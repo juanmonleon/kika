@@ -26,7 +26,7 @@ from ..classes.mf34.mf34 import (
     SubSubsectionRecord,
 )
 from ._records import populate_lb5_record, populate_lb6_record
-from ._section_writer import _find_mf_boundaries, write_mf_section_to_file
+from ._section_writer import _find_mf_boundaries, _parse_mf_mt, write_mf_section_to_file
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -834,6 +834,20 @@ def remove_mf34_from_file(filepath: str, update_directory: bool = True) -> bool:
     start, end = _find_mf_boundaries(lines, 34)
     if start is None:
         return False
+
+    # The FEND record that closes the MF34 block (MAT, 0, 0) has MF=0, so it
+    # falls outside the boundaries above. Dropping the block without it would
+    # leave two consecutive FENDs — the one closing the previous MF and this
+    # orphan — which is not a valid ENDF tape. Consume it here.
+    if end < len(lines):
+        mf_next, mt_next = _parse_mf_mt(lines[end])
+        if mf_next == 0 and mt_next == 0:
+            try:
+                mat_next = int(lines[end][66:70])
+            except ValueError:
+                mat_next = 0
+            if mat_next > 0:  # FEND, not MEND (MAT=0) or TEND (MAT=-1)
+                end += 1
 
     new_lines = lines[:start] + lines[end:]
     with open(filepath, 'w') as f:
