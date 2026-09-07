@@ -30,13 +30,36 @@ for it.
 What exists is §2-7 (units, quantities, enumerations, axes, values, the
 one-dimensional functional containers) and the §9-25 hierarchy — ``styles``,
 ``reactionSuite`` and its children, resonances split by formalism, and the
-``covarianceSuite``. The containers are structurally complete and mostly empty:
-nothing decodes an ENDF file into them yet, which is phase 3c.
+``covarianceSuite``.
+
+**Three decoders fill these containers, and one door reaches all three.**
+``kika.endf.model_adapter.decode``, ``kika.ace.model_adapter.decode`` and
+``kika.gnds.decode`` each build a ``ReactionSuite``; ``kika.read()``
+(``kika/_read.py``) sniffs the format from the file's content and routes to
+whichever applies. Do not take that on this docstring's word —
+``kika/tests/test_read_front_door.py`` holds it up, asserting for each of the
+three that the door is a *route* and not a fourth decoder.
+
+What the decoders do not reach is the shorter list. **MF12-15** have no parser
+at all. Of **MF5** only the tabulated LF=1 spectra become model nodes; the six
+analytic laws of §18.3 and every NK>1 partial are carried as bytes in the
+provenance, so they return to the tape without ever being modelled. Of **MF6**
+every law but LAW=5 does — measured 2026-08-24, the charged-particle elastic
+expansion is the one shape no GNDS evaluation in the distributed library
+carries, so there is nothing to map it onto — and a subsection whose LAW is
+negative states no distribution of its own, points at MF4, MF5, MF14 or MF15,
+and is declared rather than given a product.
+
+A docstring that reasons about the state of *another* part of this tree expires
+in silence: the paragraph above replaced one that had gone on claiming, long
+after phase 3c closed, that nothing decoded ENDF into these containers. Either
+date such a sentence or point it at the test that fails when it stops holding.
 """
 from __future__ import annotations
 
 from .axes import (Axes, Axis, Grid, angularAxes, crossSectionAxes,
-                   energyAxes, multiplicityAxes)
+                   energyAngularAxes, energyAxes, kalbachMannAxes,
+                   multiplicityAxes)
 from .enums import (
     ENDF_INT_TO_INTERPOLATION,
     INTERPOLATION_TO_ENDF_INT,
@@ -61,7 +84,9 @@ from .functions import (
     XYs3d,
     Ys1d,
     fromEndfTab2,
+    fromEndfTab3,
     toEndfTab2,
+    toEndfTab3,
 )
 from .conversion import ConversionReport
 from .covariances import (
@@ -111,7 +136,7 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              FissionFragmentData, Multiplicity, OutputChannel,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
-from .pops import Nuclide, Particle, PoPs
+from .pops import Nuclide, Particle, PoPs, pidFromZA, zaFromPid
 from .provenance import (AceProvenance, EndfProvenance, GndsProvenance,
                          Provenance)
 from .quantities import PhysicalQuantity, RangeQuantity
@@ -131,6 +156,9 @@ from .resonances import (
     BreitWigner,
     BreitWignerApproximation,
     Channel,
+    ExternalRMatrix,
+    EXTERNAL_R_MATRIX_TYPES,
+    EXTERNAL_R_MATRIX_REQUIRED_TERMS,
     Resonance,
     ResonanceParameters,
     ResonanceReaction,
@@ -180,11 +208,13 @@ __all__ = [
     "ENDF_INT_TO_INTERPOLATION", "INTERPOLATION_TO_ENDF_INT",
     # §5
     "Axes", "Axis", "Grid", "angularAxes", "crossSectionAxes",
-    "energyAxes", "multiplicityAxes", "Values",
+    "energyAngularAxes", "energyAxes", "kalbachMannAxes",
+    "multiplicityAxes", "Values",
     # §6
     "Function1d", "XYs1d", "Regions1d", "Constant1d", "Polynomial1d",
     "Ys1d", "Legendre", "Gridded1d",
     "Function2d", "XYs2d", "Regions2d", "fromEndfTab2", "toEndfTab2",
+    "fromEndfTab3", "toEndfTab3",
     "XYs3d", "Regions3d",
     # §7
     "Uncertainty", "Covariance", "ListOfCovariances",
@@ -193,7 +223,7 @@ __all__ = [
     "CrossSectionReconstructed", "AngularDistributionReconstructed",
     "Heated", "HeatedMultiGroup", "GriddedCrossSection", "URR_probabilityTables",
     # §12 PoPs
-    "PoPs", "Particle", "Nuclide",
+    "PoPs", "Particle", "Nuclide", "pidFromZA", "zaFromPid",
     # §14 the root
     "ReactionSuite", "ExternalFile", "ExternalFiles", "ApplicationData",
     "CROSS_SECTION_UNITS",
@@ -220,7 +250,8 @@ __all__ = [
     "BreitWigner", "BreitWignerApproximation", "Resonance", "SpinGroup",
     "RMatrix", "RMatrixSpinGroup", "Channel", "TabulatedWidths",
     "ResonanceParameters", "ResonanceReaction", "UnresolvedChannel",
-    "UnresolvedSpinGroup",
+    "UnresolvedSpinGroup", "ExternalRMatrix", "EXTERNAL_R_MATRIX_TYPES",
+    "EXTERNAL_R_MATRIX_REQUIRED_TERMS",
     "MODEL_RADIUS_UNIT", "FM_PER_ENDF_RADIUS", "radiusFromEndf", "radiusToEndf",
     "radiusFromStatedUnit",
     # conversion bookkeeping (not GNDS nodes)

@@ -719,6 +719,27 @@ def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK):
     return result_lines, line_num
 
 
+class NonMonotonicTable(ValueError):
+    """A TAB1's abscissae descend, so the record would not be a function.
+
+    ENDF-6 requires the x column of a TAB1 to be non-decreasing; a repeated
+    abscissa is how the format writes a step, and a *descending* one is not a
+    table at all. It is raised rather than warned because there is no reader
+    that recovers from it and no consumer that reports it:
+    :func:`kika.njoy.run_njoy.run_njoy_with_pendf` on a PENDF carrying one
+    returns ``0`` and writes an ACE built from the wrong numbers.
+
+    Carries the offending index and the two abscissae, because the useful
+    question is always *where*.
+    """
+
+    def __init__(self, message: str, *, mf: int = 0, mt: int = 0,
+                 index: int = -1, previous: float = 0.0, current: float = 0.0):
+        super().__init__(message)
+        self.mf, self.mt = mf, mt
+        self.index, self.previous, self.current = index, previous, current
+
+
 def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
                 start_line, pad=PAD_BLANK, interp_pad=PAD_BLANK):
     """
@@ -746,6 +767,8 @@ def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
     lines : list of str
     next_line_num : int
     """
+    _assertAscending(x_data, mf, mt)
+
     nr = len(interp_pairs)
     np_count = len(x_data)
     line_num = start_line
@@ -805,6 +828,52 @@ def parse_tab2(lines, start):
         interp_pairs, idx = parse_interp_pairs(lines, idx, nr)
     return header, interp_pairs, idx
 
+
+
+def _assertAscending(x_data, mf: int, mt: int) -> None:
+    """Refuse to write a TAB1 whose abscissae go backwards.
+
+    **This gate exists because of D31** (``docs/library/library-gaps.md``), and
+    the reason it sits *here* rather than in the code that had the defect is the
+    whole point. ``_augment_with_step_duplicates`` inserted step points at bin
+    edges in the wrong order when two edges fell in one interval; that produced a
+    descending table for every perturbed MT of every replica, NJOY accepted it
+    with ``returncode 0``, and the ACE that came out had elastic cross sections
+    up to 145% wrong between 10 and 30 MeV. Nothing anywhere said a word.
+
+    ``format_tab1`` is the one place every TAB1 in the library is written --
+    MF1, MF2, MF3, MF5, MF6 and MF7 all come through it -- so a check here
+    covers the defects nobody has written yet, which is the only kind worth
+    guarding against. Measured before it was turned into a hard error: of the
+    27 tapes available here, including the whole JEFF-4.0 Fe-56, **zero**
+    sections violate it, so this refuses nothing that a real evaluation writes.
+
+    The cost is one pass over the abscissae per section written. It is a
+    scan of a table that is about to be turned into text, which is orders more
+    work.
+    """
+    if x_data is None:
+        return
+    x = np.asarray(x_data, dtype=float)
+    if x.size < 2:
+        return
+    descending = np.flatnonzero(np.diff(x) < 0.0)
+    if descending.size == 0:
+        return
+
+    first = int(descending[0])
+    raise NonMonotonicTable(
+        f"MF{mf}/MT{mt}: the TAB1 abscissae descend at point {first + 1} of "
+        f"{x.size} -- {x[first]:.8g} is followed by {x[first + 1]:.8g}, and "
+        f"{descending.size} pair(s) go backwards in all. ENDF-6 requires a "
+        f"non-decreasing x column: a repeated abscissa is a step, a descending "
+        f"one is not a function. Nothing downstream reports this -- NJOY "
+        f"accepts such a tape and writes an ACE from it -- so it is refused "
+        f"here. If points were inserted into this table, they were inserted "
+        f"out of order",
+        mf=mf, mt=mt, index=first,
+        previous=float(x[first]), current=float(x[first + 1]),
+    )
 
 def format_tab2(c1, c2, l1, l2, interp_pairs, nz, mat, mf, mt, start_line,
                 interp_pad=PAD_BLANK):
@@ -889,6 +958,74 @@ def project_tabulated_to_legendre(
         P_l = np.polynomial.legendre.legval(mu_q, [0] * l + [1])  # evaluate P_l(μ)
         coeffs[l] = float(np.sum(P_l * f_q * w_q))
     return coeffs
+
+
+def evaluate_tabulated_pdf(
+    mu_points,
+    E: float,
+    *,
+    energies,
+    cosines,
+    probabilities,
+    angular_interp=None,
+    energy_interp=None,
+    out_of_range: str = "zero",
+) -> np.ndarray:
+    r"""Read :math:`f(\mu, E)` straight out of a tabulated MF4 distribution.
+
+    ENDF-correct 2D interpolation, in the order the format prescribes:
+
+    1. inside each energy's table, interpolate in :math:`\mu` under that
+       table's own ``(NBT, INT)``;
+    2. then interpolate between the two bracketing energies under the energy
+       ``(NBT, INT)``.
+
+    This is the distribution the evaluator wrote, not a reconstruction of it.
+    Shared by ``MF4MTTabulated`` and the tabulated branch of ``MF4MTMixed``
+    so the two cannot drift, which is the failure this module has already been
+    through once (see :mod:`kika.endf.dcs`).
+
+    ``out_of_range`` applies to the *energy* grid: ``"zero"`` returns zeros
+    outside it, ``"hold"`` clamps to the nearest end table.  Interpolation in
+    :math:`\mu` always holds, since a cosine outside a table's own range is
+    the table's endpoint and never an absence of data.
+    """
+    mu_points = np.asarray(mu_points, dtype=float)
+    energies = np.asarray(energies, dtype=float)
+    if energies.size == 0:
+        return np.zeros_like(mu_points, dtype=float)
+
+    E = float(E)
+    if out_of_range == "zero" and (E < energies[0] or E > energies[-1]):
+        return np.zeros_like(mu_points, dtype=float)
+
+    if E <= energies[0]:
+        idx0 = idx1 = 0
+    elif E >= energies[-1]:
+        idx0 = idx1 = energies.size - 1
+    else:
+        idx1 = int(np.searchsorted(energies, E, side="right"))
+        idx0 = idx1 - 1
+
+    angular_interp = angular_interp or []
+
+    def _table(i: int) -> np.ndarray:
+        mu_i = np.asarray(cosines[i], dtype=float)
+        f_i = np.asarray(probabilities[i], dtype=float)
+        pairs = (
+            angular_interp[i]
+            if i < len(angular_interp) and angular_interp[i]
+            else [(len(mu_i), 2)]
+        )
+        return interpolate_1d_endf(mu_i, f_i, pairs, mu_points, out_of_range="hold")
+
+    f0 = _table(idx0)
+    if idx1 == idx0:
+        return f0
+
+    pairs = energy_interp if energy_interp else [(energies.size, 2)]
+    code = int(segment_int_codes(energies.size, pairs)[idx1 - 1])
+    return interp_energy_values(energies[idx0], f0, energies[idx1], _table(idx1), E, code)
 
 
 def auto_trim_legendre_tail(

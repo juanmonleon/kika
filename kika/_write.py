@@ -15,10 +15,10 @@ editor: that one rewrites the sections it is given inside a tape it already
 read, and cannot produce a tape it was not handed. This door can, which is what
 makes a GNDS file convertible to ENDF at all.
 
-**What it cannot carry, it says.** MF6, MF7, MF12-15 and MF32 have no
-ENDF → model adapter or no encoder, and MF5 has one only for its tabulated
-LF=1 — so a model that never held them writes a tape without them, and the
-returned report names each one. The gate the writer
+**What it cannot carry, it says.** MF7, MF12-15 and MF32 have no
+ENDF → model adapter or no encoder; MF5 has one only for its tabulated LF=1,
+and MF6 for every law but LAW=5 — so a model that never held them writes a tape
+without them, and the returned report names each one. The gate the writer
 was built against is a fixed point *inside the model* — read, write, read again,
 compare — and not byte identity against the tape it came from; §2.8 says why,
 and says what that gate cannot see.
@@ -53,7 +53,8 @@ COVARIANCE_SUBDIRECTORY = "Covariances"
 
 
 def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
-          mat: Optional[int] = None, tapeId: Optional[str] = None):
+          mat: Optional[int] = None, tapeId: Optional[str] = None,
+          label: Optional[str] = None):
     """Write a :class:`ReactionSuite` out, and say what did not go with it.
 
     Parameters
@@ -82,6 +83,12 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         ENDF only. The 66 text columns of the tape identification record.
         ``read_endf`` does not keep a tape's first line, so a round trip cannot
         reproduce the original and the default label says as much in the report.
+    label
+        ENDF only. Which §9.1 style label to write out of each multi-form
+        container; the default is ``'eval'``. Naming a ``realization`` label
+        (§9.3) writes the drawn sample rather than the evaluation it was drawn
+        from, falling back to ``'eval'`` for anything that carries no form under
+        it. GNDS needs no such parameter — it writes every form, with its label.
 
     Returns
     -------
@@ -106,7 +113,7 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         from kika.endf.writers.assemble import writeEndfTape
 
         return writeEndfTape(suite, Path(os.fspath(path)), mat=mat,
-                             tapeId=tapeId)
+                             tapeId=tapeId, label=label)
     return _writeGnds(suite, Path(os.fspath(path)), gnds)
 
 

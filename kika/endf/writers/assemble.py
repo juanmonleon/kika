@@ -26,12 +26,15 @@ fixed point is necessary and not sufficient, and it leans on
 :class:`~kika.nuclear_data.model.conversion.ConversionReport` being honest about
 what did not come through.
 
-**Sections come only from what the model has.** MF6 is parsed by kika and
-*not* decoded into the model, and neither are MF5's analytic spectra — LF=5, 7,
-9, 11 and 12 are §18.3's six formulas, which the model has no node for. A tape
-carrying those comes back without them, reported loudly rather than written as
-an empty shell: a tape missing its energy distributions and not saying so is
-worse than one that says so. MF5's LF=1, the tabulated law, does come back.
+**Sections come only from what the model has.** MF5's analytic spectra are
+not in it — LF=5, 7, 9, 11 and 12 are §18.3's six formulas, which the model has
+no node for — and neither is MF7 or MF12-15. A tape carrying those comes back
+without them, reported loudly rather than written as an empty shell: a tape
+missing its energy distributions and not saying so is worse than one that says
+so. MF5's LF=1 does come back, and so does **all of MF6**: what the model does
+not carry there — LAW=5, and any subsection whose LAW is negative — is kept
+verbatim in the reaction's provenance, so the section is re-emitted whole even
+where the distribution never reached a node.
 
 **Two limits that no amount of code removes**, both format facts rather than
 gaps here: a GNDS reaction may have no MT at all (§2.4), and MF13 is reached
@@ -52,9 +55,9 @@ __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 
 #: The MF numbers an encoder exists for, in the order ENDF-6 puts them on the
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
-#: of *coverage* rather than of order: MF6, MF7, MF12-15 and MF32 are absent
-#: because nothing can write them, not because they sort late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 31, 33, 34, 35)
+#: of *coverage* rather than of order: MF7, MF12-15 and MF32 are absent because
+#: nothing can write them, not because they sort late.
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 31, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -92,11 +95,25 @@ def _mat(suite, mat: Optional[int]) -> int:
     return int(recorded)
 
 
-def _mf1Sections(suite, mat, report):
-    """MF1: the 451 header first, then whichever nu-bars the suite carries."""
+def _mf1Sections(suite, mat, report, label=None):
+    """MF1: the 451 header first, then whichever nu-bars the suite carries.
+
+    *label* selects which §9.1 form of each nu-bar is written, with the same
+    fall-back and the same report line MF3 has: a realisation that perturbed the
+    prompt nu-bar and not the delayed one still writes a whole tape, and the
+    report says which members carried the label and which fell back. That is
+    what a ``multiplicity`` becoming a
+    :class:`~kika.nuclear_data.model.component.Component` bought -- before it,
+    a realisation had to *replace* the evaluated form and there was no label for
+    this function to be told about.
+    """
+    from kika.nuclear_data.model import EVAL_LABEL
+
     from ..model_adapter import (encodeMF1MT451, encodeMF1MT452,
                                  encodeMF1MT455, encodeMF1MT456)
     from ..model_adapter.multiplicity import nubarNode
+
+    label = EVAL_LABEL if label is None else label
 
     sections = []
     header, report = encodeMF1MT451(suite, mat, report)
@@ -106,12 +123,23 @@ def _mf1Sections(suite, mat, report):
     # `nubarNode` rather than a try/except around each encoder: the encoders
     # raise on absence, and absence is the common case (nothing but a fissile
     # material has any of these).
+    written, fellBack = [], []
     for mt, encode in ((452, encodeMF1MT452), (455, encodeMF1MT455),
                        (456, encodeMF1MT456)):
-        if nubarNode(suite, mt) is None:
+        node = nubarNode(suite, mt)
+        if node is None:
             continue
-        section, report = encode(suite, mat, report)
+        formLabel = label if label in node else EVAL_LABEL
+        (written if formLabel == label else fellBack).append(mt)
+        section, report = encode(suite, mat, report, label=formLabel)
         sections.append((1, mt, section))
+
+    if label != EVAL_LABEL and (written or fellBack):
+        report.warn(
+            f"nu-bar written with the {label!r} form where there is one: "
+            f"MT {written or 'none'} carry it, MT {fellBack or 'none'} fell back "
+            f"to {EVAL_LABEL!r} because they have no {label!r} form"
+        )
     return sections, report
 
 
@@ -138,7 +166,20 @@ def _mf2Sections(suite, mat, report):
     return [(2, 151, section)], report
 
 
-def _mf3And4And5Sections(suite, mat, report):
+
+def _mf3Bearing(suite):
+    """Every reaction that owns an MF3 section, in tape order.
+
+    ``reactions`` and ``sums`` -- §21.1's ``crossSectionSums`` are reactions in
+    every respect the ENDF writer cares about, and sorting by MT rather than
+    concatenating the two lists is what keeps the sections in the order a tape
+    states them, which is the order the round-trip gate compares.
+    """
+    both = list(suite.reactions) + list(suite.sums)
+    return sorted(both, key=lambda r: (r.ENDF_MT is None, r.ENDF_MT or 0))
+
+
+def _mf3And4And5Sections(suite, mat, report, label=None):
     """MF3 for every reaction with an MT, MF4 and MF5 for what states them.
 
     **The provenance decides which sections are written, not the model's
@@ -151,8 +192,15 @@ def _mf3And4And5Sections(suite, mat, report):
 
     from ..model_adapter import encodeMF3MT, encodeMF4MT, encodeMF5MT
 
+    label = EVAL_LABEL if label is None else label
+
     mf3, mf4, mf5 = [], [], []
-    for reaction in suite.reactions:
+    written, fellBack = [], []
+    # `reactions` and `sums` both, because a tape's MF3 does not distinguish
+    # them: §21.1 is a statement about what MT1 *means*, not about whether it is
+    # in the file. Reading an evaluation and writing it back has to give the
+    # sections back, wherever the model chose to keep them.
+    for reaction in _mf3Bearing(suite):
         mt = reaction.ENDF_MT
         if mt is None:
             # §2.4, and it is irreducible: GNDS labels reactions and does not
@@ -164,11 +212,20 @@ def _mf3And4And5Sections(suite, mat, report):
             )
             continue
 
-        section, report = encodeMF3MT(reaction, mat, report)
+        # A reaction the caller did not perturb has no form under the
+        # realization's label. Falling back to `eval` keeps the tape complete;
+        # refusing would mean a partially perturbed suite could not be written
+        # at all, and writing only the perturbed sections would be a tape with
+        # holes in it.
+        formLabel = label if label in reaction.crossSection else EVAL_LABEL
+        (written if formLabel == label else fellBack).append(mt)
+        section, report = encodeMF3MT(reaction, mat, report, label=formLabel)
         mf3.append((3, mt, section))
 
         product = _neutronProduct(reaction)
-        form = _evaluatedForm(product, EVAL_LABEL)
+        form = _evaluatedForm(product, label)
+        if form is None and label != EVAL_LABEL:
+            form = _evaluatedForm(product, EVAL_LABEL)
         provenance = getattr(product, "provenance", None)
         header = getattr(provenance, "headerFields", None) or {}
 
@@ -180,6 +237,19 @@ def _mf3And4And5Sections(suite, mat, report):
         if "mf5" in header:
             section, report = encodeMF5MT(_mf5Form(form), provenance, mt, report)
             mf5.append((5, mt, section))
+
+    if label != EVAL_LABEL:
+        # **A mixed tape has to say it is mixed.** The fallback above is right --
+        # a partially perturbed suite must still produce a whole tape -- but the
+        # file it produces cannot be told apart from a fully perturbed one by
+        # reading it, and for an ensemble that distinction is the traceability.
+        # So the report states both halves, and states them even when the
+        # fallback did not fire: "0 fell back" is a claim, and its absence is not.
+        report.warn(
+            f"written with the {label!r} form where there is one: "
+            f"MT {written or 'none'} carry it, MT {fellBack or 'none'} fell back "
+            f"to {EVAL_LABEL!r} because they have no {label!r} form"
+        )
 
     return mf3 + mf4 + mf5, report
 
@@ -240,6 +310,56 @@ def _mf5Form(form):
     return form.energy if isinstance(form, Uncorrelated) else None
 
 
+
+def _mf6Sections(suite, mat, report):
+    """MF6 for every reaction whose provenance carries one.
+
+    **The provenance decides, and it has to.** An MF6 section is a list of
+    products in the evaluator's order with the evaluator's ``ZAP``/``AWP``/
+    ``LIP``, its ``JP`` and its ``LCT``, and none of that is recoverable from a
+    channel's products: the model holds the physics and the file holds the
+    bookkeeping. So a suite that never read an MF6 writes none, and one that
+    did writes exactly the section it read.
+
+    Nothing here overlaps :func:`_mf3And4And5Sections`. That one keys on the
+    *product's* provenance (``ltt`` for MF4, ``mf5`` for MF5) and this one on
+    the *reaction's*, and an MT stated in File 6 does not restate its
+    distributions in Files 4 and 5 — except through a negative LAW, which is a
+    pointer rather than a duplicate, and which this adapter deliberately leaves
+    to those two passes.
+    """
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    from ..model_adapter import encodeMF6MT
+
+    sections = []
+    for reaction in _mf3Bearing(suite):
+        provenance = getattr(reaction, "provenance", None)
+        header = getattr(provenance, "headerFields", None) or {}
+        if "mf6" not in header:
+            continue
+
+        mt = reaction.ENDF_MT
+        if mt is None:
+            report.lost(
+                f"reaction {reaction.label!r} carries an MF6 provenance and no "
+                f"ENDF MT, so there is no section number to write it under "
+                f"(gnds_endf_conflicts.md §2.4)"
+            )
+            continue
+
+        forms = {}
+        for product in reaction.outputChannel.products:
+            form = _evaluatedForm(product, EVAL_LABEL)
+            if form is not None:
+                forms[product.label or product.pid] = form
+
+        section, report = encodeMF6MT(forms, provenance, mt, report)
+        sections.append((6, mt, section))
+
+    return sections, report
+
+
 def _covarianceSections(suite, mat, report):
     """MF31/33/34/35, one section per (MF, row MT) the covariance suite carries."""
     from ..model_adapter import (encodeMF31MT, encodeMF33MT, encodeMF34MT,
@@ -295,7 +415,8 @@ def _covarianceSections(suite, mat, report):
     return sections, report
 
 
-def encodeTapeSections(suite, mat: Optional[int] = None, report=None
+def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
+                       label: Optional[str] = None
                        ) -> Tuple[List[Tuple[int, int, object]], object, int]:
     """A :class:`ReactionSuite` → ``[(MF, MT, section), …]`` in tape order.
 
@@ -310,8 +431,11 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None
 
     sections: List[Tuple[int, int, object]] = []
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
-                  _covarianceSections):
-        built, report = build(suite, mat, report)
+                  _mf6Sections, _covarianceSections):
+        if build in (_mf1Sections, _mf3And4And5Sections):
+            built, report = build(suite, mat, report, label)
+        else:
+            built, report = build(suite, mat, report)
         sections.extend(built)
 
     written = {mf for mf, _, _ in sections}
@@ -355,7 +479,8 @@ def assembleTape(sections: Sequence[Tuple[int, int, object]], mat: int,
 
 
 def writeEndfTape(suite, path, mat: Optional[int] = None,
-                  tapeId: Optional[str] = None, report=None):
+                  tapeId: Optional[str] = None, report=None, *,
+                  label: Optional[str] = None):
     """Write *suite* out as an ENDF-6 tape. Returns the :class:`ConversionReport`.
 
     The directory is rebuilt **after** the file is on disk, by
@@ -364,10 +489,17 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
     the only place the true counts exist is the written file. ``encodeMF1MT451``
     writes back the directory it read, which is right for a tape whose sections
     have not changed length and wrong the moment one has.
+
+    ``label`` selects which §9.1 form of each cross section and distribution is
+    written; the default is ``'eval'``. A ``realization`` (§9.3) drawn beside
+    the evaluation is written by naming its label here. Reactions with no form
+    under that label fall back to ``'eval'``, so a tape written from a partially
+    perturbed suite carries the perturbed sections and the original ones rather
+    than only the first.
     """
     from .update_directory import update_mf1_directory
 
-    sections, report, mat = encodeTapeSections(suite, mat, report)
+    sections, report, mat = encodeTapeSections(suite, mat, report, label=label)
     if not sections:
         raise ValueError(
             "this reactionSuite produced no ENDF sections at all, so there is "

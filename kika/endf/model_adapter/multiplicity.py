@@ -383,10 +383,20 @@ def nubarNode(suite, mt: int):
     ``reference``, a ``branching1d`` and an ``unspecified`` — and a fission
     neutron carrying one of those would otherwise be returned as the nu-bar and
     die four frames later in :func:`_tab1FromMultiplicity` with a message
-    naming ``NoneType``, which is not the object at fault. No distributed
-    evaluation is known to reach it — U-235's MT18 neutron carries an
-    ``XYs1d`` — but the guard costs a clause and the failure it prevents costs
-    a diagnosis.
+    naming ``NoneType``, which is not the object at fault.
+
+    **And it asks that the multiplicity came from MF1**, which is a second
+    question and was not asked until MF6 made it matter. "The fission channel's
+    neutron has a number on it" is not the same as "the file states a nu-bar":
+    :func:`~kika.endf.model_adapter.energy_angle.decodeMF6MT` puts MF6's
+    ``y(E)`` on every product it builds, and on a tape with MF6/MT18 and no
+    MF1/452 that yield was being returned here and written out as a nu-bar it
+    is not — ENDF/B-VIII.1's U-235 states 0.0158 at thermal for the ``LAW=0``
+    subsection's share against a real nu-bar of 2.414. It failed loudly,
+    because MF6's yield collapses to an ``XYs1d`` where MF1's stays a
+    ``Regions1d``, and that is luck rather than a gate. The provenance is the
+    gate: ``attachNubar`` puts an :class:`EndfProvenance` on the
+    :class:`Multiplicity` it builds and nothing else does.
     """
     if mt not in NUBAR_MT:
         raise ValueError(f"MT{mt} is not a fission multiplicity")
@@ -398,15 +408,17 @@ def nubarNode(suite, mt: int):
     reaction = suite.findReactionByENDF_MT(FISSION_MT)
     if reaction is not None and mt in (452, 456):
         for product in reaction.outputChannel.products:
-            if (product.pid == "n" and product.multiplicity is not None
-                    and product.multiplicity.isEvaluable):
-                return product.multiplicity
+            multiplicity = product.multiplicity
+            if (product.pid == "n" and multiplicity is not None
+                    and multiplicity.isEvaluable
+                    and multiplicity.provenance is not None):
+                return multiplicity
     return None
 
 
-def _tab1FromMultiplicity(multiplicity, mt: int):
+def _tab1FromMultiplicity(multiplicity, mt: int, label: str = EVAL_LABEL):
     """``(interpolation, energies, values)`` out of a tabulated multiplicity."""
-    function = multiplicity.form
+    function = _formUnder(multiplicity, label)
     if isinstance(function, Regions1d):
         xs, ys, pairs = function.toEndfRegions()
         return [(int(nbt), int(code)) for nbt, code in pairs], list(xs), list(ys)
@@ -417,13 +429,28 @@ def _tab1FromMultiplicity(multiplicity, mt: int):
     )
 
 
-def _fillNubarSection(section, multiplicity, mt: int, mat):
+def _formUnder(multiplicity, label: str):
+    """The form *label* names, falling back to the evaluated one.
+
+    The rule ``encodeMF3MT`` sets, and for the same reason: an ensemble
+    perturbs the reactions it has covariance for, so a suite carrying a
+    realisation of the prompt nu-bar and nothing under that label for the
+    delayed one still has to write a complete tape. Writing only the perturbed
+    members would leave the file with holes; refusing would leave it unwritable.
+    """
+    form = multiplicity.get(label)
+    return multiplicity.form if form is None else form
+
+
+def _fillNubarSection(section, multiplicity, mt: int, mat, report=None,
+                      label: str = EVAL_LABEL):
     """Populate an ``MF1MT452``/``455``/``456`` from the model. Shared by all three."""
     provenance = multiplicity.provenance
     header = (getattr(provenance, "headerFields", None)) or {}
+    form = _formUnder(multiplicity, label)
     lnu = int(header.get("lnu") or 0)
     if not lnu:
-        lnu = 1 if isinstance(multiplicity.form, Polynomial1d) else 2
+        lnu = 1 if isinstance(form, Polynomial1d) else 2
 
     section._za = float(provenance.za) if provenance and provenance.za else None
     section._awr = float(provenance.awr) if provenance and provenance.awr else None
@@ -431,18 +458,30 @@ def _fillNubarSection(section, multiplicity, mt: int, mat):
     section._lnu = lnu
 
     if lnu == 1:
-        coefficients = list(np.asarray(multiplicity.form.coefficients, dtype=float))
+        coefficients = list(np.asarray(form.coefficients, dtype=float))
         section._nc = len(coefficients)
         section._coefficients = coefficients
     else:
-        interpolation, energies, values = _tab1FromMultiplicity(multiplicity, mt)
+        interpolation, energies, values = _tab1FromMultiplicity(multiplicity, mt,
+                                                                label)
         # The file's own (NBT, INT) pairs when they were kept: the same argument
         # `encodeMF3MT` makes -- a round trip must not depend on the
-        # reconstruction from regions1d staying byte-for-byte faithful.
+        # reconstruction from regions1d staying byte-for-byte faithful -- and
+        # the same limit on it, through the same function. A nu-bar table that
+        # has been refined since it was decoded no longer matches the pairs the
+        # file stated, and MF31's factor application refines it.
+        from .encode import usableInterpolationRegions
+
         kept = getattr(provenance, "interpolationRegions", None)
-        section._interpolation = (
-            [(int(a), int(b)) for a, b in kept] if kept else interpolation
-        )
+        usable = usableInterpolationRegions(kept, len(energies))
+        if kept and usable is None and report is not None:
+            report.warn(
+                f"MF1/MT{mt}: the ENDF interpolation regions kept from the "
+                f"source describe {kept[-1][0]} point(s) and the nu-bar now has "
+                f"{len(energies)}, so they are rebuilt from the regions1d. The "
+                f"model was edited after it was decoded"
+            )
+        section._interpolation = usable if usable is not None else interpolation
         section._nr = len(section._interpolation)
         section._np = len(energies)
         section._energies = energies
@@ -450,7 +489,7 @@ def _fillNubarSection(section, multiplicity, mt: int, mat):
     return section
 
 
-def _encodeOne(cls, suite, mt: int, mat, report):
+def _encodeOne(cls, suite, mt: int, mat, report, label: str = EVAL_LABEL):
     report = report if report is not None else ConversionReport()
     multiplicity = nubarNode(suite, mt)
     if multiplicity is None:
@@ -459,28 +498,31 @@ def _encodeOne(cls, suite, mt: int, mat, report):
             f"be written from it"
         )
     section = cls()
-    _fillNubarSection(section, multiplicity, mt, mat)
+    _fillNubarSection(section, multiplicity, mt, mat, report, label=label)
     return section, report
 
 
 def encodeMF1MT452(suite, mat: Optional[int] = None,
-                   report: Optional[ConversionReport] = None):
+                   report: Optional[ConversionReport] = None, *,
+                   label: str = EVAL_LABEL):
     """A ``ReactionSuite`` → its ``MF1MT452`` (total nu-bar)."""
     from kika.endf.classes.mf1.mf1mt452 import MF1MT452
 
-    return _encodeOne(MF1MT452, suite, 452, mat, report)
+    return _encodeOne(MF1MT452, suite, 452, mat, report, label)
 
 
 def encodeMF1MT456(suite, mat: Optional[int] = None,
-                   report: Optional[ConversionReport] = None):
+                   report: Optional[ConversionReport] = None, *,
+                   label: str = EVAL_LABEL):
     """A ``ReactionSuite`` → its ``MF1MT456`` (prompt nu-bar)."""
     from kika.endf.classes.mf1.mf1mt456 import MF1MT456
 
-    return _encodeOne(MF1MT456, suite, 456, mat, report)
+    return _encodeOne(MF1MT456, suite, 456, mat, report, label)
 
 
 def encodeMF1MT455(suite, mat: Optional[int] = None,
-                   report: Optional[ConversionReport] = None):
+                   report: Optional[ConversionReport] = None, *,
+                   label: str = EVAL_LABEL):
     """A ``ReactionSuite`` → its ``MF1MT455`` (delayed nu-bar and decay rates).
 
     The rates come back off the §18.4 ``delayedNeutron`` nodes, so a caller who
@@ -498,7 +540,7 @@ def encodeMF1MT455(suite, mat: Optional[int] = None,
         )
 
     section = MF1MT455()
-    _fillNubarSection(section, multiplicity, 455, mat)
+    _fillNubarSection(section, multiplicity, 455, mat, report, label=label)
 
     header = getattr(multiplicity.provenance, "headerFields", None) or {}
     ldg = int(header.get("ldg") or 0)

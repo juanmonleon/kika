@@ -27,6 +27,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from ....processing.panel_integrals import (
+    EXACT_INT_CODES,
+    cumulative_integral,
+    evaluate_table,
+    exact_segment_codes,
+    integral_to,
+)
 from ...utils import (
     ENDF_FORMAT_FLOAT,
     ENDF_FORMAT_INT,
@@ -36,11 +43,9 @@ from ...utils import (
 )
 
 #: Interpolation codes the tabulated partial can integrate and refine exactly.
-#: 1 is histogram, 2 is lin-lin. Everything else — log in either axis — has no
-#: exact group integral in closed form here and no exact node insertion, and
-#: the whole normalisation argument of the PFNS sampler rests on both being
-#: exact. So they raise rather than approximate.
-_EXACT_INT_CODES = (1, 2)
+#: Kept as a name here because this module's own error messages and tests speak
+#: of it; the list itself now lives with the arithmetic it constrains.
+_EXACT_INT_CODES = EXACT_INT_CODES
 
 #: How many TAB1 records follow the subsection header, per law (ENDF-6 §5.1).
 #: Used only to walk past a law this module stores verbatim, so it needs the
@@ -53,6 +58,25 @@ _EXACT_INT_CODES = (1, 2)
 #:   LF=12 Madland-Nix              T_M(E)
 TAB1_RECORDS_AFTER_HEADER = {5: 2, 7: 1, 9: 1, 11: 2, 12: 1}
 
+
+# ---------------------------------------------------------------------------
+# The exact panel arithmetic, shared -- and no longer defined here
+#
+# LF=1 owns a table in E' and every analytic law owns at least one table too --
+# theta(E), g(x), a(E), b(E). They need the same three things: the INT code of
+# every interval, an exact cumulative integral, and evaluation at arbitrary
+# points. They were written at this module's scope so
+# :mod:`~kika.endf.classes.mf5.analytic` could reuse them instead of growing a
+# second implementation of the same integral.
+#
+# **The same argument then reached one layer further out.** The model's energy
+# distribution node needs those integrals too -- MF35 is the covariance of the
+# group-integrated probabilities of an MF5 table, so perturbing the node means
+# integrating it -- and ``kika/nuclear_data`` may not import ``kika.endf``. So
+# the four moved down to :mod:`kika.processing.panel_integrals`, which is the
+# calculation layer both sides may read, and are imported back here under their
+# original names. Nothing about them changed in the move.
+# ---------------------------------------------------------------------------
 
 @dataclass
 class MF5Partial:
@@ -86,6 +110,18 @@ class MF5Partial:
 
     def describe(self) -> str:
         return f"LF={self.lf}"
+
+    @property
+    def is_decoded(self) -> bool:
+        """Whether this class *reads* the law, or only carries its bytes.
+
+        The flag every consumer branches on. It exists so that
+        :meth:`kika.endf.classes.mf5.base.MF5MT.report_gaps` and anything
+        drawing a spectrum ask the same question, rather than each testing a
+        different ``isinstance`` and drifting apart the first time a law moves
+        from passed-through to decoded.
+        """
+        return False
 
 
 @dataclass
@@ -157,38 +193,21 @@ class MF5PartialTabulated(MF5Partial):
     # ------------------------------------------------------------------
     # Table access
     # ------------------------------------------------------------------
+    @property
+    def is_decoded(self) -> bool:
+        return True
+
     def table(self, k: int) -> Tuple[np.ndarray, np.ndarray]:
         """Outgoing grid and chi values at incident node *k*, as arrays."""
         return (np.asarray(self.outgoing_grids[k], dtype=float),
                 np.asarray(self.chi[k], dtype=float))
 
     def _segment_codes(self, k: int) -> np.ndarray:
-        """The ENDF INT code of every interval of table *k*.
-
-        Rejects anything but histogram and lin-lin, naming the code. See
-        :data:`_EXACT_INT_CODES` for why approximating would be the wrong
-        favour to do the caller.
-        """
-        x = self.outgoing_grids[k]
-        n = len(x)
-        pairs = self.outgoing_interp[k] or [(n, 2)]
-        codes = np.empty(max(n - 1, 0), dtype=int)
-        start = 0
-        for nbt, code in pairs:
-            stop = min(int(nbt) - 1, n - 1)
-            if stop > start:
-                codes[start:stop] = int(code)
-            start = max(start, stop)
-        if start < n - 1:                      # NBT short of NP: hold the last
-            codes[start:] = int(pairs[-1][1])
-        bad = sorted(set(int(c) for c in codes) - set(_EXACT_INT_CODES))
-        if bad:
-            raise NotImplementedError(
-                f"MF5 LF=1 outgoing table {k} uses interpolation code(s) {bad}; "
-                f"only {list(_EXACT_INT_CODES)} (histogram, lin-lin) have an "
-                f"exact group integral and an exact node insertion here"
-            )
-        return codes
+        """The ENDF INT code of every interval of table *k*."""
+        return exact_segment_codes(
+            self.outgoing_grids[k], self.outgoing_interp[k],
+            f"MF5 LF=1 outgoing table {k}",
+        )
 
     def replace_table(self, k: int, x: Sequence[float], y: Sequence[float],
                       interp: Optional[Sequence[Tuple[int, int]]] = None) -> None:
@@ -211,10 +230,7 @@ class MF5PartialTabulated(MF5Partial):
         x, y = self.table(k)
         if x.size < 2:
             return np.zeros(x.size, dtype=float)
-        codes = self._segment_codes(k)
-        dx = np.diff(x)
-        panel = np.where(codes == 1, y[:-1] * dx, 0.5 * (y[:-1] + y[1:]) * dx)
-        return np.concatenate(([0.0], np.cumsum(panel)))
+        return cumulative_integral(x, y, self._segment_codes(k))
 
     def normalisation(self, k: int) -> float:
         """``∫ chi_k(E') dE'`` over the whole table, exactly."""
@@ -227,21 +243,7 @@ class MF5PartialTabulated(MF5Partial):
         x, y = self.table(k)
         if x.size < 2:
             return 0.0
-        if limit <= x[0]:
-            return 0.0
-        if limit >= x[-1]:
-            return float(cumulative[-1])
-        codes = self._segment_codes(k)
-        i = int(np.searchsorted(x, limit, side="right")) - 1
-        i = min(max(i, 0), x.size - 2)
-        span = x[i + 1] - x[i]
-        t = 0.0 if span == 0 else (limit - x[i]) / span
-        if codes[i] == 1:
-            partial = y[i] * (limit - x[i])
-        else:
-            y_at = y[i] + t * (y[i + 1] - y[i])
-            partial = 0.5 * (y[i] + y_at) * (limit - x[i])
-        return float(cumulative[i] + partial)
+        return integral_to(x, y, self._segment_codes(k), cumulative, limit)
 
     def group_integrals(self, k: int, boundaries: Sequence[float]) -> np.ndarray:
         """``P_j = ∫_{g_j}^{g_j+1} chi_k dE'`` for the given boundaries.
@@ -325,22 +327,99 @@ class MF5PartialTabulated(MF5Partial):
         weight = (energy - energies[lower]) / (energies[upper] - energies[lower])
         return union, f_lo + weight * (f_hi - f_lo)
 
+    def normalisation_at_incident(self, energy: float) -> float:
+        """``int chi dE'`` at any incident energy, exactly.
+
+        :meth:`normalisation` takes a node index and is what the sampler uses.
+        This takes an energy, and is not a quadrature of the curve
+        :meth:`evaluate_at_incident` returns: with lin-lin on the incident axis
+        the interpolant is ``(1-w) chi_lo + w chi_hi`` at every fixed E', so its
+        integral is the same blend of the two nodes' integrals. Each of those is
+        exact on its own panels, so the blend is too.
+
+        It exists because integrating the returned curve is *not* the same
+        number. A histogram-interpolated table integrates by left rectangles,
+        and a trapezoid over the same points comes out a few parts in a
+        thousand short -- which is exactly the size of a real normalisation
+        defect, so a display that used one could not be told from a file with a
+        problem.
+        """
+        energies = np.asarray(self.incident_energies, dtype=float)
+        if energies.size == 0:
+            return 0.0
+        if energy <= energies[0]:
+            return self.normalisation(0)
+        if energy >= energies[-1]:
+            return self.normalisation(energies.size - 1)
+
+        upper = int(np.searchsorted(energies, energy, side="right"))
+        lower = upper - 1
+        if energies[lower] == energy:
+            return self.normalisation(lower)
+
+        code = int(self._incident_codes()[lower])
+        if code == 1:                            # histogram: hold the lower node
+            return self.normalisation(lower)
+        if code != 2:
+            raise NotImplementedError(
+                f"MF5 LF=1 incident interpolation code {code} between "
+                f"{energies[lower]:.6e} and {energies[upper]:.6e}; only "
+                f"histogram and lin-lin refine exactly"
+            )
+        weight = (energy - energies[lower]) / (energies[upper] - energies[lower])
+        return ((1.0 - weight) * self.normalisation(lower)
+                + weight * self.normalisation(upper))
+
+    def evaluate_on_grid(self, energy: float, points: Sequence[float]) -> np.ndarray:
+        """chi at *energy*, evaluated on a grid the caller chose.
+
+        **Exact, and by a shorter route than :meth:`evaluate_at_incident`.**
+        That method has to return a *table*, so it must first build a grid the
+        blended interpolant is piecewise-linear on -- the union of the two
+        bracketing grids. Here the abscissae are given, so the union is not
+        needed: evaluating each bracketing table at the point and blending the
+        two values *is* the definition of the lin-lin incident interpolant at
+        fixed E'.
+
+        It exists because a caller comparing several incident energies wants
+        them on one shared axis -- a plot's data table, a CSV -- and doing that
+        by resampling this class's output would put a second, mirrored copy of
+        the file's interpolation rule in the caller. There is one rule, and it
+        lives here.
+        """
+        points = np.asarray(points, dtype=float)
+        energies = np.asarray(self.incident_energies, dtype=float)
+        if energies.size == 0:
+            return np.zeros(points.shape, dtype=float)
+        if energy <= energies[0]:
+            return self._interpolate_table(0, points)
+        if energy >= energies[-1]:
+            return self._interpolate_table(energies.size - 1, points)
+
+        upper = int(np.searchsorted(energies, energy, side="right"))
+        lower = upper - 1
+        if energies[lower] == energy:
+            return self._interpolate_table(lower, points)
+
+        code = int(self._incident_codes()[lower])
+        if code == 1:                            # histogram: hold the lower table
+            return self._interpolate_table(lower, points)
+        if code != 2:
+            raise NotImplementedError(
+                f"MF5 LF=1 incident interpolation code {code} between "
+                f"{energies[lower]:.6e} and {energies[upper]:.6e}; only "
+                f"histogram and lin-lin refine exactly"
+            )
+
+        f_lo = self._interpolate_table(lower, points)
+        f_hi = self._interpolate_table(upper, points)
+        weight = (energy - energies[lower]) / (energies[upper] - energies[lower])
+        return f_lo + weight * (f_hi - f_lo)
+
     def _interpolate_table(self, k: int, points: np.ndarray) -> np.ndarray:
         """Table *k* evaluated at *points*, zero outside its own support."""
         x, y = self.table(k)
-        codes = self._segment_codes(k)
-        out = np.zeros(points.shape, dtype=float)
-        inside = (points >= x[0]) & (points <= x[-1])
-        if not np.any(inside):
-            return out
-        idx = np.clip(np.searchsorted(x, points[inside], side="right") - 1,
-                      0, x.size - 2)
-        span = x[idx + 1] - x[idx]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            t = np.where(span > 0, (points[inside] - x[idx]) / span, 0.0)
-        linear = y[idx] + t * (y[idx + 1] - y[idx])
-        out[inside] = np.where(codes[idx] == 1, y[idx], linear)
-        return out
+        return evaluate_table(x, y, self._segment_codes(k), points)
 
     def insert_incident_node(self, energy: float) -> int:
         """Add an incident node at *energy*, refining exactly. Returns its index.
@@ -385,13 +464,26 @@ class MF5PartialTabulated(MF5Partial):
 
 def make_partial(u: float, lf: int, p_interp, p_energies, p_values,
                  **law: Any) -> MF5Partial:
-    """Build the right partial class for *lf*."""
+    """Build the right partial class for *lf*.
+
+    Three outcomes: LF=1 is the tabulated law, LF=5/7/9/11 are read by
+    :mod:`~kika.endf.classes.mf5.analytic`, and anything else keeps its bytes.
+    All three carry ``raw_lines`` except LF=1, so an analytic partial can be
+    built with or without them and still emit whatever it was given.
+    """
     if lf == 1:
         return MF5PartialTabulated(
             u=u, lf=lf, p_interp=list(p_interp),
             p_energies=list(p_energies), p_values=list(p_values), **law,
         )
-    return MF5PartialRaw(
+
+    # Imported here and not at module scope: ``analytic`` needs this module's
+    # panel arithmetic, so the two would form a cycle. The factory is the only
+    # place that needs to know both.
+    from .analytic import ANALYTIC_LAWS
+
+    cls = ANALYTIC_LAWS.get(lf, MF5PartialRaw)
+    return cls(
         u=u, lf=lf, p_interp=list(p_interp),
         p_energies=list(p_energies), p_values=list(p_values), **law,
     )
