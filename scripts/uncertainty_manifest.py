@@ -28,6 +28,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import warnings
+
 import numpy as np
 
 try:
@@ -697,6 +699,46 @@ def get_dataset_flag(dataset_id: str, manifest: Optional[dict] = None) -> str:
     return entry.get("flag", "uncurated")
 
 
+def _components_in_point_order(
+    components: List[dict], point_refs: List[dict], dataset_id: str,
+) -> List[dict]:
+    """Per-point columns re-indexed to the order of ``point_refs``.
+
+    The database loader keeps every ``dy`` column in the order of the original
+    EXFOR table, but groups the points into energy blocks sorted by angle. A
+    column applied positionally to the points is therefore scrambled whenever
+    the table is not already in (energy, angle) order -- angle-major tables
+    (Pirovano 23365004/5, Barnard 30076004, Tsukada 20304002, ...) gave every
+    point another row's DATA-ERR until 2026-09-07. The loader stamps each point
+    with ``table_index``; this maps the columns through it. Scalar components
+    and columns whose length does not match the table are left untouched, the
+    latter with a warning rather than a silent fallback.
+    """
+    idx = [pt.get("table_index") for pt in point_refs]
+    if not point_refs or any(i is None for i in idx):
+        return components          # JSON path or an older loader: already in point order
+    idx_arr = np.asarray(idx, dtype=int)
+    out = []
+    for comp in components:
+        vals = comp.get("values") if comp.get("kind") == "per_point" else None
+        if vals is None:
+            out.append(comp)
+            continue
+        n_tab = len(vals)
+        if n_tab <= int(idx_arr.max()):
+            warnings.warn(
+                "{}: per-point column {} has {} rows but the points reference table row {}; "
+                "column left in table order".format(dataset_id, comp.get("header"), n_tab, int(idx_arr.max())),
+                RuntimeWarning)
+            out.append(comp)
+            continue
+        arr = np.asarray(vals, dtype=float)
+        c2 = dict(comp)
+        c2["values"] = arr[idx_arr].tolist()
+        out.append(c2)
+    return out
+
+
 def apply_manifest_to_exfor(
     exfor,
     uncertainty_components: Optional[List[dict]] = None,
@@ -750,14 +792,26 @@ def apply_manifest_to_exfor(
     energies_arr = np.asarray(energies, dtype=float)
     values_arr = np.asarray(values, dtype=float)
 
-    # Build synthetic components for the JSON path (no raw column structure).
-    if uncertainty_components is None:
-        uncertainty_components = [{
-            "header": "DATA-ERR",
-            "kind": "per_point",
-            "values": existing_stat,
-            "unit": "B/SR",
-        }]
+    # Build synthetic components for the JSON path (no raw column structure). The JSON
+    # loader hands over an EMPTY list, not None, so the test is "no columns"; and a dataset
+    # that declares no uncertainty at all (all-zero existing_stat: Perey 13511004, 20482005,
+    # 10332004, 11638003) must NOT get a synthetic column of zeros, or ``best_available``
+    # "finds" sigma = 0 and the 5 % default turns into 1 % (+) 0. Re-applied 2026-09-07: the
+    # fix of 2026-08-27 had been lost from this tree (its test survived only as a .pyc).
+    existing_arr = np.asarray(existing_stat, dtype=float)
+    if not uncertainty_components:
+        if np.any(existing_arr != 0.0):
+            uncertainty_components = [{
+                "header": "DATA-ERR",
+                "kind": "per_point",
+                "values": existing_stat,
+                "unit": "B/SR",
+            }]
+        else:
+            uncertainty_components = []
+    else:
+        uncertainty_components = _components_in_point_order(
+            uncertainty_components, point_refs, dataset_id)
 
     res = resolve_for_dataset(
         dataset_id=dataset_id,

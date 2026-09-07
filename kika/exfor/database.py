@@ -1676,6 +1676,13 @@ class X4ProDatabase:
             block_angles = block_angles[sort_idx]
             block_xs = block_xs[sort_idx]
             block_unc = block_unc[sort_idx]
+            # The row of the ORIGINAL EXFOR table each point came from. The
+            # per-point uncertainty columns stashed in ``uncertainty_components``
+            # keep the table's order (angle-major for many multi-energy sets),
+            # while these blocks are energy-major and angle-sorted: whoever maps
+            # a column back onto the points (``apply_manifest_to_exfor``) needs
+            # this index, or every point gets another row's error.
+            block_rows = np.nonzero(mask)[0][sort_idx]
 
             data_points = []
             for i in range(len(block_angles)):
@@ -1684,6 +1691,7 @@ class X4ProDatabase:
                     "cross_section": float(block_xs[i]),
                     "uncertainty_stat": float(block_unc[i]),
                     "uncertainty_sys": 0.0,
+                    "table_index": int(block_rows[i]),
                 })
 
             data_blocks.append({
