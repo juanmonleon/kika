@@ -1023,6 +1023,38 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² — cinta B-spline v6 sin host con level_vs_host, contra la base EXFOR CORREGIDA (eficiencias de la v6)",
         "systematic_block_col": None,
     },
+    # ── 8-sep: la cadena `_y` (corpus corregido del 7-sep, ventana derivada re-medida) con el tau ESTRUCTURADO
+    # (wtau: alpha_e + beta_banda(E) / gamma_detector(E), voto por experimento), pasada 5 = v6_y5s, con el término
+    # level_vs_host. B13 crudo, C13 corregido con SU tabla (w18_v6_y5s_efficiencies.csv). Se leen contra
+    # B12/C12: cambian tau y corpus; el nivel queda -8 % bajo el consenso (W28/W29).
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s (corpus corregido, tau estructurado, level_vs_host)",
+        "systematic_block_col": None,
+    },
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_corr": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_corr.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s contra la base EXFOR CORREGIDA (eficiencias de la propia y5s)",
+        "systematic_block_col": None,
+    },
+    # ── 8-sep (tarde): la MISMA cinta y5s con el nivel de EFECTOS ALEATORIOS (W30, sufijo _re): nivel x f_RE
+    # 1,0942 (consenso de 65 experimentos, sigma_b 10 % entre ellos), a_l/MF34 idénticas a B13, level_vs_host
+    # contra el nivel corregido, SE_RE 1,6 % como término correlado del nivel. B14 crudo, C14 corregido (misma
+    # tabla que C13). Se leen contra B13/C13 (aíslan el nivel) y contra B12/C12.
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s con el nivel de efectos aleatorios (f_RE 1,094, SE_RE 1,6 % en la MF33)",
+        "systematic_block_col": None,
+    },
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_corr": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_corr.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s con nivel de efectos aleatorios, contra la base EXFOR CORREGIDA",
+        "systematic_block_col": None,
+    },
     # ── RUN 97: una malla por orden Legendre (roadmap §10.8) ────────────────
     #
     # Candidata frente a `predictive_91_cross`, la misma base contra la que se

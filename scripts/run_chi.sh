@@ -415,7 +415,7 @@ R98=/share_snc/snc/JuanMonleon/ENDF_samples/new_test_98_meshraw
 # 2026-08-23 (noche): anadidos los tres brazos de la serie 104. Misma cinta
 # (`_a0cross.endf`, dead=carry) y mismo camino que 103R2/103R4, asi que las
 # cinco son comparables de una sola variable.
-CHIARM="${1:?falta el brazo. Uso: sbatch run_chi.sh B1   -- brazos validos: R2 R4 S1 S2 S3 T1 T2 B1..B12 C9 C10 C11 C12 CT}"
+CHIARM="${1:?falta el brazo. Uso: sbatch run_chi.sh B1   -- brazos validos: R2 R4 S1 S2 S3 T1 T2 B1..B14 C9..C14 CT}"
 case "$CHIARM" in
   R2) CHIDIR=new_test_103R2_base         ; CHITAG=103R2 ;;
   R4) CHIDIR=new_test_103R4_malla1etapa  ; CHITAG=103R4 ;;
@@ -501,7 +501,28 @@ case "$CHIARM" in
   C12) CHIDIR=/share_snc/snc/JuanMonleon/splines/deliverable ; CHITAG=bspline_v6_x5_perorder_m2_c3_lvdp_lh_corr
        CHIENDF=26-Fe-56g_bspline_v6_x5_perorder_m2_c3_lvdp_lh.endf ; CHICROSS=1 ; CHICORR=1
        CHICORRFILE=/share_snc/snc/JuanMonleon/splines/deliverable/corrections/w18_v6_x5_efficiencies.csv ;;
-  *)  echo "⛔ '$CHIARM' no es R2, R4, S1, S2, S3, T1, T2, B1-B12, C9-C12 ni CT"; exit 2 ;;
+  # ── 8-sep: la cadena `_y` (corpus corregido del 7-sep: 46 738 filas, ventana derivada re-medida) con el
+  #   tau ESTRUCTURADO (wtau: log tau = alpha_e + beta_banda(E) / gamma_detector(E), voto por experimento),
+  #   pasada 5 = `v6_y5s`. Sufijo GATEFAIL en el nombre de la cinta: el lobulo estadistico de la MF34 es
+  #   1,72 > 1,5 (es de a_l; la cinta se puntua igual, la puerta es otra cosa). B13 crudo, C13 corregido con
+  #   SU tabla (w18_v6_y5s_efficiencies.csv, escrita por w18_recipe_efficiencies.py bajo el entorno de la
+  #   cinta). Se leen contra B12/C12 (x5 + lh): lo que cambia es tau y corpus; el nivel sale -8 % (W28).
+  B13) CHIDIR=/share_snc/snc/JuanMonleon/splines/deliverable ; CHITAG=bspline_v6_y5s_perorder_m2_c3_lvdp_lh
+       CHIENDF=26-Fe-56g_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_GATEFAIL.endf ; CHICROSS=1 ;;
+  C13) CHIDIR=/share_snc/snc/JuanMonleon/splines/deliverable ; CHITAG=bspline_v6_y5s_perorder_m2_c3_lvdp_lh_corr
+       CHIENDF=26-Fe-56g_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_GATEFAIL.endf ; CHICROSS=1 ; CHICORR=1
+       CHICORRFILE=/share_snc/snc/JuanMonleon/splines/deliverable/corrections/w18_v6_y5s_efficiencies.csv ;;
+  # ── 8-sep (tarde): la MISMA cinta y5s con el NIVEL de efectos aleatorios (W30, sufijo _re): el nivel
+  #   x f_RE = 1,0942 (consenso de 65 experimentos con sigma_b 10 % entre ellos), a_l y MF34 IDENTICAS a B13,
+  #   level_vs_host medido contra el nivel corregido (rms 0,085 -> 0,045) y SE_RE 1,6 % como termino
+  #   correlado del nivel en la MF33. Se lee contra B13/C13 (aisla el nivel: V1-V3 cambian por el nivel,
+  #   V4 ademas por la MF33) y contra B12/C12. Misma tabla de correcciones que C13 (a_l no cambia).
+  B14) CHIDIR=/share_snc/snc/JuanMonleon/splines/deliverable ; CHITAG=bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re
+       CHIENDF=26-Fe-56g_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_GATEFAIL.endf ; CHICROSS=1 ;;
+  C14) CHIDIR=/share_snc/snc/JuanMonleon/splines/deliverable ; CHITAG=bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_corr
+       CHIENDF=26-Fe-56g_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_GATEFAIL.endf ; CHICROSS=1 ; CHICORR=1
+       CHICORRFILE=/share_snc/snc/JuanMonleon/splines/deliverable/corrections/w18_v6_y5s_efficiencies.csv ;;
+  *)  echo "⛔ '$CHIARM' no es R2, R4, S1, S2, S3, T1, T2, B1-B14, C9-C14 ni CT"; exit 2 ;;
 esac
 # Un CHIDIR que empieza por / es una ruta completa (brazo B1); el resto cuelga
 # de ENDF_samples como siempre. CHIENDF y CHICROSS conservan su valor de antes
@@ -570,6 +591,15 @@ FREE_GB=$(df -BG --output=avail /share_snc 2>/dev/null | tail -1 | tr -dc '0-9')
 echo "  disco libre: ${FREE_GB:-?} G   (el sidecar son ~11 GB)"
 [ -z "$FREE_GB" ] || [ "$FREE_GB" -ge 50 ] || { echo "⛔ menos de 50 G libres"; exit 1; }
 ls -la "$CHIRUN/$CHIENDF"
+# 8-sep: la sigma del manifiesto (tablas angulo-mayor: Pirovano, Barnard, Tsukada...) la arregla
+# `uncertainty_manifest.py` SOLO si la kika instalada en /work sella `table_index` (>= 0.3.1.dev0,
+# rueda en EXFOR/kika_dist/). Con la rueda vieja el script toma la rama de compatibilidad y el
+# arreglo queda INERTE sin error. Por eso esta puerta: antes de instalar la rueda, ningun brazo corre.
+#   /work/monleon-de-la-jan/myenv/bin/pip install --force-reinstall --no-deps \
+#       /share_snc/snc/JuanMonleon/EXFOR/kika_dist/kika_nd-0.3.1.dev0-py3-none-any.whl
+python -c "import inspect, kika, kika.exfor.database as d; ok = 'table_index' in inspect.getsource(d); \
+print('  kika', kika.__version__, '- sella table_index:', ok); import sys; sys.exit(0 if ok else 1)" \
+  || { echo "⛔ la kika instalada en /work NO sella table_index: instala kika_nd-0.3.1.dev0 (EXFOR/kika_dist/) y relanza"; exit 3; }
 
 echo
 echo "--- PASO 1: precompute_chi2_predictive ($CHITAG) ---"
