@@ -163,16 +163,48 @@ def test_a_shape_grid_the_self_blocks_do_not_share_is_refused(micro_cov_tape, tm
     `PointMap.nearest(block_grid)` to the self blocks. Different grids, no
     single M, no congruence -- §L18's four-grid problem, which `merge_mf34`
     produces for real by taking a per-pair union.
+
+    The block must be NON-ZERO. Since 2026-08-24 an identically zero (0, L1)
+    pair is the format's way of declaring "no cross term for this order" (MF34
+    stores no NSS, so a pair cannot be omitted), and the reader accepts one on
+    any grid before it reaches these guards -- rightly, because a block that is
+    all zeros contributes zero however it is mapped. This test used a zero
+    matrix as a convenient stand-in for "a block" and stopped exercising the
+    guard the day that concession landed; `test_a_null_cross_pair_is_accepted_
+    on_any_grid` below pins the other half.
     """
     mf34 = _build(_cross_dict())
     coarse = np.array([0.85e6, 2.7e6, 4.0e6])
     ss = _find(mf34, 0, 1)
-    ss.records[0] = _make_lb6_record(np.zeros((N_MAG, coarse.size - 1)),
+    ss.records[0] = _make_lb6_record(np.full((N_MAG, coarse.size - 1), 1e-3),
                                      MAG_GRID, coarse)
     path = _write(mf34, micro_cov_tape, tmp_path, "bad_col.endf")
     with pytest.raises(ValueError, match="column grid"):
         read_mf34_split(path, isotope=ISO, mt=MT, l_max=L_MAX,
                         mf33_grid_ev=MAG_GRID)
+
+
+def test_a_null_cross_pair_is_accepted_on_any_grid(micro_cov_tape, tmp_path):
+    """The concession the guard above must not swallow, and the one the shipped
+    tape depends on: a_5/a_6 ship as a declared-NULL pair.
+
+    An all-zero (0, L1) block is "this order has no cross term", written over
+    one interval because the format gives no other way to say it. It cannot be
+    on the wrong mesh -- zero maps to zero -- so the grid guards are skipped,
+    and the order comes back REPORTED rather than inferred from an absence.
+    """
+    mf34 = _build(_cross_dict())
+    coarse = np.array([0.85e6, 4.0e6])
+    ss = _find(mf34, 0, 1)
+    ss.records[0] = _make_lb6_record(np.zeros((N_MAG, coarse.size - 1)),
+                                     MAG_GRID, coarse)
+    path = _write(mf34, micro_cov_tape, tmp_path, "null_pair.endf")
+    _, cross, info = read_mf34_split(path, isotope=ISO, mt=MT, l_max=L_MAX,
+                                     mf33_grid_ev=MAG_GRID)
+    assert info["null_cross_orders"] == [1], (
+        "a declared-null pair must be REPORTED, not silently dropped")
+    assert 1 not in [b["l"] for b in cross], (
+        "a null pair carries no cross block to fold")
 
 
 def test_a_self_block_grid_the_rest_of_the_file_ignores_is_refused(
