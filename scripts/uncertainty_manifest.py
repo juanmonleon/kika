@@ -715,8 +715,26 @@ def _components_in_point_order(
     latter with a warning rather than a silent fallback.
     """
     idx = [pt.get("table_index") for pt in point_refs]
-    if not point_refs or any(i is None for i in idx):
-        return components          # JSON path or an older loader: already in point order
+    if not point_refs:
+        return components
+    if any(i is None for i in idx):
+        # Two very different situations reach here and only one is benign. The JSON path
+        # hands over points that are already in table order and carries no per-point
+        # columns to scramble. An INSTALLED kika older than 2026-09-07 does not stamp
+        # `table_index` at all -- and then this returns the scrambled columns unchanged,
+        # which is the fix looking deployed while doing nothing. That must be audible:
+        # the cluster runs from a staged wheel that is not inspectable from WSL, so a
+        # silent no-op here is exactly how the corrected sigma would fail to arrive.
+        if any(c.get("kind") == "per_point" for c in components):
+            warnings.warn(
+                "{}: {} per-point uncertainty column(s) to place, but the loader stamped no "
+                "`table_index` on the points. Either these came from the JSON path (harmless) "
+                "or the installed kika predates 2026-09-07, in which case the columns are being "
+                "applied POSITIONALLY and angle-major tables get another row's DATA-ERR. "
+                "Check the kika version in the venv this is running under.".format(
+                    dataset_id, sum(c.get("kind") == "per_point" for c in components)),
+                RuntimeWarning, stacklevel=2)
+        return components
     idx_arr = np.asarray(idx, dtype=int)
     out = []
     for comp in components:
