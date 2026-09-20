@@ -10,14 +10,8 @@ from typing import List, Optional, Sequence, Tuple, Union
 
 from kika.benchmarks.database import BenchmarksDatabase
 from kika.plotting import PlotBuilder
+from kika.plotting.styles import get_style
 from kika.sensitivities import sensitivity_to_plot_data
-
-# Colorblind-safe cycle (kika light palette) used when the caller plots several
-# reactions on one axis.
-_PALETTE = [
-    "#0173B2", "#DE8F05", "#029E73", "#D55E00", "#CC78BC",
-    "#CA9161", "#FBAFE4", "#949494", "#ECE133", "#56B4E9",
-]
 
 
 def plot_profile(
@@ -88,7 +82,7 @@ def plot_profile(
             reaction_name=r.get("reaction_name"),
             per_lethargy=per_lethargy,
             uncertainty=uncertainty,
-            color=_PALETTE[i % len(_PALETTE)],
+            color=get_style(style).color(i),
         )
         builder.add_data(pd)
 

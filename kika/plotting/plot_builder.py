@@ -5,6 +5,8 @@ This module provides the PlotBuilder class that takes PlotData objects
 and creates publication-quality plots with consistent styling.
 """
 
+import contextlib
+import warnings
 from typing import List, Optional, Tuple, Union, Dict, Any
 
 # Sentinel value to distinguish "not set" from "explicitly set to None"
@@ -15,6 +17,7 @@ import numpy as np
 
 from .plot_data import (
     PlotData,
+    PlotItem,
     UncertaintyBand,
     LegendreUncertaintyPlotData,
     MultigroupUncertaintyPlotData,
@@ -23,9 +26,10 @@ from .plot_data import (
     LegendreHeatmapData
 )
 from .styles import (
-    _get_color_palette,
+    Style,
+    get_style,
+    _isolated_rc,
     _get_linestyles,
-    _apply_style_to_rcparams,
     _adjust_figsize_for_notebook,
     _adjust_dpi_for_notebook,
     format_energy_axis_ticks
@@ -36,6 +40,33 @@ from ._backend_utils import (
     _setup_notebook_backend,
     _configure_figure_interactivity
 )
+
+
+def _ensure_minor_ticks(axis, is_log: bool) -> None:
+    """Give ``axis`` minor ticks to hang a grid on, without disturbing the ones it has.
+
+    ``Axes.minorticks_on()`` cannot be used for this. It replaces the minor
+    locator on *both* axes, and on a log axis it asks for ``subs='auto'``, which
+    over several decades resolves onto the major ticks and is then filtered out
+    as duplicate. So a twelve-decade energy axis that `format_energy_axis_ticks`
+    had subdivided into 120 minor ticks came out of ``minorticks_on()`` with
+    none — turning the minor grid *on* erased the X subdivisions and drew the
+    grid only on Y, which is the opposite of what was asked for.
+
+    An axis that already yields minor locations is left exactly as it is, so the
+    tuned log locator survives. Only an axis with nothing to hang a grid on gets
+    a locator, and it gets one that suits its scale.
+    """
+    if len(axis.get_minorticklocs()):
+        return
+    if is_log:
+        # 2..9 within each decade, matching format_energy_axis_ticks' density.
+        axis.set_minor_locator(
+            mpl.ticker.LogLocator(base=10.0, subs=tuple(range(2, 10)), numticks=100)
+        )
+    else:
+        axis.set_minor_locator(mpl.ticker.AutoMinorLocator())
+    axis.set_minor_formatter(mpl.ticker.NullFormatter())
 
 
 class PlotBuilder:
@@ -66,22 +97,25 @@ class PlotBuilder:
     
     def __init__(
         self,
-        style: str = 'light',
+        style: Union[str, Style] = 'light',
         figsize: Tuple[float, float] = (8, 6),
         dpi: int = 100,
         ax: Optional[plt.Axes] = None,
         projection: Optional[str] = None,
-        font_family: str = 'serif',
+        font_family: Optional[str] = None,
         notebook_mode: Optional[bool] = None,
         interactive: Optional[bool] = None,
     ):
         """
         Initialize the PlotBuilder.
-        
+
         Parameters
         ----------
-        style : str
-            Plot style: 'light' (default, publication-quality) or 'dark'
+        style : str or Style
+            A registered style name (see :func:`kika.plotting.list_styles`), an
+            alias (``'light'`` = ``'classic'``, ``'dark'`` = ``'classic-dark'``) or
+            a :class:`~kika.plotting.Style`. The figure is created and drawn inside
+            the style's rc context; global rcParams are never modified.
         figsize : tuple
             Figure size (width, height) in inches
         dpi : int
@@ -90,20 +124,19 @@ class PlotBuilder:
             Existing axes to plot on. If None, creates new figure and axes.
         projection : str, optional
             Projection type (e.g., '3d' for 3D plots)
-        font_family : str
-            Font family for text elements (default: 'serif')
+        font_family : str, optional
+            Font family for text elements. None (default) uses the style's font
+            (serif for 'classic').
         notebook_mode : bool, optional
             Force notebook mode (auto-detected if None)
         interactive : bool, optional
             Force interactive mode (auto-detected if None)
         """
-        if style not in ('light', 'dark'):
-            raise ValueError(f"Invalid style '{style}'. Must be 'light' or 'dark'.")
-        
-        self.style = style
+        self.style_spec: Style = get_style(style)  # raises ValueError for unknown names
+        self.style = style if isinstance(style, str) else self.style_spec.name
         self.projection = projection
         self.font_family = font_family
-        
+
         # Auto-detect notebook and interactive mode
         if notebook_mode is None:
             notebook_mode = _is_notebook()
@@ -136,8 +169,18 @@ class PlotBuilder:
         self.dpi = dpi
         
         # Get color palette and linestyles for this style
-        self._colors = _get_color_palette(style)
+        self._colors = list(self.style_spec.palette)
         self._linestyles = _get_linestyles()
+        self._rc = self.style_spec.rc_params(
+            notebook_mode=notebook_mode,
+            figsize=figsize,
+            dpi=dpi,
+            font_family=font_family,
+            projection=projection,
+        )
+        # A builder that creates its figure also owns its look. With ``ax=`` the
+        # caller's figure (and whatever rc context it was made in) is respected.
+        self._owns_figure = ax is None
         
         # Storage for plot elements
         self._data_list: List[PlotData] = []
@@ -152,6 +195,9 @@ class PlotBuilder:
         # Plot configuration
         self._x_label: Optional[str] = None
         self._y_label: Optional[str] = None
+        # Display units. None: the first curve that states one decides.
+        self._x_unit: Optional[str] = None
+        self._y_unit: Optional[str] = None
         self._title = _NOT_SET  # Use sentinel to distinguish "not set" from "explicitly None"
         self._legend_loc: str = 'best'
         self._legend_ncol: Optional[int] = None
@@ -159,10 +205,12 @@ class PlotBuilder:
         self._use_log_y: bool = False
         self._x_lim: Optional[Tuple[Optional[float], Optional[float]]] = None
         self._y_lim: Optional[Tuple[Optional[float], Optional[float]]] = None
-        self._grid: bool = True
-        self._grid_alpha: float = 0.3  # Alpha (transparency) for major grid
-        self._show_minor_grid: bool = False  # Whether to show minor grid
+        self._grid: Optional[bool] = None  # None: the style decides (rc 'axes.grid')
+        self._grid_alpha: Optional[float] = None  # None: the style's 'grid.alpha'
+        self._show_minor_grid: Optional[bool] = None  # Whether to show minor grid
         self._minor_grid_alpha: float = 0.15  # Alpha for minor grid
+        self._show_minor_grid_x: Optional[bool] = None  # Minor grid on X (see set_grid)
+        self._show_minor_grid_y: Optional[bool] = None  # Minor grid on Y
         
         # Font size configuration (will override style defaults if set)
         self._title_fontsize: Optional[float] = None
@@ -178,23 +226,15 @@ class PlotBuilder:
             self.fig = ax.figure
             self.ax = ax
         else:
-            # Apply style to matplotlib rcParams
-            _apply_style_to_rcparams(
-                style=style,
-                notebook_mode=notebook_mode,
-                figsize=figsize,
-                dpi=dpi,
-                font_family=font_family,
-                projection=projection
-            )
-            
-            # Create figure and axes
-            if projection is not None:
-                self.fig = plt.figure(figsize=figsize, dpi=dpi)
-                self.ax = self.fig.add_subplot(111, projection=projection)
-            else:
-                self.fig, self.ax = plt.subplots(figsize=figsize, dpi=dpi)
-            
+            # Create figure and axes inside the style (facecolours, spines and
+            # layout engine are read from rcParams at creation time)
+            with self._style_context():
+                if projection is not None:
+                    self.fig = plt.figure(figsize=figsize, dpi=dpi)
+                    self.ax = self.fig.add_subplot(111, projection=projection)
+                else:
+                    self.fig, self.ax = plt.subplots(figsize=figsize, dpi=dpi)
+
             # Configure figure interactivity
             _configure_figure_interactivity(self.fig, interactive)
     
@@ -235,6 +275,10 @@ class PlotBuilder:
                 "Create separate PlotBuilder instances for heatmaps and line plots."
             )
         
+        # A PlotItem from plottable() is a (data, band) pair
+        if isinstance(data, PlotItem):
+            data = (data.data, data.band)
+
         # Handle tuple input from to_plot_data(uncertainty=True)
         if isinstance(data, tuple):
             if len(data) == 2:
@@ -429,27 +473,62 @@ class PlotBuilder:
         self._legend_ncol = ncol
         return self
     
+    def set_units(self, x: Optional[str] = None, y: Optional[str] = None) -> 'PlotBuilder':
+        """
+        Display units for the axes (``'MeV'``, ``'keV'``, ``'mb'``, ``'mb/sr'``, ...).
+
+        Curves that carry units (everything :func:`kika.plotting.plottable`
+        returns) are converted on the way in; curves without unit metadata are
+        drawn as given. Without a call, the first curve that states a unit sets it.
+        Axis limits passed to :meth:`set_limits` are in these units.
+        """
+        from .units import normalise_unit
+        self._x_unit = normalise_unit(x) if x else None
+        self._y_unit = normalise_unit(y) if y else None
+        return self
+
     def set_grid(
-        self, 
-        grid: bool = True,
-        alpha: float = 0.3,
-        show_minor: bool = False,
-        minor_alpha: float = 0.15
+        self,
+        grid: Optional[bool] = True,
+        alpha: Optional[float] = 0.3,
+        show_minor: Optional[bool] = None,
+        minor_alpha: float = 0.15,
+        show_minor_x: Optional[bool] = None,
+        show_minor_y: Optional[bool] = None,
     ) -> 'PlotBuilder':
         """
         Configure grid display settings.
-        
+
         Parameters
         ----------
         grid : bool
             Whether to show major grid
         alpha : float
             Alpha (transparency) for major grid lines. Range: 0.0-1.0
-        show_minor : bool
-            Whether to show minor grid lines
+        show_minor : bool, optional
+            Whether to subdivide both axes. A shorthand: it is the default of
+            `show_minor_x` and `show_minor_y`.
         minor_alpha : float
             Alpha (transparency) for minor grid lines. Range: 0.0-1.0
-            
+        show_minor_x, show_minor_y : bool, optional
+            Whether that axis is subdivided, overriding `show_minor` for it.
+            The two axes are rarely equally worth subdividing: a log energy axis
+            over ten decades carries a useful minor grid where a linear ordinate
+            reads as noise, and the other way round.
+
+            The flag owns the whole subdivision, ticks and gridlines together,
+            because "minor tick marks but no minor grid" is a state nobody asks
+            for and one the caller could not switch off. So:
+
+            ``None`` (the default)
+                leave the axis as the style and the scale made it — a log axis
+                keeps the minor ticks matplotlib and `format_energy_axis_ticks`
+                give it, and no minor gridlines are drawn.
+            ``True``
+                subdivide the axis if it is not already, and draw the grid.
+            ``False``
+                strip the subdivision: no minor gridlines and no minor ticks.
+
         Returns
         -------
         PlotBuilder
@@ -459,6 +538,8 @@ class PlotBuilder:
         self._grid_alpha = alpha
         self._show_minor_grid = show_minor
         self._minor_grid_alpha = minor_alpha
+        self._show_minor_grid_x = show_minor if show_minor_x is None else show_minor_x
+        self._show_minor_grid_y = show_minor if show_minor_y is None else show_minor_y
         return self
     
     def set_tick_params(
@@ -665,7 +746,7 @@ class PlotBuilder:
         dpi = getattr(self, "_dpi_user", None) or self.dpi
 
         builder = HeatmapBuilder(
-            style=self.style,
+            style=self.style_spec,
             figsize=figsize,
             dpi=dpi,
             font_family=self.font_family,
@@ -1573,8 +1654,78 @@ class PlotBuilder:
                 plt.show()
             return fig
         
-        # Otherwise, build line plot (existing logic)
-        # Get default colors
+        # Otherwise, build the line plot inside the style's rc context
+        with self._style_context():
+            return self._build_lines(show)
+
+    def _style_context(self):
+        """rc context of this builder's style, or nothing when drawing on a caller's axes."""
+        if self._owns_figure:
+            return _isolated_rc(self._rc)
+        return contextlib.nullcontext()
+
+    def _harmonise_units(self) -> Dict[str, Optional[str]]:
+        """Convert every curve (and its band) to the display units; warn on mixes.
+
+        Returns the resolved display unit of each axis (None when no curve
+        carries unit metadata).
+        """
+        from .units import MixedQuantityWarning, UnitError, band_to_units, data_to_units, factor
+
+        units = {}
+        for axis in ('x', 'y'):
+            chosen = getattr(self, f'_{axis}_unit')
+            if chosen is None:
+                chosen = next((getattr(d, f'{axis}_unit') for d in self._data_list
+                               if getattr(d, f'{axis}_unit', None)), None)
+            units[axis] = chosen
+
+        quantities = {d.quantity for d in self._data_list if getattr(d, 'quantity', None)}
+        if len(quantities) > 1:
+            warnings.warn(
+                f"Different quantities on one axes: {', '.join(sorted(quantities))}",
+                MixedQuantityWarning, stacklevel=3)
+        frames = {d.provenance.frame for d in self._data_list
+                  if getattr(d, 'provenance', None) is not None and d.provenance.frame}
+        if len(frames) > 1:
+            warnings.warn(
+                f"Angular data in different frames on one axes ({', '.join(sorted(frames))}); "
+                f"convert them to one frame before comparing",
+                MixedQuantityWarning, stacklevel=3)
+
+        converted: List[PlotData] = []
+        scale: List[Tuple[float, float]] = []
+        for data in self._data_list:
+            try:
+                new = data_to_units(data, units['x'], units['y'])
+                fx = factor(data.x_unit, units['x']) if (data.x_unit and units['x']) else 1.0
+                fy = factor(data.y_unit, units['y']) if (data.y_unit and units['y']) else 1.0
+            except UnitError as exc:
+                warnings.warn(f"{data.label or 'A curve'} left unconverted: {exc}",
+                              MixedQuantityWarning, stacklevel=3)
+                new, fx, fy = data, 1.0, 1.0
+            converted.append(new)
+            scale.append((fx, fy))
+        self._data_list = converted
+        self._uncertainty_bands = [
+            (band_to_units(band, *scale[idx]) if idx < len(scale) else band, idx)
+            for band, idx in self._uncertainty_bands
+        ]
+        return units
+
+    def _auto_axis_label(self, axis: str, unit: Optional[str]) -> Optional[str]:
+        """Axis label from the curves' quantity, when they all agree on one."""
+        from .units import QUANTITIES
+
+        names = {d.quantity for d in self._data_list if getattr(d, 'quantity', None)}
+        if len(names) != 1:
+            return None
+        quantity = QUANTITIES.get(next(iter(names)))
+        return quantity.axis_label(axis, unit) if quantity else None
+
+    def _build_lines(self, show: bool) -> plt.Figure:
+        """Render the line plot. Runs inside :meth:`_style_context` (see :meth:`build`)."""
+        display_units = self._harmonise_units()
         default_colors = self._colors
         
         # Plot uncertainty bands first (so they appear behind the lines)
@@ -1849,14 +2000,19 @@ class PlotBuilder:
                 elif y_hi is not None:
                     self.ax.set_ylim(top=y_hi)
 
-        # Apply axis labels
+        # Apply axis labels. Curves that know their quantity label the axes
+        # themselves; the old guesses below are for curves that do not.
         x_fs = self._xlabel_fontsize or self._label_fontsize
         y_fs = self._ylabel_fontsize or self._label_fontsize
+        auto_x = self._auto_axis_label('x', display_units['x'])
+        auto_y = self._auto_axis_label('y', display_units['y'])
         if self._x_label is not None:
             if x_fs is not None:
                 self.ax.set_xlabel(self._x_label, fontsize=x_fs)
             else:
                 self.ax.set_xlabel(self._x_label)
+        elif auto_x is not None:
+            self.ax.set_xlabel(auto_x, **({'fontsize': x_fs} if x_fs is not None else {}))
         elif self._use_log_x:
             # Auto-label for energy axis if log scale is used
             is_energy_axis = self._x_label is None or 'energy' in self._x_label.lower()
@@ -1873,6 +2029,8 @@ class PlotBuilder:
                 self.ax.set_ylabel(self._y_label, fontsize=y_fs)
             else:
                 self.ax.set_ylabel(self._y_label)
+        elif auto_y is not None:
+            self.ax.set_ylabel(auto_y, **({'fontsize': y_fs} if y_fs is not None else {}))
         
         # Apply title (only if explicitly set to a non-empty string)
         if self._title is not _NOT_SET and self._title:
@@ -1893,19 +2051,11 @@ class PlotBuilder:
         _outside_legend_layout = False
         handles, labels = self.ax.get_legend_handles_labels()
         if handles:
-            legend_kwargs = {'loc': self._legend_loc, 'framealpha': 0.9}
+            # Frame, edge and transparency come from the style's rcParams
+            legend_kwargs = {'loc': self._legend_loc}
 
             if self._legend_ncol is not None:
                 legend_kwargs['ncol'] = self._legend_ncol
-
-            if self.style == 'light':
-                legend_kwargs.update({
-                    'frameon': True,
-                    'fancybox': False,
-                    'edgecolor': 'black'
-                })
-            else:
-                legend_kwargs['fancybox'] = True
 
             if self._legend_fontsize is not None:
                 legend_kwargs['fontsize'] = self._legend_fontsize
@@ -2067,15 +2217,35 @@ class PlotBuilder:
                 except Exception:
                     pass
         
-        # Apply grid configuration
-        if self._grid:
+        # Apply grid configuration. Line style and colour are the style's; an
+        # explicit set_grid() decides on/off and opacity.
+        grid_on = self._grid
+        if grid_on is None:
+            grid_on = mpl.rcParams['axes.grid'] if self._owns_figure else True
+        if grid_on:
             # Major grid
-            self.ax.grid(True, which='major', linestyle='--', alpha=self._grid_alpha)
+            grid_kwargs = {} if self._grid_alpha is None else {'alpha': self._grid_alpha}
+            self.ax.grid(True, which='major', **grid_kwargs)
 
-            # Minor grid (only when explicitly requested)
-            if self._show_minor_grid:
-                self.ax.minorticks_on()
-                self.ax.grid(True, which='minor', linestyle=':', alpha=self._minor_grid_alpha, linewidth=0.5)
+            # Minor grid, per axis (only where explicitly requested).
+            for axis, wanted, is_log, name in (
+                (self.ax.xaxis, self._show_minor_grid_x, self._use_log_x, 'x'),
+                (self.ax.yaxis, self._show_minor_grid_y, self._use_log_y, 'y'),
+            ):
+                if wanted is None:
+                    continue  # the style and the scale decide, as they always did
+                if wanted:
+                    _ensure_minor_ticks(axis, is_log)
+                    self.ax.grid(
+                        True, axis=name, which='minor',
+                        linestyle=':', alpha=self._minor_grid_alpha, linewidth=0.5,
+                    )
+                else:
+                    # Off means off: a log axis arrives here already subdivided by
+                    # `format_energy_axis_ticks`, and leaving those marks behind is
+                    # what made the setting look like it did nothing.
+                    axis.set_minor_locator(mpl.ticker.NullLocator())
+                    self.ax.grid(False, axis=name, which='minor')
         else:
             self.ax.grid(False)
         

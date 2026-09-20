@@ -18,6 +18,24 @@ if TYPE_CHECKING:
     from kika.plotting.plot_data import LegendreCoeffPlotData, LegendreUncertaintyPlotData
 
 
+def _ace_reaction_frame(ace: "Ace", mt: int) -> str:
+    """Reference frame of MT's angular distribution in an ACE file.
+
+    Elastic scattering is tabulated in the centre-of-mass system by definition of
+    the format. Every other reaction states it in the TYR block: a negative TY
+    means centre of mass. Every ACE distribution used to be labelled 'LAB',
+    which put the elastic of every file in the wrong frame.
+    """
+    if mt == 2:
+        return "CM"
+    try:
+        mts = [int(e.value) for e in ace.reaction_mt_data.incident_neutron]
+        ty = int(ace.particle_release.incident_neutron[mts.index(mt)].value)
+    except (AttributeError, ValueError, IndexError, TypeError):
+        return "LAB"
+    return "CM" if ty < 0 else "LAB"
+
+
 @dataclass
 class AngularDistribution:
     """Format-agnostic angular distribution for one reaction.
@@ -383,6 +401,7 @@ class AngularDistribution:
 
         zaid = ace.header.zaid or 0
         ace_energies = np.asarray(dist.energies, dtype=float) * 1e6  # MeV → eV
+        frame = _ace_reaction_frame(ace, mt)
         ace_dist_type = type(dist).__name__
 
         meta = {
@@ -399,7 +418,7 @@ class AngularDistribution:
                 coefficients={0: np.ones(n_e, dtype=float)},
                 reaction=mt,
                 nuclide_id=zaid,
-                frame="LAB",
+                frame=frame,
                 representation="isotropic",
                 metadata=meta,
             )
@@ -416,7 +435,7 @@ class AngularDistribution:
                 coefficients={},
                 reaction=mt,
                 nuclide_id=zaid,
-                frame="LAB",
+                frame=frame,
                 representation="tabulated",
                 tabulated_data=tab_data,
                 metadata=meta,
@@ -447,7 +466,7 @@ class AngularDistribution:
                 coefficients={},
                 reaction=mt,
                 nuclide_id=zaid,
-                frame="LAB",
+                frame=frame,
                 representation="tabulated",
                 tabulated_data=tab_data,
                 metadata=meta,
@@ -496,10 +515,12 @@ class AngularDistribution:
     def project_to_legendre(self, max_order: int = 6) -> None:
         """Fit Legendre coefficients from tabulated PDF data.
 
-        Uses Gauss-Legendre quadrature to compute:
-            a_l = (2l+1)/2 * integral f(mu) P_l(mu) dmu
+        Uses Gauss-Legendre quadrature to compute the Legendre moments:
+            a_l = integral f(mu) P_l(mu) dmu
 
-        Coefficients are normalised so a_0 = 1.0 (ENDF convention).
+        normalised so a_0 = 1.0. This is the ENDF MF4 convention,
+        f(mu) = sum_l (2l+1)/2 a_l P_l(mu), so the result compares directly
+        with the coefficients of an ENDF tape.
         The original tabulated data is preserved; only ``coefficients``
         is populated.
 
@@ -545,14 +566,16 @@ class AngularDistribution:
             # Interpolate tabulated PDF onto quadrature nodes
             pdf_at_nodes = np.interp(quad_nodes, cos_pts, pdf_pts)
 
-            # Compute raw coefficients
+            # Legendre moments a_l = int f(mu) P_l(mu) dmu, the ENDF convention
+            # that _evaluate_pdf_legendre inverts with (2l+1)/2 a_l P_l. This
+            # used to carry a (2l+1)/2 factor as well, which the a_0 normalisation
+            # turned into (2l+1) a_l: a_1 three times too large, a_2 five, and a
+            # PDF rebuilt from them that no longer matched the table it came from.
             raw = np.zeros(max_order + 1)
             for l in range(max_order + 1):
-                raw[l] = (2 * l + 1) / 2.0 * np.sum(
-                    quad_weights * pdf_at_nodes * leg_at_nodes[l]
-                )
+                raw[l] = np.sum(quad_weights * pdf_at_nodes * leg_at_nodes[l])
 
-            # Normalise so a_0 = 1.0
+            # Normalise so a_0 = 1.0 (removes the table's own normalisation error)
             if abs(raw[0]) > 1e-30:
                 raw /= raw[0]
             raw[0] = 1.0

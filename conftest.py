@@ -180,7 +180,12 @@ _TAPES: Dict[str, Sequence[str]] = {
     # phase 5 oracle: one evaluation, two encodings, and any disagreement
     # between them is a reader defect rather than a physics difference. Not the
     # same tape as ``fe56_host`` — that is JEFF-4.0 with a JEFF-3.3 MF4 graft.
-    "fe56_b81": ("endfb81/n-026_Fe_056.endf", "n-026_Fe_056.endf"),
+    "fe56_b81": ("endfb81/n-026_Fe_056.endf", "n-026_Fe_056.endf", "endfb8.1/n/26056.endf"),
+    # The ACE of that same evaluation (ENDF/B-VIII.1, 293.6 K), and a PENDF of the
+    # JEFF-4.0 host: the three sources kika.plotting.plottable overlays in its
+    # acceptance test.
+    "fe56_ace_b81": ("ace/260560_81.02c", "ACE_samples/260560_81.02c"),
+    "fe56_pendf": ("pendf/Fe56.pendf",),
     # MF6, the energy-angle distributions. These three are not a sample: they
     # are the carriers. Swept over all 557 ENDF/B-VIII.1 neutron tapes, LAW=7
     # occurs twice in the whole library and both are in Be-9's MT16 (which is
@@ -488,6 +493,8 @@ u5_boxer_tape = _tape_fixture("u5_boxer")
 fe56_gnds_tape = _tape_fixture("fe56_gnds")
 fe56_gnds_cov_tape = _tape_fixture("fe56_gnds_cov")
 fe56_b81_tape = _tape_fixture("fe56_b81")
+fe56_ace_b81_tape = _tape_fixture("fe56_ace_b81")
+fe56_pendf_tape = _tape_fixture("fe56_pendf")
 
 #: The MF6 law carriers. Named one at a time rather than looped, to match the
 #: block above; the census that picked them is in ``docs/library/mf6_notes.md``.

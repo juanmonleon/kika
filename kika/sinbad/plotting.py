@@ -18,12 +18,11 @@ from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 
-# kika light palette, first slots. Colourblind-safe and validated for the
+from kika.plotting.styles import CLASSIC_PALETTE
+
+# kika's classic palette, first slots. Colourblind-safe and validated for the
 # all-pairs case, which is what a scatter/line chart of several libraries needs.
-_PALETTE = [
-    "#0173B2", "#DE8F05", "#029E73", "#D55E00", "#CC78BC",
-    "#CA9161", "#FBAFE4", "#949494", "#ECE133", "#56B4E9",
-]
+_PALETTE = list(CLASSIC_PALETTE)
 
 _INK = "#0b0b0b"
 _MUTED = "#52514e"
