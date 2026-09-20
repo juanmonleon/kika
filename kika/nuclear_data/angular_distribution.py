@@ -18,13 +18,17 @@ if TYPE_CHECKING:
     from kika.plotting.plot_data import LegendreCoeffPlotData, LegendreUncertaintyPlotData
 
 
-def _ace_reaction_frame(ace: "Ace", mt: int) -> str:
+def ace_reaction_frame(ace: "Ace", mt: int) -> str:
     """Reference frame of MT's angular distribution in an ACE file.
 
     Elastic scattering is tabulated in the centre-of-mass system by definition of
     the format. Every other reaction states it in the TYR block: a negative TY
     means centre of mass. Every ACE distribution used to be labelled 'LAB',
     which put the elastic of every file in the wrong frame.
+
+    Public because the frame is worth reporting on its own: a caller that only
+    wants to label a curve should not have to decode the whole distribution to
+    find out what its angles mean.
     """
     if mt == 2:
         return "CM"
@@ -401,7 +405,7 @@ class AngularDistribution:
 
         zaid = ace.header.zaid or 0
         ace_energies = np.asarray(dist.energies, dtype=float) * 1e6  # MeV → eV
-        frame = _ace_reaction_frame(ace, mt)
+        frame = ace_reaction_frame(ace, mt)
         ace_dist_type = type(dist).__name__
 
         meta = {

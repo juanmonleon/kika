@@ -17,7 +17,7 @@ write through ``CovarianceSuite`` — a net is worth nothing installed after the
 fall. Nothing in ``kika/cov`` was changed to add it; the seven imports it had
 then were written down as they were, which is what a ratchet is for. **Phase 4's
 P4 has since taken it to six** — see the note on ``legacy_mg_plotting.py``
-below.
+below, a file phase 7 has since deleted outright.
 
 The phase-4 wording needs one gloss. "Outside the encoders" is not a rule this
 test can express, because ``kika/cov`` is not cleanly one layer: MF34 encoding
@@ -155,6 +155,12 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds")
 #: old private name survives there as an alias for the two in-package callers.
 #: Reaching through a leading underscore into another package is the part worth
 #: recording, and it is now nobody's import.
+#:
+#: The file itself is gone as of phase 7 (September 2026). It was reachable only
+#: through ``plotting_mg.py``, the deprecation shim that ``kika/cov/multigroup/
+#: __init__.py`` star-imported, so importing the package paid for 1553 lines and
+#: a DeprecationWarning that no caller ever wanted. The note stays because the
+#: lesson above is about the shape of the import, not about the file.
 RUNTIME_ALLOWLIST: dict[str, int] = {
     "kika/cov/legendre_covariance.py": 4,
     "kika/nuclear_data/angular_distribution.py": 13,

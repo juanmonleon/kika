@@ -147,7 +147,8 @@ def _generate_unique_labels(endf_list, labels):
 #: calculation-layer code living in the format package — and
 #: ``kika/cov/multigroup/legacy_mg_plotting.py`` reached it here *through its
 #: leading underscore*, which is the import the layering ratchet was counting.
-#: The alias stays so this module's two call sites read unchanged.
+#: That module was itself deleted in phase 7 (September 2026). The alias stays
+#: so this module's own two call sites read unchanged.
 _plot_uncertainty_bands = plot_legendre_uncertainty_bands
 
 
