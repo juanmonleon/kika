@@ -1,15 +1,15 @@
 # KIKA
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)](https://github.com/juanmonleon/kika)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/juanmonleon/kika)
 [![Documentation Status](https://readthedocs.org/projects/kika/badge/?version=latest)](https://kika.readthedocs.io/en/latest/?badge=latest)
 [![PyPI](https://img.shields.io/pypi/v/kika-nd)](https://pypi.org/project/kika-nd/)
 [![Python](https://img.shields.io/pypi/pyversions/kika-nd)](https://pypi.org/project/kika-nd/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](https://github.com/juanmonleon/kika/blob/main/LICENSE)
+[![Website](https://img.shields.io/badge/website-kika--app.com-4db8eb)](https://kika-app.com/)
 
-A comprehensive Python toolkit for nuclear data analysis, Monte Carlo simulation support, and uncertainty quantification. KIKA provides tools for working with MCNP, ENDF, ACE files, covariance matrices, and sensitivity analysis.
+A comprehensive Python toolkit for nuclear data analysis, Monte Carlo simulation support, and uncertainty quantification. KIKA provides tools for working with MCNP, ENDF, ACE files, covariance matrices, and sensitivity analysis, and powers the KIKA desktop workspace.
 
-> **Looking for the desktop application?** KIKA is also available as a standalone GUI — no Python required.
-> Download the latest installer from [**kika-release**](https://github.com/juanmonleon/kika-release).
+> **Looking for the desktop application?** Visit [**kika-app.com**](https://kika-app.com/) to download KIKA for Windows, macOS, or Linux and explore the user guides. No Python installation is required.
 
 ## Features
 
@@ -26,7 +26,35 @@ A comprehensive Python toolkit for nuclear data analysis, Monte Carlo simulation
 ### Nuclear Data
 - **ACE**: Parse ACE format nuclear data files
 - **ENDF**: Read Evaluated Nuclear Data Files
+- **GNDS**: Read and write GNDS 2.0/2.1 — see *What "GNDS support" means here*
 - **Covariance**: Handle covariance matrices from SCALE and NJOY
+
+#### What "GNDS support" means here
+
+kika reads and writes GNDS. It does **not** implement GNDS 2.1, and those are
+different claims: it covers the parts the ENDF/B-VIII.1 neutron evaluations
+use. Rather than leave you to find the edge, the library states it:
+
+```python
+>>> import kika.gnds
+>>> print(kika.gnds.capabilities().summary())
+300 of GNDS's nodes: 134 full, 7 partial, 159 unsupported (17 lost without a report line); and 12 nodes kika names that gnds.xsd does not declare
+```
+
+The left-hand column is every element `gnds.xsd` and `covariances.xsd`
+declare, so a node kika does not touch is listed as unsupported rather than
+being missing from the list. Every row says why, citing a section of the
+specification or a line of the source. In short: the covariance chapter (§25)
+is complete; the thermal scattering law and the double-differential cross
+sections are not read at all.
+
+```python
+>>> print(kika.gnds.capabilities(coverage="partial").text())
+>>> print(kika.gnds.capabilities(group="thermalScattering").text())
+```
+
+`capabilities()` says what the library can lose without opening a file; the
+`report` on a suite you read says what your file lost.
 
 ### Additional Tools
 - Energy group structure definitions
@@ -123,8 +151,9 @@ covariance.
 
 ## Documentation
 
-For complete documentation, examples, and API reference, visit:
-[KIKA Documentation](https://kika.readthedocs.io/en/latest/)
+- [Desktop application and workflow guides](https://kika-app.com/docs)
+- [Python library documentation and API reference](https://kika.readthedocs.io/en/latest/)
+- [Latest desktop installers](https://kika-app.com/#downloads)
 
 ## Contributing
 

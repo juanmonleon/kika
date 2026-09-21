@@ -145,10 +145,36 @@ FACADE_IMPORTERS = {
 #: there deliberately, since the commit the app pins predates them. If the app
 #: ever calls this writer, restoring those four is a precondition, and the
 #: comment block at ``kika-api.spec:128-153`` is where that is written down.
+#: **M1 of the perturbation roadmap (2026-08-29) added the fifth.**
+#: ``kika/sampling/mf33_sampling.py`` decodes MF33 and MF31 into a
+#: ``CovarianceSuite`` in ``loadCrossSectionBlocks``, which is the model-side
+#: source the MF33/MF31 draw was missing -- the same reason as the MF35 and MF34
+#: entries above, one file later: the library's format-agnostic covariance object
+#: is the GNDS one. The import is inside the function, so ``import
+#: kika.sampling`` -- which the cluster pipeline does on every run -- still does
+#: not wake the model.
+#:
+#: **The frozen build was checked and needs nothing.** kika-api reaches
+#: ``mf33_sampling`` transitively (``routers/sampling.py`` -> ``pendf_perturbation``),
+#: but it calls **none** of the functions added by M1 -- zero grep hits for
+#: ``loadCrossSectionBlocks`` / ``load_mf33_blocks`` / ``build_mf31_blocks`` in
+#: kika-app on 2026-08-29 -- and the two modules the import pulls in have been in
+#: ``kika-api.spec``'s ``hiddenimports`` since phase 3d (spec lines 162-165)
+#: regardless. That stays true when the call sites do move: the same two entries
+#: cover it.
+#:
 PERMANENT_IMPORTERS = {
     "kika/_read.py",
     "kika/sampling/mf35_sampling.py",
     "kika/sampling/endf_perturbation.py",
+    "kika/sampling/mf33_sampling.py",
+    # The model-side pipeline. It is on this list for the same reason the three
+    # sampling modules above are -- a driver that perturbs the model has to
+    # decode a tape into it and encode sections back out -- and it costs the
+    # frozen build nothing new: `kika.endf.model_adapter` and
+    # `kika.nuclear_data.model` are already in kika-api.spec's hiddenimports
+    # (lines 198-200), and the desktop app does not call this module at all.
+    "kika/sampling/model_perturbation.py",
     "kika/endf/processing/reconstruct.py",
     "kika/endf/writers/assemble.py",
 }
@@ -173,15 +199,25 @@ def _importers(adapter: str, root: Path | None = None) -> list[str]:
         relative = path.relative_to(root)
         if "model_adapter" in relative.parts or "tests" in relative.parts:
             continue
-        tree = ast.parse(path.read_text(errors="replace"), filename=str(path))
+        # ``ALLOWED_IMPORTERS`` spells its paths with forward slashes, so the
+        # entries have to as well: ``str(WindowsPath)`` uses backslashes and
+        # every comparison against the allowlist would be a miss, which reads
+        # as "nothing imports the adapter" rather than as a broken test.
+        posix = relative.as_posix()
+        # Python source is UTF-8 by definition (PEP 3120); ``read_text`` without
+        # it uses the locale encoding, which on Windows is cp1252 and raises a
+        # SyntaxError on the first non-Latin-1 identifier in the tree.
+        tree = ast.parse(
+            path.read_text(encoding="utf-8", errors="replace"), filename=str(path)
+        )
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 if _resolves_to(node, relative, adapter):
-                    found.append(f"{relative}:{node.lineno}")
+                    found.append(f"{posix}:{node.lineno}")
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name.startswith(adapter):
-                        found.append(f"{relative}:{node.lineno}")
+                        found.append(f"{posix}:{node.lineno}")
     return found
 
 

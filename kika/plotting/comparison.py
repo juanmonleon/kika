@@ -23,16 +23,18 @@ Examples
 ...     .build())
 """
 
-from typing import Optional, Tuple, List, Literal
+from typing import Optional, Tuple, List, Literal, Union
 from dataclasses import dataclass
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from .plot_data import PlotData, DifferencePlotData
+from .plot_data import PlotData, DifferencePlotData, PlotItem
 from .plot_builder import PlotBuilder, _NOT_SET
 from .styles import (
+    Style,
+    get_style,
     _get_color_palette,
-    _apply_style_to_rcparams,
     format_energy_axis_ticks,
 )
 from ._backend_utils import (
@@ -40,6 +42,11 @@ from ._backend_utils import (
     _detect_interactive_backend,
     _configure_figure_interactivity,
 )
+
+
+def _unwrap(data):
+    """PlotItem -> its PlotData; anything else unchanged."""
+    return data.data if isinstance(data, PlotItem) else data
 
 
 # ---------------------------------------------------------------------------
@@ -342,15 +349,16 @@ class ComparisonBuilder:
 
     def __init__(
         self,
-        style: str = 'light',
+        style: Union[str, Style] = 'light',
         figsize: Tuple[float, float] = (10, 6),
         dpi: int = 100,
-        font_family: str = 'serif',
+        font_family: Optional[str] = None,
         notebook_mode: Optional[bool] = None,
         interactive: Optional[bool] = None,
         interpolation: Optional[str] = None,
         grid_strategy: Literal['reference', 'comparison', 'union'] = 'reference',
     ):
+        get_style(style)  # fail early on an unknown style name
         self._style = style
         self._figsize = figsize
         self._dpi = dpi
@@ -388,10 +396,12 @@ class ComparisonBuilder:
         self._y_lim: Optional[Tuple[float, float]] = None
         self._legend_loc: str = 'best'
         self._legend_ncol: Optional[int] = None
-        self._grid: bool = True
-        self._grid_alpha: float = 0.3
-        self._show_minor_grid: bool = False
+        self._grid: Optional[bool] = None  # None: the style decides
+        self._grid_alpha: Optional[float] = None  # None: the style's grid.alpha
+        self._show_minor_grid: Optional[bool] = None
         self._minor_grid_alpha: float = 0.15
+        self._show_minor_grid_x: Optional[bool] = None
+        self._show_minor_grid_y: Optional[bool] = None
 
         # Resonance-region group-average overlay. When set, each
         # PlotData whose metadata contains a 'group_average_overlay'
@@ -412,14 +422,14 @@ class ComparisonBuilder:
     # ---- fluent API -------------------------------------------------------
 
     def set_reference(self, data: PlotData, **styling) -> 'ComparisonBuilder':
-        """Set the reference (baseline) dataset."""
-        self._reference = data
+        """Set the reference (baseline) dataset. A PlotItem is accepted too."""
+        self._reference = _unwrap(data)
         self._reference_styling = styling
         return self
 
     def add_comparison(self, data: PlotData, **styling) -> 'ComparisonBuilder':
-        """Add a comparison dataset."""
-        self._comparisons.append((data, styling))
+        """Add a comparison dataset. A PlotItem is accepted too."""
+        self._comparisons.append((_unwrap(data), styling))
         return self
 
     def add_overlay(self, data: PlotData, **styling) -> 'ComparisonBuilder':
@@ -428,7 +438,7 @@ class ComparisonBuilder:
         Overlays are rendered on the main panel but are NOT included in
         difference computations.
         """
-        self._overlays.append((data, styling))
+        self._overlays.append((_unwrap(data), styling))
         return self
 
     def add_scatter_overlay(self, data: PlotData, **styling) -> 'ComparisonBuilder':
@@ -437,7 +447,7 @@ class ComparisonBuilder:
         Scatter overlays are rendered on the main panel AND their difference
         against the reference is shown as scatter points in the diff panel.
         """
-        self._scatter_overlays.append((data, styling))
+        self._scatter_overlays.append((_unwrap(data), styling))
         return self
 
     def set_difference_panel(
@@ -538,16 +548,25 @@ class ComparisonBuilder:
 
     def set_grid(
         self,
-        grid: bool = True,
-        alpha: float = 0.3,
-        show_minor: bool = False,
+        grid: Optional[bool] = True,
+        alpha: Optional[float] = 0.3,
+        show_minor: Optional[bool] = None,
         minor_alpha: float = 0.15,
+        show_minor_x: Optional[bool] = None,
+        show_minor_y: Optional[bool] = None,
     ) -> 'ComparisonBuilder':
-        """Configure grid display settings for reference and comparison panels."""
+        """Configure grid display settings for reference and comparison panels.
+
+        `show_minor_x` / `show_minor_y` override `show_minor` for one axis; see
+        `PlotBuilder.set_grid`. Both panels get the same grid, since they share
+        the abscissa and are read as one figure.
+        """
         self._grid = grid
         self._grid_alpha = alpha
         self._show_minor_grid = show_minor
         self._minor_grid_alpha = minor_alpha
+        self._show_minor_grid_x = show_minor if show_minor_x is None else show_minor_x
+        self._show_minor_grid_y = show_minor if show_minor_y is None else show_minor_y
         return self
 
     def set_group_average(
@@ -591,7 +610,9 @@ class ComparisonBuilder:
     # ---- interpolation inference ------------------------------------------
 
     def _infer_interpolation(self, data: PlotData) -> str:
-        """Infer interpolation method from the PlotData subclass type."""
+        """The data's own interpolation law when it states one, else a guess from its class."""
+        if getattr(data, 'interpolation', None) in ('log-log', 'lin-lin', 'log-lin', 'lin-log'):
+            return data.interpolation
         class_name = type(data).__name__
         return _INTERPOLATION_DEFAULTS.get(class_name, 'log-log')
 
@@ -814,6 +835,10 @@ class ComparisonBuilder:
                 "Call add_comparison() or add_scatter_overlay() at least once."
             )
 
+        # Everything is compared in the reference's units (a no-op for data
+        # without unit metadata)
+        self._to_reference_units()
+
         # Resolve interpolation: explicit value wins, otherwise infer
         interpolation = self._interpolation
         if interpolation is None:
@@ -841,6 +866,35 @@ class ComparisonBuilder:
             return self._build_single_panel(show)
 
     # ---- internal ---------------------------------------------------------
+
+    def _to_reference_units(self) -> None:
+        """Express comparisons and overlays in the reference's units.
+
+        Differences computed between an eV curve and an MeV one are meaningless
+        and used to be computed without complaint.
+        """
+        import warnings
+        from .units import MixedQuantityWarning, UnitError, data_to_units
+
+        ref = self._reference
+        x_unit, y_unit = getattr(ref, 'x_unit', None), getattr(ref, 'y_unit', None)
+        if not x_unit and not y_unit:
+            return
+
+        def convert(entries):
+            out = []
+            for data, styling in entries:
+                try:
+                    data = data_to_units(data, x_unit, y_unit)
+                except UnitError as exc:
+                    warnings.warn(f"{data.label or 'A curve'} left unconverted: {exc}",
+                                  MixedQuantityWarning, stacklevel=4)
+                out.append((data, styling))
+            return out
+
+        self._comparisons = convert(self._comparisons)
+        self._overlays = convert(self._overlays)
+        self._scatter_overlays = convert(self._scatter_overlays)
 
     def _resolve_diff_y_label(self) -> str:
         """Build the default y-axis label for difference panels."""
@@ -945,6 +999,8 @@ class ComparisonBuilder:
             alpha=self._grid_alpha,
             show_minor=self._show_minor_grid,
             minor_alpha=self._minor_grid_alpha,
+            show_minor_x=self._show_minor_grid_x,
+            show_minor_y=self._show_minor_grid_y,
         )
 
         fig = builder.build(show=False)
@@ -1008,6 +1064,8 @@ class ComparisonBuilder:
             alpha=self._grid_alpha,
             show_minor=self._show_minor_grid,
             minor_alpha=self._minor_grid_alpha,
+            show_minor_x=self._show_minor_grid_x,
+            show_minor_y=self._show_minor_grid_y,
         )
 
         fig = builder.build(show=False)
@@ -1031,7 +1089,28 @@ class ComparisonBuilder:
             plt.show()
         return fig
 
-    def _build_dual_panel(
+    def _dual_panel_grid(self) -> bool:
+        """Grid on/off for the dual panel, whose builders draw on axes they do not own.
+
+        Called inside the style context, so ``rcParams`` is the style's.
+        """
+        return self._grid if self._grid is not None else bool(mpl.rcParams['axes.grid'])
+
+    def _build_dual_panel(self, *args, **kwargs) -> plt.Figure:
+        """Open the style's rc context around :meth:`_draw_dual_panel`."""
+        notebook = (
+            self._notebook_mode if self._notebook_mode is not None
+            else _is_notebook()
+        )
+        with get_style(self._style).context(
+            notebook_mode=notebook,
+            figsize=self._figsize,
+            dpi=self._dpi,
+            font_family=self._font_family,
+        ):
+            return self._draw_dual_panel(*args, **kwargs)
+
+    def _draw_dual_panel(
         self, results: List[ComparisonResult], show: bool,
         interpolation: str = 'log-log',
     ) -> plt.Figure:
@@ -1045,15 +1124,7 @@ class ComparisonBuilder:
         if interactive is None and notebook:
             interactive = _detect_interactive_backend()
 
-        # Apply global style
-        _apply_style_to_rcparams(
-            style=self._style,
-            notebook_mode=notebook,
-            figsize=self._figsize,
-            dpi=self._dpi,
-            font_family=self._font_family,
-        )
-
+        # The style's rc context is opened by _build_dual_panel around this call
         fig, (ax_main, ax_diff) = plt.subplots(
             nrows=2, ncols=1,
             figsize=self._figsize,
@@ -1091,10 +1162,12 @@ class ComparisonBuilder:
         main_builder.set_limits(x_lim=self._x_lim, y_lim=self._y_lim)
         main_builder.set_legend(loc=self._legend_loc, ncol=self._legend_ncol)
         main_builder.set_grid(
-            grid=self._grid,
+            grid=self._dual_panel_grid(),
             alpha=self._grid_alpha,
             show_minor=self._show_minor_grid,
             minor_alpha=self._minor_grid_alpha,
+            show_minor_x=self._show_minor_grid_x,
+            show_minor_y=self._show_minor_grid_y,
         )
         main_builder.build()
 
@@ -1202,10 +1275,12 @@ class ComparisonBuilder:
         diff_builder.set_scales(log_x=self._use_log_x, log_y=self._diff_log_y)
         diff_builder.set_limits(x_lim=self._x_lim, y_lim=self._diff_y_lim)
         diff_builder.set_grid(
-            grid=self._grid,
+            grid=self._dual_panel_grid(),
             alpha=self._grid_alpha,
             show_minor=self._show_minor_grid,
             minor_alpha=self._minor_grid_alpha,
+            show_minor_x=self._show_minor_grid_x,
+            show_minor_y=self._show_minor_grid_y,
         )
         diff_builder.build()
 

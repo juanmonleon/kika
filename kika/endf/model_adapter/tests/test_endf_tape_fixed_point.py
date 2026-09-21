@@ -10,7 +10,8 @@ that matters: **a quantity that does not survive the trip.**
 
 Its blind spot is stated so nobody has to find it: anything the model does not
 carry is equally absent from both sides, so the comparison passes. MF5 and MF6
-are exactly that today. The fixed point is necessary and not sufficient, and the
+were exactly that until their adapters landed, and MF7 and MF12-15 still are.
+The fixed point is necessary and not sufficient, and the
 :class:`ConversionReport` is the other half — which is why
 :func:`test_the_report_names_every_file_that_did_not_survive` is here and is not
 decoration.
@@ -244,7 +245,11 @@ def test_a_tape_with_mf5_comes_back_with_it(micro_pfns_tape, tmp_path):
 
     said = "\n".join(report.losses + report.unsupported)
     assert "MF5/MT455 has no MF3/MT455 to hang from" in said
-    assert "MF5/MT455 partial 0 is stored verbatim: LF=5" in said
+    # NK=6 is §18.3's weightedFunctionals and kika has no node for it, so the
+    # whole section stays out -- said once for the section rather than once per
+    # subsection, which is what it used to be when the six LF=5 partials were
+    # undecoded and each reported itself.
+    assert "MF5/MT455 has NK=6 subsections (LF=[5,5,5,5,5,5])" in said
 
     # And nothing left over from the old regime: no message may claim MF5 is
     # undecoded, and none may send the reader to the covariance decoder for it.
@@ -269,6 +274,48 @@ def test_the_mf5_section_a_tape_gets_back_is_byte_identical(micro_pfns_tape):
                for mf, mt, section in encodeTapeSections(suite)[0] if mf == 5}
     assert set(written) == {18}
     assert str(written[18]) == str(tape.mf[5].mt[18])
+
+
+
+def test_a_tape_with_mf6_comes_back_with_all_of_it(micro_mf6_tape, tmp_path):
+    """The other half of what MF5 closed, and it closes differently.
+
+    MF5 comes back only where kika models the law: a section of analytic spectra
+    is reported and *not written*. MF6 comes back whole whatever its laws,
+    because its provenance keeps the records of a subsection that did not reach
+    a §18 node — so LAW=5 and every negative LAW ride out on the bytes they came
+    in as. What the report says about them is a statement about the *model*,
+    not about the tape.
+    """
+    before, after, report = _fixedPoint(micro_mf6_tape, tmp_path)
+    assert _walk(before.reactions) == _walk(after.reactions)
+
+    source = read_endf(str(micro_mf6_tape), mf_numbers=[6]).mf[6].mt
+    sections = {mt: section
+                for mf, mt, section in encodeTapeSections(before)[0] if mf == 6}
+    assert sorted(sections) == sorted(source)
+    for mt in sorted(source):
+        assert str(sections[mt]) == str(source[mt]), f"MT{mt}"
+
+    said = "\n".join(report.losses + report.unsupported)
+    assert "nothing decodes it into this reactionSuite" not in said
+
+
+def test_the_products_mf6_builds_survive_the_trip(micro_mf6_tape, tmp_path):
+    """A channel with twenty-one products has to come back with twenty-one.
+
+    The fixed-point walk above covers this, and it is asserted separately
+    because it is the one thing MF6 changes about the *shape* of a suite: every
+    other adapter decorates the neutron a reaction already had.
+    """
+    before, after, _report = _fixedPoint(micro_mf6_tape, tmp_path)
+    for reaction in before.reactions:
+        mt = reaction.ENDF_MT
+        mirror = after.findReactionByENDF_MT(mt)
+        assert mirror is not None, f"MT{mt} did not come back"
+        assert ([p.label for p in reaction.outputChannel.products]
+                == [p.label for p in mirror.outputChannel.products]), f"MT{mt}"
+        assert reaction.outputChannel.genre == mirror.outputChannel.genre
 
 
 def test_a_tape_with_mf32_comes_back_without_it_and_says_so(micro_mf32_tape, tmp_path):

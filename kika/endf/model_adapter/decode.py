@@ -50,6 +50,7 @@ from kika.nuclear_data.model import (
     Uncorrelated,
     XYs2d,
     crossSectionAxes,
+    pidFromZA,
 )
 
 from .resonances import decodeMF2MT151
@@ -65,8 +66,8 @@ SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35)
 #: because MF5 broke the rule the redirect loop used to assume — that
 #: "supported and not one of 1, 2, 3, 4" meant "covariance". MF5 is neither:
 #: it is reactionSuite content, and since the MF5 adapter landed it is decoded
-#: like the four. MF6 is the second of the same kind, added when its parser
-#: landed, and it is still the one waiting for an adapter.
+#: like the four. MF6 is the second of the same kind and is decoded the same
+#: way, one product at a time rather than one section.
 COVARIANCE_MF = (31, 32, 33, 34, 35)
 
 
@@ -206,7 +207,7 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
     za = _za(mt451)
     pops = PoPs()
     if za:
-        pops.add(Nuclide(id=f"ZA{za}", Z=za // 1000, A=za % 1000))
+        pops.add(Nuclide(id=pidFromZA(za), Z=za // 1000, A=za % 1000))
 
     style = Evaluated(
         label=EVAL_LABEL,
@@ -216,6 +217,32 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
     )
     return pops, style, provenance, report
 
+
+
+def _summationMTs(present) -> set:
+    """Which of *present* are §21.1 ``crossSectionSums`` rather than reactions.
+
+    **A summation MT is one the file states *and* gives the partials of.** MT1
+    is always one, because MT2 is always there. MT103 is one in an evaluation
+    that also writes MT600-649 and an ordinary reaction in one that does not --
+    the same MT number, two different things, decided by what the file carries
+    beside it. ENDF-6 does not mark them, so this is derived rather than read.
+
+    Why it matters, and it is not tidiness: §21 exists because a redundant
+    quantity has no independent content. Perturbing MT1 and MT2 as if they were
+    two reactions double-counts the elastic; re-deriving MT1 after MT2 moves is
+    the correct operation and it needs somewhere to look up "what is MT1 a sum
+    of". ``reactionByENDF_MT`` searches both containers, so nothing that asks
+    for an MT by number notices the move.
+
+    The rules are :data:`kika._constants.MF3_SUM_RULES`, shared with
+    :mod:`kika.endf.writers.redundant`, which rebuilds these same sections after
+    an edit. One table, so the two cannot disagree about what MT4 is made of.
+    """
+    from kika.endf.writers.redundant import resolve_sum_components
+
+    available = set(int(mt) for mt in present)
+    return {mt for mt in available if resolve_sum_components(mt, available)}
 
 def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     """A parsed ``ENDF`` object → a :class:`ReactionSuite`, plus the report.
@@ -251,9 +278,14 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
 
     mf3 = endf.mf.get(3) if hasattr(endf, "mf") else None
     if mf3 is not None:
-        for mt in sorted(getattr(mf3, "mt", {})):
+        present = sorted(getattr(mf3, "mt", {}))
+        redundant = _summationMTs(present)
+        for mt in present:
             reaction, report = decodeMF3MT(mf3.mt[mt], report)
-            suite.reactions.append(reaction)
+            if mt in redundant:
+                suite.sums.append(reaction)
+            else:
+                suite.reactions.append(reaction)
     else:
         report.lost("no MF3: the evaluation carries no cross sections")
 
@@ -287,6 +319,14 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         for mt in sorted(getattr(mf5, "mt", {})):
             report = _attachEnergyDistribution(suite, mf5.mt[mt], mt, report)
 
+    # After MF5, and it has to be: an MT that states MF6 with a negative LAW
+    # also states MF4 or MF5, and the deferring product must not overwrite the
+    # `uncorrelated` those two passes built.
+    mf6 = endf.mf.get(6) if hasattr(endf, "mf") else None
+    if mf6 is not None:
+        for mt in sorted(getattr(mf6, "mt", {})):
+            report = _attachEnergyAngleDistributions(suite, mf6.mt[mt], mt, report)
+
     present = set(getattr(endf, "mf", {}))
     for mf in sorted(present - set(SUPPORTED_MF)):
         report.unsupportedNode(
@@ -301,33 +341,32 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         )
 
     # MF5 is decoded above, one section at a time. What stays here is the part
-    # that is *not* about this reactionSuite: `report_gaps` names the laws
-    # `MF5PartialRaw` kept as bytes, and declaring MF5 supported without saying
-    # which laws only pass through would turn a silent skip into a silent false
-    # claim of coverage. Note what is deliberately absent: no message sends the
-    # user to `decodeCovarianceSuite` for MF5, which is what the old
-    # `- {1,2,3,4}` set did and was simply false.
+    # that is *not* about this reactionSuite: `report_gaps` names the laws the
+    # *reader* kept as bytes -- LF=12 and anything a future revision adds --
+    # and declaring MF5 supported without saying which laws only pass through
+    # would turn a silent skip into a silent false claim of coverage.
+    #
+    # This list is narrower than it used to be, and `decodeMF5MT` covers the
+    # difference. Since the reader learned LF=5/7/9/11 those laws are decoded
+    # and so are *not* gaps here, while the model still has no node for them --
+    # so the section-level decode states that loss itself rather than leaning
+    # on this pass, which would now stay quiet about it.
+    #
+    # Note what is deliberately absent: no message sends the user to
+    # `decodeCovarianceSuite` for MF5, which is what the old `- {1,2,3,4}` set
+    # did and was simply false.
     if mf5 is not None:
         for mt in sorted(getattr(mf5, "mt", {})):
             for gap in getattr(mf5.mt[mt], "report_gaps", list)():
                 report.unsupportedNode(gap)
 
-    # MF6 is the same case as MF5 and needs the same notice. Its `report_gaps`
-    # is worth reading even though every MF6 law *is* decoded: a product whose
-    # LAW is -14 or -15 defers its distribution to MF14 or MF15, and those have
-    # no parser — so the section can be read in full and still not have the
-    # distribution in hand.
-    mf6 = endf.mf.get(6) if hasattr(endf, "mf") else None
+    # MF6 needs the same `report_gaps` pass as MF5, and it is worth reading
+    # even though every MF6 law *is* parsed: a product whose LAW is -14 or -15
+    # defers its distribution to MF14 or MF15, and those have no parser — so
+    # the section can be read in full and still not have the distribution in
+    # hand. `_attachEnergyAngleDistributions` says the same thing from the
+    # model's side, per product; this says it from the file's.
     if mf6 is not None:
-        report.unsupportedNode(
-            "MF6 (product energy-angle distributions) is present and parsed by "
-            "kika, but nothing decodes it into this reactionSuite; the "
-            "distributions are absent from the products below. **The model "
-            "slots exist** since GNDS phase 7b — energyAngular, angularEnergy "
-            "and KalbachMann are exactly MF6's LAW=1/LANG=1, LAW=7 and "
-            "LAW=1/LANG=2 — so what is missing is this adapter and not a "
-            "model node. The parsed sections are reachable as endf.mf[6]."
-        )
         for mt in sorted(getattr(mf6, "mt", {})):
             for gap in getattr(mf6.mt[mt], "report_gaps", list)():
                 report.unsupportedNode(gap)
@@ -536,6 +575,110 @@ def _attachEnergyDistribution(suite: ReactionSuite, mf5mt, mt: int,
     # that tabulates P(E'|E) independently is the statement that they do not.
     channel.genre = "NBody"
     return report
+
+
+
+def _attachEnergyAngleDistributions(suite: ReactionSuite, mf6mt, mt: int,
+                                    report: ConversionReport) -> ConversionReport:
+    """Hang one MF6 section on the products of its reaction, creating them.
+
+    **This is the pass that makes an output channel more than a neutron.** MF4
+    and MF5 describe the one secondary their files are about, so both passes
+    reach for ``ensureProduct('n')``; MF6 names every product the reaction has
+    — C-12's MT5 lists twenty-one, and a Fe-56 section a hundred and two — and
+    each carries its own yield and its own law.
+
+    The provenance goes on the **reaction**, under an ``"mf6"`` key beside
+    MF3's flat fields, because MF6 is one section per MT the way MF3 is. Each
+    of its per-product records names the pid it produced, and that is what
+    :func:`~kika.endf.model_adapter.energy_angle.encodeMF6MT` looks the form up
+    by on the way out.
+    """
+    from .energy_angle import decodeMF6MT
+
+    # Decode before looking for a reaction, for the reason
+    # `_attachEnergyDistribution` gives: "can kika model these laws?" and "is
+    # there a channel to hang them on?" are independent questions, and asking
+    # them the other way round hides the first behind the second.
+    entries, provenance, report = decodeMF6MT(mf6mt, report)
+
+    reaction = suite.findReactionByENDF_MT(mt)
+    if reaction is None:
+        report.lost(
+            f"MF6/MT{mt} has no MF3/MT{mt} to hang from; GNDS attaches a "
+            f"distribution to a product of a reaction, and there is no "
+            f"reaction. The section is absent from this reactionSuite and "
+            f"from anything written back from it"
+        )
+        return report
+
+    # One reaction, one provenance. MF3's fields are flat in `headerFields`
+    # and MF6's live under their own key, so neither file decides the other's
+    # -- the same rule MF4 and MF5 follow on a product.
+    existing = getattr(reaction, "provenance", None)
+    if existing is not None and getattr(existing, "sourceFormat", None) == "endf":
+        existing.headerFields["mf6"] = provenance.headerFields["mf6"]
+    else:
+        reaction.provenance = provenance
+
+    channel = reaction.outputChannel
+    channel.genre = _channelGenre(mf6mt, mt)
+
+    for label, pid, multiplicity, distribution in entries:
+        # `ensureProduct` matches on the label, which is what lets two
+        # subsections of one section name the same particle and still get two
+        # nodes -- and what lets MF6's neutron on a fission channel be the
+        # product MF1's nu-bar already put there, since both are labelled 'n'.
+        product = channel.ensureProduct(pid, label)
+        _attachMultiplicity(product, multiplicity, label, mt, report)
+        if distribution is None:
+            continue
+        if product.distribution is None:
+            product.distribution = Distribution()
+        product.distribution[EVAL_LABEL] = distribution
+
+    return report
+
+
+def _attachMultiplicity(product, multiplicity, pid: str, mt: int,
+                        report: ConversionReport) -> None:
+    """MF6's ``y(E)`` on a product, unless another file already answered.
+
+    **The only collision is MT18's neutron, and MF1 wins it.** ``attachNubar``
+    puts the prompt nu-bar there from MF1/456, and MF6's ``y(E)`` for the same
+    product is a different quantity: ENDF/B-VIII.1's U-235 states 0.0158 at
+    thermal for the ``LAW=0`` subsection's share against a nu-bar of 2.414, and
+    the distributed GNDS file carries the 2.414. Overwriting would put the
+    share where §17.3 promises the multiplicity, which no schema can catch.
+    """
+    if getattr(product, "multiplicity", None) is None:
+        product.multiplicity = multiplicity
+        return
+    report.warn(
+        f"MT{mt}: product {pid!r} already carries a multiplicity from another "
+        f"file — MF1's nu-bar is the only case — so MF6's y(E) for it is not "
+        f"written to the model. The two are different quantities and the "
+        f"nu-bar is the one §17.3 asks for. MF6's yield is kept in the "
+        f"provenance and comes back on the tape unchanged"
+    )
+
+
+def _channelGenre(mf6mt, mt: int) -> str:
+    """§17.1.1's ``genre``, from the laws the section actually states.
+
+    ``twoBody`` says the kinematics fix E' from mu, which is true exactly when
+    every product is a two-body one — LAW=2 (angle given), LAW=3 (isotropic) or
+    LAW=4 (the recoil of one of those). Anything that tabulates an outgoing
+    energy is ``NBody``.
+
+    MT5 is neither, and GNDS has a third word for it: it is the sum of every
+    channel the evaluation did not give an MT of its own, so its products are
+    not the products of one reaction. That is what the distributed files write.
+    """
+    if mt == 5:
+        return "sumOfRemainingOutputChannels"
+    laws = {product.law for product in mf6mt.products}
+    return "twoBody" if laws and laws <= {2, 3, 4} else "NBody"
 
 
 def _angularHalf(existingForm, mt: int, report: ConversionReport):

@@ -17,7 +17,7 @@ write through ``CovarianceSuite`` — a net is worth nothing installed after the
 fall. Nothing in ``kika/cov`` was changed to add it; the seven imports it had
 then were written down as they were, which is what a ratchet is for. **Phase 4's
 P4 has since taken it to six** — see the note on ``legacy_mg_plotting.py``
-below.
+below, a file phase 7 has since deleted outright.
 
 The phase-4 wording needs one gloss. "Outside the encoders" is not a rule this
 test can express, because ``kika/cov`` is not cleanly one layer: MF34 encoding
@@ -155,6 +155,12 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds")
 #: old private name survives there as an alias for the two in-package callers.
 #: Reaching through a leading underscore into another package is the part worth
 #: recording, and it is now nobody's import.
+#:
+#: The file itself is gone as of phase 7 (September 2026). It was reachable only
+#: through ``plotting_mg.py``, the deprecation shim that ``kika/cov/multigroup/
+#: __init__.py`` star-imported, so importing the package paid for 1553 lines and
+#: a DeprecationWarning that no caller ever wanted. The note stays because the
+#: lesson above is about the shape of the import, not about the file.
 RUNTIME_ALLOWLIST: dict[str, int] = {
     "kika/cov/legendre_covariance.py": 4,
     "kika/nuclear_data/angular_distribution.py": 13,
@@ -211,7 +217,12 @@ def _is_forbidden(dotted: str) -> bool:
 
 def scan_module(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
     """Return ``(runtime, type_checking)`` forbidden imports as (line, name)."""
-    tree = ast.parse(path.read_text(), filename=str(path))
+    # `encoding="utf-8"` and not the default: on Windows the default is
+    # cp1252, and six files in the guarded packages carry a character it
+    # cannot decode. Without it this whole ratchet raises
+    # UnicodeDecodeError on that machine and stops guarding anything --
+    # which it did, red, for as long as anyone had run it there.
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     type_checking_nodes: set[int] = set()
     for node in ast.walk(tree):
@@ -255,7 +266,13 @@ def _counts(kind: int) -> dict[str, int]:
     for path in guarded_modules():
         hits = scan_module(path)[kind]
         if hits:
-            result[str(path.relative_to(REPO_ROOT))] = len(hits)
+            # `as_posix()` and not `str()`: the allowlists below are frozen
+            # counts written with forward slashes, and they are the same data on
+            # both machines. On Windows `str()` gives `kika\processing\...`,
+            # which matches no key, so every entry read as new and every
+            # allowlist entry as stale -- the ratchet failed open, loudly but
+            # for the wrong reason, and said nothing true about the layering.
+            result[path.relative_to(REPO_ROOT).as_posix()] = len(hits)
     return result
 
 
@@ -393,7 +410,12 @@ def _moduleScopeImports(path: Path, predicate=_is_forbidden) -> list[tuple[int, 
     false positive on ``kika/cov/legendre_covariance.py:13`` the moment anyone
     extended this check past ``kika/processing``. Found by trying to.
     """
-    tree = ast.parse(path.read_text(), filename=str(path))
+    # `encoding="utf-8"` and not the default: on Windows the default is
+    # cp1252, and six files in the guarded packages carry a character it
+    # cannot decode. Without it this whole ratchet raises
+    # UnicodeDecodeError on that machine and stops guarding anything --
+    # which it did, red, for as long as anyone had run it there.
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     deferred: set[int] = set()
     for node in ast.walk(tree):

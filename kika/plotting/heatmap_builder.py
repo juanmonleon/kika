@@ -13,6 +13,7 @@ import numpy as np
 import warnings
 
 from .plot_builder import PlotBuilder, _NOT_SET
+from .styles import Style, get_style, _isolated_rc
 from .plot_data import (
     HeatmapPlotData,
     CovarianceHeatmapData,
@@ -64,12 +65,12 @@ class HeatmapBuilder(PlotBuilder):
 
     def __init__(
         self,
-        style: str = 'light',
+        style: Union[str, Style] = 'light',
         figsize: Tuple[float, float] = (8, 8),
         dpi: int = 150,
         ax: Optional[plt.Axes] = None,
         projection: Optional[str] = None,
-        font_family: str = 'serif',
+        font_family: Optional[str] = None,
         notebook_mode: Optional[bool] = None,
         interactive: Optional[bool] = None,
     ):
@@ -78,8 +79,11 @@ class HeatmapBuilder(PlotBuilder):
 
         Parameters
         ----------
-        style : str
-            Plot style: 'light' (default, publication-quality) or 'dark'
+        style : str or Style
+            A registered style name, alias or :class:`~kika.plotting.Style`.
+            A heatmap keeps the style's page and colour maps but not its sizes:
+            the type scale and figure geometry are fixed (see ``_heatmap_rc``),
+            because a matrix has to stay readable at any figure size.
         figsize : tuple
             Figure size (width, height) in inches
         dpi : int
@@ -88,8 +92,8 @@ class HeatmapBuilder(PlotBuilder):
             Existing axes to plot on. If None, creates new figure and axes.
         projection : str, optional
             Projection type (e.g., '3d' for 3D plots)
-        font_family : str
-            Font family for text elements (default: 'serif')
+        font_family : str, optional
+            Font family for text elements. None (default) uses the style's font.
         notebook_mode : bool, optional
             Force notebook mode (auto-detected if None)
         interactive : bool, optional
@@ -902,15 +906,84 @@ class HeatmapBuilder(PlotBuilder):
         # If no heatmap data, fall back to parent implementation
         return super().build(show=show)
 
+    def heatmap_style(self) -> Style:
+        """The style heatmaps are drawn in: this builder's, whichever it is.
+
+        A dark style used to be swapped for its light sibling here, so every
+        heatmap came out on white. That threw away work the dark styles had
+        already done: `signature-dark`'s diverging map is centred on its own
+        navy (`#0b1d29`), i.e. built so zero correlation disappears into the
+        page rather than glowing white in the middle of it.
+        """
+        return self.style_spec
+
+    def _masked_cell_color(self) -> str:
+        """The colour of a cell with no data: just off the page, never a hole in it.
+
+        A fixed light grey read as "empty" on a white page and as a hole burnt
+        through a dark one. Blending the axes background a little way towards
+        the ink keeps the same reading — slightly apart from the page, plainly
+        not part of the colour map — in either direction.
+        """
+        style = self.heatmap_style()
+        background = mpl.colors.to_rgb(style.rc_value('axes.facecolor', 'white'))
+        ink = mpl.colors.to_rgb(style.rc_value('text.color', 'black'))
+        blended = tuple(b + (i - b) * 0.08 for b, i in zip(background, ink))
+        return mpl.colors.to_hex(blended)
+
+    def _heatmap_rc(self) -> Dict[str, Any]:
+        """rcParams for a heatmap: fixed sizes on the style's page, in the style's type."""
+        style = self.heatmap_style()
+        figsize = getattr(self, "_figsize_user", None) or self.figsize
+        dpi = getattr(self, "_dpi_user", None) or self.dpi
+        rc: Dict[str, Any] = {
+            key: value for key, value in style.rc.items()
+            if key.startswith('font.') or key == 'mathtext.fontset'
+        }
+        rc.update({
+            'font.family': self.font_family or style.font_family,
+            'font.size': 12,
+            'axes.labelsize': 14,
+            'axes.titlesize': 14,
+            'xtick.labelsize': 11,
+            'ytick.labelsize': 11,
+            'legend.fontsize': 12,
+            'figure.figsize': figsize,
+            'figure.dpi': dpi,
+            'axes.linewidth': 1.2,
+            'lines.linewidth': 2.2,
+            'lines.markersize': 7,
+            'axes.grid': False,
+            'axes.facecolor': style.rc_value('axes.facecolor'),
+            'figure.facecolor': style.rc_value('figure.facecolor'),
+            'savefig.facecolor': style.rc_value('figure.facecolor'),
+            'axes.edgecolor': style.rc_value('axes.edgecolor'),
+            'axes.labelcolor': style.rc_value('axes.labelcolor'),
+            'text.color': style.rc_value('text.color'),
+            'xtick.color': style.rc_value('xtick.color'),
+            'ytick.color': style.rc_value('ytick.color'),
+            'figure.constrained_layout.use': False,
+            'pdf.fonttype': 42,
+            'ps.fonttype': 42,
+        })
+        return rc
+
     def _build_heatmap(self) -> plt.Figure:
         """
         Internal method to render heatmap. Called by build() when heatmap data is present.
+
+        Renders inside :meth:`_heatmap_rc`; global rcParams are left untouched.
 
         Returns
         -------
         matplotlib.figure.Figure
             The completed heatmap figure
         """
+        with _isolated_rc(self._heatmap_rc()):
+            return self._render_heatmap()
+
+    def _render_heatmap(self) -> plt.Figure:
+        """Draw the heatmap. Called by :meth:`_build_heatmap` inside the heatmap rc context."""
         from .plot_data import CovarianceHeatmapData, LegendreHeatmapData, HeatmapPlotData
         from .heatmap_utils import (
             setup_energy_group_ticks,
@@ -926,30 +999,9 @@ class HeatmapBuilder(PlotBuilder):
         show_uncertainties = self._heatmap_show_uncertainties
         styling_overrides = self._heatmap_styling_overrides
 
-        # For heatmaps, use manual formatting instead of style system
-        plt.rcdefaults()
+        # Fixed heatmap formatting (see _heatmap_rc), already active here
         figsize = getattr(self, "_figsize_user", None) or self.figsize
         dpi = getattr(self, "_dpi_user", None) or self.dpi
-
-        plt.rcParams.update({
-            'font.family': self.font_family,
-            'font.size': 12,
-            'axes.labelsize': 14,
-            'axes.titlesize': 14,
-            'xtick.labelsize': 11,
-            'ytick.labelsize': 11,
-            'legend.fontsize': 12,
-            'figure.figsize': figsize,
-            'figure.dpi': dpi,
-            'axes.linewidth': 1.2,
-            'lines.linewidth': 2.2,
-            'lines.markersize': 7,
-            'axes.grid': False,
-            'axes.facecolor': 'white',
-            'figure.facecolor': 'white',
-            'savefig.facecolor': 'white',
-            'figure.constrained_layout.use': False,
-        })
 
         # Close any pre-existing figure created during __init__
         if hasattr(self, "fig") and getattr(self, "ax", None) is not None:
@@ -1049,11 +1101,21 @@ class HeatmapBuilder(PlotBuilder):
                 use_cropped_data = True
 
         # Set background color for masked regions
-        ax_heatmap.set_facecolor("#F0F0F0")
+        masked_color = self._masked_cell_color()
+        ax_heatmap.set_facecolor(masked_color)
         ax_heatmap.grid(False, which="both")
 
-        # Apply styling overrides (priority: styling_overrides > heatmap_data attributes > defaults)
-        effective_cmap = styling_overrides.get('cmap', heatmap_data.cmap)
+        # Apply styling overrides (priority: styling_overrides > heatmap_data attributes > defaults).
+        # A colour map nobody chose (auto_cmap) comes from the style: its diverging
+        # map for correlations, its sequential map otherwise. 'classic' keeps
+        # RdYlGn / viridis, the maps these classes always defaulted to.
+        effective_cmap = styling_overrides.get('cmap')
+        if not effective_cmap:
+            if heatmap_data.metadata.get('auto_cmap'):
+                kind = 'diverging' if getattr(heatmap_data, 'matrix_type', None) == 'corr' else 'sequential'
+                effective_cmap = self.heatmap_style().cmap(kind)
+            else:
+                effective_cmap = heatmap_data.cmap
         effective_norm = styling_overrides.get('norm', heatmap_data.norm)
         effective_colorbar_label = styling_overrides.get('colorbar_label', heatmap_data.colorbar_label)
 
@@ -1064,7 +1126,7 @@ class HeatmapBuilder(PlotBuilder):
             cmap = effective_cmap
 
         if hasattr(cmap, 'set_bad'):
-            cmap.set_bad(color="#F0F0F0")
+            cmap.set_bad(color=masked_color)
 
         # Handle normalization (auto-detect if not provided)
         if effective_norm is not None:

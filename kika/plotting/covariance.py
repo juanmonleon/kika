@@ -27,6 +27,7 @@ def plot_covariance_heatmap(
     figsize: Tuple[float, float] = (8, 8),
     dpi: int = 300,
     font_family: str = "serif",
+    style: str = "light",
     show_uncertainties: bool = True,
     show_energy_ticks: bool = True,
     show_block_labels: bool = True,
@@ -185,8 +186,8 @@ def plot_covariance_heatmap(
     if colorbar_label is not None:
         styling_overrides["colorbar_label"] = colorbar_label
 
-    # Create the plot using HeatmapBuilder (always use light style for heatmaps)
-    builder = HeatmapBuilder(style="light", figsize=figsize, dpi=dpi, font_family=font_family)
+    # A heatmap now keeps the style it is given, dark ones included.
+    builder = HeatmapBuilder(style=style, figsize=figsize, dpi=dpi, font_family=font_family)
 
     # Set title via set_labels() so the builder handles placement
     if title == "default":
@@ -226,6 +227,7 @@ def plot_mf34_covariance_heatmap(
     figsize: Tuple[float, float] = (8, 8),
     dpi: int = 300,
     font_family: str = "serif",
+    style: str = "light",
     show_uncertainties: bool = False,
     show_energy_ticks: bool = True,
     show_block_labels: bool = True,
@@ -391,8 +393,8 @@ def plot_mf34_covariance_heatmap(
     if colorbar_label is not None:
         styling_overrides["colorbar_label"] = colorbar_label
 
-    # Create the plot using HeatmapBuilder (always use light style for heatmaps)
-    builder = HeatmapBuilder(style="light", figsize=figsize, dpi=dpi, font_family=font_family)
+    # A heatmap now keeps the style it is given, dark ones included.
+    builder = HeatmapBuilder(style=style, figsize=figsize, dpi=dpi, font_family=font_family)
 
     # Set title via set_labels() so the builder handles placement
     if title == "default":

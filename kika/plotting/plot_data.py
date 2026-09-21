@@ -5,9 +5,85 @@ These classes encapsulate the data and basic styling information for plot elemen
 separating data representation from the actual plotting logic.
 """
 
-from typing import Optional, Dict, Any, Union, List, Tuple
+from typing import Optional, Dict, Any, Union, List, Tuple, Iterator
 import numpy as np
 from dataclasses import dataclass, field
+
+
+#: What a curve's numbers are, beyond the file they came from. Used in labels and
+#: to warn when curves that should not be compared share an axis.
+PROVENANCE_STATES = (
+    'evaluated',      # the evaluation as written (ENDF MF3 without resonances, MF4, ...)
+    'background',     # ENDF MF3 of a tape whose resonances are in MF2: not sigma(E)
+    'reconstructed',  # pointwise from the resonance parameters (PENDF, NJOY RECONR)
+    'heated',         # Doppler broadened to a temperature (ACE)
+    'projected',      # derived by projection (Legendre moments of a tabulated f(mu))
+    'multigroup',     # group-averaged
+    'measured',       # experimental (EXFOR)
+)
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """
+    Where a curve comes from and what state its numbers are in.
+
+    Every field is optional. :meth:`describe` turns it into the suffix kika puts
+    in legends, so two curves of the same reaction are told apart by what makes
+    them different (evaluation, reconstruction, temperature, projection).
+
+    Attributes
+    ----------
+    format : str, optional
+        ``'endf'``, ``'pendf'``, ``'ace'``, ``'gnds'``, ``'exfor'``, ``'covariance'``.
+    evaluation : str, optional
+        Library or experiment, e.g. ``'JEFF-4.0'``, ``'ENDF/B-VIII.1'``.
+    nuclide : str, optional
+        e.g. ``'Fe56'``.
+    reaction : int, optional
+        ENDF MT number.
+    temperature : float, optional
+        Kelvin.
+    state : str, optional
+        One of :data:`PROVENANCE_STATES`.
+    frame : str, optional
+        ``'CM'`` or ``'LAB'``, for angular quantities.
+    source : str, optional
+        File the data was read from.
+    detail : str, optional
+        Anything else a reader needs (``'folded, TOF 27 m / 5 ns'``).
+    """
+    format: Optional[str] = None
+    evaluation: Optional[str] = None
+    nuclide: Optional[str] = None
+    reaction: Optional[int] = None
+    temperature: Optional[float] = None
+    state: Optional[str] = None
+    frame: Optional[str] = None
+    source: Optional[str] = None
+    detail: Optional[str] = None
+
+    def describe(self) -> str:
+        """The part of a legend entry that says what state the data is in.
+
+        Empty for plain evaluated data, so the common case stays short.
+        """
+        parts = []
+        if self.state == 'background':
+            parts.append('MF3 background')
+        elif self.state == 'reconstructed':
+            parts.append('reconstructed')
+        elif self.state == 'projected':
+            parts.append('projected')
+        elif self.state == 'multigroup':
+            parts.append('multigroup')
+        if self.format == 'ace':
+            parts.append(f'ACE {self.temperature:.1f} K' if self.temperature else 'ACE')
+        elif self.temperature and self.state == 'heated':
+            parts.append(f'{self.temperature:.1f} K')
+        if self.detail:
+            parts.append(self.detail)
+        return ', '.join(parts)
 
 
 @dataclass
@@ -60,7 +136,16 @@ class PlotData:
     plot_type: str = 'line'
     drawstyle: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    # What the numbers mean. Keyword-only and optional, so every existing
+    # constructor call (positional ones included) keeps working. Filled in by
+    # kika.plotting.plottable(); PlotBuilder uses them for unit conversion, axis
+    # labels and mixed-quantity warnings.
+    quantity: Optional[str] = field(default=None, kw_only=True)
+    x_unit: Optional[str] = field(default=None, kw_only=True)
+    y_unit: Optional[str] = field(default=None, kw_only=True)
+    provenance: Optional[Provenance] = field(default=None, kw_only=True)
+    interpolation: Optional[str] = field(default=None, kw_only=True)
+
     def __post_init__(self):
         """Validate and convert data to numpy arrays."""
         self.x = np.asarray(self.x)
@@ -603,6 +688,9 @@ class HeatmapPlotData:
     
     def __post_init__(self):
         """Validate heatmap data."""
+        # Nobody chose a colour map: the builder may replace it with the style's.
+        if isinstance(self.cmap, str) and self.cmap == "viridis":
+            self.metadata.setdefault('auto_cmap', True)
         self.matrix_data = np.asarray(self.matrix_data)
         if self.matrix_data.ndim != 2:
             raise ValueError(f"matrix_data must be 2D array, got shape {self.matrix_data.shape}")
@@ -842,3 +930,34 @@ class LegendreHeatmapData(HeatmapPlotData):
 # Backward compatibility aliases
 MultigroupXSPlotData = MultigroupCrossSectionPlotData
 MF34HeatmapData = LegendreHeatmapData
+
+
+@dataclass
+class PlotItem:
+    """
+    What :func:`kika.plotting.plottable` returns: a curve and its uncertainty.
+
+    Always this shape, whatever the source, so a caller never special-cases
+    tuples, lists or ``None``. It unpacks like the ``(data, band)`` tuples the
+    older ``to_plot_data`` methods return, and ``PlotBuilder.add_data`` takes it
+    directly.
+
+    Attributes
+    ----------
+    data : PlotData
+        The curve, in canonical units (eV, barn, b/sr), with ``quantity``,
+        ``x_unit``, ``y_unit`` and ``provenance`` filled in.
+    band : UncertaintyBand, optional
+        Its uncertainty: a relative band for evaluated data, error bars for
+        measurements. ``None`` when the source carries none.
+    """
+    data: PlotData
+    band: Optional[UncertaintyBand] = None
+
+    def __iter__(self) -> Iterator[Any]:
+        yield self.data
+        yield self.band
+
+    @property
+    def label(self) -> Optional[str]:
+        return self.data.label
