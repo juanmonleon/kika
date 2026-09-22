@@ -25,6 +25,11 @@ _LAZY = {
     'write': '_write',
 }
 
+#: Subpackages resolved on first attribute access, so that ``import kika``
+#: followed by ``kika.sinbad.read(...)`` works without every consumer of the
+#: library paying for the import. See __getattr__.
+_LAZY_SUBPACKAGES = ('sinbad',)
+
 
 def __getattr__(name):
     """PEP 562. ``kika.read`` resolves on first access, never on import.
@@ -45,16 +50,21 @@ def __getattr__(name):
     ``kika/nuclear_data/__init__.py`` uses the same mechanism for the same
     reason. ``kika.nuclear_data.model.tests.test_dormancy`` is the test.
     """
+    import importlib
     if name in _LAZY:
-        import importlib
         return getattr(importlib.import_module(f'.{_LAZY[name]}', __name__), name)
+    if name in _LAZY_SUBPACKAGES:
+        # ``import kika.sinbad`` has always worked; this is so that a plain
+        # ``import kika`` reaches it too, which is how anyone who does not
+        # already know the subpackage exists will look for it.
+        return importlib.import_module(f'.{name}', __name__)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __dir__():
     # Without this, the lazy names are invisible to tab-completion and dir() —
     # PEP 562 __getattr__ is consulted on access, never on enumeration.
-    return sorted(set(globals()) | set(_LAZY))
+    return sorted(set(globals()) | set(_LAZY) | set(_LAZY_SUBPACKAGES))
 
 
 __all__ = [

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Calculations of the mini fixture, draft format v0.3.
+
+  The checksum below is deliberately wrong, so that matches_benchmark is False as shipped; a
+  test rewrites it with the real sha1 in a temporary directory and checks the other branch.
+
+  The C/E are exact: the measured Al27 table is stored asMeasured and the comparison declares
+  backgroundSubtracted, so the denominator is the measured value times 0.98, and the calculated
+  values are 1.00 / 0.90 / 0.80 of it. Any reader that forgets the correction gets 0.98 of them.
+-->
+<sinbadCalculations formatVersion="0.3" label="lab-code-1.0">
+
+  <benchmark id="TST-ATN-BLK-STR-SUR-001-R" shortCode="mini" file="../mini.xml"
+             checksum="0000000000000000000000000000000000000000" algorithm="sha1"/>
+
+  <documentation>
+    <authors>
+      <author name="C. Computer"><affiliations><affiliation name="Nowhere"/></affiliations></author>
+    </authors>
+    <dates>
+      <date dateType="issued" value="2026" event="fixture"/>
+    </dates>
+    <title>Calculations of the mini fixture with CODE 1.0</title>
+    <computerCodes>
+      <computerCode label="CODE" name="CODE" version="1.0"><note>invented</note></computerCode>
+    </computerCodes>
+    <bibliography>
+      <bibitem xref="1">C. Computer, Calculations of the Mini Fixture, Report None (2026).</bibitem>
+    </bibliography>
+  </documentation>
+
+  <externalFiles>
+    <externalFile label="file-deck" path="00_Report/deck.inp"
+                  checksum="2222222222222222222222222222222222222222" algorithm="sha1"
+                  role="inputDeck" format="text"/>
+  </externalFiles>
+
+  <definitions>
+    <normalisation label="unitIntegral" basis="sum over all groups equal to 1" provenance="reported"/>
+  </definitions>
+
+  <issues>
+    <issue label="F2" kind="unit" about="groupStructure-MINI3">The report heads the column MeV; the values are eV.</issue>
+  </issues>
+
+  <calculation label="calc-libA" code="CODE" library="LIBA.PROCESSED" evaluatedLibrary="LIB-A"
+               options="invented" sourceDistribution="sourceDistribution-xy" xref="1">
+    <inputFile ref="file-deck"/>
+    <outputFile status="not distributed"/>
+  </calculation>
+
+  <calculation label="calc-libB" code="CODE" library="LIBB.PROCESSED" evaluatedLibrary="LIB-B"
+               options="invented" sourceDistribution="sourceDistribution-xy" xref="1">
+    <inputFile ref="file-deck"/>
+    <outputFile status="not distributed"/>
+  </calculation>
+
+  <dataObjects>
+
+    <dataObject label="groupStructure-MINI3" quantity="energy group structure" nature="evaluated"
+                unitProvenance="inferred" source="invented TAB. 1">
+      <grid index="1" label="energy" unit="eV" style="boundaries">
+        <values>1.0E+07 1.0E+06 1.0E+05 1.0E+04</values>
+      </grid>
+    </dataObject>
+
+    <dataObject label="response-Al27" quantity="detector response function" nature="evaluated"
+                library="LIBA.PROCESSED" reaction="Al27(n,a)Na24" source="invented TAB. 2">
+      <gridded1d>
+        <axes>
+          <grid index="1" label="energy" unit="eV" style="boundaries">
+            <link href="//*[@label='groupStructure-MINI3']/grid/values"/>
+          </grid>
+          <axis index="0" label="crossSection" unit="b"/>
+        </axes>
+        <array shape="3">
+          <values>1.0E-01 1.0E-03 0.0E+00</values>
+        </array>
+      </gridded1d>
+    </dataObject>
+
+    <dataObject label="selfShieldingFactors" quantity="correction factor" nature="evaluated"
+                source="invented TAB. 3">
+      <table rows="3" columns="2">
+        <columnHeaders>
+          <column index="0" name="shieldThickness" unit="cm" role="independent"/>
+          <column index="1" name="factor" unit=""/>
+        </columnHeaders>
+        <data>
+          0.00 0.990
+          5.00 0.985
+          10.00 0.980
+        </data>
+      </table>
+    </dataObject>
+
+    <dataObject label="calculated-Al27" quantity="reaction rate" nature="calculated"
+                normalisation="power30kW" convention="backgroundSubtracted"
+                reaction="Al27(n,a)Na24" source="invented TAB. 4">
+      <table rows="3" columns="4">
+        <columnHeaders>
+          <column index="0" name="position" unit="" types="UTF8Text" role="independent"/>
+          <column index="1" name="shieldThickness" unit="cm" role="independent"/>
+          <column index="2" name="reactionRate-LIBA" unit="1/s" calculatedBy="calc-libA" responseFunction="response-Al27"/>
+          <column index="3" name="reactionRate-LIBB" unit="1/s" calculatedBy="calc-libB" responseFunction="response-Al27"/>
+        </columnHeaders>
+        <data sep="tr">
+          <tr sep="td"><td>A1</td><td>0.00</td><td>9.800E-21</td><td>4.900E-21</td></tr>
+          <tr sep="td"><td>A2</td><td>5.00</td><td>1.764E-21</td><td>8.820E-22</td></tr>
+          <tr sep="td"><td>A3</td><td>10.00</td><td>2.352E-22</td><td>1.176E-22</td></tr>
+        </data>
+      </table>
+    </dataObject>
+
+  </dataObjects>
+
+  <comparisons>
+    <comparison label="CE-Al27" operator="ratio" numerator="calculated-Al27"
+                denominator="reactionRate-Al27" convention="backgroundSubtracted"
+                source="invented TAB. 5">
+      <table rows="3" columns="4">
+        <columnHeaders>
+          <column index="0" name="position" unit="" types="UTF8Text" role="independent"/>
+          <column index="1" name="shieldThickness" unit="cm" role="independent"/>
+          <column index="2" name="CE-LIBA" unit="" calculatedBy="calc-libA"/>
+          <column index="3" name="CE-LIBB" unit="" calculatedBy="calc-libB"/>
+        </columnHeaders>
+        <data sep="tr">
+          <tr sep="td"><td>A1</td><td>0.00</td><td>1.00</td><td>0.50</td></tr>
+          <tr sep="td"><td>A2</td><td>5.00</td><td>0.90</td><td>0.45</td></tr>
+          <tr sep="td"><td>A3</td><td>10.00</td><td>0.80</td><td>0.40</td></tr>
+        </data>
+      </table>
+    </comparison>
+  </comparisons>
+
+</sinbadCalculations>
