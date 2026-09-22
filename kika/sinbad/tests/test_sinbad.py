@@ -32,6 +32,7 @@ import pytest
 import kika.sinbad as sinbad
 from kika.sinbad.exceptions import (
     AmbiguousLabelError,
+    BenchmarkMismatchError,
     ContentTypeError,
     LabelNotFoundError,
     SinbadError,
@@ -563,3 +564,83 @@ def test_the_subpackage_is_reachable_from_a_plain_import_kika():
         [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_a_typed_column_that_is_not_text_is_still_read_as_numbers():
+    """§5.4.3 ``types`` names a type; only the text ones are text.
+
+    Reading every typed column as text turns ``types="Integer32"`` into a
+    column of strings, and every arithmetic on it into a TypeError far from
+    here.
+    """
+    import xml.etree.ElementTree as ET
+
+    from kika.sinbad.content import Table
+
+    table = Table(ET.fromstring(
+        '<table rows="1" columns="3">'
+        '  <columnHeaders>'
+        '    <column index="0" name="position" role="independent" types="UTF8Text"/>'
+        '    <column index="1" name="group" role="independent" types="Integer32"/>'
+        '    <column index="2" name="rate" unit="1/s" role="value"/>'
+        '  </columnHeaders>'
+        '  <data sep="tr"><tr sep="td"><td>A2</td><td>7</td><td>1.5</td></tr></data>'
+        '</table>'
+    ))
+    assert table.column("position").is_text is True
+    assert table["position"][0] == "A2"
+    assert table.column("group").is_text is False
+    assert table["group"][0] == pytest.approx(7.0)
+    assert table.column("rate").types is None
+
+
+def test_the_covariance_is_built_by_component_not_cell_by_cell(b):
+    """The rule is a sum of masked outer products, and it must stay symmetric.
+
+    The cell-by-cell form read the correlation scope off the left-hand point
+    only, so a file that gave one component two scopes produced a matrix that
+    disagreed with its own transpose.
+    """
+    matrix, index = b.covariance()
+    assert np.array_equal(matrix, matrix.T)
+    relative, _ = b.covariance(relative=True)
+    assert np.array_equal(relative, relative.T)
+    assert len(index) == matrix.shape[0]
+
+
+def test_check_reports_the_calculations_not_the_file_against_itself(b):
+    """``check()`` holds statements that can fail.
+
+    The benchmark's own sha1 compared with itself was a row that read ``ok``
+    whatever was wrong with the entry; it is :attr:`checksum` now.
+    """
+    frame = b.check()
+    assert list(frame["what"].unique()) == ["calculations -> benchmark sha1"]
+    assert len(frame) == len(b.calculations)
+    assert b.checksum == b.document.checksum()
+
+    alone = sinbad.read(BENCHMARK, calculations=False)
+    assert alone.check().empty
+    assert list(alone.check().columns) == ["what", "name", "expected", "found", "ok"]
+
+
+def test_a_calculations_file_of_another_entry_is_refused(b, tmp_path):
+    """A changed sha1 is a warning; a different entry is not.
+
+    The labels a calculations file borrows would resolve against a benchmark
+    it was never written for. One identifier disagreeing is a name that has
+    moved on and is tolerated; every one of them disagreeing is a different
+    entry, and is refused.
+    """
+    copy = tmp_path / "mini"
+    shutil.copytree(DATA, copy)
+    path = copy / "calculations" / "lab-code-1.0.xml"
+
+    # one identifier out of step is a stale name, and still opens
+    path.write_text(path.read_text().replace('shortCode="mini"', 'shortCode="other"'))
+    assert sinbad.read(copy / "mini.xml").calculations["lab-code-1.0"] is not None
+
+    # both out of step is another entry, and does not
+    path.write_text(path.read_text().replace(b.id, "TST-OTHER-001-R"))
+    with pytest.raises(BenchmarkMismatchError, match="not of"):
+        sinbad.read(copy / "mini.xml")

@@ -51,6 +51,7 @@ from kika.sinbad.entry import (
 )
 from kika.sinbad.exceptions import (
     AmbiguousLabelError,
+    BenchmarkMismatchError,
     LabelNotFoundError,
     SinbadError,
     SinbadFormatError,
@@ -402,36 +403,49 @@ class SinbadBenchmark(_Blocks):
 
     # -- what the file says about itself ----------------------------------
 
+    @property
+    def checksum(self) -> str:
+        """The sha1 of the benchmark file -- what a calculations file cites."""
+        return self.document.checksum()
+
     def check(self):
         """
         Collect what can be checked without opening the entry repository.
 
+        One row per statement a *calculations* file makes about this benchmark
+        -- today the sha1 it was written against. The benchmark file says
+        nothing checkable about itself: its own sha1 is
+        :attr:`checksum`, and comparing it with itself would be a row that
+        reads ``ok`` whatever is wrong.
+
         Returns
         -------
         pandas.DataFrame
-            One row per statement the files make about themselves: the sha1
-            each calculations file records for this benchmark, and whether it
-            still holds.
+            Empty when no calculations file was opened -- there is then
+            nothing to check, which is not the same as everything being well.
+
+        Examples
+        --------
+        >>> b.check()                                    # doctest: +SKIP
+        >>> b.check()["ok"].all()                        # doctest: +SKIP
+        True
         """
         import pandas as pd  # noqa: PLC0415
 
-        digest = self.document.checksum()
-        rows = [{
-            "what": "benchmark file",
-            "name": self.document.path.name,
-            "expected": digest,
-            "found": digest,
-            "ok": True,
-        }]
-        for calculations in self._calculations:
-            rows.append({
+        digest = self.checksum
+        rows = [
+            {
                 "what": "calculations -> benchmark sha1",
                 "name": calculations.label,
                 "expected": calculations.benchmark_checksum,
                 "found": digest,
                 "ok": calculations.matches_benchmark,
-            })
-        return pd.DataFrame(rows)
+            }
+            for calculations in self._calculations
+        ]
+        return pd.DataFrame(
+            rows, columns=["what", "name", "expected", "found", "ok"]
+        )
 
     def verify_files(self, entry_root: Optional[Union[str, Path]] = None):
         """
@@ -576,6 +590,7 @@ class Calculations(_Blocks):
         self.benchmark_checksum: Optional[str] = (
             reference.get("checksum") if reference is not None else None
         )
+        self._check_it_is_this_benchmark()
 
         self._read_common(self.document, self.index)
         self.issues: Tuple[Issue, ...] = tuple(
@@ -593,6 +608,32 @@ class Calculations(_Blocks):
         )
 
     # -- the tie to the benchmark -----------------------------------------
+
+    def _check_it_is_this_benchmark(self) -> None:
+        """Refuse a calculations file that names a different entry.
+
+        A *changed* sha1 is a warning -- the numbers are still readable and the
+        answer may be that nothing relevant moved. A different ``id`` or
+        ``shortCode`` is not: the labels this file borrows would resolve
+        against an entry it was never written for, and a C/E would silently
+        divide by the wrong table.
+        """
+        declared = [
+            (name, said, mine)
+            for name, said, mine in (
+                ("id", self.benchmark_id, self.benchmark.id),
+                ("shortCode", self.benchmark_short_code, self.benchmark.short_code),
+            )
+            if said and mine
+        ]
+        wrong = [(name, said, mine) for name, said, mine in declared if said != mine]
+        if wrong and len(wrong) == len(declared):
+            name, said, mine = wrong[0]
+            raise BenchmarkMismatchError(
+                f"{self.document.path.name} is a calculations file of "
+                f"{name} {said!r}, not of {mine!r}; move it out of "
+                f"{CALCULATIONS_DIRNAME}/ or open it with its own benchmark"
+            )
 
     @property
     def matches_benchmark(self) -> bool:

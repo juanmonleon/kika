@@ -488,20 +488,51 @@ def covariance(objects: Sequence, relative: bool = False) -> Tuple[np.ndarray, L
     points = _points(objects)
     size = len(points)
     matrix = np.zeros((size, size))
-    for i, left in enumerate(points):
-        for j, right in enumerate(points):
-            total = 0.0
-            for name, (ri, key) in left.components.items():
-                if name not in right.components:
-                    continue
-                rj, key_right = right.components[name]
-                if i == j:
-                    total += ri * rj
-                elif key is None or key_right is None:
-                    continue
-                elif "*" in key or (key & key_right):
-                    total += ri * rj
-            matrix[i, j] = total
+
+    # One outer product per component, not one sum per cell: the rule is
+    # cov = sum_c r_c r_c^T masked by what c correlates, and N**2 Python
+    # iterations is a cliff an entry with a few thousand points would fall off.
+    names: List[str] = []
+    for point in points:
+        for name in point.components:
+            if name not in names:
+                names.append(name)
+
+    for name in names:
+        sizes = np.zeros(size)
+        keys: List[Optional[frozenset]] = [None] * size
+        present = np.zeros(size, dtype=bool)
+        for i, point in enumerate(points):
+            entry = point.components.get(name)
+            if entry is None:
+                continue
+            sizes[i], keys[i] = entry
+            present[i] = True
+        if not present.any():
+            continue
+
+        shared = np.outer(present, present)
+        # ``none`` contributes on the diagonal only, so its key is None and it
+        # never enters the membership matrix; every other scope correlates two
+        # points whose refs intersect, and a scope that reaches the whole entry
+        # says so with the single ref "*", which every point then shares. Set
+        # intersection is a boolean matrix product, which is what keeps this
+        # off a second N**2 loop in Python -- and it is symmetric by
+        # construction, so a file that gives one component two different scopes
+        # cannot produce a covariance that disagrees with its own transpose.
+        refs: Dict[str, int] = {}
+        for key in keys:
+            for ref in key or ():
+                refs.setdefault(ref, len(refs))
+        membership = np.zeros((size, len(refs)), dtype=bool)
+        for i, key in enumerate(keys):
+            if present[i] and key:
+                membership[i, [refs[ref] for ref in key]] = True
+        reaches = membership.astype(np.uint8) @ membership.astype(np.uint8).T > 0
+        np.fill_diagonal(reaches, True)
+
+        matrix += np.outer(sizes, sizes) * (shared & reaches)
+
     if not relative:
         scale = np.array([p.value for p in points])
         matrix = matrix * np.outer(scale, scale)

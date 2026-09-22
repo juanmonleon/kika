@@ -352,8 +352,13 @@ class Column:
         For an uncertainty column: ``component`` or ``total``.
     confidence_level : str or None
         As published, e.g. ``"1 s.d."``.
+    types : str or None
+        GNDS §5.4.3, as written: ``UTF8Text``, ``Integer32``, ...
     is_text : bool
-        True when the column carries text (``types="UTF8Text"``).
+        True when :attr:`types` says the cells are text. Any other declared
+        type is still read as a number -- ``types="Integer32"`` is a column of
+        numbers, and treating every typed column as text would turn one into
+        strings.
     calculated_by : str or None
         Label of the calculation that produced it.
     response_function : str or None
@@ -366,9 +371,17 @@ class Column:
     role: str = "value"
     kind: Optional[str] = None
     confidence_level: Optional[str] = None
-    is_text: bool = False
+    types: Optional[str] = None
     calculated_by: Optional[str] = None
     response_function: Optional[str] = None
+
+    #: The GNDS type names whose cells are text rather than numbers.
+    TEXT_TYPES = frozenset({"utf8text", "string", "text"})
+
+    @property
+    def is_text(self) -> bool:
+        """Whether the cells of this column are text."""
+        return (self.types or "").strip().lower() in self.TEXT_TYPES
 
     @classmethod
     def _read(cls, element: ET.Element) -> "Column":
@@ -379,7 +392,7 @@ class Column:
             role=element.get("role", "value"),
             kind=element.get("kind"),
             confidence_level=element.get("confidenceLevel"),
-            is_text=bool(element.get("types")),
+            types=element.get("types"),
             calculated_by=element.get("calculatedBy"),
             response_function=element.get("responseFunction"),
         )
