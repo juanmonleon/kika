@@ -17,6 +17,7 @@ from kika.utils.numerics import (
     average_over_intervals,
     fold_tabulated,
     gauss_hermite_nodes,
+    gaussian_fold_nodes,
 )
 from kika.utils.energy_folding import tof_energy_resolution
 
@@ -171,3 +172,38 @@ def test_all_entry_points_agree():
 
 def test_zero_energy_is_zero():
     assert tof_energy_resolution(0.0, flight_path_m=27.0, delta_t_ns=5.0) == 0.0
+
+
+# ─── The grid fold (default since 2026-09-24) ───────────────────────────────
+
+def test_grid_fold_resolves_structure_gauss_hermite_misses():
+    """A table with structure finer than the kernel: the grid rule gets its
+    average, twelve Gauss-Hermite nodes do not."""
+    rng = np.random.default_rng(11)
+    x = np.sort(rng.uniform(0.9e6, 1.1e6, 4000))
+    y = 0.5 + 7.5 * rng.random(x.size)
+    x0, s = 1.0e6, 2.2e3
+    d = np.linspace(x0 - 7 * s, x0 + 7 * s, 400001)
+    g = np.exp(-0.5 * ((d - x0) / s) ** 2)
+    exact = (np.interp(d, x, y) @ g) / g.sum()
+
+    assert fold_tabulated(x, y, x0, s) == pytest.approx(exact, rel=2e-3)
+    gh = fold_tabulated(x, y, x0, s, method="gauss-hermite")
+    assert abs(gh / exact - 1) > 5 * abs(fold_tabulated(x, y, x0, s) / exact - 1)
+
+
+def test_grid_fold_nodes_include_the_table_and_normalise():
+    x = np.linspace(0.0, 10.0, 1001)
+    nodes, w = gaussian_fold_nodes(5.0, 0.3, [x])
+    assert w.sum() == pytest.approx(1.0)
+    inside = x[np.abs(x - 5.0) < 1.5]
+    assert np.isin(inside, nodes).all()
+    assert gaussian_fold_nodes(5.0, 0.0, [x])[0].tolist() == [5.0]
+
+
+def test_gauss_hermite_is_still_there_to_reproduce_old_results():
+    x = np.linspace(0.0, 10.0, 101)
+    y = x ** 2
+    assert fold_tabulated(x, y, 5.0, 1.0, method="gauss-hermite") != fold_tabulated(x, y, 5.0, 1.0)
+    with pytest.raises(ValueError):
+        fold_tabulated(x, y, 5.0, 1.0, method="simpson")

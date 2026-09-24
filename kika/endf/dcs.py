@@ -35,7 +35,7 @@ import numpy as np
 from kika._constants import FWHM_TO_SIGMA, NEUTRON_MASS_AMU
 from kika.processing.interpolation import interpolate_1d
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import fold_tabulated
+from kika.utils.numerics import fold_tabulated, gaussian_fold_nodes
 
 __all__ = [
     "TofResolution",
@@ -62,6 +62,8 @@ __all__ = [
     "coefficients_bin_averaged",
     "coefficients_folded",
     "resolve_coefficients",
+    "resolution_fold_nodes",
+    "coefficients_sigma_weighted_folded",
     "differential_xs_factor",
     "differential_xs_vs_angle",
     "differential_xs_vs_energy",
@@ -491,8 +493,9 @@ def sigma_folded(xs_energies_ev, xs_values, energy_ev, tof: TofResolution):
     r"""TOF-resolution-folded :math:`\sigma(E)`.
 
     Averages :math:`\sigma` over a Gaussian kernel
-    :math:`N(E_0, \sigma_E^2)` by Gauss-Hermite quadrature
-    (:func:`kika.utils.numerics.fold_tabulated`), with :math:`\sigma_E` from
+    :math:`N(E_0, \sigma_E^2)` on the table's own points inside the window
+    (:func:`kika.utils.numerics.fold_tabulated`, 12-node Gauss-Hermite before
+    September 2026), with :math:`\sigma_E` from
     ``tof``.  Vectorized over ``energy_ev``.
 
     Note the folding samples :math:`\sigma` **linearly** (``numpy.interp``
@@ -782,7 +785,7 @@ def coefficients_folded(
 
     The angular counterpart of :func:`sigma_folded`: each coefficient is
     averaged over the same Gaussian energy-resolution kernel, on the same
-    Gauss-Hermite quadrature.
+    quadrature (the MF4 grid's own points inside the window).
 
     Why this exists.  Folding only :math:`\sigma` gives
     :math:`\langle\sigma\rangle\,f(\mu, E)` — the measured normalization with
@@ -888,6 +891,90 @@ def resolve_coefficients(
         energies_ev, coefficients, query_ev,
         nbt_int_pairs=nbt_int_pairs, max_order=max_order,
     )
+
+
+# =============================================================================
+# The sigma-weighted fold
+# =============================================================================
+
+def resolution_fold_nodes(
+    energy_ev: float,
+    sigma_e_ev: float,
+    grids: Sequence[Sequence[float]],
+) -> Tuple[np.ndarray, np.ndarray]:
+    r"""Quadrature nodes and weights for a Gaussian fold over tabulated data.
+
+    :func:`kika.utils.numerics.gaussian_fold_nodes` in eV: every point of every
+    grid inside :math:`E_0 \pm 5\sigma_E`, the window edges and 101 uniform
+    points, weighted by the Gaussian times the trapezoid rule.  The same rule
+    :func:`sigma_folded` and :func:`coefficients_folded` now use through
+    :func:`~kika.utils.numerics.fold_tabulated`.
+    """
+    return gaussian_fold_nodes(energy_ev, sigma_e_ev, grids)
+
+
+def coefficients_sigma_weighted_folded(
+    energies_ev,
+    coefficients,
+    xs_energies_ev,
+    xs_values,
+    energy_ev: float,
+    tof: TofResolution,
+    *,
+    nbt_int_pairs=None,
+    max_order: Optional[int] = None,
+) -> Tuple[np.ndarray, float]:
+    r"""What a resolution-limited measurement of :math:`d\sigma/d\Omega` sees.
+
+    A detector at nominal :math:`E_0` counts
+
+    .. math::
+        \left\langle\frac{d\sigma}{d\Omega}\right\rangle(\mu, E_0)
+        = \frac{1}{2\pi}\int R(E; E_0)\,\sigma(E)\,f(\mu, E)\,dE
+        = \frac{\langle\sigma\rangle}{2\pi}\,f_\mathrm{eff}(\mu, E_0),
+
+    and because :math:`f` is linear in the :math:`a_\ell`, the effective shape
+    is a Legendre series with the **sigma-weighted** mean coefficients
+
+    .. math::
+        a_\ell^\mathrm{eff}(E_0) = \frac{\langle\sigma\,a_\ell\rangle}{\langle\sigma\rangle}.
+
+    This is the product fold.  :func:`resolve_coefficients` deliberately does
+    not do it -- its ``folded`` mode averages :math:`a_\ell` unweighted, the
+    factor average the chi-square scripts are built on -- so this is a separate
+    function and not a fourth mode there.  The two agree where :math:`\sigma`
+    is flat across the window and part where it is not, which above the
+    resolved range of a structural material is almost everywhere below a few
+    MeV: the counts come from the energies where :math:`\sigma` is large.
+
+    :math:`\sigma(E)` is sampled linearly between its table points, as in
+    :func:`sigma_folded`, and :math:`a_\ell(E)` under the MF4 law, as in
+    :func:`coefficients_at_energies`.  The quadrature is
+    :func:`resolution_fold_nodes` on the union of both grids.
+
+    Returns
+    -------
+    (np.ndarray, float)
+        :math:`a_1^\mathrm{eff} \ldots a_L^\mathrm{eff}` and :math:`\langle\sigma\rangle`
+        in barns.
+    """
+    grid = np.asarray(energies_ev, dtype=float)
+    xs_grid = np.asarray(xs_energies_ev, dtype=float)
+    xs = np.asarray(xs_values, dtype=float)
+
+    sigma_e_ev = float(tof.sigma_e_mev(float(energy_ev) / 1e6)) * 1e6
+    nodes, weights = resolution_fold_nodes(energy_ev, sigma_e_ev, [xs_grid, grid])
+
+    sigma_at = np.interp(nodes, xs_grid, xs)
+    a_at = coefficients_at_energies(
+        grid, coefficients, nodes, nbt_int_pairs=nbt_int_pairs, max_order=max_order,
+    )
+    sigma_avg = float(np.sum(weights * sigma_at))
+    if not (sigma_avg > 0):
+        # No counts anywhere in the window: the shape is undefined, and the
+        # unweighted mean is the only answer that is not a division by zero.
+        return a_at @ weights, sigma_avg
+    return (a_at @ (weights * sigma_at)) / sigma_avg, sigma_avg
 
 
 def differential_xs_factor(sigma, per_steradian: bool):

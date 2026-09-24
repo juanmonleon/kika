@@ -635,13 +635,20 @@ def _smooth_coefficients(n=600):
 
 
 def test_coefficients_folded_is_exact_on_a_linear_coefficient():
-    """Folding a linear function returns its value at the kernel centroid."""
+    """Folding a linear function returns its value at the kernel centroid.
+
+    To 1e-6 and not to machine precision: the fold is a trapezoid rule on the
+    table's own points (Gauss-Hermite, exact here, until September 2026), and
+    unevenly spaced nodes leave the Gaussian's curvature inside an interval,
+    ~1e-7 of the value. That is the price of a rule that does not miss the
+    structure of a real cross section by tens of percent.
+    """
     energies = np.linspace(1e5, 1e7, 400)
     coefficients = np.vstack([2.0 + 3e-7 * energies])
     got = dcs.coefficients_folded(
         energies, coefficients, np.array([5e6]), dcs.TofResolution()
     )
-    assert got[0, 0] == pytest.approx(2.0 + 3e-7 * 5e6, rel=1e-9)
+    assert got[0, 0] == pytest.approx(2.0 + 3e-7 * 5e6, rel=1e-6)
 
 
 def test_coefficients_folded_returns_a_constant_unchanged():
@@ -722,3 +729,74 @@ def test_the_four_readings_are_independent():
     assert cases["both"] == pytest.approx(
         cases["sigma_only"] * cases["shape_only"] / cases["nominal"]
     )
+
+
+# ─── The sigma-weighted fold ────────────────────────────────────────────────
+
+class TestSigmaWeightedFold:
+    """:func:`dcs.coefficients_sigma_weighted_folded` against closed forms."""
+
+    TOF = dcs.TofResolution(flight_path_m=27.037, delta_t_ns=5.0)
+    E0 = 1.3e6
+
+    def _grid(self):
+        return np.linspace(1.2e6, 1.4e6, 401)
+
+    def test_weights_are_a_normalised_gaussian(self):
+        s = 3.0e3
+        nodes, w = dcs.resolution_fold_nodes(self.E0, s, [self._grid()])
+        assert w.sum() == pytest.approx(1.0)
+        assert nodes @ w == pytest.approx(self.E0, rel=1e-9)
+        assert np.sqrt(((nodes - self.E0) ** 2) @ w) == pytest.approx(s, rel=1e-3)
+
+    def test_every_data_point_in_the_window_is_a_node(self):
+        grid = self._grid()
+        s = 3.0e3
+        nodes, _ = dcs.resolution_fold_nodes(self.E0, s, [grid])
+        inside = grid[np.abs(grid - self.E0) < 5 * s]
+        assert np.isin(inside, nodes).all()
+
+    def test_delta_kernel_is_one_node(self):
+        nodes, w = dcs.resolution_fold_nodes(self.E0, 0.0, [self._grid()])
+        assert nodes.tolist() == [self.E0] and w.tolist() == [1.0]
+
+    def test_flat_sigma_reduces_to_the_unweighted_fold(self):
+        grid = self._grid()
+        a1 = 0.1 + 0.3 * np.sin((grid - grid[0]) / 5e3)
+        a_eff, s_avg = dcs.coefficients_sigma_weighted_folded(
+            grid, {1: a1}, grid, np.full_like(grid, 2.5), self.E0, self.TOF,
+        )
+        nodes, w = dcs.resolution_fold_nodes(
+            self.E0, self.TOF.sigma_e_mev(self.E0 / 1e6) * 1e6, [grid, grid],
+        )
+        assert s_avg == pytest.approx(2.5)
+        assert a_eff[0] == pytest.approx(np.interp(nodes, grid, a1) @ w, rel=1e-12)
+
+    def test_the_shape_follows_the_counts(self):
+        # sigma is a narrow spike where a_1 = +0.8, flat and small elsewhere
+        # where a_1 = -0.8: almost every count comes from the spike, so the
+        # measured shape is the spike's.
+        grid = self._grid()
+        near = np.abs(grid - self.E0) < 1.0e3
+        sigma = np.where(near, 100.0, 0.01)
+        a1 = np.where(near, 0.8, -0.8)
+        a_eff, _ = dcs.coefficients_sigma_weighted_folded(
+            grid, {1: a1}, grid, sigma, self.E0, self.TOF,
+        )
+        unweighted = dcs.coefficients_folded(grid, a1[None, :], [self.E0], self.TOF)[0, 0]
+        # The spike's edges are linear ramps in the table, so a little of the
+        # a_1 = -0.8 side is mixed in; the unweighted fold is dominated by it.
+        assert a_eff[0] > 0.6
+        assert unweighted < 0.0
+
+    def test_sigma_average_matches_a_dense_integral(self):
+        rng = np.random.default_rng(7)
+        grid = np.sort(rng.uniform(1.25e6, 1.35e6, 3000))
+        sigma = 1.0 + 4.0 * rng.random(grid.size)  # structure finer than the kernel
+        _, s_avg = dcs.coefficients_sigma_weighted_folded(
+            grid, {1: np.zeros_like(grid)}, grid, sigma, self.E0, self.TOF,
+        )
+        s = self.TOF.sigma_e_mev(self.E0 / 1e6) * 1e6
+        x = np.linspace(self.E0 - 6 * s, self.E0 + 6 * s, 400001)
+        g = np.exp(-0.5 * ((x - self.E0) / s) ** 2)
+        assert s_avg == pytest.approx((np.interp(x, grid, sigma) @ g) / g.sum(), rel=2e-3)

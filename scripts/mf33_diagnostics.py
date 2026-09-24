@@ -128,8 +128,9 @@ def fold_host_mf3_at_points(
 
     For point ``i`` at ``energies_mev[i]`` measured in ``subentries[i]``, the
     TOF resolution ``sigma_E`` is resolved from the cache (falling back to the
-    ORELA-like defaults) and the host ``sigma(E)`` is Gauss–Hermite averaged
-    over ``N(E_i, sigma_E^2)``.
+    ORELA-like defaults) and the host ``sigma(E)`` is averaged over
+    ``N(E_i, sigma_E^2)`` by :func:`scripts.tof_parameters.fold_xs_over_resolution`
+    (on the table's own points since 2026-09-24; Gauss-Hermite before).
 
     Returns
     -------

@@ -114,6 +114,7 @@ _kika_root = Path(__file__).resolve().parent.parent
 if str(_kika_root) not in sys.path:
     sys.path.insert(0, str(_kika_root))
 
+from kika.utils.numerics import gaussian_fold_nodes
 from scripts.precompute_chi2_exfor_c0 import load_exfor, build_experiment_dataframe
 from scripts.precompute_chi2_library_c0 import (
     interp_a_l_to_energy,
@@ -138,6 +139,24 @@ MT_NUMBER = 2  # elastic scattering
 # density across the window — enough to resolve MF3 resonance structure inside it.
 N_SIGMA           = 3.0
 N_WINDOW_SAMPLES  = 65
+
+# ── Fold quadrature ──
+#   grid       every MF3 and MF4 point of the library inside +-5 sigma_E, plus 101
+#              uniform points, Gaussian x trapezoid (kika.utils.numerics.
+#              gaussian_fold_nodes). DEFAULT since 2026-09-24.
+#   uniform65  the N_WINDOW_SAMPLES uniform nodes over +-N_SIGMA above: what every
+#              run up to 2026-09-24 was scored with. Set it to reproduce one.
+#
+# Why it changed: 65 uniform nodes are ~0.1 sigma_E apart, which resolves MF3 for a
+# modern TOF kernel (sigma_E ~ 2 keV at 1 MeV, MF3 points ~0.1 keV apart) but not for
+# the wide ones of the 1950s-60s experiments (sigma_E 20-170 keV, nodes 2-16 keV
+# apart against keV structure). Measured on the bspline_v6_y5s_..._lh_re parquet:
+# y_eval moves 0.08 % median, 0.3 % p90, up to 11.5 % on a point; the diagonal
+# chi2 of the whole set by -0.3 %; but the per-experiment diagonal chi2 of 14-17 of
+# the 67 experiments by more than 10 % (Darden 1955 by +150 %).
+FOLD_QUADRATURE = os.environ.get("KIKA_FOLD_QUADRATURE", "grid").strip().lower()
+if FOLD_QUADRATURE not in ("grid", "uniform65"):
+    raise SystemExit(f"KIKA_FOLD_QUADRATURE={FOLD_QUADRATURE!r} is not 'grid' or 'uniform65'")
 
 # ── Library ENDF files ──
 # This_work uses its own MF3, MF4, MF34 and MF33 from the pipeline product.
@@ -380,14 +399,24 @@ OUTPUT_PARQUET = (
 
 # ── Resolution window ─────────────────────────────────────────────────────────
 
-def _resolution_window(e_mev: float, sigma_E_mev: float) -> Tuple[np.ndarray, np.ndarray]:
-    """Truncated-Gaussian resolution kernel nodes (eV) and unit-sum weights.
+def _resolution_window(
+    e_mev: float, sigma_E_mev: float, lib: Optional[Dict] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Resolution kernel nodes (eV) and unit-sum weights for one library.
 
     With sigma_E <= 0 the kernel collapses to a single node at e (delta),
-    matching fold_xs_over_resolution.
+    matching fold_xs_over_resolution. Under FOLD_QUADRATURE="grid" the nodes
+    include every MF3 and MF4 point of ``lib`` inside the window, so they differ
+    per library; under "uniform65" they do not depend on it.
     """
     if sigma_E_mev <= 0.0 or N_WINDOW_SAMPLES < 2:
         return np.array([e_mev * 1e6]), np.array([1.0])
+    if FOLD_QUADRATURE == "grid":
+        grids = []
+        if lib is not None:
+            grids.append(lib["e_mf3_ev"])
+            grids.append(np.asarray(lib["energies_mf4_mev"], dtype=float) * 1e6)
+        return gaussian_fold_nodes(e_mev * 1e6, sigma_E_mev * 1e6, grids)
     half = N_SIGMA * sigma_E_mev
     e_grid_mev = np.linspace(e_mev - half, e_mev + half, N_WINDOW_SAMPLES)
     w = np.exp(-0.5 * ((e_grid_mev - e_mev) / sigma_E_mev) ** 2)
@@ -397,7 +426,7 @@ def _resolution_window(e_mev: float, sigma_E_mev: float) -> Tuple[np.ndarray, np
 
 def fold_dcs(
     lib: Dict, mu: np.ndarray, sample_e_ev: np.ndarray, weights: np.ndarray,
-    mode: str = None,
+    mode: str = None, e0_ev: Optional[float] = None,
 ) -> Tuple[np.ndarray, float, np.ndarray]:
     """Evaluate dsigma/dOmega under one of the five FOLD_MODE conventions.
 
@@ -421,9 +450,12 @@ def fold_dcs(
 
     sigma_avg = float(weights @ sigma_samples)
     a_avg = weights @ a_samples
-    # The window is symmetric about the nominal energy, so the centre node is
-    # the unfolded evaluation point (and the only node when sigma_E <= 0).
-    i0 = n_nodes // 2
+    # The unfolded evaluation point. Both windows carry the nominal energy as a
+    # node (the uniform part of each has an odd count), so this is exact.
+    if e0_ev is None:
+        i0 = n_nodes // 2
+    else:
+        i0 = int(np.argmin(np.abs(sample_e_ev - e0_ev)))
     sigma_0 = float(sigma_samples[i0])
     a_0 = a_samples[i0]
 
@@ -531,9 +563,9 @@ def build_rows_at_energy(
             a1_all = np.full(n, np.nan); sigE_all = np.full(n, np.nan); efold_all = np.full(n, np.nan)
             for e_fold, idx in fold_groups:
                 sigma_E_mev = compute_sigma_E(e_fold, tof)
-                sample_e_ev, weights = _resolution_window(e_fold, sigma_E_mev)
+                sample_e_ev, weights = _resolution_window(e_fold, sigma_E_mev, lib)
                 y_eval, sigma_avg_b, a_l_folded = fold_dcs(
-                    lib, mu[idx], sample_e_ev, weights,
+                    lib, mu[idx], sample_e_ev, weights, e0_ev=e_fold * 1e6,
                 )
                 if not np.isfinite(sigma_avg_b) or sigma_avg_b <= 0:
                     continue
@@ -567,6 +599,7 @@ def build_rows_at_energy(
                     "a1_folded":       float(a1_all[j]),
                     "sigma_E_mev":     float(sigE_all[j]),
                     "n_sigma":         float(N_SIGMA),
+                    "fold_quadrature": FOLD_QUADRATURE,
                     "tof_source":      str(tof.source),
                     "fold_mode":       FOLD_MODE,
                     "eff_applied":     float(eff_row[j]),
@@ -1011,8 +1044,12 @@ def main() -> None:
         "none":    "sigma(E0) * F(a_l(E0))    (no resolution model)",
     }[FOLD_MODE]
     print(f"\nPredictive scenario, FOLD_MODE={FOLD_MODE}: {_fold_label}")
-    print(f"  truncated Gaussian ±{N_SIGMA:g}σ_E, {N_WINDOW_SAMPLES} nodes; "
-          f"covariance MF34 + MF33.")
+    if FOLD_QUADRATURE == "grid":
+        print("  fold quadrature: grid (every MF3/MF4 point in ±5σ_E + 101 uniform); "
+              "covariance MF34 + MF33.")
+    else:
+        print(f"  fold quadrature: uniform65 (legacy), truncated Gaussian ±{N_SIGMA:g}σ_E, "
+              f"{N_WINDOW_SAMPLES} nodes; covariance MF34 + MF33.")
     # Provenance: which evaluation was scored, and under which tag. Both are
     # environment-driven, so recording them is the only way a reader of the
     # output can tell run 82 from run 83.
