@@ -32,7 +32,7 @@ SINBAD's own for what neither had. ``Structures/Data_structures.md`` in the
 ``sinbadv2-data-format`` repository is the specification, and its section
 numbers are cited throughout this subpackage.
 
-This reader is written against draft **v0.3** (2026-09-19). The format is work
+This reader is written against draft **v0.4** (2026-09-30). The format is work
 in progress: a container it does not model yet opens as
 :class:`~kika.sinbad.content.UnknownContent`, which keeps the raw element, so a
 later draft still reads.
@@ -116,6 +116,7 @@ from kika.sinbad.exceptions import (
     AmbiguousLabelError,
     BenchmarkMismatchError,
     ContentTypeError,
+    IncompleteBudgetError,
     LabelNotFoundError,
     SinbadError,
     SinbadFormatError,
@@ -196,4 +197,5 @@ __all__ = [
     "AmbiguousLabelError",
     "ContentTypeError",
     "BenchmarkMismatchError",
+    "IncompleteBudgetError",
 ]

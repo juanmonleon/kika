@@ -100,6 +100,10 @@ class DataObject:
         self.convention_label: Optional[str] = element.get("convention")
         self.frame_label: Optional[str] = element.get("frame")
         self.detector_labels: List[str] = (element.get("measuredBy") or "").split()
+        #: v0.4: the one position a whole object is at (a spectrum at A2), and
+        #: the calculation that produced it.
+        self.position_label: Optional[str] = element.get("position")
+        self.calculated_by_label: Optional[str] = element.get("calculatedBy")
 
         self.corrections: List[Correction] = [
             Correction._read(c) for c in element.findall("correction")
@@ -169,6 +173,22 @@ class DataObject:
         return self._resolve(self.frame_label, "CoordinateFrame")
 
     @property
+    def position(self):
+        """
+        The :class:`~kika.sinbad.entry.Position` the whole object is at, if it says one.
+
+        Not to be confused with :attr:`positions`, the position column of a
+        table: this is for an object that is itself at one place -- a
+        calculated spectrum at A2 (v0.4, ``@position``).
+        """
+        return self._resolve(self.position_label, "Position")
+
+    @property
+    def calculated_by(self):
+        """The :class:`~kika.sinbad.entry.Calculation` that produced it, if it says one (v0.4)."""
+        return self._resolve(self.calculated_by_label, "Calculation")
+
+    @property
     def detectors(self) -> List[Any]:
         """The detectors that measured it, resolved."""
         return [d for d in (self._resolve(label, "Detector") for label in self.detector_labels) if d]
@@ -208,6 +228,8 @@ class DataObject:
         Taken from the table's ``kind="total"`` column when there is one, and
         otherwise combined from the budget. The two agree in the pilot; where
         they do not, the published column is what the entry stands behind.
+        A budget with a component given only at some positions (v0.4) gives
+        NaN at the others: the total is not known there.
         """
         try:
             table = self.table
@@ -300,6 +322,10 @@ class DataObject:
             lines.append(f"  reaction        {self.reaction}")
         if self.detector_labels:
             lines.append(f"  measured by     {' '.join(self.detector_labels)}")
+        if self.position_label:
+            lines.append(f"  at position     {self.position_label}")
+        if self.calculated_by_label:
+            lines.append(f"  calculated by   {self.calculated_by_label}")
         if self.normalisation_label:
             lines.append(f"  normalisation   {self.normalisation_label}")
         if self.convention_label:
@@ -379,6 +405,8 @@ class DataObjectCollection:
         detector: Optional[str] = None,
         kind: Optional[str] = None,
         library: Optional[str] = None,
+        position: Optional[str] = None,
+        calculated_by: Optional[str] = None,
     ) -> "DataObjectCollection":
         """
         Filter the collection. Every argument given must match.
@@ -392,6 +420,9 @@ class DataObjectCollection:
             so ``detector="S32"`` finds both sulphur pellets.
         kind : str, optional
             The container tag: ``"table"``, ``"gridded1d"``, ...
+        position, calculated_by : str, optional
+            Matched exactly against ``@position`` and ``@calculatedBy`` (v0.4):
+            ``position="A2"`` finds the spectra calculated at A2.
         """
         selected = self._objects
         if quantity is not None:
@@ -409,6 +440,10 @@ class DataObjectCollection:
             ]
         if kind is not None:
             selected = [o for o in selected if o.kind == kind]
+        if position is not None:
+            selected = [o for o in selected if o.position_label == position]
+        if calculated_by is not None:
+            selected = [o for o in selected if o.calculated_by_label == calculated_by]
         return DataObjectCollection(selected)
 
     @property

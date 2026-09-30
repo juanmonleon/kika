@@ -367,26 +367,29 @@ class SinbadBenchmark(_Blocks):
             raise SinbadError("no measured object holds both a table and a budget")
         return selected
 
-    def ce(self, wide: bool = False, **filters):
+    def ce(self, wide: bool = False, between_calculations: bool = False, **filters):
         """
         Every published comparison, from every calculations file, as one table.
 
         Parameters
         ----------
         wide : bool, default False
-            Pivot to positions x (file, column).
+            Pivot to positions x (file, calculation).
+        between_calculations : bool, default False
+            Also return the ratios of two calculations; see
+            :meth:`Calculations.ce`.
         **filters
-            ``calculations`` and/or ``reaction`` to narrow it.
+            Any column, e.g. ``calculations`` and/or ``reaction``, to narrow it.
 
         Returns
         -------
         pandas.DataFrame
-            Long form: calculations, comparison, reaction, position,
-            shieldThickness, series, value.
+            Long form: calculations, comparison, operator, against, reaction,
+            position, shieldThickness, series, calculation, value.
         """
         import pandas as pd  # noqa: PLC0415
 
-        frames = [c.ce() for c in self._calculations]
+        frames = [c.ce(between_calculations=between_calculations) for c in self._calculations]
         frames = [f for f in frames if not f.empty]
         if not frames:
             return pd.DataFrame()
@@ -396,7 +399,7 @@ class SinbadBenchmark(_Blocks):
         if wide:
             return table.pivot_table(
                 index=["reaction", "position", "shieldThickness"],
-                columns=["calculations", "series"],
+                columns=["calculations", "calculation"] + (["against"] if between_calculations else []),
                 values="value",
             )
         return table
@@ -668,16 +671,27 @@ class Calculations(_Blocks):
 
     # -- views ------------------------------------------------------------
 
-    def ce(self):
+    def ce(self, between_calculations: bool = False):
         """
         The published comparisons of this file, long form.
+
+        Parameters
+        ----------
+        between_calculations : bool, default False
+            Also return the comparisons of two calculations (v0.4: McBEND
+            shielded over dilute). Left out by default, because a ratio of two
+            calculations is not a C/E and would be read as one.
 
         Returns
         -------
         pandas.DataFrame
-            calculations, comparison, operator, reaction, position,
-            shieldThickness, series, value. ``series`` is the comparison's
-            value column -- one per library.
+            calculations, comparison, operator, against, reaction, position,
+            shieldThickness, series, calculation, value. ``series`` is the
+            comparison's value column; ``calculation`` is the run it belongs
+            to (the column's ``@calculatedBy``; when it names none, the
+            comparison for a one-column table and the series otherwise) -- the key to tell libraries apart, since McBEND files one
+            comparison per library, each with a column called ``CM``.
+            ``against`` is ``measured`` or ``calculated``.
         """
         import pandas as pd  # noqa: PLC0415
 
@@ -685,6 +699,9 @@ class Calculations(_Blocks):
         for comparison in self.comparisons:
             table = comparison.table
             if table is None:
+                continue
+            against = comparison.against
+            if against == "calculated" and not between_calculations:
                 continue
             denominator = None
             try:
@@ -701,10 +718,14 @@ class Calculations(_Blocks):
                         "calculations": self.label,
                         "comparison": comparison.label,
                         "operator": comparison.operator,
+                        "against": against,
                         "reaction": reaction,
                         "position": str(positions[i]) if positions is not None else str(i),
                         "shieldThickness": float(thickness[i]) if thickness is not None else np.nan,
                         "series": column.name,
+                        "calculation": column.calculated_by or (
+                            comparison.label if len(table.value_columns) == 1 else column.name
+                        ),
                         "value": float(values[i]),
                     })
         return pd.DataFrame(rows)

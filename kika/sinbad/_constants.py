@@ -38,7 +38,7 @@ __all__ = [
 #: Draft versions this reader has been written against. A file declaring
 #: anything else still opens; :attr:`SinbadBenchmark.format_version` reports
 #: what it said.
-FORMAT_VERSIONS: Tuple[str, ...] = ("0.1", "0.2", "0.3")
+FORMAT_VERSIONS: Tuple[str, ...] = ("0.1", "0.2", "0.3", "0.4")
 
 #: Root element of a benchmark file and of a calculations file (§1).
 BENCHMARK_ROOT = "sinbad"

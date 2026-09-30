@@ -30,7 +30,7 @@ import numpy as np
 
 from kika.sinbad._xml import as_float, sha1_of
 from kika.sinbad.content import Double, Range, Table, read_doubles
-from kika.sinbad.exceptions import SinbadError
+from kika.sinbad.exceptions import LabelNotFoundError, SinbadError
 
 __all__ = [
     "LegacyId",
@@ -741,7 +741,9 @@ class Calculation:
 
 class Comparison:
     """
-    §4.9. A published comparison of a calculated table with a measured one.
+    §4.9. A published comparison of a calculated table with a measured one --
+    or, from v0.4, with another calculated one of the same file (the ratio of
+    two calculations). :attr:`against` says which.
 
     Row by row on ``position``, in the convention it declares. The published
     numbers are in :attr:`table`; :meth:`recompute` forms the same comparison
@@ -774,8 +776,24 @@ class Comparison:
 
     @property
     def denominator(self):
-        """The measured data object of the benchmark."""
+        """The measured data object of the benchmark, or a calculated one of this file."""
         return self._entry[self.denominator_label] if self._entry is not None else None
+
+    @property
+    def against(self) -> Optional[str]:
+        """
+        ``"measured"`` for a C/E, ``"calculated"`` for a ratio between two calculations.
+
+        Read from the denominator's ``@nature``; ``None`` when the denominator
+        cannot be resolved.
+        """
+        if self._entry is None or not self.denominator_label:
+            return None
+        try:
+            nature = self.denominator.nature
+        except LabelNotFoundError:
+            return None
+        return "calculated" if nature == "calculated" else "measured"
 
     def to_dataframe(self):
         """The published comparison."""

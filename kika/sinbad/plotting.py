@@ -111,16 +111,18 @@ def plot_ce(benchmark, reaction: Optional[str] = None, ax=None, **kwargs):
     matplotlib.axes.Axes
     """
     ax = _axes(ax, figsize=(9, 6))
-    table = benchmark.ce()
+    table = benchmark.ce()  # C/E only: a ratio of two calculations is not drawn against 1 as one
     if table.empty:
         raise ValueError(f"{benchmark.short_code or benchmark.id} has no comparisons")
     if reaction is not None:
         table = table[table["reaction"] == reaction]
     style = {"marker": "o", "linestyle": ":", "markersize": 5}
     style.update(kwargs)
-    for (source, series), group in table.groupby(["calculations", "series"], sort=False):
+    # One line per run, not per column name: McBEND calls every library's
+    # column "CM", and grouping on it would join four libraries into one line.
+    for (source, calculation), group in table.groupby(["calculations", "calculation"], sort=False):
         group = group.sort_values("shieldThickness")
-        ax.plot(group["shieldThickness"], group["value"], label=f"{source} {series}", **style)
+        ax.plot(group["shieldThickness"], group["value"], label=f"{source} {calculation}", **style)
     ax.axhline(1.0, color="black", linewidth=1, alpha=0.6)
     ax.set_xlabel("Shield thickness [cm]")
     ax.set_ylabel("C/E")

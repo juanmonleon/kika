@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Calculations of the mini fixture, draft format v0.3.
+  Calculations of the mini fixture, draft format v0.4.
 
   The checksum below is deliberately wrong, so that matches_benchmark is False as shipped; a
   test rewrites it with the real sha1 in a temporary directory and checks the other branch.
@@ -8,8 +8,17 @@
   The C/E are exact: the measured Al27 table is stored asMeasured and the comparison declares
   backgroundSubtracted, so the denominator is the measured value times 0.98, and the calculated
   values are 1.00 / 0.90 / 0.80 of it. Any reader that forgets the correction gets 0.98 of them.
+
+  v0.4 structures, with numbers chosen to be exact:
+  * spectrum-LIBA-A2 is one object at one position (@position, @calculatedBy).
+  * mc-Al27-libA has a partial budget: statistics 3 %, power 8 % at 2 s.d. (4 %), and a
+    nuclear-data term given only at A1 (0) and A3 (24 % at 2 s.d., so 12 %). The totals it prints
+    at those positions, 10 and 26 % at 2 s.d., are the 3-4-5 and 3-4-12-13 quadratures. A2 has no
+    nuclear-data value, so no covariance can be built over the table.
+  * mc-Al27-libB is half of libA everywhere, with a component named and not quantified; the
+    comparison ratio-B-A is between the two calculations and is exactly 0.50.
 -->
-<sinbadCalculations formatVersion="0.3" label="lab-code-1.0">
+<sinbadCalculations formatVersion="0.4" label="lab-code-1.0">
 
   <benchmark id="TST-ATN-BLK-STR-SUR-001-R" shortCode="mini" file="../mini.xml"
              checksum="0000000000000000000000000000000000000000" algorithm="sha1"/>
@@ -113,6 +122,75 @@
       </table>
     </dataObject>
 
+    <dataObject label="spectrum-LIBA-A2" quantity="particle spectrum" nature="calculated"
+                position="A2" calculatedBy="calc-libA" normalisation="unitIntegral" source="invented TAB. 6">
+      <gridded1d>
+        <axes>
+          <grid index="1" label="energy" unit="eV" style="boundaries">
+            <link href="//*[@label='groupStructure-MINI3']/grid/values"/>
+          </grid>
+          <axis index="0" label="neutronFlux" unit=""/>
+        </axes>
+        <array shape="3">
+          <values>5.0E-01 3.0E-01 2.0E-01</values>
+        </array>
+      </gridded1d>
+    </dataObject>
+
+    <dataObject label="mc-Al27-libA" quantity="reaction rate" nature="calculated"
+                normalisation="power30kW" convention="backgroundSubtracted"
+                reaction="Al27(n,a)Na24" source="invented TAB. 7">
+      <table rows="3" columns="4">
+        <columnHeaders>
+          <column index="0" name="position" unit="" types="UTF8Text" role="independent"/>
+          <column index="1" name="shieldThickness" unit="cm" role="independent"/>
+          <column index="2" name="reactionRate" unit="1/s" calculatedBy="calc-libA"/>
+          <column index="3" name="statistics" unit="%" role="uncertainty" kind="component" confidenceLevel="1 s.d."/>
+        </columnHeaders>
+        <data sep="tr">
+          <tr sep="td"><td>A1</td><td>0.00</td><td>9.800E-21</td><td>3</td></tr>
+          <tr sep="td"><td>A2</td><td>5.00</td><td>1.764E-21</td><td>3</td></tr>
+          <tr sep="td"><td>A3</td><td>10.00</td><td>2.352E-22</td><td>3</td></tr>
+        </data>
+      </table>
+      <uncertaintyBudget combinationRule="quadratic" covariance="from components">
+        <component name="statistics" column="statistics" correlationScope="none"/>
+        <component name="power" value="8" unit="%" confidenceLevel="2 s.d." correlationScope="within-entry"/>
+        <component name="nuclearData" unit="%" confidenceLevel="2 s.d." correlationScope="within-entry"
+                   source="invented TAB. 8">
+          <at position="A1" value="0"/>
+          <at position="A3" value="24"/>
+        </component>
+        <component name="modelApproximations" status="not quantified" correlationScope="within-entry"/>
+        <total unit="%" confidenceLevel="2 s.d." source="invented TAB. 8">
+          <at position="A1" value="10"/>
+          <at position="A3" value="26"/>
+        </total>
+      </uncertaintyBudget>
+    </dataObject>
+
+    <dataObject label="mc-Al27-libB" quantity="reaction rate" nature="calculated"
+                normalisation="power30kW" convention="backgroundSubtracted"
+                reaction="Al27(n,a)Na24" source="invented TAB. 7">
+      <table rows="3" columns="4">
+        <columnHeaders>
+          <column index="0" name="position" unit="" types="UTF8Text" role="independent"/>
+          <column index="1" name="shieldThickness" unit="cm" role="independent"/>
+          <column index="2" name="reactionRate" unit="1/s" calculatedBy="calc-libB"/>
+          <column index="3" name="statistics" unit="%" role="uncertainty" kind="component" confidenceLevel="1 s.d."/>
+        </columnHeaders>
+        <data sep="tr">
+          <tr sep="td"><td>A1</td><td>0.00</td><td>4.900E-21</td><td>2</td></tr>
+          <tr sep="td"><td>A2</td><td>5.00</td><td>8.820E-22</td><td>2</td></tr>
+          <tr sep="td"><td>A3</td><td>10.00</td><td>1.176E-22</td><td>2</td></tr>
+        </data>
+      </table>
+      <uncertaintyBudget combinationRule="quadratic" covariance="from components">
+        <component name="statistics" column="statistics" correlationScope="none"/>
+        <component name="modelApproximations" status="not quantified" correlationScope="within-entry"/>
+      </uncertaintyBudget>
+    </dataObject>
+
   </dataObjects>
 
   <comparisons>
@@ -130,6 +208,21 @@
           <tr sep="td"><td>A1</td><td>0.00</td><td>1.00</td><td>0.50</td></tr>
           <tr sep="td"><td>A2</td><td>5.00</td><td>0.90</td><td>0.45</td></tr>
           <tr sep="td"><td>A3</td><td>10.00</td><td>0.80</td><td>0.40</td></tr>
+        </data>
+      </table>
+    </comparison>
+    <comparison label="ratio-B-A" operator="ratio" numerator="mc-Al27-libB" denominator="mc-Al27-libA"
+                convention="backgroundSubtracted" source="invented TAB. 9">
+      <table rows="3" columns="3">
+        <columnHeaders>
+          <column index="0" name="position" unit="" types="UTF8Text" role="independent"/>
+          <column index="1" name="shieldThickness" unit="cm" role="independent"/>
+          <column index="2" name="ratio" unit=""/>
+        </columnHeaders>
+        <data sep="tr">
+          <tr sep="td"><td>A1</td><td>0.00</td><td>0.50</td></tr>
+          <tr sep="td"><td>A2</td><td>5.00</td><td>0.50</td></tr>
+          <tr sep="td"><td>A3</td><td>10.00</td><td>0.50</td></tr>
         </data>
       </table>
     </comparison>

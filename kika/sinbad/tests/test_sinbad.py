@@ -1,4 +1,4 @@
-"""Tests for reading a SINBAD benchmark in the v0.3 XML format.
+"""Tests for reading a SINBAD benchmark in the v0.4 XML format.
 
 The fixture is ``data/mini/``: a benchmark and one calculations file, small
 enough to read in one screen and complete enough to exercise every structure
@@ -34,6 +34,7 @@ from kika.sinbad.exceptions import (
     AmbiguousLabelError,
     BenchmarkMismatchError,
     ContentTypeError,
+    IncompleteBudgetError,
     LabelNotFoundError,
     SinbadError,
     SinbadFormatError,
@@ -346,6 +347,8 @@ def test_ce_collects_every_comparison(b):
     assert len(frame) == 6
     wide = b.ce(wide=True)
     assert wide.shape == (3, 2)
+    assert set(frame["against"]) == {"measured"}
+    assert set(frame["calculation"]) == {"calc-libA", "calc-libB"}
 
 
 def test_a_changed_benchmark_is_reported(b, tmp_path):
@@ -644,3 +647,94 @@ def test_a_calculations_file_of_another_entry_is_refused(b, tmp_path):
     path.write_text(path.read_text().replace(b.id, "TST-OTHER-001-R"))
     with pytest.raises(BenchmarkMismatchError, match="not of"):
         sinbad.read(copy / "mini.xml")
+
+
+# -- v0.4: an object at one position, partial budgets, calculation ratios --
+
+
+def calc(b):
+    return b.calculations["lab-code-1.0"]
+
+
+def test_an_object_at_one_position(b):
+    spectrum = calc(b)["spectrum-LIBA-A2"]
+    assert spectrum.position_label == "A2"
+    assert spectrum.position.shield_thickness == pytest.approx(5.0)
+    assert spectrum.calculated_by.label == "calc-libA"
+    assert calc(b).data(position="A2").labels == ["spectrum-LIBA-A2"]
+    assert calc(b).data(calculated_by="calc-libA").labels == ["spectrum-LIBA-A2"]
+    assert "at position     A2" in spectrum.summary()
+    # not the position column of a table
+    assert b["reactionRate-Al27"].position is None
+
+
+def test_a_component_given_at_some_positions(b):
+    budget = calc(b)["mc-Al27-libA"].uncertainty_budget
+    nuclear = budget["nuclearData"]
+    assert nuclear.is_partial and nuclear.is_quantified
+    assert nuclear.at == {"A1": 0.0, "A3": 24.0}
+    unnamed = budget["modelApproximations"]
+    assert not unnamed.is_quantified and unnamed.status == "not quantified"
+    assert budget.unquantified == [unnamed]
+    assert budget.partial == [nuclear]
+    table = calc(b)["mc-Al27-libA"].table
+    assert budget.missing(table) == {"nuclearData": ["A2"]}
+    assert budget.complete_at(table) == ["A1", "A3"]
+    frame = budget.to_dataframe(table).set_index("component")
+    assert frame.loc["nuclearData", "as_published"] == "at A1, A3"
+    assert frame.loc["modelApproximations", "as_published"] == "not quantified"
+
+
+def test_a_partial_budget_recombines_to_its_published_total(b):
+    obj = calc(b)["mc-Al27-libA"]
+    # 3-4-5 at A1, 3-4-12-13 at A3; nothing is known at A2
+    uncertainty = obj.uncertainty
+    assert uncertainty[[0, 2]] == pytest.approx([0.05, 0.13])
+    assert np.isnan(uncertainty[1])
+    at = obj.uncertainty_budget.by_position(obj.table)
+    assert list(at.index) == ["A1", "A3"]
+    assert at["total"].tolist() == pytest.approx([0.05, 0.13])
+    assert at["published_total"].tolist() == pytest.approx([0.05, 0.13])
+
+
+def test_no_covariance_from_a_partial_budget(b):
+    obj = calc(b)["mc-Al27-libA"]
+    with pytest.raises(IncompleteBudgetError) as caught:
+        obj.covariance()
+    error = caught.value
+    assert error.label == "mc-Al27-libA"
+    assert error.missing == {"nuclearData": ["A2"]}
+    assert error.complete_at == ["A1", "A3"]
+    message = str(error)
+    assert "nuclearData: given only at A1, A3 (invented TAB. 8)" in message
+    assert "modelApproximations: named by the entry, not quantified" in message
+    assert "complete at: A1, A3" in message
+    assert "by_position" in message
+
+
+def test_an_unquantified_component_is_left_out_with_a_warning(b):
+    obj = calc(b)["mc-Al27-libB"]
+    with pytest.warns(UserWarning, match="modelApproximations"):
+        matrix, _ = obj.covariance(relative=True)
+    assert np.diag(matrix) == pytest.approx([0.02 ** 2] * 3)
+    assert obj.uncertainty == pytest.approx([0.02] * 3)
+
+
+def test_a_ratio_of_two_calculations_is_not_a_ce(b):
+    ratio = calc(b).comparisons["ratio-B-A"]
+    assert ratio.against == "calculated"
+    assert calc(b).comparisons["CE-Al27"].against == "measured"
+    assert "ratio-B-A" not in set(b.ce()["comparison"])
+    both = b.ce(between_calculations=True)
+    only = both[both["comparison"] == "ratio-B-A"]
+    assert set(only["against"]) == {"calculated"}
+    assert set(only["calculation"]) == {"ratio-B-A"}
+    assert ratio.recompute()["ratio"].tolist() == pytest.approx([1.0] * 3)
+
+
+def test_plot_ce_draws_one_line_per_run(b):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    ax = sinbad.plot_ce(b)
+    labels = [line.get_label() for line in ax.get_lines() if not line.get_label().startswith("_")]
+    assert labels == ["lab-code-1.0 calc-libA", "lab-code-1.0 calc-libB"]

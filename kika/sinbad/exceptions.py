@@ -11,6 +11,7 @@ __all__ = [
     "AmbiguousLabelError",
     "ContentTypeError",
     "BenchmarkMismatchError",
+    "IncompleteBudgetError",
 ]
 
 
@@ -63,3 +64,33 @@ class BenchmarkMismatchError(SinbadError):
     see :attr:`kika.sinbad.Calculations.matches_benchmark`; this exception is
     for a different entry altogether.
     """
+
+
+class IncompleteBudgetError(SinbadError):
+    """An uncertainty budget does not cover every point it would have to.
+
+    §3.2 (v0.4) lets an entry give a component only at the positions where it
+    was published -- AEA-RS-1231 Table 18 gives the uncertainty of the McBEND
+    rates at two positions per detector -- and name one it never quantified.
+    A covariance over the whole table would need the missing values, and
+    filling them in would be a calculation the entry did not authorise, so
+    the reader stops instead.
+
+    The message says which components are missing where. The same facts are on
+    the exception, for a caller that wants to act on them:
+
+    Attributes
+    ----------
+    label : str
+        The data object.
+    missing : dict of str to list of str
+        Component name to the positions it is not given at.
+    complete_at : list of str
+        The positions where every quantified component is given.
+    """
+
+    def __init__(self, message: str, label: str = "", missing=None, complete_at=None):
+        super().__init__(message)
+        self.label = label
+        self.missing = dict(missing or {})
+        self.complete_at = list(complete_at or [])
