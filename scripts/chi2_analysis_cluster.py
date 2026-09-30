@@ -33,9 +33,9 @@ Subsets:
   - `no_Cierjacks`         — Cierjacks 1978 excluded (aporta ~61% de los puntos
                              y es un conjunto dificil). NO es el subconjunto
                              titular: no hay ninguno.
-  - `no_KS`                — old default (Kinney 1976 + Smith 1980 excluded).
-  - `no_KS_no_Cierjacks`   — both K&S and Cierjacks excluded.
-  - `only_KS`              — Kinney + Smith only.
+  - `no_Kinney`            — Kinney 1976 excluded (era `no_KS`; Smith se queda).
+  - `no_Kinney_no_Cierjacks` — Kinney y Cierjacks excluidos.
+  - `only_Kinney`          — Kinney 1976 only (era `only_KS`; ver KINNEY_ID).
   - `only_Cierjacks`       — Cierjacks 1978 only (analyse the difficult dataset
                              on its own).
 
@@ -1359,6 +1359,48 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² analysis — c₀ from EXFOR Kinney/Smith fit, MF34 eval σ",
         "systematic_block_col": "energy_mev",
     },
+    # ── 2026-09-09 — RE-PUNTUACION DE LA TABLA DE LA TESIS BAJO LA σ ARREGLADA ─
+    #
+    # QUE SE RE-PUNTUA. La tabla del capitulo 3 (`tab:prelim_chi2` y §gof_analysis
+    # de `CHAPTER-3/Fe56.tex`) sale de `chi2_exfor_c0/run_080`, VERIFICADO valor a
+    # valor el 9-sep: V4 `all` 8,02 / 20,01 / 24,50 (This_work / JEFF / JENDL),
+    # los seis subconjuntos y el recuento por experimento 56/7/4.
+    #
+    # LA CINTA ES `ENDF_samples/new_test_77`, MEDIDO. La columna `c0` de This_work
+    # del parquet de la run 080 sale BIT A BIT (max |rel| = 0,0) del
+    # `nominal_fits.parquet` de `new_test_77`, y a 4,8e-14 del de `new_test_81`;
+    # la run 082 tiene la asimetria al reves. Como el precompute lee la cinta y el
+    # parquet del MISMO THIS_WORK_DIR, eso fija tambien de donde salio la MF34.
+    #
+    # ⛔ 082 NO ES UN REFRESCO DE 080, ES OTRA EVALUACION. Entre los dos parquets
+    # `y_eval` coincide a 1e-6 en las tres bibliotecas y `sigma_eval_diag` es
+    # identico en JEFF y JENDL, pero el de This_work difiere hasta x4,6 (mediana
+    # 8,3 %): cambia solo NUESTRA covarianza. En el `run_metadata`, `new_test_81`
+    # anade `GENERATE_MF3_MF33=1` y sube `TAU_PRIOR_NEFF_THRESHOLD` de 4,0 a 5,0.
+    # La 77 no genera MF3/MF33 propios, y es la que el manuscrito reporta.
+    #
+    # POR QUE HAY QUE REHACERLA. El 7-sep se arreglo en kika (`c0dd629`/`ae7dbf2`)
+    # el lector del manifiesto: en las tablas angulo-mayor asignaba las columnas de
+    # σ por punto EN EL ORDEN DE LA TABLA y no en el del punto, recortando la σ
+    # declarada de cuatro experimentos (Pirovano 23365004/5, Barnard 30076004,
+    # Salnikov 40372004). Eso entra por `build_exfor_cache_from_objects` ->
+    # `apply_manifest_to_exfor`, que es exactamente el camino de este precompute.
+    #
+    # ⛔ LO QUE **NO** SIRVE. Los JEFF/JENDL ya re-puntuados el 8-sep (V4 0,727 y
+    # 0,475) son de la metodologia `predictive`, que es OTRA: otro c₀, otro plegado
+    # y otro presupuesto. Contra la de la tesis dan 20,01 y 24,50. Aqui no se
+    # pueden reutilizar -- y tampoco hace falta ahorrarlos: las tres bibliotecas
+    # se puntuan en la MISMA pasada sobre el MISMO parquet, asi que salen gratis.
+    #
+    # ⚠ `systematic_block_col` = "energy_mev", igual que `exfor_c0`. Es la
+    # diferencia que hace que Kinney no se infle ~5x; cambiarla haria la tabla
+    # nueva incomparable con la publicada.
+    "exfor_c0_TH77": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_TH77.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_exfor_c0",
+        "title":      "χ² — cinta de la tesis (run 077) re-puntuada con la σ del manifiesto arreglada",
+        "systematic_block_col": "energy_mev",
+    },
     "library_c0": {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_library_c0_82.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_library_c0",
@@ -1436,6 +1478,31 @@ for _mode, _desc in _REPR_MODES.items():
 E_MIN_MEV = 0.85
 E_MAX_MEV = 4.0
 KINNEY_SMITH_IDS: List[str] = ["10571002", "10886002"]
+
+# ⚑ 2026-09-09 — el escenario aislado es KINNEY SOLA, no Kinney + Smith.
+#
+# POR QUE. `only_KS` agregaba las dos campanas de calibracion, y eso hacia el
+# numero ininterpretable: JENDL-5 sale 1,43 en V4 sobre `only_KS` pese a estar
+# ajustada a Kinney casi exactamente. Medido sobre run_TH77:
+#
+#     Kinney 10571002 (13 208 pts)   JENDL V4  0,478   JEFF V4   2,62
+#     Smith  10886002 (   490 pts)   JENDL V4 27,12    JEFF V4  12,83
+#     agregado only_KS               JENDL V4  1,43    JEFF V4   2,98
+#
+# Smith son el 3,6 % de los puntos y el 68 % del chi2. Y su exceso no es
+# desacuerdo con el dato: partiendo el chi2 de Smith por energia, JENDL lo
+# reproduce a chi2/N = 0,01 entre 2,50 y 3,87 MeV, y todo el peso (86,6 %) esta
+# POR DEBAJO DE 2,50 MeV -- que es justo el tramo donde las dos bibliotecas
+# anclan a Kinney y no a Smith, o sea fuera de muestra para ellas. Agregarlas
+# mezclaba dentro-de-muestra con fuera-de-muestra.
+#
+# ⚑ 10-sep: el eje ENTERO pasa a ser Kinney (Juan). `no_KS` -> `no_Kinney` y
+# `no_KS_no_Cierjacks` -> `no_Kinney_no_Cierjacks`: Smith deja de tratarse como
+# ancla y se queda dentro de los complementarios. Cuesta poco, medido: JEFF V4
+# pasa de 12,45 a 12,46 en `no_Kinney` (Smith son 490 puntos de 33 534), y de
+# 17,15 a 16,71 en `no_Kinney_no_Cierjacks`. `KINNEY_SMITH_IDS` se conserva
+# porque el informe lo sigue publicando como metadato.
+KINNEY_ID: str = "10571002"
 # Cierjacks 1978 (20743002) — 28,631 points (~61% of the dataset), high TOF
 # resolution but known angular-shape disagreement with all modern evaluations
 # at backward angles; broken out so it does not dominate the global chi² aggregate.
@@ -1510,9 +1577,9 @@ PRIMARY_VARIANT: str = "V4"
 SUBSETS: List[Tuple[str, str]] = [
     ("all",                "All experiments"),
     ("no_Cierjacks",       "Excluding Cierjacks 1978"),
-    ("no_KS",              "Excluding K&S"),
-    ("no_KS_no_Cierjacks", "Excluding K&S and Cierjacks 1978"),
-    ("only_KS",            "K&S only"),
+    ("no_Kinney",              "Excluding Kinney"),
+    ("no_Kinney_no_Cierjacks", "Excluding Kinney and Cierjacks 1978"),
+    ("only_Kinney",        "Kinney 1976 only"),
     ("only_Cierjacks",     "Cierjacks 1978 only"),
 ]
 
@@ -2380,13 +2447,14 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
     libraries = [lib for lib in libs_in_data if lib in LIB_LABELS]
 
     is_KS = df["is_KS"]
+    is_K = df["experiment_id"].isin([KINNEY_ID])
     is_C  = df["is_Cierjacks"]
     subsets_df: Dict[str, pd.DataFrame] = {
         "all":                df.copy(),
         "no_Cierjacks":       df[~is_C].copy(),
-        "no_KS":              df[~is_KS].copy(),
-        "no_KS_no_Cierjacks": df[~is_KS & ~is_C].copy(),
-        "only_KS":            df[is_KS].copy(),
+        "no_Kinney":              df[~is_K].copy(),
+        "no_Kinney_no_Cierjacks": df[~is_K & ~is_C].copy(),
+        "only_Kinney":        df[df["experiment_id"].isin([KINNEY_ID])].copy(),
         "only_Cierjacks":     df[is_C].copy(),
     }
     # Guard against SUBSETS containing keys not built above.
@@ -2647,6 +2715,7 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
         "n_rows": int(len(df)), "n_experiments": int(df["experiment_id"].nunique()),
         "libraries": libraries,
         "kinney_smith_ids": list(KINNEY_SMITH_IDS),
+        "kinney_id": KINNEY_ID,
         "cierjacks_ids":    list(CIERJACKS_IDS),
         "per_subset_all_variants": {
             subset_key: all_variants_summaries[subset_key].to_dict(orient="records")

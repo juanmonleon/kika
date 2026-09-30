@@ -415,8 +415,44 @@ R98=/share_snc/snc/JuanMonleon/ENDF_samples/new_test_98_meshraw
 # 2026-08-23 (noche): anadidos los tres brazos de la serie 104. Misma cinta
 # (`_a0cross.endf`, dead=carry) y mismo camino que 103R2/103R4, asi que las
 # cinco son comparables de una sola variable.
-CHIARM="${1:?falta el brazo. Uso: sbatch run_chi.sh B1   -- brazos validos: R2 R4 S1 S2 S3 T1 T2 B1..B14 C9..C14 CT}"
+CHIARM="${1:?falta el brazo. Uso: sbatch run_chi.sh B1   -- brazos validos: R2 R4 S1 S2 S3 T1 T2 TH77 B1..B14 C9..C14 CT}"
 case "$CHIARM" in
+  # ── 2026-09-09 — TH77: LA TABLA DE LA TESIS, RE-PUNTUADA ────────────────────
+  #
+  # ⚠ ESTE BRAZO NO ES `predictive`. Es el UNICO que corre la metodologia
+  #   `exfor_c0`, que es de donde sale la tabla del capitulo 3. Todo lo que
+  #   cambia va por CHIMETH; los pasos 1 y 2 despachan sobre el.
+  #
+  # QUE PUNTUA: `ENDF_samples/new_test_77`. MEDIDO, no inferido (9-sep): la
+  # columna `c0` de This_work del parquet `chi2_data_exfor_c0_80.parquet` sale
+  # BIT A BIT (max |rel| = 0,0) del `nominal_fits.parquet` de `new_test_77`, y
+  # a 4,8e-14 del de `new_test_81` -- la asimetria en el ultimo ulp identifica
+  # el fichero. Como el precompute lee la cinta y el parquet del MISMO
+  # THIS_WORK_DIR, eso fija tambien de que cinta salio la MF34.
+  # Y la salida coincide con `CHAPTER-3/Fe56.tex` valor a valor: V4 `all`
+  # 8,02 / 20,01 / 24,50, los seis subconjuntos y el recuento 56/7/4.
+  #
+  # POR QUE: el arreglo de la σ del manifiesto (7-sep, kika `c0dd629`/`ae7dbf2`)
+  # recortaba la σ declarada de Pirovano 23365004/5, Barnard 30076004 y Salnikov
+  # 40372004. Mueve LA REFERENCIA, no solo nuestra cinta.
+  #
+  # ⛔ NO se pueden reutilizar los JEFF/JENDL del 8-sep (0,727 / 0,475): son de
+  # `predictive`, otra metodologia. Y no hace falta: las tres bibliotecas salen
+  # de la misma pasada sobre el mismo parquet.
+  #
+  # ⛔ LA RUN 082 ES OTRA EVALUACION, NO OTRA VERSION DE LA MISMA. Medido: entre
+  # los parquets 80 y 82, `y_eval` es igual a 1e-6 en las tres bibliotecas
+  # (redondeo del ajuste de c0) y `sigma_eval_diag` es identico en JEFF y JENDL
+  # -- pero el de This_work difiere hasta x4,6, mediana 8,3 %. O sea: cambia
+  # SOLO la covarianza de nuestra cinta. La razon esta en su `run_metadata`:
+  # `new_test_81` (cuyo c0 la run 082 reproduce bit a bit) anade
+  # `GENERATE_MF3_MF33=1` y sube `TAU_PRIOR_NEFF_THRESHOLD` de 4,0 a 5,0; la 77
+  # no genera MF3/MF33 propios. El manuscrito reporta el 8,0 de run_080, o sea
+  # la 77. La comparacion correcta es TH77 contra run_080.
+  #
+  # CHICROSS=0: `precompute_chi2_exfor_c0.py` no lee bloques a_0.
+  TH77) CHIDIR=new_test_77 ; CHITAG=TH77 ; CHIMETH=exfor_c0
+        CHIENDF=26-Fe-56g_nominal_mg.endf ; CHICROSS=0 ;;
   R2) CHIDIR=new_test_103R2_base         ; CHITAG=103R2 ;;
   R4) CHIDIR=new_test_103R4_malla1etapa  ; CHITAG=103R4 ;;
   S1) CHIDIR=new_test_104S1_fixsingleton ; CHITAG=104S1 ;;
@@ -522,7 +558,7 @@ case "$CHIARM" in
   C14) CHIDIR=/share_snc/snc/JuanMonleon/splines/deliverable ; CHITAG=bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_corr
        CHIENDF=26-Fe-56g_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_GATEFAIL.endf ; CHICROSS=1 ; CHICORR=1
        CHICORRFILE=/share_snc/snc/JuanMonleon/splines/deliverable/corrections/w18_v6_y5s_efficiencies.csv ;;
-  *)  echo "⛔ '$CHIARM' no es R2, R4, S1, S2, S3, T1, T2, B1-B14, C9-C14 ni CT"; exit 2 ;;
+  *)  echo "⛔ '$CHIARM' no es R2, R4, S1, S2, S3, T1, T2, TH77, B1-B14, C9-C14 ni CT"; exit 2 ;;
 esac
 # Un CHIDIR que empieza por / es una ruta completa (brazo B1); el resto cuelga
 # de ENDF_samples como siempre. CHIENDF y CHICROSS conservan su valor de antes
@@ -534,6 +570,13 @@ esac
 CHIENDF=${CHIENDF:-26-Fe-56g_nominal_a0cross.endf}
 CHICROSS=${CHICROSS:-1}
 CHICORR=${CHICORR:-0}
+# 9-sep: la metodologia del brazo. `predictive` para todos los brazos historicos
+# -- el defecto reproduce lo de siempre bit a bit -- y `exfor_c0` para TH77, que
+# es la cadena de la que sale la tabla del capitulo 3. Decide la puerta de
+# registro, el precompute del paso 1, la clave del paso 2 y el directorio del
+# informe. Anadir una tercera (library_c0, folded_c0...) es anadir su rama en el
+# `case` del paso 1 y nada mas.
+CHIMETH=${CHIMETH:-predictive}
 # 4-sep: la tabla de correcciones de detector de la receta B-spline (w18_shipped_efficiencies.csv:
 # exp_key, angle_deg, efficiency, kinney_scale_permille). Solo la leen los brazos con CHICORR=1.
 # 6-sep: cada brazo corregido puede traer su propia tabla (CHICORRFILE); sin ella, la de la v5.
@@ -582,8 +625,8 @@ echo "=========================================================="
 # Las runs 85 y 89 murieron DESPUES de su precompute por no tener registrada la
 # metodologia. Estas tres comprobaciones cuestan segundos.
 [ -s "$CHIRUN/$CHIENDF" ] || { echo "⛔ no existe $CHIRUN/$CHIENDF"; exit 1; }
-grep -q "\"predictive_${CHITAG}\"" chi2_analysis_cluster.py \
-  || { echo "⛔ 'predictive_${CHITAG}' no esta registrada en chi2_analysis_cluster.py"; exit 1; }
+grep -q "\"${CHIMETH}_${CHITAG}\"" chi2_analysis_cluster.py \
+  || { echo "⛔ '${CHIMETH}_${CHITAG}' no esta registrada en chi2_analysis_cluster.py"; exit 1; }
 python -c "import sys; sys.path.insert(0, '..'); import scripts.exfor_utils as e; \
 print('  scripts ->', e.__file__); sys.exit(0 if '/newcode/' in e.__file__ else 1)" \
   || { echo "⛔ el paquete scripts NO resuelve dentro de newcode/"; exit 1; }
@@ -602,26 +645,85 @@ print('  kika', kika.__version__, '- sella table_index:', ok); import sys; sys.e
   || { echo "⛔ la kika instalada en /work NO sella table_index: instala kika_nd-0.3.1.dev0 (EXFOR/kika_dist/) y relanza"; exit 3; }
 
 echo
-echo "--- PASO 1: precompute_chi2_predictive ($CHITAG) ---"
-KIKA_THIS_WORK_DIR=$CHIRUN \
-KIKA_THIS_WORK_ENDF=$CHIENDF \
-KIKA_MF33_MF34_CROSS_FROM_FILE=$CHICROSS \
-KIKA_RUN_TAG=$CHITAG \
-    python -u precompute_chi2_predictive.py || exit 1
+# ⚑ 9-sep-2026: CHISKIP1=1 salta el precompute y va directo al analisis.
+# Para cuando lo unico que cambia es como se AGRUPA lo ya calculado -- p.ej. el
+# 9-sep, partir `only_KS` en `only_Kinney`. El parquet y su sidecar de ~8 GB ya
+# estan escritos y rehacerlos cuesta media hora para dar el mismo resultado.
+# ⛔ NO lo uses si cambia la cinta, el corpus o la kika instalada: el paso 2 no
+# comprueba de que ejecucion vino el parquet y te daria numeros viejos calladito.
+if [ "${CHISKIP1:-0}" = 1 ]; then
+  case "$CHIMETH" in
+    exfor_c0) CHIPQ=/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_${CHITAG}.parquet ;;
+    *)        CHIPQ=/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_${CHITAG}.parquet ;;
+  esac
+  [ -s "$CHIPQ" ] || { echo "⛔ CHISKIP1=1 pero no existe $CHIPQ"; exit 1; }
+  [ -s "$CHIPQ.eval_cov.npz" ] || { echo "⛔ CHISKIP1=1 pero falta el sidecar $CHIPQ.eval_cov.npz"; exit 1; }
+  echo "--- PASO 1: SALTADO (CHISKIP1=1). Reusando:"
+  ls -la "$CHIPQ" "$CHIPQ.eval_cov.npz"
+else
+echo "--- PASO 1: precompute ($CHIMETH, $CHITAG) ---"
+case "$CHIMETH" in
+  predictive)
+    KIKA_THIS_WORK_DIR=$CHIRUN \
+    KIKA_THIS_WORK_ENDF=$CHIENDF \
+    KIKA_MF33_MF34_CROSS_FROM_FILE=$CHICROSS \
+    KIKA_RUN_TAG=$CHITAG \
+        python -u precompute_chi2_predictive.py || exit 1
+    ;;
+  exfor_c0)
+    # `precompute_chi2_exfor_c0.py` no lee bloques a_0 ni KIKA_RUN_TAG: nombra su
+    # salida por KIKA_CHI2_PARQUET, y de ahi sale el sidecar `<parquet>.eval_cov.npz`.
+    # Las tres variables son OBLIGATORIAS aqui: su defecto sigue apuntando a
+    # `new_test_82_mt1fix`, que ya no existe en el share.
+    # ⚑ El nombre del parquet DEBE coincidir con el de la entrada
+    #   `exfor_c0_${CHITAG}` de chi2_analysis_cluster.py; si no, el paso 2 leeria
+    #   otro fichero (o el sidecar de 11 GB de otra run) sin decir nada.
+    KIKA_THIS_WORK_DIR=$CHIRUN \
+    KIKA_THIS_WORK_ENDF=$CHIENDF \
+    KIKA_NOMINAL_FITS=$CHIRUN/nominal_fits.parquet \
+    KIKA_CHI2_PARQUET=/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_${CHITAG}.parquet \
+        python -u precompute_chi2_exfor_c0.py || exit 1
+    ;;
+  *)
+    echo "⛔ CHIMETH='$CHIMETH' no tiene rama de precompute"; exit 2 ;;
+esac
+fi
 
 echo
-echo "--- PASO 2: chi2_analysis_cluster ($CHITAG) ---"
-KIKA_CHI2_METHODOLOGIES=predictive_$CHITAG \
+echo "--- PASO 2: chi2_analysis_cluster ($CHIMETH, $CHITAG) ---"
+KIKA_CHI2_METHODOLOGIES=${CHIMETH}_$CHITAG \
 KIKA_CHI2_RUN_ID=$CHITAG \
     python -u chi2_analysis_cluster.py || exit 1
 
 echo
 echo "=========================================================="
-echo "  ✅ $CHITAG LISTO"
-echo "  informe : /share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive/run_${CHITAG}/"
-echo "  parquet : /share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_${CHITAG}.parquet"
+echo "  ✅ $CHITAG LISTO  ($CHIMETH)"
+case "$CHIMETH" in
+  exfor_c0) CHIREPORT=chi2_exfor_c0   ; CHIPARQ=/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_${CHITAG}.parquet ;;
+  *)        CHIREPORT=chi2_predictive ; CHIPARQ=/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_${CHITAG}.parquet ;;
+esac
+echo "  informe : /share_snc/snc/JuanMonleon/CHI_Figures/${CHIREPORT}/run_${CHITAG}/"
+echo "  parquet : $CHIPARQ"
+if [ "$CHIMETH" = exfor_c0 ]; then
+  echo
+  echo "  ⚑ COMO SE LEE: contra CHI_Figures/chi2_exfor_c0/run_080/summary.json, que es"
+  echo "    de donde sale la tabla del capitulo 3. Bajo V4 y el subconjunto 'all', run_080"
+  echo "    da This_work 8,02 / JEFF 20,01 / JENDL 24,50."
+  echo
+  echo "  ⛔ NO ES UNA COMPARACION DE UNA SOLA VARIABLE. La cinta es la misma, pero"
+  echo "    run_080 es del 4-jul-2026 y entre medias se arreglaron VARIAS cosas del"
+  echo "    corpus, no solo la sigma del manifiesto (7-sep). Medido en la primera"
+  echo "    ejecucion (TH77, job 8664739): se mueven 50 de los 67 experimentos, y el"
+  echo "    que mas manda no es ninguno de los cuatro de la sigma sino GKATIS 27673002"
+  echo "    (JEFF V4 568,5 -> 21,8), que es el arreglo del 27-ago del camino JSON de"
+  echo "    EXFOR -- corria con sigma 1% plana y sigma_sys = 0. Atribuir el cambio a"
+  echo "    la sigma del manifiesto seria falso. Para AISLARLA haria falta reejecutar"
+  echo "    con la rueda vieja, y no se ha hecho."
+  echo "    Los 4 de la sigma: 23365004, 23365005 (Pirovano), 30076004 (Barnard),"
+  echo "    40372004 (Salnikov) -- en per_experiment/."
+fi
 echo "  ⚑ BORRAR el sidecar en cuanto se lea el parquet:"
-echo "    rm /share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_${CHITAG}.parquet.eval_cov.npz"
+echo "    rm ${CHIPARQ}.eval_cov.npz"
 echo "=========================================================="
 
 # --- ANTES (2026-08-20): sin trabajo activo ---------------------------------

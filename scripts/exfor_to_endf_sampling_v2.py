@@ -374,9 +374,11 @@ UNION_GRID_SUBENTRIES = [                        # (subentry, min_MeV, max_MeV)
 # "hybrid"           - KW two-pass + Gaussian blend weighted by per-bin reliability
 CORRELATION_METHOD = "kernel_weight_mc"
 KW_MC_TWO_PASS = True                            # True: per-bin variance + KW correlations
-KW_MC_INJECT = False                             # False (default): congruence transform Cov = D*Corr_pass1*D
+KW_MC_INJECT = False                             # False (default): congruence transform Cov = D*R_KW*D, i.e.
+                                                  #   ALL correlations (within-bin cross-order AND cross-bin)
+                                                  #   come from Pass 2; Pass 1 supplies only D = diag(std_perbin).
                                                   #   - PSD by construction; consistent with calibrated parquet.
-                                                  # True: legacy splice (Pass-1 cross-bin + Pass-2 within-bin)
+                                                  # True: legacy splice (Pass-2 cross-bin + Pass-1 within-bin)
                                                   #   followed by Higham nearest-PSD repair. Kept for research
                                                   #   comparison; not PSD-preserving by construction.
 KW_MC_MIN_WEIGHT = 1e-3                          # Overlap weight threshold
@@ -3704,8 +3706,9 @@ def run_exfor_to_endf_sampling_v2(
                 log_psd_diagnostics(corr_hyb, "corr_hyb (post-blend)", _logger)
 
                 if KW_MC_INJECT:
-                    # Legacy path: splice Pass-2 within-bin blocks into Pass-1
-                    # cross-bin scaffold, then snap to nearest PSD via Higham.
+                    # Legacy path: splice the Pass-1 within-bin (cross-order) blocks
+                    # into the Pass-2 cross-bin scaffold, then snap to nearest PSD
+                    # via Higham. Note the direction: corr_perbin is Pass 1.
                     # Not PSD-preserving by construction.
                     corr_hyb = inject_within_bin_correlations(
                         corr_hyb, corr_perbin, len(energy_indices_kw), max_degree,
@@ -3756,8 +3759,9 @@ def run_exfor_to_endf_sampling_v2(
                     _logger.info(f"  Hybrid blend: all {n_interp} bins interpolated (pure Gaussian)")
             else:  # pure kernel_weight_mc
                 if KW_MC_INJECT:
-                    # Legacy path: splice Pass-2 within-bin blocks into Pass-1
-                    # cross-bin scaffold, then snap to nearest PSD via Higham.
+                    # Legacy path: splice the Pass-1 within-bin (cross-order) blocks
+                    # into the Pass-2 cross-bin scaffold, then snap to nearest PSD
+                    # via Higham. Note the direction: corr_perbin is Pass 1.
                     # Not PSD-preserving by construction.
                     corr_kw = inject_within_bin_correlations(
                         corr_kw, corr_perbin, len(energy_indices_kw), max_degree,
@@ -3779,8 +3783,9 @@ def run_exfor_to_endf_sampling_v2(
                     cov_combined = corr_kw * np.outer(std_perbin, std_perbin) * _sign_outer
                     log_psd_diagnostics(cov_combined, "cov_combined (post-rescale, pure-KW)", _logger)
                 else:
-                    # Default: congruence transform Cov = D * Corr_pass1 * D with
-                    # D = diag(std_perbin). compute_covariance_from_samples sets
+                    # Default: congruence transform Cov = D * R_KW * D, with R_KW the
+                    # Pass-2 correlation matrix (corr_kw) used whole -- within-bin
+                    # cross-order blocks included -- and D = diag(std_perbin) from Pass 1. compute_covariance_from_samples sets
                     # corr diagonals to 0 for zero-variance slots (exfor_utils.py
                     # ~line 2350); restore unit diagonal so Pass-2 variances are
                     # not silently zeroed for those slots.
