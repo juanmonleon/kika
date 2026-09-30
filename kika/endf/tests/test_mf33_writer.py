@@ -54,7 +54,7 @@ def test_populate_lb5_record_fields():
 
     assert rec.ls == 1 and rec.lb == 5 and rec.ne == 4
     assert rec.energies == grid
-    assert rec.matrix == [1.0, 0.2, 0.3, 2.0, 0.4, 3.0]
+    assert np.asarray(rec.matrix).tolist() == [1.0, 0.2, 0.3, 2.0, 0.4, 3.0]
     assert rec.nt == 4 + 6
 
 
@@ -67,7 +67,8 @@ def test_populate_lb6_record_fields():
 
     assert rec.ls == 0 and rec.lb == 6
     assert rec.row_energies == row_grid and rec.col_energies == col_grid
-    assert rec.rect_matrix == list(range(6))
+    # the writers store an ndarray, not a list (writers/_records.py header): compare by value
+    assert np.asarray(rec.rect_matrix).tolist() == list(range(6))
     assert rec.nt == len(row_grid) + len(col_grid) + 2 * 3
 
 

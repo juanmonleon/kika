@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
+from itertools import chain as _chain
 
 from ..mt import MT
 from ....utils import get_endf_logger
@@ -1247,7 +1248,7 @@ class MF33MT(MT):
                                  ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
                     )
                     lines.append(blank_line_number(rec_header))
-                    _write_values_block(ni_rec.energies + ni_rec.matrix)
+                    _write_values_block(_chain(ni_rec.energies, ni_rec.matrix))
 
                 elif ni_rec.lb == 6:
                     # LIST header: 0.0, 0.0, 0, LB=6, NT, NER

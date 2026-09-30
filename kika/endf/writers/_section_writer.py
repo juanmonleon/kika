@@ -168,8 +168,25 @@ def write_mf_section_to_file(
     # ``str(section)`` emits the section body incl. its own SEND, no FEND.
     content = str(section)
     width = record_width(lines) if match_source_width else 80
-    section_lines = [line[:width] + '\n'
-                     for line in content.split('\n') if line.strip()]
+
+    def _section_lines():
+        """Yield the section's lines without materialising them.
+
+        ⚑ MEMORY.  ``content.split('\n')`` builds a list of every line and the comprehension
+        builds a second one; on a fine-mesh MF34 that is ~1.5 M strings twice over, ~400 MB, on top
+        of the joined ``content`` itself.  That, with the value lists the writers used to keep
+        (see writers/_records.py), is what made a common-mesh tape die with MemoryError.  Scanning
+        ``content`` and yielding one slice at a time keeps only the line being written alive.
+        """
+        i, n = 0, len(content)
+        while i < n:
+            j = content.find('\n', i)
+            if j < 0:
+                j = n
+            line = content[i:j]
+            if line.strip():
+                yield line[:width] + '\n'
+            i = j + 1
 
     if has_block:
         # Splice only the target (MF, MT) section; sibling MT sections and the
@@ -181,24 +198,26 @@ def write_mf_section_to_file(
                     f"MF{mf_number} MT{mt_number} already exists in {source_endf}. "
                     f"Set replace_existing=True to replace it."
                 )
-            new_lines = lines[:sec_start] + section_lines + lines[sec_end:]
+            head, tail, extra = sec_start, sec_end, ()
         else:
             insert_idx = _find_mt_insertion_point(
                 lines, mf_number, mt_number, block_start, block_end
             )
-            new_lines = lines[:insert_idx] + section_lines + lines[insert_idx:]
+            head, tail, extra = insert_idx, insert_idx, ()
     else:
         # No block for this MF yet: insert section + fresh FEND before MEND.
         from ..utils import format_endf_fend_record
         mat_num = section._mat or 0
-        fend_line = format_endf_fend_record(mat_num) + '\n'
         insert_idx = _find_mend_marker(lines)
-        new_lines = (
-            lines[:insert_idx] + section_lines + [fend_line] + lines[insert_idx:]
-        )
+        head, tail, extra = insert_idx, insert_idx, (format_endf_fend_record(mat_num) + '\n',)
 
+    # streamed, so the spliced tape never exists in memory as a second list of lines
     with open(output_path, 'w') as f:
-        f.writelines(new_lines)
+        f.writelines(lines[:head])
+        for _ln in _section_lines():
+            f.write(_ln)
+        f.writelines(extra)
+        f.writelines(lines[tail:])
 
     if update_directory:
         from .update_directory import update_mf1_directory

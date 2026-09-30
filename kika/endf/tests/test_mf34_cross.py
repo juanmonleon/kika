@@ -112,9 +112,9 @@ def test_cross_shape_blocks_match_default():
             d = _find(default, l, l1)
             c = _find(withcross, l, l1)
             if l == l1:
-                assert d.matrix == c.matrix and d.energies == c.energies
+                assert np.array_equal(np.asarray(d.matrix), np.asarray(c.matrix)) and d.energies == c.energies
             else:
-                assert d.rect_matrix == c.rect_matrix
+                assert np.array_equal(np.asarray(d.rect_matrix), np.asarray(c.rect_matrix))
 
 
 def test_cross_array_form_equivalent_to_dict():
