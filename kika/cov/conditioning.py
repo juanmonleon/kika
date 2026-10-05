@@ -133,8 +133,13 @@ ROUNDOFF_RATIO = float(np.finfo(np.float64).eps)
 #: rather than a defect: six significant figures put the last digit of a
 #: stated 1.0 at 1e-6, and the ratio of two rounded variances can move it by
 #: a few of those. Above it the matrix says something an evaluator did not
-#: mean, and the draw is refused. Measured: 2.1e-7 on U-235 JEFF-4.0 MF33.
-CORRELATION_ROUNDOFF = 1e-5
+#: mean, and the draw is refused. Measured: 2.1e-7 on U-235 JEFF-4.0 MF33, and
+#: 1.19e-5 on Pu-240 ENDF/B-VII.1 MF35 (PF-7) -- 2.6x what six-figure rounding of
+#: the three stored numbers allows, so the evaluator's own arithmetic rounded
+#: too, on rows with σ ~ 1e-7. That tape was refused at 1e-5. 1e-4 sits 8x above
+#: it and 10x below the coarsest defect it guards against: an INTG correlation
+#: read back at NDIGIT=3 is wrong by 1e-3.
+CORRELATION_ROUNDOFF = 1e-4
 
 #: ``max|Σ_j C_ij| / max|C|`` below this means the block carries a sum rule.
 #:
@@ -362,10 +367,10 @@ class ConditioningReport:
             has_sum_rule = any(f.check == "sum_rule" for f in block.findings)
 
             if definiteness is None:
-                # Including the case where definiteness came back at severity
-                # `blocks` — a matrix with no positive eigenvalue at all states
-                # no variance anywhere, and there is nothing for a projection to
-                # project. It falls through to the unrepaired notes below.
+                # Including a matrix with no positive eigenvalue at all: a zero
+                # block states no variance anywhere (a note) and anything else
+                # there has a negative variance (blocks). Either way there is
+                # nothing for a projection to project.
                 steps.append(PlanStep(
                     key=block.key, remedy="none",
                     reason="no PSD repair needed or none applies",
@@ -973,6 +978,17 @@ def _check_definiteness(
         return None
     largest = float(spectrum.max())
     smallest = float(spectrum.min())
+    if largest <= 0.0 and float(np.max(np.abs(matrix))) <= inert_floor:
+        # PF-8: JEFF-4.0 Pu-242 states its [20, 200] MeV band as a 1x1 zero.
+        # A block that states no uncertainty is drawn as no perturbation --
+        # the inert-row mask pins every row -- not refused.
+        return Finding(
+            check="definiteness",
+            severity=NOTE,
+            summary="no positive eigenvalue — the block states no variance "
+                    "anywhere and draws no perturbation",
+            evidence={"max_eigenvalue": largest},
+        )
     if largest <= 0.0:
         return Finding(
             check="definiteness",
@@ -1106,13 +1122,14 @@ def _check_inert_rows(matrix: np.ndarray, *, floor: float) -> Optional[Finding]:
     count = int(inert.sum())
     if not count:
         return None
-    severity = BLOCKS if count == matrix.shape[0] else NOTE
+    # A wholly inert block is a note too (PF-8): the evaluation states no
+    # uncertainty there, and the draw honours that by perturbing nothing.
     summary = f"{count}/{matrix.shape[0]} row(s) state no variance (σ² < {floor:.0e})"
-    if severity is BLOCKS:
-        summary += " — the whole block is inert"
+    if count == matrix.shape[0]:
+        summary += " — the whole block is inert and draws no perturbation"
     return Finding(
         check="inert_rows",
-        severity=severity,
+        severity=NOTE,
         summary=summary,
         evidence={"n_inert": count, "indices": np.flatnonzero(inert).tolist()[:64], "floor": floor},
         remedies=(
