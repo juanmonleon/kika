@@ -25,6 +25,7 @@ from kika.endf.parsers.parse_endf import parse_endf_file
 from kika.endf.writers.endf_writer import ENDFWriter
 from kika.endf.classes.mf4.polynomial import MF4MTLegendre
 from kika.endf.classes.mf4.mixed import MF4MTMixed
+from kika.endf.classes.mf4.tabulated import MF4MTTabulated
 from kika.endf.classes.mf import MF
 from kika._utils import zaid_to_symbol, temperature_to_suffix
 from kika.njoy.run_njoy import run_njoy
@@ -1532,7 +1533,18 @@ def apply_perturbation_factors_to_endf(
         return perturbed_params, positivity_events
 
     # Apply perturbations to each MT section
+    requested_mts = {mt for _isotope, mt, _l, _bin in param_mapping}
     for mt_number, mt_data in mf4.sections.items():
+        # A tabulated (LTT=2) section has no a_l to scale. Skipping it used to
+        # write a sample with that MT unperturbed and report success; the
+        # applier for tables lives on the model path only.
+        if isinstance(mt_data, MF4MTTabulated) and mt_number in requested_mts:
+            raise ValueError(
+                f"MF4/MT{mt_number} is tabulated (LTT=2) and this request carries "
+                f"MF34 components for it. The ENDF path only perturbs Legendre "
+                f"coefficients and would leave the section unperturbed; use "
+                f"kika.sampling.model_perturbation.perturbFromModel, which perturbs the table"
+            )
         # Check for both MF4MTLegendre and MF4MTMixed (both have Legendre coefficients)
         if isinstance(mt_data, (MF4MTLegendre, MF4MTMixed)):
             # Apply perturbations to Legendre coefficients

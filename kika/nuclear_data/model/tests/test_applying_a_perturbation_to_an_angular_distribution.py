@@ -377,3 +377,52 @@ def test_the_two_indices_describe_the_same_grids():
         (t[1], t[2]) for t in shipped["triplets"]]
     for component, triplet in zip(mine["components"], shipped["triplets"]):
         assert np.array_equal(mine["grids"][component], shipped["grids"][triplet])
+
+
+# ----------------------------------------------------------------------
+# The tabulated half of an LTT=3 distribution: what reaches it is reported
+# ----------------------------------------------------------------------
+
+def test_the_fe56_covariance_stops_short_of_the_tabulated_half(bothPaths):
+    """JEFF-4.0 Fe-56: tables from 45 MeV, MF34 up to 20 MeV, so nothing is lost.
+
+    Measured, not assumed, because it is the number decision D1 of
+    ``docs/library/mf4_tabulated_perturbation_roadmap.md`` waits on: if this
+    tape's covariance crossed the transition, perturbing the tabulated half
+    would move a frozen result.
+    """
+    diagnostics = bothPaths["diagnostics"]
+    assert diagnostics["tabulated_from"] == pytest.approx(4.5e7)
+    assert diagnostics["tabulated_uncovered"] == {}
+
+
+def test_bins_that_reach_the_tabulated_half_are_reported_per_order():
+    """A block running to 100 MeV puts some of its bins over the 45 MeV tables."""
+    baseline, _provenance, _report = decodeMF4MT(read_endf(TAPE).get_file(4)
+                                                 .sections[MT])
+    edges = {1: np.array([1.0e5, 1.0e7, 4.0e7, 6.0e7, 1.0e8]),
+             2: np.array([1.0e5, 2.0e7])}
+    factors = {1: np.full(4, 1.05), 2: np.array([0.95])}
+    _perturbed, diagnostics = applyLegendreFactors(baseline.angular, factors,
+                                                   edges)
+    assert diagnostics["tabulated_from"] == pytest.approx(4.5e7)
+    assert set(diagnostics["tabulated_uncovered"]) == {1}
+    stats = diagnostics["tabulated_uncovered"][1]
+    assert stats["n_bins"] == 2
+    assert stats["fraction"] == pytest.approx(0.5)
+    assert stats["energy_max"] == pytest.approx(1.0e8)
+
+
+def test_the_run_states_what_the_tabulated_half_did_not_receive():
+    """The diagnostics become one line in the run's notes, per MT."""
+    from kika.sampling.joint_blocks import ComponentKey
+    from kika.sampling.model_perturbation import _tabulatedAngularNote
+
+    reaching = {"n_bins": 2, "fraction": 0.5, "energy_max": 1.0e8}
+    applied = {ComponentKey(26056, 34, 2, 1): {"tabulated_from": 4.5e7,
+                                               "tabulated_uncovered": reaching},
+               ComponentKey(26056, 34, 2, 2): {"n_inserted": 3}}
+    note = _tabulatedAngularNote(applied)
+    assert "MF4/MT2" in note and "4.5e+07" in note and "L=1: 2 bin(s)" in note
+    assert "L=2" not in note
+    assert _tabulatedAngularNote({ComponentKey(26056, 34, 2, 2): {}}) is None

@@ -340,6 +340,49 @@ def _legendreRegions(angular):
     return found
 
 
+def _tabulatedRegions(angular):
+    """The ``XYs2d`` children of *angular* whose inner functions are tables of mu.
+
+    The complement of :func:`_legendreRegions`, with the same
+    ``(container, position, xys2d)`` triples: an LTT=2 distribution is one such
+    region, and an LTT=3 one has a Legendre region below and one of these above.
+    """
+    from .functions.higher import Regions2d, XYs2d
+
+    found = []
+    if isinstance(angular, XYs2d):
+        if angular.function1ds and not _isLegendreRegion(angular):
+            found.append((None, 0, angular))
+        return found
+    if isinstance(angular, Regions2d):
+        for position, child in enumerate(angular.function2ds):
+            if isinstance(child, XYs2d):
+                if child.function1ds and not _isLegendreRegion(child):
+                    found.append((angular, position, child))
+            elif isinstance(child, Regions2d):
+                found.extend(_tabulatedRegions(child))
+    return found
+
+
+def _binsReaching(binEdges, orders, start: float) -> dict:
+    """Per order, the bins of a factor block that reach above *start*.
+
+    A bin ``[lo, hi)`` reaches above when ``hi > start``: some of the energy
+    its factor is stated for lies where the distribution is a table. Returns
+    ``{order: {"n_bins", "fraction", "energy_max"}}`` for the orders that have
+    any, so an empty mapping means the blocks stop short of *start*.
+    """
+    reaching = {}
+    for order in orders:
+        grid = np.asarray(binEdges[order], dtype=float)
+        n = int(np.sum(grid[1:] > start + ABSCISSA_ATOL))
+        if n:
+            reaching[order] = {"n_bins": n,
+                               "fraction": n / max(grid.size - 1, 1),
+                               "energy_max": float(grid[-1])}
+    return reaching
+
+
 def _interpolateCoefficients(energy: float, xs: np.ndarray, vectors,
                              interpolation) -> np.ndarray:
     """The Legendre vector at *energy*, under the outer axis's own rule.
@@ -492,6 +535,10 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
         energy. That last is a real case, not a defensive check: a file may
         state a covariance for an order the evaluation itself stops short of,
         and a caller should be told rather than have it silently dropped.
+        ``tabulated_from`` is the first incident energy of a tabulated region
+        (``None`` without one) and ``tabulated_uncovered`` the bins, per order,
+        that reach above it -- the part of the block an LTT=3 distribution
+        does not receive from this applier.
 
     **What this reproduces, and where it deliberately does not.** The arithmetic
     is ``_apply_factors_to_mf4_legendre``'s: the union of every order's interior
@@ -603,11 +650,20 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
                              index=node.index)
         return rebuilt.get((id(None), 0), node)
 
+    # The tabulated half of an LTT=3 distribution is not touched here, so any
+    # bin that reaches into it states a perturbation this applier drops. Said in
+    # the diagnostics, because nothing in the written file would show it.
+    tables = _tabulatedRegions(angular)
+    tabulatedFrom = (min(float(region.function1ds[0].outerDomainValue)
+                         for _c, _p, region in tables) if tables else None)
     diagnostics = {
         "per_order": perOrder,
         "n_inserted": inserted,
         "orders_absent": [order for order in orders
                           if perOrder[order]["n_scaled"] == 0],
+        "tabulated_from": tabulatedFrom,
+        "tabulated_uncovered": (_binsReaching(binEdges, orders, tabulatedFrom)
+                                if tabulatedFrom is not None else {}),
     }
     return rebuild(angular), diagnostics
 

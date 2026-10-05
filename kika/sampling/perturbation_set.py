@@ -468,6 +468,10 @@ class PerturbationSet:
                     "n_inserted": info["n_inserted"],
                     **info["per_order"].get(order, {}),
                 }
+                uncovered = info.get("tabulated_uncovered", {}).get(order)
+                if uncovered:
+                    diagnostics[component]["tabulated_from"] = info["tabulated_from"]
+                    diagnostics[component]["tabulated_uncovered"] = uncovered
 
         spectra = [c for c in self.components() if c.mf == 35]
         if spectra:

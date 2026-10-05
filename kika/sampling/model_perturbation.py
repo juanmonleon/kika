@@ -304,6 +304,34 @@ def _sumRuleNote(applied) -> Optional[str]:
     return None
 
 
+def _tabulatedAngularNote(applied) -> Optional[str]:
+    """Which MF34 bins reach the tabulated half of an LTT=3 distribution.
+
+    The Legendre applier leaves that half as the evaluation wrote it, so a bin
+    whose energies extend above the transition states a perturbation the
+    realisation does not carry there. The tape gives no sign of it, which is
+    what makes it a note rather than a detail.
+    """
+    perMT: Dict[int, List[str]] = {}
+    start: Dict[int, float] = {}
+    for component, info in applied.items():
+        uncovered = info.get("tabulated_uncovered") if component.mf == 34 else None
+        if not uncovered:
+            continue
+        start[component.mt] = float(info["tabulated_from"])
+        perMT.setdefault(component.mt, []).append(
+            f"L={component.index}: {uncovered['n_bins']} bin(s), "
+            f"{uncovered['fraction']:.0%} of the block, up to "
+            f"{uncovered['energy_max']:.4g} eV")
+    if not perMT:
+        return None
+    parts = [f"MF4/MT{mt} is tabulated above {start[mt]:.4g} eV and its MF34 "
+             f"reaches past that ({'; '.join(sorted(rows))})"
+             for mt, rows in sorted(perMT.items())]
+    return ("; ".join(parts) + ". Those bins are not applied to the tabulated "
+            "half, which stays as evaluated")
+
+
 def _spectrumNote(applied) -> Optional[str]:
     """How much of the spectrum an MF35 realisation did *not* perturb.
 
@@ -1100,7 +1128,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                 sampleDir / "perturbation.json")
 
     notes = [note for note in (_redundancyNote(suite, pset), _sumRuleNote(applied),
-                               _spectrumNote(applied)) if note is not None]
+                               _spectrumNote(applied),
+                               _tabulatedAngularNote(applied)) if note is not None]
     _forget(suite, pset, applied)
     return {"sample": number, "label": label, "set": pset, "files": files,
             "applied": applied, "ace": aceProduced, "notes": notes}
