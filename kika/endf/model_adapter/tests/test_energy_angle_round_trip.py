@@ -854,3 +854,27 @@ def test_every_mf6_section_of_a_real_tape_encodes_byte_identically(
     for mt, section in sorted(sections.items()):
         encoded, *_ = _roundTrip(section, mt)
         assert str(encoded) == str(section), f"{fixture} MT{mt}"
+
+
+def test_a_law_zero_neutron_keeps_the_spectrum_mf5_gave_it(u235_b81_tape):
+    """PF-6: MF6's LAW=0 says "no distribution here", not "no distribution".
+
+    ENDF/B-VIII.1 U-235 states MT18 in MF5 (the prompt spectrum, LF=1) and in
+    MF6 (``JP=11``, a ``LAW=0`` neutron plus 54 deferring products). The MF6
+    pass ran after MF5 and put an ``unspecified`` where MF5 had put the
+    spectrum, so the reference evaluation reached the model with no PFNS and
+    MF35 had nothing to perturb. The distributed GNDS translation keeps the MF5
+    ``XYs2d`` on the fission neutron, and so does this.
+    """
+    from kika.nuclear_data.model import EVAL_LABEL, Uncorrelated, XYs2d
+
+    endf = read_endf(str(u235_b81_tape), mf_numbers=[1, 3, 4, 5, 6])
+    suite, report = decodeReactionSuite(endf)
+    neutron = next(p for p in suite.findReactionByENDF_MT(18).outputChannel.products
+                   if p.label == "n")
+    form = neutron.distribution[EVAL_LABEL]
+    assert isinstance(form, Uncorrelated), type(form).__name__
+    assert isinstance(form.energy, XYs2d)
+    assert len(form.energy.outerDomainValues) == 23
+    assert any("LAW=0" in message and "MT18" in message
+               for message in report.warnings)
