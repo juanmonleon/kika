@@ -41,6 +41,7 @@ import numpy as np
 from kika.endf.read_endf import read_endf
 from kika.endf.writers.endf_writer import ENDFWriter, update_mf1_directory
 from kika.sampling.endf_perturbation import _process_njoy_for_sample
+from kika.sampling.mf35_sampling import NULL_TOL as MF35_NULL_TOL
 from kika.sampling.mf35_sampling import (
     SIGMA_CLAMP,
     band_grids,
@@ -85,7 +86,7 @@ DECOMPOSITION_METHOD: str = "svd"       # cholesky is refused; these are rank de
 SAMPLING_METHOD: str = "sobol"
 PSD_METHOD: str = "auto"                # -> clip on this data; higham is far too slow
 PROJECTION_METRIC: str = "probability"
-NULL_TOL: float = 1e-10
+NULL_TOL: float = MF35_NULL_TOL          # one number for both draws; gated bit for bit
 
 #: See :func:`kika.sampling.mf35_sampling.generate_pfns_samples`. Removes
 #: PSD-repair debris from groups holding ~1e-14 of the spectrum.

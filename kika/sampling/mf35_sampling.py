@@ -56,10 +56,11 @@ from .pfns_positivity import check_ratios, project_ratios_to_simplex
 
 __all__ = [
     "OUTGOING_STEP_SHOULDER", "INCIDENT_STEP_SHOULDER", "ENDF_ENERGY_RTOL",
-    "SAMPLING_SPACE", "SIGMA_CLAMP",
+    "SAMPLING_SPACE", "SIGMA_CLAMP", "NULL_TOL",
     "load_pfns_covariance", "build_pfns_covariance", "covariance_suite_blocks",
     "band_grids",
-    "generate_pfns_samples", "normalisation_residual", "perturb_pfns_partial",
+    "generate_pfns_samples", "clamp_to_stated_sigma", "band_draw_report",
+    "normalisation_residual", "perturb_pfns_partial",
     "pfns_ratio_rule",
     "realised_group_probabilities", "realised_covariance_report",
     "row_sum_residual", "normalisation_drift",
@@ -265,6 +266,14 @@ def normalisation_residual(mf5_section, partial_index: int = 0) -> Dict[str, Any
 #: :func:`generate_pfns_samples` for why this is needed and why 5.
 SIGMA_CLAMP = 5.0
 
+#: Eigenvalues at or below this fraction of the largest are null directions,
+#: and an MF35 band is drawn **only** in the others. Not a tuning knob: see
+#: ``core._draw_one_block`` for why an untruncated draw of an absolute
+#: group-probability covariance writes a ×1e+7 spike into the low-energy tail.
+#: ``pfns_perturbation.NULL_TOL`` and the model path's default for absolute
+#: blocks are this number, and have to be -- the two draws are gated bit for bit.
+NULL_TOL = 1.0e-10
+
 
 def generate_pfns_samples(
     suite,
@@ -333,16 +342,41 @@ def generate_pfns_samples(
         psd_method=psd_method, null_tol=null_tol,
         dtype=np.float64, verbose=verbose, logger=logger,
     )
+    clamp_to_stated_sigma(samples, blocks, diagnostics,
+                          sigma_clamp=sigma_clamp, logger=logger)
+    return samples, diagnostics
 
-    for (key, matrix) in blocks:
-        info = diagnostics[key]
+
+def clamp_to_stated_sigma(samples, blocks, diagnostics, *,
+                          sigma_clamp: Optional[float] = SIGMA_CLAMP,
+                          logger=None) -> None:
+    """Clip every drawn delta to ``sigma_clamp`` of **its own stated** σ, in place.
+
+    The reasoning is :func:`generate_pfns_samples`'s; this is its arithmetic,
+    pulled out so that the model path (``model_perturbation._drawEverything``)
+    clamps with the same code rather than a copy of it.
+
+    *blocks* must be the matrices **as the file states them** -- before any
+    conditioning. The clamp measures a draw against the evaluator's marginal;
+    measured against a clipped matrix it would be measuring against the very
+    diagonal inflation it exists to remove. ``blocks`` is ``[(key, matrix)]``
+    or a ``{key: matrix}`` mapping; keys not in *samples* are skipped.
+
+    Records ``sigma_clamp``, ``n_clamped`` and ``clamped_fraction`` on
+    ``diagnostics[key]``.
+    """
+    items = blocks.items() if hasattr(blocks, "items") else blocks
+    for key, matrix in items:
+        if key not in samples:
+            continue
+        info = diagnostics.setdefault(key, {})
         info["sigma_clamp"] = sigma_clamp
         if sigma_clamp is None:
             info["n_clamped"] = 0
             info["clamped_fraction"] = 0.0
             continue
 
-        sigma = np.sqrt(np.clip(np.diag(matrix), 0.0, None))
+        sigma = np.sqrt(np.clip(np.diag(np.asarray(matrix, dtype=float)), 0.0, None))
         limit = float(sigma_clamp) * sigma
         drawn = samples[key]
         exceeded = np.abs(drawn) > limit
@@ -358,7 +392,27 @@ def generate_pfns_samples(
                 f"({info['clamped_fraction']:.2e}) exceeded the stated marginal"
             )
 
-    return samples, diagnostics
+
+def band_draw_report(deltas: np.ndarray, matrix: np.ndarray, *,
+                     null_tol: float = NULL_TOL) -> Dict[str, Any]:
+    """The per-band numbers the legacy run summary carries, as flat scalars.
+
+    ``row_sum_residual`` and ``normalisation_drift`` describe the *stated*
+    matrix; the rest is :func:`realised_covariance_report` on the draw. Flat and
+    scalar so that a run log that keeps only scalars keeps all of it.
+    """
+    matrix = np.asarray(matrix, dtype=float)
+    gate = realised_covariance_report(deltas, matrix, null_tol=null_tol)
+    report = {
+        "row_sum_residual": row_sum_residual(matrix),
+        "normalisation_drift": normalisation_drift(matrix),
+    }
+    for key in ("spectral_fidelity_median", "gate_tolerance",
+                "passes_spectral_gate", "null_leakage", "n_modes_retained",
+                "max_abs_delta_sum"):
+        if key in gate:
+            report[key] = gate[key]
+    return report
 
 
 # ---------------------------------------------------------------------------

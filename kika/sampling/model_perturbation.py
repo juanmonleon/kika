@@ -304,6 +304,36 @@ def _sumRuleNote(applied) -> Optional[str]:
     return None
 
 
+def _droppedStepsNote(applied) -> Optional[str]:
+    """Whether ``maxOutgoingPoints`` cost this realisation some of its steps.
+
+    A dropped step is a group whose factor was **not** written: the tape then
+    says less than the draw did, in the groups with the smallest steps. The
+    legacy driver warns for the same reason -- a silent cap reads as "the
+    factor was applied everywhere".
+    """
+    dropped = {component: int(info.get("total_steps_dropped", 0))
+               for component, info in applied.items() if component.mf == 35}
+    total = sum(dropped.values())
+    if not total:
+        return None
+    return (
+        f"MF35: {total} factor step(s) were dropped to respect "
+        f"maxOutgoingPoints, in band(s) "
+        f"{sorted(c.index for c, n in dropped.items() if n)}; the written "
+        f"spectrum is not the one that was sampled in those groups"
+    )
+
+
+#: Said once per run when it perturbs a fission spectrum. The legacy driver
+#: writes ``"mf35_unchanged": True`` in its summary and its parquet metadata,
+#: and the run metadata here carries the same flag.
+MF35_UNCHANGED_NOTE = (
+    "MF35 is not perturbed alongside the spectrum: each output carries the "
+    "evaluation's original covariance beside a spectrum that has moved "
+    "(mf35_unchanged)")
+
+
 def _spectrumNote(applied) -> Optional[str]:
     """How much of the spectrum an MF35 realisation did *not* perturb.
 
@@ -710,7 +740,8 @@ def resolveSpaces(blocks, index, space):
 
 
 def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod,
-                    samplingMethod, psdMethod, nullTol, logger):
+                    samplingMethod, psdMethod, nullTol, logger,
+                    statedBlocks=None):
     """Draw every block, each under the convention its covariance states.
 
     Returns the merged ``(samples, diagnostics)``, keyed exactly as a single
@@ -726,6 +757,23 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
     exactly what it drew before this function existed: the delta list is empty,
     the factor list is the whole thing in the same order, and the offset is
     zero.
+
+    **The absolute (MF35) blocks are drawn as the shipped PFNS pipeline draws
+    them**, because that is what makes the two paths one operation:
+
+    * truncated to the retained rank at ``mf35_sampling.NULL_TOL`` when the
+      caller left *nullTol* at ``None``. ``None`` means "every direction" for a
+      relative block and is harmless there; for a band of group probabilities
+      it puts ~1e-10 of decomposition debris on groups holding ~1e-17 of the
+      spectrum, which the applier divides into a ×1e+7 ratio. An explicit
+      *nullTol* still wins, and the value used is recorded either way;
+    * clamped at ``SIGMA_CLAMP`` of each group's **stated** σ --
+      :func:`~kika.sampling.mf35_sampling.clamp_to_stated_sigma`, the same code
+      the legacy draw runs. *statedBlocks* (``{key: matrix}``, before any
+      conditioning) is what "stated" means; without it the blocks as drawn are
+      used, which is right only when nothing conditioned them;
+    * and reported per band with the legacy run summary's numbers
+      (:func:`~kika.sampling.mf35_sampling.band_draw_report`).
     """
     from kika.sampling.core import BLOCK_SEED_STRIDE, draw_samples
 
@@ -759,14 +807,25 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
         drawnCount += len(group)
 
     if deltaBlocks:
-        from kika.sampling.mf35_sampling import SAMPLING_SPACE
+        from kika.sampling.mf35_sampling import (NULL_TOL, SAMPLING_SPACE,
+                                                 SIGMA_CLAMP, band_draw_report,
+                                                 clamp_to_stated_sigma)
 
+        deltaNullTol = NULL_TOL if nullTol is None else nullTol
         offset = drawnCount * BLOCK_SEED_STRIDE
         drawn, info = draw_samples(
             deltaBlocks, nSamples, space=SAMPLING_SPACE, returns="deltas",
             decomposition_method=decompositionMethod,
             sampling_method=samplingMethod, seed=seed + offset,
-            psd_method=psdMethod, null_tol=nullTol, verbose=False, logger=logger)
+            psd_method=psdMethod, null_tol=deltaNullTol, verbose=False,
+            logger=logger)
+        stated = dict(statedBlocks) if statedBlocks is not None else {}
+        stated = {key: stated.get(key, matrix) for key, matrix in deltaBlocks}
+        clamp_to_stated_sigma(drawn, stated, info, sigma_clamp=SIGMA_CLAMP)
+        for key, matrix in stated.items():
+            info[key]["null_tol"] = deltaNullTol
+            info[key].update(band_draw_report(drawn[key], matrix,
+                                              null_tol=deltaNullTol))
         samples.update(drawn)
         diagnostics.update(info)
 
@@ -895,6 +954,41 @@ def _readSource(source, log, covarianceSource=None):
     return suite, covariances, endfObj, path, "endf", (covReport, suiteReport)
 
 
+#: The repairs an absolute (MF35) block may receive. ``clip`` preserves the
+#: eigenvectors, so it keeps **1** in the near-null space and ``C·1 ≈ 0`` with
+#: it -- measured to *improve* the residual (4.2e-6 -> 3.0e-6 on Cf-252). A
+#: congruence (``clip_rescale``, ``cap``) maps 1 to D·1 and took it to 2.2e-3;
+#: Higham degraded it ~40x. The masks and rescales drop or move rows, which
+#: breaks the sum on the retained subspace. ``pfns_mf5_mf35_roadmap.md`` L1.
+SUM_RULE_SAFE_REMEDIES = ("none", "clip")
+
+
+def _refuseSumRuleBreakingRepairs(blocks, index, plan) -> None:
+    """Raise if *plan* would repair a spectrum band with anything but ``clip``.
+
+    A band of group probabilities carries ``C·1 ≈ 0`` because the probabilities
+    sum to one, and that is what lets a linear draw preserve the spectrum's
+    normalisation. A repair that breaks it does not fail: the projection in
+    ``pfns_ratio_rule`` absorbs the drift and the run completes, with a
+    covariance the file never stated. The automatic plan already chooses
+    ``clip`` for these blocks; this is for a plan a human edited.
+    """
+    _factorBlocks, deltaBlocks = _splitBySemantics(blocks, index)
+    absolute = {block_key_text(key) for key, _matrix in deltaBlocks}
+    bad = [step for step in plan.steps
+           if block_key_text(step.key) in absolute
+           and step.remedy not in SUM_RULE_SAFE_REMEDIES]
+    if bad:
+        raise ValueError(
+            "the conditioning plan repairs a fission-spectrum (MF35) band with "
+            + ", ".join(sorted({step.remedy for step in bad}))
+            + f" on {len(bad)} block(s). An MF35 band carries a sum rule "
+            "(C·1 ≈ 0, because the group probabilities sum to one) and only "
+            f"{' or '.join(SUM_RULE_SAFE_REMEDIES)} preserve it; anything else "
+            "draws a covariance the file does not state and the projection "
+            "hides it. Use 'clip' for these blocks.")
+
+
 def _condition(blocks, index, conditioningPlan, log, labels=None):
     """Stage 2 and 3 of the pre-flight, as the pipeline runs them.
 
@@ -951,6 +1045,8 @@ def _condition(blocks, index, conditioningPlan, log, labels=None):
             f"conditioningPlan is None (inspect and apply the recommendation), "
             f"False (touch nothing) or a ConditioningPlan, got "
             f"{type(conditioningPlan).__name__}")
+
+    _refuseSumRuleBreakingRepairs(blocks, index, conditioningPlan)
 
     with log.timed("conditioned", f"applied {len(conditioningPlan.steps)} step(s)",
                    mode=mode) as info:
@@ -1032,6 +1128,9 @@ class _SampleContext:
     ace: Optional[AceOptions]
     writeSets: bool
     emitTapes: bool
+    #: MF35 only: cap on one outgoing table, ``None`` for none -- the legacy
+    #: default, since NJOY took a ×1.57-grown Cf-252 table without complaint.
+    maxOutgoingPoints: Optional[int] = None
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1054,7 +1153,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                     "grouping": ctx.grouping, "source": str(ctx.sourcePath or ""),
                     "sourceFormat": ctx.sourceFormat})
     with log.timed("applied", f"{label} on the model", sample=number) as info:
-        applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode)
+        applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode,
+                                    maxOutgoingPoints=ctx.maxOutgoingPoints)
         info["components"] = [c.describe() for c in applied]
     _checkRealisation(pset, log, number)
 
@@ -1100,7 +1200,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                 sampleDir / "perturbation.json")
 
     notes = [note for note in (_redundancyNote(suite, pset), _sumRuleNote(applied),
-                               _spectrumNote(applied)) if note is not None]
+                               _spectrumNote(applied), _droppedStepsNote(applied))
+             if note is not None]
     _forget(suite, pset, applied)
     return {"sample": number, "label": label, "set": pset, "files": files,
             "applied": applied, "ace": aceProduced, "notes": notes}
@@ -1181,6 +1282,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      nWorkers: int = 1,
                      covarianceSource=None,
                      onMissing: str = "raise",
+                     maxOutgoingPoints: Optional[int] = None,
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
@@ -1232,9 +1334,18 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         so that a run can say which projection it used instead of a log line
         recording that one happened.
     nullTol
-        ``None`` -- every direction retained -- because that is what the shipped
-        pipelines draw with today, so a comparison against them measures the
-        path and not the truncation. See ``draw_samples``.
+        ``None`` -- every direction retained -- for the relative blocks
+        (MF31/33/34), because that is what the shipped pipelines draw with
+        today, so a comparison against them measures the path and not the
+        truncation. See ``draw_samples``. **MF35 bands are the exception:**
+        ``None`` there means ``mf35_sampling.NULL_TOL`` (1e-10), which is what
+        the shipped PFNS pipeline draws with and what keeps decomposition debris
+        off groups holding 1e-17 of the spectrum -- see :func:`_drawEverything`.
+        A number given here applies to both.
+    maxOutgoingPoints
+        MF35 only: the most points one perturbed outgoing table may hold.
+        ``None`` (default) for no cap. When it bites, the smallest factor steps
+        are dropped first and the run says how many.
     formats
         Any of :data:`EMITTERS`. ``"ace"`` needs *ace*.
     ace
@@ -1437,6 +1548,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                   quantities=list(meta["quantities"]),
                   components=[c.describe() for c in meta["components"]])
 
+    statedBlocks = {key: matrix for key, matrix in blocks}
     blocks, plan, report, conditioningApplied, conditioningMode = _condition(
         blocks, index, conditioningPlan, log, labels)
 
@@ -1445,7 +1557,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             blocks, index, nSamples, seed=seed, space=space,
             decompositionMethod=decompositionMethod,
             samplingMethod=samplingMethod, psdMethod=psdMethod, nullTol=nullTol,
-            logger=None)
+            logger=None, statedBlocks=statedBlocks)
     for key, diag in drawDiagnostics.items():
         log.event("drawn", f"rank {diag['rank']} of {diag['n']}, "
                   f"{diag['n_null']} null direction(s)",
@@ -1469,6 +1581,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                        # A skipped quantity is true of every sample and stated
                        # by no output file, which is exactly what notes are for.
                        notes=list(skipped))
+    if _perturbsASpectrum(index):
+        result.notes.append(MF35_UNCHANGED_NOTE)
+        log.note(MF35_UNCHANGED_NOTE)
 
     stem = sourcePath.stem if sourcePath is not None else "perturbed"
     if stem.endswith(".gnds"):
@@ -1479,7 +1594,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         labelPrefix=labelPrefix, seed=seed, space=space, grouping=grouping,
         formats=tuple(formats), outputDir=outputDir, stem=stem, mat=mat,
         ace=ace if "ace" in formats else None, writeSets=writeSets,
-        emitTapes=emitTapes)
+        emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
@@ -1555,6 +1670,12 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                           original, seed, space, psdMethod, nWorkers=nWorkers)
         log.write(outputDir)
     return result
+
+
+def _perturbsASpectrum(index) -> bool:
+    """Whether any block of *index* is a fission-spectrum (MF35) band."""
+    return any(component.mf == 35
+               for meta in index.values() for component in meta["components"])
 
 
 def _jsonableRequest(value):
@@ -1645,6 +1766,7 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
             for key, meta in result.index.items()
         ],
         "notes": list(result.notes),
+        **({"mf35_unchanged": True} if _perturbsASpectrum(result.index) else {}),
         "dryRun": result.dryRun,
         "nWorkers": nWorkers,
         "sourceFormat": result.sourceFormat,
