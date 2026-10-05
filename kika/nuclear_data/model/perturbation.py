@@ -56,6 +56,7 @@ from .functions.regions1d import Regions1d
 from .functions.xys1d import XYs1d
 
 __all__ = ["applyFactors", "refineAtBinEdges", "applyLegendreFactors",
+           "applyTabulatedFactors",
            "MAGNITUDE_ORDER", "applyNubarFactors", "refineForNubar",
            "applySpectrumFactors", "summariseSpectrumNodes",
            "SPECTRUM_STEP_SHOULDER", "SPECTRUM_OUTER_SHOULDER",
@@ -666,6 +667,274 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
                                 if tabulatedFrom is not None else {}),
     }
     return rebuild(angular), diagnostics
+
+
+# ======================================================================
+# Tabulated angular distributions: the same factors, written back as a table
+# ======================================================================
+
+def _tableOf(function):
+    """``(mu, p, pairs)`` of a tabulated inner function, whichever class it is."""
+    mu, p, pairs = function.toEndfRegions()
+    return (np.asarray(mu, dtype=float), np.asarray(p, dtype=float),
+            [(int(a), int(b)) for a, b in pairs])
+
+
+def _tableLike(template, mu, p, pairs, *, outerDomainValue=None):
+    """A function of *template*'s kind carrying ``(mu, p)`` under *pairs*.
+
+    One region comes back as a plain ``XYs1d`` and several as a ``Regions1d``,
+    the rule the MF4 decoder follows (a one-region ``regions1d`` is a node the
+    GNDS schema rejects).
+    """
+    from .functions.regions1d import Regions1d
+
+    function = Regions1d.fromEndfRegions(np.asarray(mu, dtype=float),
+                                         np.asarray(p, dtype=float), pairs,
+                                         axes=getattr(template, "axes", None))
+    if len(function.function1ds) == 1:
+        function = function.function1ds[0]
+    function.outerDomainValue = (template.outerDomainValue if outerDomainValue is None
+                                 else float(outerDomainValue))
+    function.index = getattr(template, "index", None)
+    return function
+
+
+def _interpolateTable(energy: float, lower, upper, interpolation):
+    """The table at *energy* between two neighbours, under the energy law.
+
+    Both neighbours are evaluated on the union of their cosine grids and
+    combined node by node. For two lin-lin tables that is exact: the sum of two
+    piecewise-linear functions is piecewise linear on the union of their
+    breakpoints. Anything else is refused rather than approximated, because
+    the result would be a central value no evaluation stated.
+    """
+    from .enums import Interpolation
+
+    interpolation = Interpolation(interpolation)
+    e1, e2 = float(lower.outerDomainValue), float(upper.outerDomainValue)
+    if interpolation is Interpolation.flat or abs(e2 - e1) < 1e-15:
+        mu, p, pairs = _tableOf(lower)
+        return _tableLike(lower, mu, p, pairs, outerDomainValue=energy)
+    if interpolation is not Interpolation.linlin:
+        raise NotImplementedError(
+            f"the incident-energy axis of this table interpolates "
+            f"{interpolation.value!r}; a bin edge between two tabulated energies "
+            f"needs the table there, and only lin-lin and flat have an answer "
+            f"this module will give")
+    (mu1, p1, pairs1), (mu2, p2, pairs2) = _tableOf(lower), _tableOf(upper)
+    if any(code != 2 for _n, code in pairs1 + pairs2):
+        raise NotImplementedError(
+            "inserting a table between two tabulated energies needs both to be "
+            "lin-lin in mu; a histogram or log law does not add node by node")
+    mu = np.unique(np.concatenate([mu1, mu2]))
+    t = (energy - e1) / (e2 - e1)
+    p = (1.0 - t) * np.interp(mu, mu1, p1) + t * np.interp(mu, mu2, p2)
+    return _tableLike(lower, mu, p, [(mu.size, 2)], outerDomainValue=energy)
+
+
+def _refineTabulatedRegion(region, edges: ArrayLike):
+    """Insert the repeated incident energies the factor blocks need.
+
+    The tabulated twin of :func:`_refineLegendreRegion`, with the same three
+    cases per edge. What is duplicated is a whole table of ``f(mu)``.
+    """
+    from .functions.higher import XYs2d
+
+    inner = list(region.function1ds)
+    xs = np.array([float(f.outerDomainValue) for f in inner], dtype=float)
+    interior = _interiorEdges(edges, float(xs[0]), float(xs[-1]))
+    inserted = 0
+    for edge in reversed(interior):
+        xs = np.array([float(f.outerDomainValue) for f in inner], dtype=float)
+        matches = np.flatnonzero(np.abs(xs - edge) <= ABSCISSA_ATOL)
+        if matches.size >= 2:
+            continue
+        if matches.size == 1:
+            at = int(matches[0])
+            mu, p, pairs = _tableOf(inner[at])
+            inner.insert(at + 1, _tableLike(inner[at], mu.copy(), p.copy(), pairs))
+            inserted += 1
+        else:
+            at = int(np.searchsorted(xs, edge, side="right"))
+            table = _interpolateTable(edge, inner[at - 1], inner[at],
+                                      region.interpolation)
+            mu, p, pairs = _tableOf(table)
+            inner[at:at] = [table, _tableLike(table, mu.copy(), p.copy(), pairs)]
+            inserted += 2
+    if not inserted:
+        return region, 0
+    return XYs2d(function1ds=inner, interpolation=region.interpolation,
+                 interpolationQualifier=region.interpolationQualifier,
+                 axes=region.axes, label=region.label,
+                 outerDomainValue=region.outerDomainValue,
+                 index=region.index), inserted
+
+
+def _replaceRegions(angular, rebuilt):
+    """*angular* with the regions keyed in *rebuilt* swapped in, others shared.
+
+    *rebuilt* maps ``(id(container), position)`` -- the triples
+    :func:`_legendreRegions` and :func:`_tabulatedRegions` return -- to the new
+    region. Untouched children are kept **by identity**, which is what lets a
+    caller check that a region nothing perturbed still encodes to the same
+    bytes.
+    """
+    from .functions.higher import Regions2d
+
+    def rebuild(node):
+        if isinstance(node, Regions2d):
+            children = []
+            for position, child in enumerate(node.function2ds):
+                replacement = rebuilt.get((id(node), position))
+                children.append(replacement if replacement is not None
+                                else rebuild(child))
+            return Regions2d(function2ds=children, axes=node.axes,
+                             label=node.label,
+                             outerDomainValue=node.outerDomainValue,
+                             index=node.index)
+        return rebuilt.get((id(None), 0), node)
+
+    return rebuild(angular)
+
+
+def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
+                          repair=None):
+    """Perturb the tabulated ``f(mu)`` of an angular distribution, order by order.
+
+    The tables' counterpart of :func:`applyLegendreFactors`, with the same
+    arguments and the same diagnostics, so a caller dispatches on the region and
+    not on the shape of the answer. Per incident energy, the table is perturbed
+    by :func:`~kika.nuclear_data.model.angular_tables.perturbTabulatedAngular`:
+    project onto the orders the factors name, scale, and add the correction to
+    the evaluator's own table on its own nodes. In energy, everything is
+    :func:`applyLegendreFactors`' rule: the union of every order's bin edges
+    becomes a repeated incident energy, the copy below takes the factor of the
+    bin that ends there and the copy above the factor of the bin that starts
+    there. An edge between two tabulated energies gets the table interpolated
+    there, node by node on the union of their cosine grids.
+
+    Only tabulated regions are touched. A Legendre region of the same
+    ``Regions2d`` (the lower half of LTT=3) is kept by identity: perturbing both
+    halves is the caller's two calls.
+
+    Parameters
+    ----------
+    repair
+        ``callable(mu, p, pPrime, info, pairs) -> (pPrime, event)`` or ``None``.
+        Called for a node whose perturbed table went negative somewhere; returns
+        the table to keep and a record of what it did (``None`` for nothing).
+        Whether a sample may carry a negative probability is the sampler's
+        decision, as it is for the Legendre applier, so the default leaves the
+        table as computed and only counts it.
+
+    Returns
+    -------
+    (perturbed, diagnostics)
+        ``per_order``, ``n_inserted`` and ``orders_absent`` as
+        :func:`applyLegendreFactors` has them -- the last always empty, since a
+        table holds every order implicitly -- plus ``min_p``,
+        ``n_negative_nodes`` (energies with any ``f' < 0`` before a repair),
+        ``max_integral_change`` (the worst ``|int f' - int f|`` relative to
+        ``int f``, under the table's own law) and ``positivity_events``.
+
+    **A limitation of the method, not a defect** (D-F of the roadmap). With a
+    relative covariance the change is ``(c_l - 1) a_l``, which vanishes where
+    ``a_l`` does. And ``a_l`` is this module's projection of the table, so if
+    the evaluator built the MF34 against a different one, the absolute
+    perturbation implied here differs from theirs.
+    """
+    from .angular_tables import perturbTabulatedAngular
+    from .functions.higher import XYs2d
+
+    orders = sorted(int(order) for order in factors)
+    if MAGNITUDE_ORDER in orders:
+        raise ValueError(
+            f"Legendre order {MAGNITUDE_ORDER} is the cross-section magnitude, "
+            f"not a shape coefficient; its factors belong on the crossSection "
+            f"node of the same reaction")
+    if set(orders) != {int(order) for order in binEdges}:
+        raise ValueError(
+            f"order(s) {sorted(set(orders) ^ {int(o) for o in binEdges})} have "
+            f"factors without a grid or a grid without factors; a block and its "
+            f"bins are one object")
+    for order in orders:
+        nFactors = len(np.asarray(factors[order]))
+        nBins = len(np.asarray(binEdges[order])) - 1
+        if nFactors != nBins:
+            raise ValueError(f"L={order}: {nFactors} factor(s) on {nBins} bin(s)")
+    if coverageEdges not in COVERAGE_EDGES:
+        raise ValueError(f"coverageEdges must be one of {COVERAGE_EDGES}, got "
+                         f"{coverageEdges!r}")
+
+    regions = _tabulatedRegions(angular)
+    if not regions:
+        raise ValueError(
+            "this distribution carries no tabulated f(mu); a Legendre "
+            "distribution is perturbed by applyLegendreFactors")
+
+    grids = [np.asarray(binEdges[order], dtype=float) for order in orders]
+    if coverageEdges == "ramp":
+        grids = [grid[1:-1] for grid in grids if grid.size > 2]
+    allEdges = (np.unique(np.concatenate(grids)) if grids
+                else np.zeros(0, dtype=float))
+
+    perOrder = {order: {"min_factor": 1.0, "max_factor": 1.0, "n_scaled": 0}
+                for order in orders}
+    inserted, negative, worstIntegral, minP = 0, 0, 0.0, np.inf
+    events = []
+    rebuilt = {}
+    for container, position, region in regions:
+        refined, added = _refineTabulatedRegion(region, allEdges)
+        inserted += added
+        xs = np.array([float(f.outerDomainValue) for f in refined.function1ds],
+                      dtype=float)
+        perPoint = {order: _flatFactors(xs, np.asarray(factors[order], dtype=float),
+                                        np.asarray(binEdges[order], dtype=float))
+                    for order in orders}
+
+        tables = []
+        for at, function in enumerate(refined.function1ds):
+            nodeFactors = {order: float(perPoint[order][at]) for order in orders}
+            if all(c == 1.0 for c in nodeFactors.values()):
+                tables.append(function)
+                continue
+            mu, p, pairs = _tableOf(function)
+            pPrime, info = perturbTabulatedAngular(mu, p, nodeFactors, pairs=pairs)
+            for order, c in nodeFactors.items():
+                if c != 1.0:
+                    stats = perOrder[order]
+                    stats["min_factor"] = min(stats["min_factor"], c)
+                    stats["max_factor"] = max(stats["max_factor"], c)
+                    stats["n_scaled"] += 1
+            if info["n_negative"]:
+                negative += 1
+                if repair is not None:
+                    pPrime, event = repair(mu, p, pPrime, info, pairs)
+                    if event is not None:
+                        events.append({"energy": float(xs[at]), **dict(event)})
+            minP = min(minP, float(np.min(pPrime)))
+            if info["integral_before"]:
+                worstIntegral = max(worstIntegral, abs(
+                    info["integral_after"] / info["integral_before"] - 1.0))
+            tables.append(_tableLike(function, mu, pPrime, pairs))
+
+        rebuilt[(id(container), position)] = XYs2d(
+            function1ds=tables, interpolation=refined.interpolation,
+            interpolationQualifier=refined.interpolationQualifier,
+            axes=refined.axes, label=refined.label,
+            outerDomainValue=refined.outerDomainValue, index=refined.index)
+
+    diagnostics = {
+        "per_order": perOrder,
+        "n_inserted": inserted,
+        "orders_absent": [],
+        "min_p": float(minP) if np.isfinite(minP) else None,
+        "n_negative_nodes": negative,
+        "max_integral_change": worstIntegral,
+        "positivity_events": events,
+    }
+    return _replaceRegions(angular, rebuilt), diagnostics
 
 
 # ======================================================================
