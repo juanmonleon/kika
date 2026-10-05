@@ -587,9 +587,9 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
     regions = _legendreRegions(angular)
     if not regions:
         raise ValueError(
-            "this distribution carries no Legendre coefficients, so an MF34 "
-            "perturbation has nothing to act on. A tabulated (LTT=2) angular "
-            "distribution is perturbed as a table, which is a different applier"
+            "this distribution carries no Legendre coefficients, so this "
+            "applier has nothing to act on. A tabulated (LTT=2) angular "
+            "distribution is perturbed as a table, by applyTabulatedFactors"
         )
 
     if coverageEdges not in COVERAGE_EDGES:

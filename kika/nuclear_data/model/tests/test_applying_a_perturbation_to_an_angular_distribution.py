@@ -413,16 +413,18 @@ def test_bins_that_reach_the_tabulated_half_are_reported_per_order():
     assert stats["energy_max"] == pytest.approx(1.0e8)
 
 
-def test_the_run_states_what_the_tabulated_half_did_not_receive():
-    """The diagnostics become one line in the run's notes, per MT."""
+def test_the_run_states_once_that_a_table_was_perturbed_as_a_table():
+    """One constant line per run, a second the first time a table goes negative."""
     from kika.sampling.joint_blocks import ComponentKey
     from kika.sampling.model_perturbation import _tabulatedAngularNote
 
-    reaching = {"n_bins": 2, "fraction": 0.5, "energy_max": 1.0e8}
-    applied = {ComponentKey(26056, 34, 2, 1): {"tabulated_from": 4.5e7,
-                                               "tabulated_uncovered": reaching},
-               ComponentKey(26056, 34, 2, 2): {"n_inserted": 3}}
+    clean = {"min_p": 0.01, "n_negative_nodes": 0, "max_integral_change": 1e-6}
+    applied = {ComponentKey(92238, 34, 2, 1): {"tables": clean},
+               ComponentKey(92238, 34, 2, 2): {"tables": clean}}
     note = _tabulatedAngularNote(applied)
-    assert "MF4/MT2" in note and "4.5e+07" in note and "L=1: 2 bin(s)" in note
-    assert "L=2" not in note
-    assert _tabulatedAngularNote({ComponentKey(26056, 34, 2, 2): {}}) is None
+    assert "MF4/MT[2] tabulated" in note and "go negative" not in note
+    other = {ComponentKey(92238, 34, 2, 1): {"tables": dict(clean, min_p=0.02)}}
+    assert _tabulatedAngularNote(other) == note, "the text must not carry numbers"
+    negative = {ComponentKey(92238, 34, 2, 1): {"tables": dict(clean, n_negative_nodes=3)}}
+    assert "go negative" in _tabulatedAngularNote(negative)
+    assert _tabulatedAngularNote({ComponentKey(92238, 34, 2, 1): {}}) is None

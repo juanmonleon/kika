@@ -305,31 +305,38 @@ def _sumRuleNote(applied) -> Optional[str]:
 
 
 def _tabulatedAngularNote(applied) -> Optional[str]:
-    """Which MF34 bins reach the tabulated half of an LTT=3 distribution.
+    """What perturbing a tabulated f(mu) did that the tape does not show.
 
-    The Legendre applier leaves that half as the evaluation wrote it, so a bin
-    whose energies extend above the transition states a perturbation the
-    realisation does not carry there. The tape gives no sign of it, which is
-    what makes it a note rather than a detail.
+    Two things, both measured per realisation by ``applyTabulatedFactors``:
+    nodes where the perturbed table went negative (counted and left as
+    computed, as the Legendre path leaves a negative series), and how far the
+    lin-lin integral of the table moved -- the correction integrates to zero
+    in the continuum but not between nodes, and a coarse cosine grid is where
+    that stops being small (decision D3 of the roadmap).
+
+    The text is the same for every sample, so the run records it once; the
+    numbers are per realisation and live in its diagnostics under ``tables``.
+    A second note is raised the first time any realisation goes negative.
     """
-    perMT: Dict[int, List[str]] = {}
-    start: Dict[int, float] = {}
-    for component, info in applied.items():
-        uncovered = info.get("tabulated_uncovered") if component.mf == 34 else None
-        if not uncovered:
-            continue
-        start[component.mt] = float(info["tabulated_from"])
-        perMT.setdefault(component.mt, []).append(
-            f"L={component.index}: {uncovered['n_bins']} bin(s), "
-            f"{uncovered['fraction']:.0%} of the block, up to "
-            f"{uncovered['energy_max']:.4g} eV")
-    if not perMT:
+    tabulated = sorted({c.mt for c, info in applied.items()
+                        if c.mf == 34 and info.get("tables")})
+    if not tabulated:
         return None
-    parts = [f"MF4/MT{mt} is tabulated above {start[mt]:.4g} eV and its MF34 "
-             f"reaches past that ({'; '.join(sorted(rows))})"
-             for mt, rows in sorted(perMT.items())]
-    return ("; ".join(parts) + ". Those bins are not applied to the tabulated "
-            "half, which stays as evaluated")
+    negative = sorted({c.mt for c, info in applied.items()
+                       if c.mf == 34 and (info.get("tables") or {}).get("n_negative_nodes")})
+    repaired = sorted({c.mt for c, info in applied.items()
+                       if c.mf == 34 and (info.get("tables") or {}).get("n_repaired")})
+    note = (f"MF4/MT{tabulated} tabulated and perturbed as a table: the correction "
+            f"is added on the evaluator's own cosine nodes and the lin-lin "
+            f"integral is not renormalised (per-realisation numbers under "
+            f"'tables')")
+    if repaired:
+        note += (f". Some realisations of MT{repaired} went negative and were "
+                 f"repaired by moving the perturbed orders")
+    elif negative:
+        note += (f". Some realisations of MT{negative} go negative at some "
+                 f"node and are left as computed")
+    return note
 
 
 def _spectrumNote(applied) -> Optional[str]:
@@ -1060,6 +1067,7 @@ class _SampleContext:
     ace: Optional[AceOptions]
     writeSets: bool
     emitTapes: bool
+    angularPositivity: str = "report"
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1082,7 +1090,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                     "grouping": ctx.grouping, "source": str(ctx.sourcePath or ""),
                     "sourceFormat": ctx.sourceFormat})
     with log.timed("applied", f"{label} on the model", sample=number) as info:
-        applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode)
+        applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode,
+                                    angularPositivity=ctx.angularPositivity)
         info["components"] = [c.describe() for c in applied]
     _checkRealisation(pset, log, number)
 
@@ -1210,6 +1219,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      nWorkers: int = 1,
                      covarianceSource=None,
                      onMissing: str = "raise",
+                     angularPositivity: str = "report",
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
@@ -1316,6 +1326,15 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         log, a line in :attr:`RunResult.notes` and an entry in
         ``run_metadata.json``. A request where *nothing* matches still raises,
         because that is a run with no perturbation in it.
+    angularPositivity
+        What to do where a perturbed **table** of f(mu) goes negative at a
+        node. ``"report"`` (the default) counts it and leaves it, which is what
+        the Legendre path does with a negative series. ``"repair"`` moves the
+        perturbed orders by the least amount that makes every node
+        non-negative (:func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`).
+        A strongly forward-peaked table -- U-238 above 17 MeV, with
+        ``f(-1) ~ 1e-4`` -- goes negative under a few percent on ``a_1``, so
+        on such tapes this is a choice and not a detail.
     covarianceSource
         A second ENDF tape to take the covariance from, leaving the model to
         come from *source*. ``None`` (the default) is the normal case: an
@@ -1365,6 +1384,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               decompositionMethod=decompositionMethod,
               samplingMethod=samplingMethod, psdMethod=psdMethod,
               dryRun=dryRun, formats=list(formats), nWorkers=nWorkers,
+              angularPositivity=angularPositivity,
               source=str(source) if isinstance(source, (str, Path)) else "<parsed>",
               covarianceSource=(str(covarianceSource)
                                 if covarianceSource is not None else None),
@@ -1514,7 +1534,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         labelPrefix=labelPrefix, seed=seed, space=space, grouping=grouping,
         formats=tuple(formats), outputDir=outputDir, stem=stem, mat=mat,
         ace=ace if "ace" in formats else None, writeSets=writeSets,
-        emitTapes=emitTapes)
+        emitTapes=emitTapes, angularPositivity=angularPositivity)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:

@@ -59,9 +59,10 @@ def _f(x: float) -> str:
 
 
 def _line(fields, mf: int, mt: int) -> str:
+    mat = MAT                     # read at call time: write() rebinds it
     body = "".join(f if isinstance(f, str) else
                    (_f(f) if isinstance(f, float) else f"{f:11d}") for f in fields)
-    return f"{body:<66}{MAT:4d}{mf:2d}{mt:3d}     "
+    return f"{body:<66}{mat:4d}{mf:2d}{mt:3d}     "
 
 
 def _list(head, values, mf, mt):
@@ -87,8 +88,25 @@ def _send(mf):
                                                         f"{mf:2d}  099999")
 
 
-def write(path: Path, *, orders=(0, 1, 2)) -> Path:
-    orders = list(orders)
+def write(path: Path, *, orders=(0, 1, 2), za: int = None, awr: float = None,
+          mat: int = None, grid=None) -> Path:
+    """Write the tape. *za*, *awr*, *mat* and *grid* default to Fe-56's; the
+    covariance numbers are the same whatever nuclide they are written for,
+    which is what lets the same block serve as a well-behaved covariance
+    beside another evaluation's tables."""
+    global ZA, AWR, MAT, GRID
+    saved = (ZA, AWR, MAT, GRID)
+    ZA = ZA if za is None else int(za)
+    AWR = AWR if awr is None else float(awr)
+    MAT = MAT if mat is None else int(mat)
+    GRID = GRID if grid is None else np.asarray(grid, dtype=float)
+    try:
+        return _write(Path(path), list(orders))
+    finally:
+        ZA, AWR, MAT, GRID = saved
+
+
+def _write(path: Path, orders) -> Path:
     lines = [f"{'synthetic Fe-56 MF33+MF34 with L=0 (kika tests)':<66}"
              f"{1:4d}{0:2d}{0:3d}     "]
     # MF3 stub: the covariance file only has to name the reaction.
@@ -111,6 +129,5 @@ def write(path: Path, *, orders=(0, 1, 2)) -> Path:
             lines += _lb5(block(l, l1), l == l1, 34, MT)
     lines += [_send(34), _line([0.0, 0.0, 0, 0, 0, 0], 0, 0),
               _line([0.0, 0.0, 0, 0, 0, 0], 0, 0).replace(f"{MAT:4d}", "  -1")]
-    path = Path(path)
     path.write_text("\n".join(lines) + "\n")
     return path
