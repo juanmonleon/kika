@@ -1424,6 +1424,12 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             log.warning(note, subject=f"MF{selection.mf}")
         if dropped:
             request = {selection.mf: selection for selection in kept}
+    from kika.sampling.joint_blocks import resolveMagnitudeOrder
+
+    request, magnitudeNotes = resolveMagnitudeOrder(covariances, request)
+    for note in magnitudeNotes:
+        skipped.append(note)
+        log.warning(note, subject="MF34")
     log.event("request", _describeRequestForPeople(request),
               request={str(k): _jsonableRequest(v) for k, v in request.items()}
               if isinstance(request, Mapping) else str(request),

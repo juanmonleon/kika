@@ -61,36 +61,55 @@ def test_the_fixture_reads_back_as_written(covarianceSuite):
 
 
 # ----------------------------------------------------------------------
-# J0: what happens today, pinned before it is changed
+# J1: an MF34 selection without orders leaves L=0 out, and says so
 # ----------------------------------------------------------------------
 
-def test_an_angular_request_perturbs_the_cross_section_today(covariance):
-    """``{34: None}`` lets L=0 in, and it lands on sigma -- MF3 is rewritten.
+def test_an_angular_request_leaves_the_cross_section_alone(covariance):
+    """``{34: None}`` perturbs the shape and nothing else; L=0 is a note.
 
-    A request that names only the angular distribution changes the cross
-    section, and nothing in the run says so.
+    Before J1 the L=0 factors landed on sigma and MF3 was rewritten by a
+    request that named only the angular distribution.
     """
     run = _run(covariance, {34: None})
     sample = run.samples[0]
-    components = sample["set"].components()
-    assert ComponentKey(ZA, 34, MT, 0) in components
+    assert {c.index for c in sample["set"].components()} == {1, 2}
+    assert _touchedFiles(sample["set"], tuple(sample["applied"])) == {4: [MT]}
+    (note,) = [n for n in run.notes if "states L=0" in n]
+    assert "only the angular distribution" in note
+    assert "reach |cov|" in note, "the fixture's cross blocks are not null"
+
+
+def test_naming_order_zero_still_perturbs_sigma_from_mf34(covariance):
+    """Explicit beats default: asking for L=0 is a request to move sigma."""
+    run = _run(covariance, {34: {"index": [0, 1, 2]}})
+    sample = run.samples[0]
+    assert ComponentKey(ZA, 34, MT, 0) in sample["set"].components()
     assert _touchedFiles(sample["set"], tuple(sample["applied"])) == {3: [MT], 4: [MT]}
-    assert run.notes == []
+    assert not [n for n in run.notes if "states L=0" in n]
 
 
-def test_both_files_unordered_are_refused(covariance):
-    """MF33 and MF34's L=0 claim one sigma, and the set refuses both."""
-    with pytest.raises(ValueError, match="Ask for one of them"):
-        _run(covariance, {33: None, 34: None})
+def test_cross_section_and_angular_together_are_drawn(covariance):
+    """``{33, 34}`` no longer refuses: MF33 gives sigma, L>=1 the shape.
+
+    The sigma <-> a_l term L0xLl is not drawn yet (J3), and on this fixture it
+    is not null, so the note has to say the correlation is missing.
+    """
+    run = _run(covariance, {33: None, 34: None})
+    components = run.samples[0]["set"].components()
+    assert components == (ComponentKey(ZA, 33, MT, 0), ComponentKey(ZA, 34, MT, 1),
+                          ComponentKey(ZA, 34, MT, 2))
+    (note,) = [n for n in run.notes if "states L=0" in n]
+    assert "MF33 gives sigma's variance" in note
+    assert "not in the draw" in note
 
 
 def test_orders_from_one_drop_the_sigma_shape_cross_term(covariance,
                                                          covarianceSuite):
     """``{33, 34: L>=1}`` draws two independent groups: L0xLl is not used.
 
-    The cross term is in the file and nowhere in the draw; the run does not say
-    so. That is the state J2/J3 exist to change -- until then, a request for
-    both quantities samples them as uncorrelated.
+    The cross term is in the file and nowhere in the draw. Named orders are
+    the caller's choice, so no note -- the default path above is the one that
+    has to explain itself.
     """
     request = {33: None, 34: {"index": [1, 2]}}
     groups = samplingGroups(collectEntries(covarianceSuite, request))

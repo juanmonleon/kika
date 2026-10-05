@@ -1,12 +1,14 @@
 """A covariance-only Fe-56 tape whose MF34 states L=0, built on demand.
 
-No committed tape carries an MF34 a_0 section, and none of the evaluated
-libraries to hand does either (scanned 2026-10-05: JEFF-4.0, ENDF/B-VIII.0 and
-VIII.1, JENDL-4.0 and -5, JEFF-3.3 -- see
-``kika-workspace/kika_dev/sampling/checks/scan_mf34_candidates.py``). The only
-real ones are this project's own ``_a0cross`` tapes, whose MF34 is gigabytes.
-So the shape is fabricated here, small enough to read in a test and with a
-covariance whose every number is known.
+Of the evaluated libraries to hand only U-235 and U-238 of ENDF/B-VIII.0 and
+VIII.1 state L=0 in MF34 (scanned 2026-10-05 with
+``kika-workspace/kika_dev/sampling/checks/scan_mf34_candidates.py``), and theirs
+is a placeholder: L0xL0 one bin of zero variance, L0xLl noise at 2e-19. That
+tape is committed as ``micro_u238_mf34_l0.endf`` and tests the plumbing; it
+cannot test a cross term that is really there. This project's ``_a0cross``
+tapes have one, in an MF34 of gigabytes. So the shape is fabricated here,
+small enough to read in a test and with a covariance whose every number is
+known.
 
 The tape is MF3 (a header stub), MF33/MT2 and MF34/MT2 of ZA 26056, MAT 2631,
 on one 3-bin grid. It is meant to be passed as ``covarianceSource`` beside
