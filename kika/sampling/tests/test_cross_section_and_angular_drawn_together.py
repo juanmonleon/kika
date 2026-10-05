@@ -84,6 +84,12 @@ def test_the_request_draws_sigma_from_mf33_and_the_shape_from_l1_l2(run):
     assert _touchedFiles(sample["set"], tuple(sample["applied"])) == {3: [MT], 4: [MT]}
     (note,) = [n for n in run.notes if "states L=0" in n]
     assert "null" in note and "nothing is lost" in note
+    # MF4/MT2 is LTT=3 with tables from 17 MeV and the MF34 runs to 30 MeV, so
+    # the tabulated half is perturbed too -- decision D1, here with the
+    # evaluation's own, well-formed covariance.
+    for component, info in sample["applied"].items():
+        if component.mf == 34:
+            assert info["tables"]["max_integral_change"] < 1e-3
 
 
 def test_each_component_carries_the_variance_the_file_states(run, stated):

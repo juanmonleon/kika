@@ -4,13 +4,21 @@ T5 and T7.3 of ``docs/library/mf4_tabulated_perturbation_roadmap.md``.
 
 The tables are real: ``micro_u238_ltt2_mf34.endf`` is U-238 of JEFF-4.0, whose
 MF4/MT2 is tabulated (LTT=2) at 39 energies with 90-91 cosines. Its own MF34 is
-**not** used here, and on purpose: as stated it cannot be sampled -- 172
-correlations outside [-1, 1] (worst 4.8), not PSD, relative variances up to
-1.7e4 -- and the pre-flight refuses it. Al-27, the only other evaluation to hand
-with LTT=2 and MF34, fails the same way. Those are defects of the evaluations,
-and a test of the applier should not have to be a test of a conditioning plan
-too, so the covariance comes from :mod:`l0_fixture` (orders 1 and 2, written for
-U-238 on a 3-bin grid from 0.1 to 20 MeV) as ``covarianceSource``.
+**not** used here: as stated it cannot be sampled -- 172 correlations outside
+[-1, 1] (worst 4.8), not PSD, relative variances up to 1.7e4 -- and the
+pre-flight refuses it (``docs/library/jeff40_mf34_covariance_report.md``).
+Al-27, the only other evaluation to hand with LTT=2 and MF34, fails the same
+way, and no other library to hand has an LTT=2 section with MF34 at all.
+
+So the covariance is taken from another library, and of two kinds:
+
+* **real** -- MF34/MT2 of U-238 from ENDF/B-VIII.1 (``micro_u238_mf34_l0.endf``),
+  the same nuclide and reaction, which passes the pre-flight. L=1 and 2 on 44
+  bins from 1e-5 eV to 30 MeV, plus an L=0 placeholder that the request drops.
+  The statistics are checked against it.
+* **synthetic** -- :mod:`l0_fixture`, orders 1 and 2 on 0.1-20 MeV, for the one
+  thing the real one cannot show: a range with no covariance at all, where the
+  written table has to be the evaluation bit for bit.
 """
 from __future__ import annotations
 
@@ -45,6 +53,17 @@ def run(covariance, tmp_path_factory):
                             outputDir=tmp_path_factory.mktemp("run"),
                             formats=("endf-delta", "endf-tape", "gnds"),
                             covarianceSource=covariance)
+
+
+REAL_COVARIANCE = TAPE.with_name("micro_u238_mf34_l0.endf")
+
+
+@pytest.fixture(scope="module")
+def realRun(tmp_path_factory):
+    return perturbFromModel(TAPE, {34: [2]}, N, seed=5,
+                            outputDir=tmp_path_factory.mktemp("real"),
+                            formats=("endf-delta",),
+                            covarianceSource=REAL_COVARIANCE)
 
 
 @pytest.fixture(scope="module")
@@ -132,3 +151,34 @@ def test_repair_leaves_no_negative_node(covariance):
     for sample in run.samples:
         for info in sample["applied"].values():
             assert info["tables"]["min_p"] > -1e-10 or info["tables"]["n_repaired"]
+
+
+def test_a_real_covariance_from_another_library_comes_back_out_of_the_tables(realRun, base):
+    """T7.3 with ENDF/B-VIII.1's MF34 on JEFF-4.0's tables, N=8, read back.
+
+    Measured 2026-10-05: 1.2e-5 on the perturbed orders, 1e-7 on the others.
+    """
+    assert {c.index for c in realRun.samples[0]["set"].components()} == {1, 2}
+    assert any("states L=0" in note for note in realRun.notes)
+    worstPerturbed, worstOther = 0.0, 0.0
+    for sample in realRun.samples:
+        blocks = {c.index: (np.asarray(v), np.asarray(sample["set"].binEdges[c]))
+                  for c, v in sample["set"].factors.items()}
+        out = _section(sample["files"]["endf-delta"])
+        for energy, mu, p in zip(base.energies, base.cosines, base.probabilities):
+            grid = blocks[1][1]
+            if len(mu) < 3 or energy in grid or not grid[0] <= energy < grid[-1]:
+                continue
+            at = out.energies.index(energy)
+            before = legendreMoments(mu, p, range(1, 7))
+            after = legendreMoments(mu, out.probabilities[at], range(1, 7))
+            for order in (1, 2):
+                factors, edges = blocks[order]
+                k = int(np.searchsorted(edges, energy, side="right") - 1)
+                expected = (factors[k] - 1.0) * before[order]
+                worstPerturbed = max(worstPerturbed,
+                                     abs(after[order] - before[order] - expected))
+            for order in range(3, 7):
+                worstOther = max(worstOther, abs(after[order] - before[order]))
+    assert worstPerturbed < 1e-4, worstPerturbed
+    assert worstOther < 1e-5, worstOther
