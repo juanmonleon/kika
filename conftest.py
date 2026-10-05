@@ -296,6 +296,33 @@ def resolve_tape(name: str) -> Optional[Path]:
     return None
 
 
+#: G4NDL libraries are *directories* — a tree of per-isotope files — so they
+#: get their own resolver rather than a ``_TAPES`` entry. ``KIKA_G4NDL`` names
+#: the directory the libraries were unpacked into; a ``G4NDL/`` folder under
+#: any tape root is tried after it. Each candidate is the unpacked library
+#: root, recognised by having ``Elastic/FS`` inside it.
+_G4NDL_LIBRARIES: Dict[str, Sequence[str]] = {
+    # The IAEA translation of JEFF-4.0 (Mendoza & Cano-Ott), as unpacked from
+    # www-nds.iaea.org/geant4: the tarball nests a JEFF-4.0/ in a JEFF-4.0/.
+    "jeff40": ("JEFF-4.0/JEFF-4.0", "JEFF-4.0"),
+    # Geant4's own default, the one every Geant4 11.3-11.4 install downloads.
+    "g4ndl471": ("G4NDL.4.7.1/G4NDL4.7.1", "G4NDL4.7.1"),
+}
+
+
+def resolve_g4ndl(name: str) -> Optional[Path]:
+    """Return the root of G4NDL library *name*, or ``None`` if not reachable."""
+    roots = []
+    if os.environ.get("KIKA_G4NDL"):
+        roots.append(Path(os.environ["KIKA_G4NDL"]))
+    roots += [root / "G4NDL" for root in _search_roots()]
+    for root in roots:
+        for rel in _G4NDL_LIBRARIES[name]:
+            if (root / rel / "Elastic" / "FS").is_dir():
+                return root / rel
+    return None
+
+
 def resolve_njoy() -> Optional[Path]:
     """Return a usable NJOY executable, or ``None``."""
     env = os.environ.get("NJOY_EXECUTABLE")
@@ -345,6 +372,7 @@ def _missing(request: pytest.FixtureRequest, what: str, detail: str):
 #: Fixtures whose presence means the test needs the shared data tree.
 _TAPE_FIXTURES = frozenset(
     {f"{name}_tape" for name in _TAPES}
+    | {f"g4ndl_{name}_library" for name in _G4NDL_LIBRARIES}
     | {"serpent_input", "fe56_ace", "tape_root"}
 )
 #: Fixtures whose presence means the test spawns NJOY.
@@ -476,6 +504,25 @@ def _tape_fixture(name: str):
     _fixture.__doc__ = f"Path to the {name} tape (skips, or fails under --deep)."
     return pytest.fixture(scope="session", name=f"{name}_tape")(_fixture)
 
+
+def _g4ndl_fixture(name: str):
+    """Build a session-scoped fixture returning G4NDL library root *name*."""
+
+    def _fixture(request: pytest.FixtureRequest) -> Path:
+        path = resolve_g4ndl(name)
+        if path is None:
+            _missing(request, f"g4ndl:{name}",
+                     "set KIKA_G4NDL to the directory holding "
+                     + " or ".join(_G4NDL_LIBRARIES[name]))
+        return path
+
+    fixture_name = f"g4ndl_{name}_library"
+    _fixture.__name__ = fixture_name
+    return pytest.fixture(scope="session", name=fixture_name)(_fixture)
+
+
+g4ndl_jeff40_library = _g4ndl_fixture("jeff40")
+g4ndl_g4ndl471_library = _g4ndl_fixture("g4ndl471")
 
 fe56_host_tape = _tape_fixture("fe56_host")
 fe57_host_tape = _tape_fixture("fe57_host")
