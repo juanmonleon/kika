@@ -134,16 +134,22 @@ def _sectionProvenance(section, ltt: Optional[int] = None) -> EndfProvenance:
     )
 
 
-def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None):
+def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
+                 xsSections: Optional[dict] = None):
     """One MF33/MT section → a list of :class:`CovarianceSection`.
 
     One section per (row MT, column MT) block the file carries, including the
     cross-MT blocks — those are what make a covariance *suite* rather than a
     list of variances, and dropping them is the classic way to lose half the
     information while everything still looks fine.
+
+    ``xsSections`` (MT → reconstructed σ(E)) is read only by a block that mixes
+    absolute and relative components (LB=0/8/9 with LB=1-6); such a block
+    raises :class:`~kika.endf.classes.mf33.MF33NeedsCrossSections` without it.
+    :func:`decodeCovarianceSuite` supplies it from NJOY on its own.
     """
     report = report if report is not None else ConversionReport()
-    covmat = mf33mt.to_xs_covmat()
+    covmat = mf33mt.to_xs_covmat(mf3_sections=xsSections)
 
     # `CrossSectionCovariance` has no `mt_metadata`, so unlike MF34 the section
     # header does not survive the trip through `kika/cov` at all: ZA reaches the
@@ -777,8 +783,29 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
 
     mf33 = endf.mf.get(33) if hasattr(endf, "mf") else None
     if mf33 is not None:
+        # A block that sums absolute (LB=0/8/9, barns²) and relative components
+        # is relative only after dividing the absolute part by σ_i·σ_j, and in
+        # the resolved range σ(E) exists only reconstructed. So σ comes from
+        # NJOY RECONR -- `endf.pendf` if the caller set it, a cached run on the
+        # source tape otherwise -- and only when some block needs it: a file
+        # whose blocks are all of one kind never starts NJOY.
+        from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
+        mixed = [mt for mt in sorted(getattr(mf33, "mt", {}))
+                 if any(mixesAbsoluteAndRelative(sub.ni_records)
+                        for sub in mf33.mt[mt].subsections)]
+        xsSections = None
+        if mixed:
+            from kika.processing.njoy_pendf_cache import attach_pendf
+            xsSections = attach_pendf(
+                endf, why=f"MF33 MT{mixed}, whose blocks sum absolute (LB=0/8/9) "
+                          f"and relative components,")
+            report.warn(
+                f"MF33 MT{mixed}: absolute components (LB=0/8/9) were made "
+                f"relative with the reconstructed σ(E) in `endf.pendf` "
+                f"(NJOY RECONR) before being summed with the relative ones"
+            )
         for mt in sorted(getattr(mf33, "mt", {})):
-            sections, report = decodeMF33MT(mf33.mt[mt], report)
+            sections, report = decodeMF33MT(mf33.mt[mt], report, xsSections=xsSections)
             suite.covarianceSections.extend(sections)
 
     mf34 = endf.mf.get(34) if hasattr(endf, "mf") else None

@@ -56,10 +56,13 @@ def read_endf(filepath: str, mf_numbers: Optional[Union[int, List[int]]] = None)
         
     # If no filtering, parse entire file with all available parsers
     if mf_numbers is None:
-        return parse_endf_file(filepath)
+        endf = parse_endf_file(filepath)
+        endf.source_path = os.path.abspath(filepath)
+        return endf
     
     # Create empty ENDF object
     endf = ENDF()
+    endf.source_path = os.path.abspath(filepath)
 
     # MAT is a property of the tape, not of the sections asked for, so a
     # targeted parse must report the same one a full parse does. It did not:

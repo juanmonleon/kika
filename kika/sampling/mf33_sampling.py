@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import shutil
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -31,7 +32,10 @@ from kika.endf.classes.mf3.mf3mt import MF3MT
 from kika.endf.writers.endf_writer import ENDFWriter
 from kika.cov.cross_section_covariance import CrossSectionCovariance
 from kika.processing.multigroup import compute_rebin_operator, collapse_covariance
+from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
 from kika.processing.njoy_pendf_cache import (
+    find_njoy_executable,
+    get_or_create_pendf,
     mf33_needs_pendf,
     read_pendf_mf3_sections,
 )
@@ -86,6 +90,23 @@ def load_mf33_covariance(
     mf33_file = endf_obj.get_file(33)
     if mf33_file is None or not getattr(mf33_file, "sections", None):
         raise RuntimeError(f"ENDF {endf_path} has no MF33 sections")
+
+    if pendf_path is None:
+        # A block that sums absolute and relative components cannot be built
+        # without σ(E), and in the resolved range that means a reconstruction.
+        mixed = [mt for mt in sorted({int(m) for m in mt_list})
+                 if mt in mf33_file.sections
+                 and any(mixesAbsoluteAndRelative(sub.ni_records)
+                         for sub in mf33_file.sections[mt].subsections)]
+        if mixed:
+            why = (f"MF33 MT{mixed} of {Path(endf_path).name}, whose blocks sum "
+                   f"absolute (LB=0/8/9) and relative components,")
+            pendf_path = str(get_or_create_pendf(
+                endf_path, tolerance=0.001,
+                njoy_exe=find_njoy_executable(why=why),
+            ))
+            if logger is not None:
+                logger.info(f"[MF33] {why} took σ(E) from NJOY RECONR: {pendf_path}")
 
     mf3_sections: Dict[int, MF3MT] = {}
     if pendf_path is not None:
@@ -308,6 +329,11 @@ def loadCrossSectionBlocks(endfObj, mtList, centralSections, *, mf: int = 33,
     if not mtsPresent:
         raise RuntimeError(f"None of MTs {requested} are present in MF{mf}")
 
+    if mf == 33 and centralSections and getattr(endfObj, "pendf", None) is None:
+        # `centralSections` is the PENDF MF3 here, so it is also the σ(E) a
+        # mixed absolute+relative block divides by: hand it over instead of
+        # letting the decode run RECONR a second time.
+        endfObj.pendf = centralSections
     suite, report = decodeCovarianceSuite(endfObj)
     if logger is not None and not report.isClean:
         logger.info(f"[MF{mf}] covariance decode: {report.summary()}")
@@ -421,9 +447,14 @@ def load_mf33_blocks(
         )
 
     endf_obj = parse_endf_file(str(endf_path))
+    # What `decodeCovarianceSuite` reaches for when a block mixes absolute and
+    # relative components: the PENDF already in hand, else the tape to run
+    # NJOY on. Without these a mixed block would start a second RECONR.
+    endf_obj.source_path = str(endf_path)
     mf3_sections: Dict[int, MF3MT] = {}
     if pendf_path is not None:
         mf3_sections = read_pendf_mf3_sections(pendf_path)
+        endf_obj.pendf = mf3_sections
 
     blocks, index, unionGrid, mtsPresent = loadCrossSectionBlocks(
         endf_obj, mt_list, mf3_sections, mf=33, isotope=isotope,

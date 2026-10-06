@@ -12,6 +12,10 @@ This module provides:
   - ``get_or_create_pendf``     — returns the cached tape22 path, running NJOY
                                   only on cache miss. SHA256(ENDF) keyed.
   - ``read_pendf_mf3_sections`` — parse the cached tape22 into MT → MF3MT.
+  - ``find_njoy_executable``    — the NJOY binary to run, or an error that says
+                                  how to point kika at one.
+  - ``attach_pendf``            — the above in one step for a parsed tape: sets
+                                  ``endf.pendf`` from a cached RECONR run.
 
 The default cache directory resolves via ``tempfile.gettempdir()`` so the
 module works on any machine without machine-specific paths baked in.
@@ -19,6 +23,7 @@ module works on any machine without machine-specific paths baked in.
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -26,7 +31,17 @@ from typing import Dict, Optional
 
 # LB types in MF33 NI sub-subsections that store *relative* covariances.
 # Anything outside this set is absolute and needs σ(E) for diagonal use.
-_RELATIVE_LB_TYPES = frozenset({5, 6, 8})
+# LB=8 is NOT one of them: ENDF-6 §33.2 gives its F_k "the dimension of
+# squared cross sections". It sat in this set until 2026-10-06, and LB=1/2
+# (relative) were missing from it.
+_RELATIVE_LB_TYPES = frozenset({1, 2, 3, 4, 5, 6})
+
+#: Environment variable read by :func:`find_njoy_executable`.
+NJOY_ENV_VAR = "NJOY_EXECUTABLE"
+
+
+class NjoyNotFoundError(RuntimeError):
+    """σ(E) has to be reconstructed with NJOY and no NJOY executable was found."""
 
 
 # Default cache directory — portable across Linux / macOS / Windows.
@@ -184,3 +199,76 @@ def read_pendf_mf3_sections(pendf_path: str | Path) -> Dict[int, object]:
     if mf3 is None or not getattr(mf3, "sections", None):
         raise RuntimeError(f"PENDF {pendf_path} has no MF3 sections")
     return {int(mt): sec for mt, sec in mf3.sections.items()}
+
+
+def find_njoy_executable(njoy_executable: str | Path | None = None, *,
+                         why: str = "this operation") -> Path:
+    """The NJOY binary to run: the argument, else ``$NJOY_EXECUTABLE``, else ``njoy`` on PATH.
+
+    kika never bundles NJOY, so when none of the three gives an existing file
+    this raises :class:`NjoyNotFoundError` with the three ways to fix it —
+    the message is the documentation a user hits at the moment they need it.
+    ``why`` says what the reconstruction is for, and goes into the message.
+    """
+    tried = []
+    if njoy_executable is not None:
+        path = Path(njoy_executable).expanduser()
+        if path.is_file():
+            return path
+        found = shutil.which(str(njoy_executable))
+        if found:
+            return Path(found)
+        tried.append(f"njoy_executable={str(njoy_executable)!r} (no such file)")
+    env = os.environ.get(NJOY_ENV_VAR)
+    if env:
+        path = Path(env).expanduser()
+        if path.is_file():
+            return path
+        tried.append(f"{NJOY_ENV_VAR}={env!r} (no such file)")
+    found = shutil.which("njoy")
+    if found:
+        return Path(found)
+    tried.append("`njoy` on PATH (not found)")
+    raise NjoyNotFoundError(
+        f"{why} needs σ(E) reconstructed by NJOY RECONR, and no NJOY executable "
+        f"was found. Tried: {'; '.join(tried)}.\n"
+        f"Fix it in one of three ways:\n"
+        f"  1. set the environment variable {NJOY_ENV_VAR} to the NJOY binary, e.g.\n"
+        f"       Windows:  setx {NJOY_ENV_VAR} C:\\path\\to\\NJOY2016\\build\\njoy.exe\n"
+        f"       Linux:    export {NJOY_ENV_VAR}=/path/to/NJOY2016/build/njoy\n"
+        f"     (on Windows use a statically linked build: a MinGW build linked\n"
+        f"     against libgfortran.dll misreads numbers under a comma-decimal locale);\n"
+        f"  2. pass njoy_executable=... to the call that raised this;\n"
+        f"  3. reconstruct σ(E) yourself and attach it before decoding:\n"
+        f"       endf.pendf = kika.processing.njoy_reconstruct(path, njoy_executable=...)"
+    )
+
+
+def attach_pendf(endf, *, endf_path: str | Path | None = None,
+                 njoy_executable: str | Path | None = None,
+                 tolerance: float = 0.001,
+                 cache_dir: str | Path | None = None,
+                 why: str = "this operation") -> Dict[int, object]:
+    """Make sure ``endf.pendf`` holds reconstructed σ(E), and return it.
+
+    Kept as is when already set — the caller chose the source. Otherwise NJOY
+    RECONR runs on the tape the object was read from (``endf.source_path``,
+    or ``endf_path``), through the SHA256-keyed cache of
+    :func:`get_or_create_pendf`, so a second call on the same tape costs a
+    file read.
+    """
+    if getattr(endf, "pendf", None):
+        return endf.pendf
+    path = endf_path if endf_path is not None else getattr(endf, "source_path", None)
+    if path is None:
+        raise NjoyNotFoundError(
+            f"{why} needs σ(E) reconstructed by NJOY RECONR, and this ENDF "
+            f"object does not know which file it was read from, so there is "
+            f"nothing to run NJOY on. Read it with kika.endf.read_endf(path), "
+            f"pass endf_path=..., or set endf.pendf yourself."
+        )
+    exe = find_njoy_executable(njoy_executable, why=why)
+    pendf_path = get_or_create_pendf(path, tolerance=tolerance, njoy_exe=exe,
+                                     cache_dir=cache_dir)
+    endf.pendf = read_pendf_mf3_sections(pendf_path)
+    return endf.pendf

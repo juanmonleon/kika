@@ -27,6 +27,9 @@ from .group_averaging import resonance_group_average
 from .derived_covariance import resolve_derived_covariance
 from .njoy_pendf_cache import (
     DEFAULT_PENDF_CACHE_DIR,
+    NjoyNotFoundError,
+    attach_pendf,
+    find_njoy_executable,
     mf33_needs_pendf,
     get_or_create_pendf,
     read_pendf_mf3_sections,
@@ -48,4 +51,7 @@ __all__ = [
     "mf33_needs_pendf",
     "get_or_create_pendf",
     "read_pendf_mf3_sections",
+    "NjoyNotFoundError",
+    "attach_pendf",
+    "find_njoy_executable",
 ]
