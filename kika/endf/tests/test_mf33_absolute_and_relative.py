@@ -293,3 +293,41 @@ def test_a_summation_mt_missing_from_the_pendf_gets_the_sum_of_its_partials():
     np.testing.assert_allclose(summed.values, 1.75)
     # A block that does not mix never looks.
     assert _xs_section(pendf, 3, [mixed[0]]) is None
+
+
+# --------------------------------------------------------------------------
+# NC LTY=0 (a covariance derived by the sum rule, e.g. JENDL-5 Fe-56 MT2)
+# --------------------------------------------------------------------------
+
+def _derived(mt, parts):
+    from kika.endf.classes.mf33 import NCSubSubsection
+    sec = MF33MT(number=mt, _za=26056.0, _awr=55.45, _mat=2631)
+    nc = NCSubSubsection(lty=0, e1=1.0, e2=100.0, nci=len(parts),
+                         ci=[1.0] * len(parts), xmti=[float(p) for p in parts])
+    sec.add_subsection(Subsection(mt1=mt, mat1=0, nc=1, ni=0, nc_records=[nc]))
+    return sec
+
+
+def test_a_sum_rule_with_a_mixed_contributor_does_not_drop_it_without_sigma():
+    siblings = {
+        4: _derived(4, [51, 52]),
+        51: _section([_lb5([0.01, 0.002, 0.04]), _table(8, [0.04, 0.09])], mt=51),
+        52: _section([_lb5([0.02, 0.0, 0.03])], mt=52),
+    }
+    with pytest.raises(MF33NeedsCrossSections):
+        siblings[4].to_xs_covmat(sibling_sections=siblings)
+
+
+def test_a_sum_rule_with_a_mixed_contributor_uses_its_converted_block():
+    siblings = {
+        4: _derived(4, [51, 52]),
+        51: _section([_lb5([0.01, 0.002, 0.04]), _table(8, [0.04, 0.09])], mt=51),
+        52: _section([_lb5([0.02, 0.0, 0.03])], mt=52),
+    }
+    sigma = {4: _xs(4.0), 51: _xs(2.0), 52: _xs(2.0)}
+    cov = siblings[4].to_xs_covmat(sibling_sections=siblings, mf3_sections=sigma)
+    # Var_4 = σ51²·(r51 + F/σ51²) + σ52²·r52, relative to σ4 = 4.
+    r51 = np.array([0.01, 0.04]) + np.array([0.04, 0.09]) / 4.0
+    r52 = np.array([0.02, 0.03])
+    expected = (4.0 * r51 + 4.0 * r52) / 16.0
+    np.testing.assert_allclose(np.diag(cov.matrices[0]), expected, rtol=1e-12)

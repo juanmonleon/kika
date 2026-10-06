@@ -941,6 +941,11 @@ class MF33MT(MT):
                     _resolving=resolving,
                     mf3_sections=mf3_sections,
                 )
+            except MF33NeedsCrossSections:
+                # A contributor that mixes absolute and relative components
+                # cannot be built without σ(E). Dropping it would make the
+                # derived covariance quietly smaller, so the caller hears it.
+                raise
             except Exception as e:
                 logger.warning(f"MT{self.number}: failed to resolve MT{mt_i}: {e}")
                 continue
