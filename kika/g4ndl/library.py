@@ -182,6 +182,22 @@ class G4NDLLibrary:
         """``target``'s ``Elastic/FS``, parsed to its last token."""
         return parse_elastic_fs(self.tokens(target, "Elastic/FS"))
 
+    def read(self, target: TargetLike):
+        """``target`` as a :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
+
+        **Elastic only (MT2)**: the other processes the library holds are not
+        read, and ``suite.report`` lists them. This is what
+        ``kika.read(root, format="g4ndl", target=...)`` calls. Importing the
+        decoder here, not at module scope, keeps ``import kika.g4ndl`` from
+        waking the model.
+        """
+        from kika.g4ndl.decode import decodeElastic
+
+        key = parse_target(target)
+        suite, _ = decodeElastic(self.crossSection(key), self.elasticFinalState(key),
+                                 key, library=self)
+        return suite
+
     def _subdirs(self, process: str) -> Tuple[str, ...]:
         try:
             return PROCESSES[process]

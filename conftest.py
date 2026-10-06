@@ -131,7 +131,12 @@ _TAPES: Dict[str, Sequence[str]] = {
     "pu239_b81": ("endfb81/n-094_Pu_239.endf", "n-094_Pu_239.endf"),
     "th232": ("jeff40-endf/90-Th-232g.txt", "90-Th-232g.txt"),
     "pu241": ("jeff40-endf/94-Pu-241g.txt", "94-Pu-241g.txt"),
-    "u238": ("jeff40-endf/92-U-238g.txt", "U238_jeff4.0_n.endf"),
+    "u238": ("jeff40-endf/92-U-238g.txt", "U238_jeff4.0_n.endf",
+             "jeff40/n_92-U-238g.jeff"),
+    # JEFF-4.0 Fe-56 as distributed, from the library tree: NOT the host tape
+    # above, whose MF4 is JEFF-3.3's. The G4NDL JEFF-4.0 translation is gated
+    # against this one's MF4.
+    "fe56_jeff40": ("jeff40/n_26-Fe-056g.jeff",),
     # MF34 with a live a_0 (magnitude x shape) block. It is one evaluation on
     # this machine, and finding that out took a sweep of all 1211 tapes:
     # JEFF-4.0 ships no MF34 for U-235 and LTT=1 for U-238, so it states no a_0
@@ -531,6 +536,7 @@ u235_tape = _tape_fixture("u235")
 th232_tape = _tape_fixture("th232")
 pu241_tape = _tape_fixture("pu241")
 u238_tape = _tape_fixture("u238")
+fe56_jeff40_tape = _tape_fixture("fe56_jeff40")
 u238_b80_tape = _tape_fixture("u238_b80")
 u235_b81_tape = _tape_fixture("u235_b81")
 cf252_b81_tape = _tape_fixture("cf252_b81")

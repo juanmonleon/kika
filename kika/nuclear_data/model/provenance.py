@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["Provenance", "EndfProvenance", "AceProvenance",
-           "GndsProvenance"]
+           "GndsProvenance", "G4NDLProvenance"]
 
 
 @dataclass
@@ -175,3 +175,50 @@ class GndsProvenance(Provenance):
     formatVersion: Optional[str] = None
     #: The file it was read from, when there was one.
     path: Optional[str] = None
+
+
+@dataclass
+class G4NDLProvenance(Provenance):
+    """Where a G4NDL-read suite came from, and the tokens the model has no slot for.
+
+    G4NDL is a *processed* library (Geant4 ParticleHP): one directory per
+    process, one file per isotope. What is here is what Phase 6's writer needs
+    to write an isotope back token for token, and what a reader needs to know
+    which files were read:
+
+    * the two bookkeeping integers of the cross section (``0 0`` in every real
+      file) and the optional ``G4NDL <source>`` header of each file;
+    * ``repFlag``, ``frameFlag`` and, for ``repFlag=0``, the second frame flag
+      Geant4 reads (and uses, since it overwrites the first);
+    * per incident energy, the temperature ``T`` and ``tempdep``. Both come
+      from ENDF MF4's ``T`` and ``LT``; Geant4 reads ``tempdep`` into a local
+      and never uses it, and stores ``T`` without reading it back
+      (``G4ParticleHPElasticFS.cc:104-215``). Kept so they survive a round trip.
+
+    ``targetMass`` is the consumer's mass ratio (ENDF's AWR), not ``A``.
+    """
+
+    sourceFormat: str = "g4ndl"
+    #: The library root that was opened, and its directory name (``JEFF-4.0``).
+    library: Optional[str] = None
+    libraryName: Optional[str] = None
+    crossSectionPath: Optional[str] = None
+    finalStatePath: Optional[str] = None
+    #: sha256 of each file as stored on disk (the ``.z`` when compressed).
+    crossSectionSha256: Optional[str] = None
+    finalStateSha256: Optional[str] = None
+    crossSectionHeader: Optional[Tuple[str, str]] = None
+    finalStateHeader: Optional[Tuple[str, str]] = None
+    bookkeeping: Optional[Tuple[int, int]] = None
+    repFlag: Optional[int] = None
+    targetMass: Optional[float] = None
+    frameFlag: Optional[int] = None
+    frameFlag2: Optional[int] = None
+    #: ``T`` and ``tempdep`` per incident energy, Legendre block then table.
+    legendreTemperatures: List[float] = field(default_factory=list)
+    legendreTempdeps: List[int] = field(default_factory=list)
+    tabulatedTemperatures: List[float] = field(default_factory=list)
+    tabulatedTempdeps: List[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.targetMass = _asFloat(self.targetMass)

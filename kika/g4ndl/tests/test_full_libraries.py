@@ -94,3 +94,63 @@ def test_fe56_records(request, fixture, n_pairs, n_leg, n_tab, e_trans):
     assert fs.transitionEnergy == pytest.approx(e_trans, rel=1e-12)
     # The mass ratio, not A.
     assert 55 < fs.targetMass < 56
+
+
+# ----------------------------------------------------------------- Phase 4
+
+@pytest.mark.parametrize("fixture", ["g4ndl_jeff40_library", "g4ndl_g4ndl471_library"])
+def test_every_isotope_decodes_into_the_model(request, fixture):
+    lib = g4ndl.open(request.getfixturevalue(fixture))
+    for key in lib.isotopes():
+        suite = lib.read(key)
+        assert suite.reactions.ENDF_MTs == [2]
+        # The library root holds more than Elastic/, and the report says so.
+        assert suite.report.unsupported
+
+
+def _records(angular):
+    """``(kind, E, values)`` per incident energy, Regions2d flattened."""
+    out = []
+    stack = [angular]
+    while stack:
+        node = stack.pop(0)
+        if hasattr(node, "function2ds"):
+            stack[:0] = list(node.function2ds)
+            continue
+        for f in node.function1ds:
+            if hasattr(f, "coefficients"):
+                out.append(("L", f.outerDomainValue, np.asarray(f.coefficients)))
+            else:
+                mu, p, _ = f.toEndfRegions()
+                out.append(("T", f.outerDomainValue, np.concatenate([mu, p])))
+    return out
+
+
+@pytest.mark.parametrize("target,tape,truncated", [
+    # The translation cuts Fe-56's last Legendre record (45 MeV, the
+    # transition) from NL=32 to NL=30: a_31 = 8.5e-9 and a_32 = 0 are dropped.
+    # Everything else, 3 978 records, is bit-for-bit the tape.
+    ("Fe56", "fe56_jeff40_tape", {3959: 30}),
+    ("U238", "u238_tape", {}),
+])
+def test_jeff40_angular_is_the_tape_mf4(request, g4ndl_jeff40_library, target, tape,
+                                        truncated):
+    """Two independent roads to one object: G4NDL through kika.g4ndl, and the
+    evaluation it was translated from through the ENDF adapter."""
+    from kika.endf.model_adapter.angular import decodeMF4MT
+    from kika.endf.read_endf import read_endf
+
+    suite = g4ndl.open(g4ndl_jeff40_library).read(target)
+    g = suite.reactions[2].outputChannel.products.byPid("n")[0].distribution["eval"]
+    endf = read_endf(str(request.getfixturevalue(tape)), mf_numbers=[4])
+    e, _, _ = decodeMF4MT(endf.mf[4].mt[2])
+    assert g.productFrame == e.productFrame
+    rg, re_ = _records(g.angular), _records(e.angular)
+    assert len(rg) == len(re_)
+    for i, (a, b) in enumerate(zip(rg, re_)):
+        assert a[0] == b[0] and a[1] == b[1]
+        if i in truncated:
+            n = truncated[i] + 1
+            assert len(a[2]) == n and a[2].tolist() == b[2][:n].tolist()
+        else:
+            assert a[2].tolist() == b[2].tolist()

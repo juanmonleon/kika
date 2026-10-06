@@ -12,7 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-__all__ = ["G4NDLError", "G4NDLFormatError", "IsotopeNotFoundError"]
+__all__ = ["G4NDLError", "G4NDLFormatError", "G4NDLUnsupportedError",
+           "IsotopeNotFoundError"]
 
 
 class G4NDLError(Exception):
@@ -55,4 +56,14 @@ class IsotopeNotFoundError(G4NDLError, LookupError):
     number (``G4ParticleHPNames::GetName``); kika does not, because data from
     a different nuclide arriving under the requested name is the one error a
     user cannot see afterwards.
+    """
+
+
+class G4NDLUnsupportedError(G4NDLError, NotImplementedError):
+    """The file is well formed, but uses something kika will not decide on.
+
+    Not a format error: the consumer accepts it. Raised where reading it into
+    the model would require choosing between two meanings — today only an
+    interpolation code 1, which ENDF calls histogram and Geant4 evaluates as
+    lin-lin.
     """

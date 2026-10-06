@@ -54,7 +54,9 @@ from typing import Optional, Tuple, Union
 
 __all__ = ["read", "sniff_format", "UnknownFormatError"]
 
-#: Formats the door can open. All three are served.
+#: Formats the door can open. All four are served. ``g4ndl`` is the odd one:
+#: a G4NDL library is a *directory* of per-isotope files, so it is opened with
+#: ``target=`` naming the isotope, and only its elastic channel is read today.
 #:
 #: Measured on this machine, warm cache, nothing else running: ENDF/B-VIII.1's
 #: Fe-56 through this door costs **2.85 s as GNDS** (18.8 MB, and that includes
@@ -63,7 +65,7 @@ __all__ = ["read", "sniff_format", "UnknownFormatError"]
 #: no parser and are not read at all; its MF6 was in that list until MF6 gained
 #: one, so this figure predates six MF6 sections now being read). Neither is
 #: the six minutes the JEFF host tape costs; that tape is larger and carries MF34.
-FORMATS = ("endf", "ace", "gnds")
+FORMATS = ("endf", "ace", "gnds", "g4ndl")
 
 #: MF numbers whose content belongs to the covarianceSuite rather than the
 #: reactionSuite (GNDS §25.1.1). Kept here because the door has to know which
@@ -167,6 +169,16 @@ def sniff_format(path) -> str:
     """
     if not os.path.exists(path):
         raise FileNotFoundError(f"no such file: {path}")
+    if os.path.isdir(path):
+        # A G4NDL library is the one format that is a directory. Recognised by
+        # the two subdirectories the elastic reader needs, as the index is.
+        if all(os.path.isdir(os.path.join(path, "Elastic", sub))
+               for sub in ("CrossSection", "FS")):
+            return "g4ndl"
+        raise UnknownFormatError(
+            f"{path} is a directory without Elastic/CrossSection and Elastic/FS, "
+            f"so it is not a G4NDL library root (the IAEA tarballs nest one, "
+            f"e.g. JEFF-4.0/JEFF-4.0); every other format is a file")
     lines = _headLines(path)
     if _looksLikeGnds(lines):
         return "gnds"
@@ -185,7 +197,8 @@ def sniff_format(path) -> str:
 # The door
 # ----------------------------------------------------------------------
 
-def read(path, format: Optional[str] = None, covariances: bool = True):
+def read(path, format: Optional[str] = None, covariances: bool = True,
+         target=None):
     """Read any supported file into a :class:`ReactionSuite`.
 
     Parameters
@@ -193,8 +206,9 @@ def read(path, format: Optional[str] = None, covariances: bool = True):
     path
         The file. Its format is detected from content unless ``format`` is given.
     format
-        ``'endf'``, ``'ace'`` or ``'gnds'``, forcing the choice. For the file
-        whose header is malformed, or an ACE 2.0 file the sniffer cannot place.
+        ``'endf'``, ``'ace'``, ``'gnds'`` or ``'g4ndl'``, forcing the choice.
+        For the file whose header is malformed, or an ACE 2.0 file the sniffer
+        cannot place.
     covariances
         When true, the covariances are decoded onto ``suite.covarianceSuite``.
         For ENDF that means MF31/33/34 off the same tape; for GNDS it means
@@ -205,6 +219,14 @@ def read(path, format: Optional[str] = None, covariances: bool = True):
         GNDS §25.1.1 makes the covariance suite a root node in its own right;
         kika hangs it off the evaluation for convenience and the writer emits it
         separately.
+    target
+        **G4NDL only, and required there**: which isotope of the library to
+        read — ``"Fe56"``, ``"Am242m1"``, ``26056``, ``(26, 56)``. A G4NDL
+        library is a directory holding hundreds of isotopes, and the lookup is
+        exact: kika does not substitute the natural element or a neighbour the
+        way Geant4 does. Only the elastic channel (MT2) is read, with the cross
+        section under the ``recon`` style — ``suite.cross_section(2,
+        form="recon")`` — and the report lists the processes left unread.
 
     Returns
     -------
@@ -220,7 +242,15 @@ def read(path, format: Optional[str] = None, covariances: bool = True):
     format = format.lower()
     if format not in FORMATS:
         raise ValueError(f"format must be one of {FORMATS}, got {format!r}")
+    if (format == "g4ndl") != (target is not None):
+        raise ValueError(
+            "target= names the isotope of a G4NDL library and is required for it"
+            if format == "g4ndl" else
+            f"target= is only for a G4NDL library; format {format!r} holds "
+            f"one evaluation per file")
 
+    if format == "g4ndl":
+        return _readG4ndl(path, target)
     if format == "gnds":
         return _readGnds(path, covariances=covariances)
     if format == "ace":
@@ -321,6 +351,13 @@ def _attachGndsCovariances(document, suite, report,
         }
         suite.covarianceSuite, _ = readCovarianceSuite(sibling, back, report)
         return
+
+
+def _readG4ndl(path, target):
+    from kika.g4ndl import open as openLibrary
+
+    # No covariances to follow: nominal G4NDL carries none (roadmap §5 Fase 4).
+    return openLibrary(path).read(target)
 
 
 def _readAce(path):

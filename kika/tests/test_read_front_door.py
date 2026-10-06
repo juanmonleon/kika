@@ -380,3 +380,35 @@ def test_repeated_access_keeps_returning_the_function():
         assert kinds == ['function'] * 3, kinds
         print('function')
     """) == "function"
+
+
+# ---------------------------------------------------------------- G4NDL
+
+_G4NDL_JEFF = __import__("pathlib").Path(kika.__file__).parent / "g4ndl/tests/data/JEFF-4.0"
+
+
+def test_a_g4ndl_library_directory_is_recognised():
+    assert sniff_format(_G4NDL_JEFF) == "g4ndl"
+
+
+def test_a_directory_that_is_not_a_g4ndl_root_says_what_it_lacks(tmp_path):
+    with pytest.raises(UnknownFormatError, match="Elastic/CrossSection"):
+        sniff_format(tmp_path)
+
+
+def test_g4ndl_needs_a_target_and_nothing_else_takes_one(micro_tape):
+    with pytest.raises(ValueError, match="required"):
+        kika.read(_G4NDL_JEFF)
+    with pytest.raises(ValueError, match="only for a G4NDL library"):
+        kika.read(micro_tape, target="Fe56")
+
+
+def test_the_g4ndl_door_is_a_route_not_a_second_decoder():
+    import kika.g4ndl as g4ndl
+
+    through = kika.read(_G4NDL_JEFF, target="C12")
+    direct = g4ndl.open(_G4NDL_JEFF).read("C12")
+    assert through.target == direct.target == "C12"
+    assert through.cross_section(2, form="recon")[1].tolist() == \
+        direct.cross_section(2, form="recon")[1].tolist()
+    assert through.report.summary() == direct.report.summary()

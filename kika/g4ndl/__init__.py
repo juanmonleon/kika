@@ -18,9 +18,11 @@ module scope: ``import kika.g4ndl`` must not wake the model
 (``kika/nuclear_data/model/tests/test_dormancy.py``).
 """
 
-from kika.g4ndl.exceptions import G4NDLError, G4NDLFormatError, IsotopeNotFoundError
+from kika.g4ndl.exceptions import (
+    G4NDLError, G4NDLFormatError, G4NDLUnsupportedError, IsotopeNotFoundError,
+)
 from kika.g4ndl.library import G4NDLLibrary, open
 from kika.g4ndl.names import IsotopeKey
 
-__all__ = ["G4NDLError", "G4NDLFormatError", "G4NDLLibrary", "IsotopeKey",
-           "IsotopeNotFoundError", "open"]
+__all__ = ["G4NDLError", "G4NDLFormatError", "G4NDLLibrary", "G4NDLUnsupportedError",
+           "IsotopeKey", "IsotopeNotFoundError", "open"]
