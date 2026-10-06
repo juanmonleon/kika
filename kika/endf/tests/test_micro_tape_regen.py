@@ -246,6 +246,11 @@ MF32_FIXTURES = {
 #:            cross section is not small.
 #: ``fe56_jendl``  JENDL-5 Fe-56, MF33 and MF34: the clean case. Nothing above
 #:            a note -- its correlations are rounded to 0.001, and C4 knows it.
+#: ``k41``    JEFF-4.0 K-41, MF32 with MF2: an INTG record at row 201 of a 93 x 93
+#:            correlation matrix.
+#: ``u239``   JEFF-4.0 U-239, MF35 alone: 21 bands that break the sum rule, one
+#:            empty, and sigma(P) up to 2919. MF5 is left out to stay small, so
+#:            the bound checked is the central-free sigma <= 1/2.
 COV_CHECK_FIXTURES = {
     "ne20": ("ne20_jeff40", {1: {451}, 2: {151}, 3: {2}, 4: {2}, 34: {2}}),
     "w186": ("w186_jeff40", {1: {451}, 2: {151}, 3: {51}, 4: {51}, 34: {51}}),
@@ -253,6 +258,8 @@ COV_CHECK_FIXTURES = {
     "si28": ("si28_b81", {1: {451}, 33: None}),
     "hf176": ("hf176_jeff40", {1: {451}, 2: {151}, 3: {107}, 33: {107}}),
     "fe56_jendl": ("fe56_jendl", {1: {451}, 33: None, 34: None}),
+    "k41": ("k41_jeff40", {1: {451}, 2: {151}, 32: {151}}),
+    "u239": ("u239_jeff40", {1: {451}, 35: {18}}),
 }
 
 
@@ -740,7 +747,8 @@ def test_regenerate_mf6_charged_particle_micro_tapes(
 @pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
 def test_regenerate_cov_check_micro_tapes(ne20_jeff40_tape, w186_jeff40_tape,
                                           fe57_jeff40_tape, si28_b81_tape,
-                                          hf176_jeff40_tape, fe56_jendl_tape, request):
+                                          hf176_jeff40_tape, fe56_jendl_tape,
+                                          k41_jeff40_tape, u239_jeff40_tape, request):
     """Rebuild just the layer-1 fixtures, for the same reason as the MF6 ones."""
     DATA.mkdir(parents=True, exist_ok=True)
     for key, (tape, keep) in COV_CHECK_FIXTURES.items():
@@ -1044,10 +1052,16 @@ def test_cov_check_inventories_are_exactly_what_we_kept(key):
 
 
 def test_cov_check_micro_tapes_stay_small():
-    """Same ceiling logic. The largest, JENDL-5 Fe-56, is ~180 kB of ENDF text."""
+    """Same ceiling logic. JENDL-5 Fe-56 is ~180 kB of ENDF text.
+
+    U-239 is the exception, decided: its MF35 alone is ~190 kB, and it is the
+    smallest of the 26 JEFF-4.0 tapes whose MF35 breaks the sum rule (the other
+    25 carry 51 bands, not 21).
+    """
+    ceiling = {"u239": 250_000}
     for key in COV_CHECK_FIXTURES:
         size = cov_check_fixture_path(key).stat().st_size
-        assert size < 200_000, f"{key} is {size} bytes"
+        assert size < ceiling.get(key, 200_000), f"{key} is {size} bytes"
 
 
 def test_pfns_micro_tapes_stay_small(micro_pfns_tape, micro_pfns_cov_tape):

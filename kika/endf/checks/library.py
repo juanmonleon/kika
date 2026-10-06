@@ -19,6 +19,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
+from .covariances import CHECKED_MF
 from .findings import (
     _RANK,
     DEFECT,
@@ -36,9 +37,12 @@ __all__ = ["check_covariance_library", "CovarianceLibraryReport", "TapeCheck", "
 #: not match.
 TAPE_PATTERNS = ("*.endf", "*.jeff", "*.txt", "*.dat")
 
-#: What a covariance file needs from the rest of the tape: MF1 (nu-bar for
-#: MF31), MF2 (where MF3 stops being a background), MF3 and MF4 (central values).
-_SUPPORT_MF = (1, 2, 3, 4)
+#: What each covariance file needs from the rest of the tape: MF1 (nu-bar for
+#: MF31), MF2 (where MF3 stops being a background, and the parameters of MF32),
+#: MF3 and MF4 (central values), MF5 (the spectra of MF35). MF40's central
+#: values are MF10, which kika does not read. Only what the asked files need is
+#: read: MF1-4 of a JENDL-5 tape cost ~6 s, for nothing if only MF35 is asked.
+_SUPPORT_MF = {31: (1,), 32: (2,), 33: (2, 3), 34: (4,), 35: (5,), 40: ()}
 
 Progress = Union[bool, None, Callable[[str], None]]
 
@@ -249,7 +253,7 @@ def _reporter(progress: Progress, total: int) -> Callable[[int, str, bool], None
 def check_covariance_library(
     source: Union[str, Path, Iterable[Union[str, Path]]],
     *,
-    mf: Sequence[int] = (31, 33, 34),
+    mf: Sequence[int] = CHECKED_MF,
     patterns: Sequence[str] = TAPE_PATTERNS,
     recursive: bool = False,
     library: Optional[str] = None,
@@ -262,8 +266,9 @@ def check_covariance_library(
     source : path or iterable of paths
         A directory of ENDF tapes, or the tapes themselves.
     mf : sequence of int
-        The covariance files to check (any of 31, 33, 34). Only these and the
-        files that give them central values (MF1-4) are read.
+        The covariance files to check (any of 31, 32, 33, 34, 35, 40; all by
+        default). Only these and the files that give them central values
+        (``_SUPPORT_MF``) are read.
     patterns : sequence of str
         Globs that pick the tapes in a directory. The default covers how
         ENDF/B, JEFF and JENDL name theirs.
@@ -291,10 +296,11 @@ def check_covariance_library(
 
     from .covariances import check_covariances
 
-    wanted = sorted({m for m in mf if m in (31, 33, 34)})
+    wanted = sorted({m for m in mf if m in CHECKED_MF})
     if not wanted:
-        raise ValueError(f"mf must name at least one of 31, 33, 34, got {list(mf)}")
-    read_mf = sorted(set(_SUPPORT_MF) | set(wanted))
+        raise ValueError(f"mf must name at least one of {', '.join(map(str, CHECKED_MF))}, "
+                         f"got {list(mf)}")
+    read_mf = sorted(set(wanted).union(*(_SUPPORT_MF[m] for m in wanted)))
     root, paths = _tapes(source, patterns, recursive)
     report = _reporter(progress, len(paths))
     out: List[TapeCheck] = []

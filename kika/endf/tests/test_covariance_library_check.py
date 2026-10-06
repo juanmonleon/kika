@@ -1,6 +1,6 @@
 """check_covariance_library: layer 1 over a directory of tapes, one at a time.
 
-The "library" is the six layer-1 micro-tapes (``COV_CHECK_FIXTURES``), whose
+The "library" is the layer-1 micro-tapes (``COV_CHECK_FIXTURES``), whose
 findings ``test_covariance_checks_on_real_cuts.py`` pins one by one; here what
 is pinned is the walk: every tape gets a row, a broken one does not stop it,
 and the tables add up to the per-tape reports.
@@ -26,8 +26,8 @@ def library():
 
 
 def test_every_tape_is_checked_and_the_report_matches_one_by_one(library):
-    assert [t.name for t in library.tapes] == [p.name for p in CUTS] and len(CUTS) == 6
-    assert library.failed == () and len(library.checked) == 6
+    assert [t.name for t in library.tapes] == [p.name for p in CUTS] and len(CUTS) == 8
+    assert library.failed == () and len(library.checked) == 8
     for tape in library.tapes:
         alone = check_covariances(read_endf(str(tape.path)))
         assert tape.report.counts() == alone.counts()
@@ -89,5 +89,5 @@ def test_write_puts_three_tables_on_disk(library, tmp_path):
 def test_a_path_that_is_not_a_directory_is_refused(tmp_path):
     with pytest.raises(FileNotFoundError):
         check_covariance_library(tmp_path / "nowhere")
-    with pytest.raises(ValueError, match="31, 33, 34"):
-        check_covariance_library(CUTS, mf=(32,))
+    with pytest.raises(ValueError, match="31, 32, 33, 34, 35, 40"):
+        check_covariance_library(CUTS, mf=(30,))

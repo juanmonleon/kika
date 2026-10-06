@@ -869,8 +869,10 @@ def _attachLayer1(endf, suite, report: ConversionReport, xsSections=None):
     from kika.endf.checks import check_covariances
 
     try:
+        # Only the files whose findings are attached below: MF32's decode and
+        # eigenvalues would cost every suite decode for nothing.
         layer1 = check_covariances(
-            endf, xs_sections=xsSections if xsSections is not None
+            endf, mf=(31, 33, 34), xs_sections=xsSections if xsSections is not None
             else getattr(endf, "pendf", None))
     except Exception as exc:  # noqa: BLE001 - the decode stands without them
         report.warn(f"the layer-1 covariance checks could not run: "

@@ -1,4 +1,7 @@
-"""Layer 1 of the covariance checks: an MF31/MF33/MF34 section as written in the file.
+"""Layer 1 of the covariance checks: a covariance section as written in the file.
+
+MF31, MF33 and MF34 are checked here; MF32, MF35 and MF40 in :mod:`.mf32`,
+:mod:`.mf35` and :mod:`.mf40`, which reuse these pieces and say what differs.
 
 :func:`check_covariances` reads what kika's parser kept -- the records with
 their LB/LS, counts and grids, and the triangle before it is mirrored -- and
@@ -46,6 +49,7 @@ relative part is checked, and a note says so.
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -61,6 +65,13 @@ from .findings import (
     CovarianceFinding,
     CovarianceLocation,
 )
+# At module scope, not in the dispatch: check_covariances is reached from the
+# desktop app (the pre-flight), and a function-scope import is invisible to
+# PyInstaller. These modules take what they reuse from here lazily, so there is
+# no import cycle.
+from .mf32 import check_mf32
+from .mf35 import check_mf35
+from .mf40 import check_mf40
 
 logger = get_endf_logger(__name__)
 
@@ -98,7 +109,11 @@ VALID_LB = {
     31: frozenset({0, 1, 2, 3, 4, 5, 6, 8, 9}),
     33: frozenset({0, 1, 2, 3, 4, 5, 6, 8, 9}),
     34: frozenset({0, 1, 2, 5, 6}),
+    40: frozenset({0, 1, 2, 3, 4, 5, 6, 8, 9}),
 }
+#: Every covariance file layer 1 checks. MF30 is absent from the three major
+#: libraries (6-oct-2026) and has no parser.
+CHECKED_MF = (31, 32, 33, 34, 35, 40)
 VALID_LTY = frozenset({0, 1, 2, 3})
 VALID_LCT = frozenset({0, 1, 2})
 #: MTs ENDF-6 §33.2.3 reserves for lumped reactions.
@@ -111,7 +126,7 @@ _EVIDENCE_ITEMS = 10
 def check_covariances(
     endf,
     *,
-    mf: Sequence[int] = (31, 33, 34),
+    mf: Sequence[int] = CHECKED_MF,
     xs_sections: Optional[Dict[int, object]] = None,
 ) -> CovarianceCheckReport:
     """Check the covariance files of one ENDF tape as they are written.
@@ -119,11 +134,12 @@ def check_covariances(
     Parameters
     ----------
     endf : ENDF
-        A tape from :func:`kika.endf.read_endf`. Read MF2/MF3 (MF33) and MF4
-        (MF34) along with the covariances, or the magnitude checks have no
-        central values and says so.
+        A tape from :func:`kika.endf.read_endf`. Read MF2/MF3 (MF33, and MF2
+        for MF32) , MF4 (MF34) and MF5 (MF35) along with the covariances, or
+        the checks that need central values say they could not run.
     mf : sequence of int
-        Which covariance files to check; any of 31, 33, 34. Others are ignored.
+        Which covariance files to check; any of 31, 32, 33, 34, 35, 40
+        (:data:`CHECKED_MF`, the default). Others are ignored.
     xs_sections : dict, optional
         sigma(E) by MT, e.g. a PENDF from ``kika.processing.read_pendf_mf3_sections``.
         Defaults to ``endf.pendf``. Used to sum mixed absolute/relative MF33
@@ -141,7 +157,7 @@ def check_covariances(
     mat = None
     for mf_number in mf:
         mf_obj = endf.files.get(mf_number)
-        if mf_obj is None or mf_number not in VALID_LB:
+        if mf_obj is None or mf_number not in CHECKED_MF:
             continue
         for mt, why in sorted(getattr(mf_obj, "parse_errors", {}).items()):
             out.append(CovarianceFinding(
@@ -150,6 +166,12 @@ def check_covariances(
                 CovarianceLocation(mf=mf_number, mt=mt), {"error": why}))
         if mf_number == 34:
             _check_mf34(ctx, mf_obj, out)
+        elif mf_number == 32:
+            check_mf32(ctx, mf_obj, out)
+        elif mf_number == 35:
+            check_mf35(ctx, mf_obj, out)
+        elif mf_number == 40:
+            check_mf40(ctx, mf_obj, out)
         else:
             _check_mf33(ctx, mf_number, mf_obj, out)
         for sec in mf_obj.mt.values():
@@ -270,6 +292,32 @@ def _decoded(sec, rec):
     return None
 
 
+def _grid_findings(g: Sequence[float], loc, out: List[CovarianceFinding]) -> bool:
+    """An energy grid: at least two points, never decreasing. True if usable."""
+    arr = np.asarray(g, dtype=float)
+    if arr.size < 2:
+        out.append(CovarianceFinding(
+            "grid_too_short", DEFECT, f"an energy grid with {arr.size} point(s) defines no bin",
+            loc, {"n": int(arr.size)}))
+        return False
+    steps = np.diff(arr)
+    if np.any(steps < 0):
+        k = int(np.argmax(steps < 0))
+        out.append(CovarianceFinding(
+            "grid_not_increasing", DEFECT,
+            f"energies decrease at index {k + 1} ({arr[k]:.6g} -> {arr[k + 1]:.6g} eV)",
+            loc, {"index": k + 1, "energies": [float(arr[k]), float(arr[k + 1])]}))
+        return False
+    elif np.any(steps == 0):
+        idx = np.flatnonzero(steps == 0)
+        out.append(CovarianceFinding(
+            "grid_repeated_point", WARN,
+            f"{idx.size} energ{'y is' if idx.size == 1 else 'ies are'} repeated, "
+            f"leaving zero-width bins (first {arr[idx[0]]:.6g} eV)",
+            loc, {"energies": [float(arr[i]) for i in idx[:_EVIDENCE_ITEMS]]}))
+    return True
+
+
 def _check_record(mf_number: int, sec, rec, loc: CovarianceLocation,
                   out: List[CovarianceFinding]) -> bool:
     """Structure of one LIST record. True if its values can be used."""
@@ -292,28 +340,7 @@ def _check_record(mf_number: int, sec, rec, loc: CovarianceLocation,
             f"NT={rec.nt} but the counts in the record imply {expected}", loc,
             {"nt": rec.nt, "expected": expected}))
     for g in _grids(rec):
-        arr = np.asarray(g, dtype=float)
-        if arr.size < 2:
-            out.append(CovarianceFinding(
-                "grid_too_short", DEFECT, f"an energy grid with {arr.size} point(s) defines no bin",
-                loc, {"n": int(arr.size)}))
-            usable = False
-            continue
-        steps = np.diff(arr)
-        if np.any(steps < 0):
-            k = int(np.argmax(steps < 0))
-            out.append(CovarianceFinding(
-                "grid_not_increasing", DEFECT,
-                f"energies decrease at index {k + 1} ({arr[k]:.6g} -> {arr[k + 1]:.6g} eV)",
-                loc, {"index": k + 1, "energies": [float(arr[k]), float(arr[k + 1])]}))
-            usable = False
-        elif np.any(steps == 0):
-            idx = np.flatnonzero(steps == 0)
-            out.append(CovarianceFinding(
-                "grid_repeated_point", WARN,
-                f"{idx.size} energ{'y is' if idx.size == 1 else 'ies are'} repeated, "
-                f"leaving zero-width bins (first {arr[idx[0]]:.6g} eV)",
-                loc, {"energies": [float(arr[i]) for i in idx[:_EVIDENCE_ITEMS]]}))
+        usable = _grid_findings(g, loc, out) and usable
     if rec.lt is not None and rec.lb in (3, 4) and int(rec.lt or 0) > int(rec.np or 0):
         out.append(CovarianceFinding(
             "count_mismatch", DEFECT, f"LT={rec.lt} pairs in the second table but NP={rec.np}",
@@ -1279,8 +1306,7 @@ def _triangle_rho(rec, diag_row, diag_col) -> Optional[float]:
 
 
 def _ls1_finding(loc: CovarianceLocation, k: int, rec, tri: Optional[float], out) -> None:
-    rloc = CovarianceLocation(mat=loc.mat, mf=loc.mf, mt=loc.mt, mat1=loc.mat1, mt1=loc.mt1,
-                              l=loc.l, l1=loc.l1, ni=k, lb=5, ls=1)
+    rloc = dataclasses.replace(loc, ni=k, nc=None, lb=5, ls=1)
     summary = ("LB=5 LS=1 (a symmetric triangle) in a cross block, which is not symmetric; "
                "kika mirrors the triangle into the lower half")
     evidence = {}

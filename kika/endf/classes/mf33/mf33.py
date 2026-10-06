@@ -1375,127 +1375,7 @@ class MF33MT(MT):
 
         # Subsections
         for subsection in self._subsections:
-            # Subsection CONT
-            subsec_cont = format_endf_data_line(
-                [subsection.xmf1 or 0.0, subsection.xlfs1 or 0.0,
-                 subsection.mat1 or 0, subsection.mt1,
-                 subsection.nc or 0, subsection.ni or 0],
-                mat, mf, mt, 0,
-                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
-                         ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-            )
-            lines.append(blank_line_number(subsec_cont))
-
-            # NC-type sub-subsections
-            for nc_rec in subsection.nc_records:
-                # CONT line
-                nc_cont = format_endf_data_line(
-                    [0.0, 0.0, 0, nc_rec.lty, 0, 0],
-                    mat, mf, mt, 0,
-                    formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
-                             ENDF_FORMAT_INT, ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT_ZERO]
-                )
-                lines.append(blank_line_number(nc_cont))
-
-                if nc_rec.lty == 0:
-                    # LIST: E1, E2, 0, 0, 2*NCI, NCI / {CI, XMTI}
-                    nci = nc_rec.nci or 0
-                    list_header = format_endf_data_line(
-                        [nc_rec.e1, nc_rec.e2, 0, 0, 2 * nci, nci],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
-                                 ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(list_header))
-                    # Data: alternating CI, XMTI
-                    all_values = []
-                    for i in range(nci):
-                        all_values.append(nc_rec.ci[i])
-                        all_values.append(nc_rec.xmti[i])
-                    _write_values_block(all_values)
-
-                elif nc_rec.lty in (1, 2, 3):
-                    # LIST: E1, E2, MATS, MTS, 2*NEI+2, NEI / (XMFS, XLFSS), {EI, WEI}
-                    nei = nc_rec.nei or 0
-                    list_header = format_endf_data_line(
-                        [nc_rec.e1, nc_rec.e2, nc_rec.mats or 0, nc_rec.mts or 0,
-                         2 * nei + 2, nei],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(list_header))
-                    # Data: XMFS, XLFSS, then alternating EI, WEI
-                    all_values = [nc_rec.xmfs or 0.0, nc_rec.xlfss or 0.0]
-                    for i in range(nei):
-                        all_values.append(nc_rec.ei[i])
-                        all_values.append(nc_rec.wei[i])
-                    _write_values_block(all_values)
-
-            # NI-type sub-subsections
-            for ni_rec in subsection.ni_records:
-                if ni_rec.lb in (0, 1, 2, 8, 9):
-                    # LIST header: 0.0, 0.0, LT, LB, NT, NP
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, ni_rec.lt or 0, ni_rec.lb, ni_rec.nt, ni_rec.np],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    # Data: alternating Ek, Fk
-                    all_values = []
-                    for i in range(len(ni_rec.e_table_k)):
-                        all_values.append(ni_rec.e_table_k[i])
-                        all_values.append(ni_rec.f_table_k[i])
-                    _write_values_block(all_values)
-
-                elif ni_rec.lb in (3, 4):
-                    # LIST header: 0.0, 0.0, LT, LB, NT, NP
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, ni_rec.lt, ni_rec.lb, ni_rec.nt, ni_rec.np],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    # Data: first table {Ek, Fk}, then second table {El, Fl}
-                    all_values = []
-                    for i in range(len(ni_rec.e_table_k)):
-                        all_values.append(ni_rec.e_table_k[i])
-                        all_values.append(ni_rec.f_table_k[i])
-                    for i in range(len(ni_rec.e_table_l)):
-                        all_values.append(ni_rec.e_table_l[i])
-                        all_values.append(ni_rec.f_table_l[i])
-                    _write_values_block(all_values)
-
-                elif ni_rec.lb == 5:
-                    # LIST header: 0.0, 0.0, LS, LB=5, NT, NE
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, ni_rec.ls, 5, ni_rec.nt, ni_rec.ne],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    _write_values_block(ni_rec.energies + ni_rec.matrix)
-
-                elif ni_rec.lb == 6:
-                    # LIST header: 0.0, 0.0, 0, LB=6, NT, NER
-                    ner = len(ni_rec.row_energies)
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, 0, 6, ni_rec.nt, ner],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
-                                 ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    _write_values_block(
-                        ni_rec.row_energies + ni_rec.col_energies + ni_rec.rect_matrix
-                    )
+            lines.extend(emit_subsection(subsection, mat, mf, mt))
 
         # SEND marker
         end_line = format_endf_data_line(
@@ -1507,3 +1387,162 @@ class MF33MT(MT):
         lines.append(end_line)
 
         return "\n".join(lines)
+
+
+def emit_subsection(subsection: "Subsection", mat: int, mf: int, mt: int) -> List[str]:
+    """The lines of one subsection: its CONT, then the NC and NI records.
+
+    Shared by MF33, MF31 and MF40 (§40 nests the same subsection under a
+    final-state level). Sequence numbers are left blank, as ``MF33MT`` always
+    wrote them; the tape writer stamps them.
+    """
+    from ...utils import (
+        format_endf_data_line,
+        ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT, ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_BLANK
+    )
+    lines: List[str] = []
+
+    def blank_line_number(line: str) -> str:
+        return line[:75] + "     "
+
+    def _write_values_block(all_values):
+        """Write a list of float values in blocks of 6 per ENDF line."""
+        buf = []
+        for val in all_values:
+            buf.append(val)
+            if len(buf) == 6:
+                ln = format_endf_data_line(buf, mat, mf, mt, 0)
+                lines.append(blank_line_number(ln))
+                buf = []
+        if buf:
+            while len(buf) < 6:
+                buf.append(None)
+            ln = format_endf_data_line(
+                buf, mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT] * len(buf) + [ENDF_FORMAT_BLANK] * (6 - len(buf))
+            )
+            lines.append(blank_line_number(ln))
+
+    # Subsection CONT
+    subsec_cont = format_endf_data_line(
+        [subsection.xmf1 or 0.0, subsection.xlfs1 or 0.0,
+         subsection.mat1 or 0, subsection.mt1,
+         subsection.nc or 0, subsection.ni or 0],
+        mat, mf, mt, 0,
+        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
+                 ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+    )
+    lines.append(blank_line_number(subsec_cont))
+
+    # NC-type sub-subsections
+    for nc_rec in subsection.nc_records:
+        # CONT line
+        nc_cont = format_endf_data_line(
+            [0.0, 0.0, 0, nc_rec.lty, 0, 0],
+            mat, mf, mt, 0,
+            formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
+                     ENDF_FORMAT_INT, ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT_ZERO]
+        )
+        lines.append(blank_line_number(nc_cont))
+
+        if nc_rec.lty == 0:
+            # LIST: E1, E2, 0, 0, 2*NCI, NCI / {CI, XMTI}
+            nci = nc_rec.nci or 0
+            list_header = format_endf_data_line(
+                [nc_rec.e1, nc_rec.e2, 0, 0, 2 * nci, nci],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
+                         ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(list_header))
+            # Data: alternating CI, XMTI
+            all_values = []
+            for i in range(nci):
+                all_values.append(nc_rec.ci[i])
+                all_values.append(nc_rec.xmti[i])
+            _write_values_block(all_values)
+
+        elif nc_rec.lty in (1, 2, 3):
+            # LIST: E1, E2, MATS, MTS, 2*NEI+2, NEI / (XMFS, XLFSS), {EI, WEI}
+            nei = nc_rec.nei or 0
+            list_header = format_endf_data_line(
+                [nc_rec.e1, nc_rec.e2, nc_rec.mats or 0, nc_rec.mts or 0,
+                 2 * nei + 2, nei],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(list_header))
+            # Data: XMFS, XLFSS, then alternating EI, WEI
+            all_values = [nc_rec.xmfs or 0.0, nc_rec.xlfss or 0.0]
+            for i in range(nei):
+                all_values.append(nc_rec.ei[i])
+                all_values.append(nc_rec.wei[i])
+            _write_values_block(all_values)
+
+    # NI-type sub-subsections
+    for ni_rec in subsection.ni_records:
+        if ni_rec.lb in (0, 1, 2, 8, 9):
+            # LIST header: 0.0, 0.0, LT, LB, NT, NP
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, ni_rec.lt or 0, ni_rec.lb, ni_rec.nt, ni_rec.np],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            # Data: alternating Ek, Fk
+            all_values = []
+            for i in range(len(ni_rec.e_table_k)):
+                all_values.append(ni_rec.e_table_k[i])
+                all_values.append(ni_rec.f_table_k[i])
+            _write_values_block(all_values)
+
+        elif ni_rec.lb in (3, 4):
+            # LIST header: 0.0, 0.0, LT, LB, NT, NP
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, ni_rec.lt, ni_rec.lb, ni_rec.nt, ni_rec.np],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            # Data: first table {Ek, Fk}, then second table {El, Fl}
+            all_values = []
+            for i in range(len(ni_rec.e_table_k)):
+                all_values.append(ni_rec.e_table_k[i])
+                all_values.append(ni_rec.f_table_k[i])
+            for i in range(len(ni_rec.e_table_l)):
+                all_values.append(ni_rec.e_table_l[i])
+                all_values.append(ni_rec.f_table_l[i])
+            _write_values_block(all_values)
+
+        elif ni_rec.lb == 5:
+            # LIST header: 0.0, 0.0, LS, LB=5, NT, NE
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, ni_rec.ls, 5, ni_rec.nt, ni_rec.ne],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            _write_values_block(ni_rec.energies + ni_rec.matrix)
+
+        elif ni_rec.lb == 6:
+            # LIST header: 0.0, 0.0, 0, LB=6, NT, NER
+            ner = len(ni_rec.row_energies)
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, 0, 6, ni_rec.nt, ner],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
+                         ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            _write_values_block(
+                ni_rec.row_energies + ni_rec.col_energies + ni_rec.rect_matrix
+            )
+
+    return lines

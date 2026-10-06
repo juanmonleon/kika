@@ -38,6 +38,7 @@ def parse_mf35(lines: List[str]) -> MF:
                 section.num_lines = line_counts[mt]
             logger.debug(f"Successfully parsed MT{mt}")
         except Exception as exc:
+            mf.parse_errors[mt] = f"{type(exc).__name__}: {exc}"
             logger.warning(f"Error parsing MT{mt} in MF35: {exc}")
 
     return mf

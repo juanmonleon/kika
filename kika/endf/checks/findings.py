@@ -30,7 +30,10 @@ class CovarianceLocation:
     """Where in the file a finding is: as many of the ENDF indices as apply.
 
     ``ni`` and ``nc`` are 0-based positions of the sub-subsection within its
-    subsection (MF33) or sub-subsection (MF34), in file order.
+    subsection (MF33) or sub-subsection (MF34), in file order. ``lfs``/``lfs1``
+    are the final states of an MF40 block, ``band`` the 0-based incident-energy
+    band of MF35, and ``range_index``/``block`` the 0-based energy range of MF32
+    and the LCOMP=1 short-range block within it.
     """
 
     mat: Optional[int] = None
@@ -44,19 +47,30 @@ class CovarianceLocation:
     nc: Optional[int] = None
     lb: Optional[int] = None
     ls: Optional[int] = None
+    lfs: Optional[int] = None
+    lfs1: Optional[int] = None
+    band: Optional[int] = None
+    range_index: Optional[int] = None
+    block: Optional[int] = None
 
     def __str__(self) -> str:
         parts = []
         if self.mf is not None:
             parts.append(f"MF{self.mf}")
         if self.mt is not None:
-            block = f"MT{self.mt}"
+            block = f"MT{self.mt}" + (f"/LFS{self.lfs}" if self.lfs is not None else "")
             if self.mt1 is not None:
-                other = f"MT{self.mt1}"
+                other = f"MT{self.mt1}" + (f"/LFS{self.lfs1}" if self.lfs1 is not None else "")
                 if self.mat1:
                     other = f"MAT{self.mat1}/{other}"
                 block += f"x{other}"
             parts.append(block)
+        if self.band is not None:
+            parts.append(f"band[{self.band}]")
+        if self.range_index is not None:
+            parts.append(f"range[{self.range_index}]")
+        if self.block is not None:
+            parts.append(f"block[{self.block}]")
         if self.l is not None or self.l1 is not None:
             parts.append(f"L{self.l}xL{self.l1}")
         if self.nc is not None:

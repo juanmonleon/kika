@@ -199,6 +199,9 @@ _TAPES: Dict[str, Sequence[str]] = {
     "w186_jeff40": ("jeff40/n_74-W-186g.jeff", "jeff40/neutrons/n_74-W-186g.jeff"),
     "fe57_jeff40": ("jeff40/n_26-Fe-057g.jeff", "jeff40/neutrons/n_26-Fe-057g.jeff"),
     "hf176_jeff40": ("jeff40/n_72-Hf-176g.jeff", "jeff40/neutrons/n_72-Hf-176g.jeff"),
+    # MF32 and MF35 of JEFF-4.0 for the same layer-1 checks, phase C8.
+    "k41_jeff40": ("jeff40/n_19-K-041g.jeff", "jeff40/neutrons/n_19-K-041g.jeff"),
+    "u239_jeff40": ("jeff40/n_92-U-239g.jeff", "jeff40/neutrons/n_92-U-239g.jeff"),
     # The ACE of that same evaluation (ENDF/B-VIII.1, 293.6 K), and a PENDF of the
     # JEFF-4.0 host: the three sources kika.plotting.plottable overlays in its
     # acceptance test.
@@ -517,6 +520,8 @@ ne20_jeff40_tape = _tape_fixture("ne20_jeff40")
 w186_jeff40_tape = _tape_fixture("w186_jeff40")
 fe57_jeff40_tape = _tape_fixture("fe57_jeff40")
 hf176_jeff40_tape = _tape_fixture("hf176_jeff40")
+k41_jeff40_tape = _tape_fixture("k41_jeff40")
+u239_jeff40_tape = _tape_fixture("u239_jeff40")
 fe56_ace_b81_tape = _tape_fixture("fe56_ace_b81")
 fe56_pendf_tape = _tape_fixture("fe56_pendf")
 

@@ -296,6 +296,7 @@ def parse_mf32(lines: List[str]) -> MF:
             if mt in line_counts:
                 section.num_lines = line_counts[mt]
         except Exception as exc:
+            mf.parse_errors[mt] = f"{type(exc).__name__}: {exc}"
             logger.warning(f"Error parsing MT{mt} in MF32: {exc}")
 
     return mf
