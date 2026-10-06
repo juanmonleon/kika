@@ -12,10 +12,12 @@ from __future__ import annotations
 import html
 import math
 import numbers
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .descriptions import CHECKS
 from .findings import _RANK, DEFECT, LEVELS, NOTE, WARN, CovarianceFinding
 
 SCHEMA = 1
@@ -106,6 +108,19 @@ def _findings_at(findings: Iterable[CovarianceFinding], level: str) -> List[Cova
                                  _int(f.location.mt) or 0, f.check))
 
 
+def _check_names(rows: Iterable[Dict[str, Any]]) -> List[str]:
+    """The check names of summary rows, first seen first (worst level first)."""
+    seen: Dict[str, None] = {}
+    for r in rows:
+        seen.setdefault(r["check"], None)
+    return list(seen)
+
+
+def checks_dict(names: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    """``{check: {title, mf, levels, description}}`` for *names* (see ``descriptions.CHECKS``)."""
+    return {n: CHECKS[n].to_dict() for n in names if n in CHECKS}
+
+
 def report_dict(report, level: str = NOTE) -> Dict[str, Any]:
     _RANK[level]  # KeyError on a bad level, before any work
     return {
@@ -118,6 +133,7 @@ def report_dict(report, level: str = NOTE) -> Dict[str, Any]:
                     "n": r["findings"]} for r in summary_rows(report.findings)],
         "level": level,
         "findings": [f.to_dict() for f in _findings_at(report.findings, level)],
+        "checks": checks_dict(_check_names(summary_rows(report.findings))),
     }
 
 
@@ -170,6 +186,7 @@ def library_dict(library, level: str = NOTE) -> Dict[str, Any]:
         if tape.report is not None:
             findings += [{"tape": tape.name, **f.to_dict()}
                          for f in _findings_at(tape.report.findings, level)]
+    summary = library_summary_rows(library)
     return {
         "kind": "kika.covariance_library_check",
         "schema": SCHEMA,
@@ -179,9 +196,10 @@ def library_dict(library, level: str = NOTE) -> Dict[str, Any]:
         "stopped": library.stopped,
         "totals": _library_counts(library),
         "tapes": [_tape_dict(t) for t in library.tapes],
-        "summary": library_summary_rows(library),
+        "summary": summary,
         "level": level,
         "findings": findings,
+        "checks": checks_dict(_check_names(summary)),
     }
 
 
@@ -322,6 +340,37 @@ def _md_method() -> List[str]:
     return out
 
 
+_LEGEND_INTRO = ("One entry per check in this report: the files it applies to, when it "
+                 "gives each level, and what the finding means.")
+
+
+def _md_legend(names: Sequence[str]) -> List[str]:
+    entries = [(n, CHECKS[n]) for n in names if n in CHECKS]
+    if not entries:
+        return []
+    out = ["## What each finding means", "", _LEGEND_INTRO, ""]
+    for name, d in entries:
+        out += [f"### `{name}`: {d.title}", "",
+                "MF " + ", ".join(map(str, d.mf)), ""]
+        out += [f"- **{lv}**: {d.levels[lv]}" for lv in (DEFECT, WARN, NOTE) if lv in d.levels]
+        out += ["", d.description, ""]
+    return out
+
+
+def _html_legend(names: Sequence[str]) -> List[str]:
+    entries = [(n, CHECKS[n]) for n in names if n in CHECKS]
+    if not entries:
+        return []
+    out = ["<h2>What each finding means</h2>", f'<p class="muted">{_e(_LEGEND_INTRO)}</p>']
+    for name, d in entries:
+        out.append(f'<h3 id="check-{_e(name)}"><code>{_e(name)}</code>: {_e(d.title)}</h3>')
+        out.append(f'<p class="muted">MF {_e(", ".join(map(str, d.mf)))}</p><ul>')
+        out += [f'<li><span class="{lv}">{lv}</span>: {_e(d.levels[lv])}</li>'
+                for lv in (DEFECT, WARN, NOTE) if lv in d.levels]
+        out += ["</ul>", f"<p>{_e(d.description)}</p>"]
+    return out
+
+
 def report_markdown(report, level: str = WARN) -> str:
     _RANK[level]
     tape = _tape_identity(report)
@@ -350,6 +399,7 @@ def report_markdown(report, level: str = WARN) -> str:
     elif not listed:
         out += ["None.", ""]
     out += _md_method()
+    out += _md_legend(_check_names(rows))
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -363,7 +413,7 @@ def library_markdown(library, level: str = WARN) -> str:
     if library.stopped:
         status += f"; stopped after {counts['tapes']} of {counts['planned']}"
     out += _md_table(("", ""), [
-        ("Library", library.library), ("Directory", library.directory),
+        ("Library", library.library), ("Directory", _base(library)),
         ("Tapes", status), ("Findings", _tally(counts["findings"])),
         ("kika", kika_version()), ("Generated", _now())])
     out += ["", "## Summary", ""]
@@ -375,10 +425,9 @@ def library_markdown(library, level: str = WARN) -> str:
     else:
         out.append("Nothing found.")
     out += ["", "## Tapes", ""]
-    out += _md_table(("File", "MAT", "MF checked", "Defects", "Warnings", "Notes", "Status"),
-                     [(t.name, t.mat, ", ".join(map(str, t.mf)), t.count(DEFECT),
-                       t.count(WARN), t.count(NOTE), _tape_status(t)) for t in library.tapes])
+    out += _md_table(_TAPE_HEADER, _tape_rows(library))
     out += ["", "## Findings", ""]
+    base = _base(library)
     any_listed = False
     for t in library.tapes:
         if t.report is None:
@@ -387,7 +436,7 @@ def library_markdown(library, level: str = WARN) -> str:
         if not listed:
             continue
         any_listed = True
-        out += [f"### {t.name}" + (f" (MAT {t.mat})" if t.mat is not None else ""), ""]
+        out += [f"### {_rel(t, base)}" + (f" (MAT {t.mat})" if t.mat is not None else ""), ""]
         out += _md_table(_FINDING_HEADER, _finding_rows(listed))
         out.append("")
     hidden = _hidden_line(counts["findings"], level)
@@ -396,7 +445,40 @@ def library_markdown(library, level: str = WARN) -> str:
     elif not any_listed:
         out += ["None.", ""]
     out += _md_method()
+    out += _md_legend(_check_names(rows))
     return "\n".join(out).rstrip() + "\n"
+
+
+def _base(library) -> Optional[Path]:
+    """The directory walked, or the deepest directory every tape is under."""
+    if library.directory:
+        return Path(library.directory)
+    parents = [str(Path(t.path).resolve().parent) for t in library.tapes]
+    if not parents:
+        return None
+    try:
+        return Path(os.path.commonpath(parents))
+    except ValueError:  # different drives
+        return None
+
+
+def _rel(tape, base: Optional[Path]) -> str:
+    """The tape's path relative to *base*, or in full when it is not under it."""
+    if base is not None:
+        try:
+            return Path(tape.path).resolve().relative_to(base.resolve()).as_posix()
+        except ValueError:
+            pass
+    return str(tape.path)
+
+
+def _tape_rows(library) -> List[Tuple]:
+    return [(t.name, t.mat, ", ".join(map(str, t.mf)), t.count(DEFECT), t.count(WARN),
+             t.count(NOTE), _tape_status(t), str(Path(t.path).resolve()))
+            for t in library.tapes]
+
+
+_TAPE_HEADER = ("File", "MAT", "MF checked", "Defects", "Warnings", "Notes", "Status", "Path")
 
 
 def _tape_status(tape) -> str:
@@ -504,6 +586,7 @@ def report_html(report, level: str = WARN) -> str:
     elif not listed:
         body.append("<p>None.</p>")
     body += _html_method()
+    body += _html_legend(_check_names(rows))
     return _html_page(title, body)
 
 
@@ -518,7 +601,7 @@ def library_html(library, level: str = WARN) -> str:
         status += f"; stopped after {counts['tapes']} of {counts['planned']}"
     body = [f"<h1>{_e(title)}</h1>"]
     body += _id_table([
-        ("Library", library.library), ("Directory", library.directory), ("Tapes", status),
+        ("Library", library.library), ("Directory", _base(library)), ("Tapes", status),
         ("Findings", _tally(counts["findings"])), ("kika", kika_version()),
         ("Generated", _now())])
     body.append("<h2>Summary</h2>")
@@ -530,11 +613,9 @@ def library_html(library, level: str = WARN) -> str:
     else:
         body.append("<p>Nothing found.</p>")
     body.append("<h2>Tapes</h2>")
-    body += _html_table(("File", "MAT", "MF checked", "Defects", "Warnings", "Notes", "Status"),
-                        [(t.name, t.mat, ", ".join(map(str, t.mf)), t.count(DEFECT),
-                          t.count(WARN), t.count(NOTE), _tape_status(t))
-                         for t in library.tapes], numeric=(1, 3, 4, 5))
+    body += _html_table(_TAPE_HEADER, _tape_rows(library), numeric=(1, 3, 4, 5), code_col=7)
     body.append("<h2>Findings</h2>")
+    base = _base(library)
     any_listed = False
     for t in library.tapes:
         if t.report is None:
@@ -543,7 +624,8 @@ def library_html(library, level: str = WARN) -> str:
         if not listed:
             continue
         any_listed = True
-        body.append(f"<h3>{_e(t.name)}" + (f" (MAT {_e(t.mat)})" if t.mat is not None else "")
+        body.append(f"<h3>{_e(_rel(t, base))}"
+                    + (f" (MAT {_e(t.mat)})" if t.mat is not None else "")
                     + "</h3>")
         body += _html_findings(listed)
     hidden = _hidden_line(counts["findings"], level)
@@ -552,6 +634,7 @@ def library_html(library, level: str = WARN) -> str:
     elif not any_listed:
         body.append("<p>None.</p>")
     body += _html_method()
+    body += _html_legend(_check_names(rows))
     return _html_page(title, body)
 
 

@@ -15,7 +15,8 @@ import pandas as pd
 import pytest
 
 from kika.endf import check_covariance_library, check_covariances, read_endf, tape_inventory
-from kika.endf.checks import CovarianceCheckReport, CovarianceFinding, CovarianceLocation
+from kika.endf.checks import (CHECKS, LEVELS, CovarianceCheckReport, CovarianceFinding,
+                              CovarianceLocation)
 from kika.endf.checks.export import jsonable
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -222,3 +223,73 @@ def test_a_tape_without_a_usable_directory_says_so(tmp_path):
     junk.write_text("not an ENDF tape\n")
     inv = tape_inventory(junk)
     assert inv.sections is None and inv.problem == "no MF1/MT451 found"
+
+
+# ---- the legend -----------------------------------------------------------
+
+def _emitted_checks():
+    """Every check name the layer-1 modules can emit, read from their source."""
+    import ast
+
+    import kika.endf.checks as pkg
+
+    names = set()
+    for path in Path(pkg.__file__).parent.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "CovarianceFinding"
+                    and node.args):
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    names.add(first.value)
+                elif isinstance(first, ast.IfExp):  # "band_gap" if gap else "band_overlap"
+                    names |= {first.body.value, first.orelse.value}
+    return names
+
+
+def test_every_check_is_described():
+    emitted = _emitted_checks()
+    assert len(emitted) > 50
+    assert emitted - set(CHECKS) == set(), "describe these in checks/descriptions.py"
+    assert set(CHECKS) - emitted == set(), "described but never emitted"
+    for d in CHECKS.values():
+        assert d.title and d.description and d.mf and set(d.levels) <= set(LEVELS)
+
+
+def test_the_legend_agrees_with_what_the_cuts_give():
+    report = check_covariance_library(CUTS, progress=False)
+    for _, f in report:
+        d = CHECKS[f.check]
+        assert f.location.mf in d.mf, (f.check, f.location.mf)
+        assert f.level in d.levels, (f.check, f.level)
+    d = report.to_dict("defect")
+    assert set(d["checks"]) == {r["check"] for r in d["summary"]}
+    entry = d["checks"]["ls1_in_cross_block"]
+    assert set(entry) == {"title", "mf", "levels", "description"}
+    assert set(entry["levels"]) == {"defect", "note"} and 34 in entry["mf"]
+    _strictly_plain(d["checks"])
+
+
+def test_the_pages_end_with_the_legend_of_their_checks(ne20):
+    md, html = ne20.to_markdown(), ne20.to_html()
+    legend = md.split("## What each finding means")[1]
+    assert "### `ls1_in_cross_block`" in legend and "### `inert_rows`" in legend
+    assert "sum_rule_violated" not in legend  # only the checks of this report
+    assert '<h3 id="check-ls1_in_cross_block">' in html
+    assert set(ne20.to_dict()["checks"]) == {f.check for f in ne20}
+
+
+def test_library_pages_give_the_full_path_of_each_tape(tmp_path):
+    report = check_covariance_library(CUTS, progress=False)
+    md, html = report.to_markdown(), report.to_html()
+    for p in CUTS:
+        assert str(p.resolve()) in md and str(p.resolve()) in html
+    # Tapes given as a list: the findings are headed by the path under the
+    # directory they share.
+    for sub in ("jeff", "endfb"):
+        (tmp_path / sub).mkdir()
+        shutil.copy(NE20, tmp_path / sub / NE20.name)
+    two = check_covariance_library([tmp_path / "jeff" / NE20.name, tmp_path / "endfb" / NE20.name],
+                                   progress=False)
+    md = two.to_markdown()
+    assert f"### jeff/{NE20.name} (MAT 1025)" in md and f"### endfb/{NE20.name}" in md
+    assert str(tmp_path.resolve()) in md.split("## Summary")[0]  # the Directory row
