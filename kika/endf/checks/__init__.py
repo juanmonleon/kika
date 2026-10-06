@@ -5,6 +5,9 @@ tape -- structure, values, positive semi-definiteness -- without changing
 anything; :func:`check_covariance_library` does it for every tape of a directory. Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
 """
 from .covariances import check_covariances
+# Imported here so a frozen build (PyInstaller) bundles it: the reports reach
+# it from inside their methods.
+from . import export  # noqa: F401
 from .library import (
     TAPE_PATTERNS,
     CovarianceLibraryReport,

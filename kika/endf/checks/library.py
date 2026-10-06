@@ -17,7 +17,8 @@ import sys
 import time
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional,
+                    Sequence, Tuple, Union)
 
 from .covariances import CHECKED_MF
 from .findings import (
@@ -45,6 +46,8 @@ TAPE_PATTERNS = ("*.endf", "*.jeff", "*.txt", "*.dat")
 _SUPPORT_MF = {31: (1,), 32: (2,), 33: (2, 3), 34: (4,), 35: (5,), 40: ()}
 
 Progress = Union[bool, None, Callable[[str], None]]
+#: ``on_tape(done, total, name, ok)``, called when each tape is done.
+OnTape = Callable[[int, int, str, bool], None]
 
 
 @dataclass(frozen=True)
@@ -57,10 +60,16 @@ class TapeCheck:
     has_covariances: bool = True
     read_seconds: float = 0.0
     check_seconds: float = 0.0
+    #: The covariance files asked for on this tape.
+    mf: Tuple[int, ...] = ()
+    #: Set only when two tapes of a walk share a file name: the path that tells
+    #: them apart (relative to the directory walked, or as given).
+    label: Optional[str] = None
 
     @property
     def name(self) -> str:
-        return self.path.name
+        """The file name, or :attr:`label` where the file name is not unique."""
+        return self.label or self.path.name
 
     @property
     def mat(self) -> Optional[int]:
@@ -87,6 +96,10 @@ class CovarianceLibraryReport:
     tapes: Tuple[TapeCheck, ...] = ()
     directory: Optional[Path] = None
     library: Optional[str] = None
+    #: True when ``should_stop`` ended the walk early: ``tapes`` holds the ones
+    #: done, out of ``planned``.
+    stopped: bool = False
+    planned: int = 0
 
     def __iter__(self) -> Iterator[Tuple[TapeCheck, CovarianceFinding]]:
         for tape in self.tapes:
@@ -147,11 +160,11 @@ class CovarianceLibraryReport:
                 for (mf, level, check), (n, names) in counts.items()]
         frame = pd.DataFrame(rows, columns=["mf", "level", "check", "findings", "tapes"])
         if frame.empty:
-            return frame
+            return frame.astype({"mf": "Int64"})
         frame["_rank"] = frame["level"].map(lambda lv: -_RANK[lv])
         frame = frame.sort_values(["mf", "_rank", "tapes", "check"],
                                   ascending=[True, True, False, True])
-        return frame.drop(columns="_rank").reset_index(drop=True)
+        return frame.drop(columns="_rank").reset_index(drop=True).astype({"mf": "Int64"})
 
     def files_dataframe(self):
         """One row per tape: MAT, counts by level, timings, and the error if any."""
@@ -162,7 +175,8 @@ class CovarianceLibraryReport:
                  "read_s": round(t.read_seconds, 2), "check_s": round(t.check_seconds, 2),
                  "error": t.error} for t in self.tapes]
         return pd.DataFrame(rows, columns=["file", "mat", "has_covariances", "n_defect",
-                                           "n_warn", "n_note", "read_s", "check_s", "error"])
+                                           "n_warn", "n_note", "read_s", "check_s", "error"]
+                            ).astype({"mat": "Int64"})
 
     def to_dataframe(self, level: str = NOTE):
         """One row per finding at *level* or worse, with its file and location."""
@@ -179,8 +193,40 @@ class CovarianceLibraryReport:
             row["summary"] = f.summary
             row["evidence"] = f.evidence
             rows.append(row)
-        return pd.DataFrame(rows, columns=["file", "level", "check", *loc_names,
-                                           "summary", "evidence"])
+        frame = pd.DataFrame(rows, columns=["file", "level", "check", *loc_names,
+                                            "summary", "evidence"])
+        # Nullable ints: a column with any None would otherwise be float (1025.0).
+        return frame.astype({name: "Int64" for name in loc_names})
+
+    def to_dict(self, level: str = NOTE) -> Dict[str, Any]:
+        """The report as plain data, safe for JSON and msgpack.
+
+        ``kika_version``, ``library``, ``stopped``, one entry per tape (name,
+        path, MAT, MF asked, status, counts by level, timings), the
+        ``summary`` by (MF, level, check) over every finding, and the
+        ``findings`` at *level* or worse, each with the ``tape`` it is in.
+        Over a whole library the notes are tens of thousands of rows; pass
+        ``level="warn"`` to leave them out.
+        """
+        from .export import library_dict
+
+        return library_dict(self, level)
+
+    def to_markdown(self, path=None, *, level: str = WARN) -> str:
+        """A self-contained Markdown report; written to *path* too if given.
+
+        The summary, one row per tape, the findings at *level* or worse by
+        tape (notes only counted by default), and the method and thresholds.
+        """
+        from .export import library_markdown, write_text
+
+        return write_text(library_markdown(self, level), path)
+
+    def to_html(self, path=None, *, level: str = WARN) -> str:
+        """The same report as :meth:`to_markdown`, as one HTML page with no external resources."""
+        from .export import library_html, write_text
+
+        return write_text(library_html(self, level), path)
 
     def write(self, out_dir, *, level: str = WARN) -> Dict[str, Path]:
         """Write ``summary``, ``files`` and ``findings`` as TSV into *out_dir*.
@@ -206,7 +252,8 @@ class CovarianceLibraryReport:
         where = self.library or (str(self.directory) if self.directory else "library")
         checked = self.checked
         with_defect = sum(1 for t in checked if t.count(DEFECT))
-        lines = [f"Covariance check of {where}: {len(self.tapes)} tapes, "
+        lines = [f"Covariance check of {where}: {len(self.tapes)} tapes"
+                 + (f" (stopped, of {self.planned})" if self.stopped else "") + ", "
                  f"{len(checked)} with covariances checked, {with_defect} with defects, "
                  f"{len(self.failed)} failed"]
         summary = self.summary()
@@ -221,7 +268,26 @@ class CovarianceLibraryReport:
         return "\n".join(lines)
 
 
+def _labels(paths: Sequence[Path], root: Optional[Path]) -> List[Optional[str]]:
+    """A label for each tape whose file name another tape of the walk shares."""
+    seen: Dict[str, int] = {}
+    for p in paths:
+        seen[p.name] = seen.get(p.name, 0) + 1
+    out: List[Optional[str]] = []
+    for p in paths:
+        if seen[p.name] == 1:
+            out.append(None)
+            continue
+        try:
+            out.append(p.relative_to(root).as_posix() if root else str(p))
+        except ValueError:
+            out.append(str(p))
+    return out
+
+
 def _tapes(source, patterns: Sequence[str], recursive: bool) -> Tuple[Optional[Path], List[Path]]:
+    if isinstance(source, Mapping):
+        return None, [Path(p) for p in source]
     if isinstance(source, (str, Path)) and Path(source).is_dir():
         root = Path(source)
         glob = root.rglob if recursive else root.glob
@@ -250,25 +316,37 @@ def _reporter(progress: Progress, total: int) -> Callable[[int, str, bool], None
     return show
 
 
+def _checked_mf(asked, where: str) -> Tuple[int, ...]:
+    wanted = tuple(sorted({int(m) for m in asked if int(m) in CHECKED_MF}))
+    if not wanted:
+        raise ValueError(f"mf must name at least one of {', '.join(map(str, CHECKED_MF))}, "
+                         f"got {list(asked)}{where}")
+    return wanted
+
+
 def check_covariance_library(
-    source: Union[str, Path, Iterable[Union[str, Path]]],
+    source: Union[str, Path, Iterable[Union[str, Path]], Mapping[Union[str, Path], Sequence[int]]],
     *,
     mf: Sequence[int] = CHECKED_MF,
     patterns: Sequence[str] = TAPE_PATTERNS,
     recursive: bool = False,
     library: Optional[str] = None,
     progress: Progress = True,
+    on_tape: Optional[OnTape] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> CovarianceLibraryReport:
     """Run :func:`check_covariances` on every tape of a library, one at a time.
 
     Parameters
     ----------
-    source : path or iterable of paths
-        A directory of ENDF tapes, or the tapes themselves.
+    source : path, iterable of paths, or mapping
+        A directory of ENDF tapes, the tapes themselves, or ``{tape: mf}`` to
+        check each tape for its own covariance files (a ``None`` value takes
+        *mf*). Tapes are walked in the order given.
     mf : sequence of int
         The covariance files to check (any of 31, 32, 33, 34, 35, 40; all by
-        default). Only these and the files that give them central values
-        (``_SUPPORT_MF``) are read.
+        default), for every tape a mapping *source* does not set. Only these
+        and the files that give them central values (``_SUPPORT_MF``) are read.
     patterns : sequence of str
         Globs that pick the tapes in a directory. The default covers how
         ENDF/B, JEFF and JENDL name theirs.
@@ -281,6 +359,16 @@ def check_covariance_library(
         ``True`` (default) keeps one line on stderr with the tape being checked
         and the running tally; a callable receives each of those lines instead
         (``print`` gives one line per tape); ``False`` is silent.
+    on_tape : callable, optional
+        ``on_tape(done, total, name, ok)``, structured progress next to (not
+        instead of) *progress*: called when each tape is done, ``done`` going
+        from 1 to ``total``; ``name`` is :attr:`TapeCheck.name` and ``ok`` is
+        False for a tape that could not be read or checked. An exception in it
+        is not caught.
+    should_stop : callable, optional
+        Asked before each tape; when it returns true the walk stops there and
+        the report of the tapes done so far comes back with ``stopped=True``.
+        Nothing stops inside a tape, so the wait is at most one tape.
 
     Returns
     -------
@@ -296,15 +384,19 @@ def check_covariance_library(
 
     from .covariances import check_covariances
 
-    wanted = sorted({m for m in mf if m in CHECKED_MF})
-    if not wanted:
-        raise ValueError(f"mf must name at least one of {', '.join(map(str, CHECKED_MF))}, "
-                         f"got {list(mf)}")
-    read_mf = sorted(set(wanted).union(*(_SUPPORT_MF[m] for m in wanted)))
+    default = _checked_mf(mf, "")
+    per_tape: Dict[Path, Tuple[int, ...]] = {}
+    if isinstance(source, Mapping):
+        # Refused before the walk, not at tape 600.
+        for p, asked in source.items():
+            if asked is not None:
+                per_tape[Path(p)] = _checked_mf(asked, f" for {Path(p).name}")
     root, paths = _tapes(source, patterns, recursive)
+    labels = _labels(paths, root)
     report = _reporter(progress, len(paths))
     out: List[TapeCheck] = []
     n_defect = n_failed = 0
+    stopped = False
     started = time.perf_counter()
 
     # The parser warns about every MF it skips and logs every quirk it repairs;
@@ -316,13 +408,21 @@ def check_covariance_library(
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            for i, path in enumerate(paths, 1):
-                report(i, f"[{i}/{len(paths)}] {path.name} ...", False)
+            for i, (path, label) in enumerate(zip(paths, labels), 1):
+                if out and on_tape is not None:
+                    on_tape(i - 1, len(paths), out[-1].name, out[-1].ok)
+                if should_stop is not None and should_stop():
+                    stopped = True
+                    break
+                wanted = per_tape.get(path, default)
+                read_mf = sorted(set(wanted).union(*(_SUPPORT_MF[m] for m in wanted)))
+                report(i, f"[{i}/{len(paths)}] {label or path.name} ...", False)
                 t0 = time.perf_counter()
                 try:
                     endf = read_endf(str(path), mf_numbers=read_mf)
                 except Exception as exc:  # noqa: BLE001 - recorded, the walk goes on
-                    out.append(TapeCheck(path, error=f"read: {type(exc).__name__}: {exc}",
+                    out.append(TapeCheck(path, mf=wanted, label=label,
+                                         error=f"read: {type(exc).__name__}: {exc}",
                                          read_seconds=time.perf_counter() - t0))
                     n_failed += 1
                     continue
@@ -331,34 +431,42 @@ def check_covariance_library(
                     # read_endf returns an empty tape for a file that is not
                     # ENDF at all; in a census that is a failure, not a tape
                     # without covariances.
-                    out.append(TapeCheck(path, error="read: no ENDF section found in the file",
+                    out.append(TapeCheck(path, mf=wanted, label=label,
+                                         error="read: no ENDF section found in the file",
                                          read_seconds=t1 - t0))
                     n_failed += 1
                     continue
                 if not any(m in endf.files for m in wanted):
-                    out.append(TapeCheck(path, has_covariances=False, read_seconds=t1 - t0))
+                    out.append(TapeCheck(path, mf=wanted, label=label, has_covariances=False,
+                                         read_seconds=t1 - t0))
                     del endf
                     continue
                 try:
                     tape_report = check_covariances(endf, mf=wanted)
                 except Exception as exc:  # noqa: BLE001
-                    out.append(TapeCheck(path, error=f"check: {type(exc).__name__}: {exc}",
+                    out.append(TapeCheck(path, mf=wanted, label=label,
+                                         error=f"check: {type(exc).__name__}: {exc}",
                                          read_seconds=t1 - t0,
                                          check_seconds=time.perf_counter() - t1))
                     n_failed += 1
                     del endf
                     continue
                 del endf
-                tape = TapeCheck(path, report=tape_report, read_seconds=t1 - t0,
-                                 check_seconds=time.perf_counter() - t1)
+                tape = TapeCheck(path, mf=wanted, label=label, report=tape_report,
+                                 read_seconds=t1 - t0, check_seconds=time.perf_counter() - t1)
                 out.append(tape)
                 n_defect += bool(tape.count(DEFECT))
-                report(i, f"[{i}/{len(paths)}] {path.name}: {tape.count(DEFECT)} defects, "
+                report(i, f"[{i}/{len(paths)}] {tape.name}: {tape.count(DEFECT)} defects, "
                        f"{tape.count(WARN)} warnings  (so far {n_defect} tapes with defects, "
                        f"{n_failed} failed)", False)
+        if out and on_tape is not None and not stopped:
+            on_tape(len(out), len(paths), out[-1].name, out[-1].ok)
     finally:
         kika_log.setLevel(level)
-    report(len(paths), f"{len(paths)} tapes in {time.perf_counter() - started:.0f} s: "
+    head = (f"stopped after {len(out)} of {len(paths)} tapes" if stopped
+            else f"{len(paths)} tapes")
+    report(len(out), f"{head} in {time.perf_counter() - started:.0f} s: "
            f"{sum(1 for t in out if t.ok and t.has_covariances)} with covariances, "
            f"{n_defect} with defects, {n_failed} failed", True)
-    return CovarianceLibraryReport(tuple(out), directory=root, library=library)
+    return CovarianceLibraryReport(tuple(out), directory=root, library=library,
+                                   stopped=stopped, planned=len(paths))

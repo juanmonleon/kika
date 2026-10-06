@@ -184,7 +184,8 @@ def check_covariances(
             _check_mf33(ctx, mf_number, mf_obj, out)
         for sec in mf_obj.mt.values():
             mat = mat or getattr(sec, "_mat", None)
-    return CovarianceCheckReport(tuple(out), source=getattr(endf, "source_path", None), mat=mat)
+    return CovarianceCheckReport(tuple(out), source=getattr(endf, "source_path", None), mat=mat,
+                                 mf=tuple(m for m in mf if m in CHECKED_MF))
 
 
 # ---------------------------------------------------------------------------

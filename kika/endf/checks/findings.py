@@ -81,6 +81,11 @@ class CovarianceLocation:
             parts.append(f"LB={self.lb}" + (f" LS={self.ls}" if self.ls is not None else ""))
         return " ".join(parts) if parts else "(file)"
 
+    def to_dict(self) -> Dict[str, Optional[int]]:
+        """Every index, ``None`` where it does not apply, as plain Python ints."""
+        return {f.name: (None if getattr(self, f.name) is None else int(getattr(self, f.name)))
+                for f in fields(self)}
+
 
 @dataclass(frozen=True)
 class CovarianceFinding:
@@ -99,6 +104,14 @@ class CovarianceFinding:
     def __str__(self) -> str:
         return f"[{self.level}] {self.location}: {self.check} -- {self.summary}"
 
+    def to_dict(self) -> Dict[str, Any]:
+        """JSON- and msgpack-safe: plain ints, no NaN/inf (``None``), no numpy."""
+        from .export import jsonable
+
+        return {"level": self.level, "check": self.check,
+                "location": self.location.to_dict(), "location_str": str(self.location),
+                "summary": self.summary, "evidence": jsonable(self.evidence)}
+
 
 @dataclass(frozen=True)
 class CovarianceCheckReport:
@@ -111,6 +124,8 @@ class CovarianceCheckReport:
     findings: Tuple[CovarianceFinding, ...] = ()
     source: Optional[str] = None
     mat: Optional[int] = None
+    #: The covariance files that were asked for (and checked where present).
+    mf: Tuple[int, ...] = ()
 
     def __iter__(self) -> Iterator[CovarianceFinding]:
         return iter(self.findings)
@@ -157,7 +172,46 @@ class CovarianceCheckReport:
             row["summary"] = f.summary
             row["evidence"] = f.evidence
             rows.append(row)
-        return pd.DataFrame(rows, columns=["level", "check", *loc_names, "summary", "evidence"])
+        frame = pd.DataFrame(rows, columns=["level", "check", *loc_names, "summary", "evidence"])
+        # Nullable ints: a column with any None would otherwise be float (1025.0).
+        return frame.astype({name: "Int64" for name in loc_names})
+
+    def summary(self):
+        """One row per (MF, level, check) with its number of ``findings``, worst first."""
+        import pandas as pd
+
+        from .export import summary_rows
+
+        return pd.DataFrame(summary_rows(self.findings),
+                            columns=["mf", "level", "check", "findings"]).astype({"mf": "Int64"})
+
+    def to_dict(self, level: str = NOTE) -> Dict[str, Any]:
+        """The report as plain data, safe for JSON and msgpack.
+
+        Holds the kika version, the tape (name, path, MAT, the MF checked), the
+        counts by level, the summary by (MF, level, check) -- always over every
+        finding -- and the findings at *level* or worse, each with its
+        ``location_str``. Non-finite numbers in the evidence become ``None``.
+        """
+        from .export import report_dict
+
+        return report_dict(self, level)
+
+    def to_markdown(self, path=None, *, level: str = WARN) -> str:
+        """A self-contained Markdown report; written to *path* too if given.
+
+        Lists the findings at *level* or worse (notes are only counted by
+        default) after the summary, and ends with the method and thresholds.
+        """
+        from .export import report_markdown, write_text
+
+        return write_text(report_markdown(self, level), path)
+
+    def to_html(self, path=None, *, level: str = WARN) -> str:
+        """The same report as :meth:`to_markdown`, as one HTML page with no external resources."""
+        from .export import report_html, write_text
+
+        return write_text(report_html(self, level), path)
 
     def __str__(self) -> str:
         head = "Covariance check"
