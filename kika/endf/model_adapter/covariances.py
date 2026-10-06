@@ -712,7 +712,8 @@ def encodeMF35MT(source, mt: int, mat: Optional[int] = None,
 
 def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
                           evaluation: Optional[str] = None,
-                          target: Optional[str] = None):
+                          target: Optional[str] = None,
+                          checks: bool = True):
     """Every covariance file in a parsed ENDF → one :class:`CovarianceSuite`.
 
     MF31, MF33, MF34 and MF35 become ``covarianceSections``; **MF32 becomes
@@ -739,6 +740,16 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
     ``sampling/endf_perturbation.py:663`` and ``sampling/mf35_sampling.py:177``)
     passes neither and gets a suite that cannot be written as valid GNDS, which
     is honest: nothing said what it was about.
+
+    **``checks`` runs layer 1 of the covariance checks**
+    (:func:`kika.endf.check_covariances`) on the tape, because this is the last
+    point where the MF31/33/34 sections are still as written: the model keeps
+    the assembled matrix, not the LB/LS records it came from. Each section's
+    findings land on its ``provenance.covarianceFindings``, and the whole report
+    -- including what belongs to no decoded section, such as an MT the parser
+    dropped -- on ``suite.covarianceChecks``. They are findings about the file,
+    not losses of the conversion, so they stay out of *report*; a check that
+    cannot run at all is the one thing that goes there.
     """
     report = report if report is not None else ConversionReport()
     if target is None:
@@ -840,7 +851,43 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
             "covariances"
         )
 
+    suite.covarianceChecks = (_attachLayer1(endf, suite, report, xsSections if mf33 is not None
+                                            else None) if checks else None)
+
     # Both ways to the same object: the tuple is unchanged, and the
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report
     return suite, report
+
+
+def _attachLayer1(endf, suite, report: ConversionReport, xsSections=None):
+    """Layer-1 findings onto the provenance of the section each one is about.
+
+    Sections decoded from one ENDF section share one provenance object, so a
+    finding is attached once per (MF, MT), keyed by the row's ``ENDF_MFMT``.
+    """
+    from kika.endf.checks import check_covariances
+
+    try:
+        layer1 = check_covariances(
+            endf, xs_sections=xsSections if xsSections is not None
+            else getattr(endf, "pendf", None))
+    except Exception as exc:  # noqa: BLE001 - the decode stands without them
+        report.warn(f"the layer-1 covariance checks could not run: "
+                    f"{type(exc).__name__}: {exc}")
+        return None
+    byKey = {}
+    for finding in layer1:
+        byKey.setdefault((finding.location.mf, finding.location.mt), []).append(finding)
+    done = set()
+    for section in suite.covarianceSections:
+        provenance = section.provenance
+        mfmt = getattr(section.rowData, "ENDF_MFMT", None) if section.rowData else None
+        if provenance is None or id(provenance) in done or not mfmt:
+            continue
+        mf, _, mt = str(mfmt).partition("/")
+        if int(mf) not in (31, 33, 34):
+            continue
+        done.add(id(provenance))
+        provenance.covarianceFindings = tuple(byKey.get((int(mf), int(mt)), ()))
+    return layer1
