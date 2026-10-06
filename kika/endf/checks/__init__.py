@@ -1,0 +1,27 @@
+"""Checks of ENDF sections as they are written in the file (layer 1).
+
+:func:`check_covariances` reports what is wrong with the MF31/MF33/MF34 of a
+tape -- structure, values, positive semi-definiteness -- without changing
+anything. Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
+"""
+from .covariances import check_covariances
+from .findings import (
+    DEFECT,
+    LEVELS,
+    NOTE,
+    WARN,
+    CovarianceCheckReport,
+    CovarianceFinding,
+    CovarianceLocation,
+)
+
+__all__ = [
+    "check_covariances",
+    "CovarianceCheckReport",
+    "CovarianceFinding",
+    "CovarianceLocation",
+    "NOTE",
+    "WARN",
+    "DEFECT",
+    "LEVELS",
+]

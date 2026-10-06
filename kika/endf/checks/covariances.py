@@ -1,0 +1,1062 @@
+"""Layer 1 of the covariance checks: an MF31/MF33/MF34 section as written in the file.
+
+:func:`check_covariances` reads what kika's parser kept -- the records with
+their LB/LS, counts and grids, and the triangle before it is mirrored -- and
+reports what is wrong with it, without assembling a model covariance. Three
+families of checks, in the order of the plan (kika-workspace
+``docs/library/cov_checks_roadmap.md``, phases C2-C4):
+
+**Structure (C2)** -- what ENDF-6 §31-34 pins down without looking at a value:
+counts (NL/NMT1, NI, NC, the number of (L, L1) sub-subsections) against what was
+read, NT against NE/LS/NER, LB valid for the file, LTY, grids strictly
+increasing, (L, L1) inside the range NL/NL1/LTT allow, and **LB=5 LS=1 in a
+cross block** -- a symmetric triangle where the block is not symmetric, which
+kika mirrors and so turns into |rho| > 1 (the "defect A" of JEFF-4.0 MF34).
+An MT the parser could not read at all is a ``parse_error``.
+
+**Values (C3)** -- on each block summed on its own union grid the way kika sums
+it: |rho| > 1 (a cross block needs the variances of both self blocks, on a
+common grid), negative variances, rows with no variance (``max == min`` exactly,
+never a threshold on sigma), covariance where the variance is zero, and large
+variances judged in **absolute** against the central values -- MF3 or a PENDF
+for MF33, the a_l of MF4 for MF34. Without central values a block is reported
+"not evaluable", not guessed.
+
+**Positive semi-definiteness (C4)** -- the eigenvalues of every self block, in
+three levels by |lambda_min| / lambda_max: below 1e-6 a note, up to 1e-3 a
+warning, above that a defect. Two explanations downgrade a negative eigenvalue
+to a note, and both are measured, not assumed: it is within the rounding of the
+values to the six significant figures an ENDF field holds, or the block's
+correlations are quantised (JENDL-5 writes sigma_i sigma_j rho_ij with rho
+rounded to 0.001, which leaves eigenvalues down to -2e-4 lambda_max in a
+near-low-rank matrix) and lambda_min of the correlation matrix is inside what
+that rounding can do. A defect also says which LB=5 record is already
+indefinite on its own.
+
+Policy (decided with the maintainer): every finding only informs. Nothing here
+raises on a bad section, changes it or proposes a remedy.
+
+A block that mixes absolute (LB=0/8/9) and relative components needs sigma(E)
+to be summed (``MF33NeedsCrossSections``). Pass ``xs_sections`` or attach a
+PENDF to the tape (``kika.processing.attach_pendf``); otherwise only its
+relative part is checked, and a note says so.
+"""
+from __future__ import annotations
+
+import math
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+from ..classes.mf33.mf33 import ABSOLUTE_LB, RELATIVE_LB, MF33MT, mixesAbsoluteAndRelative
+from ...utils import get_endf_logger
+from .findings import (
+    DEFECT,
+    NOTE,
+    WARN,
+    CovarianceCheckReport,
+    CovarianceFinding,
+    CovarianceLocation,
+)
+
+logger = get_endf_logger(__name__)
+
+#: |rho| up to 1 + this is rounding of the values (an ENDF field keeps 6-7
+#: significant figures); above it, and up to RHO_DEFECT, still a note.
+RHO_ROUNDING = 1e-6
+RHO_DEFECT = 1e-3
+
+#: The three PSD levels on |lambda_min| / lambda_max (roadmap, decisions).
+PSD_NOTE = 1e-6
+PSD_DEFECT = 1e-3
+
+#: Relative asymmetry of a self block (LS=0 stores both triangles).
+ASYM_NOTE = 1e-6
+ASYM_DEFECT = 1e-3
+
+#: Significant figures an 11-column ENDF float keeps at worst (d.ddddd+nn).
+ENDF_DIGITS = 6
+
+#: Correlation quanta tried, coarsest first, and the share of off-diagonal
+#: correlations that must sit on the lattice for it to count as quantised.
+RHO_QUANTA = (1e-2, 1e-3, 1e-4)
+RHO_QUANTUM_SHARE = 0.98
+#: Slack on the spectral norm of a symmetric rounding error, ~2 s sqrt(n).
+RHO_QUANTUM_SLACK = 1.5
+
+VALID_LB = {
+    31: frozenset({0, 1, 2, 3, 4, 5, 6, 8, 9}),
+    33: frozenset({0, 1, 2, 3, 4, 5, 6, 8, 9}),
+    34: frozenset({0, 1, 2, 5, 6}),
+}
+VALID_LTY = frozenset({0, 1, 2, 3})
+VALID_LCT = frozenset({0, 1, 2})
+
+#: How many items an evidence list keeps.
+_EVIDENCE_ITEMS = 10
+
+
+def check_covariances(
+    endf,
+    *,
+    mf: Sequence[int] = (31, 33, 34),
+    xs_sections: Optional[Dict[int, object]] = None,
+) -> CovarianceCheckReport:
+    """Check the covariance files of one ENDF tape as they are written.
+
+    Parameters
+    ----------
+    endf : ENDF
+        A tape from :func:`kika.endf.read_endf`. Read MF2/MF3 (MF33) and MF4
+        (MF34) along with the covariances, or the large-variance check has no
+        central values and says so.
+    mf : sequence of int
+        Which covariance files to check; any of 31, 33, 34. Others are ignored.
+    xs_sections : dict, optional
+        sigma(E) by MT, e.g. a PENDF from ``kika.processing.read_pendf_mf3_sections``.
+        Defaults to ``endf.pendf``. Used to sum mixed absolute/relative MF33
+        blocks and as the MF33 central values; without it MF3 is used only
+        above the upper limit of the resonance ranges, where it is the cross
+        section and not a background.
+
+    Returns
+    -------
+    CovarianceCheckReport
+    """
+    xs = xs_sections if xs_sections is not None else getattr(endf, "pendf", None)
+    ctx = _Context(endf, xs or None)
+    out: List[CovarianceFinding] = []
+    mat = None
+    for mf_number in mf:
+        mf_obj = endf.files.get(mf_number)
+        if mf_obj is None or mf_number not in VALID_LB:
+            continue
+        for mt, why in sorted(getattr(mf_obj, "parse_errors", {}).items()):
+            out.append(CovarianceFinding(
+                "parse_error", DEFECT,
+                f"the parser could not read this section and dropped it ({why})",
+                CovarianceLocation(mf=mf_number, mt=mt), {"error": why}))
+        if mf_number == 34:
+            _check_mf34(ctx, mf_obj, out)
+        else:
+            _check_mf33(ctx, mf_number, mf_obj, out)
+        for sec in mf_obj.mt.values():
+            mat = mat or getattr(sec, "_mat", None)
+    return CovarianceCheckReport(tuple(out), source=getattr(endf, "source_path", None), mat=mat)
+
+
+# ---------------------------------------------------------------------------
+# Context: the central values a tape can give
+# ---------------------------------------------------------------------------
+
+
+class _Context:
+    def __init__(self, endf, xs: Optional[Dict[int, object]]) -> None:
+        self.endf = endf
+        self.xs = xs
+        self.mf3 = dict(endf.files[3].mt) if 3 in endf.files else {}
+        self.mf4 = dict(endf.files[4].mt) if 4 in endf.files else {}
+        self.mf1 = dict(endf.files[1].mt) if 1 in endf.files else {}
+        self.eh = _resonance_upper_limit(endf)
+        self.unavailable: Dict[Tuple[int, str], List[int]] = {}
+
+    def cross_section(self, mt: int):
+        """(sigma source, lowest energy where it is the cross section) or None."""
+        if self.xs:
+            src = self.xs.get(mt)
+            if src is None:
+                src = _summed_partials(self.xs, mt)
+            return (src, 0.0) if src is not None else None
+        if self.eh is None:
+            return None
+        sec = self.mf3.get(mt)
+        if sec is None and self.mf3:
+            # A summation MT the tape leaves out of MF3 (MT3, MT4, ...): the sum of
+            # its partials, which above the resonance ranges is the cross section.
+            sec = _summed_partials(self.mf3, mt)
+        return (sec, self.eh) if sec is not None else None
+
+
+def _resonance_upper_limit(endf) -> Optional[float]:
+    """Highest EH of a resolved or unresolved range in MF2, 0 if none, None if MF2 unread."""
+    mf2 = endf.files.get(2)
+    if mf2 is None:
+        return None
+    sec = mf2.mt.get(151)
+    if sec is None:
+        return None
+    eh = 0.0
+    for iso in getattr(sec, "isotopes", []) or []:
+        for er in getattr(iso, "energy_ranges", []) or []:
+            if getattr(er, "lru", 0) in (1, 2):
+                eh = max(eh, float(er.eh))
+    return eh
+
+
+def _summed_partials(xs: Dict[int, object], mt: int):
+    from types import SimpleNamespace
+    from ..writers.redundant import resolve_sum_components
+
+    parts = resolve_sum_components(mt, xs)
+    if not parts:
+        return None
+    tables = []
+    for part in parts:
+        sec = xs[part]
+        values = getattr(sec, "values", None)
+        if values is None:
+            values = getattr(sec, "cross_sections")
+        tables.append((np.asarray(sec.energies, dtype=float), np.asarray(values, dtype=float)))
+    grid = np.unique(np.concatenate([e for e, _ in tables]))
+    total = np.zeros(grid.size)
+    for e, v in tables:
+        total += np.interp(grid, e, v, left=0.0, right=0.0)
+    return SimpleNamespace(energies=grid, values=total)
+
+
+# ---------------------------------------------------------------------------
+# Record-level structure, shared by MF33 and MF34
+# ---------------------------------------------------------------------------
+
+
+def _expected_nt(rec) -> Optional[int]:
+    lb = rec.lb
+    if lb in (0, 1, 2, 3, 4, 8, 9):
+        return 2 * int(rec.np or 0)
+    if lb == 5:
+        ne = int(rec.ne or 0)
+        m = ne - 1
+        return ne + (m * (m + 1) // 2 if rec.ls == 1 else m * m)
+    if lb == 6:
+        return 1 + len(rec.row_energies) * len(rec.col_energies)
+    return None
+
+
+def _grids(rec) -> List[Sequence[float]]:
+    if rec.lb in (0, 1, 2, 8, 9):
+        return [rec.e_table_k] if rec.e_table_k else []
+    if rec.lb in (3, 4):
+        return [rec.e_table_k, rec.e_table_l]
+    if rec.lb == 5:
+        return [rec.energies]
+    if rec.lb == 6:
+        return [rec.row_energies, rec.col_energies]
+    return []
+
+
+def _decoded(sec, rec):
+    """Decode one record with the section's own decoder; raises ValueError."""
+    lb = rec.lb
+    if lb in (0, 1, 2):
+        return sec._decode_lb012_matrix(rec)
+    if lb in (3, 4):
+        return sec._decode_lb34_matrix(rec)
+    if lb == 5:
+        return sec._decode_lb5_matrix(rec)
+    if lb == 6:
+        return sec._decode_lb6_matrix(rec)
+    return None
+
+
+def _check_record(mf_number: int, sec, rec, loc: CovarianceLocation,
+                  out: List[CovarianceFinding]) -> bool:
+    """Structure of one LIST record. True if its values can be used."""
+    usable = True
+    if rec.lb not in VALID_LB[mf_number]:
+        out.append(CovarianceFinding(
+            "lb_invalid", DEFECT, f"LB={rec.lb} is not defined for MF{mf_number}", loc,
+            {"lb": rec.lb, "valid": sorted(VALID_LB[mf_number])}))
+        return False
+    if mf_number == 34 and rec.lb in (0, 1, 2) and (rec.lt or 0) > 0:
+        out.append(CovarianceFinding(
+            "lt_not_decoded", NOTE,
+            f"LB={rec.lb} with LT={rec.lt} (two tables) is kept verbatim but kika does "
+            "not decode it, so its values are not checked", loc, {"lt": rec.lt}))
+        return False
+    expected = _expected_nt(rec)
+    if expected is not None and rec.nt is not None and int(rec.nt) != expected:
+        out.append(CovarianceFinding(
+            "nt_mismatch", DEFECT,
+            f"NT={rec.nt} but the counts in the record imply {expected}", loc,
+            {"nt": rec.nt, "expected": expected}))
+    for g in _grids(rec):
+        arr = np.asarray(g, dtype=float)
+        if arr.size < 2:
+            out.append(CovarianceFinding(
+                "grid_too_short", DEFECT, f"an energy grid with {arr.size} point(s) defines no bin",
+                loc, {"n": int(arr.size)}))
+            usable = False
+            continue
+        steps = np.diff(arr)
+        if np.any(steps < 0):
+            k = int(np.argmax(steps < 0))
+            out.append(CovarianceFinding(
+                "grid_not_increasing", DEFECT,
+                f"energies decrease at index {k + 1} ({arr[k]:.6g} -> {arr[k + 1]:.6g} eV)",
+                loc, {"index": k + 1, "energies": [float(arr[k]), float(arr[k + 1])]}))
+            usable = False
+        elif np.any(steps == 0):
+            idx = np.flatnonzero(steps == 0)
+            out.append(CovarianceFinding(
+                "grid_repeated_point", WARN,
+                f"{idx.size} energ{'y is' if idx.size == 1 else 'ies are'} repeated, "
+                f"leaving zero-width bins (first {arr[idx[0]]:.6g} eV)",
+                loc, {"energies": [float(arr[i]) for i in idx[:_EVIDENCE_ITEMS]]}))
+    if rec.lt is not None and rec.lb in (3, 4) and int(rec.lt or 0) > int(rec.np or 0):
+        out.append(CovarianceFinding(
+            "count_mismatch", DEFECT, f"LT={rec.lt} pairs in the second table but NP={rec.np}",
+            loc, {"lt": rec.lt, "np": rec.np}))
+    if usable:
+        try:
+            _decoded(sec, rec)
+        except (ValueError, IndexError) as exc:
+            out.append(CovarianceFinding(
+                "decode_error", DEFECT, f"kika cannot decode the record: {exc}", loc,
+                {"error": str(exc)}))
+            usable = False
+    return usable
+
+
+def _count(declared, found: int, what: str, loc, out) -> None:
+    declared = int(declared or 0)
+    if declared != found:
+        out.append(CovarianceFinding(
+            "count_mismatch", DEFECT,
+            f"{what} = {declared} declared, {found} read", loc,
+            {"field": what, "declared": declared, "read": found}))
+
+
+# ---------------------------------------------------------------------------
+# Matrix-level checks, shared
+# ---------------------------------------------------------------------------
+
+
+def _bins(grid: Sequence[float], idx: Iterable[int]) -> List[List[float]]:
+    g = list(grid)
+    return [[float(g[i]), float(g[i + 1])] for i in idx]
+
+
+def _half_ulp_norm(matrix: np.ndarray) -> float:
+    """Frobenius norm of the rounding of every element to ENDF_DIGITS figures."""
+    a = np.abs(matrix[matrix != 0])
+    if a.size == 0:
+        return 0.0
+    ulp = 0.5 * 10.0 ** (np.floor(np.log10(a)) - (ENDF_DIGITS - 1))
+    return float(np.sqrt(np.sum(ulp ** 2)))
+
+
+def _rho_quantum(corr: np.ndarray) -> Optional[float]:
+    """The coarsest lattice the off-diagonal correlations sit on, if any."""
+    n = corr.shape[0]
+    if n < 3:
+        return None
+    off = corr[np.triu_indices(n, 1)]
+    off = off[off != 0]
+    if off.size < 3:
+        return None
+    for q in RHO_QUANTA:
+        on = np.abs(off / q - np.round(off / q)) * q < 5e-6
+        if np.mean(on) >= RHO_QUANTUM_SHARE:
+            return q
+    return None
+
+
+def _check_self_block(matrix: np.ndarray, grid: Sequence[float], loc, out,
+                      records: Sequence[Tuple[int, object]], sec) -> None:
+    """C3 and C4 on one self block (MT, MT) or (L, L) on its union grid."""
+    m = matrix.shape[0]
+    d = np.diag(matrix).copy()
+
+    neg = np.flatnonzero(d < 0)
+    if neg.size:
+        k = int(neg[np.argmin(d[neg])])
+        out.append(CovarianceFinding(
+            "negative_variance", DEFECT,
+            f"{neg.size} of {m} variances are negative (worst {d[k]:.3e} in "
+            f"{grid[k]:.4g}-{grid[k + 1]:.4g} eV)", loc,
+            {"n": int(neg.size), "worst": float(d[k]), "bins": _bins(grid, neg[:_EVIDENCE_ITEMS])}))
+
+    zero_rows = np.array([np.max(r) == np.min(r) == 0 for r in matrix]) if m else np.array([])
+    if zero_rows.any():
+        idx = np.flatnonzero(zero_rows)
+        out.append(CovarianceFinding(
+            "inert_rows", NOTE, f"{idx.size} of {m} rows are exactly zero (no stated uncertainty)",
+            loc, {"n": int(idx.size), "of": m, "bins": _bins(grid, idx[:_EVIDENCE_ITEMS])}))
+    lonely = np.flatnonzero((d == 0) & ~zero_rows)
+    if lonely.size:
+        out.append(CovarianceFinding(
+            "covariance_without_variance", DEFECT,
+            f"{lonely.size} rows have zero variance but non-zero covariances (|rho| is infinite)",
+            loc, {"n": int(lonely.size), "bins": _bins(grid, lonely[:_EVIDENCE_ITEMS])}))
+
+    scale = float(np.max(np.abs(matrix))) if m else 0.0
+    if scale > 0:
+        asym = float(np.max(np.abs(matrix - matrix.T))) / scale
+        if asym > ASYM_NOTE:
+            level = DEFECT if asym > ASYM_DEFECT else NOTE
+            out.append(CovarianceFinding(
+                "asymmetric_self_block", level,
+                f"the block is not symmetric: max|C - C^T| / max|C| = {asym:.2e}", loc,
+                {"relative_asymmetry": asym}))
+
+    live = d > 0
+    if live.sum() >= 2:
+        sub = matrix[np.ix_(live, live)]
+        sym = 0.5 * (sub + sub.T)
+        s = np.sqrt(np.diag(sym))
+        corr = sym / np.outer(s, s)
+        _rho_finding(corr, np.flatnonzero(live), np.flatnonzero(live), grid, loc, out,
+                     self_block=True)
+    # Eigenvalues over every row that is not exactly zero: a row with no variance
+    # but with covariances (B-10 MT102 of JEFF-4.0) is what makes the block
+    # indefinite, and leaving it out would hide that.
+    active = ~zero_rows
+    if active.sum() >= 2:
+        sub = matrix[np.ix_(active, active)]
+        _psd_finding(0.5 * (sub + sub.T), loc, out, records, sec, grid)
+
+
+def _rho_finding(corr: np.ndarray, rows: np.ndarray, cols: np.ndarray, grid, loc, out,
+                 self_block: bool, extra: Optional[dict] = None) -> None:
+    a = np.abs(corr)
+    if self_block:
+        a = a.copy()
+        np.fill_diagonal(a, 0.0)
+    worst = float(a.max()) if a.size else 0.0
+    if worst <= 1 + RHO_ROUNDING:
+        return
+    i, j = np.unravel_index(int(np.argmax(a)), a.shape)
+    n_bad = int(np.sum(a > 1 + RHO_DEFECT))
+    level = DEFECT if worst > 1 + RHO_DEFECT else NOTE
+    evidence = {
+        "max_abs_rho": worst,
+        "n_above": n_bad,
+        "at": _bins(grid, [int(rows[i]), int(cols[j])]),
+    }
+    if extra:
+        evidence.update(extra)
+    summary = (f"|rho| up to {worst:.4g} ({n_bad} entries above 1+{RHO_DEFECT:g})"
+               if level == DEFECT else
+               f"|rho| up to {worst:.7g}, within rounding of the stored values")
+    if extra and extra.get("stored_triangle_max_abs_rho") is not None:
+        tri = extra["stored_triangle_max_abs_rho"]
+        summary += (f"; the stored LS=1 triangle alone reaches {tri:.4g}, so the mirror "
+                    "kika applies is what " + ("creates" if tri <= 1 + RHO_DEFECT else "worsens")
+                    + " it")
+    out.append(CovarianceFinding("correlation_out_of_bounds", level, summary, loc, evidence))
+
+
+def _quantised_allowance(records: Sequence[Tuple[int, object]], sec, grid):
+    """How negative rounded correlations can make the summed block, or None.
+
+    Some evaluations (JENDL-5) write each LB=5 record as sigma_i sigma_j rho_ij with
+    rho rounded to a lattice q. The rounding is a symmetric error E with entries
+    roughly uniform in +-q/2, whose spectral norm is about 2 (q/sqrt(12)) sqrt(n)
+    (the edge of Wigner's semicircle), so lambda_min(R) >= -that, and the record
+    D R D >= -that x max(d^2). Projecting onto the union grid scales a negative
+    eigenvalue by at most ||T||^2, the most union bins one native bin feeds, and
+    by Weyl the sum is no more negative than the sum of its parts. LB=0/1/2/8/9
+    are positive semi-definite by construction and add nothing. Every LB=5 record
+    must be quantised for the bound to say anything; LB=3/4/6 do not occur in a
+    self block of a well-formed file and void it.
+    """
+    g_union = np.asarray(grid, dtype=float)
+    total, quanta = 0.0, set()
+    for _, rec in records:
+        if rec.lb in (0, 1, 2, 8, 9):
+            continue
+        if rec.lb != 5:
+            return None
+        try:
+            mat, g = sec._decode_lb5_matrix(rec)
+        except (ValueError, IndexError):
+            return None
+        mat = 0.5 * (mat + mat.T)
+        d = np.diag(mat)
+        live = d > 0
+        if live.sum() < 3:
+            continue
+        sub = mat[np.ix_(live, live)]
+        s = np.sqrt(np.diag(sub))
+        q = _rho_quantum(sub / np.outer(s, s))
+        if q is None:
+            return None
+        quanta.add(q)
+        corr_bound = RHO_QUANTUM_SLACK * 2.0 * (q / math.sqrt(12.0)) * math.sqrt(int(live.sum()))
+        native = np.asarray(g, dtype=float)
+        overlap = np.maximum(0.0, np.minimum(g_union[1:, None], native[None, 1:])
+                             - np.maximum(g_union[:-1, None], native[None, :-1]))
+        width = (g_union[1:] - g_union[:-1])[:, None]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = np.where(width > 0, overlap / width, 0.0)
+        gain = float(np.max(np.sum(t ** 2, axis=0))) if t.size else 1.0
+        total += corr_bound * float(d.max()) * gain
+    if not quanta:
+        return None
+    return total, quanta
+
+
+def _psd_finding(sym: np.ndarray, loc, out,
+                 records: Sequence[Tuple[int, object]], sec, grid) -> None:
+    ev = np.linalg.eigvalsh(sym)
+    lam_min, lam_max = float(ev[0]), float(ev[-1])
+    if lam_min >= 0 or lam_max <= 0:
+        if lam_max <= 0 < sym.shape[0]:
+            out.append(CovarianceFinding(
+                "not_positive_semidefinite", DEFECT, "no positive eigenvalue at all", loc,
+                {"lambda_min": lam_min, "lambda_max": lam_max}))
+        return
+    ratio = -lam_min / lam_max
+    evidence = {
+        "lambda_min": lam_min,
+        "lambda_max": lam_max,
+        "ratio": ratio,
+        "n_negative": int(np.sum(ev < 0)),
+    }
+    level = NOTE if ratio < PSD_NOTE else (WARN if ratio <= PSD_DEFECT else DEFECT)
+    reason = ""
+    ulp = _half_ulp_norm(sym)
+    evidence["rounding_bound"] = ulp
+    if -lam_min <= ulp:
+        level, reason = NOTE, f"within the rounding of the values to {ENDF_DIGITS} figures"
+    elif level == WARN:
+        allowance = _quantised_allowance(records, sec, grid)
+        if allowance is not None:
+            bound, quanta = allowance
+            evidence.update({"rho_quantum": sorted(quanta), "quantised_rounding_bound": bound})
+            if -lam_min <= bound:
+                level = NOTE
+                reason = ("the correlations are rounded to "
+                          + "/".join(f"{q:g}" for q in sorted(quanta))
+                          + f" and that rounding can reach lambda_min (bound {bound:.2e})")
+    # Which record is already indefinite on its own.
+    alone = []
+    for k, rec in records:
+        if rec.lb != 5:
+            continue
+        try:
+            mat, _ = sec._decode_lb5_matrix(rec)
+        except (ValueError, IndexError):
+            continue
+        w = np.linalg.eigvalsh(0.5 * (mat + mat.T))
+        if w[-1] > 0 and -w[0] / w[-1] > PSD_DEFECT:
+            alone.append({"ni": k, "ratio": float(-w[0] / w[-1])})
+    if alone:
+        evidence["records_indefinite_alone"] = alone
+    summary = f"lambda_min/lambda_max = -{ratio:.2e}"
+    if reason:
+        summary += f"; {reason}"
+    if alone:
+        summary += "; already indefinite in " + ", ".join(f"NI[{a['ni']}]" for a in alone) + " alone"
+    out.append(CovarianceFinding("not_positive_semidefinite", level, summary, loc, evidence))
+
+
+def _large_variance(sigma_abs: np.ndarray, central: np.ndarray, valid: np.ndarray, grid,
+                    loc, out, *, scale: float, scale_name: str, rel: Optional[np.ndarray]) -> None:
+    """Uncertainty larger than the reaction's own scale, judged in absolute."""
+    over = valid & (sigma_abs > scale)
+    rel_big = np.zeros_like(valid)
+    if rel is not None:
+        rel_big = valid & (rel > 1.0) & (central >= 0.01 * scale) & ~over
+    if not over.any() and not rel_big.any():
+        return
+    evidence = {"scale": scale, "scale_name": scale_name}
+    bits = []
+    if over.any():
+        idx = np.flatnonzero(over)
+        k = int(idx[np.argmax(sigma_abs[idx])])
+        evidence.update({"n_above_scale": int(idx.size), "worst_sigma_abs": float(sigma_abs[k]),
+                         "worst_central": float(central[k]), "worst_bin": _bins(grid, [k])[0]})
+        bits.append(f"absolute sigma above {scale_name} ({scale:.4g}) in {idx.size} bins, "
+                    f"worst {sigma_abs[k]:.4g} at {grid[k]:.4g}-{grid[k + 1]:.4g} eV")
+    if rel_big.any():
+        idx = np.flatnonzero(rel_big)
+        k = int(idx[np.argmax(rel[idx])])
+        evidence.update({"n_rel_above_1": int(idx.size), "worst_rel": float(rel[k]),
+                         "worst_rel_bin": _bins(grid, [k])[0]})
+        bits.append(f"relative sigma above 100 % where the central value is not small, "
+                    f"in {idx.size} bins (worst {rel[k]:.3g})")
+    out.append(CovarianceFinding("large_variance", WARN, "; ".join(bits), loc, evidence))
+
+
+# ---------------------------------------------------------------------------
+# MF31 / MF33
+# ---------------------------------------------------------------------------
+
+
+def _assemble33(sec: MF33MT, recs, mt: int, mt1: int, xs, grid=None):
+    """(matrix, grid, relative, partial) or None, summed the way kika sums it."""
+    partial = False
+    x_row = x_col = None
+    if mixesAbsoluteAndRelative(recs):
+        from ..classes.mf33.mf33 import _xs_section
+        x_row = _xs_section(xs, mt, recs)
+        x_col = _xs_section(xs, mt1, recs)
+        if x_row is None or x_col is None:
+            recs = [r for r in recs if int(r.lb) in RELATIVE_LB]
+            partial = True
+            x_row = x_col = None
+    out = sec._process_ni_records_to_matrix(list(recs), f"MT{mt}x{mt1}", target_grid=grid,
+                                            xs_row=x_row, xs_col=x_col)
+    if out is None:
+        return None
+    matrix, g, relative = out
+    return matrix, list(g), relative, partial
+
+
+def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFinding]) -> None:
+    sections: Dict[int, MF33MT] = dict(mf_obj.mt)
+    usable: Dict[Tuple[int, int, int], List[Tuple[int, object]]] = {}
+
+    # Structure.
+    for mt, sec in sorted(sections.items()):
+        mat = sec._mat
+        head = CovarianceLocation(mat=mat, mf=mf_number, mt=mt)
+        if sec._mtl:
+            if sec.subsections:
+                out.append(CovarianceFinding(
+                    "count_mismatch", DEFECT,
+                    f"a lumped component (MTL={sec._mtl}) should carry no subsections, it has "
+                    f"{len(sec.subsections)}", head, {"mtl": sec._mtl}))
+            continue
+        _count(sec._nl, len(sec.subsections), "NL", head, out)
+        seen = set()
+        for sub in sec.subsections:
+            mat1, mt1 = int(sub.mat1 or 0), int(sub.mt1 or 0)
+            loc = CovarianceLocation(mat=mat, mf=mf_number, mt=mt, mat1=mat1, mt1=mt1)
+            if (mat1, mt1) in seen:
+                out.append(CovarianceFinding(
+                    "duplicate_block", DEFECT, "this (MAT1, MT1) subsection appears twice", loc))
+            seen.add((mat1, mt1))
+            _count(sub.nc, len(sub.nc_records), "NC", loc, out)
+            _count(sub.ni, len(sub.ni_records), "NI", loc, out)
+            for k, nc in enumerate(sub.nc_records):
+                nloc = CovarianceLocation(mat=mat, mf=mf_number, mt=mt, mat1=mat1, mt1=mt1, nc=k)
+                if nc.lty not in VALID_LTY:
+                    out.append(CovarianceFinding(
+                        "lty_invalid", DEFECT, f"LTY={nc.lty} is not defined", nloc, {"lty": nc.lty}))
+                elif nc.lty == 0 and int(nc.nci or 0) != len(nc.ci):
+                    _count(nc.nci, len(nc.ci), "NCI", nloc, out)
+                if nc.e1 is not None and nc.e2 is not None and not nc.e1 < nc.e2:
+                    out.append(CovarianceFinding(
+                        "grid_not_increasing", DEFECT,
+                        f"the NC range is empty or reversed (E1={nc.e1:.6g}, E2={nc.e2:.6g})", nloc))
+            good = []
+            for k, rec in enumerate(sub.ni_records):
+                rloc = CovarianceLocation(mat=mat, mf=mf_number, mt=mt, mat1=mat1, mt1=mt1, ni=k,
+                                          lb=rec.lb, ls=rec.ls if rec.lb == 5 else None)
+                if _check_record(mf_number, sec, rec, rloc, out):
+                    good.append((k, rec))
+            if good:
+                usable[(mt, mat1, mt1)] = good
+
+    # Self blocks.
+    self_grids: Dict[int, List[float]] = {}
+    for (mt, mat1, mt1), good in sorted(usable.items()):
+        if mat1 != 0 or mt1 != mt:
+            continue
+        sec = sections[mt]
+        loc = CovarianceLocation(mat=sec._mat, mf=mf_number, mt=mt, mat1=0, mt1=mt)
+        recs = [r for _, r in good]
+        res = _assemble33(sec, recs, mt, mt, ctx.xs)
+        if res is None:
+            continue
+        matrix, grid, relative, partial = res
+        self_grids[mt] = grid
+        if partial:
+            _note_partial(loc, recs, out)
+        _check_self_block(matrix, grid, loc, out, good, sec)
+        _mf33_large_variance(ctx, mt, matrix, grid, relative, loc, out)
+        _mf33_coverage(ctx, mt, grid, loc, out)
+
+    # Cross blocks.
+    for (mt, mat1, mt1), good in sorted(usable.items()):
+        if mat1 == 0 and mt1 == mt:
+            continue
+        sec = sections[mt]
+        loc = CovarianceLocation(mat=sec._mat, mf=mf_number, mt=mt, mat1=mat1, mt1=mt1)
+        ls1 = [(k, r) for k, r in good if r.lb == 5 and r.ls == 1]
+        if mat1 != 0:
+            for k, r in ls1:
+                _ls1_finding(loc, k, r, None, out)
+            continue
+        row_self = usable.get((mt, 0, mt))
+        col_self = usable.get((mt1, 0, mt1))
+        if row_self is None or col_self is None or mt1 not in sections:
+            for k, r in ls1:
+                _ls1_finding(loc, k, r, None, out)
+            continue
+        recs = [r for _, r in good]
+        grid = sorted({e for r in recs for g in _grids(r) for e in g}
+                      | set(self_grids.get(mt, [])) | set(self_grids.get(mt1, [])))
+        res = _assemble33(sec, recs, mt, mt1, ctx.xs, grid)
+        rr = _assemble33(sec, [r for _, r in row_self], mt, mt, ctx.xs, grid)
+        cc = _assemble33(sections[mt1], [r for _, r in col_self], mt1, mt1, ctx.xs, grid)
+        if res is None or rr is None or cc is None:
+            continue
+        if res[3]:
+            _note_partial(loc, recs, out)
+        tri = {}
+        for k, r in ls1:
+            t = _triangle_rho(r, lambda g: _diag33(sec, row_self, mt, ctx.xs, g),
+                              lambda g: _diag33(sections[mt1], col_self, mt1, ctx.xs, g))
+            tri[k] = t
+            _ls1_finding(loc, k, r, t, out)
+        extra = {"stored_triangle_max_abs_rho": max(tri.values())} if tri and all(
+            v is not None for v in tri.values()) else None
+        _check_cross_block(res[0], np.diag(rr[0]), np.diag(cc[0]), grid, loc, out, extra)
+
+
+def _diag33(sec, self_good, mt, xs, grid):
+    res = _assemble33(sec, [r for _, r in self_good], mt, mt, xs, list(grid))
+    return None if res is None else np.diag(res[0])
+
+
+def _note_partial(loc, recs, out) -> None:
+    lbs = sorted({int(r.lb) for r in recs})
+    out.append(CovarianceFinding(
+        "mixed_needs_cross_sections", NOTE,
+        "the block mixes absolute (LB 0/8/9) and relative components and no sigma(E) was "
+        "given, so only the relative part was checked (attach a PENDF to check the sum)",
+        loc, {"lb": lbs}))
+
+
+def _bin_average_nubar(sec, grid) -> np.ndarray:
+    """nu-bar averaged over each bin, from five log-spaced points (it is smooth)."""
+    g = np.asarray(grid, dtype=float)
+    out = np.zeros(g.size - 1)
+    for i in range(g.size - 1):
+        lo, hi = g[i], g[i + 1]
+        if hi <= lo:
+            continue
+        pts = np.geomspace(lo, hi, 5) if lo > 0 else np.linspace(lo, hi, 5)
+        out[i] = float(np.mean(np.asarray(sec.get_nubar(pts, out_of_range="zero"), dtype=float)))
+    return out
+
+
+def _mf33_large_variance(ctx, mt, matrix, grid, relative, loc, out) -> None:
+    g = np.asarray(grid, dtype=float)
+    if loc.mf == 31:
+        # MF31 is the covariance of nu-bar, whose central values are MF1 MT452/455/456.
+        sec1 = ctx.mf1.get(mt)
+        if sec1 is None or not hasattr(sec1, "get_nubar"):
+            ctx.unavailable.setdefault((31, "MF1"), []).append(mt)
+            _unavailable_note(ctx, loc, out, why="MF1 not read or without this nu-bar")
+            return
+        central, floor = _bin_average_nubar(sec1, grid), 0.0
+    else:
+        got = ctx.cross_section(mt)
+        if got is None:
+            ctx.unavailable.setdefault((loc.mf, "MF3" if not ctx.xs else "PENDF"), []).append(mt)
+            _unavailable_note(ctx, loc, out)
+            return
+        src, floor = got
+        central = MF33MT._bin_average_xs_exact(src, grid)
+    valid = (g[:-1] >= floor) & (central > 0) & (g[1:] > g[:-1])
+    if not valid.any():
+        return
+    var = np.clip(np.diag(matrix), 0.0, None)
+    if relative:
+        rel = np.sqrt(var)
+        sigma_abs = rel * central
+    else:
+        sigma_abs = np.sqrt(var)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rel = np.where(central > 0, sigma_abs / central, np.inf)
+    scale = float(central[valid].max())
+    _large_variance(sigma_abs, central, valid, grid, loc, out, scale=scale,
+                    scale_name=(f"the largest nu-bar of MT{mt}" if loc.mf == 31 else
+                                f"the largest sigma of MT{mt} where it is evaluated"), rel=rel)
+
+
+def _unavailable_note(ctx, loc, out, why: Optional[str] = None) -> None:
+    """One note per file, updated in place, listing the MTs with no central values."""
+    key = (31, "MF1") if loc.mf == 31 else (loc.mf, "MF3" if not ctx.xs else "PENDF")
+    mts = ctx.unavailable[key]
+    if len(mts) > 1:
+        for i, f in enumerate(out):
+            if f.check == "central_values_unavailable" and f.location.mf == loc.mf:
+                out[i] = CovarianceFinding(f.check, f.level, f.summary,
+                                           f.location, {"mts": list(mts)})
+                return
+    if why is None:
+        why = ("no PENDF given and MF2 not read, so MF3 cannot be told apart from a background"
+               if ctx.eh is None and not ctx.xs else "no sigma(E) for these MTs")
+    out.append(CovarianceFinding(
+        "central_values_unavailable", NOTE,
+        f"large variances not evaluable: {why}", CovarianceLocation(mat=loc.mat, mf=loc.mf),
+        {"mts": list(mts)}))
+
+
+def _mf33_coverage(ctx, mt, grid, loc, out) -> None:
+    sec3 = ctx.mf3.get(mt)
+    if sec3 is None:
+        return
+    e = np.asarray(sec3.energies, dtype=float)
+    x = np.asarray(sec3.cross_sections, dtype=float)
+    if e.size < 2:
+        return
+    nz = np.flatnonzero(x > 0)
+    if nz.size == 0:
+        return
+    lo, hi = float(e[nz[0]]), float(e[-1])
+    gaps = []
+    if grid[0] > lo * (1 + 1e-6) and grid[0] > 1e-5 * (1 + 1e-6):
+        gaps.append(f"starts at {grid[0]:.4g} eV, MF3 is non-zero from {lo:.4g} eV")
+    if grid[-1] < hi * (1 - 1e-6):
+        gaps.append(f"stops at {grid[-1]:.4g} eV, MF3 goes to {hi:.4g} eV")
+    if gaps:
+        out.append(CovarianceFinding(
+            "grid_coverage", NOTE, "the covariance " + "; ".join(gaps), loc,
+            {"cov_range": [float(grid[0]), float(grid[-1])], "mf3_range": [lo, hi]}))
+
+
+# ---------------------------------------------------------------------------
+# Cross blocks and LS=1, shared
+# ---------------------------------------------------------------------------
+
+
+def _check_cross_block(block: np.ndarray, d_row: np.ndarray, d_col: np.ndarray, grid, loc, out,
+                       extra: Optional[dict]) -> None:
+    live_r, live_c = d_row > 0, d_col > 0
+    dead = (~live_r[:, None] | ~live_c[None, :]) & (block != 0)
+    if dead.any():
+        rows = np.flatnonzero(dead.any(axis=1))
+        out.append(CovarianceFinding(
+            "covariance_without_variance", DEFECT,
+            f"{int(dead.sum())} covariances sit where one of the two variances is zero or "
+            "negative (|rho| is undefined)", loc,
+            {"n": int(dead.sum()), "row_bins": _bins(grid, rows[:_EVIDENCE_ITEMS])}))
+    if not live_r.any() or not live_c.any():
+        return
+    sub = block[np.ix_(live_r, live_c)]
+    corr = sub / np.sqrt(np.outer(d_row[live_r], d_col[live_c]))
+    _rho_finding(corr, np.flatnonzero(live_r), np.flatnonzero(live_c), grid, loc, out,
+                 self_block=False, extra=extra)
+
+
+def _triangle_rho(rec, diag_row, diag_col) -> Optional[float]:
+    """max |rho| of the stored LS=1 triangle alone, on the record's own grid."""
+    g = list(rec.energies)
+    dr, dc = diag_row(g), diag_col(g)
+    if dr is None or dc is None:
+        return None
+    m = len(g) - 1
+    vals = np.asarray(rec.matrix, dtype=float)
+    if vals.size != m * (m + 1) // 2 or dr.size != m or dc.size != m:
+        return None
+    i, j = np.triu_indices(m)
+    denom = dr[i] * dc[j]
+    ok = denom > 0
+    if not ok.any():
+        return None
+    return float(np.max(np.abs(vals[ok]) / np.sqrt(denom[ok])))
+
+
+def _ls1_finding(loc: CovarianceLocation, k: int, rec, tri: Optional[float], out) -> None:
+    rloc = CovarianceLocation(mat=loc.mat, mf=loc.mf, mt=loc.mt, mat1=loc.mat1, mt1=loc.mt1,
+                              l=loc.l, l1=loc.l1, ni=k, lb=5, ls=1)
+    summary = ("LB=5 LS=1 (a symmetric triangle) in a cross block, which is not symmetric; "
+               "kika mirrors the triangle into the lower half")
+    evidence = {}
+    if not np.any(np.asarray(rec.matrix, dtype=float)):
+        out.append(CovarianceFinding(
+            "ls1_in_cross_block", NOTE, summary + ", but the triangle is all zeros, so the "
+            "mirror changes nothing", rloc, evidence))
+        return
+    if tri is not None:
+        evidence["stored_triangle_max_abs_rho"] = tri
+        summary += f" (the stored triangle alone has |rho| up to {tri:.4g})"
+    out.append(CovarianceFinding("ls1_in_cross_block", DEFECT, summary, rloc, evidence))
+
+
+# ---------------------------------------------------------------------------
+# MF34
+# ---------------------------------------------------------------------------
+
+
+def _assemble34(sec, recs, grid=None):
+    """(matrix, grid, relative, partial) or None for one (L, L1) sub-subsection."""
+    comps = []
+    for rec in recs:
+        lb = int(rec.lb)
+        if lb in (0, 1, 2):
+            if (rec.lt or 0) > 0:
+                continue
+            m, g = sec._decode_lb012_matrix(rec)
+            comps.append((lb, m, list(g), None))
+        elif lb == 5:
+            m, g = sec._decode_lb5_matrix(rec)
+            comps.append((lb, m, list(g), None))
+        elif lb == 6:
+            m, rg, cg = sec._decode_lb6_matrix(rec)
+            comps.append((lb, m, list(rg), list(cg)))
+    if not comps:
+        return None
+    kinds = {lb == 0 for lb, *_ in comps}
+    partial = len(kinds) == 2
+    if partial:
+        comps = [c for c in comps if c[0] != 0]
+    relative = comps[0][0] != 0
+    if grid is None:
+        grid = sorted({e for _, _, rg, cg in comps for e in rg + (cg or [])})
+    grid = list(grid)
+    if len(grid) < 2:
+        return None
+    total = np.zeros((len(grid) - 1, len(grid) - 1))
+    for _, m, rg, cg in comps:
+        total += sec._project_matrix_piecewise_constant(
+            m, rg, grid, is_lb6=cg is not None, native_col_point_grid=cg)
+    return total, grid, relative, partial
+
+
+def _l_min(ltt) -> int:
+    return 0 if int(ltt or 1) in (2, 3) else 1
+
+
+def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
+    from ..parsers.parse_mf34 import _expected_subsubsection_count
+
+    sections = dict(mf_obj.mt)
+    usable: Dict[Tuple[int, int, int, int], Tuple[object, List[Tuple[int, object]]]] = {}
+
+    for mt, sec in sorted(sections.items()):
+        mat = sec._mat
+        head = CovarianceLocation(mat=mat, mf=34, mt=mt)
+        _count(sec._nmt1, len(sec.subsections), "NMT1", head, out)
+        lmin = _l_min(sec._ltt)
+        for sub in sec.subsections:
+            mt1, mat1 = int(sub.mt1 or 0), int(sub.mat1 or 0)
+            loc = CovarianceLocation(mat=mat, mf=34, mt=mt, mat1=mat1, mt1=mt1)
+            nss = _expected_subsubsection_count(sub.nl, sub.nl1, mt, mt1, sec._ltt)
+            _count(nss, len(sub.sub_subsections), "NSS (from NL, NL1)", loc, out)
+            nl, nl1 = int(sub.nl or 0), int(sub.nl1 or 0)
+            seen = set()
+            for ss in sub.sub_subsections:
+                l, l1 = int(ss.l or 0), int(ss.l1 or 0)
+                sloc = CovarianceLocation(mat=mat, mf=34, mt=mt, mat1=mat1, mt1=mt1, l=l, l1=l1)
+                if not (lmin <= l < lmin + nl and lmin <= l1 < lmin + nl1):
+                    out.append(CovarianceFinding(
+                        "l_out_of_range", DEFECT,
+                        f"(L, L1) = ({l}, {l1}) is outside what NL={nl}, NL1={nl1} and "
+                        f"LTT={sec._ltt} allow (L from {lmin})", sloc,
+                        {"nl": nl, "nl1": nl1, "ltt": sec._ltt}))
+                if mt1 == mt and l > l1:
+                    out.append(CovarianceFinding(
+                        "l_out_of_range", DEFECT,
+                        f"MT1 = MT stores only L <= L1, found ({l}, {l1})", sloc))
+                if (l, l1) in seen:
+                    out.append(CovarianceFinding(
+                        "duplicate_block", DEFECT, "this (L, L1) sub-subsection appears twice", sloc))
+                seen.add((l, l1))
+                if ss.lct is not None and int(ss.lct) not in VALID_LCT:
+                    out.append(CovarianceFinding(
+                        "lct_invalid", WARN, f"LCT={ss.lct} is not 0, 1 or 2", sloc, {"lct": ss.lct}))
+                _count(ss.ni, len(ss.records), "NI", sloc, out)
+                good = []
+                for k, rec in enumerate(ss.records):
+                    rloc = CovarianceLocation(mat=mat, mf=34, mt=mt, mat1=mat1, mt1=mt1, l=l, l1=l1,
+                                              ni=k, lb=rec.lb, ls=rec.ls if rec.lb == 5 else None)
+                    if _check_record(34, sec, rec, rloc, out):
+                        good.append((k, rec))
+                if good and mat1 == 0:
+                    usable[(mt, l, mt1, l1)] = (sec, good)
+                elif mat1 != 0:
+                    for k, rec in good:
+                        if rec.lb == 5 and rec.ls == 1:
+                            _ls1_finding(sloc, k, rec, None, out)
+
+    # Self-order blocks (MT, L) x (MT, L).
+    self_grids: Dict[Tuple[int, int], List[float]] = {}
+    for (mt, l, mt1, l1), (sec, good) in sorted(usable.items()):
+        if mt1 != mt or l1 != l:
+            continue
+        loc = CovarianceLocation(mat=sec._mat, mf=34, mt=mt, mat1=0, mt1=mt, l=l, l1=l)
+        res = _assemble34(sec, [r for _, r in good])
+        if res is None:
+            continue
+        matrix, grid, relative, partial = res
+        self_grids[(mt, l)] = grid
+        if partial:
+            out.append(CovarianceFinding(
+                "mixed_absolute_relative", WARN,
+                "the block mixes absolute (LB=0) and relative components; kika sums them as "
+                "relative, so only the relative part was checked", loc))
+        _check_self_block(matrix, grid, loc, out, good, sec)
+        _mf34_large_variance(ctx, mt, l, matrix, grid, relative, loc, out)
+
+    # Cross blocks: L != L1 or MT != MT1.
+    for (mt, l, mt1, l1), (sec, good) in sorted(usable.items()):
+        if mt1 == mt and l1 == l:
+            continue
+        loc = CovarianceLocation(mat=sec._mat, mf=34, mt=mt, mat1=0, mt1=mt1, l=l, l1=l1)
+        ls1 = [(k, r) for k, r in good if r.lb == 5 and r.ls == 1]
+        row_self = usable.get((mt, l, mt, l))
+        col_self = usable.get((mt1, l1, mt1, l1))
+        if row_self is None or col_self is None:
+            for k, r in ls1:
+                _ls1_finding(loc, k, r, None, out)
+            continue
+        recs = [r for _, r in good]
+        grid = sorted({e for r in recs for g in _grids(r) for e in g}
+                      | set(self_grids.get((mt, l), [])) | set(self_grids.get((mt1, l1), [])))
+        res = _assemble34(sec, recs, grid)
+        rr = _assemble34(row_self[0], [r for _, r in row_self[1]], grid)
+        cc = _assemble34(col_self[0], [r for _, r in col_self[1]], grid)
+        if res is None or rr is None or cc is None:
+            continue
+        tri = {}
+        for k, r in ls1:
+            t = _triangle_rho(
+                r,
+                lambda g: _diag34(row_self, g),
+                lambda g: _diag34(col_self, g))
+            tri[k] = t
+            _ls1_finding(loc, k, r, t, out)
+        extra = {"stored_triangle_max_abs_rho": max(tri.values())} if tri and all(
+            v is not None for v in tri.values()) else None
+        _check_cross_block(res[0], np.diag(rr[0]), np.diag(cc[0]), grid, loc, out, extra)
+
+
+def _diag34(self_entry, grid):
+    sec, good = self_entry
+    res = _assemble34(sec, [r for _, r in good], list(grid))
+    return None if res is None else np.diag(res[0])
+
+
+def _mf34_large_variance(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
+    sec4 = ctx.mf4.get(mt)
+    if sec4 is None or not hasattr(sec4, "extract_legendre_coefficients"):
+        ctx.unavailable.setdefault((34, "MF4"), []).append(mt)
+        mts = ctx.unavailable[(34, "MF4")]
+        for i, f in enumerate(out):
+            if f.check == "central_values_unavailable" and f.location.mf == 34:
+                out[i] = CovarianceFinding(f.check, f.level, f.summary, f.location,
+                                           {"mts": sorted(set(mts))})
+                return
+        out.append(CovarianceFinding(
+            "central_values_unavailable", NOTE,
+            "large variances not evaluable: MF4 not read or without Legendre coefficients",
+            CovarianceLocation(mat=loc.mat, mf=34), {"mts": [mt]}))
+        return
+    g = np.asarray(grid, dtype=float)
+    n_sub = 5
+    sub_e = np.column_stack([np.linspace(g[c], g[c + 1], n_sub) for c in range(g.size - 1)]).T
+    try:
+        coeffs = sec4.extract_legendre_coefficients(sub_e.ravel(), max_legendre_order=max(l, 1),
+                                                    out_of_range="zero")
+    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+        out.append(CovarianceFinding(
+            "central_values_unavailable", NOTE, f"MF4 a_{l} could not be evaluated: {exc}", loc))
+        return
+    vals = np.asarray(coeffs.get(l, np.zeros(sub_e.size)), dtype=float).reshape(sub_e.shape)
+    width = g[1:] - g[:-1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        central = np.where(width > 0, np.trapezoid(vals, sub_e, axis=1) / width, 0.0)
+    var = np.clip(np.diag(matrix), 0.0, None)
+    sigma_abs = np.sqrt(var) * np.abs(central) if relative else np.sqrt(var)
+    valid = width > 0
+    # The physical range of a Legendre coefficient is |a_l| <= 1: a sigma above 1
+    # spans more than all of it, whatever the central value.
+    _large_variance(sigma_abs, np.abs(central), valid, grid, loc, out, scale=1.0,
+                    scale_name="the physical range |a_l| <= 1", rel=None)

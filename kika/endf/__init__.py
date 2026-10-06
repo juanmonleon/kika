@@ -16,6 +16,7 @@ from .read_endf import (
 )
 from .classes.mf7.scatterer import ThermalScatterer, thermal_scatterer
 from . import dcs
+from .checks import check_covariances
 from .remote import (
     fetch_endf,
     download_endf,
@@ -33,6 +34,8 @@ __all__ = [
     # Differential cross sections from MF4 + MF3 (angular reconstruction, the
     # elastic frame transform, and the three readings of sigma(E))
     "dcs",
+    # Layer-1 checks of the covariance files as written
+    "check_covariances",
     # Local file reading
     "read_endf",
     "read_mt451",
