@@ -17,7 +17,8 @@ from kika.g4ndl import IsotopeKey
 from kika.g4ndl.decode import decodeElastic
 from kika.g4ndl.parse import parse_cross_section, parse_elastic_fs
 from kika.g4ndl.physics import (
-    angularPdf, checkElastic, differentialCrossSection, legendreDensity,
+    angularPdf, checkElastic, differentialCrossSection, elasticCrossSection,
+    legendreDensity,
     legendreMinimum, tableIntegral,
 )
 from kika.g4ndl.tokens import TokenStream
@@ -194,3 +195,28 @@ def test_differential_cross_section_integrates_to_sigma():
     total = 2 * np.pi * np.sum(weights * differentialCrossSection(suite, E, nodes))
     sigma = float(suite.reactions[2].crossSection["recon"].evaluate(E))
     assert total == pytest.approx(sigma, rel=1e-4)
+
+
+def test_geant4_side_is_left_at_the_transition_and_right_at_a_repeat():
+    """Geant4 is not one-sided: Legendre up to E_t, the last of a repeated
+    incident energy (G4ParticleHPLegendreStore.cc:195-199)."""
+    repeat = _suite("1 1.0 2\n3\n1 3 2\n0.0 1.0e6 0 1 0.1\n0.0 2.0e6 0 1 0.2\n"
+                    "0.0 2.0e6 0 1 0.3\n")
+    assert angularPdf(repeat, 2.0e6, 1.0, side="geant4") == \
+        angularPdf(repeat, 2.0e6, 1.0, side="right")
+    suite = JEFF.read("C12")
+    et = JEFF.elasticFinalState("C12").transitionEnergy
+    assert np.array_equal(angularPdf(suite, et, [0.0, 0.5], side="geant4"),
+                          angularPdf(suite, et, [0.0, 0.5], side="left"))
+
+
+def test_side_applies_to_sigma_too():
+    # A repeated energy in sigma: right = last value, left and geant4 = first.
+    suite = _suite("0 1.0 2\n2\n", "0 0\n4\n1.0 4.0 2.0 3.0 2.0 5.0 3.0 1.0\n")
+    assert elasticCrossSection(suite, 2.0) == 5.0
+    assert elasticCrossSection(suite, 2.0, side="left") == 3.0
+    assert elasticCrossSection(suite, 2.0, side="geant4") == 3.0
+    assert differentialCrossSection(suite, 2.0, 0.0, side="geant4") == \
+        pytest.approx(3.0 * 0.5 / (2 * np.pi))
+    with pytest.raises(ValueError, match="outside"):
+        elasticCrossSection(suite, 3.5)

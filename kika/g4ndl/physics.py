@@ -33,13 +33,22 @@ Two things, kept apart on purpose:
     * **Tables:** each bracketing record is evaluated at ``mu`` on its own
       law, then the two values are interpolated in energy. Geant4 does the
       energy step first; the two orders differ only where ``mu`` is LOGLIN
-      (C-12: up to 5e-5 relative).
+      (C-12: up to 8e-5 relative, measured).
     * **Boundaries and repeats.** No extrapolation: outside the first and
       last incident energy is an error. At a repeated energy, and at the
       ``repFlag=3`` transition, ``side`` picks the record: ``"right"`` (the
-      default, what :class:`~kika.nuclear_data.model.XYs1d` does) or
-      ``"left"`` (what Geant4 does: Legendre up to and including the
-      transition energy).
+      default, what :class:`~kika.nuclear_data.model.XYs1d` does), ``"left"``,
+      or ``"geant4"``. **Geant4 is not one-sided**, so it gets its own value:
+      it takes the Legendre block up to and including the transition energy
+      (left), the last of a repeated incident energy inside a block (right,
+      ``G4ParticleHPLegendreStore.cc:195-199``, ``G4ParticleHPPartial.cc:98-100``),
+      and, in the cross section its transport vector holds, the first of a
+      repeated energy (left, ``G4PhysicsFreeVector``).
+
+    Measured against Geant4 11.4.3's own construction of p(mu|E) from the
+    file (not its sampled density, which is biased): 2.9e-12 relative over
+    16 926 incident energies, except C-12's LOGLIN tables (8.2e-5) and
+    Geant4's tabulated Legendre polynomials (up to 1.1e-4, U-238).
 
 This module works on the model objects, not on the parsed records, so what
 it checks is what :func:`kika.g4ndl.decode.decodeElastic` produced.
@@ -54,12 +63,15 @@ from numpy.polynomial import legendre as npleg
 
 __all__ = [
     "Finding", "ElasticPhysicsCheck", "checkElastic", "angularPdf",
-    "differentialCrossSection", "legendreDensity", "legendreMinimum",
+    "differentialCrossSection", "elasticCrossSection", "legendreDensity", "legendreMinimum",
     "tableIntegral", "NORMALISATION_TOLERANCE",
 ]
 
 #: Roadmap §5 Fase 5: "para integral/PDF interpolada, empezar con 1e-6".
 NORMALISATION_TOLERANCE = 1.0e-6
+
+#: Values of ``side``: see the module docstring.
+_SIDES = ("right", "left", "geant4")
 
 #: Order of the Gauss-Legendre rule used on each table segment for moments.
 _SEGMENT_NODES = 16
@@ -371,8 +383,8 @@ def angularPdf(suiteOrDistribution, energy: float, mu, side: str = "right") -> n
     See the module docstring for the conventions. ``energy`` in eV; ``mu``
     scalar or array. Raises outside the incident-energy range.
     """
-    if side not in ("left", "right"):
-        raise ValueError(f"side must be 'left' or 'right', got {side!r}")
+    if side not in _SIDES:
+        raise ValueError(f"side must be one of {_SIDES}, got {side!r}")
     d = _distribution(suiteOrDistribution)
     mu = np.asarray(mu, dtype=float)
     if not hasattr(d, "angular"):                           # Isotropic2d
@@ -389,7 +401,8 @@ def angularPdf(suiteOrDistribution, energy: float, mu, side: str = "right") -> n
     # Records at exactly this energy: take the last ('right') or first ('left').
     hit = np.flatnonzero(e == energy)
     if hit.size:
-        f = block.functions[hit[-1] if side == "right" else hit[0]]
+        # Inside a block Geant4 keeps the last of a repeated energy.
+        f = block.functions[hit[0] if side == "left" else hit[-1]]
         return np.asarray(f.evaluate(mu), dtype=float)
     upper = int(np.searchsorted(e, energy, side="right"))
     lower = upper - 1
@@ -411,16 +424,37 @@ def _pickBlock(blocks: List[_Block], energy: float, side: str) -> _Block:
     if len(blocks) == 1:
         return blocks[0]
     transition = blocks[0].energies[-1]
-    if energy < transition or (energy == transition and side == "left"):
+    # At the transition Geant4 uses Legendre (E <= E_t).
+    if energy < transition or (energy == transition and side in ("left", "geant4")):
         return blocks[0]
     return blocks[1]
+
+
+def elasticCrossSection(suite, energy: float, side: str = "right") -> float:
+    """``sigma_el(E)`` in barn from the ``recon`` form, lin-lin, no extrapolation.
+
+    ``side`` matters only at a repeated energy (a print collision): ``"right"``
+    the last value, as the model's ``XYs1d`` evaluates; ``"left"`` and
+    ``"geant4"`` the first, as Geant4's transport vector does.
+    """
+    if side not in _SIDES:
+        raise ValueError(f"side must be one of {_SIDES}, got {side!r}")
+    form = suite.reactions[2].crossSection["recon"]
+    xs = np.asarray(form.xs)
+    if not xs[0] <= energy <= xs[-1]:
+        raise ValueError(f"E = {energy!r} eV is outside the cross section, "
+                         f"[{xs[0]!r}, {xs[-1]!r}] eV")
+    hit = np.flatnonzero(xs == energy)
+    if hit.size > 1:
+        return float(form.ys[hit[-1] if side == "right" else hit[0]])
+    return float(form.evaluate(energy))
 
 
 def differentialCrossSection(suite, energy: float, mu, side: str = "right") -> np.ndarray:
     """``dsigma/dOmega = sigma_el(E) p(mu|E) / (2 pi)`` in b/sr, frame of the data.
 
-    ``sigma_el`` is the ``recon`` form, lin-lin, exactly what the file holds.
+    ``side`` applies to both factors, so ``"geant4"`` is what Geant4 would
+    use for each of them (they are not the same side).
     """
-    form = suite.reactions[2].crossSection["recon"]
-    sigma = float(form.evaluate(energy))
-    return sigma * angularPdf(suite, energy, mu, side) / (2.0 * np.pi)
+    return (elasticCrossSection(suite, energy, side)
+            * angularPdf(suite, energy, mu, side) / (2.0 * np.pi))
