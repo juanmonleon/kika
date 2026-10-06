@@ -154,3 +154,47 @@ def test_jeff40_angular_is_the_tape_mf4(request, g4ndl_jeff40_library, target, t
             assert len(a[2]) == n and a[2].tolist() == b[2][:n].tolist()
         else:
             assert a[2].tolist() == b[2].tolist()
+
+
+# ----------------------------------------------------------------- Phase 5
+
+@pytest.mark.parametrize("fixture,negative,unnormalised", [
+    # (records, isotopes). Library anomalies, measured 2026-10-06, reported and
+    # never corrected. |int p - 1| > 1e-6 on tables is mostly the evaluations'
+    # own normalisation at the 1e-5..1e-4 level, except where noted below.
+    ("g4ndl_jeff40_library", (75, 12), (284, 98)),
+    ("g4ndl_g4ndl471_library", (36, 6), (895, 65)),
+])
+def test_physics_anomalies_of_each_library(request, fixture, negative, unnormalised):
+    from kika.g4ndl.physics import checkElastic
+
+    lib = g4ndl.open(request.getfixturevalue(fixture))
+    neg, norm = [], []
+    for key in lib.isotopes():
+        check = checkElastic(lib.read(key))
+        assert not check.byKind("moments") and not check.byKind("nonfinite")
+        neg += [(check.target, f) for f in check.byKind("negative")]
+        norm += [(check.target, f) for f in check.byKind("normalisation")]
+        # Every Legendre record has a_0 = 1: the import adds no factor.
+        assert all(f.block == "table" for f in check.byKind("normalisation"))
+    assert (len(neg), len({t for t, _ in neg})) == negative
+    assert (len(norm), len({t for t, _ in norm})) == unnormalised
+
+
+def test_jeff40_hf178m2_ships_empty_tables(g4ndl_jeff40_library):
+    """A translation defect: all 15 tables above 30 MeV are p = 0 at mu = -1, +1."""
+    from kika.g4ndl.physics import checkElastic
+
+    check = checkElastic(g4ndl.open(g4ndl_jeff40_library).read("Hf178m2"))
+    empty = [f for f in check.byKind("normalisation") if f.value == -1.0]
+    assert len(empty) == 15 and empty[0].energy == 30.0e6
+
+
+def test_jeff40_fe56_negative_lobe(g4ndl_jeff40_library):
+    """Fe-56 JEFF-4.0's Legendre density dips below zero near mu = -0.2 at
+    1.557-1.560 MeV, and at mu = -1 at 2.414 MeV. The file's, not kika's."""
+    from kika.g4ndl.physics import checkElastic
+
+    neg = checkElastic(g4ndl.open(g4ndl_jeff40_library).read("Fe56")).byKind("negative")
+    assert [f.energy for f in neg] == [1.557e6, 1.558e6, 1.559e6, 1.560e6, 2.414e6]
+    assert min(f.value for f in neg) == pytest.approx(-0.0261, abs=1e-4)
