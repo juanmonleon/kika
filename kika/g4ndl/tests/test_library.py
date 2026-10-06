@@ -67,7 +67,7 @@ def test_z_and_text_give_identical_text(tmp_path):
     src = JEFF / "Elastic/FS/1_1_Hydrogen.z"
     text = read_text(src)
     plain = tmp_path / "1_1_Hydrogen"
-    plain.write_text(text, encoding="ascii")
+    plain.write_bytes(text.encode("ascii"))  # write_text adds CR on Windows
     assert read_text(plain) == text
     a, b = TokenStream(text), TokenStream(read_text(plain))
     assert a.floats(a.remaining, "all").tolist() == b.floats(b.remaining, "all").tolist()

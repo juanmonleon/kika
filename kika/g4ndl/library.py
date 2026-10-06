@@ -29,6 +29,8 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from kika.g4ndl.exceptions import G4NDLError, IsotopeNotFoundError
 from kika.g4ndl.names import IsotopeKey, TargetLike, parse_file_name, parse_target
+from kika.g4ndl.parse import parse_cross_section, parse_elastic_fs
+from kika.g4ndl.records import CrossSectionRecord, ElasticFSRecord
 from kika.g4ndl.stream import DEFAULT_MAX_BYTES, read_text
 from kika.g4ndl.tokens import TokenStream
 
@@ -171,6 +173,14 @@ class G4NDLLibrary:
         """Open ``target``'s file in ``subdir`` as a :class:`TokenStream`."""
         f = self.locate(target, subdir)
         return TokenStream(read_text(f.path, self.max_bytes), path=f.path)
+
+    def crossSection(self, target: TargetLike) -> CrossSectionRecord:
+        """``target``'s ``Elastic/CrossSection``, parsed to its last token."""
+        return parse_cross_section(self.tokens(target, "Elastic/CrossSection"))
+
+    def elasticFinalState(self, target: TargetLike) -> ElasticFSRecord:
+        """``target``'s ``Elastic/FS``, parsed to its last token."""
+        return parse_elastic_fs(self.tokens(target, "Elastic/FS"))
 
     def _subdirs(self, process: str) -> Tuple[str, ...]:
         try:
