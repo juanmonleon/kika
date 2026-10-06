@@ -17,10 +17,13 @@ An MT the parser could not read at all is a ``parse_error``.
 **Values (C3)** -- on each block summed on its own union grid the way kika sums
 it: |rho| > 1 (a cross block needs the variances of both self blocks, on a
 common grid), negative variances, rows with no variance (``max == min`` exactly,
-never a threshold on sigma), covariance where the variance is zero, and large
-variances judged in **absolute** against the central values -- MF3 or a PENDF
-for MF33, the a_l of MF4 for MF34. Without central values a block is reported
-"not evaluable", not guessed.
+never a threshold on sigma), covariance where the variance is zero, and the size
+of the uncertainty against the central values -- MF3 or a PENDF for MF33, nu-bar
+of MF1 for MF31, the a_l of MF4 for MF34. Only bounds that hold are used: sigma(a_l)
+> 1 is impossible (|a_l| <= 1), while a cross section has no upper bound, so its
+sigma_rel > 1 is a note and only sigma_rel > 10 outside a threshold region -- past
+anything the three major libraries state -- a warning. Without central values a
+block is reported "not evaluable", not guessed.
 
 **Positive semi-definiteness (C4)** -- the eigenvalues of every self block, in
 three levels by |lambda_min| / lambda_max: below 1e-6 a note, up to 1e-3 a
@@ -84,6 +87,13 @@ RHO_QUANTUM_SHARE = 0.98
 #: Slack on the spectral norm of a symmetric rounding error, ~2 s sqrt(n).
 RHO_QUANTUM_SLACK = 1.5
 
+#: MF33/MF31: sigma_bar below this fraction of the reaction's maximum is a
+#: threshold region, where any relative uncertainty is legitimate.
+RELATIVE_THRESHOLD_ZONE = 0.01
+#: The measured edge of sigma_rel outside threshold regions in ENDF/B-VIII.1,
+#: JEFF-4.0 and JENDL-5 (6-oct-2026): nothing reaches it.
+RELATIVE_IMPLAUSIBLE = 10.0
+
 VALID_LB = {
     31: frozenset({0, 1, 2, 3, 4, 5, 6, 8, 9}),
     33: frozenset({0, 1, 2, 3, 4, 5, 6, 8, 9}),
@@ -108,7 +118,7 @@ def check_covariances(
     ----------
     endf : ENDF
         A tape from :func:`kika.endf.read_endf`. Read MF2/MF3 (MF33) and MF4
-        (MF34) along with the covariances, or the large-variance check has no
+        (MF34) along with the covariances, or the magnitude checks have no
         central values and says so.
     mf : sequence of int
         Which covariance files to check; any of 31, 33, 34. Others are ignored.
@@ -554,32 +564,81 @@ def _psd_finding(sym: np.ndarray, loc, out,
     out.append(CovarianceFinding("not_positive_semidefinite", level, summary, loc, evidence))
 
 
-def _large_variance(sigma_abs: np.ndarray, central: np.ndarray, valid: np.ndarray, grid,
-                    loc, out, *, scale: float, scale_name: str, rel: Optional[np.ndarray]) -> None:
-    """Uncertainty larger than the reaction's own scale, judged in absolute."""
-    over = valid & (sigma_abs > scale)
-    rel_big = np.zeros_like(valid)
-    if rel is not None:
-        rel_big = valid & (rel > 1.0) & (central >= 0.01 * scale) & ~over
-    if not over.any() and not rel_big.any():
+def _relative_uncertainty(rel: np.ndarray, central: np.ndarray, valid: np.ndarray, grid,
+                          loc, out) -> None:
+    """sigma_rel of a cross section or nu-bar, judged against what is measured, not assumed.
+
+    A cross section is bounded below by 0 and not above, so no variance is
+    impossible: a lognormal carries any sigma_rel. Two findings, and neither
+    guesses a scale:
+
+    * ``relative_uncertainty_above_one`` (note) -- sigma_rel > 1. Not a fault of
+      the file; it says that a *normal* draw goes negative with probability
+      Phi(-1/sigma_rel) (16 % at 100 %), which is the sampler's choice of space
+      to make. Over the three libraries thousands of bins sit between 1 and 10,
+      outside threshold regions too: there is no edge at 1 to call a defect.
+    * ``implausible_relative_uncertainty`` (warn) -- sigma_rel > 10 where sigma_bar
+      is at least 1 % of the reaction's maximum (outside a threshold region,
+      where sigma_bar -> 0 makes any ratio legitimate). That is past the measured
+      edge of the distribution: in ENDF/B-VIII.1, JEFF-4.0 and JENDL-5 no bin
+      outside a threshold region reaches it, so what does is an outlier of the
+      kind a unit error makes (LB=8 summed as relative gave 53 on Eu-154).
+    """
+    smax = float(central[valid].max())
+    above = valid & (rel > 1.0)
+    if not above.any():
         return
-    evidence = {"scale": scale, "scale_name": scale_name}
-    bits = []
-    if over.any():
-        idx = np.flatnonzero(over)
-        k = int(idx[np.argmax(sigma_abs[idx])])
-        evidence.update({"n_above_scale": int(idx.size), "worst_sigma_abs": float(sigma_abs[k]),
-                         "worst_central": float(central[k]), "worst_bin": _bins(grid, [k])[0]})
-        bits.append(f"absolute sigma above {scale_name} ({scale:.4g}) in {idx.size} bins, "
-                    f"worst {sigma_abs[k]:.4g} at {grid[k]:.4g}-{grid[k + 1]:.4g} eV")
-    if rel_big.any():
-        idx = np.flatnonzero(rel_big)
-        k = int(idx[np.argmax(rel[idx])])
-        evidence.update({"n_rel_above_1": int(idx.size), "worst_rel": float(rel[k]),
-                         "worst_rel_bin": _bins(grid, [k])[0]})
-        bits.append(f"relative sigma above 100 % where the central value is not small, "
-                    f"in {idx.size} bins (worst {rel[k]:.3g})")
-    out.append(CovarianceFinding("large_variance", WARN, "; ".join(bits), loc, evidence))
+    from math import erf, sqrt
+
+    def p_negative(r):
+        return 0.5 * (1.0 + erf(-1.0 / r / sqrt(2.0)))
+
+    idx = np.flatnonzero(above)
+    k = int(idx[np.argmax(rel[idx])])
+    bulk = central >= RELATIVE_THRESHOLD_ZONE * smax
+    implausible = above & bulk & (rel > RELATIVE_IMPLAUSIBLE)
+    if implausible.any():
+        j = np.flatnonzero(implausible)
+        w = int(j[np.argmax(rel[j])])
+        out.append(CovarianceFinding(
+            "implausible_relative_uncertainty", WARN,
+            f"sigma_rel up to {rel[w]:.3g} in {j.size} bins where the cross section is not "
+            f"near a threshold (sigma_bar {central[w]:.4g}, {central[w] / smax:.0%} of its maximum), "
+            f"past the largest value any of the three major libraries states there "
+            f"({RELATIVE_IMPLAUSIBLE:g})", loc,
+            {"n": int(j.size), "worst_rel": float(rel[w]), "worst_bin": _bins(grid, [w])[0],
+             "central_over_max": float(central[w] / smax)}))
+    out.append(CovarianceFinding(
+        "relative_uncertainty_above_one", NOTE,
+        f"sigma_rel above 100 % in {idx.size} bins (worst {rel[k]:.3g} at "
+        f"{grid[k]:.4g}-{grid[k + 1]:.4g} eV, sigma_bar {central[k] / smax:.1%} of the maximum); "
+        f"a normal draw there is negative with probability {p_negative(rel[k]):.0%}", loc,
+        {"n": int(idx.size), "n_outside_threshold_zone": int((above & bulk).sum()),
+         "worst_rel": float(rel[k]), "worst_bin": _bins(grid, [k])[0],
+         "p_negative_if_normal": p_negative(float(rel[k]))}))
+
+
+def _legendre_bound(sigma_abs: np.ndarray, central: np.ndarray, valid: np.ndarray, grid,
+                    loc, out) -> None:
+    """sigma(a_l) > 1 is impossible, not just large.
+
+    f(mu) >= 0 bounds every normalised Legendre coefficient, |a_l| <= 1, and a
+    quantity confined to an interval of width 2 has a standard deviation of at
+    most 1 whatever its distribution (Popoviciu's inequality). A stated sigma
+    above 1 cannot be the uncertainty of a physical angular distribution.
+    """
+    over = valid & (sigma_abs > 1.0)
+    if not over.any():
+        return
+    idx = np.flatnonzero(over)
+    k = int(idx[np.argmax(sigma_abs[idx])])
+    out.append(CovarianceFinding(
+        "variance_exceeds_physical_bound", DEFECT,
+        f"sigma(a_l) above 1 in {idx.size} bins even with the smallest |a_l| in the bin "
+        f"(worst {sigma_abs[k]:.4g} at {grid[k]:.4g}-{grid[k + 1]:.4g} eV, |a_l| >= "
+        f"{central[k]:.3g}); |a_l| <= 1 allows at most 1", loc,
+        {"n": int(idx.size), "worst_sigma_abs": float(sigma_abs[k]),
+         "worst_central": float(central[k]), "worst_bin": _bins(grid, [k])[0]}))
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +728,7 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
         if partial:
             _note_partial(loc, recs, out)
         _check_self_block(matrix, grid, loc, out, good, sec)
-        _mf33_large_variance(ctx, mt, matrix, grid, relative, loc, out)
+        _mf33_magnitude(ctx, mt, matrix, grid, relative, loc, out)
         _mf33_coverage(ctx, mt, grid, loc, out)
 
     # Cross blocks.
@@ -737,7 +796,7 @@ def _bin_average_nubar(sec, grid) -> np.ndarray:
     return out
 
 
-def _mf33_large_variance(ctx, mt, matrix, grid, relative, loc, out) -> None:
+def _mf33_magnitude(ctx, mt, matrix, grid, relative, loc, out) -> None:
     g = np.asarray(grid, dtype=float)
     if loc.mf == 31:
         # MF31 is the covariance of nu-bar, whose central values are MF1 MT452/455/456.
@@ -766,10 +825,7 @@ def _mf33_large_variance(ctx, mt, matrix, grid, relative, loc, out) -> None:
         sigma_abs = np.sqrt(var)
         with np.errstate(divide="ignore", invalid="ignore"):
             rel = np.where(central > 0, sigma_abs / central, np.inf)
-    scale = float(central[valid].max())
-    _large_variance(sigma_abs, central, valid, grid, loc, out, scale=scale,
-                    scale_name=(f"the largest nu-bar of MT{mt}" if loc.mf == 31 else
-                                f"the largest sigma of MT{mt} where it is evaluated"), rel=rel)
+    _relative_uncertainty(rel, central, valid, grid, loc, out)
 
 
 def _unavailable_note(ctx, loc, out, why: Optional[str] = None) -> None:
@@ -787,7 +843,7 @@ def _unavailable_note(ctx, loc, out, why: Optional[str] = None) -> None:
                if ctx.eh is None and not ctx.xs else "no sigma(E) for these MTs")
     out.append(CovarianceFinding(
         "central_values_unavailable", NOTE,
-        f"large variances not evaluable: {why}", CovarianceLocation(mat=loc.mat, mf=loc.mf),
+        f"uncertainty magnitudes not evaluable: {why}", CovarianceLocation(mat=loc.mat, mf=loc.mf),
         {"mts": list(mts)}))
 
 
@@ -986,7 +1042,7 @@ def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
                 "the block mixes absolute (LB=0) and relative components; kika sums them as "
                 "relative, so only the relative part was checked", loc))
         _check_self_block(matrix, grid, loc, out, good, sec)
-        _mf34_large_variance(ctx, mt, l, matrix, grid, relative, loc, out)
+        _mf34_magnitude(ctx, mt, l, matrix, grid, relative, loc, out)
 
     # Cross blocks: L != L1 or MT != MT1.
     for (mt, l, mt1, l1), (sec, good) in sorted(usable.items()):
@@ -1027,7 +1083,11 @@ def _diag34(self_entry, grid):
     return None if res is None else np.diag(res[0])
 
 
-def _mf34_large_variance(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
+def _mf34_magnitude(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
+    if l < 1:
+        # a_0 = 1 by normalisation: a stated a_0 covariance (LTT=3) is not the
+        # uncertainty of a coefficient bounded by |a_l| <= 1, so the bound says nothing.
+        return
     sec4 = ctx.mf4.get(mt)
     if sec4 is None or not hasattr(sec4, "extract_legendre_coefficients"):
         ctx.unavailable.setdefault((34, "MF4"), []).append(mt)
@@ -1039,11 +1099,11 @@ def _mf34_large_variance(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
                 return
         out.append(CovarianceFinding(
             "central_values_unavailable", NOTE,
-            "large variances not evaluable: MF4 not read or without Legendre coefficients",
+            "uncertainty magnitudes not evaluable: MF4 not read or without Legendre coefficients",
             CovarianceLocation(mat=loc.mat, mf=34), {"mts": [mt]}))
         return
     g = np.asarray(grid, dtype=float)
-    n_sub = 5
+    n_sub = 9
     sub_e = np.column_stack([np.linspace(g[c], g[c + 1], n_sub) for c in range(g.size - 1)]).T
     try:
         coeffs = sec4.extract_legendre_coefficients(sub_e.ravel(), max_legendre_order=max(l, 1),
@@ -1056,10 +1116,13 @@ def _mf34_large_variance(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
     width = g[1:] - g[:-1]
     with np.errstate(divide="ignore", invalid="ignore"):
         central = np.where(width > 0, np.trapezoid(vals, sub_e, axis=1) / width, 0.0)
+    # A relative sigma becomes absolute through the a_l it is relative to, and ENDF
+    # does not pin which one inside a bin where a_l moves (O-16 at 6.5 MeV crosses
+    # resonances). The smallest |a_l| the bin holds -- its average or any sampled
+    # point -- gives the smallest sigma_abs the file can mean, so a breach of the
+    # bound with it is certain, not an artefact of the averaging.
+    reference = np.minimum(np.abs(central), np.min(np.abs(vals), axis=1))
     var = np.clip(np.diag(matrix), 0.0, None)
-    sigma_abs = np.sqrt(var) * np.abs(central) if relative else np.sqrt(var)
+    sigma_abs = np.sqrt(var) * reference if relative else np.sqrt(var)
     valid = width > 0
-    # The physical range of a Legendre coefficient is |a_l| <= 1: a sigma above 1
-    # spans more than all of it, whatever the central value.
-    _large_variance(sigma_abs, np.abs(central), valid, grid, loc, out, scale=1.0,
-                    scale_name="the physical range |a_l| <= 1", rel=None)
+    _legendre_bound(sigma_abs, reference, valid, grid, loc, out)

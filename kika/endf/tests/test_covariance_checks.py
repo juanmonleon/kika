@@ -205,19 +205,29 @@ def test_negative_variance_inert_rows_and_covariance_without_variance():
     assert _only(report, "covariance_without_variance").level == DEFECT
 
 
-def test_large_variance_is_judged_in_absolute_against_sigma():
-    # sigma_rel = 2 on a flat 1 b cross section: sigma_abs 2 b > the 1 b scale.
+def test_sigma_rel_above_one_is_a_note_with_the_chance_of_a_negative_draw():
+    # 200 % on a flat 1 b cross section: allowed (a lognormal carries it), but a
+    # normal draw goes negative Phi(-0.5) = 31 % of the time.
     big = np.diag([4.0, 0.01, 0.01])
     xs = {1: SimpleNamespace(energies=np.array([0.1, 1e4]), values=np.array([1.0, 1.0]))}
-    f = _only(check_covariances(_tape(_section({1: [_lb5(big)]})), xs_sections=xs),
-              "large_variance")
-    assert f.level == WARN and f.evidence["n_above_scale"] == 1
-    assert f.evidence["worst_sigma_abs"] == pytest.approx(2.0)
-    # The same 200 % where the cross section is ~0 (a threshold) is legitimate.
+    report = check_covariances(_tape(_section({1: [_lb5(big)]})), xs_sections=xs)
+    f = _only(report, "relative_uncertainty_above_one")
+    assert f.level == NOTE and f.evidence["worst_rel"] == pytest.approx(2.0)
+    assert f.evidence["p_negative_if_normal"] == pytest.approx(0.3085, abs=1e-4)
+    assert report.at_least(WARN) == ()
+
+
+def test_sigma_rel_above_ten_warns_only_outside_a_threshold_region():
+    huge = np.diag([400.0, 0.01, 0.01])  # sigma_rel 20 in the first bin
+    flat = {1: SimpleNamespace(energies=np.array([0.1, 1e4]), values=np.array([1.0, 1.0]))}
+    f = _only(check_covariances(_tape(_section({1: [_lb5(huge)]})), xs_sections=flat),
+              "implausible_relative_uncertainty")
+    assert f.level == WARN and f.evidence["worst_rel"] == pytest.approx(20.0)
+    # The same 2000 % where sigma_bar is under 1 % of the maximum (a threshold).
     ramp = {1: SimpleNamespace(energies=np.array([1.0, 10.0, 1e4]),
                                values=np.array([0.0, 0.0, 1.0]))}
-    report = check_covariances(_tape(_section({1: [_lb5(big)]})), xs_sections=ramp)
-    assert report.by_check("large_variance") == ()
+    report = check_covariances(_tape(_section({1: [_lb5(huge)]})), xs_sections=ramp)
+    assert report.by_check("implausible_relative_uncertainty") == ()
 
 
 def test_a_mixed_block_without_sigma_is_checked_on_its_relative_part():
@@ -240,7 +250,9 @@ def test_mf34_sigma_wider_than_the_physical_range_of_a_l():
         number=2,
         extract_legendre_coefficients=lambda e, max_legendre_order, out_of_range:
             {1: np.full(np.size(e), 0.1)}))
-    f = _only(check_covariances(_tape(sec34, mf_number=34, files=[mf4])), "large_variance")
+    f = _only(check_covariances(_tape(sec34, mf_number=34, files=[mf4])),
+              "variance_exceeds_physical_bound")
+    assert f.level == DEFECT  # |a_l| <= 1 caps sigma at 1 (Popoviciu)
     assert f.evidence["worst_sigma_abs"] == pytest.approx(2.0)  # 20 x |a_1| = 0.1
 
 
@@ -307,9 +319,8 @@ def test_mf31_is_judged_against_nubar_from_mf1():
     mf1.add_section(SimpleNamespace(
         number=452, get_nubar=lambda e, out_of_range: np.full(np.size(e), 2.4)))
     endf = _tape(_section({452: [_lb5(big)]}, mt=452), mf_number=31, files=[mf1])
-    f = _only(check_covariances(endf), "large_variance")
-    assert f.location.mf == 31 and f.evidence["worst_sigma_abs"] == pytest.approx(4.8)
-    assert "nu-bar" in f.evidence["scale_name"]
+    f = _only(check_covariances(endf), "relative_uncertainty_above_one")
+    assert f.location.mf == 31 and f.evidence["worst_rel"] == pytest.approx(2.0)
 
 
 def test_a_summation_mt_missing_from_mf3_is_summed_from_its_partials():
@@ -325,8 +336,7 @@ def test_a_summation_mt_missing_from_mf3_is_summed_from_its_partials():
     endf = _tape(_section({3: [_lb5(big)]}, mt=3), files=[mf2, mf3])
     report = check_covariances(endf)
     assert report.by_check("central_values_unavailable") == ()
-    f = _only(report, "large_variance")
-    assert f.evidence["scale"] == pytest.approx(2.0)
+    assert _only(report, "relative_uncertainty_above_one").evidence["worst_rel"] ==         pytest.approx(2.0)
 
 
 def test_an_all_zero_ls1_triangle_in_a_cross_block_is_only_a_note():
@@ -366,3 +376,27 @@ def test_jendl5_fe56_has_no_defect_and_its_negative_eigenvalues_are_rounding(fe5
     assert report.defects == ()
     psd = report.by_check("not_positive_semidefinite")
     assert psd and all(f.level == NOTE for f in psd)
+
+
+def _mf34_case(l, a_of_e, variance=400.0):
+    sec34 = MF34MT(number=2, _za=26056.0, _awr=55.45, _ltt=3, _nmt1=1, _mat=2631)
+    rec = _lb5(np.diag([variance, 0.01, 0.01]), cls=SubSubsectionRecord)
+    sec34.add_subsection(Subsection34(
+        mt1=2, nl=2, nl1=2, mat1=0,
+        sub_subsections=[SubSubsection(l=l, l1=l, lct=1, ni=1, records=[rec])]))
+    mf4 = MF(number=4)
+    mf4.add_section(SimpleNamespace(
+        number=2,
+        extract_legendre_coefficients=lambda e, max_legendre_order, out_of_range:
+            {l: a_of_e(np.asarray(e, dtype=float))}))
+    return check_covariances(_tape(sec34, mf_number=34, files=[mf4]))
+
+
+def test_the_legendre_bound_skips_a0_and_uses_the_smallest_a_l_in_the_bin():
+    # a_0 = 1 by normalisation: its covariance is not bounded by |a_l| <= 1.
+    report = _mf34_case(0, lambda e: np.ones_like(e))
+    assert report.by_check("variance_exceeds_physical_bound") == ()
+    # a_1 crossing zero inside the first bin (1-10 eV): its average is 0.1, but the
+    # file's sigma_rel 20 may be relative to a value near 0 -- not a certain breach.
+    report = _mf34_case(1, lambda e: np.where(e <= 10.0, (e - 5.5) / 22.5 + 0.1, 0.1))
+    assert report.by_check("variance_exceeds_physical_bound") == ()
