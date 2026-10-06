@@ -119,6 +119,8 @@ _TAPES: Dict[str, Sequence[str]] = {
         "JENDL-5/Fe56_jendl5_n.endf",
         "Fe56_jendl5_n.endf",
         "JENDL-5/260560.jendl5",
+        # The JAEA distribution as unpacked (jendl5-n.tar.gz) under a library root.
+        "jendl5/n_026-Fe-056.dat",
     ),
     "u235": ("jeff40-endf/92-U-235g.txt", "92-U-235g.txt"),
     # PFNS: the two U-235 evaluations the MF5/MF35 work is gated against, plus
