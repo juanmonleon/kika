@@ -84,6 +84,10 @@ RHO_DEFECT = 1e-3
 PSD_NOTE = 1e-6
 PSD_DEFECT = 1e-3
 
+#: Rows whose sigma is below this fraction of the block's largest are left out
+#: of the clipping impact (``_clipping_impact``).
+PSD_IMPACT_FLOOR = 0.01
+
 #: Relative asymmetry of a self block (LS=0 stores both triangles).
 ASYM_NOTE = 1e-6
 ASYM_DEFECT = 1e-3
@@ -538,6 +542,25 @@ def _quantised_allowance(records: Sequence[Tuple[int, object]], sec, grid):
     return total, quanta
 
 
+def _clipping_impact(ev: np.ndarray, vecs: np.ndarray, sym: np.ndarray) -> Optional[float]:
+    """How much forcing the block to PSD would move its uncertainties.
+
+    Setting the negative eigenvalues to zero (the nearest PSD matrix in the
+    Frobenius norm) adds sum_k |lambda_k| v_ik^2 to each variance. Returned is
+    the largest relative change of sigma over the rows whose sigma is at least
+    PSD_IMPACT_FLOOR of the block's largest: a tail row with sigma ~1e-12 would
+    otherwise turn any absolute correction into an enormous relative one.
+    """
+    d = np.diag(sym)
+    live = d > 0
+    if not live.any():
+        return None
+    added = (vecs ** 2) @ (-np.minimum(ev, 0.0))
+    sd = np.sqrt(np.where(live, d, 0.0))
+    rows = live & (sd >= PSD_IMPACT_FLOOR * sd.max())
+    return float(np.max(np.sqrt(d[rows] + added[rows]) / sd[rows] - 1.0))
+
+
 def _psd_finding(sym: np.ndarray, loc, out,
                  records: Sequence[Tuple[int, object]], sec, grid) -> None:
     ev = np.linalg.eigvalsh(sym)
@@ -554,6 +577,7 @@ def _psd_finding(sym: np.ndarray, loc, out,
         "lambda_max": lam_max,
         "ratio": ratio,
         "n_negative": int(np.sum(ev < 0)),
+        "sigma_change_if_clipped": _clipping_impact(*np.linalg.eigh(sym), sym),
     }
     level = NOTE if ratio < PSD_NOTE else (WARN if ratio <= PSD_DEFECT else DEFECT)
     reason = ""

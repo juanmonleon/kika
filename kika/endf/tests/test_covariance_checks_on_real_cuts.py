@@ -200,11 +200,14 @@ def test_u239_mf35_not_the_covariance_of_a_normalised_spectrum():
 
 def test_cf252_mf35_the_reference_spectrum_keeps_its_sum_rule_and_bound():
     """ENDF/B-VIII.1 Cf-252 with its MF5: the sum rule holds, sigma(P) is inside
-    P(1-P) with MF5's own P, and the only fault is a slightly indefinite band
-    (-1.4e-4 of lambda_max, not explained by rounding) -- a light warning, as
-    MF33 and MF34 grade it."""
+    P(1-P) with MF5's own P, and nothing is above a note. Its bands are slightly
+    indefinite (-1.4e-4 of lambda_max, not 6-figure rounding), which MF33 and
+    MF34 would grade a light warning; for MF35 what is graded is what forcing
+    the band to PSD would do to sigma, and that is 0.2-0.3 %."""
     report = _check_file("micro_cf252_pfns.endf")
-    assert _faults(report) == {("warn", "not_positive_semidefinite"): 4}
+    assert report.at_least("warn") == ()
     assert report.by_check("central_values_unavailable") == ()
-    assert max(f.evidence["ratio"] for f in report.by_check("not_positive_semidefinite")) \
-        == pytest.approx(1.40e-4, abs=0.01e-4)
+    psd = report.by_check("not_positive_semidefinite")
+    assert len(psd) == 4
+    assert max(f.evidence["ratio"] for f in psd) == pytest.approx(1.40e-4, abs=0.01e-4)
+    assert max(f.evidence["sigma_change_if_clipped"] for f in psd) < 0.004

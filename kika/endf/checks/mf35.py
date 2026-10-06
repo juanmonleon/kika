@@ -33,6 +33,15 @@ from .findings import DEFECT, NOTE, WARN, CovarianceFinding, CovarianceLocation
 
 #: max_i |sum_j C_ij| / max|C| above this is not a normalised spectrum's covariance.
 SUM_RULE_DEFECT = 1e-2
+#: A light PSD warning on a band becomes a note when forcing the band to PSD moves
+#: no sigma (of a group with sigma >= 1 % of the band's largest) by this much.
+#: Measured, 6-oct-2026: on every band of ENDF/B-VIII.1, JEFF-4.0 and JENDL-5 that
+#: keeps the sum rule, the change is 0.8 % at most (0.27 % median; Cf-252, the
+#: reference spectrum, 0.2-0.3 %), while lambda_min/lambda_max reaches 1.5e-4.
+#: The ratio misleads here: a band is singular by construction (C.1 = 0) and its
+#: spectra correlate so strongly that one mode carries ~95 % of the trace, so any
+#: upstream rounding shows as dozens of tiny negative eigenvalues.
+PSD_IMPACT_NOTE = 0.02
 #: Relative tolerance on band edges and incident ranges (ENDF energies, 6-7 figures).
 _EDGE_RTOL = 1e-6
 
@@ -70,7 +79,9 @@ def check_mf35(ctx, mf_obj, out: List[CovarianceFinding]) -> None:
             if not _grid_findings(grid, loc, out):
                 continue
             matrix = band.matrix()
+            first = len(out)
             _check_self_block(matrix, list(grid), loc, out, (), None)
+            _grade_psd_by_impact(out, first)
             if not np.any(matrix):
                 continue
             _sum_rule(band, matrix, loc, out)
@@ -78,6 +89,21 @@ def check_mf35(ctx, mf_obj, out: List[CovarianceFinding]) -> None:
 
         if tabulated is not None and sec.subsections:
             _incident_coverage(sec, tabulated, head, out)
+
+
+def _grade_psd_by_impact(out, first: int) -> None:
+    """Downgrade this band's light PSD warning to a note when clipping changes nothing."""
+    for i in range(first, len(out)):
+        f = out[i]
+        if f.check != "not_positive_semidefinite" or f.level != WARN:
+            continue
+        impact = f.evidence.get("sigma_change_if_clipped")
+        if impact is None or impact >= PSD_IMPACT_NOTE:
+            continue
+        out[i] = CovarianceFinding(
+            f.check, NOTE,
+            f"{f.summary}; forcing the band to PSD changes no sigma by more than "
+            f"{impact:.2%} (below {PSD_IMPACT_NOTE:.0%})", f.location, f.evidence)
 
 
 def _spectrum(ctx, mt: int, head, out):

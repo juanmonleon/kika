@@ -103,6 +103,31 @@ def test_bands_must_be_non_empty_contiguous_and_counted():
     assert report.by_check("band_gap")[0].location.band == 2
 
 
+def _indefinite(depth, seed=3):
+    """A normalised band with one negative eigenvalue of -depth x lambda_max."""
+    c = _normalised(seed=seed)
+    w, v = np.linalg.eigh(c)
+    w[1] = -depth * w[-1]             # w[0] is the sum-rule null direction
+    return (v * w) @ v.T
+
+
+def test_a_light_psd_warning_is_kept_only_if_clipping_moves_sigma():
+    # The same ratio class (1e-6..1e-3) on both; only the consequence differs.
+    shallow = check_covariances(_tape(35, _mf35(_band(_indefinite(1e-5), 0, 2e7))))
+    # lambda_min = -2e-4 of lambda_max, all of it in two groups with sigma 0.02:
+    # clipping adds 1e-4 to a variance of 4e-4, a quarter.
+    small = np.array([[4e-4, 6e-4], [6e-4, 4e-4]])
+    deep_matrix = np.zeros((4, 4))
+    deep_matrix[:2, :2] = np.eye(2)
+    deep_matrix[2:, 2:] = small
+    deep = check_covariances(_tape(35, _mf35(_band(deep_matrix, 0, 2e7))))
+    f_shallow = shallow.by_check("not_positive_semidefinite")[0]
+    f_deep = deep.by_check("not_positive_semidefinite")[0]
+    assert 1e-6 < f_shallow.evidence["ratio"] < 1e-3 and 1e-6 < f_deep.evidence["ratio"] < 1e-3
+    assert f_shallow.level == "note" and f_shallow.evidence["sigma_change_if_clipped"] < 0.02
+    assert f_deep.level == "warn" and f_deep.evidence["sigma_change_if_clipped"] >= 0.02
+
+
 def test_mf35_without_its_mf5_section_is_a_covariance_of_nothing():
     endf = _tape(35, _mf35(_band(_normalised(), 0, 2e7)))
     endf.add_file(MF(number=5))
