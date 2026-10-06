@@ -44,7 +44,10 @@ because writing it would make Geant4 read something else than the model says:
 * a cross section that is not one pointwise lin-lin table. By default the
   ``recon`` form is written: G4NDL means σ at 0 K, pointwise, and an ENDF MF3
   ``eval`` is that only when the evaluation has no resonance region. Passing
-  ``crossSectionLabel='eval'`` is the caller saying it is;
+  ``crossSectionLabel='eval'`` is the caller saying it is, and a suite whose
+  ``resonances`` has a resolved or unresolved region is refused even then. For
+  an ENDF tape, :func:`kika.endf.model_adapter.pendf.readReconstructed` adds
+  the ``recon`` form from NJOY RECONR (roadmap Phase 9);
 * a Legendre expansion whose ``a_0`` is not 1 (the file stores ``a_1 … a_NL``
   and the consumer takes ``a_0 = 1``), and units other than eV and barn;
 * a suite with no ``targetMass`` to write: the AWR is physics (it sets the
@@ -156,7 +159,7 @@ def encodeElastic(suite, *, crossSectionLabel: Optional[str] = None,
     reaction = _elasticReaction(suite)
     provenance = _g4ndlProvenance(suite, reaction)
 
-    energy, sigma = _crossSectionArrays(reaction, crossSectionLabel)
+    energy, sigma = _crossSectionArrays(suite, reaction, crossSectionLabel)
     bookkeeping = provenance.bookkeeping if provenance and provenance.bookkeeping else (0, 0)
     csHeader, fsHeader = _headers(header, provenance)
     cs = CrossSectionRecord(None, csHeader, tuple(int(b) for b in bookkeeping),
@@ -200,20 +203,30 @@ def _headers(header, provenance) -> Tuple[Optional[Tuple[str, str]], Optional[Tu
 
 # ------------------------------------------------------------ cross section
 
-def _crossSectionArrays(reaction, label: Optional[str]) -> Tuple[np.ndarray, np.ndarray]:
+def _crossSectionArrays(suite, reaction, label: Optional[str]) -> Tuple[np.ndarray, np.ndarray]:
     container = reaction.crossSection
     labels = list(container.keys()) if container is not None else []
     wanted = label if label is not None else RECONSTRUCTED_LABEL
     if wanted not in labels:
         hint = ("" if label is not None else
                 f". G4NDL is pointwise sigma at 0 K, lin-lin, which is a "
-                f"'{RECONSTRUCTED_LABEL}' form; an ENDF 'eval' MF3 is that only "
-                f"without a resonance region, so pass crossSectionLabel='eval' "
-                f"only when it is")
+                f"'{RECONSTRUCTED_LABEL}' form. For an ENDF tape, add it with "
+                f"kika.endf.model_adapter.pendf.readReconstructed (NJOY RECONR, 0 K); "
+                f"an ENDF 'eval' MF3 is pointwise sigma only without a resonance "
+                f"region, and then crossSectionLabel='eval' writes it")
         raise G4NDLUnsupportedError(
             f"MT{ELASTIC_MT} has no cross section labelled {wanted!r} "
             f"(it has {labels}){hint}")
     form = container[wanted]
+    resonances = getattr(suite, "resonances", None)
+    if (wanted != RECONSTRUCTED_LABEL and resonances is not None
+            and (resonances.resolved or resonances.unresolved is not None)):
+        lo, hi = resonances.domain or (None, None)
+        raise G4NDLUnsupportedError(
+            f"MT{ELASTIC_MT} cross section {wanted!r}: the suite has a resonance region "
+            f"({lo!r}-{hi!r} eV), so its MF3 there is only the background. Reconstruct "
+            f"it first (kika.endf.model_adapter.pendf.readReconstructed, NJOY RECONR at "
+            f"0 K) and write the 'recon' form")
     if isinstance(form, XYs1d):
         x, y, pairs = form.toEndfRegions()
         axes = form.axes
