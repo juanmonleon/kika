@@ -293,3 +293,34 @@ def test_library_pages_give_the_full_path_of_each_tape(tmp_path):
     md = two.to_markdown()
     assert f"### jeff/{NE20.name} (MAT 1025)" in md and f"### endfb/{NE20.name}" in md
     assert str(tmp_path.resolve()) in md.split("## Summary")[0]  # the Directory row
+
+
+# ---- Greek letters --------------------------------------------------------
+
+def test_to_symbols_replaces_whole_words_only():
+    from kika.endf.checks.symbols import to_html_symbols, to_symbols
+
+    assert to_symbols("|rho| up to 1.9; |lambda_min| / lambda_max <= 1e-3, sigma_rel >= 1") == \
+        "|ρ| up to 1.9; |λ_min| / λ_max ≤ 1e-3, σ_rel ≥ 1"
+    assert to_symbols("sigma-bar and nu-bar, +-1, MAT1 != 0") == "σ̄ and ν̄, ±1, MAT1 ≠ 0"
+    # Evidence keys quoted in a text, and words that merely contain the letters.
+    assert to_symbols("max_abs_rho, sigma_change_if_clipped, rhombus, chimera") == \
+        "max_abs_rho, sigma_change_if_clipped, rhombus, chimera"
+    assert to_html_symbols("lambda_min < sigma_rel, |a_l| <= 1") == \
+        "λ<sub>min</sub> &lt; σ<sub>rel</sub>, |a<sub>l</sub>| ≤ 1"
+
+
+def test_read_outputs_have_greek_letters_and_ascii_ones_do_not(ne20, tmp_path):
+    d = ne20.to_dict()
+    rho = next(f for f in d["findings"] if f["check"] == "correlation_out_of_bounds")
+    assert rho["summary"].startswith("|ρ| up to") and "max_abs_rho" in rho["evidence"]
+    assert "ρ" in d["checks"]["correlation_out_of_bounds"]["title"]
+    md, html = ne20.to_markdown(level="note"), ne20.to_html(level="note")
+    assert "\|ρ\| up to" in md and "rho|" not in md  # pipes escaped in table cells
+    assert "λ<sub>min</sub>" in html and "lambda" not in html
+    # ASCII where a cp1252 console or Excel reads it.
+    assert str(ne20).isascii()
+    assert "|rho| up to" in str(ne20)
+    report = check_covariance_library([NE20], progress=False)
+    paths = report.write(tmp_path, level="note")
+    assert all(p.read_bytes().isascii() for p in paths.values())
