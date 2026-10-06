@@ -186,6 +186,11 @@ _TAPES: Dict[str, Sequence[str]] = {
     # MF33 MT1 sums LB=5 (relative) and LB=8 (absolute, barns²): the smallest
     # real carrier of the mixed block, for the conversion through NJOY.
     "si28_b81": ("endfb81/n-014_Si_028.endf", "n-014_Si_028.endf"),
+    # Layer-1 covariance checks (kika.endf.check_covariances): MF33 MT2 holds an
+    # LB=5 that is indefinite on its own (lambda_min/lambda_max = -1, an element
+    # of 111.94 between relative variances of 2.8e-6 and 0.035), verified on the
+    # ENDF text without kika.
+    "o16_b81": ("endfb81/n-008_O_016.endf", "n-008_O_016.endf"),
     # The ACE of that same evaluation (ENDF/B-VIII.1, 293.6 K), and a PENDF of the
     # JEFF-4.0 host: the three sources kika.plotting.plottable overlays in its
     # acceptance test.
@@ -499,6 +504,7 @@ fe56_gnds_tape = _tape_fixture("fe56_gnds")
 fe56_gnds_cov_tape = _tape_fixture("fe56_gnds_cov")
 fe56_b81_tape = _tape_fixture("fe56_b81")
 si28_b81_tape = _tape_fixture("si28_b81")
+o16_b81_tape = _tape_fixture("o16_b81")
 fe56_ace_b81_tape = _tape_fixture("fe56_ace_b81")
 fe56_pendf_tape = _tape_fixture("fe56_pendf")
 

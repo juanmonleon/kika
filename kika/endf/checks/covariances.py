@@ -355,7 +355,10 @@ def _rho_quantum(corr: np.ndarray) -> Optional[float]:
     if off.size < 3:
         return None
     for q in RHO_QUANTA:
-        on = np.abs(off / q - np.round(off / q)) * q < 5e-6
+        # rho recomputed from the stored values misses its lattice by up to ~3e-5
+        # (Na-23 MT79 of JENDL-5); q/20 keeps a random rho from landing on it by
+        # chance more than 10 % of the time, against the 98 % asked for.
+        on = np.abs(off / q - np.round(off / q)) * q < min(5e-5, q / 20)
         if np.mean(on) >= RHO_QUANTUM_SHARE:
             return q
     return None

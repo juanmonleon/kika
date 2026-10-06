@@ -337,3 +337,32 @@ def test_an_all_zero_ls1_triangle_in_a_cross_block_is_only_a_note():
     col = _section({2: [_lb5([[0.01, 0.0], [0.0, 0.01]], grid)]}, mt=2)
     f = _only(check_covariances(_tape(row, col)), "ls1_in_cross_block")
     assert f.level == NOTE and "all zeros" in f.summary
+
+
+# --------------------------------------------------------------------------
+# Real tapes: what the census measured
+# --------------------------------------------------------------------------
+
+def test_o16_b81_mt2_is_indefinite_already_in_its_lb5(o16_b81_tape):
+    from kika.endf import read_endf
+
+    report = check_covariances(read_endf(str(o16_b81_tape), mf_numbers=[1, 2, 3, 4, 33, 34]))
+    psd = [f for f in report.by_check("not_positive_semidefinite")
+           if f.location.mf == 33 and f.location.mt == 2]
+    assert len(psd) == 1 and psd[0].level == DEFECT
+    assert psd[0].evidence["ratio"] == pytest.approx(1.0, abs=1e-3)
+    assert [a["ni"] for a in psd[0].evidence["records_indefinite_alone"]] == [0]
+    rho = [f for f in report.by_check("correlation_out_of_bounds")
+           if f.location.mf == 33 and f.location.mt == 2]
+    assert rho and rho[0].level == DEFECT
+
+
+def test_jendl5_fe56_has_no_defect_and_its_negative_eigenvalues_are_rounding(fe56_jendl_tape):
+    # JENDL-5 writes sigma_i sigma_j rho_ij with rho rounded to 0.001; Fe-56 is the
+    # evaluation the thesis compares against, and the NC LTY=0 case of MF33 MT2.
+    from kika.endf import read_endf
+
+    report = check_covariances(read_endf(str(fe56_jendl_tape), mf_numbers=[1, 2, 3, 4, 33, 34]))
+    assert report.defects == ()
+    psd = report.by_check("not_positive_semidefinite")
+    assert psd and all(f.level == NOTE for f in psd)
