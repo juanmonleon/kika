@@ -260,13 +260,31 @@ def test_mf34_sigma_wider_than_the_physical_range_of_a_l():
 # C4 -- positive semi-definiteness, in three levels
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("ratio, level", [(1e-4, WARN), (1e-2, DEFECT)])
+@pytest.mark.parametrize("ratio, level", [(1e-4, NOTE), (1e-2, DEFECT)])
 def test_psd_levels(ratio, level):
+    # Spread over every row, a negative eigenvalue of 1e-4 lambda_max moves no
+    # sigma by 2 %: the light warning is regraded a note. 1e-2 is a defect by ratio.
     n = 6
     m = _spectrum([1.0, 0.8, 0.5, 0.3, 0.2, -ratio]) * 0.01
     f = _only(check_covariances(_tape(_section({1: [_lb5(m, _grid(n))]}))),
               "not_positive_semidefinite")
     assert f.level == level and f.evidence["ratio"] == pytest.approx(ratio, rel=1e-6)
+
+
+@pytest.mark.parametrize("a, depth, level", [(4e-6, 1.68e-6, WARN), (2e-6, 5e-6, DEFECT)])
+def test_a_light_warning_is_graded_by_what_clipping_does_to_sigma(a, depth, level):
+    # A negative eigenvalue -depth confined to two rows of variance a: clipping
+    # adds depth/2 to each, sigma grows by ~10 % (warning) or ~50 % (defect), and
+    # the ratio is in the light band (1.7e-4 and 5e-4 of lambda_max = 0.01) both times.
+    m = np.zeros((4, 4))
+    m[:2, :2] = 0.01 * np.eye(2)
+    m[2:, 2:] = [[a, a + depth], [a + depth, a]]
+    f = _only(check_covariances(_tape(_section({1: [_lb5(m, _grid(4))]}))),
+              "not_positive_semidefinite")
+    assert 1e-6 < f.evidence["ratio"] <= 1e-3
+    assert f.level == level
+    assert f.evidence["sigma_change_if_clipped"] == pytest.approx(
+        np.sqrt(1 + depth / (2 * a)) - 1, rel=1e-6)
 
 
 def test_an_eigenvalue_inside_endf_rounding_is_a_note():

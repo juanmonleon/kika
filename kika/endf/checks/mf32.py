@@ -338,6 +338,8 @@ def _check_form(form, ndigit, rng, loc, out) -> None:
 
 def _psd_on_correlation(corr, ndigit, rng, loc, out, psd_note, psd_defect, slack,
                         half_ulp_norm) -> None:
+    from .covariances import _clipping_impact, _grade_by_impact
+
     ev = np.linalg.eigvalsh(corr)
     lam_min, lam_max = float(ev[0]), float(ev[-1])
     if lam_min >= 0:
@@ -345,7 +347,8 @@ def _psd_on_correlation(corr, ndigit, rng, loc, out, psd_note, psd_defect, slack
     ratio = -lam_min / lam_max
     level = NOTE if ratio < psd_note else (WARN if ratio <= psd_defect else DEFECT)
     evidence = {"lambda_min": lam_min, "lambda_max": lam_max, "ratio": ratio,
-                "n_negative": int(np.sum(ev < 0)), "on": "correlation matrix"}
+                "n_negative": int(np.sum(ev < 0)), "on": "correlation matrix",
+                "sigma_change_if_clipped": _clipping_impact(*np.linalg.eigh(corr), corr)}
     reason = ""
     if ndigit:
         # INTG keeps NDIGIT digits: each stored rho is off by up to q/2, and one that
@@ -363,6 +366,7 @@ def _psd_on_correlation(corr, ndigit, rng, loc, out, psd_note, psd_defect, slack
         evidence["rounding_bound"] = ulp
         if -lam_min <= ulp:
             level, reason = NOTE, "within the rounding of the values to 6 figures"
+    level, reason = _grade_by_impact(level, reason, evidence["sigma_change_if_clipped"])
     summary = (f"correlation matrix: lambda_min/lambda_max = -{ratio:.2e} "
                f"(lambda_min {lam_min:.3g}, lambda_max {lam_max:.3g})")
     if reason:

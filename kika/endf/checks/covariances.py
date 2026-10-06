@@ -87,6 +87,10 @@ PSD_DEFECT = 1e-3
 #: Rows whose sigma is below this fraction of the block's largest are left out
 #: of the clipping impact (``_clipping_impact``).
 PSD_IMPACT_FLOOR = 0.01
+#: A light PSD warning becomes a note below this change of sigma, and a defect at
+#: or above the second (``_grade_by_impact``, where the measurements are).
+PSD_IMPACT_NOTE = 0.02
+PSD_IMPACT_DEFECT = 0.25
 
 #: Relative asymmetry of a self block (LS=0 stores both triangles).
 ASYM_NOTE = 1e-6
@@ -561,6 +565,32 @@ def _clipping_impact(ev: np.ndarray, vecs: np.ndarray, sym: np.ndarray) -> Optio
     return float(np.max(np.sqrt(d[rows] + added[rows]) / sd[rows] - 1.0))
 
 
+def _grade_by_impact(level: str, reason: str, impact: Optional[float]) -> Tuple[str, str]:
+    """Regrade a light PSD warning by what forcing the block to PSD does to sigma.
+
+    lambda_min / lambda_max places a block between rounding and a defect, but in
+    that light band it says nothing about consequence. Measured on ENDF/B-VIII.1,
+    JEFF-4.0 and JENDL-5 (6-oct-2026), the light warnings of MF31/33/34 change
+    sigma by under 2 % in 141 of 159 cases, while 4 change it by 33-155 % (Pt-190
+    MT54, Ac-227 MT107, Eu-154 MT3, Eu-156 MF34 L=3): no PSD matrix near them keeps
+    the stated variances. The rest sit at 13 % or below, which is where the
+    defect edge goes. Every MF35 band that keeps the sum rule stays under 0.8 %.
+
+    Only a warning moves. A note explained by rounding stays a note, and a defect
+    stays a defect: 149 defects change sigma by under 2 % because clipping keeps
+    the variances and breaks the correlations, which the ratio does see.
+    """
+    if level != WARN or impact is None:
+        return level, reason
+    if impact < PSD_IMPACT_NOTE:
+        return NOTE, (f"forcing the block to PSD changes no sigma by more than {impact:.2%} "
+                      f"(below {PSD_IMPACT_NOTE:.0%})")
+    if impact >= PSD_IMPACT_DEFECT:
+        return DEFECT, (f"forcing the block to PSD changes a sigma by {impact:.0%}: no "
+                        "positive semi-definite matrix near it keeps the stated variances")
+    return level, f"forcing the block to PSD changes a sigma by {impact:.1%}"
+
+
 def _psd_finding(sym: np.ndarray, loc, out,
                  records: Sequence[Tuple[int, object]], sec, grid) -> None:
     ev = np.linalg.eigvalsh(sym)
@@ -595,6 +625,7 @@ def _psd_finding(sym: np.ndarray, loc, out,
                 reason = ("the correlations are rounded to "
                           + "/".join(f"{q:g}" for q in sorted(quanta))
                           + f" and that rounding can reach lambda_min (bound {bound:.2e})")
+    level, reason = _grade_by_impact(level, reason, evidence["sigma_change_if_clipped"])
     # Which record is already indefinite on its own.
     alone = []
     for k, rec in records:
