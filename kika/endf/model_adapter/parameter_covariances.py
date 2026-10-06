@@ -134,6 +134,26 @@ def _triangleToFull(values: Sequence[float], order: int) -> np.ndarray:
     return matrix
 
 
+def _intgOutsideMatrix(correlations, report: ConversionReport, what: str) -> bool:
+    """True, and a loss reported, if an INTG record names a row outside NNN.
+
+    JEFF-4.0 K-41 writes row 201 under NNN = 93. Unpacking it would index past
+    the matrix; dropping the record silently would hand on a matrix without
+    correlations the file states. Neither is a decode, so the section is skipped.
+    """
+    if correlations is None:
+        return False
+    nnn = int(correlations.nnn)
+    bad = [(ii, jj) for ii, jj, _ in correlations.entries
+           if not 1 <= ii <= nnn or not 1 <= jj <= nnn]
+    if bad:
+        report.lost(
+            f"{what}: {len(bad)} INTG record(s) name a row or column outside the "
+            f"NNN={nnn} matrix (first II={bad[0][0]}, JJ={bad[0][1]}); not decoded"
+        )
+    return bool(bad)
+
+
 def _links(labels: Sequence[str], names: Sequence[str], href: str) -> List[ParameterLink]:
     """One link per resonance, each covering the same ``names`` in order."""
     width = len(names)
@@ -307,6 +327,8 @@ def _decodeLCOMP2(body, lrf: int, href: str,
         )
         return None
 
+    if _intgOutsideMatrix(body.correlations, report, "MF32 LCOMP=2"):
+        return None
     sigma = uncertainties[:, columns].reshape(-1)
     correlation = (body.correlations.correlation_matrix()
                    if body.correlations is not None else np.eye(order))
@@ -379,6 +401,8 @@ def _decodeLCOMP2RML(body, href: str,
         )
         return None
 
+    if _intgOutsideMatrix(body.correlations, report, "MF32 LCOMP=2 LRF=7"):
+        return None
     sigmaArray = np.asarray(sigma, dtype=float)
     correlation = (body.correlations.correlation_matrix()
                    if body.correlations is not None else np.eye(order))

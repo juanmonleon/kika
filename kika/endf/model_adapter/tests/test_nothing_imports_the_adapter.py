@@ -177,6 +177,14 @@ PERMANENT_IMPORTERS = {
     "kika/sampling/model_perturbation.py",
     "kika/endf/processing/reconstruct.py",
     "kika/endf/writers/assemble.py",
+    # Layer 1 for MF32 (2026-10-06). Its rows are resonance parameters, and the
+    # only reader of the §32 layouts is `decodeMF32MT`; a second one inside the
+    # checks is what the plan rules out. The import is inside `check_mf32`, so
+    # `import kika.endf` -- which imports the checks -- still does not wake the
+    # model. Frozen build: `kika.endf.model_adapter` is in kika-api.spec's
+    # hiddenimports (line 276), and the app's only route into the checks, the
+    # pre-flight's `_attachLayer1`, asks for MF31/33/34 and never reaches MF32.
+    "kika/endf/checks/mf32.py",
 }
 
 ALLOWED_IMPORTERS = FACADE_IMPORTERS | PERMANENT_IMPORTERS

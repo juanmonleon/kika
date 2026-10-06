@@ -32,6 +32,9 @@ class MF:
     number: int
     sections: Dict[int, Union[MT, MF1MT451, 'MF2MT151', 'MF3MT', 'MF1MT452', 'MF1MT455', 'MF1MT456', 'MF1MT458', 'MF1MT460']] = field(default_factory=dict)
     num_lines: int = 0  # Number of lines in this MF section
+    #: MT -> why its section could not be parsed. A parser that skips an MT
+    #: records it here, so a reader of the file can tell "absent" from "lost".
+    parse_errors: Dict[int, str] = field(default_factory=dict)
     
     def add_section(self, section: Union[MT, MF1MT451, 'MF2MT151', 'MF3MT', 'MF1MT452', 'MF1MT455', 'MF1MT456', 'MF1MT458', 'MF1MT460']) -> None:
         """

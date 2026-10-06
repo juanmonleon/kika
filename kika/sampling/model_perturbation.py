@@ -196,6 +196,12 @@ class RunResult:
     #: The :class:`~kika.cov.conditioning.ConditioningReport` an ``auto`` run
     #: made, so a caller can read the findings without re-inspecting.
     report: Any = None
+    #: Layer 1: what :func:`kika.endf.check_covariances` found in the ENDF
+    #: sections this run perturbs, as written (empty for a GNDS source), and
+    #: each pre-flight finding traced to the pair of components and the
+    #: layer-1 findings that explain it (:mod:`kika.sampling.section_checks`).
+    sectionFindings: Tuple[Any, ...] = ()
+    attribution: Tuple[Dict[str, Any], ...] = ()
     #: The run's :class:`~kika.sampling.run_log.RunLog`: every stage, timed,
     #: with its numbers. Written beside the samples as ``run.log.jsonl`` and
     #: ``run.log``.
@@ -895,7 +901,7 @@ def _readSource(source, log, covarianceSource=None):
     return suite, covariances, endfObj, path, "endf", (covReport, suiteReport)
 
 
-def _condition(blocks, index, conditioningPlan, log, labels=None):
+def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFindings=()):
     """Stage 2 and 3 of the pre-flight, as the pipeline runs them.
 
     ``None`` (the default) inspects the assembled blocks and applies
@@ -906,15 +912,25 @@ def _condition(blocks, index, conditioningPlan, log, labels=None):
     drawn as the file states them, which is what an equivalence gate wants. A
     :class:`~kika.cov.conditioning.ConditioningPlan` is applied as given.
 
-    Returns ``(blocks, plan, report, applied, mode)``.
+    *sectionFindings* are the layer-1 findings of the requested sections
+    (:func:`kika.sampling.section_checks.relevantFindings`). They are shown
+    whatever the mode -- warnings and defects one by one, notes counted -- and
+    in ``auto`` mode each pre-flight finding that blocks or distorts is traced
+    to them. They change nothing that is decided here.
+
+    Returns ``(blocks, plan, report, applied, mode, attribution)``.
     """
     from kika.cov.conditioning import ConditioningPlan, apply_plan, inspect_blocks
     from kika.sampling.joint_blocks import rowFamilies
+    from kika.sampling.section_checks import attribute
 
+    _logSectionFindings(sectionFindings, log)
     if conditioningPlan is False:
         log.event("inspected", "conditioning skipped by request "
                   "(conditioningPlan=False): blocks drawn as stated", mode="none")
-        return blocks, None, None, (), "none"
+        return blocks, None, None, (), "none", ()
+
+    attribution = ()
 
     report = None
     mode = "explicit"
@@ -939,11 +955,18 @@ def _condition(blocks, index, conditioningPlan, log, labels=None):
                           check=finding.check, severity=finding.severity,
                           **{k: v for k, v in finding.evidence.items()
                              if isinstance(v, (int, float, str, bool))})
+        attribution = attribute(blocks, index, report, sectionFindings)
+        for item in attribution:
+            log.event("inspected", item["text"], subject=labels.get(item["block"], item["block"]),
+                      block=item["block"], level="warning", check=item["check"],
+                      severity=item["severity"], layer1=len(item["layer1"]))
         if not report.samplable:
+            traced = [item["text"] for item in attribution if item["severity"] == "blocks"]
             raise ValueError(
                 "the pre-flight says these blocks cannot be sampled as they "
                 f"stand and no automatic repair applies: {report.summary()}. "
-                "Run kika.cov.conditioning.inspect_blocks on them, decide, and "
+                + (f"Traced to the file: {'; '.join(traced[:4])}. " if traced else "")
+                + "Run kika.cov.conditioning.inspect_blocks on them, decide, and "
                 "pass the plan")
         conditioningPlan = report.recommended_plan()
     elif not isinstance(conditioningPlan, ConditioningPlan):
@@ -965,7 +988,22 @@ def _condition(blocks, index, conditioningPlan, log, labels=None):
                   changed=record["changed"], reason=record["reason"],
                   stated_diagonal_max_relative_change=record.get(
                       "stated_diagonal_max_relative_change"))
-    return blocks, conditioningPlan, report, tuple(applied), mode
+    return blocks, conditioningPlan, report, tuple(applied), mode, attribution
+
+
+def _logSectionFindings(findings, log) -> None:
+    """Layer 1 in the run log: faults one by one, notes as a count per check."""
+    notes: Dict[str, int] = {}
+    for finding in findings:
+        if finding.level == "note":
+            notes[finding.check] = notes.get(finding.check, 0) + 1
+            continue
+        log.event("inspected", f"layer 1: {finding.check}: {finding.summary}",
+                  subject=str(finding.location), level="warning", layer=1,
+                  check=finding.check, severity=finding.level)
+    for check, n in sorted(notes.items()):
+        log.event("inspected", f"layer 1: {n} note(s) {check}", subject="layer 1",
+                  level="info", layer=1, check=check, severity="note", n=n)
 
 
 def _checkRealisation(pset: PerturbationSet, log, sample: int) -> None:
@@ -1437,8 +1475,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                   quantities=list(meta["quantities"]),
                   components=[c.describe() for c in meta["components"]])
 
-    blocks, plan, report, conditioningApplied, conditioningMode = _condition(
-        blocks, index, conditioningPlan, log, labels)
+    from kika.sampling.section_checks import relevantFindings, sectionFindings
+
+    layer1 = relevantFindings(sectionFindings(covariances), index)
+    blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
+        blocks, index, conditioningPlan, log, labels, layer1)
 
     with log.timed("drawn", f"drew {nSamples} sample(s) of {len(blocks)} block(s)"):
         samples, drawDiagnostics = _drawEverything(
@@ -1464,6 +1505,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                        conditioning=tuple(conditioningApplied),
                        conditioningMode=conditioningMode,
                        report=report, log=log, dryRun=dryRun,
+                       sectionFindings=layer1, attribution=attribution,
                        request=request, sourceFormat=sourceFormat,
                        aceOptions=ace if "ace" in formats else None,
                        # A skipped quantity is true of every sample and stated
@@ -1613,6 +1655,14 @@ def _forget(suite, pset: PerturbationSet, applied=()) -> None:
             "the evaluated form was removed with the realisation")
 
 
+def _layer1Counts(findings) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for finding in findings:
+        key = f"{finding.level}:{finding.check}"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport,
                       sourcePath, request, seed: int, space: str,
                       psdMethod: str = "none", nWorkers: int = 1) -> Path:
@@ -1658,6 +1708,11 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
                      else None),
             "applied": [dict(record) for record in result.conditioning],
             "preflight": result.report.summary() if result.report is not None else None,
+        },
+        "layer1": {
+            "counts": _layer1Counts(result.sectionFindings),
+            "faults": [str(f) for f in result.sectionFindings if f.level != "note"],
+            "attribution": [dict(item) for item in result.attribution],
         },
         "files": {name: path.name for name, path in result.files.items()},
         "ace": ({"options": result.aceOptions.to_dict(),
