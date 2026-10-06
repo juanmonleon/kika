@@ -16,7 +16,7 @@ from .read_endf import (
 )
 from .classes.mf7.scatterer import ThermalScatterer, thermal_scatterer
 from . import dcs
-from .checks import check_covariances
+from .checks import check_covariance_library, check_covariances
 from .remote import (
     fetch_endf,
     download_endf,
@@ -36,6 +36,7 @@ __all__ = [
     "dcs",
     # Layer-1 checks of the covariance files as written
     "check_covariances",
+    "check_covariance_library",
     # Local file reading
     "read_endf",
     "read_mt451",

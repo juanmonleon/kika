@@ -2,9 +2,15 @@
 
 :func:`check_covariances` reports what is wrong with the MF31/MF33/MF34 of a
 tape -- structure, values, positive semi-definiteness -- without changing
-anything. Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
+anything; :func:`check_covariance_library` does it for every tape of a directory. Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
 """
 from .covariances import check_covariances
+from .library import (
+    TAPE_PATTERNS,
+    CovarianceLibraryReport,
+    TapeCheck,
+    check_covariance_library,
+)
 from .findings import (
     DEFECT,
     LEVELS,
@@ -17,6 +23,10 @@ from .findings import (
 
 __all__ = [
     "check_covariances",
+    "check_covariance_library",
+    "CovarianceLibraryReport",
+    "TapeCheck",
+    "TAPE_PATTERNS",
     "CovarianceCheckReport",
     "CovarianceFinding",
     "CovarianceLocation",
