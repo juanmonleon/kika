@@ -105,12 +105,17 @@ class CovarianceFinding:
         return f"[{self.level}] {self.location}: {self.check} -- {self.summary}"
 
     def to_dict(self) -> Dict[str, Any]:
-        """JSON- and msgpack-safe: plain ints, no NaN/inf (``None``), no numpy."""
+        """JSON- and msgpack-safe: plain ints, no NaN/inf (``None``), no numpy.
+
+        The summary has its Greek letters (``|ρ|``, not ``|rho|``); ``str()``
+        and the TSV keep ASCII. Evidence keys are left as they are.
+        """
         from .export import jsonable
+        from .symbols import to_symbols
 
         return {"level": self.level, "check": self.check,
                 "location": self.location.to_dict(), "location_str": str(self.location),
-                "summary": self.summary, "evidence": jsonable(self.evidence)}
+                "summary": to_symbols(self.summary), "evidence": jsonable(self.evidence)}
 
 
 @dataclass(frozen=True)

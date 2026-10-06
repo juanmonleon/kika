@@ -1,5 +1,8 @@
 """What each layer-1 finding means: one entry per ``check`` name.
 
+Written in ASCII like the summaries; :meth:`CheckDescription.to_dict` and the
+pages give them with Greek letters (:mod:`.symbols`).
+
 The reports' legend and the desktop app's detail panel both read this table, so
 there is one text for each check. Thresholds are taken from the constants the
 checks use. ``test_every_check_is_described`` keeps the table and the checks in
@@ -11,6 +14,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Mapping, Tuple
 
 from .findings import DEFECT, NOTE, WARN
+from .symbols import to_symbols
 
 __all__ = ["CheckDescription", "CHECKS", "describe"]
 
@@ -25,9 +29,11 @@ class CheckDescription:
     description: str
 
     def to_dict(self) -> Dict[str, object]:
-        return {"title": self.title, "mf": list(self.mf),
-                "levels": {lv: self.levels[lv] for lv in (DEFECT, WARN, NOTE) if lv in self.levels},
-                "description": self.description}
+        """Plain data, with Greek letters and math signs (the texts here are ASCII)."""
+        return {"title": to_symbols(self.title), "mf": list(self.mf),
+                "levels": {lv: to_symbols(self.levels[lv])
+                           for lv in (DEFECT, WARN, NOTE) if lv in self.levels},
+                "description": to_symbols(self.description)}
 
 
 def _pct(x: float) -> str:

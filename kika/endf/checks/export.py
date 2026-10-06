@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .descriptions import CHECKS
 from .findings import _RANK, DEFECT, LEVELS, NOTE, WARN, CovarianceFinding
+from .symbols import to_html_symbols, to_symbols
 
 SCHEMA = 1
 _LEVEL_WORD = {DEFECT: "defect", WARN: "warning", NOTE: "note"}
@@ -324,8 +325,13 @@ def _hidden_line(counts: Dict[str, int], level: str) -> Optional[str]:
             f"level='{min(hidden, key=_RANK.get)}' lists them).")
 
 
-def _finding_rows(findings: Sequence[CovarianceFinding]) -> List[Tuple]:
-    return [(f.level, str(f.location), f.check, f.summary) for f in findings]
+class _Html(str):
+    """A cell already rendered as HTML: not escaped again."""
+
+
+def _finding_rows(findings: Sequence[CovarianceFinding], html_: bool = False) -> List[Tuple]:
+    text = (lambda t: _Html(to_html_symbols(t))) if html_ else to_symbols
+    return [(f.level, str(f.location), f.check, text(f.summary)) for f in findings]
 
 
 _FINDING_HEADER = ("Level", "Location", "Check", "Summary")
@@ -336,7 +342,7 @@ def _md_method() -> List[str]:
     for heading, paragraphs in method_sections():
         out += [f"### {heading}", ""]
         for p in paragraphs:
-            out += [p, ""]
+            out += [to_symbols(p), ""]
     return out
 
 
@@ -350,10 +356,11 @@ def _md_legend(names: Sequence[str]) -> List[str]:
         return []
     out = ["## What each finding means", "", _LEGEND_INTRO, ""]
     for name, d in entries:
-        out += [f"### `{name}`: {d.title}", "",
+        out += [f"### `{name}`: {to_symbols(d.title)}", "",
                 "MF " + ", ".join(map(str, d.mf)), ""]
-        out += [f"- **{lv}**: {d.levels[lv]}" for lv in (DEFECT, WARN, NOTE) if lv in d.levels]
-        out += ["", d.description, ""]
+        out += [f"- **{lv}**: {to_symbols(d.levels[lv])}"
+                for lv in (DEFECT, WARN, NOTE) if lv in d.levels]
+        out += ["", to_symbols(d.description), ""]
     return out
 
 
@@ -363,11 +370,11 @@ def _html_legend(names: Sequence[str]) -> List[str]:
         return []
     out = ["<h2>What each finding means</h2>", f'<p class="muted">{_e(_LEGEND_INTRO)}</p>']
     for name, d in entries:
-        out.append(f'<h3 id="check-{_e(name)}"><code>{_e(name)}</code>: {_e(d.title)}</h3>')
+        out.append(f'<h3 id="check-{_e(name)}"><code>{_e(name)}</code>: {to_html_symbols(d.title)}</h3>')
         out.append(f'<p class="muted">MF {_e(", ".join(map(str, d.mf)))}</p><ul>')
-        out += [f'<li><span class="{lv}">{lv}</span>: {_e(d.levels[lv])}</li>'
+        out += [f'<li><span class="{lv}">{lv}</span>: {to_html_symbols(d.levels[lv])}</li>'
                 for lv in (DEFECT, WARN, NOTE) if lv in d.levels]
-        out += ["</ul>", f"<p>{_e(d.description)}</p>"]
+        out += ["</ul>", f"<p>{to_html_symbols(d.description)}</p>"]
     return out
 
 
@@ -525,7 +532,8 @@ def _html_table(header: Sequence[str], rows: Iterable[Sequence[Any]], *,
                 attrs.append(f'class="{_e(v)}"')
             elif i == code_col:
                 attrs.append('class="loc"')
-            cells.append(f"<td{' ' + ' '.join(attrs) if attrs else ''}>{_e(v)}</td>")
+            cell = v if isinstance(v, _Html) else _e(v)
+            cells.append(f"<td{' ' + ' '.join(attrs) if attrs else ''}>{cell}</td>")
         out.append("<tr>" + "".join(cells) + "</tr>")
     out.append("</tbody></table></div>")
     return out
@@ -542,7 +550,7 @@ def _html_method() -> List[str]:
     out = ["<h2>Method and thresholds</h2>"]
     for heading, paragraphs in method_sections():
         out.append(f"<h3>{_e(heading)}</h3>")
-        out += [f"<p>{_e(p)}</p>" for p in paragraphs]
+        out += [f"<p>{to_html_symbols(p)}</p>" for p in paragraphs]
     return out
 
 
@@ -555,7 +563,8 @@ def _html_page(title: str, body: List[str]) -> str:
 
 
 def _html_findings(findings: Sequence[CovarianceFinding]) -> List[str]:
-    return _html_table(_FINDING_HEADER, _finding_rows(findings), level_col=0, code_col=1)
+    return _html_table(_FINDING_HEADER, _finding_rows(findings, html_=True),
+                       level_col=0, code_col=1)
 
 
 def report_html(report, level: str = WARN) -> str:
