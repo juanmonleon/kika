@@ -44,7 +44,7 @@ from typing import Optional
 __all__ = ["write"]
 
 #: Formats the door can write.
-WRITE_FORMATS = ("gnds", "endf")
+WRITE_FORMATS = ("gnds", "endf", "g4ndl")
 
 #: Where a covariance sibling goes, relative to the evaluation. The layout the
 #: ENDF/B-VIII.1 GNDS distribution uses, so a pair kika writes sits where a
@@ -54,7 +54,7 @@ COVARIANCE_SUBDIRECTORY = "Covariances"
 
 def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
           mat: Optional[int] = None, tapeId: Optional[str] = None,
-          label: Optional[str] = None):
+          label: Optional[str] = None, compressed: bool = False):
     """Write a :class:`ReactionSuite` out, and say what did not go with it.
 
     Parameters
@@ -66,9 +66,12 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         Where the ``reactionSuite`` goes. The covariance sibling is derived from
         it — same stem, under ``Covariances/``.
     format
-        ``'gnds'`` or ``'endf'``. ENDF writes **one** file: §25.1.1's split into
-        two documents is GNDS's, and an ENDF tape states the covariances in the
-        same material.
+        ``'gnds'``, ``'endf'`` or ``'g4ndl'``. ENDF writes **one** file: §25.1.1's
+        split into two documents is GNDS's, and an ENDF tape states the
+        covariances in the same material. G4NDL writes the elastic channel
+        (MT2) into the library directory ``path`` — ``Elastic/CrossSection/<name>``
+        and ``Elastic/FS/<name>`` — and nothing else; to replace one isotope in
+        a copy of a whole library use :func:`kika.g4ndl.patch_elastic`.
     gnds
         ``'2.0'`` or ``'2.1'``, forcing the declared version. The default
         mirrors what the suite was read from, and is ``'2.0'`` for a suite with
@@ -89,6 +92,12 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         (§9.3) writes the drawn sample rather than the evaluation it was drawn
         from, falling back to ``'eval'`` for anything that carries no form under
         it. GNDS needs no such parameter — it writes every form, with its label.
+        For G4NDL it is the style of the angular distribution (default
+        ``'eval'``); the cross section written is always the ``'recon'`` one,
+        see :func:`kika.g4ndl.encode.encodeElastic`.
+    compressed
+        G4NDL only: write ``<name>.z`` (zlib, what Geant4 distributes) instead
+        of plain text.
 
     Returns
     -------
@@ -105,6 +114,12 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         raise ValueError(
             f"format must be one of {WRITE_FORMATS}, got {format!r}"
         )
+    if format == "g4ndl":
+        # Imported here for the reason `_writeGnds` gives.
+        from kika.g4ndl.encode import writeElastic
+
+        return writeElastic(suite, Path(os.fspath(path)), compressed=compressed,
+                            angularLabel=label or "eval")
     if format == "endf":
         # Imported here, not at module scope, for the reason `_writeGnds` gives
         # and one more: the assembler reaches `kika.endf.model_adapter`, and

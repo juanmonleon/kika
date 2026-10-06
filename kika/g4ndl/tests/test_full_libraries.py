@@ -198,3 +198,71 @@ def test_jeff40_fe56_negative_lobe(g4ndl_jeff40_library):
     neg = checkElastic(g4ndl.open(g4ndl_jeff40_library).read("Fe56")).byKind("negative")
     assert [f.energy for f in neg] == [1.557e6, 1.558e6, 1.559e6, 1.560e6, 2.414e6]
     assert min(f.value for f in neg) == pytest.approx(-0.0261, abs=1e-4)
+
+
+# ----------------------------------------------------------------- Phase 6
+
+@pytest.mark.parametrize("fixture", ["g4ndl_jeff40_library", "g4ndl_g4ndl471_library"])
+def test_every_pair_is_a_fixed_point_of_read_model_write_read(request, fixture):
+    """Roadmap §5 Fase 6: values, regions, repeated energies and their order.
+
+    Through the text, which is what Geant4 reads: records → model → records →
+    text → strict parser must give the records the library has, exactly.
+    """
+    from kika.g4ndl.decode import decodeElastic
+    from kika.g4ndl.encode import (encodeElastic, formatCrossSection,
+                                   formatElasticFS, recordDifferences)
+    from kika.g4ndl.parse import parse_cross_section, parse_elastic_fs
+    from kika.g4ndl.tokens import TokenStream
+
+    lib = g4ndl.open(request.getfixturevalue(fixture))
+    bad = {}
+    for key in lib.isotopes():
+        cs, fs = lib.crossSection(key), lib.elasticFinalState(key)
+        suite, _ = decodeElastic(cs, fs, key, library=lib)
+        cs2, fs2, report = encodeElastic(suite)
+        back_cs = parse_cross_section(TokenStream(formatCrossSection(cs2)))
+        back_fs = parse_elastic_fs(TokenStream(formatElasticFS(fs2)))
+        diffs = recordDifferences(cs, back_cs) + recordDifferences(fs, back_fs)
+        if diffs or report.warnings:
+            bad[str(key)] = (diffs + report.warnings)[:3]
+    assert bad == {}
+
+
+def test_patch_a_whole_library(tmp_path, g4ndl_g4ndl471_library):
+    """The collaborator's loop on the real G4NDL 4.7.1: Pb208, hard-linked copy."""
+    import os
+
+    base = g4ndl_g4ndl471_library
+    lib = g4ndl.open(base)
+    targets = [lib.locate("Pb208", s).path for s in ("Elastic/CrossSection", "Elastic/FS")]
+    before = {p: p.read_bytes() for p in targets}
+    suite = lib.read("Pb208")
+    suite.reactions[2].crossSection["recon"].ys[:] *= 0.97
+    out = tmp_path / "G4NDL4.7.1-Pb208"
+    result = g4ndl.patch_elastic(base, suite, out, share="hardlink")
+    # Removed here, not by pytest: its cleanup clears the read-only bit to delete
+    # a file, and on a hard link that bit is the base library's.
+    from kika.g4ndl.patch import _removeTree
+    try:
+        _checkPatched(base, lib, out, result, targets, before)
+    finally:
+        _removeTree(out, base)
+    assert all(not os.access(p, os.W_OK) for p in targets)  # still read-only
+
+
+def _checkPatched(base, lib, out, result, targets, before):
+    import os
+
+    assert {p: p.read_bytes() for p in targets} == before   # the base is untouched
+    files = [p for p in base.rglob("*") if p.is_file()]
+    written = {out / r for r in result.replaced}
+    for p in files:
+        mirror = out / p.relative_to(base)
+        if mirror in written:
+            assert not os.path.samefile(p, mirror)
+        else:                                               # identical: same file
+            assert os.path.samefile(p, mirror), p
+    patched = g4ndl.open(out)
+    assert np.array_equal(patched.crossSection("Pb208").sigma,
+                          lib.crossSection("Pb208").sigma * 0.97)

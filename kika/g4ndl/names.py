@@ -14,7 +14,8 @@ from typing import Optional, Tuple, Union
 
 from kika._constants import ATOMIC_NUMBER_TO_SYMBOL, SYMBOL_TO_ATOMIC_NUMBER
 
-__all__ = ["IsotopeKey", "parse_file_name", "parse_target"]
+__all__ = ["GEANT4_ELEMENT_NAMES", "IsotopeKey", "file_name", "parse_file_name",
+           "parse_target"]
 
 _FILE_RE = re.compile(r"^(\d+)_(\d+|nat)(?:m(\d+))?_([A-Za-z]+)$")
 _TARGET_RE = re.compile(r"^([A-Za-z]{1,2})-?(\d+|nat)(?:-?[mM](\d*))?$")
@@ -51,6 +52,39 @@ def parse_file_name(stem: str) -> Optional[Tuple[IsotopeKey, str]]:
         return None
     a = None if m.group(2) == "nat" else int(m.group(2))
     return IsotopeKey(int(m.group(1)), a, int(m.group(3) or 0)), m.group(4)
+
+
+#: ``G4ParticleHPNames::theString`` (``src/G4ParticleHPNames.cc:55-71``), Z = 1..100,
+#: with Geant4's own spellings (``Berylium``, ``Phosphorous``, ``Platinium``):
+#: the consumer builds the file name from this table, so a writer must too.
+GEANT4_ELEMENT_NAMES = (
+    "Hydrogen", "Helium", "Lithium", "Berylium", "Boron", "Carbon",
+    "Nitrogen", "Oxygen", "Fluorine", "Neon", "Sodium", "Magnesium",
+    "Aluminum", "Silicon", "Phosphorous", "Sulfur", "Chlorine", "Argon",
+    "Potassium", "Calcium", "Scandium", "Titanium", "Vanadium", "Chromium",
+    "Manganese", "Iron", "Cobalt", "Nickel", "Copper", "Zinc",
+    "Gallium", "Germanium", "Arsenic", "Selenium", "Bromine", "Krypton",
+    "Rubidium", "Strontium", "Yttrium", "Zirconium", "Niobium", "Molybdenum",
+    "Technetium", "Ruthenium", "Rhodium", "Palladium", "Silver", "Cadmium",
+    "Indium", "Tin", "Antimony", "Tellurium", "Iodine", "Xenon",
+    "Cesium", "Barium", "Lanthanum", "Cerium", "Praseodymium", "Neodymium",
+    "Promethium", "Samarium", "Europium", "Gadolinium", "Terbium", "Dysprosium",
+    "Holmium", "Erbium", "Thulium", "Ytterbium", "Lutetium", "Hafnium",
+    "Tantalum", "Tungsten", "Rhenium", "Osmium", "Iridium", "Platinium",
+    "Gold", "Mercury", "Thallium", "Lead", "Bismuth", "Polonium",
+    "Astatine", "Radon", "Francium", "Radium", "Actinium", "Thorium",
+    "Protactinium", "Uranium", "Neptunium", "Plutonium", "Americium", "Curium",
+    "Berkelium", "Californium", "Einsteinium", "Fermium",
+)
+
+
+def file_name(key: "IsotopeKey") -> str:
+    """``IsotopeKey(26, 56)`` -> ``"26_56_Iron"``: the name Geant4 opens, without ``.z``."""
+    if not 1 <= key.Z <= len(GEANT4_ELEMENT_NAMES):
+        raise ValueError(f"Z={key.Z}: Geant4 names elements for Z = 1..100 only")
+    mass = "nat" if key.A is None else str(key.A)
+    iso = f"m{key.M}" if key.M else ""
+    return f"{key.Z}_{mass}{iso}_{GEANT4_ELEMENT_NAMES[key.Z - 1]}"
 
 
 TargetLike = Union[str, int, Tuple[int, ...], IsotopeKey]

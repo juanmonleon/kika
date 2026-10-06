@@ -10,7 +10,10 @@ references in ``kika-workspace/docs/library/G4NDL_token_spec.md``; checking
 against a real Geant4 build happens outside this repository.
 
 **Scope today: elastic scattering only** (``Elastic/CrossSection`` and
-``Elastic/FS``, i.e. MT2). A library also holding ``Capture``, ``Inelastic`` or
+``Elastic/FS``, i.e. MT2), read and written: ``kika.read(root, format="g4ndl",
+target=...)``, ``kika.write(suite, root, format="g4ndl")``, and
+:func:`patch_elastic` to replace one isotope in a copy of a whole library. A
+library also holding ``Capture``, ``Inelastic`` or
 ``Fission`` is read *partially*, and the conversion report says so.
 
 Like :mod:`kika.gnds`, nothing here imports :mod:`kika.nuclear_data.model` at
@@ -23,6 +26,7 @@ from kika.g4ndl.exceptions import (
 )
 from kika.g4ndl.library import G4NDLLibrary, open
 from kika.g4ndl.names import IsotopeKey
+from kika.g4ndl.patch import PatchResult, patch_elastic
 
 __all__ = ["G4NDLError", "G4NDLFormatError", "G4NDLLibrary", "G4NDLUnsupportedError",
-           "IsotopeKey", "IsotopeNotFoundError", "open"]
+           "IsotopeKey", "IsotopeNotFoundError", "PatchResult", "open", "patch_elastic"]
