@@ -101,6 +101,8 @@ VALID_LB = {
 }
 VALID_LTY = frozenset({0, 1, 2, 3})
 VALID_LCT = frozenset({0, 1, 2})
+#: MTs ENDF-6 §33.2.3 reserves for lumped reactions.
+LUMPED_MT = range(851, 871)
 
 #: How many items an evidence list keeps.
 _EVIDENCE_ITEMS = 10
@@ -684,7 +686,7 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
         _count(sec._nl, len(sec.subsections), "NL", head, out)
         seen = set()
         for sub in sec.subsections:
-            mat1, mt1 = int(sub.mat1 or 0), int(sub.mt1 or 0)
+            mat1, mt1 = _mat1(sub, mat), int(sub.mt1 or 0)
             loc = CovarianceLocation(mat=mat, mf=mf_number, mt=mt, mat1=mat1, mt1=mt1)
             if (mat1, mt1) in seen:
                 out.append(CovarianceFinding(
@@ -711,6 +713,8 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
                     good.append((k, rec))
             if good:
                 usable[(mt, mat1, mt1)] = good
+
+    _completeness33(ctx, mf_number, sections, usable, out)
 
     # Self blocks.
     self_grids: Dict[int, List[float]] = {}
@@ -745,6 +749,7 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
         row_self = usable.get((mt, 0, mt))
         col_self = usable.get((mt1, 0, mt1))
         if row_self is None or col_self is None or mt1 not in sections:
+            # A missing partner is a C5 finding (`missing_partner`, `missing_self_block`).
             for k, r in ls1:
                 _ls1_finding(loc, k, r, None, out)
             continue
@@ -871,6 +876,367 @@ def _mf33_coverage(ctx, mt, grid, loc, out) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Completeness (C5): the blocks and references a section implies
+# ---------------------------------------------------------------------------
+
+
+def _mat1(sub, own) -> int:
+    """MAT1 as kika reads it: the file's own MAT is the same material as 0.
+
+    ENDF-6 §33.3.1 b.1 asks for MAT1=0; some evaluations write their own MAT
+    (ENDF/B-VIII.1 Np-237, JEFF-4.0 H-1), and ``MF33MT.to_xs_covmat`` already
+    treats that as intra-material. A ``mat1_is_own_mat`` note says it happened.
+    """
+    mat1 = int(sub.mat1 or 0)
+    return 0 if own and mat1 == int(own) else mat1
+
+
+def _overlap(a1, a2, b1, b2) -> bool:
+    return None not in (a1, a2, b1, b2) and a1 < b2 and b1 < a2
+
+
+def _has_self(sec, mt: int) -> bool:
+    return any(_mat1(s, sec._mat) == 0 and int(s.mt1 or 0) == mt for s in sec.subsections)
+
+
+def _lty0_records(sec, mt: int):
+    return [nc for s in sec.subsections if _mat1(s, sec._mat) == 0 and int(s.mt1 or 0) == mt
+            for nc in s.nc_records if nc.lty == 0]
+
+
+def _material_notes(sec, mf_number: int, mt: int, out) -> None:
+    """MAT1 written as the file's own MAT, and blocks with another material."""
+    mat = sec._mat
+    own = sorted(int(s.mt1 or 0) for s in sec.subsections if mat and int(s.mat1 or 0) == int(mat))
+    head = CovarianceLocation(mat=mat, mf=mf_number, mt=mt)
+    if own:
+        out.append(CovarianceFinding(
+            "mat1_is_own_mat", NOTE,
+            f"{len(own)} subsection(s) write MAT1={mat}, the file's own MAT, where ENDF-6 "
+            "§33.3.1 asks for MAT1=0; read as the same material, as kika does", head,
+            {"mt1": own}))
+    external = sorted({(int(s.mat1), int(s.mt1 or 0)) for s in sec.subsections
+                       if _mat1(s, mat) != 0})
+    if external:
+        out.append(CovarianceFinding(
+            "external_material", NOTE,
+            f"{len(external)} block(s) with another material (MAT1/MT1 "
+            + ", ".join(f"{a}/{b}" for a, b in external[:_EVIDENCE_ITEMS])
+            + "): not evaluable from one file, and their partners must be in MAT1's own "
+            "file (ENDF-6 §33.3.2 b)", head, {"mat1_mt1": [list(p) for p in external]}))
+
+
+def _completeness33(ctx, mf_number: int, sections: Dict[int, MF33MT], usable, out) -> None:
+    """C5 for MF31/MF33 (ENDF-6 §33.3.2): partners, lumped reactions, NC references."""
+    lumped_into: Dict[int, List[int]] = {}
+    for mt, sec in sections.items():
+        if sec._mtl:
+            lumped_into.setdefault(int(sec._mtl), []).append(mt)
+
+    for mt, sec in sorted(sections.items()):
+        mat = sec._mat
+        head = CovarianceLocation(mat=mat, mf=mf_number, mt=mt)
+        if sec._mtl:
+            mtl = int(sec._mtl)
+            if mtl not in LUMPED_MT:
+                out.append(CovarianceFinding(
+                    "unresolved_reference", DEFECT,
+                    f"MTL={mtl} names a lumped reaction outside 851-870, the range ENDF-6 "
+                    "§33.2.3 reserves for them", head, {"mtl": mtl}))
+            elif mtl not in sections:
+                out.append(CovarianceFinding(
+                    "unresolved_reference", DEFECT,
+                    f"a component of the lumped reaction MT{mtl}, which has no section: the "
+                    "component carries no covariance and the lump that should carry it is "
+                    "missing", head, {"mtl": mtl}))
+            continue
+        if not sec.subsections:
+            continue
+        if mt in LUMPED_MT and mt not in lumped_into:
+            out.append(CovarianceFinding(
+                "lumped_without_components", WARN,
+                f"the lumped reaction MT{mt} is not named as MTL by any section, so the cross "
+                "section its covariance is relative to cannot be summed", head))
+        _material_notes(sec, mf_number, mt, out)
+        if not _has_self(sec, mt):
+            out.append(CovarianceFinding(
+                "missing_self_block", DEFECT,
+                f"no subsection (MT{mt}, MT{mt}): the section states covariances of MT{mt} "
+                "with other reactions but not its own variance (ENDF-6 §33.3.2 a.1)", head,
+                {"mt1": sorted(int(s.mt1 or 0) for s in sec.subsections)}))
+        for sub in sec.subsections:
+            mat1, mt1 = _mat1(sub, mat), int(sub.mt1 or 0)
+            loc = CovarianceLocation(mat=mat, mf=mf_number, mt=mt, mat1=mat1, mt1=mt1)
+            if mat1 == 0 and mt1 != mt:
+                _partner33(ctx, sections, usable, sec, loc, out)
+            if sub.nc_records:
+                _nc_references(sections, sec, sub, loc, out)
+
+
+def _partner33(ctx, sections, usable, sec, loc, out) -> None:
+    mt, mt1 = loc.mt, loc.mt1
+    partner = sections.get(mt1)
+    if partner is None or partner._mtl:
+        why = (f"MT{mt1} has no section in this file" if partner is None else
+               f"MT{mt1} is a component of the lumped MT{partner._mtl} and has no covariance")
+        out.append(CovarianceFinding(
+            "missing_partner", DEFECT,
+            f"the covariance with MT{mt1} is stated, but {why}: its variance, and |rho| of "
+            "this block, are undefined (ENDF-6 §33.3.2 a.1)", loc))
+        return
+    if mt1 > mt:
+        return
+    mirror = [s for s in partner.subsections
+              if _mat1(s, partner._mat) == 0 and int(s.mt1 or 0) == mt]
+    if not mirror:
+        out.append(CovarianceFinding(
+            "cross_block_below_diagonal", NOTE,
+            f"stored in MT{mt} with MT1={mt1} < MT; ENDF-6 §33.3.1 b.4 gives a cross block "
+            f"once, in the section of the lower MT. Nothing is lost: kika places it by "
+            "transposition", loc))
+        return
+    a, b = usable.get((mt, 0, mt1)), usable.get((mt1, 0, mt))
+    if a is None or b is None:
+        return
+    recs_a, recs_b = [r for _, r in a], [r for _, r in b]
+    grid = sorted({e for r in recs_a + recs_b for g in _grids(r) for e in g})
+    ra = _assemble33(sec, recs_a, mt, mt1, ctx.xs, grid)
+    rb = _assemble33(partner, recs_b, mt1, mt, ctx.xs, grid)
+    if ra is None or rb is None:
+        return
+    _mirror_finding(ra[0], rb[0], ra[2], rb[2], loc, f"MT{mt1}xMT{mt}", out)
+
+
+def _mirror_finding(a: np.ndarray, b: np.ndarray, rel_a: bool, rel_b: bool, loc,
+                    other: str, out) -> None:
+    """A cross block stated twice, as (X, Y) and as (Y, X): do they agree?"""
+    scale = max(float(np.max(np.abs(a))) if a.size else 0.0,
+                float(np.max(np.abs(b))) if b.size else 0.0)
+    diff = float(np.max(np.abs(a - b.T))) / scale if scale > 0 and a.shape == b.T.shape else 0.0
+    if rel_a == rel_b and a.shape == b.T.shape and diff <= ASYM_DEFECT:
+        out.append(CovarianceFinding(
+            "symmetric_block_repeated", NOTE,
+            f"also stated as {other}, and the two agree (max difference {diff:.1e} of the "
+            "largest element): redundant, not contradictory", loc, {"relative_difference": diff}))
+        return
+    out.append(CovarianceFinding(
+        "symmetric_block_conflict", DEFECT,
+        f"also stated as {other}, and the two disagree ("
+        + (f"max difference {diff:.2e} of the largest element"
+           if rel_a == rel_b else "one is relative, the other absolute")
+        + "); kika places both in the same joint block, and the one placed last wins "
+        "without a word", loc,
+        {"relative_difference": diff, "relative": [rel_a, rel_b]}))
+
+
+def _derives(sections, start: int, target: int) -> bool:
+    """True if ``start``'s LTY=0 chain reaches ``target``."""
+    stack, seen = [start], set()
+    while stack:
+        mt = stack.pop()
+        if mt in seen:
+            continue
+        seen.add(mt)
+        sec = sections.get(mt)
+        if sec is None:
+            continue
+        for nc in _lty0_records(sec, mt):
+            for x in nc.xmti:
+                m = int(round(x))
+                if m == target:
+                    return True
+                stack.append(m)
+    return False
+
+
+def _nc_references(sections, sec, sub, loc, out) -> None:
+    """NC sub-subsections: where they may stand, and whether what they name exists."""
+    mt = loc.mt
+    is_self = loc.mat1 == 0 and loc.mt1 == mt
+    lty0 = [(k, nc) for k, nc in enumerate(sub.nc_records) if nc.lty == 0]
+    for k, nc in enumerate(sub.nc_records):
+        nloc = CovarianceLocation(mat=loc.mat, mf=loc.mf, mt=mt, mat1=loc.mat1, mt1=loc.mt1, nc=k)
+        if nc.lty not in VALID_LTY:
+            continue  # lty_invalid (C2)
+        if nc.lty in (0, 1) and not is_self:
+            out.append(CovarianceFinding(
+                "nc_misplaced", DEFECT,
+                f"an NC sub-subsection with LTY={nc.lty} in a cross block; ENDF-6 §33.3.2 "
+                "allows it only in the self block (MT, MT)"
+                + ("; kika would put the derived self covariance of this MT here"
+                   if nc.lty == 0 else ""), nloc, {"lty": nc.lty}))
+        if nc.lty == 0:
+            for x in nc.xmti:
+                mti = int(round(x))
+                target = sections.get(mti)
+                why = None
+                if mti == mt:
+                    why = "is the derived reaction itself"
+                elif target is None:
+                    why = "has no section in this file"
+                elif target._mtl:
+                    why = (f"is a component of the lumped MT{target._mtl}, which carries no "
+                           "covariance of its own")
+                elif not _has_self(target, mti):
+                    why = f"has no self covariance (MT{mti}, MT{mti})"
+                if why is not None:
+                    out.append(CovarianceFinding(
+                        "unresolved_reference", DEFECT,
+                        f"NC LTY=0 derives this covariance from MT{mti}, which {why}; kika "
+                        "leaves that term out, so the derived covariance comes out smaller "
+                        "than the file states", nloc, {"xmti": mti}))
+                    continue
+                chained = [n for n in _lty0_records(target, mti)
+                           if _overlap(nc.e1, nc.e2, n.e1, n.e2)]
+                if chained:
+                    out.append(CovarianceFinding(
+                        "nc_chained", DEFECT,
+                        f"NC LTY=0 derives this covariance from MT{mti}, which is itself "
+                        f"derived (LTY=0) over {chained[0].e1:.6g}-{chained[0].e2:.6g} eV, "
+                        f"overlapping {nc.e1:.6g}-{nc.e2:.6g} eV; ENDF-6 §33.3.1 does not "
+                        "allow a constituent derived in the same range", nloc,
+                        {"xmti": mti, "range": [nc.e1, nc.e2],
+                         "constituent_range": [chained[0].e1, chained[0].e2]}))
+                elif _derives(sections, mti, mt):
+                    out.append(CovarianceFinding(
+                        "nc_chained", NOTE,
+                        f"MT{mti} is derived (LTY=0), in another energy range, from a chain "
+                        f"that leads back to MT{mt}. The format allows it; kika's resolver "
+                        "ignores E1-E2 and cuts the cycle, so what it assembles for this MT "
+                        "may differ from what the file states", nloc, {"xmti": mti}))
+        elif nc.lty == 1:
+            own = int(loc.mat or 0)
+            mats, mts = int(nc.mats or 0), int(nc.mts or 0)
+            if mats in (0, own):
+                out.append(CovarianceFinding(
+                    "unresolved_reference", DEFECT,
+                    f"LTY=1 names MATS={mats}, this material; ENDF-6 §33.3.3 reserves LTY=1 "
+                    "for ratios to a standard of another material", nloc, {"mats": mats}))
+            elif not any(int(s.mat1 or 0) == mats and int(s.mt1 or 0) == mts
+                         for s in sec.subsections):
+                out.append(CovarianceFinding(
+                    "unresolved_reference", DEFECT,
+                    f"LTY=1 names the standard MAT{mats}/MT{mts}, but this section has no "
+                    f"subsection (MT{mt}; MAT{mats}, MT{mts}) for the covariance with it "
+                    "(ENDF-6 §33.3.2 a.4)", nloc, {"mats": mats, "mts": mts}))
+        if nc.lty in (1, 2, 3):
+            out.append(CovarianceFinding(
+                "ratio_to_standard", NOTE,
+                f"LTY={nc.lty} ties this covariance to the standard MAT{nc.mats}/MT{nc.mts} "
+                "of another file; kika does not resolve it, so that component is missing "
+                "from what it assembles", nloc, {"lty": nc.lty, "mats": nc.mats, "mts": nc.mts}))
+
+    for (k, a), (_, b) in zip(lty0, lty0[1:]):
+        if _overlap(a.e1, a.e2, b.e1, b.e2):
+            out.append(CovarianceFinding(
+                "nc_ranges_overlap", DEFECT,
+                f"two NC LTY=0 sub-subsections overlap ({a.e1:.6g}-{a.e2:.6g} and "
+                f"{b.e1:.6g}-{b.e2:.6g} eV); ENDF-6 §33.3.1 requires disjoint ranges",
+                CovarianceLocation(mat=loc.mat, mf=loc.mf, mt=mt, mat1=loc.mat1, mt1=loc.mt1,
+                                   nc=k + 1)))
+    rules = {tuple(zip(np.round(nc.ci, 9), [int(round(x)) for x in nc.xmti])) for _, nc in lty0}
+    if len(rules) > 1:
+        out.append(CovarianceFinding(
+            "nc_only_first_resolved", NOTE,
+            f"{len(lty0)} NC LTY=0 sub-subsections with different sums of reactions; kika "
+            "resolves only the first and applies it over the whole range", loc,
+            {"rules": [[[float(c), m] for c, m in r] for r in sorted(rules)]}))
+
+
+def _completeness34(sections, usable, out) -> None:
+    """C5 for MF34 (ENDF-6 §34.2): partners of every block, and orders with no variance."""
+    selfs = {(mt, l) for (mt, l, mt1, l1) in usable if mt1 == mt and l1 == l}
+    for mt, sec in sorted(sections.items()):
+        mat = sec._mat
+        if not sec.subsections:
+            continue
+        head = CovarianceLocation(mat=mat, mf=34, mt=mt)
+        _material_notes(sec, 34, mt, out)
+        if not _has_self(sec, mt):
+            out.append(CovarianceFinding(
+                "missing_self_block", DEFECT,
+                f"no subsection MT1={mt}: none of the Legendre orders of MT{mt} has a "
+                "variance, yet covariances with other reactions are stated", head))
+        lmin = _l_min(sec._ltt)
+        for sub in sec.subsections:
+            mat1, mt1 = _mat1(sub, mat), int(sub.mt1 or 0)
+            if mat1 != 0:
+                continue
+            loc = CovarianceLocation(mat=mat, mf=34, mt=mt, mat1=0, mt1=mt1)
+            if mt1 == mt:
+                declared = set(range(lmin, lmin + int(sub.nl or 0)))
+                silent = sorted(declared - {l for (m, l) in selfs if m == mt})
+                if silent and len(silent) < len(declared):
+                    out.append(CovarianceFinding(
+                        "order_without_variance", NOTE,
+                        f"NL declares a_{silent[0]}"
+                        + (f" and {len(silent) - 1} more" if len(silent) > 1 else "")
+                        + " with no variance block; legal (ENDF-6 §34.2: not all L need be "
+                        "given), and those orders are left unperturbed", loc, {"l": silent}))
+            else:
+                partner = sections.get(mt1)
+                if partner is None:
+                    out.append(CovarianceFinding(
+                        "missing_partner", DEFECT,
+                        f"covariances with MT{mt1} are stated, but MF34 has no section MT{mt1}",
+                        loc))
+                    continue
+                if mt1 < mt:
+                    _mirror34(sections, usable, sec, partner, sub, loc, out)
+            for ss in sub.sub_subsections:
+                l, l1 = int(ss.l or 0), int(ss.l1 or 0)
+                if (mt1, l1) == (mt, l) or (mt, l, mt1, l1) not in usable:
+                    continue
+                absent = [f"a_{x} of MT{m}" for m, x in ((mt, l), (mt1, l1))
+                          if (m, x) not in selfs]
+                if not absent:
+                    continue
+                zero = all(not np.any(_decoded_values(r)) for _, r in usable[(mt, l, mt1, l1)][1])
+                out.append(CovarianceFinding(
+                    "missing_partner", NOTE if zero else DEFECT,
+                    f"a covariance between a_{l} of MT{mt} and a_{l1} of MT{mt1} is stated, but "
+                    + " and ".join(absent) + " ha" + ("ve" if len(absent) > 1 else "s")
+                    + " no variance block"
+                    + (", and the block is all zeros, so nothing follows" if zero else
+                       ": |rho| is undefined, and in the joint it is a row with covariances "
+                       "and no variance"),
+                    CovarianceLocation(mat=mat, mf=34, mt=mt, mat1=0, mt1=mt1, l=l, l1=l1),
+                    {"absent": absent}))
+
+
+def _decoded_values(rec) -> np.ndarray:
+    for name in ("matrix", "rect_matrix", "f_table_k"):
+        vals = getattr(rec, name, None)
+        if vals:
+            return np.asarray(vals, dtype=float)
+    return np.zeros(0)
+
+
+def _mirror34(sections, usable, sec, partner, sub, loc, out) -> None:
+    mt, mt1 = loc.mt, loc.mt1
+    mirror = [s for s in partner.subsections
+              if _mat1(s, partner._mat) == 0 and int(s.mt1 or 0) == mt]
+    if not mirror:
+        out.append(CovarianceFinding(
+            "cross_block_below_diagonal", NOTE,
+            f"stored in MT{mt} with MT1={mt1} < MT; ENDF-6 §34.2 gives the subsections for "
+            "MT1 >= MT. Nothing is lost: kika places it by transposition", loc))
+        return
+    for ss in sub.sub_subsections:
+        l, l1 = int(ss.l or 0), int(ss.l1 or 0)
+        a, b = usable.get((mt, l, mt1, l1)), usable.get((mt1, l1, mt, l))
+        if a is None or b is None:
+            continue
+        recs_a, recs_b = [r for _, r in a[1]], [r for _, r in b[1]]
+        grid = sorted({e for r in recs_a + recs_b for g in _grids(r) for e in g})
+        ra, rb = _assemble34(sec, recs_a, grid), _assemble34(partner, recs_b, grid)
+        if ra is None or rb is None:
+            continue
+        sloc = CovarianceLocation(mat=loc.mat, mf=34, mt=mt, mat1=0, mt1=mt1, l=l, l1=l1)
+        _mirror_finding(ra[0], rb[0], ra[2], rb[2], sloc, f"MT{mt1} L{l1} x MT{mt} L{l}", out)
+
+
+# ---------------------------------------------------------------------------
 # Cross blocks and LS=1, shared
 # ---------------------------------------------------------------------------
 
@@ -985,7 +1351,7 @@ def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
         _count(sec._nmt1, len(sec.subsections), "NMT1", head, out)
         lmin = _l_min(sec._ltt)
         for sub in sec.subsections:
-            mt1, mat1 = int(sub.mt1 or 0), int(sub.mat1 or 0)
+            mt1, mat1 = int(sub.mt1 or 0), _mat1(sub, mat)
             loc = CovarianceLocation(mat=mat, mf=34, mt=mt, mat1=mat1, mt1=mt1)
             nss = _expected_subsubsection_count(sub.nl, sub.nl1, mt, mt1, sec._ltt)
             _count(nss, len(sub.sub_subsections), "NSS (from NL, NL1)", loc, out)
@@ -1024,6 +1390,8 @@ def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
                     for k, rec in good:
                         if rec.lb == 5 and rec.ls == 1:
                             _ls1_finding(sloc, k, rec, None, out)
+
+    _completeness34(sections, usable, out)
 
     # Self-order blocks (MT, L) x (MT, L).
     self_grids: Dict[Tuple[int, int], List[float]] = {}

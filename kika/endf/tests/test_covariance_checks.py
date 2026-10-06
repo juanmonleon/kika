@@ -400,3 +400,166 @@ def test_the_legendre_bound_skips_a0_and_uses_the_smallest_a_l_in_the_bin():
     # file's sigma_rel 20 may be relative to a value near 0 -- not a certain breach.
     report = _mf34_case(1, lambda e: np.where(e <= 10.0, (e - 5.5) / 22.5 + 0.1, 0.1))
     assert report.by_check("variance_exceeds_physical_bound") == ()
+
+
+# --------------------------------------------------------------------------
+# C5 -- completeness: the blocks and references a section implies
+# --------------------------------------------------------------------------
+
+G2 = [1.0, 10.0, 100.0]
+SELF2 = [[0.01, 0.002], [0.002, 0.01]]
+
+
+def _lb6(matrix, rows=G2, cols=G2):
+    m = np.asarray(matrix, dtype=float)
+    return NISubSubsectionRecord(lb=6, ne=len(rows), nt=1 + len(rows) * len(cols),
+                                 row_energies=list(rows), col_energies=list(cols),
+                                 rect_matrix=list(m.ravel()))
+
+
+def _nc0(refs, e1=1.0, e2=100.0):
+    from kika.endf.classes.mf33 import NCSubSubsection
+
+    return NCSubSubsection(lty=0, e1=e1, e2=e2, nci=len(refs),
+                           ci=[c for c, _ in refs], xmti=[float(m) for _, m in refs])
+
+
+def _with_nc(sec, *ncs):
+    sub = next(s for s in sec.subsections if s.mt1 == sec.number)
+    sub.nc_records.extend(ncs)
+    sub.nc = len(sub.nc_records)
+    return sec
+
+
+def test_a_section_without_its_own_variance_and_a_partner_with_no_section():
+    sec = _section({2: [_lb6([[0.001, 0.0], [0.0, 0.001]])]}, mt=1)
+    report = check_covariances(_tape(sec))
+    assert _only(report, "missing_self_block").location.mt == 1
+    f = _only(report, "missing_partner")
+    assert f.level == DEFECT and (f.location.mt, f.location.mt1) == (1, 2)
+
+
+def test_a_cross_block_below_the_diagonal_is_a_note_when_stated_once():
+    low = _section({2: [_lb5(SELF2, G2)], 1: [_lb6([[0.001, 0.0], [0.0, 0.001]])]}, mt=2)
+    report = check_covariances(_tape(_section({1: [_lb5(SELF2, G2)]}, mt=1), low))
+    f = _only(report, "cross_block_below_diagonal")
+    assert f.level == NOTE and (f.location.mt, f.location.mt1) == (2, 1)
+    assert report.at_least(WARN) == ()
+
+
+def test_a_cross_block_stated_both_ways_is_compared():
+    c = [[0.001, 0.0005], [0.0, 0.001]]
+    up = _section({1: [_lb5(SELF2, G2)], 2: [_lb6(c)]}, mt=1)
+    agree = _section({2: [_lb5(SELF2, G2)], 1: [_lb6(np.transpose(c))]}, mt=2)
+    f = _only(check_covariances(_tape(up, agree)), "symmetric_block_repeated")
+    assert f.level == NOTE and f.evidence["relative_difference"] == 0.0
+    clash = _section({2: [_lb5(SELF2, G2)], 1: [_lb6(c)]}, mt=2)  # not transposed
+    f = _only(check_covariances(_tape(up, clash)), "symmetric_block_conflict")
+    assert f.level == DEFECT and f.evidence["relative_difference"] == pytest.approx(0.5)
+
+
+def test_mat1_written_as_the_own_mat_is_read_as_the_same_material():
+    sec = _section({1: [_lb5(SELF2, G2)], 2: [_lb6([[0.001, 0.0], [0.0, 0.001]])]}, mt=1)
+    for sub in sec.subsections:
+        sub.mat1 = sec._mat
+    report = check_covariances(_tape(sec, _section({2: [_lb5(SELF2, G2)]}, mt=2)))
+    assert _only(report, "mat1_is_own_mat").evidence["mt1"] == [1, 2]
+    assert report.by_check("missing_self_block") == ()
+    assert report.by_check("external_material") == ()
+
+
+def test_nc_lty0_references_that_do_not_resolve():
+    mt4 = _with_nc(_section({4: []}, mt=4), _nc0([(1.0, 51), (1.0, 52), (1.0, 4)]))
+    mt51 = _section({51: [_lb5(SELF2, G2)]}, mt=51)
+    mt52 = MF33MT(number=52, _za=26056.0, _awr=55.45, _mat=2631, _nl=0, _mtl=851)
+    lump = _section({851: [_lb5(SELF2, G2)]}, mt=851)
+    report = check_covariances(_tape(mt4, mt51, mt52, lump))
+    refs = report.by_check("unresolved_reference")
+    assert {f.evidence["xmti"] for f in refs} == {52, 4}
+    assert all(f.level == DEFECT and f.location.nc == 0 for f in refs)
+
+
+def test_nc_lty0_out_of_place_and_with_overlapping_ranges():
+    mt1 = _section({1: [_lb5(SELF2, G2)], 2: []}, mt=1)
+    cross = next(s for s in mt1.subsections if s.mt1 == 2)
+    cross.nc_records.append(_nc0([(1.0, 2)]))
+    cross.nc = 1
+    mt2 = _section({2: [_lb5(SELF2, G2)]}, mt=2)
+    assert _only(check_covariances(_tape(mt1, mt2)), "nc_misplaced").location.mt1 == 2
+
+    mt3 = _with_nc(_section({3: []}, mt=3), _nc0([(1.0, 1)], 1.0, 50.0),
+                   _nc0([(1.0, 2)], 20.0, 100.0))
+    report = check_covariances(_tape(_section({1: [_lb5(SELF2, G2)]}, mt=1), mt2, mt3))
+    assert _only(report, "nc_ranges_overlap").location.nc == 1
+    assert _only(report, "nc_only_first_resolved").level == NOTE
+
+
+def test_a_constituent_derived_in_the_same_range_and_a_cycle_in_another():
+    mt1 = _with_nc(_section({1: [_lb5(SELF2, G2)]}, mt=1), _nc0([(1.0, 2), (1.0, 3)], 1.0, 10.0))
+    mt2 = _with_nc(_section({2: [_lb5(SELF2, G2)]}, mt=2),
+                   _nc0([(1.0, 1), (-1.0, 3)], 10.0, 100.0))
+    mt3 = _section({3: [_lb5(SELF2, G2)]}, mt=3)
+    chained = check_covariances(_tape(mt1, mt2, mt3)).by_check("nc_chained")
+    # As in Si-28 of ENDF/B-VIII.1: MT1 from MT2 below 10 eV, MT2 from MT1 above.
+    assert {(f.location.mt, f.level) for f in chained} == {(1, NOTE), (2, NOTE)}
+    mt2.subsections[0].nc_records[0].e1 = 5.0  # now overlapping the range of MT1
+    chained = check_covariances(_tape(mt1, mt2, mt3)).by_check("nc_chained")
+    assert {f.level for f in chained} == {DEFECT}
+
+
+def test_lumped_reactions_and_ratios_to_standards():
+    from kika.endf.classes.mf33 import NCSubSubsection
+
+    comp = MF33MT(number=51, _za=26056.0, _awr=55.45, _mat=2631, _nl=0, _mtl=852)
+    orphan = _section({851: [_lb5(SELF2, G2)]}, mt=851)
+    report = check_covariances(_tape(comp, orphan))
+    assert _only(report, "unresolved_reference").evidence["mtl"] == 852
+    assert _only(report, "lumped_without_components").location.mt == 851
+
+    ratio = NCSubSubsection(lty=1, e1=1.0, e2=100.0, mats=2631, mts=1)
+    report = check_covariances(_tape(_with_nc(_section({1: [_lb5(SELF2, G2)]}), ratio)))
+    assert _only(report, "unresolved_reference").evidence["mats"] == 2631
+    assert _only(report, "ratio_to_standard").level == NOTE
+
+
+def _mf34(mt, blocks, nl=2, ltt=1):
+    """An MF34 section; ``blocks`` maps MT1 -> {(L, L1): [records]}."""
+    sec = MF34MT(number=mt, _za=26056.0, _awr=55.45, _ltt=ltt, _nmt1=len(blocks), _mat=2631)
+    for mt1, subs in blocks.items():
+        sec.add_subsection(Subsection34(
+            mt1=mt1, nl=nl, nl1=nl, mat1=0,
+            sub_subsections=[SubSubsection(l=l, l1=l1, lct=1, ni=len(recs), records=recs)
+                             for (l, l1), recs in subs.items()]))
+    return sec
+
+
+def _lb5_34(matrix, ls=1):
+    return _lb5(matrix, G2, ls=ls, cls=SubSubsectionRecord)
+
+
+def test_mf34_a_cross_order_block_without_the_variance_of_one_order():
+    # NL=2 declares a_1 and a_2; only a_1 has a variance block, and (1, 2) is stated.
+    cross = _lb5_34([[0.001, 0.0005], [0.0002, 0.001]], ls=0)
+    sec = _mf34(2, {2: {(1, 1): [_lb5_34(SELF2)], (1, 2): [cross], (2, 2): []}})
+    report = check_covariances(_tape(sec, mf_number=34))
+    f = [f for f in report.by_check("missing_partner") if f.location.l1 == 2]
+    assert len(f) == 1 and f[0].level == DEFECT and f[0].evidence["absent"] == ["a_2 of MT2"]
+    assert _only(report, "order_without_variance").evidence["l"] == [2]
+    # The same block with all zeros only says so.
+    zero = _lb5_34([[0.0, 0.0], [0.0, 0.0]], ls=0)
+    sec = _mf34(2, {2: {(1, 1): [_lb5_34(SELF2)], (1, 2): [zero], (2, 2): []}})
+    f = _only(check_covariances(_tape(sec, mf_number=34)), "missing_partner")
+    assert f.level == NOTE
+
+
+def test_mf34_partner_sections_and_blocks_stated_both_ways():
+    c = [[0.001, 0.0005], [0.0, 0.001]]
+    up = _mf34(2, {2: {(1, 1): [_lb5_34(SELF2)]}, 51: {(1, 1): [_lb5_34(c, ls=0)]}}, nl=1)
+    report = check_covariances(_tape(up, mf_number=34))
+    assert _only(report, "missing_partner").location.mt1 == 51
+    low = _mf34(51, {51: {(1, 1): [_lb5_34(SELF2)]},
+                     2: {(1, 1): [_lb5_34(np.transpose(c), ls=0)]}}, nl=1)
+    report = check_covariances(_tape(up, low, mf_number=34))
+    assert report.by_check("missing_partner") == ()
+    f = _only(report, "symmetric_block_repeated")
+    assert (f.location.mt, f.location.mt1, f.location.l, f.location.l1) == (51, 2, 1, 1)
