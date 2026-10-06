@@ -220,6 +220,47 @@ MF32_FIXTURES = {
     "cl35": "cl35_b81",
 }
 
+#: The layer-1 covariance-check fixtures (:func:`kika.endf.check_covariances`):
+#: key -> (source tape, what is kept). Each carries a fault, or the absence of
+#: one, found by running the checks over ENDF/B-VIII.1, JEFF-4.0 and JENDL-5
+#: (kika-workspace ``docs/library/cov_checks_roadmap.md``, phase C7).
+#:
+#: **Every cut is closed.** A covariance section names its partners, and a cut
+#: that dropped one would make the checks report a ``missing_partner`` the
+#: evaluation does not have. So each fixture keeps either a section with no
+#: partner outside itself or the whole MF33, and every one was checked to give
+#: exactly the findings the full tape gives on the same sections. The only
+#: differences are the notes about central values (MF3 dropped).
+#:
+#: ``ne20``   MF34/MT2: LB=5 LS=1 triangles in seven cross-order blocks (defect
+#:            A). Valid as stored (0.88 in L1xL5), |rho| 4.63 once mirrored.
+#: ``w186``   MF34/MT51: |rho| 49 inside the L=1 block, a negative variance, and
+#:            the block indefinite (defect C).
+#: ``fe57``   JEFF-4.0 Fe-57, all of MF33: NC LTY=0 sums that name reactions the
+#:            file has no section for (MT3, 22, 28, 107), so the covariance kika
+#:            derives is smaller than the one stated.
+#: ``si28``   ENDF/B-VIII.1 Si-28, all of MF33: MT1 derived from MT4 over a range
+#:            where MT4 is itself derived (``nc_chained``).
+#: ``hf176``  MF33/MT107 with MF2 and MF3/MT107, so the magnitude check has its
+#:            central values: a repeated grid point and sigma_rel > 10 where the
+#:            cross section is not small.
+#: ``fe56_jendl``  JENDL-5 Fe-56, MF33 and MF34: the clean case. Nothing above
+#:            a note -- its correlations are rounded to 0.001, and C4 knows it.
+COV_CHECK_FIXTURES = {
+    "ne20": ("ne20_jeff40", {1: {451}, 2: {151}, 3: {2}, 4: {2}, 34: {2}}),
+    "w186": ("w186_jeff40", {1: {451}, 2: {151}, 3: {51}, 4: {51}, 34: {51}}),
+    "fe57": ("fe57_jeff40", {1: {451}, 33: None}),
+    "si28": ("si28_b81", {1: {451}, 33: None}),
+    "hf176": ("hf176_jeff40", {1: {451}, 2: {151}, 3: {107}, 33: {107}}),
+    "fe56_jendl": ("fe56_jendl", {1: {451}, 33: None, 34: None}),
+}
+
+
+def cov_check_fixture_path(key: str) -> Path:
+    """Committed layer-1 micro-tape *key*."""
+    return DATA / f"micro_{key}_covcheck.endf"
+
+
 #: Fe-56 identity, shared by both fixtures.
 ZA, AWR, MAT, MT = 26056.0, 55.36735, 2631, 2
 
@@ -321,6 +362,27 @@ def build_mf6(source: Path, dest: Path, keep: dict) -> None:
             continue
         for mt in sorted(set(mts) - keep[mf]):
             to_remove.append((mf, mt))
+
+    trimmed, n_removed = remove_sections(content, to_remove)
+    assert n_removed, f"nothing was removed from {source.name} — wrong source?"
+    dest.write_text(trimmed)
+
+
+def build_cov_check(source: Path, dest: Path, keep: dict) -> None:
+    """Cut *source* down to *keep* and write it to *dest*, verbatim.
+
+    As :func:`build_mf6`, except that ``None`` for an MF keeps all of it: a
+    closed cut of MF33 is often the whole MF33 (``COV_CHECK_FIXTURES``).
+    """
+    content = source.read_text()
+    inventory = section_inventory(content)
+
+    to_remove: list[tuple[int, int | None]] = []
+    for mf, mts in sorted(inventory.items()):
+        if mf not in keep:
+            to_remove.append((mf, None))
+        elif keep[mf] is not None:
+            to_remove.extend((mf, mt) for mt in sorted(set(mts) - keep[mf]))
 
     trimmed, n_removed = remove_sections(content, to_remove)
     assert n_removed, f"nothing was removed from {source.name} — wrong source?"
@@ -675,6 +737,18 @@ def test_regenerate_mf6_charged_particle_micro_tapes(
     assert all(mf6_fixture_path(k).stat().st_size > 0 for k in MF6_CP_FIXTURES)
 
 
+@pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
+def test_regenerate_cov_check_micro_tapes(ne20_jeff40_tape, w186_jeff40_tape,
+                                          fe57_jeff40_tape, si28_b81_tape,
+                                          hf176_jeff40_tape, fe56_jendl_tape, request):
+    """Rebuild just the layer-1 fixtures, for the same reason as the MF6 ones."""
+    DATA.mkdir(parents=True, exist_ok=True)
+    for key, (tape, keep) in COV_CHECK_FIXTURES.items():
+        source = request.getfixturevalue(f"{tape}_tape")
+        build_cov_check(Path(source), cov_check_fixture_path(key), keep)
+    assert all(cov_check_fixture_path(k).stat().st_size > 0 for k in COV_CHECK_FIXTURES)
+
+
 # ---------------------------------------------------------------------------
 # What the committed fixtures must satisfy
 # ---------------------------------------------------------------------------
@@ -955,6 +1029,25 @@ def test_the_tsl_fixtures_cover_every_lthr_branch():
         if mt2 is not None:
             seen[key] = mt2.lthr
     assert sorted(set(seen.values())) == [1, 2, 3], seen
+
+
+@pytest.mark.parametrize("key", sorted(COV_CHECK_FIXTURES))
+def test_cov_check_inventories_are_exactly_what_we_kept(key):
+    """The cut kept what ``COV_CHECK_FIXTURES`` says and the covariance MFs whole
+    where it says ``None`` -- an MT short there would be a ``missing_partner``."""
+    inventory = section_inventory(cov_check_fixture_path(key).read_text())
+    keep = COV_CHECK_FIXTURES[key][1]
+    assert set(inventory) == set(keep)
+    for mf, mts in keep.items():
+        if mts is not None:
+            assert set(inventory[mf]) == mts, f"MF{mf} MT set drifted"
+
+
+def test_cov_check_micro_tapes_stay_small():
+    """Same ceiling logic. The largest, JENDL-5 Fe-56, is ~180 kB of ENDF text."""
+    for key in COV_CHECK_FIXTURES:
+        size = cov_check_fixture_path(key).stat().st_size
+        assert size < 200_000, f"{key} is {size} bytes"
 
 
 def test_pfns_micro_tapes_stay_small(micro_pfns_tape, micro_pfns_cov_tape):

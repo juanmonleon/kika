@@ -1,0 +1,716 @@
+JEFF-4.0 Incident Neutron File                                       1 0  0    0
+ 7.217600+4 1.744300+2          1          0          2          17231 1451    1
+ 0.000000+0 0.000000+0          0          0          0          67231 1451    2
+ 1.000000+0 2.000000+7          3          0         10          37231 1451    3
+ 0.000000+0 0.000000+0          0          0        446          47231 1451    4
+ 72-Hf-176 CEA-AMEC   EVAL-JAN16 JEFF Collaboration               7231 1451    5
+                      DIST-DEC17 REV3-DEC17            20171231   7231 1451    6
+---JEFF-3.3           Material 7231                               7231 1451    7
+-----Incident neutron  data                                       7231 1451    8
+------ENDF-6 Format                                               7231 1451    9
+                                                                  7231 1451   10
+************** G E N E R A L   I N F O R M A T I O N *************7231 1451   11
+                                                                  7231 1451   12
+This evaluated data file is based on the following works:         7231 1451   13
+                                                                  7231 1451   14
+Resonance parameters are taken from JEFF-3.2. They were           7231 1451   15
+established by T. Ware in the frame of a IRMM/SERCO collaboration 7231 1451   16
+                                                                  7231 1451   17
+Unresolved resonance parameters were established at               7231 1451   18
+CEA Cadarache by using the URR option of TALYS                    7231 1451   19
+                                                                  7231 1451   20
+Neutron cross sections above the RRR were calculated with         7231 1451   21
+ECIS/TALYS at CEA Cadarache (Ref. 12)                             7231 1451   22
+                                                                  7231 1451   23
+Covariance files (MF=32 and MF=33) were produced with the         7231 1451   24
+CONRAD code (Ref. 13)                                             7231 1451   25
+                                                                  7231 1451   26
+The TENDL-2015 file was used as template                          7231 1451   27
+                                                                  7231 1451   28
+******************* R E S O N A N C E  R A N G E *****************7231 1451   29
+                                                                  7231 1451   30
+ Authors: T Ware, M Moxon, D Weaver, C Dean and R Hiles           7231 1451   31
+ November 2009 (SERCO)                                            7231 1451   32
+                                                                  7231 1451   33
+ The parameters in this isotopic evaluation were generated as     7231 1451   34
+ part of an evaluation of natural Hafnium data. This isotopic     7231 1451   35
+ evaluation should be used with those for the other isotopes that 7231 1451   36
+ form this evaluation of natural Hf data.                         7231 1451   37
+                                                                  7231 1451   38
+ The parameters for resonances in MF 2 (resolved resonance        7231 1451   39
+ region) are based on the analysis presented in Ref.1. and        7231 1451   40
+ summarised in Ref.2. The resolved region was analyzed in Reich-  7231 1451   41
+ Moore formalism by T. Ware using the REFIT analysis              7231 1451   42
+ code (Ref.3.). It is supplemented by two studies by M. Moxon.    7231 1451   43
+ The first reviewed published thermal (2200m/s) capture cross     7231 1451   44
+ sections, adjusted appropriate measurements to modern standards  7231 1451   45
+ and inverse variance weighted the results. The second (Ref.4.)   7231 1451   46
+ used the REFIT code to fit resonance parameters for the 7.8eV    7231 1451   47
+ doublet where resonances in Hf-176 and Hf-178 overlap.           7231 1451   48
+ Analysis for natural Hf by T Ware results in resonance           7231 1451   49
+ parameters for each of the naturally occurring isotopes. In all, 7231 1451   50
+ 24 measurements are included in the final fit. Six existing      7231 1451   51
+ natural hafnium transmission measurements by P Siegler           7231 1451   52
+ (Ref.5.) were complemented by six capture measurements specially 7231 1451   53
+ performed for the evaluation by P Schillebeeckx and colleagues   7231 1451   54
+ using GELINA at IRMM GEEL (Ref.6.). A further natural            7231 1451   55
+ transmission measurement on a thick 16mm sample was made in 2009 7231 1451   56
+ at Geel and included in the fit to help define the scattering    7231 1451   57
+ radius. To attribute resonances to isotopes 10 further capture   7231 1451   58
+ measurements were made at GELINA using HfO2 samples enriched in  7231 1451   59
+ Hf-176, 177, 178 and 179 and loaned by IRNE Sofia. As no samples 7231 1451   60
+ enriched in Hf-180 were available, Moxon's 1973 Harwell capture  7231 1451   61
+ measurement was included (Ref.7.). Other ORNL( Harvey - Ref.8.), 7231 1451   62
+ Harwell (Moxon - Ref.7.) and RPI (Trbovich - Ref.9.) data were   7231 1451   63
+ used to validate the measurements applied in the fit.            7231 1451   64
+ The current fits to Hf result in parameters for the following    7231 1451   65
+ ranges:-                                                         7231 1451   66
+     Isotope      Resolved range     Unresolved range             7231 1451   67
+                                                                  7231 1451   68
+      174Hf    1E-5              250                 50000        7231 1451   69
+      176Hf    1E-5             3000                 50000        7231 1451   70
+      177Hf    1E-5             1000                 50000        7231 1451   71
+      178Hf    1E-5             3000                 50000        7231 1451   72
+      179Hf    1E-5             1000                 50000        7231 1451   73
+      180Hf    1E-5             3000                 50000        7231 1451   74
+                                                                  7231 1451   75
+ 2200m/s capture cross sections and resonance integrals           7231 1451   76
+      Isotope          Cross section   Resonance integral         7231 1451   77
+                          (barn)             (barn)               7231 1451   78
+                                                                  7231 1451   79
+      174Hf            648.36+/-33.5        451.149               7231 1451   80
+      176Hf             16.83+/-2.3         633.097               7231 1451   81
+      177Hf            371.05+/-2.6        7164.19                7231 1451   82
+      178Hf             82.8+/-1.2         1797.94                7231 1451   83
+      179Hf             39.83+/-1.8         529.521               7231 1451   84
+      180Hf             13.06+/-0.09         37.2008              7231 1451   85
+                                                                  7231 1451   86
+****************** G A M M A  P R O D U C T I O N ****************7231 1451   87
+                                                                  7231 1451   88
+Gamma production spectra in the MF6-MT102 files:                  7231 1451   89
+                                                                  7231 1451   90
+Below 1keV, the continuum part of the spectrum is calculated      7231 1451   91
+by TALYS using the Composite Gilbert-Cameron model (CGCM)         7231 1451   92
+as the level density model and the Enhenced Generalized           7231 1451   93
+LOrentzian model (EGLO) as the strength function model as         7231 1451   94
+advised by Kopecky-Uhl (Ref. 14). Discrete peaks are taken from   7231 1451   95
+EGAF (Ref. 15).                                                   7231 1451   96
+                                                                  7231 1451   97
+Above 1 keV, both the discrete and the continuum part are         7231 1451   98
+calculated with TALYS with the CGCM and the EGLO model            7231 1451   99
+                                                                  7231 1451  100
+************************* C O N T I N U U M **********************7231 1451  101
+                                                                  7231 1451  102
+This evaluated data file is based on a software system built      7231 1451  103
+around the nuclear model code TALYS (Ref. 10), version 1.74. It is7231 1451  104
+part of a large collection of isotopic evaluations, all created by7231 1451  105
+running the system with either adjusted or default input          7231 1451  106
+parameters. This means that the data in the entire collection have7231 1451  107
+been tested in detail for many isotopes against individual        7231 1451  108
+experimental data, while for other isotopes it is only as good as 7231 1451  109
+the global quality of TALYS at the moment. The mutual quality of  7231 1451  110
+all individual data files is however consistent: The same set of  7231 1451  111
+nuclear models is used and, equally important, the same ENDF-6    7231 1451  112
+formatting procedures for each isotope. The data file has been    7231 1451  113
+created automatically using the ENDF-6 format generator TEFAL.    7231 1451  114
+                                                                  7231 1451  115
+The resulting data file provides a complete representation of     7231 1451  116
+nuclear data needed for transport, activation, damage, heating,   7231 1451  117
+radioactivity, and shielding applications over the incident       7231 1451  118
+neutron energy range from 1.e-11 to 20. MeV.                      7231 1451  119
+                                                                  7231 1451  120
+All transport and activation data for neutrons, charged particles,7231 1451  121
+photons and residual nuclides are filed. This includes cross      7231 1451  122
+sections, angular distributions, double-differential spectra,     7231 1451  123
+isomeric production, discrete and continuum photon production     7231 1451  124
+cross sections, residual production cross sections and recoils.   7231 1451  125
+This general purpose evaluation can thus be used as both          7231 1451  126
+transport and activation library.                                 7231 1451  127
+                                                                  7231 1451  128
+A complete set of covariance data is included, which is stored    7231 1451  129
+in MF31-40.                                                       7231 1451  130
+                                                                  7231 1451  131
+The OMP was adjusted based on parameters from G. Noguere to       7231 1451  132
+obtain a good agreement with the (n,tot) data for natural Hf.     7231 1451  133
+                                                                  7231 1451  134
+***************************** T A L Y S **************************7231 1451  135
+                                                                  7231 1451  136
+TALYS is a computer code system for the prediction and analysis   7231 1451  137
+of nuclear reactions. TALYS simulates reactions that involve      7231 1451  138
+neutrons, gamma-rays, protons, deuterons, tritons, helions and    7231 1451  139
+alpha-particles, in the 1 keV - 200 MeV energy range. This is     7231 1451  140
+achieved by implementing a suite of nuclear reaction models into  7231 1451  141
+a single code system. This nuclear data file is based on a        7231 1451  142
+theoretical analysis that utilizes the optical model, compound    7231 1451  143
+nucleus statistical theory, fission, direct reactions and         7231 1451  144
+pre-equilibrium processes, in combination with databases and      7231 1451  145
+models for nuclear structure. The following output of TALYS is    7231 1451  146
+stored in this data file:                                         7231 1451  147
+                                                                  7231 1451  148
+- Total, elastic and non-elastic cross sections                   7231 1451  149
+- Inelastic cross sections to discrete states                     7231 1451  150
+- Exclusive channel cross sections, e.g. (n,g), (n,2n), (n,np),.. 7231 1451  151
+- Inelastic scattering angular distributions to discrete states   7231 1451  152
+- Exclusive channel energy spectra                                7231 1451  153
+- Exclusive channel double-differential spectra                   7231 1451  154
+- Exclusive gamma production for discrete states and continuum    7231 1451  155
+- Elastic scattering angular distributions                        7231 1451  156
+- Recoil data                                                     7231 1451  157
+- Total particle cross sections, e.g. (n,xn), (n,xp),..           7231 1451  158
+- Total particle energy spectra                                   7231 1451  159
+- Total particle double-differential spectra                      7231 1451  160
+- Isomeric and ground state cross sections                        7231 1451  161
+- Residual production cross sections                              7231 1451  162
+                                                                  7231 1451  163
+For a description of the used nuclear models and their            7231 1451  164
+parameterization we refer to (Ref. 11). If for this specific      7231 1451  165
+nuclide we deviate from the global parameterization, it is made   7231 1451  166
+explicit above under Nuclide Specific Information.                7231 1451  167
+                                                                  7231 1451  168
+***************** F I L E   I N F O R M A T I O N ****************7231 1451  169
+                                                                  7231 1451  170
+##### MF1: GENERAL INFORMATION                                    7231 1451  171
+                                                                  7231 1451  172
+- MT451    : Descriptive data and directory                       7231 1451  173
+                                                                  7231 1451  174
+This text and the full directory of used MF/MT sections.          7231 1451  175
+                                                                  7231 1451  176
+##### MF2: RESONANCE PARAMETERS                                   7231 1451  177
+                                                                  7231 1451  178
+- MT151    : Resonance parameters                                 7231 1451  179
+                                                                  7231 1451  180
+Details about the origin of the resonance parameters for this     7231 1451  181
+nuclide are given above in this description. In general, both a   7231 1451  182
+Resolved and an Unresolved Resonance Range are given.             7231 1451  183
+                                                                  7231 1451  184
+##### MF3: REACTION CROSS SECTIONS                                7231 1451  185
+                                                                  7231 1451  186
+All the data present in the following MT-sections have been       7231 1451  187
+calculated with TALYS, possibly normalized to experimental data.  7231 1451  188
+If the maximal cross section in an excitation function over the   7231 1451  189
+whole energy range does not exceed 1.e-9 b, the MT-number is not  7231 1451  190
+included. Cross sections lower than 1.e-20 b are assumed to have  7231 1451  191
+no physical meaning and are set to zero. All MT numbers extend up 7231 1451  192
+to the highest incident energy.                                   7231 1451  193
+The following reaction channels/MT numbers are generally included:7231 1451  194
+                                                                  7231 1451  195
+- MT1      : Total cross section                                  7231 1451  196
+                                                                  7231 1451  197
+Calculated with the optical model over the whole energy range,    7231 1451  198
+or partly reproduced using experimental data.                     7231 1451  199
+                                                                  7231 1451  200
+- MT2      : Elastic scattering cross section                     7231 1451  201
+                                                                  7231 1451  202
+Obtained by subtracting the non-elastic cross section from the    7231 1451  203
+total cross section.                                              7231 1451  204
+                                                                  7231 1451  205
+- MT3      : Non-elastic cross section                            7231 1451  206
+                                                                  7231 1451  207
+Calculated with the optical model over the whole energy range.    7231 1451  208
+                                                                  7231 1451  209
+- MT4      : Total inelastic cross section                        7231 1451  210
+                                                                  7231 1451  211
+Sum of MT=51-91.                                                  7231 1451  212
+                                                                  7231 1451  213
+- MT5      : (n,anything) cross section                           7231 1451  214
+                                                                  7231 1451  215
+MT5 contains the reactions which can not be stored in any other   7231 1451  216
+MT-number. The information of MF3/MT5 can be combined with        7231 1451  217
+MF6/MT5 to obtain residual production cross sections particle     7231 1451  218
+production cross sections and (double-)differential cross         7231 1451  219
+sections.                                                         7231 1451  220
+                                                                  7231 1451  221
+- MT16     : (n,2n) cross section                                 7231 1451  222
+- MT17     : (n,3n) cross section                                 7231 1451  223
+- MT22     : (n,na) cross section                                 7231 1451  224
+- MT28     : (n,np) cross section                                 7231 1451  225
+- MT51-90  : (n,n') cross section for 1st-40th excited state      7231 1451  226
+- MT91     : (n,n') continuum cross section                       7231 1451  227
+- MT102    : (n,gamma) cross section                              7231 1451  228
+- MT103    : (n,p) cross section                                  7231 1451  229
+- MT104    : (n,d) cross section                                  7231 1451  230
+- MT105    : (n,t) cross section                                  7231 1451  231
+- MT106    : (n,h) cross section                                  7231 1451  232
+- MT107    : (n,a) cross section                                  7231 1451  233
+- MT600-610: (n,p) cross section for 0th-10th excited state       7231 1451  234
+- MT649    : (n,p) continuum cross section                        7231 1451  235
+- MT650-655: (n,d) cross section for 0th-5th excited state        7231 1451  236
+- MT699    : (n,d) continuum cross section                        7231 1451  237
+- MT700-705: (n,t) cross section for 0th-5th excited state        7231 1451  238
+- MT749    : (n,t) continuum cross section                        7231 1451  239
+- MT750-755: (n,h) cross section for 0th-5th excited state        7231 1451  240
+- MT799    : (n,h) continuum cross section                        7231 1451  241
+- MT800-810: (n,a) cross section for 0th-10th excited state       7231 1451  242
+- MT849    : (n,a) continuum cross section                        7231 1451  243
+                                                                  7231 1451  244
+##### MF4: ANGULAR DISTRIBUTIONS OF SECONDARY PARTICLES           7231 1451  245
+                                                                  7231 1451  246
+We use MF4 for the neutron scattering angular distribution for    7231 1451  247
+discrete levels.                                                  7231 1451  248
+                                                                  7231 1451  249
+- MT2      : Elastic angular distribution                         7231 1451  250
+                                                                  7231 1451  251
+The flag LTT=3 is used to indicate a switch at some high energy,  7231 1451  252
+generally 50 MeV, from a Legendre representation to a tabulated   7231 1451  253
+representation. For incident energies below this energy, the      7231 1451  254
+Legendre coefficients are given on a sufficiently precise energy  7231 1451  255
+grid. They are a sum of calculated Legendre coefficients for      7231 1451  256
+compound nucleus and shape-elastic scattering. For higher         7231 1451  257
+incident energies, relative angular distributions are tabulated   7231 1451  258
+on an angular grid.                                               7231 1451  259
+                                                                  7231 1451  260
+- MT51-70  : (n,n') angular distribution for 1st-20th state       7231 1451  261
+- MT600-610: (n,p) angular distribution for 0th-10th state        7231 1451  262
+- MT650-655: (n,d) angular distribution for 0th-5th state         7231 1451  263
+- MT700-705: (n,t) angular distribution for 0th-5th state         7231 1451  264
+- MT750-755: (n,h) angular distribution for 0th-5th state         7231 1451  265
+- MT800-810: (n,a) angular distribution for 0th-10th state        7231 1451  266
+                                                                  7231 1451  267
+##### MF6: PRODUCT ENERGY-ANGLE DISTRIBUTIONS                     7231 1451  268
+                                                                  7231 1451  269
+In MF6 we store all secondary energy, angle, and energy-angle     7231 1451  270
+distributions, as well as all residual and discrete + continuum   7231 1451  271
+photon production cross sections for channels other than capture  7231 1451  272
+(MT102) and reactions to discrete levels (MT51,etc.).             7231 1451  273
+All data are generated with TALYS.                                7231 1451  274
+                                                                  7231 1451  275
+- MT5      : (n,anything) yields and energy-angle distributions   7231 1451  276
+                                                                  7231 1451  277
+MT5 contains, in this order,                                      7231 1451  278
+For neutrons up to alpha particles and photons:                   7231 1451  279
+- the production yields per particle for the whole energy range   7231 1451  280
+- the secondary energy-angle distributions per particles which are7231 1451  281
+  not represented by explicit MT numbers. On a secondary energy   7231 1451  282
+  grid the relative emission spectra are given together with the  7231 1451  283
+  parameters for the Kalbach systematics for angular              7231 1451  284
+  distributions. Inelastic scattering cross sections for discrete 7231 1451  285
+  states have been broadened and added to the continuum spectra.  7231 1451  286
+For each residual product:                                        7231 1451  287
+- the production yields for the whole energy range.               7231 1451  288
+- the recoil                                                      7231 1451  289
+These distributions can be multiplied with MF3/MT5 to get         7231 1451  290
+the production cross sections and (double-)differential cross     7231 1451  291
+sections.                                                         7231 1451  292
+                                                                  7231 1451  293
+- MT16     : (n,2n) energy-angle distr. and photon production     7231 1451  294
+                                                                  7231 1451  295
+First, for each type of outgoing particle, the (trivial) integer  7231 1451  296
+particle yields are given. Next, on a sufficiently dense incident 7231 1451  297
+energy grid the secondary energy-angle distributions are          7231 1451  298
+specified by means of the relative emission spectra and the       7231 1451  299
+parameters for the Kalbach systematics for angular distributions. 7231 1451  300
+Next, the photon yield is tabulated as a function of incident     7231 1451  301
+energy. For each incident energy, the photon production is given  7231 1451  302
+for all discrete gamma lines present in the final nucleus. A      7231 1451  303
+continuum photon distribution is added to this. We assume         7231 1451  304
+isotropy for all produced gamma rays.                             7231 1451  305
+                                                                  7231 1451  306
+For the following MT-numbers, the same procedure as for MT16 is   7231 1451  307
+followed:                                                         7231 1451  308
+                                                                  7231 1451  309
+- MT17 : (n,3n) energy-angle distr. and photon production         7231 1451  310
+- MT22 : (n,na) energy-angle distr. and photon production         7231 1451  311
+- MT28 : (n,np) energy-angle distr. and photon production         7231 1451  312
+- MT91 : (n,n') continuum energy-angle distr. and phot. prod.     7231 1451  313
+- MT649: (n,p) continuum energy-angle distr. and photon prod.     7231 1451  314
+- MT699: (n,d) continuum energy-angle distr. and photon prod.     7231 1451  315
+- MT749: (n,t) continuum energy-angle distr. and photon prod.     7231 1451  316
+- MT809: (n,h) continuum energy-angle distr. and photon prod.     7231 1451  317
+- MT849: (n,a) continuum energy-angle distr. and photon prod.     7231 1451  318
+                                                                  7231 1451  319
+##### MF8: RADIOACTIVE DECAY DATA                                 7231 1451  320
+                                                                  7231 1451  321
+For reactions to isomers, MF8 designates where the information    7231 1451  322
+for isomeric versus ground state production, or residual          7231 1451  323
+production can be found, i.e. for each MT number it points to     7231 1451  324
+either MF6, MF9 or MF10.                                          7231 1451  325
+                                                                  7231 1451  326
+##### MF9: MULTIPLICITIES FOR PRODUCTION OF RADIOACTIVE NUCLIDES  7231 1451  327
+                                                                  7231 1451  328
+MF9 is used for isomer production by non-threshold reactions.     7231 1451  329
+Final states with a lifetime that exceeds 1 second are treated    7231 1451  330
+as isomer.                                                        7231 1451  331
+                                                                  7231 1451  332
+##### MF10: CROSS SECTIONS FOR PRODUCTION OF RADIOACTIVE NUCLIDES 7231 1451  333
+                                                                  7231 1451  334
+MF10 is used for isomer production by threshold reactions.        7231 1451  335
+Final states with a lifetime that exceeds 1 second are treated    7231 1451  336
+as isomer.                                                        7231 1451  337
+                                                                  7231 1451  338
+##### MF12: PHOTON PRODUCTION YIELD DATA                          7231 1451  339
+                                                                  7231 1451  340
+MF12 is used for the photon production for two types of reactions:7231 1451  341
+- Reactions to discrete levels (MT51, etc.) For this transition   7231 1451  342
+  probabilities are used (LO=2)                                   7231 1451  343
+- Photons from neutron capture (MT102). Here multiplicities are   7231 1451  344
+  given                                                           7231 1451  345
+                                                                  7231 1451  346
+##### MF14: PHOTON ANGULAR DISTRIBUTIONS                          7231 1451  347
+                                                                  7231 1451  348
+All photon production is considered as isotropic                  7231 1451  349
+                                                                  7231 1451  350
+##### MF15: PHOTON ENERGY SPECTRA                                 7231 1451  351
+                                                                  7231 1451  352
+For capture (MT102), the photon energy spectrum is given.         7231 1451  353
+                                                                  7231 1451  354
+##### MF32: COVARIANCES OF RESONANCE PARAMETERS                   7231 1451  355
+                                                                  7231 1451  356
+In MF32, we store the covariances of resonance parameters,        7231 1451  357
+and more details are given above in this description.             7231 1451  358
+                                                                  7231 1451  359
+##### MF33: COVARIANCES OF NEUTRON CROSS SECTIONS                 7231 1451  360
+                                                                  7231 1451  361
+In MF33, we store the covariances of most, but not all, reaction  7231 1451  362
+channels that are given in MF3. All covariances are generated     7231 1451  363
+with the TASMAN code (Ref. 11), which generates TALYS runs using  7231 1451  364
+a Monte Carlo parameter method.                                   7231 1451  365
+For each MT-number, the information consists of:                  7231 1451  366
+1. Covariances for MTa, Ea and MTa, Ea (variances)                7231 1451  367
+2. Covariances for MTa, Ea and MTa, Eb (correlations for the      7231 1451  368
+   same reaction channel between different energies)              7231 1451  369
+3. Covariances for MTa, Ea and MTb, Ea (correlations between      7231 1451  370
+   different reaction channels for the same energy)               7231 1451  371
+4. Covariances for MTa, Ea and MTb, Eb (correlations between      7231 1451  372
+   different reaction channels for different energies)            7231 1451  373
+Classes 1 and 2 are covered by NI-type subsubsections with        7231 1451  374
+flag LB=5, followed by a LB=8 section which contains              7231 1451  375
+the cross section variances multiplied by 1.e-3. Next, classes 3  7231 1451  376
+and 4 are covered by flag LB=6 to account for the different       7231 1451  377
+energy grids that two correlating MT-sections may have. Since     7231 1451  378
+the total correlation matrix is fully symmetric, we only need to  7231 1451  379
+include the correlation elements between different MT-numbers     7231 1451  380
+once, and we do that in the subsection with the lowest of the     7231 1451  381
+two MT-numbers. We include covariance information for all the     7231 1451  382
+total cross sections, the lumped partial cross sections and the   7231 1451  383
+individual inelastic cross sections per level (MT51,...). We do   7231 1451  384
+not include covariances for MT600 and higher MT-numbers. For the  7231 1451  385
+most important channels, we include cross-channel correlations.   7231 1451  386
+                                                                  7231 1451  387
+##### MF34: COVARIANCES OF ANGULAR DISTRIBUTIONS                  7231 1451  388
+                                                                  7231 1451  389
+In MF34, we store the covariances of the elastic scattering       7231 1451  390
+angular distributions that are given in MF4/MT2. All covariances  7231 1451  391
+are generated with the TASMAN code (Ref. 11), which generates     7231 1451  392
+TALYS runs using a Monte Carlo parameter method. The tables are   7231 1451  393
+restricted to MT2 and contain covariances for the first 6         7231 1451  394
+Legendre coefficients. Both intra- and inter-correlations of the  7231 1451  395
+various Legendre coefficients are given. As in MF33, the LB5      7231 1451  396
+representation is used.                                           7231 1451  397
+                                                                  7231 1451  398
+##### MF40: COVARIANCES OF ISOMER PRODUCTION                      7231 1451  399
+                                                                  7231 1451  400
+For covariances of ground state and isomeric cross sections, the  7231 1451  401
+same procedures as for MF33 are used.                             7231 1451  402
+                                                                  7231 1451  403
+*********************** R E F E R E N C E S **********************7231 1451  404
+                                                                  7231 1451  405
+ References                                                       7231 1451  406
+ 1) T C Ware Measurement and Analysis of the Resolved Resonance   7231 1451  407
+    Cross-Sections of Natural Hafnium Isotopes, PhD Thesis,       7231 1451  408
+    University of Birmingham, UK, 2010.                           7231 1451  409
+ 2) T Ware et al., Evaluation of Neutron Cross Sections for       7231 1451  410
+    Hafnium in the Resolved Resonance Range, ND2010 Conference    7231 1451  411
+    Korea, April 2010.                                            7231 1451  412
+ 3) M C Moxon et al., REFIT-2007 A Least-Square Fitting Program   7231 1451  413
+    for Resonance Analysis of Neutron Transmission, Capture,      7231 1451  414
+    Fission and Scattering Data Users' Guide for REFIT-2007-08,   7231 1451  415
+    UKNSF(2007)P216.                                              7231 1451  416
+ 4) M C Moxon, Analysis of the 8eV Doublet in Hf, JEF/DOC-1313,   7231 1451  417
+    November 2009.                                                7231 1451  418
+ 5) P Siegler et al., Testing of neutron data by comparison of    7231 1451  419
+    measured and calculated average transmissions, ND2001         7231 1451  420
+    Conference and J. Nuc. Sci. and Tech. Sup. 2, 936-939,        7231 1451  421
+    August 2002.                                                  7231 1451  422
+ 6) A Borella, P Schillebeeckx et al., Advances in Neutron        7231 1451  423
+    Induced Resonance Reaction Cross Section Studies at GELINA,   7231 1451  424
+    ND2007, Vol 1,page 547.                                       7231 1451  425
+ 7) M C Moxon et al., Differential neutron cross-sections of      7231 1451  426
+    natural hafnium and its isotopes for neutron energies up to   7231 1451  427
+    30 eV, Harwell report, AERE R7864 (1974).                     7231 1451  428
+ 8) T Fuketa and J A Harvey, Level spacings and s-wave neutron    7231 1451  429
+    strength functions of the isotopes of hafnium, ORNL report,   7231 1451  430
+    ORNL-3778 (1965).                                             7231 1451  431
+ 9) M J Trbovich et al., Hafnium resonance parameter analysis     7231 1451  432
+    using neutron capture and transmission experiments, ND2004.   7231 1451  433
+10) A.J. Koning, S. Hilaire and M.C. Duijvestijn, TALYS-1.0,      7231 1451  434
+    Proceedings of the International Conference on Nuclear        7231 1451  435
+    Data for Science and Technology - ND-2007,                    7231 1451  436
+    April 22-27, 2007, Nice, France                               7231 1451  437
+11) A.J. Koning and D. Rochman, Modern nuclear data               7231 1451  438
+    evaluation with the TALYS code system, Nuclear Data           7231 1451  439
+    Sheets 113, 2841 (2012)                                       7231 1451  440
+12) G. Noguere, E. Rich, C. De Saint Jean, O. Litaize,            7231 1451  441
+    P. Siegler, V. Avrigeanu, NPA 831, 106 (2009)                 7231 1451  442
+13) G. Noguere, P. Blaise, O. Litaize, D. Bernard,                7231 1451  443
+    J-M. Ruggieri, ANE 36, 1059 (2009)                            7231 1451  444
+14) J. Kopecky, M. Uhl, Phys. Rev. C, Vol. 47, 1 (1993)           7231 1451  445
+15) "Database of prompt gamma rays from slow neutron capture      7231 1451  446
+    for elemental analysis", IAEA, Vienna (2007)                  7231 1451  447
+                                                                  7231 1451  448
+************************* C O N T E N T S ************************7231 1451  449
+                                                                  7231 1451  450
+                                1        451        454          17231 1451  451
+                                2        151        179          17231 1451  452
+                                3        107         15          17231 1451  453
+                               33        107         46          17231 1451  454
+ 0.000000+0 0.000000+0          0          0          0          07231 1  099999
+                                                                  7231 0  0    0
+ 7.217600+4 1.744300+2          0          0          1          07231 2151    1
+ 7.217600+4 1.000000+0          0          0          2          07231 2151    2
+ 1.000000-5 3.000000+3          1          3          0          17231 2151    3
+ 0.000000+0 7.600000-1          1          0          1          17231 2151    4
+ 1.744300+2 7.600000-1          0          0        444         747231 2151    5
+-8.063200+1 5.000000-1 3.510000-1 5.832000-2 0.000000+0 0.000000+07231 2151    6
+-2.013800+1 5.000000-1 2.604000-2 5.634000-2 0.000000+0 0.000000+07231 2151    7
+ 7.903400+0 5.000000-1 9.388000-3 4.473000-2 0.000000+0 0.000000+07231 2151    8
+ 4.823900+1 5.000000-1 1.129000-1 5.805000-2 0.000000+0 0.000000+07231 2151    9
+ 5.327000+1 5.000000-1 1.499000-3 7.073000-2 0.000000+0 0.000000+07231 2151   10
+ 6.725600+1 5.000000-1 1.649000-2 6.281000-2 0.000000+0 0.000000+07231 2151   11
+ 1.240400+2 5.000000-1 4.352000-2 6.092000-2 0.000000+0 0.000000+07231 2151   12
+ 1.778000+2 5.000000-1 4.405000-2 6.823000-2 0.000000+0 0.000000+07231 2151   13
+ 2.017100+2 5.000000-1 3.955000-2 5.636000-2 0.000000+0 0.000000+07231 2151   14
+ 2.435500+2 5.000000-1 1.699000-2 5.824000-2 0.000000+0 0.000000+07231 2151   15
+ 2.551800+2 5.000000-1 1.022000-1 5.304000-2 0.000000+0 0.000000+07231 2151   16
+ 2.867400+2 5.000000-1 2.107000-1 6.049000-2 0.000000+0 0.000000+07231 2151   17
+ 3.045600+2 5.000000-1 2.009000-2 5.176000-2 0.000000+0 0.000000+07231 2151   18
+ 3.472000+2 5.000000-1 1.719000-1 5.549000-2 0.000000+0 0.000000+07231 2151   19
+ 3.962700+2 5.000000-1 4.985000-4 5.100000-2 0.000000+0 0.000000+07231 2151   20
+ 4.239700+2 5.000000-1 1.059000-3 5.100000-2 0.000000+0 0.000000+07231 2151   21
+ 4.351400+2 5.000000-1 1.348000-1 5.100000-2 0.000000+0 0.000000+07231 2151   22
+ 4.441800+2 5.000000-1 1.554000-1 5.355000-2 0.000000+0 0.000000+07231 2151   23
+ 4.759400+2 5.000000-1 1.876000-2 1.794000-1 0.000000+0 0.000000+07231 2151   24
+ 5.336800+2 5.000000-1 3.246000-2 4.368000-2 0.000000+0 0.000000+07231 2151   25
+ 5.469600+2 5.000000-1 7.662000-2 5.082000-2 0.000000+0 0.000000+07231 2151   26
+ 5.771700+2 5.000000-1 3.434000-2 3.517000-1 0.000000+0 0.000000+07231 2151   27
+ 6.261600+2 5.000000-1 7.269000-1 6.594000-2 0.000000+0 0.000000+07231 2151   28
+ 6.558700+2 5.000000-1 1.766000-1 5.525000-2 0.000000+0 0.000000+07231 2151   29
+ 7.308500+2 5.000000-1 3.862000-2 7.649000-2 0.000000+0 0.000000+07231 2151   30
+ 7.493900+2 5.000000-1 1.017000-1 4.713000-2 0.000000+0 0.000000+07231 2151   31
+ 7.807199+2 5.000000-1 4.780000-2 2.100000-2 0.000000+0 0.000000+07231 2151   32
+ 7.919500+2 5.000000-1 1.661000-1 6.363000-2 0.000000+0 0.000000+07231 2151   33
+ 8.696700+2 5.000000-1 1.297000+0 6.695000-2 0.000000+0 0.000000+07231 2151   34
+ 9.213100+2 5.000000-1 1.486000-1 5.310000-2 0.000000+0 0.000000+07231 2151   35
+ 9.315900+2 5.000000-1 4.502000-2 5.574000-2 0.000000+0 0.000000+07231 2151   36
+ 9.555901+2 5.000000-1 2.464000-1 5.716000-2 0.000000+0 0.000000+07231 2151   37
+ 9.789100+2 5.000000-1 1.069000-2 2.928000-2 0.000000+0 0.000000+07231 2151   38
+ 9.940600+2 5.000000-1 2.179000-1 4.488000-2 0.000000+0 0.000000+07231 2151   39
+ 1.030300+3 5.000000-1 1.580000-1 5.100000-2 0.000000+0 0.000000+07231 2151   40
+ 1.067300+3 5.000000-1 1.608000-1 5.100000-2 0.000000+0 0.000000+07231 2151   41
+ 1.135900+3 5.000000-1 1.659000-1 5.100000-2 0.000000+0 0.000000+07231 2151   42
+ 1.180000+3 5.000000-1 1.691000-1 5.100000-2 0.000000+0 0.000000+07231 2151   43
+ 1.264000+3 5.000000-1 1.750000-1 5.100000-2 0.000000+0 0.000000+07231 2151   44
+ 1.282600+3 5.000000-1 1.763000-1 5.100000-2 0.000000+0 0.000000+07231 2151   45
+ 1.371300+3 5.000000-1 1.823000-1 5.100000-2 0.000000+0 0.000000+07231 2151   46
+ 1.446100+3 5.000000-1 1.872000-1 5.100000-2 0.000000+0 0.000000+07231 2151   47
+ 1.501600+3 5.000000-1 1.907000-1 5.100000-2 0.000000+0 0.000000+07231 2151   48
+ 1.531000+3 5.000000-1 1.926000-1 5.100000-2 0.000000+0 0.000000+07231 2151   49
+ 1.597500+3 5.000000-1 1.967000-1 5.100000-2 0.000000+0 0.000000+07231 2151   50
+ 1.622900+3 5.000000-1 1.983000-1 5.100000-2 0.000000+0 0.000000+07231 2151   51
+ 1.679400+3 5.000000-1 2.017000-1 5.100000-2 0.000000+0 0.000000+07231 2151   52
+ 1.737800+3 5.000000-1 2.052000-1 5.100000-2 0.000000+0 0.000000+07231 2151   53
+ 1.788400+3 5.000000-1 2.081000-1 5.100000-2 0.000000+0 0.000000+07231 2151   54
+ 1.813600+3 5.000000-1 2.096000-1 5.100000-2 0.000000+0 0.000000+07231 2151   55
+ 1.842100+3 5.000000-1 2.112000-1 5.100000-2 0.000000+0 0.000000+07231 2151   56
+ 1.966100+3 5.000000-1 2.182000-1 5.100000-2 0.000000+0 0.000000+07231 2151   57
+ 1.991100+3 5.000000-1 2.196000-1 5.100000-2 0.000000+0 0.000000+07231 2151   58
+ 2.011400+3 5.000000-1 2.207000-1 5.100000-2 0.000000+0 0.000000+07231 2151   59
+ 2.116400+3 5.000000-1 2.264000-1 5.100000-2 0.000000+0 0.000000+07231 2151   60
+ 2.139700+3 5.000000-1 2.277000-1 5.100000-2 0.000000+0 0.000000+07231 2151   61
+ 2.169600+3 5.000000-1 2.292000-1 5.100000-2 0.000000+0 0.000000+07231 2151   62
+ 2.194200+3 5.000000-1 2.305000-1 5.100000-2 0.000000+0 0.000000+07231 2151   63
+ 2.277100+3 5.000000-1 2.349000-1 5.100000-2 0.000000+0 0.000000+07231 2151   64
+ 2.300800+3 5.000000-1 2.361000-1 5.100000-2 0.000000+0 0.000000+07231 2151   65
+ 2.323000+3 5.000000-1 2.372000-1 5.100000-2 0.000000+0 0.000000+07231 2151   66
+ 2.333900+3 5.000000-1 2.378000-1 5.100000-2 0.000000+0 0.000000+07231 2151   67
+ 2.429500+3 5.000000-1 2.426000-1 5.100000-2 0.000000+0 0.000000+07231 2151   68
+ 2.463200+3 5.000000-1 2.443000-1 5.100000-2 0.000000+0 0.000000+07231 2151   69
+ 2.522500+3 5.000000-1 2.472000-1 5.100000-2 0.000000+0 0.000000+07231 2151   70
+ 2.544200+3 5.000000-1 2.482000-1 5.100000-2 0.000000+0 0.000000+07231 2151   71
+ 2.560700+3 5.000000-1 2.491000-1 5.100000-2 0.000000+0 0.000000+07231 2151   72
+ 2.608200+3 5.000000-1 2.514000-1 5.100000-2 0.000000+0 0.000000+07231 2151   73
+ 2.638700+3 5.000000-1 2.528000-1 5.100000-2 0.000000+0 0.000000+07231 2151   74
+ 2.785100+3 5.000000-1 2.597000-1 5.100000-2 0.000000+0 0.000000+07231 2151   75
+ 2.871200+3 5.000000-1 2.637000-1 5.100000-2 0.000000+0 0.000000+07231 2151   76
+ 2.899800+3 5.000000-1 2.650000-1 5.100000-2 0.000000+0 0.000000+07231 2151   77
+ 2.947100+3 5.000000-1 2.672000-1 5.100000-2 0.000000+0 0.000000+07231 2151   78
+ 3.000400+3 5.000000-1 2.696000-1 5.100000-2 0.000000+0 0.000000+07231 2151   79
+ 3.000000+3 8.000000+4          2          2          0          07231 2151   80
+ 0.000000+0 7.600000-1          1          0          3          07231 2151   81
+ 1.744290+2 0.000000+0          0          0          1          07231 2151   82
+ 5.000000-1 0.000000+0          2          0        108         177231 2151   83
+ 0.000000+0 0.000000+0 1.000000+0 1.000000+0 0.000000+0 0.000000+07231 2151   84
+ 3.000000+3 3.483000+1 0.000000+0 6.932564-3 5.015800-2 0.000000+07231 2151   85
+ 3.500000+3 3.480100+1 0.000000+0 6.908347-3 5.016200-2 0.000000+07231 2151   86
+ 4.000000+3 3.477300+1 0.000000+0 6.886097-3 5.016600-2 0.000000+07231 2151   87
+ 4.500000+3 3.474500+1 0.000000+0 6.864570-3 5.017000-2 0.000000+07231 2151   88
+ 5.000000+3 3.471700+1 0.000000+0 6.844110-3 5.017400-2 0.000000+07231 2151   89
+ 6.000000+3 3.466000+1 0.000000+0 6.805838-3 5.018300-2 0.000000+07231 2151   90
+ 7.000000+3 3.460400+1 0.000000+0 6.769926-3 5.019100-2 0.000000+07231 2151   91
+ 8.000001+3 3.454800+1 0.000000+0 6.736169-3 5.020000-2 0.000000+07231 2151   92
+ 9.000000+3 3.449100+1 0.000000+0 6.704016-3 5.020800-2 0.000000+07231 2151   93
+ 1.000000+4 3.443500+1 0.000000+0 6.673159-3 5.021700-2 0.000000+07231 2151   94
+ 2.000000+4 3.388000+1 0.000000+0 6.414839-3 5.030200-2 0.000000+07231 2151   95
+ 3.000000+4 3.333400+1 0.000000+0 6.204791-3 5.038800-2 0.000000+07231 2151   96
+ 4.000000+4 3.279700+1 0.000000+0 6.021529-3 5.047500-2 0.000000+07231 2151   97
+ 5.000000+4 3.226900+1 0.000000+0 5.855210-3 5.056300-2 0.000000+07231 2151   98
+ 6.000000+4 3.175100+1 0.000000+0 5.702480-3 5.065100-2 0.000000+07231 2151   99
+ 7.000000+4 3.124000+1 0.000000+0 5.559783-3 5.074000-2 0.000000+07231 2151  100
+ 8.000000+4 3.073900+1 0.000000+0 5.426048-3 5.083000-2 0.000000+07231 2151  101
+ 1.744290+2 0.000000+0          1          0          2          07231 2151  102
+ 5.000000-1 0.000000+0          2          0        108         177231 2151  103
+ 0.000000+0 0.000000+0 1.000000+0 1.000000+0 0.000000+0 0.000000+07231 2151  104
+ 3.000000+3 3.483000+1 0.000000+0 3.131531-3 4.934900-2 0.000000+07231 2151  105
+ 3.500000+3 3.480100+1 0.000000+0 3.129793-3 4.935400-2 0.000000+07231 2151  106
+ 4.000000+3 3.477300+1 0.000000+0 3.128109-3 4.935800-2 0.000000+07231 2151  107
+ 4.500000+3 3.474500+1 0.000000+0 3.126459-3 4.936300-2 0.000000+07231 2151  108
+ 5.000000+3 3.471700+1 0.000000+0 3.124808-3 4.936800-2 0.000000+07231 2151  109
+ 6.000000+3 3.466000+1 0.000000+0 3.121480-3 4.937700-2 0.000000+07231 2151  110
+ 7.000000+3 3.460400+1 0.000000+0 3.118097-3 4.938600-2 0.000000+07231 2151  111
+ 8.000001+3 3.454800+1 0.000000+0 3.114640-3 4.939500-2 0.000000+07231 2151  112
+ 9.000000+3 3.449100+1 0.000000+0 3.111123-3 4.940400-2 0.000000+07231 2151  113
+ 1.000000+4 3.443500+1 0.000000+0 3.107690-3 4.941300-2 0.000000+07231 2151  114
+ 2.000000+4 3.388000+1 0.000000+0 3.072747-3 4.950500-2 0.000000+07231 2151  115
+ 3.000000+4 3.333400+1 0.000000+0 3.037060-3 4.959800-2 0.000000+07231 2151  116
+ 4.000000+4 3.279700+1 0.000000+0 3.001287-3 4.969200-2 0.000000+07231 2151  117
+ 5.000000+4 3.226900+1 0.000000+0 2.965360-3 4.978600-2 0.000000+07231 2151  118
+ 6.000000+4 3.175100+1 0.000000+0 2.929728-3 4.988100-2 0.000000+07231 2151  119
+ 7.000000+4 3.124000+1 0.000000+0 2.894355-3 4.997600-2 0.000000+07231 2151  120
+ 8.000000+4 3.073900+1 0.000000+0 2.859772-3 5.007200-2 0.000000+07231 2151  121
+ 1.500000+0 0.000000+0          2          0        108         177231 2151  122
+ 0.000000+0 0.000000+0 1.000000+0 1.000000+0 0.000000+0 0.000000+07231 2151  123
+ 3.000000+3 1.829100+1 0.000000+0 1.920372-3 4.893700-2 0.000000+07231 2151  124
+ 3.500000+3 1.827700+1 0.000000+0 1.919816-3 4.894200-2 0.000000+07231 2151  125
+ 4.000000+3 1.826200+1 0.000000+0 1.919153-3 4.894600-2 0.000000+07231 2151  126
+ 4.500000+3 1.824700+1 0.000000+0 1.918489-3 4.895100-2 0.000000+07231 2151  127
+ 5.000000+3 1.823200+1 0.000000+0 1.917642-3 4.895500-2 0.000000+07231 2151  128
+ 6.000000+3 1.820200+1 0.000000+0 1.916307-3 4.896500-2 0.000000+07231 2151  129
+ 7.000000+3 1.817200+1 0.000000+0 1.914966-3 4.897400-2 0.000000+07231 2151  130
+ 8.000001+3 1.814300+1 0.000000+0 1.913542-3 4.898300-2 0.000000+07231 2151  131
+ 9.000000+3 1.811300+1 0.000000+0 1.912009-3 4.899200-2 0.000000+07231 2151  132
+ 1.000000+4 1.808400+1 0.000000+0 1.910575-3 4.900100-2 0.000000+07231 2151  133
+ 2.000000+4 1.779100+1 0.000000+0 1.895275-3 4.909300-2 0.000000+07231 2151  134
+ 3.000000+4 1.750400+1 0.000000+0 1.879054-3 4.918600-2 0.000000+07231 2151  135
+ 4.000000+4 1.722100+1 0.000000+0 1.862279-3 4.927900-2 0.000000+07231 2151  136
+ 5.000000+4 1.694300+1 0.000000+0 1.845093-3 4.937400-2 0.000000+07231 2151  137
+ 6.000000+4 1.667000+1 0.000000+0 1.827532-3 4.946800-2 0.000000+07231 2151  138
+ 7.000000+4 1.640200+1 0.000000+0 1.810125-3 4.956400-2 0.000000+07231 2151  139
+ 8.000000+4 1.613700+1 0.000000+0 1.792498-3 4.966000-2 0.000000+07231 2151  140
+ 1.744290+2 0.000000+0          2          0          2          07231 2151  141
+ 1.500000+0 0.000000+0          2          0        108         177231 2151  142
+ 0.000000+0 0.000000+0 1.000000+0 1.000000+0 0.000000+0 0.000000+07231 2151  143
+ 3.000000+3 1.829100+1 0.000000+0 3.788432-3 4.979800-2 0.000000+07231 2151  144
+ 3.500000+3 1.827700+1 0.000000+0 3.784618-3 4.980200-2 0.000000+07231 2151  145
+ 4.000000+3 1.826200+1 0.000000+0 3.780599-3 4.980600-2 0.000000+07231 2151  146
+ 4.500000+3 1.824700+1 0.000000+0 3.776582-3 4.981100-2 0.000000+07231 2151  147
+ 5.000000+3 1.823200+1 0.000000+0 3.772565-3 4.981500-2 0.000000+07231 2151  148
+ 6.000000+3 1.820200+1 0.000000+0 3.764538-3 4.982300-2 0.000000+07231 2151  149
+ 7.000000+3 1.817200+1 0.000000+0 3.756516-3 4.983200-2 0.000000+07231 2151  150
+ 8.000001+3 1.814300+1 0.000000+0 3.748525-3 4.984000-2 0.000000+07231 2151  151
+ 9.000000+3 1.811300+1 0.000000+0 3.740516-3 4.984900-2 0.000000+07231 2151  152
+ 1.000000+4 1.808400+1 0.000000+0 3.732718-3 4.985700-2 0.000000+07231 2151  153
+ 2.000000+4 1.779100+1 0.000000+0 3.654271-3 4.994200-2 0.000000+07231 2151  154
+ 3.000000+4 1.750400+1 0.000000+0 3.577468-3 5.002700-2 0.000000+07231 2151  155
+ 4.000000+4 1.722100+1 0.000000+0 3.501890-3 5.011400-2 0.000000+07231 2151  156
+ 5.000000+4 1.694300+1 0.000000+0 3.427738-3 5.020100-2 0.000000+07231 2151  157
+ 6.000000+4 1.667000+1 0.000000+0 3.354504-3 5.028900-2 0.000000+07231 2151  158
+ 7.000000+4 1.640200+1 0.000000+0 3.282204-3 5.037700-2 0.000000+07231 2151  159
+ 8.000000+4 1.613700+1 0.000000+0 3.209004-3 5.046600-2 0.000000+07231 2151  160
+ 2.500000+0 0.000000+0          2          0        108         177231 2151  161
+ 0.000000+0 0.000000+0 1.000000+0 1.000000+0 0.000000+0 0.000000+07231 2151  162
+ 3.000000+3 1.323400+1 0.000000+0 5.559206-3 4.925000-2 0.000000+07231 2151  163
+ 3.500000+3 1.322400+1 0.000000+0 5.554345-3 4.925400-2 0.000000+07231 2151  164
+ 4.000000+3 1.321300+1 0.000000+0 5.549063-3 4.925800-2 0.000000+07231 2151  165
+ 4.500000+3 1.320200+1 0.000000+0 5.543916-3 4.926300-2 0.000000+07231 2151  166
+ 5.000000+3 1.319100+1 0.000000+0 5.538637-3 4.926700-2 0.000000+07231 2151  167
+ 6.000000+3 1.317000+1 0.000000+0 5.528502-3 4.927500-2 0.000000+07231 2151  168
+ 7.000000+3 1.314800+1 0.000000+0 5.517952-3 4.928300-2 0.000000+07231 2151  169
+ 8.000001+3 1.312600+1 0.000000+0 5.507407-3 4.929200-2 0.000000+07231 2151  170
+ 9.000000+3 1.310500+1 0.000000+0 5.497154-3 4.930000-2 0.000000+07231 2151  171
+ 1.000000+4 1.308300+1 0.000000+0 5.486618-3 4.930800-2 0.000000+07231 2151  172
+ 2.000000+4 1.287100+1 0.000000+0 5.383554-3 4.939200-2 0.000000+07231 2151  173
+ 3.000000+4 1.266200+1 0.000000+0 5.280561-3 4.947600-2 0.000000+07231 2151  174
+ 4.000000+4 1.245700+1 0.000000+0 5.178250-3 4.956100-2 0.000000+07231 2151  175
+ 5.000000+4 1.225500+1 0.000000+0 5.076021-3 4.964700-2 0.000000+07231 2151  176
+ 6.000000+4 1.205600+1 0.000000+0 4.973582-3 4.973300-2 0.000000+07231 2151  177
+ 7.000000+4 1.186100+1 0.000000+0 4.871313-3 4.982000-2 0.000000+07231 2151  178
+ 8.000000+4 1.166900+1 0.000000+0 4.767720-3 4.990800-2 0.000000+07231 2151  179
+                                                                  7231 2  099999
+                                                                  7231 0  0    0
+ 7.217600+4 1.744300+2          0          0          0          07231 3107    1
+ 8.620200+6 8.620200+6          0          0          1         357231 3107    2
+         35          2                                            7231 3107    3
+ 8.000000+5 0.000000+0 9.000000+5 1.824800-7 1.000000+6 2.397101-77231 3107    4
+ 1.200000+6 1.203481-6 1.400000+6 1.671950-6 1.600000+6 2.093681-67231 3107    5
+ 1.800000+6 2.548781-6 2.000000+6 2.966209-6 2.200000+6 3.706842-67231 3107    6
+ 2.400000+6 4.444651-6 2.600000+6 5.168921-6 2.800000+6 6.110987-67231 3107    7
+ 3.000000+6 7.177848-6 3.500000+6 9.908261-6 4.000000+6 1.327450-57231 3107    8
+ 4.500000+6 1.696689-5 5.000000+6 2.100120-5 5.500000+6 2.533369-57231 3107    9
+ 6.000000+6 2.970861-5 6.500000+6 3.420579-5 7.000000+6 3.898201-57231 3107   10
+ 7.500000+6 4.422449-5 8.000000+6 5.052912-5 9.000000+6 7.229939-57231 3107   11
+ 1.000000+7 1.206720-4 1.100000+7 2.246410-4 1.200000+7 4.216069-47231 3107   12
+ 1.300000+7 7.959190-4 1.400000+7 1.335020-3 1.500000+7 2.049559-37231 3107   13
+ 1.600000+7 2.903959-3 1.700000+7 3.862939-3 1.800000+7 5.037930-37231 3107   14
+ 1.900000+7 6.482899-3 2.000000+7 8.008379-3                      7231 3107   15
+                                                                  7231 3  099999
+                                                                  7231 3  099999
+                                                                  7231 3  099999
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+ 7.217600+4 1.744300+2          0          0          0          1723133107    1
+ 0.000000+0 0.000000+0          0        107          0          1723133107    2
+ 0.000000+0 0.000000+0          1          5        253         22723133107    3
+ 4.000000+6 4.500000+6 5.000000+6 5.500000+6 6.000000+6 6.500000+6723133107    4
+ 7.000000+6 7.500000+6 8.000000+6 9.000000+6 1.000000+7 1.100000+7723133107    5
+ 1.200000+7 1.300000+7 1.400000+7 1.500000+7 1.600000+7 1.700000+7723133107    6
+ 1.800000+7 1.900000+7 2.000000+7 2.000000+7 1.582382+2 1.736474+2723133107    7
+ 1.781634+2 1.746814+2 1.682570+2 1.604461+2 1.542837+2 1.502602+2723133107    8
+ 1.482291+2 1.348355+2 1.034224+2 6.535350+1 3.748446+1 1.963653+1723133107    9
+ 1.148585+1 6.960218+0 4.469516+0 3.052759+0 2.208994+0 1.842797+0723133107   10
+ 1.590774+0 1.905643+2 1.955298+2 1.917162+2 1.846680+2 1.760998+2723133107   11
+ 1.693420+2 1.649318+2 1.627094+2 1.480217+2 1.135524+2 7.176692+1723133107   12
+ 4.117341+1 2.157490+1 1.262446+1 7.653073+0 4.916654+0 3.360101+0723133107   13
+ 2.433764+0 2.032323+0 1.755324+0 2.006370+2 1.967363+2 1.895106+2723133107   14
+ 1.807261+2 1.737986+2 1.692807+2 1.670084+2 1.519521+2 1.165918+2723133107   15
+ 7.370842+1 4.230484+1 2.218099+1 1.298505+1 7.876140+0 5.063039+0723133107   16
+ 3.462631+0 2.510816+0 2.098956+0 1.813913+0 1.929253+2 1.858503+2723133107   17
+ 1.772458+2 1.704599+2 1.660364+2 1.638156+2 1.490664+2 1.144049+2723133107   18
+ 7.235068+1 4.154661+1 2.179799+1 1.276857+1 7.749800+0 4.984895+0723133107   19
+ 3.411407+0 2.475834+0 2.071402+0 1.790828+0 1.790490+2 1.707695+2723133107   20
+ 1.642380+2 1.599788+2 1.578421+2 1.436403+2 1.102610+2 6.975175+1723133107   21
+ 4.007295+1 2.103519+1 1.232979+1 7.487276+0 4.817790+0 3.297840+0723133107   22
+ 2.393595+0 2.002703+0 1.731506+0 1.628816+2 1.566579+2 1.526000+2723133107   23
+ 1.505662+2 1.370307+2 1.052068+2 6.657346+1 3.826334+1 2.009575+1723133107   24
+ 1.178548+1 7.160334+0 4.609395+0 3.156441+0 2.291987+0 1.918531+0723133107   25
+ 1.659138+0 1.506774+2 1.467795+2 1.448288+2 1.318213+2 1.012236+2723133107   26
+ 6.406737+1 3.683537+1 1.935373+1 1.135524+1 6.901941+0 4.445021+0723133107   27
+ 3.045376+0 2.212959+0 1.853747+0 1.603764+0 1.429881+2 1.410939+2723133107   28
+ 1.284347+2 9.863768+1 6.244250+1 3.591117+1 1.887568+1 1.107822+1723133107   29
+ 6.736226+0 4.340254+0 2.975266+0 2.164006+0 1.814425+0 1.570518+0723133107   30
+ 1.392312+2 1.267537+2 9.736295+1 6.164829+1 3.546517+1 1.864954+1723133107   31
+ 1.094911+1 6.660611+0 4.293675+0 2.945148+0 2.144243+0 1.799578+0723133107   32
+ 1.558405+0 1.154267+2 8.870360+1 5.619933+1 3.235899+1 1.703686+1723133107   33
+ 1.001218+1 6.097771+0 3.935680+0 2.703359+0 1.972177+0 1.658023+0723133107   34
+ 1.436839+0 6.822663+1 4.327935+1 2.496442+1 1.317625+1 7.758266+0723133107   35
+ 4.735276+0 3.062316+0 2.107466+0 1.540794+0 1.297283+0 1.124563+0723133107   36
+ 2.750395+1 1.590653+1 8.425234+0 4.974895+0 3.045568+0 1.974630+0723133107   37
+ 1.361997+0 9.979141-1 8.412291-1 7.292517-1 9.234281+0 4.915484+0723133107   38
+ 2.914510+0 1.791827+0 1.165972+0 8.068192-1 5.930348-1 5.009553-1723133107   39
+ 4.344358-1 2.695078+0 1.569764+0 9.703887-1 6.344263-1 4.408424-1723133107   40
+ 3.252227-1 2.749523-1 2.380547-1 9.398304-1 5.835516-1 3.829827-1723133107   41
+ 2.670873-1 1.979240-1 1.681419-1 1.460465-1 3.640329-1 2.399604-1723133107   42
+ 1.680982-1 1.252586-1 1.068734-1 9.300036-2 1.589298-1 1.119753-1723133107   43
+ 8.413916-2 7.232336-2 6.318662-2 7.951349-2 6.049542-2 5.260681-2723133107   44
+ 4.627763-2 4.702380-2 4.177059-2 3.723152-2 3.796198-2 3.435128-2723133107   45
+ 3.142003-2 0.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0723133107   46
+                                                                  723133  099999
+                                                                  7231 0  0    0
+                                                                  7231 0  0    0
+                                                                     0 0  0    0
+                                                                    -1 0  0    0

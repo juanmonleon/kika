@@ -116,3 +116,30 @@ def test_the_sampler_shows_layer1_and_names_the_cause_when_it_refuses(tmp_path, 
                         (None, suite, endf, None, "endf", (covReport, None)))
     with pytest.raises(ValueError, match="Traced to the file:.*ls1_in_cross_block"):
         mp.perturbFromModel("tape.endf", {34: None}, 1, dryRun=True)
+
+
+def test_the_real_ne20_rho_is_traced_to_its_ls1_records():
+    """The same on the evaluation it was modelled on: JEFF-4.0 Ne-20 MF34/MT2,
+    committed as ``micro_ne20_covcheck.endf``. Each of the seven |rho| > 1 the
+    pre-flight finds in the joint is traced to the LS=1 record of its block."""
+    from pathlib import Path
+
+    from kika.cov.conditioning import inspect_blocks
+    from kika.endf import read_endf
+    from kika.sampling.joint_blocks import assembleRequest, collectEntries
+    from kika.sampling.section_checks import attribute, relevantFindings, sectionFindings
+
+    tape = Path(__file__).resolve().parents[2] / "endf/tests/data/micro_ne20_covcheck.endf"
+    suite, _ = decodeCovarianceSuite(read_endf(str(tape)))
+    blocks, index = assembleRequest(collectEntries(suite, {34: [2]}))
+    report = inspect_blocks(blocks, predict=False)
+    assert not report.samplable
+
+    traced = [a for a in attribute(blocks, index, report,
+                                   relevantFindings(sectionFindings(suite), index))
+              if a["check"] == "correlation_bound"]
+    assert len(traced) == 7
+    assert all(any("ls1_in_cross_block" in text for text in a["layer1"]) for a in traced)
+    worst = max(traced, key=lambda a: a["measure"])
+    assert worst["measure"] == pytest.approx(4.634, abs=1e-3)
+    assert "L=1" in worst["text"] and "L=5" in worst["text"] and "L1xL5" in worst["text"]

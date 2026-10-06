@@ -191,6 +191,14 @@ _TAPES: Dict[str, Sequence[str]] = {
     # of 111.94 between relative variances of 2.8e-6 and 0.035), verified on the
     # ENDF text without kika.
     "o16_b81": ("endfb81/n-008_O_016.endf", "n-008_O_016.endf"),
+    # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
+    # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
+    # validation that picked them is kika-workspace
+    # ``docs/library/cov_checks_roadmap.md``, phase C7.
+    "ne20_jeff40": ("jeff40/n_10-Ne-020g.jeff", "jeff40/neutrons/n_10-Ne-020g.jeff"),
+    "w186_jeff40": ("jeff40/n_74-W-186g.jeff", "jeff40/neutrons/n_74-W-186g.jeff"),
+    "fe57_jeff40": ("jeff40/n_26-Fe-057g.jeff", "jeff40/neutrons/n_26-Fe-057g.jeff"),
+    "hf176_jeff40": ("jeff40/n_72-Hf-176g.jeff", "jeff40/neutrons/n_72-Hf-176g.jeff"),
     # The ACE of that same evaluation (ENDF/B-VIII.1, 293.6 K), and a PENDF of the
     # JEFF-4.0 host: the three sources kika.plotting.plottable overlays in its
     # acceptance test.
@@ -505,6 +513,10 @@ fe56_gnds_cov_tape = _tape_fixture("fe56_gnds_cov")
 fe56_b81_tape = _tape_fixture("fe56_b81")
 si28_b81_tape = _tape_fixture("si28_b81")
 o16_b81_tape = _tape_fixture("o16_b81")
+ne20_jeff40_tape = _tape_fixture("ne20_jeff40")
+w186_jeff40_tape = _tape_fixture("w186_jeff40")
+fe57_jeff40_tape = _tape_fixture("fe57_jeff40")
+hf176_jeff40_tape = _tape_fixture("hf176_jeff40")
 fe56_ace_b81_tape = _tape_fixture("fe56_ace_b81")
 fe56_pendf_tape = _tape_fixture("fe56_pendf")
 
