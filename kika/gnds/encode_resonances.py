@@ -314,6 +314,8 @@ def _spinGroup(parent: ET.Element, group, report: ConversionReport,
 
     channels = ET.SubElement(element, "channels")
     for channel in group.channels:
+        if channel.additionalPhaseShift is not None or channel.phaseShiftMode:
+            report.unsupportedNode("GNDS channel has no supported per-channel KPS phase representation")
         if channel.tabulatedBackground is not None:
             report.unsupportedNode(f"channel {channel.label!r}: GNDS externalRMatrix cannot serialize a tabulated complex background")
         node = ET.SubElement(channels, "channel")

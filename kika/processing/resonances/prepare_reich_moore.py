@@ -50,6 +50,8 @@ def prepare_rm(region,resonances,context,notes):
         for channel in sg.channels:
             if channel.resonanceReaction not in roles:raise ValueError('RM channel refers to an unknown reaction')
             kinds.append(roles[channel.resonanceReaction])
+            if channel.additionalPhaseShift is not None or channel.phaseShiftMode:
+                raise UnsupportedResonanceError('RM channel phase requires complete RML pair normalization')
             if channel.externalRMatrix is not None or channel.tabulatedBackground is not None:
                 raise UnsupportedResonanceError('RM external R-matrix is deferred to RML')
             if channel.boundaryConditionValue not in (None,0.):raise UnsupportedResonanceError('nonzero RM boundary value is not supported')

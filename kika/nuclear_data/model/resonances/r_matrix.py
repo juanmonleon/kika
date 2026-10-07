@@ -74,7 +74,7 @@ class ExternalRMatrix:
     A contribution added to the R-matrix diagonal during reconstruction, standing
     in for levels the evaluator did not fit. Two parametrisations exist and they
     are not variants of one formula: SAMMY's is a polynomial in energy plus a
-    logarithmic term and is purely real; Froehner's is an arctangent plus a
+    logarithmic term and is purely real; Froehner's is an inverse hyperbolic tangent plus a
     genuinely **imaginary** part. A consumer that reads the terms without reading
     :attr:`type` has no way to tell which it holds.
 
@@ -199,6 +199,9 @@ class Channel:
     #: deliberately *not* ``ScatteringRadius``: ``reconstruct.py`` reads
     #: ``channels[0].scatteringRadius`` as a number into the penetrability.
     radiusUnit: Optional[str] = None
+    #: ENDF KPS is per channel; these replace its hard-sphere phase.
+    additionalPhaseShift: Optional[ComplexChannelFunction] = None
+    phaseShiftMode: Optional[int] = None
 
 
 @dataclass
@@ -309,7 +312,6 @@ class RMatrix:
     #: The unit the radius above was read with. Same field, same reason as
     #: :attr:`Channel.radiusUnit`.
     radiusUnit: Optional[str] = None
-    boundaryConditionValue: Optional[float] = None
     boundaryCondition: Optional[str] = None
     #: §19.3.1. ENDF's **IFG**. ``False`` — the default and the common case —
     #: means ``widths`` are widths in eV; ``True`` means they are reduced-width

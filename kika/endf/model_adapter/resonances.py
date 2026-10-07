@@ -542,6 +542,14 @@ def _normalizeRMLExtras(source, target, report):
         channel.externalRMatrix = ExternalRMatrix(kind,[PhysicalQuantity(value,unit,label=label)
             for label,value,unit in terms])
     target.phaseShiftMode = source.kps
+    if source.phase_shifts:
+        if len(source.phase_shifts)!=len(target.channels):raise ValueError('KPS channel count disagrees')
+        for ch,phase in zip(target.channels,source.phase_shifts):
+            ch.phaseShiftMode = int(phase is not None)
+            if phase is not None:
+                ch.additionalPhaseShift = ComplexChannelFunction(
+                    _channelFunction(phase.psr_energies,phase.psr_values,phase.psr_interp),
+                    _channelFunction(phase.psi_energies,phase.psi_values,phase.psi_interp))
     if source.phase_shift is not None:
         phase = source.phase_shift
         target.additionalPhaseShift = ComplexChannelFunction(
@@ -1003,6 +1011,7 @@ def _encodeRMLExtras(group, perGroup):
         ix,iy,iinterp = table(group.additionalPhaseShift.imaginary)
         phase=TabulatedPhaseShift(list(interp),list(x),list(y),list(iinterp),list(ix),list(iy))
     mode=perGroup.get('kps',0) if group.phaseShiftMode is None else group.phaseShiftMode
+    if any(ch.additionalPhaseShift is not None or ch.phaseShiftMode for ch in group.channels):mode=1
     return backgrounds,mode,phase
 
 
@@ -1010,8 +1019,15 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
     """LRF=7. Ten of the twelve particle-pair columns come from provenance."""
     from kika.endf.classes.mf2.mf2mt151 import (RMatrixLimited, RML_Channel,
                                                 RML_ParticlePair, RML_Resonance,
-                                                RML_SpinGroup)
+                                                RML_SpinGroup, TabulatedPhaseShift)
 
+    def phase_record(function):
+        from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
+        def table(curve):
+            if hasattr(curve,'toEndfRegions'):return curve.toEndfRegions()
+            return curve.xs,curve.ys,[(len(curve.xs),INTERPOLATION_TO_ENDF_INT[curve.interpolation])]
+        x,y,interp=table(function.real);ix,iy,iinterp=table(function.imaginary)
+        return TabulatedPhaseShift(list(interp),list(x),list(y),list(iinterp),list(ix),list(iy))
     pairs = fields.get("particle_pairs")
     if pairs is None:
         raise ValueError(
@@ -1075,17 +1091,20 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
                 apt=radiusToEndf(channel.scatteringRadius),
             ))
 
+        for ch in group.channels:
+            if ch.phaseShiftMode not in (None,0,1) or (ch.phaseShiftMode==1 and ch.additionalPhaseShift is None) or (ch.phaseShiftMode==0 and ch.additionalPhaseShift is not None):
+                raise ValueError("invalid per-channel LPS declaration")
         spinGroups.append(RML_SpinGroup(
             aj=encoded_spin, pj=encoded_parity,
             kbk=len(backgrounds), kps=phaseMode,
             channels=channels,
             resonances=[RML_Resonance(er=energy, widths=list(widths))
                         for energy, widths in zip(group.energies, group.widths)],
-            # Background R-matrices and phase shifts are held verbatim: the
-            # model has no node for either, so they are copied through rather
-            # than rebuilt. No tape to hand exercises this.
+            # Rebuild typed channel functions, retaining ENDF channel ownership.
             background=backgrounds,
             phase_shift=phaseFunction,
+            phase_shifts=[None if ch.additionalPhaseShift is None else phase_record(ch.additionalPhaseShift)
+                for ch in group.channels] if phaseMode else [],
         ))
 
     return RMatrixLimited(

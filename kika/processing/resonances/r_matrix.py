@@ -1,4 +1,4 @@
-"""Neutral multichannel KRM3 algebra, including real shifts and closed channels.
+"""Neutron-incidence KRM3/KRM4 algebra, including charged exits and closed shifts.
 
 R is unscaled: reduced amplitudes do not include sqrt(P). A channel/level
 augmented system replaces naked divisions near poles. Absorption is evaluated
@@ -47,10 +47,24 @@ class RMLChannel:
     boundary: float
     effective: bool = False
     external: object = None
+    charge_strength: float = 0.
+    phase_function: object = None
+    kinematics: object = None
+    reaction_label: str = ''
+
+    @property
+    def threshold(self):
+        return self.kinematics.threshold if self.kinematics is not None else -self.q/self.cm_ratio
+
+    def channel_energy(self,lab):
+        return self.kinematics.energy(lab) if self.kinematics is not None else self.cm_ratio*(np.asarray(lab)-self.threshold)
+
+    def k_squared(self,channel_energy):
+        return self.kinematics.k_squared(channel_energy) if self.kinematics is not None else self.k2_cm*channel_energy
 
     def functions(self, energy):
         e = np.asarray(energy)
-        channel_energy = self.cm_ratio*(e-(-self.q/self.cm_ratio))
+        channel_energy = self.channel_energy(e)
         opened = channel_energy > 0
         p = np.zeros_like(e)
         s = np.zeros_like(e)
@@ -58,16 +72,35 @@ class RMLChannel:
         if self.effective:
             p.fill(1.)
         else:
-            rho = np.sqrt(self.k2_cm*np.abs(channel_energy))*self.radius.evaluate(e)
+            rho = np.sqrt(np.abs(self.k_squared(channel_energy)))*self.radius.evaluate(e)
             if np.any(opened):
-                po, so, _ = neutral_channel_functions(self.l, rho[opened])
+                if self.charge_strength:
+                    from .coulomb import charged_channel_functions
+                    eta = self.charge_strength/np.sqrt(self.k2_cm*channel_energy[opened])
+                    po,so,_ = charged_channel_functions(self.l,eta,rho[opened])
+                else:
+                    po, so, _ = neutral_channel_functions(self.l, rho[opened])
                 p[opened] = po if self.penetrability == 'calculate' else 1.
                 s[opened] = so
                 if self.phase_radius.constant != 0.:
-                    phase[opened] = neutral_channel_functions(self.l,
-                        np.sqrt(self.k2_cm*channel_energy[opened])*self.phase_radius.evaluate(e[opened]))[2]
+                    phase_rho = np.sqrt(self.k_squared(channel_energy[opened]))*self.phase_radius.evaluate(e[opened])
+                    if self.charge_strength:
+                        phase[opened] = charged_channel_functions(self.l,eta,phase_rho)[2]
+                    else:
+                        phase[opened] = neutral_channel_functions(self.l,phase_rho)[2]
             if np.any(~opened):
-                s[~opened] = closed_neutral_shift(self.l, rho[~opened])
+                if self.charge_strength:
+                    from .coulomb import closed_charged_shift,charged_threshold_shift
+                    closed = channel_energy<0;threshold = channel_energy==0
+                    if np.any(closed):
+                        eta = self.charge_strength/np.sqrt(self.k2_cm*-channel_energy[closed])
+                        s[closed] = closed_charged_shift(self.l,eta,rho[closed])
+                    if np.any(threshold):
+                        s[threshold] = charged_threshold_shift(self.l,self.charge_strength*self.radius.evaluate(e[threshold]))
+                else:
+                    s[~opened] = closed_neutral_shift(self.l, rho[~opened])
+        if self.phase_function is not None:
+            phase[opened] = self.phase_function.evaluate(e[opened]).real
         real = s-self.boundary if self.shift == 'calculate' else np.full_like(e, -self.boundary)
         return p, real+1j*p, phase
 
@@ -79,6 +112,7 @@ class RMLGroup(Group):
     reduced: tuple = ()
     radiation: tuple = ()
     entrances: tuple = ()
+    parity: int = 1
 
     @property
     def reaction_mts(self):
@@ -152,16 +186,23 @@ def evaluate_rml(energies, groups, context, diagnostics=None):
     result = {mt: np.zeros_like(e) for mt in mts}
     for group in groups:
         ctx = group.context or context
-        beta = np.pi*.01/(ctx.k_squared_per_ev*e)*(2*group.spin+1)/(2*(2*ctx.target_spin+1))
+        incident = group.channels[group.entrances[0]]
+        k2 = incident.k_squared(incident.channel_energy(e))
+        beta = np.pi*.01/k2*(2*group.spin+1)/(2*(2*ctx.target_spin+1))
         values = [ch.functions(e) for ch in group.channels]
         p, log, phase = (np.stack([v[index] for v in values], axis=1) for index in range(3))
+        reduced = np.asarray(group.reduced).reshape((len(group.levels),len(group.channels)))
+        for index,ch in enumerate(group.channels):
+            if (not ch.effective and ch.penetrability == 'calculate' and np.any(reduced[:,index] != 0)
+                    and np.any((e > ch.threshold) & (p[:,index] == 0))):
+                raise FloatingPointError('open RML penetrability underflows for an active channel')
         external = np.stack([np.zeros_like(e, dtype=complex) if ch.external is None else ch.external.evaluate(e)
                              for ch in group.channels], axis=1)
         if np.any(external.imag < 0):
             raise ValueError('negative external absorption is outside the passive KRM3 profile')
         for entrance in group.entrances:
             w, x, y = solve_rml(e, [lv.energy for lv in group.levels], group.radiation,
-                np.asarray(group.reduced).reshape((len(group.levels), len(group.channels))), log,
+                reduced, log,
                 external, entrance=entrance, diagnostics=diagnostics)
             resonant = 2j*np.sqrt(p*p[:, entrance, None])*w*np.exp(-1j*(phase+phase[:, entrance, None]))
             collision = resonant.copy()

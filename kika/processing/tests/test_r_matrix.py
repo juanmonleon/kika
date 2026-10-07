@@ -275,3 +275,49 @@ def test_signed_capture_width_is_a_sign_of_amplitude_and_negative_dummy_uses_abs
     reference=abs(50*56/57-75*56/57)
     p=neutral_channel_functions(0,np.sqrt(ch.k2_cm*reference)*6.)[0]
     assert abs(prepared.regions[0].groups[0].reduced[0][1])==pytest.approx(np.sqrt(.2/(2*p)),rel=3e-15)
+
+
+def test_missing_rml_parity_is_rejected():
+    source,ctx = rml_model()
+    source.resolved[0].formalism.spinGroups[0].parity = None
+    with pytest.raises(ValueError,match='requires declared parity'):
+        prepare_resonances(source,ctx)
+
+
+def test_active_open_channel_underflow_is_rejected_but_closed_channel_is_retained(monkeypatch):
+    from kika.processing.resonances import r_matrix
+    original = r_matrix.neutral_channel_functions
+    def lost_penetrability(l,rho):
+        p,s,phase = original(l,rho)
+        return np.zeros_like(p),s,phase
+    source,ctx = rml_model()
+    prepared = prepare_resonances(source,ctx)
+    monkeypatch.setattr(r_matrix,'neutral_channel_functions',lost_penetrability)
+    with pytest.raises(FloatingPointError,match='open RML penetrability underflows'):
+        prepared.evaluate(np.array([100.]))
+    channel = prepared.regions[0].groups[0].channels[1]
+    p,log,phase = channel.functions(np.array([30.]))
+    assert p[0] == 0 and log[0].real < 0 and phase[0] == 0
+
+
+def test_external_repeated_energy_preserves_both_limits_and_tabulation_segments():
+    from kika.nuclear_data.model import XYs1d,Axes,Axis,Regions1d
+    from kika.processing.resonances.prepare import group_breaks
+    source,ctx = rml_model()
+    channel = source.resolved[0].formalism.spinGroups[0].channels[0]
+    axes = Axes([Axis(1,'energy_in','eV'),Axis(0,'R','')])
+    channel.tabulatedBackground = ComplexChannelFunction(
+        XYs1d([10.,150.,150.,300.],[.01,.01,.08,.08],axes=axes),
+        XYs1d([10.,300.],[.001,.001],axes=axes))
+    prepared = prepare_resonances(source,ctx)
+    group = prepared.regions[0].groups[0]
+    e = np.array([np.nextafter(150.,0.),150.,np.nextafter(150.,np.inf)])
+    np.testing.assert_allclose(group.channels[0].external.evaluate(e).real,[.01,.08,.08],rtol=0,atol=0)
+    assert 150. in group_breaks(group)
+    result = tabulate_resonances(prepared)
+    assert isinstance(result.forms[2],Regions1d)
+    left,right = result.forms[2].function1ds
+    assert left.domainMax == right.domainMin == 150.
+    np.testing.assert_allclose(left.ys[-1],prepared.evaluate(e[:1])[2][0],rtol=1e-13)
+    np.testing.assert_allclose(right.ys[0],prepared.evaluate(e[1:2])[2][0],rtol=1e-13)
+    assert max(result.verify_forms(result.forms).values()) <= 1.

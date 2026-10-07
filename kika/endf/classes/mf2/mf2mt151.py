@@ -319,6 +319,8 @@ class RML_SpinGroup:
     resonances: List[RML_Resonance] = field(default_factory=list)
     background: List[BackgroundRMatrix] = field(default_factory=list)
     phase_shift: Optional[TabulatedPhaseShift] = None
+    #: One LPS entry per channel; None denotes hard-sphere LPS=0.
+    phase_shifts: List[Optional[TabulatedPhaseShift]] = field(default_factory=list)
 
 
 # --- Top-level R-Matrix Limited ---
@@ -1086,30 +1088,25 @@ def _serialize_rml(p, lines, mat, mf, mt, ln):
                     body_lines, ln = format_data_values(body, mat, mf, mt, ln)
                     lines.extend(body_lines)
 
-        # Phase shifts (KPS)
+        # ENDF requires a LIST (including six reserved values) per channel.
         if sg.kps > 0:
-            lps = 1 if sg.phase_shift is not None else 0
-            lines.append(_cont(
-                [0, 0, 0, 0, lps, 0],
-                mat, mf, mt, ln,
-                [ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
-                 ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT_ZERO,
-                 ENDF_FORMAT_INT, ENDF_FORMAT_INT_ZERO],
-            ))
-            ln += 1
-            if lps == 1 and sg.phase_shift is not None:
-                ps = sg.phase_shift
-                psr_lines, ln = format_tab1(
-                    0.0, 0.0, 0, 0,
-                    ps.psr_interp, ps.psr_energies, ps.psr_values,
-                    mat, mf, mt, ln,
-                )
-                lines.extend(psr_lines)
-                psi_lines, ln = format_tab1(
-                    0.0, 0.0, 0, 0,
-                    ps.psi_interp, ps.psi_energies, ps.psi_values,
-                    mat, mf, mt, ln,
-                )
-                lines.extend(psi_lines)
+            phases = sg.phase_shifts
+            if not phases:
+                if sg.phase_shift is not None:
+                    raise ValueError('legacy group phase has no channel ownership')
+                phases = [None]*len(sg.channels)
+            if len(phases)!=len(sg.channels):raise ValueError('KPS channel count disagrees')
+            for ps in phases:
+                lines.append(_cont([0,0,0,0,int(ps is not None),1],mat,mf,mt,ln,
+                    [ENDF_FORMAT_FLOAT,ENDF_FORMAT_FLOAT,ENDF_FORMAT_INT_ZERO,
+                     ENDF_FORMAT_INT_ZERO,ENDF_FORMAT_INT,ENDF_FORMAT_INT]))
+                ln += 1
+                phase_lines,ln = format_data_values([0.]*6,mat,mf,mt,ln)
+                lines.extend(phase_lines)
+                if ps is not None:
+                    for interp,energies,values in ((ps.psr_interp,ps.psr_energies,ps.psr_values),
+                                                  (ps.psi_interp,ps.psi_energies,ps.psi_values)):
+                        phase_lines,ln = format_tab1(0.,0.,0,0,interp,energies,values,mat,mf,mt,ln)
+                        lines.extend(phase_lines)
 
     return ln

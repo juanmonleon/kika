@@ -640,13 +640,16 @@ def _parse_rml_spin_group(
 
     # Phase shifts
     phase_shift = None
+    phase_shifts = []
     if kps > 0:
-        phase_shift, idx = _parse_rml_phase_shift(lines, idx)
+        for _ in range(nch):
+            phase,idx = _parse_rml_phase_shift(lines,idx)
+            phase_shifts.append(phase)
 
     return RML_SpinGroup(
         aj=aj, pj=pj, kbk=kbk, kps=kps,
         channels=channels, resonances=resonances,
-        background=background, phase_shift=phase_shift,
+        background=background, phase_shift=phase_shift, phase_shifts=phase_shifts,
     ), idx
 
 
@@ -709,9 +712,12 @@ def _parse_rml_phase_shift(
     lines: List[str], idx: int
 ) -> Tuple['TabulatedPhaseShift', int]:
     """Parse tabulated phase shift data."""
-    # LIST: 0, 0, 0, 0, LPS, 0
-    cont = parse_line(lines[idx])
-    idx += 1
+    # LIST: 0,0,0,0,LPS,1 followed by six reserved zeros.
+    cont = parse_line(lines[idx]);idx += 1
+    if int(cont.get('C6',0) or 0)!=1:raise ValueError('KPS LIST must declare one reserved line')
+    reserved = parse_line(lines[idx]);idx += 1
+    if any(float(reserved.get(f'C{i}',0) or 0)!=0 for i in range(1,7)):
+        raise ValueError('nonzero KPS reserved values')
     lps = int(cont.get("C5", 0) or 0)
 
     if lps == 1:
@@ -724,5 +730,5 @@ def _parse_rml_phase_shift(
             psi_interp=psi_interp, psi_energies=psi_e, psi_values=psi_v,
         ), idx
 
-    # LPS != 1: no tabulated data
+    if lps!=0:raise ValueError('unknown RML phase LPS')
     return None, idx

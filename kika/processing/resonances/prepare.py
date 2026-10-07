@@ -285,18 +285,20 @@ def group_radii(group):
 def group_knots(group):
     knots = set()
     for c in getattr(group,'channels',()):
-        if not c.effective:knots.add(-c.q/c.cm_ratio)
-        if c.external is not None and c.external.kind == 'table':
-            for curve in c.external.real+c.external.imaginary:knots.update(curve.x)
+        if not c.effective:knots.add(c.threshold)
+        for table in (c.external,c.phase_function):
+            if table is not None and table.kind == 'table':
+                for curve in table.real+table.imaginary:knots.update(curve.x)
     return knots
 
 
 def group_breaks(group):
     breaks = set()
     for c in getattr(group,'channels',()):
-        if not c.effective and c.penetrability == 'unity':breaks.add(-c.q/c.cm_ratio)
-        if c.external is not None and c.external.kind == 'table':
-            for curves in (c.external.real,c.external.imaginary):
+        if not c.effective and c.penetrability == 'unity':breaks.add(c.threshold)
+        for table in (c.external,c.phase_function):
+            if table is None or table.kind!='table':continue
+            for curves in (table.real,table.imaginary):
                 for index,curve in enumerate(curves):
                     if curve.law == 1:breaks.update(curve.x[1:])
                     if index and curves[index-1].y[-1] != curve.y[0]:breaks.add(curve.x[0])

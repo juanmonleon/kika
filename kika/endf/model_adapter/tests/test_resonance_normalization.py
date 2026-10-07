@@ -29,7 +29,7 @@ def test_rml_physical_metadata_and_extra_functions_roundtrip(background):
         [RML_ParticlePair(1.,56.,0.,26.,.5,-.5,0.,1,1,2,0.,0.),
          RML_ParticlePair(0.,0.,0.,0.,0.,0.,1e6,-1,0,102,0.,0.)],
         [RML_SpinGroup(-.5,1.,1,1,[RML_Channel(1,0,1.,0.,.5,.6),
-          RML_Channel(2,0,0.,0.,0.,0.)],[RML_Resonance(100.,[.1,-.2])],[background],phase)])
+          RML_Channel(2,0,0.,0.,0.,0.)],[RML_Resonance(100.,[.1,-.2])],[background],phase_shifts=[phase,None])])
     s=section(parameters)
     m,p,report=decodeMF2MT151(s)
     assert report.isClean
@@ -46,7 +46,7 @@ def test_rml_physical_metadata_and_extra_functions_roundtrip(background):
     assert capture.eliminated and capture.kinematics.effective
     assert capture.kinematics.penetrability == 'unity'
     assert f.spinGroups[0].widths == [[.1,-.2]]  # IFG amplitudes/sign retained
-    np.testing.assert_allclose(f.spinGroups[0].additionalPhaseShift.real.evaluate([1.,1000.]),[.1,.2])
+    np.testing.assert_allclose(f.spinGroups[0].channels[0].additionalPhaseShift.real.evaluate([1.,1000.]),[.1,.2])
     original=copy.deepcopy(p.headerFields)
     encoded=encodeMF2MT151(m,p)
     assert str(encoded) == str(s)
