@@ -14,7 +14,7 @@ so perturbing a PFNS was format work by construction.
    ``groupIntegrals``, ``replaceTable``, plus the exact outer-axis refinement —
    give the same numbers as the ENDF class on a real evaluation. Not "close":
    the same, because both call
-   :mod:`kika.processing.panel_integrals` after the arithmetic moved down there.
+   :mod:`kika.algebra` after the arithmetic moved down there.
 2. :func:`~kika.nuclear_data.model.perturbation.applySpectrumFactors` reproduces
    :func:`~kika.sampling.mf35_sampling.perturb_pfns_partial` **point for point**
    on real drawn deltas, on the synthetic tape and on Cf-252. That is the
@@ -88,10 +88,10 @@ def _deltas(suite, seed=7):
 def test_the_model_node_integrates_exactly_what_the_endf_class_does(name):
     """Identical, not close — the two call the same panel arithmetic.
 
-    ``exact_segment_codes``, ``cumulative_integral``, ``integral_to`` and
-    ``evaluate_table`` moved from ``kika/endf/classes/mf5/partials.py`` down to
-    ``kika.processing.panel_integrals`` so that the model could reach them
-    without importing a format package. The move was verbatim, so ``0.0`` here
+    The panel arithmetic moved from ``kika/endf/classes/mf5/partials.py`` down
+    to ``kika.processing.panel_integrals``, and from there into
+    :mod:`kika.algebra`, so that the model could reach it without importing a
+    format package. Both sides call it, so ``0.0`` here
     is the expected answer and any nonzero difference means one of the two grew
     an implementation of its own.
     """

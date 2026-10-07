@@ -26,7 +26,7 @@ from numpy.typing import ArrayLike
 from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate
 
 __all__ = ["evaluate", "left_limit", "right_limit", "sample_on_union",
-           "panel_value", "OUTSIDE"]
+           "panel_value", "interpolate_between", "OUTSIDE"]
 
 #: What a table is outside its own domain.
 OUTSIDE = ("zero", "hold", "raise")
@@ -183,3 +183,35 @@ def sample_on_union(x, y, laws, u: ArrayLike) -> np.ndarray:
         idx = np.flatnonzero(middle)[own]
         out[idx] = y[lo[own] + occurrence[middle][own]]
     return out
+
+
+def interpolate_between(x1: float, y1: ArrayLike, x2: float, y2: ArrayLike,
+                        law: int, q: float) -> np.ndarray:
+    """The value at outer coordinate *q* between two whole functions.
+
+    ``y1`` and ``y2`` are arrays of the same shape -- two tables already read
+    on one inner grid, say -- and each element is interpolated on its own
+    under *law*, the way a TAB2 interpolates between incident energies. At
+    ``q == x1`` the result is ``y1`` and at ``q == x2`` it is ``y2`` (``y1``
+    for a histogram), bit for bit.
+
+    A log law with a non-positive value or abscissa raises: the element has no
+    value under that law, and reading it lin-lin instead is how a wrong number
+    used to come back silently.
+    """
+    law = int(law)
+    if law not in (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG):
+        raise ValueError(f"interpolation law {law} is not 1-5")
+    y1 = np.asarray(y1, dtype=float)
+    y2 = np.asarray(y2, dtype=float)
+    if x1 == x2 or q == x1 or law == HISTOGRAM:
+        return y1.copy()
+    if q == x2:
+        return y2.copy()
+    if law in (LINLOG, LOGLOG) and (x1 <= 0 or x2 <= 0 or q <= 0):
+        raise ValueError(f"law {law} interpolates in ln x but the outer "
+                         f"coordinates are {x1!r}, {x2!r}, {q!r}")
+    if law in (LOGLIN, LOGLOG) and (np.any(y1 <= 0) or np.any(y2 <= 0)):
+        raise ValueError(f"law {law} interpolates in ln y but a value is "
+                         f"not positive")
+    return panel_value(x1, y1, x2, y2, law, np.full(y1.shape, float(q)))

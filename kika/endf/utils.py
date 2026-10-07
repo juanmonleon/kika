@@ -226,6 +226,7 @@ def describe_interpolation_region(nbt, int_code):
 # ENDF-specific. This is a *live* re-export -- eight call sites in kika/endf
 # import interpolate_1d_endf -- not a shim awaiting deletion.
 from kika.processing.interpolation import interpolate_1d as interpolate_1d_endf
+from kika.algebra import interpolate_between, interval_laws
 
 
 
@@ -1019,8 +1020,8 @@ def evaluate_tabulated_pdf(
         return f0
 
     pairs = energy_interp if energy_interp else [(energies.size, 2)]
-    code = int(segment_int_codes(energies.size, pairs)[idx1 - 1])
-    return interp_energy_values(energies[idx0], f0, energies[idx1], _table(idx1), E, code)
+    code = int(interval_laws(energies.size, pairs)[idx1 - 1])
+    return interpolate_between(energies[idx0], f0, energies[idx1], _table(idx1), code, E)
 
 
 def auto_trim_legendre_tail(
@@ -1081,82 +1082,3 @@ def pick_mixed_branch(E: float, E_leg: np.ndarray, E_tab: np.ndarray) -> str:
     if has_leg and has_tab:
         return "leg" if abs(E - E_leg.max()) <= abs(E - E_tab.min()) else "tab"
     return "leg" if has_leg else "tab"
-
-
-def segment_int_codes(ne: int, nbt_int_pairs: Sequence[Tuple[int, int]]) -> np.ndarray:
-    """
-    Build an array of length (ne-1) with the INT code for each energy interval [k, k+1].
-    ENDF NBT's are 1-based indices of the *last* point in the region.
-    """
-    if not nbt_int_pairs:
-        nbt_int_pairs = [(ne, 2)]  # default linear across full grid
-
-    seg = np.full(ne - 1, 2, dtype=int)
-    start = 0
-    for nbt, ic in nbt_int_pairs:
-        # region covers points [start ... end], so intervals [start ... end-1]
-        end = max(0, min(nbt - 1, ne - 1))
-        if end > start:
-            seg[start:end] = ic
-        start = max(0, min(nbt, ne - 1))
-        if start >= ne - 1:
-            break
-    return seg
-
-
-def interp_energy_values(E0: float, f0: np.ndarray,
-                          E1: float, f1: np.ndarray,
-                          E: float, int_code: int) -> np.ndarray:
-    """
-    Vectorized interpolation of y(E) between (E0,f0) and (E1,f1) under ENDF INT code (1..5).
-    Falls back to linear where logs are invalid.
-    """
-    if E0 == E1:
-        return np.array(f0, dtype=float, copy=True)
-
-    t = (E - E0) / (E1 - E0)
-    code = int_code % 10 if int_code >= 10 else int_code
-    code = 5 if code == 0 else code  # 10,20 → 0 → use 5
-
-    # default lin-lin
-    if code == 1:
-        return np.array(f0, dtype=float, copy=True)  # histogram in E: hold left
-    if code == 2:
-        return (1.0 - t) * np.asarray(f0, dtype=float) + t * np.asarray(f1, dtype=float)
-
-    # helpers
-    f0 = np.asarray(f0, dtype=float)
-    f1 = np.asarray(f1, dtype=float)
-
-    # lin-log (y linear in ln E)
-    if code == 3:
-        if E0 <= 0 or E1 <= 0 or E <= 0:
-            return (1.0 - t) * f0 + t * f1
-        le0, le1, le = math.log(E0), math.log(E1), math.log(E)
-        tt = (le - le0) / (le1 - le0)
-        return (1.0 - tt) * f0 + tt * f1
-
-    # log-lin (ln y linear in E)
-    if code == 4:
-        mask = (f0 > 0.0) & (f1 > 0.0)
-        out = (1.0 - t) * f0 + t * f1
-        if np.any(mask):
-            ln_y = (1.0 - t) * np.log(f0[mask]) + t * np.log(f1[mask])
-            out[mask] = np.exp(ln_y)
-        return out
-
-    # log-log (ln y linear in ln E)
-    if code == 5:
-        if E0 <= 0 or E1 <= 0 or E <= 0:
-            return (1.0 - t) * f0 + t * f1
-        le0, le1, le = math.log(E0), math.log(E1), math.log(E)
-        tt = (le - le0) / (le1 - le0)
-        mask = (f0 > 0.0) & (f1 > 0.0)
-        out = (1.0 - t) * f0 + t * f1
-        if np.any(mask):
-            ln_y = (1.0 - tt) * np.log(f0[mask]) + tt * np.log(f1[mask])
-            out[mask] = np.exp(ln_y)
-        return out
-
-    # fallback
-    return (1.0 - t) * f0 + t * f1

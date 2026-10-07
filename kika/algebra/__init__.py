@@ -30,7 +30,8 @@ integrals, 1/x weight), :mod:`.refine` (the adaptive refinement engine and
 """
 from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS,
                    interval_laws, pairs_from_laws, validate)
-from .evaluate import evaluate, left_limit, right_limit, sample_on_union
+from .evaluate import (evaluate, interpolate_between, left_limit, right_limit,
+                       sample_on_union)
 from .grid import discontinuities, join_pieces, split_at_discontinuities, union
 from .integrate import (cumulative_integral, group_integrals, integral,
                         panel_integrals)
@@ -40,7 +41,7 @@ from .arithmetic import add
 __all__ = [
     "HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS",
     "interval_laws", "pairs_from_laws", "validate",
-    "evaluate", "left_limit", "right_limit", "sample_on_union",
+    "evaluate", "interpolate_between", "left_limit", "right_limit", "sample_on_union",
     "discontinuities", "join_pieces", "split_at_discontinuities", "union",
     "cumulative_integral", "group_integrals", "integral", "panel_integrals",
     "RefinementError", "RefineResult", "refine", "to_linlin",

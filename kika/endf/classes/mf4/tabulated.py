@@ -6,7 +6,7 @@ import numpy as np
 from .base import MF4MT
 from ....endf.utils import (
     auto_trim_legendre_tail, evaluate_tabulated_pdf, interpolate_1d_endf,
-    segment_int_codes, interp_energy_values, project_tabulated_to_legendre
+    project_tabulated_to_legendre
 )
 
 
@@ -80,16 +80,6 @@ class MF4MTTabulated(MF4MT):
     
 
     # ------------------------- core helpers -------------------------
-    def _energy_panel_code_for_pair(self, upper_index: int) -> int:
-        """
-        Return the ENDF INT code for the interval (E[upper_index-1], E[upper_index]).
-        upper_index runs from 1 to NE-1 (inclusive).
-        """
-        ne = len(self._energies)
-        pairs = self._interpolation if self._interpolation else [(ne, 2)]
-        seg_int = segment_int_codes(ne, pairs)
-        return int(seg_int[upper_index - 1])
-
     def _f_mu_at_energy(self, E: float, mu_points: np.ndarray, out_of_range: str = "zero") -> np.ndarray:
         """
         Evaluate f(μ, E) at requested E using ENDF-correct 2D interpolation:

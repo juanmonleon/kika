@@ -283,10 +283,15 @@ def test_group_integrals_are_exact_against_a_refined_table(synthetic_partial):
         np.testing.assert_allclose(got, expected, rtol=1e-13)
 
 
-def test_a_non_exact_interpolation_code_is_refused(synthetic_partial):
-    """log-log tables have no exact group integral here, so they raise."""
+def test_a_log_law_starting_at_zero_energy_is_refused(synthetic_partial):
+    """Every law integrates in closed form now, but log-log has no value at E'=0.
+
+    Until 7-oct-2026 any log law raised here, because only histogram and lin-lin
+    had a closed-form group integral. What is left to refuse is a table the law
+    cannot describe: this one starts at E' = 0, where ln E' does not exist.
+    """
     synthetic_partial.outgoing_interp[0] = [(7, 5)]
-    with pytest.raises(NotImplementedError, match=r"interpolation code\(s\) \[5\]"):
+    with pytest.raises(ValueError, match="ln x"):
         synthetic_partial.group_integrals(0, [0.0, 1.0e6, 2.0e7])
 
 

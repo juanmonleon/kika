@@ -84,7 +84,7 @@ class Function2d(ABC):
     # numbers had none of them, so the PFNS applier had to be written against
     # the ENDF class and the perturbation became a property of ENDF. These are
     # those four on the node, spelled the model's way, and the arithmetic under
-    # them is the one :mod:`kika.processing.panel_integrals` gives the ENDF
+    # them is the one :mod:`kika.algebra` gives the ENDF
     # class -- so the two integrate identically by construction rather than by
     # agreement.
     #

@@ -27,13 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ....processing.panel_integrals import (
-    EXACT_INT_CODES,
-    cumulative_integral,
-    evaluate_table,
-    exact_segment_codes,
-    integral_to,
-)
+from ....algebra import cumulative_integral, evaluate, group_integrals, interval_laws
 from ...utils import (
     ENDF_FORMAT_FLOAT,
     ENDF_FORMAT_INT,
@@ -41,11 +35,6 @@ from ...utils import (
     format_tab1,
     format_tab2,
 )
-
-#: Interpolation codes the tabulated partial can integrate and refine exactly.
-#: Kept as a name here because this module's own error messages and tests speak
-#: of it; the list itself now lives with the arithmetic it constrains.
-_EXACT_INT_CODES = EXACT_INT_CODES
 
 #: How many TAB1 records follow the subsection header, per law (ENDF-6 §5.1).
 #: Used only to walk past a law this module stores verbatim, so it needs the
@@ -73,9 +62,10 @@ TAB1_RECORDS_AFTER_HEADER = {5: 2, 7: 1, 9: 1, 11: 2, 12: 1}
 # distribution node needs those integrals too -- MF35 is the covariance of the
 # group-integrated probabilities of an MF5 table, so perturbing the node means
 # integrating it -- and ``kika/nuclear_data`` may not import ``kika.endf``. So
-# the four moved down to :mod:`kika.processing.panel_integrals`, which is the
-# calculation layer both sides may read, and are imported back here under their
-# original names. Nothing about them changed in the move.
+# the four moved down to ``kika.processing.panel_integrals``, and from there
+# (7-oct-2026) into :mod:`kika.algebra`, the one implementation of a table's
+# arithmetic. That last move also lifted the restriction to INT 1-2: every law
+# now integrates in closed form.
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -204,10 +194,7 @@ class MF5PartialTabulated(MF5Partial):
 
     def _segment_codes(self, k: int) -> np.ndarray:
         """The ENDF INT code of every interval of table *k*."""
-        return exact_segment_codes(
-            self.outgoing_grids[k], self.outgoing_interp[k],
-            f"MF5 LF=1 outgoing table {k}",
-        )
+        return interval_laws(len(self.outgoing_grids[k]), self.outgoing_interp[k])
 
     def replace_table(self, k: int, x: Sequence[float], y: Sequence[float],
                       interp: Optional[Sequence[Tuple[int, int]]] = None) -> None:
@@ -237,29 +224,17 @@ class MF5PartialTabulated(MF5Partial):
         cumulative = self._cumulative_integral(k)
         return float(cumulative[-1]) if cumulative.size else 0.0
 
-    def _integral_to(self, k: int, cumulative: np.ndarray,
-                     limit: float) -> float:
-        """``∫_{x0}^{limit}``, with *limit* anywhere inside or outside the table."""
-        x, y = self.table(k)
-        if x.size < 2:
-            return 0.0
-        return integral_to(x, y, self._segment_codes(k), cumulative, limit)
-
     def group_integrals(self, k: int, boundaries: Sequence[float]) -> np.ndarray:
         """``P_j = ∫_{g_j}^{g_j+1} chi_k dE'`` for the given boundaries.
 
-        Exact: the limits are clipped into the table's own panels rather than
-        the grid being refined first. This is what MF35's LB=7 matrix is the
-        covariance *of* — see the roadmap's measured fact 4 — so it has to be
-        the same integral the evaluator took, not a quadrature of it.
+        Exact, under every law of the table: each edge cuts its panel into two
+        of the same law (:func:`kika.algebra.group_integrals`). This is what
+        MF35's LB=7 matrix is the covariance *of* — see the roadmap's measured
+        fact 4 — so it has to be the same integral the evaluator took, not a
+        quadrature of it.
         """
-        cumulative = self._cumulative_integral(k)
-        edges = np.asarray(boundaries, dtype=float)
-        totals = np.array(
-            [self._integral_to(k, cumulative, edge) for edge in edges],
-            dtype=float,
-        )
-        return np.diff(totals)
+        x, y = self.table(k)
+        return group_integrals(x, y, self._segment_codes(k), boundaries)
 
     # ------------------------------------------------------------------
     # The incident axis
@@ -419,7 +394,7 @@ class MF5PartialTabulated(MF5Partial):
     def _interpolate_table(self, k: int, points: np.ndarray) -> np.ndarray:
         """Table *k* evaluated at *points*, zero outside its own support."""
         x, y = self.table(k)
-        return evaluate_table(x, y, self._segment_codes(k), points)
+        return evaluate(x, y, self._segment_codes(k), points)
 
     def insert_incident_node(self, energy: float) -> int:
         """Add an incident node at *energy*, refining exactly. Returns its index.
