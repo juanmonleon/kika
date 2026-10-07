@@ -392,8 +392,81 @@ class PerturbationSet:
             resolved[reaction] = components[0]
         return resolved
 
+    def _applyCrossSectionsWithSums(self, suite, claims):
+        """Perturb the cross sections with MF3's sum rules held.
+
+        :func:`~kika.sampling.cross_section_sums.planCrossSectionSums` decides
+        which block moves each leaf partial -- its own, or the nearest perturbed
+        sum above it -- and which sums are rebuilt; this applies the blocks to
+        the leaves and re-derives the sums as ``S + sum (p' - p)``.
+
+        Diagnostics, keyed so the emitter writes everything that moved and the
+        run can say why:
+
+        * a leaf with its own block -- under its component, as before;
+        * a leaf riding a sum's block -- under ``ComponentKey(za, 33, leaf)``
+          with ``factor_from`` naming the sum. It was not drawn, and it was
+          moved, so it has to be written;
+        * a rebuilt sum -- under its own component if the request named it,
+          else ``ComponentKey(za, 33, sum)``, with ``rederived_from`` and, for
+          a named one, ``own_block``: the leaves its block reached, or
+          ``"discarded"`` when every partial under it had a block of its own.
+        """
+        from kika.nuclear_data.model import EVAL_LABEL
+        from kika.sampling.cross_section_sums import (planCrossSectionSums,
+                                                      rederiveSum)
+
+        for component in claims.values():
+            if self.semanticsOf(component) != SEMANTICS[0]:
+                raise ValueError(
+                    f"{component.describe()} acts as {self.semanticsOf(component)}"
+                    f"; MF3's sum rules carry a factor from a sum to its parts, "
+                    f"which only means something for a multiplicative block")
+
+        byMT = {mt: component for (_za, mt), component in claims.items()}
+        za = next(iter(claims))[0]
+        present = {int(r.ENDF_MT) for container in (suite.reactions, suite.sums)
+                   for r in container if getattr(r, "ENDF_MT", None) is not None}
+        sums = {int(r.ENDF_MT) for r in suite.sums
+                if getattr(r, "ENDF_MT", None) is not None}
+        plan = planCrossSectionSums(byMT, present, sums)
+
+        diagnostics: Dict[ComponentKey, Dict[str, Any]] = {}
+        moved = {}
+        for leaf, component in plan.leafControl.items():
+            reaction = suite.reactionByENDF_MT(leaf)
+            before = reaction.crossSection[EVAL_LABEL]
+            after, info = self.apply(before, component)
+            reaction.crossSection[self.label] = self._labelled(after)
+            edges = np.asarray(self.binEdges[component], dtype=float)
+            moved[leaf] = (before, after, float(edges[0]), float(edges[-1]))
+            if component.mt == leaf:
+                diagnostics[component] = info
+            else:
+                diagnostics[ComponentKey(za, 33, leaf)] = {
+                    **info, "factor_from": component.mt}
+
+        for total in plan.rederive:
+            reaction = suite.reactionByENDF_MT(total)
+            rebuilt, info = rederiveSum(
+                reaction.crossSection[EVAL_LABEL],
+                [moved[leaf] for leaf in plan.movedUnder[total]])
+            reaction.crossSection[self.label] = self._labelled(rebuilt)
+            info = {**info, "rederived_from": plan.movedUnder[total]}
+            if total in byMT:
+                info["own_block"] = plan.ownBlockReached.get(total) or "discarded"
+                diagnostics[byMT[total]] = info
+            else:
+                diagnostics[ComponentKey(za, 33, total)] = info
+        for total in plan.virtual:
+            diagnostics[byMT[total]] = {
+                "virtual": True,
+                "own_block": plan.ownBlockReached.get(total) or "discarded"}
+        return diagnostics
+
     def applyToSuite(self, suite, *, multiplicityResolver=None,
-                     maxOutgoingPoints: Optional[int] = None
+                     maxOutgoingPoints: Optional[int] = None,
+                     crossSectionSums: bool = True
                      ) -> Dict[ComponentKey, Dict[str, Any]]:
         """Put a perturbed form under :attr:`label` on every node this set covers.
 
@@ -408,7 +481,13 @@ class PerturbationSet:
 
         * ``crossSection`` -- MF33, and MF34's L=0 magnitude, which lands on the
           same node. See :meth:`_crossSectionBlocks` for why both at once is
-          refused.
+          refused. With *crossSectionSums* (the default) MF3's sum rules hold
+          on the realisation: partials govern, a partial without a block of its
+          own rides the nearest perturbed sum above it, and every sum with a
+          moved partial is re-derived -- see :meth:`_applyCrossSectionsWithSums`.
+          ``False`` scales each named MT by its own block and nothing else,
+          which leaves the sums stale; it exists for the equivalence gate
+          against ``perturb_PENDF_files``, which does not re-derive.
         * ``angularDistribution`` -- MF34's L>=1, all orders of one reaction in
           one call, because a Legendre vector is perturbed once and not once per
           order.
@@ -446,12 +525,16 @@ class PerturbationSet:
         # absence is a mistake in the request or a tape that does not carry it,
         # not something to skip past. It searches `sums` too, which is where the
         # ENDF adapter now puts MT1 and MT4.
-        for (_za, mt), component in self._crossSectionBlocks().items():
-            reaction = suite.reactionByENDF_MT(mt)
-            perturbed, info = self.apply(reaction.crossSection[EVAL_LABEL],
-                                         component)
-            reaction.crossSection[self.label] = self._labelled(perturbed)
-            diagnostics[component] = info
+        claims = self._crossSectionBlocks()
+        if crossSectionSums and claims:
+            diagnostics.update(self._applyCrossSectionsWithSums(suite, claims))
+        else:
+            for (_za, mt), component in claims.items():
+                reaction = suite.reactionByENDF_MT(mt)
+                perturbed, info = self.apply(reaction.crossSection[EVAL_LABEL],
+                                             component)
+                reaction.crossSection[self.label] = self._labelled(perturbed)
+                diagnostics[component] = info
 
         byReaction: Dict[Tuple[int, int], Dict[int, ComponentKey]] = {}
         for component in self.components():

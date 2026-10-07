@@ -240,47 +240,93 @@ class RunResult:
                 if record["returncode"] != 0 or not record["ace"]]
 
 
-def _redundancyNote(suite, pset) -> Optional[str]:
-    """Whether this realisation perturbs a summed cross section and its parts.
+def _mtRanges(mts) -> str:
+    """``[51, 52, 53, 91]`` as ``MT51-53, 91``: a note names forty partials."""
+    mts = sorted(int(mt) for mt in mts)
+    runs, start = [], None
+    for index, mt in enumerate(mts):
+        if start is None:
+            start = mt
+        if index + 1 == len(mts) or mts[index + 1] != mt + 1:
+            runs.append(f"{start}" if start == mt else f"{start}-{mt}")
+            start = None
+    return "MT" + ", ".join(runs)
 
-    **This does not repair anything, and saying so is the point.** ENDF states
-    MT1 and MT4 as ordinary sections, so a request for "every MT the file states"
-    routinely names a sum *and* its partials, and each is perturbed from its own
-    covariance block. The tape that comes out therefore has MT1 that is no longer
-    the sum of what it sums -- which is what ``apply_factors_to_pendf_mf3`` half
-    solves for the PENDF case, by expanding a composite over its partials and
-    excluding the partials that are perturbed in their own right.
 
-    Re-deriving here is decision 3 of the roadmap (Juan, 2026-08-29: the sum is
-    re-derived when the partials are perturbed) and it **moves numbers**, so it
-    is not something to slip into a pipeline unannounced. What it needs first is
-    for the applier to know which MT sums which, and the ENDF-decoded model does
-    not carry that: ``f982268`` puts a summed MT in ``suite.sums``, but §25's
-    ``<summands/>`` comes out empty because ENDF says nowhere what MT1 is made
-    of, and ``kika._constants.MT_COMPOSITES`` only approximates it.
+def _redundancyNote(suite, pset, applied=None,
+                    crossSectionSums: bool = True) -> Optional[str]:
+    """What this realisation did to MF3's sums -- or failed to do.
 
-    So the run records the fact instead of quietly leaving it out of the file.
+    With *crossSectionSums* on, the applier holds the sum rules
+    (:mod:`kika.sampling.cross_section_sums`) and this says what that cost: the
+    sums it re-derived, the partials that rode a sum's block, a sum whose own
+    block reached nothing because every partial under it had one of its own,
+    and any re-derived sum that went negative -- which only an evaluation whose
+    total sits below its own parts can produce. Re-deriving moves numbers the
+    request did not name, so it is said, not done quietly.
+
+    With it off, each named MT is scaled by its own block and nothing else, and
+    this names every sum left stating a total that is not the sum of its parts:
+    one perturbed beside its partials, and -- the case the first version of this
+    note missed -- one whose partial moved while the sum itself was not named.
     """
-    reactions = getattr(getattr(suite, "sums", None), "reactions", None)
-    if not reactions:
+    applied = applied or {}
+    if crossSectionSums:
+        rebuilt = sorted(c.mt for c, info in applied.items()
+                         if "rederived_from" in info)
+        if not rebuilt and not any("factor_from" in info for info in applied.values()):
+            return None
+        riders: Dict[int, List[int]] = {}
+        for component, info in applied.items():
+            if "factor_from" in info:
+                riders.setdefault(int(info["factor_from"]), []).append(component.mt)
+        discarded = sorted(c.mt for c, info in applied.items()
+                           if info.get("own_block") == "discarded")
+        negative = sorted(c.mt for c, info in applied.items()
+                          if info.get("n_negative"))
+        parts = [f"MF3 sums re-derived from their moved partials: "
+                 f"{_mtRanges(rebuilt)}"]
+        for total in sorted(riders):
+            parts.append(f"MT{total}'s block moved its unperturbed partials "
+                         f"{_mtRanges(riders[total])}")
+        virtual = sorted(c.mt for c, info in applied.items() if info.get("virtual"))
+        if virtual:
+            parts.append(f"{_mtRanges(virtual)} carry a covariance but no MF3 section of "
+                         f"their own; their blocks went to their partials")
+        if discarded:
+            parts.append(f"{_mtRanges(discarded)}: own block discarded, every partial "
+                         f"under it carries a block of its own, and partials govern")
+        if negative:
+            parts.append(f"{_mtRanges(negative)} went NEGATIVE after re-deriving, "
+                         f"where no partial is: "
+                         f"the evaluation states that sum below its own partials, "
+                         f"and the realisation is not usable as written")
+        return "; ".join(parts)
+
+    from kika.sampling.cross_section_sums import _leavesUnder, sumTree
+
+    sums = {int(r.ENDF_MT) for r in getattr(suite, "sums", ())
+            if getattr(r, "ENDF_MT", None) is not None}
+    if not sums:
         return None
-    # `Sums.reactions` is a plain list of `Reaction`s -- the ENDF adapter fills
-    # it that way because ENDF says nowhere what MT1 sums, so there is no
-    # `CrossSectionSum` to build. Asking it for `byENDF_MT` raised
-    # AttributeError, which an over-broad `except` then swallowed: the note
-    # could never fire and the run said nothing. Read the list.
-    summedMTs = {int(reaction.ENDF_MT) for reaction in reactions
-                 if getattr(reaction, "ENDF_MT", None) is not None}
-    summed = [mt for mt in pset.reactions() if mt in summedMTs]
-    if not summed or len(pset.reactions()) < 2:
+    present = sums | {int(r.ENDF_MT) for r in getattr(suite, "reactions", ())
+                      if getattr(r, "ENDF_MT", None) is not None}
+    children, _parent = sumTree(present, sums)
+    moved = {c.mt for c in pset.components()
+             if c.mf == 33 or (c.mf == 34 and c.index == 0)}
+    stale = sorted(total for total in sums
+                   if total in moved
+                   or any(leaf in moved for leaf in _leavesUnder(total, children)))
+    if not stale:
         return None
     return (
-        f"MT{summed} is a summed cross section and this realisation also "
-        f"perturbs {[mt for mt in pset.reactions() if mt not in summed]}: each "
-        f"is scaled by its own factor block, so the sum is NOT re-derived and "
-        f"the tape states a total that is not the sum of its parts. Re-deriving "
-        f"is decision 3 of docs/library/perturbation_model_roadmap.md and moves "
-        f"numbers; it is not done here"
+        f"{_mtRanges(stale)} are summed cross sections and this realisation moves "
+        f"them or their partials ({_mtRanges(moved)}) with crossSectionSums=False: "
+        f"each named "
+        f"MT is scaled by its own block, so the tape states totals that are NOT "
+        f"the sum of their parts. NJOY's RECONR rebuilds MT1 and MT4 from the "
+        f"partials and discards what the tape states, so a block put on a sum "
+        f"alone does not reach the ACE either"
     )
 
 
@@ -382,11 +428,13 @@ def _touchedFiles(pset: PerturbationSet, alsoChanged=()) -> Dict[int, List[int]]
     writes a tape whose MF3 is perturbed and whose MF1 directory says it is not.
 
     *alsoChanged* is the components the **applier** moved that the request did
-    not name -- today exactly one thing: the nu-bar the sum rule derives. It has
-    to be here rather than inferred from the request, because a realisation that
-    perturbs MT455 and MT456 also rewrites MT452, and a delta that wrote only
-    what was asked for would leave the tape stating a total that is not the sum
-    of the parts it just changed. That was the first thing this emitter got
+    not name: the nu-bar the sum rule derives, and MF3's -- a partial riding a
+    sum's block, and every sum re-derived from its moved partials
+    (:mod:`kika.sampling.cross_section_sums`). It has to be here rather than
+    inferred from the request, because a realisation that perturbs MT455 and
+    MT456 also rewrites MT452, and one that perturbs MT51 rewrites MT4 and MT1,
+    and a delta that wrote only what was asked for would leave the tape stating
+    a total that is not the sum of the parts it just changed. That was the first thing this emitter got
     wrong, and it looked right: two files written, both perturbed, and the third
     silently stale.
     """
@@ -460,6 +508,12 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
             raise ValueError(
                 f"the realisation perturbs MF{mf} and the tape has no MF{mf}")
         for mt in mts:
+            if mf == 3 and suite.findReactionByENDF_MT(mt) is None:
+                # A block on a sum the tape states only through its partials
+                # (B-VIII.1 Fe-56: MF33/MT103 over MF3/MT600-649). The applier
+                # sent it to the partials, which are written; it would have
+                # raised had the MT been missing outright.
+                continue
             if mf == 3:
                 encoded, _report = encodeMF3MT(suite.reactionByENDF_MT(mt),
                                                label=pset.label, report=report)
@@ -1182,6 +1236,8 @@ class _SampleContext:
     #: MF35 only: cap on one outgoing table, ``None`` for none -- the legacy
     #: default, since NJOY took a ×1.57-grown Cf-252 table without complaint.
     maxOutgoingPoints: Optional[int] = None
+    #: MF3's sum rules on the realisation; see ``perturbFromModel``.
+    crossSectionSums: bool = True
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1205,7 +1261,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                     "sourceFormat": ctx.sourceFormat})
     with log.timed("applied", f"{label} on the model", sample=number) as info:
         applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode,
-                                    maxOutgoingPoints=ctx.maxOutgoingPoints)
+                                    maxOutgoingPoints=ctx.maxOutgoingPoints,
+                                    crossSectionSums=ctx.crossSectionSums)
         info["components"] = [c.describe() for c in applied]
     _checkRealisation(pset, log, number)
 
@@ -1250,7 +1307,9 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
             files["perturbation-set"] = pset.write(
                 sampleDir / "perturbation.json")
 
-    notes = [note for note in (_redundancyNote(suite, pset), _sumRuleNote(applied),
+    notes = [note for note in (_redundancyNote(suite, pset, applied,
+                                               ctx.crossSectionSums),
+                               _sumRuleNote(applied),
                                _spectrumNote(applied), _droppedStepsNote(applied))
              if note is not None]
     _forget(suite, pset, applied)
@@ -1334,6 +1393,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      covarianceSource=None,
                      onMissing: str = "raise",
                      maxOutgoingPoints: Optional[int] = None,
+                     crossSectionSums: bool = True,
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
@@ -1397,6 +1457,19 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         MF35 only: the most points one perturbed outgoing table may hold.
         ``None`` (default) for no cap. When it bites, the smallest factor steps
         are dropped first and the run says how many.
+    crossSectionSums
+        Hold MF3's sum rules on every realisation (the default): a partial with
+        its own block is perturbed by it, one without rides the nearest
+        perturbed sum above it, and every sum with a moved partial is
+        re-derived as ``S + sum (p' - p)`` -- see
+        :mod:`kika.sampling.cross_section_sums`. Not optional in practice:
+        NJOY's RECONR discards a tape's stated MT1 and MT4 and rebuilds them
+        from the partials (measured 2026-10-07 on ENDF/B-VIII.1 Fe-56), so a
+        perturbation put on MT1 alone never reaches the ACE, and MT27/MT101,
+        which RECONR does not rebuild, would reach it stale. ``False`` scales
+        each named MT by its own block and nothing else, and the run notes the
+        sums it left stale; it exists for the equivalence gate against
+        ``perturb_PENDF_files``.
     formats
         Any of :data:`EMITTERS`. ``"ace"`` needs *ace*.
     ace
@@ -1498,6 +1571,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               decompositionMethod=decompositionMethod,
               samplingMethod=samplingMethod, psdMethod=psdMethod,
               dryRun=dryRun, formats=list(formats), nWorkers=nWorkers,
+              crossSectionSums=crossSectionSums,
               source=str(source) if isinstance(source, (str, Path)) else "<parsed>",
               covarianceSource=(str(covarianceSource)
                                 if covarianceSource is not None else None),
@@ -1649,7 +1723,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         labelPrefix=labelPrefix, seed=seed, space=space, grouping=grouping,
         formats=tuple(formats), outputDir=outputDir, stem=stem, mat=mat,
         ace=ace if "ace" in formats else None, writeSets=writeSets,
-        emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints)
+        emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints,
+        crossSectionSums=crossSectionSums)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
@@ -1722,7 +1797,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         result.files["log-text"] = outputDir / "run.log"
         result.files["metadata"] = outputDir / "run_metadata.json"
         _writeRunMetadata(result, outputDir, covReport, suiteReport, sourcePath,
-                          original, seed, space, psdMethod, nWorkers=nWorkers)
+                          original, seed, space, psdMethod, nWorkers=nWorkers,
+                          crossSectionSums=crossSectionSums)
         log.write(outputDir)
     return result
 
@@ -1773,7 +1849,12 @@ def _forget(suite, pset: PerturbationSet, applied=()) -> None:
         if node is not None:
             node.forms.pop(pset.label, None)
 
-    for mt in pset.reactions():
+    # The applier also rewrites cross sections the request did not name -- a
+    # partial riding a sum's block, a sum re-derived from its parts -- and they
+    # carry the label exactly as the named ones do.
+    moved = set(pset.reactions()) | {component.mt for component in applied
+                                     if component.mf in (33, 34)}
+    for mt in sorted(moved):
         if mt in NUBAR_MT:
             continue
         reaction = suite.findReactionByENDF_MT(mt)
@@ -1799,7 +1880,8 @@ def _layer1Counts(findings) -> Dict[str, int]:
 
 def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport,
                       sourcePath, request, seed: int, space: str,
-                      psdMethod: str = "none", nWorkers: int = 1) -> Path:
+                      psdMethod: str = "none", nWorkers: int = 1,
+                      crossSectionSums: bool = True) -> Path:
     """The run's own account of itself, beside the samples.
 
     Deliberately includes the grouping description in full: "these quantities
@@ -1820,6 +1902,7 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
         "seed": seed,
         "space": space,
         "grouping": result.grouping,
+        "crossSectionSums": crossSectionSums,
         "nSamples": result.nSamples,
         "groups": result.description,
         "blocks": [

@@ -106,14 +106,18 @@ FE56 = DATA / "micro_fe56_xs_and_angular.endf"
 
 
 def test_a_cross_section_delta_leaves_the_other_mf3_sections_alone(tmp_path):
-    """MT1 and MT102 sit in the MF3 that MT2's perturbation rewrites."""
-    _assertOnlyPerturbedMoved(FE56, {33: None}, {(3, 2)}, tmp_path)
+    """MT102 sits in the MF3 that MT2's perturbation rewrites, and stays.
+
+    MT1 moves with MT2 because on this tape it is the sum of MT2 and MT102 --
+    MF3's sum rules, which re-derive it -- so it is part of what moved.
+    """
+    _assertOnlyPerturbedMoved(FE56, {33: None}, {(3, 1), (3, 2)}, tmp_path)
 
 
 def test_a_joint_delta_moves_mf3_and_mf4_and_nothing_else(tmp_path):
     _assertOnlyPerturbedMoved(
         FE56, {33: None, 34: {"mt": [2], "index": [1, 2, 3]}},
-        {(3, 2), (4, 2)}, tmp_path)
+        {(3, 1), (3, 2), (4, 2)}, tmp_path)
 
 
 # ----------------------------------------------------------------------
