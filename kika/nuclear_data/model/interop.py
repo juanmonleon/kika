@@ -161,17 +161,30 @@ def flatAngularDistribution(distribution, provenance, mt: int) -> Dict[str, Any]
     so nothing that reads ``coefficients`` sees a different array than before.
     """
     from .distributions import Isotropic2d
+    from .enums import Frame
     from .functions import Regions2d
 
-    header = dict(provenance.headerFields)
+    header = dict(getattr(provenance, "headerFields", None) or {})
+    # LTT and the frame are properties of the form, not of the header that came
+    # with it. They are read from the header when it has them (an MF4 section's
+    # own provenance) and from the form otherwise: a suite's provenance, or one
+    # decoded from G4NDL, has neither key, and the old fallback of "Legendre,
+    # centre of mass" turned an LTT=3 section into a crash and a LAB one into CM.
     ltt = header.get("ltt")
+    if ltt is None:
+        ltt = _inferLtt(distribution)
+    frame = getattr(distribution, "productFrame", None)
+    if frame is not None:
+        frame = "LAB" if Frame(frame) == Frame.lab else "CM"
+    else:
+        frame = "LAB" if header.get("lct") == 1 else "CM"
     common = {
         "reaction": mt,
-        "nuclide_id": provenance.za or 0,
-        "frame": "LAB" if header.get("lct") == 1 else "CM",
+        "nuclide_id": getattr(provenance, "za", None) or 0,
+        "frame": frame,
         "metadata": {
-            "mat": provenance.mat,
-            "awr": provenance.awr,
+            "mat": getattr(provenance, "mat", None),
+            "awr": getattr(provenance, "awr", None),
             "ltt": ltt,
             "li": header.get("li"),
             "lct": header.get("lct"),
@@ -243,6 +256,38 @@ def flatAngularDistribution(distribution, provenance, mt: int) -> Dict[str, Any]
         "coefficients": coefficients,
         "representation": _LTT_TO_REPRESENTATION.get(ltt, "legendre"),
     }
+
+
+def _inferLtt(distribution) -> int:
+    """ENDF's LTT from the shape of the form: 0 isotropic, 1 Legendre, 2 table, 3 both.
+
+    LTT=3 is the shape both decoders build for it: a ``Regions2d`` of two
+    children, the Legendre block first. Anything else that mixes the two kinds
+    has no LTT and is refused rather than read as one of them.
+    """
+    from .distributions import Isotropic2d
+    from .functions import Legendre, Regions2d
+
+    angular = getattr(distribution, "angular", None)
+    if isinstance(distribution, Isotropic2d) or isinstance(angular, Isotropic2d) or angular is None:
+        return 0
+
+    def kinds(node):
+        if isinstance(node, Regions2d):
+            return {k for child in node.function2ds for k in kinds(child)}
+        return {"legendre" if isinstance(f, Legendre) else "table" for f in node.function1ds}
+
+    found = kinds(angular)
+    if found == {"legendre"}:
+        return 1
+    if found == {"table"}:
+        return 2
+    if (isinstance(angular, Regions2d) and len(angular.function2ds) == 2
+            and kinds(angular.function2ds[0]) == {"legendre"}
+            and kinds(angular.function2ds[1]) == {"table"}):
+        return 3
+    raise ValueError("the angular form mixes Legendre and tabulated records in a shape "
+                     "that is not LTT=3 (a Regions2d of two children, Legendre first)")
 
 
 def _flatten(form) -> List[Any]:
