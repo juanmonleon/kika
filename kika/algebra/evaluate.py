@@ -79,6 +79,11 @@ def _read(x, y, laws, q, side: str, outside: str):
     if outside not in OUTSIDE:
         raise ValueError(f"outside must be one of {OUTSIDE}, got {outside!r}")
     x, y, laws = validate(x, y, laws)
+    return _read_checked(x, y, laws, q, side, outside)
+
+
+def _read_checked(x, y, laws, q, side: str, outside: str):
+    """:func:`_read` on a table :func:`validate` has already passed."""
     scalar = np.ndim(q) == 0
     q = np.asarray(q, dtype=float)
     flat = q.reshape(-1)
@@ -168,27 +173,30 @@ def sample_on_union(x, y, laws, u: ArrayLike) -> np.ndarray:
     u = np.asarray(u, dtype=float)
     if u.size == 0:
         return np.zeros(0)
+    out = _read_checked(x, y, laws, u, "point", "zero")
+    # Only the repeated abscissae need more than the value; they are few, so
+    # the bookkeeping is done on them alone.
     first = np.r_[True, u[1:] != u[:-1]]
-    start = np.flatnonzero(first)
-    count = np.diff(np.r_[start, u.size])
-    run = np.cumsum(first) - 1
-    occurrence = np.arange(u.size) - start[run]
+    lone = first & np.r_[first[1:], True]
+    if lone.all():
+        return out
+    rep = np.flatnonzero(~lone)
+    ur, fr = u[rep], first[rep]
+    start = np.flatnonzero(fr)
+    count = np.diff(np.r_[start, rep.size])
+    run = np.cumsum(fr) - 1
+    occurrence = np.arange(rep.size) - start[run]
     multiplicity = count[run]
-
-    out = evaluate(x, y, laws, u)
-    lone = multiplicity == 1
-    lead = (~lone) & (occurrence == 0)
-    tail = (~lone) & (occurrence == multiplicity - 1)
-    if lead.any():
-        out[lead] = left_limit(x, y, laws, u[lead])
-    if tail.any():
-        out[tail] = right_limit(x, y, laws, u[tail])
-    middle = ~(lone | lead | tail)
+    lead = occurrence == 0
+    tail = occurrence == multiplicity - 1
+    out[rep[lead]] = _read_checked(x, y, laws, ur[lead], "left", "zero")
+    out[rep[tail]] = _read_checked(x, y, laws, ur[tail], "right", "zero")
+    middle = ~(lead | tail)
     if middle.any() and x.size:
-        lo = np.searchsorted(x, u[middle], side="left")
-        hi = np.searchsorted(x, u[middle], side="right")
+        lo = np.searchsorted(x, ur[middle], side="left")
+        hi = np.searchsorted(x, ur[middle], side="right")
         own = occurrence[middle] < hi - lo
-        idx = np.flatnonzero(middle)[own]
+        idx = rep[np.flatnonzero(middle)[own]]
         out[idx] = y[lo[own] + occurrence[middle][own]]
     return out
 

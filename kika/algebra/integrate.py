@@ -40,7 +40,7 @@ from typing import Optional
 
 import numpy as np
 
-from .evaluate import evaluate
+from .evaluate import _read_checked
 from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate
 from .refine import LINEARIZATION_TOLERANCE, to_linlin
 
@@ -71,9 +71,11 @@ def _q(d: np.ndarray) -> np.ndarray:
     """``1 - ln(1 + d)/d``, the lin-lin panel's ``1/x`` correction, ``d = dx/x1``."""
     small = np.abs(d) < 1e-3
     with np.errstate(divide="ignore", invalid="ignore"):
-        direct = 1.0 - np.log1p(d) / d
-    series = d / 2.0 - d ** 2 / 3.0 + d ** 3 / 4.0 - d ** 4 / 5.0
-    return np.where(small, series, direct)
+        out = 1.0 - np.log1p(d) / d
+    if small.any():
+        e = d[small]
+        out[small] = e / 2.0 - e ** 2 / 3.0 + e ** 3 / 4.0 - e ** 4 / 5.0
+    return out
 
 
 def panel_integrals(x, y, laws, weight: Optional[str] = None) -> np.ndarray:
@@ -87,15 +89,23 @@ def panel_integrals(x, y, laws, weight: Optional[str] = None) -> np.ndarray:
     x, y, laws = validate(x, y, laws)
     if x.size < 2:
         return np.zeros(0)
-    x1, x2, y1, y2 = x[:-1], x[1:], y[:-1], y[1:]
+    return _integrate_panels(x[:-1], x[1:], y[:-1], y[1:], laws, weight)
+
+
+def _integrate_panels(x1, x2, y1, y2, laws, weight) -> np.ndarray:
+    """The integrals of the panels ``(x1, y1)-(x2, y2)`` under *laws*, checked arrays."""
     dx = x2 - x1
     out = np.zeros(dx.size)
     wide = dx > 0
     if weight == "1/x" and np.any(wide & (x1 <= 0)):
         raise ValueError("a 1/x weight needs positive abscissae")
+    codes = np.unique(laws[wide])
     with np.errstate(divide="ignore", invalid="ignore"):
-        for code in np.unique(laws[wide]):
-            m = wide & (laws == code)
+        for code in codes:
+            # One law over panels that all have width is the common case, and
+            # needs no copies.
+            m = (slice(None) if codes.size == 1 and wide.all()
+                 else wide & (laws == code))
             a1, a2, b1, b2, d = x1[m], x2[m], y1[m], y2[m], dx[m]
             if weight is None:
                 if code == HISTOGRAM:
@@ -143,6 +153,8 @@ def group_integrals(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarr
     that law at the edge, so the result is the table's own integral and not a
     quadrature of it.
     """
+    if weight not in WEIGHTS:
+        raise ValueError(f"weight must be one of {WEIGHTS}, got {weight!r}")
     x, y, laws = validate(x, y, laws)
     edges = np.asarray(edges, dtype=float)
     if edges.ndim != 1 or np.any(np.diff(edges) < 0):
@@ -150,25 +162,20 @@ def group_integrals(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarr
     n_groups = max(edges.size - 1, 0)
     if x.size < 2 or n_groups == 0:
         return np.zeros(n_groups)
-    # Edges strictly inside the domain that are not already nodes become cuts.
-    inner = edges[(edges > x[0]) & (edges < x[-1])]
-    cuts = np.setdiff1d(inner, x)
-    if cuts.size:
-        k = np.searchsorted(x, cuts, side="right") - 1
-        # The value at a cut is the law's own value there. Panels with a
-        # repeated abscissa never contain a cut (cuts are not nodes).
-        vals = evaluate(x, y, laws, cuts)
-        at = np.searchsorted(x, cuts, side="right")
-        xr = np.insert(x, at, cuts)
-        yr = np.insert(y, at, vals)
-        lr = np.insert(laws, k + 1, laws[k])  # both halves keep the law
-        x, y, laws = xr, yr, lr
-    cumulative = cumulative_integral(x, y, laws, weight)
-    # The integral up to an edge: everything left of it. At an edge equal to a
-    # repeated abscissa the zero-width interval adds nothing either way.
+    cumulative = np.concatenate(([0.0], np.cumsum(
+        _integrate_panels(x[:-1], x[1:], y[:-1], y[1:], laws, weight))))
+    # The integral up to an edge: every whole panel left of it, plus the piece
+    # of the panel it falls in, from that panel's start to the edge -- the same
+    # law, valued at the edge by that law. At an edge on a node the piece is
+    # empty, and at a repeated abscissa the zero-width interval adds nothing.
     c = np.clip(edges, x[0], x[-1])
-    idx = np.searchsorted(x, c, side="left")
-    totals = cumulative[idx]
+    k = np.minimum(np.searchsorted(x, c, side="right") - 1, x.size - 2)
+    totals = cumulative[k]
+    inside = c > x[k]
+    if inside.any():
+        j, e = k[inside], c[inside]
+        totals[inside] += _integrate_panels(
+            x[j], e, y[j], _read_checked(x, y, laws, e, "point", "zero"), laws[j], weight)
     return np.diff(totals)
 
 
