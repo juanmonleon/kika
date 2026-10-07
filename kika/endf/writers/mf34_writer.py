@@ -27,6 +27,7 @@ from ..classes.mf34.mf34 import (
 )
 from ._records import populate_lb5_record, populate_lb6_record
 from ._section_writer import _find_mf_boundaries, _parse_mf_mt, write_mf_section_to_file
+from ..utils import line_ending
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -830,6 +831,7 @@ def remove_mf34_from_file(filepath: str, update_directory: bool = True) -> bool:
     """
     with open(filepath, 'r') as f:
         lines = f.readlines()
+    newline = line_ending(filepath)
 
     start, end = _find_mf_boundaries(lines, 34)
     if start is None:
@@ -850,7 +852,7 @@ def remove_mf34_from_file(filepath: str, update_directory: bool = True) -> bool:
                 end += 1
 
     new_lines = lines[:start] + lines[end:]
-    with open(filepath, 'w') as f:
+    with open(filepath, 'w', newline=newline) as f:
         f.writelines(new_lines)
 
     if update_directory:

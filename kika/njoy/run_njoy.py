@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import subprocess
@@ -143,6 +144,41 @@ def _render_njoy_input(mat: int, T: float, title: str, suff: str = None,
     return dedent(template).format(mat=mat, T=T, title=title, suff=suff)
 
 # ---- 2) Runner ----
+#: Re-runs when NJOY misread the deck; the same budget as RECONR's
+#: (``kika.processing.njoy_reconstruct._MAX_LOCALE_ATTEMPTS``).
+_MAX_LOCALE_ATTEMPTS = 8
+
+
+def _run_njoy_deck(njoy_exe, workdir: Path, deck: str):
+    """Run *deck* in *workdir*, again while NJOY's listing shows a misread.
+
+    The decimal-locale misread is per run (:mod:`kika.njoy.locale_guard`), so a
+    second run of the same deck on the same tapes is what fixes it; the input
+    tapes are untouched by NJOY and the outputs are rewritten. What a run that
+    still misreads after the last attempt left behind is checked again by
+    :func:`_guard_decimal_locale`, which raises.
+    """
+    from .locale_guard import check_run, read_listing
+
+    for attempt in range(1, _MAX_LOCALE_ATTEMPTS + 1):
+        result = subprocess.run(
+            build_njoy_command(njoy_exe),
+            cwd=workdir,
+            input=deck.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        check = check_run(deck, read_listing(workdir))
+        if not check.corrupted:
+            return result
+        if attempt < _MAX_LOCALE_ATTEMPTS:
+            logging.getLogger(__name__).warning(
+                "NJOY misread its deck (%s); re-running (%d/%d)",
+                check.detail, attempt + 1, _MAX_LOCALE_ATTEMPTS)
+    return result
+
+
 def _guard_decimal_locale(workdir: Path, deck: str, njoy_files_dir: Path,
                           base_filename: str) -> str | None:
     """Fail the run if NJOY read numbers other than the ones in the deck.
@@ -290,14 +326,7 @@ def run_njoy(
         deck_path.write_text(njoy_input)
 
         # Run NJOY: feed stdin from the input deck
-        result = subprocess.run(
-            build_njoy_command(njoy_exe),
-            cwd=workdir,
-            input=njoy_input.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        result = _run_njoy_deck(njoy_exe, workdir, njoy_input)
 
         # Save organized output files
         results = {
@@ -455,14 +484,7 @@ def run_njoy_with_pendf(
         deck_path = workdir / "njoy.inp"
         deck_path.write_text(njoy_input)
 
-        result = subprocess.run(
-            build_njoy_command(njoy_exe),
-            cwd=workdir,
-            input=njoy_input.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        result = _run_njoy_deck(njoy_exe, workdir, njoy_input)
 
         results = {
             "returncode": result.returncode,

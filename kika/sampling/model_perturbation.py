@@ -240,47 +240,118 @@ class RunResult:
                 if record["returncode"] != 0 or not record["ace"]]
 
 
-def _redundancyNote(suite, pset) -> Optional[str]:
-    """Whether this realisation perturbs a summed cross section and its parts.
+def _mtRanges(mts) -> str:
+    """``[51, 52, 53, 91]`` as ``MT51-53, 91``: a note names forty partials."""
+    mts = sorted(int(mt) for mt in mts)
+    runs, start = [], None
+    for index, mt in enumerate(mts):
+        if start is None:
+            start = mt
+        if index + 1 == len(mts) or mts[index + 1] != mt + 1:
+            runs.append(f"{start}" if start == mt else f"{start}-{mt}")
+            start = None
+    return "MT" + ", ".join(runs)
 
-    **This does not repair anything, and saying so is the point.** ENDF states
-    MT1 and MT4 as ordinary sections, so a request for "every MT the file states"
-    routinely names a sum *and* its partials, and each is perturbed from its own
-    covariance block. The tape that comes out therefore has MT1 that is no longer
-    the sum of what it sums -- which is what ``apply_factors_to_pendf_mf3`` half
-    solves for the PENDF case, by expanding a composite over its partials and
-    excluding the partials that are perturbed in their own right.
 
-    Re-deriving here is decision 3 of the roadmap (Juan, 2026-08-29: the sum is
-    re-derived when the partials are perturbed) and it **moves numbers**, so it
-    is not something to slip into a pipeline unannounced. What it needs first is
-    for the applier to know which MT sums which, and the ENDF-decoded model does
-    not carry that: ``f982268`` puts a summed MT in ``suite.sums``, but §25's
-    ``<summands/>`` comes out empty because ENDF says nowhere what MT1 is made
-    of, and ``kika._constants.MT_COMPOSITES`` only approximates it.
+def _redundancyNote(suite, pset, applied=None,
+                    crossSectionSums: bool = True,
+                    sumBlocks: str = "undecomposed") -> Optional[str]:
+    """What this realisation did to MF3's sums -- or failed to do.
 
-    So the run records the fact instead of quietly leaving it out of the file.
+    With *crossSectionSums* on, the applier holds the sum rules
+    (:mod:`kika.sampling.cross_section_sums`) and this says what that cost: the
+    sums it re-derived, the partials that rode a sum's block (an undecomposed
+    sum's, or with ``sumBlocks="fill"`` any sum's), a sum whose own block was
+    discarded because the file decomposes it, and any re-derived sum that went
+    negative -- which
+    only an evaluation whose total sits below its own parts can produce.
+    Re-deriving moves numbers the request did not name, so it is said, not
+    done quietly.
+
+    With it off, each named MT is scaled by its own block and nothing else, and
+    this names every sum left stating a total that is not the sum of its parts:
+    one perturbed beside its partials, and -- the case the first version of this
+    note missed -- one whose partial moved while the sum itself was not named.
     """
-    reactions = getattr(getattr(suite, "sums", None), "reactions", None)
-    if not reactions:
+    applied = applied or {}
+    if crossSectionSums:
+        rebuilt = sorted(c.mt for c, info in applied.items()
+                         if "rederived_from" in info)
+        if not rebuilt and not any("factor_from" in info or "remainder_of" in info
+                                   for info in applied.values()):
+            return None
+        riders: Dict[int, List[int]] = {}
+        lumps: Dict[int, List[int]] = {}
+        for component, info in applied.items():
+            if "factor_from" in info:
+                (lumps if info.get("lumped") else riders).setdefault(
+                    int(info["factor_from"]), []).append(component.mt)
+        remainderOf = {c.mt: info["remainder_of"] for c, info in applied.items()
+                       if "remainder_of" in info}
+        discarded = sorted(c.mt for c, info in applied.items()
+                           if info.get("own_block") == "discarded")
+        negative = sorted(c.mt for c, info in applied.items()
+                          if info.get("n_negative") and "remainder_of" not in info)
+        negativeRemainders = sorted(c.mt for c, info in applied.items()
+                                    if info.get("n_negative")
+                                    and "remainder_of" in info)
+        parts = [f"MF3 sums re-derived from their moved partials: "
+                 f"{_mtRanges(rebuilt)}"]
+        for total in sorted(riders):
+            parts.append(f"MT{total}'s block moved its unperturbed partials "
+                         f"{_mtRanges(riders[total])} by one common factor"
+                         + (" (sumBlocks='fill': an assumption, the file "
+                            "states no covariance for them)"
+                            if sumBlocks == "fill" else ""))
+        for lump in sorted(lumps):
+            parts.append(f"the lumped MT{lump}'s block moved its members "
+                         f"{_mtRanges(lumps[lump])} by one common factor (MTL)")
+        for partial in sorted(remainderOf):
+            parts.append(f"MT{partial} took MT{remainderOf[partial]}'s move "
+                         f"less the others' (MF33 states it as the remainder)")
+        if negativeRemainders:
+            parts.append(f"{_mtRanges(negativeRemainders)} went NEGATIVE as a "
+                         f"remainder: the total moved down more than the others "
+                         f"left room for, and the realisation is not usable as "
+                         f"written")
+        virtual = sorted(c.mt for c, info in applied.items() if info.get("virtual"))
+        if virtual:
+            parts.append(f"{_mtRanges(virtual)} carry a covariance but no MF3 section of "
+                         f"their own; their blocks went to their partials")
+        if discarded:
+            parts.append(f"{_mtRanges(discarded)}: own block discarded, partials "
+                         f"under it carry blocks of their own, and partials govern")
+        if negative:
+            parts.append(f"{_mtRanges(negative)} went NEGATIVE after re-deriving, "
+                         f"where no partial is: "
+                         f"the evaluation states that sum below its own partials, "
+                         f"and the realisation is not usable as written")
+        return "; ".join(parts)
+
+    from kika.sampling.cross_section_sums import _leavesUnder, sumTree
+
+    sums = {int(r.ENDF_MT) for r in getattr(suite, "sums", ())
+            if getattr(r, "ENDF_MT", None) is not None}
+    if not sums:
         return None
-    # `Sums.reactions` is a plain list of `Reaction`s -- the ENDF adapter fills
-    # it that way because ENDF says nowhere what MT1 sums, so there is no
-    # `CrossSectionSum` to build. Asking it for `byENDF_MT` raised
-    # AttributeError, which an over-broad `except` then swallowed: the note
-    # could never fire and the run said nothing. Read the list.
-    summedMTs = {int(reaction.ENDF_MT) for reaction in reactions
-                 if getattr(reaction, "ENDF_MT", None) is not None}
-    summed = [mt for mt in pset.reactions() if mt in summedMTs]
-    if not summed or len(pset.reactions()) < 2:
+    present = sums | {int(r.ENDF_MT) for r in getattr(suite, "reactions", ())
+                      if getattr(r, "ENDF_MT", None) is not None}
+    children, _parent = sumTree(present, sums)
+    moved = {c.mt for c in pset.components()
+             if c.mf == 33 or (c.mf == 34 and c.index == 0)}
+    stale = sorted(total for total in sums
+                   if total in moved
+                   or any(leaf in moved for leaf in _leavesUnder(total, children)))
+    if not stale:
         return None
     return (
-        f"MT{summed} is a summed cross section and this realisation also "
-        f"perturbs {[mt for mt in pset.reactions() if mt not in summed]}: each "
-        f"is scaled by its own factor block, so the sum is NOT re-derived and "
-        f"the tape states a total that is not the sum of its parts. Re-deriving "
-        f"is decision 3 of docs/library/perturbation_model_roadmap.md and moves "
-        f"numbers; it is not done here"
+        f"{_mtRanges(stale)} are summed cross sections and this realisation moves "
+        f"them or their partials ({_mtRanges(moved)}) with crossSectionSums=False: "
+        f"each named "
+        f"MT is scaled by its own block, so the tape states totals that are NOT "
+        f"the sum of their parts. NJOY's RECONR rebuilds MT1 and MT4 from the "
+        f"partials and discards what the tape states, so a block put on a sum "
+        f"alone does not reach the ACE either"
     )
 
 
@@ -382,11 +453,13 @@ def _touchedFiles(pset: PerturbationSet, alsoChanged=()) -> Dict[int, List[int]]
     writes a tape whose MF3 is perturbed and whose MF1 directory says it is not.
 
     *alsoChanged* is the components the **applier** moved that the request did
-    not name -- today exactly one thing: the nu-bar the sum rule derives. It has
-    to be here rather than inferred from the request, because a realisation that
-    perturbs MT455 and MT456 also rewrites MT452, and a delta that wrote only
-    what was asked for would leave the tape stating a total that is not the sum
-    of the parts it just changed. That was the first thing this emitter got
+    not name: the nu-bar the sum rule derives, and MF3's -- a partial riding a
+    sum's block, and every sum re-derived from its moved partials
+    (:mod:`kika.sampling.cross_section_sums`). It has to be here rather than
+    inferred from the request, because a realisation that perturbs MT455 and
+    MT456 also rewrites MT452, and one that perturbs MT51 rewrites MT4 and MT1,
+    and a delta that wrote only what was asked for would leave the tape stating
+    a total that is not the sum of the parts it just changed. That was the first thing this emitter got
     wrong, and it looked right: two files written, both perturbed, and the third
     silently stale.
     """
@@ -418,12 +491,25 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
     Everything not re-encoded is copied through as bytes, which is what keeps a
     perturbed tape comparable to the one it came from -- and what makes ``cmp``
     between two samples show exactly the perturbation and nothing else.
+
+    The unit of replacement is the **MT**, not the MF. Replacing the whole MF
+    re-encoded every sibling section the realisation never touched -- MF5/MT455
+    beside a perturbed MT18 came back with the same values but new sequence
+    numbers, zero-filled SEND records and, on B-VIII.1 U-233, its ZA spelt
+    ``9.223300+4`` instead of ``92233.0000`` (PF-5). The pattern is the legacy
+    writers' (``_write_perturbed_pfns_endf``): a fresh ``ENDFWriter`` per MT,
+    because it snapshots the file at construction and a reused one would
+    splice the second section into the pre-first text and drop the first; no
+    directory update per MT; one rebuild at the end, once the line counts have
+    settled.
     """
+    import shutil
     from kika.endf.model_adapter import encodeMF3MT, encodeMF4MT, encodeMF5MT
     from kika.endf.model_adapter.multiplicity import (encodeMF1MT452,
                                                       encodeMF1MT455,
                                                       encodeMF1MT456)
     from kika.endf.writers.endf_writer import ENDFWriter
+    from kika.endf.writers.update_directory import update_mf1_directory
     from kika.nuclear_data.model import EVAL_LABEL
 
     _MF1_ENCODERS = {452: encodeMF1MT452, 455: encodeMF1MT455,
@@ -440,14 +526,19 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
     if not touched:
         raise ValueError("this realisation touches nothing; there is no delta")
 
-    current = Path(sourcePath)
     outPath = Path(outPath)
+    shutil.copyfile(sourcePath, outPath)
     for mf, mts in touched.items():
-        mfFile = endfObj.get_file(mf)
-        if mfFile is None:
+        if endfObj.get_file(mf) is None:
             raise ValueError(
                 f"the realisation perturbs MF{mf} and the tape has no MF{mf}")
         for mt in mts:
+            if mf == 3 and suite.findReactionByENDF_MT(mt) is None:
+                # A block on a sum the tape states only through its partials
+                # (B-VIII.1 Fe-56: MF33/MT103 over MF3/MT600-649). The applier
+                # sent it to the partials, which are written; it would have
+                # raised had the MT been missing outright.
+                continue
             if mf == 3:
                 encoded, _report = encodeMF3MT(suite.reactionByENDF_MT(mt),
                                                label=pset.label, report=report)
@@ -484,11 +575,12 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
             else:
                 raise NotImplementedError(
                     f"no delta encoder for MF{mf}")
-            mfFile.sections[mt] = encoded
-        writer = ENDFWriter(str(current))
-        if not writer.replace_mf_section(mfFile, str(outPath)):
-            raise RuntimeError(f"writing MF{mf} of {outPath} failed")
-        current = outPath
+            writer = ENDFWriter(str(outPath))
+            if not writer.replace_mt_section(encoded, mf_number=mf,
+                                             output_filepath=str(outPath),
+                                             update_directory=False):
+                raise RuntimeError(f"writing MF{mf}/MT{mt} of {outPath} failed")
+    update_mf1_directory(str(outPath))
     return outPath
 
 
@@ -503,8 +595,27 @@ def _emitWholeFile(suite, pset, outPath, fmt, mat=None) -> Path:
     return outPath
 
 
+def _njoyInputs(deltaTape: Path, originalSource: Path, pendf: Path,
+                workDir: Path) -> Tuple[Path, Path]:
+    """``(endf, pendf)`` NJOY needs for a sample of a reconstructed tape.
+
+    The perturbed PENDF is RECONR's with the sample's MF3; the ENDF is the
+    sample's tape with the *original* MF3 and LRP back, so that PURR reads the
+    background and the unresolved parameters it expects. See
+    :mod:`kika.sampling.resonance_region`.
+    """
+    from kika.endf import read_endf
+    from kika.sampling.resonance_region import _lrp, setLRP, spliceMF3
+
+    workDir.mkdir(parents=True, exist_ok=True)
+    samplePendf = spliceMF3(pendf, deltaTape, workDir / "perturbed.pendf")
+    njoyEndf = spliceMF3(deltaTape, originalSource, workDir / "njoy-input.endf")
+    setLRP(njoyEndf, _lrp(read_endf(str(originalSource), mf_numbers=[1])) or 1)
+    return njoyEndf, samplePendf
+
+
 def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
-             sample: int) -> List[Dict[str, Any]]:
+             sample: int, pendfPath: Optional[Path] = None) -> List[Dict[str, Any]]:
     """NJOY on one sample's tape, once per temperature. Records, never raises.
 
     A failed NJOY run is an ``error`` event naming the sample and the
@@ -515,7 +626,7 @@ def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
     import shutil
     import tempfile
 
-    from kika.njoy.run_njoy import run_njoy
+    from kika.njoy.run_njoy import run_njoy, run_njoy_with_pendf
 
     aceDir = sampleDir / "ace"
     njoyDir = sampleDir / "njoy"
@@ -530,14 +641,21 @@ def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
         with log.timed("emitted", f"ace at {temperature:g} K", subject="ace",
                        sample=sample, temperature=temperature) as info:
             with tempfile.TemporaryDirectory(prefix="njoy_", dir=sampleDir) as scratch:
-                result = run_njoy(
-                    njoy_exe=options.njoyExe, endf_path=endfPath,
+                common = dict(
                     temperature=temperature, library_name=options.libraryName,
                     output_dir=scratch, njoy_version=options.njoyVersion,
                     additional_suffix=f"{sample:04d}" if extension is None else None,
                     extension=extension, ace_dir=aceDir, xsdir_dir=aceDir,
                     njoy_files_dir=njoyDir if options.keepNjoyFiles else Path(scratch),
                 )
+                if pendfPath is None:
+                    result = run_njoy(njoy_exe=options.njoyExe, endf_path=endfPath,
+                                      **common)
+                else:
+                    # A reconstructed tape: RECONR has run, on the evaluation,
+                    # and the sample's cross sections are in the PENDF.
+                    result = run_njoy_with_pendf(options.njoyExe, endfPath,
+                                                 pendfPath, **common)
             record["returncode"] = int(result.get("returncode", -1))
             record["ace"] = result.get("ace_file")
             record["xsdir"] = result.get("xsdir_file")
@@ -648,6 +766,264 @@ def _missingReactions(request, entries) -> Dict[int, List[int]]:
         if absent:
             missing[selection.mf] = absent
     return missing
+
+
+def _statedCrossSectionMTs(covariances) -> set:
+    """The MTs MF33 states a covariance for (a diagonal section), unassembled.
+
+    Read off the links, without building a matrix: :func:`_expandNamedSums`
+    needs it before the request is assembled, and assembling ``{33: None}``
+    just to ask the question costs what the run costs.
+    """
+    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf
+
+    stated = set()
+    for section in getattr(covariances, "covarianceSections", covariances):
+        row = section.rowData
+        col = section.columnData if section.columnData is not None else row
+        if _is_endf_mf(row, 33) and _endf_mt(row) == _endf_mt(col):
+            stated.add(int(_endf_mt(row)))
+    return stated
+
+
+def _sumStatements(suite, endfObj, covarianceSource, log):
+    """``(lumped, remainders)`` the covariance tape's MF33 states, logged.
+
+    Read off the parsed ENDF (or the separate covariance tape, when there is
+    one: the statements belong to whichever file holds the covariance). A GNDS
+    source carries neither, and gets neither.
+    """
+    from kika.sampling.cross_section_sums import readSumStatements, suiteSumLayout
+
+    tape = endfObj
+    if covarianceSource is not None:
+        from kika.endf import read_endf
+
+        tape = read_endf(str(covarianceSource), mf_numbers=[33])
+    if tape is None or not getattr(suite, "sums", None):
+        return {}, {}
+    present, sums = suiteSumLayout(suite)
+    remainders, lumped, notes = readSumStatements(tape, present, sums)
+    for note in notes:
+        log.warning(note, subject="MF33")
+    for mtl, members in lumped.items():
+        log.note(f"MT{mtl} is a lumped covariance (MTL) for {_mtRanges(members)}: "
+                 f"its block moves them", subject=f"MF33/MT{mtl}")
+    for partial, statements in remainders.items():
+        for statement in statements:
+            log.note(f"MT{partial}'s covariance is stated as MT{statement.total} "
+                     f"minus {_mtRanges(statement.minus)} over "
+                     f"[{statement.lo:.4g}, {statement.hi:.4g}] eV: it takes the "
+                     f"difference", subject=f"MF33/MT{partial}")
+    return lumped, remainders
+
+
+def _expandNamedSums(suite, covariances, request, log, lumped=None,
+                     remainders=None):
+    """A named sum the file decomposes means the sections that decompose it.
+
+    Asking for MT4 on a tape that states covariances for MT51 and MT52 is
+    asking to perturb inelastic scattering, and the file says that is done
+    through MT51 and MT52 (Juan, 2026-10-07): they are added to the request,
+    the sum stays in it (its block is then discarded, or carried to the rest
+    with ``sumBlocks="fill"``), and the run says so. A sum whose covariance is
+    only *derived* -- B-VIII.1 U-235's MT1, stated as the sum of its channels
+    -- has no block of its own to keep, so it is replaced by them rather than
+    refused as "not stated". A sum nothing under which carries a covariance is
+    left alone: its own block is what perturbs it.
+
+    Two more statements the file can make, read the same way. A partial whose
+    covariance is a lump's (MTL) is asked for through the lump, which moves
+    every member. A partial whose covariance is a total minus the others
+    (:class:`~kika.sampling.cross_section_sums.Remainder`) is asked for through
+    that total and those others.
+
+    Returns ``(request, notes)``; *request* unchanged when nothing applies.
+    """
+    from kika.sampling.cross_section_sums import suiteSumLayout, sumMembers
+    from kika.sampling.joint_blocks import Selection, _asSelections
+
+    if not isinstance(request, Mapping) or not getattr(suite, "sums", None):
+        return request, []
+    selections = _asSelections(request)
+    named = [s for s in selections if s.mf == 33 and s.mt is not None]
+    if not named:
+        return request, []
+    stated = _statedCrossSectionMTs(covariances)
+    present, sums = suiteSumLayout(suite)
+    members = sumMembers(present, sums, claims=stated)
+    lumpOf = {member: mtl for mtl, ms in (lumped or {}).items() if mtl in stated
+              for member in ms}
+    reachable = stated | set(lumpOf)
+
+    notes: List[str] = []
+    rebuilt = {}
+    for selection in selections:
+        if selection not in named:
+            rebuilt[selection.mf] = selection
+            continue
+        wanted = (list(selection.mt) if isinstance(selection.mt, (list, tuple, set))
+                  else [selection.mt])
+        out = [int(mt) for mt in wanted]
+        for mt in [int(mt) for mt in wanted]:
+            if mt in lumpOf and mt not in stated:
+                out.remove(mt)
+                out.append(lumpOf[mt])
+                note = (f"MT{mt} was asked for and its covariance is the lumped "
+                        f"MT{lumpOf[mt]}'s (MTL); it is perturbed through it, "
+                        f"which moves every member of the lump")
+                notes.append(note)
+                log.note(note, subject=f"MF33/MT{mt}")
+                continue
+            if mt in (remainders or {}) and mt not in stated:
+                sources = set()
+                for statement in remainders[mt]:
+                    sources.add(statement.total)
+                    sources.update(m for m in statement.minus if m in reachable)
+                sources = {lumpOf.get(m, m) for m in sources}
+                out.remove(mt)
+                out.extend(m for m in sources if m not in out)
+                note = (f"MT{mt} was asked for and its covariance is stated as "
+                        f"a total minus the others; it is perturbed through "
+                        f"{_mtRanges(sources)}, and takes the difference")
+                notes.append(note)
+                log.note(note, subject=f"MF33/MT{mt}")
+                continue
+            covered = sorted({lumpOf.get(m, m)
+                              for m in members.get(mt, ()) if m in reachable})
+            if not covered:
+                continue
+            added = [m for m in covered if m not in out]
+            out.extend(added)
+            if mt not in stated:
+                out.remove(mt)
+                note = (f"MT{mt} was asked for and states no covariance of its "
+                        f"own here; it is perturbed through the sections under "
+                        f"it that do ({_mtRanges(covered)}) and re-derived")
+            elif added:
+                note = (f"MT{mt} was asked for, and the file decomposes it: "
+                        f"{_mtRanges(added)} under it carry covariances of "
+                        f"their own and were added to the request")
+            else:
+                continue
+            notes.append(note)
+            log.note(note, subject=f"MF33/MT{mt}", added=sorted(added))
+        rebuilt[selection.mf] = Selection(mf=33, mt=sorted(set(out)),
+                                          index=selection.index,
+                                          relative=selection.relative)
+    if not notes:
+        return request, []
+    return rebuilt, notes
+
+
+def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log,
+                     lumped=None, remainders=None):
+    """Drop the sums' blocks this run has no use for, before the draw.
+
+    A sum's own block is never applied to the sum (it has to equal its parts).
+    Where the file decomposes the sum -- something under it carries a
+    covariance of its own -- the block is *discarded*, in every mode but
+    ``"fill"``. Where it does not, the block moves the partials
+    (``"undecomposed"``, the default, and ``"fill"``) or, under ``"never"``,
+    has nowhere to go: refused if the request named the sum and
+    ``onMissing="raise"``, dropped with a warning otherwise. See
+    :mod:`kika.sampling.cross_section_sums`.
+
+    A decomposed sum MF33 states a partial under it as the remainder of
+    (:class:`~kika.sampling.cross_section_sums.Remainder`) is *anchored*: its
+    block is drawn, because the remainder is made of it. Lumped reactions
+    (MT851...) count as claims on their members.
+
+    Taken out here rather than drawn and thrown away, so the draw, the factors
+    table and ``run_metadata.json`` all hold exactly what reaches the tape --
+    dropping a component from a joint normal draw is marginalising it, which
+    leaves the others' joint law as stated.
+
+    Returns ``(entries, record, notes)``.
+    """
+    from kika.sampling.cross_section_sums import screenSumClaims, suiteSumLayout
+    from kika.sampling.joint_blocks import _asSelections
+
+    record: Dict[str, Any] = {"mode": mode, "discarded": {}, "undecomposed": {},
+                              "dropped": {}, "anchored": {},
+                              "lumped": {str(k): list(v)
+                                         for k, v in (lumped or {}).items()},
+                              "remainders": {
+                                  str(k): [[r.total, list(r.minus), r.lo, r.hi]
+                                           for r in rs]
+                                  for k, rs in (remainders or {}).items()}}
+    claimKeys: Dict[int, set] = {}
+    for rowKey, colKey, *_rest in entries:
+        for key in (rowKey, colKey):
+            if key.mf == 33 or (key.mf == 34 and key.index == 0):
+                claimKeys.setdefault(int(key.mt), set()).add(key)
+    if not claimKeys or not getattr(suite, "sums", None):
+        return entries, record, []
+    present, sums = suiteSumLayout(suite)
+    screen = screenSumClaims(claimKeys, present, sums, lumped=lumped,
+                             remainders=remainders)
+
+    notes: List[str] = []
+    drop = set()
+    for total, partials in screen.anchored.items():
+        record["anchored"][str(total)] = list(partials)
+        note = (f"MT{total}'s own covariance is drawn although the file "
+                f"decomposes it: MF33 states {_mtRanges(partials)} as MT{total} "
+                f"minus the rest, so MT{total}'s uncertainty reaches the tape "
+                f"through {'it' if len(partials) == 1 else 'them'}")
+        notes.append(note)
+        log.note(note, subject=f"MF33/MT{total}", partials=list(partials))
+    if mode != "fill":
+        for total, own in screen.discarded.items():
+            drop |= claimKeys[total]
+            record["discarded"][str(total)] = list(own)
+            note = (f"MT{total}'s own covariance was not drawn: the file "
+                    f"decomposes it ({_mtRanges(own)} under it carry their own), "
+                    f"so it is perturbed through them and re-derived; partials "
+                    f"under it with no covariance stay as evaluated")
+            notes.append(note)
+            log.note(note, subject=f"MF33/MT{total}", partials=list(own))
+
+    if mode == "never":
+        named = set()
+        for selection in _asSelections(request):
+            if selection.mf in (33, 34) and selection.mt is not None:
+                wanted = (selection.mt if isinstance(selection.mt, (list, tuple, set))
+                          else [selection.mt])
+                named.update(int(mt) for mt in wanted)
+        refused = {total: leaves for total, leaves in screen.undecomposed.items()
+                   if total in named}
+        if refused and onMissing == "raise":
+            raise ValueError(
+                "; ".join(f"MT{total} over {_mtRanges(leaves)}"
+                          for total, leaves in refused.items())
+                + ": the request names the sum, nothing under it carries a "
+                  "covariance of its own, and sumBlocks='never' uses no sum's "
+                  "block. Applied to the sum alone it would leave the sum "
+                  "unequal to its parts (and NJOY rebuilds MT1 and MT4 from "
+                  "the parts anyway). Use sumBlocks='undecomposed' to move its "
+                  "partials by it")
+        for total, leaves in screen.undecomposed.items():
+            drop |= claimKeys[total]
+            record["dropped"][str(total)] = list(leaves)
+            note = (f"MT{total}'s covariance was not drawn: nothing under it "
+                    f"({_mtRanges(leaves)}) carries a covariance of its own and "
+                    f"sumBlocks='never', so MT{total} and its partials are left "
+                    f"as evaluated")
+            notes.append(note)
+            log.warning(note, subject=f"MF33/MT{total}", partials=list(leaves))
+    else:
+        for total, leaves in screen.undecomposed.items():
+            record["undecomposed"][str(total)] = list(leaves)
+
+    kept = [entry for entry in entries
+            if entry[0] not in drop and entry[1] not in drop]
+    if not kept:
+        raise ValueError(
+            "every block this request reaches belongs to a summed cross "
+            "section this run does not use, so nothing is left to perturb: "
+            + " ".join(notes))
+    return kept, record, notes
 
 
 def _splitBySemantics(blocks, index):
@@ -883,6 +1259,42 @@ def _readCovarianceFrom(path, expectedZaid, log):
         f"evaluation declares",
         subject=path.name)
     return covariances, covReport
+
+
+#: What ``perturbFromModel(resonanceRegion=...)`` accepts.
+RESONANCE_REGION_MODES = ("reconstructed", "evaluated")
+
+
+def _reconstructResonanceRegion(sourcePath: Path, endfObj, njoyExe, tolerance: float,
+                                log):
+    """``(suite, endfObj, basePath, pendfPath)`` for a tape whose MF3 is a background.
+
+    See :mod:`kika.sampling.resonance_region`. RECONR runs once per tape and
+    tolerance (cached by the bytes of the tape); the LRP=2 base tape is cached
+    beside its PENDF, so a second run -- and every worker process, which
+    re-reads the base -- costs a parse and nothing else.
+    """
+    from kika.endf import read_endf
+    from kika.endf.model_adapter import decodeReactionSuite
+    from kika.processing.njoy_pendf_cache import (find_njoy_executable,
+                                                  get_or_create_pendf)
+    from kika.sampling.resonance_region import reconstructedBase, resonanceRanges
+
+    ranges = resonanceRanges(endfObj)
+    exe = find_njoy_executable(
+        njoyExe, why="perturbing the cross sections of a resonance region")
+    with log.timed("read",
+                   f"resonance region reconstructed by RECONR at 0 K, tolerance "
+                   f"{tolerance:g}", subject=sourcePath.name) as info:
+        pendf = get_or_create_pendf(sourcePath, tolerance=tolerance, njoy_exe=exe)
+        base = pendf.with_name(pendf.stem + ".lrp2.endf")
+        if not base.is_file():
+            reconstructedBase(sourcePath, pendf, base)
+        baseObj = read_endf(str(base))
+        suite, _report = decodeReactionSuite(baseObj)
+        info.update(pendf=str(pendf), base=str(base),
+                    ranges=[list(r) for r in ranges])
+    return suite, baseObj, base, pendf
 
 
 def _readSource(source, log, covarianceSource=None):
@@ -1169,6 +1581,18 @@ class _SampleContext:
     #: MF35 only: cap on one outgoing table, ``None`` for none -- the legacy
     #: default, since NJOY took a ×1.57-grown Cf-252 table without complaint.
     maxOutgoingPoints: Optional[int] = None
+    #: MF3's sum rules on the realisation; see ``perturbFromModel``.
+    crossSectionSums: bool = True
+    #: What a sum's own block does; see ``perturbFromModel``.
+    sumBlocks: str = "undecomposed"
+    #: MF33's lumped reactions and remainder statements, read once.
+    lumped: Optional[Dict[int, Tuple[int, ...]]] = None
+    remainders: Optional[Dict[int, Tuple[Any, ...]]] = None
+    #: The tape as given, when ``sourcePath`` is its reconstructed base; and
+    #: RECONR's PENDF, which ACE is made from. ``None`` both when the tape
+    #: needed no reconstruction.
+    originalSourcePath: Optional[Path] = None
+    pendfPath: Optional[Path] = None
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1188,11 +1612,16 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
     pset = PerturbationSet.fromDraw(
         dict(drawn), ctx.index, label=label,
         provenance={"seed": ctx.seed, "sample": number, "space": ctx.space,
-                    "grouping": ctx.grouping, "source": str(ctx.sourcePath or ""),
+                    "grouping": ctx.grouping,
+                    "source": str(ctx.originalSourcePath or ctx.sourcePath or ""),
                     "sourceFormat": ctx.sourceFormat})
     with log.timed("applied", f"{label} on the model", sample=number) as info:
         applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode,
-                                    maxOutgoingPoints=ctx.maxOutgoingPoints)
+                                    maxOutgoingPoints=ctx.maxOutgoingPoints,
+                                    crossSectionSums=ctx.crossSectionSums,
+                                    sumBlocks=ctx.sumBlocks,
+                                    lumped=ctx.lumped,
+                                    remainders=ctx.remainders)
         info["components"] = [c.describe() for c in applied]
     _checkRealisation(pset, log, number)
 
@@ -1229,7 +1658,14 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                 info["bytes"] = files[fmt].stat().st_size
         if "ace" in ctx.formats:
             tape = files.get("endf-delta") or files["endf-tape"]
-            aceProduced = _emitAce(tape, sampleDir, ctx.ace, log, number)
+            if ctx.pendfPath is not None:
+                njoyEndf, samplePendf = _njoyInputs(
+                    Path(tape), Path(ctx.originalSourcePath), Path(ctx.pendfPath),
+                    sampleDir / "njoy-input")
+                aceProduced = _emitAce(njoyEndf, sampleDir, ctx.ace, log, number,
+                                       pendfPath=samplePendf)
+            else:
+                aceProduced = _emitAce(tape, sampleDir, ctx.ace, log, number)
             good = [r["ace"] for r in aceProduced if r["ace"] and r["returncode"] == 0]
             if good:
                 files["ace"] = [Path(p) for p in good]
@@ -1237,7 +1673,10 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
             files["perturbation-set"] = pset.write(
                 sampleDir / "perturbation.json")
 
-    notes = [note for note in (_redundancyNote(suite, pset), _sumRuleNote(applied),
+    notes = [note for note in (_redundancyNote(suite, pset, applied,
+                                               ctx.crossSectionSums,
+                                               ctx.sumBlocks),
+                               _sumRuleNote(applied),
                                _spectrumNote(applied), _droppedStepsNote(applied))
              if note is not None]
     _forget(suite, pset, applied)
@@ -1321,6 +1760,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      covarianceSource=None,
                      onMissing: str = "raise",
                      maxOutgoingPoints: Optional[int] = None,
+                     crossSectionSums: bool = True,
+                     sumBlocks: str = "undecomposed",
+                     resonanceRegion: str = "reconstructed",
+                     reconstructionTolerance: float = 0.001,
+                     njoyExe=None,
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
@@ -1384,6 +1828,47 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         MF35 only: the most points one perturbed outgoing table may hold.
         ``None`` (default) for no cap. When it bites, the smallest factor steps
         are dropped first and the run says how many.
+    crossSectionSums
+        Hold MF3's sum rules on every realisation (the default): a partial with
+        its own block is perturbed by it, and every sum with a moved partial is
+        re-derived as ``S + sum (p' - p)`` -- its own block is never applied to
+        it. What a sum's block does instead is *sumBlocks*. Not optional in
+        practice: NJOY's RECONR discards a tape's stated MT1 and MT4 and
+        rebuilds them from the partials (measured 2026-10-07 on ENDF/B-VIII.1
+        Fe-56), so a perturbation put on MT1 alone never reaches the ACE, and
+        MT27/MT101, which RECONR does not rebuild, would reach it stale.
+        ``False`` scales each named MT by its own block and nothing else, and
+        the run notes the sums it left stale; it exists for the equivalence
+        gate against ``perturb_PENDF_files``.
+    sumBlocks
+        What a summed cross section's own covariance block does -- see
+        :mod:`kika.sampling.cross_section_sums`. ``"undecomposed"`` (the
+        default): where nothing under the sum carries a covariance of its own,
+        the sum's block moves all its partials by the same factor; where the
+        file decomposes it, the block is discarded and the partials without a
+        covariance stay as evaluated. ``"fill"`` also carries the block to
+        those (an assumption the file does not make, named in every
+        realisation's notes). ``"never"`` uses no sum's block at all. Whatever
+        the mode, a request naming a sum the file decomposes is a request for
+        the sections that decompose it (:func:`_expandNamedSums`).
+    resonanceRegion
+        ``"reconstructed"`` (the default): on a tape with LRP=1 whose MF2
+        states a resolved or unresolved range, MF3 there is only a background
+        the resonance cross section is added to, and a factor on it perturbs
+        almost nothing (ENDF/B-VIII.1 Fe-56 MT2 is 5e-4 b at 1 keV in MF3 and
+        9.3 b reconstructed). So NJOY RECONR reconstructs the region once, at
+        0 K, the model is decoded from the tape with that MF3 and LRP=2, and
+        ACE is made from the perturbed PENDF -- see
+        :mod:`kika.sampling.resonance_region`. Needs NJOY (*njoyExe*, else
+        ``AceOptions.njoyExe``, else ``$NJOY_EXECUTABLE``, else ``njoy`` on
+        PATH) and a path as *source*. ``"evaluated"`` perturbs MF3 as the tape
+        states it, background and all, and says so in a warning; it exists for
+        tapes NJOY cannot process, such as the section-sliced micro-tapes the
+        tests use.
+    reconstructionTolerance
+        RECONR's fractional tolerance; 0.001 is what the ACE chain uses.
+    njoyExe
+        The NJOY executable for the reconstruction.
     formats
         Any of :data:`EMITTERS`. ``"ace"`` needs *ace*.
     ace
@@ -1478,6 +1963,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     if onMissing not in ("raise", "skip"):
         raise ValueError(
             f"onMissing must be 'raise' or 'skip', got {onMissing!r}")
+    if resonanceRegion not in RESONANCE_REGION_MODES:
+        raise ValueError(f"resonanceRegion must be one of {RESONANCE_REGION_MODES}, "
+                         f"got {resonanceRegion!r}")
 
     log = runLog if runLog is not None else RunLog(logger=logger, label=labelPrefix)
     log.event("started", f"perturbFromModel: {nSamples} sample(s), seed {seed}",
@@ -1485,6 +1973,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               decompositionMethod=decompositionMethod,
               samplingMethod=samplingMethod, psdMethod=psdMethod,
               dryRun=dryRun, formats=list(formats), nWorkers=nWorkers,
+              crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
+              resonanceRegion=resonanceRegion,
+              reconstructionTolerance=reconstructionTolerance,
               source=str(source) if isinstance(source, (str, Path)) else "<parsed>",
               covarianceSource=(str(covarianceSource)
                                 if covarianceSource is not None else None),
@@ -1494,6 +1985,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     suite, covariances, endfObj, sourcePath, sourceFormat, reports = \
         _readSource(source, log, covarianceSource)
     covReport, suiteReport = reports
+
+    originalSourcePath = sourcePath
+    pendfPath = None
+    resonanceRecord: Dict[str, Any] = {"mode": resonanceRegion, "reconstructed": False}
+    resonanceNotes: List[str] = []
 
     if (sourceFormat == "gnds" and "endf-delta" in formats
             and outputDir is not None and not dryRun):
@@ -1522,11 +2018,64 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                          f"{getattr(suite, 'target', '?')}; the GNDS source states none",
                          mat=mat)
 
+    from kika.sampling.cross_section_sums import checkSumBlockMode
+
+    checkSumBlockMode(sumBlocks)
     original = request
     request = normaliseRequest(request, suite)
+    from kika.sampling.resonance_region import needsReconstruction, resonanceRanges
+
+    from kika.sampling.joint_blocks import _asSelections
+
+    # Only a request that moves a cross section needs it: MF33, or MF34's
+    # L=0 magnitude. A spectrum- or nu-bar-only run leaves MF3 alone.
+    movesCrossSections = any(
+        sel.mf == 33 or (sel.mf == 34 and (sel.index is None or 0 in (
+            sel.index if isinstance(sel.index, (list, tuple, set)) else [sel.index])))
+        for sel in _asSelections(request))
+    if (movesCrossSections and sourceFormat == "endf" and endfObj is not None
+            and needsReconstruction(endfObj)):
+        ranges = resonanceRanges(endfObj)
+        span = (f"{min(r[1] for r in ranges):.4g}-{max(r[2] for r in ranges):.4g} eV")
+        resonanceRecord["ranges"] = [list(r) for r in ranges]
+        if resonanceRegion == "reconstructed":
+            if sourcePath is None:
+                raise ValueError(
+                    "this tape states a resonance region (MF2, LRP=1), where MF3 "
+                    "is only a background, and reconstructing it needs NJOY to "
+                    "read the tape from a path. Pass the path rather than a "
+                    "parsed object, or resonanceRegion='evaluated' to perturb "
+                    "the background as stated")
+            suite, endfObj, sourcePath, pendfPath = _reconstructResonanceRegion(
+                originalSourcePath, endfObj,
+                njoyExe or (ace.njoyExe if ace is not None else None),
+                reconstructionTolerance, log)
+            resonanceRecord.update(reconstructed=True, pendf=str(pendfPath),
+                                   base=str(sourcePath),
+                                   tolerance=reconstructionTolerance)
+            resonanceNotes.append(
+                f"the resonance region ({span}) was reconstructed by NJOY RECONR "
+                f"at 0 K (tolerance {reconstructionTolerance:g}) and the "
+                f"perturbation applied to the cross sections, not to MF3's "
+                f"background: the ENDF outputs carry the reconstructed MF3 with "
+                f"LRP=2 (MF2 kept for information and for the unresolved "
+                f"self-shielding), and ACE is made from the perturbed PENDF")
+        else:
+            note = (f"resonanceRegion='evaluated' on a tape with a resonance "
+                    f"region ({span}): MF3 there is only the background the "
+                    f"resonances are added to, so this realisation barely "
+                    f"perturbs those energies")
+            resonanceNotes.append(note)
+            log.warning(note, subject="MF2")
+    expansionNotes: List[str] = []
+    lumped, remainders = {}, {}
+    if crossSectionSums:
+        lumped, remainders = _sumStatements(suite, endfObj, covarianceSource, log)
+        request, expansionNotes = _expandNamedSums(
+            suite, covariances, request, log, lumped, remainders)
     from kika.sampling.joint_blocks import QUANTITY_OF_MF
 
-    skipped: List[str] = []
+    skipped: List[str] = list(expansionNotes)
     if onMissing == "skip":
         from kika.sampling.joint_blocks import pruneRequest
 
@@ -1552,6 +2101,24 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
 
     with log.timed("assembled", "assembled the covariance blocks") as info:
         entries = collectEntries(covariances, request)
+        missing = _missingReactions(request, entries)
+        if onMissing == "raise" and missing.get(33):
+            absent = missing[33]
+            raise ValueError(
+                f"MT{', MT'.join(str(mt) for mt in absent)}: asked for, and this "
+                f"evaluation states no cross-section covariance for "
+                f"{'it' if len(absent) == 1 else 'them'}. A covariance perturbs "
+                f"only the cross section it was stated for, so no other block -- "
+                f"a sum's included -- stands in. Drop "
+                f"{'it' if len(absent) == 1 else 'them'} from the request, or "
+                f"pass onMissing='skip' to perturb the rest and record the "
+                f"omission")
+        sumRecord: Dict[str, Any] = {"mode": sumBlocks}
+        if crossSectionSums:
+            entries, sumRecord, sumNotes = _screenSumBlocks(
+                suite, request, entries, onMissing, sumBlocks, log,
+                lumped, remainders)
+            skipped.extend(sumNotes)
         domains = componentDomains(covariances, request)
         blocks, index = assembleRequest(entries, grouping=grouping,
                                         domains=domains)
@@ -1566,7 +2133,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     # them and said so nowhere. What was asked for and not found is recorded
     # here, whatever `onMissing` says, because a partial match is not a failure
     # and is still something the ensemble's own metadata has to carry.
-    for mf, absent in _missingReactions(request, entries).items():
+    for mf, absent in missing.items():
         note = (f"{QUANTITY_OF_MF.get(mf, f'MF{mf}')}: MT"
                 f"{', MT'.join(str(mt) for mt in absent)} "
                 f"{'was' if len(absent) == 1 else 'were'} asked for and "
@@ -1622,12 +2189,13 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                        aceOptions=ace if "ace" in formats else None,
                        # A skipped quantity is true of every sample and stated
                        # by no output file, which is exactly what notes are for.
-                       notes=list(skipped))
+                       notes=list(resonanceNotes) + list(skipped))
     if _perturbsASpectrum(index):
         result.notes.append(MF35_UNCHANGED_NOTE)
         log.note(MF35_UNCHANGED_NOTE)
 
-    stem = sourcePath.stem if sourcePath is not None else "perturbed"
+    stem = (originalSourcePath.stem if originalSourcePath is not None
+            else "perturbed")
     if stem.endswith(".gnds"):
         stem = stem[:-5]
     emitTapes = outputDir is not None and not dryRun
@@ -1636,7 +2204,10 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         labelPrefix=labelPrefix, seed=seed, space=space, grouping=grouping,
         formats=tuple(formats), outputDir=outputDir, stem=stem, mat=mat,
         ace=ace if "ace" in formats else None, writeSets=writeSets,
-        emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints)
+        emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints,
+        crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
+        lumped=lumped, remainders=remainders,
+        originalSourcePath=originalSourcePath, pendfPath=pendfPath)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
@@ -1709,7 +2280,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         result.files["log-text"] = outputDir / "run.log"
         result.files["metadata"] = outputDir / "run_metadata.json"
         _writeRunMetadata(result, outputDir, covReport, suiteReport, sourcePath,
-                          original, seed, space, psdMethod, nWorkers=nWorkers)
+                          original, seed, space, psdMethod, nWorkers=nWorkers,
+                          crossSectionSums=crossSectionSums, sumBlocks=sumRecord,
+                          resonanceRegion=resonanceRecord)
         log.write(outputDir)
     return result
 
@@ -1760,7 +2333,12 @@ def _forget(suite, pset: PerturbationSet, applied=()) -> None:
         if node is not None:
             node.forms.pop(pset.label, None)
 
-    for mt in pset.reactions():
+    # The applier also rewrites cross sections the request did not name -- a
+    # partial riding a sum's block, a sum re-derived from its parts -- and they
+    # carry the label exactly as the named ones do.
+    moved = set(pset.reactions()) | {component.mt for component in applied
+                                     if component.mf in (33, 34)}
+    for mt in sorted(moved):
         if mt in NUBAR_MT:
             continue
         reaction = suite.findReactionByENDF_MT(mt)
@@ -1786,7 +2364,10 @@ def _layer1Counts(findings) -> Dict[str, int]:
 
 def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport,
                       sourcePath, request, seed: int, space: str,
-                      psdMethod: str = "none", nWorkers: int = 1) -> Path:
+                      psdMethod: str = "none", nWorkers: int = 1,
+                      crossSectionSums: bool = True,
+                      sumBlocks: Optional[Mapping[str, Any]] = None,
+                      resonanceRegion: Optional[Mapping[str, Any]] = None) -> Path:
     """The run's own account of itself, beside the samples.
 
     Deliberately includes the grouping description in full: "these quantities
@@ -1807,6 +2388,13 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
         "seed": seed,
         "space": space,
         "grouping": result.grouping,
+        "crossSectionSums": crossSectionSums,
+        # Which sums' blocks were not drawn, and why: "discarded" (partials
+        # under it carry their own) or "unreachable" (none does). Keyed by MT.
+        "sumBlocks": dict(sumBlocks or {}),
+        # Whether MF3 was perturbed as reconstructed cross sections (RECONR)
+        # or as the tape states it; see perturbFromModel(resonanceRegion=).
+        "resonanceRegion": dict(resonanceRegion or {}),
         "nSamples": result.nSamples,
         "groups": result.description,
         "blocks": [

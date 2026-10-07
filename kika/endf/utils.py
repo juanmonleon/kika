@@ -110,6 +110,22 @@ def record_width(lines: Sequence[str]) -> int:
     return 75 if width <= 75 else 80
 
 
+def line_ending(path) -> str:
+    """CRLF or LF, whichever the tape at *path* ends its first line with.
+
+    The other half of :func:`record_width`: what a splice must preserve so the
+    tape is still the tape it was outside the spliced section. The writers read
+    in text mode, which hides the ending, and then wrote in text mode, which on
+    Windows turned every line of an LF tape into CRLF -- so a one-section edit
+    changed every byte-level line of the file, and ``cmp`` against the source
+    could no longer show what moved. Pass the result as ``newline=`` when
+    writing and the internal newline comes out as the source had it.
+    """
+    with open(path, 'rb') as f:
+        first = f.readline()
+    return '\r\n' if first.endswith(b'\r\n') else '\n'
+
+
 
 
 def group_lines_by_mt_with_positions(lines: List[str]) -> Tuple[Dict[int, List[str]], Dict[int, int]]:

@@ -392,8 +392,151 @@ class PerturbationSet:
             resolved[reaction] = components[0]
         return resolved
 
+    def _applyCrossSectionsWithSums(self, suite, claims, mode="undecomposed",
+                                    lumped=None, remainders=None):
+        """Perturb the cross sections with MF3's sum rules held.
+
+        :func:`~kika.sampling.cross_section_sums.planCrossSectionSums` decides
+        which block moves each leaf partial -- its own, a lump's it belongs to,
+        or the nearest perturbed sum above it where *mode* allows -- and which
+        sums are rebuilt; this applies the blocks to the leaves, takes the
+        remainders (*remainders*: a partial MF33 states as a total minus the
+        others) and re-derives the sums as ``S + sum (p' - p)``. See the module
+        docstring of :mod:`~kika.sampling.cross_section_sums`.
+
+        Diagnostics, keyed so the emitter writes everything that moved and the
+        run can say why:
+
+        * a leaf with its own block -- under its component, as before;
+        * a leaf moved by another block (a sum's it rides, or a lump's it
+          belongs to, ``lumped: True``) -- under ``ComponentKey(za, 33, leaf)``
+          with ``factor_from`` naming the block. It was not drawn, and it was
+          moved, so it has to be written;
+        * a remainder -- under its own component if it has one, else
+          ``ComponentKey(za, 33, leaf)``, with ``remainder_of`` naming the
+          total;
+        * a rebuilt sum -- under its own component if the request named it,
+          else ``ComponentKey(za, 33, sum)``, with ``rederived_from`` and, for
+          a named one, ``own_block``: the leaves its block reached,
+          ``"discarded"``, or ``"remainder"`` when a remainder carries it.
+        """
+        from kika.nuclear_data.model import EVAL_LABEL
+        from kika.sampling.cross_section_sums import (planCrossSectionSums,
+                                                      rederiveSum,
+                                                      suiteSumLayout)
+
+        for component in claims.values():
+            if self.semanticsOf(component) != SEMANTICS[0]:
+                raise ValueError(
+                    f"{component.describe()} acts as {self.semanticsOf(component)}"
+                    f"; MF3's sum rules carry a factor from a sum to its parts, "
+                    f"which only means something for a multiplicative block")
+
+        byMT = {mt: component for (_za, mt), component in claims.items()}
+        za = next(iter(claims))[0]
+        present, sums = suiteSumLayout(suite)
+        plan = planCrossSectionSums(byMT, present, sums, mode=mode,
+                                    lumped=lumped, remainders=remainders)
+
+        def span(component):
+            edges = np.asarray(self.binEdges[component], dtype=float)
+            return float(edges[0]), float(edges[-1])
+
+        diagnostics: Dict[ComponentKey, Dict[str, Any]] = {}
+        moved = {}
+        for leaf, component in plan.leafControl.items():
+            reaction = suite.reactionByENDF_MT(leaf)
+            before = reaction.crossSection[EVAL_LABEL]
+            after, info = self.apply(before, component)
+            reaction.crossSection[self.label] = self._labelled(after)
+            moved[leaf] = (before, after, *span(component))
+            if component.mt == leaf:
+                diagnostics[component] = info
+            else:
+                extra = {"factor_from": component.mt}
+                if leaf in plan.lumpOf:
+                    extra["lumped"] = True
+                diagnostics[ComponentKey(za, 33, leaf)] = {**info, **extra}
+
+        anchors = {r.total: [] for rs in plan.remainders.values() for r in rs}
+        for partial, statements in plan.remainders.items():
+            for statement in statements:
+                anchors[statement.total].append(partial)
+
+        def takeRemainders():
+            for partial, statements in plan.remainders.items():
+                reaction = suite.reactionByENDF_MT(partial)
+                before = reaction.crossSection[EVAL_LABEL]
+                moves = [moved[partial]] if partial in moved else []
+                for statement in statements:
+                    totalForm = suite.reactionByENDF_MT(statement.total
+                                                        ).crossSection[EVAL_LABEL]
+                    component = byMT[statement.total]
+                    totalAfter, _ = self.apply(totalForm, component)
+                    lo, hi = span(component)
+                    lo, hi = max(lo, statement.lo), min(hi, statement.hi)
+                    if lo < hi:
+                        moves.append((totalForm, totalAfter, lo, hi))
+                    for other in statement.minus:
+                        # A virtual sum has no section of its own to have
+                        # moved; its partials did.
+                        for piece in (plan.virtualLeaves.get(other) or (other,)):
+                            if piece not in moved:
+                                continue
+                            oBefore, oAfter, oLo, oHi = moved[piece]
+                            lo, hi = max(oLo, statement.lo), min(oHi, statement.hi)
+                            if lo < hi:
+                                # Reversed: subtract what the other moved.
+                                moves.append((oAfter, oBefore, lo, hi))
+                if not moves:
+                    continue
+                after, info = rederiveSum(before, moves, keepZeros=True)
+                reaction.crossSection[self.label] = self._labelled(after)
+                moved[partial] = (before, after, min(m[2] for m in moves),
+                                  max(m[3] for m in moves))
+                key = (plan.leafControl[partial]
+                       if partial in plan.leafControl
+                       and plan.leafControl[partial].mt == partial
+                       else ComponentKey(za, 33, partial))
+                diagnostics[key] = {**diagnostics.get(key, {}), **info,
+                                    "remainder_of": statements[0].total}
+
+        for index, total in enumerate(plan.rederive):
+            if index == plan.remainderAt:
+                takeRemainders()
+            reaction = suite.reactionByENDF_MT(total)
+            before = reaction.crossSection[EVAL_LABEL]
+            moves = [moved[leaf] for leaf in plan.movedUnder[total] if leaf in moved]
+            rebuilt, info = rederiveSum(before, moves)
+            reaction.crossSection[self.label] = self._labelled(rebuilt)
+            # A sum is itself a section others may be subtracted from: a
+            # remainder's "minus" list names MT103-107 beside the partials.
+            moved[total] = (before, rebuilt, min(m[2] for m in moves),
+                            max(m[3] for m in moves))
+            info = {**info, "rederived_from": plan.movedUnder[total]}
+            if total in byMT:
+                if total in anchors:
+                    info["own_block"] = "remainder"
+                    info["anchors"] = tuple(sorted(anchors[total]))
+                else:
+                    info["own_block"] = (plan.ownBlockReached.get(total)
+                                         or "discarded")
+                diagnostics[byMT[total]] = info
+            else:
+                diagnostics[ComponentKey(za, 33, total)] = info
+        if plan.remainderAt >= len(plan.rederive):
+            takeRemainders()
+        for total in plan.virtual:
+            diagnostics[byMT[total]] = {
+                "virtual": True,
+                "own_block": plan.ownBlockReached.get(total) or "discarded"}
+        return diagnostics
+
     def applyToSuite(self, suite, *, multiplicityResolver=None,
-                     maxOutgoingPoints: Optional[int] = None
+                     maxOutgoingPoints: Optional[int] = None,
+                     crossSectionSums: bool = True,
+                     sumBlocks: str = "undecomposed",
+                     lumped=None, remainders=None
                      ) -> Dict[ComponentKey, Dict[str, Any]]:
         """Put a perturbed form under :attr:`label` on every node this set covers.
 
@@ -408,7 +551,20 @@ class PerturbationSet:
 
         * ``crossSection`` -- MF33, and MF34's L=0 magnitude, which lands on the
           same node. See :meth:`_crossSectionBlocks` for why both at once is
-          refused.
+          refused. With *crossSectionSums* (the default) MF3's sum rules hold
+          on the realisation: partials govern, every sum with a moved partial
+          is re-derived, and a sum's own block moves its partials only where
+          the file does not decompose it (*sumBlocks*, ``"undecomposed"`` by
+          default; ``"fill"`` and ``"never"`` as in
+          :mod:`~kika.sampling.cross_section_sums`) -- see
+          :meth:`_applyCrossSectionsWithSums`. *lumped* and *remainders* are
+          what :func:`~kika.sampling.cross_section_sums.readSumStatements`
+          reads off the tape's MF33: lumped reactions move their members, and
+          a partial stated as a total minus the rest takes the difference.
+          ``crossSectionSums=False`` scales each named MT by its own block and
+          nothing else, which leaves the sums stale; it exists for the
+          equivalence gate against ``perturb_PENDF_files``, which does not
+          re-derive.
         * ``angularDistribution`` -- MF34's L>=1, all orders of one reaction in
           one call, because a Legendre vector is perturbed once and not once per
           order.
@@ -446,12 +602,18 @@ class PerturbationSet:
         # absence is a mistake in the request or a tape that does not carry it,
         # not something to skip past. It searches `sums` too, which is where the
         # ENDF adapter now puts MT1 and MT4.
-        for (_za, mt), component in self._crossSectionBlocks().items():
-            reaction = suite.reactionByENDF_MT(mt)
-            perturbed, info = self.apply(reaction.crossSection[EVAL_LABEL],
-                                         component)
-            reaction.crossSection[self.label] = self._labelled(perturbed)
-            diagnostics[component] = info
+        claims = self._crossSectionBlocks()
+        if crossSectionSums and claims:
+            diagnostics.update(self._applyCrossSectionsWithSums(
+                suite, claims, mode=sumBlocks, lumped=lumped,
+                remainders=remainders))
+        else:
+            for (_za, mt), component in claims.items():
+                reaction = suite.reactionByENDF_MT(mt)
+                perturbed, info = self.apply(reaction.crossSection[EVAL_LABEL],
+                                             component)
+                reaction.crossSection[self.label] = self._labelled(perturbed)
+                diagnostics[component] = info
 
         byReaction: Dict[Tuple[int, int], Dict[int, ComponentKey]] = {}
         for component in self.components():

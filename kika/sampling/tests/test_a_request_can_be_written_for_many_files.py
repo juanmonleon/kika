@@ -11,12 +11,21 @@ are on a cluster) has to be able to say.
 was dropped reaches the log, the notes and the metadata, so an ensemble can
 always be asked what was actually perturbed in it.
 """
+from functools import partial
 from pathlib import Path
 
 import pytest
 
 from kika.sampling.joint_blocks import Selection, pruneRequest
 from kika.sampling.model_perturbation import perturbFromModel
+
+# The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
+# the full tape section by section, and NJOY cannot read them (RECONR stops at
+# their orphan FEND records, "illegal TAB1 for mf/mt = 3/0"). So they are
+# perturbed as stated -- resonanceRegion="evaluated" -- which is what these
+# tests are about; the reconstruction itself is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 FE56 = DATA / "micro_fe56_xs_and_angular.endf"   # MF33 + MF34, no MF31/MF35
@@ -172,10 +181,18 @@ def test_a_reaction_list_the_file_fully_states_leaves_no_note():
     assert not [n for n in run.notes if "not perturbed" in n]
 
 
-def test_missing_reactions_are_reported_under_raise_too():
-    """A partial match is not a failure, so `raise` does not refuse it -- but
-    it is still something the run has to record."""
-    run = perturbFromModel(FE56, {33: {"mt": [2, 16]}}, 1, seed=5, dryRun=True)
-    perturbed = {key.mt for key in run.samples[0]["set"].components()}
-    if 16 not in perturbed:
-        assert any("MT16" in note for note in run.notes)
+def test_a_named_cross_section_without_a_covariance_is_refused_under_raise():
+    """MT16 has no block here, and no other block may stand in for it.
+
+    Until 2026-10-07 a partial match passed under `raise` with a note. For
+    cross sections it now refuses: the alternative the sum rules once offered
+    -- moving MT16 with a sum's block -- pairs it with an uncertainty the file
+    does not state, and a run that quietly perturbs less than it was asked for
+    is the other way to get it wrong. `skip` still records it and goes on.
+    """
+    with pytest.raises(ValueError, match="MT16: asked for"):
+        perturbFromModel(FE56, {33: {"mt": [2, 16]}}, 1, seed=5, dryRun=True)
+    run = perturbFromModel(FE56, {33: {"mt": [2, 16]}}, 1, seed=5, dryRun=True,
+                           onMissing="skip")
+    assert {key.mt for key in run.samples[0]["set"].components()} == {2}
+    assert any("MT16" in note for note in run.notes)

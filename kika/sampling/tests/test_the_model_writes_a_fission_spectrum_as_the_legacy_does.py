@@ -18,10 +18,12 @@ accident:
   no shoulder below the lowest one, so the factor ramps across the incident
   interval under it. The model steps there. Only the whole-band request -- the
   only one the legacy driver ever makes -- is equivalent;
-* **PF-5** (model emitter): ``endf-delta`` re-encodes the whole MF it touched,
-  so the *other* MF5 sections (MT455 on Cf-252) come back with the same values
-  and new sequence numbers and SEND records. The legacy writer replaces MT18
-  alone. The values are gated here; the bytes are not.
+* **PF-5** (model emitter) -- **fixed**: ``endf-delta`` used to re-encode the
+  whole MF it touched, so the *other* MF5 sections (MT455 on Cf-252) came back
+  with the same values and new sequence numbers and SEND records. It now
+  replaces per MT, as the legacy writer does, so those sections are gated here
+  as text, on both sides. The general gate, over MF1/3/4/5, is
+  ``test_the_delta_emitter_leaves_the_rest_of_the_tape_alone.py``.
 
 The plan is ``kika-workspace/docs/pfns/pfns_mf5_mf35_roadmap.md``, "Phase 2", Q1.
 """
@@ -71,32 +73,6 @@ def _records(path):
         if mt:
             out.setdefault((mf, mt), []).append(line)
     return out
-
-
-def _number(field):
-    """One ENDF field as a value: ``9.223300+4`` and ``92233.0000`` are one number."""
-    text = field.strip()
-    if not text:
-        return 0.0
-    try:
-        return float(text)
-    except ValueError:
-        pass
-    for sign in "+-":
-        cut = text.rfind(sign)
-        if cut > 0:
-            try:
-                return float(f"{text[:cut]}e{text[cut:]}")
-            except ValueError:
-                break
-    return text
-
-
-def _values(lines):
-    """The six fields of every record, read as numbers. U-233 B-VIII.1 spells
-    MT455's ZA ``92233.0000`` and the encoder writes ``9.223300+4``."""
-    return [tuple(_number(line[i:i + 11]) for i in range(0, 66, 11))
-            for line in lines]
 
 
 # ======================================================================
@@ -173,12 +149,7 @@ def _assertSameTape(tape, tmp_path, nSamples=1):
         assert old[(1, 451)] == new[(1, 451)], "the directories disagree"
 
         for key in source:
-            if key[0] == 5 and key != (5, 18):
-                assert old[key] == source[key]
-                assert _values(new[key]) == _values(source[key]), (
-                    f"MF{key[0]}/MT{key[1]}: the model re-encoded a section it "
-                    f"did not perturb and changed its values (PF-5)")
-            elif key[0] != 5 and key != (1, 451):
+            if key not in ((5, 18), (1, 451)):
                 assert old[key] == source[key] == new[key], (
                     f"MF{key[0]}/MT{key[1]} moved")
 

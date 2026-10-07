@@ -10,7 +10,7 @@ from ..classes.mt import MT
 from ..classes.mf1.mf1mt451 import MF1MT451
 from ..classes.mf import MF
 from ..classes.mf4.base import MF4MT
-from ..utils import NonMonotonicTable, parse_endf_id
+from ..utils import NonMonotonicTable, line_ending, parse_endf_id, record_width
 from ...utils import get_endf_logger
 from .update_directory import update_mf1_directory
 
@@ -51,6 +51,16 @@ class ENDFWriter:
         
         with open(self.original_filepath, 'r') as f:
             self.original_lines = f.readlines()
+        #: The source's own line ending, which every write here reproduces.
+        self.newline = line_ending(self.original_filepath)
+        #: And its record width, 75 or 80. The encoders always write the
+        #: columns 76-80 sequence number, so a section spliced into a 75-column
+        #: tape (``micro_cf252_pfns.endf``, and every tape from ENDF/B-VIII.1's
+        #: thermal library) came back 80 wide in a 75-wide file -- which NJOY
+        #: reads without complaint and processes wrongly. See
+        #: :func:`~kika.endf.utils.record_width`; ``write_mf_section_to_file``
+        #: already trimmed, these two did not.
+        self.width = record_width(self.original_lines)
         
         logger.debug(f"Loaded {len(self.original_lines)} lines from {self.original_filepath}")
     
@@ -163,7 +173,8 @@ class ENDFWriter:
             modified_content = str(modified_mf)
             if not modified_content.endswith('\n'):
                 modified_content += '\n'
-            modified_lines = modified_content.split('\n')[:-1]  # Remove empty last element
+            modified_lines = [line[:self.width] for line in
+                              modified_content.split('\n')[:-1]]  # Remove empty last element
 
             # Create new file content
             new_lines = (
@@ -174,7 +185,7 @@ class ENDFWriter:
             
             # Write the result
             output_path = output_filepath if output_filepath else self.original_filepath
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', newline=self.newline) as f:
                 f.writelines(new_lines)
             
             logger.debug(f"Successfully replaced MF{modified_mf.number} section in {output_path}")
@@ -265,7 +276,8 @@ class ENDFWriter:
             modified_content = str(modified_mt)
             if not modified_content.endswith('\n'):
                 modified_content += '\n'
-            modified_lines = modified_content.split('\n')[:-1]  # Remove empty last element
+            modified_lines = [line[:self.width] for line in
+                              modified_content.split('\n')[:-1]]  # Remove empty last element
 
             # Create new file content
             new_lines = (
@@ -276,7 +288,7 @@ class ENDFWriter:
             
             # Write the result
             output_path = output_filepath if output_filepath else self.original_filepath
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', newline=self.newline) as f:
                 f.writelines(new_lines)
             
             logger.debug(f"Successfully replaced MF{mf_number}/MT{modified_mt.number} section in {output_path}")
@@ -317,7 +329,7 @@ class ENDFWriter:
         for update in updates:
             logger.info(update.describe())
         if rewritten != edited:
-            with open(output_path, "w") as fh:
+            with open(output_path, "w", newline=self.newline) as fh:
                 fh.write(rewritten)
 
 # Convenience functions for direct use without instantiating the class
