@@ -210,13 +210,94 @@ def parse_reconr_card(deck: str) -> Optional[tuple]:
     return None
 
 
-def check_run(deck: str, listing: Optional[str]) -> ListingCheck:
-    """Check any NJOY run for which we have both the deck and the listing."""
-    card = parse_reconr_card(deck)
-    if card is None:
+_BROADR_LINE = re.compile(r"^\s*broadr\s*$", re.IGNORECASE)
+_BROADR_ECHO = {
+    "errthn": re.compile(r"thinning tolerance\s*\.{2,}\s*([-+0-9.eEdD]+)"),
+    "errmax": re.compile(r"errmax for thinning\s*\.{2,}\s*([-+0-9.eEdD]+)"),
+    "errint": re.compile(r"errint for thinning\s*\.{2,}\s*([-+0-9.eEdD]+)"),
+}
+
+
+def parse_broadr_card(deck: str) -> Optional[tuple]:
+    """``(errthn, errmax, errint)`` from a deck's ``broadr`` card 3, or None.
+
+    A deck that feeds NJOY a PENDF it did not make (``run_njoy_with_pendf``)
+    has no ``reconr`` card, and ``broadr`` is then the first module to read a
+    number after the binary tape is written -- so it is where the misread shows.
+    Card 3 is ``errthn thnmax errmax errint``; ``errmax`` may be omitted, in
+    which case NJOY supplies it and it is not checked.
+    """
+    lines = [line for line in deck.splitlines() if line.strip()]
+    for i, line in enumerate(lines):
+        if not _BROADR_LINE.match(line):
+            continue
+        if i + 3 >= len(lines):
+            return None
+        numbers = _NUMBER.findall(lines[i + 3])
+        if len(numbers) < 4:
+            return None
+        try:
+            values = [float(n.replace("D", "E").replace("d", "e")) for n in numbers[:4]]
+        except ValueError:
+            return None
+        errthn, _thnmax, errmax, errint = values
+        if errthn <= 0 or errmax <= 0 or errint <= 0:
+            return None
+        return errthn, errmax, errint
+    return None
+
+
+def check_broadr_listing(listing: Optional[str], *, errthn: float, errmax: float,
+                         errint: float) -> ListingCheck:
+    """What ``broadr`` echoed against what it was sent.
+
+    ``thinning tolerance`` prints with ``f10.3`` and is compared at that
+    precision, the other two with four significant figures and relatively --
+    the same rules as :func:`check_reconr_listing`. Measured 2026-10-07 on
+    ``njoy_fixed.exe``: a misread run echoed ``0.000`` and ``0.000E+00`` for
+    0.001 and 0.01, then thinned ENDF/B-VIII.1 Fe-56 below 8 eV only and died
+    in HEATR.
+    """
+    if not listing:
         return ListingCheck(checked=False, ok=True)
-    err, errmax, errint = card
-    return check_reconr_listing(listing, err=err, errmax=errmax, errint=errint)
+    expected = {"errthn": errthn, "errmax": errmax, "errint": errint}
+    mismatches: List[str] = []
+    checked_any = False
+    for key, want in expected.items():
+        match = _BROADR_ECHO[key].search(listing)
+        if match is None:
+            continue
+        got = _parse_fortran_float(match.group(1))
+        if got is None:
+            continue
+        checked_any = True
+        ok = (abs(got - want) <= 5.05e-4 if key == "errthn"
+              else abs(got - want) <= abs(want) * 1e-3)
+        if not ok:
+            mismatches.append(f"broadr {key}: sent {want:g}, NJOY read {got:g}")
+    if not checked_any:
+        return ListingCheck(checked=False, ok=True)
+    if mismatches:
+        return ListingCheck(checked=True, ok=False, detail="; ".join(mismatches))
+    return ListingCheck(checked=True, ok=True)
+
+
+def check_run(deck: str, listing: Optional[str]) -> ListingCheck:
+    """Check any NJOY run for which we have both the deck and the listing.
+
+    ``reconr``'s echo when the deck has one, else ``broadr``'s: whichever reads
+    numbers first after the first binary tape is written.
+    """
+    card = parse_reconr_card(deck)
+    if card is not None:
+        err, errmax, errint = card
+        return check_reconr_listing(listing, err=err, errmax=errmax, errint=errint)
+    card = parse_broadr_card(deck)
+    if card is not None:
+        errthn, errmax, errint = card
+        return check_broadr_listing(listing, errthn=errthn, errmax=errmax,
+                                    errint=errint)
+    return ListingCheck(checked=False, ok=True)
 
 
 def locale_error_message(detail: str, *, attempts: int) -> str:

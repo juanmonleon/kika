@@ -595,8 +595,27 @@ def _emitWholeFile(suite, pset, outPath, fmt, mat=None) -> Path:
     return outPath
 
 
+def _njoyInputs(deltaTape: Path, originalSource: Path, pendf: Path,
+                workDir: Path) -> Tuple[Path, Path]:
+    """``(endf, pendf)`` NJOY needs for a sample of a reconstructed tape.
+
+    The perturbed PENDF is RECONR's with the sample's MF3; the ENDF is the
+    sample's tape with the *original* MF3 and LRP back, so that PURR reads the
+    background and the unresolved parameters it expects. See
+    :mod:`kika.sampling.resonance_region`.
+    """
+    from kika.endf import read_endf
+    from kika.sampling.resonance_region import _lrp, setLRP, spliceMF3
+
+    workDir.mkdir(parents=True, exist_ok=True)
+    samplePendf = spliceMF3(pendf, deltaTape, workDir / "perturbed.pendf")
+    njoyEndf = spliceMF3(deltaTape, originalSource, workDir / "njoy-input.endf")
+    setLRP(njoyEndf, _lrp(read_endf(str(originalSource), mf_numbers=[1])) or 1)
+    return njoyEndf, samplePendf
+
+
 def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
-             sample: int) -> List[Dict[str, Any]]:
+             sample: int, pendfPath: Optional[Path] = None) -> List[Dict[str, Any]]:
     """NJOY on one sample's tape, once per temperature. Records, never raises.
 
     A failed NJOY run is an ``error`` event naming the sample and the
@@ -607,7 +626,7 @@ def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
     import shutil
     import tempfile
 
-    from kika.njoy.run_njoy import run_njoy
+    from kika.njoy.run_njoy import run_njoy, run_njoy_with_pendf
 
     aceDir = sampleDir / "ace"
     njoyDir = sampleDir / "njoy"
@@ -622,14 +641,21 @@ def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
         with log.timed("emitted", f"ace at {temperature:g} K", subject="ace",
                        sample=sample, temperature=temperature) as info:
             with tempfile.TemporaryDirectory(prefix="njoy_", dir=sampleDir) as scratch:
-                result = run_njoy(
-                    njoy_exe=options.njoyExe, endf_path=endfPath,
+                common = dict(
                     temperature=temperature, library_name=options.libraryName,
                     output_dir=scratch, njoy_version=options.njoyVersion,
                     additional_suffix=f"{sample:04d}" if extension is None else None,
                     extension=extension, ace_dir=aceDir, xsdir_dir=aceDir,
                     njoy_files_dir=njoyDir if options.keepNjoyFiles else Path(scratch),
                 )
+                if pendfPath is None:
+                    result = run_njoy(njoy_exe=options.njoyExe, endf_path=endfPath,
+                                      **common)
+                else:
+                    # A reconstructed tape: RECONR has run, on the evaluation,
+                    # and the sample's cross sections are in the PENDF.
+                    result = run_njoy_with_pendf(options.njoyExe, endfPath,
+                                                 pendfPath, **common)
             record["returncode"] = int(result.get("returncode", -1))
             record["ace"] = result.get("ace_file")
             record["xsdir"] = result.get("xsdir_file")
@@ -1235,6 +1261,42 @@ def _readCovarianceFrom(path, expectedZaid, log):
     return covariances, covReport
 
 
+#: What ``perturbFromModel(resonanceRegion=...)`` accepts.
+RESONANCE_REGION_MODES = ("reconstructed", "evaluated")
+
+
+def _reconstructResonanceRegion(sourcePath: Path, endfObj, njoyExe, tolerance: float,
+                                log):
+    """``(suite, endfObj, basePath, pendfPath)`` for a tape whose MF3 is a background.
+
+    See :mod:`kika.sampling.resonance_region`. RECONR runs once per tape and
+    tolerance (cached by the bytes of the tape); the LRP=2 base tape is cached
+    beside its PENDF, so a second run -- and every worker process, which
+    re-reads the base -- costs a parse and nothing else.
+    """
+    from kika.endf import read_endf
+    from kika.endf.model_adapter import decodeReactionSuite
+    from kika.processing.njoy_pendf_cache import (find_njoy_executable,
+                                                  get_or_create_pendf)
+    from kika.sampling.resonance_region import reconstructedBase, resonanceRanges
+
+    ranges = resonanceRanges(endfObj)
+    exe = find_njoy_executable(
+        njoyExe, why="perturbing the cross sections of a resonance region")
+    with log.timed("read",
+                   f"resonance region reconstructed by RECONR at 0 K, tolerance "
+                   f"{tolerance:g}", subject=sourcePath.name) as info:
+        pendf = get_or_create_pendf(sourcePath, tolerance=tolerance, njoy_exe=exe)
+        base = pendf.with_name(pendf.stem + ".lrp2.endf")
+        if not base.is_file():
+            reconstructedBase(sourcePath, pendf, base)
+        baseObj = read_endf(str(base))
+        suite, _report = decodeReactionSuite(baseObj)
+        info.update(pendf=str(pendf), base=str(base),
+                    ranges=[list(r) for r in ranges])
+    return suite, baseObj, base, pendf
+
+
 def _readSource(source, log, covarianceSource=None):
     """*source* as ``(suite, covariances, endfObj, path, format, report)``.
 
@@ -1526,6 +1588,11 @@ class _SampleContext:
     #: MF33's lumped reactions and remainder statements, read once.
     lumped: Optional[Dict[int, Tuple[int, ...]]] = None
     remainders: Optional[Dict[int, Tuple[Any, ...]]] = None
+    #: The tape as given, when ``sourcePath`` is its reconstructed base; and
+    #: RECONR's PENDF, which ACE is made from. ``None`` both when the tape
+    #: needed no reconstruction.
+    originalSourcePath: Optional[Path] = None
+    pendfPath: Optional[Path] = None
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1545,7 +1612,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
     pset = PerturbationSet.fromDraw(
         dict(drawn), ctx.index, label=label,
         provenance={"seed": ctx.seed, "sample": number, "space": ctx.space,
-                    "grouping": ctx.grouping, "source": str(ctx.sourcePath or ""),
+                    "grouping": ctx.grouping,
+                    "source": str(ctx.originalSourcePath or ctx.sourcePath or ""),
                     "sourceFormat": ctx.sourceFormat})
     with log.timed("applied", f"{label} on the model", sample=number) as info:
         applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode,
@@ -1590,7 +1658,14 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                 info["bytes"] = files[fmt].stat().st_size
         if "ace" in ctx.formats:
             tape = files.get("endf-delta") or files["endf-tape"]
-            aceProduced = _emitAce(tape, sampleDir, ctx.ace, log, number)
+            if ctx.pendfPath is not None:
+                njoyEndf, samplePendf = _njoyInputs(
+                    Path(tape), Path(ctx.originalSourcePath), Path(ctx.pendfPath),
+                    sampleDir / "njoy-input")
+                aceProduced = _emitAce(njoyEndf, sampleDir, ctx.ace, log, number,
+                                       pendfPath=samplePendf)
+            else:
+                aceProduced = _emitAce(tape, sampleDir, ctx.ace, log, number)
             good = [r["ace"] for r in aceProduced if r["ace"] and r["returncode"] == 0]
             if good:
                 files["ace"] = [Path(p) for p in good]
@@ -1687,6 +1762,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      maxOutgoingPoints: Optional[int] = None,
                      crossSectionSums: bool = True,
                      sumBlocks: str = "undecomposed",
+                     resonanceRegion: str = "reconstructed",
+                     reconstructionTolerance: float = 0.001,
+                     njoyExe=None,
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
@@ -1773,6 +1851,24 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         realisation's notes). ``"never"`` uses no sum's block at all. Whatever
         the mode, a request naming a sum the file decomposes is a request for
         the sections that decompose it (:func:`_expandNamedSums`).
+    resonanceRegion
+        ``"reconstructed"`` (the default): on a tape with LRP=1 whose MF2
+        states a resolved or unresolved range, MF3 there is only a background
+        the resonance cross section is added to, and a factor on it perturbs
+        almost nothing (ENDF/B-VIII.1 Fe-56 MT2 is 5e-4 b at 1 keV in MF3 and
+        9.3 b reconstructed). So NJOY RECONR reconstructs the region once, at
+        0 K, the model is decoded from the tape with that MF3 and LRP=2, and
+        ACE is made from the perturbed PENDF -- see
+        :mod:`kika.sampling.resonance_region`. Needs NJOY (*njoyExe*, else
+        ``AceOptions.njoyExe``, else ``$NJOY_EXECUTABLE``, else ``njoy`` on
+        PATH) and a path as *source*. ``"evaluated"`` perturbs MF3 as the tape
+        states it, background and all, and says so in a warning; it exists for
+        tapes NJOY cannot process, such as the section-sliced micro-tapes the
+        tests use.
+    reconstructionTolerance
+        RECONR's fractional tolerance; 0.001 is what the ACE chain uses.
+    njoyExe
+        The NJOY executable for the reconstruction.
     formats
         Any of :data:`EMITTERS`. ``"ace"`` needs *ace*.
     ace
@@ -1867,6 +1963,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     if onMissing not in ("raise", "skip"):
         raise ValueError(
             f"onMissing must be 'raise' or 'skip', got {onMissing!r}")
+    if resonanceRegion not in RESONANCE_REGION_MODES:
+        raise ValueError(f"resonanceRegion must be one of {RESONANCE_REGION_MODES}, "
+                         f"got {resonanceRegion!r}")
 
     log = runLog if runLog is not None else RunLog(logger=logger, label=labelPrefix)
     log.event("started", f"perturbFromModel: {nSamples} sample(s), seed {seed}",
@@ -1875,6 +1974,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               samplingMethod=samplingMethod, psdMethod=psdMethod,
               dryRun=dryRun, formats=list(formats), nWorkers=nWorkers,
               crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
+              resonanceRegion=resonanceRegion,
+              reconstructionTolerance=reconstructionTolerance,
               source=str(source) if isinstance(source, (str, Path)) else "<parsed>",
               covarianceSource=(str(covarianceSource)
                                 if covarianceSource is not None else None),
@@ -1884,6 +1985,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     suite, covariances, endfObj, sourcePath, sourceFormat, reports = \
         _readSource(source, log, covarianceSource)
     covReport, suiteReport = reports
+
+    originalSourcePath = sourcePath
+    pendfPath = None
+    resonanceRecord: Dict[str, Any] = {"mode": resonanceRegion, "reconstructed": False}
+    resonanceNotes: List[str] = []
 
     if (sourceFormat == "gnds" and "endf-delta" in formats
             and outputDir is not None and not dryRun):
@@ -1917,6 +2023,50 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     checkSumBlockMode(sumBlocks)
     original = request
     request = normaliseRequest(request, suite)
+    from kika.sampling.resonance_region import needsReconstruction, resonanceRanges
+
+    from kika.sampling.joint_blocks import _asSelections
+
+    # Only a request that moves a cross section needs it: MF33, or MF34's
+    # L=0 magnitude. A spectrum- or nu-bar-only run leaves MF3 alone.
+    movesCrossSections = any(
+        sel.mf == 33 or (sel.mf == 34 and (sel.index is None or 0 in (
+            sel.index if isinstance(sel.index, (list, tuple, set)) else [sel.index])))
+        for sel in _asSelections(request))
+    if (movesCrossSections and sourceFormat == "endf" and endfObj is not None
+            and needsReconstruction(endfObj)):
+        ranges = resonanceRanges(endfObj)
+        span = (f"{min(r[1] for r in ranges):.4g}-{max(r[2] for r in ranges):.4g} eV")
+        resonanceRecord["ranges"] = [list(r) for r in ranges]
+        if resonanceRegion == "reconstructed":
+            if sourcePath is None:
+                raise ValueError(
+                    "this tape states a resonance region (MF2, LRP=1), where MF3 "
+                    "is only a background, and reconstructing it needs NJOY to "
+                    "read the tape from a path. Pass the path rather than a "
+                    "parsed object, or resonanceRegion='evaluated' to perturb "
+                    "the background as stated")
+            suite, endfObj, sourcePath, pendfPath = _reconstructResonanceRegion(
+                originalSourcePath, endfObj,
+                njoyExe or (ace.njoyExe if ace is not None else None),
+                reconstructionTolerance, log)
+            resonanceRecord.update(reconstructed=True, pendf=str(pendfPath),
+                                   base=str(sourcePath),
+                                   tolerance=reconstructionTolerance)
+            resonanceNotes.append(
+                f"the resonance region ({span}) was reconstructed by NJOY RECONR "
+                f"at 0 K (tolerance {reconstructionTolerance:g}) and the "
+                f"perturbation applied to the cross sections, not to MF3's "
+                f"background: the ENDF outputs carry the reconstructed MF3 with "
+                f"LRP=2 (MF2 kept for information and for the unresolved "
+                f"self-shielding), and ACE is made from the perturbed PENDF")
+        else:
+            note = (f"resonanceRegion='evaluated' on a tape with a resonance "
+                    f"region ({span}): MF3 there is only the background the "
+                    f"resonances are added to, so this realisation barely "
+                    f"perturbs those energies")
+            resonanceNotes.append(note)
+            log.warning(note, subject="MF2")
     expansionNotes: List[str] = []
     lumped, remainders = {}, {}
     if crossSectionSums:
@@ -2039,12 +2189,13 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                        aceOptions=ace if "ace" in formats else None,
                        # A skipped quantity is true of every sample and stated
                        # by no output file, which is exactly what notes are for.
-                       notes=list(skipped))
+                       notes=list(resonanceNotes) + list(skipped))
     if _perturbsASpectrum(index):
         result.notes.append(MF35_UNCHANGED_NOTE)
         log.note(MF35_UNCHANGED_NOTE)
 
-    stem = sourcePath.stem if sourcePath is not None else "perturbed"
+    stem = (originalSourcePath.stem if originalSourcePath is not None
+            else "perturbed")
     if stem.endswith(".gnds"):
         stem = stem[:-5]
     emitTapes = outputDir is not None and not dryRun
@@ -2055,7 +2206,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         ace=ace if "ace" in formats else None, writeSets=writeSets,
         emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints,
         crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
-        lumped=lumped, remainders=remainders)
+        lumped=lumped, remainders=remainders,
+        originalSourcePath=originalSourcePath, pendfPath=pendfPath)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
@@ -2129,7 +2281,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         result.files["metadata"] = outputDir / "run_metadata.json"
         _writeRunMetadata(result, outputDir, covReport, suiteReport, sourcePath,
                           original, seed, space, psdMethod, nWorkers=nWorkers,
-                          crossSectionSums=crossSectionSums, sumBlocks=sumRecord)
+                          crossSectionSums=crossSectionSums, sumBlocks=sumRecord,
+                          resonanceRegion=resonanceRecord)
         log.write(outputDir)
     return result
 
@@ -2213,7 +2366,8 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
                       sourcePath, request, seed: int, space: str,
                       psdMethod: str = "none", nWorkers: int = 1,
                       crossSectionSums: bool = True,
-                      sumBlocks: Optional[Mapping[str, Any]] = None) -> Path:
+                      sumBlocks: Optional[Mapping[str, Any]] = None,
+                      resonanceRegion: Optional[Mapping[str, Any]] = None) -> Path:
     """The run's own account of itself, beside the samples.
 
     Deliberately includes the grouping description in full: "these quantities
@@ -2238,6 +2392,9 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
         # Which sums' blocks were not drawn, and why: "discarded" (partials
         # under it carry their own) or "unreachable" (none does). Keyed by MT.
         "sumBlocks": dict(sumBlocks or {}),
+        # Whether MF3 was perturbed as reconstructed cross sections (RECONR)
+        # or as the tape states it; see perturbFromModel(resonanceRegion=).
+        "resonanceRegion": dict(resonanceRegion or {}),
         "nSamples": result.nSamples,
         "groups": result.description,
         "blocks": [

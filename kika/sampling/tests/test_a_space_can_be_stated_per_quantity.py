@@ -11,12 +11,21 @@ for a quantity that was *already* getting that space moves nothing: block *i*
 keeps the seed it had, so a run that asks for ``{33: "log"}`` draws exactly
 what ``space="log"`` drew.
 """
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from kika.sampling.model_perturbation import perturbFromModel, resolveSpaces
+
+# The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
+# the full tape section by section, and NJOY cannot read them (RECONR stops at
+# their orphan FEND records, "illegal TAB1 for mf/mt = 3/0"). So they are
+# perturbed as stated -- resonanceRegion="evaluated" -- which is what these
+# tests are about; the reconstruction itself is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 #: Fe-56 with MF3, MF4, MF33 and MF34 of MT2 on one tape.

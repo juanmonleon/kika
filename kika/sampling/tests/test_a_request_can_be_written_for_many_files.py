@@ -11,12 +11,21 @@ are on a cluster) has to be able to say.
 was dropped reaches the log, the notes and the metadata, so an ensemble can
 always be asked what was actually perturbed in it.
 """
+from functools import partial
 from pathlib import Path
 
 import pytest
 
 from kika.sampling.joint_blocks import Selection, pruneRequest
 from kika.sampling.model_perturbation import perturbFromModel
+
+# The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
+# the full tape section by section, and NJOY cannot read them (RECONR stops at
+# their orphan FEND records, "illegal TAB1 for mf/mt = 3/0"). So they are
+# perturbed as stated -- resonanceRegion="evaluated" -- which is what these
+# tests are about; the reconstruction itself is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 FE56 = DATA / "micro_fe56_xs_and_angular.endf"   # MF33 + MF34, no MF31/MF35

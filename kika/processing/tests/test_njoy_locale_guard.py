@@ -111,3 +111,50 @@ def test_probe_report_reads_as_a_rate() -> None:
     blind = ProbeReport(executable="njoy", runs=2, corrupted=0, inconclusive=2)
     assert not blind.conclusive
     assert "did not run" in blind.summary
+
+
+# ----------------------------------------------------------------------
+# broadr: the first reader in a deck that is handed a PENDF (no reconr)
+# ----------------------------------------------------------------------
+
+# Copied from run_njoy_with_pendf on ENDF/B-VIII.1 Fe-56, 2026-10-07: a clean
+# run, and one that misread 0.001 and 0.01 and went on to die in HEATR.
+BROADR_CLEAN = """
+ thinning tolerance ...................      0.001
+ max. energy ..........................  1.000E+06
+ errmax for thinning ..................  1.000E-02
+ errint for thinning ..................  5.000E-08
+"""
+BROADR_CORRUPT = """
+ thinning tolerance ...................      0.000
+ max. energy ..........................  1.000E+06
+ errmax for thinning ..................  0.000E+00
+ errint for thinning ..................  5.000E-08
+"""
+
+
+def test_a_pendf_deck_is_checked_through_broadr() -> None:
+    from kika.njoy.locale_guard import check_run, parse_broadr_card
+    from kika.njoy.templates import NJOY_INPUT_TEMPLATE_WITH_PENDF
+
+    deck = NJOY_INPUT_TEMPLATE_WITH_PENDF.format(mat=2631, T=293.6, title="t",
+                                                 suff=".02")
+    assert parse_broadr_card(deck) == (0.001, 0.01, 5e-08)
+    assert check_run(deck, BROADR_CLEAN).ok
+    bad = check_run(deck, BROADR_CORRUPT)
+    assert bad.corrupted
+    assert "broadr errthn: sent 0.001, NJOY read 0" in bad.detail
+
+
+def test_a_deck_with_reconr_is_still_checked_through_reconr() -> None:
+    from kika.njoy.locale_guard import check_run
+    from kika.njoy.templates import NJOY_INPUT_TEMPLATE
+
+    deck = NJOY_INPUT_TEMPLATE.format(mat=2631, T=293.6, title="t", suff=".02")
+    # A clean broadr echo does not hide a corrupt reconr one.
+    corruptReconr = """
+ reconstruction tolerance .............      0.000
+ resonance-integral-check tolerance ...      0.000
+ max resonance-integral error .........  5.000E+00
+""" + BROADR_CLEAN
+    assert check_run(deck, corruptReconr).corrupted

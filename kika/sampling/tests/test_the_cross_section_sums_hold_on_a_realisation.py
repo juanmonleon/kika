@@ -26,6 +26,7 @@ MT101, which RECONR does not rebuild, would reach it stale.
 """
 from __future__ import annotations
 
+from functools import partial
 import json
 from pathlib import Path
 
@@ -42,6 +43,14 @@ from kika.sampling.cross_section_sums import (Remainder, planCrossSectionSums,
 from kika.sampling.joint_blocks import ComponentKey
 from kika.sampling.model_perturbation import perturbFromModel
 from kika.sampling.perturbation_set import PerturbationSet
+
+# The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
+# the full tape section by section, and NJOY cannot read them (RECONR stops at
+# their orphan FEND records, "illegal TAB1 for mf/mt = 3/0"). So they are
+# perturbed as stated -- resonanceRegion="evaluated" -- which is what these
+# tests are about; the reconstruction itself is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 FE56_XS = DATA / "micro_fe56_xs_and_angular.endf"
@@ -591,9 +600,14 @@ def test_every_sum_holds_on_a_whole_evaluation(fe56_b81_tape, tmp_path):
     from kika.sampling.cross_section_sums import _leavesUnder
 
     run = perturbFromModel(str(fe56_b81_tape), {33: None}, 1, seed=7,
-                           outputDir=tmp_path, formats=("endf-delta",))
+                           outputDir=tmp_path, formats=("endf-delta",),
+                           resonanceRegion="reconstructed")
     delta = run.paths("endf-delta")[0]
-    source = read_endf(str(fe56_b81_tape), mf_numbers=[3]).get_file(3).sections
+    # The tape the realisation was made from: the evaluation with its resonance
+    # region reconstructed (MF3 from RECONR, LRP=2).
+    base = json.loads((tmp_path / "run_metadata.json").read_text(
+        encoding="utf-8"))["resonanceRegion"]["base"]
+    source = read_endf(base, mf_numbers=[3]).get_file(3).sections
     written = read_endf(str(delta), mf_numbers=[3]).get_file(3).sections
     present = set(source)
     children, _ = sumTree(present, summation(present))
@@ -683,7 +697,10 @@ def test_jendl5_fe56_elastic_is_the_remainder_it_is_stated_as(fe56_jendl_tape, t
     wherever MT1's block reaches -- to the seven digits ENDF stores.
     """
     run = perturbFromModel(str(fe56_jendl_tape), {33: None}, 1, seed=11,
-                           outputDir=tmp_path, formats=("endf-delta",))
+                           outputDir=tmp_path, formats=("endf-delta",),
+                           resonanceRegion="reconstructed")
+    base = json.loads((tmp_path / "run_metadata.json").read_text(
+        encoding="utf-8"))["resonanceRegion"]["base"]
     sample = run.samples[0]
     assert sample["applied"][ComponentKey(ZA, 33, 2)]["remainder_of"] == 1
     assert any("MT2 took MT1's move" in note for note in run.notes), run.notes
@@ -695,6 +712,6 @@ def test_jendl5_fe56_elastic_is_the_remainder_it_is_stated_as(fe56_jendl_tape, t
     mids = np.sqrt(edges[:-1] * edges[1:])
     keep = mids > 1.0e6                       # above the resolved range
     ratio = (_sectionValues(delta, 1, mids[keep])
-             / _sectionValues(fe56_jendl_tape, 1, mids[keep]))
+             / _sectionValues(base, 1, mids[keep]))
     assert np.allclose(ratio, factors[keep], rtol=2e-6), (
         f"max {np.max(np.abs(ratio / factors[keep] - 1)):.2e}")

@@ -23,11 +23,20 @@ The plan is ``kika-workspace/docs/pfns/pfns_mf5_mf35_roadmap.md``, PF-5 / PD-7.
 """
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import pytest
 
 from kika.sampling.model_perturbation import perturbFromModel
+
+# The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
+# the full tape section by section, and NJOY cannot read them (RECONR stops at
+# their orphan FEND records, "illegal TAB1 for mf/mt = 3/0"). So they are
+# perturbed as stated -- resonanceRegion="evaluated" -- which is what these
+# tests are about; the reconstruction itself is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 

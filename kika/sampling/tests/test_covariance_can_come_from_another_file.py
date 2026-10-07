@@ -10,12 +10,21 @@ It is not the recommended path and the tests say so as much as the code does:
 the gate below is that the run **warns**, every time, because nothing in either
 file asserts that the two belong together.
 """
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from kika.sampling.model_perturbation import perturbFromModel
+
+# The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
+# the full tape section by section, and NJOY cannot read them (RECONR stops at
+# their orphan FEND records, "illegal TAB1 for mf/mt = 3/0"). So they are
+# perturbed as stated -- resonanceRegion="evaluated" -- which is what these
+# tests are about; the reconstruction itself is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 FE56 = DATA / "micro_fe56_xs_and_angular.endf"
