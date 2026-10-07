@@ -21,6 +21,7 @@ from .parse_mf32 import parse_mf32
 from .parse_mf33 import parse_mf33
 from .parse_mf34 import parse_mf34
 from .parse_mf35 import parse_mf35
+from .parse_mf40 import parse_mf40
 from ...utils import get_endf_logger
 
 # Initialize logger for this module
@@ -41,6 +42,7 @@ MF_PARSERS = {
     33: parse_mf33,
     34: parse_mf34,
     35: parse_mf35,
+    40: parse_mf40,
     # Additional parsers will be registered here
 }
 

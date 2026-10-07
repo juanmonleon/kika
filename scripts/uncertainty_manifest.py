@@ -28,6 +28,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import warnings
+
 import numpy as np
 
 try:
@@ -697,6 +699,64 @@ def get_dataset_flag(dataset_id: str, manifest: Optional[dict] = None) -> str:
     return entry.get("flag", "uncurated")
 
 
+def _components_in_point_order(
+    components: List[dict], point_refs: List[dict], dataset_id: str,
+) -> List[dict]:
+    """Per-point columns re-indexed to the order of ``point_refs``.
+
+    The database loader keeps every ``dy`` column in the order of the original
+    EXFOR table, but groups the points into energy blocks sorted by angle. A
+    column applied positionally to the points is therefore scrambled whenever
+    the table is not already in (energy, angle) order -- angle-major tables
+    (Pirovano 23365004/5, Barnard 30076004, Tsukada 20304002, ...) gave every
+    point another row's DATA-ERR until 2026-09-07. The loader stamps each point
+    with ``table_index``; this maps the columns through it. Scalar components
+    and columns whose length does not match the table are left untouched, the
+    latter with a warning rather than a silent fallback.
+    """
+    idx = [pt.get("table_index") for pt in point_refs]
+    if not point_refs:
+        return components
+    if any(i is None for i in idx):
+        # Two very different situations reach here and only one is benign. The JSON path
+        # hands over points that are already in table order and carries no per-point
+        # columns to scramble. An INSTALLED kika older than 2026-09-07 does not stamp
+        # `table_index` at all -- and then this returns the scrambled columns unchanged,
+        # which is the fix looking deployed while doing nothing. That must be audible:
+        # the cluster runs from a staged wheel that is not inspectable from WSL, so a
+        # silent no-op here is exactly how the corrected sigma would fail to arrive.
+        if any(c.get("kind") == "per_point" for c in components):
+            warnings.warn(
+                "{}: {} per-point uncertainty column(s) to place, but the loader stamped no "
+                "`table_index` on the points. Either these came from the JSON path (harmless) "
+                "or the installed kika predates 2026-09-07, in which case the columns are being "
+                "applied POSITIONALLY and angle-major tables get another row's DATA-ERR. "
+                "Check the kika version in the venv this is running under.".format(
+                    dataset_id, sum(c.get("kind") == "per_point" for c in components)),
+                RuntimeWarning, stacklevel=2)
+        return components
+    idx_arr = np.asarray(idx, dtype=int)
+    out = []
+    for comp in components:
+        vals = comp.get("values") if comp.get("kind") == "per_point" else None
+        if vals is None:
+            out.append(comp)
+            continue
+        n_tab = len(vals)
+        if n_tab <= int(idx_arr.max()):
+            warnings.warn(
+                "{}: per-point column {} has {} rows but the points reference table row {}; "
+                "column left in table order".format(dataset_id, comp.get("header"), n_tab, int(idx_arr.max())),
+                RuntimeWarning)
+            out.append(comp)
+            continue
+        arr = np.asarray(vals, dtype=float)
+        c2 = dict(comp)
+        c2["values"] = arr[idx_arr].tolist()
+        out.append(c2)
+    return out
+
+
 def apply_manifest_to_exfor(
     exfor,
     uncertainty_components: Optional[List[dict]] = None,
@@ -751,13 +811,44 @@ def apply_manifest_to_exfor(
     values_arr = np.asarray(values, dtype=float)
 
     # Build synthetic components for the JSON path (no raw column structure).
-    if uncertainty_components is None:
-        uncertainty_components = [{
-            "header": "DATA-ERR",
-            "kind": "per_point",
-            "values": existing_stat,
-            "unit": "B/SR",
-        }]
+    # ⚠ Two conditions, and both are load-bearing.
+    #
+    # (1) The emptiness test is falsy, NOT ``is None``. ``kika/exfor/io.py``
+    #     (the JSON loader) sets ``_raw_uncertainty_components = []``, and the
+    #     database loader also yields ``[]`` for a dataset with no
+    #     ``cvar=='dy'`` columns. Both mean "no raw columns"; ``[] is not
+    #     None``, so an ``is None`` test skipped the synthesis and every
+    #     ``column:`` lookup in the manifest resolved to zeros. For a
+    #     ``derive_stat_only`` entry that cascades: σ_total = 0 → σ_sys capped
+    #     to 0 → σ_stat pinned at the 1 % floor. It silently destroyed Gkatis
+    #     27673002's real 3.4-26 % per-point uncertainties (found 2026-08-27;
+    #     the resolver had been logging "capped on 1016/1016 rows" every run).
+    #
+    # (2) ``existing_stat`` must contain something. A dataset that declares NO
+    #     per-point uncertainty at all (13511004 Perey 1991, 20482005, 10332004,
+    #     11638003) has nothing to synthesize FROM: building a DATA-ERR column
+    #     of zeros would make ``column: best_available`` "succeed" with σ = 0
+    #     and trigger the very cascade above, replacing the defaults block's
+    #     5 % σ_sys with 1 % σ_stat ⊕ 0. Those datasets must keep falling
+    #     through to the defaults, which is what the ``is None`` test did for
+    #     them by accident. Pinned by test_manifest_json_path_components.py.
+    if not uncertainty_components:
+        if np.any(np.asarray(existing_stat, dtype=float) != 0.0):
+            uncertainty_components = [{
+                "header": "DATA-ERR",
+                "kind": "per_point",
+                "values": existing_stat,
+                "unit": "B/SR",
+            }]
+        else:
+            # Nothing to synthesize from. Normalise to a list rather than
+            # leaving ``None`` here: ``_find_component`` iterates it.
+            uncertainty_components = []
+    else:
+        # 2026-09-07: the database loader's columns are in TABLE order, the points
+        # are not -- map them through each point's table_index before resolving.
+        uncertainty_components = _components_in_point_order(
+            uncertainty_components, point_refs, dataset_id)
 
     res = resolve_for_dataset(
         dataset_id=dataset_id,

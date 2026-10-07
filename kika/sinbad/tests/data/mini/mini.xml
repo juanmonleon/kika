@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A fixture, not an experiment. Draft format v0.3.
+
+  It is minimal but structurally complete: two detectors, three measuring positions, a table in
+  each of the two bodies GNDS 5.4.4 allows, a blank cell, a correction applied and one declared
+  and not applied, a correction whose size the entry does not know, an uncertainty budget with
+  all three correlation scopes, materials, a layered geometry, a factor chain, external files
+  with a good and a bad checksum, issues and absences. The numbers are chosen so that every
+  quantity a test asserts is exact:
+
+      Al27  1 % counting (per point, 1/2/4 %), 3 % calibration (within-detector),
+            8 % plate power at 2 s.d. = 4 % (within-entry)   ->  total 5.1 / 5.4 / 6.4 %
+      Au197 1 % counting, 2 % calibration, the same plate power  ->  total 4.6 %
+-->
+<sinbad formatVersion="0.3" id="TST-ATN-BLK-STR-SUR-001-R" shortCode="mini"
+        path="sinbad/test/TST-mini" revision="0000000000000000000000000000000000000000">
+
+  <identification domain="TST" purpose="ATN" geometry="BLK" material="STR" source="SUR"
+                  sequence="001" measurement="R" volume="1">
+    <legacyId scheme="SINBAD v1 short code" value="mini"/>
+    <relatedEntry shortCode="mini2" title="Another fixture" relation="same fixture family"/>
+  </identification>
+
+  <documentation>
+    <authors>
+      <author name="A. Tester"><affiliations><affiliation name="Nowhere"/></affiliations>
+        <note>Wrote the fixture</note></author>
+    </authors>
+    <contributors>
+      <contributor name="B. Reviewer" contributorType="Other">
+        <affiliations><affiliation name="Nowhere"/></affiliations></contributor>
+    </contributors>
+    <dates>
+      <date dateType="created" value="1990" event="fixture invented"/>
+      <date dateType="updated" value="2026-09-21" event="written for kika.sinbad"/>
+    </dates>
+    <title>Mini fixture benchmark</title>
+    <abstract>Two activation foils behind three slabs of mild steel. Nothing was measured.</abstract>
+    <bibliography>
+      <bibitem xref="1">A. Tester, The Mini Fixture, Report None (1990).</bibitem>
+    </bibliography>
+  </documentation>
+
+  <status availability="unrestricted" maturityLevel="1">
+    <qualityAssessment rating="fixture" xref="1">
+      <reservation>everything</reservation>
+    </qualityAssessment>
+    <issues>
+      <issue label="F1" kind="inconsistency" about="reactionRate-Al27">The A4 row has no value.</issue>
+    </issues>
+  </status>
+
+  <externalFiles>
+    <externalFile label="file-source" path="00_Report/source.txt"
+                  checksum="3573c0756ca94d503740343348b4f4cdf0646ebd" algorithm="sha1"
+                  role="description" format="text"/>
+    <externalFile label="file-stale" path="00_Report/source.txt"
+                  checksum="0000000000000000000000000000000000000000" algorithm="sha1"
+                  role="reference" format="text"/>
+    <externalFile label="file-archive" path="archive.tar.gz"
+                  checksum="1111111111111111111111111111111111111111" algorithm="sha1"
+                  role="archive" format="tar.gz"/>
+    <externalFile label="file-inside" path="deck.inp" archive="file-archive"
+                  role="inputDeck" format="text"/>
+  </externalFiles>
+
+  <definitions>
+    <normalisation label="power30kW" basis="reactor power" provenance="reported">
+      <double label="power" value="30" unit="kW"/>
+    </normalisation>
+    <normalisation label="plate1W" basis="plate power" provenance="reported">
+      <double label="power" value="1" unit="W"/>
+    </normalisation>
+    <valueConvention label="asMeasured" basis="includes the background"/>
+    <valueConvention label="backgroundSubtracted" basis="background removed"/>
+    <valueConvention label="selfShielded" basis="corrected for foil self-shielding"/>
+  </definitions>
+
+  <experiment>
+
+    <coordinateFrames>
+      <coordinateFrame label="lab" unit="cm" source="invented">
+        <direction name="z" description="penetration axis; 0 at the source"/>
+        <point name="centre" x="0.0" y="0.0"/>
+      </coordinateFrame>
+    </coordinateFrames>
+
+    <positions frame="lab" line="axis" source="invented" provenance="reported">
+      <position label="A1" layer="gap-A1" shieldThickness="0.00"/>
+      <position label="A2" layer="gap-A2" shieldThickness="5.00"/>
+      <position label="A3" layer="gap-A3" shieldThickness="10.00"/>
+      <position label="A4" layer="gap-A4" shieldThickness="15.00"/>
+    </positions>
+
+    <radiationSources>
+      <radiationSource label="plate" kind="volume" particle="n" layer="source" material="fuel2"
+                       strength="sourceStrength" description="a fission plate that does not exist">
+        <energySpectrum status="stated, absent" description="not tabulated"/>
+      </radiationSource>
+    </radiationSources>
+
+    <detectors source="invented">
+      <detector label="det-Al27" kind="activationFoil" reaction="Al27(n,a)Na24" countingSystem="Ge">
+        <double label="diameter" value="50" unit="mm"/>
+        <double label="mass" value="16.72" unit="g"/>
+      </detector>
+      <detector label="det-Au197" kind="activationFoil" reaction="Au197(n,g)Au198" countingSystem="NaI">
+        <double label="diameter" value="12.7" unit="mm"/>
+        <range label="mass" min="0.12" max="0.13" unit="g"/>
+        <cover material="Cd" materialProvenance="inferred">
+          <double label="thickness" value="0.050" unit="inch"/>
+        </cover>
+      </detector>
+    </detectors>
+
+    <dataObjects>
+
+      <dataObject label="materials" quantity="material composition" nature="measured" source="invented">
+        <materials>
+          <material name="mildSteel1">
+            <materialDensity value="7.850" unit="g/cm**3"/>
+            <nuclides delimiter="space" decimalMarker="." nuclideFormat="ZA"
+                      nuclideDensityUnits="weight fraction" timeDependent="false">
+              <csvData>
+                Fe0 0.9900
+                C0 0.0100
+              </csvData>
+            </nuclides>
+          </material>
+          <material name="fuel2">
+            <materialDensity value="3.256" unit="g/cm**3"/>
+            <nuclides delimiter="space" decimalMarker="." nuclideFormat="ZA"
+                      nuclideDensityUnits="weight fraction" timeDependent="false">
+              <csvData>
+                Al0 0.8000
+                U235 0.2000
+              </csvData>
+            </nuclides>
+          </material>
+        </materials>
+        <note>Invented compositions.</note>
+      </dataObject>
+
+      <dataObject label="assemblyGeometry" quantity="assembly geometry" nature="measured"
+                  frame="lab" source="invented">
+        <geometry>
+          <slab name="stack" description="three slabs with a gap in front of each">
+            <layers name="axialStack" axis="z">
+              <layer name="source" material="fuel2"><min value="-1.00" unit="cm"/><max value="0.00" unit="cm"/></layer>
+              <layer name="gap-A1"><min value="0.00" unit="cm"/><max value="0.50" unit="cm"/></layer>
+              <layer name="slab-01" material="mildSteel1"><min value="0.50" unit="cm"/><max value="5.00" unit="cm"/></layer>
+              <layer name="gap-A2"><min value="5.00" unit="cm"/><max value="5.50" unit="cm"/></layer>
+              <layer name="slab-02" material="mildSteel1"><min value="5.50" unit="cm"/><max value="10.00" unit="cm"/></layer>
+              <layer name="gap-A3"><min value="10.00" unit="cm"/><max value="10.50" unit="cm"/></layer>
+              <layer name="slab-03" material="mildSteel1"><min value="10.50" unit="cm"/><max value="15.00" unit="cm"/></layer>
+              <layer name="gap-A4"><min value="15.00" unit="cm"/><max value="15.50" unit="cm"/></layer>
+            </layers>
+            <length_x value="100.0" unit="cm"/>
+            <length_y value="100.0" unit="cm"/>
+            <length_z value="16.5" unit="cm"/>
+          </slab>
+        </geometry>
+      </dataObject>
+
+      <dataObject label="sourceStrength" quantity="source strength" nature="evaluated"
+                  normalisation="plate1W" source="invented">
+        <factorChain operator="product">
+          <factor provenance="measured" uncertaintyAsPublished="8% at the 2 s.d. level">
+            <double label="platePower" value="5.0e-4" unit="W/W">
+              <uncertainty><standard><double value="2.0e-5"/></standard></uncertainty>
+            </double>
+          </factor>
+          <factor provenance="constant, stated">
+            <double label="fissionsPerWatt" value="3.0e10" unit="1/(W*s)"/>
+          </factor>
+          <factor provenance="constant, stated">
+            <double label="neutronsPerFission" value="2.4" unit=""/>
+          </factor>
+          <result nature="derived"><double label="neutronsPerSecond" value="3.6e7" unit="1/s"/></result>
+        </factorChain>
+      </dataObject>
+
+      <dataObject label="sourceDistribution-xy" quantity="source distribution" nature="evaluated"
+                  normalisation="plate1W" frame="lab" source="invented">
+        <gridded2d>
+          <axes>
+            <grid index="2" label="y" unit="cm" style="boundaries">
+              <values>-3.0 -1.0 1.0 3.0</values></grid>
+            <grid index="1" label="x" unit="cm" style="boundaries">
+              <values>-2.0 0.0 2.0</values></grid>
+            <axis index="0" label="sourceDensity" unit="1/(cm**3*s)"/>
+          </axes>
+          <array shape="3,2">
+            <values>
+              1.0 2.0
+              3.0 4.0
+              5.0 6.0
+            </values>
+          </array>
+        </gridded2d>
+      </dataObject>
+
+      <dataObject label="reactionRate-Al27" quantity="reaction rate" nature="measured"
+                  normalisation="power30kW" convention="asMeasured" measuredBy="det-Al27"
+                  reaction="Al27(n,a)Na24" source="invented Table 1">
+        <table rows="4" columns="5">
+          <columnHeaders>
+            <column index="0" name="position" unit="" types="UTF8Text" role="independent"/>
+            <column index="1" name="shieldThickness" unit="cm" role="independent"/>
+            <column index="2" name="reactionRate" unit="1/s"/>
+            <column index="3" name="countingStatistics" unit="%" role="uncertainty" kind="component" confidenceLevel="1 s.d."/>
+            <column index="4" name="totalSd" unit="%" role="uncertainty" kind="total" confidenceLevel="1 s.d."/>
+          </columnHeaders>
+          <data sep="tr">
+            <tr sep="td"><td>A1</td><td>0.00</td><td>1.00E-20</td><td>1.0</td><td>5.1</td></tr>
+            <tr sep="td"><td>A2</td><td>5.00</td><td>2.00E-21</td><td>2.0</td><td>5.4</td></tr>
+            <tr sep="td"><td>A3</td><td>10.00</td><td>3.00E-22</td><td>4.0</td><td>6.4</td></tr>
+            <tr sep="td"><td>A4</td><td>15.00</td><td/><td/><td/></tr>
+          </data>
+        </table>
+        <correction kind="background" direction="subtract" applied="false"
+                    from="asMeasured" to="backgroundSubtracted" method="invented" source="invented">
+          <double label="magnitude" value="2" unit="%"/>
+        </correction>
+        <uncertaintyBudget combinationRule="quadratic" covariance="from components">
+          <component name="countingStatistics" column="countingStatistics" correlationScope="none"/>
+          <component name="calibration" value="3.0" unit="%" confidenceLevel="1 s.d."
+                     correlationScope="within-detector" ref="det-Al27" source="invented"/>
+          <component name="platePower" value="8" unit="%" confidenceLevel="2 s.d."
+                     correlationScope="within-entry" ref="sourceStrength" source="invented"/>
+        </uncertaintyBudget>
+      </dataObject>
+
+      <dataObject label="reactionRate-Au197" quantity="reaction rate" nature="measured"
+                  normalisation="power30kW" convention="backgroundSubtracted" measuredBy="det-Au197"
+                  reaction="Au197(n,g)Au198" source="invented Table 2">
+        <table rows="2" columns="5">
+          <columnHeaders>
+            <column index="0" name="position" unit="" types="UTF8Text" role="independent"/>
+            <column index="1" name="shieldThickness" unit="cm" role="independent"/>
+            <column index="2" name="reactionRate" unit="1/s"/>
+            <column index="3" name="countingStatistics" unit="%" role="uncertainty" kind="component" confidenceLevel="1 s.d."/>
+            <column index="4" name="totalSd" unit="%" role="uncertainty" kind="total" confidenceLevel="1 s.d."/>
+          </columnHeaders>
+          <data sep="tr">
+            <tr sep="td"><td>A1</td><td>0.00</td><td>5.00E-15</td><td>1.0</td><td>4.6</td></tr>
+            <tr sep="td"><td>A2</td><td>5.00</td><td>4.00E-15</td><td>1.0</td><td>4.6</td></tr>
+          </data>
+        </table>
+        <correction kind="background" direction="subtract" applied="true"
+                    from="asMeasured" to="backgroundSubtracted" method="invented" source="invented">
+          <magnitude status="not reported"/>
+        </correction>
+        <correction kind="selfShielding" direction="multiply" applied="false"
+                    from="backgroundSubtracted" to="selfShielded" method="invented" source="invented">
+          <magnitude status="not reported"/>
+        </correction>
+        <uncertaintyBudget combinationRule="quadratic" covariance="from components">
+          <component name="countingStatistics" column="countingStatistics" correlationScope="none"/>
+          <component name="calibration" value="2.0" unit="%" confidenceLevel="1 s.d."
+                     correlationScope="within-detector" ref="det-Au197" source="invented"/>
+          <component name="platePower" value="8" unit="%" confidenceLevel="2 s.d."
+                     correlationScope="within-entry" ref="sourceStrength" source="invented"/>
+        </uncertaintyBudget>
+      </dataObject>
+
+    </dataObjects>
+
+  </experiment>
+
+  <absences>
+    <absence kind="not stated">experiment date</absence>
+    <absence kind="not reported">everything else</absence>
+  </absences>
+
+</sinbad>

@@ -84,7 +84,11 @@ def fold_xs_over_bins(
     energy_bins : Sequence[EnergyBinInfo]
         Bins carrying ``energy_mev``, ``sigma_E_mev`` and the bin edges.
     n_nodes : int, default 12
-        Gauss-Hermite nodes.
+        Gauss-Hermite nodes; read only if ``fold_tabulated`` is asked for its
+        legacy method. The default fold integrates on the table's own points
+        (:func:`kika.utils.numerics.gaussian_fold_nodes`) since 2026-09-24, and
+        a MF33 built before then was recentred on a Gauss-Hermite fold of the
+        host MF3 that is 4 % off median for Fe-56 elastic.
     logger : optional
         Sink for the count of bins that fell back to a box average.
 

@@ -62,6 +62,11 @@ _DEFAULT_TAPE_ROOT = "/share_snc/snc/JuanMonleon"
 #: reached by ``../../lib/endf`` from the first, which would break the moment
 #: ``KIKA_TAPES`` points somewhere else.
 _DEFAULT_LIB_ROOT = "/share_snc/lib/endf"
+#: Where the same libraries sit on the WSL workstation, one directory deeper
+#: (``<lib>/neutrons/``). ``/share_snc/lib/endf`` does not exist there
+#: (measured 2026-10-05), so without this root every library-only tape skips
+#: on the one machine the PFNS gates are run from.
+_SOFT_LIB_ROOT = "/soft_snc/lib/endf"
 
 
 def _search_roots() -> Tuple[Path, ...]:
@@ -76,6 +81,7 @@ def _search_roots() -> Tuple[Path, ...]:
     if env_endf:
         roots.append(Path(env_endf))
     roots.append(Path(os.environ.get("KIKA_LIB_TAPES", _DEFAULT_LIB_ROOT)))
+    roots.append(Path(_SOFT_LIB_ROOT))
     roots.append(_downloadCacheRoot())
     roots.append(REPO_ROOT / "files" / "endf")
     roots.append(REPO_ROOT / "files")
@@ -119,6 +125,8 @@ _TAPES: Dict[str, Sequence[str]] = {
         "JENDL-5/Fe56_jendl5_n.endf",
         "Fe56_jendl5_n.endf",
         "JENDL-5/260560.jendl5",
+        # The JAEA distribution as unpacked (jendl5-n.tar.gz) under a library root.
+        "jendl5/n_026-Fe-056.dat",
     ),
     "u235": ("jeff40-endf/92-U-235g.txt", "92-U-235g.txt"),
     # PFNS: the two U-235 evaluations the MF5/MF35 work is gated against, plus
@@ -126,9 +134,15 @@ _TAPES: Dict[str, Sequence[str]] = {
     # reached through the personal root; ``u235_b81`` is a different evaluation
     # and both are needed, because the padding divergence and the outgoing-grid
     # mismatch only show up on ENDF/B-VIII.1.
-    "u235_b81": ("endfb81/n-092_U_235.endf", "n-092_U_235.endf"),
-    "cf252_b81": ("endfb81/n-098_Cf_252.endf", "n-098_Cf_252.endf"),
+    "u235_b81": ("endfb81/n-092_U_235.endf", "n-092_U_235.endf",
+                 "endfb81/neutrons/n-092_U_235.endf"),
+    "cf252_b81": ("endfb81/n-098_Cf_252.endf", "n-098_Cf_252.endf",
+                  "endfb81/neutrons/n-098_Cf_252.endf"),
     "pu239_b81": ("endfb81/n-094_Pu_239.endf", "n-094_Pu_239.endf"),
+    # The two PFNS tapes the pre-flight refused (PF-7, PF-8): a correlation
+    # above 1 by 1.2e-5, and a band stated as a 1x1 zero.
+    "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf",),
+    "pu242_j40": ("jeff40/neutrons/94-Pu-242g.txt",),
     "th232": ("jeff40-endf/90-Th-232g.txt", "90-Th-232g.txt"),
     "pu241": ("jeff40-endf/94-Pu-241g.txt", "94-Pu-241g.txt"),
     "u238": ("jeff40-endf/92-U-238g.txt", "U238_jeff4.0_n.endf",
@@ -186,6 +200,25 @@ _TAPES: Dict[str, Sequence[str]] = {
     # between them is a reader defect rather than a physics difference. Not the
     # same tape as ``fe56_host`` — that is JEFF-4.0 with a JEFF-3.3 MF4 graft.
     "fe56_b81": ("endfb81/n-026_Fe_056.endf", "n-026_Fe_056.endf", "endfb8.1/n/26056.endf"),
+    # MF33 MT1 sums LB=5 (relative) and LB=8 (absolute, barns²): the smallest
+    # real carrier of the mixed block, for the conversion through NJOY.
+    "si28_b81": ("endfb81/n-014_Si_028.endf", "n-014_Si_028.endf"),
+    # Layer-1 covariance checks (kika.endf.check_covariances): MF33 MT2 holds an
+    # LB=5 that is indefinite on its own (lambda_min/lambda_max = -1, an element
+    # of 111.94 between relative variances of 2.8e-6 and 0.035), verified on the
+    # ENDF text without kika.
+    "o16_b81": ("endfb81/n-008_O_016.endf", "n-008_O_016.endf"),
+    # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
+    # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
+    # validation that picked them is kika-workspace
+    # ``docs/library/cov_checks_roadmap.md``, phase C7.
+    "ne20_jeff40": ("jeff40/n_10-Ne-020g.jeff", "jeff40/neutrons/n_10-Ne-020g.jeff"),
+    "w186_jeff40": ("jeff40/n_74-W-186g.jeff", "jeff40/neutrons/n_74-W-186g.jeff"),
+    "fe57_jeff40": ("jeff40/n_26-Fe-057g.jeff", "jeff40/neutrons/n_26-Fe-057g.jeff"),
+    "hf176_jeff40": ("jeff40/n_72-Hf-176g.jeff", "jeff40/neutrons/n_72-Hf-176g.jeff"),
+    # MF32 and MF35 of JEFF-4.0 for the same layer-1 checks, phase C8.
+    "k41_jeff40": ("jeff40/n_19-K-041g.jeff", "jeff40/neutrons/n_19-K-041g.jeff"),
+    "u239_jeff40": ("jeff40/n_92-U-239g.jeff", "jeff40/neutrons/n_92-U-239g.jeff"),
     # The ACE of that same evaluation (ENDF/B-VIII.1, 293.6 K), and a PENDF of the
     # JEFF-4.0 host: the three sources kika.plotting.plottable overlays in its
     # acceptance test.
@@ -541,11 +574,21 @@ u238_b80_tape = _tape_fixture("u238_b80")
 u235_b81_tape = _tape_fixture("u235_b81")
 cf252_b81_tape = _tape_fixture("cf252_b81")
 pu239_b81_tape = _tape_fixture("pu239_b81")
+pu240_b71_tape = _tape_fixture("pu240_b71")
+pu242_j40_tape = _tape_fixture("pu242_j40")
 u5_nubar_covfil_tape = _tape_fixture("u5_nubar_covfil")
 u5_boxer_tape = _tape_fixture("u5_boxer")
 fe56_gnds_tape = _tape_fixture("fe56_gnds")
 fe56_gnds_cov_tape = _tape_fixture("fe56_gnds_cov")
 fe56_b81_tape = _tape_fixture("fe56_b81")
+si28_b81_tape = _tape_fixture("si28_b81")
+o16_b81_tape = _tape_fixture("o16_b81")
+ne20_jeff40_tape = _tape_fixture("ne20_jeff40")
+w186_jeff40_tape = _tape_fixture("w186_jeff40")
+fe57_jeff40_tape = _tape_fixture("fe57_jeff40")
+hf176_jeff40_tape = _tape_fixture("hf176_jeff40")
+k41_jeff40_tape = _tape_fixture("k41_jeff40")
+u239_jeff40_tape = _tape_fixture("u239_jeff40")
 fe56_ace_b81_tape = _tape_fixture("fe56_ace_b81")
 fe56_pendf_tape = _tape_fixture("fe56_pendf")
 

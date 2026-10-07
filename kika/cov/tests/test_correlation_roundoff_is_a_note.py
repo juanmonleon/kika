@@ -38,4 +38,12 @@ def test_a_real_excess_still_blocks():
 
 
 def test_the_threshold_sits_far_above_what_a_file_produces():
-    assert 2.1e-7 < CORRELATION_ROUNDOFF < 1e-3
+    # 1.19e-5 is Pu-240 ENDF/B-VII.1 MF35 (PF-7); 1e-3 is an INTG correlation
+    # read back at NDIGIT=3, the coarsest real defect the bound is there for.
+    assert 1.19e-5 < CORRELATION_ROUNDOFF < 1e-3
+
+
+def test_a_negative_definite_block_still_blocks():
+    """Only a block that is zero is let through; a negative variance is not."""
+    report = inspect_matrix(np.array([[-1.0]]))
+    assert not report.samplable

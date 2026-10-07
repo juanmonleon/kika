@@ -524,6 +524,12 @@ class PerturbationSet:
                 maxOutgoingPoints=maxOutgoingPoints)
             self._putEnergyRealisation(product, perturbed)
 
+            # The evaluation's own departure from int chi = 1, measured on the
+            # node the realisation started from. It is how a budget below is
+            # read: a renormalisation of 1e-7 means nothing against an input
+            # that was already off by 3e-7 (JEFF-4.0 Pu-241).
+            inputResidual = _inputNormalisationResidual(energyForm, bands)
+
             for component in bandComponents:
                 # Per band, because that is what was drawn: a band's own nodes
                 # carry its renormalisation and its group self-check, and the
@@ -534,6 +540,8 @@ class PerturbationSet:
                 diagnostics[component] = {
                     "n_outer_inserted": info["n_outer_inserted"],
                     **summariseSpectrumNodes(nodes),
+                    "input_normalisation_max_abs":
+                        inputResidual.get(component.index, 0.0),
                 }
         return diagnostics
 
@@ -1107,3 +1115,19 @@ def readFactorsTable(directory, sample: int, *, name: str = FACTORS_STEM
                            outerDomains=outerDomains,
                            edgeRule=index.get("edgeRule", EDGE_RULE),
                            provenance=provenance)
+
+
+def _inputNormalisationResidual(energyForm, bands) -> Dict[Any, float]:
+    """``{band: max |int chi - 1|}`` over the evaluated nodes inside each band.
+
+    The model twin of ``mf35_sampling.normalisation_residual``, kept per band so
+    it sits beside the band's own budgets. A band with no node inside it gets 0.
+    """
+    worst: Dict[Any, float] = {key: 0.0 for key in bands}
+    for k, value in enumerate(list(energyForm.outerDomainValues)):
+        for key, (lo, hi) in bands.items():
+            if lo <= float(value) <= hi:
+                residual = abs(float(energyForm.normalisation(k)) - 1.0)
+                worst[key] = max(worst[key], residual)
+    return worst
+

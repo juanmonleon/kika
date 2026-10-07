@@ -27,6 +27,7 @@ Energies are in **eV** unless a name says ``_mev``; cross sections in **barns**;
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Callable, Literal, Mapping, Optional, Sequence, Tuple, Union
 
@@ -35,7 +36,7 @@ import numpy as np
 from kika._constants import FWHM_TO_SIGMA, NEUTRON_MASS_AMU
 from kika.processing.interpolation import interpolate_1d
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import fold_tabulated
+from kika.utils.numerics import fold_tabulated, gaussian_fold_nodes
 
 __all__ = [
     "TofResolution",
@@ -62,9 +63,14 @@ __all__ = [
     "coefficients_bin_averaged",
     "coefficients_folded",
     "resolve_coefficients",
+    "resolution_fold_nodes",
+    "coefficients_sigma_weighted_folded",
+    "coefficients_sigma_weighted",
+    "product_reading_nodes",
     "differential_xs_factor",
     "differential_xs_vs_angle",
     "differential_xs_vs_energy",
+    "dsigma_vs_energy_grid",
 ]
 
 Frame = Literal["lab", "cm"]
@@ -491,8 +497,9 @@ def sigma_folded(xs_energies_ev, xs_values, energy_ev, tof: TofResolution):
     r"""TOF-resolution-folded :math:`\sigma(E)`.
 
     Averages :math:`\sigma` over a Gaussian kernel
-    :math:`N(E_0, \sigma_E^2)` by Gauss-Hermite quadrature
-    (:func:`kika.utils.numerics.fold_tabulated`), with :math:`\sigma_E` from
+    :math:`N(E_0, \sigma_E^2)` on the table's own points inside the window
+    (:func:`kika.utils.numerics.fold_tabulated`, 12-node Gauss-Hermite before
+    September 2026), with :math:`\sigma_E` from
     ``tof``.  Vectorized over ``energy_ev``.
 
     Note the folding samples :math:`\sigma` **linearly** (``numpy.interp``
@@ -782,7 +789,7 @@ def coefficients_folded(
 
     The angular counterpart of :func:`sigma_folded`: each coefficient is
     averaged over the same Gaussian energy-resolution kernel, on the same
-    Gauss-Hermite quadrature.
+    quadrature (the MF4 grid's own points inside the window).
 
     Why this exists.  Folding only :math:`\sigma` gives
     :math:`\langle\sigma\rangle\,f(\mu, E)` — the measured normalization with
@@ -874,7 +881,22 @@ def resolve_coefficients(
     impose a point-by-point energy correlation the evaluation does not carry.
     That is the same choice ``scripts/precompute_chi2_folded_al_c0.py`` makes,
     and the two must not disagree.
+
+    .. deprecated:: October 2026
+       Not the reading of a measurement.  A detector counts
+       :math:`\langle\sigma f\rangle`, and the evaluation states
+       :math:`\sigma(E)` and :math:`f(\mu, E)` at every energy, so their
+       product at each energy is exactly what it asserts; averaging the factors
+       apart assumes they do not vary together inside the window.  Use
+       :func:`coefficients_sigma_weighted`.  The app no longer calls this.
     """
+    if mode != "nominal":
+        warnings.warn(
+            "resolve_coefficients averages the coefficients apart from sigma; "
+            "use coefficients_sigma_weighted for what a measurement sees",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if mode == "binavg" and bin_edges is not None:
         return coefficients_bin_averaged(
             energies_ev, coefficients, bin_edges, weighting=weighting, max_order=max_order
@@ -887,6 +909,177 @@ def resolve_coefficients(
     return coefficients_at_energies(
         energies_ev, coefficients, query_ev,
         nbt_int_pairs=nbt_int_pairs, max_order=max_order,
+    )
+
+
+# =============================================================================
+# The sigma-weighted fold
+# =============================================================================
+
+def resolution_fold_nodes(
+    energy_ev: float,
+    sigma_e_ev: float,
+    grids: Sequence[Sequence[float]],
+) -> Tuple[np.ndarray, np.ndarray]:
+    r"""Quadrature nodes and weights for a Gaussian fold over tabulated data.
+
+    :func:`kika.utils.numerics.gaussian_fold_nodes` in eV: every point of every
+    grid inside :math:`E_0 \pm 5\sigma_E`, the window edges and 101 uniform
+    points, weighted by the Gaussian times the trapezoid rule.  The same rule
+    :func:`sigma_folded` and :func:`coefficients_folded` now use through
+    :func:`~kika.utils.numerics.fold_tabulated`.
+    """
+    return gaussian_fold_nodes(energy_ev, sigma_e_ev, grids)
+
+
+def product_reading_nodes(
+    energy_ev: float,
+    mode: XsMode,
+    grids: Sequence[Sequence[float]],
+    *,
+    tof: Optional[TofResolution] = None,
+    bin_edges: Optional[Tuple[float, float]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    r"""Nodes and normalised weights for one reading of a product such as :math:`\sigma f`.
+
+    - ``'folded'``: :func:`resolution_fold_nodes` with :math:`\sigma_E` from
+      ``tof``, a Gaussian over :math:`E_0 \pm 5\sigma_E`.
+    - ``'binavg'``: the window ``bin_edges`` under a flux flat per unit lethargy
+      (:math:`w = 1/E`), on its edges and every grid point strictly inside,
+      trapezoid rule.  A window reaching :math:`E \le 0` is cut at the first
+      positive grid point inside it, as :func:`sigma_bin_averaged` does.
+    - ``'nominal'``, or a mode whose inputs are missing: the single node
+      :math:`E_0`.
+
+    Whatever the reading, the average of a product is :math:`\sum_i w_i\,
+    \sigma(E_i)\,f(E_i)`, so the resolution acts on what a detector counts and
+    never on the factors one at a time.
+    """
+    e0 = float(energy_ev)
+    if mode == "folded" and tof is not None:
+        sigma_e = float(tof.sigma_e_mev(e0 / 1e6)) * 1e6
+        return resolution_fold_nodes(e0, sigma_e, grids)
+    if mode == "binavg" and bin_edges is not None:
+        lo, hi = float(bin_edges[0]), float(bin_edges[1])
+        parts = []
+        for grid in grids:
+            g = np.asarray(grid, dtype=float)
+            if g.size:
+                parts.append(g[(g > lo) & (g < hi)])
+        inside = np.unique(np.concatenate(parts)) if parts else np.zeros(0)
+        if lo <= 0.0:
+            positive = inside[inside > 0.0]
+            lo = float(positive[0]) if positive.size else hi * 1e-6
+            inside = inside[inside > lo]
+        if hi > lo:
+            nodes = np.unique(np.concatenate(([lo], inside, [hi])))
+            w = 1.0 / nodes
+            trap = np.zeros_like(nodes)
+            spans = np.diff(nodes)
+            trap[:-1] += 0.5 * spans
+            trap[1:] += 0.5 * spans
+            weights = w * trap
+            total = weights.sum()
+            if total > 0:
+                return nodes, weights / total
+    return np.array([e0]), np.array([1.0])
+
+
+def coefficients_sigma_weighted(
+    energies_ev,
+    coefficients,
+    xs_energies_ev,
+    xs_values,
+    energy_ev: float,
+    *,
+    mode: XsMode = "folded",
+    tof: Optional[TofResolution] = None,
+    bin_edges: Optional[Tuple[float, float]] = None,
+    nbt_int_pairs=None,
+    max_order: Optional[int] = None,
+) -> Tuple[np.ndarray, float]:
+    r"""The angular shape and cross section a resolution-limited measurement sees.
+
+    :func:`coefficients_sigma_weighted_folded` for any reading of
+    :func:`product_reading_nodes`: :math:`a_\ell^\mathrm{eff} =
+    \langle\sigma a_\ell\rangle / \langle\sigma\rangle` and
+    :math:`\langle\sigma\rangle`, so :math:`d\sigma/d\Omega(\mu) =
+    \langle\sigma\rangle f_\mathrm{eff}(\mu)/2\pi = \langle\sigma f\rangle/2\pi`.
+
+    :math:`\sigma` is read linearly inside a fold (``numpy.interp``, as
+    :func:`sigma_folded`) and log-log otherwise (as :func:`sigma_nominal` and
+    :func:`sigma_bin_averaged`).  Nominal, it is the file at :math:`E_0`.
+    """
+    grid = np.asarray(energies_ev, dtype=float)
+    xs_grid = np.asarray(xs_energies_ev, dtype=float)
+    xs = np.asarray(xs_values, dtype=float)
+    nodes, weights = product_reading_nodes(
+        energy_ev, mode, [xs_grid, grid], tof=tof, bin_edges=bin_edges,
+    )
+    folded = mode == "folded" and tof is not None
+    sigma_at = (
+        np.interp(nodes, xs_grid, xs) if folded
+        else np.atleast_1d(interpolate_log_log(xs_grid, xs, nodes))
+    )
+    a_at = coefficients_at_energies(
+        grid, coefficients, nodes, nbt_int_pairs=nbt_int_pairs, max_order=max_order,
+    )
+    sigma_avg = float(np.sum(weights * sigma_at))
+    if not (sigma_avg > 0):
+        # No counts anywhere in the window: the shape is undefined, and the
+        # unweighted mean is the only answer that is not a division by zero.
+        return a_at @ weights, sigma_avg
+    return (a_at @ (weights * sigma_at)) / sigma_avg, sigma_avg
+
+
+def coefficients_sigma_weighted_folded(
+    energies_ev,
+    coefficients,
+    xs_energies_ev,
+    xs_values,
+    energy_ev: float,
+    tof: TofResolution,
+    *,
+    nbt_int_pairs=None,
+    max_order: Optional[int] = None,
+) -> Tuple[np.ndarray, float]:
+    r"""What a resolution-limited measurement of :math:`d\sigma/d\Omega` sees.
+
+    A detector at nominal :math:`E_0` counts
+
+    .. math::
+        \left\langle\frac{d\sigma}{d\Omega}\right\rangle(\mu, E_0)
+        = \frac{1}{2\pi}\int R(E; E_0)\,\sigma(E)\,f(\mu, E)\,dE
+        = \frac{\langle\sigma\rangle}{2\pi}\,f_\mathrm{eff}(\mu, E_0),
+
+    and because :math:`f` is linear in the :math:`a_\ell`, the effective shape
+    is a Legendre series with the **sigma-weighted** mean coefficients
+
+    .. math::
+        a_\ell^\mathrm{eff}(E_0) = \frac{\langle\sigma\,a_\ell\rangle}{\langle\sigma\rangle}.
+
+    This is the product fold.  :func:`resolve_coefficients` deliberately does
+    not do it -- its ``folded`` mode averages :math:`a_\ell` unweighted, the
+    factor average the chi-square scripts are built on -- so this is a separate
+    function and not a fourth mode there.  The two agree where :math:`\sigma`
+    is flat across the window and part where it is not, which above the
+    resolved range of a structural material is almost everywhere below a few
+    MeV: the counts come from the energies where :math:`\sigma` is large.
+
+    :math:`\sigma(E)` is sampled linearly between its table points, as in
+    :func:`sigma_folded`, and :math:`a_\ell(E)` under the MF4 law, as in
+    :func:`coefficients_at_energies`.  The quadrature is
+    :func:`resolution_fold_nodes` on the union of both grids.
+
+    Returns
+    -------
+    (np.ndarray, float)
+        :math:`a_1^\mathrm{eff} \ldots a_L^\mathrm{eff}` and :math:`\langle\sigma\rangle`
+        in barns.
+    """
+    return coefficients_sigma_weighted(
+        energies_ev, coefficients, xs_energies_ev, xs_values, energy_ev,
+        mode="folded", tof=tof, nbt_int_pairs=nbt_int_pairs, max_order=max_order,
     )
 
 
@@ -997,6 +1190,15 @@ def differential_xs_vs_energy(
         this function knows the energies the values have to line up with.
         Everything downstream (the sigma modes, the frame jacobian, the units)
         is the same either way, which is why both representations meet here.
+    xs_mode
+        ``'nominal'``, ``'binavg'`` or ``'folded'``.  The two averaged readings
+        average the product :math:`\sigma(E)\,f(\mu, E)` over the window, which
+        is what a detector at a fixed angle counts (:func:`product_reading_nodes`);
+        ``sigma`` in the result is then :math:`\langle\sigma\rangle`.  A bin is
+        the MF4 bin of the output energy.  Until October 2026 the two factors were
+        averaged separately, which parts from this wherever :math:`\sigma` has
+        structure inside the window.  Pair a fold with
+        :func:`dsigma_vs_energy_grid` for ``query_energies_ev``.
 
     Returns
     -------
@@ -1031,44 +1233,83 @@ def differential_xs_vs_energy(
         out_e = np.asarray(query_energies_ev, dtype=float)
         out_e = out_e[(out_e >= grid[0]) & (out_e <= grid[-1])]
 
-    # 3. f(mu_native, E) for every energy.
-    if pdf_at_energies is not None:
-        # The section holds the distribution; ask it, and never build the
-        # expansion at all.
-        pdf = np.asarray(pdf_at_energies(mu_native, out_e), dtype=float).ravel()
-        if pdf.size != out_e.size:
-            raise ValueError(
-                f"pdf_at_energies returned {pdf.size} values for {out_e.size} energies"
+    # 3. f(mu_native, E) at any set of energies.
+    def pdf_at(energies: np.ndarray, on_grid: bool = False) -> np.ndarray:
+        if pdf_at_energies is not None:
+            # The section holds the distribution; ask it, and never build the
+            # expansion at all.
+            values = np.asarray(pdf_at_energies(mu_native, energies), dtype=float).ravel()
+            if values.size != energies.size:
+                raise ValueError(
+                    f"pdf_at_energies returned {values.size} values for {energies.size} energies"
+                )
+            return values
+        if on_grid:
+            return pdf_on_grid()
+        if linear_in_y:
+            # f is linear in the a_l, and a law linear in y commutes with a
+            # linear combination: interpolating f(mu, E) itself is exact, and
+            # costs one row where the coefficients cost L. A fold reads ~200
+            # energies per output point, so this is most of its time.
+            return np.asarray(
+                interpolate_1d(grid, pdf_on_grid(), pairs, energies, out_of_range="hold"),
+                dtype=float,
             )
-    else:
+        return legendre_sum(coefficients_at_energies(
+            grid, coefficients, energies, nbt_int_pairs=nbt_int_pairs, max_order=max_order
+        ))
+
+    def legendre_sum(coeffs: np.ndarray) -> np.ndarray:
         # One Legendre basis, reused across the sweep.
-        if query_energies_ev is None:
-            coeffs = _as_coefficient_matrix(coefficients, grid.size, max_order)
-        else:
-            coeffs = coefficients_at_energies(
-                grid, coefficients, out_e, nbt_int_pairs=nbt_int_pairs, max_order=max_order
-            )
         basis = legendre_basis(np.array([mu_native]), coeffs.shape[0])[:, 0]
         orders = np.arange(1, coeffs.shape[0] + 1)
-        pdf = 0.5 * basis[0] + 0.5 * ((2 * orders + 1) * basis[1:]) @ coeffs
+        return 0.5 * basis[0] + 0.5 * ((2 * orders + 1) * basis[1:]) @ coeffs
 
-    # 4. sigma(E) under the requested reconstruction mode.
+    grid_pdf: list = []
+
+    def pdf_on_grid() -> np.ndarray:
+        if not grid_pdf:
+            grid_pdf.append(legendre_sum(_as_coefficient_matrix(coefficients, grid.size, max_order)))
+        return grid_pdf[0]
+
+    pairs = list(nbt_int_pairs) if nbt_int_pairs else [(grid.size, 2)]
+    # INT 1-3 (histogram, lin-lin, lin-log) interpolate y linearly.
+    linear_in_y = all(int(law) in (1, 2, 3) for _, law in pairs)
+
+    has_xs = xs_energies_ev is not None and xs_values is not None and len(xs_values) > 0
+
+    # 4a. An averaged reading: <sigma f> over the window, as one quantity.
+    averaged = (xs_mode == "folded" and tof is not None) or xs_mode == "binavg"
+    if averaged and has_xs:
+        sigma, folded_product = _sigma_weighted_average_at_mu(
+            np.asarray(xs_energies_ev, dtype=float),
+            np.asarray(xs_values, dtype=float),
+            grid,
+            out_e,
+            xs_mode,
+            tof,
+            pdf_at,
+        )
+        values = differential_xs_factor(folded_product, per_steradian) * jacobian
+        return {
+            "energies": out_e,
+            "values": values,
+            "sigma": sigma,
+            "mu_requested": float(mu),
+            "mu_native": mu_native,
+            "jacobian": jacobian,
+            "frame": mu_frame,
+            "native_frame": native_frame,
+            "y_unit": "barn/sr" if per_steradian else "barn",
+            "xs_mode": xs_mode,
+        }
+
+    pdf = pdf_at(out_e, on_grid=query_energies_ev is None)
+
+    # 4b. Nominal: sigma(E) at the energy.
     sigma = None
-    if xs_energies_ev is not None and xs_values is not None and len(xs_values):
-        if xs_mode == "binavg":
-            # Bin edges come from the MF4 grid, so each output energy borrows
-            # the bin of the MF4 point it falls in.
-            idx = np.clip(np.searchsorted(grid, out_e), 0, grid.size - 1)
-            sigma = np.array([
-                sigma_bin_averaged(
-                    xs_energies_ev, xs_values, *bin_edges_for_energy(grid, int(i)), weighting
-                )
-                for i in idx
-            ])
-        elif xs_mode == "folded" and tof is not None:
-            sigma = np.atleast_1d(sigma_folded(xs_energies_ev, xs_values, out_e, tof))
-        else:
-            sigma = np.atleast_1d(sigma_nominal(xs_energies_ev, xs_values, out_e))
+    if has_xs:
+        sigma = np.atleast_1d(sigma_nominal(xs_energies_ev, xs_values, out_e))
 
     if sigma is None:
         values = pdf
@@ -1091,3 +1332,91 @@ def differential_xs_vs_energy(
         "y_unit": y_unit,
         "xs_mode": xs_mode,
     }
+
+
+def _sigma_weighted_average_at_mu(
+    xs_grid: np.ndarray,
+    xs: np.ndarray,
+    mf4_grid: np.ndarray,
+    energies_ev: np.ndarray,
+    mode: XsMode,
+    tof: Optional[TofResolution],
+    pdf_at: Callable[[np.ndarray], np.ndarray],
+) -> Tuple[np.ndarray, np.ndarray]:
+    r""":math:`\langle\sigma\rangle` and :math:`\langle\sigma f\rangle` at one cosine, per energy.
+
+    :func:`coefficients_sigma_weighted` at a single :math:`\mu`, for a whole
+    sweep at once.  Every energy gets its own :func:`product_reading_nodes` on
+    the union of the two grids (a bin is the MF4 bin of the energy); the nodes
+    of all energies are concatenated so :math:`\sigma` and :math:`f` are each
+    evaluated in one vectorised call, and the window sums are segment sums.
+    """
+    node_parts, weight_parts = [], []
+    for e0 in energies_ev:
+        edges = None
+        if mode == "binavg":
+            i = int(np.clip(np.searchsorted(mf4_grid, e0), 0, mf4_grid.size - 1))
+            edges = bin_edges_for_energy(mf4_grid, i)
+        nodes, weights = product_reading_nodes(
+            float(e0), mode, (xs_grid, mf4_grid), tof=tof, bin_edges=edges,
+        )
+        node_parts.append(nodes)
+        weight_parts.append(weights)
+    if not node_parts:
+        return np.zeros(0), np.zeros(0)
+    counts = np.array([n.size for n in node_parts])
+    starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
+    nodes = np.concatenate(node_parts)
+    weights = np.concatenate(weight_parts)
+
+    sigma_n = (
+        np.interp(nodes, xs_grid, xs) if mode == "folded"
+        else np.atleast_1d(interpolate_log_log(xs_grid, xs, nodes))
+    )
+    f_n = pdf_at(nodes)
+    sigma_avg = np.add.reduceat(weights * sigma_n, starts)
+    product = np.add.reduceat(weights * sigma_n * f_n, starts)
+    return sigma_avg, product
+
+
+def dsigma_vs_energy_grid(
+    xs_energies_ev: Sequence[float],
+    mf4_energies_ev: Sequence[float],
+    *,
+    tof: Optional[TofResolution] = None,
+) -> np.ndarray:
+    r"""The incident energies a :math:`d\sigma/d\Omega(E)` curve is drawn on.
+
+    :math:`d\sigma/d\Omega(E) = \sigma(E)\,f(\mu, E)/2\pi`, and :math:`\sigma`
+    has structure on a far finer grid than the few hundred energies MF4
+    tabulates.  Drawn on the MF4 grid alone, the curve steps over every
+    resonance between two of them.
+
+    - **Nominal** (``tof=None``): the union of both grids, inside the MF4
+      range.  Between two points both factors are the file's own
+      interpolants, so this grid loses nothing.
+    - **Folded**: the same union, thinned so consecutive points are at least
+      :math:`\sigma_E/4` apart.  The folded curve is smooth on the scale of
+      the kernel, so a point every quarter width resolves it, and where the
+      table is coarser than that every table point is kept.
+    """
+    xs_grid = np.asarray(xs_energies_ev, dtype=float)
+    mf4 = np.asarray(mf4_energies_ev, dtype=float)
+    if mf4.size == 0:
+        return np.zeros(0)
+    lo, hi = float(mf4[0]), float(mf4[-1])
+    inside = xs_grid[(xs_grid >= lo) & (xs_grid <= hi)]
+    union = np.unique(np.concatenate([mf4, inside]))
+    if tof is None or union.size < 3:
+        return union
+
+    step = np.atleast_1d(np.asarray(tof.sigma_e_mev(union / 1e6), dtype=float)) * 1e6 / 4.0
+    keep = np.zeros(union.size, dtype=bool)
+    keep[0] = True
+    next_allowed = union[0] + step[0]
+    for i in range(1, union.size - 1):
+        if union[i] >= next_allowed:
+            keep[i] = True
+            next_allowed = union[i] + step[i]
+    keep[-1] = True
+    return union[keep]

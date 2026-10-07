@@ -1,0 +1,1498 @@
+JEFF-4.0 Incident Neutron File                                       1 0  0    0
+ 7.418600+4 1.843570+2          1          0          0          17443 1451    1
+ 0.000000+0 0.000000+0          0          0          0          67443 1451    2
+ 1.000000+0 1.500000+8          0          0         10          87443 1451    3
+ 0.000000+0 0.000000+0          0          0        645          57443 1451    4
+ 74-W -186 IAEA       Eval090806                                  7443 1451    5
+ NDS 148, 1 (2018)    DIST-FEB18                       20111222   7443 1451    6
+----ENDF/B-VIII.0     MATERIAL 7443                               7443 1451    7
+-----INCIDENT NEUTRON DATA                                        7443 1451    8
+------ENDF-6 FORMAT                                               7443 1451    9
+***********************************************************       7443 1451   10
+ 74-W- 186 ORNL Resonance Evaluation Including Covariance         7443 1451   11
+ (ORNL AUG 2014)                                                  7443 1451   12
+                                                                  7443 1451   13
+ L. Leal, M. Pigni, K. Guber, D. Wiarda, and G. Arbanas           7443 1451   14
+                                                                  7443 1451   15
+ W-186 resolved resonance parameter evaluation was done in the    7443 1451   16
+energy range form 1e-5 eV to 10 keV with the SAMMY code[ref1].    7443 1451   17
+Capture and transmission measurements for enriched W-186 and      7443 1451   18
+natural tungsten were used in the evaluation. The measurements    7443 1451   19
+were done at the Oak Ridge Linear Accelerator (ORELA)[ref2] and   7443 1451   20
+at the Geel Linear Accelerator (GELINA), Belgium[ref3]. Neutron   7443 1451   21
+transmission and capture data were measured in the energy range   7443 1451   22
+from 20 eV to 10 keV.                                             7443 1451   23
+ Thermal cross section[ref4] data available in the EXFOR library  7443 1451   24
+were also used in the evaluation.                                 7443 1451   25
+                                                                  7443 1451   26
+ Resonance parameter covariance matrices were also obtained in    7443 1451   27
+the SAMMY evaluation process in the energy region 1e-5 eV-10 keV. 7443 1451   28
+The RML formalist (LRF=7) was used for the resonance parameters   7443 1451   29
+and the compact formalism (LCOMP=2) for the covariance matrix.    7443 1451   30
+  Thermal cross section and uncertainty calculated with SAMMY and 7443 1451   31
+the PUFF codes are compared with the values listed in the ATLAS   7443 1451   32
+of Neutron Resoances in the table below. Also shown is the        7443 1451   33
+capture resonance integral, Coherent scattering length and the    7443 1451   34
+effective radius R'.                                              7443 1451   35
+                                                                  7443 1451   36
+    Cross Section        ORNL (b)           Atlas (b)             7443 1451   37
+    -------------        --------           ---------             7443 1451   38
+       Total         37.97 +/- 0.59             -                 7443 1451   39
+       Capt          37.88 +/- 0.59        38.1  +/-  0.5         7443 1451   40
+       Scat           0.09 +/- 0.02         0.07 +/-  0.01        7443 1451   41
+                                                                  7443 1451   42
+ Capture Res. Int.  476.01 +/- 7.43       480.0  +/- 15.0         7443 1451   43
+                                                                  7443 1451   44
+        R'            7.75 fm               7.64 +/-  0.05 fm     7443 1451   45
+                                                                  7443 1451   46
+        b_coher      -0.76 fm              -0.73 +/-  0.06 fm     7443 1451   47
+                                                                  7443 1451   48
+                                                                  7443 1451   49
+ Average cross section and related uncertainties calculated in    7443 1451   50
+energy group 0.0253 eV - 0.3 eV are listed in the table below.    7443 1451   51
+                                                                  7443 1451   52
+            Cross Section                Average Value (b)        7443 1451   53
+            -------------                -----------------        7443 1451   54
+                Total                 36.37 +/- 0.57 ( 1.6%)      7443 1451   55
+                Capt                  36.28 +/- 0.57 ( 1.6%)      7443 1451   56
+                Scat                   0.09 +/- 0.02 (28.2%)      7443 1451   57
+                                                                  7443 1451   58
+ [ref 1] N. M. Larson,"Updated Users' Guide for SAMMY," Oak Ridge 7443 1451   59
+            National Laboratory report  ORNL/TM-9179/R6 (2003).   7443 1451   60
+ [ref 2] K. Guber, private communication (2012).                  7443 1451   61
+ [ref 3] C. Lampoudis, K. Guber, S. Kopecky, et al.,              7443 1451   62
+         J. Korean Phys. Soc. 59, 1860 (2010).                    7443 1451   63
+ [ref 4] S. J. Friesenhahn, E. Haddad, F.H. Froehner, et al.,     7443 1451   64
+         Nucl. Sci. Eng. 26, 487 (1966).                          7443 1451   65
+                                                                  7443 1451   66
+ ***************************************************              7443 1451   67
+ FAST ENERGY REGION                                               7443 1451   68
+ Authors: R. Capote, A. Trkov, E. Soukhovitskii                   7443 1451   69
+                                                                  7443 1451   70
+ CROSS-SECTION EVALUATION PROCEDURE                               7443 1451   71
+                                                                  7443 1451   72
+ Adopted procedure is based on careful theoretical                7443 1451   73
+ analysis utilizing available experimental data and               7443 1451   74
+ nuclear reaction model calculations.                             7443 1451   75
+                                                                  7443 1451   76
+ Available experimental data were interpreted  using              7443 1451   77
+ nuclear reaction model code EMPIRE-2.19b35 by                    7443 1451   78
+ M. Herman et al [He01, He02]. This code integrates               7443 1451   79
+ into a single system a number of important modules               7443 1451   80
+ and features:                                                    7443 1451   81
+                                                                  7443 1451   82
+ - Spherical and deformed Optical Model including                 7443 1451   83
+   coupled-channels (ECIS03 by J. Raynal)                         7443 1451   84
+ - Hauser-Feshbach statistical model including                    7443 1451   85
+   HRTW width fluctuation correction                              7443 1451   86
+ - Quantum-mechanical MSD TUL model (codes ORION &                7443 1451   87
+   TRISTAN by H. Lenske), and MSC NVWY model                      7443 1451   88
+ - Exciton model with angular momentum coupling                   7443 1451   89
+   (code DEGAS by E. Betak and P. Oblozinsky) that                7443 1451   90
+   represents a good approximation to the DSD model               7443 1451   91
+ - Exciton model with Iwamoto-Harada cluster                      7443 1451   92
+   emission and Kalbach systematic angular distr.                 7443 1451   93
+   (code PCROSS by R.Capote et al)                                7443 1451   94
+ - Complete gamma-ray cascade after emission of                   7443 1451   95
+   each particle, including realistic treatment of                7443 1451   96
+   discrete transitions                                           7443 1451   97
+ - Access to OM segment of the RIPL-2 library [Ri03]              7443 1451   98
+ - Built-in input parameter files, such as masses,                7443 1451   99
+   level density, discrete levels, fission barriers               7443 1451  100
+   and gamma strength functions  based on the RIPL-2              7443 1451  101
+   library [Ri03]                                                 7443 1451  102
+ - Automatic retrieval of experimental data from the              7443 1451  103
+   EXFOR/CSISRS library                                           7443 1451  104
+ - ENDF-6 formatting (code EMPEND by A. Trkov)                    7443 1451  105
+   coupled to graphical presentation capabilities                 7443 1451  106
+   (code ZVView by V. Zerkin) through the chain of                7443 1451  107
+   PrePro codes by R. Cullen                                      7443 1451  108
+ - Checking codes (CHECKR, FIZCON, PSYCHE)                        7443 1451  109
+ - Support for NJOY                                               7443 1451  110
+                                                                  7443 1451  111
+ PARAMETERIZATIONS                                                7443 1451  112
+                                                                  7443 1451  113
+ Following models and parameters were used in the                 7443 1451  114
+ current evaluation:                                              7443 1451  115
+                                                                  7443 1451  116
+ Discrete levels were taken from the RIPL-2 level                 7443 1451  117
+ file, based on the 1998 version of ENSDF.                        7443 1451  118
+ EMPIRE-specific level densities                                  7443 1451  119
+ Spin-cut off parameter for dynamic LD reduced by factor  0.500   7443 1451  120
+ Exciton model calculations with code PCROSS                      7443 1451  121
+ Cluster emission in terms of the Iwamoto-Harada model            7443 1451  122
+ Kalbach systematics angular distributions (see RIPL-1)           7443 1451  123
+ Mean free path parameter in PCROSS set to  1.3 (Recommended ~ 1.57443 1451  124
+ Max hole number in PCROSS set to 0.30*sqrt(g*U)                  7443 1451  125
+    being U the CN excitation energy                              7443 1451  126
+ Width fluctuations calculated within HRTW  up to 3.00 MeV        7443 1451  127
+ Exclusive spectra available up to emission loop #  1             7443 1451  128
+ Shell corrections according to Myers-Swiatecki                   7443 1451  129
+ PE emission width of ejectile 0 from 187W  multiplied by  3.000  7443 1451  130
+ PE emission width of ejectile 2 from 187W  multiplied by  1.100  7443 1451  131
+ Emission width of ejectile 0 from 187W  multiplied by   1.600    7443 1451  132
+ Emission width of ejectile 2 from 187W  multiplied by   1.760    7443 1451  133
+ Emission width of ejectile 3 from 187W  multiplied by   1.600    7443 1451  134
+ Emission width of ejectile 3 from 186Ta multiplied by   0.200    7443 1451  135
+ Emission width of ejectile 3 from 185Ta multiplied by   0.050    7443 1451  136
+ Emission width of ejectile 3 from 184Ta multiplied by   0.050    7443 1451  137
+ Emission width of ejectile 3 from 183Ta multiplied by   0.050    7443 1451  138
+ Emission width of ejectile 3 from 182Ta multiplied by   0.050    7443 1451  139
+ Emission width of ejectile 3 from 181Ta multiplied by   0.050    7443 1451  140
+ Emission width of ejectile 3 from 180Ta multiplied by   0.050    7443 1451  141
+ Emission width of ejectile 3 from 179Ta multiplied by   0.050    7443 1451  142
+ Emission width of ejectile 3 from 178Ta multiplied by   0.050    7443 1451  143
+ Emission width of ejectile 3 from 177Ta multiplied by   0.050    7443 1451  144
+ Emission width of ejectile 3 from 176Ta multiplied by   0.050    7443 1451  145
+ Emission width of ejectile 3 from 186W  multiplied by   0.200    7443 1451  146
+ Emission width of ejectile 3 from 185W  multiplied by   0.050    7443 1451  147
+ Emission width of ejectile 3 from 184W  multiplied by   0.030    7443 1451  148
+ Emission width of ejectile 3 from 183W  multiplied by   0.030    7443 1451  149
+ Emission width of ejectile 3 from 182W  multiplied by   0.030    7443 1451  150
+ Emission width of ejectile 3 from 181W  multiplied by   0.030    7443 1451  151
+ Emission width of ejectile 3 from 180W  multiplied by   0.030    7443 1451  152
+ Emission width of ejectile 3 from 179W  multiplied by   0.030    7443 1451  153
+ Emission width of ejectile 3 from 178W  multiplied by   0.030    7443 1451  154
+ Emission width of ejectile 3 from 177W  multiplied by   0.030    7443 1451  155
+ Emission width of ejectile 3 from 176W  multiplied by   0.030    7443 1451  156
+ Emission width of ejectile 1 from 185W  multiplied by   1.150    7443 1451  157
+ Emission width of ejectile 1 from 184W  multiplied by   1.150    7443 1451  158
+ Emission width of ejectile 1 from 183W  multiplied by   1.150    7443 1451  159
+ Emission width of ejectile 1 from 182W  multiplied by   1.150    7443 1451  160
+ Emission width of ejectile 1 from 181W  multiplied by   1.150    7443 1451  161
+ Emission width of ejectile 1 from 180W  multiplied by   1.150    7443 1451  162
+ Emission width of ejectile 1 from 179W  multiplied by   1.150    7443 1451  163
+ Emission width of ejectile 1 from 178W  multiplied by   1.150    7443 1451  164
+ Emission width of ejectile 1 from 177W  multiplied by   1.150    7443 1451  165
+ Coupled Channels (ECIS) used for direct inelastic scattering     7443 1451  166
+ Coupled Channels (ECIS) used for Tl calculations in inelastic cha7443 1451  167
+ Total cross section was scaled by factor  1.300                  7443 1451  168
+ E1 strength function set to MLO1                                 7443 1451  169
+ GDR parameters from RIPL-2/Exp.data+Plujko systematics           7443 1451  170
+                                                                  7443 1451  171
+                       Use of preequilibrium models               7443 1451  172
+                       ----------------------------               7443 1451  173
+                                                                  7443 1451  174
+ Exit channel      ECIS    MSD    MSC   DEGAS   HMS   PCROSS      7443 1451  175
+                                                                  7443 1451  176
+ n to levels         1      0      0      0      0      0         7443 1451  177
+ n to continuum      0      0      0      0      0      1         7443 1451  178
+ p to levels         0      0      0      0      0      0         7443 1451  179
+ p to continuum      0      0      0      0      0      1         7443 1451  180
+ g                   0      0      0      0      0      1         7443 1451  181
+ a                   0      0      0      0      0      1         7443 1451  182
+                                                                  7443 1451  183
+  Collective levels used in direct calcualtions                   7443 1451  184
+  74 186     nucleus is treated as deformed                       7443 1451  185
+                                                                  7443 1451  186
+    Ncoll  Lmax IDef  Kgs  (Def(1,j),j=2,IDef,2)                  7443 1451  187
+      68    6    6   0.0  0.197E+00 -0.920E-01 -0.110E-02         7443 1451  188
+                                                                  7443 1451  189
+  N  E[MeV]   J  pi  Nph L  K  Dyn. Def.                          7443 1451  190
+  1  0.0000  0.0  1.  0  0  0  0.100E-01                          7443 1451  191
+  2  0.1226  2.0  1.  0  0  0  0.200E-01                          7443 1451  192
+  3  0.3966  4.0  1.  0  0  0  0.200E-01                          7443 1451  193
+  4  0.7380  2.0  1.  1  2  0  0.260E-01                          7443 1451  194
+  5  0.8086  6.0  1.  0  0  0  0.200E-01                          7443 1451  195
+  7  0.8820  0.0  1.  2  0  0  0.350E-01                          7443 1451  196
+  5  0.8095  2.0  1.  0  0  0  0.260E-01                          7443 1451  197
+  6  0.8621  3.0  1.  0  0  0  0.200E-01                          7443 1451  198
+  8  0.9527  2.0 -1.  0  0  0  0.290E-01                          7443 1451  199
+  9  1.0067  2.0  1.  0  0  0  0.200E-01                          7443 1451  200
+ 10  1.0149  3.0  1.  0  0  0  0.200E-01                          7443 1451  201
+ 11  1.0307  4.0  1.  0  0  0  0.200E-01                          7443 1451  202
+ 12  1.0453  3.0 -1.  0  0  0  0.560E-01 GOR                      7443 1451  203
+ 13  1.0509  2.0  1.  0  0  0  0.250E-01 cont                     7443 1451  204
+ 14  1.1358  0.0  1.  0  0  0  0.250E-01 cont                     7443 1451  205
+ 15  1.1444  2.0  1.  0  0  0  0.270E-01 cont                     7443 1451  206
+ 16  1.2214  2.0  1.  0  0  0  0.250E-01 cont                     7443 1451  207
+ 17  1.2574  2.0  1.  0  0  0  0.220E-01 cont                     7443 1451  208
+ 18  1.2892  2.0 -1.  0  0  0  0.250E-01 cont                     7443 1451  209
+ 19  1.3311  3.0  1.  0  0  0  0.300E-01 cont                     7443 1451  210
+ 20  1.3738  2.0  1.  0  0  0  0.240E-01 cont                     7443 1451  211
+ 21  1.4500  4.0  1.  0  0  0  0.350E-01 cont                     7443 1451  212
+ 22  1.5000  2.0  1.  0  0  0  0.250E-01 cont                     7443 1451  213
+ 23  1.6000  2.0  1.  0  0  0  0.260E-01 cont                     7443 1451  214
+ 24  1.8000  2.0  1.  0  0  0  0.260E-01 cont                     7443 1451  215
+ 25  1.9000  4.0  1.  0  0  0  0.360E-01 cont                     7443 1451  216
+ 26  2.0000  2.0  1.  0  0  0  0.260E-01 cont                     7443 1451  217
+ 27  2.1500  2.0  1.  0  0  0  0.280E-01 cont                     7443 1451  218
+ 28  2.3000  4.0  1.  0  0  0  0.370E-01 cont                     7443 1451  219
+ 29  2.4000  2.0  1.  0  0  0  0.280E-01 cont                     7443 1451  220
+ 30  2.5500  2.0  1.  0  0  0  0.250E-01 cont                     7443 1451  221
+ 31  2.7000  2.0  1.  0  0  0  0.260E-01 cont                     7443 1451  222
+ 32  2.8000  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  223
+ 33  2.9000  2.0  1.  0  0  0  0.250E-01 cont                     7443 1451  224
+ 34  3.0000  3.0 -1.  0  0  0  0.360E-01 cont                     7443 1451  225
+ 35  3.1000  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  226
+ 36  3.2000  3.0 -1.  0  0  0  0.360E-01 cont                     7443 1451  227
+ 37  3.3500  3.0 -1.  0  0  0  0.350E-01 cont                     7443 1451  228
+ 38  3.5000  3.0 -1.  0  0  0  0.360E-01 cont                     7443 1451  229
+ 39  3.7000  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  230
+ 40  3.8000  2.0  1.  0  0  0  0.280E-01 cont                     7443 1451  231
+ 41  3.9000  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  232
+ 42  4.0000  3.0 -1.  0  0  0  0.370E-01 cont                     7443 1451  233
+ 43  4.2000  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  234
+ 44  4.3500  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  235
+ 45  4.5000  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  236
+ 46  4.6000  3.0 -1.  0  0  0  0.360E-01 cont                     7443 1451  237
+ 47  4.8000  2.0  1.  0  0  0  0.300E-01 cont                     7443 1451  238
+ 48  5.0000  3.0 -1.  0  0  0  0.360E-01 cont                     7443 1451  239
+ 49  5.2000  2.0  1.  0  0  0  0.250E-01 cont                     7443 1451  240
+ 50  5.4000  4.0  1.  0  0  0  0.350E-01 cont                     7443 1451  241
+ 51  5.4700  3.0 -1.  0  0  0  0.310E-01 lGOR                     7443 1451  242
+ 52  5.6000  2.0  1.  0  0  0  0.270E-01 cont                     7443 1451  243
+ 53  5.8000  3.0 -1.  0  0  0  0.300E-01 cont                     7443 1451  244
+ 54  6.0000  2.0  1.  0  0  0  0.250E-01 cont                     7443 1451  245
+ 55  6.2000  4.0  1.  0  0  0  0.300E-01 cont                     7443 1451  246
+ 56  6.4000  3.0 -1.  0  0  0  0.250E-01 cont                     7443 1451  247
+ 57  6.6000  2.0  1.  0  0  0  0.200E-01 cont                     7443 1451  248
+ 58  6.8000  2.0  1.  0  0  0  0.200E-01 cont                     7443 1451  249
+ 59  7.0000  3.0 -1.  0  0  0  0.200E-01 cont                     7443 1451  250
+ 60  7.3000  2.0  1.  0  0  0  0.120E-01 cont                     7443 1451  251
+ 61  7.6000  2.0  1.  0  0  0  0.120E-01 cont                     7443 1451  252
+ 62  8.0000  3.0 -1.  0  0  0  0.200E-01 cont                     7443 1451  253
+ 63  8.2000  4.0  1.  0  0  0  0.300E-01 cont                     7443 1451  254
+ 64  8.4000  3.0 -1.  0  0  0  0.250E-01 cont                     7443 1451  255
+ 65  8.6000  2.0  1.  0  0  0  0.170E-01 cont                     7443 1451  256
+ 66  8.8000  2.0  1.  0  0  0  0.180E-01 cont                     7443 1451  257
+ 67  9.0000  2.0  1.  0  0  0  0.150E-01 cont                     7443 1451  258
+                                                                  7443 1451  259
+                                                                  7443 1451  260
+ Inelastic o. m. parameters: RIPL catalog number         1482     7443 1451  261
+ Neutron   o. m. parameters: RIPL catalog number         1482     7443 1451  262
+ Proton    o. m. parameters: RIPL catalog number         4432     7443 1451  263
+ Alpha     o. m. parameters: RIPL catalog number         9600     7443 1451  264
+                                                                  7443 1451  265
+          B i n d i n g    e n e r g i e s                        7443 1451  266
+                                                                  7443 1451  267
+    Nucleus          1n        1p        4He                      7443 1451  268
+                                                                  7443 1451  269
+  74-W -187         5.467     8.586    -0.954                     7443 1451  270
+  74-W -186         7.194     8.404    -1.124                     7443 1451  271
+  74-W -185         5.753     7.837    -1.601                     7443 1451  272
+  74-W -184         7.411     7.699    -1.659                     7443 1451  273
+  74-W -183         6.191     7.222    -1.682                     7443 1451  274
+  74-W -182  <      8.064     7.094    -1.774                     7443 1451  275
+  74-W -181  <      6.681     6.607    -2.212                     7443 1451  276
+  74-W -180  <      8.412     6.570    -2.516                     7443 1451  277
+  74-W -179  <      6.931     6.058    -2.763                     7443 1451  278
+  74-W -178  <      8.790     6.007    -2.985                     7443 1451  279
+  74-W -177  <      7.111     5.538    -3.136                     7443 1451  280
+  74-W -176  <      9.171     5.482    -3.287                     7443 1451  281
+  74-W -175  <      7.502     4.865    -3.425                     7443 1451  282
+  74-W -174  <      9.629     4.847    -3.639                     7443 1451  283
+  73-Ta-186         5.285     7.503    -0.687                     7443 1451  284
+  73-Ta-185         6.627     7.185    -0.919                     7443 1451  285
+  73-Ta-184         5.615     6.843    -1.422                     7443 1451  286
+  73-Ta-183         6.934     6.525    -1.346                     7443 1451  287
+  73-Ta-182  <      6.063     6.308    -1.488                     7443 1451  288
+  73-Ta-181  <      7.577     5.940    -1.526                     7443 1451  289
+  73-Ta-180  <      6.644     5.751    -2.031                     7443 1451  290
+  73-Ta-179  <      7.900     5.206    -2.387                     7443 1451  291
+  73-Ta-178  <      6.880     4.932    -2.621                     7443 1451  292
+  73-Ta-177  <      8.321     4.429    -2.740                     7443 1451  293
+  73-Ta-176  <      7.055     4.273    -2.846                     7443 1451  294
+  73-Ta-175  <      8.554     3.927    -2.922                     7443 1451  295
+  73-Ta-174  <      7.484     4.012    -2.881                     7443 1451  296
+  73-Ta-173  <      9.190     3.488    -3.061                     7443 1451  297
+  72-Hf-185  <      4.967     9.515    -0.025                     7443 1451  298
+  72-Hf-184  <      6.285     9.266    -0.479                     7443 1451  299
+  72-Hf-183         5.297     8.853    99.000                     7443 1451  300
+  72-Hf-182  <      6.717     8.609    -1.216                     7443 1451  301
+  72-Hf-181  <      5.695     8.016    -1.154                     7443 1451  302
+  72-Hf-180  <      7.388     8.012    -1.282                     7443 1451  303
+  72-Hf-179  <      6.099     7.416    -1.806                     7443 1451  304
+  72-Hf-178  <      7.626     7.342    -2.083                     7443 1451  305
+  72-Hf-177  <      6.377     6.788    -2.245                     7443 1451  306
+  72-Hf-176  <      8.165     6.699    -2.255                     7443 1451  307
+  72-Hf-175  <      6.709     6.200    -2.400                     7443 1451  308
+  72-Hf-174  <      8.639     6.252    -2.495                     7443 1451  309
+  72-Hf-173  <      6.960     5.828    -2.664                     7443 1451  310
+  72-Hf-172  <      9.033     5.847    -2.757                     7443 1451  311
+  71-Lu-184  <      4.718     7.269    -0.485                     7443 1451  312
+  71-Lu-183  <      5.872     6.712     0.347                     7443 1451  313
+  71-Lu-182  <      5.053     8.165     0.031                     7443 1451  314
+  71-Lu-181  <      6.124     7.625    -0.304                     7443 1451  315
+  71-Lu-180  <      5.691     7.560    -0.265                     7443 1451  316
+  71-Lu-179  <      6.792     6.655    -0.827                     7443 1451  317
+  71-Lu-178  <      6.025     6.642    -1.102                     7443 1451  318
+  71-Lu-177  <      7.072     6.184    -1.445                     7443 1451  319
+  71-Lu-176  <      6.288     5.976    -1.568                     7443 1451  320
+  71-Lu-175  <      7.666     5.510    -1.620                     7443 1451  321
+  71-Lu-174  <      6.761     5.308    -1.800                     7443 1451  322
+  71-Lu-173  <      8.215     4.914    -1.968                     7443 1451  323
+  71-Lu-172  <      6.979     4.719    -2.150                     7443 1451  324
+  71-Lu-171  <      8.595     4.354    -2.289                     7443 1451  325
+  72-Hf-171  <      7.288     5.409    -2.739                     7443 1451  326
+  72-Hf-170  <      9.477     5.425    -2.950                     7443 1451  327
+  71-Lu-170  <      7.304     4.229    -2.157                     7443 1451  328
+  71-Lu-169  <      9.049     3.792    -2.434                     7443 1451  329
+  70-Yb-181  <      4.513     9.055     0.767                     7443 1451  330
+  70-Yb-180  <      6.059    10.092     0.524                     7443 1451  331
+  70-Yb-179  <      4.786     9.589     0.338                     7443 1451  332
+  70-Yb-178  <      6.779     9.521     0.279                     7443 1451  333
+  70-Yb-177  <      5.567     8.905    -0.236                     7443 1451  334
+  70-Yb-176  <      6.864     8.467    -0.571                     7443 1451  335
+  70-Yb-175  <      5.822     8.120    -0.600                     7443 1451  336
+  70-Yb-174  <      7.464     7.980    -0.740                     7443 1451  337
+  70-Yb-173  <      6.367     7.465    -0.946                     7443 1451  338
+  70-Yb-172  <      8.020     7.334    -1.310                     7443 1451  339
+  70-Yb-171  <      6.614     6.800    -1.559                     7443 1451  340
+  70-Yb-170  <      8.470     6.779    -1.737                     7443 1451  341
+  70-Yb-169  <      6.867     6.342    99.000                     7443 1451  342
+  70-Yb-168  <      9.051     6.315    -1.951                     7443 1451  343
+  69-Tm-180  <      5.550     9.139     1.555                     7443 1451  344
+  69-Tm-179  <      5.556     7.580     1.224                     7443 1451  345
+  69-Tm-178  <      4.718     8.901     1.038                     7443 1451  346
+  69-Tm-177  <      6.163     8.453     0.795                     7443 1451  347
+  69-Tm-176  <      5.129     8.163     0.402                     7443 1451  348
+  69-Tm-175  <      6.517     7.761     0.215                     7443 1451  349
+  69-Tm-174  <      5.682     7.508     0.050                     7443 1451  350
+  69-Tm-173  <      6.949     7.058    -0.120                     7443 1451  351
+  69-Tm-172  <      6.236     6.944    -0.276                     7443 1451  352
+  69-Tm-171  <      7.486     6.390    -0.649                     7443 1451  353
+  69-Tm-170  <      6.593     6.162    -0.851                     7443 1451  354
+  69-Tm-169  <      8.033     5.572    -1.200                     7443 1451  355
+  69-Tm-168  <      6.840     5.310    -1.245                     7443 1451  356
+  69-Tm-167  <      8.727     4.906    -1.411                     7443 1451  357
+                                                                  7443 1451  358
+  < indicates inclusive spectra only                              7443 1451  359
+                                                                  7443 1451  360
+ RESULTS                                                          7443 1451  361
+                                                                  7443 1451  362
+ MF=3 Neutron cross sections                                      7443 1451  363
+      EMPIRE calculations were adopted for:                       7443 1451  364
+    MT=1 Total                                                    7443 1451  365
+    MT=2 Elastic scattering                                       7443 1451  366
+    MT=4, 51-91 Inelastic scattering                              7443 1451  367
+    MT=102 Capture                                                7443 1451  368
+    MT=16   (n,2n)                                                7443 1451  369
+    MT=17   (n,3n)                                                7443 1451  370
+    MT=18   (n,f)                                                 7443 1451  371
+    MT=22   (n,na)                                                7443 1451  372
+    MT=24   (n,2na)                                               7443 1451  373
+    MT=28   (n,np)                                                7443 1451  374
+    MT=45   (n,npa)                                               7443 1451  375
+    MT=103, 600-649 (n,p)                                         7443 1451  376
+    MT=107, 800-849 (n,a)                                         7443 1451  377
+    MT=112  (n,pa)                                                7443 1451  378
+                                                                  7443 1451  379
+ MF=4 Angular distributions of secondary neutrons                 7443 1451  380
+      EMPIRE calculations were adopted                            7443 1451  381
+                                                                  7443 1451  382
+ MF=6 Energy-angle distributions of reaction                      7443 1451  383
+      products; EMPIRE calculations were adopted                  7443 1451  384
+                                                                  7443 1451  385
+ MF=12 Transition probability arrays for photon                   7443 1451  386
+       production; taken from the RIPL-2                          7443 1451  387
+                                                                  7443 1451  388
+ MF=14 Photon angular distributions                               7443 1451  389
+       isotropic distributions were assumed                       7443 1451  390
+                                                                  7443 1451  391
+ REFERENCES                                                       7443 1451  392
+                                                                  7443 1451  393
+ [He01] M. Herman  EMPIRE-II Statistical Model                    7443 1451  394
+    Code for Nuclear Reaction Calculations, in                    7443 1451  395
+    Nuclear Reaction Data and Nuclear Reactors,                   7443 1451  396
+    eds. N.Paver, M. Herman and A.Gandini, ICTP                   7443 1451  397
+    Lecture Notes 5 (ICTP Trieste, 2001) pp.137.                  7443 1451  398
+                                                                  7443 1451  399
+ [He02] M. Herman, R. Capote, P. Oblozinsky,                      7443 1451  400
+        M. Sin, A. Trkov, A. Ventura, V. Zerkin                   7443 1451  401
+    Recent Development of the Nuclear                             7443 1451  402
+    Reaction Model Code EMPIRE,  International                    7443 1451  403
+    Conference on Nuclear Data for Science &                      7443 1451  404
+    Technology - ND2004 September 26 - October 1,                 7443 1451  405
+    2004, Santa Fe, New Mexico.                                   7443 1451  406
+                                                                  7443 1451  407
+ [Ri03]                                                           7443 1451  408
+    Handbook for calculations of nuclear reaction                 7443 1451  409
+    data: Reference Input Parameter Library II.                   7443 1451  410
+    IAEA, Vienna 2005. Available online at                        7443 1451  411
+    http://www-nds.iaea.org/RIPL-2/                               7443 1451  412
+                                                                  7443 1451  413
+ ************************************************                 7443 1451  414
+                                                                  7443 1451  415
+                                                                  7443 1451  416
+ EVALUATION PROCEDURE OF COVARIANCE DATA ABOVE RESONANCE RANGE    7443 1451  417
+                                                                  7443 1451  418
+ The GANDR System is employed to generate covariance matrix of the7443 1451  419
+ cross sections of W-186 based on the new INDL file produced as a 7443 1451  420
+ result of an IAEA Data Development Project.                      7443 1451  421
+                                                                  7443 1451  422
+ The prior covariance matrix (above 100 keV) is generated by the  7443 1451  423
+ Monte Carlo technique. The final covariance matrix is the result 7443 1451  424
+ of a GANDR calculation after introducing a selected set of       7443 1451  425
+ experimental data as follows. Only the EXFOR entries preceeded   7443 1451  426
+ by the sequence number are included in the fitting procedure.    7443 1451  427
+ Reasons for exclusion or modification are given in the comments. 7443 1451  428
+                                                                  7443 1451  429
+ (n,tot) Total                                                    7443 1451  430
+ ------------                                                     7443 1451  431
+    Author               Year EXFOR No.  Comment                  7443 1451  432
+ ---------------------------------------------------------------  7443 1451  433
+  - W.SELOVE             (51) X12168  6  Old                      7443 1451  434
+  2 J.F.WHALEN,ET.AL.    (82) X11540 19  Add 0.1 b uncertainty    7443 1451  435
+  3 K.KNOPF,ET.AL.       (87) X22045 10  Only 143 keV point       7443 1451  436
+  4 P.T.GUENTHER,ET.AL.  (82) X10803 19                           7443 1451  437
+  - R.C.MARTIN,ET.AL.    (67) X12159  5  Old and discrepant       7443 1451  438
+  6 D.G.FOSTER JR,ET.AL. (71) X10047107  <10 MeV                  7443 1451  439
+  7 D.G.FOSTER JR,ET.AL. (71) X10047107  >10 MeV                  7443 1451  440
+  8 F.S.Dietrich,ET.AL.  (03) X13887  4                           7443 1451  441
+  - A.N.DJUMIN,ET.AL.    (77) X40585 36  Single point             7443 1451  442
+ Systematic uncertainties:                                        7443 1451  443
+ - 2% for each Exfor set                                          7443 1451  444
+ - 2% common to all measurements                                  7443 1451  445
+                                                                  7443 1451  446
+ (n,2n+x) Two-neutrons emission                                   7443 1451  447
+ ------------------------------                                   7443 1451  448
+    Author               Year EXFOR No.  Comment                  7443 1451  449
+ ---------------------------------------------------------------  7443 1451  450
+  1 J. Frehaut           (80) X20416 53 (16 points)               7443 1451  451
+                                         Corrected according to   7443 1451  452
+                                         reccomendation by Vonach 7443 1451  453
+  2 Kong Xiangshong      (97) X31484  6 (5 points)                7443 1451  454
+  3 A.A. Filatenkov      (03) X41428 12 (5 points)                7443 1451  455
+  - M. Lindner           (59) X12185  7 Old, discrepant           7443 1451  456
+  - A.A. DRUZHININ,ET.AL.(66) X40174  61                          7443 1451  457
+ Systematic uncertainties:                                        7443 1451  458
+ - 1% systematic for each data set.                               7443 1451  459
+ - 4% common to all measurements                                  7443 1451  460
+                                                                  7443 1451  461
+ (n,3n+x) Three-neutrons emission                                 7443 1451  462
+ --------------------------------                                 7443 1451  463
+    Author               Year EXFOR No.  Comment                  7443 1451  464
+ ---------------------------------------------------------------  7443 1451  465
+  1 J. Frehaut           (80)                                     7443 1451  466
+ Systematic uncertainties:                                        7443 1451  467
+ - 1% for each Exfor set                                          7443 1451  468
+ - 4% common to all measurements                                  7443 1451  469
+                                                                  7443 1451  470
+ (n,n1) Discrete inelastic cross sections to the first level      7443 1451  471
+ -----------------------------------------------------------      7443 1451  472
+    Author               Year EXFOR No.  Comment                  7443 1451  473
+ ---------------------------------------------------------------  7443 1451  474
+  1 D. Lister            (67) X12174010 (59 points)               7443 1451  475
+  2 P.T. Guenther        (82) X10803016 (15 points)               7443 1451  476
+ Systematic uncertainties:                                        7443 1451  477
+ - 10% for each Exfor set                                         7443 1451  478
+ - 10% common to all measurements (altogether 2.8%)               7443 1451  479
+                                                                  7443 1451  480
+ (n,g) Radiative capture                                          7443 1451  481
+ -----------------------                                          7443 1451  482
+    Author               Year EXFOR No.  Comment                  7443 1451  483
+ ---------------------------------------------------------------  7443 1451  484
+  - S.J.FRIESENHANN      (66) X12167  8 Resonance                 7443 1451  485
+  - G.GLEASON            (77) X10662 14 Thermal                   7443 1451  486
+  - L.SEREN,ET.AL.       (47) X11447115 Thermal                   7443 1451  487
+  - H.POMERANCE          (52) X11507 94 Thermal                   7443 1451  488
+  - W.S.LYON             (60) X11625 32 Thermal                   7443 1451  489
+  - S.J.FRIESENHAHN,     (66) X12167  9 Thermal                   7443 1451  490
+  - C.H.HOGG,ET.AL.      (70) X12602  7 Thermal                   7443 1451  491
+  - P.P.DAMLE,ET.AL.     (67) X20184  2 Thermal                   7443 1451  492
+  - K.KNOPF,ET.AL.       (87) X22045 16 Thermal                   7443 1451  493
+  - M.Karadag,ET.AL.     (04) X22842  2 Thermal                   7443 1451  494
+  - V.A.ANUFRIEV,ET.AL.  (81) X40608  3 Thermal                   7443 1451  495
+  - S.V.KAPCHIGASHEV,    (66) X40755  5 Resonance                 7443 1451  496
+ 13 R.C.BLOCK,ET.AL.     (66) X11458  8 (9 points)                7443 1451  497
+ 14 R.L.MACKLIN,ET.AL.   (83) X10999  9 (34 points)               7443 1451  498
+ 15 M.V.BOKHOVKO,ET.AL.  (86) X40925  6 (19 points) <50 keV       7443 1451  499
+  - M.V.BOKHOVKO,ET.AL.  (86) X40925  6 (38 points) >50 keV       7443 1451  500
+  - K.Siddappa,ET.AL.    (74) X30502 18                           7443 1451  501
+  - R.L.MACKLIN,ET.AL.   (57) X11399 45 (1 point)                 7443 1451  502
+  - R.BOOTH,ET.AL.       (58) X11429 28                           7443 1451  503
+  - A.K.CHAUBEY,ET.AL.   (65) X30079 35                           7443 1451  504
+  - V.N.KONONOV,ET.AL.   (58) X40421 23                           7443 1451  505
+  - T.BRADLEY,ET.AL.     (79) X10938  6                           7443 1451  506
+  - YU.YA.STAVISSKII,    (60) X40452  5                           7443 1451  507
+  - J.A.MISKEL,ET.AL.    (62) X12115  5                           7443 1451  508
+  - V.N.KONONOV,ET.AL.   (66) X40076  7                           7443 1451  509
+  - Vuong Huu Tan,ET.AL. (04) X31542  2                           7443 1451  510
+  - J.A.MISKEL,ET.AL.    (62) X12115  6                           7443 1451  511
+  - M.LINDNER,ET.AL.     (76) X10221 44                           7443 1451  512
+  - A.E.JOHNSRUD,ET.AL.  (59) X11675 25                           7443 1451  513
+  - W.S.LYON,ET.AL.      (59) X11407 30                           7443 1451  514
+  - A.I.LEIPUNSKIJ,      (58) X40244 36                           7443 1451  515
+  - G.G.ZAIKIN,ET.AL.    (68) X40248  4                           7443 1451  516
+  - Z.M.BARTOLOME,ET.AL. (69) X10002 41                           7443 1451  517
+ 34 S.JOLY,ET.AL.        (81) X21619 15 (3 points)                7443 1451  518
+  - J.VOIGNIER,ET.AL.    (92) X22006 21                           7443 1451  519
+  - GUOHUI ZHANG,ET.AL.  (01) X32550  2                           7443 1451  520
+  - L.E.BEGHIAN,ET.AL.   (49) X22580 14                           7443 1451  521
+ 38 YU.N.TROFIMOV        (87) X41001 37 (1 point)                 7443 1451  522
+  - M.V.PASECHNIK,ET.AL. (58) X40336 93                           7443 1451  523
+  - A.I.LEIPUNSKIJ,      (58) X40244 17                           7443 1451  524
+  - M.DIKSIC,ET.AL.      (70) X30023 12                           7443 1451  525
+  - A.I.LEIPUNSKIJ,      (58) X40244 58                           7443 1451  526
+  - J.L.PERKIN,ET.AL.    (58) X21438 25                           7443 1451  527
+  - O.SCHWERER,ET.AL.    (76) X20670 16                           7443 1451  528
+ 45 M.VALKONEN           (76) X20673 35 (1 point)                 7443 1451  529
+ 46 G.MAGNUSSON,ET.AL.   (80) X21004  4 (1 point)                 7443 1451  530
+ 47 G.D.Kim,ET.AL.       (07) X20673 35 (3 points)                7443 1451  531
+ Systematic uncertainties:                                        7443 1451  532
+ - 3% for each Exfor set                                          7443 1451  533
+ - 1% common to all measurements                                  7443 1451  534
+                                                                  7443 1451  535
+ (n,p)                                                            7443 1451  536
+ -----                                                            7443 1451  537
+    Author               Year EXFOR No.  Comment                  7443 1451  538
+ ---------------------------------------------------------------  7443 1451  539
+  1 S.MURAHIRA,ET.AL.    (95) X22311 14 (6 points)                7443 1451  540
+  2 Y.KASUGAI,ET.AL.          X22351  8 (5 points)                7443 1451  541
+  3 A.A.FILATENKOV,      (99) X41240106 (8 points)                7443 1451  542
+  4 A.A.FILATENKOV,      (03) X41428 14 (7 points)                7443 1451  543
+  5 Y.SATOH,ET.AL.            X22365 12 (5 points)                7443 1451  544
+  6 A.A.FILATENKOV,      (99) X41298 12 (1 point)                 7443 1451  545
+  - R.F.COLEMAN,ET.AL.   (59) X21440 25 (1 point)                 7443 1451  546
+  - S.K.MUKHERJEE,ET.AL. (63) X31330 12 (1 point)                 7443 1451  547
+  9 S.M.QAIM,ET.AL.      (75) X20668 17 (1 point)                 7443 1451  548
+  - A.POULARIKAS,ET.AL.  (60) X12181  4 (1 point)                 7443 1451  549
+ 11 V.SEMKOVA[prelim],   (07) X41469 11 (3 points)                7443 1451  550
+ Systematic uncertainties:                                        7443 1451  551
+ - 2% for each Exfor set                                          7443 1451  552
+ - 10% common to all measurements                                 7443 1451  553
+                                                                  7443 1451  554
+ (n,a)                                                            7443 1451  555
+ -----                                                            7443 1451  556
+    Author               Year EXFOR No.  Comment                  7443 1451  557
+ ---------------------------------------------------------------  7443 1451  558
+  1 Y.KASUGAI,ET.AL.          X22351 10 (6 points)                7443 1451  559
+  2 A.A.FILATENKOV,      (03) X41428 13 (7 points)                7443 1451  560
+  3 Kong Xiangzhong,     (97) X31484  4 (5 points)                7443 1451  561
+  - S.K.MUKHERJEE,ET.AL. (63) X31330 11 (1 point)                 7443 1451  562
+  5 S.M.QAIM,ET.AL.      (75) X20668 19 (1 point)                 7443 1451  563
+  6 A.GRALLERT,ET.AL.    (93) X31496 29 (1 point)                 7443 1451  564
+  - A.POULARIKAS,ET.AL.  (60) X12181  3 (1 point)                 7443 1451  565
+  8 V.SEMKOVA[prelim],   (07) X41469 11 (6 points)                7443 1451  566
+  9 Y.IKEDA,ET.AL.       (88) X22089108 (4 points)                7443 1451  567
+ Systematic uncertainties:                                        7443 1451  568
+ - 1% for each Exfor set                                          7443 1451  569
+ - 5% common to all measurements                                  7443 1451  570
+                                                                  7443 1451  571
+ ************************************************                 7443 1451  572
+                                                                  7443 1451  573
+                                                                  7443 1451  574
+ *** ENDRESS - Merging source and resonance ENDF files            7443 1451  575
+             Source ENDF W186_ib21g.t0                            7443 1451  576
+          Resonance ENDF ..\resonance\W186_ib8forAndrej.end       7443 1451  577
+                                                                  7443 1451  578
+RESOLVED RESONANCE PARAMETERS (L. Leal, ORNL, January 2008)       7443 1451  579
+ Starting from the resonance parameter data in the IRDF-2002      7443 1451  580
+ library, small adjustments were made to reproduce the thermal    7443 1451  581
+ capture cross section of 38.09 barns and the resonance integral  7443 1451  582
+ of 483.4 barns as closely as possible. This ratio 12.69 is in    7443 1451  583
+ good agreement with the value 12.59+/-0.22 from the Kayzero      7443 1451  584
+ database for neutron activation analysis [1].                    7443 1451  585
+                                                                  7443 1451  586
+RESOLVED RESONANCE PARAMETERS (IRDF-2002)                         7443 1451  587
+    Resolved MLBW resonance parameters up to  8.5 keV  were based 7443 1451  588
+on data from ref.[2-3]. Spins of resonances, which were not iden- 7443 1451  589
+tified, have been assigned by taking into account 2*J+1 law  and  7443 1451  590
+approximate linear growth of the number of levels with given spin 7443 1451  591
+and parity from energy. Average gamma-widths 0.05 eV (L=0 and L=1)7443 1451  592
+were assigned to those resonances, widths for which were absent.  7443 1451  593
+Fictitious resonances were added in the energy region 4 - 8.5 keV 7443 1451  594
+to obtain  the average capture cross section values  observed  in 7443 1451  595
+the experiments [4],[5],[6],[7].                                  7443 1451  596
+                                                                  7443 1451  597
+UNRESOLVED RESONANCE PARAMETERS (IRDF-2002)                       7443 1451  598
+    Unresolved resonance parameters in  the region  8.5 - 100 keV 7443 1451  599
+were evaluated  with using 'EVPAR' code (Hauser-Feshbach-Moldauer 7443 1451  600
+statistical model)[8]. They were calculated from optimized fit to 7443 1451  601
+the measured capture [5,6,7,9,10] and total [11,12] cross sections7443 1451  602
+data.  Average resolved resonance  parameters  have been  used as 7443 1451  603
+zero approximation.  Contribution of  F-wave in the energy region 7443 1451  604
+30 - 100 keV given as smoothed background cross section in File 3.7443 1451  605
+                                                                  7443 1451  606
+RESONANCE COVARIANCE DATA (L. Leal, ORNL, Jan 2008)               7443 1451  607
+The procedure used to generate the resolved covariance data       7443 1451  608
+with the SAMMY code is as follow:                                 7443 1451  609
+ a) Retrieve best set of available resonance parameters.          7443 1451  610
+ b) Convert the resonance parameters into the Reich-Moore form.   7443 1451  611
+ c) Generate "experimental" cross sections for total, scattering, 7443 1451  612
+    and capture cross sections with the NJOY code, for use as     7443 1451  613
+    "experimental data" in SAMMY.                                 7443 1451  614
+ d) Assign a global "experimental" uncertainty to the             7443 1451  615
+    "experimental data." The uncertainties used were based on     7443 1451  616
+    uncertainty in the thermal capture cross section and          7443 1451  617
+    uncertainty in the capture resonance integrals.               7443 1451  618
+ e) Run SAMMY code with the option to generate                    7443 1451  619
+    resonance-covariances retroactively.                          7443 1451  620
+ f) Convert the resonance-covariance results from SAMMY into      7443 1451  621
+    the ENDF format for file 32 and MT=151.                       7443 1451  622
+                                                                  7443 1451  623
+The resulting resonance parameters and covariance were used in    7443 1451  624
+the calculations of average cross sections and uncertainties.     7443 1451  625
+The calculations were done with SAMMY, ERRORJ, and PUFF-IV codes. 7443 1451  626
+The results of these three codes agreed very well.                7443 1451  627
+                                                                  7443 1451  628
+References :                                                      7443 1451  629
+ 1. F. De Corte, A. Simonits, Atomic Data Nucl. Data Tables 85,   7443 1451  630
+    (2003), 47-67.                                                7443 1451  631
+ 2. S.F.Mughabghab et al.  Neutron Cross Sections, vol.1, part B, 7443 1451  632
+    New York, Academic Press, 1984                                7443 1451  633
+ 3. S.I.Sukhoruchkin et al. Landolt Bornstein New Series, v.I/16B,7443 1451  634
+    ed. H.Schopper, Springer, 1998, pp.w19-w23                    7443 1451  635
+ 4. S.V.Kapchigashev, Ju.P.Popov, F.L.Shapiro  EXFOR 40755.005    7443 1451  636
+ 5. Z.M.Bartolome et al.  Nucl. Sci. Eng., v.37, pp.137-156, 1969 7443 1451  637
+ 6. R.L.Macklin et al.  Nucl. Sci. Eng., v.84, p.98, June 1983    7443 1451  638
+ 7. M.V.Bokhovko et al.  Voprosy Atomnoj Nauki i Tekhniki, Ser.:  7443 1451  639
+    Yadernye Konstanty, v.1, p.39, February 1986                  7443 1451  640
+ 8. G.N.Manturov et al.  Voprosy Atomnoy Nauki i Tekhniki, Ser.:  7443 1451  641
+    Jadernye Konstanty, v.1, p.50, 1983                           7443 1451  642
+ 9. Yu.Ya.Stavisskii, V.A.Tolstikov   Atomnaja Energija, v.9,     7443 1451  643
+    p.401, 1960                                                   7443 1451  644
+10. V.N.Kononov et al.  Yadernaja Fizika, v.4, no.2, p.282, 1966  7443 1451  645
+11. P.T.Guenther. et al.  Phys. Rev. C., v.26, p.2433, 1982       7443 1451  646
+12. V.N.Kononov  et al.  Sov J. of Nuclear Physics, v.46, part 1, 7443 1451  647
+                                1        451        773          17443 1451  648
+                                2        151        316          17443 1451  649
+                                1        451        654          17443 1451  650
+                                2        151        316          17443 1451  651
+                                3         51         33          17443 1451  652
+                                4         51        343          17443 1451  653
+                               34         51        104          17443 1451  654
+ 0.000000+0 0.000000+0          0          0          0          07443 1  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 7.418600+4 1.843570+2          0          0          1          07443 2151    1
+ 7.418600+4 1.000000+0          0          0          2          07443 2151    2
+ 1.000000-5 1.000000+4          1          7          0          17443 2151    3
+ 0.000000+0 0.000000+0          0          3          3          07443 2151    4
+ 0.000000+0 0.000000+0          2          0         24          47443 2151    5
+ 0.000000+0 1.853462+2 0.000000+0 7.400000+1 1.000000+0 0.000000+07443 2151    6
+ 0.000000+0 0.000000+0 0.000000+0 1.020000+2 0.000000+0 0.000000+07443 2151    7
+ 1.000000+0 1.843462+2 0.000000+0 7.400000+1 5.000000-1 0.000000+07443 2151    8
+ 0.000000+0 1.000000+0 0.000000+0 2.000000+0 0.000000+0 1.000000+07443 2151    9
+ 5.000000-1 0.000000+0          0          0         12          27443 2151   10
+ 1.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+07443 2151   11
+ 2.000000+0 0.000000+0 5.000000-1 0.000000+0 7.750000-1 7.750000-17443 2151   12
+ 0.000000+0 0.000000+0          0         80        480         807443 2151   13
+-5.319459+2 5.344730-2 1.138134+0 0.000000+0 0.000000+0 0.000000+07443 2151   14
+-4.001078+2 5.392131-2 1.170111+0 0.000000+0 0.000000+0 0.000000+07443 2151   15
+-2.629538+2 6.583542-2 3.270875+0 0.000000+0 0.000000+0 0.000000+07443 2151   16
+ 1.884338+1 4.356507-2 3.122952-1 0.000000+0 0.000000+0 0.000000+07443 2151   17
+ 1.709854+2 7.740906-2 3.010150-2 0.000000+0 0.000000+0 0.000000+07443 2151   18
+ 2.180325+2 5.732740-2 5.431203-1 0.000000+0 0.000000+0 0.000000+07443 2151   19
+ 2.869226+2 6.642415-2 3.462487-2 0.000000+0 0.000000+0 0.000000+07443 2151   20
+ 4.060186+2 5.648713-2 1.075941-1 0.000000+0 0.000000+0 0.000000+07443 2151   21
+ 5.099802+2 5.585014-2 9.330321-2 0.000000+0 0.000000+0 0.000000+07443 2151   22
+ 5.415186+2 5.815681-2 5.363986-1 0.000000+0 0.000000+0 0.000000+07443 2151   23
+ 6.635169+2 7.001136-2 6.983554-1 0.000000+0 0.000000+0 0.000000+07443 2151   24
+ 7.211769+2 6.582481-2 2.066605+0 0.000000+0 0.000000+0 0.000000+07443 2151   25
+ 8.315949+2 5.519647-2 3.550226-2 0.000000+0 0.000000+0 0.000000+07443 2151   26
+ 9.644849+2 5.982592-2 1.007718+0 0.000000+0 0.000000+0 0.000000+07443 2151   27
+ 1.071715+3 6.100000-2 5.737060-1 0.000000+0 0.000000+0 0.000000+07443 2151   28
+ 1.122085+3 6.000000-2 3.686631-1 0.000000+0 0.000000+0 0.000000+07443 2151   29
+ 1.188029+3 5.500000-2 9.261658-1 0.000000+0 0.000000+0 0.000000+07443 2151   30
+ 1.419198+3 6.000000-2 1.099937-1 0.000000+0 0.000000+0 0.000000+07443 2151   31
+ 1.500402+3 6.800000-2 1.367129+0 0.000000+0 0.000000+0 0.000000+07443 2151   32
+ 1.796343+3 6.115672-2 4.431168-2 0.000000+0 0.000000+0 0.000000+07443 2151   33
+ 1.934386+3 6.000000-2 8.801897-1 0.000000+0 0.000000+0 0.000000+07443 2151   34
+ 2.025464+3 6.700000-2 6.179549-1 0.000000+0 0.000000+0 0.000000+07443 2151   35
+ 2.106522+3 6.700000-2 1.662368-1 0.000000+0 0.000000+0 0.000000+07443 2151   36
+ 2.349148+3 6.000000-2 2.749481-1 0.000000+0 0.000000+0 0.000000+07443 2151   37
+ 2.516554+3 6.000000-2 7.628254-1 0.000000+0 0.000000+0 0.000000+07443 2151   38
+ 2.571838+3 6.000000-2 1.325677-3 0.000000+0 0.000000+0 0.000000+07443 2151   39
+ 2.591878+3 6.000000-2 1.294454+0 0.000000+0 0.000000+0 0.000000+07443 2151   40
+ 2.658632+3 4.030000-2 5.239261+0 0.000000+0 0.000000+0 0.000000+07443 2151   41
+ 2.780455+3 4.280000-2 3.155347-1 0.000000+0 0.000000+0 0.000000+07443 2151   42
+ 2.878332+3 5.277258-2 1.240569+0 0.000000+0 0.000000+0 0.000000+07443 2151   43
+ 2.978336+3 6.714685-2 1.610668-1 0.000000+0 0.000000+0 0.000000+07443 2151   44
+ 3.041125+3 6.208447-2 1.204623+1 0.000000+0 0.000000+0 0.000000+07443 2151   45
+ 3.159735+3 6.739681-2 2.347532+0 0.000000+0 0.000000+0 0.000000+07443 2151   46
+ 3.312788+3 4.170000-2 6.568569-1 0.000000+0 0.000000+0 0.000000+07443 2151   47
+ 3.424262+3 4.640000-2 3.338615+0 0.000000+0 0.000000+0 0.000000+07443 2151   48
+ 3.543838+3 4.640000-2 4.380981-1 0.000000+0 0.000000+0 0.000000+07443 2151   49
+ 3.713215+3 6.010000-2 2.195768-1 0.000000+0 0.000000+0 0.000000+07443 2151   50
+ 3.770348+3 4.640000-2 1.537267+0 0.000000+0 0.000000+0 0.000000+07443 2151   51
+ 3.871955+3 4.490000-2 2.819436+0 0.000000+0 0.000000+0 0.000000+07443 2151   52
+ 3.965900+3 3.240000-2 5.926873-1 0.000000+0 0.000000+0 0.000000+07443 2151   53
+ 4.168102+3 5.247545-2 1.206005+0 0.000000+0 0.000000+0 0.000000+07443 2151   54
+ 4.222864+3 6.259068-2 2.787788+0 0.000000+0 0.000000+0 0.000000+07443 2151   55
+ 4.397417+3 4.724937-2 1.793642+0 0.000000+0 0.000000+0 0.000000+07443 2151   56
+ 4.542801+3 4.430000-2 2.189200+0 0.000000+0 0.000000+0 0.000000+07443 2151   57
+ 4.806640+3 3.760000-2 5.481686+0 0.000000+0 0.000000+0 0.000000+07443 2151   58
+ 4.979445+3 5.654498-2 5.329065-1 0.000000+0 0.000000+0 0.000000+07443 2151   59
+ 5.161153+3 4.134791-2 3.211279+0 0.000000+0 0.000000+0 0.000000+07443 2151   60
+ 5.286824+3 6.041875-2 5.828599-1 0.000000+0 0.000000+0 0.000000+07443 2151   61
+ 5.386352+3 3.311120-2 1.312517+0 0.000000+0 0.000000+0 0.000000+07443 2151   62
+ 5.405609+3 3.954753-2 4.965895-1 0.000000+0 0.000000+0 0.000000+07443 2151   63
+ 5.670436+3 4.426937-2 5.636236+0 0.000000+0 0.000000+0 0.000000+07443 2151   64
+ 5.780955+3 4.937791-2 5.890201+0 0.000000+0 0.000000+0 0.000000+07443 2151   65
+ 6.295659+3 3.607678-2 1.602736+0 0.000000+0 0.000000+0 0.000000+07443 2151   66
+ 6.390144+3 5.167969-2 1.802860+0 0.000000+0 0.000000+0 0.000000+07443 2151   67
+ 6.490815+3 5.797574-2 5.067177+0 0.000000+0 0.000000+0 0.000000+07443 2151   68
+ 6.702649+3 4.035893-2 1.625392-1 0.000000+0 0.000000+0 0.000000+07443 2151   69
+ 6.759479+3 6.110234-2 3.919299+0 0.000000+0 0.000000+0 0.000000+07443 2151   70
+ 6.950459+3 4.748705-2 1.196000+0 0.000000+0 0.000000+0 0.000000+07443 2151   71
+ 6.971285+3 5.605825-2 1.430608+0 0.000000+0 0.000000+0 0.000000+07443 2151   72
+ 7.117955+3 4.760000-2 5.827173-1 0.000000+0 0.000000+0 0.000000+07443 2151   73
+ 7.177655+3 7.029990-2 1.487389+0 0.000000+0 0.000000+0 0.000000+07443 2151   74
+ 7.327744+3 5.390000-2 1.381069+0 0.000000+0 0.000000+0 0.000000+07443 2151   75
+ 7.473993+3 6.429990-2 5.289462+0 0.000000+0 0.000000+0 0.000000+07443 2151   76
+ 7.637654+3 5.250000-2 1.912655+0 0.000000+0 0.000000+0 0.000000+07443 2151   77
+ 7.713298+3 5.120000-2 1.627573+0 0.000000+0 0.000000+0 0.000000+07443 2151   78
+ 7.847679+3 4.200000-2 6.562670-1 0.000000+0 0.000000+0 0.000000+07443 2151   79
+ 7.982251+3 3.390000-2 9.822903-1 0.000000+0 0.000000+0 0.000000+07443 2151   80
+ 8.135975+3 4.420000-2 1.195074+0 0.000000+0 0.000000+0 0.000000+07443 2151   81
+ 8.295981+3 4.340000-2 2.961637+0 0.000000+0 0.000000+0 0.000000+07443 2151   82
+ 8.353924+3 4.850000-2 4.508706-1 0.000000+0 0.000000+0 0.000000+07443 2151   83
+ 8.630533+3 6.000000-2 9.423125-1 0.000000+0 0.000000+0 0.000000+07443 2151   84
+ 8.672468+3 6.000000-2 5.260938-1 0.000000+0 0.000000+0 0.000000+07443 2151   85
+ 9.183351+3 6.000000-2 3.681814+0 0.000000+0 0.000000+0 0.000000+07443 2151   86
+ 9.291314+3 6.000000-2 7.858797+0 0.000000+0 0.000000+0 0.000000+07443 2151   87
+ 9.549293+3 6.000000-2 5.389436+0 0.000000+0 0.000000+0 0.000000+07443 2151   88
+ 9.588462+3 6.000000-2 2.819269+1 0.000000+0 0.000000+0 0.000000+07443 2151   89
+ 9.845148+3 6.000000-2 1.919741+0 0.000000+0 0.000000+0 0.000000+07443 2151   90
+ 1.010781+4 5.302837-2 3.406887+0 0.000000+0 0.000000+0 0.000000+07443 2151   91
+ 1.024114+4 5.302837-2 2.313728+0 0.000000+0 0.000000+0 0.000000+07443 2151   92
+ 1.037398+4 5.302837-2 2.052358+0 0.000000+0 0.000000+0 0.000000+07443 2151   93
+-5.000000-1 0.000000+0          0          0         12          27443 2151   94
+ 1.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+07443 2151   95
+ 2.000000+0 1.000000+0 5.000000-1 0.000000+0 7.750000-1 7.750000-17443 2151   96
+ 0.000000+0 0.000000+0          0         47        282         477443 2151   97
+ 6.547466+2 6.464431-2 1.308540-3 0.000000+0 0.000000+0 0.000000+07443 2151   98
+ 7.297953+2 5.171797-2 1.396105-3 0.000000+0 0.000000+0 0.000000+07443 2151   99
+ 7.711739+2 6.412243-2 1.267203-3 0.000000+0 0.000000+0 0.000000+07443 2151  100
+ 1.472895+3 5.079674-2 1.362416-3 0.000000+0 0.000000+0 0.000000+07443 2151  101
+ 1.598097+3 5.000417-2 1.513722-3 0.000000+0 0.000000+0 0.000000+07443 2151  102
+ 1.687506+3 5.053277-2 1.971429-3 0.000000+0 0.000000+0 0.000000+07443 2151  103
+ 2.536610+3 6.333461-2 4.070900-3 0.000000+0 0.000000+0 0.000000+07443 2151  104
+ 2.768825+3 5.097281-2 3.547693-3 0.000000+0 0.000000+0 0.000000+07443 2151  105
+ 3.018177+3 5.043911-2 9.714496-4 0.000000+0 0.000000+0 0.000000+07443 2151  106
+ 3.180449+3 4.788055-2 3.284880-3 0.000000+0 0.000000+0 0.000000+07443 2151  107
+ 3.368241+3 4.970725-2 6.841419-3 0.000000+0 0.000000+0 0.000000+07443 2151  108
+ 3.501781+3 4.923055-2 3.864085-3 0.000000+0 0.000000+0 0.000000+07443 2151  109
+ 3.628871+3 4.718212-2 4.377597-3 0.000000+0 0.000000+0 0.000000+07443 2151  110
+ 4.028754+3 5.044610-2 5.045939-3 0.000000+0 0.000000+0 0.000000+07443 2151  111
+ 4.263137+3 5.023225-2 3.244652-3 0.000000+0 0.000000+0 0.000000+07443 2151  112
+ 4.374339+3 5.040330-2 3.174604-3 0.000000+0 0.000000+0 0.000000+07443 2151  113
+ 4.490872+3 5.181976-2 4.956149-3 0.000000+0 0.000000+0 0.000000+07443 2151  114
+ 4.706428+3 5.071927-2 1.069280-2 0.000000+0 0.000000+0 0.000000+07443 2151  115
+ 4.753141+3 5.091559-2 1.418349-2 0.000000+0 0.000000+0 0.000000+07443 2151  116
+ 4.817178+3 5.012968-2 1.894535-3 0.000000+0 0.000000+0 0.000000+07443 2151  117
+ 4.960045+3 5.631632-2 5.743020-3 0.000000+0 0.000000+0 0.000000+07443 2151  118
+ 5.107470+3 5.043455-2 3.590144-3 0.000000+0 0.000000+0 0.000000+07443 2151  119
+ 5.332447+3 5.068557-2 5.554435-3 0.000000+0 0.000000+0 0.000000+07443 2151  120
+ 5.435535+3 5.008601-2 1.958706-3 0.000000+0 0.000000+0 0.000000+07443 2151  121
+ 5.456860+3 5.220881-2 1.284525-2 0.000000+0 0.000000+0 0.000000+07443 2151  122
+ 5.594632+3 5.086789-2 4.863411-3 0.000000+0 0.000000+0 0.000000+07443 2151  123
+ 5.818172+3 5.062767-2 1.303866-2 0.000000+0 0.000000+0 0.000000+07443 2151  124
+ 5.892463+3 5.087581-2 7.041425-3 0.000000+0 0.000000+0 0.000000+07443 2151  125
+ 6.184519+3 5.191723-2 5.648922-3 0.000000+0 0.000000+0 0.000000+07443 2151  126
+ 6.261461+3 5.151983-2 5.563600-3 0.000000+0 0.000000+0 0.000000+07443 2151  127
+ 6.519511+3 5.069561-2 4.545084-3 0.000000+0 0.000000+0 0.000000+07443 2151  128
+ 6.552239+3 5.032714-2 3.272713-3 0.000000+0 0.000000+0 0.000000+07443 2151  129
+ 6.691476+3 5.710230-2 1.384437-2 0.000000+0 0.000000+0 0.000000+07443 2151  130
+ 6.846598+3 5.904629-2 3.223104-2 0.000000+0 0.000000+0 0.000000+07443 2151  131
+ 7.092606+3 5.234503-2 2.453751-2 0.000000+0 0.000000+0 0.000000+07443 2151  132
+ 7.291701+3 5.042009-2 5.249715-3 0.000000+0 0.000000+0 0.000000+07443 2151  133
+ 7.498044+3 5.222119-2 1.850901-2 0.000000+0 0.000000+0 0.000000+07443 2151  134
+ 7.883868+3 5.231801-2 1.769764-2 0.000000+0 0.000000+0 0.000000+07443 2151  135
+ 8.022424+3 5.512120-2 3.223382-2 0.000000+0 0.000000+0 0.000000+07443 2151  136
+ 8.236134+3 5.368492-2 4.225637-2 0.000000+0 0.000000+0 0.000000+07443 2151  137
+ 8.428538+3 5.178387-2 2.297063-2 0.000000+0 0.000000+0 0.000000+07443 2151  138
+ 8.953448+3 6.000000-2 7.196640-2 0.000000+0 0.000000+0 0.000000+07443 2151  139
+ 8.956659+3 6.000000-2 2.410721-2 0.000000+0 0.000000+0 0.000000+07443 2151  140
+ 9.003475+3 6.000000-2 1.238209-1 0.000000+0 0.000000+0 0.000000+07443 2151  141
+ 9.209124+3 6.000000-2 5.264272-1 0.000000+0 0.000000+0 0.000000+07443 2151  142
+ 9.416727+3 6.000000-2 8.521626+0 0.000000+0 0.000000+0 0.000000+07443 2151  143
+ 9.885855+3 6.000000-2 4.410330-1 0.000000+0 0.000000+0 0.000000+07443 2151  144
+-1.500000+0 0.000000+0          0          0         12          27443 2151  145
+ 1.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+07443 2151  146
+ 2.000000+0 1.000000+0 5.000000-1 0.000000+0 7.750000-1 7.750000-17443 2151  147
+ 0.000000+0 0.000000+0          0         48        288         487443 2151  148
+ 1.085047+3 4.963368-2 1.064607-3 0.000000+0 0.000000+0 0.000000+07443 2151  149
+ 1.825160+3 5.390883-2 1.136656-3 0.000000+0 0.000000+0 0.000000+07443 2151  150
+ 2.076545+3 5.847279-2 1.382237-3 0.000000+0 0.000000+0 0.000000+07443 2151  151
+ 2.393773+3 5.658378-2 4.200804-3 0.000000+0 0.000000+0 0.000000+07443 2151  152
+ 2.888951+3 6.966089-2 4.464214-3 0.000000+0 0.000000+0 0.000000+07443 2151  153
+ 3.112106+3 5.093277-2 2.086898-3 0.000000+0 0.000000+0 0.000000+07443 2151  154
+ 3.323613+3 5.102186-2 7.489817-3 0.000000+0 0.000000+0 0.000000+07443 2151  155
+ 3.578915+3 5.286279-2 1.305512-2 0.000000+0 0.000000+0 0.000000+07443 2151  156
+ 3.650849+3 5.032184-2 5.405629-3 0.000000+0 0.000000+0 0.000000+07443 2151  157
+ 3.722748+3 4.988743-2 2.995399-3 0.000000+0 0.000000+0 0.000000+07443 2151  158
+ 3.759415+3 5.010419-2 1.929212-3 0.000000+0 0.000000+0 0.000000+07443 2151  159
+ 4.057041+3 4.425525-2 7.379708-3 0.000000+0 0.000000+0 0.000000+07443 2151  160
+ 4.124211+3 5.041113-2 4.749618-3 0.000000+0 0.000000+0 0.000000+07443 2151  161
+ 4.205140+3 5.197750-2 3.796613-3 0.000000+0 0.000000+0 0.000000+07443 2151  162
+ 4.458840+3 3.953232-2 2.283340-2 0.000000+0 0.000000+0 0.000000+07443 2151  163
+ 4.570192+3 4.789046-2 1.112752-2 0.000000+0 0.000000+0 0.000000+07443 2151  164
+ 4.586986+3 5.064941-2 8.902295-3 0.000000+0 0.000000+0 0.000000+07443 2151  165
+ 4.893656+3 5.697982-2 2.146298-2 0.000000+0 0.000000+0 0.000000+07443 2151  166
+ 5.133552+3 5.043452-2 1.844856-3 0.000000+0 0.000000+0 0.000000+07443 2151  167
+ 5.185585+3 5.338686-2 1.473462-2 0.000000+0 0.000000+0 0.000000+07443 2151  168
+ 5.198889+3 5.151030-2 2.183262-3 0.000000+0 0.000000+0 0.000000+07443 2151  169
+ 5.520710+3 5.508547-2 2.706350-2 0.000000+0 0.000000+0 0.000000+07443 2151  170
+ 5.699454+3 5.142637-2 2.099450-3 0.000000+0 0.000000+0 0.000000+07443 2151  171
+ 5.809390+3 5.059901-2 1.944577-3 0.000000+0 0.000000+0 0.000000+07443 2151  172
+ 5.963006+3 5.181023-2 2.344238-2 0.000000+0 0.000000+0 0.000000+07443 2151  173
+ 6.036882+3 5.084982-2 9.173093-3 0.000000+0 0.000000+0 0.000000+07443 2151  174
+ 6.057530+3 5.401602-2 1.215976-2 0.000000+0 0.000000+0 0.000000+07443 2151  175
+ 6.126553+3 5.332911-2 2.902506-2 0.000000+0 0.000000+0 0.000000+07443 2151  176
+ 6.137568+3 5.090930-2 8.710016-3 0.000000+0 0.000000+0 0.000000+07443 2151  177
+ 6.240862+3 5.484640-2 2.029584-2 0.000000+0 0.000000+0 0.000000+07443 2151  178
+ 6.410484+3 5.135455-2 1.000778-2 0.000000+0 0.000000+0 0.000000+07443 2151  179
+ 6.666918+3 3.710269-2 2.448632-2 0.000000+0 0.000000+0 0.000000+07443 2151  180
+ 6.808935+3 5.133768-2 1.488161-2 0.000000+0 0.000000+0 0.000000+07443 2151  181
+ 7.243587+3 5.120774-2 1.186835-2 0.000000+0 0.000000+0 0.000000+07443 2151  182
+ 7.351371+3 5.017442-2 8.990530-3 0.000000+0 0.000000+0 0.000000+07443 2151  183
+ 7.420429+3 5.367526-2 3.047913-2 0.000000+0 0.000000+0 0.000000+07443 2151  184
+ 7.554289+3 5.647290-2 3.080595-2 0.000000+0 0.000000+0 0.000000+07443 2151  185
+ 7.924568+3 5.137301-2 2.271361-2 0.000000+0 0.000000+0 0.000000+07443 2151  186
+ 8.040113+3 5.622547-2 7.416368-2 0.000000+0 0.000000+0 0.000000+07443 2151  187
+ 8.088515+3 5.314019-2 3.404082-2 0.000000+0 0.000000+0 0.000000+07443 2151  188
+ 8.628605+3 6.000000-2 1.190013-2 0.000000+0 0.000000+0 0.000000+07443 2151  189
+ 8.797708+3 6.000000-2 2.290317-2 0.000000+0 0.000000+0 0.000000+07443 2151  190
+ 8.903390+3 6.000000-2 8.876425-3 0.000000+0 0.000000+0 0.000000+07443 2151  191
+ 9.032612+3 6.000000-2 3.902288-2 0.000000+0 0.000000+0 0.000000+07443 2151  192
+ 9.047282+3 6.000000-2 2.123012-2 0.000000+0 0.000000+0 0.000000+07443 2151  193
+ 9.300775+3 6.000000-2 1.366035-2 0.000000+0 0.000000+0 0.000000+07443 2151  194
+ 9.737254+3 6.000000-2 1.213292-1 0.000000+0 0.000000+0 0.000000+07443 2151  195
+ 9.940221+3 6.000000-2 3.875773-2 0.000000+0 0.000000+0 0.000000+07443 2151  196
+ 1.000000+4 1.000000+5          2          2          0          07443 2151  197
+ 0.000000+0 7.640000-1          1          0          3          07443 2151  198
+ 1.843600+2 0.000000+0          0          0          1          07443 2151  199
+ 5.000000-1 0.000000+0          2          0        132         217443 2151  200
+ 0.000000+0 0.000000+0 0.000000+0 1.000000+0 0.000000+0 0.000000+07443 2151  201
+ 1.000000+4 8.844440+1 0.000000+0 1.818610-2 3.283460-2 0.000000+07443 2151  202
+ 1.200000+4 8.813750+1 0.000000+0 1.800860-2 3.288360-2 0.000000+07443 2151  203
+ 1.400000+4 8.783040+1 0.000000+0 1.784200-2 3.293150-2 0.000000+07443 2151  204
+ 1.600000+4 8.752560+1 0.000000+0 1.768450-2 3.297900-2 0.000000+07443 2151  205
+ 1.800000+4 8.722040+1 0.000000+0 1.753410-2 3.302540-2 0.000000+07443 2151  206
+ 2.000000+4 8.691790+1 0.000000+0 1.739020-2 3.307150-2 0.000000+07443 2151  207
+ 2.250000+4 8.654020+1 0.000000+0 1.721770-2 3.312780-2 0.000000+07443 2151  208
+ 2.500000+4 8.616550+1 0.000000+0 1.705260-2 3.318360-2 0.000000+07443 2151  209
+ 2.750000+4 8.579120+1 0.000000+0 1.689340-2 3.323770-2 0.000000+07443 2151  210
+ 3.000000+4 8.541960+1 0.000000+0 1.673990-2 3.329120-2 0.000000+07443 2151  211
+ 3.250000+4 8.504840+1 0.000000+0 1.659090-2 3.334310-2 0.000000+07443 2151  212
+ 3.500000+4 8.468010+1 0.000000+0 1.644650-2 3.339450-2 0.000000+07443 2151  213
+ 3.750000+4 8.431320+1 0.000000+0 1.630600-2 3.344470-2 0.000000+07443 2151  214
+ 4.000000+4 8.394790+1 0.000000+0 1.616910-2 3.349380-2 0.000000+07443 2151  215
+ 4.500000+4 8.322200+1 0.000000+0 1.590500-2 3.358900-2 0.000000+07443 2151  216
+ 5.000000+4 8.250220+1 0.000000+0 1.565210-2 3.367980-2 0.000000+07443 2151  217
+ 6.000000+4 8.108340+1 0.000000+0 1.517550-2 3.385040-2 0.000000+07443 2151  218
+ 7.000000+4 7.968970+1 0.000000+0 1.473080-2 3.400530-2 0.000000+07443 2151  219
+ 8.000000+4 7.832170+1 0.000000+0 1.431270-2 3.414570-2 0.000000+07443 2151  220
+ 9.000000+4 7.697910+1 0.000000+0 1.391730-2 3.427210-2 0.000000+07443 2151  221
+ 1.000000+5 7.565890+1 0.000000+0 1.354140-2 3.438390-2 0.000000+07443 2151  222
+ 1.843600+2 0.000000+0          1          0          2          07443 2151  223
+ 5.000000-1 0.000000+0          2          0        132         217443 2151  224
+ 0.000000+0 0.000000+0 0.000000+0 1.000000+0 0.000000+0 0.000000+07443 2151  225
+ 1.000000+4 8.844440+1 0.000000+0 1.039910-2 2.517620-2 0.000000+07443 2151  226
+ 1.200000+4 8.813750+1 0.000000+0 1.035960-2 2.521390-2 0.000000+07443 2151  227
+ 1.400000+4 8.783040+1 0.000000+0 1.032000-2 2.525060-2 0.000000+07443 2151  228
+ 1.600000+4 8.752560+1 0.000000+0 1.028040-2 2.528700-2 0.000000+07443 2151  229
+ 1.800000+4 8.722040+1 0.000000+0 1.024060-2 2.532260-2 0.000000+07443 2151  230
+ 2.000000+4 8.691790+1 0.000000+0 1.020090-2 2.535790-2 0.000000+07443 2151  231
+ 2.250000+4 8.654020+1 0.000000+0 1.015120-2 2.540110-2 0.000000+07443 2151  232
+ 2.500000+4 8.616550+1 0.000000+0 1.010170-2 2.544380-2 0.000000+07443 2151  233
+ 2.750000+4 8.579120+1 0.000000+0 1.005200-2 2.548540-2 0.000000+07443 2151  234
+ 3.000000+4 8.541960+1 0.000000+0 1.000250-2 2.552640-2 0.000000+07443 2151  235
+ 3.250000+4 8.504840+1 0.000000+0 9.952930-3 2.556620-2 0.000000+07443 2151  236
+ 3.500000+4 8.468010+1 0.000000+0 9.903570-3 2.560560-2 0.000000+07443 2151  237
+ 3.750000+4 8.431320+1 0.000000+0 9.854300-3 2.564410-2 0.000000+07443 2151  238
+ 4.000000+4 8.394790+1 0.000000+0 9.805120-3 2.568180-2 0.000000+07443 2151  239
+ 4.500000+4 8.322200+1 0.000000+0 9.707100-3 2.575470-2 0.000000+07443 2151  240
+ 5.000000+4 8.250220+1 0.000000+0 9.609590-3 2.582440-2 0.000000+07443 2151  241
+ 6.000000+4 8.108340+1 0.000000+0 9.416650-3 2.595510-2 0.000000+07443 2151  242
+ 7.000000+4 7.968970+1 0.000000+0 9.226510-3 2.607390-2 0.000000+07443 2151  243
+ 8.000000+4 7.832170+1 0.000000+0 9.039560-3 2.618160-2 0.000000+07443 2151  244
+ 9.000000+4 7.697910+1 0.000000+0 8.855970-3 2.627850-2 0.000000+07443 2151  245
+ 1.000000+5 7.565890+1 0.000000+0 8.675560-3 2.636420-2 0.000000+07443 2151  246
+ 1.500000+0 0.000000+0          2          0        132         217443 2151  247
+ 0.000000+0 0.000000+0 0.000000+0 1.000000+0 0.000000+0 0.000000+07443 2151  248
+ 1.000000+4 4.421290+1 0.000000+0 5.198430-3 2.400780-2 0.000000+07443 2151  249
+ 1.200000+4 4.405760+1 0.000000+0 5.178520-3 2.404310-2 0.000000+07443 2151  250
+ 1.400000+4 4.390220+1 0.000000+0 5.158480-3 2.407750-2 0.000000+07443 2151  251
+ 1.600000+4 4.374810+1 0.000000+0 5.138460-3 2.411160-2 0.000000+07443 2151  252
+ 1.800000+4 4.359370+1 0.000000+0 5.118360-3 2.414490-2 0.000000+07443 2151  253
+ 2.000000+4 4.344070+1 0.000000+0 5.098330-3 2.417800-2 0.000000+07443 2151  254
+ 2.250000+4 4.324960+1 0.000000+0 5.073220-3 2.421850-2 0.000000+07443 2151  255
+ 2.500000+4 4.306020+1 0.000000+0 5.048190-3 2.425850-2 0.000000+07443 2151  256
+ 2.750000+4 4.287080+1 0.000000+0 5.023100-3 2.429730-2 0.000000+07443 2151  257
+ 3.000000+4 4.268290+1 0.000000+0 4.998110-3 2.433560-2 0.000000+07443 2151  258
+ 3.250000+4 4.249520+1 0.000000+0 4.973070-3 2.437280-2 0.000000+07443 2151  259
+ 3.500000+4 4.230900+1 0.000000+0 4.948150-3 2.440950-2 0.000000+07443 2151  260
+ 3.750000+4 4.212350+1 0.000000+0 4.923270-3 2.444540-2 0.000000+07443 2151  261
+ 4.000000+4 4.193880+1 0.000000+0 4.898450-3 2.448060-2 0.000000+07443 2151  262
+ 4.500000+4 4.157180+1 0.000000+0 4.848980-3 2.454850-2 0.000000+07443 2151  263
+ 5.000000+4 4.120800+1 0.000000+0 4.799770-3 2.461330-2 0.000000+07443 2151  264
+ 6.000000+4 4.049100+1 0.000000+0 4.702430-3 2.473460-2 0.000000+07443 2151  265
+ 7.000000+4 3.978680+1 0.000000+0 4.606530-3 2.484440-2 0.000000+07443 2151  266
+ 8.000000+4 3.909570+1 0.000000+0 4.512260-3 2.494350-2 0.000000+07443 2151  267
+ 9.000000+4 3.841760+1 0.000000+0 4.419710-3 2.503230-2 0.000000+07443 2151  268
+ 1.000000+5 3.775110+1 0.000000+0 4.328790-3 2.511030-2 0.000000+07443 2151  269
+ 1.843600+2 0.000000+0          2          0          2          07443 2151  270
+ 1.500000+0 0.000000+0          2          0        132         217443 2151  271
+ 0.000000+0 0.000000+0 0.000000+0 1.000000+0 0.000000+0 0.000000+07443 2151  272
+ 1.000000+4 4.421290+1 0.000000+0 1.034570-2 3.219840-2 0.000000+07443 2151  273
+ 1.200000+4 4.405760+1 0.000000+0 1.030940-2 3.224570-2 0.000000+07443 2151  274
+ 1.400000+4 4.390220+1 0.000000+0 1.027300-2 3.229190-2 0.000000+07443 2151  275
+ 1.600000+4 4.374810+1 0.000000+0 1.023680-2 3.233770-2 0.000000+07443 2151  276
+ 1.800000+4 4.359370+1 0.000000+0 1.020060-2 3.238230-2 0.000000+07443 2151  277
+ 2.000000+4 4.344070+1 0.000000+0 1.016470-2 3.242680-2 0.000000+07443 2151  278
+ 2.250000+4 4.324960+1 0.000000+0 1.011990-2 3.248100-2 0.000000+07443 2151  279
+ 2.500000+4 4.306020+1 0.000000+0 1.007540-2 3.253460-2 0.000000+07443 2151  280
+ 2.750000+4 4.287080+1 0.000000+0 1.003090-2 3.258670-2 0.000000+07443 2151  281
+ 3.000000+4 4.268290+1 0.000000+0 9.986760-3 3.263810-2 0.000000+07443 2151  282
+ 3.250000+4 4.249520+1 0.000000+0 9.942610-3 3.268790-2 0.000000+07443 2151  283
+ 3.500000+4 4.230900+1 0.000000+0 9.898770-3 3.273720-2 0.000000+07443 2151  284
+ 3.750000+4 4.212350+1 0.000000+0 9.855090-3 3.278530-2 0.000000+07443 2151  285
+ 4.000000+4 4.193880+1 0.000000+0 9.811590-3 3.283250-2 0.000000+07443 2151  286
+ 4.500000+4 4.157180+1 0.000000+0 9.725030-3 3.292360-2 0.000000+07443 2151  287
+ 5.000000+4 4.120800+1 0.000000+0 9.639110-3 3.301050-2 0.000000+07443 2151  288
+ 6.000000+4 4.049100+1 0.000000+0 9.469440-3 3.317310-2 0.000000+07443 2151  289
+ 7.000000+4 3.978680+1 0.000000+0 9.302310-3 3.332040-2 0.000000+07443 2151  290
+ 8.000000+4 3.909570+1 0.000000+0 9.137820-3 3.345330-2 0.000000+07443 2151  291
+ 9.000000+4 3.841760+1 0.000000+0 8.975940-3 3.357240-2 0.000000+07443 2151  292
+ 1.000000+5 3.775110+1 0.000000+0 8.816290-3 3.367710-2 0.000000+07443 2151  293
+ 2.500000+0 0.000000+0          2          0        132         217443 2151  294
+ 0.000000+0 0.000000+0 0.000000+0 1.000000+0 0.000000+0 0.000000+07443 2151  295
+ 1.000000+4 2.946490+1 0.000000+0 6.894740-3 2.975460-2 0.000000+07443 2151  296
+ 1.200000+4 2.935940+1 0.000000+0 6.870020-3 2.979710-2 0.000000+07443 2151  297
+ 1.400000+4 2.925380+1 0.000000+0 6.845280-3 2.983850-2 0.000000+07443 2151  298
+ 1.600000+4 2.914900+1 0.000000+0 6.820710-3 2.987960-2 0.000000+07443 2151  299
+ 1.800000+4 2.904410+1 0.000000+0 6.796130-3 2.991960-2 0.000000+07443 2151  300
+ 2.000000+4 2.894020+1 0.000000+0 6.771730-3 2.995950-2 0.000000+07443 2151  301
+ 2.250000+4 2.881040+1 0.000000+0 6.741280-3 3.000800-2 0.000000+07443 2151  302
+ 2.500000+4 2.868170+1 0.000000+0 6.711060-3 3.005600-2 0.000000+07443 2151  303
+ 2.750000+4 2.855310+1 0.000000+0 6.680850-3 3.010250-2 0.000000+07443 2151  304
+ 3.000000+4 2.842540+1 0.000000+0 6.650860-3 3.014830-2 0.000000+07443 2151  305
+ 3.250000+4 2.829800+1 0.000000+0 6.620880-3 3.019280-2 0.000000+07443 2151  306
+ 3.500000+4 2.817150+1 0.000000+0 6.591120-3 3.023670-2 0.000000+07443 2151  307
+ 3.750000+4 2.804560+1 0.000000+0 6.561460-3 3.027950-2 0.000000+07443 2151  308
+ 4.000000+4 2.792020+1 0.000000+0 6.531930-3 3.032140-2 0.000000+07443 2151  309
+ 4.500000+4 2.767110+1 0.000000+0 6.473180-3 3.040210-2 0.000000+07443 2151  310
+ 5.000000+4 2.742420+1 0.000000+0 6.414890-3 3.047900-2 0.000000+07443 2151  311
+ 6.000000+4 2.693770+1 0.000000+0 6.299800-3 3.062220-2 0.000000+07443 2151  312
+ 7.000000+4 2.646010+1 0.000000+0 6.186480-3 3.075110-2 0.000000+07443 2151  313
+ 8.000000+4 2.599160+1 0.000000+0 6.075000-3 3.086660-2 0.000000+07443 2151  314
+ 9.000000+4 2.553210+1 0.000000+0 5.965340-3 3.096910-2 0.000000+07443 2151  315
+ 1.000000+5 2.508050+1 0.000000+0 5.857250-3 3.105820-2 0.000000+07443 2151  316
+ 0.000000+0 0.000000+0          0          0          0          07443 2  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 7.418600+4 1.843570+2          0          0          0          07443 3 51    1
+ 0.000000+0-1.225800+5          0          0          1         897443 3 51    2
+         89          2                                            7443 3 51    3
+ 1.232450+5 0.000000+0 1.300000+5 1.153000-1 1.400000+5 1.832880-17443 3 51    4
+ 1.500000+5 2.353690-1 1.600000+5 2.799650-1 1.700000+5 3.193120-17443 3 51    5
+ 1.800000+5 3.558300-1 1.900000+5 3.897350-1 2.000000+5 4.216390-17443 3 51    6
+ 2.200000+5 4.842140-1 2.500000+5 5.781400-1 3.000000+5 7.208130-17443 3 51    7
+ 4.000000+5 9.887000-1 5.000000+5 1.195990+0 5.200000+5 1.226130+07443 3 51    8
+ 5.500000+5 1.274820+0 6.000000+5 1.340340+0 6.100000+5 1.349990+07443 3 51    9
+ 6.200000+5 1.359290+0 6.300000+5 1.368100+0 6.500000+5 1.382600+07443 3 51   10
+ 7.000000+5 1.421260+0 7.500000+5 1.438030+0 8.500000+5 1.415710+07443 3 51   11
+ 9.000000+5 1.399560+0 1.000000+6 1.340860+0 1.100000+6 1.202340+07443 3 51   12
+ 1.200000+6 1.092200+0 1.300000+6 9.980890-1 1.400000+6 9.350770-17443 3 51   13
+ 1.500000+6 8.933190-1 1.600000+6 8.387170-1 1.700000+6 7.948810-17443 3 51   14
+ 1.800000+6 7.483960-1 2.000000+6 6.750770-1 2.100000+6 6.576510-17443 3 51   15
+ 2.200000+6 6.244540-1 2.300000+6 5.915210-1 2.500000+6 5.462150-17443 3 51   16
+ 2.750000+6 4.960270-1 3.000000+6 4.315010-1 3.500000+6 3.670220-17443 3 51   17
+ 4.000000+6 3.370200-1 4.500000+6 3.167910-1 5.000000+6 2.989200-17443 3 51   18
+ 5.500000+6 2.804540-1 6.000000+6 2.623380-1 6.500000+6 2.445070-17443 3 51   19
+ 7.000000+6 2.270230-1 7.500000+6 2.110700-1 8.000000+6 1.965780-17443 3 51   20
+ 8.200000+6 1.911020-1 8.400000+6 1.858520-1 8.600000+6 1.808190-17443 3 51   21
+ 9.000000+6 1.713600-1 1.000000+7 1.507030-1 1.050000+7 1.422900-17443 3 51   22
+ 1.100000+7 1.344810-1 1.150000+7 1.272130-1 1.200000+7 1.204550-17443 3 51   23
+ 1.250000+7 1.141830-1 1.300000+7 1.086020-1 1.350000+7 1.034910-17443 3 51   24
+ 1.400000+7 9.876910-2 1.450000+7 9.440810-2 1.500000+7 9.037950-27443 3 51   25
+ 1.550000+7 8.665420-2 1.600000+7 8.322590-2 1.700000+7 7.719190-27443 3 51   26
+ 1.800000+7 7.202550-2 1.900000+7 6.761340-2 2.000000+7 6.385910-27443 3 51   27
+ 2.200000+7 5.809110-2 2.400000+7 5.390320-2 2.800000+7 4.833370-27443 3 51   28
+ 3.200000+7 4.472670-2 3.500000+7 4.271460-2 3.800000+7 4.107570-27443 3 51   29
+ 4.500000+7 3.786690-2 5.000000+7 3.580360-2 5.500000+7 3.378020-27443 3 51   30
+ 6.000000+7 3.184090-2 7.000000+7 2.833220-2 8.000000+7 2.525140-27443 3 51   31
+ 9.000000+7 2.254940-2 1.000000+8 2.024150-2 1.150000+8 1.748800-27443 3 51   32
+ 1.300000+8 1.540260-2 1.500000+8 1.326400-2                      7443 3 51   33
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 3  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 7.418600+4 1.843570+2          0          1          0          07443 4 51    1
+ 0.000000+0 1.843570+2          0          2          0          07443 4 51    2
+ 0.000000+0 0.000000+0          0          0          1         897443 4 51    3
+         89          2                                            7443 4 51    4
+ 0.000000+0 1.232449+5          0          0          2          07443 4 51    5
+ 0.000000+0 0.000000+0                                            7443 4 51    6
+ 0.000000+0 1.300000+5          0          0          2          07443 4 51    7
+ 3.514840-3 0.000000+0                                            7443 4 51    8
+ 0.000000+0 1.400000+5          0          0          2          07443 4 51    9
+ 6.094590-3 0.000000+0                                            7443 4 51   10
+ 0.000000+0 1.500000+5          0          0          2          07443 4 51   11
+ 8.216590-3 0.000000+0                                            7443 4 51   12
+ 0.000000+0 1.600000+5          0          0          2          07443 4 51   13
+ 1.012300-2 0.000000+0                                            7443 4 51   14
+ 0.000000+0 1.700000+5          0          0          2          07443 4 51   15
+ 1.185060-2 0.000000+0                                            7443 4 51   16
+ 0.000000+0 1.800000+5          0          0          2          07443 4 51   17
+ 1.342900-2 0.000000+0                                            7443 4 51   18
+ 0.000000+0 1.900000+5          0          0          2          07443 4 51   19
+ 1.489380-2 0.000000+0                                            7443 4 51   20
+ 0.000000+0 2.000000+5          0          0          2          07443 4 51   21
+ 1.624900-2 0.000000+0                                            7443 4 51   22
+ 0.000000+0 2.200000+5          0          0          2          07443 4 51   23
+ 1.855100-2 0.000000+0                                            7443 4 51   24
+ 0.000000+0 2.500000+5          0          0          2          07443 4 51   25
+ 2.099310-2 0.000000+0                                            7443 4 51   26
+ 0.000000+0 3.000000+5          0          0          2          07443 4 51   27
+ 2.329180-2 0.000000+0                                            7443 4 51   28
+ 0.000000+0 4.000000+5          0          0          4          07443 4 51   29
+ 2.482970-2-6.372410-3-1.800540-3 0.000000+0                      7443 4 51   30
+ 0.000000+0 5.000000+5          0          0          4          07443 4 51   31
+ 2.298110-2-1.128750-2-1.998850-3 0.000000+0                      7443 4 51   32
+ 0.000000+0 5.200000+5          0          0          4          07443 4 51   33
+ 2.252720-2-1.213680-2-1.976190-3 0.000000+0                      7443 4 51   34
+ 0.000000+0 5.500000+5          0          0          4          07443 4 51   35
+ 2.184090-2-1.327960-2-1.902770-3 0.000000+0                      7443 4 51   36
+ 0.000000+0 6.000000+5          0          0          4          07443 4 51   37
+ 2.072940-2-1.478170-2-1.664640-3 0.000000+0                      7443 4 51   38
+ 0.000000+0 6.100000+5          0          0          4          07443 4 51   39
+ 2.052340-2-1.501710-2-1.600800-3 0.000000+0                      7443 4 51   40
+ 0.000000+0 6.200000+5          0          0          4          07443 4 51   41
+ 2.031950-2-1.522980-2-1.529520-3 0.000000+0                      7443 4 51   42
+ 0.000000+0 6.300000+5          0          0          4          07443 4 51   43
+ 2.012220-2-1.541770-2-1.453700-3 0.000000+0                      7443 4 51   44
+ 0.000000+0 6.500000+5          0          0          4          07443 4 51   45
+ 1.974640-2-1.572300-2-1.285820-3 0.000000+0                      7443 4 51   46
+ 0.000000+0 7.000000+5          0          0          4          07443 4 51   47
+ 1.898650-2-1.763230-2-7.751200-4 1.968540-3                      7443 4 51   48
+ 0.000000+0 7.500000+5          0          0          4          07443 4 51   49
+ 1.864730-2-1.777290-2-1.391280-4 2.211490-3                      7443 4 51   50
+ 0.000000+0 8.500000+5          0          0          4          07443 4 51   51
+ 1.841460-2-1.763760-2 1.614030-3 2.614480-3                      7443 4 51   52
+ 0.000000+0 9.000000+5          0          0          4          07443 4 51   53
+ 1.923090-2-1.664150-2 2.647480-3 2.787310-3                      7443 4 51   54
+ 0.000000+0 1.000000+6          0          0          4          07443 4 51   55
+ 2.172210-2-1.385500-2 5.055210-3 2.975020-3                      7443 4 51   56
+ 0.000000+0 1.100000+6          0          0          6          07443 4 51   57
+ 2.680380-2-1.086390-2 9.421560-3 3.009750-3-1.734560-3 0.000000+07443 4 51   58
+ 0.000000+0 1.200000+6          0          0          6          07443 4 51   59
+ 3.260120-2-7.349680-3 1.340220-2 2.672000-3-2.261980-3 0.000000+07443 4 51   60
+ 0.000000+0 1.300000+6          0          0          6          07443 4 51   61
+ 4.015840-2-3.841440-3 1.806180-2 2.001990-3-2.782530-3 0.000000+07443 4 51   62
+ 0.000000+0 1.400000+6          0          0          6          07443 4 51   63
+ 4.920100-2-7.366670-4 2.317590-2 1.050010-4-3.165420-3 1.347560-37443 4 51   64
+ 0.000000+0 1.500000+6          0          0          6          07443 4 51   65
+ 5.814110-2 2.356630-3 2.784700-2-1.378720-3-3.194920-3 1.806330-37443 4 51   66
+ 0.000000+0 1.600000+6          0          0          6          07443 4 51   67
+ 6.976450-2 5.336610-3 3.329570-2-2.896450-3-2.944180-3 2.347810-37443 4 51   68
+ 0.000000+0 1.700000+6          0          0          6          07443 4 51   69
+ 8.101260-2 8.234120-3 3.802570-2-4.153560-3-2.231860-3 2.826490-37443 4 51   70
+ 0.000000+0 1.800000+6          0          0          8          07443 4 51   71
+ 9.489230-2 1.150910-2 4.372870-2-5.111550-3-1.025780-5 3.287420-37443 4 51   72
+-1.787860-3 0.000000+0                                            7443 4 51   73
+ 0.000000+0 2.000000+6          0          0          8          07443 4 51   74
+ 1.219940-1 1.911270-2 5.316070-2-5.472440-3 3.686130-3 3.706120-37443 4 51   75
+-2.877590-3 0.000000+0                                            7443 4 51   76
+ 0.000000+0 2.100000+6          0          0          8          07443 4 51   77
+ 1.371780-1 2.385200-2 5.810570-2-4.966480-3 5.791610-3 3.634900-37443 4 51   78
+-3.508720-3 0.000000+0                                            7443 4 51   79
+ 0.000000+0 2.200000+6          0          0          8          07443 4 51   80
+ 1.514190-1 2.887080-2 6.240880-2-3.988180-3 7.827930-3 3.270140-37443 4 51   81
+-4.132700-3 0.000000+0                                            7443 4 51   82
+ 0.000000+0 2.300000+6          0          0          8          07443 4 51   83
+ 1.653350-1 3.415780-2 6.637920-2-2.652530-3 9.681540-3 2.603050-37443 4 51   84
+-4.747780-3 0.000000+0                                            7443 4 51   85
+ 0.000000+0 2.500000+6          0          0          8          07443 4 51   86
+ 1.911920-1 4.449690-2 7.293790-2 2.869410-4 1.231950-2-1.093680-37443 4 51   87
+-5.862110-3 2.108040-3                                            7443 4 51   88
+ 0.000000+0 2.750000+6          0          0          8          07443 4 51   89
+ 2.174570-1 5.548230-2 7.722670-2 4.294360-3 1.243970-2-7.073790-37443 4 51   90
+-6.744690-3 3.563190-3                                            7443 4 51   91
+ 0.000000+0 3.000000+6          0          0          8          07443 4 51   92
+ 2.355790-1 6.169400-2 7.567820-2 6.455410-3 7.993550-3-1.547240-27443 4 51   93
+-6.626280-3 5.471450-3                                            7443 4 51   94
+ 0.000000+0 3.500000+6          0          0         10          07443 4 51   95
+ 2.524780-1 5.835950-2 5.494370-2 4.250590-4-1.276730-2-3.503190-27443 4 51   96
+-1.383050-3 9.773240-3-1.438020-3 0.000000+0                      7443 4 51   97
+ 0.000000+0 4.000000+6          0          0         10          07443 4 51   98
+ 2.589530-1 4.564840-2 2.384820-2-1.508530-2-3.626180-2-4.828480-27443 4 51   99
+ 7.381790-3 1.086610-2-2.559160-3 1.923670-3                      7443 4 51  100
+ 0.000000+0 4.500000+6          0          0         10          07443 4 51  101
+ 2.671160-1 3.890130-2 1.791040-3-2.683960-2-4.757590-2-4.969140-27443 4 51  102
+ 1.402810-2 7.709910-3-3.213740-3 3.836300-3                      7443 4 51  103
+ 0.000000+0 5.000000+6          0          0         10          07443 4 51  104
+ 2.787870-1 4.207290-2-5.939210-3-2.987360-2-4.663420-2-4.446250-27443 4 51  105
+ 1.500840-2 1.081790-3-2.792260-3 6.220380-3                      7443 4 51  106
+ 0.000000+0 5.500000+6          0          0         10          07443 4 51  107
+ 2.913970-1 5.178380-2-4.590790-3-2.725590-2-4.061170-2-3.898090-27443 4 51  108
+ 1.134750-2-6.063370-3-1.122660-3 8.676190-3                      7443 4 51  109
+ 0.000000+0 6.000000+6          0          0         10          07443 4 51  110
+ 3.028720-1 6.407750-2 1.377470-4-2.284220-2-3.450830-2-3.580040-27443 4 51  111
+ 5.727550-3-1.143810-2 1.636600-3 1.082390-2                      7443 4 51  112
+ 0.000000+0 6.500000+6          0          0         10          07443 4 51  113
+ 3.130150-1 7.696770-2 5.401510-3-1.851690-2-2.987380-2-3.452280-27443 4 51  114
+ 3.617320-4-1.397740-2 5.124940-3 1.233480-2                      7443 4 51  115
+ 0.000000+0 7.000000+6          0          0         12          07443 4 51  116
+ 3.229490-1 9.012040-2 1.065490-2-1.461550-2-2.628940-2-3.385740-27443 4 51  117
+-3.281740-3-1.383880-2 9.214710-3 1.217460-2-6.664470-4 1.382360-37443 4 51  118
+ 0.000000+0 7.500000+6          0          0         12          07443 4 51  119
+ 3.337260-1 1.040090-1 1.612480-2-1.042270-2-2.295420-2-3.227120-27443 4 51  120
+-4.912470-3-1.136440-2 1.248950-2 1.146310-2-6.225870-4 2.184700-37443 4 51  121
+ 0.000000+0 8.000000+6          0          0         12          07443 4 51  122
+ 3.461370-1 1.187110-1 2.218680-2-5.455370-3-1.908460-2-2.920690-27443 4 51  123
+-4.604760-3-7.796170-3 1.472310-2 9.850840-3-2.663020-4 3.260410-37443 4 51  124
+ 0.000000+0 8.200000+6          0          0         14          07443 4 51  125
+ 3.515460-1 1.247710-1 2.472210-2-3.196380-3-1.740690-2-2.756250-27443 4 51  126
+-4.179990-3-6.302600-3 1.505570-2 9.015610-3-7.295580-4 3.767180-37443 4 51  127
+ 1.215900-3 0.000000+0                                            7443 4 51  128
+ 0.000000+0 8.400000+6          0          0         14          07443 4 51  129
+ 3.573050-1 1.309020-1 2.742310-2-7.849610-4-1.553280-2-2.571220-27443 4 51  130
+-3.476130-3-4.850950-3 1.535090-2 8.106270-3-5.611140-4 4.312780-37443 4 51  131
+ 1.455480-3 0.000000+0                                            7443 4 51  132
+ 0.000000+0 8.600000+6          0          0         14          07443 4 51  133
+ 3.633360-1 1.370780-1 3.022240-2 1.770520-3-1.354670-2-2.368870-27443 4 51  134
+-2.632130-3-3.474700-3 1.545220-2 7.147930-3-3.487600-4 4.895290-37443 4 51  135
+ 1.724900-3 0.000000+0                                            7443 4 51  136
+ 0.000000+0 9.000000+6          0          0         14          07443 4 51  137
+ 3.761150-1 1.494770-1 3.611540-2 7.272470-3-9.292940-3-1.925510-27443 4 51  138
+-6.644450-4-1.032430-3 1.516300-2 5.191750-3 1.991320-4 6.149430-37443 4 51  139
+ 2.350870-3 0.000000+0                                            7443 4 51  140
+ 0.000000+0 1.000000+7          0          0         14          07443 4 51  141
+ 4.107240-1 1.800530-1 5.280270-2 2.273500-2 2.450570-3-7.149620-37443 4 51  142
+ 5.055610-3 3.326350-3 1.316430-2 9.367790-4 2.057090-3 8.608680-37443 4 51  143
+ 4.354640-3 1.510900-3                                            7443 4 51  144
+ 0.000000+0 1.050000+7          0          0         14          07443 4 51  145
+ 4.282940-1 1.948880-1 6.237270-2 3.125890-2 8.828230-3-7.800710-47443 4 51  146
+ 8.294230-3 5.264230-3 1.253930-2-1.397970-4 3.056510-3 9.786840-37443 4 51  147
+ 5.517400-3 2.127050-3                                            7443 4 51  148
+ 0.000000+0 1.100000+7          0          0         16          07443 4 51  149
+ 4.452720-1 2.092710-1 7.268430-2 4.015790-2 1.550410-2 5.793260-37443 4 51  150
+ 1.186430-2 7.490850-3 1.253020-2-3.843000-4 3.693180-3 1.060730-27443 4 51  151
+ 5.800670-3 2.906170-3 1.603120-3 0.000000+0                      7443 4 51  152
+ 0.000000+0 1.150000+7          0          0         16          07443 4 51  153
+ 4.614210-1 2.230770-1 8.370270-2 4.930150-2 2.262840-2 1.259620-27443 4 51  154
+ 1.604110-2 1.021710-2 1.347980-2 1.635900-4 4.275320-3 1.093410-27443 4 51  155
+ 6.598440-3 3.869470-3 2.273660-3 0.000000+0                      7443 4 51  156
+ 0.000000+0 1.200000+7          0          0         16          07443 4 51  157
+ 4.764830-1 2.361920-1 9.509720-2 5.845980-2 3.003450-2 1.956070-27443 4 51  158
+ 2.072750-2 1.348140-2 1.517330-2 1.361520-3 4.552200-3 1.067210-27443 4 51  159
+ 7.199590-3 5.019250-3 3.136270-3 0.000000+0                      7443 4 51  160
+ 0.000000+0 1.250000+7          0          0         16          07443 4 51  161
+ 4.903960-1 2.484840-1 1.065650-1 6.732620-2 3.752080-2 2.645760-27443 4 51  162
+ 2.575920-2 1.709380-2 1.735980-2 2.869640-3 4.482180-3 9.572760-37443 4 51  163
+ 7.519740-3 5.638570-3 4.207540-3 1.230010-3                      7443 4 51  164
+ 0.000000+0 1.300000+7          0          0         16          07443 4 51  165
+ 5.031240-1 2.599750-1 1.178270-1 7.577210-2 4.484310-2 3.317070-27443 4 51  166
+ 3.086920-2 2.096660-2 1.971490-2 4.607840-3 4.067190-3 7.966830-37443 4 51  167
+ 7.480720-3 6.798870-3 5.491530-3 1.736160-3                      7443 4 51  168
+ 0.000000+0 1.350000+7          0          0         18          07443 4 51  169
+ 5.147040-1 2.706160-1 1.286170-1 8.357130-2 5.170810-2 3.941010-27443 4 51  170
+ 3.569790-2 2.477780-2 2.186690-2 6.245210-3 3.257290-3 5.795480-37443 4 51  171
+ 6.850550-3 7.935420-3 6.389910-3 2.387560-3 1.038060-3 0.000000+07443 4 51  172
+ 0.000000+0 1.400000+7          0          0         18          07443 4 51  173
+ 5.252840-1 2.804320-1 1.388500-1 9.061710-2 5.800210-2 4.496070-27443 4 51  174
+ 4.005580-2 2.825770-2 2.367750-2 7.555620-3 2.262700-3 3.190060-37443 4 51  175
+ 5.852630-3 8.947470-3 7.801690-3 3.202890-3 1.475440-3 0.000000+07443 4 51  176
+ 0.000000+0 1.450000+7          0          0         18          07443 4 51  177
+ 5.349290-1 2.894670-1 1.484070-1 9.686620-2 6.356380-2 4.966010-27443 4 51  178
+ 4.370050-2 3.118710-2 2.494820-2 8.377620-3 1.078910-3 3.164120-47443 4 51  179
+ 4.356850-3 9.722990-3 9.259870-3 4.189890-3 2.044440-3 0.000000+07443 4 51  180
+ 0.000000+0 1.500000+7          0          0         18          07443 4 51  181
+ 5.437660-1 2.977740-1 1.572650-1 1.023420-1 6.834480-2 5.343020-27443 4 51  182
+ 4.649470-2 3.340050-2 2.559040-2 8.616210-3-2.531180-4-2.648800-37443 4 51  183
+ 2.400450-3 1.014900-2 1.068980-2 5.347440-3 2.763880-3 0.000000+07443 4 51  184
+ 0.000000+0 1.550000+7          0          0         18          07443 4 51  185
+ 5.517910-1 3.053750-1 1.653710-1 1.070580-1 7.234300-2 5.615790-27443 4 51  186
+ 4.840690-2 3.469310-2 2.560020-2 8.133090-3-1.731030-3-5.658040-37443 4 51  187
+ 3.254310-5 9.948580-3 1.197790-2 5.944910-3 3.651950-3 1.283370-37443 4 51  188
+ 0.000000+0 1.600000+7          0          0         18          07443 4 51  189
+ 5.591550-1 3.123650-1 1.727670-1 1.111620-1 7.558110-2 5.799010-27443 4 51  190
+ 4.941580-2 3.516750-2 2.497960-2 7.109520-3-3.359830-3-8.395100-37443 4 51  191
+-2.629410-3 9.365300-3 1.303910-2 7.149890-3 4.721910-3 1.737670-37443 4 51  192
+ 0.000000+0 1.700000+7          0          0         20          07443 4 51  193
+ 5.721460-1 3.246550-1 1.854760-1 1.177830-1 7.997840-2 5.915760-27443 4 51  194
+ 4.889170-2 3.360160-2 2.194850-2 3.550640-3-7.238870-3-1.301320-27443 4 51  195
+-8.437840-3 6.497810-3 1.387720-2 9.645520-3 6.804530-3 2.997770-37443 4 51  196
+ 1.108340-3 0.000000+0                                            7443 4 51  197
+ 0.000000+0 1.800000+7          0          0         20          07443 4 51  198
+ 5.833450-1 3.349010-1 1.956530-1 1.228040-1 8.220290-2 5.784260-27443 4 51  199
+ 4.563480-2 2.937090-2 1.699880-2-1.250350-3-1.188090-2-1.649870-27443 4 51  200
+-1.394230-2 1.466410-3 1.275350-2 1.189710-2 9.748760-3 4.807740-37443 4 51  201
+ 1.933390-3 0.000000+0                                            7443 4 51  202
+ 0.000000+0 1.900000+7          0          0         20          07443 4 51  203
+ 5.932560-1 3.433090-1 2.035170-1 1.266420-1 8.290740-2 5.505820-27443 4 51  204
+ 4.045110-2 2.346940-2 1.057670-2-6.589250-3-1.723620-2-1.954890-27443 4 51  205
+-1.862790-2-5.274880-3 9.288240-3 1.323760-2 1.296130-2 6.571900-37443 4 51  206
+ 3.160010-3 1.150820-3                                            7443 4 51  207
+ 0.000000+0 2.000000+7          0          0         20          07443 4 51  208
+ 6.022740-1 3.501590-1 2.093260-1 1.296110-1 8.262910-2 5.158650-27443 4 51  209
+ 3.408200-2 1.673760-2 3.087680-3-1.216570-2-2.313700-2-2.299400-27443 4 51  210
+-2.245280-2-1.269110-2 3.696230-3 1.344940-2 1.605380-2 9.148540-37443 4 51  211
+ 4.888720-3 1.916440-3                                            7443 4 51  212
+ 0.000000+0 2.200000+7          0          0         22          07443 4 51  213
+ 6.186820-1 3.604140-1 2.163570-1 1.337030-1 8.043630-2 4.383330-27443 4 51  214
+ 1.988580-2 1.838240-3-1.390000-2-2.511800-2-3.597850-2-3.351110-27443 4 51  215
+-2.910690-2-2.605540-2-1.140440-2 8.814790-3 1.968560-2 1.506910-27443 4 51  216
+ 9.128820-3 4.615590-3 1.829250-3 0.000000+0                      7443 4 51  217
+ 0.000000+0 2.400000+7          0          0         22          07443 4 51  218
+ 6.341010-1 3.684000-1 2.204560-1 1.364890-1 7.787300-2 3.673210-27443 4 51  219
+ 6.873530-3-1.354280-2-3.076350-2-4.065120-2-4.855460-2-4.740770-27443 4 51  220
+-3.665940-2-3.421720-2-2.626230-2-3.049570-3 1.731130-2 2.000910-27443 4 51  221
+ 1.545290-2 8.480820-3 4.211060-3 1.664970-3                      7443 4 51  222
+ 0.000000+0 2.800000+7          0          0         24          07443 4 51  223
+ 6.655090-1 3.865120-1 2.280910-1 1.403350-1 7.776170-2 3.233720-27443 4 51  224
+-5.257830-3-3.211380-2-5.124520-2-6.368460-2-6.627800-2-6.618460-27443 4 51  225
+-5.422340-2-4.103490-2-4.069460-2-3.325240-2-7.609480-3 1.706840-27443 4 51  226
+ 2.600900-2 2.089260-2 1.267330-2 6.299170-3 2.975610-3 1.170230-37443 4 51  227
+ 0.000000+0 3.200000+7          0          0         26          07443 4 51  228
+ 6.996110-1 4.142440-1 2.415710-1 1.470850-1 8.625740-2 4.019530-27443 4 51  229
+ 2.249690-3-2.791350-2-4.945960-2-6.392360-2-6.913400-2-6.766580-27443 4 51  230
+-6.153660-2-4.792000-2-4.019070-2-4.439430-2-3.597000-2-7.236460-37443 4 51  231
+ 1.997680-2 2.977870-2 2.531630-2 1.614550-2 8.598000-3 4.007360-37443 4 51  232
+ 1.858460-3 7.372870-4                                            7443 4 51  233
+ 0.000000+0 3.500000+7          0          0         28          07443 4 51  234
+ 7.254410-1 4.414350-1 2.583170-1 1.571620-1 9.615760-2 5.152140-27443 4 51  235
+ 1.584990-2-1.422640-2-3.647220-2-5.206310-2-5.997360-2-6.037200-27443 4 51  236
+-5.667450-2-4.834620-2-3.861300-2-4.112140-2-4.504110-2-2.838120-27443 4 51  237
+ 3.122260-3 2.700420-2 3.256440-2 2.572290-2 1.599990-2 8.471650-37443 4 51  238
+ 4.019890-3 1.751370-3 7.852060-4 3.091030-4                      7443 4 51  239
+ 0.000000+0 3.800000+7          0          0         28          07443 4 51  240
+ 7.499270-1 4.720500-1 2.803500-1 1.714730-1 1.082390-1 6.546310-27443 4 51  241
+ 3.210220-2 4.207210-3-1.785950-2-3.374830-2-4.376770-2-4.702960-27443 4 51  242
+-4.591260-2-4.226990-2-3.572090-2-3.548320-2-4.387850-2-4.170300-27443 4 51  243
+-1.702620-2 1.488390-2 3.325080-2 3.396600-2 2.517540-2 1.525540-27443 4 51  244
+ 8.090490-3 3.859260-3 1.890340-3 7.935150-4                      7443 4 51  245
+ 0.000000+0 4.500000+7          0          0         30          07443 4 51  246
+ 7.995520-1 5.480420-1 3.469330-1 2.195430-1 1.451660-1 1.011520-17443 4 51  247
+ 7.109510-2 4.866850-2 2.992950-2 1.507900-2 3.474220-3-5.115540-37443 4 51  248
+-1.030340-2-1.433340-2-1.755550-2-2.093680-2-2.858470-2-4.035740-27443 4 51  249
+-4.284180-2-2.441640-2 6.959320-3 3.217630-2 4.070250-2 3.544440-27443 4 51  250
+ 2.481640-2 1.490940-2 8.088300-3 4.016050-3 2.104930-3 9.415160-47443 4 51  251
+ 0.000000+0 5.000000+7          0          0         34          07443 4 51  252
+ 8.282960-1 5.991760-1 4.000390-1 2.625370-1 1.780480-1 1.279430-17443 4 51  253
+ 9.681630-2 7.524310-2 5.881900-2 4.498460-2 3.369100-2 2.364850-27443 4 51  254
+ 1.524490-2 7.775670-3-1.248390-4-8.008940-3-1.734750-2-3.002650-27443 4 51  255
+-4.114390-2-3.900140-2-1.780020-2 1.272690-2 3.612990-2 4.385240-27443 4 51  256
+ 3.857470-2 2.779100-2 1.737360-2 9.793730-3 5.103110-3 2.530180-37443 4 51  257
+ 1.195120-3 6.138400-4 2.751490-4 0.000000+0                      7443 4 51  258
+ 0.000000+0 5.500000+7          0          0         34          07443 4 51  259
+ 8.516110-1 6.441470-1 4.520300-1 3.085740-1 2.144290-1 1.562550-17443 4 51  260
+ 1.207300-1 9.750620-2 8.111270-2 6.790270-2 5.653100-2 4.616930-27443 4 51  261
+ 3.592060-2 2.613600-2 1.567920-2 4.393930-3-7.145450-3-2.035010-27443 4 51  262
+-3.414530-2-4.137770-2-3.328120-2-9.320580-3 1.979020-2 4.045970-27443 4 51  263
+ 4.650800-2 4.075740-2 2.988350-2 1.922470-2 1.122620-2 6.079290-37443 4 51  264
+ 3.141920-3 1.546250-3 8.364100-4 3.904900-4                      7443 4 51  265
+ 0.000000+0 6.000000+7          0          0         36          07443 4 51  266
+ 8.703600-1 6.826580-1 5.000620-1 3.545520-1 2.525410-1 1.859670-17443 4 51  267
+ 1.439050-1 1.168820-1 9.831840-2 8.437140-2 7.238850-2 6.145960-27443 4 51  268
+ 5.042480-2 3.902660-2 2.723090-2 1.420390-2 7.393080-4-1.290730-27443 4 51  269
+-2.724330-2-3.869460-2-3.975900-2-2.561470-2 3.076360-4 2.726890-27443 4 51  270
+ 4.465690-2 4.855330-2 4.208260-2 3.113430-2 2.045850-2 1.226570-27443 4 51  271
+ 6.865110-3 3.638850-3 1.871170-3 9.261340-4 5.091970-4 2.415210-47443 4 51  272
+ 0.000000+0 7.000000+7          0          0         40          07443 4 51  273
+ 8.973560-1 7.416690-1 5.797750-1 4.382760-1 3.274420-1 2.467350-17443 4 51  274
+ 1.904370-1 1.518250-1 1.248960-1 1.051270-1 8.948150-2 7.574730-27443 4 51  275
+ 6.282890-2 4.979200-2 3.624140-2 2.231770-2 7.719000-3-6.906720-37443 4 51  276
+-2.051270-2-3.296740-2-4.184240-2-4.160050-2-2.871150-2-5.634140-37443 4 51  277
+ 2.032800-2 4.097060-2 5.113000-2 5.047760-2 4.245010-2 3.157300-27443 4 51  278
+ 2.130020-2 1.329000-2 7.798150-3 4.360440-3 2.354830-3 1.235850-37443 4 51  279
+ 6.430690-4 3.261720-4 1.876800-4 9.272450-5                      7443 4 51  280
+ 0.000000+0 8.000000+7          0          0         44          07443 4 51  281
+ 9.148120-1 7.818230-1 6.381860-1 5.053960-1 3.932600-1 3.042190-17443 4 51  282
+ 2.363920-1 1.858930-1 1.484070-1 1.200460-1 9.770420-2 7.913480-27443 4 51  283
+ 6.266840-2 4.734710-2 3.249340-2 1.777600-2 3.368310-3-1.070880-27443 4 51  284
+-2.395410-2-3.522630-2-4.397980-2-4.870790-2-4.544910-2-3.136700-27443 4 51  285
+-8.660980-3 1.647280-2 3.755730-2 5.037940-2 5.379750-2 4.939850-27443 4 51  286
+ 4.035000-2 2.993670-2 2.050000-2 1.313530-2 7.974850-3 4.637380-37443 4 51  287
+ 2.608970-3 1.431850-3 7.734270-4 4.107630-4 2.180890-4 1.134100-47443 4 51  288
+ 6.782580-5 3.476860-5                                            7443 4 51  289
+ 0.000000+0 9.000000+7          0          0         48          07443 4 51  290
+ 9.263490-1 8.091060-1 6.795520-1 5.558990-1 4.464150-1 3.541310-17443 4 51  291
+ 2.790050-1 2.192580-1 1.722290-1 1.350790-1 1.052290-1 8.055200-27443 4 51  292
+ 5.945020-2 4.073140-2 2.366510-2 7.793820-3-7.094080-3-2.083160-27443 4 51  293
+-3.324440-2-4.392270-2-5.189320-2-5.645660-2-5.665840-2-4.988090-27443 4 51  294
+-3.390960-2-1.057950-2 1.447800-2 3.545730-2 4.899850-2 5.436540-27443 4 51  295
+ 5.261600-2 4.585770-2 3.658730-2 2.703270-2 1.868410-2 1.219950-27443 4 51  296
+ 7.595750-3 4.551500-3 2.646680-3 1.503600-3 8.397250-4 4.641740-47443 4 51  297
+ 2.523540-4 1.369600-4 7.264960-5 4.376030-5 2.220380-5 0.000000+07443 4 51  298
+ 0.000000+0 1.000000+8          0          0         50          07443 4 51  299
+ 9.342350-1 8.279580-1 7.087020-1 5.928090-1 4.873400-1 3.949380-17443 4 51  300
+ 3.161640-1 2.503580-1 1.960990-1 1.515410-1 1.147790-1 8.406880-27443 4 51  301
+ 5.795950-2 3.533720-2 1.537880-2-2.431820-3-1.838580-2-3.258840-27443 4 51  302
+-4.488440-2-5.504760-2-6.273300-2-6.718460-2-6.772410-2-6.372670-27443 4 51  303
+-5.358300-2-3.573740-2-1.168530-2 1.353530-2 3.442460-2 4.795960-27443 4 51  304
+ 5.389840-2 5.350880-2 4.852740-2 4.077080-2 3.196800-2 2.353480-27443 4 51  305
+ 1.637260-2 1.084030-2 6.882780-3 4.221300-3 2.519790-3 1.473170-37443 4 51  306
+ 8.481170-4 4.824380-4 2.727720-4 1.518130-4 8.503350-5 4.657840-57443 4 51  307
+ 3.036030-5 1.669450-5                                            7443 4 51  308
+ 0.000000+0 1.150000+8          0          0         56          07443 4 51  309
+ 9.420390-1 8.466210-1 7.376450-1 6.301310-1 5.303610-1 4.402790-17443 4 51  310
+ 3.602710-1 2.901700-1 2.294700-1 1.773460-1 1.327580-1 9.460090-27443 4 51  311
+ 6.182620-2 3.352060-2 8.956900-3-1.240740-2-3.093960-2-4.683520-27443 4 51  312
+-6.016350-2-7.086380-2-7.874590-2-8.358290-2-8.501670-2-8.250950-27443 4 51  313
+-7.567370-2-6.409600-2-4.696210-2-2.428010-2 1.240140-3 2.466680-27443 4 51  314
+ 4.172250-2 5.096960-2 5.352050-2 5.139940-2 4.635150-2 3.961650-27443 4 51  315
+ 3.215230-2 2.479000-2 1.818830-2 1.274080-2 8.564300-3 5.556090-37443 4 51  316
+ 3.499070-3 2.152540-3 1.300730-3 7.753580-4 4.574240-4 2.670860-47443 4 51  317
+ 1.543880-4 8.772620-5 4.885620-5 2.750590-5 1.585420-5 8.580280-67443 4 51  318
+ 5.233900-6 2.624890-6                                            7443 4 51  319
+ 0.000000+0 1.300000+8          0          0         64          07443 4 51  320
+ 9.472170-1 8.588120-1 7.562470-1 6.539450-1 5.582250-1 4.708540-17443 4 51  321
+ 3.918560-1 3.209090-1 2.576260-1 2.016610-1 1.524760-1 1.094270-17443 4 51  322
+ 7.184560-2 3.908170-2 1.057450-2-1.417590-2-3.552490-2-5.368010-27443 4 51  323
+-6.881240-2-8.096230-2-9.009510-2-9.610780-2-9.879590-2-9.801630-27443 4 51  324
+-9.348820-2-8.491040-2-7.216280-2-5.515660-2-3.386510-2-9.408370-37443 4 51  325
+ 1.493600-2 3.485430-2 4.740880-2 5.243290-2 5.184450-2 4.802470-27443 4 51  326
+ 4.266540-2 3.661560-2 3.032020-2 2.414340-2 1.842980-2 1.348820-27443 4 51  327
+ 9.495550-3 6.448630-3 4.250580-3 2.726920-3 1.713210-3 1.065030-37443 4 51  328
+ 6.530050-4 3.972530-4 2.402950-4 1.378870-4 7.914840-5 4.815100-57443 4 51  329
+ 2.867060-5 1.677320-5 6.144060-6 6.611720-6 8.141120-6 1.473410-67443 4 51  330
+-6.666190-7-1.476330-6-3.246000-6-1.251310-6                      7443 4 51  331
+ 0.000000+0 1.500000+8          0          0         64          07443 4 51  332
+ 9.521880-1 8.706300-1 7.738870-1 6.757980-1 5.832700-1 4.984020-17443 4 51  333
+ 4.211620-1 3.509470-1 2.871820-1 2.295400-1 1.777250-1 1.313390-17443 4 51  334
+ 9.004180-2 5.349360-2 2.129320-2-6.927660-3-3.145340-2-5.251350-27443 4 51  335
+-7.028120-2-8.486340-2-9.628870-2-1.045640-1-1.096760-1-1.115120-17443 4 51  336
+-1.099900-1-1.050180-1-9.649310-2-8.438180-2-6.873200-2-4.980380-27443 4 51  337
+-2.808620-2-4.715640-3 1.787860-2 3.633910-2 4.801020-2 5.236510-27443 4 51  338
+ 5.101170-2 4.650820-2 4.093500-2 3.537970-2 3.013230-2 2.513820-27443 4 51  339
+ 2.039900-2 1.600650-2 1.210280-2 8.829140-3 6.234980-3 4.268730-37443 4 51  340
+ 2.853200-3 1.872950-3 1.202580-3 7.643530-4 4.805520-4 3.000160-47443 4 51  341
+ 1.870780-4 1.128470-4 6.790900-5 3.945260-5 2.486310-5 1.588780-57443 4 51  342
+ 5.904820-6 1.749530-6 3.546260-6 2.141320-6                      7443 4 51  343
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 4  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 7.418600+4 1.843570+2          0          1          0          1744334 51    1
+ 0.000000+0 0.000000+0          0         51          1          1744334 51    2
+ 0.000000+0 0.000000+0          1          1          1          1744334 51    3
+ 0.000000+0 0.000000+0          1          5        595         34744334 51    4
+ 8.154800+4 1.129500+5 1.421900+5 1.790100+5 2.253600+5 2.837100+5744334 51    5
+ 3.571700+5 4.496500+5 5.660700+5 7.126400+5 8.971600+5 1.129500+6744334 51    6
+ 1.421900+6 1.790100+6 2.253600+6 2.837100+6 3.571700+6 4.496500+6744334 51    7
+ 5.660700+6 7.126400+6 8.971600+6 1.129500+7 1.421900+7 1.790100+7744334 51    8
+ 2.253600+7 2.837100+7 3.571700+7 4.496500+7 5.660700+7 7.126400+7744334 51    9
+ 8.971600+7 1.129500+8 1.379500+8 1.500000+8 2.837180-5-8.847710-6744334 51   10
+-3.399460-6-4.167170-6-3.676620-6-3.477360-6-3.218980-6-2.967860-6744334 51   11
+-2.728650-6-1.367670-6-2.806210-6-2.550640-6-2.444180-6-2.317310-6744334 51   12
+-2.090690-6-1.098160-6 1.692330-6 1.818440-6 1.850070-6 1.979570-6744334 51   13
+ 2.148040-6 2.255780-6 2.339190-6 2.459990-6 2.527570-6 2.619760-6744334 51   14
+ 2.727050-6 2.862040-6 2.991880-6 3.131760-6 3.259760-6 3.368610-6744334 51   15
+ 3.504840-6 9.732790-4 8.002410-4 1.006550-3 1.087910-3 1.050770-3744334 51   16
+ 1.206020-3 5.232530-4-2.182260-4-8.633000-4-1.084550-3-7.736010-4744334 51   17
+-3.051610-4 1.944850-4 6.984940-4 9.370800-4 8.052580-4 8.149470-4744334 51   18
+ 1.086430-3 1.277450-3 1.392450-3 1.402260-3 1.443550-3 1.509990-3744334 51   19
+ 1.626860-3 1.742820-3 1.757070-3 1.672830-3 1.539080-3 1.397480-3744334 51   20
+ 1.257860-3 1.114750-3 1.032580-3 1.399050-3 1.697620-3 1.832750-3744334 51   21
+ 1.861250-3 2.210670-3 1.511220-3 7.762400-4-1.636310-5-6.059540-4744334 51   22
+-3.142240-4 4.339260-4 1.119640-3 1.534730-3 1.680080-3 1.446930-3744334 51   23
+ 1.424910-3 1.616130-3 1.772230-3 1.893870-3 1.877740-3 1.880050-3744334 51   24
+ 1.918870-3 1.994310-3 2.069240-3 2.054570-3 1.954810-3 1.810670-3744334 51   25
+ 1.656800-3 1.503820-3 1.345880-3 1.257500-3 2.038400-3 2.185710-3744334 51   26
+ 2.233350-3 2.652000-3 1.905820-3 1.122490-3 2.168470-4-5.339940-4744334 51   27
+-2.361420-4 6.363000-4 1.417520-3 1.840330-3 1.967970-3 1.685400-3744334 51   28
+ 1.663870-3 1.859800-3 2.015360-3 2.150080-3 2.129260-3 2.122080-3744334 51   29
+ 2.153030-3 2.219840-3 2.284760-3 2.255150-3 2.135530-3 1.968080-3744334 51   30
+ 1.788780-3 1.609840-3 1.425550-3 1.319910-3 2.366230-3 2.431900-3744334 51   31
+ 2.900740-3 2.175040-3 1.381060-3 3.772320-4-5.213090-4-2.533460-4744334 51   32
+ 6.577170-4 1.479800-3 1.938110-3 2.083730-3 1.776650-3 1.760830-3744334 51   33
+ 1.962620-3 2.108280-3 2.243720-3 2.226010-3 2.216910-3 2.241540-3744334 51   34
+ 2.300520-3 2.356970-3 2.318030-3 2.188090-3 2.008990-3 1.816630-3744334 51   35
+ 1.624120-3 1.426290-3 1.311350-3 2.586910-3 3.086370-3 2.459760-3744334 51   36
+ 1.704260-3 6.091970-4-4.771620-4-3.212280-4 5.371400-4 1.353650-3744334 51   37
+ 1.877520-3 2.088620-3 1.771400-3 1.765920-3 1.980790-3 2.111780-3744334 51   38
+ 2.239080-3 2.230010-3 2.224910-3 2.245260-3 2.298550-3 2.349050-3744334 51   39
+ 2.304860-3 2.170340-3 1.986230-3 1.787770-3 1.588720-3 1.384670-3744334 51   40
+ 1.265180-3 4.181830-3 3.148550-3 2.484880-3 1.345650-3 1.523490-5744334 51   41
+-1.608950-4 4.516290-4 1.166560-3 1.728970-3 2.061930-3 1.740820-3744334 51   42
+ 1.755270-3 2.016430-3 2.140570-3 2.262150-3 2.249190-3 2.238640-3744334 51   43
+ 2.253230-3 2.309970-3 2.361280-3 2.302500-3 2.137210-3 1.913600-3744334 51   44
+ 1.673560-3 1.434620-3 1.194340-3 1.047760-3 3.239490-3 2.865140-3744334 51   45
+ 2.004890-3 5.254330-4-2.241900-4-2.202760-4 1.780530-4 7.910960-4744334 51   46
+ 1.323010-3 1.129690-3 1.192850-3 1.482970-3 1.571260-3 1.633040-3744334 51   47
+ 1.634630-3 1.644280-3 1.657690-3 1.703970-3 1.742300-3 1.687090-3744334 51   48
+ 1.544810-3 1.354980-3 1.150990-3 9.475640-4 7.442770-4 6.167480-4744334 51   49
+ 3.735450-3 3.427610-3 2.022980-3 2.639800-4-9.014700-4-1.189440-3744334 51   50
+-6.752840-4 1.140300-4 1.242390-4 2.803720-4 6.507350-4 7.245600-4744334 51   51
+ 7.194210-4 7.202730-4 7.445020-4 7.535840-4 7.895850-4 8.087840-4744334 51   52
+ 7.396700-4 5.923810-4 4.045110-4 2.058750-4 9.681710-6-1.798350-4744334 51   53
+-3.107950-4 5.238590-3 3.932850-3 1.125460-3-1.525780-3-2.769580-3744334 51   54
+-2.511430-3-1.599690-3-1.283090-3-9.941790-4-5.578700-4-5.189330-4744334 51   55
+-6.241140-4-6.391010-4-6.046320-4-6.025010-4-5.748820-4-5.746270-4744334 51   56
+-6.535900-4-8.014270-4-9.798200-4-1.163420-3-1.339760-3-1.498340-3744334 51   57
+-1.626530-3 4.884040-3 1.823200-3-1.535540-3-3.466310-3-3.615240-3744334 51   58
+-2.880520-3-2.460250-3-2.127980-3-1.725480-3-1.694230-3-1.824160-3744334 51   59
+-1.830840-3-1.784060-3-1.773280-3-1.740020-3-1.737970-3-1.791220-3744334 51   60
+-1.893740-3-2.014420-3-2.134120-3-2.246190-3-2.337890-3-2.435470-3744334 51   61
+ 1.338500-3-1.393360-4-8.175520-4-1.181960-3-1.308940-3-1.291590-3744334 51   62
+-1.169100-3-9.778140-4-9.436630-4-9.812450-4-9.910560-4-9.689760-4744334 51   63
+-9.419900-4-8.942930-4-8.617440-4-8.423100-4-8.410710-4-8.472640-4744334 51   64
+-8.570900-4-8.654340-4-8.695330-4-8.913230-4 2.127760-3 3.616580-3744334 51   65
+ 2.810870-3 1.474000-3 8.289860-4 6.289070-4 5.310190-4 6.070320-4744334 51   66
+ 7.406670-4 6.710420-4 6.169190-4 6.646530-4 7.333540-4 8.019580-4744334 51   67
+ 9.128720-4 1.049880-3 1.193570-3 1.324830-3 1.447430-3 1.546970-3744334 51   68
+ 1.619700-3 6.956410-3 6.014450-3 3.821630-3 2.636860-3 2.244740-3744334 51   69
+ 1.983370-3 2.091570-3 2.353950-3 2.253610-3 2.142420-3 2.188580-3744334 51   70
+ 2.255230-3 2.331960-3 2.479510-3 2.674970-3 2.880380-3 3.065120-3744334 51   71
+ 3.233630-3 3.360970-3 3.473910-3 6.073150-3 3.950980-3 2.688360-3744334 51   72
+ 2.322180-3 2.121690-3 2.163500-3 2.351610-3 2.263130-3 2.152800-3744334 51   73
+ 2.180920-3 2.243450-3 2.320240-3 2.462860-3 2.646460-3 2.835690-3744334 51   74
+ 3.000010-3 3.149320-3 3.260440-3 3.363220-3 3.010750-3 1.810970-3744334 51   75
+ 1.467160-3 1.400230-3 1.394460-3 1.459320-3 1.367260-3 1.270310-3744334 51   76
+ 1.290020-3 1.361690-3 1.445030-3 1.588890-3 1.766960-3 1.952880-3744334 51   77
+ 2.112720-3 2.262270-3 2.381410-3 2.477870-3 8.077280-4 4.617830-4744334 51   78
+ 4.390400-4 3.755840-4 3.332330-4 2.168040-4 1.196860-4 1.390810-4744334 51   79
+ 2.373410-4 3.470990-4 5.298550-4 7.509070-4 9.880010-4 1.199450-3744334 51   80
+ 1.405260-3 1.585480-3 1.709230-3 1.738210-4 1.794350-4 1.064190-4744334 51   81
+ 3.553370-5-7.506600-5-1.656140-4-1.426260-4-2.661910-5 1.011050-4744334 51   82
+ 2.990660-4 5.297620-4 7.737760-4 9.911139-4 1.203180-3 1.390570-3744334 51   83
+ 1.515910-3 2.884670-4 2.122570-4 9.946900-5-1.273400-5-9.006730-5744334 51   84
+-6.950790-5 3.988480-5 1.588830-4 3.310280-4 5.246560-4 7.249390-4744334 51   85
+ 8.959690-4 1.061250-3 1.203650-3 1.296860-3 1.349530-4-1.171930-5744334 51   86
+-1.595930-4-2.532030-4-2.343620-4-1.220770-4-4.158820-6 1.602610-4744334 51   87
+ 3.445990-4 5.370120-4 7.009470-4 8.606530-4 9.983880-4 1.083730-3744334 51   88
+-1.601180-4-3.444720-4-4.626470-4-4.492320-4-3.315040-4-2.118810-4744334 51   89
+-4.401100-5 1.460650-4 3.473690-4 5.205080-4 6.907970-4 8.391660-4744334 51   90
+ 9.265690-4-5.254340-4-6.542330-4-6.518710-4-5.415020-4-4.308280-4744334 51   91
+-2.682840-4-8.107300-5 1.180560-4 2.870150-4 4.528190-4 5.976970-4744334 51   92
+ 6.782010-4-7.824860-4-7.893030-4-6.839190-4-5.790160-4-4.218600-4744334 51   93
+-2.396550-4-4.530700-5 1.173920-4 2.766220-4 4.156730-4 4.889590-4744334 51   94
+-8.004850-4-7.018550-4-6.049060-4-4.588540-4-2.888260-4-1.061870-4744334 51   95
+ 4.507090-5 1.931650-4 3.218120-4 3.865750-4-6.151530-4-5.343460-4744334 51   96
+-4.118640-4-2.698390-4-1.152300-4 9.722080-6 1.325630-4 2.379550-4744334 51   97
+ 2.870350-4-4.705390-4-3.736940-4-2.613270-4-1.365220-4-3.954300-5744334 51   98
+ 5.685490-5 1.386930-4 1.721980-4-3.045970-4-2.219140-4-1.252890-4744334 51   99
+-5.516600-5 1.536080-5 7.407090-5 9.319600-5-1.634280-4-8.984980-5744334 51  100
+-4.082080-5 8.497850-6 4.768790-5 5.524980-5-3.432200-5-3.318770-6744334 51  101
+ 2.808590-5 5.024810-5 4.819640-5 1.246580-5 2.787870-5 3.562400-5744334 51  102
+ 2.546380-5 2.811010-5 2.202070-5 4.573730-6 4.624020-6-1.839500-5744334 51  103
+-4.385180-5                                                       744334 51  104
+ 0.000000+0 0.000000+0          0          0          0          0744334  099999
+ 0.000000+0 0.000000+0          0          0          0          07443 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0

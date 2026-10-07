@@ -1,589 +1,740 @@
-"""Tests for the SINBAD subpackage: package forms, library, objects, tables.
+"""Tests for reading a SINBAD benchmark in the v0.4 XML format.
 
-The fixture is a minimal but structurally complete package written to a tmp
-directory in both forms, so the tests exercise the thing the design rests on:
-a directory and a ``.sinbad`` archive must be indistinguishable to a reader.
+The fixture is ``data/mini/``: a benchmark and one calculations file, small
+enough to read in one screen and complete enough to exercise every structure
+the format has -- both table bodies, a blank cell, a correction applied and one
+declared and not applied, a correction whose size is not reported, the three
+correlation scopes, a linked grid across files, materials, geometry and a
+factor chain. Its header says which numbers were chosen to make an assertion
+exact.
 
-It carries two measurement systems and a three-component uncertainty model --
-counting statistics (uncorrelated), detector calibration (correlated within one
-system) and source strength (correlated across the entry) -- because the block
-structure that produces is the part most easily got wrong.
+What is asserted here is mostly **not** that the reader returns something, but
+that it returns the thing the specification says. The two places worth naming:
+
+* the covariance is the sum of the shared components, so every off-diagonal
+  entry is a number this file can state in closed form, and does;
+* a comparison's C/E divides by the denominator *in the declared convention*,
+  which for the fixture means times 0.98. A reader that forgets it is out by
+  2 %, and ``test_comparison_recompute_matches_published`` is what notices.
 """
 
-import json
-import math
-import zipfile
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import kika.sinbad as sinbad
+from kika.sinbad.exceptions import (
+    AmbiguousLabelError,
+    BenchmarkMismatchError,
+    ContentTypeError,
+    IncompleteBudgetError,
+    LabelNotFoundError,
+    SinbadError,
+    SinbadFormatError,
+)
 
-BENCHMARK_ID = "TEST-SHIELD-01"
-
-STAT = 0.01
-CAL = {"SYS-AL": 0.03, "SYS-AU": 0.02}
-SRC = 0.04
-
-SYSTEMS = {
-    "SYS-AL": ("Al27", [("A1", 5.0, 2.0e-8), ("A2", 15.0, 4.0e-9)]),
-    "SYS-AU": ("Au197", [("A1", 5.0, 1.0e-6), ("A2", 15.0, 3.0e-7),
-                         ("A3", 25.0, 9.0e-8)]),
-}
-
-
-def _total(system):
-    return math.sqrt(STAT**2 + CAL[system] ** 2 + SRC**2)
-
-
-def _components(system):
-    return [
-        {"id": "U0", "type": "countingStatistics", "relative": STAT,
-         "coverageFactor": 1, "derivation": "reconstructed",
-         "correlationScope": {"kind": "none"}},
-        {"id": "U1", "type": "detectorCalibration", "relative": CAL[system],
-         "coverageFactor": 1, "derivation": "reported",
-         "correlationScope": {"kind": "fullWithinMeasurementSystem",
-                              "ref": system}},
-        {"id": "U2", "type": "sourceStrength", "relative": SRC,
-         "coverageFactor": 1, "derivation": "reported",
-         "correlationScope": {"kind": "fullWithinEntry", "ref": "NORM-X"}},
-    ]
-
-
-def _model():
-    """Two systems, two libraries, one absent input, one derived deck."""
-    measurements = []
-    for sys_id, (_nuclide, points) in SYSTEMS.items():
-        tag = sys_id.split("-")[1]
-        for pos, depth, value in points:
-            measurements.append({
-                "id": f"EXP-{tag}-{pos}",
-                "systemRef": sys_id,
-                "observableRef": f"OBS-{tag}",
-                "unit": "1/s",
-                "value": value,
-                "reportedValue": value * 1e3,
-                "position": {"label": pos, "axialDepth_cm": depth},
-                "uncertainty": {
-                    "componentsResolved": True,
-                    "reportedTotal": _total(sys_id),
-                    "components": _components(sys_id),
-                    "missing": [],
-                },
-            })
-
-    calculations, comparisons = [], []
-    for tag, lib, scale in (("L1", "LIB-A", 1.10), ("L2", "LIB-B", 0.95)):
-        for sys_id in SYSTEMS:
-            short = sys_id.split("-")[1]
-            calc_id = f"CALC-{short}-{tag}"
-            mine = [m for m in measurements if m["systemRef"] == sys_id]
-            results = [
-                {
-                    "id": f"{calc_id}:{m['id']}",
-                    "measurementRef": m["id"],
-                    "value": m["value"] * scale,
-                    "unit": "1/s",
-                    "statisticalRelativeUncertainty": 0.01,
-                }
-                for m in mine
-            ]
-            calculations.append({
-                "id": calc_id,
-                "systemRef": sys_id,
-                "code": "MCNP",
-                "codeVersion": "6.3",
-                "nuclearDataLibrary": lib,
-                "librarySelector": f"xsdir-{tag}",
-                "historiesRequested": "5E7",
-                "varianceReduction": {
-                    "method": "weightWindowMesh",
-                    "generator": "notReported",
-                    "scope": "perMeasurementSystem",
-                    "note": "",
-                },
-                "inputs": [
-                    {"artifactRef": "ART-DECK", "role": "transportInput",
-                     "appliesTo": None},
-                    {"artifactRef": f"ART-WW-{short}", "role": "weightWindow",
-                     "appliesTo": None},
-                ],
-                "results": results,
-            })
-            comparisons += [
-                {
-                    "id": f"CMP-{calc_id}-{r['measurementRef']}",
-                    "measurementRef": r["measurementRef"],
-                    "calculationResultRef": r["id"],
-                    "quantity": "C/E",
-                    "value": scale,
-                }
-                for r in results
-            ]
-
-    return {
-        "identification": {
-            "id": BENCHMARK_ID,
-            "title": "Synthetic test entry",
-            "facility": "Nowhere",
-            "year": 1999,
-            "category": "shielding/test",
-        },
-        "documentation": {"references": {}},
-        "systematics": [
-            {
-                "id": "NORM-X",
-                "factors": [
-                    {
-                        "symbol": "P",
-                        "value": 1.0,
-                        "unit": "W",
-                        "relativeUncertainty": None,
-                        "uncertaintyMissingReason": "notReported",
-                    }
-                ],
-            }
-        ],
-        "experiment": {
-            "materials": [{"id": "MAT-1", "nuclides": [{"id": "Fe56"}]}],
-            "measurementSystems": [
-                {
-                    "id": sys_id,
-                    "targetNuclide": nuclide,
-                    "reaction": f"{nuclide}(n,x)",
-                    "productNuclide": "X",
-                    "effectiveThreshold_MeV": 1.0 if sys_id == "SYS-AL" else None,
-                    "dosimetryEvaluation": "IRDFF-II",
-                    "foil": {"diameter_mm": 10.0, "thickness_mm": 1.0},
-                }
-                for sys_id, (nuclide, _pts) in SYSTEMS.items()
-            ],
-            "observables": [
-                {
-                    "id": f"OBS-{sys_id.split('-')[1]}",
-                    "systemRef": sys_id,
-                    "name": "reaction rate",
-                    "unit": "1/s",
-                    "unit_confidence": "derived" if sys_id == "SYS-AL" else "reported",
-                    "unit_note": "reconstructed",
-                }
-                for sys_id in SYSTEMS
-            ],
-            "measurements": measurements,
-        },
-        "calculations": calculations,
-        "comparisons": comparisons,
-        "sensitivities": [
-            {
-                "id": "SENS-1",
-                "systemRef": "SYS-AL",
-                "position": "P1",
-                "measurementRef": "M-AL-1",
-                "nuclearDataLibrary": "TEST-LIB",
-                "parameter": {
-                    "kind": "nuclearData",
-                    "targetNuclide": "Fe56",
-                    "reactions": [2],
-                    "reactionNames": ["(n,el)"],
-                },
-                "convention": "relative-relative",
-                "method": "PERT",
-                "includesImplicitEffects": False,
-                "dataOrigin": "syntheticDemo",
-                "coefficientsRef": "arrays.npz#/sens/coefficients",
-                "groupStructureRef": "arrays.npz#/sens/boundaries",
-            }
-        ],
-        "artifacts": [
-            {
-                "id": "ART-DECK",
-                "role": "transportInput",
-                "format": "MCNP",
-                "path": "decks/base.mcnp",
-                "sha256": "0" * 64,
-                "includedInPackage": False,
-                "derivedFrom": None,
-                "modification": None,
-                "reason": "byReference",
-            },
-            {
-                "id": "ART-DECK-MOD",
-                "role": "transportInput",
-                "format": "MCNP",
-                "path": "decks/mod.mcnp",
-                "sha256": "1" * 64,
-                "includedInPackage": False,
-                "derivedFrom": "ART-DECK",
-                "modification": "changed one material",
-                "reason": "byReference",
-            },
-        ]
-        + [
-            {
-                "id": f"ART-WW-{tag}",
-                "role": "weightWindow",
-                "format": "MCNP wwinp",
-                "path": None,
-                "sha256": None,
-                "includedInPackage": False,
-                "derivedFrom": None,
-                "modification": None,
-                "reason": "notInThisExtract",
-            }
-            for tag in ("AL", "AU")
-        ],
-        "dataQuality": [
-            {
-                "id": "DQ-TEST",
-                "severity": "warning",
-                "affects": "all measurements",
-                "summary": "A finding the entry carries about itself.",
-                "detail": "Long form.",
-                "evidence": {},
-            }
-        ],
-        "provenance": {"statement": "test fixture"},
-    }
+DATA = Path(__file__).parent / "data" / "mini"
+BENCHMARK = DATA / "mini.xml"
 
 
 @pytest.fixture
-def package(tmp_path):
-    """Write the fixture entry as a directory and as a .sinbad archive."""
-    pkg = tmp_path / "test-shield-01"
-    pkg.mkdir()
-    (pkg / "benchmark.json").write_text(json.dumps(_model()))
-    (pkg / "manifest.xml").write_text("<manifest/>")
-    np.savez_compressed(
-        pkg / "arrays.npz",
-        **{
-            "sens/coefficients": np.array([[-0.1, -0.2, -0.3]]),
-            "sens/boundaries": np.array([0.1, 1.0, 5.0, 20.0]),
-        },
+def b():
+    return sinbad.read(BENCHMARK)
+
+
+# -- opening ---------------------------------------------------------------
+
+
+def test_read_a_file_and_a_directory_are_the_same(b):
+    from_directory = sinbad.read(DATA)
+    assert from_directory.id == b.id
+    assert from_directory.data.labels == b.data.labels
+
+
+def test_a_calculations_file_is_not_a_benchmark():
+    with pytest.raises(SinbadFormatError, match="calculations file"):
+        sinbad.read(DATA / "calculations" / "lab-code-1.0.xml")
+
+
+def test_not_a_sinbad_file(tmp_path):
+    path = tmp_path / "other.xml"
+    path.write_text("<something/>")
+    with pytest.raises(SinbadFormatError, match="root <something>"):
+        sinbad.read(path)
+
+
+def test_calculations_are_opened_with_the_benchmark(b):
+    assert b.calculations.labels == ["lab-code-1.0"]
+    assert sinbad.read(BENCHMARK, calculations=False).calculations.labels == []
+
+
+# -- the entry blocks ------------------------------------------------------
+
+
+def test_identity(b):
+    assert b.short_code == "mini"
+    assert b.id == "TST-ATN-BLK-STR-SUR-001-R"
+    assert b.title == "Mini fixture benchmark"
+    assert b.format_version == "0.3"
+    assert b.identification.domain == "TST"
+    assert b.identification.related[0].short_code == "mini2"
+
+
+def test_documentation(b):
+    assert [a.name for a in b.documentation.authors] == ["A. Tester"]
+    assert b.documentation.authors[0].affiliations == ("Nowhere",)
+    assert b.documentation.contributors[0].contributor_type == "Other"
+    assert b.year == 1990
+    assert b.documentation.bibitem("1").text.startswith("A. Tester")
+
+
+def test_status_issues_and_absences(b):
+    assert b.status.availability == "unrestricted"
+    assert b.status.quality.rating == "fixture"
+    assert b.status.quality.reservations == ("everything",)
+    assert [i.label for i in b.issues] == ["F1"]
+    assert b.issues[0].about == ("reactionRate-Al27",)
+    assert len(b.absences) == 2
+    assert b.absences[0].kind == "not stated"
+
+
+def test_detectors_and_positions(b):
+    assert b.detectors.labels == ["det-Al27", "det-Au197"]
+    gold = b.detectors["det-Au197"]
+    assert gold.target == "Au197"
+    assert gold.dimensions["diameter"].value == 12.7
+    assert gold.dimensions["mass"].min == 0.12  # a range, not a double
+    assert gold.cover.material == "Cd"
+    assert gold.cover.dimensions["thickness"].unit == "inch"
+    assert b.positions["A3"].shield_thickness == 10.0
+    assert b.positions["A3"].layer == "gap-A3"
+
+
+def test_definitions_resolve_from_a_data_object(b):
+    obj = b["reactionRate-Al27"]
+    assert obj.normalisation.label == "power30kW"
+    assert obj.normalisation.value.value == 30
+    assert obj.normalisation.value.unit == "kW"
+    assert obj.convention.basis == "includes the background"
+    assert [d.label for d in obj.detectors] == ["det-Al27"]
+
+
+# -- tables ----------------------------------------------------------------
+
+
+def test_table_with_td_rows_and_a_blank_cell(b):
+    table = b["reactionRate-Al27"].table
+    assert table.nrows == 4
+    assert table.names == [
+        "position", "shieldThickness", "reactionRate", "countingStatistics", "totalSd",
+    ]
+    assert list(table["position"]) == ["A1", "A2", "A3", "A4"]
+    assert table["reactionRate"][0] == pytest.approx(1.0e-20)
+    assert np.isnan(table["reactionRate"][3])  # the blank cell, not a zero
+    assert np.isnan(table["totalSd"][3])
+
+
+def test_table_with_a_whitespace_body(b):
+    table = b.calculations["lab-code-1.0"]["selfShieldingFactors"].table
+    assert table.nrows == 3
+    assert table["shieldThickness"][2] == 10.0
+    assert table["factor"][2] == pytest.approx(0.980)
+
+
+def test_column_roles(b):
+    table = b["reactionRate-Al27"].table
+    assert [c.name for c in table.independent] == ["position", "shieldThickness"]
+    assert [c.name for c in table.value_columns] == ["reactionRate"]
+    assert table.column("totalSd").kind == "total"
+    assert table.column("position").is_text
+    assert table.units()["reactionRate"] == "1/s"
+
+
+def test_a_table_with_several_value_columns_refuses_to_guess(b):
+    calculated = b.calculations["lab-code-1.0"]["calculated-Al27"].table
+    with pytest.raises(ContentTypeError, match="2 value columns"):
+        _ = calculated.values
+
+
+def test_asking_a_geometry_for_its_table(b):
+    with pytest.raises(ContentTypeError, match="not a table"):
+        _ = b["assemblyGeometry"].table
+
+
+# -- corrections and conventions -------------------------------------------
+
+
+def test_correction_declared_and_not_applied(b):
+    obj = b["reactionRate-Al27"]
+    correction = obj.corrections[0]
+    assert correction.kind == "background"
+    assert correction.applied is False
+    assert correction.relative == pytest.approx(0.02)
+    assert correction.factor() == pytest.approx(0.98)
+    assert obj.corrected("backgroundSubtracted")[0] == pytest.approx(0.98e-20)
+    assert obj.values[0] == pytest.approx(1.0e-20)  # the stored values are untouched
+
+
+def test_corrected_to_its_own_convention_is_the_stored_values(b):
+    obj = b["reactionRate-Au197"]
+    assert obj.convention_label == "backgroundSubtracted"
+    assert obj.corrected("backgroundSubtracted")[0] == pytest.approx(5.0e-15)
+
+
+def test_a_correction_without_a_magnitude_cannot_be_applied(b):
+    with pytest.raises(SinbadError, match="not reported"):
+        b["reactionRate-Au197"].corrected("selfShielded")
+
+
+def test_a_convention_the_object_cannot_reach(b):
+    with pytest.raises(SinbadError, match="declares no correction"):
+        b["reactionRate-Al27"].corrected("selfShielded")
+
+
+# -- uncertainty -----------------------------------------------------------
+
+
+def test_budget_components_and_their_scopes(b):
+    budget = b["reactionRate-Al27"].uncertainty_budget
+    assert budget.names == ["countingStatistics", "calibration", "platePower"]
+    assert budget["countingStatistics"].is_per_point
+    assert budget["platePower"].coverage_factor == 2.0
+    # 8 % at 2 s.d. is 4 % at 1 s.d.
+    assert budget["platePower"].relative()[0] == pytest.approx(0.04)
+    assert budget["calibration"].relative()[0] == pytest.approx(0.03)
+
+
+def test_budget_total_reproduces_the_published_column(b):
+    obj = b["reactionRate-Al27"]
+    total = obj.uncertainty_budget.total(obj.table)
+    # 1 % / 2 % / 4 % counting, 3 % calibration, 4 % plate power, in quadrature
+    assert total[:3] == pytest.approx([0.05099, 0.05385, 0.06403], abs=5e-5)
+    assert obj.uncertainty[:3] == pytest.approx([0.051, 0.054, 0.064])
+
+
+def test_covariance_is_the_sum_of_the_shared_components(b):
+    matrix, index = b.covariance(relative=True)
+    # four measured points: Al27 A1-A3 (A4 is blank) and Au197 A1-A2
+    assert [label for label, _ in index] == (
+        ["reactionRate-Al27"] * 3 + ["reactionRate-Au197"] * 2
+    )
+    assert [position for _, position in index] == ["A1", "A2", "A3", "A1", "A2"]
+    assert matrix.shape == (5, 5)
+    assert np.allclose(matrix, matrix.T)
+    # diagonal: the total, squared
+    assert matrix[0, 0] == pytest.approx(0.01**2 + 0.03**2 + 0.04**2)
+    # same detector: calibration and plate power, no counting statistics
+    assert matrix[0, 1] == pytest.approx(0.03**2 + 0.04**2)
+    # different detectors: only what is within-entry
+    assert matrix[0, 3] == pytest.approx(0.04**2)
+
+
+def test_absolute_covariance_scales_by_the_values(b):
+    relative, _ = b.covariance(relative=True)
+    absolute, index = b.covariance()
+    values = np.array([1.0e-20, 2.0e-21, 3.0e-22, 5.0e-15, 4.0e-15])
+    assert np.allclose(absolute, relative * np.outer(values, values))
+
+
+def test_correlation_has_a_unit_diagonal(b):
+    matrix, _ = b.correlation()
+    assert np.allclose(np.diag(matrix), 1.0)
+    assert matrix[0, 3] == pytest.approx(
+        0.04**2 / np.sqrt((0.01**2 + 0.03**2 + 0.04**2) * (0.01**2 + 0.02**2 + 0.04**2))
     )
 
-    archive = tmp_path / "test-shield-01.sinbad"
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(p.name for p in pkg.iterdir()):
-            z.writestr(f"{pkg.name}/{f}", (pkg / f).read_bytes())
 
-    yield {"dir": pkg, "archive": archive, "root": tmp_path}
-    sinbad.reset_config()
+def test_a_blank_point_carries_no_uncertainty(b):
+    _, index = b["reactionRate-Al27"].covariance()
+    assert [position for _, position in index] == ["A1", "A2", "A3"]
 
 
-# -- package forms ---------------------------------------------------------
+# -- other containers ------------------------------------------------------
 
 
-def test_both_package_forms_open(package):
-    for form in ("dir", "archive"):
-        b = sinbad.SinbadBenchmark(package[form])
-        assert b.id == BENCHMARK_ID
-        b.close()
+def test_materials(b):
+    materials = b["materials"].content
+    assert materials.names == ["mildSteel1", "fuel2"]
+    assert materials["mildSteel1"].density == 7.850
+    assert materials["mildSteel1"].total == pytest.approx(1.0)
+    assert materials["fuel2"].nuclides[1].name == "U235"
+    frame = materials.to_dataframe()
+    assert len(frame) == 4
+    assert set(frame["units"]) == {"weight fraction"}
 
 
-def test_forms_are_indistinguishable(package):
-    a = sinbad.SinbadBenchmark(package["dir"])
-    z = sinbad.SinbadBenchmark(package["archive"])
-    assert a.model == z.model
-    assert a.to_dataframe().equals(z.to_dataframe())
-    assert a.package.kind == "directory" and z.package.kind == "archive"
-    a.close()
-    z.close()
+def test_geometry(b):
+    geometry = b["assemblyGeometry"].content
+    assert len(geometry.layers) == 8
+    assert geometry.layer("slab-01").thickness == pytest.approx(4.5)
+    assert geometry.layer("slab-01").material == "mildSteel1"
+    assert geometry.shapes[0].lengths["length_z"].value == 16.5
+    assert len(geometry.to_dataframe()) == 8
 
 
-def test_arrays_load_from_inside_the_archive(package):
-    with sinbad.SinbadBenchmark(package["archive"]) as b:
-        s = b.sensitivity("SENS-1")
-        assert s.coefficients.shape == (1, 3)
-        assert len(s.group_boundaries) == 4
+def test_factor_chain_recomputes_its_published_result(b):
+    chain = b["sourceStrength"].content
+    assert len(chain) == 3
+    assert chain["platePower"].value.uncertainty.standard == pytest.approx(2.0e-5)
+    assert chain.recompute() == pytest.approx(chain.result.value)
 
 
-def test_unknown_path_raises(tmp_path):
-    with pytest.raises(sinbad.PackageNotFoundError):
-        sinbad.SinbadBenchmark(tmp_path / "nothing-here")
+def test_gridded2d_shape_and_grids(b):
+    gridded = b["sourceDistribution-xy"].content
+    assert gridded.shape == (3, 2)
+    assert gridded.values[2, 1] == 6.0        # highest grid index first
+    assert gridded.grid("y").size == 3
+    assert gridded.grid("x").centers == pytest.approx([-1.0, 1.0])
+    assert gridded.unit == "1/(cm**3*s)"
+    assert len(gridded.to_dataframe()) == 6
 
 
-# -- library ---------------------------------------------------------------
+def test_a_grid_is_a_group_structure(b):
+    content = b.calculations["lab-code-1.0"]["groupStructure-MINI3"].content
+    assert content.size == 3                  # four boundaries, three groups
+    assert content.grid.unit == "eV"
+    assert len(content.to_dataframe()) == 3
 
 
-def test_library_discovery_prefers_the_archive(package):
-    sinbad.configure(path=str(package["root"]))
-    assert sinbad.list_benchmarks() == [BENCHMARK_ID]
-    assert sinbad.scan()[BENCHMARK_ID].suffix == ".sinbad"
+# -- the join between the files --------------------------------------------
 
 
-def test_catalogue_columns(package):
-    sinbad.configure(path=str(package["root"]))
-    cat = sinbad.catalogue()
-    assert list(cat["id"]) == [BENCHMARK_ID]
-    assert cat.loc[0, "measurements"] == 5
-    assert cat.loc[0, "libraries"] == "LIB-A, LIB-B"
+def test_a_linked_grid_resolves_across_files(b):
+    response = b.calculations["lab-code-1.0"]["response-Al27"].content
+    assert response.values.shape == (3,)
+    assert response.grid("energy").values[0] == 1.0e7
+    assert response.unit == "b"
 
 
-def test_open_by_identifier_and_by_substring(package):
-    sinbad.configure(path=str(package["root"]))
-    assert sinbad.open(BENCHMARK_ID).id == BENCHMARK_ID
-    assert sinbad.open("SHIELD-01").id == BENCHMARK_ID
+def test_a_calculations_file_borrows_the_benchmarks_labels(b):
+    calculations = b.calculations["lab-code-1.0"]
+    assert calculations["reactionRate-Al27"] is b["reactionRate-Al27"]
+    assert calculations["power30kW"].basis == "reactor power"
 
 
-def test_open_accepts_a_path_without_configuration(package):
-    assert sinbad.SinbadBenchmark.open(package["archive"]).id == BENCHMARK_ID
+def test_a_benchmark_reaches_into_its_calculations(b):
+    assert b["calculated-Al27"].nature == "calculated"
+    assert b["CE-Al27"].operator == "ratio"
 
 
-def test_missing_identifier_lists_what_is_available(package):
-    sinbad.configure(path=str(package["root"]))
-    with pytest.raises(sinbad.PackageNotFoundError, match=BENCHMARK_ID):
-        sinbad.open("NOT-A-BENCHMARK")
+def test_an_unknown_label(b):
+    with pytest.raises(LabelNotFoundError):
+        b["no-such-thing"]
+    assert "no-such-thing" not in b
 
 
-def test_unconfigured_library_raises(tmp_path):
-    sinbad.configure(path=str(tmp_path / "does-not-exist"))
-    with pytest.raises(sinbad.LibraryNotConfiguredError):
-        sinbad.list_benchmarks()
+def test_comparison_recompute_matches_published(b):
+    comparison = b.calculations["lab-code-1.0"].comparisons["CE-Al27"]
+    assert comparison.denominator_label == "reactionRate-Al27"
+    frame = comparison.recompute()
+    assert len(frame) == 6                    # three positions, two libraries
+    assert frame["ratio"].tolist() == pytest.approx([1.0] * 6)
+    published = comparison.to_dataframe()
+    assert list(published["CE-LIBA"]) == [1.0, 0.9, 0.8]
 
 
-# -- measurement systems ---------------------------------------------------
-
-
-def test_systems_are_objects(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    assert [s.id for s in b.systems] == ["SYS-AL", "SYS-AU"]
-    assert b.system("Al27").target_nuclide == "Al27"
-    # A capture reaction has no threshold, and that is not the same as unknown.
-    assert b.system("SYS-AU").threshold_mev is None
-
-
-def test_system_resolves_by_id_nuclide_or_fragment(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    for key in ("SYS-AL", "Al27", "al27", "AL"):
-        assert len(b.measurements(key)) == 2
-
-
-def test_ambiguous_or_unknown_system_lists_the_real_ones(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    with pytest.raises(KeyError, match="SYS-AL"):
-        b.measurements("SYS")          # ambiguous
-    with pytest.raises(KeyError, match="SYS-AL"):
-        b.measurements("Pu239")        # unknown
-
-
-# -- objects and tables ----------------------------------------------------
-
-
-def test_measurements(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    m = b.measurements("Al27")[0]
-    assert m.position == "A1"
-    assert m.system == "SYS-AL"
-    assert m.rel_unc == pytest.approx(_total("SYS-AL"))
-    assert m.abs_unc == pytest.approx(2.0e-8 * _total("SYS-AL"))
-    # The split that decides what an aggregate is worth.
-    assert m.correlated_rel_unc == pytest.approx(math.hypot(CAL["SYS-AL"], SRC))
-    assert m.independent_rel_unc == pytest.approx(STAT)
-
-
-def test_to_dataframe(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    df = b.to_dataframe()
-    assert len(df) == 5
-    assert set(df.columns) >= {"system", "nuclide", "value", "rel_unc", "abs_unc",
-                               "correlated_unc", "independent_unc"}
-    assert len(b.to_dataframe("Au197")) == 3
-
-
-def test_ce_long_and_wide(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    long = b.ce()
-    assert len(long) == 10
-    assert (long["C"] / long["E"]).round(6).equals(long["ce"].round(6))
-
-    # Position labels repeat across systems, so the wide index has to as well.
+def test_ce_collects_every_comparison(b):
+    frame = b.ce()
+    assert set(frame["series"]) == {"CE-LIBA", "CE-LIBB"}
+    assert set(frame["reaction"]) == {"Al27(n,a)Na24"}
+    assert len(frame) == 6
     wide = b.ce(wide=True)
-    assert list(wide.columns) == ["LIB-A", "LIB-B"]
-    assert wide.index.names == ["system", "position"]
-    assert wide.loc[("SYS-AL", "A1"), "LIB-A"] == pytest.approx(1.10)
-
-    one = b.ce(system="Al27", wide=True)
-    assert one.index.name == "position"
+    assert wide.shape == (3, 2)
+    assert set(frame["against"]) == {"measured"}
+    assert set(frame["calculation"]) == {"calc-libA", "calc-libB"}
 
 
-def test_ce_unknown_library_lists_the_real_ones(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    with pytest.raises(KeyError, match="LIB-A"):
-        b.ce(library="LIB-Z")
+def test_a_changed_benchmark_is_reported(b, tmp_path):
+    calculations = b.calculations["lab-code-1.0"]
+    assert calculations.matches_benchmark is False  # the fixture cites a wrong sha1
+    assert not b.check()["ok"].all()
+
+    copy = tmp_path / "mini"
+    shutil.copytree(DATA, copy)
+    real = b.document.checksum()
+    path = copy / "calculations" / "lab-code-1.0.xml"
+    text = path.read_text().replace("0" * 40, real)
+    assert real in text
+    path.write_text(text)
+    fixed = sinbad.read(copy / "mini.xml")
+    assert fixed.calculations["lab-code-1.0"].matches_benchmark is True
+    assert fixed.check()["ok"].all()
 
 
-def test_covariance_block_structure(package):
-    """Within a system: calibration + source. Across systems: source only."""
-    b = sinbad.SinbadBenchmark(package["dir"])
-    cov = b.covariance()
-    assert cov.shape == (5, 5)
-
-    within = CAL["SYS-AL"] ** 2 + SRC**2
-    across = SRC**2
-    assert cov.loc["EXP-AL-A1", "EXP-AL-A1"] == pytest.approx(_total("SYS-AL") ** 2)
-    assert cov.loc["EXP-AL-A1", "EXP-AL-A2"] == pytest.approx(within)
-    assert cov.loc["EXP-AL-A1", "EXP-AU-A1"] == pytest.approx(across)
-    assert np.allclose(cov.values, cov.values.T)
-    assert np.linalg.eigvalsh(cov.values).min() > -1e-12
+# -- external files --------------------------------------------------------
 
 
-def test_covariance_of_one_system_only(package):
-    cov = sinbad.SinbadBenchmark(package["dir"]).covariance("Au197")
-    assert cov.shape == (3, 3)
-    assert cov.iloc[0, 1] == pytest.approx(CAL["SYS-AU"] ** 2 + SRC**2)
+def test_external_files_are_verified_against_the_entry(b):
+    frame = b.verify_files(DATA).set_index("label")
+    assert frame.loc["file-source", "ok"] is True
+    assert frame.loc["file-stale", "ok"] is False
+    assert "archive" in frame.loc["file-inside", "note"]
 
 
-def test_covariance_absolute_scales_by_values(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    rel = b.covariance(relative=True)
-    absolute = b.covariance(relative=False)
-    v = b.to_dataframe()["value"].values
-    assert np.allclose(absolute.values, rel.values * np.outer(v, v))
+def test_resolving_a_file_inside_an_archive(b):
+    with pytest.raises(SinbadError, match="archive"):
+        b.files["file-inside"].resolve(DATA)
+    assert b.files["file-source"].resolve(DATA).exists()
 
 
-def test_uncertainty_of_mean_quantifies_the_correlation(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    u = b.uncertainty_of_mean("Al27")
-    n = 2
-    var_full = (_total("SYS-AL") ** 2 + CAL["SYS-AL"] ** 2 + SRC**2) / n
-    assert u["full"] == pytest.approx(math.sqrt(var_full))
-    assert u["diagonal_only"] == pytest.approx(_total("SYS-AL") / math.sqrt(n))
-    assert u["factor"] > 1.0
-
-    budget = b.uncertainty_budget()
-    assert list(budget["scope"]) == ["whole entry", "SYS-AL", "SYS-AU"]
-    assert (budget["factor"] > 1.0).all()
+# -- frames ----------------------------------------------------------------
 
 
-def test_covariance_ignores_undeclared_correlation():
-    """A scope of ``unknown`` must stay on the diagonal, not be promoted."""
-    model = _model()
-    for m in model["experiment"]["measurements"]:
-        for c in m["uncertainty"]["components"]:
-            c["correlationScope"] = {"kind": "unknown"}
-    import tempfile
-    from pathlib import Path
+def test_to_dataframe_stacks_the_measured_tables(b):
+    frame = b.to_dataframe()
+    assert set(frame["object"]) == {"reactionRate-Al27", "reactionRate-Au197"}
+    assert len(frame) == 6                    # 4 + 2 rows, blanks included
 
-    with tempfile.TemporaryDirectory() as tmp:
-        pkg = Path(tmp) / "p"
-        pkg.mkdir()
-        (pkg / "benchmark.json").write_text(json.dumps(model))
-        cov = sinbad.SinbadBenchmark(pkg).covariance()
-        off = cov.values - np.diag(np.diag(cov.values))
-        assert not off.any()
+    corrected = b.to_dataframe(convention="backgroundSubtracted")
+    al27 = corrected[corrected["object"] == "reactionRate-Al27"]
+    assert al27["reactionRate"].iloc[0] == pytest.approx(0.98e-20)
+    assert set(corrected["convention"]) == {"backgroundSubtracted"}
 
 
-# -- calculation inputs (design report Sec. 3.11) --------------------------
+def test_filtering_the_data_objects(b):
+    assert len(b.data(quantity="reaction rate")) == 2
+    # the materials and the geometry are measured too -- nature is not "is a table"
+    assert len(b.data(nature="measured")) == 4
+    assert b.data(detector="Al27").labels == ["reactionRate-Al27"]
+    assert b.data(kind="geometry").labels == ["assemblyGeometry"]
+    assert b.data.quantities[0] == "material composition"
 
 
-def test_calculation_carries_its_own_inputs(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    calc = b.calculations[0]
-    assert [i.role for i in calc.inputs] == ["transportInput", "weightWindow"]
-    assert calc.system == "SYS-AL"
-    # The library as the code resolved it, not only as a human labelled it.
-    assert calc.library_selector == "xsdir-L1"
+def test_summary_mentions_what_the_entry_holds(b):
+    text = b.summary()
+    assert "Mini fixture benchmark" in text
+    assert "det-Al27" in text
+    assert "measured points 5" in text
+    assert "lab-code-1.0" in text
+    assert "[benchmark has changed]" in text
 
 
-def test_absent_weight_window_makes_a_calculation_irreproducible(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    rep = b.reproducibility()
-    assert len(rep) == 4
-    assert not rep["reproducible"].any()
-    assert (rep["available"] == 1).all()
-    assert (rep["missing_roles"] == "weightWindow").all()
+# -- interop ---------------------------------------------------------------
 
 
-def test_modified_deck_declares_what_it_derives_from(package):
-    arts = {a["id"]: a for a in sinbad.SinbadBenchmark(package["dir"]).artifacts}
-    assert arts["ART-DECK-MOD"]["derivedFrom"] == "ART-DECK"
-    assert "changed one material" in arts["ART-DECK-MOD"]["modification"]
+def test_gridded_to_gnds_axes(b):
+    from kika.nuclear_data.model import Axes as ModelAxes
+
+    axes, values = b.calculations["lab-code-1.0"]["response-Al27"].content.to_gnds()
+    assert isinstance(axes, ModelAxes)
+    assert axes.dependent.label == "crossSection"
+    assert axes.dependent.unit == "b"
+    assert values.shape == (3,)
 
 
-def test_unresolved_reports_every_kind_of_gap(package):
-    unres = sinbad.SinbadBenchmark(package["dir"]).unresolved()
-    what = " | ".join(unres["what"])
-    assert "relativeUncertainty" in what
-    assert "input file" in what
-    # A reconstructed component is neither missing nor reported, and is listed
-    # once per type rather than once per point.
-    assert "countingStatistics component" in what
-    assert (unres["reason"] == "reconstructed, not reported").sum() == 1
+def test_a_unit_gnds_cannot_spell_is_dropped_not_raised(b):
+    # 1/(cm**3*s) does not parse today; building the axes must still work.
+    axes, _ = b["sourceDistribution-xy"].content.to_gnds()
+    assert axes.dependent.label == "sourceDensity"
+    assert axes.dependent.unit == ""
 
 
-def test_findings_are_carried_by_the_entry(package):
-    f = sinbad.SinbadBenchmark(package["dir"]).findings()
-    assert list(f["id"]) == ["DQ-TEST"]
-    assert f.loc[0, "severity"] == "warning"
+def test_check_units_reports_what_would_be_refused(b):
+    from kika.sinbad.gnds import check_units
+
+    frame = check_units(b).set_index("unit")
+    assert frame.loc["1/s", "parses"] is np.True_ or frame.loc["1/s", "parses"] is True
+    assert not frame.loc["%", "parses"]
+    assert not frame.loc["1/(cm**3*s)", "parses"]
 
 
-# -- presentation ----------------------------------------------------------
+def test_materials_to_kika(b):
+    collection = b["materials"].content.to_kika_materials()
+    assert len(collection) == 2
+    steel = collection.by_id[1]
+    assert steel.name == "mildSteel1"
+    assert steel.fraction_type == "wo"
+    assert steel.density == 7.850
+    assert "26000" in steel.to_mcnp()          # Fe0 became natural iron
 
 
-def test_summary_reports_systems_correlations_and_warnings(package):
-    text = sinbad.SinbadBenchmark(package["dir"]).summary()
-    assert BENCHMARK_ID in text
-    assert "derived" in text          # the Al observable's unit confidence
-    assert "DQ-TEST" in text          # data-quality warning surfaced
-    assert "understates" in text      # the correlation factor is called out
+# -- import cost -----------------------------------------------------------
 
 
-def test_sensitivity_dataframe(package):
-    s = sinbad.SinbadBenchmark(package["dir"]).sensitivity("SENS-1")
-    df = s.to_dataframe()
-    assert len(df) == 3
-    assert list(df["reaction"].unique()) == ["(n,el)"]
-    assert list(df["mt"].unique()) == [2]
-    assert (df["e_low"] < df["e_high"]).all()
+def test_reading_an_entry_does_not_wake_the_gnds_model():
+    """Opening a benchmark must not import :mod:`kika.nuclear_data.model`.
 
+    The model is thirty modules describing an evaluated nuclear-data file, and
+    ``kika/nuclear_data/model/tests/test_dormancy.py`` keeps it unreachable from
+    a plain ``import kika``. A shielding entry has no business waking it: the
+    translation lives in :mod:`kika.sinbad.gnds` and happens when it is asked
+    for. It is also what lets this reader stand on numpy alone.
 
-def test_unknown_sensitivity_lists_the_real_ones(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    with pytest.raises(KeyError, match="SENS-1"):
-        b.sensitivity("SENS-NOPE")
-
-
-def test_plots_return_axes(package):
-    import matplotlib
-
-    matplotlib.use("Agg")
-    b = sinbad.SinbadBenchmark(package["dir"])
-    # Several systems -> small multiples, one panel each.
-    axes = sinbad.plot_ce(b)
-    assert axes.size >= len(b.systems)
-    assert sinbad.plot_ce(b, system="Al27") is not None
-    assert sinbad.plot_uncertainty_budget(b) is not None
-    assert sinbad.plot_sensitivity(b.sensitivity("SENS-1")) is not None
-
-
-def test_sensitivities_filter_by_system(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    assert len(b.sensitivities()) == 1
-    assert len(b.sensitivities("Al27")) == 1
-    assert b.sensitivities("Au197") == []
-
-
-def test_sensitivity_profile_found_by_position(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    assert b.sensitivity_profile("Al27", "P1").id == "SENS-1"
-    with pytest.raises(KeyError, match="P9"):
-        b.sensitivity_profile("Al27", "P9")
-
-
-def test_sensitivity_summary_integrates_each_reaction(package):
-    b = sinbad.SinbadBenchmark(package["dir"])
-    df = b.sensitivity_summary()
-    s = b.sensitivity("SENS-1")
-    assert df.loc[("SYS-AL", "P1"), "(n,el)"] == pytest.approx(
-        s.coefficients.sum()
+    Run in a subprocess, because by the time this module is collected pytest
+    has imported everything. pandas and matplotlib are not asserted on here:
+    ``kika/__init__.py`` imports them itself, so this test could say nothing
+    about ``kika.sinbad``'s own cost.
+    """
+    code = textwrap.dedent(
+        """
+        import sys
+        import kika.sinbad as sinbad
+        b = sinbad.read(sys.argv[1])
+        assert b.short_code == "mini"
+        assert b["reactionRate-Al27"].values[0] > 0
+        assert b["reactionRate-Al27"].covariance()[0].shape == (3, 3)
+        print(",".join(sorted(m for m in sys.modules
+                              if m.startswith("kika.nuclear_data.model"))))
+        """
     )
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(BENCHMARK)],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "", f"model woken by reading: {result.stdout.strip()}"
 
 
-def test_sensitivity_carries_its_library_and_measurement(package):
-    s = sinbad.SinbadBenchmark(package["dir"]).sensitivity("SENS-1")
-    # A profile belongs to one library; comparing it against another's C/E
-    # would be a category error, so the object has to be able to say which.
-    assert s.nuclear_data_library == "TEST-LIB"
-    assert s.measurement == "M-AL-1"
-    assert s.mts == [2]
+# -- what a wrong answer would look like -----------------------------------
+
+
+def test_an_ambiguous_fragment_says_so_rather_than_no_such_thing(b):
+    """A fragment matching several objects is ambiguous, not missing.
+
+    Look-up accepts a fragment as a convenience, and the failure that costs
+    time is the one that answers "no detector 'Al'" when the entry holds two
+    of them.
+    """
+    with pytest.raises(AmbiguousLabelError, match="matches 2"):
+        _ = b.data["reactionRate-A"]
+    with pytest.raises(LabelNotFoundError, match="no data object"):
+        _ = b.data["reactionRate-Xx"]
+    assert isinstance(AmbiguousLabelError("x"), KeyError)
+
+
+def test_a_multi_column_table_is_not_stamped_with_a_convention_it_is_not_in(b):
+    """The trap: a frame labelled ``backgroundSubtracted`` that never was.
+
+    ``corrected()`` needs one value column to know what to correct, so a
+    calculated table of several libraries cannot be brought to another
+    convention as one frame. Writing the column anyway would hand back numbers
+    in one convention under the name of another.
+    """
+    calculations = b.calculations["lab-code-1.0"]
+    stored = calculations["calculated-Al27"].table["reactionRate-LIBA"].copy()
+
+    # its own convention is a no-op, and is allowed
+    same = calculations.data(kind="table").to_dataframe(convention="backgroundSubtracted")
+    assert (same[same["object"] == "calculated-Al27"]["reactionRate-LIBA"].to_numpy()
+            == pytest.approx(stored))
+
+    with pytest.raises(SinbadError, match="value columns"):
+        calculations.data(kind="table").to_dataframe(convention="asMeasured")
+
+
+def test_a_per_point_component_falls_back_to_its_own_confidence_level():
+    """§2.3 puts the level on the column; a file that puts it on the component
+    must not be read at 1 s.d. when it says 2."""
+    import xml.etree.ElementTree as ET
+
+    from kika.sinbad.content import Table
+    from kika.sinbad.uncertainty import UncertaintyComponent
+
+    table = Table(ET.fromstring(
+        '<table rows="1" columns="2">'
+        '  <columnHeaders>'
+        '    <column index="0" name="rate" unit="1/s" role="value"/>'
+        '    <column index="1" name="stat" unit="%" role="uncertainty" kind="component"/>'
+        '  </columnHeaders>'
+        '  <data sep="tr"><tr sep="td"><td>1.0</td><td>8.0</td></tr></data>'
+        '</table>'
+    ))
+    component = UncertaintyComponent(name="stat", column="stat", confidence_level="2 s.d.")
+    assert component.relative(table)[0] == pytest.approx(0.04)
+
+
+def test_the_subpackage_is_reachable_from_a_plain_import_kika():
+    """``import kika`` must find it without importing it -- the reason anyone
+    who does not already know the subpackage exists will ever find it."""
+    code = textwrap.dedent(
+        """
+        import sys
+        import kika
+        assert "kika.sinbad" not in sys.modules, "imported eagerly"
+        assert "sinbad" in dir(kika)
+        assert kika.sinbad.read is not None
+        assert "kika.sinbad" in sys.modules
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_typed_column_that_is_not_text_is_still_read_as_numbers():
+    """§5.4.3 ``types`` names a type; only the text ones are text.
+
+    Reading every typed column as text turns ``types="Integer32"`` into a
+    column of strings, and every arithmetic on it into a TypeError far from
+    here.
+    """
+    import xml.etree.ElementTree as ET
+
+    from kika.sinbad.content import Table
+
+    table = Table(ET.fromstring(
+        '<table rows="1" columns="3">'
+        '  <columnHeaders>'
+        '    <column index="0" name="position" role="independent" types="UTF8Text"/>'
+        '    <column index="1" name="group" role="independent" types="Integer32"/>'
+        '    <column index="2" name="rate" unit="1/s" role="value"/>'
+        '  </columnHeaders>'
+        '  <data sep="tr"><tr sep="td"><td>A2</td><td>7</td><td>1.5</td></tr></data>'
+        '</table>'
+    ))
+    assert table.column("position").is_text is True
+    assert table["position"][0] == "A2"
+    assert table.column("group").is_text is False
+    assert table["group"][0] == pytest.approx(7.0)
+    assert table.column("rate").types is None
+
+
+def test_the_covariance_is_built_by_component_not_cell_by_cell(b):
+    """The rule is a sum of masked outer products, and it must stay symmetric.
+
+    The cell-by-cell form read the correlation scope off the left-hand point
+    only, so a file that gave one component two scopes produced a matrix that
+    disagreed with its own transpose.
+    """
+    matrix, index = b.covariance()
+    assert np.array_equal(matrix, matrix.T)
+    relative, _ = b.covariance(relative=True)
+    assert np.array_equal(relative, relative.T)
+    assert len(index) == matrix.shape[0]
+
+
+def test_check_reports_the_calculations_not_the_file_against_itself(b):
+    """``check()`` holds statements that can fail.
+
+    The benchmark's own sha1 compared with itself was a row that read ``ok``
+    whatever was wrong with the entry; it is :attr:`checksum` now.
+    """
+    frame = b.check()
+    assert list(frame["what"].unique()) == ["calculations -> benchmark sha1"]
+    assert len(frame) == len(b.calculations)
+    assert b.checksum == b.document.checksum()
+
+    alone = sinbad.read(BENCHMARK, calculations=False)
+    assert alone.check().empty
+    assert list(alone.check().columns) == ["what", "name", "expected", "found", "ok"]
+
+
+def test_a_calculations_file_of_another_entry_is_refused(b, tmp_path):
+    """A changed sha1 is a warning; a different entry is not.
+
+    The labels a calculations file borrows would resolve against a benchmark
+    it was never written for. One identifier disagreeing is a name that has
+    moved on and is tolerated; every one of them disagreeing is a different
+    entry, and is refused.
+    """
+    copy = tmp_path / "mini"
+    shutil.copytree(DATA, copy)
+    path = copy / "calculations" / "lab-code-1.0.xml"
+
+    # one identifier out of step is a stale name, and still opens
+    path.write_text(path.read_text().replace('shortCode="mini"', 'shortCode="other"'))
+    assert sinbad.read(copy / "mini.xml").calculations["lab-code-1.0"] is not None
+
+    # both out of step is another entry, and does not
+    path.write_text(path.read_text().replace(b.id, "TST-OTHER-001-R"))
+    with pytest.raises(BenchmarkMismatchError, match="not of"):
+        sinbad.read(copy / "mini.xml")
+
+
+# -- v0.4: an object at one position, partial budgets, calculation ratios --
+
+
+def calc(b):
+    return b.calculations["lab-code-1.0"]
+
+
+def test_an_object_at_one_position(b):
+    spectrum = calc(b)["spectrum-LIBA-A2"]
+    assert spectrum.position_label == "A2"
+    assert spectrum.position.shield_thickness == pytest.approx(5.0)
+    assert spectrum.calculated_by.label == "calc-libA"
+    assert calc(b).data(position="A2").labels == ["spectrum-LIBA-A2"]
+    assert calc(b).data(calculated_by="calc-libA").labels == ["spectrum-LIBA-A2"]
+    assert "at position     A2" in spectrum.summary()
+    # not the position column of a table
+    assert b["reactionRate-Al27"].position is None
+
+
+def test_a_component_given_at_some_positions(b):
+    budget = calc(b)["mc-Al27-libA"].uncertainty_budget
+    nuclear = budget["nuclearData"]
+    assert nuclear.is_partial and nuclear.is_quantified
+    assert nuclear.at == {"A1": 0.0, "A3": 24.0}
+    unnamed = budget["modelApproximations"]
+    assert not unnamed.is_quantified and unnamed.status == "not quantified"
+    assert budget.unquantified == [unnamed]
+    assert budget.partial == [nuclear]
+    table = calc(b)["mc-Al27-libA"].table
+    assert budget.missing(table) == {"nuclearData": ["A2"]}
+    assert budget.complete_at(table) == ["A1", "A3"]
+    frame = budget.to_dataframe(table).set_index("component")
+    assert frame.loc["nuclearData", "as_published"] == "at A1, A3"
+    assert frame.loc["modelApproximations", "as_published"] == "not quantified"
+
+
+def test_a_partial_budget_recombines_to_its_published_total(b):
+    obj = calc(b)["mc-Al27-libA"]
+    # 3-4-5 at A1, 3-4-12-13 at A3; nothing is known at A2
+    uncertainty = obj.uncertainty
+    assert uncertainty[[0, 2]] == pytest.approx([0.05, 0.13])
+    assert np.isnan(uncertainty[1])
+    at = obj.uncertainty_budget.by_position(obj.table)
+    assert list(at.index) == ["A1", "A3"]
+    assert at["total"].tolist() == pytest.approx([0.05, 0.13])
+    assert at["published_total"].tolist() == pytest.approx([0.05, 0.13])
+
+
+def test_no_covariance_from_a_partial_budget(b):
+    obj = calc(b)["mc-Al27-libA"]
+    with pytest.raises(IncompleteBudgetError) as caught:
+        obj.covariance()
+    error = caught.value
+    assert error.label == "mc-Al27-libA"
+    assert error.missing == {"nuclearData": ["A2"]}
+    assert error.complete_at == ["A1", "A3"]
+    message = str(error)
+    assert "nuclearData: given only at A1, A3 (invented TAB. 8)" in message
+    assert "modelApproximations: named by the entry, not quantified" in message
+    assert "complete at: A1, A3" in message
+    assert "by_position" in message
+
+
+def test_an_unquantified_component_is_left_out_with_a_warning(b):
+    obj = calc(b)["mc-Al27-libB"]
+    with pytest.warns(UserWarning, match="modelApproximations"):
+        matrix, _ = obj.covariance(relative=True)
+    assert np.diag(matrix) == pytest.approx([0.02 ** 2] * 3)
+    assert obj.uncertainty == pytest.approx([0.02] * 3)
+
+
+def test_a_ratio_of_two_calculations_is_not_a_ce(b):
+    ratio = calc(b).comparisons["ratio-B-A"]
+    assert ratio.against == "calculated"
+    assert calc(b).comparisons["CE-Al27"].against == "measured"
+    assert "ratio-B-A" not in set(b.ce()["comparison"])
+    both = b.ce(between_calculations=True)
+    only = both[both["comparison"] == "ratio-B-A"]
+    assert set(only["against"]) == {"calculated"}
+    assert set(only["calculation"]) == {"ratio-B-A"}
+    assert ratio.recompute()["ratio"].tolist() == pytest.approx([1.0] * 3)
+
+
+def test_plot_ce_draws_one_line_per_run(b):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    ax = sinbad.plot_ce(b)
+    labels = [line.get_label() for line in ax.get_lines() if not line.get_label().startswith("_")]
+    assert labels == ["lab-code-1.0 calc-libA", "lab-code-1.0 calc-libB"]

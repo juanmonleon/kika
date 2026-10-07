@@ -109,6 +109,13 @@ class EndfProvenance(Provenance):
     #: from the written file. Kept here so a round trip that changes nothing
     #: writes back what it read rather than a recomputation of it.
     directory: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    #: What :func:`kika.endf.check_covariances` (layer 1) found in the MF31/33/34
+    #: section a covariance was decoded from: faults of the section *as written*
+    #: -- an LS=1 triangle in a cross block, a partner block that is missing --
+    #: which the assembled matrix can no longer show. They only inform; the
+    #: sampling pre-flight shows them and traces its own findings back to them.
+    #: Empty when the checks were not run, and on every other kind of section.
+    covarianceFindings: Tuple[object, ...] = ()
 
     def __post_init__(self) -> None:
         self.awr = _asFloat(self.awr)

@@ -259,6 +259,7 @@ def parse_mf34(lines: List[str]) -> MF:
             if mt in line_counts:
                 mt_section.num_lines = line_counts[mt]
         except Exception as e:
+            mf.parse_errors[mt] = f"{type(e).__name__}: {e}"
             logger.warning(f"Error parsing MT{mt} in MF34: {e}")
 
     return mf

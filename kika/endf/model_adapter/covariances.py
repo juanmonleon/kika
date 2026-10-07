@@ -134,16 +134,22 @@ def _sectionProvenance(section, ltt: Optional[int] = None) -> EndfProvenance:
     )
 
 
-def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None):
+def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
+                 xsSections: Optional[dict] = None):
     """One MF33/MT section → a list of :class:`CovarianceSection`.
 
     One section per (row MT, column MT) block the file carries, including the
     cross-MT blocks — those are what make a covariance *suite* rather than a
     list of variances, and dropping them is the classic way to lose half the
     information while everything still looks fine.
+
+    ``xsSections`` (MT → reconstructed σ(E)) is read only by a block that mixes
+    absolute and relative components (LB=0/8/9 with LB=1-6); such a block
+    raises :class:`~kika.endf.classes.mf33.MF33NeedsCrossSections` without it.
+    :func:`decodeCovarianceSuite` supplies it from NJOY on its own.
     """
     report = report if report is not None else ConversionReport()
-    covmat = mf33mt.to_xs_covmat()
+    covmat = mf33mt.to_xs_covmat(mf3_sections=xsSections)
 
     # `CrossSectionCovariance` has no `mt_metadata`, so unlike MF34 the section
     # header does not survive the trip through `kika/cov` at all: ZA reaches the
@@ -706,7 +712,8 @@ def encodeMF35MT(source, mt: int, mat: Optional[int] = None,
 
 def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
                           evaluation: Optional[str] = None,
-                          target: Optional[str] = None):
+                          target: Optional[str] = None,
+                          checks: bool = True):
     """Every covariance file in a parsed ENDF → one :class:`CovarianceSuite`.
 
     MF31, MF33, MF34 and MF35 become ``covarianceSections``; **MF32 becomes
@@ -733,6 +740,16 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
     ``sampling/endf_perturbation.py:663`` and ``sampling/mf35_sampling.py:177``)
     passes neither and gets a suite that cannot be written as valid GNDS, which
     is honest: nothing said what it was about.
+
+    **``checks`` runs layer 1 of the covariance checks**
+    (:func:`kika.endf.check_covariances`) on the tape, because this is the last
+    point where the MF31/33/34 sections are still as written: the model keeps
+    the assembled matrix, not the LB/LS records it came from. Each section's
+    findings land on its ``provenance.covarianceFindings``, and the whole report
+    -- including what belongs to no decoded section, such as an MT the parser
+    dropped -- on ``suite.covarianceChecks``. They are findings about the file,
+    not losses of the conversion, so they stay out of *report*; a check that
+    cannot run at all is the one thing that goes there.
     """
     report = report if report is not None else ConversionReport()
     if target is None:
@@ -777,8 +794,29 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
 
     mf33 = endf.mf.get(33) if hasattr(endf, "mf") else None
     if mf33 is not None:
+        # A block that sums absolute (LB=0/8/9, barns²) and relative components
+        # is relative only after dividing the absolute part by σ_i·σ_j, and in
+        # the resolved range σ(E) exists only reconstructed. So σ comes from
+        # NJOY RECONR -- `endf.pendf` if the caller set it, a cached run on the
+        # source tape otherwise -- and only when some block needs it: a file
+        # whose blocks are all of one kind never starts NJOY.
+        from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
+        mixed = [mt for mt in sorted(getattr(mf33, "mt", {}))
+                 if any(mixesAbsoluteAndRelative(sub.ni_records)
+                        for sub in mf33.mt[mt].subsections)]
+        xsSections = None
+        if mixed:
+            from kika.processing.njoy_pendf_cache import attach_pendf
+            xsSections = attach_pendf(
+                endf, why=f"MF33 MT{mixed}, whose blocks sum absolute (LB=0/8/9) "
+                          f"and relative components,")
+            report.warn(
+                f"MF33 MT{mixed}: absolute components (LB=0/8/9) were made "
+                f"relative with the reconstructed σ(E) in `endf.pendf` "
+                f"(NJOY RECONR) before being summed with the relative ones"
+            )
         for mt in sorted(getattr(mf33, "mt", {})):
-            sections, report = decodeMF33MT(mf33.mt[mt], report)
+            sections, report = decodeMF33MT(mf33.mt[mt], report, xsSections=xsSections)
             suite.covarianceSections.extend(sections)
 
     mf34 = endf.mf.get(34) if hasattr(endf, "mf") else None
@@ -813,7 +851,45 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
             "covariances"
         )
 
+    suite.covarianceChecks = (_attachLayer1(endf, suite, report, xsSections if mf33 is not None
+                                            else None) if checks else None)
+
     # Both ways to the same object: the tuple is unchanged, and the
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report
     return suite, report
+
+
+def _attachLayer1(endf, suite, report: ConversionReport, xsSections=None):
+    """Layer-1 findings onto the provenance of the section each one is about.
+
+    Sections decoded from one ENDF section share one provenance object, so a
+    finding is attached once per (MF, MT), keyed by the row's ``ENDF_MFMT``.
+    """
+    from kika.endf.checks import check_covariances
+
+    try:
+        # Only the files whose findings are attached below: MF32's decode and
+        # eigenvalues would cost every suite decode for nothing.
+        layer1 = check_covariances(
+            endf, mf=(31, 33, 34), xs_sections=xsSections if xsSections is not None
+            else getattr(endf, "pendf", None))
+    except Exception as exc:  # noqa: BLE001 - the decode stands without them
+        report.warn(f"the layer-1 covariance checks could not run: "
+                    f"{type(exc).__name__}: {exc}")
+        return None
+    byKey = {}
+    for finding in layer1:
+        byKey.setdefault((finding.location.mf, finding.location.mt), []).append(finding)
+    done = set()
+    for section in suite.covarianceSections:
+        provenance = section.provenance
+        mfmt = getattr(section.rowData, "ENDF_MFMT", None) if section.rowData else None
+        if provenance is None or id(provenance) in done or not mfmt:
+            continue
+        mf, _, mt = str(mfmt).partition("/")
+        if int(mf) not in (31, 33, 34):
+            continue
+        done.add(id(provenance))
+        provenance.covarianceFindings = tuple(byKey.get((int(mf), int(mt)), ()))
+    return layer1

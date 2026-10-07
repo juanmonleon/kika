@@ -117,9 +117,18 @@ def test_roundoff_asymmetry_is_not_reported_and_real_asymmetry_blocks():
     assert finding.severity == BLOCKS
 
 
-def test_a_wholly_inert_block_blocks_but_a_partly_inert_one_does_not():
-    inert = np.zeros((5, 5))
-    assert _finding(inspect_matrix(inert), "inert_rows").severity == BLOCKS
+def test_a_wholly_inert_block_draws_nothing_and_a_partly_inert_one_is_noted():
+    """PF-8: a block that states no uncertainty is drawn as no perturbation.
+
+    JEFF-4.0 Pu-242 states its [20, 200] MeV PFNS band as a 1x1 zero, and the
+    pre-flight used to refuse the whole run over it. The legacy sampler drew
+    δ ≡ 0 there, which is what the evaluation says.
+    """
+    for inert in (np.zeros((5, 5)), np.zeros((1, 1))):
+        report = inspect_matrix(inert)
+        assert report.samplable
+        assert _finding(report, "inert_rows").severity == NOTE
+        assert _finding(report, "definiteness").severity == NOTE
 
     partial = np.eye(5)
     partial[3, 3] = 0.0

@@ -73,9 +73,26 @@ MT_NUMBER = 2  # elastic scattering
 # This_work uses the pipeline's nominal ENDF and the matching nominal_fits
 # parquet that lives next to it (both written by exfor_to_endf_sampling_v2.py
 # into OUTPUT_DIR).
-THIS_WORK_DIR        = "/share_snc/snc/JuanMonleon/ENDF_samples/new_test_82_mt1fix"
-THIS_WORK_FILE       = f"{THIS_WORK_DIR}/26-Fe-56g_nominal_mg.endf"
-NOMINAL_FITS_PARQUET = f"{THIS_WORK_DIR}/nominal_fits.parquet"
+#
+# ⚑ 2026-09-09 — OVERRIDABLES DESDE EL ENTORNO, con los valores de siempre como
+#   defecto: sin las variables el script hace exactamente lo que hacia. Mismos
+#   nombres que `precompute_chi2_predictive.py` (KIKA_THIS_WORK_DIR /
+#   KIKA_THIS_WORK_ENDF) para que un brazo de `run_chi.sh` se escriba igual en
+#   las dos cadenas.
+#   ⛔ El defecto `new_test_82_mt1fix` YA NO EXISTE en el share: sin
+#   `KIKA_THIS_WORK_DIR` este script falla al abrir la cinta. Se deja como
+#   estaba a proposito, porque cambiarlo escondería dos hechos medidos el
+#   9-sep: (1) la cinta del manuscrito es `new_test_77` -- el `c0` de This_work
+#   del parquet de la run 080 sale bit a bit de su `nominal_fits.parquet`; y
+#   (2) la run 082 es OTRA evaluacion, con `GENERATE_MF3_MF33=1` y otro
+#   `TAU_PRIOR_NEFF_THRESHOLD`, no un refresco de la misma.
+THIS_WORK_DIR        = os.environ.get(
+    "KIKA_THIS_WORK_DIR",
+    "/share_snc/snc/JuanMonleon/ENDF_samples/new_test_82_mt1fix").strip()
+THIS_WORK_FILE       = f"{THIS_WORK_DIR}/" + os.environ.get(
+    "KIKA_THIS_WORK_ENDF", "26-Fe-56g_nominal_mg.endf").strip()
+NOMINAL_FITS_PARQUET = os.environ.get(
+    "KIKA_NOMINAL_FITS", f"{THIS_WORK_DIR}/nominal_fits.parquet").strip()
 
 JEFF_FILE  = "/share_snc/snc/JuanMonleon/jeff40_with_MF4_from_jeff33/26-Fe-56g.txt"
 JENDL_FILE = "/share_snc/snc/JuanMonleon/JENDL-5/260560.jendl5"
@@ -112,7 +129,14 @@ M_TARG_U = 55.93494
 L_MAX = 6
 
 # ── Output ──
-OUTPUT_PARQUET = "/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_82.parquet"
+# ⚑ 2026-09-09: overridable igual que las entradas. El sidecar de 11 GB se
+#   deduce de aqui (`<parquet>.eval_cov.npz`), asi que un tag propio evita
+#   pisar `chi2_data_exfor_c0_80.parquet` -- el de la run 080, que es sobre el
+#   que descansa la tabla del manuscrito y el unico registro que queda de como
+#   se puntuo la cinta `new_test_77`.
+OUTPUT_PARQUET = os.environ.get(
+    "KIKA_CHI2_PARQUET",
+    "/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_82.parquet").strip()
 
 
 # ── ENDF loading ──────────────────────────────────────────────────────────────

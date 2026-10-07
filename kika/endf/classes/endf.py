@@ -18,6 +18,9 @@ class ENDF:
     metadata: Dict[str, Any] = field(default_factory=dict)
     mat: Optional[int] = None  # MAT number from ENDF file
     _pendf: Optional[Dict] = field(default=None, repr=False)
+    #: The file this object was read from, set by ``read_endf``. It is what
+    #: NJOY runs on when σ(E) has to be reconstructed (``attach_pendf``).
+    source_path: Optional[str] = field(default=None, repr=False)
     
     def add_file(self, mf: MF) -> None:
         """Add an MF file to this ENDF file"""

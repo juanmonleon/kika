@@ -5,12 +5,76 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
+from itertools import chain as _chain
 
 from ..mt import MT
 from ....utils import get_endf_logger
 
 # Initialize logger for this module
 logger = get_endf_logger(__name__)
+
+#: LB values whose numbers are relative (fractional) covariances, and those
+#: whose numbers are absolute, in barns². ENDF-6 manual §33.2: LB=0 "absolute
+#: covariance", and for LB=8/9 "the F_k values have the dimension of squared
+#: cross sections". The two can only be summed after the absolute part is
+#: divided by σ_i·σ_j.
+RELATIVE_LB = frozenset({1, 2, 3, 4, 5, 6})
+ABSOLUTE_LB = frozenset({0, 8, 9})
+
+
+class MF33NeedsCrossSections(ValueError):
+    """An MF33 block mixes absolute and relative components and no σ(E) was given.
+
+    Summing them needs the absolute part divided by σ̄_i·σ̄_j, and below the
+    resolved-resonance upper limit MF3 holds only the background, so σ(E) has
+    to come from a reconstruction. kika takes it from an NJOY RECONR PENDF:
+    ``kika.processing.attach_pendf(endf)`` does that for a whole tape.
+    """
+
+
+def mixesAbsoluteAndRelative(ni_records) -> bool:
+    """True if these NI records hold both absolute and relative components."""
+    lbs = {int(r.lb) for r in ni_records if r.lb is not None}
+    return bool(lbs & ABSOLUTE_LB) and bool(lbs & RELATIVE_LB)
+
+
+def _xs_section(xs_sections: Optional[Dict[int, object]], mt: int,
+                ni_records) -> Optional[object]:
+    """σ(E) of ``mt`` for a block made of ``ni_records``, or ``None`` if it needs none.
+
+    Only a block that mixes absolute and relative components reads σ, so for
+    any other block this returns ``None`` without looking -- the lookup below
+    can sum partials, and nothing else should pay for it.
+
+    RECONR writes only the MTs the tape's MF3 gives, and a covariance can be
+    stated for a summation reaction the tape leaves out of MF3 (Si-28 of
+    ENDF/B-VIII.1: MF33 MT3, no MF3 MT3). Its σ is then the ENDF-6 sum of the
+    partials that are there, by the same rules ``kika.endf.writers.redundant``
+    rebuilds MF3 with. ``None`` when neither resolves.
+    """
+    if not xs_sections or not mixesAbsoluteAndRelative(ni_records):
+        return None
+    if mt in xs_sections:
+        return xs_sections[mt]
+    from types import SimpleNamespace
+    from ...writers.redundant import resolve_sum_components
+    parts = resolve_sum_components(mt, xs_sections)
+    if not parts:
+        return None
+    tables = []
+    for part in parts:
+        sec = xs_sections[part]
+        values = getattr(sec, 'values', None)
+        if values is None:
+            values = getattr(sec, 'cross_sections')
+        tables.append((np.asarray(sec.energies, dtype=float),
+                       np.asarray(values, dtype=float)))
+    grid = np.unique(np.concatenate([e for e, _ in tables]))
+    total = np.zeros(grid.size)
+    for e, v in tables:
+        total += np.interp(grid, e, v, left=0.0, right=0.0)
+    logger.info(f"MT{mt}: σ(E) not given, summed from MT{list(parts)}")
+    return SimpleNamespace(energies=grid, values=total)
 
 
 @dataclass
@@ -301,6 +365,99 @@ class MF33MT(MT):
         return result
 
     @staticmethod
+    def _short_range_diagonal(record: 'NISubSubsectionRecord',
+                              output_grid: List[float]) -> np.ndarray:
+        """Variance of an LB=8/9 sub-subsection on ``output_grid`` (absolute, b²).
+
+        ENDF-6 §33.2: each F_k is an *uncorrelated* contribution, so the result
+        is diagonal, and its size depends on the width of the group it lands in.
+        For a group j inside the interval k:
+
+        * LB=8: Var_jj = F_k · ΔE_k / ΔE_j  (grows as the group narrows);
+        * LB=9: Var_jj = F_k · (1 − ΔE_j / ΔE_k)  (zero on the native grid).
+
+        A group j that overlaps several intervals k averages them as
+        uncorrelated pieces: with o_jk the overlap,
+        LB=8 → Σ_k o_jk·F_k·ΔE_k / ΔE_j², LB=9 → Σ_k (o_jk/ΔE_j)²·F_k·(1 − o_jk/ΔE_k).
+        Both reduce to the manual's formulas when j ⊂ k, and LB=8 gives F_k
+        when j = k.
+
+        Projecting LB=8 the way LB=0 is projected (the same value in every
+        sub-bin, fully correlated) is what this replaces: it is right for LB=0,
+        whose F_k is the variance of the whole interval, and wrong here.
+        """
+        energies = np.asarray(record.e_table_k, dtype=float)
+        if energies.size < 2:
+            raise ValueError(f"LB={record.lb} requires NE >= 2, got {energies.size}")
+        f_values = np.asarray(record.f_table_k[:energies.size - 1], dtype=float)
+        grid = np.asarray(output_grid, dtype=float)
+
+        if record.lb == 8 and grid.size == energies.size and np.array_equal(grid, energies):
+            # The native grid: exactly F_k, without a round trip through ΔE.
+            return f_values.copy()
+
+        d_k = np.diff(energies)
+        d_j = np.diff(grid)
+        overlap = np.maximum(
+            0.0,
+            np.minimum(grid[1:, None], energies[None, 1:])
+            - np.maximum(grid[:-1, None], energies[None, :-1]),
+        )
+        with np.errstate(divide='ignore', invalid='ignore'):
+            if record.lb == 8:
+                var = (overlap * (f_values * d_k)[None, :]).sum(axis=1) / d_j ** 2
+            else:
+                frac_j = overlap / d_j[:, None]
+                frac_k = np.where(d_k[None, :] > 0, overlap / d_k[None, :], 0.0)
+                var = (frac_j ** 2 * f_values[None, :] * (1.0 - frac_k)).sum(axis=1)
+        return np.where(d_j > 0, var, 0.0)
+
+    @staticmethod
+    def _bin_average_xs_exact(xs_source: object, energy_grid: List[float]) -> np.ndarray:
+        """1/E-weighted average of a lin-lin tabulated σ(E) over each bin, exactly.
+
+        On a segment where σ = a + bE, ∫σ/E dE = a·ln(E₂/E₁) + b·(E₂−E₁), so the
+        average needs no quadrature at all and sees every point of the table —
+        which matters in the resolved range, where a bin can hold hundreds of
+        resonances that a fixed number of nodes per bin would sample at random.
+        A PENDF is linearised by RECONR to its tolerance, so lin-lin is its own
+        interpolation law. A bin whose lower edge is 0 gets the flat average.
+
+        Accepts an ``MF3MT`` (``energies``/``cross_sections``) or a
+        ``CrossSection`` (``energies``/``values``).
+        """
+        e_tab = np.asarray(xs_source.energies, dtype=float)
+        values = getattr(xs_source, 'values', None)
+        if values is None:
+            values = getattr(xs_source, 'cross_sections')
+        s_tab = np.asarray(values, dtype=float)
+        grid = np.asarray(energy_grid, dtype=float)
+
+        pts = np.union1d(e_tab, grid)
+        pts = pts[(pts >= grid[0]) & (pts <= grid[-1])]
+        sig = np.interp(pts, e_tab, s_tab, left=0.0, right=0.0)
+        e1, e2 = pts[:-1], pts[1:]
+        s1, s2 = sig[:-1], sig[1:]
+        de = e2 - e1
+        with np.errstate(divide='ignore', invalid='ignore'):
+            b = np.where(de > 0, (s2 - s1) / de, 0.0)
+            a = s1 - b * e1
+            log_seg = np.where(e1 > 0, np.log(e2 / e1), 0.0)
+        seg_int = a * log_seg + b * de            # ∫ σ/E dE per segment
+        seg_flat = 0.5 * (s1 + s2) * de           # ∫ σ dE per segment
+
+        cum_int = np.concatenate(([0.0], np.cumsum(seg_int)))
+        cum_flat = np.concatenate(([0.0], np.cumsum(seg_flat)))
+        at = np.searchsorted(pts, grid)
+        lo, hi = grid[:-1], grid[1:]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_bin = np.where(lo > 0, np.log(hi / lo), 0.0)
+            weighted = (cum_int[at[1:]] - cum_int[at[:-1]]) / log_bin
+            flat = (cum_flat[at[1:]] - cum_flat[at[:-1]]) / (hi - lo)
+        out = np.where(lo > 0, weighted, flat)
+        return np.where(hi > lo, out, 0.0)
+
+    @staticmethod
     def _project_matrix_piecewise_constant(
         component_matrix: np.ndarray,
         native_row_grid: List[float],
@@ -388,12 +545,28 @@ class MF33MT(MT):
         ni_records: List['NISubSubsectionRecord'],
         mt_label: str = '',
         target_grid: Optional[List[float]] = None,
+        xs_row: Optional[object] = None,
+        xs_col: Optional[object] = None,
     ) -> Optional[Tuple[np.ndarray, List[float], bool]]:
         """Process a list of NI records into a full covariance matrix.
 
         All NI components are decoded, projected onto a shared grid, and
         summed. The full matrix (with off-diagonal structure) is returned,
         not just the diagonal.
+
+        **Relative and absolute components are summed separately** (see
+        :data:`RELATIVE_LB` / :data:`ABSOLUTE_LB`). A block that holds only one
+        kind comes back in that kind, exactly as before. A block that holds
+        both — the usual LB=5 + LB=8 of an evaluation with a short-range
+        variance in the resolved range — comes back relative, with the
+        absolute part divided by σ̄_i·σ̄_j, where σ̄ is the 1/E-weighted bin
+        average of ``xs_row`` / ``xs_col``. Without them it raises
+        :class:`MF33NeedsCrossSections`: adding barns² to fractions is the
+        alternative, and it is what this method did until 2026-10-06 — up to
+        ×6400 on JEFF-4.0 Eu-154 MT3 (census in kika-workspace
+        ``docs/library/cov_checks_roadmap.md``, C0).
+
+        LB=8/9 are projected by :meth:`_short_range_diagonal`, not as LB=0.
 
         Parameters
         ----------
@@ -404,69 +577,115 @@ class MF33MT(MT):
         target_grid : list of float, optional
             Energy grid to project onto. If None, the union of every
             component's grid is used.
+        xs_row, xs_col : MF3MT or CrossSection, optional
+            σ(E) of the row and column reaction. Only read when the block
+            mixes absolute and relative components; below the resolved
+            resonance upper limit it must be reconstructed (an NJOY PENDF).
 
         Returns
         -------
         (matrix, energy_grid, is_relative) or None
-            Full NxN matrix on the chosen grid, its boundaries, and a flag
-            identifying whether the combined matrix is relative (any
-            LB in {1,2,3,4,5,6}) or absolute (all LB in {0,8,9}).
+            Full NxN matrix on the chosen grid, its boundaries, and whether it
+            is relative.
         """
         all_energies: Set[float] = set()
-        components = []
+        relative = []       # (matrix, row_grid, col_grid)
+        absolute = []       # LB=0, projected like the relative ones
+        short_range = []    # LB=8/9 records, projected by _short_range_diagonal
 
         for ni_rec in ni_records:
             try:
-                if ni_rec.lb in (0, 1, 2, 8, 9):
+                if ni_rec.lb in (8, 9):
+                    grid = list(ni_rec.e_table_k)
+                    if len(grid) < 2:
+                        raise ValueError(f"LB={ni_rec.lb} requires NE >= 2, got {len(grid)}")
+                    all_energies.update(grid)
+                    short_range.append(ni_rec)
+                elif ni_rec.lb in (0, 1, 2):
                     mat, grid = self._decode_lb012_matrix(ni_rec)
                     all_energies.update(grid)
-                    components.append((mat, grid, None))
+                    (absolute if ni_rec.lb == 0 else relative).append((mat, grid, None))
                 elif ni_rec.lb in (3, 4):
                     mat, row_grid, col_grid = self._decode_lb34_matrix(ni_rec)
                     all_energies.update(row_grid)
                     all_energies.update(col_grid)
-                    components.append((mat, row_grid, col_grid))
+                    relative.append((mat, row_grid, col_grid))
                 elif ni_rec.lb == 5:
                     mat, grid = self._decode_lb5_matrix(ni_rec)
                     all_energies.update(grid)
-                    components.append((mat, grid, None))
+                    relative.append((mat, grid, None))
                 elif ni_rec.lb == 6:
                     mat, row_grid, col_grid = self._decode_lb6_matrix(ni_rec)
                     all_energies.update(row_grid)
                     all_energies.update(col_grid)
-                    components.append((mat, row_grid, col_grid))
+                    relative.append((mat, row_grid, col_grid))
             except ValueError as e:
                 logger.error(f"Error decoding LB={ni_rec.lb} in {mt_label}: {e}")
 
-        if not components:
+        if not (relative or absolute or short_range):
             return None
 
         output_grid = list(target_grid) if target_grid is not None else sorted(all_energies)
         if len(output_grid) < 2:
             return None
         m = len(output_grid) - 1
-        total = np.zeros((m, m))
 
-        for comp_mat, row_grid, col_grid in components:
-            if col_grid is None and row_grid == output_grid:
-                projected = comp_mat
-            elif col_grid is not None and row_grid == output_grid and col_grid == output_grid:
-                projected = comp_mat
-            else:
-                projected = self._project_matrix_piecewise_constant(
-                    comp_mat, row_grid, output_grid, native_col_grid=col_grid
-                )
-            total += projected
+        def _summed(components):
+            total = np.zeros((m, m))
+            for comp_mat, row_grid, col_grid in components:
+                if col_grid is None and row_grid == output_grid:
+                    projected = comp_mat
+                elif col_grid is not None and row_grid == output_grid and col_grid == output_grid:
+                    projected = comp_mat
+                else:
+                    projected = self._project_matrix_piecewise_constant(
+                        comp_mat, row_grid, output_grid, native_col_grid=col_grid
+                    )
+                total += projected
+            return total
 
-        lb_set = {r.lb for r in ni_records}
-        is_relative = not lb_set.issubset({0, 8, 9})
-        return total, output_grid, is_relative
+        rel_total = _summed(relative)
+        if not (absolute or short_range):
+            return rel_total, output_grid, True
+
+        abs_total = _summed(absolute)
+        for rec in short_range:
+            abs_total[np.diag_indices(m)] += self._short_range_diagonal(rec, output_grid)
+        if not relative:
+            return abs_total, output_grid, False
+
+        if xs_row is None or xs_col is None:
+            lbs = sorted({int(r.lb) for r in ni_records})
+            raise MF33NeedsCrossSections(
+                f"MF33 {mt_label}: the block mixes absolute "
+                f"(LB={sorted(set(lbs) & ABSOLUTE_LB)}, barns²) and relative "
+                f"(LB={sorted(set(lbs) & RELATIVE_LB)}) components. They can only "
+                f"be summed after dividing the absolute part by σ_i·σ_j, and "
+                f"below the resolved-resonance upper limit σ(E) has to be "
+                f"reconstructed. Pass the reconstructed sections as "
+                f"`mf3_sections` (an NJOY PENDF: `kika.processing.attach_pendf"
+                f"(endf)` sets `endf.pendf`), or decode through "
+                f"`decodeCovarianceSuite(endf)`, which does it on its own."
+            )
+        s_row = self._bin_average_xs_exact(xs_row, output_grid)
+        s_col = s_row if xs_col is xs_row else self._bin_average_xs_exact(xs_col, output_grid)
+        denom = np.outer(s_row, s_col)
+        lost = (denom <= 0) & (abs_total != 0)
+        if lost.any():
+            logger.warning(
+                f"MF33 {mt_label}: {int(lost.sum())} absolute covariance entries "
+                f"sit where σ̄ = 0 and cannot be made relative; dropped."
+            )
+        with np.errstate(divide='ignore', invalid='ignore'):
+            converted = np.where(denom > 0, abs_total / np.where(denom > 0, denom, 1.0), 0.0)
+        return rel_total + converted, output_grid, True
 
     def _get_cross_mt_matrix(
         self,
         mt_i: int,
         mt_j: int,
         sibling_sections: Dict[int, 'MF33MT'],
+        mf3_sections: Optional[Dict[int, object]] = None,
     ) -> Optional[Tuple[np.ndarray, List[float], bool]]:
         """Return the full cross-MT covariance Cov(MT_i, MT_j) if stored.
 
@@ -483,6 +702,8 @@ class MF33MT(MT):
             result = section._process_ni_records_to_matrix(
                 subsection.ni_records,
                 mt_label=f"MT{src_mt}→MT{tgt_mt}",
+                xs_row=_xs_section(mf3_sections, src_mt, subsection.ni_records),
+                xs_col=_xs_section(mf3_sections, tgt_mt, subsection.ni_records),
             )
             if result is not None:
                 return result
@@ -576,9 +797,11 @@ class MF33MT(MT):
 
         ni_bundle: Optional[Tuple[np.ndarray, List[float], bool]] = None
         if self_sub.ni_records:
+            xs_self = _xs_section(mf3_sections, self.number, self_sub.ni_records)
             ni_bundle = self._process_ni_records_to_matrix(
                 self_sub.ni_records,
                 mt_label=f"MT{self.number}→MT{self.number}",
+                xs_row=xs_self, xs_col=xs_self,
             )
 
         if nc_matrix is not None and ni_bundle is not None:
@@ -719,6 +942,11 @@ class MF33MT(MT):
                     _resolving=resolving,
                     mf3_sections=mf3_sections,
                 )
+            except MF33NeedsCrossSections:
+                # A contributor that mixes absolute and relative components
+                # cannot be built without σ(E). Dropping it would make the
+                # derived covariance quietly smaller, so the caller hears it.
+                raise
             except Exception as e:
                 logger.warning(f"MT{self.number}: failed to resolve MT{mt_i}: {e}")
                 continue
@@ -821,6 +1049,8 @@ class MF33MT(MT):
                 bundle = sec._process_ni_records_to_matrix(
                     sub.ni_records,
                     mt_label=f"MT{src_mt}→MT{tgt_mt}",
+                    xs_row=_xs_section(mf3_sections, src_mt, sub.ni_records),
+                    xs_col=_xs_section(mf3_sections, tgt_mt, sub.ni_records),
                 )
                 if bundle is not None:
                     cross_index[(src_mt, tgt_mt)] = bundle
@@ -1027,9 +1257,13 @@ class MF33MT(MT):
             # alongside an NC record are additive per ENDF 33.3.3 item 3)
             ni_bundle: Optional[Tuple[np.ndarray, List[float], bool]] = None
             if subsection.ni_records:
+                same_mat = mat1 == 0 or mat1 == own_mat
                 ni_bundle = self._process_ni_records_to_matrix(
                     subsection.ni_records,
                     mt_label=f"MT{self.number}→MT{mt1}",
+                    xs_row=_xs_section(mf3_sections, self.number, subsection.ni_records),
+                    xs_col=(_xs_section(mf3_sections, mt1, subsection.ni_records)
+                            if same_mat else None),
                 )
 
             # Step C: combine NC and NI (on a shared union grid) and emit
@@ -1142,127 +1376,7 @@ class MF33MT(MT):
 
         # Subsections
         for subsection in self._subsections:
-            # Subsection CONT
-            subsec_cont = format_endf_data_line(
-                [subsection.xmf1 or 0.0, subsection.xlfs1 or 0.0,
-                 subsection.mat1 or 0, subsection.mt1,
-                 subsection.nc or 0, subsection.ni or 0],
-                mat, mf, mt, 0,
-                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
-                         ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-            )
-            lines.append(blank_line_number(subsec_cont))
-
-            # NC-type sub-subsections
-            for nc_rec in subsection.nc_records:
-                # CONT line
-                nc_cont = format_endf_data_line(
-                    [0.0, 0.0, 0, nc_rec.lty, 0, 0],
-                    mat, mf, mt, 0,
-                    formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
-                             ENDF_FORMAT_INT, ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT_ZERO]
-                )
-                lines.append(blank_line_number(nc_cont))
-
-                if nc_rec.lty == 0:
-                    # LIST: E1, E2, 0, 0, 2*NCI, NCI / {CI, XMTI}
-                    nci = nc_rec.nci or 0
-                    list_header = format_endf_data_line(
-                        [nc_rec.e1, nc_rec.e2, 0, 0, 2 * nci, nci],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
-                                 ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(list_header))
-                    # Data: alternating CI, XMTI
-                    all_values = []
-                    for i in range(nci):
-                        all_values.append(nc_rec.ci[i])
-                        all_values.append(nc_rec.xmti[i])
-                    _write_values_block(all_values)
-
-                elif nc_rec.lty in (1, 2, 3):
-                    # LIST: E1, E2, MATS, MTS, 2*NEI+2, NEI / (XMFS, XLFSS), {EI, WEI}
-                    nei = nc_rec.nei or 0
-                    list_header = format_endf_data_line(
-                        [nc_rec.e1, nc_rec.e2, nc_rec.mats or 0, nc_rec.mts or 0,
-                         2 * nei + 2, nei],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(list_header))
-                    # Data: XMFS, XLFSS, then alternating EI, WEI
-                    all_values = [nc_rec.xmfs or 0.0, nc_rec.xlfss or 0.0]
-                    for i in range(nei):
-                        all_values.append(nc_rec.ei[i])
-                        all_values.append(nc_rec.wei[i])
-                    _write_values_block(all_values)
-
-            # NI-type sub-subsections
-            for ni_rec in subsection.ni_records:
-                if ni_rec.lb in (0, 1, 2, 8, 9):
-                    # LIST header: 0.0, 0.0, LT, LB, NT, NP
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, ni_rec.lt or 0, ni_rec.lb, ni_rec.nt, ni_rec.np],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    # Data: alternating Ek, Fk
-                    all_values = []
-                    for i in range(len(ni_rec.e_table_k)):
-                        all_values.append(ni_rec.e_table_k[i])
-                        all_values.append(ni_rec.f_table_k[i])
-                    _write_values_block(all_values)
-
-                elif ni_rec.lb in (3, 4):
-                    # LIST header: 0.0, 0.0, LT, LB, NT, NP
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, ni_rec.lt, ni_rec.lb, ni_rec.nt, ni_rec.np],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    # Data: first table {Ek, Fk}, then second table {El, Fl}
-                    all_values = []
-                    for i in range(len(ni_rec.e_table_k)):
-                        all_values.append(ni_rec.e_table_k[i])
-                        all_values.append(ni_rec.f_table_k[i])
-                    for i in range(len(ni_rec.e_table_l)):
-                        all_values.append(ni_rec.e_table_l[i])
-                        all_values.append(ni_rec.f_table_l[i])
-                    _write_values_block(all_values)
-
-                elif ni_rec.lb == 5:
-                    # LIST header: 0.0, 0.0, LS, LB=5, NT, NE
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, ni_rec.ls, 5, ni_rec.nt, ni_rec.ne],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    _write_values_block(ni_rec.energies + ni_rec.matrix)
-
-                elif ni_rec.lb == 6:
-                    # LIST header: 0.0, 0.0, 0, LB=6, NT, NER
-                    ner = len(ni_rec.row_energies)
-                    rec_header = format_endf_data_line(
-                        [0.0, 0.0, 0, 6, ni_rec.nt, ner],
-                        mat, mf, mt, 0,
-                        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
-                                 ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT,
-                                 ENDF_FORMAT_INT, ENDF_FORMAT_INT]
-                    )
-                    lines.append(blank_line_number(rec_header))
-                    _write_values_block(
-                        ni_rec.row_energies + ni_rec.col_energies + ni_rec.rect_matrix
-                    )
+            lines.extend(emit_subsection(subsection, mat, mf, mt))
 
         # SEND marker
         end_line = format_endf_data_line(
@@ -1274,3 +1388,162 @@ class MF33MT(MT):
         lines.append(end_line)
 
         return "\n".join(lines)
+
+
+def emit_subsection(subsection: "Subsection", mat: int, mf: int, mt: int) -> List[str]:
+    """The lines of one subsection: its CONT, then the NC and NI records.
+
+    Shared by MF33, MF31 and MF40 (§40 nests the same subsection under a
+    final-state level). Sequence numbers are left blank, as ``MF33MT`` always
+    wrote them; the tape writer stamps them.
+    """
+    from ...utils import (
+        format_endf_data_line,
+        ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT, ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_BLANK
+    )
+    lines: List[str] = []
+
+    def blank_line_number(line: str) -> str:
+        return line[:75] + "     "
+
+    def _write_values_block(all_values):
+        """Write a list of float values in blocks of 6 per ENDF line."""
+        buf = []
+        for val in all_values:
+            buf.append(val)
+            if len(buf) == 6:
+                ln = format_endf_data_line(buf, mat, mf, mt, 0)
+                lines.append(blank_line_number(ln))
+                buf = []
+        if buf:
+            while len(buf) < 6:
+                buf.append(None)
+            ln = format_endf_data_line(
+                buf, mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT] * len(buf) + [ENDF_FORMAT_BLANK] * (6 - len(buf))
+            )
+            lines.append(blank_line_number(ln))
+
+    # Subsection CONT
+    subsec_cont = format_endf_data_line(
+        [subsection.xmf1 or 0.0, subsection.xlfs1 or 0.0,
+         subsection.mat1 or 0, subsection.mt1,
+         subsection.nc or 0, subsection.ni or 0],
+        mat, mf, mt, 0,
+        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
+                 ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+    )
+    lines.append(blank_line_number(subsec_cont))
+
+    # NC-type sub-subsections
+    for nc_rec in subsection.nc_records:
+        # CONT line
+        nc_cont = format_endf_data_line(
+            [0.0, 0.0, 0, nc_rec.lty, 0, 0],
+            mat, mf, mt, 0,
+            formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
+                     ENDF_FORMAT_INT, ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT_ZERO]
+        )
+        lines.append(blank_line_number(nc_cont))
+
+        if nc_rec.lty == 0:
+            # LIST: E1, E2, 0, 0, 2*NCI, NCI / {CI, XMTI}
+            nci = nc_rec.nci or 0
+            list_header = format_endf_data_line(
+                [nc_rec.e1, nc_rec.e2, 0, 0, 2 * nci, nci],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT_ZERO,
+                         ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(list_header))
+            # Data: alternating CI, XMTI
+            all_values = []
+            for i in range(nci):
+                all_values.append(nc_rec.ci[i])
+                all_values.append(nc_rec.xmti[i])
+            _write_values_block(all_values)
+
+        elif nc_rec.lty in (1, 2, 3):
+            # LIST: E1, E2, MATS, MTS, 2*NEI+2, NEI / (XMFS, XLFSS), {EI, WEI}
+            nei = nc_rec.nei or 0
+            list_header = format_endf_data_line(
+                [nc_rec.e1, nc_rec.e2, nc_rec.mats or 0, nc_rec.mts or 0,
+                 2 * nei + 2, nei],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(list_header))
+            # Data: XMFS, XLFSS, then alternating EI, WEI
+            all_values = [nc_rec.xmfs or 0.0, nc_rec.xlfss or 0.0]
+            for i in range(nei):
+                all_values.append(nc_rec.ei[i])
+                all_values.append(nc_rec.wei[i])
+            _write_values_block(all_values)
+
+    # NI-type sub-subsections
+    for ni_rec in subsection.ni_records:
+        if ni_rec.lb in (0, 1, 2, 8, 9):
+            # LIST header: 0.0, 0.0, LT, LB, NT, NP
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, ni_rec.lt or 0, ni_rec.lb, ni_rec.nt, ni_rec.np],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            # Data: alternating Ek, Fk
+            all_values = []
+            for i in range(len(ni_rec.e_table_k)):
+                all_values.append(ni_rec.e_table_k[i])
+                all_values.append(ni_rec.f_table_k[i])
+            _write_values_block(all_values)
+
+        elif ni_rec.lb in (3, 4):
+            # LIST header: 0.0, 0.0, LT, LB, NT, NP
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, ni_rec.lt, ni_rec.lb, ni_rec.nt, ni_rec.np],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            # Data: first table {Ek, Fk}, then second table {El, Fl}
+            all_values = []
+            for i in range(len(ni_rec.e_table_k)):
+                all_values.append(ni_rec.e_table_k[i])
+                all_values.append(ni_rec.f_table_k[i])
+            for i in range(len(ni_rec.e_table_l)):
+                all_values.append(ni_rec.e_table_l[i])
+                all_values.append(ni_rec.f_table_l[i])
+            _write_values_block(all_values)
+
+        elif ni_rec.lb == 5:
+            # LIST header: 0.0, 0.0, LS, LB=5, NT, NE
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, ni_rec.ls, 5, ni_rec.nt, ni_rec.ne],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            _write_values_block(_chain(ni_rec.energies, ni_rec.matrix))
+
+        elif ni_rec.lb == 6:
+            # LIST header: 0.0, 0.0, 0, LB=6, NT, NER
+            ner = len(ni_rec.row_energies)
+            rec_header = format_endf_data_line(
+                [0.0, 0.0, 0, 6, ni_rec.nt, ner],
+                mat, mf, mt, 0,
+                formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
+                         ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT,
+                         ENDF_FORMAT_INT, ENDF_FORMAT_INT]
+            )
+            lines.append(blank_line_number(rec_header))
+            _write_values_block(
+                ni_rec.row_energies + ni_rec.col_energies + ni_rec.rect_matrix
+            )
+
+    return lines

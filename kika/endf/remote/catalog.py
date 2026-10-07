@@ -74,8 +74,6 @@ _NUCLIDE_FILE = re.compile(
 #   tsl_H(H2O)_0001.dat  tsl_10Graphite_0031.zip  tsl_026-Fe-56_0056.zip
 _TSL_FILE = re.compile(r"^tsl_(?P<label>.+?)_(?P<mat>\d{4})\.(?:zip|dat)$", re.IGNORECASE)
 
-_NEUTRON_SYMBOLS = {"n", "nn"}
-
 
 def _library_id(directory: str) -> str:
     """Canonical id for a library directory: the historical short id when one
@@ -243,12 +241,11 @@ def parse_catalog_filename(filename: str, sublib: str) -> dict | None:
         side = "1" if m.group("mat1") else "2"
         z = int(m.group(f"z{side}"))
         a = int(m.group(f"a{side}"))
-        el = m.group(f"el{side}")
         iso = m.group(f"m{side}")
         mat = int(m.group(f"mat{side}"))
         isomer = int(iso[1:] or 1) if iso else 0
-        if el.lower() in _NEUTRON_SYMBOLS:
-            z = 0
+        # The neutron is told apart by Z = 0 in the name (0-N-1, 000-nn-1),
+        # never by its symbol: "N" is also nitrogen.
         return {"z": z, "a": a, "isomer": isomer, "mat": mat, "label": nuclide_label(z, a, isomer)}
 
     if sublib.lower() == "tsl":

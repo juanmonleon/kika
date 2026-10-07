@@ -635,13 +635,20 @@ def _smooth_coefficients(n=600):
 
 
 def test_coefficients_folded_is_exact_on_a_linear_coefficient():
-    """Folding a linear function returns its value at the kernel centroid."""
+    """Folding a linear function returns its value at the kernel centroid.
+
+    To 1e-6 and not to machine precision: the fold is a trapezoid rule on the
+    table's own points (Gauss-Hermite, exact here, until September 2026), and
+    unevenly spaced nodes leave the Gaussian's curvature inside an interval,
+    ~1e-7 of the value. That is the price of a rule that does not miss the
+    structure of a real cross section by tens of percent.
+    """
     energies = np.linspace(1e5, 1e7, 400)
     coefficients = np.vstack([2.0 + 3e-7 * energies])
     got = dcs.coefficients_folded(
         energies, coefficients, np.array([5e6]), dcs.TofResolution()
     )
-    assert got[0, 0] == pytest.approx(2.0 + 3e-7 * 5e6, rel=1e-9)
+    assert got[0, 0] == pytest.approx(2.0 + 3e-7 * 5e6, rel=1e-6)
 
 
 def test_coefficients_folded_returns_a_constant_unchanged():
@@ -722,3 +729,193 @@ def test_the_four_readings_are_independent():
     assert cases["both"] == pytest.approx(
         cases["sigma_only"] * cases["shape_only"] / cases["nominal"]
     )
+
+
+# ─── The sigma-weighted fold ────────────────────────────────────────────────
+
+class TestSigmaWeightedFold:
+    """:func:`dcs.coefficients_sigma_weighted_folded` against closed forms."""
+
+    TOF = dcs.TofResolution(flight_path_m=27.037, delta_t_ns=5.0)
+    E0 = 1.3e6
+
+    def _grid(self):
+        return np.linspace(1.2e6, 1.4e6, 401)
+
+    def test_weights_are_a_normalised_gaussian(self):
+        s = 3.0e3
+        nodes, w = dcs.resolution_fold_nodes(self.E0, s, [self._grid()])
+        assert w.sum() == pytest.approx(1.0)
+        assert nodes @ w == pytest.approx(self.E0, rel=1e-9)
+        assert np.sqrt(((nodes - self.E0) ** 2) @ w) == pytest.approx(s, rel=1e-3)
+
+    def test_every_data_point_in_the_window_is_a_node(self):
+        grid = self._grid()
+        s = 3.0e3
+        nodes, _ = dcs.resolution_fold_nodes(self.E0, s, [grid])
+        inside = grid[np.abs(grid - self.E0) < 5 * s]
+        assert np.isin(inside, nodes).all()
+
+    def test_delta_kernel_is_one_node(self):
+        nodes, w = dcs.resolution_fold_nodes(self.E0, 0.0, [self._grid()])
+        assert nodes.tolist() == [self.E0] and w.tolist() == [1.0]
+
+    def test_flat_sigma_reduces_to_the_unweighted_fold(self):
+        grid = self._grid()
+        a1 = 0.1 + 0.3 * np.sin((grid - grid[0]) / 5e3)
+        a_eff, s_avg = dcs.coefficients_sigma_weighted_folded(
+            grid, {1: a1}, grid, np.full_like(grid, 2.5), self.E0, self.TOF,
+        )
+        nodes, w = dcs.resolution_fold_nodes(
+            self.E0, self.TOF.sigma_e_mev(self.E0 / 1e6) * 1e6, [grid, grid],
+        )
+        assert s_avg == pytest.approx(2.5)
+        assert a_eff[0] == pytest.approx(np.interp(nodes, grid, a1) @ w, rel=1e-12)
+
+    def test_the_shape_follows_the_counts(self):
+        # sigma is a narrow spike where a_1 = +0.8, flat and small elsewhere
+        # where a_1 = -0.8: almost every count comes from the spike, so the
+        # measured shape is the spike's.
+        grid = self._grid()
+        near = np.abs(grid - self.E0) < 1.0e3
+        sigma = np.where(near, 100.0, 0.01)
+        a1 = np.where(near, 0.8, -0.8)
+        a_eff, _ = dcs.coefficients_sigma_weighted_folded(
+            grid, {1: a1}, grid, sigma, self.E0, self.TOF,
+        )
+        unweighted = dcs.coefficients_folded(grid, a1[None, :], [self.E0], self.TOF)[0, 0]
+        # The spike's edges are linear ramps in the table, so a little of the
+        # a_1 = -0.8 side is mixed in; the unweighted fold is dominated by it.
+        assert a_eff[0] > 0.6
+        assert unweighted < 0.0
+
+    def test_sigma_average_matches_a_dense_integral(self):
+        rng = np.random.default_rng(7)
+        grid = np.sort(rng.uniform(1.25e6, 1.35e6, 3000))
+        sigma = 1.0 + 4.0 * rng.random(grid.size)  # structure finer than the kernel
+        _, s_avg = dcs.coefficients_sigma_weighted_folded(
+            grid, {1: np.zeros_like(grid)}, grid, sigma, self.E0, self.TOF,
+        )
+        s = self.TOF.sigma_e_mev(self.E0 / 1e6) * 1e6
+        x = np.linspace(self.E0 - 6 * s, self.E0 + 6 * s, 400001)
+        g = np.exp(-0.5 * ((x - self.E0) / s) ** 2)
+        assert s_avg == pytest.approx((np.interp(x, grid, sigma) @ g) / g.sum(), rel=2e-3)
+
+
+class TestDsigmaVsEnergyProductFold:
+    """``differential_xs_vs_energy`` averages the product, and its grid."""
+
+    TOF = dcs.TofResolution(flight_path_m=27.037, delta_t_ns=5.0)
+
+    def _evaluation(self):
+        rng = np.random.default_rng(11)
+        mf4 = np.linspace(1.0e6, 1.6e6, 61)
+        a1 = 0.2 + 0.4 * np.sin((mf4 - mf4[0]) / 4e4)
+        a2 = 0.05 * np.cos((mf4 - mf4[0]) / 7e4)
+        xs_grid = np.sort(rng.uniform(0.9e6, 1.7e6, 4000))
+        xs = 2.0 + 3.0 * rng.random(xs_grid.size)
+        return mf4, {1: a1, 2: a2}, xs_grid, xs
+
+    def test_each_point_is_the_fixed_energy_product_fold_at_that_cosine(self):
+        mf4, coeffs, xs_grid, xs = self._evaluation()
+        query = np.array([1.1e6, 1.27e6, 1.45e6])
+        out = dcs.differential_xs_vs_energy(
+            energies_ev=mf4, coefficients=coeffs, mu=0.3, native_frame="cm", mu_frame="cm",
+            xs_energies_ev=xs_grid, xs_values=xs, xs_mode="folded", tof=self.TOF,
+            query_energies_ev=query,
+        )
+        for i, e0 in enumerate(query):
+            a_eff, s_avg = dcs.coefficients_sigma_weighted_folded(
+                mf4, coeffs, xs_grid, xs, e0, self.TOF,
+            )
+            expected = dcs.angular_pdf(np.array([0.3]), a_eff)[0] * s_avg / (2 * np.pi)
+            assert out["values"][i] == pytest.approx(expected, rel=1e-12)
+            assert out["sigma"][i] == pytest.approx(s_avg, rel=1e-12)
+
+    def test_constant_shape_and_flat_sigma_fold_to_themselves(self):
+        mf4 = np.linspace(1.0e6, 1.6e6, 61)
+        coeffs = {1: np.full(mf4.size, 0.25)}
+        xs_grid = np.linspace(0.9e6, 1.7e6, 801)
+        xs = np.full(xs_grid.size, 3.0)
+        kwargs = dict(energies_ev=mf4, coefficients=coeffs, mu=-0.4, xs_energies_ev=xs_grid,
+                      xs_values=xs, xs_mode="folded", tof=self.TOF, mu_frame="cm")
+        out = dcs.differential_xs_vs_energy(**kwargs)
+        expected = dcs.angular_pdf(np.array([-0.4]), [0.25])[0] * 3.0 / (2 * np.pi)
+        np.testing.assert_allclose(out["values"], expected, rtol=1e-12)
+
+    def test_the_jacobian_applies_to_the_product_too(self):
+        mf4, coeffs, xs_grid, xs = self._evaluation()
+        common = dict(energies_ev=mf4, coefficients=coeffs, xs_energies_ev=xs_grid,
+                      xs_values=xs, xs_mode="folded", tof=self.TOF,
+                      query_energies_ev=[1.3e6], native_frame="cm")
+        alpha = dcs.frame_alpha(mass_number=56)
+        lab = dcs.differential_xs_vs_energy(mu=0.5, mu_frame="lab", alpha=alpha, **common)
+        cm = dcs.differential_xs_vs_energy(mu=lab["mu_native"], mu_frame="cm", **common)
+        assert lab["values"][0] == pytest.approx(cm["values"][0] * lab["jacobian"], rel=1e-12)
+
+    def test_nominal_grid_is_the_union_inside_the_mf4_range(self):
+        mf4 = np.array([1.0, 10.0, 100.0])
+        xs_grid = np.array([0.5, 2.0, 10.0, 50.0, 200.0])
+        grid = dcs.dsigma_vs_energy_grid(xs_grid, mf4)
+        assert grid.tolist() == [1.0, 2.0, 10.0, 50.0, 100.0]
+
+    def test_folded_grid_keeps_a_quarter_kernel_between_points(self):
+        mf4 = np.linspace(1.0e6, 2.0e6, 11)
+        xs_grid = np.linspace(1.0e6, 2.0e6, 200001)
+        grid = dcs.dsigma_vs_energy_grid(xs_grid, mf4, tof=self.TOF)
+        assert grid[0] == 1.0e6 and grid[-1] == 2.0e6
+        gaps = np.diff(grid[:-1])
+        quarter = self.TOF.sigma_e_mev(grid[:-2] / 1e6) * 1e6 / 4
+        assert (gaps >= quarter).all()
+        # and never much more than that where the table is dense
+        assert (gaps <= quarter + 2 * (xs_grid[1] - xs_grid[0])).all()
+
+
+class TestProductReadings:
+    """``coefficients_sigma_weighted`` for every reading, against closed forms."""
+
+    def test_bin_average_of_a_flat_product_is_itself(self):
+        grid = np.linspace(1e6, 2e6, 101)
+        a, s = dcs.coefficients_sigma_weighted(
+            grid, {1: np.full(grid.size, 0.3)}, grid, np.full(grid.size, 4.0), 1.5e6,
+            mode="binavg", bin_edges=(1.4e6, 1.6e6),
+        )
+        assert s == pytest.approx(4.0) and a[0] == pytest.approx(0.3)
+
+    def test_bin_average_weights_by_lethargy_and_by_sigma(self):
+        grid = np.linspace(1e6, 2e6, 2001)
+        sigma = np.where(grid < 1.5e6, 1.0, 9.0)
+        a1 = np.where(grid < 1.5e6, -0.5, 0.5)
+        a, s = dcs.coefficients_sigma_weighted(
+            grid, {1: a1}, grid, sigma, 1.5e6, mode="binavg", bin_edges=(1.2e6, 1.8e6),
+        )
+        x = np.linspace(1.2e6, 1.8e6, 600001)
+        w = 1 / x
+        sx = np.where(x < 1.5e6, 1.0, 9.0)
+        ax = np.where(x < 1.5e6, -0.5, 0.5)
+        assert s == pytest.approx((sx * w).sum() / w.sum(), rel=2e-3)
+        assert a[0] == pytest.approx((sx * ax * w).sum() / (sx * w).sum(), rel=5e-3)
+
+    def test_nominal_is_the_file_at_the_energy(self):
+        grid = np.linspace(1e6, 2e6, 11)
+        a1 = np.linspace(0.0, 1.0, 11)
+        a, s = dcs.coefficients_sigma_weighted(
+            grid, {1: a1}, grid, np.linspace(1.0, 2.0, 11), 1.5e6, mode="nominal",
+        )
+        assert a[0] == pytest.approx(0.5) and s == pytest.approx(1.5)
+
+    def test_the_folded_wrapper_is_the_folded_reading(self):
+        grid = np.linspace(1.2e6, 1.4e6, 401)
+        a1 = 0.1 + 0.3 * np.sin((grid - grid[0]) / 5e3)
+        sigma = 1.0 + np.cos((grid - grid[0]) / 3e3) ** 2
+        tof = dcs.TofResolution(27.037, 5.0)
+        old = dcs.coefficients_sigma_weighted_folded(grid, {1: a1}, grid, sigma, 1.3e6, tof)
+        new = dcs.coefficients_sigma_weighted(grid, {1: a1}, grid, sigma, 1.3e6, mode="folded", tof=tof)
+        np.testing.assert_allclose(old[0], new[0], rtol=1e-14)
+        assert old[1] == pytest.approx(new[1], rel=1e-14)
+
+    def test_resolve_coefficients_warns_off_nominal(self):
+        grid = np.linspace(1e6, 2e6, 11)
+        with pytest.warns(DeprecationWarning):
+            dcs.resolve_coefficients(grid, np.zeros((1, 11)), [1.5e6], mode="folded",
+                                     tof=dcs.TofResolution())
