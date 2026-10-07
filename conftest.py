@@ -128,7 +128,12 @@ _TAPES: Dict[str, Sequence[str]] = {
         # The JAEA distribution as unpacked (jendl5-n.tar.gz) under a library root.
         "jendl5/n_026-Fe-056.dat",
     ),
-    "u235": ("jeff40-endf/92-U-235g.txt", "92-U-235g.txt"),
+    # The share keeps an older JEFF-4.0 distribution, named ``92-U-235g.txt``;
+    # the public NEA zip (``JEFF40-Evaluations-Neutron-593.zip``) names the same
+    # material ``n_92-U-235g.jeff``, which is what a machine that downloaded it
+    # has. Both spellings, so the JEFF U-235 gates run on either.
+    "u235": ("jeff40-endf/92-U-235g.txt", "92-U-235g.txt",
+             "jeff40/n_92-U-235g.jeff", "jeff40/neutrons/n_92-U-235g.jeff"),
     # PFNS: the two U-235 evaluations the MF5/MF35 work is gated against, plus
     # Cf-252 as the cheap one. ``u235`` above is the same JEFF-4.0 material
     # reached through the personal root; ``u235_b81`` is a different evaluation
@@ -146,7 +151,8 @@ _TAPES: Dict[str, Sequence[str]] = {
     # The two PFNS tapes the pre-flight refused (PF-7, PF-8): a correlation
     # above 1 by 1.2e-5, and a band stated as a 1x1 zero.
     "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf",),
-    "pu242_j40": ("jeff40/neutrons/94-Pu-242g.txt",),
+    "pu242_j40": ("jeff40/neutrons/94-Pu-242g.txt", "jeff40/n_94-Pu-242g.jeff",
+                  "jeff40/neutrons/n_94-Pu-242g.jeff"),
     "th232": ("jeff40-endf/90-Th-232g.txt", "90-Th-232g.txt"),
     "pu241": ("jeff40-endf/94-Pu-241g.txt", "94-Pu-241g.txt"),
     "u238": ("jeff40-endf/92-U-238g.txt", "U238_jeff4.0_n.endf"),
