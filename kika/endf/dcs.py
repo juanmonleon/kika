@@ -67,6 +67,7 @@ __all__ = [
     "differential_xs_factor",
     "differential_xs_vs_angle",
     "differential_xs_vs_energy",
+    "dsigma_vs_energy_grid",
 ]
 
 Frame = Literal["lab", "cm"]
@@ -1053,6 +1054,7 @@ def differential_xs_vs_energy(
     nbt_int_pairs: Optional[Sequence[Tuple[int, int]]] = None,
     max_order: Optional[int] = None,
     pdf_at_energies: Optional[Callable[[float, np.ndarray], np.ndarray]] = None,
+    fold: Literal["factor", "product"] = "factor",
 ) -> dict:
     r""":math:`d\sigma/d\Omega` at a **fixed angle**, against incident energy.
 
@@ -1084,6 +1086,16 @@ def differential_xs_vs_energy(
         this function knows the energies the values have to line up with.
         Everything downstream (the sigma modes, the frame jacobian, the units)
         is the same either way, which is why both representations meet here.
+    fold
+        How ``xs_mode="folded"`` folds.  ``"factor"`` folds :math:`\sigma`
+        alone and multiplies by :math:`f` at the nominal energy, the reading
+        this function has always had.  ``"product"`` folds
+        :math:`\sigma(E)\,f(\mu, E)` as one quantity, which is what a detector
+        at a fixed angle counts and what
+        :func:`coefficients_sigma_weighted_folded` does at a fixed energy; the
+        two part wherever :math:`\sigma` has structure inside the window.
+        ``sigma`` in the result is then :math:`\langle\sigma\rangle`.  Pair it
+        with :func:`dsigma_vs_energy_grid` for ``query_energies_ev``.
 
     Returns
     -------
@@ -1118,30 +1130,81 @@ def differential_xs_vs_energy(
         out_e = np.asarray(query_energies_ev, dtype=float)
         out_e = out_e[(out_e >= grid[0]) & (out_e <= grid[-1])]
 
-    # 3. f(mu_native, E) for every energy.
-    if pdf_at_energies is not None:
-        # The section holds the distribution; ask it, and never build the
-        # expansion at all.
-        pdf = np.asarray(pdf_at_energies(mu_native, out_e), dtype=float).ravel()
-        if pdf.size != out_e.size:
-            raise ValueError(
-                f"pdf_at_energies returned {pdf.size} values for {out_e.size} energies"
+    # 3. f(mu_native, E) at any set of energies.
+    def pdf_at(energies: np.ndarray, on_grid: bool = False) -> np.ndarray:
+        if pdf_at_energies is not None:
+            # The section holds the distribution; ask it, and never build the
+            # expansion at all.
+            values = np.asarray(pdf_at_energies(mu_native, energies), dtype=float).ravel()
+            if values.size != energies.size:
+                raise ValueError(
+                    f"pdf_at_energies returned {values.size} values for {energies.size} energies"
+                )
+            return values
+        if on_grid:
+            return pdf_on_grid()
+        if linear_in_y:
+            # f is linear in the a_l, and a law linear in y commutes with a
+            # linear combination: interpolating f(mu, E) itself is exact, and
+            # costs one row where the coefficients cost L. A fold reads ~200
+            # energies per output point, so this is most of its time.
+            return np.asarray(
+                interpolate_1d(grid, pdf_on_grid(), pairs, energies, out_of_range="hold"),
+                dtype=float,
             )
-    else:
+        return legendre_sum(coefficients_at_energies(
+            grid, coefficients, energies, nbt_int_pairs=nbt_int_pairs, max_order=max_order
+        ))
+
+    def legendre_sum(coeffs: np.ndarray) -> np.ndarray:
         # One Legendre basis, reused across the sweep.
-        if query_energies_ev is None:
-            coeffs = _as_coefficient_matrix(coefficients, grid.size, max_order)
-        else:
-            coeffs = coefficients_at_energies(
-                grid, coefficients, out_e, nbt_int_pairs=nbt_int_pairs, max_order=max_order
-            )
         basis = legendre_basis(np.array([mu_native]), coeffs.shape[0])[:, 0]
         orders = np.arange(1, coeffs.shape[0] + 1)
-        pdf = 0.5 * basis[0] + 0.5 * ((2 * orders + 1) * basis[1:]) @ coeffs
+        return 0.5 * basis[0] + 0.5 * ((2 * orders + 1) * basis[1:]) @ coeffs
 
-    # 4. sigma(E) under the requested reconstruction mode.
+    grid_pdf: list = []
+
+    def pdf_on_grid() -> np.ndarray:
+        if not grid_pdf:
+            grid_pdf.append(legendre_sum(_as_coefficient_matrix(coefficients, grid.size, max_order)))
+        return grid_pdf[0]
+
+    pairs = list(nbt_int_pairs) if nbt_int_pairs else [(grid.size, 2)]
+    # INT 1-3 (histogram, lin-lin, lin-log) interpolate y linearly.
+    linear_in_y = all(int(law) in (1, 2, 3) for _, law in pairs)
+
+    has_xs = xs_energies_ev is not None and xs_values is not None and len(xs_values) > 0
+
+    # 4a. The product fold: <sigma f> integrated as one quantity.
+    if fold == "product" and xs_mode == "folded" and tof is not None and has_xs:
+        sigma, folded_product = _sigma_weighted_fold_at_mu(
+            np.asarray(xs_energies_ev, dtype=float),
+            np.asarray(xs_values, dtype=float),
+            grid,
+            out_e,
+            tof,
+            pdf_at,
+        )
+        values = differential_xs_factor(folded_product, per_steradian) * jacobian
+        return {
+            "energies": out_e,
+            "values": values,
+            "sigma": sigma,
+            "mu_requested": float(mu),
+            "mu_native": mu_native,
+            "jacobian": jacobian,
+            "frame": mu_frame,
+            "native_frame": native_frame,
+            "y_unit": "barn/sr" if per_steradian else "barn",
+            "xs_mode": xs_mode,
+            "fold": "product",
+        }
+
+    pdf = pdf_at(out_e, on_grid=query_energies_ev is None)
+
+    # 4b. sigma(E) under the requested reconstruction mode.
     sigma = None
-    if xs_energies_ev is not None and xs_values is not None and len(xs_values):
+    if has_xs:
         if xs_mode == "binavg":
             # Bin edges come from the MF4 grid, so each output energy borrows
             # the bin of the MF4 point it falls in.
@@ -1177,4 +1240,84 @@ def differential_xs_vs_energy(
         "native_frame": native_frame,
         "y_unit": y_unit,
         "xs_mode": xs_mode,
+        "fold": "factor" if xs_mode == "folded" and sigma is not None else None,
     }
+
+
+def _sigma_weighted_fold_at_mu(
+    xs_grid: np.ndarray,
+    xs: np.ndarray,
+    mf4_grid: np.ndarray,
+    energies_ev: np.ndarray,
+    tof: TofResolution,
+    pdf_at: Callable[[np.ndarray], np.ndarray],
+) -> Tuple[np.ndarray, np.ndarray]:
+    r""":math:`\langle\sigma\rangle` and :math:`\langle\sigma f\rangle` at one cosine, per energy.
+
+    :func:`coefficients_sigma_weighted_folded` at a single :math:`\mu`, for a
+    whole sweep at once.  Every energy gets its own
+    :func:`resolution_fold_nodes` on the union of the two grids; the nodes of
+    all energies are concatenated so :math:`\sigma` and :math:`f` are each
+    evaluated in one vectorised call, and the window sums are segment sums.
+    """
+    sigma_e_ev = np.atleast_1d(np.asarray(tof.sigma_e_mev(energies_ev / 1e6), dtype=float)) * 1e6
+    node_parts, weight_parts = [], []
+    for e0, s in zip(energies_ev, sigma_e_ev):
+        nodes, weights = resolution_fold_nodes(float(e0), float(s), (xs_grid, mf4_grid))
+        node_parts.append(nodes)
+        weight_parts.append(weights)
+    if not node_parts:
+        return np.zeros(0), np.zeros(0)
+    counts = np.array([n.size for n in node_parts])
+    starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
+    nodes = np.concatenate(node_parts)
+    weights = np.concatenate(weight_parts)
+
+    sigma_n = np.interp(nodes, xs_grid, xs)
+    f_n = pdf_at(nodes)
+    sigma_avg = np.add.reduceat(weights * sigma_n, starts)
+    product = np.add.reduceat(weights * sigma_n * f_n, starts)
+    return sigma_avg, product
+
+
+def dsigma_vs_energy_grid(
+    xs_energies_ev: Sequence[float],
+    mf4_energies_ev: Sequence[float],
+    *,
+    tof: Optional[TofResolution] = None,
+) -> np.ndarray:
+    r"""The incident energies a :math:`d\sigma/d\Omega(E)` curve is drawn on.
+
+    :math:`d\sigma/d\Omega(E) = \sigma(E)\,f(\mu, E)/2\pi`, and :math:`\sigma`
+    has structure on a far finer grid than the few hundred energies MF4
+    tabulates.  Drawn on the MF4 grid alone, the curve steps over every
+    resonance between two of them.
+
+    - **Nominal** (``tof=None``): the union of both grids, inside the MF4
+      range.  Between two points both factors are the file's own
+      interpolants, so this grid loses nothing.
+    - **Folded**: the same union, thinned so consecutive points are at least
+      :math:`\sigma_E/4` apart.  The folded curve is smooth on the scale of
+      the kernel, so a point every quarter width resolves it, and where the
+      table is coarser than that every table point is kept.
+    """
+    xs_grid = np.asarray(xs_energies_ev, dtype=float)
+    mf4 = np.asarray(mf4_energies_ev, dtype=float)
+    if mf4.size == 0:
+        return np.zeros(0)
+    lo, hi = float(mf4[0]), float(mf4[-1])
+    inside = xs_grid[(xs_grid >= lo) & (xs_grid <= hi)]
+    union = np.unique(np.concatenate([mf4, inside]))
+    if tof is None or union.size < 3:
+        return union
+
+    step = np.atleast_1d(np.asarray(tof.sigma_e_mev(union / 1e6), dtype=float)) * 1e6 / 4.0
+    keep = np.zeros(union.size, dtype=bool)
+    keep[0] = True
+    next_allowed = union[0] + step[0]
+    for i in range(1, union.size - 1):
+        if union[i] >= next_allowed:
+            keep[i] = True
+            next_allowed = union[i] + step[i]
+    keep[-1] = True
+    return union[keep]

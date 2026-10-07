@@ -800,3 +800,73 @@ class TestSigmaWeightedFold:
         x = np.linspace(self.E0 - 6 * s, self.E0 + 6 * s, 400001)
         g = np.exp(-0.5 * ((x - self.E0) / s) ** 2)
         assert s_avg == pytest.approx((np.interp(x, grid, sigma) @ g) / g.sum(), rel=2e-3)
+
+
+class TestDsigmaVsEnergyProductFold:
+    """``differential_xs_vs_energy(fold="product")`` and its grid."""
+
+    TOF = dcs.TofResolution(flight_path_m=27.037, delta_t_ns=5.0)
+
+    def _evaluation(self):
+        rng = np.random.default_rng(11)
+        mf4 = np.linspace(1.0e6, 1.6e6, 61)
+        a1 = 0.2 + 0.4 * np.sin((mf4 - mf4[0]) / 4e4)
+        a2 = 0.05 * np.cos((mf4 - mf4[0]) / 7e4)
+        xs_grid = np.sort(rng.uniform(0.9e6, 1.7e6, 4000))
+        xs = 2.0 + 3.0 * rng.random(xs_grid.size)
+        return mf4, {1: a1, 2: a2}, xs_grid, xs
+
+    def test_each_point_is_the_fixed_energy_product_fold_at_that_cosine(self):
+        mf4, coeffs, xs_grid, xs = self._evaluation()
+        query = np.array([1.1e6, 1.27e6, 1.45e6])
+        out = dcs.differential_xs_vs_energy(
+            energies_ev=mf4, coefficients=coeffs, mu=0.3, native_frame="cm", mu_frame="cm",
+            xs_energies_ev=xs_grid, xs_values=xs, xs_mode="folded", tof=self.TOF,
+            query_energies_ev=query, fold="product",
+        )
+        assert out["fold"] == "product"
+        for i, e0 in enumerate(query):
+            a_eff, s_avg = dcs.coefficients_sigma_weighted_folded(
+                mf4, coeffs, xs_grid, xs, e0, self.TOF,
+            )
+            expected = dcs.angular_pdf(np.array([0.3]), a_eff)[0] * s_avg / (2 * np.pi)
+            assert out["values"][i] == pytest.approx(expected, rel=1e-12)
+            assert out["sigma"][i] == pytest.approx(s_avg, rel=1e-12)
+
+    def test_constant_shape_and_flat_sigma_agree_with_the_factor_fold(self):
+        mf4 = np.linspace(1.0e6, 1.6e6, 61)
+        coeffs = {1: np.full(mf4.size, 0.25)}
+        xs_grid = np.linspace(0.9e6, 1.7e6, 801)
+        xs = np.full(xs_grid.size, 3.0)
+        kwargs = dict(energies_ev=mf4, coefficients=coeffs, mu=-0.4, xs_energies_ev=xs_grid,
+                      xs_values=xs, xs_mode="folded", tof=self.TOF, mu_frame="cm")
+        product = dcs.differential_xs_vs_energy(fold="product", **kwargs)
+        factor = dcs.differential_xs_vs_energy(**kwargs)
+        np.testing.assert_allclose(product["values"], factor["values"], rtol=1e-12)
+
+    def test_the_jacobian_applies_to_the_product_too(self):
+        mf4, coeffs, xs_grid, xs = self._evaluation()
+        common = dict(energies_ev=mf4, coefficients=coeffs, xs_energies_ev=xs_grid,
+                      xs_values=xs, xs_mode="folded", tof=self.TOF, fold="product",
+                      query_energies_ev=[1.3e6], native_frame="cm")
+        alpha = dcs.frame_alpha(mass_number=56)
+        lab = dcs.differential_xs_vs_energy(mu=0.5, mu_frame="lab", alpha=alpha, **common)
+        cm = dcs.differential_xs_vs_energy(mu=lab["mu_native"], mu_frame="cm", **common)
+        assert lab["values"][0] == pytest.approx(cm["values"][0] * lab["jacobian"], rel=1e-12)
+
+    def test_nominal_grid_is_the_union_inside_the_mf4_range(self):
+        mf4 = np.array([1.0, 10.0, 100.0])
+        xs_grid = np.array([0.5, 2.0, 10.0, 50.0, 200.0])
+        grid = dcs.dsigma_vs_energy_grid(xs_grid, mf4)
+        assert grid.tolist() == [1.0, 2.0, 10.0, 50.0, 100.0]
+
+    def test_folded_grid_keeps_a_quarter_kernel_between_points(self):
+        mf4 = np.linspace(1.0e6, 2.0e6, 11)
+        xs_grid = np.linspace(1.0e6, 2.0e6, 200001)
+        grid = dcs.dsigma_vs_energy_grid(xs_grid, mf4, tof=self.TOF)
+        assert grid[0] == 1.0e6 and grid[-1] == 2.0e6
+        gaps = np.diff(grid[:-1])
+        quarter = self.TOF.sigma_e_mev(grid[:-2] / 1e6) * 1e6 / 4
+        assert (gaps >= quarter).all()
+        # and never much more than that where the table is dense
+        assert (gaps <= quarter + 2 * (xs_grid[1] - xs_grid[0])).all()
