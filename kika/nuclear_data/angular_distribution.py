@@ -658,6 +658,94 @@ class AngularDistribution:
             f"tabulated={'yes' if self.tabulated_data else 'no'}"
         )
 
+    def evaluate_pdf_vs_energy(self, cosine: float, energies) -> np.ndarray:
+        """Evaluate the angular PDF at one cosine for many incident energies.
+
+        The same numbers as calling :meth:`evaluate_pdf` once per energy, at a
+        fraction of the cost: both halves of a distribution are read lin-lin in
+        energy between the energies they tabulate, so at a fixed cosine the PDF
+        is piecewise linear between those energies, and one row evaluated on
+        them interpolates exactly.  A mixed (LTT=3) section switches from the
+        Legendre half to the tabulated one above the last Legendre energy, as
+        :meth:`evaluate_pdf` does, and the jump between them is kept.
+
+        This is the reading a differential cross section at a fixed angle
+        needs: :func:`kika.endf.dcs.differential_xs_vs_energy` takes it as
+        ``pdf_at_energies``, and a resolution fold calls it at ~200 energies
+        per output point.
+
+        Parameters
+        ----------
+        cosine : float
+            The scattering cosine, in this distribution's frame.
+        energies : array-like
+            Incident energies in eV.
+
+        Returns
+        -------
+        np.ndarray
+            f(cosine, E) at each energy.
+        """
+        e = np.atleast_1d(np.asarray(energies, dtype=float))
+        if self.representation == "isotropic":
+            return np.full(e.shape, 0.5)
+        mu = np.array([float(cosine)])
+
+        def legendre_row():
+            if (
+                self.representation == "mixed"
+                and self.tabulated_data
+                and "legendre_energies" in self.tabulated_data
+            ):
+                grid = np.asarray(self.tabulated_data["legendre_energies"], dtype=float)
+            else:
+                grid = np.asarray(self.energies, dtype=float)
+            # _evaluate_pdf_legendre at every grid energy, summed as rows: each
+            # a_l is read on the grid with the same np.interp, then weighted by
+            # P_l at the one cosine.
+            row = np.zeros(grid.size)
+            for l, values in self.coefficients.items():
+                arr = np.asarray(values, dtype=float)
+                if arr.size == 0:
+                    continue
+                unit = np.zeros(l + 1)
+                unit[l] = 1.0
+                p_l = float(np.polynomial.legendre.legval(mu[0], unit))
+                row += (2 * l + 1) / 2.0 * np.interp(grid, grid[: arr.size], arr) * p_l
+            return grid, row
+
+        def tabulated_row():
+            tab = self.tabulated_data
+            if "tabulated_energies" in tab:
+                grid = np.asarray(tab["tabulated_energies"], dtype=float)
+            else:
+                grid = np.asarray(self.energies, dtype=float)[: len(tab["cosines"])]
+            return grid, np.array([self._evaluate_pdf_tabulated(x, mu)[1][0] for x in grid])
+
+        if self.representation == "mixed" and self.tabulated_data is not None:
+            leg_energies = self.tabulated_data.get("legendre_energies")
+            tab_energies = self.tabulated_data.get("tabulated_energies")
+            if leg_energies is not None and len(leg_energies) > 0 and self.coefficients:
+                grid, row = legendre_row()
+                out = np.interp(e, grid, row)
+                if tab_energies is not None and len(tab_energies) > 0:
+                    above = e > max(leg_energies)
+                    if np.any(above):
+                        t_grid, t_row = tabulated_row()
+                        out[above] = np.interp(e[above], t_grid, t_row)
+                return out
+            if tab_energies is not None:
+                grid, row = tabulated_row()
+                return np.interp(e, grid, row)
+
+        if self.representation == "tabulated" or not self.coefficients:
+            if self.tabulated_data is None:
+                return np.array([self.evaluate_pdf(x, mu)[1][0] for x in e])
+            grid, row = tabulated_row()
+        else:
+            grid, row = legendre_row()
+        return np.interp(e, grid, row)
+
     def _evaluate_pdf_legendre(
         self, energy: float, cosines: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
