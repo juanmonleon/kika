@@ -3,9 +3,10 @@
 These pin the two properties the folding/TOF unification was done for:
 
 * every entry point computes the *same* sigma_E, under both conventions;
-* the Gaussian fold integrates the interpolant, so its answer does not depend
-  on how densely the input happens to be sampled — which is exactly what the
-  old point-weighted implementation got wrong.
+* the Gaussian fold is the exact integral of the interpolant, so its answer
+  does not depend on how densely the input happens to be sampled — which is
+  exactly what the old point-weighted implementation got wrong — and carries
+  no quadrature error at all.
 """
 from __future__ import annotations
 
@@ -16,9 +17,9 @@ from kika._constants import FWHM_TO_SIGMA
 from kika.utils.numerics import (
     average_over_intervals,
     fold_tabulated,
-    gauss_hermite_nodes,
     gaussian_fold_nodes,
 )
+from kika.utils import numerics
 from kika.utils.energy_folding import tof_energy_resolution
 
 
@@ -41,7 +42,7 @@ def test_fold_quadratic_matches_analytic_second_moment():
     """For y = x^2 the exact fold is x0^2 + sigma^2."""
     x = np.linspace(-20.0, 20.0, 40001)
     y = x ** 2
-    got = fold_tabulated(x, y, 1.0, 2.0, n_nodes=20)
+    got = fold_tabulated(x, y, 1.0, 2.0)
     assert got == pytest.approx(1.0 ** 2 + 2.0 ** 2, rel=1e-4)
 
 
@@ -92,18 +93,77 @@ def test_fold_vectorises_over_centroids():
         assert got[i] == pytest.approx(fold_tabulated(x, y, float(c), 0.3))
 
 
-# --- gauss_hermite_nodes ---------------------------------------------------
+# --- exactness ----------------------------------------------------------------
 
-def test_nodes_weights_sum_to_one_and_centre_on_x0():
-    pts, w = gauss_hermite_nodes(5.0, 2.0, n_nodes=16)
-    assert w.sum() == pytest.approx(1.0, rel=1e-12)
-    assert float(np.sum(w * pts)) == pytest.approx(5.0, rel=1e-9)
-    # Second central moment recovers sigma^2.
-    assert float(np.sum(w * (pts - 5.0) ** 2)) == pytest.approx(4.0, rel=1e-9)
+def _reference_fold(x, y, x0, s):
+    """The same integral by adaptive quadrature, panel by panel between the
+    table's own points, over +-12 sigma -- an independent route to the number.
+    A uniform trapezoid is not one: it straddles every kink of the table and
+    is off by ~1e-7 at two million points."""
+    from scipy.integrate import quad
+
+    def f(t):
+        return np.interp(t, x, y) * np.exp(-0.5 * ((t - x0) / s) ** 2) / (s * np.sqrt(2 * np.pi))
+
+    lo, hi = x0 - 12 * s, x0 + 12 * s
+    cuts = np.r_[lo, x[(x > lo) & (x < hi)], hi]
+    return sum(quad(f, a, b, epsabs=0.0, epsrel=1e-13)[0] for a, b in zip(cuts[:-1], cuts[1:]))
+
+
+def test_fold_is_the_exact_integral_of_the_interpolant():
+    """A coarse, jagged table: no quadrature error left to see."""
+    rng = np.random.default_rng(3)
+    x = np.sort(rng.uniform(0.0, 10.0, 40))
+    y = rng.uniform(0.0, 5.0, x.size)
+    for x0, s in [(5.0, 0.05), (5.0, 1.0), (2.3, 3.0)]:
+        assert fold_tabulated(x, y, x0, s) == pytest.approx(_reference_fold(x, y, x0, s), rel=1e-8)
+
+
+def test_a_step_folds_to_the_normal_cdf():
+    """A repeated abscissa is a step, and it is integrated as one."""
+    x = np.array([0.0, 1.0, 1.0, 2.0])
+    y = np.array([0.0, 0.0, 1.0, 1.0])
+    assert fold_tabulated(x, y, 1.0, 0.1) == pytest.approx(0.5, abs=1e-12)
+    assert fold_tabulated(x, y, 1.1, 0.1) == pytest.approx(0.8413447460685429, rel=1e-12)
+
+
+def test_past_the_table_the_end_value_is_held():
+    x = np.array([0.0, 1.0])
+    y = np.array([2.0, 2.0])
+    assert fold_tabulated(x, y, 1.0, 0.5) == pytest.approx(2.0, rel=1e-12)
+    assert fold_tabulated(x, y, 50.0, 0.5) == pytest.approx(2.0, rel=1e-12)
+
+
+def test_batches_give_the_answer_one_batch_gives(monkeypatch):
+    x = np.linspace(0.0, 10.0, 2001)
+    y = np.sin(3 * x) ** 2
+    centroids = np.linspace(1.0, 9.0, 300)
+    whole = fold_tabulated(x, y, centroids, 0.2)
+    monkeypatch.setattr(numerics, "_FOLD_BATCH_PAIRS", 500)
+    np.testing.assert_allclose(fold_tabulated(x, y, centroids, 0.2), whole, rtol=1e-14)
+
+
+# --- gaussian_fold_nodes ---------------------------------------------------
+
+def test_fold_nodes_are_the_same_integral_as_the_table_fold():
+    rng = np.random.default_rng(5)
+    x = np.sort(rng.uniform(0.0, 10.0, 300))
+    y = rng.uniform(0.0, 5.0, x.size)
+    nodes, w = gaussian_fold_nodes(5.0, 0.4, [x])
+    assert w.sum() == pytest.approx(1.0, abs=1e-14)
+    assert 5.0 in nodes
+    # Equal up to where each holds the 1e-9 of mass past 6 sigma.
+    assert float(w @ np.interp(nodes, x, y)) == pytest.approx(
+        fold_tabulated(x, y, 5.0, 0.4), rel=1e-8)
+
+
+def test_fold_nodes_need_the_integrand_breakpoints():
+    with pytest.raises(ValueError):
+        gaussian_fold_nodes(5.0, 1.0, [])
 
 
 def test_nodes_degenerate_at_zero_sigma():
-    pts, w = gauss_hermite_nodes(1.5, 0.0)
+    pts, w = gaussian_fold_nodes(1.5, 0.0, [np.linspace(0.0, 3.0, 4)])
     np.testing.assert_allclose(pts, [1.5])
     np.testing.assert_allclose(w, [1.0])
 
@@ -174,36 +234,21 @@ def test_zero_energy_is_zero():
     assert tof_energy_resolution(0.0, flight_path_m=27.0, delta_t_ns=5.0) == 0.0
 
 
-# ─── The grid fold (default since 2026-09-24) ───────────────────────────────
+# ─── Structure finer than the kernel ────────────────────────────────────────
 
-def test_grid_fold_resolves_structure_gauss_hermite_misses():
-    """A table with structure finer than the kernel: the grid rule gets its
-    average, twelve Gauss-Hermite nodes do not."""
+def test_the_fold_resolves_structure_finer_than_the_kernel():
+    """A table with structure finer than the kernel, the case a fixed set of
+    nodes (Gauss-Hermite, a uniform window) gets wrong."""
     rng = np.random.default_rng(11)
     x = np.sort(rng.uniform(0.9e6, 1.1e6, 4000))
     y = 0.5 + 7.5 * rng.random(x.size)
     x0, s = 1.0e6, 2.2e3
-    d = np.linspace(x0 - 7 * s, x0 + 7 * s, 400001)
-    g = np.exp(-0.5 * ((d - x0) / s) ** 2)
-    exact = (np.interp(d, x, y) @ g) / g.sum()
-
-    assert fold_tabulated(x, y, x0, s) == pytest.approx(exact, rel=2e-3)
-    gh = fold_tabulated(x, y, x0, s, method="gauss-hermite")
-    assert abs(gh / exact - 1) > 5 * abs(fold_tabulated(x, y, x0, s) / exact - 1)
+    assert fold_tabulated(x, y, x0, s) == pytest.approx(_reference_fold(x, y, x0, s), rel=1e-8)
 
 
-def test_grid_fold_nodes_include_the_table_and_normalise():
+def test_fold_nodes_include_the_table_inside_the_window():
     x = np.linspace(0.0, 10.0, 1001)
     nodes, w = gaussian_fold_nodes(5.0, 0.3, [x])
     assert w.sum() == pytest.approx(1.0)
     inside = x[np.abs(x - 5.0) < 1.5]
     assert np.isin(inside, nodes).all()
-    assert gaussian_fold_nodes(5.0, 0.0, [x])[0].tolist() == [5.0]
-
-
-def test_gauss_hermite_is_still_there_to_reproduce_old_results():
-    x = np.linspace(0.0, 10.0, 101)
-    y = x ** 2
-    assert fold_tabulated(x, y, 5.0, 1.0, method="gauss-hermite") != fold_tabulated(x, y, 5.0, 1.0)
-    with pytest.raises(ValueError):
-        fold_tabulated(x, y, 5.0, 1.0, method="simpson")

@@ -54,22 +54,21 @@ correction, not a rounding detail.
 
 Window width
 ------------
-`N_SIGMA = 3` and nothing else. The window is a *truncated* Gaussian renormalized
-to unit weight, so a narrow window is not a conservative choice — it is a
-different, wrong kernel. Measured convergence of the product fold against the
-3-sigma answer:
-
-    +-1 sigma   0.5-12.5% median, up to 21% max   -> NOT converged
-    +-4 sigma   <=0.14% median, <=0.51% max       -> converged
-
-So +-1 sigma is not a sensitivity knob worth reporting, and +-4 buys nothing.
+None to choose: the kernel is the whole Gaussian. The nodes are the library's
+MF3 and MF4 points inside +-6 sigma_E with weights exact for the integrand's
+lin-lin interpolant, and the mass beyond 6 sigma (1e-9) is held at the edge.
+Until October 2026 the window was a *truncated* Gaussian at N_SIGMA = 3,
+renormalized, chosen by this convergence study of the product fold against the
+3-sigma answer (+-1 sigma: 0.5-12.5 % median, up to 21 % max; +-4 sigma:
+<=0.14 % median, <=0.51 % max) -- a truncated kernel is a different kernel, which
+is why the exact fold replaced it rather than tuning it.
 
 Per datapoint, for each library:
 
     y_eval(mu):
         sum_i w_i * [ sigma_i/(4 pi) * (1 + sum_l (2l+1) a_l(E_i) P_l(mu)) ]
-        over N_WINDOW_SAMPLES nodes E_i spanning +-N_SIGMA*sigma_E, with
-        Gaussian weights w_i renormalized to 1. sigma_E comes from the
+        over the fold nodes E_i above, with exact Gaussian weights w_i
+        summing to 1. sigma_E comes from the
         experiment's own flight path / timing (same TOF metadata and FWHM
         convention as the sampling pipeline).
 
@@ -133,30 +132,20 @@ from scripts.tof_parameters import (
 
 MT_NUMBER = 2  # elastic scattering
 
-# ── Resolution window ──
-# Single value on purpose; see the module docstring for the convergence numbers
-# that retire the 1-sigma/3-sigma sweep. N_WINDOW_SAMPLES sets the sampling
-# density across the window — enough to resolve MF3 resonance structure inside it.
-N_SIGMA           = 3.0
-N_WINDOW_SAMPLES  = 65
-
 # ── Fold quadrature ──
-#   grid       every MF3 and MF4 point of the library inside +-5 sigma_E, plus 101
-#              uniform points, Gaussian x trapezoid (kika.utils.numerics.
-#              gaussian_fold_nodes). DEFAULT since 2026-09-24.
-#   uniform65  the N_WINDOW_SAMPLES uniform nodes over +-N_SIGMA above: what every
-#              run up to 2026-09-24 was scored with. Set it to reproduce one.
-#
-# Why it changed: 65 uniform nodes are ~0.1 sigma_E apart, which resolves MF3 for a
-# modern TOF kernel (sigma_E ~ 2 keV at 1 MeV, MF3 points ~0.1 keV apart) but not for
-# the wide ones of the 1950s-60s experiments (sigma_E 20-170 keV, nodes 2-16 keV
-# apart against keV structure). Measured on the bspline_v6_y5s_..._lh_re parquet:
-# y_eval moves 0.08 % median, 0.3 % p90, up to 11.5 % on a point; the diagonal
-# chi2 of the whole set by -0.3 %; but the per-experiment diagonal chi2 of 14-17 of
-# the 67 experiments by more than 10 % (Darden 1955 by +150 %).
-FOLD_QUADRATURE = os.environ.get("KIKA_FOLD_QUADRATURE", "grid").strip().lower()
-if FOLD_QUADRATURE not in ("grid", "uniform65"):
-    raise SystemExit(f"KIKA_FOLD_QUADRATURE={FOLD_QUADRATURE!r} is not 'grid' or 'uniform65'")
+# Exact for the lin-lin interpolant of the integrand on every MF3 and MF4 point of
+# the library inside +-6 sigma_E (kika.utils.numerics.gaussian_fold_nodes): the
+# integral of a straight line against a Gaussian has a closed form. Earlier runs
+# were scored with other rules and are not reproduced by this script any more:
+#   up to 2026-09-24  65 uniform nodes over a truncated +-3 sigma_E window; it
+#                     resolves MF3 for a modern TOF kernel but not for the wide ones
+#                     of the 1950s-60s (sigma_E 20-170 keV against keV structure):
+#                     per-experiment diagonal chi2 of 14-17 of 67 experiments moved
+#                     by more than 10 % (Darden 1955 by +150 %) when it was retired.
+#   to October 2026   Gaussian x trapezoid on the same points plus 101 uniform ones,
+#                     within 6e-4 of the exact fold.
+# The run metadata records fold_quadrature = "exact" so a parquet says which.
+FOLD_QUADRATURE = "exact"
 
 # ── Library ENDF files ──
 # This_work uses its own MF3, MF4, MF34 and MF33 from the pipeline product.
@@ -405,24 +394,17 @@ def _resolution_window(
     """Resolution kernel nodes (eV) and unit-sum weights for one library.
 
     With sigma_E <= 0 the kernel collapses to a single node at e (delta),
-    matching fold_xs_over_resolution. Under FOLD_QUADRATURE="grid" the nodes
-    include every MF3 and MF4 point of ``lib`` inside the window, so they differ
-    per library; under "uniform65" they do not depend on it.
+    matching fold_xs_over_resolution. Otherwise the nodes are every MF3 and MF4
+    point of ``lib`` inside the window, so they differ per library, and the
+    weights are exact for the integrand's lin-lin interpolant on them.
     """
-    if sigma_E_mev <= 0.0 or N_WINDOW_SAMPLES < 2:
+    if sigma_E_mev <= 0.0:
         return np.array([e_mev * 1e6]), np.array([1.0])
-    if FOLD_QUADRATURE == "grid":
-        grids = []
-        if lib is not None:
-            grids.append(lib["e_mf3_ev"])
-            grids.append(np.asarray(lib["energies_mf4_mev"], dtype=float) * 1e6)
-        return gaussian_fold_nodes(e_mev * 1e6, sigma_E_mev * 1e6, grids)
-    half = N_SIGMA * sigma_E_mev
-    e_grid_mev = np.linspace(e_mev - half, e_mev + half, N_WINDOW_SAMPLES)
-    w = np.exp(-0.5 * ((e_grid_mev - e_mev) / sigma_E_mev) ** 2)
-    w /= w.sum()
-    return e_grid_mev * 1e6, w
-
+    grids = []
+    if lib is not None:
+        grids.append(lib["e_mf3_ev"])
+        grids.append(np.asarray(lib["energies_mf4_mev"], dtype=float) * 1e6)
+    return gaussian_fold_nodes(e_mev * 1e6, sigma_E_mev * 1e6, grids)
 
 def fold_dcs(
     lib: Dict, mu: np.ndarray, sample_e_ev: np.ndarray, weights: np.ndarray,
@@ -450,12 +432,11 @@ def fold_dcs(
 
     sigma_avg = float(weights @ sigma_samples)
     a_avg = weights @ a_samples
-    # The unfolded evaluation point. Both windows carry the nominal energy as a
-    # node (the uniform part of each has an odd count), so this is exact.
-    if e0_ev is None:
-        i0 = n_nodes // 2
-    else:
-        i0 = int(np.argmin(np.abs(sample_e_ev - e0_ev)))
+    # The unfolded evaluation point. gaussian_fold_nodes always carries the
+    # centre as a node, so this is exact; without e0_ev the centre is the
+    # node nearest the kernel's mean.
+    centre = float(weights @ sample_e_ev) if e0_ev is None else e0_ev
+    i0 = int(np.argmin(np.abs(sample_e_ev - centre)))
     sigma_0 = float(sigma_samples[i0])
     a_0 = a_samples[i0]
 
@@ -598,7 +579,6 @@ def build_rows_at_energy(
                     "sigma_avg_b":     float(sig_all[j]),
                     "a1_folded":       float(a1_all[j]),
                     "sigma_E_mev":     float(sigE_all[j]),
-                    "n_sigma":         float(N_SIGMA),
                     "fold_quadrature": FOLD_QUADRATURE,
                     "tof_source":      str(tof.source),
                     "fold_mode":       FOLD_MODE,
@@ -1044,12 +1024,8 @@ def main() -> None:
         "none":    "sigma(E0) * F(a_l(E0))    (no resolution model)",
     }[FOLD_MODE]
     print(f"\nPredictive scenario, FOLD_MODE={FOLD_MODE}: {_fold_label}")
-    if FOLD_QUADRATURE == "grid":
-        print("  fold quadrature: grid (every MF3/MF4 point in ±5σ_E + 101 uniform); "
-              "covariance MF34 + MF33.")
-    else:
-        print(f"  fold quadrature: uniform65 (legacy), truncated Gaussian ±{N_SIGMA:g}σ_E, "
-              f"{N_WINDOW_SAMPLES} nodes; covariance MF34 + MF33.")
+    print("  fold quadrature: exact (every MF3/MF4 point in ±6σ_E, closed-form weights); "
+          "covariance MF34 + MF33.")
     # Provenance: which evaluation was scored, and under which tag. Both are
     # environment-driven, so recording them is the only way a reader of the
     # output can tell run 82 from run 83.

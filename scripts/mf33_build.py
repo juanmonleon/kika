@@ -60,7 +60,6 @@ def fold_xs_over_bins(
     xs_b: np.ndarray,
     energy_bins: Sequence[Any],
     *,
-    n_nodes: int = 12,
     logger=None,
 ) -> np.ndarray:
     """Project a pointwise cross section onto analysis bins through the TOF kernel.
@@ -83,12 +82,6 @@ def fold_xs_over_bins(
         background there and is identically zero inside the RRR.
     energy_bins : Sequence[EnergyBinInfo]
         Bins carrying ``energy_mev``, ``sigma_E_mev`` and the bin edges.
-    n_nodes : int, default 12
-        Gauss-Hermite nodes; read only if ``fold_tabulated`` is asked for its
-        legacy method. The default fold integrates on the table's own points
-        (:func:`kika.utils.numerics.gaussian_fold_nodes`) since 2026-09-24, and
-        a MF33 built before then was recentred on a Gauss-Hermite fold of the
-        host MF3 that is 4 % off median for Fe-56 elastic.
     logger : optional
         Sink for the count of bins that fell back to a box average.
 
@@ -113,7 +106,6 @@ def fold_xs_over_bins(
         if sigma_E_mev > 0.0:
             out[i] = fold_tabulated(
                 e_ev, xs_b, float(eb.energy_mev) * 1e6, sigma_E_mev * 1e6,
-                n_nodes=n_nodes,
             )
         else:
             fallback.append(i)
