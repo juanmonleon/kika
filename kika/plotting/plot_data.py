@@ -35,7 +35,8 @@ class Provenance:
     Attributes
     ----------
     format : str, optional
-        ``'endf'``, ``'pendf'``, ``'ace'``, ``'gnds'``, ``'exfor'``, ``'covariance'``.
+        ``'endf'``, ``'pendf'``, ``'ace'``, ``'gnds'``, ``'g4ndl'``, ``'exfor'``,
+        ``'covariance'``.
     evaluation : str, optional
         Library or experiment, e.g. ``'JEFF-4.0'``, ``'ENDF/B-VIII.1'``.
     nuclide : str, optional
@@ -79,6 +80,8 @@ class Provenance:
             parts.append('multigroup')
         if self.format == 'ace':
             parts.append(f'ACE {self.temperature:.1f} K' if self.temperature else 'ACE')
+        elif self.format == 'g4ndl':
+            parts.append('G4NDL')
         elif self.temperature and self.state == 'heated':
             parts.append(f'{self.temperature:.1f} K')
         if self.detail:

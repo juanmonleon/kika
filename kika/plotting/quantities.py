@@ -817,12 +817,30 @@ def _ace_dsigma(ace: Any, *, mt: int = 2, energy: float, cosines=None, num_point
 _SUITE = 'kika.nuclear_data.model.suite.ReactionSuite'
 
 
+def _is_g4ndl(suite: Any) -> bool:
+    return getattr(getattr(suite, 'provenance', None), 'sourceFormat', None) == 'g4ndl'
+
+
+def _suite_provenance(suite: Any, mt: int, state: Optional[str], **changes: Any) -> Provenance:
+    """A G4NDL-read suite says so, with its library's directory name as the
+    evaluation (G4NDL does not record which evaluation it was made from)."""
+    if _is_g4ndl(suite):
+        prov = suite.provenance
+        base = dict(format='g4ndl', evaluation=prov.libraryName, nuclide=suite.target,
+                    reaction=mt, source=prov.library)
+    else:
+        base = dict(format='gnds', evaluation=getattr(suite, 'evaluation', None),
+                    nuclide=getattr(suite, 'target', None), reaction=mt, state=state)
+    base.update(changes)
+    return Provenance(**base)
+
+
 @register_adapter(_SUITE, 'cross_section')
 def _suite_cross_section(suite: Any, *, mt: int, form: Optional[str] = None,
                          uncertainty: bool = False, sigma: float = 1.0) -> PlotItem:
     """sigma(E) from a ``ReactionSuite`` (``kika.read``). ``form`` picks the style
     label; by default the evaluated form, or the only one there is (ACE decodes
-    to a heated, gridded form)."""
+    to a heated, gridded form; G4NDL to the 0 K pointwise ``recon`` one)."""
     try:
         reaction = suite.reactionByENDF_MT(mt)
     except Exception as exc:
@@ -832,9 +850,89 @@ def _suite_cross_section(suite: Any, *, mt: int, form: Optional[str] = None,
         form = 'eval' if 'eval' in labels or not labels else labels[0]
     energies, values = suite.cross_section(mt, form=form)
     state = 'heated' if 'heat' in form.lower() or 'grid' in form.lower() else 'evaluated'
-    prov = Provenance(format='gnds', evaluation=getattr(suite, 'evaluation', None),
-                      nuclide=getattr(suite, 'target', None), reaction=mt, state=state)
     return PlotItem(PlotData(x=np.asarray(energies, dtype=float), y=np.asarray(values, dtype=float),
+                             provenance=_suite_provenance(suite, mt, state)))
+
+
+def _g4ndl_only(suite: Any, mt: int) -> None:
+    """The model leaves general angular evaluation undecided (``XYs2d.evaluate``);
+    for a G4NDL-read suite :mod:`kika.g4ndl.physics` settles it, as Geant4 does."""
+    if not _is_g4ndl(suite):
+        raise NotPlottable('angular quantities of a ReactionSuite are plotted only for '
+                           'one read from G4NDL; open the ENDF tape for the others')
+    if mt != 2:
+        raise NotPlottable(f'a G4NDL suite holds the elastic channel (MT2) only, not MT{mt}')
+
+
+def _g4ndl_frame(suite: Any) -> Optional[str]:
+    from kika.g4ndl.tables import _frame as frame
+
+    return frame(suite.reactions[2].outputChannel.products.byPid('n')[0].distribution['eval'])
+
+
+@register_adapter(_SUITE, 'angular_distribution')
+def _suite_angular_distribution(suite: Any, *, mt: int = 2, energy: float, cosines=None,
+                                num_points: int = 201,
+                                resolution: Optional[Tuple[float, float]] = None) -> PlotItem:
+    """G4NDL p(mu | E) at incident ``energy`` (eV), as Geant4 builds it
+    (:func:`kika.g4ndl.physics.angularPdf`, ``side='geant4'``)."""
+    from kika.g4ndl.physics import angularPdf
+    from kika.g4ndl.tables import angularBulk
+
+    _g4ndl_only(suite, mt)
+    mu = _cosines(cosines, num_points)
+    grid = np.asarray(angularBulk(suite)['energies'], dtype=float)
+
+    def pdf(e: float) -> np.ndarray:
+        return angularPdf(suite, e, mu, side='geant4')
+
+    values = pdf(energy) if resolution is None else fold_in_energy(
+        pdf, energy, _tof_sigma_ev(energy, resolution), grids=[grid], bounds=(grid[0], grid[-1]))
+    prov = _suite_provenance(suite, mt, None, frame=_g4ndl_frame(suite),
+                             detail=_resolution_detail(resolution))
+    return PlotItem(PlotData(x=mu, y=np.asarray(values, dtype=float), provenance=prov))
+
+
+@register_adapter(_SUITE, 'differential_cross_section')
+def _suite_dsigma(suite: Any, *, mt: int = 2, energy: float, cosines=None, num_points: int = 201,
+                  resolution: Optional[Tuple[float, float]] = None) -> PlotItem:
+    """G4NDL dsigma/dOmega = sigma(E) p(mu | E) / 2 pi at incident ``energy`` (eV)."""
+    from kika.g4ndl.physics import differentialCrossSection
+    from kika.g4ndl.tables import angularBulk
+
+    _g4ndl_only(suite, mt)
+    mu = _cosines(cosines, num_points)
+    e_grid = np.asarray(suite.cross_section(2, form='recon')[0], dtype=float)
+    a_grid = np.asarray(angularBulk(suite)['energies'], dtype=float)
+    lo, hi = max(e_grid[0], a_grid[0]), min(e_grid[-1], a_grid[-1])
+
+    def dsigma(e: float) -> np.ndarray:
+        return differentialCrossSection(suite, e, mu, side='geant4')
+
+    values = dsigma(energy) if resolution is None else fold_in_energy(
+        dsigma, energy, _tof_sigma_ev(energy, resolution), grids=[e_grid, a_grid], bounds=(lo, hi))
+    prov = _suite_provenance(suite, mt, None, frame=_g4ndl_frame(suite),
+                             detail=_resolution_detail(resolution))
+    return PlotItem(PlotData(x=mu, y=np.asarray(values, dtype=float), provenance=prov))
+
+
+@register_adapter(_SUITE, 'legendre_coefficient')
+def _suite_legendre(suite: Any, *, mt: int = 2, order: int = 1, uncertainty: bool = False,
+                    sigma: float = 1.0) -> PlotItem:
+    """G4NDL a_L(E): the file's own coefficients on its Legendre energies, and
+    the moments of its tables above them (:func:`kika.g4ndl.angularBulk`)."""
+    from kika.g4ndl.tables import angularBulk
+
+    _g4ndl_only(suite, mt)
+    rep = suite.provenance.repFlag
+    bulk = angularBulk(suite, maxOrder=max(order, 1) if rep == 2 else None)
+    if str(order) not in bulk['coefficients_by_order']:
+        raise NotPlottable(f'MT{mt}: no Legendre order {order} (the file goes to '
+                           f'{bulk["max_order"]})')
+    prov = _suite_provenance(suite, mt, None, frame=bulk['frame'],
+                             detail='tables projected' if rep in (2, 3) else None)
+    return PlotItem(PlotData(x=np.asarray(bulk['energies'], dtype=float),
+                             y=np.asarray(bulk['coefficients_by_order'][str(order)], dtype=float),
                              provenance=prov))
 
 

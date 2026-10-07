@@ -27,6 +27,8 @@ from kika.g4ndl.exceptions import (
 from kika.g4ndl.library import G4NDLLibrary, open
 from kika.g4ndl.names import IsotopeKey
 from kika.g4ndl.patch import PatchResult, patch_elastic
+from kika.g4ndl.tables import angularBulk, isotopeSummary
 
 __all__ = ["G4NDLError", "G4NDLFormatError", "G4NDLLibrary", "G4NDLUnsupportedError",
-           "IsotopeKey", "IsotopeNotFoundError", "PatchResult", "open", "patch_elastic"]
+           "IsotopeKey", "IsotopeNotFoundError", "PatchResult", "angularBulk",
+           "isotopeSummary", "open", "patch_elastic"]

@@ -154,6 +154,31 @@ class G4NDLLibrary:
         """Top-level directories present, indexed or not — for partial-read reports."""
         return sorted(p.name for p in self.root.iterdir() if p.is_dir())
 
+    def describe(self) -> dict:
+        """The library as a viewer lists it, from the index alone: no file is
+        opened, so it stays cheap on a 560-isotope library on a network share.
+
+        ``isotopes`` holds one entry per isotope :meth:`isotopes` returns, with
+        the ``target`` name :meth:`read` takes (``Fe56``, ``Cnat``, ``Co58m1``),
+        its GNDS id (``Fe56``, ``C``, ``Co58_m1``), ``Z``, ``A`` (``None`` for
+        a natural element), ``M``, the element name of its file and whether
+        its files are ``.z``. ``unread`` names the top-level directories kika
+        does not read yet (``Capture``, ``Inelastic``, ...).
+        """
+        from kika.g4ndl.decode import targetId
+
+        entries = []
+        for key in self.isotopes():
+            files = [self._index[(s, key)] for s in PROCESSES["elastic"]]
+            entries.append(dict(target=str(key), id=targetId(key), Z=key.Z, A=key.A, M=key.M,
+                                element=files[0].elementName,
+                                compressed=all(f.compressed for f in files)))
+        read = {s.split("/")[0] for subs in PROCESSES.values() for s in subs}
+        return dict(root=str(self.root), name=self.root.name, isotopes=entries,
+                    processes=sorted(PROCESSES),
+                    unread=[d for d in self.presentTopLevel() if d not in read],
+                    unindexed=len(self.unindexed), duplicates=len(self.duplicates))
+
     def locate(self, target: TargetLike, subdir: str) -> IndexedFile:
         """The file holding ``target`` in ``subdir``, e.g. ``"Elastic/FS"``."""
         if subdir not in {s for subs in PROCESSES.values() for s in subs}:
