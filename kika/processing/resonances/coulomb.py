@@ -43,7 +43,12 @@ def _outgoing(l,eta,rho):
 
 def _transport(l,eta,start,stop,shift,log_p):
     """Transport S=rho*H'/H and ln(P) without large wavefunctions."""
+    evaluations = 0
     def equation(t,y):
+        nonlocal evaluations
+        evaluations += 1
+        if evaluations>100000:
+            raise FloatingPointError('scaled Coulomb transport exceeded its work budget')
         rho = np.exp(t); s = y[0]
         p = np.exp(y[1])
         return [s-rho*rho+2*eta*rho+l*(l+1)-s*s+p*p,1-2*s]
@@ -54,11 +59,12 @@ def _transport(l,eta,start,stop,shift,log_p):
     return result.y[:,-1]
 
 
-def charged_channel_functions(l,eta,rho):
-    """Return P,S,hard-sphere phase for finite rho>0, eta>=0.
+def charged_channel_log_functions(l,eta,rho):
+    """Return ln(P),S,hard-sphere phase for finite rho>0, eta>=0.
 
     Phase is modulo pi, sufficient for neutral-incidence cross sections. A
-    penetrability unrepresentable as a positive float causes an explicit error.
+    ln(P) remains available below the positive float range. A phase below
+    that range rounds to zero; this does not change ln(P) or label P zero.
     """
     from .channel_functions import neutral_channel_functions
     if not isinstance(l,(int,np.integer)) or not 0<=l<=64:
@@ -71,10 +77,18 @@ def charged_channel_functions(l,eta,rho):
         h,r = float(eta[index]),float(rho[index])
         if h==0:
             p[index],s[index],phase[index] = neutral_channel_functions(l,r)
+            if p[index]>0:
+                p[index] = np.log(p[index])
+            else:
+                # Exact positive neutral denominator polynomial, evaluated
+                # logarithmically when its penetrability has underflowed.
+                from scipy.special import gammaln,logsumexp
+                n=np.arange(l+1)
+                coefficients=(gammaln(l+n+1)-gammaln(l-n+1)+gammaln(2*n+1)
+                    -2*gammaln(n+1)-2*n*np.log(2.))
+                p[index]=np.log(r)-logsumexp(coefficients-2*n*np.log(r))
             continue
-        turning = h+np.sqrt(h*h+l*(l+1))
-        if h>200 and r<turning:
-            raise FloatingPointError('charged barrier exceeds verified computational range')
+        turning = h+np.hypot(h,np.sqrt(l*(l+1)))
         start = max(r,turning+8.)
         derivative = _outgoing(l,h,start)
         if derivative.imag<=0:
@@ -82,12 +96,28 @@ def charged_channel_functions(l,eta,rho):
         shift = start*derivative.real; lp = np.log(start)+np.log(derivative.imag)
         if start!=r:shift,lp = _transport(l,h,start,r,shift,lp)
         penetration = np.exp(lp)
-        if not np.isfinite(penetration) or penetration<=0:
-            raise FloatingPointError('charged penetrability is not representable')
+        if not np.isfinite(lp+shift):
+            raise FloatingPointError('nonfinite scaled charged channel functions')
         regular = _regular(l,h,r)
-        p[index] = penetration;s[index] = shift
+        p[index] = lp;s[index] = shift
         phase[index] = np.arctan2(penetration,r*regular-shift)
     return p,s,phase
+
+
+def charged_channel_functions(l,eta,rho):
+    """Return representable P,S,phase; reject an underflow instead of clipping."""
+    log_p,shift,phase = charged_channel_log_functions(l,eta,rho)
+    p = np.array(np.exp(log_p),copy=True)
+    # Preserve the exact neutral limit, including its rounding. A log/exp
+    # round trip needlessly changes the eta=0 branch by a few ulps.
+    eta_values,rho_values = np.broadcast_arrays(np.asarray(eta),np.asarray(rho))
+    neutral = eta_values==0
+    if np.any(neutral):
+        from .channel_functions import neutral_channel_functions
+        p[neutral] = neutral_channel_functions(l,rho_values[neutral])[0]
+    if np.any(~np.isfinite(p)) or np.any(p<=0):
+        raise FloatingPointError('charged penetrability is not representable; use logarithmic channel functions')
+    return p,shift,phase
 
 
 def closed_charged_shift(l,eta,kappa):

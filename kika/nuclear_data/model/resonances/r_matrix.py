@@ -202,6 +202,10 @@ class Channel:
     #: ENDF KPS is per channel; these replace its hard-sphere phase.
     additionalPhaseShift: Optional[ComplexChannelFunction] = None
     phaseShiftMode: Optional[int] = None
+    #: Explicit resonance-reaction label receiving flux lost through this
+    #: channel's passive complex KPS phase. ENDF has no ownership field;
+    #: do not infer capture from the presence of an imaginary phase.
+    phaseAbsorptionReaction: Optional[str] = None
 
 
 @dataclass

@@ -1,4 +1,4 @@
-"""Immutable normalization of explicitly declared neutral KRM3 channels."""
+"""Immutable normalization of neutron-incidence KRM3/KRM4 channels."""
 from dataclasses import dataclass
 import math
 import numpy as np
@@ -118,15 +118,27 @@ def prepare_rml(region, resonances, context, notes):
             if ch.resonanceReaction not in reactions:
                 raise ValueError('unknown RML resonance reaction')
             rr = reactions[ch.resonanceReaction]; pair = rr.kinematics
-            phase_function = None
+            phase_function = None; phase_absorption_mt = None
             if ch.phaseShiftMode not in (None,0,1) or (ch.phaseShiftMode==1 and ch.additionalPhaseShift is None) or (ch.phaseShiftMode==0 and ch.additionalPhaseShift is not None):
                 raise ValueError('invalid per-channel LPS declaration')
             if ch.additionalPhaseShift is not None:
                 from types import SimpleNamespace
                 phase_function = prepare_external(SimpleNamespace(externalRMatrix=None,tabulatedBackground=ch.additionalPhaseShift),region.domainMin,region.domainMax)
-                if any(any(v!=0 for v in curve.y) for curve in phase_function.imaginary):
-                    raise UnsupportedResonanceError('absorptive phase requires declared reaction ownership')
+                absorptive = any(any(v!=0 for v in curve.y) for curve in phase_function.imaginary)
+                if ch.phaseAbsorptionReaction is not None or absorptive:
+                    owner = reactions.get(ch.phaseAbsorptionReaction)
+                    mt_owner = None if owner is None else owner.reactionMT
+                    allowed_owner = isinstance(mt_owner,int) and (
+                        mt_owner in (18,19,102,103,104,105,106,107)
+                        or 51<=mt_owner<=91 or 600<=mt_owner<=849)
+                    if not allowed_owner:
+                        raise UnsupportedResonanceError('absorptive phase requires declared reaction ownership with a supported nonelastic MT')
+                    if any(any(v>0 for v in curve.y) for curve in phase_function.imaginary):
+                        raise ValueError('passive KPS requires imaginary phase <= 0 for exp(-i phase)')
+                    phase_absorption_mt = 18 if mt_owner==19 else mt_owner
                 if rr.eliminated:raise UnsupportedResonanceError('eliminated channel cannot declare an external phase')
+            if ch.phaseAbsorptionReaction is not None and phase_function is None:
+                raise ValueError('phase absorption ownership requires a phase function')
             if rr.reactionMT is None or pair is None:
                 raise UnsupportedResonanceError('RML requires normalized reaction MT and physical/effective pair data')
             if not isinstance(rr.reactionMT,int) or rr.reactionMT not in (2,18,19,102,103,104,105,106,107) and not (51<=rr.reactionMT<=91 or 600<=rr.reactionMT<=849):
@@ -216,7 +228,7 @@ def prepare_rml(region, resonances, context, notes):
             if identity in identities:raise ValueError('duplicate coherent channel')
             identities.add(identity)
             channel = RMLChannel(mt,l,s,q,cm,k2,radius,phase,mode,shift,boundary,effective,
-                                 prepare_external(ch,region.domainMin,region.domainMax),strength,phase_function,kinematics,rr.label)
+                                 prepare_external(ch,region.domainMin,region.domainMax),strength,phase_function,kinematics,rr.label,phase_absorption_mt)
             channels.append(channel); indexes.append(index)
             if mt == 2:
                 previous = coverage.get(l)
@@ -237,7 +249,7 @@ def prepare_rml(region, resonances, context, notes):
                 width = row[i]
                 if f.reducedWidthAmplitudes:
                     amplitude = width
-                    pr = ch.functions(np.array([max(abs(er),np.finfo(float).tiny)]))[0][0]
+                    pr = ch.functions(np.array([max(abs(er),np.finfo(float).tiny)]),logarithmic=True)[0][0]
                 else:
                     if ch.effective or ch.penetrability == 'unity':pr = 1.
                     else:
@@ -330,7 +342,7 @@ def normalize_suite_pairs(suite, context):
     if resolved is None:return resolved
     candidates = [r for r in resolved.resolved if isinstance(r.formalism,RMatrix)
                   and (r.formalism.approximation=='RMatrixLimited' or r.formalism.relativisticKinematics or r.formalism.boundaryCondition in ('Given','NegativeOrbitalMomentum','Brune')
-                       or any(ch.additionalPhaseShift is not None or ch.phaseShiftMode for g in r.formalism.spinGroups for ch in g.channels)
+                       or any(ch.additionalPhaseShift is not None or ch.phaseShiftMode or ch.phaseAbsorptionReaction is not None for g in r.formalism.spinGroups for ch in g.channels)
                        or any(rr.reactionMT not in (None,2,18,19,102) for rr in r.formalism.resonanceReactions)
                        or any(sum(ch.resonanceReaction==rr.label for ch in g.channels)>1
                               for rr in r.formalism.resonanceReactions if rr.reactionMT==2 for g in r.formalism.spinGroups))

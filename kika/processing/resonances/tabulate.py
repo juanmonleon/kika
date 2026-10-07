@@ -143,7 +143,7 @@ def _seeds(segment,context):
                 reduced=np.asarray(g.reduced[level_index])
                 for _ in range(8):
                     if not lo<=center<=hi:break
-                    real=np.array([c.functions(np.array([center]))[1][0].real for c in g.channels])
+                    real=np.array([c.functions(np.array([center]),logarithmic=True)[1][0].real for c in g.channels])
                     center=level.energy-float(np.sum(reduced*reduced*real))
             # Fixed-point seeds isolate shifted peaks; correctness still comes
             # from subsequent reference evaluations, not this estimate.

@@ -65,12 +65,13 @@ def test_per_channel_phase_replaces_hard_sphere_and_preserves_jump():
 
 
 @pytest.mark.parametrize('amplitudes',[False,True])
-def test_endf_kps_records_are_per_channel_and_survive_parse_and_model(amplitudes):
+@pytest.mark.parametrize('imaginary',[0.,-.1])
+def test_endf_kps_records_are_per_channel_and_survive_parse_and_model(amplitudes,imaginary):
     from kika.endf.classes.mf2.mf2mt151 import (MF2MT151,Isotope,EnergyRange,RMatrixLimited,
         RML_ParticlePair,RML_Channel,RML_SpinGroup,RML_Resonance,TabulatedPhaseShift)
     from kika.endf.parsers.parse_mf2 import parse_mf2_mt151
     from kika.endf.model_adapter import decodeMF2MT151,encodeMF2MT151
-    phase=TabulatedPhaseShift([(2,2)],[10.,300.],[.1,.2],[(2,2)],[10.,300.],[0.,0.])
+    phase=TabulatedPhaseShift([(2,2)],[10.,300.],[.1,.2],[(2,2)],[10.,300.],[imaginary,imaginary])
     p=RMatrixLimited(int(amplitudes),3,0,.5,.5,
         [RML_ParticlePair(1.,56.,0.,26.,.5,.5,0.,1,1,2,1.,1.),RML_ParticlePair(0.,0.,0.,0.,0.,0.,1e6,-1,0,102,1.,1.)],
         [RML_SpinGroup(1.,1.,0,1,[RML_Channel(1,0,1.,.2,0.,.5),RML_Channel(2,0,0.,0.,0.,0.)],
@@ -84,6 +85,11 @@ def test_endf_kps_records_are_per_channel_and_survive_parse_and_model(amplitudes
     assert model.resolved[0].formalism.spinGroups[0].channels[0].phaseShiftMode==1
     assert model.resolved[0].formalism.spinGroups[0].channels[1].phaseShiftMode==0
     assert str(encodeMF2MT151(model,provenance))==str(loaded)
+    ch=model.resolved[0].formalism.spinGroups[0].channels[0]
+    assert ch.phaseAbsorptionReaction is None
+    ch.phaseAbsorptionReaction=model.resolved[0].formalism.resonanceReactions[1].label
+    with pytest.raises(ValueError,match='cannot preserve phase absorption'):
+        encodeMF2MT151(model,provenance)
 
 
 @pytest.mark.parametrize('capture_explicit',[False,True])
@@ -157,8 +163,11 @@ def test_coulomb_unrepresentable_flux_is_explicit_error():
 
 
 def test_extreme_barrier_and_inconsistent_relativistic_pair_are_explicit():
-    with pytest.raises(FloatingPointError,match='verified computational range'):
-        charged_channel_functions(0,201.,.1)
+    from kika.processing.resonances.coulomb import charged_channel_log_functions
+    log_p,shift,_=charged_channel_log_functions(0,1000.,1000.)
+    assert log_p < -1000. and np.isfinite(shift)
+    with pytest.raises(FloatingPointError,match='not representable'):
+        charged_channel_functions(0,1000.,1000.)
     source,ctx=rml_model();f=source.resolved[0].formalism
     rr=f.resonanceReactions[1];rr.reactionMT=103;f.relativisticKinematics=True
     rr.kinematics=ChannelKinematics(ChannelParticle(1.,1.,.5,1),ChannelParticle(56.,1.,.5,1),'calculate','calculate')
@@ -308,7 +317,8 @@ def test_charged_exit_model_retains_closed_shift_and_open_flux():
     assert np.allclose(result[1],result[2]+result[103]+result[102])
 
 
-def test_legacy_rm_fallback_never_drops_channel_phase():
+@pytest.mark.parametrize('field',['phaseShiftMode','phaseAbsorptionReaction'])
+def test_legacy_rm_fallback_never_drops_channel_phase(field):
     from kika.processing.resonances import UnsupportedResonanceError
     source,ctx=rml_model();f=source.resolved[0].formalism
     f.boundaryCondition='EliminateShiftFunction'
@@ -317,7 +327,7 @@ def test_legacy_rm_fallback_never_drops_channel_phase():
     g.widths=[[row[i] for i in (0,2)] for row in g.widths]
     for rr in f.resonanceReactions:rr.kinematics=None
     for ch in g.channels:ch.boundaryConditionValue=None
-    g.channels[0].phaseShiftMode=1
+    setattr(g.channels[0],field,1 if field=='phaseShiftMode' else 'capture')
     with pytest.raises(UnsupportedResonanceError,match='channel phase'):
         prepare_resonances(source,ctx)
 
@@ -396,3 +406,239 @@ def test_relativistic_charged_against_independent_60_digit_level_matrix(q,explic
         p,log,_=c.functions(e)
         np.testing.assert_array_equal(p,0.)
         np.testing.assert_allclose(log.real[0],log.real[1],rtol=2e-11)
+
+
+def _complex_phase(real,imaginary):
+    from kika.nuclear_data.model import XYs1d,Axes,Axis
+    from kika.nuclear_data.model.resonances import ComplexChannelFunction
+    axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'phase','')])
+    return ComplexChannelFunction(XYs1d([10.,300.],[real,real],axes=axes),
+        XYs1d([10.,300.],[imaginary,imaginary],axes=axes))
+
+
+@pytest.mark.parametrize('imaginary',[-1e-16,-.2,-1000.])
+def test_passive_kps_potential_only_direct_absorption_and_optical_theorem(imaginary):
+    source,ctx=rml_model();f=source.resolved[0].formalism;g=f.spinGroups[0]
+    g.energies=[];g.widths=[]
+    g.channels[0].additionalPhaseShift=_complex_phase(.12,imaginary)
+    g.channels[0].phaseAbsorptionReaction='capture'
+    potential=deepcopy(g);potential.spin=0.
+    for ch in potential.channels:ch.channelSpin=0.
+    f.spinGroups.append(potential)
+    e=np.array([10.,30.,100.,300.]);result=prepare_resonances(source,ctx).evaluate(e)
+    beta=np.pi*.01/(ctx.k_squared_per_ev*e)
+    s=np.exp(-2j*(.12+1j*imaginary))
+    np.testing.assert_allclose(result[2],beta*abs(1-s)**2,rtol=3e-14)
+    np.testing.assert_allclose(result[102],beta*(-np.expm1(4*imaginary)),rtol=3e-14)
+    np.testing.assert_allclose(result[1],2*beta*(1-s.real),rtol=3e-14)
+    assert np.all(result[102]>0)
+
+
+@pytest.mark.parametrize('explicit',[False,True])
+def test_passive_kps_level_matrix_and_separate_reaction_ownership(explicit):
+    from kika.nuclear_data.model.resonances import ResonanceReaction
+    source,ctx=rml_model();f=source.resolved[0].formalism;g=f.spinGroups[0]
+    if explicit:
+        f.approximation='RMatrixLimited';f.resonanceReactions[2].eliminated=False
+        g.channels[2].boundaryConditionValue=0.
+    f.resonanceReactions.append(ResonanceReaction('opticalLoss',reactionMT=18,
+        kinematics=deepcopy(f.resonanceReactions[2].kinematics)))
+    g.channels[0].additionalPhaseShift=_complex_phase(.12,-.2)
+    g.channels[0].phaseAbsorptionReaction='opticalLoss'
+    g.channels[1].additionalPhaseShift=_complex_phase(-.04,-.1)
+    g.channels[1].phaseAbsorptionReaction='capture'
+    potential=deepcopy(g);potential.spin=0.;potential.energies=[];potential.widths=[]
+    for ch in potential.channels:ch.channelSpin=0.
+    f.spinGroups.append(potential)
+    prepared=prepare_resonances(source,ctx)
+    e=np.array([30.,99.8,100.,100.1,100.2,101.,250.])
+    diagnostics={};actual=prepared.evaluate(e,diagnostics=diagnostics)
+    expected={mt:np.zeros(len(e)) for mt in (2,51,102,18)}
+    for group in prepared.regions[0].groups:
+        gamma=np.asarray(group.reduced).reshape(len(group.levels),len(group.channels))
+        for i,energy in enumerate(e):
+            values=[c.functions(np.array([energy])) for c in group.channels]
+            p=np.array([v[0][0] for v in values]);logs=np.array([v[1][0] for v in values]);ph=np.array([v[2][0] for v in values])
+            d=np.diag([lv.energy-energy-.5j*gg for lv,gg in zip(group.levels,group.radiation)])-(gamma*logs)@gamma.T
+            x=np.linalg.solve(d,gamma[:,0]) if len(gamma) else np.zeros(0,complex)
+            core=2j*np.sqrt(p*p[0])*(gamma.T@x);core[0]+=1.
+            observed=np.exp(-1j*ph)*core*np.exp(-1j*ph[0])
+            beta=np.pi*.01/(ctx.k_squared_per_ev*energy)*(2*group.spin+1)/4
+            for out,c in enumerate(group.channels):expected[c.mt][i]+=beta*abs((1 if out==0 else 0)-observed[out])**2
+            core_capture=2*p[0]*sum(gg*abs(xx)**2 for gg,xx in zip(group.radiation,x))
+            expected[102][i]+=beta*np.exp(2*ph[0].imag)*core_capture
+            for out,c in enumerate(group.channels):
+                loss=np.exp(2*ph[0].imag)*(-np.expm1(2*ph[out].imag))*abs(core[out])**2
+                if out==0:loss+=-np.expm1(2*ph[0].imag)
+                if c.phase_absorption_mt is not None:expected[c.phase_absorption_mt][i]+=beta*loss
+    for mt in expected:np.testing.assert_allclose(actual[mt],expected[mt],rtol=8e-13,atol=1e-15)
+    assert diagnostics['rml_max_absolute_flux_error']<1e-12
+
+
+@pytest.mark.parametrize('capture,elastic,radiative',[
+    (True,7.4452865664117607e-6,1.6929247875343792e-4),
+    (False,7.4459126596722876e-6,0.)])
+def test_actual_extreme_coulomb_kernel_against_70_digit_level_reference(capture,elastic,radiative):
+    from scipy.constants import alpha
+    source,ctx=rml_model();f=source.resolved[0].formalism;g=f.spinGroups[0]
+    rr=f.resonanceReactions[1];rr.reactionMT=103
+    rr.kinematics=ChannelKinematics(ChannelParticle(1.,1.,.5,1),ChannelParticle(56.,25.,.5,1),'calculate','calculate')
+    mu=ctx.neutron_mass_mev*56/57;k=alpha*25*mu/ctx.hbar_c_mev_fm/1000
+    rr.Q=k*k/(2*mu*1e-6/ctx.hbar_c_mev_fm**2)-100*56/57
+    g.channels[1].scatteringRadius=1000/k
+    if not capture:
+        for row in g.widths:row[2]=0.
+    diagnostics={};result=prepare_resonances(source,ctx).evaluate(np.array([100.]),diagnostics=diagnostics)
+    assert result[2][0]==pytest.approx(elastic,rel=3e-11)
+    assert result[102][0]==pytest.approx(radiative,rel=3e-11,abs=0.)
+    assert result[103][0]==0.  # The final ~6e-497 b observable rounds to zero.
+    assert diagnostics['rml_underflow_bounded_solves']==1
+    assert diagnostics['rml_underflow_max_log_perturbation_bound'] < -1100.
+
+
+@pytest.mark.parametrize('owner,imaginary,message',[(None,-.1,'reaction ownership'),('missing',-.1,'reaction ownership'),('elastic',-.1,'reaction ownership'),('capture',.1,'passive KPS')])
+def test_kps_absorption_rejects_missing_ownership_and_gain(owner,imaginary,message):
+    source,ctx=rml_model();ch=source.resolved[0].formalism.spinGroups[0].channels[1]
+    ch.additionalPhaseShift=_complex_phase(.1,imaginary);ch.phaseAbsorptionReaction=owner
+    with pytest.raises(ValueError,match=message):prepare_resonances(source,ctx)
+
+
+def test_kps_absorption_model_snapshot_and_tabulation_preserve_imaginary_step():
+    from kika.nuclear_data.model import XYs1d,Axes,Axis,Regions1d
+    source,ctx=rml_model();f=source.resolved[0].formalism;g=f.spinGroups[0]
+    ch=g.channels[1];ch.additionalPhaseShift=_complex_phase(.1,-.1);ch.phaseAbsorptionReaction='capture'
+    axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'phase','')])
+    ch.additionalPhaseShift.imaginary=XYs1d([10.,150.,150.,300.],[-.1,-.1,-.3,-.3],axes=axes)
+    prepared=prepare_resonances(source,ctx)
+    points=np.array([np.nextafter(150.,0.),150.,np.nextafter(150.,np.inf)])
+    before=prepared.evaluate(points)
+    ch.additionalPhaseShift.imaginary.ys[:]=-.8;ch.phaseAbsorptionReaction='missing'
+    after=prepared.evaluate(points)
+    for mt in before:np.testing.assert_array_equal(before[mt],after[mt])
+    table=tabulate_resonances(prepared)
+    assert isinstance(table.forms[102],Regions1d)
+    assert max(table.verify_forms(table.forms).values())<=1.
+
+
+def test_kps_absorption_gnds_reports_unrepresentable_processing_metadata():
+    import xml.etree.ElementTree as ET
+    from kika.gnds.encode_resonances import writeResonances
+    from kika.nuclear_data.model import ConversionReport
+    source,_=rml_model();ch=source.resolved[0].formalism.spinGroups[0].channels[1]
+    ch.additionalPhaseShift=_complex_phase(.1,-.1);ch.phaseAbsorptionReaction='capture'
+    report=ConversionReport()
+    writeResonances(ET.Element('reactionSuite'),source,report,('10','300'))
+    assert not report.isClean
+    assert any('KPS' in str(value) for value in report.unsupported)
+
+
+def test_kps_absorption_reconstructs_and_attaches_native_suite():
+    from test_resonance_publication import writable_suite
+    from test_resonance_suite import curve,href
+    from kika.nuclear_data.model import (Reaction,ReactionId,CrossSection,
+        ResonancesWithBackground,Background,Add)
+    from kika.processing.resonances import reconstruct_suite,attach_reconstruction
+    suite=writable_suite();source,ctx=rml_model();suite.resonances=source
+    ch=source.resolved[0].formalism.spinGroups[0].channels[1]
+    ch.additionalPhaseShift=_complex_phase(.1,-.2);ch.phaseAbsorptionReaction='capture'
+    form=ResonancesWithBackground(Background(resolvedRegion=curve(10.,300.,0.),
+        fastRegion=curve(300.,1000.,0.)),resonanceRegionHref='/reactionSuite/resonances/resolved',label='eval')
+    suite.reactions.append(Reaction(ReactionId('inelastic',ENDF_MT=51),CrossSection({'eval':form})))
+    suite.sums[1].summands.summands.append(Add(href('inelastic')))
+    result=reconstruct_suite(suite,ctx);attach_reconstruction(suite,result)
+    assert max(result.verify_suite(suite).values())<=1.
+    assert suite.resonances.resolved[0].formalism.spinGroups[0].channels[1].phaseAbsorptionReaction=='capture'
+
+
+@pytest.mark.parametrize('l,constant',[(1,1.),(2,9.)])
+def test_logarithmic_neutral_limit_retains_unrepresentable_penetrability(l,constant):
+    from kika.processing.resonances.coulomb import charged_channel_log_functions
+    rho=1e-200
+    log_p,shift,phase=charged_channel_log_functions(l,0.,rho)
+    assert log_p==pytest.approx((2*l+1)*np.log(rho)-np.log(constant),abs=1e-12)
+    assert shift==-l and phase==0.
+
+
+@pytest.mark.parametrize('log_p',[-740.,-746.,-1200.])
+@pytest.mark.parametrize('capture,phase',[ (True,False),(False,False),(False,True)])
+def test_logarithmic_exit_preserves_rescued_observables_and_exact_poles(monkeypatch,log_p,capture,phase):
+    from kika.processing.resonances import coulomb
+    source,ctx=rml_model();f=source.resolved[0].formalism;g=f.spinGroups[0]
+    source.resolved[0].domainMin=99.8;source.resolved[0].domainMax=101.
+    rr=f.resonanceReactions[1];rr.reactionMT=103
+    rr.kinematics=ChannelKinematics(ChannelParticle(1.,1.,.5,1),ChannelParticle(56.,1.,.5,1),'calculate','calculate')
+    if not capture:
+        for row in g.widths:row[2]=0.
+    if phase:
+        g.channels[1].additionalPhaseShift=_complex_phase(.1,-.2)
+        g.channels[1].phaseAbsorptionReaction='capture'
+    def channel(l,eta,rho):
+        return np.full_like(rho,log_p),np.full_like(rho,-.7),np.zeros_like(rho)
+    monkeypatch.setattr(coulomb,'charged_channel_log_functions',channel)
+    prepared=prepare_resonances(source,ctx);group=prepared.regions[0].groups[0]
+    e=np.array([99.8,100.,100.1,100.2,101.]);diagnostics={}
+    actual=prepared.evaluate(e,diagnostics=diagnostics)
+    gamma=np.asarray(group.reduced);radiation=np.asarray(group.radiation)
+    for i,energy in enumerate(e):
+        pn=5*np.sqrt(ctx.k_squared_per_ev*energy)
+        logs=np.array([-.2+1j*pn,-.9+0j])
+        d=np.diag(np.array([100.,100.2])-energy-.5j*radiation)-(gamma*logs)@gamma.T
+        x=np.linalg.solve(d,gamma[:,0]);w=gamma.T@x
+        beta=np.pi*.01/(ctx.k_squared_per_ev*energy)*.75
+        expected=np.exp(np.log(beta)+np.log(4*pn)+log_p+2*np.log(abs(w[1]))-(.4 if phase else 0.))
+        assert abs(actual[103][i]-expected)<=4*np.nextafter(0.,1.)
+        if log_p>=-746.:assert actual[103][i]>0
+        if phase:
+            loss=np.exp(np.log(beta)+np.log(4*pn)+log_p+2*np.log(abs(w[1]))+np.log(-np.expm1(-.4)))
+            assert abs(actual[102][i]-loss)<=4*np.nextafter(0.,1.)
+        else:
+            expected_capture=beta*2*pn*np.sum(radiation*abs(x)**2)
+            np.testing.assert_allclose(actual[102][i],expected_capture,rtol=2e-12,atol=0.)
+    assert diagnostics['rml_underflow_bounded_solves']==len(e)
+    assert diagnostics['rml_underflow_max_log_perturbation_bound'] < -700.
+    assert diagnostics['rml_max_absolute_flux_error']<1e-12
+    if capture and log_p==-746.:
+        table=tabulate_resonances(prepared)
+        assert max(table.verify_forms(table.forms).values())<=1.
+
+
+def test_logarithmic_exit_rejects_an_unbounded_singular_limit():
+    from kika.processing.resonances.r_matrix import solve_rml
+    with pytest.raises(FloatingPointError,match='unrepresentable penetrability'):
+        solve_rml([1.],[1.],[0.],[[1e-160,1.]],[[.2j,0j]],
+            log_penetrability=np.array([[np.log(.2),-750.]]),error_bounds={})
+
+
+@pytest.mark.parametrize('l,eta,rho,log_p,shift,phase',[
+    (0,201.,300.,-69.4117667370198578,-173.9347792081184676,2.0463621957271838e-33),
+    (0,500.,800.,-121.3061245022519847,-398.7432497719208222,2.5961915583029375e-56),
+    (2,500.,800.,-121.3121056686043086,-398.7507783562332885,2.5806612597095178e-56),
+    (0,1000.,1900.,-24.2059855936139224,-430.7482270259691634,3.5253284460346487e-14),
+    (0,1000.,1000.,-1134.6853151028429608,-999.4998746240512031,0.),
+    (0,200.,.1,-1229.5526784282512425,-6.0874603576934330,0.)])
+def test_extreme_barrier_against_independent_whittaker_limit(l,eta,rho,log_p,shift,phase):
+    from kika.processing.resonances.coulomb import charged_channel_log_functions
+    actual=charged_channel_log_functions(l,eta,rho)
+    assert actual[0]==pytest.approx(log_p,abs=2e-8)
+    assert actual[1]==pytest.approx(shift,rel=2e-9)
+    if phase:assert actual[2]==pytest.approx(phase,rel=3e-8,abs=0.)
+    else:assert actual[2]==0.
+
+
+def test_integer_level_energies_do_not_truncate_reference_widths():
+    source,ctx=rml_model();source.resolved[0].formalism.spinGroups[0].energies=[100,101]
+    group=prepare_resonances(source,ctx).regions[0].groups[0]
+    expected=2*.4**2*5*np.sqrt(ctx.k_squared_per_ev*100)
+    assert group.levels[0].neutron==pytest.approx(expected,rel=2e-14)
+
+
+def test_kps_first_chance_fission_ownership_uses_the_kernel_fission_total():
+    from kika.nuclear_data.model.resonances import ResonanceReaction
+    source,ctx=rml_model();f=source.resolved[0].formalism
+    f.resonanceReactions.append(ResonanceReaction('fissionLoss',reactionMT=19,
+        kinematics=deepcopy(f.resonanceReactions[2].kinematics)))
+    ch=f.spinGroups[0].channels[1]
+    ch.additionalPhaseShift=_complex_phase(.1,-.2);ch.phaseAbsorptionReaction='fissionLoss'
+    actual=prepare_resonances(source,ctx).evaluate(np.array([100.1]))
+    assert 19 not in actual and actual[18][0]>0
+    np.testing.assert_allclose(actual[1],actual[2]+actual[51]+actual[102]+actual[18],rtol=2e-14)
