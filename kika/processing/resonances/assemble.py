@@ -6,6 +6,7 @@ coverage outside them.
 """
 from dataclasses import dataclass
 import numpy as np
+from kika.algebra import discontinuities, evaluate
 from .prepare import UnsupportedResonanceError, evaluate_region, region_mts
 from .breit_wigner import evaluate_bw
 
@@ -17,14 +18,8 @@ class BackgroundCurve:
     law: int
 
     def evaluate(self,e):
-        x,y=np.asarray(self.x),np.asarray(self.y)
-        i=np.clip(np.searchsorted(x,e,side='right')-1,0,len(x)-2)
-        t=(np.log(e/x[i])/np.log(x[i+1]/x[i]) if self.law in (3,5)
-           else (e-x[i])/(x[i+1]-x[i]))
-        if self.law==1:out=y[i]
-        elif self.law in (2,3):out=y[i]+t*(y[i+1]-y[i])
-        else:out=np.exp(np.log(y[i])+t*np.log(y[i+1]/y[i]))
-        return np.where(e==x[-1],y[-1],out)
+        """The curve under its law (:func:`kika.algebra.evaluate`), zero off it."""
+        return evaluate(self.x,self.y,self.law,np.asarray(e,dtype=float))
 
 
 def prepare_backgrounds(backgrounds):
@@ -60,7 +55,7 @@ def prepare_backgrounds(backgrounds):
             # ENDF uses duplicate abscissae for one-sided values at a jump.
             # Split them into independently owned regions, never deduplicate
             # a value or interpolate across that zero-width transition.
-            cuts=np.r_[0,np.flatnonzero(np.diff(x)==0)+1,len(x)]
+            cuts=np.r_[0,discontinuities(x)+1,len(x)]
             for start,stop in zip(cuts[:-1],cuts[1:]):
                 xx,yy=x[start:stop],y[start:stop]
                 if len(xx)<2:raise UnsupportedResonanceError('isolated repeated endpoint has no background interval')

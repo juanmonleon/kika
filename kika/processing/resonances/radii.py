@@ -1,6 +1,7 @@
 """Validated immutable radius functions; no silent interpolation fallback."""
 from dataclasses import dataclass
 import numpy as np
+from kika.algebra import evaluate, interval_laws
 
 
 @dataclass(frozen=True)
@@ -14,27 +15,14 @@ class RadiusFunction:
         x = np.asarray(energy, dtype=float)
         if self.constant is not None:
             return np.full_like(x, self.constant)
-        grid, values = np.asarray(self.energies), np.asarray(self.values)
+        grid = np.asarray(self.energies)
         if np.any(x < grid[0]) or np.any(x > grid[-1]):
             raise ValueError("radius table does not cover evaluation/reference energies")
-        i = np.clip(np.searchsorted(grid, x, side="right")-1, 0, len(grid)-2)
-        # NBT is the 1-based last point; adjacent regions share their endpoint.
-        endpoints = np.array([nbt for nbt, _ in self.interpolation])
-        region = np.searchsorted(endpoints, i+2, side="left")
-        laws = np.array([law for _, law in self.interpolation])[region]
-        x1, x2, y1, y2 = grid[i], grid[i+1], values[i], values[i+1]
-        result = np.empty_like(x)
-        for law in np.unique(laws):
-            select = laws == law
-            t = ((np.log(x[select]/x1[select])/np.log(x2[select]/x1[select]))
-                 if law in (3, 5) else (x[select]-x1[select])/(x2[select]-x1[select]))
-            if law == 1:
-                result[select] = y1[select]
-            elif law in (2, 3):
-                result[select] = y1[select]+t*(y2[select]-y1[select])
-            else:
-                result[select] = np.exp(np.log(y1[select])+t*np.log(y2[select]/y1[select]))
-        return np.where(x == grid[-1], values[-1], result)
+        return np.asarray(evaluate(grid, self.values, self._laws(), x))
+
+    def _laws(self):
+        """One law per interval; NBT is the 1-based last point of a region."""
+        return interval_laws(len(self.energies), self.interpolation)
 
 
     def difference(self, reference, energy):
@@ -50,8 +38,7 @@ class RadiusFunction:
             return result
         grid, radii = np.asarray(self.energies), np.asarray(self.values)
         i = np.clip(np.searchsorted(grid, x, side="right")-1, 0, len(grid)-2)
-        endpoints = np.array([nbt for nbt, _ in self.interpolation])
-        laws = np.array([law for _, law in self.interpolation])[np.searchsorted(endpoints, i+2)]
+        laws = self._laws()[i]
         near = (abs(reference-x) < .25*x) & (reference >= grid[i]) & (reference <= grid[i+1])
         for law in (2, 3, 4, 5):
             mask = near & (laws == law)

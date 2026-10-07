@@ -46,7 +46,15 @@ PANEL_TEST_FRACTIONS = np.array([0.25, 0.5, 0.75])
 
 
 class RefinementError(RuntimeError):
-    """The refinement could not meet its tolerance within its budget."""
+    """The refinement could not meet its tolerance within its budget.
+
+    ``reason`` says which budget: ``"points"``, ``"passes"`` or
+    ``"unresolvable"`` (a failing panel float64 cannot split).
+    """
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass
@@ -136,7 +144,8 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
     log_x = (np.zeros(width.size, dtype=bool) if log_x is None
              else np.asarray(log_x, dtype=bool))
     if max_points is not None and n > max_points:
-        raise RefinementError(f"{n} starting points exceed max_points={max_points}")
+        raise RefinementError(f"{n} starting points exceed max_points={max_points}",
+                              "points")
 
     # The panels being refined, as flat arrays.
     idx = np.flatnonzero(active)
@@ -151,7 +160,8 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
 
     while owner.size:
         if passes == max_passes:
-            raise RefinementError(f"refinement did not converge in {max_passes} passes")
+            raise RefinementError(f"refinement did not converge in {max_passes} passes",
+                                  "passes")
         passes += 1
         f = fractions[None, :]
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -183,7 +193,7 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
                 i = int(np.flatnonzero(stuck)[0])
                 raise RefinementError(
                     f"panel [{x1[i]!r}, {x2[i]!r}] fails its tolerance and cannot "
-                    f"be split further in float64")
+                    f"be split further in float64", "unresolvable")
             unresolved += int(stuck.sum())
         settle = ~bad | stuck
         if keep_probes and settle.any():
@@ -214,7 +224,7 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         new_x, new_y, new_owner = qs[r, c], vs[r, c], owner[r]
         n_points += new_x.size
         if max_points is not None and n_points > max_points:
-            raise RefinementError(f"refinement exceeds max_points={max_points}")
+            raise RefinementError(f"refinement exceeds max_points={max_points}", "points")
         added_x.append(new_x), added_y.append(new_y), added_at.append(new_owner)
 
         # Children: consecutive nodes of [x1, new..., x2] within each panel.

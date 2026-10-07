@@ -47,60 +47,58 @@ def error_ratio(actual, linear, options):
 
 
 def linearize(evaluate, seeds, options, point_budget):
-    """Return a common grid, values and checks; retain node evaluations."""
+    """Return a common grid, values and checks; retain node evaluations.
+
+    The refinement itself is :func:`kika.algebra.refine`, the one adaptive
+    engine in kika: every panel is probed at the refinement and verification
+    fractions, a panel whose mixed error ratio exceeds one half anywhere gains
+    all of its probes, and only the panels a pass creates are probed again.
+    (Until October 2026 every pass re-probed every panel, converged ones
+    included, which asked the physics the same question once per pass.)
+    """
+    from kika.algebra import RefinementError, refine
+
     x=np.unique(np.asarray(seeds,dtype=float))
     if len(x)>point_budget:
         raise ReconstructionConvergenceError('seed grid exceeds max_points')
-    y=evaluate(x)
-    evaluations=len(x)
-    for iteration in range(options.max_iterations):
-        fractions=np.r_[REFINEMENT_FRACTIONS,VERIFICATION_FRACTIONS]
-        probes=x[:-1,None]+np.diff(x)[:,None]*fractions
-        if np.any(probes <= x[:-1,None]) or np.any(probes >= x[1:,None]):
-            # Only irreducible panels need special handling; larger panels
-            # may still be refined. Test their endpoint-scale error below.
-            probes=np.maximum(x[:-1,None],np.minimum(x[1:,None],probes))
-        actual=evaluate(probes.ravel())
-        # On very narrow panels a nominal fraction may round onto an endpoint.
-        # Compare the line at the *representable* queried abscissa.
-        actual_fractions=(probes-x[:-1,None])/np.diff(x)[:,None]
-        evaluations+=probes.size
-        bad=np.zeros(len(x)-1,dtype=bool)
-        maxima={}
-        for mt in y:
-            linear=y[mt][:-1,None]+(y[mt][1:]-y[mt][:-1])[:,None]*actual_fractions
-            ratio=error_ratio(actual[mt].reshape(probes.shape),linear,options)
-            bad |= np.any(ratio>.5,axis=1)
-            maxima[mt]=(float(np.max(ratio[:,:3])),float(np.max(ratio[:,3:])))
-        if not np.any(bad):
-            weights=np.array([5/18,4/9,5/18])
-            gauss_indices=[3,1,6]
-            integrals={}
-            for mt in y:
-                a=actual[mt].reshape(probes.shape)[:,gauss_indices]
-                linear=y[mt][:-1,None]+(y[mt][1:]-y[mt][:-1])[:,None]*actual_fractions[:,gauss_indices]
-                energy=probes[:,gauss_indices]
-                integrals[mt]={}
-                for name,weight in (('dE',1.),('dE_over_E',1/energy)):
-                    factor=np.diff(x)[:,None]*weights*weight
-                    integrals[mt][name]={'reference_estimate':float(np.sum(factor*a)),
-                                        'linear_estimate':float(np.sum(factor*linear)),
-                                        'absolute_difference_estimate':float(np.sum(factor*np.abs(a-linear)))}
-            return x,y,dict(iterations=iteration+1,evaluations=evaluations,
-                           refinement_maxima={mt:v[0] for mt,v in maxima.items()},
-                           verification_maxima={mt:v[1] for mt,v in maxima.items()},
-                           integrals=integrals)
-        additions=probes[bad].ravel()
-        merged=np.unique(np.r_[x,additions])
-        if len(merged)==len(x):
-            raise ReconstructionConvergenceError('required separation is not representable in float64')
-        if len(merged)>point_budget:
-            raise ReconstructionConvergenceError('refinement exceeds max_points')
-        # Cache both old endpoints and all new samples; no endpoint recomputation.
-        order=np.argsort(np.r_[x,additions],kind='stable')
-        all_x=np.r_[x,additions][order]
-        unique=np.r_[True,np.diff(all_x)>0]
-        y={mt:np.r_[v,actual[mt].reshape(probes.shape)[bad].ravel()][order][unique]
-           for mt,v in y.items()}
-        x=merged
-    raise ReconstructionConvergenceError('refinement exceeds max_iterations')
+    first=evaluate(x)
+    seeded=len(x)
+    mts=list(first)
+    columns=lambda values:np.column_stack([np.asarray(values[mt],dtype=float) for mt in mts])
+    fractions=np.r_[REFINEMENT_FRACTIONS,VERIFICATION_FRACTIONS]
+    try:
+        result=refine(x,columns(first),lambda q,owner:columns(evaluate(q)),
+                      lambda actual,linear:error_ratio(actual,linear,options)/.5,
+                      fractions=fractions,insert='all',max_passes=options.max_iterations,
+                      max_points=point_budget,keep_probes=True)
+    except RefinementError as exc:
+        message={'points':'refinement exceeds max_points',
+                 'passes':'refinement exceeds max_iterations',
+                 'unresolvable':'required separation is not representable in float64'}[exc.reason]
+        raise ReconstructionConvergenceError(message) from exc
+    x=result.x
+    y={mt:result.y[:,j] for j,mt in enumerate(mts)}
+    probes,actual=result.probe_x,result.probe_y
+    # On very narrow panels a nominal fraction may round onto an endpoint.
+    # Compare the line at the *representable* queried abscissa.
+    actual_fractions=(probes-x[:-1,None])/np.diff(x)[:,None]
+    weights=np.array([5/18,4/9,5/18])
+    gauss_indices=[3,1,6]
+    maxima={}
+    integrals={}
+    for j,mt in enumerate(mts):
+        linear=y[mt][:-1,None]+(y[mt][1:]-y[mt][:-1])[:,None]*actual_fractions
+        ratio=error_ratio(actual[:,:,j],linear,options)
+        maxima[mt]=(float(np.max(ratio[:,:3])),float(np.max(ratio[:,3:])))
+        a=actual[:,gauss_indices,j]
+        energy=probes[:,gauss_indices]
+        integrals[mt]={}
+        for name,weight in (('dE',1.),('dE_over_E',1/energy)):
+            factor=np.diff(x)[:,None]*weights*weight
+            integrals[mt][name]={'reference_estimate':float(np.sum(factor*a)),
+                                'linear_estimate':float(np.sum(factor*linear[:,gauss_indices])),
+                                'absolute_difference_estimate':float(np.sum(factor*np.abs(a-linear[:,gauss_indices])))}
+    return x,y,dict(iterations=result.passes,evaluations=seeded+result.evaluations,
+                   refinement_maxima={mt:v[0] for mt,v in maxima.items()},
+                   verification_maxima={mt:v[1] for mt,v in maxima.items()},
+                   integrals=integrals)
