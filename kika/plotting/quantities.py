@@ -623,14 +623,73 @@ def _endf_dsigma(endf: Any, *, mt: int = 2, energy: float, cosines=None, num_poi
     return PlotItem(PlotData(x=mu, y=values, provenance=prov))
 
 
+_NUBAR_MTS = (452, 455, 456)
+
+
+def _mf31_relative(endf: Any, mt: int) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """MF31 relative standard deviation of nu-bar ``mt``: ``(edges eV, fraction per group)``.
+
+    Goes through :func:`build_mf31_covariance`, which turns absolute blocks
+    relative with the bin-averaged MF1 nu-bar, so that the number plotted here
+    is the one the sampler perturbs with.
+    """
+    mf31 = endf.files.get(31)
+    if mf31 is None or mt not in mf31.mt:
+        return None
+    from kika.sampling.mf31_sampling import build_mf31_covariance
+
+    cov, _sections, grid, _present = build_mf31_covariance(endf, [mt])
+    for i, matrix in enumerate(cov.matrices):
+        if int(cov.reaction_rows[i]) != mt or int(cov.reaction_cols[i]) != mt:
+            continue
+        if cov.isotope_rows[i] != cov.isotope_cols[i]:
+            continue
+        edges = cov.energy_grids[i] if i < len(cov.energy_grids) and cov.energy_grids[i] else grid
+        sigma = np.sqrt(np.clip(np.diag(np.asarray(matrix, dtype=float)), 0.0, None))
+        return np.asarray(edges, dtype=float), sigma
+    return None
+
+
 @register_adapter(_ENDF, 'relative_uncertainty')
 def _endf_relative_uncertainty(endf: Any, *, mt: int, order: Optional[int] = None) -> PlotItem:
-    """Relative standard deviation per group: MF33 of sigma, or MF34 of a_L if ``order`` is given."""
-    rel = _mf33_relative(endf, mt) if order is None else _mf34_relative(endf, mt, order)
+    """Relative standard deviation per group: MF33 of sigma, MF31 of nu-bar
+    (MT 452/455/456), or MF34 of a_L if ``order`` is given."""
+    if order is not None:
+        rel, mf = _mf34_relative(endf, mt, order), 34
+    elif mt in _NUBAR_MTS:
+        rel, mf = _mf31_relative(endf, mt), 31
+    else:
+        rel, mf = _mf33_relative(endf, mt), 33
     if rel is None:
-        mf = 33 if order is None else 34
         raise NotPlottable(f'MF{mf}/MT{mt} is not in this tape')
     return _step_item(rel, _endf_provenance(endf, mt, state='multigroup'))
+
+
+@register_adapter(_ENDF, 'spectrum_relative_uncertainty')
+def _endf_spectrum_relative_uncertainty(endf: Any, *, incident_energy: float,
+                                        mt: int = 18) -> PlotItem:
+    """MF35 relative standard deviation of the group probabilities against E'.
+
+    The band is the one containing ``incident_energy`` on *this* tape, so the
+    same energy can be asked of every library even though their bands differ.
+    The grid is the band's own: per-group relative uncertainties depend on the
+    group width, so two libraries' curves compare their files as written, not
+    a common structure.
+    """
+    mf35 = endf.files.get(35)
+    if mf35 is None or mt not in mf35.mt:
+        raise NotPlottable(f'MF35/MT{mt} is not in this tape')
+    mf5 = endf.files.get(5)
+    mf5_section = mf5.mt.get(mt) if mf5 is not None else None
+    try:
+        result = mf35.mt[mt].relative_uncertainty(mf5_section, incident_energy=incident_energy)
+    except ValueError as exc:
+        raise NotPlottable(str(exc)) from None
+    if result.relative is None:
+        raise NotPlottable('; '.join(result.warnings))
+    detail = (f'E={incident_energy:.4g} eV, band [{result.e1:.4g}, {result.e2:.4g}] eV')
+    return _step_item((result.boundaries, result.relative),
+                      _endf_provenance(endf, mt, state='multigroup', detail=detail))
 
 
 def _step_item(rel: Tuple[np.ndarray, np.ndarray], prov: Provenance) -> PlotItem:

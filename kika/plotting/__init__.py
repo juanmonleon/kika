@@ -51,6 +51,7 @@ from .styles import (
 )
 from .plot_builder import PlotBuilder
 from .heatmap_builder import HeatmapBuilder
+from .heatmap_grid import heatmap_grid, shared_norm
 from .comparison import (
     ComparisonBuilder,
     ComparisonResult,
@@ -92,6 +93,8 @@ __all__ = [
     'style_names',
     'PlotBuilder',
     'HeatmapBuilder',
+    'heatmap_grid',
+    'shared_norm',
     'ComparisonBuilder',
     'ComparisonResult',
     'compute_difference',

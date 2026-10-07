@@ -236,6 +236,47 @@ class MF5PartialTabulated(MF5Partial):
         x, y = self.table(k)
         return group_integrals(x, y, self._segment_codes(k), boundaries)
 
+    def group_integrals_at(self, energy: float,
+                           boundaries: Sequence[float]) -> np.ndarray:
+        """:meth:`group_integrals` at any incident *energy*, without a new node.
+
+        The same argument as :meth:`normalisation_at_incident`: with lin-lin on
+        the incident axis the interpolant is ``(1-w) chi_lo + w chi_hi`` at every
+        E', so its integral over any group is the same blend of the two nodes'
+        group integrals, each exact on its own panels. Histogram holds the lower
+        node; any other code raises, because no blend reproduces it.
+
+        It exists so that a reader comparing MF35 bands between libraries can
+        ask for one incident energy on every tape without going through
+        :meth:`insert_incident_node`, which mutates the section.
+        """
+        energies = np.asarray(self.incident_energies, dtype=float)
+        edges = np.asarray(boundaries, dtype=float)
+        if energies.size == 0:
+            return np.zeros(max(edges.size - 1, 0), dtype=float)
+        if energy <= energies[0]:
+            return self.group_integrals(0, edges)
+        if energy >= energies[-1]:
+            return self.group_integrals(energies.size - 1, edges)
+
+        upper = int(np.searchsorted(energies, energy, side="right"))
+        lower = upper - 1
+        if energies[lower] == energy:
+            return self.group_integrals(lower, edges)
+
+        code = int(self._incident_codes()[lower])
+        if code == 1:                            # histogram: hold the lower node
+            return self.group_integrals(lower, edges)
+        if code != 2:
+            raise NotImplementedError(
+                f"MF5 LF=1 incident interpolation code {code} between "
+                f"{energies[lower]:.6e} and {energies[upper]:.6e}; only "
+                f"histogram and lin-lin refine exactly"
+            )
+        weight = (energy - energies[lower]) / (energies[upper] - energies[lower])
+        return ((1.0 - weight) * self.group_integrals(lower, edges)
+                + weight * self.group_integrals(upper, edges))
+
     # ------------------------------------------------------------------
     # The incident axis
     # ------------------------------------------------------------------
