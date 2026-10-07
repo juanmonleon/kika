@@ -36,8 +36,9 @@ from kika._constants import MF3_SUM_RULES
 from kika.endf import read_endf
 from kika.endf.model_adapter.decode import _summationMTs
 from kika.nuclear_data.model.functions import Regions1d, XYs1d
-from kika.sampling.cross_section_sums import (planCrossSectionSums, rederiveSum,
-                                              screenSumClaims, sumTree)
+from kika.sampling.cross_section_sums import (Remainder, planCrossSectionSums,
+                                              rederiveSum, screenSumClaims,
+                                              sumTree)
 from kika.sampling.joint_blocks import ComponentKey
 from kika.sampling.model_perturbation import perturbFromModel
 from kika.sampling.perturbation_set import PerturbationSet
@@ -204,6 +205,55 @@ def test_fill_rides_the_nearest_sum_as_before():
         assert plan.leafControl[leaf] == _key(1)
     assert plan.rederive == (4, 1)
     assert plan.ownBlockReached == {1: (2, 16, 102), 4: (52,)}
+
+
+def test_a_lump_moves_its_members_as_their_own_block():
+    """B-VIII.1 U-238: MT851 (MTL) is the covariance of MT52-91, stated for them.
+
+    The members carry no block, their MF33 points at the lump, so the lump's
+    factor moves them -- in every mode, ``never`` included: it is not a sum's
+    block standing in for them, it is the one the file gives them. MT51 keeps
+    its own, MT4 = MT51 + MT52-53 is decomposed and re-derived.
+    """
+    present = {1, 2, 4, 51, 52, 53}
+    for mode in ("undecomposed", "never"):
+        plan = planCrossSectionSums({51: _key(51), 851: _key(851)}, present,
+                                    _summationMTs(present), mode=mode,
+                                    lumped={851: (52, 53, 54)})
+        assert plan.leafControl == {51: _key(51), 52: _key(851), 53: _key(851)}
+        assert plan.lumpOf == {52: 851, 53: 851}
+        assert plan.rederive == (4, 1)
+
+
+def test_a_remainder_anchors_its_total():
+    """JENDL-5 Fe-56: MF33 states MT2 as MT1 minus the rest.
+
+    MT1 is decomposed (MT102 carries its own), so without the statement its
+    block would be discarded; with it, MT1 is anchored, MT2 takes the
+    difference, and MT1 is rebuilt only after it.
+    """
+    present = {1, 2, 4, 51, 52, 102}
+    statement = Remainder(total=1, minus=(4, 102), lo=1e-5, hi=2e7)
+    screen = screenSumClaims({1, 102}, present, _summationMTs(present),
+                             remainders={2: (statement,)})
+    assert screen.anchored == {1: (2,)}
+    assert screen.discarded == {}
+    plan = planCrossSectionSums({1: _key(1), 102: _key(102)}, present,
+                                _summationMTs(present),
+                                remainders={2: (statement,)})
+    assert plan.leafControl == {102: _key(102)}, "MT2 does not ride MT1"
+    assert plan.remainders == {2: (statement,)}
+    assert plan.rederive[plan.remainderAt:] == (1,)
+
+
+def test_a_remainder_waits_for_its_total_to_be_drawn():
+    """MT102 asked for alone: MT1 is not drawn, so MT2 is left as evaluated."""
+    present = {1, 2, 102}
+    plan = planCrossSectionSums(
+        {102: _key(102)}, present, _summationMTs(present),
+        remainders={2: (Remainder(total=1, minus=(102,), lo=1e-5, hi=2e7),)})
+    assert plan.remainders == {}
+    assert plan.leafControl == {102: _key(102)}
 
 
 def test_an_unknown_mode_is_refused():
@@ -373,6 +423,40 @@ def test_an_undecomposed_total_reaches_its_partials():
         assert np.allclose(ratio, [1.1, 0.9], rtol=1e-12)
 
 
+def test_a_remainder_takes_the_difference_and_the_total_keeps_its_own_move():
+    """MT1 and MT102 drawn, MT2 stated as MT1 - MT102.
+
+    MT2' = MT2 + (MT1' - MT1) - (MT102' - MT102), so the total rebuilt from its
+    partials is MT1 times MT1's own factor: the covariance the file states for
+    the total is the one the realisation carries, and MT2's is the one the
+    file defines for it. Checked above the resolved range, where MF3 is the
+    cross section and not a background.
+    """
+    from kika.endf.model_adapter import decodeReactionSuite
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    suite, _ = decodeReactionSuite(read_endf(str(FE56_STRUCTURAL)))
+    edges = np.array([1.0e-5, 1.0e6, 2.0e7])
+    pset = PerturbationSet(
+        label="r",
+        factors={_key(1): np.array([1.10, 0.95]), _key(102): np.array([0.7, 1.3])},
+        binEdges={_key(1): edges, _key(102): edges})
+    statement = Remainder(total=1, minus=(102,), lo=1e-5, hi=2e7)
+    applied = pset.applyToSuite(suite, remainders={2: (statement,)})
+
+    assert applied[_key(2)]["remainder_of"] == 1
+    assert applied[_key(1)]["own_block"] == "remainder"
+    probe = np.array([9.0e5, 3.0e6, 1.2e7])
+    form = {mt: suite.reactionByENDF_MT(mt).crossSection for mt in (1, 2, 102)}
+    total = form[1]["r"].evaluate(probe) / form[1][EVAL_LABEL].evaluate(probe)
+    assert np.allclose(total, [1.10, 0.95, 0.95], rtol=1e-12)
+    expected2 = (form[2][EVAL_LABEL].evaluate(probe)
+                 + (total - 1.0) * form[1][EVAL_LABEL].evaluate(probe)
+                 - (form[102]["r"].evaluate(probe)
+                    - form[102][EVAL_LABEL].evaluate(probe)))
+    assert np.allclose(form[2]["r"].evaluate(probe), expected2, rtol=1e-12)
+
+
 def test_the_written_total_moved_by_what_its_partials_moved(tmp_path):
     """Through the delta tape: MT1_out - MT1_in = MT2_out - MT2_in, to ENDF's digits.
 
@@ -411,8 +495,9 @@ def test_a_sums_own_block_is_not_drawn_where_its_partials_carry_theirs(
     assert np.all(np.abs(moved1 - moved2)
                   <= 2e-6 * _sectionValues(tape, 1, energies) + 1e-12)
     meta = json.loads((tmp_path / "run_metadata.json").read_text(encoding="utf-8"))
-    assert meta["sumBlocks"] == {"mode": "undecomposed", "discarded": {"1": [2]},
-                                 "undecomposed": {}, "dropped": {}}
+    assert meta["sumBlocks"]["mode"] == "undecomposed"
+    assert meta["sumBlocks"]["discarded"] == {"1": [2]}
+    assert meta["sumBlocks"]["undecomposed"] == {}
 
 
 def test_naming_a_decomposed_sum_names_what_decomposes_it(fe56WithTotalCovariance):
@@ -586,3 +671,30 @@ def test_a_negative_background_is_not_an_alarm_and_a_short_sum_is():
     _, info = rederiveSum(short, [(part, _perturbed(part, [0.5], [1.0, 10.0]),
                                    1.0, 10.0)])
     assert info["n_negative"] > 0
+
+
+@pytest.mark.slow
+def test_jendl5_fe56_elastic_is_the_remainder_it_is_stated_as(fe56_jendl_tape, tmp_path):
+    """JENDL-5 Fe-56 states MT2's covariance as MT1 minus every other channel.
+
+    Before 2026-10-07 the model dropped that statement (an NC subsection) and
+    the elastic was not perturbed at all. Now MT1 is drawn, MT2 takes the
+    difference, and the written MT1 is the evaluation's times MT1's own factor
+    wherever MT1's block reaches -- to the seven digits ENDF stores.
+    """
+    run = perturbFromModel(str(fe56_jendl_tape), {33: None}, 1, seed=11,
+                           outputDir=tmp_path, formats=("endf-delta",))
+    sample = run.samples[0]
+    assert sample["applied"][ComponentKey(ZA, 33, 2)]["remainder_of"] == 1
+    assert any("MT2 took MT1's move" in note for note in run.notes), run.notes
+
+    key = ComponentKey(ZA, 33, 1)
+    factors = np.asarray(sample["set"].factors[key], float)
+    edges = np.asarray(sample["set"].binEdges[key], float)
+    delta = run.paths("endf-delta")[0]
+    mids = np.sqrt(edges[:-1] * edges[1:])
+    keep = mids > 1.0e6                       # above the resolved range
+    ratio = (_sectionValues(delta, 1, mids[keep])
+             / _sectionValues(fe56_jendl_tape, 1, mids[keep]))
+    assert np.allclose(ratio, factors[keep], rtol=2e-6), (
+        f"max {np.max(np.abs(ratio / factors[keep] - 1)):.2e}")

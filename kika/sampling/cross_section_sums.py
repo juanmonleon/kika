@@ -168,6 +168,130 @@ class SumPlan:
     #: MT600-649 and MT800-849 alone (NJOY builds MT103 itself). Their block
     #: reaches the partials and there is no section of theirs to rebuild.
     virtual: Tuple[int, ...] = ()
+    #: Partial -> the remainder statements that move it (its anchor is drawn).
+    remainders: Dict[int, Tuple["Remainder", ...]] = field(default_factory=dict)
+    #: Lump member -> its lumped reaction (MTL), for the ones a lump moves.
+    lumpOf: Dict[int, int] = field(default_factory=dict)
+    #: Index into ``rederive`` at which the remainders are taken: the sums
+    #: before it contain none, the ones from it on contain one.
+    remainderAt: int = 0
+    #: Virtual sum -> its leaf partials: a remainder may subtract one.
+    virtualLeaves: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Remainder:
+    """MF33 states this partial's covariance as a total's minus the others'.
+
+    ENDF-6 §33.2's NC-type LTY=0 with one coefficient +1 (*total*) and the
+    rest -1 (*minus*), over ``[lo, hi]`` eV: JENDL-5 Fe-56's MT2 is
+    MT1 - (MT16 + MT22 + ... + MT115), its O-16's MT2 the same above 6 MeV,
+    and B-VIII.1/JEFF-4.0 O-16's MT5 is MT1 - MT2. The covariance of the
+    partial is then *defined* by the total's and the others', so the
+    realisation that honours it is the arithmetic itself: the total moves by
+    its own block, the others by theirs, and this partial takes the
+    difference -- ``p' = p + (T' - T) - sum (X' - X)`` -- after which the
+    total, re-derived from its partials, is ``T'`` again. No covariance is
+    invented and none is approximated.
+    """
+
+    total: int
+    minus: Tuple[int, ...]
+    lo: float
+    hi: float
+
+
+def readSumStatements(endfObj, present: Iterable[int], sums: Iterable[int]
+                      ) -> Tuple[Dict[int, Tuple[Remainder, ...]],
+                                 Dict[int, Tuple[int, ...]], List[str]]:
+    """``(remainders, lumped, notes)`` from a parsed tape's MF33.
+
+    *lumped* is ``{MTL: members}``: ENDF-6 §33.2's lumped reactions
+    (MT851-870), whose covariance the members' own sections point to with a
+    non-zero MTL instead of stating one -- B-VIII.1 U-235's MT851 = MT52-91.
+    The file states the lump's block *for* the members, so they move by it.
+
+    *remainders* is ``{partial: (Remainder, ...)}`` (see :class:`Remainder`).
+    An NC statement whose coefficients are all +1 is a derived *sum* and needs
+    nothing here (the sum rules already re-derive it); one that fits neither
+    shape, or whose partial is itself a sum in MF3, is left out and named in
+    *notes* rather than guessed at.
+    """
+    from kika.endf.writers.redundant import resolve_sum_components  # noqa: F401
+
+    present = {int(mt) for mt in present}
+    sums = {int(s) for s in sums}
+    remainders: Dict[int, List[Remainder]] = {}
+    lumped: Dict[int, List[int]] = {}
+    notes: List[str] = []
+    mf = getattr(endfObj, "mf", None) or {}
+    if 33 not in mf:
+        return {}, {}, []
+    children, parent = sumTree(present, sums)
+    for mt, section in sorted(mf[33].mt.items()):
+        mtl = int(getattr(section, "_mtl", 0) or 0)
+        if mtl:
+            lumped.setdefault(mtl, []).append(int(mt))
+            continue
+        for sub in getattr(section, "subsections", ()):
+            if int(sub.mt1) != int(mt):
+                continue
+            for nc in sub.nc_records:
+                if nc.lty != 0:
+                    continue
+                terms = [(float(c), int(round(x))) for c, x in zip(nc.ci, nc.xmti)]
+                plus = [x for c, x in terms if c > 0]
+                minus = [x for c, x in terms if c < 0]
+                if not minus:
+                    continue                      # a derived sum: nothing to do
+                if (len(plus) != 1 or any(abs(abs(c) - 1.0) > 1e-9 for c, _ in terms)):
+                    notes.append(
+                        f"MT{mt}'s MF33 is stated as {terms[:6]}..., which is "
+                        f"neither a sum nor a total minus the rest; that part of "
+                        f"its covariance is not applied")
+                    continue
+                total = plus[0]
+                node, ancestors = int(mt), []
+                while node in parent:
+                    node = parent[node]
+                    ancestors.append(node)
+                if int(mt) in sums:
+                    notes.append(
+                        f"MT{mt}'s MF33 states it as MT{total} minus the rest, "
+                        f"and MT{mt} is itself a sum in MF3; that part of its "
+                        f"covariance is not applied (its own NI part is)")
+                    continue
+                if int(mt) not in present or total not in ancestors:
+                    notes.append(
+                        f"MT{mt}'s MF33 states it as MT{total} minus the rest, "
+                        f"and MF3 does not put MT{mt} under MT{total}; not applied")
+                    continue
+                remainders.setdefault(int(mt), []).append(Remainder(
+                    total=total, minus=tuple(minus), lo=float(nc.e1),
+                    hi=float(nc.e2)))
+    return ({mt: tuple(rs) for mt, rs in remainders.items()},
+            {mtl: tuple(sorted(m)) for mtl, m in lumped.items()}, notes)
+
+
+def _effectiveClaims(claims: Mapping[int, object], present: set,
+                     lumped: Optional[Mapping[int, Tuple[int, ...]]]
+                     ) -> Tuple[Dict[int, object], Dict[int, int]]:
+    """Claims with every claimed lump replaced by its members in MF3.
+
+    A member that carries a block of its own keeps it; the others take the
+    lump's. ``lumpOf`` maps each member a lump moves to the lump.
+    """
+    out = {int(mt): value for mt, value in claims.items()
+           if not lumped or int(mt) not in lumped}
+    lumpOf: Dict[int, int] = {}
+    for lump, members in (lumped or {}).items():
+        if lump not in claims:
+            continue
+        for member in members:
+            if member in present and member not in out:
+                out[member] = claims[lump]
+                lumpOf[member] = int(lump)
+    return out, lumpOf
 
 
 def _virtualClaims(claims: Iterable[int], present: set) -> set:
@@ -199,6 +323,9 @@ class SumScreen:
     #: smaller sum between) carries a block. Its block reaches the tape only by
     #: moving them.
     undecomposed: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
+    #: Decomposed sum whose block is still drawn, because MF33 states a partial
+    #: under it as the remainder (:class:`Remainder`) -> those partials.
+    anchored: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
 
 
 def _descendants(total: int, children: Mapping[int, Tuple[int, ...]]
@@ -254,7 +381,10 @@ def _layout(present, sums, claims):
 
 
 def screenSumClaims(claims: Iterable[int], present: Iterable[int],
-                    sums: Iterable[int]) -> SumScreen:
+                    sums: Iterable[int], *,
+                    lumped: Optional[Mapping[int, Tuple[int, ...]]] = None,
+                    remainders: Optional[Mapping[int, Tuple[Remainder, ...]]] = None
+                    ) -> SumScreen:
     """Sort the claimed sums by whether the file decomposes them.
 
     *claims* is every MT a block is drawn for (MF33, or MF34's L=0 magnitude);
@@ -265,26 +395,45 @@ def screenSumClaims(claims: Iterable[int], present: Iterable[int],
     sections a sum has is read from MF3, so a virtual sum -- a covariance for
     MT103 on a tape that states only MT600-649 -- counts its MF3 partials like
     any other.
+
+    A claimed lump (*lumped*, MT851...) counts as claims on its members. A
+    decomposed sum that is the total of a remainder statement on a partial
+    present in MF3 (*remainders*) is *anchored* instead of discarded: its block
+    is what the remainder is made of.
     """
-    claims = {int(mt) for mt in claims}
     present = {int(mt) for mt in present}
+    claims, _lumpOf = _effectiveClaims({int(mt): mt for mt in claims}, present,
+                                       lumped)
+    claims = set(claims)
     sums = {int(s) for s in sums}
     virtual = _virtualClaims(claims, present)
     children, _parent = sumTree(present | virtual, sums | virtual)
+    anchorsOf: Dict[int, List[int]] = {}
+    for partial, statements in (remainders or {}).items():
+        if partial in present:
+            for statement in statements:
+                anchorsOf.setdefault(statement.total, []).append(int(partial))
     discarded: Dict[int, Tuple[int, ...]] = {}
     undecomposed: Dict[int, Tuple[int, ...]] = {}
+    anchored: Dict[int, Tuple[int, ...]] = {}
     for total in sorted((sums | virtual) & claims):
         own = tuple(mt for mt in _descendants(total, children) if mt in claims)
-        if own:
+        if total in anchorsOf:
+            anchored[total] = tuple(sorted(set(anchorsOf[total])))
+        elif own:
             discarded[total] = own
         else:
             undecomposed[total] = _leavesUnder(total, children)
-    return SumScreen(discarded=discarded, undecomposed=undecomposed)
+    return SumScreen(discarded=discarded, undecomposed=undecomposed,
+                     anchored=anchored)
 
 
 def planCrossSectionSums(claims: Mapping[int, ComponentKey],
                          present: Iterable[int], sums: Iterable[int], *,
-                         mode: str = "undecomposed") -> SumPlan:
+                         mode: str = "undecomposed",
+                         lumped: Optional[Mapping[int, Tuple[int, ...]]] = None,
+                         remainders: Optional[Mapping[int, Tuple[Remainder, ...]]] = None
+                         ) -> SumPlan:
     """Decide, per MT, which block moves it and which sums are rebuilt.
 
     *claims* is ``MT -> component`` for every cross section the realisation
@@ -296,13 +445,22 @@ def planCrossSectionSums(claims: Mapping[int, ComponentKey],
     is undecomposed (nothing under it is claimed), always when it is
     ``"fill"``, and never when it is ``"never"`` -- where an undecomposed sum
     raises instead, since its block would have nowhere to go.
+
+    In every mode a claimed lump (*lumped*) moves its members as if the block
+    were theirs -- the file says it is -- and a partial MF33 states as a
+    remainder (*remainders*) takes the difference when its total is claimed.
     """
     checkSumBlockMode(mode)
     sums = {int(s) for s in sums}
     present = {int(mt) for mt in present}
+    claims, lumpOf = _effectiveClaims(claims, present, lumped)
     virtual = _virtualClaims(claims, present)
     children, parent = sumTree(present | virtual, sums | virtual)
-    screen = screenSumClaims(claims, present, sums)
+    active = {int(partial): tuple(r for r in statements if r.total in claims)
+              for partial, statements in (remainders or {}).items()
+              if int(partial) in present and int(partial) not in sums}
+    active = {partial: rs for partial, rs in active.items() if rs}
+    screen = screenSumClaims(claims, present, sums, remainders=active)
 
     if mode == "never" and screen.undecomposed:
         named = "; ".join(
@@ -320,7 +478,7 @@ def planCrossSectionSums(claims: Mapping[int, ComponentKey],
         if leaf in claims:
             leafControl[leaf] = claims[leaf]
             continue
-        if mode == "never":
+        if mode == "never" or leaf in active:
             continue
         node: Optional[int] = parent.get(leaf)
         while node is not None and node not in claims:
@@ -333,10 +491,21 @@ def planCrossSectionSums(claims: Mapping[int, ComponentKey],
     movedUnder = {}
     for total in sums:  # not the virtual ones: they have no section to rebuild
         moved = tuple(leaf for leaf in _leavesUnder(total, children)
-                      if leaf in leafControl)
+                      if leaf in leafControl or leaf in active)
         if moved:
             movedUnder[total] = moved
-    rederive = tuple(sorted(movedUnder, key=lambda s: (-_depth(s, parent), s)))
+    # A remainder needs the others final and moves the sums above it, so the
+    # sums that do not contain one are rebuilt first, then the remainders are
+    # taken (``remainderAt``), then the sums above them.
+    above = set()
+    for partial in active:
+        node = partial
+        while node in parent:
+            node = parent[node]
+            above.add(node)
+    order = sorted(movedUnder, key=lambda s: (-_depth(s, parent), s))
+    first = [s for s in order if s not in above]
+    rederive = tuple(first + [s for s in order if s in above])
 
     ownBlockReached = {}
     for total in sorted((sums | virtual) & set(claims)):
@@ -345,7 +514,9 @@ def planCrossSectionSums(claims: Mapping[int, ComponentKey],
             if component == claims[total])
     return SumPlan(leafControl=leafControl, rederive=rederive,
                    movedUnder=movedUnder, ownBlockReached=ownBlockReached,
-                   virtual=tuple(sorted(virtual)))
+                   virtual=tuple(sorted(virtual)), remainders=active,
+                   lumpOf=lumpOf, remainderAt=len(first),
+                   virtualLeaves={v: _leavesUnder(v, children) for v in virtual})
 
 
 # ----------------------------------------------------------------------
@@ -379,7 +550,8 @@ def _limits(function1d, energies: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return left, right
 
 
-def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]]):
+def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
+                keepZeros: bool = False):
     """``total`` moved by what its partials moved: ``S' = S + sum (p' - p)``.
 
     Parameters
@@ -407,6 +579,14 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]]):
         partial is itself negative (a background inside the resolved range,
         which MF3 may state below zero) or where the evaluation's own sum
         already was is not counted.
+
+    A move may be passed reversed, ``(after, before, lo, hi)``, to *subtract*
+    what a section moved -- which is how a remainder (:class:`Remainder`) is
+    taken -- so the inserted points come from both forms. With *keepZeros*,
+    wherever *total* is exactly zero it stays zero: a remainder statement
+    covers an energy range, and the partial it names may not exist over all
+    of it (B-VIII.1 O-16's MT5 = MT1 - MT2 is stated from 1e-5 eV, and MT5
+    only has values above its threshold).
     """
     from kika.nuclear_data.model.functions import Regions1d, XYs1d
 
@@ -418,10 +598,11 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]]):
     lo, hi = float(xs[0]), float(xs[-1])
 
     extra = []
-    for _before, after, spanLo, spanHi in moves:
-        grid = np.asarray(after.toEndfRegions()[0], dtype=float)
-        keep = ((grid >= max(lo, spanLo)) & (grid <= min(hi, spanHi)))
-        extra.append(grid[keep])
+    for before, after, spanLo, spanHi in moves:
+        for form in (after, before):
+            grid = np.asarray(form.toEndfRegions()[0], dtype=float)
+            keep = ((grid >= max(lo, spanLo)) & (grid <= min(hi, spanHi)))
+            extra.append(grid[keep])
     energies = np.unique(np.concatenate([xs] + extra))
 
     deltaLeft = np.zeros(energies.size)
@@ -447,6 +628,9 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]]):
     # The sum's own end points have one side only, and it is the inside one.
     sL[0], sR[-1] = sR[0], sL[-1]
     deltaLeft[0], deltaRight[-1] = deltaRight[0], deltaLeft[-1]
+    if keepZeros:
+        deltaLeft[sL == 0.0] = 0.0
+        deltaRight[sR == 0.0] = 0.0
 
     newXs: List[float] = []
     newYs: List[float] = []

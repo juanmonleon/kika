@@ -277,16 +277,24 @@ def _redundancyNote(suite, pset, applied=None,
     if crossSectionSums:
         rebuilt = sorted(c.mt for c, info in applied.items()
                          if "rederived_from" in info)
-        if not rebuilt and not any("factor_from" in info for info in applied.values()):
+        if not rebuilt and not any("factor_from" in info or "remainder_of" in info
+                                   for info in applied.values()):
             return None
         riders: Dict[int, List[int]] = {}
+        lumps: Dict[int, List[int]] = {}
         for component, info in applied.items():
             if "factor_from" in info:
-                riders.setdefault(int(info["factor_from"]), []).append(component.mt)
+                (lumps if info.get("lumped") else riders).setdefault(
+                    int(info["factor_from"]), []).append(component.mt)
+        remainderOf = {c.mt: info["remainder_of"] for c, info in applied.items()
+                       if "remainder_of" in info}
         discarded = sorted(c.mt for c, info in applied.items()
                            if info.get("own_block") == "discarded")
         negative = sorted(c.mt for c, info in applied.items()
-                          if info.get("n_negative"))
+                          if info.get("n_negative") and "remainder_of" not in info)
+        negativeRemainders = sorted(c.mt for c, info in applied.items()
+                                    if info.get("n_negative")
+                                    and "remainder_of" in info)
         parts = [f"MF3 sums re-derived from their moved partials: "
                  f"{_mtRanges(rebuilt)}"]
         for total in sorted(riders):
@@ -295,6 +303,17 @@ def _redundancyNote(suite, pset, applied=None,
                          + (" (sumBlocks='fill': an assumption, the file "
                             "states no covariance for them)"
                             if sumBlocks == "fill" else ""))
+        for lump in sorted(lumps):
+            parts.append(f"the lumped MT{lump}'s block moved its members "
+                         f"{_mtRanges(lumps[lump])} by one common factor (MTL)")
+        for partial in sorted(remainderOf):
+            parts.append(f"MT{partial} took MT{remainderOf[partial]}'s move "
+                         f"less the others' (MF33 states it as the remainder)")
+        if negativeRemainders:
+            parts.append(f"{_mtRanges(negativeRemainders)} went NEGATIVE as a "
+                         f"remainder: the total moved down more than the others "
+                         f"left room for, and the realisation is not usable as "
+                         f"written")
         virtual = sorted(c.mt for c, info in applied.items() if info.get("virtual"))
         if virtual:
             parts.append(f"{_mtRanges(virtual)} carry a covariance but no MF3 section of "
@@ -741,7 +760,40 @@ def _statedCrossSectionMTs(covariances) -> set:
     return stated
 
 
-def _expandNamedSums(suite, covariances, request, log):
+def _sumStatements(suite, endfObj, covarianceSource, log):
+    """``(lumped, remainders)`` the covariance tape's MF33 states, logged.
+
+    Read off the parsed ENDF (or the separate covariance tape, when there is
+    one: the statements belong to whichever file holds the covariance). A GNDS
+    source carries neither, and gets neither.
+    """
+    from kika.sampling.cross_section_sums import readSumStatements, suiteSumLayout
+
+    tape = endfObj
+    if covarianceSource is not None:
+        from kika.endf import read_endf
+
+        tape = read_endf(str(covarianceSource), mf_numbers=[33])
+    if tape is None or not getattr(suite, "sums", None):
+        return {}, {}
+    present, sums = suiteSumLayout(suite)
+    remainders, lumped, notes = readSumStatements(tape, present, sums)
+    for note in notes:
+        log.warning(note, subject="MF33")
+    for mtl, members in lumped.items():
+        log.note(f"MT{mtl} is a lumped covariance (MTL) for {_mtRanges(members)}: "
+                 f"its block moves them", subject=f"MF33/MT{mtl}")
+    for partial, statements in remainders.items():
+        for statement in statements:
+            log.note(f"MT{partial}'s covariance is stated as MT{statement.total} "
+                     f"minus {_mtRanges(statement.minus)} over "
+                     f"[{statement.lo:.4g}, {statement.hi:.4g}] eV: it takes the "
+                     f"difference", subject=f"MF33/MT{partial}")
+    return lumped, remainders
+
+
+def _expandNamedSums(suite, covariances, request, log, lumped=None,
+                     remainders=None):
     """A named sum the file decomposes means the sections that decompose it.
 
     Asking for MT4 on a tape that states covariances for MT51 and MT52 is
@@ -753,6 +805,12 @@ def _expandNamedSums(suite, covariances, request, log):
     -- has no block of its own to keep, so it is replaced by them rather than
     refused as "not stated". A sum nothing under which carries a covariance is
     left alone: its own block is what perturbs it.
+
+    Two more statements the file can make, read the same way. A partial whose
+    covariance is a lump's (MTL) is asked for through the lump, which moves
+    every member. A partial whose covariance is a total minus the others
+    (:class:`~kika.sampling.cross_section_sums.Remainder`) is asked for through
+    that total and those others.
 
     Returns ``(request, notes)``; *request* unchanged when nothing applies.
     """
@@ -768,6 +826,9 @@ def _expandNamedSums(suite, covariances, request, log):
     stated = _statedCrossSectionMTs(covariances)
     present, sums = suiteSumLayout(suite)
     members = sumMembers(present, sums, claims=stated)
+    lumpOf = {member: mtl for mtl, ms in (lumped or {}).items() if mtl in stated
+              for member in ms}
+    reachable = stated | set(lumpOf)
 
     notes: List[str] = []
     rebuilt = {}
@@ -779,7 +840,31 @@ def _expandNamedSums(suite, covariances, request, log):
                   else [selection.mt])
         out = [int(mt) for mt in wanted]
         for mt in [int(mt) for mt in wanted]:
-            covered = [m for m in members.get(mt, ()) if m in stated]
+            if mt in lumpOf and mt not in stated:
+                out.remove(mt)
+                out.append(lumpOf[mt])
+                note = (f"MT{mt} was asked for and its covariance is the lumped "
+                        f"MT{lumpOf[mt]}'s (MTL); it is perturbed through it, "
+                        f"which moves every member of the lump")
+                notes.append(note)
+                log.note(note, subject=f"MF33/MT{mt}")
+                continue
+            if mt in (remainders or {}) and mt not in stated:
+                sources = set()
+                for statement in remainders[mt]:
+                    sources.add(statement.total)
+                    sources.update(m for m in statement.minus if m in reachable)
+                sources = {lumpOf.get(m, m) for m in sources}
+                out.remove(mt)
+                out.extend(m for m in sources if m not in out)
+                note = (f"MT{mt} was asked for and its covariance is stated as "
+                        f"a total minus the others; it is perturbed through "
+                        f"{_mtRanges(sources)}, and takes the difference")
+                notes.append(note)
+                log.note(note, subject=f"MF33/MT{mt}")
+                continue
+            covered = sorted({lumpOf.get(m, m)
+                              for m in members.get(mt, ()) if m in reachable})
             if not covered:
                 continue
             added = [m for m in covered if m not in out]
@@ -805,7 +890,8 @@ def _expandNamedSums(suite, covariances, request, log):
     return rebuilt, notes
 
 
-def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log):
+def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log,
+                     lumped=None, remainders=None):
     """Drop the sums' blocks this run has no use for, before the draw.
 
     A sum's own block is never applied to the sum (it has to equal its parts).
@@ -816,6 +902,11 @@ def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log):
     has nowhere to go: refused if the request named the sum and
     ``onMissing="raise"``, dropped with a warning otherwise. See
     :mod:`kika.sampling.cross_section_sums`.
+
+    A decomposed sum MF33 states a partial under it as the remainder of
+    (:class:`~kika.sampling.cross_section_sums.Remainder`) is *anchored*: its
+    block is drawn, because the remainder is made of it. Lumped reactions
+    (MT851...) count as claims on their members.
 
     Taken out here rather than drawn and thrown away, so the draw, the factors
     table and ``run_metadata.json`` all hold exactly what reaches the tape --
@@ -828,7 +919,13 @@ def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log):
     from kika.sampling.joint_blocks import _asSelections
 
     record: Dict[str, Any] = {"mode": mode, "discarded": {}, "undecomposed": {},
-                              "dropped": {}}
+                              "dropped": {}, "anchored": {},
+                              "lumped": {str(k): list(v)
+                                         for k, v in (lumped or {}).items()},
+                              "remainders": {
+                                  str(k): [[r.total, list(r.minus), r.lo, r.hi]
+                                           for r in rs]
+                                  for k, rs in (remainders or {}).items()}}
     claimKeys: Dict[int, set] = {}
     for rowKey, colKey, *_rest in entries:
         for key in (rowKey, colKey):
@@ -837,10 +934,19 @@ def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log):
     if not claimKeys or not getattr(suite, "sums", None):
         return entries, record, []
     present, sums = suiteSumLayout(suite)
-    screen = screenSumClaims(claimKeys, present, sums)
+    screen = screenSumClaims(claimKeys, present, sums, lumped=lumped,
+                             remainders=remainders)
 
     notes: List[str] = []
     drop = set()
+    for total, partials in screen.anchored.items():
+        record["anchored"][str(total)] = list(partials)
+        note = (f"MT{total}'s own covariance is drawn although the file "
+                f"decomposes it: MF33 states {_mtRanges(partials)} as MT{total} "
+                f"minus the rest, so MT{total}'s uncertainty reaches the tape "
+                f"through {'it' if len(partials) == 1 else 'them'}")
+        notes.append(note)
+        log.note(note, subject=f"MF33/MT{total}", partials=list(partials))
     if mode != "fill":
         for total, own in screen.discarded.items():
             drop |= claimKeys[total]
@@ -1417,6 +1523,9 @@ class _SampleContext:
     crossSectionSums: bool = True
     #: What a sum's own block does; see ``perturbFromModel``.
     sumBlocks: str = "undecomposed"
+    #: MF33's lumped reactions and remainder statements, read once.
+    lumped: Optional[Dict[int, Tuple[int, ...]]] = None
+    remainders: Optional[Dict[int, Tuple[Any, ...]]] = None
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1442,7 +1551,9 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
         applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode,
                                     maxOutgoingPoints=ctx.maxOutgoingPoints,
                                     crossSectionSums=ctx.crossSectionSums,
-                                    sumBlocks=ctx.sumBlocks)
+                                    sumBlocks=ctx.sumBlocks,
+                                    lumped=ctx.lumped,
+                                    remainders=ctx.remainders)
         info["components"] = [c.describe() for c in applied]
     _checkRealisation(pset, log, number)
 
@@ -1807,8 +1918,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     original = request
     request = normaliseRequest(request, suite)
     expansionNotes: List[str] = []
+    lumped, remainders = {}, {}
     if crossSectionSums:
-        request, expansionNotes = _expandNamedSums(suite, covariances, request, log)
+        lumped, remainders = _sumStatements(suite, endfObj, covarianceSource, log)
+        request, expansionNotes = _expandNamedSums(
+            suite, covariances, request, log, lumped, remainders)
     from kika.sampling.joint_blocks import QUANTITY_OF_MF
 
     skipped: List[str] = list(expansionNotes)
@@ -1852,7 +1966,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         sumRecord: Dict[str, Any] = {"mode": sumBlocks}
         if crossSectionSums:
             entries, sumRecord, sumNotes = _screenSumBlocks(
-                suite, request, entries, onMissing, sumBlocks, log)
+                suite, request, entries, onMissing, sumBlocks, log,
+                lumped, remainders)
             skipped.extend(sumNotes)
         domains = componentDomains(covariances, request)
         blocks, index = assembleRequest(entries, grouping=grouping,
@@ -1939,7 +2054,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         formats=tuple(formats), outputDir=outputDir, stem=stem, mat=mat,
         ace=ace if "ace" in formats else None, writeSets=writeSets,
         emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints,
-        crossSectionSums=crossSectionSums, sumBlocks=sumBlocks)
+        crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
+        lumped=lumped, remainders=remainders)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
