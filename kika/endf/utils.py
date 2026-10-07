@@ -223,16 +223,9 @@ def describe_interpolation_region(nbt, int_code):
 
 # Moved to kika/processing/interpolation.py by phase 2 of the GNDS roadmap:
 # interpolation law codes 1-5 are shared with GNDS (§3.4.4) and are not
-# ENDF-specific. These are *live* re-exports -- eight call sites in kika/endf
-# import interpolate_1d_endf -- not shims awaiting deletion. The private names
-# come along because kika/endf/tests reaches for them.
-from kika.processing.interpolation import (
-    interpolate_1d as interpolate_1d_endf,
-    _regionize,
-    _base_int_code,
-    _interp_pair,
-    _interp_pair_vec,
-)
+# ENDF-specific. This is a *live* re-export -- eight call sites in kika/endf
+# import interpolate_1d_endf -- not a shim awaiting deletion.
+from kika.processing.interpolation import interpolate_1d as interpolate_1d_endf
 
 
 

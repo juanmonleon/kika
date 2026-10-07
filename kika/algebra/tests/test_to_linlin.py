@@ -1,8 +1,7 @@
 """Tests for re-expressing a table on any ENDF law as lin-lin.
 
-:func:`~kika.processing.linearization.linearize_table` is judged against the
-interpolator that defines what a table means,
-:func:`~kika.processing.interpolation.interpolate_1d`: lin-lin on the output must
+:func:`~kika.algebra.to_linlin` is judged against the evaluator that defines
+what a table means, :func:`~kika.algebra.evaluate`: lin-lin on the output must
 reproduce it to the stated tolerance everywhere, and every original point must
 come through untouched.
 """
@@ -11,8 +10,19 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from kika.processing.interpolation import interpolate_1d, interval_codes
-from kika.processing.linearization import linearize_table
+from kika.algebra import evaluate, interval_laws, to_linlin
+
+
+def interval_codes(n, pairs):
+    return interval_laws(n, pairs)
+
+
+def interpolate_1d(x, y, pairs, q):
+    return evaluate(x, y, interval_laws(len(x), pairs), q)
+
+
+def linearize_table(x, y, pairs, tol=1e-4, snap=None):
+    return to_linlin(x, y, interval_laws(len(x), pairs), tol, snap=snap)
 
 
 def _probe(x):
@@ -111,11 +121,7 @@ def test_a_panel_the_snap_grid_cannot_split_is_left_as_it_is():
     np.testing.assert_array_equal(ys, [10.0, 0.1])
 
 
-def test_a_log_law_the_interpolator_reads_lin_lin_is_left_alone():
-    """A zero on a log-y law: interpolate_1d falls back to lin-lin there."""
-    x = np.array([1.0, 10.0])
-    y = np.array([0.0, 3.0])
-    xs, ys = linearize_table(x, y, [(2, 5)])
-
-    np.testing.assert_array_equal(xs, x)
-    np.testing.assert_array_equal(ys, y)
+def test_a_log_law_on_a_zero_is_refused():
+    """A zero on a log-y law has no log-log value; it used to be read lin-lin."""
+    with pytest.raises(ValueError, match="ln y"):
+        linearize_table([1.0, 10.0], [0.0, 3.0], [(2, 5)])

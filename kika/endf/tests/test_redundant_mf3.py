@@ -396,8 +396,8 @@ def test_a_real_evaluation_already_satisfies_the_sum_rules(fe56_host_tape, mt):
     from kika.endf.writers.redundant import (_evaluate, _relative_deviation,
                                              _sum_partials)
     own = np.asarray(sections[mt].energies, dtype=float)
-    grid, occurrence, total = _sum_partials(sections, components, extra_grids=[own])
-    deviation = _relative_deviation(_evaluate(sections[mt], grid, occurrence), total)
+    grid, total = _sum_partials(sections, components, extra_grids=[own])
+    deviation = _relative_deviation(_evaluate(sections[mt], grid), total)
 
     assert deviation < 1e-4
 
