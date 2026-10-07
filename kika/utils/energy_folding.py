@@ -81,13 +81,12 @@ class EnergyFoldingConfig:
         delta_t_ns: Time resolution FWHM in nanoseconds (default: 5.0 ns)
                     Note: This is the Full Width at Half Maximum of the time response,
                     following standard experimental convention (GELINA, ORELA, n_TOF).
-        n_sigma: Number of sigma for integration window (default: 4.0)
-        n_samples: Number of energy samples for folding integration (default: 21)
+
+    The fold itself has nothing to configure: it is exact
+    (:mod:`kika.utils.numerics`), so there is no window or sample count.
     """
     flight_path_m: float = 27.037  # GELINA default
     delta_t_ns: float = 5.0        # Time resolution FWHM (not sigma!)
-    n_sigma: float = 4.0           # Integration window in sigma units
-    n_samples: int = 21            # Energy samples for angular folding
 
 
 # =============================================================================
@@ -207,7 +206,6 @@ def fold_cross_section(
     target_energy_mev: float,
     mt: int,
     sigma_E_mev: float,
-    n_sigma: float = 4.0,
 ) -> Tuple[float, float]:
     """
     Compute energy-folded cross section using ACE data.
@@ -216,22 +214,18 @@ def fold_cross_section(
 
         σ_folded = ∫ σ(E) × G(E; E₀, σE) dE / ∫ G(E; E₀, σE) dE
 
-    .. versionchanged::
-        This used to average the *tabulated points* weighted by the Gaussian,
-        with no dE measure.  An ACE energy grid is adaptively refined — densest
-        exactly at resonance peaks — so that over-weighted the peaks: on the
-        JEFF-4.0 Fe-56 elastic it differed from the integral by 8.6% on average
-        and 21.4% at worst.  It now integrates the interpolant by Gauss-Hermite
-        quadrature, which is insensitive to how the input is sampled.  **Folded
-        values from this function change accordingly.**
+    Exact for the lin-lin interpolant of the ACE cross section (closed form,
+    :func:`kika.utils.numerics.fold_tabulated`), held at its end values past
+    the table.  **Values changed twice**: in September 2026 away from a
+    Gaussian-weighted average of the tabulated points (8.6 % off on Fe-56
+    elastic), and in October 2026 to the exact integral (up to 6e-4 from the
+    trapezoid rule in between).
 
     Parameters:
         ace_data: ACE data object from kika.read_ace()
         target_energy_mev: Central energy for folding (MeV)
         mt: Reaction MT number (e.g., 2 for elastic)
         sigma_E_mev: Energy resolution σE (MeV)
-        n_sigma: Ignored, kept for backward compatibility.  Gauss-Hermite
-            quadrature has no truncation window to size.
 
     Returns:
         Tuple of (folded_xs, unfolded_xs) in barns
@@ -290,63 +284,39 @@ def fold_angular_distribution(
     target_energy_mev: float,
     mt: int,
     sigma_E_mev: float,
-    n_sigma: float = 4.0,
-    n_samples: int = 21,
     num_mu_points: int = 200,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute energy-folded angular distribution shape using ACE data.
-    
-    This folds the angular distribution PDF (shape only, not cross section).
-    
+
+    This folds the angular distribution PDF (shape only, not cross section),
+    through the ACE container's own fold: nodes on every incident energy the
+    distribution tabulates, weights exact for its lin-lin interpolation in
+    energy (:func:`kika.utils.numerics.gaussian_fold_nodes`).  Until October
+    2026 this averaged 21 uniform samples over +-4 sigma, a rule of its own.
+
     Parameters:
         ace_data: ACE data object from kika.read_ace()
         target_energy_mev: Central energy for folding (MeV)
         mt: Reaction MT number
         sigma_E_mev: Energy resolution σE (MeV)
-        n_sigma: Integration window in sigma units
-        n_samples: Number of energy samples for integration
         num_mu_points: Number of μ grid points
-    
+
     Returns:
         Tuple of (mu_grid, folded_pdf, unfolded_pdf)
     """
-    # Get energy bounds from ACE
-    e_min_ace = np.min(ace_data.energies)
-    e_max_ace = np.max(ace_data.energies)
-    
-    # Define window
-    E_lo = max(target_energy_mev - n_sigma * sigma_E_mev, e_min_ace)
-    E_hi = min(target_energy_mev + n_sigma * sigma_E_mev, e_max_ace)
-    
-    # Sample energies
-    sample_energies = np.linspace(E_lo, E_hi, n_samples)
-    
-    # Gaussian weights
-    weights = np.exp(-0.5 * ((sample_energies - target_energy_mev) / sigma_E_mev) ** 2)
-    weights /= weights.sum()
-    
-    # Accumulate weighted angular distributions
     mu_grid = np.linspace(-1, 1, num_mu_points)
-    folded_pdf = np.zeros(num_mu_points)
-    
-    for E_sample, w in zip(sample_energies, weights):
-        # Get angular distribution at this energy
-        plot_data = ace_data.angular_distributions.to_plot_data(
-            mt=mt,
-            energy=E_sample,
-            ace=ace_data,
-            interpolate=True,
-            num_points=num_mu_points,
-            normalize_to_xs=False,  # PDF only
-        )
-        # Ensure proper sorting for interpolation (np.interp requires increasing xp)
-        ace_mu = np.asarray(plot_data.x)
-        ace_pdf = np.asarray(plot_data.y)
-        sort_idx = np.argsort(ace_mu)
-        folded_pdf += w * np.interp(mu_grid, ace_mu[sort_idx], ace_pdf[sort_idx])
-    
-    # Unfolded PDF at target energy
+
+    def on_grid(cosines, values):
+        order = np.argsort(np.asarray(cosines))
+        return np.interp(mu_grid, np.asarray(cosines)[order], np.asarray(values)[order])
+
+    cosines, folded = ace_data.angular_distributions._apply_energy_folding(
+        mt, target_energy_mev, sigma_E_mev, ace_data, 'neutron', 0,
+        num_mu_points, False, 'b',
+    )
+    folded_pdf = on_grid(cosines, folded)
+
     unfolded_data = ace_data.angular_distributions.to_plot_data(
         mt=mt,
         energy=target_energy_mev,
@@ -355,12 +325,8 @@ def fold_angular_distribution(
         num_points=num_mu_points,
         normalize_to_xs=False,
     )
-    # Ensure proper sorting for interpolation
-    ace_mu_unf = np.asarray(unfolded_data.x)
-    ace_pdf_unf = np.asarray(unfolded_data.y)
-    sort_idx_unf = np.argsort(ace_mu_unf)
-    unfolded_pdf = np.interp(mu_grid, ace_mu_unf[sort_idx_unf], ace_pdf_unf[sort_idx_unf])
-    
+    unfolded_pdf = on_grid(unfolded_data.x, unfolded_data.y)
+
     return mu_grid, folded_pdf, unfolded_pdf
 
 
@@ -444,12 +410,12 @@ def compute_folded_differential_xs(
     # Get cross sections (always needed for normalization)
     if mode in ("xs_only", "both"):
         folded_xs, unfolded_xs = fold_cross_section(
-            ace_data, target_energy_mev, mt, sigma_E_mev, config.n_sigma
+            ace_data, target_energy_mev, mt, sigma_E_mev
         )
     else:
         # angular_only: no XS folding
         _, unfolded_xs = fold_cross_section(
-            ace_data, target_energy_mev, mt, sigma_E_mev, config.n_sigma
+            ace_data, target_energy_mev, mt, sigma_E_mev
         )
         folded_xs = unfolded_xs
     
@@ -460,8 +426,7 @@ def compute_folded_differential_xs(
     if mode in ("angular_only", "both"):
         # Fold angular distribution
         _, angular_pdf, _ = fold_angular_distribution(
-            ace_data, target_energy_mev, mt, sigma_E_mev,
-            config.n_sigma, config.n_samples, num_mu_points
+            ace_data, target_energy_mev, mt, sigma_E_mev, num_mu_points
         )
     else:
         # xs_only: use unfolded angular distribution

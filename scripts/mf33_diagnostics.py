@@ -116,7 +116,6 @@ def fold_host_mf3_at_points(
     energies_mev: Sequence[float],
     tof_cache: Dict[str, Any],
     *,
-    n_nodes: int = 12,
     default_flight_path_m: float = 27.037,
     default_time_resolution_ns: float = 5.0,
     default_delta_t_is_fwhm: bool = True,
@@ -151,7 +150,7 @@ def fold_host_mf3_at_points(
         )
         sigma_e = compute_sigma_E(float(e_mev), tof, min_sigma_E_kev=min_sigma_E_kev)
         out[i] = fold_xs_over_resolution(
-            mf3_energy_ev, mf3_xs_b, float(e_mev), sigma_e, n_nodes=n_nodes,
+            mf3_energy_ev, mf3_xs_b, float(e_mev), sigma_e,
         )
     return out
 

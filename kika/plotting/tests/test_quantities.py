@@ -167,10 +167,26 @@ def test_an_unknown_source_says_so():
 
 
 def test_folding_averages_over_the_kernel():
-    # a linear function is its own Gaussian average
-    assert fold_in_energy(lambda e: np.array([2.0 * e]), 5.0, 0.5)[0] == pytest.approx(10.0)
-    # a quadratic picks up sigma^2
-    assert fold_in_energy(lambda e: np.array([e * e]), 5.0, 0.5)[0] == pytest.approx(25.25)
+    # a linear function is its own Gaussian average, whatever its grid
+    coarse = [np.linspace(0.0, 10.0, 11)]
+    assert fold_in_energy(lambda e: np.array([2.0 * e]), 5.0, 0.5,
+                          grids=coarse)[0] == pytest.approx(10.0, rel=1e-12)
+    # a quadratic picks up sigma^2, through its tabulation on the grid
+    fine = [np.linspace(0.0, 10.0, 20001)]
+    assert fold_in_energy(lambda e: np.array([e * e]), 5.0, 0.5,
+                          grids=fine)[0] == pytest.approx(25.25, rel=1e-7)
+
+
+def test_folding_sees_structure_between_fixed_nodes():
+    """A narrow peak on the grid: the fold must see it wherever it sits."""
+    grid = np.linspace(0.0, 10.0, 2001)
+    peak = 1.0 + 50.0 * np.exp(-0.5 * ((grid - 5.37) / 0.01) ** 2)
+    got = fold_in_energy(lambda e: np.array([np.interp(e, grid, peak)]), 5.0, 0.5,
+                         grids=[grid])[0]
+    t = np.linspace(0.5, 9.5, 2_000_001)
+    g = np.exp(-0.5 * ((t - 5.0) / 0.5) ** 2)
+    exact = np.trapezoid(np.interp(t, grid, peak) * g, t) / np.trapezoid(g, t)
+    assert got == pytest.approx(exact, rel=1e-6)
 
 
 # ---------------------------------------------------------------- EXFOR (synthetic set)

@@ -110,7 +110,6 @@ DEFAULT_TIME_RESOLUTION_NS = 5.0
 # read delta_t as a sigma; from run 82 it is a FWHM (sigma_E = FWHM/2.3548).
 # Passed explicitly because get_tof_parameters() now defaults it to True.
 DELTA_T_IS_FWHM            = True
-RESOLUTION_FOLD_NODES      = 12      # Gauss-Hermite nodes, only if the legacy fold method is asked for
 
 # Energy range for the analysis. EXFOR datapoints outside this window are
 # dropped at the precompute stage.
@@ -205,7 +204,6 @@ def build_rows_at_energy(
         for lib_key, lib in libraries.items():
             sigma_avg_b = fold_xs_over_resolution(
                 lib["e_mf3_ev"], lib["xs_mf3"], e_mev, sigma_E_mev,
-                n_nodes=RESOLUTION_FOLD_NODES,
             )
             if not np.isfinite(sigma_avg_b) or sigma_avg_b <= 0:
                 continue

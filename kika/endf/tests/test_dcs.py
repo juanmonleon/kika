@@ -743,11 +743,14 @@ class TestSigmaWeightedFold:
         return np.linspace(1.2e6, 1.4e6, 401)
 
     def test_weights_are_a_normalised_gaussian(self):
-        s = 3.0e3
+        """Exact for the lin-lin interpolant on the nodes, not for a smooth
+        function: (E - E0)^2 tabulated every h = 500 eV is a polygon whose
+        Gaussian average is s^2 + h^2/6, and that is what the weights give."""
+        s, h = 3.0e3, 500.0
         nodes, w = dcs.resolution_fold_nodes(self.E0, s, [self._grid()])
         assert w.sum() == pytest.approx(1.0)
         assert nodes @ w == pytest.approx(self.E0, rel=1e-9)
-        assert np.sqrt(((nodes - self.E0) ** 2) @ w) == pytest.approx(s, rel=1e-3)
+        assert ((nodes - self.E0) ** 2) @ w == pytest.approx(s * s + h * h / 6, rel=1e-6)
 
     def test_every_data_point_in_the_window_is_a_node(self):
         grid = self._grid()
