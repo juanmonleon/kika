@@ -105,3 +105,28 @@ def test_a_splice_of_an_unchanged_section_leaves_the_rest_byte_identical(
         return kept
 
     assert outside(out) == outside(source)
+
+
+@pytest.mark.parametrize("operation", ["mt", "mf"])
+def test_a_splice_into_a_75_column_tape_stays_75_columns(operation, tmp_path):
+    """The encoders write a sequence number; a tape without one must not gain it.
+
+    Built by cutting columns 76-80 off the micro-tape, because the committed
+    one is not a clean witness: its MF1/451 is 80 wide (a leftover of the
+    directory rebuild before it learned the width), so it measures as 80.
+    """
+    lines = PFNS.read_bytes().splitlines()
+    source = tmp_path / "source_75.endf"
+    source.write_bytes(b"".join(line[:75].rstrip(b"\r") + b"\n" for line in lines))
+    endf = read_endf(str(source), mf_numbers=[5])
+    out = tmp_path / "out.endf"
+
+    writer = ENDFWriter(str(source))
+    if operation == "mt":
+        assert writer.replace_mt_section(endf.mf[5].mt[18], mf_number=5,
+                                         output_filepath=str(out))
+    else:
+        assert writer.replace_mf_section(endf.mf[5], str(out))
+
+    widths = {len(line) for line in out.read_bytes().splitlines()}
+    assert max(widths) <= 75, f"record widths in the output: {sorted(widths)}"
