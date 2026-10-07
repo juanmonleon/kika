@@ -23,6 +23,7 @@ import numpy as np
 __all__ = [
     "gauss_hermite_nodes",
     "gaussian_fold_nodes",
+    "box_gaussian_fold_nodes",
     "fold_tabulated",
     "average_over_intervals",
 ]
@@ -124,6 +125,73 @@ def gaussian_fold_nodes(
     trap[:-1] += 0.5 * spans
     trap[1:] += 0.5 * spans
     weights = gauss * trap
+    return nodes, weights / weights.sum()
+
+
+def box_gaussian_fold_nodes(
+    lo: float,
+    hi: float,
+    sigma: float,
+    grids: Sequence[Sequence[float]] = (),
+    *,
+    half_width_sigmas: float = FOLD_HALF_WIDTH_SIGMAS,
+    n_uniform: int = FOLD_UNIFORM_POINTS,
+) -> tuple[np.ndarray, np.ndarray]:
+    r"""Nodes and normalised weights for a bin ``[lo, hi]`` read through a Gaussian.
+
+    What a histogram bin of a resolution-limited measurement averages over: an
+    event at true :math:`x` is recorded at :math:`x + \epsilon`,
+    :math:`\epsilon \sim N(0, \sigma^2)`, and lands in the bin with probability
+
+    .. math::
+        K(x) = \Phi\!\left(\frac{hi - x}{\sigma}\right)
+             - \Phi\!\left(\frac{lo - x}{\sigma}\right),
+
+    the box convolved with the Gaussian.  The weights are :math:`K` times the
+    trapezoid rule, normalised to sum to one, on the same kind of node set as
+    :func:`gaussian_fold_nodes`: every point of every grid inside
+    :math:`[lo - 5\sigma, hi + 5\sigma]`, the bin edges, the window edges and
+    ``n_uniform`` evenly spaced points.  The kernel is flat in :math:`x` inside the
+    bin -- whatever weights the bin's events (a flux, a detector efficiency) is
+    taken as constant across it.
+
+    The two limits are the readings that already exist: ``sigma <= 0`` is the
+    plain bin average (a box), and ``hi <= lo`` is :func:`gaussian_fold_nodes`
+    at ``lo``.  Both collapse to the single point ``lo`` when both are degenerate.
+    """
+    lo, hi, s = float(lo), float(hi), float(sigma)
+    if not (hi > lo):
+        return gaussian_fold_nodes(lo, s, grids, half_width_sigmas=half_width_sigmas,
+                                   n_uniform=n_uniform)
+    smear = half_width_sigmas * s if s > 0.0 else 0.0
+    a, b = lo - smear, hi + smear
+    parts = [np.linspace(a, b, max(int(n_uniform), 2)), np.array([lo, hi])]
+    for grid in grids:
+        g = np.asarray(grid, dtype=float)
+        if g.size:
+            i0 = int(np.searchsorted(g, a, side="right"))
+            i1 = int(np.searchsorted(g, b, side="left"))
+            parts.append(g[i0:i1])
+    nodes = np.unique(np.concatenate(parts))
+
+    if s > 0.0:
+        from scipy.special import ndtr
+
+        kernel = ndtr((hi - nodes) / s) - ndtr((lo - nodes) / s)
+    else:
+        kernel = ((nodes >= lo) & (nodes <= hi)).astype(float)
+    spans = np.diff(nodes)
+    trap = np.zeros_like(nodes)
+    if s > 0.0:
+        trap[:-1] += 0.5 * spans
+        trap[1:] += 0.5 * spans
+    else:
+        # A box has jumps at its edges: integrate only the spans inside it, so the
+        # trapezoid does not leak half a span past each edge.
+        inside = (nodes[:-1] >= lo) & (nodes[1:] <= hi)
+        trap[:-1] += np.where(inside, 0.5 * spans, 0.0)
+        trap[1:] += np.where(inside, 0.5 * spans, 0.0)
+    weights = kernel * trap
     return nodes, weights / weights.sum()
 
 
