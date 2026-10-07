@@ -42,11 +42,13 @@ def panel_value(x1, y1, x2, y2, law, q) -> np.ndarray:
     """
     x1, y1, x2, y2, q = np.broadcast_arrays(*(np.asarray(a, dtype=float)
                                               for a in (x1, y1, x2, y2, q)))
-    law = np.broadcast_to(np.asarray(law, dtype=np.int64), q.shape)
+    law = np.asarray(law, dtype=np.int64)
+    codes = (np.unique(law) if law.ndim else [int(law)])
+    law = np.broadcast_to(law, q.shape)
     out = np.empty(q.shape, dtype=float)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        for code in np.unique(law):
-            m = law == code
+        for code in codes:
+            m = slice(None) if len(codes) == 1 else law == code
             a1, b1, a2, b2, t = x1[m], y1[m], x2[m], y2[m], q[m]
             if code == HISTOGRAM:
                 out[m] = b1
@@ -98,6 +100,12 @@ def _read(x, y, laws, q, side: str, outside: str):
 
     if inside.any() and x.size == 1:
         out[inside] = y[0]
+    elif inside.any() and side == "point" and laws.min() == laws.max() == LINLIN:
+        # np.interp is this same arithmetic (see panel_value), right-continuous
+        # at a repeated abscissa and exact at the nodes, and it binary-searches
+        # with a hint -- several times faster on the sorted queries most
+        # callers make.
+        out[inside] = np.interp(flat[inside], x, y)
     elif inside.any():
         p = flat[inside]
         if side == "left":
