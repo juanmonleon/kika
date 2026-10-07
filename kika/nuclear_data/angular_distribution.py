@@ -519,7 +519,8 @@ class AngularDistribution:
     def project_to_legendre(self, max_order: int = 6) -> None:
         """Fit Legendre coefficients from tabulated PDF data.
 
-        Uses Gauss-Legendre quadrature to compute the Legendre moments:
+        Computes the Legendre moments exactly on the lin-lin table
+        (:func:`kika.algebra.legendre_coefficients`):
             a_l = integral f(mu) P_l(mu) dmu
 
         normalised so a_0 = 1.0. This is the ENDF MF4 convention,
@@ -548,42 +549,19 @@ class AngularDistribution:
         pdf_list = self.tabulated_data["probabilities"]
         n_energies = len(cosines_list)
 
-        # Gauss-Legendre quadrature nodes and weights
-        n_quad = max(64, 2 * max_order + 1)
-        quad_nodes, quad_weights = np.polynomial.legendre.leggauss(n_quad)
-
-        # Pre-compute Legendre polynomials at quadrature nodes
-        leg_at_nodes = np.zeros((max_order + 1, n_quad))
-        for l in range(max_order + 1):
-            c = np.zeros(l + 1)
-            c[l] = 1.0
-            leg_at_nodes[l] = np.polynomial.legendre.legval(quad_nodes, c)
+        from kika.algebra import LINLIN, legendre_coefficients
 
         coefficients: Dict[int, np.ndarray] = {
             l: np.zeros(n_energies, dtype=float) for l in range(max_order + 1)
         }
-
         for i in range(n_energies):
-            cos_pts = np.asarray(cosines_list[i], dtype=float)
-            pdf_pts = np.asarray(pdf_list[i], dtype=float)
-
-            # Interpolate tabulated PDF onto quadrature nodes
-            pdf_at_nodes = np.interp(quad_nodes, cos_pts, pdf_pts)
-
-            # Legendre moments a_l = int f(mu) P_l(mu) dmu, the ENDF convention
-            # that _evaluate_pdf_legendre inverts with (2l+1)/2 a_l P_l. This
-            # used to carry a (2l+1)/2 factor as well, which the a_0 normalisation
-            # turned into (2l+1) a_l: a_1 three times too large, a_2 five, and a
-            # PDF rebuilt from them that no longer matched the table it came from.
-            raw = np.zeros(max_order + 1)
-            for l in range(max_order + 1):
-                raw[l] = np.sum(quad_weights * pdf_at_nodes * leg_at_nodes[l])
-
-            # Normalise so a_0 = 1.0 (removes the table's own normalisation error)
-            if abs(raw[0]) > 1e-30:
-                raw /= raw[0]
+            # Read lin-lin and held at its ends, as np.interp read it; the
+            # moments are exact on that (they were a 64-node Gauss-Legendre
+            # rule over the whole of [-1, 1], blind to the table's kinks).
+            raw = legendre_coefficients(np.asarray(cosines_list[i], dtype=float),
+                                        np.asarray(pdf_list[i], dtype=float),
+                                        LINLIN, max_order)
             raw[0] = 1.0
-
             for l in range(max_order + 1):
                 coefficients[l][i] = raw[l]
 

@@ -84,7 +84,7 @@ class Function2d(ABC):
     # numbers had none of them, so the PFNS applier had to be written against
     # the ENDF class and the perturbation became a property of ENDF. These are
     # those four on the node, spelled the model's way, and the arithmetic under
-    # them is the one :mod:`kika.processing.panel_integrals` gives the ENDF
+    # them is the one :mod:`kika.algebra` gives the ENDF
     # class -- so the two integrate identically by construction rather than by
     # agreement.
     #
@@ -302,8 +302,6 @@ class XYs2d(Function2d):
         shift in a zero-perturbation run, which is precisely the defect such a
         run exists to rule out.
         """
-        from .integration import evaluateExactly
-
         outer = np.asarray(self.outerDomainValues, dtype=float)
         if outer.size == 0:
             return np.empty(0), np.empty(0)
@@ -321,11 +319,17 @@ class XYs2d(Function2d):
             xs, ys = self.table(lower)
             return xs.copy(), ys.copy()
 
-        xLow, _ = self.table(lower)
-        xHigh, _ = self.table(upper)
-        union = np.union1d(xLow, xHigh)
-        low = evaluateExactly(self.function1ds[lower], union)
-        high = evaluateExactly(self.function1ds[upper], union)
+        from kika.algebra import sample_on_union, union as unionOf
+
+        from .integration import tabulateFunction1d
+
+        tLow = tabulateFunction1d(self.function1ds[lower])
+        tHigh = tabulateFunction1d(self.function1ds[upper])
+        # A repeated abscissa is a step of a child; the union keeps it twice
+        # and each copy reads its own one-sided limit (np.union1d dropped one).
+        union = unionOf([tLow[0], tHigh[0]])
+        low = sample_on_union(*tLow, union)
+        high = sample_on_union(*tHigh, union)
         weight = (value - outer[lower]) / (outer[upper] - outer[lower])
         return union, low + weight * (high - low)
 

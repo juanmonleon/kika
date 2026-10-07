@@ -14,14 +14,14 @@ format class happened to need one.
 ``group_integrals``, ``normalisation``, ``table``, ``replace_table`` — which is
 why perturbing MF5 was format work by construction. These functions and the
 2-d methods that use them are what moves that capability onto the model; the
-arithmetic underneath is :mod:`kika.processing.panel_integrals`, the same
-functions the ENDF class calls, so the two cannot drift.
+arithmetic underneath is :mod:`kika.algebra`, the same functions the ENDF
+class calls, so the two cannot drift.
 
-**Exact, or it raises.** Only histogram and lin-lin panels have a closed-form
-group integral here, and the whole normalisation argument of a PFNS draw rests
-on the integral being the evaluator's own rather than a quadrature of it. A
-log-interpolated panel therefore raises rather than being approximated — see
-:data:`kika.processing.panel_integrals.EXACT_INT_CODES`.
+**Exact under every law.** The whole normalisation argument of a PFNS draw
+rests on the integral being the evaluator's own rather than a quadrature of it.
+Each of the five laws integrates in closed form (:mod:`kika.algebra.integrate`);
+until 7-oct-2026 only histogram and lin-lin did, and a log-interpolated table
+was refused.
 """
 from __future__ import annotations
 
@@ -30,11 +30,9 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ....processing.panel_integrals import (cumulative_integral, evaluate_table,
-                                            exact_segment_codes, integral_to)
+from ....algebra import group_integrals, integral, interval_laws
 
-__all__ = ["tabulateFunction1d", "integrateFunction1d", "groupIntegralsOf",
-           "evaluateExactly"]
+__all__ = ["tabulateFunction1d", "integrateFunction1d", "groupIntegralsOf"]
 
 
 def tabulateFunction1d(function1d, what: str = "") -> Tuple[np.ndarray, np.ndarray,
@@ -59,7 +57,7 @@ def tabulateFunction1d(function1d, what: str = "") -> Tuple[np.ndarray, np.ndarr
     xs, ys, pairs = toRegions()
     xs = np.asarray(xs, dtype=float)
     ys = np.asarray(ys, dtype=float)
-    return xs, ys, exact_segment_codes(xs, pairs, what)
+    return xs, ys, interval_laws(xs.size, pairs)
 
 
 def integrateFunction1d(function1d, domainMin: Optional[float] = None,
@@ -73,46 +71,19 @@ def integrateFunction1d(function1d, domainMin: Optional[float] = None,
     there, it is not merely unknown.
     """
     xs, ys, codes = tabulateFunction1d(function1d, what)
-    if xs.size < 2:
-        return 0.0
-    cumulative = cumulative_integral(xs, ys, codes)
-    lo = float(xs[0]) if domainMin is None else float(domainMin)
-    hi = float(xs[-1]) if domainMax is None else float(domainMax)
-    if hi <= lo:
-        return 0.0
-    return (integral_to(xs, ys, codes, cumulative, hi)
-            - integral_to(xs, ys, codes, cumulative, lo))
+    return integral(xs, ys, codes, domainMin, domainMax)
 
 
 def groupIntegralsOf(function1d, boundaries: ArrayLike,
                      what: str = "") -> np.ndarray:
     """``P_j = int_{g_j}^{g_j+1} f`` for every group of *boundaries*.
 
-    One cumulative integral for the whole table rather than one per group, and
-    the limits are clipped into the table's own panels rather than the grid
-    being refined first. That is what makes ``P_j`` the same number the
+    Each edge cuts its panel into two of the same law, valued by that law, so
+    nothing is sampled (:func:`kika.algebra.group_integrals`). That is what
+    makes ``P_j`` the same number the
     evaluator's own integral gives — which matters here because it is the
     quantity an MF35 matrix is the covariance *of*, not a discretisation of it.
     """
     xs, ys, codes = tabulateFunction1d(function1d, what)
-    edges = np.asarray(boundaries, dtype=float)
-    if xs.size < 2:
-        return np.zeros(max(edges.size - 1, 0), dtype=float)
-    cumulative = cumulative_integral(xs, ys, codes)
-    totals = np.array([integral_to(xs, ys, codes, cumulative, edge)
-                       for edge in edges], dtype=float)
-    return np.diff(totals)
+    return group_integrals(xs, ys, codes, boundaries)
 
-
-def evaluateExactly(function1d, points: ArrayLike, what: str = "") -> np.ndarray:
-    """*function1d* at *points*, zero outside its own support.
-
-    :meth:`XYs1d.evaluate` answers the same question through
-    :func:`kika.processing.interpolation.interpolate_1d`, which is the general
-    interpolator and knows every law. This one is restricted to the two laws
-    that refine exactly, and it exists so that a node inserted into a table by
-    the same arithmetic that integrates it cannot disagree with the integral by
-    a rounding of a different code path.
-    """
-    xs, ys, codes = tabulateFunction1d(function1d, what)
-    return evaluate_table(xs, ys, codes, np.asarray(points, dtype=float))

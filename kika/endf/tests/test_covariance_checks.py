@@ -246,10 +246,10 @@ def test_mf34_sigma_wider_than_the_physical_range_of_a_l():
         mt1=2, nl=1, nl1=1, mat1=0,
         sub_subsections=[SubSubsection(l=1, l1=1, lct=1, ni=1, records=[rec])]))
     mf4 = MF(number=4)
-    mf4.add_section(SimpleNamespace(
+    mf4.add_section(SimpleNamespace(  # a_1 = 0.1 at every energy
         number=2,
-        extract_legendre_coefficients=lambda e, max_legendre_order, out_of_range:
-            {1: np.full(np.size(e), 0.1)}))
+        legendre_cell_averages=lambda edges, order: {order: np.full(len(edges) - 1, 0.1)},
+        legendre_cell_min_abs=lambda edges, order: np.full(len(edges) - 1, 0.1)))
     f = _only(check_covariances(_tape(sec34, mf_number=34, files=[mf4])),
               "variance_exceeds_physical_bound")
     assert f.level == DEFECT  # |a_l| <= 1 caps sigma at 1 (Popoviciu)

@@ -27,6 +27,10 @@ from ..utils import (
     record_width,
 )
 from ..._constants import MF3_SUM_ORDER, MF3_SUM_RULES
+from ..._records import round_to_endf_field
+from ...algebra import (add, interval_laws, sample_on_union, union)
+from ...algebra.arithmetic import domain_steps
+from ...algebra.refine import LINEARIZATION_TOLERANCE as TABLE_LINEARIZATION_TOLERANCE
 from ...utils import get_endf_logger
 
 logger = get_endf_logger(__name__)
@@ -90,12 +94,24 @@ class RedundantUpdate:
     #: How far the *original* file was from satisfying this sum rule, when a
     #: baseline was supplied. ``None`` when it was not, or could not be tested.
     baseline_deviation: Optional[float] = None
+    #: Partials stated on a non-lin-lin law somewhere, re-expressed as lin-lin
+    #: (to ``linearize_tolerance``) before summing. Only filled on a rebuild.
+    linearized: Tuple[int, ...] = ()
+    #: Partials that end at a non-zero value inside the range of the sum, and
+    #: therefore contribute a step to it there. Only filled on a rebuild.
+    edge_steps: Tuple[int, ...] = ()
 
     def describe(self) -> str:
         if self.status == "updated":
-            return (f"MT{self.mt} rebuilt from {len(self.components)} partials "
+            text = (f"MT{self.mt} rebuilt from {len(self.components)} partials "
                     f"({self.points_before} -> {self.points_after} points, "
                     f"max change {self.max_rel_change:.3%})")
+            if self.linearized:
+                text += f"; linearised MT{', MT'.join(map(str, self.linearized))}"
+            if self.edge_steps:
+                text += (f"; step at the edge of "
+                         f"MT{', MT'.join(map(str, self.edge_steps))}")
+            return text
         return f"MT{self.mt} {self.status}: {self.reason}"
 
 
@@ -146,74 +162,83 @@ def resolve_sum_components(mt: int, present: Iterable[int]) -> Tuple[int, ...]:
 # Summation on a union grid
 # ---------------------------------------------------------------------------
 
-def _union_grid(grids: Sequence[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
-    """Union of ENDF energy grids, keeping repeated energies.
+def _as_written(energies: np.ndarray) -> np.ndarray:
+    """*energies* as the TAB1 writer will put them on the tape, and read back.
 
-    A repeated energy is a step discontinuity in sigma, not a duplicate to be
-    tidied away: the two entries carry the left and right limits. ``np.unique``
-    would collapse the pair and turn the step into a ramp across the whole
-    neighbouring interval, which is a real change to the cross section.
-
-    Returns the grid and, for each of its points, the 0-based index of that
-    point among the repeats of its own energy.
+    Eleven columns hold seven significant digits, so at 1 MeV an energy is
+    stored to the nearest eV. A node the linearisation adds has to be valued
+    at *that* energy, not at the one it computed.
     """
-    values = np.unique(np.concatenate(grids))
-    multiplicity = np.ones(values.size, dtype=int)
-    for grid in grids:
-        seen, counts = np.unique(grid, return_counts=True)
-        np.maximum.at(multiplicity, np.searchsorted(values, seen), counts)
-
-    expanded = np.repeat(values, multiplicity)
-    starts = np.repeat(np.cumsum(multiplicity) - multiplicity, multiplicity)
-    return expanded, np.arange(expanded.size) - starts
+    return round_to_endf_field(energies)
 
 
-def _evaluate(section: MF3MT, grid: np.ndarray, occurrence: np.ndarray) -> np.ndarray:
-    """Sigma of *section* over *grid*, zero outside its own energy range.
-
-    Points of *grid* that the section carries verbatim are taken verbatim
-    rather than interpolated, which is what makes a repeated energy come out
-    right: where the section repeats it too, its k-th entry answers the k-th
-    repeat, so its discontinuity survives into the sum. Where the section does
-    not repeat it, that energy is a continuity point of this partial and every
-    repeat gets the same value.
-    """
+def _table(section: MF3MT):
+    """``(energies, values, laws)`` of a section, one law per interval."""
     energies = np.asarray(section.energies, dtype=float)
-    values = np.asarray(section.cross_sections, dtype=float)
-    out = np.asarray(
-        section.get_cross_section(grid, out_of_range="zero"), dtype=float
-    ).copy()
-    if energies.size == 0:
-        return out
+    return (energies, np.asarray(section.cross_sections, dtype=float),
+            interval_laws(energies.size, section.energy_interpolation))
 
-    lo = np.searchsorted(energies, grid, side="left")
-    hi = np.searchsorted(energies, grid, side="right")
-    repeats = hi - lo
-    exact = repeats > 0
-    if exact.any():
-        idx = lo + np.minimum(occurrence, np.maximum(repeats - 1, 0))
-        np.clip(idx, 0, energies.size - 1, out=idx)
-        out[exact] = values[idx[exact]]
-    return out
+
+def _evaluate(section, grid: np.ndarray) -> np.ndarray:
+    """Sigma of *section* over a union *grid*, zero outside its own range.
+
+    *section* is an :class:`MF3MT` or an ``(energies, values, laws)`` table. An
+    energy the grid repeats is a step of the sum: its first copy gets the
+    section's left limit and its last the right one, so the section's own
+    discontinuities -- and the edges of its range, where it drops to zero --
+    survive into the sum. See :func:`kika.algebra.sample_on_union`.
+    """
+    table = _table(section) if isinstance(section, MF3MT) else section
+    return sample_on_union(*table, grid)
 
 
 def _sum_partials(
     sections: Dict[int, MF3MT],
     components: Sequence[int],
     extra_grids: Sequence[np.ndarray] = (),
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    *,
+    faithful: bool = False,
+    linearize_tolerance: float = TABLE_LINEARIZATION_TOLERANCE,
+    notes: Optional[Dict[int, List[str]]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
     """Sum *components* onto the union of their grids (plus *extra_grids*).
 
-    Returns the grid, its per-energy repeat indices, and the summed values.
-    """
-    grids = [np.asarray(sections[mt].energies, dtype=float) for mt in components]
-    grids.extend(g for g in extra_grids if len(g))
-    grid, occurrence = _union_grid(grids)
+    Returns the grid and the summed values.
 
-    total = np.zeros(grid.size, dtype=float)
-    for mt in components:
-        total += _evaluate(sections[mt], grid, occurrence)
-    return grid, occurrence, total
+    ``faithful=False`` sums the sections as they stand, at the nodes, which
+    answers "do the nodes already agree?" and is all the unchanged and baseline
+    checks need. ``faithful=True`` is :func:`kika.algebra.add`: every partial is
+    re-expressed lin-lin to *linearize_tolerance* (each added energy valued
+    where the eleven-column float will put it, :func:`_as_written`) and a
+    partial that ends at a non-zero value inside the range of the sum steps
+    there, so that the result, written lin-lin, *is* the sum between the nodes
+    too. That is the one a rewrite must use. *notes*, when given, collects by
+    MT which partials had to be linearised (``'linearized'``) and which put a
+    step at an edge (``'edge_step'``).
+    """
+    own = [np.asarray(g, dtype=float) for g in extra_grids if len(g)]
+    tables = {mt: _table(sections[mt]) for mt in components}
+    if not faithful:
+        grid = union([t[0] for t in tables.values()] + own)
+        total = np.zeros(grid.size, dtype=float)
+        for table in tables.values():
+            total += _evaluate(table, grid)
+        return grid, total
+
+    if notes is not None:
+        spans = [t[0] for t in tables.values() if t[0].size] + own
+        lo = min(float(g[0]) for g in spans) if spans else 0.0
+        hi = max(float(g[-1]) for g in spans) if spans else 0.0
+        for mt, (energies, values, laws) in tables.items():
+            done = []
+            if np.any(laws != 2):
+                done.append("linearized")
+            if domain_steps(energies, values, lo, hi):
+                done.append("edge_step")
+            if done:
+                notes[mt] = done
+    return add(list(tables.values()), tol=linearize_tolerance, snap=_as_written,
+               grids=own)
 
 
 def _relative_deviation(reference: np.ndarray, candidate: np.ndarray) -> float:
@@ -306,16 +331,22 @@ def recompute_redundant_mf3(
     protected_mts: Iterable[int] = (),
     baseline_content: Optional[str] = None,
     tolerance: float = DEFAULT_TOLERANCE,
+    linearize_tolerance: float = TABLE_LINEARIZATION_TOLERANCE,
 ) -> Tuple[str, List[RedundantUpdate]]:
     """Rebuild the MF3 summation cross sections that an edit has invalidated.
 
     Each redundant MT is resummed from the partials the file actually carries,
     onto the union of their energy grids *and its own*. Keeping its own grid
     costs a few points and means the rewrite can never drop energies the
-    evaluator put there -- which matters when a partial interpolates
-    logarithmically, since the sum of a log-log and a lin-lin partial is not
-    exactly representable in either and the evaluator's extra points are what
-    carries the accuracy.
+    evaluator put there.
+
+    The rebuilt section is lin-lin over one region, so it is summed from
+    partials re-expressed as lin-lin first: a partial on log-log is refined to
+    *linearize_tolerance*, and a partial that ends at a non-zero value inside
+    the range of the sum contributes a step there (a repeated energy) rather
+    than a ramp. See :func:`_sum_partials`. The checks that decide whether
+    to rebuild at all compare the sections as they stand, node by node, so a
+    tape nobody edited still comes back byte for byte.
 
     Parameters
     ----------
@@ -338,6 +369,9 @@ def recompute_redundant_mf3(
         than having its total quietly replaced by a sum over whatever survived.
     tolerance : float
         Relative agreement required of that baseline check.
+    linearize_tolerance : float
+        Relative accuracy to which a partial stated on a log law is
+        re-expressed as lin-lin before it is summed.
 
     Returns
     -------
@@ -407,10 +441,10 @@ def recompute_redundant_mf3(
 
         section = sections[mt]
         old_energies = np.asarray(section.energies, dtype=float)
-        grid, occurrence, total = _sum_partials(
+        grid, total = _sum_partials(
             sections, components, extra_grids=[old_energies])
 
-        previous = (_evaluate(section, grid, occurrence) if old_energies.size
+        previous = (_evaluate(section, grid) if old_energies.size
                     else np.zeros_like(total))
         change = _relative_deviation(previous, total)
 
@@ -422,6 +456,14 @@ def recompute_redundant_mf3(
                 reason="already equal to the sum of its partials",
             ))
             continue
+
+        notes: Dict[int, List[str]] = {}
+        grid, total = _sum_partials(
+            sections, components, extra_grids=[old_energies], faithful=True,
+            linearize_tolerance=linearize_tolerance, notes=notes)
+        previous = (_evaluate(section, grid) if old_energies.size
+                    else np.zeros_like(total))
+        change = _relative_deviation(previous, total)
 
         section._energies = [float(e) for e in grid]
         section._cross_sections = [float(v) for v in total]
@@ -435,6 +477,8 @@ def recompute_redundant_mf3(
             mt=mt, status="updated", components=components,
             points_before=int(old_energies.size), points_after=int(grid.size),
             max_rel_change=change, baseline_deviation=deviation,
+            linearized=tuple(m for m, done in notes.items() if "linearized" in done),
+            edge_steps=tuple(m for m, done in notes.items() if "edge_step" in done),
         ))
         logger.debug(updates[-1].describe())
 
@@ -479,6 +523,6 @@ def _baseline_deviation(baseline: Dict[int, MF3MT], mt: int) -> Optional[float]:
     if not components:
         return None
     own = np.asarray(baseline[mt].energies, dtype=float)
-    grid, occurrence, total = _sum_partials(baseline, components, extra_grids=[own])
-    reference = _evaluate(baseline[mt], grid, occurrence)
+    grid, total = _sum_partials(baseline, components, extra_grids=[own])
+    reference = _evaluate(baseline[mt], grid)
     return _relative_deviation(reference, total)

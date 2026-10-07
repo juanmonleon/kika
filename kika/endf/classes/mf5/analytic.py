@@ -44,14 +44,8 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ...utils import interp_energy_values, segment_int_codes
-from .partials import (
-    MF5PartialRaw,
-    cumulative_integral,
-    evaluate_table,
-    exact_segment_codes,
-    integral_to,
-)
+from ....algebra import evaluate, integral, interval_laws
+from .partials import MF5PartialRaw
 
 #: Points in the display grid a law builds for itself when the caller does not
 #: supply one. Only ever a rendering choice -- an analytic law has no grid of
@@ -67,30 +61,14 @@ def tab1_at(x: Sequence[float], y: Sequence[float],
             interp: Sequence[Tuple[int, int]], at: float) -> float:
     """A TAB1 evaluated at one abscissa, under its own INT codes.
 
-    Uses the library's generic ENDF interpolators rather than the exact-panel
-    pair in :mod:`~kika.endf.classes.mf5.partials`, and the difference is
-    deliberate: theta(E), a(E) and b(E) are only ever *evaluated*, so all five
-    INT codes are fine, while g(x) is *integrated* and so is held to the two
-    codes that integrate exactly.
+    Outside the table the end value is held. Every one of the five laws is
+    evaluated, and integrated, in closed form by :mod:`kika.algebra`.
     """
     xs = np.asarray(x, dtype=float)
-    ys = np.asarray(y, dtype=float)
     if xs.size == 0:
         raise ValueError("cannot evaluate an empty TAB1")
-    if xs.size == 1 or at <= xs[0]:
-        return float(ys[0])
-    if at >= xs[-1]:
-        return float(ys[-1])
-
-    codes = segment_int_codes(xs.size, list(interp))
-    i = int(np.searchsorted(xs, at, side="right")) - 1
-    i = min(max(i, 0), xs.size - 2)
-    value = interp_energy_values(
-        float(xs[i]), np.array([ys[i]]),
-        float(xs[i + 1]), np.array([ys[i + 1]]),
-        float(at), int(codes[i]),
-    )
-    return float(value[0])
+    return float(evaluate(xs, y, interval_laws(xs.size, list(interp)), float(at),
+                          outside="hold"))
 
 
 @dataclass
@@ -219,7 +197,7 @@ class MF5GeneralEvaporation(MF5PartialAnalytic):
                        self.theta_interp, energy)
 
     def _g_codes(self) -> np.ndarray:
-        return exact_segment_codes(self.g_x, self.g_interp, "MF5 LF=5 g(x)")
+        return interval_laws(len(self.g_x), self.g_interp)
 
     def shape(self, energy: float, e_out: np.ndarray) -> np.ndarray:
         theta = self.theta(energy)
@@ -230,7 +208,7 @@ class MF5GeneralEvaporation(MF5PartialAnalytic):
         gy = np.asarray(self.g_values, dtype=float)
         if gx.size < 2:
             return np.zeros(np.shape(e_out), dtype=float)
-        return evaluate_table(gx, gy, self._g_codes(), x) / theta
+        return evaluate(gx, gy, self._g_codes(), x) / theta
 
     def normalisation_at(self, energy: float) -> float:
         """``int_0^(E-U) g(E'/theta)/theta dE'`` = ``int_0^{(E-U)/theta} g dx``.
@@ -247,9 +225,7 @@ class MF5GeneralEvaporation(MF5PartialAnalytic):
         gy = np.asarray(self.g_values, dtype=float)
         if gx.size < 2:
             return 0.0
-        codes = self._g_codes()
-        cumulative = cumulative_integral(gx, gy, codes)
-        return integral_to(gx, gy, codes, cumulative, hi / theta)
+        return integral(gx, gy, self._g_codes(), gx[0], hi / theta)
 
     def default_grid(self, energy: float,
                      n_points: int = DEFAULT_GRID_POINTS) -> np.ndarray:

@@ -244,6 +244,8 @@ def _stub_partial_sources(monkeypatch, xs_by_mt, cov_by_mt, grid_ev):
     class _Sec:
         energies: np.ndarray
         cross_sections: np.ndarray
+        # A PENDF section states its laws like any MF3 one; RECONR's is lin-lin.
+        energy_interpolation: tuple = ()
 
     def _sections(_path):
         # Piecewise-constant per group, sampled just inside each edge so the

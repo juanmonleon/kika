@@ -309,7 +309,10 @@ def test_a_set_puts_its_realisation_beside_the_evaluated_form():
                            binEdges={XS2: edges})
     diagnostics = pset.applyToSuite(suite)
 
-    assert set(diagnostics) == {XS2}
+    # MT1 comes back too: on this tape it is the sum of MT2 and MT102, so MT2
+    # moving re-derives it (kika.sampling.cross_section_sums).
+    assert set(diagnostics) == {XS2, ComponentKey(26056, 33, 1)}
+    assert diagnostics[ComponentKey(26056, 33, 1)]["rederived_from"] == (2,)
     reaction = suite.reactionByENDF_MT(2)
     assert EVAL_LABEL in reaction.crossSection
     assert "realization-0007" in reaction.crossSection
@@ -320,9 +323,10 @@ def test_a_set_puts_its_realisation_beside_the_evaluated_form():
     assert diagnostics[XS2]["n_inserted"] == realised[0].size - evaluated[0].size
     assert diagnostics[XS2]["max_factor"] == pytest.approx(1.25)
 
-    # And the untouched reactions are untouched, not quietly perturbed by one.
-    for mt in (1, 102):
-        assert "realization-0007" not in suite.reactionByENDF_MT(mt).crossSection
+    # And the untouched reaction is untouched, not quietly perturbed by one;
+    # MT1, the sum above it, is the one that carries a re-derived form.
+    assert "realization-0007" not in suite.reactionByENDF_MT(102).crossSection
+    assert "realization-0007" in suite.reactionByENDF_MT(1).crossSection
 
 
 # ---------------------------------------------------------------------------

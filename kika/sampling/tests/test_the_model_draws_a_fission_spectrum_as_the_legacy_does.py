@@ -195,8 +195,11 @@ def test_the_run_says_the_covariance_was_not_moved(tmp_path):
 
 
 def test_a_run_without_a_spectrum_does_not_claim_one(tmp_path):
+    # NJOY cannot read the section-sliced micro-tape, so its resonance region
+    # is perturbed as stated; this test is about MF35's metadata.
     perturbFromModel(str(DATA / "micro_fe56_xs_and_angular.endf"), {33: None}, nSamples=1,
-                     seed=5, outputDir=tmp_path, formats=("endf-delta",))
+                     seed=5, outputDir=tmp_path, formats=("endf-delta",),
+                     resonanceRegion="evaluated")
     payload = json.loads((tmp_path / "run_metadata.json").read_text("utf-8"))
     assert "mf35_unchanged" not in payload
 

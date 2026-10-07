@@ -162,10 +162,19 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl")
 #: __init__.py`` star-imported, so importing the package paid for 1553 lines and
 #: a DeprecationWarning that no caller ever wanted. The note stays because the
 #: lesson above is about the shape of the import, not about the file.
+#:
+#: ``nuclear_data/forward.py`` (1) — the elastic forward operator of the G4NDL
+#: roadmap's phase 12 (October 2026), deferred to call time. It is
+#: ``cos_cm_from_cos_lab`` and ``jacobian_cm_to_lab`` from ``kika.endf.dcs``:
+#: two-body kinematics, which are not ENDF's property, living in the format
+#: package -- the same species as ``legacy_mg_plotting.py``'s helper. The fix is
+#: to move them down and leave ``kika.endf.dcs`` re-exporting them; until then
+#: the entry is written down rather than a fourth copy written out.
 RUNTIME_ALLOWLIST: dict[str, int] = {
     "kika/cov/legendre_covariance.py": 4,
     "kika/nuclear_data/angular_distribution.py": 13,
     "kika/nuclear_data/cross_section.py": 3,
+    "kika/nuclear_data/forward.py": 1,
     "kika/nuclear_data/nuclide_info.py": 2,
     "kika/nuclear_data/resonance_parameters.py": 2,
     "kika/processing/derived_covariance.py": 1,

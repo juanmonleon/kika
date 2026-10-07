@@ -868,8 +868,11 @@ class MF34MT(MT):
         """Extract cell-averaged Legendre coefficients from MF4 onto MF34 energy grids.
 
         For each unique (reaction, l_order) found in the covariance matrices,
-        compute ā_l per energy cell via trapezoidal integration of the
-        pointwise a_l(E) returned by ``mf4_data.mt[reaction].extract_legendre_coefficients()``.
+        the exact mean of a_l over every energy cell:
+        ``mf4_data.mt[reaction].legendre_cell_averages`` integrates the table
+        a_l(E) is in incident energy, under its own laws. Five sampled points
+        per cell used to stand in for it and missed the resonance structure of
+        a_1 by up to 0.13 (JEFF-4.0 Fe-56 elastic, 0.65-0.75 MeV).
         Results are stored in ``ang_covmat.legendre_coefficients[(isotope, reaction, l)]``.
         """
         if not hasattr(mf4_data, 'mt'):
@@ -886,7 +889,7 @@ class MF34MT(MT):
             if reaction not in mf4_data.mt:
                 continue
             mf4_mt = mf4_data.mt[reaction]
-            if not hasattr(mf4_mt, 'extract_legendre_coefficients'):
+            if not hasattr(mf4_mt, 'legendre_cell_averages'):
                 continue
 
             grid = np.asarray(ang_covmat.energy_grids[grid_idx], dtype=float)
@@ -894,22 +897,7 @@ class MF34MT(MT):
             if n_cells < 1:
                 continue
 
-            # Build all sub-grid energies at once (5 points per cell)
-            n_sub = 5
-            sub_e_2d = np.column_stack(
-                [np.linspace(grid[c], grid[c + 1], n_sub) for c in range(n_cells)]
-            ).T  # shape (n_cells, n_sub)
-
-            # ONE call with all energies flattened
-            coeffs_dict = mf4_mt.extract_legendre_coefficients(
-                sub_e_2d.ravel(), max_legendre_order=l_order, out_of_range='zero',
-            )
-
-            if l_order in coeffs_dict:
-                vals_2d = np.asarray(coeffs_dict[l_order], dtype=float).reshape(n_cells, n_sub)
-                cell_avg = np.trapezoid(vals_2d, sub_e_2d, axis=1) / (grid[1:] - grid[:-1])
-            else:
-                cell_avg = np.zeros(n_cells, dtype=float)
+            cell_avg = mf4_mt.legendre_cell_averages(grid, l_order)[l_order]
 
             ang_covmat.legendre_coefficients[(isotope, reaction, l_order)] = cell_avg
 

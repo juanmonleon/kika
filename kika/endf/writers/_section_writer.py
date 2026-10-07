@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from ..utils import record_width
+from ..utils import line_ending, record_width
 
 
 def _find_mf_boundaries(
@@ -161,6 +161,7 @@ def write_mf_section_to_file(
 
     with open(source_endf, 'r') as f:
         lines = f.readlines()
+    newline = line_ending(source_endf)
 
     block_start, block_end = _find_mf_boundaries(lines, mf_number)
     has_block = block_start is not None
@@ -212,7 +213,7 @@ def write_mf_section_to_file(
         head, tail, extra = insert_idx, insert_idx, (format_endf_fend_record(mat_num) + '\n',)
 
     # streamed, so the spliced tape never exists in memory as a second list of lines
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', newline=newline) as f:
         f.writelines(lines[:head])
         for _ln in _section_lines():
             f.write(_ln)

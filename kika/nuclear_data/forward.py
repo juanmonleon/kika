@@ -9,7 +9,7 @@ bin of incident energy at a detector angle,
     = \frac{J}{2\pi}\int K(E)\,\sigma(E)\,f(\mu_C, E)\,dE ,
 
 with :math:`K` the bin seen through the energy resolution (a box convolved with a
-Gaussian, :func:`kika.utils.numerics.box_gaussian_fold_nodes`), :math:`\mu_C` the
+Gaussian, :func:`kika.algebra.box_gaussian_fold_nodes`), :math:`\mu_C` the
 centre-of-mass cosine of the laboratory one and :math:`J = d\Omega_C/d\Omega_L`.
 
 **The product is folded, never the factors.**  Where :math:`\sigma` is resonant
@@ -21,7 +21,7 @@ reading :math:`\langle\sigma\rangle f(E_0)` only so the two can be compared.
 Everything is read from the model, so a suite decoded from ENDF, from G4NDL or
 modified in memory goes through the same code: :class:`ElasticView` extracts the
 two factors once, and the readings are the plain-array primitives of
-:mod:`kika.endf.dcs` and :mod:`kika.utils.numerics`.
+:mod:`kika.endf.dcs` and :mod:`kika.algebra`.
 
 Kernel width.  :math:`\sigma_K^2 = \sigma_E^2 + \sigma_D^2`: the TOF resolution
 (:class:`kika.endf.dcs.TofResolution`, whose ``min_sigma_e_kev`` floor must stay at
@@ -237,7 +237,6 @@ class ForwardSetup:
     tof: Optional[object] = None
     temperature_k: Optional[float] = None
     angular_half_width_deg: Optional[float] = None
-    n_uniform: int = 101
     n_angular: int = 5
 
 
@@ -255,12 +254,11 @@ def reading_nodes(view: ElasticView, setup: ForwardSetup, energy_ev: float,
                   bin_ev: Optional[Tuple[float, float]] = None,
                   grids: Optional[Sequence[np.ndarray]] = None):
     """Nodes and weights for the bin ``bin_ev`` (or the point ``energy_ev``) seen through σ_K."""
-    from kika.utils.numerics import box_gaussian_fold_nodes
+    from kika.algebra import box_gaussian_fold_nodes
 
     s = kernel_sigma_ev(setup, energy_ev, view.awr)
     lo, hi = (bin_ev if bin_ev is not None else (energy_ev, energy_ev))
-    return box_gaussian_fold_nodes(lo, hi, s, grids if grids is not None else view.energy_grids(),
-                                   n_uniform=setup.n_uniform)
+    return box_gaussian_fold_nodes(lo, hi, s, grids if grids is not None else view.energy_grids())
 
 
 def _all_nodes(view, setup, energies_ev, bins_ev):

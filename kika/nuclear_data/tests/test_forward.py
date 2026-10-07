@@ -19,8 +19,8 @@ from kika.endf.dcs import TofResolution
 from kika.nuclear_data.forward import (
     ElasticView, ForwardSetup, forward_dcs, forward_sigma, kernel_sigma_ev,
 )
-from kika.utils.numerics import (
-    average_over_intervals, box_gaussian_fold_nodes, gaussian_fold_nodes,
+from kika.algebra import (
+    box_gaussian_fold_nodes, gaussian_fold_nodes, group_averages,
 )
 
 DATA = Path(kika.__file__).parent / "endf" / "tests" / "data"
@@ -46,7 +46,7 @@ def test_without_resolution_it_is_the_bin_average():
     x = np.linspace(0.0, 10.0, 2001)
     y = 1.0 + np.sin(7 * x) ** 2 * np.exp(-x / 4)
     n, w = box_gaussian_fold_nodes(2.3, 3.1, 0.0, (x,))
-    ref = average_over_intervals(x, y, np.array([2.3, 3.1]))[0]
+    ref = group_averages(x, y, 2, np.array([2.3, 3.1]))[0]
     assert _avg(n, w, x, y) == pytest.approx(ref, rel=1e-6)
 
 
@@ -62,11 +62,55 @@ def test_the_two_limits_are_continuous():
     x = np.linspace(0.0, 10.0, 4001)
     y = 1.0 + np.sin(7 * x) ** 2
     box = _avg(*box_gaussian_fold_nodes(4.0, 6.0, 0.0, (x,)), x, y)
-    near_box = _avg(*box_gaussian_fold_nodes(4.0, 6.0, 1e-4, (x,), n_uniform=4001), x, y)
+    near_box = _avg(*box_gaussian_fold_nodes(4.0, 6.0, 1e-4, (x,)), x, y)
     assert near_box == pytest.approx(box, rel=1e-4)
     gauss = _avg(*gaussian_fold_nodes(5.0, 0.5, (x,)), x, y)
     near_gauss = _avg(*box_gaussian_fold_nodes(5.0 - 1e-4, 5.0 + 1e-4, 0.5, (x,)), x, y)
     assert near_gauss == pytest.approx(gauss, rel=1e-5)
+
+
+def _trapezoid_box_gaussian(lo, hi, sigma, x, y, n_uniform=101):
+    """The quadrature the exact weights replaced: K times the trapezoid rule on
+    the table's points, the bin edges and ``n_uniform`` uniform points within
+    5 sigma of the bin."""
+    from scipy.special import ndtr
+
+    a, b = lo - 5.0 * sigma, hi + 5.0 * sigma
+    t = np.unique(np.concatenate([np.linspace(a, b, n_uniform), [lo, hi],
+                                  x[(x > a) & (x < b)]]))
+    trap = np.zeros_like(t)
+    trap[:-1] += 0.5 * np.diff(t)
+    trap[1:] += 0.5 * np.diff(t)
+    w = (ndtr((hi - t) / sigma) - ndtr((lo - t) / sigma)) * trap
+    return float(w @ np.interp(t, x, y) / w.sum())
+
+
+def test_the_exact_weights_agree_with_the_trapezoid_they_replaced():
+    x = np.linspace(0.0, 10.0, 2001)
+    y = 1.0 + np.sin(7 * x) ** 2 * np.exp(-x / 4)
+    for lo, hi, s in ((4.0, 6.0, 0.3), (2.3, 3.1, 0.05), (4.0, 6.0, 2.0), (4.9, 5.1, 0.4)):
+        exact = _avg(*box_gaussian_fold_nodes(lo, hi, s, (x,)), x, y)
+        assert exact == pytest.approx(_trapezoid_box_gaussian(lo, hi, s, x, y), rel=1e-4)
+
+
+def test_the_box_gaussian_weights_are_exact_for_the_interpolant():
+    """Against adaptive quadrature of the interpolant times K, panel by panel.
+
+    The window edge 2.3 - 6 * 0.05 lands an ulp from the grid point 2.0, so this
+    also pins the panel of width 2e-16 the closed-form moment cannot resolve."""
+    from scipy.integrate import quad
+    from scipy.special import ndtr
+
+    x = np.linspace(0.0, 10.0, 2001)
+    y = 1.0 + np.sin(7 * x) ** 2 * np.exp(-x / 4)
+    lo, hi, s = 2.3, 3.1, 0.05
+    n, w = box_gaussian_fold_nodes(lo, hi, s, (x,))
+    assert np.all(w > 0.0) and w.sum() == pytest.approx(1.0, abs=1e-14)
+    k = lambda t: np.interp(t, x, y) * (ndtr((hi - t) / s) - ndtr((lo - t) / s))
+    edges = np.concatenate([[lo - 12 * s], n, [hi + 12 * s]])
+    ref = sum(quad(k, p, q, epsabs=1e-15, epsrel=1e-13)[0]
+              for p, q in zip(edges[:-1], edges[1:])) / (hi - lo)
+    assert _avg(n, w, x, y) == pytest.approx(ref, rel=1e-10)
 
 
 def test_doppler_adds_in_quadrature():
@@ -149,7 +193,7 @@ def test_a_g4ndl_round_trip_reads_the_same(suite, tmp_path):
 
 def test_with_flat_sigma_the_product_fold_is_sigma_times_the_folded_pdf(suite):
     """σ constant: ⟨σ f⟩ = σ ⟨f⟩, with ⟨f⟩ folded independently of the operator."""
-    from kika.utils.numerics import fold_tabulated
+    from kika.algebra import fold_tabulated
 
     real = ElasticView.from_suite(suite)
     flat = ElasticView(real.xs_energies, np.full_like(real.xs_values, 3.0), real.angular,

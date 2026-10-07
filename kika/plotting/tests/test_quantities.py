@@ -167,10 +167,26 @@ def test_an_unknown_source_says_so():
 
 
 def test_folding_averages_over_the_kernel():
-    # a linear function is its own Gaussian average
-    assert fold_in_energy(lambda e: np.array([2.0 * e]), 5.0, 0.5)[0] == pytest.approx(10.0)
-    # a quadratic picks up sigma^2
-    assert fold_in_energy(lambda e: np.array([e * e]), 5.0, 0.5)[0] == pytest.approx(25.25)
+    # a linear function is its own Gaussian average, whatever its grid
+    coarse = [np.linspace(0.0, 10.0, 11)]
+    assert fold_in_energy(lambda e: np.array([2.0 * e]), 5.0, 0.5,
+                          grids=coarse)[0] == pytest.approx(10.0, rel=1e-12)
+    # a quadratic picks up sigma^2, through its tabulation on the grid
+    fine = [np.linspace(0.0, 10.0, 20001)]
+    assert fold_in_energy(lambda e: np.array([e * e]), 5.0, 0.5,
+                          grids=fine)[0] == pytest.approx(25.25, rel=1e-7)
+
+
+def test_folding_sees_structure_between_fixed_nodes():
+    """A narrow peak on the grid: the fold must see it wherever it sits."""
+    grid = np.linspace(0.0, 10.0, 2001)
+    peak = 1.0 + 50.0 * np.exp(-0.5 * ((grid - 5.37) / 0.01) ** 2)
+    got = fold_in_energy(lambda e: np.array([np.interp(e, grid, peak)]), 5.0, 0.5,
+                         grids=[grid])[0]
+    t = np.linspace(0.5, 9.5, 2_000_001)
+    g = np.exp(-0.5 * ((t - 5.0) / 0.5) ** 2)
+    exact = np.trapezoid(np.interp(t, grid, peak) * g, t) / np.trapezoid(g, t)
+    assert got == pytest.approx(exact, rel=1e-6)
 
 
 # ---------------------------------------------------------------- EXFOR (synthetic set)
@@ -314,3 +330,28 @@ def test_ace_differential_cross_section_and_its_folding(fe56_ace):
 def test_supported_quantities(fe56_jeff, fe56_ace):
     assert "relative_uncertainty" in supported_quantities(fe56_jeff)
     assert "relative_uncertainty" not in supported_quantities(fe56_ace)
+
+
+# ---------------------------------------------------------------- MF31 nu-bar
+
+
+@pytest.mark.parametrize("mt", [452, 456])
+def test_relative_uncertainty_of_nubar_reads_mf31(u235_b81_tape, mt):
+    """MT 452/455/456 never appear in MF33, so the MT alone routes to MF31."""
+    from kika.endf import read_endf
+
+    endf = read_endf(str(u235_b81_tape), mf_numbers=[1, 31])
+    item = plottable(endf, "relative_uncertainty", mt=mt)
+    assert item.data.plot_type == "step"
+    y = np.asarray(item.data.y)
+    assert y.size == np.asarray(item.data.x).size
+    # A fraction of a per cent at thermal, a few per cent at the top: in %.
+    assert 0.1 < np.nanmin(y) and np.nanmax(y) < 10.0
+
+
+def test_relative_uncertainty_of_nubar_without_mf31_is_not_plottable(u235_b81_tape):
+    from kika.endf import read_endf
+
+    endf = read_endf(str(u235_b81_tape), mf_numbers=[1])
+    with pytest.raises(NotPlottable, match="MF31/MT456"):
+        plottable(endf, "relative_uncertainty", mt=456)

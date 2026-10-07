@@ -21,7 +21,7 @@ from kika._constants import (
     SPEED_OF_LIGHT_M_NS as _SPEED_OF_LIGHT_M_PER_NS,
 )
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import gaussian_fold_nodes
+from kika.algebra import gaussian_fold_nodes
 
 # Default TOF parameters (GELINA facility)
 _DEFAULT_FLIGHT_PATH_M = 27.037  # meters
@@ -336,8 +336,6 @@ class AngularDistributionContainer:
         num_points: int,
         normalize_to_xs: bool,
         cross_section_unit: str,
-        n_sigma: float = 3.0,
-        n_samples: int = 21,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Apply Gaussian energy folding to angular distribution.
@@ -365,10 +363,6 @@ class AngularDistributionContainer:
             If True, return differential cross-section instead of PDF
         cross_section_unit : str
             Unit for differential cross-section
-        n_sigma : float, optional
-            Number of sigma to extend folding window (default: 3.0)
-        n_samples : int, optional
-            Number of energy samples for numerical integration (default: 21)
 
         Returns
         -------
@@ -384,13 +378,13 @@ class AngularDistributionContainer:
             e_min = 1e-11
             e_max = 20.0
 
-        # The same quadrature kika.utils.numerics.fold_tabulated uses: a node on
-        # every incident energy the distribution tabulates and every point of
-        # the cross-section grid inside the window, plus uniform ones. With
-        # normalize_to_xs the integrand is sigma(E) f(mu, E), and sigma has
-        # structure on a keV scale above the resolved range, which twelve
-        # Gauss-Hermite nodes (used here until September 2026) do not resolve.
-        # ``n_sigma`` and ``n_samples`` are no longer read.
+        # The fold every other path in kika uses: a node on every incident
+        # energy the distribution tabulates and every point of the
+        # cross-section grid inside the window, with weights exact for the
+        # integrand's lin-lin interpolant between them. With normalize_to_xs
+        # the integrand is sigma(E) f(mu, E), and sigma has structure on a keV
+        # scale above the resolved range, which is why the nodes have to be
+        # the grids' own points and not a fixed rule.
         grids = []
         try:
             dist = self.elastic if mt == 2 else self.incident_neutron.get(mt)
@@ -402,10 +396,8 @@ class AngularDistributionContainer:
         if xs_grid is not None and len(xs_grid):
             grids.append(np.asarray(xs_grid, dtype=float))
         sample_energies, weights = gaussian_fold_nodes(target_energy, sigma_E, grids)
-        # Clamp into the ACE range and renormalise; only matters within a few
-        # sigma of the table edges.
+        # Past the ACE range the integrand is held at its end value.
         sample_energies = np.clip(sample_energies, e_min, e_max)
-        weights = weights / weights.sum()
 
         # Initialize accumulators
         cosine_grid = None

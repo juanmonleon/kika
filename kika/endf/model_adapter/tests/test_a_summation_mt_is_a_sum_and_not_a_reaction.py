@@ -107,3 +107,15 @@ def test_the_written_tape_still_carries_the_summation_section(decoded, tmp_path)
 
     written = read_endf(str(out))
     assert sorted(written.mf[3].mt) == [1, 2, 102]
+
+
+
+def test_decoded_sums_carry_explicit_native_component_links(decoded):
+    _endf,suite=decoded
+    from kika.nuclear_data.model import CrossSectionSum
+    total=suite.sums[1]
+    assert isinstance(total,CrossSectionSum)
+    assert [add.href for add in total.summands]==[
+        "/reactionSuite/reactions/reaction[@label='MT2']/crossSection",
+        "/reactionSuite/reactions/reaction[@label='MT102']/crossSection",
+    ]

@@ -256,7 +256,7 @@ def _decodedRange(fields, resolved, resonances) -> dict:
             "pairs": fields["particle_pairs"],
             "groups": [
                 {
-                    "aj": group.spin, "pj": perGroup["pj"],
+                    "aj": group.spin * group.parity, "pj": perGroup["pj"],
                     "kbk": perGroup["kbk"], "kps": perGroup["kps"],
                     "channels": [
                         {"ipp": index + 1, "l": c.L, "sch": c.channelSpin,

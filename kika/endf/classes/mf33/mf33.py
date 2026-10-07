@@ -77,6 +77,32 @@ def _xs_section(xs_sections: Optional[Dict[int, object]], mt: int,
     return SimpleNamespace(energies=grid, values=total)
 
 
+
+
+def bin_average_xs(energies, values, edges, laws=2) -> np.ndarray:
+    """Lethargy-flux (1/E) group average of a table over each bin, exactly.
+
+    The group cross section MF33 is a covariance of: ``int σ/E dE / int dE/E``
+    over the whole bin, with σ zero outside its own table. A bin whose lower
+    edge is not positive has no 1/E weight and gets the flat average; a bin of
+    zero width gets zero. *laws* is one ENDF code or one per interval.
+    """
+    from ....algebra import group_averages
+
+    e = np.asarray(energies, dtype=float)
+    v = np.asarray(values, dtype=float)
+    g = np.asarray(edges, dtype=float)
+    out = np.zeros(max(g.size - 1, 0))
+    if e.size < 2 or g.size < 2:
+        return out
+    positive = g[:-1] > 0
+    k = int(np.argmax(positive)) if positive.any() else g.size - 1
+    if k > 0:
+        out[:k] = group_averages(e, v, laws, g[:k + 1])
+    if positive.any():
+        out[k:] = group_averages(e, v, laws, g[k:], "1/x")
+    return np.nan_to_num(out, nan=0.0)
+
 @dataclass
 class NISubSubsectionRecord:
     """NI-type LIST record within a subsection (LB=0-9)."""
@@ -307,64 +333,6 @@ class MF33MT(MT):
         return matrix, row_energies, col_energies
 
     @staticmethod
-    def _group_average_xs(
-        mf3_section: object,
-        energy_grid: List[float],
-        n_samples: int = 64,
-    ) -> np.ndarray:
-        """Compute lethargy-weighted group-averaged cross sections.
-
-        For each energy bin [E_i, E_{i+1}], evaluates:
-
-            σ̄ = ∫ σ(E) / E dE  /  ∫ 1/E dE
-
-        using Gauss-Legendre quadrature in log-E space for accuracy.
-
-        Parameters
-        ----------
-        mf3_section : MF3MT
-            Section with ``get_cross_section(energy)`` method.
-        energy_grid : list of float
-            Energy bin boundaries (N+1 points → N bins).
-        n_samples : int
-            Number of quadrature points per bin (default 64).
-
-        Returns
-        -------
-        np.ndarray of shape (N,)
-            Group-averaged cross sections (barns).
-        """
-        grid = np.asarray(energy_grid, dtype=float)
-        n_bins = len(grid) - 1
-        result = np.zeros(n_bins)
-
-        # Gauss-Legendre nodes and weights on [-1, 1]
-        nodes, weights = np.polynomial.legendre.leggauss(n_samples)
-
-        for g in range(n_bins):
-            # Log-space quadrature requires both edges > 0; bins touching 0 eV
-            # leave result[g] = 0 (the slot was pre-zeroed). This corresponds
-            # to "no σ contribution from a degenerate bin" — bin gets dropped
-            # downstream wherever a positive σ is needed.
-            if grid[g] <= 0 or grid[g + 1] <= 0:
-                continue
-            ln_lo = np.log(grid[g])
-            ln_hi = np.log(grid[g + 1])
-            if ln_hi <= ln_lo:
-                continue
-            half_width = 0.5 * (ln_hi - ln_lo)
-            mid = 0.5 * (ln_lo + ln_hi)
-            # Map nodes to [ln_lo, ln_hi]
-            ln_e = mid + half_width * nodes
-            e_pts = np.exp(ln_e)
-            xs_pts = np.asarray(
-                mf3_section.get_cross_section(e_pts), dtype=float
-            )
-            # ∫ σ(E) dln(E) / ∫ dln(E) = weighted average over quadrature
-            result[g] = np.dot(weights, xs_pts) / np.sum(weights)
-        return result
-
-    @staticmethod
     def _short_range_diagonal(record: 'NISubSubsectionRecord',
                               output_grid: List[float]) -> np.ndarray:
         """Variance of an LB=8/9 sub-subsection on ``output_grid`` (absolute, b²).
@@ -413,49 +381,34 @@ class MF33MT(MT):
         return np.where(d_j > 0, var, 0.0)
 
     @staticmethod
-    def _bin_average_xs_exact(xs_source: object, energy_grid: List[float]) -> np.ndarray:
-        """1/E-weighted average of a lin-lin tabulated σ(E) over each bin, exactly.
+    def _bin_average_xs(xs_source: object, energy_grid: List[float]) -> np.ndarray:
+        """1/E-weighted average of a tabulated σ(E) over each bin, exactly.
 
-        On a segment where σ = a + bE, ∫σ/E dE = a·ln(E₂/E₁) + b·(E₂−E₁), so the
-        average needs no quadrature at all and sees every point of the table —
-        which matters in the resolved range, where a bin can hold hundreds of
-        resonances that a fixed number of nodes per bin would sample at random.
-        A PENDF is linearised by RECONR to its tolerance, so lin-lin is its own
-        interpolation law. A bin whose lower edge is 0 gets the flat average.
+        The section's own interpolation laws, integrated in closed form
+        (:func:`bin_average_xs`), so every point of the table is seen -- which
+        matters in the resolved range, where a bin can hold hundreds of
+        resonances. Until October 2026 this method was a 64-point Gauss-Legendre
+        rule in ln E, 6-50 % off on wide resolved-range bins of Fe-56, and a
+        separate exact lin-lin twin sat next to it.
 
-        Accepts an ``MF3MT`` (``energies``/``cross_sections``) or a
-        ``CrossSection`` (``energies``/``values``).
+        Accepts an ``MF3MT`` (``energies``/``cross_sections``/
+        ``energy_interpolation``), a ``CrossSection`` (``energies``/``values``/
+        ``interval_laws()``) or a bare ``energies``/``values`` table, read
+        lin-lin.
         """
-        e_tab = np.asarray(xs_source.energies, dtype=float)
+        from ....algebra import interval_laws
+
+        energies = np.asarray(xs_source.energies, dtype=float)
         values = getattr(xs_source, 'values', None)
         if values is None:
             values = getattr(xs_source, 'cross_sections')
-        s_tab = np.asarray(values, dtype=float)
-        grid = np.asarray(energy_grid, dtype=float)
-
-        pts = np.union1d(e_tab, grid)
-        pts = pts[(pts >= grid[0]) & (pts <= grid[-1])]
-        sig = np.interp(pts, e_tab, s_tab, left=0.0, right=0.0)
-        e1, e2 = pts[:-1], pts[1:]
-        s1, s2 = sig[:-1], sig[1:]
-        de = e2 - e1
-        with np.errstate(divide='ignore', invalid='ignore'):
-            b = np.where(de > 0, (s2 - s1) / de, 0.0)
-            a = s1 - b * e1
-            log_seg = np.where(e1 > 0, np.log(e2 / e1), 0.0)
-        seg_int = a * log_seg + b * de            # ∫ σ/E dE per segment
-        seg_flat = 0.5 * (s1 + s2) * de           # ∫ σ dE per segment
-
-        cum_int = np.concatenate(([0.0], np.cumsum(seg_int)))
-        cum_flat = np.concatenate(([0.0], np.cumsum(seg_flat)))
-        at = np.searchsorted(pts, grid)
-        lo, hi = grid[:-1], grid[1:]
-        with np.errstate(divide='ignore', invalid='ignore'):
-            log_bin = np.where(lo > 0, np.log(hi / lo), 0.0)
-            weighted = (cum_int[at[1:]] - cum_int[at[:-1]]) / log_bin
-            flat = (cum_flat[at[1:]] - cum_flat[at[:-1]]) / (hi - lo)
-        out = np.where(lo > 0, weighted, flat)
-        return np.where(hi > lo, out, 0.0)
+        if hasattr(xs_source, 'energy_interpolation'):
+            laws = interval_laws(energies.size, list(xs_source.energy_interpolation))
+        elif hasattr(xs_source, 'interval_laws'):
+            laws = xs_source.interval_laws()
+        else:
+            laws = 2
+        return bin_average_xs(energies, values, energy_grid, laws)
 
     @staticmethod
     def _project_matrix_piecewise_constant(
@@ -667,8 +620,8 @@ class MF33MT(MT):
                 f"(endf)` sets `endf.pendf`), or decode through "
                 f"`decodeCovarianceSuite(endf)`, which does it on its own."
             )
-        s_row = self._bin_average_xs_exact(xs_row, output_grid)
-        s_col = s_row if xs_col is xs_row else self._bin_average_xs_exact(xs_col, output_grid)
+        s_row = self._bin_average_xs(xs_row, output_grid)
+        s_col = s_row if xs_col is xs_row else self._bin_average_xs(xs_col, output_grid)
         denom = np.outer(s_row, s_col)
         lost = (denom <= 0) & (abs_total != 0)
         if lost.any():
@@ -708,31 +661,6 @@ class MF33MT(MT):
             if result is not None:
                 return result
         return None
-
-    def _bin_average_xs(
-        self,
-        xs_source: object,
-        energy_grid: List[float],
-        n_samples: int = 64,
-    ) -> np.ndarray:
-        """1/E-weighted bin average of σ(E) over each bin of ``energy_grid``.
-
-        Accepts either an ENDF ``MF3MT`` (has ``get_cross_section``) or a
-        canonical ``CrossSection`` (has ``energies``/``values`` arrays).
-        Delegates to :meth:`_group_average_xs`, wrapping CrossSection-like
-        inputs in a thin shim that interpolates linearly between tabulated
-        points.
-        """
-        if hasattr(xs_source, 'get_cross_section'):
-            return self._group_average_xs(xs_source, energy_grid, n_samples)
-        energies = np.asarray(getattr(xs_source, 'energies'), dtype=float)
-        values = np.asarray(getattr(xs_source, 'values'), dtype=float)
-
-        class _InterpShim:
-            def get_cross_section(self_, e):
-                return np.interp(e, energies, values, left=0.0, right=0.0)
-
-        return self._group_average_xs(_InterpShim(), energy_grid, n_samples)
 
     def _self_covariance_matrix(
         self,

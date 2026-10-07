@@ -11,12 +11,13 @@ For each group ``g`` with boundaries ``[E_lo, E_hi]`` the average is:
     sigma_bar_g = integral sigma(E) * phi(E) dE / integral phi(E) dE
 
 evaluated on the overlap of the group with the pointwise energy range.
-The pointwise cross section is treated as piecewise linear between
-tabulated points. For ``phi(E) = 1/E`` the integrals are evaluated in
-lethargy space (``u = ln E``) where the weight reduces to a constant,
-keeping numerator and denominator on identical numerics so that a
-constant cross section reproduces itself exactly. For ``phi = 1`` the
-integrals are evaluated directly in energy.
+The pointwise cross section is lin-lin between tabulated points, and both
+integrals are closed form for either weight (:func:`kika.algebra.group_averages`):
+for ``phi = 1/E`` a panel ``sigma = a + bE`` gives ``a ln(E2/E1) + b (E2 - E1)``.
+
+Until October 2026 the 1/E integral was a trapezoid in ``u = ln E``, which is
+exact only for a constant sigma: on a table of three points
+``[1e5, 1e6, 2e7] -> [1, 10, 1]`` it was 7 % low, and 8e-7 off on a fine one.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from __future__ import annotations
 from typing import Literal, Tuple
 
 import numpy as np
+
+from kika.algebra import group_averages
 
 __all__ = ["resonance_group_average"]
 
@@ -42,7 +45,8 @@ def resonance_group_average(
     Parameters
     ----------
     energies : np.ndarray
-        Pointwise energies in eV, strictly increasing.
+        Pointwise energies in eV, non-decreasing (a repeated energy is a
+        step).
     cross_sections : np.ndarray
         Pointwise cross section values (e.g., barns), same shape as
         ``energies``.
@@ -73,8 +77,8 @@ def resonance_group_average(
         raise ValueError("energies and cross_sections must have the same shape")
     if energies.size < 2:
         raise ValueError("need at least 2 pointwise energies")
-    if not np.all(np.diff(energies) > 0):
-        raise ValueError("energies must be strictly increasing")
+    if np.any(np.diff(energies) < 0):
+        raise ValueError("energies must be non-decreasing")
     if group_boundaries.ndim != 1 or group_boundaries.size < 2:
         raise ValueError("group_boundaries must be a 1-D array with >=2 entries")
     if not np.all(np.diff(group_boundaries) > 0):
@@ -84,46 +88,10 @@ def resonance_group_average(
     if weighting == "lethargy" and energies[0] <= 0.0:
         raise ValueError("lethargy weighting requires strictly positive energies")
 
-    n_groups = group_boundaries.size - 1
-    averages = np.full(n_groups, np.nan, dtype=float)
-
-    e_min = energies[0]
-    e_max = energies[-1]
-
-    for g in range(n_groups):
-        e_lo = max(group_boundaries[g], e_min)
-        e_hi = min(group_boundaries[g + 1], e_max)
-        if e_hi <= e_lo:
-            continue
-
-        # Build an integration grid by inserting the clipped group
-        # boundaries into the pointwise grid. Cross-section values at
-        # the boundaries come from linear-in-E interpolation, matching
-        # the piecewise-linear tabulation contract used by ENDF MF3
-        # TAB1 records reconstructed to a fine grid.
-        inner_mask = (energies > e_lo) & (energies < e_hi)
-        inner_e = energies[inner_mask]
-        inner_xs = cross_sections[inner_mask]
-        xs_lo = float(np.interp(e_lo, energies, cross_sections))
-        xs_hi = float(np.interp(e_hi, energies, cross_sections))
-
-        e_grid = np.concatenate(([e_lo], inner_e, [e_hi]))
-        xs_grid = np.concatenate(([xs_lo], inner_xs, [xs_hi]))
-
-        if weighting == "lethargy":
-            # Integrate in lethargy u = ln E; phi·dE = du, so the
-            # numerator is trap(sigma, u) and the denominator is
-            # exactly u_hi - u_lo. This keeps both consistent and
-            # exact for constant sigma.
-            u_grid = np.log(e_grid)
-            numerator = float(np.trapezoid(xs_grid, u_grid))
-            denominator = float(u_grid[-1] - u_grid[0])
-        else:  # constant
-            numerator = float(np.trapezoid(xs_grid, e_grid))
-            denominator = float(e_hi - e_lo)
-
-        if abs(denominator) < 1e-30:
-            continue
-        averages[g] = numerator / denominator
+    # Each group is averaged over its overlap with the table, so clip the
+    # edges to the table's range; a group left with no width is NaN.
+    clipped = np.clip(group_boundaries, energies[0], energies[-1])
+    weight = "1/x" if weighting == "lethargy" else None
+    averages = group_averages(energies, cross_sections, 2, clipped, weight)
 
     return group_boundaries.copy(), averages

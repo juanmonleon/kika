@@ -160,7 +160,7 @@ def test_to_xs_covmat_reads_sigma_from_mf3_sections():
 def test_the_bin_average_of_a_linear_sigma_is_closed_form():
     # σ = E on [1, 10]: ∫ σ/E dE / ∫ dE/E = 9 / ln 10.
     table = SimpleNamespace(energies=np.array([1.0, 10.0]), cross_sections=np.array([1.0, 10.0]))
-    got = MF33MT._bin_average_xs_exact(table, [1.0, 10.0])
+    got = MF33MT._bin_average_xs(table, [1.0, 10.0])
     assert got[0] == pytest.approx(9 / math.log(10), rel=1e-14)
 
 
@@ -170,11 +170,18 @@ def test_the_bin_average_sees_every_point_of_a_resonant_table():
     e = np.linspace(100.0, 200.0, 4001)
     s = np.where(np.arange(e.size) % 2 == 1, 1000.0, 1.0)
     table = SimpleNamespace(energies=e, values=s)
-    got = MF33MT._bin_average_xs_exact(table, [100.0, 200.0])[0]
-    a =s[:-1] - (s[1:] - s[:-1]) / np.diff(e) * e[:-1]
-    b = (s[1:] - s[:-1]) / np.diff(e)
-    reference = np.sum(a * np.log(e[1:] / e[:-1]) + b * np.diff(e)) / math.log(2.0)
-    assert got == pytest.approx(reference, rel=1e-12)
+    got = MF33MT._bin_average_xs(table, [100.0, 200.0])[0]
+    # sum of a ln(E2/E1) + b dE over the panels, in 45-digit decimals: the same
+    # formula in float64 cancels to 1e-10 here, the closed form keeps 1e-14.
+    from decimal import Decimal, getcontext
+    getcontext().prec = 45
+    total = Decimal(0)
+    for e1, e2, s1, s2 in zip(e[:-1], e[1:], s[:-1], s[1:]):
+        e1, e2, s1, s2 = (Decimal(float(v)) for v in (e1, e2, s1, s2))
+        slope = (s2 - s1) / (e2 - e1)
+        total += (s1 - slope * e1) * (e2 / e1).ln() + slope * (e2 - e1)
+    reference = float(total / Decimal(2).ln())
+    assert got == pytest.approx(reference, rel=1e-13)
     assert 490.0 < got < 510.0
 
 
@@ -270,7 +277,7 @@ def test_si28_b81_lb8_reaches_the_model_divided_by_the_reconstructed_sigma(
     rel_only, _, rel_flag = sec._process_ni_records_to_matrix(relative, target_grid=grid)
     abs_only, _, abs_flag = sec._process_ni_records_to_matrix(absolute, target_grid=grid)
     assert rel_flag is True and abs_flag is False
-    sigma = MF33MT._bin_average_xs_exact(endf.pendf[1], grid)
+    sigma = MF33MT._bin_average_xs(endf.pendf[1], grid)
     denom = np.outer(sigma, sigma)
     with np.errstate(divide="ignore", invalid="ignore"):
         added = np.where(denom > 0, abs_only / denom, 0.0)

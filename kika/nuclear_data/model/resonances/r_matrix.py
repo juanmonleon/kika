@@ -11,9 +11,46 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from ..quantities import PhysicalQuantity
+from .radius_policy import RadiusPolicy
+from ..functions import Function1d
 
 __all__ = ["ExternalRMatrix", "Channel", "ResonanceReaction",
-           "RMatrixSpinGroup", "RMatrix"]
+           "RMatrixSpinGroup", "RMatrix", "ChannelParticle", "ChannelKinematics", "ComplexChannelFunction"]
+
+
+@dataclass
+class ComplexChannelFunction:
+    """Real and imaginary dimensionless functions of energy in eV."""
+    real: Function1d
+    imaginary: Function1d
+
+
+@dataclass(frozen=True)
+class ChannelParticle:
+    """Channel-local particle properties; mass in neutron-mass units.
+
+    Effective capture/fission pairs may have zero masses. These are declared
+    parametrizations, never usable as physical masses in a two-body solver.
+    """
+    massRatio: float
+    charge: float
+    spin: float
+    parity: int
+
+
+@dataclass(frozen=True)
+class ChannelKinematics:
+    """Physical pair and declared penetrability/shift conventions.
+
+    ``automatic`` requires resolving the reaction type; ``unity`` is an
+    effective channel, ``calculate`` requires the two particle masses.
+    The Brune shift convention is represented separately, not treated as zero.
+    """
+    particleA: ChannelParticle
+    particleB: ChannelParticle
+    penetrability: Optional[str]
+    shift: Optional[str]
+    effective: bool = False
 
 #: The two parametrisations §19.3.4 admits, and the *only* two: ``type`` is an
 #: ``xs:enumeration`` in the schema (``gnds.xsd:935-940``), unlike the term
@@ -37,7 +74,7 @@ class ExternalRMatrix:
     A contribution added to the R-matrix diagonal during reconstruction, standing
     in for levels the evaluator did not fit. Two parametrisations exist and they
     are not variants of one formula: SAMMY's is a polynomial in energy plus a
-    logarithmic term and is purely real; Froehner's is an arctangent plus a
+    logarithmic term and is purely real; Froehner's is an inverse hyperbolic tangent plus a
     genuinely **imaginary** part. A consumer that reads the terms without reading
     :attr:`type` has no way to tell which it holds.
 
@@ -149,6 +186,7 @@ class Channel:
     #: child of a channel (``gnds.xsd:915-919``, an ``xs:sequence`` ahead of both
     #: radii), which is where the writer puts it.
     externalRMatrix: Optional["ExternalRMatrix"] = None
+    tabulatedBackground: Optional[ComplexChannelFunction] = None
     #: The unit the two radii above were read with — ``fm`` from GNDS, ``None``
     #: from ENDF, which declares none. Both share one field because they come
     #: off the same node and no file states them differently.
@@ -161,6 +199,9 @@ class Channel:
     #: deliberately *not* ``ScatteringRadius``: ``reconstruct.py`` reads
     #: ``channels[0].scatteringRadius`` as a number into the penetrability.
     radiusUnit: Optional[str] = None
+    #: ENDF KPS is per channel; these replace its hard-sphere phase.
+    additionalPhaseShift: Optional[ComplexChannelFunction] = None
+    phaseShiftMode: Optional[int] = None
 
 
 @dataclass
@@ -171,6 +212,8 @@ class ResonanceReaction:
     ejectile: Optional[str] = None
     Q: Optional[float] = None
     eliminated: bool = False
+    reactionMT: Optional[int] = None
+    kinematics: Optional[ChannelKinematics] = None
     scatteringRadius: Optional[float] = None
     #: §19.3.3's ``<link href=.../>``: the xPath of the ``reaction`` this channel
     #: *is*. All 902 ``resonanceReaction`` nodes in ENDF/B-VIII.1-GNDS carry one,
@@ -220,6 +263,8 @@ class RMatrixSpinGroup:
     #: ``ResonanceRecord.spin`` and had nothing to read.
     spins: List[float] = field(default_factory=list)
     atomicWeightRatio: Optional[float] = None
+    additionalPhaseShift: Optional[ComplexChannelFunction] = None
+    phaseShiftMode: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.spins and len(self.spins) != len(self.energies):
@@ -288,6 +333,11 @@ class RMatrix:
     #: evaluator's AP into the penetrability where the evaluator asked for
     #: 0.123 A^(1/3) + 0.08, and the two differ by percent.
     calculateChannelRadius: bool = False
+    #: Number of orbital L values required for angular convergence (RM NLSC).
+    angularLCount: Optional[int] = None
+    radiusPolicy: Optional[RadiusPolicy] = None
+    #: Default B for channels without a local value (GNDS Given convention).
+    boundaryConditionValue: Optional[float] = None
 
     @property
     def numberOfResonances(self) -> int:

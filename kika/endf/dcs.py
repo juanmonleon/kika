@@ -36,7 +36,7 @@ import numpy as np
 from kika._constants import FWHM_TO_SIGMA, NEUTRON_MASS_AMU
 from kika.processing.interpolation import interpolate_1d
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import fold_tabulated, gaussian_fold_nodes
+from kika.algebra import fold_tabulated, gaussian_fold_nodes
 
 __all__ = [
     "TofResolution",
@@ -109,7 +109,7 @@ class TofResolution:
 
         It used to be 1 keV, to keep a Gauss-Hermite kernel from collapsing to
         a delta at low energy.  The fold has integrated on the table's own
-        points since September 2026 (:func:`kika.utils.numerics.gaussian_fold_nodes`),
+        points since September 2026 (:func:`kika.algebra.gaussian_fold_nodes`),
         and a narrow kernel then tends to the interpolated value as it should,
         so the floor protected nothing and only widened the resolution of a
         good spectrometer: 27 m and 3.5 ns FWHM give :math:`\sigma_E` = 0.70 keV
@@ -504,10 +504,9 @@ def sigma_folded(xs_energies_ev, xs_values, energy_ev, tof: TofResolution):
     r"""TOF-resolution-folded :math:`\sigma(E)`.
 
     Averages :math:`\sigma` over a Gaussian kernel
-    :math:`N(E_0, \sigma_E^2)` on the table's own points inside the window
-    (:func:`kika.utils.numerics.fold_tabulated`, 12-node Gauss-Hermite before
-    September 2026), with :math:`\sigma_E` from
-    ``tof``.  Vectorized over ``energy_ev``.
+    :math:`N(E_0, \sigma_E^2)`, exactly for the lin-lin interpolant of the
+    table (:func:`kika.algebra.fold.fold_tabulated`), with :math:`\sigma_E`
+    from ``tof``.  Vectorized over ``energy_ev``.
 
     Note the folding samples :math:`\sigma` **linearly** (``numpy.interp``
     semantics), unlike :func:`sigma_nominal`.  That is deliberate: the fold is
@@ -930,11 +929,11 @@ def resolution_fold_nodes(
 ) -> Tuple[np.ndarray, np.ndarray]:
     r"""Quadrature nodes and weights for a Gaussian fold over tabulated data.
 
-    :func:`kika.utils.numerics.gaussian_fold_nodes` in eV: every point of every
-    grid inside :math:`E_0 \pm 5\sigma_E`, the window edges and 101 uniform
-    points, weighted by the Gaussian times the trapezoid rule.  The same rule
-    :func:`sigma_folded` and :func:`coefficients_folded` now use through
-    :func:`~kika.utils.numerics.fold_tabulated`.
+    :func:`kika.algebra.fold.gaussian_fold_nodes` in eV: every point of every
+    grid inside :math:`E_0 \pm 6\sigma_E` and the window edges, with weights
+    exact for the integrand's lin-lin interpolant between them.  The same
+    integral :func:`sigma_folded` and :func:`coefficients_folded` take through
+    :func:`~kika.algebra.fold.fold_tabulated`.
     """
     return gaussian_fold_nodes(energy_ev, sigma_e_ev, grids)
 
@@ -950,7 +949,7 @@ def product_reading_nodes(
     r"""Nodes and normalised weights for one reading of a product such as :math:`\sigma f`.
 
     - ``'folded'``: :func:`resolution_fold_nodes` with :math:`\sigma_E` from
-      ``tof``, a Gaussian over :math:`E_0 \pm 5\sigma_E`.
+      ``tof``, a Gaussian over :math:`E_0 \pm 6\sigma_E`.
     - ``'binavg'``: the window ``bin_edges`` under a flux flat per unit lethargy
       (:math:`w = 1/E`), on its edges and every grid point strictly inside,
       trapezoid rule.  A window reaching :math:`E \le 0` is cut at the first

@@ -111,7 +111,90 @@ def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
     return formatted.rjust(width)
 
 
+#: ``10.0 ** k`` for ``|k| <= 22``: the powers of ten a double holds exactly.
+_EXACT_POWERS = {k: float(10 ** k) for k in range(23)}
+
+
+def round_to_endf_field(values) -> "np.ndarray":
+    """Each of *values* as :func:`format_endf_number` writes it and it reads back.
+
+    The same doubles as ``parse_number(format_endf_number(v))``, bit for bit,
+    without a string per value: the mantissa is rounded to its 7 (6, 5)
+    significant digits as an integer ``N`` and the field's value is
+    ``N * 10**k`` or ``N / 10**-k``, one correctly rounded operation on two
+    exact operands while ``|k| <= 22`` -- which is what a decimal-to-double
+    conversion of those digits gives. Values whose rounding is too close to a
+    tie to decide in floating point, or whose ``k`` is out of that range, go
+    through the strings.
+    """
+    import numpy as np
+
+    v = np.asarray(values, dtype=float).ravel()
+    if not np.all(np.isfinite(v)):
+        raise ValueError("Cannot format non-finite ENDF value")
+    out = np.zeros(v.size)
+    a = np.abs(v)
+    live = np.flatnonzero(a > 0)
+    if live.size == 0:
+        return out
+    a = a[live]
+    with np.errstate(divide="ignore"):
+        exponent = np.floor(np.log10(a)).astype(np.int64)
+    # The mantissa as format_endf_number computes it, divisor and all.
+    divisor = np.empty(a.size)
+    for e in np.unique(exponent):
+        divisor[exponent == e] = 10 ** int(e)
+    mantissa = a / divisor
+    places = np.where(np.abs(exponent) < 10, 6,
+                      np.where(np.abs(exponent) < 100, 5, 4))
+    scaled = mantissa * np.power(10.0, places)
+    n = np.rint(scaled)
+    k = exponent - places
+    slow = ((np.abs(scaled - np.floor(scaled) - 0.5) < 1e-6)   # near a tie
+            | (mantissa < 1.0) | (n >= 10.0 * np.power(10.0, places))  # carry
+            | (np.abs(k) > 22))
+    value = np.empty(a.size)
+    up, down = (~slow) & (k >= 0), (~slow) & (k < 0)
+    for e in np.unique(k[up | down]):
+        at = (k == e) & ~slow
+        if e >= 0:
+            value[at] = n[at] * _EXACT_POWERS[int(e)]
+        else:
+            value[at] = n[at] / _EXACT_POWERS[int(-e)]
+    for i in np.flatnonzero(slow):
+        value[i] = float(parse_number(format_endf_number(float(a[i]))))
+    out[live] = np.copysign(value, v[live])
+    return out
+
+
+
+def format_endf_number_precise(value, width=11):
+    """Choose the closest legal ENDF decimal field (ENDF-102 2023, 0.6.2).
+
+    Fixed notation can retain more digits than normalized exponent notation.
+    The legacy formatter remains the default for unchanged evaluations.
+    """
+    legacy = format_endf_number(value, width)
+    if value is None or value == 0:
+        return legacy
+    candidates = [legacy]
+    digits = max(1, int(math.floor(math.log10(abs(value)))) + 1)
+    sign = int(value < 0)
+    if digits + sign <= width:
+        # Among fixed decimals the finest fitting quantum cannot round worse
+        # than a coarser one. A rounding carry may require one fewer place.
+        places = max(0, width-digits-sign-1)
+        while places >= 0:
+            fixed = f"{value:.{places}f}"
+            if len(fixed) <= width:
+                candidates.append(fixed.rjust(width))
+                break
+            places -= 1
+    return min(candidates, key=lambda field: abs(parse_number(field)-value))
+
+
 # Format constants for ENDF data types
+ENDF_FORMAT_PRECISE = 'float_precise'
 ENDF_FORMAT_FLOAT = 'float'       # Scientific notation (e.g., " 1.234567+5")
 ENDF_FORMAT_INT = 'int'           # Integer format (e.g., "         11")
 ENDF_FORMAT_BLANK = 'blank'       # Blank field
@@ -162,6 +245,8 @@ def format_endf_data_line(values: Sequence[Union[int, float, None]],
                 # ENDF_FORMAT_INT_ZERO is an alias for this, so one branch
                 # serves both — as it always did, in two identical copies.
                 parts.append(f"{int(value):11d}")
+            elif fmt == ENDF_FORMAT_PRECISE:
+                parts.append(format_endf_number_precise(value))
             elif fmt == ENDF_FORMAT_BLANK or value is None:
                 parts.append("           ")
             else:

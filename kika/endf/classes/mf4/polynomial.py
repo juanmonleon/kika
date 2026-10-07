@@ -237,6 +237,25 @@ class MF4MTLegendre(MF4MT):
             'mt': getattr(self, 'number', None),
         }
     
+    def legendre_table(self, max_order: int):
+        """``(E, A, laws, hold)`` -- see :meth:`MF4MT.legendre_table`.
+
+        The file's own coefficients on its own energies under its own (NBT, INT):
+        exactly what :meth:`extract_legendre_coefficients` interpolates. a_0 is 1
+        and an order a row does not carry is zero.
+        """
+        from ....algebra import interval_laws
+
+        energies = np.asarray(self._energies, dtype=float)
+        table = np.zeros((energies.size, max_order + 1))
+        table[:, 0] = 1.0
+        for i, row in enumerate(self._legendre_coeffs):
+            n = min(len(row), max_order)
+            table[i, 1:n + 1] = np.asarray(row[:n], dtype=float)
+        laws = (interval_laws(energies.size, self._interpolation or [(energies.size, 2)])
+                if energies.size > 1 else np.zeros(0, dtype=np.int64))
+        return energies, table, laws, False
+
     def extract_legendre_coefficients(
         self,
         energy: Union[float, np.ndarray],

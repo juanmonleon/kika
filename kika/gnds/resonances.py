@@ -28,10 +28,8 @@ missing one. :attr:`~kika.nuclear_data.model.resonances.UnresolvedChannel.energi
 was added for it, and the block-level grid is filled only when every curve
 agrees.
 
-**What is not read, and is reported instead:** the per-region interpolation of
-a ``regions1d`` average width, which is an *approximation* and not a loss,
-because the flattened numbers look exactly like data and only the rule
-connecting them is gone. ``supportsAngularReconstruction`` (65 files) is
+Average-width ``regions1d`` functions retain their regions and interpolation.
+``supportsAngularReconstruction`` (65 files) is
 reported and will stay that way: it is a FUDGE capability hint, not a property
 of the evaluation.
 
@@ -51,6 +49,8 @@ import xml.etree.ElementTree as ET
 from typing import Callable, List, Optional
 
 import numpy as np
+from kika.nuclear_data.model.resonances.radius_policy import RadiusPolicy
+from kika.nuclear_data.model.units import conversion_factor, UnitError
 
 from kika.nuclear_data.model import (BreitWigner, BreitWignerApproximation,
                                      Channel, ConversionReport, ExternalRMatrix,
@@ -186,8 +186,17 @@ class _ResonanceReader:
         if form is None:
             return None
         values, unit = self.toModelUnits(form.ys, self.radiusUnit(table), here)
+        axes = readAxes(table, self.resolve)
+        energyUnit = next((a.unit for a in axes if a.index == 1), "eV") if axes is not None else "eV"
+        try:
+            energyFactor = conversion_factor(energyUnit, "eV")
+        except UnitError as error:
+            self.unsupported("scatteringRadius", here, str(error))
+            return None
+        from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
         return ScatteringRadius(
-            energies=form.xs, values=values, interpolation=form.interpolation,
+            energies=form.xs*energyFactor, values=values,
+            interpolation=[(len(form.xs), INTERPOLATION_TO_ENDF_INT[form.interpolation])],
             unit=unit,
         )
 
@@ -254,10 +263,11 @@ class _ResonanceReader:
 
     def readResolved(self, element: ET.Element, path: str) -> ResolvedRegion:
         here = f"{path}/resolved"
+        energyFactor = conversion_factor(element.attrib.get("domainUnit", "eV"), "eV")
         region = ResolvedRegion(
-            domainMin=float(element.attrib["domainMin"]),
-            domainMax=float(element.attrib["domainMax"]),
-            domainUnit=element.attrib.get("domainUnit", "eV"),
+            domainMin=float(element.attrib["domainMin"])*energyFactor,
+            domainMax=float(element.attrib["domainMax"])*energyFactor,
+            domainUnit="eV",
         )
         for child in element:
             if child.tag == "RMatrix":
@@ -300,6 +310,7 @@ class _ResonanceReader:
             label=label,
             approximation=element.attrib.get("approximation"),
             boundaryCondition=element.attrib.get("boundaryCondition"),
+            boundaryConditionValue=_optionalFloat(element,"boundaryConditionValue"),
             calculateChannelRadius=_isTrue(element, "calculateChannelRadius"),
             # §19.3.1's two flags. Both were **written** from the model
             # (encode_resonances.py:161-162) and never read back, so a file that
@@ -315,7 +326,7 @@ class _ResonanceReader:
             PoPs=None if pops is None else self.readPoPs(pops),
             resonanceReactions=self.readResonanceReactions(element, here),
             spinGroups=[
-                self.readSpinGroup(group, f"{here}/spinGroups")
+                self.readSpinGroup(group, f"{here}/spinGroups", _isTrue(element,'reducedWidthAmplitudes'))
                 for group in element.findall("spinGroups/spinGroup")
             ],
         )
@@ -338,7 +349,12 @@ class _ResonanceReader:
             # Cl-35; measured 2026-08-24 over the 558 distributed evaluations).
             reactionHardSphere, hardSphereUnit = self.modelRadius(
                 child.find("hardSphereRadius"), here)
+            linked = None
+            if link is not None and link.attrib.get("href") and self.resolve is not None:
+                linked = self.resolve(link.attrib["href"], link)
+            statedMT = None if linked is None else linked.attrib.get("ENDF_MT")
             out.append(ResonanceReaction(
+                reactionMT=None if statedMT is None else int(statedMT),
                 label=child.attrib.get("label", ""),
                 ejectile=child.attrib.get("ejectile"),
                 eliminated=_isTrue(child, "eliminated"),
@@ -352,7 +368,7 @@ class _ResonanceReader:
             ))
         return out
 
-    def readSpinGroup(self, element: ET.Element, path: str) -> RMatrixSpinGroup:
+    def readSpinGroup(self, element: ET.Element, path: str, amplitudes=False) -> RMatrixSpinGroup:
         label = element.attrib.get("label", "")
         here = f"{path}/spinGroup[@label='{label}']"
         spin = element.attrib.get("spin")
@@ -360,7 +376,7 @@ class _ResonanceReader:
             self.readChannel(child, here)
             for child in element.findall("channels/channel")
         ]
-        energies, widths = self.readParameterTable(element, channels, here)
+        energies, widths = self.readParameterTable(element, channels, here, 'eV**0.5' if amplitudes else 'eV')
         return RMatrixSpinGroup(
             label=label,
             spin=None if spin is None else readFraction(spin),
@@ -435,7 +451,7 @@ class _ResonanceReader:
         )
 
     def readParameterTable(self, element: ET.Element, channels: List[Channel],
-                           path: str):
+                           path: str, widthUnit='eV'):
         """§19.3.5's ``table`` → ``(energies, [[width per channel] per resonance])``.
 
         The width columns are located through each channel's ``columnIndex``,
@@ -462,6 +478,17 @@ class _ResonanceReader:
             )
             return [], []
 
+        try:
+            for header in table.findall('columnHeaders/column'):
+                index = int(header.attrib['index'])
+                unit = header.attrib.get('unit','').replace('**(1/2)','**0.5')
+                target = 'eV' if index == 0 else widthUnit
+                if index < 0 or index >= data.shape[1]:
+                    raise ValueError('RMatrix column index outside the table')
+                data[:,index] *= conversion_factor(unit,target)
+        except (ValueError,UnitError) as error:
+            self.unsupported('table',path,str(error))
+            return [],[]
         energies = data[:, 0].tolist()
         widths = []
         for row in data:
@@ -471,7 +498,7 @@ class _ResonanceReader:
                 and channel.columnIndex < row.size else 0.0
                 for channel in channels
             ])
-        missing = [c.label for c in channels if c.columnIndex is None]
+        missing = [c.label for c in channels if c.columnIndex is None or not 1 <= c.columnIndex < data.shape[1]]
         if missing:
             self.report.lost(
                 f"{path}: channels {missing} carry no columnIndex, so their "
@@ -516,6 +543,9 @@ class _ResonanceReader:
         here = f"{path}/BreitWigner"
         bwRadius, bwRadiusUnit = self.modelRadius(
             element.find("scatteringRadius"), here)
+        radiusWrapper = element.find("scatteringRadius")
+        localRadius = (self.readScatteringRadius(radiusWrapper, here)
+                       if radiusWrapper is not None and radiusWrapper.find("XYs1d") is not None else None)
         pops = element.find("PoPs")
         approximation = element.attrib.get("approximation")
         if approximation not in BREIT_WIGNER_APPROXIMATIONS:
@@ -536,6 +566,9 @@ class _ResonanceReader:
             radiusUnit=bwRadiusUnit,
             PoPs=None if pops is None else self.readPoPs(pops),
             resonanceParameters=self.readBreitWignerTable(element, here),
+            radiusPolicy=RadiusPolicy(
+                channelMode="mass" if _isTrue(element, "calculateChannelRadius") else "phase",
+                phaseRadius=localRadius),
         )
 
     def readBreitWignerTable(self, element: ET.Element,
@@ -550,6 +583,15 @@ class _ResonanceReader:
 
         headers = [c.attrib.get("name", "") for c in table.findall("columnHeaders/column")]
         index = {name: position for position, name in enumerate(headers)}
+        for column in table.findall("columnHeaders/column"):
+            name = column.attrib.get("name", "")
+            if name == "energy" or name in BREIT_WIGNER_WIDTHS:
+                try:
+                    factor = conversion_factor(column.attrib.get("unit", ""), "eV")
+                except UnitError as error:
+                    self.unsupported("table", path, f"{name} unit: {error}")
+                    return parameters
+                data[:, index[name]] *= factor
         for name in ("energy", "L", "J"):
             if name not in index:
                 self.unsupported(
@@ -590,10 +632,11 @@ class _ResonanceReader:
 
     def readUnresolved(self, element: ET.Element, path: str) -> UnresolvedRegion:
         here = f"{path}/unresolved"
+        factor = conversion_factor(element.attrib.get("domainUnit", "eV"), "eV")
         region = UnresolvedRegion(
-            domainMin=float(element.attrib["domainMin"]),
-            domainMax=float(element.attrib["domainMax"]),
-            domainUnit=element.attrib.get("domainUnit", "eV"),
+            domainMin=float(element.attrib["domainMin"])*factor,
+            domainMax=float(element.attrib["domainMax"])*factor,
+            domainUnit="eV",
         )
         widths = element.find("tabulatedWidths")
         if widths is None:
@@ -637,6 +680,7 @@ class _ResonanceReader:
             J=readFraction(J.attrib["value"]),
             levelSpacing=None if spacing is None else spacing[1],
             levelSpacingEnergies=None if spacing is None else spacing[0],
+            levelSpacingFunction=None if spacing is None else spacing[2],
         )
         for width in J.findall("widths/width"):
             label = width.attrib.get("label", "")
@@ -644,41 +688,57 @@ class _ResonanceReader:
             group.channels.append(UnresolvedChannel(
                 label=width.attrib.get("resonanceReaction", label),
                 degreesOfFreedom=float(width.attrib.get("degreesOfFreedom", 1.0)),
-                widths=None if average is None else average[1],
-                constantWidth=None if average is not None else _constant(width),
+                widths=None if average is None or average[0] is None else average[1],
+                constantWidth=(float(average[1][0]) if average is not None and average[0] is None
+                               else None if average is not None else _constant(width)),
                 energies=None if average is None else average[0],
+                averageFunction=None if average is None else average[2],
             ))
         return group
 
     def readAverage(self, element: Optional[ET.Element], path: str):
-        """``(energies, values)`` for one average, or ``None`` for a constant.
+        """Return compatibility arrays plus the complete canonical function.
 
-        A ``regions1d`` — 414 of the library's 5 937 widths — is flattened onto
-        one grid, which drops the differing interpolation rule *between* its
-        regions. That is an **approximation** and not a loss: the numbers that
-        come back are the evaluator's at every node and something else between
-        two nodes that belonged to different regions, and nothing in the result
-        says so. It is reported for that reason.
+        A regions1d keeps its boundaries and interpolation; the arrays are
+        a compatibility view and never replace the function for serialization.
         """
         if element is None:
             return None
         for child in element:
-            if child.tag == "constant1d":
-                return None
-            if child.tag in ("XYs1d", "regions1d"):
+            if child.tag in ("constant1d", "XYs1d", "regions1d"):
                 form = self.function(child, path)
                 if form is None:
                     return None
+                from dataclasses import replace
+                from kika.nuclear_data.model.axes import Axes
+                if form.axes is None:
+                    self.unsupported('average',path,'missing energy/value axes and units')
+                    return None
+                try:
+                    units = {axis.index:axis.unit for axis in form.axes}
+                    xf = conversion_factor(units.get(1,''),'eV')
+                    yf = conversion_factor(units.get(0,''),'eV')
+                except UnitError as error:
+                    self.unsupported('average',path,str(error))
+                    return None
+                axes = Axes([replace(axis,unit='eV') if axis.index in (0,1) else axis for axis in form.axes])
+                curves = form.function1ds if isinstance(form,Regions1d) else [form]
+                for curve in curves:
+                    curve.axes=axes
+                    if hasattr(curve,'constant'):
+                        curve.constant *= yf
+                        curve.domainMin_ *= xf
+                        curve.domainMax_ *= xf
+                    else:
+                        curve.xs *= xf
+                        curve.ys *= yf
+                form.axes=axes
+                if hasattr(form,'constant'):
+                    return None,np.array([form.constant]),form
                 if isinstance(form, Regions1d):
-                    self.report.approximated(
-                        f"{path}: a regions1d average width was flattened onto "
-                        f"one grid; the per-region interpolation rules are gone "
-                        f"and the values between two nodes of different regions "
-                        f"are no longer the evaluator's"
-                    )
                     xs, ys, _ = form.toEndfRegions()
-                    return xs, ys
-                return form.xs, form.ys
+                    return xs, ys, form
+                return form.xs, form.ys, form
             if child.tag != "axes":
                 self.unsupported(child.tag, path, "not an average kika reads")
         return None

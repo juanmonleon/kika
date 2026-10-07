@@ -47,7 +47,7 @@ from kika.processing.njoy_pendf_cache import (
     get_or_create_pendf,
     read_pendf_mf3_sections,
 )
-from kika.utils.numerics import average_over_intervals, fold_tabulated
+from kika.algebra import fold_tabulated, group_averages, interval_laws
 from scripts.mf33_diagnostics import FOUR_PI, bin_average_xs
 from scripts.multigroup_collapse import (
     MF33MultigroupResult,
@@ -60,7 +60,6 @@ def fold_xs_over_bins(
     xs_b: np.ndarray,
     energy_bins: Sequence[Any],
     *,
-    n_nodes: int = 12,
     logger=None,
 ) -> np.ndarray:
     """Project a pointwise cross section onto analysis bins through the TOF kernel.
@@ -83,12 +82,6 @@ def fold_xs_over_bins(
         background there and is identically zero inside the RRR.
     energy_bins : Sequence[EnergyBinInfo]
         Bins carrying ``energy_mev``, ``sigma_E_mev`` and the bin edges.
-    n_nodes : int, default 12
-        Gauss-Hermite nodes; read only if ``fold_tabulated`` is asked for its
-        legacy method. The default fold integrates on the table's own points
-        (:func:`kika.utils.numerics.gaussian_fold_nodes`) since 2026-09-24, and
-        a MF33 built before then was recentred on a Gauss-Hermite fold of the
-        host MF3 that is 4 % off median for Fe-56 elastic.
     logger : optional
         Sink for the count of bins that fell back to a box average.
 
@@ -113,14 +106,13 @@ def fold_xs_over_bins(
         if sigma_E_mev > 0.0:
             out[i] = fold_tabulated(
                 e_ev, xs_b, float(eb.energy_mev) * 1e6, sigma_E_mev * 1e6,
-                n_nodes=n_nodes,
             )
         else:
             fallback.append(i)
             edges = np.array(
                 [eb.bin_lower_mev * 1e6, eb.bin_upper_mev * 1e6], dtype=float,
             )
-            out[i] = average_over_intervals(e_ev, xs_b, edges)[0]
+            out[i] = group_averages(e_ev, xs_b, 2, edges)[0]
 
     if fallback and logger is not None:
         logger.warning(
@@ -429,10 +421,10 @@ def build_mt1_from_partials(
         sec = sections.get(mt)
         if sec is None:
             return None
-        return average_over_intervals(
-            np.asarray(sec.energies, dtype=float),
-            np.asarray(sec.cross_sections, dtype=float),
-            grid_ev,
+        energies = np.asarray(sec.energies, dtype=float)
+        return group_averages(
+            energies, np.asarray(sec.cross_sections, dtype=float),
+            interval_laws(energies.size, sec.energy_interpolation), grid_ev,
         )
 
     sigma_tot = group_xs(total_mt)

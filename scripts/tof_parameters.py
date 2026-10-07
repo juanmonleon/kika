@@ -31,7 +31,7 @@ import numpy as np
 
 from kika._constants import NEUTRON_MASS_MEV, SPEED_OF_LIGHT_M_NS  # noqa: F401
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import fold_tabulated
+from kika.algebra import fold_tabulated
 
 
 @dataclass
@@ -457,27 +457,21 @@ def fold_xs_over_resolution(
     xs: np.ndarray,
     energy_mev: float,
     sigma_E_mev: float,
-    n_nodes: int = 12,
-    method: str = "grid",
 ) -> float:
     """Average a tabulated cross section σ(E') over a Gaussian energy-resolution
     kernel N(energy_mev, sigma_E_mev²).
 
-    Since 2026-09-24 the default quadrature (``method="grid"``) integrates on the
-    table's own points inside ±5σ_E plus 101 uniform ones
-    (:func:`kika.utils.numerics.gaussian_fold_nodes`). The 12-node Gauss–Hermite
-    rule used before is ``method="gauss-hermite"``: it misses Fe-56 elastic by
-    4 % median and up to 55 % over the chi-square database, because MF3 has
-    structure finer than σ_E there and its nodes do not know where.
+    Exact for the lin-lin interpolant of the (e_grid_ev, xs) table: the integral
+    of a straight line against a Gaussian has a closed form, summed panel by
+    panel over the table's own points (:func:`kika.algebra.fold.fold_tabulated`).
+    σ(E') is held at the table's end values outside its coverage. With
+    sigma_E_mev <= 0 the kernel collapses to a delta and σ(energy_mev) is
+    returned. Units follow `xs` (barns for MF3 elastic).
 
-    σ(E') is obtained by linear interpolation on the (e_grid_ev, xs) table and
-    clamped to the table endpoints outside its coverage (numpy.interp default).
-    With sigma_E_mev <= 0 the kernel collapses to a delta and the unfolded value
-    σ(energy_mev) is returned. Units follow `xs` (barns for MF3 elastic).
-
-    Under ``method="gauss-hermite"``, with nodes xᵢ and weights wᵢ for the
-    weight exp(-x²),
-        ⟨σ⟩ = (1/√π) · Σᵢ wᵢ · σ(E₀ + √2·σ_E·xᵢ).
+    History, because scored numbers moved with it: 12-node Gauss–Hermite until
+    2026-09-24 (4 % median and up to 55 % off Fe-56 elastic over the chi-square
+    database), then a Gaussian × trapezoid rule on the table's points plus 101
+    uniform ones (up to 6e-4 off), exact since October 2026.
 
     Parameters
     ----------
@@ -489,11 +483,6 @@ def fold_xs_over_resolution(
         Kernel centroid (the datapoint's nominal incident energy) in MeV.
     sigma_E_mev : float
         Gaussian energy-resolution width in MeV (e.g. from `compute_sigma_E`).
-    n_nodes : int
-        Number of Gauss–Hermite nodes (default 12); read only with
-        ``method="gauss-hermite"``.
-    method : str
-        ``"grid"`` (default) or ``"gauss-hermite"``, see above.
 
     Returns
     -------
@@ -502,10 +491,7 @@ def fold_xs_over_resolution(
     """
     # Unit adapter over the shared primitive: the grid is in eV while the
     # centroid and width arrive in MeV.
-    return float(fold_tabulated(
-        e_grid_ev, xs, energy_mev * 1e6, sigma_E_mev * 1e6,
-        method=method, n_nodes=n_nodes,
-    ))
+    return float(fold_tabulated(e_grid_ev, xs, energy_mev * 1e6, sigma_E_mev * 1e6))
 
 
 def find_bin_for_energy(

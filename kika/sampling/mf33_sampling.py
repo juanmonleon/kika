@@ -33,6 +33,12 @@ from kika.endf.writers.endf_writer import ENDFWriter
 from kika.cov.cross_section_covariance import CrossSectionCovariance
 from kika.processing.multigroup import compute_rebin_operator, collapse_covariance
 from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
+# The one group average of a central value MF33 is a covariance of: exact,
+# 1/E-weighted, zero outside the table. Until October 2026 this module had its
+# own, a 64-point trapezoid in ln E that was up to 50 % off on wide bins of the
+# resolved range.
+from kika.endf.classes.mf33.mf33 import bin_average_xs as _bin_average_xs
+from kika.algebra import interval_laws
 from kika.processing.njoy_pendf_cache import (
     find_njoy_executable,
     get_or_create_pendf,
@@ -158,10 +164,11 @@ def load_mf33_covariance(
     if mf3_sections:
         for mt in mts_present:
             if mt in mf3_sections:
+                section = mf3_sections[mt]
+                energies = np.asarray(section.energies, dtype=float)
                 bin_xs[mt] = _bin_average_xs(
-                    np.asarray(mf3_sections[mt].energies, dtype=float),
-                    np.asarray(mf3_sections[mt].cross_sections, dtype=float),
-                    union_grid,
+                    energies, np.asarray(section.cross_sections, dtype=float), union_grid,
+                    interval_laws(energies.size, list(getattr(section, 'energy_interpolation', ()))),
                 )
 
     unified = CrossSectionCovariance(
@@ -386,10 +393,10 @@ def loadCrossSectionBlocks(endfObj, mtList, centralSections, *, mf: int = 33,
     for mt in mtsPresent:
         section = (centralSections or {}).get(mt)
         if section is not None:
+            energies = np.asarray(section.energies, dtype=float)
             binCentral[mt] = _bin_average_xs(
-                np.asarray(section.energies, dtype=float),
-                np.asarray(section.cross_sections, dtype=float),
-                unionGrid,
+                energies, np.asarray(section.cross_sections, dtype=float), unionGrid,
+                interval_laws(energies.size, list(getattr(section, 'energy_interpolation', ()))),
             )
 
     sections = relativiseAbsoluteSections(
@@ -901,46 +908,3 @@ def _augment_with_step_duplicates(
         new_interp.append((int(nbt) + int(added), int(intc)))
 
     return np.asarray(e_aug, dtype=float), np.asarray(s_aug, dtype=float), new_interp
-
-
-def _bin_average_xs(
-    energies: np.ndarray,
-    xs: np.ndarray,
-    bin_edges: Sequence[float],
-    n_quad: int = 64,
-) -> np.ndarray:
-    """1/E-weighted bin average of σ(E) over each interval of ``bin_edges``.
-
-    Mirrors the approach in ``MF33MT._bin_average_xs`` but stays self-
-    contained (linear interpolation between tabulated PENDF points).
-    """
-    edges = np.asarray(bin_edges, dtype=float)
-    out = np.zeros(edges.size - 1, dtype=float)
-    if energies.size == 0:
-        return out
-    e_min = float(energies[0])
-    e_max = float(energies[-1])
-
-    for i in range(edges.size - 1):
-        lo, hi = float(edges[i]), float(edges[i + 1])
-        if hi <= e_min or lo >= e_max:
-            out[i] = 0.0
-            continue
-        lo_clip = max(lo, e_min)
-        hi_clip = min(hi, e_max)
-        if hi_clip <= lo_clip:
-            out[i] = 0.0
-            continue
-        # 1/E-weighted average via log-spaced quadrature, with a linear
-        # fallback if the interval starts at 0 eV (rare for ENDF MF3).
-        if lo_clip > 0:
-            sample_e = np.geomspace(lo_clip, hi_clip, n_quad)
-            weights = 1.0 / sample_e
-        else:
-            sample_e = np.linspace(lo_clip, hi_clip, n_quad)
-            weights = np.ones_like(sample_e)
-        sample_xs = np.interp(sample_e, energies, xs, left=0.0, right=0.0)
-        num = np.trapezoid(weights * sample_xs, sample_e)
-        den = np.trapezoid(weights, sample_e)
-        out[i] = num / den if den > 0 else 0.0
-    return out

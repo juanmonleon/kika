@@ -25,6 +25,7 @@ from numpy.typing import ArrayLike
 from .._records import (
     ENDF_FORMAT_BLANK,
     ENDF_FORMAT_FLOAT,
+    ENDF_FORMAT_PRECISE,
     ENDF_FORMAT_INT,
     ENDF_FORMAT_INT_ZERO,
     ENDF_FORMAT_PRESERVE,
@@ -107,6 +108,22 @@ def record_width(lines: Sequence[str]) -> int:
         if width >= 80:
             return 80
     return 75 if width <= 75 else 80
+
+
+def line_ending(path) -> str:
+    """CRLF or LF, whichever the tape at *path* ends its first line with.
+
+    The other half of :func:`record_width`: what a splice must preserve so the
+    tape is still the tape it was outside the spliced section. The writers read
+    in text mode, which hides the ending, and then wrote in text mode, which on
+    Windows turned every line of an LF tape into CRLF -- so a one-section edit
+    changed every byte-level line of the file, and ``cmp`` against the source
+    could no longer show what moved. Pass the result as ``newline=`` when
+    writing and the internal newline comes out as the source had it.
+    """
+    with open(path, 'rb') as f:
+        first = f.readline()
+    return '\r\n' if first.endswith(b'\r\n') else '\n'
 
 
 
@@ -222,16 +239,10 @@ def describe_interpolation_region(nbt, int_code):
 
 # Moved to kika/processing/interpolation.py by phase 2 of the GNDS roadmap:
 # interpolation law codes 1-5 are shared with GNDS (§3.4.4) and are not
-# ENDF-specific. These are *live* re-exports -- eight call sites in kika/endf
-# import interpolate_1d_endf -- not shims awaiting deletion. The private names
-# come along because kika/endf/tests reaches for them.
-from kika.processing.interpolation import (
-    interpolate_1d as interpolate_1d_endf,
-    _regionize,
-    _base_int_code,
-    _interp_pair,
-    _interp_pair_vec,
-)
+# ENDF-specific. This is a *live* re-export -- eight call sites in kika/endf
+# import interpolate_1d_endf -- not a shim awaiting deletion.
+from kika.processing.interpolation import interpolate_1d as interpolate_1d_endf
+from kika.algebra import interpolate_between, interval_laws, legendre_coefficients
 
 
 
@@ -686,7 +697,8 @@ def format_interp_pairs(pairs, mat, mf, mt, start_line, pad=PAD_BLANK):
     return result_lines, line_num
 
 
-def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK):
+def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK,
+                      data_format=ENDF_FORMAT_FLOAT):
     """
     Format NP x/y data pairs into ENDF lines (3 pairs per line).
 
@@ -709,7 +721,7 @@ def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK):
         for j in range(3):
             if i + j < n:
                 values.extend([x_data[i + j], y_data[i + j]])
-                fmts.extend([ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT])
+                fmts.extend([data_format, data_format])
             else:
                 values.extend([tail, tail])
                 fmts.extend([tail_fmt, tail_fmt])
@@ -741,7 +753,7 @@ class NonMonotonicTable(ValueError):
 
 
 def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
-                start_line, pad=PAD_BLANK, interp_pad=PAD_BLANK):
+                start_line, pad=PAD_BLANK, interp_pad=PAD_BLANK, data_format=ENDF_FORMAT_FLOAT):
     """
     Format a complete TAB1 record to ENDF lines.
 
@@ -792,7 +804,7 @@ def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
 
     # Data pairs
     dp_lines, line_num = format_data_pairs(x_data, y_data, mat, mf, mt,
-                                           line_num, pad=pad)
+                                           line_num, pad=pad, data_format=data_format)
     result_lines.extend(dp_lines)
 
     return result_lines, line_num
@@ -927,37 +939,23 @@ def project_tabulated_to_legendre(
     fmu: ArrayLike,
     max_order: int,
     ang_nbt_int: Optional[Sequence[Tuple[int, int]]] = None,
-    quad_order: int = 64,
 ) -> np.ndarray:
-    """
-    Compute Legendre coefficients a_l up to max_order from tabulated f(μ) on μ∈[-1,1].
-    Uses Gauss–Legendre quadrature on an ENDF-interpolated f(μ) (respects angular INT codes).
+    """Legendre coefficients ``a_0..a_L`` of a tabulated f(mu), normalised to ``a_0 = 1``.
 
-    Conventions:
-    - Angular PDF is represented as f(μ) = 1/2 Σ_{l=0}^L (2l+1) a_l P_l(μ)
-    - With this convention, coefficients are: a_l = ∫_{-1}^{1} f(μ) P_l(μ) dμ
+    ``a_l = int f(mu) P_l(mu) dmu / int f(mu) dmu`` -- the convention
+    ``f = sum (2l+1)/2 a_l P_l`` -- with f read under the table's own angular
+    (NBT, INT) and held at its end values out to mu = -1 and +1, as
+    :func:`evaluate_tabulated_pdf` reads it: :func:`kika.algebra.legendre_coefficients`,
+    exact on lin-lin and histogram tables. A 64-node Gauss-Legendre rule over the whole of [-1, 1] used to
+    stand in for them and missed the kinks of the table by up to 5e-4 in a_l
+    (forward-peaked elastic at 30 MeV, JEFF-4.0 U-235 and U-238).
     """
     mu = np.asarray(mu, dtype=float)
     fmu = np.asarray(fmu, dtype=float)
     if mu.size == 0 or fmu.size == 0:
         return np.zeros(max_order + 1, dtype=float)
-
-    # GL nodes/weights
-    mu_q, w_q = np.polynomial.legendre.leggauss(quad_order)
-    # Interpolate f to GL nodes with ENDF angular interpolation (default linear)
-    f_q = interpolate_1d_endf(mu, fmu, ang_nbt_int or [(len(mu), 2)], mu_q, out_of_range="hold")
-
-    # Normalize on [-1,1] using the same quadrature
-    norm = float(np.sum(f_q * w_q))
-    if abs(norm) > 1e-15:
-        f_q = f_q / norm
-
-    # Project: a_l = ∫ f(μ) P_l(μ) dμ under the convention used elsewhere (a0 ≈ 1)
-    coeffs = np.zeros(max_order + 1, dtype=float)
-    for l in range(max_order + 1):
-        P_l = np.polynomial.legendre.legval(mu_q, [0] * l + [1])  # evaluate P_l(μ)
-        coeffs[l] = float(np.sum(P_l * f_q * w_q))
-    return coeffs
+    laws = interval_laws(mu.size, ang_nbt_int or [(mu.size, 2)]) if mu.size > 1         else np.zeros(0, dtype=np.int64)
+    return legendre_coefficients(mu, fmu, laws, max_order)
 
 
 def evaluate_tabulated_pdf(
@@ -1024,8 +1022,8 @@ def evaluate_tabulated_pdf(
         return f0
 
     pairs = energy_interp if energy_interp else [(energies.size, 2)]
-    code = int(segment_int_codes(energies.size, pairs)[idx1 - 1])
-    return interp_energy_values(energies[idx0], f0, energies[idx1], _table(idx1), E, code)
+    code = int(interval_laws(energies.size, pairs)[idx1 - 1])
+    return interpolate_between(energies[idx0], f0, energies[idx1], _table(idx1), code, E)
 
 
 def auto_trim_legendre_tail(
@@ -1086,82 +1084,3 @@ def pick_mixed_branch(E: float, E_leg: np.ndarray, E_tab: np.ndarray) -> str:
     if has_leg and has_tab:
         return "leg" if abs(E - E_leg.max()) <= abs(E - E_tab.min()) else "tab"
     return "leg" if has_leg else "tab"
-
-
-def segment_int_codes(ne: int, nbt_int_pairs: Sequence[Tuple[int, int]]) -> np.ndarray:
-    """
-    Build an array of length (ne-1) with the INT code for each energy interval [k, k+1].
-    ENDF NBT's are 1-based indices of the *last* point in the region.
-    """
-    if not nbt_int_pairs:
-        nbt_int_pairs = [(ne, 2)]  # default linear across full grid
-
-    seg = np.full(ne - 1, 2, dtype=int)
-    start = 0
-    for nbt, ic in nbt_int_pairs:
-        # region covers points [start ... end], so intervals [start ... end-1]
-        end = max(0, min(nbt - 1, ne - 1))
-        if end > start:
-            seg[start:end] = ic
-        start = max(0, min(nbt, ne - 1))
-        if start >= ne - 1:
-            break
-    return seg
-
-
-def interp_energy_values(E0: float, f0: np.ndarray,
-                          E1: float, f1: np.ndarray,
-                          E: float, int_code: int) -> np.ndarray:
-    """
-    Vectorized interpolation of y(E) between (E0,f0) and (E1,f1) under ENDF INT code (1..5).
-    Falls back to linear where logs are invalid.
-    """
-    if E0 == E1:
-        return np.array(f0, dtype=float, copy=True)
-
-    t = (E - E0) / (E1 - E0)
-    code = int_code % 10 if int_code >= 10 else int_code
-    code = 5 if code == 0 else code  # 10,20 → 0 → use 5
-
-    # default lin-lin
-    if code == 1:
-        return np.array(f0, dtype=float, copy=True)  # histogram in E: hold left
-    if code == 2:
-        return (1.0 - t) * np.asarray(f0, dtype=float) + t * np.asarray(f1, dtype=float)
-
-    # helpers
-    f0 = np.asarray(f0, dtype=float)
-    f1 = np.asarray(f1, dtype=float)
-
-    # lin-log (y linear in ln E)
-    if code == 3:
-        if E0 <= 0 or E1 <= 0 or E <= 0:
-            return (1.0 - t) * f0 + t * f1
-        le0, le1, le = math.log(E0), math.log(E1), math.log(E)
-        tt = (le - le0) / (le1 - le0)
-        return (1.0 - tt) * f0 + tt * f1
-
-    # log-lin (ln y linear in E)
-    if code == 4:
-        mask = (f0 > 0.0) & (f1 > 0.0)
-        out = (1.0 - t) * f0 + t * f1
-        if np.any(mask):
-            ln_y = (1.0 - t) * np.log(f0[mask]) + t * np.log(f1[mask])
-            out[mask] = np.exp(ln_y)
-        return out
-
-    # log-log (ln y linear in ln E)
-    if code == 5:
-        if E0 <= 0 or E1 <= 0 or E <= 0:
-            return (1.0 - t) * f0 + t * f1
-        le0, le1, le = math.log(E0), math.log(E1), math.log(E)
-        tt = (le - le0) / (le1 - le0)
-        mask = (f0 > 0.0) & (f1 > 0.0)
-        out = (1.0 - t) * f0 + t * f1
-        if np.any(mask):
-            ln_y = (1.0 - tt) * np.log(f0[mask]) + tt * np.log(f1[mask])
-            out[mask] = np.exp(ln_y)
-        return out
-
-    # fallback
-    return (1.0 - t) * f0 + t * f1

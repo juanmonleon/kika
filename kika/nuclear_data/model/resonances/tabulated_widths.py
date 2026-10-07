@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional
+from ..functions import Function1d
+from ..enums import Interpolation
 
 import numpy as np
 
@@ -35,6 +37,10 @@ class UnresolvedChannel:
     #: ENDF-decoded evaluation always says. Same two-field shape as
     #: :class:`~kika.nuclear_data.model.resonances.ScatteringRadius`.
     energies: Optional[np.ndarray] = None
+    #: Canonical function preserves interpolation and independent regions.
+    #: Arrays above remain a compatibility view; processing must use this
+    #: function when supplied, without inventing a common grid.
+    averageFunction: Optional[Function1d] = None
 
     def __post_init__(self) -> None:
         if self.widths is not None:
@@ -61,6 +67,9 @@ class UnresolvedSpinGroup:
     #: The energies ``levelSpacing`` is tabulated against, when they are not the
     #: block's grid. See :attr:`UnresolvedChannel.energies`.
     levelSpacingEnergies: Optional[np.ndarray] = None
+    levelSpacingFunction: Optional[Function1d] = None
+    #: ENDF URR INT interpolates cross sections, not the average parameters.
+    crossSectionInterpolation: Optional[Interpolation] = None
 
     def __post_init__(self) -> None:
         if self.levelSpacing is not None:

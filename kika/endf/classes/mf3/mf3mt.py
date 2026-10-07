@@ -36,6 +36,7 @@ class MF3MT(MT):
     _interpolation: List[Tuple[int, int]] = field(default_factory=list)
     _energies: List[float] = field(default_factory=list)
     _cross_sections: List[float] = field(default_factory=list)
+    _data_format: str = ENDF_FORMAT_FLOAT
 
     # Line count
     num_lines: int = 0
@@ -185,7 +186,7 @@ class MF3MT(MT):
         tab1_lines, line_num = format_tab1(
             self._qm, self._qi, 0, self._lr,
             self._interpolation, self._energies, self._cross_sections,
-            mat, mf, mt, line_num,
+            mat, mf, mt, line_num, data_format=self._data_format,
         )
         lines.extend(tab1_lines)
 

@@ -6,7 +6,7 @@ import numpy as np
 from .base import MF4MT
 from ....endf.utils import (
     auto_trim_legendre_tail, evaluate_tabulated_pdf, interpolate_1d_endf,
-    segment_int_codes, interp_energy_values, project_tabulated_to_legendre
+    project_tabulated_to_legendre
 )
 
 
@@ -80,47 +80,6 @@ class MF4MTTabulated(MF4MT):
     
 
     # ------------------------- core helpers -------------------------
-    def _energy_panel_code_for_pair(self, upper_index: int) -> int:
-        """
-        Return the ENDF INT code for the interval (E[upper_index-1], E[upper_index]).
-        upper_index runs from 1 to NE-1 (inclusive).
-        """
-        ne = len(self._energies)
-        pairs = self._interpolation if self._interpolation else [(ne, 2)]
-        seg_int = segment_int_codes(ne, pairs)
-        return int(seg_int[upper_index - 1])
-
-    def _f_mu_at_energy(self, E: float, mu_points: np.ndarray, out_of_range: str = "zero") -> np.ndarray:
-        """
-        Evaluate f(μ, E) at requested E using ENDF-correct 2D interpolation:
-          1) within each energy table, interpolate in μ using that table's (NBT,INT),
-          2) then interpolate in E between the bracketing energies using the energy (NBT,INT).
-          
-        Parameters
-        ----------
-        E : float
-            Energy at which to evaluate the distribution
-        mu_points : np.ndarray
-            Cosine values where to evaluate f(μ, E)
-        out_of_range : str
-            Behavior outside energy grid: 'zero' or 'hold'
-        """
-        # Shared with the tabulated branch of MF4MTMixed, which needs exactly
-        # this and used to have no way to say so.  "hold" rather than the
-        # caller's out_of_range: this path feeds the Legendre projection, which
-        # has always clamped to the end tables outside the energy grid, and the
-        # public evaluator is where the choice is made properly.
-        return evaluate_tabulated_pdf(
-            mu_points,
-            E,
-            energies=self._energies,
-            cosines=self._cosines,
-            probabilities=self._probabilities,
-            angular_interp=self._angular_interpolation,
-            energy_interp=self._interpolation,
-            out_of_range="hold",
-        )
-
     def evaluate_angular_pdf(
         self,
         mu,
@@ -178,6 +137,35 @@ class MF4MTTabulated(MF4MT):
         return grid if grid.size else None
 
     # ------------------------- public API -------------------------
+    def legendre_table(self, max_order: int):
+        """``(E, A, laws, hold)`` -- see :meth:`MF4MT.legendre_table`.
+
+        f(mu, E) is interpolated between incident energies at fixed mu, and the
+        projection onto P_l is linear in f, so under a law that is linear in y
+        (1, 2 or 3) a_l(E) interpolates between the projections at the file's
+        energies under that same law. Under a log-y law (4, 5) it does not, and
+        there is no table to give. Held outside the grid, as
+        :meth:`extract_legendre_coefficients` holds it.
+        """
+        from ....algebra import interval_laws
+
+        energies = np.asarray(self._energies, dtype=float)
+        laws = (interval_laws(energies.size, self._interpolation or [(energies.size, 2)])
+                if energies.size > 1 else np.zeros(0, dtype=np.int64))
+        if np.any(np.isin(laws, (4, 5)) & (np.diff(energies) > 0)):
+            raise ValueError(
+                "a log-y energy law interpolates f(mu, E), not its Legendre "
+                "projection, so a_l(E) is not a table under it")
+        table = np.zeros((energies.size, max_order + 1))
+        for i in range(energies.size):
+            pairs = (self._angular_interpolation[i]
+                     if i < len(self._angular_interpolation) and self._angular_interpolation[i]
+                     else None)
+            table[i] = project_tabulated_to_legendre(
+                np.asarray(self._cosines[i], dtype=float),
+                np.asarray(self._probabilities[i], dtype=float), max_order, pairs)
+        return energies, table, laws, True
+
     def extract_legendre_coefficients(
         self,
         energy: Union[float, np.ndarray],
@@ -185,62 +173,43 @@ class MF4MTTabulated(MF4MT):
         *,
         trim: bool = False,
         trim_tol: float = 1e-6,
-        quad_order: int = 96,
         out_of_range: str = "zero"
     ) -> Dict[int, Union[float, np.ndarray]]:
         """
-        Compute a_ℓ(E) = (2ℓ+1)/2 ∫_{-1}^{1} P_ℓ(μ) f(μ,E) dμ,
-        honoring ENDF angular and energy interpolation laws.
-        
+        a_l(E) = int P_l(mu) f(mu, E) dmu / int f(mu, E) dmu, from the file's
+        tables under their angular laws and its energy law.
+
+        Each table is projected exactly (:func:`project_tabulated_to_legendre`)
+        and the projections are interpolated under the energy law, which is the
+        projection of the interpolated f(mu, E) for any law linear in y
+        (see :meth:`legendre_table`). Outside the energy grid the end values
+        are held: *out_of_range* is accepted for the common signature and has
+        no effect, as it never had on this projection.
+
         Parameters
         ----------
         energy : float or array
             Energy point(s) where to evaluate a_ℓ(E)
         max_legendre_order : int
             Maximum Legendre order to compute
-        quad_order : int  
-            Quadrature order for Gauss-Legendre integration
-        out_of_range : str
-            Behavior outside energy grid: 'zero' or 'hold'
-            
+
         Returns
         -------
         Dict[int, Union[float, np.ndarray]]
             Dictionary mapping Legendre order ℓ to coefficient values a_ℓ(E)
         """
-        # Handle empty data
-        if len(self._energies) == 0:
-            scalar_input = np.isscalar(energy)
-            energy_array = np.array([energy], dtype=float) if scalar_input else np.array(energy, dtype=float)
-            zeros = {ell: (0.0 if scalar_input else np.zeros_like(energy_array)) 
-                    for ell in range(max_legendre_order + 1)}
-            return zeros
+        from ....algebra import evaluate
 
         scalar_input = np.isscalar(energy)
-        E_arr = np.array([energy], dtype=float) if scalar_input else np.array(energy, dtype=float)
-
-        # Gauss–Legendre quadrature nodes/weights on [-1,1]
-        mu_q, w_q = np.polynomial.legendre.leggauss(quad_order)
-
-        out = {ell: np.empty(E_arr.shape, dtype=float) for ell in range(max_legendre_order + 1)}
-
-        for k, Ereq in enumerate(E_arr):
-            f_q = self._f_mu_at_energy(Ereq, mu_q, out_of_range)
-
-            # Use the utility function for projection
-            # Note: project_tabulated_to_legendre expects tabulated (mu, f_mu) data,
-            # but we already have f evaluated at quadrature points, so we pass them directly
-            coeffs = project_tabulated_to_legendre(
-                mu=mu_q,
-                fmu=f_q,
-                max_order=max_legendre_order,
-                ang_nbt_int=[(len(mu_q), 2)],  # Linear interpolation (already interpolated)
-                quad_order=quad_order
-            )
-
-            # Store results
-            for ell in range(max_legendre_order + 1):
-                out[ell][k] = coeffs[ell]
+        E_arr = np.atleast_1d(np.asarray(energy, dtype=float))
+        if len(self._energies) == 0:
+            out = {ell: np.zeros(E_arr.shape) for ell in range(max_legendre_order + 1)}
+        else:
+            E, A, laws, _hold = self.legendre_table(max_legendre_order)
+            held = np.clip(E_arr, E[0], E[-1])
+            out = {ell: (evaluate(E, A[:, ell], laws, held) if E.size > 1
+                         else np.full(E_arr.shape, A[0, ell]))
+                   for ell in range(max_legendre_order + 1)}
 
         if trim:
             out = auto_trim_legendre_tail(out, tol=trim_tol, min_order=0)
@@ -270,15 +239,14 @@ class MF4MTTabulated(MF4MT):
         self,
         order: int,
         label: str = None,
-        quad_order: int = 96,
         **styling_kwargs
     ):
         """
         Create a PlotData object for tabulated distribution projected to Legendre coefficients.
         
         For tabulated distributions (LTT=2), Legendre coefficients are computed by
-        projecting the tabulated f(μ,E) distributions onto Legendre polynomials using
-        Gauss-Legendre quadrature.
+        projecting the tabulated f(μ,E) distributions onto Legendre polynomials,
+        exactly (:meth:`extract_legendre_coefficients`).
         
         Parameters
         ----------
@@ -286,9 +254,6 @@ class MF4MTTabulated(MF4MT):
             Legendre polynomial order to extract
         label : str, optional
             Custom label for the plot. If None, auto-generates from isotope and order.
-        quad_order : int, optional
-            Quadrature order for Gauss-Legendre integration when projecting
-            tabulated distributions to Legendre coefficients (default: 96)
         **styling_kwargs
             Additional styling kwargs (color, linestyle, linewidth, etc.)
             
@@ -302,9 +267,6 @@ class MF4MTTabulated(MF4MT):
         >>> # Project tabulated distribution to Legendre coefficients
         >>> data = mf4_tabulated.to_plot_data(order=1, color='blue')
         >>> builder = PlotBuilder().add_data(data).build()
-        >>> 
-        >>> # Use higher quadrature order for better accuracy
-        >>> data = mf4_tabulated.to_plot_data(order=2, quad_order=128)
         
         Notes
         -----
@@ -313,8 +275,7 @@ class MF4MTTabulated(MF4MT):
         
             a_ℓ(E) = (2ℓ+1)/2 ∫_{-1}^{1} P_ℓ(μ) f(μ,E) dμ
         
-        using Gauss-Legendre quadrature. The accuracy depends on the quad_order parameter.
-        Higher orders require higher quadrature orders for accurate integration.
+        exactly on each table's own panels.
         """
         from kika.plotting import LegendreCoeffPlotData
         
@@ -328,7 +289,6 @@ class MF4MTTabulated(MF4MT):
         coeffs_dict = self.extract_legendre_coefficients(
             energy=energies,
             max_legendre_order=order,
-            quad_order=quad_order,
             out_of_range="zero"
         )
         
@@ -361,20 +321,17 @@ class MF4MTTabulated(MF4MT):
     def to_bulk_plot_data(
         self,
         max_order: int = 12,
-        quad_order: int = 96
     ) -> Dict[str, Union[List[float], Dict[int, List[float]], int, str]]:
         """
         Extract ALL Legendre orders at once for bulk loading.
 
         For tabulated distributions (LTT=2), coefficients are computed by projecting
-        f(μ,E) onto Legendre polynomials using Gauss-Legendre quadrature.
+        f(μ,E) onto Legendre polynomials, exactly.
 
         Parameters
         ----------
         max_order : int, optional
             Maximum Legendre order to compute (default: 12)
-        quad_order : int, optional
-            Quadrature order for Gauss-Legendre integration (default: 96)
 
         Returns
         -------
@@ -401,7 +358,6 @@ class MF4MTTabulated(MF4MT):
         coeffs_dict = self.extract_legendre_coefficients(
             energy=energies,
             max_legendre_order=max_order,
-            quad_order=quad_order,
             out_of_range="zero"
         )
 

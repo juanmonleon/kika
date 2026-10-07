@@ -177,6 +177,9 @@ QUANTITIES: Dict[str, Quantity] = {q.name: q for q in (
     Quantity('relative_uncertainty', 'Relative uncertainty',
              'Incident energy', 'Relative uncertainty', 'eV', '%',
              interpolation='lin-lin', log_x=True),
+    Quantity('spectrum_relative_uncertainty', 'Spectrum relative uncertainty',
+             'Outgoing energy', 'Relative uncertainty', 'eV', '%',
+             interpolation='lin-lin', log_x=True),
 )}
 
 

@@ -21,6 +21,7 @@ Repeating it here would measure the appliers twice and the pipeline not at all.
 """
 from __future__ import annotations
 
+from functools import partial
 from collections import defaultdict
 from pathlib import Path
 
@@ -29,6 +30,14 @@ import pytest
 
 from kika.endf import read_endf
 from kika.sampling.model_perturbation import TAPE_EMITTERS, perturbFromModel
+
+# The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
+# the full tape section by section, and NJOY cannot read them (RECONR stops at
+# their orphan FEND records, "illegal TAB1 for mf/mt = 3/0"). So they are
+# perturbed as stated -- resonanceRegion="evaluated" -- which is what these
+# tests are about; the reconstruction itself is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 TAPE = str(DATA / "micro_fe56_xs_and_angular.endf")
@@ -155,18 +164,20 @@ def test_the_angular_distribution_carries_its_own_factors(run):
 def test_a_reaction_the_request_did_not_name_is_untouched(run):
     """Byte for byte, which is what the delta emitter is for.
 
-    MT1 and MT102 are in the same MF3 as the perturbed MT2, so they are
-    re-rendered by the writer even though the model did not change them -- this
-    asserts that the re-render is faithful, which is the property that makes
-    ``cmp`` between two samples show only the perturbation.
+    MT102 sits in the same MF3 as the perturbed MT2 and nothing moves it, so it
+    comes back as the source wrote it. MT1 is the exception, and on purpose: on
+    this tape it is the sum of MT2 and MT102, so MT2 moving re-derives it (MF3's
+    sum rules, ``kika.sampling.cross_section_sums``). That it moved by exactly
+    what MT2 moved is asserted in
+    ``test_the_cross_section_sums_hold_on_a_realisation.py``.
     """
     source = _blocks(TAPE)
     delta = _blocks(str(run.samples[0]["files"]["endf-delta"]))
 
-    for key in ((3, 1), (3, 102), (2, 151), (33, 2), (34, 2)):
+    for key in ((3, 102), (2, 151), (33, 2), (34, 2)):
         assert delta[key] == source[key], f"MF{key[0]}/MT{key[1]} was rewritten"
-    assert delta[(3, 2)] != source[(3, 2)]
-    assert delta[(4, 2)] != source[(4, 2)]
+    for key in ((3, 1), (3, 2), (4, 2)):
+        assert delta[key] != source[key], f"MF{key[0]}/MT{key[1]} did not move"
 
 
 def test_two_samples_differ_only_where_they_were_perturbed(run):
@@ -174,7 +185,7 @@ def test_two_samples_differ_only_where_they_were_perturbed(run):
     second = _blocks(str(run.samples[1]["files"]["endf-delta"]))
     differing = {key for key in set(first) | set(second)
                  if first.get(key) != second.get(key)}
-    assert differing == {(3, 2), (4, 2)}, (
+    assert differing == {(3, 1), (3, 2), (4, 2)}, (
         f"two samples of the same request differ in {sorted(differing)}")
 
 
@@ -257,57 +268,87 @@ def test_the_realisation_is_removed_from_the_suite_after_it_is_written(run):
     through the second sample's diagnostics being complete: if the first
     sample's label had stayed, the second would have been applied on top of it.
     """
+    from kika.sampling.joint_blocks import ComponentKey
+
     first, second = (sample["set"] for sample in run.samples)
     assert set(first.components()) == set(second.components())
+    # The applier reports the request plus what the sum rules moved with it:
+    # MT1, re-derived because its partial MT2 moved.
+    rederived = {ComponentKey(26056, 33, 1)}
     for sample in run.samples:
-        assert set(sample["applied"]) == set(sample["set"].components())
+        assert set(sample["applied"]) == set(sample["set"].components()) | rederived
 
 
 # ----------------------------------------------------------------------
 # What the run says about what it did not do
 # ----------------------------------------------------------------------
 
-def test_a_run_that_leaves_a_sum_stale_says_so():
-    """MT1 perturbed beside its partials makes a total that is not their sum.
-
-    ENDF states MT1 and MT4 as ordinary sections, so a request for "every MT the
-    file states" routinely names a sum and its partials, and each is scaled by
-    its own block. Re-deriving is decision 3 of the roadmap and moves numbers, so
-    the run records the fact rather than repairing it quietly or leaving it out.
-
-    Built by hand rather than run, because the committed tape that carries a
-    summed MT (``micro_fe56_structural.endf``: MT1 goes to ``sums`` because its
-    partials MT2 and MT102 are given beside it) has no MF33 to draw from. What is
-    under test is the note, and the note reads the suite.
-    """
+def _structuralSuite():
     from kika.endf.model_adapter import decodeReactionSuite
-    from kika.sampling.joint_blocks import ComponentKey
-    from kika.sampling.model_perturbation import _redundancyNote
-    from kika.sampling.perturbation_set import PerturbationSet
 
     suite, _report = decodeReactionSuite(
         read_endf(str(DATA / "micro_fe56_structural.endf")))
     assert 1 in {int(r.ENDF_MT) for r in suite.sums.reactions}, (
         "this fixture is meant to carry MT1 as a sum; it no longer does")
+    return suite
+
+
+def _handBuiltSet(mts):
+    from kika.sampling.joint_blocks import ComponentKey
+    from kika.sampling.perturbation_set import PerturbationSet
 
     edges = np.array([1.0e-5, 1.0e6, 2.0e7])
-    components = [ComponentKey(26056, 33, mt) for mt in (1, 2)]
-    pset = PerturbationSet(
+    components = [ComponentKey(26056, 33, mt) for mt in mts]
+    return PerturbationSet(
         label="realization-0000",
         factors={component: np.array([1.1, 0.9]) for component in components},
         binEdges={component: edges for component in components})
 
-    note = _redundancyNote(suite, pset)
-    assert note is not None
-    assert "not the sum of its parts" in note
-    assert "decision 3" in note
 
-    # And a realisation that touches only the partials has nothing to say.
-    partialsOnly = PerturbationSet(
-        label="realization-0000",
-        factors={components[1]: np.array([1.1, 0.9])},
-        binEdges={components[1]: edges})
-    assert _redundancyNote(suite, partialsOnly) is None
+def test_a_run_that_leaves_a_sum_stale_says_so():
+    """With the sum rules off, every sum left stale is named -- even one whose
+    partial moved while the sum itself was not asked for.
+
+    The first version of this note only fired when a sum was perturbed *beside*
+    a partial, and a test pinned the silence for the partial-only case. That is
+    the commonest way to leave MT1 stale, and NJOY does not cover for it: RECONR
+    rebuilds MT1 from the partials, so the ACE is consistent while the ENDF tape
+    states a total nobody computed. Built by hand rather than run, because the
+    committed tape that carries a summed MT (``micro_fe56_structural.endf``:
+    MT1 goes to ``sums`` because its partials MT2 and MT102 are given beside it)
+    has no MF33 to draw from.
+    """
+    from kika.sampling.model_perturbation import _redundancyNote
+
+    suite = _structuralSuite()
+    for mts in ((1, 2), (2,), (1,)):
+        note = _redundancyNote(suite, _handBuiltSet(mts), {},
+                               crossSectionSums=False)
+        assert note is not None, f"perturbing MT{list(mts)} left MT1 stale silently"
+        assert "NOT the sum of their parts" in note
+
+
+def test_a_run_that_holds_the_sums_says_what_it_rebuilt():
+    """With them on (the default), the note is the account of what moved and why."""
+    from kika.sampling.model_perturbation import _redundancyNote
+
+    suite = _structuralSuite()
+    pset = _handBuiltSet((1, 2))
+    applied = pset.applyToSuite(suite)
+    note = _redundancyNote(suite, pset, applied, crossSectionSums=True)
+    assert "re-derived from their moved partials: MT1" in note
+    # MT2 has its own block, so MT1's is discarded; MT102 has none and stays.
+    assert "MT1: own block discarded" in note
+    assert "MT102" not in note
+    assert {c.mt for c in applied} == {1, 2}
+
+    distributed = _structuralSuite()
+    applied = pset.applyToSuite(distributed, sumBlocks="fill")
+    note = _redundancyNote(distributed, pset, applied, crossSectionSums=True,
+                           sumBlocks="fill")
+    # Asked for: MT102 rides MT1's block, and the note calls it an assumption.
+    assert "MT1's block moved its unperturbed partials MT102" in note
+    assert "assumption" in note
 
 
 def test_a_reaction_whose_partials_the_file_omits_is_not_a_sum():
