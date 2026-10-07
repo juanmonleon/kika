@@ -10,33 +10,33 @@ evaluation.
 The rule this module applies is decision 3 of
 ``kika-workspace/docs/library/perturbation_model_roadmap.md``, completed on
 2026-10-07, with its casuistry in ``mf3_perturbation_casuistry.md`` beside it.
-Its principle: **a covariance block perturbs the cross section it was stated
-for, and no other.** A block applied to a section it was not given for pairs a
-central value with an uncertainty nobody stated, and the realisation stops
-being a draw from the evaluation.
+Its principle: **the file says with which covariance each section moves, and a
+sum's covariance is used only where the file does not break the sum down.**
 
 1. **A partial with its own block is perturbed by it.** Partials govern: when a
    request names a sum and some of its parts, the parts keep their own factors.
-2. **A partial without one is not perturbed.** MT4's block says nothing about
-   MT53 on its own -- only about MT51 + ... + MT91 together -- so carrying it to
-   MT53 would invent a covariance (same relative uncertainty, fully correlated
-   with the sum) the file never states.
-3. **Every sum with a moved partial under it is re-derived**, and a sum's own
+2. **Every sum with a moved partial under it is re-derived**, and a sum's own
    block is never applied to the sum itself: the sum has to equal its parts,
-   so it moves by what they moved. Its block is *discarded*, and the run says
-   so.
-4. **A sum's block with no partial of its own under it has nowhere to go.**
-   Applying it to the sum alone breaks (3), and NJOY's RECONR would discard it
-   anyway (it rebuilds MT1 and MT4 from the partials). Such a block is refused
-   -- see :func:`screenSumClaims` -- unless the caller opts into
-   ``distribute=True``.
+   so it moves by what they moved.
+3. **A sum the file decomposes** -- some section under it (a partial, or a
+   smaller sum) carries a covariance of its own -- is perturbed through those
+   sections and nothing else. Its own block is *discarded*, and the partials
+   under it that carry none stay as evaluated: MT4's block is the uncertainty
+   of MT51 + ... + MT91 together, and with MT51 and MT52 stated apart the file
+   no longer says what the rest share of it.
+4. **A sum the file does not decompose** -- nothing under it carries a
+   covariance -- moves its partials by its own factor, all of them alike. The
+   covariance exists; it is just not broken down, and this is the only reading
+   of it that reaches the tape (NJOY's RECONR rebuilds MT1 and MT4 from the
+   partials, so a factor left on the sum is lost).
 
-``distribute=True`` is the explicit, recorded assumption that a sum's block may
-be carried to its partials: each partial without a block of its own then rides
-the nearest perturbed sum above it, by the same factor. That keeps the sum
-consistent with its own covariance and gives the partials one the file does not
-state. It is what ``apply_factors_to_pendf_mf3`` does for a composite the PENDF
-lacks, and it is off by default.
+The three ``mode`` values of :func:`planCrossSectionSums` (and ``sumBlocks`` of
+``perturbFromModel``) are ``"undecomposed"`` -- rules 1-4, the default --
+``"fill"``, which in case 3 also carries the sum's block to the partials that
+carry none (an assumption the file does not make; what
+``apply_factors_to_pendf_mf3`` does for a composite the PENDF lacks), and
+``"never"``, which drops rule 4 and uses no sum's block at all. SANDY's
+``Samples.iterate_xs_samples`` is ``"undecomposed"`` one level deep.
 
 **Re-derived as a delta, not as a fresh sum.** ``S' = S + sum_p (p' - p)`` over
 the leaf partials under ``S``. Summing the partials afresh would also "repair"
@@ -66,8 +66,18 @@ import numpy as np
 
 from kika.sampling.joint_blocks import ComponentKey
 
-__all__ = ["SumPlan", "SumScreen", "planCrossSectionSums", "rederiveSum",
-           "screenSumClaims", "suiteSumLayout", "sumLeaves", "sumTree"]
+__all__ = ["SUM_BLOCK_MODES", "SumPlan", "SumScreen", "planCrossSectionSums",
+           "rederiveSum", "screenSumClaims", "suiteSumLayout", "sumLeaves",
+           "sumMembers", "sumTree"]
+
+#: What a sum's own covariance block may do -- see the module docstring.
+SUM_BLOCK_MODES = ("undecomposed", "fill", "never")
+
+
+def checkSumBlockMode(mode: str) -> str:
+    if mode not in SUM_BLOCK_MODES:
+        raise ValueError(f"sumBlocks must be one of {SUM_BLOCK_MODES}, got {mode!r}")
+    return mode
 
 
 def suiteSumLayout(suite) -> Tuple[set, set]:
@@ -144,7 +154,7 @@ class SumPlan:
     """What a realisation does to MF3 once the sum rules are applied."""
 
     #: Leaf partial -> the component whose block it is perturbed by: its own,
-    #: or, only with ``distribute=True``, the nearest perturbed sum above it.
+    #: or the nearest perturbed sum above it (see ``mode``).
     leafControl: Dict[int, ComponentKey] = field(default_factory=dict)
     #: The sums to re-derive, deepest first (MT4 before MT3 before MT1).
     rederive: Tuple[int, ...] = ()
@@ -179,14 +189,37 @@ def _virtualClaims(claims: Iterable[int], present: set) -> set:
 
 @dataclass(frozen=True)
 class SumScreen:
-    """Which claimed sums the strict rule leaves without a use."""
+    """The claimed sums, sorted by whether the file decomposes them."""
 
-    #: Sum -> the leaf partials under it that carry a block of their own. The
-    #: sum's block is not applied; the sum is re-derived from those partials.
+    #: Decomposed sum -> the sections under it (partials or smaller sums, any
+    #: depth) that carry a block of their own. The sum's block is not applied;
+    #: the sum is re-derived from what those move.
     discarded: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
-    #: Sum -> every leaf partial under it, none of which carries a block. The
-    #: sum's block could only reach the tape by being carried to them.
-    unreachable: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
+    #: Undecomposed sum -> every leaf partial under it, none of which (nor any
+    #: smaller sum between) carries a block. Its block reaches the tape only by
+    #: moving them.
+    undecomposed: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
+
+
+def _descendants(total: int, children: Mapping[int, Tuple[int, ...]]
+                 ) -> Tuple[int, ...]:
+    out: List[int] = []
+    for part in children.get(total, ()):
+        out.append(part)
+        if part in children:
+            out.extend(_descendants(part, children))
+    return tuple(out)
+
+
+def sumMembers(present: Iterable[int], sums: Optional[Iterable[int]] = None,
+               claims: Iterable[int] = ()) -> Dict[int, Tuple[int, ...]]:
+    """``{sum: every section under it}``, smaller sums included, any depth.
+
+    The question "does the file decompose this sum?" is whether any of these
+    carries a covariance. Arguments as for :func:`sumLeaves`.
+    """
+    children, allSums = _layout(present, sums, claims)
+    return {total: _descendants(total, children) for total in sorted(allSums)}
 
 
 def sumLeaves(present: Iterable[int], sums: Optional[Iterable[int]] = None,
@@ -202,6 +235,11 @@ def sumLeaves(present: Iterable[int], sums: Optional[Iterable[int]] = None,
     refused: this is a question about the tape's layout, asked by tools that
     describe it.
     """
+    children, allSums = _layout(present, sums, claims)
+    return {total: _leavesUnder(total, children) for total in sorted(allSums)}
+
+
+def _layout(present, sums, claims):
     from kika.endf.writers.redundant import resolve_sum_components
 
     present = {int(mt) for mt in present}
@@ -212,20 +250,21 @@ def sumLeaves(present: Iterable[int], sums: Optional[Iterable[int]] = None,
                and resolve_sum_components(int(mt), present)}
     allSums = {int(s) for s in sums} | virtual
     children, _parent = sumTree(present | virtual, allSums)
-    return {total: _leavesUnder(total, children) for total in sorted(allSums)}
+    return children, allSums
 
 
 def screenSumClaims(claims: Iterable[int], present: Iterable[int],
                     sums: Iterable[int]) -> SumScreen:
-    """Sort the claimed sums by what the strict rule does with their blocks.
+    """Sort the claimed sums by whether the file decomposes them.
 
     *claims* is every MT a block is drawn for (MF33, or MF34's L=0 magnitude);
     *present* and *sums* as :func:`suiteSumLayout` gives them. A claimed sum
-    lands in exactly one of :class:`SumScreen`'s two maps: some partial under
-    it is claimed too (its block is discarded and the sum re-derived), or none
-    is (its block has nowhere to go). Which partials a sum has is read from
-    MF3, so a virtual sum -- a covariance for MT103 on a tape that states only
-    MT600-649 -- counts its MF3 partials like any other.
+    lands in exactly one of :class:`SumScreen`'s two maps: some section under
+    it -- a partial, or a smaller sum -- is claimed too (decomposed: its block
+    is discarded and the sum re-derived), or none is (undecomposed). Which
+    sections a sum has is read from MF3, so a virtual sum -- a covariance for
+    MT103 on a tape that states only MT600-649 -- counts its MF3 partials like
+    any other.
     """
     claims = {int(mt) for mt in claims}
     present = {int(mt) for mt in present}
@@ -233,63 +272,62 @@ def screenSumClaims(claims: Iterable[int], present: Iterable[int],
     virtual = _virtualClaims(claims, present)
     children, _parent = sumTree(present | virtual, sums | virtual)
     discarded: Dict[int, Tuple[int, ...]] = {}
-    unreachable: Dict[int, Tuple[int, ...]] = {}
+    undecomposed: Dict[int, Tuple[int, ...]] = {}
     for total in sorted((sums | virtual) & claims):
-        leaves = _leavesUnder(total, children)
-        own = tuple(leaf for leaf in leaves if leaf in claims)
+        own = tuple(mt for mt in _descendants(total, children) if mt in claims)
         if own:
             discarded[total] = own
         else:
-            unreachable[total] = leaves
-    return SumScreen(discarded=discarded, unreachable=unreachable)
+            undecomposed[total] = _leavesUnder(total, children)
+    return SumScreen(discarded=discarded, undecomposed=undecomposed)
 
 
 def planCrossSectionSums(claims: Mapping[int, ComponentKey],
                          present: Iterable[int], sums: Iterable[int], *,
-                         distribute: bool = False) -> SumPlan:
+                         mode: str = "undecomposed") -> SumPlan:
     """Decide, per MT, which block moves it and which sums are rebuilt.
 
     *claims* is ``MT -> component`` for every cross section the realisation
     perturbs (MF33, or MF34's L=0 magnitude). *present* is every MF3 MT of the
     suite and *sums* the ones the decoder recognised as sums.
 
-    By default a leaf moves only by its own block, and a claimed sum with no
-    claimed partial under it raises: its block has nowhere it may go (rule 4
-    of the module docstring). With *distribute*, a leaf without a block rides
-    the nearest claimed sum above it instead.
+    A leaf with a block of its own moves by it. One without moves by the
+    nearest claimed sum above it when *mode* is ``"undecomposed"`` and that sum
+    is undecomposed (nothing under it is claimed), always when it is
+    ``"fill"``, and never when it is ``"never"`` -- where an undecomposed sum
+    raises instead, since its block would have nowhere to go.
     """
+    checkSumBlockMode(mode)
     sums = {int(s) for s in sums}
     present = {int(mt) for mt in present}
     virtual = _virtualClaims(claims, present)
     children, parent = sumTree(present | virtual, sums | virtual)
+    screen = screenSumClaims(claims, present, sums)
 
-    if not distribute:
-        screen = screenSumClaims(claims, present, sums)
-        if screen.unreachable:
-            named = "; ".join(
-                f"MT{total} over {_mtList(leaves)}"
-                for total, leaves in screen.unreachable.items())
-            raise ValueError(
-                f"{named}: a block is drawn for the sum and for none of its "
-                f"partials, and a covariance perturbs only the cross section "
-                f"it was stated for. Applied to the sum alone it would leave "
-                f"the sum unequal to its parts (and NJOY rebuilds MT1 and MT4 "
-                f"from the parts anyway); carried to the partials it would "
-                f"give them an uncertainty the file does not state. Ask for "
-                f"partials that carry a covariance, or pass "
-                f"distributeSums=True to carry the sum's block to them as a "
-                f"stated assumption")
+    if mode == "never" and screen.undecomposed:
+        named = "; ".join(
+            f"MT{total} over {_mtList(leaves)}"
+            for total, leaves in screen.undecomposed.items())
+        raise ValueError(
+            f"{named}: a block is drawn for the sum and for nothing under it, "
+            f"and sumBlocks='never' uses no sum's block. Applied to the sum "
+            f"alone it would leave the sum unequal to its parts (and NJOY "
+            f"rebuilds MT1 and MT4 from the parts anyway). Use "
+            f"sumBlocks='undecomposed' to move the partials by it")
 
     leafControl: Dict[int, ComponentKey] = {}
     for leaf in sorted(present - sums):
-        if not distribute:
-            if leaf in claims:
-                leafControl[leaf] = claims[leaf]
+        if leaf in claims:
+            leafControl[leaf] = claims[leaf]
             continue
-        node: Optional[int] = leaf
+        if mode == "never":
+            continue
+        node: Optional[int] = parent.get(leaf)
         while node is not None and node not in claims:
             node = parent.get(node)
-        if node is not None:
+        if node is None:
+            continue
+        if mode == "fill" or node in screen.undecomposed:
             leafControl[leaf] = claims[node]
 
     movedUnder = {}

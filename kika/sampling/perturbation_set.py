@@ -392,22 +392,21 @@ class PerturbationSet:
             resolved[reaction] = components[0]
         return resolved
 
-    def _applyCrossSectionsWithSums(self, suite, claims, distribute=False):
+    def _applyCrossSectionsWithSums(self, suite, claims, mode="undecomposed"):
         """Perturb the cross sections with MF3's sum rules held.
 
         :func:`~kika.sampling.cross_section_sums.planCrossSectionSums` decides
-        which block moves each leaf partial -- its own, or, with *distribute*,
-        the nearest perturbed sum above it -- and which sums are rebuilt; this
-        applies the blocks to the leaves and re-derives the sums as
-        ``S + sum (p' - p)``. Without *distribute* a sum's block with no
-        partial of its own under it raises (see the module docstring of
-        :mod:`~kika.sampling.cross_section_sums`).
+        which block moves each leaf partial -- its own, or the nearest
+        perturbed sum above it where *mode* allows -- and which sums are
+        rebuilt; this applies the blocks to the leaves and re-derives the sums
+        as ``S + sum (p' - p)``. See the module docstring of
+        :mod:`~kika.sampling.cross_section_sums` for the three modes.
 
         Diagnostics, keyed so the emitter writes everything that moved and the
         run can say why:
 
         * a leaf with its own block -- under its component, as before;
-        * a leaf riding a sum's block (*distribute* only) -- under
+        * a leaf riding a sum's block -- under
           ``ComponentKey(za, 33, leaf)`` with ``factor_from`` naming the sum.
           It was not drawn, and it was moved, so it has to be written;
         * a rebuilt sum -- under its own component if the request named it,
@@ -430,7 +429,7 @@ class PerturbationSet:
         byMT = {mt: component for (_za, mt), component in claims.items()}
         za = next(iter(claims))[0]
         present, sums = suiteSumLayout(suite)
-        plan = planCrossSectionSums(byMT, present, sums, distribute=distribute)
+        plan = planCrossSectionSums(byMT, present, sums, mode=mode)
 
         diagnostics: Dict[ComponentKey, Dict[str, Any]] = {}
         moved = {}
@@ -468,7 +467,7 @@ class PerturbationSet:
     def applyToSuite(self, suite, *, multiplicityResolver=None,
                      maxOutgoingPoints: Optional[int] = None,
                      crossSectionSums: bool = True,
-                     distributeSums: bool = False
+                     sumBlocks: str = "undecomposed"
                      ) -> Dict[ComponentKey, Dict[str, Any]]:
         """Put a perturbed form under :attr:`label` on every node this set covers.
 
@@ -484,11 +483,12 @@ class PerturbationSet:
         * ``crossSection`` -- MF33, and MF34's L=0 magnitude, which lands on the
           same node. See :meth:`_crossSectionBlocks` for why both at once is
           refused. With *crossSectionSums* (the default) MF3's sum rules hold
-          on the realisation: a block moves only the section it was stated for,
-          partials govern, every sum with a moved partial is re-derived, and a
-          sum's block with no partial of its own under it raises -- see
-          :meth:`_applyCrossSectionsWithSums`. *distributeSums* carries such a
-          block to the partials without one instead, as a stated assumption.
+          on the realisation: partials govern, every sum with a moved partial
+          is re-derived, and a sum's own block moves its partials only where
+          the file does not decompose it (*sumBlocks*, ``"undecomposed"`` by
+          default; ``"fill"`` and ``"never"`` as in
+          :mod:`~kika.sampling.cross_section_sums`) -- see
+          :meth:`_applyCrossSectionsWithSums`.
           ``crossSectionSums=False`` scales each named MT by its own block and
           nothing else, which leaves the sums stale; it exists for the
           equivalence gate against ``perturb_PENDF_files``, which does not
@@ -533,7 +533,7 @@ class PerturbationSet:
         claims = self._crossSectionBlocks()
         if crossSectionSums and claims:
             diagnostics.update(self._applyCrossSectionsWithSums(
-                suite, claims, distribute=distributeSums))
+                suite, claims, mode=sumBlocks))
         else:
             for (_za, mt), component in claims.items():
                 reaction = suite.reactionByENDF_MT(mt)

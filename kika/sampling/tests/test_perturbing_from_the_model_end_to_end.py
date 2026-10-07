@@ -334,8 +334,9 @@ def test_a_run_that_holds_the_sums_says_what_it_rebuilt():
     assert {c.mt for c in applied} == {1, 2}
 
     distributed = _structuralSuite()
-    applied = pset.applyToSuite(distributed, distributeSums=True)
-    note = _redundancyNote(distributed, pset, applied, crossSectionSums=True)
+    applied = pset.applyToSuite(distributed, sumBlocks="fill")
+    note = _redundancyNote(distributed, pset, applied, crossSectionSums=True,
+                           sumBlocks="fill")
     # Asked for: MT102 rides MT1's block, and the note calls it an assumption.
     assert "MT1's block moved its unperturbed partials MT102" in note
     assert "assumption" in note
