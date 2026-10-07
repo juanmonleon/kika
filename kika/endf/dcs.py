@@ -27,6 +27,7 @@ Energies are in **eV** unless a name says ``_mev``; cross sections in **barns**;
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Callable, Literal, Mapping, Optional, Sequence, Tuple, Union
 
@@ -64,6 +65,8 @@ __all__ = [
     "resolve_coefficients",
     "resolution_fold_nodes",
     "coefficients_sigma_weighted_folded",
+    "coefficients_sigma_weighted",
+    "product_reading_nodes",
     "differential_xs_factor",
     "differential_xs_vs_angle",
     "differential_xs_vs_energy",
@@ -878,7 +881,22 @@ def resolve_coefficients(
     impose a point-by-point energy correlation the evaluation does not carry.
     That is the same choice ``scripts/precompute_chi2_folded_al_c0.py`` makes,
     and the two must not disagree.
+
+    .. deprecated:: October 2026
+       Not the reading of a measurement.  A detector counts
+       :math:`\langle\sigma f\rangle`, and the evaluation states
+       :math:`\sigma(E)` and :math:`f(\mu, E)` at every energy, so their
+       product at each energy is exactly what it asserts; averaging the factors
+       apart assumes they do not vary together inside the window.  Use
+       :func:`coefficients_sigma_weighted`.  The app no longer calls this.
     """
+    if mode != "nominal":
+        warnings.warn(
+            "resolve_coefficients averages the coefficients apart from sigma; "
+            "use coefficients_sigma_weighted for what a measurement sees",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if mode == "binavg" and bin_edges is not None:
         return coefficients_bin_averaged(
             energies_ev, coefficients, bin_edges, weighting=weighting, max_order=max_order
@@ -912,6 +930,106 @@ def resolution_fold_nodes(
     :func:`~kika.utils.numerics.fold_tabulated`.
     """
     return gaussian_fold_nodes(energy_ev, sigma_e_ev, grids)
+
+
+def product_reading_nodes(
+    energy_ev: float,
+    mode: XsMode,
+    grids: Sequence[Sequence[float]],
+    *,
+    tof: Optional[TofResolution] = None,
+    bin_edges: Optional[Tuple[float, float]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    r"""Nodes and normalised weights for one reading of a product such as :math:`\sigma f`.
+
+    - ``'folded'``: :func:`resolution_fold_nodes` with :math:`\sigma_E` from
+      ``tof``, a Gaussian over :math:`E_0 \pm 5\sigma_E`.
+    - ``'binavg'``: the window ``bin_edges`` under a flux flat per unit lethargy
+      (:math:`w = 1/E`), on its edges and every grid point strictly inside,
+      trapezoid rule.  A window reaching :math:`E \le 0` is cut at the first
+      positive grid point inside it, as :func:`sigma_bin_averaged` does.
+    - ``'nominal'``, or a mode whose inputs are missing: the single node
+      :math:`E_0`.
+
+    Whatever the reading, the average of a product is :math:`\sum_i w_i\,
+    \sigma(E_i)\,f(E_i)`, so the resolution acts on what a detector counts and
+    never on the factors one at a time.
+    """
+    e0 = float(energy_ev)
+    if mode == "folded" and tof is not None:
+        sigma_e = float(tof.sigma_e_mev(e0 / 1e6)) * 1e6
+        return resolution_fold_nodes(e0, sigma_e, grids)
+    if mode == "binavg" and bin_edges is not None:
+        lo, hi = float(bin_edges[0]), float(bin_edges[1])
+        parts = []
+        for grid in grids:
+            g = np.asarray(grid, dtype=float)
+            if g.size:
+                parts.append(g[(g > lo) & (g < hi)])
+        inside = np.unique(np.concatenate(parts)) if parts else np.zeros(0)
+        if lo <= 0.0:
+            positive = inside[inside > 0.0]
+            lo = float(positive[0]) if positive.size else hi * 1e-6
+            inside = inside[inside > lo]
+        if hi > lo:
+            nodes = np.unique(np.concatenate(([lo], inside, [hi])))
+            w = 1.0 / nodes
+            trap = np.zeros_like(nodes)
+            spans = np.diff(nodes)
+            trap[:-1] += 0.5 * spans
+            trap[1:] += 0.5 * spans
+            weights = w * trap
+            total = weights.sum()
+            if total > 0:
+                return nodes, weights / total
+    return np.array([e0]), np.array([1.0])
+
+
+def coefficients_sigma_weighted(
+    energies_ev,
+    coefficients,
+    xs_energies_ev,
+    xs_values,
+    energy_ev: float,
+    *,
+    mode: XsMode = "folded",
+    tof: Optional[TofResolution] = None,
+    bin_edges: Optional[Tuple[float, float]] = None,
+    nbt_int_pairs=None,
+    max_order: Optional[int] = None,
+) -> Tuple[np.ndarray, float]:
+    r"""The angular shape and cross section a resolution-limited measurement sees.
+
+    :func:`coefficients_sigma_weighted_folded` for any reading of
+    :func:`product_reading_nodes`: :math:`a_\ell^\mathrm{eff} =
+    \langle\sigma a_\ell\rangle / \langle\sigma\rangle` and
+    :math:`\langle\sigma\rangle`, so :math:`d\sigma/d\Omega(\mu) =
+    \langle\sigma\rangle f_\mathrm{eff}(\mu)/2\pi = \langle\sigma f\rangle/2\pi`.
+
+    :math:`\sigma` is read linearly inside a fold (``numpy.interp``, as
+    :func:`sigma_folded`) and log-log otherwise (as :func:`sigma_nominal` and
+    :func:`sigma_bin_averaged`).  Nominal, it is the file at :math:`E_0`.
+    """
+    grid = np.asarray(energies_ev, dtype=float)
+    xs_grid = np.asarray(xs_energies_ev, dtype=float)
+    xs = np.asarray(xs_values, dtype=float)
+    nodes, weights = product_reading_nodes(
+        energy_ev, mode, [xs_grid, grid], tof=tof, bin_edges=bin_edges,
+    )
+    folded = mode == "folded" and tof is not None
+    sigma_at = (
+        np.interp(nodes, xs_grid, xs) if folded
+        else np.atleast_1d(interpolate_log_log(xs_grid, xs, nodes))
+    )
+    a_at = coefficients_at_energies(
+        grid, coefficients, nodes, nbt_int_pairs=nbt_int_pairs, max_order=max_order,
+    )
+    sigma_avg = float(np.sum(weights * sigma_at))
+    if not (sigma_avg > 0):
+        # No counts anywhere in the window: the shape is undefined, and the
+        # unweighted mean is the only answer that is not a division by zero.
+        return a_at @ weights, sigma_avg
+    return (a_at @ (weights * sigma_at)) / sigma_avg, sigma_avg
 
 
 def coefficients_sigma_weighted_folded(
@@ -959,23 +1077,10 @@ def coefficients_sigma_weighted_folded(
         :math:`a_1^\mathrm{eff} \ldots a_L^\mathrm{eff}` and :math:`\langle\sigma\rangle`
         in barns.
     """
-    grid = np.asarray(energies_ev, dtype=float)
-    xs_grid = np.asarray(xs_energies_ev, dtype=float)
-    xs = np.asarray(xs_values, dtype=float)
-
-    sigma_e_ev = float(tof.sigma_e_mev(float(energy_ev) / 1e6)) * 1e6
-    nodes, weights = resolution_fold_nodes(energy_ev, sigma_e_ev, [xs_grid, grid])
-
-    sigma_at = np.interp(nodes, xs_grid, xs)
-    a_at = coefficients_at_energies(
-        grid, coefficients, nodes, nbt_int_pairs=nbt_int_pairs, max_order=max_order,
+    return coefficients_sigma_weighted(
+        energies_ev, coefficients, xs_energies_ev, xs_values, energy_ev,
+        mode="folded", tof=tof, nbt_int_pairs=nbt_int_pairs, max_order=max_order,
     )
-    sigma_avg = float(np.sum(weights * sigma_at))
-    if not (sigma_avg > 0):
-        # No counts anywhere in the window: the shape is undefined, and the
-        # unweighted mean is the only answer that is not a division by zero.
-        return a_at @ weights, sigma_avg
-    return (a_at @ (weights * sigma_at)) / sigma_avg, sigma_avg
 
 
 def differential_xs_factor(sigma, per_steradian: bool):
@@ -1054,7 +1159,6 @@ def differential_xs_vs_energy(
     nbt_int_pairs: Optional[Sequence[Tuple[int, int]]] = None,
     max_order: Optional[int] = None,
     pdf_at_energies: Optional[Callable[[float, np.ndarray], np.ndarray]] = None,
-    fold: Literal["factor", "product"] = "factor",
 ) -> dict:
     r""":math:`d\sigma/d\Omega` at a **fixed angle**, against incident energy.
 
@@ -1086,16 +1190,15 @@ def differential_xs_vs_energy(
         this function knows the energies the values have to line up with.
         Everything downstream (the sigma modes, the frame jacobian, the units)
         is the same either way, which is why both representations meet here.
-    fold
-        How ``xs_mode="folded"`` folds.  ``"factor"`` folds :math:`\sigma`
-        alone and multiplies by :math:`f` at the nominal energy, the reading
-        this function has always had.  ``"product"`` folds
-        :math:`\sigma(E)\,f(\mu, E)` as one quantity, which is what a detector
-        at a fixed angle counts and what
-        :func:`coefficients_sigma_weighted_folded` does at a fixed energy; the
-        two part wherever :math:`\sigma` has structure inside the window.
-        ``sigma`` in the result is then :math:`\langle\sigma\rangle`.  Pair it
-        with :func:`dsigma_vs_energy_grid` for ``query_energies_ev``.
+    xs_mode
+        ``'nominal'``, ``'binavg'`` or ``'folded'``.  The two averaged readings
+        average the product :math:`\sigma(E)\,f(\mu, E)` over the window, which
+        is what a detector at a fixed angle counts (:func:`product_reading_nodes`);
+        ``sigma`` in the result is then :math:`\langle\sigma\rangle`.  A bin is
+        the MF4 bin of the output energy.  Until October 2026 the two factors were
+        averaged separately, which parts from this wherever :math:`\sigma` has
+        structure inside the window.  Pair a fold with
+        :func:`dsigma_vs_energy_grid` for ``query_energies_ev``.
 
     Returns
     -------
@@ -1175,13 +1278,15 @@ def differential_xs_vs_energy(
 
     has_xs = xs_energies_ev is not None and xs_values is not None and len(xs_values) > 0
 
-    # 4a. The product fold: <sigma f> integrated as one quantity.
-    if fold == "product" and xs_mode == "folded" and tof is not None and has_xs:
-        sigma, folded_product = _sigma_weighted_fold_at_mu(
+    # 4a. An averaged reading: <sigma f> over the window, as one quantity.
+    averaged = (xs_mode == "folded" and tof is not None) or xs_mode == "binavg"
+    if averaged and has_xs:
+        sigma, folded_product = _sigma_weighted_average_at_mu(
             np.asarray(xs_energies_ev, dtype=float),
             np.asarray(xs_values, dtype=float),
             grid,
             out_e,
+            xs_mode,
             tof,
             pdf_at,
         )
@@ -1197,28 +1302,14 @@ def differential_xs_vs_energy(
             "native_frame": native_frame,
             "y_unit": "barn/sr" if per_steradian else "barn",
             "xs_mode": xs_mode,
-            "fold": "product",
         }
 
     pdf = pdf_at(out_e, on_grid=query_energies_ev is None)
 
-    # 4b. sigma(E) under the requested reconstruction mode.
+    # 4b. Nominal: sigma(E) at the energy.
     sigma = None
     if has_xs:
-        if xs_mode == "binavg":
-            # Bin edges come from the MF4 grid, so each output energy borrows
-            # the bin of the MF4 point it falls in.
-            idx = np.clip(np.searchsorted(grid, out_e), 0, grid.size - 1)
-            sigma = np.array([
-                sigma_bin_averaged(
-                    xs_energies_ev, xs_values, *bin_edges_for_energy(grid, int(i)), weighting
-                )
-                for i in idx
-            ])
-        elif xs_mode == "folded" and tof is not None:
-            sigma = np.atleast_1d(sigma_folded(xs_energies_ev, xs_values, out_e, tof))
-        else:
-            sigma = np.atleast_1d(sigma_nominal(xs_energies_ev, xs_values, out_e))
+        sigma = np.atleast_1d(sigma_nominal(xs_energies_ev, xs_values, out_e))
 
     if sigma is None:
         values = pdf
@@ -1240,30 +1331,35 @@ def differential_xs_vs_energy(
         "native_frame": native_frame,
         "y_unit": y_unit,
         "xs_mode": xs_mode,
-        "fold": "factor" if xs_mode == "folded" and sigma is not None else None,
     }
 
 
-def _sigma_weighted_fold_at_mu(
+def _sigma_weighted_average_at_mu(
     xs_grid: np.ndarray,
     xs: np.ndarray,
     mf4_grid: np.ndarray,
     energies_ev: np.ndarray,
-    tof: TofResolution,
+    mode: XsMode,
+    tof: Optional[TofResolution],
     pdf_at: Callable[[np.ndarray], np.ndarray],
 ) -> Tuple[np.ndarray, np.ndarray]:
     r""":math:`\langle\sigma\rangle` and :math:`\langle\sigma f\rangle` at one cosine, per energy.
 
-    :func:`coefficients_sigma_weighted_folded` at a single :math:`\mu`, for a
-    whole sweep at once.  Every energy gets its own
-    :func:`resolution_fold_nodes` on the union of the two grids; the nodes of
-    all energies are concatenated so :math:`\sigma` and :math:`f` are each
+    :func:`coefficients_sigma_weighted` at a single :math:`\mu`, for a whole
+    sweep at once.  Every energy gets its own :func:`product_reading_nodes` on
+    the union of the two grids (a bin is the MF4 bin of the energy); the nodes
+    of all energies are concatenated so :math:`\sigma` and :math:`f` are each
     evaluated in one vectorised call, and the window sums are segment sums.
     """
-    sigma_e_ev = np.atleast_1d(np.asarray(tof.sigma_e_mev(energies_ev / 1e6), dtype=float)) * 1e6
     node_parts, weight_parts = [], []
-    for e0, s in zip(energies_ev, sigma_e_ev):
-        nodes, weights = resolution_fold_nodes(float(e0), float(s), (xs_grid, mf4_grid))
+    for e0 in energies_ev:
+        edges = None
+        if mode == "binavg":
+            i = int(np.clip(np.searchsorted(mf4_grid, e0), 0, mf4_grid.size - 1))
+            edges = bin_edges_for_energy(mf4_grid, i)
+        nodes, weights = product_reading_nodes(
+            float(e0), mode, (xs_grid, mf4_grid), tof=tof, bin_edges=edges,
+        )
         node_parts.append(nodes)
         weight_parts.append(weights)
     if not node_parts:
@@ -1273,7 +1369,10 @@ def _sigma_weighted_fold_at_mu(
     nodes = np.concatenate(node_parts)
     weights = np.concatenate(weight_parts)
 
-    sigma_n = np.interp(nodes, xs_grid, xs)
+    sigma_n = (
+        np.interp(nodes, xs_grid, xs) if mode == "folded"
+        else np.atleast_1d(interpolate_log_log(xs_grid, xs, nodes))
+    )
     f_n = pdf_at(nodes)
     sigma_avg = np.add.reduceat(weights * sigma_n, starts)
     product = np.add.reduceat(weights * sigma_n * f_n, starts)
