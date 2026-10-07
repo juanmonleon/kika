@@ -38,15 +38,15 @@ MAT = 2631
 # Synthetic tape construction
 # ---------------------------------------------------------------------------
 
-def _section(mt, energies, xs, *, qi=0.0, head_l2=0):
+def _section(mt, energies, xs, *, qi=0.0, head_l2=0, interpolation=None):
     """One MF3 section as tape lines (HEAD + TAB1 + SEND)."""
     sec = MF3MT(number=mt)
     sec._za, sec._awr, sec._mat = 26056.0, 55.454, MAT
     sec._qm, sec._qi, sec._lr = qi, qi, 0
     sec._energies = [float(e) for e in energies]
     sec._cross_sections = [float(v) for v in xs]
-    sec._nr, sec._np = 1, len(energies)
-    sec._interpolation = [(len(energies), 2)]
+    sec._interpolation = list(interpolation or [(len(energies), 2)])
+    sec._nr, sec._np = len(sec._interpolation), len(energies)
     lines = str(sec).split("\n")
     if head_l2:
         # Columns 34-44 of the HEAD record, which MF3MT does not model.
@@ -232,6 +232,89 @@ def test_the_rebuilt_section_says_lin_lin_over_one_region():
 
 
 # ---------------------------------------------------------------------------
+# What the sum is between the nodes
+# ---------------------------------------------------------------------------
+#
+# The rebuilt section is lin-lin, so the sum has to be right *between* its
+# nodes as read lin-lin, not only at them. Two ways the union grid alone got
+# that wrong: a partial that starts or stops at a non-zero value (its step
+# became a ramp across the neighbouring interval) and a partial on a log law
+# (its curvature was lost between nodes).
+
+def test_a_partial_starting_at_a_non_zero_value_steps_the_sum():
+    """MT51 opens at 2 b. Below 5 it is zero, so the total steps at 5.
+
+    Before, the union grid held 5 once and the total ramped from 1 at E=1 to 3
+    at E=5, overstating everything in between.
+    """
+    tape = _tape(
+        _section(1, [1.0, 10.0], [1.0, 1.0]),
+        _section(2, [1.0, 10.0], [1.0, 1.0]),
+        _section(51, [5.0, 10.0], [2.0, 2.0], qi=-5.0),
+    )
+    out, updates = recompute_redundant_mf3(tape, changed_mts=[51])
+    energies, values = _values(out, 1)
+
+    np.testing.assert_allclose(energies, [1.0, 5.0, 5.0, 10.0])
+    np.testing.assert_allclose(values, [1.0, 1.0, 3.0, 3.0])
+    assert next(u for u in updates if u.mt == 1).edge_steps == (51,)
+
+
+def test_a_partial_stopping_at_a_non_zero_value_steps_the_sum():
+    """The same at the top: a partial cut at 5 while the total runs to 10."""
+    tape = _tape(
+        _section(1, [1.0, 10.0], [1.0, 1.0]),
+        _section(2, [1.0, 10.0], [1.0, 1.0]),
+        _section(102, [1.0, 5.0], [2.0, 2.0]),
+    )
+    out, _ = recompute_redundant_mf3(tape, changed_mts=[102])
+    energies, values = _values(out, 1)
+
+    np.testing.assert_allclose(energies, [1.0, 5.0, 5.0, 10.0])
+    np.testing.assert_allclose(values, [3.0, 3.0, 1.0, 1.0])
+
+
+def test_a_log_log_partial_is_summed_right_between_the_nodes():
+    """MT102 is 1/E on log-log over two decades, stated by its two ends.
+
+    On the union grid alone the total would be the chord from 11 to 1.1, which
+    is 5x too high at E = 10. The rebuild linearises MT102 first. (MT1 starts
+    out stale, as it is after MT102 has been transferred in: one that already
+    agreed node by node would be left as the evaluator wrote it.)
+    """
+    tape = _tape(
+        _section(1, [1.0, 100.0], [9.0, 0.9]),
+        _section(2, [1.0, 100.0], [1.0, 1.0]),
+        _section(102, [1.0, 100.0], [10.0, 0.1], interpolation=[(2, 5)]),
+    )
+    out, updates = recompute_redundant_mf3(tape, changed_mts=[102],
+                                           linearize_tolerance=1e-4)
+    energies, values = _values(out, 1)
+    section = _parse_baseline(out)[1]
+
+    probe = np.geomspace(1.0, 100.0, 2001)
+    exact = 1.0 + 10.0 / probe
+    read_back = np.interp(probe, energies, values)
+    # 1e-4 from the linearisation, plus the six-digit float it is written in.
+    assert np.max(np.abs(read_back - exact) / exact) < 1.2e-4
+    assert section.energy_interpolation == [(len(energies), 2)]
+    assert next(u for u in updates if u.mt == 1).linearized == (102,)
+
+
+def test_a_histogram_partial_enters_the_sum_as_steps():
+    tape = _tape(
+        _section(1, [1.0, 2.0, 3.0], [2.0, 2.0, 2.0]),
+        _section(2, [1.0, 3.0], [1.0, 1.0]),
+        _section(102, [1.0, 2.0, 3.0], [1.0, 4.0, 4.0], interpolation=[(3, 1)]),
+    )
+    out, _ = recompute_redundant_mf3(tape, changed_mts=[102])
+    energies, values = _values(out, 1)
+
+    np.testing.assert_allclose(energies, [1.0, 2.0, 2.0, 3.0])
+    np.testing.assert_allclose(values, [2.0, 2.0, 5.0, 5.0])
+
+
+# ---------------------------------------------------------------------------
 # What it refuses to touch
 # ---------------------------------------------------------------------------
 
@@ -326,6 +409,37 @@ def test_resumming_an_untouched_evaluation_gives_the_tape_back(fe56_host_tape):
 
     assert out == content
     assert not [u for u in updates if u.status == "updated"]
+
+
+def test_a_total_rebuilt_over_log_log_partials_is_their_sum_between_nodes(fe56_jendl_tape):
+    """JENDL-5 Fe-56 states MT2, MT5, MT102 and MT107 on INT=5 regions.
+
+    Its MT1 sits 0.9 % from its partials as distributed, so any edit reaching it
+    rebuilds it. Read lin-lin, as it is written, the rebuild has to be the sum
+    of the partials under their own laws between its nodes as well as at them.
+    Summed on the union grid alone it was not: 1.8e-3 off at worst. With the
+    linearisation, and the added nodes valued at the energies the tape can
+    hold, 6.6e-5.
+    """
+    content = fe56_jendl_tape.open(encoding="utf-8", newline="").read()
+    sections = _parse_baseline(content)
+    components = resolve_sum_components(1, sections)
+
+    out, updates = recompute_redundant_mf3(content, changed_mts=[2])
+    total = next(u for u in updates if u.mt == 1)
+    assert total.status == "updated"
+    assert {2, 102}.issubset(total.linearized)
+
+    rebuilt = _parse_baseline(out)[1]
+    energies = np.asarray(rebuilt.energies, dtype=float)
+    values = np.asarray(rebuilt.cross_sections, dtype=float)
+    wide = np.diff(energies) > 0
+    probe = np.sqrt(energies[:-1][wide] * energies[1:][wide])
+    exact = sum(np.asarray(sections[mt].get_cross_section(probe), dtype=float)
+                for mt in components)
+    error = np.abs(np.interp(probe, energies, values) - exact) / exact
+
+    assert error.max() < 1e-4
 
 
 # ---------------------------------------------------------------------------

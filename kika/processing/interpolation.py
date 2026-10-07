@@ -14,7 +14,35 @@ from typing import List, Sequence, Tuple, Union
 import numpy as np
 from numpy.typing import ArrayLike
 
-__all__ = ["interpolate_1d"]
+__all__ = ["interpolate_1d", "interval_codes"]
+
+
+def interval_codes(np_len: int, nbt_int_pairs: Sequence[Tuple[int, int]]) -> np.ndarray:
+    """The ENDF INT code of every *interval* of a table of *np_len* points.
+
+    Interval ``i`` joins points ``i`` and ``i + 1``. NBT is cumulative and
+    one-based, so region *r* owns intervals ``NBT[r-1] - 1`` up to
+    ``NBT[r] - 2``; the interval that straddles a region boundary belongs to the
+    region *after* it, the same assignment :func:`interpolate_1d` makes. An empty
+    pair list means one lin-lin region, and a list whose last NBT falls short of
+    the table holds its last code to the end, again as :func:`interpolate_1d`
+    does.
+
+    No code is rejected here. Restricting the laws is the caller's decision --
+    :func:`kika.processing.panel_integrals.exact_segment_codes` is the one that
+    refuses everything but 1 and 2.
+    """
+    codes = np.full(max(np_len - 1, 0), 2, dtype=int)
+    pairs = list(nbt_int_pairs) or [(np_len, 2)]
+    start = 0
+    for nbt, code in pairs:
+        stop = min(int(nbt) - 1, np_len - 1)
+        if stop > start:
+            codes[start:stop] = int(code)
+        start = max(start, stop)
+    if start < np_len - 1:
+        codes[start:] = int(pairs[-1][1])
+    return codes
 
 
 def _regionize(nbt_int_pairs: Sequence[Tuple[int, int]], np_len: int) -> List[Tuple[int, int, int]]:
