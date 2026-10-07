@@ -27,7 +27,7 @@ from ..utils import (
     record_width,
 )
 from ..._constants import MF3_SUM_ORDER, MF3_SUM_RULES
-from ..._records import format_endf_number, parse_number
+from ..._records import round_to_endf_field
 from ...algebra import (add, interval_laws, sample_on_union, union)
 from ...algebra.arithmetic import domain_steps
 from ...algebra.refine import LINEARIZATION_TOLERANCE as TABLE_LINEARIZATION_TOLERANCE
@@ -169,8 +169,7 @@ def _as_written(energies: np.ndarray) -> np.ndarray:
     stored to the nearest eV. A node the linearisation adds has to be valued
     at *that* energy, not at the one it computed.
     """
-    return np.array([float(parse_number(format_endf_number(float(e))))
-                     for e in np.ravel(energies)], dtype=float)
+    return round_to_endf_field(energies)
 
 
 def _table(section: MF3MT):

@@ -523,31 +523,26 @@ def planCrossSectionSums(claims: Mapping[int, ComponentKey],
 # The arithmetic: S' = S + sum (p' - p)
 # ----------------------------------------------------------------------
 
-def _limits(function1d, energies: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _table(function1d) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(x, y, laws)`` of a cross section, one law per interval."""
+    from kika.algebra import interval_laws
+
+    xs, ys, pairs = function1d.toEndfRegions()
+    xs = np.asarray(xs, dtype=float)
+    return xs, np.asarray(ys, dtype=float), interval_laws(xs.size, pairs)
+
+
+def _limits(table, energies: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Left and right limits of a tabulated cross section at *energies*.
 
     A repeated abscissa is ENDF's step, so a single value per energy cannot
-    describe it: the first copy is the limit from below and the last the limit
-    from above. Elsewhere the two agree and come from the node's own
-    interpolation. Outside its table a cross section is zero, so at its first
-    abscissa the left limit is zero and at its last the right one is.
+    describe it. Outside its table a cross section is zero, so at its first
+    abscissa the left limit is zero and at its last the right one is. See
+    :func:`kika.algebra.left_limit`.
     """
-    xs, ys, _pairs = function1d.toEndfRegions()
-    xs = np.asarray(xs, dtype=float)
-    ys = np.asarray(ys, dtype=float)
-    values = np.asarray(function1d.evaluate(energies, outOfRange="zero"),
-                        dtype=float).copy()
-    left, right = values, values.copy()
-    if xs.size == 0:
-        return np.zeros_like(left), np.zeros_like(right)
-    first = np.searchsorted(xs, energies, side="left")
-    last = np.searchsorted(xs, energies, side="right")
-    hit = last > first
-    left[hit] = ys[first[hit]]
-    right[hit] = ys[last[hit] - 1]
-    left[energies <= xs[0]] = 0.0
-    right[energies >= xs[-1]] = 0.0
-    return left, right
+    from kika.algebra import left_limit, right_limit
+
+    return left_limit(*table, energies), right_limit(*table, energies)
 
 
 def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
@@ -572,7 +567,14 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
     (form, info)
         A node of the same kind as *total*, keeping its interpolation regions
         and laws; points are added where a partial moved (its grid, and the
-        steps at the factor block's edges). *info* carries ``n_inserted``,
+        steps at the factor block's edges). A sum of tables under different
+        laws has no law of its own, so wherever the sum moved and its own law
+        is not lin-lin, the result is lin-lin there, on the points that make
+        every form in the sum lin-lin to
+        :data:`~kika.algebra.refine.LINEARIZATION_TOLERANCE`
+        (:func:`kika.algebra.to_linlin`, each added energy valued where the
+        tape will put it). Between nodes it is then the sum to that tolerance,
+        not only at them. *info* carries ``n_inserted``,
         ``max_rel_change`` and ``n_negative`` -- a negative total can only come
         from an evaluation whose sum sits below its own parts, and the caller
         must say so rather than write it. A negative point where a moved
@@ -588,6 +590,9 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
     of it (B-VIII.1 O-16's MT5 = MT1 - MT2 is stated from 1e-5 eV, and MT5
     only has values above its threshold).
     """
+    from kika.algebra import LINLIN, interval_laws, pairs_from_laws, to_linlin
+    from kika.endf.writers.redundant import _as_written
+    from kika.nuclear_data.model.enums import ENDF_INT_TO_INTERPOLATION
     from kika.nuclear_data.model.functions import Regions1d, XYs1d
 
     xs, ys, pairs = total.toEndfRegions()
@@ -596,13 +601,30 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
     if xs.size < 2:
         return total, {"n_inserted": 0, "max_rel_change": 0.0, "n_negative": 0}
     lo, hi = float(xs[0]), float(xs[-1])
+    laws = interval_laws(xs.size, pairs)
+    # Where anything moved: the blocks' spans, merged (they are usually one).
+    starts, ends = [], []
+    for a, b in sorted((max(lo, s0), min(hi, s1)) for _, _, s0, s1 in moves):
+        if starts and a <= ends[-1]:
+            ends[-1] = max(ends[-1], b)
+        else:
+            starts.append(a)
+            ends.append(b)
+    starts, ends = np.asarray(starts), np.asarray(ends)
 
-    extra = []
-    for before, after, spanLo, spanHi in moves:
-        for form in (after, before):
-            grid = np.asarray(form.toEndfRegions()[0], dtype=float)
-            keep = ((grid >= max(lo, spanLo)) & (grid <= min(hi, spanHi)))
-            extra.append(grid[keep])
+    def inSpans(grid):
+        j = np.searchsorted(starts, grid, side="right") - 1
+        return grid[(j >= 0) & (grid <= ends[np.maximum(j, 0)])]
+
+    # Every form's own points where it moved, and the ones that make it
+    # lin-lin there -- none for a lin-lin form, so a lin-lin tape gets exactly
+    # the grid it always did.
+    tables = [(_table(before), _table(after)) for before, after, _, _ in moves]
+    curved = [t for pair in tables for t in pair if np.any(t[2] != LINLIN)]
+    if np.any(laws != LINLIN):
+        curved.append((xs, ys, laws))
+    extra = [inSpans(t[0]) for pair in tables for t in pair]
+    extra += [inSpans(to_linlin(*t, snap=_as_written)[0]) for t in curved]
     energies = np.unique(np.concatenate([xs] + extra))
 
     deltaLeft = np.zeros(energies.size)
@@ -611,20 +633,30 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
     # range, which MF3 is allowed to state below zero -- a negative sum is not
     # evidence of anything, so it is not counted as one.
     signedPart = np.zeros(energies.size, dtype=bool)
-    for before, after, spanLo, spanHi in moves:
-        aL, aR = _limits(after, energies)
-        bL, bR = _limits(before, energies)
-        signedPart |= (aL < 0) | (aR < 0) | (bL < 0) | (bR < 0)
+    for (bTable, aTable), (_b, _a, spanLo, spanHi) in zip(tables, moves):
+        # Off its block and off both forms' domains a move is zero: read only
+        # the window in between, ends included (a limit there is not zero).
+        reach = [t[0] for t in (bTable, aTable) if t[0].size]
+        if not reach:
+            continue
+        first = np.searchsorted(energies, max(spanLo, min(r[0] for r in reach)), "left")
+        last = np.searchsorted(energies, min(spanHi, max(r[-1] for r in reach)), "right")
+        if last <= first:
+            continue
+        window = energies[first:last]
+        aL, aR = _limits(aTable, window)
+        bL, bR = _limits(bTable, window)
+        signedPart[first:last] |= (aL < 0) | (aR < 0) | (bL < 0) | (bR < 0)
         dL, dR = aL - bL, aR - bR
         # The block steps from 1 to its first factor at spanLo and back at
         # spanHi, so the left limit at spanLo and the right one at spanHi are
         # outside it.
-        dL[(energies <= spanLo) | (energies > spanHi)] = 0.0
-        dR[(energies < spanLo) | (energies >= spanHi)] = 0.0
-        deltaLeft += dL
-        deltaRight += dR
+        dL[(window <= spanLo) | (window > spanHi)] = 0.0
+        dR[(window < spanLo) | (window >= spanHi)] = 0.0
+        deltaLeft[first:last] += dL
+        deltaRight[first:last] += dR
 
-    sL, sR = _limits(total, energies)
+    sL, sR = _limits((xs, ys, laws), energies)
     # The sum's own end points have one side only, and it is the inside one.
     sL[0], sR[-1] = sR[0], sL[-1]
     deltaLeft[0], deltaRight[-1] = deltaRight[0], deltaLeft[-1]
@@ -656,7 +688,9 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
                 newAt.append(k)
                 lastOf[old] = len(newXs) - 1
             continue
-        if valueLeft == valueRight:
+        if valueLeft == valueRight or (deltaLeft[k] == 0.0
+                                       and deltaRight[k] == 0.0):
+            # Unmoved, a histogram's node keeps the one point it had.
             newXs.append(energy)
             newYs.append(valueLeft)
             newAt.append(k)
@@ -678,13 +712,33 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
             newYs[lastOf[int(first[k])]] = ys[int(first[k])]
 
     newPairs = [(int(lastOf[int(nbt) - 1]) + 1, int(code)) for nbt, code in pairs]
-    if isinstance(total, Regions1d):
+    # Where the sum moved under a law of its own that is not lin-lin, the
+    # interval is lin-lin now: the points above make it the sum there.
+    newAt = np.asarray(newAt, dtype=int)
+    if np.any(laws != LINLIN) and newXs.size > 1:
+        newLaws = interval_laws(newXs.size, newPairs)
+        # A panel moved if it did just inside either of its ends.
+        a, b = newAt[:-1], newAt[1:]
+        wide = newXs[1:] > newXs[:-1]
+        relaw = (wide & (newLaws != LINLIN)
+                 & ((deltaRight[a] != 0.0) | (deltaLeft[b] != 0.0)))
+        if relaw.any():
+            newLaws[relaw] = LINLIN
+            # A step's zero-width interval keeps the law before it, as the
+            # tape had it, so the regions do not fragment at every step.
+            index = np.where(wide, np.arange(wide.size), 0)
+            np.maximum.accumulate(index, out=index)
+            newLaws = newLaws[index]
+            newPairs = pairs_from_laws(newLaws)
+    # A log-law XYs1d that moved in part has two laws now: a Regions1d.
+    if isinstance(total, Regions1d) or len(newPairs) > 1:
         out = Regions1d.fromEndfRegions(newXs, newYs, newPairs, axes=total.axes,
                                         label=total.label)
         out.outerDomainValue = total.outerDomainValue
         out.index = total.index
     else:
-        out = XYs1d(xs=newXs, ys=newYs, interpolation=total.interpolation,
+        out = XYs1d(xs=newXs, ys=newYs,
+                    interpolation=ENDF_INT_TO_INTERPOLATION[int(newPairs[0][1])],
                     axes=total.axes, label=total.label,
                     outerDomainValue=total.outerDomainValue, index=total.index)
 
@@ -693,7 +747,6 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
     nonzero = old != 0.0
     maxRel = float(np.max(np.abs(moved[nonzero] / old[nonzero] - 1.0))) \
         if nonzero.any() else 0.0
-    newAt = np.asarray(newAt, dtype=int)
     ownNegative = (sL < 0) | (sR < 0)
     suspicious = (newYs < 0.0) & ~signedPart[newAt] & ~ownNegative[newAt]
     info = {"n_inserted": int(newXs.size - xs.size),

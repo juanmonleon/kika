@@ -170,3 +170,33 @@ def test_a_line_is_eighty_characters_with_its_identification():
     line = format_endf_data_line([0] * 6, MAT, MF, MT, 42, formats=[ENDF_FORMAT_INT] * 6)
     assert len(line) == 80
     assert line[66:] == f"{MAT:4d}{MF:2d}{MT:3d}{42:5d}"
+
+
+def test_the_vector_rounding_is_the_field_written_and_read_back_bit_for_bit():
+    """``round_to_endf_field`` is ``parse_number(format_endf_number(v))``, vectorised.
+
+    The linearisations that put new energies on a tape value each one where the
+    eleven columns will put it, and did so with a string per value -- 70 % of a
+    re-derived JENDL-5 Fe-56 total. The vector form rounds the mantissa as an
+    integer and scales it by an exact power of ten; these are the cases where
+    that could go wrong: decimal ties, powers of ten and their neighbours, the
+    rounding carry into the next exponent, and two- and three-digit exponents.
+    """
+    import numpy as np
+
+    from kika._records import round_to_endf_field
+
+    rng = np.random.default_rng(1)
+    powers = np.array([10.0 ** k for k in range(-120, 120)])
+    values = np.concatenate([
+        10 ** rng.uniform(-12, 12, 20_000),
+        -10 ** rng.uniform(-5, 8, 2_000),
+        (np.floor(rng.uniform(1e6, 1e7, 2_000)) + 0.5)
+        * 10.0 ** rng.integers(-11, 2, 2_000),
+        powers, np.nextafter(powers, 0), np.nextafter(powers, np.inf),
+        [9.9999999e9, 9.99999949e9, 9.9999995e9, 9.999999e99, 1.5963e-100,
+         2.427894e7, 24278940.0, 0.0, -0.0, 1e-5, 2e7],
+    ])
+    expected = np.array([float(parse_number(format_endf_number(float(v))))
+                         for v in values])
+    assert np.array_equal(round_to_endf_field(values), expected)

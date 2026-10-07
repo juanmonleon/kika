@@ -370,7 +370,13 @@ def test_outside_the_block_the_sum_is_the_evaluations_value_for_value():
 
 
 def test_the_sums_regions_and_laws_survive():
-    """A two-region total keeps both regions, both laws and its own step."""
+    """A two-region total keeps both regions, both laws and its own step.
+
+    Except where it moved under a law that is not lin-lin: a log-log total plus
+    a lin-lin partial has no law of its own, so between 5 and 7 the result is
+    lin-lin, on enough points to be the sum to the linearisation tolerance
+    between them too -- reading it log-log there was the sum at the nodes only.
+    """
     xs = np.array([1.0, 2.0, 3.0, 3.0, 4.0, 6.0, 8.0])
     ys = np.array([1.0, 2.0, 3.0, 5.0, 6.0, 7.0, 9.0])
     total = Regions1d.fromEndfRegions(xs, ys, [(4, 2), (7, 5)])
@@ -379,10 +385,15 @@ def test_the_sums_regions_and_laws_survive():
 
     rebuilt, _ = rederiveSum(total, [(part, after, 5.0, 7.0)])
     _xs_, _ys_, pairs = rebuilt.toEndfRegions()
-    assert [code for _nbt, code in pairs] == [2, 5]
+    assert [code for _nbt, code in pairs] == [2, 5, 2, 5]
     assert np.count_nonzero(_xs_ == 3.0) == 2, "the evaluation's own step went"
     assert rebuilt.evaluate(2.5) == total.evaluate(2.5)
+    # Log-log outside the block; the panel is split at 5, hence an ulp.
+    assert rebuilt.evaluate(4.5) == pytest.approx(total.evaluate(4.5), rel=1e-14)
     assert rebuilt.evaluate(6.0) == pytest.approx(total.evaluate(6.0) + 0.5)
+    probes = np.linspace(5.0, 7.0, 201)[1:-1]
+    exact = total.evaluate(probes) + 0.5
+    assert np.max(np.abs(rebuilt.evaluate(probes) / exact - 1.0)) < 1e-4
 
 
 # ----------------------------------------------------------------------

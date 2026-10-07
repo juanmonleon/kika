@@ -111,6 +111,62 @@ def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
     return formatted.rjust(width)
 
 
+#: ``10.0 ** k`` for ``|k| <= 22``: the powers of ten a double holds exactly.
+_EXACT_POWERS = {k: float(10 ** k) for k in range(23)}
+
+
+def round_to_endf_field(values) -> "np.ndarray":
+    """Each of *values* as :func:`format_endf_number` writes it and it reads back.
+
+    The same doubles as ``parse_number(format_endf_number(v))``, bit for bit,
+    without a string per value: the mantissa is rounded to its 7 (6, 5)
+    significant digits as an integer ``N`` and the field's value is
+    ``N * 10**k`` or ``N / 10**-k``, one correctly rounded operation on two
+    exact operands while ``|k| <= 22`` -- which is what a decimal-to-double
+    conversion of those digits gives. Values whose rounding is too close to a
+    tie to decide in floating point, or whose ``k`` is out of that range, go
+    through the strings.
+    """
+    import numpy as np
+
+    v = np.asarray(values, dtype=float).ravel()
+    if not np.all(np.isfinite(v)):
+        raise ValueError("Cannot format non-finite ENDF value")
+    out = np.zeros(v.size)
+    a = np.abs(v)
+    live = np.flatnonzero(a > 0)
+    if live.size == 0:
+        return out
+    a = a[live]
+    with np.errstate(divide="ignore"):
+        exponent = np.floor(np.log10(a)).astype(np.int64)
+    # The mantissa as format_endf_number computes it, divisor and all.
+    divisor = np.empty(a.size)
+    for e in np.unique(exponent):
+        divisor[exponent == e] = 10 ** int(e)
+    mantissa = a / divisor
+    places = np.where(np.abs(exponent) < 10, 6,
+                      np.where(np.abs(exponent) < 100, 5, 4))
+    scaled = mantissa * np.power(10.0, places)
+    n = np.rint(scaled)
+    k = exponent - places
+    slow = ((np.abs(scaled - np.floor(scaled) - 0.5) < 1e-6)   # near a tie
+            | (mantissa < 1.0) | (n >= 10.0 * np.power(10.0, places))  # carry
+            | (np.abs(k) > 22))
+    value = np.empty(a.size)
+    up, down = (~slow) & (k >= 0), (~slow) & (k < 0)
+    for e in np.unique(k[up | down]):
+        at = (k == e) & ~slow
+        if e >= 0:
+            value[at] = n[at] * _EXACT_POWERS[int(e)]
+        else:
+            value[at] = n[at] / _EXACT_POWERS[int(-e)]
+    for i in np.flatnonzero(slow):
+        value[i] = float(parse_number(format_endf_number(float(a[i]))))
+    out[live] = np.copysign(value, v[live])
+    return out
+
+
 
 def format_endf_number_precise(value, width=11):
     """Choose the closest legal ENDF decimal field (ENDF-102 2023, 0.6.2).
