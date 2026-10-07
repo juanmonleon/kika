@@ -1166,7 +1166,7 @@ def summariseSpectrumNodes(perNode) -> dict:
         values = [abs(entry[field]) for entry in perNode if field in entry]
         return float(max(values)) if values else 0.0
 
-    return {
+    summary = {
         "n_nodes": len(perNode),
         "max_renormalisation_error": worst("renormalisation_error"),
         "max_group_ratio_error": worst("max_group_ratio_error"),
@@ -1177,3 +1177,23 @@ def summariseSpectrumNodes(perNode) -> dict:
         "total_outgoing_inserted": int(sum(entry.get("n_outgoing_inserted", 0)
                                            for entry in perNode)),
     }
+
+    # What the ratio rule recorded, when it recorded it. These are the budgets
+    # of what a *sample* was allowed to be -- how far the projection shifted the
+    # ratios, how much mass clipping to zero moved -- so they come from the
+    # caller's ``ratiosFor`` and this function only takes the worst of each.
+    # Summed where the quantity is a count, maximised where it is a size.
+    present = set().union(*(entry.keys() for entry in perNode)) if perNode else set()
+    for field, name in (("projection_shift", "max_projection_shift"),
+                        ("sum_error_before_projection",
+                         "max_sum_error_before_projection"),
+                        ("sum_error_after_projection",
+                         "max_sum_error_after_projection"),
+                        ("clipped_mass_fraction", "max_clipped_mass_fraction")):
+        if field in present:
+            summary[name] = worst(field)
+    for field, name in (("n_clipped", "total_clipped"),
+                        ("n_groups_frozen", "total_groups_frozen")):
+        if field in present:
+            summary[name] = int(sum(entry.get(field, 0) for entry in perNode))
+    return summary

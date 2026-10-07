@@ -120,14 +120,17 @@ def fold_host_mf3_at_points(
     default_flight_path_m: float = 27.037,
     default_time_resolution_ns: float = 5.0,
     default_delta_t_is_fwhm: bool = True,
+    default_rel_sigma_E: Optional[float] = None,
+    quarantined_as_box: bool = True,
     min_sigma_E_kev: float = 1.0,
 ) -> np.ndarray:
     """Fold the host MF3 elastic cross section through each point's TOF kernel.
 
     For point ``i`` at ``energies_mev[i]`` measured in ``subentries[i]``, the
     TOF resolution ``sigma_E`` is resolved from the cache (falling back to the
-    ORELA-like defaults) and the host ``sigma(E)`` is Gauss–Hermite averaged
-    over ``N(E_i, sigma_E^2)``.
+    ORELA-like defaults) and the host ``sigma(E)`` is averaged over
+    ``N(E_i, sigma_E^2)`` by :func:`scripts.tof_parameters.fold_xs_over_resolution`
+    (on the table's own points since 2026-09-24; Gauss-Hermite before).
 
     Returns
     -------
@@ -143,6 +146,8 @@ def fold_host_mf3_at_points(
             default_flight_path_m=default_flight_path_m,
             default_time_resolution_ns=default_time_resolution_ns,
             default_delta_t_is_fwhm=default_delta_t_is_fwhm,
+            default_rel_sigma_E=default_rel_sigma_E,
+            quarantined_as_box=quarantined_as_box,
         )
         sigma_e = compute_sigma_E(float(e_mev), tof, min_sigma_E_kev=min_sigma_E_kev)
         out[i] = fold_xs_over_resolution(

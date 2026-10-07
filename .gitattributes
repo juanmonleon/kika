@@ -4,3 +4,6 @@
 # lector calcula el sha1 de la copia CRLF y avisa de que los dos no se
 # escribieron juntos. Se sacan byte a byte en todas las plataformas.
 kika/gnds/tests/data/**/*.xml -text
+# Lo mismo para las entradas SINBAD: `externalFile/@checksum` cubre los ficheros
+# del paquete (00_Report/source.txt), y una copia CRLF ya no casa con el digest.
+kika/sinbad/tests/data/** -text

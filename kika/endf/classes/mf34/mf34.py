@@ -10,6 +10,7 @@ from ..mt import MT
 from ....cov.legendre_covariance import LegendreCovariance 
 from ....utils.logging_utils import get_endf_logger
 import numpy as np # Make sure numpy is imported
+from itertools import chain as _chain
 
 # Initialize logger for this module
 logger = get_endf_logger(__name__)
@@ -251,7 +252,7 @@ class MF34MT(MT):
                         lines.append(blank_line_number(record_header))
                         
                         # Format energy grid and matrix values in blocks of 6
-                        all_values = record.energies + record.matrix
+                        all_values = _chain(record.energies, record.matrix)   # ndarray-safe; see writers/_records.py
                         current_values = []
                         
                         for val in all_values:
@@ -287,7 +288,7 @@ class MF34MT(MT):
                         lines.append(blank_line_number(rl_header))
 
                         # stack row-energies, col-energies, then matrix values
-                        all_vals = record.row_energies + record.col_energies + record.rect_matrix
+                        all_vals = _chain(record.row_energies, record.col_energies, record.rect_matrix)
                         buf = []
                         for v in all_vals:
                             buf.append(v)

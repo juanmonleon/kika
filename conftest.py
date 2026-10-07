@@ -62,6 +62,11 @@ _DEFAULT_TAPE_ROOT = "/share_snc/snc/JuanMonleon"
 #: reached by ``../../lib/endf`` from the first, which would break the moment
 #: ``KIKA_TAPES`` points somewhere else.
 _DEFAULT_LIB_ROOT = "/share_snc/lib/endf"
+#: Where the same libraries sit on the WSL workstation, one directory deeper
+#: (``<lib>/neutrons/``). ``/share_snc/lib/endf`` does not exist there
+#: (measured 2026-10-05), so without this root every library-only tape skips
+#: on the one machine the PFNS gates are run from.
+_SOFT_LIB_ROOT = "/soft_snc/lib/endf"
 
 
 def _search_roots() -> Tuple[Path, ...]:
@@ -76,6 +81,7 @@ def _search_roots() -> Tuple[Path, ...]:
     if env_endf:
         roots.append(Path(env_endf))
     roots.append(Path(os.environ.get("KIKA_LIB_TAPES", _DEFAULT_LIB_ROOT)))
+    roots.append(Path(_SOFT_LIB_ROOT))
     roots.append(_downloadCacheRoot())
     roots.append(REPO_ROOT / "files" / "endf")
     roots.append(REPO_ROOT / "files")
@@ -128,9 +134,15 @@ _TAPES: Dict[str, Sequence[str]] = {
     # reached through the personal root; ``u235_b81`` is a different evaluation
     # and both are needed, because the padding divergence and the outgoing-grid
     # mismatch only show up on ENDF/B-VIII.1.
-    "u235_b81": ("endfb81/n-092_U_235.endf", "n-092_U_235.endf"),
-    "cf252_b81": ("endfb81/n-098_Cf_252.endf", "n-098_Cf_252.endf"),
+    "u235_b81": ("endfb81/n-092_U_235.endf", "n-092_U_235.endf",
+                 "endfb81/neutrons/n-092_U_235.endf"),
+    "cf252_b81": ("endfb81/n-098_Cf_252.endf", "n-098_Cf_252.endf",
+                  "endfb81/neutrons/n-098_Cf_252.endf"),
     "pu239_b81": ("endfb81/n-094_Pu_239.endf", "n-094_Pu_239.endf"),
+    # The two PFNS tapes the pre-flight refused (PF-7, PF-8): a correlation
+    # above 1 by 1.2e-5, and a band stated as a 1x1 zero.
+    "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf",),
+    "pu242_j40": ("jeff40/neutrons/94-Pu-242g.txt",),
     "th232": ("jeff40-endf/90-Th-232g.txt", "90-Th-232g.txt"),
     "pu241": ("jeff40-endf/94-Pu-241g.txt", "94-Pu-241g.txt"),
     "u238": ("jeff40-endf/92-U-238g.txt", "U238_jeff4.0_n.endf"),
@@ -509,6 +521,8 @@ u238_b80_tape = _tape_fixture("u238_b80")
 u235_b81_tape = _tape_fixture("u235_b81")
 cf252_b81_tape = _tape_fixture("cf252_b81")
 pu239_b81_tape = _tape_fixture("pu239_b81")
+pu240_b71_tape = _tape_fixture("pu240_b71")
+pu242_j40_tape = _tape_fixture("pu242_j40")
 u5_nubar_covfil_tape = _tape_fixture("u5_nubar_covfil")
 u5_boxer_tape = _tape_fixture("u5_boxer")
 fe56_gnds_tape = _tape_fixture("fe56_gnds")

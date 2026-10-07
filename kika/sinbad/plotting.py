@@ -1,449 +1,179 @@
-"""
-Plots for SINBAD shielding benchmarks.
+"""Plots of a SINBAD benchmark: the measured profiles, C/E, and the correlations.
 
-Deliberately few, and each one answers a question a user actually asks. The
-C/E plot carries the experimental uncertainty as declared by the entry, which
-for a legacy benchmark usually means an unresolved total -- an assumption the
-package makes visible rather than one it hides. See
-:meth:`kika.sinbad.SinbadBenchmark.unresolved`.
+Three figures cover what an entry is usually opened for. Each takes the
+benchmark (or a piece of it), returns the :class:`matplotlib.axes.Axes` it drew
+on, and draws on one the caller passes if there is one -- so they compose into
+a bigger figure instead of owning it.
 
-An entry with several measurement systems is drawn as small multiples, one
-panel per system, rather than as one axis carrying every foil at once: the
-reaction rates of five different reactions share no scale, and C/E curves that
-belong to different detectors are not a single series.
+matplotlib is imported inside the functions, like everywhere else in kika:
+reading a file must not need a display stack.
 """
 
-import math
-from typing import Optional, Tuple
+from __future__ import annotations
 
-import matplotlib.pyplot as plt
+from typing import Any, Optional, Sequence
 
-from kika.plotting.styles import CLASSIC_PALETTE
+import numpy as np
 
-# kika's classic palette, first slots. Colourblind-safe and validated for the
-# all-pairs case, which is what a scatter/line chart of several libraries needs.
-_PALETTE = list(CLASSIC_PALETTE)
-
-_INK = "#0b0b0b"
-_MUTED = "#52514e"
-_GRID = "#e6e5e1"
-_AXIS = "#c9c8c3"
-
-#: Sequential single-hue ramp, light to dark. Depth is an ordered magnitude,
-#: not an identity, so it gets a ramp rather than categorical hues -- a rainbow
-#: over fourteen positions would imply distinctions that are not there.
-_DEPTH_RAMP = [
-    "#cfe3f2", "#a9cce7", "#82b4db", "#5b9bcf", "#3a82bf",
-    "#1f6aa8", "#0f5490", "#0a3f73", "#062c55", "#031c39",
-]
-
-__all__ = [
-    "plot_ce",
-    "plot_sensitivity",
-    "plot_sensitivity_depth",
-    "plot_uncertainty_budget",
-]
+__all__ = ["plot_profile", "plot_ce", "plot_correlation"]
 
 
-def _style(ax) -> None:
-    ax.grid(True, lw=0.5, color=_GRID)
-    ax.set_axisbelow(True)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_color(_AXIS)
-    ax.tick_params(colors=_MUTED)
+def _axes(ax, **kwargs):
+    import matplotlib.pyplot as plt  # noqa: PLC0415
 
-
-def _colours(libraries) -> dict:
-    """Colour follows the library, never its rank in a filtered subset."""
-    return {lib: _PALETTE[i % len(_PALETTE)] for i, lib in enumerate(libraries)}
-
-
-def _draw_ce_panel(ax, df, colours, uncertainty, direct_labels) -> None:
-    ax.axhline(1.0, color=_AXIS, lw=1, zorder=1)
-    ends = []
-    for lib in sorted(df["library"].unique()):
-        sub = df[df["library"] == lib].sort_values("depth_cm")
-        err = (sub["ce"] * sub["exp_rel_unc"]) if uncertainty else None
-        ax.errorbar(
-            sub["depth_cm"], sub["ce"], yerr=err,
-            lw=2, marker="o", ms=6, capsize=3, color=colours[lib],
-            label=lib, zorder=3, markeredgecolor="white", markeredgewidth=1.2,
-        )
-        ends.append([sub["ce"].iloc[-1], sub["depth_cm"].iloc[-1], lib])
-
-    if not direct_labels:
-        return
-    # Libraries can land on top of each other at the deepest position; push the
-    # direct labels apart so both stay readable.
-    span = df["ce"].max() - df["ce"].min()
-    gap = max(span * 0.09, 1e-6)
-    ends.sort()
-    for i in range(1, len(ends)):
-        ends[i][0] = max(ends[i][0], ends[i - 1][0] + gap)
-    for y_lab, x_end, lib in ends:
-        ax.annotate(
-            lib, (x_end, y_lab), color=colours[lib], fontsize=10, fontweight="bold",
-            xytext=(9, 0), textcoords="offset points", va="center",
-        )
-    ax.set_xlim(right=df["depth_cm"].max() * 1.34)
-
-
-def plot_ce(
-    benchmark,
-    system: Optional[str] = None,
-    uncertainty: bool = True,
-    figsize: Optional[Tuple[float, float]] = None,
-    title: Optional[str] = None,
-    ax=None,
-    show: bool = False,
-):
-    """
-    Plot C/E against detector depth, one line per nuclear data library.
-
-    With one measurement system, or when ``system`` selects one, this is a
-    single axis with direct labels. With several it becomes small multiples,
-    one panel per system, sharing a legend.
-
-    Parameters
-    ----------
-    benchmark : SinbadBenchmark
-        The benchmark to plot.
-    system : str, optional
-        Restrict to one measurement system -- an identifier (``"FOIL-AL27"``),
-        a target nuclide (``"Al27"``), or any unambiguous fragment.
-    uncertainty : bool, default True
-        Draw the experimental uncertainty as error bars.
-    figsize : tuple of float, optional
-        Figure size. Defaults to a size appropriate to the panel count.
-    title : str, optional
-        Figure title. Defaults to the benchmark identifier.
-    ax : matplotlib.axes.Axes, optional
-        Draw onto an existing axis. Only valid for the single-panel case.
-    show : bool, default False
-        Call ``plt.show()`` before returning.
-
-    Returns
-    -------
-    matplotlib.axes.Axes or numpy.ndarray of Axes
-    """
-    df = benchmark.ce(system=system)
-    libraries = sorted(df["library"].unique())
-    colours = _colours(benchmark.libraries)
-    systems = list(dict.fromkeys(df["system"]))
-
-    caption = ("error bars: experimental uncertainty as declared by the entry"
-               if uncertainty else None)
-
-    # -- single panel ----------------------------------------------------
-    if len(systems) == 1 or ax is not None:
-        if ax is None:
-            _, ax = plt.subplots(figsize=figsize or (7.6, 4.6))
-        _draw_ce_panel(ax, df, colours, uncertainty, direct_labels=True)
-        label = benchmark.system(systems[0]).reaction if len(systems) == 1 else ""
-        ax.set_xlabel("detector depth (cm)", color=_MUTED)
-        ax.set_ylabel("C/E", color=_MUTED)
-        ax.set_title(
-            title or f"{benchmark.id} · {label}",
-            color=_INK, loc="left", fontweight="bold", pad=24,
-        )
-        if caption:
-            ax.text(0, 1.02, caption, transform=ax.transAxes,
-                    fontsize=8.5, color=_MUTED)
-        _style(ax)
-        ax.legend(frameon=False, loc="lower left", labelcolor=_MUTED)
-        if show:
-            plt.show()
+    if ax is not None:
         return ax
-
-    # -- small multiples -------------------------------------------------
-    ncols = min(3, len(systems))
-    nrows = math.ceil(len(systems) / ncols)
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=figsize or (4.6 * ncols, 3.3 * nrows),
-        sharex=True, squeeze=False,
-    )
-    flat = axes.ravel()
-    for panel, sys_id in zip(flat, systems):
-        _draw_ce_panel(panel, df[df["system"] == sys_id], colours,
-                       uncertainty, direct_labels=False)
-        panel.set_title(benchmark.system(sys_id).reaction,
-                        color=_INK, loc="left", fontsize=10.5, fontweight="bold")
-        _style(panel)
-    for panel in flat[len(systems):]:
-        panel.set_visible(False)
-    # The bottom row is ragged when the panel count is not a multiple of ncols;
-    # label the lowest *visible* panel of each column, not the lowest slot.
-    for col in range(ncols):
-        for row in range(nrows - 1, -1, -1):
-            if axes[row][col].get_visible():
-                axes[row][col].set_xlabel("detector depth (cm)", color=_MUTED)
-                axes[row][col].tick_params(labelbottom=True)
-                break
-    for row in axes:
-        row[0].set_ylabel("C/E", color=_MUTED)
-
-    fig.suptitle(title or f"{benchmark.id} · C/E by activation foil",
-                 color=_INK, x=0.01, ha="left", fontweight="bold")
-    if caption:
-        fig.text(0.01, 0.945, caption, fontsize=8.5, color=_MUTED)
-    handles = [
-        plt.Line2D([], [], color=colours[lib], lw=2, marker="o", label=lib)
-        for lib in libraries
-    ]
-    fig.legend(handles=handles, frameon=False, ncol=len(libraries),
-               loc="lower left", bbox_to_anchor=(0.01, 0.0), labelcolor=_MUTED)
-    fig.tight_layout(rect=(0, 0.05, 1, 0.93))
-
-    if show:
-        plt.show()
-    return axes
+    _, ax = plt.subplots(**kwargs)
+    return ax
 
 
-def _ramp(n: int) -> list:
-    """``n`` steps of the sequential ramp, spread across its full range."""
-    if n <= 1:
-        return [_DEPTH_RAMP[-1]]
-    last = len(_DEPTH_RAMP) - 1
-    return [_DEPTH_RAMP[round(i * last / (n - 1))] for i in range(n)]
-
-
-def plot_sensitivity_depth(
+def plot_profile(
     benchmark,
-    system: str,
-    mt: int = 4,
-    figsize: Tuple[float, float] = (8.0, 4.6),
-    title: Optional[str] = None,
+    convention: Optional[str] = None,
+    labels: Optional[Sequence[str]] = None,
     ax=None,
-    show: bool = False,
+    **kwargs,
 ):
     """
-    One reaction's sensitivity profile at every measured depth.
-
-    The question a set of profiles down a shield answers is how the response
-    stops being sensitive to the same energies as it goes deeper. Drawing them
-    on one axis with a light-to-dark ramp shows that directly; one panel per
-    position would not, because the comparison *is* the point.
+    Measured values against shield thickness, one series per data object.
 
     Parameters
     ----------
     benchmark : SinbadBenchmark
-        Entry to read the profiles from. Requires ``h5py`` for HDF5 payloads.
-    system : str
-        Measurement system id, target nuclide, or an unambiguous fragment.
-    mt : int, default 4
-        MT number of the reaction to draw. 4 is inelastic scattering, which is
-        what governs deep penetration in iron.
-    figsize : tuple of float, default (8.0, 4.6)
-        Figure size, used only when ``ax`` is None.
-    title : str, optional
-        Plot title. Defaults to the system and reaction.
+    convention : str, optional
+        Bring every table to this ``valueConvention`` first -- without it,
+        tables stored in different conventions are plotted as stored, which is
+        rarely what is wanted.
+    labels : sequence of str, optional
+        Which data objects to draw. Default: every measured table.
     ax : matplotlib.axes.Axes, optional
-        Draw onto an existing axis instead of creating a figure.
-    show : bool, default False
-        Call ``plt.show()`` before returning.
+    **kwargs
+        Passed to :meth:`~matplotlib.axes.Axes.errorbar`.
 
     Returns
     -------
     matplotlib.axes.Axes
 
-    Raises
-    ------
-    KeyError
-        If no profile in the system carries the requested MT.
+    Examples
+    --------
+    >>> from kika.sinbad import plot_profile              # doctest: +SKIP
+    >>> plot_profile(b, convention="backgroundSubtracted")   # doctest: +SKIP
     """
-    sets = benchmark.sensitivities(system)
-    sets = [s for s in sets if mt in s.mts]
-    if not sets:
-        available = sorted({m for s in benchmark.sensitivities(system) for m in s.mts})
-        raise KeyError(f"no profile with MT={mt} for {system!r}; available: {available}")
-
-    depth = {m.id: m.depth_cm for m in benchmark.measurements()}
-    sets.sort(key=lambda s: (depth.get(s.measurement, float("inf")), s.position))
-    colours = _ramp(len(sets))
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=figsize)
-
-    label = sets[0].reactions[sets[0].mts.index(mt)]
-    lo, hi = None, None
-    for s, colour in zip(sets, colours):
-        df = s.to_dataframe()
-        sub = df[df["mt"] == mt]
-        d = depth.get(s.measurement)
-        ax.step(
-            sub["e_mid"], sub["sensitivity"], where="mid", lw=2, color=colour,
-            label=f"{s.position}" + (f" · {d:.0f} cm" if d is not None else ""),
-            zorder=3,
-        )
-        # A threshold reaction is flat zero over most of a 12-decade grid.
-        # Spending the axis on that hides the part anyone is looking at, so the
-        # range follows the support of the data rather than the grid.
-        live = sub[sub["sensitivity"].abs() > 1e-12]
-        if not live.empty:
-            lo = live["e_low"].min() if lo is None else min(lo, live["e_low"].min())
-            hi = live["e_high"].max() if hi is None else max(hi, live["e_high"].max())
-
-    ax.axhline(0.0, color=_AXIS, lw=1, zorder=1)
-    ax.set_xscale("log")
-    if lo and hi:
-        ax.set_xlim(lo * 0.7, hi * 1.4)
-    ax.set_xlabel("energy (MeV)", color=_MUTED)
-    ax.set_ylabel(f"sensitivity to {sets[0].target_nuclide} {label}", color=_MUTED)
-    ax.set_title(
-        title or f"{system} · {sets[0].target_nuclide} {label} · by depth",
-        color=_INK, loc="left", fontweight="bold", pad=24,
+    ax = _axes(ax, figsize=(9, 6))
+    objects = (
+        [benchmark.data[label] for label in labels] if labels
+        else [o for o in benchmark.measurements if o.kind == "table"]
     )
-    ax.text(
-        0, 1.02,
-        f"{sets[0].convention} · {sets[0].nuclear_data_library}",
-        transform=ax.transAxes, fontsize=8.5, color=_MUTED,
-    )
-    _style(ax)
-    ax.legend(frameon=False, ncol=2, fontsize=8.5, labelcolor=_MUTED,
-              loc="lower left")
-
-    if show:
-        plt.show()
+    style = {"fmt": "o", "capsize": 3, "markersize": 5}
+    style.update(kwargs)
+    for obj in objects:
+        table = obj.table
+        if "shieldThickness" not in table:
+            continue
+        x = table["shieldThickness"]
+        y = obj.corrected(convention) if convention else obj.values
+        relative = obj.uncertainty
+        yerr = y * relative if relative is not None else None
+        ax.errorbar(x, y, yerr=yerr, label=obj.reaction or obj.label, **style)
+    ax.set_yscale("log")
+    ax.set_xlabel("Shield thickness [cm]")
+    unit = ""
+    if objects:
+        values = objects[0].table.value_columns
+        unit = values[0].unit if values else ""
+    ax.set_ylabel(f"Measured value [{unit}]" if unit else "Measured value")
+    normalisation = objects[0].normalisation if objects else None
+    title = benchmark.short_code or benchmark.id
+    if normalisation is not None:
+        title += f"  --  per {normalisation.basis}"
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
     return ax
 
 
-def plot_uncertainty_budget(
-    benchmark,
-    figsize: Tuple[float, float] = (7.6, 3.8),
-    title: Optional[str] = None,
-    ax=None,
-    show: bool = False,
-):
+def plot_ce(benchmark, reaction: Optional[str] = None, ax=None, **kwargs):
     """
-    Plot what the declared correlation structure is worth.
-
-    Paired bars per scope: the uncertainty on the mean C/E computed from the
-    full covariance, against the same quantity computed from its diagonal. The
-    gap is what an analysis that treats the points as independent throws away.
+    Published C/E against shield thickness, one line per library and code.
 
     Parameters
     ----------
     benchmark : SinbadBenchmark
-        The benchmark to plot.
-    figsize : tuple of float, default (7.6, 3.8)
-        Figure size, used only when ``ax`` is None.
-    title : str, optional
-        Plot title.
+    reaction : str, optional
+        Draw only this reaction, e.g. ``"S32(n,p)P32"``. Without it every
+        comparison is drawn, which is readable only for a small entry.
     ax : matplotlib.axes.Axes, optional
-        Draw onto an existing axis instead of creating a figure.
-    show : bool, default False
-        Call ``plt.show()`` before returning.
+    **kwargs
+        Passed to :meth:`~matplotlib.axes.Axes.plot`.
 
     Returns
     -------
     matplotlib.axes.Axes
     """
-    df = benchmark.uncertainty_budget()
-    labels = [
-        s if s == "whole entry" else s.replace("FOIL-", "")
-        for s in df["scope"]
-    ]
-    y = range(len(df))
-    height = 0.38
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=figsize)
-
-    # 2 px of surface between the paired bars, per the mark spec.
-    ax.barh([i + height / 2 + 0.01 for i in y], 100 * df["full"], height,
-            color=_PALETTE[0], label="with declared correlations",
-            edgecolor="white", linewidth=1)
-    ax.barh([i - height / 2 - 0.01 for i in y], 100 * df["diagonal_only"], height,
-            color=_PALETTE[1], label="diagonal only", edgecolor="white", linewidth=1)
-
-    for i, row in df.iterrows():
-        ax.annotate(f"{row['factor']:.1f}x", (100 * row["full"], i),
-                    xytext=(6, 0), textcoords="offset points",
-                    va="center", fontsize=9.5, color=_MUTED, fontweight="bold")
-
-    ax.set_yticks(list(y), labels)
-    ax.invert_yaxis()
-    ax.set_xlabel("uncertainty on the mean C/E (%)", color=_MUTED)
-    ax.set_xlim(right=100 * df["full"].max() * 1.22)
-    ax.set_title(title or f"{benchmark.id} · cost of ignoring the correlations",
-                 color=_INK, loc="left", fontweight="bold", pad=24)
-    ax.text(0, 1.02,
-            "factor by which independence understates the aggregate",
-            transform=ax.transAxes, fontsize=8.5, color=_MUTED)
-    _style(ax)
-    ax.grid(axis="y", visible=False)
-    # Upper right: the "whole entry" row is the shortest pair, so that corner is
-    # the only one guaranteed clear of the bars and their factor labels.
-    ax.legend(frameon=False, loc="upper right", labelcolor=_MUTED)
-
-    if show:
-        plt.show()
+    ax = _axes(ax, figsize=(9, 6))
+    table = benchmark.ce()  # C/E only: a ratio of two calculations is not drawn against 1 as one
+    if table.empty:
+        raise ValueError(f"{benchmark.short_code or benchmark.id} has no comparisons")
+    if reaction is not None:
+        table = table[table["reaction"] == reaction]
+    style = {"marker": "o", "linestyle": ":", "markersize": 5}
+    style.update(kwargs)
+    # One line per run, not per column name: McBEND calls every library's
+    # column "CM", and grouping on it would join four libraries into one line.
+    for (source, calculation), group in table.groupby(["calculations", "calculation"], sort=False):
+        group = group.sort_values("shieldThickness")
+        ax.plot(group["shieldThickness"], group["value"], label=f"{source} {calculation}", **style)
+    ax.axhline(1.0, color="black", linewidth=1, alpha=0.6)
+    ax.set_xlabel("Shield thickness [cm]")
+    ax.set_ylabel("C/E")
+    ax.set_title(f"{benchmark.short_code or benchmark.id}" + (f"  --  {reaction}" if reaction else ""))
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8)
     return ax
 
 
-def plot_sensitivity(
-    sensitivity,
-    figsize: Tuple[float, float] = (7.6, 4.2),
-    title: Optional[str] = None,
-    ax=None,
-    show: bool = False,
-):
+def plot_correlation(benchmark, labels: Optional[Sequence[str]] = None, ax=None, **kwargs):
     """
-    Plot a sensitivity set, one step curve per reaction.
+    The correlation between the measured points, built from the uncertainty budgets.
+
+    The block structure is the point of the figure: the diagonal blocks are the
+    within-detector components, the background is what ``within-entry``
+    correlates -- in the pilot, the 8 % on the fission-plate power that every
+    point carries.
 
     Parameters
     ----------
-    sensitivity : SensitivitySet
-        The set to plot. Requires ``h5py`` if the package stores arrays as HDF5.
-    figsize : tuple of float, default (7.6, 4.2)
-        Figure size, used only when ``ax`` is None.
-    title : str, optional
-        Plot title. Defaults to the set identifier and target nuclide.
+    benchmark : SinbadBenchmark
+    labels : sequence of str, optional
     ax : matplotlib.axes.Axes, optional
-        Draw onto an existing axis instead of creating a figure.
-    show : bool, default False
-        Call ``plt.show()`` before returning.
+    **kwargs
+        Passed to :meth:`~matplotlib.axes.Axes.imshow`.
 
     Returns
     -------
     matplotlib.axes.Axes
     """
-    df = sensitivity.to_dataframe()
+    import matplotlib.pyplot as plt  # noqa: PLC0415
 
-    if ax is None:
-        _, ax = plt.subplots(figsize=figsize)
-
-    for i, reaction in enumerate(sensitivity.reactions):
-        sub = df[df["reaction"] == reaction]
-        ax.step(
-            sub["e_mid"], sub["sensitivity"], where="mid",
-            lw=2, color=_PALETTE[i % len(_PALETTE)], label=reaction,
-        )
-
-    ax.set_xscale("log")
-    ax.set_xlabel("energy (MeV)", color=_MUTED)
-    ax.set_ylabel("sensitivity coefficient", color=_MUTED)
-    ax.set_title(
-        title or f"{sensitivity.id} · {sensitivity.target_nuclide}",
-        color=_INK, loc="left", fontweight="bold", pad=24,
-    )
-    ax.text(
-        0, 1.02, sensitivity.convention,
-        transform=ax.transAxes, fontsize=8.5, color=_MUTED,
-    )
-    _style(ax)
-    ax.legend(frameon=False, loc="lower left", labelcolor=_MUTED)
-
-    # A placeholder that cannot be told apart from data is worse than none.
-    if sensitivity.data_origin == "syntheticDemo":
-        ax.text(
-            0.30, 0.55, "SYNTHETIC — NOT PHYSICS", transform=ax.transAxes,
-            ha="center", va="center", fontsize=15, color="#e34948",
-            alpha=0.38, fontweight="bold",
-        )
-
-    if show:
-        plt.show()
+    ax = _axes(ax, figsize=(7, 6))
+    matrix, index = benchmark.correlation(labels)
+    style = {"vmin": 0.0, "vmax": 1.0, "cmap": "viridis", "origin": "upper"}
+    style.update(kwargs)
+    image = ax.imshow(matrix, **style)
+    boundaries, last = [], None
+    for position, (label, _) in enumerate(index):
+        if label != last:
+            boundaries.append((position, label))
+            last = label
+    for position, _ in boundaries[1:]:
+        ax.axhline(position - 0.5, color="white", linewidth=0.8)
+        ax.axvline(position - 0.5, color="white", linewidth=0.8)
+    ticks = [p for p, _ in boundaries]
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    names = [label for _, label in boundaries]
+    ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
+    ax.set_yticklabels(names, fontsize=8)
+    ax.set_title(f"{benchmark.short_code or benchmark.id} -- correlation of the measured points")
+    plt.colorbar(image, ax=ax, label="correlation")
     return ax

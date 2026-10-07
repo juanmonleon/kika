@@ -28,7 +28,8 @@ experiments, not just K&S), each library's evaluation is constructed as:
 
     c_0(E):
         <sigma_MF3>_fold / (4 pi), folded over the per-experiment Gaussian
-        resolution kernel (Gauss-Hermite quadrature). sigma(E') is interpolated
+        resolution kernel (on the table's own points since 2026-09-24; 12-node
+        Gauss-Hermite before, see tof_parameters). sigma(E') is interpolated
         on MF3's native pointwise grid (already linearised through the resonance
         region in the ENDF file).
 
@@ -109,7 +110,7 @@ DEFAULT_TIME_RESOLUTION_NS = 5.0
 # read delta_t as a sigma; from run 82 it is a FWHM (sigma_E = FWHM/2.3548).
 # Passed explicitly because get_tof_parameters() now defaults it to True.
 DELTA_T_IS_FWHM            = True
-RESOLUTION_FOLD_NODES      = 12      # Gauss-Hermite nodes for the c_0 fold
+RESOLUTION_FOLD_NODES      = 12      # Gauss-Hermite nodes, only if the legacy fold method is asked for
 
 # Energy range for the analysis. EXFOR datapoints outside this window are
 # dropped at the precompute stage.

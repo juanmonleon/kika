@@ -48,6 +48,7 @@ from kika.nuclear_data.model import (
     ReactionSuite,
     Regions1d,
     Uncorrelated,
+    Unspecified,
     XYs2d,
     crossSectionAxes,
     pidFromZA,
@@ -632,6 +633,22 @@ def _attachEnergyAngleDistributions(suite: ReactionSuite, mf6mt, mt: int,
         product = channel.ensureProduct(pid, label)
         _attachMultiplicity(product, multiplicity, label, mt, report)
         if distribution is None:
+            continue
+        # LAW=0 states no distribution; it does not state that there is none.
+        # On a fission channel MF4/MF5 got here first (ENDF/B-VIII.1 U-235:
+        # JP=11, a LAW=0 neutron, and the prompt spectrum in MF5/MT18), and
+        # replacing their `uncorrelated` with an `unspecified` threw the PFNS
+        # away -- the defect PF-6 of the PFNS roadmap. The distributed GNDS
+        # file keeps the MF5 spectrum on that neutron, and so does this. The
+        # MF6 section still comes back whole: LAW=0 is re-encoded from the
+        # provenance with no body, whatever form the product carries.
+        existing = (product.distribution.get(EVAL_LABEL)
+                    if product.distribution is not None else None)
+        if isinstance(distribution, Unspecified) and existing is not None:
+            report.warn(
+                f"MT{mt}: MF6 gives product {label!r} LAW=0 (no distribution) "
+                f"and MF4/MF5 already gave it one; the {type(existing).__name__} "
+                f"from those files is kept, as the distributed GNDS does")
             continue
         if product.distribution is None:
             product.distribution = Distribution()

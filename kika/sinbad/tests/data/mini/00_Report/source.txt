@@ -1,0 +1,2 @@
+NESTOR-like source description for the test entry.
+Not a real experiment.

@@ -21,7 +21,7 @@ from kika._constants import (
     SPEED_OF_LIGHT_M_NS as _SPEED_OF_LIGHT_M_PER_NS,
 )
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import gauss_hermite_nodes
+from kika.utils.numerics import gaussian_fold_nodes
 
 # Default TOF parameters (GELINA facility)
 _DEFAULT_FLIGHT_PATH_M = 27.037  # meters
@@ -384,16 +384,26 @@ class AngularDistributionContainer:
             e_min = 1e-11
             e_max = 20.0
 
-        # Gauss-Hermite quadrature over the resolution kernel — the same nodes
-        # kika.utils.numerics.fold_tabulated uses, so the cross-section and
-        # angular folding paths share one scheme. This replaces a uniform
-        # n_samples-point Riemann sum over +-n_sigma, which needed many more
-        # evaluations for the same accuracy.
-        sample_energies, weights = gauss_hermite_nodes(
-            target_energy, sigma_E, n_nodes=n_samples,
-        )
-        # Nodes are unbounded, so clamp into the ACE range and renormalise.
-        # Only matters within a few sigma of the table edges.
+        # The same quadrature kika.utils.numerics.fold_tabulated uses: a node on
+        # every incident energy the distribution tabulates and every point of
+        # the cross-section grid inside the window, plus uniform ones. With
+        # normalize_to_xs the integrand is sigma(E) f(mu, E), and sigma has
+        # structure on a keV scale above the resolved range, which twelve
+        # Gauss-Hermite nodes (used here until September 2026) do not resolve.
+        # ``n_sigma`` and ``n_samples`` are no longer read.
+        grids = []
+        try:
+            dist = self.elastic if mt == 2 else self.incident_neutron.get(mt)
+            if dist is not None and getattr(dist, "energies", None) is not None:
+                grids.append(np.asarray(dist.energies, dtype=float))
+        except Exception:
+            pass
+        xs_grid = getattr(ace, "energies", None)
+        if xs_grid is not None and len(xs_grid):
+            grids.append(np.asarray(xs_grid, dtype=float))
+        sample_energies, weights = gaussian_fold_nodes(target_energy, sigma_E, grids)
+        # Clamp into the ACE range and renormalise; only matters within a few
+        # sigma of the table edges.
         sample_energies = np.clip(sample_energies, e_min, e_max)
         weights = weights / weights.sum()
 

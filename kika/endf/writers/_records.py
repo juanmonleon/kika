@@ -12,6 +12,13 @@ from __future__ import annotations
 from typing import List
 import numpy as np
 
+# ⚑ ``matrix`` / ``rect_matrix`` HOLD A NUMPY ARRAY, NOT A PYTHON LIST.  A Python list of floats
+# costs ~4x the ndarray (measured: one 554x554 block is 2.5 MB as float64 and 9.8 MB as a list), and
+# an MF34 on a fine mesh has ~9 M values across its 27 blocks -- 286 MB of float objects that the
+# writer then formats.  That is what made a common-mesh tape die with MemoryError on a 12 GB box.
+# The parsers still assign plain lists, so every CONSUMER must accept both: use ``np.asarray(...)``
+# to read, and ``itertools.chain(...)`` -- never ``+`` -- to concatenate with the energy grids.
+
 
 def populate_lb5_record(record, matrix: np.ndarray, energy_grid: List[float]):
     """Populate ``record`` as an LB=5 (LS=1, symmetric upper triangle) block.
@@ -41,7 +48,7 @@ def populate_lb5_record(record, matrix: np.ndarray, energy_grid: List[float]):
     record.ne = len(energy_grid)
     record.energies = list(energy_grid)
     triu_rows, triu_cols = np.triu_indices(m)
-    record.matrix = matrix[triu_rows, triu_cols].tolist()
+    record.matrix = np.ascontiguousarray(matrix[triu_rows, triu_cols], dtype=float)
     record.nt = len(energy_grid) + len(record.matrix)
     return record
 
@@ -79,7 +86,7 @@ def populate_lb6_record(
     record.lb = 6
     record.row_energies = list(row_energy_grid)
     record.col_energies = list(col_energy_grid)
-    record.rect_matrix = matrix.ravel().tolist()
+    record.rect_matrix = np.ascontiguousarray(matrix.ravel(), dtype=float)
     record.nt = len(row_energy_grid) + len(col_energy_grid) + r * c
     record.ne = len(row_energy_grid)
     return record
