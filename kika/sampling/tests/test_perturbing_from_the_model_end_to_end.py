@@ -328,8 +328,17 @@ def test_a_run_that_holds_the_sums_says_what_it_rebuilt():
     applied = pset.applyToSuite(suite)
     note = _redundancyNote(suite, pset, applied, crossSectionSums=True)
     assert "re-derived from their moved partials: MT1" in note
-    # MT2 has its own block; MT102 has none and rides MT1's.
+    # MT2 has its own block, so MT1's is discarded; MT102 has none and stays.
+    assert "MT1: own block discarded" in note
+    assert "MT102" not in note
+    assert {c.mt for c in applied} == {1, 2}
+
+    distributed = _structuralSuite()
+    applied = pset.applyToSuite(distributed, distributeSums=True)
+    note = _redundancyNote(distributed, pset, applied, crossSectionSums=True)
+    # Asked for: MT102 rides MT1's block, and the note calls it an assumption.
     assert "MT1's block moved its unperturbed partials MT102" in note
+    assert "assumption" in note
 
 
 def test_a_reaction_whose_partials_the_file_omits_is_not_a_sum():

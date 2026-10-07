@@ -9,19 +9,34 @@ evaluation.
 
 The rule this module applies is decision 3 of
 ``kika-workspace/docs/library/perturbation_model_roadmap.md``, completed on
-2026-10-07:
+2026-10-07, with its casuistry in ``mf3_perturbation_casuistry.md`` beside it.
+Its principle: **a covariance block perturbs the cross section it was stated
+for, and no other.** A block applied to a section it was not given for pairs a
+central value with an uncertainty nobody stated, and the realisation stops
+being a draw from the evaluation.
 
 1. **A partial with its own block is perturbed by it.** Partials govern: when a
    request names a sum and some of its parts, the parts keep their own factors.
-2. **A partial without one rides the nearest perturbed sum above it.** MT1's
-   block, drawn on its own, moves every partial of MT1 that nothing more
-   specific claims -- MT2 included -- by the same factor. MT4's block, if MT4
-   is also perturbed, takes precedence over MT1's for MT51-91. This is what
-   ``apply_factors_to_pendf_mf3`` does for a composite the PENDF lacks, and
-   what the nu-bar family does for a member with no block of its own.
+2. **A partial without one is not perturbed.** MT4's block says nothing about
+   MT53 on its own -- only about MT51 + ... + MT91 together -- so carrying it to
+   MT53 would invent a covariance (same relative uncertainty, fully correlated
+   with the sum) the file never states.
 3. **Every sum with a moved partial under it is re-derived**, and a sum's own
-   block is never applied to the sum itself: it either reached the partials
-   through (2) or it is discarded, and the run says which.
+   block is never applied to the sum itself: the sum has to equal its parts,
+   so it moves by what they moved. Its block is *discarded*, and the run says
+   so.
+4. **A sum's block with no partial of its own under it has nowhere to go.**
+   Applying it to the sum alone breaks (3), and NJOY's RECONR would discard it
+   anyway (it rebuilds MT1 and MT4 from the partials). Such a block is refused
+   -- see :func:`screenSumClaims` -- unless the caller opts into
+   ``distribute=True``.
+
+``distribute=True`` is the explicit, recorded assumption that a sum's block may
+be carried to its partials: each partial without a block of its own then rides
+the nearest perturbed sum above it, by the same factor. That keeps the sum
+consistent with its own covariance and gives the partials one the file does not
+state. It is what ``apply_factors_to_pendf_mf3`` does for a composite the PENDF
+lacks, and it is off by default.
 
 **Re-derived as a delta, not as a fresh sum.** ``S' = S + sum_p (p' - p)`` over
 the leaf partials under ``S``. Summing the partials afresh would also "repair"
@@ -37,8 +52,10 @@ Which MT sums which is :data:`kika._constants.MF3_SUM_RULES`, resolved against
 what the tape carries by
 :func:`~kika.endf.writers.redundant.resolve_sum_components` -- the same table
 the decoder uses to put an MT in ``suite.sums`` and the writer uses to resum.
-The rules form a tree (no MT has two parents; checked in the tests), which is
-what makes "the nearest perturbed sum above it" a definite answer.
+**What a sum is made of is MF3's question, not MF33's**: MT4 is the sum of every
+MT51-91 the tape states, whichever of them carry a covariance. The rules form a
+tree (no MT has two parents; checked in the tests), which is what makes "the
+partials under a sum" and "the nearest perturbed sum above it" definite.
 """
 from __future__ import annotations
 
@@ -49,7 +66,17 @@ import numpy as np
 
 from kika.sampling.joint_blocks import ComponentKey
 
-__all__ = ["SumPlan", "planCrossSectionSums", "rederiveSum", "sumTree"]
+__all__ = ["SumPlan", "SumScreen", "planCrossSectionSums", "rederiveSum",
+           "screenSumClaims", "suiteSumLayout", "sumLeaves", "sumTree"]
+
+
+def suiteSumLayout(suite) -> Tuple[set, set]:
+    """``(present, sums)``: every MF3 MT the suite carries, and its sums."""
+    present = {int(r.ENDF_MT) for container in (suite.reactions, suite.sums)
+               for r in container if getattr(r, "ENDF_MT", None) is not None}
+    sums = {int(r.ENDF_MT) for r in suite.sums
+            if getattr(r, "ENDF_MT", None) is not None}
+    return present, sums
 
 
 def sumTree(present: Iterable[int], sums: Iterable[int]
@@ -78,6 +105,21 @@ def sumTree(present: Iterable[int], sums: Iterable[int]
     return children, parent
 
 
+def _mtList(mts) -> str:
+    """``[51, 52, 53, 91]`` as ``MT51-53, 91``."""
+    mts = sorted(int(mt) for mt in mts)
+    if not mts:
+        return "no partial"
+    runs, start = [], None
+    for index, mt in enumerate(mts):
+        if start is None:
+            start = mt
+        if index + 1 == len(mts) or mts[index + 1] != mt + 1:
+            runs.append(f"{start}" if start == mt else f"{start}-{mt}")
+            start = None
+    return "MT" + ", ".join(runs)
+
+
 def _leavesUnder(total: int, children: Mapping[int, Tuple[int, ...]]
                  ) -> Tuple[int, ...]:
     out: List[int] = []
@@ -102,7 +144,7 @@ class SumPlan:
     """What a realisation does to MF3 once the sum rules are applied."""
 
     #: Leaf partial -> the component whose block it is perturbed by: its own,
-    #: or the nearest perturbed sum above it.
+    #: or, only with ``distribute=True``, the nearest perturbed sum above it.
     leafControl: Dict[int, ComponentKey] = field(default_factory=dict)
     #: The sums to re-derive, deepest first (MT4 before MT3 before MT1).
     rederive: Tuple[int, ...] = ()
@@ -118,21 +160,13 @@ class SumPlan:
     virtual: Tuple[int, ...] = ()
 
 
-def planCrossSectionSums(claims: Mapping[int, ComponentKey],
-                         present: Iterable[int], sums: Iterable[int]) -> SumPlan:
-    """Decide, per MT, which block moves it and which sums are rebuilt.
-
-    *claims* is ``MT -> component`` for every cross section the realisation
-    perturbs (MF33, or MF34's L=0 magnitude). *present* is every MF3 MT of the
-    suite and *sums* the ones the decoder recognised as sums.
-    """
+def _virtualClaims(claims: Iterable[int], present: set) -> set:
+    """Claimed MTs the tape states no MF3 section for, only partials of."""
     from kika.endf.writers.redundant import resolve_sum_components
 
-    sums = {int(s) for s in sums}
-    present = {int(mt) for mt in present}
     virtual = set()
     for mt in claims:
-        if mt in present:
+        if int(mt) in present:
             continue
         if not resolve_sum_components(int(mt), present):
             raise KeyError(
@@ -140,10 +174,118 @@ def planCrossSectionSums(claims: Mapping[int, ComponentKey],
                 f"of its partials either: the realisation perturbs a cross "
                 f"section the tape does not state")
         virtual.add(int(mt))
+    return virtual
+
+
+@dataclass(frozen=True)
+class SumScreen:
+    """Which claimed sums the strict rule leaves without a use."""
+
+    #: Sum -> the leaf partials under it that carry a block of their own. The
+    #: sum's block is not applied; the sum is re-derived from those partials.
+    discarded: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
+    #: Sum -> every leaf partial under it, none of which carries a block. The
+    #: sum's block could only reach the tape by being carried to them.
+    unreachable: Dict[int, Tuple[int, ...]] = field(default_factory=dict)
+
+
+def sumLeaves(present: Iterable[int], sums: Optional[Iterable[int]] = None,
+              claims: Iterable[int] = ()) -> Dict[int, Tuple[int, ...]]:
+    """``{sum: leaf partials}`` for every sum the tape states, as MF3 has them.
+
+    *present* is every MF3 MT; *sums* the ones that are sums, or ``None`` to
+    derive them the way the decoder does (an MT the tape states *and* gives
+    the partials of), so a caller holding only the parsed tape's MF3 listing
+    gets the tree a run will use. *claims* adds the virtual sums -- MTs a
+    covariance is stated for and MF3 holds only the partials of. A claim that
+    is neither (ENDF/B-VIII.1 U-238's lumped MT851) is left out rather than
+    refused: this is a question about the tape's layout, asked by tools that
+    describe it.
+    """
+    from kika.endf.writers.redundant import resolve_sum_components
+
+    present = {int(mt) for mt in present}
+    if sums is None:
+        sums = {mt for mt in present if resolve_sum_components(mt, present)}
+    virtual = {int(mt) for mt in claims
+               if int(mt) not in present
+               and resolve_sum_components(int(mt), present)}
+    allSums = {int(s) for s in sums} | virtual
+    children, _parent = sumTree(present | virtual, allSums)
+    return {total: _leavesUnder(total, children) for total in sorted(allSums)}
+
+
+def screenSumClaims(claims: Iterable[int], present: Iterable[int],
+                    sums: Iterable[int]) -> SumScreen:
+    """Sort the claimed sums by what the strict rule does with their blocks.
+
+    *claims* is every MT a block is drawn for (MF33, or MF34's L=0 magnitude);
+    *present* and *sums* as :func:`suiteSumLayout` gives them. A claimed sum
+    lands in exactly one of :class:`SumScreen`'s two maps: some partial under
+    it is claimed too (its block is discarded and the sum re-derived), or none
+    is (its block has nowhere to go). Which partials a sum has is read from
+    MF3, so a virtual sum -- a covariance for MT103 on a tape that states only
+    MT600-649 -- counts its MF3 partials like any other.
+    """
+    claims = {int(mt) for mt in claims}
+    present = {int(mt) for mt in present}
+    sums = {int(s) for s in sums}
+    virtual = _virtualClaims(claims, present)
+    children, _parent = sumTree(present | virtual, sums | virtual)
+    discarded: Dict[int, Tuple[int, ...]] = {}
+    unreachable: Dict[int, Tuple[int, ...]] = {}
+    for total in sorted((sums | virtual) & claims):
+        leaves = _leavesUnder(total, children)
+        own = tuple(leaf for leaf in leaves if leaf in claims)
+        if own:
+            discarded[total] = own
+        else:
+            unreachable[total] = leaves
+    return SumScreen(discarded=discarded, unreachable=unreachable)
+
+
+def planCrossSectionSums(claims: Mapping[int, ComponentKey],
+                         present: Iterable[int], sums: Iterable[int], *,
+                         distribute: bool = False) -> SumPlan:
+    """Decide, per MT, which block moves it and which sums are rebuilt.
+
+    *claims* is ``MT -> component`` for every cross section the realisation
+    perturbs (MF33, or MF34's L=0 magnitude). *present* is every MF3 MT of the
+    suite and *sums* the ones the decoder recognised as sums.
+
+    By default a leaf moves only by its own block, and a claimed sum with no
+    claimed partial under it raises: its block has nowhere it may go (rule 4
+    of the module docstring). With *distribute*, a leaf without a block rides
+    the nearest claimed sum above it instead.
+    """
+    sums = {int(s) for s in sums}
+    present = {int(mt) for mt in present}
+    virtual = _virtualClaims(claims, present)
     children, parent = sumTree(present | virtual, sums | virtual)
+
+    if not distribute:
+        screen = screenSumClaims(claims, present, sums)
+        if screen.unreachable:
+            named = "; ".join(
+                f"MT{total} over {_mtList(leaves)}"
+                for total, leaves in screen.unreachable.items())
+            raise ValueError(
+                f"{named}: a block is drawn for the sum and for none of its "
+                f"partials, and a covariance perturbs only the cross section "
+                f"it was stated for. Applied to the sum alone it would leave "
+                f"the sum unequal to its parts (and NJOY rebuilds MT1 and MT4 "
+                f"from the parts anyway); carried to the partials it would "
+                f"give them an uncertainty the file does not state. Ask for "
+                f"partials that carry a covariance, or pass "
+                f"distributeSums=True to carry the sum's block to them as a "
+                f"stated assumption")
 
     leafControl: Dict[int, ComponentKey] = {}
     for leaf in sorted(present - sums):
+        if not distribute:
+            if leaf in claims:
+                leafControl[leaf] = claims[leaf]
+            continue
         node: Optional[int] = leaf
         while node is not None and node not in claims:
             node = parent.get(node)

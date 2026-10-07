@@ -172,10 +172,18 @@ def test_a_reaction_list_the_file_fully_states_leaves_no_note():
     assert not [n for n in run.notes if "not perturbed" in n]
 
 
-def test_missing_reactions_are_reported_under_raise_too():
-    """A partial match is not a failure, so `raise` does not refuse it -- but
-    it is still something the run has to record."""
-    run = perturbFromModel(FE56, {33: {"mt": [2, 16]}}, 1, seed=5, dryRun=True)
-    perturbed = {key.mt for key in run.samples[0]["set"].components()}
-    if 16 not in perturbed:
-        assert any("MT16" in note for note in run.notes)
+def test_a_named_cross_section_without_a_covariance_is_refused_under_raise():
+    """MT16 has no block here, and no other block may stand in for it.
+
+    Until 2026-10-07 a partial match passed under `raise` with a note. For
+    cross sections it now refuses: the alternative the sum rules once offered
+    -- moving MT16 with a sum's block -- pairs it with an uncertainty the file
+    does not state, and a run that quietly perturbs less than it was asked for
+    is the other way to get it wrong. `skip` still records it and goes on.
+    """
+    with pytest.raises(ValueError, match="MT16: asked for"):
+        perturbFromModel(FE56, {33: {"mt": [2, 16]}}, 1, seed=5, dryRun=True)
+    run = perturbFromModel(FE56, {33: {"mt": [2, 16]}}, 1, seed=5, dryRun=True,
+                           onMissing="skip")
+    assert {key.mt for key in run.samples[0]["set"].components()} == {2}
+    assert any("MT16" in note for note in run.notes)

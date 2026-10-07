@@ -259,11 +259,12 @@ def _redundancyNote(suite, pset, applied=None,
 
     With *crossSectionSums* on, the applier holds the sum rules
     (:mod:`kika.sampling.cross_section_sums`) and this says what that cost: the
-    sums it re-derived, the partials that rode a sum's block, a sum whose own
-    block reached nothing because every partial under it had one of its own,
-    and any re-derived sum that went negative -- which only an evaluation whose
-    total sits below its own parts can produce. Re-deriving moves numbers the
-    request did not name, so it is said, not done quietly.
+    sums it re-derived, the partials that rode a sum's block (only with
+    ``distributeSums``), a sum whose own block was discarded because partials
+    under it had their own, and any re-derived sum that went negative -- which
+    only an evaluation whose total sits below its own parts can produce.
+    Re-deriving moves numbers the request did not name, so it is said, not
+    done quietly.
 
     With it off, each named MT is scaled by its own block and nothing else, and
     this names every sum left stating a total that is not the sum of its parts:
@@ -288,14 +289,15 @@ def _redundancyNote(suite, pset, applied=None,
                  f"{_mtRanges(rebuilt)}"]
         for total in sorted(riders):
             parts.append(f"MT{total}'s block moved its unperturbed partials "
-                         f"{_mtRanges(riders[total])}")
+                         f"{_mtRanges(riders[total])} (distributeSums: an "
+                         f"assumption, the file states no covariance for them)")
         virtual = sorted(c.mt for c, info in applied.items() if info.get("virtual"))
         if virtual:
             parts.append(f"{_mtRanges(virtual)} carry a covariance but no MF3 section of "
                          f"their own; their blocks went to their partials")
         if discarded:
-            parts.append(f"{_mtRanges(discarded)}: own block discarded, every partial "
-                         f"under it carries a block of its own, and partials govern")
+            parts.append(f"{_mtRanges(discarded)}: own block discarded, partials "
+                         f"under it carry blocks of their own, and partials govern")
         if negative:
             parts.append(f"{_mtRanges(negative)} went NEGATIVE after re-deriving, "
                          f"where no partial is: "
@@ -715,6 +717,95 @@ def _missingReactions(request, entries) -> Dict[int, List[int]]:
         if absent:
             missing[selection.mf] = absent
     return missing
+
+
+def _screenSumBlocks(suite, request, entries, onMissing: str, log):
+    """Drop the sums' blocks the strict rule has no use for, before the draw.
+
+    A covariance block perturbs the cross section it was stated for and no
+    other (:mod:`kika.sampling.cross_section_sums`). A sum's own block is
+    therefore never applied: where partials under it carry blocks of their
+    own, it is *discarded* and the sum re-derived from them; where none does,
+    it has nowhere to go. Both are taken out here rather than drawn and thrown
+    away, so the draw, the factors table and ``run_metadata.json`` all hold
+    exactly what reaches the tape -- dropping a component from a joint normal
+    draw is marginalising it, which leaves the others' joint law as stated.
+
+    A sum the request **named** whose block has nowhere to go raises under
+    ``onMissing="raise"``: the request asked for something this file cannot
+    give without inventing a covariance. Reached by ``None`` ("every reaction")
+    or under ``"skip"``, it is dropped with a warning instead.
+
+    Returns ``(entries, record, notes)``.
+    """
+    from kika.sampling.cross_section_sums import screenSumClaims, suiteSumLayout
+    from kika.sampling.joint_blocks import _asSelections
+
+    record: Dict[str, Any] = {"discarded": {}, "unreachable": {}}
+    claimKeys: Dict[int, set] = {}
+    for rowKey, colKey, *_rest in entries:
+        for key in (rowKey, colKey):
+            if key.mf == 33 or (key.mf == 34 and key.index == 0):
+                claimKeys.setdefault(int(key.mt), set()).add(key)
+    if not claimKeys or not getattr(suite, "sums", None):
+        return entries, record, []
+    present, sums = suiteSumLayout(suite)
+    screen = screenSumClaims(claimKeys, present, sums)
+    if not screen.discarded and not screen.unreachable:
+        return entries, record, []
+
+    named = set()
+    for selection in _asSelections(request):
+        if selection.mf in (33, 34) and selection.mt is not None:
+            wanted = (selection.mt if isinstance(selection.mt, (list, tuple, set))
+                      else [selection.mt])
+            named.update(int(mt) for mt in wanted)
+
+    refused = {total: leaves for total, leaves in screen.unreachable.items()
+               if total in named}
+    if refused and onMissing == "raise":
+        raise ValueError(
+            "; ".join(f"MT{total} over {_mtRanges(leaves)}"
+                      for total, leaves in refused.items())
+            + ": the request names the sum, and no partial under it carries a "
+              "covariance of its own. A covariance perturbs only the cross "
+              "section it was stated for: applied to the sum alone it would "
+              "leave the sum unequal to its parts (and NJOY rebuilds MT1 and "
+              "MT4 from the parts anyway), and carried to the partials it would "
+              "give them an uncertainty the file does not state. Ask for "
+              "partials that carry a covariance, or pass distributeSums=True "
+              "to carry the sum's block to them as a stated assumption")
+
+    notes: List[str] = []
+    drop = set()
+    for total, own in screen.discarded.items():
+        drop |= claimKeys[total]
+        record["discarded"][str(total)] = list(own)
+        note = (f"MT{total}'s own covariance was not drawn: partials under it "
+                f"carry their own ({_mtRanges(own)}), partials govern, and "
+                f"MT{total} is re-derived from what they moved")
+        notes.append(note)
+        log.note(note, subject=f"MF33/MT{total}", partials=list(own))
+    for total, leaves in screen.unreachable.items():
+        drop |= claimKeys[total]
+        record["unreachable"][str(total)] = list(leaves)
+        note = (f"MT{total}'s covariance was not drawn: no partial under it "
+                f"({_mtRanges(leaves)}) carries a covariance of its own, and a "
+                f"block perturbs only the cross section it was stated for, so "
+                f"MT{total} and its partials are left as evaluated. "
+                f"distributeSums=True would carry it to them as a stated "
+                f"assumption")
+        notes.append(note)
+        log.warning(note, subject=f"MF33/MT{total}", partials=list(leaves))
+
+    kept = [entry for entry in entries
+            if entry[0] not in drop and entry[1] not in drop]
+    if not kept:
+        raise ValueError(
+            "every block this request reaches belongs to a summed cross "
+            "section with no partial of its own under it, so nothing is left "
+            "to perturb: " + " ".join(notes))
+    return kept, record, notes
 
 
 def _splitBySemantics(blocks, index):
@@ -1238,6 +1329,8 @@ class _SampleContext:
     maxOutgoingPoints: Optional[int] = None
     #: MF3's sum rules on the realisation; see ``perturbFromModel``.
     crossSectionSums: bool = True
+    #: Carry a sum's block to its partials without one; see ``perturbFromModel``.
+    distributeSums: bool = False
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1262,7 +1355,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
     with log.timed("applied", f"{label} on the model", sample=number) as info:
         applied = pset.applyToSuite(suite, multiplicityResolver=nubarNode,
                                     maxOutgoingPoints=ctx.maxOutgoingPoints,
-                                    crossSectionSums=ctx.crossSectionSums)
+                                    crossSectionSums=ctx.crossSectionSums,
+                                    distributeSums=ctx.distributeSums)
         info["components"] = [c.describe() for c in applied]
     _checkRealisation(pset, log, number)
 
@@ -1394,6 +1488,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      onMissing: str = "raise",
                      maxOutgoingPoints: Optional[int] = None,
                      crossSectionSums: bool = True,
+                     distributeSums: bool = False,
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
@@ -1458,10 +1553,15 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         ``None`` (default) for no cap. When it bites, the smallest factor steps
         are dropped first and the run says how many.
     crossSectionSums
-        Hold MF3's sum rules on every realisation (the default): a partial with
-        its own block is perturbed by it, one without rides the nearest
-        perturbed sum above it, and every sum with a moved partial is
-        re-derived as ``S + sum (p' - p)`` -- see
+        Hold MF3's sum rules on every realisation (the default). A covariance
+        block perturbs the cross section it was stated for and no other: a
+        partial with its own block is perturbed by it, one without is not
+        perturbed, and every sum with a moved partial is re-derived as
+        ``S + sum (p' - p)`` -- its own block is never applied to it. A sum's
+        block is therefore not drawn at all (see :func:`_screenSumBlocks`):
+        discarded where partials under it carry their own, and, where none
+        does, refused if the request named the sum and dropped with a warning
+        if it came with ``None`` -- see
         :mod:`kika.sampling.cross_section_sums`. Not optional in practice:
         NJOY's RECONR discards a tape's stated MT1 and MT4 and rebuilds them
         from the partials (measured 2026-10-07 on ENDF/B-VIII.1 Fe-56), so a
@@ -1470,6 +1570,13 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         each named MT by its own block and nothing else, and the run notes the
         sums it left stale; it exists for the equivalence gate against
         ``perturb_PENDF_files``.
+    distributeSums
+        ``False`` (the default) keeps the rule above. ``True`` is the
+        explicit assumption that a sum's block may be carried to the partials
+        under it that have none: they ride the nearest perturbed sum above
+        them by the same factor, which keeps the sum consistent with its own
+        covariance and gives the partials one the file does not state. Every
+        rider is named in the run's notes.
     formats
         Any of :data:`EMITTERS`. ``"ace"`` needs *ace*.
     ace
@@ -1571,7 +1678,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               decompositionMethod=decompositionMethod,
               samplingMethod=samplingMethod, psdMethod=psdMethod,
               dryRun=dryRun, formats=list(formats), nWorkers=nWorkers,
-              crossSectionSums=crossSectionSums,
+              crossSectionSums=crossSectionSums, distributeSums=distributeSums,
               source=str(source) if isinstance(source, (str, Path)) else "<parsed>",
               covarianceSource=(str(covarianceSource)
                                 if covarianceSource is not None else None),
@@ -1639,6 +1746,24 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
 
     with log.timed("assembled", "assembled the covariance blocks") as info:
         entries = collectEntries(covariances, request)
+        missing = _missingReactions(request, entries)
+        if onMissing == "raise" and missing.get(33):
+            absent = missing[33]
+            raise ValueError(
+                f"MT{', MT'.join(str(mt) for mt in absent)}: asked for, and this "
+                f"evaluation states no cross-section covariance for "
+                f"{'it' if len(absent) == 1 else 'them'}. A covariance perturbs "
+                f"only the cross section it was stated for, so no other block -- "
+                f"a sum's included -- stands in. Drop "
+                f"{'it' if len(absent) == 1 else 'them'} from the request, or "
+                f"pass onMissing='skip' to perturb the rest and record the "
+                f"omission")
+        sumRecord: Dict[str, Any] = {"discarded": {}, "unreachable": {}}
+        if crossSectionSums and not distributeSums:
+            entries, sumRecord, sumNotes = _screenSumBlocks(
+                suite, request, entries, onMissing, log)
+            skipped.extend(sumNotes)
+        sumRecord["distributeSums"] = bool(distributeSums)
         domains = componentDomains(covariances, request)
         blocks, index = assembleRequest(entries, grouping=grouping,
                                         domains=domains)
@@ -1653,7 +1778,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     # them and said so nowhere. What was asked for and not found is recorded
     # here, whatever `onMissing` says, because a partial match is not a failure
     # and is still something the ensemble's own metadata has to carry.
-    for mf, absent in _missingReactions(request, entries).items():
+    for mf, absent in missing.items():
         note = (f"{QUANTITY_OF_MF.get(mf, f'MF{mf}')}: MT"
                 f"{', MT'.join(str(mt) for mt in absent)} "
                 f"{'was' if len(absent) == 1 else 'were'} asked for and "
@@ -1724,7 +1849,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         formats=tuple(formats), outputDir=outputDir, stem=stem, mat=mat,
         ace=ace if "ace" in formats else None, writeSets=writeSets,
         emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints,
-        crossSectionSums=crossSectionSums)
+        crossSectionSums=crossSectionSums, distributeSums=distributeSums)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
@@ -1798,7 +1923,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         result.files["metadata"] = outputDir / "run_metadata.json"
         _writeRunMetadata(result, outputDir, covReport, suiteReport, sourcePath,
                           original, seed, space, psdMethod, nWorkers=nWorkers,
-                          crossSectionSums=crossSectionSums)
+                          crossSectionSums=crossSectionSums, sumBlocks=sumRecord)
         log.write(outputDir)
     return result
 
@@ -1881,7 +2006,8 @@ def _layer1Counts(findings) -> Dict[str, int]:
 def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport,
                       sourcePath, request, seed: int, space: str,
                       psdMethod: str = "none", nWorkers: int = 1,
-                      crossSectionSums: bool = True) -> Path:
+                      crossSectionSums: bool = True,
+                      sumBlocks: Optional[Mapping[str, Any]] = None) -> Path:
     """The run's own account of itself, beside the samples.
 
     Deliberately includes the grouping description in full: "these quantities
@@ -1903,6 +2029,9 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
         "space": space,
         "grouping": result.grouping,
         "crossSectionSums": crossSectionSums,
+        # Which sums' blocks were not drawn, and why: "discarded" (partials
+        # under it carry their own) or "unreachable" (none does). Keyed by MT.
+        "sumBlocks": dict(sumBlocks or {}),
         "nSamples": result.nSamples,
         "groups": result.description,
         "blocks": [

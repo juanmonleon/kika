@@ -1,13 +1,17 @@
 """MF3's sum rules on a realisation: partials govern, sums follow, nothing else moves.
 
 The rule (decision 3 of ``kika-workspace/docs/library/perturbation_model_roadmap.md``,
-completed 2026-10-07) in three parts, each pinned here:
+completed 2026-10-07) rests on one principle -- **a covariance block perturbs
+the cross section it was stated for, and no other** -- and comes in four parts,
+each pinned here:
 
 1. a partial with its own block is perturbed by it -- partials govern;
-2. one without rides the nearest perturbed sum above it -- MT1's block moves
-   MT2 when MT2 has none, MT4's block beats MT1's for MT51-91;
+2. one without is not perturbed: a sum's block says nothing about it alone;
 3. every sum with a moved partial is re-derived as ``S + sum (p' - p)``, and a
-   sum's own block is never applied to the sum.
+   sum's own block is never applied to the sum;
+4. a sum's block with no partial of its own under it is refused (named) or
+   dropped with a warning (reached by ``None``) -- unless ``distributeSums``
+   asks for it to be carried to the partials, as a stated assumption.
 
 And the property a reader of the tape relies on: **a sum moves by exactly what
 its partials moved, and nowhere else.** Outside the factor blocks' energy range
@@ -22,6 +26,7 @@ MT101, which RECONR does not rebuild, would reach it stale.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +37,7 @@ from kika.endf import read_endf
 from kika.endf.model_adapter.decode import _summationMTs
 from kika.nuclear_data.model.functions import Regions1d, XYs1d
 from kika.sampling.cross_section_sums import (planCrossSectionSums, rederiveSum,
-                                              sumTree)
+                                              screenSumClaims, sumTree)
 from kika.sampling.joint_blocks import ComponentKey
 from kika.sampling.model_perturbation import perturbFromModel
 from kika.sampling.perturbation_set import PerturbationSet
@@ -47,6 +52,36 @@ def _key(mt):
     return ComponentKey(ZA, 33, mt)
 
 
+@pytest.fixture
+def fe56WithTotalCovariance(tmp_path):
+    """``micro_fe56_xs_and_angular`` with MT2's MF33 block also stated as MT1's.
+
+    No committed micro-tape carries a covariance for a sum over partials it
+    also states, and that is the case the strict rule is about: MF3 has MT1,
+    MT2 and MT102; MF33 then has MT1 and MT2, and nothing for MT102.
+    """
+    lines = FE56_XS.read_text(encoding="utf-8").splitlines(keepends=True)
+    section = [i for i, line in enumerate(lines)
+               if line[70:72] == "33" and line[72:75] == "  2"]
+    first, last = section[0], section[-1]
+    copy = []
+    for offset, line in enumerate(lines[first:last + 1]):
+        if offset == 1:
+            assert line[33:44] == "          2", "the subsection names MT2"
+            line = line[:33] + "          1" + line[44:]
+        copy.append(line[:72] + "  1" + line[75:])
+    send = lines[last + 1]
+    assert send[70:72] == "33" and send[72:75] == "  0"
+    copy.append(send[:72] + "  0" + send[75:])
+    out = tmp_path / "fe56_with_mt1_covariance.endf"
+    out.write_text("".join(lines[:first] + copy + lines[first:]), encoding="utf-8",
+                   newline="")
+    from kika.endf.writers.update_directory import update_mf1_directory
+
+    update_mf1_directory(str(out))
+    return out
+
+
 # ----------------------------------------------------------------------
 # The plan: which block moves which MT
 # ----------------------------------------------------------------------
@@ -59,18 +94,66 @@ def test_the_sum_rules_are_a_tree():
     sumTree(everything, MF3_SUM_RULES)          # raises on a second parent
 
 
-def test_partials_govern_and_the_rest_ride_the_nearest_sum():
+def test_a_block_moves_only_the_section_it_was_stated_for():
+    """MT4 and MT51 carry blocks; MT52 does not, and so it does not move.
+
+    MT4's block is the uncertainty of MT51 + MT52 together. Moving MT52 by it
+    would state that MT52 has MT4's relative uncertainty and is fully
+    correlated with it, which the file does not say.
+    """
     present = {1, 2, 4, 16, 51, 52, 102}
     sums = _summationMTs(present)
     assert sums == {1, 4}
     plan = planCrossSectionSums({1: _key(1), 4: _key(4), 51: _key(51)},
                                 present, sums)
 
+    assert plan.leafControl == {51: _key(51)}, "only a partial's own block moves it"
+    assert plan.rederive == (4, 1), "deepest first"
+    assert plan.movedUnder == {4: (51,), 1: (51,)}
+    assert plan.ownBlockReached == {1: (), 4: ()}, "both sums' blocks discarded"
+
+
+def test_the_screen_sorts_the_sums_by_what_their_blocks_can_do():
+    present = {1, 2, 4, 16, 51, 52, 102}
+    screen = screenSumClaims({1, 2, 4}, present, _summationMTs(present))
+    assert screen.discarded == {1: (2,)}, "MT2 under MT1 carries its own"
+    assert screen.unreachable == {4: (51, 52)}, "nothing under MT4 does"
+
+
+def test_the_leaves_of_each_sum_come_from_mf3_virtual_ones_included():
+    """What the app's builder shows beside a sum: its partials, from MF3."""
+    from kika.sampling.cross_section_sums import sumLeaves
+
+    present = {1, 2, 4, 51, 52, 102, 600, 601}
+    leaves = sumLeaves(present, _summationMTs(present), claims={103, 851})
+    assert leaves[4] == (51, 52)
+    assert set(leaves[1]) == {2, 51, 52, 102, 600, 601}
+    assert leaves[103] == (600, 601), "a virtual sum counts its MF3 partials"
+    assert 851 not in leaves, "a lumped MTL is not a sum of MF3 sections"
+    assert sumLeaves(present, None, claims={103}) == leaves, (
+        "deriving the sums from MF3 alone gives the decoder's tree")
+
+
+@pytest.mark.parametrize("claims", [{1}, {4}, {1, 2, 4}])
+def test_a_sum_block_with_no_partial_of_its_own_is_refused(claims):
+    """Applied to the sum alone it breaks the sum rule; carried down it invents."""
+    present = {1, 2, 4, 16, 51, 52, 102}
+    with pytest.raises(ValueError, match="distributeSums=True"):
+        planCrossSectionSums({mt: _key(mt) for mt in claims}, present,
+                             _summationMTs(present))
+
+
+def test_distributing_rides_the_nearest_sum_as_before():
+    """``distribute=True``: the explicit assumption, MT4 beating MT1 for MT52."""
+    present = {1, 2, 4, 16, 51, 52, 102}
+    plan = planCrossSectionSums({1: _key(1), 4: _key(4), 51: _key(51)},
+                                present, _summationMTs(present), distribute=True)
+
     assert plan.leafControl[51] == _key(51), "a partial's own block governs"
     assert plan.leafControl[52] == _key(4), "MT4 is nearer to MT52 than MT1 is"
     for leaf in (2, 16, 102):
         assert plan.leafControl[leaf] == _key(1)
-    assert plan.rederive == (4, 1), "deepest first"
+    assert plan.rederive == (4, 1)
     assert plan.ownBlockReached == {1: (2, 16, 102), 4: (52,)}
 
 
@@ -90,15 +173,19 @@ def test_a_partial_alone_rebuilds_every_sum_above_it_and_nothing_else():
     assert plan.movedUnder == {4: (51,), 1: (51,)}
 
 
-def test_a_sum_stated_only_through_its_partials_still_moves_them():
+def test_a_sum_stated_only_through_its_partials():
     """ENDF/B-VIII.1 Fe-56: MF33 for MT103, MF3 for MT600-649 and no MT103.
 
-    The block goes to the partials -- what ``apply_factors_to_pendf_mf3`` does
-    for a composite the PENDF lacks -- and MT1 above them is rebuilt. Before
-    this, the model pipeline could not run ``{33: None}`` on that tape at all.
+    Its partials come from MF3 like any sum's, so the strict rule refuses it
+    (none of MT600-649 carries a block); distributing carries it to them --
+    what ``apply_factors_to_pendf_mf3`` does for a composite the PENDF lacks --
+    and MT1 above them is rebuilt.
     """
     present = {1, 2, 102, 600, 601, 649}
-    plan = planCrossSectionSums({103: _key(103)}, present, _summationMTs(present))
+    with pytest.raises(ValueError, match="MT103 over MT600-601, 649"):
+        planCrossSectionSums({103: _key(103)}, present, _summationMTs(present))
+    plan = planCrossSectionSums({103: _key(103)}, present, _summationMTs(present),
+                                distribute=True)
     assert plan.virtual == (103,)
     assert {leaf: c.mt for leaf, c in plan.leafControl.items()} == {
         600: 103, 601: 103, 649: 103}
@@ -196,11 +283,23 @@ def _sectionValues(path, mt, energies):
                      np.asarray(section.cross_sections, float))
 
 
-def test_a_total_perturbed_alone_reaches_its_partials(tmp_path):
-    """MT1's block, drawn on its own, moves MT2 and MT102 by the same factor.
+def test_a_total_perturbed_alone_is_refused_on_the_model():
+    """MT1's block alone: nowhere it may go, so the applier says so."""
+    from kika.endf.model_adapter import decodeReactionSuite
 
-    This is the case RECONR makes essential: it throws the tape's MT1 away, so a
-    block that stayed on MT1 would not reach the ACE at all.
+    suite, _ = decodeReactionSuite(read_endf(str(FE56_STRUCTURAL)))
+    pset = PerturbationSet(label="r", factors={_key(1): np.array([1.1, 0.9])},
+                           binEdges={_key(1): np.array([1.0e-5, 1.0e6, 2.0e7])})
+    with pytest.raises(ValueError, match="none of its partials"):
+        pset.applyToSuite(suite)
+
+
+def test_a_total_distributed_reaches_its_partials():
+    """``distributeSums``: MT1's block moves MT2 and MT102 by the same factor.
+
+    The case RECONR makes the only way to get a total's block to the ACE: it
+    throws the tape's MT1 away, so a block that stayed on MT1 would not reach
+    it. That is why the option exists, and why it is an option.
     """
     from kika.endf.model_adapter import decodeReactionSuite
     from kika.nuclear_data.model import EVAL_LABEL
@@ -209,7 +308,7 @@ def test_a_total_perturbed_alone_reaches_its_partials(tmp_path):
     edges = np.array([1.0e-5, 1.0e6, 2.0e7])
     pset = PerturbationSet(label="r", factors={_key(1): np.array([1.1, 0.9])},
                            binEdges={_key(1): edges})
-    applied = pset.applyToSuite(suite)
+    applied = pset.applyToSuite(suite, distributeSums=True)
 
     assert set(applied) == {_key(1), _key(2), _key(102)}
     assert applied[_key(2)]["factor_from"] == 1
@@ -242,6 +341,69 @@ def test_the_written_total_moved_by_what_its_partials_moved(tmp_path):
     assert any("re-derived" in note for note in run.notes)
 
 
+def test_a_sums_own_block_is_not_drawn_where_its_partials_carry_theirs(
+        fe56WithTotalCovariance, tmp_path):
+    """MF33 states MT1 and MT2: MT2 governs, MT1 follows, MT102 stays put."""
+    tape = fe56WithTotalCovariance
+    run = perturbFromModel(str(tape), {33: None}, 1, seed=3,
+                           outputDir=tmp_path, formats=("endf-delta",))
+    delta = run.paths("endf-delta")[0]
+    assert {c.mt for c in run.samples[0]["set"].components()} == {2}
+    assert any("MT1's own covariance was not drawn" in n for n in run.notes)
+    energies = np.geomspace(1.0e-4, 1.9e7, 4000)
+    assert np.array_equal(_sectionValues(delta, 102, energies),
+                          _sectionValues(tape, 102, energies)), "MT102 moved"
+    moved1 = _sectionValues(delta, 1, energies) - _sectionValues(tape, 1, energies)
+    moved2 = _sectionValues(delta, 2, energies) - _sectionValues(tape, 2, energies)
+    assert np.all(np.abs(moved1 - moved2)
+                  <= 2e-6 * _sectionValues(tape, 1, energies) + 1e-12)
+    meta = json.loads((tmp_path / "run_metadata.json").read_text(encoding="utf-8"))
+    assert meta["sumBlocks"] == {"discarded": {"1": [2]}, "unreachable": {},
+                                 "distributeSums": False}
+
+
+def test_a_request_naming_a_sum_alone_is_refused(fe56WithTotalCovariance):
+    """``{33: [1]}``: MF33 states MT1, and nothing under it is asked for."""
+    with pytest.raises(ValueError, match="the request names the sum"):
+        perturbFromModel(str(fe56WithTotalCovariance), {33: [1]}, 1, seed=3,
+                         dryRun=True)
+
+
+def test_skipping_a_named_sum_alone_leaves_nothing_and_says_so(
+        fe56WithTotalCovariance):
+    with pytest.raises(ValueError, match="nothing is left to perturb"):
+        perturbFromModel(str(fe56WithTotalCovariance), {33: [1]}, 1, seed=3,
+                         dryRun=True, onMissing="skip")
+
+
+def test_a_sum_and_its_partial_named_together_is_the_partial(
+        fe56WithTotalCovariance):
+    """``{33: [1, 2]}``: partials govern, so this is MT2 and a re-derived MT1."""
+    run = perturbFromModel(str(fe56WithTotalCovariance), {33: [1, 2]}, 1, seed=3,
+                           dryRun=True)
+    assert {c.mt for c in run.samples[0]["set"].components()} == {2}
+    assert any("MT1's own covariance was not drawn" in n for n in run.notes)
+
+
+def test_a_named_partial_without_a_covariance_is_refused():
+    """MT102 has no block of its own, and MT1's does not stand in for it."""
+    with pytest.raises(ValueError, match="MT102: asked for"):
+        perturbFromModel(str(FE56_XS), {33: [2, 102]}, 1, seed=3, dryRun=True)
+    run = perturbFromModel(str(FE56_XS), {33: [2, 102]}, 1, seed=3, dryRun=True,
+                           onMissing="skip")
+    assert {c.mt for c in run.samples[0]["set"].components()} == {2}
+    assert any("MT102 was asked for" in note for note in run.notes)
+
+
+def test_distributing_from_the_pipeline_names_its_riders(fe56WithTotalCovariance):
+    """``distributeSums=True``: MT1 is drawn and MT102 rides it, said aloud."""
+    run = perturbFromModel(str(fe56WithTotalCovariance), {33: None}, 1, seed=3,
+                           dryRun=True, distributeSums=True)
+    assert 1 in {c.mt for c in run.samples[0]["set"].components()}
+    assert any("moved its unperturbed partials MT102" in note
+               and "assumption" in note for note in run.notes)
+
+
 def test_the_switch_restores_the_old_behaviour(tmp_path):
     """``crossSectionSums=False``: MT1 is left as written, and the run says so."""
     run = perturbFromModel(str(FE56_XS), {33: None}, 1, seed=3,
@@ -259,8 +421,10 @@ def test_every_sum_holds_on_a_whole_evaluation(fe56_b81_tape, tmp_path):
     """ENDF/B-VIII.1 Fe-56, every cross section its MF33 states, one sample.
 
     The request names sums and partials together (MF33 there carries MT1, MT4
-    and partials of both), so this is rules 1-3 at once on a real tree. Checked
-    per re-derived sum, against the leaves under it, on the sum's own grid.
+    and partials of both), so this is the whole rule at once on a real tree.
+    Checked per re-derived sum, against the leaves under it, on the sum's own
+    grid. MT4, MT103 and MT107 carry blocks over partials that carry none, so
+    those three are dropped, and the run says so.
     """
     from kika.endf.model_adapter.decode import _summationMTs as summation
     from kika.sampling.cross_section_sums import _leavesUnder
@@ -275,6 +439,11 @@ def test_every_sum_holds_on_a_whole_evaluation(fe56_b81_tape, tmp_path):
     rebuilt = [c.mt for c, info in run.samples[0]["applied"].items()
                if "rederived_from" in info]
     assert rebuilt, "nothing was re-derived on a tape that states MT1 and MT4"
+    drawn = {c.mt for c in run.samples[0]["set"].components() if c.mf == 33}
+    sums = summation(present) | {103, 107}
+    assert not drawn & sums, f"a sum's own block was drawn: {sorted(drawn & sums)}"
+    assert not any("factor_from" in info
+                   for info in run.samples[0]["applied"].values()), "a rider moved"
     for component, info in run.samples[0]["applied"].items():
         assert not info.get("n_negative"), (
             f"MT{component.mt} went negative where no partial is: {info}")
