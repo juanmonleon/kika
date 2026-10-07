@@ -480,124 +480,8 @@ class _SuiteWriter:
         writeStyles(root, self.suite.styles, _number, documentation=True)
 
     def pops(self, root: ET.Element) -> None:
-        """§12, written back as minimally as it was read — and it says so.
-
-        kika's PoPs holds ids, masses, spins, parities and charges. A file
-        written from it has a ``PoPs`` with those and nothing else: no decay
-        data, no halflives, no aliases, no level energies. That is a real loss
-        against the file it was read from and it is reported, once, with the
-        count — because a reader of the *written* file has no way to tell a
-        minimal PoPs from a particle database that genuinely says this much.
-        """
-        container = ET.SubElement(root, "PoPs")
-        _set(container, name=self.suite.PoPs.name or "protare_internal",
-             version=self.suite.PoPs.version or "1.0", format="2.0")
-        nuclides = [p for p in self.suite.PoPs.particles.values()
-                    if isinstance(p, Nuclide)]
-        others = [p for p in self.suite.PoPs.particles.values()
-                  if not isinstance(p, Nuclide)]
-
-        for particle in others:
-            wrapper = ("gaugeBosons" if particle.id == "photon" else "baryons")
-            group = container.find(wrapper)
-            if group is None:
-                group = ET.SubElement(container, wrapper)
-            node = ET.SubElement(group, wrapper[:-1])
-            node.attrib["id"] = particle.id
-            self.particleProperties(node, particle)
-
-        if nuclides:
-            elements = ET.SubElement(container, "chemicalElements")
-            byZ: Dict[int, List[Nuclide]] = {}
-            for nuclide in nuclides:
-                byZ.setdefault(nuclide.Z, []).append(nuclide)
-            for Z in sorted(k for k in byZ if k is not None):
-                chemical = ET.SubElement(elements, "chemicalElement")
-                _set(chemical, symbol=byZ[Z][0].id.rstrip("0123456789"),
-                     Z=str(Z), name=byZ[Z][0].id.rstrip("0123456789"))
-                isotopes = ET.SubElement(chemical, "isotopes")
-                byA: Dict[int, List[Nuclide]] = {}
-                for nuclide in byZ[Z]:
-                    byA.setdefault(nuclide.A, []).append(nuclide)
-                for A in sorted(k for k in byA if k is not None):
-                    isotope = ET.SubElement(isotopes, "isotope")
-                    _set(isotope, symbol=byA[A][0].id, A=str(A))
-                    holder = ET.SubElement(isotope, "nuclides")
-                    for nuclide in byA[A]:
-                        node = ET.SubElement(holder, "nuclide")
-                        node.attrib["id"] = nuclide.id
-                        self.nuclideProperties(node, nuclide)
-
-        if len(self.suite.PoPs):
-            self.report.lost(
-                f"PoPs was written from kika's minimal §12 model: "
-                f"{len(self.suite.PoPs)} particles with their masses, spins, "
-                f"parities, charges and halflives and nothing else. Decay data, "
-                f"aliases and nuclear level energies are not in the model and so "
-                f"are not in this file; a reader of it cannot tell that from a "
-                f"database that genuinely says only this much"
-            )
-
-    def particleProperties(self, node: ET.Element, particle) -> None:
-        if particle.mass is not None:
-            _set(ET.SubElement(ET.SubElement(node, "mass"), "double"),
-                 label="eval", value=_number(particle.mass.value),
-                 unit=particle.mass.unit)
-        if particle.spin is not None:
-            _set(ET.SubElement(ET.SubElement(node, "spin"), "fraction"),
-                 label="eval", value=formatFraction(particle.spin.value),
-                 unit=particle.spin.unit)
-        if particle.parity is not None:
-            _set(ET.SubElement(ET.SubElement(node, "parity"), "integer"),
-                 label="eval", value=str(particle.parity))
-        if particle.charge is not None:
-            _set(ET.SubElement(ET.SubElement(node, "charge"), "integer"),
-                 label="eval", value=str(particle.charge), unit="e")
-        self.halflife(node, particle.halflife)
-
-    def halflife(self, node: ET.Element, halflife) -> None:
-        """§12's ``halflife``, in whichever of its two spellings the model holds.
-
-        Mandatory on a ``baryon`` and a ``gaugeBoson``, so a particle with none
-        gets ``<string value="unknown">`` — which is a real §12 value and the
-        only honest thing to write: kika does not know, and the alternatives are
-        omitting a required element or asserting a number.
-        """
-        element = ET.SubElement(node, "halflife")
-        if halflife is None:
-            _set(ET.SubElement(element, "string"), label="eval",
-                 value="unknown", unit="s")
-        elif isinstance(halflife, str):
-            _set(ET.SubElement(element, "string"), label="eval",
-                 value=halflife, unit="s")
-        else:
-            _set(ET.SubElement(element, "double"), label="eval",
-                 value=_number(halflife.value), unit=halflife.unit or "s")
-
-    def nuclideProperties(self, node: ET.Element, nuclide: Nuclide) -> None:
-        """The atom's mass and charge on the ``nuclide``, the nucleus's spin and
-        parity on the ``nucleus`` — which is where each was read from."""
-        if nuclide.mass is not None:
-            _set(ET.SubElement(ET.SubElement(node, "mass"), "double"),
-                 label="eval", value=_number(nuclide.mass.value),
-                 unit=nuclide.mass.unit)
-        if nuclide.charge is not None:
-            _set(ET.SubElement(ET.SubElement(node, "charge"), "integer"),
-                 label="eval", value=str(nuclide.charge), unit="e")
-        nucleus = ET.SubElement(node, "nucleus")
-        _set(nucleus, id=nuclide.id.lower(), index=str(nuclide.nuclearLevel))
-        if nuclide.spin is not None:
-            _set(ET.SubElement(ET.SubElement(nucleus, "spin"), "fraction"),
-                 label="eval", value=formatFraction(nuclide.spin.value),
-                 unit=nuclide.spin.unit)
-        if nuclide.parity is not None:
-            _set(ET.SubElement(ET.SubElement(nucleus, "parity"), "integer"),
-                 label="eval", value=str(nuclide.parity))
-        if nuclide.Z is not None:
-            _set(ET.SubElement(ET.SubElement(nucleus, "charge"), "integer"),
-                 label="eval", value=str(nuclide.Z), unit="e")
-        if nuclide.halflife is not None:
-            self.halflife(nucleus, nuclide.halflife)
+        from .encode_pops import writePoPs
+        writePoPs(root, self.suite.PoPs, self.report)
 
     # -- reactions ---------------------------------------------------------
 
@@ -1127,7 +1011,7 @@ def writeCovarianceSuite(covarianceSuite, format: str,
     # omitted, and the report says which happened.
     if covarianceSuite.styles is not None and len(covarianceSuite.styles):
         writeStyles(root, covarianceSuite.styles, _number,
-                    documentation=False)
+                    documentation=False, report=report)
     else:
         from kika.nuclear_data.model import (Evaluated, PhysicalQuantity,
                                              RangeQuantity, Styles)

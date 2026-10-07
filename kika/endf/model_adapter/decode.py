@@ -284,6 +284,16 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         for mt in present:
             reaction, report = decodeMF3MT(mf3.mt[mt], report)
             if mt in redundant:
+                from kika.nuclear_data.model import CrossSectionSum, Summands, Add
+                from kika.endf.writers.redundant import resolve_sum_components
+                parts = resolve_sum_components(mt, set(present))
+                links = []
+                for part in parts:
+                    container = "sums/crossSectionSums/crossSectionSum" if part in redundant else "reactions/reaction"
+                    links.append(Add(f"/reactionSuite/{container}[@label='MT{part}']/crossSection"))
+                reaction = CrossSectionSum(id=reaction.id, crossSection=reaction.crossSection,
+                    outputChannel=reaction.outputChannel, provenance=reaction.provenance,
+                    summands=Summands(links))
                 suite.sums.append(reaction)
             else:
                 suite.reactions.append(reaction)
@@ -306,6 +316,16 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         resonances, resonanceProvenance, report = decodeMF2MT151(mf2.mt[151], report)
         resonances.provenance = resonanceProvenance
         suite.resonances = resonances
+        from kika.nuclear_data.model.resonances import RMatrix
+        for region in resonances.resolved:
+            if isinstance(region.formalism, RMatrix):
+                for channelReaction in region.formalism.resonanceReactions:
+                    if channelReaction.reactionMT is None:continue
+                    for container in ('reactions','sums'):
+                        matching=[r for r in getattr(suite,container) if r.ENDF_MT==channelReaction.reactionMT]
+                        if len(matching)==1:
+                            channelReaction.href=f"/reactionSuite/{container}/{'reaction' if container=='reactions' else 'crossSectionSum'}[@label='{matching[0].label}']"
+                            break
 
     mf4 = endf.mf.get(4) if hasattr(endf, "mf") else None
     if mf4 is not None:

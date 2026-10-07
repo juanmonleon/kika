@@ -11,15 +11,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from .breit_wigner import (BreitWigner, BreitWignerApproximation, Resonance,
+from .breit_wigner import (BreitWigner, BreitWignerApproximation, CompetitiveChannel, Resonance,
                            ResonanceParameters, SpinGroup)
 from .r_matrix import (Channel, EXTERNAL_R_MATRIX_REQUIRED_TERMS,
                        EXTERNAL_R_MATRIX_TYPES, ExternalRMatrix, RMatrix,
                        RMatrixSpinGroup, ResonanceReaction)
 from .tabulated_widths import (TabulatedWidths, UnresolvedChannel,
                                UnresolvedSpinGroup)
+from .radius_policy import RadiusPolicy
+from .r_matrix import ChannelParticle, ChannelKinematics, ComplexChannelFunction
 
 __all__ = [
+    "CompetitiveChannel", "RadiusPolicy",
     "BreitWigner", "BreitWignerApproximation", "Resonance", "ResonanceParameters",
     "SpinGroup", "Channel", "RMatrix", "RMatrixSpinGroup", "ResonanceReaction",
     "ExternalRMatrix", "EXTERNAL_R_MATRIX_TYPES",
@@ -27,7 +30,7 @@ __all__ = [
     "TabulatedWidths", "UnresolvedChannel", "UnresolvedSpinGroup",
     "ScatteringRadius", "ResolvedRegion", "UnresolvedRegion", "Resonances",
     "MODEL_RADIUS_UNIT", "FM_PER_ENDF_RADIUS", "radiusFromEndf", "radiusToEndf",
-    "radiusFromStatedUnit",
+    "radiusFromStatedUnit", "ChannelParticle", "ChannelKinematics", "ComplexChannelFunction",
 ]
 
 #: **The unit every radius on this model is stated in, without exception.**
@@ -163,6 +166,7 @@ class ResolvedRegion:
     domainMax: float
     domainUnit: str = "eV"
     formalism: Optional[object] = None   # BreitWigner | RMatrix
+    scatteringRadius: Optional[ScatteringRadius] = None
 
 
 @dataclass

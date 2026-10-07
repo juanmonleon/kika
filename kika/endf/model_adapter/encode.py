@@ -76,7 +76,7 @@ _MF1_EVALUATION_INFO = (
 
 def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
                 report: Optional[ConversionReport] = None, *,
-                label: str = EVAL_LABEL):
+                label: str = EVAL_LABEL, precision: str = "legacy"):
     """A :class:`Reaction` → an ``MF3MT``.
 
     Everything comes from the model or from the provenance the decoder kept;
@@ -98,6 +98,8 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
     """
     from kika.endf.classes.mf3.mf3mt import MF3MT
 
+    if precision not in ("legacy", "best"):
+        raise ValueError("MF3 precision must be 'legacy' or 'best'")
     report = report if report is not None else ConversionReport()
     provenance = getattr(reaction, "provenance", None)
 
@@ -156,6 +158,9 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
         )
 
     section = MF3MT(number=int(mt))
+    if precision == "best":
+        from kika._records import ENDF_FORMAT_PRECISE
+        section._data_format = ENDF_FORMAT_PRECISE
     section._za = float(_nuclideId(reaction, provenance))
     section._awr = getattr(provenance, "awr", None) or 0.0
     section._mat = mat if mat is not None else getattr(provenance, "mat", None)

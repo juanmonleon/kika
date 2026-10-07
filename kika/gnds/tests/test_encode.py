@@ -1546,12 +1546,17 @@ def test_an_unknown_format_is_refused_by_name(h2_gnds, tmp_path):
 # the report is the only place the gaps are visible
 # ---------------------------------------------------------------------------
 
-def test_the_minimal_pops_is_declared_in_every_written_file(evaluation,
-                                                            tmp_path):
-    """A reader of the written file cannot tell kika's minimal §12 from a
-    database that genuinely says this much. The report can."""
-    _, report = _write(kika.read(evaluation, covariances=False), tmp_path)
-    assert any("minimal §12 model" in loss for loss in report.losses)
+def test_represented_pops_fields_survive_and_coverage_is_declared(evaluation, tmp_path):
+    before = kika.read(evaluation, covariances=False)
+    path, report = _write(before, tmp_path)
+    after = kika.read(path, covariances=False)
+    assert any("all represented particle fields" in warning for warning in report.warnings)
+    assert not any("PoPs was written" in loss for loss in report.losses)
+    for pid in before.PoPs:
+        for name in ('mass', 'spin', 'parity', 'charge', 'halflife'):
+            value = getattr(before.PoPs[pid], name)
+            if value is not None:
+                assert getattr(after.PoPs[pid], name) == value
 
 
 def test_the_writer_returns_a_report_and_not_the_file(h2_gnds, tmp_path):

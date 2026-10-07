@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterator, List, Optional
 
 from .quantities import PhysicalQuantity, RangeQuantity
+from .documentation import Documentation
 
 __all__ = [
     "Style",
@@ -59,6 +60,7 @@ class Style:
     label: str
     derivedFrom: Optional[str] = None
     date: Optional[str] = None
+    documentation: Optional[Documentation] = field(default=None, kw_only=True)
 
     #: The GNDS node name, which is *not* the class name lower-cased in every
     #: case (``MonteCarlo_cdf``, ``URR_probabilityTables``), so it is declared.

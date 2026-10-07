@@ -154,6 +154,8 @@ from .reactions import (
 )
 from .resonances import (
     BreitWigner,
+    CompetitiveChannel,
+    RadiusPolicy,
     BreitWignerApproximation,
     Channel,
     ExternalRMatrix,
@@ -247,7 +249,7 @@ __all__ = [
     "Recoil", "NOT_IMPLEMENTED_DISTRIBUTIONS",
     # §19 resonances, by formalism
     "Resonances", "ResolvedRegion", "UnresolvedRegion", "ScatteringRadius",
-    "BreitWigner", "BreitWignerApproximation", "Resonance", "SpinGroup",
+    "BreitWigner", "BreitWignerApproximation", "CompetitiveChannel", "RadiusPolicy", "Resonance", "SpinGroup",
     "RMatrix", "RMatrixSpinGroup", "Channel", "TabulatedWidths",
     "ResonanceParameters", "ResonanceReaction", "UnresolvedChannel",
     "UnresolvedSpinGroup", "ExternalRMatrix", "EXTERNAL_R_MATRIX_TYPES",

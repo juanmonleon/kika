@@ -132,8 +132,14 @@ def _scatteringRadius(parent: ET.Element, radius: Optional[ScatteringRadius],
     element = ET.SubElement(parent, tag)
     unit = _radiusUnit(radius.unit, report, where)
     if radius.isEnergyDependent:
+        laws = {law for _, law in (radius.interpolation or [])}
+        if len(laws) != 1 or next(iter(laws), None) not in (1,2,3,4,5):
+            report.unsupportedNode(f"{where}: GNDS radius XYs1d requires one declared interpolation law")
+            parent.remove(element)
+            return
         node = ET.SubElement(element, "XYs1d")
         node.attrib["label"] = "eval"
+        node.attrib["interpolation"] = {1:'flat',2:'lin-lin',3:'lin-log',4:'log-lin',5:'log-log'}[next(iter(laws))]
         _radiusAxes(node, unit)
         values = ET.SubElement(node, "values")
         values.text = " ".join(
@@ -160,9 +166,11 @@ def _resolved(parent: ET.Element, region, report: ConversionReport,
          domainUnit=region.domainUnit or "eV")
     formalism = region.formalism
     if isinstance(formalism, RMatrix):
+        if region.scatteringRadius is not None:
+            report.unsupportedNode('region-local RMatrix radius function is not serialized by this GNDS writer')
         _rMatrix(element, formalism, report, domain)
     elif isinstance(formalism, BreitWigner):
-        _breitWigner(element, formalism, report, domain)
+        _breitWigner(element, formalism, report, domain, region.scatteringRadius)
     elif formalism is not None:
         report.unsupportedNode(
             f"resolved region: kika's writer has no serialisation for a "
@@ -170,40 +178,28 @@ def _resolved(parent: ET.Element, region, report: ConversionReport,
         )
 
 
-def _nestedPoPs(formalism, report: ConversionReport, where: str) -> None:
-    """Say so when a formalism carries a `<PoPs>` this writer does not emit.
-
-    §19.3.1 and §19.3.6 both admit a `PoPs` inside the formalism -- a local
-    particle database for the channels, which every ENDF/B-VIII.1-GNDS RMatrix
-    carries. The reader reads it onto `formalism.PoPs`; writing it is §12 work
-    and is blocked on the `gnds_endf_conflicts.md` §3.3 decision, so it is not
-    started here.
-
-    What is fixed here is the **silence**. Every other node kika reads and does
-    not write announces itself in the report, and this one did not -- so a file
-    round-tripped through kika lost its nested particle database with nothing
-    said. That was the whole defect; the writer is unchanged.
-    """
-    if getattr(formalism, "PoPs", None) is None:
-        return
-    report.lost(
-        f"{where}: the nested <PoPs> was read and is not written. §19 admits a "
-        f"local particle database inside the formalism and writing it is §12 "
-        f"work, blocked on the docs/library/gnds_endf_conflicts.md §3.3 decision; the "
-        f"channels below refer to particles this file no longer defines"
-    )
+def _nestedPoPs(parent, formalism, report: ConversionReport, where: str) -> None:
+    """Preserve the modeled local particle database with the shared writer."""
+    from .encode_pops import writePoPs
+    pops = getattr(formalism, "PoPs", None)
+    if pops is not None:
+        writePoPs(parent, pops, report)
 
 
 def _rMatrix(parent: ET.Element, formalism: RMatrix,
              report: ConversionReport, domain) -> None:
     element = ET.SubElement(parent, "RMatrix")
+    if formalism.radiusPolicy is not None and (formalism.radiusPolicy.channelMode=='constant' or formalism.radiusPolicy.phaseRadius is not None):
+        report.unsupportedNode('independent RM radiusPolicy requires channel-radius normalization before GNDS serialization')
+    if formalism.angularLCount not in (None, 0):
+        report.lost('RMatrix angularLCount (ENDF NLSC) has no native attribute in this GNDS writer')
     _set(element, label=formalism.label or "eval",
          approximation=formalism.approximation,
          boundaryCondition=formalism.boundaryCondition,
-         calculateChannelRadius=_true(formalism.calculateChannelRadius),
+         calculateChannelRadius=_true(formalism.calculateChannelRadius if formalism.radiusPolicy is None else formalism.radiusPolicy.channelMode == "mass"),
          relativisticKinematics=_true(formalism.relativisticKinematics),
          reducedWidthAmplitudes=_true(formalism.reducedWidthAmplitudes))
-    _nestedPoPs(formalism, report, "RMatrix")
+    _nestedPoPs(element, formalism, report, "RMatrix")
     if formalism.scatteringRadius is not None:
         _scatteringRadius(element, ScatteringRadius(
             constant=formalism.scatteringRadius,
@@ -214,13 +210,54 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
         _resonanceReaction(reactions, reaction, report, domain)
 
     groups = ET.SubElement(element, "spinGroups")
-    for group in formalism.spinGroups:
-        _spinGroup(groups, group, report, domain)
+    for group in _rmGroupsForGNDS(formalism, report):
+        _spinGroup(groups, group, report, domain, formalism.reducedWidthAmplitudes)
+
+
+def _rmGroupsForGNDS(formalism, report):
+    """Project per-row RM J and signed channel spin into true GNDS groups.
+
+    No new widths or parity are inferred. AWRI and angular convergence metadata
+    without a native GNDS slot remain explicit conversion losses.
+    """
+    from copy import deepcopy
+    if formalism.approximation != 'ReichMoore':return formalism.spinGroups
+    particles=[] if formalism.PoPs is None else list(formalism.PoPs.particles.values())
+    target=particles[0] if len(particles)==1 else None
+    result=[]
+    for source in formalism.spinGroups:
+        if not source.spins:
+            result.append(source);continue
+        if target is None or target.spin is None:
+            raise ValueError('serializing legacy RM rows requires modeled target spin')
+        if source.atomicWeightRatio is not None:
+            report.lost(f'RM {source.label}: per-group atomicWeightRatio has no native GNDS slot; supply physical particle masses for a normalized GNDS evaluation')
+        if target.parity is None:
+            report.lost(f'RM {source.label}: target parity is unknown; GNDS spin-group parity cannot be inferred')
+        spin=float(target.spin.value);neutron=next((c for c in source.channels if c.resonanceReaction=='elastic'),None)
+        if neutron is None:raise ValueError('legacy RM requires its declared elastic channel')
+        l=neutron.L;buckets={}
+        for i,aj in enumerate(source.spins):
+            j=abs(aj);cs=abs(spin-.5) if aj<0 else spin+.5
+            if not abs(l-cs)<=j<=l+cs and aj>=0:cs=abs(spin-.5)
+            buckets.setdefault((j,cs),[]).append(i)
+        for ordinal,((j,cs),indices) in enumerate(buckets.items()):
+            group=deepcopy(source);group.label=f'{source.label}-J{j}-s{cs}-{ordinal}'
+            group.spin=j;group.parity=None if target.parity is None else target.parity*(-1)**l
+            group.spins=[];group.energies=[source.energies[i] for i in indices]
+            group.widths=[list(source.widths[i]) for i in indices];group.atomicWeightRatio=None
+            for position,channel in enumerate(group.channels):
+                channel.columnIndex=position+1
+                if channel.resonanceReaction=='elastic':channel.channelSpin=cs
+            result.append(group)
+    return result
 
 
 def _resonanceReaction(parent: ET.Element, reaction, report: ConversionReport,
                        domain) -> None:
     element = ET.SubElement(parent, "resonanceReaction")
+    if reaction.kinematics is not None:
+        report.lost(f"resonanceReaction {reaction.label!r}: channel-local particle properties and PNT/SHF require PoPs/link normalization; this writer does not serialize them")
     _set(element, label=reaction.label, ejectile=reaction.ejectile,
          eliminated=_true(reaction.eliminated))
     if reaction.href:
@@ -268,7 +305,7 @@ def _externalRMatrix(parent: ET.Element, external) -> None:
 
 
 def _spinGroup(parent: ET.Element, group, report: ConversionReport,
-               domain) -> None:
+               domain, amplitudes=False) -> None:
     element = ET.SubElement(parent, "spinGroup")
     _set(element, label=group.label,
          spin=None if group.spin is None else formatFraction(group.spin),
@@ -276,6 +313,8 @@ def _spinGroup(parent: ET.Element, group, report: ConversionReport,
 
     channels = ET.SubElement(element, "channels")
     for channel in group.channels:
+        if channel.tabulatedBackground is not None:
+            report.unsupportedNode(f"channel {channel.label!r}: GNDS externalRMatrix cannot serialize a tabulated complex background")
         node = ET.SubElement(channels, "channel")
         _set(node, label=channel.label,
              resonanceReaction=channel.resonanceReaction,
@@ -300,10 +339,12 @@ def _spinGroup(parent: ET.Element, group, report: ConversionReport,
                           unit=_radiusUnit(channel.radiusUnit, report,
                                            f"channel[@label='{channel.label}']/{tag}"))
 
-    _rMatrixTable(element, group, report)
+    _rMatrixTable(element, group, report, 'eV**0.5' if amplitudes else 'eV')
+    if group.additionalPhaseShift is not None or group.phaseShiftMode:
+        report.unsupportedNode(f"spinGroup {group.label!r}: additional complex phase shift requires an extension not serialized by this GNDS writer")
 
 
-def _rMatrixTable(parent: ET.Element, group, report: ConversionReport) -> None:
+def _rMatrixTable(parent: ET.Element, group, report: ConversionReport, widthUnit='eV') -> None:
     """§19.3.5's ``table``, with each channel's width back in its own column.
 
     The table is laid out by ``columnIndex``, not by channel order: the two are
@@ -333,7 +374,7 @@ def _rMatrixTable(parent: ET.Element, group, report: ConversionReport) -> None:
         entry = byIndex.get(index)
         _set(ET.SubElement(headers, "column"), index=str(index),
              name=f"{entry[1].resonanceReaction} width" if entry else f"column{index}",
-             unit="eV")
+             unit=widthUnit)
 
     rows = []
     for position, energy in enumerate(group.energies):
@@ -346,13 +387,18 @@ def _rMatrixTable(parent: ET.Element, group, report: ConversionReport) -> None:
 
 
 def _breitWigner(parent: ET.Element, formalism: BreitWigner,
-                 report: ConversionReport, domain) -> None:
+                 report: ConversionReport, domain, regionRadius=None) -> None:
     element = ET.SubElement(parent, "BreitWigner")
     _set(element, label=formalism.label or "eval",
-         approximation=str(formalism.approximation),
-         calculateChannelRadius=_true(formalism.calculateChannelRadius))
-    _nestedPoPs(formalism, report, "BreitWigner")
-    if formalism.scatteringRadius is not None:
+         approximation=getattr(formalism.approximation, "value", str(formalism.approximation)),
+         calculateChannelRadius=_true(formalism.calculateChannelRadius if formalism.radiusPolicy is None
+                                      else formalism.radiusPolicy.channelMode == 'mass'))
+    _nestedPoPs(element, formalism, report, "BreitWigner")
+    if formalism.radiusPolicy is not None and formalism.radiusPolicy.phaseRadius is not None:
+        _scatteringRadius(element, formalism.radiusPolicy.phaseRadius, report, "BreitWigner", domain)
+    elif regionRadius is not None:
+        _scatteringRadius(element, regionRadius, report, "BreitWigner", domain)
+    elif formalism.scatteringRadius is not None:
         _scatteringRadius(element, ScatteringRadius(
             constant=formalism.scatteringRadius,
             unit=formalism.radiusUnit), report, "BreitWigner", domain)
@@ -360,6 +406,10 @@ def _breitWigner(parent: ET.Element, formalism: BreitWigner,
     resonances = [(group.L, resonance)
                   for group in formalism.resonanceParameters.spinGroups
                   for resonance in group.resonances]
+    if any(group.competitiveChannel is not None for group in formalism.resonanceParameters.spinGroups):
+        report.unsupportedNode("GNDS BreitWigner has no native competitive descriptor; exit metadata is not serialized")
+    if formalism.radiusPolicy is not None and formalism.radiusPolicy.channelMode == "constant":
+        report.unsupportedNode("GNDS BreitWigner cannot serialize an independent constant channel radius (NAPS2)")
     withFission = any(r.fissionWidth for _, r in resonances)
     columns = [c for c in BREIT_WIGNER_COLUMNS
                if c[0] != "fissionWidth" or withFission]
@@ -395,7 +445,7 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
     _set(node, label=widths.label or "eval",
          approximation="SingleLevelBreitWigner",
          useForSelfShieldingOnly=_true(widths.selfShieldingOnly))
-    _nestedPoPs(widths, report, "tabulatedWidths")
+    _nestedPoPs(node, widths, report, "tabulatedWidths")
     if widths.scatteringRadius is not None:
         _scatteringRadius(node, ScatteringRadius(
             constant=widths.scatteringRadius,
@@ -439,11 +489,13 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
     element = ET.SubElement(parent, "J")
     _set(element, label=str(index), value=formatFraction(group.J))
 
+    if group.crossSectionInterpolation is not None:
+        report.lost(f"URR L={group.L} J={group.J}: cross-section interpolation is distinct from parameter-function interpolation and is not serialized by this GNDS writer")
     grid = group.levelSpacingEnergies if group.levelSpacingEnergies is not None \
         else blockGrid
     _average(element, "levelSpacing", grid, group.levelSpacing, None,
              f"spinGroup L={group.L} J={group.J} levelSpacing", report, domain,
-             unit="eV", label="levelSpacing")
+             unit="eV", label="levelSpacing", form=group.levelSpacingFunction)
 
     widths = ET.SubElement(element, "widths")
     for position, channel in enumerate(group.channels):
@@ -453,14 +505,34 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
         grid = channel.energies if channel.energies is not None else blockGrid
         _average(node, None, grid, channel.widths, channel.constantWidth,
                  f"spinGroup L={group.L} J={group.J} width {channel.label!r}",
-                 report, domain, unit="eV", label="width")
+                 report, domain, unit="eV", label="width", form=channel.averageFunction)
 
 
 def _average(parent: ET.Element, tag: Optional[str], grid, values,
              constant: Optional[float], where: str,
              report: ConversionReport, domain, unit: str = "eV",
-             label: str = "width") -> None:
+             label: str = "width", form=None) -> None:
     """One §19.4.1 average: an ``XYs1d`` over its grid, or a ``constant1d``."""
+    if form is not None:
+        from .encode import _function
+        holder = parent if tag is None else ET.SubElement(parent, tag)
+        if hasattr(form,'constant'):
+            if (constant is not None and constant != form.constant) or (
+                    values is not None and not np.array_equal(values,[form.constant])):
+                report.lost(f"{where}: compatibility scalar disagrees with canonical constant function")
+                return
+            _function(holder,form,report,where)
+            return
+        if hasattr(form, 'function1ds'):
+            canonical_x, canonical_y, _ = form.toEndfRegions()
+        else:
+            canonical_x, canonical_y = form.xs, form.ys
+        if (values is not None and not np.array_equal(values, canonical_y)) or (
+                grid is not None and not np.array_equal(grid, canonical_x)):
+            report.lost(f"{where}: compatibility arrays disagree with the canonical function; edit the function and synchronize the arrays")
+            return
+        _function(holder, form, report, where)
+        return
     if constant is not None:
         _constant(parent, tag, constant, domain, unit=unit, label=label)
         return

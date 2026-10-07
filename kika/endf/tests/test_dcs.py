@@ -803,7 +803,7 @@ class TestSigmaWeightedFold:
 
 
 class TestDsigmaVsEnergyProductFold:
-    """``differential_xs_vs_energy(fold="product")`` and its grid."""
+    """``differential_xs_vs_energy`` averages the product, and its grid."""
 
     TOF = dcs.TofResolution(flight_path_m=27.037, delta_t_ns=5.0)
 
@@ -822,9 +822,8 @@ class TestDsigmaVsEnergyProductFold:
         out = dcs.differential_xs_vs_energy(
             energies_ev=mf4, coefficients=coeffs, mu=0.3, native_frame="cm", mu_frame="cm",
             xs_energies_ev=xs_grid, xs_values=xs, xs_mode="folded", tof=self.TOF,
-            query_energies_ev=query, fold="product",
+            query_energies_ev=query,
         )
-        assert out["fold"] == "product"
         for i, e0 in enumerate(query):
             a_eff, s_avg = dcs.coefficients_sigma_weighted_folded(
                 mf4, coeffs, xs_grid, xs, e0, self.TOF,
@@ -833,21 +832,21 @@ class TestDsigmaVsEnergyProductFold:
             assert out["values"][i] == pytest.approx(expected, rel=1e-12)
             assert out["sigma"][i] == pytest.approx(s_avg, rel=1e-12)
 
-    def test_constant_shape_and_flat_sigma_agree_with_the_factor_fold(self):
+    def test_constant_shape_and_flat_sigma_fold_to_themselves(self):
         mf4 = np.linspace(1.0e6, 1.6e6, 61)
         coeffs = {1: np.full(mf4.size, 0.25)}
         xs_grid = np.linspace(0.9e6, 1.7e6, 801)
         xs = np.full(xs_grid.size, 3.0)
         kwargs = dict(energies_ev=mf4, coefficients=coeffs, mu=-0.4, xs_energies_ev=xs_grid,
                       xs_values=xs, xs_mode="folded", tof=self.TOF, mu_frame="cm")
-        product = dcs.differential_xs_vs_energy(fold="product", **kwargs)
-        factor = dcs.differential_xs_vs_energy(**kwargs)
-        np.testing.assert_allclose(product["values"], factor["values"], rtol=1e-12)
+        out = dcs.differential_xs_vs_energy(**kwargs)
+        expected = dcs.angular_pdf(np.array([-0.4]), [0.25])[0] * 3.0 / (2 * np.pi)
+        np.testing.assert_allclose(out["values"], expected, rtol=1e-12)
 
     def test_the_jacobian_applies_to_the_product_too(self):
         mf4, coeffs, xs_grid, xs = self._evaluation()
         common = dict(energies_ev=mf4, coefficients=coeffs, xs_energies_ev=xs_grid,
-                      xs_values=xs, xs_mode="folded", tof=self.TOF, fold="product",
+                      xs_values=xs, xs_mode="folded", tof=self.TOF,
                       query_energies_ev=[1.3e6], native_frame="cm")
         alpha = dcs.frame_alpha(mass_number=56)
         lab = dcs.differential_xs_vs_energy(mu=0.5, mu_frame="lab", alpha=alpha, **common)
@@ -870,3 +869,53 @@ class TestDsigmaVsEnergyProductFold:
         assert (gaps >= quarter).all()
         # and never much more than that where the table is dense
         assert (gaps <= quarter + 2 * (xs_grid[1] - xs_grid[0])).all()
+
+
+class TestProductReadings:
+    """``coefficients_sigma_weighted`` for every reading, against closed forms."""
+
+    def test_bin_average_of_a_flat_product_is_itself(self):
+        grid = np.linspace(1e6, 2e6, 101)
+        a, s = dcs.coefficients_sigma_weighted(
+            grid, {1: np.full(grid.size, 0.3)}, grid, np.full(grid.size, 4.0), 1.5e6,
+            mode="binavg", bin_edges=(1.4e6, 1.6e6),
+        )
+        assert s == pytest.approx(4.0) and a[0] == pytest.approx(0.3)
+
+    def test_bin_average_weights_by_lethargy_and_by_sigma(self):
+        grid = np.linspace(1e6, 2e6, 2001)
+        sigma = np.where(grid < 1.5e6, 1.0, 9.0)
+        a1 = np.where(grid < 1.5e6, -0.5, 0.5)
+        a, s = dcs.coefficients_sigma_weighted(
+            grid, {1: a1}, grid, sigma, 1.5e6, mode="binavg", bin_edges=(1.2e6, 1.8e6),
+        )
+        x = np.linspace(1.2e6, 1.8e6, 600001)
+        w = 1 / x
+        sx = np.where(x < 1.5e6, 1.0, 9.0)
+        ax = np.where(x < 1.5e6, -0.5, 0.5)
+        assert s == pytest.approx((sx * w).sum() / w.sum(), rel=2e-3)
+        assert a[0] == pytest.approx((sx * ax * w).sum() / (sx * w).sum(), rel=5e-3)
+
+    def test_nominal_is_the_file_at_the_energy(self):
+        grid = np.linspace(1e6, 2e6, 11)
+        a1 = np.linspace(0.0, 1.0, 11)
+        a, s = dcs.coefficients_sigma_weighted(
+            grid, {1: a1}, grid, np.linspace(1.0, 2.0, 11), 1.5e6, mode="nominal",
+        )
+        assert a[0] == pytest.approx(0.5) and s == pytest.approx(1.5)
+
+    def test_the_folded_wrapper_is_the_folded_reading(self):
+        grid = np.linspace(1.2e6, 1.4e6, 401)
+        a1 = 0.1 + 0.3 * np.sin((grid - grid[0]) / 5e3)
+        sigma = 1.0 + np.cos((grid - grid[0]) / 3e3) ** 2
+        tof = dcs.TofResolution(27.037, 5.0)
+        old = dcs.coefficients_sigma_weighted_folded(grid, {1: a1}, grid, sigma, 1.3e6, tof)
+        new = dcs.coefficients_sigma_weighted(grid, {1: a1}, grid, sigma, 1.3e6, mode="folded", tof=tof)
+        np.testing.assert_allclose(old[0], new[0], rtol=1e-14)
+        assert old[1] == pytest.approx(new[1], rel=1e-14)
+
+    def test_resolve_coefficients_warns_off_nominal(self):
+        grid = np.linspace(1e6, 2e6, 11)
+        with pytest.warns(DeprecationWarning):
+            dcs.resolve_coefficients(grid, np.zeros((1, 11)), [1.5e6], mode="folded",
+                                     tof=dcs.TofResolution())

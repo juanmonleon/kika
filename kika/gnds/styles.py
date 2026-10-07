@@ -88,19 +88,17 @@ def readStyles(element: ET.Element, path: str, report: ConversionReport,
             style.projectileEnergyDomain = readRange(
                 child.find("projectileEnergyDomain")
             )
-        if child.find("documentation") is not None and tally is not None:
-            tally(
-                "style <documentation>: free-text provenance, including the "
-                "verbatim ENDF-6 header in <endfCompatible>, for which the "
-                "model has no node"
-            )
+        document = child.find("documentation")
+        if document is not None and (len(document) or document.attrib or (document.text or "").strip()):
+            from .documentation import readDocumentation
+            style.documentation = readDocumentation(document, report)
         styles.add(style)
     return styles
 
 
 @writes("style", *WRITABLE_STYLES)
 def writeStyles(root: ET.Element, styles: Styles, number,
-                documentation: bool = True) -> ET.Element:
+                documentation: bool = True, report=None) -> ET.Element:
     """The model → ``<styles>``. ``number`` formats a float, from the encoder.
 
     **The two schemas disagree about ``documentation``, and that is what the
@@ -122,6 +120,14 @@ def writeStyles(root: ET.Element, styles: Styles, number,
                             ("date", style.date)):
             if value is not None:
                 element.attrib[name] = value
+        if style.documentation is not None:
+            if not documentation:
+                if report is None:
+                    raise ValueError("this root does not admit style documentation")
+                report.lost("covariance style documentation cannot be represented in this schema")
+            else:
+                from .documentation import writeDocumentation
+                writeDocumentation(element, style.documentation)
         if not isinstance(style, Evaluated):
             continue
         for name, value in (("library", style.library),
@@ -138,6 +144,6 @@ def writeStyles(root: ET.Element, styles: Styles, number,
             node.attrib["min"] = number(domain.min)
             node.attrib["max"] = number(domain.max)
             node.attrib["unit"] = domain.unit
-        if documentation:
+        if documentation and style.documentation is None:
             ET.SubElement(element, "documentation")
     return container

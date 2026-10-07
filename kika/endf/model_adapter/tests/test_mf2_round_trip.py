@@ -26,6 +26,7 @@ perfectly compatible with not having it.
 """
 from __future__ import annotations
 
+from kika.nuclear_data.model.enums import Interpolation
 import pytest
 
 from kika.endf.model_adapter import decodeMF2MT151, encodeMF2MT151
@@ -133,6 +134,12 @@ _EDITS = [
     ("th232_tape", "an unresolved average width",
      lambda r: r.unresolved.tabulatedWidths.spinGroups[0]
                 .channels[0].widths.__setitem__(0, 9.9)),
+    ("fe57_host_tape", "a model particle-pair Q value",
+     lambda r: setattr(r.resolved[0].formalism.resonanceReactions[2], "Q", -14000.0)),
+    ("th232_tape", "model URR cross-section interpolation",
+     lambda r: setattr(r.unresolved.tabulatedWidths.spinGroups[0],
+                       "crossSectionInterpolation", Interpolation.loglog)),
+
 ]
 
 
@@ -166,12 +173,7 @@ def test_an_edit_to_the_model_reaches_the_file(request, tape, what, edit):
 _BOOKKEEPING = [
     ("th232_tape", "LAD",
      lambda p: p.headerFields["regions"][0].__setitem__("lad", 0)),
-    ("fe57_host_tape", "a particle-pair Q value",
-     lambda p: p.headerFields["regions"][0]["particle_pairs"][2]
-                .__setitem__("q", -14000.0)),
-    ("th232_tape", "URR case C's interpolation code INT",
-     lambda p: p.headerFields["regions"][1]["j_states"][0]
-                .__setitem__("int_code", 5)),
+
 ]
 
 

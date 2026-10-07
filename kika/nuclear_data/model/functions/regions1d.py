@@ -8,10 +8,13 @@ than the metadata silently interpolates part of the table under the wrong law.
 ``regions1d`` has no dominant scheme: every region is its own function with its
 own rule, which is what the data actually is.
 
-**Bit-exactness.** :meth:`evaluate` rebuilds the ENDF ``(NBT, INT)`` pairs and
+**Bit-exactness for continuous adjacent regions.** :meth:`evaluate` rebuilds
+the ENDF ``(NBT, INT)`` pairs and
 makes a single call to ``kika.processing.interpolation.interpolate_1d`` over the
 concatenated grid — the same call, on the same arrays, that the flat path makes.
-It is not a reimplementation, so there is nothing for the two to disagree about.
+Discontinuous or separated supports are evaluated region by region with the
+same interpolator. Shared boundaries belong to the right region. A gap cannot
+be flattened into a TAB1 curve without inventing data and raises explicitly.
 """
 from __future__ import annotations
 
@@ -110,10 +113,14 @@ class Regions1d(Function1d):
         ys = [self.function1ds[0].ys]
         pairs = [(len(self.function1ds[0]), self.function1ds[0].endfInterpolationCode)]
         for region in self.function1ds[1:]:
-            # Drop the shared boundary point that fromEndfRegions duplicated.
-            xs.append(region.xs[1:])
-            ys.append(region.ys[1:])
-            pairs.append((pairs[-1][0] + len(region) - 1, region.endfInterpolationCode))
+            if region.domainMin != xs[-1][-1]:
+                raise ValueError("nonadjacent regions cannot be flattened without inventing data across a gap")
+            # A jump needs both one-sided values at the shared abscissa.
+            shared = region.ys[0] == ys[-1][-1]
+            offset = 1 if shared else 0
+            xs.append(region.xs[offset:])
+            ys.append(region.ys[offset:])
+            pairs.append((pairs[-1][0] + len(region) - offset, region.endfInterpolationCode))
         return np.concatenate(xs), np.concatenate(ys), pairs
 
     # ------------------------------------------------------------------
@@ -127,8 +134,34 @@ class Regions1d(Function1d):
         second implementation of region look-up, and the phase 3 gate is that
         this reproduces the flat path exactly.
         """
-        xs, ys, pairs = self.toEndfRegions()
-        return _interpolate_1d()(xs, ys, pairs, x, outOfRange)
+        separated = any(a.domainMax != b.domainMin or a.ys[-1] != b.ys[0]
+                        for a,b in zip(self.function1ds[:-1],self.function1ds[1:]))
+        if not separated:
+            xs, ys, pairs = self.toEndfRegions()
+            return _interpolate_1d()(xs, ys, pairs, x, outOfRange)
+        # Preserve independent supports and jumps. Right region owns a shared
+        # boundary; ordinary continuous tables retain the legacy bit-exact path.
+        energy = np.asarray(x,dtype=float)
+        flat = energy.reshape(-1)
+        values = np.zeros(len(flat))
+        covered = np.zeros(len(flat),dtype=bool)
+        previous = None
+        for curve in self.function1ds:
+            if previous is not None and curve.domainMin < previous:
+                raise ValueError("overlapping regions")
+            select = (flat >= curve.domainMin) & (flat <= curve.domainMax)
+            values[select] = curve.evaluate(flat[select],outOfRange)
+            covered |= select
+            previous = curve.domainMax
+        if outOfRange == "raise" and np.any(~covered):
+            raise ValueError("energy outside region supports, including gaps")
+        if outOfRange == "hold":
+            values[flat < self.domainMin] = self.function1ds[0].ys[0]
+            values[flat > self.domainMax] = self.function1ds[-1].ys[-1]
+        elif outOfRange not in ("zero","raise"):
+            raise ValueError("outOfRange must be zero, hold or raise")
+        shaped = values.reshape(energy.shape)
+        return float(shaped) if energy.ndim == 0 else shaped
 
     def __repr__(self) -> str:
         rules = ", ".join(f.interpolation.value for f in self.function1ds)
