@@ -882,7 +882,7 @@ class HeatmapBuilder(PlotBuilder):
 
         return self
 
-    def build(self, show: bool = False) -> plt.Figure:
+    def build(self, show: bool = False, target=None) -> plt.Figure:
         """
         Build and return the figure.
 
@@ -890,6 +890,10 @@ class HeatmapBuilder(PlotBuilder):
         ----------
         show : bool
             Whether to display the figure immediately
+        target : matplotlib.figure.SubFigure, optional
+            Draw the heatmap inside this subfigure instead of a new figure,
+            which is how :func:`~kika.plotting.heatmap_grid` lays several
+            out side by side. The subfigure is returned.
 
         Returns
         -------
@@ -898,7 +902,11 @@ class HeatmapBuilder(PlotBuilder):
         """
         # Check if we have heatmap data
         if self._heatmap_data is not None:
-            fig = self._build_heatmap()
+            self._target = target
+            try:
+                fig = self._build_heatmap()
+            finally:
+                self._target = None
             if show:
                 plt.show()
             return fig
@@ -1044,7 +1052,8 @@ class HeatmapBuilder(PlotBuilder):
         energy_lim = user_x_lim if user_x_lim is not None else user_y_lim
 
         # Create figure and layout
-        fig = plt.figure(figsize=figsize, dpi=dpi)
+        target = getattr(self, "_target", None)
+        fig = target if target is not None else plt.figure(figsize=figsize, dpi=dpi)
 
         if has_uncertainties:
             num_panels = len(heatmap_data.uncertainty_data)
@@ -1057,7 +1066,8 @@ class HeatmapBuilder(PlotBuilder):
             if is_off_diagonal:
                 num_panels = 1
 
-            fig.set_size_inches(figsize[0], figsize[1] * 1.2)
+            if target is None:
+                fig.set_size_inches(figsize[0], figsize[1] * 1.2)
 
             gs = GridSpec(2, num_panels if num_panels > 1 else 1, figure=fig,
                          height_ratios=[0.2, 0.8], hspace=0.12, wspace=0.02)
@@ -1266,10 +1276,14 @@ class HeatmapBuilder(PlotBuilder):
         extra_margin = max(0, num_blocks - 1) * 0.015
         bottom_margin = min(0.14 + extra_margin, 0.28)
 
+        # A whole figure lets the colorbar hang past its right edge and relies
+        # on ``bbox_inches='tight'`` to keep it; a grid cell cannot, because the
+        # next cell is drawn over anything that leaves this one.
+        right = 0.76 if target is not None else 0.94
         if has_uncertainties:
-            fig.subplots_adjust(left=0.12, right=0.94, bottom=bottom_margin, top=0.90)
+            fig.subplots_adjust(left=0.12, right=right, bottom=bottom_margin, top=0.90)
         else:
-            fig.subplots_adjust(left=0.12, right=0.94, bottom=bottom_margin, top=0.93)
+            fig.subplots_adjust(left=0.12, right=right, bottom=bottom_margin, top=0.93)
 
         # Draw pending block labels NOW (after layout is finalized)
         if pending_block_labels is not None and self._heatmap_show_block_labels:
@@ -1594,7 +1608,7 @@ class HeatmapBuilder(PlotBuilder):
                 if abs(mantissa - 1.0) < 0.1:
                     return f'1e{exponent:+03d}'
                 else:
-                    return f'{int(np.round(mantissa))}e{exponent:+03d}'
+                    return f'{np.round(mantissa, 1):g}e{exponent:+03d}'
 
             formatter = FuncFormatter(format_energy_log)
 
@@ -1630,7 +1644,7 @@ class HeatmapBuilder(PlotBuilder):
                 if abs(mantissa - 1.0) < 0.1:
                     return f'1e{exponent:+03d}'
                 else:
-                    return f'{int(np.round(mantissa))}e{exponent:+03d}'
+                    return f'{np.round(mantissa, 1):g}e{exponent:+03d}'
 
             formatter = FuncFormatter(format_energy_linear)
 
@@ -1790,7 +1804,7 @@ class HeatmapBuilder(PlotBuilder):
                         if abs(mantissa - 1.0) < 0.1:
                             label = f'1e{exponent:+03d}'
                         else:
-                            label = f'{int(np.round(mantissa))}e{exponent:+03d}'
+                            label = f'{np.round(mantissa, 1):g}e{exponent:+03d}'
 
                     # Add to x-axis if in visible coord range AND within energy limits
                     if is_visible_x and coord_start_x <= pos <= coord_end_x and e_x_lo <= e <= e_x_hi:

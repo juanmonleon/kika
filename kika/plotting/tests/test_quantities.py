@@ -314,3 +314,28 @@ def test_ace_differential_cross_section_and_its_folding(fe56_ace):
 def test_supported_quantities(fe56_jeff, fe56_ace):
     assert "relative_uncertainty" in supported_quantities(fe56_jeff)
     assert "relative_uncertainty" not in supported_quantities(fe56_ace)
+
+
+# ---------------------------------------------------------------- MF31 nu-bar
+
+
+@pytest.mark.parametrize("mt", [452, 456])
+def test_relative_uncertainty_of_nubar_reads_mf31(u235_b81_tape, mt):
+    """MT 452/455/456 never appear in MF33, so the MT alone routes to MF31."""
+    from kika.endf import read_endf
+
+    endf = read_endf(str(u235_b81_tape), mf_numbers=[1, 31])
+    item = plottable(endf, "relative_uncertainty", mt=mt)
+    assert item.data.plot_type == "step"
+    y = np.asarray(item.data.y)
+    assert y.size == np.asarray(item.data.x).size
+    # A fraction of a per cent at thermal, a few per cent at the top: in %.
+    assert 0.1 < np.nanmin(y) and np.nanmax(y) < 10.0
+
+
+def test_relative_uncertainty_of_nubar_without_mf31_is_not_plottable(u235_b81_tape):
+    from kika.endf import read_endf
+
+    endf = read_endf(str(u235_b81_tape), mf_numbers=[1])
+    with pytest.raises(NotPlottable, match="MF31/MT456"):
+        plottable(endf, "relative_uncertainty", mt=456)

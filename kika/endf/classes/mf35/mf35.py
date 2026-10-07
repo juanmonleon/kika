@@ -22,7 +22,7 @@ MF33's NC/NI subsection hierarchy, which MF35 does not have.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -88,6 +88,113 @@ class MF35SubSection:
     def energy_grid(self) -> np.ndarray:
         return np.asarray(self.boundaries, dtype=float)
 
+    def correlation(self) -> np.ndarray:
+        """``C_ij / (σ_i σ_j)``, NaN where a variance is zero (or clipped to it)."""
+        matrix = self.matrix()
+        sigma = np.sqrt(np.clip(np.diag(matrix), 0.0, None))
+        outer = np.outer(sigma, sigma)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(outer > 0.0, matrix / outer, np.nan)
+
+    def to_heatmap_data(self, matrix_type: str = "corr", scale: str = "log",
+                        relative_pct: Optional[np.ndarray] = None,
+                        mt: Optional[int] = None, zaid: Optional[int] = None,
+                        energy_range: Optional[Tuple[float, float]] = None,
+                        label: Optional[str] = None):
+        """This band as :class:`~kika.plotting.plot_data.CovarianceHeatmapData`.
+
+        Laid out exactly as ``CrossSectionCovariance.to_heatmap_data`` lays out
+        one MF33 reaction: edges in plot coordinates (``_log_edges`` on a log
+        scale), a one-block ``block_info``, and cropping by *energy_range*. The
+        builder then takes the same path for MF35 as for MF33, which is what
+        gives it energy ticks and every option of the heatmap panel; a bare
+        matrix with only an ``energy_grid`` drew neither ticks nor limits.
+
+        One block, never several bands: their orders differ, so there is no
+        common group count to lay blocks out on. The panel above the matrix
+        takes *relative_pct* (from :meth:`MF35MT.relative_uncertainty`) and
+        nothing else: ``sqrt(diag C)`` alone is in units of a group probability,
+        and drawing it on a per-cent axis would mislabel it.
+
+        ENDF/B-VIII U-235 bands 1-4 start at E' = 0. On a log scale that edge is
+        drawn one decade below the next (``_log_edges``), and ``energy_grid``
+        carries the same value so the energy ticks agree with the cells.
+        """
+        from kika.cov.cross_section_covariance import _log_edges
+        from kika.plotting.plot_data import CovarianceHeatmapData
+
+        if matrix_type not in ("corr", "cov"):
+            raise ValueError("matrix_type must be 'corr' or 'cov'")
+        if scale not in ("log", "linear"):
+            raise ValueError("scale must be 'log' or 'linear'")
+        matrix = self.correlation() if matrix_type == "corr" else self.matrix()
+        edges = self.energy_grid().astype(float)
+
+        keep = np.ones(len(edges) - 1, dtype=bool)
+        if energy_range is not None:
+            emin, emax = (float(v) for v in energy_range)
+            if not emin < emax:
+                raise ValueError("energy_range must be (emin, emax) with emin < emax")
+            keep = (edges[1:] > emin) & (edges[:-1] < emax)
+            if not keep.any():
+                raise ValueError("energy_range removed all groups; nothing to plot")
+        first, last = np.where(keep)[0][[0, -1]]
+        edges = edges[first:last + 2]
+        matrix = matrix[first:last + 1, first:last + 1]
+
+        if matrix_type == "cov":
+            # Zero-variance groups render grey, as they do for MF33.
+            std = np.sqrt(np.abs(np.diag(matrix)))
+            top = np.nanmax(std) if np.any(np.isfinite(std)) else 1.0
+            dead = ~np.isfinite(std) | (std < (top * 1e-12 if top > 0 else 1e-30))
+            if dead.any():
+                matrix = matrix.copy()
+                matrix[dead, :] = np.nan
+                matrix[:, dead] = np.nan
+
+        if scale == "log":
+            plot_edges = _log_edges(edges)
+            positive = edges[edges > 0]
+            if positive.size and edges[0] <= 0.0:
+                edges = edges.copy()
+                edges[0] = positive.min() / 10.0
+        else:
+            plot_edges = edges.copy()
+        x_edges = plot_edges - plot_edges[0]
+        width = float(x_edges[-1])
+
+        key = int(mt) if mt is not None else 0
+        uncertainty = None
+        if relative_pct is not None:
+            pct = np.asarray(relative_pct, dtype=float)
+            uncertainty = {key: pct[first:last + 1] if pct.size == len(keep) else pct}
+
+        if label is None:
+            kind = "Correlation" if matrix_type == "corr" else "Covariance"
+            label = f"MF35 MT:{key} [{self.e1:.3g}, {self.e2:.3g}] eV {kind}"
+        return CovarianceHeatmapData(
+            matrix_data=matrix,
+            matrix_type=matrix_type,
+            zaid=zaid,
+            block_info={
+                "mts": [key],
+                "G": int(len(edges) - 1),
+                "ranges": [(0.0, width)],
+                "energy_ranges": {key: (0.0, width)},
+            },
+            uncertainty_data=uncertainty,
+            energy_grid=edges,
+            mt_labels=[str(key)],
+            is_diagonal=True,
+            mask_value=0.0 if matrix_type == "corr" else None,
+            scale=scale,
+            x_edges=x_edges,
+            y_edges=x_edges.copy(),
+            extent=(0.0, width, 0.0, width),
+            label=label,
+            colorbar_label="Correlation" if matrix_type == "corr" else "Covariance",
+        )
+
     # ------------------------------------------------------------------
     def row_sum_residual(self) -> float:
         """``max_i |Σ_j C_ij| / max|C|`` — how close ``C·1`` is to zero.
@@ -138,6 +245,59 @@ class MF35SubSection:
 
 
 @dataclass
+class MF35RelativeUncertainty:
+    """One band's diagonal, read against the spectrum it covaries.
+
+    ``relative`` is a fraction (not per cent) and is ``None`` when the band
+    could not be paired with an MF5 spectrum; ``warnings`` then says why. A
+    band is still worth showing in absolute terms in that case, which is why
+    this is a result and not an exception.
+    """
+
+    mt: int
+    band_index: int
+    e1: float
+    e2: float
+    boundaries: np.ndarray
+    sigma: np.ndarray
+    incident_energy: Optional[float] = None
+    #: True when ``probabilities`` are the file's interpolant at exactly
+    #: ``incident_energy``; False when it had to fall back to an MF5 node.
+    exact: bool = False
+    probabilities: Optional[np.ndarray] = None
+    relative: Optional[np.ndarray] = None
+    incident_nodes: List[float] = field(default_factory=list)
+    #: ``(E1, E2)`` of every band of the section, so a caller can say which
+    #: one an energy falls in without a second call.
+    bands: List[Tuple[float, float]] = field(default_factory=list)
+    #: Every MF5 node inside the section's bands, plus the band edges: the
+    #: incident energies at which the answer changes, across all bands.
+    incident_grid: List[float] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+def _tabulated_partial(mf5_section, mt: int):
+    """The single LF=1 partial of *mf5_section*, or ``(None, reason)``.
+
+    MF35 covaries group integrals of a *tabulated* spectrum, so the analytic
+    laws have nothing to be relative to, and with two LF=1 partials the file
+    does not say which one the band belongs to.
+    """
+    if mf5_section is None:
+        return None, f"there is no MF5/MT{mt}, so MF35/MT{mt} has no spectrum to be relative to"
+    tabulated = mf5_section.tabulated_partials()
+    if not tabulated:
+        laws = ",".join(str(p.lf) for p in mf5_section.partials)
+        return None, (f"MF5/MT{mt} carries no LF=1 subsection (LF=[{laws}]), and "
+                      f"the group probabilities MF35 is relative to are an "
+                      f"integral of a tabulated spectrum")
+    if len(tabulated) > 1:
+        return None, (f"MF5/MT{mt} has {len(tabulated)} LF=1 subsections; which "
+                      f"of them MF35's band is relative to is not stated")
+    return tabulated[0][1], None
+
+
+@dataclass
 class MF35MT(MT):
     """One MT section of MF35: NK bands of one reaction's spectrum covariance."""
 
@@ -167,6 +327,90 @@ class MF35MT(MT):
             if index == last and energy == band.e2:
                 return index
         return None
+
+    def relative_uncertainty(
+        self,
+        mf5_section=None,
+        incident_energy: Optional[float] = None,
+        band_index: Optional[int] = None,
+    ) -> MF35RelativeUncertainty:
+        """``sqrt(C_ii) / P_i`` of one band, with ``P_i`` from *mf5_section*.
+
+        The band is *band_index* if given, otherwise the one containing
+        *incident_energy* (:meth:`band_for_incident`). ``P_i`` is the group
+        integral of the MF5 spectrum at *incident_energy*, defaulting to the
+        band's lower edge, which is measured to be an MF5 node on every tape.
+
+        Comparing libraries is the reason for selecting by energy: their bands
+        cover different ranges, so "band 2" means something different on each
+        tape while "1 MeV" does not. The matrix is the same across the band,
+        but ``P_i`` is not, which is why the energy is part of the answer.
+        """
+        if band_index is None:
+            if incident_energy is None:
+                raise ValueError("give a band_index or an incident_energy")
+            band_index = self.band_for_incident(float(incident_energy))
+            if band_index is None:
+                spans = ", ".join(f"[{b.e1:.4e}, {b.e2:.4e}]" for b in self.subsections)
+                raise ValueError(
+                    f"incident energy {float(incident_energy):.6e} eV is outside "
+                    f"every MF35/MT{self.number} band ({spans})"
+                )
+        if not 0 <= band_index < len(self.subsections):
+            raise IndexError(
+                f"MF35/MT{self.number} has {len(self.subsections)} band(s); "
+                f"index {band_index} is out of range"
+            )
+        band = self.subsections[band_index]
+
+        variance = np.diag(band.matrix())
+        result = MF35RelativeUncertainty(
+            mt=int(self.number), band_index=int(band_index),
+            e1=float(band.e1), e2=float(band.e2),
+            boundaries=band.energy_grid(),
+            sigma=np.sqrt(np.clip(variance, 0.0, None)),
+            bands=[(float(b.e1), float(b.e2)) for b in self.subsections],
+        )
+        edges = {e for span in result.bands for e in span}
+        result.incident_grid = sorted(edges)
+        if np.any(variance < 0.0):
+            result.warnings.append(
+                f"{int(np.sum(variance < 0.0))} of {variance.size} diagonal entries "
+                f"are negative and were clipped to zero before the square root"
+            )
+
+        partial, reason = _tabulated_partial(mf5_section, int(self.number))
+        if partial is None:
+            result.warnings.append(f"no relative uncertainty: {reason}")
+            return result
+
+        result.incident_nodes = [float(e) for e in partial.incident_energies
+                                 if band.e1 <= e <= band.e2]
+        lo, hi = min(edges), max(edges)
+        result.incident_grid = sorted(edges | {
+            float(e) for e in partial.incident_energies if lo <= e <= hi})
+        energy = float(incident_energy) if incident_energy is not None else float(band.e1)
+        try:
+            probabilities = partial.group_integrals_at(energy, result.boundaries)
+            result.exact = True
+        except NotImplementedError as exc:
+            if not result.incident_nodes:
+                result.warnings.append(f"no relative uncertainty: {exc}")
+                return result
+            nearest = min(result.incident_nodes, key=lambda e: abs(e - energy))
+            result.warnings.append(
+                f"{exc}; used the MF5 node {nearest:.6e} eV instead of {energy:.6e} eV")
+            energy = nearest
+            k = list(partial.incident_energies).index(nearest)
+            probabilities = partial.group_integrals(k, result.boundaries)
+
+        probabilities = np.asarray(probabilities, dtype=float)
+        result.incident_energy = energy
+        result.probabilities = probabilities
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result.relative = np.where(
+                probabilities > 0.0, result.sigma / probabilities, np.nan)
+        return result
 
     def __str__(self) -> str:
         mat = self._mat if self._mat is not None else 0
