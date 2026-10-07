@@ -30,10 +30,9 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ....algebra import evaluate, group_integrals, integral, interval_laws
+from ....algebra import group_integrals, integral, interval_laws
 
-__all__ = ["tabulateFunction1d", "integrateFunction1d", "groupIntegralsOf",
-           "evaluateExactly"]
+__all__ = ["tabulateFunction1d", "integrateFunction1d", "groupIntegralsOf"]
 
 
 def tabulateFunction1d(function1d, what: str = "") -> Tuple[np.ndarray, np.ndarray,
@@ -88,14 +87,3 @@ def groupIntegralsOf(function1d, boundaries: ArrayLike,
     xs, ys, codes = tabulateFunction1d(function1d, what)
     return group_integrals(xs, ys, codes, boundaries)
 
-
-def evaluateExactly(function1d, points: ArrayLike, what: str = "") -> np.ndarray:
-    """*function1d* at *points*, zero outside its own support.
-
-    The same evaluator :meth:`XYs1d.evaluate` reaches, :func:`kika.algebra.evaluate`,
-    and the same one the integrals cut their panels with -- so a node inserted
-    into a table cannot disagree with the table's integral by a rounding of a
-    different code path.
-    """
-    xs, ys, codes = tabulateFunction1d(function1d, what)
-    return evaluate(xs, ys, codes, np.asarray(points, dtype=float))
