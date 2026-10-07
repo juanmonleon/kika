@@ -1539,7 +1539,7 @@ def _mf34_magnitude(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
         # uncertainty of a coefficient bounded by |a_l| <= 1, so the bound says nothing.
         return
     sec4 = ctx.mf4.get(mt)
-    if sec4 is None or not hasattr(sec4, "extract_legendre_coefficients"):
+    if sec4 is None or not hasattr(sec4, "legendre_cell_averages"):
         ctx.unavailable.setdefault((34, "MF4"), []).append(mt)
         mts = ctx.unavailable[(34, "MF4")]
         for i, f in enumerate(out):
@@ -1553,26 +1553,23 @@ def _mf34_magnitude(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
             CovarianceLocation(mat=loc.mat, mf=34), {"mts": [mt]}))
         return
     g = np.asarray(grid, dtype=float)
-    n_sub = 9
-    sub_e = np.column_stack([np.linspace(g[c], g[c + 1], n_sub) for c in range(g.size - 1)]).T
+    width = g[1:] - g[:-1]
+    valid = width > 0
     try:
-        coeffs = sec4.extract_legendre_coefficients(sub_e.ravel(), max_legendre_order=max(l, 1),
-                                                    out_of_range="zero")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            central = np.where(valid, sec4.legendre_cell_averages(g, l)[l], 0.0)
+        smallest = sec4.legendre_cell_min_abs(g, l)
     except Exception as exc:  # noqa: BLE001 - reported, not hidden
         out.append(CovarianceFinding(
             "central_values_unavailable", NOTE, f"MF4 a_{l} could not be evaluated: {exc}", loc))
         return
-    vals = np.asarray(coeffs.get(l, np.zeros(sub_e.size)), dtype=float).reshape(sub_e.shape)
-    width = g[1:] - g[:-1]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        central = np.where(width > 0, np.trapezoid(vals, sub_e, axis=1) / width, 0.0)
     # A relative sigma becomes absolute through the a_l it is relative to, and ENDF
     # does not pin which one inside a bin where a_l moves (O-16 at 6.5 MeV crosses
-    # resonances). The smallest |a_l| the bin holds -- its average or any sampled
-    # point -- gives the smallest sigma_abs the file can mean, so a breach of the
-    # bound with it is certain, not an artefact of the averaging.
-    reference = np.minimum(np.abs(central), np.min(np.abs(vals), axis=1))
+    # resonances). The smallest |a_l| the bin holds -- its average or any point of
+    # it, exactly, from the table a_l(E) is -- gives the smallest sigma_abs the file
+    # can mean, so a breach of the bound with it is certain, not an artefact of the
+    # averaging.
+    reference = np.minimum(np.abs(central), smallest)
     var = np.clip(np.diag(matrix), 0.0, None)
     sigma_abs = np.sqrt(var) * reference if relative else np.sqrt(var)
-    valid = width > 0
     _legendre_bound(sigma_abs, reference, valid, grid, loc, out)

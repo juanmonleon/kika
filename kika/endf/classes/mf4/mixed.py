@@ -199,7 +199,6 @@ class MF4MTMixed(MF4MT):
     def to_bulk_plot_data(
         self,
         max_order: int = 12,
-        quad_order: int = 64
     ) -> Dict[str, Union[List[float], Dict[int, List[float]], int, str]]:
         """
         Extract ALL Legendre orders at once for bulk loading.
@@ -211,8 +210,6 @@ class MF4MTMixed(MF4MT):
         ----------
         max_order : int, optional
             Maximum Legendre order to compute (default: 12)
-        quad_order : int, optional
-            Quadrature order for projecting tabulated portions (default: 64)
 
         Returns
         -------
@@ -246,7 +243,6 @@ class MF4MTMixed(MF4MT):
             energy=energies,
             max_legendre_order=max_order,
             trim=False,  # Don't trim - we want all orders
-            quad_order=quad_order,
             out_of_range="zero"
         )
 
@@ -272,6 +268,88 @@ class MF4MTMixed(MF4MT):
 
     # --- CORE: extract coefficients with auto-trim and ENDF interpolation ---
 
+    def _branch_tables(self, max_order: int):
+        """``(A_leg, A_tab)``: a_0..a_L on each branch's own energies, or None.
+
+        The Legendre branch reads the file's rows (a_0 = 1, a missing order is
+        zero); the tabulated one projects each table onto P_l, exactly
+        (:func:`~kika.endf.utils.project_tabulated_to_legendre`). Both
+        :meth:`extract_legendre_coefficients` and :meth:`legendre_table`
+        interpolate these, so the two cannot disagree.
+        """
+        A_leg = None  # shape (n_leg, L+1), with a0 in column 0
+        if self._energies:
+            pad = np.zeros((len(self._legendre_coeffs), max_order + 1), dtype=float)
+            for i, coeffs in enumerate(self._legendre_coeffs):
+                # coeffs from file typically contain a1..aNL (a0 implicit)
+                pad[i, 0] = 1.0  # a0
+                max_from_file = min(len(coeffs), max_order)
+                if max_from_file > 0:
+                    pad[i, 1:max_from_file + 1] = np.asarray(coeffs[:max_from_file], dtype=float)
+            A_leg = pad
+
+        A_tab = None  # shape (n_tab, L+1)
+        if self._tabulated_energies:
+            n_tab = len(self._tabulated_energies)
+            pad = np.zeros((n_tab, max_order + 1), dtype=float)
+            for i in range(n_tab):
+                mu_i = self._tabulated_cosines[i] if i < len(self._tabulated_cosines) else []
+                f_i = self._tabulated_probabilities[i] if i < len(self._tabulated_probabilities) else []
+                ang_interp_i = self._angular_interpolation[i] if i < len(self._angular_interpolation) and self._angular_interpolation[i] else [(len(mu_i), 2)]
+                pad[i, :] = project_tabulated_to_legendre(
+                    mu=np.asarray(mu_i, dtype=float),
+                    fmu=np.asarray(f_i, dtype=float),
+                    max_order=max_order,
+                    ang_nbt_int=ang_interp_i,
+                )
+            A_tab = pad
+        return A_leg, A_tab
+
+    def legendre_table(self, max_order: int):
+        """``(E, A, laws, hold)`` -- see :meth:`MF4MT.legendre_table`.
+
+        The two branches glued where :meth:`extract_legendre_coefficients`
+        switches: the Legendre rows up to and including their last energy, a
+        repeated abscissa there (the step between the representations), then
+        the tabulated branch's projections. Where the branches leave a gap the
+        coefficients are zero, as either branch reads them off its own grid.
+        Matches ``extract_legendre_coefficients(..., out_of_range="zero")``.
+        """
+        from ....algebra import interval_laws, sample_on_union, union
+
+        A_leg, A_tab = self._branch_tables(max_order)
+        E_leg = np.asarray(self._energies or [], dtype=float)
+        E_tab = np.asarray(self._tabulated_energies or [], dtype=float)
+        def laws_of(energies, pairs):
+            if energies.size < 2:
+                return np.zeros(0, dtype=np.int64)
+            return interval_laws(energies.size, pairs or [(energies.size, 2)])
+
+        leg_laws = laws_of(E_leg, self._interpolation)
+        tab_laws = laws_of(E_tab, self._tab_interpolation)
+        if A_tab is None and A_leg is None:
+            return np.zeros(0), np.zeros((0, max_order + 1)), np.zeros(0, dtype=np.int64), False
+        if A_tab is None:
+            return E_leg, A_leg, leg_laws, False
+        if A_leg is None:
+            return E_tab, A_tab, tab_laws, False
+
+        # The tabulated branch from the switch on, read on its own nodes after
+        # it, with a step where its own domain starts inside the gap.
+        switch = E_leg[-1]
+        u = union([np.r_[switch, E_tab[E_tab > switch]]],
+                  steps=[E_tab[0]] if E_tab[0] > switch else [])
+        tail = np.column_stack([sample_on_union(E_tab, A_tab[:, l], tab_laws, u)
+                                for l in range(max_order + 1)])
+        mid = 0.5 * (u[:-1] + u[1:])
+        k = np.clip(np.searchsorted(E_tab, mid, side="right") - 1, 0, max(E_tab.size - 2, 0))
+        inside = (mid >= E_tab[0]) & (mid <= E_tab[-1]) & (E_tab.size > 1)
+        tail_laws = np.where(inside, tab_laws[k] if tab_laws.size else 2, 2)
+        E = np.r_[E_leg, u]
+        A = np.vstack([A_leg, tail])
+        laws = np.r_[leg_laws, 2, tail_laws].astype(np.int64)
+        return E, A, laws, False
+
     def extract_legendre_coefficients(
         self,
         energy: Union[float, np.ndarray],
@@ -279,7 +357,6 @@ class MF4MTMixed(MF4MT):
         *,
         trim: bool = True,
         trim_tol: float = 1e-6,
-        quad_order: int = 64,
         out_of_range: str = "zero"
     ) -> Dict[int, Union[float, np.ndarray]]:
         """
@@ -302,8 +379,6 @@ class MF4MTMixed(MF4MT):
             If True, auto-trim trailing orders by the tail sum rule ∑_{ℓ>L} |a_ℓ| < trim_tol
         trim_tol : float
             Tolerance for auto-trim
-        quad_order : int
-            Quadrature order for projecting tabulated f(μ|E) to Legendre
         out_of_range : str
             Behavior outside energy grid: 'zero' or 'hold'
             
@@ -321,37 +396,7 @@ class MF4MTMixed(MF4MT):
         E_query = np.array([energy], dtype=float) if scalar else np.asarray(energy, dtype=float)
         nE = E_query.size
 
-        # Precompute padded coefficient arrays on each grid up to max_legendre_order
-        A_leg = None  # shape (n_leg, L+1), with a0 in column 0
-        if E_leg.size > 0:
-            n_leg = len(self._legendre_coeffs)
-            Lmax = max_legendre_order
-            pad = np.zeros((n_leg, Lmax + 1), dtype=float)
-            for i, coeffs in enumerate(self._legendre_coeffs):
-                # coeffs from file typically contain a1..aNL (a0 implicit)
-                pad[i, 0] = 1.0  # a0
-                max_from_file = min(len(coeffs), Lmax)
-                if max_from_file > 0:
-                    pad[i, 1:max_from_file + 1] = np.asarray(coeffs[:max_from_file], dtype=float)
-            A_leg = pad  # (n_leg, L+1)
-
-        A_tab = None  # shape (n_tab, L+1)
-        if E_tab.size > 0:
-            n_tab = len(self._tabulated_energies)
-            Lmax = max_legendre_order
-            pad = np.zeros((n_tab, Lmax + 1), dtype=float)
-            for i in range(n_tab):
-                mu_i = self._tabulated_cosines[i] if i < len(self._tabulated_cosines) else []
-                f_i = self._tabulated_probabilities[i] if i < len(self._tabulated_probabilities) else []
-                ang_interp_i = self._angular_interpolation[i] if i < len(self._angular_interpolation) and self._angular_interpolation[i] else [(len(mu_i), 2)]
-                pad[i, :] = project_tabulated_to_legendre(
-                    mu=np.asarray(mu_i, dtype=float),
-                    fmu=np.asarray(f_i, dtype=float),
-                    max_order=Lmax,
-                    ang_nbt_int=ang_interp_i,
-                    quad_order=quad_order,
-                )
-            A_tab = pad
+        A_leg, A_tab = self._branch_tables(max_legendre_order)
 
         # Classify all query energies by branch at once
         branches = np.array([pick_mixed_branch(float(E), E_leg, E_tab) for E in E_query])

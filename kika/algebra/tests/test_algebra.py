@@ -243,3 +243,25 @@ def test_algebra_imports_nothing_from_kika():
                 offenders += [f"{path.name}:{node.lineno} {a.name}" for a in node.names
                               if a.name.split(".")[0] == "kika"]
     assert not offenders, offenders
+
+
+# ---------------------------------------------------------------------------
+# Legendre moments
+# ---------------------------------------------------------------------------
+
+def test_legendre_moments_are_exact_on_a_linlin_table_with_a_step():
+    from scipy.special import eval_legendre
+
+    x = np.array([-1.0, -0.3, -0.3, 0.2, 0.9, 1.0])
+    y = np.array([0.1, 0.4, 0.6, 0.2, 1.5, 3.0])
+    got = A.legendre_moments(x, y, 2, 12)
+    for l in range(13):
+        want = sum(quad(lambda t: np.interp(t, x[i:i + 2], y[i:i + 2]) * eval_legendre(l, t),
+                        x[i], x[i + 1])[0] for i in range(x.size - 1) if x[i + 1] > x[i])
+        assert got[l] == pytest.approx(want, abs=1e-15)
+
+
+def test_legendre_coefficients_hold_a_short_table_to_both_ends_and_normalise():
+    # Constant 2 on [-0.5, 0.5], held: f = 2 on [-1, 1], isotropic.
+    got = A.legendre_coefficients([-0.5, 0.5], [2.0, 2.0], 2, 4)
+    assert got == pytest.approx([1.0, 0.0, 0.0, 0.0, 0.0], abs=1e-15)

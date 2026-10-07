@@ -242,7 +242,7 @@ def describe_interpolation_region(nbt, int_code):
 # ENDF-specific. This is a *live* re-export -- eight call sites in kika/endf
 # import interpolate_1d_endf -- not a shim awaiting deletion.
 from kika.processing.interpolation import interpolate_1d as interpolate_1d_endf
-from kika.algebra import interpolate_between, interval_laws
+from kika.algebra import interpolate_between, interval_laws, legendre_coefficients
 
 
 
@@ -939,37 +939,23 @@ def project_tabulated_to_legendre(
     fmu: ArrayLike,
     max_order: int,
     ang_nbt_int: Optional[Sequence[Tuple[int, int]]] = None,
-    quad_order: int = 64,
 ) -> np.ndarray:
-    """
-    Compute Legendre coefficients a_l up to max_order from tabulated f(μ) on μ∈[-1,1].
-    Uses Gauss–Legendre quadrature on an ENDF-interpolated f(μ) (respects angular INT codes).
+    """Legendre coefficients ``a_0..a_L`` of a tabulated f(mu), normalised to ``a_0 = 1``.
 
-    Conventions:
-    - Angular PDF is represented as f(μ) = 1/2 Σ_{l=0}^L (2l+1) a_l P_l(μ)
-    - With this convention, coefficients are: a_l = ∫_{-1}^{1} f(μ) P_l(μ) dμ
+    ``a_l = int f(mu) P_l(mu) dmu / int f(mu) dmu`` -- the convention
+    ``f = sum (2l+1)/2 a_l P_l`` -- with f read under the table's own angular
+    (NBT, INT) and held at its end values out to mu = -1 and +1, as
+    :func:`evaluate_tabulated_pdf` reads it: :func:`kika.algebra.legendre_coefficients`,
+    exact on lin-lin and histogram tables. A 64-node Gauss-Legendre rule over the whole of [-1, 1] used to
+    stand in for them and missed the kinks of the table by up to 5e-4 in a_l
+    (forward-peaked elastic at 30 MeV, JEFF-4.0 U-235 and U-238).
     """
     mu = np.asarray(mu, dtype=float)
     fmu = np.asarray(fmu, dtype=float)
     if mu.size == 0 or fmu.size == 0:
         return np.zeros(max_order + 1, dtype=float)
-
-    # GL nodes/weights
-    mu_q, w_q = np.polynomial.legendre.leggauss(quad_order)
-    # Interpolate f to GL nodes with ENDF angular interpolation (default linear)
-    f_q = interpolate_1d_endf(mu, fmu, ang_nbt_int or [(len(mu), 2)], mu_q, out_of_range="hold")
-
-    # Normalize on [-1,1] using the same quadrature
-    norm = float(np.sum(f_q * w_q))
-    if abs(norm) > 1e-15:
-        f_q = f_q / norm
-
-    # Project: a_l = ∫ f(μ) P_l(μ) dμ under the convention used elsewhere (a0 ≈ 1)
-    coeffs = np.zeros(max_order + 1, dtype=float)
-    for l in range(max_order + 1):
-        P_l = np.polynomial.legendre.legval(mu_q, [0] * l + [1])  # evaluate P_l(μ)
-        coeffs[l] = float(np.sum(P_l * f_q * w_q))
-    return coeffs
+    laws = interval_laws(mu.size, ang_nbt_int or [(mu.size, 2)]) if mu.size > 1         else np.zeros(0, dtype=np.int64)
+    return legendre_coefficients(mu, fmu, laws, max_order)
 
 
 def evaluate_tabulated_pdf(

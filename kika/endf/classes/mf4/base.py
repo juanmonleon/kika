@@ -143,6 +143,75 @@ class MF4MT(MT):
         """
         return None
 
+    def legendre_table(self, max_order: int):
+        r"""``(E, A, laws, hold)``: :math:`a_l(E)` as one table in incident energy.
+
+        ``A`` has shape ``(len(E), max_order + 1)``, ``laws`` is one ENDF code
+        per interval of ``E`` and ``hold`` says whether the coefficients keep
+        their end values outside ``E`` (otherwise they are zero there). Read
+        under ``laws`` this table **is** what :meth:`extract_legendre_coefficients`
+        returns at any energy, so an integral or an extremum of :math:`a_l` over
+        an energy cell is a property of the table and needs no sampling.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not state its a_l(E) as a table")
+
+    def _held_legendre_table(self, max_order: int, lo: float, hi: float):
+        """:meth:`legendre_table` with a held table extended flat to ``[lo, hi]``."""
+        E, A, laws, hold = self.legendre_table(max_order)
+        E = np.asarray(E, dtype=float)
+        A = np.asarray(A, dtype=float).reshape(E.size, max_order + 1)
+        laws = np.asarray(laws, dtype=np.int64).reshape(max(E.size - 1, 0))
+        if hold and E.size:
+            if lo < E[0]:
+                E, A, laws = np.r_[lo, E], np.vstack([A[:1], A]), np.r_[2, laws]
+            if hi > E[-1]:
+                E, A, laws = np.r_[E, hi], np.vstack([A, A[-1:]]), np.r_[laws, 2]
+        return E, A, laws
+
+    def legendre_cell_averages(self, edges, max_order: int):
+        r"""``{l: <a_l>}`` over every cell of *edges*, exactly.
+
+        The integral of the table :meth:`legendre_table` states, under its own
+        laws (:func:`kika.algebra.group_averages`), divided by the cell width --
+        not a quadrature of :meth:`extract_legendre_coefficients`. Five points
+        per cell missed a resonance in a_1 by 0.13 on JEFF-4.0 Fe-56 elastic.
+        A cell of zero width is ``nan``.
+        """
+        from ....algebra import group_averages
+
+        edges = np.asarray(edges, dtype=float)
+        E, A, laws = self._held_legendre_table(max_order, edges[0], edges[-1])
+        if E.size < 2:
+            return {l: np.zeros(edges.size - 1) for l in range(max_order + 1)}
+        return {l: group_averages(E, A[:, l], laws, edges)
+                for l in range(max_order + 1)}
+
+    def legendre_cell_min_abs(self, edges, order: int) -> np.ndarray:
+        r"""The smallest :math:`|a_l(E)|` inside every cell of *edges*.
+
+        Each of the five laws is monotone on a panel, so the extremes of a_l on
+        a cell are at its edges and at the table's own energies inside it -- both
+        limits at a step -- and a sign change inside the cell makes the minimum
+        zero.
+        """
+        from ....algebra import left_limit, right_limit
+
+        edges = np.asarray(edges, dtype=float)
+        E, A, laws = self._held_legendre_table(order, edges[0], edges[-1])
+        out = np.zeros(edges.size - 1)
+        if E.size < 2:
+            return out
+        y = A[:, order]
+        q = np.union1d(edges, E[(E > edges[0]) & (E < edges[-1])])
+        below, above = left_limit(E, y, laws, q), right_limit(E, y, laws, q)
+        at = np.searchsorted(q, edges)
+        for c in range(edges.size - 1):
+            i, j = at[c], at[c + 1]
+            seen = np.r_[above[i], below[i + 1:j], above[i + 1:j], below[j]]
+            out[c] = 0.0 if seen.min() < 0.0 < seen.max() else np.abs(seen).min()
+        return out
+
     def to_dense_plot_data(
         self,
         order: int,

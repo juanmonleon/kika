@@ -28,6 +28,11 @@ refused here rather than approximated.
 Group integrals cut the table at the group edges, give each cut the value its
 own law gives there -- a sub-panel of a law is the same law -- and sum whole
 panels. Nothing is sampled, so a group integral *is* the table's integral.
+
+Legendre moments ``int y P_l dx`` (:func:`legendre_moments`) are exact on a
+lin-lin or histogram table: on a panel the integrand is a polynomial of degree
+``l + 1``, which Gauss-Legendre with ``l // 2 + 2`` nodes per panel integrates
+exactly. A table under another law is made lin-lin to a stated tolerance first.
 """
 from __future__ import annotations
 
@@ -37,9 +42,10 @@ import numpy as np
 
 from .evaluate import evaluate
 from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate
+from .refine import LINEARIZATION_TOLERANCE, to_linlin
 
 __all__ = ["panel_integrals", "cumulative_integral", "integral", "group_integrals",
-           "group_averages", "WEIGHTS"]
+           "group_averages", "legendre_moments", "legendre_coefficients", "WEIGHTS"]
 
 #: The weights :func:`panel_integrals` knows: none, and ``1/x``.
 WEIGHTS = (None, "1/x")
@@ -202,3 +208,54 @@ def group_averages(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarra
         den = np.log(hi / lo)
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(den > 0, num / den, np.nan)
+
+
+def legendre_moments(x, y, laws, max_order: int,
+                     tol: float = LINEARIZATION_TOLERANCE) -> np.ndarray:
+    """``[int y P_0 dx, ..., int y P_L dx]`` over the table's own domain.
+
+    The Legendre polynomials are those of ``[-1, 1]``; the table is zero
+    outside its domain, so a cosine table that does not reach both ends of
+    ``[-1, 1]`` has to be extended by the caller if it means something else
+    there. Exact for lin-lin and histogram panels (see the module docstring);
+    log laws are re-expressed lin-lin to *tol* first
+    (:func:`~kika.algebra.refine.to_linlin`), the one approximation, and a
+    stated one.
+    """
+    x, y, laws = validate(x, y, laws)
+    out = np.zeros(int(max_order) + 1)
+    if x.size < 2:
+        return out
+    x, y = to_linlin(x, y, laws, tol)
+    wide = np.diff(x) > 0
+    a, b = x[:-1][wide], x[1:][wide]
+    ya, yb = y[:-1][wide], y[1:][wide]
+    nodes, weights = np.polynomial.legendre.leggauss(int(max_order) // 2 + 2)
+    half = 0.5 * (b - a)
+    t = (0.5 * (a + b))[:, None] + half[:, None] * nodes
+    f = ya[:, None] + (yb - ya)[:, None] * (0.5 * (nodes + 1.0))
+    p = np.polynomial.legendre.legvander(t.ravel(), int(max_order))
+    return (half[:, None] * weights * f).ravel() @ p
+
+
+def legendre_coefficients(mu, f, laws, max_order: int,
+                          tol: float = LINEARIZATION_TOLERANCE) -> np.ndarray:
+    """``a_0..a_L`` of an angular distribution tabulated in the cosine, ``a_0 = 1``.
+
+    ``a_l = int f P_l dmu / int f dmu`` over ``[-1, 1]`` -- the convention
+    ``f = sum (2l+1)/2 a_l P_l`` of ENDF MF4 -- with a table that stops short
+    of either end held at its end value out to it: a cosine outside a table's
+    range is the table's end point, not an absence of data. The integrals are
+    :func:`legendre_moments`.
+    """
+    mu, f, laws = validate(mu, f, laws)
+    if mu.size == 0:
+        return np.zeros(int(max_order) + 1)
+    if mu[0] > -1.0:
+        mu, f, laws = np.r_[-1.0, mu], np.r_[f[0], f], np.r_[LINLIN, laws]
+    if mu[-1] < 1.0:
+        mu, f, laws = np.r_[mu, 1.0], np.r_[f, f[-1]], np.r_[laws, LINLIN]
+    moments = legendre_moments(mu, f, laws, max_order, tol)
+    if abs(moments[0]) > 1e-15:
+        moments = moments / moments[0]
+    return moments

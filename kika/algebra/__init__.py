@@ -34,7 +34,8 @@ from .evaluate import (evaluate, interpolate_between, left_limit, right_limit,
                        sample_on_union)
 from .grid import discontinuities, join_pieces, split_at_discontinuities, union
 from .integrate import (cumulative_integral, group_averages, group_integrals,
-                        integral, panel_integrals)
+                        integral, legendre_coefficients, legendre_moments,
+                        panel_integrals)
 from .fold import fold_tabulated, gaussian_fold_nodes
 from .refine import RefinementError, RefineResult, refine, to_linlin
 from .arithmetic import add
@@ -45,7 +46,7 @@ __all__ = [
     "evaluate", "interpolate_between", "left_limit", "right_limit", "sample_on_union",
     "discontinuities", "join_pieces", "split_at_discontinuities", "union",
     "cumulative_integral", "group_averages", "group_integrals", "integral",
-    "panel_integrals", "fold_tabulated", "gaussian_fold_nodes",
+    "legendre_coefficients", "legendre_moments", "panel_integrals", "fold_tabulated", "gaussian_fold_nodes",
     "RefinementError", "RefineResult", "refine", "to_linlin",
     "add",
 ]

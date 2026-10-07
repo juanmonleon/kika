@@ -13,7 +13,13 @@ class MF4MTIsotropic(MF4MT):
     For isotropic distributions, the probability is constant (1.0) for all angles.
     """
     _ltt: int = 0
-        
+
+    def legendre_table(self, max_order: int):
+        """``(E, A, laws, hold)`` -- a_0 = 1 and the rest zero, at every energy."""
+        table = np.zeros((1, max_order + 1))
+        table[0, 0] = 1.0
+        return np.zeros(1), table, np.zeros(0, dtype=np.int64), True
+
     def extract_legendre_coefficients(
         self,
         energy: Union[float, np.ndarray],
