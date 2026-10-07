@@ -24,8 +24,8 @@ two factors once, and the readings are the plain-array primitives of
 :mod:`kika.endf.dcs` and :mod:`kika.utils.numerics`.
 
 Kernel width.  :math:`\sigma_K^2 = \sigma_E^2 + \sigma_D^2`: the TOF resolution
-(:class:`kika.endf.dcs.TofResolution`; mind its ``min_sigma_e_kev`` floor, 1 keV by
-default, which is wider than a 27 m flight path at 1 MeV) and the Doppler width of
+(:class:`kika.endf.dcs.TofResolution`, whose ``min_sigma_e_kev`` floor must stay at
+its default of zero here: a 1 keV floor is wider than ELISA below ~1 MeV) and the Doppler width of
 the target's free-gas motion in its high-energy limit,
 :math:`\sigma_D = \sqrt{2 E k_B T / A}`.  Adding the Doppler in quadrature is exact
 for that limit (a Gaussian convolved with a Gaussian); it needs :math:`E \gg k_B T`,

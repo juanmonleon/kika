@@ -104,16 +104,23 @@ class TofResolution:
            wider than the library's for the same inputs.  There is no safe
            default that suits both readings; callers that care should pass it
            explicitly.
-    min_sigma_e_kev : float, default 1.0
-        Floor on :math:`\sigma_E`, in keV.  Keeps the kernel from collapsing to
-        a delta at low energy where the TOF relation gives an unusably narrow
-        width.
+    min_sigma_e_kev : float, default 0.0
+        Floor on :math:`\sigma_E`, in keV; none by default.
+
+        It used to be 1 keV, to keep a Gauss-Hermite kernel from collapsing to
+        a delta at low energy.  The fold has integrated on the table's own
+        points since September 2026 (:func:`kika.utils.numerics.gaussian_fold_nodes`),
+        and a narrow kernel then tends to the interpolated value as it should,
+        so the floor protected nothing and only widened the resolution of a
+        good spectrometer: 27 m and 3.5 ns FWHM give :math:`\sigma_E` = 0.70 keV
+        at 0.6 MeV, which a 1 keV floor read as 1.4x wider.  Pass a value to
+        reproduce a result computed with the floor.
     """
 
     flight_path_m: float = 27.037
     delta_t_ns: float = 10.0
     delta_t_is_fwhm: bool = True
-    min_sigma_e_kev: float = 1.0
+    min_sigma_e_kev: float = 0.0
 
     #: A resolution the experiment declared itself, as a **FWHM in eV**,
     #: constant in energy.  When set it replaces the flight-path geometry: see

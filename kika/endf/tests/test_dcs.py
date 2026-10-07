@@ -238,6 +238,11 @@ class TestTofResolution:
         tof = dcs.TofResolution(min_sigma_e_kev=1.0)
         assert tof.sigma_e_mev(1e-9) == pytest.approx(0.001)
 
+    def test_there_is_no_floor_by_default(self):
+        # ELISA (27.037 m, 3.5 ns FWHM) at 0.6 MeV is narrower than the old 1 keV floor.
+        tof = dcs.TofResolution(flight_path_m=27.037, delta_t_ns=3.5)
+        assert tof.sigma_e_mev(0.6) == pytest.approx(7.07e-4, rel=1e-3)
+
     def test_vectorizes(self):
         tof = dcs.TofResolution()
         got = tof.sigma_e_mev(np.array([1.0, 4.0]))
