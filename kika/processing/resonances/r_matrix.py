@@ -76,7 +76,9 @@ class RMLChannel:
             if np.any(opened):
                 if self.charge_strength:
                     from .coulomb import charged_channel_functions
-                    eta = self.charge_strength/np.sqrt(self.k2_cm*channel_energy[opened])
+                    # ENDF D.80-D.81 retain the rest reduced mass in eta;
+                    # KRL changes k through the two-body invariant.
+                    eta = self.charge_strength/np.sqrt(self.k_squared(channel_energy[opened]))
                     po,so,_ = charged_channel_functions(self.l,eta,rho[opened])
                 else:
                     po, so, _ = neutral_channel_functions(self.l, rho[opened])
@@ -93,7 +95,7 @@ class RMLChannel:
                     from .coulomb import closed_charged_shift,charged_threshold_shift
                     closed = channel_energy<0;threshold = channel_energy==0
                     if np.any(closed):
-                        eta = self.charge_strength/np.sqrt(self.k2_cm*-channel_energy[closed])
+                        eta = self.charge_strength/np.sqrt(-self.k_squared(channel_energy[closed]))
                         s[closed] = closed_charged_shift(self.l,eta,rho[closed])
                     if np.any(threshold):
                         s[threshold] = charged_threshold_shift(self.l,self.charge_strength*self.radius.evaluate(e[threshold]))

@@ -185,7 +185,6 @@ def prepare_rml(region, resonances, context, notes):
                 from scipy.constants import alpha
                 strength = alpha*a.charge*b.charge*mu/context.hbar_c_mev_fm
                 if f.relativisticKinematics:
-                    if strength:raise UnsupportedResonanceError('relativistic Coulomb convention requires a separate certification')
                     from .kinematics import RelativisticPair
                     kinematics = RelativisticPair(context.neutron_mass_mev,context.neutron_mass_mev*context.atomic_weight_ratio,
                         a.massRatio*context.neutron_mass_mev,b.massRatio*context.neutron_mass_mev,q,context.hbar_c_mev_fm)
@@ -252,7 +251,7 @@ def prepare_rml(region, resonances, context, notes):
                             rho = np.sqrt(ch.k_squared(reference))*ch.radius.evaluate(abs(er))
                             if ch.charge_strength:
                                 from .coulomb import charged_channel_functions
-                                eta = ch.charge_strength/np.sqrt(ch.k2_cm*reference)
+                                eta = ch.charge_strength/np.sqrt(ch.k_squared(reference))
                                 pr = float(charged_channel_functions(ch.l,eta,rho)[0])
                             else:
                                 pr = float(neutral_channel_functions(ch.l,rho)[0])

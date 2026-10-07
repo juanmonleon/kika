@@ -156,15 +156,44 @@ def test_coulomb_unrepresentable_flux_is_explicit_error():
         charged_channel_functions(0,200.,.1)
 
 
-def test_extreme_barrier_and_uncertified_relativistic_coulomb_are_explicit():
-    from kika.processing.resonances import UnsupportedResonanceError
+def test_extreme_barrier_and_inconsistent_relativistic_pair_are_explicit():
     with pytest.raises(FloatingPointError,match='verified computational range'):
         charged_channel_functions(0,201.,.1)
     source,ctx=rml_model();f=source.resolved[0].formalism
     rr=f.resonanceReactions[1];rr.reactionMT=103;f.relativisticKinematics=True
     rr.kinematics=ChannelKinematics(ChannelParticle(1.,1.,.5,1),ChannelParticle(56.,1.,.5,1),'calculate','calculate')
-    with pytest.raises(UnsupportedResonanceError,match='relativistic Coulomb'):
+    with pytest.raises(ValueError,match='conserve rest energy'):
         prepare_resonances(source,ctx)
+
+
+@pytest.mark.parametrize('amplitudes',[False,True])
+def test_relativistic_charged_exit_uses_one_momentum_for_eta_and_rho(amplitudes):
+    from scipy.constants import alpha
+    source,ctx=rml_model(amplitudes=amplitudes);f=source.resolved[0].formalism
+    f.relativisticKinematics=True;rr=f.resonanceReactions[1]
+    rr.reactionMT=103;rr.Q=1e6
+    a=ChannelParticle(1.,1.,.5,1)
+    b=ChannelParticle(56.-rr.Q*1e-6/ctx.neutron_mass_mev,1.,.5,1)
+    rr.kinematics=ChannelKinematics(a,b,'calculate','calculate')
+    f.spinGroups[0].energies=[1e7,1.001e7];source.resolved[0].domainMax=2e8
+    prepared=prepare_resonances(source,ctx);c=prepared.regions[0].groups[0].channels[1]
+    e=np.array([30.,1e5,1e7,1.001e7,5e7,1e8]);t=c.channel_energy(e)
+    invariant=(57*ctx.neutron_mass_mev)**2+2*56*ctx.neutron_mass_mev*e*1e-6
+    ma,mb=a.massRatio*ctx.neutron_mass_mev,b.massRatio*ctx.neutron_mass_mev
+    k=np.sqrt((invariant-(ma+mb)**2)*(invariant-(ma-mb)**2)/(4*invariant))/ctx.hbar_c_mev_fm
+    eta=alpha*(ma*mb/(ma+mb))/(ctx.hbar_c_mev_fm*k)
+    p,s,phase=charged_channel_functions(c.l,eta,k*6.)
+    actual=c.functions(e)
+    np.testing.assert_allclose(actual[0],p,rtol=2e-10)
+    np.testing.assert_allclose(actual[1].real,s-c.boundary,rtol=2e-10)
+    # Nonzero APE must use the same eta and momentum as APT.
+    from dataclasses import replace
+    from kika.processing.resonances.radii import RadiusFunction
+    with_phase=replace(c,phase_radius=RadiusFunction(constant=4.))
+    np.testing.assert_allclose(np.sin(with_phase.functions(e)[2]-charged_channel_functions(c.l,eta,k*4.)[2]),0.,atol=2e-12)
+    diagnostics={};values=prepared.evaluate(e,diagnostics=diagnostics)
+    np.testing.assert_allclose(values[1],values[2]+values[103]+values[102],rtol=2e-14)
+    assert diagnostics['rml_max_absolute_flux_error']<1e-11
 
 
 def test_krm4_ifg1_native_suite_publication(tmp_path):
@@ -291,3 +320,79 @@ def test_legacy_rm_fallback_never_drops_channel_phase():
     g.channels[0].phaseShiftMode=1
     with pytest.raises(UnsupportedResonanceError,match='channel phase'):
         prepare_resonances(source,ctx)
+
+
+def test_relativistic_charged_native_suite_publication(tmp_path):
+    from test_resonance_publication import writable_suite
+    from test_resonance_suite import curve,href
+    from kika.nuclear_data.model import (Particle,Nuclide,PhysicalQuantity,Reaction,ReactionId,
+        CrossSection,ResonancesWithBackground,Background,Add,Product,Products,Q,
+        Multiplicity,Constant1d,Axes,Axis,Distribution,Unspecified)
+    from kika.processing.resonances import reconstruct_suite,attach_reconstruction
+    from kika.processing.resonances.prepare_r_matrix import normalize_suite_pairs
+    from kika.gnds.encode import writeReactionSuite
+    from kika.gnds.decode import readReactionSuite
+    from kika.gnds.xpath import Document
+    suite=writable_suite();source,ctx=rml_model();suite.resonances=source
+    f=source.resolved[0].formalism;f.relativisticKinematics=True
+    f.resonanceReactions[1].label='charged';f.resonanceReactions[1].reactionMT=103
+    f.resonanceReactions[1].Q=None;f.resonanceReactions[1].ejectile='H1'
+    f.spinGroups[0].channels[1].resonanceReaction='charged'
+    for rr in f.resonanceReactions:
+        rr.kinematics=None;rr.href=f"/reactionSuite/reactions/reaction[@label='{rr.label}']"
+    form=ResonancesWithBackground(Background(resolvedRegion=curve(10.,300.,0.),fastRegion=curve(300.,1000.,0.)),resonanceRegionHref='/reactionSuite/resonances/resolved',label='eval')
+    reaction=Reaction(ReactionId('charged',ENDF_MT=103),CrossSection({'eval':form}))
+    reaction.outputChannel.products=Products([Product(pid,label=pid) for pid in ('H1','Mn56')])
+    for p in reaction.outputChannel.products:
+        p.multiplicity=Multiplicity(form=Constant1d(1.,10.,1000.,axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'multiplicity','')]),label='eval'))
+        p.distribution=Distribution({'eval':Unspecified(label='eval')})
+    reaction.outputChannel.Q=Q(value=1e6,unit='eV',label='eval',domainMin=10.,domainMax=1000.)
+    suite.reactions.append(reaction);suite.sums[1].summands.summands.append(Add(href('charged')))
+    suite.PoPs.add(Particle('n',mass=PhysicalQuantity(ctx.neutron_mass_amu,'amu'),spin=PhysicalQuantity(.5,'hbar'),parity=1,charge=0,halflife='stable'))
+    # Explicit synthetic masses conserve the stated Q. They are not a fit or
+    # an alteration of any evaluated material.
+    for pid,z,a,mass in ((suite.target,26,56,56.),('H1',1,1,1.),('Mn56',25,56,56.-1./ctx.neutron_mass_mev)):
+        suite.PoPs.add(Nuclide(pid,Z=z,A=a,mass=PhysicalQuantity(mass*ctx.neutron_mass_amu,'amu'),spin=PhysicalQuantity(.5,'hbar'),parity=1,charge=z))
+    result=reconstruct_suite(suite,ctx);attach_reconstruction(suite,result)
+    tree,report=writeReactionSuite(suite);assert report.isClean,vars(report)
+    path=tmp_path/'charged_krl.xml';tree.write(path)
+    loaded,report=readReactionSuite(Document.parse(path));assert report.isClean,vars(report)
+    assert loaded.resonances.resolved[0].formalism.relativisticKinematics
+    assert max(result.verify_suite(loaded).values())<=1.
+    e=np.array([10.,30.,100.,100.2,250.,300.])
+    before=prepare_resonances(normalize_suite_pairs(suite,ctx),ctx).evaluate(e)
+    after=prepare_resonances(normalize_suite_pairs(loaded,ctx),ctx).evaluate(e)
+    for mt,v in before.items():np.testing.assert_allclose(after[mt],v,rtol=4e-13)
+    assert np.all(after[103]>0)
+
+
+@pytest.mark.parametrize('q,explicit,amplitudes,reference',[
+    (1e6,False,False,[.013919645971544983,.027839291943089976,.011135716777197869]),
+    (1e6,False,True,[.06379374985094877,.04472193848987714,.004661976399958515]),
+    (1e6,True,False,[.01391964663830124,.027839293276602475,.011135717310640957]),
+    (1e6,True,True,[.06379375038486433,.04472193886417304,.004661976439012291]),
+    (-1e6,False,False,[.013916170340474206,.027832340680948354,.01113293627190646]),
+    (-1e6,False,True,[.06912105045643953,.04362222568653895,.005051289612558657]),
+    (-1e6,True,False,[.013916171055364763,.027832342110729498,.011132936844291886]),
+    (-1e6,True,True,[.06912105108452296,.043622226082921774,.005051289658497106]),
+])
+def test_relativistic_charged_against_independent_60_digit_level_matrix(q,explicit,amplitudes,reference):
+    # Constants from the independent invariant/Coulomb/level-space gate,
+    # archived in workspace evidence. No production kernel generates them.
+    source,ctx=rml_model(amplitudes=amplitudes);f=source.resolved[0].formalism
+    f.relativisticKinematics=True;f.approximation='RMatrixLimited' if explicit else 'ReichMoore'
+    f.resonanceReactions[2].eliminated=not explicit
+    f.spinGroups[0].channels[2].boundaryConditionValue=0.
+    rr=f.resonanceReactions[1];rr.reactionMT=103;rr.Q=q
+    rr.kinematics=ChannelKinematics(ChannelParticle(1.,1.,.5,1),
+        ChannelParticle(56.-q*1e-6/ctx.neutron_mass_mev,1.,.5,1),'calculate','calculate')
+    f.spinGroups[0].energies=[1e7,1.001e7];source.resolved[0].domainMax=2e8
+    prepared=prepare_resonances(source,ctx)
+    result=prepared.evaluate(np.array([1e7]))
+    np.testing.assert_allclose([result[mt][0] for mt in (2,103,102)],reference,rtol=2e-10,atol=0.)
+    if q<0:
+        c=prepared.regions[0].groups[0].channels[1]
+        e=np.array([np.nextafter(c.threshold,0.),c.threshold])
+        p,log,_=c.functions(e)
+        np.testing.assert_array_equal(p,0.)
+        np.testing.assert_allclose(log.real[0],log.real[1],rtol=2e-11)
