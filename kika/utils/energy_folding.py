@@ -64,7 +64,7 @@ from kika._constants import (
     NEUTRON_MASS_MEV,
     SPEED_OF_LIGHT_M_NS,
 )
-from kika.utils.numerics import fold_tabulated
+from kika.algebra import fold_tabulated
 
 
 # =============================================================================
@@ -83,7 +83,7 @@ class EnergyFoldingConfig:
                     following standard experimental convention (GELINA, ORELA, n_TOF).
 
     The fold itself has nothing to configure: it is exact
-    (:mod:`kika.utils.numerics`), so there is no window or sample count.
+    (:mod:`kika.algebra.fold`), so there is no window or sample count.
     """
     flight_path_m: float = 27.037  # GELINA default
     delta_t_ns: float = 5.0        # Time resolution FWHM (not sigma!)
@@ -210,12 +210,12 @@ def fold_cross_section(
     """
     Compute energy-folded cross section using ACE data.
 
-    Thin ACE adapter over :func:`kika.utils.numerics.fold_tabulated`:
+    Thin ACE adapter over :func:`kika.algebra.fold.fold_tabulated`:
 
         σ_folded = ∫ σ(E) × G(E; E₀, σE) dE / ∫ G(E; E₀, σE) dE
 
     Exact for the lin-lin interpolant of the ACE cross section (closed form,
-    :func:`kika.utils.numerics.fold_tabulated`), held at its end values past
+    :func:`kika.algebra.fold.fold_tabulated`), held at its end values past
     the table.  **Values changed twice**: in September 2026 away from a
     Gaussian-weighted average of the tabulated points (8.6 % off on Fe-56
     elastic), and in October 2026 to the exact integral (up to 6e-4 from the
@@ -292,7 +292,7 @@ def fold_angular_distribution(
     This folds the angular distribution PDF (shape only, not cross section),
     through the ACE container's own fold: nodes on every incident energy the
     distribution tabulates, weights exact for its lin-lin interpolation in
-    energy (:func:`kika.utils.numerics.gaussian_fold_nodes`).  Until October
+    energy (:func:`kika.algebra.fold.gaussian_fold_nodes`).  Until October
     2026 this averaged 21 uniform samples over +-4 sigma, a rule of its own.
 
     Parameters:

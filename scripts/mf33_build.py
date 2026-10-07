@@ -47,7 +47,7 @@ from kika.processing.njoy_pendf_cache import (
     get_or_create_pendf,
     read_pendf_mf3_sections,
 )
-from kika.utils.numerics import average_over_intervals, fold_tabulated
+from kika.algebra import fold_tabulated, group_averages, interval_laws
 from scripts.mf33_diagnostics import FOUR_PI, bin_average_xs
 from scripts.multigroup_collapse import (
     MF33MultigroupResult,
@@ -112,7 +112,7 @@ def fold_xs_over_bins(
             edges = np.array(
                 [eb.bin_lower_mev * 1e6, eb.bin_upper_mev * 1e6], dtype=float,
             )
-            out[i] = average_over_intervals(e_ev, xs_b, edges)[0]
+            out[i] = group_averages(e_ev, xs_b, 2, edges)[0]
 
     if fallback and logger is not None:
         logger.warning(
@@ -421,10 +421,10 @@ def build_mt1_from_partials(
         sec = sections.get(mt)
         if sec is None:
             return None
-        return average_over_intervals(
-            np.asarray(sec.energies, dtype=float),
-            np.asarray(sec.cross_sections, dtype=float),
-            grid_ev,
+        energies = np.asarray(sec.energies, dtype=float)
+        return group_averages(
+            energies, np.asarray(sec.cross_sections, dtype=float),
+            interval_laws(energies.size, sec.energy_interpolation), grid_ev,
         )
 
     sigma_tot = group_xs(total_mt)

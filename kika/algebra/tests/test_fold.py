@@ -14,12 +14,8 @@ import numpy as np
 import pytest
 
 from kika._constants import FWHM_TO_SIGMA
-from kika.utils.numerics import (
-    average_over_intervals,
-    fold_tabulated,
-    gaussian_fold_nodes,
-)
-from kika.utils import numerics
+from kika.algebra import fold as numerics
+from kika.algebra import fold_tabulated, gaussian_fold_nodes, group_averages
 from kika.utils.energy_folding import tof_energy_resolution
 
 
@@ -168,25 +164,26 @@ def test_nodes_degenerate_at_zero_sigma():
     np.testing.assert_allclose(w, [1.0])
 
 
-# --- average_over_intervals ------------------------------------------------
+# --- group_averages (formerly average_over_intervals) ----------------------
 
 def test_interval_average_of_a_line_is_the_midpoint_value():
     x = np.linspace(0.0, 10.0, 1001)
     y = 3.0 * x + 1.0
     edges = np.array([0.0, 2.0, 5.0, 10.0])
-    got = average_over_intervals(x, y, edges)
+    got = group_averages(x, y, 2, edges)
     mids = 0.5 * (edges[:-1] + edges[1:])
-    np.testing.assert_allclose(got, 3.0 * mids + 1.0, rtol=1e-9)
+    np.testing.assert_allclose(got, 3.0 * mids + 1.0, rtol=1e-13)
 
 
 def test_interval_average_does_not_step_over_a_narrow_feature():
-    """The native points are unioned into the sub-grid, so spikes survive."""
+    """Every panel of the table is integrated, so a spike is never skipped."""
     x = np.unique(np.concatenate([
         np.linspace(0.0, 10.0, 101), np.linspace(4.999, 5.001, 201),
     ]))
     y = np.where(np.abs(x - 5.0) < 0.001, 100.0, 1.0)
-    got = average_over_intervals(x, y, np.array([0.0, 10.0]), n_sub=5)
-    assert got[0] > 1.0, "narrow spike was skipped by the uniform sub-grid"
+    got = group_averages(x, y, 2, np.array([0.0, 10.0]))
+    exact = np.trapezoid(y, x) / 10.0
+    assert got[0] == pytest.approx(exact, rel=1e-13)
 
 
 # --- TOF resolution --------------------------------------------------------

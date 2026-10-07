@@ -1,9 +1,10 @@
-"""Format-agnostic numerical primitives.
+"""Gaussian folds of a tabulated function, in closed form.
 
 Pure mathematics on tabulated data: no nuclear physics, no file formats, no MT
 numbers.  Anything in the library or in ``scripts/`` that needs to convolve a
-tabulated function with a Gaussian, or average it over intervals, should call
-these rather than growing its own copy.
+tabulated function with a Gaussian should call these rather than growing its
+own copy.  (Moved here from ``kika/utils/numerics.py`` in October 2026; its
+interval average became :func:`kika.algebra.group_averages`.)
 
 **The Gaussian fold is exact.**  A tabulated function is a straight line on
 every panel, and the integral of a straight line against a Gaussian has a
@@ -31,7 +32,6 @@ from scipy.special import ndtr
 __all__ = [
     "gaussian_fold_nodes",
     "fold_tabulated",
-    "average_over_intervals",
 ]
 
 #: Half-width of a fold window, in kernel standard deviations.  The Gaussian
@@ -173,7 +173,7 @@ def fold_tabulated(
         Kernel standard deviation(s), broadcast against ``x0``.  Where
         ``sigma <= 0`` the kernel is a delta and ``y(x0)`` is returned -- for a
         sharply peaked ``y`` a point sample is usually *not* what you want;
-        consider :func:`average_over_intervals` instead.
+        consider :func:`kika.algebra.group_averages` instead.
 
     Returns
     -------
@@ -229,47 +229,3 @@ def fold_tabulated(
         start = stop
     return float(out[0]) if scalar_in else out
 
-
-def average_over_intervals(
-    x: np.ndarray,
-    y: np.ndarray,
-    edges: np.ndarray,
-    *,
-    n_sub: int = 200,
-) -> np.ndarray:
-    """Average a tabulated function over each interval of ``edges``.
-
-    Trapezoid integral of the linearly-interpolated ``y(x)`` over
-    ``[edges[i], edges[i+1]]``, divided by the interval width.
-
-    Each interval is sampled on the union of a uniform sub-grid and the native
-    ``x`` points falling inside it.  The union matters: with uniform sampling
-    alone, a feature narrower than ``(hi - lo) / n_sub`` — a resonance on a
-    finely tabulated cross section, say — can be stepped over entirely.
-
-    Parameters
-    ----------
-    x, y : np.ndarray
-        Tabulated function, ``x`` ascending.
-    edges : np.ndarray
-        Interval boundaries, ``N + 1`` ascending values.
-    n_sub : int, default 200
-        Uniform sub-samples per interval, before the union with native points.
-
-    Returns
-    -------
-    np.ndarray
-        Interval averages, shape ``(N,)``.
-    """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    edges = np.asarray(edges, dtype=float)
-
-    out = np.empty(len(edges) - 1, dtype=float)
-    for i in range(len(edges) - 1):
-        lo, hi = edges[i], edges[i + 1]
-        inside = x[(x > lo) & (x < hi)]
-        x_sub = np.unique(np.concatenate([np.linspace(lo, hi, n_sub), inside]))
-        y_sub = np.interp(x_sub, x, y)
-        out[i] = np.trapezoid(y_sub, x_sub) / (hi - lo)
-    return out

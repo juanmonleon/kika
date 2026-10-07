@@ -31,7 +31,7 @@ import numpy as np
 
 from kika._constants import NEUTRON_MASS_MEV, SPEED_OF_LIGHT_M_NS  # noqa: F401
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import fold_tabulated
+from kika.algebra import fold_tabulated
 
 
 @dataclass
@@ -463,7 +463,7 @@ def fold_xs_over_resolution(
 
     Exact for the lin-lin interpolant of the (e_grid_ev, xs) table: the integral
     of a straight line against a Gaussian has a closed form, summed panel by
-    panel over the table's own points (:func:`kika.utils.numerics.fold_tabulated`).
+    panel over the table's own points (:func:`kika.algebra.fold.fold_tabulated`).
     σ(E') is held at the table's end values outside its coverage. With
     sigma_E_mev <= 0 the kernel collapses to a delta and σ(energy_mev) is
     returned. Units follow `xs` (barns for MF3 elastic).

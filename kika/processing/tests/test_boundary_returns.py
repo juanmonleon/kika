@@ -150,7 +150,7 @@ def test_groups_outside_the_pointwise_range_are_nan_not_zero(pointwise):
         (dict(cross_sections=np.array([1.0, 2.0])), "same shape"),
         (dict(energies=np.array([1.0]), cross_sections=np.array([1.0])),
          "at least 2"),
-        (dict(energies=np.array([10.0, 1.0, 100.0, 1000.0])), "strictly increasing"),
+        (dict(energies=np.array([10.0, 1.0, 100.0, 1000.0])), "non-decreasing"),
         (dict(group_boundaries=np.array([1.0])), "group_boundaries"),
         (dict(group_boundaries=np.array([100.0, 1.0])), "strictly increasing"),
         (dict(weighting="uniform"), "unknown weighting"),

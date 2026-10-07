@@ -39,7 +39,7 @@ from .evaluate import evaluate
 from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate
 
 __all__ = ["panel_integrals", "cumulative_integral", "integral", "group_integrals",
-           "WEIGHTS"]
+           "group_averages", "WEIGHTS"]
 
 #: The weights :func:`panel_integrals` knows: none, and ``1/x``.
 WEIGHTS = (None, "1/x")
@@ -180,3 +180,25 @@ def integral(x, y, laws, lo: Optional[float] = None, hi: Optional[float] = None,
     if b <= a:
         return 0.0
     return float(group_integrals(x, y, laws, [a, b], weight)[0])
+
+
+def group_averages(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarray:
+    """``int y w / int w`` over every group of *edges*, exactly.
+
+    The table is zero outside its own domain, so a group that reaches past it
+    averages that zero in: this is the mean of the function over the group, not
+    over the part of the group the table happens to cover. A caller that wants
+    the latter clips *edges* to the domain first. A group of zero weight (zero
+    width) is ``nan``. With ``weight="1/x"`` every edge must be positive.
+    """
+    edges = np.asarray(edges, dtype=float)
+    num = group_integrals(x, y, laws, edges, weight)
+    lo, hi = edges[:-1], edges[1:]
+    if weight is None:
+        den = hi - lo
+    else:
+        if np.any(edges <= 0):
+            raise ValueError("a 1/x weight needs positive group edges")
+        den = np.log(hi / lo)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(den > 0, num / den, np.nan)

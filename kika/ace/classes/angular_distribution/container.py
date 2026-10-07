@@ -21,7 +21,7 @@ from kika._constants import (
     SPEED_OF_LIGHT_M_NS as _SPEED_OF_LIGHT_M_PER_NS,
 )
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.utils.numerics import gaussian_fold_nodes
+from kika.algebra import gaussian_fold_nodes
 
 # Default TOF parameters (GELINA facility)
 _DEFAULT_FLIGHT_PATH_M = 27.037  # meters

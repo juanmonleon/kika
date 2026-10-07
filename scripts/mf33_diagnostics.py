@@ -30,7 +30,7 @@ from typing import Any, Dict, Iterable, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from kika.utils.numerics import average_over_intervals
+from kika.algebra import group_averages
 from scripts.tof_parameters import (
     get_tof_parameters,
     compute_sigma_E,
@@ -70,12 +70,11 @@ def bin_average_xs(
     e_ev: np.ndarray,
     xs_b: np.ndarray,
     grid_ev: np.ndarray,
-    n_sub: int = 200,
 ) -> np.ndarray:
     """Width-weighted average of a pointwise cross section over each grid bin.
 
-    Trapezoid integral of the linearly-interpolated ``xs(E)`` over
-    ``[grid_ev[i], grid_ev[i+1]]`` divided by the bin width.  Used to project
+    The exact integral of the lin-lin ``xs(E)`` over ``[grid_ev[i],
+    grid_ev[i+1]]`` divided by the bin width; zero outside the table.  Used to project
     the host MF3 onto the fine bin grid so the relative MF33 can be recentred
     on the shipped (host) central value.
 
@@ -85,10 +84,6 @@ def bin_average_xs(
         Pointwise cross section (energies in eV, values in barns), ascending.
     grid_ev : np.ndarray
         Bin boundaries in eV (N+1 values).
-    n_sub : int, default 200
-        Sub-samples per bin for the trapezoid rule (the host grid is dense
-        through the resonance region; uniform sub-sampling of the interpolant
-        is robust to bins wider than the local point spacing).
 
     Returns
     -------
@@ -97,12 +92,13 @@ def bin_average_xs(
 
     Notes
     -----
-    Domain-named adapter over
-    :func:`kika.utils.numerics.average_over_intervals`, which holds the
-    implementation.  Kept because it reads better at the diagnostic call sites
+    Domain-named adapter over :func:`kika.algebra.group_averages`, which holds
+    the implementation (until October 2026 a trapezoid on the table's points
+    plus 200 uniform ones per bin, which agreed with the exact integral to
+    1e-13 inside the table and held the end value outside it).  Kept because it reads better at the diagnostic call sites
     and because the eV/barns units are part of the contract here.
     """
-    return average_over_intervals(e_ev, xs_b, grid_ev, n_sub=n_sub)
+    return group_averages(e_ev, xs_b, 2, grid_ev)
 
 
 # --------------------------------------------------------------------------- #

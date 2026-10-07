@@ -1,10 +1,6 @@
 """Utility functions for KIKA."""
 from kika.utils.logging_utils import configure_ace_debug_logging, configure_endf_debug_logging, get_endf_logger
-from kika.utils.numerics import (
-    gaussian_fold_nodes,
-    fold_tabulated,
-    average_over_intervals,
-)
+from kika.algebra import gaussian_fold_nodes, fold_tabulated
 from kika.utils.energy_folding import (
     EnergyFoldingConfig,
     FWHM_TO_SIGMA,
@@ -22,10 +18,9 @@ __all__ = [
     'configure_ace_debug_logging',
     'configure_endf_debug_logging',
     'get_endf_logger',
-    # Numerical primitives
+    # Gaussian folds (implemented in kika.algebra)
     'gaussian_fold_nodes',
     'fold_tabulated',
-    'average_over_intervals',
     # Energy folding utilities
     'EnergyFoldingConfig',
     'FWHM_TO_SIGMA',

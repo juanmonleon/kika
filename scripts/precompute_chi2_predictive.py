@@ -113,7 +113,7 @@ _kika_root = Path(__file__).resolve().parent.parent
 if str(_kika_root) not in sys.path:
     sys.path.insert(0, str(_kika_root))
 
-from kika.utils.numerics import gaussian_fold_nodes
+from kika.algebra import gaussian_fold_nodes
 from scripts.precompute_chi2_exfor_c0 import load_exfor, build_experiment_dataframe
 from scripts.precompute_chi2_library_c0 import (
     interp_a_l_to_energy,
@@ -134,7 +134,7 @@ MT_NUMBER = 2  # elastic scattering
 
 # ── Fold quadrature ──
 # Exact for the lin-lin interpolant of the integrand on every MF3 and MF4 point of
-# the library inside +-6 sigma_E (kika.utils.numerics.gaussian_fold_nodes): the
+# the library inside +-6 sigma_E (kika.algebra.fold.gaussian_fold_nodes): the
 # integral of a straight line against a Gaussian has a closed form. Earlier runs
 # were scored with other rules and are not reproduced by this script any more:
 #   up to 2026-09-24  65 uniform nodes over a truncated +-3 sigma_E window; it

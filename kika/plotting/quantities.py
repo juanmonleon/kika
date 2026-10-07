@@ -345,7 +345,7 @@ def fold_in_energy(
 
     :math:`\\int f(E)\\,N(E; E_0, \\sigma_E^2)\\,dE`, exact for the piecewise-linear
     interpolant of ``evaluate`` on every point of ``grids`` inside the window
-    (:func:`kika.utils.numerics.gaussian_fold_nodes`, the rule every other fold in
+    (:func:`kika.algebra.fold.gaussian_fold_nodes`, the rule every other fold in
     kika uses). ``grids`` are the energy grids the integrand is tabulated on --
     the cross section's *and* the angular distribution's for dsigma/dOmega. The
     21 Gauss-Hermite nodes used here until October 2026 do not know where those
@@ -357,7 +357,7 @@ def fold_in_energy(
     This is experimental resolution made explicit: the plottable adapters call it
     only when the caller passes ``resolution=``.
     """
-    from kika.utils.numerics import gaussian_fold_nodes
+    from kika.algebra import gaussian_fold_nodes
 
     nodes, weights = gaussian_fold_nodes(energy, sigma_energy, grids)
     if bounds is not None:
