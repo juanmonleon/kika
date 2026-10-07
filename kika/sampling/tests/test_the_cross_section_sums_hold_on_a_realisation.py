@@ -423,8 +423,9 @@ def test_every_sum_holds_on_a_whole_evaluation(fe56_b81_tape, tmp_path):
     The request names sums and partials together (MF33 there carries MT1, MT4
     and partials of both), so this is the whole rule at once on a real tree.
     Checked per re-derived sum, against the leaves under it, on the sum's own
-    grid. MT4, MT103 and MT107 carry blocks over partials that carry none, so
-    those three are dropped, and the run says so.
+    grid. MT4 and MT103 carry blocks over partials that carry none (MT51-91,
+    MT600-649), so both are dropped, and the run says so; MT1's is discarded
+    because MT2, MT5, MT16 and MT102 carry their own (measured 2026-10-07).
     """
     from kika.endf.model_adapter.decode import _summationMTs as summation
     from kika.sampling.cross_section_sums import _leavesUnder
@@ -440,8 +441,10 @@ def test_every_sum_holds_on_a_whole_evaluation(fe56_b81_tape, tmp_path):
                if "rederived_from" in info]
     assert rebuilt, "nothing was re-derived on a tape that states MT1 and MT4"
     drawn = {c.mt for c in run.samples[0]["set"].components() if c.mf == 33}
-    sums = summation(present) | {103, 107}
+    sums = summation(present) | {103}
     assert not drawn & sums, f"a sum's own block was drawn: {sorted(drawn & sums)}"
+    for total in (4, 103):
+        assert any(f"MT{total}'s covariance was not drawn" in n for n in run.notes)
     assert not any("factor_from" in info
                    for info in run.samples[0]["applied"].values()), "a rider moved"
     for component, info in run.samples[0]["applied"].items():
