@@ -418,12 +418,25 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
     Everything not re-encoded is copied through as bytes, which is what keeps a
     perturbed tape comparable to the one it came from -- and what makes ``cmp``
     between two samples show exactly the perturbation and nothing else.
+
+    The unit of replacement is the **MT**, not the MF. Replacing the whole MF
+    re-encoded every sibling section the realisation never touched -- MF5/MT455
+    beside a perturbed MT18 came back with the same values but new sequence
+    numbers, zero-filled SEND records and, on B-VIII.1 U-233, its ZA spelt
+    ``9.223300+4`` instead of ``92233.0000`` (PF-5). The pattern is the legacy
+    writers' (``_write_perturbed_pfns_endf``): a fresh ``ENDFWriter`` per MT,
+    because it snapshots the file at construction and a reused one would
+    splice the second section into the pre-first text and drop the first; no
+    directory update per MT; one rebuild at the end, once the line counts have
+    settled.
     """
+    import shutil
     from kika.endf.model_adapter import encodeMF3MT, encodeMF4MT, encodeMF5MT
     from kika.endf.model_adapter.multiplicity import (encodeMF1MT452,
                                                       encodeMF1MT455,
                                                       encodeMF1MT456)
     from kika.endf.writers.endf_writer import ENDFWriter
+    from kika.endf.writers.update_directory import update_mf1_directory
     from kika.nuclear_data.model import EVAL_LABEL
 
     _MF1_ENCODERS = {452: encodeMF1MT452, 455: encodeMF1MT455,
@@ -440,11 +453,10 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
     if not touched:
         raise ValueError("this realisation touches nothing; there is no delta")
 
-    current = Path(sourcePath)
     outPath = Path(outPath)
+    shutil.copyfile(sourcePath, outPath)
     for mf, mts in touched.items():
-        mfFile = endfObj.get_file(mf)
-        if mfFile is None:
+        if endfObj.get_file(mf) is None:
             raise ValueError(
                 f"the realisation perturbs MF{mf} and the tape has no MF{mf}")
         for mt in mts:
@@ -484,11 +496,12 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
             else:
                 raise NotImplementedError(
                     f"no delta encoder for MF{mf}")
-            mfFile.sections[mt] = encoded
-        writer = ENDFWriter(str(current))
-        if not writer.replace_mf_section(mfFile, str(outPath)):
-            raise RuntimeError(f"writing MF{mf} of {outPath} failed")
-        current = outPath
+            writer = ENDFWriter(str(outPath))
+            if not writer.replace_mt_section(encoded, mf_number=mf,
+                                             output_filepath=str(outPath),
+                                             update_directory=False):
+                raise RuntimeError(f"writing MF{mf}/MT{mt} of {outPath} failed")
+    update_mf1_directory(str(outPath))
     return outPath
 
 

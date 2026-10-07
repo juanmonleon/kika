@@ -139,6 +139,10 @@ _TAPES: Dict[str, Sequence[str]] = {
     "cf252_b81": ("endfb81/n-098_Cf_252.endf", "n-098_Cf_252.endf",
                   "endfb81/neutrons/n-098_Cf_252.endf"),
     "pu239_b81": ("endfb81/n-094_Pu_239.endf", "n-094_Pu_239.endf"),
+    # PF-5: the tape where re-encoding a whole MF5 showed most, because its
+    # MT455 spells the HEAD's ZA ``92233.0000`` and the encoder writes
+    # ``9.223300+4``. The delta emitter's byte-identity gate runs on it.
+    "u233_b81": ("endfb81/n-092_U_233.endf", "n-092_U_233.endf"),
     # The two PFNS tapes the pre-flight refused (PF-7, PF-8): a correlation
     # above 1 by 1.2e-5, and a band stated as a 1x1 zero.
     "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf",),
@@ -521,6 +525,7 @@ u238_b80_tape = _tape_fixture("u238_b80")
 u235_b81_tape = _tape_fixture("u235_b81")
 cf252_b81_tape = _tape_fixture("cf252_b81")
 pu239_b81_tape = _tape_fixture("pu239_b81")
+u233_b81_tape = _tape_fixture("u233_b81")
 pu240_b71_tape = _tape_fixture("pu240_b71")
 pu242_j40_tape = _tape_fixture("pu242_j40")
 u5_nubar_covfil_tape = _tape_fixture("u5_nubar_covfil")
