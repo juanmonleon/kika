@@ -519,7 +519,9 @@ class CrossSection:
         ENDF interpolation regions are preserved in
         ``metadata['interpolation_regions']`` (set by :meth:`from_endf`),
         the full ENDF interpolation law is honoured. Otherwise the
-        ``interpolation`` attribute is used as a single-region scheme.
+        ``interpolation`` attribute is used as a single-region scheme. Either
+        way the table goes to :func:`kika.algebra.evaluate`
+        (:meth:`interval_laws`).
 
         Parameters
         ----------
@@ -533,67 +535,33 @@ class CrossSection:
         float or np.ndarray
             Cross section(s) in barns.
         """
-        from kika.processing.interpolation import interpolate_1d  # local import: avoid cycle
+        from kika.algebra import evaluate
 
         target = np.asarray(energy, dtype=float)
-        scalar_input = np.ndim(target) == 0
+        result = evaluate(np.asarray(self.energies, dtype=float),
+                          np.asarray(self.values, dtype=float),
+                          self.interval_laws(), target, outside=out_of_range)
+        return float(result) if np.ndim(target) == 0 else np.asarray(result, dtype=float)
 
+    def interval_laws(self) -> np.ndarray:
+        """The ENDF law of every interval: the real regions when kept, else the scheme.
+
+        ``metadata['interpolation_regions']`` (set by :meth:`from_endf`) is the
+        tape's own ``(NBT, INT)`` list; without it the single ``interpolation``
+        name applies to the whole table. An unknown name raises rather than
+        being read lin-lin.
+        """
+        from kika.algebra import interval_laws
+
+        n = len(self.energies)
         regions = self.metadata.get("interpolation_regions") if self.metadata else None
         if regions:
-            result = interpolate_1d(
-                list(self.energies),
-                list(self.values),
-                list(regions),
-                target,
-                out_of_range=out_of_range,
-            )
-        else:
-            # Fallback: single-region scheme from self.interpolation
-            scheme = self.interpolation or "linlin"
-            result = self._interp_single_scheme(target, scheme, out_of_range)
-
-        return float(result) if scalar_input and np.ndim(result) == 0 else np.asarray(result, dtype=float)
-
-    def _interp_single_scheme(
-        self,
-        target: np.ndarray,
-        scheme: str,
-        out_of_range: str,
-    ) -> np.ndarray:
-        """Interpolate using a single global scheme (no per-region INT codes)."""
-        e = np.asarray(self.energies, dtype=float)
-        v = np.asarray(self.values, dtype=float)
-        out = np.zeros_like(np.atleast_1d(target), dtype=float)
-
-        if scheme == "loglog":
-            positive = (e > 0) & (v > 0)
-            if np.all(positive):
-                log_e = np.log(e)
-                log_v = np.log(v)
-                out = np.exp(np.interp(np.log(np.maximum(target, 1e-30)), log_e, log_v))
-            else:
-                out = np.interp(target, e, v)
-        elif scheme == "linlog":  # σ linear in log E
-            out = np.interp(np.log(np.maximum(target, 1e-30)), np.log(np.maximum(e, 1e-30)), v)
-        elif scheme == "loglin":  # log σ linear in E
-            positive = v > 0
-            if np.all(positive):
-                out = np.exp(np.interp(target, e, np.log(v)))
-            else:
-                out = np.interp(target, e, v)
-        elif scheme == "histogram":
-            idx = np.searchsorted(e, target, side='right') - 1
-            idx = np.clip(idx, 0, len(v) - 1)
-            out = v[idx]
-        else:  # linlin or unknown → linear
-            out = np.interp(target, e, v)
-
-        # out_of_range handling for linear interp (np.interp clamps by default)
-        if out_of_range == "zero":
-            below = np.asarray(target) < e[0]
-            above = np.asarray(target) > e[-1]
-            out = np.where(below | above, 0.0, out)
-        return out
+            return interval_laws(n, list(regions))
+        scheme = self.interpolation or "linlin"
+        if scheme not in _NAME_TO_ENDF_INTERP:
+            raise ValueError(f"unknown interpolation scheme {scheme!r}; expected one "
+                             f"of {sorted(_NAME_TO_ENDF_INTERP)}")
+        return np.full(max(n - 1, 0), _NAME_TO_ENDF_INTERP[scheme], dtype=np.int64)
 
     # ------------------------------------------------------------------
     # Convenience

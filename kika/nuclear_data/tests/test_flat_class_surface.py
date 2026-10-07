@@ -134,7 +134,7 @@ EXPECTED_FIELDS: dict[str, list[tuple[str, str, str]]] = {
 
 #: Callables on each class. Single-underscore names are included deliberately:
 #: they are private by convention but load-bearing outside their own module
-#: (``_interp_single_scheme`` is the interpolation entry point;
+#: (``interval_laws`` is what the MF33 bin average reads the laws through;
 #: ``_evaluate_pdf_*`` are what ``evaluate_pdf`` dispatches to).
 EXPECTED_METHODS: dict[str, dict[str, str]] = {
     "CrossSection": {
@@ -146,7 +146,7 @@ EXPECTED_METHODS: dict[str, dict[str, str]] = {
         "all_from_ace": '(cls, ace: "\'Ace\'", include_composites: \'bool\' = True) -> "Dict[int, \'CrossSection\']"',
         "to_plot_data": '(self, label: \'Optional[str]\' = None, **styling_kwargs) -> "\'CrossSectionPlotData\'"',
         "get_cross_section": "(self, energy: 'Union[float, ArrayLike]', out_of_range: 'str' = 'zero') -> 'Union[float, np.ndarray]'",
-        "_interp_single_scheme": "(self, target: 'np.ndarray', scheme: 'str', out_of_range: 'str') -> 'np.ndarray'",
+        "interval_laws": "(self) -> 'np.ndarray'",
     },
     "AngularDistribution": {
         "from_endf": '(cls, mf4mt: "\'MF4MT\'") -> "\'AngularDistribution\'"',

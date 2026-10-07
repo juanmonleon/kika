@@ -901,7 +901,7 @@ def _mf33_magnitude(ctx, mt, matrix, grid, relative, loc, out) -> None:
             _unavailable_note(ctx, loc, out)
             return
         src, floor = got
-        central = MF33MT._bin_average_xs_exact(src, grid)
+        central = MF33MT._bin_average_xs(src, grid)
     valid = (g[:-1] >= floor) & (central > 0) & (g[1:] > g[:-1])
     if not valid.any():
         return
