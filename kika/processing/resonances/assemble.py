@@ -6,7 +6,7 @@ coverage outside them.
 """
 from dataclasses import dataclass
 import numpy as np
-from .prepare import UnsupportedResonanceError, evaluate_region
+from .prepare import UnsupportedResonanceError, evaluate_region, region_mts
 from .breit_wigner import evaluate_bw
 
 
@@ -100,8 +100,7 @@ def prepare_sums(sums,available):
 
 def evaluate_assembled(region,context,e,backgrounds,graph,order,block_size):
     e=np.asarray(e,dtype=float)
-    mts={1,2,18,102}|set(backgrounds)|set(graph)|{
-        g.competitive_mt for g in region.groups if g.competitive_mt is not None}
+    mts=region_mts(region)|set(backgrounds)|set(graph)
     out={mt:np.zeros(len(e)) for mt in mts}
     for start in range(0,len(e),block_size):
         sl=slice(start,start+block_size)

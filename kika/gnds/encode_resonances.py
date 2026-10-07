@@ -196,6 +196,7 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
     _set(element, label=formalism.label or "eval",
          approximation=formalism.approximation,
          boundaryCondition=formalism.boundaryCondition,
+         boundaryConditionValue=None if formalism.boundaryConditionValue is None else _number(formalism.boundaryConditionValue),
          calculateChannelRadius=_true(formalism.calculateChannelRadius if formalism.radiusPolicy is None else formalism.radiusPolicy.channelMode == "mass"),
          relativisticKinematics=_true(formalism.relativisticKinematics),
          reducedWidthAmplitudes=_true(formalism.reducedWidthAmplitudes))

@@ -310,6 +310,7 @@ class _ResonanceReader:
             label=label,
             approximation=element.attrib.get("approximation"),
             boundaryCondition=element.attrib.get("boundaryCondition"),
+            boundaryConditionValue=_optionalFloat(element,"boundaryConditionValue"),
             calculateChannelRadius=_isTrue(element, "calculateChannelRadius"),
             # §19.3.1's two flags. Both were **written** from the model
             # (encode_resonances.py:161-162) and never read back, so a file that

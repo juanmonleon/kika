@@ -1070,7 +1070,7 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
                 )
             channels.append(RML_Channel(
                 ipp=ipp, l=channel.L, sch=channel.channelSpin,
-                bnd=channel.boundaryConditionValue,
+                bnd=channel.boundaryConditionValue if channel.boundaryConditionValue is not None else formalism.boundaryConditionValue,
                 ape=radiusToEndf(channel.hardSphereRadius),
                 apt=radiusToEndf(channel.scatteringRadius),
             ))

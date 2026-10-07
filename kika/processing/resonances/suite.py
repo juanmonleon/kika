@@ -14,7 +14,7 @@ import numpy as np
 
 from .assemble import prepare_backgrounds
 from .breit_wigner import evaluate_bw
-from .prepare import evaluate_region
+from .prepare import evaluate_region, group_radii, group_knots, group_breaks
 from .context import NeutronContext
 from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize, error_ratio
 from .prepare import prepare_resonances, UnsupportedResonanceError
@@ -345,7 +345,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             raise ValueError('supply explicit NeutronContext when model mass/spin are incomplete')
         context=NeutronContext(target.mass.convertedTo('amu').value/neutron.mass.convertedTo('amu').value,
                                target.spin.convertedTo('hbar').value)
-    prepared=prepare_resonances(suite.resonances,context,conversion_report=suite.report)
+    from .prepare_r_matrix import normalize_suite_pairs
+    prepared=prepare_resonances(normalize_suite_pairs(suite,context),context,conversion_report=suite.report)
     source_hash=_fingerprint(suite,source_style)
     snapshot=deepcopy(suite)
     entries=_entries(snapshot)
@@ -375,7 +376,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             if c.law==1:cuts.update(c.x[1:])
     for r in prepared.regions:
         for g in r.groups:
-            for radius in (g.phase_radius,g.channel_radius):
+            cuts.update(x for x in group_breaks(g) if r.low<x<r.high)
+            for radius in group_radii(g):
                 previous=1
                 for nbt,law in radius.interpolation:
                     if law==1:cuts.update(x for x in radius.energies[previous:nbt] if r.low<x<r.high)
@@ -466,3 +468,5 @@ def attach_reconstruction(suite,result):
     suite.styles=candidate.styles
     return suite
 
+
+from .prepare import group_radii, group_knots, group_breaks

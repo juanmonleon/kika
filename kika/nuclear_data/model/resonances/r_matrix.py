@@ -309,6 +309,7 @@ class RMatrix:
     #: The unit the radius above was read with. Same field, same reason as
     #: :attr:`Channel.radiusUnit`.
     radiusUnit: Optional[str] = None
+    boundaryConditionValue: Optional[float] = None
     boundaryCondition: Optional[str] = None
     #: §19.3.1. ENDF's **IFG**. ``False`` — the default and the common case —
     #: means ``widths`` are widths in eV; ``True`` means they are reduced-width
@@ -333,6 +334,8 @@ class RMatrix:
     #: Number of orbital L values required for angular convergence (RM NLSC).
     angularLCount: Optional[int] = None
     radiusPolicy: Optional[RadiusPolicy] = None
+    #: Default B for channels without a local value (GNDS Given convention).
+    boundaryConditionValue: Optional[float] = None
 
     @property
     def numberOfResonances(self) -> int:

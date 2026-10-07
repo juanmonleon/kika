@@ -4,7 +4,7 @@ import hashlib
 from types import MappingProxyType
 import numpy as np
 
-from .prepare import PreparedResonances
+from .prepare import PreparedResonances, group_radii, group_knots, group_breaks, region_mts
 from .assemble import prepare_backgrounds,prepare_sums,evaluate_assembled
 from .grid import ReconstructionOptions,ReconstructionConvergenceError,linearize,error_ratio,VERIFICATION_FRACTIONS
 from .channel_functions import neutral_channel_functions
@@ -104,7 +104,8 @@ def _segments(prepared,backgrounds):
                 cuts.update(x for x in (curve.x[0],curve.x[-1]) if region.low<x<region.high)
                 if curve.law==1:cuts.update(x for x in curve.x[1:] if region.low<x<region.high)
         for group in region.groups:
-            for radius in (group.phase_radius,group.channel_radius):
+            cuts.update(x for x in group_breaks(group) if region.low<x<region.high)
+            for radius in group_radii(group):
                 previous=1
                 for nbt,law in radius.interpolation:
                     if law==1:cuts.update(x for x in radius.energies[previous:nbt] if region.low<x<region.high)
@@ -130,16 +131,23 @@ def _seeds(segment,context):
             seeds.append(np.nextafter(hi,lo))
     for g in segment.region.groups:
         ctx=g.context or context
-        for radius in (g.phase_radius,g.channel_radius):seeds.extend(x for x in radius.energies if lo<x<hi)
+        for radius in group_radii(g):seeds.extend(x for x in radius.energies if lo<x<hi)
+        seeds.extend(x for x in group_knots(g) if lo<=x<=hi)
         if g.competitive_mt is not None and g.competitive_q<0:
             seeds.append(-g.competitive_q*(1+ctx.atomic_weight_ratio)/ctx.atomic_weight_ratio)
-        for level in g.levels:
+        for level_index,level in enumerate(g.levels):
             if level.energy<=0:continue
             pr,sr,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*level.energy)*g.channel_radius.evaluate(level.energy))
             center=level.energy
+            if segment.region.approximation == 'RMatrixNeutral':
+                reduced=np.asarray(g.reduced[level_index])
+                for _ in range(8):
+                    if not lo<=center<=hi:break
+                    real=np.array([c.functions(np.array([center]))[1][0].real for c in g.channels])
+                    center=level.energy-float(np.sum(reduced*reduced*real))
             # Fixed-point seeds isolate shifted peaks; correctness still comes
             # from subsequent reference evaluations, not this estimate.
-            for _ in range(0 if segment.region.approximation=="ReichMoore" else 4):
+            for _ in range(0 if segment.region.approximation in ("ReichMoore","RMatrixNeutral") else 4):
                 if not lo<=center<=hi:break
                 _,shift,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*center)*g.channel_radius.evaluate(center))
                 center=level.energy+.5*level.neutron*(sr-shift)/pr
@@ -168,7 +176,7 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
     if not isinstance(options,ReconstructionOptions):raise TypeError('expected ReconstructionOptions')
     if not isinstance(label,str) or not label:raise ValueError('nonempty output label required')
     background=prepare_backgrounds(backgrounds)
-    available={1,2,18,102}|set(background)|{g.competitive_mt for r in prepared.regions for g in r.groups if g.competitive_mt is not None}
+    available={mt for r in prepared.regions for mt in region_mts(r)}|set(background)
     graph,order=prepare_sums(sums,available)
     if set(graph)&set(background):raise ValueError('a rebuilt sum cannot also have an evaluated background')
     segments=_segments(prepared,background)

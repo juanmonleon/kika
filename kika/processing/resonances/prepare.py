@@ -48,8 +48,7 @@ class PreparedResonances:
             owner[(flat >= region.low) & (flat <= region.high)] = i
         if np.any(owner < 0):
             raise ValueError("energies outside prepared regions (including gaps)")
-        mts = {1, 2, 18, 102} | {g.competitive_mt for r in self.regions for g in r.groups
-                                 if g.competitive_mt is not None}
+        mts = {mt for r in self.regions for mt in region_mts(r)}
         output = {mt: np.zeros(flat.size) for mt in sorted(mts)}
         for i, region in enumerate(self.regions):
             indices = np.flatnonzero(owner == i)
@@ -113,8 +112,14 @@ def prepare_resonances(resonances, context, *, conversion_report=None):
         bw = region.formalism
         if isinstance(bw, RMatrix):
             from .prepare_reich_moore import prepare_rm
-            groups=prepare_rm(region,resonances,context,notes)
-            prepared.append(PreparedRegion(low,high,'ReichMoore',groups))
+            if bw.resonanceReactions and all(rr.kinematics is not None for rr in bw.resonanceReactions):
+                from .prepare_r_matrix import prepare_rml
+                groups = prepare_rml(region,resonances,context,notes)
+                approximation = 'RMatrixNeutral'
+            else:
+                groups = prepare_rm(region,resonances,context,notes)
+                approximation = 'ReichMoore'
+            prepared.append(PreparedRegion(low,high,approximation,groups))
             continue
         if not isinstance(bw, BreitWigner):
             raise UnsupportedResonanceError("only BreitWigner is implemented")
@@ -267,7 +272,45 @@ def prepare_resonances(resonances, context, *, conversion_report=None):
     return PreparedResonances(context, tuple(prepared), tuple(notes))
 
 
+def region_mts(region):
+    return {1,2,18,102} | {mt for g in region.groups for mt in getattr(g,'reaction_mts',())} | {
+        g.competitive_mt for g in region.groups if g.competitive_mt is not None}
+
+
+def group_radii(group):
+    channels = getattr(group,'channels',())
+    return tuple(r for c in channels for r in (c.radius,c.phase_radius)) if channels else (group.channel_radius,group.phase_radius)
+
+
+def group_knots(group):
+    knots = set()
+    for c in getattr(group,'channels',()):
+        if not c.effective:knots.add(-c.q/c.cm_ratio)
+        if c.external is not None and c.external.kind == 'table':
+            for curve in c.external.real+c.external.imaginary:knots.update(curve.x)
+    return knots
+
+
+def group_breaks(group):
+    breaks = set()
+    for c in getattr(group,'channels',()):
+        if not c.effective and c.penetrability == 'unity':breaks.add(-c.q/c.cm_ratio)
+        if c.external is not None and c.external.kind == 'table':
+            for curves in (c.external.real,c.external.imaginary):
+                for index,curve in enumerate(curves):
+                    if curve.law == 1:breaks.update(curve.x[1:])
+                    if index and curves[index-1].y[-1] != curve.y[0]:breaks.add(curve.x[0])
+    return breaks
+
+
 def evaluate_region(energies,region,context,diagnostics=None):
+    if region.approximation == 'RMatrixNeutral':
+        from .r_matrix import evaluate_rml
+        out = {mt:np.zeros_like(energies) for mt in region_mts(region)}
+        for start in range(0,len(energies),128):
+            sl = slice(start,start+128)
+            for mt,value in evaluate_rml(energies[sl],region.groups,context,diagnostics).items():out[mt][sl] = value
+        return out
     if region.approximation=='ReichMoore':
         # Limit temporary level/channel arrays independently of caller block size.
         out={mt:np.zeros_like(energies) for mt in (1,2,18,102)}
