@@ -127,9 +127,14 @@ def test_the_reconstructed_style_names_what_it_derives_from(fe56):
     assert suite.styles.evaluatedFor("recon").label == "eval"
 
 
-def test_documentation_is_declared_lost_rather_than_dropped(fe56):
-    _, report = fe56
-    assert any("style <documentation>" in loss for loss in report.losses)
+def test_documentation_text_authors_and_dates_are_preserved(fe56):
+    suite, report = fe56
+    documentation = suite.styles['eval'].documentation
+    assert documentation.body.text == 'See the endfCompatible section.'
+    assert '26-Fe- 56' in documentation.endfCompatible.text
+    assert documentation.authors[0].name.startswith('INDEN')
+    assert documentation.dates[0].dateType == 'created'
+    assert not any('style <documentation>' in loss for loss in report.losses)
 
 
 # ---------------------------------------------------------------------------

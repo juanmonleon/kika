@@ -25,6 +25,7 @@ from numpy.typing import ArrayLike
 from .._records import (
     ENDF_FORMAT_BLANK,
     ENDF_FORMAT_FLOAT,
+    ENDF_FORMAT_PRECISE,
     ENDF_FORMAT_INT,
     ENDF_FORMAT_INT_ZERO,
     ENDF_FORMAT_PRESERVE,
@@ -686,7 +687,8 @@ def format_interp_pairs(pairs, mat, mf, mt, start_line, pad=PAD_BLANK):
     return result_lines, line_num
 
 
-def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK):
+def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK,
+                      data_format=ENDF_FORMAT_FLOAT):
     """
     Format NP x/y data pairs into ENDF lines (3 pairs per line).
 
@@ -709,7 +711,7 @@ def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK):
         for j in range(3):
             if i + j < n:
                 values.extend([x_data[i + j], y_data[i + j]])
-                fmts.extend([ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT])
+                fmts.extend([data_format, data_format])
             else:
                 values.extend([tail, tail])
                 fmts.extend([tail_fmt, tail_fmt])
@@ -741,7 +743,7 @@ class NonMonotonicTable(ValueError):
 
 
 def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
-                start_line, pad=PAD_BLANK, interp_pad=PAD_BLANK):
+                start_line, pad=PAD_BLANK, interp_pad=PAD_BLANK, data_format=ENDF_FORMAT_FLOAT):
     """
     Format a complete TAB1 record to ENDF lines.
 
@@ -792,7 +794,7 @@ def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
 
     # Data pairs
     dp_lines, line_num = format_data_pairs(x_data, y_data, mat, mf, mt,
-                                           line_num, pad=pad)
+                                           line_num, pad=pad, data_format=data_format)
     result_lines.extend(dp_lines)
 
     return result_lines, line_num

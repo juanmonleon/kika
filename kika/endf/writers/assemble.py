@@ -51,7 +51,7 @@ from ..utils import (format_endf_fend_record, format_endf_mend_record,
                      format_endf_tend_record)
 
 __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
-           "encodeTapeSections", "assembleTape", "writeEndfTape"]
+           "encodeTapeSections", "assembleTape", "writeEndfTape", "writeReconstructedEndfTape"]
 
 #: The MF numbers an encoder exists for, in the order ENDF-6 puts them on the
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
@@ -117,6 +117,19 @@ def _mf1Sections(suite, mat, report, label=None):
 
     sections = []
     header, report = encodeMF1MT451(suite, mat, report)
+    from kika.nuclear_data.model import CrossSectionReconstructed
+    try:
+        selected_style = suite.styles[label]
+    except KeyError:
+        selected_style = None
+    if isinstance(selected_style, CrossSectionReconstructed):
+        missing = [r.label for r in _mf3Bearing(suite) if label not in r.crossSection]
+        if missing:
+            raise ValueError(f"reconstructed ENDF export cannot mix evaluated cross sections: {missing}")
+        # ENDF-102 §1.1: keep MF2, but MF3 already contains its contribution.
+        # Change the encoded header only; the evaluated model remains intact.
+        header._lrp = 2
+        header._ldrv = 1
     sections.append((1, 451, header))
 
     # 452, 455, 456 -- ascending, which is the order they sit in on the tape.
@@ -219,7 +232,13 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
         # holes in it.
         formLabel = label if label in reaction.crossSection else EVAL_LABEL
         (written if formLabel == label else fellBack).append(mt)
-        section, report = encodeMF3MT(reaction, mat, report, label=formLabel)
+        from kika.nuclear_data.model import CrossSectionReconstructed
+        try:
+            reconstructed = isinstance(suite.styles[formLabel], CrossSectionReconstructed)
+        except KeyError:
+            reconstructed = False
+        section, report = encodeMF3MT(reaction, mat, report, label=formLabel,
+            precision="best" if reconstructed else "legacy")
         mf3.append((3, mt, section))
 
         product = _neutronProduct(reaction)
@@ -527,3 +546,39 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
             "cannot be reproduced. Pass tapeId= to set it."
         )
     return report
+
+
+def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
+    """Write, reload and verify before replacing the requested destination.
+
+    The result must already be attached to the suite. A new derived tape uses
+    KIKA's identification label by default. Conversion losses and numerical
+    failures abort publication and leave an existing destination intact.
+    Only the model's represented ENDF sections can be preserved; inspect the
+    source conversion report before preparing a reconstruction.
+    """
+    import tempfile
+    from ..read_endf import read_endf
+    from ..model_adapter import decodeReactionSuite
+
+    result.verify_source(suite)
+    result.verify_suite(suite)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix='.'+target.name+'.',
+        suffix='.endf', dir=target.parent)
+    os.close(descriptor)
+    provisional = Path(name)
+    try:
+        report = writeEndfTape(suite, provisional, mat=mat,
+            tapeId=DEFAULT_TAPE_ID if tapeId is None else tapeId, label=result.label)
+        if not report.isClean:
+            raise ValueError(f'reconstructed ENDF conversion is incomplete: {vars(report)}')
+        reloaded, conversion = decodeReactionSuite(read_endf(str(provisional)))
+        if not conversion.isClean:
+            raise ValueError(f'reconstructed ENDF reload is incomplete: {vars(conversion)}')
+        result.verify_suite(reloaded, label='eval')
+        provisional.replace(target)
+        return report
+    finally:
+        provisional.unlink(missing_ok=True)

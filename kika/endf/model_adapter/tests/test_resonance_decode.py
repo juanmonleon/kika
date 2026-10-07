@@ -462,9 +462,11 @@ def test_qx_is_not_read_as_a_scattering_radius():
     resonances, _, report = decodeMF2MT151(_breitWignerSection(2, qx=-1.5e6, lrx=1))
     group = resonances.resolved[0].formalism.resonanceParameters.spinGroups[0]
     assert group.scatteringRadius is None
-    assert any("QX" in entry for entry in report.losses), (
-        "the competitive width was dropped without the report saying so"
-    )
+    assert group.competitiveChannel.Q == -1.5e6
+    assert group.competitiveChannel.reactionMT == 51
+    assert group.competitiveChannel.L is None  # absent from ENDF, never guessed
+    assert not report.losses
+    assert any("exit L" in entry for entry in report.warnings)
 
 
 def test_an_unsupported_lrf_is_declared_and_the_range_is_not_invented():

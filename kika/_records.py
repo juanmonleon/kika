@@ -111,7 +111,34 @@ def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
     return formatted.rjust(width)
 
 
+
+def format_endf_number_precise(value, width=11):
+    """Choose the closest legal ENDF decimal field (ENDF-102 2023, 0.6.2).
+
+    Fixed notation can retain more digits than normalized exponent notation.
+    The legacy formatter remains the default for unchanged evaluations.
+    """
+    legacy = format_endf_number(value, width)
+    if value is None or value == 0:
+        return legacy
+    candidates = [legacy]
+    digits = max(1, int(math.floor(math.log10(abs(value)))) + 1)
+    sign = int(value < 0)
+    if digits + sign <= width:
+        # Among fixed decimals the finest fitting quantum cannot round worse
+        # than a coarser one. A rounding carry may require one fewer place.
+        places = max(0, width-digits-sign-1)
+        while places >= 0:
+            fixed = f"{value:.{places}f}"
+            if len(fixed) <= width:
+                candidates.append(fixed.rjust(width))
+                break
+            places -= 1
+    return min(candidates, key=lambda field: abs(parse_number(field)-value))
+
+
 # Format constants for ENDF data types
+ENDF_FORMAT_PRECISE = 'float_precise'
 ENDF_FORMAT_FLOAT = 'float'       # Scientific notation (e.g., " 1.234567+5")
 ENDF_FORMAT_INT = 'int'           # Integer format (e.g., "         11")
 ENDF_FORMAT_BLANK = 'blank'       # Blank field
@@ -162,6 +189,8 @@ def format_endf_data_line(values: Sequence[Union[int, float, None]],
                 # ENDF_FORMAT_INT_ZERO is an alias for this, so one branch
                 # serves both — as it always did, in two identical copies.
                 parts.append(f"{int(value):11d}")
+            elif fmt == ENDF_FORMAT_PRECISE:
+                parts.append(format_endf_number_precise(value))
             elif fmt == ENDF_FORMAT_BLANK or value is None:
                 parts.append("           ")
             else:

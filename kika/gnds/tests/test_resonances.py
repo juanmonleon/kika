@@ -335,22 +335,17 @@ def test_a_file_that_declares_neither_flag_still_reads_them_false(fe56):
     assert formalism.relativisticKinematics is False
 
 
-def test_the_nested_pops_is_announced_instead_of_disappearing(micro_fe56_gnds,
-                                                              tmp_path):
-    """§19 admits a ``PoPs`` inside the formalism and every RMatrix in
-    ENDF/B-VIII.1-GNDS carries one. kika reads it and does not write it —
-    writing it is §12 work, blocked on ``gnds_endf_conflicts.md`` §3.3 — and it
-    was the **only** node kika read and dropped without a report entry.
-
-    The writer is unchanged. What is asserted is that the silence is gone.
-    """
+def test_the_nested_pops_survives_serialization(micro_fe56_gnds, tmp_path):
+    """Suite and formalism scopes use the same modeled particle writer."""
     import kika
-
     suite = kika.read(micro_fe56_gnds, covariances=False)
-    assert suite.resonances.resolved[0].formalism.PoPs is not None
-
-    report = kika.write(suite, tmp_path / "out.gnds.xml")
-    assert any("nested <PoPs>" in loss for loss in report.losses), report.losses
+    before = suite.resonances.resolved[0].formalism.PoPs
+    assert before is not None
+    path = tmp_path / "out.gnds.xml"
+    report = kika.write(suite, path)
+    after = kika.read(path, covariances=False).resonances.resolved[0].formalism.PoPs
+    assert after == before
+    assert not any("nested <PoPs>" in loss for loss in report.losses)
 
 
 # ---------------------------------------------------------------------------

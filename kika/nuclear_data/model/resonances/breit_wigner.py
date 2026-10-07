@@ -23,9 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Tuple
+from .radius_policy import RadiusPolicy
 
 __all__ = ["BreitWignerApproximation", "Resonance", "ResonanceParameters",
-           "SpinGroup", "BreitWigner"]
+           "SpinGroup", "BreitWigner", "CompetitiveChannel"]
 
 
 class BreitWignerApproximation(str, Enum):
@@ -79,9 +80,28 @@ class SpinGroup:
     resonances: List[Resonance] = field(default_factory=list)
     scatteringRadius: Optional[float] = None
     atomicWeightRatio: Optional[float] = None
+    competitiveChannel: Optional["CompetitiveChannel"] = None
 
     def __len__(self) -> int:
         return len(self.resonances)
+
+
+@dataclass
+class CompetitiveChannel:
+    """Single neutron exit channel for BW competition.
+
+    Q is in eV in the center-of-mass frame. L is the *exit* orbital momentum;
+    None explicitly records that the source lacks it. The exit target/neutron
+    mass ratio defaults to the entrance isotope's ratio. ENDF D.3.3 places
+    this reaction entirely in MF3: ``inEvaluatedBackground`` records that
+    assembly convention, separately from the physical width used in BW.
+    """
+    Q: float
+    reactionMT: int = 51
+    L: Optional[int] = None
+    atomicWeightRatio: Optional[float] = None
+    channelRadius: Optional[float] = None
+    inEvaluatedBackground: bool = False
 
 
 @dataclass
@@ -112,6 +132,7 @@ class BreitWigner:
     #: ``BreitWigner`` nodes set it. See
     #: :attr:`~kika.nuclear_data.model.resonances.r_matrix.RMatrix.calculateChannelRadius`.
     calculateChannelRadius: bool = False
+    radiusPolicy: Optional[RadiusPolicy] = None
 
     @property
     def numberOfResonances(self) -> int:

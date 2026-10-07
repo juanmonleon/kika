@@ -18,19 +18,14 @@ same field is QX under LRF=1/2 and must never be read as a radius), so this
 decoder asks it rather than reading C2, and a test asserts the L=1 value
 survives into ``SpinGroup.scatteringRadius``.
 
-**There is no encoder, and that is a scope decision, not an oversight.**
-``ResonanceParameters`` has no ``to_endf`` — there has never been an MF2 writer
-driven from a format-agnostic object — so unlike MF3 and MF4 there is no
-existing path to be gated against. Writing one means emitting five formalisms'
-record layouts from scratch, which is its own increment with its own risk.
-Until it exists, ``MF2MT151.__str__`` is the only MF2 writer, it reproduces the
-tape byte for byte, and the model is decode-only. The gate here is
-correspondingly element-for-element against ``ResonanceParameters.from_endf``
-plus the things that path does not keep.
+The encoder reads physical values from the model. Provenance preserves record
+layout and redundant format conventions; it does not override edited physical
+fields. Unsupported representations are reported or rejected explicitly.
 """
 from __future__ import annotations
 
 from typing import List, Optional
+from dataclasses import replace
 
 import numpy as np
 
@@ -51,6 +46,7 @@ from kika.nuclear_data.model import (
     UnresolvedRegion,
 )
 from kika.nuclear_data.model.resonances import (
+    CompetitiveChannel, RadiusPolicy, ChannelParticle, ChannelKinematics, ComplexChannelFunction, ExternalRMatrix,
     Channel,
     RMatrix,
     RMatrixSpinGroup,
@@ -82,7 +78,7 @@ KRM_TO_APPROXIMATION = {
 }
 
 
-def decodeMF2MT151(mf2mt151, report: Optional[ConversionReport] = None):
+def decodeMF2MT151(mf2mt151, report: Optional[ConversionReport] = None, *, competitiveChannels=None):
     """One MF2/151 section → ``(Resonances, EndfProvenance, report)``.
 
     Every isotope's every energy range becomes a region. A file with more than
@@ -109,15 +105,23 @@ def decodeMF2MT151(mf2mt151, report: Optional[ConversionReport] = None):
 
     isotopes = list(getattr(mf2mt151, "isotopes", []) or [])
     if len(isotopes) > 1:
-        report.warn(
+        report.unsupportedNode(
             f"MF2/151 carries {len(isotopes)} isotopes; GNDS gives each its own "
             f"reactionSuite, so their resonance regions are merged into one list "
             f"here and the per-isotope abundances are not represented"
         )
 
     for index, isotope in enumerate(isotopes):
-        for energyRange in isotope.energy_ranges:
+        for rangeIndex, energyRange in enumerate(isotope.energy_ranges):
             _decodeRange(energyRange, resonances, report, regions, isotope, index)
+            if energyRange.lru == 1 and energyRange.lrf in LRF_TO_APPROXIMATION and competitiveChannels:
+                for group in resonances.resolved[-1].formalism.resonanceParameters.spinGroups:
+                    descriptor = competitiveChannels.get((index, rangeIndex, group.L))
+                    if descriptor is not None:
+                        original = group.competitiveChannel
+                        if original is None or original.Q != descriptor.Q or descriptor.reactionMT != 51:
+                            raise ValueError("competitive supplement disagrees with ENDF QX/LRX")
+                        group.competitiveChannel = replace(descriptor, inEvaluatedBackground=True)
 
     if not resonances.resolved and resonances.unresolved is None:
         report.lost("MF2/151 yielded no resonance region")
@@ -264,6 +268,10 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
         return
 
     if lru == 2:
+        if resonances.unresolved is not None:
+            report.unsupportedNode("MF2/151 has multiple URR ranges; the model cannot represent the additional range")
+            keep("unsupported")
+            return
         tabulated = _decodeUnresolved(parameters, report, fields)
         if tabulated is not None and tabulated.PoPs is None:
             tabulated.PoPs = _targetPoPs(
@@ -301,6 +309,16 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
         keep("unsupported")
         return
 
+    # NAPS belongs to physics as well as round-trip provenance. BW's model
+    # flag selects the mass-derived channel radius for P/S; AP still sets phase.
+    if lrf in (*LRF_TO_APPROXIMATION, 3):
+        formalism.calculateChannelRadius = (energyRange.naps == 0)
+        formalism.radiusPolicy = RadiusPolicy(
+            channelMode=("mass" if energyRange.naps == 0 else
+                         "constant" if energyRange.naps == 2 else "phase"),
+            channelRadius=radiusFromEndf(parameters.ap) if energyRange.naps == 2 else None,
+        )
+
     # Additive: the encoder still writes SPI from provenance, so this cannot
     # move a byte. It is what makes the range self-sufficient for a calculation.
     if getattr(formalism, "PoPs", None) is None:
@@ -313,6 +331,11 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
         domainMin=energyRange.el,
         domainMax=energyRange.eh,
         formalism=formalism,
+        scatteringRadius=(ScatteringRadius(
+            energies=np.asarray(energyRange.ap_e.energies, dtype=float),
+            values=radiusFromEndf(np.asarray(energyRange.ap_e.ap_values, dtype=float)),
+            interpolation=list(energyRange.ap_e.interpolation), unit=MODEL_RADIUS_UNIT)
+            if energyRange.nro == 1 and energyRange.ap_e is not None else None),
     ))
     keep("resolved")
 
@@ -349,6 +372,8 @@ def _spinGroups(parameters, widthsFromFlat) -> List[SpinGroup]:
             # formalism, not by a comparison that happened to come out equal.
             scatteringRadius=None,
             atomicWeightRatio=block.awri,
+            competitiveChannel=(CompetitiveChannel(Q=block.apl_or_qx, reactionMT=51,
+                inEvaluatedBackground=True) if block.lrx else None),
         ))
     return groups
 
@@ -370,11 +395,11 @@ def _decodeBreitWigner(parameters, lrf: int, report: ConversionReport,
         # B1a the values are carried in provenance, so the section can still be
         # written back; the *model* is what has no home for them.
         if block.lrx or block.apl_or_qx:
-            report.lost(
+            report.warn(
                 f"MF2/151 LRF={lrf} L={block.l}: QX={block.apl_or_qx} LRX="
-                f"{block.lrx} describe a competitive width; the model has no "
-                f"competitive channel for a Breit-Wigner region, so they are "
-                f"kept in provenance and written back unchanged"
+                f"{block.lrx} describe a competitive neutron channel; Q and MT51 "
+                f"are modeled but ENDF supplies no exit L; processing requires "
+                f"an explicit competitiveChannels supplement"
             )
 
     if fields is not None:
@@ -408,10 +433,10 @@ def _decodeReichMoore(parameters, report: ConversionReport,
         return None
 
     reactions = [
-        ResonanceReaction(label="elastic", ejectile="n"),
-        ResonanceReaction(label="capture", ejectile="photon", eliminated=True),
-        ResonanceReaction(label="fissionA"),
-        ResonanceReaction(label="fissionB"),
+        ResonanceReaction(label="elastic", ejectile="n", reactionMT=2),
+        ResonanceReaction(label="capture", ejectile="photon", eliminated=True, reactionMT=102),
+        ResonanceReaction(label="fissionA", reactionMT=18),
+        ResonanceReaction(label="fissionB", reactionMT=18),
     ]
     channelLabels = ("neutron", "capture", "fissionA", "fissionB")
 
@@ -454,6 +479,8 @@ def _decodeReichMoore(parameters, report: ConversionReport,
 
     return RMatrix(
         approximation="ReichMoore",
+        boundaryCondition="EliminateShiftFunction",
+        angularLCount=parameters.nlsc,
         resonanceReactions=reactions,
         spinGroups=spinGroups,
         scatteringRadius=radiusFromEndf(parameters.ap),
@@ -474,6 +501,54 @@ PARTICLE_PAIR_FIELDS = ("ma", "mb", "za", "zb", "ia", "ib",
                         "q", "pnt", "shf", "mt", "pa", "pb")
 
 
+def _channelFunction(x, y, interpolation):
+    from kika.nuclear_data.model.functions import Regions1d
+    from kika.nuclear_data.model.axes import Axes, Axis
+    return Regions1d.fromEndfRegions(x, y, interpolation,
+        axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'channel_function','')]))
+
+
+def _normalizeRMLExtras(source, target, report):
+    from kika.endf.classes.mf2.mf2mt151 import (
+        NoBackgroundRMatrix, TabulatedBackgroundRMatrix,
+        SammyBackgroundRMatrix, FrohnerBackgroundRMatrix)
+    for background in source.background:
+        if not 1 <= background.lch <= len(target.channels):
+            report.unsupportedNode('RML background refers to an absent channel')
+            continue
+        channel = target.channels[background.lch-1]
+        if isinstance(background, NoBackgroundRMatrix):
+            continue
+        if isinstance(background, TabulatedBackgroundRMatrix):
+            channel.tabulatedBackground = ComplexChannelFunction(
+                _channelFunction(background.rbr_energies,background.rbr_values,background.rbr_interp),
+                _channelFunction(background.rbi_energies,background.rbi_values,background.rbi_interp))
+            continue
+        terms = [('singularityEnergyBelow',background.ed,'eV'),
+                 ('singularityEnergyAbove',background.eu,'eV'),
+                 ('constantExternalR',background.r0,'')]
+        if isinstance(background, SammyBackgroundRMatrix):
+            kind = 'SAMMY'
+            terms += [('linearExternalR',background.r1,'1/eV'),
+                      ('quadraticExternalR',background.r2,'1/eV**2'),
+                      ('constantLogarithmicCoefficient',background.s0,''),
+                      ('linearLogarithmicCoefficient',background.s1,'1/eV')]
+        elif isinstance(background, FrohnerBackgroundRMatrix):
+            kind = 'Froehner'
+            terms += [('poleStrength',background.s0,''),('averageRadiationWidth',background.ga,'eV')]
+        else:
+            report.unsupportedNode(f'Unknown RML background {type(background).__name__}')
+            continue
+        channel.externalRMatrix = ExternalRMatrix(kind,[PhysicalQuantity(value,unit,label=label)
+            for label,value,unit in terms])
+    target.phaseShiftMode = source.kps
+    if source.phase_shift is not None:
+        phase = source.phase_shift
+        target.additionalPhaseShift = ComplexChannelFunction(
+            _channelFunction(phase.psr_energies,phase.psr_values,phase.psr_interp),
+            _channelFunction(phase.psi_energies,phase.psi_values,phase.psi_interp))
+
+
 def _decodeRMatrixLimited(parameters, report: ConversionReport,
                           fields: Optional[dict] = None) -> Optional[RMatrix]:
     """LRF=7. Already channel-shaped in the file, so the mapping is direct."""
@@ -483,10 +558,24 @@ def _decodeRMatrixLimited(parameters, report: ConversionReport,
         report.lost("MF2/151 LRF=7 range has no R-matrix-limited parameters")
         return None
 
-    reactions = [
-        ResonanceReaction(label=f"MT{pair.mt}", Q=pair.q)
-        for pair in parameters.particle_pairs
-    ]
+    reactions = []
+    for pair in parameters.particle_pairs:
+        def particle(mass,charge,spin,parity):
+            # ENDF encodes parity in the sign of nonzero spin; PA/PB apply
+            # only to zero spin. Keep the original encoding in provenance.
+            return ChannelParticle(mass,charge,abs(spin),int(np.sign(spin)) if spin else int(parity or 1))
+        pnt = {-1:'unity',0:'automatic',1:'calculate'}.get(pair.pnt)
+        shf = {-1:'zero',0:'zero',1:'calculate',2:'brune'}.get(pair.shf)
+        if pnt is None or shf is None:
+            report.unsupportedNode(f"RML pair MT{pair.mt} has unknown PNT/SHF")
+        label = f'MT{pair.mt}'
+        if any(r.label == label for r in reactions):
+            label += f'-pair{len(reactions)+1}'
+        reactions.append(ResonanceReaction(label=label, Q=pair.q,
+            reactionMT=pair.mt, eliminated=parameters.krm == 3 and pair.mt == 102,
+            kinematics=ChannelKinematics(particle(pair.ma,pair.za,pair.ia,pair.pa),
+                particle(pair.mb,pair.zb,pair.ib,pair.pb),pnt,shf,
+                effective=pair.mt in (18,19,102))))
 
     spinGroups: List[RMatrixSpinGroup] = []
     groupFields: List[dict] = []
@@ -515,45 +604,21 @@ def _decodeRMatrixLimited(parameters, report: ConversionReport,
         ]
         spinGroups.append(RMatrixSpinGroup(
             label=f"J{group.aj}-{index}",
-            spin=group.aj,
-            parity=int(group.pj) if group.pj else None,
+            spin=abs(group.aj),
+            parity=int(np.sign(group.aj)) if group.aj else int(group.pj or 1),
             channels=channels,
             energies=[r.er for r in group.resonances],
             widths=[list(r.widths) for r in group.resonances],
         ))
+        _normalizeRMLExtras(group,spinGroups[-1],report)
 
-        # KBK/KPS: carried verbatim so the section round-trips, *and* still
-        # declared unsupported so the report does not imply the model
-        # understands them. Both halves matter — carrying them silently would
-        # let a caller believe the model can reason about a background R-matrix
-        # it merely copies. There is no tape to hand that exercises either.
-        #
-        # **The model gained a node for two of the four LBK forms on
-        # 2026-08-24** -- `Channel.externalRMatrix`, LBK=2 SAMMY and LBK=3
-        # Froehner -- and this path still does not use it. Two reasons, both in
-        # `docs/library/gnds_endf_conflicts.md` section 6.4: LBK=1 tabulates the
-        # background as two curves and GNDS's `externalRMatrix` has no form for
-        # a table, so migrating gives one field two routes; and there is still
-        # no tape here with KBK>0, which makes the migration untested code
-        # sitting on MF2's byte-exact gates.
-        perGroup = {"kbk": group.kbk, "kps": group.kps, "pj": group.pj}
+        # Encoding/order is retained for byte-exact round trips; the physical
+        # background and phase functions now live on model channels/groups.
+        perGroup = {"kbk": group.kbk, "kps": group.kps, "pj": group.pj, "aj":group.aj}
         if group.kbk:
             perGroup["background"] = list(group.background)
-            report.unsupportedNode(
-                f"MF2/151 LRF=7 spin group {index} carries {group.kbk} background "
-                f"R-matrix records (LBK); the model has carried §19.3.4's "
-                f"externalRMatrix since 2026-08-24 and this adapter does not "
-                f"fill it yet, so they are kept verbatim in provenance and the "
-                f"section is still written back unchanged "
-                f"(gnds_endf_conflicts.md §6.4)"
-            )
         if group.kps:
             perGroup["phase_shift"] = group.phase_shift
-            report.unsupportedNode(
-                f"MF2/151 LRF=7 spin group {index} carries tabulated phase shifts "
-                f"(KPS={group.kps}); they are not represented in the model and "
-                f"are kept verbatim in provenance"
-            )
         groupFields.append(perGroup)
 
     if fields is not None:
@@ -583,7 +648,6 @@ def _decodeRMatrixLimited(parameters, report: ConversionReport,
     )
 
 
-# ---------------------------------------------------------------------------
 # Unresolved (LRU=2)
 # ---------------------------------------------------------------------------
 
@@ -658,13 +722,6 @@ def _decodeUnresolved(parameters, report: ConversionReport,
                 # tapes to hand all share one grid, so this is latent rather
                 # than observed — recorded per state so the encoder does not
                 # depend on that staying true.
-                if energyGrid is not None and not np.array_equal(energyGrid, grid):
-                    report.lost(
-                        f"MF2/151 URR case C: L={block.l} J={state.aj} has its own "
-                        f"ES grid of {grid.size} points, which differs from the "
-                        f"region's; TabulatedWidths holds one grid, so only "
-                        f"provenance keeps this one"
-                    )
                 energyGrid = grid
                 spinGroups.append(UnresolvedSpinGroup(
                     L=block.l, J=state.aj,
@@ -677,6 +734,13 @@ def _decodeUnresolved(parameters, report: ConversionReport,
                         _channel("competitive", [p.gx for p in points], state.amux),
                     ],
                 ))
+                spinGroups[-1].levelSpacingEnergies = grid.copy()
+                from kika.nuclear_data.model.enums import ENDF_INT_TO_INTERPOLATION
+                spinGroups[-1].crossSectionInterpolation = ENDF_INT_TO_INTERPOLATION.get(state.int_code)
+                if spinGroups[-1].crossSectionInterpolation is None:
+                    report.unsupportedNode(f"URR unknown cross-section interpolation INT={state.int_code}")
+                for channel in spinGroups[-1].channels:
+                    channel.energies = grid.copy()
                 # INT varies across the corpus — 2 on U-235 and Th-232, 5 on
                 # Pu-241 — so it is not a constant that can be assumed on the
                 # way out.
@@ -694,6 +758,11 @@ def _decodeUnresolved(parameters, report: ConversionReport,
         fields["urr_case"] = case
         fields["lssf"] = parameters.lssf
         fields["j_states"] = stateFields
+
+    if case == 'C' and spinGroups:
+        grids = [g.levelSpacingEnergies for g in spinGroups]
+        if not all(np.array_equal(grids[0],g) for g in grids):
+            energyGrid = None
 
     return TabulatedWidths(
         spinGroups=spinGroups,
@@ -748,6 +817,7 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
     ranges: dict = {}
 
     for fields in regions:
+        fields = dict(fields)  # encode updates physical fields without mutating provenance
         kind = fields["kind"]
         if kind == "unsupported":
             raise ValueError(
@@ -773,6 +843,26 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
                     f"regions ({len(resonances.resolved)})"
                 )
             parameters = _encodeResolved(region.formalism, fields, report)
+            if isinstance(region.formalism, BreitWigner) or fields["lrf"] == 3:
+                bw = region.formalism
+                policy = bw.radiusPolicy
+                if policy is not None:
+                    modes = {"mass": 0, "phase": 1, "constant": 2}
+                    if policy.channelMode not in modes:
+                        raise ValueError("unknown BW radius policy")
+                    fields["naps"] = modes[policy.channelMode]
+                localRadius = (policy.phaseRadius if policy is not None and policy.phaseRadius is not None
+                               else region.scatteringRadius)
+                if localRadius is not None and localRadius.isEnergyDependent:
+                    fields["nro"] = 1
+                    fields["radius_table"] = (localRadius.energies, radiusToEndf(np.asarray(localRadius.values)),
+                                               localRadius.interpolation)
+                if policy is not None and policy.channelMode == "constant":
+                    parameters.ap = radiusToEndf(policy.channelRadius)
+                elif localRadius is not None and not localRadius.isEnergyDependent:
+                    parameters.ap = radiusToEndf(localRadius.constant)
+                elif bw.scatteringRadius is not None:
+                    parameters.ap = radiusToEndf(bw.scatteringRadius)
 
         apE = None
         if "radius_table" in fields:
@@ -826,7 +916,7 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
         if isinstance(formalism, BreitWigner):
             # LRF=1/2: C2 is QX, a Q value the model has no node for, so it is
             # written back from provenance exactly as it was read.
-            c2 = block["qx"]
+            c2 = group.competitiveChannel.Q if group.competitiveChannel is not None else block["qx"]
             records = [EndfResonance(*resonance.toFlat()) for resonance in group.resonances]
             l = group.L
         else:
@@ -839,9 +929,20 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
             # nowhere else, which is what makes a caller's edit effective.
             c2 = group.channels[0].scatteringRadius if group.channels else None
             c2 = radiusToEndf(c2) if c2 is not None else 0.0
+            if formalism.reducedWidthAmplitudes:
+                raise ValueError('LRF3 requires physical widths; normalize amplitudes before encoding')
+            byReaction = {channel.resonanceReaction: i for i, channel in enumerate(group.channels)}
+            if len(byReaction) != len(group.channels):
+                raise ValueError('LRF3 cannot encode duplicate reaction channels')
+            identifiers = ('elastic', 'capture', 'fissionA', 'fissionB')
+            if any(label not in byReaction for label in identifiers):
+                raise ValueError('LRF3 encoding requires its four normalized reaction identities')
+            positions = [byReaction[label] for label in identifiers]
+            if len(group.spins) != len(group.energies) or len(group.widths) != len(group.energies):
+                raise ValueError('LRF3 encoding requires complete per-row J and width tables')
             records = [
                 EndfResonance(energy=energy, spin=spin,
-                              c3=widths[0], c4=widths[1], c5=widths[2], c6=widths[3])
+                              **{f'c{i+3}': widths[position] for i, position in enumerate(positions)})
                 for energy, spin, widths in zip(group.energies, group.spins, group.widths)
             ]
             l = group.channels[0].L if group.channels else None
@@ -849,13 +950,60 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
         lValues.append(LValueBlock(
             awri=group.atomicWeightRatio, l=l,
             num_resonances=block["num_resonances"],
-            apl_or_qx=c2, lrx=block["lrx"], resonances=records,
+            apl_or_qx=c2, lrx=(1 if isinstance(formalism, BreitWigner) and group.competitiveChannel is not None
+                              else block["lrx"]), resonances=records,
         ))
 
     return ResolvedResonanceRange(
         spi=fields["spi"], ap=fields["ap"], nls=fields["nls"],
-        nlsc=fields["nlsc"], lad=fields["lad"], l_values=lValues,
+        nlsc=fields["nlsc"] if getattr(formalism,'angularLCount',None) is None else formalism.angularLCount,
+        lad=fields["lad"], l_values=lValues,
     )
+
+
+def _encodeRMLExtras(group, perGroup):
+    from kika.endf.classes.mf2.mf2mt151 import (
+        NoBackgroundRMatrix, TabulatedBackgroundRMatrix, SammyBackgroundRMatrix,
+        FrohnerBackgroundRMatrix, TabulatedPhaseShift)
+    from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
+    def table(function):
+        if hasattr(function,'toEndfRegions'):
+            return function.toEndfRegions()
+        return function.xs,function.ys,[(len(function.xs),INTERPOLATION_TO_ENDF_INT[function.interpolation])]
+    normalized = {}
+    for lch,channel in enumerate(group.channels,1):
+        external = channel.externalRMatrix
+        tabulated = channel.tabulatedBackground
+        if external is not None and tabulated is not None:
+            raise ValueError('A channel cannot have both tabulated and parametrized external R-matrix')
+        if tabulated is not None:
+            x,y,interp = table(tabulated.real)
+            ix,iy,iinterp = table(tabulated.imaginary)
+            normalized[lch] = TabulatedBackgroundRMatrix(lch,list(interp),list(x),list(y),list(iinterp),list(ix),list(iy))
+        elif external is not None:
+            def term(label, unit=''):
+                quantity = external.term(label)
+                return 0. if quantity is None else quantity.convertedTo(unit).value
+            common = (lch,term('singularityEnergyBelow','eV'),term('singularityEnergyAbove','eV'),term('constantExternalR'))
+            if external.type == 'SAMMY':
+                normalized[lch] = SammyBackgroundRMatrix(*common,term('linearExternalR','1/eV'),
+                    term('quadraticExternalR','1/eV**2'),term('constantLogarithmicCoefficient'),term('linearLogarithmicCoefficient','1/eV'))
+            else:
+                normalized[lch] = FrohnerBackgroundRMatrix(*common,term('poleStrength'),term('averageRadiationWidth','eV'))
+    backgrounds=[]
+    for original in perGroup.get('background',[]):
+        if original.lch in normalized:
+            backgrounds.append(normalized.pop(original.lch))
+        elif isinstance(original,NoBackgroundRMatrix):
+            backgrounds.append(original)
+    backgrounds.extend(normalized.values())
+    phase=None
+    if group.additionalPhaseShift is not None:
+        x,y,interp = table(group.additionalPhaseShift.real)
+        ix,iy,iinterp = table(group.additionalPhaseShift.imaginary)
+        phase=TabulatedPhaseShift(list(interp),list(x),list(y),list(iinterp),list(ix),list(iy))
+    mode=perGroup.get('kps',0) if group.phaseShiftMode is None else group.phaseShiftMode
+    return backgrounds,mode,phase
 
 
 def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
@@ -873,6 +1021,31 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
             "without guessing, so the section is not written."
         )
 
+    if len(pairs) != len(formalism.resonanceReactions):
+        raise ValueError('RML particle-pair count differs from model reaction count')
+    normalized_pairs = []
+    for reaction,source_pair in zip(formalism.resonanceReactions,pairs):
+        pair = dict(source_pair)
+        if reaction.Q is not None:
+            pair['q'] = reaction.Q
+        if reaction.reactionMT is not None:
+            pair['mt'] = reaction.reactionMT
+        kinematics = reaction.kinematics
+        if kinematics is not None:
+            for suffix,particle in (('a',kinematics.particleA),('b',kinematics.particleB)):
+                pair['m'+suffix] = particle.massRatio
+                pair['z'+suffix] = particle.charge
+                old_spin = pair['i'+suffix]
+                old_parity = int(np.sign(old_spin)) if old_spin else int(pair['p'+suffix] or 1)
+                if abs(old_spin) != particle.spin or old_parity != particle.parity:
+                    pair['i'+suffix] = particle.spin*particle.parity
+                    if particle.spin == 0:
+                        pair['p'+suffix] = particle.parity
+            pair['pnt'] = {'unity':-1,'automatic':0,'calculate':1}[kinematics.penetrability]
+            shift = {'zero':0,'calculate':1,'brune':2}[kinematics.shift]
+            pair['shf'] = pair['shf'] if shift == 0 and pair['shf'] == -1 else shift
+        normalized_pairs.append(pair)
+
     # IPP is one-based into the pair list; the model stores the reaction *label*
     # instead, so the index comes back by lookup rather than being stored twice.
     order = {reaction.label: index + 1
@@ -880,6 +1053,12 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
 
     spinGroups = []
     for group, perGroup in zip(formalism.spinGroups, fields["spin_groups"]):
+        backgrounds, phaseMode, phaseFunction = _encodeRMLExtras(group,perGroup)
+        original_spin=perGroup.get('aj',group.spin)
+        original_parity=int(np.sign(original_spin)) if original_spin else int(perGroup['pj'] or 1)
+        spin_unchanged=(group.spin == abs(original_spin) and group.parity == original_parity)
+        encoded_spin=original_spin if spin_unchanged else group.spin*group.parity
+        encoded_parity=perGroup['pj'] if spin_unchanged else group.parity if group.spin == 0 else 0
         channels = []
         for channel in group.channels:
             ipp = order.get(channel.resonanceReaction)
@@ -897,16 +1076,16 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
             ))
 
         spinGroups.append(RML_SpinGroup(
-            aj=group.spin, pj=perGroup["pj"],
-            kbk=perGroup["kbk"], kps=perGroup["kps"],
+            aj=encoded_spin, pj=encoded_parity,
+            kbk=len(backgrounds), kps=phaseMode,
             channels=channels,
             resonances=[RML_Resonance(er=energy, widths=list(widths))
                         for energy, widths in zip(group.energies, group.widths)],
             # Background R-matrices and phase shifts are held verbatim: the
             # model has no node for either, so they are copied through rather
             # than rebuilt. No tape to hand exercises this.
-            background=list(perGroup.get("background", [])),
-            phase_shift=perGroup.get("phase_shift"),
+            background=backgrounds,
+            phase_shift=phaseFunction,
         ))
 
     return RMatrixLimited(
@@ -914,7 +1093,7 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
         krm=fields["krm"],
         krl=int(formalism.relativisticKinematics),
         spi=fields["spi"], ap=fields["ap"],
-        particle_pairs=[RML_ParticlePair(**pair) for pair in pairs],
+        particle_pairs=[RML_ParticlePair(**pair) for pair in normalized_pairs],
         spin_groups=spinGroups,
     )
 
@@ -946,7 +1125,7 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
         channels = {channel.label: channel for channel in group.channels}
         entry["states"].append((group, state, channels))
 
-    common = dict(spi=fields["spi"], ap=fields["ap"], lssf=fields["lssf"],
+    common = dict(spi=fields["spi"], ap=radiusToEndf(widths.scatteringRadius), lssf=int(widths.selfShieldingOnly),
                   nls=fields["nls"])
 
     if case == "A":
@@ -964,6 +1143,9 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
         ], **common)
 
     if case == "B":
+        if any(c.label == 'fission' and not float(c.degreesOfFreedom).is_integer()
+               for g in widths.spinGroups for c in g.channels):
+            raise ValueError('URR case B cannot encode fractional fission degrees of freedom as MUF')
         return UnresolvedCaseB(
             ne=int(np.asarray(widths.energyGrid).size),
             energies=list(np.asarray(widths.energyGrid, dtype=float)),
@@ -976,7 +1158,8 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
                         gg=channels["capture"].constantWidth,
                         # MUF has nowhere to live on the model when GF is falsy,
                         # because the fission channel is then never built.
-                        muf=state["muf"], gf=list(state["gf"]),
+                        muf=(state['muf'] if 'fission' not in channels else int(channels['fission'].degreesOfFreedom)),
+                        gf=(list(state['gf']) if 'fission' not in channels else list(channels['fission'].widths)),
                     )
                     for group, state, channels in block["states"]
                 ])
@@ -984,13 +1167,23 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
             ], **common)
 
     if case == "C":
+        from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
+        for group in widths.spinGroups:
+            grid=group.levelSpacingEnergies if group.levelSpacingEnergies is not None else widths.energyGrid
+            if grid is None or len(grid) != len(group.levelSpacing):
+                raise ValueError('URR case C spacing and energy grid sizes differ')
+            for channel in group.channels:
+                channel_grid=channel.energies if channel.energies is not None else widths.energyGrid
+                if channel.widths is None or len(channel.widths) != len(grid) or not np.array_equal(channel_grid,grid):
+                    raise ValueError('URR case C channels must share their J-state grid; no implicit resampling')
         return UnresolvedCaseC(l_values=[
             URR_LValue_CaseC(awri=block["awri"], l=l, j_states=[
                 URR_JState_CaseC(
                     aj=group.J,
                     # INT varies across the corpus (2 on U-235 and Th-232, 5 on
                     # Pu-241), so it is read back and never assumed.
-                    int_code=state["int_code"],
+                    int_code=(state["int_code"] if group.crossSectionInterpolation is None
+                              else INTERPOLATION_TO_ENDF_INT[group.crossSectionInterpolation]),
                     amux=channels["competitive"].degreesOfFreedom,
                     amun=channels["neutron"].degreesOfFreedom,
                     amug=channels["capture"].degreesOfFreedom,
@@ -998,7 +1191,8 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
                     energy_points=[
                         URR_EnergyPoint(es=es, d=d, gx=gx, gn0=gn0, gg=gg, gf=gf)
                         for es, d, gx, gn0, gg, gf in zip(
-                            np.asarray(state["energy_grid"], dtype=float),
+                            np.asarray(group.levelSpacingEnergies if group.levelSpacingEnergies is not None
+                                       else widths.energyGrid, dtype=float),
                             np.asarray(group.levelSpacing, dtype=float),
                             np.asarray(channels["competitive"].widths, dtype=float),
                             np.asarray(channels["neutron"].widths, dtype=float),
