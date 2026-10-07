@@ -44,6 +44,10 @@ from kika.endf.remote.constants import (
         ("decay_0001_0-nn-1.zip", "decay", (0, 1, 0, 1, "n-1")),
         ("decay_000-Nn-1_0001.zip", "decay", (0, 1, 0, 1, "n-1")),
         ("decay_000-n-1_0001.zip", "decay", (0, 1, 0, 1, "n-1")),
+        ("n_0025_0-N-1.zip", "n", (0, 1, 0, 25, "n-1")),
+        # nitrogen spells its symbol like the neutron; Z keeps them apart
+        ("n_007-N-14_0725.zip", "n", (7, 14, 0, 725, "N-14")),
+        ("n_0725_7-N-14.zip", "n", (7, 14, 0, 725, "N-14")),
         # elemental files (photo-atomic) carry A=0 and label as the element
         ("photo_0100_1-H-0.zip", "photo", (1, 0, 0, 100, "H")),
     ],
@@ -102,6 +106,7 @@ DOC = {
                     ["n_026-Fe-56_2631.zip", 1000, "2024-10-03"],
                     ["n_092-U-235_9228.zip", 5000, "2024-10-03"],
                     ["n_NDS148,1_0025.zip", 5, "2024-10-03"],
+                    ["n_0025_0-N-1.zip", 50, "2024-10-03"],
                 ],
                 "tsl": [["tsl_H(H2O)_0001.zip", 300, "2024-10-03"]],
             },
@@ -133,7 +138,7 @@ def test_library_ids_keep_the_historical_short_names(catalog):
     assert ids["endfb8.1"].family == "ENDF/B"
     assert ids["fendl-3.2"].directory == "FENDL-3.2"
     assert ids["fendl-3.2"].sublibs == {"n": 1, "p": 1}
-    assert ids["endfb8.1"].sublibs == {"n": 2, "tsl": 1}  # the stray file is gone
+    assert ids["endfb8.1"].sublibs == {"n": 3, "tsl": 1}  # the stray file is gone
 
 
 def test_resolve_library_accepts_ids_aliases_and_directory_names(catalog):
@@ -155,6 +160,8 @@ def test_nuclide_first_lookup(catalog):
     assert catalog.entries(26056, sublib=None) and len(catalog.entries(26056, sublib=None)) == 4
     assert catalog.find("jeff3.3", "U235") is None
     assert catalog.find("endfb8.1", "U-235").mat == 9228
+    # the neutron as a target: the picker asks for it by its ZAID, 1
+    assert [e.filename for e in catalog.entries(1)] == ["n_0025_0-N-1.zip"]
 
 
 def test_nuclide_census_counts_libraries(catalog):

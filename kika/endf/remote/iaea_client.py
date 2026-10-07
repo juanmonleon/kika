@@ -63,7 +63,9 @@ def parse_isotope_state(isotope: str | int) -> tuple[int, int, str, int]:
         if a > 400:
             a -= 400
             isomer = 1
-        symbol = ATOMIC_NUMBER_TO_SYMBOL.get(z)
+        # Z = 0 is the free neutron (n-1), which the IAEA libraries evaluate
+        # as a target in their own right; the catalogue labels it "n".
+        symbol = "n" if z == 0 else ATOMIC_NUMBER_TO_SYMBOL.get(z)
         if symbol is None:
             raise ValueError(f"Unknown atomic number: {z}")
         return z, a, symbol, isomer
