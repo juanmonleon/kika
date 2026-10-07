@@ -35,6 +35,15 @@ The fix is the same idea, put where the model can use it:
 
 The perturbation is applied at 0 K and Doppler-broadened afterwards, the order
 both other pipelines use.
+
+**Open (2026-10-07): the unresolved range is not perturbed in the ACE.** The
+perturbed PENDF carries the infinite-dilution cross sections in the URR, but
+PURR builds the probability tables from MF2's *unperturbed* parameters, so the
+URR cross sections transport sees do not carry the factor -- for LSSF=0 the
+tables are absolute and certainly do not; whether LSSF=1 (tables as factors
+on the smooth cross section) lets it through has not been verified. The legacy
+pipeline and SANDY share this. To look at: perturbing MF2's URR parameters, or
+scaling the tables.
 """
 from __future__ import annotations
 
