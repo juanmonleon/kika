@@ -1,235 +1,1689 @@
 {
   "10037024": {
-    "energy_resolution_input": {
-      "distance": {
-        "value": 2.75,
-        "uncertainty": 0.45,
-        "unit": "m",
-        "ref": "source_to_scatter + scatter_to_detector(mid)"
-      },
-      "time_resolution": {
-        "value": 1.5,
-        "unit": "ns",
-        "ref": "neutron_pulse_width_FWHM"
-      }
+    "author": "Boschung",
+    "year": 1971,
+    "tof": {
+      "flight_path_m": 2.75,
+      "flight_path_uncertainty_m": 0.45,
+      "flight_path_ref": "source_to_scatter + scatter_to_detector(mid)",
+      "time_resolution_ns": 1.5,
+      "time_resolution_ref": "neutron_pulse_width_FWHM",
+      "source": "curated (publication / EXFOR free text)"
     },
-    "flight_path": {
-      "source_to_scatter": {
-        "value": 0.1,
-        "uncertainty": null,
-        "unit": "m"
-      },
-      "scatter_to_detector": {
-        "value": 2.65,
-        "uncertainty": 0.45,
-        "unit": "m"
-      }
-    },
-    "notes": "Paper states neutron pulses of ~1.5 ns duration (FWHM). Samples were placed 10 cm from the neutron source; main detector distance varied from 220 to 310 cm, so scatter->detector stored as midpoint 2.65±0.45 m and total TOF path (source->scatter + scatter->detector) as 2.75±0.45 m. Data reduction used a Monte Carlo correction that included time-of-flight resolution; detector/electronics timing contributions beyond pulse width are not explicitly quoted, so Δt=1.5 ns should be treated as a lower-bound input."
-  },
-  "10571002": {
-    "energy_resolution_input": {
-      "distance": {
-        "value": 40.0,
-        "unit": "m",
-        "ref": "incident_TOF_flight_path"
-      },
-      "time_resolution": {
-        "value": 8.0,
-        "unit": "ns",
-        "ref": "incident_spectrum_resolution_0.2ns_per_m"
-      }
-    },
-    "notes": "ORELA TOF reported as a 40 m flight path with incident spectrum resolution 0.2 ns/m (treated as an effective timing term already including source/moderator/instrument contributions). Thus Δt_eff = (0.2 ns/m)*40 m = 8 ns. EXFOR text also describes scattering geometry with 5 m source->scatterer and 5 m scatterer->detector legs; those lengths describe the scattering setup, but the incident neutron energy resolution used here is tied to the 40 m TOF station. Data were averaged over 100 keV incident-energy bins, so practical incident-energy resolution is not better than the bin width even if TOF allows finer resolution."
-  },
-  "10886002": {
-    "flight_path": {
-      "total": {
-        "min": {
-          "value": 5.0,
-          "unit": "m"
-        },
-        "max": {
-          "value": 5.5,
-          "unit": "m"
-        }
-      }
-    },
-    "energy_resolution_input": {
-      "distance": {
-        "value": 5.25,
-        "uncertainty": 0.25,
-        "unit": "m",
-        "ref": "EXFOR 10886 METHOD: 'FLIGHT PATH OF 5 TO 5.5 METERS' (midpoint)"
-      },
-      "time_resolution": {
-        "value": 5.0,
-        "unit": "ns",
-        "ref": "NOT DOCUMENTED - library default carried over as an upper bound"
-      }
-    },
-    "notes": "The flight path was recorded here only under the top-level `flight_path` key, which _get_tof_params_for_experiment does not read, so this entry silently used the 27.037 m default. Promoted to energy_resolution_input 2026-08-26. delta_t is still undocumented; see the same subentry in EXFOR/exfor_tof_parameters.json on the analysis share."
-  },
-  "11276009": {
-    "energy_resolution_inputs": {
+    "details": {
       "flight_path": {
         "source_to_scatter": {
-          "value": null,
+          "value": 0.1,
           "uncertainty": null,
           "unit": "m"
         },
         "scatter_to_detector": {
-          "value": null,
-          "uncertainty": null,
+          "value": 2.65,
+          "uncertainty": 0.45,
           "unit": "m"
         }
+      }
+    },
+    "notes": "Paper states neutron pulses of ~1.5 ns duration (FWHM). Samples were placed 10 cm from the neutron source; main detector distance varied from 220 to 310 cm, so scatter->detector stored as midpoint 2.65±0.45 m and total TOF path (source->scatter + scatter->detector) as 2.75±0.45 m. Data reduction used a Monte Carlo correction that included time-of-flight resolution; detector/electronics timing contributions beyond pulse width are not explicitly quoted, so Δt=1.5 ns should be treated as a lower-bound input."
+  },
+  "10111011": {
+    "author": "Kinney",
+    "year": 1970,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 168,
+        "min_mev": 0.03,
+        "max_mev": 0.17,
+        "mean_mev": 0.07446428571428572
       },
-      "tof_resolution": {
-        "value": null,
-        "unit": "ns"
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "fwhm_mev": 0.14892857142857144,
+      "fwhm_mev_range": [
+        0.06,
+        0.34
+      ],
+      "rel_fwhm_max": 0.0625
+    }
+  },
+  "10332004": {
+    "author": "Cox",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.2,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.2,
+      "rel_fwhm_max": 0.2217,
+      "review_required": true,
+      "note_review": "declared width is 22% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    },
+    "notes": "The quarantined declared width is CORROBORATED by the entry's own BIB text - EXFOR 10332 INC-SPECT: 'Incident energy interval at least 200 keV' - and the word 'interval' also settles the shape: a range, i.e. a box. It therefore resolves through the exfor_rsl_box channel to sigma_E = 0.200/sqrt(12) = 57.7 keV, against 1.9 keV under the old default (31x narrower). Leaving it quarantined rather than un-quarantining it is deliberate: un-quarantining would read 200 keV as a FWHM (85 keV), which the BIB does not support."
+  },
+  "10332075": {
+    "author": "Cox",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.2,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.2,
+      "rel_fwhm_max": 0.2217,
+      "review_required": true,
+      "note_review": "declared width is 22% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "10571002": {
+    "author": "Kinney",
+    "year": 1976,
+    "tof": {
+      "flight_path_m": 40.0,
+      "flight_path_ref": "incident_TOF_flight_path",
+      "time_resolution_ns": 8.0,
+      "time_resolution_ref": "incident_spectrum_resolution_0.2ns_per_m",
+      "source": "curated (publication / EXFOR free text)"
+    },
+    "notes": "ORELA TOF reported as a 40 m flight path with incident spectrum resolution 0.2 ns/m (treated as an effective timing term already including source/moderator/instrument contributions). Thus Δt_eff = (0.2 ns/m)*40 m = 8 ns. EXFOR text also describes scattering geometry with 5 m source->scatterer and 5 m scatterer->detector legs; those lengths describe the scattering setup, but the incident neutron energy resolution used here is tied to the 40 m TOF station. Data were averaged over 100 keV incident-energy bins, so practical incident-energy resolution is not better than the bin width even if TOF allows finer resolution."
+  },
+  "10578006": {
+    "author": "Brandenberger",
+    "year": 1975,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.08,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.08,
+      "rel_fwhm_max": 0.0548
+    }
+  },
+  "10886002": {
+    "author": "Smith",
+    "year": 1980,
+    "details": {
+      "flight_path": {
+        "total": {
+          "min": {
+            "value": 5.0,
+            "unit": "m"
+          },
+          "max": {
+            "value": 5.5,
+            "unit": "m"
+          }
+        }
+      }
+    },
+    "tof": {
+      "flight_path_m": 5.25,
+      "flight_path_uncertainty_m": 0.25,
+      "flight_path_ref": "EXFOR 10886 METHOD: 'PULSED BEAM TIME OF FLIGHT. FLIGHT PATH OF 5 TO 5.5 METERS' (midpoint of the quoted range)",
+      "time_resolution_ns": 5.0,
+      "time_resolution_ref": "NOT DOCUMENTED - pipeline default delta_t carried over as an upper bound",
+      "source": "curated (publication / EXFOR free text)"
+    },
+    "notes": "L is documented (EXFOR METHOD, 5-5.5 m); delta_t is NOT. Until the ANL report is checked the pipeline default 5 ns is kept, which is the conservative reading: it gives sigma_E = 1.86% of E (51 keV at 2.75 MeV) against 0.36% under the previous ORELA-like 27.037 m default. A delta_t of 2 ns with the same L would give 0.74% (20 keV). Smith's own energy steps are 50 keV median. This subentry carries 17% of the chi2 corpus above 3.06 MeV and is the JEFF/JENDL anchor there, so delta_t is the single number in this file most worth pinning down."
+  },
+  "11121006": {
+    "author": "Wells",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.007,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.007,
+      "rel_fwhm_max": 0.0093
+    }
+  },
+  "11121007": {
+    "author": "Wells",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.007,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.007,
+      "rel_fwhm_max": 0.0092
+    }
+  },
+  "11121008": {
+    "author": "Wells",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.007,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.007,
+      "rel_fwhm_max": 0.0093
+    }
+  },
+  "11121009": {
+    "author": "Wells",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.007,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.007,
+      "rel_fwhm_max": 0.0092
+    }
+  },
+  "11121010": {
+    "author": "Wells",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.007,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.007,
+      "rel_fwhm_max": 0.0093
+    }
+  },
+  "11121011": {
+    "author": "Wells",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.007,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.007,
+      "rel_fwhm_max": 0.0093
+    }
+  },
+  "11215021": {
+    "author": "Walt",
+    "year": 1955,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.08,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.08,
+      "rel_fwhm_max": 0.0195
+    }
+  },
+  "11220013": {
+    "author": "Beyster",
+    "year": 1956,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 30,
+        "min_mev": 0.2,
+        "max_mev": 0.4,
+        "mean_mev": 0.2866666666666667
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.2866666666666667,
+      "fwhm_mev_range": [
+        0.2,
+        0.4
+      ],
+      "rel_fwhm_max": 0.08
+    }
+  },
+  "11276009": {
+    "author": "Rodgers",
+    "year": 1967,
+    "details": {
+      "energy_resolution_inputs": {
+        "flight_path": {
+          "source_to_scatter": {
+            "value": null,
+            "uncertainty": null,
+            "unit": "m"
+          },
+          "scatter_to_detector": {
+            "value": null,
+            "uncertainty": null,
+            "unit": "m"
+          }
+        }
+      },
+      "provenance": {
+        "exfor_entry": "11276",
+        "primary_reference": "COO-1573-33 (1967)",
+        "supporting_related_entry": "10037 (Boschung/Lindow/Shrader, 1971)"
       }
     },
     "notes": [
       "EXFOR 11276 (COO-1573-33, 1967) specifies TOF method but does not provide flight-path distances or timing resolution in the BIB information available here.",
       "A closely related Case Western Reserve (1USACSE) TOF scattering setup is documented in EXFOR 10037 (Boschung/Lindow/Shrader, Nucl. Phys. A161 (1971)), using a 3-MeV terminal pulsed Van de Graaff with Mobley magnet beam buncher, D(d,n) source, and liquid scintillator with pulse-shape discrimination. This may indicate similar instrumentation family, but distances/timing must still be taken from the 1967 report or derived from peak widths/energy spread.",
       "If the 1967 report (COO-1573-33) can be accessed, extract the actual source→scatterer and scatterer→detector distances and the effective timing resolution (beam pulse width/bunch width + detector timing + electronics) and fill the null values above."
-    ],
-    "provenance": {
-      "exfor_entry": "11276",
-      "primary_reference": "COO-1573-33 (1967)",
-      "supporting_related_entry": "10037 (Boschung/Lindow/Shrader, 1971)"
+    ]
+  },
+  "11287009": {
+    "author": "Wilenzick",
+    "year": 1965,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.23,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.23,
+      "rel_fwhm_max": 0.0381
+    }
+  },
+  "11287013": {
+    "author": "Wilenzick",
+    "year": 1965,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.23,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.23,
+      "rel_fwhm_max": 0.0381
+    }
+  },
+  "11316003": {
+    "author": "Muehlhause",
+    "year": 1956,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.075,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.075,
+      "rel_fwhm_max": 0.0507
+    }
+  },
+  "11321005": {
+    "author": "Hill",
+    "year": 1958,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.02
+    }
+  },
+  "11322007": {
+    "author": "Coon",
+    "year": 1958,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.35,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.35,
+      "rel_fwhm_max": 0.0241
+    }
+  },
+  "11341005": {
+    "author": "Bostrom",
+    "year": 1959,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0272
+    }
+  },
+  "11396011": {
+    "author": "Cranberg",
+    "year": 1956,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0444
+    }
+  },
+  "11495011": {
+    "author": "Thomson",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0143
+    }
+  },
+  "11496004": {
+    "author": "Bredin",
+    "year": 1964,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.09,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.09,
+      "rel_fwhm_max": 0.0462
+    }
+  },
+  "11511009": {
+    "author": "Becker",
+    "year": 1966,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0312
+    }
+  },
+  "11519016": {
+    "author": "Cox",
+    "year": 1966,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.02,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.02,
+      "rel_fwhm_max": 0.0294
+    }
+  },
+  "11572007": {
+    "author": "Machwe",
+    "year": 1959,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.4,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.4,
+      "rel_fwhm_max": 0.1093,
+      "review_required": true,
+      "note_review": "declared width is 11% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "11572011": {
+    "author": "Machwe",
+    "year": 1959,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.4,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.4,
+      "rel_fwhm_max": 0.1093,
+      "review_required": true,
+      "note_review": "declared width is 11% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "11637007": {
+    "author": "Walt",
+    "year": 1954,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.16,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.16,
+      "rel_fwhm_max": 0.16,
+      "review_required": true,
+      "note_review": "declared width is 16% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "11638003": {
+    "author": "Darden",
+    "year": 1955,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.1
+    }
+  },
+  "11695002": {
+    "author": "Weddell",
+    "year": 1956,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 5.0,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 5.0,
+      "rel_fwhm_max": 1.1364,
+      "review_required": true,
+      "note_review": "declared width is 114% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "11706005": {
+    "author": "Hopkins",
+    "year": 1964,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 1,
+        "min_mev": 0.105,
+        "max_mev": 0.105,
+        "mean_mev": 0.105
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.105,
+      "fwhm_mev_range": [
+        0.105,
+        0.105
+      ],
+      "rel_fwhm_max": 0.0525
+    }
+  },
+  "11708006": {
+    "author": "Kinney",
+    "year": 1968,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 85,
+        "min_mev": 0.03,
+        "max_mev": 0.05,
+        "mean_mev": 0.03929411764705882
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.03929411764705882,
+      "fwhm_mev_range": [
+        0.03,
+        0.05
+      ],
+      "rel_fwhm_max": 0.0109
+    }
+  },
+  "11711002": {
+    "author": "Stelson",
+    "year": 1952,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0267
+    }
+  },
+  "11717002": {
+    "author": "Landon",
+    "year": 1958,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.12,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.12,
+      "rel_fwhm_max": 0.0545
+    }
+  },
+  "12144003": {
+    "author": "Smith",
+    "year": 1966,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.1572,
+      "review_required": true,
+      "note_review": "declared width is 16% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "13510005": {
+    "author": "Hjort",
+    "year": 1994,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 2.5,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 2.5,
+      "rel_fwhm_max": 0.0385
     }
   },
   "14462002": {
-    "energy_resolution_input": {
-      "distance": {
-        "value": 4.0,
-        "unit": "m",
-        "ref": "max_flight_path"
-      },
-      "time_resolution": {
-        "value": 1.0,
-        "unit": "ns",
-        "ref": "beam_bunch_width"
-      }
+    "author": "Ramirez",
+    "year": 2017,
+    "tof": {
+      "flight_path_m": 4.0,
+      "flight_path_ref": "max_flight_path",
+      "time_resolution_ns": 1.0,
+      "time_resolution_ref": "beam_bunch_width",
+      "source": "curated (publication / EXFOR free text)"
     },
     "notes": "TOF used with a pulsed/bunched beam; bunch width about 1 ns (used here as timing input). Detector mounted on a goniometer; paper states it can accommodate a flight path up to 4 m but does not give the exact flight path used for the reported datasets, so distance=4 m is an upper bound assumption. Actual flight path may be <4 m, which would worsen TOF energy resolution. Timing contributions from detector/electronics (beyond beam bunch width) are not explicitly given, so the true effective Δt is likely >1 ns."
   },
-  "20743002": {
-    "flight_path": {
-      "source_to_detector": {
-        "value": 57.0,
-        "unit": "m"
-      }
-    },
-    "energy_resolution_input": {
-      "distance": {
-        "value": 57.0,
-        "unit": "m"
+  "20008002": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0351
+    }
+  },
+  "20008003": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.034
+    }
+  },
+  "20008004": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0321
+    }
+  },
+  "20008005": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0313
+    }
+  },
+  "20008006": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0303
+    }
+  },
+  "20008007": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0296
+    }
+  },
+  "20008008": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0289
+    }
+  },
+  "20008009": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0282
+    }
+  },
+  "20008010": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0273
+    }
+  },
+  "20008011": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0267
+    }
+  },
+  "20008012": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0261
+    }
+  },
+  "20008013": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0258
+    }
+  },
+  "20008014": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0252
+    }
+  },
+  "20008015": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0245
+    }
+  },
+  "20008016": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0242
+    }
+  },
+  "20008017": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0237
+    }
+  },
+  "20008018": {
+    "author": "Tomita",
+    "year": 1973,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.0232
+    }
+  },
+  "20019099": {
+    "author": "Holmqvist",
+    "year": 1969,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 93,
+        "min_mev": 0.05,
+        "max_mev": 0.09,
+        "mean_mev": 0.06419354838709677
       },
-      "time_resolution": {
-        "value": 5.47,
-        "unit": "ns"
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "fwhm_mev": 0.12838709677419355,
+      "fwhm_mev_range": [
+        0.1,
+        0.18
+      ],
+      "rel_fwhm_max": 0.0338
+    }
+  },
+  "20019104": {
+    "author": "Holmqvist",
+    "year": 1969,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 43,
+        "min_mev": 0.05,
+        "max_mev": 0.09,
+        "mean_mev": 0.06767441860465116
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "fwhm_mev": 0.13534883720930233,
+      "fwhm_mev_range": [
+        0.1,
+        0.18
+      ],
+      "rel_fwhm_max": 0.0338
+    }
+  },
+  "20020012": {
+    "author": "Holmqvist",
+    "year": 1970,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0565
+    }
+  },
+  "20020017": {
+    "author": "Holmqvist",
+    "year": 1970,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0565
+    }
+  },
+  "20162003": {
+    "author": "Holmqvist",
+    "year": 1971,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.09,
+      "convention_source": "BIB text: INC-SOURCE: \"TOTAL ENERGY SPREAD +-90 KEV\" = declared 0.09",
+      "fwhm_mev": 0.18,
+      "rel_fwhm_max": 0.0302
+    }
+  },
+  "20162004": {
+    "author": "Holmqvist",
+    "year": 1971,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.09,
+      "convention_source": "BIB text: INC-SOURCE: \"TOTAL ENERGY SPREAD +-90 KEV\" = declared 0.09",
+      "fwhm_mev": 0.18,
+      "rel_fwhm_max": 0.0302
+    }
+  },
+  "20197006": {
+    "author": "Malmskog",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "half-width (probable)",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.015,
+      "convention_source": "BIB text: INC-SPECT: \"time resolution ... 7ns(30 keV) at 500 keV\"; declared 0.015 = half",
+      "fwhm_mev": 0.03,
+      "rel_fwhm_max": 0.0462
+    }
+  },
+  "20197007": {
+    "author": "Malmskog",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "half-width (probable)",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.015,
+      "convention_source": "BIB text: INC-SPECT: \"time resolution ... 7ns(30 keV) at 500 keV\"; declared 0.015 = half",
+      "fwhm_mev": 0.03,
+      "rel_fwhm_max": 0.0462
+    }
+  },
+  "20281003": {
+    "author": "Yuasa",
+    "year": 1958,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.2,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.2,
+      "rel_fwhm_max": 0.0142
+    }
+  },
+  "20304002": {
+    "author": "Tsukada",
+    "year": 1969,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.045,
+      "fwhm_mev": 0.09,
+      "rel_fwhm_max": 0.0657
+    }
+  },
+  "20482005": {
+    "author": "Cabe",
+    "year": 1967,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "half-width",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 63,
+        "min_mev": 0.02,
+        "max_mev": 0.035,
+        "mean_mev": 0.027142857142857146
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "convention_source": "BIB text: INC-SPECT: \"spread 70 keV Louvain / 40 keV Bruyeres\"; per-point 0.020-0.035 = half",
+      "fwhm_mev": 0.05428571428571429,
+      "fwhm_mev_range": [
+        0.04,
+        0.07
+      ],
+      "rel_fwhm_max": 0.1022
+    }
+  },
+  "20482006": {
+    "author": "Cabe",
+    "year": 1967,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "half-width",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 21,
+        "min_mev": 0.02,
+        "max_mev": 0.035,
+        "mean_mev": 0.02785714285714286
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "convention_source": "BIB text: INC-SPECT: \"spread 70 keV Louvain / 40 keV Bruyeres\"; per-point 0.020-0.035 = half",
+      "fwhm_mev": 0.05571428571428572,
+      "fwhm_mev_range": [
+        0.04,
+        0.07
+      ],
+      "rel_fwhm_max": 0.1022
+    }
+  },
+  "20690003": {
+    "author": "Hyakutake",
+    "year": 1975,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.26,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.26,
+      "rel_fwhm_max": 0.0184
+    }
+  },
+  "20743002": {
+    "author": "Cierjacks",
+    "year": 1978,
+    "tof": {
+      "flight_path_m": 57.0,
+      "time_resolution_ns": 5.47,
+      "source": "curated (publication / EXFOR free text)"
+    },
+    "details": {
+      "flight_path": {
+        "source_to_detector": {
+          "value": 57.0,
+          "unit": "m"
+        }
       }
     },
     "notes": "Assumed that Karlsruhe ISO-CYCLO TOF spectrometer used an evacuated flight path of ~57 m for neutron timing measurements (there is a longer flight path of 195m, information is not clear which one was used). EXFOR indicates a neutron pulse width of 2 ns and an instrument timing term of 0.09 ns/m; interpreted as separate timing contributions. Using L = 57 m gives spectrometer timing = 0.09 ns/m * 57 = 5.13 ns. Combined in quadrature with the 2 ns pulse width yields Δt_eff ≈ 5.47 ns for conservative time resolution."
   },
+  "20855002": {
+    "author": "Corcalciuc",
+    "year": 1974,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.09,
+      "fwhm_mev": 0.18,
+      "rel_fwhm_max": 0.0257
+    }
+  },
+  "21377005": {
+    "author": "Poole",
+    "year": 1953,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.2,
+      "fwhm_mev": 0.4,
+      "rel_fwhm_max": 0.16,
+      "review_required": true,
+      "note_review": "declared width is 16% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "22048014": {
+    "author": "Olsson",
+    "year": 1987,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.075,
+      "convention_source": "BIB text: INC-SOURCE: \"TOTAL ENERGY SPREAD ... LESS THAN +/- 75 KEV\" = declared 0.075",
+      "fwhm_mev": 0.15,
+      "rel_fwhm_max": 0.0069
+    }
+  },
+  "22403002": {
+    "author": "Schmidt",
+    "year": 1994,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 374,
+        "min_mev": 0.12,
+        "max_mev": 0.136,
+        "mean_mev": 0.1254705882352941
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "fwhm_mev": 0.1254705882352941,
+      "fwhm_mev_range": [
+        0.12,
+        0.136
+      ],
+      "rel_fwhm_max": 0.0132
+    }
+  },
+  "22403005": {
+    "author": "Schmidt",
+    "year": 1994,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 143,
+        "min_mev": 0.12,
+        "max_mev": 0.136,
+        "mean_mev": 0.12581818181818183
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "fwhm_mev": 0.12581818181818183,
+      "fwhm_mev_range": [
+        0.12,
+        0.136
+      ],
+      "rel_fwhm_max": 0.0132
+    }
+  },
+  "22531007": {
+    "author": "Tsukada",
+    "year": 1961,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "per-point",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "per_point": {
+        "n": 5,
+        "min_mev": 0.28,
+        "max_mev": 0.4,
+        "mean_mev": 0.332
+      },
+      "note": "per-point column; full array in the DB (dat0); fwhm_mev uses the mean",
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.332,
+      "fwhm_mev_range": [
+        0.28,
+        0.4
+      ],
+      "rel_fwhm_max": 0.1163,
+      "review_required": true,
+      "note_review": "declared width is 12% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "22766027": {
+    "author": "Takahashi",
+    "year": 1992,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.2,
+      "fwhm_mev": 0.4,
+      "rel_fwhm_max": 0.0284
+    }
+  },
+  "22987002": {
+    "author": "Oehrn",
+    "year": 2008,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 1.2,
+      "fwhm_mev": 1.2,
+      "rel_fwhm_max": 0.0125
+    }
+  },
+  "22987005": {
+    "author": "Oehrn",
+    "year": 2008,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 1.2,
+      "fwhm_mev": 1.2,
+      "rel_fwhm_max": 0.0125
+    }
+  },
   "23365004": {
-    "energy_resolution_inputs": {
-      "distance": {
-        "value": 27.037,
-        "uncertainty": 0.005,
-        "unit": "m",
-        "ref": "source_to_scatter"
+    "author": "Pirovano",
+    "year": 2019,
+    "tof": {
+      "flight_path_m": 27.037,
+      "flight_path_uncertainty_m": 0.005,
+      "flight_path_ref": "source_to_scatter",
+      "time_resolution_ns": 5.0,
+      "source": "curated (publication / EXFOR free text)"
+    },
+    "details": {
+      "flight_path": {
+        "source_to_scatter": {
+          "value": 27.037,
+          "uncertainty": 0.005,
+          "unit": "m"
+        },
+        "source_to_monitor": {
+          "value": 25.667,
+          "uncertainty": 0.005,
+          "unit": "m"
+        }
       },
-      "time_resolution": {
+      "energy_resolution_at_1MeV": {
         "value": 5.0,
-        "unit": "ns"
+        "unit": "keV"
       }
-    },
-    "flight_path": {
-      "source_to_scatter": {
-        "value": 27.037,
-        "uncertainty": 0.005,
-        "unit": "m"
-      },
-      "source_to_monitor": {
-        "value": 25.667,
-        "uncertainty": 0.005,
-        "unit": "m"
-      }
-    },
-    "energy_resolution_at_1MeV": {
-      "value": 5.0,
-      "unit": "keV"
     }
   },
   "23365005": {
-    "energy_resolution_inputs": {
-      "distance": {
-        "value": 8.3,
-        "uncertainty": 0.005,
-        "unit": "m",
-        "ref": "source_to_scatter"
-      },
-      "time_resolution": {
-        "value": 1.0,
-        "unit": "ns"
-      }
+    "author": "Pirovano",
+    "year": 2019,
+    "tof": {
+      "flight_path_m": 8.3,
+      "flight_path_uncertainty_m": 0.005,
+      "flight_path_ref": "source_to_scatter",
+      "time_resolution_ns": 1.0,
+      "source": "curated (publication / EXFOR free text)"
     },
-    "flight_path": {
-      "source_to_scatter": {
-        "value": 8.3,
-        "uncertainty": 0.005,
-        "unit": "m"
+    "details": {
+      "flight_path": {
+        "source_to_scatter": {
+          "value": 8.3,
+          "uncertainty": 0.005,
+          "unit": "m"
+        },
+        "source_to_monitor": {
+          "value": 6.044,
+          "uncertainty": 0.005,
+          "unit": "m"
+        }
       },
-      "source_to_monitor": {
-        "value": 6.044,
-        "uncertainty": 0.005,
-        "unit": "m"
+      "energy_resolution_at_1MeV": {
+        "value": 3.0,
+        "unit": "keV"
       }
-    },
-    "energy_resolution_at_1MeV": {
-      "value": 3.0,
-      "unit": "keV"
     }
   },
   "27673002": {
-    "energy_resolution_inputs": {
-      "distance": {
-        "value": 27.037,
-        "uncertainty": 0.005,
-        "unit": "m",
-        "ref": "source_to_scatter"
+    "tof": {
+      "flight_path_m": 27.037,
+      "flight_path_uncertainty_m": 0.005,
+      "flight_path_ref": "source_to_scatter",
+      "time_resolution_ns": 10.0,
+      "source": "curated (publication / EXFOR free text)"
+    },
+    "details": {
+      "flight_path": {
+        "source_to_scatter": {
+          "value": 27.037,
+          "uncertainty": 0.005,
+          "unit": "m"
+        },
+        "source_to_monitor": {
+          "value": 25.667,
+          "uncertainty": 0.005,
+          "unit": "m"
+        }
       },
-      "time_resolution": {
+      "energy_resolution_at_1MeV": {
         "value": 10.0,
-        "unit": "ns"
+        "unit": "keV"
       }
-    },
-    "flight_path": {
-      "source_to_scatter": {
-        "value": 27.037,
-        "uncertainty": 0.005,
-        "unit": "m"
-      },
-      "source_to_monitor": {
-        "value": 25.667,
-        "uncertainty": 0.005,
-        "unit": "m"
-      }
-    },
-    "energy_resolution_at_1MeV": {
-      "value": 10.0,
-      "unit": "keV"
+    }
+  },
+  "30076004": {
+    "author": "Barnard",
+    "year": 1968,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.004,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "note_bib": "INC-SPECT: \"Resolution given is only target thickness\" - partial width, underestimates",
+      "fwhm_mev": 0.004,
+      "rel_fwhm_max": 0.0043
     }
   },
   "30463020": {
-    "flight_path": {},
-    "tof_resolution": {
-      "value": 3.0,
-      "unit": "ns",
-      "origin": "reported_by_authors"
+    "author": "Schweitzer",
+    "year": 1978,
+    "tof": {
+      "time_resolution_ns": 3.0,
+      "time_resolution_ref": "reported_by_authors",
+      "source": "curated (publication / EXFOR free text)"
     }
+  },
+  "30990002": {
+    "author": "Qi Huiquan",
+    "year": 1992,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 1.0,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "note_bib": "METHOD: \"energy resolution of the measuring system is 1 MeV so the data include contributions from neutrons scattered inelastically from low-lying excited levels\"",
+      "fwhm_mev": 1.0,
+      "rel_fwhm_max": 0.0676
+    }
+  },
+  "40042010": {
+    "author": "Korzh",
+    "year": 1968,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0667
+    }
+  },
+  "40042016": {
+    "author": "Korzh",
+    "year": 1968,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0667
+    }
+  },
+  "400750021": {
+    "author": "Morozov",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.2,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.2,
+      "rel_fwhm_max": 0.1111,
+      "review_required": true,
+      "note_review": "declared width is 11% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "400750022": {
+    "author": "Morozov",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.2,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.2,
+      "rel_fwhm_max": 0.1111,
+      "review_required": true,
+      "note_review": "declared width is 11% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "40088004": {
+    "author": "Leshchenko",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.45,
+      "fwhm_mev": 0.9,
+      "rel_fwhm_max": 0.0643
+    }
+  },
+  "40168003": {
+    "author": "Lovchikova",
+    "year": 1957,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "fwhm_mev": 0.2,
+      "rel_fwhm_max": 0.2222,
+      "review_required": true,
+      "note_review": "declared width is 22% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "40179004": {
+    "author": "Korzh",
+    "year": 1972,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.09,
+      "fwhm_mev": 0.18,
+      "rel_fwhm_max": 0.12,
+      "review_required": true,
+      "note_review": "declared width is 12% of E - possibly a source spread or covered range, not a Gaussian resolution; read the entry before feeding it to the fold"
+    }
+  },
+  "40367002": {
+    "author": "Popov",
+    "year": 1957,
+    "energy_resolution": {
+      "header": "EN-RSL-HW",
+      "convention": "half-width",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "fwhm_mev": 0.2,
+      "rel_fwhm_max": 0.069
+    }
+  },
+  "40532004": {
+    "author": "Korzh",
+    "year": 1977,
+    "energy_resolution": {
+      "header": "EN-RSL-FW",
+      "convention": "FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.0667
+    }
+  },
+  "40683021": {
+    "author": "Pasechnik",
+    "year": 1964,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.05,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.05,
+      "rel_fwhm_max": 0.1
+    }
+  },
+  "40706046": {
+    "author": "Kazakova",
+    "year": 1965,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.1,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.1,
+      "rel_fwhm_max": 0.05
+    }
+  },
+  "40763023": {
+    "author": "Korzh",
+    "year": 1963,
+    "energy_resolution": {
+      "header": "EN-RSL",
+      "convention": "unspecified, assumed FWHM",
+      "origin": "COMMON",
+      "unit": "MeV",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "value_mev": 0.025,
+      "convention_source": "LEXFOR \"Resolution\" (IAEA-NDS-208): \"usually defined as full-width at half-maximum (FWHM)\"; no overriding BIB text found",
+      "fwhm_mev": 0.025,
+      "rel_fwhm_max": 0.0833
+    }
+  },
+  "_meta": {
+    "schema": {
+      "energy_resolution": "declared EXFOR EN-RSL* resolution, convention-resolved to fwhm_mev (preferred sigma_E channel)",
+      "tof": "curated (flight_path_m, time_resolution_ns) pair (fallback channel)",
+      "details/notes": "auxiliary curated information, not read by the pipeline",
+      "reader": "scripts/tof_parameters.py:get_tof_parameters, precedence energy_resolution -> tof -> defaults; review_required blocks are quarantined (thesis_chi2_review.md §12e/f)",
+      "energy_spread": "curated incident-energy spread from the entry's BIB text (full_width_mev + shape box|fwhm); ranks below energy_resolution and above tof"
+    },
+    "declared_energy_resolution_sweep": {
+      "date": "2026-07-30",
+      "source": "EXFOR x4sqlite1.db (master, 2025-11-05)",
+      "accessed_via": "/share_snc/snc/JuanMonleon/EXFOR/x4_iron_angular.db",
+      "script": "kika-workspace/myworkspace/EXFOR/extract_en_rsl_resolutions.py",
+      "datasets_in_subset": 139,
+      "datasets_declaring": 87,
+      "conventions": {
+        "EN-RSL-FW": "FWHM",
+        "EN-RSL-HW": "half-width",
+        "EN-RSL": "unspecified"
+      },
+      "note": "fwhm_mev is convention-resolved (EN-RSL-HW x2; bare EN-RSL assumed FWHM per LEXFOR unless BIB text overrides)"
+    },
+    "manual_edits": [
+      {
+        "date": "2026-08-26",
+        "by": "sigma_E input audit",
+        "subentries": [
+          "10886002",
+          "13511004",
+          "40372004",
+          "10332004"
+        ],
+        "reason": "documented flight paths / spreads present in the EXFOR BIB text but absent from this file; see each entry's notes",
+        "backup": "exfor_tof_parameters.bak-20260826-pre-sigmaE-fix.json"
+      }
+    ]
+  },
+  "13511004": {
+    "author": "Perey",
+    "year": 1991,
+    "tof": {
+      "flight_path_m": 200.191,
+      "flight_path_ref": "EXFOR 13511 subentry 004 METHOD: '200.191 meter flight path'",
+      "time_resolution_ns": 6.0,
+      "time_resolution_ref": "EXFOR 13511 subentry 004 METHOD: 'Burst width 6 nsec'",
+      "source": "curated (publication / EXFOR free text)"
+    },
+    "notes": "ORELA. Both numbers are stated in subentry 004's own METHOD line (sister subentries of entry 13511 quote 80.117 m and 201.575/201.583 m with 4.5/7 ns - do not transplant them). sigma_E drops from 1.70 keV under the old 27.037 m default to 0.28 keV at 0.85 MeV."
+  },
+  "40372004": {
+    "author": "Salnikov",
+    "year": 1957,
+    "energy_spread": {
+      "full_width_mev": 0.6,
+      "shape": "box",
+      "ref": "EXFOR 40372 INC-SPECT: 'Narrow spectrum from 1.85 to 2.45 MeV, is on Fig.1 of SJA,3,869,1957'",
+      "source": "curated (publication / EXFOR free text)"
+    },
+    "notes": "Nuclear-emulsion measurement, no time-of-flight: the ORELA-like (L, delta_t) default was meaningless here. The BIB quotes a covered range 1.85-2.45 MeV, read as a uniform box: sigma_E = 0.60/sqrt(12) = 173 keV, against 7.8 keV under the old default. The published spectrum (Fig. 1 of the reference) is not flat, so the box is an approximation in the conservative direction."
   }
 }
