@@ -180,3 +180,99 @@ def test_mf7_mt451_is_written_from_target_info_when_no_text_was_kept(micro_tsl_s
     assert isotope.awr == pytest.approx(b[2], rel=1e-12)
     assert isotope.sigma_free == pytest.approx(b[0] / b[5], rel=1e-12)
     assert any("written from targetInfo" in line for line in report.approximations)
+
+
+# ----------------------------------------------------------------------
+# GNDS → ENDF (roadmap E4, with G1 of gnds_to_endf_plan.md)
+# ----------------------------------------------------------------------
+
+def _withoutFlags(suite):
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    suite.applicationData.entries[:] = [e for e in suite.applicationData.entries
+                                        if not isinstance(e, EndfConversionFlags)]
+    return suite
+
+
+def _sch4WithAPrincipalNuclide(tape):
+    """s-CH4 with its principal atom named H-1, as an MF7/MT451 would name it."""
+    suite, _ = decodeReactionSuite(read_endf(str(tape)))
+    inelastic = next(_form(r) for r in suite.reactions
+                     if isinstance(_form(r), IncoherentInelastic))
+    principal = inelastic.principal
+    principal.pid = inelastic.primaryScatterer = "H1"
+    suite.PoPs.add(Nuclide(id="H1", Z=1, A=1, mass=principal.mass))
+    return suite
+
+
+def _suiteNote(path):
+    root = ET.parse(path).getroot()
+    (conversion,) = [c for c in root.iter("conversion") if c.get("href") == "/reactionSuite"]
+    return conversion.get("flags")
+
+
+def test_the_gnds_carries_fudges_mat_note(roundTrip):
+    """FUDGE writes ``MAT=…,ZA=…`` on every TSL suite and cannot get back to ENDF
+    without it. With no principal nuclide named, kika states the MAT alone."""
+    suite, _, path = roundTrip
+    assert _suiteNote(path) == f"MAT={suite.provenance.mat}"
+
+
+def test_the_note_names_the_principal_scatterer_as_fudge_does(micro_tsl_sch4_tape, tmp_path):
+    """FUDGE's ZA is the principal atom's, not the header's pseudo-ZA: for
+    s-CH4 FUDGE writes ``MAT=34,ZA=1001``, and so does kika once H-1 is named."""
+    path = tmp_path / "sch4.xml"
+    kika.write(_sch4WithAPrincipalNuclide(micro_tsl_sch4_tape), path)
+    assert _suiteNote(path) == "MAT=34,ZA=1001"
+
+
+def test_a_tsl_suite_read_from_gnds_writes_its_tape_back(roundTrip, tmp_path):
+    """GNDS → ENDF → model gives the source's forms, MAT, AWR and header.
+
+    The pseudo-ZA is MAT + 100, said in the report: GNDS does not carry the
+    tape's own, so JEFF-4.0's Be metal (4000) comes back as 126.
+    """
+    from kika.endf.writers.assemble import writeEndfTape
+
+    suite, back, _ = roundTrip
+    tape = tmp_path / "back.endf"
+    report = writeEndfTape(back, tape)
+    again, _ = decodeReactionSuite(read_endf(str(tape)))
+    assert again.target == suite.target
+    assert [r.label for r in again.reactions] == [r.label for r in suite.reactions]
+    for before, after in zip(suite.reactions, again.reactions):
+        _sameForm(_form(before), _form(after))
+    source, written = suite.provenance, again.provenance
+    assert (written.mat, written.awr) == (source.mat, source.awr)
+    assert written.za == source.mat + 100
+    assert any("MAT + 100" in line for line in report.approximations)
+    for name in ("nsub", "nlib", "nver", "lrel", "nmod", "emax", "temp", "lrp", "lfi"):
+        assert written.headerFields.get(name) == source.headerFields.get(name), name
+
+
+def test_the_principal_za_does_not_become_the_header_za(micro_tsl_sch4_tape, tmp_path):
+    """A note's ZA=1001 is FUDGE's principal atom: the header still says 134."""
+    from kika.endf.writers.assemble import writeEndfTape
+
+    path = tmp_path / "sch4.xml"
+    kika.write(_sch4WithAPrincipalNuclide(micro_tsl_sch4_tape), path)
+    tape = tmp_path / "sch4.endf"
+    writeEndfTape(kika.read(path, covariances=False), tape)
+    again, _ = decodeReactionSuite(read_endf(str(tape)))
+    assert (again.provenance.mat, again.provenance.za) == (34, 134)
+
+
+def test_without_the_note_a_tsl_tape_needs_its_mat(roundTrip, tmp_path):
+    """No note, no MAT: a TSL material is in no MAT table, so kika refuses by
+    name, and a MAT passed by the caller is enough."""
+    from kika.endf.writers.assemble import writeEndfTape
+
+    suite, back, _ = roundTrip
+    back = _withoutFlags(back)
+    with pytest.raises(ValueError, match="thermal-scattering.*mat="):
+        writeEndfTape(back, tmp_path / "x.endf")
+    tape = tmp_path / "y.endf"
+    writeEndfTape(back, tape, mat=suite.provenance.mat)
+    again, _ = decodeReactionSuite(read_endf(str(tape)))
+    assert (again.provenance.mat, again.provenance.za) == (suite.provenance.mat,
+                                                         suite.provenance.mat + 100)

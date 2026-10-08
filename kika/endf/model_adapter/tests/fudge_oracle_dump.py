@@ -158,7 +158,16 @@ def main(tapeText, name):
         # The other direction (roadmap E4b): a GNDS file kika wrote, read by
         # FUDGE and reported exactly as an ENDF translation would be.
         reactionSuite = _readGnds(tapeText)
-        sys.stdout.write("\n" + JSON_MARKER + json.dumps({"tsl": _tsl(reactionSuite)}) + "\n")
+        out = {"tsl": _tsl(reactionSuite)}
+        if str(reactionSuite.interaction) == "thermalNeutronScatteringLaw":
+            # And on to ENDF, which FUDGE can only do with the MAT=…,ZA=… note
+            # kika writes on a TSL suite (roadmap E4, GNDS → ENDF).
+            import brownies.legacy.toENDF6.toENDF6  # noqa: F401 - attaches toENDF6
+            try:
+                out["endf"] = reactionSuite.toENDF6("eval", {"verbosity": 0})
+            except Exception as error:  # reported, so the GNDS tests still run
+                out["endfError"] = f"{type(error).__name__}: {error}"
+        sys.stdout.write("\n" + JSON_MARKER + json.dumps(out) + "\n")
         return
 
     # FUDGE's TSL converter names the scatterer from the *file name*

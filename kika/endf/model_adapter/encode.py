@@ -233,7 +233,7 @@ def encodeMF1MT451(source, mat: Optional[int] = None,
         # field that had to be assumed rather than derived is in the report.
         from .mf1_header import synthesiseMF1Header
 
-        fields, za, awr = synthesiseMF1Header(source, report)
+        fields, za, awr = synthesiseMF1Header(source, report, targetZA=za)
         missing = []
     if missing:
         sourceFormat = getattr(provenance, "sourceFormat", "unknown")

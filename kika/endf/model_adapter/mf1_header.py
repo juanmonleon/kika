@@ -189,8 +189,12 @@ def _level(suite, target: str, report) -> Tuple[int, float, int, int]:
     return lis, elis, sta, liso
 
 
-def synthesiseMF1Header(suite, report) -> Tuple[Dict[str, object], int, float]:
+def synthesiseMF1Header(suite, report, *, targetZA: Optional[int] = None
+                        ) -> Tuple[Dict[str, object], int, float]:
     """``(headerFields, ZA, AWR)`` derived from *suite*, for :func:`encodeMF1MT451`.
+
+    *targetZA* overrides the ZA spelled by the target id. A thermal-scattering
+    target (``tnsl-…``) spells none, so for one it is required.
 
     Raises when the suite has no ``evaluated`` style: TEMP, EMAX and the library
     all live there, and a header without them would be invented, not derived.
@@ -205,8 +209,15 @@ def synthesiseMF1Header(suite, report) -> Tuple[Dict[str, object], int, float]:
             "the library, version, temperature and energy domain all live there"
         )
 
+    from kika.nuclear_data.model.thermal_scattering import TNSL_INTERACTION
+
     target = suite.target
-    za = zaFromPid(target)
+    thermal = getattr(suite, "interaction", None) == TNSL_INTERACTION
+    if thermal and targetZA is None:
+        raise ValueError(
+            f"the thermal-scattering target {target!r} spells no ZA: its MF1/451 "
+            f"pseudo-ZA has to be given (derive/suite.py writes MAT + 100)")
+    za = int(targetZA) if targetZA is not None else zaFromPid(target)
     neutronAmu = _massAmu(suite.PoPs.particles.get("n")) or NEUTRON_MASS_AMU
     awr = _awr(suite.PoPs, target, za, neutronAmu, "target", report)
 
@@ -216,7 +227,9 @@ def synthesiseMF1Header(suite, report) -> Tuple[Dict[str, object], int, float]:
         0.0 if ipart == 0 else _awr(suite.PoPs, projectile, ipart, neutronAmu,
                                      "projectile", report))
     mts = {getattr(reaction, "ENDF_MT", None) for reaction in suite.reactions}
-    itype = 3 if any(mt is not None and 500 <= mt < 573 for mt in mts) else 0
+    # ENDF-102 §1.1: ITYPE 2 is thermal neutron scattering (NSUB = 12).
+    itype = 2 if thermal else (
+        3 if any(mt is not None and 500 <= mt < 573 for mt in mts) else 0)
 
     nlib = nlibFromLibrary(style.library)
     if nlib is None:

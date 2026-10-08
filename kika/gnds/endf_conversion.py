@@ -8,6 +8,7 @@ else is left to the caller's loss report, untouched.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from typing import Optional
 
 from kika.nuclear_data.model.endf_conversion import (ENDF_CONVERSION_INSTITUTION,
                                                      EndfConversionFlags)
@@ -15,6 +16,7 @@ from kika.nuclear_data.model.endf_conversion import (ENDF_CONVERSION_INSTITUTION
 __all__ = ["readConversionFlags", "writeConversionFlags"]
 
 _TAG = "ENDFconversionFlags"
+_SUITE_HREF = "/reactionSuite"
 
 
 def readConversionFlags(applicationData: ET.Element, suite, report):
@@ -48,9 +50,56 @@ def readConversionFlags(applicationData: ET.Element, suite, report):
     return rest
 
 
+def _principalZA(suite) -> Optional[int]:
+    """The ZA of the principal scatterer, when it is a nuclide PoPs knows."""
+    from kika.nuclear_data.model import EVAL_LABEL, IncoherentInelastic, Nuclide
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    for reaction in suite.reactions:
+        ddcs = reaction.doubleDifferentialCrossSection
+        form = ddcs.get(EVAL_LABEL) if ddcs is not None else None
+        if isinstance(form, IncoherentInelastic) and form.principal is not None:
+            particle = suite.PoPs.particles.get(form.principal.pid)
+            if isinstance(particle, Nuclide):
+                return zaFromPid(particle.id)
+    return None
+
+
+def _tslFlags(suite) -> Optional[EndfConversionFlags]:
+    """FUDGE's ``MAT=…,ZA=…`` note on ``/reactionSuite``, for a TSL suite read from ENDF.
+
+    A thermal-scattering target is an ``unorthodox`` particle (``tnsl-…``), so
+    nothing in GNDS spells its MAT and no table has one. FUDGE writes this note
+    on every TSL evaluation it converts (``ENDF_ITYPE_2.py``) and cannot write
+    one back to ENDF without it. **Its ZA is the principal scatterer's** (1001
+    for s-CH4, 4009 for Be metal), which FUDGE looks a mass up by -- not the
+    MAT + 100 pseudo-ZA of the tape's headers. kika writes it when the principal
+    atom is a nuclide in PoPs (MF7/MT451 named it), and ``MAT=`` alone otherwise.
+    """
+    from kika.nuclear_data.model.thermal_scattering import TNSL_INTERACTION
+
+    if getattr(suite, "interaction", None) != TNSL_INTERACTION:
+        return None
+    mat = getattr(getattr(suite, "provenance", None), "mat", None)
+    if mat is None:
+        return None
+    za = _principalZA(suite)
+    text = f"MAT={int(mat)}" + (f",ZA={za}" if za is not None else "")
+    return EndfConversionFlags([(_SUITE_HREF, text)])
+
+
 def writeConversionFlags(root: ET.Element, suite) -> None:
-    """Append the suite's flags to *root*'s ``applicationData``, creating it if needed."""
+    """Append the suite's flags to *root*'s ``applicationData``, creating it if needed.
+
+    A TSL suite read from ENDF has no flags of its own; it gets FUDGE's
+    ``MAT=…,ZA=…`` note (:func:`_tslFlags`), unless its flags already state a MAT.
+    """
     flags = EndfConversionFlags.of(suite)
+    if not flags or "MAT" not in flags.flagsFor(_SUITE_HREF):
+        synthesised = _tslFlags(suite)
+        if synthesised is not None:
+            flags = EndfConversionFlags(synthesised.conversions
+                                        + (list(flags.conversions) if flags else []))
     if not flags:
         return
     application = root.find("applicationData")

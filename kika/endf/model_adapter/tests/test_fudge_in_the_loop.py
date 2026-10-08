@@ -307,7 +307,8 @@ def test_the_one_tsl_difference_is_a_repeated_point_kika_keeps(fudgePython):
 @pytest.fixture(scope="module", params=sorted(_TSL))
 def tslGnds(request, fudgePython, tmp_path_factory):
     """kika's ENDF decode, FUDGE's reading of the tape, FUDGE's reading of the
-    GNDS kika wrote from it, and kika's reading of the GNDS FUDGE wrote."""
+    GNDS kika wrote from it, kika's reading of the GNDS FUDGE wrote, the ENDF
+    FUDGE writes from kika's GNDS, and the path of FUDGE's GNDS."""
     import kika
 
     key = request.param
@@ -320,7 +321,8 @@ def tslGnds(request, fudgePython, tmp_path_factory):
     fromKika = _runFudge(fudgePython, ours, "suite.xml")
     theirs = folder / "fudge.xml"
     theirs.write_text(fromEndf["gnds"])
-    return suite, fromEndf["tsl"], fromKika["tsl"], kika.read(theirs, covariances=False)
+    return (suite, fromEndf["tsl"], fromKika["tsl"], kika.read(theirs, covariances=False),
+            fromKika.get("endf") or fromKika.get("endfError"), theirs)
 
 
 def _assertSameDump(ours, theirs, path="tsl"):
@@ -344,7 +346,7 @@ def _assertSameDump(ours, theirs, path="tsl"):
 
 def test_fudge_reads_the_tsl_gnds_kika_writes(tslGnds):
     """FUDGE opens kika's file and finds what it finds in the ENDF tape."""
-    _, fromEndf, fromKika, _ = tslGnds
+    _, fromEndf, fromKika, _, _, _ = tslGnds
     _assertSameDump(fromEndf, fromKika)
 
 
@@ -358,7 +360,7 @@ def test_kika_reads_the_tsl_gnds_fudge_writes(tslGnds):
     from kika.nuclear_data.model import (EVAL_LABEL, CoherentElastic, IncoherentElastic,
                                          IncoherentInelastic)
 
-    suite, _, _, theirs = tslGnds
+    suite, _, _, theirs, _, _ = tslGnds
     assert str(theirs.interaction) == "thermalNeutronScatteringLaw"
     assert len(theirs.reactions) == len(suite.reactions)
     for mine, other in zip(suite.reactions, theirs.reactions):
@@ -393,3 +395,53 @@ def test_kika_reads_the_tsl_gnds_fudge_writes(tslGnds):
             for ga, gb in zip(ka.grids, kb.grids):
                 np.testing.assert_allclose(ga.values, gb.values, rtol=RTOL)
             np.testing.assert_allclose(ka.values, kb.values, rtol=RTOL)
+
+
+# ----------------------------------------------------------------------
+# The thermal scattering law from GNDS back to ENDF (roadmap E4), both ways
+# ----------------------------------------------------------------------
+
+def _sameTslForms(suite, tape: Path):
+    """*tape*, decoded by kika, holds the forms *suite* holds (the GNDS test's rule)."""
+    from kika.gnds.tests.test_thermal_scattering import _form, _sameForm
+
+    back, _ = decodeReactionSuite(read_endf(str(tape)))
+    assert [r.label for r in back.reactions] == [r.label for r in suite.reactions]
+    for before, after in zip(suite.reactions, back.reactions):
+        _sameForm(_form(before), _form(after))
+    return back
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "FUDGE's toENDF6 needs the projectile in PoPs (`PoPs['n']`) and a mass for the "
+    "note's principal ZA; no GNDS kika writes from ENDF carries the neutron "
+    "(endf_coverage_roadmap.md, transversal T6)"))
+def test_fudge_writes_endf_from_the_tsl_gnds_kika_writes(tslGnds, tmp_path):
+    """FUDGE needs the MAT=… note to write a TSL tape; kika writes it since 2026-10-08.
+
+    Its tape must hold the forms kika decodes from the source, under the
+    source's MAT. Still short of that: see the xfail.
+    """
+    suite, _, _, _, endf, _ = tslGnds
+    assert not endf.startswith(("KeyError", "ValueError")), endf
+    tape = tmp_path / "fudge_from_kika.endf"
+    tape.write_text(endf)
+    back = _sameTslForms(suite, tape)
+    assert back.provenance.mat == suite.provenance.mat
+
+
+def test_kika_writes_endf_from_the_tsl_gnds_fudge_writes(tslGnds, tmp_path):
+    """kika takes the MAT from FUDGE's note and writes the tape's forms back.
+
+    The note's ZA is FUDGE's principal atom (1001 for s-CH4); the header's
+    pseudo-ZA is MAT + 100 either way, which is also what FUDGE writes.
+    """
+    import kika
+    from kika.endf.writers.assemble import writeEndfTape
+
+    suite, _, _, _, _, theirs = tslGnds
+    tape = tmp_path / "kika_from_fudge.endf"
+    writeEndfTape(kika.read(theirs, covariances=False), tape)
+    back = _sameTslForms(suite, tape)
+    assert (back.provenance.mat, back.provenance.za) == (suite.provenance.mat,
+                                                         suite.provenance.mat + 100)
