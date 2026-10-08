@@ -78,3 +78,32 @@ def test_legacy_nested_schema_is_still_read(metadata_file):
 def test_tof_block_with_a_null_falls_back(metadata_file):
     metadata_file({"1": {"tof": {"flight_path_m": None, "time_resolution_ns": 3.0}}})
     assert _get_tof_params_for_experiment("1")["source"] == "default"
+
+
+class TestCuratedResolution:
+    """The channels of the file that rank above the (L, dt) pair."""
+
+    def test_a_bare_en_rsl_resolved_from_the_bib_is_a_half_width(self):
+        from kika.exfor.database import _get_curated_resolution, _load_tof_metadata
+        _load_tof_metadata(force_reload=True)
+        r = _get_curated_resolution("20197006")["curated_resolution"]
+        assert r["convention"] == "half_width"
+        assert r["assumed_fwhm"] is False
+        assert r["fwhm_mev"] == pytest.approx(0.03)
+        assert "BIB" in r["convention_source"]
+
+    def test_an_unresolved_bare_en_rsl_says_it_was_assumed(self):
+        from kika.exfor.database import _get_curated_resolution
+        r = _get_curated_resolution("10332004")["curated_resolution"]
+        assert r["convention"] == "unspecified"
+        assert r["assumed_fwhm"] is True
+        assert r["review_required"] is True
+
+    def test_a_spread_comes_with_its_shape(self):
+        from kika.exfor.database import _get_curated_resolution
+        s = _get_curated_resolution("40372004")["energy_spread"]
+        assert s == {"full_width_mev": 0.6, "shape": "box", "ref": s["ref"]}
+
+    def test_an_entry_the_file_does_not_have_has_nothing(self):
+        from kika.exfor.database import _get_curated_resolution
+        assert _get_curated_resolution("00000000") == {}

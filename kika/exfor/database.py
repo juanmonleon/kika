@@ -133,17 +133,89 @@ def _get_tof_params_for_experiment(dataset_id: str) -> Dict[str, Any]:
             distance = (eri.get("distance") or {}).get("value")
             time_res = (eri.get("time_resolution") or {}).get("value")
         if distance is not None and time_res is not None:
-            return {
+            params = {
                 "flight_path_m": float(distance),
                 "time_resolution_ns": float(time_res),
                 "source": "file",
             }
+            # Which measurement the pair belongs to, when the entry says
+            # (``tof.facility``). One EXFOR entry can hold the same work done
+            # at two facilities under two subentries (Pirovano 2019: GELINA in
+            # 23365004, nELBE in 23365005), and the numbers alone do not say
+            # which one the reader is looking at.
+            if isinstance(tof, dict) and isinstance(tof.get("facility"), str):
+                params["facility"] = tof["facility"]
+            return params
 
     return {
         "flight_path_m": _TOF_DEFAULT_FLIGHT_PATH_M,
         "time_resolution_ns": _TOF_DEFAULT_TIME_RESOLUTION_NS,
         "source": "default",
     }
+
+#: The conventions the TOF-parameters file resolves a declared width to, and
+#: whether the resolution is a reading of the entry or the LEXFOR default.
+_CURATED_CONVENTIONS = {
+    "FWHM": ("full_width", False),
+    "half-width": ("half_width", False),
+    "half-width (probable)": ("half_width", False),
+    "unspecified, assumed FWHM": ("unspecified", True),
+}
+
+
+def _get_curated_resolution(dataset_id: str) -> Dict[str, Any]:
+    """The incident-energy resolution blocks of the TOF-parameters file.
+
+    The file is the one the Fe-56 evaluation reads, and beyond the (L, dt) pair
+    (:func:`_get_tof_params_for_experiment`) it carries two channels that rank
+    above it (``scripts/tof_parameters.py:get_tof_parameters``):
+
+    ``energy_resolution``
+        the EXFOR EN-RSL* sweep, with the convention resolved from the heading
+        or, for a bare EN-RSL, from the entry's BIB text where it says (else
+        "unspecified, assumed FWHM", LEXFOR's "usually"). ``fwhm_mev`` is
+        already a FWHM. ``review_required`` marks a width the sweep found
+        implausible as a resolution; the pipeline quarantines it.
+    ``energy_spread``
+        a spread read from the BIB text, ``full_width_mev`` with a ``shape``
+        (``box`` or ``fwhm``).
+
+    Returned as ``{"curated_resolution": {...}, "energy_spread": {...}}`` with
+    only what the entry has, normalised to the keys a consumer needs: the
+    convention as ``full_width``/``half_width``/``unspecified`` plus
+    ``assumed_fwhm``, and the free text that decided it.
+    """
+    metadata = _load_tof_metadata()
+    entry = metadata.get(dataset_id) if isinstance(metadata, dict) else None
+    out: Dict[str, Any] = {}
+    if not isinstance(entry, dict):
+        return out
+
+    declared = entry.get("energy_resolution")
+    if isinstance(declared, dict) and declared.get("fwhm_mev") is not None:
+        convention, assumed = _CURATED_CONVENTIONS.get(
+            declared.get("convention", ""), ("unspecified", True)
+        )
+        out["curated_resolution"] = {
+            "header": declared.get("header", "EN-RSL"),
+            "convention": convention,
+            "assumed_fwhm": assumed,
+            "convention_note": declared.get("convention"),
+            "convention_source": declared.get("convention_source"),
+            "fwhm_mev": float(declared["fwhm_mev"]),
+            "review_required": bool(declared.get("review_required", False)),
+            "note_review": declared.get("note_review"),
+        }
+
+    spread = entry.get("energy_spread")
+    if isinstance(spread, dict) and spread.get("full_width_mev") is not None:
+        out["energy_spread"] = {
+            "full_width_mev": float(spread["full_width_mev"]),
+            "shape": spread.get("shape", "box"),
+            "ref": spread.get("ref"),
+        }
+    return out
+
 
 @dataclass
 class X4ProDataset:
@@ -1772,7 +1844,18 @@ class X4ProDatabase:
                 "unit": "ns",
             },
             "source": tof_params.get("source", "default"),
+            # Where the (L, dt) pair itself came from. `source` is replaced by
+            # the declared width's tag below when there is one, and a consumer
+            # still needs to know whether the geometry is a curated reading or
+            # the GELINA placeholder before it offers it to anyone.
+            "geometry_source": tof_params.get("source", "default"),
         }
+        if tof_params.get("facility"):
+            energy_resolution_input["facility"] = tof_params["facility"]
+        # The curated channels that rank above the geometry, when the entry
+        # has them. Added alongside, not merged into `declared`: that one is
+        # what EXFOR itself says, this is what the curation made of it.
+        energy_resolution_input.update(_get_curated_resolution(dataset.dataset_id))
 
         # The experiment's own declared resolution outranks anything curated
         # externally, and covers far more of the corpus. It is *added* rather
