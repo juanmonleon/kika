@@ -45,7 +45,8 @@ def evaluate_bw(energies, groups, approximation, context):
         k2 = ctx.k_squared_per_ev * energies
         beta = np.pi * 0.01 / k2  # fm^2 -> barn
         l = group.l
-        p, s, _ = neutral_channel_functions(l, np.sqrt(k2) * group.channel_radius.evaluate(energies))
+        radius = group.channel_radius.evaluate(energies)
+        p, s, _ = neutral_channel_functions(l, np.sqrt(k2) * radius)
         if any(level.neutron for level in group.levels) and np.any(p == 0):
             raise FloatingPointError('neutron penetrability underflows at an evaluation energy')
         _, _, phi = neutral_channel_functions(l, np.sqrt(k2) * group.phase_radius.evaluate(energies))
@@ -55,9 +56,13 @@ def evaluate_bw(energies, groups, approximation, context):
         if approximation == "SingleLevel":
             elastic += beta * (2*l + 1) * potential
         amplitudes = {}
-        for level in group.levels:
-            pr, sr, _ = neutral_channel_functions(
-                l, np.sqrt(ctx.k_squared_per_ev * abs(level.energy)) * group.channel_radius.evaluate(abs(level.energy)))
+        # Evaluate level-reference quantities once as a vector, rather than
+        # invoking table/channel validation for every level in every block.
+        reference_energies=np.asarray([abs(level.energy) for level in group.levels])
+        reference_radii=group.channel_radius.evaluate(reference_energies)
+        reference_p=neutral_channel_functions(l,np.sqrt(ctx.k_squared_per_ev*reference_energies)*reference_radii)[0]
+        for level_index,level in enumerate(group.levels):
+            pr=reference_p[level_index]
             gn = level.neutron * p / pr
             if level.neutron and np.any(gn == 0):
                 raise FloatingPointError('scaled neutron width underflows at an evaluation energy')
@@ -82,17 +87,19 @@ def evaluate_bw(energies, groups, approximation, context):
                         raise FloatingPointError('open competitive penetrability underflows')
                     gx[open_mask] = level.competitive*px/pxr
             width = gn + level.capture + level.fission + gx
-            reference_energy = abs(level.energy)
-            reference_radius = group.channel_radius.evaluate(reference_energy)
-            radius = group.channel_radius.evaluate(energies)
-            radius_delta = group.channel_radius.difference(reference_energy, energies)
-            squared_delta = ctx.k_squared_per_ev * (
-                (reference_energy-energies)*reference_radius**2
-                + energies*radius_delta*(reference_radius+radius))
-            shift_delta = neutral_shift_difference(l,
-                ctx.k_squared_per_ev*reference_energy*reference_radius**2,
-                k2*radius**2, squared_delta)
-            delta = (energies-level.energy) - level.neutron*shift_delta/(2*pr)
+            if l==0:
+                delta=energies-level.energy  # Neutral S_0 is identically zero.
+            else:
+                reference_energy = reference_energies[level_index]
+                reference_radius = reference_radii[level_index]
+                radius_delta = group.channel_radius.difference(reference_energy, energies)
+                squared_delta = ctx.k_squared_per_ev * (
+                    (reference_energy-energies)*reference_radius**2
+                    + energies*radius_delta*(reference_radius+radius))
+                shift_delta = neutral_shift_difference(l,
+                    ctx.k_squared_per_ev*reference_energy*reference_radius**2,
+                    k2*radius**2, squared_delta)
+                delta = (energies-level.energy) - level.neutron*shift_delta/(2*pr)
             denominator = delta**2 + (width/2)**2
             g = (2*level.spin + 1) / (2*(2*ctx.target_spin + 1))
             capture += beta * g * gn * level.capture / denominator

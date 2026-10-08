@@ -33,6 +33,7 @@ class ConversionReport:
     losses: List[str] = field(default_factory=list)
     approximations: List[str] = field(default_factory=list)
     unsupported: List[str] = field(default_factory=list)
+    scopeExclusions: List[dict] = field(default_factory=list)
 
     def warn(self, message: str) -> None:
         self.warnings.append(message)
@@ -43,14 +44,39 @@ class ConversionReport:
     def approximated(self, message: str) -> None:
         self.approximations.append(message)
 
-    def unsupportedNode(self, message: str) -> None:
+    def unsupportedNode(self, message: str, *, unaffectedScopes=()) -> None:
+        """Declare a limitation, optionally proven irrelevant to named consumers.
+
+        The global report remains unclean. Unannotated entries always block
+        scoped checks; consumers must not infer scope by parsing messages.
+        """
         self.unsupported.append(message)
+        if unaffectedScopes:
+            self.scopeExclusions.append(dict(kind='unsupported', message=message,
+                                             scopes=list(unaffectedScopes)))
 
     def extend(self, other: "ConversionReport") -> None:
         self.warnings.extend(other.warnings)
         self.losses.extend(other.losses)
         self.approximations.extend(other.approximations)
         self.unsupported.extend(other.unsupported)
+        self.scopeExclusions.extend(other.scopeExclusions)
+
+    def isCleanFor(self, scope: str) -> bool:
+        """Whether every issue is absent or explicitly irrelevant to ``scope``.
+
+        Count occurrences so a tagged entry cannot exempt another, identical
+        but unannotated issue added by a different converter.
+        """
+        from collections import Counter
+        excluded = Counter((entry['kind'], entry['message'])
+                           for entry in self.scopeExclusions
+                           if scope in entry['scopes'])
+        for kind in ('losses', 'approximations', 'unsupported'):
+            for message, count in Counter(getattr(self, kind)).items():
+                if count > excluded[(kind, message)]:
+                    return False
+        return True
 
     @property
     def isClean(self) -> bool:

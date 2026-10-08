@@ -6,6 +6,9 @@ import numpy as np
 
 class ReconstructionConvergenceError(RuntimeError):
     """No result is returned when a requested numerical budget is exhausted."""
+    def __init__(self,message,*,category='verification-failed'):
+        super().__init__(message)
+        self.category=category
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,7 @@ def linearize(evaluate, seeds, options, point_budget):
 
     x=np.unique(np.asarray(seeds,dtype=float))
     if len(x)>point_budget:
-        raise ReconstructionConvergenceError('seed grid exceeds max_points')
+        raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
     first=evaluate(x)
     seeded=len(x)
     mts=list(first)
@@ -75,7 +78,8 @@ def linearize(evaluate, seeds, options, point_budget):
         message={'points':'refinement exceeds max_points',
                  'passes':'refinement exceeds max_iterations',
                  'unresolvable':'required separation is not representable in float64'}[exc.reason]
-        raise ReconstructionConvergenceError(message) from exc
+        category={'points':'budget-exhausted','passes':'iterations-exhausted','unresolvable':'float64-separation'}[exc.reason]
+        raise ReconstructionConvergenceError(message,category=category) from exc
     x=result.x
     y={mt:result.y[:,j] for j,mt in enumerate(mts)}
     probes,actual=result.probe_x,result.probe_y

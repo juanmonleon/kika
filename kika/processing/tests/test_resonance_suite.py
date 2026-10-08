@@ -98,10 +98,15 @@ def test_reference_resolution_and_cycle_failure():
     with pytest.raises(ValueError,match='cycle'):run(suite)
 
 
-def test_inconsistent_or_missing_sum_components_reject_whole_material():
+def test_inconsistent_source_sum_is_diagnosed_and_missing_graph_rejects():
     suite=suite_model()
     suite.sums[1].summands.summands.pop()
-    with pytest.raises(UnsupportedResonanceError,match='does not close'):run(suite)
+    result=run(suite)
+    key=ReactionKey('sums','total')
+    assert result.report['source_sum_error_ratios'][key]>1
+    assert result.report['source_sum_policy']=='derive-from-leaves'
+    values=result.evaluate([500.])
+    np.testing.assert_allclose(values[key],values[ReactionKey('reactions','elastic')]+values[ReactionKey('reactions','capture')])
     suite=suite_model();suite.sums[1].summands=Summands()
     with pytest.raises(UnsupportedResonanceError,match='component graph'):run(suite)
 

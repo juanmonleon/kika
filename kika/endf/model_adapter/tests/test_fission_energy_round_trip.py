@@ -36,6 +36,19 @@ def test_the_section_written_from_the_model_is_the_section_read(micro_fission_en
     assert str(section) == str(endf.mf[1].mt[458])
 
 
+def test_lfc1_limitation_is_explicitly_independent_of_cross_sections():
+    from pathlib import Path
+    path = (Path(__file__).resolve().parents[2] / 'tests' / 'data'
+            / 'micro_u235_fission_energy.endf')
+    # Use the real tabulated MF1/458 fixture, preserving its raw uncertainties.
+    endf=read_endf(str(path))
+    from kika.endf.model_adapter.fission_energy import decodeMF1MT458
+    node,report=decodeMF1MT458(endf.mf[1].mt[458],domain=(1e-5,endf.mf[1].mt[451]._emax))
+    assert not report.isClean
+    assert report.isCleanFor('cross-sections')
+    assert report.unsupported
+
+
 def test_the_node_sits_on_the_fission_channel_with_nine_terms(micro_fission_energy_tape):
     _endf, suite, _report = _decode(micro_fission_energy_tape)
     data = suite.findReactionByENDF_MT(18).outputChannel.fissionFragmentData

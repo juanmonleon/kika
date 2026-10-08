@@ -12,6 +12,7 @@ This section contains detailed tutorials to help you learn how to use KIKA effec
    mctal_files
    pert_cards
    sensitivity_analysis
+   native_resonance_reconstruction
 
 
 You can run these tutorials by cloning the KIKA repository and opening the notebooks:

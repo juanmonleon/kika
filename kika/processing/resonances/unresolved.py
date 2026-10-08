@@ -209,14 +209,14 @@ def prepare_unresolved(region,context,notes):
             if spin.unit!='hbar' or float(spin.value)!=context.target_spin:
                 raise ValueError('URR target spin disagrees with the explicit context')
     policy=source.radiusPolicy
-    if policy is None:raise UnsupportedResonanceError('URR radius policy is absent; declare radiusPolicy explicitly before calculating')
+    if policy is None:raise UnsupportedResonanceError('URR radius policy is absent; declare radiusPolicy explicitly before calculating',category='missing-radius-policy')
     phase=prepare_radius(policy.phaseRadius if policy.phaseRadius is not None else source.scatteringRadius)
     groups=[];seen=set();laws=set();grids=[];policies=[];lcontexts={}
     for sg in source.spinGroups:
         l,j=sg.L,float(sg.J)
         if not isinstance(l,(int,np.integer)) or not 0<=l<=64 or not np.isfinite(j) or j<0 or not float(2*j).is_integer():raise ValueError('invalid URR L/J')
         allowed=any(abs(l-s)<=j<=l+s and float(l+s-j).is_integer() for s in {abs(context.target_spin-.5),context.target_spin+.5})
-        if not allowed:raise ValueError(f'URR J={j:g} is incompatible with I={context.target_spin:g}, L={l}')
+        if not allowed:raise UnsupportedResonanceError(f'URR J={j:g} is incompatible with I={context.target_spin:g}, L={l}',category='invalid-J')
         if (l,j) in seen:raise ValueError('duplicate URR L/J group')
         seen.add((l,j));ctx=context if sg.atomicWeightRatio is None else replace(context,atomic_weight_ratio=sg.atomicWeightRatio)
         if l in lcontexts and lcontexts[l]!=ctx:raise UnsupportedResonanceError('URR groups of one L disagree on mass')

@@ -123,7 +123,7 @@ def decodeMF2MT151(mf2mt151, report: Optional[ConversionReport] = None, *, compe
                             raise ValueError("competitive supplement disagrees with ENDF QX/LRX")
                         group.competitiveChannel = replace(descriptor, inEvaluatedBackground=True)
 
-    if not resonances.resolved and resonances.unresolved is None:
+    if not resonances.resolved and resonances.unresolved is None and not any(r.get('kind')=='radiusOnly' for r in regions):
         report.lost("MF2/151 yielded no resonance region")
 
     provenance = EndfProvenance(

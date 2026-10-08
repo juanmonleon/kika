@@ -103,7 +103,7 @@ def _segments(prepared,backgrounds):
         for curves in backgrounds.values():
             for curve in curves:
                 cuts.update(x for x in (curve.x[0],curve.x[-1]) if region.low<x<region.high)
-                if curve.law==1:cuts.update(x for x in curve.x[1:] if region.low<x<region.high)
+                cuts.update(x for x in curve.breaks if region.low<x<region.high)
         for group in region.groups:
             cuts.update(x for x in group_breaks(group) if region.low<x<region.high)
             for radius in group_radii(group):
@@ -130,7 +130,7 @@ def _seeds(segment,context):
         seeds.extend(x for x in segment.region.unresolved.grid if lo<=x<=hi)
     for curves in segment.backgrounds.values():
         seeds.extend(x for c in curves for x in c.x if lo<x<hi)
-        if not segment.left_high and any(c.law==1 and c.x[-1]==hi and c.y[-1]!=c.y[-2] for c in curves):
+        if not segment.left_high and any(c.x[-1]==hi and c.endpoint_jump for c in curves):
             seeds.append(np.nextafter(hi,lo))
     for g in segment.region.groups:
         ctx=g.context or context

@@ -12,6 +12,9 @@ from .channel_functions import neutral_channel_functions
 
 class UnsupportedResonanceError(ValueError):
     """The requested model contains physics not supported by this evaluator."""
+    def __init__(self,message,*,category='unsupported-physics'):
+        super().__init__(message)
+        self.category=category
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,7 @@ class PreparedResonances:
     For ENDF BW, competition already belongs to MF3: assembly must honor
     ``competitive_in_background`` and must not add that partial twice.
     """
-    context: NeutronContext
+    context: NeutronContext | None
     regions: tuple[PreparedRegion, ...]
     preparation_notes: tuple[str, ...] = ()
 
@@ -69,7 +72,7 @@ def _positive(value, name):
     return float(value)
 
 
-def prepare_resonances(resonances, context, *, conversion_report=None):
+def prepare_resonances(resonances, context, *, conversion_report=None, allow_empty=False):
     """Prepare model ``Resonances``; explicit context, no ENDF width positions.
 
     Neutron BW/RM, scalar/tabulated radii in fm; BW also supports explicit competition.
@@ -80,14 +83,15 @@ def prepare_resonances(resonances, context, *, conversion_report=None):
     """
     from kika.nuclear_data.model.resonances import BreitWigner, Resonances, RMatrix
 
-    if not isinstance(resonances, Resonances) or not isinstance(context, NeutronContext):
+    empty=isinstance(resonances,Resonances) and not resonances.resolved and resonances.unresolved is None
+    if not isinstance(resonances, Resonances) or not (isinstance(context,NeutronContext) or (allow_empty and empty and context is None)):
         raise TypeError("expected model Resonances and NeutronContext")
-    if conversion_report is not None and not conversion_report.isClean:
-        raise UnsupportedResonanceError("input conversion reports losses, approximations or unsupported data")
-    if not resonances.resolved and resonances.unresolved is None:
+    if conversion_report is not None and not conversion_report.isCleanFor('cross-sections'):
+        raise UnsupportedResonanceError("input conversion reports losses, approximations or unsupported data",category='conversion-not-clean')
+    if empty and not allow_empty:
         raise ValueError("no resonance regions")
     header = getattr(resonances.provenance, "headerFields", None) or {}
-    if len(header.get("isotopes", [])) > 1:
+    if not empty and len(header.get("isotopes", [])) > 1:
         raise UnsupportedResonanceError("isotope mixtures are not implemented")
     for record in header.get("regions", []):
         if record.get("kind") == "unsupported" or (record.get("kind") == "unresolved" and resonances.unresolved is None):

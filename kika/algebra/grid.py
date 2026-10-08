@@ -70,6 +70,23 @@ def split_at_discontinuities(x, y, laws) -> List[Tuple[np.ndarray, np.ndarray, n
     and is refused, since it states a value no interval owns.
     """
     x, y, laws = validate(x, y, laws)
+    # ENDF can repeat an identical threshold point more than twice. Such
+    # extra copies state no extra one-sided value; remove only consecutive
+    # equal values within those runs. Distinct intermediate values remain
+    # ambiguous and are still refused below. Keep an ordinary two-point
+    # repeat, including a continuous region boundary, unchanged.
+    repeated=np.diff(x)==0
+    transitions=np.flatnonzero(np.diff(np.r_[False,repeated,False]))
+    keep=np.ones(len(x),dtype=bool)
+    for a,b in zip(transitions[::2],transitions[1::2]):
+        if b-a<2:continue
+        retained=[a]+[i for i in range(a+1,b+1) if not np.array_equal(y[i],y[i-1])]
+        if len(retained)==1:retained=[a,b]
+        else:retained[-1]=b
+        keep[a:b+1]=False;keep[retained]=True
+    if not np.all(keep):
+        indices=np.flatnonzero(keep)
+        x,y,laws=x[indices],y[indices],laws[indices[1:]-1]
     cuts = np.r_[0, discontinuities(x) + 1, x.size]
     pieces = []
     for a, b in zip(cuts[:-1], cuts[1:]):

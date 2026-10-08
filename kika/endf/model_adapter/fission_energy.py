@@ -201,7 +201,8 @@ def decodeMF1MT458(section, report: Optional[ConversionReport] = None,
                 f"table replaces the thermal value the LIST states for it, and "
                 f"that value, its uncertainty and the TAB1's LDRV have no GNDS "
                 f"node; they are kept in provenance and written back. A table "
-                f"carries no uncertainty in the model"
+                f"carries no uncertainty in the model",
+                unaffectedScopes=('cross-sections',),
             )
 
     node.provenance = EndfProvenance(

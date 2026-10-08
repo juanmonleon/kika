@@ -17,7 +17,7 @@ from .breit_wigner import evaluate_bw
 from .prepare import evaluate_region, group_radii, group_knots, group_breaks
 from .context import NeutronContext
 from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize, error_ratio
-from .prepare import prepare_resonances, UnsupportedResonanceError
+from .prepare import PreparedResonances, prepare_resonances, UnsupportedResonanceError
 from .tabulate import _Segment, _seeds
 
 
@@ -144,7 +144,7 @@ def _graph(entries,style):
     for key,reaction in entries.items():
         if key.container!='sums':continue
         summands=getattr(reaction,'summands',None)
-        if not summands:raise UnsupportedResonanceError(f'sum {key.label} has no component graph; completeness cannot be certified')
+        if not summands:raise UnsupportedResonanceError(f'sum {key.label} has no component graph; completeness cannot be certified',category='sum-without-graph')
         targets=[_target(part.href,_path(key).rsplit('/crossSection',1)[0]+'/summands/add',entries,style) for part in summands]
         if any(label!=style for _,label in targets):raise UnsupportedResonanceError('sum links must select the requested source style')
         graph[key]=tuple(target for target,_ in targets)
@@ -164,6 +164,10 @@ def _graph(entries,style):
     return graph,tuple(order)
 
 
+def _sum_leaves(key,graph):
+    return {key} if key not in graph else set().union(*(_sum_leaves(part,graph) for part in graph[key]))
+
+
 def _curves(forms):
     from kika.nuclear_data.model import ResonancesWithBackground,Background
     out={}
@@ -176,8 +180,8 @@ def _curves(forms):
             if form.background is None:raise ValueError('missing resonance background')
             form=form.background
         if isinstance(form,Background):
-            pieces=[v for v in (form.resolvedRegion,form.unresolvedRegion,form.fastRegion) if v is not None]
-            if not pieces:raise ValueError('empty resonance background')
+            out[key]=prepare_backgrounds({2:form})[2]
+            continue
         else:pieces=[form]
         curves=[]
         for piece in pieces:curves.extend(prepare_backgrounds({2:piece})[2])
@@ -210,11 +214,16 @@ class SuiteReconstructionResult:
     _order: tuple
     _mt_keys: object
     _source_hash: str
+    _physical_owners: object
 
     def _evaluate_segment(self,s,points,include_resonances=True):
         e=np.asarray(points,dtype=float).copy()
         if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
-        values={key:(curve.evaluate(e) if curve is not None else np.zeros(len(e))) for key,curve in s.curves.items()}
+        values={key:(curve.evaluate(e) if curve is not None and
+                    (not include_resonances or key not in self._graph) else np.zeros(len(e)))
+                for key,curve in s.curves.items()}
+        total=self._mt_keys.get(1)
+        total_parts=_sum_leaves(total,self._graph) if total is not None else None
         if include_resonances and s.region is not None:
             for start in range(0,len(e),self.options.block_size):
                 sl=slice(start,start+self.options.block_size)
@@ -227,8 +236,11 @@ class SuiteReconstructionResult:
                         physical[g.competitive_mt]-=evaluate_bw(e[sl],(g,),s.region.approximation,self._prepared.context)[g.competitive_mt]
                 for mt,value in physical.items():
                     if mt==1:continue
-                    key=self._mt_keys.get(mt)
-                    if key is not None and key not in self._graph:values[key][sl]+=value
+                    key=self._physical_owners.get(mt)
+                    if key is not None and key not in self._graph:
+                        if total_parts is not None and key not in total_parts and np.any(value!=0):
+                            raise UnsupportedResonanceError(f'total graph omits resonance partial MT{mt}',category='incomplete-total-graph')
+                        values[key][sl]+=value
                     elif np.any(value!=0):raise UnsupportedResonanceError(f'MF2 partial MT{mt} has no exclusive model reaction')
         if include_resonances:
             for key in self._order:values[key]=sum((values[part] for part in self._graph[key]),np.zeros(len(e)))
@@ -272,45 +284,51 @@ class SuiteReconstructionResult:
         entries=_entries(suite);chosen=self.label if label is None else label
         projected={r.ENDF_MT:key for key,r in entries.items() if r.ENDF_MT is not None}
         maxima={key:0. for key in self.forms}
-        checked={}
+        checked={};covered=set()
         worst={}
         for key,original in self.forms.items():
             target=key if key in entries else next((projected[mt] for mt,k in self._mt_keys.items() if k==key and mt in projected),None)
             if target is None:raise ValueError(f'reloaded suite lost reaction {key}')
+            covered.add(target)
             form=entries[target].crossSection.get(chosen)
             if form is None:raise ValueError(f'reloaded suite lacks selected form for {key}')
             curves=form.function1ds if isinstance(form,Regions1d) else [form]
             if len(curves)!=len(self._segments):raise ReconstructionConvergenceError('serialized region structure changed')
             checked[key]=curves
+        if covered!=set(entries):raise ReconstructionConvergenceError('serialized reaction coverage changed')
         first=next(iter(self.forms.values()))
         originals=first.function1ds if isinstance(first,Regions1d) else [first]
         for i,(segment,source_curve) in enumerate(zip(self._segments,originals)):
             grid=source_curve.xs
             fractions=np.array([.1732050807568877,.3819660112501051,.6180339887498949,.8267949192431123])
             points=np.r_[grid,(grid[:-1,None]+np.diff(grid)[:,None]*fractions).ravel()]
-            reference=self._evaluate_segment(segment,points)
-            serialized={}
-            for key,curves in checked.items():
-                curve=curves[i]
-                if curve.domainMin!=segment.low or curve.domainMax!=segment.high:raise ReconstructionConvergenceError('serialization moved a domain boundary')
-                if curve.domainUnit!='eV' or curve.rangeUnit!='b' or curve.endfInterpolationCode!=2:
-                    raise ReconstructionConvergenceError('serialized units or interpolation changed')
-                if np.any(np.diff(curve.xs)<0) or np.any(~np.isfinite(curve.xs)) or np.any(~np.isfinite(curve.ys)):
-                    raise ReconstructionConvergenceError('invalid serialized table')
-                values=np.asarray(curve.evaluate(points))
-                if values.shape!=points.shape or np.any(~np.isfinite(values)):
-                    raise ReconstructionConvergenceError('invalid serialized values')
-                serialized[key]=values
-                ratio=error_ratio(reference[key],values,self.options)
-                maximum=float(np.max(ratio))
-                if maximum>maxima[key]:
-                    index=int(np.argmax(ratio))
-                    worst[key]=(float(points[index]),float(reference[key][index]),float(values[index]))
-                maxima[key]=max(maxima[key],maximum)
-            for key in self._order:
-                components=sum((serialized[part] for part in self._graph[key]),np.zeros(len(points)))
-                if np.any(error_ratio(serialized[key],components,self.options)>1):
-                    raise ReconstructionConvergenceError(f'serialized sum does not close within the total budget: {key}')
+            all_points=points
+            verification_batch=max(32768,self.options.block_size)
+            for start in range(0,len(all_points),verification_batch):
+                points=all_points[start:start+verification_batch]
+                reference=self._evaluate_segment(segment,points)
+                serialized={}
+                for key,curves in checked.items():
+                    curve=curves[i]
+                    if curve.domainMin!=segment.low or curve.domainMax!=segment.high:raise ReconstructionConvergenceError('serialization moved a domain boundary')
+                    if curve.domainUnit!='eV' or curve.rangeUnit!='b' or curve.endfInterpolationCode!=2:
+                        raise ReconstructionConvergenceError('serialized units or interpolation changed')
+                    if np.any(np.diff(curve.xs)<0) or np.any(~np.isfinite(curve.xs)) or np.any(~np.isfinite(curve.ys)):
+                        raise ReconstructionConvergenceError('invalid serialized table')
+                    values=np.asarray(curve.evaluate(points))
+                    if values.shape!=points.shape or np.any(~np.isfinite(values)):
+                        raise ReconstructionConvergenceError('invalid serialized values')
+                    serialized[key]=values
+                    ratio=error_ratio(reference[key],values,self.options)
+                    maximum=float(np.max(ratio))
+                    if maximum>maxima[key]:
+                        index=int(np.argmax(ratio))
+                        worst[key]=(float(points[index]),float(reference[key][index]),float(values[index]))
+                    maxima[key]=max(maxima[key],maximum)
+                for key in self._order:
+                    components=sum((serialized[part] for part in self._graph[key]),np.zeros(len(points)))
+                    if np.any(error_ratio(serialized[key],components,self.options)>1):
+                        raise ReconstructionConvergenceError(f'serialized sum does not close within the total budget: {key}')
         if any(not np.isfinite(v) or v>1 for v in maxima.values()):raise ReconstructionConvergenceError(f'reloaded suite exceeds total budget: {maxima}; worst (eV, reference b, serialized b): {worst}')
         return maxima
 
@@ -319,7 +337,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     """Reconstruct a complete supported resonance model suite without mutating it.
 
     Local References and native summand links are resolved. All sums must have
-    a graph and their evaluated values must close at the requested accuracy.
+    a graph. Evaluated aggregate discrepancies are recorded; output aggregates
+    are derived from their exclusive leaves and must close after publication.
     Existing partials are preserved outside supported resonance domains; output aggregates are
     rebuilt once from exclusive leaves. No partial success or automatic fallback.
     """
@@ -333,11 +352,15 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     if any(isinstance(s,CrossSectionReconstructed) for s in chain):raise ValueError('source style already includes resonance reconstruction')
     if not isinstance(chain[-1],Evaluated):raise ValueError('source style must derive from an evaluated style')
     if getattr(suite.provenance,'headerFields',{}).get('lrp')==2:
-        raise ValueError('source ENDF already contains resonance contributions (LRP=2)')
-    if suite.report is not None and not suite.report.isClean:raise UnsupportedResonanceError('suite conversion reports losses or unsupported data')
+        raise UnsupportedResonanceError('source ENDF already contains resonance contributions (LRP=2)',category='already-reconstructed')
+    if getattr(suite.provenance,'headerFields',{}).get('lrp')==1 and suite.resonances is None:
+        raise UnsupportedResonanceError('source declares resonance parameters but MF2 is absent from the model',category='missing-resonance-regions')
+    if suite.report is not None and not suite.report.isCleanFor('cross-sections'):raise UnsupportedResonanceError('suite conversion reports losses or unsupported data affecting cross sections',category='conversion-not-clean')
     if suite.projectile!='n' or str(suite.projectileFrame)!='lab':raise UnsupportedResonanceError('only incident neutron laboratory suites are implemented')
-    if len(suite.incompleteReactions):raise UnsupportedResonanceError('incomplete reactions prevent material coverage certification')
-    if context is None:
+    if len(suite.incompleteReactions):raise UnsupportedResonanceError('incomplete reactions prevent material coverage certification',category='incomplete-reactions')
+    has_resonances=suite.resonances is not None and (suite.resonances.resolved or suite.resonances.unresolved is not None)
+    if context is not None and not isinstance(context,NeutronContext):raise TypeError('expected NeutronContext')
+    if context is None and has_resonances:
         try:target=suite.PoPs[suite.target];neutron=suite.PoPs[suite.projectile]
         except KeyError as exc:raise ValueError('supply explicit NeutronContext when model particles are incomplete') from exc
         if target.mass is None or neutron.mass is None or target.spin is None:
@@ -347,13 +370,18 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     from .prepare_r_matrix import normalize_suite_pairs
     from .unresolved import normalize_unresolved_links
     resonances=normalize_unresolved_links(suite,normalize_suite_pairs(suite,context),source_style)
-    prepared=prepare_resonances(resonances,context,conversion_report=suite.report)
+    prepared=(PreparedResonances(context,()) if resonances is None else
+              prepare_resonances(resonances,context,conversion_report=suite.report,allow_empty=True))
     source_hash=_fingerprint(suite,source_style)
     snapshot=deepcopy(suite)
     entries=_entries(snapshot)
     if not entries:raise ValueError('no model cross sections')
     if any(label in r.crossSection for r in entries.values()):raise ValueError('output form label already exists')
     forms=_source_forms(entries,source_style)
+    if not prepared.regions:
+        from kika.nuclear_data.model import ResonancesWithBackground
+        if any(isinstance(f,ResonancesWithBackground) for f in forms.values()):
+            raise UnsupportedResonanceError('resonance backgrounds require modeled resonance regions',category='missing-resonance-regions')
     graph,order=_graph(entries,source_style)
     curves=_curves(forms)
     mt_keys={}
@@ -361,21 +389,33 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         if r.ENDF_MT is not None:
             if r.ENDF_MT in mt_keys:raise UnsupportedResonanceError('ambiguous MT projection for model reactions')
             mt_keys[r.ENDF_MT]=key
-    if 1 in mt_keys and mt_keys[1] not in graph:raise UnsupportedResonanceError('total must have an explicit additive model graph')
+    physical_owners=dict(mt_keys)
+    # ENDF-102 §3.4.5 assigns the MF2 fission contribution to MT19 when
+    # MT18 is represented by its chance partials. Rebuild MT18 through the
+    # model graph afterwards, so that contribution is included only once.
+    if mt_keys.get(18) in graph:
+        parts=_sum_leaves(mt_keys[18],graph);first_chance=mt_keys.get(19)
+        allowed={mt_keys[mt] for mt in (19,20,21,38) if mt in mt_keys}
+        if first_chance in parts and first_chance not in graph and parts<=allowed:
+            physical_owners[18]=first_chance
+    elif 18 not in mt_keys and 19 in mt_keys and mt_keys[19] not in graph:
+        physical_owners[18]=mt_keys[19]
+    if 1 in mt_keys and mt_keys[1] not in graph:raise UnsupportedResonanceError('total must have an explicit additive model graph',category='total-without-graph')
     low=min(c.x[0] for cs in curves.values() for c in cs)
     high=max(c.x[-1] for cs in curves.values() for c in cs)
     declared=chain[-1].projectileEnergyDomain
     if declared is not None:
         if declared.unit!='eV' or declared.min!=low or declared.max!=high:
-            raise UnsupportedResonanceError('modeled cross sections do not cover the evaluated projectile energy domain')
+            raise UnsupportedResonanceError('modeled cross sections do not cover the evaluated projectile energy domain',category='domain-not-covered')
     if any(r.low<low or r.high>high for r in prepared.regions):raise ValueError('resonance region outside modeled material domain')
     cuts={low,high}
     for r in prepared.regions:cuts.update((r.low,r.high))
     for cs in curves.values():
         for c in cs:
             cuts.update((c.x[0],c.x[-1]))
-            if c.law==1:cuts.update(c.x[1:])
+            cuts.update(c.breaks)
     for r in prepared.regions:
+        if r.unresolved is not None:cuts.update(r.unresolved.breaks)
         for g in r.groups:
             cuts.update(x for x in group_breaks(g) if r.low<x<r.high)
             for radius in group_radii(g):
@@ -391,14 +431,14 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             candidates=[c for c in cs if c.x[0]<=a and c.x[-1]>=b]
             if len(candidates)>1:raise ValueError('ambiguous source region ownership')
             if not candidates and not (b<=cs[0].x[0] or a>=cs[-1].x[-1]):
-                raise UnsupportedResonanceError(f'source function has an uncovered internal gap: {key}')
+                raise UnsupportedResonanceError(f'source function has an uncovered internal gap: {key}',category='internal-gap')
             local[key]=candidates[0] if candidates else None
         segments.append(_SuiteSegment(a,b,MappingProxyType(local),region,b<high))
     result=SuiteReconstructionResult(MappingProxyType({}),MappingProxyType({}),source_style,label,options,prepared,
-        tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash)
-    tables=[];checks=[];points=0;source_balance={key:0. for key in graph}
+        tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
+    tables=[];checks=[];points=0;source_balance={key:0. for key in graph};source_worst={}
     for s in segments:
-        seed_curves={i:(c,) for i,c in enumerate(s.curves.values()) if c is not None}
+        seed_curves={i:(c,) for i,(key,c) in enumerate(s.curves.items()) if c is not None and key not in graph}
         if s.region is not None:
             seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context)
         else:
@@ -407,21 +447,25 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             seeds=sorted({s.low,s.high}|{x for c in seed_curves.values() for x in c[0].x if s.low<=x<=s.high})
             for cs in seed_curves.values():
                 c=cs[0]
-                if c.law==1 and c.x[-1]==s.high and c.y[-1]!=c.y[-2]:
+                if c.x[-1]==s.high and c.endpoint_jump:
                     seeds.append(float(np.nextafter(s.high,s.low)))
             seeds=sorted(set(seeds))
-        # Before changing an aggregate, prove that its stated components cover
-        # it at source knots and interior points. No invented residual channel.
-        grid=np.asarray(seeds)
+        # Diagnose the evaluated aggregate against exclusive leaves. Output
+        # sums are derived even if the redundant source aggregate disagrees.
+        # Redundant aggregates inform diagnostics, not the reconstructed mesh.
+        # Keep their original knots in this separate source-comparison grid.
+        diagnostic_seeds=set(seeds)|{x for c in s.curves.values() if c is not None for x in c.x if s.low<=x<=s.high}
+        grid=np.asarray(sorted(diagnostic_seeds))
         probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
         original=result._evaluate_segment(s,probe,False)
         for key in order:
             summed=sum((original[part] for part in graph[key]),np.zeros(len(probe)))
             ratio=error_ratio(original[key],summed,options)
-            source_balance[key]=max(source_balance[key],float(np.max(ratio)))
-            if np.any(ratio>1):
+            maximum=float(np.max(ratio))
+            if maximum>source_balance[key]:
                 index=int(np.argmax(ratio))
-                raise UnsupportedResonanceError(f'evaluated sum {key} does not close; missing components or inconsistent source; eV={probe[index]}, stated b={original[key][index]}, components b={summed[index]}, ratio={ratio[index]}')
+                source_worst[key]=dict(energy_eV=float(probe[index]),side='left-limit' if s.left_high and probe[index]==s.high else 'point',stated_b=float(original[key][index]),components_b=float(summed[index]),error_ratio=maximum)
+            source_balance[key]=max(source_balance[key],maximum)
             original[key]=summed
         x,y,check=linearize(lambda e:result._evaluate_segment(s,e),seeds,options,options.max_points-points)
         points+=len(x);tables.append((x,y));checks.append(dict(domain=(s.low,s.high),points=len(x),**check))
@@ -432,15 +476,18 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         output[key].label=label
     normalized_hash=hashlib.sha256((source_hash+repr(context)+repr(options)).encode()).hexdigest()
     minima={key:min(float(np.min(y[key])) for _,y in tables) for key in entries}
-    report=dict(engine='kika-bw-suite-1',scope='all modeled cross sections across evaluated domain',
+    report=dict(engine='kika-native-suite-1',scope='all modeled cross sections across evaluated domain',
         source_sha256=source_hash,normalized_sha256=normalized_hash,minima=minima,
         projectile=str(suite.projectile),target=str(suite.target),projectileFrame=str(suite.projectileFrame),
         domain=(low,high),points=points,regions=checks,source_sum_error_ratios=source_balance,
+        source_sum_policy='derive-from-leaves',source_sum_discrepancies=source_worst,
+        source_conversion_report=deepcopy(suite.report),
+        resonance_partial_owners=MappingProxyType(physical_owners),
         source_style=source_style,source_style_labels=tuple(suite.styles.labels),
         label=label,options=options,context=context,preparation_notes=prepared.preparation_notes,
         empirical_verification=True,global_error_bound=False)
     return SuiteReconstructionResult(MappingProxyType(output),MappingProxyType(report),source_style,label,options,prepared,
-        tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash)
+        tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
 
 
 def attach_reconstruction(suite,result):

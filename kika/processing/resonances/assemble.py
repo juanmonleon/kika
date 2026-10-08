@@ -4,9 +4,9 @@ No ENDF/GNDS imports and no implicit sums inferred from numerical MT ranges.
 The low-level tabulator covers prepared resonance domains; the suite facade
 checks coverage of the complete modeled material.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 import numpy as np
-from kika.algebra import evaluate,join_pieces,split_at_discontinuities
+from kika.algebra import evaluate,join_pieces,discontinuities,validate
 from .prepare import UnsupportedResonanceError, evaluate_region, region_mts
 from .breit_wigner import evaluate_bw
 
@@ -15,11 +15,32 @@ from .breit_wigner import evaluate_bw
 class BackgroundCurve:
     x: tuple[float,...]
     y: tuple[float,...]
-    law: int
+    law: int | tuple[int,...]
+    _x: object=field(init=False,repr=False,compare=False)
+    _y: object=field(init=False,repr=False,compare=False)
+    _laws: object=field(init=False,repr=False,compare=False)
+
+    def __post_init__(self):
+        for name,value,dtype in (('_x',self.x,float),('_y',self.y,float),('_laws',self.law,int)):
+            array=np.asarray(value,dtype=dtype).copy()
+            array.setflags(write=False)
+            object.__setattr__(self,name,array)
+
+    @property
+    def breaks(self):
+        x=self._x;laws=np.broadcast_to(self._laws,(len(x)-1,))
+        return tuple(np.unique(np.r_[x[discontinuities(x)],x[1:][laws==1]]))
+
+    @property
+    def endpoint_jump(self):
+        first=int(np.searchsorted(self._x,self.x[-1],side='left'))
+        laws=np.broadcast_to(self._laws,(len(self.x)-1,))
+        left=self.y[first-1] if laws[first-1]==1 else self.y[first]
+        return left!=self.y[-1]
 
     def evaluate(self,e):
         """The curve under its law (:func:`kika.algebra.evaluate`), zero off it."""
-        return evaluate(self.x,self.y,self.law,np.asarray(e,dtype=float))
+        return evaluate(self._x,self._y,self._laws,np.asarray(e,dtype=float))
 
 
 def prepare_backgrounds(backgrounds):
@@ -34,12 +55,12 @@ def prepare_backgrounds(backgrounds):
             form=form.background
         if isinstance(form,Background):
             pieces=[v for v in (form.resolvedRegion,form.unresolvedRegion,form.fastRegion) if v is not None]
-            snapshots=tuple(c for piece in pieces for c in prepare_backgrounds({mt:piece})[mt])
-            snapshots=tuple(sorted(snapshots,key=lambda c:c.x[0]))
-            if not snapshots:raise ValueError('empty background')
-            if any(a.x[-1]>b.x[0] for a,b in zip(snapshots[:-1],snapshots[1:])):
-                raise ValueError('overlapping background domains')
-            out[mt]=snapshots
+            children=[c for piece in pieces for c in (piece.function1ds if isinstance(piece,Regions1d) else [piece])]
+            if not children:raise ValueError('empty background')
+            children.sort(key=lambda c:c.domainMin)
+            # A repeated right endpoint in resolvedRegion may own its next
+            # interval in fastRegion. Join the whole background first.
+            out[mt]=prepare_backgrounds({mt:Regions1d(children)})[mt]
             continue
         if isinstance(form,XYs1d):curves=[form]
         elif isinstance(form,Regions1d):curves=form.function1ds
@@ -56,10 +77,10 @@ def prepare_backgrounds(backgrounds):
                     or np.any(np.diff(x)<0) or np.any(x<=0)):
                 raise ValueError('background requires finite nondecreasing positive energies')
             if law not in (1,2,3,4,5):raise UnsupportedResonanceError('unsupported background interpolation law')
-            if law in (4,5) and np.any(y<=0):raise ValueError('log-value background requires positive values')
+            validate(x,y,law)
             if pieces and x[0]<pieces[-1][0][-1]:raise ValueError('overlapping background regions')
             pieces.append((x,y,law))
-        # Join adjacent interpolation regions before splitting steps. A step
+        # Join adjacent interpolation regions before locating steps. A step
         # at an INT boundary can end the preceding region with an otherwise
         # isolated point whose interval belongs to the following region.
         # Algebra retains both values and removes only identical shared points.
@@ -69,13 +90,12 @@ def prepare_backgrounds(backgrounds):
             clusters[-1].append(piece)
         snapshots=[]
         for cluster in clusters:
-            try:continuous=split_at_discontinuities(*join_pieces(cluster))
-            except ValueError as exc:
-                raise UnsupportedResonanceError('isolated repeated endpoint has no background interval') from exc
-            for x,y,laws in continuous:
-                cuts=np.r_[0,np.flatnonzero(np.diff(laws))+1,len(laws)]
-                for a,b in zip(cuts[:-1],cuts[1:]):
-                    snapshots.append(BackgroundCurve(tuple(x[a:b+1]),tuple(y[a:b+1]),int(laws[a])))
+            x,y,laws=join_pieces(cluster)
+            if x[-1]<=x[0]:raise ValueError('background must contain a positive-width domain')
+            # Preserve the raw function and its interval laws. Algebra owns
+            # repeated-node semantics, including first/final endpoint values;
+            # a strict continuous-piece representation would discard them.
+            snapshots.append(BackgroundCurve(tuple(x),tuple(y),tuple(int(v) for v in laws)))
         out[mt]=tuple(snapshots)
     return out
 

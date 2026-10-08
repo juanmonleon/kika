@@ -1,10 +1,10 @@
-"""Experimental, model-based point evaluation of resonance cross sections.
+"""Native model-based reconstruction of resonance cross sections.
 
 The tabulator accepts explicit model backgrounds and sums. The suite facade
 assembles supported resolved and dilute URR models across their evaluated domain and attaches a
 separate reconstructed style after verification. Format round trips require
 ``verify_suite``; unsupported materials and precision failures are rejected.
-These APIs do not replace the legacy ``reconstruct`` entry point.
+The legacy ``reconstruct`` entry point remains separate until its migration.
 Model imports are deferred until preparation.
 """
 from .context import NeutronContext

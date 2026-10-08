@@ -624,7 +624,7 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
         if not report.isClean:
             raise ValueError(f'reconstructed ENDF conversion is incomplete: {vars(report)}')
         reloaded, conversion = decodeReactionSuite(read_endf(str(provisional)))
-        if not conversion.isClean:
+        if not conversion.isCleanFor('cross-sections'):
             raise ValueError(f'reconstructed ENDF reload is incomplete: {vars(conversion)}')
         result.verify_suite(reloaded, label='eval')
         provisional.replace(target)
