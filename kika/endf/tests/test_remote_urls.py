@@ -79,3 +79,50 @@ def test_isomers_do_not_share_the_ground_state_cache_key():
 def test_a_nuclide_without_an_isomer_says_so():
     with pytest.raises(ValueError, match="isomeric state"):
         get_endf_mat(26, 56, 1)
+
+
+# --- refusals ----------------------------------------------------------------
+
+def _fetch_with(monkeypatch, handler):
+    """Run IAEAClient._fetch against a canned response."""
+    import httpx
+
+    from kika.endf.remote.iaea_client import IAEAClient
+
+    real_client = httpx.Client
+
+    def client(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", client)
+    c = IAEAClient.__new__(IAEAClient)
+    c.timeout = 5.0
+    return c._fetch("https://nds.iaea.org/x.zip", True, isotope="Fe56", library="endfb8.1")
+
+
+def test_a_cloudflare_challenge_is_told_apart_from_a_network_failure(monkeypatch):
+    import httpx
+
+    from kika.endf.remote.exceptions import AccessBlockedError
+
+    def challenge(request):
+        return httpx.Response(
+            403,
+            headers={"cf-mitigated": "challenge", "server": "cloudflare"},
+            text="<title>Just a moment...</title>",
+        )
+
+    with pytest.raises(AccessBlockedError) as err:
+        _fetch_with(monkeypatch, challenge)
+    assert err.value.url == "https://nds.iaea.org/x.zip"
+
+
+def test_a_plain_403_stays_a_network_error(monkeypatch):
+    import httpx
+
+    from kika.endf.remote.exceptions import AccessBlockedError, NetworkError
+
+    with pytest.raises(NetworkError) as err:
+        _fetch_with(monkeypatch, lambda request: httpx.Response(403, text="Forbidden"))
+    assert not isinstance(err.value, AccessBlockedError)

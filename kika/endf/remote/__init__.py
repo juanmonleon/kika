@@ -50,14 +50,17 @@ from .catalog import (
 )
 from .constants import list_available_libraries
 from .exceptions import (
+    AccessBlockedError,
     CacheError,
     ENDFRemoteError,
     IsotopeNotFoundError,
     LibraryNotFoundError,
     NetworkError,
 )
+from .browser_download import find_browser_download, import_entry
 from .iaea_client import (
     IAEAClient,
+    check_access,
     get_client,
     isotope_key,
     parse_isotope,
@@ -372,11 +375,16 @@ __all__ = [
     "list_available_libraries",
     "get_cache_info",
     "clear_cache",
+    # Files the IAEA serves only to a browser
+    "check_access",
+    "find_browser_download",
+    "import_entry",
     # Exceptions
     "ENDFRemoteError",
     "IsotopeNotFoundError",
     "LibraryNotFoundError",
     "NetworkError",
+    "AccessBlockedError",
     "CacheError",
     # For advanced usage
     "IAEAClient",

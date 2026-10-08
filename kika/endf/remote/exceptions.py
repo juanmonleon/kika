@@ -35,6 +35,23 @@ class NetworkError(ENDFRemoteError):
         super().__init__(message)
 
 
+class AccessBlockedError(NetworkError):
+    """Raised when the server answers but refuses automated clients.
+
+    The IAEA put ``nds.iaea.org`` behind a Cloudflare managed challenge (seen
+    October 2026): every non-browser request gets a 403 carrying
+    ``cf-mitigated: challenge`` and an HTML "Just a moment..." page, whatever
+    its User-Agent. Retrying does not help; a web browser still gets through.
+    """
+
+    def __init__(self, url: str | None = None):
+        super().__init__(
+            "The server is refusing automated downloads (bot protection); "
+            "the file can still be fetched from a web browser",
+            url,
+        )
+
+
 class CacheError(ENDFRemoteError):
     """Raised when a cache operation fails."""
 

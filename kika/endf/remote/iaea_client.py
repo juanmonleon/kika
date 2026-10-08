@@ -1,8 +1,6 @@
 """IAEA Nuclear Data Service client for downloading ENDF files."""
 
-import io
 import re
-import zipfile
 from typing import TYPE_CHECKING
 
 import httpx
@@ -26,6 +24,7 @@ from .constants import (
 if TYPE_CHECKING:  # pragma: no cover
     from .catalog import CatalogEntry
 from .exceptions import (
+    AccessBlockedError,
     IsotopeNotFoundError,
     LibraryNotFoundError,
     NetworkError,
@@ -209,6 +208,12 @@ def build_iaea_url(
     return f"{IAEA_BASE_URL}/{library_path}/{particle}/{filename}"
 
 
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0",
+    "Accept": "application/zip, application/octet-stream, */*",
+}
+
+
 class IAEAClient:
     """Client for downloading ENDF files from IAEA Nuclear Data Service."""
 
@@ -334,18 +339,16 @@ class IAEAClient:
 
     def _fetch(self, url: str, is_archive: bool, *, isotope: str, library: str) -> bytes:
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0",
-                "Accept": "application/zip, application/octet-stream, */*",
-            }
             with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
-                response = client.get(url, headers=headers)
+                response = client.get(url, headers=_HEADERS)
                 response.raise_for_status()
         except httpx.TimeoutException:
             raise NetworkError(f"Request timed out after {self.timeout}s", url)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 raise IsotopeNotFoundError(isotope, library) from e
+            if _is_bot_challenge(e.response):
+                raise AccessBlockedError(url) from e
             raise NetworkError(f"HTTP error {e.response.status_code}: {e}", url) from e
         except httpx.RequestError as e:
             raise NetworkError(f"Request failed: {e}", url) from e
@@ -359,16 +362,41 @@ class IAEAClient:
 
     def _extract_endf_from_zip(self, zip_content: bytes) -> bytes:
         """Extract the ENDF file from a ZIP archive."""
-        with zipfile.ZipFile(io.BytesIO(zip_content)) as zf:
-            # Find the ENDF file in the archive
-            for name in zf.namelist():
-                # Skip directories
-                if name.endswith("/"):
-                    continue
-                # The ENDF file is typically the only file or has no extension
-                if not name.endswith((".zip", ".gz", ".tar")):
-                    return zf.read(name)
-            raise ValueError("No ENDF file found in ZIP archive")
+        from .browser_download import extract_endf_from_zip
+
+        return extract_endf_from_zip(zip_content)
+
+
+def check_access(timeout: float = 15.0) -> str:
+    """Whether kika can download from the IAEA right now.
+
+    Returns ``"ok"``, ``"blocked"`` (the server answers with a bot challenge,
+    see :class:`AccessBlockedError`) or ``"offline"`` (no answer at all). One
+    small request against the root of the download tree.
+    """
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            response = client.get(f"{IAEA_BASE_URL}/", headers=_HEADERS)
+    except httpx.HTTPError:
+        return "offline"
+    if _is_bot_challenge(response):
+        return "blocked"
+    return "ok"
+
+
+def _is_bot_challenge(response: httpx.Response) -> bool:
+    """Whether a refusal is a bot challenge (Cloudflare) and not a plain error.
+
+    Cloudflare marks the challenge it serves with ``cf-mitigated: challenge``;
+    the body check covers a front end that strips the header.
+    """
+    if response.status_code not in (403, 429, 503):
+        return False
+    if response.headers.get("cf-mitigated", "").lower() == "challenge":
+        return True
+    if "cloudflare" in response.headers.get("server", "").lower():
+        return "Just a moment" in response.text[:4096]
+    return False
 
 
 def _catalog_entry(library: str, isotope, sublib: str):
