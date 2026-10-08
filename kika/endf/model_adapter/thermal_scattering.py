@@ -207,6 +207,10 @@ def _tslDomain(suite, report: ConversionReport):
     The schema requires it on ``evaluated`` and the TSL forms' Q and
     multiplicity need it. FUDGE builds it the same way, and also replaces an
     EMAX above 5 eV with 5 eV; kika keeps what the tape says.
+
+    **EMAX = 0 is real**: ENDF/B-VIII.1 tsl-HinH2O and tsl-ortho-H write it. There
+    kika does what FUDGE does, 5 eV (``ENDF_ITYPE_2``: EMAX <= EMin gives 5 eV),
+    and says so; the tape's own EMAX still goes back out unchanged.
     """
     from kika.nuclear_data.model import RangeQuantity
 
@@ -217,10 +221,14 @@ def _tslDomain(suite, report: ConversionReport):
         return style.projectileEnergyDomain
     header = getattr(getattr(suite, "provenance", None), "headerFields", None) or {}
     emax = header.get("emax")
-    if not emax or float(emax) <= 1e-5:
-        report.lost("MF1/451 states no usable EMAX, so the TSL evaluation has no "
+    if emax is None:
+        report.lost("MF1/451 is missing, so the TSL evaluation has no "
                     "projectileEnergyDomain and its Q and multiplicity are left unset")
         return None
+    if float(emax) <= 1e-5:
+        report.approximated(f"MF1/451 EMAX = {float(emax):g} eV is not a domain; the TSL "
+                            f"evaluation is given 1e-5 to 5 eV, FUDGE's value for this case")
+        emax = 5.0
     style.projectileEnergyDomain = RangeQuantity(min=1e-5, max=float(emax), unit="eV")
     return style.projectileEnergyDomain
 
