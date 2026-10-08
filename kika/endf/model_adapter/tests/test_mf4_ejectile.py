@@ -66,8 +66,11 @@ def test_the_mt_names_the_particle(mt, pid):
 def test_mt600_mf4_hangs_on_the_proton(mt600Tape):
     _, suite = _decode(mt600Tape)
     products = list(suite.findReactionByENDF_MT(600).outputChannel.products)
-    assert [p.pid for p in products] == ["H1"]
+    assert products[0].pid == "H1"
     assert products[0].distribution is not None
+    # Anything after the proton is the residual GNDS states for a level whose
+    # QM differs from its QI (``residuals.py``), never a second MF4 owner.
+    assert all(p.pid != "H1" and p.outputChannel is not None for p in products[1:])
 
 
 def test_mt600_mf34_points_at_the_proton(mt600Tape):

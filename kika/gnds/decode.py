@@ -196,7 +196,9 @@ class _SuiteReader:
 
         applicationData = root.find("applicationData")
         if applicationData is not None:
+            from .endf_conversion import readConversionFlags
             from .resonance_extensions import read
+            applicationData = readConversionFlags(applicationData, suite, self.report)
             unknown=read(applicationData,suite,self.report,self.form)
             if unknown:self.report.lost(
                 f"{path}/applicationData holds "

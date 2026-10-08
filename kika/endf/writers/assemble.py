@@ -495,6 +495,17 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
     from kika.nuclear_data.model import ConversionReport
 
     report = report if report is not None else ConversionReport()
+
+    # A suite with no ENDF header to write back -- read from GNDS, or built by
+    # hand -- gets its ENDF bookkeeping derived from the model, on a copy so the
+    # caller's suite is not changed (`model_adapter/derive`). One read from ENDF
+    # is never derived, and writes back what it read.
+    from ..model_adapter.derive import deriveEndfProvenance, needsDerivation
+    if needsDerivation(suite):
+        import copy
+
+        suite = copy.deepcopy(suite)
+        report = deriveEndfProvenance(suite, report, mat=mat)
     mat = _mat(suite, mat)
 
     sections: List[Tuple[int, int, object]] = []
