@@ -19,13 +19,30 @@ __all__ = ["UnresolvedChannel", "UnresolvedSpinGroup", "TabulatedWidths"]
 
 @dataclass
 class UnresolvedChannel:
-    """Average width for one channel, constant or tabulated against energy."""
+    """Average width for one channel, constant or tabulated against energy.
+
+    **What the numbers are.** The ``"neutron"`` channel holds ENDF's GN0, the
+    average *reduced* neutron width, exactly as ENDF and GNDS store it (FUDGE
+    copies it verbatim into the ``elastic`` width). The physical average is
+    ⟨Γn⟩(E) = GN0 · √E · ν_n · V_l(ρ), with V_l = P_l/ρ (V_0 = 1) — NJOY
+    ``unfac`` (reconr.f90:4473-4495) and FUDGE (reconstructResonances.py:
+    3273-3281) agree. That conversion belongs to the URR kernel; the model
+    never stores the converted width, so ν_n is not applied twice.
+
+    The other channels are physical average widths in eV. The ``"competitive"``
+    width only enters the total width: ENDF-6 §2.1 (LRP=1) puts the competing
+    cross sections entirely in File 3 and lets Γx carry their effect on the
+    resonance reactions, so the channel needs no exit-reaction descriptor of
+    its own (unlike BW's :class:`~.breit_wigner.CompetitiveChannel`).
+    """
 
     label: str
     #: ν of the χ² distribution of this width. **Zero means the width does not
     #: fluctuate** — ENDF's AMUG/AMUF/AMUX=0, and what cases A and B imply for
     #: capture. Non-integer values are real data (TALYS-derived AMUX such as
     #: 1.0123 in ~25 B-VIII.1/JENDL-5 evaluations) and must not be truncated.
+    #: The 1.0 default only serves a model built by hand; every reader states
+    #: the value it read.
     degreesOfFreedom: float = 1.0
     widths: Optional[np.ndarray] = None
     constantWidth: Optional[float] = None
