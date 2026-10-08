@@ -961,8 +961,9 @@ def writeReactionSuite(suite, format: Optional[str] = None,
     completely from one it wrote with holes, and the holes are invisible in the
     XML — an empty ``<distribution/>`` looks like a formatting accident.
 
-    ``resonance_extensions=True`` preserves complex KPS and tabulated LBK in
-    a versioned KIKA institution under applicationData. This requires a KIKA-
+    ``resonance_extensions=True`` preserves complex KPS, tabulated LBK and
+    the URR's cross-section INT in a versioned KIKA institution under
+    applicationData. This requires a KIKA-
     aware consumer and reports that requirement; it is not standard §19 data.
     """
     report = report if report is not None else ConversionReport()

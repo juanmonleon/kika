@@ -463,10 +463,12 @@ _group("documentationContent", Coverage.UNSUPPORTED, 'documentation',
 
 _group("applicationData", Coverage.PARTIAL, 'applicationData',
        "KIKA::resonance_channel_functions version 1 is read into typed "
-       "channel fields and written with resonance_extensions=True. Other "
+       "channel fields (resonanceChannelFunctions) and URR cross-section "
+       "INT (unresolvedCrossSectionInterpolation), and written with "
+       "resonance_extensions=True. Other "
        "institutions are reported and dropped; raw XML is not retained. "
        "This is application-specific content, not standard resonance nodes; "
-       "kika/gnds/resonance_extensions.py:1-110, GNDS section 26",
+       "kika/gnds/resonance_extensions.py:1-159, GNDS section 26",
        """
        applicationData institution
        """)

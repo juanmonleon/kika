@@ -210,3 +210,75 @@ def test_a_phase_mode_table_is_the_gnds_scattering_radius():
                             ConversionReport(), lambda e: None)
     policy = reread.unresolved.tabulatedWidths.radiusPolicy
     assert policy.channelMode == "phase" and policy.phaseRadius.isEnergyDependent
+
+
+# ---------------------------------------------------------------------------
+# P1: ENDF's URR INT through GNDS, in the KIKA applicationData institution
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+
+import pytest
+
+from kika.endf import read_endf
+from kika.endf.model_adapter import decodeReactionSuite
+
+
+def suite_with_urr(laws=(2, 5)):
+    data = Path(__file__).resolve().parents[2] / "tests/data/micro_fe56_structural.endf"
+    suite, _ = decodeReactionSuite(read_endf(str(data), mf_numbers=[1, 3]))
+    points = lambda: [URR_EnergyPoint(e, 20., 0., 1e-3, .1, 0.) for e in (2e3, 1e4, 1e5)]
+    parameters = UnresolvedCaseC(1., .5, 0, 1, [URR_LValue_CaseC(56., 0, [
+        URR_JState_CaseC(.5, laws[0], 0., 1., 0., 0., points()),
+        URR_JState_CaseC(1.5, laws[1], 0., 1., 0., 0., points())])])
+    s = MF2MT151(number=151)
+    s._za, s._awr, s._mat, s._nis = 26056, 55.45, 2631, 1
+    s._isotopes = [Isotope(26056, 1., 0, 1, [EnergyRange(2e3, 1e5, 2, 2, 0, 0, parameters)])]
+    suite.resonances, provenance, _ = decodeMF2MT151(s)
+    suite.resonances.provenance = provenance
+    return suite
+
+
+def laws(suite):
+    return [None if g.crossSectionInterpolation is None else g.crossSectionInterpolation.value
+            for g in suite.resonances.unresolved.tabulatedWidths.spinGroups]
+
+
+def test_urr_int_is_a_declared_loss_without_the_extension():
+    from kika.gnds.encode import writeReactionSuite
+    _, report = writeReactionSuite(suite_with_urr())
+    assert sum("cross-section interpolation" in line for line in report.losses) == 2
+
+
+def test_urr_int_survives_gnds_in_the_kika_institution(tmp_path):
+    from kika.gnds.decode import readReactionSuite
+    from kika.gnds.encode import writeReactionSuite
+    from kika.gnds.xpath import Document
+    suite = suite_with_urr()
+    assert laws(suite) == ["lin-lin", "log-log"]
+    tree, report = writeReactionSuite(suite, resonance_extensions=True)
+    assert not any("cross-section interpolation" in line for line in report.losses)
+    block = tree.getroot().find(
+        "applicationData/institution/unresolvedCrossSectionInterpolation")
+    assert block is not None and len(block) == 2
+    # The source suite is not edited by writing it.
+    assert laws(suite) == ["lin-lin", "log-log"]
+    path = tmp_path / "urr.xml"
+    tree.write(path)
+    loaded, report = readReactionSuite(Document.parse(path))
+    assert laws(loaded) == ["lin-lin", "log-log"]
+    assert not any("applicationData holds" in line for line in report.losses)
+
+
+def test_a_stale_urr_int_entry_is_refused(tmp_path):
+    from kika.gnds.decode import readReactionSuite
+    from kika.gnds.encode import writeReactionSuite
+    from kika.gnds.xpath import Document
+    tree, _ = writeReactionSuite(suite_with_urr(), resonance_extensions=True)
+    entry = tree.getroot().find(
+        "applicationData/institution/unresolvedCrossSectionInterpolation/J")
+    entry.set("parameterFingerprint", "0" * 64)
+    path = tmp_path / "stale.xml"
+    tree.write(path)
+    with pytest.raises(ValueError, match="does not match"):
+        readReactionSuite(Document.parse(path))

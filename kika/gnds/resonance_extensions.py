@@ -3,14 +3,22 @@
 This is application-specific data, not an extension to the standard channel
 schema. A generic GNDS consumer must not reconstruct these parameters after
 ignoring the institution. The ordinary writer continues to report the gap.
+
+Two blocks share the institution: ``resonanceChannelFunctions`` (complex KPS,
+tabulated LBK) and ``unresolvedCrossSectionInterpolation`` — ENDF's URR INT,
+which interpolates the *cross sections* between the parameter energies.
+§19.4.1 has a law only for each parameter function, and FUDGE copies INT
+there, which is a different calculation (resonance roadmap D13/N3).
 """
 from copy import deepcopy
 import hashlib
 import json
 import xml.etree.ElementTree as ET
 from kika.nuclear_data.model.resonances import RMatrix,ComplexChannelFunction
+from kika.nuclear_data.model.enums import Interpolation
 
 LABEL='KIKA::resonance_channel_functions'
+URR='unresolved'
 
 
 def _fingerprint(formalism):
@@ -18,6 +26,13 @@ def _fingerprint(formalism):
     data=[(g.label,number(g.spin),g.parity,list(map(float,g.energies)),[list(map(float,row)) for row in g.widths],
            [(c.label,c.resonanceReaction,c.L,number(c.channelSpin),c.columnIndex) for c in g.channels])
           for g in formalism.spinGroups]
+    return hashlib.sha256(json.dumps(data,separators=(',',':')).encode()).hexdigest()
+
+
+def _urrFingerprint(widths):
+    """Identity of the URR spin groups an INT entry belongs to: L, J and D."""
+    data=[(g.L,float(g.J),[float(v) for v in (g.levelSpacing if g.levelSpacing is not None else [])])
+          for g in widths.spinGroups]
     return hashlib.sha256(json.dumps(data,separators=(',',':')).encode()).hexdigest()
 
 
@@ -36,6 +51,13 @@ def extract(suite):
                 saved.append((r,g,c,fingerprint,deepcopy(channel)))
                 channel.additionalPhaseShift=None;channel.phaseAbsorptionReaction=None
                 channel.phaseShiftMode=None;channel.tabulatedBackground=None
+    widths=getattr(result.resonances.unresolved,'tabulatedWidths',None)
+    if widths is not None:
+        fingerprint=_urrFingerprint(widths)
+        for g,group in enumerate(widths.spinGroups):
+            if group.crossSectionInterpolation is None:continue
+            saved.append((URR,g,group.L,float(group.J),fingerprint,group.crossSectionInterpolation))
+            group.crossSectionInterpolation=None
     return result,saved
 
 
@@ -44,8 +66,17 @@ def write(root,saved,report):
     from .encode import _function
     application=ET.SubElement(root,'applicationData')
     institution=ET.SubElement(application,'institution',label=LABEL)
+    channels=[s for s in saved if s[0]!=URR];urr=[s for s in saved if s[0]==URR]
+    if urr:
+        block=ET.SubElement(institution,'unresolvedCrossSectionInterpolation',version='1')
+        for _,g,L,J,fingerprint,law in urr:
+            ET.SubElement(block,'J',index=str(g),L=str(L),value=repr(J),interpolation=law.value,
+                          parameterFingerprint=fingerprint)
+    if not channels:
+        report.warn('KIKA-specific resonance applicationData written; consumers must interpret this institution before reconstructing resonances')
+        return
     data=ET.SubElement(institution,'resonanceChannelFunctions',version='1')
-    for r,g,c,fingerprint,ch in saved:
+    for r,g,c,fingerprint,ch in channels:
         attributes=dict(region=str(r),group=str(g),channel=str(c),parameterFingerprint=fingerprint)
         if ch.phaseShiftMode is not None:attributes['phaseShiftMode']=str(ch.phaseShiftMode)
         if ch.phaseAbsorptionReaction is not None:attributes['phaseAbsorptionReaction']=ch.phaseAbsorptionReaction
@@ -65,12 +96,17 @@ def read(application,suite,report,read_function):
     for institution in application:
         if institution.get('label')!=LABEL:
             unknown.append(institution.get('label',institution.tag));continue
-        data=institution.find('resonanceChannelFunctions')
-        if data is None or data.get('version')!='1':
-            report.unsupportedNode('unsupported KIKA resonance applicationData version');continue
-        if len(institution)!=1 or set(data.attrib)!={'version'}:
+        tags=[child.tag for child in institution]
+        if not tags or len(set(tags))!=len(tags) or set(tags)-{'resonanceChannelFunctions','unresolvedCrossSectionInterpolation'}:
             raise ValueError('unknown KIKA resonance applicationData content')
-        for entry in data:
+        if any(child.get('version')!='1' for child in institution):
+            report.unsupportedNode('unsupported KIKA resonance applicationData version');continue
+        if any(set(child.attrib)!={'version'} for child in institution):
+            raise ValueError('unknown KIKA resonance applicationData content')
+        block=institution.find('unresolvedCrossSectionInterpolation')
+        if block is not None:_readUnresolved(block,suite)
+        data=institution.find('resonanceChannelFunctions')
+        for entry in (data if data is not None else []):
             if entry.tag!='channel':raise ValueError('unknown KIKA resonance applicationData entry')
             if set(entry.attrib)-{'region','group','channel','parameterFingerprint','phaseShiftMode','phaseAbsorptionReaction'}:
                 raise ValueError('unknown KIKA resonance channel attribute')
@@ -103,5 +139,21 @@ def read(application,suite,report,read_function):
                     if value is None:raise ValueError('unsupported KIKA complex channel function')
                     components.append(value)
                 setattr(channel,name,ComplexChannelFunction(*components))
-        report.warn('KIKA-specific resonance applicationData interpreted; these channel fields are not standard GNDS nodes')
+        report.warn('KIKA-specific resonance applicationData interpreted; these resonance fields are not standard GNDS nodes')
     return unknown
+
+
+def _readUnresolved(block,suite):
+    widths=getattr(getattr(suite.resonances,'unresolved',None),'tabulatedWidths',None) if suite.resonances is not None else None
+    if widths is None:raise ValueError('KIKA URR interpolation without an unresolved region')
+    fingerprint=_urrFingerprint(widths);seen=set()
+    for entry in block:
+        if entry.tag!='J' or set(entry.attrib)!={'index','L','value','interpolation','parameterFingerprint'}:
+            raise ValueError('unknown KIKA URR interpolation entry')
+        g=int(entry.get('index'))
+        if g<0 or g>=len(widths.spinGroups) or g in seen:
+            raise ValueError('invalid or duplicate KIKA URR interpolation reference')
+        seen.add(g);group=widths.spinGroups[g]
+        if entry.get('parameterFingerprint')!=fingerprint or int(entry.get('L'))!=group.L or float(entry.get('value'))!=float(group.J):
+            raise ValueError('KIKA URR interpolation does not match its spin groups')
+        group.crossSectionInterpolation=Interpolation(entry.get('interpolation'))

@@ -100,8 +100,9 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         G4NDL only: write ``<name>.z`` (zlib, what Geant4 distributes) instead
         of plain text.
     resonance_extensions
-        GNDS only. Preserve KPS and tabulated resonance backgrounds in the
-        versioned KIKA applicationData institution. Other consumers require
+        GNDS only. Preserve KPS, tabulated resonance backgrounds and the
+        URR's cross-section INT in the versioned KIKA applicationData
+        institution. Other consumers require
         support for this institution before reconstructing the resonances.
 
     Returns
