@@ -16,10 +16,16 @@ that reaches for ``sections[2]`` must expect a ``KeyError``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import numpy as np
 
 from .base import MF7MT, TemperatureTable
+from ..mf5.analytic import tab1_at
 from ...utils import PadStyle, format_endf_send_record, format_tab1
+
+#: Energies a caller may pass: one value or anything numpy reads as a vector.
+Energies = Union[float, Sequence[float], np.ndarray]
 
 #: ``LTHR`` values that carry a coherent block, and those that carry an
 #: incoherent one. Written as sets because LTHR=3 is in both, and every
@@ -58,6 +64,35 @@ class CoherentElastic:
         """S(E) at temperature *index*, one value per Bragg edge."""
         return self.table.row(index)
 
+    def cross_section(self, energies: Energies, temperature: float) -> np.ndarray:
+        """σ_coh(E, T) = S(E, T) / E, in barns (ENDF-102 eq. 7.3).
+
+        S is cumulative over the edges, so between edge *i* and edge *i+1* it is
+        the value written at edge *i*, and below the first edge it is zero: no
+        lattice plane can diffract a neutron whose wavelength is longer than
+        twice its spacing. The result is a sawtooth, which drops as 1/E between
+        edges and jumps at each one.
+
+        *temperature* must be one the table lists. ``li`` tells how ENDF wants
+        two temperatures combined, and doing that silently here would put an
+        approximation in front of a caller who asked for data. Refused, too,
+        when the table is not histogram-interpolated: the formula reads S as a
+        staircase, and on any other INT it would be the wrong function.
+        """
+        if not self.is_histogram:
+            raise ValueError(
+                f"coherent elastic S(E) is interpolated with {self.table.interp}; "
+                "sigma = S/E needs the histogram (INT=1) every evaluation writes"
+            )
+        s = np.asarray(self.table.at_temperature(temperature), dtype=float)
+        edges = np.asarray(self.energies, dtype=float)
+        e = np.asarray(energies, dtype=float)
+        # The last edge at or below each E. -1 means below the first edge.
+        index = np.searchsorted(edges, e, side="right") - 1
+        held = np.where(index >= 0, s[np.clip(index, 0, None)], 0.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(e > 0, held / np.where(e > 0, e, 1.0), 0.0)
+
     def emit(self, mat: int, mf: int, mt: int, line_num: int,
              pad: PadStyle = PadStyle()) -> Tuple[List[str], int]:
         return self.table.emit(0.0, mat, mf, mt, line_num, pad=pad)
@@ -86,6 +121,38 @@ class IncoherentElastic:
             self.sb, 0.0, 0, 0, self.interp, self.temperatures, self.w,
             mat, mf, mt, line_num, pad=pad.pairs,
         )
+
+    def debye_waller(self, temperature: float) -> float:
+        """W′(T) in 1/eV, under the TAB1's own interpolation law.
+
+        Interpolated, unlike the coherent stack: here temperature *is* the x
+        axis of a TAB1, so a value between two nodes is what the evaluator's INT
+        code defines and not something this method chooses. Outside the table it
+        is refused, because holding the end value would invent a lattice.
+        """
+        ts = np.asarray(self.temperatures, dtype=float)
+        if ts.size == 0:
+            raise ValueError("incoherent elastic block has no W'(T) table")
+        if not ts.min() <= temperature <= ts.max():
+            raise KeyError(
+                f"{temperature} K is outside the W'(T) table "
+                f"[{ts.min()}, {ts.max()}] K"
+            )
+        return tab1_at(self.temperatures, self.w, self.interp, temperature)
+
+    def cross_section(self, energies: Energies, temperature: float) -> np.ndarray:
+        """σ_inc(E, T) in barns (ENDF-102 eq. 7.5).
+
+        σ = SB/2 · (1 − e^(−4EW′)) / (2EW′), which tends to SB as E → 0 and
+        falls as SB / (4EW′) once 4EW′ ≫ 1. Written with ``expm1`` so the low-E
+        limit is not a cancellation of two numbers near one.
+        """
+        w = self.debye_waller(temperature)
+        e = np.asarray(energies, dtype=float)
+        x = 2.0 * e * w
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(x > 0, -np.expm1(-2.0 * x) / np.where(x > 0, x, 1.0), 2.0)
+        return 0.5 * self.sb * ratio
 
     def describe(self) -> str:
         return f"incoherent: SB={self.sb}, {len(self.temperatures)} temperature(s)"
@@ -123,6 +190,24 @@ class MF7MT2(MF7MT):
         if self.incoherent is not None:
             return self.incoherent.temperatures
         return []
+
+    def cross_sections(self, energies: Energies, temperature: float
+                       ) -> Dict[str, np.ndarray]:
+        """Each elastic σ the section states at *temperature*, by name.
+
+        Keys are ``'coherent'`` and ``'incoherent'``, present when the block is,
+        and ``'total'`` when both are. A block whose temperatures do not include
+        *temperature* raises: on an LTHR=3 file the two grids need not agree,
+        and a total missing one of its terms would look like a total.
+        """
+        result: Dict[str, np.ndarray] = {}
+        if self.coherent is not None:
+            result["coherent"] = self.coherent.cross_section(energies, temperature)
+        if self.incoherent is not None:
+            result["incoherent"] = self.incoherent.cross_section(energies, temperature)
+        if len(result) == 2:
+            result["total"] = result["coherent"] + result["incoherent"]
+        return result
 
     def report_gaps(self) -> List[str]:
         """Empty: MT2 is decoded in full, for every LTHR this format defines.
