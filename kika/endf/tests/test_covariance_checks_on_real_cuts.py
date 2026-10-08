@@ -32,7 +32,8 @@ def test_ne20_mf34_the_mirror_of_an_ls1_triangle_is_what_breaks_rho():
     """JEFF-4.0 Ne-20 MT2, defect A: seven cross-order blocks stored as LS=1."""
     report = _check("ne20")
     assert _faults(report) == {("defect", "ls1_in_cross_block"): 10,
-                               ("defect", "correlation_out_of_bounds"): 7}
+                               ("defect", "correlation_out_of_bounds"): 7,
+                               ("defect", "joint_not_positive_semidefinite"): 1}
     rho = {(f.location.l, f.location.l1): f for f in report.by_check("correlation_out_of_bounds")}
     assert set(rho) == {(1, 2), (1, 3), (1, 5), (2, 4), (2, 5), (3, 5), (4, 5)}
     worst = rho[(1, 5)]
@@ -45,6 +46,12 @@ def test_ne20_mf34_the_mirror_of_an_ls1_triangle_is_what_breaks_rho():
     ls1 = {(f.location.l, f.location.l1) for f in report.by_check("ls1_in_cross_block")
            if f.level == "defect"}
     assert set(rho) <= ls1 and len(ls1 - set(rho)) == 3
+    # The joint of a_1..a_6 is indefinite, and the cross block that does most of it
+    # on its own is L2xL3: one of those three, |rho| <= 1 everywhere and still not
+    # compatible with its two self blocks (C9, 8-oct-2026).
+    joint = report.by_check("joint_not_positive_semidefinite")[0].evidence
+    assert joint["excess_ratio"] == pytest.approx(0.168, abs=1e-3)
+    assert joint["pairs_indefinite_alone"][0]["pair"] == ["MT2 a_2", "MT2 a_3"]
 
 
 def test_w186_mf34_rho_49_a_negative_variance_and_an_indefinite_block():
@@ -52,7 +59,10 @@ def test_w186_mf34_rho_49_a_negative_variance_and_an_indefinite_block():
     report = _check("w186")
     assert _faults(report) == {("defect", "negative_variance"): 1,
                                ("defect", "correlation_out_of_bounds"): 1,
-                               ("defect", "not_positive_semidefinite"): 1}
+                               ("defect", "not_positive_semidefinite"): 1,
+                               ("warn", "frame_differs_from_mf4"): 1}
+    # LAB covariances (LCT=1) for an MF4 given in CM (C9).
+    assert report.by_check("frame_differs_from_mf4")[0].evidence["mf4_lct"] == {"51": 2}
     assert all((f.location.mt, f.location.l, f.location.l1) == (51, 1, 1)
                for f in report.at_least("warn"))
     rho = report.by_check("correlation_out_of_bounds")[0].evidence

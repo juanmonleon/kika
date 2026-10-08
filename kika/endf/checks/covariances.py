@@ -39,6 +39,15 @@ near-low-rank matrix) and lambda_min of the correlation matrix is inside what
 that rounding can do. A defect also says which LB=5 record is already
 indefinite on its own.
 
+**The joint matrix (C9)** -- every reaction of MF31/MF33, and every Legendre
+order of MF34, joined by its cross blocks: self blocks PSD and |rho| <= 1
+everywhere do not make the joint PSD. Only what the cross blocks add is graded.
+C9 also brought in what FUDGE's converter checks and kika did not (a non-zero
+last F, MF32 widths and J against MF2, covariances of quantities the tape does
+not give) and the procedures of ENDF-6 §33.3.3 and §34 (LB=8/9 only in self
+blocks and not just above a threshold, null L=L1=0 blocks in MF34, the frame of
+MF34 against MF4's).
+
 Policy (decided with the maintainer): every finding only informs. Nothing here
 raises on a bad section, changes it or proposes a remedy.
 
@@ -202,6 +211,9 @@ class _Context:
         self.mf1 = dict(endf.files[1].mt) if 1 in endf.files else {}
         self.eh = _resonance_upper_limit(endf)
         self.unavailable: Dict[Tuple[int, str], List[int]] = {}
+        #: (MF, MT) whose central values the tape should give and does not
+        #: (``missing_central_values``); their magnitude checks are skipped.
+        self.missing: set = set()
 
     def cross_section(self, mt: int):
         """(sigma source, lowest energy where it is the cross section) or None."""
@@ -350,6 +362,7 @@ def _check_record(mf_number: int, sec, rec, loc: CovarianceLocation,
             {"nt": rec.nt, "expected": expected}))
     for g in _grids(rec):
         usable = _grid_findings(g, loc, out) and usable
+    _trailing_value(rec, loc, out)
     if rec.lt is not None and rec.lb in (3, 4) and int(rec.lt or 0) > int(rec.np or 0):
         out.append(CovarianceFinding(
             "count_mismatch", DEFECT, f"LT={rec.lt} pairs in the second table but NP={rec.np}",
@@ -363,6 +376,31 @@ def _check_record(mf_number: int, sec, rec, loc: CovarianceLocation,
                 {"error": str(exc)}))
             usable = False
     return usable
+
+
+def _trailing_value(rec, loc, out: List[CovarianceFinding]) -> None:
+    """The last F of an (E_k, F_k) table, which no interval uses (LB 0-4, 8, 9).
+
+    NE energies bound NE-1 intervals, so F_NE belongs to none, and ENDF-6
+    §33.2.2.2 says it "must be zero". Nothing reads it (kika's decoder and
+    FUDGE's converter both drop it), so it is a warning rather than a defect:
+    what it usually means is a table shifted by one place. In LB=8/9 it is a
+    note: ENDF/B-VIII.1 (781 records, 27 tapes) and JEFF-4.0 (52, 2) write a
+    non-zero last F there as a habit, every one of them LB=8 (census 8-oct-2026).
+    """
+    if rec.lb not in (0, 1, 2, 3, 4, 8, 9):
+        return
+    tables = [("F_k", rec.e_table_k, rec.f_table_k)]
+    if rec.lb in (3, 4):
+        tables.append(("F_l", rec.e_table_l, rec.f_table_l))
+    for name, e, f in tables:
+        if e and f and len(f) == len(e) and float(f[-1]) != 0.0:
+            out.append(CovarianceFinding(
+                "trailing_value_not_zero", NOTE if rec.lb in (8, 9) else WARN,
+                f"the last {name} is {float(f[-1]):.6g}, where ENDF-6 §33.2.2.2 asks for 0: it "
+                "closes no interval and kika ignores it, but a non-zero value often means the "
+                "table is shifted by one place",
+                loc, {"table": name, "value": float(f[-1]), "ne": len(e)}))
 
 
 def _count(declared, found: int, what: str, loc, out) -> None:
@@ -792,12 +830,19 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
             for k, rec in enumerate(sub.ni_records):
                 rloc = CovarianceLocation(mat=mat, mf=mf_number, mt=mt, mat1=mat1, mt1=mt1, ni=k,
                                           lb=rec.lb, ls=rec.ls if rec.lb == 5 else None)
+                if rec.lb in (8, 9) and (mat1, mt1) != (0, mt):
+                    out.append(CovarianceFinding(
+                        "short_range_in_cross_block", DEFECT,
+                        f"LB={rec.lb} (a short-range self-scaling variance) in a cross block; "
+                        "ENDF-6 §33.3.3 (13) does not allow it for cross-reaction covariances, "
+                        "and a variance has no meaning between two reactions", rloc))
                 if _check_record(mf_number, sec, rec, rloc, out):
                     good.append((k, rec))
             if good:
                 usable[(mt, mat1, mt1)] = good
 
     _completeness33(ctx, mf_number, sections, usable, out)
+    _missing_central33(ctx, mf_number, sections, out)
 
     # Self blocks.
     self_grids: Dict[int, List[float]] = {}
@@ -817,6 +862,7 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
         _check_self_block(matrix, grid, loc, out, good, sec)
         _mf33_magnitude(ctx, mt, matrix, grid, relative, loc, out)
         _mf33_coverage(ctx, mt, grid, loc, out)
+        _short_range_near_threshold(ctx, mt, good, loc, out)
 
     # Cross blocks.
     for (mt, mat1, mt1), good in sorted(usable.items()):
@@ -856,6 +902,8 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
             v is not None for v in tri.values()) else None
         _check_cross_block(res[0], np.diag(rr[0]), np.diag(cc[0]), grid, loc, out, extra)
 
+    _joint33(ctx, mf_number, sections, usable, out)
+
 
 def _diag33(sec, self_good, mt, xs, grid):
     res = _assemble33(sec, [r for _, r in self_good], mt, mt, xs, list(grid))
@@ -886,6 +934,8 @@ def _bin_average_nubar(sec, grid) -> np.ndarray:
 
 def _mf33_magnitude(ctx, mt, matrix, grid, relative, loc, out) -> None:
     g = np.asarray(grid, dtype=float)
+    if (loc.mf, mt) in ctx.missing:
+        return  # missing_central_values already says why
     if loc.mf == 31:
         # MF31 is the covariance of nu-bar, whose central values are MF1 MT452/455/456.
         sec1 = ctx.mf1.get(mt)
@@ -901,11 +951,22 @@ def _mf33_magnitude(ctx, mt, matrix, grid, relative, loc, out) -> None:
             _unavailable_note(ctx, loc, out)
             return
         src, floor = got
-        central = MF33MT._bin_average_xs(src, grid)
+        try:
+            central = MF33MT._bin_average_xs(src, grid)
+        except ValueError as exc:
+            # JEFF-4.0 writes MT102 as sigma = 0 at 1e-5 eV under log-log (INT=5),
+            # which kika.algebra refuses; one such MF3 must not stop the whole tape.
+            out.append(CovarianceFinding(
+                "central_values_unavailable", NOTE,
+                f"MF3/MT{mt} could not be averaged over the covariance bins: {exc}", loc,
+                {"error": str(exc)}))
+            return
+    var = np.clip(np.diag(matrix), 0.0, None)
+    _variance_on_zero(var, (g[:-1] >= floor) & (central == 0) & (g[1:] > g[:-1]), relative,
+                      "the cross section" if loc.mf == 33 else "nu-bar", grid, loc, out)
     valid = (g[:-1] >= floor) & (central > 0) & (g[1:] > g[:-1])
     if not valid.any():
         return
-    var = np.clip(np.diag(matrix), 0.0, None)
     if relative:
         rel = np.sqrt(var)
         sigma_abs = rel * central
@@ -956,6 +1017,96 @@ def _mf33_coverage(ctx, mt, grid, loc, out) -> None:
         out.append(CovarianceFinding(
             "grid_coverage", NOTE, "the covariance " + "; ".join(gaps), loc,
             {"cov_range": [float(grid[0]), float(grid[-1])], "mf3_range": [lo, hi]}))
+
+
+def _variance_on_zero(var: np.ndarray, zero: np.ndarray, relative: bool, what: str, grid,
+                      loc, out) -> None:
+    """Variance stated over bins where the central value is exactly zero.
+
+    The mirror of ``grid_coverage``, and the equivalent of MF35's
+    ``variance_where_distribution_is_zero``. A relative variance there has no
+    effect -- every sample stays at zero -- so it is a note: usually a grid that
+    starts at 1e-5 eV for a threshold reaction. An absolute one is a warning: a
+    normal draw there is negative half the time.
+    """
+    idx = np.flatnonzero(zero & (var > 0))
+    if not idx.size:
+        return
+    out.append(CovarianceFinding(
+        "variance_where_central_value_is_zero", NOTE if relative else WARN,
+        f"{idx.size} bins carry a{' relative' if relative else 'n absolute'} variance where "
+        f"{what} is zero over the whole bin (first {grid[idx[0]]:.4g}-{grid[idx[0] + 1]:.4g} eV)"
+        + ("; it has no effect on a sample" if relative else
+           "; a normal draw there is negative half the time"), loc,
+        {"n": int(idx.size), "relative": relative, "bins": _bins(grid, idx[:_EVIDENCE_ITEMS])}))
+
+
+def _missing_central33(ctx, mf_number: int, sections: Dict[int, MF33MT], out) -> None:
+    """MF31/MF33 sections whose MF1/MF3 counterpart the tape does not have.
+
+    Only judged when the file the central values live in was read: MF3 for MF33
+    (a summation MT counts as present if its partials are, as ENDF-6 lets MT1, 3,
+    4, 103-107 be left out of MF3), MF1 for MF31 (MT452 counts as present if
+    MT455 and MT456 are). Lumped MTs 851-870 have no File 3 by construction.
+    """
+    where = "MF3" if mf_number == 33 else "MF1"
+    if int(where[2:]) not in ctx.endf.files:
+        return
+
+    unread = set(getattr(ctx.endf.files[int(where[2:])], "parse_errors", {}))
+
+    def present(mt: int) -> bool:
+        if mt in unread:
+            return True  # there, but the parser dropped it: not a missing section
+        if mf_number == 33:
+            return mt in ctx.mf3 or _summed_partials(ctx.mf3, mt) is not None
+        return mt in ctx.mf1 or (mt == 452 and 455 in ctx.mf1 and 456 in ctx.mf1)
+
+    for mt, sec in sorted(sections.items()):
+        if sec._mtl or not sec.subsections or mt in LUMPED_MT or present(mt):
+            continue
+        ctx.missing.add((mf_number, mt))
+        out.append(CovarianceFinding(
+            "missing_central_values", DEFECT,
+            f"MF{mf_number}/MT{mt} has no {where}/MT{mt}: a covariance of a quantity the file "
+            "does not give, which no processor can apply", CovarianceLocation(
+                mat=sec._mat, mf=mf_number, mt=mt), {"file": where}))
+
+
+#: ENDF-6 §33.3.3 (13): LB=8/9 are absolute, so not below 1 MeV above an
+#: effective threshold that is itself above 0.1 MeV.
+SHORT_RANGE_THRESHOLD_MIN = 1e5
+SHORT_RANGE_THRESHOLD_GAP = 1e6
+
+
+def _short_range_near_threshold(ctx, mt: int, good, loc, out) -> None:
+    sec3 = ctx.mf3.get(mt)
+    if sec3 is None:
+        return
+    e = np.asarray(sec3.energies, dtype=float)
+    x = np.asarray(sec3.cross_sections, dtype=float)
+    nz = np.flatnonzero(x > 0)
+    if not nz.size:
+        return
+    threshold = float(e[max(nz[0] - 1, 0)]) if nz[0] > 0 else float(e[0])
+    if threshold <= SHORT_RANGE_THRESHOLD_MIN:
+        return
+    edge = threshold + SHORT_RANGE_THRESHOLD_GAP
+    for k, rec in good:
+        if rec.lb not in (8, 9) or not rec.e_table_k:
+            continue
+        ek = np.asarray(rec.e_table_k, dtype=float)
+        fk = np.asarray(rec.f_table_k[:ek.size - 1], dtype=float)
+        hit = np.flatnonzero((fk != 0) & (ek[:-1] < edge))
+        if hit.size:
+            out.append(CovarianceFinding(
+                "short_range_near_threshold", NOTE,
+                f"LB={rec.lb} gives a non-zero absolute short-range variance from "
+                f"{ek[hit[0]]:.4g} eV, less than 1 MeV above the threshold ({threshold:.4g} eV); "
+                "ENDF-6 §33.3.3 (13) says not to, since an absolute variance near a threshold "
+                "is large against the cross section",
+                dataclasses.replace(loc, ni=k, lb=rec.lb),
+                {"threshold": threshold, "first_bin": _bins(ek, [int(hit[0])])[0]}))
 
 
 # ---------------------------------------------------------------------------
@@ -1226,9 +1377,21 @@ def _nc_references(sections, sec, sub, loc, out) -> None:
             {"rules": [[[float(c), m] for c, m in r] for r in sorted(rules)]}))
 
 
-def _completeness34(sections, usable, out) -> None:
-    """C5 for MF34 (ENDF-6 §34.2): partners of every block, and orders with no variance."""
-    selfs = {(mt, l) for (mt, l, mt1, l1) in usable if mt1 == mt and l1 == l}
+def _completeness34(ctx, sections, usable, out) -> None:
+    """C5 for MF34 (ENDF-6 §34.2): partners of every block, and orders with no variance.
+
+    a_0 is the exception (§34.1, §34.3): it stands for the integrated cross
+    section, whose variance is MF33's, and its own (0, 0) block is null by
+    convention. A block (0, L1) therefore has its row variance in MF33, and is
+    without a partner only when MF33 has no self block for that MT either.
+    """
+    selfs = {(mt, l) for (mt, l, mt1, l1), entry in usable.items() if mt1 == mt and l1 == l
+             and not (l == 0 and _null_block(entry))}
+    # MF33 may state that variance by NC derivation, which counts as stated here.
+    mf33 = ctx.endf.files[33].mt if 33 in ctx.endf.files else {}
+    selfs |= {(mt, 0) for mt in sections
+              if mt in mf33 and not mf33[mt]._mtl and _has_self(mf33[mt], mt)}
+    mf33_read = 33 in ctx.endf.files
     for mt, sec in sorted(sections.items()):
         mat = sec._mat
         if not sec.subsections:
@@ -1247,7 +1410,8 @@ def _completeness34(sections, usable, out) -> None:
                 continue
             loc = CovarianceLocation(mat=mat, mf=34, mt=mt, mat1=0, mt1=mt1)
             if mt1 == mt:
-                declared = set(range(lmin, lmin + int(sub.nl or 0)))
+                # a_0 has no variance block of its own by convention (§34.3).
+                declared = set(range(lmin, lmin + int(sub.nl or 0))) - {0}
                 silent = sorted(declared - {l for (m, l) in selfs if m == mt})
                 if silent and len(silent) < len(declared):
                     out.append(CovarianceFinding(
@@ -1270,8 +1434,9 @@ def _completeness34(sections, usable, out) -> None:
                 l, l1 = int(ss.l or 0), int(ss.l1 or 0)
                 if (mt1, l1) == (mt, l) or (mt, l, mt1, l1) not in usable:
                     continue
-                absent = [f"a_{x} of MT{m}" for m, x in ((mt, l), (mt1, l1))
-                          if (m, x) not in selfs]
+                absent = [f"a_{x} of MT{m}" + (" (nor MF33)" if x == 0 else "")
+                          for m, x in ((mt, l), (mt1, l1))
+                          if (m, x) not in selfs and (x != 0 or mf33_read)]
                 if not absent:
                     continue
                 zero = all(not np.any(_decoded_values(r)) for _, r in usable[(mt, l, mt1, l1)][1])
@@ -1378,6 +1543,264 @@ def _ls1_finding(loc: CovarianceLocation, k: int, rec, tri: Optional[float], out
 
 
 # ---------------------------------------------------------------------------
+# The joint matrix: what the cross blocks do to positive semi-definiteness
+# ---------------------------------------------------------------------------
+
+#: Largest joint matrix whose eigenvalues are computed (as MF32's EIG_MAX).
+JOINT_EIG_MAX = 6000
+#: Cross blocks whose two-node joint is measured for the evidence.
+_JOINT_PAIRS_MAX = 60
+
+
+def _components(nodes, edges):
+    parent = {n: n for n in nodes}
+
+    def find(n):
+        while parent[n] != n:
+            parent[n] = parent[parent[n]]
+            n = parent[n]
+        return n
+
+    for a, b in edges:
+        parent[find(a)] = find(b)
+    groups: Dict[object, List[object]] = {}
+    for n in nodes:
+        groups.setdefault(find(n), []).append(n)
+    return [sorted(g) for g in groups.values() if len(g) > 1]
+
+
+def _joint_matrix(members, grids, selfs, cross):
+    """The joint matrix on each member's own grid, and the rows of each member."""
+    offsets, n = {}, 0
+    for m in members:
+        offsets[m] = n
+        n += len(grids[m]) - 1
+    joint = np.zeros((n, n))
+    for m in members:
+        o = offsets[m]
+        k = len(grids[m]) - 1
+        joint[o:o + k, o:o + k] = selfs[m]
+    for (a, b), block in cross.items():
+        if a in offsets and b in offsets:
+            oa, ob = offsets[a], offsets[b]
+            joint[oa:oa + block.shape[0], ob:ob + block.shape[1]] = block
+            joint[ob:ob + block.shape[1], oa:oa + block.shape[0]] = block.T
+    return joint, offsets
+
+
+def _pick(block_on_union: np.ndarray, union, row_grid, col_grid) -> np.ndarray:
+    """A block summed on the union of two grids, read back on each grid.
+
+    Both grids hold every energy of every record the block is summed from, so
+    inside one bin of either grid the block is constant: the first union bin
+    of each is exact.
+    """
+    u = np.asarray(union, dtype=float)
+    r = np.searchsorted(u, np.asarray(row_grid[:-1], dtype=float))
+    c = np.searchsorted(u, np.asarray(col_grid[:-1], dtype=float))
+    return block_on_union[np.ix_(r, c)]
+
+
+def _negative_excess(sym: np.ndarray, self_min: float):
+    """(eigenvalues, vectors, how far lambda_min falls below the self blocks')."""
+    zero = ~np.any(sym != 0, axis=1)
+    sub = sym[np.ix_(~zero, ~zero)]
+    ev, vecs = np.linalg.eigh(sub)
+    return ev, vecs, sub, min(float(ev[0]), 0.0) - min(self_min, 0.0)
+
+
+def _joint_psd(nodes, grids, selfs, cross, describe, loc, out) -> None:
+    """Indefiniteness the cross blocks create, beyond what the self blocks hold.
+
+    Each self block positive semi-definite and every |rho| <= 1 does not make
+    the joint matrix PSD: three reactions can be pairwise compatible and not
+    jointly (FUDGE leaves this as a FIXME; kika's pre-flight sees it only for
+    what it samples). A block-diagonal joint has the smallest eigenvalue of its
+    blocks, so what the cross blocks add is how far lambda_min of the joint
+    falls below the smallest of the self blocks', graded on lambda_max of the
+    joint with the levels of ``not_positive_semidefinite``. Rounding is allowed
+    for as there: the six figures of an ENDF field, and correlations quantised
+    to a lattice (JENDL-5).
+    """
+    edges = list(cross)
+    for members in _components(nodes, edges):
+        size = sum(len(grids[m]) - 1 for m in members)
+        where = describe(members)
+        if size > JOINT_EIG_MAX:
+            out.append(CovarianceFinding(
+                "psd_not_evaluated", NOTE,
+                f"the joint matrix of {where} has {size} rows: above {JOINT_EIG_MAX}, its "
+                "eigenvalues are not computed", loc(members), {"n": size}))
+            continue
+        self_min = {m: float(np.linalg.eigvalsh(0.5 * (selfs[m] + selfs[m].T))[0])
+                    if selfs[m].size else 0.0 for m in members}
+        joint, _ = _joint_matrix(members, grids, selfs, cross)
+        sym = 0.5 * (joint + joint.T)
+        ev, vecs, sub, excess = _negative_excess(sym, min(self_min.values()))
+        lam_max = float(ev[-1])
+        if lam_max <= 0 or excess >= 0:
+            continue
+        excess = -excess
+        if excess <= _half_ulp_norm(sub):
+            continue
+        ratio = excess / lam_max
+        if ratio < PSD_NOTE:
+            continue
+        level = WARN if ratio <= PSD_DEFECT else DEFECT
+        reason = ""
+        evidence = {"nodes": [describe([m]) for m in members], "lambda_min": float(ev[0]),
+                    "lambda_max": lam_max, "self_lambda_min": min(self_min.values()),
+                    "excess_ratio": ratio, "n_negative": int(np.sum(ev < 0)),
+                    "sigma_change_if_clipped": _clipping_impact(ev, vecs, sub)}
+        d = np.diag(sub)
+        live = d > 0
+        if live.sum() >= 3 and level == WARN:
+            s = np.sqrt(d[live])
+            q = _rho_quantum(sub[np.ix_(live, live)] / np.outer(s, s))
+            if q is not None:
+                bound = (RHO_QUANTUM_SLACK * 2.0 * (q / math.sqrt(12.0))
+                         * math.sqrt(int(live.sum())) * float(d.max()))
+                evidence.update({"rho_quantum": [q], "quantised_rounding_bound": bound})
+                if excess <= bound:
+                    level = NOTE
+                    reason = (f"the correlations are rounded to {q:g} and that rounding can "
+                              f"reach it (bound {bound:.2e})")
+        level, reason = _grade_by_impact(level, reason, evidence["sigma_change_if_clipped"])
+        # Which cross blocks are already incompatible with their two self blocks.
+        pairs = []
+        for a, b in edges[:_JOINT_PAIRS_MAX]:
+            if a not in members or b not in members:
+                continue
+            j2, _ = _joint_matrix([a, b], grids, selfs, {(a, b): cross[(a, b)]})
+            w = np.linalg.eigvalsh(0.5 * (j2 + j2.T))
+            gap = min(self_min[a], self_min[b], 0.0) - float(w[0])
+            if w[-1] > 0 and gap / float(w[-1]) > PSD_NOTE:
+                pairs.append({"pair": [describe([a]), describe([b])],
+                              "excess_ratio": gap / float(w[-1])})
+        pairs.sort(key=lambda p: -p["excess_ratio"])
+        evidence["pairs_indefinite_alone"] = pairs[:_EVIDENCE_ITEMS]
+        summary = (f"the joint matrix of {where} has lambda_min {ev[0]:.3e}, "
+                   f"{ratio:.2e} x lambda_max below the smallest of its self blocks: the "
+                   "cross blocks make it indefinite")
+        if pairs:
+            summary += "; already with " + " and ".join(pairs[0]["pair"]) + " alone"
+        else:
+            summary += "; no single cross block does it alone, only their combination"
+        if reason:
+            summary += f"; {reason}"
+        out.append(CovarianceFinding("joint_not_positive_semidefinite", level, summary,
+                                     loc(members), evidence))
+
+
+def _joint33(ctx, mf_number: int, sections, usable, out) -> None:
+    """MF31/MF33: every MT of the file joined by its cross blocks."""
+    rel: Dict[int, bool] = {}
+    grids: Dict[int, set] = {}
+    pairs: Dict[Tuple[int, int], Tuple[int, int]] = {}
+    for (mt, mat1, mt1), good in usable.items():
+        if mat1 != 0:
+            continue
+        energies = {e for _, r in good for g in _grids(r) for e in g}
+        grids.setdefault(mt, set()).update(energies)
+        grids.setdefault(mt1, set()).update(energies)
+        if mt1 != mt:
+            key = (min(mt, mt1), max(mt, mt1))
+            if key not in pairs or mt < mt1:
+                pairs[key] = (mt, mt1)
+    nodes = sorted(m for m in grids if (m, 0, m) in usable and m in sections)
+    selfs: Dict[int, np.ndarray] = {}
+    for m in nodes:
+        res = _assemble33(sections[m], [r for _, r in usable[(m, 0, m)]], m, m, ctx.xs,
+                          sorted(grids[m]))
+        if res is None or res[3]:
+            continue
+        selfs[m], rel[m] = res[0], res[2]
+    grid_of = {m: sorted(grids[m]) for m in selfs}
+    cross: Dict[Tuple[int, int], np.ndarray] = {}
+    dropped = set()
+    for (a, b), (mt, mt1) in sorted(pairs.items()):
+        if a not in selfs or b not in selfs:
+            continue
+        union = sorted(set(grid_of[a]) | set(grid_of[b]))
+        res = _assemble33(sections[mt], [r for _, r in usable[(mt, 0, mt1)]], mt, mt1,
+                          ctx.xs, union)
+        if res is None or res[3] or res[2] != rel[a] or rel[a] != rel[b]:
+            # Leaving a cross block out could make the joint look indefinite; leaving
+            # out a whole reaction (a principal submatrix) cannot.
+            dropped.add(b)
+            continue
+        block = res[0] if mt == a else res[0].T
+        cross[(a, b)] = _pick(block, union, grid_of[a], grid_of[b])
+    for m in dropped:
+        selfs.pop(m, None)
+    cross = {k: v for k, v in cross.items() if k[0] in selfs and k[1] in selfs}
+    if not cross:
+        return
+    mat = next(iter(sections.values()))._mat
+    _joint_psd(sorted(selfs), grid_of, selfs, cross,
+               lambda ms: ", ".join(f"MT{m}" for m in ms),
+               lambda ms: CovarianceLocation(mat=mat, mf=mf_number), out)
+
+
+def _joint34(ctx, sections, usable, out) -> None:
+    """MF34: every (MT, L) joined by its cross blocks, across orders and reactions.
+
+    An a_0 with no (0, 0) block of its own takes MF33's self block, so the joint
+    of a tape with magnitude-shape cross blocks (§34.3) is the joint of MF33
+    and MF34 together.
+    """
+    grids: Dict[Tuple[int, int], set] = {}
+    pairs = {}
+    for (mt, l, mt1, l1), (sec, good) in usable.items():
+        energies = {e for _, r in good for g in _grids(r) for e in g}
+        grids.setdefault((mt, l), set()).update(energies)
+        grids.setdefault((mt1, l1), set()).update(energies)
+        if (mt, l) != (mt1, l1):
+            a, b = sorted([(mt, l), (mt1, l1)])
+            if (a, b) not in pairs or (mt, l) == a:
+                pairs[(a, b)] = (mt, l, mt1, l1)
+    for node in list(grids):
+        if node[1] == 0 and (node + node not in usable or _null_block(usable[node + node])):
+            mag = _magnitude_self(ctx, node[0])
+            if mag is not None:
+                grids[node].update(e for r in mag[1] for g in _grids(r) for e in g)
+    selfs, rel = {}, {}
+    for node in sorted(grids):
+        res = _self34(ctx, usable, node, sorted(grids[node]))
+        if res is None or res[3]:
+            continue
+        selfs[node], rel[node] = res[0], res[2]
+    grid_of = {n: sorted(grids[n]) for n in selfs}
+    cross, dropped = {}, set()
+    for (a, b), key in sorted(pairs.items()):
+        if a not in selfs or b not in selfs:
+            continue
+        sec, good = usable[key]
+        union = sorted(set(grid_of[a]) | set(grid_of[b]))
+        res = _assemble34(sec, [r for _, r in good], union)
+        if res is None or res[3] or res[2] != rel[a] or rel[a] != rel[b]:
+            dropped.add(b)
+            continue
+        block = res[0] if key[:2] == a else res[0].T
+        cross[(a, b)] = _pick(block, union, grid_of[a], grid_of[b])
+    for n in dropped:
+        selfs.pop(n, None)
+    cross = {k: v for k, v in cross.items() if k[0] in selfs and k[1] in selfs}
+    if not cross:
+        return
+    mat = next(iter(sections.values()))._mat
+
+    def describe(ns):
+        return ", ".join(f"MT{m} a_{l}" for m, l in ns)
+
+    def loc(ns):
+        mts = {m for m, _ in ns}
+        return CovarianceLocation(mat=mat, mf=34, mt=mts.pop() if len(mts) == 1 else None)
+
+    _joint_psd(sorted(selfs), grid_of, selfs, cross, describe, loc, out)
+
+
+# ---------------------------------------------------------------------------
 # MF34
 # ---------------------------------------------------------------------------
 
@@ -1459,6 +1882,16 @@ def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
                 if ss.lct is not None and int(ss.lct) not in VALID_LCT:
                     out.append(CovarianceFinding(
                         "lct_invalid", WARN, f"LCT={ss.lct} is not 0, 1 or 2", sloc, {"lct": ss.lct}))
+                elif mat1 == 0:
+                    _frame_against_mf4(ctx, ss, mt, mt1, sloc, out)
+                if (l == 0 and l1 == 0 and mt1 != mt
+                        and any(np.any(_decoded_values(r)) for r in ss.records)):
+                    out.append(CovarianceFinding(
+                        "magnitude_covariance_in_mf34", WARN,
+                        f"a non-null (L=0, L1=0) block between MT{mt} and MT{mt1}: ENDF-6 §34.3 "
+                        "keeps the covariances of integrated cross sections in MF33 and asks for "
+                        "null L=L1=0 components here, so a processor that sums the files counts "
+                        "this one twice", sloc))
                 _count(ss.ni, len(ss.records), "NI", sloc, out)
                 good = []
                 for k, rec in enumerate(ss.records):
@@ -1473,7 +1906,8 @@ def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
                         if rec.lb == 5 and rec.ls == 1:
                             _ls1_finding(sloc, k, rec, None, out)
 
-    _completeness34(sections, usable, out)
+    _completeness34(ctx, sections, usable, out)
+    _missing_central34(ctx, sections, out)
 
     # Self-order blocks (MT, L) x (MT, L).
     self_grids: Dict[Tuple[int, int], List[float]] = {}
@@ -1486,6 +1920,8 @@ def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
             continue
         matrix, grid, relative, partial = res
         self_grids[(mt, l)] = grid
+        if l == 0 and not np.any(matrix):
+            continue  # the null (0, 0) block of §34.3: a_0's variance is MF33's
         if partial:
             out.append(CovarianceFinding(
                 "mixed_absolute_relative", WARN,
@@ -1500,37 +1936,221 @@ def _check_mf34(ctx: _Context, mf_obj, out: List[CovarianceFinding]) -> None:
             continue
         loc = CovarianceLocation(mat=sec._mat, mf=34, mt=mt, mat1=0, mt1=mt1, l=l, l1=l1)
         ls1 = [(k, r) for k, r in good if r.lb == 5 and r.ls == 1]
-        row_self = usable.get((mt, l, mt, l))
-        col_self = usable.get((mt1, l1, mt1, l1))
-        if row_self is None or col_self is None:
+        row_grid = _self34_grid(ctx, usable, (mt, l), self_grids)
+        col_grid = _self34_grid(ctx, usable, (mt1, l1), self_grids)
+        if row_grid is None or col_grid is None:
             for k, r in ls1:
                 _ls1_finding(loc, k, r, None, out)
             continue
         recs = [r for _, r in good]
         grid = sorted({e for r in recs for g in _grids(r) for e in g}
-                      | set(self_grids.get((mt, l), [])) | set(self_grids.get((mt1, l1), [])))
+                      | set(row_grid) | set(col_grid))
         res = _assemble34(sec, recs, grid)
-        rr = _assemble34(row_self[0], [r for _, r in row_self[1]], grid)
-        cc = _assemble34(col_self[0], [r for _, r in col_self[1]], grid)
+        rr = _self34(ctx, usable, (mt, l), grid)
+        cc = _self34(ctx, usable, (mt1, l1), grid)
         if res is None or rr is None or cc is None:
             continue
         tri = {}
         for k, r in ls1:
             t = _triangle_rho(
                 r,
-                lambda g: _diag34(row_self, g),
-                lambda g: _diag34(col_self, g))
+                lambda g, n=(mt, l): _diag_of(_self34(ctx, usable, n, list(g))),
+                lambda g, n=(mt1, l1): _diag_of(_self34(ctx, usable, n, list(g))))
             tri[k] = t
             _ls1_finding(loc, k, r, t, out)
         extra = {"stored_triangle_max_abs_rho": max(tri.values())} if tri and all(
             v is not None for v in tri.values()) else None
         _check_cross_block(res[0], np.diag(rr[0]), np.diag(cc[0]), grid, loc, out, extra)
 
+    _joint34(ctx, sections, usable, out)
+    _magnitude_against_mf33(ctx, usable, out)
 
-def _diag34(self_entry, grid):
-    sec, good = self_entry
-    res = _assemble34(sec, [r for _, r in good], list(grid))
+
+def _magnitude_self(ctx, mt: int):
+    """MF33's self block of MT as (section, NI records): the variance a_0 stands for.
+
+    None if MF33 was not read, has no section for MT, or gives its self block
+    only as an NC derivation (which layer 1 does not assemble).
+    """
+    cache = ctx.__dict__.setdefault("_magnitude", {})
+    if mt not in cache:
+        cache[mt] = None
+        sec = ctx.endf.files[33].mt.get(mt) if 33 in ctx.endf.files else None
+        if sec is not None and not sec._mtl:
+            recs = [r for s in sec.subsections if _mat1(s, sec._mat) == 0
+                    and int(s.mt1 or 0) == mt for r in s.ni_records]
+            if recs:
+                cache[mt] = (sec, recs)
+    return cache[mt]
+
+
+def _null_block(entry) -> bool:
+    return entry is not None and not any(np.any(_decoded_values(r)) for _, r in entry[1])
+
+
+def _self34(ctx, usable, node, grid):
+    """The self block of (MT, L) summed on *grid*, as ``_assemble34`` returns it.
+
+    For a_0 without a (0, 0) block of its own, or with the null one §34.3 asks
+    for, MF33's self block of the MT.
+    """
+    entry = usable.get(node + node)
+    if entry is not None and not (node[1] == 0 and _null_block(entry)):
+        return _assemble34(entry[0], [r for _, r in entry[1]], grid)
+    if node[1] == 0:
+        mag = _magnitude_self(ctx, node[0])
+        if mag is not None:
+            try:
+                return _assemble33(mag[0], mag[1], node[0], node[0], ctx.xs, list(grid))
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
+def _self34_grid(ctx, usable, node, self_grids):
+    if node[1] == 0 and _null_block(usable.get(node + node)):
+        mag = _magnitude_self(ctx, node[0])
+        return None if mag is None else sorted(
+            {e for r in mag[1] for g in _grids(r) for e in g})
+    if node in self_grids:
+        return self_grids[node]
+    if node + node in usable:
+        return sorted({e for _, r in usable[node + node][1] for g in _grids(r) for e in g})
+    if node[1] == 0:
+        mag = _magnitude_self(ctx, node[0])
+        if mag is not None:
+            return sorted({e for r in mag[1] for g in _grids(r) for e in g})
+    return None
+
+
+def _diag_of(res):
     return None if res is None else np.diag(res[0])
+
+
+def _magnitude_against_mf33(ctx, usable, out) -> None:
+    """A non-null (MT, L=0) self block of MF34 against MF33's self block of MT.
+
+    ENDF-6 §34.3: the covariance of the integrated cross section goes in MF33,
+    and the (0, 0) components of MF34 are null, so a processor that sums the
+    two files does not count it twice. The value a_0's variance stands for is
+    MF33's, so a non-null one is compared with it: the same is a note (kika
+    keeps a_0 out of what it perturbs from MF34, but a summing processor doubles
+    it), a different one, or one with no MF33 to compare with, a warning.
+    """
+    for (mt, l, mt1, l1), (sec, good) in sorted(usable.items()):
+        if (l, mt1, l1) != (0, mt, 0):
+            continue
+        recs = [r for _, r in good]
+        if not any(np.any(_decoded_values(r)) for r in recs):
+            continue
+        loc = CovarianceLocation(mat=sec._mat, mf=34, mt=mt, mat1=0, mt1=mt, l=0, l1=0)
+        mag = _magnitude_self(ctx, mt)
+        if mag is None:
+            why = ("MF33 was not read" if 33 not in ctx.endf.files else
+                   f"MF33 has no self block for MT{mt}")
+            out.append(CovarianceFinding(
+                "magnitude_covariance_in_mf34", WARN,
+                f"a non-null (L=0, L1=0) block, and {why}: ENDF-6 §34.3 puts the covariance "
+                "of the integrated cross section in MF33 and asks for null L=L1=0 "
+                "components here", loc, {"mf33": None}))
+            continue
+        grid = sorted({e for r in recs for g in _grids(r) for e in g}
+                      | {e for r in mag[1] for g in _grids(r) for e in g})
+        a, b = _assemble34(sec, recs, grid), _self34(ctx, {}, (mt, 0), grid)
+        if a is None or b is None:
+            continue
+        scale = max(float(np.max(np.abs(a[0]))), float(np.max(np.abs(b[0]))))
+        diff = float(np.max(np.abs(a[0] - b[0]))) / scale if scale > 0 else 0.0
+        same = a[2] == b[2] and diff <= ASYM_DEFECT
+        if same:
+            summary = (f"a non-null (L=0, L1=0) block that repeats MF33's self block of MT{mt} "
+                       f"(max difference {diff:.1e} of the largest element). ENDF-6 §34.3 asks "
+                       "for it null; kika leaves a_0 out of what it perturbs from MF34, but a "
+                       "processor that sums the files counts it twice")
+        else:
+            summary = (f"a non-null (L=0, L1=0) block that differs from MF33's self block of "
+                       f"MT{mt} ("
+                       + (f"max difference {diff:.2e} of the largest element" if a[2] == b[2]
+                          else "one is relative, the other absolute")
+                       + "): two different covariances of the same integrated cross section, "
+                       "where ENDF-6 §34.3 asks for the MF34 one to be null")
+        out.append(CovarianceFinding(
+            "magnitude_covariance_in_mf34", NOTE if same else WARN, summary, loc,
+            {"relative_difference": diff, "mf33": "same" if same else "different"}))
+
+
+def _frame_against_mf4(ctx, ss, mt: int, mt1: int, loc, out) -> None:
+    """LCT of an MF34 block against the LCT of MF4 for both reactions.
+
+    ENDF-6 §34.1 allows it: the covariance may be of LAB coefficients while
+    MF4 gives CM ones, because transport uses LAB moments. It is still a
+    warning, because nothing in kika converts between frames -- a sampler that
+    perturbs MF4 applies these covariances to coefficients of the other frame.
+    """
+    lct = int(ss.lct or 0)
+    if lct == 0:
+        return
+    frames = {}
+    for m in {mt, mt1}:
+        sec4 = ctx.mf4.get(m)
+        frame = getattr(sec4, "_lct", None) if sec4 is not None else None
+        if frame in (1, 2) and int(frame) != lct:
+            frames[m] = int(frame)
+    if frames:
+        name = {1: "LAB", 2: "CM"}
+        out.append(CovarianceFinding(
+            "frame_differs_from_mf4", WARN,
+            f"the covariance is of {name[lct]} coefficients (LCT={lct}) and MF4 gives "
+            + ", ".join(f"MT{m} in {name[f]}" for m, f in sorted(frames.items()))
+            + "; ENDF-6 §34.1 allows it, but kika does not convert between frames", loc,
+            {"lct": lct, "mf4_lct": {str(m): f for m, f in frames.items()}}))
+
+
+def _missing_central34(ctx, sections, out) -> None:
+    """MF34 sections with no MF4 for their MT, when MF4 was read.
+
+    An angular distribution given in MF6 instead (LAW=2) is a note: §34 is
+    written for File 4, and the pairing is the processor's to make.
+    """
+    if 4 not in ctx.endf.files:
+        return
+    mf6 = ctx.endf.files.get(6)
+    mf6_mts = None
+    unread = set(getattr(ctx.endf.files[4], "parse_errors", {}))
+    for mt, sec in sorted(sections.items()):
+        if not sec.subsections or mt in ctx.mf4 or mt in unread:
+            continue
+        ctx.missing.add((34, mt))
+        if mf6_mts is None:
+            # A library walk reads MF4 for MF34 but not MF6, which can be large: the
+            # MF/MT columns of the tape say whether it is there without parsing it.
+            mf6_mts = set(mf6.mt) if mf6 is not None else _mts_on_tape(ctx.endf, 6)
+        in_mf6 = mt in mf6_mts
+        out.append(CovarianceFinding(
+            "missing_central_values", NOTE if in_mf6 else DEFECT,
+            f"MF34/MT{mt} has no MF4/MT{mt}"
+            + (": its angular distribution is in MF6, while ENDF-6 §34 is written for the "
+               "coefficients of File 4" if in_mf6 else
+               ": a covariance of Legendre coefficients the file does not give"),
+            CovarianceLocation(mat=sec._mat, mf=34, mt=mt), {"file": "MF4", "in_mf6": in_mf6}))
+
+
+def _mts_on_tape(endf, mf_number: int) -> set:
+    """The MTs of *mf_number* on the tape *endf* was read from (columns 71-75)."""
+    path = getattr(endf, "source_path", None)
+    if not path:
+        return set()
+    mts = set()
+    try:
+        with open(path, "r", errors="replace") as fh:
+            for line in fh:
+                if len(line) >= 75 and line[70:72].strip() == str(mf_number):
+                    mt = line[72:75].strip()
+                    if mt.isdigit() and int(mt):
+                        mts.add(int(mt))
+    except OSError:
+        return set()
+    return mts
 
 
 def _mf34_magnitude(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
@@ -1538,6 +2158,8 @@ def _mf34_magnitude(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
         # a_0 = 1 by normalisation: a stated a_0 covariance (LTT=3) is not the
         # uncertainty of a coefficient bounded by |a_l| <= 1, so the bound says nothing.
         return
+    if (34, mt) in ctx.missing:
+        return  # missing_central_values already says why
     sec4 = ctx.mf4.get(mt)
     if sec4 is None or not hasattr(sec4, "legendre_cell_averages"):
         ctx.unavailable.setdefault((34, "MF4"), []).append(mt)
@@ -1571,5 +2193,10 @@ def _mf34_magnitude(ctx, mt, l, matrix, grid, relative, loc, out) -> None:
     # averaging.
     reference = np.minimum(np.abs(central), smallest)
     var = np.clip(np.diag(matrix), 0.0, None)
+    if relative:
+        # A relative variance on an a_l that MF4 gives as zero over the whole bin
+        # (or does not give: an order above MF4's NL) perturbs nothing.
+        _variance_on_zero(var, valid & (central == 0) & (smallest == 0), True,
+                          f"a_{l} of MF4", grid, loc, out)
     sigma_abs = np.sqrt(var) * reference if relative else np.sqrt(var)
     _legendre_bound(sigma_abs, reference, valid, grid, loc, out)

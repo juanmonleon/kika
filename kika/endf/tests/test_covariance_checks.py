@@ -581,3 +581,286 @@ def test_mf34_partner_sections_and_blocks_stated_both_ways():
     assert report.by_check("missing_partner") == ()
     f = _only(report, "symmetric_block_repeated")
     assert (f.location.mt, f.location.mt1, f.location.l, f.location.l1) == (51, 2, 1, 1)
+
+
+# --------------------------------------------------------------------------
+# C9 -- the comparison with FUDGE, and what neither had
+# --------------------------------------------------------------------------
+
+def _mf3(*mts, energies=(1e-5, 2e7), value=1.0):
+    mf3 = MF(number=3)
+    for mt in mts:
+        mf3.add_section(SimpleNamespace(number=mt, energies=np.array(energies, dtype=float),
+                                        cross_sections=np.full(len(energies), value)))
+    return mf3
+
+
+def test_a_non_zero_last_f_is_a_warning():
+    rec = _lb1([0.01, 0.01, 0.01])
+    rec.f_table_k[-1] = 0.02
+    f = _only(check_covariances(_tape(_section({1: [rec]}))), "trailing_value_not_zero")
+    assert f.level == WARN and f.evidence["value"] == pytest.approx(0.02)
+    clean = check_covariances(_tape(_section({1: [_lb1([0.01, 0.01, 0.01])]})))
+    assert clean.by_check("trailing_value_not_zero") == ()
+    # In LB=8 the major libraries do it as a habit: a note.
+    rec = _lb1([1e-4, 1e-4, 1e-4], lb=8)
+    rec.f_table_k[-1] = 1e-4
+    f = _only(check_covariances(_tape(_section({1: [_lb5(CLEAN), rec]}))),
+              "trailing_value_not_zero")
+    assert f.level == NOTE
+
+
+def test_a_short_range_variance_between_two_reactions_is_a_defect():
+    sec = _section({2: [_lb5(CLEAN)], 102: [_lb1([1e-3, 1e-3, 1e-3], lb=8)]}, mt=2)
+    f = _only(check_covariances(_tape(sec, _section({102: [_lb5(CLEAN)]}, mt=102))),
+              "short_range_in_cross_block")
+    assert f.level == DEFECT and (f.location.mt, f.location.mt1, f.location.lb) == (2, 102, 8)
+
+
+def test_a_short_range_variance_just_above_a_threshold_is_a_note():
+    grid = [1e6, 1.5e6, 5e6, 2e7]
+    mf3 = MF(number=3)
+    mf3.add_section(SimpleNamespace(number=16, energies=np.array([1e6, 2e6, 2e7]),
+                                    cross_sections=np.array([0.0, 0.1, 0.5])))
+    sec = _section({16: [_lb5(CLEAN, grid=grid), _lb1([1e-4, 1e-4, 1e-4], grid=grid, lb=8)]},
+                   mt=16)
+    f = _only(check_covariances(_tape(sec, files=[mf3])), "short_range_near_threshold")
+    assert f.level == NOTE and f.evidence["threshold"] == pytest.approx(1e6)
+
+
+def test_a_covariance_of_a_reaction_the_tape_does_not_give():
+    report = check_covariances(_tape(_section({16: [_lb5(CLEAN)]}, mt=16),
+                                     files=[_mf3(2, 102)]))
+    f = _only(report, "missing_central_values")
+    assert f.level == DEFECT and f.location.mt == 16
+    assert report.by_check("central_values_unavailable") == ()
+    # MT3 is not in MF3 but its partials are.
+    report = check_covariances(_tape(_section({3: [_lb5(CLEAN)]}, mt=3), files=[_mf3(4, 102)]))
+    assert report.by_check("missing_central_values") == ()
+    # Without MF3 read nothing is judged.
+    report = check_covariances(_tape(_section({16: [_lb5(CLEAN)]}, mt=16)))
+    assert report.by_check("missing_central_values") == ()
+
+
+def test_mf31_nubar_452_may_come_from_455_and_456():
+    mf1 = MF(number=1)
+    for mt in (455, 456):
+        mf1.add_section(SimpleNamespace(
+            number=mt, get_nubar=lambda e, out_of_range: np.full(np.size(e), 2.4)))
+    endf = _tape(_section({452: [_lb5(CLEAN)]}, mt=452), mf_number=31, files=[mf1])
+    assert check_covariances(endf).by_check("missing_central_values") == ()
+
+
+def _mf4(mt, lct=2, a=0.1):
+    return SimpleNamespace(
+        number=mt, _lct=lct,
+        legendre_cell_averages=lambda edges, order: {order: np.full(len(edges) - 1, a)},
+        legendre_cell_min_abs=lambda edges, order: np.full(len(edges) - 1, abs(a)))
+
+
+def test_mf34_without_mf4_is_a_defect_and_a_note_when_mf6_has_it():
+    sec = _mf34(2, {2: {(1, 1): [_lb5_34(SELF2)]}}, nl=1)
+    mf4 = MF(number=4)
+    mf4.add_section(_mf4(51))
+    f = _only(check_covariances(_tape(sec, mf_number=34, files=[mf4])), "missing_central_values")
+    assert f.level == DEFECT
+    mf6 = MF(number=6)
+    mf6.add_section(SimpleNamespace(number=2))
+    f = _only(check_covariances(_tape(sec, mf_number=34, files=[mf4, mf6])),
+              "missing_central_values")
+    assert f.level == NOTE and f.evidence["in_mf6"]
+
+
+def test_mf34_frame_against_mf4():
+    sec = _mf34(2, {2: {(1, 1): [_lb5_34(SELF2)]}}, nl=1)  # LCT=1, LAB
+    mf4 = MF(number=4)
+    mf4.add_section(_mf4(2, lct=2))
+    f = _only(check_covariances(_tape(sec, mf_number=34, files=[mf4])), "frame_differs_from_mf4")
+    assert f.level == WARN and f.evidence["lct"] == 1
+    sec.subsections[0].sub_subsections[0].lct = 0  # the same frame as MF4
+    report = check_covariances(_tape(sec, mf_number=34, files=[mf4]))
+    assert report.by_check("frame_differs_from_mf4") == ()
+
+
+def test_mf34_a_non_null_l0_block_counts_the_magnitude_twice():
+    sec = _mf34(2, {2: {(0, 0): [_lb5_34(SELF2)], (1, 1): [_lb5_34(SELF2)]}}, ltt=3)
+    f = _only(check_covariances(_tape(sec, mf_number=34)), "magnitude_covariance_in_mf34")
+    assert f.level == WARN and (f.location.l, f.location.l1) == (0, 0)
+
+
+def test_variance_where_the_central_value_is_zero():
+    ramp = {1: SimpleNamespace(energies=np.array([1.0, 10.0, 1e4]),
+                               values=np.array([0.0, 0.0, 1.0]))}
+    f = _only(check_covariances(_tape(_section({1: [_lb5(CLEAN)]})), xs_sections=ramp),
+              "variance_where_central_value_is_zero")
+    assert f.level == NOTE and f.evidence["bins"] == [[1.0, 10.0]]
+    # MF34: an order MF4 gives as zero everywhere.
+    sec = _mf34(2, {2: {(1, 1): [_lb5_34(SELF2)]}}, nl=1)
+    mf4 = MF(number=4)
+    mf4.add_section(_mf4(2, lct=1, a=0.0))
+    f = _only(check_covariances(_tape(sec, mf_number=34, files=[mf4])),
+              "variance_where_central_value_is_zero")
+    assert f.evidence["n"] == 2
+
+
+ONE = [1.0, 10.0]
+
+
+def _joint_tape(r12, r13, r23):
+    """Three one-bin reactions, unit relative variances, the given correlations."""
+    def lb5(v):
+        return _lb5([[v]], grid=ONE, ls=0)
+    return _tape(_section({2: [_lb5([[1.0]], grid=ONE)], 4: [lb5(r12)], 102: [lb5(r13)]}, mt=2),
+                 _section({4: [_lb5([[1.0]], grid=ONE)], 102: [lb5(r23)]}, mt=4),
+                 _section({102: [_lb5([[1.0]], grid=ONE)]}, mt=102))
+
+
+def test_pairwise_compatible_blocks_can_make_an_indefinite_joint():
+    # |rho| <= 0.9 everywhere and no pair alone is indefinite, but x = (1, -1, -1)
+    # has variance 3 - 5.4 < 0.
+    report = check_covariances(_joint_tape(0.9, 0.9, -0.9))
+    assert report.by_check("correlation_out_of_bounds") == ()
+    assert report.by_check("not_positive_semidefinite") == ()
+    f = _only(report, "joint_not_positive_semidefinite")
+    assert f.level == DEFECT and f.location.mt is None
+    assert f.evidence["nodes"] == ["MT2", "MT4", "MT102"]
+    assert f.evidence["pairs_indefinite_alone"] == []
+    expected = np.linalg.eigvalsh([[1, .9, .9], [.9, 1, -.9], [.9, -.9, 1]])[0]
+    assert f.evidence["lambda_min"] == pytest.approx(expected)
+    # The same correlations with a consistent sign are a valid joint matrix.
+    report = check_covariances(_joint_tape(0.9, 0.9, 0.9))
+    assert report.by_check("joint_not_positive_semidefinite") == ()
+
+
+def test_the_joint_names_a_cross_block_that_is_indefinite_alone():
+    f = _only(check_covariances(_joint_tape(1.5, 0.0, 0.0)), "joint_not_positive_semidefinite")
+    assert [p["pair"] for p in f.evidence["pairs_indefinite_alone"]] == [["MT2", "MT4"]]
+
+
+def test_mf34_joint_across_orders():
+    def cross(v):
+        return _lb5_34([[v, 0.0], [0.0, v]], ls=0)
+    sec = _mf34(2, {2: {(1, 1): [_lb5_34(np.eye(2))], (1, 2): [cross(0.9)],
+                        (1, 3): [cross(0.9)], (2, 2): [_lb5_34(np.eye(2))],
+                        (2, 3): [cross(-0.9)], (3, 3): [_lb5_34(np.eye(2))]}}, nl=3)
+    f = _only(check_covariances(_tape(sec, mf_number=34)), "joint_not_positive_semidefinite")
+    assert f.location.mt == 2 and f.evidence["nodes"] == ["MT2 a_1", "MT2 a_2", "MT2 a_3"]
+
+
+def _mf32_lcomp0(rows):
+    """MF32 LCOMP=0, LRF=2: rows of (ER, GN, GG, DJ2)."""
+    from kika.endf.classes.mf32.mf32mt151 import (CovEnergyRange, CovIsotope, LCOMP0Body,
+                                                  MF32MT151)
+    from kika.endf.classes.mf32.records import PackedList, Record
+
+    values = []
+    for er, gn, gg, dj2 in rows:
+        values += [er, 0.5, gn + gg, gn, gg, 0.0,
+                   1e-4, 1e-4, 0.0, 1e-4, 0.0, 0.0, 0.0,
+                   0.0, 0.0, 0.0, dj2, 0.0]
+    block = Record(raw="", l2=0, n1=18 * len(rows), n2=len(rows), body=PackedList())
+    block.body.set_values(values)
+    rng = CovEnergyRange(el=1e-5, eh=1e3, lru=1, lrf=2,
+                         body=LCOMP0Body(control=Record(raw="", n1=1), l_blocks=[block]))
+    return MF32MT151(number=151, _za=26056.0, _awr=55.45, _nis=1, _mat=2631,
+                     isotopes=[CovIsotope(zai=26056.0, abn=1.0, energy_ranges=[rng])])
+
+
+def _mf2_mlbw(rows):
+    """MF2/MT151 with one MLBW range: rows of (ER, GN, GG)."""
+    from kika.endf.classes.mf2.mf2mt151 import (EnergyRange, LValueBlock, Resonance,
+                                                ResolvedResonanceRange)
+
+    res = [Resonance(energy=er, spin=0.5, c3=gn + gg, c4=gn, c5=gg, c6=0.0) for er, gn, gg in rows]
+    params = ResolvedResonanceRange(spi=0.0, ap=0.5, nls=1, nlsc=1, l_values=[
+        LValueBlock(awri=55.45, l=0, num_resonances=len(res), resonances=res)])
+    rng = EnergyRange(el=1e-5, eh=1e3, lru=1, lrf=2, nro=0, naps=0, parameters=params)
+    mf2 = MF(number=2)
+    mf2.add_section(SimpleNamespace(number=151, isotopes=[SimpleNamespace(energy_ranges=[rng])]))
+    return mf2
+
+
+def test_mf32_widths_and_spin_against_mf2():
+    # The 20 eV resonance has GN = 2.0 in MF32 and 2.5 in MF2, and an uncertainty on J.
+    endf = _tape(_mf32_lcomp0([(10.0, 1.0, 0.5, 0.0), (20.0, 2.0, 0.5, 0.3)]), mf_number=32,
+                 files=[_mf2_mlbw([(10.0, 1.0, 0.5), (20.0, 2.5, 0.5)])])
+    report = check_covariances(endf, mf=(32,))
+    f = _only(report, "widths_differ_from_mf2")
+    assert f.level == WARN and (f.evidence["n"], f.evidence["of"]) == (1, 2)
+    assert f.evidence["examples"] == [{"er": 20.0, "parameter": "GN", "mf32": 2.0, "mf2": 2.5}]
+    assert _only(report, "spin_uncertainty").evidence["n"] == 1
+    # A width copied with fewer digits, far inside its sigma (0.01): a note.
+    endf = _tape(_mf32_lcomp0([(10.0, 1.0, 0.5, 0.0), (20.0, 2.0, 0.5, 0.0)]), mf_number=32,
+                 files=[_mf2_mlbw([(10.0, 1.0, 0.5), (20.0, 2.0004, 0.5)])])
+    f = _only(check_covariances(endf, mf=(32,)), "widths_differ_from_mf2")
+    assert f.level == NOTE and f.evidence["max_in_sigmas"] == pytest.approx(0.04, rel=1e-3)
+    # The same widths within the 1e-5 that ENDF-6 §32.3 allows say nothing.
+    endf = _tape(_mf32_lcomp0([(10.0, 1.0, 0.5, 0.0), (20.0, 2.0, 0.5, 0.0)]), mf_number=32,
+                 files=[_mf2_mlbw([(10.0, 1.0, 0.5), (20.000001, 2.000001, 0.5)])])
+    report = check_covariances(endf, mf=(32,))
+    assert report.by_check("widths_differ_from_mf2") == ()
+    assert report.by_check("parameters_not_in_mf2") == ()
+    assert report.by_check("spin_uncertainty") == ()
+
+
+# a_0 stands for the integrated cross section (ENDF-6 §34.1, §34.3): its variance
+# is MF33's, its own (0, 0) block is null by convention, and the blocks (0, L1)
+# carry the magnitude-shape correlation. This is the layout of the Fe-56
+# `_a0cross` deliverable, built here synthetically.
+
+NULL2 = [[0.0, 0.0], [0.0, 0.0]]
+
+
+def _a0cross(cross, mf33_mt=2, l0=NULL2):
+    """MF34 MT2 (LTT=3): (0, 0), (0, 1) and (1, 1); MF33 MT ``mf33_mt``.
+
+    (0, 0) is written null by default, as §34.3 asks: NSS = NL(NL+1)/2 is what
+    tells a reader how many sub-subsections follow.
+    """
+    blocks = {(0, 0): [_lb5_34(l0)], (1, 1): [_lb5_34(SELF2)], (0, 1): [_lb5_34(cross, ls=0)]}
+    sec34 = _mf34(2, {2: blocks}, ltt=3)
+    mf33 = MF(number=33)
+    mf33.add_section(_section({mf33_mt: [_lb5(SELF2, grid=G2)]}, mt=mf33_mt))
+    return _tape(sec34, mf_number=34, files=[mf33])
+
+
+def test_a0_takes_its_variance_from_mf33():
+    report = check_covariances(_a0cross([[0.005, 0.0], [0.0, 0.005]]))
+    assert report.at_least(WARN) == ()
+    # Nothing about the null (0, 0) block: not inert rows, not an order without variance.
+    assert report.by_check("inert_rows") == () and report.by_check("order_without_variance") == ()
+    # rho of (0, 1) is measured against MF33's variance: 0.015 / 0.01 = 1.5.
+    f = _only(check_covariances(_a0cross([[0.015, 0.0], [0.0, 0.005]])),
+              "correlation_out_of_bounds")
+    assert (f.location.l, f.location.l1) == (0, 1)
+    assert f.evidence["max_abs_rho"] == pytest.approx(1.5)
+
+
+def test_a0_without_mf33_for_its_mt_has_no_partner():
+    f = _only(check_covariances(_a0cross([[0.005, 0.0], [0.0, 0.005]], mf33_mt=102)),
+              "missing_partner")
+    assert f.level == DEFECT and f.evidence["absent"] == ["a_0 of MT2 (nor MF33)"]
+
+
+def test_the_joint_of_mf33_and_mf34_through_a0():
+    # Each block is fine alone, but sigma_0 and a_1 correlated at 0.9 in both bins
+    # while (1, 1) anti-correlates the two bins of a_1 and MF33 correlates sigma_0's.
+    anti = [[0.01, -0.009], [-0.009, 0.01]]
+    sec34 = _mf34(2, {2: {(0, 0): [_lb5_34(NULL2)], (1, 1): [_lb5_34(anti)],
+                          (0, 1): [_lb5_34([[0.009, 0.0], [0.0, 0.009]], ls=0)]}}, ltt=3)
+    mf33 = MF(number=33)
+    mf33.add_section(_section({2: [_lb5([[0.01, 0.009], [0.009, 0.01]], grid=G2)]}, mt=2))
+    f = _only(check_covariances(_tape(sec34, mf_number=34, files=[mf33])),
+              "joint_not_positive_semidefinite")
+    assert f.evidence["nodes"] == ["MT2 a_0", "MT2 a_1"]
+    assert f.evidence["pairs_indefinite_alone"][0]["pair"] == ["MT2 a_0", "MT2 a_1"]
+
+
+def test_a_non_null_l0_block_is_compared_with_mf33():
+    same = _only(check_covariances(_a0cross([[0.005, 0.0], [0.0, 0.005]], l0=SELF2)),
+                 "magnitude_covariance_in_mf34")
+    assert same.level == NOTE and same.evidence["mf33"] == "same"
+    other = _only(check_covariances(_a0cross([[0.005, 0.0], [0.0, 0.005]],
+                                             l0=np.multiply(SELF2, 2.0))),
+                  "magnitude_covariance_in_mf34")
+    assert other.level == WARN and other.evidence["mf33"] == "different"

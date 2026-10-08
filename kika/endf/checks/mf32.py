@@ -35,8 +35,9 @@ from .findings import DEFECT, NOTE, WARN, CovarianceFinding, CovarianceLocation
 
 #: Largest matrix whose eigenvalues are computed (Pt-192 of JEFF-4.0 is 5475).
 EIG_MAX = 6000
-#: Relative tolerance when matching MF32 energies to MF2's.
-_E_RTOL = 1e-6
+#: Relative tolerance when matching MF32 energies to MF2's: ENDF-6 §32.3
+#: (Correspondence, 2 and 3) identifies a resonance to 1e-5.
+_E_RTOL = 1e-5
 _ITEMS = 10
 
 
@@ -54,6 +55,7 @@ def check_mf32(ctx, mf_obj, out: List[CovarianceFinding]) -> None:
             for k, rng in enumerate(iso.energy_ranges):
                 loc = CovarianceLocation(mat=mat, mf=32, mt=mt, range_index=k)
                 readable[(i_iso, k)] = _intg_indices(rng, loc, out)
+                _spin_uncertainty(rng, loc, out)
                 if mf2_ranges is not None:
                     _against_mf2(rng, i_iso, k, mf2_ranges, loc, out)
 
@@ -88,6 +90,7 @@ def check_mf32(ctx, mf_obj, out: List[CovarianceFinding]) -> None:
                     _check_form(cov.form, ndigit, rng, bloc, out)
                     if mf2_ranges is not None:
                         _energies_in_mf2(cov.form, rng, mf2_ranges, bloc, out)
+                        _widths_in_mf2(cov.form, rng, mf2_ranges, bloc, out)
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +233,148 @@ def _energies_in_mf2(form, rng, mf2_ranges, loc, out) -> None:
             {"n": int(missing.sum()), "of": int(er.size),
              "energies": [float(x) for x in er[missing][:_ITEMS]],
              "max_relative_offset": float(rel.max())}))
+
+
+#: Relative tolerance when comparing a width of MF32 with MF2's: both are
+#: 11-column ENDF floats, so a copy agrees to the sixth figure.
+_W_RTOL = 1e-5
+#: A width that differs from MF2's by at least this fraction of its own sigma is
+#: a warning; less, a note. JEFF-4.0 differs in 66 tapes, with a median of
+#: 4e-4 of the width (census 8-oct-2026): copies with fewer digits, which move
+#: nothing next to an uncertainty of percents.
+_W_SIGMA_FRACTION = 0.1
+
+
+def _mf2_rows(twin) -> Optional[List[Tuple[float, Dict[str, float]]]]:
+    """[(ER, {slot name: value})] of an LRF=1/2/3 range of MF2, or None."""
+    from ..model_adapter.parameter_covariances import _SLOTS
+
+    slots = _SLOTS.get(int(twin.lrf))
+    p = twin.parameters
+    if slots is None or p is None or not hasattr(p, "l_values"):
+        return None
+    rows = []
+    for b in p.l_values:
+        for r in b.resonances:
+            vals = (r.energy, r.spin, r.c3, r.c4, r.c5, r.c6)
+            rows.append((float(r.energy), dict(zip(slots, map(float, vals)))))
+    return rows
+
+
+def _widths_in_mf2(form, rng, mf2_ranges, loc, out) -> None:
+    """The widths MF32 states for a resonance against the ones MF2 has for it.
+
+    LCOMP=0/1/2 repeat the File 2 parameters next to their covariances; FUDGE's
+    converter compares (ER, GN, GG) and refuses a file where they differ. A
+    resonance whose energy matches but whose widths do not is a covariance of a
+    parameter set that is not the one the cross sections are built from. Several
+    MF2 resonances may share an energy (different J), so the closest of them is
+    the one compared. LRF=7 keeps its widths per channel and is not compared.
+    """
+    if int(rng.lru) != 1 or int(rng.lrf) not in (1, 2, 3):
+        return
+    if int(rng.lrf) == 3 and type(rng.body).__name__ == "LCOMP0Body":
+        return  # LCOMP=0 reads GN/GG/GF from the LRF=1/2 slots (§32.2.1)
+    twin = None
+    for ranges in mf2_ranges:
+        twin = _match(rng, ranges) or twin
+    if twin is None or int(twin.lru) != 1 or int(twin.lrf) != int(rng.lrf):
+        return
+    rows = _mf2_rows(twin)
+    if not rows:
+        return
+    names, labels = _names(form), _labels(form)
+    values = np.asarray(form.parameterValues, dtype=float)
+    by_energy: Dict[float, List[Dict[str, float]]] = {}
+    for er, row in rows:
+        by_energy.setdefault(er, []).append(row)
+    ref = np.array(sorted(by_energy))
+    # One resonance of the covariance = consecutive rows with the same label.
+    groups: Dict[str, List[int]] = {}
+    for i, lab in enumerate(labels[:values.size]):
+        groups.setdefault(lab, []).append(i)
+    n_res = n_bad = n_matter = 0
+    worst = (0.0, "", 0.0)
+    worst_sigmas = 0.0
+    examples = []
+    diag = np.diag(np.asarray(form.matrix, dtype=float))
+    for idx in groups.values():
+        mine = {names[i]: float(values[i]) for i in idx}
+        sigma = {names[i]: float(np.sqrt(max(diag[i], 0.0))) for i in idx if i < diag.size}
+        er = mine.get("ER")
+        widths = [n for n in mine if n not in ("ER", "AJ", "?")]
+        if er is None or not widths:
+            continue
+        j = int(np.argmin(np.abs(ref - er)))
+        if abs(ref[j] - er) > _E_RTOL * max(abs(er), 1.0):
+            continue  # parameters_not_in_mf2 reports it
+        n_res += 1
+        best = None
+        for cand in by_energy[float(ref[j])]:
+            dev = max(abs(mine[n] - cand[n]) / max(abs(cand[n]), abs(mine[n]), 1e-30)
+                      for n in widths if n in cand)
+            if best is None or dev < best[0]:
+                best = (dev, cand)
+        if best is None or best[0] <= _W_RTOL:
+            continue
+        n_bad += 1
+        dev, cand = best
+        name = max((n for n in widths if n in cand),
+                   key=lambda n: abs(mine[n] - cand[n]) / max(abs(cand[n]), abs(mine[n]), 1e-30))
+        # How many of its own sigmas apart; a width with no stated sigma counts in full.
+        sig = max((abs(mine[n] - cand[n]) / sigma[n] if sigma.get(n, 0) > 0 else np.inf)
+                  for n in widths if n in cand and abs(mine[n] - cand[n]) > 0)
+        worst_sigmas = max(worst_sigmas, sig)
+        n_matter += sig >= _W_SIGMA_FRACTION
+        if dev > worst[0]:
+            worst = (dev, name, er)
+        if len(examples) < _ITEMS:
+            examples.append({"er": er, "parameter": name, "mf32": mine[name], "mf2": cand[name]})
+    if n_bad:
+        matters = n_matter > 0
+        out.append(CovarianceFinding(
+            "widths_differ_from_mf2", WARN if matters else NOTE,
+            f"{n_bad} of {n_res} resonances have widths that differ from MF2's (worst {worst[1]} "
+            f"at {worst[2]:.6g} eV, off by {worst[0]:.2g} of its value; "
+            + (f"{n_matter} by {_W_SIGMA_FRACTION:g} sigma or more): the covariance is of a "
+               "parameter set the cross sections are not built from" if matters else
+               f"all within {_W_SIGMA_FRACTION:g} of their sigma): a copy with fewer digits, "
+               "which changes nothing the covariance says"), loc,
+            {"n": n_bad, "of": n_res, "max_relative_difference": worst[0],
+             "n_beyond_sigma_fraction": n_matter,
+             "max_in_sigmas": None if not np.isfinite(worst_sigmas) else worst_sigmas,
+             "examples": examples}))
+
+
+def _spin_uncertainty(rng, loc, out) -> None:
+    """An uncertainty on the resonance spin J, which is a quantum number.
+
+    LCOMP=0 carries four J terms per resonance (DJDN, DJDG, DJDF, DJ2) that
+    §32.2.1 calls null and §32.3 (Other procedures, 2) says to treat as null if
+    they are not; LCOMP=2 has a slot under AJ where §32.2.3 gives 0.0 "instead
+    of DAJ". kika's decoder drops both (FUDGE's refuses the file): a warning,
+    since what the evaluator meant by a non-zero one is lost.
+    """
+    body = rng.body
+    kind = type(body).__name__
+    hits = 0
+    if kind == "LCOMP0Body":
+        for block in body.l_blocks:
+            count = int(block.n2)
+            raw = np.asarray(block.values[:18 * count], dtype=float)
+            if raw.size == 18 * count and count:
+                hits += int(np.count_nonzero(np.any(raw.reshape(count, 18)[:, 13:17] != 0,
+                                                    axis=1)))
+    elif kind == "LCOMP2Body" and body.parameters is not None and int(rng.lrf) in (1, 2, 3):
+        count = int(body.parameters.n2)
+        raw = np.asarray(body.parameters.values[:12 * count], dtype=float)
+        if raw.size == 12 * count and count:
+            hits = int(np.count_nonzero(raw.reshape(count, 12)[:, 7]))
+    if hits:
+        out.append(CovarianceFinding(
+            "spin_uncertainty", WARN,
+            f"{hits} resonance(s) state an uncertainty on the spin J, a quantum number; "
+            "ENDF-6 §32 has J carry none, and kika drops it", loc, {"n": hits}))
 
 
 # ---------------------------------------------------------------------------

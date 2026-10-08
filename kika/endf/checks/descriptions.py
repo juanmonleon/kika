@@ -111,6 +111,24 @@ def _build() -> Dict[str, CheckDescription]:
             {DEFECT: "always"},
             "kika could not turn the record into a matrix (in MF32, the resonance-parameter "
             "decoder skipped the range, e.g. an NNN that does not add up)."),
+        "trailing_value_not_zero": D(
+            "Last F of a table not zero", XS,
+            {WARN: "LB 0-4", NOTE: "LB=8/9, where the major libraries write it non-zero as a habit"},
+            "NE energies bound NE-1 intervals, so the last F of an (E, F) table (LB 0-4, 8, 9) "
+            "belongs to none, and ENDF-6 33.2.2.2 says it must be zero. Nothing reads it, but "
+            "a non-zero value often means the table is shifted by one place."),
+        "short_range_in_cross_block": D(
+            "LB=8/9 in a cross block", (31, 33),
+            {DEFECT: "always"},
+            "A short-range self-scaling variance (LB=8 or 9) between two reactions. ENDF-6 "
+            "33.3.3 (13) does not allow these formats for cross-reaction covariances: they "
+            "state a variance, which has no meaning off the diagonal."),
+        "magnitude_covariance_in_mf34": D(
+            "Non-null L=L1=0 block in MF34", (34,),
+            {WARN: "always"},
+            "ENDF-6 34.3 keeps the covariance of the integrated cross section in MF33 and asks "
+            "for null (L=0, L1=0) components in MF34. A non-null one counts that covariance "
+            "a second time when the two files are combined."),
         "lt_not_decoded": D(
             "LB 0-2 with LT > 0 not decoded", (34,),
             {NOTE: "always"},
@@ -176,10 +194,23 @@ def _build() -> Dict[str, CheckDescription]:
             "and how much the repair would change sigma; the evidence names the record "
             "already indefinite on its own. MF32 is judged on its correlation matrix."),
         "psd_not_evaluated": D(
-            "PSD not evaluated (too large)", (32,),
+            "PSD not evaluated (too large)", (31, 32, 33, 34),
             {NOTE: "always"},
-            "An MF32 block with more parameters than the eigenvalue limit; its positive "
-            "semi-definiteness was not computed."),
+            "An MF32 block, or the joint matrix of a file, with more rows than the eigenvalue "
+            "limit; its positive semi-definiteness was not computed."),
+        "joint_not_positive_semidefinite": D(
+            "Joint matrix not positive semi-definite", (31, 33, 34),
+            {DEFECT: f"the cross blocks push lambda_min of the joint more than {c.PSD_DEFECT:g} "
+                     f"x lambda_max below the smallest of its self blocks, or a warning whose "
+                     f"clipping changes some sigma by {_pct(c.PSD_IMPACT_DEFECT)} or more",
+             WARN: f"between {c.PSD_NOTE:g} and {c.PSD_DEFECT:g}, not explained by rounding",
+             NOTE: "explained by the rounding of quantised correlations, or clipping changes "
+                   f"no sigma by {_pct(c.PSD_IMPACT_NOTE)} or more"},
+            "Every self block PSD and every |rho| <= 1 do not make the matrix of all reactions "
+            "(MF31/33) or of all Legendre orders (MF34) PSD: the cross blocks can make "
+            "combinations of quantities with negative variance. Only what the cross blocks add "
+            "is graded: how far lambda_min of the joint falls below the smallest eigenvalue "
+            "of its self blocks. The evidence names the cross blocks that do it on their own."),
         "relative_uncertainty_above_one": D(
             "Relative uncertainty above 100 %", (31, 32, 33),
             {NOTE: "always"},
@@ -199,6 +230,13 @@ def _build() -> Dict[str, CheckDescription]:
             "MF34: |a_l| <= 1 for l >= 1, so sigma(a_l) > 1 is impossible whatever the "
             "distribution (Popoviciu); the relative sigma is scaled by the smallest |a_l| "
             "in the bin. MF35: a probability P has var(P) <= P(1 - P), with P from MF5."),
+        "variance_where_central_value_is_zero": D(
+            "Variance where the central value is zero", (31, 33, 34),
+            {WARN: "the variance is absolute: a normal draw there is negative half the time",
+             NOTE: "the variance is relative, so it has no effect on a sample"},
+            "Bins with an uncertainty where the cross section, nu-bar or a_l of MF4 is zero "
+            "over the whole bin: below a threshold, or a Legendre order MF4 does not give. The "
+            "mirror of 'Covariance grid shorter than MF3'."),
         "central_values_unavailable": D(
             "Central values not available", (31, 33, 34, 35, 40),
             {NOTE: "always"},
@@ -223,6 +261,13 @@ def _build() -> Dict[str, CheckDescription]:
             "The section has covariances with other reactions (or orders, or final states) "
             "but none with itself. Correlations cannot be formed, and the cross blocks "
             "cannot be checked."),
+        "missing_central_values": D(
+            "Covariance without its central values", (31, 33, 34),
+            {DEFECT: "the tape has no MF3 (MF33), MF1 (MF31) or MF4 (MF34) section for the MT",
+             NOTE: "MF34: the angular distribution is in MF6 instead"},
+            "A covariance of a quantity the file does not give, so no processor can apply it. "
+            "Judged only when the file of central values was read; a summation MT counts as "
+            "present if its partials are, and MT452 if MT455 and MT456 are."),
         "missing_partner": D(
             "The other side of a cross block is missing", XS,
             {DEFECT: "the partner MT, order or final state has no section or no self block",
@@ -235,6 +280,18 @@ def _build() -> Dict[str, CheckDescription]:
             {NOTE: "always"},
             "NL counts a Legendre order that has no (L, L) block. Legal: that order is "
             "given no uncertainty."),
+        "frame_differs_from_mf4": D(
+            "MF34 frame differs from MF4", (34,),
+            {WARN: "always"},
+            "The block is of LAB coefficients and MF4 gives CM ones, or the reverse. ENDF-6 "
+            "34.1 allows it (transport uses LAB moments), but kika does not convert between "
+            "frames: its ENDF sampler applies the covariance to MF4's coefficients as they are."),
+        "short_range_near_threshold": D(
+            "LB=8/9 near a threshold", (31, 33),
+            {NOTE: "always"},
+            "A non-zero LB=8/9 variance less than 1 MeV above an effective threshold above "
+            "0.1 MeV. ENDF-6 33.3.3 (13) says not to: the variance is absolute, and near a "
+            "threshold it is large against the cross section."),
         "cross_block_below_diagonal": D(
             "Cross block stored under the diagonal", (31, 33, 34),
             {NOTE: "always"},
@@ -319,6 +376,19 @@ def _build() -> Dict[str, CheckDescription]:
             "Range limits differ from MF2", (32,),
             {NOTE: "always"},
             "The range exists in MF2 with the same formalism, but its energy limits differ."),
+        "widths_differ_from_mf2": D(
+            "Widths differ from MF2", (32,),
+            {WARN: "some width differs by 0.1 of its own sigma or more",
+             NOTE: "every difference is under 0.1 sigma: a copy with fewer digits"},
+            "MF32 repeats the File 2 parameters next to their covariances. Resonances whose "
+            "energy matches MF2 but whose widths do not (to 1e-5) make the covariance one of a "
+            "parameter set the cross sections are not built from."),
+        "spin_uncertainty": D(
+            "Uncertainty on the spin J", (32,),
+            {WARN: "always"},
+            "J is a quantum number and carries no uncertainty: the J terms of LCOMP=0 are null "
+            "by definition and LCOMP=2 gives 0.0 instead of DAJ. A non-zero one is dropped by "
+            "kika (ENDF-6 32.3 says to treat it as null), so what the evaluator meant is lost."),
         "parameters_not_in_mf2": D(
             "Resonances not in MF2", (32,),
             {WARN: "always"},
