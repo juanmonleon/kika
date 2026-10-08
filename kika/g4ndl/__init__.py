@@ -9,12 +9,15 @@ the reader follows is the consumer's source, Geant4 v11.4.3
 references in ``kika-workspace/docs/library/G4NDL_token_spec.md``; checking
 against a real Geant4 build happens outside this repository.
 
-**Scope today: elastic scattering only** (``Elastic/CrossSection`` and
-``Elastic/FS``, i.e. MT2), read and written: ``kika.read(root, format="g4ndl",
-target=...)``, ``kika.write(suite, root, format="g4ndl")``, and
-:func:`patch_elastic` to replace one isotope in a copy of a whole library. A
-library also holding ``Capture``, ``Inelastic`` or
-``Fission`` is read *partially*, and the conversion report says so.
+**Scope today: elastic and inelastic scattering**, read and written:
+``Elastic/CrossSection`` and ``Elastic/FS`` (MT2), and ``Inelastic/CrossSection``,
+the 36 channel directories ``Inelastic/F01`` … ``F36`` and the residual level
+schemes ``Inelastic/Gammas`` (:mod:`kika.g4ndl.inelastic_decode` says what of
+them reaches the model). ``kika.read(root, format="g4ndl", target=...)``,
+``kika.write(suite, root, format="g4ndl")``, and :func:`patch_isotope` (or
+:func:`patch_elastic`) to replace one isotope in a copy of a whole library. A
+library also holding ``Capture`` or ``Fission`` is read *partially*, and the
+conversion report says so.
 
 Like :mod:`kika.gnds`, nothing here imports :mod:`kika.nuclear_data.model` at
 module scope: ``import kika.g4ndl`` must not wake the model
@@ -26,9 +29,10 @@ from kika.g4ndl.exceptions import (
 )
 from kika.g4ndl.library import G4NDLLibrary, open
 from kika.g4ndl.names import IsotopeKey
-from kika.g4ndl.patch import PatchResult, patch_elastic
-from kika.g4ndl.tables import angularBulk, isotopeSummary
+from kika.g4ndl.patch import PatchResult, patch_elastic, patch_isotope
+from kika.g4ndl.tables import angularBulk, angularMTs, crossSections, inelasticTotal, isotopeSummary
 
 __all__ = ["G4NDLError", "G4NDLFormatError", "G4NDLLibrary", "G4NDLUnsupportedError",
-           "IsotopeKey", "IsotopeNotFoundError", "PatchResult", "angularBulk",
-           "isotopeSummary", "open", "patch_elastic"]
+           "IsotopeKey", "IsotopeNotFoundError", "PatchResult", "angularBulk", "angularMTs",
+           "crossSections", "inelasticTotal",
+           "isotopeSummary", "open", "patch_elastic", "patch_isotope"]

@@ -39,12 +39,15 @@ from kika.g4ndl.records import (
 from kika.g4ndl.tokens import TokenStream
 
 __all__ = ["parse_cross_section", "parse_elastic_fs", "parse_interpolation",
-           "SUPPORTED_INTERPOLATION", "TRANSITION_RTOL"]
+           "QUALIFIED_INTERPOLATION", "SUPPORTED_INTERPOLATION", "TRANSITION_RTOL"]
 
 #: ENDF codes 1-5. ``G4InterpolationManager::MakeScheme`` also accepts the
 #: ``C…`` (11-15) and ``U…`` (21-25) variants; no real elastic file uses them,
 #: so kika refuses them until one does rather than guess their meaning.
 SUPPORTED_INTERPOLATION = frozenset({1, 2, 3, 4, 5})
+#: The corresponding-point (``C…``, 11-15) and unit-base (``U…``, 21-25)
+#: variants, admitted only where ``qualified=True``.
+QUALIFIED_INTERPOLATION = frozenset(range(11, 16)) | frozenset(range(21, 26))
 _LOG_X = frozenset({3, 5})  # ln x: x must be > 0
 _LOG_Y = frozenset({4, 5})  # ln y: y must be > 0
 
@@ -60,8 +63,14 @@ _FRAMES = (1, 2)
 
 # ------------------------------------------------------------ interpolation
 
-def parse_interpolation(stream: TokenStream, n: int, what: str) -> Interpolation:
+def parse_interpolation(stream: TokenStream, n: int, what: str, *,
+                        qualified: bool = False) -> Interpolation:
     """Read ``NR (NBT INT)×NR`` governing ``n`` points.
+
+    ``qualified`` admits the corresponding-point (11-15) and unit-base
+    (21-25) variants ``G4InterpolationManager::MakeScheme`` knows. No elastic
+    file uses them; the incident-energy tables of inelastic spectra do
+    (``G4NDL_token_spec.md`` §10), and there the consumer applies them.
 
     ``NBT`` is cumulative (the consumer's ``start[i] = range[i-1]``): it must
     increase strictly and end at ``n``, else regions overlap or leave points
@@ -82,7 +91,7 @@ def parse_interpolation(stream: TokenStream, n: int, what: str) -> Interpolation
                          f"{nbt[-1] if nbt else 0}", f"{what}: NBT[{k}]", pos)
         pos = stream.position
         c = stream.int(f"{what}: INT[{k}]")
-        if c not in SUPPORTED_INTERPOLATION:
+        if c not in SUPPORTED_INTERPOLATION and not (qualified and c in QUALIFIED_INTERPOLATION):
             kind = ("a C/U variant Geant4 knows but no real file uses"
                     if c in range(11, 16) or c in range(21, 26)
                     else "not a code Geant4 knows (it would throw)")
@@ -117,7 +126,7 @@ def _check_log_domain(stream, interp, x, y, what, start):
     n = len(x)
     if n < 2:
         return
-    iv = _interval_codes(interp, n)
+    iv = _interval_codes(interp, n) % 10  # a C/U variant takes the logs of its base code
     for axis, values, logs in (("x", x, _LOG_X), ("y", y, _LOG_Y)):
         log_iv = np.isin(iv, list(logs))
         touched = np.zeros(n, dtype=bool)

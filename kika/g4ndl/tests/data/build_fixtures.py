@@ -13,6 +13,15 @@ so the reader under test opens them the way it opens a real one:
     read from the whole library by the ``tape``-marked tests instead
     (``KIKA_G4NDL``, see the repository ``conftest.py``).
 
+``inelastic/JEFF-4.0/`` and ``inelastic/G4NDL-4.7.1/``
+    Real ``Inelastic/`` files, byte for byte, kept apart from the elastic
+    mini libraries so that those keep testing an elastic-only library. Chosen
+    by ``kika-workspace/myworkspace/G4NDL/phase10/`` as the smallest file
+    showing each section type and law (``INELASTIC`` says which), plus one
+    whole isotope (Pu-244 of G4NDL 4.7.1: its ``Inelastic/CrossSection`` and
+    every channel, 2.3 kB) for the total and the sums, and two level schemes
+    from ``Inelastic/Gammas`` (G4NDL 4.7.1 only: JEFF-4.0 ships none). ~120 kB.
+
 ``synthetic/``
     Hand-written token streams for what no real file shows (``repFlag=0``, the
     ``G4NDL`` header, a laboratory frame, ``tempdep != 0``) and for the inputs a
@@ -50,6 +59,33 @@ REAL = {
 
 SUBDIRS = ("Elastic/CrossSection", "Elastic/FS")
 
+#: (library, subdir under Inelastic/, file) -> why it is here.
+INELASTIC = {
+    ("G4NDL-4.7.1", "F18", "94_244_Plutonium.z"): "base FS: MF4 isotropic + MF5 LF=9 (not modelled)",
+    ("G4NDL-4.7.1", "F23", "47_109_Silver.z"): "composite F23, the lumped MT103 alone",
+    ("G4NDL-4.7.1", "F05", "80_196_Mercury.z"): "photons 12 (LO=1), 14 isotropic, 15; MF5 LF=1 with INT=1",
+    ("G4NDL-4.7.1", "F05", "56_132_Barium.z"): "MF5 LF=1 modelled: MF4 + MF5 as one uncorrelated",
+    ("JEFF-4.0", "F18", "97_247_Berkelium.z"): "MF6 LAW=1 LANG=1",
+    ("G4NDL-4.7.1", "F04", "64_156_Gadolinium.z"): "MF4 tabulated; MF5 NK=2",
+    ("JEFF-4.0", "F01", "8_18_Oxygen.z"): "the smallest F01",
+    ("G4NDL-4.7.1", "F22", "13_27_Aluminum.z"): "MF6 LAW=1 LANG=2 (Kalbach-Mann)",
+    ("JEFF-4.0", "F18", "79_197_Gold.z"): "MF4 Legendre; photons 13",
+    ("G4NDL-4.7.1", "F26", "26_58_Iron.z"): "MF6 LAW=2",
+    ("G4NDL-4.7.1", "F01", "63_151_Europium.z"): "photons 12 LO=2 (cascade)",
+    ("G4NDL-4.7.1", "F24", "7_14_Nitrogen.z"): "photons 14 Legendre (LTT=1)",
+    ("JEFF-4.0", "F25", "5_10_Boron.z"): "MF6 LAW=4 (recoil)",
+    ("G4NDL-4.7.1", "F01", "28_64_Nickel.z"): "F01 with MT4 and partials; MF6 LAW=3",
+    ("JEFF-4.0", "F02", "94_240_Plutonium.z"): "MF6 LAW=0",
+    ("JEFF-4.0", "F27", "4_9_Berylium.z"): "MF6 LAW=7",
+}
+
+#: Whole isotopes: Inelastic/CrossSection and every channel file.
+INELASTIC_ISOTOPES = {("G4NDL-4.7.1", "94_244_Plutonium"): "the total and its parts"}
+
+#: Inelastic/Gammas level schemes (plain text).
+GAMMAS = {("G4NDL-4.7.1", "z6.a15"): "the smallest non-empty",
+          ("G4NDL-4.7.1", "z55.a120"): "levels out of order"}
+
 #: sha256 of every committed real file, filled from the first build. A change
 #: here means the source library changed, and that is news.
 SHA256 = {
@@ -65,6 +101,28 @@ SHA256 = {
     "JEFF-4.0/Elastic/FS/2_3_Helium.z": "59161930e1b39747d920e59784cbca0359bd3ffbb8588972e28a4e58377afe9c",
     "JEFF-4.0/Elastic/FS/6_12_Carbon.z": "996d24020dec7fce45e7987a3942f4ffb38f61c62d0626d7cb03630f38e8f061",
     "JEFF-4.0/Elastic/FS/7_14_Nitrogen.z": "45da433a1bf8b33916c0d06cffe27cb8ee41618f6675425979e32be8aa761f82",
+    "inelastic/G4NDL-4.7.1/Inelastic/CrossSection/94_244_Plutonium.z": "afda8ff6dd4ecc7ec69baa5278abae9b62c594b06ff6eae87a0314e572c1bf93",
+    "inelastic/G4NDL-4.7.1/Inelastic/F01/28_64_Nickel.z": "200002676a4e04223373e1fec59095739e9b6f75ed09aff338c4ae4b4eb0202b",
+    "inelastic/G4NDL-4.7.1/Inelastic/F01/63_151_Europium.z": "213f2fef0f3321ff557621229d23064bd9d42e51569455872cb022a32810b2de",
+    "inelastic/G4NDL-4.7.1/Inelastic/F01/94_244_Plutonium.z": "1e694b9838a5532f9f7b10f068e83bc58262699e86e43518a668f41c1359791d",
+    "inelastic/G4NDL-4.7.1/Inelastic/F04/64_156_Gadolinium.z": "c5841490795dce66312015c7fe74e4fd369681c979ab8e8425215c0ceb5e9383",
+    "inelastic/G4NDL-4.7.1/Inelastic/F04/94_244_Plutonium.z": "3484115c3af622f14411645bcb07b64c767c0e0419b1885a78eee9d56f27c260",
+    "inelastic/G4NDL-4.7.1/Inelastic/F05/56_132_Barium.z": "dd4ceb21afbd3e00d42c40786ac52f5ef079d16c3f99e47f780f4e505fd2bfae",
+    "inelastic/G4NDL-4.7.1/Inelastic/F05/80_196_Mercury.z": "147b916b3ccaa77da9ab51caa90e4942301457554330cc048c49b81ecccc3a62",
+    "inelastic/G4NDL-4.7.1/Inelastic/F05/94_244_Plutonium.z": "86af1d426f28267d6112e9917eb14cedb41df0c2608fb6c4874cedb5b00f3660",
+    "inelastic/G4NDL-4.7.1/Inelastic/F18/94_244_Plutonium.z": "ea82a8b7c184b301a200138ab75cfc3e30b2190de1ef4976d054e7b80d5da24a",
+    "inelastic/G4NDL-4.7.1/Inelastic/F22/13_27_Aluminum.z": "4d8fe0b2deaa631b17bceaf51d007478f43a65bb24ef6fbe2451d5e7c1e809aa",
+    "inelastic/G4NDL-4.7.1/Inelastic/F23/47_109_Silver.z": "443f7c54d715328d11771c3690c6cb45ac47d278f543a3464155ebf46a61eeff",
+    "inelastic/G4NDL-4.7.1/Inelastic/F24/7_14_Nitrogen.z": "0d68670af182125c2027168fa53036e017383466ada71b039d932f65dd8ee148",
+    "inelastic/G4NDL-4.7.1/Inelastic/F26/26_58_Iron.z": "76fa6f229601f65f60167060c170333d9e259da45a306f635a2445b8e74277e1",
+    "inelastic/G4NDL-4.7.1/Inelastic/Gammas/z55.a120": "c475283b46d01df233d2b95398efcd03b54c50bdbe350b0f0e6f4ee84401c239",
+    "inelastic/G4NDL-4.7.1/Inelastic/Gammas/z6.a15": "fec14ab141b545fa360042678c3fb1617172629b9136dcec5189f751d016e311",
+    "inelastic/JEFF-4.0/Inelastic/F01/8_18_Oxygen.z": "75a6fb6f7fa838193def79d40f767190c9476412a1d0318cd5dcc446c6ceef21",
+    "inelastic/JEFF-4.0/Inelastic/F02/94_240_Plutonium.z": "5b00d43081a069d3a1e2e9bdfc3f79b81aeedf3c4266cadd6844ad170a83d634",
+    "inelastic/JEFF-4.0/Inelastic/F18/79_197_Gold.z": "a0ffbda3fea74f4d76aa0cf93ef12bd1c77f7fc0ff1dbfd1f31f53ca12cb1d1d",
+    "inelastic/JEFF-4.0/Inelastic/F18/97_247_Berkelium.z": "fbbe473d2335298074132e6a6ca1f68dd93d7aaf1b17a8a1506bbb4047712903",
+    "inelastic/JEFF-4.0/Inelastic/F25/5_10_Boron.z": "96c54417a24ed30da53f06450ac03f3bd42a3243778979f2c197c7058bd17032",
+    "inelastic/JEFF-4.0/Inelastic/F27/4_9_Berylium.z": "a51160244e93fb66e9d01919f3ebdedc9b997c13c8793b10fad63adba1318814",
 }
 
 _CS_OK = "0 0\n3\n1.0e-5 4.0 1.0e6 3.0 2.0e7 1.0\n"
@@ -150,6 +208,25 @@ def copy_real(sources: dict[str, Path]) -> dict[str, str]:
     return hashes
 
 
+def copy_inelastic(sources: dict[str, Path]) -> dict[str, str]:
+    files = [(lib, f"Inelastic/{sub}/{name}") for (lib, sub, name) in INELASTIC]
+    for (lib, stem) in INELASTIC_ISOTOPES:
+        for d in sorted((sources[lib] / "Inelastic").iterdir()):
+            if d.name != "Gammas" and (d / f"{stem}.z").is_file():
+                files.append((lib, f"Inelastic/{d.name}/{stem}.z"))
+    files += [(lib, f"Inelastic/Gammas/{name}") for (lib, name) in GAMMAS]
+    hashes = {}
+    for lib, rel in files:
+        dst = HERE / "inelastic" / lib / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(sources[lib] / rel, dst)
+        key = str(dst.relative_to(HERE).as_posix())
+        hashes[key] = sha256(dst)
+        if SHA256.get(key) and SHA256[key] != hashes[key]:
+            raise SystemExit(f"{key}: source changed, sha256 {hashes[key]}")
+    return hashes
+
+
 def write_synthetic() -> None:
     root = HERE / "synthetic"
     if root.exists():
@@ -168,7 +245,9 @@ def main() -> None:
     ap.add_argument("--jeff", type=Path, required=True)
     ap.add_argument("--g4ndl", type=Path, required=True)
     a = ap.parse_args()
-    hashes = copy_real({"JEFF-4.0": a.jeff, "G4NDL-4.7.1": a.g4ndl})
+    sources = {"JEFF-4.0": a.jeff, "G4NDL-4.7.1": a.g4ndl}
+    hashes = copy_real(sources)
+    hashes.update(copy_inelastic(sources))
     write_synthetic()
     for k, v in sorted(hashes.items()):
         print(f'    "{k}": "{v}",')

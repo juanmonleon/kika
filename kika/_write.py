@@ -69,10 +69,13 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
     format
         ``'gnds'``, ``'endf'`` or ``'g4ndl'``. ENDF writes **one** file: §25.1.1's
         split into two documents is GNDS's, and an ENDF tape states the
-        covariances in the same material. G4NDL writes the elastic channel
-        (MT2) into the library directory ``path`` — ``Elastic/CrossSection/<name>``
-        and ``Elastic/FS/<name>`` — and nothing else; to replace one isotope in
-        a copy of a whole library use :func:`kika.g4ndl.patch_elastic`.
+        covariances in the same material. G4NDL writes what the suite holds
+        into the library directory ``path``: the elastic channel (MT2) as
+        ``Elastic/CrossSection/<name>`` and ``Elastic/FS/<name>``, and the
+        inelastic channels as ``Inelastic/CrossSection/<name>`` and
+        ``Inelastic/Fxx/<name>`` (:func:`kika.g4ndl.encode.writeSuite`); to
+        replace one isotope in a copy of a whole library use
+        :func:`kika.g4ndl.patch_isotope`.
     gnds
         ``'2.0'`` or ``'2.1'``, forcing the declared version. The default
         mirrors what the suite was read from, and is ``'2.0'`` for a suite with
@@ -93,9 +96,10 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         (§9.3) writes the drawn sample rather than the evaluation it was drawn
         from, falling back to ``'eval'`` for anything that carries no form under
         it. GNDS needs no such parameter — it writes every form, with its label.
-        For G4NDL it is the style of the angular distribution (default
-        ``'eval'``); the cross section written is always the ``'recon'`` one,
-        see :func:`kika.g4ndl.encode.encodeElastic`.
+        For G4NDL it is the style of the elastic angular distribution (default
+        ``'eval'``; the inelastic distributions are always ``'eval'``); the
+        cross sections written are always the ``'recon'`` ones, see
+        :func:`kika.g4ndl.encode.encodeElastic`.
     compressed
         G4NDL only: write ``<name>.z`` (zlib, what Geant4 distributes) instead
         of plain text.
@@ -124,10 +128,10 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         raise ValueError('resonance_extensions is a GNDS-only option')
     if format == "g4ndl":
         # Imported here for the reason `_writeGnds` gives.
-        from kika.g4ndl.encode import writeElastic
+        from kika.g4ndl.encode import writeSuite
 
-        return writeElastic(suite, Path(os.fspath(path)), compressed=compressed,
-                            angularLabel=label or "eval")
+        return writeSuite(suite, Path(os.fspath(path)), compressed=compressed,
+                          angularLabel=label or "eval")
     if format == "endf":
         # Imported here, not at module scope, for the reason `_writeGnds` gives
         # and one more: the assembler reaches `kika.endf.model_adapter`, and

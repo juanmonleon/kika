@@ -160,3 +160,55 @@ def test_plottable_g4ndl_suite():
     a1 = plottable(suite, "legendre_coefficient", mt=2, order=1).data
     assert a1.x.size == len(g4ndl.angularBulk(suite)["energies"])
     assert a1.provenance.detail == "tables projected"
+
+
+# ------------------------------------------------------------ the inelastic
+
+INELASTIC = DATA / "inelastic"
+
+
+def _inelastic(lib, target):
+    return g4ndl.open(INELASTIC / lib).read(target)
+
+
+def test_every_cross_section_is_listed_sums_included():
+    suite = _inelastic("G4NDL-4.7.1", "Eu151")
+    assert list(g4ndl.crossSections(suite)) == [4, *range(51, 60), 91]
+    e, s = g4ndl.crossSections(suite)[4]
+    assert e.size == s.size and s.max() > 0
+    # Inelastic/CrossSection is not among them: it has no ENDF MT.
+    assert g4ndl.inelasticTotal(suite) is None
+
+
+@pytest.mark.parametrize("lib, target, mts", [
+    ("G4NDL-4.7.1", "Eu151", [*range(51, 60), 91]),   # levels + MT91 (MF4 with MF5)
+    ("JEFF-4.0", "Au197", [37]),
+    ("G4NDL-4.7.1", "Fe58", []),                       # only protons and alphas
+])
+def test_angular_mts_are_the_neutrons_mf4s(lib, target, mts):
+    assert g4ndl.angularMTs(_inelastic(lib, target)) == mts
+
+
+@pytest.mark.parametrize("lib, target, mt, rep", [
+    ("G4NDL-4.7.1", "Eu151", 51, 2),
+    ("JEFF-4.0", "Au197", 37, 1),
+    ("G4NDL-4.7.1", "Ni64", 51, 0),
+])
+def test_an_inelastic_bulk_reads_as_a_normalised_pdf(lib, target, mt, rep):
+    suite = _inelastic(lib, target)
+    b = g4ndl.angularBulk(suite, mt=mt)
+    assert b["representation"] == rep and b["frame"] in ("CM", "LAB")
+    e = np.asarray(b["energies"])
+    assert np.all(np.diff(e) >= 0)
+    fine = np.linspace(-1.0, 1.0, 4001)
+    for energy in (e[0], 0.5 * (e[0] + e[-1]), e[-1]):
+        if rep == 0:
+            break
+        p = _client(b, energy, fine)
+        assert np.trapezoid(p, fine) == pytest.approx(1.0, abs=2e-3)
+
+
+def test_a_reaction_with_no_neutron_angular_distribution_is_refused():
+    suite = _inelastic("G4NDL-4.7.1", "Fe58")
+    with pytest.raises(ValueError, match="no neutron"):
+        g4ndl.angularBulk(suite, mt=750)

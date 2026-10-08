@@ -28,11 +28,14 @@ imported, so that the two formats do not depend on each other.
 
 **Two decisions made with Juan (2026-10-06).**
 
-* **INT=1 (histogram) is refused.** Geant4 evaluates code 1 as lin-lin — the
+* **INT=1 in μ is read as lin-lin** (revised in Fase 10, D10-3; it was
+  refused on 2026-10-06). Geant4 evaluates code 1 as lin-lin — the
   ``Histogram`` call is commented out (``G4ParticleHPInterpolator.hh:91-95``)
-  — so a file using it means one thing to ENDF and another to its consumer.
-  No real elastic file uses it; until one does, there is nothing to decide
-  against, and :class:`~kika.g4ndl.exceptions.G4NDLUnsupportedError` says why.
+  — and the model holds what is transported. ENDF would read a histogram, so
+  the report calls it an approximation; the declared code is kept in the
+  provenance (``tabulatedCode1``) and written back. The inelastic reader does
+  the same. No real elastic file uses it. A code 1 in **incident energy** is
+  still refused: neither library has one, and it has no slot.
 * **``tempdep != 0`` is accepted.** Geant4 reads it and discards it; refusing
   would be stricter than the consumer for no gain. It is kept in the
   provenance and reported as a warning when it is not zero.
@@ -79,7 +82,7 @@ from kika.nuclear_data.model import (
 )
 from kika.nuclear_data.model.enums import Interpolation as ModelInterpolation
 
-__all__ = ["decodeElastic", "EVALUATED_LABEL", "RECONSTRUCTED_LABEL",
+__all__ = ["decodeElastic", "newSuite", "EVALUATED_LABEL", "RECONSTRUCTED_LABEL",
            "ELASTIC_MT", "FRAME_FROM_FLAG", "targetId"]
 
 EVALUATED_LABEL = "eval"
@@ -106,9 +109,54 @@ def targetId(key: IsotopeKey) -> str:
     return f"{pid}_m{key.M}" if key.M else pid
 
 
+def newSuite(key: IsotopeKey, *, library=None, provenance: Optional[G4NDLProvenance] = None,
+             report: Optional[ConversionReport] = None,
+             readDirectories: Tuple[str, ...] = ("Elastic",),
+             absentDirectories: Tuple[str, ...] = ()):
+    """An empty suite for ``key``: target nuclide, the two styles, the provenance.
+
+    What the elastic and the inelastic decoders share. ``readDirectories``
+    are the library's top-level directories the caller reads; every other one
+    present is reported as not read; ``absentDirectories`` are those kika
+    reads that hold nothing for this isotope.
+    """
+    report = report if report is not None else ConversionReport()
+    if provenance is None:
+        provenance = G4NDLProvenance(
+            library=str(library.root) if library is not None else None,
+            libraryName=library.root.name if library is not None else None)
+    pops = PoPs()
+    target = targetId(key)
+    pops.add(Nuclide(id=target, Z=key.Z, A=key.A))
+    if key.M:
+        report.warn(
+            f"{target}: G4NDL names the metastable state M={key.M} but not its "
+            f"nuclear level, so the nuclide's level index is left at 0")
+    suite = ReactionSuite(
+        evaluation=provenance.libraryName or "",
+        projectile="n",
+        target=target,
+        projectileFrame=Frame.lab,
+    )
+    suite.PoPs = pops
+    suite.provenance = provenance
+    suite.styles.add(Evaluated(label=EVALUATED_LABEL))
+    suite.styles.add(CrossSectionReconstructed(label=RECONSTRUCTED_LABEL,
+                                               derivedFrom=EVALUATED_LABEL))
+    _reportPartialRead(library, report, readDirectories, absentDirectories)
+    report.lost(
+        "G4NDL does not record which evaluation it was translated from, nor its "
+        "resonance parameters: the 'eval' style holds the distributions only, "
+        "and the cross sections are the 0 K pointwise ones under 'recon'")
+    suite.report = report
+    return suite, report
+
+
 def decodeElastic(crossSection: CrossSectionRecord, finalState: ElasticFSRecord,
                   key: IsotopeKey, *, library=None,
-                  report: Optional[ConversionReport] = None):
+                  report: Optional[ConversionReport] = None,
+                  readDirectories: Tuple[str, ...] = ("Elastic",),
+                  absentDirectories: Tuple[str, ...] = ()):
     """One isotope's elastic records → ``(suite, report)``.
 
     Parameters
@@ -125,31 +173,13 @@ def decodeElastic(crossSection: CrossSectionRecord, finalState: ElasticFSRecord,
     Raises
     ------
     G4NDLUnsupportedError
-        For an interpolation code 1 (histogram) anywhere in the final state.
+        For an interpolation code 1 (histogram) between incident energies.
     """
-    report = report if report is not None else ConversionReport()
     provenance = _provenance(crossSection, finalState, library)
     where = finalState.path.name if finalState.path is not None else str(key)
-
-    pops = PoPs()
-    target = targetId(key)
-    pops.add(Nuclide(id=target, Z=key.Z, A=key.A))
-    if key.M:
-        report.warn(
-            f"{target}: G4NDL names the metastable state M={key.M} but not its "
-            f"nuclear level, so the nuclide's level index is left at 0")
-
-    suite = ReactionSuite(
-        evaluation=provenance.libraryName or "",
-        projectile="n",
-        target=target,
-        projectileFrame=Frame.lab,
-    )
-    suite.PoPs = pops
-    suite.provenance = provenance
-    suite.styles.add(Evaluated(label=EVALUATED_LABEL))
-    suite.styles.add(CrossSectionReconstructed(label=RECONSTRUCTED_LABEL,
-                                               derivedFrom=EVALUATED_LABEL))
+    suite, report = newSuite(key, library=library, provenance=provenance, report=report,
+                             readDirectories=readDirectories,
+                             absentDirectories=absentDirectories)
 
     reaction = Reaction(
         id=ReactionId(label=f"MT{ELASTIC_MT}", ENDF_MT=ELASTIC_MT),
@@ -163,15 +193,9 @@ def decodeElastic(crossSection: CrossSectionRecord, finalState: ElasticFSRecord,
     product = channel.ensureProduct("n")
     product.provenance = provenance
     product.distribution = Distribution()
-    product.distribution[EVALUATED_LABEL] = _angular(finalState, where, report)
+    product.distribution[EVALUATED_LABEL] = _angular(finalState, where, report,
+                                                     provenance.tabulatedCode1)
     suite.reactions.append(reaction)
-
-    _reportPartialRead(library, report)
-    report.lost(
-        "G4NDL does not record which evaluation it was translated from, nor its "
-        "resonance parameters: the 'eval' style holds the angular distribution "
-        "only, and the cross section is the 0 K pointwise one under 'recon'")
-    suite.report = report
     return suite, report
 
 
@@ -200,7 +224,8 @@ def _crossSection(record: CrossSectionRecord, where: str,
 
 # ------------------------------------------------------------ final state
 
-def _angular(record: ElasticFSRecord, where: str, report: ConversionReport):
+def _angular(record: ElasticFSRecord, where: str, report: ConversionReport,
+             code1: Optional[dict] = None):
     frame = FRAME_FROM_FLAG[record.frameFlag]
     if record.repFlag == REP_ISOTROPIC:
         # The consumer reads frameFlag again and keeps the second one.
@@ -212,20 +237,26 @@ def _angular(record: ElasticFSRecord, where: str, report: ConversionReport):
 
     _checkTemperatures(record, where, report)
     axes = angularAxes()  # one object: see the note in endf/model_adapter/angular.py
+    code1 = {} if code1 is None else code1
     if record.repFlag == REP_LEGENDRE:
         angular = _block(record.legendre, axes, where, "Legendre")
     elif record.repFlag == REP_TABULATED:
-        angular = _block(record.tabulated, axes, where, "table")
+        angular = _block(record.tabulated, axes, where, "table", code1)
     else:
         assert record.repFlag == REP_MIXED
         angular = Regions2d(function2ds=[
             _block(record.legendre, axes, where, "Legendre"),
-            _block(record.tabulated, axes, where, "table"),
+            _block(record.tabulated, axes, where, "table", code1),
         ], axes=axes)
+    if code1:
+        report.approximated(
+            f"{where}: {len(code1)} table record(s) with interpolation code 1 in mu read "
+            f"lin-lin, which is how Geant4 evaluates it (G4ParticleHPInterpolator.hh); "
+            f"ENDF would read a histogram. The code is kept and written back")
     return AngularTwoBody(angular=angular, productFrame=frame)
 
 
-def _block(block: AngularBlock, axes, where: str, tag: str):
+def _block(block: AngularBlock, axes, where: str, tag: str, code1=None):
     _refuseHistogram(block.interpolation, f"{where}: {tag} block, incident energy")
     functions = []
     for i, rec in enumerate(block.records):
@@ -236,15 +267,20 @@ def _block(block: AngularBlock, axes, where: str, tag: str):
             functions.append(Legendre(coefficients=coefficients,
                                       outerDomainValue=float(rec.energy), index=i))
         else:
-            _refuseHistogram(rec.interpolation, f"{where}: table, energy {i + 1}, mu")
-            functions.append(_tabulated(rec, i))
+            functions.append(_tabulated(rec, i, code1))
     return fromEndfTab2(functions, _pairs(block.interpolation), axes=axes)
 
 
-def _tabulated(rec, index: int):
-    """One region is an ``XYs1d``; a ``regions1d`` needs two (``gnds.xsd``)."""
+def _tabulated(rec, index: int, code1=None):
+    """One region is an ``XYs1d``; a ``regions1d`` needs two (``gnds.xsd``).
+
+    A code 1 is held lin-lin and its declared pairs go to ``code1[str(index)]``.
+    """
+    declared = _pairs(rec.interpolation)
+    if any(c == 1 for _, c in declared):
+        code1[str(index)] = [[int(b), int(c)] for b, c in declared]
     function = Regions1d.fromEndfRegions(rec.mu.copy(), rec.probability.copy(),
-                                         _pairs(rec.interpolation))
+                                         [(b, 2 if c == 1 else c) for b, c in declared])
     if len(function.function1ds) == 1:
         function = function.function1ds[0]
     function.outerDomainValue = float(rec.energy)
@@ -305,11 +341,19 @@ def _provenance(cs: CrossSectionRecord, fs: ElasticFSRecord, library) -> G4NDLPr
     )
 
 
-def _reportPartialRead(library, report: ConversionReport) -> None:
+_PROCESS_NAMES = {"Elastic": "the elastic channel (MT2)",
+                  "Inelastic": "the inelastic channels"}
+
+
+def _reportPartialRead(library, report: ConversionReport,
+                       readDirectories: Tuple[str, ...] = ("Elastic",),
+                       absentDirectories: Tuple[str, ...] = ()) -> None:
     if library is None:
         return
+    held = " and ".join(_PROCESS_NAMES.get(d, d) for d in readDirectories)
     for name in library.presentTopLevel():
-        if name != "Elastic":
+        if name not in readDirectories and name not in absentDirectories:
+            what = ("which kika reads but was not asked for" if name in _PROCESS_NAMES
+                    else "which kika does not read yet")
             report.unsupportedNode(
-                f"the library also holds {name}/, which kika does not read yet: "
-                f"this suite is the elastic channel (MT2) only")
+                f"the library also holds {name}/, {what}: this suite is {held} only")

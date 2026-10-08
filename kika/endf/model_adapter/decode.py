@@ -476,13 +476,16 @@ def _attachEvaluatedDomain(suite: ReactionSuite, style: Evaluated,
 
 def _attachAngularDistribution(suite: ReactionSuite, mf4mt, mt: int,
                                report: ConversionReport) -> ConversionReport:
-    """Hang one MF4 section on the neutron product of its reaction.
+    """Hang one MF4 section on the product of its reaction that MT names.
+
+    That is the neutron except for MT600-849, whose MF4 is the outgoing p, d,
+    t, He-3 or alpha (:func:`~.angular.mf4Ejectile`).
 
     GNDS puts a distribution on a *product* of an output channel, not on the
     reaction — which is why an MF4 section with no MF3 counterpart has nowhere
     to go, and is reported rather than dropped into an invented reaction.
     """
-    from .angular import decodeMF4MT
+    from .angular import decodeMF4MT, mf4Ejectile
 
     # `findReaction...`, not `reactionByENDF_MT`: the strict one raises, so the
     # branch below was unreachable when this was written. It never fired because
@@ -506,7 +509,7 @@ def _attachAngularDistribution(suite: ReactionSuite, mf4mt, mt: int,
     # a neutron on this channel, and §17.2.1 gives one product one multiplicity
     # *and* one distribution. Appending here produced two neutrons on the
     # fission channel of every fissile tape -- see `OutputChannel.ensureProduct`.
-    product = channel.ensureProduct("n")
+    product = channel.ensureProduct(mf4Ejectile(mt))
     product.provenance = provenance
     if product.distribution is None:
         product.distribution = Distribution()

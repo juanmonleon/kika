@@ -37,9 +37,11 @@ without an error.
 **What is refused** (:class:`~kika.g4ndl.exceptions.G4NDLUnsupportedError`),
 because writing it would make Geant4 read something else than the model says:
 
-* interpolation code 1 (histogram), in μ or in incident energy. Geant4
-  evaluates it lin-lin; the reader refuses it for the same reason, and Juan
-  decided (2026-10-06) the writer refuses it too rather than rewrite the step;
+* a histogram in the model (interpolation code 1), in μ or in incident
+  energy. Geant4 evaluates code 1 lin-lin, so writing it would say something
+  else; Juan decided (2026-10-06) the writer refuses it rather than rewrite the
+  step. A code 1 *read* from a file is held lin-lin and written back as it
+  was declared (``tabulatedCode1``, roadmap Fase 10, D10-3);
 * any code outside 2-5, including unit-base and corresponding-point qualifiers;
 * a cross section that is not one pointwise lin-lin table. By default the
   ``recon`` form is written: G4NDL means σ at 0 K, pointwise, and an ENDF MF3
@@ -79,7 +81,8 @@ from kika.nuclear_data.model import (
 )
 
 __all__ = ["encodeElastic", "formatCrossSection", "formatElasticFS",
-           "recordDifferences", "targetKey", "writeElastic", "KEEP"]
+           "recordDifferences", "suiteProcesses", "targetKey", "writeElastic",
+           "writeSuite", "KEEP"]
 
 #: ``header=KEEP`` writes back the ``G4NDL <source>`` header the provenance
 #: recorded (none, for a suite that did not come from G4NDL).
@@ -438,10 +441,15 @@ def _tableBlock(functions, interp, provenance, report) -> AngularBlock:
     temps, deps = _carried(provenance, "tabulatedTemperatures", "tabulatedTempdeps",
                            len(functions), "table", report)
     records = []
+    code1 = dict(getattr(provenance, "tabulatedCode1", None) or {})
     for i, f in enumerate(functions):
         mu, p, pairs = f.toEndfRegions()
         what = f"table record {i + 1} at E={f.outerDomainValue!r} eV, mu"
         _checkCodes([c for _, c in pairs], what)
+        declared = [(int(b), int(c)) for b, c in code1.get(str(i), ())]
+        if declared and [(int(b), int(c)) for b, c in pairs] == [
+                (b, 2 if c == 1 else c) for b, c in declared]:
+            pairs = declared
         records.append(TabulatedRecord(
             temps[i], float(f.outerDomainValue), deps[i],
             Interpolation(tuple(int(b) for b, _ in pairs), tuple(int(c) for _, c in pairs)),
@@ -638,4 +646,56 @@ def writeElastic(suite, root, *, compressed: bool = False,
             report.warn(f"removed {twin}: Geant4 reads the .z when both exist, so the "
                         f"{'plain' if compressed else 'compressed'} twin would have "
                         f"{'been shadowed by' if compressed else 'shadowed'} the file just written")
+    return report
+
+
+# ------------------------------------------------------------------ the whole suite
+
+def suiteProcesses(suite) -> List[str]:
+    """The G4NDL processes ``suite`` holds data for: ``elastic`` (MT2), ``inelastic``."""
+    from kika.g4ndl.inelastic_decode import INELASTIC_SUM_LABEL
+    from kika.g4ndl.inelastic_encode import channelOf
+
+    out = []
+    try:
+        suite.reactions[ELASTIC_MT]
+        out.append("elastic")
+    except (KeyError, IndexError):
+        pass
+    if any(channelOf(r) is not None for r in list(suite.reactions) + list(suite.sums)) or any(
+            r.id.label == INELASTIC_SUM_LABEL and r.id.ENDF_MT is None for r in suite.sums):
+        out.append("inelastic")
+    return out
+
+
+def writeSuite(suite, root, *, processes: Optional[Sequence[str]] = None,
+               compressed: bool = False, crossSectionLabel: Optional[str] = None,
+               angularLabel: str = EVALUATED_LABEL, targetMass: Optional[float] = None,
+               header=KEEP, elementName: Optional[str] = None) -> ConversionReport:
+    """Write every process of ``suite`` into the library directory ``root``.
+
+    ``processes`` defaults to :func:`suiteProcesses`: the elastic channel
+    through :func:`writeElastic` (``crossSectionLabel``, ``angularLabel``) and
+    the inelastic channels through
+    :func:`kika.g4ndl.inelastic_encode.writeInelastic` (its distributions are
+    always the ``eval`` style, and its sums follow their parts). This is
+    ``kika.write(suite, root, format="g4ndl")``. Every file is encoded and
+    read back before any is written, process by process.
+    """
+    from kika.g4ndl.inelastic_encode import writeInelastic
+
+    wanted = suiteProcesses(suite) if processes is None else list(processes)
+    unknown = set(wanted) - {"elastic", "inelastic"}
+    if unknown or not wanted:
+        raise ValueError(f"processes must be a non-empty subset of ('elastic', 'inelastic'), "
+                         f"got {wanted!r}")
+    report = ConversionReport()
+    if "elastic" in wanted:
+        report.extend(writeElastic(suite, root, compressed=compressed,
+                                   crossSectionLabel=crossSectionLabel,
+                                   angularLabel=angularLabel, targetMass=targetMass,
+                                   header=header, elementName=elementName))
+    if "inelastic" in wanted:
+        report.extend(writeInelastic(suite, root, compressed=compressed, header=header,
+                                     targetMass=targetMass, elementName=elementName))
     return report

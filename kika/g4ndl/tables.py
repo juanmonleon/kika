@@ -1,4 +1,4 @@
-"""An elastic suite read from G4NDL, as the plain arrays a viewer draws.
+"""A suite read from G4NDL, as the plain arrays a viewer draws.
 
 The kika-app explores a G4NDL library the way it explores an ENDF tape, and
 its angular views already read MF4 in one shape: the ``/api/endf/bulk-legendre``
@@ -20,6 +20,17 @@ the two conventions this module has to choose are stated where they are made:
   on each segment's own law (:func:`kika.g4ndl.physics._tableMoments`), so an
   a_l(E) curve spans the whole range. The table itself, not the projection, is
   what the angular views read there.
+
+**The inelastic.** A reaction whose outgoing neutron carries an angular
+distribution of its own is an MF4 in the same sense: a two-body emission
+(``angularTwoBody``, the discrete levels MT51-90 and MT2) or the angular half
+of an ``uncorrelated`` pair (MF4 with MF5, which the continuum MT91, MT16, ...
+often is). :func:`angularBulk` takes an ``mt`` and answers for any of them
+(:func:`angularMTs` lists them), as the ENDF MF4 view lists every MT with an
+MF4. A correlated energy-angle law (``energyAngular``, ``KalbachMann``: MF6)
+is not served here. :func:`crossSections` gives every cross section the suite
+holds, the sums MT4 and MT103-107
+included, so a viewer lists them as it lists an ENDF tape's MF3.
 """
 from __future__ import annotations
 
@@ -31,8 +42,9 @@ from kika.g4ndl.physics import (
     _blocks, _distribution, _segmentValues, _tableArrays, _tableMoments,
 )
 
-__all__ = ["angularBulk", "isotopeSummary", "LINEARISATION_POINTS",
-           "PROJECTION_ORDER", "REPRESENTATIONS"]
+__all__ = ["angularBulk", "angularMTs", "crossSections", "isotopeSummary",
+           "LINEARISATION_POINTS", "PROJECTION_ORDER", "REPRESENTATIONS",
+           "INELASTIC_TOTAL", "inelasticTotal"]
 
 #: Points each non-lin-lin segment of a table is cut into before it is sent.
 LINEARISATION_POINTS = 16
@@ -44,6 +56,86 @@ PROJECTION_ORDER = 20
 #: ``repFlag`` → what it means; the numbers are MF4's LTT.
 REPRESENTATIONS = {0: "isotropic", 1: "Legendre", 2: "tabulated",
                    3: "Legendre, then tabulated"}
+
+
+#: Label of the G4NDL ``Inelastic/CrossSection`` sum in ``suite.sums``: the
+#: process cross section, which has no ENDF MT (it is not MT3).
+INELASTIC_TOTAL = "inelastic"
+
+
+def _neutronDistribution(suite, mt: int):
+    """The ``eval`` distribution of the outgoing neutron of reaction ``mt``."""
+    reaction = suite.reactions.byENDF_MT(mt)
+    products = reaction.outputChannel.products.byPid("n")
+    if not products:
+        raise ValueError(f"MT{mt} of {suite.target} emits no neutron")
+    return products[0].distribution["eval"]
+
+
+def _angular(distribution):
+    """The angular part of a two-body or uncorrelated form, or ``None`` when
+    it has none (a recoil, or a correlated energy-angle law)."""
+    if type(distribution).__name__ in ("AngularTwoBody", "Uncorrelated"):
+        return distribution.angular
+    if type(distribution).__name__ == "Isotropic2d":
+        return distribution
+    return None
+
+
+def _isIsotropic(angular) -> bool:
+    return not (hasattr(angular, "function2ds") or hasattr(angular, "function1ds"))
+
+
+def _repFlag(blocks) -> int:
+    kinds = [b.kind for b in blocks]
+    if not kinds:
+        return 0
+    if kinds == ["Legendre"]:
+        return 1
+    if kinds == ["table"]:
+        return 2
+    return 3
+
+
+def angularMTs(suite) -> List[int]:
+    """MTs whose outgoing neutron has an angular distribution of its own (see
+    the module docstring): what :func:`angularBulk` serves."""
+    out = []
+    for reaction in suite.reactions:
+        mt = reaction.ENDF_MT
+        if mt is None:
+            continue
+        try:
+            angular = _angular(_neutronDistribution(suite, mt))
+        except (ValueError, KeyError):
+            continue
+        if angular is not None:
+            out.append(int(mt))
+    return sorted(out)
+
+
+def crossSections(suite) -> Dict[int, Any]:
+    """MT → ``(E, sigma)`` (eV, b, 0 K, ``recon``) for every reaction and every
+    sum with an ENDF MT; the process total is :func:`inelasticTotal`."""
+    out: Dict[int, Any] = {}
+    for node in list(suite.reactions) + list(suite.sums):
+        mt = node.ENDF_MT
+        if mt is None:
+            continue
+        try:
+            out[int(mt)] = suite.cross_section(int(mt), form="recon")
+        except KeyError:
+            continue
+    return dict(sorted(out.items()))
+
+
+def inelasticTotal(suite):
+    """``(E, sigma)`` of ``Inelastic/CrossSection``, or ``None``."""
+    for node in suite.sums:
+        if node.label == INELASTIC_TOTAL:
+            form = node.crossSection["recon"]
+            return np.asarray(form.xs, dtype=float), np.asarray(form.ys, dtype=float)
+    return None
 
 
 def _frame(distribution) -> Optional[str]:
@@ -94,8 +186,9 @@ def _regionPairs(codes: np.ndarray) -> List[List[int]]:
     return pairs
 
 
-def angularBulk(suite, maxOrder: Optional[int] = None) -> Dict[str, Any]:
-    """The elastic angular distribution in the shape of an MF4 bulk response.
+def angularBulk(suite, maxOrder: Optional[int] = None, mt: int = 2) -> Dict[str, Any]:
+    """Reaction ``mt``'s angular distribution (default the elastic) in the
+    shape of an MF4 bulk response. ``mt`` is one of :func:`angularMTs`.
 
     Returns a dict with ``energies`` (eV, the Legendre block then the tables
     above it), ``max_order``, ``coefficients_by_order`` (``str(l)`` → one value
@@ -103,12 +196,24 @@ def angularBulk(suite, maxOrder: Optional[int] = None) -> Dict[str, Any]:
     block's ``[NBT, INT]``), ``representation`` (``repFlag``), ``frame``
     (``"CM"``/``"LAB"``), ``pdf_mu_by_energy``/``pdf_by_energy`` (``None`` on a
     Legendre row), ``pdf_angular_linlin`` and the ``pdf_boundary*`` table a
-    ``repFlag=3`` isotope stores at its transition energy.
+    ``repFlag=3`` isotope stores at its transition energy. For an inelastic
+    ``mt`` ``representation`` is the same code, read off the blocks.
     """
-    distribution = _distribution(suite)
-    repFlag = getattr(getattr(suite, "provenance", None), "repFlag", None)
-    if not hasattr(distribution, "angular"):                  # isotropic
-        energies, _ = _crossSection(suite)
+    if mt == 2:
+        distribution = _distribution(suite)
+        repFlag = getattr(getattr(suite, "provenance", None), "repFlag", None)
+        angular = distribution.angular if hasattr(distribution, "angular") else None
+    else:
+        distribution = _neutronDistribution(suite, mt)
+        angular = _angular(distribution)
+        if angular is None:
+            raise ValueError(f"MT{mt} of {suite.target} has no angular distribution of its own; "
+                             f"angular MTs: {angularMTs(suite)}")
+        if _isIsotropic(angular):
+            angular = None
+        repFlag = 0 if angular is None else _repFlag(_blocks(angular))
+    if angular is None:                                       # isotropic
+        energies, _ = suite.cross_section(mt, form="recon")
         span = [float(energies[0]), float(energies[-1])]
         return dict(energies=span, max_order=0, coefficients_by_order={"0": [1.0, 1.0]},
                     energy_interpolation=None, representation=0 if repFlag is None else repFlag,
@@ -116,7 +221,7 @@ def angularBulk(suite, maxOrder: Optional[int] = None) -> Dict[str, Any]:
                     pdf_angular_linlin=True, pdf_boundary_energy=None,
                     pdf_boundary_mu=None, pdf_boundary=None)
 
-    blocks = _blocks(distribution.angular)
+    blocks = _blocks(angular)
     legendre = next((b for b in blocks if b.kind == "Legendre"), None)
     table = next((b for b in blocks if b.kind == "table"), None)
 
@@ -227,4 +332,54 @@ def isotopeSummary(suite) -> Dict[str, Any]:
         report=dict(warnings=list(report.warnings), losses=list(report.losses),
                     approximations=list(report.approximations),
                     unsupported=list(report.unsupported)) if report is not None else None,
+        reactions=_reactionRows(suite),
+        angular_mts=angularMTs(suite),
+        inelastic_total=_range(inelasticTotal(suite)),
     )
+
+
+def _range(pair) -> Optional[Dict[str, Any]]:
+    if pair is None:
+        return None
+    e, s = pair
+    return dict(count=int(e.size), energy_min=float(e[0]), energy_max=float(e[-1]),
+                sigma_max=float(s.max()))
+
+
+def _reactionRows(suite) -> List[Dict[str, Any]]:
+    """One row per MT with a cross section: Q, the σ grid's range, whether it
+    is a sum (MT4, MT103-107) and whether :func:`angularBulk` serves it; for
+    those, its ``rep_flag``, native Legendre order and transition energy, which
+    is what a viewer says about an MF4 section before reading it."""
+    angular = set(angularMTs(suite))
+    sums = {int(n.ENDF_MT) for n in suite.sums if n.ENDF_MT is not None}
+    rows = []
+    for mt, (e, s) in crossSections(suite).items():
+        q = None
+        if mt not in sums:
+            channel = suite.reactions.byENDF_MT(mt).outputChannel
+            q = getattr(getattr(channel, "Q", None), "value", None)
+        positive = np.nonzero(s > 0)[0]
+        row = dict(mt=mt, q_value=None if q is None else float(q),
+                   threshold=float(e[positive[0]]) if positive.size else None,
+                   sum=mt in sums, angular=mt in angular, **_range((e, s)))
+        if mt in angular:
+            row.update(_angularShape(suite, mt))
+        rows.append(row)
+    return rows
+
+
+def _angularShape(suite, mt: int) -> Dict[str, Any]:
+    if mt == 2:
+        distribution = _distribution(suite)
+        angular = getattr(distribution, "angular", None)
+    else:
+        angular = _angular(_neutronDistribution(suite, mt))
+    if angular is None or _isIsotropic(angular):
+        return dict(rep_flag=0, max_order=0, transition_energy=None)
+    blocks = _blocks(angular)
+    legendre = next((b for b in blocks if b.kind == "Legendre"), None)
+    table = next((b for b in blocks if b.kind == "table"), None)
+    order = max(len(f.coefficients) - 1 for f in legendre.functions) if legendre else 0
+    return dict(rep_flag=_repFlag(blocks), max_order=int(order),
+                transition_energy=float(legendre.energies[-1]) if legendre and table else None)

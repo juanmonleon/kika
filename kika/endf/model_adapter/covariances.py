@@ -73,10 +73,16 @@ def reactionHref(mt: int) -> str:
 
 
 def angularDistributionHref(mt: int) -> str:
-    """xPath to the angular distribution an MF34 covariance is about."""
+    """xPath to the angular distribution an MF34 covariance is about.
+
+    The product MF4 put it on: the neutron, or for MT600-849 the outgoing
+    charged particle (:func:`~.angular.mf4Ejectile`).
+    """
+    from .angular import mf4Ejectile
+
     return (
         f"/reactionSuite/reactions/reaction[@label='MT{mt}']"
-        f"/outputChannel/products/product[@label='n']/distribution"
+        f"/outputChannel/products/product[@label='{mf4Ejectile(mt)}']/distribution"
     )
 
 

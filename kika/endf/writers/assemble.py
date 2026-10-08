@@ -204,6 +204,7 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
     from kika.nuclear_data.model import EVAL_LABEL
 
     from ..model_adapter import encodeMF3MT, encodeMF4MT, encodeMF5MT
+    from ..model_adapter.angular import mf4Ejectile
 
     label = EVAL_LABEL if label is None else label
 
@@ -241,21 +242,25 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
             precision="best" if reconstructed else "legacy")
         mf3.append((3, mt, section))
 
-        product = _neutronProduct(reaction)
-        form = _evaluatedForm(product, label)
-        if form is None and label != EVAL_LABEL:
-            form = _evaluatedForm(product, EVAL_LABEL)
-        provenance = getattr(product, "provenance", None)
-        header = getattr(provenance, "headerFields", None) or {}
+        # MF4 is about the particle the MT names (the p, d, t, He-3 or alpha
+        # for MT600-849); MF5 is always about a neutron. For every other MT the
+        # two are the same product and this is one lookup.
+        for pid in dict.fromkeys((mf4Ejectile(mt), "n")):
+            product = _product(reaction, pid)
+            form = _evaluatedForm(product, label)
+            if form is None and label != EVAL_LABEL:
+                form = _evaluatedForm(product, EVAL_LABEL)
+            provenance = getattr(product, "provenance", None)
+            header = getattr(provenance, "headerFields", None) or {}
 
-        angular = _mf4Form(form)
-        if angular is not None and "ltt" in header:
-            section, report = encodeMF4MT(angular, provenance, mt, report)
-            mf4.append((4, mt, section))
+            angular = _mf4Form(form)
+            if pid == mf4Ejectile(mt) and angular is not None and "ltt" in header:
+                section, report = encodeMF4MT(angular, provenance, mt, report)
+                mf4.append((4, mt, section))
 
-        if "mf5" in header:
-            section, report = encodeMF5MT(_mf5Form(form), provenance, mt, report)
-            mf5.append((5, mt, section))
+            if pid == "n" and "mf5" in header:
+                section, report = encodeMF5MT(_mf5Form(form), provenance, mt, report)
+                mf5.append((5, mt, section))
 
     if label != EVAL_LABEL:
         # **A mixed tape has to say it is mixed.** The fallback above is right --
@@ -273,11 +278,11 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
     return mf3 + mf4 + mf5, report
 
 
-def _neutronProduct(reaction):
-    """The ``n`` product of a reaction's output channel, or ``None``."""
+def _product(reaction, pid):
+    """The *pid* product of a reaction's output channel, or ``None``."""
     channel = getattr(reaction, "outputChannel", None)
     for product in getattr(channel, "products", None) or ():
-        if getattr(product, "pid", None) == "n":
+        if getattr(product, "pid", None) == pid:
             return product
     return None
 

@@ -20,7 +20,8 @@ from pathlib import Path
 import pytest
 
 from kika.g4ndl.tests.data.build_fixtures import (
-    CLAIMS, REAL, SHA256, SUBDIRS, SYNTHETIC, SYNTHETIC_COMPRESSED,
+    CLAIMS, GAMMAS, INELASTIC, INELASTIC_ISOTOPES, REAL, SHA256, SUBDIRS, SYNTHETIC,
+    SYNTHETIC_COMPRESSED,
 )
 
 DATA = Path(__file__).parent / "data"
@@ -105,7 +106,16 @@ def test_real_files_are_byte_for_byte_the_recorded_ones(key):
 
 def test_every_real_isotope_has_both_files_and_a_hash():
     expected = {f"{lib}/{sub}/{stem}.z" for lib, stem in REAL for sub in SUBDIRS}
-    assert expected == set(SHA256)
+    assert expected == {k for k in SHA256 if not k.startswith("inelastic/")}
+
+
+def test_every_inelastic_fixture_has_a_hash():
+    expected = {f"inelastic/{lib}/Inelastic/{sub}/{name}" for lib, sub, name in INELASTIC}
+    expected |= {f"inelastic/{lib}/Inelastic/Gammas/{name}" for lib, name in GAMMAS}
+    for lib, stem in INELASTIC_ISOTOPES:
+        expected |= {k for k in SHA256 if k.startswith(f"inelastic/{lib}/") and stem in k}
+    assert expected == {k for k in SHA256 if k.startswith("inelastic/")}
+    assert sum((DATA / k).stat().st_size for k in expected) < 200_000
 
 
 @pytest.mark.parametrize("lib,stem", sorted(REAL))
