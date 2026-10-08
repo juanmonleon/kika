@@ -1173,6 +1173,8 @@ def writeReactionSuite(suite, format: Optional[str] = None,
     if saved:
         from .resonance_extensions import write
         write(root,saved,report)
+    from .endf_conversion import writeConversionFlags
+    writeConversionFlags(root, suite)
     return ET.ElementTree(root), report
 
 

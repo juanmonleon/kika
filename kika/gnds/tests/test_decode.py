@@ -560,9 +560,16 @@ def test_a_sum_is_reachable_through_the_suite_wide_mt_lookup(h2):
     assert suite.findReactionByENDF_MT(999) is None
 
 
-def test_application_data_is_declared_lost_rather_than_kept_as_raw_xml(h2):
-    _, report = h2
-    assert any("applicationData holds ['LLNL']" in loss for loss in report.losses)
+def test_fudges_conversion_flags_are_read_and_nothing_else_is_kept_as_raw_xml(h2):
+    """LLNL's ``ENDFconversionFlags`` are a typed node now (the ENDF writer needs
+    them, ``gnds_to_endf_plan.md`` D2); an institution holding anything else is
+    still declared lost rather than carried as XML."""
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    suite, report = h2
+    flags = EndfConversionFlags.of(suite)
+    assert flags is not None and len(flags) > 0
+    assert not any("applicationData holds ['LLNL']" in loss for loss in report.losses)
 
 
 # ---------------------------------------------------------------------------

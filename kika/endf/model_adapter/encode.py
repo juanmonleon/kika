@@ -138,7 +138,10 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
             )
 
     q = reaction.outputChannel.Q
-    qi = q.value
+    # A continuum reaction FUDGE wrote carries its ground-state Q as the GNDS
+    # `Q` and its QI in ENDFconversionFlags; the derivation pass puts that QI
+    # in the provenance, and only there is it different from the model's Q.
+    qi = (getattr(provenance, "headerFields", None) or {}).get("qi", q.value)
     qm = getattr(provenance, "qm", None)
     lr = getattr(provenance, "lr", None)
 
@@ -297,7 +300,7 @@ def _derivable(source, provenance) -> bool:
     """
     if getattr(source, "styles", None) is None:
         return False
-    return provenance is None or getattr(provenance, "sourceFormat", None) == "gnds"
+    return provenance is None or getattr(provenance, "sourceFormat", None) in ("gnds", "derived")
 
 
 def _evaluationInfoFromText(text) -> dict:

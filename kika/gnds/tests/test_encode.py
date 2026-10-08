@@ -1510,37 +1510,23 @@ def test_the_pair_reads_back_through_the_door_with_its_links_intact(h2_gnds,
                 if "The covariance itself is read" in loss]
 
 
-def test_writing_a_gnds_sourced_suite_to_endf_is_refused_for_the_right_reason(
-        h2_gnds, tmp_path):
-    """``format="endf"`` exists now (§2.8) — and this suite still cannot use it.
+def test_a_gnds_sourced_suite_writes_an_endf_tape(h2_gnds, tmp_path):
+    """GNDS → ENDF, with the bookkeeping derived from the model (2026-10-08).
 
-    The door stopped raising ``NotImplementedError`` when
-    ``kika/endf/writers/assemble.py`` landed. What replaces it is not "it works
-    for everything": a suite decoded from **GNDS** carries no ENDF provenance,
-    so it has no MAT to stamp on every record — and MAT is not a field the
-    writer may invent, because two materials on one tape are told apart by
-    nothing else. The refusal moved from the format to the *suite*, which is
-    where it belongs.
+    Until then this refused twice: no MAT, then no MF1/451 header, then MT1's
+    QM/LR. All three are derived now, the way FUDGE's ``toENDF6`` derives them
+    (``kika/endf/model_adapter/derive``): MAT from ENDF-6's table, the header
+    from the evaluated style and PoPs, QM/LR from the residual's decay. What
+    cannot be derived yet is in the report, not silently missing.
     """
     suite = kika.read(h2_gnds, covariances=False)
-    with pytest.raises(ValueError, match="no MAT number"):
-        kika.write(suite, tmp_path / "out.endf", format="endf")
-
-
-def test_a_gnds_sourced_suite_with_a_mat_gets_past_the_header_and_stops_at_mf3(
-        h2_gnds, tmp_path):
-    """Giving it a MAT is still not enough — but the header is no longer why.
-
-    Until 2026-10-08 ``encodeMF1MT451`` refused here: MF1/451's nineteen fields
-    were taken only from an ENDF read. They are now derived from the model the
-    way FUDGE's ``toENDF6`` derives them (``mf1_header.py``; gated field by field
-    against real tapes in ``test_header_synthesis.py``). What stops the tape now
-    is MT1's QM/LR, which GNDS does not state and ``encodeMF3MT`` will not
-    invent — the next item of ``gnds_endf_conflicts.md`` §6.3.
-    """
-    suite = kika.read(h2_gnds, covariances=False)
-    with pytest.raises(ValueError, match="carries no qm/lr"):
-        kika.write(suite, tmp_path / "out.endf", format="endf", mat=125)
+    path = tmp_path / "out.endf"
+    report = kika.write(suite, path, format="endf")
+    back = kika.read(path, covariances=False)
+    assert back.provenance.mat == 128
+    assert sorted(r.ENDF_MT for r in back.reactions) \
+        == sorted(r.ENDF_MT for r in suite.reactions)
+    assert any("MF2/151 cannot be written" in loss for loss in report.losses)
 
 
 def test_an_unknown_format_is_refused_by_name(h2_gnds, tmp_path):

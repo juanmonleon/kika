@@ -438,6 +438,12 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             for gap in getattr(mf6.mt[mt], "report_gaps", list)():
                 report.unsupportedNode(gap)
 
+    # QM and LR as GNDS states them: the excited residual and its decay
+    # (`residuals.py`). After MF6, which may already have given the residual a
+    # product of its own.
+    from .residuals import attachResiduals
+    report = attachResiduals(suite, report)
+
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)
 
