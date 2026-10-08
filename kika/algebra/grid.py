@@ -16,7 +16,32 @@ import numpy as np
 from .laws import LINLIN, validate
 
 __all__ = ["union", "occurrences", "discontinuities", "split_at_discontinuities",
-           "join_pieces"]
+           "join_pieces", "compress_flat"]
+
+
+def compress_flat(x, y, laws=LINLIN):
+    """Remove interior nodes of exactly constant lin-lin/histogram spans.
+
+    No tolerance or approximation is involved. Keep law boundaries, repeated
+    abscissae and signed-zero ordinates. Return independent arrays, including
+    when no node can be removed.
+    """
+    x, y, laws = validate(x, y, laws)
+    if y.ndim != 1:
+        raise ValueError('flat compression requires one-dimensional ordinates')
+    keep = np.ones(len(x), dtype=bool)
+    if len(x) > 2:
+        keep[1:-1] = ~((y[:-2] == y[1:-1]) & (y[1:-1] == y[2:])
+            & (laws[:-1] == laws[1:]) & np.isin(laws[:-1], [1, 2])
+            & (x[:-2] < x[1:-1]) & (x[1:-1] < x[2:])
+            & ~((y[:-2] == 0) & np.signbit(y[:-2]))
+            & ~((y[1:-1] == 0) & np.signbit(y[1:-1]))
+            & ~((y[2:] == 0) & np.signbit(y[2:])))
+    indices = np.flatnonzero(keep)
+    with np.errstate(over='ignore'):
+        if np.any(~np.isfinite(np.diff(x[indices]))):
+            return x.copy(), y.copy(), laws.copy()
+    return x[indices].copy(), y[indices].copy(), laws[indices[:-1]].copy()
 
 
 def union(grids: Iterable[np.ndarray], steps: Iterable[float] = ()) -> np.ndarray:

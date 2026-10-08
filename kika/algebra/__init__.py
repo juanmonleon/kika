@@ -37,21 +37,22 @@ from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS,
                    validate)
 from .evaluate import (evaluate, interpolate_between, left_limit, right_limit,
                        sample_on_union)
-from .grid import discontinuities, join_pieces, split_at_discontinuities, union
+from .grid import compress_flat, discontinuities, join_pieces, split_at_discontinuities, union
 from .integrate import (cumulative_integral, group_averages, group_integrals,
                         integral, legendre_coefficients, legendre_moments,
                         panel_integrals)
 from .fold import box_gaussian_fold_nodes, fold_tabulated, gaussian_fold_nodes
 from .refine import RefinementError, RefineResult, refine, to_linlin
 from .arithmetic import add
+from .prepared import prepare_evaluator
 
 __all__ = [
     "HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS",
     "interval_laws", "laws_on_refinement", "pairs_from_laws", "validate",
     "evaluate", "interpolate_between", "left_limit", "right_limit", "sample_on_union",
-    "discontinuities", "join_pieces", "split_at_discontinuities", "union",
+    "compress_flat", "discontinuities", "join_pieces", "split_at_discontinuities", "union",
     "cumulative_integral", "group_averages", "group_integrals", "integral",
     "legendre_coefficients", "legendre_moments", "panel_integrals", "box_gaussian_fold_nodes", "fold_tabulated", "gaussian_fold_nodes",
     "RefinementError", "RefineResult", "refine", "to_linlin",
-    "add",
+    "add", "prepare_evaluator",
 ]

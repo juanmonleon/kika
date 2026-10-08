@@ -321,22 +321,47 @@ def group_breaks(group):
     return breaks
 
 
-def evaluate_region(energies,region,context,diagnostics=None):
+def energy_block_size(region, maximum=2048, work_bytes=64*1024**2):
+    """Size exact RM/RML energy batches from a conservative workspace estimate.
+
+    Covers level/channel temporaries per energy, not retained tables, parser
+    data, BLAS allocations, or augmented systems at exceptional pole clusters.
+    Thus ``work_bytes`` is a workspace target, not a process-memory guarantee.
+    """
+    if region.approximation not in ('ReichMoore','RMatrixNeutral'):return maximum
+    largest=1;fixed=0
+    for group in region.groups:
+        n=len(group.levels)
+        c=len(getattr(group,'channels',())) or 3
+        # Both production solvers use separable reduced amplitudes: no
+        # energy x level x channel tensor is materialized.
+        largest=max(largest,128*(n+c*c+1))
+        fixed=max(fixed,32*n*c*c)
+    if largest+fixed>work_bytes:
+        from .grid import ReconstructionConvergenceError
+        raise ReconstructionConvergenceError('one RM/RML energy exceeds the temporary workspace target',
+            category='memory-budget-exhausted')
+    return max(1,min(maximum,(work_bytes-fixed)//largest))
+
+
+def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*1024**2):
     if region.approximation == 'Unresolved':
         from .unresolved import evaluate_unresolved
         return evaluate_unresolved(energies,region,diagnostics)
     if region.approximation == 'RMatrixNeutral':
         from .r_matrix import evaluate_rml
         out = {mt:np.zeros_like(energies) for mt in region_mts(region)}
-        for start in range(0,len(energies),128):
-            sl = slice(start,start+128)
-            for mt,value in evaluate_rml(energies[sl],region.groups,context,diagnostics).items():out[mt][sl] = value
+        block=energy_block_size(region,work_bytes=work_bytes)
+        for start in range(0,len(energies),block):
+            sl = slice(start,start+block)
+            for mt,value in evaluate_rml(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes).items():out[mt][sl] = value
         return out
     if region.approximation=='ReichMoore':
         # Limit temporary level/channel arrays independently of caller block size.
         out={mt:np.zeros_like(energies) for mt in (1,2,18,102)}
-        for start in range(0,len(energies),128):
-            sl=slice(start,start+128)
-            for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics).items():out[mt][sl]=value
+        block=energy_block_size(region,work_bytes=work_bytes)
+        for start in range(0,len(energies),block):
+            sl=slice(start,start+block)
+            for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes).items():out[mt][sl]=value
         return out
-    return evaluate_bw(energies,region.groups,region.approximation,context)
+    return evaluate_bw(energies,region.groups,region.approximation,context,work_bytes=work_bytes)

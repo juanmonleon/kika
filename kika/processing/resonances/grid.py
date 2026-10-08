@@ -18,19 +18,23 @@ class ReconstructionOptions:
     Half the requested budget is used for tabulation, leaving headroom for
     serialization. Finite interior probes are empirical checks, not a global
     mathematical bound. Negative values are retained and reported.
+    ``max_work_bytes`` targets temporary batches and seed-panel chunks; retained
+    input/output, adaptive chunk growth and backend allocations are additional.
+    A dense exceptional solve exceeding its estimated target raises explicitly.
     """
     rtol: float = 1e-3
     atol: float = 1e-8
     max_points: int = 200000
     max_iterations: int = 40
     block_size: int = 2048
+    max_work_bytes: int = 64*1024**2
 
     def __post_init__(self):
         if not math.isfinite(self.rtol) or not 0 < self.rtol < 1:
             raise ValueError('rtol must be finite and between zero and one')
         if not math.isfinite(self.atol) or self.atol <= 0:
             raise ValueError('atol must be finite and positive [barn]')
-        for name in ('max_points','max_iterations','block_size'):
+        for name in ('max_points','max_iterations','block_size','max_work_bytes'):
             value=getattr(self,name)
             if not isinstance(value,int) or isinstance(value,bool) or value <= 0:
                 raise ValueError(f'{name} must be a positive integer')
@@ -49,13 +53,61 @@ def error_ratio(actual, linear, options):
     return np.abs(actual-linear)/(options.atol+options.rtol*np.maximum(np.abs(actual),np.abs(linear)))
 
 
+def check_dense_workspace(size,work_bytes):
+    """Reject an exceptional dense system before allocating its workspace."""
+    if 64*size*size>work_bytes:
+        raise ReconstructionConvergenceError(
+            f'dense resonance system of order {size} exceeds max_work_bytes={work_bytes}',
+            category='memory-budget-exhausted')
+
+
 def linearize(evaluate, seeds, options, point_budget):
+    """Refine independent seed-panel chunks on the same shared reaction mesh.
+
+    The workspace target sizes starting chunks; final tables and an adaptive
+    chunk's growth are additional storage. It is not a bound on process RSS.
+    All probes and error budgets are unchanged. A failing panel gains its
+    worst probe and the midpoint; adding all seven probes multiplies output size.
+    """
+    x=np.unique(np.asarray(seeds,dtype=float))
+    if len(x)>point_budget:
+        raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
+    first=evaluate(x)
+    count=len(first)
+    # Conservative live-array estimate for seven probes, sorting, chords,
+    # ratios, kept probes, and child panels. Adaptive growth remains explicit.
+    panels=max(1,min(4096,options.max_work_bytes//(1024*(count+1))))
+    if len(x)-1<=panels:
+        return _linearize_chunk(evaluate,x,options,point_budget,first=first)
+    chunks=[];checks=[];points=0
+    for start in range(0,len(x)-1,panels):
+        end=min(start+panels,len(x)-1)
+        future_seeds=len(x)-end-1
+        budget=point_budget-points-future_seeds+(1 if start else 0)
+        grid,values,check=_linearize_chunk(evaluate,x[start:end+1],options,budget,
+            first={mt:v[start:end+1] for mt,v in first.items()})
+        keep=slice(1,None) if start else slice(None)
+        chunks.append((grid[keep],{mt:v[keep] for mt,v in values.items()}))
+        checks.append(check);points+=len(grid[keep])
+    grid=np.concatenate([chunk[0] for chunk in chunks])
+    values={mt:np.concatenate([chunk[1][mt] for chunk in chunks]) for mt in first}
+    check=dict(iterations=max(c['iterations'] for c in checks),
+        evaluations=sum(c['evaluations'] for c in checks)-(len(checks)-1),
+        refinement_maxima={mt:max(c['refinement_maxima'][mt] for c in checks) for mt in first},
+        verification_maxima={mt:max(c['verification_maxima'][mt] for c in checks) for mt in first},
+        integrals={mt:{weight:{name:sum(c['integrals'][mt][weight][name] for c in checks)
+            for name in checks[0]['integrals'][mt][weight]} for weight in ('dE','dE_over_E')} for mt in first},
+        refinement_chunks=len(chunks))
+    return grid,values,check
+
+
+def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None):
     """Return a common grid, values and checks; retain node evaluations.
 
     The refinement itself is :func:`kika.algebra.refine`, the one adaptive
     engine in kika: every panel is probed at the refinement and verification
     fractions, a panel whose mixed error ratio exceeds one half anywhere gains
-    all of its probes, and only the panels a pass creates are probed again.
+    its worst probe and midpoint, and only the panels a pass creates are probed again.
     (Until October 2026 every pass re-probed every panel, converged ones
     included, which asked the physics the same question once per pass.)
     """
@@ -64,7 +116,7 @@ def linearize(evaluate, seeds, options, point_budget):
     x=np.unique(np.asarray(seeds,dtype=float))
     if len(x)>point_budget:
         raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
-    first=evaluate(x)
+    first=evaluate(x) if first is None else first
     seeded=len(x)
     mts=list(first)
     columns=lambda values:np.column_stack([np.asarray(values[mt],dtype=float) for mt in mts])
@@ -72,7 +124,7 @@ def linearize(evaluate, seeds, options, point_budget):
     try:
         result=refine(x,columns(first),lambda q,owner:columns(evaluate(q)),
                       lambda actual,linear:error_ratio(actual,linear,options)/.5,
-                      fractions=fractions,insert='all',max_passes=options.max_iterations,
+                      fractions=fractions,insert='balanced',max_passes=options.max_iterations,
                       max_points=point_budget,keep_probes=True)
     except RefinementError as exc:
         message={'points':'refinement exceeds max_points',
@@ -106,3 +158,16 @@ def linearize(evaluate, seeds, options, point_budget):
                    refinement_maxima={mt:v[0] for mt,v in maxima.items()},
                    verification_maxima={mt:v[1] for mt,v in maxima.items()},
                    integrals=integrals)
+
+
+def verification_batches(grid,batch_size,fractions=VERIFICATION_FRACTIONS):
+    """Original nodes, then every panel's probes, without a full probe array."""
+    grid=np.asarray(grid,dtype=float)
+    for start in range(0,len(grid),batch_size):
+        yield grid[start:start+batch_size]
+    fractions=np.asarray(fractions)
+    # Flat indexing preserves the former panel-major order even for tiny batches.
+    for start in range(0,(len(grid)-1)*len(fractions),batch_size):
+        index=np.arange(start,min(start+batch_size,(len(grid)-1)*len(fractions)))
+        panel,probe=np.divmod(index,len(fractions))
+        yield grid[panel]+(grid[panel+1]-grid[panel])*fractions[probe]

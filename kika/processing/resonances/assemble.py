@@ -6,7 +6,7 @@ checks coverage of the complete modeled material.
 """
 from dataclasses import dataclass,field
 import numpy as np
-from kika.algebra import evaluate,join_pieces,discontinuities,validate
+from kika.algebra import prepare_evaluator,join_pieces,discontinuities,validate
 from .prepare import UnsupportedResonanceError, evaluate_region, region_mts
 from .breit_wigner import evaluate_bw
 
@@ -19,12 +19,14 @@ class BackgroundCurve:
     _x: object=field(init=False,repr=False,compare=False)
     _y: object=field(init=False,repr=False,compare=False)
     _laws: object=field(init=False,repr=False,compare=False)
+    _evaluate: object=field(init=False,repr=False,compare=False)
 
     def __post_init__(self):
         for name,value,dtype in (('_x',self.x,float),('_y',self.y,float),('_laws',self.law,int)):
             array=np.asarray(value,dtype=dtype).copy()
             array.setflags(write=False)
             object.__setattr__(self,name,array)
+        object.__setattr__(self,'_evaluate',prepare_evaluator(self._x,self._y,self._laws))
 
     @property
     def breaks(self):
@@ -40,7 +42,7 @@ class BackgroundCurve:
 
     def evaluate(self,e):
         """The curve under its law (:func:`kika.algebra.evaluate`), zero off it."""
-        return evaluate(self._x,self._y,self._laws,np.asarray(e,dtype=float))
+        return self._evaluate(np.asarray(e,dtype=float))
 
 
 def prepare_backgrounds(backgrounds):
@@ -128,13 +130,13 @@ def prepare_sums(sums,available):
     return graph,tuple(order)
 
 
-def evaluate_assembled(region,context,e,backgrounds,graph,order,block_size):
+def evaluate_assembled(region,context,e,backgrounds,graph,order,block_size,work_bytes=64*1024**2):
     e=np.asarray(e,dtype=float)
     mts=region_mts(region)|set(backgrounds)|set(graph)
     out={mt:np.zeros(len(e)) for mt in mts}
     for start in range(0,len(e),block_size):
         sl=slice(start,start+block_size)
-        values=evaluate_region(e[sl],region,context)
+        values=evaluate_region(e[sl],region,context,work_bytes=work_bytes)
         # Subtract each owned group's contribution separately: the same MT
         # can occur in other groups whose competition is not already in MF3.
         owned=[g for g in region.groups if g.competitive_in_background]

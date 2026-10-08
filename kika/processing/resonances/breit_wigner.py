@@ -37,7 +37,49 @@ class Group:
     competitive_in_background: bool = False
 
 
-def evaluate_bw(energies, groups, approximation, context):
+def _accumulate_columns(target, values):
+    """Ordered additions, including the existing accumulator's rounding."""
+    if not values.shape[1]:return
+    values[:,0]+=target
+    np.cumsum(values,axis=1,out=values)
+    target[:]=values[:,-1]
+
+
+def _s_wave(energies,levels,p,reference_p,beta,context,approximation,
+            sin2,sin_double,elastic,capture,fission,work_bytes):
+    """Exact L=0, no-competition BW; vectorize bounded groups of levels.
+
+    Accumulate in source level order, including each J amplitude. This avoids
+    changing interference or summation conventions while removing the massive
+    Python loop over individual levels.
+    """
+    amplitudes={}
+    batch=max(1,min(128,work_bytes//max(1,128*len(energies))))
+    for start in range(0,len(levels),batch):
+        local=levels[start:start+batch]
+        gn=p[:,None]*np.array([lv.neutron for lv in local])[None,:]/reference_p[None,start:start+batch]
+        if np.any((gn==0)&(np.array([lv.neutron for lv in local])!=0)[None,:]):
+            raise FloatingPointError('scaled neutron width underflows at an evaluation energy')
+        gc=np.array([lv.capture for lv in local]);gf=np.array([lv.fission for lv in local])
+        width=gn+gc[None,:]+gf[None,:]+0.
+        delta=energies[:,None]-np.array([lv.energy for lv in local])[None,:]
+        denominator=delta**2+(width/2)**2
+        weights=np.array([(2*lv.spin+1)/(2*(2*context.target_spin+1)) for lv in local])
+        factor=beta[:,None]*weights[None,:]
+        _accumulate_columns(capture,factor*gn*gc[None,:]/denominator)
+        _accumulate_columns(fission,factor*gn*gf[None,:]/denominator)
+        if approximation=='SingleLevel':
+            _accumulate_columns(elastic,factor*gn*(gn-2*width*sin2[:,None]+2*delta*sin_double[:,None])/denominator)
+        else:
+            for spin in dict.fromkeys(lv.spin for lv in local):
+                mask=np.array([lv.spin==spin for lv in local])
+                t1,t2=amplitudes.setdefault(spin,(np.zeros(len(energies)),np.zeros(len(energies))))
+                _accumulate_columns(t1,(gn*width/2/denominator)[:,mask])
+                _accumulate_columns(t2,(gn*delta/denominator)[:,mask])
+    return amplitudes
+
+
+def evaluate_bw(energies, groups, approximation, context, *, work_bytes=64*1024**2):
     elastic, capture, fission = (np.zeros_like(energies) for _ in range(3))
     competitive = {}
     for group in groups:
@@ -61,6 +103,17 @@ def evaluate_bw(energies, groups, approximation, context):
         reference_energies=np.asarray([abs(level.energy) for level in group.levels])
         reference_radii=group.channel_radius.evaluate(reference_energies)
         reference_p=neutral_channel_functions(l,np.sqrt(ctx.k_squared_per_ev*reference_energies)*reference_radii)[0]
+        if l==0 and len(group.levels)>=32 and not any(level.competitive for level in group.levels):
+            amplitudes=_s_wave(energies,group.levels,p,reference_p,beta,ctx,approximation,
+                sin2,sin_double,elastic,capture,fission,work_bytes)
+            if group.competitive_mt is not None:competitive.setdefault(group.competitive_mt,np.zeros_like(energies))
+            if approximation=='MultiLevel':
+                represented_weight=0.
+                for spin,(t1,t2) in amplitudes.items():
+                    g=(2*spin+1)/(2*(2*ctx.target_spin+1));represented_weight+=g
+                    elastic+=beta*g*((2*sin2-t1)**2+(sin_double+t2)**2)
+                elastic+=beta*(1-represented_weight)*potential
+            continue
         for level_index,level in enumerate(group.levels):
             pr=reference_p[level_index]
             gn = level.neutron * p / pr

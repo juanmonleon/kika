@@ -5,7 +5,7 @@ and never edited by reconstruction. The supported material is a neutron/lab
 suite whose resonance ranges are supported and whose additive sums close.
 """
 from copy import deepcopy
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 import hashlib
 import re
@@ -16,7 +16,7 @@ from .assemble import prepare_backgrounds
 from .breit_wigner import evaluate_bw
 from .prepare import evaluate_region, group_radii, group_knots, group_breaks
 from .context import NeutronContext
-from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize, error_ratio
+from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize, error_ratio, verification_batches
 from .prepare import PreparedResonances, prepare_resonances, UnsupportedResonanceError
 from .tabulate import _Segment, _seeds
 
@@ -215,6 +215,8 @@ class SuiteReconstructionResult:
     _mt_keys: object
     _source_hash: str
     _physical_owners: object
+    _grids: tuple=()
+    _verification_cache: object=field(default_factory=dict,init=False,repr=False,compare=False)
 
     def _evaluate_segment(self,s,points,include_resonances=True):
         e=np.asarray(points,dtype=float).copy()
@@ -227,7 +229,7 @@ class SuiteReconstructionResult:
         if include_resonances and s.region is not None:
             for start in range(0,len(e),self.options.block_size):
                 sl=slice(start,start+self.options.block_size)
-                physical=evaluate_region(e[sl],s.region,self._prepared.context)
+                physical=evaluate_region(e[sl],s.region,self._prepared.context,work_bytes=self.options.max_work_bytes)
                 for g in s.region.groups:
                     if g.competitive_in_background:
                         owner = self._mt_keys.get(g.competitive_mt)
@@ -278,6 +280,7 @@ class SuiteReconstructionResult:
     def verify_suite(self,suite,*,label=None):
         """Verify a complete model reloaded from GNDS or a processed ENDF tape."""
         from kika.nuclear_data.model import Regions1d
+        from kika.algebra import prepare_evaluator
         for name in ('projectile','target','projectileFrame'):
             if str(getattr(suite,name))!=self.report[name]:
                 raise ReconstructionConvergenceError(f'serialized material identity changed: {name}')
@@ -298,24 +301,42 @@ class SuiteReconstructionResult:
         if covered!=set(entries):raise ReconstructionConvergenceError('serialized reaction coverage changed')
         first=next(iter(self.forms.values()))
         originals=first.function1ds if isinstance(first,Regions1d) else [first]
-        for i,(segment,source_curve) in enumerate(zip(self._segments,originals)):
-            grid=source_curve.xs
+        grids=self._grids or tuple(c.xs for c in originals)
+        # A verified numeric snapshot can be reused only when every selected
+        # table, its interpretation, and the frozen reference are identical.
+        # Hash contents on each call, never object identity or a style label.
+        digest=hashlib.sha256(repr((self._prepared,self.options,self._graph,self._order)).encode())
+        def array(value):
+            value=np.ascontiguousarray(value)
+            digest.update(repr((value.dtype.str,value.shape)).encode())
+            digest.update(memoryview(value).cast('B'))
+        for grid in grids:array(grid)
+        for key,curves in checked.items():
+            digest.update(repr(key).encode())
+            for curve in curves:
+                digest.update(repr((type(curve).__qualname__,curve.domainUnit,curve.rangeUnit,
+                    curve.endfInterpolationCode,curve.domainMin,curve.domainMax)).encode())
+                array(curve.xs);array(curve.ys)
+        signature=digest.digest()
+        cached=self._verification_cache.get('entry')
+        if cached is not None and cached[0]==signature:
+            return dict(cached[1])
+        for i,(segment,grid) in enumerate(zip(self._segments,grids)):
             fractions=np.array([.1732050807568877,.3819660112501051,.6180339887498949,.8267949192431123])
-            points=np.r_[grid,(grid[:-1,None]+np.diff(grid)[:,None]*fractions).ravel()]
-            all_points=points
-            verification_batch=max(32768,self.options.block_size)
-            for start in range(0,len(all_points),verification_batch):
-                points=all_points[start:start+verification_batch]
+            evaluators={}
+            for key,curves in checked.items():
+                curve=curves[i]
+                if curve.domainMin!=segment.low or curve.domainMax!=segment.high:raise ReconstructionConvergenceError('serialization moved a domain boundary')
+                if curve.domainUnit!='eV' or curve.rangeUnit!='b' or curve.endfInterpolationCode!=2:
+                    raise ReconstructionConvergenceError('serialized units or interpolation changed')
+                try:evaluators[key]=prepare_evaluator(curve.xs,curve.ys,2)
+                except ValueError as exc:raise ReconstructionConvergenceError('invalid serialized table') from exc
+            verification_batch=max(1,min(32768,self.options.max_work_bytes//(64*(len(checked)+1))))
+            for points in verification_batches(grid,verification_batch,fractions):
                 reference=self._evaluate_segment(segment,points)
                 serialized={}
-                for key,curves in checked.items():
-                    curve=curves[i]
-                    if curve.domainMin!=segment.low or curve.domainMax!=segment.high:raise ReconstructionConvergenceError('serialization moved a domain boundary')
-                    if curve.domainUnit!='eV' or curve.rangeUnit!='b' or curve.endfInterpolationCode!=2:
-                        raise ReconstructionConvergenceError('serialized units or interpolation changed')
-                    if np.any(np.diff(curve.xs)<0) or np.any(~np.isfinite(curve.xs)) or np.any(~np.isfinite(curve.ys)):
-                        raise ReconstructionConvergenceError('invalid serialized table')
-                    values=np.asarray(curve.evaluate(points))
+                for key,evaluator in evaluators.items():
+                    values=np.asarray(evaluator(points))
                     if values.shape!=points.shape or np.any(~np.isfinite(values)):
                         raise ReconstructionConvergenceError('invalid serialized values')
                     serialized[key]=values
@@ -330,6 +351,7 @@ class SuiteReconstructionResult:
                     if np.any(error_ratio(serialized[key],components,self.options)>1):
                         raise ReconstructionConvergenceError(f'serialized sum does not close within the total budget: {key}')
         if any(not np.isfinite(v) or v>1 for v in maxima.values()):raise ReconstructionConvergenceError(f'reloaded suite exceeds total budget: {maxima}; worst (eV, reference b, serialized b): {worst}')
+        self._verification_cache['entry']=(signature,dict(maxima))
         return maxima
 
 
@@ -470,8 +492,12 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         x,y,check=linearize(lambda e:result._evaluate_segment(s,e),seeds,options,options.max_points-points)
         points+=len(x);tables.append((x,y));checks.append(dict(domain=(s.low,s.high),points=len(x),**check))
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')]);output={}
+    from kika.algebra import compress_flat
     for key in entries:
-        children=[XYs1d(x.copy(),y[key].copy(),axes=axes,index=i) for i,(x,y) in enumerate(tables)]
+        children=[]
+        for i,(x,y) in enumerate(tables):
+            cx,cy,_=compress_flat(x,y[key],2)
+            children.append(XYs1d(cx,cy,axes=axes,index=i))
         output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
         output[key].label=label
     normalized_hash=hashlib.sha256((source_hash+repr(context)+repr(options)).encode()).hexdigest()
@@ -480,6 +506,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         source_sha256=source_hash,normalized_sha256=normalized_hash,minima=minima,
         projectile=str(suite.projectile),target=str(suite.target),projectileFrame=str(suite.projectileFrame),
         domain=(low,high),points=points,regions=checks,source_sum_error_ratios=source_balance,
+        stored_points=sum(len(c.xs) for f in output.values() for c in (f.function1ds if isinstance(f,Regions1d) else [f])),
         source_sum_policy='derive-from-leaves',source_sum_discrepancies=source_worst,
         source_conversion_report=deepcopy(suite.report),
         resonance_partial_owners=MappingProxyType(physical_owners),
@@ -487,7 +514,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         label=label,options=options,context=context,preparation_notes=prepared.preparation_notes,
         empirical_verification=True,global_error_bound=False)
     return SuiteReconstructionResult(MappingProxyType(output),MappingProxyType(report),source_style,label,options,prepared,
-        tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
+        tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners),
+        tuple(np.frombuffer(x.tobytes(),dtype=x.dtype) for x,_ in tables))
 
 
 def attach_reconstruction(suite,result):

@@ -34,7 +34,10 @@ def test_common_grid_final_background_and_independent_probes():
     bg={2:constant(1.),102:constant(.4),16:constant(.6)}
     result=tabulate_resonances(p,backgrounds=bg,sums={1:(2,18,102,16)})
     grid=result.forms[2].xs
-    assert all(np.array_equal(f.xs,grid) for f in result.forms.values())
+    # Physics uses a common master grid; exact constant outputs need only ends.
+    assert np.array_equal(result._grids[0],grid)
+    assert len(result.forms[16].xs)==2
+    assert all(set(f.xs)<=set(grid) for f in result.forms.values())
     probes=np.unique(np.r_[np.geomspace(10.,300.,1701),np.linspace(99.,101.,1013)])
     assert_budget(result,probes)
     values=result.evaluate(probes)

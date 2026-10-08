@@ -115,7 +115,9 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         evaluated, so that a stored value belongs to the abscissa that will be
         written.
     insert
-        ``"worst"``: a failing panel gains its worst probe. ``"all"``: it gains
+        ``"worst"``: a failing panel gains its worst probe. ``"balanced"``:
+        it gains the worst and the usable probe nearest the midpoint, keeping
+        progress on both sides of a narrow feature. ``"all"``: it gains
         every distinct probe strictly inside it.
     max_passes, max_points
         Budgets; running out of either raises :class:`RefinementError`.
@@ -127,8 +129,8 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         Return the probes of every final panel (requires every interval to be
         active).
     """
-    if insert not in ("worst", "all"):
-        raise ValueError(f"insert must be 'worst' or 'all', got {insert!r}")
+    if insert not in ("worst", "balanced", "all"):
+        raise ValueError(f"insert must be 'worst', 'balanced' or 'all', got {insert!r}")
     if unresolvable not in ("raise", "accept"):
         raise ValueError(f"unresolvable must be 'raise' or 'accept', got {unresolvable!r}")
     x = np.asarray(x, dtype=float)
@@ -206,10 +208,13 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
 
         # The nodes each failing panel gains.
         rows = np.flatnonzero(split)
-        if insert == "worst":
+        if insert in ("worst","balanced"):
             pick = np.zeros(q.shape, dtype=bool)
             worst = np.argmax(np.where(usable, ratio, -1.0), axis=1)
             pick[rows, worst[rows]] = True
+            if insert == "balanced":
+                middle=np.argmin(np.where(usable,abs(frac-.5),np.inf),axis=1)
+                pick[rows,middle[rows]]=True
         else:
             pick = usable.copy()
         pick &= split[:, None]

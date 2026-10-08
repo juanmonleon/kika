@@ -129,3 +129,18 @@ def test_a_log_law_on_a_zero_is_its_limit_and_on_a_negative_is_refused():
     np.testing.assert_array_equal(ys, [0.0, 0.0, 3.0])
     with pytest.raises(ValueError, match="ln y"):
         linearize_table([1.0, 10.0], [-1.0, 3.0], [(2, 5)])
+
+
+def test_balanced_refinement_resolves_a_narrow_endpoint_feature_without_relaxing_budget():
+    from kika.algebra import refine,RefinementError
+    fractions=np.array([.1127016653792583,.5,.8872983346207417])
+    def physics(q,owner):return 1/((1-q)**2+1e-18)
+    def ratio(actual,chord):return abs(actual-chord)/(1e-8+1e-3*np.maximum(abs(actual),abs(chord)))
+    x=np.array([0.,1.]);y=physics(x,None)
+    with pytest.raises(RefinementError):
+        refine(x,y,physics,ratio,fractions=fractions,insert='worst',max_passes=40)
+    result=refine(x,y,physics,ratio,fractions=fractions,insert='balanced',
+        max_passes=40,max_points=20000,keep_probes=True)
+    f=(result.probe_x-result.x[:-1,None])/np.diff(result.x)[:,None]
+    chord=result.y[:-1,None]+np.diff(result.y)[:,None]*f
+    assert np.max(ratio(result.probe_y,chord))<=1

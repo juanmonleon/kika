@@ -6,7 +6,7 @@ import numpy as np
 
 from .prepare import PreparedResonances, group_radii, group_knots, group_breaks, region_mts
 from .assemble import prepare_backgrounds,prepare_sums,evaluate_assembled
-from .grid import ReconstructionOptions,ReconstructionConvergenceError,linearize,error_ratio,VERIFICATION_FRACTIONS
+from .grid import ReconstructionOptions,ReconstructionConvergenceError,linearize,error_ratio,VERIFICATION_FRACTIONS,verification_batches
 from .channel_functions import neutral_channel_functions
 
 
@@ -18,10 +18,10 @@ class _Segment:
     backgrounds: object
     left_high: bool
 
-    def evaluate(self,energy,context,graph,order,block_size):
+    def evaluate(self,energy,context,graph,order,block_size,work_bytes=64*1024**2):
         e=np.asarray(energy,dtype=float).copy()
         if self.left_high:e[e==self.high]=np.nextafter(self.high,self.low)
-        return evaluate_assembled(self.region,context,e,self.backgrounds,graph,order,block_size)
+        return evaluate_assembled(self.region,context,e,self.backgrounds,graph,order,block_size,work_bytes)
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,7 @@ class ReconstructionResult:
     _segments: tuple
     _graph: object
     _order: tuple
+    _grids: tuple=()
 
     def evaluate(self,energies):
         """Assembled reference callable, preserving scalar/1D shape and order."""
@@ -54,7 +55,7 @@ class ReconstructionResult:
         for i,s in enumerate(self._segments):
             indices=np.flatnonzero(owner==i)
             if len(indices):
-                values=s.evaluate(flat[indices],self._prepared.context,self._graph,self._order,self.options.block_size)
+                values=s.evaluate(flat[indices],self._prepared.context,self._graph,self._order,self.options.block_size,self.options.max_work_bytes)
                 for mt in out:out[mt][indices]=values.get(mt,np.zeros(len(indices)))
         return {mt:v.reshape(e.shape) for mt,v in out.items()}
 
@@ -65,14 +66,13 @@ class ReconstructionResult:
         Finite probes cannot establish a mathematical all-energy guarantee.
         """
         from kika.nuclear_data.model import Regions1d
+        from kika.algebra import prepare_evaluator
         if set(forms)!=set(self.forms):raise ValueError('reloaded reactions differ from reconstructed output')
         maxima={mt:0. for mt in forms}
         for index,s in enumerate(self._segments):
             exemplar=next(iter(self.forms.values()))
-            grid=exemplar.function1ds[index].xs if isinstance(exemplar,Regions1d) else exemplar.xs
-            probes=(grid[:-1,None]+np.diff(grid)[:,None]*VERIFICATION_FRACTIONS).ravel()
-            points=np.r_[grid,probes]
-            actual=s.evaluate(points,self._prepared.context,self._graph,self._order,self.options.block_size)
+            grid=self._grids[index] if self._grids else (exemplar.function1ds[index].xs if isinstance(exemplar,Regions1d) else exemplar.xs)
+            evaluators={}
             for mt,form in forms.items():
                 curves=form.function1ds if isinstance(form,Regions1d) else [form]
                 if len(curves)!=len(self._segments):raise ValueError('serialized region structure changed')
@@ -85,10 +85,16 @@ class ReconstructionResult:
                 if (np.any(~np.isfinite(curve.xs)) or np.any(~np.isfinite(curve.ys))
                         or np.any(np.diff(curve.xs)<0)):
                     raise ReconstructionConvergenceError('invalid reloaded grid or values')
-                value=np.asarray(curve.evaluate(points))
-                if np.any(~np.isfinite(value)):raise ReconstructionConvergenceError('nonfinite reloaded form')
-                ratio=error_ratio(actual.get(mt,np.zeros(len(points))),value,self.options)
-                maxima[mt]=max(maxima[mt],float(np.max(ratio)))
+                evaluators[mt]=prepare_evaluator(curve.xs,curve.ys,2)
+            batch=max(1,min(32768,self.options.max_work_bytes//(64*(len(forms)+1))))
+            for points in verification_batches(grid,batch):
+                actual=s.evaluate(points,self._prepared.context,self._graph,self._order,
+                    self.options.block_size,self.options.max_work_bytes)
+                for mt,evaluator in evaluators.items():
+                    value=np.asarray(evaluator(points))
+                    if np.any(~np.isfinite(value)):raise ReconstructionConvergenceError('nonfinite reloaded form')
+                    ratio=error_ratio(actual.get(mt,np.zeros(len(points))),value,self.options)
+                    maxima[mt]=max(maxima[mt],float(np.max(ratio)))
         if any(v>1 for v in maxima.values()):
             raise ReconstructionConvergenceError(f'reloaded output exceeds total mixed-error budget: {maxima}')
         return maxima
@@ -138,16 +144,24 @@ def _seeds(segment,context):
         seeds.extend(x for x in group_knots(g) if lo<=x<=hi)
         if g.competitive_mt is not None and g.competitive_q<0:
             seeds.append(-g.competitive_q*(1+ctx.atomic_weight_ratio)/ctx.atomic_weight_ratio)
+        centers=None
+        if segment.region.approximation=='RMatrixNeutral' and not g.level_metric and g.levels:
+            # Independent fixed-point estimates as one vector. The per-level
+            # update, eight steps and range stopping rule are unchanged.
+            er=np.array([lv.energy for lv in g.levels])
+            centers=er.copy()
+            reduced=np.asarray(g.reduced).reshape(len(er),len(g.channels))
+            active=(er>0)&(centers>=lo)&(centers<=hi)
+            for _ in range(8):
+                if not np.any(active):break
+                real=np.stack([c.functions(centers[active],logarithmic=True)[1].real for c in g.channels],axis=1)
+                centers[active]=er[active]-np.sum(reduced[active]*reduced[active]*real,axis=1)
+                active&=(centers>=lo)&(centers<=hi)
         for level_index,level in enumerate(g.levels):
             if level.energy<=0:continue
             pr,sr,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*level.energy)*g.channel_radius.evaluate(level.energy))
             center=level.energy
-            if segment.region.approximation == 'RMatrixNeutral' and not g.level_metric:
-                reduced=np.asarray(g.reduced[level_index])
-                for _ in range(8):
-                    if not lo<=center<=hi:break
-                    real=np.array([c.functions(np.array([center]),logarithmic=True)[1][0].real for c in g.channels])
-                    center=level.energy-float(np.sum(reduced*reduced*real))
+            if centers is not None:center=float(centers[level_index])
             # Fixed-point seeds isolate shifted peaks; correctness still comes
             # from subsequent reference evaluations, not this estimate.
             for _ in range(0 if segment.region.approximation in ("ReichMoore","RMatrixNeutral") else 4):
@@ -170,9 +184,11 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
     resonance domains. Fast-region data are untouched and outside this result.
     ``sums`` is an explicit additive MT graph; aggregates replace their kernel
     values, and background values for a rebuilt sum are rejected as ambiguous.
-    No thinning, clipping, automatic tolerance relaxation or implicit attachment.
+    Only exactly constant spans are compacted; no approximate thinning,
+    clipping, automatic tolerance relaxation or implicit attachment.
     """
     from kika.nuclear_data.model import Axis,Axes,XYs1d,Regions1d
+    from kika.algebra import compress_flat
     if not isinstance(prepared,PreparedResonances):raise TypeError('expected PreparedResonances')
     if not prepared.regions:raise ValueError('no prepared regions to tabulate')
     options=ReconstructionOptions() if options is None else options
@@ -187,7 +203,7 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
     checks=[]
     points=0
     for s in segments:
-        def evaluate(e):return s.evaluate(e,prepared.context,graph,order,options.block_size)
+        def evaluate(e):return s.evaluate(e,prepared.context,graph,order,options.block_size,options.max_work_bytes)
         x,y,check=linearize(evaluate,_seeds(s,prepared.context),options,options.max_points-points)
         points+=len(x)
         tables.append((x,y))
@@ -196,15 +212,19 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')])
     forms={}
     for mt in mts:
-        curves=[XYs1d(x.copy(),y.get(mt,np.zeros(len(x))).copy(),axes=axes,index=i)
-                for i,(x,y) in enumerate(tables)]
+        curves=[]
+        for i,(x,y) in enumerate(tables):
+            cx,cy,_=compress_flat(x,y.get(mt,np.zeros(len(x))),2)
+            curves.append(XYs1d(cx,cy,axes=axes,index=i))
         forms[mt]=curves[0] if len(curves)==1 else Regions1d(curves,axes=axes,label=label)
         forms[mt].label=label
     fingerprint=hashlib.sha256(repr((prepared,background,graph,options)).encode()).hexdigest()
     report=dict(engine='kika-bw-rrr-tabulator-1',scope='prepared resonance domains',normalized_sha256=fingerprint,
                 context=prepared.context,options=options,regions=checks,points=points,
+                stored_points=sum(len(c.xs) for f in forms.values() for c in (f.function1ds if isinstance(f,Regions1d) else [f])),
                 units=dict(energy='eV',cross_section='b'),background_mts=tuple(sorted(background)),
                 sum_graph=dict(graph),preparation_notes=prepared.preparation_notes,
                 empirical_verification=True,global_error_bound=False,negative_policy='retain and report',
                 minima={mt:min(float(np.min(t[1].get(mt,np.zeros(len(t[0]))))) for t in tables) for mt in mts})
-    return ReconstructionResult(MappingProxyType(forms),MappingProxyType(report),options,prepared,segments,MappingProxyType(graph),order)
+    grids=tuple(np.frombuffer(x.tobytes(),dtype=x.dtype) for x,_ in tables)
+    return ReconstructionResult(MappingProxyType(forms),MappingProxyType(report),options,prepared,segments,MappingProxyType(graph),order,grids)

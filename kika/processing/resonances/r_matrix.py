@@ -9,6 +9,8 @@ import numpy as np
 from .breit_wigner import Group
 from .channel_functions import neutral_channel_functions
 from scipy.special import gammaln, logsumexp
+from .grid import check_dense_workspace
+from .reich_moore import level_matrix
 
 
 def closed_neutral_shift(l, kappa):
@@ -137,7 +139,7 @@ class RMLGroup(Group):
 
 
 def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, *, entrance=0, diagnostics=None,
-              log_penetrability=None, error_bounds=None, level_metric=None, level_energy=None,level_origin=0.):
+              log_penetrability=None, error_bounds=None, level_metric=None, level_energy=None,level_origin=0.,work_bytes=64*1024**2):
     """Return W_c,n, level absorption X_lambda,n and channel excitation y.
 
     y=(I-LR)^-1 e_n; W=Ry and X=D^-1 gamma y. Retaining closed
@@ -189,6 +191,7 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
             diagnostics['rml_underflow_max_log_perturbation_bound'] = max(diagnostics.get('rml_underflow_max_log_perturbation_bound',-np.inf),float(log_q))
         return log_state_error
     if level_metric is not None:
+        check_dense_workspace(c+n,work_bytes)
         metric = np.asarray(level_metric).reshape(n,n)
         eigen_energy = np.asarray(level_energy).reshape(n,n)
         for i,energy in enumerate(e):
@@ -217,7 +220,7 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
         regular = ~np.any(poles,axis=1)
         pole_indices = np.flatnonzero(~regular)
     if np.any(regular):
-        r = np.einsum('nc,en,nd->ecd',a,1/d[regular],a,optimize=True)
+        r = level_matrix(1/d[regular],a)
         indexes = np.arange(c)
         r[:,indexes,indexes] += z[regular]
         matrix = np.eye(c)[None,:,:]-logarithmic[regular,:,None]*r
@@ -228,7 +231,7 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
         maximum = float(np.max(residual/scale))
         excitation[regular] = y
         w[regular] = np.einsum('ecd,ed->ec',r,y)
-        x[regular] = np.einsum('nc,ec->en',a,y)/d[regular]
+        x[regular] = (y@a.T)/d[regular]
         regular_indices = np.flatnonzero(regular)
         for local in np.flatnonzero(np.any(missing[regular],axis=1)):
             i = regular_indices[local]
@@ -240,6 +243,7 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
         other = ~pole
         r0 = np.diag(z[i])+(a[other].T/d[i, other])@a[other]
         ap = a[pole]
+        check_dense_workspace(c+len(ap),work_bytes)
         matrix = np.block([[np.eye(c)-logarithmic[i, :, None]*r0,
                             -logarithmic[i, :, None]*ap.T],
                            [-ap, np.diag(d[i, pole])]])
@@ -283,7 +287,7 @@ def _check_underflow_bound(log_value,log_error):
         raise FloatingPointError('underflow correction exceeds the amplitude accuracy bound')
 
 
-def evaluate_rml(energies, groups, context, diagnostics=None):
+def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1024**2):
     e = np.asarray(energies)
     mts = {1, 2, 18, 102} | {mt for g in groups for mt in g.reaction_mts}
     result = {mt: np.zeros_like(e) for mt in mts}
@@ -320,7 +324,7 @@ def evaluate_rml(energies, groups, context, diagnostics=None):
                 log_penetrability=log_p,error_bounds=bounds,
                 level_metric=group.level_metric if group.level_metric else None,
                 level_energy=group.level_energy if group.level_metric else None,
-                level_origin=group.level_origin)
+                level_origin=group.level_origin,work_bytes=work_bytes)
             underflow = np.any(bounds['missing'],axis=1)
             core = 2j*np.sqrt(p)*np.sqrt(p[:, entrance, None])*w
             if np.any(underflow):

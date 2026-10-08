@@ -99,3 +99,27 @@ generic GNDS does not represent. `result.report["source_conversion_report"]`
 retains the source conversion report, including limitations explicitly
 classified as irrelevant to cross sections. Unknown conversion losses block
 reconstruction.
+
+## Resource budgets and repeated verification
+
+`ReconstructionOptions.max_work_bytes` defaults to 64 MiB. It targets temporary
+energy batches and refinement chunks; input data, final tables, adaptive growth
+and backend allocations are additional memory. It is not a process RSS limit.
+An exceptional dense solve that exceeds its estimated workspace raises
+`ReconstructionConvergenceError` with category `memory-budget-exhausted`.
+The point and iteration budgets remain strict; exceeding them does not relax
+the requested tolerance. Large evaluations can require an explicitly larger
+`max_points` budget than the default 200,000.
+
+Verification keeps every original node and four independent locations per
+panel. A previous successful check can be reused only when all selected table
+contents, units and the physical reference match exactly. Editing a table
+forces another check. ENDF rounding usually changes the contents, so the
+reloaded file receives its own physical verification.
+
+Physics is refined on a common grid within each segment. Stored curves compact
+only exactly constant spans, preserving boundaries and steps. Verification
+retains an independent, immutable copy of the original computation grids,
+including probes for reactions whose stored curves become constant.
+`result.report["points"]` counts computation nodes;
+`result.report["stored_points"]` counts nodes across all stored curves.
