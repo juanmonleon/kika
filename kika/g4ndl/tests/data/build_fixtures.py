@@ -22,6 +22,11 @@ so the reader under test opens them the way it opens a real one:
     every channel, 2.3 kB) for the total and the sums, and two level schemes
     from ``Inelastic/Gammas`` (G4NDL 4.7.1 only: JEFF-4.0 ships none). ~120 kB.
 
+``capture/G4NDL-4.7.1/``
+    Real ``Capture/`` files, byte for byte: whole isotopes (the cross section
+    and the one final state each has), the smallest showing each final-state
+    construct (``CAPTURE`` says which). ~27 kB.
+
 ``synthetic/``
     Hand-written token streams for what no real file shows (``repFlag=0``, the
     ``G4NDL`` header, a laboratory frame, ``tempdep != 0``) and for the inputs a
@@ -86,9 +91,26 @@ INELASTIC_ISOTOPES = {("G4NDL-4.7.1", "94_244_Plutonium"): "the total and its pa
 GAMMAS = {("G4NDL-4.7.1", "z6.a15"): "the smallest non-empty",
           ("G4NDL-4.7.1", "z55.a120"): "levels out of order"}
 
+#: (library, isotope stem) -> why it is here. Its Capture/CrossSection and its
+#: final state (Capture/FSMF6 or Capture/FS, whichever it has) are copied.
+CAPTURE = {
+    ("G4NDL-4.7.1", "1_2_Hydrogen"): "FS: one photon line, isotropic, no MF15 read",
+    ("G4NDL-4.7.1", "7_14_Nitrogen"): "FS: 59 lines, MF14 Legendre, MF15 spectra read",
+    ("G4NDL-4.7.1", "1_1_Hydrogen"): "FSMF6: LAW=2 photon and its LAW=4 deuteron recoil",
+    ("G4NDL-4.7.1", "7_15_Nitrogen"): "FSMF6: one LAW=1 photon (the shape of 507 of 508)",
+}
+
 #: sha256 of every committed real file, filled from the first build. A change
 #: here means the source library changed, and that is news.
 SHA256 = {
+    "capture/G4NDL-4.7.1/Capture/CrossSection/1_1_Hydrogen.z": "4593a3fb885eacd3dc71eadb200e6a98e34d9d66680663a5f8497413a4001a88",
+    "capture/G4NDL-4.7.1/Capture/CrossSection/1_2_Hydrogen.z": "e40c5a72fedd83643107c3de866be1538b5048c0d84ddca366e5bdd48422f786",
+    "capture/G4NDL-4.7.1/Capture/CrossSection/7_14_Nitrogen.z": "682cb37a9e557a484e0087fbe8ae863f732e1b832d7c59854c3335c62b16b871",
+    "capture/G4NDL-4.7.1/Capture/CrossSection/7_15_Nitrogen.z": "ad6f759338459dd37ccaa30003e3915032f958730fdda155e39c94a2c9012060",
+    "capture/G4NDL-4.7.1/Capture/FS/1_2_Hydrogen.z": "77e78d5fecff23fc6cde05842c83c1270bf473ea531bf2cfd874ef99b66466f2",
+    "capture/G4NDL-4.7.1/Capture/FS/7_14_Nitrogen.z": "39f871220ce7a47ac9ddc079293d73588e24a46daef10f3635851dd3ea255638",
+    "capture/G4NDL-4.7.1/Capture/FSMF6/1_1_Hydrogen.z": "a9d64186446ba312b2ed845d063794db710054ff0f6f78918039fc067294546e",
+    "capture/G4NDL-4.7.1/Capture/FSMF6/7_15_Nitrogen.z": "b9d023deb7df0088ea11f60bf438ec0b673ad499c5200aa74b572c82be735c85",
     "G4NDL-4.7.1/Elastic/CrossSection/6_nat_Carbon.z": "0f976388f60166171da0198006aa5274666aa1e50449d86941c847df09fb50bb",
     "G4NDL-4.7.1/Elastic/FS/6_nat_Carbon.z": "e01353eed87ac0fcb8ff16d97f9de6cde947232bf4c249efcef5d665325de9ca",
     "JEFF-4.0/Elastic/CrossSection/1_1_Hydrogen.z": "cd49090965075c4c5effac4874268999c22d0d21dc31687a31b5f51a48b3a710",
@@ -227,6 +249,23 @@ def copy_inelastic(sources: dict[str, Path]) -> dict[str, str]:
     return hashes
 
 
+def copy_capture(sources: dict[str, Path]) -> dict[str, str]:
+    hashes = {}
+    for (lib, stem) in CAPTURE:
+        for sub in ("CrossSection", "FSMF6", "FS"):
+            src = sources[lib] / "Capture" / sub / f"{stem}.z"
+            if not src.is_file():
+                continue
+            dst = HERE / "capture" / lib / "Capture" / sub / src.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            key = str(dst.relative_to(HERE).as_posix())
+            hashes[key] = sha256(dst)
+            if SHA256.get(key) and SHA256[key] != hashes[key]:
+                raise SystemExit(f"{key}: source changed, sha256 {hashes[key]}")
+    return hashes
+
+
 def write_synthetic() -> None:
     root = HERE / "synthetic"
     if root.exists():
@@ -248,6 +287,7 @@ def main() -> None:
     sources = {"JEFF-4.0": a.jeff, "G4NDL-4.7.1": a.g4ndl}
     hashes = copy_real(sources)
     hashes.update(copy_inelastic(sources))
+    hashes.update(copy_capture(sources))
     write_synthetic()
     for k, v in sorted(hashes.items()):
         print(f'    "{k}": "{v}",')
