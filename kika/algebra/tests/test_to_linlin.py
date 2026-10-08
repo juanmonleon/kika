@@ -121,7 +121,11 @@ def test_a_panel_the_snap_grid_cannot_split_is_left_as_it_is():
     np.testing.assert_array_equal(ys, [10.0, 0.1])
 
 
-def test_a_log_law_on_a_zero_is_refused():
-    """A zero on a log-y law has no log-log value; it used to be read lin-lin."""
+def test_a_log_law_on_a_zero_is_its_limit_and_on_a_negative_is_refused():
+    """A zero on a log-y law used to be read lin-lin. It is the law's limit now:
+    0 inside, the jump at the non-zero end (algebra.laws.vanishing_panels)."""
+    xs, ys = linearize_table([1.0, 10.0], [0.0, 3.0], [(2, 5)])
+    np.testing.assert_array_equal(xs, [1.0, 10.0, 10.0])
+    np.testing.assert_array_equal(ys, [0.0, 0.0, 3.0])
     with pytest.raises(ValueError, match="ln y"):
-        linearize_table([1.0, 10.0], [0.0, 3.0], [(2, 5)])
+        linearize_table([1.0, 10.0], [-1.0, 3.0], [(2, 5)])

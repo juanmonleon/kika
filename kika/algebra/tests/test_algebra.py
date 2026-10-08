@@ -32,8 +32,8 @@ def test_codes_outside_one_to_five_are_refused(code):
         interval_laws(3, [(3, code)])
 
 
-@pytest.mark.parametrize("law,y", [(5, [1.0, 0.0]), (4, [-1.0, 2.0])])
-def test_log_law_on_non_positive_values_is_refused(law, y):
+@pytest.mark.parametrize("law,y", [(5, [1.0, -1.0]), (4, [-1.0, 2.0]), (5, [0.0, -1.0])])
+def test_log_law_on_negative_values_is_refused(law, y):
     with pytest.raises(ValueError, match="ln y"):
         A.evaluate([1.0, 2.0], y, law, 1.5)
 
@@ -265,3 +265,103 @@ def test_legendre_coefficients_hold_a_short_table_to_both_ends_and_normalise():
     # Constant 2 on [-0.5, 0.5], held: f = 2 on [-1, 1], isotropic.
     got = A.legendre_coefficients([-0.5, 0.5], [2.0, 2.0], 2, 4)
     assert got == pytest.approx([1.0, 0.0, 0.0, 0.0, 0.0], abs=1e-15)
+
+
+# ---------------------------------------------------------------------------
+# A log-y panel with an end at 0 is the limit of its law (JEFF-4.0 MT102)
+# ---------------------------------------------------------------------------
+
+# Mo-100 of JEFF-4.0, MF3/MT102: a null background under log-log across the
+# resolved range, then the cross section above it.
+ZERO_X = [1e-5, 26081.0, 26081.0, 1e5]
+ZERO_Y = [0.0, 0.0, 1e-3, 2e-3]
+
+
+@pytest.mark.parametrize("law", [4, 5])
+def test_a_log_y_panel_from_zero_to_zero_is_the_zero_function(law):
+    laws = [law, 2, law]
+    assert np.all(A.evaluate(ZERO_X, ZERO_Y, laws, [1e-5, 1.0, 1e4]) == 0.0)
+    assert A.left_limit(ZERO_X, ZERO_Y, laws, 26081.0) == 0.0
+    assert A.right_limit(ZERO_X, ZERO_Y, laws, 26081.0) == 1e-3
+    # The rest of the table reads as it always did.
+    assert A.evaluate(ZERO_X, ZERO_Y, laws, 1e5) == 2e-3
+    q = 5e4
+    assert A.evaluate(ZERO_X, ZERO_Y, laws, q) == pytest.approx(
+        A.evaluate([26081.0, 1e5], [1e-3, 2e-3], law, q), rel=0, abs=0)
+
+
+@pytest.mark.parametrize("law", [4, 5])
+def test_a_zero_panel_integrates_to_zero_and_averages_with_the_rest(law):
+    laws = [law, 2, law]
+    tail = A.integral([26081.0, 1e5], [1e-3, 2e-3], law)
+    assert A.integral(ZERO_X, ZERO_Y, laws) == pytest.approx(tail, rel=1e-15)
+    edges = [1e-5, 1e3, 26081.0, 1e5]
+    avg = A.group_averages(ZERO_X, ZERO_Y, laws, edges)
+    assert avg[0] == 0.0 and avg[1] == 0.0
+    assert avg[2] == pytest.approx(tail / (1e5 - 26081.0), rel=1e-14)
+    # The 1/x weight too, which MF33 uses for its bin averages.
+    if law == 5:
+        assert A.group_averages(ZERO_X, ZERO_Y, laws, edges, "1/x")[:2].tolist() == [0.0, 0.0]
+
+
+def test_a_zero_log_lin_panel_with_a_1_over_x_weight_is_zero_not_refused():
+    assert A.integral([1.0, 2.0], [0.0, 0.0], 4, weight="1/x") == 0.0
+    # A log-lin panel that is not zero still has no closed form under 1/x.
+    with pytest.raises(ValueError, match="exponential integral"):
+        A.integral([1.0, 2.0], [1.0, 2.0], 4, weight="1/x")
+
+
+@pytest.mark.parametrize("law", [4, 5])
+def test_to_linlin_keeps_a_zero_panel_as_it_is(law):
+    x, y = A.to_linlin(ZERO_X, ZERO_Y, [law, 2, law])
+    assert x[:3].tolist() == ZERO_X[:3] and y[:3].tolist() == ZERO_Y[:3]
+    assert np.all(y[(x > 1e-5) & (x < 26081.0)] == 0.0)
+
+
+def test_interpolate_between_reads_an_element_with_an_end_at_zero_as_its_limit():
+    out = A.interpolate_between(1.0, np.array([0.0, 1.0, 2.0]), 2.0,
+                                np.array([0.0, 4.0, 0.0]), 5, 1.5)
+    assert out[0] == 0.0 and out[1] == pytest.approx(1.5 ** 2) and out[2] == 0.0
+    with pytest.raises(ValueError, match="ln y"):
+        A.interpolate_between(1.0, np.array([-1.0, 1.0]), 2.0, np.array([1.0, 4.0]), 5, 1.5)
+
+
+# Pd-105 of JEFF-4.0, MF3/MT102 above 30 MeV: log-log from 3.7296e-4 b to 0.
+FALL_X = [1e7, 3e7, 2e8]
+FALL_Y = [1e-3, 3.7296e-4, 0.0]
+
+
+@pytest.mark.parametrize("law", [4, 5])
+def test_a_log_y_panel_falling_to_zero_drops_right_after_its_start(law):
+    laws = [2, law]
+    # Node values are the tabulated ones; inside the panel the law's limit is 0.
+    assert A.evaluate(FALL_X, FALL_Y, laws, [3e7, 5e7, 2e8]).tolist() == [3.7296e-4, 0.0, 0.0]
+    # The jump is at 30 MeV: the left limit is the value, the right limit 0.
+    assert A.left_limit(FALL_X, FALL_Y, laws, 3e7) == 3.7296e-4
+    assert A.right_limit(FALL_X, FALL_Y, laws, 3e7) == 0.0
+    assert A.integral(FALL_X, FALL_Y, laws, lo=3e7) == 0.0
+    assert A.group_averages(FALL_X, FALL_Y, laws, [1e7, 3e7, 2e8])[1] == 0.0
+
+
+@pytest.mark.parametrize("law", [4, 5])
+def test_a_log_y_panel_rising_from_zero_jumps_at_its_end(law):
+    x, y = [1.0, 2.0, 3.0], [0.0, 5.0, 6.0]
+    laws = [law, 2]
+    assert A.evaluate(x, y, laws, [1.5, 2.0]).tolist() == [0.0, 5.0]
+    assert A.left_limit(x, y, laws, 2.0) == 0.0
+    assert A.right_limit(x, y, laws, 2.0) == 5.0
+    assert A.integral(x, y, laws, hi=2.0) == 0.0
+
+
+@pytest.mark.parametrize("law", [4, 5])
+def test_to_linlin_writes_a_vanishing_panel_as_its_step(law):
+    x, y = A.to_linlin(FALL_X, FALL_Y, [2, law])
+    assert x.tolist() == [1e7, 3e7, 3e7, 2e8] and y.tolist() == [1e-3, 3.7296e-4, 0.0, 0.0]
+    x, y = A.to_linlin([1.0, 2.0, 3.0], [0.0, 5.0, 6.0], [law, 2])
+    assert x.tolist() == [1.0, 2.0, 2.0, 3.0] and y.tolist() == [0.0, 0.0, 5.0, 6.0]
+    # The lin-lin form reads the same off the jump, and the same limits at it.
+    lx, ly = A.to_linlin(FALL_X, FALL_Y, [2, law])
+    q = [1e7, 2e7, 1e8, 2e8]
+    assert np.array_equal(A.evaluate(lx, ly, 2, q), A.evaluate(FALL_X, FALL_Y, [2, law], q))
+    for side in (A.left_limit, A.right_limit):
+        assert side(lx, ly, 2, 3e7) == side(FALL_X, FALL_Y, [2, law], 3e7)

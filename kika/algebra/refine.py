@@ -28,7 +28,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from .evaluate import panel_value
-from .laws import HISTOGRAM, LINLIN, LOG_X, validate
+from .laws import HISTOGRAM, LINLIN, LOGLIN, LOGLOG, LOG_X, validate, vanishing_panels
 
 __all__ = ["RefinementError", "RefineResult", "refine", "to_linlin",
            "LINEARIZATION_TOLERANCE", "PANEL_TEST_FRACTIONS"]
@@ -278,6 +278,9 @@ def to_linlin(x, y, laws, tol: float = LINEARIZATION_TOLERANCE, *,
     * **lin-lin** panels are copied as they are.
     * **histogram** panels gain the left limit of their right end as a repeated
       abscissa, ``(x_{i+1}, y_i)`` -- the exact lin-lin form of a step.
+    * **log-lin, log-log** panels with an end at 0 are 0 inside, with the jump
+      at the other end (:func:`~kika.algebra.laws.vanishing_panels`): written as
+      that step, exactly, by repeating the non-zero end's abscissa at 0.
     * **lin-log, log-lin, log-log** panels are refined until the chord agrees
       with the law to a relative *tol* at a quarter, a half and three quarters
       of every panel, in ``ln x`` for the log-x laws. Each added point is valued
@@ -300,6 +303,19 @@ def to_linlin(x, y, laws, tol: float = LINEARIZATION_TOLERANCE, *,
         x = np.insert(x, step + 1, x[step + 1])
         y = np.insert(y, step + 1, y[step])
         laws = np.insert(laws, step + 1, LINLIN)
+    wide = np.diff(x) > 0
+    vanishing = wide & np.isin(laws, (LOGLIN, LOGLOG)) & vanishing_panels(y[:-1], y[1:])
+    if vanishing.any():
+        # (x1, y1 > 0) -> (x2, 0) becomes (x1, y1), (x1, 0), (x2, 0); and
+        # (x1, 0) -> (x2, y2 > 0) becomes (x1, 0), (x2, 0), (x2, y2).
+        k = np.flatnonzero(vanishing)
+        falls, rises = k[y[k] > 0], k[y[k + 1] > 0]
+        laws = np.where(vanishing, LINLIN, laws)
+        at = np.r_[falls + 1, rises + 1]
+        order = np.argsort(at, kind="stable")
+        x = np.insert(x, at[order], np.r_[x[falls], x[rises + 1]][order])
+        y = np.insert(y, at[order], np.zeros(at.size))
+        laws = np.insert(laws, at[order], LINLIN)
     curved = (laws > LINLIN) & (np.diff(x) > 0)
     if not curved.any():
         return x.copy(), y.copy()

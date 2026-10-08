@@ -23,7 +23,7 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate
+from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate, vanishing_panels
 
 __all__ = ["evaluate", "left_limit", "right_limit", "sample_on_union",
            "panel_value", "interpolate_between", "OUTSIDE"]
@@ -59,9 +59,11 @@ def panel_value(x1, y1, x2, y2, law, q) -> np.ndarray:
             elif code == LINLOG:
                 out[m] = b1 + (b2 - b1) * (np.log(t / a1) / np.log(a2 / a1))
             elif code == LOGLIN:
-                out[m] = b1 * np.exp((t - a1) / (a2 - a1) * np.log(b2 / b1))
+                v = b1 * np.exp((t - a1) / (a2 - a1) * np.log(b2 / b1))
+                out[m] = np.where(vanishing_panels(b1, b2), 0.0, v)
             elif code == LOGLOG:
-                out[m] = b1 * np.exp(np.log(t / a1) / np.log(a2 / a1) * np.log(b2 / b1))
+                v = b1 * np.exp(np.log(t / a1) / np.log(a2 / a1) * np.log(b2 / b1))
+                out[m] = np.where(vanishing_panels(b1, b2), 0.0, v)
             else:  # pragma: no cover - validate() refuses it first
                 raise ValueError(f"interpolation law {code} is not 1-5")
     return out
@@ -131,6 +133,14 @@ def _read_checked(x, y, laws, q, side: str, outside: str):
         value[at_start] = y1[at_start]
         at_end = (p == x2) & ((law != HISTOGRAM) | (side != "left"))
         value[at_end] = y2[at_end]
+        # A log-y panel with an end at 0 is 0 inside (laws.vanishing_panels):
+        # its jump is at the other end, which a one-sided limit sees.
+        if side != "point":
+            logy = (law == LOGLIN) | (law == LOGLOG)
+            jump = wide & logy & vanishing_panels(y1, y2)
+            if jump.any():
+                inner = (at_start & (side == "right")) | (at_end & (side == "left"))
+                value[jump & inner] = 0.0
         out[inside] = value
     return float(out[0]) if scalar else out.reshape(q.shape)
 
@@ -213,7 +223,9 @@ def interpolate_between(x1: float, y1: ArrayLike, x2: float, y2: ArrayLike,
 
     A log law with a non-positive value or abscissa raises: the element has no
     value under that law, and reading it lin-lin instead is how a wrong number
-    used to come back silently.
+    used to come back silently. An element with an end at exactly 0 and none
+    below is read as the limit of the law, 0 between the ends
+    (:func:`~kika.algebra.laws.vanishing_panels`).
     """
     law = int(law)
     if law not in (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG):
@@ -227,7 +239,7 @@ def interpolate_between(x1: float, y1: ArrayLike, x2: float, y2: ArrayLike,
     if law in (LINLOG, LOGLOG) and (x1 <= 0 or x2 <= 0 or q <= 0):
         raise ValueError(f"law {law} interpolates in ln x but the outer "
                          f"coordinates are {x1!r}, {x2!r}, {q!r}")
-    if law in (LOGLIN, LOGLOG) and (np.any(y1 <= 0) or np.any(y2 <= 0)):
+    if law in (LOGLIN, LOGLOG) and (np.any(y1 < 0) or np.any(y2 < 0)):
         raise ValueError(f"law {law} interpolates in ln y but a value is "
-                         f"not positive")
+                         f"negative")
     return panel_value(x1, y1, x2, y2, law, np.full(y1.shape, float(q)))
