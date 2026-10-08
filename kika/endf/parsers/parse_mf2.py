@@ -37,6 +37,23 @@ from ...utils import get_endf_logger
 
 logger = get_endf_logger(__name__)
 
+#: Why an Adler-Adler range is refused, by name (ENDF-coverage roadmap T3,
+#: decided by Juan 2026-10-08). GNDS has no node for it, and the census of
+#: 2026-10-08 found **no** LRF=4 range -- nor LRF=5 or 6 -- in the 1 950
+#: evaluations of ENDF/B-VIII.1, JEFF-4.0 and JENDL-5. A reader for a format
+#: no tape exercises would be code no test can reach.
+ADLER_ADLER_REFUSAL = (
+    "LRF=4 (Adler-Adler) is not read by kika: GNDS has no node for it and no "
+    "evaluation of ENDF/B-VIII.1, JEFF-4.0 or JENDL-5 uses it"
+)
+
+
+def _unreadableResolved(lrf: int) -> str:
+    """What to say about a resolved range kika cannot read, naming Adler-Adler."""
+    if lrf == 4:
+        return ADLER_ADLER_REFUSAL
+    return f"LRU=1/LRF={lrf} is not an ENDF-6 resolved-range format kika reads"
+
 
 def parse_mf2(lines: List[str]) -> MF:
     """
@@ -109,6 +126,8 @@ def parse_mf2_mt151(lines: List[str], mt: int) -> MF2MT151:
     idx = 1
 
     for _ in range(nis):
+        if idx >= len(lines):
+            break   # an unreadable range stopped the read; see _parse_isotope
         isotope, idx = _parse_isotope(lines, idx)
         isotopes.append(isotope)
 
@@ -139,9 +158,21 @@ def _parse_isotope(lines: List[str], idx: int) -> Tuple[Isotope, int]:
     logger.debug(f"  Isotope ZA={za_i}, ABN={abn}, LFW={lfw}, NER={ner}")
 
     energy_ranges: List[EnergyRange] = []
-    for _ in range(ner):
+    for number in range(ner):
         er, idx = _parse_energy_range(lines, idx, lfw)
         energy_ranges.append(er)
+        if er.lru == 1 and er.parameters is None:
+            # The body of a range kika cannot read has no length kika knows,
+            # so nothing after it can be located: reading on would decode the
+            # next records under the wrong layout. Stop, and say how much.
+            warnings.warn(
+                f"MF2: {_unreadableResolved(er.lrf)}. Range "
+                f"[{er.el:.6g}, {er.eh:.6g}] is kept without parameters, and "
+                f"the {ner - number - 1} range(s) after it in this isotope, and "
+                f"any later isotope, are not read"
+            )
+            idx = len(lines)
+            break
 
     return Isotope(
         za=za_i,
@@ -193,7 +224,9 @@ def _parse_energy_range(lines: List[str], idx: int, lfw: int = 0) -> Tuple[Energ
                 f"MF2: unrecognized LRU=2/LRF={lrf}/LFW={lfw} "
                 f"in range [{el:.6g}, {eh:.6g}]"
             )
-    else:
+    elif lru != 1:
+        # An unreadable *resolved* range is reported by `_parse_isotope`, which
+        # is the one that knows what reading stops for it.
         warnings.warn(
             f"MF2: unrecognized LRU={lru}/LRF={lrf} in range [{el:.6g}, {eh:.6g}]"
         )

@@ -303,9 +303,13 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
     elif lrf == 7:
         formalism = _decodeRMatrixLimited(parameters, report, fields)
     else:
+        from kika.endf.parsers.parse_mf2 import ADLER_ADLER_REFUSAL
+
+        named = (f"{ADLER_ADLER_REFUSAL}, so" if lrf == 4 else
+                 f"LRF={lrf} in a resolved range is not one of 1, 2, 3, 7;")
         report.unsupportedNode(
-            f"MF2/151 LRF={lrf} in a resolved range is not one of 1, 2, 3, 7; "
-            f"the range is present in the file and absent from the model"
+            f"MF2/151 {named} the range is present in the file and absent from "
+            f"the model, and the ranges after it were not read"
         )
         keep("unsupported")
         return
@@ -866,9 +870,13 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
         fields = dict(fields)  # encode updates physical fields without mutating provenance
         kind = fields["kind"]
         if kind == "unsupported":
+            from kika.endf.parsers.parse_mf2 import ADLER_ADLER_REFUSAL
+
+            why = (f" {ADLER_ADLER_REFUSAL}."
+                   if fields.get("lru") == 1 and fields.get("lrf") == 4 else "")
             raise ValueError(
                 f"MF2/151 range LRU={fields['lru']} LRF={fields['lrf']} was not "
-                f"decoded into the model, so it cannot be written back. The "
+                f"decoded into the model, so it cannot be written back.{why} The "
                 f"section can only be re-emitted by the parser that read it."
             )
 
