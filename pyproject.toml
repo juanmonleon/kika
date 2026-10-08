@@ -75,4 +75,5 @@ markers = [
     "gnds: needs a GNDS fixture or reader",
     "slow: takes more than a few seconds",
     "perf: a wall-clock measurement; needs a quiet machine and RUN_PERF_GATE=1",
+    "fudge: runs LLNL FUDGE through $KIKA_FUDGE_PYTHON (never a kika dependency)",
 ]
