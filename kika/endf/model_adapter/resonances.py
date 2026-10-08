@@ -903,6 +903,8 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
     """One resolved range: ``BreitWigner``/``RMatrix`` + its fields → ENDF parameters."""
     from kika.endf.classes.mf2.mf2mt151 import (LValueBlock, ResolvedResonanceRange,
                                                 Resonance as EndfResonance)
+    if isinstance(formalism,RMatrix) and formalism.boundaryCondition=='Brune':
+        raise ValueError('ENDF cannot preserve Brune alternative resonance parameters')
     if isinstance(formalism,RMatrix) and any(ch.phaseAbsorptionReaction is not None
             for group in formalism.spinGroups for ch in group.channels):
         raise ValueError('ENDF cannot preserve phase absorption reaction ownership')

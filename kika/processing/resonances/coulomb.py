@@ -5,7 +5,78 @@ to the independent development oracle. Only repulsive charged exits are supporte
 """
 import numpy as np
 from scipy.integrate import solve_ivp, quad
-from scipy.special import kve
+from scipy.special import kve, digamma, loggamma, gammaln
+
+
+def _small_radius_outgoing(l,eta,rho):
+    """Integer-b Tricomi series, DLMF 13.2.9, normalized at the origin.
+
+    Products use eta*rho rather than large eta powers. This avoids transporting
+    the outgoing wave from its increasingly remote turning point at a threshold.
+    The imaginary logarithmic derivative is recovered by normalization, not
+    cancellation of complex series components.
+    """
+    m=2*l+1;a=l+1+1j*eta;z=np.clongdouble(-2j*rho)
+    term=np.clongdouble(1.);value=term;derivative=np.clongdouble(0.)
+    magnitude=np.longdouble(1.)
+    for j in range(1,m):
+        term *= -z*(a-m+j-1)/(j*(m-j))
+        value+=term;derivative+=j*term;magnitude+=abs(term)
+    prefactor=np.clongdouble(np.exp(-np.longdouble(gammaln(m+1)+gammaln(m))))
+    for j in range(m):prefactor*=z*(a-m+j)
+    coefficient=np.clongdouble(1.);stable=0
+    for k in range(10000):
+        bracket=np.log(z)+digamma(a+k)-digamma(k+1.)-digamma(m+k+1.)
+        piece=prefactor*coefficient*bracket
+        value+=piece;derivative+=prefactor*coefficient*((m+k)*bracket+1.)
+        magnitude+=abs(piece)
+        stable=stable+1 if abs(piece)<2e-18*abs(value) else 0
+        if stable==4:break
+        coefficient*=z*(a+k)/((k+1)*(m+k+1))
+    else:raise FloatingPointError('small-radius Coulomb series did not converge')
+    if abs(value)==0 or not np.isfinite(value+derivative) or 32*np.finfo(float).eps*magnitude/abs(value)>2e-10:
+        raise FloatingPointError('small-radius Coulomb series lost accuracy through cancellation')
+    shift=float((-l+1j*rho+derivative/value).real)
+    log_c=l*np.log(2.)-.5*np.pi*eta+loggamma(l+1+1j*eta).real-gammaln(2*l+2)
+    log_p=(2*l+1)*np.log(rho)+2*(np.log(2*l+1)+log_c)-2*float(np.log(abs(value)))
+    return shift,log_p
+
+
+def _outgoing_laplace(l,eta,rho):
+    """Tricomi's Laplace integral rotated to the positive imaginary axis.
+
+    The scaled integration variable is v=rho*Im(t). Near a threshold the
+    dominant weight depends on eta*rho, so the turning point is never visited.
+    Both the wave modulus and its derivative come from the same integral.
+    """
+    product=eta*rho
+    mode=.5*(l+np.hypot(l,np.sqrt(2*product)))
+    def weight_log(v):
+        angle=np.arctan2(rho,v)
+        return 2*l*np.log(v)+.5*l*np.log1p((rho/v)**2)-eta*angle-2*v
+    peak=weight_log(mode)
+    def integrand(t,derivative=False):
+        if t==0:return 0j
+        v=mode*t;ratio=rho/v
+        phase=-l*np.arctan(ratio)-.5*eta*np.log1p(ratio*ratio)
+        value=np.exp(weight_log(v)-peak+1j*phase)
+        if derivative:
+            denom=1+ratio*ratio
+            value*=((l*ratio*ratio-eta*ratio)/denom
+                    -1j*(l*ratio+eta*ratio*ratio)/denom)
+        return value
+    values=[];errors=[]
+    for derivative in (False,True):
+        for imaginary in (False,True):
+            fun=lambda t: (integrand(t,derivative).imag if imaginary else integrand(t,derivative).real)
+            value,error=quad(fun,0,np.inf,epsabs=2e-12,epsrel=2e-12,limit=300)
+            values.append(value);errors.append(error)
+    wave=complex(*values[:2]);slope=complex(*values[2:])
+    if abs(wave)==0 or not np.isfinite(wave+slope) or sum(errors)>2e-10*abs(wave):
+        raise FloatingPointError('outgoing Coulomb Laplace integral did not converge')
+    log_wave=(.5*np.pi*eta+(l+1)*np.log(2.)-l*np.log(rho)
+              -loggamma(l+1+1j*eta).real+np.log(mode)+peak+np.log(abs(wave)))
+    return -l+(slope/wave).real,np.log(rho)-2*log_wave
 
 
 def _fraction(initial, coefficients, max_iterations=20000):
@@ -89,12 +160,17 @@ def charged_channel_log_functions(l,eta,rho):
                 p[index]=np.log(r)-logsumexp(coefficients-2*n*np.log(r))
             continue
         turning = h+np.hypot(h,np.sqrt(l*(l+1)))
-        start = max(r,turning+8.)
-        derivative = _outgoing(l,h,start)
-        if derivative.imag<=0:
-            raise FloatingPointError('Coulomb outgoing flux lost precision')
-        shift = start*derivative.real; lp = np.log(start)+np.log(derivative.imag)
-        if start!=r:shift,lp = _transport(l,h,start,r,shift,lp)
+        if r<=.25 and h*r<=2.:
+            shift,lp=_small_radius_outgoing(l,h,r)
+        elif r<=.25:
+            shift,lp=_outgoing_laplace(l,h,r)
+        else:
+            start = max(r,turning+8.)
+            derivative = _outgoing(l,h,start)
+            if derivative.imag<=0:
+                raise FloatingPointError('Coulomb outgoing flux lost precision')
+            shift = start*derivative.real; lp = np.log(start)+np.log(derivative.imag)
+            if start!=r:shift,lp = _transport(l,h,start,r,shift,lp)
         penetration = np.exp(lp)
         if not np.isfinite(lp+shift):
             raise FloatingPointError('nonfinite scaled charged channel functions')
@@ -154,5 +230,13 @@ def charged_threshold_shift(l,eta_rho):
     value = np.asarray(eta_rho,dtype=float)
     if not isinstance(l,(int,np.integer)) or not 0<=l<=64 or np.any(value<=0) or np.any(~np.isfinite(value)):
         raise ValueError('threshold requires L=0..64 and positive finite eta*rho')
-    z = np.sqrt(8*value);order = 2*l+1
-    return .5-.25*z*(kve(order-1,z)+kve(order+1,z))/kve(order,z)
+    z = np.sqrt(value)*np.sqrt(8.)
+    # K_(n+1)/K_n = 2*n/z + K_(n-1)/K_n (DLMF 10.29).
+    # Ratios stay finite when individual high-order scaled K values overflow.
+    ratio = np.empty_like(z)
+    large = z>1e6
+    inverse = 1/z[large]
+    ratio[large] = 1+.5*inverse-.125*inverse**2
+    ratio[~large] = kve(1,z[~large])/kve(0,z[~large])
+    for n in range(1,2*l+1):ratio = 2*n/z+1/ratio
+    return -l-.5*z/ratio

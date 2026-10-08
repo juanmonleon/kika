@@ -159,7 +159,10 @@ def test_unsupported_capabilities_are_not_silently_replaced(capability):
     else:
         rr = f.resonanceReactions[1];p = rr.kinematics
         rr.kinematics = ChannelKinematics(ChannelParticle(1.,1.,.5,1),p.particleB,p.penetrability,p.shift)
-    with pytest.raises(UnsupportedResonanceError):prepare_resonances(source,ctx)
+    if capability=='brune':
+        with pytest.raises(ValueError,match='boundary constants'):prepare_resonances(source,ctx)
+    else:
+        with pytest.raises(UnsupportedResonanceError):prepare_resonances(source,ctx)
 
 
 def test_tabulated_external_snapshot_and_passive_absorption():

@@ -94,7 +94,7 @@ def prepare_rml(region, resonances, context, notes):
     eliminated_capture = f.approximation == 'ReichMoore'
     if f.radiusPolicy is not None:
         raise UnsupportedResonanceError('RML uses explicit per-channel APT/APE, not an unnormalized global radius policy')
-    if f.boundaryCondition not in (None, 'Given', 'NegativeOrbitalMomentum', 'EliminateShiftFunction'):
+    if f.boundaryCondition not in (None, 'Given', 'NegativeOrbitalMomentum', 'EliminateShiftFunction', 'Brune'):
         raise UnsupportedResonanceError('Brune/unknown boundary convention requires a separate certification')
     reactions = {r.label:r for r in f.resonanceReactions}
     if len(reactions) != len(f.resonanceReactions):
@@ -153,8 +153,10 @@ def prepare_rml(region, resonances, context, notes):
                 raise UnsupportedResonanceError('KRM3 requires eliminated capture')
             if not eliminated_capture and (ch.externalRMatrix is not None or ch.tabulatedBackground is not None):
                 raise UnsupportedResonanceError('ENDF background R-matrix is defined for KRM3 only')
-            if pair.penetrability not in ('automatic', 'calculate', 'unity') or pair.shift not in ('zero', 'calculate'):
+            if pair.penetrability not in ('automatic', 'calculate', 'unity') or pair.shift not in ('zero', 'calculate', 'brune'):
                 raise UnsupportedResonanceError('unknown PNT/SHF or Brune shift')
+            if pair.shift == 'brune' and f.boundaryCondition != 'Brune':
+                raise ValueError('Brune shift requires the Brune boundary convention')
             if ch.radiusUnit not in (None, 'fm') or f.radiusUnit not in (None, 'fm'):
                 raise UnsupportedResonanceError('RML radii must be normalized to fm')
             l, s = ch.L, ch.channelSpin
@@ -211,7 +213,11 @@ def prepare_rml(region, resonances, context, notes):
                 phase = RadiusFunction(constant=0.) if phase_zero else prepare_radius(declared_phase)
                 for r in (radius,phase):r.evaluate(np.array([max(region.domainMin,np.finfo(float).tiny),region.domainMax]))
             shift = pair.shift
-            if f.boundaryCondition == 'EliminateShiftFunction':
+            if f.boundaryCondition == 'Brune':
+                if ch.boundaryConditionValue is not None or f.boundaryConditionValue is not None:
+                    raise ValueError('Brune parameters do not have boundary constants')
+                shift = 'calculate' if pair.shift == 'brune' else pair.shift; boundary = 0.
+            elif f.boundaryCondition == 'EliminateShiftFunction':
                 if ch.boundaryConditionValue not in (None,0.):
                     raise ValueError('explicit boundary conflicts with eliminated-shift convention')
                 shift = 'zero'; boundary = 0.
@@ -262,14 +268,24 @@ def prepare_rml(region, resonances, context, notes):
                             from .channel_functions import neutral_channel_functions
                             rho = np.sqrt(ch.k_squared(reference))*ch.radius.evaluate(abs(er))
                             if ch.charge_strength:
-                                from .coulomb import charged_channel_functions
+                                from .coulomb import charged_channel_log_functions
                                 eta = ch.charge_strength/np.sqrt(ch.k_squared(reference))
-                                pr = float(charged_channel_functions(ch.l,eta,rho)[0])
+                                log_pr = float(charged_channel_log_functions(ch.l,eta,rho)[0])
+                                pr = math.exp(log_pr)
                             else:
                                 pr = float(neutral_channel_functions(ch.l,rho)[0])
-                    if pr <= 0 and width != 0:raise UnsupportedResonanceError('RML reference penetrability underflows')
-                    amplitude = 0. if width == 0 else math.copysign(math.sqrt(abs(width)/(2*pr)),width)
-                amplitudes.append(amplitude); physical.append(2*pr*amplitude**2)
+                    if pr < np.finfo(float).tiny and width != 0:
+                        if not ch.charge_strength:raise UnsupportedResonanceError('RML reference penetrability underflows')
+                        log_amplitude = .5*(math.log(abs(width))-math.log(2.)-log_pr)
+                        if log_amplitude > .5*math.log(np.finfo(float).max):
+                            raise FloatingPointError('IFG0 reduced amplitude squared exceeds the finite solver range')
+                        amplitude = math.copysign(math.exp(log_amplitude),width)
+                    else:
+                        amplitude = 0. if width == 0 else math.copysign(math.sqrt(abs(width)/(2*pr)),width)
+                if not math.isfinite(amplitude) or abs(amplitude)>math.sqrt(np.finfo(float).max):
+                    raise FloatingPointError('reduced amplitude squared exceeds the finite solver range')
+                amplitudes.append(amplitude)
+                physical.append(2*pr*amplitude**2 if f.reducedWidthAmplitudes else abs(width))
             reduced.append(tuple(amplitudes)); radiation.append(gg)
             levels.append(Level(er,sg.spin,sum(v for v,c in zip(physical,channels) if c.mt==2),gg,
                                 sum(v for v,c in zip(physical,channels) if c.mt==18),
@@ -323,6 +339,10 @@ def prepare_rml(region, resonances, context, notes):
                 kin = next(c.kinematics for g in prepared for c in g.channels if c.mt==2)
                 c = RMLChannel(2,l,s,0.,cm,k2,radius,phase,'calculate','zero',0.,kinematics=kin)
                 prepared.append(RMLGroup(l,radius,phase,(),context=context,spin=j,channels=(c,),entrances=(0,)))
+    if f.boundaryCondition == 'Brune':
+        from .brune import prepare_brune
+        prepared = [prepare_brune(g) for g in prepared]
+        notes.append('Brune alternative parameters; generalized level metric retained, including eliminated absorption')
     notes.append('RML KRM3/KRM4, neutral incidence and repulsive charged exits; closed-channel shift retained')
     return tuple(prepared)
 

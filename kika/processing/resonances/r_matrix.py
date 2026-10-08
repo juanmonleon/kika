@@ -127,6 +127,9 @@ class RMLGroup(Group):
     radiation: tuple = ()
     entrances: tuple = ()
     parity: int = 1
+    level_metric: tuple = ()
+    level_energy: tuple = ()
+    level_origin: float = 0.
 
     @property
     def reaction_mts(self):
@@ -134,7 +137,7 @@ class RMLGroup(Group):
 
 
 def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, *, entrance=0, diagnostics=None,
-              log_penetrability=None, error_bounds=None):
+              log_penetrability=None, error_bounds=None, level_metric=None, level_energy=None,level_origin=0.):
     """Return W_c,n, level absorption X_lambda,n and channel excitation y.
 
     y=(I-LR)^-1 e_n; W=Ry and X=D^-1 gamma y. Retaining closed
@@ -185,8 +188,34 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
             diagnostics['rml_underflow_bounded_solves'] = diagnostics.get('rml_underflow_bounded_solves',0)+1
             diagnostics['rml_underflow_max_log_perturbation_bound'] = max(diagnostics.get('rml_underflow_max_log_perturbation_bound',-np.inf),float(log_q))
         return log_state_error
-    poles = (np.abs(d) <= 1e-6*np.sum(a*a, axis=1)[None,:]*np.maximum(1., np.max(abs(logarithmic),axis=1))[:,None]) | (d == 0)
-    regular = ~np.any(poles,axis=1)
+    if level_metric is not None:
+        metric = np.asarray(level_metric).reshape(n,n)
+        eigen_energy = np.asarray(level_energy).reshape(n,n)
+        for i,energy in enumerate(e):
+            matrix = np.zeros((c+n,c+n),complex)
+            matrix[:c,:c] = np.eye(c)-np.diag(logarithmic[i]*z[i])
+            matrix[:c,c:] = -logarithmic[i,:,None]*a.T
+            matrix[c:,:c] = -a
+            matrix[c:,c:] = eigen_energy-(energy-level_origin)*metric-.5j*np.diag(radiation)
+            rhs = np.zeros(c+n,complex);rhs[entrance] = 1.
+            used_limit=0
+            try:solution=np.linalg.solve(matrix,rhs)
+            except np.linalg.LinAlgError:
+                solution=np.linalg.lstsq(matrix,rhs,rcond=None)[0];used_limit=1
+            residual=np.linalg.norm(matrix@solution-rhs,np.inf)/(np.linalg.norm(matrix,np.inf)*np.linalg.norm(solution,np.inf)+1.)
+            maximum=max(maximum,residual);singular+=used_limit
+            y,x[i] = solution[:c],solution[c:]
+            excitation[i]=y;w[i]=z[i]*y+a.T@x[i]
+            if np.any(missing[i]):
+                channel_map=np.concatenate((np.diag(z[i]),a.T),axis=1)
+                delta=bound(i,matrix,solution,channel_map)
+                x_errors[i]=delta
+        regular = np.zeros(len(e),bool)
+        pole_indices = ()
+    else:
+        poles = (np.abs(d) <= 1e-6*np.sum(a*a, axis=1)[None,:]*np.maximum(1., np.max(abs(logarithmic),axis=1))[:,None]) | (d == 0)
+        regular = ~np.any(poles,axis=1)
+        pole_indices = np.flatnonzero(~regular)
     if np.any(regular):
         r = np.einsum('nc,en,nd->ecd',a,1/d[regular],a,optimize=True)
         indexes = np.arange(c)
@@ -206,7 +235,7 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
             delta = bound(i,matrix[local],y[local],r[local])
             with np.errstate(divide='ignore'):
                 x_errors[i] = np.log(np.sum(abs(a),axis=1))-np.log(abs(d[i]))+delta
-    for i in np.flatnonzero(~regular):
+    for i in pole_indices:
         pole = poles[i]
         other = ~pole
         r0 = np.diag(z[i])+(a[other].T/d[i, other])@a[other]
@@ -288,7 +317,10 @@ def evaluate_rml(energies, groups, context, diagnostics=None):
             w, x, y = solve_rml(e, [lv.energy for lv in group.levels], group.radiation,
                 reduced, log,
                 external, entrance=entrance, diagnostics=diagnostics,
-                log_penetrability=log_p,error_bounds=bounds)
+                log_penetrability=log_p,error_bounds=bounds,
+                level_metric=group.level_metric if group.level_metric else None,
+                level_energy=group.level_energy if group.level_metric else None,
+                level_origin=group.level_origin)
             underflow = np.any(bounds['missing'],axis=1)
             core = 2j*np.sqrt(p)*np.sqrt(p[:, entrance, None])*w
             if np.any(underflow):

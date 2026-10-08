@@ -1,0 +1,107 @@
+"""Versioned, opt-in KIKA resonance data in GNDS applicationData.
+
+This is application-specific data, not an extension to the standard channel
+schema. A generic GNDS consumer must not reconstruct these parameters after
+ignoring the institution. The ordinary writer continues to report the gap.
+"""
+from copy import deepcopy
+import hashlib
+import json
+import xml.etree.ElementTree as ET
+from kika.nuclear_data.model.resonances import RMatrix,ComplexChannelFunction
+
+LABEL='KIKA::resonance_channel_functions'
+
+
+def _fingerprint(formalism):
+    number=lambda v: None if v is None else float(v)
+    data=[(g.label,number(g.spin),g.parity,list(map(float,g.energies)),[list(map(float,row)) for row in g.widths],
+           [(c.label,c.resonanceReaction,c.L,number(c.channelSpin),c.columnIndex) for c in g.channels])
+          for g in formalism.spinGroups]
+    return hashlib.sha256(json.dumps(data,separators=(',',':')).encode()).hexdigest()
+
+
+def extract(suite):
+    """Copy the suite, moving only fields absent from standard GNDS channels."""
+    saved=[];result=deepcopy(suite)
+    if result.resonances is None:return result,saved
+    for r,region in enumerate(result.resonances.resolved):
+        f=region.formalism
+        if not isinstance(f,RMatrix):continue
+        fingerprint=_fingerprint(f)
+        for g,group in enumerate(f.spinGroups):
+            for c,channel in enumerate(group.channels):
+                if (channel.additionalPhaseShift is None and channel.phaseAbsorptionReaction is None
+                        and channel.phaseShiftMode is None and channel.tabulatedBackground is None):continue
+                saved.append((r,g,c,fingerprint,deepcopy(channel)))
+                channel.additionalPhaseShift=None;channel.phaseAbsorptionReaction=None
+                channel.phaseShiftMode=None;channel.tabulatedBackground=None
+    return result,saved
+
+
+def write(root,saved,report):
+    if not saved:return
+    from .encode import _function
+    application=ET.SubElement(root,'applicationData')
+    institution=ET.SubElement(application,'institution',label=LABEL)
+    data=ET.SubElement(institution,'resonanceChannelFunctions',version='1')
+    for r,g,c,fingerprint,ch in saved:
+        attributes=dict(region=str(r),group=str(g),channel=str(c),parameterFingerprint=fingerprint)
+        if ch.phaseShiftMode is not None:attributes['phaseShiftMode']=str(ch.phaseShiftMode)
+        if ch.phaseAbsorptionReaction is not None:attributes['phaseAbsorptionReaction']=ch.phaseAbsorptionReaction
+        entry=ET.SubElement(data,'channel',attributes)
+        for name in ('additionalPhaseShift','tabulatedBackground'):
+            value=getattr(ch,name)
+            if value is None:continue
+            holder=ET.SubElement(entry,name)
+            for part in ('real','imaginary'):
+                _function(ET.SubElement(holder,part),getattr(value,part),report,'KIKA resonance '+name)
+    report.warn('KIKA-specific resonance applicationData written; consumers must interpret this institution before reconstructing resonances')
+
+
+def read(application,suite,report,read_function):
+    """Restore known typed data; leave other institutions for loss reporting."""
+    unknown=[];seen=set()
+    for institution in application:
+        if institution.get('label')!=LABEL:
+            unknown.append(institution.get('label',institution.tag));continue
+        data=institution.find('resonanceChannelFunctions')
+        if data is None or data.get('version')!='1':
+            report.unsupportedNode('unsupported KIKA resonance applicationData version');continue
+        if len(institution)!=1 or set(data.attrib)!={'version'}:
+            raise ValueError('unknown KIKA resonance applicationData content')
+        for entry in data:
+            if entry.tag!='channel':raise ValueError('unknown KIKA resonance applicationData entry')
+            if set(entry.attrib)-{'region','group','channel','parameterFingerprint','phaseShiftMode','phaseAbsorptionReaction'}:
+                raise ValueError('unknown KIKA resonance channel attribute')
+            if any(child.tag not in ('additionalPhaseShift','tabulatedBackground') for child in entry):
+                raise ValueError('unknown KIKA resonance channel function')
+            if len({child.tag for child in entry})!=len(entry):
+                raise ValueError('duplicate KIKA resonance channel function')
+            key=tuple(int(entry.attrib[k]) for k in ('region','group','channel'))
+            if min(key)<0 or key in seen:raise ValueError('invalid or duplicate KIKA resonance channel reference')
+            seen.add(key)
+            try:
+                region=suite.resonances.resolved[key[0]];f=region.formalism
+                channel=f.spinGroups[key[1]].channels[key[2]]
+            except (AttributeError,IndexError) as exc:raise ValueError('unresolved KIKA resonance channel reference') from exc
+            if entry.get('parameterFingerprint')!=_fingerprint(f):
+                raise ValueError('KIKA resonance applicationData does not match its parameter table')
+            mode=entry.get('phaseShiftMode')
+            channel.phaseShiftMode=None if mode is None else int(mode)
+            channel.phaseAbsorptionReaction=entry.get('phaseAbsorptionReaction')
+            for name in ('additionalPhaseShift','tabulatedBackground'):
+                holder=entry.find(name)
+                if holder is None:continue
+                if holder.attrib or sorted(child.tag for child in holder)!=['imaginary','real']:
+                    raise ValueError('invalid KIKA complex channel function components')
+                components=[]
+                for part in ('real','imaginary'):
+                    child=holder.find(part)
+                    if child is None or len(child)!=1:raise ValueError('incomplete KIKA complex channel function')
+                    value=read_function(child[0],'/reactionSuite/applicationData/'+name,part)
+                    if value is None:raise ValueError('unsupported KIKA complex channel function')
+                    components.append(value)
+                setattr(channel,name,ComplexChannelFunction(*components))
+        report.warn('KIKA-specific resonance applicationData interpreted; these channel fields are not standard GNDS nodes')
+    return unknown

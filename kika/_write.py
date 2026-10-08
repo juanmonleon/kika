@@ -54,7 +54,8 @@ COVARIANCE_SUBDIRECTORY = "Covariances"
 
 def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
           mat: Optional[int] = None, tapeId: Optional[str] = None,
-          label: Optional[str] = None, compressed: bool = False):
+          label: Optional[str] = None, compressed: bool = False, *,
+          resonance_extensions: bool = False):
     """Write a :class:`ReactionSuite` out, and say what did not go with it.
 
     Parameters
@@ -98,6 +99,10 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
     compressed
         G4NDL only: write ``<name>.z`` (zlib, what Geant4 distributes) instead
         of plain text.
+    resonance_extensions
+        GNDS only. Preserve KPS and tabulated resonance backgrounds in the
+        versioned KIKA applicationData institution. Other consumers require
+        support for this institution before reconstructing the resonances.
 
     Returns
     -------
@@ -114,6 +119,8 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         raise ValueError(
             f"format must be one of {WRITE_FORMATS}, got {format!r}"
         )
+    if resonance_extensions and format != 'gnds':
+        raise ValueError('resonance_extensions is a GNDS-only option')
     if format == "g4ndl":
         # Imported here for the reason `_writeGnds` gives.
         from kika.g4ndl.encode import writeElastic
@@ -129,10 +136,10 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
 
         return writeEndfTape(suite, Path(os.fspath(path)), mat=mat,
                              tapeId=tapeId, label=label)
-    return _writeGnds(suite, Path(os.fspath(path)), gnds)
+    return _writeGnds(suite, Path(os.fspath(path)), gnds,resonance_extensions)
 
 
-def _writeGnds(suite, path: Path, gnds: Optional[str]):
+def _writeGnds(suite, path: Path, gnds: Optional[str],resonance_extensions=False):
     # Imported here, not at module scope: importing the encoder imports the
     # model, and `import kika` must not wake it. Same reason as `_read`.
     from kika.gnds.encode import (chooseFormat, serialise, sha1,
@@ -141,6 +148,9 @@ def _writeGnds(suite, path: Path, gnds: Optional[str]):
 
     report = ConversionReport()
     format = chooseFormat(suite, gnds)
+    if resonance_extensions:
+        from functools import partial
+        writeReactionSuite=partial(writeReactionSuite,resonance_extensions=True)
 
     # Both links below are rewritten on the caller's own objects, so they are
     # put back before returning. **Writing a file must not edit the model you

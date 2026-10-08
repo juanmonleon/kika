@@ -139,7 +139,7 @@ def _seeds(segment,context):
             if level.energy<=0:continue
             pr,sr,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*level.energy)*g.channel_radius.evaluate(level.energy))
             center=level.energy
-            if segment.region.approximation == 'RMatrixNeutral':
+            if segment.region.approximation == 'RMatrixNeutral' and not g.level_metric:
                 reduced=np.asarray(g.reduced[level_index])
                 for _ in range(8):
                     if not lo<=center<=hi:break

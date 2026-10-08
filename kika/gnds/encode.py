@@ -952,19 +952,31 @@ class _SuiteWriter:
 
 
 def writeReactionSuite(suite, format: Optional[str] = None,
-                       report: Optional[ConversionReport] = None
+                       report: Optional[ConversionReport] = None, *,
+                       resonance_extensions: bool = False
                        ) -> Tuple[ET.ElementTree, ConversionReport]:
     """§14.1.1 ``reactionSuite`` → an ``ElementTree``, plus what was not written.
 
     Read the report. It is the only thing that distinguishes a file kika wrote
     completely from one it wrote with holes, and the holes are invisible in the
     XML — an empty ``<distribution/>`` looks like a formatting accident.
+
+    ``resonance_extensions=True`` preserves complex KPS and tabulated LBK in
+    a versioned KIKA institution under applicationData. This requires a KIKA-
+    aware consumer and reports that requirement; it is not standard §19 data.
     """
     report = report if report is not None else ConversionReport()
+    saved=[]
+    if resonance_extensions:
+        from .resonance_extensions import extract
+        suite,saved=extract(suite)
     writer = _SuiteWriter(suite, report)
     writer.incompleteProducts = []
     writer._warnedAboutDomain = False
     root = writer.write(chooseFormat(suite, format))
+    if saved:
+        from .resonance_extensions import write
+        write(root,saved,report)
     return ET.ElementTree(root), report
 
 

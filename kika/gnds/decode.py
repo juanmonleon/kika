@@ -196,9 +196,11 @@ class _SuiteReader:
 
         applicationData = root.find("applicationData")
         if applicationData is not None:
-            self.report.lost(
+            from .resonance_extensions import read
+            unknown=read(applicationData,suite,self.report,self.form)
+            if unknown:self.report.lost(
                 f"{path}/applicationData holds "
-                f"{[c.attrib.get('label', c.tag) for c in applicationData]}; "
+                f"{unknown}; "
                 f"kika has no typed home for application-specific data and does "
                 f"not keep raw XML in the model, so it is dropped rather than "
                 f"carried as an opaque blob"

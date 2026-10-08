@@ -461,11 +461,12 @@ _group("documentationContent", Coverage.UNSUPPORTED, 'documentation',
        endfCompatible note
        """)
 
-_group("applicationData", Coverage.UNSUPPORTED, 'applicationData',
-       "kika has no typed home for application-specific data and does "
-       "not keep raw XML in a format-neutral model, so the reader lists "
-       "the children by label and drops them. gnds.xsd:1194-1200, which "
-       "leaves the content unspecified on purpose",
+_group("applicationData", Coverage.PARTIAL, 'applicationData',
+       "KIKA::resonance_channel_functions version 1 is read into typed "
+       "channel fields and written with resonance_extensions=True. Other "
+       "institutions are reported and dropped; raw XML is not retained. "
+       "This is application-specific content, not standard resonance nodes; "
+       "kika/gnds/resonance_extensions.py:1-110, GNDS section 26",
        """
        applicationData institution
        """)
