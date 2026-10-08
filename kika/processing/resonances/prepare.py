@@ -1,4 +1,4 @@
-"""Immutable preparation of supported neutron BW and Reich-Moore models."""
+"""Immutable preparation of supported neutron resolved and dilute URR models."""
 from dataclasses import dataclass, replace
 import math
 import numpy as np
@@ -20,12 +20,15 @@ class PreparedRegion:
     high: float
     approximation: str
     groups: tuple[Group, ...]
+    unresolved: object | None = None
 
 
 @dataclass(frozen=True)
 class PreparedResonances:
     """Immutable snapshot. ``evaluate`` returns MT -> array in barns.
 
+    Values are resonance contributions; LSSF=1 contributes zero because its
+    dilute cross sections already belong to the evaluated background.
     All energies must be inside one of the prepared regions. At a shared
     boundary the region on the right owns the point; the final high endpoint
     is included. Returned MT1 sums all physical partials, including competition.
@@ -70,7 +73,8 @@ def prepare_resonances(resonances, context, *, conversion_report=None):
     """Prepare model ``Resonances``; explicit context, no ENDF width positions.
 
     Neutron BW/RM, scalar/tabulated radii in fm; BW also supports explicit competition.
-    URR and uncertified conventions reject the entire request before evaluation.
+    Dilute URR supports canonical mean widths; uncertified conventions reject
+    the entire request before evaluation.
     Provenance is inspected only to detect data not yet expressible in the
     canonical model; it never supplies coefficients to the kernel.
     """
@@ -80,15 +84,13 @@ def prepare_resonances(resonances, context, *, conversion_report=None):
         raise TypeError("expected model Resonances and NeutronContext")
     if conversion_report is not None and not conversion_report.isClean:
         raise UnsupportedResonanceError("input conversion reports losses, approximations or unsupported data")
-    if resonances.unresolved is not None:
-        raise UnsupportedResonanceError("URR is not implemented")
-    if not resonances.resolved:
-        raise ValueError("no resolved regions")
+    if not resonances.resolved and resonances.unresolved is None:
+        raise ValueError("no resonance regions")
     header = getattr(resonances.provenance, "headerFields", None) or {}
     if len(header.get("isotopes", [])) > 1:
         raise UnsupportedResonanceError("isotope mixtures are not implemented")
     for record in header.get("regions", []):
-        if record.get("kind") in ("unsupported", "unresolved"):
+        if record.get("kind") == "unsupported" or (record.get("kind") == "unresolved" and resonances.unresolved is None):
             raise UnsupportedResonanceError("source contains a dropped or unsupported region")
         if ("el" not in record or "eh" not in record) and (
                 record.get("nro") or record.get("naps") == 2 or
@@ -269,6 +271,12 @@ def prepare_resonances(resonances, context, *, conversion_report=None):
         if not groups:
             raise ValueError("BW needs at least one L block (may contain no levels)")
         prepared.append(PreparedRegion(low, high, approximation, tuple(groups)))
+    if resonances.unresolved is not None:
+        from .unresolved import prepare_unresolved
+        prepared.append(prepare_unresolved(resonances.unresolved, context, notes))
+    prepared.sort(key=lambda r: r.low)
+    if any(a.high > b.low for a,b in zip(prepared[:-1],prepared[1:])):
+        raise UnsupportedResonanceError("overlapping resonance regions")
     return PreparedResonances(context, tuple(prepared), tuple(notes))
 
 
@@ -284,6 +292,8 @@ def group_radii(group):
 
 def group_knots(group):
     knots = set()
+    for average in getattr(group,'averages',()) + ((group.spacing,) if hasattr(group,'spacing') else ()):
+        knots.update(average.knots)
     for c in getattr(group,'channels',()):
         if not c.effective:knots.add(c.threshold)
         for table in (c.external,c.phase_function):
@@ -294,6 +304,8 @@ def group_knots(group):
 
 def group_breaks(group):
     breaks = set()
+    for average in getattr(group,'averages',()) + ((group.spacing,) if hasattr(group,'spacing') else ()):
+        breaks.update(average.breaks)
     for c in getattr(group,'channels',()):
         if not c.effective and c.penetrability == 'unity':breaks.add(c.threshold)
         for table in (c.external,c.phase_function):
@@ -306,6 +318,9 @@ def group_breaks(group):
 
 
 def evaluate_region(energies,region,context,diagnostics=None):
+    if region.approximation == 'Unresolved':
+        from .unresolved import evaluate_unresolved
+        return evaluate_unresolved(energies,region,diagnostics)
     if region.approximation == 'RMatrixNeutral':
         from .r_matrix import evaluate_rml
         out = {mt:np.zeros_like(energies) for mt in region_mts(region)}

@@ -65,7 +65,13 @@ def test_case_b_capture_is_fixed_and_fission_keeps_muf():
     group = model.unresolved.tabulatedWidths.spinGroups[0]
     assert channels(group)["capture"].degreesOfFreedom == 0.
     assert channels(group)["fission"].degreesOfFreedom == 2.
+    from kika.nuclear_data.model.enums import Interpolation
+    assert group.crossSectionInterpolation == Interpolation.linlin
     assert str(encodeMF2MT151(model, provenance)) == str(section(parameters, lrf=1, lfw=1))
+    group.crossSectionInterpolation=Interpolation.loglog
+    import pytest
+    with pytest.raises(ValueError,match='lin-lin cross-section'):
+        encodeMF2MT151(model,provenance)
 
 
 def test_case_a_level_spacing_reaches_gnds_as_a_constant():

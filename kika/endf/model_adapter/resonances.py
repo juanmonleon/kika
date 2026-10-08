@@ -733,6 +733,7 @@ def _decodeUnresolved(parameters, report: ConversionReport,
                 stateFields.append({"l": block.l, "j": state.aj})
 
     elif isinstance(parameters, UnresolvedCaseB):
+        from kika.nuclear_data.model.enums import ENDF_INT_TO_INTERPOLATION
         case = "B"
         energyGrid = np.asarray(parameters.energies, dtype=float)
         for block in parameters.l_values:
@@ -746,6 +747,7 @@ def _decodeUnresolved(parameters, report: ConversionReport,
                 spinGroups.append(UnresolvedSpinGroup(
                     L=block.l, J=state.aj, levelSpacing=np.asarray([state.d], dtype=float),
                     atomicWeightRatio=block.awri, channels=channels,
+                    crossSectionInterpolation=ENDF_INT_TO_INTERPOLATION[2],
                 ))
                 # MUF rides on the fission channel's degreesOfFreedom, and when
                 # GF is falsy that channel is never built — so the value had
@@ -1221,6 +1223,9 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
         ], **common)
 
     if case == "B":
+        from kika.nuclear_data.model.enums import Interpolation
+        if any(g.crossSectionInterpolation not in (None,Interpolation.linlin) for g in widths.spinGroups):
+            raise ValueError('URR case B requires lin-lin cross-section interpolation')
         if any(c.label == 'fission' and not float(c.degreesOfFreedom).is_integer()
                for g in widths.spinGroups for c in g.channels):
             raise ValueError('URR case B cannot encode fractional fission degrees of freedom as MUF')

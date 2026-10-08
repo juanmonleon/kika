@@ -1,12 +1,12 @@
-"""Immutable RRR backgrounds and explicitly declared additive reaction graphs.
+"""Immutable resonance backgrounds and explicitly declared additive reaction graphs.
 
 No ENDF/GNDS imports and no implicit sums inferred from numerical MT ranges.
-The first tabulator covers resolved domains only; it does not claim material
-coverage outside them.
+The low-level tabulator covers prepared resonance domains; the suite facade
+checks coverage of the complete modeled material.
 """
 from dataclasses import dataclass
 import numpy as np
-from kika.algebra import discontinuities, evaluate
+from kika.algebra import evaluate,join_pieces,split_at_discontinuities
 from .prepare import UnsupportedResonanceError, evaluate_region, region_mts
 from .breit_wigner import evaluate_bw
 
@@ -33,14 +33,19 @@ def prepare_backgrounds(backgrounds):
                 raise UnsupportedResonanceError('resolve the resonance link before supplying its Background to the explicit RRR API')
             form=form.background
         if isinstance(form,Background):
-            if form.unresolvedRegion is not None:
-                raise UnsupportedResonanceError('URR background is outside this RRR tabulator')
-            form=form.resolvedRegion
+            pieces=[v for v in (form.resolvedRegion,form.unresolvedRegion,form.fastRegion) if v is not None]
+            snapshots=tuple(c for piece in pieces for c in prepare_backgrounds({mt:piece})[mt])
+            snapshots=tuple(sorted(snapshots,key=lambda c:c.x[0]))
+            if not snapshots:raise ValueError('empty background')
+            if any(a.x[-1]>b.x[0] for a,b in zip(snapshots[:-1],snapshots[1:])):
+                raise ValueError('overlapping background domains')
+            out[mt]=snapshots
+            continue
         if isinstance(form,XYs1d):curves=[form]
         elif isinstance(form,Regions1d):curves=form.function1ds
         else:raise UnsupportedResonanceError('background must contain XYs1d or Regions1d resolved data')
         if not curves:raise ValueError('empty background')
-        snapshots=[]
+        pieces=[]
         for curve in curves:
             if not isinstance(curve,XYs1d):raise UnsupportedResonanceError('background region must be XYs1d')
             if curve.axes is None or curve.domainUnit!='eV' or curve.rangeUnit!='b':
@@ -52,15 +57,25 @@ def prepare_backgrounds(backgrounds):
                 raise ValueError('background requires finite nondecreasing positive energies')
             if law not in (1,2,3,4,5):raise UnsupportedResonanceError('unsupported background interpolation law')
             if law in (4,5) and np.any(y<=0):raise ValueError('log-value background requires positive values')
-            # ENDF uses duplicate abscissae for one-sided values at a jump.
-            # Split them into independently owned regions, never deduplicate
-            # a value or interpolate across that zero-width transition.
-            cuts=np.r_[0,discontinuities(x)+1,len(x)]
-            for start,stop in zip(cuts[:-1],cuts[1:]):
-                xx,yy=x[start:stop],y[start:stop]
-                if len(xx)<2:raise UnsupportedResonanceError('isolated repeated endpoint has no background interval')
-                if snapshots and xx[0]<snapshots[-1].x[-1]:raise ValueError('overlapping background regions')
-                snapshots.append(BackgroundCurve(tuple(xx),tuple(yy),law))
+            if pieces and x[0]<pieces[-1][0][-1]:raise ValueError('overlapping background regions')
+            pieces.append((x,y,law))
+        # Join adjacent interpolation regions before splitting steps. A step
+        # at an INT boundary can end the preceding region with an otherwise
+        # isolated point whose interval belongs to the following region.
+        # Algebra retains both values and removes only identical shared points.
+        clusters=[]
+        for piece in pieces:
+            if not clusters or clusters[-1][-1][0][-1]!=piece[0][0]:clusters.append([])
+            clusters[-1].append(piece)
+        snapshots=[]
+        for cluster in clusters:
+            try:continuous=split_at_discontinuities(*join_pieces(cluster))
+            except ValueError as exc:
+                raise UnsupportedResonanceError('isolated repeated endpoint has no background interval') from exc
+            for x,y,laws in continuous:
+                cuts=np.r_[0,np.flatnonzero(np.diff(laws))+1,len(laws)]
+                for a,b in zip(cuts[:-1],cuts[1:]):
+                    snapshots.append(BackgroundCurve(tuple(x[a:b+1]),tuple(y[a:b+1]),int(laws[a])))
         out[mt]=tuple(snapshots)
     return out
 

@@ -1,4 +1,4 @@
-"""Initial R3 API: resolved-domain tabulation, background assembly and V3 checks."""
+"""Prepared-domain resonance tabulation, background assembly and V3 checks."""
 from dataclasses import dataclass
 import hashlib
 from types import MappingProxyType
@@ -29,7 +29,7 @@ class ReconstructionResult:
     """RRR-only forms and a frozen reference; no automatic suite mutation.
 
     MT1 includes exactly the declared inputs or explicitly supplied sum graph.
-    This result does not claim coverage of a material's fast/URR regions.
+    Coverage is restricted to the prepared resonance domains (RRR and/or URR).
     ``verify_forms`` must be called after serialization/reloading; rounding is
     part of the requested total budget and may cause an explicit failure.
     """
@@ -125,6 +125,8 @@ def _segments(prepared,backgrounds):
 def _seeds(segment,context):
     lo,hi=segment.low,segment.high
     seeds=list(np.geomspace(lo,hi,65))+[lo,hi]
+    if segment.region.unresolved is not None:
+        seeds.extend(x for x in segment.region.unresolved.grid if lo<=x<=hi)
     for curves in segment.backgrounds.values():
         seeds.extend(x for c in curves for x in c.x if lo<x<hi)
         if not segment.left_high and any(c.law==1 and c.x[-1]==hi and c.y[-1]!=c.y[-2] for c in curves):
@@ -160,11 +162,11 @@ def _seeds(segment,context):
 
 
 def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label='recon'):
-    """Tabulate all supported RRR blocks on shared per-segment grids.
+    """Tabulate supported resolved/dilute URR blocks on shared per-segment grids.
 
     Backgrounds map MT to canonical model XYs1d/Regions1d, Background or
     ResonancesWithBackground. All supplied functions must cover the requested
-    resolved domains. Fast-region data are untouched and outside this result.
+    resonance domains. Fast-region data are untouched and outside this result.
     ``sums`` is an explicit additive MT graph; aggregates replace their kernel
     values, and background values for a rebuilt sum are rejected as ambiguous.
     No thinning, clipping, automatic tolerance relaxation or implicit attachment.
@@ -198,7 +200,7 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
         forms[mt]=curves[0] if len(curves)==1 else Regions1d(curves,axes=axes,label=label)
         forms[mt].label=label
     fingerprint=hashlib.sha256(repr((prepared,background,graph,options)).encode()).hexdigest()
-    report=dict(engine='kika-bw-rrr-tabulator-1',scope='resolved domains only',normalized_sha256=fingerprint,
+    report=dict(engine='kika-bw-rrr-tabulator-1',scope='prepared resonance domains',normalized_sha256=fingerprint,
                 context=prepared.context,options=options,regions=checks,points=points,
                 units=dict(energy='eV',cross_section='b'),background_mts=tuple(sorted(background)),
                 sum_graph=dict(graph),preparation_notes=prepared.preparation_notes,

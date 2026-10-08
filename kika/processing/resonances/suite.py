@@ -1,8 +1,8 @@
-"""Complete model-suite BW assembly, local links and atomic style attachment.
+"""Complete model-suite resonance assembly, local links and atomic style attachment.
 
 All format imports are deferred to callers. Source data are copied, hash-guarded
 and never edited by reconstruction. The supported material is a neutron/lab
-suite whose resonance ranges are all BW and whose additive sums close.
+suite whose resonance ranges are supported and whose additive sums close.
 """
 from copy import deepcopy
 from dataclasses import dataclass, fields, is_dataclass
@@ -171,13 +171,12 @@ def _curves(forms):
         if isinstance(form,ResonancesWithBackground):
             if form.resonanceRegionHref:
                 target=_normalize_link(form.resonanceRegionHref,_path(key)+"/resonancesWithBackground/resonances")
-                if target not in ('/reactionSuite/resonances','/reactionSuite/resonances/resolved'):
+                if target not in ('/reactionSuite/resonances','/reactionSuite/resonances/resolved','/reactionSuite/resonances/unresolved'):
                     raise ValueError('resonance link does not identify this suite\'s resolved parameters')
             if form.background is None:raise ValueError('missing resonance background')
             form=form.background
         if isinstance(form,Background):
-            if form.unresolvedRegion is not None:raise UnsupportedResonanceError('URR backgrounds are not implemented')
-            pieces=[v for v in (form.resolvedRegion,form.fastRegion) if v is not None]
+            pieces=[v for v in (form.resolvedRegion,form.unresolvedRegion,form.fastRegion) if v is not None]
             if not pieces:raise ValueError('empty resonance background')
         else:pieces=[form]
         curves=[]
@@ -317,7 +316,7 @@ class SuiteReconstructionResult:
 
 
 def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',options=None):
-    """Reconstruct a complete supported BW/RM model suite without mutating it.
+    """Reconstruct a complete supported resonance model suite without mutating it.
 
     Local References and native summand links are resolved. All sums must have
     a graph and their evaluated values must close at the requested accuracy.
@@ -346,7 +345,9 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         context=NeutronContext(target.mass.convertedTo('amu').value/neutron.mass.convertedTo('amu').value,
                                target.spin.convertedTo('hbar').value)
     from .prepare_r_matrix import normalize_suite_pairs
-    prepared=prepare_resonances(normalize_suite_pairs(suite,context),context,conversion_report=suite.report)
+    from .unresolved import normalize_unresolved_links
+    resonances=normalize_unresolved_links(suite,normalize_suite_pairs(suite,context),source_style)
+    prepared=prepare_resonances(resonances,context,conversion_report=suite.report)
     source_hash=_fingerprint(suite,source_style)
     snapshot=deepcopy(suite)
     entries=_entries(snapshot)
@@ -436,7 +437,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         projectile=str(suite.projectile),target=str(suite.target),projectileFrame=str(suite.projectileFrame),
         domain=(low,high),points=points,regions=checks,source_sum_error_ratios=source_balance,
         source_style=source_style,source_style_labels=tuple(suite.styles.labels),
-        label=label,options=options,context=context,empirical_verification=True,global_error_bound=False)
+        label=label,options=options,context=context,preparation_notes=prepared.preparation_notes,
+        empirical_verification=True,global_error_bound=False)
     return SuiteReconstructionResult(MappingProxyType(output),MappingProxyType(report),source_style,label,options,prepared,
         tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash)
 
