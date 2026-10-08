@@ -47,7 +47,7 @@ def configure(
     tof_metadata_path : str, optional
         Path to the TOF metadata JSON file. This file contains flight path
         and time resolution parameters for experiments not in the database.
-        If not set, uses the default file in kika/exfor/tof_metadata.json.
+        If not set, uses the default file in kika/exfor/exfor_tof_parameters.json.
 
     Examples
     --------
@@ -116,7 +116,7 @@ def get_tof_metadata_path(explicit_path: Optional[str] = None) -> str:
     Priority:
     1. Explicitly passed path (if not None)
     2. Module configuration (set via configure())
-    3. Default file in kika/exfor/tof_metadata.json
+    3. Default file in kika/exfor/exfor_tof_parameters.json
 
     Parameters
     ----------

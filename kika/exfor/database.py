@@ -58,11 +58,12 @@ def _load_tof_metadata(force_reload: bool = False) -> Dict[str, Any]:
     """
     Load TOF metadata from the configuration file.
 
-    The file (``exfor_tof_parameters.json``) is keyed by EXFOR dataset ID; each
-    entry uses the nested ``energy_resolution_input`` schema (``distance`` and
-    ``time_resolution`` sub-objects). Supplements the database, which lacks this
-    metadata. Returns an empty map if the file is missing or invalid, so every
-    experiment falls back to the defaults.
+    The file (``exfor_tof_parameters.json``) is keyed by EXFOR dataset ID and
+    is the same one the Fe-56 evaluation scripts read
+    (``scripts/tof_parameters.py``); see :func:`_get_tof_params_for_experiment`
+    for the schema. Supplements the database, which lacks this metadata.
+    Returns an empty map if the file is missing or invalid, so every experiment
+    falls back to the defaults.
 
     Parameters
     ----------
@@ -93,10 +94,19 @@ def _get_tof_params_for_experiment(dataset_id: str) -> Dict[str, Any]:
     """
     Get TOF parameters for a specific experiment, with fallback to defaults.
 
-    Reads the nested ``energy_resolution_input`` (or ``energy_resolution_inputs``)
-    schema, taking ``distance.value`` as the flight path and
-    ``time_resolution.value`` as the timing resolution. When the experiment is
-    absent, or either value is missing/null, the defaults are used.
+    Reads the curated (L, δt) pair from the entry's ``tof`` block
+    (``flight_path_m``, ``time_resolution_ns``). The file's other blocks are
+    not read here: ``energy_resolution`` is the EXFOR EN-RSL* sweep, which the
+    database parses itself from the entry (``dataset.energy_resolution``), and
+    ``details``/``notes`` are documentation.
+
+    The older nested schema (``energy_resolution_input`` or
+    ``energy_resolution_inputs`` with ``distance.value`` and
+    ``time_resolution.value``) is still accepted, for metadata files passed
+    through :func:`kika.exfor.config.configure`.
+
+    When the experiment is absent, or either value is missing/null, the
+    defaults are used.
 
     Parameters
     ----------
@@ -113,16 +123,21 @@ def _get_tof_params_for_experiment(dataset_id: str) -> Dict[str, Any]:
     entry = metadata.get(dataset_id) if isinstance(metadata, dict) else None
 
     if isinstance(entry, dict):
+        distance = time_res = None
+        tof = entry.get("tof")
         eri = entry.get("energy_resolution_input") or entry.get("energy_resolution_inputs")
-        if isinstance(eri, dict):
+        if isinstance(tof, dict):
+            distance = tof.get("flight_path_m")
+            time_res = tof.get("time_resolution_ns")
+        elif isinstance(eri, dict):
             distance = (eri.get("distance") or {}).get("value")
             time_res = (eri.get("time_resolution") or {}).get("value")
-            if distance is not None and time_res is not None:
-                return {
-                    "flight_path_m": float(distance),
-                    "time_resolution_ns": float(time_res),
-                    "source": "file",
-                }
+        if distance is not None and time_res is not None:
+            return {
+                "flight_path_m": float(distance),
+                "time_resolution_ns": float(time_res),
+                "source": "file",
+            }
 
     return {
         "flight_path_m": _TOF_DEFAULT_FLIGHT_PATH_M,
