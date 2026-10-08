@@ -163,12 +163,24 @@ def test_histogram_interpolation_is_refused_with_the_reason():
         decodeElastic(cs, fs, IsotopeKey(1, 1))
 
 
-def test_histogram_in_mu_is_refused_too():
+def test_histogram_in_mu_is_read_lin_lin_and_written_back():
+    """D10-3: Geant4 evaluates a code 1 lin-lin, so the model holds lin-lin.
+
+    The report calls it an approximation (ENDF reads a histogram), and the
+    declared code is what the encoder writes back.
+    """
+    from kika.g4ndl.encode import encodeElastic, recordDifferences
+
     cs = parse_cross_section(TokenStream("0 0\n2\n1.0 1.0 2.0 1.0\n"))
     fs = parse_elastic_fs(TokenStream("2 1.0 2\n1\n1 1 2\n"
                                       "0.0 1.0e6 0 2 1 2 1 -1.0 0.5 1.0 0.5\n"))
-    with pytest.raises(G4NDLUnsupportedError, match="mu"):
-        decodeElastic(cs, fs, IsotopeKey(1, 1))
+    suite, report = decodeElastic(cs, fs, IsotopeKey(1, 1))
+    assert any("code 1 in mu read lin-lin" in m for m in report.approximations)
+    assert suite.provenance.tabulatedCode1 == {"0": [[2, 1]]}
+    table = _angular(suite).angular.function1ds[0]
+    assert table.interpolation.value == "lin-lin"
+    _, fs2, _ = encodeElastic(suite)
+    assert recordDifferences(fs, fs2) == []
 
 
 # -------------------------------------------------------------- provenance
@@ -191,8 +203,10 @@ def test_a_library_with_other_processes_reports_a_partial_read(tmp_path):
     (root / "Capture").mkdir()
     (root / "Inelastic").mkdir()
     report = g4ndl.open(root).read("H1").report
-    assert len(report.unsupported) == 2
-    assert all("elastic channel (MT2) only" in m for m in report.unsupported)
+    # Inelastic/ is read, and holds nothing for H1; Capture/ is not read.
+    assert len(report.unsupported) == 1
+    assert "Capture/" in report.unsupported[0]
+    assert "elastic channel (MT2) only" in report.unsupported[0]
 
 
 def test_reading_does_not_wake_the_model_until_asked():

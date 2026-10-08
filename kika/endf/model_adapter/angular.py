@@ -48,11 +48,33 @@ from kika.nuclear_data.model import (
     toEndfTab2,
 )
 
-__all__ = ["decodeMF4MT", "encodeMF4MT", "LCT_TO_FRAME", "FRAME_TO_LCT"]
+__all__ = ["decodeMF4MT", "encodeMF4MT", "mf4Ejectile", "LCT_TO_FRAME",
+           "FRAME_TO_LCT"]
 
 #: ENDF LCT (§MF4) ↔ GNDS §3.4.2 ``frame``.
 LCT_TO_FRAME = {1: Frame.lab, 2: Frame.centerOfMass}
 FRAME_TO_LCT = {frame: lct for lct, frame in LCT_TO_FRAME.items()}
+
+#: ENDF-6 §4: MF4 of an MT in one of these ranges is the angular distribution
+#: of the outgoing p, d, t, He-3 or alpha that leaves the residual in level
+#: ``MT - start`` — not of a neutron. Every other neutron-induced MT with an
+#: MF4 (MT2, MT50-91, MT875-891) emits a neutron.
+_MF4_CHARGED_EJECTILE = ((600, 650, "H1"), (650, 700, "H2"), (700, 750, "H3"),
+                         (750, 800, "He3"), (800, 850, "He4"))
+
+
+def mf4Ejectile(mt: int) -> str:
+    """The pid of the particle an MF4/MT section describes.
+
+    MF4 names no particle: ENDF-6 lets the MT imply it. Putting MT600's
+    distribution on an ``n`` product said the reaction emits a neutron with the
+    proton's angular distribution, which is what any GNDS export of the suite
+    then wrote, and what G4NDL's writer had to second-guess.
+    """
+    for start, stop, pid in _MF4_CHARGED_EJECTILE:
+        if start <= mt < stop:
+            return pid
+    return "n"
 
 
 def _za(section) -> Optional[int]:

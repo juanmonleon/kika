@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["Provenance", "EndfProvenance", "AceProvenance",
-           "GndsProvenance", "G4NDLProvenance"]
+           "GndsProvenance", "G4NDLProvenance", "G4NDLInelasticProvenance"]
 
 
 @dataclass
@@ -226,6 +226,56 @@ class G4NDLProvenance(Provenance):
     legendreTempdeps: List[int] = field(default_factory=list)
     tabulatedTemperatures: List[float] = field(default_factory=list)
     tabulatedTempdeps: List[int] = field(default_factory=list)
+    #: The declared ``(NBT, INT)`` of each table record (by index, from 0)
+    #: whose μ interpolation had a code 1, which the model holds lin-lin as
+    #: Geant4 evaluates it; the encoder writes it back (roadmap Fase 10, D10-3).
+    tabulatedCode1: Dict[str, List[List[int]]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.targetMass = _asFloat(self.targetMass)
+
+
+@dataclass
+class G4NDLInelasticProvenance(Provenance):
+    """One inelastic reaction read from G4NDL, and the tokens the model has no slot for.
+
+    The inelastic counterpart of :class:`G4NDLProvenance`, attached to each
+    reaction (and to the ``Inelastic/CrossSection`` sum) rather than to the
+    suite, because one isotope's inelastic data is many files: one per
+    channel directory ``F01`` … ``F36``, and a composite channel (``F01``,
+    ``F23``-``F27``) holds several reactions in one file.
+
+    ``sections`` lists this reaction's sections of the file in file order, one
+    plain ``dict`` each: its ``position`` among all the file's sections, the
+    header integers, and the bookkeeping of its body that the model has no
+    place for (``targetMass`` of an angular or energy-angle section, ``T`` and
+    ``tempdep`` per incident energy, the ZAP/AWP/LIP/LAW of each product...).
+    A section the model does not carry at all — the photon sections 12-15 and
+    any law kika has no form for — is kept whole as ``verbatim`` G4NDL text:
+    plain data, not a parsed object, so that the model holds no format-shaped
+    class (``kika/g4ndl/inelastic_decode.py``).
+    """
+
+    sourceFormat: str = "g4ndl"
+    library: Optional[str] = None
+    libraryName: Optional[str] = None
+    #: ``"F01"`` … ``"F36"``, or ``"CrossSection"`` for the total.
+    channel: Optional[str] = None
+    path: Optional[str] = None
+    sha256: Optional[str] = None
+    header: Optional[Tuple[str, str]] = None
+    composite: Optional[bool] = None
+    #: A base-FS file's ``Qvalue`` and ``dummy``, read once after its first section.
+    Qvalue: Optional[float] = None
+    Qdummy: Optional[int] = None
+    sfType: Optional[int] = None
+    #: How many sections the whole file has, to tell a complete set from a subset.
+    nSections: Optional[int] = None
+    sections: List[Dict[str, object]] = field(default_factory=list)
+    #: ``Inelastic/CrossSection`` only: the two bookkeeping integers.
+    bookkeeping: Optional[Tuple[int, int]] = None
+    #: A sum only (the ``inelastic`` total, MT4, MT103-107): SHA-256 of its σ
+    #: and of its parts' σ as read. What tells the writer later whether the
+    #: sum or its parts were edited (roadmap G4NDL Fase 10, D10-1).
+    crossSectionDigest: Optional[str] = None
+    partsDigest: Optional[str] = None

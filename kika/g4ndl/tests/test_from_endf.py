@@ -92,3 +92,75 @@ def test_fe56_jeff40_against_the_iaea_translation(tmp_path, fe56_jeff40_tape, nj
     ours = _groupAverages(cs.energy, cs.sigma, edges, ref_cs.energy)
     theirs = _groupAverages(ref_cs.energy, ref_cs.sigma, edges, cs.energy)
     assert np.abs(ours / theirs - 1).max() < 2e-3
+
+
+# ---------------------------------------------------------- Phase 10, inelastic
+
+def _sameUpToTheTranslation(ours, theirs):
+    """MF4/MF6 bodies equal but for what the IAEA translation does (roadmap Fase 10).
+
+    It cuts Legendre series at NL = 30 (MF4, and the MF6 LANG=1 rows), prints
+    incident energies of MF6 to 6 digits and the AWR to 6. Anything else is a
+    difference.
+    """
+    if hasattr(theirs, "legendre"):            # dataType 4
+        for block in ("legendre", "tabulated"):
+            a, b = getattr(theirs, block), getattr(ours, block)
+            assert (a is None) == (b is None)
+            for ra, rb in zip(a.records if a else (), b.records if b else ()):
+                assert ra.energy == rb.energy
+                if block == "legendre":
+                    n = len(ra.coefficients)
+                    assert n == len(rb.coefficients) or n == 30
+                    assert np.array_equal(ra.coefficients, rb.coefficients[:n])
+                else:
+                    assert np.array_equal(ra.mu, rb.mu)
+                    assert np.array_equal(ra.probability, rb.probability)
+        return
+    assert len(theirs.products) == len(ours.products)
+    for pa, pb in zip(theirs.products, ours.products):
+        assert (pa.massCode, pa.distLaw) == (pb.massCode, pb.distLaw)
+        assert np.array_equal(pa.yield_.y, pb.yield_.y)
+        if pa.distLaw != 1:
+            continue
+        assert len(pa.body.energies) == len(pb.body.energies)
+        for ea, eb in zip(pa.body.energies, pb.body.energies):
+            assert ea.energy == pytest.approx(eb.energy, rel=5e-6)
+            k = ea.rows.shape[1]
+            assert k == eb.rows.shape[1] or k == 31
+            assert np.array_equal(ea.rows, eb.rows[:, :k])
+
+
+@pytest.mark.njoy
+@pytest.mark.tape
+def test_fe56_jeff40_inelastic_against_the_iaea_translation(tmp_path, fe56_jeff40_tape,
+                                                            njoy_exe, g4ndl_jeff40_library):
+    from kika.g4ndl.inelastic_encode import encodeInelastic
+
+    suite, _ = readReconstructed(fe56_jeff40_tape, njoy=njoy_exe, tolerance=1e-3,
+                                 cache_dir=tmp_path)
+    # A tape states no G4NDL total; Geant4 needs it, so the encoder makes it.
+    _, files, report = encodeInelastic(suite)
+    assert any(m.startswith("inelastic: not in the suite") for m in report.warnings)
+    iaea = g4ndl.open(g4ndl_jeff40_library)
+    assert sorted(files) == iaea.inelasticChannels("Fe56")
+    # MT600-649's MF4 is the proton's, and the adapter puts it on the proton.
+    assert [p.pid for p in suite.findReactionByENDF_MT(600).outputChannel.products] == ["H1"]
+    missing = set()
+    for ch, ours in files.items():
+        theirs = iaea.inelasticFinalState("Fe56", ch)
+        mine = {(s.sfType, s.dataType): s.body for s in ours.sections}
+        for s in theirs.sections:
+            key = (s.sfType, s.dataType)
+            if s.dataType >= 12:
+                missing.add(s.dataType)       # photon production: not in the model
+                assert key not in mine
+                continue
+            if s.dataType == 3:
+                a, b = s.body.points, mine[key].points
+                grid = a.x[(a.x >= b.x[0]) & (a.x <= b.x[-1])]
+                assert np.abs(np.interp(grid, b.x, b.y) - np.interp(grid, a.x, a.y)).max() \
+                    <= 1.5e-3 * a.y.max(), (ch, key)
+                continue
+            _sameUpToTheTranslation(mine[key], s.body)
+    assert missing == {12, 14}

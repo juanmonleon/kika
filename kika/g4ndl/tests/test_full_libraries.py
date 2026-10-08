@@ -18,14 +18,15 @@ from kika.g4ndl import IsotopeKey, IsotopeNotFoundError
 pytestmark = pytest.mark.tape
 
 
-@pytest.mark.parametrize("fixture,n_iso", [
-    ("g4ndl_jeff40_library", 593),
-    ("g4ndl_g4ndl471_library", 560),
+@pytest.mark.parametrize("fixture,n_iso,unindexed", [
+    ("g4ndl_jeff40_library", 593, []),
+    # Two backup copies of europium level schemes ship in Inelastic/Gammas.
+    ("g4ndl_g4ndl471_library", 560, ["z63.a150.org", "z63.a151.org"]),
 ])
-def test_index_counts(request, fixture, n_iso):
+def test_index_counts(request, fixture, n_iso, unindexed):
     lib = g4ndl.open(request.getfixturevalue(fixture))
     assert len(lib) == n_iso
-    assert lib.duplicates == [] and lib.unindexed == []
+    assert lib.duplicates == [] and sorted(p.name for p in lib.unindexed) == unindexed
 
 
 def test_g4ndl_ships_jendl_he_and_it_stays_out(g4ndl_g4ndl471_library):
@@ -102,7 +103,8 @@ def test_fe56_records(request, fixture, n_pairs, n_leg, n_tab, e_trans):
 def test_every_isotope_decodes_into_the_model(request, fixture):
     lib = g4ndl.open(request.getfixturevalue(fixture))
     for key in lib.isotopes():
-        suite = lib.read(key)
+        # The inelastic channels have their own test (test_inelastic_full_libraries).
+        suite = lib.read(key, processes=["elastic"])
         assert suite.reactions.ENDF_MTs == [2]
         # The library root holds more than Elastic/, and the report says so.
         assert suite.report.unsupported
@@ -171,7 +173,7 @@ def test_physics_anomalies_of_each_library(request, fixture, negative, unnormali
     lib = g4ndl.open(request.getfixturevalue(fixture))
     neg, norm = [], []
     for key in lib.isotopes():
-        check = checkElastic(lib.read(key))
+        check = checkElastic(lib.read(key, processes=["elastic"]))
         assert not check.byKind("moments") and not check.byKind("nonfinite")
         neg += [(check.target, f) for f in check.byKind("negative")]
         norm += [(check.target, f) for f in check.byKind("normalisation")]

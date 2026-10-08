@@ -1,12 +1,15 @@
-"""Replace one isotope's elastic data in a copy of a whole G4NDL library.
+"""Replace one isotope's data in a copy of a whole G4NDL library.
 
 Phase 6 of the G4NDL roadmap, for the case it was asked for: an iterative loop
 (insert measured σ or a measured p(μ), run Geant4, compare, repeat) needs a
 complete library ``G4NEUTRONHPDATA`` can point at, in which exactly one
-isotope's elastic files differ from a reference library.
+isotope's files differ from a reference library. Phase 10 extends it from the
+elastic to the inelastic channels.
 
-:func:`patch_elastic` is "copy the base library, then
-:func:`~kika.g4ndl.encode.writeElastic` one isotope into the copy", with the
+:func:`patch_isotope` is "copy the base library, then
+:func:`~kika.g4ndl.encode.writeSuite` one isotope into the copy", for the
+processes asked (``elastic``, ``inelastic`` or both; default: what the suite
+holds). :func:`patch_elastic` is the elastic-only case. Both come with the
 guarantees the roadmap asks for:
 
 * **The base library is never modified.** Everything is written into a
@@ -15,9 +18,15 @@ guarantees the roadmap asks for:
   the base. The isotope's own files are never copied or linked, only written
   fresh: the distributed libraries are read-only, Windows will not replace a
   read-only file, and the read-only bit of a hard link is the base file's.
-* **Only that isotope's two files change.** Its other variant (``.z`` or
-  plain) is left out so it cannot shadow the new file; every other file is the
-  base's, which the verification checks by relative path and size.
+* **Only that isotope's files of those processes change**: two for the
+  elastic; for the inelastic ``Inelastic/CrossSection`` and one file per
+  channel the suite has, and the isotope's file in any other ``Fxx`` is
+  *removed* (Geant4 would otherwise read a channel the suite does not have).
+  Its other variant (``.z`` or plain) is left out so it cannot shadow the new
+  file; every other file is the base's, which the verification checks by
+  relative path and size. Level schemes of residual nuclei
+  (``Inelastic/Gammas``) are not the isotope's: they change only when passed
+  as ``gammas=``.
 * **What was done is written down** in ``kika_manifest.json`` at the library
   root, outside every numeric stream: the base, the files replaced or added
   and their SHA-256 before and after, the labels and mass written, the
@@ -36,12 +45,12 @@ import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from kika.g4ndl.exceptions import IsotopeNotFoundError
-from kika.g4ndl.library import PROCESSES, G4NDLLibrary
+from kika.g4ndl.library import CHANNELS, GAMMAS_DIR, PROCESSES, G4NDLLibrary
 
-__all__ = ["MANIFEST_NAME", "PatchResult", "patch_elastic"]
+__all__ = ["MANIFEST_NAME", "PatchResult", "patch_elastic", "patch_isotope"]
 
 MANIFEST_NAME = "kika_manifest.json"
 _SHARE_MODES = ("copy", "hardlink")
@@ -49,7 +58,7 @@ _SHARE_MODES = ("copy", "hardlink")
 
 @dataclass
 class PatchResult:
-    """What :func:`patch_elastic` produced.
+    """What :func:`patch_isotope` (or :func:`patch_elastic`) produced.
 
     ``replaced`` maps each written file (relative to the library root) to the
     base file it replaces, or ``None`` when the base had no file for the
@@ -113,7 +122,28 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
                   share: str = "copy", overwrite: bool = False,
                   crossSectionLabel: Optional[str] = None, angularLabel: str = "eval",
                   targetMass: Optional[float] = None, header="keep") -> PatchResult:
-    """Copy ``base_library`` to ``output_library`` with ``suite``'s elastic data in it.
+    """:func:`patch_isotope` with ``processes=("elastic",)``: only MT2 is replaced."""
+    return patch_isotope(base_library, suite, output_library, processes=("elastic",),
+                         compressed=compressed, share=share, overwrite=overwrite,
+                         crossSectionLabel=crossSectionLabel, angularLabel=angularLabel,
+                         targetMass=targetMass, header=header)
+
+
+def _subdirsOf(processes) -> List[str]:
+    out = []
+    for p in processes:
+        out.extend(PROCESSES[p])
+        out.extend(CHANNELS.get(p, ()))
+    return out
+
+
+def patch_isotope(base_library, suite, output_library, *,
+                  processes: Optional[Sequence[str]] = None, gammas=(),
+                  compressed: Optional[bool] = None, share: str = "copy",
+                  overwrite: bool = False, crossSectionLabel: Optional[str] = None,
+                  angularLabel: str = "eval", targetMass: Optional[float] = None,
+                  header="keep") -> PatchResult:
+    """Copy ``base_library`` to ``output_library`` with ``suite``'s data in it.
 
     Parameters
     ----------
@@ -126,6 +156,14 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
         Where the patched library goes. Must not exist, unless ``overwrite``
         and it is a library this function wrote (it has a ``kika_manifest.json``):
         kika never deletes a directory it did not make.
+    processes
+        ``("elastic",)``, ``("inelastic",)`` or both. Default: what the suite
+        holds (:func:`kika.g4ndl.encode.suiteProcesses`). The isotope's files
+        of the other processes are the base's, untouched.
+    gammas
+        :class:`~kika.g4ndl.inelastic_records.GammasRecord` level schemes to
+        write into ``Inelastic/Gammas`` in place of the base's (plain text, as
+        Geant4 reads them).
     compressed
         Write ``.z`` (zlib) or plain text. Default: whatever the base has for
         that isotope, ``.z`` when the base has neither.
@@ -137,7 +175,8 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
         base too; kika itself never does.
     overwrite, crossSectionLabel, angularLabel, targetMass, header
         ``overwrite`` replaces a previous output of this function; the rest go
-        to :func:`kika.g4ndl.encode.encodeElastic`.
+        to :func:`kika.g4ndl.encode.writeSuite`. The inelastic sums follow the
+        suite's partials there: edit MT51 and MT4 and the total are rebuilt.
 
     Returns
     -------
@@ -145,11 +184,18 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
         With the :class:`~kika.nuclear_data.model.conversion.ConversionReport`
         in ``.report``. Read it.
     """
-    from kika.g4ndl.encode import (encodeElastic, formatCrossSection, formatElasticFS,
-                                   recordDifferences, targetKey, writeElastic)
+    from kika.g4ndl.encode import (encodeElastic, recordDifferences, suiteProcesses,
+                                   targetKey, writeSuite)
+    from kika.g4ndl.inelastic_encode import encodeInelastic
+    from kika.g4ndl.inelastic_format import formatGammas, inelasticDifferences
+    from kika.g4ndl.names import file_name
 
     if share not in _SHARE_MODES:
         raise ValueError(f"share must be one of {_SHARE_MODES}, got {share!r}")
+    wanted = suiteProcesses(suite) if processes is None else list(processes)
+    if not wanted or set(wanted) - set(PROCESSES):
+        raise ValueError(f"processes must be a non-empty subset of {tuple(PROCESSES)}, "
+                         f"got {wanted!r}")
     base = Path(base_library).resolve()
     output = Path(output_library).resolve()
     baseLib = G4NDLLibrary(base)  # refuses a directory that is not a library
@@ -159,40 +205,54 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
     if output.exists():
         if not overwrite:
             raise FileExistsError(f"{output} exists; pass overwrite=True to replace a "
-                                  f"library patch_elastic wrote before")
+                                  f"library patch_isotope wrote before")
         if not (output / MANIFEST_NAME).is_file():
             raise FileExistsError(f"{output} exists and has no {MANIFEST_NAME}: kika "
                                   f"only replaces a library it wrote itself")
 
     # Encode and check before copying a gigabyte: a refusal costs nothing.
-    cs, fs, _ = encodeElastic(suite, crossSectionLabel=crossSectionLabel,
-                              angularLabel=angularLabel, targetMass=targetMass, header=header)
+    encoded = {}
+    if "elastic" in wanted:
+        cs, fs, _ = encodeElastic(suite, crossSectionLabel=crossSectionLabel,
+                                  angularLabel=angularLabel, targetMass=targetMass,
+                                  header=header)
+        encoded["Elastic/CrossSection"] = cs
+        encoded["Elastic/FS"] = fs
+    if "inelastic" in wanted:
+        total, files, _ = encodeInelastic(suite, header=header, targetMass=targetMass)
+        if total is not None:
+            encoded["Inelastic/CrossSection"] = total
+        for ch, record in files.items():
+            encoded[f"Inelastic/{ch}"] = record
     key = targetKey(suite)
     located = {}
-    for sub in PROCESSES["elastic"]:
+    for sub in _subdirsOf(wanted):
         try:
             located[sub] = baseLib.locate(key, sub)
         except IsotopeNotFoundError:
             located[sub] = None
+    found = [f for f in located.values() if f is not None]
     if compressed is None:
-        found = [f for f in located.values() if f is not None]
         compressed = found[0].compressed if found else True
-    elementName = next((f.elementName for f in located.values() if f is not None), None)
+    elementName = found[0].elementName if found else None
+    stem = file_name(key)
+    if elementName is not None:
+        stem = stem.rsplit("_", 1)[0] + "_" + elementName
 
     # The isotope's files (both variants) are neither copied nor linked: they are
     # written fresh. Overwriting a copy would fail on a read-only base file, and
     # making a hard link writable would make the base writable with it.
-    stems = {}
-    for sub, f in located.items():
-        if f is None:
-            from kika.g4ndl.names import file_name
-            stems[sub] = file_name(key)
-        else:
-            stems[sub] = f.path.name[:-2] if f.compressed else f.path.name
-    skip = {f"{sub}/{stem}{suffix}" for sub, stem in stems.items() for suffix in ("", ".z")}
+    skip = {f"{sub}/{stem}{suffix}" for sub in located for suffix in ("", ".z")}
+    skip |= {f"{sub}/{f.path.name}" for sub, f in located.items() if f is not None}
     written = {f"{sub}/{stem}{'.z' if compressed else ''}":
                (located[sub].path.relative_to(base).as_posix() if located[sub] else None)
-               for sub, stem in stems.items()}
+               for sub in encoded}
+    gammaFiles = {}
+    for g in gammas or ():
+        rel = f"{GAMMAS_DIR}/z{int(g.Z)}.a{int(g.A)}"
+        gammaFiles[rel] = g
+        skip.add(rel)
+        written[rel] = rel if (base / rel).is_file() else None
 
     def ignore(directory, names):
         rel = Path(directory).relative_to(base).as_posix()
@@ -203,9 +263,12 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
     try:
         shutil.copytree(base, tmp, ignore=ignore,
                         copy_function=os.link if share == "hardlink" else shutil.copy2)
-        report = writeElastic(suite, tmp, compressed=compressed,
-                              crossSectionLabel=crossSectionLabel, angularLabel=angularLabel,
-                              targetMass=targetMass, header=header, elementName=elementName)
+        report = writeSuite(suite, tmp, processes=wanted, compressed=compressed,
+                            crossSectionLabel=crossSectionLabel, angularLabel=angularLabel,
+                            targetMass=targetMass, header=header, elementName=elementName)
+        for rel, g in gammaFiles.items():
+            (tmp / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp / rel).write_text(formatGammas(g), encoding="ascii")
 
         # The copy must be the base minus the isotope's files plus the written ones.
         baseFiles = _fileSet(base)
@@ -215,28 +278,43 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
         unexpected = sorted(set(after) ^ expected)
         unexpected += sorted(p for p in set(baseFiles) - skip if after.get(p) != baseFiles[p])
         if unexpected:
-            raise RuntimeError(f"patch_elastic changed files outside {key}: {unexpected[:5]}")
+            raise RuntimeError(f"patch_isotope changed files outside {key}: {unexpected[:5]}")
 
         # The written isotope must read back to what was encoded.
         check = G4NDLLibrary(tmp)
-        diffs = (recordDifferences(cs, check.crossSection(key))
-                 + recordDifferences(fs, check.elasticFinalState(key)))
+        diffs = []
+        for sub, record in encoded.items():
+            if sub == "Elastic/CrossSection":
+                diffs += recordDifferences(record, check.crossSection(key))
+            elif sub == "Elastic/FS":
+                diffs += recordDifferences(record, check.elasticFinalState(key))
+            elif sub == "Inelastic/CrossSection":
+                diffs += recordDifferences(record, check.inelasticCrossSection(key))
+            else:
+                diffs += inelasticDifferences(record, check.inelasticFinalState(
+                    key, sub.split("/")[1]))
+        for rel, g in gammaFiles.items():
+            diffs += inelasticDifferences(g, check.gammas(g.Z, g.A))
         if diffs:
             raise RuntimeError(f"the patched {key} does not read back: {diffs[:5]}")
 
+        fs = encoded.get("Elastic/FS")
         manifest = {
-            "tool": "kika.g4ndl.patch_elastic",
+            "tool": "kika.g4ndl.patch_isotope",
             "kika": _kikaVersion(),
             "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "base_library": str(base),
             "target": str(key),
+            "processes": wanted,
             "share": share,
             "compressed": bool(compressed),
             "crossSectionLabel": crossSectionLabel or "recon",
             "angularLabel": angularLabel,
-            "repFlag": fs.repFlag,
-            "targetMass": fs.targetMass,
-            "frameFlag": fs.frameFlag,
+            "repFlag": fs.repFlag if fs is not None else None,
+            "targetMass": fs.targetMass if fs is not None else targetMass,
+            "frameFlag": fs.frameFlag if fs is not None else None,
+            "channels": sorted(s.split("/")[1] for s in encoded
+                               if s.startswith("Inelastic/F")),
             "source": _sourceOf(suite),
             "files": [
                 {"path": new, "sha256": _sha256(tmp / new),
