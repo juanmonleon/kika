@@ -271,3 +271,27 @@ def test_parsing_capture_does_not_wake_the_model():
     out = subprocess.run([sys.executable, "-c", code, str(DATA)],
                          capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+# ------------------------------------------------------------------ what a viewer shows
+
+def test_the_capture_summary_says_where_the_photons_live():
+    from kika.g4ndl.tables import _reactionRows, captureSummary, crossSections
+
+    n15 = captureSummary(G4.read("N15"))
+    assert (n15["final_state"], n15["photons"], n15["products"]) == ("FSMF6", "model", ["photon"])
+    assert n15["q_value"] == float(G4.captureCrossSection("N15").bookkeeping[0])
+    assert n15["cross_section"]["count"] == len(G4.captureCrossSection("N15").energy)
+    h1 = captureSummary(G4.read("H1"))
+    assert h1["products"] == ["photon", "H2"]
+    n14 = captureSummary(G4.read("N14"))
+    assert (n14["final_state"], n14["photons"], n14["products"]) == ("FS", "verbatim", [])
+    suite = G4.read("N15")
+    r = suite.findReactionByENDF_MT(102)
+    r.outputChannel.products.products[:] = []
+    r.provenance.finalStateEntry.clear()
+    assert captureSummary(suite)["photons"] is None
+    # MT102 is one more row of the reactions table, with its Q, and no angular.
+    assert 102 in crossSections(suite)
+    (row,) = [row for row in _reactionRows(suite) if row["mt"] == 102]
+    assert row["q_value"] == r.outputChannel.Q.value and not row["sum"] and not row["angular"]
