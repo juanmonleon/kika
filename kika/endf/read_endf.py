@@ -9,6 +9,7 @@ from .parsers.parse_endf import (
     parse_endf_file,
     parse_mf_from_file,
     scan_mat_number,
+    scan_tape_id,
     MF_PARSERS,
 )
 from .classes.mf1.mf1mt451 import MF1MT451
@@ -71,7 +72,9 @@ def read_endf(filepath: str, mf_numbers: Optional[Union[int, List[int]]] = None)
     # output directory from the former, writing perturbed samples under
     # endf/unknown/ where the pairing stage looked under endf/26056/.
     with open(filepath, 'r') as f:
-        endf.mat = scan_mat_number(f.readlines())
+        lines = f.readlines()
+    endf.mat = scan_mat_number(lines)
+    endf.tape_id = scan_tape_id(lines)
 
     # Parse each requested MF section
     for mf_number in mf_numbers:

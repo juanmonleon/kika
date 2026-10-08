@@ -58,6 +58,9 @@ from .mf1_header import libraryFromNlib, versionFromHeader
 from kika._constants import NEUTRON_MASS_AMU
 from .resonances import decodeMF2MT151
 
+#: Where the tape identification record is kept, on the suite's provenance.
+TAPE_ID_KEY = "tpid"
+
 __all__ = ["decodeMF3MT", "decodeMF1MT451", "decodeReactionSuite"]
 
 #: MF numbers kika's parser registry covers. Everything else is declared
@@ -302,6 +305,12 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     if style is not None:
         suite.styles.add(style)
     suite.provenance = headerProvenance
+    # The tape's first line, verbatim, for writeEndfTape (roadmap T1). A tape
+    # is a container of materials and its label belongs to no one of them, so
+    # it can only live beside the header, in the provenance.
+    tapeId = getattr(endf, "tape_id", None)
+    if headerProvenance is not None and tapeId is not None:
+        headerProvenance.headerFields[TAPE_ID_KEY] = tapeId
 
     mf3 = endf.mf.get(3) if hasattr(endf, "mf") else None
     if mf3 is not None:

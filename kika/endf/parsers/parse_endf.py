@@ -77,6 +77,29 @@ def scan_mat_number(lines: List[str]) -> Optional[int]:
     return None
 
 
+def scan_tape_id(lines: List[str]) -> Optional[str]:
+    """The tape identification record (§0.6.2), verbatim, or None.
+
+    It is the first line when its MF and MT fields (columns 71-75) are zero or
+    blank. Kept **whole** rather than as its 66 text columns, because the three
+    libraries disagree on the rest of the line: ENDF/B-VIII.1 leaves the NTAPE
+    field blank and stops at column 75, JEFF-4.0 writes NTAPE=1 and a sequence
+    number, JENDL-5 writes NTAPE=0. A writer that rebuilt the record would
+    "correct" two of the three (ENDF-coverage roadmap T1).
+    """
+    if not lines:
+        return None
+    first = lines[0].rstrip("\r\n")
+    if len(first) < 72:
+        return None
+    try:
+        mf = int(first[70:72].strip() or 0)
+        mt = int(first[72:75].strip() or 0)
+    except ValueError:
+        return None
+    return first if (mf, mt) == (0, 0) else None
+
+
 def parse_endf_file(filepath: str) -> ENDF:
     """
     Parse a complete ENDF file.
@@ -94,6 +117,7 @@ def parse_endf_file(filepath: str) -> ENDF:
         lines = f.readlines()
         logger.debug(f"Read {len(lines)} lines from file")
         
+        endf.tape_id = scan_tape_id(lines)
         mat_number = scan_mat_number(lines)
         if mat_number is not None:
             endf.mat = mat_number

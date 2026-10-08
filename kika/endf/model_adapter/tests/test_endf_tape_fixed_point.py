@@ -149,10 +149,11 @@ def test_the_report_names_every_file_that_did_not_survive(roundTripped):
     said = "\n".join(report.losses + report.approximations +
                      report.unsupported + report.warnings)
 
-    # The tape label is not in the model at all -- `read_endf` drops the first
-    # line -- so the writer says it invented one rather than letting the file
-    # imply otherwise.
-    assert "tape identification record" in said
+    # The tape label used to be the first thing on this list: `read_endf`
+    # dropped the first line and the writer invented one. Since roadmap T1 the
+    # line is kept and written back, so it is *not* on the list any more; the
+    # verbatim check is `test_the_tape_identification_record_comes_back`.
+    assert "tape identification record" not in said
 
     # And the one thing that genuinely did not survive the trip: MF34 came back
     # through `kika/cov`, which states the same numbers in a different record
@@ -161,6 +162,35 @@ def test_the_report_names_every_file_that_did_not_survive(roundTripped):
     # it is said nowhere.
     assert "MF34/MT2" in said and "collapsed" in said
     assert not report.isClean, "a report that claims a clean trip is the failure mode"
+
+
+def test_the_tape_identification_record_comes_back(roundTripped, micro_tape):
+    """The first line, byte for byte (roadmap T1): the libraries disagree on its ID columns."""
+    _before, _after, _report, out = roundTripped
+    source = micro_tape.read_text().splitlines()[0]
+    assert out.read_text().splitlines()[0] == source
+
+
+def test_a_suite_that_kept_no_tape_id_says_it_invented_one(micro_tape, tmp_path):
+    from kika.endf.model_adapter.decode import TAPE_ID_KEY
+
+    suite, report = _decode(micro_tape)
+    suite.provenance.headerFields.pop(TAPE_ID_KEY)
+    out = tmp_path / "written.endf"
+    report = writeEndfTape(suite, out, report=report)
+    assert out.read_text().splitlines()[0].startswith(DEFAULT_TAPE_ID)
+    assert any("tape identification record" in l for l in report.losses)
+
+
+@pytest.mark.parametrize("line, kept", [
+    (" ENDF/B-VIII.1" + " " * 56 + " 0  0", True),
+    ("JEFF-4.0 Incident Neutron File" + " " * 39 + "1 0  0    0", True),
+    (" 2.605600+4 5.545440+1          0          0          0          52631 1451    1", False),
+])
+def test_scan_tape_id_keeps_the_whole_line_or_none(line, kept):
+    from kika.endf.parsers.parse_endf import scan_tape_id
+
+    assert scan_tape_id([line + "\n"]) == (line if kept else None)
 
 
 def test_a_suite_with_no_mat_is_refused_rather_than_stamped_with_a_guess(micro_tape):

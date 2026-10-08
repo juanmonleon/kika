@@ -21,7 +21,11 @@ class ENDF:
     #: The file this object was read from, set by ``read_endf``. It is what
     #: NJOY runs on when σ(E) has to be reconstructed (``attach_pendf``).
     source_path: Optional[str] = field(default=None, repr=False)
-    
+    #: The tape identification record (§0.6.2), the whole first line as read,
+    #: or None when the file does not start with one. ``writeEndfTape`` writes
+    #: it back; see :func:`kika.endf.parsers.parse_endf.scan_tape_id`.
+    tape_id: Optional[str] = field(default=None, repr=False)
+
     def add_file(self, mf: MF) -> None:
         """Add an MF file to this ENDF file"""
         self.files[mf.number] = mf

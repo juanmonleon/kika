@@ -63,10 +63,11 @@ MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35)
 #: regardless of the material that follows.
 TAPE_ID_MAT = 1
 
-#: What goes in a TPID's 66 text columns when the caller names nothing. **The
-#: label is not in the model**: ``read_endf`` does not keep the first line of
-#: the tape, so a round trip cannot reproduce it and this module does not
-#: pretend to. It is reported, not silently invented.
+#: What goes in a TPID's 66 text columns when the caller names nothing and the
+#: suite kept none. ``read_endf`` keeps the tape's first line
+#: (``ENDF.tape_id``) and the decoder hangs it on the suite's provenance, so a
+#: round trip writes the source's record back verbatim; this label is for a
+#: suite that never came from a tape, and is reported when used.
 DEFAULT_TAPE_ID = "TAPE WRITTEN BY KIKA FROM A REACTION SUITE"
 
 
@@ -511,7 +512,8 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
 
 
 def assembleTape(sections: Sequence[Tuple[int, int, object]], mat: int,
-                 tapeId: Optional[str] = None) -> str:
+                 tapeId: Optional[str] = None, *,
+                 tapeRecord: Optional[str] = None) -> str:
     """``[(MF, MT, section), …]`` → the text of a one-material ENDF tape.
 
     Each section renders itself, ID columns and trailing SEND included — that is
@@ -524,7 +526,11 @@ def assembleTape(sections: Sequence[Tuple[int, int, object]], mat: int,
     Sequence numbers are **per section** and each section already restarts them
     at 1, which is §0.6.3's rule, so there is nothing to renumber here.
     """
-    lines = [_tapeIdRecord(tapeId if tapeId is not None else DEFAULT_TAPE_ID)]
+    # ``tapeRecord`` is a whole first line kept from a source tape, written as
+    # it was read: the libraries disagree on its ID columns (see
+    # ``scan_tape_id``), so rebuilding it would change two of the three.
+    lines = [tapeRecord if tapeRecord is not None
+             else _tapeIdRecord(tapeId if tapeId is not None else DEFAULT_TAPE_ID)]
 
     previousMf = None
     for mf, _mt, section in sections:
@@ -570,7 +576,14 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
 
     path = Path(os.fspath(path))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(assembleTape(sections, mat, tapeId), newline="\n")
+    from ..model_adapter.decode import TAPE_ID_KEY
+
+    kept = None
+    if tapeId is None:
+        header = getattr(getattr(suite, "provenance", None), "headerFields", None) or {}
+        kept = header.get(TAPE_ID_KEY)
+    path.write_text(assembleTape(sections, mat, tapeId, tapeRecord=kept),
+                    newline="\n")
 
     # Every section written is declared, so the rebuild does not drop one that
     # the source tape's directory happened not to list.
@@ -582,11 +595,11 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
             f"true if no section changed length"
         )
 
-    if tapeId is None:
+    if tapeId is None and kept is None:
         report.lost(
             "the tape identification record was written with kika's own label: "
-            "read_endf does not keep the first line of a tape, so the original "
-            "cannot be reproduced. Pass tapeId= to set it."
+            "this suite kept no first line from a source tape. Pass tapeId= to "
+            "set it."
         )
     return report
 
