@@ -185,6 +185,12 @@ def encodeMF1MT451(source, mat: Optional[int] = None,
     ``LDRV``, the NWD comment block — is ENDF bookkeeping with no GNDS
     counterpart, so it is written back unchanged rather than recomputed.
 
+    **On the comment block.** Its text is taken from the suite's evaluated
+    style, ``documentation.endfCompatible``, when there is one — that is the
+    copy a caller edits and the one a GNDS file carries — and from
+    ``provenance.descriptiveText`` otherwise. On an unedited ENDF read the two
+    are the same lines, so the round trip stays byte-identical.
+
     **On the directory.** ``NXC`` entries carry ``NC``, a *line count*, so a
     directory is only true of the tape it was read from. This writes back the one
     it read, which is right for a round trip and wrong the moment a section
@@ -215,7 +221,17 @@ def encodeMF1MT451(source, mat: Optional[int] = None,
     provenance = getattr(source, "provenance", source)
 
     fields = dict(getattr(provenance, "headerFields", None) or {})
+    za = getattr(provenance, "za", None)
+    awr = getattr(provenance, "awr", None)
     missing = [name for name in _MF1_REQUIRED_FIELDS if fields.get(name) is None]
+    if missing and _derivable(source, provenance):
+        # A GNDS-read or hand-built suite: no ENDF read kept the header, so it is
+        # derived from the model the way FUDGE's toENDF6 derives it. Every
+        # field that had to be assumed rather than derived is in the report.
+        from .mf1_header import synthesiseMF1Header
+
+        fields, za, awr = synthesiseMF1Header(source, report)
+        missing = []
     if missing:
         sourceFormat = getattr(provenance, "sourceFormat", "unknown")
         raise ValueError(
@@ -226,14 +242,25 @@ def encodeMF1MT451(source, mat: Optional[int] = None,
             f"where the header comes from the file."
         )
 
-    text = list(getattr(provenance, "descriptiveText", None) or [])
+    mat = mat if mat is not None else getattr(provenance, "mat", None)
+    text = _endfCompatibleLines(source, report)
+    if text is None:
+        text = list(getattr(provenance, "descriptiveText", None) or [])
+    if not text and _derivable(source, provenance):
+        text = _minimalText(source, fields, za, mat)
+        report.lost(
+            "MF1/451: the suite carries no ENDF comment block (no "
+            "documentation/endfCompatible), so only the five identification "
+            "records ENDF-102 asks for were written"
+        )
     directory = [tuple(entry) for entry in getattr(provenance, "directory", None) or []]
-    evaluationInfo = getattr(provenance, "evaluationInfo", None) or {}
+    evaluationInfo = (_evaluationInfoFromText(text) if text
+                      else getattr(provenance, "evaluationInfo", None) or {})
 
     mt451 = MF1MT451(number=451)
-    mt451._mat = mat if mat is not None else getattr(provenance, "mat", None)
-    mt451._za = float(getattr(provenance, "za", None) or 0)
-    mt451._awr = getattr(provenance, "awr", None)
+    mt451._mat = mat
+    mt451._za = float(za or 0)
+    mt451._awr = awr
     mt451._temp = fields.get("temp")
     for name in _MF1_REQUIRED_FIELDS:
         setattr(mt451, f"_{name}", fields[name])
@@ -246,8 +273,8 @@ def encodeMF1MT451(source, mat: Optional[int] = None,
     mt451._directory = directory
     mt451._nxc = len(directory)
 
-    # Set from `evaluationInfo` as well, and not instead: `__str__` falls back to
-    # these seven when there is no text block, and a section whose text survived
+    # Set from the text as well, and not instead: `__str__` falls back to these
+    # seven when there is no text block, and a section whose text survived
     # should not carry a header that disagrees with it.
     for attr, key in _MF1_EVALUATION_INFO:
         setattr(mt451, attr, evaluationInfo.get(key) or "")
@@ -258,6 +285,113 @@ def encodeMF1MT451(source, mat: Optional[int] = None,
             "none, so the NWD comment block cannot be reproduced"
         )
     return mt451, report
+
+
+def _derivable(source, provenance) -> bool:
+    """Whether MF1/451 may be derived from the model rather than read back.
+
+    Only for a suite that never had an ENDF header to keep: one read from GNDS,
+    or built by hand. An ENDF-decoded suite writes back what it read, and an
+    ACE-decoded one still refuses — ACE states four of the nineteen fields and
+    nothing of the library, so there is next to nothing to derive *from*.
+    """
+    if getattr(source, "styles", None) is None:
+        return False
+    return provenance is None or getattr(provenance, "sourceFormat", None) == "gnds"
+
+
+def _evaluationInfoFromText(text) -> dict:
+    """The seven fields of records 5 and 6, at the columns the parser reads them."""
+    first = (text[0] if text else "").ljust(66)
+    second = (text[1] if len(text) > 1 else "").ljust(66)
+    return {
+        "material_id": first[:11].strip(), "laboratory": first[11:22].strip(),
+        "eval_date": first[22:32].strip(), "authors": first[33:66].strip(),
+        "reference": second[1:22].strip(), "dist_date": second[22:32].strip(),
+        "revision_date": second[33:43].strip(),
+    }
+
+
+_MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+           "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+_SUBLIBRARY = {0: "PHOTO-NUCLEAR", 10: "INCIDENT-NEUTRON", 10010: "INCIDENT-PROTON",
+               10020: "INCIDENT-DEUTERON", 10030: "INCIDENT-TRITON",
+               20030: "INCIDENT-HE3", 20040: "INCIDENT-ALPHA"}
+
+
+def _minimalText(suite, fields, za, mat) -> list:
+    """ENDF-102 §1.1's five identification records, from what the model states.
+
+    The layout the evaluated libraries use (ZSYMAM/ALAB/EDATE/AUTH, then
+    REF/DDATE/RDATE/ENDATE, then library, sub-library and format lines). Where
+    the model says nothing — the laboratory, the reference — the columns are
+    left blank rather than filled with a placeholder, which is where this
+    departs from FUDGE's ``LLNL``/``Unknown``.
+    """
+    from kika._constants import ATOMIC_NUMBER_TO_SYMBOL
+    from .mf1_header import _evaluatedStyle
+
+    style = _evaluatedStyle(suite)
+    z, a = divmod(int(za or 0), 1000)
+    symbol = ATOMIC_NUMBER_TO_SYMBOL.get(z, "")
+    zsymam = f"{z:3d}-{symbol:<2s}-{a:3d}{'M' if fields.get('liso') else ' '}"
+
+    edate = ""
+    date = (getattr(style, "date", None) or "").split("-")
+    if len(date) >= 2 and date[0].isdigit() and date[1].isdigit():
+        edate = f"EVAL-{_MONTHS[int(date[1]) - 1]}{date[0][2:]}"
+    documentation = getattr(style, "documentation", None)
+    authors = ", ".join(author.name for author in getattr(documentation, "authors", None) or [])
+
+    library = f"{style.library or ''}-{style.version or ''}".strip("-")
+    sublibrary = _SUBLIBRARY.get(int(fields.get("nsub") or 0), "")
+    return [
+        f"{zsymam:<11s}{'':<11s}{edate:<10s} {authors[:33]}",
+        "",
+        f"---- {library:<22s}MATERIAL {int(mat or 0):4d}".rstrip(),
+        f"----- {sublibrary} DATA".rstrip(),
+        "------ ENDF-6 FORMAT",
+    ]
+
+
+def _endfCompatibleLines(source, report: ConversionReport):
+    """The NWD records from the suite's ``documentation/endfCompatible``, or None.
+
+    That node is the model's copy of the comment block — the ENDF decoder fills
+    it, a GNDS read fills it from the file, and it is what a caller edits — so
+    it wins over ``provenance.descriptiveText``, which only records what was
+    read. A bare provenance has no styles and falls through to its own text.
+
+    Lines longer than a record are wrapped at 66 columns the way FUDGE wraps
+    them on its way to ENDF, and the report says so.
+    """
+    from kika.nuclear_data.model import Evaluated
+
+    styles = getattr(source, "styles", None)
+    if styles is None:
+        return None
+    for style in styles:
+        documentation = getattr(style, "documentation", None)
+        endfCompatible = getattr(documentation, "endfCompatible", None)
+        if isinstance(style, Evaluated) and endfCompatible is not None and endfCompatible.text:
+            break
+    else:
+        return None
+
+    import textwrap
+
+    lines = []
+    for line in endfCompatible.text.split("\n"):
+        if len(line) <= 66:
+            lines.append(line)
+            continue
+        lines += textwrap.wrap(line, 66, replace_whitespace=False, drop_whitespace=False)
+        report.approximated(
+            f"MF1/451: a documentation line of {len(line)} characters was "
+            f"wrapped at 66 columns to fit an ENDF record"
+        )
+    return lines
 
 
 def _nuclideId(reaction: Reaction, provenance) -> int:

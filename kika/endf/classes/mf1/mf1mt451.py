@@ -171,6 +171,21 @@ class MF1MT451:
         return self._nwd
     
     @property
+    def descriptive_text(self) -> List[str]:
+        """The NWD descriptive records (the evaluator's comment block), 66 columns each.
+
+        Kept verbatim from the file and written back by ``__str__``; the seven
+        fields of the first two records are also parsed into the properties
+        below.
+        """
+        return [line[:66] for line in self._text_lines[4:4 + (self._nwd or 0)]]
+
+    @property
+    def description(self) -> str:
+        """:attr:`descriptive_text` as one string, trailing blanks dropped."""
+        return "\n".join(line.rstrip() for line in self.descriptive_text)
+
+    @property
     def directory_records(self) -> int:
         """Number of records in directory"""
         return self._nxc

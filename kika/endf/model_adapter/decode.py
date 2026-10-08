@@ -54,6 +54,8 @@ from kika.nuclear_data.model import (
     pidFromZA,
 )
 
+from .mf1_header import libraryFromNlib, versionFromHeader
+from kika._constants import NEUTRON_MASS_AMU
 from .resonances import decodeMF2MT151
 
 __all__ = ["decodeMF3MT", "decodeMF1MT451", "decodeReactionSuite"]
@@ -208,14 +210,38 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
     za = _za(mt451)
     pops = PoPs()
     if za:
-        pops.add(Nuclide(id=pidFromZA(za), Z=za // 1000, A=za % 1000))
+        # AWR is the target's mass in neutron masses; PoPs states it in amu.
+        # FUDGE fills the mass the same way, and it is what lets MF1/451 be
+        # derived again from a GNDS file this suite is written to.
+        awr = getattr(mt451, "atomic_weight_ratio", None)
+        mass = (PhysicalQuantity(value=float(awr) * NEUTRON_MASS_AMU, unit="amu")
+                if awr else None)
+        # STA=1 is spelled as FUDGE spells it, the literal "unstable": the flag
+        # is the evaluator's, not a decay fact, and this is how it survives GNDS.
+        halflife = "unstable" if getattr(mt451, "_sta", None) else None
+        pops.add(Nuclide(id=pidFromZA(za), Z=za // 1000, A=za % 1000, mass=mass,
+                         halflife=halflife))
 
     style = Evaluated(
         label=EVAL_LABEL,
-        library=str(fields.get("nlib") or ""),
-        version=str(fields.get("nver") or ""),
+        # FUDGE's spelling, so a GNDS file kika writes says what one FUDGE
+        # writes: the NLIB name ("JEFF") and "NVER.LREL.NMOD". The bare numbers
+        # this used to write lost LREL and NMOD, and no other reader knew them.
+        library=libraryFromNlib(fields.get("nlib")),
+        version=versionFromHeader(fields.get("nver"), fields.get("lrel"), fields.get("nmod")),
         date=evaluationInfo.get("eval_date") or None,
     )
+    # The same block, as GNDS carries it: FUDGE writes the NWD records into the
+    # evaluated style's `documentation/endfCompatible`, one line per record, and
+    # reads them back from there on the way to ENDF. Without this an ENDF->GNDS
+    # conversion writes an empty <documentation/> and the comment block is gone
+    # from the file. Trailing blanks are dropped because the writer pads every
+    # record back to 66 columns, so the round trip stays byte-identical.
+    if descriptiveText:
+        from kika.nuclear_data.model.documentation import (Documentation,
+                                                           DocumentationText)
+        style.documentation = Documentation(endfCompatible=DocumentationText(
+            text="\n".join(line.rstrip() for line in descriptiveText)))
     return pops, style, provenance, report
 
 

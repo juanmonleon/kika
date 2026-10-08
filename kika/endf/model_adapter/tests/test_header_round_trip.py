@@ -111,3 +111,54 @@ def test_the_directory_is_written_back_as_read(microSection):
 
     assert rebuilt._directory == [tuple(e) for e in microSection._directory]
     assert rebuilt._nxc == microSection._nxc
+
+
+# ---------------------------------------------------------------------------
+# The comment block as GNDS carries it: documentation/endfCompatible
+# ---------------------------------------------------------------------------
+
+def _endfCompatible(suite):
+    return suite.styles.evaluatedFor("eval").documentation.endfCompatible.text
+
+
+def test_the_comment_block_is_on_the_evaluated_style(micro_tape, microSection):
+    """Where FUDGE puts it, so an ENDF->GNDS conversion does not drop it."""
+    suite, _ = decodeReactionSuite(read_endf(str(micro_tape)))
+    assert _endfCompatible(suite) == microSection.description
+    assert len(_endfCompatible(suite).split("\n")) == microSection._nwd
+
+
+def test_the_comment_block_survives_a_gnds_file(micro_tape, microSection, tmp_path):
+    """ENDF -> model -> GNDS XML -> model -> MF1/451, and the section is the file's."""
+    from kika.gnds.decode import readReactionSuite
+    from kika.gnds.encode import writeReactionSuite
+    from kika.gnds.xpath import Document
+
+    endf = read_endf(str(micro_tape))
+    suite, _ = decodeReactionSuite(endf)
+    tree, _ = writeReactionSuite(suite)
+    path = tmp_path / "suite.xml"
+    tree.write(path, encoding="UTF-8", xml_declaration=True)
+    reread, _ = readReactionSuite(Document.parse(path))
+    assert _endfCompatible(reread) == microSection.description
+
+    # GNDS states none of the nineteen header fields, so they are lent from the
+    # ENDF read; the text comes from the GNDS file.
+    from dataclasses import replace
+    reread.provenance = replace(suite.provenance, descriptiveText=[])
+    rebuilt, _ = encodeMF1MT451(reread)
+    assert str(rebuilt) == str(microSection)
+
+
+def test_an_edited_comment_block_is_what_gets_written(micro_tape):
+    """The documentation node is the copy a caller edits, so it wins over provenance."""
+    suite, _ = decodeReactionSuite(read_endf(str(micro_tape)))
+    documentation = suite.styles.evaluatedFor("eval").documentation
+    note = "Perturbed by kika: MF33 sample 17. " * 3
+    documentation.endfCompatible.text += "\n" + note
+
+    rebuilt, report = encodeMF1MT451(suite)
+    assert rebuilt._nwd == len(suite.provenance.descriptiveText) + 2
+    assert rebuilt.descriptive_text[-2].startswith("Perturbed by kika")
+    assert all(len(line) <= 66 for line in rebuilt.descriptive_text)
+    assert any("wrapped at 66" in entry for entry in report.approximations)

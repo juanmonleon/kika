@@ -1521,18 +1521,19 @@ def test_writing_a_gnds_sourced_suite_to_endf_is_refused_for_the_right_reason(
         kika.write(suite, tmp_path / "out.endf", format="endf")
 
 
-def test_a_gnds_sourced_suite_with_a_mat_is_still_refused_by_the_header(h2_gnds,
-                                                                       tmp_path):
-    """And giving it a MAT is not enough, which is the honest half.
+def test_a_gnds_sourced_suite_with_a_mat_gets_past_the_header_and_stops_at_mf3(
+        h2_gnds, tmp_path):
+    """Giving it a MAT is still not enough — but the header is no longer why.
 
-    MF1/451 carries nineteen fields — NLIB, NMOD, LDRV, LREL, the NWD comment
-    block — that GNDS states nowhere, so ``encodeMF1MT451`` refuses rather than
-    inventing a header. Writing ENDF from a GNDS file needs those fields
-    supplied, not guessed; ``gnds_endf_conflicts.md`` §2.8 counts that as part
-    of the conversion problem rather than a gap in the assembler.
+    Until 2026-10-08 ``encodeMF1MT451`` refused here: MF1/451's nineteen fields
+    were taken only from an ENDF read. They are now derived from the model the
+    way FUDGE's ``toENDF6`` derives them (``mf1_header.py``; gated field by field
+    against real tapes in ``test_header_synthesis.py``). What stops the tape now
+    is MT1's QM/LR, which GNDS does not state and ``encodeMF3MT`` will not
+    invent — the next item of ``gnds_endf_conflicts.md`` §6.3.
     """
     suite = kika.read(h2_gnds, covariances=False)
-    with pytest.raises(ValueError, match="ENDF MF1/451 section cannot be written"):
+    with pytest.raises(ValueError, match="carries no qm/lr"):
         kika.write(suite, tmp_path / "out.endf", format="endf", mat=125)
 
 
