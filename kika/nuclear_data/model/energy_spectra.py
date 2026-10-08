@@ -27,10 +27,9 @@ the table, and here the attribute *is* the table.
 a node that inherited from it would be perturbed as if it were a table it is
 not. A parametrised spectrum has no covariance in ENDF -- MF35 is stated for
 tables -- and perturbing it would need a covariance of its *parameters*, which
-no library carries. PD-3 as recommended on 2026-10-08, not yet confirmed by
-Juan: refuse it by name. What these nodes offer instead is :meth:`toPointwise`:
-the spectrum tabulated, as an ``XYs2d`` the caller asked for, never filed under
-the evaluated label.
+no library carries. Decision PD-3 (Juan, 2026-10-08): refuse it by name. What
+these nodes offer instead is :meth:`toPointwise`: the spectrum tabulated, as an
+``XYs2d`` the caller asked for, never filed under the evaluated label.
 
 **The arithmetic is** :mod:`kika.algebra.spectra`'s, the same functions the
 ENDF reader evaluates with, so the two cannot disagree. Every form is

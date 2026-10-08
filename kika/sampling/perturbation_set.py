@@ -739,7 +739,7 @@ class PerturbationSet:
             elif isinstance(energy, Function2d):
                 candidates.append((product, energy))
         if not candidates and refused:
-            # PD-3 (recommended 2026-10-08, pending Juan): refused by name.
+            # PD-3 (decided 2026-10-08): refused by name.
             # A parametrised spectrum is a formula, MF35 is a covariance of the group
             # integrals of a *table*, and perturbing the formula would need a
             # covariance of its parameters, which ENDF does not carry.
