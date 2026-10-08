@@ -166,7 +166,10 @@ def main(tapeText, name):
             try:
                 out["endf"] = reactionSuite.toENDF6("eval", {"verbosity": 0})
             except Exception as error:  # reported, so the GNDS tests still run
+                import traceback
+
                 out["endfError"] = f"{type(error).__name__}: {error}"
+                out["endfTraceback"] = traceback.format_exc()
         sys.stdout.write("\n" + JSON_MARKER + json.dumps(out) + "\n")
         return
 

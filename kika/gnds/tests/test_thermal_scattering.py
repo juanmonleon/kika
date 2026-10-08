@@ -12,6 +12,7 @@ test_fudge_in_the_loop.py``, behind the ``fudge`` marker.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -211,11 +212,19 @@ def _suiteNote(path):
     return conversion.get("flags")
 
 
-def test_the_gnds_carries_fudges_mat_note(roundTrip):
+#: The note kika writes per micro-tape, and FUDGE's where it differs. The ZA is
+#: MF7/MT451's principal element's most abundant nuclide (N14, Be9), else the
+#: tape's header ZA when it is not MAT + 100 (JEFF-4.0's 4000; FUDGE's file-name
+#: table says 4009). s-CH4 names no nuclide at all: the MAT alone.
+_NOTES = {"bemetal_elastic": "MAT=26,ZA=4009", "jeff_be_elastic": "MAT=26,ZA=4000",
+          "un_elastic": "MAT=71,ZA=7014", "sch4": "MAT=34"}
+
+
+def test_the_gnds_carries_fudges_mat_note(roundTrip, micro_tsl_tape):
     """FUDGE writes ``MAT=…,ZA=…`` on every TSL suite and cannot get back to ENDF
-    without it. With no principal nuclide named, kika states the MAT alone."""
+    without both halves (roadmap T6)."""
     suite, _, path = roundTrip
-    assert _suiteNote(path) == f"MAT={suite.provenance.mat}"
+    assert _suiteNote(path) == _NOTES[Path(micro_tsl_tape).stem.removeprefix("micro_tsl_")]
 
 
 def test_the_note_names_the_principal_scatterer_as_fudge_does(micro_tsl_sch4_tape, tmp_path):

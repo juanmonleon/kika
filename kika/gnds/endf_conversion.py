@@ -51,8 +51,24 @@ def readConversionFlags(applicationData: ET.Element, suite, report):
 
 
 def _principalZA(suite) -> Optional[int]:
-    """The ZA of the principal scatterer, when it is a nuclide PoPs knows."""
-    from kika.nuclear_data.model import EVAL_LABEL, IncoherentInelastic, Nuclide
+    """The ZA FUDGE's note names the scatterer by, when the evaluation states one.
+
+    FUDGE takes it from a table keyed by the *file name* (``ENDF_ITYPE_2.py``:
+    the principal isotope, or the most abundant one -- W184, Pb208). kika has
+    no file name to go by, so it reads what the evaluation says, in order:
+
+    1. the principal scattering atom of MF7/MT4, when it is a nuclide;
+    2. the most abundant nuclide of the first element of ``targetInfo``
+       (MF7/MT451 lists the principal element first);
+    3. the tape's own header ZA, when it is a real one and not the MAT + 100
+       pseudo-ZA (JEFF-4.0 writes Be metal as 4000, the element).
+
+    FUDGE's ``toENDF6`` only looks a mass up by this number and then replaces
+    it with the target's, so a real ZA is all it needs. ``None`` when nothing
+    names one: kika does not guess a nuclide from an atom's mass.
+    """
+    from kika.nuclear_data.model import (EVAL_LABEL, Evaluated, IncoherentInelastic,
+                                         Nuclide)
     from kika.nuclear_data.model.pops import zaFromPid
 
     for reaction in suite.reactions:
@@ -62,6 +78,15 @@ def _principalZA(suite) -> Optional[int]:
             particle = suite.PoPs.particles.get(form.principal.pid)
             if isinstance(particle, Nuclide):
                 return zaFromPid(particle.id)
+    style = next((s for s in suite.styles if isinstance(s, Evaluated)), None)
+    info = getattr(style, "targetInfo", None)
+    if info is not None and info.chemicalElements and info.chemicalElements[0].nuclides:
+        nuclides = info.chemicalElements[0].nuclides
+        return zaFromPid(max(nuclides, key=lambda n: n.atomFraction or 0.0).pid)
+    provenance = getattr(suite, "provenance", None)
+    za, mat = getattr(provenance, "za", None), getattr(provenance, "mat", None)
+    if za is not None and mat is not None and int(za) >= 1000 and int(za) != int(mat) + 100:
+        return int(za)
     return None
 
 
@@ -73,8 +98,8 @@ def _tslFlags(suite) -> Optional[EndfConversionFlags]:
     on every TSL evaluation it converts (``ENDF_ITYPE_2.py``) and cannot write
     one back to ENDF without it. **Its ZA is the principal scatterer's** (1001
     for s-CH4, 4009 for Be metal), which FUDGE looks a mass up by -- not the
-    MAT + 100 pseudo-ZA of the tape's headers. kika writes it when the principal
-    atom is a nuclide in PoPs (MF7/MT451 named it), and ``MAT=`` alone otherwise.
+    MAT + 100 pseudo-ZA of the tape's headers. kika writes it when the evaluation
+    names one (:func:`_principalZA`), and ``MAT=`` alone otherwise.
     """
     from kika.nuclear_data.model.thermal_scattering import TNSL_INTERACTION
 

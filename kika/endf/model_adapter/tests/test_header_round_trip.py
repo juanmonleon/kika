@@ -162,3 +162,30 @@ def test_an_edited_comment_block_is_what_gets_written(micro_tape):
     assert rebuilt.descriptive_text[-2].startswith("Perturbed by kika")
     assert all(len(line) <= 66 for line in rebuilt.descriptive_text)
     assert any("wrapped at 66" in entry for entry in report.approximations)
+
+
+def test_the_suite_carries_its_projectile_in_pops(micro_tape, tmp_path):
+    """The neutron is in PoPs, as a ``baryon``, with kika's mass (roadmap T6).
+
+    A tape never states its projectile, but a GNDS file has to: FUDGE's
+    ``toENDF6`` looks up ``PoPs['n']``. The target is still the header's
+    nuclide, and AWR comes back unchanged through GNDS, which it would not with
+    any neutron mass other than the one the target's mass was built from.
+    """
+    import xml.etree.ElementTree as ET
+
+    import kika
+    from kika._constants import NEUTRON_MASS_AMU
+
+    suite, _ = decodeReactionSuite(read_endf(str(micro_tape)))
+    neutron = suite.PoPs["n"]
+    assert suite.target != "n"
+    assert neutron.mass.value == NEUTRON_MASS_AMU and neutron.mass.unit == "amu"
+    assert neutron.charge == 0 and neutron.spin.value == 0.5
+
+    path = tmp_path / "suite.xml"
+    kika.write(suite, path)
+    baryons = ET.parse(path).getroot().findall("PoPs/baryons/baryon")
+    assert [b.get("id") for b in baryons] == ["n"]
+    back = kika.read(path, covariances=False)
+    assert back.PoPs["n"].mass.value == NEUTRON_MASS_AMU

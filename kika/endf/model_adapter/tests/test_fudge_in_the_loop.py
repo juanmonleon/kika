@@ -412,16 +412,18 @@ def _sameTslForms(suite, tape: Path):
     return back
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FUDGE's toENDF6 needs the projectile in PoPs (`PoPs['n']`) and a mass for the "
-    "note's principal ZA; no GNDS kika writes from ENDF carries the neutron "
-    "(endf_coverage_roadmap.md, transversal T6)"))
-def test_fudge_writes_endf_from_the_tsl_gnds_kika_writes(tslGnds, tmp_path):
-    """FUDGE needs the MAT=… note to write a TSL tape; kika writes it since 2026-10-08.
+def test_fudge_writes_endf_from_the_tsl_gnds_kika_writes(tslGnds, tmp_path, request):
+    """FUDGE writes a TSL tape from kika's GNDS (roadmap T6).
 
+    It needs the neutron in PoPs and both halves of the ``MAT=…,ZA=…`` note.
     Its tape must hold the forms kika decodes from the source, under the
-    source's MAT. Still short of that: see the xfail.
+    source's MAT.
     """
+    if request.node.callspec.params["tslGnds"] == "sch4":
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "the s-CH4 micro-tape has no MF7/MT451 and MF7/MT4 names its principal "
+            "atom by mass only, so nothing states the note's ZA; FUDGE takes it "
+            "from the file name, and kika does not guess a nuclide from a mass")))
     suite, _, _, _, endf, _ = tslGnds
     assert not endf.startswith(("KeyError", "ValueError")), endf
     tape = tmp_path / "fudge_from_kika.endf"

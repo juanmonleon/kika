@@ -38,6 +38,7 @@ from kika.nuclear_data.model import (
     Frame,
     Nuclide,
     OutputChannel,
+    Particle,
     PhysicalQuantity,
     PoPs,
     Q,
@@ -146,6 +147,20 @@ def _qi(mf3mt, report: ConversionReport) -> Optional[float]:
         report.lost(f"MT{mf3mt.number}: MF3 carried no QI, so the reaction Q is unknown")
         return None
     return float(value)
+
+
+def _neutron() -> Particle:
+    """The projectile as FUDGE's PoPs states it, with kika's neutron mass.
+
+    The mass is :data:`~kika._constants.NEUTRON_MASS_AMU`, not FUDGE's
+    1.00866491574: the target's mass above is AWR times this constant and
+    MF1/451's AWR is derived back as their ratio, so any other value would
+    move AWR on a round trip. The halflife is FUDGE's 881.5 s, because §12
+    requires one on a ``baryon``.
+    """
+    return Particle(id="n", mass=PhysicalQuantity(value=NEUTRON_MASS_AMU, unit="amu"),
+                    spin=PhysicalQuantity(value=0.5, unit="hbar"), parity=1, charge=0,
+                    halflife=PhysicalQuantity(value=881.5, unit="s"))
 
 
 def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
@@ -301,6 +316,12 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         target=target,
         projectileFrame=Frame.lab,
     )
+    # The projectile, after the target is named from the header's nuclide. An
+    # ENDF tape never states it (the sublibrary does), but a GNDS file has to:
+    # FUDGE's toENDF6 looks up `PoPs['n']`, and a suite without it cannot be
+    # written back to ENDF by anyone but kika (roadmap T6).
+    if headerProvenance is not None:
+        pops.add(_neutron())
     suite.PoPs = pops
     if style is not None:
         suite.styles.add(style)
