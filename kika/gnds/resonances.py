@@ -687,7 +687,9 @@ class _ResonanceReader:
             average = self.readAverage(width, f"{here}/widths/width[@label='{label}']")
             group.channels.append(UnresolvedChannel(
                 label=width.attrib.get("resonanceReaction", label),
-                degreesOfFreedom=float(width.attrib.get("degreesOfFreedom", 1.0)),
+                # FUDGE reads an absent attribute as 0, a width that does not
+                # fluctuate; 1.0 would make it Porter-Thomas without saying so.
+                degreesOfFreedom=float(width.attrib.get("degreesOfFreedom", 0.0)),
                 widths=None if average is None or average[0] is None else average[1],
                 constantWidth=(float(average[1][0]) if average is not None and average[0] is None
                                else None if average is not None else _constant(width)),

@@ -22,6 +22,10 @@ class UnresolvedChannel:
     """Average width for one channel, constant or tabulated against energy."""
 
     label: str
+    #: ν of the χ² distribution of this width. **Zero means the width does not
+    #: fluctuate** — ENDF's AMUG/AMUF/AMUX=0, and what cases A and B imply for
+    #: capture. Non-integer values are real data (TALYS-derived AMUX such as
+    #: 1.0123 in ~25 B-VIII.1/JENDL-5 evaluations) and must not be truncated.
     degreesOfFreedom: float = 1.0
     widths: Optional[np.ndarray] = None
     constantWidth: Optional[float] = None

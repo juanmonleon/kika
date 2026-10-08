@@ -691,7 +691,12 @@ def _decodeUnresolved(parameters, report: ConversionReport,
                     atomicWeightRatio=block.awri,
                     channels=[
                         _channel("neutron", state.gn0, state.amun),
-                        _channel("capture", state.gg),
+                        # Cases A and B state no AMUG: the capture width does
+                        # not fluctuate, which the model spells as zero degrees
+                        # of freedom (case C writes AMUG=0 for the same thing,
+                        # and FUDGE converts A/B to 0). Leaving the 1.0 default
+                        # turned a fixed width into a Porter-Thomas one.
+                        _channel("capture", state.gg, 0.0),
                     ],
                 ))
                 stateFields.append({"l": block.l, "j": state.aj})
@@ -703,7 +708,7 @@ def _decodeUnresolved(parameters, report: ConversionReport,
             for state in block.j_states:
                 channels = [
                     _channel("neutron", state.gn0, state.amun),
-                    _channel("capture", state.gg),
+                    _channel("capture", state.gg, 0.0),  # no AMUG in case B either
                 ]
                 if state.gf:
                     channels.append(_channel("fission", state.gf, float(state.muf)))

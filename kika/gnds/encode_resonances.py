@@ -496,7 +496,15 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
         report.lost(f"URR L={group.L} J={group.J}: cross-section interpolation is distinct from parameter-function interpolation and is not serialized by this GNDS writer")
     grid = group.levelSpacingEnergies if group.levelSpacingEnergies is not None \
         else blockGrid
-    _average(element, "levelSpacing", grid, group.levelSpacing, None,
+    spacing, spacingConstant = group.levelSpacing, None
+    if (group.levelSpacingFunction is None and spacing is not None
+            and np.asarray(spacing).size == 1
+            and (grid is None or np.asarray(grid).size != 1)):
+        # ENDF cases A and B give one D per J: the model keeps it as a
+        # one-element array, which the arrays-against-a-grid path below could
+        # only drop. It is a constant, and §19.4.1 writes it as constant1d.
+        spacing, spacingConstant = None, float(np.asarray(spacing)[0])
+    _average(element, "levelSpacing", grid, spacing, spacingConstant,
              f"spinGroup L={group.L} J={group.J} levelSpacing", report, domain,
              unit="eV", label="levelSpacing", form=group.levelSpacingFunction)
 

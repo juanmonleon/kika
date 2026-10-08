@@ -502,7 +502,8 @@ def parse_data_values(lines, start, n_values):
     for _ in range(num_lines_needed):
         if idx >= len(lines):
             break
-        ld = parse_line(lines[idx])
+        line = lines[idx]
+        ld = parse_line(line)
         idx += 1
         for i in range(1, 7):
             if len(values) >= n_values:
@@ -510,6 +511,12 @@ def parse_data_values(lines, start, n_values):
             v = ld.get(f"C{i}")
             if v is not None:
                 values.append(v)
+            elif not line[(i - 1) * 11:i * 11].strip():
+                # A blank field inside a LIST body is a zero, not an absent
+                # value. Skipping it shifted every later value one slot: JEFF-4.0
+                # Gd-155/157 leave two RML channel columns blank, and their
+                # whole MF2 was lost behind a logged IndexError.
+                values.append(0.0)
     return values, idx
 
 
