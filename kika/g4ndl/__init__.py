@@ -9,15 +9,17 @@ the reader follows is the consumer's source, Geant4 v11.4.3
 references in ``kika-workspace/docs/library/G4NDL_token_spec.md``; checking
 against a real Geant4 build happens outside this repository.
 
-**Scope today: elastic and inelastic scattering**, read and written:
-``Elastic/CrossSection`` and ``Elastic/FS`` (MT2), and ``Inelastic/CrossSection``,
+**Scope today: elastic, inelastic and capture**, read and written:
+``Elastic/CrossSection`` and ``Elastic/FS`` (MT2); ``Inelastic/CrossSection``,
 the 36 channel directories ``Inelastic/F01`` … ``F36`` and the residual level
 schemes ``Inelastic/Gammas`` (:mod:`kika.g4ndl.inelastic_decode` says what of
-them reaches the model). ``kika.read(root, format="g4ndl", target=...)``,
+them reaches the model); and ``Capture/CrossSection`` with its final state,
+``Capture/FSMF6`` or ``Capture/FS`` (MT102, :mod:`kika.g4ndl.capture`).
+``kika.read(root, format="g4ndl", target=...)``,
 ``kika.write(suite, root, format="g4ndl")``, and :func:`patch_isotope` (or
 :func:`patch_elastic`) to replace one isotope in a copy of a whole library. A
-library also holding ``Capture`` or ``Fission`` is read *partially*, and the
-conversion report says so.
+library also holding ``Fission`` or ``ThermalScattering`` is read *partially*,
+and the conversion report says so.
 
 Like :mod:`kika.gnds`, nothing here imports :mod:`kika.nuclear_data.model` at
 module scope: ``import kika.g4ndl`` must not wake the model

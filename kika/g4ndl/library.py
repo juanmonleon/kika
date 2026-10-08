@@ -14,10 +14,11 @@ from the user:
   the ``.z`` wins, as in ``GetDataStream``, and the library lists the pair in
   :attr:`G4NDLLibrary.duplicates`.
 * **Only the processes kika reads are indexed.** Today that is the elastic
-  (``Elastic/CrossSection``, ``Elastic/FS``) and the inelastic
+  (``Elastic/CrossSection``, ``Elastic/FS``), the inelastic
   (``Inelastic/CrossSection``, the channel directories ``Inelastic/F01`` …
-  ``F36`` and the level schemes ``Inelastic/Gammas``), at the library root and
-  nowhere else: ``JENDL_HE/neutron/Elastic`` is a different, high-energy data
+  ``F36`` and the level schemes ``Inelastic/Gammas``) and the capture
+  (``Capture/CrossSection`` and its final state, ``Capture/FSMF6`` or
+  ``Capture/FS``), at the library root and nowhere else: ``JENDL_HE/neutron/Elastic`` is a different, high-energy data
   set that ships in the same tarball, and walking every directory named
   ``Elastic`` would mix the two.
 
@@ -44,11 +45,14 @@ __all__ = ["G4NDLLibrary", "IndexedFile", "open"]
 PROCESSES: Dict[str, Tuple[str, ...]] = {
     "elastic": ("Elastic/CrossSection", "Elastic/FS"),
     "inelastic": ("Inelastic/CrossSection",),
+    "capture": ("Capture/CrossSection",),
 }
 
 #: Process name -> the per-channel subdirectories an isotope has some of.
 CHANNELS: Dict[str, Tuple[str, ...]] = {
     "inelastic": tuple(f"Inelastic/{ch}" for ch in sorted(CHANNEL_MT)),
+    # The final state: Geant4 reads FSMF6 and, only when there is none, FS.
+    "capture": ("Capture/FSMF6", "Capture/FS"),
 }
 
 #: The residual nuclei's level schemes, ``z<Z>.a<A>``, plain text only.
@@ -128,8 +132,8 @@ class G4NDLLibrary:
             nested = [p for p in self.root.iterdir()
                       if p.is_dir() and (p / "Elastic").is_dir()]
             hint = f"; did you mean {nested[0]}?" if nested else ""
-            raise G4NDLError(f"{self.root} holds no Elastic/CrossSection or "
-                             f"Elastic/FS directory{hint}")
+            raise G4NDLError(f"{self.root} holds none of the directories kika reads "
+                             f"(Elastic/, Inelastic/, Capture/){hint}")
 
     def _indexDirectory(self, sub: str, d: Path) -> None:
         plain: Dict[str, Path] = {}
@@ -207,7 +211,8 @@ class G4NDLLibrary:
         the ``target`` name :meth:`read` takes (``Fe56``, ``Cnat``, ``Co58m1``),
         its GNDS id (``Fe56``, ``C``, ``Co58_m1``), ``Z``, ``A`` (``None`` for
         a natural element), ``M``, the element name of its file, whether
-        its files are ``.z`` and the ``inelastic`` channels it has. ``unread``
+        its files are ``.z``, the ``inelastic`` channels it has and whether it has
+        ``capture``. ``unread``
         names the top-level directories kika does not read yet (``Capture``,
         ``Fission``, ...).
         """
@@ -219,7 +224,8 @@ class G4NDLLibrary:
             entries.append(dict(target=str(key), id=targetId(key), Z=key.Z, A=key.A, M=key.M,
                                 element=files[0].elementName,
                                 compressed=all(f.compressed for f in files),
-                                inelastic=self.inelasticChannels(key)))
+                                inelastic=self.inelasticChannels(key),
+                                capture=self.has(key, "capture")))
         read = {s.split("/")[0] for s in _indexedSubdirs()}
         return dict(root=str(self.root), name=self.root.name, isotopes=entries,
                     processes=sorted(p for p in PROCESSES if self.isotopes(p)),
@@ -264,6 +270,36 @@ class G4NDLLibrary:
 
         return parse_inelastic_fs(self.tokens(target, f"Inelastic/{channel}"), channel)
 
+    def captureCrossSection(self, target: TargetLike) -> CrossSectionRecord:
+        """``target``'s ``Capture/CrossSection``, MT102's σ."""
+        return parse_cross_section(self.tokens(target, "Capture/CrossSection"))
+
+    def captureFinalStateDirectory(self, target: TargetLike) -> Optional[str]:
+        """``"Capture/FSMF6"``, ``"Capture/FS"`` or ``None``: what Geant4 reads for ``target``.
+
+        Raises :class:`~kika.g4ndl.exceptions.G4NDLError` when both exist.
+        Geant4 would read ``FSMF6`` and never look at ``FS``; no real library
+        has such an isotope, so it is a library someone assembled by hand, and
+        which of the two they meant is not kika's to guess.
+        """
+        key = parse_target(target)
+        present = [s for s in CHANNELS["capture"] if (s, key) in self._index]
+        if len(present) > 1:
+            raise G4NDLError(f"{key} has both {present[0]} and {present[1]}: Geant4 reads "
+                             f"the first and ignores the second. Remove the one you did "
+                             f"not mean")
+        return present[0] if present else None
+
+    def captureFinalState(self, target: TargetLike):
+        """``target``'s capture final state (``FSMF6`` or ``FS``), or ``None`` without one."""
+        from kika.g4ndl.capture import parse_capture_mf6, parse_capture_photons
+
+        sub = self.captureFinalStateDirectory(target)
+        if sub is None:
+            return None
+        parser = parse_capture_mf6 if sub == "Capture/FSMF6" else parse_capture_photons
+        return parser(self.tokens(target, sub))
+
     def gammas(self, Z: int, A: int) -> GammasRecord:
         """The ``Inelastic/Gammas/z<Z>.a<A>`` level scheme of nucleus ``(Z, A)``."""
         from kika.g4ndl.inelastic_parse import parse_gammas
@@ -280,11 +316,12 @@ class G4NDLLibrary:
         """``target`` as a :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
         ``processes`` (default: every process kika reads that the library has
-        for ``target``) is a subset of ``("elastic", "inelastic")``. The elastic
-        is MT2; the inelastic is one reaction per channel and partial MT
-        (:mod:`kika.g4ndl.inelastic_decode`) plus the ``inelastic`` total in
-        ``suite.sums``. What the library holds and kika does not read
-        (``Capture``, ``Fission``, ...) is listed in ``suite.report``. This is
+        for ``target``) is a subset of ``("elastic", "inelastic", "capture")``.
+        The elastic is MT2; the inelastic is one reaction per channel and
+        partial MT (:mod:`kika.g4ndl.inelastic_decode`) plus the ``inelastic``
+        total in ``suite.sums``; the capture is MT102
+        (:mod:`kika.g4ndl.capture`). What the library holds and kika does not read
+        (``Fission``, ...) is listed in ``suite.report``. This is
         what ``kika.read(root, format="g4ndl", target=...)`` calls. Importing
         the decoders here, not at module scope, keeps ``import kika.g4ndl``
         from waking the model.
@@ -318,6 +355,11 @@ class G4NDLLibrary:
                      if (PROCESSES["inelastic"][0], key) in self._index else None)
             files = [self.inelasticFinalState(key, ch) for ch in self.inelasticChannels(key)]
             decodeInelastic(total, files, suite, library=self, report=report)
+        if "capture" in wanted:
+            from kika.g4ndl.capture import decodeCapture
+
+            decodeCapture(self.captureCrossSection(key), self.captureFinalState(key), suite,
+                          library=self, report=report)
         return suite
 
     def _subdirs(self, process: str) -> Tuple[str, ...]:

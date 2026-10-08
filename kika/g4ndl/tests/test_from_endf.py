@@ -45,7 +45,13 @@ def test_an_endf_suite_with_its_reconstruction_is_written(tmp_path):
     assert lib.isotopes() == [g4ndl.IsotopeKey(26, 56)]
     fs = lib.elasticFinalState("Fe56")
     assert fs.targetMass == 55.45443 and fs.frameFlag == 2    # AWR and LCT of the tape
-    assert fs.header is None and report.warnings == []
+    assert fs.header is None
+    # MT102 goes to Capture/ too. The micro-tape has no MF6 for it, so there
+    # is no final state to write, and that is the one thing the report says.
+    assert len(report.warnings) == 1 and "G4PhotonEvaporation" in report.warnings[0]
+    assert lib.captureFinalState("Fe56") is None
+    assert np.array_equal(lib.captureCrossSection("Fe56").sigma,
+                          suite.findReactionByENDF_MT(102).crossSection["recon"].ys)
     # The angular distribution is the tape's MF4, record for record.
     mf4 = suite.reactions[2].outputChannel.products.byPid("n")[0].distribution["eval"]
     assert [r.energy for b in (fs.legendre, fs.tabulated) if b for r in b.records] == mf4.energies

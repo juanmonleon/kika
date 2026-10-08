@@ -200,12 +200,13 @@ def test_provenance_names_the_files_and_keeps_the_tokens():
 def test_a_library_with_other_processes_reports_a_partial_read(tmp_path):
     root = tmp_path / "lib"
     shutil.copytree(DATA / "JEFF-4.0", root)
-    (root / "Capture").mkdir()
+    (root / "Fission").mkdir()
     (root / "Inelastic").mkdir()
+    (root / "Capture").mkdir()
     report = g4ndl.open(root).read("H1").report
-    # Inelastic/ is read, and holds nothing for H1; Capture/ is not read.
+    # Inelastic/ and Capture/ are read, and hold nothing for H1; Fission/ is not read.
     assert len(report.unsupported) == 1
-    assert "Capture/" in report.unsupported[0]
+    assert "Fission/" in report.unsupported[0]
     assert "elastic channel (MT2) only" in report.unsupported[0]
 
 

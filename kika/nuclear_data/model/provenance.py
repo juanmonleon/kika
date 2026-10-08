@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["Provenance", "EndfProvenance", "AceProvenance",
-           "GndsProvenance", "G4NDLProvenance", "G4NDLInelasticProvenance"]
+           "GndsProvenance", "G4NDLProvenance", "G4NDLInelasticProvenance",
+           "G4NDLCaptureProvenance"]
 
 
 @dataclass
@@ -279,3 +280,39 @@ class G4NDLInelasticProvenance(Provenance):
     #: sum or its parts were edited (roadmap G4NDL Fase 10, D10-1).
     crossSectionDigest: Optional[str] = None
     partsDigest: Optional[str] = None
+
+
+@dataclass
+class G4NDLCaptureProvenance(Provenance):
+    """The capture reaction (MT102) read from G4NDL, and the tokens the model has no slot for.
+
+    One isotope's capture is two files: ``Capture/CrossSection`` and a final
+    state, which is **either** ``Capture/FSMF6`` (an ENDF MF6 body: the
+    photon spectrum, sometimes a recoil) **or** ``Capture/FS`` (an ENDF
+    MF12/14/15 photon body). Geant4 opens ``FSMF6`` first and reads ``FS``
+    only when it is absent; with neither it falls back to its own
+    photon-evaporation model (``G4NeutronHPCaptureFS::Init``).
+
+    ``bookkeeping`` are the cross-section file's two integers. Geant4 discards
+    them; in capture both libraries write the reaction's Q value in eV,
+    rounded, and 0. ``finalState`` says which file was read (``"FSMF6"``,
+    ``"FS"``, ``None``) and ``finalStateEntry`` holds what its body has and
+    the model does not: for ``FSMF6`` the bookkeeping of an inelastic
+    ``dataType=6`` section (``targetMass``, ``frameFlag``, ZAP/AWP/LIP/LAW per
+    product...), or the whole body as ``verbatim`` G4NDL text when the model
+    cannot hold it; for ``FS`` always ``verbatim``, since the model has no
+    photon-production form yet (``kika/g4ndl/capture.py``).
+    """
+
+    sourceFormat: str = "g4ndl"
+    library: Optional[str] = None
+    libraryName: Optional[str] = None
+    crossSectionPath: Optional[str] = None
+    crossSectionSha256: Optional[str] = None
+    crossSectionHeader: Optional[Tuple[str, str]] = None
+    bookkeeping: Optional[Tuple[int, int]] = None
+    finalState: Optional[str] = None
+    finalStatePath: Optional[str] = None
+    finalStateSha256: Optional[str] = None
+    finalStateHeader: Optional[Tuple[str, str]] = None
+    finalStateEntry: Dict[str, object] = field(default_factory=dict)

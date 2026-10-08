@@ -652,7 +652,8 @@ def writeElastic(suite, root, *, compressed: bool = False,
 # ------------------------------------------------------------------ the whole suite
 
 def suiteProcesses(suite) -> List[str]:
-    """The G4NDL processes ``suite`` holds data for: ``elastic`` (MT2), ``inelastic``."""
+    """The G4NDL processes ``suite`` holds data for: ``elastic`` (MT2), ``inelastic``,
+    ``capture`` (MT102)."""
     from kika.g4ndl.inelastic_decode import INELASTIC_SUM_LABEL
     from kika.g4ndl.inelastic_encode import channelOf
 
@@ -665,6 +666,8 @@ def suiteProcesses(suite) -> List[str]:
     if any(channelOf(r) is not None for r in list(suite.reactions) + list(suite.sums)) or any(
             r.id.label == INELASTIC_SUM_LABEL and r.id.ENDF_MT is None for r in suite.sums):
         out.append("inelastic")
+    if suite.findReactionByENDF_MT(102) is not None:
+        out.append("capture")
     return out
 
 
@@ -678,17 +681,19 @@ def writeSuite(suite, root, *, processes: Optional[Sequence[str]] = None,
     through :func:`writeElastic` (``crossSectionLabel``, ``angularLabel``) and
     the inelastic channels through
     :func:`kika.g4ndl.inelastic_encode.writeInelastic` (its distributions are
-    always the ``eval`` style, and its sums follow their parts). This is
+    always the ``eval`` style, and its sums follow their parts), and MT102
+    through :func:`kika.g4ndl.capture.writeCapture`. This is
     ``kika.write(suite, root, format="g4ndl")``. Every file is encoded and
     read back before any is written, process by process.
     """
+    from kika.g4ndl.capture import writeCapture
     from kika.g4ndl.inelastic_encode import writeInelastic
 
     wanted = suiteProcesses(suite) if processes is None else list(processes)
-    unknown = set(wanted) - {"elastic", "inelastic"}
+    unknown = set(wanted) - {"elastic", "inelastic", "capture"}
     if unknown or not wanted:
-        raise ValueError(f"processes must be a non-empty subset of ('elastic', 'inelastic'), "
-                         f"got {wanted!r}")
+        raise ValueError(f"processes must be a non-empty subset of ('elastic', 'inelastic', "
+                         f"'capture'), got {wanted!r}")
     report = ConversionReport()
     if "elastic" in wanted:
         report.extend(writeElastic(suite, root, compressed=compressed,
@@ -698,4 +703,7 @@ def writeSuite(suite, root, *, processes: Optional[Sequence[str]] = None,
     if "inelastic" in wanted:
         report.extend(writeInelastic(suite, root, compressed=compressed, header=header,
                                      targetMass=targetMass, elementName=elementName))
+    if "capture" in wanted:
+        report.extend(writeCapture(suite, root, compressed=compressed, header=header,
+                                   targetMass=targetMass, elementName=elementName))
     return report

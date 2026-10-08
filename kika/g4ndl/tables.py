@@ -44,7 +44,7 @@ from kika.g4ndl.physics import (
 
 __all__ = ["angularBulk", "angularMTs", "crossSections", "isotopeSummary",
            "LINEARISATION_POINTS", "PROJECTION_ORDER", "REPRESENTATIONS",
-           "INELASTIC_TOTAL", "inelasticTotal"]
+           "INELASTIC_TOTAL", "inelasticTotal", "captureSummary"]
 
 #: Points each non-lin-lin segment of a table is cut into before it is sent.
 LINEARISATION_POINTS = 16
@@ -335,7 +335,39 @@ def isotopeSummary(suite) -> Dict[str, Any]:
         reactions=_reactionRows(suite),
         angular_mts=angularMTs(suite),
         inelastic_total=_range(inelasticTotal(suite)),
+        capture=captureSummary(suite),
     )
+
+
+def captureSummary(suite) -> Optional[Dict[str, Any]]:
+    """MT102 as a viewer shows it, or ``None`` without capture: its σ range,
+    Q, which final-state file it was read from (``FSMF6``, ``FS``, ``None``),
+    where its photons live (``"model"`` when the products reached the model,
+    ``"verbatim"`` when they travel as G4NDL text, ``None`` without a final
+    state, when Geant4 samples them from its photon evaporation) and the
+    products' particles."""
+    reaction = suite.findReactionByENDF_MT(102)
+    if reaction is None:
+        return None
+    prov = getattr(reaction, "provenance", None)
+    entry = getattr(prov, "finalStateEntry", None) or {}
+    products = [p.label or p.pid for p in reaction.outputChannel.products]         if reaction.outputChannel is not None else []
+    if products:
+        photons = "model"
+    elif entry.get("verbatim") is not None:
+        photons = "verbatim"
+    else:
+        photons = None
+    q = getattr(getattr(reaction.outputChannel, "Q", None), "value", None)
+    try:
+        sigma = _range(suite.cross_section(102, form="recon"))
+    except KeyError:
+        sigma = None
+    return dict(cross_section=sigma, q_value=None if q is None else float(q),
+                final_state=getattr(prov, "finalState", None), photons=photons,
+                products=products,
+                cross_section_path=getattr(prov, "crossSectionPath", None),
+                final_state_path=getattr(prov, "finalStatePath", None))
 
 
 def _range(pair) -> Optional[Dict[str, Any]]:

@@ -438,7 +438,7 @@ def test_elastic_and_inelastic_together(tmp_path):
     assert not any("Elastic/" in m for m in suite.report.unsupported)   # it has none
     out = tmp_path / "out"
     with pytest.raises(ValueError):
-        writeSuite(suite, out, processes=["capture"])
+        writeSuite(suite, out, processes=["fission"])
     writeSuite(suite, out, processes=["inelastic"])
     assert sorted(p.name for p in (out / "Inelastic").iterdir()) == ["CrossSection", "F01",
                                                                     "F04", "F05", "F18"]

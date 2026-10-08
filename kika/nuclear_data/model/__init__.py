@@ -140,7 +140,8 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
 from .pops import Nuclide, Particle, PoPs, pidFromZA, zaFromPid
-from .provenance import (AceProvenance, EndfProvenance, G4NDLInelasticProvenance,
+from .provenance import (AceProvenance, EndfProvenance, G4NDLCaptureProvenance,
+                         G4NDLInelasticProvenance,
                          G4NDLProvenance, GndsProvenance, Provenance)
 from .quantities import PhysicalQuantity, RangeQuantity
 from .quantities import Uncertainty as ScalarUncertainty
@@ -265,6 +266,7 @@ __all__ = [
     # conversion bookkeeping (not GNDS nodes)
     "ConversionReport", "Provenance", "EndfProvenance", "AceProvenance",
     "GndsProvenance",
+    "G4NDLCaptureProvenance",
     "G4NDLInelasticProvenance",
     "G4NDLProvenance",
     # §25 covariances
