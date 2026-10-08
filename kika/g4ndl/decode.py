@@ -343,7 +343,8 @@ def _provenance(cs: CrossSectionRecord, fs: ElasticFSRecord, library) -> G4NDLPr
 
 _PROCESS_NAMES = {"Elastic": "the elastic channel (MT2)",
                   "Inelastic": "the inelastic channels",
-                  "Capture": "the capture (MT102)"}
+                  "Capture": "the capture (MT102)",
+                  "Fission": "the fission (MT18 and its chances)"}
 
 
 def _reportPartialRead(library, report: ConversionReport,

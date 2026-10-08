@@ -106,8 +106,11 @@ def test_every_isotope_decodes_into_the_model(request, fixture):
         # The inelastic channels have their own test (test_inelastic_full_libraries).
         suite = lib.read(key, processes=["elastic"])
         assert suite.reactions.ENDF_MTs == [2]
-        # The library root holds more than Elastic/, and the report says so.
-        assert suite.report.unsupported
+        # When the isotope has more than its elastic, or the library a directory kika
+        # does not read, the report says so. JEFF-4.0's He-4 has neither.
+        more = [p for p in ("capture", "fission") if lib.has(key, p)] + lib.inelasticChannels(key)
+        unread = set(lib.presentTopLevel()) - {"Elastic", "Inelastic", "Capture", "Fission"}
+        assert bool(suite.report.unsupported) == bool(more or unread), key
 
 
 def _records(angular):

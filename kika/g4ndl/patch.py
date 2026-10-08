@@ -4,7 +4,8 @@ Phase 6 of the G4NDL roadmap, for the case it was asked for: an iterative loop
 (insert measured σ or a measured p(μ), run Geant4, compare, repeat) needs a
 complete library ``G4NEUTRONHPDATA`` can point at, in which exactly one
 isotope's files differ from a reference library. Phase 10 extends it from the
-elastic to the inelastic channels, and the capture work extends it to MT102.
+elastic to the inelastic channels, and the capture and fission work extend it
+to MT102 and MT18.
 
 :func:`patch_isotope` is "copy the base library, then
 :func:`~kika.g4ndl.encode.writeSuite` one isotope into the copy", for the
@@ -23,7 +24,10 @@ guarantees the roadmap asks for:
   channel the suite has, and the isotope's file in any other ``Fxx`` is
   *removed* (Geant4 would otherwise read a channel the suite does not have);
   for the capture ``Capture/CrossSection`` and the one final state the suite
-  has, ``FSMF6`` or ``FS``, with the other removed for the same reason.
+  has, ``FSMF6`` or ``FS``, with the other removed for the same reason; for
+  the fission ``Fission/CrossSection``, ``Fission/FS``, one ``Fission/FC`` …
+  ``LC`` per chance the suite has and ``Fission/FF`` when it carries yields,
+  the others removed.
   Its other variant (``.z`` or plain) is left out so it cannot shadow the new
   file; every other file is the base's, which the verification checks by
   relative path and size. Level schemes of residual nuclei
@@ -159,7 +163,7 @@ def patch_isotope(base_library, suite, output_library, *,
         and it is a library this function wrote (it has a ``kika_manifest.json``):
         kika never deletes a directory it did not make.
     processes
-        Any of ``"elastic"``, ``"inelastic"``, ``"capture"``. Default: what the suite
+        Any of ``"elastic"``, ``"inelastic"``, ``"capture"``, ``"fission"``. Default: what the suite
         holds (:func:`kika.g4ndl.encode.suiteProcesses`). The isotope's files
         of the other processes are the base's, untouched.
     gammas
@@ -189,6 +193,8 @@ def patch_isotope(base_library, suite, output_library, *,
     from kika.g4ndl.encode import (encodeElastic, recordDifferences, suiteProcesses,
                                    targetKey, writeSuite)
     from kika.g4ndl.capture import CaptureMF6Record, encodeCapture, finalStateDifferences
+    from kika.g4ndl.fission import fissionDifferences
+    from kika.g4ndl.fission_model import encodeFission
     from kika.g4ndl.inelastic_encode import encodeInelastic
     from kika.g4ndl.inelastic_format import formatGammas, inelasticDifferences
     from kika.g4ndl.names import file_name
@@ -233,6 +239,15 @@ def patch_isotope(base_library, suite, output_library, *,
         if fs is not None:
             encoded["Capture/FSMF6" if isinstance(fs, CaptureMF6Record)
                     else "Capture/FS"] = fs
+    if "fission" in wanted:
+        cs, fs, chances, ff, _ = encodeFission(suite, header=header, targetMass=targetMass)
+        encoded["Fission/CrossSection"] = cs
+        if fs is not None:
+            encoded["Fission/FS"] = fs
+        for chance, record in chances.items():
+            encoded[f"Fission/{chance}"] = record
+        if ff is not None:
+            encoded["Fission/FF"] = ff
     key = targetKey(suite)
     located = {}
     for sub in _subdirsOf(wanted):
@@ -303,6 +318,14 @@ def patch_isotope(base_library, suite, output_library, *,
                 diffs += recordDifferences(record, check.captureCrossSection(key))
             elif sub.startswith("Capture/"):
                 diffs += finalStateDifferences(record, check.captureFinalState(key))
+            elif sub == "Fission/CrossSection":
+                diffs += recordDifferences(record, check.fissionCrossSection(key))
+            elif sub == "Fission/FS":
+                diffs += fissionDifferences(record, check.fissionFinalState(key))
+            elif sub == "Fission/FF":
+                diffs += fissionDifferences(record, check.fragmentYields(key))
+            elif sub.startswith("Fission/"):
+                diffs += fissionDifferences(record, check.chanceFission(key, sub.split("/")[1]))
             else:
                 diffs += inelasticDifferences(record, check.inelasticFinalState(
                     key, sub.split("/")[1]))

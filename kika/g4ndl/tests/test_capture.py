@@ -208,7 +208,7 @@ def test_the_front_door_reads_and_writes_the_capture(tmp_path):
     assert recordDifferences(G4.captureCrossSection("H1"), lib.captureCrossSection("H1")) == []
     assert finalStateDifferences(_record("H1"), lib.captureFinalState("H1")) == []
     with pytest.raises(ValueError, match="'capture'"):
-        writeSuite(suite, tmp_path, processes=["fission"])
+        writeSuite(suite, tmp_path, processes=["thermal"])
 
 
 # ------------------------------------------------------------------ patch

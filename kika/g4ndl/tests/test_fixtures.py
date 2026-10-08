@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from kika.g4ndl.tests.data.build_fixtures import (
-    CAPTURE, CLAIMS, GAMMAS, INELASTIC, INELASTIC_ISOTOPES, REAL, SHA256, SUBDIRS, SYNTHETIC,
+    CAPTURE, CLAIMS, FISSION, FISSION_FF, GAMMAS, INELASTIC, INELASTIC_ISOTOPES, REAL, SHA256, SUBDIRS, SYNTHETIC,
     SYNTHETIC_COMPRESSED,
 )
 
@@ -106,7 +106,8 @@ def test_real_files_are_byte_for_byte_the_recorded_ones(key):
 
 def test_every_real_isotope_has_both_files_and_a_hash():
     expected = {f"{lib}/{sub}/{stem}.z" for lib, stem in REAL for sub in SUBDIRS}
-    assert expected == {k for k in SHA256 if not k.startswith(("inelastic/", "capture/"))}
+    assert expected == {k for k in SHA256
+                        if not k.startswith(("inelastic/", "capture/", "fission/"))}
 
 
 def test_every_inelastic_fixture_has_a_hash():
@@ -128,6 +129,17 @@ def test_every_capture_fixture_is_a_whole_isotope_with_a_hash():
         keys -= mine
     assert keys == set()
     assert sum((DATA / k).stat().st_size for k in SHA256 if k.startswith("capture/")) < 40_000
+
+
+def test_every_fission_fixture_is_a_whole_isotope_with_a_hash():
+    """Each isotope: every Fission/ file the library has for it, and the lone FF."""
+    keys = {k for k in SHA256 if k.startswith("fission/")}
+    for lib, stem in FISSION:
+        mine = {k for k in keys if k.endswith(f"/{stem}.z") and f"/{lib}/" in k}
+        assert {"CrossSection", "FS"} <= {k.split("/")[3] for k in mine}, stem
+        keys -= mine
+    assert keys == {f"fission/{lib}/Fission/FF/{name}" for lib, name in FISSION_FF}
+    assert sum((DATA / k).stat().st_size for k in SHA256 if k.startswith("fission/")) < 110_000
 
 
 @pytest.mark.parametrize("lib,stem", sorted(REAL))

@@ -242,9 +242,9 @@ def test_wrong_root_says_where_the_library_is(tmp_path):
 def test_unknown_subdir_and_process():
     lib = g4ndl.open(JEFF)
     with pytest.raises(ValueError, match="not indexed"):
-        lib.locate("H1", "Fission/CrossSection")
+        lib.locate("H1", "ThermalScattering/Coherent")
     with pytest.raises(ValueError, match="not read by kika yet"):
-        lib.isotopes("fission")
+        lib.isotopes("thermal")
 
 
 def test_cross_section_streams_to_its_last_token():

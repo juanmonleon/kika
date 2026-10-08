@@ -18,7 +18,9 @@ from the user:
   (``Inelastic/CrossSection``, the channel directories ``Inelastic/F01`` …
   ``F36`` and the level schemes ``Inelastic/Gammas``) and the capture
   (``Capture/CrossSection`` and its final state, ``Capture/FSMF6`` or
-  ``Capture/FS``), at the library root and nowhere else: ``JENDL_HE/neutron/Elastic`` is a different, high-energy data
+  ``Capture/FS``) and the fission (``Fission/CrossSection``, ``Fission/FS``,
+  the chances ``Fission/FC`` … ``LC`` and the yields ``Fission/FF``), at the
+  library root and nowhere else: ``JENDL_HE/neutron/Elastic`` is a different, high-energy data
   set that ships in the same tarball, and walking every directory named
   ``Elastic`` would mix the two.
 
@@ -46,6 +48,8 @@ PROCESSES: Dict[str, Tuple[str, ...]] = {
     "elastic": ("Elastic/CrossSection", "Elastic/FS"),
     "inelastic": ("Inelastic/CrossSection",),
     "capture": ("Capture/CrossSection",),
+    # ``Fission/FS`` is required with the σ: without it Geant4 emits no neutron.
+    "fission": ("Fission/CrossSection", "Fission/FS"),
 }
 
 #: Process name -> the per-channel subdirectories an isotope has some of.
@@ -53,6 +57,8 @@ CHANNELS: Dict[str, Tuple[str, ...]] = {
     "inelastic": tuple(f"Inelastic/{ch}" for ch in sorted(CHANNEL_MT)),
     # The final state: Geant4 reads FSMF6 and, only when there is none, FS.
     "capture": ("Capture/FSMF6", "Capture/FS"),
+    # The chances (MT19, 20, 21, 38) and the fragment yields, each optional.
+    "fission": ("Fission/FC", "Fission/SC", "Fission/TC", "Fission/LC", "Fission/FF"),
 }
 
 #: The residual nuclei's level schemes, ``z<Z>.a<A>``, plain text only.
@@ -133,7 +139,7 @@ class G4NDLLibrary:
                       if p.is_dir() and (p / "Elastic").is_dir()]
             hint = f"; did you mean {nested[0]}?" if nested else ""
             raise G4NDLError(f"{self.root} holds none of the directories kika reads "
-                             f"(Elastic/, Inelastic/, Capture/){hint}")
+                             f"(Elastic/, Inelastic/, Capture/, Fission/){hint}")
 
     def _indexDirectory(self, sub: str, d: Path) -> None:
         plain: Dict[str, Path] = {}
@@ -211,8 +217,9 @@ class G4NDLLibrary:
         the ``target`` name :meth:`read` takes (``Fe56``, ``Cnat``, ``Co58m1``),
         its GNDS id (``Fe56``, ``C``, ``Co58_m1``), ``Z``, ``A`` (``None`` for
         a natural element), ``M``, the element name of its file, whether
-        its files are ``.z``, the ``inelastic`` channels it has and whether it has
-        ``capture``. ``unread``
+        its files are ``.z``, the ``inelastic`` channels it has, whether it has
+        ``capture`` and its ``fission`` chances (``None`` without fission,
+        ``[]`` for MT18 alone). ``unread``
         names the top-level directories kika does not read yet (``Capture``,
         ``Fission``, ...).
         """
@@ -225,7 +232,9 @@ class G4NDLLibrary:
                                 element=files[0].elementName,
                                 compressed=all(f.compressed for f in files),
                                 inelastic=self.inelasticChannels(key),
-                                capture=self.has(key, "capture")))
+                                capture=self.has(key, "capture"),
+                                fission=(self.fissionChances(key)
+                                         if self.has(key, "fission") else None)))
         read = {s.split("/")[0] for s in _indexedSubdirs()}
         return dict(root=str(self.root), name=self.root.name, isotopes=entries,
                     processes=sorted(p for p in PROCESSES if self.isotopes(p)),
@@ -300,6 +309,36 @@ class G4NDLLibrary:
         parser = parse_capture_mf6 if sub == "Capture/FSMF6" else parse_capture_photons
         return parser(self.tokens(target, sub))
 
+    def fissionCrossSection(self, target: TargetLike) -> CrossSectionRecord:
+        """``target``'s ``Fission/CrossSection``, MT18's σ."""
+        return parse_cross_section(self.tokens(target, "Fission/CrossSection"))
+
+    def fissionFinalState(self, target: TargetLike):
+        """``target``'s ``Fission/FS``: ν̄, spectra, energy release, photons."""
+        from kika.g4ndl.fission import parse_fission_fs
+
+        return parse_fission_fs(self.tokens(target, "Fission/FS"))
+
+    def fissionChances(self, target: TargetLike) -> List[str]:
+        """The chance directories (``"FC"`` … ``"LC"``) holding a file for ``target``."""
+        key = parse_target(target)
+        return [s.split("/")[1] for s in CHANNELS["fission"][:4] if (s, key) in self._index]
+
+    def chanceFission(self, target: TargetLike, chance: str):
+        """``target``'s ``Fission/<chance>`` file (``"FC"`` … ``"LC"``)."""
+        from kika.g4ndl.fission import parse_chance_fission
+
+        return parse_chance_fission(self.tokens(target, f"Fission/{chance}"), chance)
+
+    def fragmentYields(self, target: TargetLike):
+        """``target``'s ``Fission/FF``, or ``None`` when the library has none for it."""
+        from kika.g4ndl.fission import parse_fragment_yields
+
+        key = parse_target(target)
+        if ("Fission/FF", key) not in self._index:
+            return None
+        return parse_fragment_yields(self.tokens(key, "Fission/FF"))
+
     def gammas(self, Z: int, A: int) -> GammasRecord:
         """The ``Inelastic/Gammas/z<Z>.a<A>`` level scheme of nucleus ``(Z, A)``."""
         from kika.g4ndl.inelastic_parse import parse_gammas
@@ -316,12 +355,14 @@ class G4NDLLibrary:
         """``target`` as a :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
         ``processes`` (default: every process kika reads that the library has
-        for ``target``) is a subset of ``("elastic", "inelastic", "capture")``.
+        for ``target``) is a subset of ``("elastic", "inelastic", "capture",
+        "fission")``.
         The elastic is MT2; the inelastic is one reaction per channel and
         partial MT (:mod:`kika.g4ndl.inelastic_decode`) plus the ``inelastic``
         total in ``suite.sums``; the capture is MT102
-        (:mod:`kika.g4ndl.capture`). What the library holds and kika does not read
-        (``Fission``, ...) is listed in ``suite.report``. This is
+        (:mod:`kika.g4ndl.capture`); the fission is MT18 and its chances
+        (:mod:`kika.g4ndl.fission_model`). What the library holds and kika does
+        not read (``ThermalScattering``, ...) is listed in ``suite.report``. This is
         what ``kika.read(root, format="g4ndl", target=...)`` calls. Importing
         the decoders here, not at module scope, keeps ``import kika.g4ndl``
         from waking the model.
@@ -359,6 +400,13 @@ class G4NDLLibrary:
             from kika.g4ndl.capture import decodeCapture
 
             decodeCapture(self.captureCrossSection(key), self.captureFinalState(key), suite,
+                          library=self, report=report)
+        if "fission" in wanted:
+            from kika.g4ndl.fission_model import decodeFission
+
+            chances = {c: self.chanceFission(key, c) for c in self.fissionChances(key)}
+            decodeFission(self.fissionCrossSection(key), self.fissionFinalState(key), suite,
+                          chances=chances, fragmentYields=self.fragmentYields(key),
                           library=self, report=report)
         return suite
 

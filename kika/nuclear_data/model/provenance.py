@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 __all__ = ["Provenance", "EndfProvenance", "AceProvenance",
            "GndsProvenance", "G4NDLProvenance", "G4NDLInelasticProvenance",
-           "G4NDLCaptureProvenance"]
+           "G4NDLCaptureProvenance", "G4NDLFissionProvenance"]
 
 
 @dataclass
@@ -316,3 +316,43 @@ class G4NDLCaptureProvenance(Provenance):
     finalStateSha256: Optional[str] = None
     finalStateHeader: Optional[Tuple[str, str]] = None
     finalStateEntry: Dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
+class G4NDLFissionProvenance(Provenance):
+    """A fission reaction read from G4NDL, and the tokens the model has no slot for.
+
+    On MT18 it describes ``Fission/CrossSection``, ``Fission/FS`` and
+    ``Fission/FF``; on a chance reaction (MT19, 20, 21, 38) the one file
+    ``Fission/FC``, ``SC``, ``TC`` or ``LC`` that holds its σ and, sometimes,
+    its neutrons' MF4 and MF5 (``kika/g4ndl/fission_model.py``).
+
+    ``directory`` is ``"CrossSection"`` for MT18 and the chance's directory
+    otherwise; ``bookkeeping`` the cross section's two integers (``0 0`` for
+    MT18, the chance's Q in eV and ``0`` for a chance). ``sections`` lists the
+    sections of ``Fission/FS`` in file order, or a chance file's two, one plain
+    ``dict`` each: ``infoType`` and ``dataType``, and what the body has and the
+    model does not (``targetMass``, ``iflag``, ``T`` and ``tempdep`` of an
+    angular body, each energy partial's ``p(E)``, the energy release's
+    dummy...). A section the model does not carry — the photons, MF12/14/15 —
+    is kept whole as ``verbatim`` G4NDL text. ``fragmentYields`` is the
+    ``Fission/FF`` body, verbatim: the model has a ``productYields`` slot and
+    nothing that fills it yet.
+    """
+
+    sourceFormat: str = "g4ndl"
+    library: Optional[str] = None
+    libraryName: Optional[str] = None
+    directory: Optional[str] = None
+    crossSectionPath: Optional[str] = None
+    crossSectionSha256: Optional[str] = None
+    crossSectionHeader: Optional[Tuple[str, str]] = None
+    bookkeeping: Optional[Tuple[int, int]] = None
+    finalStatePath: Optional[str] = None
+    finalStateSha256: Optional[str] = None
+    finalStateHeader: Optional[Tuple[str, str]] = None
+    sections: List[Dict[str, object]] = field(default_factory=list)
+    fragmentYields: Optional[str] = None
+    fragmentYieldsPath: Optional[str] = None
+    fragmentYieldsSha256: Optional[str] = None
+    fragmentYieldsHeader: Optional[Tuple[str, str]] = None
