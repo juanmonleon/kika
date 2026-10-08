@@ -44,11 +44,18 @@ padding of the records) is not modelled. It travels in the reactions'
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, List, Optional, Union
+from typing import ClassVar, List, Optional, Sequence, Union
+
+import numpy as np
 
 from .component import Component
 from .functions import Gridded2d, Gridded3d, Regions1d, XYs1d
 from .quantities import PhysicalQuantity
+from .enums import Interpolation
+from .units import conversion_factor
+
+#: Energies a caller may pass to the cross-section methods, in eV.
+Energies = Union[float, Sequence[float], np.ndarray]
 
 __all__ = [
     "TNSL_INTERACTION", "TNSL_PROCESSES", "DoubleDifferentialCrossSection",
@@ -109,6 +116,52 @@ class CoherentElastic:
     productFrame: str = "lab"
     gndsNodeName = "thermalNeutronScatteringLaw_coherentElastic"
 
+    @property
+    def temperatures(self) -> np.ndarray:
+        """The tabulated temperatures, in K."""
+        grid = self.S_table.grids[0]
+        return np.asarray(grid.values, dtype=float) * conversion_factor(grid.unit, "K")
+
+    def braggEdges(self) -> np.ndarray:
+        """The Bragg-edge energies, in eV."""
+        grid = self.S_table.grids[1]
+        return np.asarray(grid.values, dtype=float) * conversion_factor(grid.unit, "eV")
+
+    def cumulativeS(self, temperature: float) -> np.ndarray:
+        """S(E_i, T) on the Bragg edges, in eV*b, at a tabulated *temperature* (K)."""
+        temperatures = self.temperatures
+        matches = np.flatnonzero(temperatures == float(temperature))
+        if matches.size == 0:
+            raise KeyError(
+                f"{temperature} K is not tabulated; have {[float(t) for t in temperatures]}"
+            )
+        factor = conversion_factor(self.S_table.dependentAxis.unit, "eV*b")
+        return np.asarray(self.S_table.values[matches[0]], dtype=float) * factor
+
+    def crossSection(self, energies: Energies, temperature: float) -> np.ndarray:
+        """σ_coh(E, T) = S(E, T) / E in b, at incident *energies* in eV (ENDF-102 eq. 7.3).
+
+        S is cumulative, so between edge *i* and edge *i+1* it is the value at
+        edge *i*, and below the first edge σ is zero. The temperature must be
+        tabulated: how two temperatures combine is the temperature grid's law,
+        and applying it here would hand back an approximation as if it were data.
+        Refused when the energy grid is not ``flat``, because S/E reads S as a
+        staircase and on any other law it would be the wrong function.
+        """
+        law = self.S_table.grids[1].interpolation
+        if law is not Interpolation.flat:
+            raise ValueError(
+                f"coherent elastic S(E) is interpolated {law.value}; sigma = S/E "
+                "needs the flat (histogram) staircase every evaluation writes"
+            )
+        s = self.cumulativeS(temperature)
+        edges = self.braggEdges()
+        e = np.asarray(energies, dtype=float)
+        index = np.searchsorted(edges, e, side="right") - 1
+        held = np.where(index >= 0, s[np.clip(index, 0, None)], 0.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(e > 0, held / np.where(e > 0, e, 1.0), 0.0)
+
 
 @dataclass
 class IncoherentElastic:
@@ -120,6 +173,43 @@ class IncoherentElastic:
     pid: str = "n"
     productFrame: str = "lab"
     gndsNodeName = "thermalNeutronScatteringLaw_incoherentElastic"
+
+    @property
+    def temperatures(self) -> np.ndarray:
+        """The temperatures W'(T) is tabulated at, in K."""
+        w = self.DebyeWallerIntegral
+        xs, _, _ = w.toEndfRegions()
+        return np.asarray(xs, dtype=float) * conversion_factor(w.domainUnit or "K", "K")
+
+    def debyeWaller(self, temperature: float) -> float:
+        """W'(T) in 1/eV at *temperature* (K), under the function's own law.
+
+        Interpolated: temperature *is* the abscissa here, so a value between
+        two nodes is what the evaluator's law defines. Outside the table it is
+        refused, because a held end value would invent a lattice.
+        """
+        w = self.DebyeWallerIntegral
+        toKelvin = conversion_factor(w.domainUnit or "K", "K")
+        low, high = w.domainMin * toKelvin, w.domainMax * toKelvin
+        if not low <= temperature <= high:
+            raise KeyError(f"{temperature} K is outside the W'(T) table [{low}, {high}] K")
+        value = w.evaluate(float(temperature) / toKelvin)
+        return float(value) * conversion_factor(w.rangeUnit or "1/eV", "1/eV")
+
+    def crossSection(self, energies: Energies, temperature: float) -> np.ndarray:
+        """σ_inc(E, T) in b at incident *energies* in eV (ENDF-102 eq. 7.5).
+
+        σ = σ_b/2 · (1 − e^(−4EW′)) / (2EW′), with σ_b the bound cross section.
+        It tends to σ_b as E → 0, written with ``expm1`` so that limit is not a
+        cancellation of two numbers near one.
+        """
+        w = self.debyeWaller(temperature)
+        sigmaBound = self.boundAtomCrossSection.convertedTo("b").value
+        e = np.asarray(energies, dtype=float)
+        x = 2.0 * e * w
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(x > 0, -np.expm1(-2.0 * x) / np.where(x > 0, x, 1.0), 2.0)
+        return 0.5 * sigmaBound * ratio
 
 
 @dataclass
