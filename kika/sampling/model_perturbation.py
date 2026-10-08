@@ -215,6 +215,13 @@ class RunResult:
     #: Run-level files: the factors table and its index, the plan, the
     #: metadata, the log. Per-sample files are on each entry of ``samples``.
     files: Dict[str, Path] = field(default_factory=dict)
+    #: C10 (PD-9), for a run that perturbs a fission spectrum: what each MF35
+    #: band states for ``<E'>`` and the tail fractions, against independent
+    #: knowledge where the roadmap has read some. ``{mt: {band: record}}``;
+    #: :func:`kika.sampling.pfns_moments.statedSpectrumMoments`. Reported, not
+    #: a gate, and it changes nothing that is drawn.
+    spectrumMoments: Dict[int, Dict[Any, Dict[str, Any]]] = field(
+        default_factory=dict)
 
     @property
     def nSamples(self) -> int:
@@ -443,6 +450,23 @@ def _spectrumNote(applied) -> Optional[str]:
         f"them; that mass is not perturbed, it is only carried by the "
         f"renormalisation that puts the integral back where it was"
     )
+
+
+def _pointBandNote(applied) -> Optional[str]:
+    """Every MF35 band stated at a point (PD-1), named, once per run.
+
+    ``E1 == E2`` is a covariance at one incident energy. The run perturbs the
+    MF5 node at exactly that energy and nothing around it -- no extension by
+    default, because the file states none -- and this is where that narrowing
+    is said, rather than left to a reader who sees a band in the request and a
+    spectrum that moved at one node.
+    """
+    notes = [f"MF35/MT{component.mt} band {component.index}: {info['note']}"
+             for component, info in sorted(applied.items(),
+                                           key=lambda item: (item[0].mt,
+                                                             item[0].index))
+             if component.mf == 35 and info.get("band_kind") == "point"]
+    return "; ".join(notes) if notes else None
 
 
 def _touchedFiles(pset: PerturbationSet, alsoChanged=()) -> Dict[int, List[int]]:
@@ -1684,7 +1708,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                                                ctx.crossSectionSums,
                                                ctx.sumBlocks),
                                _sumRuleNote(applied),
-                               _spectrumNote(applied), _droppedStepsNote(applied))
+                               _spectrumNote(applied), _droppedStepsNote(applied),
+                               _pointBandNote(applied))
              if note is not None]
     _forget(suite, pset, applied)
     return {"sample": number, "label": label, "set": pset, "files": files,
@@ -2201,6 +2226,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     if _perturbsASpectrum(index):
         result.notes.append(MF35_UNCHANGED_NOTE)
         log.note(MF35_UNCHANGED_NOTE)
+        result.spectrumMoments = _statedSpectrumMoments(
+            suite, index, statedBlocks, samples, log, result.notes)
 
     stem = (originalSourcePath.stem if originalSourcePath is not None
             else "perturbed")
@@ -2293,6 +2320,74 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                           resonanceRegion=resonanceRecord)
         log.write(outputDir)
     return result
+
+
+def _statedSpectrumMoments(suite, index, statedBlocks, samples, log,
+                           notes) -> Dict[int, Dict[Any, Dict[str, Any]]]:
+    """C10 for every MF35 reaction of the run, logged and returned (PD-9).
+
+    The library's MF35 is drawn as stated, whatever it says; this is where the
+    run says *what* it says for the mean outgoing energy, so that a JEFF-4.0
+    U-235 ensemble carrying a 2.00 % sigma(<E'>) is not read as one carrying
+    the 0.45 % of the standards evaluation. Built from the **stated** blocks
+    (before conditioning) and the evaluated node, once per run.
+
+    A failure here is a warning and not an abort: the report is about the
+    library, and losing a production run to it would invert the priorities.
+    """
+    from kika.sampling.pfns_moments import (statedMomentsNote,
+                                            statedSpectrumMoments)
+
+    zeros = {key: np.zeros(int(meta["dimension"])) for key, meta in index.items()}
+    pset = PerturbationSet.fromDraw(zeros, index, label="c10")
+    byReaction: Dict[Tuple[int, int], Dict[str, Dict[Any, Any]]] = {}
+    for key, meta in index.items():
+        components = [pset._asComponentKey(c, key) for c in meta["components"]]
+        if len(components) != 1 or components[0].mf != 35:
+            continue
+        component = components[0]
+        entry = byReaction.setdefault((component.za, component.mt), {
+            "bands": {}, "grids": {}, "matrices": {}, "drawn": {}})
+        entry["bands"][component.index] = pset.outerDomains[component]
+        entry["grids"][component.index] = pset.binEdges[component]
+        entry["matrices"][component.index] = statedBlocks[key]
+        if key in samples:
+            entry["drawn"][component.index] = np.asarray(samples[key], dtype=float)
+
+    out: Dict[int, Dict[Any, Dict[str, Any]]] = {}
+    for (za, mt), entry in byReaction.items():
+        try:
+            _product, form = PerturbationSet._energyOf(
+                suite.reactionByENDF_MT(mt), mt)
+            moments = statedSpectrumMoments(
+                form, entry["bands"], entry["grids"], entry["matrices"],
+                za=za, drawn=entry["drawn"])
+        except Exception as error:   # noqa: BLE001 -- a report, never an abort
+            log.warning(f"C10 not computed for MF35/MT{mt}: {error}",
+                        subject=f"MF35/MT{mt}")
+            continue
+        out[int(mt)] = moments
+        for band, record in moments.items():
+            if record.get("probe") is None:
+                continue
+            log.event("checked",
+                      f"C10 band {band}: sigma(<E'>) stated "
+                      f"{100 * record['sigma(meanEnergy)_stated_rel']:.3g} % "
+                      f"at E = {record['probe']:.4g} eV",
+                      subject=f"MF35/MT{mt}",
+                      **{k: v for k, v in record.items()
+                         if isinstance(v, (int, float, str, bool))})
+        note = statedMomentsNote(mt, moments)
+        if note is not None and note not in notes:
+            notes.append(note)
+            log.note(note)
+    return out
+
+
+def _jsonableMoments(moments) -> Dict[str, Any]:
+    """``spectrumMoments`` with string keys, for ``run_metadata.json``."""
+    return {str(mt): {str(band): dict(record) for band, record in bands.items()}
+            for mt, bands in moments.items()}
 
 
 def _perturbsASpectrum(index) -> bool:
@@ -2413,6 +2508,10 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
         ],
         "notes": list(result.notes),
         **({"mf35_unchanged": True} if _perturbsASpectrum(result.index) else {}),
+        # C10 (PD-9): what MF35 states for <E'>, beside the ensemble drawn
+        # from it. Reported, not a gate.
+        **({"mf35StatedMoments": _jsonableMoments(result.spectrumMoments)}
+           if result.spectrumMoments else {}),
         "dryRun": result.dryRun,
         "nWorkers": nWorkers,
         "sourceFormat": result.sourceFormat,

@@ -139,7 +139,22 @@ class Function2d(ABC):
         """``P_j`` of child *k* over *boundaries* -- what MF35 is a covariance of."""
         return self.function1ds[k].groupIntegrals(boundaries)
 
-    def replaceTable(self, k: int, xs, ys, regions=None) -> Function1d:
+    def tableLaws(self, k: int) -> "np.ndarray":
+        """The ENDF ``INT`` of every interval of child *k*, one per panel.
+
+        :meth:`table` gives the points and this gives the law between each pair
+        of them -- the vocabulary of :mod:`kika.algebra`. A caller that inserts
+        a point into a table has to value it under the panel's own law and not
+        under ``np.interp``: on a log-lin or log-log panel the two are
+        different numbers, and the second is not the evaluator's function.
+        """
+        from .integration import tabulateFunction1d
+
+        _xs, _ys, codes = tabulateFunction1d(self.function1ds[k],
+                                             f"{type(self).__name__} child {k}")
+        return codes
+
+    def replaceTable(self, k: int, xs, ys, regions=None, laws=None) -> Function1d:
         """Put a new table in child *k*'s place, and return it.
 
         Keeps the child's ``axes``, ``label``, ``outerDomainValue`` and
@@ -147,16 +162,33 @@ class Function2d(ABC):
         coordinate, differently tabulated, and a caller that had to restate
         those would eventually restate one of them wrongly.
 
-        *regions* is an ENDF ``(NBT, INT)`` list when the new table is
-        piecewise. Leaving it ``None`` means "one region under the rule this
-        child already states", which is defined only when the child *has* one
-        rule -- so a multi-region child raises rather than being flattened.
-        **That refusal is the point.** ``MF5PartialTabulated.replace_table``
-        defaults to a single lin-lin region, which silently relabels every panel
-        of a table whose later regions were histogram; no MF5 tape read so far
-        has one, and if one turns up the caller has to say what it wants rather
-        than find out from the file that comes out.
+        **What law the new table's panels follow**, in order of precedence:
+
+        * *regions*, an ENDF ``(NBT, INT)`` list, says it outright;
+        * *laws*, one ``INT`` per interval (:mod:`kika.algebra`'s spelling),
+          says it outright too, and the regions are the runs of equal law;
+        * otherwise a single-rule child keeps its rule;
+        * otherwise -- a multi-region child -- the new table must be a
+          **refinement** of the old one (same domain, every new interval
+          inside one old panel), and each interval inherits the law of the
+          panel it lies in (:func:`kika.algebra.laws_on_refinement`). That is
+          the only reading under which inserting points is exact: a point
+          inserted in a panel cuts it into two panels of the same law.
+
+        A multi-region child handed a table that is *not* a refinement still
+        raises. **That refusal is the point.**
+        ``MF5PartialTabulated.replace_table`` defaults to a single lin-lin
+        region, which silently relabels every panel of a table whose later
+        regions were histogram or log-lin (PF-4); here the regions are either
+        preserved, or stated, or refused -- never invented. Measured on a
+        synthetic INT 2+4 spectrum
+        (``test_a_log_interpolated_spectrum_is_perturbed_exactly.py``): the
+        relabel moves the integral by 1.3e-4 and chi between nodes by up to
+        4.3e-4, with no perturbation in it at all.
         """
+        from kika.algebra import laws_on_refinement, pairs_from_laws
+
+        from .integration import tabulateFunction1d
         from .regions1d import Regions1d
         from .xys1d import XYs1d
 
@@ -165,16 +197,26 @@ class Function2d(ABC):
         xs = np.asarray(xs, dtype=float)
         ys = np.asarray(ys, dtype=float)
 
-        if regions is None:
+        if regions is None and laws is None:
             interpolation = getattr(old, "interpolation", None)
             if interpolation is None:
-                raise ValueError(
-                    f"child {k} is a {type(old).__name__} carrying "
-                    f"{len(getattr(old, 'function1ds', ()))} interpolation "
-                    f"region(s), so 'the rule it already states' is not one "
-                    f"rule. Pass regions=[(NBT, INT), ...] saying what the new "
-                    f"table's regions are"
-                )
+                oldXs, _oldYs, oldLaws = tabulateFunction1d(
+                    old, f"{type(self).__name__} child {k}")
+                try:
+                    laws = laws_on_refinement(oldXs, oldLaws, xs)
+                except ValueError as error:
+                    raise ValueError(
+                        f"child {k} is a {type(old).__name__} carrying "
+                        f"{len(getattr(old, 'function1ds', ()))} interpolation "
+                        f"region(s), so 'the rule it already states' is not one "
+                        f"rule, and the new table is not a refinement of the "
+                        f"old one ({error}). Pass regions=[(NBT, INT), ...] or "
+                        f"laws=[...] saying what the new table's regions are"
+                    ) from None
+        if regions is None and laws is not None:
+            regions = pairs_from_laws(np.asarray(laws, dtype=np.int64))
+
+        if regions is None:
             new: Function1d = XYs1d(xs=xs, ys=ys, interpolation=interpolation,
                                     axes=old.axes)
         else:

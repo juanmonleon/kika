@@ -59,7 +59,7 @@ __all__ = ["applyFactors", "refineAtBinEdges", "applyLegendreFactors",
            "MAGNITUDE_ORDER", "applyNubarFactors", "refineForNubar",
            "applySpectrumFactors", "summariseSpectrumNodes",
            "SPECTRUM_STEP_SHOULDER", "SPECTRUM_OUTER_SHOULDER",
-           "SPECTRUM_ENERGY_RTOL"]
+           "SPECTRUM_ENERGY_RTOL", "POINT_BAND_NOTE"]
 
 #: How close two abscissae must be to count as the repeated pair that ENDF-6
 #: uses for a step. The same value the format applier uses, and it is an
@@ -918,20 +918,93 @@ def _asBandMap(bands) -> "dict":
             for index, (lo, hi) in enumerate(bands)}
 
 
+#: What a run says about a band whose two edges are the same energy (PD-1).
+POINT_BAND_NOTE = "covariance stated at a point, not over a band"
+
+
+def _isPoint(lo: float, hi: float) -> bool:
+    """A band stated at one incident energy: ``E1 == E2`` (PD-1)."""
+    return lo == hi
+
+
 def _bandOf(value: float, bands: "dict"):
-    """The key of the band containing *value*: ``[E1, E2)``, the last closed."""
+    """The key of the band containing *value*.
+
+    A band is ``[E1, E2)``, and the last one is closed at the top. **A band
+    stated at a point** -- ``E1 == E2``, which B-VII.1 Pu-240 does for its only
+    band and JEFF-4.0 U-238 for its first -- contains exactly the node at that
+    energy and nothing else (decision PD-1, 2026-10-08), and it is looked up
+    **first**: where a point band and a range band both start at the same
+    energy (JEFF-4.0 U-238: ``[1e-5, 1e-5]`` then ``[1e-5, 1e3)``), the node
+    at that energy is the one thing the point band is a statement about, so it
+    takes it.
+
+    Before PD-1 the half-open test matched a point band only when it happened
+    to be the last band (``value == hi`` closes the last one): B-VII.1
+    Pu-240's ``[0.5, 0.5]`` MeV was perturbed by accident of position, and
+    JEFF-4.0 U-238's band 0 perturbed **nothing**, silently -- its node went to
+    band 1. No extension: a point band never claims a neighbourhood, because
+    the file states no covariance over one (B-VIII.0 rewrote the same Pu-240
+    band as ``[1e-5 eV, 0.5 MeV]``, which is evidence the evaluators meant a
+    range, not licence to read one in).
+    """
     ordered = sorted(bands.items(), key=lambda item: item[1][0])
-    for position, (key, (lo, hi)) in enumerate(ordered):
+    for key, (lo, hi) in ordered:
+        if _isPoint(lo, hi) and value == lo:
+            return key
+    ranges = [(key, (lo, hi)) for key, (lo, hi) in ordered if not _isPoint(lo, hi)]
+    for position, (key, (lo, hi)) in enumerate(ranges):
         if lo <= value < hi:
             return key
-        if position == len(ordered) - 1 and value == hi:
+        if position == len(ranges) - 1 and value == hi:
             return key
     return None
 
 
+def _outerStepPoints(bands, *, shoulder=SPECTRUM_OUTER_SHOULDER) -> List[float]:
+    """Where the outer coordinate needs a node so the factor *steps* there.
+
+    The factor is piecewise constant in incident energy, so it steps at both
+    edges of every band. A node *at* an edge is not enough: the node on the
+    other side of the step must be within ``shoulder`` of it too, or the
+    factor ramps across the whole incident interval between the edge and the
+    next node.
+
+    * **Below every lower edge**, ``E1 (1 - s)``: the node at ``E1`` is in the
+      band and the one below is not. This is all the applier did before
+      2026-10-08.
+    * **At every upper edge** (PF-2, decision PD-2). If the node at ``E2`` is
+      in the band -- the last band, closed at the top, or a point band -- the
+      step is just above it, ``E2 (1 + s)``. If it is not (half-open), the
+      step is just below it, ``E2 (1 - s)``. Where the next requested band
+      starts at ``E2`` that second point is the next band's own lower
+      shoulder and the de-duplication drops it, so contiguous bands -- every
+      whole-band request on a tape whose bands tile its incident range -- get
+      exactly the nodes they got before.
+
+    **PF-2 measured** (seed 11, sample 0, before this point was inserted):
+    ENDF/B-VIII.1 U-233 states one band ``[1e-5 eV, 5 MeV]`` on an MF5 grid to
+    20 MeV with the next node at 6 MeV. The node at 5 MeV moves its group
+    probabilities by up to 63 %, and the unperturbed node at 6 MeV did not stop
+    it: at 5.5 MeV the realised ``P_j`` were still 36 % off the evaluated ones,
+    at 5.01 MeV 63 %. ENDF/B-VIII.1 Pu-240 (band to 0.5 MeV, next node 1 MeV):
+    45 % at the edge, 22 % at 0.75 MeV. After: the factor is 1 from
+    ``E2 (1 + 1e-3)`` up, to the last bit, and the ramp is confined to that
+    sliver (``test_the_factor_stops_at_the_top_of_a_partial_band``).
+    """
+    points = set()
+    for key, (lo, hi) in bands.items():
+        points.add(lo * (1.0 - shoulder))
+        if _bandOf(hi, bands) == key:
+            points.add(hi * (1.0 + shoulder))
+        else:
+            points.add(hi * (1.0 - shoulder))
+    return sorted(points)
+
+
 def _insertOuterShoulders(form, bands, *, shoulder=SPECTRUM_OUTER_SHOULDER,
                           rtol=SPECTRUM_ENERGY_RTOL) -> int:
-    """Give every interior band edge an outer node just below it.
+    """Give every band edge an outer node on the far side of its step.
 
     Band edges are already nodes on every tape measured -- 6/6 on ENDF/B-VIII.1
     and 9/9 on JEFF-4.0 -- but that only puts a node *at* the step. The new
@@ -939,7 +1012,8 @@ def _insertOuterShoulders(form, bands, *, shoulder=SPECTRUM_OUTER_SHOULDER,
     :meth:`~kika.nuclear_data.model.functions.higher.XYs2d.evaluateAtOuter`,
     which is an exact refinement; copying the edge's own table instead is ~0.1 %
     wrong and would surface as a central-value shift in a zero-perturbation run,
-    which is a defect that looks like physics.
+    which is a defect that looks like physics. Which points, and why at both
+    edges: :func:`_outerStepPoints`.
     """
     # Every band's lower edge, and not "all but the lowest". The factor steps
     # from *whatever is below* to this band's, and below the lowest requested
@@ -949,26 +1023,31 @@ def _insertOuterShoulders(form, bands, *, shoulder=SPECTRUM_OUTER_SHOULDER,
     # both committed tapes: band 0 starts at the first incident energy. The
     # ENDF twin skips ``bands[1:]`` instead, which is right only because it is
     # always handed the whole band list.
-    edges = sorted({float(lo) for lo, _ in bands.values()})
+    # A point band with no node at its point perturbs nothing (PD-1), so it
+    # has no step to shoulder either.
+    nodes = set(float(v) for v in form.outerDomainValues)
+    stepping = {key: (lo, hi) for key, (lo, hi) in bands.items()
+                if not _isPoint(lo, hi) or lo in nodes}
     inserted = 0
-    for edge in edges:
-        below = edge * (1.0 - shoulder)
+    for point in _outerStepPoints(stepping, shoulder=shoulder):
         existing = np.asarray(form.outerDomainValues, dtype=float)
-        if existing.size == 0 or not (existing[0] < below < existing[-1]):
+        if existing.size == 0 or not (existing[0] < point < existing[-1]):
             continue
-        nearest = existing[np.argmin(np.abs(existing - below))]
-        if np.isclose(below, nearest, rtol=rtol, atol=0.0):
+        nearest = existing[np.argmin(np.abs(existing - point))]
+        if np.isclose(point, nearest, rtol=rtol, atol=0.0):
             continue
-        form.insertOuterNode(below)
+        form.insertOuterNode(point)
         inserted += 1
     return inserted
 
 
-def _refineAndScale(xs, ys, boundaries, ratios, *, maxPoints=None,
+def _refineAndScale(xs, ys, boundaries, ratios, *, laws=None, maxPoints=None,
                     shoulder=SPECTRUM_STEP_SHOULDER, rtol=SPECTRUM_ENERGY_RTOL):
     """Refine a table where the factor steps, then scale every node.
 
-    Returns ``(xs, ys, nInserted, nStepsDropped)``.
+    Returns ``(xs, ys, laws, nInserted, nStepsDropped)``. *laws* is one ENDF
+    ``INT`` per interval of the input (``None``: lin-lin throughout), and the
+    returned one is the same for the refined table.
 
     **This is the load-bearing step and the single most likely silent bug.**
     Scaling the nodes without first inserting the group boundary applies the
@@ -978,43 +1057,104 @@ def _refineAndScale(xs, ys, boundaries, ratios, *, maxPoints=None,
     construction preserve normalisation -- and the renormalisation that follows
     absorbs the difference into a scalar, so the run completes, the file is
     valid, and the perturbation is not the one that was computed.
+
+    **An inserted point is valued under its panel's own law** (PD-6,
+    2026-10-08), with :func:`kika.algebra.evaluate`, and inherits that law
+    (:func:`kika.algebra.laws_on_refinement`): a point inside a log-lin or
+    log-log panel cuts it into two panels of the same law, which is exact.
+    ``np.interp`` -- what this did before, and what the legacy applier does --
+    puts a lin-lin value on a log panel. On a lin-lin table the two are the same
+    bits (``evaluate`` *is* ``np.interp`` there), so nothing already gated moves.
+    Scaling both ends of a panel by one factor keeps it the same law, so every
+    panel away from a step stays exact under all five laws.
+
+    **The outer edges of the grid step too** (PF-3, decision PD-2). Outside
+    ``[g_0, g_N]`` the factor is 1, so where the table reaches past the grid
+    the factor steps from ``r_0`` (or ``r_{N-1}``) to 1 there. The edges were
+    not stepping candidates, so on a table with no node at ``g_N`` the panel
+    straddling it ramped across, inside the top group and outside it. They are
+    now, whenever their ratio is not 1 and the table reaches past them, with
+    the shoulder on the *outside*: ``g_0 - s w_0`` and ``g_N + s w_{N-1}``. The
+    node at the edge keeps the group's factor, so the groups' integrals are
+    exact and the sliver of ramp lies in mass no covariance speaks for.
+    **Measured** (seed 11, sample 0) as the mass outside the grid, net of the
+    renormalisation scalar, which is the mass the step should leave alone:
+
+    ======================================  ====================  ====================
+    tape (grid vs table)                    before                after
+    ======================================  ====================  ====================
+    ENDF/B-VIII.1 U-233 (10 eV-30 MeV vs    2.1 % of it moved     6.2e-5 of it
+    0-31 MeV)                               (3.3e-10 of chi)      (6.0e-13 of chi)
+    ENDF/B-VIII.1 Pu-240 (10 eV-20 MeV vs   38 % (2.9e-8)         0.37 % (2.8e-10)
+    0-20.2 MeV)
+    ENDF/B-VIII.1 U-235                     (1.2e-10 of chi)      (1.2e-13 of chi)
+    ======================================  ====================  ====================
+
+    It is also why the B-VIII.1 U-235 tape gate against the legacy is no
+    longer byte-identical (pinned in
+    ``test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py``), and
+    why the thesis anchor recipe on JEFF-4.0 Pu-239 gains one node at
+    9.99e-6 eV (its grid starts at 1e-5, its tables at 0), which moves the
+    anchor's bin probabilities by at most 3.5e-18. U-235, U-238 and Pu-241
+    anchors are bit-identical to the legacy (8 replicas, seed 7, 2026-10-08).
+
+    What is left is the sliver of shoulder ramp. The groups' own integrals
+    were exact to 2e-6 relative before and after -- the edges are nodes of
+    those tables, so the ramp lay wholly outside -- and so the leak is small in
+    absolute terms because so is the mass outside. JEFF-4.0 Pu-242, the other
+    suspected witness, shows none (1e-15): its tables reach past the 20.2 MeV
+    grid only in band 4, whose 1x1 zero gives ``r = 1``. The gate is
+    ``test_the_factor_stops_at_the_edge_of_the_mf35_grid``.
     """
+    from kika.algebra import evaluate as evaluateTable
+    from kika.algebra import laws_on_refinement
+
     xs = np.asarray(xs, dtype=float)
     ys = np.asarray(ys, dtype=float)
+    laws = (np.full(max(xs.size - 1, 0), 2, dtype=np.int64) if laws is None
+            else np.asarray(laws, dtype=np.int64))
     boundaries = np.asarray(boundaries, dtype=float)
     ratios = np.asarray(ratios, dtype=float)
     lo, hi = float(xs[0]), float(xs[-1])
 
     # Boundary ``interior[i]`` separates groups i and i+1, so the factor steps
     # there iff ``ratios[i+1] != ratios[i]``. Only steps strictly inside the
-    # table's own support can be represented at all.
+    # table's own support can be represented at all. Each step is
+    # ``(edge, shoulder point, size)``; the shoulder is on the side whose
+    # factor differs from the edge node's.
     interior = boundaries[1:-1]
-    widths = np.diff(boundaries)[:-1]            # width of the group *below*
+    widths = np.diff(boundaries)
     jumps = np.abs(ratios[1:] - ratios[:-1])
     stepping = (jumps != 0.0) & (interior > lo) & (interior < hi)
-    candidates = interior[stepping]
-    magnitudes = jumps[stepping]
-    shoulderWidths = widths[stepping]
+    steps = [(float(edge), float(edge) - shoulder * float(width), float(jump))
+             for edge, width, jump in zip(interior[stepping],
+                                          widths[:-1][stepping],
+                                          jumps[stepping])]
+    if ratios.size:
+        bottom, top = float(boundaries[0]), float(boundaries[-1])
+        if ratios[0] != 1.0 and lo < bottom < hi:
+            steps.insert(0, (bottom, bottom - shoulder * float(widths[0]),
+                             float(abs(ratios[0] - 1.0))))
+        if ratios[-1] != 1.0 and lo < top < hi:
+            steps.append((top, top + shoulder * float(widths[-1]),
+                          float(abs(ratios[-1] - 1.0))))
 
     nDropped = 0
-    if maxPoints is not None and candidates.size:
+    if maxPoints is not None and steps:
         # Two nodes per surviving step. Drop the smallest steps first, and say
         # how many -- a silent cap reads as "the factor was applied
         # everywhere", which is exactly the claim that would then be false.
         budget = max(int((maxPoints - xs.size) // 2), 0)
-        if budget < candidates.size:
-            keep = np.argsort(magnitudes)[::-1][:budget]
-            nDropped = int(candidates.size - keep.size)
-            order = np.sort(keep)
-            candidates = candidates[order]
-            shoulderWidths = shoulderWidths[order]
+        if budget < len(steps):
+            keep = np.argsort([size for _e, _s, size in steps])[::-1][:budget]
+            nDropped = int(len(steps) - keep.size)
+            steps = [steps[i] for i in np.sort(keep)]
 
     wanted: List[float] = []
-    for edge, width in zip(candidates, shoulderWidths):
-        wanted.append(float(edge))
-        below = float(edge) - shoulder * float(width)
-        if below > lo:
-            wanted.append(below)
+    for edge, beside, _size in steps:
+        wanted.append(edge)
+        if lo < beside < hi:
+            wanted.append(beside)
 
     nInserted = 0
     if wanted:
@@ -1027,11 +1167,13 @@ def _refineAndScale(xs, ys, boundaries, ratios, *, maxPoints=None,
                          | np.isclose(new, under, rtol=rtol, atol=0.0))
             new = new[~duplicate]
         if new.size:
-            values = np.interp(new, xs, ys)
-            xs = np.concatenate([xs, new])
-            ys = np.concatenate([ys, values])
-            order = np.argsort(xs, kind="stable")
-            xs, ys = xs[order], ys[order]
+            values = np.asarray(evaluateTable(xs, ys, laws, new), dtype=float)
+            merged = np.concatenate([xs, new])
+            order = np.argsort(merged, kind="stable")
+            xsNew = merged[order]
+            ys = np.concatenate([ys, values])[order]
+            laws = laws_on_refinement(xs, laws, xsNew)
+            xs = xsNew
             nInserted = int(new.size)
 
     # Group of each node: side='right' puts a node sitting exactly on a
@@ -1041,7 +1183,7 @@ def _refineAndScale(xs, ys, boundaries, ratios, *, maxPoints=None,
                     0, ratios.size - 1)
     inside = (xs >= boundaries[0]) & (xs <= boundaries[-1])
     scale = np.where(inside, ratios[group], 1.0)
-    return xs, ys * scale, nInserted, nDropped
+    return xs, ys * scale, laws, nInserted, nDropped
 
 
 def _copyOuterContainer(form):
@@ -1160,15 +1302,16 @@ def applySpectrumFactors(energyForm, bands, boundariesByBand, ratiosFor, *,
             )
 
         xs, ys = form.table(k)
-        xNew, yNew, nInserted, nDropped = _refineAndScale(
-            xs, ys, boundaries, ratios, maxPoints=maxOutgoingPoints,
-            shoulder=shoulder, rtol=rtol)
-        form.replaceTable(k, xNew, yNew)
+        laws = form.tableLaws(k)
+        xNew, yNew, lawsNew, nInserted, nDropped = _refineAndScale(
+            xs, ys, boundaries, ratios, laws=laws,
+            maxPoints=maxOutgoingPoints, shoulder=shoulder, rtol=rtol)
+        form.replaceTable(k, xNew, yNew, laws=lawsNew)
 
         realised = form.normalisation(k)
         rescale = (total / realised) if realised != 0.0 else 1.0
         if rescale != 1.0:
-            form.replaceTable(k, xNew, yNew * rescale)
+            form.replaceTable(k, xNew, yNew * rescale, laws=lawsNew)
 
         wanted = rescale * ratios * p0
         realisedGroups = form.groupIntegrals(k, boundaries)
@@ -1210,7 +1353,37 @@ def applySpectrumFactors(energyForm, bands, boundariesByBand, ratiosFor, *,
     diagnostics = summariseSpectrumNodes(perNode)
     diagnostics["n_outer_inserted"] = insertedOuter
     diagnostics["per_node"] = perNode
+    diagnostics["point_bands"] = _describePointBands(bands, energyForm)
     return form, diagnostics
+
+
+def _describePointBands(bands, energyForm) -> dict:
+    """``{key: record}`` for every band stated at a point (PD-1), by name.
+
+    The record says what the run did with it -- the one MF5 incident node at
+    exactly ``E1``, or nothing when the evaluated grid has no node there -- so
+    the narrowing is stated where the result is read and not left to be
+    inferred from a node count. It is looked up on the **evaluated** grid: an
+    outer node the applier itself inserted is a shoulder, not a node the file
+    states, and a point band never claims one.
+    """
+    nodes = np.asarray(energyForm.outerDomainValues, dtype=float)
+    out = {}
+    for key, (lo, hi) in bands.items():
+        if not _isPoint(lo, hi):
+            continue
+        found = bool(np.any(nodes == lo))
+        out[key] = {
+            "band_kind": "point",
+            "energy": float(lo),
+            "node_at_point": found,
+            "note": (f"{POINT_BAND_NOTE}: E1 = E2 = {lo:.6g} eV; "
+                     + ("only the MF5 incident node at exactly that energy is "
+                        "perturbed, and no range around it" if found else
+                        "the MF5 grid has no incident node at that energy, so "
+                        "nothing is perturbed")),
+        }
+    return out
 
 
 def summariseSpectrumNodes(perNode) -> dict:

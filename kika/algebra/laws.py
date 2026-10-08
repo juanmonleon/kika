@@ -31,8 +31,8 @@ from typing import Sequence, Tuple
 import numpy as np
 
 __all__ = ["HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS",
-           "interval_laws", "pairs_from_laws", "validate", "vanishing_panels", "LOG_X",
-           "LOG_Y"]
+           "interval_laws", "pairs_from_laws", "laws_on_refinement", "validate",
+           "vanishing_panels", "LOG_X", "LOG_Y"]
 
 HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG = 1, 2, 3, 4, 5
 LAWS = (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG)
@@ -86,6 +86,49 @@ def pairs_from_laws(laws: np.ndarray) -> list:
     change = np.flatnonzero(np.diff(laws)) + 1
     ends = np.r_[change, laws.size]
     return [(int(e) + 1, int(laws[e - 1])) for e in ends]
+
+
+def laws_on_refinement(x_old, laws_old, x_new) -> np.ndarray:
+    """The law of every interval of *x_new*, a refinement of *x_old*.
+
+    A point inserted inside a panel cuts it into two panels of the **same**
+    law -- that is what makes the insertion exact -- so a refined table states
+    no law of its own: each new interval inherits the law of the old panel it
+    lies in. Spelled out here so a caller that inserts points into a
+    multi-region table does not have to choose between relabelling it (one
+    lin-lin region, what ``MF5PartialTabulated.replace_table`` does by default)
+    and refusing it.
+
+    Raises ``ValueError`` when *x_new* is not a refinement: a different
+    domain, or an interval that straddles an old node. A zero-width interval
+    (a repeated abscissa, a step) has no law; it takes the old one at the same
+    place when the old table had the repeat too, and the law of the panel it
+    starts otherwise -- which no reader consults, but which keeps the regions
+    contiguous.
+    """
+    x_old = np.asarray(x_old, dtype=float)
+    x_new = np.asarray(x_new, dtype=float)
+    laws_old = np.asarray(laws_old, dtype=np.int64)
+    if laws_old.ndim == 0:
+        laws_old = np.full(max(x_old.size - 1, 0), int(laws_old), dtype=np.int64)
+    if x_new.size < 2 or x_old.size < 2:
+        return np.full(max(x_new.size - 1, 0), LINLIN, dtype=np.int64)
+    if x_new[0] != x_old[0] or x_new[-1] != x_old[-1]:
+        raise ValueError(
+            f"[{x_new[0]:.6e}, {x_new[-1]:.6e}] is not the domain "
+            f"[{x_old[0]:.6e}, {x_old[-1]:.6e}] of the table it is meant to "
+            f"refine, so its intervals have no law to inherit")
+    a, b = x_new[:-1], x_new[1:]
+    wide = b > a
+    middle = np.where(wide, 0.5 * (a + b), a)
+    k = np.clip(np.searchsorted(x_old, middle, side="right") - 1, 0, x_old.size - 2)
+    straddles = wide & ((a < x_old[k]) | (b > x_old[k + 1]))
+    if np.any(straddles):
+        first = int(np.flatnonzero(straddles)[0])
+        raise ValueError(
+            f"interval [{a[first]:.6e}, {b[first]:.6e}] crosses a node of the "
+            f"table it is meant to refine, so it is not one panel of one law")
+    return laws_old[k].copy()
 
 
 def vanishing_panels(y1, y2) -> np.ndarray:

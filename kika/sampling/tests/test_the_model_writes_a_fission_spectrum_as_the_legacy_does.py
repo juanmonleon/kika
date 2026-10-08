@@ -36,7 +36,8 @@ import pytest
 
 from kika.endf import read_endf
 from kika.sampling.core import BLOCK_SEED_STRIDE
-from kika.sampling.mf35_sampling import build_pfns_covariance, generate_pfns_samples
+from kika.sampling.mf35_sampling import (band_grids, build_pfns_covariance,
+                                         generate_pfns_samples)
 from kika.sampling.model_perturbation import perturbFromModel
 from kika.sampling.pfns_perturbation import perturb_pfns_files
 
@@ -129,7 +130,15 @@ def test_a_mixed_request_draws_the_spectrum_further_up_the_seed_ladder(
 # Q1.2 -- the tape
 # ======================================================================
 
-def _assertSameTape(tape, tmp_path, nSamples=1):
+def _assertSameTape(tape, tmp_path, nSamples=1, gridEdgesStep=False):
+    """MF5/MT18 byte-identical between the two writers, everything else untouched.
+
+    ``gridEdgesStep=True`` is for a tape whose MF5 tables reach past the MF35
+    grid (ENDF/B-VIII.1 U-235): there the model steps the factor at the grid's
+    outer edges (PF-3, fixed on the model only under PD-2) and the legacy
+    ramps it, so MF5/MT18 is compared by :func:`_assertTheyPartOnlyAtTheGridEdges`
+    instead of byte for byte. Everything else is still byte-identical.
+    """
     legacy = perturb_pfns_files(str(tape), nSamples, generate_ace=False,
                                 seed=11, output_dir=str(tmp_path / "legacy"))
     assert legacy["errors"] == []
@@ -143,15 +152,63 @@ def _assertSameTape(tape, tmp_path, nSamples=1):
         old, new = _records(legacyTape), _records(modelTape)
         assert set(old) == set(new) == set(source)
 
-        assert old[(5, 18)] == new[(5, 18)], (
-            f"sample {number}: MF5/MT18 differs between the two writers")
+        if gridEdgesStep:
+            _assertTheyPartOnlyAtTheGridEdges(tape, legacyTape, modelTape)
+        else:
+            assert old[(5, 18)] == new[(5, 18)], (
+                f"sample {number}: MF5/MT18 differs between the two writers")
+            assert old[(1, 451)] == new[(1, 451)], "the directories disagree"
         assert old[(5, 18)] != source[(5, 18)], "the sample moved nothing"
-        assert old[(1, 451)] == new[(1, 451)], "the directories disagree"
 
         for key in source:
             if key not in ((5, 18), (1, 451)):
                 assert old[key] == source[key] == new[key], (
                     f"MF{key[0]}/MT{key[1]} moved")
+
+
+def _assertTheyPartOnlyAtTheGridEdges(tape, legacyTape, modelTape):
+    """PF-3, pinned: the two spectra differ only where the MF35 grid ends.
+
+    Per incident node, the model's outgoing grid is the legacy's plus points at
+    the grid's outer edges ``g_0``/``g_N`` and their shoulders (``g_0 - s w_0``,
+    ``g_N + s w_{N-1}``), and at every point both carry the values agree to the
+    last printed digit: the only other thing that moves is the renormalisation
+    scalar, by the mass the legacy's ramp shifted outside the grid (measured on
+    this tape, seed 11: 1.2e-10 of chi). Nodes outside every band are equal.
+    """
+    from kika.nuclear_data.model.perturbation import _bandOf
+
+    endf = read_endf(str(tape), mf_numbers=[5, 35])
+    _suite, _mf5, bands = build_pfns_covariance(endf, mt=18)
+    grids = band_grids(_suite)
+    bandMap = dict(enumerate(bands))
+
+    def partial(path):
+        return read_endf(str(path), mf_numbers=[5]).mf[5].mt[18].partials[0]
+
+    old, new = partial(legacyTape), partial(modelTape)
+    assert list(old.incident_energies) == list(new.incident_energies)
+    extra = 0
+    for k, energy in enumerate(old.incident_energies):
+        xOld, yOld = old.table(k)
+        xNew, yNew = new.table(k)
+        band = _bandOf(float(energy), bandMap)
+        if band is None:
+            assert np.array_equal(xOld, xNew) and np.array_equal(yOld, yNew)
+            continue
+        grid = np.asarray(grids[band], dtype=float)
+        widths = np.diff(grid)
+        allowed = np.array([grid[0], grid[0] - 1e-3 * widths[0],
+                            grid[-1], grid[-1] + 1e-3 * widths[-1]])
+        added = np.setdiff1d(xNew, xOld)
+        assert np.all(np.isin(xOld, xNew)), f"node {k}: the model dropped points"
+        for point in added:
+            assert np.any(np.isclose(point, allowed, rtol=1e-6, atol=0.0)), (
+                f"node {k}: {point:.6e} is not at an edge of the MF35 grid")
+        extra += added.size
+        shared = np.isin(xNew, xOld)
+        np.testing.assert_allclose(yNew[shared], yOld, rtol=2e-6, atol=0.0)
+    assert extra > 0, "nothing parted; this tape is no longer a PF-3 witness"
 
 
 def test_the_two_writers_write_the_same_spectrum_on_the_micro_tape(tmp_path):
@@ -176,8 +233,15 @@ def test_the_two_writers_write_the_same_spectrum_on_endfb81_u235(
     Its MT18 is stated in MF5 *and* in MF6 (``JP=11``, a ``LAW=0`` neutron), and
     the decoder let MF6's ``unspecified`` replace MF5's spectrum. MF6 must come
     back byte for byte as well, which the "every other MF" clause checks.
+
+    **No longer byte-identical in MF5/MT18, on purpose** (PD-2, 2026-10-08):
+    its tables reach past the MF35 grid at both ends, so the model now steps
+    the factor at the grid's edges where the legacy ramps it (PF-3). What
+    parts, and by how much, is pinned by
+    :func:`_assertTheyPartOnlyAtTheGridEdges`; before PD-2 this tape was
+    byte-identical.
     """
-    _assertSameTape(u235_b81_tape, tmp_path)
+    _assertSameTape(u235_b81_tape, tmp_path, gridEdgesStep=True)
 
 
 @pytest.mark.slow
@@ -188,11 +252,19 @@ def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
     The pre-flight refused the band; the legacy clipped it and drew. Rounding
     in the file is a note now, so the model clips and draws the same thing.
 
-    The tapes are not byte-equal, and that is PF-1 rather than PF-7: the one
-    band is [0.5, 0.5] MeV, so it does not start at the lowest incident node.
-    The legacy puts no shoulder under it and ramps the factor from 1e-5 eV up
-    to 0.5 MeV; the model steps at 0.4995 MeV. From the band up, every
-    incident table is the same.
+    The tapes are not byte-equal, and that is PF-1 and PF-2 rather than PF-7:
+    the one band is [0.5, 0.5] MeV, a band stated at a point (PD-1), so it
+    neither starts at the lowest incident node nor ends at the highest. The
+    legacy puts no shoulder under it and ramps the factor from 1e-5 eV up to
+    0.5 MeV, and none above it, so the factor ramps down again to the next node;
+    the model steps at 0.4995 and 0.5005 MeV (PD-2, 2026-10-08) and perturbs
+    the 0.5 MeV node alone. Every original incident node carries the same
+    table on both sides -- the ramps live *between* them.
+
+    **Not run at home**: there is no ENDF/B-VII.1 on this box. The 0.5005 MeV
+    half was written on 2026-10-08 from the semantics pinned by
+    ``test_the_spectrum_factor_stops_where_the_covariance_does.py`` (synthetic
+    point band, and JEFF-4.0 U-238's band 0) and has not yet seen this tape.
     """
     _assertSameDraw(pu240_b71_tape)
 
@@ -212,7 +284,7 @@ def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
     nodes = np.asarray(source.incident_energies)
     assert np.array_equal(old.incident_energies, nodes)
     assert np.array_equal(new.incident_energies,
-                          np.insert(nodes, 1, 4.995e5)), "the PF-1 shoulder"
+                          np.sort(np.concatenate([nodes, [4.995e5, 5.005e5]]))),         "the PF-1 shoulder below the point band and the PF-2 one above it"
     for energy in nodes:
         a, b = old.evaluate_at_incident(energy), new.evaluate_at_incident(energy)
         assert all(np.array_equal(x, y) for x, y in zip(a, b)), energy

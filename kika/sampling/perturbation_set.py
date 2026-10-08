@@ -721,6 +721,10 @@ class PerturbationSet:
                     **summariseSpectrumNodes(nodes),
                     "input_normalisation_max_abs":
                         inputResidual.get(component.index, 0.0),
+                    # A band stated at one energy (PD-1) says so by name, so a
+                    # one-node perturbation is not read as a band that covered
+                    # its range.
+                    **info["point_bands"].get(component.index, {}),
                 }
         return diagnostics
 

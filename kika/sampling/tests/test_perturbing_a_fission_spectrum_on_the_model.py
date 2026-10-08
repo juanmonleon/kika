@@ -138,12 +138,13 @@ def test_a_node_that_is_not_a_table_refuses_to_be_integrated():
 
 
 def test_a_multi_region_child_will_not_be_flattened_silently():
-    """``replaceTable`` refuses what the ENDF twin does by default.
+    """``replaceTable`` keeps a multi-region child's regions, or refuses.
 
     ``MF5PartialTabulated.replace_table`` declares one lin-lin region whatever
     it was handed, which relabels every panel of a table whose later regions
-    were histogram. No MF5 tape read so far has one; if one turns up, the caller
-    has to say what it wants.
+    were histogram (PF-4). The model never does: a table that **refines** the
+    old one inherits each panel's law (PD-6, 2026-10-08); one that does not is
+    refused unless the caller states the regions.
     """
     from kika.nuclear_data.model.enums import Interpolation
     from kika.nuclear_data.model.functions import Regions1d, XYs1d, XYs2d
@@ -155,8 +156,16 @@ def test_a_multi_region_child_will_not_be_flattened_silently():
     child.outerDomainValue = 1.0
     form = XYs2d(function1ds=[child])
 
-    with pytest.raises(ValueError, match="not one rule"):
-        form.replaceTable(0, [0.0, 1.0, 2.0], [1.0, 1.0, 0.0])
+    # A refinement: one point inside each region, each inherits its region's law.
+    kept = form.replaceTable(0, [0.0, 0.5, 1.0, 1.5, 2.0],
+                             [1.0, 1.0, 1.0, 0.5, 0.0])
+    assert isinstance(kept, Regions1d)
+    assert kept.toEndfRegions()[2] == [(3, 1), (5, 2)]
+    assert form.normalisation(0) == pytest.approx(1.0 + 0.5)
+
+    # Not a refinement (the node at 1.0 is gone): there is no law to inherit.
+    with pytest.raises(ValueError, match="not a refinement"):
+        form.replaceTable(0, [0.0, 0.7, 2.0], [1.0, 1.0, 0.0])
 
     # ...and it is accepted the moment the caller states the regions.
     form.replaceTable(0, [0.0, 1.0, 2.0], [2.0, 2.0, 0.0],

@@ -33,7 +33,8 @@ integrals, 1/x weight), :mod:`.refine` (the adaptive refinement engine and
 :func:`to_linlin`), :mod:`.arithmetic` (sums), :mod:`.fold` (Gaussian folds).
 """
 from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS,
-                   interval_laws, pairs_from_laws, validate)
+                   interval_laws, laws_on_refinement, pairs_from_laws,
+                   validate)
 from .evaluate import (evaluate, interpolate_between, left_limit, right_limit,
                        sample_on_union)
 from .grid import discontinuities, join_pieces, split_at_discontinuities, union
@@ -46,7 +47,7 @@ from .arithmetic import add
 
 __all__ = [
     "HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS",
-    "interval_laws", "pairs_from_laws", "validate",
+    "interval_laws", "laws_on_refinement", "pairs_from_laws", "validate",
     "evaluate", "interpolate_between", "left_limit", "right_limit", "sample_on_union",
     "discontinuities", "join_pieces", "split_at_discontinuities", "union",
     "cumulative_integral", "group_averages", "group_integrals", "integral",
