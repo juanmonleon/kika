@@ -9,10 +9,12 @@ function in kika. Nothing is interpolated here.
 :func:`interpolate_1d`: eight call sites inside ``kika/endf`` import that name.
 
 What changed when the evaluation moved to :mod:`kika.algebra` (7-oct-2026):
-a log law over a non-positive value, and any code outside 1-5 (INT=6, the
+a log law over a negative value, and any code outside 1-5 (INT=6, the
 two-dimensional 11-25), now raise instead of being read lin-lin without a word;
-and the last point of a histogram reads its own tabulated value. A census of
-the 2506 MF3 sections of the 42 local tapes found none of the first two.
+and the last point of a histogram reads its own tabulated value. A log-y law
+with an end at exactly 0 is read as the limit of the law -- 0 inside the panel,
+the jump at the other end (:func:`kika.algebra.laws.vanishing_panels`, 8-oct-2026):
+JEFF-4.0 writes it in the MT102 of 15 tapes, which the first rule refused.
 """
 from typing import Sequence, Tuple, Union
 

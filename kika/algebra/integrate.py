@@ -41,7 +41,7 @@ from typing import Optional
 import numpy as np
 
 from .evaluate import _read_checked
-from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate
+from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate, vanishing_panels
 from .refine import LINEARIZATION_TOLERANCE, to_linlin
 
 __all__ = ["panel_integrals", "cumulative_integral", "integral", "group_integrals",
@@ -129,11 +129,15 @@ def _integrate_panels(x1, x2, y1, y2, laws, weight) -> np.ndarray:
                     v = 0.5 * (b1 + b2) * L
                 elif code == LOGLOG:
                     v = b1 * L * _expm1_over(np.log(b2 / b1))
+                elif np.all(vanishing_panels(b1, b2)):
+                    v = np.zeros(np.shape(b1))
                 else:
                     raise ValueError(
                         "a log-lin panel has no closed-form 1/x integral (it is "
                         "an exponential integral); linearize the table first "
                         "with kika.algebra.to_linlin")
+            if code in (LOGLIN, LOGLOG):
+                v = np.where(vanishing_panels(b1, b2), 0.0, v)
             out[m] = v
     return out
 

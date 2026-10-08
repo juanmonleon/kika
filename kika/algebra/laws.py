@@ -31,7 +31,8 @@ from typing import Sequence, Tuple
 import numpy as np
 
 __all__ = ["HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS",
-           "interval_laws", "pairs_from_laws", "validate", "LOG_X", "LOG_Y"]
+           "interval_laws", "pairs_from_laws", "validate", "vanishing_panels", "LOG_X",
+           "LOG_Y"]
 
 HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG = 1, 2, 3, 4, 5
 LAWS = (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG)
@@ -87,13 +88,29 @@ def pairs_from_laws(laws: np.ndarray) -> list:
     return [(int(e) + 1, int(laws[e - 1])) for e in ends]
 
 
+def vanishing_panels(y1, y2) -> np.ndarray:
+    """Where a log-y panel has an end at exactly 0 and none below it.
+
+    ``y1 (x / x1)**p`` (log-log) or ``y1 exp(p (x - x1))`` (log-lin) with ``y2 -> 0``
+    sends ``p`` to minus infinity, and with ``y1 -> 0`` to plus infinity: the
+    law's limit is 0 everywhere inside the panel, with the jump at the end that
+    is not 0 (both ends 0: the zero function). That is what every operation in
+    this package reads, exactly and in closed form -- and what NJOY's ``terp1``
+    returns -- rather than refusing the table or reading it lin-lin.
+    """
+    y1, y2 = np.asarray(y1), np.asarray(y2)
+    return (y1 >= 0) & (y2 >= 0) & ((y1 == 0) | (y2 == 0))
+
+
 def validate(x, y, laws) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(x, y, laws)`` as float/int arrays, or a ``ValueError`` saying why not.
 
     *laws* may be one code for the whole table or one per interval. Checked:
     matching shapes, finite values, non-decreasing ``x``, codes 1-5, and that
     every log law has positive values on its own axis. A zero-width interval
-    (a repeated abscissa) has no law and is not checked.
+    (a repeated abscissa) has no law and is not checked. A log-y interval with
+    an end at exactly 0 is let through (:func:`vanishing_panels`); one below 0
+    is refused.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -122,14 +139,14 @@ def validate(x, y, laws) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         logy = wide & np.isin(laws, LOG_Y)
         if logy.any():
             y1, y2 = y[:-1], y[1:]
+            nonpositive = (y1 < 0) | (y2 < 0)
             if y.ndim > 1:
-                bad = logy & (np.any(y1 <= 0, axis=tuple(range(1, y.ndim)))
-                              | np.any(y2 <= 0, axis=tuple(range(1, y.ndim))))
+                bad = logy & np.any(nonpositive, axis=tuple(range(1, y.ndim)))
             else:
-                bad = logy & ((y1 <= 0) | (y2 <= 0))
+                bad = logy & nonpositive
             if bad.any():
                 i = int(np.flatnonzero(bad)[0])
                 raise ValueError(
                     f"law {laws[i]} interpolates in ln y but interval {i} "
-                    f"([{x[i]!r}, {x[i + 1]!r}]) has a non-positive value")
+                    f"([{x[i]!r}, {x[i + 1]!r}]) has a negative value")
     return x, y, laws

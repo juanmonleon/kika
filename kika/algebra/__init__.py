@@ -15,7 +15,11 @@ The rules every function in the package keeps:
 * **Exact, or it raises.** Each law is evaluated and integrated in closed form.
   What has no closed form is first re-expressed as lin-lin to a tolerance the
   caller states (:func:`to_linlin`). A log law on a non-positive value is an
-  error, never a silent lin-lin.
+  error, never a silent lin-lin. A log-y panel with an end at exactly 0 (and
+  none below) is read as the limit of its own law, not refused: 0 inside the
+  panel, with the jump at the non-zero end (:func:`~kika.algebra.laws.vanishing_panels`).
+  It is what NJOY's ``terp1`` gives, and JEFF-4.0 writes it (MT102 from 0 to 0
+  under the resolved range, and from 3.7e-4 b to 0 between 30 and 200 MeV).
 * **A discontinuity is a repeated abscissa.** ``(x, y_left), (x, y_right)`` is
   a step, kept as such by every operation; nothing turns it into a ramp.
 * **Zero outside the domain**, unless the caller asks otherwise.
