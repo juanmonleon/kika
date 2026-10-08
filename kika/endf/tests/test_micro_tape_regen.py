@@ -213,6 +213,31 @@ KEEP_MF32 = {1: {451}, 2: {151}, 32: {151}}
 #:
 #: LCOMP=1 has no fixture: the smallest evaluation using it is Mn-55 at 26 467
 #: MF32 lines, ~2 MB, so it stays on the ``tape``-marked tests.
+#: The MF1/458 fixtures: key -> (source tape, what is kept). One per shape --
+#: see ``micro_fission_energy_tape`` in the root conftest.
+FISSION_ENERGY_FIXTURES = {
+    "u235": ("u235_b81", {1: {451, 452, 455, 456, 458}, 3: {18}}),
+    "th232": ("th232_b81", {1: {451, 458}, 3: {18}}),
+    "ac227": ("ac227_b81", {1: {451, 458}, 3: {18}}),
+}
+
+#: The MF5 parametrised-spectrum fixtures (roadmap E2): file name -> (source
+#: tape, what is kept). U-235's MF5/455 is NK=6 of LF=5 with MF1/455 beside it,
+#: the shape whose families get their spectra.
+MF5_SPECTRA_FIXTURES = {
+    "micro_ra223_mf5_lf7.endf": ("ra223_b81", {1: {451}, 3: {18}, 4: {18}, 5: {18}}),
+    "micro_o17_mf5_weighted.endf": ("o17_b81", {1: {451}, 3: {16}, 4: {16}, 5: {16}}),
+    "micro_u235_delayed.endf": ("u235_b81", {1: {451, 452, 455, 456}, 3: {18}, 5: {455}}),
+    "micro_u233_mf5_lf11.endf": ("u233_b71", {1: {451}, 3: {18}, 4: {18}, 5: {18}}),
+    "micro_am241_mf5_lf12.endf": ("am241_b71", {1: {451}, 3: {18}, 4: {18}, 5: {18}}),
+}
+
+
+def fission_energy_fixture_path(key: str) -> Path:
+    """Committed MF1/458 micro-tape for *key*."""
+    return DATA / f"micro_{key}_fission_energy.endf"
+
+
 MF32_FIXTURES = {
     "na23": "na23_b81",
     "cm244": "cm244_b81",
@@ -541,6 +566,22 @@ def build_nubar(source: Path, dest: Path) -> None:
     dest.write_text(trimmed)
 
 
+def build_kept(source: Path, dest: Path, keep) -> None:
+    """Cut *source* down to *keep*, verbatim -- :func:`build_nubar` for any keep."""
+    content = source.read_text()
+    inventory = section_inventory(content)
+    to_remove: list[tuple[int, int | None]] = []
+    for mf, mts in sorted(inventory.items()):
+        if mf not in keep:
+            to_remove.append((mf, None))
+            continue
+        for mt in sorted(set(mts) - keep[mf]):
+            to_remove.append((mf, mt))
+    trimmed, n_removed = remove_sections(content, to_remove)
+    assert n_removed, f"nothing was removed from {source} — wrong source tape?"
+    dest.write_text(trimmed)
+
+
 def build_mf32(source: Path, dest: Path) -> None:
     """Cut *source* down to ``KEEP_MF32``, verbatim.
 
@@ -706,6 +747,43 @@ def test_regenerate_micro_tapes(fe56_host_tape, cf252_b81_tape, u235_b81_tape, r
     assert all(tsl_fixture_path(k).stat().st_size > 0 for k in TSL_FIXTURES)
     assert all(mf6_fixture_path(k).stat().st_size > 0 for k in MF6_FIXTURES)
     assert all(mf6_fixture_path(k).stat().st_size > 0 for k in MF6_CP_FIXTURES)
+
+
+@pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
+def test_regenerate_fission_energy_micro_tapes(request):
+    """The three MF1/458 fixtures, from ENDF/B-VIII.1."""
+    for key, (tape, keep) in FISSION_ENERGY_FIXTURES.items():
+        source = request.getfixturevalue(f"{tape}_tape")
+        build_kept(Path(source), fission_energy_fixture_path(key), keep)
+    assert all(fission_energy_fixture_path(k).stat().st_size > 0
+               for k in FISSION_ENERGY_FIXTURES)
+
+
+@pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
+def test_regenerate_mf5_spectra_micro_tapes(request):
+    """The MF5 parametrised-spectrum fixtures, from ENDF/B-VIII.1 and -VII.1."""
+    for name, (tape, keep) in MF5_SPECTRA_FIXTURES.items():
+        source = request.getfixturevalue(f"{tape}_tape")
+        build_kept(Path(source), DATA / name, keep)
+
+
+@pytest.mark.parametrize("name", sorted(MF5_SPECTRA_FIXTURES))
+def test_mf5_spectra_inventories_are_exactly_what_we_kept(name):
+    inventory = section_inventory((DATA / name).read_text())
+    assert {mf: set(mts) for mf, mts in inventory.items()} == MF5_SPECTRA_FIXTURES[name][1]
+    assert (DATA / name).stat().st_size < 100_000
+
+
+@pytest.mark.parametrize("key", sorted(FISSION_ENERGY_FIXTURES))
+def test_fission_energy_inventories_are_exactly_what_we_kept(key):
+    inventory = section_inventory(fission_energy_fixture_path(key).read_text())
+    keep = FISSION_ENERGY_FIXTURES[key][1]
+    assert {mf: set(mts) for mf, mts in inventory.items()} == keep
+
+
+def test_fission_energy_micro_tapes_stay_small():
+    for key in FISSION_ENERGY_FIXTURES:
+        assert fission_energy_fixture_path(key).stat().st_size < 100_000, key
 
 
 @pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")

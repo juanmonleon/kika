@@ -490,18 +490,21 @@ _group("subtract", Coverage.UNSUPPORTED, 'subtract',
        subtract
        """)
 
-_group("analyticSpectra", Coverage.UNSUPPORTED, 'energy',
-       "§18.3's analytic spectra (gnds.xsd:1701-1762) and their "
-       "parameter children. Each is a formula with named parameters "
-       "rather than a table, so kika reports one instead of tabulating "
-       "it -- a tabulation would put numbers in the file the evaluator "
-       "never wrote. nodes.py:158-193 carries the census count of each, "
-       "and four of the six have a witness while Watt and MadlandNix "
-       "have none",
+_group("analyticSpectra", Coverage.FULL, None,
+       "§18.3's parametrised spectra (gnds.xsd:1701-1762) and their "
+       "parameter children, modelled since 2026-10-08 as their "
+       "parameters -- kika/nuclear_data/model/energy_spectra.py, never "
+       "tabulated into the file -- and read and written by both doors. "
+       "ENDF MF5 LF=5/7/9/11/12 and NK>1 reach them; MT455's NK "
+       "subsections are per-family spectra and go on the delayedNeutron "
+       "products instead. Watt and MadlandNix have no ENDF witness on "
+       "this machine and are gated on their closed forms. FUDGE 6.10's "
+       "schema admits only evaporation inside weighted",
        """
        evaporation generalEvaporation simpleMaxwellianFission Watt
        MadlandNix weightedFunctionals weighted U theta g b EFL EFH T_M
        """)
+
 
 _group("census0Forms", Coverage.UNSUPPORTED, 'distribution',
        "**zero** occurrences across the 558 distributed neutron "
@@ -548,20 +551,33 @@ _group("thermalScattering", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSectio
        SCTApproximation freeGasApproximation phononSpectrum
        """)
 
-_group("fissionFragmentData", Coverage.UNSUPPORTED, 'fissionFragmentData',
-       "delayed neutrons and fission energy release "
-       "(gnds.xsd:1457-1565). kika reads both from ENDF MF1/455 and "
-       "MF1/458 today and the GNDS side has no phase scheduled, so the "
-       "reader names the container and stops",
+_group("fissionFragmentData", Coverage.FULL, None,
+       "§18.4 (gnds.xsd:1296-1335): the delayed-neutron families from ENDF "
+       "MF1/455 and the fission energy release from MF1/458, read into the "
+       "model and written back by both doors since 2026-10-08 (kika/gnds/"
+       "encode.py fissionFragmentData, decode.py readFissionFragmentData). "
+       "A term is polynomial1d -- with its coefficients' uncertainty as "
+       "<uncertainty><polynomial1d/> -- or XYs1d. The delayedNeutron's "
+       "product carries no multiplicity or distribution until MF5/455's "
+       "per-family spectra reach it",
        """
        fissionFragmentData delayedNeutrons delayedNeutron rate
        fissionEnergyReleases fissionEnergyRelease promptProductKE
        promptNeutronKE delayedNeutronKE promptGammaEnergy
        delayedGammaEnergy delayedBetaEnergy neutrinoEnergy
-       nonNeutrinoEnergy totalEnergy productYields productYield
-       elapsedTimes elapsedTime time yields incidentEnergies
-       incidentEnergy
+       nonNeutrinoEnergy totalEnergy
        """)
+
+_group("fissionProductYields", Coverage.UNSUPPORTED, 'fissionFragmentData',
+       "fission product yields (gnds.xsd:1339 onwards), ENDF MF8/454 and "
+       "/459. The model keeps a productYields slot and nothing fills it; "
+       "the reader reports the container. Roadmap E7 (kika-workspace "
+       "docs/library/endf_coverage_roadmap.md)",
+       """
+       productYields productYield elapsedTimes elapsedTime time yields
+       incidentEnergies incidentEnergy
+       """)
+
 
 _group("averageProductEnergy", Coverage.UNSUPPORTED, 'averageProductEnergy',
        "§17.4 (gnds.xsd:1606) is a processed quantity and kika reads "

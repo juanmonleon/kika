@@ -416,7 +416,27 @@ def _readPolynomial1d(element: ET.Element, axes: Optional[Axes]) -> Polynomial1d
         label=element.attrib.get("label"),
         outerDomainValue=_optionalFloat(element, "outerDomainValue"),
         index=_optionalInt(element, "index"),
+        uncertainty=_functionUncertainty(element),
     )
+
+
+def _functionUncertainty(element: ET.Element):
+    """§7's ``uncertainty`` child when it holds a function, else ``None``.
+
+    The inverse of ``encode._functionUncertainty``: an ``XYs1d`` or a
+    ``polynomial1d`` becomes :attr:`Uncertainty.standard`. A ``covariance``
+    back-link is not read here -- the decoder tallies it where it occurs, since
+    §25.2.3 states the same relation from the covarianceSuite.
+    """
+    from kika.nuclear_data.model.uncertainties import Uncertainty
+
+    node = element.find("uncertainty")
+    if node is None:
+        return None
+    for child in node:
+        if child.tag in ("XYs1d", "polynomial1d"):
+            return Uncertainty(standard=readFunction1d(child))
+    return None
 
 
 # ---------------------------------------------------------------------------

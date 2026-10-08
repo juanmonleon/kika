@@ -21,15 +21,33 @@ from typing import Callable, Optional
 from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      Branching3d,
                                      ConversionReport, DiscreteGamma,
-                                     EnergyAngular, Frame, Isotropic2d,
-                                     KalbachMann, NBodyPhaseSpace,
+                                     EnergyAngular, Evaporation, Frame,
+                                     GeneralEvaporation, Isotropic2d,
+                                     KalbachMann, MadlandNix, NBodyPhaseSpace,
                                      PhysicalQuantity, PrimaryGamma,
-                                     Uncorrelated, Unspecified)
+                                     SimpleMaxwellianFission, Uncorrelated,
+                                     Unspecified, Watt, Weighted,
+                                     WeightedFunctionals)
 from kika.nuclear_data.model.distributions import Distribution
 
 from .nodes import NODES, Status, reads
-from .primitives import (UnsupportedNode, readAxes, readFunction2d,
-                         readFunction3d)
+from .primitives import (UnsupportedNode, readAxes, readFunction1d,
+                         readFunction2d, readFunction3d)
+
+def _incomplete(tag: str, missing) -> str:
+    return (f"analytic §18.3 spectrum with no {', '.join(missing)} "
+            f"(gnds.xsd:1714-1770 makes them required); without its parameters "
+            f"it is not a spectrum, and none is guessed")
+
+
+#: GNDS tag → (model class, its parameter wrappers in schema order, quantities).
+_SPECTRA = {
+    "evaporation": (Evaporation, ("theta",), ("U",)),
+    "generalEvaporation": (GeneralEvaporation, ("theta", "g"), ("U",)),
+    "simpleMaxwellianFission": (SimpleMaxwellianFission, ("theta",), ("U",)),
+    "Watt": (Watt, ("a", "b"), ("U",)),
+    "MadlandNix": (MadlandNix, ("T_M",), ("EFL", "EFH")),
+}
 
 __all__ = ["readDistribution"]
 
@@ -223,7 +241,9 @@ class _DistributionReader:
         return None
 
     @reads("uncorrelatedEnergyForm", "discreteGamma", "primaryGamma",
-           "NBodyPhaseSpace")
+           "NBodyPhaseSpace", "evaporation", "generalEvaporation",
+           "simpleMaxwellianFission", "Watt", "MadlandNix",
+           "weightedFunctionals")
     def uncorrelatedEnergy(self, element: ET.Element, path: str):
         """``uncorrelated/energy``: eleven choices, four of which kika models.
 
@@ -251,6 +271,8 @@ class _DistributionReader:
                     axes=readAxes(child, self.resolve),
                     finalState=child.attrib.get("finalState"),
                 )
+            if child.tag in _SPECTRA or child.tag == "weightedFunctionals":
+                return self.analyticSpectrum(child, here)
             if child.tag in UNREAD_ENERGY_FORMS:
                 self.unsupported(child.tag, here,
                                  UNREAD_ENERGY_FORMS[child.tag])
@@ -270,6 +292,58 @@ class _DistributionReader:
                 self.unsupported(child.tag, here, exc.args[0])
         return None
 
+
+    def analyticSpectrum(self, element: ET.Element, path: str):
+        """§18.3's parametrised spectra -- the inverse of the writer's.
+
+        The parameter wrappers (``theta``, ``g``, ``a``, ``b``, ``T_M``) each
+        hold one ``XYs1d``; the model keeps the table and drops the wrapper.
+        """
+        here = f"{path}/{element.tag}"
+        if element.tag == "weightedFunctionals":
+            form = WeightedFunctionals()
+            for weighted in element.findall("weighted"):
+                children = [c for c in weighted if c.tag not in IGNORED]
+                weight = functional = None
+                for child in children:
+                    if child.tag in _SPECTRA:
+                        functional = self.analyticSpectrum(child, f"{here}/weighted")
+                    elif weight is None:
+                        weight = readFunction1d(child, readAxes(child, self.resolve))
+                    else:
+                        functional = readFunction2d(child, readAxes(child, self.resolve))
+                form.weighted.append(Weighted(weight=weight, functional=functional))
+            if not form.weighted or any(w.weight is None or w.functional is None
+                                        for w in form.weighted):
+                self.unsupported(element.tag, path, _incomplete(element.tag, ["weighted"]))
+                return None
+            return form
+        cls, parameters, quantities = _SPECTRA[element.tag]
+        form = cls()
+        for name in quantities:
+            node = element.find(name)
+            if node is not None and "value" in node.attrib:
+                setattr(form, name, PhysicalQuantity(
+                    value=float(node.attrib["value"]),
+                    unit=node.attrib.get("unit", "eV")))
+        for name in parameters:
+            wrapper = element.find(name)
+            tables = [c for c in (wrapper if wrapper is not None else []) if c.tag not in IGNORED]
+            if not tables:
+                self.unsupported(name, here, "the parameter wrapper is empty")
+                continue
+            try:
+                setattr(form, name, readFunction1d(tables[0], readAxes(tables[0], self.resolve)))
+            except UnsupportedNode as exc:
+                self.unsupported(tables[0].tag, f"{here}/{name}", exc.args[0])
+        missing = [name for name in (*quantities, *parameters) if getattr(form, name) is None]
+        if missing:
+            # A formula without its parameters is not a spectrum: refused by
+            # name, so the uncorrelated it sits in stays a half node and the
+            # writer's one rule for those applies.
+            self.unsupported(element.tag, path, _incomplete(element.tag, missing))
+            return None
+        return form
 
     # -- §18.4 and §18.5, the two orderings of DistributionAEType -----------
 

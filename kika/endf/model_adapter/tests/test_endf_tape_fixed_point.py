@@ -228,12 +228,14 @@ def test_a_tape_with_mf5_comes_back_with_it(micro_pfns_tape, tmp_path):
     anyway**, because the distributions were absent from both sides. So the
     assertions here were the negative ones, and the docstring said as much.
 
-    Now MF5/MT18 round-trips and MF5/MT455 does not, and the difference is the
-    whole point. MT455 is the delayed spectrum: it has no cross section, so it
-    has no MF3 and no reaction to hang a distribution from, and §18.4's
-    ``delayedNeutrons`` — where it does belong — is a separate increment. That
-    is a **declared** loss, and the loop below is what makes it declared rather
-    than silent.
+    Now MF5/MT18 round-trips and, on this tape, MF5/MT455 does not. MT455 is
+    the delayed spectrum: it has no cross section, so it has no MF3 and no
+    reaction to hang a distribution from. Its home is §18.4's
+    ``delayedNeutrons``, one spectrum per precursor family -- but the families
+    come from MF1/455, and this cut tape does not carry it. So here the loss is
+    **declared**, and the assertions below are what make it declared rather
+    than silent; with MF1/455 present the spectra are placed and written back
+    (``test_energy_spectra``).
     """
     before, after, report = _fixedPoint(micro_pfns_tape, tmp_path)
     assert _walk(before.reactions) == _walk(after.reactions)
@@ -245,10 +247,10 @@ def test_a_tape_with_mf5_comes_back_with_it(micro_pfns_tape, tmp_path):
 
     said = "\n".join(report.losses + report.unsupported)
     assert "MF5/MT455 has no MF3/MT455 to hang from" in said
-    # NK=6 is §18.3's weightedFunctionals and kika has no node for it, so the
-    # whole section stays out -- said once for the section rather than once per
-    # subsection, which is what it used to be when the six LF=5 partials were
-    # undecoded and each reported itself.
+    # MT455's NK=6 are per-family spectra; this cut tape has no MF1/455, so
+    # there are no families to put them on and the section stays out -- said
+    # once for the section, naming its laws. With MF1/455 they are placed and
+    # written back: test_fission_energy_round_trip / test_energy_spectra.
     assert "MF5/MT455 has NK=6 subsections (LF=[5,5,5,5,5,5])" in said
 
     # And nothing left over from the old regime: no message may claim MF5 is

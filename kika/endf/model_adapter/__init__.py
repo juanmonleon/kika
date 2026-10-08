@@ -25,6 +25,12 @@ from .decode import decodeMF1MT451, decodeMF3MT, decodeReactionSuite
 from .encode import encodeMF1MT451, encodeMF3MT
 from .energy import decodeMF5MT, encodeMF5MT
 from .energy_angle import decodeMF6MT, encodeMF6MT
+from .fission_energy import (
+    attachFissionEnergyRelease,
+    decodeMF1MT458,
+    encodeMF1MT458,
+    encodeMF1MT460,
+)
 from .multiplicity import (
     attachNubar,
     decodeMF1Nubar,
@@ -47,4 +53,6 @@ __all__ = [
     "encodeMF31MT", "encodeMF33MT", "encodeMF34MT", "encodeMF35MT",
     "decodeMF1Nubar", "attachNubar", "nubarHref",
     "encodeMF1MT452", "encodeMF1MT455", "encodeMF1MT456",
+    "decodeMF1MT458", "attachFissionEnergyRelease", "encodeMF1MT458",
+    "encodeMF1MT460",
 ]

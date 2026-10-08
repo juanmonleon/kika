@@ -120,17 +120,23 @@ def test_the_energy_axes_come_off_the_node_and_are_shared(mf5):
         assert all(region.axes is form.axes for region in form.function2ds)
 
 
-def test_nk_greater_than_one_is_declared_and_not_half_read(mf5):
-    """A partial of a weighted sum is not the distribution.
+def test_mt455_is_per_family_and_not_a_weighted_sum(mf5):
+    """MT455's NK subsections are the precursor families, not ``weightedFunctionals``.
 
-    MT455 is NK=6. Even had one of the six been an LF=1, hanging it on the
-    product as *the* energy distribution would be a statement no schema can
-    catch — §18.3's node for a weighted sum is ``weightedFunctionals``, which
-    kika does not model. So the whole section stays out of the reactionSuite.
+    ``decodeMF5MT`` gives no single form for it -- one partial, or their sum,
+    hung on a product as *the* delayed spectrum would be a statement no schema
+    can catch -- and ``decodeMF5Families`` gives the six one by one, each with
+    its ``p_k``, for §18.4's ``delayedNeutron`` products (roadmap E2).
     """
+    from kika.endf.model_adapter.energy import decodeMF5Families
+    from kika.nuclear_data.model import GeneralEvaporation
+
     _, form, _, report = _roundTrip(mf5.mt[455], 455)
     assert form is None
-    assert any("weightedFunctionals" in line for line in report.unsupported)
+    assert any("not a weighted sum" in line for line in report.unsupported)
+    families, _provenance, _report = decodeMF5Families(mf5.mt[455])
+    assert len(families) == 6
+    assert all(isinstance(spectrum, GeneralEvaporation) for _p, spectrum in families)
 
 
 def test_the_encoder_refuses_to_work_without_the_provenance(mf5):
@@ -142,11 +148,12 @@ def test_the_encoder_refuses_to_work_without_the_provenance(mf5):
 
 
 def test_the_encoder_refuses_a_form_the_provenance_does_not_expect(mf5):
-    """MT455 modelled nothing; handing it a form would silently write the
-    section as an LF=1 it never was."""
+    """MT455 is written back from its bytes; handed a form that is not what
+    those bytes decode to -- here MT18's LF=1 table -- it refuses rather than
+    silently writing the original over an edit."""
     form, _p, _r = decodeMF5MT(mf5.mt[18])
     _f, provenance, _r = decodeMF5MT(mf5.mt[455])
-    with pytest.raises(ValueError, match="carried the model form"):
+    with pytest.raises(ValueError, match="differs from the section it was decoded from"):
         encodeMF5MT(form, provenance, 455)
 
 

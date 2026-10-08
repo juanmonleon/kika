@@ -127,6 +127,14 @@ def multiplicityAxes() -> Axes:
     return Axes.forFunction1d("multiplicity", "", "energy_in", "eV")
 
 
+#: The axes of one fission-energy-release component (§18.4, MF1/458): an energy
+#: as a function of the incident energy. The labels are FUDGE's
+#: (``fissionEnergyRelease.defaultAxes``), so a coefficient ``c_n`` is in
+#: ``eV / eV**n`` and the polynomial evaluates to eV.
+def fissionEnergyReleaseAxes() -> Axes:
+    return Axes.forFunction1d("energy_out", "eV", "energy_in", "eV")
+
+
 #: The axes of a two-body angular distribution — the MF4 case, and the one
 #: container in the library that is **three** axes rather than two, so it is
 #: built literally instead of through :meth:`Axes.forFunction1d`.

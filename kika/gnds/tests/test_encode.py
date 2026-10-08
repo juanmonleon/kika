@@ -22,6 +22,8 @@ Three gates, and the third is the one that matters.
 """
 from __future__ import annotations
 
+import os
+
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
@@ -43,9 +45,12 @@ from kika.gnds.xpath import Document
 #: makes it a root in its own right and FUDGE ships it its own schema — so
 #: validating the sibling against the reaction schema fails with "no matching
 #: global declaration" and says nothing about the file.
-SCHEMA = Path("/soft_snc/FUDGE/6.10.0/fudge/fudge/gnds.xsd")
-COVARIANCE_SCHEMA = Path(
-    "/soft_snc/FUDGE/6.10.0/fudge/fudge/covariances/covariances.xsd")
+#: FUDGE 6.10.0's schemas. The cluster install by default; ``KIKA_FUDGE_DIR``
+#: points at another checkout (the directory holding ``fudge/gnds.xsd``), which
+#: is what lets the schema gates run on a workstation instead of skipping.
+_FUDGE_DIR = Path(os.environ.get("KIKA_FUDGE_DIR", "/soft_snc/FUDGE/6.10.0/fudge"))
+SCHEMA = _FUDGE_DIR / "fudge" / "gnds.xsd"
+COVARIANCE_SCHEMA = _FUDGE_DIR / "fudge" / "covariances" / "covariances.xsd"
 
 #: The committed evaluations, by conftest fixture name. Between them they carry
 #: every node the writer emits. It was three until phase 7b needed witnesses:
@@ -497,8 +502,9 @@ def test_an_unreadable_distribution_is_left_empty_and_never_called_unspecified(
     **The subject moved when phase 7b landed ``uncorrelated``.** H-2's three
     empty ``<distribution/>`` elements were its three ``uncorrelated`` laws;
     they are read now, so the doctrine needs a law that is still unread. One is
-    planted here — an ``<evaporation>``, one of the six analytic §18.3 spectra
-    (``gnds.xsd:1697-1709``) — and it exercises a second rule at the same time:
+    planted here — an ``<evaporation>`` with no ``U`` and no ``theta``, which
+    kika (reading the analytic §18.3 spectra since 2026-10-08) refuses as not a
+    spectrum at all — and it exercises a second rule at the same time:
     the reader keeps the angular half it *could* read, and the writer refuses
     to emit a one-child ``<uncorrelated>`` because ``gnds.xsd:1677-1680`` is an
     ``xs:sequence``. A half node would validate against nothing and read as a

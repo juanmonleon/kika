@@ -46,11 +46,13 @@ class Add:
 class Summands:
     """§21.3. What a sum is a sum of, in the order the evaluation gives them.
 
-    **May legitimately be empty while the sum itself has values.** MF1/455 is
-    the case: the aggregate delayed nu-bar is in the file, the per-family
-    multiplicities it is the sum of are not (they need MF5's weights). An empty
-    ``summands`` says "kika has the total and not the parts", which is true; a
-    fabricated list of links to empty nodes would not be.
+    **May legitimately be empty while the sum itself has values.** MF1/455
+    without MF5/455 is the case: the aggregate delayed nu-bar is in the file,
+    the per-family multiplicities it is the sum of are not (they need MF5's
+    weights). An empty ``summands`` says "kika has the total and not the
+    parts", which is true; a fabricated list of links to empty nodes would not
+    be. With MF5/455 the families get ``p_k * nu_d`` and the list is filled
+    (``fission_energy.attachDelayedSpectra``, 2026-10-08).
     """
 
     summands: List[Add] = field(default_factory=list)

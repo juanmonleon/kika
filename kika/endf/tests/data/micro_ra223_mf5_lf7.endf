@@ -1,0 +1,173 @@
+ ENDF/B-VIII.1                                                         0  0
+ 8.822300+4 2.211030+2          0          1          0          18825 1451
+ 0.000000+0 1.000000+0          0          0          0          68825 1451
+ 1.000000+0 2.000000+7          1          0         10          88825 1451
+ 0.000000+0 0.000000+0          0          0        123          48825 1451
+ 88-Ra-223 TIT        EVAL-AUG88 N.Takagi                         8825 1451
+ NDS 148, 1 (2018)    DIST-AUG24 REV1-JUL23            20240830   8825 1451
+---- ENDF/B-VIII.1    MATERIAL 8825         REVISION 1            8825 1451
+----- INCIDENT-NEUTRON DATA                                       8825 1451
+------ ENDF-6                                                     8825 1451
+                                                                  8825 1451
+****************************************************************  8825 1451
+Missing exit distributions imported from TENDL2019                8825 1451
+by I.J. Thompson (LLNL) on 2023-04-21T21:38:53                    8825 1451
+                                                                  8825 1451
+Some neutron exit distributions, as noted, may be imported so all 8825 1451
+exit distributions have the same reference frame.                 8825 1451
+                                                                  8825 1451
+Changes by program patchGNDS.py:                                  8825 1451
+  photon distribution for MT=102: Ra224 + photon.                 8825 1451
+                                                                  8825 1451
+                                                                  8825 1451
+   ===========================================================    8825 1451
+   JENDL-3.2 data were automatically transformed to JENDL-3.3.    8825 1451
+    Interpolation of spectra: 22 (unit base interpolation)        8825 1451
+    (3,251) deleted, T-matrix of (4,2) deleted, and others.       8825 1451
+   ===========================================================    8825 1451
+                                                                  8825 1451
+HISTORY                                                           8825 1451
+88-08 NEW EVALUATION WAS MADE BY N. TAKAGI (TOKYO INSTITUTE OF    8825 1451
+      TECHNOLOGY, TIT)                                            8825 1451
+                                                                  8825 1451
+MF=1  GENERAL INFORMATION                                         8825 1451
+  MT=451   COMMENT AND DICTIONARY                                 8825 1451
+  MT=452   NUMBER OF NEUTRONS PER FISSION                         8825 1451
+            EVALUATED WITH SEMI EMPIRICAL FORMULA OF HOWERTON/1/. 8825 1451
+                                                                  8825 1451
+MF=2  RESONANCE PARAMETERS                                        8825 1451
+  MT=151   RESONANCE PARAMETERS                                   8825 1451
+    NO RESONANCE PARAMETERS WERE GIVEN.                           8825 1451
+                                                                  8825 1451
+  2200-M/S CROSS SECTIONS AND RESONANCE INTEGRALS                 8825 1451
+                      2200 M/S VALUE       RES. INT.              8825 1451
+        TOTAL           143.10    B            -                  8825 1451
+        ELASTIC          12.40    B            -                  8825 1451
+        FISSION           0.70    B         1.06  B               8825 1451
+        CAPTURE         130.00    B         435   B               8825 1451
+                                                                  8825 1451
+MF=3  NEUTRON CROSS SECTIONS                                      8825 1451
+  MT=1  TOTAL CROSS SECTION                                       8825 1451
+        BELOW  4 EV, CALCULATED AS SUM OF MT'S = 2, 18 AND 102.   8825 1451
+        ABOVE  4 EV, OPTICAL MODEL CALCULATION WAS MADE WITH      8825 1451
+        CASTHY/2/.  THE POTENTIAL PARAMETERS/3/ USED ARE AS       8825 1451
+        FOLLOWS,                                                  8825 1451
+           V = 41.0 - 0.05*EN                      (MEV)          8825 1451
+           WS= 6.4 - 0.15*SQRT(EN)                 (MEV)          8825 1451
+           WV= 0             , VSO = 7.0           (MEV)          8825 1451
+           R = RSO = 1.31    , RS = 1.38            (FM)          8825 1451
+           A = ASO = 0.47    , B  = 0.47            (FM)          8825 1451
+                                                                  8825 1451
+  MT=2  ELASTIC SCATTERING CROSS SECTION                          8825 1451
+        BELOW 4 EV, THE CONSTANT CROSS SECTION OF 12.4 BARNS WAS  8825 1451
+        ASSUMED, WHICH WAS THE SHAPE ELASTIC SCATTERING CROSS     8825 1451
+        SECTION CALCULATED WITH OPTICAL MODEL.  ABOVE THIS ENERGY,8825 1451
+        OPTICAL MODEL CALCULATION WAS ADOPTED.                    8825 1451
+                                                                  8825 1451
+  MT=4,51-52,91  INELASTIC SCATTERING CROSS SECTIONS.             8825 1451
+        OPTICAL AND STATISTICAL MODEL CALCULATION WAS MADE WITH   8825 1451
+        CASTHY/2/.  THE LEVEL SCHEME WAS TAKEN FROM REF. 4.       8825 1451
+                   NO         ENERGY(KEV)   SPIN-PARITY           8825 1451
+                  G.S.             0.0         1/2 +              8825 1451
+                    1             50.19        3/2 -              8825 1451
+                    2             61.53        5/2 +              8825 1451
+                    3             79.77        3/2 -              8825 1451
+                    4            123.91        5/2 -              8825 1451
+                    5            130.27        7/2 +              8825 1451
+                    6            174.72        9/2 +              8825 1451
+                    7            174.78        7/2 -              8825 1451
+                    8            247.47        9/2 -              8825 1451
+                    9            280.31        3/2 +              8825 1451
+                   10            286.16        3/2 +              8825 1451
+                   11            329.95        3/2 -              8825 1451
+                   12            334.52        3/2 +              8825 1451
+                   13            342.50        3/2 +              8825 1451
+                   14            342.92        5/2 +              8825 1451
+        LEVELS ABOVE 369.43 KEV WERE ASSUMED TO BE OVERLAPPING.   8825 1451
+        THE LEVEL DENSITY PARAMETERS WERE TAKEN FROM REF. 5.      8825 1451
+                                                                  8825 1451
+  MT=16,17,37  (N,2N), (N,3N) AND (N,4N) REACTION CROSS SECTIONS  8825 1451
+        CALCULATED WITH EVAPORATION MODEL.                        8825 1451
+                                                                  8825 1451
+  MT=18  FISSION CROSS SECTION                                    8825 1451
+        MEASURED THERMAL CROSS SECTION OF 0.7 BARN WAS TAKEN FROM 8825 1451
+        REF. 6 , AND 1/V FORM WAS ASSUMED BELOW 4 EV.  ABOVE THIS 8825 1451
+        ENERGY, THE CONSTANT CROSS SECTION WAS ADOPTED.           8825 1451
+                                                                  8825 1451
+  MT=102  CAPTURE CROSS SECTION                                   8825 1451
+        MEASURED THERMAL CROSS SECTION OF 130 BARNS WAS TAKEN FROM8825 1451
+        REF. 6 , AND 1/V FORM WAS ASSUMED BELOW 4 EV.  ABOVE 4 EV,8825 1451
+        CALCULATED WITH CASTHY. THE GAMMA-RAY STRENGTH FUNCTION   8825 1451
+        WAS ESTIMATED FROM GAMMA-GAMMA = 0.040 EV AND LEVEL       8825 1451
+        SPACING = 8 EV.                                           8825 1451
+                                                                  8825 1451
+  MT=251  MU-L                                                    8825 1451
+        CALCULATED WITH CASTHY.                                   8825 1451
+                                                                  8825 1451
+MF=4  ANGULAR DISTRIBUTIONS OF SECONDARY NEUTRONS                 8825 1451
+  MT=2,51-64,91       CALCULATED WITH OPTICAL MODEL.              8825 1451
+  MT=16,17,18,37      ISOTROPIC IN THE LAB SYSTEM.                8825 1451
+                                                                  8825 1451
+MF=5  ENERGY DISTRIBUTIONS OF SECONDARY NEUTRONS                  8825 1451
+  MT=16,17,37,91      EVAPORATION SPECTRA                         8825 1451
+         OBTAINED FROM LEVEL DENSITY PARAMETERS.                  8825 1451
+                                                                  8825 1451
+  MT=18               MAXWELLIAN FISSION SPECTRUM.                8825 1451
+        TEMPERATURE WAS ESTIMATED FROM Z**2/A DEPENDENCE/7/.      8825 1451
+                                                                  8825 1451
+REFERENCES                                                        8825 1451
+ 1) HOWERTON R.J.: NUCL. SCI. ENG., 62, 438 (1977).               8825 1451
+ 2) IGARASI S.: J.NUCL.SCI.TECHNOL.,12,67 (1975).                 8825 1451
+ 3) OHSAWA T., OHTA M.: J. NUCL. SCI. TECHNOL., 18, 408 (1981).   8825 1451
+ 4) MAPLES C.: NUCL. DATA SHEETS, 22, 243 (1977).                 8825 1451
+ 5) GILBERT A., CAMERON A.G.W.: CAN. J. PHYS., 43, 1446 (1965).   8825 1451
+ 6) MUGHABGHAB S.F.: "NEUTRON CROSS SECTIONS, VOL.1, NEUTRON      8825 1451
+    RESONANCE PARAMETERS AND THERMAL CROSS SECTIONS , PART B,     8825 1451
+    Z=61-100", ACADEMIC PRESS (1984).                             8825 1451
+ 7) SMITH A.B. ET AL.: ANL/NDM-50 (1979).                         8825 1451
+                                                                  8825 1451
+                                1        451        131          08825 1451
+                                3         18         14          08825 1451
+                                4         18         10          08825 1451
+                                5         18          7          08825 1451
+ 0.000000+0 0.000000+0          0          0          0          08825 1  0
+ 0.000000+0 0.000000+0          0          0          0          08825 0  0
+ 8.822300+4 2.211030+2          0          0          0          08825 3 18
+ 1.999990+8 1.999990+8          0          0          1         338825 3 18
+         33          5          0          0          0          08825 3 18
+ 1.000000-5 3.520900+1 2.530000-2 7.000000-1 1.000000-1 3.520900-18825 3 18
+ 1.000000+0 1.113400-1 4.000000+0 5.570000-2 1.000000+2 5.570000-28825 3 18
+ 1.000000+3 5.520900-2 1.000000+4 5.570000-2 2.000000+4 5.570000-28825 3 18
+ 4.000000+4 5.570000-2 8.000000+4 5.570000-2 1.000000+5 5.570000-28825 3 18
+ 2.000000+5 5.570000-2 4.000000+5 5.570000-2 8.000000+5 5.570000-28825 3 18
+ 1.000000+6 5.570000-2 1.500000+6 5.570000-2 2.000000+6 5.570000-28825 3 18
+ 3.000000+6 5.570000-2 4.000000+6 5.570000-2 6.000000+6 5.570000-28825 3 18
+ 8.000000+6 5.570000-2 9.000000+6 5.570000-2 1.000000+7 5.570000-28825 3 18
+ 1.100000+7 5.570000-2 1.200000+7 5.570000-2 1.300000+7 5.570000-28825 3 18
+ 1.350000+7 5.570000-2 1.400000+7 5.570000-2 1.500000+7 5.570000-28825 3 18
+ 1.600000+7 5.570000-2 1.800000+7 5.570000-2 2.000000+7 5.570000-28825 3 18
+ 0.000000+0 0.000000+0          0          0          0          08825 3  0
+ 0.000000+0 0.000000+0          0          0          0          08825 0  0
+ 8.822300+4 2.211030+2          0          2          0          08825 4 18
+ 0.000000+0 2.211030+2          0          1          0          08825 4 18
+ 0.000000+0 0.000000+0          0          0          1          28825 4 18
+          2          2          0          0          0          08825 4 18
+ 0.000000+0 1.000000-5          0          0          1          28825 4 18
+          2          2          0          0          0          08825 4 18
+-1.000000+0 5.000000-1 1.000000+0 5.000000-1                      8825 4 18
+ 0.000000+0 2.000000+7          0          0          1          28825 4 18
+          2          2          0          0          0          08825 4 18
+-1.000000+0 5.000000-1 1.000000+0 5.000000-1                      8825 4 18
+ 0.000000+0 0.000000+0          0          0          0          08825 4  0
+ 0.000000+0 0.000000+0          0          0          0          08825 0  0
+ 8.822300+4 2.211030+2          0          0          1          08825 5 18
+-2.000000+7 0.000000+0          0          7          1          28825 5 18
+          2          2          0          0          0          08825 5 18
+ 1.000000-5 1.000000+0 2.000000+7 1.000000+0                      8825 5 18
+ 0.000000+0 0.000000+0          0          0          1          28825 5 18
+          2          2          0          0          0          08825 5 18
+ 1.000000-5 1.288000+6 2.000000+7 1.288000+6                      8825 5 18
+ 0.000000+0 0.000000+0          0          0          0          08825 5  0
+ 0.000000+0 0.000000+0          0          0          0          08825 0  0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0

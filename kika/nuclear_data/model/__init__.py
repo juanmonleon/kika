@@ -58,8 +58,8 @@ date such a sentence or point it at the test that fails when it stops holding.
 from __future__ import annotations
 
 from .axes import (Axes, Axis, Grid, angularAxes, crossSectionAxes,
-                   energyAngularAxes, energyAxes, kalbachMannAxes,
-                   multiplicityAxes)
+                   energyAngularAxes, energyAxes, fissionEnergyReleaseAxes,
+                   kalbachMannAxes, multiplicityAxes)
 from .enums import (
     ENDF_INT_TO_INTERPOLATION,
     INTERPOLATION_TO_ENDF_INT,
@@ -132,8 +132,11 @@ from .distributions import (
     Uncorrelated,
     Unspecified,
 )
+from .energy_spectra import (ANALYTIC_SPECTRA, Evaporation, GeneralEvaporation,
+                             MadlandNix, SimpleMaxwellianFission, Watt, Weighted,
+                             WeightedFunctionals)
 from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
-                             FissionFragmentData, Multiplicity, OutputChannel,
+                             FissionEnergyRelease, FissionFragmentData, Multiplicity, OutputChannel,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
 from .pops import Nuclide, Particle, PoPs, pidFromZA, zaFromPid
@@ -211,7 +214,7 @@ __all__ = [
     # §5
     "Axes", "Axis", "Grid", "angularAxes", "crossSectionAxes",
     "energyAngularAxes", "energyAxes", "kalbachMannAxes",
-    "multiplicityAxes", "Values",
+    "multiplicityAxes", "fissionEnergyReleaseAxes", "Values",
     # §6
     "Function1d", "XYs1d", "Regions1d", "Constant1d", "Polynomial1d",
     "Ys1d", "Legendre", "Gridded1d",
@@ -240,7 +243,10 @@ __all__ = [
     # §17-18 output channels and distributions
     "OutputChannel", "Product", "Products", "Multiplicity", "Q",
     "Branching1d", "UnspecifiedMultiplicity",
-    "FissionFragmentData", "DelayedNeutron", "DelayedNeutrons",
+    "Evaporation", "GeneralEvaporation", "SimpleMaxwellianFission", "Watt",
+    "MadlandNix", "Weighted", "WeightedFunctionals", "ANALYTIC_SPECTRA",
+    "FissionFragmentData", "FissionEnergyRelease", "DelayedNeutron",
+    "DelayedNeutrons",
     "Add", "Summands", "MultiplicitySum", "MultiplicitySums",
     "Distribution", "AngularTwoBody", "Isotropic2d", "Unspecified", "Uncorrelated",
     "EnergyAngular", "AngularEnergy", "KalbachMann", "Branching3d",

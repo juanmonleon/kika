@@ -216,7 +216,7 @@ def test_report_is_clean_apart_from_the_declared_gaps(micro_pfns_tape):
     # decodes them now, so what is left is the single statement the *model*
     # owes. A count is easy to satisfy by accident, so the content is asserted
     # too.
-    assert sum("weightedFunctionals" in m for m in messages) == 1
+    assert sum("not a weighted sum" in m for m in messages) == 1
 
     # And the MF35 redirect really was acted on rather than left standing.
     assert not any("covarianceSuite" in m for m in messages)

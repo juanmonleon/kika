@@ -153,6 +153,19 @@ def _mf1Sections(suite, mat, report, label=None):
             f"MT {written or 'none'} carry it, MT {fellBack or 'none'} fell back "
             f"to {EVAL_LABEL!r} because they have no {label!r} form"
         )
+
+    # 458 and 460 after the nu-bars, ascending. 458 from the model, falling
+    # back to the evaluated node like the nu-bars do; 460 from the records the
+    # decoder kept, since it has no model node.
+    from ..model_adapter.fission_energy import (encodeMF1MT458, encodeMF1MT460,
+                                                fissionEnergyReleaseNode)
+
+    if fissionEnergyReleaseNode(suite, label) is not None:
+        section, report = encodeMF1MT458(suite, mat, report, label=label)
+        sections.append((1, 458, section))
+    section, report = encodeMF1MT460(suite, mat, report)
+    if section is not None:
+        sections.append((1, 460, section))
     return sections, report
 
 
@@ -270,7 +283,38 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
             f"to {EVAL_LABEL!r} because they have no {label!r} form"
         )
 
+    section, report = _mf5DelayedSection(suite, report)
+    if section is not None:
+        mf5.append((5, 455, section))
+
     return mf3 + mf4 + mf5, report
+
+
+def _mf5DelayedSection(suite, report):
+    """MF5/MT455, from the bytes kept on ``delayedNeutrons`` -- or ``None``.
+
+    It has no reaction of its own, so the loop above never reaches it: the
+    section's home is §18.4's precursor families on the fission channel
+    (``fission_energy.attachDelayedSpectra``). The families' spectra go in as
+    the edit check, so a spectrum changed in the model is refused rather than
+    overwritten by the original.
+    """
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    from ..model_adapter import encodeMF5MT
+
+    reaction = suite.findReactionByENDF_MT(18)
+    data = getattr(getattr(reaction, "outputChannel", None), "fissionFragmentData", None)
+    families = getattr(data, "delayedNeutrons", None)
+    provenance = getattr(families, "provenance", None)
+    if provenance is None:
+        return None, report
+    forms = []
+    for family in families:
+        form = _evaluatedForm(getattr(family, "product", None), EVAL_LABEL)
+        forms.append(getattr(form, "energy", None))
+    energyForm = forms if forms and all(f is not None for f in forms) else None
+    return encodeMF5MT(energyForm, provenance, 455, report)
 
 
 def _neutronProduct(reaction):
