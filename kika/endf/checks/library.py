@@ -43,7 +43,9 @@ TAPE_PATTERNS = ("*.endf", "*.jeff", "*.txt", "*.dat")
 #: MF3 and MF4 (central values), MF5 (the spectra of MF35). MF40's central
 #: values are MF10, which kika does not read. Only what the asked files need is
 #: read: MF1-4 of a JENDL-5 tape cost ~6 s, for nothing if only MF35 is asked.
-_SUPPORT_MF = {31: (1,), 32: (2,), 33: (2, 3), 34: (4,), 35: (5,), 40: ()}
+#: MF34 reads MF33 too: a_0 stands for the integrated cross section, whose
+#: variance is MF33's (ENDF-6 §34.3).
+_SUPPORT_MF = {31: (1,), 32: (2,), 33: (2, 3), 34: (4, 33), 35: (5,), 40: ()}
 
 Progress = Union[bool, None, Callable[[str], None]]
 #: ``on_tape(done, total, name, ok)``, called when each tape is done.
