@@ -60,9 +60,14 @@ def fudgePython():
     return command
 
 
-def _runFudge(command, tape: Path) -> dict:
+def _runFudge(command, tape: Path, name: str = "tape.endf") -> dict:
+    """FUDGE's reading of *tape*, written for it under the file *name*.
+
+    The name matters for a TSL tape only: FUDGE's converter names the
+    scatterer from it (``ENDF_ITYPE_2.py``) and refuses a name it does not know.
+    """
     source = (_HERE / "fudge_oracle_dump.py").read_text()
-    stdin = source + "\n" + TAPE_MARKER + tape.read_text()
+    stdin = f"NAME = {name!r}\n" + source + "\n" + TAPE_MARKER + tape.read_text()
     environment = dict(os.environ, MSYS_NO_PATHCONV="1")
     done = subprocess.run(command + ["-c", _RUNNER], input=stdin,
                           capture_output=True, text=True, timeout=900,
@@ -198,3 +203,98 @@ def test_the_resonance_energies_read_the_same(pair):
         for group in region.formalism.spinGroups:
             energies.extend(float(e) for e in group.energies)
     np.testing.assert_allclose(sorted(energies), fudge["resonances"], rtol=RTOL, atol=0)
+
+
+# ----------------------------------------------------------------------
+# The thermal scattering law (roadmap E4)
+# ----------------------------------------------------------------------
+
+#: The committed TSL micro-tapes, and the evaluation file name FUDGE knows each by.
+_TSL = {"sch4": "tsl-s-CH4.endf", "un_elastic": "tsl-NinUN.endf",
+        "bemetal_elastic": "tsl-Be-metal.endf", "jeff_be_elastic": "tsl-Be-metal.endf"}
+
+#: kika's NEUTRON_MASS_AMU is CODATA 2018 and FUDGE's is older; masses in amu
+#: agree to ~2e-10, and that is the constant, not the reading.
+MASS_RTOL = 1e-9
+
+
+@pytest.fixture(scope="module", params=sorted(_TSL))
+def tslPair(request, fudgePython):
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    tape = _DATA / f"micro_tsl_{request.param}.endf"
+    suite, _ = decodeReactionSuite(read_endf(str(tape)))
+    forms = [r.doubleDifferentialCrossSection[EVAL_LABEL] for r in suite.reactions]
+    return forms, _runFudge(fudgePython, tape, _TSL[request.param])["tsl"]
+
+
+def test_the_tsl_forms_are_the_same_forms(tslPair):
+    forms, fudge = tslPair
+    kinds = {"CoherentElastic": "coherentElastic", "IncoherentElastic": "incoherentElastic",
+             "IncoherentInelastic": "incoherentInelastic"}
+    assert [kinds[type(f).__name__] for f in forms] == [entry["kind"] for entry in fudge]
+
+
+def test_the_tsl_tables_read_the_same(tslPair):
+    from kika.nuclear_data.model import (CoherentElastic, IncoherentElastic,
+                                         IncoherentInelastic)
+
+    forms, fudge = tslPair
+    for form, entry in zip(forms, fudge):
+        if isinstance(form, CoherentElastic):
+            temperature, energy = form.S_table.grids
+            np.testing.assert_allclose(temperature.values, entry["temperatures"], rtol=RTOL)
+            np.testing.assert_allclose(energy.values, entry["energies"], rtol=RTOL)
+            np.testing.assert_allclose(form.S_table.values.ravel(), entry["values"], rtol=RTOL)
+        elif isinstance(form, IncoherentElastic):
+            assert form.boundAtomCrossSection.value == pytest.approx(entry["bound"], rel=RTOL)
+            # A repeated identical point is kept by kika and dropped by FUDGE
+            # (ENDF_ITYPE_2.py:357); see the test naming it below.
+            xs, ys = _collapse(*form.DebyeWallerIntegral.toEndfRegions()[:2])
+            np.testing.assert_allclose(xs, entry["temperatures"], rtol=RTOL)
+            np.testing.assert_allclose(ys, entry["values"], rtol=RTOL)
+        elif isinstance(form, IncoherentInelastic):
+            kernel = form.principal.selfScatteringKernel.kernel
+            temperature, beta, alpha = kernel.grids
+            np.testing.assert_allclose(temperature.values, entry["temperatures"], rtol=RTOL)
+            np.testing.assert_allclose(beta.values, entry["betas"], rtol=RTOL)
+            np.testing.assert_allclose(alpha.values, entry["alphas"], rtol=RTOL)
+            np.testing.assert_allclose(kernel.values.ravel(), entry["values"], rtol=RTOL)
+            assert form.calculatedAtThermal == entry["calculatedAtThermal"]
+
+
+def test_the_scattering_atoms_read_the_same(tslPair):
+    from kika.nuclear_data.model import IncoherentInelastic
+
+    forms, fudge = tslPair
+    for form, entry in zip(forms, fudge):
+        if not isinstance(form, IncoherentInelastic):
+            continue
+        assert len(form.scatteringAtoms) == len(entry["atoms"])
+        for atom, theirs in zip(form.scatteringAtoms, entry["atoms"]):
+            assert atom.numberPerMolecule == theirs["numberPerMolecule"]
+            assert atom.primaryScatterer == theirs["primary"]
+            assert atom.boundAtomCrossSection.value == pytest.approx(theirs["bound"], rel=RTOL)
+            assert atom.mass.value == pytest.approx(theirs["mass"], rel=MASS_RTOL)
+            assert atom.e_max.value == pytest.approx(theirs["e_max"], rel=RTOL, abs=0.0)
+            assert type(atom.selfScatteringKernel.kernel).__name__ == theirs["kernel"]
+
+
+def test_the_one_tsl_difference_is_a_repeated_point_kika_keeps(fudgePython):
+    """Name the TSL difference rather than leave it inside a helper.
+
+    ENDF/B-VIII.1 s-CH4's MF7/MT2 tabulates W'(T) as two identical points at
+    22 K (a one-temperature evaluation written as a two-point TAB1). FUDGE
+    drops the second (ENDF_ITYPE_2.py:357); kika keeps it, because the reader
+    reproduces the tape. Found the first time the TSL oracle ran (2026-10-08).
+    """
+    from kika.nuclear_data.model import EVAL_LABEL, IncoherentElastic
+
+    tape = _DATA / "micro_tsl_sch4.endf"
+    suite, _ = decodeReactionSuite(read_endf(str(tape)))
+    form = next(r.doubleDifferentialCrossSection[EVAL_LABEL] for r in suite.reactions
+                if isinstance(r.doubleDifferentialCrossSection[EVAL_LABEL], IncoherentElastic))
+    xs, _ys, _ = form.DebyeWallerIntegral.toEndfRegions()
+    assert list(xs) == [22.0, 22.0]
+    fudge = _runFudge(fudgePython, tape, _TSL["sch4"])["tsl"]
+    assert next(e for e in fudge if e["kind"] == "incoherentElastic")["temperatures"] == [22.0]

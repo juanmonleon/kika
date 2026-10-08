@@ -92,12 +92,59 @@ def _resonanceEnergies(reactionSuite):
     return sorted(energies)
 
 
-def main(tapeText):
+def _array(gridded):
+    return [float(v) for v in gridded.array.constructArray().ravel()]
+
+
+def _grid(gridded, index):
+    return [float(v) for v in gridded.axes[index].values]
+
+
+def _tsl(reactionSuite):
+    """Each TSL reaction's form, in plain lists (kika's E4 decode builds the same)."""
+    out = []
+    for reaction in reactionSuite.reactions:
+        form = reaction.doubleDifferentialCrossSection.evaluated
+        kind = type(form).__module__.rsplit(".", 1)[-1]
+        entry = {"kind": kind, "mt": reaction.ENDF_MT}
+        if kind == "coherentElastic":
+            table = form.S_table.gridded2d
+            entry.update(temperatures=_grid(table, 2), energies=_grid(table, 1),
+                         values=_array(table))
+        elif kind == "incoherentElastic":
+            dw = form.DebyeWallerIntegral.function1d
+            entry.update(bound=float(form.boundAtomCrossSection.value),
+                         temperatures=[float(x) for x, _ in dw],
+                         values=[float(y) for _, y in dw])
+        else:
+            atoms = []
+            for atom in form.scatteringAtoms:
+                kernel = atom.selfScatteringKernel.kernel
+                atoms.append({
+                    "numberPerMolecule": int(atom.numberPerMolecule),
+                    "mass": float(atom.mass.value),
+                    "bound": float(atom.boundAtomCrossSection.value),
+                    "e_max": float(atom.e_max.value),
+                    "kernel": type(kernel).__name__,
+                    "primary": bool(atom.primaryScatterer),
+                })
+            kernel = form.scatteringAtoms[0].selfScatteringKernel.kernel
+            entry.update(atoms=atoms, temperatures=_grid(kernel, 3), betas=_grid(kernel, 2),
+                         alphas=_grid(kernel, 1), values=_array(kernel),
+                         calculatedAtThermal=bool(form.calculatedAtThermal))
+        out.append(entry)
+    return out
+
+
+def main(tapeText, name):
     from brownies.legacy.converting import endfFileToGNDS
 
-    with tempfile.NamedTemporaryFile("w", suffix=".endf", delete=False) as handle:
+    # FUDGE's TSL converter names the scatterer from the *file name*
+    # (ENDF_ITYPE_2.py), so the tape is written under the name it expects.
+    folder = tempfile.mkdtemp()
+    path = os.path.join(folder, name)
+    with open(path, "w") as handle:
         handle.write(tapeText)
-        path = handle.name
     try:
         translated = endfFileToGNDS.endfFileToGNDS(
             path, toStdOut=False, skipBadData=True, doCovariances=False,
@@ -105,7 +152,11 @@ def main(tapeText):
             reconstructResonances=False)
     finally:
         os.unlink(path)
+        os.rmdir(folder)
     reactionSuite = translated["reactionSuite"]
+    if str(reactionSuite.interaction) == "thermalNeutronScatteringLaw":
+        sys.stdout.write("\n" + JSON_MARKER + json.dumps({"tsl": _tsl(reactionSuite)}) + "\n")
+        return
 
     out = {"crossSections": {}, "legendre": {}, "resonances": None}
     for reaction in reactionSuite.reactions:
@@ -123,4 +174,4 @@ def main(tapeText):
 
 
 if __name__ == "oracle":
-    main(TAPE)  # noqa: F821 - injected by the caller's exec
+    main(TAPE, globals().get("NAME", "tape.endf"))  # noqa: F821 - injected by the caller

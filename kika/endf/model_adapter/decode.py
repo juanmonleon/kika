@@ -65,7 +65,7 @@ __all__ = ["decodeMF3MT", "decodeMF1MT451", "decodeReactionSuite"]
 
 #: MF numbers kika's parser registry covers. Everything else is declared
 #: unsupported by the report rather than silently skipped.
-SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35)
+SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 
 #: Of those, the ones whose content belongs to the ``covarianceSuite``
 #: (§25.1.1) rather than to the ``reactionSuite``. Kept as a set of its own
@@ -332,6 +332,12 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
                 suite.sums.append(reaction)
             else:
                 suite.reactions.append(reaction)
+    elif 7 in getattr(endf, "mf", {}):
+        # A TSL tape (NSUB=12) has no MF3 by construction: its cross sections
+        # are the scattering law, which MF7 states (roadmap E4).
+        from .thermal_scattering import attachThermalScattering
+
+        report = attachThermalScattering(suite, endf, report)
     else:
         report.lost("no MF3: the evaluation carries no cross sections")
 

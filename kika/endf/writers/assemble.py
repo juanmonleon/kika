@@ -58,7 +58,7 @@ __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
 #: of *coverage* rather than of order: MF7, MF12-15 and MF32 are absent because
 #: nothing can write them, not because they sort late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35)
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -216,10 +216,15 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
     it would put a section on the tape the source never carried. The same rule
     the MF4 encoder already lives by, applied one level up.
     """
-    from kika.nuclear_data.model import EVAL_LABEL
+    from kika.nuclear_data.model import EVAL_LABEL, TNSL_INTERACTION
 
     from ..model_adapter import encodeMF3MT, encodeMF4MT, encodeMF5MT
     from ..model_adapter.angular import mf4Ejectile
+
+    # A thermal-scattering suite states no MF3, MF4 or MF5: its reactions'
+    # cross sections and distributions are links to the law, written as MF7.
+    if getattr(suite, "interaction", None) == TNSL_INTERACTION:
+        return [], report
 
     label = EVAL_LABEL if label is None else label
 
@@ -430,6 +435,13 @@ def _mf6Sections(suite, mat, report):
     return sections, report
 
 
+def _mf7Sections(suite, mat, report):
+    """MF7 for a thermal-scattering suite (roadmap E4); nothing for any other."""
+    from ..model_adapter.thermal_scattering import encodeMF7Sections
+
+    return encodeMF7Sections(suite, mat, report)
+
+
 def _covarianceSections(suite, mat, report):
     """MF31/33/34/35, one section per (MF, row MT) the covariance suite carries."""
     from ..model_adapter import (encodeMF31MT, encodeMF32MT, encodeMF33MT,
@@ -495,7 +507,7 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
 
     sections: List[Tuple[int, int, object]] = []
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
-                  _mf6Sections, _covarianceSections):
+                  _mf6Sections, _mf7Sections, _covarianceSections):
         if build in (_mf1Sections, _mf3And4And5Sections):
             built, report = build(suite, mat, report, label)
         else:
