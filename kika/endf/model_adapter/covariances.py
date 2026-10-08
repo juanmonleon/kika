@@ -52,12 +52,12 @@ from kika.nuclear_data.model import (
     EndfProvenance,
 )
 
-from .parameter_covariances import decodeMF32MT
+from .parameter_covariances import MF32MT151_KEY, decodeMF32MT, encodeMF32MT
 
 __all__ = ["decodeMF31MT", "decodeMF32MT", "decodeMF33MT", "decodeMF34MT",
            "decodeMF35MT", "decodeCovarianceSuite",
-           "encodeMF31MT", "encodeMF33MT", "encodeMF34MT", "encodeMF35MT",
-           "reactionHref", "angularDistributionHref",
+           "encodeMF31MT", "encodeMF32MT", "encodeMF33MT", "encodeMF34MT",
+           "encodeMF35MT", "reactionHref", "angularDistributionHref",
            "energyDistributionHref", "nubarShims"]
 
 
@@ -848,6 +848,14 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
     if mf32 is not None:
         for mt in sorted(getattr(mf32, "mt", {})):
             parameterCovariances, report = decodeMF32MT(mf32.mt[mt], report)
+            # The section's text, for `encodeMF32MT`: MF32 restates File 2's
+            # layout and the model keeps only the matrix, so the way back
+            # writes into the records it came from. One list, shared by every
+            # covariance of the section through their one provenance.
+            if parameterCovariances:
+                text = str(mf32.mt[mt]).split("\n")[:-1]   # without SEND
+                for covariance in parameterCovariances:
+                    covariance.provenance.headerFields[MF32MT151_KEY] = text
             suite.parameterCovariances.extend(parameterCovariances)
 
     if (mf31 is None and mf33 is None and mf34 is None and mf35 is None

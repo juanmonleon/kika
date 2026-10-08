@@ -57,7 +57,7 @@ __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
 #: of *coverage* rather than of order: MF7, MF12-15 and MF32 are absent because
 #: nothing can write them, not because they sort late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 31, 33, 34, 35)
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -430,8 +430,8 @@ def _mf6Sections(suite, mat, report):
 
 def _covarianceSections(suite, mat, report):
     """MF31/33/34/35, one section per (MF, row MT) the covariance suite carries."""
-    from ..model_adapter import (encodeMF31MT, encodeMF33MT, encodeMF34MT,
-                                 encodeMF35MT)
+    from ..model_adapter import (encodeMF31MT, encodeMF32MT, encodeMF33MT,
+                                 encodeMF34MT, encodeMF35MT)
 
     covarianceSuite = getattr(suite, "covarianceSuite", None)
     if covarianceSuite is None:
@@ -442,8 +442,8 @@ def _covarianceSections(suite, mat, report):
 
     # One pass over the sections to learn which (MF, MT) pairs exist, because
     # the encoders take an MT and there is no listing of them anywhere else.
-    # MF32 is deliberately absent from `encoders`: it decodes and has no
-    # encoder, so it is declared rather than skipped.
+    # MF32 is absent from `encoders` because it is not a `covarianceSection`;
+    # it is written below, from its own container.
     present = set()
     for section in getattr(covarianceSuite, "covarianceSections", ()):
         row = getattr(section, "rowData", None)
@@ -467,19 +467,13 @@ def _covarianceSections(suite, mat, report):
 
     # §25.3 lives in its own container, and it is **not** reachable through the
     # loop above -- `parameterCovariances` are not `covarianceSections`, so a
-    # tape whose only covariance is MF32 produced an empty `present` and said
-    # nothing at all. `decodeMF32MT` exists and has no inverse
-    # (`gnds_endf_conflicts.md` §6.5 closed the *writing* of §25.3 to GNDS, not
-    # to ENDF), so this is declared rather than attempted.
-    parameters = getattr(covarianceSuite, "parameterCovariances", None) or ()
-    if parameters:
-        report.unsupportedNode(
-            f"{len(parameters)} §25.3 parameter covariance section(s) are in the "
-            f"covarianceSuite and there is no MF32 encoder, so the written tape "
-            f"has no MF32: the resonance-parameter covariances do not survive "
-            f"this trip and the fixed point cannot see it, because they are "
-            f"absent from both sides"
-        )
+    # tape whose only covariance is MF32 produced an empty `present` and, until
+    # the encoder existed, said nothing at all. `encodeMF32MT` writes into the
+    # section the decoder kept, and declares the suites it cannot write.
+    if getattr(covarianceSuite, "parameterCovariances", None):
+        section, report = encodeMF32MT(covarianceSuite, mat, report)
+        if section is not None:
+            sections.append((32, 151, section))
     return sections, report
 
 

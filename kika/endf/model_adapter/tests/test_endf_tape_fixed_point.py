@@ -320,18 +320,24 @@ def test_the_products_mf6_builds_survive_the_trip(micro_mf6_tape, tmp_path):
         assert reaction.outputChannel.genre == mirror.outputChannel.genre
 
 
-def test_a_tape_with_mf32_comes_back_without_it_and_says_so(micro_mf32_tape, tmp_path):
-    """§25.3 parameter covariances decode and have no ENDF encoder.
+def test_a_tape_with_mf32_comes_back_with_it(micro_mf32_tape, tmp_path):
+    """§25.3 parameter covariances survive the trip (ENDF-coverage roadmap E1).
 
-    They are not ``covarianceSections``, so the MF31/33/34/35 loop never sees
-    them and said nothing at all until this was written. Same shape as the MF5
-    case and a different container.
+    This used to pin the opposite: MF32 decoded and had no encoder, so the
+    written tape had none and the fixed point could not see it, the covariances
+    being absent from both sides. So the comparison here is on the
+    ``parameterCovariances`` themselves, not only on File 2.
     """
     before, after, report = _fixedPoint(micro_mf32_tape, tmp_path)
     assert _walk(before.resonances) == _walk(after.resonances)
 
     said = "\n".join(report.unsupported)
-    assert "parameter covariance section(s)" in said
+    assert "parameter covariance" not in said
     sections, _report, _mat = encodeTapeSections(before)
-    assert 32 not in {mf for mf, _mt, _s in sections}
-    assert (2, 151) in {(mf, mt) for mf, mt, _s in sections}, "MF2 does survive"
+    assert (32, 151) in {(mf, mt) for mf, mt, _s in sections}
+
+    def forms(suite):
+        return {c.label: _walk(c.form)
+                for c in suite.covarianceSuite.parameterCovariances}
+
+    assert forms(before) and forms(before) == forms(after)
