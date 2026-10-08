@@ -68,6 +68,7 @@ def _process_sample(
     xsdir_file: Optional[str] = None,
     enforce_positivity: bool = False,
     positivity_check_points: int = 101,
+    frames: Optional[Dict[int, str]] = None,
 ):
     """
     Process a single perturbation sample for ENDF files.
@@ -98,6 +99,10 @@ def _process_sample(
         Nuclear data library name
     njoy_version : str
         NJOY version string
+    frames : dict, optional
+        ``{MT: "LAB" | "CM"}``: the frame MF34 states each reaction's
+        coefficients in, where it is not MF4's. See
+        :func:`apply_perturbation_factors_to_endf`.
     """
     if dry_run:
         # Dry-run is a fast preview: write the factor summary, do not
@@ -153,6 +158,7 @@ def _process_sample(
             endf, sample, sample_index, energy_grids, param_mapping, verbose=False,
             enforce_positivity=enforce_positivity,
             positivity_check_points=positivity_check_points,
+            frames=frames,
         )
         os.makedirs(sample_dir, exist_ok=True)
         writer = ENDFWriter(endf_file)
@@ -689,6 +695,16 @@ def _mf34_available(suite) -> Tuple[List[int], List[int]]:
             sorted({l for _za, _mt, l in triplets}))
 
 
+def _frames_from_index(entry) -> Dict[int, str]:
+    """``{MT: "LAB" | "CM"}`` from a :func:`legendre_covariance_index` entry.
+
+    Only the reactions whose MF34 names a frame (LCT 1 or 2). LCT=0, "same as
+    MF4", needs nothing done and is absent.
+    """
+    return {int(triplet[1]): frame
+            for triplet, frame in (entry.get("frames") or {}).items()}
+
+
 def _parameter_mapping_from_index(entry) -> Tuple[
     List[Tuple[int, int, int, int]], Dict[Tuple[int, int, int], List[float]]
 ]:
@@ -1121,6 +1137,15 @@ def perturb_ENDF_files(
                 param_mapping = [tuple(x) for x in pre["param_mapping"]]
                 energy_grids = {tuple(k): list(v)
                                 for k, v in pre["energy_grids"].items()}
+                if "frames" in pre:
+                    frames = {int(mt): frame for mt, frame in (pre["frames"] or {}).items()}
+                else:
+                    # Nothing here can tell: the base tape carries no MF34.
+                    frames = {}
+                    _logger.warning(
+                        f"  [WARN] [ENDF] File {step_num}: the precomputed "
+                        f"factors do not say which frame their covariance is "
+                        f"in; applying them in MF4's own frame")
                 diagnostic_results = pre.get("diagnostics")
                 if factors.ndim != 2 or factors.shape[1] != len(param_mapping):
                     raise ValueError(
@@ -1137,6 +1162,7 @@ def perturb_ENDF_files(
                     {mt for _za, mt, _l, _b in param_mapping})
                 summary_data[file_key]['perturbed_l_coeffs'] = sorted(
                     {l for _za, _mt, l, _b in param_mapping})
+                summary_data[file_key]['covariance_frames'] = dict(frames)
                 summary_data[file_key]['sampling_diagnostics'] = diagnostic_results
                 if energy_ranges is not None:
                     factors = _mask_factors_by_energy_range(
@@ -1208,6 +1234,13 @@ def perturb_ENDF_files(
 
                 # Create parameter mapping and energy grids
                 param_mapping, energy_grids = _parameter_mapping_from_index(index[block_key])
+                frames = _frames_from_index(index[block_key])
+                summary_data[file_key]['covariance_frames'] = dict(frames)
+                if frames:
+                    _logger.info(
+                        f"  [INFO] [ENDF] File {step_num}: MF34 states "
+                        + ", ".join(f"MT{mt} in {frame}" for mt, frame in sorted(frames.items()))
+                        + "; the factors are applied in that frame and brought back to MF4's")
 
                 # Generate perturbation factors
                 if verbose:
@@ -1307,7 +1340,7 @@ def perturb_ENDF_files(
                                 endf_file, factors[sample_idx], sample_idx, energy_grids,
                                 param_mapping, output_dir, dry_run, generate_ace, njoy_exe,
                                 temperatures, extensions, library_name, njoy_version, xsdir_file,
-                                enforce_positivity, positivity_check_points,
+                                enforce_positivity, positivity_check_points, frames,
                             )
                             future = pool.apply_async(_process_sample, args=args)
                             futures.append(future)
@@ -1348,6 +1381,7 @@ def perturb_ENDF_files(
                                 xsdir_file=xsdir_file,
                                 enforce_positivity=enforce_positivity,
                                 positivity_check_points=positivity_check_points,
+                                frames=frames,
                             )
                             _absorb_result(sample_idx, result)
                         except Exception as sample_e:
@@ -1374,6 +1408,7 @@ def perturb_ENDF_files(
                             xsdir_file=xsdir_file,
                             enforce_positivity=enforce_positivity,
                             positivity_check_points=positivity_check_points,
+                            frames=frames,
                         )
                         _absorb_result(sample_idx, result)
                     except Exception as e:
@@ -1559,6 +1594,7 @@ def apply_perturbation_factors_to_endf(
     verbose: bool = True,
     enforce_positivity: bool = False,
     positivity_check_points: int = 101,
+    frames: Optional[Dict[int, str]] = None,
 ):
     """
     Apply perturbation factors to ENDF MF4 angular distribution data.
@@ -1577,7 +1613,12 @@ def apply_perturbation_factors_to_endf(
         Mapping of sample indices to (isotope, mt, l, energy_bin) parameters
     verbose : bool
         Whether to log perturbation details
-        
+    frames : dict, optional
+        ``{MT: "LAB" | "CM"}``, the frame MF34 states the coefficients in. Where
+        it differs from the MT's MF4 frame (LCT), the factors act on that frame's
+        coefficients and the change comes back to MF4's
+        (:mod:`kika._legendre_frames`); the tape keeps its frame.
+
     Returns
     -------
     List[Tuple[int, int, int, int]]
@@ -1601,10 +1642,13 @@ def apply_perturbation_factors_to_endf(
         # Check for both MF4MTLegendre and MF4MTMixed (both have Legendre coefficients)
         if isinstance(mt_data, (MF4MTLegendre, MF4MTMixed)):
             # Apply perturbations to Legendre coefficients
+            conversion = _frame_conversion_for(
+                endf, mt_data, (frames or {}).get(mt_number))
             events = _apply_factors_to_mf4_legendre(
                 mt_data, sample, param_mapping, energy_grids, verbose,
                 enforce_positivity=enforce_positivity,
                 positivity_check_points=positivity_check_points,
+                frame_conversion=conversion,
             )
             positivity_events.extend(events)
             # Add all perturbed parameters for this MT
@@ -1613,6 +1657,61 @@ def apply_perturbation_factors_to_endf(
                     perturbed_params.append((isotope, mt, l_coeff, energy_bin))
 
     return perturbed_params, positivity_events
+
+
+def _frame_conversion_for(endf, mt_data, covariance_frame):
+    """The :class:`~kika._legendre_frames.FrameConversion` for one MF4 MT, or ``None``.
+
+    ``None`` when the covariance names no frame or names MF4's own. Otherwise
+    the kinematics come off the tape: AWR from MF4's header and, for an
+    inelastic level, QI from MF3. Elastic scattering has Q = 0 by definition.
+    """
+    if covariance_frame is None:
+        return None
+    from kika._legendre_frames import FrameConversion
+
+    mt = int(mt_data.number)
+    q = 0.0
+    if mt != 2:
+        mf3 = endf.get_file(3)
+        section = None if mf3 is None else mf3.sections.get(mt)
+        if section is None:
+            raise ValueError(
+                f"MT{mt}: MF34 is in {covariance_frame} and MF4 in "
+                f"{mt_data.frame}, and converting between them needs the "
+                f"reaction's QI, which lives in MF3; this tape has no MF3/MT{mt}")
+        q = float(section.q_reaction)
+    return FrameConversion.between(mt_data.frame, covariance_frame,
+                                   awr=mt_data._awr, q=q, mt=mt)
+
+
+def _scale_endf_legendre(coeffs, factors_by_order, energy, frame_conversion):
+    """One MF4 Legendre vector (``a_1, a_2, ...``, ENDF's layout) times its factors.
+
+    Without a conversion, each ``a_l`` the vector carries is multiplied by its
+    own factor. With one, the factors act in the covariance's frame
+    (:func:`kika._legendre_frames.scaleInOtherFrame`), and ``a_0 = 1`` is
+    restored to the front for that and taken off again. Returns the new vector
+    and whether the node was degenerate (``γ ≥ 1``, left as it was).
+    """
+    if frame_conversion is None:
+        out = list(coeffs)
+        for l_coeff, factor in factors_by_order.items():
+            coeff_index = l_coeff - 1
+            if 0 <= coeff_index < len(out):
+                out[coeff_index] *= factor
+        return out, False
+    from kika._legendre_frames import scaleInOtherFrame
+
+    if all(factor == 1.0 for factor in factors_by_order.values()):
+        return list(coeffs), False
+    full = np.concatenate(([1.0], np.asarray(coeffs, dtype=float)))
+    scaled, _info = scaleInOtherFrame(
+        full, {int(l): float(f) for l, f in factors_by_order.items()},
+        frame_conversion.gamma(energy), frame_conversion.direction)
+    if scaled is None:
+        return list(coeffs), True
+    return [float(value) for value in scaled[1:]], False
 
 
 def _apply_factors_to_mf4_legendre(
@@ -1624,6 +1723,7 @@ def _apply_factors_to_mf4_legendre(
     enforce_positivity: bool = False,
     positivity_check_points: int = 101,
     mf3_magnitude_sink: Optional[Dict[Tuple[int, int, int], float]] = None,
+    frame_conversion=None,
 ) -> List[Tuple[int, float, float, float]]:
     """
     Apply perturbation factors to MF4 Legendre coefficient data with proper discontinuity handling.
@@ -1659,6 +1759,11 @@ def _apply_factors_to_mf4_legendre(
         skipped.  L>=1 (shape) factors are applied to MF4 exactly as before, so
         this changes nothing for existing MF34-only callers (whose
         ``param_mapping`` never contains L=0).
+    frame_conversion : FrameConversion, optional
+        Set when MF34 states the coefficients in another frame than this MT's
+        MF4. Each energy's factors are then applied together in that frame
+        (a frame change couples the orders) and brought back; see
+        :func:`_scale_endf_legendre`.
 
     Notes
     -----
@@ -1715,7 +1820,8 @@ def _apply_factors_to_mf4_legendre(
     
     # Step 2: Scale interior points (not at boundaries)
     applied_count = 0
-    
+    node_factors: Dict[int, Dict[int, float]] = {}
+
     for factor_idx, (isotope, mt, l_coeff, energy_bin) in enumerate(param_mapping):
         if mt != mt_data.number:
             continue
@@ -1753,24 +1859,27 @@ def _apply_factors_to_mf4_legendre(
                     )
             continue
 
-        # Apply factor to coefficients strictly inside this bin (not at boundaries)
+        # Collect the factor of each energy strictly inside this bin (not at
+        # boundaries). They are applied per energy below, all orders at once,
+        # because a frame change couples the orders.
         for energy_idx, energy in enumerate(mt_data._energies):
             if energy_low <= energy < energy_high and not _on_boundary(energy):
-                # Check if this L coefficient exists at this energy
-                coeff_index = l_coeff - 1  # Convert L=1,2,3... to 0-indexed
-                if (coeff_index >= 0 and energy_idx < len(mt_data._legendre_coeffs) and
-                    coeff_index < len(mt_data._legendre_coeffs[energy_idx])):
-                    
-                    old_value = mt_data._legendre_coeffs[energy_idx][coeff_index]
-                    mt_data._legendre_coeffs[energy_idx][coeff_index] *= factor
-                    applied_count += 1
-                    
-                    if verbose and _get_logger():
-                        _get_logger().debug(
-                            f"  [INFO] [ENDF] INTERIOR MT{mt} L{l_coeff} at {energy:.3e} MeV: "
-                            f"factor {factor:.6f}, {old_value:.3e} -> {mt_data._legendre_coeffs[energy_idx][coeff_index]:.3e}"
-                        )
-    
+                node_factors.setdefault(energy_idx, {})[l_coeff] = factor
+
+    degenerate = 0
+    for energy_idx, factors_here in sorted(node_factors.items()):
+        if energy_idx >= len(mt_data._legendre_coeffs):
+            continue
+        coeffs = mt_data._legendre_coeffs[energy_idx]
+        if frame_conversion is None:
+            applied_count += sum(1 for l in factors_here if 0 <= l - 1 < len(coeffs))
+        else:
+            applied_count += len(factors_here)
+        new, was_degenerate = _scale_endf_legendre(
+            coeffs, factors_here, mt_data._energies[energy_idx], frame_conversion)
+        degenerate += int(was_degenerate)
+        mt_data._legendre_coeffs[energy_idx] = new
+
     # Step 3 & 4: Handle discontinuities at boundaries
     insertions_made = 0
     
@@ -1822,23 +1931,17 @@ def _apply_factors_to_mf4_legendre(
         if not lower_factors and not upper_factors:
             continue
         
-        # Apply factors to create lower and upper coefficient vectors
-        coeffs_minus = baseline_coeffs[:]
-        coeffs_plus = baseline_coeffs[:]
-        
-        # L=0 (coeff_index == -1) is intentionally excluded by the guards below:
-        # magnitude creates no MF4 shape discontinuity and is handled in the
-        # interior pass via mf3_magnitude_sink.
-        for l_coeff, factor in lower_factors.items():
-            coeff_index = l_coeff - 1
-            if 0 <= coeff_index < len(coeffs_minus):
-                coeffs_minus[coeff_index] *= factor
+        # Apply factors to create lower and upper coefficient vectors.
+        # L=0 never reaches these sets: magnitude creates no MF4 shape
+        # discontinuity and is handled in the interior pass via
+        # mf3_magnitude_sink.
+        coeffs_minus, was_degenerate = _scale_endf_legendre(
+            baseline_coeffs, lower_factors, boundary_energy, frame_conversion)
+        degenerate += int(was_degenerate)
+        coeffs_plus, was_degenerate = _scale_endf_legendre(
+            baseline_coeffs, upper_factors, boundary_energy, frame_conversion)
+        degenerate += int(was_degenerate)
 
-        for l_coeff, factor in upper_factors.items():
-            coeff_index = l_coeff - 1
-            if 0 <= coeff_index < len(coeffs_plus):
-                coeffs_plus[coeff_index] *= factor
-        
         # Insert or replace the boundary points
         _insert_boundary_discontinuity(
             mt_data, boundary_energy, coeffs_minus, coeffs_plus, verbose
@@ -1913,6 +2016,13 @@ def _apply_factors_to_mf4_legendre(
             f"  [INFO] [ENDF] MT{mt_data.number}: Applied {applied_count} interior factors and "
             f"{insertions_made} boundary discontinuities. Final: {mt_data._ne} energy points"
         )
+        if frame_conversion is not None:
+            _get_logger().info(
+                f"  [INFO] [ENDF] MT{mt_data.number}: factors applied in "
+                f"{frame_conversion.covarianceFrame} and brought back to "
+                f"{frame_conversion.distributionFrame}; {degenerate} node(s) at "
+                f"or just above threshold (gamma >= 1) left unperturbed"
+            )
 
     return positivity_events
 

@@ -676,10 +676,19 @@ def test_mf34_frame_against_mf4():
     mf4 = MF(number=4)
     mf4.add_section(_mf4(2, lct=2))
     f = _only(check_covariances(_tape(sec, mf_number=34, files=[mf4])), "frame_differs_from_mf4")
-    assert f.level == WARN and f.evidence["lct"] == 1
+    # MT2 is two-body: the samplers convert, so it is a note.
+    assert f.level == NOTE and f.evidence["lct"] == 1 and f.evidence["converted"]
     sec.subsections[0].sub_subsections[0].lct = 0  # the same frame as MF4
     report = check_covariances(_tape(sec, mf_number=34, files=[mf4]))
     assert report.by_check("frame_differs_from_mf4") == ()
+
+
+def test_mf34_frame_of_a_reaction_kika_does_not_convert_is_a_warning():
+    sec = _mf34(16, {16: {(1, 1): [_lb5_34(SELF2)]}}, nl=1)  # LCT=1, LAB
+    mf4 = MF(number=4)
+    mf4.add_section(_mf4(16, lct=2))
+    f = _only(check_covariances(_tape(sec, mf_number=34, files=[mf4])), "frame_differs_from_mf4")
+    assert f.level == WARN and not f.evidence["converted"]
 
 
 def test_mf34_a_non_null_l0_block_counts_the_magnitude_twice():

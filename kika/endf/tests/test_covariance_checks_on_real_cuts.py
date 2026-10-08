@@ -59,10 +59,11 @@ def test_w186_mf34_rho_49_a_negative_variance_and_an_indefinite_block():
     report = _check("w186")
     assert _faults(report) == {("defect", "negative_variance"): 1,
                                ("defect", "correlation_out_of_bounds"): 1,
-                               ("defect", "not_positive_semidefinite"): 1,
-                               ("warn", "frame_differs_from_mf4"): 1}
-    # LAB covariances (LCT=1) for an MF4 given in CM (C9).
-    assert report.by_check("frame_differs_from_mf4")[0].evidence["mf4_lct"] == {"51": 2}
+                               ("defect", "not_positive_semidefinite"): 1}
+    # LAB covariances (LCT=1) for an MF4 given in CM (C9). A note since the
+    # samplers convert between frames for MT51 (8-oct-2026).
+    frame = report.by_check("frame_differs_from_mf4")[0]
+    assert frame.level == "note" and frame.evidence["mf4_lct"] == {"51": 2}
     assert all((f.location.mt, f.location.l, f.location.l1) == (51, 1, 1)
                for f in report.at_least("warn"))
     rho = report.by_check("correlation_out_of_bounds")[0].evidence

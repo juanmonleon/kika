@@ -282,10 +282,12 @@ def _build() -> Dict[str, CheckDescription]:
             "given no uncertainty."),
         "frame_differs_from_mf4": D(
             "MF34 frame differs from MF4", (34,),
-            {WARN: "always"},
+            {NOTE: "MT2 and MT51-90, which kika's samplers convert",
+             WARN: "any other reaction, which they refuse to sample"},
             "The block is of LAB coefficients and MF4 gives CM ones, or the reverse. ENDF-6 "
-            "34.1 allows it (transport uses LAB moments), but kika does not convert between "
-            "frames: its ENDF sampler applies the covariance to MF4's coefficients as they are."),
+            "34.1 allows it (transport uses LAB moments). For two-body neutron scattering kika's "
+            "MF4 samplers apply the factors in the covariance's frame and convert the change "
+            "back, so the tape keeps its frame."),
         "short_range_near_threshold": D(
             "LB=8/9 near a threshold", (31, 33),
             {NOTE: "always"},

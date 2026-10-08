@@ -201,6 +201,10 @@ def load_joint_mf33_mf34(
         a_block_key=a_key,
         mf34_info=dict(split.info),
         unsupported=list(getattr(report, "unsupported", ()) or ()),
+        # {MT: "LAB" | "CM"} where MF34 is not in MF4's frame; the MF4 applier
+        # needs it and the base tape it writes onto carries no MF34 to ask.
+        frames={int(triplet[1]): frame for triplet, frame
+                in (a_index[a_key].get("frames") or {}).items()},
     )
     key = (int(isotope), "MF33xMF34", int(mt))
     return [(key, joint)], index

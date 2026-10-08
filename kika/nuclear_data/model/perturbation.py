@@ -462,7 +462,8 @@ def _refineLegendreRegion(region, edges: ArrayLike):
 COVERAGE_EDGES = ("step", "ramp")
 
 
-def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
+def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step",
+                         frameConversion=None):
     """Scale the Legendre coefficients of an angular distribution, order by order.
 
     Parameters
@@ -482,6 +483,13 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
         What to do where a factor block's coverage ends; see
         :data:`COVERAGE_EDGES`. The default states the step the block implies;
         ``"ramp"`` reproduces the shipped MF4 applier and is there for gates.
+    frameConversion
+        A :class:`~kika._legendre_frames.FrameConversion`
+        when the covariance the factors were drawn from is in a different frame
+        from the distribution (MF34 LCT ≠ MF4 LCT). At each incident energy the
+        factors then act on that frame's coefficients, and the change comes back
+        to this one; see :mod:`kika._legendre_frames`.
+        ``None``, the default, scales the coefficients as they stand.
 
     Returns
     -------
@@ -557,6 +565,8 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
     perOrder = {order: {"min_factor": 1.0, "max_factor": 1.0, "n_scaled": 0}
                 for order in orders}
     inserted = 0
+    frameInfo = {"n_converted": 0, "n_degenerate": 0, "max_gamma": 0.0,
+                 "max_condition": 1.0, "max_solved": 0, "pad_capped": 0}
     rebuilt = {}
     for container, position, region in regions:
         refined, added = _refineLegendreRegion(region, allEdges)
@@ -566,20 +576,26 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
                       dtype=float)
         coefficients = [np.array(f.coefficients, dtype=float, copy=True)
                         for f in refined.function1ds]
-        for order in orders:
-            perPoint = _flatFactors(xs, np.asarray(factors[order], dtype=float),
-                                    np.asarray(binEdges[order], dtype=float))
-            touched = 0
-            for at, vector in enumerate(coefficients):
-                if order >= vector.size:
-                    continue
-                vector[order] *= perPoint[at]
-                touched += 1
-            if touched:
-                stats = perOrder[order]
-                stats["min_factor"] = min(stats["min_factor"], float(perPoint.min()))
-                stats["max_factor"] = max(stats["max_factor"], float(perPoint.max()))
-                stats["n_scaled"] += touched
+        perPoints = {order: _flatFactors(xs, np.asarray(factors[order], dtype=float),
+                                         np.asarray(binEdges[order], dtype=float))
+                     for order in orders}
+        if frameConversion is None:
+            for order in orders:
+                perPoint = perPoints[order]
+                touched = 0
+                for at, vector in enumerate(coefficients):
+                    if order >= vector.size:
+                        continue
+                    vector[order] *= perPoint[at]
+                    touched += 1
+                if touched:
+                    stats = perOrder[order]
+                    stats["min_factor"] = min(stats["min_factor"], float(perPoint.min()))
+                    stats["max_factor"] = max(stats["max_factor"], float(perPoint.max()))
+                    stats["n_scaled"] += touched
+        else:
+            coefficients = _scaleAcrossFrames(xs, coefficients, perPoints,
+                                              frameConversion, perOrder, frameInfo)
 
         scaled = [Legendre(coefficients=vector, axes=f.axes,
                            outerDomainValue=f.outerDomainValue, index=f.index)
@@ -609,7 +625,49 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step"):
         "orders_absent": [order for order in orders
                           if perOrder[order]["n_scaled"] == 0],
     }
+    if frameConversion is not None:
+        diagnostics["frame"] = {"direction": frameConversion.direction,
+                                "awr": frameConversion.awr,
+                                "q": frameConversion.q, **frameInfo}
     return rebuild(angular), diagnostics
+
+
+def _scaleAcrossFrames(xs, coefficients, perPoints, conversion, perOrder,
+                       frameInfo):
+    """Apply each node's factors in the covariance's frame (``applyLegendreFactors``).
+
+    A frame change couples every order, so the factors of one incident energy
+    are applied together rather than order by order. A node where ``γ ≥ 1`` (an
+    inelastic threshold) has no CM vector with the requested LAB coefficients
+    and is left as the evaluation has it; ``n_degenerate`` counts those nodes.
+    """
+    from kika._legendre_frames import scaleInOtherFrame
+
+    out = []
+    for at, vector in enumerate(coefficients):
+        nodeFactors = {order: float(perPoints[order][at]) for order in perPoints}
+        if all(value == 1.0 for value in nodeFactors.values()):
+            out.append(vector)
+            continue
+        scaled, info = scaleInOtherFrame(vector, nodeFactors,
+                                         conversion.gamma(xs[at]),
+                                         conversion.direction)
+        if scaled is None:
+            frameInfo["n_degenerate"] += 1
+            out.append(vector)
+            continue
+        frameInfo["n_converted"] += 1
+        frameInfo["max_gamma"] = max(frameInfo["max_gamma"], info["gamma"])
+        frameInfo["max_condition"] = max(frameInfo["max_condition"], info["condition"])
+        frameInfo["max_solved"] = max(frameInfo["max_solved"], info["n_solved"])
+        frameInfo["pad_capped"] += int(info["pad_capped"])
+        for order, value in nodeFactors.items():
+            stats = perOrder[order]
+            stats["min_factor"] = min(stats["min_factor"], value)
+            stats["max_factor"] = max(stats["max_factor"], value)
+            stats["n_scaled"] += 1
+        out.append(scaled)
+    return out
 
 
 # ======================================================================

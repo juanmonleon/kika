@@ -62,6 +62,7 @@ import numpy as np
 from kika.cov.conditioning import block_key_text
 from kika.sampling.joint_blocks import (assembleRequest, collectEntries,
                                         componentDomains, describeRequest)
+from kika.sampling.model_blocks import mf34_frames
 from kika.sampling.perturbation_set import PerturbationSet
 
 __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOptions"]
@@ -1623,6 +1624,12 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                                     lumped=ctx.lumped,
                                     remainders=ctx.remainders)
         info["components"] = [c.describe() for c in applied]
+        # MF34 stated in another frame than MF4: what the conversion did, per
+        # reaction, including the nodes at threshold it had to leave alone.
+        frames = {f"MT{c.mt}": d["frame"] for c, d in applied.items()
+                  if isinstance(d, dict) and "frame" in d}
+        if frames:
+            info["frames"] = frames
     _checkRealisation(pset, log, number)
 
     files: Dict[str, Any] = {}
@@ -2121,7 +2128,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             skipped.extend(sumNotes)
         domains = componentDomains(covariances, request)
         blocks, index = assembleRequest(entries, grouping=grouping,
-                                        domains=domains)
+                                        domains=domains,
+                                        frames=mf34_frames(covariances))
         description = describeRequest(entries, grouping=grouping)
         info["groups"] = len(blocks)
         info["description"] = description
