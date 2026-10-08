@@ -7,3 +7,7 @@ kika/gnds/tests/data/**/*.xml -text
 # Lo mismo para las entradas SINBAD: `externalFile/@checksum` cubre los ficheros
 # del paquete (00_Report/source.txt), y una copia CRLF ya no casa con el digest.
 kika/sinbad/tests/data/** -text
+# Los fixtures de G4NDL se comprueban byte a byte contra su sha256
+# (test_fixtures.py); los de Gammas/ son texto y con core.autocrlf=true en
+# Windows salian como CRLF y el digest ya no casaba.
+kika/g4ndl/tests/data/** -text
