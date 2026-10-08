@@ -33,7 +33,8 @@ from kika._covariance_forms import require_single_matrix
 __all__ = ["covariance_suite_blocks", "parameter_covariance_blocks",
            "mf35_band_domains",
            "parameter_covariance_index", "legendre_covariance_blocks",
-           "legendre_covariance_index", "cross_section_covariance_blocks",
+           "legendre_covariance_index", "mf34_frames",
+           "cross_section_covariance_blocks",
            "cross_section_covariance_index", "assemble_joint", "UNION_MODES",
            "CROSS_SECTION_MF"]
 
@@ -458,6 +459,41 @@ def _mf34_entries(suite, mt=None, orders=None, relative=None):
     return entries
 
 
+def mf34_frames(suite) -> Dict[Tuple[int, int], str]:
+    """``{(ZA, MT): "LAB" | "CM"}``: the frame each MF34 reaction's
+    coefficients are stated in, where the file names one.
+
+    LCT=0 ("same as MF4") is left out, because then the applier has nothing to
+    convert. ENDF-6 §34.2 gives an LCT per ``(L, L1)`` sub-subsection, so a
+    reaction is read off every section that touches it, row or column. Two
+    different frames for one reaction are refused: nothing would say which frame
+    one drawn vector is in.
+    """
+    from kika._legendre_frames import normaliseFrame
+
+    seen: Dict[Tuple[int, int], set] = {}
+    for section in getattr(suite, "covarianceSections", suite):
+        rowData, colData = section.rowData, section.columnData
+        if not _is_endf_mf(rowData, 34):
+            continue
+        colData = rowData if colData is None else colData
+        frame = normaliseFrame(getattr(getattr(section, "form", None),
+                                       "productFrame", None))
+        za = _za_of(suite, section)
+        for link in (rowData, colData):
+            seen.setdefault((za, _endf_mt(link)), set()).add(frame)
+    frames = {}
+    for key, found in seen.items():
+        if len(found) > 1:
+            raise ValueError(
+                f"MF34 ZA={key[0]} MT{key[1]} states its coefficients in "
+                f"{sorted(str(f) for f in found)} across its sections; one "
+                f"reaction's covariance has to be in one frame")
+        (frame,) = found
+        if frame is not None:
+            frames[key] = frame
+    return frames
+
 
 def _incident_band(link):
     """The ``(E1, E2)`` an MF35 link is sliced to, or ``None``.
@@ -640,6 +676,7 @@ def legendre_covariance_index(
     keys = sorted(unions)
     widths = {key: len(unions[key]) - 1 for key in keys}
     stride = max(widths.values())
+    frames = mf34_frames(suite)
     return {
         (isotope, "MF34", tuple(keys)): {
             "triplets": list(keys),
@@ -647,6 +684,10 @@ def legendre_covariance_index(
             "grids": {key: unions[key] for key in keys},
             "widths": widths,
             "dimension": len(keys) * stride,
+            # The frame each triplet's coefficients are stated in, where it is
+            # not MF4's own (see `mf34_frames`). An applier that ignores it
+            # perturbs the wrong frame's coefficients.
+            "frames": {key: frames[key[:2]] for key in keys if key[:2] in frames},
         }
     }
 

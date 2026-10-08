@@ -584,7 +584,7 @@ def _entriesOfGroup(entries, members):
 
 
 def requestIndex(entries, *, isotope: Any = None, grouping: str = "mf",
-                 atol: float = 1e-12, domains=None
+                 atol: float = 1e-12, domains=None, frames=None
                  ) -> Dict[Hashable, Dict[str, Any]]:
     """What the rows of each assembled block are, without assembling anything.
 
@@ -609,6 +609,11 @@ def requestIndex(entries, *, isotope: Any = None, grouping: str = "mf",
     per component, so a :class:`~kika.sampling.perturbation_set.PerturbationSet`
     built from this index knows *where* each block applies as well as *what* it
     says.
+
+    *frames* is :func:`~kika.sampling.model_blocks.mf34_frames`' answer,
+    ``{(ZA, MT): "LAB" | "CM"}``. It goes into ``frames`` per MF34 component,
+    for the reactions whose covariance is not in MF4's frame: an applier that
+    did not know would perturb the other frame's coefficients.
     """
     index: Dict[Hashable, Dict[str, Any]] = {}
     for members in samplingGroups(entries, grouping=grouping):
@@ -628,12 +633,14 @@ def requestIndex(entries, *, isotope: Any = None, grouping: str = "mf",
             "quantities": sorted({key.quantity for key in keys}),
             "domains": {key: tuple(domains[key])
                         for key in keys if key in (domains or {})},
+            "frames": {key: (frames or {})[(key.za, key.mt)] for key in keys
+                       if key.mf == 34 and (key.za, key.mt) in (frames or {})},
         }
     return index
 
 
 def assembleRequest(entries, *, isotope: Any = None, grouping: str = "mf",
-                    atol: float = 1e-12, domains=None
+                    atol: float = 1e-12, domains=None, frames=None
                     ) -> Tuple[List[Tuple[Hashable, np.ndarray]],
                                Dict[Hashable, Dict[str, Any]]]:
     """The blocks a request assembles to, and the index saying what their rows are.
@@ -648,7 +655,7 @@ def assembleRequest(entries, *, isotope: Any = None, grouping: str = "mf",
     entry point, bit for bit.
     """
     index = requestIndex(entries, isotope=isotope, grouping=grouping, atol=atol,
-                         domains=domains)
+                         domains=domains, frames=frames)
     blocks: List[Tuple[Hashable, np.ndarray]] = []
     for key, meta in index.items():
         groupEntries = _entriesOfGroup(entries, meta["components"])

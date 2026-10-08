@@ -37,6 +37,7 @@ from kika._constants import FWHM_TO_SIGMA, NEUTRON_MASS_AMU
 from kika.processing.interpolation import interpolate_1d
 from kika.utils.energy_folding import tof_energy_resolution
 from kika.algebra import fold_tabulated, gaussian_fold_nodes
+from kika._legendre_frames import cos_cm_from_cos_lab, cos_lab_from_cos_cm
 
 __all__ = [
     "TofResolution",
@@ -262,24 +263,8 @@ def frame_alpha(*, awr: Optional[float] = None, mass_number: Optional[float] = N
     return 0.0
 
 
-def cos_lab_from_cos_cm(mu_cm, alpha: float):
-    r""":math:`\mu_L = (\mu_C + \alpha)/\sqrt{1 + 2\alpha\mu_C + \alpha^2}`."""
-    mu_cm = np.asarray(mu_cm, dtype=float)
-    return (mu_cm + alpha) / np.sqrt(1.0 + 2.0 * alpha * mu_cm + alpha * alpha)
-
-
-def cos_cm_from_cos_lab(mu_lab, alpha: float):
-    r"""Inverse of :func:`cos_lab_from_cos_cm` (forward branch).
-
-    .. math::
-        \mu_C = -\alpha(1 - \mu_L^2) + \mu_L\sqrt{1 - \alpha^2(1 - \mu_L^2)}
-
-    Single-valued only for :math:`\alpha < 1` (target heavier than the
-    neutron), which holds for every nuclide but hydrogen.
-    """
-    mu_lab = np.asarray(mu_lab, dtype=float)
-    s = 1.0 - mu_lab * mu_lab
-    return -alpha * s + mu_lab * np.sqrt(np.maximum(1.0 - alpha * alpha * s, 0.0))
+# `cos_lab_from_cos_cm` and `cos_cm_from_cos_lab` live in `kika._legendre_frames`,
+# where the sampler's MF34 frame change uses them too; imported above.
 
 
 def jacobian_cm_to_lab(mu_cm, alpha: float):

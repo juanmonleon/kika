@@ -2083,9 +2083,11 @@ def _frame_against_mf4(ctx, ss, mt: int, mt1: int, loc, out) -> None:
     """LCT of an MF34 block against the LCT of MF4 for both reactions.
 
     ENDF-6 §34.1 allows it: the covariance may be of LAB coefficients while
-    MF4 gives CM ones, because transport uses LAB moments. It is still a
-    warning, because nothing in kika converts between frames -- a sampler that
-    perturbs MF4 applies these covariances to coefficients of the other frame.
+    MF4 gives CM ones, because transport uses LAB moments. kika's MF4 samplers
+    convert for two-body neutron scattering (MT2, MT51-90; see
+    :mod:`kika._legendre_frames`): they apply the factors in the covariance's
+    frame and bring the change back. There it is a note. Any other reaction is
+    a warning, because the samplers refuse to perturb it.
     """
     lct = int(ss.lct or 0)
     if lct == 0:
@@ -2097,13 +2099,20 @@ def _frame_against_mf4(ctx, ss, mt: int, mt1: int, loc, out) -> None:
         if frame in (1, 2) and int(frame) != lct:
             frames[m] = int(frame)
     if frames:
+        from kika._legendre_frames import TWO_BODY_NEUTRON_MTS
+
         name = {1: "LAB", 2: "CM"}
+        converted = all(m in TWO_BODY_NEUTRON_MTS for m in frames)
         out.append(CovarianceFinding(
-            "frame_differs_from_mf4", WARN,
+            "frame_differs_from_mf4", NOTE if converted else WARN,
             f"the covariance is of {name[lct]} coefficients (LCT={lct}) and MF4 gives "
             + ", ".join(f"MT{m} in {name[f]}" for m, f in sorted(frames.items()))
-            + "; ENDF-6 §34.1 allows it, but kika does not convert between frames", loc,
-            {"lct": lct, "mf4_lct": {str(m): f for m, f in frames.items()}}))
+            + "; ENDF-6 §34.1 allows it, and "
+            + ("kika's samplers apply the factors in that frame and convert back"
+               if converted else
+               "kika converts only for MT2 and MT51-90, so its samplers refuse this one"),
+            loc, {"lct": lct, "mf4_lct": {str(m): f for m, f in frames.items()},
+                  "converted": converted}))
 
 
 def _missing_central34(ctx, sections, out) -> None:

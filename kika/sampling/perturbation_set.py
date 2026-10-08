@@ -127,6 +127,11 @@ class PerturbationSet:
     #: live on the axis they apply to.
     outerDomains: Dict[ComponentKey, Tuple[float, float]] = field(
         default_factory=dict)
+    #: The frame an MF34 block's coefficients are stated in, ``"LAB"`` or
+    #: ``"CM"``, where it is not the distribution's own (MF34 LCT 1 or 2 against
+    #: a different MF4 LCT). Absent means "the same as the distribution". The
+    #: factors act on that frame's coefficients, and the applier converts.
+    componentFrames: Dict[ComponentKey, str] = field(default_factory=dict)
     edgeRule: str = EDGE_RULE
     provenance: Dict[str, Any] = field(default_factory=dict)
 
@@ -161,6 +166,11 @@ class PerturbationSet:
                     f"{component.describe()}: {len(values)} factor(s) on "
                     f"{len(edges) - 1} bin(s)"
                 )
+        for component, frame in self.componentFrames.items():
+            if component.mf != 34 or frame not in ("LAB", "CM"):
+                raise ValueError(
+                    f"{component.describe()}: frame {frame!r}. A frame is "
+                    f"stated for MF34 components only, as 'LAB' or 'CM'")
         grouped = {component for group in self.groups for component in group}
         if self.groups and grouped != set(self.factors):
             raise ValueError(
@@ -214,6 +224,7 @@ class PerturbationSet:
         factors: Dict[ComponentKey, np.ndarray] = {}
         binEdges: Dict[ComponentKey, np.ndarray] = {}
         outerDomains: Dict[ComponentKey, Tuple[float, float]] = {}
+        componentFrames: Dict[ComponentKey, str] = {}
         componentSemantics: Dict[ComponentKey, str] = {}
         groups: List[Tuple[ComponentKey, ...]] = []
         for blockKey, meta in index.items():
@@ -250,12 +261,15 @@ class PerturbationSet:
                 domain = (meta.get("domains") or {}).get(lookup)
                 if domain is not None:
                     outerDomains[component] = (float(domain[0]), float(domain[1]))
+                frame = (meta.get("frames") or {}).get(lookup)
+                if frame is not None:
+                    componentFrames[component] = frame
                 group.append(component)
             groups.append(tuple(group))
 
         return cls(label=label, factors=factors, binEdges=binEdges,
                    groups=tuple(groups), componentSemantics=componentSemantics,
-                   outerDomains=outerDomains,
+                   outerDomains=outerDomains, componentFrames=componentFrames,
                    provenance=dict(provenance or {}))
 
     @staticmethod
@@ -623,12 +637,15 @@ class PerturbationSet:
         for (_za, mt), orders in byReaction.items():
             reaction = suite.reactionByENDF_MT(mt)
             product, angular = self._angularOf(reaction, mt)
-            perturbed, info = self._applyAngular(angular, orders)
+            conversion = self._frameConversion(suite, reaction, product, mt,
+                                               orders)
+            perturbed, info = self._applyAngular(angular, orders, conversion)
             self._putRealisation(product, perturbed)
             for order, component in orders.items():
                 diagnostics[component] = {
                     "n_inserted": info["n_inserted"],
                     **info["per_order"].get(order, {}),
+                    **({"frame": info["frame"]} if "frame" in info else {}),
                 }
 
         spectra = [c for c in self.components() if c.mf == 35]
@@ -887,14 +904,55 @@ class PerturbationSet:
         return grids[0]
 
 
-    def _applyAngular(self, angular, orders: Mapping[int, ComponentKey]):
+    def _applyAngular(self, angular, orders: Mapping[int, ComponentKey],
+                      frameConversion=None):
         from kika.nuclear_data.model.perturbation import applyLegendreFactors
 
         return applyLegendreFactors(
             angular,
             {order: self.factors[component] for order, component in orders.items()},
             {order: self.binEdges[component] for order, component in orders.items()},
+            frameConversion=frameConversion,
         )
+
+    def _frameConversion(self, suite, reaction, product, mt: int,
+                         orders: Mapping[int, ComponentKey]):
+        """The CM/LAB change these blocks need, or ``None`` when there is none.
+
+        MF34 may state the coefficients in another frame than MF4's (ENDF-6
+        §34.1). Then the factors act on that frame's coefficients, and
+        :mod:`kika._legendre_frames` brings the change back. The kinematics are
+        the evaluation's: AWR off the reaction's provenance (or the suite's),
+        and the reaction's Q, which is QI for an ENDF-built suite.
+        """
+        from kika._legendre_frames import FrameConversion
+        from kika.nuclear_data.model import EVAL_LABEL
+
+        stated = {self.componentFrames.get(component)
+                  for component in orders.values()}
+        if len(stated) > 1:
+            raise ValueError(
+                f"MT{mt}: the orders of one reaction carry different frames "
+                f"{sorted(map(str, stated))}; one drawn vector is in one frame")
+        (covarianceFrame,) = stated
+        if covarianceFrame is None:
+            return None
+        form = product.distribution[EVAL_LABEL]
+        awr = None
+        for holder in (reaction, suite):
+            awr = getattr(getattr(holder, "provenance", None), "awr", None)
+            if awr is not None:
+                break
+        q = 0.0
+        if int(mt) != 2:
+            q = getattr(getattr(reaction.outputChannel, "Q", None), "value", None)
+            if q is None:
+                raise ValueError(
+                    f"MT{mt}: the covariance is in {covarianceFrame} and the "
+                    f"distribution in {form.productFrame}; the frame change "
+                    f"needs the reaction's Q, and this suite does not know it")
+        return FrameConversion.between(form.productFrame, covarianceFrame,
+                                       awr=awr, q=q, mt=mt)
 
     @staticmethod
     def _angularOf(reaction, mt: int):
@@ -989,6 +1047,8 @@ class PerturbationSet:
                     "binEdges": [float(e) for e in self.binEdges[component]],
                     **({"outerDomain": list(self.outerDomains[component])}
                        if component in self.outerDomains else {}),
+                    **({"frame": self.componentFrames[component]}
+                       if component in self.componentFrames else {}),
                 }
                 for component in self.components()
             ],
@@ -1004,6 +1064,7 @@ class PerturbationSet:
             )
         setSemantics = data.get("semantics", SEMANTICS[0])
         factors, binEdges, outerDomains, componentSemantics = {}, {}, {}, {}
+        componentFrames = {}
         for block in data["blocks"]:
             component = ComponentKey(*(int(v) for v in block["component"]))
             factors[component] = np.asarray(block["factors"], dtype=float)
@@ -1014,13 +1075,15 @@ class PerturbationSet:
             domain = block.get("outerDomain")
             if domain is not None:
                 outerDomains[component] = (float(domain[0]), float(domain[1]))
+            if block.get("frame") is not None:
+                componentFrames[component] = block["frame"]
         groups = tuple(tuple(ComponentKey(*(int(v) for v in component))
                              for component in group)
                        for group in data.get("groups", ()))
         return cls(label=data["label"], factors=factors, binEdges=binEdges,
                    groups=groups, semantics=setSemantics,
                    componentSemantics=componentSemantics,
-                   outerDomains=outerDomains,
+                   outerDomains=outerDomains, componentFrames=componentFrames,
                    edgeRule=data.get("edgeRule", EDGE_RULE),
                    provenance=dict(data.get("provenance", {})))
 
@@ -1111,6 +1174,8 @@ def _factorsIndex(sets: Sequence["PerturbationSet"]) -> Dict[str, Any]:
                 "binEdges": [float(e) for e in first.binEdges[component]],
                 **({"outerDomain": list(first.outerDomains[component])}
                    if component in first.outerDomains else {}),
+                **({"frame": first.componentFrames[component]}
+                   if component in first.componentFrames else {}),
             }
             for component in components
         ],
@@ -1240,6 +1305,7 @@ def readFactorsTable(directory, sample: int, *, name: str = FACTORS_STEM
         raise ValueError(f"the table holds no rows for sample {sample}")
 
     factors, binEdges, outerDomains, componentSemantics = {}, {}, {}, {}
+    componentFrames = {}
     setSemantics = index.get("semantics", SEMANTICS[0])
     for block in index["blocks"]:
         component = ComponentKey(*(int(v) for v in block["component"]))
@@ -1265,6 +1331,8 @@ def readFactorsTable(directory, sample: int, *, name: str = FACTORS_STEM
         domain = block.get("outerDomain")
         if domain is not None:
             outerDomains[component] = (float(domain[0]), float(domain[1]))
+        if block.get("frame") is not None:
+            componentFrames[component] = block["frame"]
     groups = tuple(tuple(ComponentKey(*(int(v) for v in component))
                          for component in group)
                    for group in index.get("groups", ()))
@@ -1275,6 +1343,7 @@ def readFactorsTable(directory, sample: int, *, name: str = FACTORS_STEM
                            semantics=setSemantics,
                            componentSemantics=componentSemantics,
                            outerDomains=outerDomains,
+                           componentFrames=componentFrames,
                            edgeRule=index.get("edgeRule", EDGE_RULE),
                            provenance=provenance)
 

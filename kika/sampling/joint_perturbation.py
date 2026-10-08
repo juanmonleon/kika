@@ -112,21 +112,29 @@ def load_or_build_joint(
     cache = Path(cache_path)
     if cache.exists():
         with np.load(cache, allow_pickle=True) as z:
-            if str(z["source_sha256"]) == digest:
-                index = json.loads(str(z["index_json"]))
+            same_tape = str(z["source_sha256"]) == digest
+            index = json.loads(str(z["index_json"])) if same_tape else None
+            if index is not None and "frames" in index:
                 index["sigma_grid_ev"] = z["sigma_grid_ev"]
                 index["triplets"] = [tuple(t) for t in index["triplets"]]
                 index["widths"] = {tuple(k): v for k, v in index["widths"]}
                 index["grids"] = {tuple(k): np.asarray(v)
                                   for k, v in index["grids"]}
+                index["frames"] = {int(mt): f for mt, f in index["frames"].items()}
                 key = tuple(index.pop("_key"))
                 if logger:
                     logger.info(f"  [INFO] [JOINT] cache hit {cache}")
                 return [(key, z["joint"])], index
-            if logger:
+            if logger and not same_tape:
                 logger.warning(
                     f"  [WARN] [JOINT] cache {cache} was built from a different "
                     f"tape (sha256 mismatch); rebuilding")
+            elif logger:
+                # Written before the index carried MF34's frame. Reusing it
+                # would apply the factors in MF4's frame whatever MF34 says.
+                logger.warning(
+                    f"  [WARN] [JOINT] cache {cache} predates the MF34 frame "
+                    f"field; rebuilding")
 
     blocks, index = load_joint_mf33_mf34(
         covariance_endf, mt=mt, isotope=isotope, l_max=l_max,
@@ -206,6 +214,8 @@ def _split_factors(factors: np.ndarray, index: Dict[str, Any], which: str):
             "factors": np.ascontiguousarray(a),
             "param_mapping": param_mapping,
             "energy_grids": energy_grids,
+            "frames": {int(mt): frame
+                       for mt, frame in (index.get("frames") or {}).items()},
         }
     return endf_pre, pendf_pre
 
