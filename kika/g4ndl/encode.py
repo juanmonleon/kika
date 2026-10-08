@@ -653,7 +653,7 @@ def writeElastic(suite, root, *, compressed: bool = False,
 
 def suiteProcesses(suite) -> List[str]:
     """The G4NDL processes ``suite`` holds data for: ``elastic`` (MT2), ``inelastic``,
-    ``capture`` (MT102)."""
+    ``capture`` (MT102), ``fission`` (MT18)."""
     from kika.g4ndl.inelastic_decode import INELASTIC_SUM_LABEL
     from kika.g4ndl.inelastic_encode import channelOf
 
@@ -668,6 +668,8 @@ def suiteProcesses(suite) -> List[str]:
         out.append("inelastic")
     if suite.findReactionByENDF_MT(102) is not None:
         out.append("capture")
+    if suite.findReactionByENDF_MT(18) is not None:
+        out.append("fission")
     return out
 
 
@@ -682,18 +684,20 @@ def writeSuite(suite, root, *, processes: Optional[Sequence[str]] = None,
     the inelastic channels through
     :func:`kika.g4ndl.inelastic_encode.writeInelastic` (its distributions are
     always the ``eval`` style, and its sums follow their parts), and MT102
-    through :func:`kika.g4ndl.capture.writeCapture`. This is
+    through :func:`kika.g4ndl.capture.writeCapture`, MT18 and its chances through
+    :func:`kika.g4ndl.fission_model.writeFission`. This is
     ``kika.write(suite, root, format="g4ndl")``. Every file is encoded and
     read back before any is written, process by process.
     """
     from kika.g4ndl.capture import writeCapture
+    from kika.g4ndl.fission_model import writeFission
     from kika.g4ndl.inelastic_encode import writeInelastic
 
     wanted = suiteProcesses(suite) if processes is None else list(processes)
-    unknown = set(wanted) - {"elastic", "inelastic", "capture"}
+    unknown = set(wanted) - {"elastic", "inelastic", "capture", "fission"}
     if unknown or not wanted:
         raise ValueError(f"processes must be a non-empty subset of ('elastic', 'inelastic', "
-                         f"'capture'), got {wanted!r}")
+                         f"'capture', 'fission'), got {wanted!r}")
     report = ConversionReport()
     if "elastic" in wanted:
         report.extend(writeElastic(suite, root, compressed=compressed,
@@ -705,5 +709,8 @@ def writeSuite(suite, root, *, processes: Optional[Sequence[str]] = None,
                                      targetMass=targetMass, elementName=elementName))
     if "capture" in wanted:
         report.extend(writeCapture(suite, root, compressed=compressed, header=header,
+                                   targetMass=targetMass, elementName=elementName))
+    if "fission" in wanted:
+        report.extend(writeFission(suite, root, compressed=compressed, header=header,
                                    targetMass=targetMass, elementName=elementName))
     return report

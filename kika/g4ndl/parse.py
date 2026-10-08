@@ -151,8 +151,14 @@ def _check_non_decreasing(stream, values, what, start, stride, name):
 
 # ------------------------------------------------------------ cross section
 
-def parse_cross_section(stream: TokenStream) -> CrossSectionRecord:
+def parse_cross_section(stream: TokenStream, *, toEnd: bool = True,
+                        nonnegative: bool = True) -> CrossSectionRecord:
     """``Elastic/CrossSection``: ``<int> <int> N (E σ)×N``, nothing after.
+
+    ``toEnd=False`` stops after the pairs: a fission-chance file
+    (``Fission/FC`` …) goes on with a final state after its σ.
+    ``nonnegative=False`` admits a negative σ, which Geant4 reads as written:
+    JEFF-4.0's Ac-225 first chance has one of -1e-9 b (spec §12).
 
     The two bookkeeping integers are kept; both libraries write ``0 0``
     everywhere, so they identify nothing and MT2 comes from the directory.
@@ -168,13 +174,14 @@ def parse_cross_section(stream: TokenStream) -> CrossSectionRecord:
                      "CrossSection: N", pos)
     start = stream.position
     energy, sigma = stream.pairs(n, f"CrossSection: {n} (E, sigma) pairs")
-    stream.expectEnd("CrossSection: end of file")
+    if toEnd:
+        stream.expectEnd("CrossSection: end of file")
     if energy[0] <= 0:
         stream._fail(f"first energy {float(energy[0])!r} eV is not positive",
                      "CrossSection: E[0]", start)
     _check_non_decreasing(stream, energy, "CrossSection: E", start, 2, "energy")
     neg = np.flatnonzero(sigma < 0)
-    if neg.size:
+    if neg.size and nonnegative:
         k = int(neg[0])
         stream._fail(f"negative cross section {float(sigma[k])!r} b at E={float(energy[k])!r} eV "
                      f"({neg.size} negative values)", "CrossSection: sigma",

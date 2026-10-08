@@ -44,7 +44,7 @@ from kika.g4ndl.physics import (
 
 __all__ = ["angularBulk", "angularMTs", "crossSections", "isotopeSummary",
            "LINEARISATION_POINTS", "PROJECTION_ORDER", "REPRESENTATIONS",
-           "INELASTIC_TOTAL", "inelasticTotal", "captureSummary"]
+           "INELASTIC_TOTAL", "inelasticTotal", "captureSummary", "fissionSummary"]
 
 #: Points each non-lin-lin segment of a table is cut into before it is sent.
 LINEARISATION_POINTS = 16
@@ -107,7 +107,7 @@ def angularMTs(suite) -> List[int]:
             continue
         try:
             angular = _angular(_neutronDistribution(suite, mt))
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, TypeError):
             continue
         if angular is not None:
             out.append(int(mt))
@@ -336,6 +336,7 @@ def isotopeSummary(suite) -> Dict[str, Any]:
         angular_mts=angularMTs(suite),
         inelastic_total=_range(inelasticTotal(suite)),
         capture=captureSummary(suite),
+        fission=fissionSummary(suite),
     )
 
 
@@ -368,6 +369,116 @@ def captureSummary(suite) -> Optional[Dict[str, Any]]:
                 products=products,
                 cross_section_path=getattr(prov, "crossSectionPath", None),
                 final_state_path=getattr(prov, "finalStatePath", None))
+
+
+#: Where ν̄ and the energy release are quoted: thermal incidence.
+THERMAL_EV = 0.0253
+
+#: A spectrum's model class → the ENDF law a viewer names it by.
+_SPECTRUM_LAWS = {"XYs2d": "LF=1 table", "Regions2d": "LF=1 table",
+                  "GeneralEvaporation": "LF=5 general evaporation",
+                  "SimpleMaxwellianFission": "LF=7 Maxwellian", "Evaporation": "LF=9 evaporation",
+                  "Watt": "LF=11 Watt", "MadlandNix": "LF=12 Madland-Nix",
+                  "WeightedFunctionals": "weighted sum"}
+
+
+def _atThermal(function) -> Optional[float]:
+    if function is None:
+        return None
+    try:
+        return float(np.asarray(function.evaluate(THERMAL_EV, outOfRange="hold")))
+    except TypeError:
+        return float(np.asarray(function.evaluate(THERMAL_EV)))
+
+
+def _spectrumLaw(distribution) -> Optional[str]:
+    energy = getattr(distribution, "energy", None)
+    if energy is None:
+        return None
+    name = type(energy).__name__
+    if name == "WeightedFunctionals":
+        parts = [_SPECTRUM_LAWS.get(type(w.functional).__name__, type(w.functional).__name__)
+                 for w in energy.weighted]
+        return f"weighted sum of {len(parts)}: {', '.join(parts)}"
+    return _SPECTRUM_LAWS.get(name, name)
+
+
+def fissionSummary(suite) -> Optional[Dict[str, Any]]:
+    """MT18 as a viewer shows it, or ``None`` without fission: its σ range;
+    ν̄ total, prompt and delayed at thermal (``None`` for one the file does not
+    state); the delayed families and their spectra's law; the prompt
+    spectrum's law and where the neutron's angle is stated; the energy release
+    at thermal (``ET``, ``ER``, the fragments' kinetic energy); the chances
+    (MT19, 20, 21, 38) with their σ range, Q and whether they carry a final
+    state of their own; where the photons live (``"verbatim"``, as G4NDL text,
+    or ``None`` without) and whether the fragment yields (``Fission/FF``) are
+    kept."""
+    reaction = suite.findReactionByENDF_MT(18)
+    if reaction is None:
+        return None
+    prov = getattr(reaction, "provenance", None)
+    channel = reaction.outputChannel
+    neutron = next((p for p in channel.products if p.pid == "n"), None)
+    sums = suite.sums.multiplicitySums
+    total, delayed = sums.byENDF_MT(452), sums.byENDF_MT(455)
+    primitive = getattr(getattr(neutron, "multiplicity", None), "form", None)
+    if total is not None:
+        nuTotal, nuPrompt = _atThermal(total.multiplicity.form), _atThermal(primitive)
+    else:
+        nuTotal, nuPrompt = _atThermal(primitive), None
+    distribution = None
+    if neutron is not None and neutron.distribution is not None and             "eval" in neutron.distribution.keys():
+        distribution = neutron.distribution["eval"]
+    data = channel.fissionFragmentData
+    families = list(data.delayedNeutrons) if data is not None else []
+    familyLaws = sorted({_spectrumLaw(f.product.distribution["eval"]) for f in families
+                         if f.product is not None and f.product.distribution is not None
+                         and "eval" in f.product.distribution.keys()})
+    release = None
+    releases = list(data.fissionEnergyReleases) if data is not None else []
+    if releases:
+        node = releases[0]
+        release = {name: _atThermal(getattr(node, name)) for name in
+                   ("totalEnergy", "nonNeutrinoEnergy", "promptProductKE",
+                    "promptNeutronKE", "promptGammaEnergy", "neutrinoEnergy")}
+    chances = []
+    for mt, name in ((19, "FC"), (20, "SC"), (21, "TC"), (38, "LC")):
+        r = suite.findReactionByENDF_MT(mt)
+        if r is None:
+            continue
+        try:
+            sigma = _range(suite.cross_section(mt, form="recon"))
+        except KeyError:
+            sigma = None
+        q = getattr(getattr(r.outputChannel, "Q", None), "value", None)
+        own = any(p.pid == "n" and p.distribution is not None for p in r.outputChannel.products)
+        chances.append(dict(mt=mt, directory=name, cross_section=sigma,
+                            q_value=None if q is None else float(q), final_state=own))
+    sections = list(getattr(prov, "sections", None) or [])
+    photons = "verbatim" if any(e.get("dataType", 0) >= 12 and e.get("verbatim") is not None
+                                for e in sections) else None
+    kept = [f"({e['infoType']}, {e['dataType']})" for e in sections
+            if e.get("verbatim") is not None and e.get("dataType", 0) < 12]
+    try:
+        sigma = _range(suite.cross_section(18, form="recon"))
+    except KeyError:
+        sigma = None
+    return dict(cross_section=sigma,
+                nubar_total=nuTotal, nubar_prompt=nuPrompt,
+                nubar_delayed=_atThermal(delayed.multiplicity.form) if delayed else None,
+                delayed_families=len(families),
+                delayed_spectra=familyLaws[0] if len(familyLaws) == 1 else
+                (", ".join(familyLaws) if familyLaws else None),
+                prompt_spectrum=_spectrumLaw(distribution),
+                angular_frame=_frame(distribution) if distribution is not None else None,
+                energy_release=release,
+                chances=chances,
+                photons=photons,
+                verbatim_sections=kept,
+                fragment_yields=bool(getattr(prov, "fragmentYields", None)),
+                cross_section_path=getattr(prov, "crossSectionPath", None),
+                final_state_path=getattr(prov, "finalStatePath", None),
+                fragment_yields_path=getattr(prov, "fragmentYieldsPath", None))
 
 
 def _range(pair) -> Optional[Dict[str, Any]]:

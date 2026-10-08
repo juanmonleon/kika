@@ -141,6 +141,7 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              UnspecifiedMultiplicity)
 from .pops import Nuclide, Particle, PoPs, pidFromZA, zaFromPid
 from .provenance import (AceProvenance, EndfProvenance, G4NDLCaptureProvenance,
+                         G4NDLFissionProvenance,
                          G4NDLInelasticProvenance,
                          G4NDLProvenance, GndsProvenance, Provenance)
 from .quantities import PhysicalQuantity, RangeQuantity
@@ -267,6 +268,7 @@ __all__ = [
     "ConversionReport", "Provenance", "EndfProvenance", "AceProvenance",
     "GndsProvenance",
     "G4NDLCaptureProvenance",
+    "G4NDLFissionProvenance",
     "G4NDLInelasticProvenance",
     "G4NDLProvenance",
     # §25 covariances

@@ -60,7 +60,7 @@ from kika.g4ndl.inelastic_records import (
 from kika.g4ndl.parse import (
     _block, _check_log_domain, _check_non_decreasing, parse_interpolation,
 )
-from kika.g4ndl.records import REP_ISOTROPIC, REP_LEGENDRE, REP_TABULATED
+from kika.g4ndl.records import FRAME_LAB, REP_ISOTROPIC, REP_LEGENDRE, REP_TABULATED
 from kika.g4ndl.tokens import TokenStream
 
 __all__ = ["parse_inelastic_fs", "parse_gammas", "parseSectionBody", "photonSlot",
@@ -251,7 +251,10 @@ def _body(stream, dt, composite, tag, photons, slot):
 
 # ------------------------------------------------------------------ dataType 4
 
-def _angular(stream, tag) -> AngularBody:
+def _angular(stream, tag, *, zeroMassInLab: bool = False) -> AngularBody:
+    """``zeroMassInLab`` admits ``targetMass = 0`` in a laboratory-frame body,
+    where ``G4ParticleHPAngular`` never uses the mass: four prompt-fission
+    MF4s write it so (``G4NDL_token_spec.md`` §12)."""
     pos = stream.position
     rep = stream.int(f"{tag}: repFlag")
     if rep not in (REP_ISOTROPIC, REP_LEGENDRE, REP_TABULATED):
@@ -259,9 +262,9 @@ def _angular(stream, tag) -> AngularBody:
                      f"on anything else", f"{tag}: repFlag", pos)
     pos = stream.position
     mass = stream.float(f"{tag}: targetMass")
-    if mass <= 0:
-        stream._fail(f"targetMass={mass!r} is not positive", f"{tag}: targetMass", pos)
     frame = _frame(stream, f"{tag}: frameFlag")
+    if mass < 0 or (mass == 0 and not (zeroMassInLab and frame == FRAME_LAB)):
+        stream._fail(f"targetMass={mass!r} is not positive", f"{tag}: targetMass", pos)
     leg = tab = None
     if rep == REP_LEGENDRE:
         leg = _block(stream, tabulated=False, tag=f"{tag} Legendre")
@@ -427,7 +430,9 @@ def _labAngleEnergy(stream, tag) -> LabAngleEnergyBody:
 
 # ------------------------------------------------------------------ photons
 
-def _photonMean(stream, tag):
+def _photonMean(stream, tag, *, nonnegative: bool = True):
+    """``nonnegative=False`` admits a negative multiplicity, which Geant4 reads as
+    written: Pa-231's fission photons carry two of -7e-9 (spec §12)."""
     pos = stream.position
     rep = stream.int(f"{tag}: repFlag")
     mass = stream.float(f"{tag}: targetMass")
@@ -438,7 +443,8 @@ def _photonMean(stream, tag):
             what = f"{tag}, photon {i + 1}"
             dis = stream.int(f"{what}: disType")
             e = stream.float(f"{what}: energy")
-            lines.append(PhotonLine(dis, e, _tab1(stream, f"{what}: multiplicity")))
+            lines.append(PhotonLine(dis, e, _tab1(stream, f"{what}: multiplicity",
+                                                  nonnegative=nonnegative)))
         return PhotonMultiplicityBody(rep, mass, n, tuple(lines))
     if rep == 2:
         ic = stream.int(f"{tag}: conversion flag")

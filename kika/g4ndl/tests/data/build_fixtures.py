@@ -27,6 +27,13 @@ so the reader under test opens them the way it opens a real one:
     and the one final state each has), the smallest showing each final-state
     construct (``CAPTURE`` says which). ~27 kB.
 
+``fission/G4NDL-4.7.1/``
+    Real ``Fission/`` files, byte for byte: whole isotopes (σ, ``FS`` and every
+    chance file each has), the smallest showing each construct, and one
+    ``Fission/FF`` alone (``FISSION`` says which). ~105 kB, 80 of them
+    Fm-255's ``FS``: the smallest file with the photons and an LF=5 delayed
+    spectrum.
+
 ``synthetic/``
     Hand-written token streams for what no real file shows (``repFlag=0``, the
     ``G4NDL`` header, a laboratory frame, ``tempdep != 0``) and for the inputs a
@@ -100,9 +107,36 @@ CAPTURE = {
     ("G4NDL-4.7.1", "7_15_Nitrogen"): "FSMF6: one LAW=1 photon (the shape of 507 of 508)",
 }
 
+#: (library, isotope stem) -> why it is here: every Fission/ file it has.
+FISSION = {
+    ("G4NDL-4.7.1", "90_230_Thorium"): "the smallest: nu total only, energy release, MF5 LF=7",
+    ("G4NDL-4.7.1", "94_244_Plutonium"): "chances FC and SC, each with its own MF4 + MF5",
+    ("G4NDL-4.7.1", "88_223_Radium"): "one delayed family, MF4 tabulated (repFlag=2)",
+    ("G4NDL-4.7.1", "100_255_Fermium"): "photons 12/14/15; six LF=5 delayed spectra; four chances",
+}
+#: (library, file) -> why: a Fission/FF without the rest of its isotope.
+FISSION_FF = {
+    ("G4NDL-4.7.1", "90_227_Thorium.z"): "the smallest FF: MF8/454 and 459, one energy each",
+}
+
 #: sha256 of every committed real file, filled from the first build. A change
 #: here means the source library changed, and that is news.
 SHA256 = {
+    "fission/G4NDL-4.7.1/Fission/CrossSection/100_255_Fermium.z": "9919b4b1a0c4b4e0cb7896b0f38a807dc97737c84bc4ac9da8f9c27ff1e66aca",
+    "fission/G4NDL-4.7.1/Fission/CrossSection/88_223_Radium.z": "e500108deb325889aebdc9b74aefea97264692666a397f417ed875beaaa2ca57",
+    "fission/G4NDL-4.7.1/Fission/CrossSection/90_230_Thorium.z": "70312086f0a9cdf9c083249e1cbce4620fe6eb89edcfc6014f1f175e2d8d2826",
+    "fission/G4NDL-4.7.1/Fission/CrossSection/94_244_Plutonium.z": "edb5bc5acc8045ebe721b41083e132b9efdc64198f1b1b8e617098fafbc266c2",
+    "fission/G4NDL-4.7.1/Fission/FC/100_255_Fermium.z": "092a544173623b70ae51d57a27006b9c3cd634ed9037aa831f2edc54cbf1971b",
+    "fission/G4NDL-4.7.1/Fission/FC/94_244_Plutonium.z": "23d4798ac1bbbc92d9cf0b5bac147aa6c0a6336115ecc815fb994ba125d2620c",
+    "fission/G4NDL-4.7.1/Fission/FF/90_227_Thorium.z": "1f58b8adebd60e0aefbcd787bb210804b36bbdff8c696830b53259015dddcdd8",
+    "fission/G4NDL-4.7.1/Fission/FS/100_255_Fermium.z": "16186be9af90beed2c72377dcb803cc8c4bd001b66f11eb47ff3b907370b1689",
+    "fission/G4NDL-4.7.1/Fission/FS/88_223_Radium.z": "46d4d4b55645538e1abbeede2954f0d7d5fc9831bf56b8ac2c9841a3e443460b",
+    "fission/G4NDL-4.7.1/Fission/FS/90_230_Thorium.z": "7a2bc6fbeacc950c425d1aa5980f3486c0f55d45f117b02b415da9e544e3e159",
+    "fission/G4NDL-4.7.1/Fission/FS/94_244_Plutonium.z": "def5d24c04ecb7cd22dd1d4752ee3b768255f451fd486e343716b2329c466deb",
+    "fission/G4NDL-4.7.1/Fission/LC/100_255_Fermium.z": "bf3bbc006532dee3ff8f16e7cb28ab0bfe32760dc7c9d382af27a4c5f8423ed0",
+    "fission/G4NDL-4.7.1/Fission/SC/100_255_Fermium.z": "91c79e6eae4629724fd70c013e4223a7e543488755a072da6dcea0f0926c7604",
+    "fission/G4NDL-4.7.1/Fission/SC/94_244_Plutonium.z": "3a5f61604effeea6679325a08f62d81b668aef241acf9108673f5d104140cd40",
+    "fission/G4NDL-4.7.1/Fission/TC/100_255_Fermium.z": "06663170009babb3d52816aa41ee12bde1302969c6805faff6a1ac8306cb1bb6",
     "capture/G4NDL-4.7.1/Capture/CrossSection/1_1_Hydrogen.z": "4593a3fb885eacd3dc71eadb200e6a98e34d9d66680663a5f8497413a4001a88",
     "capture/G4NDL-4.7.1/Capture/CrossSection/1_2_Hydrogen.z": "e40c5a72fedd83643107c3de866be1538b5048c0d84ddca366e5bdd48422f786",
     "capture/G4NDL-4.7.1/Capture/CrossSection/7_14_Nitrogen.z": "682cb37a9e557a484e0087fbe8ae863f732e1b832d7c59854c3335c62b16b871",
@@ -266,6 +300,24 @@ def copy_capture(sources: dict[str, Path]) -> dict[str, str]:
     return hashes
 
 
+def copy_fission(sources: dict[str, Path]) -> dict[str, str]:
+    files = [(lib, f"Fission/FF/{name}") for (lib, name) in FISSION_FF]
+    for (lib, stem) in FISSION:
+        for d in sorted((sources[lib] / "Fission").iterdir()):
+            if (d / f"{stem}.z").is_file():
+                files.append((lib, f"Fission/{d.name}/{stem}.z"))
+    hashes = {}
+    for lib, rel in files:
+        dst = HERE / "fission" / lib / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(sources[lib] / rel, dst)
+        key = str(dst.relative_to(HERE).as_posix())
+        hashes[key] = sha256(dst)
+        if SHA256.get(key) and SHA256[key] != hashes[key]:
+            raise SystemExit(f"{key}: source changed, sha256 {hashes[key]}")
+    return hashes
+
+
 def write_synthetic() -> None:
     root = HERE / "synthetic"
     if root.exists():
@@ -288,6 +340,7 @@ def main() -> None:
     hashes = copy_real(sources)
     hashes.update(copy_inelastic(sources))
     hashes.update(copy_capture(sources))
+    hashes.update(copy_fission(sources))
     write_synthetic()
     for k, v in sorted(hashes.items()):
         print(f'    "{k}": "{v}",')
