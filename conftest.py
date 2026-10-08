@@ -367,9 +367,11 @@ def resolve_tape(name: str) -> Optional[Path]:
 _G4NDL_LIBRARIES: Dict[str, Sequence[str]] = {
     # The IAEA translation of JEFF-4.0 (Mendoza & Cano-Ott), as unpacked from
     # www-nds.iaea.org/geant4: the tarball nests a JEFF-4.0/ in a JEFF-4.0/.
-    "jeff40": ("JEFF-4.0/JEFF-4.0", "JEFF-4.0"),
+    # ``jeff40`` / ``g4ndl471`` first: since 2026-10-08 NuclearData names a
+    # library the same way under every type (endf/jeff40, tsl/endfb81, g4ndl/jeff40).
+    "jeff40": ("jeff40", "JEFF-4.0/JEFF-4.0", "JEFF-4.0"),
     # Geant4's own default, the one every Geant4 11.3-11.4 install downloads.
-    "g4ndl471": ("G4NDL.4.7.1/G4NDL4.7.1", "G4NDL4.7.1"),
+    "g4ndl471": ("g4ndl471", "G4NDL.4.7.1/G4NDL4.7.1", "G4NDL4.7.1"),
 }
 
 
@@ -378,7 +380,7 @@ def resolve_g4ndl(name: str) -> Optional[Path]:
     roots = []
     if os.environ.get("KIKA_G4NDL"):
         roots.append(Path(os.environ["KIKA_G4NDL"]))
-    roots += [root / "G4NDL" for root in _search_roots()]
+    roots += [root / name for root in _search_roots() for name in ("g4ndl", "G4NDL")]
     for root in roots:
         for rel in _G4NDL_LIBRARIES[name]:
             if (root / rel / "Elastic" / "FS").is_dir():

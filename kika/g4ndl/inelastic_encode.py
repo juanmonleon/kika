@@ -406,6 +406,11 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
             (int(e3["LR"]) if e3.get("LR") is not None else 0) if composite else None,
             Pairs(np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)))
     products = list(reaction.outputChannel.products) if reaction.outputChannel else []
+    # The decaying residual of a level reaction (endf/model_adapter/residuals.py,
+    # and what FUDGE's GNDS carries too) states no multiplicity and an
+    # `unspecified` distribution: G4NDL has nowhere to put it and Geant4 makes the
+    # recoil from kinematics, so it is not a product G4NDL writes.
+    products = [p for p in products if not _isBareResidual(p, EMITTED[channel])]
     if form is None and (products or any(e["dataType"] == DT_CROSS_SECTION for e in entries)):
         raise G4NDLUnsupportedError(
             f"{where} has no '{RECONSTRUCTED_LABEL}' cross section: G4NDL is pointwise "
@@ -443,6 +448,18 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
             f"either one product (the {emitted!r}) with a distribution and no multiplicity "
             f"(MF4/MF5) or products with multiplicities (MF6)")
     return out
+
+
+def _isBareResidual(product, emitted) -> bool:
+    """A product that says nothing but that it exists: no multiplicity, and only
+    ``unspecified`` distributions. Never the channel's emitted particle."""
+    from kika.nuclear_data.model import Unspecified
+
+    if product.pid in (emitted, "photon") or product.multiplicity is not None:
+        return False
+    d = product.distribution
+    forms = list(d.forms.values()) if d is not None else []
+    return bool(forms) and all(isinstance(f, Unspecified) for f in forms)
 
 
 def _evalForm(product):
