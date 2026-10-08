@@ -4,8 +4,14 @@ The grammar is :mod:`kika.g4ndl.fission`; this module puts what it reads in
 the nodes the ENDF adapter puts the same evaluation in
 (``kika/endf/model_adapter/{multiplicity,fission_energy,energy}.py``), so a
 G4NDL suite and an ENDF suite of one fissile isotope come out in the same
-shape, and the labels and hrefs are imported from there rather than spelt
-twice.
+shape. The labels, the hrefs and ``p_k·ν̄_d`` are restated here rather than
+imported, as :mod:`kika.g4ndl.inelastic_decode` restates the MF4-MF6 mapping:
+the two formats do not depend on each other, and only the façades and the
+front door may import an adapter
+(``kika/endf/model_adapter/tests/test_nothing_imports_the_adapter.py``). That
+the two still agree is what ``test_fission.py`` (``nubarNode`` finds the
+nu-bar) and ``test_fission_full_libraries.py`` (the model against the ENDF
+adapter's) check.
 
 **MT18** is one :class:`~kika.nuclear_data.model.reactions.Reaction`, its σ
 under ``recon`` (lin-lin, 0 K) from ``Fission/CrossSection``. Its Q is left
@@ -95,6 +101,22 @@ __all__ = ["CHANCE_DIRECTORY", "decodeFission", "encodeFission", "writeFission",
 #: restated so that importing this module does not import the decoder.
 RECONSTRUCTED_LABEL = "recon"
 EVALUATED_LABEL = "eval"
+
+#: §21.3 labels, spelt as :mod:`kika.endf.model_adapter.multiplicity` (and FUDGE) spell them.
+TOTAL_NUBAR_LABEL = "total fission neutron multiplicity"
+DELAYED_NUBAR_LABEL = "delayed fission neutron multiplicity"
+
+
+def _fissionProductMultiplicityHref() -> str:
+    """The fission neutron's multiplicity: ``multiplicity.fissionProductMultiplicityHref``."""
+    return (f"/reactionSuite/reactions/reaction[@label='MT{FISSION_MT}']"
+            f"/outputChannel/products/product[@label='n']/multiplicity")
+
+
+def _multiplicitySumHref(label: str) -> str:
+    """One §21.3 ``multiplicitySum``'s multiplicity: ``multiplicity.multiplicitySumHref``."""
+    return (f"/reactionSuite/sums/multiplicitySums"
+            f"/multiplicitySum[@label='{label}']/multiplicity")
 
 #: MT -> the chance directory that holds it.
 CHANCE_DIRECTORY: Dict[int, str] = {mt: ch for ch, mt in CHANCE_MT.items()}
@@ -369,10 +391,6 @@ def decodeFission(crossSection: CrossSectionRecord, finalState: Optional[Fission
 
 def _decodeFS(record: FissionFSRecord, reaction, suite, provenance, domain, where, report,
               libraryRoot, libraryName, verbatimError) -> None:
-    from kika.endf.model_adapter.multiplicity import (
-        DELAYED_NUBAR_LABEL, TOTAL_NUBAR_LABEL, fissionProductMultiplicityHref,
-        multiplicitySumHref,
-    )
     from kika.nuclear_data.model import (
         Add, DelayedNeutron, FissionFragmentData, G4NDLFissionProvenance, MultiplicitySum,
         PhysicalQuantity, Product,
@@ -460,9 +478,9 @@ def _decodeFS(record: FissionFSRecord, reaction, suite, provenance, domain, wher
     if INFO_NU_TOTAL in nu and separatePrompt:
         total = MultiplicitySum(label=TOTAL_NUBAR_LABEL, multiplicity=nu[INFO_NU_TOTAL],
                                 ENDF_MT=452)
-        total.summands.append(Add(href=fissionProductMultiplicityHref()))
+        total.summands.append(Add(href=_fissionProductMultiplicityHref()))
         if INFO_DELAYED in nu:
-            total.summands.append(Add(href=multiplicitySumHref(DELAYED_NUBAR_LABEL)))
+            total.summands.append(Add(href=_multiplicitySumHref(DELAYED_NUBAR_LABEL)))
         suite.sums.multiplicitySums.append(total)
     if release is not None:
         channel.fissionFragmentData.fissionEnergyReleases.append(release)
@@ -501,9 +519,40 @@ def _reportCode1(entries, where: str, report) -> None:
                 f"kept and written back")
 
 
+def _familyMultiplicity(nubar, weight, label: str, report):
+    """``p_k(E) · ν̄_d(E)``, as ``fission_energy._familyMultiplicity`` (and FUDGE) build it.
+
+    Exact when ``p_k`` is constant: the delayed nu-bar's own table, scaled.
+    Otherwise the product of two tables is a table of neither law, so it is
+    sampled on the union of both grids, steps kept, and joined lin-lin, and the
+    report says so.
+    """
+    from kika.algebra import interval_laws, sample_on_union, union
+    from kika.nuclear_data.model import Multiplicity, Regions1d, XYs1d, multiplicityAxes
+
+    nform = nubar if isinstance(nubar, Regions1d) else Regions1d(function1ds=[nubar])
+    wform = weight if isinstance(weight, Regions1d) else Regions1d(function1ds=[weight])
+    nx, ny, npairs = nform.toEndfRegions()
+    wx, wy, wpairs = wform.toEndfRegions()
+    wy = np.asarray(wy, dtype=float)
+    if wy.size and np.all(wy == wy[0]):
+        table = Regions1d.fromEndfRegions(nx, np.asarray(ny, dtype=float) * float(wy[0]),
+                                          npairs, axes=multiplicityAxes())
+        return Multiplicity(form=table.function1ds[0] if len(table.function1ds) == 1 else table)
+    nx, ny = np.asarray(nx, dtype=float), np.asarray(ny, dtype=float)
+    wx = np.asarray(wx, dtype=float)
+    grid = union([nx, wx[(wx >= nx[0]) & (wx <= nx[-1])]], steps=wx[1:-1])
+    values = (sample_on_union(nx, ny, interval_laws(nx.size, npairs), grid)
+              * sample_on_union(wx, wy, interval_laws(wx.size, wpairs), grid))
+    report.approximated(
+        f"delayedNeutron {label!r}: its multiplicity is p_k(E) * nu_d(E) with a p_k that is "
+        f"not constant, sampled on the {grid.size}-point union of both grids and joined "
+        f"lin-lin -- the product of two tables is not a table of either law")
+    return Multiplicity(form=XYs1d(xs=grid, ys=values, axes=multiplicityAxes()))
+
+
 def _delayedFamilies(body: EnergyBody, entry: dict, channel, delayed, where, report) -> None:
     """MF5/455 → each family's product, as ``attachDelayedSpectra`` places it."""
-    from kika.endf.model_adapter.fission_energy import _familyMultiplicity
     from kika.g4ndl.inelastic_decode import _tab1Dict
     from kika.nuclear_data.model import Distribution, Frame, Isotropic2d, Uncorrelated
 
