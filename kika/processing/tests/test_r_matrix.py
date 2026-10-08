@@ -106,6 +106,89 @@ def test_closed_channel_virtual_shift_is_not_discarded():
     assert abs(shifted[0]-removed[0])/shifted[0] > 1e-5
 
 
+def effective_fission_model():
+    model,ctx=rml_model(shift='zero')
+    f=model.resolved[0].formalism;sg=f.spinGroups[0]
+    zero=ChannelParticle(0.,0.,0.,1)
+    f.resonanceReactions.append(ResonanceReaction('fission',reactionMT=18,Q=0.,
+        kinematics=ChannelKinematics(zero,zero,'unity','zero',effective=True)))
+    sg.channels += [Channel('f1','fission',L=0,channelSpin=0.,columnIndex=4,boundaryConditionValue=0.),
+                    Channel('f2','fission',L=0,channelSpin=0.,columnIndex=5,boundaryConditionValue=0.)]
+    sg.widths[0] += [.25,-.15];sg.widths[1] += [-.1,.3]
+    return model,ctx
+
+
+def test_effective_fission_exits_with_same_pair_and_quantum_numbers_are_orthogonal():
+    model,ctx=effective_fission_model();sg=model.resolved[0].formalism.spinGroups[0]
+    prepared=prepare_resonances(model,ctx);g=prepared.regions[0].groups[0]
+    e=np.array([30.,99.9,100.,100.2,180.]);actual=prepared.evaluate(e)
+    a=np.asarray(g.reduced);expected=[]
+    for energy in e:
+        functions=[c.functions(np.array([energy])) for c in g.channels]
+        p=np.array([v[0][0] for v in functions]);log=np.array([v[1][0] for v in functions])
+        matrix=np.diag(np.asarray(sg.energies)-energy-.5j*np.asarray(g.radiation))-(a*log)@a.T
+        x=np.linalg.solve(matrix,a[:,g.entrances[0]]);w=a.T@x
+        beta=np.pi*.01/(ctx.k_squared_per_ev*energy)*3/4
+        expected.append(beta*4*p[g.entrances[0]]*sum(p[i]*abs(w[i])**2
+            for i,c in enumerate(g.channels) if c.mt==18))
+    np.testing.assert_allclose(actual[18],expected,rtol=3e-12,atol=1e-11)
+    np.testing.assert_allclose(actual[1],actual[2]+actual[51]+actual[102]+actual[18],rtol=3e-13)
+
+
+def test_duplicate_physical_pair_sector_is_still_rejected():
+    model,ctx=rml_model();sg=model.resolved[0].formalism.spinGroups[0]
+    duplicate=deepcopy(sg.channels[0]);duplicate.label='duplicate';duplicate.columnIndex=4
+    sg.channels.append(duplicate)
+    for row in sg.widths:row.append(row[0])
+    with pytest.raises(ValueError,match='duplicate coherent physical channel'):
+        prepare_resonances(model,ctx)
+
+
+def test_effective_fission_columns_survive_complete_suite_and_publication(tmp_path):
+    from test_resonance_publication import writable_suite
+    from test_resonance_suite import curve,href
+    from kika.nuclear_data.model import (Reaction,ReactionId,CrossSection,Background,
+        ResonancesWithBackground,Add,Q,EndfProvenance)
+    from kika.processing.resonances import reconstruct_suite,attach_reconstruction
+    from kika.endf.writers.assemble import writeReconstructedEndfTape
+    from kika.gnds.decode import readReactionSuite
+    from kika.gnds.xpath import Document
+    from kika.endf.classes.mf2.mf2mt151 import (MF2MT151,Isotope,EnergyRange,
+        RMatrixLimited,RML_ParticlePair,RML_Channel,RML_SpinGroup,RML_Resonance)
+    from kika.endf.model_adapter import decodeMF2MT151
+    import kika
+    suite=writable_suite();ctx=NeutronContext(56.,.5)
+    # A small ENDF source supplies the bookkeeping required by its writer.
+    pairs=[RML_ParticlePair(0.,0.,0.,0.,0.,0.,1e6,-1,0,102,1.,1.),
+           RML_ParticlePair(1.,56.,0.,26.,.5,.5,0.,1,0,2,1.,1.),
+           RML_ParticlePair(0.,0.,0.,0.,0.,0.,0.,-1,0,18,1.,1.)]
+    channels=[RML_Channel(2,0,1.,.2,0.,.5),RML_Channel(1,0,0.,0.,0.,0.),
+              RML_Channel(3,0,0.,0.,0.,0.),RML_Channel(3,0,0.,0.,0.,0.)]
+    group=RML_SpinGroup(1.,1.,0,0,channels,
+        [RML_Resonance(100.,[.4,.2,.25,-.15]),RML_Resonance(100.2,[.28,.14,-.1,.3])])
+    section=MF2MT151(number=151);section._za,section._awr,section._mat,section._nis=26056.,56.,2631,1
+    section._isotopes=[Isotope(26056.,1.,0,1,[EnergyRange(10.,300.,1,7,0,0,
+        RMatrixLimited(1,3,0,.5,.5,pairs,[group]))])]
+    model,provenance,report=decodeMF2MT151(section);model.provenance=provenance
+    assert report.isClean
+    suite.resonances=model
+    form=ResonancesWithBackground(Background(resolvedRegion=curve(10.,300.,0.),
+        fastRegion=curve(300.,1000.,0.)),resonanceRegionHref='/reactionSuite/resonances/resolved',label='eval')
+    reaction=Reaction(ReactionId('fission',ENDF_MT=18),CrossSection({'eval':form}))
+    reaction.provenance=EndfProvenance(qm=0.,lr=0)
+    reaction.outputChannel.Q=Q(value=0.);suite.reactions.append(reaction)
+    suite.sums[1].summands.append(Add(href('fission')))
+    result=reconstruct_suite(suite,ctx);attach_reconstruction(suite,result)
+    assert writeReconstructedEndfTape(suite,result,tmp_path/'effective.endf').isClean
+    path=tmp_path/'effective.xml';kika.write(suite,path,resonance_extensions=True)
+    back,_=readReactionSuite(Document.parse(path))
+    assert max(result.verify_suite(back).values())<=1
+    restored=back.resonances.resolved[0].formalism.spinGroups[0]
+    original=model.resolved[0].formalism.spinGroups[0]
+    assert sum(c.resonanceReaction=='MT18' for c in restored.channels)==2
+    np.testing.assert_array_equal(restored.widths,original.widths)
+
+
 def test_channel_permutation_preserves_physics_and_snapshot():
     source,ctx = rml_model(multiple=True);clone = deepcopy(source)
     g = clone.resolved[0].formalism.spinGroups[0];order = [3,2,0,1]

@@ -231,8 +231,14 @@ def prepare_rml(region, resonances, context, notes):
                     boundary = 0.
             if not math.isfinite(boundary):raise ValueError('nonfinite boundary constant')
             identity = (ch.resonanceReaction,l,s)
-            if identity in identities:raise ValueError('duplicate coherent channel')
-            identities.add(identity)
+            # Effective fission/radiative exits are orthogonal channels whose
+            # quantum numbers need not identify their deformation/radiative
+            # state. Keep each width column, even for identical pair/L/S.
+            # A physical two-body channel still has a unique pair/L/S sector.
+            if not effective:
+                if identity in identities:
+                    raise ValueError(f'duplicate coherent physical channel {identity!r} in spin group {sg.label!r}')
+                identities.add(identity)
             channel = RMLChannel(mt,l,s,q,cm,k2,radius,phase,mode,shift,boundary,effective,
                                  prepare_external(ch,region.domainMin,region.domainMax),strength,phase_function,kinematics,rr.label,phase_absorption_mt)
             channels.append(channel); indexes.append(index)
