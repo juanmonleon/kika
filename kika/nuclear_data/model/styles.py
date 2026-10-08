@@ -46,6 +46,9 @@ __all__ = [
     "SnElasticUpScatter",
     "Styles",
     "StyleError",
+    "TargetInfo",
+    "TargetInfoElement",
+    "TargetInfoNuclide",
 ]
 
 
@@ -88,6 +91,37 @@ def _style(nodeName: str, *, requiresDerivedFrom: bool = False):
     return decorate
 
 
+@dataclass
+class TargetInfoNuclide:
+    """``targetInfo/…/nuclide``: one isotope of the target and its atom fraction."""
+
+    pid: str
+    atomFraction: float
+
+
+@dataclass
+class TargetInfoElement:
+    """``targetInfo/…/chemicalElement``: an element of the target, by symbol."""
+
+    symbol: str
+    nuclides: List[TargetInfoNuclide] = field(default_factory=list)
+
+
+@dataclass
+class TargetInfo:
+    """``evaluated/targetInfo``: what the target is made of (``gnds.xsd`` TargetInfoType).
+
+    The schema's only child is ``isotopicAbundances/chemicalElements``, so this
+    holds the elements directly. ENDF states the same thing in MF7/MT451 for a
+    thermal-scattering evaluation (ZAI and AFI per isotope); the free cross
+    sections of that section go on the principal scattering atom's
+    ``boundAtomCrossSectionByNuclide``, which is where FUDGE puts them, and the
+    pids name nuclides in PoPs, which hold the masses (AWRI).
+    """
+
+    chemicalElements: List[TargetInfoElement] = field(default_factory=list)
+
+
 @_style("evaluated")
 @dataclass
 class Evaluated(Style):
@@ -106,6 +140,8 @@ class Evaluated(Style):
     version: Optional[str] = None
     temperature: Optional[PhysicalQuantity] = None
     projectileEnergyDomain: Optional[RangeQuantity] = None
+    #: Optional in the schema; a thermal-scattering evaluation fills it.
+    targetInfo: Optional[TargetInfo] = None
 
 
 @_style("realization", requiresDerivedFrom=True)

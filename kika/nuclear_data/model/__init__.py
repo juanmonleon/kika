@@ -149,7 +149,7 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              FissionEnergyRelease, FissionFragmentData, Multiplicity, OutputChannel,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
-from .pops import Nuclide, Particle, PoPs, pidFromZA, zaFromPid
+from .pops import Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
 from .provenance import (AceProvenance, EndfProvenance, G4NDLCaptureProvenance,
                          G4NDLFissionProvenance,
                          G4NDLInelasticProvenance,
@@ -205,6 +205,9 @@ from .styles import (
     HeatedMultiGroup,
     Realization,
     Style,
+    TargetInfo,
+    TargetInfoElement,
+    TargetInfoNuclide,
     StyleError,
     Styles,
     URR_probabilityTables,
@@ -237,10 +240,11 @@ __all__ = [
     "Uncertainty", "Covariance", "ListOfCovariances",
     # §9-10 styles
     "Style", "Styles", "StyleError", "Evaluated", "Realization",
+    "TargetInfo", "TargetInfoElement", "TargetInfoNuclide",
     "CrossSectionReconstructed", "AngularDistributionReconstructed",
     "Heated", "HeatedMultiGroup", "GriddedCrossSection", "URR_probabilityTables",
     # §12 PoPs
-    "PoPs", "Particle", "Nuclide", "pidFromZA", "zaFromPid",
+    "PoPs", "Particle", "Nuclide", "Unorthodox", "pidFromZA", "zaFromPid",
     # §14 the root
     "ReactionSuite", "ExternalFile", "ExternalFiles", "ApplicationData",
     "CROSS_SECTION_UNITS",

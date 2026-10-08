@@ -103,7 +103,8 @@ class _DistributionReader:
     def unsupported(self, tag: str, path: str, reason: str) -> None:
         self.report.unsupportedNode(f"{path}/{tag}: {reason}")
 
-    @reads("distributionForm", "angularTwoBody", "unspecified", "branching3d")
+    @reads("distributionForm", "angularTwoBody", "unspecified", "branching3d",
+           "thermalNeutronScatteringLaw")
     def read(self, element: ET.Element, path: str) -> Distribution:
         here = f"{path}/distribution"
         distribution = Distribution()
@@ -126,6 +127,12 @@ class _DistributionReader:
                     label=label,
                     productFrame=Frame(child.attrib.get("productFrame", "lab")),
                 )
+            elif child.tag == "thermalNeutronScatteringLaw":
+                # The product-side link of a TSL reaction (roadmap E4b): the
+                # law itself lives in the reaction's doubleDifferentialCrossSection.
+                from kika.nuclear_data.model import ThermalNeutronScatteringLaw
+                form = ThermalNeutronScatteringLaw(
+                    href=child.attrib.get("href", ""), label=label)
             elif child.tag == "branching3d":
                 # Two attributes and no content (gnds.xsd:1816-1819). Read so
                 # the node survives a round trip; **not** resolved against the

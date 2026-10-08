@@ -136,8 +136,30 @@ def _tsl(reactionSuite):
     return out
 
 
+def _readGnds(text):
+    """A GNDS ``reactionSuite`` *text* read by FUDGE (``fudge.reactionSuite.read``)."""
+    from fudge import reactionSuite as reactionSuiteModule
+
+    folder = tempfile.mkdtemp()
+    path = os.path.join(folder, "suite.xml")
+    with open(path, "w") as handle:
+        handle.write(text)
+    try:
+        return reactionSuiteModule.read(path, lazyParsing=False)
+    finally:
+        os.unlink(path)
+        os.rmdir(folder)
+
+
 def main(tapeText, name):
     from brownies.legacy.converting import endfFileToGNDS
+
+    if name.endswith(".xml"):
+        # The other direction (roadmap E4b): a GNDS file kika wrote, read by
+        # FUDGE and reported exactly as an ENDF translation would be.
+        reactionSuite = _readGnds(tapeText)
+        sys.stdout.write("\n" + JSON_MARKER + json.dumps({"tsl": _tsl(reactionSuite)}) + "\n")
+        return
 
     # FUDGE's TSL converter names the scatterer from the *file name*
     # (ENDF_ITYPE_2.py), so the tape is written under the name it expects.
@@ -155,7 +177,10 @@ def main(tapeText, name):
         os.rmdir(folder)
     reactionSuite = translated["reactionSuite"]
     if str(reactionSuite.interaction) == "thermalNeutronScatteringLaw":
-        sys.stdout.write("\n" + JSON_MARKER + json.dumps({"tsl": _tsl(reactionSuite)}) + "\n")
+        # FUDGE's own GNDS of the tape goes back too, for kika to read (E4b).
+        gnds = "\n".join(reactionSuite.toXML_strList())
+        sys.stdout.write("\n" + JSON_MARKER + json.dumps({"tsl": _tsl(reactionSuite),
+                                                          "gnds": gnds}) + "\n")
         return
 
     out = {"crossSections": {}, "legendre": {}, "resonances": None}

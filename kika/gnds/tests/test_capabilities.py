@@ -258,9 +258,9 @@ def test_the_registry_bounds_the_capability():
 def test_the_bridge_joined_something():
     """The empty-room guard for the bridge itself. Every assertion above is
     worthless if ``BRIDGED`` came out empty because a key shape changed."""
-    assert len(BRIDGED) == 42, (
+    assert len(BRIDGED) == 52, (
         f"{len(BRIDGED)} registry tags are schema nodes; the two tables were "
-        f"written against 42"
+        f"written against 42, and E4b's thermal-scattering nodes added ten"
     )
     assert len(UNBRIDGED) == 12
 
@@ -325,20 +325,20 @@ def test_a_group_is_one_coverage():
 
 
 def test_the_silent_drops_are_pinned_by_count():
-    """Twenty-one nodes vanish with nothing said. **Each repair lowers this
+    """Seventeen nodes vanish with nothing said. **Each repair lowers this
     number and this test is what notices** — the shape ``KNOWN_DEFECTS`` has
     next door.
 
     Most are honest: a child of a container already reported, a branch the
-    reader never enters, a node no valid document can contain. One is not.
+    reader never enters, a node no valid document can contain. It was 21
+    until roadmap E4b, and the one that was not honest went first:
     ``targetInfo`` hangs off ``<evaluated>``, which kika reads, and the style
-    reader takes three children and never looks at the rest — so it is dropped
-    under a node kika claims to support. That is the entry this number should
-    lose first.
+    reader used to drop it. It is read and written now, and so is the
+    ``unorthodox`` particle a thermal-scattering target is.
     """
     silent = sorted(e.node for e in cap.capabilities().silent)
-    assert len(silent) == 21, silent
-    assert "targetInfo" in silent and "isotopicAbundances" in silent
+    assert len(silent) == 17, silent
+    assert "targetInfo" not in silent and "unorthodox" not in silent
     for node in silent:
         assert CAPABILITIES[node].why
 
@@ -371,7 +371,7 @@ def test_filters_compose_and_an_unknown_word_raises():
     everything = cap.capabilities()
     assert len(everything) == len(CAPABILITIES)
     assert 0 < len(cap.capabilities(coverage="partial")) < len(everything)
-    assert len(cap.capabilities(group="thermalScattering")) == 24
+    assert len(cap.capabilities(group="thermalScattering")) == 22
     assert cap.capabilities(node="XYs1d")[  # the exact-node form
         "XYs1d"].coverage is Coverage.FULL
     with pytest.raises(ValueError, match="not a coverage"):

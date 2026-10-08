@@ -19,7 +19,8 @@ from typing import Optional
 from kika.gnds.nodes import reads, writes
 from kika.nuclear_data.model import (ConversionReport, CrossSectionReconstructed,
                                      Evaluated, PhysicalQuantity, RangeQuantity,
-                                     Style, Styles)
+                                     Style, Styles, TargetInfo, TargetInfoElement,
+                                     TargetInfoNuclide)
 
 __all__ = ["STYLES", "WRITABLE_STYLES", "readStyles", "writeStyles",
            "readPhysicalQuantity", "readRange"]
@@ -58,6 +59,34 @@ def readRange(element: Optional[ET.Element]) -> Optional[RangeQuantity]:
                          unit=element.attrib.get("unit", ""))
 
 
+def readTargetInfo(element: ET.Element) -> TargetInfo:
+    """``evaluated/targetInfo`` (gnds.xsd TargetInfoType): the target's isotopes."""
+    elements = []
+    for chemical in element.findall("isotopicAbundances/chemicalElements/chemicalElement"):
+        elements.append(TargetInfoElement(
+            symbol=chemical.attrib.get("symbol", ""),
+            nuclides=[TargetInfoNuclide(pid=n.attrib.get("pid", ""),
+                                        atomFraction=float(n.attrib.get("atomFraction", "nan")))
+                      for n in chemical.findall("nuclides/nuclide")]))
+    return TargetInfo(chemicalElements=elements)
+
+
+def writeTargetInfo(parent: ET.Element, info: TargetInfo, number) -> ET.Element:
+    """The other way. Only a reactionSuite's ``evaluated`` admits it."""
+    element = ET.SubElement(parent, "targetInfo")
+    container = ET.SubElement(ET.SubElement(element, "isotopicAbundances"),
+                              "chemicalElements")
+    for chemical in info.chemicalElements:
+        node = ET.SubElement(container, "chemicalElement")
+        node.attrib["symbol"] = chemical.symbol
+        nuclides = ET.SubElement(node, "nuclides")
+        for nuclide in chemical.nuclides:
+            child = ET.SubElement(nuclides, "nuclide")
+            child.attrib["pid"] = nuclide.pid
+            child.attrib["atomFraction"] = number(nuclide.atomFraction)
+    return element
+
+
 @reads("style", *STYLES)
 def readStyles(element: ET.Element, path: str, report: ConversionReport,
                tally=None) -> Styles:
@@ -88,6 +117,9 @@ def readStyles(element: ET.Element, path: str, report: ConversionReport,
             style.projectileEnergyDomain = readRange(
                 child.find("projectileEnergyDomain")
             )
+            info = child.find("targetInfo")
+            if info is not None:
+                style.targetInfo = readTargetInfo(info)
         document = child.find("documentation")
         if document is not None and (len(document) or document.attrib or (document.text or "").strip()):
             from .documentation import readDocumentation
@@ -144,6 +176,8 @@ def writeStyles(root: ET.Element, styles: Styles, number,
             node.attrib["min"] = number(domain.min)
             node.attrib["max"] = number(domain.max)
             node.attrib["unit"] = domain.unit
+        if documentation and style.targetInfo is not None:
+            writeTargetInfo(element, style.targetInfo, number)
         if documentation and style.documentation is None:
             ET.SubElement(element, "documentation")
     return container

@@ -274,6 +274,14 @@ class _SuiteReader:
             pops.add(self.readParticle(particle))
         for particle in element.iter("baryon"):
             pops.add(self.readParticle(particle))
+        for particle in element.iter("unorthodox"):
+            # A thermal-scattering target (roadmap E4b): mass and charge only.
+            from kika.nuclear_data.model import Unorthodox
+            pops.add(Unorthodox(
+                id=particle.attrib["id"],
+                mass=self.readPhysicalQuantity(particle.find("mass/double")),
+                charge=self.readInteger(particle.find("charge/integer")),
+            ))
         for chemicalElement in element.iter("chemicalElement"):
             Z = int(chemicalElement.attrib["Z"])
             for isotope in chemicalElement.iter("isotope"):
@@ -380,14 +388,8 @@ class _SuiteReader:
         )
         crossSection = element.find("crossSection")
 
-        if element.find("doubleDifferentialCrossSection") is not None:
-            self.unsupported(
-                "doubleDifferentialCrossSection", here,
-                "the model declares the slot and nothing fills it; §14's "
-                "double-differential data is not a §18 law and was never in "
-                "phase 7b's scope, so no phase is scheduled for it"
-            )
-        return Reaction(
+        ddcs = element.find("doubleDifferentialCrossSection")
+        reaction = Reaction(
             id=ReactionId(
                 label=label,
                 products=tuple(p.pid for p in outputChannel.products),
@@ -399,10 +401,18 @@ class _SuiteReader:
                           else self.readCrossSection(crossSection, here)),
             outputChannel=outputChannel,
         )
+        if ddcs is not None:
+            # §14, roadmap E4b: the thermal scattering law. The reaction's
+            # crossSection and its neutron's distribution are links into it.
+            from .thermal_scattering import readDoubleDifferentialCrossSection
+            reaction.doubleDifferentialCrossSection = readDoubleDifferentialCrossSection(
+                ddcs, here, self.resolve, self.report)
+        return reaction
 
     # -- crossSection ------------------------------------------------------
 
-    @reads("crossSectionForm", "resonancesWithBackground", "reference")
+    @reads("crossSectionForm", "resonancesWithBackground", "reference",
+           "thermalNeutronScatteringLaw1d")
     def readCrossSection(self, element: ET.Element, path: str) -> CrossSection:
         """§16.1.1: a mapping from style label to form, which is what it is."""
         here = f"{path}/crossSection"
@@ -415,6 +425,10 @@ class _SuiteReader:
                 form = self.readResonancesWithBackground(child, here)
             elif child.tag == "reference":
                 form = Reference(href=child.attrib.get("href", ""), label=label)
+            elif child.tag == "thermalNeutronScatteringLaw1d":
+                from kika.nuclear_data.model import ThermalNeutronScatteringLaw1d
+                form = ThermalNeutronScatteringLaw1d(
+                    href=child.attrib.get("href", ""), label=label)
             else:
                 form = self.form(child, here, "crossSection")
                 # §7 hangs the uncertainty on the *form*, not on the container,

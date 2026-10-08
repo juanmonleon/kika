@@ -65,6 +65,8 @@ from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      Regions1d, Regions2d,
                                      ResonancesWithBackground, RMatrix,
                                      ShortRangeSelfScalingVariance, Sum,
+                                     ThermalNeutronScatteringLaw,
+                                     ThermalNeutronScatteringLaw1d,
                                      Uncorrelated, Unspecified,
                                      UnspecifiedMultiplicity, XYs1d,
                                      XYs2d, XYs3d)
@@ -539,12 +541,19 @@ class _SuiteWriter:
         _set(element, label=reaction.label,
              ENDF_MT=None if reaction.ENDF_MT is None else str(reaction.ENDF_MT),
              fissionGenre=reaction.id.fissionGenre)
+        # ReactionType's sequence puts doubleDifferentialCrossSection *before*
+        # crossSection (gnds.xsd:888-896).
+        from .thermal_scattering import writeDoubleDifferentialCrossSection
+        writeDoubleDifferentialCrossSection(
+            element, getattr(reaction, "doubleDifferentialCrossSection", None),
+            self.report, f"{reaction.label!r}")
         self.crossSection(element, reaction.crossSection,
                           f"{reaction.label!r}")
         self.outputChannel(element, reaction.outputChannel,
                            f"{reaction.label!r}")
 
-    @writes("crossSectionForm", "resonancesWithBackground", "reference")
+    @writes("crossSectionForm", "resonancesWithBackground", "reference",
+            "thermalNeutronScatteringLaw1d")
     def crossSection(self, parent: ET.Element, crossSection, where: str) -> None:
         element = ET.SubElement(parent, "crossSection")
         for label, form in crossSection.items():
@@ -552,6 +561,9 @@ class _SuiteWriter:
                 self.resonancesWithBackground(element, form, label, where)
             elif isinstance(form, Reference):
                 _set(ET.SubElement(element, "reference"),
+                     label=label, href=form.href)
+            elif isinstance(form, ThermalNeutronScatteringLaw1d):
+                _set(ET.SubElement(element, "thermalNeutronScatteringLaw1d"),
                      label=label, href=form.href)
             else:
                 _function(element, form, self.report,
@@ -733,7 +745,8 @@ class _SuiteWriter:
             else:
                 _function(element, form, self.report, where)
 
-    @writes("distributionForm", "angularTwoBody", "unspecified", "branching3d")
+    @writes("distributionForm", "angularTwoBody", "unspecified", "branching3d",
+            "thermalNeutronScatteringLaw")
     def distribution(self, parent: ET.Element, distribution, where: str) -> None:
         """§18. **An empty ``<distribution/>`` is deliberate and is reported.**
 
@@ -785,6 +798,9 @@ class _SuiteWriter:
             elif isinstance(form, Unspecified):
                 _set(ET.SubElement(element, "unspecified"), label=label,
                      productFrame=str(form.productFrame))
+            elif isinstance(form, ThermalNeutronScatteringLaw):
+                _set(ET.SubElement(element, "thermalNeutronScatteringLaw"),
+                     label=label, href=form.href)
             else:
                 self.report.unsupportedNode(
                     f"{where}: kika's writer has no serialisation for a "

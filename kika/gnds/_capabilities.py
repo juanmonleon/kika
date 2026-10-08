@@ -177,9 +177,13 @@ _IN_BOTH = frozenset("""
 _FAMILIES: Dict[str, Tuple[str, ...]] = {
     "CoulombPlusNuclearElastic": ("crossSectionForm",),
     "KalbachMann": ("distributionForm",),
+    "BraggEdges": ("coherentElasticForm",),
+    "GaussianApproximation": ("scatteringKernelForm",),
     "Legendre": ("function1d",),
     "MadlandNix": ("uncorrelatedEnergyForm",),
     "NBodyPhaseSpace": ("uncorrelatedEnergyForm",),
+    "SCTApproximation": ("scatteringKernelForm",),
+    "S_table": ("coherentElasticForm",),
     "Watt": ("uncorrelatedEnergyForm",),
     "XYs1d": ("function1d",),
     "XYs2d": ("function2d",),
@@ -198,7 +202,9 @@ _FAMILIES: Dict[str, Tuple[str, ...]] = {
     "evaluated": ("style",),
     "evaporation": ("uncorrelatedEnergyForm",),
     "forward": ("uncorrelatedAngularForm",),
+    "freeGasApproximation": ("scatteringKernelForm",),
     "generalEvaporation": ("uncorrelatedEnergyForm",),
+    "gridded3d": ("scatteringKernelForm",),
     "heated": ("style",),
     "isotropic2d": ("angularTwoBodyForm", "uncorrelatedAngularForm"),
     "mixed": ("covarianceForm",),
@@ -213,7 +219,11 @@ _FAMILIES: Dict[str, Tuple[str, ...]] = {
     "shortRangeSelfScalingVariance": ("covarianceForm",),
     "simpleMaxwellianFission": ("uncorrelatedEnergyForm",),
     "sum": ("covarianceForm",),
+    "thermalNeutronScatteringLaw": ("distributionForm",),
     "thermalNeutronScatteringLaw1d": ("crossSectionForm",),
+    "thermalNeutronScatteringLaw_coherentElastic": ("doubleDifferentialForm",),
+    "thermalNeutronScatteringLaw_incoherentElastic": ("doubleDifferentialForm",),
+    "thermalNeutronScatteringLaw_incoherentInelastic": ("doubleDifferentialForm",),
     "uncorrelated": ("distributionForm",),
     "unspecified": ("distributionForm", "multiplicityForm"),
     "weightedFunctionals": ("uncorrelatedEnergyForm",),
@@ -516,8 +526,7 @@ _group("census0Forms", Coverage.UNSUPPORTED, 'distribution',
        "guinea pig in test_nodes.py",
        """
        forward CoulombPlusNuclearElastic coherentPhotonScattering
-       incoherentPhotonScattering thermalNeutronScatteringLaw
-       thermalNeutronScatteringLaw1d
+       incoherentPhotonScattering
        """)
 
 _group("doubleDifferential", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSection',
@@ -526,29 +535,49 @@ _group("doubleDifferential", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSecti
        "scope, so no phase is scheduled and the reader says so rather "
        "than naming one",
        """
-       doubleDifferentialCrossSection RutherfordScattering
+       RutherfordScattering
        nuclearAmplitudeExpansion nuclearPlusInterference nuclearTerm
        realInterferenceTerm imaginaryInterferenceTerm formFactor
        realAnomalousFactor imaginaryAnomalousFactor scatteringFactor
        """)
 
-_group("thermalScattering", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSection',
-       "the thermal neutron scattering law (gnds.xsd:1346 onwards), "
-       "reachable only under doubleDifferentialCrossSection. TSL "
-       "evaluations reach kika through kika/endf/classes/mf7 and not "
-       "through here, which is what nodes.py:243-246 says of the §16.1.1 "
-       "form. Worth stating plainly: GNDS 2.1's own stated focus over "
-       "2.0 is this chapter, and it is the chapter kika does not read",
+_group("doubleDifferentialContainer", Coverage.PARTIAL, None,
+       "§14's container (gnds.xsd:1087-1096). Read and written since "
+       "roadmap E4b for the three thermal-scattering forms "
+       "(kika/gnds/thermal_scattering.py); the photon and Coulomb forms "
+       "under it are reported by name and not read",
+       """
+       doubleDifferentialCrossSection
+       """)
+
+_group("thermalScattering", Coverage.FULL, None,
+       "the thermal neutron scattering law (gnds.xsd:1182-1283), read and "
+       "written since roadmap E4b (kika/gnds/thermal_scattering.py) with "
+       "FUDGE's names, child order and units, and the reaction's two links "
+       "to it. ENDF MF7 reaches the same model (E4a). Checked both ways "
+       "against FUDGE: it reads what kika writes and kika reads what it "
+       "writes (test_fudge_in_the_loop.py)",
        """
        thermalNeutronScatteringLaw_coherentElastic
        thermalNeutronScatteringLaw_incoherentElastic
        thermalNeutronScatteringLaw_incoherentInelastic S_table
-       BraggEdges BraggEdge BraggEnergy structureFactor
        boundAtomCrossSection boundAtomCrossSectionByNuclide
        DebyeWallerIntegral scatteringAtoms scatteringAtom e_critical
        e_max coherentAtomCrossSection distinctScatteringKernel
        selfScatteringKernel T_effective gridded3d GaussianApproximation
        SCTApproximation freeGasApproximation phononSpectrum
+       thermalNeutronScatteringLaw thermalNeutronScatteringLaw1d
+       """)
+
+_group("braggEdges", Coverage.UNSUPPORTED,
+       'thermalNeutronScatteringLaw_coherentElastic',
+       "the schema's alternative to S_table (gnds.xsd:1200-1211). No ENDF "
+       "counterpart, and FUDGE neither reads nor writes it "
+       "(FUDGE's coherentElastic reader parses element[0] as S_table); "
+       "kika/gnds/thermal_scattering.py reports a coherentElastic that "
+       "holds one",
+       """
+       BraggEdges BraggEdge BraggEnergy structureFactor
        """)
 
 _group("fissionFragmentData", Coverage.FULL, None,
@@ -616,12 +645,20 @@ _group("popsAtomic", Coverage.UNSUPPORTED, None,
        """)
 
 _group("popsOther", Coverage.UNSUPPORTED, None,
-       "the reader iterates gaugeBoson and baryon only "
+       "the reader iterates gaugeBoson, baryon and unorthodox only "
        "(gnds.xsd:486-489) and no distributed neutron evaluation carries "
-       "a lepton or an unorthodox particle, so the branch is never "
-       "entered and nothing reports it",
+       "a lepton, so the branch is never entered and nothing reports it",
        """
-       leptons lepton unorthodoxes unorthodox
+       leptons lepton
+       """)
+
+_group("popsUnorthodox", Coverage.FULL, None,
+       "a thermal-scattering target (roadmap E4b): read into "
+       "model.pops.Unorthodox and written back with its mass and charge, "
+       "the only children PoPs_UnorthodoxType (gnds.xsd:506-513) has "
+       "besides decayData, which is its own row",
+       """
+       unorthodoxes unorthodox
        """)
 
 _group("physicalQuantityUncertainty", Coverage.UNSUPPORTED, None,
@@ -632,14 +669,11 @@ _group("physicalQuantityUncertainty", Coverage.UNSUPPORTED, None,
        confidenceIntervals interval standard
        """)
 
-_group("targetInfo", Coverage.UNSUPPORTED, None,
-       "**the one silent drop under a node kika reads.** "
-       "RS_EvaluatedType (gnds.xsd:96-108) hangs targetInfo off "
-       "<evaluated>; kika/gnds/styles.py takes temperature, "
-       "projectileEnergyDomain and documentation and never looks at the "
-       "rest. It is minOccurs=0, so what kika writes stays valid -- this "
-       "is a read loss, and it is the entry in this group that ought to "
-       "shrink",
+_group("targetInfo", Coverage.FULL, None,
+       "RS_EvaluatedType's optional child (gnds.xsd:96-108, TargetInfoType "
+       "at 264-295): the target's isotopes and atom fractions, read into "
+       "Evaluated.targetInfo and written back by kika/gnds/styles.py since "
+       "roadmap E4b. ENDF MF7/MT451 fills it",
        """
        targetInfo isotopicAbundances
        """)

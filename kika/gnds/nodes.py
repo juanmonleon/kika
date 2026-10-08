@@ -77,6 +77,11 @@ from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      ResonancesWithBackground,
                                      ShortRangeSelfScalingVariance, Sum,
                                      ThermalNeutronScatteringLaw1d,
+                                     ThermalNeutronScatteringLaw,
+                                     CoherentElastic, IncoherentElastic,
+                                     IncoherentInelastic, Gridded3d,
+                                     SCTApproximation, FreeGasApproximation,
+                                     GaussianApproximation,
                                      URR_probabilityTables,
                                      URR_probabilityTables1d, Uncorrelated,
                                      Unspecified, UnspecifiedMultiplicity,
@@ -150,11 +155,13 @@ def _spec(*args, **kwargs) -> Tuple[Tuple[str, str], NodeSpec]:
 #: sentence anyway.
 #:
 #: ``gnds.xsd:1647-1662`` gives §18.1.1's choice twelve members and kika names
-#: **seven** below. The five it does not — ``reference``,
+#: **eight** below. The four it does not — ``reference``,
 #: ``CoulombPlusNuclearElastic``, ``coherentPhotonScattering``,
-#: ``incoherentPhotonScattering``, ``thermalNeutronScatteringLaw`` — occur
-#: **zero times** across the 558 neutron evaluations the census walked, which is
-#: why they are not entries and why one of them is now the import-time ratchet's
+#: ``incoherentPhotonScattering`` — occur **zero times** across the 558 neutron
+#: evaluations the census walked, which is why they are not entries. The fifth,
+#: ``thermalNeutronScatteringLaw``, is zero there too -- TSL evaluations are a
+#: sublibrary of their own -- and became an entry with roadmap E4b, which reads
+#: and writes the TSL forms it links to and why one of them is now the import-time ratchet's
 #: guinea pig (see :func:`reads` and its test). ``branching3d`` held that job
 #: until §18.1.1 was finished and it became a real entry.
 
@@ -244,9 +251,7 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
           "modelled; §16.1.1 admits it for charged-particle elastic, and it is "
           "absent from every neutron evaluation kika reads"),
     _spec("thermalNeutronScatteringLaw1d", "crossSectionForm", "§16.1.1",
-          ThermalNeutronScatteringLaw1d, Status.NEITHER,
-          "modelled; §16.1.1 admits it, and TSL evaluations reach kika through "
-          "kika/endf/classes/mf7, not here"),
+          ThermalNeutronScatteringLaw1d, Status.PAIRED),
     _spec("URR_probabilityTables1d", "crossSectionForm", "§16.1.1",
           URR_probabilityTables1d, Status.NEITHER,
           "modelled, and **produced live** by "
@@ -280,6 +285,36 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
           Status.PAIRED),
     _spec("branching3d", "distributionForm", "§18.1.1", Branching3d,
           Status.PAIRED),
+    #    The product-side link of a TSL reaction (gnds.xsd:1511, XLinkType),
+    #    read and written since roadmap E4b with the law it points at.
+    _spec("thermalNeutronScatteringLaw", "distributionForm", "§18.1.1",
+          ThermalNeutronScatteringLaw, Status.PAIRED),
+
+    # -- §14 doubleDifferentialCrossSection forms. gnds.xsd:1087-1096, an
+    #    xs:choice. The three thermal-scattering forms (roadmap E4b); the
+    #    photon and Coulomb members have no ENDF neutron counterpart kika
+    #    decodes and are not entries, like the census-zero §18 members.
+    _spec("thermalNeutronScatteringLaw_coherentElastic", "doubleDifferentialForm",
+          "§14", CoherentElastic, Status.PAIRED),
+    _spec("thermalNeutronScatteringLaw_incoherentElastic", "doubleDifferentialForm",
+          "§14", IncoherentElastic, Status.PAIRED),
+    _spec("thermalNeutronScatteringLaw_incoherentInelastic", "doubleDifferentialForm",
+          "§14", IncoherentInelastic, Status.PAIRED),
+    #    coherentElastic's own choice (gnds.xsd:1184): S_table or BraggEdges.
+    _spec("S_table", "coherentElasticForm", "§14", None, Status.PAIRED,
+          "a wrapper around the gridded2d CoherentElastic.S_table holds"),
+    _spec("BraggEdges", "coherentElasticForm", "§14", None, Status.NEITHER,
+          "gnds.xsd:1207; no ENDF counterpart, and FUDGE neither reads nor "
+          "writes it (FUDGE's coherentElastic reader takes element[0] as S_table). "
+          "kika/gnds/thermal_scattering.py reports it by name"),
+    #    selfScatteringKernel's choice (gnds.xsd:1258).
+    _spec("gridded3d", "scatteringKernelForm", "§14", Gridded3d, Status.PAIRED),
+    _spec("SCTApproximation", "scatteringKernelForm", "§14", SCTApproximation,
+          Status.PAIRED),
+    _spec("freeGasApproximation", "scatteringKernelForm", "§14",
+          FreeGasApproximation, Status.PAIRED),
+    _spec("GaussianApproximation", "scatteringKernelForm", "§14",
+          GaussianApproximation, Status.PAIRED),
 
     # -- §18.2's angularTwoBody forms. gnds.xsd:1665, an xs:choice.
     #    XYs2d and regions2d delegate to the functional family.
@@ -530,6 +565,7 @@ def check() -> Tuple[str, ...]:
     import kika.gnds.encode       # noqa: F401  - registers the writer's side
     import kika.gnds.primitives   # noqa: F401  - registers the functionals
     import kika.gnds.styles       # noqa: F401  - registers §9
+    import kika.gnds.thermal_scattering  # noqa: F401  - registers §14's TSL
 
     problems = []
     for key, spec in NODES.items():

@@ -1,8 +1,8 @@
 """Serialize the same modeled PoPs fields at suite and formalism scope."""
 import xml.etree.ElementTree as ET
 from typing import Dict, List
-from kika.nuclear_data.model import Nuclide, ConversionReport
-from kika._constants import ATOMIC_NUMBER_TO_SYMBOL
+from kika.nuclear_data.model import Nuclide, ConversionReport, Unorthodox
+from kika._constants import ATOMIC_NUMBER_TO_NAME, ATOMIC_NUMBER_TO_SYMBOL
 from .primitives import formatFraction
 
 
@@ -25,8 +25,10 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
          version=pops.version or "1.0", format="2.0")
     nuclides = [p for p in pops.particles.values()
                 if isinstance(p, Nuclide)]
+    unorthodoxes = [p for p in pops.particles.values()
+                    if isinstance(p, Unorthodox)]
     others = [p for p in pops.particles.values()
-              if not isinstance(p, Nuclide)]
+              if not isinstance(p, (Nuclide, Unorthodox))]
 
     for particle in others:
         wrapper = ("gaugeBosons" if particle.id == "photon" else "baryons")
@@ -48,7 +50,9 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
         for Z in sorted(k for k in byZ if k is not None):
             chemical = ET.SubElement(elements, "chemicalElement")
             symbol = ATOMIC_NUMBER_TO_SYMBOL[Z]
-            _set(chemical, symbol=symbol, Z=str(Z), name=symbol)
+            # `name` is the element's name: FUDGE refuses a file whose name and Z
+            # disagree, and the symbol written here before was such a file.
+            _set(chemical, symbol=symbol, Z=str(Z), name=ATOMIC_NUMBER_TO_NAME[Z])
             isotopes = ET.SubElement(chemical, "isotopes")
             byA: Dict[int, List[Nuclide]] = {}
             for nuclide in byZ[Z]:
@@ -61,6 +65,21 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
                     node = ET.SubElement(holder, "nuclide")
                     node.attrib["id"] = nuclide.id
                     _nuclideProperties(node, nuclide)
+
+    if unorthodoxes:
+        # A thermal-scattering target (roadmap E4b). PoPs_UnorthodoxType admits
+        # mass, charge and decayData only, so nothing else is written.
+        group = ET.SubElement(container, "unorthodoxes")
+        for particle in unorthodoxes:
+            node = ET.SubElement(group, "unorthodox")
+            node.attrib["id"] = particle.id
+            if particle.mass is not None:
+                _set(ET.SubElement(ET.SubElement(node, "mass"), "double"),
+                     label="eval", value=_number(particle.mass.value),
+                     unit=particle.mass.unit)
+            if particle.charge is not None:
+                _set(ET.SubElement(ET.SubElement(node, "charge"), "integer"),
+                     label="eval", value=str(particle.charge), unit="e")
 
     if len(pops):
         report.warn("PoPs serialization covers all represented particle fields; "

@@ -298,3 +298,98 @@ def test_the_one_tsl_difference_is_a_repeated_point_kika_keeps(fudgePython):
     assert list(xs) == [22.0, 22.0]
     fudge = _runFudge(fudgePython, tape, _TSL["sch4"])["tsl"]
     assert next(e for e in fudge if e["kind"] == "incoherentElastic")["temperatures"] == [22.0]
+
+
+# ----------------------------------------------------------------------
+# The thermal scattering law through GNDS (roadmap E4b), both ways
+# ----------------------------------------------------------------------
+
+@pytest.fixture(scope="module", params=sorted(_TSL))
+def tslGnds(request, fudgePython, tmp_path_factory):
+    """kika's ENDF decode, FUDGE's reading of the tape, FUDGE's reading of the
+    GNDS kika wrote from it, and kika's reading of the GNDS FUDGE wrote."""
+    import kika
+
+    key = request.param
+    tape = _DATA / f"micro_tsl_{key}.endf"
+    suite, _ = decodeReactionSuite(read_endf(str(tape)))
+    fromEndf = _runFudge(fudgePython, tape, _TSL[key])
+    folder = tmp_path_factory.mktemp(f"tsl_{key}")
+    ours = folder / "kika.xml"
+    kika.write(suite, ours)
+    fromKika = _runFudge(fudgePython, ours, "suite.xml")
+    theirs = folder / "fudge.xml"
+    theirs.write_text(fromEndf["gnds"])
+    return suite, fromEndf["tsl"], fromKika["tsl"], kika.read(theirs, covariances=False)
+
+
+def _assertSameDump(ours, theirs, path="tsl"):
+    if isinstance(ours, dict):
+        assert set(ours) == set(theirs), path
+        for key in ours:
+            _assertSameDump(ours[key], theirs[key], f"{path}.{key}")
+    elif isinstance(ours, list) and ours and isinstance(ours[0], dict):
+        assert len(ours) == len(theirs), path
+        for index, (a, b) in enumerate(zip(ours, theirs)):
+            _assertSameDump(a, b, f"{path}[{index}]")
+    elif isinstance(ours, list):
+        np.testing.assert_allclose(ours, theirs, rtol=RTOL, atol=0, err_msg=path)
+    elif isinstance(ours, float):
+        # Masses are in amu through each side's own neutron mass (see MASS_RTOL).
+        rel = MASS_RTOL if path.endswith(".mass") else RTOL
+        assert ours == pytest.approx(theirs, rel=rel), path
+    else:
+        assert ours == theirs, path
+
+
+def test_fudge_reads_the_tsl_gnds_kika_writes(tslGnds):
+    """FUDGE opens kika's file and finds what it finds in the ENDF tape."""
+    _, fromEndf, fromKika, _ = tslGnds
+    _assertSameDump(fromEndf, fromKika)
+
+
+def test_kika_reads_the_tsl_gnds_fudge_writes(tslGnds):
+    """kika opens FUDGE's file and finds what it decodes from the ENDF tape.
+
+    The scatterers' pids and the target's id differ by design (FUDGE names
+    them from the file name, kika from MF7/MT451 and ZSYMAM), so the
+    comparison is of the physics: forms, grids, tables, scalars.
+    """
+    from kika.nuclear_data.model import (EVAL_LABEL, CoherentElastic, IncoherentElastic,
+                                         IncoherentInelastic)
+
+    suite, _, _, theirs = tslGnds
+    assert str(theirs.interaction) == "thermalNeutronScatteringLaw"
+    assert len(theirs.reactions) == len(suite.reactions)
+    for mine, other in zip(suite.reactions, theirs.reactions):
+        a = mine.doubleDifferentialCrossSection[EVAL_LABEL]
+        b = other.doubleDifferentialCrossSection[EVAL_LABEL]
+        assert type(a) is type(b)
+        if isinstance(a, CoherentElastic):
+            for ga, gb in zip(a.S_table.grids, b.S_table.grids):
+                np.testing.assert_allclose(ga.values, gb.values, rtol=RTOL)
+                assert str(ga.interpolation) == str(gb.interpolation)
+            np.testing.assert_allclose(a.S_table.values, b.S_table.values, rtol=RTOL)
+        elif isinstance(a, IncoherentElastic):
+            assert a.boundAtomCrossSection.value == pytest.approx(
+                b.boundAtomCrossSection.value, rel=RTOL)
+            xa, ya = _collapse(*a.DebyeWallerIntegral.toEndfRegions()[:2])
+            xb, yb, _ = b.DebyeWallerIntegral.toEndfRegions()
+            np.testing.assert_allclose(xa, xb, rtol=RTOL)
+            np.testing.assert_allclose(ya, yb, rtol=RTOL)
+        elif isinstance(a, IncoherentInelastic):
+            assert a.calculatedAtThermal == b.calculatedAtThermal
+            assert len(a.scatteringAtoms) == len(b.scatteringAtoms)
+            for x, y in zip(a.scatteringAtoms, b.scatteringAtoms):
+                assert x.numberPerMolecule == y.numberPerMolecule
+                assert x.primaryScatterer == y.primaryScatterer
+                assert x.mass.value == pytest.approx(y.mass.value, rel=MASS_RTOL)
+                assert x.boundAtomCrossSection.value == pytest.approx(
+                    y.boundAtomCrossSection.value, rel=MASS_RTOL)
+                assert x.e_max.value == pytest.approx(y.e_max.value, rel=RTOL)
+                assert type(x.selfScatteringKernel.kernel) is type(y.selfScatteringKernel.kernel)
+            ka = a.principal.selfScatteringKernel.kernel
+            kb = b.principal.selfScatteringKernel.kernel
+            for ga, gb in zip(ka.grids, kb.grids):
+                np.testing.assert_allclose(ga.values, gb.values, rtol=RTOL)
+            np.testing.assert_allclose(ka.values, kb.values, rtol=RTOL)

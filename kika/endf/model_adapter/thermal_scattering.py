@@ -43,8 +43,16 @@ temperature's LI, and the padding dialect -- travels in each reaction's
 provenance under :data:`MF7_KEY`. The encoder rebuilds the flat sections from
 the model and takes from the provenance only what the model does not hold. A
 scalar the model still holds unchanged is written with the digits it was read
-with. MF7/MT451, the composition, has no model node in E4a and goes back out
-verbatim from the suite's provenance (:data:`MF7MT451_KEY`).
+with. MF7/MT451, the composition, is stated in the model since E4b (the
+evaluated style's ``targetInfo``, PoPs nuclides, and the principal atom's
+``boundAtomCrossSectionByNuclide``, as FUDGE maps it) and still goes back out
+verbatim from the suite's provenance (:data:`MF7MT451_KEY`) when it is there;
+without it the section is rebuilt from the model by FUDGE's rule.
+
+**The target** (E4b) is the ``unorthodox`` particle ``tnsl-<ZSYMAM>`` with
+MF1's AWR as its mass, in place of the pseudo-ZA nuclide MF1/451 names, and
+each reaction has Q = 0 and a neutron multiplicity of 1 over the evaluation's
+domain (1e-5 eV to EMAX): the nodes GNDS requires and FUDGE writes.
 """
 from __future__ import annotations
 
@@ -59,8 +67,11 @@ from kika.nuclear_data.model import (
     FreeGasApproximation, Gridded2d, Gridded3d, IncoherentElastic,
     IncoherentInelastic, PhysicalQuantity, Reaction, Regions1d, ScatteringAtom,
     SCTApproximation, SelfScatteringKernel, ThermalNeutronScatteringLaw,
-    ThermalNeutronScatteringLaw1d, XYs1d, pidFromZA,
+    TargetInfo, TargetInfoElement, TargetInfoNuclide, ThermalNeutronScatteringLaw1d,
+    Unorthodox, XYs1d, pidFromZA,
 )
+from kika._constants import ATOMIC_NUMBER_TO_SYMBOL
+from kika.nuclear_data.model import Evaluated, Nuclide
 from kika.nuclear_data.model.axes import Grid
 from kika.nuclear_data.model.enums import (ENDF_INT_TO_INTERPOLATION,
                                            INTERPOLATION_TO_ENDF_INT, GridStyle)
@@ -161,6 +172,94 @@ def _decodeIncoherentElastic(incoherent):
         boundAtomCrossSection=PhysicalQuantity(float(incoherent.sb), "b"),
         DebyeWallerIntegral=dw, label=EVAL_LABEL)
     return form, {"interp": [tuple(p) for p in incoherent.interp]}
+
+
+# ---------------------------------------------------------------------------
+# The target and its composition (MF1/451's pseudo-ZA, MF7/MT451)
+# ---------------------------------------------------------------------------
+
+def _tslTarget(suite) -> None:
+    """Make the suite's target the ``unorthodox`` particle a TSL evaluation is.
+
+    MF1/451 gives a TSL tape a pseudo-ZA (MAT + 100: ``134`` for s-CH4), which
+    the header decoder turned into a nuclide ``ZA134`` with no element. The
+    scatterer is a molecule or a lattice, not a nuclide, and GNDS -- like
+    FUDGE -- states it as ``unorthodox`` with MF1's AWR as its mass. Its id is
+    ``tnsl-`` and the evaluation's ZSYMAM, the tape's own name for the
+    material. FUDGE takes the name from the *file* name instead; a file name is
+    not part of the evaluation and kika does not read meaning into it.
+    """
+    old = suite.target
+    particle = suite.PoPs.particles.pop(old, None) if old in suite.PoPs else None
+    name = "_".join((suite.evaluation or "").split()) or old or "unknown"
+    pid = f"tnsl-{name}"
+    suite.PoPs.add(Unorthodox(id=pid, mass=getattr(particle, "mass", None)))
+    suite.target = pid
+
+
+def _evaluatedStyle(suite) -> Optional[Evaluated]:
+    return next((s for s in suite.styles if isinstance(s, Evaluated)), None)
+
+
+def _tslDomain(suite, report: ConversionReport):
+    """The evaluated style's ``projectileEnergyDomain``: 1e-5 eV to MF1's EMAX.
+
+    The schema requires it on ``evaluated`` and the TSL forms' Q and
+    multiplicity need it. FUDGE builds it the same way, and also replaces an
+    EMAX above 5 eV with 5 eV; kika keeps what the tape says.
+    """
+    from kika.nuclear_data.model import RangeQuantity
+
+    style = _evaluatedStyle(suite)
+    if style is None:
+        return None
+    if style.projectileEnergyDomain is not None:
+        return style.projectileEnergyDomain
+    header = getattr(getattr(suite, "provenance", None), "headerFields", None) or {}
+    emax = header.get("emax")
+    if not emax or float(emax) <= 1e-5:
+        report.lost("MF1/451 states no usable EMAX, so the TSL evaluation has no "
+                    "projectileEnergyDomain and its Q and multiplicity are left unset")
+        return None
+    style.projectileEnergyDomain = RangeQuantity(min=1e-5, max=float(emax), unit="eV")
+    return style.projectileEnergyDomain
+
+
+def _decodeComposition(suite, composition, report: ConversionReport) -> dict:
+    """MF7/MT451 → ``targetInfo``, PoPs nuclides, and bound σ per nuclide.
+
+    FUDGE's mapping (``ENDF_ITYPE_2.readMF7_info``): each isotope becomes a PoPs
+    nuclide with mass AWRI x m_n and a ``targetInfo`` nuclide with its atom
+    fraction AFI; its free cross section SFI becomes a bound one,
+    SFI·((A+1)/A)², returned keyed by pid for the principal scattering atom's
+    ``boundAtomCrossSectionByNuclide``. NAS is not modelled (it is
+    ``numberPerMolecule`` where it is right, and it is not always right); the
+    section itself still travels verbatim in the suite's provenance.
+    """
+    byNuclide = {}
+    elements = []
+    for element in composition:
+        nuclides = []
+        symbol = None
+        for isotope in element.isotopes:
+            pid = pidFromZA(int(isotope.zai), int(isotope.lis or 0))
+            if pid not in suite.PoPs:
+                suite.PoPs.add(Nuclide(
+                    id=pid, Z=isotope.z, A=isotope.a,
+                    mass=PhysicalQuantity(isotope.awr * NEUTRON_MASS_AMU, "amu")
+                    if isotope.awr else None))
+            if isotope.awr:
+                byNuclide[pid] = PhysicalQuantity(
+                    _boundFromFree(isotope.sigma_free, isotope.awr), "b")
+            nuclides.append(TargetInfoNuclide(pid=pid, atomFraction=float(isotope.atom_fraction)))
+            symbol = symbol or ATOMIC_NUMBER_TO_SYMBOL.get(isotope.z)
+        elements.append(TargetInfoElement(symbol=symbol or "", nuclides=nuclides))
+    style = _evaluatedStyle(suite)
+    if style is not None:
+        style.targetInfo = TargetInfo(chemicalElements=elements)
+    else:
+        report.lost("MF7/MT451: the suite has no evaluated style to hang targetInfo on")
+    return byNuclide
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +423,16 @@ def _mt4Scalars(b: List[float], ns: int) -> list:
 # The suite
 # ---------------------------------------------------------------------------
 
-def _reaction(form, mt: int, provenance) -> Reaction:
+def _reaction(form, mt: int, provenance, domain=None) -> Reaction:
+    """One TSL reaction, built the way FUDGE builds it (``ENDF_ITYPE_2``).
+
+    Q is 0 and the neutron's multiplicity is 1, both over the evaluation's
+    domain: a bound scatterer exchanges energy with the material, it does not
+    change any rest mass, and the neutron comes out. These are the two §17
+    nodes the schema requires and ENDF states nowhere because they cannot be
+    anything else. Without a domain they are left unset and the GNDS writer
+    reports the empty nodes.
+    """
     label = _LABELS[type(form)]
     reaction = Reaction(id=ReactionId(label=label, ENDF_MT=mt), provenance=provenance)
     reaction.doubleDifferentialCrossSection = DoubleDifferentialCrossSection()
@@ -335,7 +443,14 @@ def _reaction(form, mt: int, provenance) -> Reaction:
     channel.genre = "twoBody"
     channel.process = TNSL_PROCESSES[type(form)]
     product = channel.ensureProduct("n", label="n")
-    from kika.nuclear_data.model import Distribution
+    from kika.nuclear_data.model import Constant1d, Distribution, Multiplicity, Q
+    from kika.nuclear_data.model.axes import multiplicityAxes
+    if domain is not None:
+        low, high = float(domain.min), float(domain.max)
+        channel.Q = Q(value=0.0, unit="eV", label=EVAL_LABEL, domainMin=low, domainMax=high)
+        product.multiplicity = Multiplicity(form=Constant1d(
+            constant=1.0, domainMin_=low, domainMax_=high, axes=multiplicityAxes(),
+            label=EVAL_LABEL))
     product.distribution = Distribution()
     product.distribution[EVAL_LABEL] = ThermalNeutronScatteringLaw(href=href, label=EVAL_LABEL)
     return reaction
@@ -363,15 +478,19 @@ def attachThermalScattering(suite, endf, report: ConversionReport) -> Conversion
     sections = getattr(mf7, "mt", {}) if mf7 is not None else {}
     suite.interaction = TNSL_INTERACTION
 
+    _tslTarget(suite)
+    domain = _tslDomain(suite, report)
+
     composition = []
+    byNuclide = {}
     mt451 = sections.get(451)
     if mt451 is not None:
         composition = list(mt451.elements)
         if suite.provenance is not None:
+            # The model states the composition (targetInfo); the text is kept
+            # too, because NAS and the digits of SFI are ENDF's alone.
             suite.provenance.headerFields[MF7MT451_KEY] = str(mt451).split("\n")[:-1]
-        report.approximated(
-            "MF7/MT451 (the scatterer's composition) has no model node yet; it is "
-            "kept verbatim and written back as it was read (GNDS targetInfo is E4b)")
+        byNuclide = _decodeComposition(suite, composition, report)
 
     try:
         from kika.endf.classes.mf7.scatterer import thermal_scatterer
@@ -383,16 +502,17 @@ def attachThermalScattering(suite, endf, report: ConversionReport) -> Conversion
     if mt2 is not None:
         if mt2.coherent is not None:
             form, book = _decodeCoherent(mt2.coherent, report)
-            suite.reactions.append(_reaction(form, 2, _provenance(mt2, {"part": "coherent", **book})))
+            suite.reactions.append(_reaction(form, 2, _provenance(mt2, {"part": "coherent", **book}), domain))
         if mt2.incoherent is not None:
             form, book = _decodeIncoherentElastic(mt2.incoherent)
-            suite.reactions.append(_reaction(form, 2, _provenance(mt2, {"part": "incoherent", **book})))
+            suite.reactions.append(_reaction(form, 2, _provenance(mt2, {"part": "incoherent", **book}), domain))
 
     mt4 = sections.get(4)
     if mt4 is not None:
         form, book = _decodeMT4(mt4, composition, principalName, report)
         if form is not None:
-            suite.reactions.append(_reaction(form, 4, _provenance(mt4, book)))
+            form.principal.boundAtomCrossSectionByNuclide = dict(byNuclide)
+            suite.reactions.append(_reaction(form, 4, _provenance(mt4, book), domain))
     return report
 
 
@@ -533,6 +653,62 @@ def _encodeMT4(form: IncoherentInelastic, book: dict, provenance, mat, report):
     return section
 
 
+def _encodeMT451(suite, inelastic, anchor, mat, report: ConversionReport):
+    """MF7/MT451 from ``targetInfo``, when no source text was kept -- FUDGE's rule.
+
+    (``toENDF6/.../thermalNeutronScatteringLaw.py``.) ZAI from the PoPs nuclide,
+    AWRI from its mass, AFI from ``targetInfo``, SFI from the principal atom's
+    ``boundAtomCrossSectionByNuclide`` taken back to free, and NAS from the
+    ``numberPerMolecule`` of the scattering atom of that element (1 if none).
+    """
+    from kika.endf.classes.mf7.composition import (MF7MT451, ElementComposition,
+                                                   TSLIsotope)
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    style = _evaluatedStyle(suite)
+    info = getattr(style, "targetInfo", None)
+    if info is None or not info.chemicalElements:
+        return None
+    provenance = anchor[2] if anchor is not None else None
+    if provenance is None or provenance.za is None or provenance.awr is None:
+        report.lost("MF7/MT451: targetInfo is stated but the MF7 header (ZA, AWR) is "
+                    "not known, so the section is not written")
+        return None
+    principal = inelastic[0].principal if inelastic is not None else None
+    bound = principal.boundAtomCrossSectionByNuclide if principal is not None else {}
+    perMolecule = {}
+    for atom in (inelastic[0].scatteringAtoms if inelastic is not None else []):
+        particle = suite.PoPs.particles.get(atom.pid)
+        z = getattr(particle, "Z", None)
+        if z is not None:
+            perMolecule[ATOMIC_NUMBER_TO_SYMBOL.get(z)] = atom.numberPerMolecule
+    elements = []
+    for element in info.chemicalElements:
+        isotopes = []
+        for nuclide in element.nuclides:
+            particle = suite.PoPs.particles.get(nuclide.pid)
+            if particle is None or particle.mass is None:
+                report.lost(f"MF7/MT451: {nuclide.pid} has no PoPs mass, so the "
+                            f"section is not written")
+                return None
+            awri = particle.mass.convertedTo("amu").value / NEUTRON_MASS_AMU
+            sigma = bound.get(nuclide.pid)
+            if sigma is None:
+                report.lost(f"MF7/MT451: no bound cross section for {nuclide.pid}, so "
+                            f"the section is not written")
+                return None
+            isotopes.append(TSLIsotope(zai=zaFromPid(nuclide.pid),
+                                       lis=int(getattr(particle, "nuclearLevel", 0) or 0),
+                                       atom_fraction=nuclide.atomFraction, awr=awri,
+                                       sigma_free=_freeFromBound(sigma.value, awri)))
+        elements.append(ElementComposition(nas=perMolecule.get(element.symbol, 1),
+                                           isotopes=isotopes))
+    report.approximated("MF7/MT451 is written from targetInfo (no source text was kept); "
+                        "NAS comes from numberPerMolecule")
+    return MF7MT451(number=451, _za=provenance.za, _awr=provenance.awr,
+                    _mat=mat if mat is not None else provenance.mat, elements=elements)
+
+
 def encodeMF7Sections(suite, mat: Optional[int], report: ConversionReport):
     """``[(7, MT, section), ...]`` for a TSL suite, and the report.
 
@@ -569,6 +745,11 @@ def encodeMF7Sections(suite, mat: Optional[int], report: ConversionReport):
         if mat is not None:
             section451._mat = int(mat)
         sections.append((7, 451, section451))
+    else:
+        section451 = _encodeMT451(suite, inelastic, coherent or incoherent or inelastic,
+                                  mat, report)
+        if section451 is not None:
+            sections.append((7, 451, section451))
 
     if coherent is not None or incoherent is not None:
         anchor = coherent or incoherent

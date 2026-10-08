@@ -18,7 +18,7 @@ from ..._constants import ATOMIC_NUMBER_TO_SYMBOL, SYMBOL_TO_ATOMIC_NUMBER
 from .quantities import PhysicalQuantity
 from .units import check_mass_unit
 
-__all__ = ["Particle", "Nuclide", "PoPs", "pidFromZA", "zaFromPid"]
+__all__ = ["Particle", "Nuclide", "Unorthodox", "PoPs", "pidFromZA", "zaFromPid"]
 
 
 @dataclass
@@ -61,6 +61,20 @@ class Nuclide(Particle):
         if self.Z is None or self.A is None:
             return None
         return 1000 * self.Z + self.A
+
+
+@dataclass
+class Unorthodox(Particle):
+    """§12 ``unorthodox``: a particle that is none of the others.
+
+    The target of a thermal-scattering evaluation is one: a molecule or a
+    lattice, named by the evaluation, whose mass is MF1/451's AWR and which has
+    no Z/A pair (ENDF writes a pseudo-ZA, MAT + 100). FUDGE gives it the same
+    node. The schema admits only ``mass``, ``charge`` and ``decayData`` on it,
+    so the spin, parity and halflife the base class carries are never written.
+    """
+
+    gndsNodeName = "unorthodox"
 
 
 @dataclass

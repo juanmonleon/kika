@@ -16,6 +16,33 @@ ATOMIC_NUMBER_TO_SYMBOL = {
 # Reverse mapping: element symbol to atomic number
 SYMBOL_TO_ATOMIC_NUMBER = {v: k for k, v in ATOMIC_NUMBER_TO_SYMBOL.items()}
 
+#: Z -> the element's name as GNDS PoPs writes it (``chemicalElement/@name``).
+#: FUDGE's own list (``PoPs/chemicalElements/misc.py``, first spelling), which
+#: is also what FUDGE checks a file against: it refuses a ``name`` that is not
+#: the element's ("Z = 7 and chemical element name = N are not consistent").
+ATOMIC_NUMBER_TO_NAME = {
+    1: "Hydrogen", 2: "Helium", 3: "Lithium", 4: "Beryllium", 5: "Boron", 6: "Carbon",
+    7: "Nitrogen", 8: "Oxygen", 9: "Fluorine", 10: "Neon", 11: "Sodium", 12: "Magnesium",
+    13: "Aluminium", 14: "Silicon", 15: "Phosphorus", 16: "Sulfur", 17: "Chlorine", 18: "Argon",
+    19: "Potassium", 20: "Calcium", 21: "Scandium", 22: "Titanium", 23: "Vanadium", 24: "Chromium",
+    25: "Manganese", 26: "Iron", 27: "Cobalt", 28: "Nickel", 29: "Copper", 30: "Zinc",
+    31: "Gallium", 32: "Germanium", 33: "Arsenic", 34: "Selenium", 35: "Bromine", 36: "Krypton",
+    37: "Rubidium", 38: "Strontium", 39: "Yttrium", 40: "Zirconium", 41: "Niobium", 42: "Molybdenum",
+    43: "Technetium", 44: "Ruthenium", 45: "Rhodium", 46: "Palladium", 47: "Silver", 48: "Cadmium",
+    49: "Indium", 50: "Tin", 51: "Antimony", 52: "Tellurium", 53: "Iodine", 54: "Xenon",
+    55: "Caesium", 56: "Barium", 57: "Lanthanum", 58: "Cerium", 59: "Praseodymium", 60: "Neodymium",
+    61: "Promethium", 62: "Samarium", 63: "Europium", 64: "Gadolinium", 65: "Terbium", 66: "Dysprosium",
+    67: "Holmium", 68: "Erbium", 69: "Thulium", 70: "Ytterbium", 71: "Lutetium", 72: "Hafnium",
+    73: "Tantalum", 74: "Tungsten", 75: "Rhenium", 76: "Osmium", 77: "Iridium", 78: "Platinum",
+    79: "Gold", 80: "Mercury", 81: "Thallium", 82: "Lead", 83: "Bismuth", 84: "Polonium",
+    85: "Astatine", 86: "Radon", 87: "Francium", 88: "Radium", 89: "Actinium", 90: "Thorium",
+    91: "Protactinium", 92: "Uranium", 93: "Neptunium", 94: "Plutonium", 95: "Americium", 96: "Curium",
+    97: "Berkelium", 98: "Californium", 99: "Einsteinium", 100: "Fermium", 101: "Mendelevium", 102: "Nobelium",
+    103: "Lawrencium", 104: "Rutherfordium", 105: "Dubnium", 106: "Seaborgium", 107: "Bohrium", 108: "Hassium",
+    109: "Meitnerium", 110: "Darmstadtium", 111: "Roentgenium", 112: "Copernicium", 113: "Nihonium", 114: "Flerovium",
+    115: "Moscovium", 116: "Livermorium", 117: "Tennessine", 118: "Oganesson",
+}
+
 N_AVOGADRO = 6.02214e23
 BOLTZMANN_CONSTANT = 8.617333262145e-11  # MeV/K
 
