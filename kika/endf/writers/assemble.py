@@ -26,12 +26,12 @@ fixed point is necessary and not sufficient, and it leans on
 :class:`~kika.nuclear_data.model.conversion.ConversionReport` being honest about
 what did not come through.
 
-**Sections come only from what the model has.** MF5's analytic spectra are
-not in it — LF=5, 7, 9, 11 and 12 are §18.3's six formulas, which the model has
-no node for — and neither is MF7 or MF12-15. A tape carrying those comes back
-without them, reported loudly rather than written as an empty shell: a tape
-missing its energy distributions and not saying so is worse than one that says
-so. MF5's LF=1 does come back, and so does **all of MF6**: what the model does
+**Sections come only from what the model has.** MF7 and MF12-15 are not in
+it. A tape carrying those comes back without them, reported loudly rather than
+written as an empty shell: a tape missing its photon or thermal data and not
+saying so is worse than one that says so. MF5 comes back whole — its analytic
+spectra have had nodes since roadmap E2 — and MF32 is written into the section
+the decoder kept (E1). So does **all of MF6**: what the model does
 not carry there — LAW=5, and any subsection whose LAW is negative — is kept
 verbatim in the reaction's provenance, so the section is re-emitted whole even
 where the distribution never reached a node.
@@ -51,7 +51,8 @@ from ..utils import (format_endf_fend_record, format_endf_mend_record,
                      format_endf_tend_record)
 
 __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
-           "encodeTapeSections", "assembleTape", "writeEndfTape", "writeReconstructedEndfTape"]
+           "encodeTapeSections", "assembleTape", "writeEndfTape",
+           "writeEndfTapes", "writeReconstructedEndfTape"]
 
 #: The MF numbers an encoder exists for, in the order ENDF-6 puts them on the
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
@@ -602,6 +603,80 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
             "set it."
         )
     return report
+
+
+def writeEndfTapes(suites, path, mats: Optional[Sequence[Optional[int]]] = None,
+                   tapeId: Optional[str] = None, *,
+                   label: Optional[str] = None) -> list:
+    """Several suites → one ENDF-6 tape, one material each (roadmap T2).
+
+    Returns one :class:`ConversionReport` per suite, in the order given.
+
+    **Each material is written by** :func:`writeEndfTape` **and then spliced.**
+    The MF1/451 directory can only be rebuilt from a written file (its NC
+    entries are line counts), and the rebuild reads one material; so each suite
+    is written to its own temporary tape, which gets a correct directory, and
+    the tape here is those materials' records between one TPID and one TEND,
+    each still closed by its own MEND (§0.6.3). Nothing is re-rendered.
+
+    The materials keep the order given: §0 does not require ascending MAT and
+    a caller may have a reason. Two suites with the same MAT are refused,
+    because every record of a material is found by that number.
+
+    The TPID is ``tapeId`` if given, else the first suite's kept first line,
+    else kika's label (reported on the first suite's report).
+    """
+    import tempfile
+    from ..model_adapter.decode import TAPE_ID_KEY
+    from kika.nuclear_data.model import ConversionReport
+
+    suites = list(suites)
+    if not suites:
+        raise ValueError("no suites given, so there is no tape to write")
+    mats = list(mats) if mats is not None else [None] * len(suites)
+    if len(mats) != len(suites):
+        raise ValueError(f"{len(suites)} suites and {len(mats)} MAT numbers")
+    resolved = [_mat(suite, mat) for suite, mat in zip(suites, mats)]
+    repeated = sorted({m for m in resolved if resolved.count(m) > 1})
+    if repeated:
+        raise ValueError(
+            f"MAT {repeated} appears more than once; every record of a material "
+            f"is found by its MAT, so two materials cannot share one"
+        )
+
+    reports = []
+    bodies: List[str] = []
+    with tempfile.TemporaryDirectory(prefix="kika-tapes-") as scratch:
+        for index, (suite, mat) in enumerate(zip(suites, resolved)):
+            one = Path(scratch) / f"material{index}.endf"
+            # The per-material TPID is thrown away below, so it is named here
+            # to keep each report from claiming a label was invented.
+            reports.append(writeEndfTape(suite, one, mat=mat,
+                                         tapeId=DEFAULT_TAPE_ID,
+                                         report=ConversionReport(), label=label))
+            lines = one.read_text().rstrip("\n").split("\n")
+            # Drop the TPID and the TEND; keep everything through the MEND.
+            bodies.extend(lines[1:-1])
+
+    record = None
+    if tapeId is None:
+        header = getattr(getattr(suites[0], "provenance", None),
+                         "headerFields", None) or {}
+        record = header.get(TAPE_ID_KEY)
+        if record is None:
+            reports[0].lost(
+                "the tape identification record was written with kika's own "
+                "label: the first suite kept no first line from a source tape. "
+                "Pass tapeId= to set it."
+            )
+    first = record if record is not None else _tapeIdRecord(
+        tapeId if tapeId is not None else DEFAULT_TAPE_ID)
+
+    path = Path(os.fspath(path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join([first, *bodies, format_endf_tend_record()]) + "\n",
+                    newline="\n")
+    return reports
 
 
 def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
