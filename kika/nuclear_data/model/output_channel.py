@@ -23,7 +23,8 @@ from .quantities import PhysicalQuantity
 
 __all__ = ["Q", "Product", "Products", "Multiplicity", "Branching1d",
            "UnspecifiedMultiplicity", "OutputChannel",
-           "DelayedNeutron", "DelayedNeutrons", "FissionFragmentData"]
+           "DelayedNeutron", "DelayedNeutrons", "FissionEnergyRelease",
+           "FissionFragmentData"]
 
 
 @dataclass
@@ -334,6 +335,10 @@ class DelayedNeutrons:
     """§18.4. The precursor families of one fission channel, in file order."""
 
     delayedNeutrons: List[DelayedNeutron] = field(default_factory=list)
+    #: MF5/MT455's section, as the ENDF adapter kept it: the families' spectra
+    #: live on their products, the section's bytes here, and the tape is
+    #: written back from these. ``None`` when nothing read an MF5/455.
+    provenance: Optional[object] = None
 
     def __len__(self) -> int:
         return len(self.delayedNeutrons)
@@ -354,17 +359,89 @@ class DelayedNeutrons:
 
 
 @dataclass
+class FissionEnergyRelease:
+    """§18.4 (``gnds.xsd:1457-1565``). How a fission's energy is shared out.
+
+    Nine terms, each a function of the incident energy in eV, with the names
+    GNDS and FUDGE give them. In ENDF they are MF1/458's nine components, and
+    :attr:`TERMS` is that order -- ``IFC = TERMS.index(name) + 1``:
+
+    ====================  =====  ==========================================
+    term                  ENDF   what it is
+    ====================  =====  ==========================================
+    promptProductKE       EFR    kinetic energy of the fission products
+    promptNeutronKE       ENP    prompt neutrons
+    delayedNeutronKE      END    delayed neutrons
+    promptGammaEnergy     EGP    prompt gammas
+    delayedGammaEnergy    EGD    delayed gammas
+    delayedBetaEnergy     EB     delayed betas
+    neutrinoEnergy        ENU    neutrinos
+    nonNeutrinoEnergy     ER     everything but the neutrinos (ET - ENU)
+    totalEnergy           ET     the sum, the fission Q
+    ====================  =====  ==========================================
+
+    A term is a :class:`~kika.nuclear_data.model.functions.Polynomial1d` (MF1/458
+    LFC=0, its coefficients' uncertainties on ``.uncertainty``) or a tabulated
+    function (an LFC=1 TAB1). **One deliberate departure from FUDGE:** there the
+    term is a wrapper node whose ``.data`` holds the function, one hop that
+    carries nothing, because the GNDS element has no attributes. Here the term
+    *is* the function. The GNDS element is still one-to-one with the attribute.
+
+    **What the polynomial does not say.** For a constant (NPLY=0) the ENDF-102
+    procedures (§1.5.2.1) recommend Sher and Beck's energy dependence -- slopes
+    that are not in the file and that involve nu-bar. The model carries what
+    the file states, a constant, and so does FUDGE; applying the systematics is
+    a processing choice and belongs to whoever processes, said once, here.
+    """
+
+    TERMS: ClassVar[tuple] = (
+        "promptProductKE", "promptNeutronKE", "delayedNeutronKE",
+        "promptGammaEnergy", "delayedGammaEnergy", "delayedBetaEnergy",
+        "neutrinoEnergy", "nonNeutrinoEnergy", "totalEnergy",
+    )
+
+    label: str = EVAL_LABEL
+    promptProductKE: Optional[Function1d] = None
+    promptNeutronKE: Optional[Function1d] = None
+    delayedNeutronKE: Optional[Function1d] = None
+    promptGammaEnergy: Optional[Function1d] = None
+    delayedGammaEnergy: Optional[Function1d] = None
+    delayedBetaEnergy: Optional[Function1d] = None
+    neutrinoEnergy: Optional[Function1d] = None
+    nonNeutrinoEnergy: Optional[Function1d] = None
+    totalEnergy: Optional[Function1d] = None
+    #: What MF1/458 states and no term can hold: LFC, NPLY, and for an LFC=1
+    #: section the thermal value a tabulated term replaced, its LDRV and the
+    #: order the TAB1s came in. ``None`` when the node did not come from ENDF.
+    provenance: Optional[object] = None
+
+    def terms(self):
+        """``(name, function)`` for every term that is present, in ENDF order."""
+        for name in self.TERMS:
+            function = getattr(self, name)
+            if function is not None:
+                yield name, function
+
+    def __repr__(self) -> str:
+        forms = sorted({type(f).__name__ for _, f in self.terms()})
+        present = sum(1 for _ in self.terms())
+        return (f"FissionEnergyRelease(label={self.label!r}, {present}/9 terms, "
+                f"{'/'.join(forms) or 'empty'})")
+
+
+@dataclass
 class FissionFragmentData:
     """§18.4. What a fission channel carries beyond its products.
 
-    Only ``delayedNeutrons`` is filled from ENDF today. ``fissionEnergyReleases``
-    (MF1/458) and ``productYields`` (MF8/454, /459) have slots so that the two
-    files which would fill them do not have to restructure this node when they
-    land; both are absent from every decoder for now.
+    ``delayedNeutrons`` is filled from MF1/455 and ``fissionEnergyReleases``
+    from MF1/458, one :class:`FissionEnergyRelease` per style label -- ENDF
+    gives one, the evaluated. ``productYields`` (MF8/454, /459) keeps its slot
+    so that the file which would fill it does not have to restructure this
+    node when it lands; no decoder fills it yet.
     """
 
     delayedNeutrons: DelayedNeutrons = field(default_factory=DelayedNeutrons)
-    fissionEnergyReleases: List[object] = field(default_factory=list)
+    fissionEnergyReleases: List[FissionEnergyRelease] = field(default_factory=list)
     productYields: List[object] = field(default_factory=list)
 
 

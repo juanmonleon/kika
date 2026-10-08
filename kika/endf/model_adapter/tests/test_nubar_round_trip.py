@@ -106,14 +106,16 @@ def test_the_delayed_sum_has_no_summands_and_says_why(decoded):
     """The honest empty list, and the report entry that keeps it honest.
 
     MF1/455 gives the aggregate; the per-family split is MF5/455's weights,
-    which nothing decodes. Filling ``summands`` with links to the six empty
-    family multiplicities would make the model look complete.
+    and this tape carries no MF5. Filling ``summands`` with links to the six
+    empty family multiplicities would make the model look complete. It is a
+    warning, not a loss: nothing in the file is missing from the model.
     """
     suite, report = decoded
     delayed = suite.sums.multiplicitySums.byENDF_MT(455)
 
     assert len(delayed.summands) == 0
-    assert any("MF5/455" in entry for entry in report.losses)
+    assert any("MF5/455" in entry for entry in report.warnings)
+    assert not any("MF5/455" in entry for entry in report.losses)
 
 
 def test_the_precursor_families_carry_their_rates(decoded):

@@ -495,9 +495,10 @@ def test_an_unread_energy_form_is_named_with_its_xpath(h2_gnds, tmp_path):
     """The naming doctrine, on a subject that survives phase 7b.
 
     Six of ``uncorrelated/energy``'s eleven choices are analytic spectra
-    (``gnds.xsd:1697-1709``) that kika reports rather than tabulates. This
-    plants one into H-2 and checks that the report says which node, where, and
-    that the angular half is still read — losing that as well would throw away
+    (``gnds.xsd:1697-1709``). kika reads them since 2026-10-08, so this plants
+    one **without its parameters** -- which is not a spectrum and stays
+    unread -- into H-2, and checks that the report says which node, where, and
+    that the angular half is still read: losing that as well would throw away
     something the file did state.
     """
     tree = ET.parse(h2_gnds)

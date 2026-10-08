@@ -329,9 +329,13 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # After MF3, and it has to be: the nu-bars hang off the fission reaction,
     # which does not exist until MF3/MT18 has been decoded.
     if mf1 is not None:
+        from .fission_energy import attachFissionEnergyRelease
         from .multiplicity import attachNubar
 
         report = attachNubar(suite, mf1, report)
+        # After the nu-bars, and it has to be: MF1/455 creates the channel's
+        # fissionFragmentData, and MF1/458 adds to it.
+        report = attachFissionEnergyRelease(suite, mf1, report)
 
     mf2 = endf.mf.get(2) if hasattr(endf, "mf") else None
     if mf2 is not None and 151 in getattr(mf2, "mt", {}):
@@ -365,6 +369,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     if mf5 is not None:
         for mt in sorted(getattr(mf5, "mt", {})):
             report = _attachEnergyDistribution(suite, mf5.mt[mt], mt, report)
+    _sayWhenFamiliesStayEmpty(suite, report)
 
     # After MF5, and it has to be: an MT that states MF6 with a negative LAW
     # also states MF4 or MF5, and the deferring product must not overwrite the
@@ -517,6 +522,33 @@ def _attachAngularDistribution(suite: ReactionSuite, mf4mt, mt: int,
     return report
 
 
+def _sayWhenFamiliesStayEmpty(suite, report: ConversionReport) -> None:
+    """MF1/455's families with no spectrum after MF5: say why, once.
+
+    The per-family split of the delayed nu-bar is MF5/455's subsection weights.
+    In all 146 evaluations with an MF5/455 in ENDF/B-VIII.0/VIII.1, JEFF-4.0 and
+    JENDL-5 it is there with NK = NNF and `attachDelayedSpectra` places it; the
+    families stay empty only when the file has no MF5/455 at all (or a
+    mismatch that function has already reported as a loss). Nothing of the
+    file is missing from the model then, so this is a warning, not a loss.
+    """
+    from .multiplicity import DELAYED_NUBAR_LABEL
+
+    reaction = suite.findReactionByENDF_MT(18)
+    data = getattr(getattr(reaction, "outputChannel", None), "fissionFragmentData", None)
+    families = list(getattr(data, "delayedNeutrons", None) or ())
+    if not families or any(f.product is not None and f.product.distribution is not None
+                           for f in families):
+        return
+    report.warn(
+        f"MF1/455: the {len(families)} precursor families have their decay "
+        f"rates and no spectrum or multiplicity of their own -- the per-family "
+        f"split is MF5/455's subsection weights, and none was placed on them "
+        f"(no MF5/455 in this file, or one reported above). The aggregate "
+        f"delayed nu-bar is on the '{DELAYED_NUBAR_LABEL}' multiplicitySum"
+    )
+
+
 def _attachEnergyDistribution(suite: ReactionSuite, mf5mt, mt: int,
                               report: ConversionReport) -> ConversionReport:
     """Hang one MF5 section on the neutron product of its reaction.
@@ -555,22 +587,30 @@ def _attachEnergyDistribution(suite: ReactionSuite, mf5mt, mt: int,
     # it on?" — and asking them the other way round made an unmodellable
     # MT455 come back as "there is no MF3/MT455" with no word about the law,
     # which is a true sentence that leaves the reader with the wrong idea.
+    if mt == 455:
+        # Not a weighted sum: one spectrum per precursor family, and its home
+        # is §18.4's delayedNeutrons on the fission channel (roadmap E2).
+        from .fission_energy import attachDelayedSpectra
+
+        placed, report = attachDelayedSpectra(suite, mf5mt, report)
+        if placed:
+            return report
+
     energy, provenance, report = decodeMF5MT(mf5mt, report)
 
     reaction = suite.findReactionByENDF_MT(mt)
     if reaction is None:
-        # MT455 is this branch's whole population: the delayed spectrum has no
-        # cross section, so it has no MF3 and no reaction. Its GNDS home is
-        # §18.4's `fissionFragmentData/delayedNeutrons`, which `attachNubar`
-        # already builds from MF1/455 and which no decoder fills distributions
-        # into yet. Declared rather than dropped, and the section is not
-        # written back either.
+        # MT455 lands here only when `attachDelayedSpectra` found no MF1/455
+        # families to put its spectra on (a cut tape, or an evaluation with
+        # MF5/455 and no MF1/455): the delayed spectrum has no cross section,
+        # so no MF3 and no reaction. Declared rather than dropped.
         report.lost(
             f"MF5/MT{mt} has no MF3/MT{mt} to hang from; GNDS attaches a "
             f"distribution to a product of a reaction, and there is no "
-            f"reaction. For MT455 the home is §18.4's delayedNeutrons and not "
-            f"a reaction at all — a separate increment. The section is absent "
-            f"from this reactionSuite and from anything written back from it"
+            f"reaction. For MT455 the home is §18.4's delayedNeutrons, which "
+            f"MF1/455 builds and this evaluation does not carry. The section "
+            f"is absent from this reactionSuite and from anything written back "
+            f"from it"
         )
         return report
 

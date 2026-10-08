@@ -62,10 +62,12 @@ MAT, MT = 9999, 18
 # Building a section by hand, for the laws no tape here carries
 # ---------------------------------------------------------------------------
 
-def build_section(lf: float, u: float, law_tab1s, mt: int = MT):
+def build_section(lf: float, u: float, law_tab1s, mt: int = MT, headers=None):
     """One MF5 section with a single subsection of law *lf*, as tape lines.
 
-    ``law_tab1s`` is ``[(interp, x, y), ...]`` in tape order. Written with the
+    ``law_tab1s`` is ``[(interp, x, y), ...]`` in tape order; ``headers``, if
+    given, the ``(C1, C2)`` of each of those TAB1s (LF=12's EFL and EFH live
+    there). Written with the
     library's own formatters so the parser is being fed the dialect the library
     emits, not one invented here.
     """
@@ -80,18 +82,19 @@ def build_section(lf: float, u: float, law_tab1s, mt: int = MT):
         MAT, 5, mt, line_num,
     )
     lines.extend(header)
-    for interp, x, y in law_tab1s:
+    for k, (interp, x, y) in enumerate(law_tab1s):
+        c1, c2 = headers[k] if headers else (0.0, 0.0)
         block, line_num = format_tab1(
-            0.0, 0.0, 0, 0, interp, list(x), list(y), MAT, 5, mt, line_num,
+            c1, c2, 0, 0, interp, list(x), list(y), MAT, 5, mt, line_num,
         )
         lines.extend(block)
     lines.append(format_endf_send_record(MAT, 5))
     return lines
 
 
-def one_partial(lf, u, law_tab1s):
+def one_partial(lf, u, law_tab1s, headers=None):
     """Parse a hand-built section and hand back its only subsection."""
-    section = parse_mf5_mt(build_section(lf, u, law_tab1s), MT)
+    section = parse_mf5_mt(build_section(lf, u, law_tab1s, headers=headers), MT)
     assert section.num_partials == 1
     return section.partials[0]
 
@@ -285,12 +288,49 @@ def test_theta_only_laws_parse_to_their_class(lf, cls):
     assert partial.theta(1.0e6) == pytest.approx(THETA[2][0])
 
 
-def test_undecoded_law_is_still_kept_verbatim():
-    """LF=12 has no evaluator, and says so rather than going quiet."""
-    partial = one_partial(12.0, 0.0, [THETA])
-    assert type(partial) is MF5PartialRaw
-    assert partial.is_decoded is False
-    assert partial.raw_lines
+#: U-235-like Madland-Nix parameters: EFL, EFH and a T_M(E) table, in eV.
+EFL, EFH = 1.0600e6, 0.5200e6
+T_M = ([(2, 5)], [1.0e-5, 2.0e7], [1.03e6, 1.20e6])
+
+
+def madland_nix_partial():
+    return one_partial(12.0, 0.0, [T_M], headers=[(EFL, EFH)])
+
+
+def test_lf12_is_decoded_and_its_efl_efh_come_from_the_tm_header():
+    """Since 2026-10-08. They were the C1/C2 the walker used to discard."""
+    from kika.endf.classes.mf5.analytic import MF5MadlandNix
+
+    partial = madland_nix_partial()
+    assert type(partial) is MF5MadlandNix and partial.is_decoded
+    assert (partial.efl, partial.efh) == (EFL, EFH)
+    assert partial.tm_interp == [(2, 5)]
+    assert partial.raw_lines, "the bytes still go back as read"
+
+
+@pytest.mark.parametrize("energy", [0.0253, 1.0e6, 1.4e7])
+def test_lf12_integrates_to_one_and_has_the_closed_form_mean(energy):
+    """Its two closed forms, against quadrature -- no tape here carries LF=12."""
+    from scipy import integrate
+
+    from kika.algebra.spectra import madland_nix_mean
+
+    partial = madland_nix_partial()
+    tm = partial.tm(energy)
+    hi = float(partial.default_grid(energy)[-1])
+    pdf = lambda e: float(partial.evaluate_on_grid(energy, [e])[0])
+    kinks = [EFH, EFL]
+    norm, _ = integrate.quad(pdf, 0.0, hi, points=kinks, limit=400, epsrel=1e-12)
+    mean, _ = integrate.quad(lambda e: e * pdf(e), 0.0, hi, points=kinks,
+                             limit=400, epsrel=1e-12)
+    assert norm == pytest.approx(1.0, abs=1e-10)
+    assert mean == pytest.approx(madland_nix_mean(EFL, EFH, tm), rel=1e-10)
+
+
+def test_lf12_is_not_truncated_at_e_minus_u():
+    """At thermal incidence E - U is 0.0253 eV; the spectrum is MeV-wide."""
+    partial = madland_nix_partial()
+    assert partial.evaluate_on_grid(0.0253, [2.0e6])[0] > 0.0
 
 
 # ---------------------------------------------------------------------------

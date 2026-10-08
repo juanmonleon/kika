@@ -52,7 +52,17 @@ class Constant1d(Function1d):
 
 @dataclass
 class Polynomial1d(Function1d):
-    """§6. Coefficients in ascending order: ``c[0] + c[1]*x + c[2]*x**2 + ...``."""
+    """§6. Coefficients in ascending order: ``c[0] + c[1]*x + c[2]*x**2 + ...``.
+
+    ``uncertainty`` is §7's optional child, and the one case that fills it is
+    MF1/458: every coefficient of a fission-energy component comes with its own
+    standard deviation. The shape is FUDGE's (``fissionEnergyRelease.py``): an
+    :class:`~kika.nuclear_data.model.uncertainties.Uncertainty` whose
+    ``standard`` is a second ``Polynomial1d`` of the same order, holding the
+    uncertainty of each coefficient. That is *not* the uncertainty of the
+    polynomial's value at ``x`` -- the file states no correlation between the
+    coefficients -- and nothing here pretends to propagate it.
+    """
 
     coefficients: np.ndarray
     domainMin_: float
@@ -61,6 +71,7 @@ class Polynomial1d(Function1d):
     label: Optional[str] = None
     outerDomainValue: Optional[float] = None
     index: Optional[int] = None
+    uncertainty: Optional[object] = None
 
     def __post_init__(self) -> None:
         self.coefficients = np.asarray(self.coefficients, dtype=float)

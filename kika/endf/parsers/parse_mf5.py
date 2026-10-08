@@ -15,7 +15,8 @@ uses in MF4.
 from typing import List, Tuple
 
 from ..classes.mf import MF
-from ..classes.mf5.analytic import ANALYTIC_LAWS, ANALYTIC_RECORDS
+from ..classes.mf5.analytic import (ANALYTIC_HEADER_FIELDS, ANALYTIC_LAWS,
+                                     ANALYTIC_RECORDS)
 from ..classes.mf5.base import MF5MT
 from ..classes.mf5.partials import (
     TAB1_RECORDS_AFTER_HEADER,
@@ -124,10 +125,13 @@ def _law_fields(lf: int, records):
     if names is None or len(records) != len(names):
         return None
     fields = {}
-    for (interp_name, x_name, y_name), (interp, x, y) in zip(names, records):
+    for (interp_name, x_name, y_name), (_header, interp, x, y) in zip(names, records):
         fields[interp_name] = list(interp)
         fields[x_name] = list(x)
         fields[y_name] = list(y)
+    for (c1_name, c2_name), (header, *_rest) in zip(ANALYTIC_HEADER_FIELDS.get(lf, ()), records):
+        fields[c1_name] = float(header.get("C1") or 0.0)
+        fields[c2_name] = float(header.get("C2") or 0.0)
     return fields
 
 
@@ -189,6 +193,7 @@ def _read_law_records(lines: List[str], idx: int, lf: int, mt: int,
     for _ in range(n_records):
         if idx >= len(lines):
             break
-        _, interp, x_data, y_data, idx = parse_tab1(lines, idx)
-        records.append((interp, x_data, y_data))
+        header, interp, x_data, y_data, idx = parse_tab1(lines, idx)
+        # The header is kept: LF=12's EFL and EFH are its C1 and C2.
+        records.append((header, interp, x_data, y_data))
     return records, idx

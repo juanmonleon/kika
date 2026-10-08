@@ -52,7 +52,11 @@ from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      BreitWigner, ConversionReport,
                                      Constant1d, CovarianceMatrix,
                                      CrossSectionSum, DiscreteGamma,
-                                     EnergyAngular, Evaluated, Isotropic2d,
+                                     EnergyAngular, Evaluated, Evaporation,
+                                     FissionEnergyRelease, GeneralEvaporation,
+                                     Isotropic2d, MadlandNix,
+                                     SimpleMaxwellianFission, Watt,
+                                     WeightedFunctionals,
                                      KalbachMann, Legendre, Mixed,
                                      NBodyPhaseSpace,
                                      Nuclide, ParameterCovariance,
@@ -272,8 +276,15 @@ def _function(parent: ET.Element, form, report: ConversionReport,
     if isinstance(form, Polynomial1d):
         element = ET.SubElement(parent, "polynomial1d")
         _writeCommon(element, form, nested, index)
+        # Required by `xData_polynomial_1d_primary` (xData.xsd:570-571). Not
+        # written until 2026-10-08, so every LNU=1 nu-bar kika wrote was a
+        # polynomial1d the schema rejects; nothing read one back, and no
+        # committed fixture carries one.
+        _set(element, domainMin=_number(form.domainMin),
+             domainMax=_number(form.domainMax))
         _axesUnlessNested(element, form, report, where, nested, parentAxes)
         _values(element, form.coefficients)
+        _functionUncertainty(element, form, report, where)
         return element
     if isinstance(form, XYs2d):
         element = ET.SubElement(parent, "XYs2d")
@@ -329,6 +340,44 @@ def _function(parent: ET.Element, form, report: ConversionReport,
         f"{type(form).__name__}; the node is absent from the file"
     )
     return None
+
+
+#: The §18.3 parametrised spectra: model class → GNDS tag, and the parameter
+#: wrappers each carries, in schema order.
+_SPECTRUM_TAGS = {
+    Evaporation: "evaporation", GeneralEvaporation: "generalEvaporation",
+    SimpleMaxwellianFission: "simpleMaxwellianFission", Watt: "Watt",
+    MadlandNix: "MadlandNix", WeightedFunctionals: "weightedFunctionals",
+}
+_SPECTRUM_PARAMETERS = {
+    Evaporation: ("theta",), GeneralEvaporation: ("theta", "g"),
+    SimpleMaxwellianFission: ("theta",), Watt: ("a", "b"), MadlandNix: ("T_M",),
+}
+
+
+def _functionUncertainty(element: ET.Element, form, report: ConversionReport,
+                         where: str) -> None:
+    """§7's ``uncertainty`` child of a functional, when it holds a function.
+
+    ``xData_uncertainty`` (xData.xsd:685) is a choice of a primary ``XYs1d`` or
+    ``polynomial1d``, a ``covariance`` or a ``listOfCovariances``. Only the
+    first two are written from here: MF1/458's per-coefficient uncertainties
+    are the one case the model fills, and FUDGE writes them as a bare
+    ``<uncertainty><polynomial1d/></uncertainty>``. A covariance back-link is
+    stated from the covarianceSuite's side (§25.2.3), which is the end kika
+    writes.
+    """
+    uncertainty = getattr(form, "uncertainty", None)
+    standard = getattr(uncertainty, "standard", None)
+    if standard is None:
+        return
+    if not isinstance(standard, (XYs1d, Polynomial1d)):
+        report.unsupportedNode(
+            f"{where}: an uncertainty held as a {type(standard).__name__}; "
+            f"xData_uncertainty admits XYs1d or polynomial1d, so it is not written"
+        )
+        return
+    _function(ET.SubElement(element, "uncertainty"), standard, report, where)
 
 
 def _axesUnlessNested(element: ET.Element, form, report: ConversionReport,
@@ -529,6 +578,73 @@ class _SuiteWriter:
         products = ET.SubElement(element, "products")
         for product in channel.products:
             self.product(products, product, where)
+        if channel.fissionFragmentData is not None:
+            self.fissionFragmentData(element, channel.fissionFragmentData, where)
+
+    def fissionFragmentData(self, parent: ET.Element, data, where: str) -> None:
+        """§18.4, ``gnds.xsd:1296-1335``: delayed neutrons and the energy release.
+
+        A sequence, not a choice, so there is no form to dispatch on: each of
+        the three lists is written when the model holds anything in it. The
+        nine terms of a ``fissionEnergyRelease`` are *all* required by the
+        schema; a term the model lacks is written as an empty element and
+        reported, the judgement an empty ``<distribution/>`` gets -- the file
+        announces it is incomplete rather than asserting a zero.
+
+        A term is ``polynomial1d`` or ``XYs1d`` (``gridded1d`` is processed
+        data). A ``regions1d`` of one region is spelled as its ``XYs1d`` by
+        :func:`_function`; one of several has no place in this schema and is
+        reported -- no ENDF/B-VIII.1 MF1/458 table has more than one region.
+        """
+        here = f"{where} fissionFragmentData"
+        element = ET.SubElement(parent, "fissionFragmentData")
+
+        if len(data.delayedNeutrons):
+            families = ET.SubElement(element, "delayedNeutrons")
+            for family in data.delayedNeutrons:
+                node = ET.SubElement(families, "delayedNeutron")
+                _set(node, label=family.label)
+                rate = ET.SubElement(node, "rate")
+                if family.rate is None:
+                    self.report.lost(f"{here}: delayedNeutron {family.label!r} has no rate")
+                else:
+                    _set(ET.SubElement(rate, "double"), label="eval",
+                         value=_number(family.rate.value), unit=family.rate.unit)
+                product = family.product
+                if product is None:
+                    from kika.nuclear_data.model import Product
+                    product = Product(pid="n", label="n")
+                self.product(node, product, f"{here} delayedNeutron {family.label!r}")
+
+        if data.fissionEnergyReleases:
+            releases = ET.SubElement(element, "fissionEnergyReleases")
+            for release in data.fissionEnergyReleases:
+                node = ET.SubElement(releases, "fissionEnergyRelease")
+                _set(node, label=release.label)
+                for name in FissionEnergyRelease.TERMS:
+                    term = ET.SubElement(node, name)
+                    form = getattr(release, name)
+                    if form is None:
+                        self.report.lost(
+                            f"{here}: {name} is absent from the model, so "
+                            f"<{name}> is empty and the file does not validate"
+                        )
+                        continue
+                    if isinstance(form, Regions1d) and len(form.function1ds) > 1:
+                        self.report.unsupportedNode(
+                            f"{here}: {name} is a regions1d of "
+                            f"{len(form.function1ds)} regions, and "
+                            f"FissionEnergyReleaseSubformType admits polynomial1d "
+                            f"or XYs1d only; <{name}> is empty"
+                        )
+                        continue
+                    _function(term, form, self.report, f"{here} {name}")
+
+        if data.productYields:
+            self.report.unsupportedNode(
+                f"{here}: productYields (MF8/454, /459) has a slot in the model "
+                f"and nothing fills or writes it"
+            )
 
     def Q(self, parent: ET.Element, q, where: str) -> None:
         element = ET.SubElement(parent, "Q")
@@ -810,7 +926,9 @@ class _SuiteWriter:
         self._uncorrelatedEnergy(element, form.energy, where)
 
     @writes("uncorrelatedEnergyForm", "discreteGamma", "primaryGamma",
-            "NBodyPhaseSpace")
+            "NBodyPhaseSpace", "evaporation", "generalEvaporation",
+            "simpleMaxwellianFission", "Watt", "MadlandNix",
+            "weightedFunctionals")
     def _uncorrelatedEnergy(self, parent: ET.Element, form,
                             where: str) -> None:
         """``uncorrelated/energy``: the four non-functional forms, by hand.
@@ -843,7 +961,68 @@ class _SuiteWriter:
                 _set(ET.SubElement(phaseSpace, "mass"),
                      value=_number(form.mass.value), unit=form.mass.unit)
             return
+        if isinstance(form, tuple(_SPECTRUM_TAGS)):
+            self._analyticSpectrum(element, form, where)
+            return
         _function(element, form, self.report, where)
+
+    def _analyticSpectrum(self, parent: ET.Element, form, where: str) -> None:
+        """§18.3's parametrised spectra, ``gnds.xsd:1714-1770``.
+
+        Each is an ``xs:sequence``: the ``U`` (or ``EFL``/``EFH``) as a
+        ``PhysicalQuantity``, then each parameter wrapped in its own element
+        around one primary ``XYs1d`` (``XYs1dWrapperType``) -- the wrapper the
+        model drops, put back. A parameter held as a ``regions1d`` of several
+        regions has no place in the wrapper and is reported; FUDGE's reader
+        refuses those outright.
+        """
+        tag = _SPECTRUM_TAGS[type(form)]
+        element = ET.SubElement(parent, tag)
+        here = f"{where} {tag}"
+        if isinstance(form, WeightedFunctionals):
+            # `weighted` is (XYs1d weight, functional). FUDGE 6.10's schema
+            # admits only `evaporation` as the functional (gnds.xsd:1761);
+            # what ENDF writes there -- LF=9 on every NK>1 of ENDF/B-VIII.1 --
+            # fits it. Another law is written and reported, not dropped.
+            for index, term in enumerate(form.weighted):
+                weighted = ET.SubElement(element, "weighted")
+                _set(weighted, index=str(index))
+                if term.weight is not None:
+                    _function(weighted, term.weight, self.report, here)
+                functional = term.functional
+                if not isinstance(functional, Evaporation):
+                    self.report.unsupportedNode(
+                        f"{here}: weighted[{index}] is a "
+                        f"{type(functional).__name__}; gnds.xsd admits only "
+                        f"evaporation there, so this file does not validate"
+                    )
+                if isinstance(functional, tuple(_SPECTRUM_TAGS)):
+                    self._analyticSpectrum(weighted, functional, here)
+                elif functional is not None:
+                    _function(weighted, functional, self.report, here)
+            return
+        if isinstance(form, MadlandNix):
+            for name in ("EFL", "EFH"):
+                quantity = getattr(form, name)
+                if quantity is not None:
+                    _set(ET.SubElement(element, name),
+                         value=_number(quantity.value), unit=quantity.unit or "eV")
+        elif form.U is not None:
+            _set(ET.SubElement(element, "U"),
+                 value=_number(form.U.value), unit=form.U.unit or "eV")
+        for name in _SPECTRUM_PARAMETERS[type(form)]:
+            table = getattr(form, name)
+            wrapper = ET.SubElement(element, name)
+            if table is None:
+                self.report.lost(f"{here}: no {name}, so <{name}> is empty")
+                continue
+            if isinstance(table, Regions1d) and len(table.function1ds) > 1:
+                self.report.unsupportedNode(
+                    f"{here}: {name} has {len(table.function1ds)} interpolation "
+                    f"regions and XYs1dWrapperType holds one XYs1d; written as a "
+                    f"regions1d the schema rejects"
+                )
+            _function(wrapper, table, self.report, here)
 
     def _gammaAxes(self, parent: ET.Element, axes, where: str,
                    tag: str) -> None:

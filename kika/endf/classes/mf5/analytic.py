@@ -1,8 +1,10 @@
 """The MF5 laws given by parameters rather than by a table (ENDF-6 §5.1.1).
 
-LF=1 writes chi(E->E') out point by point; LF=5, 7, 9 and 11 write a handful of
-energy-dependent parameters and leave the shape to a formula. This module reads
-those four.
+LF=1 writes chi(E->E') out point by point; LF=5, 7, 9, 11 and 12 write a
+handful of energy-dependent parameters and leave the shape to a formula. This
+module reads those five. The formulae themselves are
+:mod:`kika.algebra.spectra`'s, shared with the model's §18.3 nodes, so the
+reader and the model cannot evaluate two different spectra.
 
 **Decoded for reading, emitted from bytes.** Every class here subclasses
 :class:`~kika.endf.classes.mf5.partials.MF5PartialRaw` and so keeps
@@ -24,10 +26,14 @@ Normalising by the measured integral of the shape satisfies §5.1 under either,
 and reduces to ``f = g`` exactly on the one witness available here (Cf-252
 MT455, where theta == 1 and ``int g dx == 1``), so nothing has to be guessed.
 
-**LF=12 (Madland-Nix) is not here.** It needs a numerical double integral and
-there is no tape on this machine to close it against; a plausible implementation
-would be silently wrong, which is worse than none. It stays an
-:class:`MF5PartialRaw` and ``report_gaps`` says so.
+**LF=12 (Madland-Nix) is here since 2026-10-08.** The reason it was kept out
+-- "it needs a numerical double integral" -- was wrong: §5.1.1.6's density is
+closed in E1 and the lower incomplete gamma function. What there still is not
+is a tape on this machine to close it against (ENDF/B-VII.1 Am-241 and
+JEFF-3.1.1 are on the cluster), so it is gated on its own two closed forms:
+the density integrates to 1 and its first moment is ``(EFL+EFH)/2 + 4/3 T_M``,
+to 1e-13. Its EFL and EFH are the C1/C2 of the T_M TAB1's header, which the
+walker used to throw away. It has no ``U`` and is not truncated at ``E - U``.
 
 **What is witnessed and what is not.** LF=5 is read off a committed fixture
 (``micro_cf252_pfns.endf``, MT455, six subsections). LF=7, 9 and 11 have no tape
@@ -44,7 +50,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ....algebra import evaluate, integral, interval_laws
+from ....algebra import evaluate, integral, interval_laws, spectra
 from .partials import MF5PartialRaw
 
 #: Points in the display grid a law builds for itself when the caller does not
@@ -272,21 +278,11 @@ class MF5Maxwellian(MF5PartialAnalytic):
                        self.theta_interp, energy)
 
     def shape(self, energy: float, e_out: np.ndarray) -> np.ndarray:
-        theta = self.theta(energy)
-        if theta <= 0.0:
-            return np.zeros(np.shape(e_out), dtype=float)
-        e_out = np.asarray(e_out, dtype=float)
-        return np.sqrt(e_out) * np.exp(-e_out / theta)
+        return spectra.maxwellian(e_out, self.theta(energy))
 
     def normalisation_at(self, energy: float) -> float:
         """``theta^(3/2) [sqrt(pi)/2 erf(sqrt(y)) - sqrt(y) exp(-y)]``, ``y = (E-U)/theta``."""
-        theta = self.theta(energy)
-        hi = self.upper_bound(energy)
-        if theta <= 0.0 or hi <= 0.0:
-            return 0.0
-        y = hi / theta
-        return theta ** 1.5 * (0.5 * math.sqrt(math.pi) * math.erf(math.sqrt(y))
-                               - math.sqrt(y) * math.exp(-y))
+        return spectra.maxwellian_integral(self.upper_bound(energy), self.theta(energy))
 
     def describe(self) -> str:
         return (f"LF=7, simple Maxwellian, "
@@ -307,20 +303,11 @@ class MF5Evaporation(MF5PartialAnalytic):
                        self.theta_interp, energy)
 
     def shape(self, energy: float, e_out: np.ndarray) -> np.ndarray:
-        theta = self.theta(energy)
-        if theta <= 0.0:
-            return np.zeros(np.shape(e_out), dtype=float)
-        e_out = np.asarray(e_out, dtype=float)
-        return e_out * np.exp(-e_out / theta)
+        return spectra.evaporation(e_out, self.theta(energy))
 
     def normalisation_at(self, energy: float) -> float:
         """``theta^2 [1 - exp(-y)(1 + y)]``, ``y = (E-U)/theta``."""
-        theta = self.theta(energy)
-        hi = self.upper_bound(energy)
-        if theta <= 0.0 or hi <= 0.0:
-            return 0.0
-        y = hi / theta
-        return theta * theta * (1.0 - math.exp(-y) * (1.0 + y))
+        return spectra.evaporation_integral(self.upper_bound(energy), self.theta(energy))
 
     def describe(self) -> str:
         return (f"LF=9, evaporation, "
@@ -346,24 +333,11 @@ class MF5Watt(MF5PartialAnalytic):
         return tab1_at(self.b_energies, self.b_values, self.b_interp, energy)
 
     def shape(self, energy: float, e_out: np.ndarray) -> np.ndarray:
-        a, b = self.a(energy), self.b(energy)
-        if a <= 0.0 or b < 0.0:
-            return np.zeros(np.shape(e_out), dtype=float)
-        e_out = np.asarray(e_out, dtype=float)
-        return np.exp(-e_out / a) * np.sinh(np.sqrt(b * e_out))
+        return spectra.watt(e_out, self.a(energy), self.b(energy))
 
     def normalisation_at(self, energy: float) -> float:
         """ENDF-6 §5.1.1.5's closed form for the Watt integral over ``[0, E-U]``."""
-        a, b = self.a(energy), self.b(energy)
-        hi = self.upper_bound(energy)
-        if a <= 0.0 or b < 0.0 or hi <= 0.0:
-            return 0.0
-        root = math.sqrt(a * b / 4.0)
-        y = math.sqrt(hi / a)
-        return (0.5 * math.sqrt(math.pi * b * a ** 3 / 4.0)
-                * math.exp(a * b / 4.0)
-                * (math.erf(y - root) + math.erf(y + root))
-                - a * math.exp(-hi / a) * math.sinh(math.sqrt(b * hi)))
+        return spectra.watt_integral(self.upper_bound(energy), self.a(energy), self.b(energy))
 
     def describe(self) -> str:
         return (f"LF=11, energy-dependent Watt, "
@@ -371,13 +345,58 @@ class MF5Watt(MF5PartialAnalytic):
                 f"{len(self.b_energies)}-point b(E)")
 
 
+@dataclass
+class MF5MadlandNix(MF5PartialAnalytic):
+    """LF=12: the Madland-Nix spectrum, ``EFL``, ``EFH`` and a ``T_M(E)`` table.
+
+    Normalised over ``[0, inf)`` by construction, and **not** bounded by
+    ``E - U``: §5.1.1.6 gives the law no ``U`` (the subsection header's C1 is
+    written 0), and the base class's bound would truncate a thermal-incident
+    spectrum at 0.0253 eV. ``U`` stays in the dataclass because the header has
+    the slot and the bytes go back as read.
+    """
+
+    lf: int = 12
+    efl: float = 0.0
+    efh: float = 0.0
+    tm_interp: List[Tuple[int, int]] = field(default_factory=list)
+    tm_energies: List[float] = field(default_factory=list)
+    tm_values: List[float] = field(default_factory=list)
+
+    def tm(self, energy: float) -> float:
+        return tab1_at(self.tm_energies, self.tm_values, self.tm_interp, energy)
+
+    def upper_bound(self, energy: float) -> float:
+        return math.inf
+
+    def shape(self, energy: float, e_out: np.ndarray) -> np.ndarray:
+        return spectra.madland_nix(e_out, float(self.efl), float(self.efh), self.tm(energy))
+
+    def normalisation_at(self, energy: float) -> float:
+        return 1.0 if self.tm(energy) > 0.0 else 0.0
+
+    def normalisation(self, energy: float) -> float:
+        return self.normalisation_at(energy)
+
+    def default_grid(self, energy: float,
+                     n_points: int = DEFAULT_GRID_POINTS) -> np.ndarray:
+        hi = spectra.madland_nix_upper(float(self.efh), self.tm(energy))
+        lo = hi * 10.0 ** (-_DEFAULT_GRID_DECADES)
+        return np.concatenate(([0.0], np.geomspace(lo, hi, max(n_points - 1, 2))))
+
+    def describe(self) -> str:
+        return (f"LF=12, Madland-Nix, EFL={self.efl:g} eV, EFH={self.efh:g} eV, "
+                f"{len(self.tm_energies)}-point T_M(E)")
+
+
 #: ``LF`` -> the class that reads it. A law absent from here keeps its bytes and
-#: is reported as a gap; see this module's docstring on LF=12.
+#: is reported as a gap.
 ANALYTIC_LAWS = {
     5: MF5GeneralEvaporation,
     7: MF5Maxwellian,
     9: MF5Evaporation,
     11: MF5Watt,
+    12: MF5MadlandNix,
 }
 
 #: ``LF`` -> the ``(interp, abscissa, ordinate)`` field names of each TAB1 record
@@ -397,4 +416,12 @@ ANALYTIC_RECORDS = {
     9: (("theta_interp", "theta_energies", "theta_values"),),
     11: (("a_interp", "a_energies", "a_values"),
          ("b_interp", "b_energies", "b_values")),
+    12: (("tm_interp", "tm_energies", "tm_values"),),
+}
+
+#: ``LF`` -> the field names of a TAB1 record's C1 and C2, for the laws that put
+#: parameters there. Only LF=12 does: EFL and EFH are the header of its T_M
+#: table (ENDF-6 §5.1.1.6), which is why the walker now keeps headers.
+ANALYTIC_HEADER_FIELDS = {
+    12: (("efl", "efh"),),
 }

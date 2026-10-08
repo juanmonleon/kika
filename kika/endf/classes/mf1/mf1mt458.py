@@ -1,16 +1,18 @@
 """
 MF1/MT458 — Components of energy release due to fission.
 
-Nine energy components (each with uncertainty):
-  IFC=0: EFR  — kinetic energy of fission fragments
-  IFC=1: ENP  — kinetic energy of prompt fission neutrons
-  IFC=2: END  — kinetic energy of delayed fission neutrons
-  IFC=3: EGP  — total energy from prompt gamma rays
-  IFC=4: EGD  — total energy from delayed gamma rays
-  IFC=5: EB   — total energy from delayed betas
-  IFC=6: ENU  — energy carried away by neutrinos
-  IFC=7: ER   — total energy less neutrinos (ER = ET - ENU)
-  IFC=8: ET   — total fission energy (pseudo-Q-value)
+Nine energy components (each with uncertainty). IFC is one-based (ENDF-102
+§1.5.1) -- it is what an LFC=1 TAB1 states in L2 -- while ``_get_component``
+below takes the zero-based position in the LIST, IFC-1:
+  IFC=1: EFR  — kinetic energy of fission fragments
+  IFC=2: ENP  — kinetic energy of prompt fission neutrons
+  IFC=3: END  — kinetic energy of delayed fission neutrons
+  IFC=4: EGP  — total energy from prompt gamma rays
+  IFC=5: EGD  — total energy from delayed gamma rays
+  IFC=6: EB   — total energy from delayed betas
+  IFC=7: ENU  — energy carried away by neutrinos
+  IFC=8: ER   — total energy less neutrinos (ER = ET - ENU)
+  IFC=9: ET   — total fission energy (pseudo-Q-value)
 
 Two formats:
   LFC=0  polynomial   LIST with 18*(NPLY+1) coefficients

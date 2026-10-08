@@ -264,9 +264,12 @@ def test_an_analytic_spectrum_is_reported_and_not_guessed(tag, h2_gnds,
                                                           tmp_path):
     """Six of the eleven energy choices are formulae with named parameters.
 
-    Tabulating one would put numbers in the file the evaluator never wrote, so
-    each is reported with its xPath instead — and the reason comes from
-    ``nodes.NODES``, so the report and the table cannot say different things.
+    They are read since 2026-10-08 (roadmap E2; the round trips are in
+    ``kika/endf/model_adapter/tests/test_energy_spectra.py``). What this keeps
+    pinning is the other half: one planted **without** its parameters is not a
+    spectrum, so it is reported with its xPath and nothing is guessed in its
+    place -- tabulating or defaulting would put numbers in the file the
+    evaluator never wrote.
     """
     tree = ET.parse(h2_gnds)
     energy = tree.getroot().find(".//uncorrelated/energy")

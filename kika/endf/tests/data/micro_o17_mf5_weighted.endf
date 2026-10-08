@@ -1,0 +1,176 @@
+ ENDF/B-VIII.1                                                         0  0
+ 8.017000+3 1.685310+1          0          0          0          0 828 1451
+ 0.000000+0 0.000000+0          0          0          0          6 828 1451
+ 1.000000+0 2.000000+7          1          0         10          8 828 1451
+ 0.000000+0 0.000000+0          0          0        125          4 828 1451
+  8-O - 17 BNL        EVAL-JAN78 B.A.Magurno                       828 1451
+ NDS 148, 1 (2018)    DIST-AUG24 REV1-NOV19            20240830    828 1451
+---- ENDF/B-VIII.1    MATERIAL  828         REVISION 1             828 1451
+----- INCIDENT-NEUTRON DATA                                        828 1451
+------ ENDF-6                                                      828 1451
+                                                                   828 1451
+ ****************************************************************  828 1451
+                                                                   828 1451
+ ENDF/B-VII  CONVERTED FROM ENDF/B-VI BY NNDC OCT 2004             828 1451
+ ENDF/B-V MATERIAL CONVERTED TO ENDF-6 FORMAT BY NNDC              828 1451
+                                                                   828 1451
+ ****************************************************************  828 1451
+  DOCUMENTATION INCLUDED IN EPRI-NP-973 1978 ALAPOUR ET.AL.        828 1451
+ ****************************************************************  828 1451
+   THERMAL CROSS SECTIONS                                          828 1451
+            N,GAMMA=3.8 MB+/-20PC CALCULATED BY S.F.MUGHABGHAB     828 1451
+         (MU78) USING METHOD OF LANE + LYNN (SEE DOCUMENT)         828 1451
+            N,ALPHA=235 MILLIBARNS WEIGHTED AVERAGE OF(HA61),      828 1451
+                                  (SE56),(MA47).                   828 1451
+            N,ABSORPTION=238.8 MB. TOTAL OF ABOVE.                 828 1451
+         THESE CROSS SECTIONS ASSUMED TO BE I/V TO APPROX 100KEV.  828 1451
+ ****************************************************************  828 1451
+  SINCE VIRTUALLY NO EXPERIMENTAL DATA AVAILABLE,THIS EVALUATION   828 1451
+  IS ALMOST TOTALLY CALCULATED WITH NUCLEAR MODEL CODES.           828 1451
+ ****************************************************************  828 1451
+   MF=2 MT=151 NO RESONANCE PARAMETER DATA AVAILABLE.SMOOTH CROSS  828 1451
+       SECTIONS CALCULATED IN THE RESONANCE REGION CONSTRUED AS    828 1451
+       "AVERAGE"CROSS SECTIONS.                                    828 1451
+ ****************************************************************  828 1451
+   MF=3 MT=1 TOTAL CROSS SECTION IS CALCULATED AS SUM OF THE CROSS 828 1451
+       SECTIONS LISTED BELOW.IN GOOD AGREEMENT WITH PRELIMINARY    828 1451
+       MEASUREMENTS BY AUCHAMPAUGH(AU77).                          828 1451
+   **** MT=2 TOTAL ELASTIC CROSS AT LOW ENERGY DERIVED FROM        828 1451
+       EXP.MEASURED COHERENT SCATTERING AMPLITUDE. (VA68) HIGH     828 1451
+       ENERGY CROSS SECTION CALCULATED WITH NUBAK (AN IN-HOUSE     828 1451
+       VERSION OF"ABACUS")(AU64)                                   828 1451
+   **** MT=4 DERIVED FROM THE SUMMATION OF MT=51-62 AND MT=91      828 1451
+   **** MT=51-62,91 THESE LEVELS CALCULATED WITH NUCLEAR MODEL     828 1451
+       CODES "MODNEW"(AN IN-HOUSE VERSION OF UHL'S CODE)(UH72)     828 1451
+       MODIFIED FOR GILBERT AND CAMERON PARAMETERS(SEE DOCUMENT    828 1451
+       ABOVE) AND"COMNUC" (DU70). COMNUC RESULTS NORMALIZED TO     828 1451
+       HIGH ENERGY MODNEW RESULTS TO ALLOW FOR COMPETING REACTIONS 828 1451
+   **** MT=16 CALCULATED WITH"MODNEW"(UH72) NO NORMALIZATION       828 1451
+       AVAILABLE.                                                  828 1451
+   **** MT=22 CALCULATED WITH"MODNEW"(UH72) NO NORMALIZATION       828 1451
+       AVAILABLE.                                                  828 1451
+   **** MT=28 CALCULATED WITH"MODNEW"(UH72) NO NORMALIZATION       828 1451
+       AVAILABLE.                                                  828 1451
+   **** MT=102 CALCULATED WITH"COMNUC"(DU70).LEVEL SPACING ASSUMED 828 1451
+       AND GAMMA GAMMA ASSUMED.2PI GAMMA GAMMA OVER D =0.000063.   828 1451
+       CROSS SECTION AT 14.0 MEV=0.1MILLIBARN.                     828 1451
+   **** MT=103 CALCULATED WITH"MODNEW"(UH72).NEUTRON YIELD         828 1451
+       ACTIVATION MEASUREMENT AT 14.1 MEV=21.5+-1.7 MILLIBARNS BY  828 1451
+       MENLOVE (ME70) SUPPORTS CALCULATION VALUE 14.1MEV=40 MILLI- 828 1451
+       BARNS.                                                      828 1451
+   **** MT=104 CALCULATED WITH"MODNEW(UH72) NO NORMALIZATION       828 1451
+       AVAILABLE.                                                  828 1451
+   **** MT=107 N,ALPHA CROSS SECTION EXOERGIC.CALCULATED WITH      828 1451
+       "MODNEW"(UH72).NO NORMALIZATION AVAILABLE.CALCULATIONS BY   828 1451
+       ARTHUR(AR77) WITH LASL VERSION OF"COMNUC" SHOW SIMILAR      828 1451
+       SHAPE AND MAGNITUDE.                                        828 1451
+ ****************************************************************  828 1451
+   MF=4 MT=2 ELASTIC ANGULAR DISTRIBUTIONS CALCULATED WITH"NUBAK"  828 1451
+       AS A KLASS 3 PROBLEM(AU64)                                  828 1451
+   **** MT=16,22,28,91 GIVEN AS ISOTROPIC IN LAB SYSTEM            828 1451
+   **** M=51-62 GIVEN AS ISOTROPIC IN THE C.O.M. SYSTEM            828 1451
+ ****************************************************************  828 1451
+   MF=5 MT=16,22,28,91 TEMPERATURE DISTRIBUTIONS AS A FUNCTION OF  828 1451
+       ENERGY CALCULATED PER PRESCRIPTION OF GILBERT AND CAMERON   828 1451
+       (GI65)                                                      828 1451
+ ****************************************************************  828 1451
+       AJ77 F.AJZENBERG-SELOVE ENERGY LEVELS OF LIGHT NUCLEI       828 1451
+                      A=18 PPP1-77   FEB.1977                      828 1451
+                      A=16-17 NUC.PHYS.A281,1,1977                 828 1451
+                      A=13-15 NUC.PHYS.A268,1,1976                 828 1451
+                      A=11-12 NUC.PHYS.A248,1,1975                 828 1451
+                      A= 5-10 NUC.PHYS.A227,1,1974                 828 1451
+       AR77 E.ARTHUR      LASL PRIVATE COMM. 1977                  828 1451
+       AU77 G.AUCHAMPAUGH LASL PRIVATE COMM. 1977                  828 1451
+       AU64 E.H.AUERBACH,ABACUS-2 BNL 6562 1964                    828 1451
+       BA70 H.BABA NUC.PHYS.A159,625,1970                          828 1451
+       BA66 J.K.BAIR ET.AL. PHYS.REV.144,799,1966                  828 1451
+       BE74 I.BERGQVIST PROC.2ND INT SYMP ON NEUTRON CAPTURE GAMMA 828 1451
+                      RAY SPECTROSCOPY AND RELATED TOPICS,199,1974 828 1451
+       DU70 C.L.DUNFORD,COMNUC AI-AEC-12931,1970                   828 1451
+       FE   E.FERMI NUCLEAR PHYSICS U.OF CHI PRESS PP-145-146 REV. 828 1451
+                      EDITION                                      828 1451
+       GI65 A.GILBERT AND A.G.W.CAMERON,CAN.J.PHYS.43,1446,1965    828 1451
+       GR50 A.E.S.GREEN AND D.F.EDWARDS PHYS.REV.91,49,1952        828 1451
+       HA61 G.C.HANNA ET.AL.CAN.J.PHYS.39,1784,1961                828 1451
+       HO72 N.E.HOLDEN AND W.F.WALKER,G.E.CHART OF NUCLIDES 11TH   828 1451
+                      ED.REVISED TO 1972                           828 1451
+       MA47 A.N.MAY AND E.P.HINCKS CAN.J.RES.A25,77,1947           828 1451
+       MA50 M.G.MAYER PHYS.REV.78,77,1960                          828 1451
+       MC77 A.B.MCDONALD ET.AL.NUC.PHYS.A281,325,1977              828 1451
+       ME70 H.O.MENLOVE ET.AL. NSE 40,136,1970                     828 1451
+       MO70 G.L.MORGAN ET.AL. NUC.PHYS.148,480,1970                828 1451
+       MU78 S.F.MUGHABGHAB PC-78 METHOD BNL-NCS25086R(TBP PHY.LET) 828 1451
+       MU73 S.F.MUGHABGHAB AND D.I.GARBER BNL-325 3RD ED.VOLI 1973 828 1451
+       PE74 C.M.PEREY AND F.G.PEREY AT.DATA TABLES 13,293,1974     828 1451
+       RO77 P.ROSE BNL PRIV.COMM. 1977                             828 1451
+       SE56 E.J.SEPPI  HANFORD PRIV.COMM TO SIGMA CNTR 1956        828 1451
+       UH72 M.UHL NUC.PHYS.A184,253,1972                           828 1451
+       VA68 T.M.VALENTINE AERE-R5770,1968                          828 1451
+       VO69 H.K.VONACH AND M.HILLE NUC.PHYS.A127,289,1969          828 1451
+       WI64 D.WILMORE AND P.E.HODGSON NUC.PHYS.55,673,1964         828 1451
+ ****************************************************************  828 1451
+ ***************** Program LINEAR (VERSION 2017-1) *************** 828 1451
+ For All Data Greater than 1.0000E-10 barns in Absolute Value      828 1451
+ Data Linearized to Within an Accuracy of .100000000 per-cent      828 1451
+ ***************** Program FIXUP (Version 2017-1) **************** 828 1451
+ Corrected ZA/AWR in All Sections-----------------------------Yes  828 1451
+ Corrected Thresholds-----------------------------------------No   828 1451
+ Extended Cross Sections to 20 MeV----------------------------No   828 1451
+ Allow Cross Section Deletion---------------------------------No   828 1451
+ Allow Cross Section Reconstruction---------------------------Yes  828 1451
+ Make All Cross Sections Non-Negative-------------------------Yes  828 1451
+ Delete Energies Not in Ascending Order-----------------------Yes  828 1451
+ Deleted Duplicate Points-------------------------------------Yes  828 1451
+ Check for Ascending MAT/MF/MT Order--------------------------Yes  828 1451
+ Check for Legal MF/MT Numbers--------------------------------Yes  828 1451
+ Allow Creation of Missing Sections---------------------------No   828 1451
+ Allow Insertion of Energy Points-----------------------------No   828 1451
+ Uniform Energy Grid for ALL MT-------------------------------No   828 1451
+ Delete Section if Cross Section =0 at All Energies-----------Yes  828 1451
+                                1        451        133          0 828 1451
+                                3         16          8          0 828 1451
+                                4         16          2          0 828 1451
+                                5         16         22          0 828 1451
+ 0.000000+0 0.000000+0          0          0          0          0 828 1  0
+                                                                   828 0  0
+ 8017.00000 16.8531000          0          0          0          0 828 3 16
+-4144300.00-4144300.00          0          0          1         15 828 3 16
+         15          2                                             828 3 16
+ 4390210.00 0.0        7760000.00 0.0        9340000.00 .001650000 828 3 16
+ 10140000.0 .008670000 10930000.0 .018760000 11730000.0 .029900000 828 3 16
+ 13310000.0 .054470000 14110000.0 .066260000 14900000.0 .078160000 828 3 16
+ 15700000.0 .090600000 17290000.0 .115280000 18080000.0 .125440000 828 3 16
+ 18780000.0 .133710000 19670000.0 .139750000 20000000.0 .142000000 828 3 16
+                                                                   828 3  0
+                                                                   828 0  0
+ 8017.00000 16.8531000          0          0          0          0 828 4 16
+ 0.000000+0 1.685310+1          1          1          0          0 828 4 16
+                                                                   828 4  0
+                                                                   828 0  0
+ 8017.00000 16.8531000          0          0          2          0 828 5 16
+ 4.144300+6 0.000000+0          0          9          1          3 828 5 16
+          3          2                                             828 5 16
+ 4.390210+6 0.000000+0 4.390210+6 5.000000-1 2.000000+7 5.000000-1 828 5 16
+ 0.000000+0 0.000000+0          0          0          1         16 828 5 16
+         16          2                                             828 5 16
+ 4.390210+6 3.719790+5 7.000000+6 3.719790+5 8.000000+6 3.778070+5 828 5 16
+ 9.000000+6 3.920370+5 1.000000+7 4.057470+5 1.100000+7 4.189910+5 828 5 16
+ 1.200000+7 4.318120+5 1.300000+7 4.442490+5 1.400000+7 4.563340+5 828 5 16
+ 1.450000+7 4.622540+5 1.500000+7 4.680960+5 1.600000+7 4.795600+5 828 5 16
+ 1.700000+7 4.907460+5 1.800000+7 5.016740+5 1.900000+7 5.123620+5 828 5 16
+ 2.000000+7 5.228240+5                                             828 5 16
+ 4.144300+6 0.000000+0          0          9          1          3 828 5 16
+          3          2                                             828 5 16
+ 4.390210+6 0.000000+0 4.390210+6 5.000000-1 2.000000+7 5.000000-1 828 5 16
+ 0.000000+0 0.000000+0          0          0          1         14 828 5 16
+         14          2                                             828 5 16
+ 4.390210+6 3.927790+5 9.000000+6 3.927790+5 1.000000+7 4.067020+5 828 5 16
+ 1.100000+7 4.203740+5 1.200000+7 4.336080+5 1.300000+7 4.464450+5 828 5 16
+ 1.400000+7 4.584190+5 1.450000+7 4.650280+5 1.500000+7 4.710570+5 828 5 16
+ 1.600000+7 4.828870+5 1.700000+7 4.944300+5 1.800000+7 5.057060+5 828 5 16
+ 1.900000+7 5.167330+5 2.000000+7 5.275280+5                       828 5 16
+                                                                   828 5  0
+                                                                   828 0  0
+                                                                     0 0  0
+                                                                    -1 0  0

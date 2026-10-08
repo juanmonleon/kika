@@ -1,0 +1,406 @@
+ ENDF/B-VIII.1                                                         0  0
+ 8.922700+4 2.250770+2          0          1          0          18931 1451
+ 0.000000+0 1.000000+0          0          0          0          68931 1451
+ 1.000000+0 2.000000+7          1          0         10          88931 1451
+ 0.000000+0 0.000000+0          0          0        351          38931 1451
+ 89-Ac-227 JAEA+      EVAL-FEB10 O.Iwamoto, T.Nakagawa, et al.    8931 1451
+ NDS 148, 1 (2018)    DIST-AUG24 REV1-SEP22            20240830   8931 1451
+---- ENDF/B-VIII.1    MATERIAL 8931         REVISION 1            8931 1451
+----- INCIDENT-NEUTRON DATA                                       8931 1451
+------ ENDF-6                                                     8931 1451
+                                                                  8931 1451
+ *****************************************************************8931 1451
+                         JENDL-4.0 adopted                        8931 1451
+ *****************************************************************8931 1451
+AUG11 Added MT458 fission energy release data based on R. Vogt    8931 1451
+Energy-Dependent Fission Q Values Generalized for All Actinides   8931 1451
+Oct 8, 2008 report LLNL-TR-407620                                 8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+History                                                           8931 1451
+07-10 Theoretical calculation was performed with CCONE code.      8931 1451
+      Data were compiled as JENDL/AC-2008/1/.                     8931 1451
+10-02 Data of prompt gamma rays due to fission were given.        8931 1451
+10-03 Covariance data were given.                                 8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=1 General information                                          8931 1451
+  MT=452 Number of Neutrons per fission                           8931 1451
+    Sum of MT's=455 and 456.                                      8931 1451
+                                                                  8931 1451
+  MT=455 Delayed neutron data                                     8931 1451
+    Estimated from systematics by Tuttle/2/, Benedetti et al./3/  8931 1451
+    and Waldo et al./4/                                           8931 1451
+                                                                  8931 1451
+  MT=456 Number of prompt neutrons per fission                    8931 1451
+    Estimated from Howerton's systematics/5/.                     8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF= 2 Resonance parameters                                        8931 1451
+  MT=151                                                          8931 1451
+  No resonance parameters are given.                              8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+     Thermal cross sections and resonance integrals (at 300K)     8931 1451
+    -------------------------------------------------------       8931 1451
+                    0.0253 eV    reson. integ.(*)                 8931 1451
+                     (barns)       (barns)                        8931 1451
+    -------------------------------------------------------       8931 1451
+    total             813.1                                       8931 1451
+    elastic            12.53                                      8931 1451
+    fission             0.0001         0.057                      8931 1451
+    capture           800.3         1020                          8931 1451
+    -------------------------------------------------------       8931 1451
+      (*) In the energy range from 0.5 eV to 10 MeV.              8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF= 3 Neutron cross sections                                      8931 1451
+  Below 0.6 eV:                                                   8931 1451
+    * Elastic scattering cross section is 12.5b calculated from   8931 1451
+      scattering radius of 9.962 fm/6/.                           8931 1451
+    * Fission cross section is in the 1/v shape.                  8931 1451
+      1 mb at 0.0253 eV was estimated from the experimental       8931 1451
+      data of < 0.35 mb/7/.                                       8931 1451
+    * Capture cross section is in the 1/v shape.                  8931 1451
+      Cross section of 800 b at 0.0253 eV was an average value of 8931 1451
+      experimental data of Monsecour and de Begge/8/ and          8931 1451
+      Cabell/9/.                                                  8931 1451
+                                                                  8931 1451
+  Above 0.3 eV:                                                   8931 1451
+    Cross sections were calculated with CCONE code/6/, except     8931 1451
+    for the elastic scattering (MT=2) and fission cross sections  8931 1451
+    (MT's=18, 19).                                                8931 1451
+                                                                  8931 1451
+  MT=1  Total cross section                                       8931 1451
+    The cross section was calculated with CC OMP of Soukhovitskii 8931 1451
+    et al./10/.                                                   8931 1451
+                                                                  8931 1451
+  MT= 2 Elastic scattering cross section                          8931 1451
+    Calculated as total - non-elastic scattering cross sections.  8931 1451
+                                                                  8931 1451
+  MT=18,19  Fission cross section, (n,f) cross section            8931 1451
+    Shape of 1/v was assumed up to 6.5 eV.                        8931 1451
+    From 6.5 eV to 100 keV, a constant value of 6 micro-b was     8931 1451
+    assumed.                                                      8931 1451
+    Above 170 keV, CCONE calculation was adopted.                 8931 1451
+    Experimental data of Kuks et al./11/ were used to adjust      8931 1451
+    parameters of CCONE code.                                     8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF= 4 Angular distributions of secondary neutrons                 8931 1451
+  MT=2  Elastic scattering                                        8931 1451
+    Calculated with CCONE code/6/.                                8931 1451
+                                                                  8931 1451
+  MT=18 Fission                                                   8931 1451
+    Isotropic distributions in the laboratory system were assumed.8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF= 5 Energy distributions of secondary neutrons                  8931 1451
+  MT=18 Prompt neutrons                                           8931 1451
+    Calculated with CCONE code/6/.                                8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF= 6 Energy-angle distributions                                  8931 1451
+    Calculated with CCONE code/6/.                                8931 1451
+    Distributions from fission (MT=18) are not included.          8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=12 Photon production multiplicities                            8931 1451
+  MT=18 Fission                                                   8931 1451
+    Calculated from the total energy released by the prompt       8931 1451
+    gamma-rays due to fission which was estimated from its        8931 1451
+    systematics, and the average energy of gamma-rays.            8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=14 Photon angular distributions                                8931 1451
+  MT=18 Fission                                                   8931 1451
+    Isotoropic distributions were assumed.                        8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=15 Continuous photon energy spectra                            8931 1451
+  MT=18 Fission                                                   8931 1451
+    Experimental data measured by Verbinski et al./12/ for        8931 1451
+    U-235 thermal fission were adopted.                           8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=31 Covariances of average number of neutrons per fission       8931 1451
+  MT=452 Number of neutrons per fission                           8931 1451
+    Sum of covariances for MT=455 and MT=456.                     8931 1451
+                                                                  8931 1451
+  MT=455                                                          8931 1451
+    Error of 15% was assumed.                                     8931 1451
+                                                                  8931 1451
+  MT=456                                                          8931 1451
+    Covariance was obtained by fitting a linear function to the   8931 1451
+    at 0.0 and 5.0 MeV with an uncertainty of 5%.                 8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=33 Covariances of neutron cross sections                       8931 1451
+  Covariances were given to all the cross sections by using       8931 1451
+  KALMAN code/13/ and the covariances of model parameters         8931 1451
+  used in the cross-section calculations.                         8931 1451
+                                                                  8931 1451
+  Covariances of the fission cross section were determined from   8931 1451
+  experimental data.                                              8931 1451
+                                                                  8931 1451
+  For the following cross sections, standard deviations in the    8931 1451
+  energy region below 0.6 eV were assumed as follows:             8931 1451
+                                                                  8931 1451
+     Total                2.9 %                                   8931 1451
+     Elastic scattering  50 %                                     8931 1451
+     Fission             50 %                                     8931 1451
+     Capture              2.8 % estimated from experimental data  8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=34 Covariances for Angular Distributions                       8931 1451
+  MT=2 Elastic scattering                                         8931 1451
+    Covariances were given only to P1 components.                 8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+MF=35 Covariances for Energy Distributions                        8931 1451
+  MT=18 Fission spectra                                           8931 1451
+    Estimated with CCONE and KALMAN codes.                        8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+***************************************************************** 8931 1451
+  Calculation with CCONE code                                     8931 1451
+***************************************************************** 8931 1451
+                                                                  8931 1451
+  Models and parameters used in the CCONE/6/ calculation          8931 1451
+  1) Coupled channel optical model                                8931 1451
+     Levels in the rotational band were included. Optical model   8931 1451
+     potential and coupled levels are shown in Table 1.           8931 1451
+                                                                  8931 1451
+  2) Two-component exciton model/14/                              8931 1451
+    * Global parametrization of Koning-Duijvestijn/15/            8931 1451
+      was used.                                                   8931 1451
+    * Gamma emission channel/16/ was added to simulate direct     8931 1451
+      and semi-direct capture reaction.                           8931 1451
+                                                                  8931 1451
+  3) Hauser-Feshbach statistical model                            8931 1451
+    * Moldauer width fluctuation correction/17/ was included.     8931 1451
+    * Neutron, gamma and fission decay channel were included.     8931 1451
+    * Transmission coefficients of neutrons were taken from       8931 1451
+      coupled channel calculation in Table 1.                     8931 1451
+    * The level scheme of the target is shown in Table 2.         8931 1451
+    * Level density formula of constant temperature and Fermi-gas 8931 1451
+      model were used with shell energy correction and collective 8931 1451
+      enhancement factor. Parameters are shown in Table 3.        8931 1451
+    * Fission channel:                                            8931 1451
+      Double humped fission barriers were assumed.                8931 1451
+      Fission barrier penetrabilities were calculated with        8931 1451
+      Hill-Wheler formula/18/. Fission barrier parameters were    8931 1451
+      shown in Table 4. Transition state model was used and       8931 1451
+      continuum levels are assumed above the saddles. The level   8931 1451
+      density parameters for inner and outer saddles are shown in 8931 1451
+      Tables 5 and 6, respectively.                               8931 1451
+    * Gamma-ray strength function of Kopecky et al/19/,/20/       8931 1451
+      was used. The prameters are shown in Table 7.               8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+------------------------------------------------------------------8931 1451
+                              Tables                              8931 1451
+------------------------------------------------------------------8931 1451
+                                                                  8931 1451
+Table 1. Coupled channel calculation                              8931 1451
+  --------------------------------------------------              8931 1451
+  * rigid rotor model was applied                                 8931 1451
+  * coupled levels = 0,2,4,7,11 (see Table 2)                     8931 1451
+  * optical potential parameters /10/                             8931 1451
+    Volume:                                                       8931 1451
+      V_0       = 49.97    MeV                                    8931 1451
+      lambda_HF = 0.01004  1/MeV                                  8931 1451
+      C_viso    = 15.9     MeV                                    8931 1451
+      A_v       = 12.04    MeV                                    8931 1451
+      B_v       = 81.36    MeV                                    8931 1451
+      E_a       = 385      MeV                                    8931 1451
+      r_v       = 1.2568   fm                                     8931 1451
+      a_v       = 0.633    fm                                     8931 1451
+    Surface:                                                      8931 1451
+      W_0       = 17.2     MeV                                    8931 1451
+      B_s       = 11.19    MeV                                    8931 1451
+      C_s       = 0.01361  1/MeV                                  8931 1451
+      C_wiso    = 23.5     MeV                                    8931 1451
+      r_s       = 1.1803   fm                                     8931 1451
+      a_s       = 0.601    fm                                     8931 1451
+    Spin-orbit:                                                   8931 1451
+      V_so      = 5.75     MeV                                    8931 1451
+      lambda_so = 0.005    1/MeV                                  8931 1451
+      W_so      = -3.1     MeV                                    8931 1451
+      B_so      = 160      MeV                                    8931 1451
+      r_so      = 1.1214   fm                                     8931 1451
+      a_so      = 0.59     fm                                     8931 1451
+    Coulomb:                                                      8931 1451
+      C_coul    = 1.3                                             8931 1451
+      r_c       = 1.2452   fm                                     8931 1451
+      a_c       = 0.545    fm                                     8931 1451
+    Deformation:                                                  8931 1451
+      beta_2    = 0.213                                           8931 1451
+      beta_4    = 0.066                                           8931 1451
+      beta_6    = 0.0015                                          8931 1451
+                                                                  8931 1451
+  * Calculated strength function                                  8931 1451
+    S0= 0.98e-4 S1= 2.28e-4 R'=  9.96 fm (En=1 keV)               8931 1451
+  --------------------------------------------------              8931 1451
+                                                                  8931 1451
+Table 2. Level Scheme of Ac-227                                   8931 1451
+  -------------------                                             8931 1451
+  No.  Ex(MeV)   J PI                                             8931 1451
+  -------------------                                             8931 1451
+   0  0.00000  3/2 -  *                                           8931 1451
+   1  0.02737  3/2 +                                              8931 1451
+   2  0.02998  5/2 -  *                                           8931 1451
+   3  0.04635  5/2 +                                              8931 1451
+   4  0.07414  7/2 -  *                                           8931 1451
+   5  0.08455  7/2 +                                              8931 1451
+   6  0.10994  9/2 +                                              8931 1451
+   7  0.12686  9/2 -  *                                           8931 1451
+   8  0.14800  5/2 +                                              8931 1451
+   9  0.16000  7/2 -                                              8931 1451
+  10  0.18732 11/2 +                                              8931 1451
+  11  0.19871 11/2 -  *                                           8931 1451
+  12  0.21078 13/2 +                                              8931 1451
+  13  0.22700  9/2 +                                              8931 1451
+  14  0.24900 15/2 +                                              8931 1451
+  15  0.27129 13/2 -                                              8931 1451
+  16  0.27314  5/2 -                                              8931 1451
+  17  0.30473  5/2 +                                              8931 1451
+  18  0.31600  7/2 -                                              8931 1451
+  19  0.33004  3/2 -                                              8931 1451
+  20  0.34200  7/2 +                                              8931 1451
+  -------------------                                             8931 1451
+  *) Coupled levels in CC calculation                             8931 1451
+                                                                  8931 1451
+Table 3. Level density parameters                                 8931 1451
+  --------------------------------------------------------        8931 1451
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         8931 1451
+            1/MeV     MeV     MeV     MeV     MeV     MeV         8931 1451
+  --------------------------------------------------------        8931 1451
+   Ac-228 17.7035  0.0000  3.5524  0.3477 -1.2833  1.7974         8931 1451
+   Ac-227 17.6369  0.7965  3.3377  0.4083 -1.1126  3.3578         8931 1451
+   Ac-226 17.5702  0.0000  3.0355  0.3357 -1.1051  1.5780         8931 1451
+   Ac-225 17.5034  0.8000  2.9322  0.4278 -1.2611  3.5537         8931 1451
+   Ac-224 17.4367  0.0000  2.4959  0.3776 -1.4315  1.9979         8931 1451
+  --------------------------------------------------------        8931 1451
+                                                                  8931 1451
+Table 4. Fission barrier parameters                               8931 1451
+  ----------------------------------------                        8931 1451
+  Nuclide     V_A    hw_A     V_B    hw_B                         8931 1451
+              MeV     MeV     MeV     MeV                         8931 1451
+  ----------------------------------------                        8931 1451
+   Ac-228   7.000   0.800   7.100   0.900                         8931 1451
+   Ac-227   7.000   0.800   7.100   0.930                         8931 1451
+   Ac-226   6.500   0.800   6.900   0.900                         8931 1451
+   Ac-225   7.000   0.800   7.100   0.930                         8931 1451
+   Ac-224   7.000   0.800   7.100   0.900                         8931 1451
+  ----------------------------------------                        8931 1451
+                                                                  8931 1451
+Table 5. Level density above inner saddle                         8931 1451
+  --------------------------------------------------------        8931 1451
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         8931 1451
+            1/MeV     MeV     MeV     MeV     MeV     MeV         8931 1451
+  --------------------------------------------------------        8931 1451
+   Ac-228 18.5887  0.0000  2.6000  0.3469 -2.4547  2.0000         8931 1451
+   Ac-227 19.4006  0.9292  2.6000  0.3387 -1.4940  2.9292         8931 1451
+   Ac-226 18.4487  0.0000  2.6000  0.3484 -2.4548  2.0000         8931 1451
+   Ac-225 18.3786  0.9333  2.6000  0.3491 -1.5215  2.9333         8931 1451
+   Ac-224 18.3085  0.0000  2.6000  0.3498 -2.4549  2.0000         8931 1451
+  --------------------------------------------------------        8931 1451
+                                                                  8931 1451
+Table 6. Level density above outer saddle                         8931 1451
+  --------------------------------------------------------        8931 1451
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         8931 1451
+            1/MeV     MeV     MeV     MeV     MeV     MeV         8931 1451
+  --------------------------------------------------------        8931 1451
+   Ac-228 18.5887  0.0000 -0.3600  0.3970 -1.7115  2.0000         8931 1451
+   Ac-227 19.4006  0.9292 -0.4000  0.3875 -0.7697  2.9292         8931 1451
+   Ac-226 18.4487  0.0000 -0.4400  0.3999 -1.7104  2.0000         8931 1451
+   Ac-225 18.3786  0.9333 -0.4800  0.4014 -0.7766  2.9333         8931 1451
+   Ac-224 18.3085  0.0000 -0.5200  0.4028 -1.7094  2.0000         8931 1451
+  --------------------------------------------------------        8931 1451
+                                                                  8931 1451
+Table 7. Gamma-ray strength function for Ac-228                   8931 1451
+  --------------------------------------------------------        8931 1451
+  K0 = 1.503   E0 = 4.500 (MeV)                                   8931 1451
+  * E1: ER = 11.03 (MeV) EG = 2.71 (MeV) SIG = 302.00 (mb)        8931 1451
+        ER = 13.87 (MeV) EG = 4.77 (MeV) SIG = 449.00 (mb)        8931 1451
+  * M1: ER =  6.71 (MeV) EG = 4.00 (MeV) SIG =   2.82 (mb)        8931 1451
+  * E2: ER = 10.31 (MeV) EG = 3.37 (MeV) SIG =   6.13 (mb)        8931 1451
+  --------------------------------------------------------        8931 1451
+                                                                  8931 1451
+                                                                  8931 1451
+References                                                        8931 1451
+ 1) O.Iwamoto et al.: J. Nucl. Sci. Technol., 46, 510 (2009).     8931 1451
+ 2) R.J.Tuttle: INDC(NDS)-107/G+Special, p.29 (1979).             8931 1451
+ 3) G.Benedetti et al.: Nucl. Sci. Eng., 80, 379 (1982).          8931 1451
+ 4) R.Waldo et al.: Phys. Rev., C23, 1113 (1981).                 8931 1451
+ 5) R.J.Howerton: Nucl. Sci. Eng., 62, 438 (1977).                8931 1451
+ 6) O.Iwamoto: J. Nucl. Sci. Technol., 44, 687 (2007).            8931 1451
+ 7) P.del Marmol et al.: J. Inorg. Nucl. Chem., 35, 4323 (1973).  8931 1451
+ 8) M.Monsecour, P.de Regge: J. Inorg. Nucl. Chem., 37, 1841      8931 1451
+   (1975).                                                        8931 1451
+ 9) M.J.Cabell: Can. J. Chem., 37, 1094 (1959).                   8931 1451
+10) E.Sh.Soukhovitskii et al.: Phys. Rev. C72, 024604 (2005).     8931 1451
+11) I.M.Kuks et al.: Prog.Rep. Yaderno-Fizicheskie Issledovaniya  8931 1451
+    Reports No.26, p.46 (1978).                                   8931 1451
+12) V.V.Verbinski et al.: Phys. Rev., C7, 1173 (1973).            8931 1451
+13) T.Kawano, K.Shibata, JAERI-Data/Code 97-037 (1997) in         8931 1451
+    Japanese.                                                     8931 1451
+14) C.Kalbach: Phys. Rev. C33, 818 (1986).                        8931 1451
+15) A.J.Koning, M.C.Duijvestijn: Nucl. Phys. A744, 15 (2004).     8931 1451
+16) J.M.Akkermans, H.Gruppelaar: Phys. Lett. 157B, 95 (1985).     8931 1451
+17) P.A.Moldauer: Nucl. Phys. A344, 185 (1980).                   8931 1451
+18) D.L.Hill, J.A.Wheeler: Phys. Rev. 89, 1102 (1953).            8931 1451
+19) J.Kopecky, M.Uhl: Phys. Rev. C41, 1941 (1990).                8931 1451
+20) J.Kopecky, M.Uhl, R.E.Chrien: Phys. Rev. C47, 312 (1990).     8931 1451
+                                                                  8931 1451
+                                1        451        358          08931 1451
+                                1        458         11          08931 1451
+                                3         18         29          08931 1451
+ 0.000000+0 0.000000+0          0          0          0          08931 1  0
+ 8.922700+4 2.250770+2          0          0          0          08931 1458
+ 0.000000+0 0.000000+0          0          2         54         278931 1458
+ 1.572239+8 8.647315+6 3.396000+6 5.400000+4 4.809000+4 1.570000+38931 1458
+ 7.028282+6 7.028282+4 3.807034+6 1.947664+4 3.914805+6 1.298443+48931 1458
+ 5.262589+6 1.947664+4 1.754181+8 1.174234+7 1.806807+8 1.211309+78931 1458
+-8.159921-2 4.487956-3 1.888000-1 1.540000-2-1.091000-3 4.480000-48931 1458
+ 1.693000-2 1.693000-4-7.500000-2 7.500000-3-7.500000-2 7.500000-38931 1458
+-1.000000-1 1.000000-2-1.026960+0 4.574267-1-1.126960+0 5.144636-18931 1458
+ 0.000000+0 0.000000+0-1.44000-10 8.12000-10 1.39000-11 2.36000-118931 1458
+ 0.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+08931 1458
+ 0.000000+0 0.000000+0-1.30100-10 7.66152-10-1.30100-10 7.66152-108931 1458
+ 0.000000+0 0.000000+0          0          0          0          08931 1  0
+                                                                  8931 0  0
+ 8.922700+4 2.250770+2          0          0          0          08931 3 18
+ 1.754181+8 1.754181+8          0          0          1         768931 3 18
+         76          5                                            8931 3 18
+ 1.000000-5 5.100000-3 2.530000-2 1.000000-4 6.500000+0 6.000000-68931 3 18
+ 1.000000+5 6.000000-6 1.700000+5 6.091620-6 1.881520+5 6.237420-68931 3 18
+ 1.995930+5 6.397430-6 2.000000+5 6.404070-6 2.117160+5 6.412690-68931 3 18
+ 2.280080+5 6.506970-6 2.500000+5 6.785890-6 2.501060+5 6.787660-68931 3 18
+ 2.724950+5 7.234460-6 2.743540+5 7.278230-6 3.000000+5 7.885790-68931 3 18
+ 3.060840+5 7.966330-6 3.174040+5 8.054370-6 3.315060+5 8.242080-68931 3 18
+ 3.435200+5 8.380750-6 4.000000+5 9.649380-6 5.000000+5 1.408010-58931 3 18
+ 6.000000+5 1.980970-5 7.000000+5 2.960010-5 8.000000+5 4.397340-58931 3 18
+ 9.000000+5 6.709570-5 1.000000+6 1.040320-4 1.100000+6 1.619800-48931 3 18
+ 1.200000+6 2.541600-4 1.300000+6 4.013810-4 1.400000+6 6.352530-48931 3 18
+ 1.500000+6 1.007670-3 1.600000+6 1.594450-3 1.700000+6 2.509670-38931 3 18
+ 1.800000+6 3.900330-3 1.900000+6 5.923900-3 2.000000+6 8.669390-38931 3 18
+ 2.100000+6 1.203610-2 2.200000+6 1.570800-2 2.400000+6 2.245150-28931 3 18
+ 2.600000+6 2.723280-2 2.800000+6 3.021200-2 3.000000+6 3.192270-28931 3 18
+ 3.500000+6 3.342120-2 4.000000+6 3.347080-2 4.500000+6 3.337870-28931 3 18
+ 5.000000+6 3.351590-2 5.500000+6 3.306610-2 6.000000+6 3.287020-28931 3 18
+ 6.500000+6 3.306930-2 7.000000+6 3.723980-2 7.500000+6 4.483020-28931 3 18
+ 8.000000+6 5.290820-2 8.500000+6 5.762790-2 9.000000+6 5.933600-28931 3 18
+ 9.500000+6 5.884050-2 1.000000+7 5.775470-2 1.050000+7 5.696440-28931 3 18
+ 1.100000+7 5.658620-2 1.150000+7 5.672600-2 1.200000+7 5.751710-28931 3 18
+ 1.250000+7 5.852780-2 1.300000+7 5.964200-2 1.350000+7 6.090790-28931 3 18
+ 1.400000+7 6.278840-2 1.450000+7 6.683650-2 1.500000+7 7.336930-28931 3 18
+ 1.550000+7 8.259230-2 1.600000+7 9.392110-2 1.650000+7 1.062050-18931 3 18
+ 1.700000+7 1.181560-1 1.750000+7 1.281970-1 1.800000+7 1.384730-18931 3 18
+ 1.850000+7 1.461870-1 1.900000+7 1.522310-1 1.950000+7 1.567760-18931 3 18
+ 2.000000+7 1.605640-1                                            8931 3 18
+ 0.000000+0 0.000000+0          0          0          0          08931 3  0
+                                                                  8931 0  0
+                                                                     0 0  0
+                                                                    -1 0  0

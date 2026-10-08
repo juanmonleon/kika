@@ -281,14 +281,9 @@ def _delayedNeutrons(section, report: ConversionReport):
             rate=PhysicalQuantity(value=float(rate), unit="1/s"),
             product=Product(pid="n", label="n"),
         ))
-    if families.delayedNeutrons:
-        report.lost(
-            f"MF1/455: the {len(families.delayedNeutrons)} precursor families "
-            f"have their decay rates and no multiplicity of their own — the "
-            f"per-family split is MF5/455's subsection weights, which this "
-            f"adapter does not decode. The aggregate delayed nu-bar is on the "
-            f"'{DELAYED_NUBAR_LABEL}' multiplicitySum"
-        )
+    # Whether the families end up with a spectrum and a multiplicity is MF5/455's
+    # business (`attachDelayedSpectra`), and the decoder says so once MF5 has
+    # been read -- not here, where it is not known yet.
     return families
 
 

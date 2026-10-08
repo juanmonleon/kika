@@ -1,0 +1,770 @@
+ ENDF/B-VIII.1                                                         0  0
+ 9.023200+4 2.300450+2          1          1          0          19040 1451
+ 0.000000+0 0.000000+0          0          0          0          69040 1451
+ 1.000000+0 6.000000+7          1          0         10          89040 1451
+ 0.000000+0 0.000000+0          0          0        692          39040 1451
+ 90-Th-232 IAEA       Eval-Feb06 CRP/Th-U Co-ordinator A. Trkov   9040 1451
+ NDS 148, 1 (2018)    DIST-AUG24 REV1-SEP22            20240830   9040 1451
+---- ENDF/B-VIII.1    MATERIAL 9040         REVISION 1            9040 1451
+----- INCIDENT-NEUTRON DATA                                       9040 1451
+------ ENDF-6                                                     9040 1451
+*** Feb 2013 - Densify energy mesh of the low-energy tail of the  9040 1451
+*** spectra in MF6/MT18 (A. Trkov for NNDC)                       9040 1451
+                                                                  9040 1451
+FILE ASSEMBLY, VERIFICATION AND VALIDATION                        9040 1451
+A. Trkov, IAEA                                                    9040 1451
+                                                                  9040 1451
+The ENDF-formatted data from EMPIRE calculation were merged       9040 1451
+consistently with the resonance data, including resonance         9040 1451
+covariance file (see description below). The nu-bar values and    9040 1451
+delayed neutron data from the BROND-3 file [1] were added,        9040 1451
+including the nu-bar covariance data.  Cross-covariances of       9040 1451
+nu-bar with other materials were removed because they referred    9040 1451
+to obsolete MAT numbers.                                          9040 1451
+                                                                  9040 1451
+The assembled file was checked according to the IAEA              9040 1451
+verification procedure [2]. None of the checking codes reported   9040 1451
+any significant errors. Comparison with experimental data         9040 1451
+from EXFOR confirmed that the data are representative of the      9040 1451
+database on which the evaluation is based. The ACE file for       9040 1451
+Monte Carlo transport calculations was produced as a result of    9040 1451
+the checking process. This was used for further validation on     9040 1451
+benchmarks listed below. Detailed results are presented in a      9040 1451
+separate report. The following benchmarks were considered:        9040 1451
+                                                                  9040 1451
+Label     Ref. to ICSBEP [3]                                      9040 1451
+KBR22     HEU-MET-FAST-068                                        9040 1451
+KBR23     HEU-MET-INTER-008                                       9040 1451
+KBR18     IEU-COMP-FAST-002                                       9040 1451
+KBR19     IEU-COMP-INTER-001                                      9040 1451
+KBR20     IEU-COMP-INTER-001                                      9040 1451
+KBR21     IEU-COMP-THERM-005                                      9040 1451
+SB-1      HEU-COMP-THERM-015                                      9040 1451
+SB-5           - " -                                              9040 1451
+SB-2      U233-COMP-THERM-001                                     9040 1451
+SB-2+1/2       - " -  (for comparison, no Th in the lattice)      9040 1451
+SB-3           - " -                                              9040 1451
+SB-4           - " -                                              9040 1451
+SB-6           - " -                                              9040 1451
+SB-7           - " -                                              9040 1451
+THOR      PU-MET-FAST-008                                         9040 1451
+                                                                  9040 1451
+IPPE Th Sphere with D-T source [2].                               9040 1451
+                                                                  9040 1451
+[1] A. Ignatyuk: BROND-3                                          9040 1451
+[2] A. Trkov: Resolution Broadening of Measured Leakage Spectra   9040 1451
+    from IPPE Spheres, International Atomic Energy Agency,        9040 1451
+    Vienna, Austria, Jan-2006, INDC(NDS)-0493                     9040 1451
+[3] NEA/NSC/DOC(2006)1: International Handbook of Evaluated       9040 1451
+    Reactor Physics Benchmarks Experiments, Nuclear Energy        9040 1451
+    Agency, OECD, Paris, March 2006.                              9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+***************************************************************** 9040 1451
+                                                                  9040 1451
+CROSS SECTION COVARANCE DATA                                      9040 1451
+R. Capote Noy and A. Trkov, IAEA                                  9040 1451
+                                                                  9040 1451
+Cross section covariance data were generated by the Monte Carlo   9040 1451
+technique [1] using the EMPIRE nuclear model code. The covariance 9040 1451
+matrix was used as a prior in the GANDR system [2]. GANDR was let 9040 1451
+to update the covariance matrix on the basis of experimental data 9040 1451
+from EXFOR. The following data from EXFOR were included in the    9040 1451
+analysis:                                                         9040 1451
+                                                                  9040 1451
+Fission:                                                          9040 1451
+EXFOR entry   Author                    Comment                   9040 1451
+41111002      Fursov et al       (1991)  Ratio                    9040 1451
+41430006      Shcherbakov et al  (2001)  Ratio                    9040 1451
+10658002      Behrens et al      (1982)  Ratio                    9040 1451
+20796002      Blons et al        (1975)                           9040 1451
+21963002      Kanda et al        (1985)  Ratio                    9040 1451
+40888002      Goverdovskij et al (1986)  Ratio                    9040 1451
+31424002      Sastry et al       (1992)                           9040 1451
+30813007      Garlea et al       (1984)                           9040 1451
+31459025      Garlea et al       (1992)                           9040 1451
+              Lisowski et al     (1988)  Unpublished              9040 1451
+              Eismont et al      (1999)  Unpublished              9040 1451
+Note:                                                             9040 1451
+Since practically all measurements were measured as ratios to     9040 1451
+a chosen standard, a 2% fully correlated uncertainty was added    9040 1451
+to all measurements.                                              9040 1451
+                                                                  9040 1451
+(n,2n)                                                            9040 1451
+30816002      Raics et al        (1985)                           9040 1451
+12305002      Cochran et al      (1958)                           9040 1451
+22845002      Karamanis et al    (2003)                           9040 1451
+20499003      Karius et al       (1979)                           9040 1451
+22235002      Chatani et al      (1993)                           9040 1451
+22203002      Chatani et al      (1991)                           9040 1451
+22637089      Konno et al        (1993)                           9040 1451
+                                                                  9040 1451
+Radiative capture                                                 9040 1451
+20871002      Kobayashi et al    (1979)                           9040 1451
+10554003      Macklin et al      (1977)                           9040 1451
+Aerts                                                             9040 1451
+22875002      Schillebeeckx et al(2004)                           9040 1451
+22654003      Wisshak et al      (2001)                           9040 1451
+10735002      Poenitz et al      (1978)                           9040 1451
+22663002      Karamanis et al    (2001)                           9040 1451
+41183003      Davletshin et al   (1993)                           9040 1451
+                                                                  9040 1451
+Total                                                             9040 1451
+21088003      Uttley et al       (1966)                           9040 1451
+10935004      Poenitz et al      (1981)                           9040 1451
+21766002      Iwasaki et al      (1981)                           9040 1451
+12853052      Poenitz et al      (1983)                           9040 1451
+10047094      Foster JR et al    (1971)                           9040 1451
+13753029      Abfalterer et al   (2001)                           9040 1451
+Note:                                                             9040 1451
+Although the uncertainties are quoted as total, a 1% systematic   9040 1451
+uncertainty was acknowledged by Abfalterer in a publication.      9040 1451
+By analogy, the same is adopted for all measurements. In addition,9040 1451
+a 0.2% fully correlated uncertainty was assumed between all       9040 1451
+measurements.                                                     9040 1451
+                                                                  9040 1451
+A 2% uncertainty was added from 1E-5 eV to 897 KeV to the elastic 9040 1451
+cross section to account for the scattering radius uncertainty    9040 1451
+The final covariance matrix was converted into ENDF format with   9040 1451
+the ENDCOV code (A.Trkov).                                        9040 1451
+                                                                  9040 1451
+[1] D. Smith: Covariance Matrices for Nuclear Cross Sections      9040 1451
+    Derived from Nuclear Model Calculations,                      9040 1451
+    Nuclear Data and Measurement Series,                          9040 1451
+    Argonne National Laboratory, ANL/NDM-159, November 2004.      9040 1451
+[2] D.W. Muir: GANDR - Tool for Global Assessment of Nuclear Data 9040 1451
+    Requirements; Ref.: Summary report of a Technical Meeting on  9040 1451
+    Covariances of Nuclear Reaction Data: GANDR Project,          9040 1451
+    International Atomic Energy Agency, 11-13 April 2005,         9040 1451
+    (Ed.: A. Trkov), INDC(NDS)-0471, April 20005.                 9040 1451
+[3] Improvement of the Standard Cross Sections for Light Elements,9040 1451
+    Coordinated Research Project, International Atomic Energy     9040 1451
+    Agency, Vienna, "http://www-nds.iaea.org/standards/".         9040 1451
+                                                                  9040 1451
+***************************************************************** 9040 1451
+ FAST ENERGY REGION                                               9040 1451
+ Authors: Roberto Capote (IAEA/NAPC, Nuclear Data Section)        9040 1451
+          Mihaela Sin (University of Bucharest, Romania)          9040 1451
+          Andrej Trkov (IAEA/NAPC, Nuclear Data Section)          9040 1451
+                                                                  9040 1451
+ EVALUATION PROCEDURE                                             9040 1451
+                                                                  9040 1451
+ Adopted procedure is based on careful theoretical                9040 1451
+ analysis utilizing available experimental data and               9040 1451
+ nuclear reaction model calculations.                             9040 1451
+                                                                  9040 1451
+ Available experimental data were interpreted  using              9040 1451
+ nuclear reaction model code EMPIRE-2.19b33 by                    9040 1451
+ M. Herman et al [He01, He02]. This code integrates               9040 1451
+ into a single system a number of important modules               9040 1451
+ and features, relevant for this evaluation:                      9040 1451
+ - Spherical and deformed Optical Model including                 9040 1451
+   coupled-channels (ECIS03 by J. Raynal)                         9040 1451
+ - Hauser-Feshbach statistical model including                    9040 1451
+   HRTW width fluctuation correction                              9040 1451
+ - Exciton model with Iwamoto-Harada cluster                      9040 1451
+   emission and Kalbach systematic angular distr.                 9040 1451
+   (code PCROSS by R.Capote et al)                                9040 1451
+ - Complete gamma-ray cascade after emission of                   9040 1451
+   each particle, including realistic treatment of                9040 1451
+   discrete transitions                                           9040 1451
+ - Access to OM segment of the RIPL-2 library [Ri03]              9040 1451
+ - Built-in input parameter files, such as masses,                9040 1451
+   level density, discrete levels, fission barriers               9040 1451
+   and gamma strength functions  based on the RIPL-2              9040 1451
+   library [Ri03]                                                 9040 1451
+ - Automatic retrieval of experimental data from the              9040 1451
+   EXFOR/CSISRS library                                           9040 1451
+ - ENDF-6 formatting (code EMPEND by A. Trkov)                    9040 1451
+   coupled to graphical presentation capabilities                 9040 1451
+   (code ZVView by V. Zerkin) through the chain of                9040 1451
+   PrePro codes by R. Cullen                                      9040 1451
+ - Checking codes (CHECKR, FIZCON, PSYCHE)                        9040 1451
+ - Support for NJOY                                               9040 1451
+                                                                  9040 1451
+ PARAMETERIZATIONS                                                9040 1451
+                                                                  9040 1451
+ Following models and parameters were used in the                 9040 1451
+ current evaluation:                                              9040 1451
+                                                                  9040 1451
+ Discrete levels were taken from the RIPL-2 level                 9040 1451
+ file, based on the 1998 version of ENSDF.                        9040 1451
+ Prompt fission neutron spectra and niu-bar                       9040 1451
+ calculation include contributions from thorium                   9040 1451
+ and actinium chain (see description of the method                9040 1451
+ used in Maslov V.M. et al, Eur.Phys.J.A18(2003)93).              9040 1451
+ Niu-bar calculation was renormalized to evaluation               9040 1451
+ based on experimental data (see niu-bar section)                 9040 1451
+ Prefission neutrons assumed anisotropic following                9040 1451
+ (n,xn) angular distribution.                                     9040 1451
+ EMPIRE-specific level densities                                  9040 1451
+ Exciton model calculations with code PCROSS                      9040 1451
+ Cluster emission in terms of the Iwamoto-Harada model            9040 1451
+ Kalbach systematics angular distributions (see RIPL-1)           9040 1451
+ Mean free path parameter in PCROSS energy dependent              9040 1451
+ (it was increased around 14 +/- 3 MeV to reproduce               9040 1451
+ energy dependence of n,2n cross section)                         9040 1451
+ Width fluctuations calculated within HRTW  up to 1.95 MeV        9040 1451
+ Exclusive spectra available up to emission loop #  3             9040 1451
+ Shell corrections according to Myers-Swiatecki                   9040 1451
+ Emission width of ejectile 0 from 233Th multiplied by   3.330    9040 1451
+ Emission width of ejectile 2 from 233Th multiplied by   1.500    9040 1451
+ Coupled Channels (ECIS) used for direct inelastic scattering     9040 1451
+ Direct contributions to continuum were smoothed using            9040 1451
+ gaussian function                                                9040 1451
+ For all nuclei: advanced treatment of fission                    9040 1451
+ E1 strength function set to MLO1                                 9040 1451
+ GDR parameters from RIPL-2/Exp.data+Plujko systematics           9040 1451
+                                                                  9040 1451
+          Use of preequilibrium models                            9040 1451
+          ----------------------------                            9040 1451
+         Exit channel      ECIS    PCROSS                         9040 1451
+                                                                  9040 1451
+         n to levels         1       0                            9040 1451
+         n to continuum      0       1                            9040 1451
+         p to levels         0       0                            9040 1451
+         p to continuum      0       1                            9040 1451
+         g                   0       1                            9040 1451
+         a                   0       1                            9040 1451
+                                                                  9040 1451
+  Collective levels used in direct calcualtions                   9040 1451
+  90 232     nucleus is treated as deformed                       9040 1451
+                                                                  9040 1451
+    Ncoll  Lmax IDef  Kgs  (Def(1,j),j=2,IDef,2)                  9040 1451
+      80    8    6   0.0  0.213E+00  0.660E-01  0.150E-02         9040 1451
+                                                                  9040 1451
+  N  E[MeV]   J  pi  Nph L  K  Dyn. Def.                          9040 1451
+  1  0.0000  0.0  1.  0  0  0  0.100E-01                          9040 1451
+  2  0.0494  2.0  1.  0  0  0  0.100E-01                          9040 1451
+  3  0.1621  4.0  1.  0  0  0  0.100E-01                          9040 1451
+  4  0.3322  6.0  1.  0  0  0  0.100E-01                          9040 1451
+  5  0.5560  8.0  1.  0  0  0  0.100E-01                          9040 1451
+  5  0.5569  8.0  1.  0  0  0  0.400E-01                          9040 1451
+  6  0.7143  1.0 -1.  0  0  0  0.133E-01                          9040 1451
+  7  0.7304  0.0  1.  0  0  0  0.180E-01                          9040 1451
+  8  0.7741  2.0  1.  0  0  0  0.130E-01                          9040 1451
+  9  0.7744  3.0 -1.  0  0  0  0.123E-01                          9040 1451
+ 10  0.7853  2.0  1.  0  0  0  0.160E-01                          9040 1451
+ 11  0.8270 10.0  1.  0  0  0  0.252E-01                          9040 1451
+ 12  0.8296  3.0  1.  0  0  0  0.180E-01                          9040 1451
+ 13  0.8730  4.0  1.  0  0  0  0.200E-01                          9040 1451
+ 14  0.8836  5.0 -1.  0  0  0  0.113E-01                          9040 1451
+ 15  0.8901  4.0  1.  0  0  0  0.200E-01                          9040 1451
+ 16  0.9604  5.0  1.  0  0  0  0.200E-01                          9040 1451
+ 17  1.0231  6.0  1.  0  0  0  0.200E-01                          9040 1451
+ 18  1.0429  7.0 -1.  0  0  0  0.155E-01                          9040 1451
+ 19  1.0499  6.0  1.  0  0  0  0.140E-01                          9040 1451
+ 20  1.0536  2.0  1.  0  0  0  0.130E-01                          9040 1451
+ 21  1.0729  2.0  1.  0  0  0  0.130E-01                          9040 1451
+ 22  1.0775  1.0 -1.  0  0  0  0.130E-01                          9040 1451
+ 23  1.0787  0.0  1.  0  0  0  0.130E-01                          9040 1451
+ 24  1.0944  3.0 -1.  0  0  0  0.130E-01                          9040 1451
+ 25  1.1057  3.0 -1.  0  0  0  0.120E-01                          9040 1451
+ 26  1.1218  2.0  1.  0  0  0  0.120E-01                          9040 1451
+ 27  1.1371 12.0  1.  0  0  0  0.152E-01                          9040 1451
+ 28  1.1433  4.0 -1.  0  0  0  0.170E-01                          9040 1451
+ 29  1.1460  7.0  1.  0  0  0  0.200E-01                          9040 1451
+ 30  1.1483  4.0  1.  0  0  0  0.170E-01                          9040 1451
+ 31  1.1825  3.0 -1.  0  0  0  0.170E-01                          9040 1451
+ 32  1.2089  5.0 -1.  0  0  0  0.260E-01                          9040 1451
+ 33  1.2181  4.0 -1.  0  0  0  0.330E-01                          9040 1451
+ 34  1.2221  8.0  1.  0  0  0  0.350E-01                          9040 1451
+ 35  1.2496  9.0 -1.  0  0  0  0.350E-01                          9040 1451
+ 36  1.2587  8.0  1.  0  0  0  0.330E-01                          9040 1451
+ 37  1.2932  2.0  1.  0  0  0  0.210E-01                          9040 1451
+ 38  1.3294  6.0  1.  0  0  0  0.250E-01                          9040 1451
+ 39  1.3700  6.0  1.  0  0  0  0.250E-01                          9040 1451
+ 40  1.3872  6.0  1.  0  0  0  0.250E-01                          9040 1451
+ 41  1.4140  2.0  1.  0  0  0  0.200E-01 cont                     9040 1451
+ 42  1.5290  3.0 -1.  0  0  0  0.220E-01 cont                     9040 1451
+ 43  1.6500  2.0  1.  0  0  0  0.250E-01 cont                     9040 1451
+ 44  1.7800  3.0 -1.  0  0  0  0.300E-01 cont                     9040 1451
+ 45  1.8800  4.0  1.  0  0  0  0.340E-01 cont                     9040 1451
+ 46  2.0800  3.0 -1.  0  0  0  0.280E-01 cont                     9040 1451
+ 47  2.2500  4.0  1.  0  0  0  0.340E-01 cont                     9040 1451
+ 48  2.4000  3.0 -1.  0  0  0  0.320E-01 cont                     9040 1451
+ 49  2.5060  2.0  1.  0  0  0  0.250E-01 cont                     9040 1451
+ 50  2.5560  3.0 -1.  0  0  0  0.300E-01 cont                     9040 1451
+ 51  2.6960  2.0  1.  0  0  0  0.220E-01 cont                     9040 1451
+ 52  2.8960  4.0  1.  0  0  0  0.310E-01 cont                     9040 1451
+ 53  3.0960  3.0 -1.  0  0  0  0.250E-01 cont                     9040 1451
+ 54  3.1960  4.0  1.  0  0  0  0.280E-01 cont                     9040 1451
+ 55  3.2960  3.0 -1.  0  0  0  0.270E-01 cont                     9040 1451
+ 56  3.3960  4.0  1.  0  0  0  0.350E-01 cont                     9040 1451
+ 57  3.8960  2.0  1.  0  0  0  0.230E-01 cont                     9040 1451
+ 58  4.0160  3.0 -1.  0  0  0  0.320E-01 cont                     9040 1451
+ 59  4.2160  4.0  1.  0  0  0  0.320E-01 cont                     9040 1451
+ 60  4.4160  2.0  1.  0  0  0  0.220E-01 cont                     9040 1451
+ 61  4.7160  4.0  1.  0  0  0  0.360E-01 cont                     9040 1451
+ 62  5.0160  2.0  1.  0  0  0  0.320E-01 cont                     9040 1451
+ 63  5.5160  4.0  1.  0  0  0  0.380E-01 cont                     9040 1451
+ 64  6.0160  2.0  1.  0  0  0  0.410E-01 cont                     9040 1451
+ 65  6.5160  3.0 -1.  0  0  0  0.420E-01 cont                     9040 1451
+ 66  7.0160  2.0  1.  0  0  0  0.380E-01 cont                     9040 1451
+ 67  7.5160  3.0 -1.  0  0  0  0.470E-01 cont                     9040 1451
+ 68  8.0160  2.0  1.  0  0  0  0.420E-01 cont                     9040 1451
+ 69  8.5160  3.0 -1.  0  0  0  0.450E-01 cont                     9040 1451
+ 70  9.0060  2.0  1.  0  0  0  0.440E-01 cont                     9040 1451
+ 71  9.2460  3.0 -1.  0  0  0  0.460E-01 cont                     9040 1451
+ 72  9.5060  2.0  1.  0  0  0  0.440E-01 cont                     9040 1451
+ 73  9.7460  3.0 -1.  0  0  0  0.460E-01 cont                     9040 1451
+ 74 10.0060  2.0  1.  0  0  0  0.440E-01 cont                     9040 1451
+ 75 10.3060  2.0  1.  0  0  0  0.440E-01 cont                     9040 1451
+ 76 10.5060  3.0 -1.  0  0  0  0.470E-01 cont                     9040 1451
+ 77 11.0060  2.0  1.  0  0  0  0.400E-01 cont                     9040 1451
+ 78 11.5060  2.0  1.  0  0  0  0.440E-01 cont                     9040 1451
+ 79 12.0060  3.0 -1.  0  0  0  0.460E-01 cont                     9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+ Inelastic o. m. parameters: RIPL catalog number  608             9040 1451
+ Neutron   o. m. parameters: RIPL catalog number  608             9040 1451
+ Proton    o. m. parameters: RIPL catalog number  4608            9040 1451
+ Alpha     o. m. parameters: RIPL catalog number  9600            9040 1451
+                                                                  9040 1451
+          B i n d i n g    e n e r g i e s                        9040 1451
+                                                                  9040 1451
+    Nucleus          1n        1p        4He                      9040 1451
+                                                                  9040 1451
+  90-Th-233         4.786     7.704    99.000                     9040 1451
+  90-Th-232         6.437     7.755    -4.083                     9040 1451
+  90-Th-231         5.118     7.036    -4.213                     9040 1451
+  90-Th-230         6.794     7.107    -4.770                     9040 1451
+  90-Th-229  <      5.254     6.599    -5.168                     9040 1451
+  90-Th-228  <      7.109     6.372    -5.520                     9040 1451
+  90-Th-227  <      5.456     5.791    -6.146                     9040 1451
+  90-Th-226  <      7.186     5.733    -6.452                     9040 1451
+  90-Th-225  <      5.759     5.209    -6.921                     9040 1451
+  90-Th-224  <      7.453     5.116    -7.304                     9040 1451
+  89-Ac-232         4.837     6.541    -4.325                     9040 1451
+  89-Ac-231         5.718     5.923    -3.833                     9040 1451
+  89-Ac-230         5.189     6.167    -3.799                     9040 1451
+  89-Ac-229  <      6.286     5.550    -4.397                     9040 1451
+  89-Ac-228  <      5.027     5.571    -4.821                     9040 1451
+  89-Ac-227  <      6.528     5.105    -5.042                     9040 1451
+  89-Ac-226  <      5.398     4.973    -5.536                     9040 1451
+  89-Ac-225  <      6.662     4.477    -5.935                     9040 1451
+  89-Ac-224  <      5.666     4.298    -6.327                     9040 1451
+  89-Ac-223  <      6.862     3.782    -6.783                     9040 1451
+  88-Ra-229         4.572     7.248    -3.518                     9040 1451
+  88-Ra-228         6.307     8.005    -4.071                     9040 1451
+  88-Ra-227         4.561     7.450    -4.450                     9040 1451
+  88-Ra-226  <      6.396     7.480    -4.870                     9040 1451
+  88-Ra-225  <      4.902     6.946    -5.166                     9040 1451
+  88-Ra-224  <      6.483     6.850    -5.789                     9040 1451
+  88-Ra-223  <      5.150     6.401    99.000                     9040 1451
+  88-Ra-222  <      6.717     6.250    -6.680                     9040 1451
+  88-Ra-221  <      5.376     5.803    99.000                     9040 1451
+  88-Ra-220  <      7.190     5.637    99.000                     9040 1451
+  87-Fr-228         5.329     7.876    -1.879                     9040 1451
+  87-Fr-227         5.752     6.411    99.000                     9040 1451
+  87-Fr-226  <      4.591     6.448    99.000                     9040 1451
+  87-Fr-225  <      5.862     5.876    -4.531                     9040 1451
+  87-Fr-224  <      4.806     5.942    99.000                     9040 1451
+  87-Fr-223  <      6.034     5.277    -5.431                     9040 1451
+  87-Fr-222  <      4.999     5.343    99.000                     9040 1451
+  87-Fr-221  <      6.270     4.623    99.000                     9040 1451
+  87-Fr-220  <      5.210     4.646    99.000                     9040 1451
+  87-Fr-219  <      6.508     3.885    99.000                     9040 1451
+                                                                  9040 1451
+  < indicates inclusive spectra only                              9040 1451
+                                                                  9040 1451
+ RESULTS                                                          9040 1451
+                                                                  9040 1451
+ MF=3 Neutron cross sections                                      9040 1451
+      EMPIRE calculations were adopted for:                       9040 1451
+    MT=1 Total                                                    9040 1451
+    MT=2 Elastic scattering                                       9040 1451
+    MT=4, 51-91 Inelastic scattering                              9040 1451
+    MT=102 Capture                                                9040 1451
+    MT=16   (n,2n)                                                9040 1451
+    MT=17   (n,3n)                                                9040 1451
+    MT=18   (n,f)                                                 9040 1451
+    MT=22   (n,na)                                                9040 1451
+    MT=24   (n,2na)                                               9040 1451
+    MT=28   (n,np)                                                9040 1451
+    MT=45   (n,npa)                                               9040 1451
+    MT=103, 600-649 (n,p)                                         9040 1451
+    MT=107, 800-849 (n,a)                                         9040 1451
+    MT=112  (n,pa)                                                9040 1451
+                                                                  9040 1451
+ MF=4 Angular distributions of secondary neutrons                 9040 1451
+      EMPIRE calculations were adopted                            9040 1451
+                                                                  9040 1451
+ MF=6 Energy-angle distributions of reaction                      9040 1451
+      products; EMPIRE calculations were adopted                  9040 1451
+                                                                  9040 1451
+ MF=12 Transition probability arrays for photon                   9040 1451
+       production; taken from the RIPL-2                          9040 1451
+                                                                  9040 1451
+ MF=14 Photon angular distributions                               9040 1451
+       isotropic distributions were assumed                       9040 1451
+                                                                  9040 1451
+ REFERENCES                                                       9040 1451
+                                                                  9040 1451
+ [He01] M. Herman  EMPIRE-II Statistical Model                    9040 1451
+    Code for Nuclear Reaction Calculations, in                    9040 1451
+    Nuclear Reaction Data and Nuclear Reactors,                   9040 1451
+    eds. N.Paver, M. Herman and A.Gandini, ICTP                   9040 1451
+    Lecture Notes 5 (ICTP Trieste, 2001) pp.137.                  9040 1451
+                                                                  9040 1451
+ [He02] M. Herman, R. Capote, P. Oblozinsky,                      9040 1451
+        M. Sin, A. Trkov, A. Ventura, V. Zerkin                   9040 1451
+    Recent Development of the Nuclear                             9040 1451
+    Reaction Model Code EMPIRE,  International                    9040 1451
+    Conference on Nuclear Data for Science &                      9040 1451
+    Technology - ND2004 September 26 - October 1,                 9040 1451
+    2004, Santa Fe, New Mexico.                                   9040 1451
+                                                                  9040 1451
+ [Ri03]                                                           9040 1451
+    Handbook for calculations of nuclear reaction                 9040 1451
+    data: Reference Input Parameter Library II.                   9040 1451
+    IAEA, Vienna 2005. Available online at                        9040 1451
+    http://www-nds.iaea.org/RIPL-2/                               9040 1451
+                                                                  9040 1451
+ ************************************************                 9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+ *** ENDRESS - Merging source and resonance ENDF files            9040 1451
+             Source ENDF Th-232_i3c7.e                            9040 1451
+          Resonance ENDF luiz\Th232_Jan09_ed2.dat                 9040 1451
+                                                                  9040 1451
+EVALUATION OF THE RESONANCE PARAMETERS IN THE ENERGY RANGE 0 to   9040 1451
+ 4 keV - L.C. Leal and H. Derrien, ORNL(2005)                     9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+  The resonance parameters were obtained from a sequential Bayes  9040 1451
+analysis, with the computer code SAMMY, of an experimental data   9040 1451
+base including Olsen(1) neutron transmission data(ORELA),         9040 1451
+Schillebeeckx(2) capture data(GELINA), and Gunsing(3) capture     9040 1451
+data(nTof) in the energy range 1 eV to 4 keV.  In the thermal     9040 1451
+energy range the capture data of Chrien(4) and of Lundgreen(5)    9040 1451
+were normalized to a value of 7.35 b recommended by Trkov(6) and  9040 1451
+fitted by SAMMY along with the total cross section of Olsen(1) in 9040 1451
+the energy range up to 1 eV.                                      9040 1451
+  The contribution of the external resonances(negative energy     9040 1451
+resonances and resonances at energies larger than 4 keV) was      9040 1451
+obtained from two fictitious resonances, one at -2000 eV and the  9040 1451
+other at 6000 eV.  The parameters of these resonances allow the   9040 1451
+representation of the Olsen thick samples transmission data with  9040 1451
+an accuracy of 1% on average, and a constant value of R'=9.686 fm 9040 1451
+could be used over the entire energy range analyzed, in agreement 9040 1451
+with Olsen(7) evaluated value. A ladder of 7 s-wave negative      9040 1451
+energy resonances from -3 eV to -110 eV was used to help the fit  9040 1451
+of the thermal energy range. The resonance at -3.52 eV could be   9040 1451
+used to adjust the cross sections at 0.0253 eV.                   9040 1451
+  The resonance set contain 244 s-wave resonances and 669 p-wave  9040 1451
+resonances. The large s-wave resonances were identified from their9040 1451
+shape; some other resonances were assigned s-wave because leading 9040 1451
+to too large reduced neutron width when assigned p.  A large      9040 1451
+number of resonances assigned p-wave are not seen in the          9040 1451
+experimental data; they were used to obtain the agreement with    9040 1451
+the Wigner distribution of the spacing and the Porter-Thomas      9040 1451
+distribution of the reduced neutron width.  It can be shown that  9040 1451
+a set of resonances that does not contain p-wave resonances of    9040 1451
+reduced neutron width smaller than 1.6 meV calculated average     9040 1451
+capture cross section too small by 0.5% in the energy range below 9040 1451
+1 keV, and too small by about 3% in the energy range 3 to 4 keV.  9040 1451
+  The prior values of the resonance parameters in the SAMMY fit   9040 1451
+were those from the Olsen(7) evaluation with a constant value of  9040 1451
+24.4 meV for the capture width of all the resonances. The value of9040 1451
+24.4 meV was kept for the p-wave resonances. In the SAMMY fit the 9040 1451
+capture width was allowed to vary for the large s-wave resonances 9040 1451
+since for most of these resonances the capture area is sensitive  9040 1451
+to the capture width. However, the average of the varied capture  9040 1451
+agrees within 4% with the value of 24.4 meV.                      9040 1451
+  The cross sections calculated at 0.0253 eV with the resonance   9040 1451
+parameters are 20.40 b and 7.34 b respectively for the total and  9040 1451
+capture cross sections compared to 20.38 b and 7.40 b calculated  9040 1451
+from ENDF/B-VI.  The capture resonance integral in the energy     9040 1451
+range 0.5 eV to 4000 eV is 81.74 b from the present evaluation and9040 1451
+83.62 b from ENDF/B-VI, i.e 2.3% lower than ENDF/B-VI. The total  9040 1451
+cross section calculated with the resonance parameters is not     9040 1451
+consistent with Olsen experimental data in the energy range near  9040 1451
+0.0253 eV due to the Bragg scattering effect in the measured total9040 1451
+cross section.                                                    9040 1451
+  The average capture cross sections calculated in several energy 9040 1451
+ranges are compared to the ENDF/B-VI values in the following      9040 1451
+table (SAMMY calculation):                                        9040 1451
+                                                                  9040 1451
+----------------------------------------------------------------- 9040 1451
+  Energy Range  Present Results    ENDF/B-VI   Difference         9040 1451
+     eV             Barn             Barn       Barn    %         9040 1451
+----------------------------------------------------------------- 9040 1451
+    0.1 -1.0        1.475            1.630     0.155  10.5        9040 1451
+    1.0 -20.        0.212            0.335     0.123  58.0        9040 1451
+    20. -100.      25.920           26.000     0.080   0.3        9040 1451
+    100.-500.       9.049            9.356     0.307   3.4        9040 1451
+    500.-1000.      3.115            3.284     0.169   5.4        9040 1451
+   1000.-2000.      2.063            2.177     0.114   5.5        9040 1451
+   2000.-3000.      1.584            1.650     0.066   4.2        9040 1451
+   3000.-4000.      1.141            1.267     0.126  11.0        9040 1451
+_________________________________________________________________ 9040 1451
+                                                                  9040 1451
+  More details on the evaluation will be described on ORNL report 9040 1451
+                                                                  9040 1451
+  The covariances of resolved resonance parameters were obtained  9040 1451
+automatically from the above-described analysis with the          9040 1451
+SAMMY code.                                                       9040 1451
+                                                                  9040 1451
+REFERENCES-                                                       9040 1451
+1/ D.K. Olsen and R.W. Ingle, ORNL/TM-7661(ENDF-307),1981.        9040 1451
+2/ P. Schillebeeckx, Private Communication.                       9040 1451
+3/ F. Gunsing, Private Communication.                             9040 1451
+4/ R.E. Chrien et al., NSE,65(2), 347(1978).                      9040 1451
+5/ G. Lundgreen et al., NUK,11,61(1968).                          9040 1451
+6/ A. Trkov, Private Communication.                               9040 1451
+7/ D.K. Olsen, ORNL/TM-8056(ENDF-319),1981.                       9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+EVALUATION OF THE AVERAGE RESONANCE PARAMETERS IN THE UNRESOLVED  9040 1451
+RESONANCE REGION FROM 4 TO 100 keV                                9040 1451
+                                                                  9040 1451
+A) ENDF-6 EVALUATED FILE FROM 4 to 100 KEV (MF=2,3,4)             9040 1451
+   I. Sirakov and P. Schillebeeckx (INRNE,IRMM), Geel, Dec 2005   9040 1451
+   R. Capote Noy and A. Trkov (IAEA)                              9040 1451
+                                                                  9040 1451
+Energy-dependent Parameters.                                      9040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+EVALUATION PROCEDURE                                              9040 1451
+  The present evaluation was obtained as the best NJOY-compatible 9040 1451
+description of the total and capture cross section in the URR.    9040 1451
+  Generalized single level representation was used by following   9040 1451
+the Froehner's (FITACS) approach [Fr00] approximated to be        9040 1451
+compatible with the ENDF-6 SLBW [CS01]. The contribution of the   9040 1451
+distant levels was accounted according to the standard description9040 1451
+scheme [Fr00], but with distant level parameters (and consequently9040 1451
+scattering radius) being energy dependent.                        9040 1451
+  The energy dependence of the potential scattering radius R'(E)  9040 1451
+was rigorously calculated from the OM shape elastic cross section 9040 1451
+& neutron transmission coefficients, taken from EMPIRE [He05]     9040 1451
+output [Ca05]. The corresponding TAB1 record is listed below.     9040 1451
+The energy-dependence of level spacing was calculated according to9040 1451
+the Gilbert-Cameron's level density formula. The energy-dependence9040 1451
+of gamma width was calculated according to the GDR model.         9040 1451
+  Average resonance parameters S0, S1, S2, Gg0, Gg1 were obtained 9040 1451
+from a simultaneous fit to the experimental data: total cross     9040 1451
+section data [Po81, Iw81, Ut66], capture cross section data [Bo04,9040 1451
+Gu04, Po78], and renormalized capture data [Ma81, Ko81], with the 9040 1451
+constraint to be consistent with the recent IAEA EMPIRE evaluation9040 1451
+[Ca05]. In the least square adjustment, D0 was kept fixed at 17.4 9040 1451
+eV according to the latest results obtained at n_TOF [Gu05]. The  9040 1451
+infinitely-dilute cross sections were determined with the RECENT  9040 1451
+code [Cu05], which (in contrast to NJOY [Ma00]) can process the   9040 1451
+ENDF-6 option of energy-dependent scattering radius.              9040 1451
+  Average parameters:                                             9040 1451
+                S (1E-4)      D (eV)*      Gg (meV)**             9040 1451
+    s-wave      0.8784        17.40        23.55                  9040 1451
+    p-wave      1.902                      22.66                  9040 1451
+    d-wave      1.266                      23.55                  9040 1451
+   *  Level spacing at the neutron separation energy of target+n. 9040 1451
+   ** Radiation width at En=0 eV.                                 9040 1451
+                                                                  9040 1451
+  The above description refers to the "basic evaluation". Most    9040 1451
+of the processing codes (e.g. NJOY) can not handle the energy     9040 1451
+dependent scattering radius. The adopted solution was to make     9040 1451
+a best "NJOY-compatible" approximation to the basic evaluation    9040 1451
+by putting the point-wise infinitely-dilute cross-section data    9040 1451
+into File 3 and use unresolved resonance parameters to calculate  9040 1451
+self-shielding only.                                              9040 1451
+  Considering that self-shielding effects are strongest at the    9040 1451
+lower end of the energy range, it was verified that the constant- 9040 1451
+scattering-radius approximation, with R'-value taken at En=4 keV, 9040 1451
+retains the self-shielding factors practically intact. This       9040 1451
+ensures that there is a consistency of both the cross sections and9040 1451
+the self-shielding factors of the present evaluation with the     9040 1451
+results obtained from the basic evaluation with energy-dependent  9040 1451
+scattering radius.                                                9040 1451
+  The evaluated infinitely-dilute cross sections (total, capture  9040 1451
+and in-elastic) are fully consistent with those of EMPIRE. This   9040 1451
+justified the unified use of the EMPIRE results in File 3         9040 1451
+(infinitely-dilute cross sections) and File 4 (angular            9040 1451
+distributions of secondary neutrons) from 4 to 100 keV.           9040 1451
+                                                                  9040 1451
+ CONT (defining NRO), and TAB1 record defining energy-dependent   9040 1451
+ scattering radius.                                               9040 1451
+ 4.000000+3 1.000000+5          2          2          1          09040 1451
+ 0.000000+0 0.000000+0          0          0          1         789040 1451
+         78          2                                            9040 1451
+ 4.000000+3 9.800843-1 5.000000+3 9.799127-1 6.000000+3 9.797387-19040 1451
+ 7.000000+3 9.795624-1 8.000000+3 9.793837-1 9.000000+3 9.792026-19040 1451
+ 1.000000+4 9.790191-1 1.100000+4 9.788332-1 1.200000+4 9.786450-19040 1451
+ 1.300000+4 9.784544-1 1.400000+4 9.782614-1 1.500000+4 9.780660-19040 1451
+ 1.600000+4 9.778682-1 1.700000+4 9.776681-1 1.800000+4 9.774656-19040 1451
+ 1.900000+4 9.772607-1 2.000000+4 9.770534-1 2.100000+4 9.768437-19040 1451
+ 2.200000+4 9.766316-1 2.300000+4 9.764172-1 2.400000+4 9.762004-19040 1451
+ 2.500000+4 9.759812-1 2.600000+4 9.757596-1 2.700000+4 9.755357-19040 1451
+ 2.800000+4 9.753094-1 2.900000+4 9.750806-1 3.000000+4 9.748496-19040 1451
+ 3.100000+4 9.746161-1 3.200000+4 9.743802-1 3.300000+4 9.741420-19040 1451
+ 3.400000+4 9.739014-1 3.500000+4 9.736584-1 3.600000+4 9.734130-19040 1451
+ 3.700000+4 9.731652-1 3.800000+4 9.729151-1 3.900000+4 9.726626-19040 1451
+ 4.000000+4 9.724077-1 4.100000+4 9.721504-1 4.200000+4 9.718907-19040 1451
+ 4.300000+4 9.716287-1 4.400000+4 9.713643-1 4.500000+4 9.710975-19040 1451
+ 4.600000+4 9.708283-1 4.700000+4 9.705567-1 4.800000+4 9.702828-19040 1451
+ 4.900000+4 9.700064-1 4.958361+4 9.698441-1 5.000000+4 9.697277-19040 1451
+ 5.100000+4 9.694466-1 5.200000+4 9.691632-1 5.300000+4 9.688773-19040 1451
+ 5.400000+4 9.685891-1 5.500000+4 9.682985-1 5.600000+4 9.680055-19040 1451
+ 5.700000+4 9.677101-1 5.800000+4 9.674123-1 5.900000+4 9.671122-19040 1451
+ 6.000000+4 9.668097-1 6.200000+4 9.661975-1 6.400000+4 9.655758-19040 1451
+ 6.600000+4 9.649446-1 6.800000+4 9.643039-1 7.000000+4 9.636536-19040 1451
+ 7.200000+4 9.629938-1 7.400000+4 9.623245-1 7.600000+4 9.616457-19040 1451
+ 7.800000+4 9.609573-1 8.000000+4 9.602594-1 8.200000+4 9.595520-19040 1451
+ 8.400000+4 9.588351-1 8.600000+4 9.581087-1 8.800000+4 9.573727-19040 1451
+ 9.000000+4 9.566272-1 9.200000+4 9.558722-1 9.400000+4 9.551076-19040 1451
+ 9.600000+4 9.543336-1 9.800000+4 9.535500-1 1.000000+5 9.527569-19040 1451
+                                                                  9040 1451
+                                                                  9040 1451
+B) COVARIANCE MATRIX OF THE RESONANCE PARAMETERS (MF=32)          9040 1451
+   Below 4 keV - L.C. Leal (ORNL) by using the SAMMY code         9040 1451
+                                                                  9040 1451
+   From 4 to 100 keV - P. Schillebeeckx, I. Sirakov (IRMM, INRNE) 9040 1451
+                                                                  9040 1451
+  The covariance matrix of the average resonance parameters in    9040 1451
+the unresolved resonance region was deduced from the covariance   9040 1451
+matrix of the experimental data and the sensitivity matrix or the 9040 1451
+partial derivatives with respect to the adjusted parameters.      9040 1451
+The covariance matrix of the experimental data was constructed by 9040 1451
+assuming the following uncertainties:                             9040 1451
+                                                                  9040 1451
+total cross section:                                              9040 1451
+  - correlated          : 1.0%                                    9040 1451
+  - uncorrelated        : 0.5%                                    9040 1451
+                                                                  9040 1451
+capture cross section                                             9040 1451
+  - correlated          : 1.5%                                    9040 1451
+  - uncorrelated        : 1.5%                                    9040 1451
+                                                                  9040 1451
+The sensitivity matrix was deduced with RECENT around the final   9040 1451
+average resonance parameters used to construct File 2.            9040 1451
+The covariance and sensivitivy matrix were constructed at the     9040 1451
+energy points of the cross section data in File 3.                9040 1451
+                                                                  9040 1451
+Since in the fitting procedure only the neutron strength functions9040 1451
+Sl for l = 0, 1 and 2 and the radiation widths Gg,l for l = 0,1   9040 1451
+were adjusted, only the partial derivatives with respect to these 9040 1451
+parameters were considered. The resulting covariance matrix of the9040 1451
+adjusted parameters is:                                           9040 1451
+                                                                  9040 1451
+     Parameter    Rel. Unc.             Correlation matrix        9040 1451
+                                                                  9040 1451
+  S0    8.78E-5     2.0%     1.00   -0.61    0.86   -0.54    0.73 9040 1451
+  Gg,0  23.6 meV    4.2%             1.00   -0.64    0.69   -0.58 9040 1451
+  S1    1.90E-4     4.1%                     1.00   -0.54    0.74 9040 1451
+  Gg,1  22.7 meV    3.7%                             1.00   -0.86 9040 1451
+  S2    1.27E-4     20.%                                     1.00 9040 1451
+                                                                  9040 1451
+This covariance matrix was used to create file 32.                9040 1451
+To construct file 32 a very small relative uncertainty on the     9040 1451
+level distance was introduced and it was assumed that the         9040 1451
+relative covariance elements for the reduced neutron widths can be9040 1451
+approximated by the relative covariance elements of the neutron   9040 1451
+strength functions.                                               9040 1451
+                                                                  9040 1451
+ ---------------------------------------------------------------  9040 1451
+                                                                  9040 1451
+ REFERENCES                                                       9040 1451
+ [Bo04]  A.Borella et al., "Determination of the Th-232(n,g) Cross9040 1451
+         Section from 4 to 140 keV at GELINA", NSE, v.152(2006),  9040 1451
+         p.1; X4 #22875002.                                       9040 1451
+ [Ca05]  R.Capote, Private communication using optical model as   9040 1451
+         given in  E.S.Soukhovitskii et al., Phys. Rev.C 72,      9040 1451
+         024604 (2005).                                           9040 1451
+ [Cu05]  D.Cullen, "ENDF/B Pre-processing Codes v.2005-1",        9040 1451
+         available at www-nds.iaea.or.at/ndspub/endf/prepro/.     9040 1451
+ [CS01]  CSEWG, "ENDF-102 Data Formats and Procedures for the     9040 1451
+         Evaluated Nuclear Data File ENDF-6", BNL-NCS-44945-01/04,9040 1451
+         Rev. Apr 2001.                                           9040 1451
+ [Fr00]  F.Froener, "Evaluation and Analysis of Nuclear Resonance 9040 1451
+         Data", JEFF Report 18, NEA, 2000.                        9040 1451
+ [Gu04]  F.Gunsing et al., "Measurement of the Th-232 Neutron     9040 1451
+         Capture Cross Section at the CERN n_TOF Facility", Int.  9040 1451
+         Conf. on Nucl. Data for Sci. and Techn., Santa Fe,2004,  9040 1451
+         part 2, p.1470; also G.Aerts, "Mesure de la section      9040 1451
+         efficace de capture neutronique du Th-232 a n_TOF au     9040 1451
+         CERN", These-09/05, DAPNIA-05-12-T.                      9040 1451
+ [Gu05]  F. Gunsing, Private Communication.                       9040 1451
+ [He05]  M.Herman et al., "Nuclear reaction model code EMPIRE     9040 1451
+         v.2.19", available at www-nds.iaea.org/empire/.          9040 1451
+ [Iw81]  T.Iwasaki et al., "Measurements of neutron total cross   9040 1451
+         section for Th-232", R, NEANDC(J)-75,8109, X4 #21766002. 9040 1451
+ [Ja06]  N.Janeva, Private communication.                         9040 1451
+ [Ko01]  Koyumdjieva et al., "Validation of the characteristic    9040 1451
+         function model for the unresolved resonance region",     9040 1451
+         Nucl. Sci.Eng., 137(2), 194 (2001).                      9040 1451
+ [Ko81]  K.Kobayashi et al., "Measurement of the Neutron Capture  9040 1451
+         Cross Section of Th-232 from 1 keV to 408 keV", NST,     9040 1451
+                                1        451        699          09040 1451
+                                1        458          5          09040 1451
+                                3         18         58          09040 1451
+ 0.000000+0 0.000000+0          0          0          0          09040 1  0
+ 9.023200+4 2.300450+2          0          0          0          09040 1458
+ 0.000000+0 0.000000+0          0          0         18          99040 1458
+ 1.603900+8 9.200000+5 4.410000+6 1.200000+5 2.200000+4 4.400000+39040 1458
+ 7.110000+6 9.000000+5 8.160000+6 1.000000+5 8.380000+6 1.000000+59040 1458
+ 1.127000+7 1.100000+6 1.884700+8 3.087000+5 1.997400+8 2.800000+59040 1458
+ 0.000000+0 0.000000+0          0          0          0          09040 1  0
+                                                                  9040 0  0
+ 9.023200+4 2.300450+2          0          0          0          09040 3 18
+ 1.884700+8 1.884700+8          0          0          1        1649040 3 18
+        164          2                                            9040 3 18
+ 1.000000-5 0.000000+0 4.000000+3 0.000000+0 4.000000+3 3.799060-69040 3 18
+ 4.500000+3 3.596740-6 5.000000+3 3.423650-6 6.000000+3 3.145720-69040 3 18
+ 7.000000+3 2.930710-6 8.000000+3 2.753490-6 9.000000+3 2.599570-69040 3 18
+ 1.000000+4 2.483100-6 1.500000+4 1.972560-6 2.000000+4 1.624260-69040 3 18
+ 2.500000+4 1.365790-6 3.000000+4 1.170920-6 3.500000+4 1.022460-69040 3 18
+ 4.000000+4 9.112730-7 4.500000+4 8.269610-7 4.850000+4 7.802510-79040 3 18
+ 4.900000+4 7.743570-7 5.000000+4 7.585200-7 5.100000+4 7.377210-79040 3 18
+ 5.300000+4 7.052430-7 5.500000+4 6.726710-7 6.000000+4 6.078190-79040 3 18
+ 7.000000+4 5.242480-7 8.000000+4 4.827070-7 9.000000+4 4.641200-79040 3 18
+ 1.000000+5 4.601090-7 1.100000+5 4.629440-7 1.200000+5 4.502150-79040 3 18
+ 1.300000+5 4.232830-7 1.400000+5 3.877160-7 1.440000+5 3.776160-79040 3 18
+ 1.500000+5 3.667490-7 1.600000+5 3.569630-7 1.750000+5 3.519780-79040 3 18
+ 1.900000+5 3.568240-7 2.000000+5 3.642200-7 2.500000+5 4.554620-79040 3 18
+ 3.000000+5 7.226460-7 3.500000+5 2.190850-6 4.000000+5 1.022450-59040 3 18
+ 4.500000+5 4.401590-6 5.000000+5 4.726420-6 5.500000+5 5.526680-69040 3 18
+ 6.000000+5 8.106600-6 6.500000+5 2.446310-5 7.000000+5 4.858390-59040 3 18
+ 7.500000+5 1.868460-4 8.000000+5 6.007700-4 8.500000+5 5.777180-49040 3 18
+ 9.000000+5 3.520040-4 9.500000+5 9.084020-4 1.000000+6 1.417150-39040 3 18
+ 1.100000+6 9.915840-4 1.140000+6 1.302880-3 1.200000+6 3.370900-39040 3 18
+ 1.240000+6 7.526090-3 1.300000+6 2.080150-2 1.350000+6 4.479750-29040 3 18
+ 1.400000+6 5.793890-2 1.460000+6 6.162070-2 1.500000+6 6.365990-29040 3 18
+ 1.520000+6 7.571190-2 1.560000+6 1.111900-1 1.580000+6 1.266670-19040 3 18
+ 1.600000+6 1.201980-1 1.620000+6 1.018690-1 1.660000+6 7.314430-29040 3 18
+ 1.670000+6 7.616450-2 1.700000+6 9.521130-2 1.720000+6 9.103110-29040 3 18
+ 1.760000+6 6.945910-2 1.780000+6 6.958730-2 1.800000+6 7.524410-29040 3 18
+ 1.820000+6 9.034890-2 1.860000+6 1.105650-1 1.880000+6 1.146780-19040 3 18
+ 1.900000+6 1.129340-1 1.920000+6 1.075140-1 1.960000+6 1.151400-19040 3 18
+ 2.000000+6 1.200070-1 2.020000+6 1.178190-1 2.060000+6 1.209180-19040 3 18
+ 2.080000+6 1.243030-1 2.100000+6 1.237970-1 2.120000+6 1.302180-19040 3 18
+ 2.140000+6 1.346380-1 2.160000+6 1.419850-1 2.200000+6 1.425230-19040 3 18
+ 2.220000+6 1.394970-1 2.240000+6 1.319810-1 2.260000+6 1.305330-19040 3 18
+ 2.280000+6 1.227210-1 2.340000+6 1.109080-1 2.360000+6 1.095820-19040 3 18
+ 2.400000+6 1.102620-1 2.500000+6 1.177510-1 2.600000+6 1.221960-19040 3 18
+ 2.750000+6 1.269500-1 2.850000+6 1.311140-1 2.900000+6 1.320060-19040 3 18
+ 3.000000+6 1.336850-1 3.200000+6 1.375720-1 3.550000+6 1.415190-19040 3 18
+ 3.750000+6 1.430270-1 4.000000+6 1.442080-1 4.250000+6 1.443520-19040 3 18
+ 4.500000+6 1.454060-1 5.000000+6 1.467030-1 5.500000+6 1.445290-19040 3 18
+ 5.750000+6 1.436560-1 6.100000+6 1.614360-1 6.400000+6 2.538350-19040 3 18
+ 6.800000+6 3.557290-1 7.000000+6 3.850910-1 7.250000+6 3.971230-19040 3 18
+ 7.500000+6 3.997310-1 7.750000+6 3.890310-1 8.000000+6 3.692930-19040 3 18
+ 8.500000+6 3.494940-1 9.000000+6 3.362000-1 9.500000+6 3.227510-19040 3 18
+ 1.000000+7 3.178630-1 1.050000+7 3.137920-1 1.100000+7 3.127020-19040 3 18
+ 1.180000+7 3.063030-1 1.200000+7 3.044000-1 1.220000+7 3.023730-19040 3 18
+ 1.260000+7 3.055740-1 1.300000+7 3.082140-1 1.360000+7 3.316790-19040 3 18
+ 1.410000+7 3.606860-1 1.470000+7 3.911710-1 1.500000+7 4.135900-19040 3 18
+ 1.550000+7 4.389750-1 1.600000+7 4.541880-1 1.650000+7 4.611570-19040 3 18
+ 1.700000+7 4.649290-1 1.770000+7 4.767580-1 1.800000+7 4.827750-19040 3 18
+ 1.900000+7 4.920430-1 2.000000+7 5.274050-1 2.100000+7 6.010140-19040 3 18
+ 2.200000+7 6.764400-1 2.300000+7 6.973610-1 2.400000+7 7.046020-19040 3 18
+ 2.500000+7 6.950110-1 2.600000+7 6.901070-1 2.800000+7 7.038300-19040 3 18
+ 3.000000+7 7.519830-1 3.400000+7 8.038500-1 3.600000+7 8.135630-19040 3 18
+ 3.800000+7 8.529130-1 4.000000+7 8.868020-1 4.200000+7 8.938560-19040 3 18
+ 4.400000+7 8.801540-1 4.600000+7 8.903020-1 4.800000+7 9.061330-19040 3 18
+ 5.000000+7 9.098420-1 5.100000+7 9.184860-1 5.300000+7 9.139080-19040 3 18
+ 5.700000+7 9.242480-1 6.000000+7 9.351850-1                      9040 3 18
+ 0.000000+0 0.000000+0          0          0          0          09040 3  0
+                                                                  9040 0  0
+                                                                     0 0  0
+                                                                    -1 0  0

@@ -739,10 +739,11 @@ class PerturbationSet:
         discrete line has no such integral.
         """
         from kika.nuclear_data.model import EVAL_LABEL
+        from kika.nuclear_data.model import ANALYTIC_SPECTRA
         from kika.nuclear_data.model.functions.higher import Function2d
 
         channel = getattr(reaction, "outputChannel", None)
-        candidates = []
+        candidates, refused = [], []
         for product in (getattr(channel, "products", None) or ()):
             distribution = getattr(product, "distribution", None)
             if distribution is None:
@@ -750,17 +751,31 @@ class PerturbationSet:
             form = (distribution.get(EVAL_LABEL)
                     if hasattr(distribution, "get") else distribution)
             energy = getattr(form, "energy", None)
-            if isinstance(energy, Function2d):
+            if isinstance(energy, ANALYTIC_SPECTRA):
+                refused.append(type(energy).__name__)
+            elif isinstance(energy, Function2d):
                 candidates.append((product, energy))
+        if not candidates and refused:
+            # PD-3 (decided 2026-10-08): refused by name.
+            # A parametrised spectrum is a formula, MF35 is a covariance of the group
+            # integrals of a *table*, and perturbing the formula would need a
+            # covariance of its parameters, which ENDF does not carry.
+            # Tabulating it and applying an external covariance is roadmap P5.
+            raise ValueError(
+                f"MT{mt}: the energy distribution is a parametrised spectrum "
+                f"({', '.join(refused)}), and an MF35 perturbation is refused "
+                f"for it (decision PD-3): MF35 covers group integrals of a "
+                f"tabulated chi(E'|E), and a formula has no such table. "
+                f"Tabulating it with toPointwise() and supplying a covariance "
+                f"is the external-covariance route (P5), not built yet"
+            )
         if not candidates:
             raise ValueError(
                 f"MT{mt} has no product carrying an evaluated energy "
                 f"distribution as a table of chi(E'|E), so an MF35 "
-                f"perturbation has nothing to act on. An NK>1 MF5 section and "
-                f"the analytic laws (LF=5/7/9/11/12) reach the model as "
-                f"provenance and not as a node -- the decoder's report says so "
-                f"-- and neither can be perturbed from a covariance of group "
-                f"integrals"
+                f"perturbation has nothing to act on. A law the reader keeps as "
+                f"bytes reaches the model as provenance and not as a node -- "
+                f"the decoder's report says so"
             )
         if len(candidates) > 1:
             raise ValueError(

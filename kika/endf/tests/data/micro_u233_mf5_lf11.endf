@@ -1,0 +1,693 @@
+ $Rev:: 532      $  $Date:: 2011-12-05#$                             1 0  0    0
+ 9.223300+4 2.310377+2          1          1          0          19222 1451    1
+ 0.000000+0 1.000000+0          0          0          0          69222 1451    2
+ 1.000000+0 3.000000+7          1          0         10          79222 1451    3
+ 0.000000+0 0.000000+0          0          0        541          49222 1451    4
+ 92-U -233 LANL,ORNL  EVAL-SEP06 Young,Chadwick,Talou,Leal,Derrien9222 1451    5
+                      DIST-DEC06                       20111222   9222 1451    6
+----ENDF/B-VII.1      MATERIAL 9222                               9222 1451    7
+-----INCIDENT NEUTRON DATA                                        9222 1451    8
+------ENDF-6 FORMAT                                               9222 1451    9
+***************************************************************** 9222 1451   10
+                                                                  9222 1451   11
+            ENDF/B-VII.1 EVALUATION MODIFICATIONS                 9222 1451   12
+                             2/27/2011                            9222 1451   13
+      P.G.Young, P.Talou, T. Kawano, M.B.Chadwick, (LANL)         9222 1451   14
+                                                                  9222 1451   15
+                  ----- SUMMARY -----                             9222 1451   16
+                                                                  9222 1451   17
+   The ENDF/B-VII.1 evaluation is a modification of the ENDF/B-   9222 1451   18
+VII.0 evaluation to correct the cross sections and angular        9222 1451   19
+distributions of the ground-state rotational band of 233U, i.e.,  9222 1451   20
+MF=3,4, MT=51,52,53,55,58,65. The correction was required because 9222 1451   21
+the compound-nucleus components for these states in the Version   9222 1451   22
+VIII.0 evaluation did not take proper account of fission          9222 1451   23
+competition. In addition, the inelastic cross section below 1 MeV 9222 1451   24
+exhibited an anomalous peak, mainly due to MT=51,52.  The         9222 1451   25
+following changes were made:                                      9222 1451   26
+                                                                  9222 1451   27
+1. The compound nucleus cross sections for MT=51,52,53,55,58,65   9222 1451   28
+were re-calculated and combined with the direct components from   9222 1451   29
+ECIS calculations.                                                9222 1451   30
+2. The MF=4, MT=53,55,58,65 data were replaced with these         9222 1451   31
+data.                                                             9222 1451   32
+3. The MF=3, MT=53,55,58,65 data were also replaced with these    9222 1451   33
+data.                                                             9222 1451   34
+4. The corrected results for MF=3,4, MT=51,52 were found to       9222 1451   35
+inadequately reproduce the measurements of Haouat et. al (Ha82    9222 1451   36
+below). It was surmised that the deformed optical model potential 9222 1451   37
+used in the evaluation might not be adequate at incident energies 9222 1451   38
+below approximately 1.0-1.5 MeV. Therefore, to correct this       9222 1451   39
+problem, the compound nucleus contributions to these states were  9222 1451   40
+scaled by a single factor to produce better agreement with the    9222 1451   41
+Haouat et al. experiment.  The difference in the inelastic cross  9222 1451   42
+section was absorbed in the elastic cross section.                9222 1451   43
+5. The data were modified for MF=3,4, MT=2,51,52 (the MT=2        9222 1451   44
+change was small).                                                9222 1451   45
+                                                                  9222 1451   46
+***************************************************************** 9222 1451   47
+12/09/2010  S.T. Holloway on behalf of LANL                       9222 1451   48
+  Reverted MF=1/5, MT=455 Delayed-neutron 6-grp data to           9222 1451   49
+  ENDF/B-VI.8 values.                                             9222 1451   50
+***************************************************************** 9222 1451   51
+                                                                  9222 1451   52
+                 ENDF/B-VII EVALUATION                            9222 1451   53
+                                                                  9222 1451   54
+P.G.Young, M.B.Chadwick, R.E.MacFarlane, W.B.Wilson, D.G.Madland, 9222 1451   55
+                P.Talou, T. Kawano (LANL)                         9222 1451   56
+                          and                                     9222 1451   57
+    L. Leal, H. Derrien, Guber, N. Larson, R. Wright,             9222 1451   58
+                    R.Spencer (ORNL)                              9222 1451   59
+                                                                  9222 1451   60
+                  ----- SUMMARY -----                             9222 1451   61
+   The ENDF/B-VII evaluation is a complete revision of almost all 9222 1451   62
+the data in the 233U evaluation. Major features of the evaluation 9222 1451   63
+are:                                                              9222 1451   64
+1. A new evaluation of the (n,f) cross section based on ENDF/B-   9222 1451   65
+   VII standard cross section analysis is incorporated.           9222 1451   66
+2. A new evaluation of nubar consistent with experimental data    9222 1451   67
+   within uncertainties and with fast critical benchmark          9222 1451   68
+   measurements is included.                                      9222 1451   69
+3. New resolved and unresolved resonance parameter data are       9222 1451   70
+   incorporated.                                                  9222 1451   71
+4. Improved delayed neutron data are incorporated.                9222 1451   72
+5. Coupled-channels optical model calculations are used to        9222 1451   73
+   provide scattering cross sections and angular distributions.   9222 1451   74
+6. New reaction theory calculations are utilized for (n,xn) and   9222 1451   75
+   other reactions.                                               9222 1451   76
+7. Compound nucleus and direct reaction cross sections and        9222 1451   77
+   angular distributions are extended to an excitation energy of  9222 1451   78
+   1.5 MeV.                                                       9222 1451   79
+8. Fission neutron spectra from JENDL-3.3 are adopted.            9222 1451   80
+9. Covariance matrix evaluations for all energy ranges.           9222 1451   81
+                                                                  9222 1451   82
+            ----- DETAILED DESCRIPTION -----                      9222 1451   83
+                                                                  9222 1451   84
+>> MF=1 GENERAL INFORMATION                                       9222 1451   85
+                                                                  9222 1451   86
+MT=452: TOTAL AVERAGE NEUTRON MULTIPLICITY PER FISSION (TOTAL     9222 1451   87
+        NUBAR)                                                    9222 1451   88
+   Sum of MT=455 and 456. Adopted the ENDF/B-VII thermal standard 9222 1451   89
+value of 2.4968.                                                  9222 1451   90
+                                                                  9222 1451   91
+MT=455: AVERAGE DELAYED NEUTRON MULTIPLICITY PER FISSION          9222 1451   92
+   Based on new delayed neutron 6-group parameters from CINDER'90 9222 1451   93
+summation calculations.  The CINDER calculations (Wi05) are based 9222 1451   94
+on a new CINDER library in which beta-decay half-lives and beta-  9222 1451   95
+delayed neutron-emission probablities are obtained from the       9222 1451   96
+evaluated experimental data file NuBase2003 (Au03), when          9222 1451   97
+available there. When experimental data are not available, the    9222 1451   98
+data are calculated in a model where allowed Gamow-Teller decays  9222 1451   99
+are treated in a microscopic quasi-particle random-phase          9222 1451  100
+approximation (QRPA) and the first forbidden decays are treated   9222 1451  101
+in the statistical gross theory (Mo03). (typo fixed by TK 2009)   9222 1451  102
+                                                                  9222 1451  103
+MT=456: AVERAGE PROMPT NEUTRON MULTIPLICITY PER FISSION           9222 1451  104
+    1.e-5 eV - 10 eV: Adopted the thermal value of 2.4894 for     9222 1451  105
+prompt nubar, corresponding to the ENDF/B-VII thermal standard    9222 1451  106
+value of 2.4968 for total nubar.                                  9222 1451  107
+    10 eV - 30 MeV: Generally based on results from the           9222 1451  108
+covariance analysis of experimental data performed for ENDF/B-VI, 9222 1451  109
+after correction for the ENDF/B-VII standard 252Cf nubar value.   9222 1451  110
+We attempted to follow the covariance data as well as possible    9222 1451  111
+but mainly to stay within uncertainties in the data and to keep   9222 1451  112
+good agreement with fast critical benchmarks.                     9222 1451  113
+                                                                  9222 1451  114
+            ----- REFERENCES (MF=1) -----                         9222 1451  115
+Au03 G. Audi, O. Bersillon, J. Blanchot, and A. H. Wapstra, Nucl. 9222 1451  116
+     Phys. A729 (2003) p. 3-129.                                  9222 1451  117
+Bo90 G.S. Boykov, V.D. Dmitriev, G.A. Kudyaev, M.I. Svirin, G.N.  9222 1451  118
+     Smirenkin, Atomnaya Energiya 69, 23 (1990).                  9222 1451  119
+Kh94 Yu.A. Khoklhov, I.A. Ivanin, V.I. In'kov, Yu.I. Vinogradov,  9222 1451  120
+     L.D. Dailin, B.N. Polynov, Proc. Int. Conf. on Nucl. Data    9222 1451  121
+     for Science & Tech., Gatlinberg,1994, v.1, p.272 (1994).     9222 1451  122
+Mo03 P. Moller, B. Pfeiffer, and K.-L. Kratz, Phys. Rev. C. 67    9222 1451  123
+     (2003) 055802.                                               9222 1451  124
+Wi05 W. B. Wilson, personal communication, 2005.                  9222 1451  125
+                                                                  9222 1451  126
+>> MF=2 RESONANCE PARAMETERS                                      9222 1451  127
+                                                                  9222 1451  128
+MT=151 RESOLVED AND UNRESOLVED RESONANCE PARAMETER EVALUATIONS    9222 1451  129
+      L. Leal, H. Derrien, Guber, N. Larson, R. Wright,           9222 1451  130
+               and R.Spencer (ORNL)                               9222 1451  131
+                    January, 2003                                 9222 1451  132
+                                                                  9222 1451  133
+   The resonance parameter evaluation was done by Leal,           9222 1451  134
+Derrien, Guber, Larson, Wright and Spencer [LE01] using the       9222 1451  135
+multilevel R-matrix analysis code SAMMY [LA96].  The resolved     9222 1451  136
+resonance evaluation were performed in the energy range from 0 to 9222 1451  137
+600 eV. The unresolved resonance region evaluation covers the     9222 1451  138
+energy range from 600 eV to 40 keV.                               9222 1451  139
+   The evaluation included high resolution transmission data      9222 1451  140
+(GU00), fission cross section data [GU98] measured at the Oak     9222 1451  141
+Ridge Electron Linear Accelerator (ORELA), in addition to other   9222 1451  142
+experimental data.  Integral data were also included in the       9222 1451  143
+evaluation. Integral quantities and thermal values calculated     9222 1451  144
+with the U-233 resonance parameter are shown in the Table below.  9222 1451  145
+Also shown are the results of calculations using U-233 ENDF/B-VI  9222 1451  146
+evaluation and Axton standard values:                             9222 1451  147
+                                                                  9222 1451  148
+                                                                  9222 1451  149
+Quantity     ENDF/B-VI           Axton           Present Eval     9222 1451  150
+--------     ---------           -----           ------------     9222 1451  151
+Fission      531.14 +/- 1.33    530.70 +/- 1.34    530.70         9222 1451  152
+Capture       45.51 +/- 0.68     45.52 +/- 0.70     45.22         9222 1451  153
+Scattering    12.13 +/- 0.66     12.19 +/- 0.67     12.18         9222 1451  154
+Westcott ga  0.9996 +/- 0.0011  0.9995 +/- 0.0011  1.00325        9222 1451  155
+Westcott gf  0.9955 +/- 0.0014  0.9955 +/- 0.0014  1.00045        9222 1451  156
+K1 (barn)    742.60 +/- 2.40    742.25 +/- 0.0040  746.0          9222 1451  157
+                                                                  9222 1451  158
+   The following Table shows the average values of the fission    9222 1451  159
+and capture cross sections of the present evaluation compared     9222 1451  160
+to the previous ENDF-B6 evaluation in the energy range thermal    9222 1451  161
+to 600 eV.                                                        9222 1451  162
+                                                                  9222 1451  163
+     Energy Range       Fission                Capture            9222 1451  164
+         (eV)       Present   ENDF/B-VI.5   Present  ENDF/B-VI.5  9222 1451  165
+    --------------  --------  -----------   ------   -----------  9222 1451  166
+      0.001 -0.020   980.19    971.62        82.03    83.27       9222 1451  167
+      0.020 -0.050   462.03    460.02        39.84    40.21       9222 1451  168
+      0.050 -0.400   201.88    202.62        20.86    20.36       9222 1451  169
+      0.400 - 1.00   127.29    126.91        11.93     9.95       9222 1451  170
+       1.0  - 2.10   389.14    378.56        66.35    67.37       9222 1451  171
+       2.10 - 2.75   206.76    198.02       111.45   112.00       9222 1451  172
+       2.75 - 3.00    49.84     50.46         7.91     7.48       9222 1451  173
+       3.00 - 15.0   104.25    101.26        17.66    17.65       9222 1451  174
+       15.0 - 30.0    94.72     91.80        13.51    13.27       9222 1451  175
+       30.0 - 50.0    40.72     38.85         5.66     5.46       9222 1451  176
+       50.0 - 75.0    41.24     41.21         5.69     4.61       9222 1451  177
+       75.0 - 100     36.92     33.72         8.94     4.35       9222 1451  178
+       100  - 125     38.24     29.94         6.10     3.88       9222 1451  179
+       125  - 150     21.11     22.10         3.72     3.54       9222 1451  180
+       150  - 200     20.99     21.34         3.06     3.18       9222 1451  181
+       200  - 300     23.10     19.87         3.51     2.72       9222 1451  182
+       300  - 400     18.28     16.66         2.45     2.33       9222 1451  183
+       400  - 500     11.06     13.17         1.39     2.08       9222 1451  184
+       500  - 600     13.52     13.40         2.00     1.90       9222 1451  185
+----------------------------------------------------------------- 9222 1451  186
+                                                                  9222 1451  187
+    The fission and capture resonance integral calculated from    9222 1451  188
+ the present evaluation are 776.64 b and 139.66 b, respectively,  9222 1451  189
+ which compare to 760 +/ 17 b and 137 +/- 6 b reported by         9222 1451  190
+ Mughabghab.[MU85]                                                9222 1451  191
+                                                                  9222 1451  192
+            ----- REFERENCES (MF=2) -----                         9222 1451  193
+                                                                  9222 1451  194
+GU98 K. H. Guber et al., Nuc. Sci. Eng. 135, 1(2000).             9222 1451  195
+GU00 K. H. Guber et al., to be published in the Nuc. Sci. Eng.    9222 1451  196
+KA85 K. Kanda et al, Measurement of Fast Neutron Induced Fission  9222 1451  197
+     Cross Sections of 232-Th, 233-U, and 234-U Relative to       9222 1451  198
+     235-U, Nuclear Data for Basic and Applied Science, Vol. 1,   9222 1451  199
+     Santa Fe, New Mexico (May 1985).                             9222 1451  200
+LA98 N. M. Lasrson, Updated User Guide for SAMMY: Multilevel R-   9222 1451  201
+     Matrix Fits to Neutron Data Using Bayes' Equations,          9222 1451  202
+     ORNL/TM-9179/R4 (December 1998).  See also ORNL/TM-9170/R5.  9222 1451  203
+LE01 L. C. Leal, H. Derrien, J. A. Harvey, K. H. Guber, N. M.     9222 1451  204
+     Larson and R. R. Spencer, R-Matrix Resonance Analysis and    9222 1451  205
+     Statistical Properties of the Resonance Parameters of U-233  9222 1451  206
+     in the Neutron Energy Range from Thermal to 600 eV,          9222 1451  207
+     ORNL/TM-2000/372, March 2001.                                9222 1451  208
+LE96 L. C. Leal and R. Q. Wright, Assessment of the Available     9222 1451  209
+     233-U Cross Section Evaluations in the Calculation of        9222 1451  210
+     Critical Benchmark Experiments, ORNL/TM-13313R (Sept 1996).  9222 1451  211
+MU85 S. F. Mughabghab, Neutron Cross Sections, Vol. I. Part B     9222 1451  212
+     (1985).                                                      9222 1451  213
+                                                                  9222 1451  214
+>> MF=3 NEUTRON CROSS SECTIONS                                    9222 1451  215
+                                                                  9222 1451  216
+              ----- GENERAL INFORMATION -----                     9222 1451  217
+                                                                  9222 1451  218
+      EVALUATION ABOVE THE UNRESOLVED RESONANCE REGION            9222 1451  219
+            P. G. Young and M. B. Chadwick (LANL)                 9222 1451  220
+                    January, 2003                                 9222 1451  221
+   The maximum energy of the evaluation (Yo03) was increased to   9222 1451  222
+30 MeV. Above the unresolved resonance region (En=40 keV), new    9222 1451  223
+evaluations were performed of the neutron total, elastic, (n,n'), 9222 1451  224
+(n,2n), (n,3n), (n,4n), (n,f), (n,nf), (n,2nf), (n,3nf), (n,4nf), 9222 1451  225
+and (n,gamma) cross sections, as well as their associated angular 9222 1451  226
+and energy distributions. The energy range of the evaluation was  9222 1451  227
+increased from 20 to 30 MeV.                                      9222 1451  228
+   To provide the new data, coupled channel optical model calcu-  9222 1451  229
+lations were performed with the ECIS96 code for the lowest 7      9222 1451  230
+members of the U233 ground state rotational band. These calcu-    9222 1451  231
+lations were used to provide elastic and inelastic cross sections 9222 1451  232
+and angular distributions, and to provide neutron transmission    9222 1451  233
+coefficients for nuclear reaction theory calculations with the    9222 1451  234
+GNASH (Ch01,Yo98) Hauser- Feshbach statistical/fission/           9222 1451  235
+preequilibrium code. The GNASH calculations were used directly    9222 1451  236
+for the correlated energy-angle spectra in MF=6 for the           9222 1451  237
+(n,n'continuum), (n,2n), (n,3n), and (n,4n) reactions.            9222 1451  238
+   The total cross section (MT=1), the radiative capture cross    9222 1451  239
+section (MT=102) and the fission cross section (MT=18) are based  9222 1451  240
+all or in part on experimental data.  Experimental data were      9222 1451  241
+obtained mainly from the EXFOR data base.  All other cross        9222 1451  242
+sections are based on theoretical calculations.  In addition, the 9222 1451  243
+shape of the radiative capture cross section at lower energies    9222 1451  244
+and the absolute values above 1 MeV are from the GNASH analysis.  9222 1451  245
+                                                                  9222 1451  246
+                                                                  9222 1451  247
+            ----- DETAILS OF LANL REVISION -----                  9222 1451  248
+                                                                  9222 1451  249
+MT=1: TOTAL CROSS SECTION                                         9222 1451  250
+   The ENDF/B-VI evaluation of the total cross section (MT=1),    9222 1451  251
+based mainly on experimental data but especially [Fo71], was      9222 1451  252
+adopted over the energy range 1-15 MeV.  The ENDF/B-VI results    9222 1451  253
+were modified slightly below 1 MeV to better conform with         9222 1451  254
+experimental data. The optical model analysis (Yo03) was used for 9222 1451  255
+the cross section from 15 to 30 MeV.                              9222 1451  256
+                                                                  9222 1451  257
+MT=2: ELASTIC SCATTERING CROSS SECTION                            9222 1451  258
+   The elastic cross section is obtained by subtracting the       9222 1451  259
+nonelastic cross section (MT=3) from the total cross section      9222 1451  260
+(MT=1).                                                           9222 1451  261
+                                                                  9222 1451  262
+MT=3: NONELASTIC CROSS SECTION                                    9222 1451  263
+   The (redundant) nonelastic cross section is the sum of the     9222 1451  264
+following reactions: MT=4,16,17,18,37,102.                        9222 1451  265
+                                                                  9222 1451  266
+MT=4: INELASTIC CROSS SECTION                                     9222 1451  267
+   Sum of MT=51-91.                                               9222 1451  268
+                                                                  9222 1451  269
+MT=16,17,37: (n,xn) CROSS SECTIONS                                9222 1451  270
+   The (n,xn) cross sections are based on an analysis with the    9222 1451  271
+GNASH nuclear model code (Yo98). The (n,5n) cross section becomes 9222 1451  272
+significant above about 25 MeV.  Because there is no ENDF-6 MT    9222 1451  273
+number for this reaction, we have arbitrarily included this cross 9222 1451  274
+section in the (n,4n) reaction.  Consequently, the (n,4n) cross   9222 1451  275
+section becomes unphysical above about 25 MeV.                    9222 1451  276
+                                                                  9222 1451  277
+MT=18: FISSION NEUTRON CROSS SECTION                              9222 1451  278
+   Much of the 233U fission cross section data are in the form of 9222 1451  279
+ratios relative to 235U. All 233U(n,f) ratio and cross section    9222 1451  280
+data were converted to ENDF/B-VII standards [see Pronyaev et al.  9222 1451  281
+(Pr05)], and a covariance analysis of the data was performed. The 9222 1451  282
+results were smoothed and used for the (n,f) cross section, after 9222 1451  283
+small modifications. The somewhat higher 235U fission cross       9222 1451  284
+section in the fission spectrum region produces better agreement  9222 1451  285
+with with fast critical benchmark experiments.  Important         9222 1451  286
+experimental data included in the ENDF/B-VII analysis include the 9222 1451  287
+data of Li02, Me74, Me88, and Ka86.                               9222 1451  288
+                                                                  9222 1451  289
+MT=19,20,21,38: MULTI-CHANCE FISSION CROSS SECTIONS               9222 1451  290
+  The ratios of the multi-chance fission cross sections to the    9222 1451  291
+total fission cross section were obtained from GNASH              9222 1451  292
+calculations.  The evaluated multi-chance fission cross sections  9222 1451  293
+were then obtained by multiplying the MT=18 total fission cross   9222 1451  294
+section by the ratios.                                            9222 1451  295
+                                                                  9222 1451  296
+MT=51-53,55,58,65:  DISCRETE INELASTIC CROSS SECTIONS TO GROUND-  9222 1451  297
+                    STATE ROTATIONAL BAND LEVELS                  9222 1451  298
+   Coupled channel optical model calculations were performed with 9222 1451  299
+the ECIS96 code for the lowest 7 members of the U233 ground state 9222 1451  300
+rotational band (MT=2,51,52,53,55,58,65), including compound      9222 1451  301
+nucleus contributions. These calculations were also used to       9222 1451  302
+provide neutron transmission coefficients for nuclear reaction    9222 1451  303
+theory calculations with the GNASH (Yo98) and COMNUC (Du71)       9222 1451  304
+Hauser- Feshbach statistical-fission-preequilibrium codes.  See   9222 1451  305
+description above under GENERAL INFORMATION.                      9222 1451  306
+                                                                  9222 1451  307
+MT=54,56-57,59-64,66-88: DISCRETE INELASTIC NEUTRON CROSS         9222 1451  308
+                         SECTIONS                                 9222 1451  309
+   Inelastic cross sections from compound-nucleus reactions were  9222 1451  310
+calculated with ECIS96 for all states. In addition, ECIS96 was    9222 1451  311
+used for vibrational model calculations for 3- and 2+ states in   9222 1451  312
+238U which were then included in lumped form in the 233U analysis 9222 1451  313
+(MT=84-88).                                                       9222 1451  314
+                                                                  9222 1451  315
+MT=91:  INELASTIC CONTINUUM NEUTRON CROSS SECTION                 9222 1451  316
+   Based on the GNASH Hauser-Feshbach statistical-preequilibrium  9222 1451  317
+calculations, described above. Note that MT=91 thresholds at 0.70 9222 1451  318
+MeV.  Therefore, discrete states with excitation energies above   9222 1451  319
+0.70 MeV (MT=83-88) lie in the MT=91 continuum region.            9222 1451  320
+                                                                  9222 1451  321
+MT=102: NEUTRON RADIATIVE CAPTURE CROSS SECTION                   9222 1451  322
+   1.0-5 to 40 keV:  Based on the resonance parameter evaluation  9222 1451  323
+by Leal et al. (see above).                                       9222 1451  324
+   40 keV to 30 MeV: The GNASH code system was utilized to        9222 1451  325
+calculate the (n,gamma) cross section from 1 keV to 16 MeV. The   9222 1451  326
+gamma-ray strength function and level densities were adjusted so  9222 1451  327
+that the calculation reproduced the experimental data of Hopkins  9222 1451  328
+and Diven (Ho62). The results were used from 0.04 to 16 MeV for   9222 1451  329
+the (n,gamma) cross section, with a smooth extrapolation to 30    9222 1451  330
+MeV.                                                              9222 1451  331
+                                                                  9222 1451  332
+                                                                  9222 1451  333
+         ----- REFERENCES (MF=3) -----                            9222 1451  334
+Bo71 J. Boldeman et al., J. Nucl. En. 25, 321 (1971).             9222 1451  335
+Ch01 M. Chadwick, H. G. Hughes, R. C. Little, E. J. Pitcher, and  9222 1451  336
+     P. G. Young, "Nuclear Data for Accelerator-Driven Systems,"  9222 1451  337
+     Prog. Nucl. En. 38,179 (2001).                               9222 1451  338
+Fo71 D. G. Foster and D. Glasgow, Phys. Rev. C3, 604 (1971).      9222 1451  339
+Gw84 R. Gwin, R. R. Spencer, and R. W. Ingle,  Nucl. Sci. Eng.    9222 1451  340
+     94, 365 (1986).                                              9222 1451  341
+Ha82 Haouat, J. Lachkar, Ch. Lagrange, J. Jary, J. Sigaud, and Y. 9222 1451  342
+     Patin,  Nucl. Sci. Eng. 81, 491 (1982).                      9222 1451  343
+Ho62 J. C. Hopkins and B. C. Diven, Nucl. Sci. Eng. 12, 169       9222 1451  344
+     (1962).                                                      9222 1451  345
+Ka86 J. Kanda, H. Imaruoka, K. Yoshida, O. Sato, and N. Hirakawa, 9222 1451  346
+     Rad. Eff. 93, 233 (1986).                                    9222 1451  347
+Li02 P. Lisowski, personal communication, 2002.                   9222 1451  348
+Me74 J. Meadows, Nucl.Sci.Eng. 54,317(1974).                      9222 1451  349
+Me88 J. Meadows, Ann. Nucl. En. 15, 421 (1988).                   9222 1451  350
+Pr05 V.G. Pronyaev, S.A.Badikov, A.D. Carlson, Z. Chen, E.V. Gai, 9222 1451  351
+     G.M. Hale, F.-J. Hambsch, H.M. Hofmann, T. Kawano, N.M.      9222 1451  352
+     Larson, S.-Y. Oh, D.L. Smith, S. Tagesen, and H. Vonach,     9222 1451  353
+     personal communication (2005); see also: "An International   9222 1451  354
+     Evaluation of the Neutron Cross Section Standards," to be    9222 1451  355
+     published as an IAEA Technical report (2006).                9222 1451  356
+Yo03 P. G. Young, M. B. Chadwick, R. E. MacFarlane, and Patrick   9222 1451  357
+     Talou, "Analysis of Neutron Reactions on 233U," Los Alamos   9222 1451  358
+     National Laboratory report LA-UR-03-1617 (2003).             9222 1451  359
+Yo98 P.Young, E.Arthur, M.Chadwick, Proc. Workshop on Nuclear     9222 1451  360
+     Reaction Data and Nuclear Reactors, ICTP, Trieste (1996),    9222 1451  361
+     World Scientific Pub. Co., Singapore (1998), p227-404.       9222 1451  362
+                                                                  9222 1451  363
+>> MF=4 ANGULAR DISTRIBUTIONS OF SECONDARY PARTICLES              9222 1451  364
+                                                                  9222 1451  365
+MT=2: NEUTRON ELASTIC SCATTERING ANGULAR DISTRIBUTIONS            9222 1451  366
+  All elastic neutron angular distributions are based on the      9222 1451  367
+coupled-channels optical model calculations with the ECIS96 code  9222 1451  368
+(Ra94), including compound elastic contributions.  The optical    9222 1451  369
+model results are in good agreement with the experimental data of 9222 1451  370
+Ha82.                                                             9222 1451  371
+                                                                  9222 1451  372
+MT=51-53,55,58,65: DISCRETE INELASTIC NEUTRON ANGULAR             9222 1451  373
+                   DISTRIBUTIONS FOR THE GROUND-STATE ROTATIONAL  9222 1451  374
+                   BAND                                           9222 1451  375
+   Angular distributions of the ground-state rotational band are  9222 1451  376
+based on coupled-channels optical model calculations with the     9222 1451  377
+ECIS96 code, described above, including direct and compound       9222 1451  378
+elastic contributions.                                            9222 1451  379
+                                                                  9222 1451  380
+MT=54,56-57,59-64,66-88: DISCRETE INELASTIC NEUTRON ANGULAR       9222 1451  381
+                         DISTRIBUTIONS                            9222 1451  382
+   These angular distributions are based on compound-nucleus      9222 1451  383
+calculations with ECIS96. In addition, ECIS96 was used for        9222 1451  384
+vibrational model calculations for 3- and 2+ states in 238U which 9222 1451  385
+were then included in lumped form in the 233U analysis for MT=84- 9222 1451  386
+88.                                                               9222 1451  387
+                                                                  9222 1451  388
+             ----- REFERENCES (MF=4) -----                        9222 1451  389
+Ha82 Haouat, J. Lachkar, Ch. Lagrange, J. Jary, J. Sigaud, and Y. 9222 1451  390
+     Patin,  Nucl. Sci. Eng. 81, 491 (1982).                      9222 1451  391
+Ra94 J. Raynal, "Notes on ECIS94," Centre d'Etudes Nucleaires     9222 1451  392
+     (Saclay) report CEA-N-2772 (1994).                           9222 1451  393
+                                                                  9222 1451  394
+>> MF=5 ENERGY DISTRIBUTIONS OF SECONDARY PARTICLES               9222 1451  395
+                                                                  9222 1451  396
+MT=18: Prompt Fission Neutron Spectrum Matrix                     9222 1451  397
+   The MT=18 spectra are taken from the JENDL-3.3 evaluation      9222 1451  398
+(Ma02). That evaluation utilizes a modified form (Oh92) of the    9222 1451  399
+Madland and Nix Los Alamos model (MN82). The compound nucleus     9222 1451  400
+formation cross sections for fission fragments (FF) were          9222 1451  401
+calculated using Becchetti-Greenlees potential (Be69).  Up to     9222 1451  402
+4th-chance-fission were considered at high incident neuttron      9222 1451  403
+energies.  The Ignatyuk formula (Ig79) were used to generate the  9222 1451  404
+level density parameters.                                         9222 1451  405
+Parameters adopted:                                               9222 1451  406
+     Total average FF kinetic energy = 172.311-0.0212*E(MeV)      9222 1451  407
+     Average energy release          = 188.438 MeV                9222 1451  408
+     Average mass number of light FF =  95                        9222 1451  409
+     Average mass number of heavy FF = 139                        9222 1451  410
+     Level density of the light FF   =  9.999- 10.094             9222 1451  411
+     Level density of the heavy FF   = 11.89 - 12.20              9222 1451  412
+Note that the parameters vary with the incident energy within the 9222 1451  413
+indicated range.                                                  9222 1451  414
+                                                                  9222 1451  415
+MT=455: DELAYED NEUTRON EMISSION SPECTRA FROM FISSION             9222 1451  416
+   The abundances are based on the new delayed-neutron            9222 1451  417
+calculations (Wi05) described under MF=1, MT=455. However, the    9222 1451  418
+earlier six-group spectra from ENDF/B-VI are carried over to      9222 1451  419
+ENDF/B-VII because new multigroup spectra have not yet been       9222 1451  420
+calculated with the new library.                                  9222 1451  421
+                                                                  9222 1451  422
+            ----- REFERENCES (MF=5) -----                         9222 1451  423
+Be69 F. D. Becchetti. Jr. and G. W. Greenlees, Phys. Rev., 182,   9222 1451  424
+     1190 (1969).                                                 9222 1451  425
+Ig79 A. V. Ignatyuk, Sov. J. Nucl. Phys. 29, 450 (1979).          9222 1451  426
+Ma02 H. Matsunobu (SAEI), T.Kawano(Kyushu Univ.), and O.Iwamoto   9222 1451  427
+     (NDC-JAERI) (2002).                                          9222 1451  428
+MN82 D. G. Madland and J. R. Nix, Nucl. Sci. Eng. 81 (1982)       9222 1451  429
+     213-271.                                                     9222 1451  430
+Oh92 T. Ohsawa and T. Shibata, Proc. Int. Conf. on Nuclear Data   9222 1451  431
+     for Science and Technology, Julich, Germany, 13-17 May 1991, 9222 1451  432
+     [Ed. S. M. Qaim, Springer-Verlag, Germany (1992)].           9222 1451  433
+Wi05 W. B. Wilson, personal communication, 2005.                  9222 1451  434
+                                                                  9222 1451  435
+>> MF=6 PRODUCT ENERGY-ANGULAR DISTRIBUTIONS                      9222 1451  436
+                                                                  9222 1451  437
+MT=16,17,37: (n,xn) CONTINUUM DISTRIBUTIONS                       9222 1451  438
+   Based on the GNASH Hauser-Feshbach statistical/preequilibrium  9222 1451  439
+calculations described above. Updated Kalbach-Mann systematics    9222 1451  440
+are used for specifying neutron distributions (Ka88). Only        9222 1451  441
+neutron distributions are given.                                  9222 1451  442
+                                                                  9222 1451  443
+MT=91: (n,n') CONTINUUM DISTRIBUTIONS                             9222 1451  444
+   Based on the GNASH Hauser-Feshbach statistical/preequilibrium  9222 1451  445
+calculations described above. Updated Kalbach-Mann systematics    9222 1451  446
+are used for specifying neutron distributions (Ka88). Only        9222 1451  447
+neutron distributions are given.                                  9222 1451  448
+                                                                  9222 1451  449
+         ----- REFERENCES (MF=6) -----                            9222 1451  450
+Ka88 C. Kalbach, "Systematics of Continuum Angular                9222 1451  451
+     Distributions: Extensions to Higher Energies," Phys.Rev.C    9222 1451  452
+     37, 2350 (1988); see also C. Kalbach and F. M. Mann,         9222 1451  453
+     "Phenomenology of Continuum Angular Distributions. I.        9222 1451  454
+     Systematics and Parameterization," Phys.Rev.C 23, 112        9222 1451  455
+     (1981).                                                      9222 1451  456
+                                                                  9222 1451  457
+>> MF=12 PHOTON PRODUCTION MULTIPLICITIES AND TRANSITION          9222 1451  458
+         PROBABILITIES                                            9222 1451  459
+                                                                  9222 1451  460
+MT=4: PHOTON MULTIPLICITIES FROM INELASTIC SCATTERING             9222 1451  461
+ All data are carried over from ENDF/B-VI, as follows: Transition 9222 1451  462
+probabilities are used for four discrete levels assuming 60% -    9222 1451  463
+40% split.  Continuum added above 300 keV. Due to the fact that   9222 1451  464
+only four levels are involved, the continuum probability is       9222 1451  465
+large.  The multiplicities are zero above 1.09 MeV.               9222 1451  466
+                                                                  9222 1451  467
+MT=18: PHOTON MULTIPLICITIES FROM FISSION                         9222 1451  468
+ All data are carried over from ENDF/B-VI. In that evaluation     9222 1451  469
+photon multiplicities are taken from Hoffman and Hoffman (Ho74).  9222 1451  470
+                                                                  9222 1451  471
+MT=102: PHOTON MULTIPLICITIES FROM RADIATIVE CAPTURE              9222 1451  472
+  The multiplicities for radiative capture from the               9222 1451  473
+GNASH analysis are incorporated into the file.                    9222 1451  474
+                                                                  9222 1451  475
+>> MF=13 PHOTON PRODUCTION CROSS SECTIONS                         9222 1451  476
+                                                                  9222 1451  477
+MT=3: PHOTON PRODUCTION CROSS SECTIONS FROM NONELASTIC REACTIONS  9222 1451  478
+  All data are carried over from ENDF/B-VI. That evaluation       9222 1451  479
+utilized data from the ENDF/B-V.2 239Pu evaluation (MAT 1399),    9222 1451  480
+after some modification.                                          9222 1451  481
+                                                                  9222 1451  482
+>> MF=14 PHOTON ANGULAR DISTRIBUTIONS                             9222 1451  483
+                                                                  9222 1451  484
+MF=3,4,18,102: PHOTON ANGULAR DISTRIBUTIONS FROM NONELASTIC,      9222 1451  485
+               INELASTIC, FISSION, RADIATIVE CAPTURE REACTIONS    9222 1451  486
+  All data are carried over from ENDF/B-VI, which assumes that    9222 1451  487
+all reactions are isotropic in the laboratory system.             9222 1451  488
+                                                                  9222 1451  489
+>> MF=15 CONTINUOUS PHOTON ENERGY SPECTRA                         9222 1451  490
+                                                                  9222 1451  491
+MT=3,4,18: PHOTON ENERGY SPECTRA FROM NONELASTIC, INELASTIC,      9222 1451  492
+             AND FISSION REACTIONS                                9222 1451  493
+  All data are carried over from ENDF/B-VI.  That evaluation      9222 1451  494
+utilized the 239Pu data from ENDF/B-V.2, MAT=1399.                9222 1451  495
+                                                                  9222 1451  496
+MT=102: PHOTON ENERGY SPECTRA FROM NONELASTIC REACTIONS,          9222 1451  497
+               FISSION AND RADIATIVE CAPTURE                      9222 1451  498
+   All data are carried over from ENDF/B-VI.  That evaluation     9222 1451  499
+utilized the 239Pu data from ENDF/B-V.2, MAT=1399, after          9222 1451  500
+adjustment for energy differences.                                9222 1451  501
+                                                                  9222 1451  502
+          ----- REFERENCES (MF=12-15) -----                       9222 1451  503
+Ho74 D. C. Hoffman and M. M. Hoffman, Ann. Rev. Nucl. Sci. 24,    9222 1451  504
+     151 (1974).                                                  9222 1451  505
+                                                                  9222 1451  506
+>> MF=33 CROSS-SECTION COVARIANCE MATRICES                        9222 1451  507
+                                                                  9222 1451  508
+>>> MF=33 RESONANCE PARAMETER COVARIANCE (ORNL)                   9222 1451  509
+                                                                  9222 1451  510
+Resonance parameter covariances were generated in the resolved    9222 1451  511
+energy region (1.0-5 eV to 600.0 eV)                              9222 1451  512
+with the computer code SAMMY at ORNL.                             9222 1451  513
+Uncertainty on nubar was also generated at ORNL. Experimental     9222 1451  514
+data and uncertainties were used to generate covariance data.     9222 1451  515
+SAMMY covariance information was converted in the ENDF FILE32     9222 1451  516
+representation. However, because of computer storage concern the  9222 1451  517
+FILE32 was converted into the FILE33 (MT=1, 2, 18, and 102)       9222 1451  518
+representation with reduced computer storage but approximating    9222 1451  519
+the features of the FILE32 representation. The full FILE32        9222 1451  520
+matrices can be obtained directly from ORNL. The conversion was   9222 1451  521
+done with the PUFF-IV code. Above the unresolved resonance region 9222 1451  522
+( > 40 keV) covariance data were generated at LANL.               9222 1451  523
+                                                                  9222 1451  524
+>>> MF=33 FAST-ENERGY COVARIANCE (LANL)                           9222 1451  525
+                                                                  9222 1451  526
+Cross-section covariance matrices in the fast energy region were  9222 1451  527
+obtained through a combination of nuclear reaction sensitivity    9222 1451  528
+calculations using the GNASH code, and available information on   9222 1451  529
+experimental uncertainties for some of the cross sections. The    9222 1451  530
+sensitivity of GNASH results on the choice of model parameters    9222 1451  531
+was assessed, and the KALMAN code (Ka97) was used to merge        9222 1451  532
+sensitivity calculations with experimental uncertainties.         9222 1451  533
+                                                                  9222 1451  534
+More details on this work can be found in (Ta08).                 9222 1451  535
+                                                                  9222 1451  536
+           ------------ REFERENCES (MF=33) -------------          9222 1451  537
+Ka97 T.Kawano and K.Shibata, "Covariance Evaluation System"       9222 1451  538
+     JAERI-Data/Code 97-037, 1997 (in Japanese).                  9222 1451  539
+Ta08 P.Talou, T.Kawano and P.G.Young, "Covariance matrices for    9222 1451  540
+     ENDF/B-VII 235,238U and 239Pu evaluated files in the fast    9222 1451  541
+     energy range", Proc. of the ND2007 Conference, April 22-27,  9222 1451  542
+     2007, Nice, France. [Los Alamos report LA-UR-07-2501].       9222 1451  543
+                                                                  9222 1451  544
+************************ C O N T E N T S ***********************  9222 1451  545
+                                1        451        549          19222 1451  546
+                                3         18        107          19222 1451  547
+                                4         18         10          19222 1451  548
+                                5         18         16          19222 1451  549
+ 0.000000+0 0.000000+0          0          0          0          09222 1  099999
+ 0.000000+0 0.000000+0          0          0          0          09222 0  0    0
+ 9.223300+4 2.310377+2          0          0          0          09222 3 18    1
+ 1.910400+8 1.910400+8          0          0          1        3109222 3 18    2
+        310          2                                            9222 3 18    3
+ 1.000000-5 0.000000+0 2.530000-2 0.000000+0 6.000000+2 0.000000+09222 3 18    4
+ 6.000000+2 1.306532+1 6.825000+2 1.510596+1 7.650000+2 1.118508+19222 3 18    5
+ 8.725000+2 1.370753+1 9.900000+2 8.729729+0 1.125000+3 1.011875+19222 3 18    6
+ 1.250000+3 8.204137+0 1.340000+3 1.095813+1 1.410000+3 7.345544+09222 3 18    7
+ 1.470000+3 9.418834+0 1.585000+3 7.722345+0 1.735000+3 7.786820+09222 3 18    8
+ 1.880000+3 8.218710+0 2.107500+3 6.948265+0 2.522500+3 6.642895+09222 3 18    9
+ 3.120000+3 6.144742+0 4.475000+3 5.043720+0 6.250000+3 4.487702+09222 3 18   10
+ 7.275000+3 4.266785+0 7.775000+3 4.167328+0 8.350000+3 4.062346+09222 3 18   11
+ 9.350000+3 3.902791+0 1.100000+4 3.693924+0 1.350000+4 3.457035+09222 3 18   12
+ 1.750000+4 3.190162+0 2.250000+4 2.961924+0 2.750000+4 2.809944+09222 3 18   13
+ 3.250000+4 2.707346+0 4.000000+4 2.597019+0 4.000000+4 2.597019+09222 3 18   14
+ 4.250000+4 2.567257+0 4.500000+4 2.539995+0 4.750000+4 2.514826+09222 3 18   15
+ 5.000000+4 2.491426+0 5.250000+4 2.469535+0 5.500000+4 2.448945+09222 3 18   16
+ 5.750000+4 2.429480+0 6.000000+4 2.411000+0 6.250000+4 2.393444+09222 3 18   17
+ 6.500000+4 2.376811+0 6.750000+4 2.361064+0 7.000000+4 2.346167+09222 3 18   18
+ 7.250000+4 2.332080+0 7.500000+4 2.318767+0 7.750000+4 2.306192+09222 3 18   19
+ 8.000000+4 2.294321+0 8.250000+4 2.283120+0 8.500000+4 2.272557+09222 3 18   20
+ 8.750000+4 2.262602+0 9.000000+4 2.253227+0 9.250000+4 2.244404+09222 3 18   21
+ 9.500000+4 2.236108+0 9.750000+4 2.228314+0 1.000000+5 2.221000+09222 3 18   22
+ 1.100000+5 2.196802+0 1.200000+5 2.179241+0 1.250000+5 2.172355+09222 3 18   23
+ 1.300000+5 2.166495+0 1.400000+5 2.157303+0 1.500000+5 2.150772+09222 3 18   24
+ 1.600000+5 2.146254+0 1.700000+5 2.143267+0 1.750000+5 2.142233+09222 3 18   25
+ 1.800000+5 2.141453+0 1.900000+5 2.140534+0 2.000000+5 2.140300+09222 3 18   26
+ 2.100000+5 2.141715+0 2.200000+5 2.143896+0 2.300000+5 2.144868+09222 3 18   27
+ 2.400000+5 2.145727+0 2.500000+5 2.146343+0 2.600000+5 2.146326+09222 3 18   28
+ 2.700000+5 2.145373+0 2.800000+5 2.143257+0 2.900000+5 2.139807+09222 3 18   29
+ 3.000000+5 2.134900+0 3.100000+5 2.127369+0 3.200000+5 2.117020+09222 3 18   30
+ 3.300000+5 2.105045+0 3.400000+5 2.092434+0 3.500000+5 2.080000+09222 3 18   31
+ 3.600000+5 2.067633+0 3.700000+5 2.055139+0 3.800000+5 2.043009+09222 3 18   32
+ 3.900000+5 2.031651+0 4.000000+5 2.021400+0 4.100000+5 2.012084+09222 3 18   33
+ 4.200000+5 2.003298+0 4.300000+5 1.994985+0 4.400000+5 1.987097+09222 3 18   34
+ 4.500000+5 1.979588+0 4.600000+5 1.972419+0 4.700000+5 1.965557+09222 3 18   35
+ 4.800000+5 1.958967+0 4.900000+5 1.952624+0 5.000000+5 1.946500+09222 3 18   36
+ 5.250000+5 1.932600+0 5.500000+5 1.920641+0 5.750000+5 1.910162+09222 3 18   37
+ 6.000000+5 1.900800+0 6.250000+5 1.894746+0 6.500000+5 1.891967+09222 3 18   38
+ 6.750000+5 1.889419+0 7.000000+5 1.884700+0 7.250000+5 1.874448+09222 3 18   39
+ 7.500000+5 1.860481+0 7.750000+5 1.847700+0 8.000000+5 1.840000+09222 3 18   40
+ 8.250000+5 1.836693+0 8.500000+5 1.834760+0 8.750000+5 1.834016+09222 3 18   41
+ 9.000000+5 1.834300+0 9.250000+5 1.835082+0 9.500000+5 1.836034+09222 3 18   42
+ 9.750000+5 1.837300+0 1.000000+6 1.839000+0 1.050000+6 1.842759+09222 3 18   43
+ 1.100000+6 1.846655+0 1.150000+6 1.851214+0 1.200000+6 1.856829+09222 3 18   44
+ 1.250000+6 1.863800+0 1.300000+6 1.871554+0 1.350000+6 1.879271+09222 3 18   45
+ 1.400000+6 1.886841+0 1.450000+6 1.894174+0 1.500000+6 1.901200+09222 3 18   46
+ 1.550000+6 1.907952+0 1.600000+6 1.914500+0 1.650000+6 1.920840+09222 3 18   47
+ 1.700000+6 1.926969+0 1.750000+6 1.932886+0 1.800000+6 1.938590+09222 3 18   48
+ 1.850000+6 1.944082+0 1.900000+6 1.949363+0 1.950000+6 1.954435+09222 3 18   49
+ 2.000000+6 1.959300+0 2.100000+6 1.962795+0 2.200000+6 1.957171+09222 3 18   50
+ 2.300000+6 1.946162+0 2.400000+6 1.932689+0 2.500000+6 1.919000+09222 3 18   51
+ 2.600000+6 1.905882+0 2.700000+6 1.892612+0 2.800000+6 1.878828+09222 3 18   52
+ 2.900000+6 1.864257+0 3.000000+6 1.848700+0 3.100000+6 1.832845+09222 3 18   53
+ 3.200000+6 1.817214+0 3.300000+6 1.801467+0 3.400000+6 1.785333+09222 3 18   54
+ 3.500000+6 1.768600+0 3.600000+6 1.751825+0 3.700000+6 1.735654+09222 3 18   55
+ 3.800000+6 1.720049+0 3.900000+6 1.704975+0 4.000000+6 1.690400+09222 3 18   56
+ 4.100000+6 1.676299+0 4.200000+6 1.662647+0 4.300000+6 1.649422+09222 3 18   57
+ 4.400000+6 1.636601+0 4.500000+6 1.624163+0 4.600000+6 1.612090+09222 3 18   58
+ 4.700000+6 1.600363+0 4.800000+6 1.588966+0 4.900000+6 1.577883+09222 3 18   59
+ 5.000000+6 1.567100+0 5.100000+6 1.556727+0 5.200000+6 1.546865+09222 3 18   60
+ 5.300000+6 1.537489+0 5.400000+6 1.528574+0 5.500000+6 1.520100+09222 3 18   61
+ 5.600000+6 1.521328+0 5.700000+6 1.538285+0 5.800000+6 1.566675+09222 3 18   62
+ 5.900000+6 1.602661+0 6.000000+6 1.642600+0 6.100000+6 1.693669+09222 3 18   63
+ 6.200000+6 1.758778+0 6.300000+6 1.827773+0 6.400000+6 1.889984+09222 3 18   64
+ 6.500000+6 1.934400+0 6.600000+6 1.965423+0 6.700000+6 1.994629+09222 3 18   65
+ 6.750000+6 2.008516+0 6.800000+6 2.021908+0 6.900000+6 2.047162+09222 3 18   66
+ 7.000000+6 2.070300+0 7.100000+6 2.092294+0 7.200000+6 2.114105+09222 3 18   67
+ 7.300000+6 2.135637+0 7.400000+6 2.156798+0 7.500000+6 2.177500+09222 3 18   68
+ 7.600000+6 2.197702+0 7.700000+6 2.217238+0 7.800000+6 2.235847+09222 3 18   69
+ 7.900000+6 2.253279+0 8.000000+6 2.269300+0 8.100000+6 2.282302+09222 3 18   70
+ 8.200000+6 2.291179+0 8.300000+6 2.296451+0 8.400000+6 2.298628+09222 3 18   71
+ 8.500000+6 2.298200+0 8.600000+6 2.296507+0 8.700000+6 2.294561+09222 3 18   72
+ 8.800000+6 2.292340+0 8.900000+6 2.289825+0 9.000000+6 2.287000+09222 3 18   73
+ 9.100000+6 2.284063+0 9.200000+6 2.281194+0 9.300000+6 2.278348+09222 3 18   74
+ 9.400000+6 2.275486+0 9.500000+6 2.272568+0 9.600000+6 2.269561+09222 3 18   75
+ 9.700000+6 2.266430+0 9.800000+6 2.263144+0 9.900000+6 2.259677+09222 3 18   76
+ 1.000000+7 2.256000+0 1.010000+7 2.251885+0 1.020000+7 2.247218+09222 3 18   77
+ 1.030000+7 2.242136+0 1.040000+7 2.236771+0 1.050000+7 2.231247+09222 3 18   78
+ 1.060000+7 2.225677+0 1.070000+7 2.220170+0 1.080000+7 2.214827+09222 3 18   79
+ 1.090000+7 2.209740+0 1.100000+7 2.205000+0 1.110000+7 2.200295+09222 3 18   80
+ 1.120000+7 2.195420+0 1.130000+7 2.190602+0 1.140000+7 2.186056+09222 3 18   81
+ 1.150000+7 2.181984+0 1.160000+7 2.178574+0 1.170000+7 2.176006+09222 3 18   82
+ 1.180000+7 2.174448+0 1.190000+7 2.174061+0 1.200000+7 2.175000+09222 3 18   83
+ 1.210000+7 2.177621+0 1.220000+7 2.181983+0 1.230000+7 2.187798+09222 3 18   84
+ 1.240000+7 2.194792+0 1.250000+7 2.202704+0 1.260000+7 2.211282+09222 3 18   85
+ 1.270000+7 2.220282+0 1.280000+7 2.229469+0 1.290000+7 2.238616+09222 3 18   86
+ 1.300000+7 2.247500+0 1.310000+7 2.256257+0 1.320000+7 2.265132+09222 3 18   87
+ 1.330000+7 2.274080+0 1.340000+7 2.283052+0 1.350000+7 2.292005+09222 3 18   88
+ 1.360000+7 2.300895+0 1.370000+7 2.309680+0 1.380000+7 2.318319+09222 3 18   89
+ 1.390000+7 2.326772+0 1.400000+7 2.335000+0 1.410000+7 2.342955+09222 3 18   90
+ 1.420000+7 2.350638+0 1.430000+7 2.358079+0 1.440000+7 2.365312+09222 3 18   91
+ 1.450000+7 2.372368+0 1.460000+7 2.379275+0 1.470000+7 2.386064+09222 3 18   92
+ 1.480000+7 2.392763+0 1.490000+7 2.399399+0 1.500000+7 2.406000+09222 3 18   93
+ 1.525000+7 2.423172+0 1.550000+7 2.438438+0 1.575000+7 2.447133+09222 3 18   94
+ 1.600000+7 2.445000+0 1.625000+7 2.435320+0 1.650000+7 2.424321+09222 3 18   95
+ 1.675000+7 2.412501+0 1.700000+7 2.400309+0 1.725000+7 2.388148+09222 3 18   96
+ 1.750000+7 2.376382+0 1.775000+7 2.365336+0 1.800000+7 2.355300+09222 3 18   97
+ 1.825000+7 2.345951+0 1.850000+7 2.336789+0 1.875000+7 2.327814+09222 3 18   98
+ 1.900000+7 2.319028+0 1.925000+7 2.310434+0 1.950000+7 2.302030+09222 3 18   99
+ 1.975000+7 2.293819+0 2.000000+7 2.285800+0 2.050000+7 2.271441+09222 3 18  100
+ 2.100000+7 2.259751+0 2.150000+7 2.250322+0 2.200000+7 2.242800+09222 3 18  101
+ 2.250000+7 2.245866+0 2.300000+7 2.259972+0 2.350000+7 2.273564+09222 3 18  102
+ 2.400000+7 2.276300+0 2.450000+7 2.267908+0 2.500000+7 2.256818+09222 3 18  103
+ 2.550000+7 2.246325+0 2.600000+7 2.239300+0 2.650000+7 2.234976+09222 3 18  104
+ 2.700000+7 2.230793+0 2.750000+7 2.226662+0 2.800000+7 2.222500+09222 3 18  105
+ 2.850000+7 2.218353+0 2.900000+7 2.214292+0 2.950000+7 2.210284+09222 3 18  106
+ 3.000000+7 2.206300+0                                            9222 3 18  107
+ 0.000000+0 0.000000+0          0          0          0          09222 3  099999
+ 0.000000+0 0.000000+0          0          0          0          09222 0  0    0
+ 9.223300+4 2.310377+2          0          2          0          09222 4 18    1
+ 0.000000+0 2.310377+2          0          1          0          09222 4 18    2
+ 0.000000+0 0.000000+0          0          0          1          29222 4 18    3
+          2          2                                            9222 4 18    4
+ 0.000000+0 1.000000-5          0          0          1          29222 4 18    5
+          2          2                                            9222 4 18    6
+-1.000000+0 5.000000-1 1.000000+0 5.000000-1                      9222 4 18    7
+ 0.000000+0 3.000000+7          0          0          1          29222 4 18    8
+          2          2                                            9222 4 18    9
+-1.000000+0 5.000000-1 1.000000+0 5.000000-1                      9222 4 18   10
+ 0.000000+0 0.000000+0          0          0          0          09222 4  099999
+ 0.000000+0 0.000000+0          0          0          0          09222 0  0    0
+ 9.223300+4 2.310377+2          0          0          1          09222 5 18    1
+-3.000000+7 0.000000+0          0         11          1          29222 5 18    2
+          2          2                                            9222 5 18    3
+ 1.000000-5 1.000000+0 3.000000+7 1.000000+0                      9222 5 18    4
+ 0.000000+0 0.000000+0          0          0          1         119222 5 18    5
+         11          2                                            9222 5 18    6
+ 1.000000-5 9.770000+5 1.500000+6 9.770000+5 2.000000+6 9.800000+59222 5 18    7
+ 5.000000+6 1.010000+6 7.000000+6 9.700000+5 1.000000+7 9.800000+59222 5 18    8
+ 1.220000+7 1.010000+6 1.500000+7 1.000000+6 1.800000+7 1.040000+69222 5 18    9
+ 2.000000+7 1.060000+6 3.000000+7 1.060000+6                      9222 5 18   10
+ 0.000000+0 0.000000+0          0          0          1         119222 5 18   11
+         11          2                                            9222 5 18   12
+ 1.000000-5 2.546000-6 1.500000+6 2.546000-6 2.000000+6 2.532000-69222 5 18   13
+ 5.000000+6 2.412000-6 7.000000+6 2.571000-6 1.000000+7 2.474000-69222 5 18   14
+ 1.220000+7 2.612000-6 1.500000+7 2.652000-6 1.800000+7 2.689000-69222 5 18   15
+ 2.000000+7 2.620000-6 3.000000+7 2.620000-6                      9222 5 18   16
+ 0.000000+0 0.000000+0          0          0          0          09222 5  099999
+ 0.000000+0 0.000000+0          0          0          0          09222 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0

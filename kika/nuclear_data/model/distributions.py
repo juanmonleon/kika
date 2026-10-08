@@ -237,8 +237,11 @@ class Uncorrelated:
     """
 
     angular: Optional[Union[XYs2d, Isotropic2d]] = None
+    #: Or one of §18.3's parametrised spectra
+    #: (:mod:`~kika.nuclear_data.model.energy_spectra`), which are deliberately
+    #: not ``Function2d``.
     energy: Optional[Union[XYs2d, Regions2d, DiscreteGamma, PrimaryGamma,
-                           NBodyPhaseSpace]] = None
+                           NBodyPhaseSpace, object]] = None
     label: Optional[str] = None
     productFrame: Frame = Frame.lab
 

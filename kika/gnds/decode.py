@@ -497,15 +497,55 @@ class _SuiteReader:
                 self.unsupported(child.tag, f"{here}/products", "not a product")
                 continue
             channel.products.products.append(self.readProduct(child, here))
-        if element.find("fissionFragmentData") is not None:
-            self.unsupported(
-                "fissionFragmentData", here,
-                "delayed neutrons and fission energy release are read from ENDF "
-                "MF1/455 and MF1/458 today; the GNDS side has no phase "
-                "scheduled — §18.4 fission fragment data is not a §18.1.1 "
-                "distribution law and was not in phase 7b's scope"
-            )
+        data = element.find("fissionFragmentData")
+        if data is not None:
+            channel.fissionFragmentData = self.readFissionFragmentData(data, here)
         return channel
+
+    def readFissionFragmentData(self, element: ET.Element, path: str):
+        """§18.4: the delayed-neutron families and the energy release.
+
+        The inverse of the writer's ``fissionFragmentData``. ``productYields``
+        is reported, not read -- the model keeps its slot empty (MF8/454, /459
+        is roadmap E7).
+        """
+        from kika.nuclear_data.model import (DelayedNeutron, FissionEnergyRelease,
+                                             FissionFragmentData, Product)
+
+        here = f"{path}/fissionFragmentData"
+        data = FissionFragmentData()
+
+        for node in element.findall("delayedNeutrons/delayedNeutron"):
+            label = node.attrib.get("label", "")
+            rate = None
+            rateNode = node.find("rate")
+            if rateNode is not None and len(rateNode):
+                rate = self.readPhysicalQuantity(rateNode[0])
+            product = node.find("product")
+            data.delayedNeutrons.append(DelayedNeutron(
+                label=label, rate=rate,
+                product=(self.readProduct(product, f"{here}/delayedNeutron{_quoted(label)}")
+                         if product is not None else Product(pid="n", label="n")),
+            ))
+
+        for node in element.findall("fissionEnergyReleases/fissionEnergyRelease"):
+            release = FissionEnergyRelease(label=node.attrib.get("label", "eval"))
+            for name in FissionEnergyRelease.TERMS:
+                term = node.find(name)
+                if term is None or not len(term):
+                    self.unsupported(name, f"{here}/fissionEnergyRelease",
+                                     "the term is empty; the model holds None")
+                    continue
+                setattr(release, name, self.form(term[0], f"{here}/{name}", name))
+            data.fissionEnergyReleases.append(release)
+
+        if element.find("productYields") is not None:
+            self.unsupported(
+                "productYields", here,
+                "fission product yields (ENDF MF8/454, /459) have a model slot "
+                "and no reader; roadmap E7"
+            )
+        return data
 
     def readQ(self, element: ET.Element, path: str) -> Q:
         """§17.1.1. Every Q in the library is a ``constant1d``, so Q is a number.

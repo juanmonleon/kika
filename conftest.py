@@ -184,6 +184,21 @@ _TAPES: Dict[str, Sequence[str]] = {
     # Th-232 is the only tape here with two ranges: LCOMP=2 (LRF=3) and then an
     # unresolved LRU=2 covariance, §32.2.4. It is the whole URR coverage.
     "th232_b81": ("endfb81/n-090_Th_232.endf", "endfb8.1/n/90232.endf"),
+    # MF1/458 with LFC=0 and NPLY=2, the polynomial shape; 52 of the 161 MF1/458
+    # in the three libraries have it, and Ac-227's MF3/MT18 is the smallest.
+    "ac227_b81": ("endfb81/n-089_Ac_227.endf", "n-089_Ac_227.endf"),
+    # MF5 parametrised spectra (roadmap E2), the local witnesses: Ra-223's
+    # MT18 is LF=7 (simpleMaxwellianFission, 11 MT18 in ENDF/B-VIII.1), and
+    # O-17's MT16 is NK=2 of LF=9 (weightedFunctionals, the 28 NK>1 of the
+    # library are all LF=9). LF=11 and LF=12 have no tape on this machine.
+    "ra223_b81": ("endfb81/n-088_Ra_223.endf", "n-088_Ra_223.endf"),
+    "o17_b81": ("endfb81/n-008_O_017.endf", "n-008_O_017.endf"),
+    # LF=11 (Watt) and LF=12 (Madland-Nix): ENDF/B-VIII.1 has no MT18 with
+    # either, so the witnesses are ENDF/B-VII.1's U-233 and Am-241, fetched
+    # into kika.endf.remote's cache layout (2026-10-08, from NNDC: the IAEA
+    # endpoint sat behind a Cloudflare challenge that day).
+    "u233_b71": ("endfb71/n-092_U_233.endf", "endfb7.1/n/92233.endf"),
+    "am241_b71": ("endfb71/n-095_Am_241.endf", "endfb7.1/n/95241.endf"),
     # LCOMP=2 for R-Matrix Limited (LRF=7). W-186 is the smallest of the three;
     # Cl-35 is the one whose NJS (8) differs from its NJSX (7).
     "w186_b81": ("endfb81/n-074_W_186.endf", "endfb8.1/n/74186.endf"),
@@ -585,6 +600,11 @@ u235_b81_tape = _tape_fixture("u235_b81")
 cf252_b81_tape = _tape_fixture("cf252_b81")
 pu239_b81_tape = _tape_fixture("pu239_b81")
 u233_b81_tape = _tape_fixture("u233_b81")
+ac227_b81_tape = _tape_fixture("ac227_b81")
+ra223_b81_tape = _tape_fixture("ra223_b81")
+o17_b81_tape = _tape_fixture("o17_b81")
+u233_b71_tape = _tape_fixture("u233_b71")
+am241_b71_tape = _tape_fixture("am241_b71")
 pu240_b71_tape = _tape_fixture("pu240_b71")
 pu242_j40_tape = _tape_fixture("pu242_j40")
 u5_nubar_covfil_tape = _tape_fixture("u5_nubar_covfil")
@@ -859,6 +879,23 @@ def micro_nubar_tape() -> Path:
     would never exercise. 914 lines.
     """
     path = MICRO_TAPE_DIR / "micro_u235_nubar.endf"
+    if not path.is_file():  # pragma: no cover - fixture is committed
+        pytest.fail(f"committed micro-tape is missing: {path}")
+    return path
+
+
+@pytest.fixture(scope="session", params=["u235", "th232", "ac227"])
+def micro_fission_energy_tape(request: pytest.FixtureRequest) -> Path:
+    """Committed MF1/458 slices, one per shape the libraries use.
+
+    ``u235``  LFC=1, four components tabulated (ENDF/B-VIII.1; with 452/455/456)
+    ``th232`` LFC=0, NPLY=0 -- nine constants (106 of the 161 sections)
+    ``ac227`` LFC=0, NPLY=2 -- polynomials (52 of 161)
+
+    Each keeps MF1/451 and MF3/MT18 as well, since the energy release hangs off
+    the fission channel. Cut verbatim from ENDF/B-VIII.1.
+    """
+    path = MICRO_TAPE_DIR / f"micro_{request.param}_fission_energy.endf"
     if not path.is_file():  # pragma: no cover - fixture is committed
         pytest.fail(f"committed micro-tape is missing: {path}")
     return path
