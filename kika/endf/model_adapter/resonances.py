@@ -1187,7 +1187,19 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
                                                 UnresolvedCaseB, UnresolvedCaseC)
 
     widths = unresolved.tabulatedWidths
+    if widths is not None:
+        for group in widths.spinGroups:
+            parameterGrid=group.levelSpacingEnergies if group.levelSpacingEnergies is not None else widths.energyGrid
+            if group.crossSectionEnergies is not None and not np.array_equal(group.crossSectionEnergies,parameterGrid):
+                raise ValueError('ENDF URR requires a common parameter/sigma grid; independent sigma nodes need explicit resampling')
+    if widths is not None and any(c.neutronWidthConvention!='reduced' for g in widths.spinGroups for c in g.channels):
+        raise ValueError('ENDF URR requires reduced GN0; physical neutron widths must be converted explicitly')
+    if widths is not None and (widths.potentialScatteringInterpolation is not None
+                              or widths.potentialScatteringEnergies is not None):
+        raise ValueError('ENDF cannot represent an independent URR potential-scattering interpolation policy')
     case = fields.get("urr_case")
+    if case=='A' and any(g.crossSectionInterpolation is not None for g in widths.spinGroups):
+        raise ValueError('ENDF Case A has no sigma interpolation policy; explicit conversion to an energy-dependent case is required')
     states = fields.get("j_states") or []
     if case is None:
         raise ValueError("provenance does not record which URR case this range is")

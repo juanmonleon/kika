@@ -99,6 +99,7 @@ def _segments(prepared,backgrounds):
     for region in prepared.regions:
         if region.low<=0:raise ValueError('tabulation requires strictly positive lower energy bounds')
         cuts={region.low,region.high}
+        if region.unresolved is not None:cuts.update(region.unresolved.breaks)
         for curves in backgrounds.values():
             for curve in curves:
                 cuts.update(x for x in (curve.x[0],curve.x[-1]) if region.low<x<region.high)

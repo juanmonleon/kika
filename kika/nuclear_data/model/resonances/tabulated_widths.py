@@ -8,7 +8,7 @@ getting it wrong double-counts the unresolved region.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Literal
 from ..functions import Function1d
 from ..enums import Interpolation
 
@@ -21,13 +21,16 @@ __all__ = ["UnresolvedChannel", "UnresolvedSpinGroup", "TabulatedWidths"]
 class UnresolvedChannel:
     """Average width for one channel, constant or tabulated against energy.
 
-    **What the numbers are.** The ``"neutron"`` channel holds ENDF's GN0, the
+    **What the numbers are.** By default the ``"neutron"`` channel holds ENDF's GN0, the
     average *reduced* neutron width, exactly as ENDF and GNDS store it (FUDGE
     copies it verbatim into the ``elastic`` width). The physical average is
     ⟨Γn⟩(E) = GN0 · √E · ν_n · V_l(ρ), with V_l = P_l/ρ (V_0 = 1) — NJOY
     ``unfac`` (reconr.f90:4473-4495) and FUDGE (reconstructResonances.py:
     3273-3281) agree. That conversion belongs to the URR kernel; the model
-    never stores the converted width, so ν_n is not applied twice.
+    never stores the converted width on that path, so ν_n is not applied twice.
+    A canonical input explicitly declaring ``neutronWidthConvention="physical"``
+    supplies the physical mean in eV instead; neither sqrt(E), nu nor V_l is
+    applied again. That additional convention requires KIKA's GNDS extension.
 
     The other channels are physical average widths in eV. The ``"competitive"``
     width only enters the total width: ENDF-6 §2.1 (LRP=1) puts the competing
@@ -62,6 +65,11 @@ class UnresolvedChannel:
     #: Arrays above remain a compatibility view; processing must use this
     #: function when supplied, without inventing a common grid.
     averageFunction: Optional[Function1d] = None
+    #: ENDF/GNDS elastic averages are reduced GN0 by default. A canonical
+    #: model may instead explicitly supply physical mean neutron widths in eV,
+    #: including deterministic widths (nu=0). This declaration is carried by
+    #: the KIKA opt-in extension and cannot be exported as ENDF GN0.
+    neutronWidthConvention: Literal["reduced", "physical"] = "reduced"
 
     def __post_init__(self) -> None:
         if self.widths is not None:
@@ -91,6 +99,11 @@ class UnresolvedSpinGroup:
     levelSpacingFunction: Optional[Function1d] = None
     #: ENDF URR INT interpolates cross sections, not the average parameters.
     crossSectionInterpolation: Optional[Interpolation] = None
+    #: Sigma interpolation nodes, independent of the level-spacing function.
+    #: None retains the compatibility fallback to levelSpacingEnergies/block
+    #: energyGrid. KIKA's GNDS extension saves the effective sigma grid even
+    #: when D and all widths serialize as constant functions.
+    crossSectionEnergies: Optional[np.ndarray] = None
 
     def __post_init__(self) -> None:
         if self.levelSpacing is not None:
@@ -99,6 +112,8 @@ class UnresolvedSpinGroup:
             self.levelSpacingEnergies = np.asarray(
                 self.levelSpacingEnergies, dtype=float
             )
+        if self.crossSectionEnergies is not None:
+            self.crossSectionEnergies = np.asarray(self.crossSectionEnergies,dtype=float)
 
 
 @dataclass
@@ -149,6 +164,19 @@ class TabulatedWidths:
     #: source stated no policy (a GNDS file without ``calculateChannelRadius``).
     radiusPolicy: Optional[object] = None
 
+    #: Explicit convention for the potential-scattering term when spin groups
+    #: have different cross-section interpolation policies. ``None`` retains
+    #: the historical common-grid aggregate convention and requires all groups
+    #: to agree. ``"continuous"`` evaluates the potential once per L at E;
+    #: an Interpolation evaluates it on potentialScatteringEnergies, then
+    #: interpolates it independently of each group's resonance contribution.
+    #: These explicit policies require KIKA's opt-in GNDS extension; ENDF
+    #: cannot represent this additional convention.
+    potentialScatteringInterpolation: Optional[Interpolation | Literal["continuous"]] = None
+    potentialScatteringEnergies: Optional[np.ndarray] = None
+
     def __post_init__(self) -> None:
         if self.energyGrid is not None:
             self.energyGrid = np.asarray(self.energyGrid, dtype=float)
+        if self.potentialScatteringEnergies is not None:
+            self.potentialScatteringEnergies = np.asarray(self.potentialScatteringEnergies, dtype=float)

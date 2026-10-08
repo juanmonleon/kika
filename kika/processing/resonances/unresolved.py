@@ -6,7 +6,7 @@ Competition affects the width denominator only; its cross section is in MF3.
 """
 from dataclasses import dataclass,replace
 import numpy as np
-from kika.algebra import evaluate,discontinuities
+from kika.algebra import evaluate,join_pieces,split_at_discontinuities
 from .breit_wigner import Group
 from .radii import prepare_radius
 from .channel_functions import neutral_channel_functions
@@ -55,19 +55,23 @@ def average(function,values,grid,constant,low,high,*,positive=False,reduced=Fals
             constant=float(function.constant)
         else:
             curves=function.function1ds if isinstance(function,Regions1d) else [function]
-            result=[]
+            result=[];pieces=[]
             for curve in curves:
                 if not isinstance(curve,XYs1d):raise UnsupportedResonanceError('URR averages require constant1d, XYs1d or regions1d')
-                if curve.domainUnit!='eV':raise ValueError('URR average energies must be eV')
+                if curve.domainUnit!='eV' or curve.rangeUnit not in allowed_units:
+                    raise ValueError('URR average energies and widths/spacings must have normalized units')
                 x=np.asarray(curve.xs);y=np.asarray(curve.ys);law=curve.endfInterpolationCode
                 check(y)
                 if len(x)<2 or np.any(~np.isfinite(x)) or np.any(x<=0) or np.any(np.diff(x)<0):raise ValueError('invalid URR parameter grid')
                 if law not in (1,2,3,4,5):raise UnsupportedResonanceError('unknown URR parameter interpolation')
                 if law in (4,5) and np.any(y<=0):raise ValueError('URR logarithmic parameters must be positive')
-                cuts=np.r_[0,discontinuities(x)+1,len(x)]
+                pieces.append((x,y,law))
+            if any(a[0][-1]!=b[0][0] for a,b in zip(pieces[:-1],pieces[1:])):
+                raise ValueError('URR parameter regions overlap or have gaps')
+            for x,y,laws in split_at_discontinuities(*join_pieces(pieces)):
+                cuts=np.r_[0,np.flatnonzero(np.diff(laws))+1,len(laws)]
                 for a,b in zip(cuts[:-1],cuts[1:]):
-                    if b-a<2:raise ValueError('isolated URR repeated endpoint')
-                    result.append((tuple(x[a:b]),tuple(y[a:b]),law))
+                    result.append((tuple(x[a:b+1]),tuple(y[a:b+1]),int(laws[a])))
             if not result or result[0][0][0]>low or result[-1][0][-1]<high:raise ValueError('URR parameter grid does not cover region')
             if any(a[0][-1]!=b[0][0] for a,b in zip(result[:-1],result[1:])):raise ValueError('URR parameter regions overlap or have gaps')
             return Average(curves=tuple(result))
@@ -92,6 +96,7 @@ class UnresolvedGroup(Group):
     spacing: Average | None = None
     averages: tuple = ()
     degrees: tuple = ()
+    reduced_neutron: bool = True
 
 
 @dataclass(frozen=True)
@@ -101,9 +106,12 @@ class UnresolvedData:
     law: int | None = None
     quadrature: tuple = ()
     sigma_curves: tuple = ()
+    components: tuple = ()
+    potential_curves: tuple = ()
+    breaks: tuple = ()
 
 
-def _physics(energy,groups,diagnostics=None):
+def _physics(energy,groups,diagnostics=None,*,include_potential=True):
     e=np.asarray(energy,dtype=float);out={mt:np.zeros_like(e) for mt in (1,2,18,102)};potential=set()
     for group in groups:
         ctx=group.context;k2=ctx.k_squared_per_ev*e
@@ -114,9 +122,9 @@ def _physics(energy,groups,diagnostics=None):
         widths=np.stack([v.evaluate(e) for v in group.averages],axis=1)
         # ENDF GN0 is reduced, including the explicitly stated neutron nu.
         active=widths[:,0]>0
-        if np.any(active&(p==0)):
+        if group.reduced_neutron and np.any(active&(p==0)):
             raise FloatingPointError('URR neutron penetrability underflows; no silent zero-width substitution')
-        if np.any(active):
+        if group.reduced_neutron and np.any(active):
             widths[active,0]=np.exp(np.log(widths[active,0])+.5*np.log(e[active])
                 +np.log(group.degrees[0])+np.log(p[active])-np.log(rho[active]))
         if np.any(active&((widths[:,0]==0)|~np.isfinite(widths[:,0]))):
@@ -125,11 +133,63 @@ def _physics(energy,groups,diagnostics=None):
         factor=2*np.pi**2*.01/k2*(2*group.spin+1)/(2*(2*ctx.target_spin+1))/spacing
         out[2]+=factor*(products[:,0]-2*widths[:,0]*np.sin(phi)**2)
         out[102]+=factor*products[:,1];out[18]+=factor*products[:,2]
-        if group.l not in potential:
+        if include_potential and group.l not in potential:
             out[2]+=4*np.pi*.01/k2*(2*group.l+1)*np.sin(phi)**2;potential.add(group.l)
     if any(np.any(~np.isfinite(v)) for v in out.values()):raise FloatingPointError('nonfinite dilute URR cross section')
     out[1]=out[2]+out[18]+out[102]
     return out
+
+
+def _potential(energy,groups):
+    e=np.asarray(energy,dtype=float);result=np.zeros_like(e);seen=set()
+    for group in groups:
+        if group.l in seen:continue
+        k2=group.context.k_squared_per_ev*e
+        _,_,phi=neutral_channel_functions(group.l,np.sqrt(k2)*group.phase_radius.evaluate(e))
+        result+=4*np.pi*.01/k2*(2*group.l+1)*np.sin(phi)**2;seen.add(group.l)
+    return result
+
+
+def _sigma_nodes(grid,low,high):
+    grid=np.asarray(grid,dtype=float)
+    if (grid.ndim!=1 or len(grid)<2 or not np.all(np.isfinite(grid))
+            or grid[0]!=low or grid[-1]!=high or np.any(np.diff(grid)<=0)):
+        raise ValueError('URR sigma grid must span its domain in increasing order')
+    nodes=set(grid)
+    for a,b in zip(grid[:-1],grid[1:]):
+        if b/a>3:nodes.update(np.geomspace(a,b,int(np.ceil(10*np.log10(b/a)))+1))
+    return nodes
+
+
+def _sigma_curves(grid,breaks,law,low,high,calculate):
+    curves=[]
+    for a,b in zip(sorted({low,high}|breaks)[:-1],sorted({low,high}|breaks)[1:]):
+        x=np.asarray(sorted({a,b}|{v for v in grid if a<v<b}));energies=x.copy()
+        if b<high:energies[-1]=np.nextafter(b,a)
+        y=np.asarray(calculate(energies))
+        if law in (4,5) and np.any(y<=0) and not np.all(y==0):
+            raise ValueError('logarithmic URR sigma law requires positive nonzero partials')
+        curves.append((tuple(x),tuple(y),law))
+    return tuple(curves)
+
+
+def _curve_values(energies,curves):
+    values=np.zeros_like(energies)
+    for x,y,law in curves:
+        mask=(energies>=x[0])&(energies<=x[-1])
+        values[mask]=0. if all(v==0 for v in y) else evaluate(x,y,law,energies[mask])
+    return values
+
+
+def _group_breaks(group):
+    from .prepare import group_breaks
+    cuts=set(group_breaks(group))
+    for radius in (group.channel_radius,group.phase_radius):
+        previous=1
+        for nbt,code in radius.interpolation:
+            if code==1:cuts.update(radius.energies[previous:nbt])
+            previous=nbt
+    return cuts
 
 
 def prepare_unresolved(region,context,notes):
@@ -151,7 +211,7 @@ def prepare_unresolved(region,context,notes):
     policy=source.radiusPolicy
     if policy is None:raise UnsupportedResonanceError('URR radius policy is absent; declare radiusPolicy explicitly before calculating')
     phase=prepare_radius(policy.phaseRadius if policy.phaseRadius is not None else source.scatteringRadius)
-    groups=[];seen=set();laws=set();grids=[];lcontexts={}
+    groups=[];seen=set();laws=set();grids=[];policies=[];lcontexts={}
     for sg in source.spinGroups:
         l,j=sg.L,float(sg.J)
         if not isinstance(l,(int,np.integer)) or not 0<=l<=64 or not np.isfinite(j) or j<0 or not float(2*j).is_integer():raise ValueError('invalid URR L/J')
@@ -175,33 +235,76 @@ def prepare_unresolved(region,context,notes):
             if name is None:raise UnsupportedResonanceError(f'unidentified URR width channel {c.label!r}')
             if mt is not None and name!=mt_labels.get(mt,'competitive'):
                 raise ValueError('URR width label/MT mismatch')
+            if c.neutronWidthConvention not in ('reduced','physical') or (name!='neutron' and c.neutronWidthConvention!='reduced'):
+                raise ValueError('URR physical neutron-width convention belongs only to the neutron channel')
             if name in by_label:raise ValueError('duplicate URR width channel')
             if not np.isfinite(c.degreesOfFreedom) or c.degreesOfFreedom<0:raise ValueError('URR degrees of freedom must be real and nonnegative')
-            f=average(c.averageFunction,c.widths,c.energies if c.energies is not None else source.energyGrid,c.constantWidth,low,high,reduced=name=='neutron')
+            f=average(c.averageFunction,c.widths,c.energies if c.energies is not None else source.energyGrid,c.constantWidth,low,high,reduced=name=='neutron' and c.neutronWidthConvention=='reduced')
             by_label[name]=(f,float(c.degreesOfFreedom))
+            if name=='neutron':reduced_neutron=c.neutronWidthConvention=='reduced'
         if 'neutron' not in by_label:raise ValueError('URR group needs a reduced neutron width')
         pairs=[by_label.get(name,(Average(0.),0.)) for name in ('neutron','capture','fission','competitive')]
-        if pairs[0][1]==0 and any(v>0 for v in (pairs[0][0].constant,) if v is not None):
+        if reduced_neutron and pairs[0][1]==0 and any(v>0 for v in (pairs[0][0].constant,) if v is not None):
             raise UnsupportedResonanceError('nonzero reduced GN0 requires positive neutron nu; fixed physical widths are not reduced GN0')
-        if pairs[0][1]==0 and any(v>0 for curve in pairs[0][0].curves for v in curve[1]):
+        if reduced_neutron and pairs[0][1]==0 and any(v>0 for curve in pairs[0][0].curves for v in curve[1]):
             raise UnsupportedResonanceError('nonzero reduced GN0 requires positive neutron nu; fixed physical widths are not reduced GN0')
-        groups.append(UnresolvedGroup(l,channel,phase,(),context=ctx,spin=j,spacing=spacing,averages=tuple(p[0] for p in pairs),degrees=tuple(p[1] for p in pairs)))
+        groups.append(UnresolvedGroup(l,channel,phase,(),context=ctx,spin=j,spacing=spacing,averages=tuple(p[0] for p in pairs),degrees=tuple(p[1] for p in pairs),reduced_neutron=reduced_neutron))
         law=None if sg.crossSectionInterpolation is None else INTERPOLATION_TO_ENDF_INT.get(sg.crossSectionInterpolation)
-        if law not in (None,2,5):raise UnsupportedResonanceError('URR cross-section interpolation supports INT2/5')
+        if sg.crossSectionInterpolation is not None and law is None or law not in (None,1,2,3,4,5):
+            raise UnsupportedResonanceError('URR cross-section interpolation supports INT1-5')
         laws.add(law)
         if law is not None:
-            grid=sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid
+            grid=(sg.crossSectionEnergies if sg.crossSectionEnergies is not None else
+                  sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid)
             if grid is None:raise ValueError('URR cross-section interpolation requires a declared energy grid')
             grids.append(tuple(map(float,grid)))
+        elif sg.crossSectionEnergies is not None:raise ValueError('URR sigma grid requires an interpolation policy')
+        policies.append((law,None if law is None else tuple(map(float,grid))))
     if not groups:raise ValueError('URR needs spin groups')
+    explicit=source.potentialScatteringInterpolation
+    if explicit is not None:
+        potential_law=None if explicit=='continuous' else INTERPOLATION_TO_ENDF_INT.get(explicit)
+        if explicit!='continuous' and potential_law not in (1,2,3,4,5):
+            raise UnsupportedResonanceError('URR potential interpolation supports continuous or INT1-5')
+        nodes={low,high};breaks=set();diagnostics={};components=[]
+        for group,(code,declared_grid) in zip(groups,policies):
+            cuts={v for v in _group_breaks(group) if low<v<high};breaks.update(cuts)
+            if code is None:components.append(());continue
+            local_nodes=_sigma_nodes(declared_grid,low,high)|cuts;nodes.update(local_nodes)
+            if code==1:breaks.update(v for v in local_nodes if low<v<high)
+            sampled={}
+            def calculate(e):
+                key=tuple(e)
+                if key not in sampled:sampled[key]=_physics(e,(group,),diagnostics,include_potential=False)
+                return sampled[key]
+            components.append(tuple(_sigma_curves(local_nodes,cuts,code,low,high,
+                lambda e,mt=mt:calculate(e)[mt]) for mt in (2,18,102)))
+        potential_curves=()
+        if potential_law is not None:
+            declared=source.potentialScatteringEnergies
+            if declared is None:declared=source.energyGrid
+            if declared is None:raise ValueError('URR potential interpolation requires an explicit grid')
+            potential_cuts=set()
+            for group in groups:
+                radius=group.phase_radius;previous=1
+                for nbt,code in radius.interpolation:
+                    if code==1:potential_cuts.update(v for v in radius.energies[previous:nbt] if low<v<high)
+                    previous=nbt
+            local_nodes=_sigma_nodes(declared,low,high)|potential_cuts;nodes.update(local_nodes)
+            potential_curves=_sigma_curves(local_nodes,potential_cuts,potential_law,low,high,lambda e:_potential(e,groups))
+            breaks.update(potential_cuts)
+            if potential_law==1:breaks.update(v for v in local_nodes if low<v<high)
+        elif source.potentialScatteringEnergies is not None:
+            raise ValueError('continuous URR potential does not use an interpolation grid')
+        notes.append(f'URR per-group sigma policies; explicit potential policy {explicit}')
+        data=UnresolvedData(grid=tuple(sorted(nodes)),quadrature=tuple(diagnostics.items()),
+            components=tuple(components),potential_curves=potential_curves,breaks=tuple(sorted(breaks)))
+        return PreparedRegion(low,high,'Unresolved',tuple(groups),data)
+    if source.potentialScatteringEnergies is not None:raise ValueError('URR potential grid requires a policy')
     if len(laws)!=1 or grids and len(set(grids))!=1:raise UnsupportedResonanceError('mixed URR sigma laws or grids need an explicit aggregate interpolation convention')
     law=next(iter(laws));data=UnresolvedData()
     if law is not None:
-        grid=np.asarray(grids[0]);
-        if len(grid)<2 or grid[0]!=low or grid[-1]!=high or np.any(np.diff(grid)<=0):raise ValueError('URR sigma grid must span its domain in increasing order')
-        nodes=set(grid)
-        for a,b in zip(grid[:-1],grid[1:]):
-            if b/a>3:nodes.update(np.geomspace(a,b,int(np.ceil(10*np.log10(b/a)))+1))
+        nodes=_sigma_nodes(grids[0],low,high)
         # An explicit function step retains both one-sided values. Sigma
         # interpolation never bridges a jump in widths or phase radius.
         breaks=set()
@@ -221,10 +324,11 @@ def prepare_unresolved(region,context,notes):
             values=_physics(energies,groups,diagnostics)
             for mt in curves:
                 y=values[mt]
-                if law==5 and np.any(y<=0) and not np.all(y==0):raise ValueError('logarithmic URR sigma law requires positive nonzero partials')
+                if law in (4,5) and np.any(y<=0) and not np.all(y==0):raise ValueError('logarithmic URR sigma law requires positive nonzero partials')
                 curves[mt].append((tuple(x),tuple(y),law))
         data=UnresolvedData(grid=tuple(grid),law=law,quadrature=tuple(diagnostics.items()),
-            sigma_curves=tuple(tuple(curves[mt]) for mt in (2,18,102)))
+            sigma_curves=tuple(tuple(curves[mt]) for mt in (2,18,102)),
+            breaks=tuple(sorted(breaks|({x for x in grid if low<x<high} if law==1 else set()))))
         notes.append(f'URR sigma INT={law}; {len(grid)} nodes; wide-panel parameter interpolation then sigma interpolation')
     else:notes.append('URR evaluates physical energy dependence using each canonical parameter function')
     notes.append('URR dilute mean; real nu; fixed nu=0; competition only in total width')
@@ -237,6 +341,15 @@ def evaluate_unresolved(energies,region,diagnostics=None):
         for key,value in data.quadrature:
             diagnostics[key]=max(diagnostics.get(key,0),value)
     if data.self_shielding_only:return {mt:np.zeros_like(energies) for mt in (1,2,18,102)}
+    if data.components:
+        out={mt:np.zeros_like(energies) for mt in (2,18,102)}
+        for group,curves in zip(region.groups,data.components):
+            values=(_physics(energies,(group,),diagnostics,include_potential=False) if not curves
+                    else {mt:_curve_values(energies,c) for mt,c in zip((2,18,102),curves)})
+            for mt in out:out[mt]+=values[mt]
+        out[2]+=(_curve_values(energies,data.potential_curves) if data.potential_curves
+                 else _potential(energies,region.groups))
+        out[1]=out[2]+out[18]+out[102];return out
     if data.law is None:return _physics(energies,region.groups,diagnostics)
     out={}
     for mt,curves in zip((2,18,102),data.sigma_curves):

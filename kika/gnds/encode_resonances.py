@@ -451,21 +451,27 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
          calculateChannelRadius=(None if policy is None
                                  else "true" if policy.channelMode == "mass" else "false"),
          useForSelfShieldingOnly=_true(widths.selfShieldingOnly))
+    if widths.potentialScatteringInterpolation is not None or widths.potentialScatteringEnergies is not None:
+        report.lost('URR independent potential-scattering interpolation requires the KIKA opt-in resonance extension')
     _nestedPoPs(node, widths, report, "tabulatedWidths")
     table = None if policy is None else policy.phaseRadius
-    if policy is not None and policy.channelMode == "constant":
-        report.unsupportedNode("tabulatedWidths cannot state an independent constant channel radius (NAPS2)")
     # FUDGE's mapping (ENDF_ITYPE_0_Misc.readResonanceSection): AP(E) is the
     # hardSphereRadius when P/S come from the mass, and the scatteringRadius
     # when they use it too. The constant AP is kept beside a hardSphereRadius,
     # where it is unused but is what ENDF writes back.
-    if table is not None and table.isEnergyDependent and policy.channelMode == "phase":
+    if policy is not None and policy.channelMode == "constant":
+        _scatteringRadius(node, ScatteringRadius(constant=policy.channelRadius,unit="fm"),
+                          report, "tabulatedWidths", domain)
+        phase=table if table is not None else ScatteringRadius(
+            constant=widths.scatteringRadius,unit=widths.radiusUnit)
+        _scatteringRadius(node, phase, report, "tabulatedWidths", domain,tag="hardSphereRadius")
+    elif table is not None and table.isEnergyDependent and policy.channelMode == "phase":
         _scatteringRadius(node, table, report, "tabulatedWidths", domain)
     elif widths.scatteringRadius is not None:
         _scatteringRadius(node, ScatteringRadius(
             constant=widths.scatteringRadius,
             unit=widths.radiusUnit), report, "tabulatedWidths", domain)
-    if table is not None and table.isEnergyDependent and policy.channelMode != "phase":
+    if table is not None and table.isEnergyDependent and policy.channelMode == "mass":
         _scatteringRadius(node, table, report, "tabulatedWidths", domain,
                           tag="hardSphereRadius")
 
@@ -507,7 +513,7 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
     element = ET.SubElement(parent, "J")
     _set(element, label=str(index), value=formatFraction(group.J))
 
-    if group.crossSectionInterpolation is not None:
+    if group.crossSectionInterpolation is not None or group.crossSectionEnergies is not None:
         report.lost(f"URR L={group.L} J={group.J}: cross-section interpolation is distinct from parameter-function interpolation and is not serialized by this GNDS writer")
     grid = group.levelSpacingEnergies if group.levelSpacingEnergies is not None \
         else blockGrid
@@ -525,6 +531,8 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
 
     widths = ET.SubElement(element, "widths")
     for position, channel in enumerate(group.channels):
+        if channel.neutronWidthConvention!='reduced':
+            report.lost('URR physical neutron widths require the KIKA opt-in resonance extension')
         node = ET.SubElement(widths, "width")
         _set(node, label=str(position), resonanceReaction=channel.label,
              degreesOfFreedom=_number(channel.degreesOfFreedom))

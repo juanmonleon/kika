@@ -676,6 +676,10 @@ class _ResonanceReader:
         policy = None if stated is None and table is None else RadiusPolicy(
             channelMode="mass" if _isTrue(element, "calculateChannelRadius") else "phase",
             phaseRadius=table)
+        if stated is not None and not _isTrue(element,"calculateChannelRadius") and hardSphere is not None and urrRadius is not None:
+            # GNDS states P/S on scatteringRadius and the phase separately on
+            # hardSphereRadius. Do not reuse the latter as the channel radius.
+            policy=RadiusPolicy(channelMode="constant",channelRadius=urrRadius,phaseRadius=table)
         pops = element.find("PoPs")
         widths = TabulatedWidths(
             label=element.attrib.get("label", ""),
