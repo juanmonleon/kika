@@ -116,6 +116,21 @@ class TabulatedWidths:
     #: two halves of the same calculation ask for the same number in different
     #: ways. Added in phase 4.
     PoPs: Optional[object] = None
+    #: The region's own radius policy, the same
+    #: :class:`~.radius_policy.RadiusPolicy` the resolved formalisms carry.
+    #: ``channelMode`` says what P and S use (ENDF NAPS: ``"mass"`` = 0,
+    #: ``"phase"`` = 1); ``phaseRadius`` is the region's energy-dependent AP(E)
+    #: (ENDF NRO=1), and ``None`` there means the constant
+    #: :attr:`scatteringRadius`. GNDS states the same three facts on
+    #: ``tabulatedWidths`` itself: ``calculateChannelRadius``,
+    #: ``hardSphereRadius`` and ``scatteringRadius``.
+    #:
+    #: Before this field the URR's NAPS lived only in ENDF provenance, and its
+    #: AP(E) was copied to :attr:`Resonances.scatteringRadius`, the radius of
+    #: the **whole evaluation** — Au-197 (B-VIII.1, JEFF-4.0) handed its URR
+    #: table to every consumer that read the global radius. ``None`` means the
+    #: source stated no policy (a GNDS file without ``calculateChannelRadius``).
+    radiusPolicy: Optional[object] = None
 
     def __post_init__(self) -> None:
         if self.energyGrid is not None:

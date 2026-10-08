@@ -231,10 +231,13 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
     parameters = energyRange.parameters
     fields = _rangeFields(energyRange, isotope, isotopeIndex)
 
-    if energyRange.nro == 1 and energyRange.ap_e is not None:
+    if energyRange.nro == 1 and energyRange.ap_e is not None and lru != 2:
         # An energy-dependent radius is a property of the evaluation, not of one
         # region, and ENDF gives no per-l version of it — so it wins over the
         # constant, and that precedence is stated here rather than left implicit.
+        # Not for the URR: its table is the URR's own and lands on its
+        # ``radiusPolicy`` below. Copying it here gave Au-197's resolved range,
+        # and the GNDS top-level radius, the URR's AP(E).
         resonances.scatteringRadius = ScatteringRadius(
             constant=radiusFromEndf(getattr(parameters, "ap", None)),
             energies=np.asarray(energyRange.ap_e.energies, dtype=float),
@@ -273,6 +276,8 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
             keep("unsupported")
             return
         tabulated = _decodeUnresolved(parameters, report, fields)
+        if tabulated is not None:
+            tabulated.radiusPolicy = _unresolvedRadiusPolicy(energyRange, parameters, report)
         if tabulated is not None and tabulated.PoPs is None:
             tabulated.PoPs = _targetPoPs(
                 fields.get("spi"),
@@ -659,6 +664,32 @@ def _decodeRMatrixLimited(parameters, report: ConversionReport,
 # Unresolved (LRU=2)
 # ---------------------------------------------------------------------------
 
+def _unresolvedRadiusPolicy(energyRange, parameters, report: ConversionReport):
+    """NAPS and NRO of an LRU=2 range → the URR's :class:`RadiusPolicy`.
+
+    NAPS=0 computes the channel radius for P/S from the mass, NAPS=1 uses the
+    scattering radius; the phase radius is AP(E) under NRO=1 and AP otherwise
+    (ENDF-102 §2.2.1, which states NRO/NAPS for the range, not for LRU=1 only).
+    NAPS=2 is defined for resolved ranges; on a URR it is kept and reported.
+    """
+    naps = energyRange.naps
+    if naps not in (0, 1, 2):
+        report.unsupportedNode(f"MF2/151 URR NAPS={naps} is not 0, 1 or 2")
+        return None
+    if naps == 2:
+        report.warn("MF2/151 URR declares NAPS=2, which ENDF-102 defines for resolved ranges")
+    table = None
+    if energyRange.nro == 1 and energyRange.ap_e is not None:
+        table = ScatteringRadius(
+            energies=np.asarray(energyRange.ap_e.energies, dtype=float),
+            values=radiusFromEndf(np.asarray(energyRange.ap_e.ap_values, dtype=float)),
+            interpolation=list(energyRange.ap_e.interpolation), unit=MODEL_RADIUS_UNIT)
+    return RadiusPolicy(
+        channelMode={0: "mass", 1: "phase", 2: "constant"}[naps],
+        channelRadius=radiusFromEndf(parameters.ap) if naps == 2 and parameters is not None else None,
+        phaseRadius=table)
+
+
 def _channel(label: str, value, degreesOfFreedom: float = 1.0) -> UnresolvedChannel:
     """One average width, constant (case A) or tabulated (cases B and C)."""
     if isinstance(value, np.ndarray) or isinstance(value, (list, tuple)):
@@ -848,6 +879,24 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
                     "no unresolved region"
                 )
             parameters = _encodeUnresolved(resonances.unresolved, fields)
+            policy = getattr(resonances.unresolved.tabulatedWidths, "radiusPolicy", None)
+            if policy is not None:
+                # The model decides, as for BW: an edited policy or AP(E) has to
+                # reach the file, and a removed table must not come back from
+                # provenance.
+                modes = {"mass": 0, "phase": 1, "constant": 2}
+                if policy.channelMode not in modes:
+                    raise ValueError(f"unknown URR radius policy {policy.channelMode!r}")
+                fields["naps"] = modes[policy.channelMode]
+                table = policy.phaseRadius
+                if table is not None and table.isEnergyDependent:
+                    fields["nro"] = 1
+                    fields["radius_table"] = (np.asarray(table.energies, dtype=float),
+                                              radiusToEndf(np.asarray(table.values, dtype=float)),
+                                              list(table.interpolation))
+                else:
+                    fields["nro"] = 0
+                    fields.pop("radius_table", None)
         else:
             region = next(resolved, None)
             if region is None:

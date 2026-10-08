@@ -654,6 +654,28 @@ class _ResonanceReader:
         here = f"{path}/tabulatedWidths"
         urrRadius, urrRadiusUnit = self.modelRadius(
             element.find("scatteringRadius"), here)
+        # The inverse of the writer's (and FUDGE's) mapping: a tabulated
+        # scatteringRadius is AP(E) for P/S and phase alike, a hardSphereRadius
+        # is AP(E) for the phase only.
+        wrapper = element.find("scatteringRadius")
+        table = (self.readScatteringRadius(wrapper, here)
+                 if wrapper is not None and wrapper.find("XYs1d") is not None else None)
+        hardSphere = element.find("hardSphereRadius")
+        if hardSphere is not None:
+            if table is not None:
+                self.unsupported("hardSphereRadius", here,
+                                 "beside a tabulated scatteringRadius; the model keeps one AP(E)")
+            else:
+                table = self.readScatteringRadius(hardSphere, here)
+        stated = element.attrib.get("calculateChannelRadius")
+        if stated is None and table is not None:
+            self.report.warn(
+                f"{here}: no calculateChannelRadius beside an energy-dependent "
+                f"radius; GNDS before 2.2 had no such flag for the URR and meant "
+                f"NAPS=0, so P/S are taken from the radius as GNDS 2.2 says")
+        policy = None if stated is None and table is None else RadiusPolicy(
+            channelMode="mass" if _isTrue(element, "calculateChannelRadius") else "phase",
+            phaseRadius=table)
         pops = element.find("PoPs")
         widths = TabulatedWidths(
             label=element.attrib.get("label", ""),
@@ -662,6 +684,7 @@ class _ResonanceReader:
             radiusUnit=urrRadiusUnit,
             PoPs=None if pops is None else self.readPoPs(pops),
             resonanceReactions=self.readResonanceReactions(element, here),
+            radiusPolicy=policy,
         )
         for L in element.findall("Ls/L"):
             for J in L.findall("Js/J"):

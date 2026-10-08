@@ -445,14 +445,29 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
         return
 
     node = ET.SubElement(element, "tabulatedWidths")
+    policy = getattr(widths, "radiusPolicy", None)
     _set(node, label=widths.label or "eval",
          approximation="SingleLevelBreitWigner",
+         calculateChannelRadius=(None if policy is None
+                                 else "true" if policy.channelMode == "mass" else "false"),
          useForSelfShieldingOnly=_true(widths.selfShieldingOnly))
     _nestedPoPs(node, widths, report, "tabulatedWidths")
-    if widths.scatteringRadius is not None:
+    table = None if policy is None else policy.phaseRadius
+    if policy is not None and policy.channelMode == "constant":
+        report.unsupportedNode("tabulatedWidths cannot state an independent constant channel radius (NAPS2)")
+    # FUDGE's mapping (ENDF_ITYPE_0_Misc.readResonanceSection): AP(E) is the
+    # hardSphereRadius when P/S come from the mass, and the scatteringRadius
+    # when they use it too. The constant AP is kept beside a hardSphereRadius,
+    # where it is unused but is what ENDF writes back.
+    if table is not None and table.isEnergyDependent and policy.channelMode == "phase":
+        _scatteringRadius(node, table, report, "tabulatedWidths", domain)
+    elif widths.scatteringRadius is not None:
         _scatteringRadius(node, ScatteringRadius(
             constant=widths.scatteringRadius,
             unit=widths.radiusUnit), report, "tabulatedWidths", domain)
+    if table is not None and table.isEnergyDependent and policy.channelMode != "phase":
+        _scatteringRadius(node, table, report, "tabulatedWidths", domain,
+                          tag="hardSphereRadius")
 
     reactions = ET.SubElement(node, "resonanceReactions")
     for reaction in widths.resonanceReactions:
