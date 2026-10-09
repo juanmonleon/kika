@@ -447,3 +447,98 @@ def test_kika_writes_endf_from_the_tsl_gnds_fudge_writes(tslGnds, tmp_path):
     back = _sameTslForms(suite, tape)
     assert (back.provenance.mat, back.provenance.za) == (suite.provenance.mat,
                                                          suite.provenance.mat + 100)
+
+
+# ---------------------------------------------------------------------------
+# The photons (roadmap E5b)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def photonPair(fudgePython):
+    tape = _DATA / "micro_n14_photons.endf"
+    suite, _ = decodeReactionSuite(read_endf(str(tape)))
+    return suite, _runFudge(fudgePython, tape)
+
+
+def _kikaPhotons(channel):
+    out = []
+    for product in channel.products:
+        if product.pid == "photon" and product.multiplicity is not None:
+            out.append(product)
+        if product.outputChannel is not None:
+            out.extend(_kikaPhotons(product.outputChannel))
+    return out
+
+
+def _key(kind, value):
+    return (kind, -1.0 if value is None else value)
+
+
+def test_the_capture_photons_read_the_same(photonPair):
+    """N-14 MT102, 59 photons: kika and FUDGE agree on every multiplicity,
+    line energy, continuum table and Legendre row to the last bit, once paired
+    by (kind, energy).
+
+    **One difference, named and asserted (decision J6):** a line's domain.
+    kika takes the domain of the photon's own multiplicity, which is what the
+    section states; FUDGE takes the reaction's cross-section domain.
+    """
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    suite, fudge = photonPair
+    reaction = suite.reactionByENDF_MT(102)
+    theirs = sorted(fudge["photons"]["102"],
+                    key=lambda e: _key(e["kind"], e.get("value")))
+    ours = sorted(_kikaPhotons(reaction.outputChannel),
+                  key=lambda p: _key(type(p.distribution[EVAL_LABEL].energy).__name__,
+                                     getattr(p.distribution[EVAL_LABEL].energy, "value", None)))
+    assert len(ours) == len(theirs) == 59
+
+    sigma = reaction.crossSection[EVAL_LABEL]
+    for product, entry in zip(ours, theirs):
+        form = product.distribution[EVAL_LABEL]
+        energy = form.energy
+        assert type(energy).__name__ == entry["kind"]
+        xs, ys = _collapse(*entry["multiplicity"])
+        np.testing.assert_allclose(product.multiplicity.form.xs, xs, rtol=RTOL)
+        np.testing.assert_allclose(product.multiplicity.form.ys, ys, rtol=RTOL)
+        if "value" in entry:
+            assert energy.value == entry["value"]
+            assert entry["domain"] == [float(sigma.domainMin), float(sigma.domainMax)]
+            assert (energy.domainMin, energy.domainMax) == (xs[0], xs[-1])
+        else:
+            assert [f.outerDomainValue for f in energy.function1ds] ==                 [row[0] for row in entry["energy"]]
+            for function, (_, (ex, ey)) in zip(energy.function1ds, entry["energy"]):
+                np.testing.assert_allclose(function.xs, ex, rtol=RTOL)
+                np.testing.assert_allclose(function.ys, ey, rtol=RTOL)
+        if isinstance(entry["angular"], list):
+            for function, (e, coefficients) in zip(form.angular.function1ds,
+                                                   entry["angular"]):
+                assert function.outerDomainValue == e
+                np.testing.assert_allclose(function.coefficients, coefficients, rtol=RTOL)
+        else:
+            assert type(form.angular).__name__ == entry["angular"] == "Isotropic2d"
+
+
+def test_the_mf13_photons_divide_to_the_same_multiplicities(photonPair):
+    """N-14 MT4 (a reaction in the cut): kika's σ_γ/σ against FUDGE's.
+
+    **Not to the last bit, and that is the point of decision J5.** FUDGE divides
+    on MF13's grid alone and skips σ = 0; kika divides on MF13 ∪ σ. Read at
+    FUDGE's own abscissae the two must agree to the linearisation tolerance
+    both apply to σ (1e-3), and the line energies must be identical.
+    """
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    suite, fudge = photonPair
+    theirs = fudge["photons"].get("4")
+    assert theirs, "FUDGE translated no MT4 photons"
+    ours = {p.distribution[EVAL_LABEL].energy.value: p
+            for p in _kikaPhotons(suite.reactionByENDF_MT(4).outputChannel)}
+    assert len(ours) == len(theirs)
+    for entry in theirs:
+        product = ours[entry["value"]]
+        x, y = (np.asarray(v, dtype=float) for v in entry["multiplicity"])
+        keep = y > 0
+        mine = np.interp(x[keep], product.multiplicity.form.xs, product.multiplicity.form.ys)
+        np.testing.assert_allclose(mine, y[keep], rtol=2e-3)

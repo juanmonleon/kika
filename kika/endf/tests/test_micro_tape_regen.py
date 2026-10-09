@@ -314,6 +314,8 @@ def photon_fixture_path(key: str) -> Path:
 #:   MF14 and MF15 -- the three-file case the 130 LAW=-15 subsections live in.
 #: * ``cm243`` (JEFF-4.0): LO=2 with LG=1 (no GP), which Fe-56 and S-36 lack.
 #:   The smallest LG=1 carrier in JEFF-4.0; ENDF/B-VIII.1's smallest is Cd-111.
+#: * ``li7`` (JEFF-4.0): an LO=1 photon on a discrete level (MT51), which is the
+#:   decay of the excited residual and so lands in *its* output channel.
 #: * ``s36`` (JENDL-5): the smallest LO=2 with LP=1.
 #: * ``hf182`` (JENDL-5): the photons on MT3, MF12 LO=1 and an MF15 of 1397
 #:   lines, the shape 95 JENDL-5 sections have.
@@ -326,6 +328,7 @@ PHOTON_FIXTURES = {
     "u235": ("u235_b81", {1: {451}, 3: {18}, 6: {18}, 12: {18}, 14: {18}, 15: {18}}),
     "cm243": ("cm243_jeff40", {1: {451}, 3: {51, 52, 53}, 12: {51, 52, 53},
                                14: {51, 52, 53}}),
+    "li7": ("li7_jeff40", {1: {451}, 3: {51}, 12: {51}, 14: {51}}),
     "s36": ("s36_jendl", {1: {451}, 3: {51, 52, 53}, 12: {51, 52, 53},
                           14: {51, 52, 53}}),
     "hf182": ("hf182_jendl", {1: {451}, 3: {3}, 12: {3}, 14: {3}, 15: {3}}),
@@ -877,7 +880,7 @@ def test_regenerate_cov_check_micro_tapes(ne20_jeff40_tape, w186_jeff40_tape,
 @pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
 def test_regenerate_photon_micro_tapes(n14_b81_tape, fe56_b81_tape, u235_b81_tape,
                                        s36_jendl_tape, hf182_jendl_tape,
-                                       cm243_jeff40_tape, request):
+                                       cm243_jeff40_tape, li7_jeff40_tape, request):
     """Rebuild just the photon fixtures, for the same reason as the MF6 ones."""
     DATA.mkdir(parents=True, exist_ok=True)
     for key, (tape, keep) in PHOTON_FIXTURES.items():

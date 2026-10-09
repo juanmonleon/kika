@@ -238,11 +238,13 @@ _TAPES: Dict[str, Sequence[str]] = {
     # §2.7). N-14 carries MF12 LO=1, MF13, an anisotropic MF14 and MF15 in one
     # 1.25 MB tape, and NNDC's GNDS of it has the five orphanProducts MF13 makes;
     # S-36 is the smallest LO=2 with LP=1; Hf-182 the smallest JENDL-5 tape with
-    # its photons on MT3; Cm-243 the smallest JEFF-4.0 LO=2 with LG=1.
+    # its photons on MT3; Cm-243 the smallest JEFF-4.0 LO=2 with LG=1; Li-7 the
+    # smallest JEFF-4.0 tape with an LO=1 photon on a discrete level (MT51).
     "n14_b81": ("endfb81/n-007_N_014.endf", "endfb81/neutrons/n-007_N_014.endf"),
     "s36_jendl": ("jendl5/n_016-S-036.dat", "jendl5/neutrons/n_016-S-036.dat"),
     "hf182_jendl": ("jendl5/n_072-Hf-182.dat", "jendl5/neutrons/n_072-Hf-182.dat"),
     "cm243_jeff40": ("jeff40/n_96-Cm-243g.jeff", "jeff40/neutrons/n_96-Cm-243g.jeff"),
+    "li7_jeff40": ("jeff40/n_3-Li-007g.jeff", "jeff40/neutrons/n_3-Li-007g.jeff"),
     # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
     # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
     # validation that picked them is kika-workspace
@@ -671,7 +673,7 @@ for _name in MF32_TAPES:
 del _name
 
 #: The photon witnesses (roadmap E5), for the same reason as ``MF32_TAPES``.
-PHOTON_TAPES = ("n14_b81", "s36_jendl", "hf182_jendl", "cm243_jeff40")
+PHOTON_TAPES = ("n14_b81", "s36_jendl", "hf182_jendl", "cm243_jeff40", "li7_jeff40")
 for _name in PHOTON_TAPES:
     globals()[f"{_name}_tape"] = _tape_fixture(_name)
 del _name
