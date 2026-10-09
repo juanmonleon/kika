@@ -297,6 +297,9 @@ def format_endf_id_columns(mat: int, mf: int, mt: int, line_num: int) -> str:
     return f"{mat:4d}{mf:2d}{mt:3d}{line_num:5d}"
 
 
+_ENDF_NUMBER = re.compile(r'([-+]?\d*\.\d*)([+-]\d+)')
+
+
 def parse_number(text: str) -> Union[float, int, None]:
     """
     Parse an ENDF-formatted number.
@@ -313,6 +316,24 @@ def parse_number(text: str) -> Union[float, int, None]:
     text = text.strip()
     if not text:
         return None
+
+    # Most ENDF fields omit E. Recognize that grammar before float() rather
+    # than throwing a ValueError for almost every value in a LIST/TAB1 body.
+    # Full matching keeps Python float syntax (including underscores, NaN,
+    # infinity and explicit exponents) on its original path. One decimal
+    # conversion, never mantissa * 10**exponent, preserves exact rounding.
+    # A decimal point excludes integer controls; E/e excludes the explicit
+    # exponent syntax used by the other fixed-width formats.
+    if '.' in text and 'e' not in text and 'E' not in text:
+        match = _ENDF_NUMBER.fullmatch(text)
+        if match is not None:
+            try:
+                value = float(f"{match[1]}e{match[2]}")
+            except ValueError:
+                # The historical regex also matches an empty mantissa ".";
+                # ".+3" has always returned None rather than raising.
+                return None
+            return int(value) if value.is_integer() else value
     
     try:
         # Try standard float parsing first
@@ -324,7 +345,7 @@ def parse_number(text: str) -> Union[float, int, None]:
     except ValueError:
         # Handle ENDF-specific format where "+" or "-" might be used instead of "E"
         # For example, "1.234+5" instead of "1.234E+5"
-        match = re.search(r'([-+]?\d*\.\d*)([+-]\d+)', text)
+        match = _ENDF_NUMBER.search(text)
         if match:
             try:
                 # Reassembled into one decimal string and converted once, NOT
@@ -354,6 +375,25 @@ def parse_number(text: str) -> Union[float, int, None]:
         return None
 
 
+def parse_record_values(line: str) -> Tuple[Optional[Union[float, int]], ...]:
+    """Six data fields of a record, retaining identification-field validation.
+
+    LIST/TAB1 bodies need positional values, not a dict with C1..C6 keys.
+    Short lines and invalid ID fields keep parse_line's existing behavior.
+    """
+    if len(line) >= 75:
+        int(line[66:70].strip() or '0')
+        int(line[70:72].strip() or '0')
+        int(line[72:75].strip() or '0')
+    if len(line) >= 80:
+        int(line[75:80].strip() or '0')
+    if len(line) < 66:
+        return (None,) * 6
+    return (parse_number(line[:11]), parse_number(line[11:22]),
+            parse_number(line[22:33]), parse_number(line[33:44]),
+            parse_number(line[44:55]), parse_number(line[55:66]))
+
+
 def parse_line(line: str) -> Dict[str, Any]:
     """
     Parse a standard ENDF record line into its components.
@@ -368,15 +408,9 @@ def parse_line(line: str) -> Dict[str, Any]:
     
     # Parse data fields (columns 1-66)
     if len(line) >= 66:
-        data_part = line[:66]
-        # ENDF format typically has 6 fields of 11 characters each
-        for i in range(6):
-            field_name = f"C{i+1}"
-            start = i * 11
-            end = start + 11
-            if end <= len(data_part):
-                field_value = data_part[start:end].strip()
-                result[field_name] = parse_number(field_value)
+        result = {"C1": parse_number(line[:11]), "C2": parse_number(line[11:22]),
+                  "C3": parse_number(line[22:33]), "C4": parse_number(line[33:44]),
+                  "C5": parse_number(line[44:55]), "C6": parse_number(line[55:66])}
     
     # Parse identification fields (columns 67-80)
     if len(line) >= 75:

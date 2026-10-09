@@ -11,7 +11,9 @@ from typing import List, Tuple
 
 from ..classes.mf import MF
 from ..classes.mf34.mf34 import MF34MT, Subsection, SubSubsection, SubSubsectionRecord
-from ..utils import parse_line, parse_endf_id, group_lines_by_mt_with_positions
+from ..utils import (
+    parse_line, parse_endf_id, group_lines_by_mt_with_positions, parse_record_values,
+)
 from ...utils import get_endf_logger
 
 logger = get_endf_logger(__name__)
@@ -56,12 +58,11 @@ def _read_floats(lines: List[str], idx: int, n: int) -> Tuple[List[float], int]:
     """Read N scalar floats from the body of a LIST record (6 per line)."""
     values: List[float] = []
     while len(values) < n and idx < len(lines):
-        ld = parse_line(lines[idx])
+        ld = parse_record_values(lines[idx])
         idx += 1
-        for i in range(1, 7):
+        for v in ld:
             if len(values) >= n:
                 break
-            v = ld.get(f"C{i}")
             if v is not None:
                 values.append(v)
     return values, idx

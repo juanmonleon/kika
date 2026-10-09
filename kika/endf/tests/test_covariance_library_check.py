@@ -91,3 +91,45 @@ def test_a_path_that_is_not_a_directory_is_refused(tmp_path):
         check_covariance_library(tmp_path / "nowhere")
     with pytest.raises(ValueError, match="31, 32, 33, 34, 35, 40"):
         check_covariance_library(CUTS, mf=(30,))
+
+
+def test_no_covariances_do_not_invoke_any_mf_parser(monkeypatch):
+    from kika.endf.parsers.parse_endf import MF_PARSERS
+
+    def unexpected(lines):
+        pytest.fail("an MF was parsed although no requested covariance is present")
+
+    for mf in list(MF_PARSERS):
+        monkeypatch.setitem(MF_PARSERS, mf, unexpected)
+    # The tape carries MF34, but the caller asked for MF33 only.
+    report = check_covariance_library([DATA / "micro_w186_covcheck.endf"],
+                                      mf=(33,), progress=False)
+    assert report.failed == ()
+    assert not report.tapes[0].has_covariances
+
+
+def test_only_present_covariances_and_their_support_are_parsed(monkeypatch):
+    from kika.endf.parsers.parse_endf import MF_PARSERS
+
+    loaded = []
+    for mf, parser in list(MF_PARSERS.items()):
+        def track(lines, mf=mf, parser=parser):
+            loaded.append(mf)
+            return parser(lines)
+        monkeypatch.setitem(MF_PARSERS, mf, track)
+    report = check_covariance_library([DATA / "micro_fe56_mf33.endf"], progress=False)
+    assert report.failed == () and report.tapes[0].has_covariances
+    assert loaded == [3, 33]
+
+
+@pytest.mark.parametrize("mf", [3, 33])
+def test_parse_failures_are_still_reported_in_the_read_phase(monkeypatch, mf):
+    from kika.endf.parsers.parse_endf import MF_PARSERS
+
+    def broken(lines):
+        raise ValueError("deliberate parser failure")
+
+    monkeypatch.setitem(MF_PARSERS, mf, broken)
+    report = check_covariance_library([DATA / "micro_fe56_mf33.endf"], progress=False)
+    assert len(report.failed) == 1
+    assert report.failed[0].error.startswith("read: ValueError:")

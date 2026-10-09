@@ -79,6 +79,24 @@ deprecated:
    endf = kika.read_endf("Fe56.endf")
    endf.mf[33].mt[102]        # the covariance section as ENDF structures it
 
+When only a few MF files are needed, :func:`kika.endf.open_endf` indexes the
+tape once and parses each MF on its first access:
+
+.. code-block:: python
+
+   from kika.endf import open_endf, check_covariance_library
+
+   endf = open_endf("Fe56.endf")
+   33 in endf.files          # presence check; does not parse MF33
+   endf.files[33].mt[102]    # parses MF33 once
+
+   report = check_covariance_library("evaluations", progress=True)
+
+The covariance-library walk uses this index to skip tapes without the
+requested covariance files. For tapes that carry them, it parses only those
+files and the support files their checks need. It checks and releases one
+tape at a time, and still records read failures without stopping the walk.
+
 Reach for them when you need a section kika does not model yet, when you are
 working as an evaluator in ENDF's own vocabulary, or when you are writing a
 tape back out. They are also the **faster** road: decoding into the model costs

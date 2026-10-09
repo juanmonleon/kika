@@ -405,7 +405,9 @@ def check_covariance_library(
     mf : sequence of int
         The covariance files to check (any of 31, 32, 33, 34, 35, 40; all by
         default), for every tape a mapping *source* does not set. Only these
-        and the files that give them central values (``_SUPPORT_MF``) are read.
+        that are present and the files that give them central values
+        (``_SUPPORT_MF``) are parsed. A single index scan detects tapes without
+        requested covariances without parsing any MF.
     patterns : sequence of str
         Globs that pick the tapes in a directory. The default covers how
         ENDF/B, JEFF and JENDL name theirs.
@@ -443,7 +445,7 @@ def check_covariance_library(
     import logging
     import warnings
 
-    from kika.endf import read_endf
+    from kika.endf import open_endf
 
     from .covariances import check_covariances
 
@@ -486,11 +488,20 @@ def check_covariance_library(
                 wanted = per_tape.get(path, default)
                 za, liso = _nuclide(path)
                 make = functools.partial(TapeCheck, path, mf=wanted, label=label, za=za, liso=liso)
-                read_mf = sorted(set(wanted).union(*(_SUPPORT_MF[m] for m in wanted)))
                 report(i, f"[{i}/{len(paths)}] {label or path.name} ...", False)
                 t0 = time.perf_counter()
                 try:
-                    endf = read_endf(str(path), mf_numbers=read_mf)
+                    endf = open_endf(str(path))
+                    present = set(endf.files)
+                    covariances = present.intersection(wanted)
+                    if covariances:
+                        read_mf = sorted(covariances.union(
+                            *(_SUPPORT_MF[m] for m in covariances)))
+                        # _Context accesses every support MF it can see. Give
+                        # it only those needed by the requested covariances,
+                        # and finish parsing here so failures and timing stay
+                        # in the read phase. Membership never parses an MF.
+                        endf.files = {m: endf.files[m] for m in read_mf if m in present}
                 except Exception as exc:  # noqa: BLE001 - recorded, the walk goes on
                     out.append(make(
                         error=f"read: {type(exc).__name__}: {exc}",
@@ -499,7 +510,7 @@ def check_covariance_library(
                     continue
                 t1 = time.perf_counter()
                 if not endf.files:
-                    # read_endf returns an empty tape for a file that is not
+                    # open_endf returns an empty tape for a file that is not
                     # ENDF at all; in a census that is a failure, not a tape
                     # without covariances.
                     out.append(make(

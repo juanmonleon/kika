@@ -36,6 +36,7 @@ from .._records import (
     parse_endf_id,
     parse_line,
     parse_number,
+    parse_record_values,
 )
 
 
@@ -269,11 +270,11 @@ def parse_interp_pairs(lines, start, nr):
     idx = start
     remaining = nr
     while remaining > 0 and idx < len(lines):
-        ld = parse_line(lines[idx])
+        values = parse_record_values(lines[idx])
         n_this_line = min(3, remaining)
         for i in range(n_this_line):
-            nbt = ld.get(f"C{i * 2 + 1}")
-            interp = ld.get(f"C{i * 2 + 2}")
+            nbt = values[i * 2]
+            interp = values[i * 2 + 1]
             if nbt is not None and interp is not None:
                 pairs.append((int(nbt), int(interp)))
         remaining -= n_this_line
@@ -307,13 +308,13 @@ def parse_data_pairs(lines, start, np_count):
     for _ in range(num_lines_needed):
         if idx >= len(lines):
             break
-        ld = parse_line(lines[idx])
+        values = parse_record_values(lines[idx])
         idx += 1
         for i in range(3):
             if len(x_list) >= np_count:
                 break
-            x = ld.get(f"C{i * 2 + 1}")
-            y = ld.get(f"C{i * 2 + 2}")
+            x = values[i * 2]
+            y = values[i * 2 + 1]
             if x is not None and y is not None:
                 x_list.append(x)
                 y_list.append(y)
@@ -503,12 +504,12 @@ def parse_data_values(lines, start, n_values):
         if idx >= len(lines):
             break
         line = lines[idx]
-        ld = parse_line(line)
+        fields = parse_record_values(line)
         idx += 1
         for i in range(1, 7):
             if len(values) >= n_values:
                 break
-            v = ld.get(f"C{i}")
+            v = fields[i - 1]
             if v is not None:
                 values.append(v)
             elif not line[(i - 1) * 11:i * 11].strip():

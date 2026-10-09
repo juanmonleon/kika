@@ -7,7 +7,9 @@ from typing import List, Tuple
 
 from ..classes.mf import MF
 from ..classes.mf33.mf33 import MF33MT, Subsection, NCSubSubsection, NISubSubsectionRecord
-from ..utils import parse_line, parse_endf_id, group_lines_by_mt_with_positions
+from ..utils import (
+    parse_line, parse_endf_id, group_lines_by_mt_with_positions, parse_record_values,
+)
 from ...utils import get_endf_logger
 
 logger = get_endf_logger(__name__)
@@ -57,13 +59,13 @@ def _read_list_values(lines: List[str], current_line: int, count: int):
     """
     all_values = []
     while len(all_values) < count and current_line < len(lines):
-        vl = parse_line(lines[current_line])
+        vl = parse_record_values(lines[current_line])
         current_line += 1
-        for i in range(1, 7):
-            if len(all_values) < count:
-                v = vl.get(f"C{i}")
-                if v is not None:
-                    all_values.append(v)
+        for v in vl:
+            if len(all_values) >= count:
+                break
+            if v is not None:
+                all_values.append(v)
     return all_values, current_line
 
 
