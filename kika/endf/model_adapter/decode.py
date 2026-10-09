@@ -270,8 +270,14 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
         # STA=1 is spelled as FUDGE spells it, the literal "unstable": the flag
         # is the evaluator's, not a decay fact, and this is how it survives GNDS.
         halflife = "unstable" if getattr(mt451, "_sta", None) else None
+        # The target's level energy is ELIS, 0 for a ground state. FUDGE's
+        # toENDF6 reads it (`target.energy[0]`) and stops without it, so a
+        # GNDS file kika writes from a tape could not be written back to ENDF
+        # by FUDGE (found by the E5c oracle, test_fudge_in_the_loop).
+        elis = getattr(mt451, "_elis", None)
         pops.add(Nuclide(id=pidFromZA(za), Z=za // 1000, A=za % 1000, mass=mass,
-                         halflife=halflife))
+                         halflife=halflife,
+                         energy=PhysicalQuantity(value=float(elis or 0.0), unit="eV")))
 
     style = Evaluated(
         label=EVAL_LABEL,

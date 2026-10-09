@@ -108,3 +108,12 @@ def test_a_pending_entry_that_no_longer_occurs_is_removed(table):
         f"{stale} no longer occur: the phase that closed them has to take "
         f"them out of PENDING"
     )
+
+
+def test_the_derivers_run_suite_first_whatever_was_imported_first():
+    """The order used to be import order, and a test importing
+    ``derive.reactions`` first gave every reaction ZA and AWR of ``None``."""
+    from kika.endf.model_adapter.derive import _inRunOrder
+    from kika.endf.model_adapter.derive import reactions, suite  # noqa: F401
+
+    assert [name for name, _, _ in _inRunOrder()][:2] == ["suite", "reactions"]

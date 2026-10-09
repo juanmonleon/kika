@@ -430,8 +430,16 @@ def _mf6Sections(suite, mat, report, label=None):
             )
             continue
 
+        # Only the products MF6 itself lists. A reaction can carry others --
+        # the photons of MF12/MF13 beside an MF6 that does not state them
+        # (ENDF/B-VIII.1 S-36 MT22), an excited residual -- and those are
+        # written by their own files.
+        listed = {record["label"] for record in header["mf6"].get("products", ())
+                  if record.get("label") is not None}
         forms = {}
         for product in reaction.outputChannel.products:
+            if (product.label or product.pid) not in listed:
+                continue
             form = _evaluatedForm(product, label)
             if form is not None and label != EVAL_LABEL:
                 carried.append(mt)

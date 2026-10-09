@@ -542,3 +542,83 @@ def test_the_mf13_photons_divide_to_the_same_multiplicities(photonPair):
         keep = y > 0
         mine = np.interp(x[keep], product.multiplicity.form.xs, product.multiplicity.form.ys)
         np.testing.assert_allclose(mine, y[keep], rtol=2e-3)
+
+
+# ---------------------------------------------------------------------------
+# The cascades (roadmap E5c)
+# ---------------------------------------------------------------------------
+
+def _cascadesOfPoPs(xml):
+    """``{level: (energy, [(TP, final, GP)])}`` from a PoPs XML text."""
+    import xml.etree.ElementTree as ET
+
+    out = {}
+    for nuclide in ET.fromstring(xml).iter("nuclide"):
+        modes = nuclide.findall("decayData/decayModes/decayMode")
+        if not modes:
+            continue
+        energy = nuclide.find("nucleus/energy/double")
+        out[nuclide.attrib["id"]] = (
+            float(energy.attrib["value"]) if energy is not None else None,
+            [(float(m.find("probability/double").attrib["value"]),
+              [p.attrib["pid"] for p in m.findall("decayPath/decay/products/product")
+               if p.attrib["pid"] != "photon"][-1],
+              (float(m.find("photonEmissionProbabilities/shell").attrib["value"])
+               if m.find("photonEmissionProbabilities/shell") is not None else None))
+             for m in modes])
+    return out
+
+
+def _kikaCascades(suite):
+    out = {}
+    for pid, particle in suite.PoPs.particles.items():
+        data = getattr(particle, "decayData", None)
+        if data is None:
+            continue
+        out[pid] = (particle.energy.value if particle.energy is not None else None,
+                    [(m.probability, m.finalState(),
+                      m.photonEmissionProbabilities.total()
+                      if m.photonEmissionProbabilities is not None else None)
+                     for m in data.decayModes])
+    return out
+
+
+@pytest.fixture(scope="module")
+def cascadePair(fudgePython):
+    tape = _DATA / "micro_s36_b81_photons.endf"
+    suite, _ = decodeReactionSuite(read_endf(str(tape)))
+    return suite, tape, _runFudge(fudgePython, tape)
+
+
+def test_fudge_and_kika_read_the_same_cascades_from_the_tape(cascadePair):
+    """S-36 MT51-55: the same level energies, probabilities and final levels."""
+    suite, _, fudge = cascadePair
+    assert _kikaCascades(suite) == _cascadesOfPoPs(fudge["pops"])
+    assert len(_kikaCascades(suite)) == 5
+
+
+def test_fudge_writes_the_cascades_back_from_the_gnds_kika_writes(cascadePair, fudgePython,
+                                                                  tmp_path):
+    """kika's GNDS → FUDGE's ``toENDF6`` → the same TP and GP per level.
+
+    **The difference that is named, not tolerated:** FUDGE writes LP=0 on every
+    LO=2 section (it does not keep LP); kika keeps the file's.
+    """
+    import kika
+
+    suite, tape, _ = cascadePair
+    gnds = tmp_path / "s36.gnds.xml"
+    kika.write(suite, gnds)
+    fudge = _runFudge(fudgePython, gnds, name="s36.xml")
+    assert _cascadesOfPoPs(fudge["pops"]) == _kikaCascades(suite)
+    assert "endf" in fudge, fudge.get("endfError")
+    written = tmp_path / "fudge.endf"
+    written.write_text(fudge["endf"])
+    theirs = read_endf(str(written)).mf[12].mt
+    ours = read_endf(str(tape)).mf[12].mt
+    assert sorted(theirs) == sorted(ours)
+    for mt in ours:
+        assert theirs[mt].lo == 2
+        assert theirs[mt].transitions == ours[mt].transitions, mt
+        assert theirs[mt].es_ns == ours[mt].es_ns
+        assert theirs[mt].lp == 0

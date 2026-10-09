@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
-__all__ = ["levelSeries", "attachResiduals"]
+__all__ = ["levelSeries", "attachResiduals", "residualOf"]
 
 #: First MT of each discrete-level series → the ejectile's ZA. The last MT of a
 #: series (91, 649, 699, 749, 799, 849, 891) is its continuum and has no level.
@@ -80,12 +80,14 @@ _LIGHT_ORDER = ("n", "H1", "H2", "H3", "He3", "He4")
 
 
 def _constantMultiplicity(count: int, domain):
-    from kika.nuclear_data.model import Multiplicity, multiplicityAxes
+    from kika.nuclear_data.model import EVAL_LABEL, Multiplicity, multiplicityAxes
     from kika.nuclear_data.model.functions.simple import Constant1d
 
     low, high = domain
+    # Labelled, as every evaluated form is: FUDGE refuses an unlabelled one.
     return Multiplicity(form=Constant1d(constant=float(count), domainMin_=low,
-                                        domainMax_=high, axes=multiplicityAxes()))
+                                        domainMax_=high, axes=multiplicityAxes(),
+                                        label=EVAL_LABEL))
 
 
 def _domain(reaction):
@@ -122,8 +124,12 @@ def _decayChannel(residualZA: int, lr: int, q: float, report, mt: int, domain):
                                                  multiplicity=multiplicity,
                                                  distribution=_unspecified()))
 
+    # The nucleus that is left carries multiplicity 1, as in FUDGE and NNDC's
+    # files: FUDGE's toENDF6 reads a multiplicity off every product it walks
+    # and stops on one without (found by the E5c oracle).
+    one = _constantMultiplicity(1, domain) if domain is not None else None
     if lr == 0:
-        add(pidFromZA(residualZA))
+        add(pidFromZA(residualZA), one)
         add("photon")
         return channel
 
@@ -152,8 +158,71 @@ def _decayChannel(residualZA: int, lr: int, q: float, report, mt: int, domain):
         za = zaFromPid(pid)
         remaining -= count * (za if residualZA % 1000 else 1000 * (za // 1000))
     if remaining:
-        add(pidFromZA(remaining))
+        add(pidFromZA(remaining), one)
     return channel
+
+
+def _zas(suite) -> Optional[Tuple[int, int]]:
+    """``(target ZA, projectile ZA)``, or ``None`` when the suite names no nuclide."""
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    try:
+        targetZA = zaFromPid(suite.target)
+        projectileZA = zaFromPid(suite.projectile or "n")
+    except ValueError:
+        return None
+    return (targetZA, projectileZA) if targetZA else None
+
+
+def residualOf(suite, reaction, report, *, force: bool = False):
+    """The decaying residual product of a discrete-level *reaction*, built if needed.
+
+    ``None`` for a reaction that is not to a discrete level, or whose level has
+    nothing to say (QM = QI and LR = 0) unless *force* -- which is what an MF12
+    LO=2 cascade is: a level whose decay the file does state (roadmap E5c).
+    """
+    from kika.nuclear_data.model import Nuclide, Product, pidFromZA
+
+    zas = _zas(suite)
+    mt = reaction.ENDF_MT
+    series = levelSeries(int(mt)) if mt is not None else None
+    provenance = getattr(reaction, "provenance", None)
+    if zas is None or series is None or provenance is None:
+        return None
+    targetZA, projectileZA = zas
+    qi = getattr(reaction.outputChannel.Q, "value", None)
+    qm, lr = getattr(provenance, "qm", None), int(getattr(provenance, "lr", 0) or 0)
+    if qi is None or qm is None or (qm == qi and lr == 0 and not force):
+        return None
+
+    _, ejectile, level = series
+    # The projectile's ZA, not a neutron's: a charged-particle tape names its
+    # projectile through NSUB (decode._projectile).
+    residualZA = targetZA + projectileZA - ejectile
+    pid = pidFromZA(residualZA, level)
+    existing = next((p for p in reaction.outputChannel.products
+                     if p.pid != "photon" and _za(p.pid) == residualZA), None)
+    if existing is not None and existing.outputChannel is not None:
+        return existing
+    decay = _decayChannel(residualZA, lr, qm - qi, report, mt, _domain(reaction))
+    if decay is None:
+        return None
+    if existing is not None:
+        existing.outputChannel = decay
+        residual = existing
+    else:
+        domain = _domain(reaction)
+        residual = Product(pid=pid, label=pid, distribution=_unspecified(),
+                           outputChannel=decay,
+                           multiplicity=(_constantMultiplicity(1, domain)
+                                         if domain is not None else None))
+        reaction.outputChannel.products.products.append(residual)
+    if reaction.outputChannel.genre is None:
+        reaction.outputChannel.genre = "twoBody"
+    if pid not in suite.PoPs.particles:
+        suite.PoPs.add(Nuclide(id=pid, Z=residualZA // 1000, A=residualZA % 1000,
+                               nuclearLevel=level))
+    return residual
 
 
 def attachResiduals(suite, report):
@@ -162,53 +231,13 @@ def attachResiduals(suite, report):
     The residual becomes a product of the reaction — or, when MF6 already gave
     it one, that product gets the decay as its own output channel — and a PoPs
     entry for the level. Reactions to a level with QM = QI and LR = 0 (a series'
-    ground state) have nothing to say and are left alone.
+    ground state) have nothing to say and are left alone, unless MF12 states
+    their cascade (:func:`residualOf` with ``force``, from ``photons.py``).
     """
-    from kika.nuclear_data.model import Nuclide, Product, pidFromZA
-    from kika.nuclear_data.model.pops import zaFromPid
-
-    try:
-        targetZA = zaFromPid(suite.target)
-        projectileZA = zaFromPid(suite.projectile or "n")
-    except ValueError:
+    if _zas(suite) is None:
         return report
-    if not targetZA:
-        return report
-
     for reaction in suite.reactions:
-        mt = reaction.ENDF_MT
-        series = levelSeries(int(mt)) if mt is not None else None
-        provenance = getattr(reaction, "provenance", None)
-        if series is None or provenance is None:
-            continue
-        qi = getattr(reaction.outputChannel.Q, "value", None)
-        qm, lr = getattr(provenance, "qm", None), int(getattr(provenance, "lr", 0) or 0)
-        if qi is None or qm is None or (qm == qi and lr == 0):
-            continue
-
-        _, ejectile, level = series
-        # The projectile's ZA, not a neutron's: a charged-particle tape names
-        # its projectile through NSUB (decode._projectile).
-        residualZA = targetZA + projectileZA - ejectile
-        decay = _decayChannel(residualZA, lr, qm - qi, report, mt, _domain(reaction))
-        if decay is None:
-            continue
-        pid = pidFromZA(residualZA, level)
-
-        existing = next((p for p in reaction.outputChannel.products
-                         if p.pid != "photon" and _za(p.pid) == residualZA), None)
-        if existing is not None:
-            if existing.outputChannel is None:
-                existing.outputChannel = decay
-        else:
-            reaction.outputChannel.products.products.append(
-                Product(pid=pid, label=pid, distribution=_unspecified(),
-                        outputChannel=decay))
-        if reaction.outputChannel.genre is None:
-            reaction.outputChannel.genre = "twoBody"
-        if pid not in suite.PoPs.particles:
-            suite.PoPs.add(Nuclide(id=pid, Z=residualZA // 1000, A=residualZA % 1000,
-                                   nuclearLevel=level))
+        residualOf(suite, reaction, report)
     return report
 
 

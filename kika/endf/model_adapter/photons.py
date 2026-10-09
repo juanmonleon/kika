@@ -19,6 +19,7 @@ MF12/MF13 total (NK>1)                  ``multiplicitySum`` with the photons as 
 MF13 (σ_γ)                              the same products, multiplicity = σ_γ / σ
 MF14 LI=1, or an isotropic CONT         ``Uncorrelated(angular=Isotropic2d)``
 MF14 LTT=1 / LTT=2                      ``XYs2d`` of ``Legendre`` (a_0 = 1 written) / of ``XYs1d``
+MF12 LO=2 (+MF14 LI=1)                  the level's PoPs ``decayData`` + ``branching1d/3d``
 ======================================  =========================================
 
 **Where a photon hangs.** On the reaction's output channel — except for a
@@ -39,9 +40,20 @@ is declared. On the way back the section is the **original bytes** while the
 SHA-256 of every multiplicity and of σ still match what was read; once either
 changed, σ_γ = y·σ on MF13's own grid, declared once per section.
 
-**What this module does not model yet, and keeps whole.** MF12 LO=2 (the level
-schemes, roadmap E5c) and the photons of an MT with no cross section to hang
-them on (MF13 on MT28 and MT32 of N-14 has no MF3: FUDGE drops those silently).
+**MF12 LO=2 is a level's decay, and it goes to PoPs** (roadmap E5c, decision
+J1 = A). The level is the residual of the reaction's two-body channel; its PoPs
+entry gets ``nucleus/energy`` = ES_NS and one electromagnetic ``decayMode`` per
+transition (TP, and GP as ``photonEmissionProbabilities`` when LG=2), ending on
+the level whose energy is ES_i -- found exactly, or within the format's digits,
+and never guessed. The residual's decay channel carries a ``branching1d``/
+``branching3d`` photon that points at it. On the way back the section is its
+own bytes while the cascade's SHA-256 matches, and rebuilt from PoPs (with LP
+and NS as read, not FUDGE's LP=0) once it changed.
+
+**What this module does not model, and keeps whole.** An LO=2 whose MF14 is
+anisotropic or whose ES_i names no level of the evaluation, and the photons of
+an MT with no cross section to hang them on (MF13 on MT28 and MT32 of N-14 has
+no MF3: FUDGE drops those silently).
 Their sections travel as text in the suite's provenance under
 :data:`PHOTONS_VERBATIM_KEY` and are written back as they came, declared.
 
@@ -273,6 +285,11 @@ def attachPhotons(suite, endf, report: Optional[ConversionReport] = None):
     mts = sorted({mt for sections in files.values() for mt in sections})
     for mt in mts:
         sections = {mf: files[mf][mt] for mf in files if mt in files[mf]}
+        if 12 in sections and sections[12].lo == 2:
+            why = _attachCascade(suite, sections, files.get(12, {}), mt, report)
+            if why is not None:
+                _keepVerbatim(suite, sections, mt, why, report)
+            continue
         why = _whyNotModelled(sections)
         host = None
         if why is None:
@@ -294,9 +311,6 @@ def _whyNotModelled(sections) -> Optional[str]:
         return "both MF12 and MF13 state this MT's photons, which ENDF-6 does not allow"
     if production is None:
         return "MF14/MF15 with no MF12 or MF13 to say which photons they describe"
-    if production.lo == 2:
-        return ("MF12 LO=2 (the level scheme of the residual) has no model form "
-                "yet: it needs decay data in PoPs (roadmap E5c)")
     if 15 in sections and len(sections[15].spectra) != 1:
         return (f"MF15 states {len(sections[15].spectra)} partial distributions; "
                 f"one per section is the only shape in the three libraries and "
@@ -766,8 +780,11 @@ def encodePhotonSections(suite, mat: Optional[int] = None,
         mt = int(node.ENDF_MT)
         fields = header[f"mf{mf}"]
         host = fields.get("host")
-        sections.append((mf, mt, _encodeProduction(suite, node, fields, mf, mt, mat,
-                                                   report)))
+        if mf == 12 and fields.get("lo") == 2:
+            sections.append((12, mt, _encodeCascade(suite, fields, mt, mat, report)))
+        else:
+            sections.append((mf, mt, _encodeProduction(suite, node, fields, mf, mt,
+                                                       mat, report)))
         if "mf14" in header:
             sections.append((14, mt, _encodeMF14(node, header["mf14"], mt, mat, host)))
         if "mf15" in header:
@@ -784,3 +801,218 @@ def encodePhotonSections(suite, mat: Optional[int] = None,
             section._mat = int(mat)
         sections.append((mf, mt, section))
     return sections, report
+
+
+# ---------------------------------------------------------------------------
+# MF12 LO=2: a level's cascade, in PoPs (roadmap E5c)
+# ---------------------------------------------------------------------------
+
+#: How close an ``ES_i`` must be to a level's energy to name that level, relative.
+#: ENDF writes both from the same evaluated level scheme, so they normally agree
+#: to the last digit; this only absorbs the 6-7 significant figures of the format.
+_LEVEL_TOLERANCE = 1e-5
+
+
+def _cascadeDigest(levelEnergy: float, transitions) -> str:
+    """SHA-256 of a level's energy and its ``(ES, TP[, GP])`` rows, in order."""
+    digest = hashlib.sha256()
+    digest.update(np.asarray([levelEnergy], dtype=float).tobytes())
+    for row in transitions:
+        digest.update(np.asarray([float(v) for v in row if v is not None],
+                                 dtype=float).tobytes())
+        digest.update(b"|" if len(row) < 3 or row[2] is None else b"g")
+    return digest.hexdigest()
+
+
+def _levelEnergies(suite, sections12, series) -> Dict[int, float]:
+    """``{level index: energy}`` for every level of *series* the evaluation names.
+
+    From MF12 LO=2's ``ES_NS`` where a section states it, and otherwise from
+    MF3's ``QM - QI`` -- the excitation energy the residual decay carries. The
+    ground state is 0.
+    """
+    from .residuals import levelSeries
+
+    start = series[0]
+    energies = {0: 0.0}
+    for reaction in suite.reactions:
+        mt = reaction.ENDF_MT
+        found = levelSeries(int(mt)) if mt is not None else None
+        if found is None or found[0] != start:
+            continue
+        provenance = getattr(reaction, "provenance", None)
+        qi = getattr(reaction.outputChannel.Q, "value", None)
+        qm = getattr(provenance, "qm", None)
+        if qi is not None and qm is not None:
+            energies[found[2]] = float(qm) - float(qi)
+    for mt, section in sections12.items():
+        found = levelSeries(int(mt))
+        if found is not None and found[0] == start and section.lo == 2:
+            energies[found[2]] = float(section.es_ns)
+    return energies
+
+
+def _levelOf(energies: Dict[int, float], es: float) -> Optional[int]:
+    """The level index whose energy is *es*, or ``None`` -- never a nearest guess."""
+    if es == 0.0:
+        return 0
+    for index, energy in energies.items():
+        if energy == es:
+            return index
+    matches = [index for index, energy in energies.items()
+               if energy and abs(energy - es) <= _LEVEL_TOLERANCE * abs(es)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
+    """MF12 LO=2 (+MF14 LI=1) → the level's ``decayData`` in PoPs. ``None`` on success.
+
+    The level the reaction leaves is the residual product of its two-body
+    channel (``residuals.residualOf``, built here when MF3 alone would not have
+    built it); its PoPs entry gets the level energy and one electromagnetic
+    ``decayMode`` per transition, and the residual's decay channel gets the
+    ``branching1d``/``branching3d`` photon that points at it -- as FUDGE writes
+    it and as NNDC's GNDS reads.
+    """
+    from kika.nuclear_data.model import (ELECTROMAGNETIC, Branching1d, Branching3d,
+                                         Decay, DecayData, DecayMode, DecayModes,
+                                         DecayPath, Nuclide, PhotonEmissionProbabilities,
+                                         PhysicalQuantity, Product, Shell, pidFromZA)
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    from .residuals import levelSeries, residualOf
+
+    section, mf14 = sections[12], sections.get(14)
+    if set(sections) - {12, 14}:
+        return "MF13 or MF15 beside an MF12 LO=2 section, which ENDF-6 does not admit"
+    if mf14 is not None and mf14.li != 1:
+        return ("its MF14 is anisotropic, and a level's cascade has no place for a "
+                "per-transition angular distribution in GNDS (branching3d)")
+    series = levelSeries(int(mt))
+    if series is None:
+        return "LO=2 on an MT that is not a discrete level, which has no level to decay"
+    reaction = suite.findReactionByENDF_MT(mt)
+    if reaction is None or not any(reaction is r for r in suite.reactions):
+        return "there is no MF3 reaction for this level"
+    provenance = getattr(reaction, "provenance", None)
+    if provenance is None or getattr(provenance, "sourceFormat", None) != "endf":
+        return "its reaction carries no ENDF provenance to keep the bookkeeping in"
+    residual = residualOf(suite, reaction, report, force=True)
+    if residual is None or residual.outputChannel is None:
+        return "the residual's decay channel could not be built (see the report)"
+
+    residualZA = zaFromPid(residual.pid)
+    energies = _levelEnergies(suite, sections12, series)
+    levelEnergy = float(section.es_ns)
+    qm, qi = getattr(provenance, "qm", None), getattr(reaction.outputChannel.Q, "value", None)
+    if qm is not None and qi is not None and float(qm) - float(qi) != levelEnergy:
+        report.warn(
+            f"MT{mt}: MF12 states the level at ES={levelEnergy!r} eV and MF3's "
+            f"QM-QI gives {float(qm) - float(qi)!r} eV; the level energy is "
+            f"MF12's and the decay Q stays MF3's (FUDGE keeps whichever has more "
+            f"digits; kika keeps both)")
+
+    lg = int(section.lg)
+    modes = DecayModes()
+    finals = []
+    for k, row in enumerate(section.transitions):
+        es, tp = float(row[0]), float(row[1])
+        index = _levelOf(energies, es)
+        if index is None:
+            return (f"transition {k} ends at ES={es!r} eV, which is no level this "
+                    f"evaluation names in the series")
+        final = pidFromZA(residualZA, index)
+        if final not in suite.PoPs.particles:
+            suite.PoPs.add(Nuclide(id=final, Z=residualZA // 1000, A=residualZA % 1000,
+                                   nuclearLevel=index,
+                                   energy=(PhysicalQuantity(value=energies[index], unit="eV")
+                                           if index else None)))
+        emission = (PhotonEmissionProbabilities(shells=[Shell(label="total",
+                                                              value=float(row[2]))])
+                    if lg == 2 else None)
+        modes.decayModes.append(DecayMode(
+            label=str(k), mode=ELECTROMAGNETIC, probability=tp,
+            photonEmissionProbabilities=emission,
+            decayPath=DecayPath(decays=[Decay(index=k, products=[
+                Product(pid="photon", label="photon"), Product(pid=final, label=final)])])))
+        finals.append((final, es))
+
+    level = suite.PoPs.particles.get(residual.pid)
+    if level is None:
+        return f"the residual {residual.pid!r} has no PoPs entry to carry its decay"
+    decayData = DecayData(decayModes=modes)
+    if getattr(level, "decayData", None) is not None and level.decayData != decayData:
+        return (f"{residual.pid} already has a different decay from another section, "
+                f"and one level decays one way")
+    level.energy = PhysicalQuantity(value=levelEnergy, unit="eV")
+    level.decayData = decayData
+
+    channel = residual.outputChannel
+    channel.products.products[:] = [
+        p for p in channel.products.products
+        if not (p.pid == "photon" and p.multiplicity is None)]
+    photon = Product(pid="photon", label="photon",
+                     multiplicity=Multiplicity(form=Branching1d(label=EVAL_LABEL)))
+    photon.distribution = Distribution()
+    photon.distribution[EVAL_LABEL] = Branching3d(label=EVAL_LABEL, productFrame=Frame.lab)
+    channel.products.products.append(photon)
+
+    provenance.headerFields["mf12"] = {
+        **_head(section), "lo": 2, "lg": lg, "ns": section._ns, "n2": section._n2,
+        "listC2": section.list_c2, "lp": section.lp, "listL2": section.list_l2,
+        "nt": section.nt, "pad": _pad(section), "level": residual.pid,
+        "host": residual.label, "finals": finals,
+        "lines": str(section).split("\n"),
+        "digest": _cascadeDigest(levelEnergy, section.transitions),
+    }
+    if mf14 is not None:
+        provenance.headerFields["mf14"] = _mf14Fields(mf14, None, [])
+    return None
+
+
+def _cascadeRows(suite, fields, mt):
+    """The level's ``(ES, TP[, GP])`` rows as the model holds them now."""
+    level = suite.PoPs.particles.get(fields["level"])
+    decayData = getattr(level, "decayData", None)
+    if level is None or decayData is None:
+        raise ValueError(f"MT{mt}: MF12 LO=2 names the level {fields['level']!r} and "
+                         f"PoPs has no decay for it")
+    kept = {final: es for final, es in fields["finals"]}
+    rows = []
+    for mode in decayData.decayModes:
+        final = mode.finalState()
+        if final in kept:
+            es = kept[final]
+        else:
+            particle = suite.PoPs.particles.get(final)
+            energy = getattr(particle, "energy", None)
+            es = float(energy.value) if energy is not None else 0.0
+        gp = (mode.photonEmissionProbabilities.total()
+              if mode.photonEmissionProbabilities is not None else None)
+        rows.append((es, float(mode.probability), gp) if fields["lg"] == 2
+                    else (es, float(mode.probability)))
+    energy = getattr(level, "energy", None)
+    return (float(energy.value) if energy is not None else 0.0), rows
+
+
+def _encodeCascade(suite, fields, mt, mat, report):
+    """MF12 LO=2 from PoPs: the kept bytes while the cascade is unchanged."""
+    from kika.endf.classes.mf12.base import MF12MT
+    from kika.endf.parsers.parse_photons import parse_mf12_mt
+
+    levelEnergy, rows = _cascadeRows(suite, fields, mt)
+    if _cascadeDigest(levelEnergy, rows) == fields["digest"]:
+        body = [line for line in fields["lines"] if line[72:75].strip() not in ("", "0")]
+        section = parse_mf12_mt(body, mt)
+        if mat is not None:
+            section._mat = int(mat)
+        return section
+    report.warn(f"MT{mt}: the cascade of {fields['level']} changed, so MF12 LO=2 is "
+                f"rebuilt from PoPs (LP and NS as read)")
+    values = [float(v) for row in rows for v in row]
+    return MF12MT(number=mt, _za=fields["za"], _awr=fields["awr"], _lo=2,
+                  _l2=int(fields["lg"]), _ns=int(fields["ns"]), _n2=int(fields["n2"]),
+                  _mat=mat if mat is not None else fields["mat"],
+                  es_ns=levelEnergy, list_c2=fields["listC2"], lp=int(fields["lp"]),
+                  list_l2=int(fields["listL2"]), transition_values=values,
+                  nt=len(rows), pad=_padStyle(fields))

@@ -11,8 +11,10 @@ both halves of what this phase does:
   tables — with only ENDF's own bookkeeping taken from the provenance;
 * MF13 (E5d) is divided by σ on the way in and comes back as its own bytes
   while nothing changed, rebuilt by multiplication once something did;
-* MF12 LO=2 (E5c) and the photons of an MT with no cross section are kept
-  verbatim and declared, and come back from the kept text.
+* MF12 LO=2 (E5c) reaches PoPs as the level's decay and comes back as its
+  own bytes while the cascade is unchanged (``test_photon_cascades.py``);
+  an LO=2 whose transitions name a level the evaluation does not, and the
+  photons of an MT with no cross section, are kept verbatim and declared.
 
 On the six committed cuts here, and — ``tape``/``slow`` — on every tape of the
 three libraries whose photons the model now carries.
@@ -41,7 +43,8 @@ from kika.nuclear_data.model import (
 
 DATA = Path(__file__).resolve().parents[2] / "tests" / "data"
 FIXTURES = {key: DATA / f"micro_{key}_photons.endf"
-            for key in ("n14", "fe56", "u235", "s36", "hf182", "cm243", "li7")}
+            for key in ("n14", "fe56", "u235", "s36", "s36_b81", "hf182", "cm243",
+                        "li7")}
 
 
 def decode(key):
@@ -176,9 +179,11 @@ def test_the_pfns_selector_still_finds_the_neutron_on_mt18():
 
 def test_what_the_model_does_not_carry_is_kept_and_declared():
     suite, report = decode("fe56")
+    # The cut keeps MT52-55 and not MT51, so the 846.8 keV level their
+    # cascades end on is named nowhere in it: kept, and said, never guessed.
     kept = suite.provenance.headerFields[PHOTONS_VERBATIM_KEY]
     assert {"12/52", "14/52"} <= set(kept)
-    assert any("LO=2" in m and "E5c" in m for m in report.unsupported)
+    assert any("MT52" in m and "no level" in m for m in report.unsupported)
     suite, report = decode("n14")
     # N-14's MT28 and MT32 state MF13 photons and no MF3: nothing to divide by.
     assert {"13/28", "13/32"} <= set(suite.provenance.headerFields[PHOTONS_VERBATIM_KEY])
