@@ -132,7 +132,8 @@ def test_mt18_lands_where_the_endf_adapter_puts_it():
     assert isinstance(r.provenance, G4NDLFissionProvenance)
     assert r.outputChannel.Q.value is None   # the file states 0 0, not the fission Q
     assert np.array_equal(r.crossSection["recon"].ys, G4.fissionCrossSection("Fm255").sigma)
-    (n,) = r.outputChannel.products
+    n, *photons = r.outputChannel.products        # the photons after it (D10-2)
+    assert n.pid == "n" and photons and all(p.pid == "photon" for p in photons)
     d = n.distribution["eval"]
     assert isinstance(d, Uncorrelated) and isinstance(d.energy, XYs2d)
     # Prompt on the product, total and delayed as §21.3 sums, as attachNubar places them.
@@ -153,10 +154,10 @@ def test_mt18_lands_where_the_endf_adapter_puts_it():
     release = r.outputChannel.fissionFragmentData.fissionEnergyReleases[0]
     assert release.totalEnergy.coefficients.tolist() == \
         [G4.fissionFinalState("Fm255").section(5, 1).body.values[9]]
-    # Only the photons are kept as text, and the report says so.
+    # The photons reach the model too (D10-2): nothing is kept as text.
     kept = [(e["infoType"], e["dataType"]) for e in r.provenance.sections if "verbatim" in e]
-    assert kept == [(1, 12), (1, 14), (1, 15)]
-    assert any("photon" in m for m in suite.report.unsupported)
+    assert kept == []
+    assert [p for p in r.outputChannel.products if p.pid == "photon"]
 
 
 def test_a_total_only_nubar_is_the_product_multiplicity_and_lf7_is_a_maxwellian():
@@ -340,7 +341,7 @@ def test_the_fission_summary():
     assert (fm["nubar_prompt"], fm["delayed_families"]) == (4.0, 6)
     assert fm["nubar_total"] == pytest.approx(fm["nubar_prompt"] + fm["nubar_delayed"])
     assert fm["delayed_spectra"] == "LF=5 general evaporation"
-    assert fm["prompt_spectrum"] == "LF=1 table" and fm["photons"] == "verbatim"
+    assert fm["prompt_spectrum"] == "LF=1 table" and fm["photons"] == "model"
     assert [c["directory"] for c in fm["chances"]] == ["FC", "SC", "TC", "LC"]
     assert not any(c["final_state"] for c in fm["chances"])
     assert fm["energy_release"]["totalEnergy"] > 1.9e8 and fm["verbatim_sections"] == []

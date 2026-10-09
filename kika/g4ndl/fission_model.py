@@ -39,7 +39,9 @@ is a different statement). ``Fission/FS``, section by section:
            *k*'s product, isotropic in the lab, with the multiplicity
            ``p_k(E)·ν̄_d(E)`` — :func:`~kika.endf.model_adapter.fission_energy.
            attachDelayedSpectra`'s placement
-1, 12-15   **not modelled**: the photons, as for the inelastic and the capture
+1, 12-15   the fission photons, ENDF's MF12-15 for MT18, through
+           :mod:`kika.g4ndl.photons` (D10-2): photon products on MT18, as an
+           ENDF tape's MF12-15 give them
 =========  ===================================================================
 
 What the model has no slot for travels in the reaction's
@@ -405,6 +407,7 @@ def _decodeFS(record: FissionFSRecord, reaction, suite, provenance, domain, wher
     release = None
     angular = energy = delayedSpectra = None
     entries = []
+    photonSections = []
     for k, s in enumerate(record.sections):
         entry = {"position": k, "infoType": int(s.infoType), "dataType": int(s.dataType)}
         entries.append(entry)
@@ -413,7 +416,8 @@ def _decodeFS(record: FissionFSRecord, reaction, suite, provenance, domain, wher
             if last[(s.infoType, s.dataType)] != k:
                 raise _Kept("repeated later in the file, and the consumer keeps the last")
             if s.dataType >= DT_PHOTON_MULTIPLICITY:
-                raise _Kept("photon production (MF12-15) has no model form yet")
+                photonSections.append((s, entry))   # the photons go in together
+                continue
             if s.infoType in (INFO_NU_TOTAL, INFO_NU_PROMPT) or (
                     s.infoType == INFO_DELAYED and s.dataType == DT_YIELD):
                 nu[s.infoType] = _multiplicity(s.body, tag, domain, entry)
@@ -432,13 +436,6 @@ def _decodeFS(record: FissionFSRecord, reaction, suite, provenance, domain, wher
                 report.unsupportedNode(f"{tag}: {exc}; kept as G4NDL text in the provenance")
             _keep(entry, formatFissionSectionBody(s))
     provenance.sections = entries
-    photons = sorted({s.dataType for s in record.sections
-                      if s.dataType >= DT_PHOTON_MULTIPLICITY})
-    if photons:
-        report.unsupportedNode(
-            f"{where} (1, {'/'.join(str(d) for d in photons)}): fission photon production "
-            f"(MF12-15) has no model form yet; kept as G4NDL text in the provenance and "
-            f"written back unchanged")
 
     # The prompt neutron: MF4, and MF5 only beside a modelled MF4.
     if angular is not None:
@@ -505,6 +502,10 @@ def _decodeFS(record: FissionFSRecord, reaction, suite, provenance, domain, wher
                     family.product.multiplicity = None
                     family.product.distribution = None
             _keep(entry, formatFissionSectionBody(FissionSection(INFO_DELAYED, DT_ENERGY, body)))
+
+    # The photons last, after the neutron, as the ENDF route places MF12-15.
+    if photonSections:
+        _fissionPhotons(reaction, suite, photonSections, where, report)
 
 
 def _reportCode1(entries, where: str, report) -> None:
@@ -879,11 +880,67 @@ def _entryFor(entries, key) -> dict:
     return {}
 
 
+def _fissionPhotons(reaction, suite, photonSections, where, report) -> None:
+    """MT18's photon sections (ENDF MF12-15) into the model, or kept as text."""
+    from kika.g4ndl.photons import attachPhotonBodies
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    byType = {s.dataType: (s, entry) for s, entry in photonSections}
+    mean = byType.get(DT_PHOTON_MULTIPLICITY) or byType.get(13)
+    done = False
+    if mean is not None and len(byType) == len(photonSections):
+        try:
+            za = float(zaFromPid(suite.target))
+        except (ValueError, TypeError):
+            za = 0.0
+        bag = {"targetMass": float(mean[0].body.targetMass)}
+        done = attachPhotonBodies(
+            suite, reaction, mean[0].body, byType[14][0].body if 14 in byType else None,
+            byType[15][0].body if 15 in byType else None, bag, f"{where} photons", report,
+            za, reaction.ENDF_MT)
+        if done:
+            mean[1]["photons"] = bag
+            for s, entry in photonSections:
+                if entry is not mean[1]:
+                    entry["photonsOf"] = mean[0].dataType
+    if not done:
+        for s, entry in photonSections:
+            _keep(entry, formatFissionSectionBody(s))
+
+
+def _fissionPhotonBodies(reaction, suite, entries, targetMass, where, report):
+    """MT18's photons from the model as ``{(1, dataType): body}`` (D10-2)."""
+    from kika.g4ndl.inelastic_encode import _endfProvenance
+    from kika.g4ndl.photons import photonBodiesFromModel
+
+    bag = next((e["photons"] for e in entries
+                if e.get("photons") is not None and e.get("verbatim") is None), None)
+    endf = _endfProvenance(reaction)
+    fields = getattr(endf, "headerFields", None) or {}
+    if bag is None and not (not entries and {"mf12", "mf13"} & set(fields)):
+        return {}
+    mass = targetMass if targetMass is not None else (bag or {}).get("targetMass")
+    mat = getattr(endf, "mat", None) or 0
+    bodies = photonBodiesFromModel(suite, reaction, bag, mat, report, mass)
+    if bodies is None:
+        report.warn(f"{where}: the fission photons could not be written from the model")
+        return {}
+    mean, angular, energies = bodies
+    dt = 13 if mean.__class__.__name__ == "PhotonPartialsBody" else DT_PHOTON_MULTIPLICITY
+    out = {(1, dt): mean}
+    if angular is not None:
+        out[(1, 14)] = angular
+    if energies is not None and energies.needed:
+        out[(1, 15)] = energies
+    return out
+
+
 def _modelledFS(reaction, suite, entries, targetMass, where, report):
     """The bodies of the ``Fission/FS`` sections the model states for MT18."""
     from kika.g4ndl.inelastic_encode import _angular, _mass, _split
 
     out: Dict[Tuple[int, int], object] = {}
+    out.update(_fissionPhotonBodies(reaction, suite, entries, targetMass, where, report))
     channel = reaction.outputChannel
     neutron = _neutron(channel)
     sums = suite.sums.multiplicitySums
@@ -977,9 +1034,10 @@ def _fsRecord(reaction, suite, header, targetMass, report) -> Optional[FissionFS
         elif key not in modelled:
             report.warn(f"{where}: the file had a {key} section and the model no longer "
                         f"holds what it said; it is not written")
-    if any(s.dataType >= DT_PHOTON_MULTIPLICITY for s in sections):
-        report.warn(f"{where}: the fission photons are written back as they were read; kika "
-                    f"does not model photon production yet")
+    if any(e.get("verbatim") is not None and e["dataType"] >= DT_PHOTON_MULTIPLICITY
+           for e in entries):
+        report.warn(f"{where}: some fission photons are written back as they were read "
+                    f"(the model could not hold them; see the decode report)")
     for key in _DEFAULT_ORDER:
         if key in modelled and key not in used:
             sections.append(FissionSection(key[0], key[1], modelled[key]))
