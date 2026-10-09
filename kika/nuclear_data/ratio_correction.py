@@ -51,11 +51,21 @@ back structure the experiment does not resolve.
 edge reading (``READING_REACH`` reading widths, which that reading folds), and
 then goes back to one over a ramp of one reading width (FWHM).
 
-**Iterated.**  The correction is first order: :math:`\langle\sigma r\rangle =
-r\langle\sigma\rangle` only if r is flat inside the kernel.  Each iteration
-re-reads the corrected suite and corrects the residual ratio, with the width
-chosen in the first one, until the residual moves no bin by more than
-``tolerance`` of its own statistical uncertainty.
+**Iterated, as a fixed point.**  The correction is first order:
+:math:`\langle\sigma r\rangle = r\langle\sigma\rangle` only if r is flat inside
+the kernel.  Iteration k re-reads the evaluation corrected with :math:`r_k` and
+smooths :math:`y_i\,r_k(E_i)/\langle\sigma r_k\rangle_i` -- the data over the
+*current* model, times the current ratio -- with the width chosen in the first
+one; :math:`r_{k+1}` is then applied to the *original* evaluation.  Where r is
+flat inside the reading that is :math:`r_1` again, so the iteration fixes only
+the curvature of r against σ's structure.  It stops when :math:`r_{k+1}` differs
+from :math:`r_k` by less than ``tolerance`` of every bin's statistical
+uncertainty.  (Smoothing the *residual* and multiplying the corrections, as the
+first version did, is twicing: each pass takes in more of the noise the kernel
+had left out, and the χ² falls with no end -- measured on ELISA's Pb-208,
+9-oct.)  The angular δa_l iterate the same way: each pass fits the residual of
+the current model, adds the current δa_l, smooths the sum and applies it to the
+original f.
 
 **What the method trusts.**  The *positions* of the evaluation's resonances: a
 displaced resonance makes r oscillate, and the smoothing flattens it rather
@@ -454,11 +464,12 @@ def _add_angular(suite, delta: Callable, anchors: np.ndarray,
 class CrossSectionCorrection:
     """What :func:`correct_cross_section` did.
 
-    ``ratio`` is the cumulative smoothed r(E) (the product of every iteration's);
-    ``first`` the first iteration's fit, with the CV curve; ``chi2`` χ²/N of the
-    folded suite against the data before correcting and after each iteration;
-    ``max_pull`` per iteration the largest |r_k - 1| over δr_k, the convergence
-    statistic; ``grid`` the number of σ points before and after.
+    ``iterations`` holds every r_k (each a full ratio to the original
+    evaluation), and :meth:`ratio` is the last one, the one applied; ``first``
+    the first fit, with the CV curve; ``chi2`` χ²/N of the folded suite against
+    the data before correcting and after each applied r_k; ``max_pull`` per
+    iteration the largest |r_{k+1} - r_k| over δr (from 1 for the first), the
+    convergence statistic; ``grid`` the number of σ points before and after.
     """
 
     label: str
@@ -470,10 +481,9 @@ class CrossSectionCorrection:
     converged: bool
 
     def ratio(self, energies) -> np.ndarray:
-        out = np.ones(np.size(energies))
-        for it in self.iterations:
-            out = out * it(energies)
-        return out
+        if not self.iterations:
+            return np.ones(np.size(energies))
+        return np.atleast_1d(self.iterations[-1](energies))
 
 
 @dataclass
@@ -481,9 +491,10 @@ class AngularCorrection:
     """What :func:`correct_angular` did.
 
     ``iterations`` holds each iteration's fit smoothed in energy, as
-    ``[λ, δa_1, …, δa_L]`` per energy (``values`` is ``(n_E, degree+1)``);
+    ``[λ, δa_1, …, δa_L]`` per energy (``values`` is ``(n_E, degree+1)``), each
+    the whole correction to the original f; the last is the one applied.
     ``chi2``/``max_pull`` as for σ, over every (energy, angle), the pull being
-    the applied correction over the data's uncertainty; ``emin`` the energy
+    the change in the applied correction over the data's uncertainty; ``emin`` the energy
     below which nothing was corrected and ``excluded`` how many measured
     energies that left out; ``inherited_negative`` the records the evaluation
     already had negative somewhere on [-1, 1] and the correction did not
@@ -504,18 +515,16 @@ class AngularCorrection:
     inherited_negative: List[Tuple[float, float, float]] = field(default_factory=list)
 
     def delta(self, energies) -> np.ndarray:
-        """Cumulative ``δa_1..δa_L`` at ``energies``: ``(n, degree)``."""
-        out = np.zeros((np.size(energies), self.degree))
-        for it in self.iterations:
-            out = out + np.atleast_2d(it(energies))[:, 1:]
-        return out
+        """The applied ``δa_1..δa_L`` at ``energies``: ``(n, degree)``."""
+        if not self.iterations:
+            return np.zeros((np.size(energies), self.degree))
+        return np.atleast_2d(self.iterations[-1](energies))[:, 1:]
 
     def level_factor(self, energies) -> np.ndarray:
-        """Cumulative ``1 + λ`` at ``energies`` (applied to σ only with ``from_dcs``)."""
-        out = np.ones(np.size(energies))
-        for it in self.iterations:
-            out = out * (1.0 + np.atleast_2d(it(energies))[:, 0])
-        return out
+        """``1 + λ`` at ``energies`` (applied to σ only with ``from_dcs``)."""
+        if not self.iterations:
+            return np.ones(np.size(energies))
+        return 1.0 + np.atleast_2d(self.iterations[-1](energies))[:, 0]
 
 
 def _chi2(model, values, errors) -> float:
@@ -545,26 +554,33 @@ def correct_cross_section(suite, energies_ev, values, errors, setup: ForwardSetu
     bins = None if bins_ev is None else [b for b, k in zip(bins_ev, keep) if k]
     out = copy.deepcopy(suite)
     label = _cross_section_label(out, cross_section_label)
+    original = copy.deepcopy(out.reactions[ELASTIC_MT].crossSection[label])
     view = ElasticView.from_suite(out, cross_section_label=label)
     width = _reading_width(view, setup, e, bins)
 
     model = forward_sigma(view, e, setup, bins)
     chi2 = [_chi2(model, y, dy)]
     iterations, pulls, grid, first = [], [], None, None
+    current = np.ones(e.size)
     converged = False
     for _ in range(max_iterations):
-        r, dr = y / model, dy / model
-        fit = (fit_smooth_ratio(e, r, dr, width, min_width=min_width, factors=factors)
+        # the data over the current model, times the current ratio: a ratio to the
+        # ORIGINAL evaluation, smoothed whole (a fixed point, not twicing)
+        z, dz = y / model * current, dy / model * current
+        fit = (fit_smooth_ratio(e, z, dz, width, min_width=min_width, factors=factors)
                if first is None else
-               SmoothRatio(*_sorted(e, r, dr), width, first.factor))
+               SmoothRatio(*_sorted(e, z, dz), width, first.factor))
         first = first or fit
-        pulls.append(float(np.max(np.abs(fit(e) - 1.0) / dr)))
-        if pulls[-1] < tolerance:
+        new = np.atleast_1d(fit(e))
+        pulls.append(float(np.max(np.abs(new - current) / dz)))
+        if iterations and pulls[-1] < tolerance:
             converged = True
             break
+        out.reactions[ELASTIC_MT].crossSection[label] = copy.deepcopy(original)
         n = _multiply_cross_section(out, label, fit, fit.anchors(), grid_tolerance)
-        grid = (n[0], n[1]) if grid is None else (grid[0], n[1])
+        grid = (n[0], n[1])
         iterations.append(fit)
+        current = new
         view = ElasticView.from_suite(out, cross_section_label=label)
         model = forward_sigma(view, e, setup, bins)
         chi2.append(_chi2(model, y, dy))
@@ -664,14 +680,23 @@ def correct_angular(suite, energies_ev, mu_lab, values, errors, setup: ForwardSe
 
     fwd = forward_dcs(view, e, mus, setup, bins)
     model = fwd["dcs"]
+    model0, sigma0 = model, fwd["sigma"]
     chi2 = [_chi2(model, y, dy)]
     iterations, pulls, touched, inherited = [], [], 0, []
     factor, converged, grid = None, False, None
+    start = out
+    current = np.zeros((e.size, degree + 1))     # [λ, δa_1..] applied to the original
+    basis0 = _shape_basis(view, mus, setup, sigma0, degree)
     for _ in range(max_iterations):
         basis = _shape_basis(view, mus, setup, fwd["sigma"], degree)
         fits = [_fit_delta(y[i] - model[i], dy[i], model[i], basis[i]) for i in range(e.size)]
         p = np.array([f[0] for f in fits])
         dp = np.array([f[1] for f in fits])
+        # the whole correction to the original f: the current one plus what the
+        # residual still asks for (λ compounds only where it is applied)
+        p[:, 1:] += current[:, 1:]
+        if level == "from_dcs":
+            p[:, 0] = (1.0 + current[:, 0]) * (1.0 + p[:, 0]) - 1.0
         if factor is None:
             fit = fit_smooth_ratio(e, p, dp, width, min_width=min_width,
                                    factors=factors, identity=identity)
@@ -679,19 +704,18 @@ def correct_angular(suite, energies_ev, mu_lab, values, errors, setup: ForwardSe
         else:
             fit = SmoothRatio(*_sorted(e, p, dp), width, factor, identity=identity)
         s = np.atleast_2d(fit(e))
-        applied = np.einsum("ijl,il->ij", basis, s[:, 1:])
+        change = np.einsum("ijl,il->ij", basis0, s[:, 1:] - current[:, 1:])
         if level == "from_dcs":
-            applied = applied + s[:, :1] * model
-        pulls.append(float(np.nanmax(np.abs(applied) / dy)))
-        if pulls[-1] < tolerance:
+            change = change + (s[:, :1] - current[:, :1]) * model0
+        pulls.append(float(np.nanmax(np.abs(change) / dy)))
+        if iterations and pulls[-1] < tolerance:
             converged = True
             break
         anchors = fit.anchors()
-        problems, inh, touched = _add_angular(
+        out = copy.deepcopy(start)
+        problems, inherited, touched = _add_angular(
             out, lambda q: np.atleast_2d(fit(q))[:, 1:], anchors, table_tolerance,
             positivity_points)
-        first_before = {en: b for en, b, _ in inherited}
-        inherited = [(en, first_before.get(en, b), a) for en, b, a in inh]
         if problems:
             worst = min(problems, key=lambda q: q[1])
             raise ValueError(
@@ -701,8 +725,9 @@ def correct_angular(suite, energies_ev, mu_lab, values, errors, setup: ForwardSe
         if level == "from_dcs":
             n = _multiply_cross_section(out, label, lambda q: 1.0 + np.atleast_2d(fit(q))[:, 0],
                                         anchors, grid_tolerance)
-            grid = (n[0], n[1]) if grid is None else (grid[0], n[1])
+            grid = (n[0], n[1])
         iterations.append(fit)
+        current = s
         view = ElasticView.from_suite(out, cross_section_label=label)
         fwd = forward_dcs(view, e, mus, setup, bins)
         model = fwd["dcs"]

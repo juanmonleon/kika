@@ -192,3 +192,16 @@ def test_a_correction_that_makes_f_negative_raises(suite):
     with pytest.raises(ValueError, match="negative"):
         rc.correct_angular(suite, E, MU, dcs * (1.0 + 1.6 * mu_cm), 0.02 * dcs, SETUP,
                            bins_ev=BINS, degree=1)
+
+
+def test_iterating_does_not_fit_the_noise(suite):
+    """Data that are the evaluation plus 1 % noise: every pass after the first must
+    give back the first smoothed ratio, not take in more of the noise (twicing)."""
+    v0 = ElasticView.from_suite(suite)
+    sig = forward_sigma(v0, E, SETUP, BINS)
+    noisy = sig * (1.0 + 0.01 * np.random.default_rng(3).normal(size=E.size))
+    _, rep = rc.correct_cross_section(suite, E, noisy, 0.01 * sig, SETUP, bins_ev=BINS,
+                                      tolerance=1e-3, max_iterations=6)
+    drift = np.max(np.abs(rep.ratio(E) - rep.first(E))) / 0.01
+    assert drift < 0.05
+    assert rep.chi2[-1] == pytest.approx(rep.chi2[1], rel=0.01)
