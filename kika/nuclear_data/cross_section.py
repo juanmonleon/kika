@@ -111,8 +111,8 @@ class CrossSection:
         ``NuclideInfo``, ``AngularDistribution`` and ``ResonanceParameters`` all
         build their model and project back. Doing the same here costs 2.5x:
         ``decodeMF3MT`` alone is 5.4 ms against this body's 3.3 ms for the
-        committed slice's three sections, and ``kika/processing/reconstruct.py``
-        constructs one ``CrossSection`` per MT per call, which the cluster runs
+        committed slice's three sections, and the legacy reconstructor (removed
+        2026-10-08) constructed one ``CrossSection`` per MT per call, which the cluster ran
         per sample per temperature. The plan's phase 3d gate names a 20% ceiling
         and its documented fallback is exactly this: keep the fast constructor,
         and expose the model lazily through :attr:`model`.

@@ -112,8 +112,9 @@ FACADE_IMPORTERS = {
 #: if those entries are ever removed, this endpoint breaks in the frozen build
 #: and nowhere else.
 #:
-#: **Phase 4 P1a (2026-08-12) added the fourth.**
-#: ``kika/endf/processing/reconstruct.py`` is the ENDF adapter for resonance
+#: **Phase 4 P1a (2026-08-12) added the fourth; it left with the legacy
+#: reconstructor on 2026-10-08.**
+#: ``kika/endf/processing/reconstruct.py`` was the ENDF adapter for resonance
 #: reconstruction: MF2/151 in, ``MF3MT`` out. The physics moved onto the model,
 #: so the middle of that sandwich is now ``decodeMF2MT151`` — which makes this
 #: module an ENDF↔model boundary, and that is exactly what the adapter is for.
@@ -191,7 +192,6 @@ PERMANENT_IMPORTERS = {
     # (lines 198-200), and the desktop app does not call this module at all.
     "kika/sampling/model_perturbation.py",
     "kika/sampling/joint_mf33_mf34.py",
-    "kika/endf/processing/reconstruct.py",
     "kika/endf/writers/assemble.py",
     # Layer 1 for MF32 (2026-10-06). Its rows are resonance parameters, and the
     # only reader of the §32 layouts is `decodeMF32MT`; a second one inside the

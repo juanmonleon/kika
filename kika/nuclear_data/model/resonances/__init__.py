@@ -147,10 +147,10 @@ class ScatteringRadius:
     #:
     #: **What that cost, and where it was paid.** The ENDF reconstructor works
     #: in ENDF's units throughout, so converting here would have moved the
-    #: reconstruction — the reason this was deferred. It does not, because the
-    #: conversion back happens at the boundary into
-    #: :mod:`kika.processing.resonance_formulas` rather than inside it, and
-    #: ``test_numeric_goldens`` is the gate that says so.
+    #: reconstruction — the reason this was deferred. It did not: the legacy
+    #: reconstructor (removed 2026-10-08) converted back at its own boundary,
+    #: and its goldens did not move. :mod:`kika.processing.resonances` works in
+    #: fm natively.
     unit: Optional[str] = None
 
     @property

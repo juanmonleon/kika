@@ -160,9 +160,9 @@ def test_the_two_paths_agree_on_the_scattering_radius(fromGnds, fromEndf):
     place it mattered — a consumer reading ``constant`` — and stays where it
     belongs, in each format's own file.
 
-    The reconstruction did not move with it: the conversion back to ENDF units
-    happens at the edge of :mod:`kika.processing.resonance_formulas` rather than
-    inside it, and ``test_numeric_goldens`` is the gate on that.
+    The reconstruction did not move with it: the legacy reconstructor (removed
+    2026-10-08) converted back to ENDF units at its own edge, and its goldens
+    held. :mod:`kika.processing.resonances` works in fm natively.
     """
     gnds, _ = fromGnds
     fromGndsRadius = gnds.resonances.scatteringRadius

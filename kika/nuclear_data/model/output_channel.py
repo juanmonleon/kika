@@ -5,8 +5,8 @@ includes the reaction Q-value and a list of products."* Products may themselves
 break up or decay, and the result is another ``outputChannel`` — which is why
 ``Product.outputChannel`` exists and the structure is recursive.
 
-**Where the Q = 0 defect lands.** ``kika/processing/reconstruct.py:269``
-hardcodes ``qm = qi = 0.0`` on every reconstructed section, and the flat
+**Where the Q = 0 defect landed.** The legacy reconstructor (removed
+2026-10-08) hardcoded ``qm = qi = 0.0`` on every reconstructed section, and the flat
 ``CrossSection`` carries Q in an untyped ``metadata`` dict that ACE cannot fill.
 Here Q is a node of the output channel, where it belongs, and its absence is
 representable as ``None`` rather than as a silent zero. Deciding *whose* Q a
