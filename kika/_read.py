@@ -229,7 +229,11 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
 
     Returns
     -------
-    ReactionSuite
+    ReactionSuite or PoPs
+        A **PoPs** for a radioactive decay evaluation -- an ENDF decay
+        sublibrary tape (NSUB=4) or a GNDS file whose root is ``PoPs`` -- whose
+        one nuclide carries ``halflife`` and ``decayData`` (roadmap E7b); a
+        :class:`ReactionSuite` for everything else.
         With ``suite.report`` set — what the decode lost, approximated or could
         not represent. Check it. A partial decode is normal today (MF12-15 are
         not read at all, of MF5 only its tabulated LF=1 reaches the model, and
@@ -269,6 +273,16 @@ def _readEndf(path, covariances: bool):
     # *present* in the parsed object — so filtering the parse would quietly
     # shrink the report, and the report is the reason this door is trustworthy.
     endf = read_endf(str(path))
+    mt451 = getattr(endf, "mf", {}).get(1)
+    mt451 = getattr(mt451, "mt", {}).get(451) if mt451 is not None else None
+    if getattr(mt451, "_nsub", None) == 4:
+        # A radioactive decay sublibrary evaluation (roadmap E7b): one nuclide
+        # and how it decays, which GNDS writes as a standalone PoPs.
+        from kika.endf.model_adapter.decay_sublibrary import decodeDecaySublibrary
+        pops, report = decodeDecaySublibrary(endf, sourcePath=path)
+        _noteUnparsedMFs(path, endf, report)
+        pops.report = report
+        return pops
     suite, report = decodeReactionSuite(endf)
 
     decoded = ()
@@ -311,6 +325,11 @@ def _readGnds(path, covariances: bool):
     from kika.gnds.xpath import Document, readExternalFiles
 
     document = Document.parse(path)
+    if document.root.tag == "PoPs":
+        # A decay evaluation (roadmap E7b): a standalone PoPs, no reactionSuite.
+        from kika.gnds.decay import readPoPsDocument
+        pops, _ = readPoPsDocument(document)
+        return pops
     suite, report = readReactionSuite(document)
     if covariances:
         _attachGndsCovariances(document, suite, report,

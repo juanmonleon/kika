@@ -147,9 +147,11 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              FissionEnergyRelease, FissionFragmentData, Multiplicity, OutputChannel,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
-from .pops import Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
-from .decay import (ELECTROMAGNETIC, Decay, DecayData, DecayMode, DecayModes,
-                    DecayPath, PhotonEmissionProbabilities, Shell)
+from .pops import MetaStable, Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
+from .decay import (AVERAGE_ENERGY_LABELS, ELECTROMAGNETIC, SPECTRUM_LABELS,
+                    TRANSITION_TYPES, Continuum, Decay, DecayData, DecayMode,
+                    DecayModes, DecayPath, Discrete, PhotonEmissionProbabilities, Shell,
+                    Spectrum)
 from .provenance import (AceProvenance, EndfProvenance, G4NDLCaptureProvenance,
                          G4NDLFissionProvenance,
                          G4NDLInelasticProvenance,
@@ -247,6 +249,8 @@ __all__ = [
     "PoPs", "Particle", "Nuclide", "Unorthodox", "pidFromZA", "zaFromPid",
     "DecayData", "DecayModes", "DecayMode", "DecayPath", "Decay",
     "PhotonEmissionProbabilities", "Shell", "ELECTROMAGNETIC",
+    "Spectrum", "Discrete", "Continuum", "TRANSITION_TYPES", "SPECTRUM_LABELS",
+    "AVERAGE_ENERGY_LABELS", "MetaStable",
     # §14 the root
     "ReactionSuite", "ExternalFile", "ExternalFiles", "ApplicationData",
     "CROSS_SECTION_UNITS",

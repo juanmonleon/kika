@@ -129,6 +129,11 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         )
     if resonance_extensions and format != 'gnds':
         raise ValueError('resonance_extensions is a GNDS-only option')
+    from kika.nuclear_data.model import PoPs
+    if isinstance(suite, PoPs):
+        # A decay evaluation (roadmap E7b): an ENDF decay sublibrary tape, or
+        # a GNDS file whose root is PoPs.
+        return _writePoPs(suite, Path(os.fspath(path)), format, mat=mat, tapeId=tapeId)
     if format == "g4ndl":
         # Imported here for the reason `_writeGnds` gives.
         from kika.g4ndl.encode import writeSuite
@@ -145,6 +150,22 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         return writeEndfTape(suite, Path(os.fspath(path)), mat=mat,
                              tapeId=tapeId, label=label)
     return _writeGnds(suite, Path(os.fspath(path)), gnds,resonance_extensions)
+
+
+def _writePoPs(pops, path: Path, format: str, mat=None, tapeId=None):
+    if format == "endf":
+        from kika.endf.model_adapter.decay_sublibrary import writeDecayTape
+        return writeDecayTape(pops, path, mat=mat, tapeId=tapeId)
+    if format != "gnds":
+        raise ValueError(f"a decay evaluation (PoPs) is written as 'endf' or 'gnds', "
+                         f"not {format!r}")
+    from kika.gnds.decay import writePoPsDocument
+    from kika.gnds.encode import serialise
+
+    tree, report = writePoPsDocument(pops)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(serialise(tree))
+    return report
 
 
 def _writeGnds(suite, path: Path, gnds: Optional[str],resonance_extensions=False):
