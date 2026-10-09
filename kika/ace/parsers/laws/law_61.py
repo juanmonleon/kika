@@ -433,12 +433,11 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
                 raise Law61ParseError(f"Failed to read angular distribution data for LC={LC}: {str(e)}")
             
             # Validate that the cosines are in the expected range [-1, 1]
-            if ang_n_points > 0:
-                min_cos = min(float(cos) for cos in cosines)
-                max_cos = max(float(cos) for cos in cosines)
+            if debug and ang_n_points > 0:
+                min_cos = float(cosines.min())
+                max_cos = float(cosines.max())
                 if min_cos < -1.001 or max_cos > 1.001:  # Allow slight numerical error
-                    if debug:
-                        logger.debug(f"  WARNING: Cosine values outside expected range [-1,1]: min={min_cos}, max={max_cos}")
+                    logger.debug(f"  WARNING: Cosine values outside expected range [-1,1]: min={min_cos}, max={max_cos}")
             
             # Store the angular distribution
             ang_data = {

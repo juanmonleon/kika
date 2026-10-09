@@ -65,6 +65,89 @@ def test_lines_past_nxs1_are_not_read():
     np.testing.assert_array_equal(read_xss(lines, len(VALUES))[1:], VALUES)
 
 
+# ``read_xss_file`` reads the XSS from the file a chunk of 80-column lines at a
+# time, as fixed-width fields of a structured dtype. Whatever it accepts must
+# come out bit for bit as the line reader has it, and whatever it does not
+# must fall back to that reader rather than fail.
+
+# Rounded to the 12 digits E20.11 keeps, so they read back exactly.
+MANY = [float(f"{(-1) ** i * 1.234567890123e-3 * (i + 1) ** 1.7:.11E}") for i in range(39)]
+INTS = [11, 0, 123456789, 2]
+
+
+def _xss_bytes(values, eol="\n", pad=None):
+    """An XSS block as ACE writes it; ``pad`` adds blanks to that line."""
+    fields = [f"{v:20d}" if isinstance(v, int) else f"{v:20.11E}" for v in values]
+    lines = ["".join(fields[i:i + 4]) for i in range(0, len(fields), 4)]
+    if pad is not None:
+        lines[pad] += "   "
+    return "".join(line + eol for line in lines).encode("ascii")
+
+
+def _from_file(data, n, monkeypatch=None, chunk=None):
+    import io
+    from kika.ace.parsers import parse_ace
+
+    if chunk is not None:
+        monkeypatch.setattr(parse_ace, "_XSS_CHUNK_LINES", chunk)
+    return parse_ace.read_xss_file(io.BytesIO(data), n)
+
+
+def _from_lines(data, n):
+    return read_xss(data.decode("ascii").splitlines(keepends=True), n)
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+@pytest.mark.parametrize("chunk", [1, 4, 65536])
+def test_the_file_reader_matches_the_line_reader(eol, chunk, monkeypatch):
+    values = INTS + MANY
+    data = _xss_bytes(values, eol)
+    xss = _from_file(data, len(values), monkeypatch, chunk)
+    assert xss.tobytes() == _from_lines(data, len(values)).tobytes()
+    assert xss[0] == 0.0 and xss.size == len(values) + 1
+
+
+def test_the_file_reader_takes_the_fast_path_on_standard_lines(monkeypatch):
+    from kika.ace.parsers import parse_ace
+
+    monkeypatch.setattr(parse_ace, "read_xss", None)  # the fallback must not run
+    values = MANY[:12]
+    np.testing.assert_array_equal(_from_file(_xss_bytes(values), 12)[1:], values)
+
+
+def test_the_file_reader_stops_at_nxs1():
+    """A second table after this one in the same file is not read."""
+    values = MANY[:8]
+    data = _xss_bytes(values) + b"  92238.80c  236.005800  2.5301E-08   12/12/12\n"
+    np.testing.assert_array_equal(_from_file(data, 8)[1:], values)
+
+
+@pytest.mark.parametrize("pad", [0, 3])
+def test_a_line_of_another_width_falls_back_to_the_line_reader(pad, monkeypatch):
+    from kika.ace.parsers import parse_ace
+
+    calls = []
+    line_reader = parse_ace.read_xss
+    monkeypatch.setattr(
+        parse_ace, "read_xss", lambda *a: calls.append(1) or line_reader(*a)
+    )
+    values = MANY[:20]
+    xss = _from_file(_xss_bytes(values, pad=pad), 20)
+    assert calls, "the fast path accepted a padded line"
+    np.testing.assert_array_equal(xss[1:], values)
+
+
+def test_a_glued_pair_is_read_by_columns():
+    """The fast path reads fixed columns, so no blank is needed between fields."""
+    glued = b"-1.000000000000E-100" * 2 + FIELDS[1].encode() + FIELDS[3].encode() + b"\n"
+    np.testing.assert_array_equal(_from_file(glued, 4)[1:], [-1e-100, -1e-100, 2.5, 4.0])
+
+
+def test_a_short_xss_in_a_file_is_an_error():
+    with pytest.raises(ValueError, match="NXS"):
+        _from_file(_xss_bytes(MANY[:8]), 9)
+
+
 def _ace_with_esz(n_energy=3):
     """An Ace whose XSS is just an ESZ block: E, total, abs, elastic, heating."""
     esz = np.arange(1.0, 5 * n_energy + 1)

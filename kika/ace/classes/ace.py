@@ -74,9 +74,6 @@ class Ace:
     secondary_particle_data_locations: Optional[SecondaryParticleDataLocators] = None
     secondary_particle_cross_sections: Optional[SecondaryParticleCrossSections] = None
     
-    # Cache for energy distributions (still lazy-loaded)
-    _cache: Dict[str, Any] = field(default_factory=dict, repr=False)
-    
     # Debug flag for parsers
     _debug: bool = False
     

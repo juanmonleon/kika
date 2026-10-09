@@ -44,7 +44,7 @@ def ace_repr(self):
         ("Angular Distribution Locators", "angular_locators", self.angular_locators),
         ("Angular Distributions", "angular_distributions", self.angular_distributions),
         ("Energy Distribution Locators", "energy_distribution_locators", self.energy_distribution_locators),
-        ("Energy Distributions", "energy_distributions", "Lazy-loaded on access"),
+        ("Energy Distributions", "energy_distributions", self.energy_distributions),
         ("Photon Production Data", "photon_production_data", self.photon_production_data),
         ("Photon Production Cross Sections (SIGP)", "photon_production_xs", self.photon_production_xs),
         ("Secondary Particle Yield-Based Cross Sections (SIGH)", "particle_production_xs", self.particle_production_xs),
@@ -61,10 +61,7 @@ def ace_repr(self):
     
     # Generate table rows
     for name, attr_name, attr_value in components:
-        if attr_name == "energy_distributions":
-            # Special case for lazy-loaded energy distributions
-            status = attr_value
-        elif attr_name == "reaction_mt_data" and attr_value is not None:
+        if attr_name == "reaction_mt_data" and attr_value is not None:
             # Check if there's actual MT data available
             if attr_value.has_neutron_mt_data or attr_value.has_photon_production_mt_data or attr_value.has_particle_production_mt_data:
                 status = f"Available: ace.{attr_name}"
@@ -137,6 +134,5 @@ def ace_repr(self):
     usage = "Usage Examples:\n"
     usage += "- Get cross sections: ace.get_cross_section(reaction=2)  # MT=2 is elastic scattering\n"
     usage += "- Plot cross sections: ace.plot_cross_section(reactions=[1, 2, 18])\n"
-    usage += "- Energy distributions are lazy-loaded to conserve memory\n"
     
     return header + summary + usage
