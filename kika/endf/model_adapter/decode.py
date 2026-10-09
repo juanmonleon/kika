@@ -167,6 +167,35 @@ def _neutron() -> Particle:
                     halflife=PhysicalQuantity(value=881.5, unit="s"))
 
 
+def _projectile(headerProvenance) -> Tuple[str, Optional[Particle]]:
+    """``(pid, particle)`` of the projectile, from MF1/451's NSUB = 10·IPART + ITYPE.
+
+    The first version wrote ``"n"`` on every suite, so an alpha-incident tape
+    (NSUB 20040) decoded as a neutron one and its AWI and NSUB could not be
+    derived back. IPART is the projectile's ZA (ENDF-102 §1.1): 1 is the
+    neutron, 0 the photon, 1001…2004 the light ions. A light ion's mass is
+    AWI neutron masses, as the target's is AWR, so the header round trips
+    through GNDS. Anything else -- electrons (IPART 11) and a header with no
+    NSUB -- stays the neutron the sublibraries kika decodes assume.
+    """
+    fields = getattr(headerProvenance, "headerFields", None) or {}
+    nsub = fields.get("nsub")
+    ipart = int(nsub) // 10 if nsub not in (None, "") else 1
+    if ipart == 1 or headerProvenance is None:
+        return "n", _neutron()
+    if ipart == 0:
+        return "photon", Particle(id="photon", mass=PhysicalQuantity(value=0.0, unit="amu"),
+                                  spin=PhysicalQuantity(value=1.0, unit="hbar"),
+                                  parity=1, charge=0)
+    if ipart < 1000:
+        return "n", _neutron()
+    awi = fields.get("awi")
+    mass = (PhysicalQuantity(value=float(awi) * NEUTRON_MASS_AMU, unit="amu")
+            if awi else None)
+    pid = pidFromZA(ipart)
+    return pid, Nuclide(id=pid, Z=ipart // 1000, A=ipart % 1000, mass=mass)
+
+
 def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
     """MF1/451 → ``(PoPs, Evaluated style, EndfProvenance)``.
 
@@ -314,18 +343,23 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         report.lost("no MF1/451: the evaluation has no header, so no PoPs and no style")
 
     target = next(iter(pops.particles), "unknown")
+    projectile, particle = _projectile(headerProvenance)
     suite = ReactionSuite(
         evaluation=(headerProvenance.evaluationInfo.get("material_id", "") if headerProvenance else ""),
-        projectile="n",
+        projectile=projectile,
         target=target,
         projectileFrame=Frame.lab,
     )
     # The projectile, after the target is named from the header's nuclide. An
-    # ENDF tape never states it (the sublibrary does), but a GNDS file has to:
-    # FUDGE's toENDF6 looks up `PoPs['n']`, and a suite without it cannot be
-    # written back to ENDF by anyone but kika (roadmap T6).
+    # ENDF tape states it only through NSUB, but a GNDS file has to: FUDGE's
+    # toENDF6 looks up `PoPs[projectile]`, and a suite without it cannot be
+    # written back to ENDF by anyone but kika (roadmap T6). The neutron goes in
+    # on every suite, as before: products name it even when it is not incident.
     if headerProvenance is not None:
-        pops.add(_neutron())
+        if "n" not in pops.particles:
+            pops.add(_neutron())
+        if particle is not None and projectile not in pops.particles:
+            pops.add(particle)
     suite.PoPs = pops
     if style is not None:
         suite.styles.add(style)

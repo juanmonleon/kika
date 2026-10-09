@@ -105,12 +105,13 @@ def load_joint_mf33_mf34(
 
     # ⚑ TWO PARSES, AND IT IS NOT AN OVERSIGHT.
     #
-    # `parse_mf34.py` wraps each MT in `except Exception` and logs the message.
-    # `MemoryError` IS an Exception and its `str()` is EMPTY, so a parse that
-    # runs out of RAM prints "Error parsing MT2 in MF34:" and hands back a tape
-    # with NO MF34 — indistinguishable from a tape that legitimately has none,
-    # which JEFF and JENDL do. Measured on this very deliverable at 570 MiB: MF3,
-    # MF4 and MF33 perfect, MF34 gone, nothing raised.
+    # `parse_mf34.py` wraps each MT in `except Exception`. `MemoryError` IS an
+    # Exception and its `str()` is EMPTY, so a parse that runs out of RAM used
+    # to print "Error parsing MT2 in MF34:" and hand back a tape with NO MF34 —
+    # indistinguishable from a tape that legitimately has none, which JEFF and
+    # JENDL do. Measured on this very deliverable at 570 MiB: MF3, MF4 and MF33
+    # perfect, MF34 gone, nothing raised. The parser now records the failure
+    # (type included) in `MF.parse_errors`, and step 2 below raises on it.
     #
     # Reading the two families separately means the two peaks do not add, and
     # MF33 goes FIRST because the a₀ blocks' row axis has to be checked against
@@ -148,14 +149,18 @@ def load_joint_mf33_mf34(
     # 2. the a_0 blocks, and the in-place strip ----------------------------
     endf = read_endf(str(endf_path), mf_numbers=[34])
     mf34_file = endf.get_file(34)
+    unread = (getattr(mf34_file, "parse_errors", None) or {}).get(int(mt))
+    if unread is not None:
+        hint = (" — the parse ran out of memory; budget ~4 GB"
+                if unread.startswith("MemoryError") else "")
+        raise ValueError(
+            f"{endf_path}: MF34/MT{mt} is on the tape but failed to parse "
+            f"({unread}){hint}"
+        )
     if mf34_file is None or int(mt) not in getattr(mf34_file, "sections", {}):
         raise ValueError(
-            f"{endf_path}: MF34/MT{mt} did not come back from the parser. If "
-            f"the tape does carry it, the cause is almost certainly memory: "
-            f"`parse_mf34` degrades a MemoryError to a warning with an empty "
-            f"message and returns the tape without MF34. Check the log for "
-            f"'Error parsing MT{mt} in MF34:' with nothing after the colon, and "
-            f"budget ~4 GB."
+            f"{endf_path}: the tape carries no MF34/MT{mt} (a failed parse "
+            f"would have been named above, from MF.parse_errors)"
         )
     split = read_mf34_split(
         str(endf_path), isotope=int(isotope), mt=int(mt), l_max=int(l_max),
