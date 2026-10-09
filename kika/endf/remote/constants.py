@@ -8,11 +8,12 @@ from pathlib import Path
 IAEA_BASE_URL = "https://nds.iaea.org/public/download-endf"
 
 # Since October 2026 nds.iaea.org sits behind a Cloudflare challenge that
-# refuses every non-browser client. The NDS allowlists this User-Agent for
-# /public/download-endf/ (suggested by the NDS, 2026-10-08; it was set up for
-# the Sandy package). The match is exact: anything appended to it, or any
-# other version, is challenged again. It does not open EXFOR or relnsd.
-IAEA_USER_AGENT = "Sandy/1.0"
+# refuses every non-browser client. The NDS allowlisted this User-Agent for
+# KIKA on /public/download-endf/ (A. Martinez, NDS, 2026-10-09; until then we
+# borrowed "Sandy/1.0", the Sandy package's entry). The match is exact up to
+# case: anything appended to it, or any other version, is challenged again.
+# It does not open EXFOR or relnsd.
+IAEA_USER_AGENT = "KIKA/1.0"
 
 # Default cache directory (can be overridden via environment variable)
 DEFAULT_CACHE_DIR = Path.home() / ".kika" / "endf_cache"
