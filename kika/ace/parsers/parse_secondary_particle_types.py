@@ -37,7 +37,7 @@ def parse_ptype_block(ace: Ace, debug=False) -> SecondaryParticleTypes:
     result = SecondaryParticleTypes()
     
     # Check if we have the necessary base data structures
-    if not ace.header or not ace.header.jxs_array or not ace.header.nxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or not ace.header.nxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping secondary particle types: required base data structures missing")
         return result
@@ -95,7 +95,7 @@ def parse_ptype_block(ace: Ace, debug=False) -> SecondaryParticleTypes:
     # Read the particle type identifiers
     for i in range(ntype):
         particle_id_entry = ace.xss_data[ltype_idx + i]
-        particle_id = int(particle_id_entry.value)
+        particle_id = int(particle_id_entry)
         result.particle_ids.append(particle_id)
         
         if debug:

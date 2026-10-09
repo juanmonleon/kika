@@ -86,8 +86,8 @@ class KalbachMannDistribution(EnergyDistribution):
         Dict
             Dictionary containing the interpolated distribution data
         """
-        # Convert incident energies from XssEntry to float values for comparison
-        incident_energy_values = [e.value if hasattr(e, 'value') else float(e) for e in self.incident_energies]
+        # Incident energies as floats for comparison
+        incident_energy_values = [float(e) for e in self.incident_energies]
         
         # Find the bracketing incident energies
         if not incident_energy_values or incident_energy <= incident_energy_values[0]:
@@ -198,7 +198,7 @@ class KalbachMannDistribution(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # If we have incident energies, show the range
-        incident_energy_values = [e.value if hasattr(e, 'value') else float(e) for e in self.incident_energies]
+        incident_energy_values = [float(e) for e in self.incident_energies]
         if incident_energy_values:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", 

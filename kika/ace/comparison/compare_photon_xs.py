@@ -2,7 +2,6 @@
 Module for comparing photon production cross section data in ACE format.
 """
 
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.photon_production_xs import YieldBasedCrossSection, DirectCrossSection
 from kika.ace.comparison.compare_ace import compare_arrays
@@ -25,15 +24,9 @@ def compare_photon_production_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, 
         return False
     
     # Compare reaction MT numbers
-    # Extract values from XssEntry objects before creating sets
-    if any(isinstance(key, XssEntry) for key in ace1.photon_production_xs.cross_sections.keys()):
-        # If keys are XssEntry objects, compare their values
-        mt_numbers1 = {key.value for key in ace1.photon_production_xs.cross_sections.keys()}
-        mt_numbers2 = {key.value for key in ace2.photon_production_xs.cross_sections.keys()}
-    else:
-        # If keys are already numeric, use them directly
-        mt_numbers1 = set(ace1.photon_production_xs.cross_sections.keys())
-        mt_numbers2 = set(ace2.photon_production_xs.cross_sections.keys())
+    # Keys are int MT numbers
+    mt_numbers1 = set(ace1.photon_production_xs.cross_sections.keys())
+    mt_numbers2 = set(ace2.photon_production_xs.cross_sections.keys())
     
     if mt_numbers1 != mt_numbers2:
         if verbose:
@@ -44,15 +37,8 @@ def compare_photon_production_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, 
     
     # Compare each reaction's cross section data
     for mt_value in sorted(mt_numbers1):
-        # Get the corresponding XssEntry keys if needed
-        if any(isinstance(key, XssEntry) for key in ace1.photon_production_xs.cross_sections.keys()):
-            mt_key1 = next(key for key in ace1.photon_production_xs.cross_sections.keys() if key.value == mt_value)
-            mt_key2 = next(key for key in ace2.photon_production_xs.cross_sections.keys() if key.value == mt_value)
-            xs1 = ace1.photon_production_xs.cross_sections[mt_key1]
-            xs2 = ace2.photon_production_xs.cross_sections[mt_key2]
-        else:
-            xs1 = ace1.photon_production_xs.cross_sections[mt_value]
-            xs2 = ace2.photon_production_xs.cross_sections[mt_value]
+        xs1 = ace1.photon_production_xs.cross_sections[mt_value]
+        xs2 = ace2.photon_production_xs.cross_sections[mt_value]
         
         # Compare cross section types
         if type(xs1) != type(xs2):
@@ -102,8 +88,8 @@ def compare_yield_based_xs(xs1: YieldBasedCrossSection, xs2: YieldBasedCrossSect
                   f"({len(xs1.interpolation_bounds)} vs {len(xs2.interpolation_bounds)})")
         return False
     
-    bounds1 = [b.value for b in xs1.interpolation_bounds]
-    bounds2 = [b.value for b in xs2.interpolation_bounds]
+    bounds1 = [float(b) for b in xs1.interpolation_bounds]
+    bounds2 = [float(b) for b in xs2.interpolation_bounds]
     
     if not compare_arrays(bounds1, bounds2, tolerance, f"Photon production MT={mt} interpolation bounds", verbose):
         return False
@@ -115,8 +101,8 @@ def compare_yield_based_xs(xs1: YieldBasedCrossSection, xs2: YieldBasedCrossSect
                   f"({len(xs1.interpolation_schemes)} vs {len(xs2.interpolation_schemes)})")
         return False
     
-    schemes1 = [s.value for s in xs1.interpolation_schemes]
-    schemes2 = [s.value for s in xs2.interpolation_schemes]
+    schemes1 = [float(s) for s in xs1.interpolation_schemes]
+    schemes2 = [float(s) for s in xs2.interpolation_schemes]
     
     if not compare_arrays(schemes1, schemes2, tolerance, f"Photon production MT={mt} interpolation schemes", verbose):
         return False
@@ -129,15 +115,15 @@ def compare_yield_based_xs(xs1: YieldBasedCrossSection, xs2: YieldBasedCrossSect
         return False
     
     # Compare energy grid
-    energies1 = [e.value for e in xs1.energies]
-    energies2 = [e.value for e in xs2.energies]
+    energies1 = [float(e) for e in xs1.energies]
+    energies2 = [float(e) for e in xs2.energies]
     
     if not compare_arrays(energies1, energies2, tolerance, f"Photon production MT={mt} energy grid", verbose):
         return False
     
     # Compare yield values
-    yields1 = [y.value for y in xs1.yields]
-    yields2 = [y.value for y in xs2.yields]
+    yields1 = [float(y) for y in xs1.yields]
+    yields2 = [float(y) for y in xs2.yields]
     
     if not compare_arrays(yields1, yields2, tolerance, f"Photon production MT={mt} yields", verbose):
         return False
@@ -163,8 +149,8 @@ def compare_direct_xs(xs1: DirectCrossSection, xs2: DirectCrossSection,
         return False
     
     # Compare cross section values
-    xs_values1 = [x.value for x in xs1.cross_sections]
-    xs_values2 = [x.value for x in xs2.cross_sections]
+    xs_values1 = [float(x) for x in xs1.cross_sections]
+    xs_values2 = [float(x) for x in xs2.cross_sections]
     
     if not compare_arrays(xs_values1, xs_values2, tolerance, f"Photon production MT={mt} cross sections", verbose):
         return False

@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from collections import defaultdict
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.header import Header
 from kika.ace.classes.nubar.nubar import NuContainer
 from kika.ace.classes.delayed_neutron.delayed_neutron import DelayedNeutronData
@@ -46,7 +45,7 @@ class Ace:
     header: Optional[Header] = None
     
     # XSS data array - loaded immediately
-    xss_data: Optional[List[XssEntry]] = None  # Main data array
+    xss_data: Optional[np.ndarray] = None  # XSS array, float64, xss_data[0] is a placeholder
     
     # Standard ACE data blocks
     esz_block: Optional[EszBlock] = None
@@ -96,29 +95,29 @@ class Ace:
     @property
     def energies(self):
         """Energy grid - returns list of float values"""
-        if self.esz_block and self.esz_block.energies:
-            return [e.value for e in self.esz_block.energies]
+        if self.esz_block and len(self.esz_block.energies):
+            return self.esz_block.energies.tolist()
         return None
     
     @property
     def total_xs(self):
         """Total cross section - returns list of float values"""
-        if self.esz_block and self.esz_block.total_xs:
-            return [xs.value for xs in self.esz_block.total_xs]
+        if self.esz_block and len(self.esz_block.total_xs):
+            return self.esz_block.total_xs.tolist()
         return None
     
     @property
     def absorption_xs(self):
         """Absorption cross section - returns list of float values"""
-        if self.esz_block and self.esz_block.absorption_xs:
-            return [xs.value for xs in self.esz_block.absorption_xs]
+        if self.esz_block and len(self.esz_block.absorption_xs):
+            return self.esz_block.absorption_xs.tolist()
         return None
     
     @property
     def elastic_xs(self):
         """Elastic cross section - returns list of float values"""
-        if self.esz_block and self.esz_block.elastic_xs:
-            return [xs.value for xs in self.esz_block.elastic_xs]
+        if self.esz_block and len(self.esz_block.elastic_xs):
+            return self.esz_block.elastic_xs.tolist()
         return None
     
     def copy(self) -> 'Ace':
@@ -132,12 +131,39 @@ class Ace:
         """
         import copy
         return copy.deepcopy(self)
+
+    def __deepcopy__(self, memo):
+        """Deep copy whose blocks stay views of the copy's own XSS array.
+
+        ``copy.deepcopy`` of a numpy view copies its data, which would detach
+        every block of the copy from the array ``write_ace`` serialises: a
+        perturbation applied to the copy would be silently dropped on write.
+        Each view of ``xss_data`` is therefore pre-registered in ``memo`` as
+        the same window onto the copied array.
+        """
+        import copy
+        xss = self.xss_data
+        if isinstance(xss, np.ndarray):
+            new_xss = xss.copy()
+            memo[id(xss)] = new_xss
+            origin = xss.__array_interface__["data"][0]
+            for view in _views_of(self, xss):
+                memo[id(view)] = np.ndarray(
+                    shape=view.shape, dtype=view.dtype, buffer=new_xss,
+                    offset=view.__array_interface__["data"][0] - origin,
+                    strides=view.strides,
+                )
+        result = self.__class__.__new__(self.__class__)
+        memo[id(self)] = result
+        for name, value in self.__dict__.items():
+            setattr(result, name, copy.deepcopy(value, memo))
+        return result
     
     @property
     def heating_numbers(self):
         """Heating numbers - returns list of float values"""
-        if self.esz_block and self.esz_block.heating_numbers:
-            return [h.value for h in self.esz_block.heating_numbers]
+        if self.esz_block and len(self.esz_block.heating_numbers):
+            return self.esz_block.heating_numbers.tolist()
         return None
     
     @property
@@ -152,8 +178,7 @@ class Ace:
         
         # Add reaction-specific MT numbers if available
         if self.reaction_mt_data and self.reaction_mt_data.has_neutron_mt_data:
-            # Extract integer values from XssEntry objects
-            mt_list.extend([int(entry.value) for entry in self.reaction_mt_data.incident_neutron])
+            mt_list.extend([int(entry) for entry in self.reaction_mt_data.incident_neutron])
         
         # Remove duplicates and sort
         return sorted(list(set(mt_list)))
@@ -217,25 +242,24 @@ class Ace:
         # Add energy column
         if not self.esz_block or not self.esz_block.has_data:
             raise ValueError("Energy grid is not available")
-        # Extract values from XssEntry objects
-        energy_values = [e.value for e in self.esz_block.energies]
+        energy_values = self.esz_block.energies.tolist()
         result["Energy"] = energy_values
         
         # Add standard cross sections and reaction-specific cross sections
         for mt in reaction_list:
             try:
                 if mt == 1:  # Total
-                    if not self.esz_block.total_xs or len(self.esz_block.total_xs) != len(self.esz_block.energies):
+                    if len(self.esz_block.total_xs) == 0 or len(self.esz_block.total_xs) != len(self.esz_block.energies):
                         raise ValueError(f"Cross section data for MT={mt} (Total) is not available")
-                    result[f"MT={mt}"] = [xs.value for xs in self.esz_block.total_xs]
+                    result[f"MT={mt}"] = self.esz_block.total_xs.tolist()
                 elif mt == 2:  # Elastic
-                    if not self.esz_block.elastic_xs or len(self.esz_block.elastic_xs) != len(self.esz_block.energies):
+                    if len(self.esz_block.elastic_xs) == 0 or len(self.esz_block.elastic_xs) != len(self.esz_block.energies):
                         raise ValueError(f"Cross section data for MT={mt} (Elastic) is not available")
-                    result[f"MT={mt}"] = [xs.value for xs in self.esz_block.elastic_xs]
+                    result[f"MT={mt}"] = self.esz_block.elastic_xs.tolist()
                 elif mt == 101:  # Absorption
-                    if not self.esz_block.absorption_xs or len(self.esz_block.absorption_xs) != len(self.esz_block.energies):
+                    if len(self.esz_block.absorption_xs) == 0 or len(self.esz_block.absorption_xs) != len(self.esz_block.energies):
                         raise ValueError(f"Cross section data for MT={mt} (Absorption) is not available")
-                    result[f"MT={mt}"] = [xs.value for xs in self.esz_block.absorption_xs]
+                    result[f"MT={mt}"] = self.esz_block.absorption_xs.tolist()
                 else:
                     # Handle reaction-specific cross sections
                     if not self.cross_section or not self.cross_section.has_data:
@@ -255,8 +279,7 @@ class Ace:
                     if energy_idx < 0 or energy_idx >= len(energy_values) or num_energies <= 0:
                         raise ValueError(f"Invalid energy index or number of energies for MT={mt}")
                     
-                    # Extract the cross section values from XssEntry objects
-                    rx_xs_values = [xs.value for xs in reaction_xs._xs_entries]
+                    rx_xs_values = reaction_xs._xs_entries.tolist()
                     
                     # Verify the length matches the declared number of energies
                     if len(rx_xs_values) != num_energies:
@@ -428,8 +451,9 @@ class Ace:
             if total_mt in cs:
                 if has_feeder:
                     total_rx = cs[total_mt]
-                    for E, entry in zip(total_rx.energies, total_rx._xs_entries):
-                        entry.value = energy_sums.get(E, 0.0)
+                    xs = total_rx._xs_entries  # view: writes the XSS array
+                    n = min(len(xs), len(total_rx.energies))
+                    xs[:n] = [energy_sums.get(E, 0.0) for E in total_rx.energies[:n]]
                 else:
                     logging.debug(
                         "update_cross_sections: MT=%d stored directly (no "
@@ -457,8 +481,9 @@ class Ace:
         if not rx1:
             raise RuntimeError("MT=1 not found in cross section data")
         if mt1_has_feeder:
-            for E, entry in zip(rx1.energies, rx1._xs_entries):
-                entry.value = energy_mt1.get(E, 0.0)
+            xs = rx1._xs_entries  # view: writes the XSS array
+            n = min(len(xs), len(rx1.energies))
+            xs[:n] = [energy_mt1.get(E, 0.0) for E in rx1.energies[:n]]
         else:
             logging.debug(
                 "update_cross_sections: MT=1 stored directly (no components "
@@ -619,3 +644,24 @@ class Ace:
             markersize=kwargs.get('markersize', None),
             plot_type='line'
         )
+
+
+def _views_of(root, base: np.ndarray) -> List[np.ndarray]:
+    """Every array reachable from ``root`` whose memory is ``base``'s."""
+    found, seen, stack = [], set(), [root]
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        if isinstance(obj, np.ndarray):
+            if obj is not base and obj.base is base:
+                found.append(obj)
+        elif isinstance(obj, dict):
+            stack.extend(obj.keys())
+            stack.extend(obj.values())
+        elif isinstance(obj, (list, tuple, set)):
+            stack.extend(obj)
+        elif hasattr(obj, "__dict__") and not isinstance(obj, type):
+            stack.extend(vars(obj).values())
+    return found

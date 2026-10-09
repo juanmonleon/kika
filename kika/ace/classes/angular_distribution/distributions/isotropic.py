@@ -79,7 +79,7 @@ class IsotropicAngularDistribution(AngularDistribution):
         info_table += "-" * header_width + "\n"
         
         # MT number
-        mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+        mt_value = int(self.mt)
         info_table += "{:<{width1}} {:<{width2}}\n".format(
             "MT Number", f"{mt_value}", width1=property_col_width, width2=value_col_width)
         
@@ -147,7 +147,7 @@ class IsotropicAngularDistribution(AngularDistribution):
             "Example:\n"
             "--------\n"
             "# Access the MT number\n"
-            "mt_value = int(distribution.mt.value)\n\n"
+            "mt_value = int(distribution.mt)\n\n"
             "# Sample a cosine for any energy (will always be uniform)\n"
             "mu = distribution.sample_mu(energy=1.0, random_value=0.5)  # Returns 0.0\n"
         )

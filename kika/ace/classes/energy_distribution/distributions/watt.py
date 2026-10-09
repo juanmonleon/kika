@@ -57,7 +57,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
         float
             The a parameter value
         """
-        if not self.a_incident_energies or len(self.a_incident_energies) == 0:
+        if len(self.a_incident_energies) == 0:
             return 0.0
             
         # If energy is outside the tabulated range, use the closest value
@@ -92,7 +92,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
         float
             The b parameter value
         """
-        if not self.b_incident_energies or len(self.b_incident_energies) == 0:
+        if len(self.b_incident_energies) == 0:
             return 0.0
             
         # If energy is outside the tabulated range, use the closest value
@@ -217,7 +217,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
             "Parameter a - Data Points", self.n_a_energies, 
             width1=property_col_width, width2=value_col_width)
         
-        if self.a_incident_energies and self.a_values:
+        if len(self.a_incident_energies) > 0 and len(self.a_values) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Parameter a - Energy Range", 
                 f"{min(self.a_incident_energies):.6g} - {max(self.a_incident_energies):.6g} MeV", 
@@ -232,7 +232,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
             "Parameter b - Data Points", self.n_b_energies, 
             width1=property_col_width, width2=value_col_width)
         
-        if self.b_incident_energies and self.b_values:
+        if len(self.b_incident_energies) > 0 and len(self.b_values) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Parameter b - Energy Range", 
                 f"{min(self.b_incident_energies):.6g} - {max(self.b_incident_energies):.6g} MeV", 

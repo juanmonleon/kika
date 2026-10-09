@@ -63,8 +63,8 @@ def compare_neutron_xs_locators(ace1: Ace, ace2: Ace, tolerance: float, verbose:
         return False
     
     # Compare locator values
-    locators1 = [loc.value for loc in ace1.xs_locators.incident_neutron]
-    locators2 = [loc.value for loc in ace2.xs_locators.incident_neutron]
+    locators1 = [float(loc) for loc in ace1.xs_locators.incident_neutron]
+    locators2 = [float(loc) for loc in ace2.xs_locators.incident_neutron]
     
     return compare_arrays(locators1, locators2, tolerance, "Neutron cross section locators", verbose)
 
@@ -91,8 +91,8 @@ def compare_photon_xs_locators(ace1: Ace, ace2: Ace, tolerance: float, verbose: 
         return False
     
     # Compare locator values
-    locators1 = [loc.value for loc in ace1.xs_locators.photon_production]
-    locators2 = [loc.value for loc in ace2.xs_locators.photon_production]
+    locators1 = [float(loc) for loc in ace1.xs_locators.photon_production]
+    locators2 = [float(loc) for loc in ace2.xs_locators.photon_production]
     
     return compare_arrays(locators1, locators2, tolerance, "Photon production cross section locators", verbose)
 
@@ -128,8 +128,8 @@ def compare_particle_xs_locators(ace1: Ace, ace2: Ace, tolerance: float, verbose
             return False
         
         # Compare locator values for this particle type
-        locators1 = [loc.value for loc in loc_list1]
-        locators2 = [loc.value for loc in loc_list2]
+        locators1 = [float(loc) for loc in loc_list1]
+        locators2 = [float(loc) for loc in loc_list2]
         
         if not compare_arrays(locators1, locators2, tolerance, f"Particle type {i} cross section locators", verbose):
             return False

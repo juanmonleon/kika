@@ -1,4 +1,3 @@
-from kika.ace.classes.xss import XssEntry
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Union, Tuple
 import numpy as np
@@ -32,19 +31,19 @@ class YieldBasedCrossSection(ProductionCrossSection):
     """
     mtmult: int = 0  # MT number of the cross section to multiply by yield
     num_regions: int = 0  # Number of interpolation regions
-    interpolation_bounds: List[XssEntry] = field(default_factory=list)  # NBT array as XssEntry objects
-    interpolation_schemes: List[XssEntry] = field(default_factory=list)  # INT array as XssEntry objects
+    interpolation_bounds: np.ndarray = field(default_factory=lambda: np.empty(0))  # NBT array (view of xss_data)
+    interpolation_schemes: np.ndarray = field(default_factory=lambda: np.empty(0))  # INT array (view of xss_data)
     num_energies: int = 0  # Number of energy points
-    energies: List[XssEntry] = field(default_factory=list)  # Energy grid as XssEntry objects
-    yields: List[XssEntry] = field(default_factory=list)  # Yield values as XssEntry objects
+    energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Energy grid (view of xss_data)
+    yields: np.ndarray = field(default_factory=lambda: np.empty(0))  # Yield values (view of xss_data)
     
     def get_energy_values(self) -> List[float]:
         """Get the energy grid values as a list of floats."""
-        return [entry.value for entry in self.energies]
+        return self.energies.tolist()
     
     def get_yield_values(self) -> List[float]:
         """Get the yield values as a list of floats."""
-        return [entry.value for entry in self.yields]
+        return self.yields.tolist()
     
     def get_interpolated_yield(self, energy: float) -> float:
         """
@@ -115,11 +114,11 @@ class DirectCrossSection(ProductionCrossSection):
     """
     energy_grid_index: int = 0  # IE - Starting index in the energy grid
     num_entries: int = 0        # NE - Number of consecutive entries
-    cross_sections: List[XssEntry] = field(default_factory=list)  # Cross section values as XssEntry objects
+    cross_sections: np.ndarray = field(default_factory=lambda: np.empty(0))  # Cross section values (view of xss_data)
     
     def get_xs_values(self) -> List[float]:
         """Get the cross section values as a list of floats."""
-        return [entry.value for entry in self.cross_sections]
+        return self.cross_sections.tolist()
     
     def get_value(self, energy: float, energy_grid: List[float]) -> float:
         """

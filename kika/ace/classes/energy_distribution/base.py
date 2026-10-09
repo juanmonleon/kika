@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List
 import numpy as np
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.energy_distribution.types import EnergyDistributionType
 from kika._utils import create_repr_section
 
@@ -13,8 +12,8 @@ class EnergyDistribution:
     idat: int = 0  # Offset to distribution data in XSS array (relative to JED)
     
     # Law applicability parameters
-    applicability_energies: List[XssEntry] = field(default_factory=list)  # Energies at which to check if law applies
-    applicability_probabilities: List[XssEntry] = field(default_factory=list)  # Probability of law validity at each energy
+    applicability_energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Energies at which to check if law applies (view of xss_data)
+    applicability_probabilities: np.ndarray = field(default_factory=lambda: np.empty(0))  # Probability of law validity at each energy (view of xss_data)
     nbt: List[int] = field(default_factory=list)  # NBT interpolation parameters
     interp: List[int] = field(default_factory=list)  # INT interpolation scheme
     
@@ -56,12 +55,12 @@ class EnergyDistribution:
             Probability between 0 and 1 that this law applies
         """
         # If there's no applicability data, this is the only law
-        if not self.applicability_energies or not self.applicability_probabilities:
+        if len(self.applicability_energies) == 0 or len(self.applicability_probabilities) == 0:
             return 1.0
         
         # Convert applicability_energies and applicability_probabilities to lists of float values
-        energy_values = [entry.value for entry in self.applicability_energies]
-        prob_values = [entry.value for entry in self.applicability_probabilities]
+        energy_values = [float(e) for e in self.applicability_energies]
+        prob_values = [float(p) for p in self.applicability_probabilities]
         
         # If energy is outside the tabulated range, use the closest value
         if energy <= energy_values[0]:
@@ -130,8 +129,8 @@ class EnergyDistribution:
                 width1=property_col_width, width2=value_col_width)
             
             if n_points > 0:
-                e_min = self.applicability_energies[0].value
-                e_max = self.applicability_energies[-1].value
+                e_min = float(self.applicability_energies[0])
+                e_max = float(self.applicability_energies[-1])
                 energy_range = f"{e_min:.6g} - {e_max:.6g} MeV"
                 info_table += "{:<{width1}} {:<{width2}}\n".format(
                     "Energy Range", energy_range,

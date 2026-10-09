@@ -48,7 +48,7 @@ def particle_release_repr(self) -> str:
         energy_dependent_count = 0
         
         for ty in self.incident_neutron:
-            ty_value = int(ty.value)
+            ty_value = int(ty)
             if abs(ty_value) > 100:
                 energy_dependent_count += 1
             else:
@@ -89,9 +89,9 @@ def particle_release_repr(self) -> str:
         # Add details for each particle type if there aren't too many
         if num_particle_types <= 5:
             for i, ty_list in enumerate(self.particle_production):
-                if ty_list:
+                if len(ty_list) > 0:
                     # Count energy-dependent yields
-                    energy_dep_count = sum(1 for ty in ty_list if abs(int(ty.value)) > 100)
+                    energy_dep_count = sum(1 for ty in ty_list if abs(int(ty)) > 100)
                     
                     particle_info = f"{len(ty_list)} reactions"
                     if energy_dep_count > 0:

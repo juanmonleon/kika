@@ -23,8 +23,8 @@ def compare_gpd(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = T
         return False
     
     # Compare total photon production cross section
-    xs_values1 = [xs.value for xs in ace1.photon_production_data.total_xs]
-    xs_values2 = [xs.value for xs in ace2.photon_production_data.total_xs]
+    xs_values1 = [float(xs) for xs in ace1.photon_production_data.total_xs]
+    xs_values2 = [float(xs) for xs in ace2.photon_production_data.total_xs]
     
     if not compare_arrays(xs_values1, xs_values2, tolerance, "Total photon production cross section", verbose):
         return False
@@ -71,8 +71,8 @@ def compare_gpd(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = T
                 return False
             
             # Compare energy values for this group
-            group_values1 = [e.value for e in energy_group1]
-            group_values2 = [e.value for e in energy_group2]
+            group_values1 = [float(e) for e in energy_group1]
+            group_values2 = [float(e) for e in energy_group2]
             
             if not compare_arrays(group_values1, group_values2, tolerance, 
                                  f"Outgoing photon energies for neutron group {i}", verbose):

@@ -32,8 +32,8 @@ def compare_energy_grid(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: 
         return False
     
     # Compare energy grid values
-    energies1 = [e.value for e in ace1.esz_block.energies]
-    energies2 = [e.value for e in ace2.esz_block.energies]
+    energies1 = [float(e) for e in ace1.esz_block.energies]
+    energies2 = [float(e) for e in ace2.esz_block.energies]
     
     if not compare_arrays(energies1, energies2, tolerance, "Energy grid", verbose):
         return False

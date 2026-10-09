@@ -60,8 +60,8 @@ def compare_elastic_angular(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbo
         return False
     
     # Compare energies
-    energy_values1 = [e.value for e in dist1.energies] if dist1.energies else []
-    energy_values2 = [e.value for e in dist2.energies] if dist2.energies else []
+    energy_values1 = [float(e) for e in dist1.energies]
+    energy_values2 = [float(e) for e in dist2.energies]
     if not compare_arrays(energy_values1, energy_values2, tolerance, "Elastic angular energy grid", verbose):
         return False
         
@@ -106,8 +106,8 @@ def compare_neutron_angular(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbo
             return False
         
         # Compare energies
-        energy_values1 = [e.value for e in dist1.energies] if dist1.energies else []
-        energy_values2 = [e.value for e in dist2.energies] if dist2.energies else []
+        energy_values1 = [float(e) for e in dist1.energies]
+        energy_values2 = [float(e) for e in dist2.energies]
         if not compare_arrays(energy_values1, energy_values2, tolerance, f"Neutron MT={mt} angular energy grid", verbose):
             return False
         
@@ -155,8 +155,8 @@ def compare_photon_angular(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbos
             return False
         
         # Compare energies
-        energy_values1 = [e.value for e in dist1.energies] if dist1.energies else []
-        energy_values2 = [e.value for e in dist2.energies] if dist2.energies else []
+        energy_values1 = [float(e) for e in dist1.energies]
+        energy_values2 = [float(e) for e in dist2.energies]
         if not compare_arrays(energy_values1, energy_values2, tolerance, f"Photon MT={mt} angular energy grid", verbose):
             return False
         
@@ -230,8 +230,8 @@ def compare_particle_angular(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verb
                 return False
             
             # Compare energies
-            energy_values1 = [e.value for e in dist1.energies] if dist1.energies else []
-            energy_values2 = [e.value for e in dist2.energies] if dist2.energies else []
+            energy_values1 = [float(e) for e in dist1.energies]
+            energy_values2 = [float(e) for e in dist2.energies]
             if not compare_arrays(energy_values1, energy_values2, tolerance, 
                                  f"Particle type {particle_idx} MT={mt} angular energy grid", verbose):
                 return False
@@ -280,8 +280,8 @@ def compare_angular_distribution_data(dist1, dist2, tolerance: float, name: str,
             return False
         
         for i, (bins1, bins2) in enumerate(zip(dist1.cosine_bins, dist2.cosine_bins)):
-            bins_values1 = [bin.value for bin in bins1]
-            bins_values2 = [bin.value for bin in bins2]
+            bins_values1 = [float(b) for b in bins1]
+            bins_values2 = [float(b) for b in bins2]
             
             if not compare_arrays(bins_values1, bins_values2, tolerance, 
                                  f"{name} angular distribution cosine bins at energy point {i}", verbose):
@@ -308,22 +308,22 @@ def compare_angular_distribution_data(dist1, dist2, tolerance: float, name: str,
         # Compare cosine grids, PDFs, and CDFs for each energy
         for i in range(len(dist1.cosine_grid)):
             # Cosine grid
-            grid1 = [c.value for c in dist1.cosine_grid[i]]
-            grid2 = [c.value for c in dist2.cosine_grid[i]]
+            grid1 = [float(c) for c in dist1.cosine_grid[i]]
+            grid2 = [float(c) for c in dist2.cosine_grid[i]]
             if not compare_arrays(grid1, grid2, tolerance, 
                                  f"{name} angular distribution cosine grid at energy point {i}", verbose):
                 return False
             
             # PDF
-            pdf1 = [p.value for p in dist1.pdf[i]]
-            pdf2 = [p.value for p in dist2.pdf[i]]
+            pdf1 = [float(p) for p in dist1.pdf[i]]
+            pdf2 = [float(p) for p in dist2.pdf[i]]
             if not compare_arrays(pdf1, pdf2, tolerance, 
                                  f"{name} angular distribution PDF at energy point {i}", verbose):
                 return False
             
             # CDF
-            cdf1 = [c.value for c in dist1.cdf[i]]
-            cdf2 = [c.value for c in dist2.cdf[i]]
+            cdf1 = [float(c) for c in dist1.cdf[i]]
+            cdf2 = [float(c) for c in dist2.cdf[i]]
             if not compare_arrays(cdf1, cdf2, tolerance, 
                                  f"{name} angular distribution CDF at energy point {i}", verbose):
                 return False

@@ -3,7 +3,6 @@ Module for comparing energy distribution data in ACE format.
 """
 
 from typing import List
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.energy_distribution import EnergyDistribution
 from kika.ace.comparison.compare_ace import compare_arrays
@@ -285,15 +284,8 @@ def compare_yields(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool) -> boo
                     print(f"Particle type {particle_idx} yields mismatch: One has yields, the other doesn't")
                 return False
             
-            # Check if the keys are XssEntry objects or integers
-            if mt_dict1 and isinstance(next(iter(mt_dict1.keys())), XssEntry):
-                # If they are XssEntry objects, extract values first
-                mt_numbers1 = set(key.value for key in mt_dict1.keys())
-                mt_numbers2 = set(key.value for key in mt_dict2.keys())
-            else:
-                # If they are already integers
-                mt_numbers1 = set(mt_dict1.keys())
-                mt_numbers2 = set(mt_dict2.keys())
+            mt_numbers1 = set(mt_dict1.keys())
+            mt_numbers2 = set(mt_dict2.keys())
             
             if mt_numbers1 != mt_numbers2:
                 if verbose:
@@ -304,15 +296,8 @@ def compare_yields(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool) -> boo
             
             # Compare yield values for each MT
             for mt in sorted(mt_numbers1):
-                # Get the yield objects, accounting for XssEntry keys if needed
-                if isinstance(next(iter(mt_dict1.keys())), XssEntry):
-                    mt_key1 = next(key for key in mt_dict1.keys() if key.value == mt)
-                    mt_key2 = next(key for key in mt_dict2.keys() if key.value == mt)
-                    yield1 = mt_dict1[mt_key1]
-                    yield2 = mt_dict2[mt_key2]
-                else:
-                    yield1 = mt_dict1[mt]
-                    yield2 = mt_dict2[mt]
+                yield1 = mt_dict1[mt]
+                yield2 = mt_dict2[mt]
                 
                 if not compare_energy_distribution(yield1, yield2, tolerance, 
                                                  f"Particle type {particle_idx} yield MT={mt}", verbose):
@@ -421,16 +406,16 @@ def compare_energy_distribution(dist1, dist2, tolerance: float, name: str, verbo
     # Attributes common to both EnergyDistribution and EnergyDependentYield
     if hasattr(dist1, 'energies') and hasattr(dist2, 'energies'):
         # Compare energies
-        energies1 = [e.value for e in dist1.energies] if dist1.energies else []
-        energies2 = [e.value for e in dist2.energies] if dist2.energies else []
+        energies1 = [float(e) for e in dist1.energies]
+        energies2 = [float(e) for e in dist2.energies]
         
         if not compare_arrays(energies1, energies2, tolerance, f"{name} energies", verbose):
             return False
     
     # Compare yield values for EnergyDependentYield objects
     if hasattr(dist1, 'yields') and hasattr(dist2, 'yields'):
-        yields1 = [y.value for y in dist1.yields] if dist1.yields else []
-        yields2 = [y.value for y in dist2.yields] if dist2.yields else []
+        yields1 = [float(y) for y in dist1.yields]
+        yields2 = [float(y) for y in dist2.yields]
         
         if not compare_arrays(yields1, yields2, tolerance, f"{name} yields", verbose):
             return False
@@ -465,14 +450,14 @@ def compare_energy_distribution(dist1, dist2, tolerance: float, name: str, verbo
     
     # Compare applicability data for EnergyDistribution objects
     if hasattr(dist1, "applicability_energies") and hasattr(dist2, "applicability_energies"):
-        energies1 = [e.value for e in dist1.applicability_energies] if dist1.applicability_energies else []
-        energies2 = [e.value for e in dist2.applicability_energies] if dist2.applicability_energies else []
+        energies1 = [float(e) for e in dist1.applicability_energies]
+        energies2 = [float(e) for e in dist2.applicability_energies]
         
         if not compare_arrays(energies1, energies2, tolerance, f"{name} applicability energies", verbose):
             return False
         
-        probs1 = [p.value for p in dist1.applicability_probabilities] if dist1.applicability_probabilities else []
-        probs2 = [p.value for p in dist2.applicability_probabilities] if dist2.applicability_probabilities else []
+        probs1 = [float(p) for p in dist1.applicability_probabilities]
+        probs2 = [float(p) for p in dist2.applicability_probabilities]
         
         if not compare_arrays(probs1, probs2, tolerance, f"{name} applicability probabilities", verbose):
             return False

@@ -2,7 +2,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.angular_distribution.base import AngularDistribution
 from kika.ace.classes.angular_distribution.types import AngularDistributionType
 from kika._utils import create_repr_section
@@ -53,19 +52,19 @@ class KalbachMannAngularDistribution(AngularDistribution):
             If the ACE object is not provided or missing required data
         """
         if ace is None:
-            mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+            mt_value = int(self.mt)
             raise Law44DataError(
                 f"ACE object must be provided for Kalbach-Mann (Law=44) angular distribution (MT={mt_value})"
             )
             
         if ace.energy_distributions is None:
-            mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+            mt_value = int(self.mt)
             raise Law44DataError(
                 f"Energy distributions missing in ACE object for Kalbach-Mann distribution (MT={mt_value})"
             )
             
         # Get MT number
-        mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+        mt_value = int(self.mt)
         
         # Get the appropriate container based on the particle type
         if self.is_particle_production:
@@ -132,7 +131,7 @@ class KalbachMannAngularDistribution(AngularDistribution):
         # to return in the same sense as the other distribution types
         try:
             
-            mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+            mt_value = int(self.mt)
             
             # If no ACE data is provided, raise an error
             if ace is None:
@@ -174,9 +173,8 @@ class KalbachMannAngularDistribution(AngularDistribution):
                             r_value = dist['r'][middle_idx]
                             a_value = dist['a'][middle_idx]
                             
-                            # Handle XssEntry objects if present
-                            r_value = float(r_value.value if hasattr(r_value, 'value') else r_value)
-                            a_value = float(a_value.value if hasattr(a_value, 'value') else a_value)
+                            r_value = float(r_value)
+                            a_value = float(a_value)
                             
                             # Calculate PDF values
                             for cosine in cosines:
@@ -218,15 +216,15 @@ class KalbachMannAngularDistribution(AngularDistribution):
             
             # Verify that we have e_out, r, and a data and they're non-empty
             if ('e_out' not in dist or 'r' not in dist or 'a' not in dist or 
-                not dist['e_out'] or not dist['r'] or not dist['a']):
+                len(dist['e_out']) == 0 or len(dist['r']) == 0 or len(dist['a']) == 0):
                 raise Law44DataError(
                     f"Incomplete Law=44 data for MT={mt_value} at energy {energy} MeV"
                 )
             
             # Convert all lengths to integers explicitly to avoid type issues
-            e_out_len = int(len(dist['e_out'])) if isinstance(dist['e_out'], list) else 0
-            r_len = int(len(dist['r'])) if isinstance(dist['r'], list) else 0
-            a_len = int(len(dist['a'])) if isinstance(dist['a'], list) else 0
+            e_out_len = int(len(dist['e_out']))
+            r_len = int(len(dist['r']))
+            a_len = int(len(dist['a']))
             
             # Make sure r and a arrays are at least as long as e_out
             if r_len < e_out_len or a_len < e_out_len:
@@ -242,9 +240,8 @@ class KalbachMannAngularDistribution(AngularDistribution):
             r_value = dist['r'][middle_idx]
             a_value = dist['a'][middle_idx]
             
-            # Handle XssEntry objects if present
-            r_value = float(r_value.value if hasattr(r_value, 'value') else r_value)
-            a_value = float(a_value.value if hasattr(a_value, 'value') else a_value)
+            r_value = float(r_value)
+            a_value = float(a_value)
             
             # Generate a fine cosine grid
             cosines = np.linspace(-1, 1, num_points)
@@ -289,7 +286,7 @@ class KalbachMannAngularDistribution(AngularDistribution):
     
     def __str__(self) -> str:
         """Human-readable string representation."""
-        mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+        mt_value = int(self.mt)
         particle_info = f", particle={self.particle_idx}" if self.is_particle_production else ""
         return (f"Kalbach-Mann Angular Distribution (MT={mt_value}{particle_info})\n"
                 f"REQUIRES: Law=44 data from energy distribution section\n"
@@ -327,7 +324,7 @@ class KalbachMannAngularDistribution(AngularDistribution):
         info_table += "-" * header_width + "\n"
         
         # MT number
-        mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+        mt_value = int(self.mt)
         info_table += "{:<{width1}} {:<{width2}}\n".format(
             "MT Number", f"{mt_value}", width1=property_col_width, width2=value_col_width)
         
@@ -413,7 +410,7 @@ class KalbachMannAngularDistribution(AngularDistribution):
             "Example:\n"
             "--------\n"
             "# Access reference properties\n"
-            "mt_value = int(distribution.mt.value)\n"
+            "mt_value = int(distribution.mt)\n"
             "reaction_idx = distribution.reaction_index\n"
             "is_particle = distribution.is_particle_production\n\n"
             "# Get data as DataFrame at 14 MeV\n"

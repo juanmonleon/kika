@@ -55,8 +55,8 @@ def yield_based_cross_section_repr(self) -> str:
         width1=property_col_width, width2=value_col_width)
     
     # Add energy range if data is available
-    if self.energies and len(self.energies) > 0:
-        energy_values = [entry.value for entry in self.energies]
+    if len(self.energies) > 0:
+        energy_values = [float(entry) for entry in self.energies]
         min_e = min(energy_values)
         max_e = max(energy_values)
         info_table += "{:<{width1}} {:<{width2}}\n".format(
@@ -64,8 +64,8 @@ def yield_based_cross_section_repr(self) -> str:
             width1=property_col_width, width2=value_col_width)
     
     # Add yield range if data is available
-    if self.yields and len(self.yields) > 0:
-        yield_values = [entry.value for entry in self.yields]
+    if len(self.yields) > 0:
+        yield_values = [float(entry) for entry in self.yields]
         min_y = min(yield_values)
         max_y = max(yield_values)
         info_table += "{:<{width1}} {:<{width2}}\n".format(
@@ -142,8 +142,8 @@ def direct_cross_section_repr(self) -> str:
         width1=property_col_width, width2=value_col_width)
     
     # Add cross section range if data is available
-    if self.cross_sections and len(self.cross_sections) > 0:
-        xs_values = [entry.value for entry in self.cross_sections]
+    if len(self.cross_sections) > 0:
+        xs_values = [float(entry) for entry in self.cross_sections]
         min_xs = min(xs_values)
         max_xs = max(xs_values)
         info_table += "{:<{width1}} {:<{width2}}\n".format(

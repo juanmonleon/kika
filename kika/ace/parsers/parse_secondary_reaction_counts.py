@@ -36,7 +36,7 @@ def parse_ntro_block(ace: Ace, debug=False) -> SecondaryParticleReactions:
     result = SecondaryParticleReactions()
     
     # Check if we have the necessary basic data structures
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping reaction counts: required base data structures missing")
         return result
@@ -96,7 +96,7 @@ def parse_ntro_block(ace: Ace, debug=False) -> SecondaryParticleReactions:
     
     # Read the number of reactions for each particle type
     for i in range(ntype):
-        reaction_count = int(ace.xss_data[ltype_idx + i].value)
+        reaction_count = int(ace.xss_data[ltype_idx + i])
         result.reaction_counts.append(reaction_count)
         
         if debug:

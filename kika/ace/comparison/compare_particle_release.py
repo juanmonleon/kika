@@ -57,8 +57,8 @@ def compare_neutron_particle_release(ace1: Ace, ace2: Ace, tolerance: float, ver
         return False
     
     # Compare TY values
-    ty_values1 = [ty.value for ty in ace1.particle_release.incident_neutron]
-    ty_values2 = [ty.value for ty in ace2.particle_release.incident_neutron]
+    ty_values1 = [float(ty) for ty in ace1.particle_release.incident_neutron]
+    ty_values2 = [float(ty) for ty in ace2.particle_release.incident_neutron]
     
     if not compare_arrays(ty_values1, ty_values2, tolerance, "Neutron particle release TY values", verbose):
         return False
@@ -98,8 +98,8 @@ def compare_particle_production_release(ace1: Ace, ace2: Ace, tolerance: float, 
             return False
         
         # Compare TY values for this particle type
-        ty_values1 = [ty.value for ty in ty_list1]
-        ty_values2 = [ty.value for ty in ty_list2]
+        ty_values1 = [float(ty) for ty in ty_list1]
+        ty_values2 = [float(ty) for ty in ty_list2]
         
         if not compare_arrays(ty_values1, ty_values2, tolerance, f"Particle type {i} release TY values", verbose):
             return False

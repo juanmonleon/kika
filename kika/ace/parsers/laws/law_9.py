@@ -58,7 +58,7 @@ def parse_evaporation_spectrum(ace: Ace, base_dist: EnergyDistribution, idat_idx
     
     # Read the number of interpolation regions for temperature (N_R)
     n_temp_interp_regions_entry = ace.xss_data[idat_idx]
-    distribution.n_temp_interp_regions = int(n_temp_interp_regions_entry.value)
+    distribution.n_temp_interp_regions = int(n_temp_interp_regions_entry)
     n_r = distribution.n_temp_interp_regions
     if debug:
         logger.debug(f"Number of interpolation regions for temperature (N_R): {n_r}")
@@ -68,7 +68,7 @@ def parse_evaporation_spectrum(ace: Ace, base_dist: EnergyDistribution, idat_idx
     if n_r > 0:
         # Read NBT values for temperature interpolation
         if idx + n_r <= len(ace.xss_data):
-            distribution.temp_nbt = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+            distribution.temp_nbt = [int(ace.xss_data[idx + i]) for i in range(n_r)]
             if debug:
                 logger.debug(f"Temperature NBT values: {distribution.temp_nbt}")
             idx += n_r
@@ -77,7 +77,7 @@ def parse_evaporation_spectrum(ace: Ace, base_dist: EnergyDistribution, idat_idx
         
         # Read INT values for temperature interpolation
         if idx + n_r <= len(ace.xss_data):
-            distribution.temp_interp = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+            distribution.temp_interp = [int(ace.xss_data[idx + i]) for i in range(n_r)]
             if debug:
                 logger.debug(f"Temperature INT values: {distribution.temp_interp}")
             idx += n_r
@@ -87,7 +87,7 @@ def parse_evaporation_spectrum(ace: Ace, base_dist: EnergyDistribution, idat_idx
     # Read the number of incident energies (N_E)
     if idx < len(ace.xss_data):
         n_incident_energies_entry = ace.xss_data[idx]
-        distribution.n_incident_energies = int(n_incident_energies_entry.value)
+        distribution.n_incident_energies = int(n_incident_energies_entry)
         n_e = distribution.n_incident_energies
         if debug:
             logger.debug(f"Number of incident energies (N_E): {n_e}")
@@ -97,22 +97,22 @@ def parse_evaporation_spectrum(ace: Ace, base_dist: EnergyDistribution, idat_idx
             logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
         return distribution
     
-    # Read the incident energy table - store the XssEntry objects
+    # Read the incident energy table - a view of xss_data
     if idx + n_e <= len(ace.xss_data):
-        distribution.incident_energies = [ace.xss_data[idx + i] for i in range(n_e)]
+        distribution.incident_energies = ace.xss_data[idx:idx + n_e]
         if debug:
-            logger.debug(f"Incident energy table range: [{distribution.incident_energies[0].value if n_e > 0 else 'N/A'}, {distribution.incident_energies[-1].value if n_e > 0 else 'N/A'}]")
+            logger.debug(f"Incident energy table range: [{distribution.incident_energies[0] if n_e > 0 else 'N/A'}, {distribution.incident_energies[-1] if n_e > 0 else 'N/A'}]")
         idx += n_e
     else:
         if debug:
             logger.debug(f"Not enough data to read incident energy table. Need index up to {idx + n_e}, have {len(ace.xss_data)}")
         return distribution
     
-    # Read the temperature table - store the XssEntry objects
+    # Read the temperature table - a view of xss_data
     if idx + n_e <= len(ace.xss_data):
-        distribution.temperatures = [ace.xss_data[idx + i] for i in range(n_e)]
+        distribution.temperatures = ace.xss_data[idx:idx + n_e]
         if debug:
-            logger.debug(f"Temperature table range: [{distribution.temperatures[0].value if n_e > 0 else 'N/A'}, {distribution.temperatures[-1].value if n_e > 0 else 'N/A'}]")
+            logger.debug(f"Temperature table range: [{distribution.temperatures[0] if n_e > 0 else 'N/A'}, {distribution.temperatures[-1] if n_e > 0 else 'N/A'}]")
         idx += n_e
     else:
         if debug:
@@ -121,7 +121,7 @@ def parse_evaporation_spectrum(ace: Ace, base_dist: EnergyDistribution, idat_idx
     
     # Read the restriction energy (U)
     if idx < len(ace.xss_data):
-        distribution.restriction_energy = ace.xss_data[idx].value
+        distribution.restriction_energy = float(ace.xss_data[idx])
         if debug:
             logger.debug(f"Restriction energy (U): {distribution.restriction_energy}")
     elif debug:

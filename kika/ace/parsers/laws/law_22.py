@@ -62,7 +62,7 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
         return distribution
     
     # Read the number of interpolation regions (N_R)
-    distribution.n_interp_regions = int(ace.xss_data[idat_idx].value)
+    distribution.n_interp_regions = int(ace.xss_data[idat_idx])
     if debug:
         logger.debug(f"Number of interpolation regions (N_R): {distribution.n_interp_regions}")
     idx = idat_idx + 1
@@ -71,13 +71,13 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
     # Read the interpolation parameters if present
     if n_r > 0 and idx + 2*n_r - 1 < len(ace.xss_data):
         # Read NBT values
-        distribution.nbt = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+        distribution.nbt = [int(ace.xss_data[idx + i]) for i in range(n_r)]
         if debug:
             logger.debug(f"NBT values: {distribution.nbt}")
         idx += n_r
         
         # Read INT values
-        distribution.interp = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+        distribution.interp = [int(ace.xss_data[idx + i]) for i in range(n_r)]
         if debug:
             logger.debug(f"INT values: {distribution.interp}")
         idx += n_r
@@ -90,21 +90,21 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
             logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
         return distribution
     
-    distribution.n_energies = int(ace.xss_data[idx].value)
+    distribution.n_energies = int(ace.xss_data[idx])
     if debug:
         logger.debug(f"Number of incident energies (N_E): {distribution.n_energies}")
     idx += 1
     n_e = distribution.n_energies
     
-    # Read the incident energies - store the XssEntry objects
+    # Read the incident energies - a view of xss_data
     if idx + n_e - 1 >= len(ace.xss_data):
         if debug:
             logger.debug(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
         return distribution
     
-    distribution.incident_energies = [ace.xss_data[idx + i] for i in range(n_e)]
+    distribution.incident_energies = ace.xss_data[idx:idx + n_e]
     if debug:
-        logger.debug(f"Incident energies range: [{distribution.incident_energies[0].value if n_e > 0 else 'N/A'}, {distribution.incident_energies[-1].value if n_e > 0 else 'N/A'}]")
+        logger.debug(f"Incident energies range: [{distribution.incident_energies[0] if n_e > 0 else 'N/A'}, {distribution.incident_energies[-1] if n_e > 0 else 'N/A'}]")
     idx += n_e
     
     # Read the table locators
@@ -113,7 +113,7 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
             logger.debug(f"Not enough data to read table locators. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
         return distribution
     
-    distribution.table_locators = [int(ace.xss_data[idx + i].value) for i in range(n_e)]
+    distribution.table_locators = [int(ace.xss_data[idx + i]) for i in range(n_e)]
     if debug:
         logger.debug(f"Table locators: {distribution.table_locators}")
     idx += n_e
@@ -148,7 +148,7 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
             continue
         
         # Read number of functions (NF_i)
-        nf = int(ace.xss_data[func_idx].value)
+        nf = int(ace.xss_data[func_idx])
         if debug:
             logger.debug(f"Number of functions (NF): {nf}")
         
@@ -160,19 +160,19 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
             continue
         
         # Read probability values (P_ik)
-        p_values = [ace.xss_data[func_idx + 1 + j] for j in range(nf)]
+        p_values = ace.xss_data[func_idx + 1:func_idx + 1 + nf]
         if debug:
-            logger.debug(f"Probability values range: [{p_values[0].value if nf > 0 else 'N/A'}, {p_values[-1].value if nf > 0 else 'N/A'}]")
+            logger.debug(f"Probability values range: [{p_values[0] if nf > 0 else 'N/A'}, {p_values[-1] if nf > 0 else 'N/A'}]")
         
         # Read origin parameter values (T_ik)
-        t_values = [ace.xss_data[func_idx + 1 + nf + j] for j in range(nf)]
+        t_values = ace.xss_data[func_idx + 1 + nf:func_idx + 1 + nf + nf]
         if debug:
-            logger.debug(f"Origin parameter values range: [{t_values[0].value if nf > 0 else 'N/A'}, {t_values[-1].value if nf > 0 else 'N/A'}]")
+            logger.debug(f"Origin parameter values range: [{t_values[0] if nf > 0 else 'N/A'}, {t_values[-1] if nf > 0 else 'N/A'}]")
         
         # Read slope parameter values (C_ik)
-        c_values = [ace.xss_data[func_idx + 1 + 2*nf + j] for j in range(nf)]
+        c_values = ace.xss_data[func_idx + 1 + 2*nf:func_idx + 1 + 2*nf + nf]
         if debug:
-            logger.debug(f"Slope parameter values range: [{c_values[0].value if nf > 0 else 'N/A'}, {c_values[-1].value if nf > 0 else 'N/A'}]")
+            logger.debug(f"Slope parameter values range: [{c_values[0] if nf > 0 else 'N/A'}, {c_values[-1] if nf > 0 else 'N/A'}]")
         
         # Store function data
         func_data = {

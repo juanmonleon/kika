@@ -72,8 +72,8 @@ def compare_precursor_group(precursor1: DelayedNeutronPrecursor, precursor2: Del
         return False
     
     if precursor1.decay_constant is not None and precursor2.decay_constant is not None:
-        decay1 = precursor1.decay_constant.value
-        decay2 = precursor2.decay_constant.value
+        decay1 = precursor1.decay_constant
+        decay2 = precursor2.decay_constant
         
         if not compare_floats(decay1, decay2, tolerance, f"Delayed neutron group {group_idx} decay constant", verbose):
             return False
@@ -94,16 +94,16 @@ def compare_precursor_group(precursor1: DelayedNeutronPrecursor, precursor2: Del
             return False
     
     # Compare energy grid
-    energy_values1 = [e.value for e in precursor1.energies]
-    energy_values2 = [e.value for e in precursor2.energies]
+    energy_values1 = [float(e) for e in precursor1.energies]
+    energy_values2 = [float(e) for e in precursor2.energies]
     
     if not compare_arrays(energy_values1, energy_values2, tolerance, 
                          f"Delayed neutron group {group_idx} energy grid", verbose):
         return False
     
     # Compare probabilities
-    prob_values1 = [p.value for p in precursor1.probabilities]
-    prob_values2 = [p.value for p in precursor2.probabilities]
+    prob_values1 = [float(p) for p in precursor1.probabilities]
+    prob_values2 = [float(p) for p in precursor2.probabilities]
     
     if not compare_arrays(prob_values1, prob_values2, tolerance, 
                          f"Delayed neutron group {group_idx} probabilities", verbose):

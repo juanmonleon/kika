@@ -31,7 +31,7 @@ def read_fission_xs_block(ace: Ace, debug=False) -> Optional[FissionCrossSection
     fission_xs.has_data = False
     
     # Check if we have the necessary data
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping FIS block: required data missing")
         return fission_xs
@@ -58,7 +58,7 @@ def read_fission_xs_block(ace: Ace, debug=False) -> Optional[FissionCrossSection
         logger.debug(f"FIS block starts at index {fis_idx} (FORTRAN 1-indexed)")
     
     # Read the energy grid index (IE)
-    energy_grid_index = int(ace.xss_data[fis_idx].value)
+    energy_grid_index = int(ace.xss_data[fis_idx])
     
     if debug:
         logger.debug(f"Energy grid index (IE): {energy_grid_index}")
@@ -69,7 +69,7 @@ def read_fission_xs_block(ace: Ace, debug=False) -> Optional[FissionCrossSection
             logger.debug(f"ERROR: Not enough data to read number of entries")
         return fission_xs
     
-    num_entries = int(ace.xss_data[fis_idx + 1].value)
+    num_entries = int(ace.xss_data[fis_idx + 1])
     
     if debug:
         logger.debug(f"Number of cross section entries (NE): {num_entries}")
@@ -85,7 +85,7 @@ def read_fission_xs_block(ace: Ace, debug=False) -> Optional[FissionCrossSection
             logger.debug(f"ERROR: Not enough data for cross sections: need {num_entries}, available {len(ace.xss_data) - (fis_idx + 2)}")
         return fission_xs
     
-    # Read the cross section values - store the XssEntry objects
+    # Read the cross section values (view of xss_data)
     cross_sections = ace.xss_data[fis_idx + 2:fis_idx + 2 + num_entries]
     
     # Store the data

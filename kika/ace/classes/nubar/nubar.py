@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Union
-from kika.ace.classes.xss import XssEntry
 from kika._utils import create_repr_section
 from kika.ace.classes.nubar.nubar_repr import nudata_repr, nucontainer_repr
 import pandas as pd
@@ -9,7 +8,7 @@ import numpy as np
 @dataclass
 class NuPolynomial:
     """Polynomial form of nubar data."""
-    coefficients: List[XssEntry] = field(default_factory=list)
+    coefficients: np.ndarray = field(default_factory=lambda: np.empty(0))  # view of xss_data
     
     def evaluate(self, energy: float) -> float:
         """Evaluate the polynomial at the given energy.
@@ -21,15 +20,15 @@ class NuPolynomial:
         """
         result = 0.0
         for i, coef in enumerate(self.coefficients):
-            result += coef.value * (energy ** i)
+            result += coef * (energy ** i)
         return result
 
 @dataclass
 class NuTabulated:
     """Tabulated form of nubar data."""
     interpolation_regions: List[Tuple[int, int]] = field(default_factory=list)  # (NBT, INT) pairs
-    energies: List[XssEntry] = field(default_factory=list)  # Energy points
-    nubar_values: List[XssEntry] = field(default_factory=list)  # nubar values
+    energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Energy points (view of xss_data)
+    nubar_values: np.ndarray = field(default_factory=lambda: np.empty(0))  # nubar values (view of xss_data)
     
     def evaluate(self, energy: float) -> float:
         """Evaluate the tabulated data at the given energy using interpolation.
@@ -40,22 +39,22 @@ class NuTabulated:
         :rtype: float
         """
         # Simple linear interpolation for now
-        if energy <= self.energies[0].value:
-            return self.nubar_values[0].value
+        if energy <= self.energies[0]:
+            return self.nubar_values[0]
         
-        if energy >= self.energies[-1].value:
-            return self.nubar_values[-1].value
+        if energy >= self.energies[-1]:
+            return self.nubar_values[-1]
         
         # Find the bracketing energy points
         for i in range(len(self.energies) - 1):
-            if self.energies[i].value <= energy <= self.energies[i + 1].value:
+            if self.energies[i] <= energy <= self.energies[i + 1]:
                 # Linear interpolation
-                x1, x2 = self.energies[i].value, self.energies[i + 1].value
-                y1, y2 = self.nubar_values[i].value, self.nubar_values[i + 1].value
+                x1, x2 = self.energies[i], self.energies[i + 1]
+                y1, y2 = self.nubar_values[i], self.nubar_values[i + 1]
                 return y1 + (y2 - y1) * (energy - x1) / (x2 - x1)
         
         # Shouldn't reach here, but just in case
-        return self.nubar_values[-1].value
+        return self.nubar_values[-1]
 
 @dataclass
 class NuData:
@@ -75,7 +74,7 @@ class NuData:
         :rtype: list of float or None
         """
         if self.format == "tabulated" and self.tabulated is not None:
-            energy_points = [e.value for e in self.tabulated.energies]
+            energy_points = [float(e) for e in self.tabulated.energies]
             return energy_points
         return None
     
@@ -97,8 +96,8 @@ class NuData:
             
         elif self.format == "tabulated" and self.tabulated is not None:
             # For tabulated, use the existing energy grid
-            energy_points = [e.value for e in self.tabulated.energies]  
-            nubar_values = [n.value for n in self.tabulated.nubar_values]  
+            energy_points = [float(e) for e in self.tabulated.energies]  
+            nubar_values = [float(n) for n in self.tabulated.nubar_values]  
         else:
             return pd.DataFrame(columns=['energy', 'nubar'])
         

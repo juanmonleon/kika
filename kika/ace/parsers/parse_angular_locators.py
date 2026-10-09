@@ -153,14 +153,14 @@ def read_land_block(ace: Ace, land_idx: int, num_reactions: int, debug=False) ->
         raise ValueError(f"LAND block truncated: need {total_entries} entries, but only {len(ace.xss_data) - land_idx} available")
     
     # LOCB1 - Angular distribution for elastic scattering (first element)
-    elastic_locator = ace.xss_data[land_idx]
+    elastic_locator = int(ace.xss_data[land_idx])
     ace.angular_locators.elastic_scattering = elastic_locator
     
     if debug:
-        logger.debug(f"Elastic scattering locator (LOCB1): {elastic_locator.value}")
+        logger.debug(f"Elastic scattering locator (LOCB1): {elastic_locator}")
         # Check if LOCB₁ = 1 as per documentation
-        if int(elastic_locator.value) != 1:
-            logger.warning(f"Elastic scattering locator value is {elastic_locator.value}, but documentation indicates it should be 1")
+        if elastic_locator != 1:
+            logger.warning(f"Elastic scattering locator value is {elastic_locator}, but documentation indicates it should be 1")
     
     # LOCB2 through LOCB_NMT - Angular distributions for other neutron reactions
     ace.angular_locators.incident_neutron = ace.xss_data[land_idx + 1:land_idx + 1 + num_reactions]
@@ -170,7 +170,7 @@ def read_land_block(ace: Ace, land_idx: int, num_reactions: int, debug=False) ->
         # Display first 3 LOCB values for verification
         display_count = min(3, len(ace.angular_locators.incident_neutron))
         if display_count > 0:
-            locb_values = [int(ace.angular_locators.incident_neutron[i].value) for i in range(display_count)]
+            locb_values = [int(ace.angular_locators.incident_neutron[i]) for i in range(display_count)]
             logger.debug(f"First {display_count} LOCB values: {locb_values}")
         logger.debug(f"These locators are relative to JXS(9)={ace.header.jxs_array[9]}")
 
@@ -232,7 +232,7 @@ def read_landp_block(ace: Ace, landp_idx: int, num_photon_reactions: int, debug=
         # Display first 3 LOCB values for verification
         display_count = min(3, len(ace.angular_locators.photon_production))
         if display_count > 0:
-            locb_values = [int(ace.angular_locators.photon_production[i].value) for i in range(display_count)]
+            locb_values = [int(ace.angular_locators.photon_production[i]) for i in range(display_count)]
             logger.debug(f"First {display_count} LOCB values: {locb_values}")
 
 
@@ -308,7 +308,7 @@ def read_landh_block(ace: Ace, jxs31_idx: int, jxs32_idx: int, num_particle_type
                 logger.debug(f"  ERROR: MT count index out of bounds: {mt_count_idx} >= {len(ace.xss_data)}")
             raise ValueError(f"MT count index out of bounds for particle type {i}: {mt_count_idx} >= {len(ace.xss_data)}")
         
-        num_mt_values = int(ace.xss_data[mt_count_idx].value)
+        num_mt_values = int(ace.xss_data[mt_count_idx])
         
         if debug:
             logger.debug(f"  Number of MT values: {num_mt_values}")
@@ -327,7 +327,7 @@ def read_landh_block(ace: Ace, jxs31_idx: int, jxs32_idx: int, num_particle_type
             raise ValueError(f"LANDH pointer index out of bounds for particle type {i}: {landh_pointer_idx} >= {len(ace.xss_data)}")
         
         # Get the actual pointer value (to the LOCB values)
-        landh_locb_ptr = int(ace.xss_data[landh_pointer_idx].value)
+        landh_locb_ptr = int(ace.xss_data[landh_pointer_idx])
         
         if debug:
             logger.debug(f"  LANDH pointer value: {landh_locb_ptr} → Location of LOCB values for particle type {i}")
@@ -338,7 +338,7 @@ def read_landh_block(ace: Ace, jxs31_idx: int, jxs32_idx: int, num_particle_type
         andh_pointer_idx = jxs32_idx + andh_offset
         
         if debug and andh_pointer_idx < len(ace.xss_data):
-            andh_ptr = int(ace.xss_data[andh_pointer_idx].value)
+            andh_ptr = int(ace.xss_data[andh_pointer_idx])
             logger.debug(f"  ANDH pointer index: JXS(32) + 10*(i-1) + 6 = {jxs32_idx} + {andh_offset} = {andh_pointer_idx}")
             logger.debug(f"  ANDH pointer value: {andh_ptr} → Base for angular distribution data")
         
@@ -357,11 +357,11 @@ def read_landh_block(ace: Ace, jxs31_idx: int, jxs32_idx: int, num_particle_type
             # Display first 3 LOCB values for verification
             display_count = min(3, len(locb_values))
             if display_count > 0:
-                locb_sample = [int(locb_values[j].value) for j in range(display_count)]
+                locb_sample = [int(locb_values[j]) for j in range(display_count)]
                 logger.debug(f"  First {display_count} LOCB values: {locb_sample}")
                 
                 # Look for suspicious LOCB values (extremely small positive values might be errors)
-                small_positive_locbs = [int(v.value) for v in locb_values if 0 < int(v.value) <= 5]
+                small_positive_locbs = [int(v) for v in locb_values if 0 < int(v) <= 5]
                 if small_positive_locbs:
                     logger.warning(f"  WARNING: Found {len(small_positive_locbs)} suspiciously small positive LOCB values: {small_positive_locbs}")
                     logger.warning("  Small positive LOCB values may indicate data integrity issues")

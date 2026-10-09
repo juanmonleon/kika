@@ -1,6 +1,6 @@
 import logging
 from kika.ace.classes.ace import Ace
-from kika.ace.classes.xss import XssEntry
+import numpy as np
 from kika.ace.classes.header import Header
 from kika.ace.parsers.parse_esz import read_esz_block
 from kika.ace.parsers import read_header, read_nubar_data
@@ -47,7 +47,6 @@ def read_ace(filename, debug=False):
     ace : Ace
         An Ace object containing the parsed data
     """
-    debug1 = True
 
     if debug:
         logger.debug(f"Reading ACE file: {filename}")
@@ -73,7 +72,7 @@ def read_ace(filename, debug=False):
     line_idx = read_header(ace.header, lines, debug=debug)
     
     # Read the XSS array - essential data needed for all parsers
-    ace.xss_data = read_xss(lines[line_idx:])
+    ace.xss_data = read_xss(lines[line_idx:], ace.header.nxs_array[1])
     
     # Eagerly load all components except energy distribution data
     
@@ -147,40 +146,70 @@ def read_ace(filename, debug=False):
     
     return ace
 
-def read_xss(lines):
+#: Lines of XSS parsed per chunk (4 values each).
+_XSS_CHUNK_LINES = 65536
+
+
+def read_xss(lines, n_values=None):
     """
-    Read the XSS array from an ACE file and convert it to a list of XssEntry.
-    
-    The array uses 1-based indexing to match FORTRAN style indexing.
-    Index 0 contains a placeholder value (0) to facilitate 1-based indexing.
-    
+    Read the XSS array of an ACE table into a float64 numpy array.
+
+    The array uses 1-based indexing to match the FORTRAN ``XSS(i)`` of the ACE
+    manual: index 0 holds a 0.0 placeholder and ``xss[i]`` is ``XSS(i)``.
+    Blocks parsed from it are views of this array (see
+    :mod:`kika.ace.classes.xss`).
+
     Parameters
     ----------
-    lines : list
-        List of lines from the file containing the XSS array
-        
+    lines : list of str
+        The lines of the file after the header.
+    n_values : int, optional
+        ``NXS(1)``, the declared length of the XSS array. When given, only the
+        lines that hold it are read, and the count is checked.
+
     Returns
     -------
-    list
-        The XSS array as a list of XssEntry objects starting at index 1
+    numpy.ndarray
+        ``float64`` array of length ``n + 1``.
     """
-    xss_data = [0]  # Placeholder at index 0 for FORTRAN-style 1-based indexing
-    xss_index = 1  # Start at 1 for FORTRAN-style indexing
-    
+    if n_values:
+        lines = lines[:-(-n_values // 4)]  # 4 values per line, last one partial
+
+    # Whitespace split is ~4x faster than slicing 4E20 fields and agrees with it
+    # whenever adjacent fields are separated by a blank, which every E20.11 /
+    # I20 value is. A glued pair, or a token float() rejects, changes the count,
+    # and that falls back to the fixed-width reading.
+    # Parsed in chunks so the transient token strings stay bounded (a single
+    # split of a 5.8 M-value table holds ~350 MB of str objects at once).
+    try:
+        values = np.concatenate([np.empty(0)] + [
+            np.array(" ".join(lines[i:i + _XSS_CHUNK_LINES]).split(), dtype=np.float64)
+            for i in range(0, len(lines), _XSS_CHUNK_LINES)
+        ])
+    except ValueError:
+        values = None
+    if values is None or (n_values and values.size != n_values):
+        values = _read_xss_fixed_width(lines)
+    if n_values and values.size != n_values:
+        raise ValueError(
+            f"XSS array has {values.size} values, NXS(1) declares {n_values}"
+        )
+
+    xss = np.empty(values.size + 1, dtype=np.float64)
+    xss[0] = 0.0
+    xss[1:] = values
+    return xss
+
+
+def _read_xss_fixed_width(lines):
+    """4E20 field-by-field reading; skips blank and non-numeric fields."""
+    values = []
     for line in lines:
-        # Each line contains 4 numbers in 4E20.0 format
         for i in range(4):
-            start_idx = i * 20
-            if start_idx + 20 <= len(line):
-                value_str = line[start_idx:start_idx+20].strip()
-                if value_str:
-                    try:
-                        value = float(value_str)
-                        # Create XssEntry with the current index in the array
-                        xss_data.append(XssEntry(xss_index, value))
-                        xss_index += 1
-                    except ValueError:
-                        # Skip non-numeric entries
-                        pass
-    
-    return xss_data
+            field = line[i * 20:(i + 1) * 20].strip()
+            if field:
+                try:
+                    values.append(float(field))
+                except ValueError:
+                    pass
+    return np.array(values, dtype=np.float64)

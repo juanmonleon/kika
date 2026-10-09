@@ -41,8 +41,8 @@ def particle_production_cross_section_repr(self) -> str:
         width1=property_col_width, width2=value_col_width)
     
     # Add cross section range if data is available
-    if self.xs_values:
-        xs_float_values = [entry.value for entry in self.xs_values]
+    if len(self.xs_values) > 0:
+        xs_float_values = [float(entry) for entry in self.xs_values]
         min_xs = min(xs_float_values)
         max_xs = max(xs_float_values)
         info_table += "{:<{width1}} {:<{width2}}\n".format(
@@ -50,8 +50,8 @@ def particle_production_cross_section_repr(self) -> str:
             width1=property_col_width, width2=value_col_width)
     
     # Add heating number range if data is available
-    if self.heating_numbers:
-        heating_float_values = [entry.value for entry in self.heating_numbers]
+    if len(self.heating_numbers) > 0:
+        heating_float_values = [float(entry) for entry in self.heating_numbers]
         min_heat = min(heating_float_values)
         max_heat = max(heating_float_values)
         info_table += "{:<{width1}} {:<{width2}}\n".format(
@@ -142,8 +142,8 @@ def secondary_particle_cross_sections_repr(self) -> str:
             particle_info += f"Particle Type {idx}:\n"
             
             # Get energy range if possible
-            if data.num_energies > 0 and data.xs_values:
-                xs_float_values = [entry.value for entry in data.xs_values]
+            if data.num_energies > 0 and len(data.xs_values) > 0:
+                xs_float_values = [float(entry) for entry in data.xs_values]
                 min_xs = min(xs_float_values)
                 max_xs = max(xs_float_values)
                 particle_info += f"  Cross Section Range: {min_xs:.6e} to {max_xs:.6e} barns\n"

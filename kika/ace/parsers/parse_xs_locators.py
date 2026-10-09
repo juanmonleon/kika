@@ -51,7 +51,6 @@ def read_xs_locator_blocks(ace: Ace, debug=False):
                 logger.debug(f"LSIG block range: XSS[{lsig_idx}:{lsig_idx+num_reactions}]")
             
             if (lsig_idx + num_reactions <= len(ace.xss_data)):
-                # Store XssEntry objects directly
                 ace.xs_locators.incident_neutron = ace.xss_data[lsig_idx:lsig_idx + num_reactions]
                 
                 if debug:
@@ -76,7 +75,6 @@ def read_xs_locator_blocks(ace: Ace, debug=False):
                 logger.debug(f"LSIGP block range: XSS[{lsigp_idx}:{lsigp_idx+num_photon_reactions}]")
             
             if lsigp_idx + num_photon_reactions <= len(ace.xss_data):
-                # Store XssEntry objects directly
                 ace.xs_locators.photon_production = ace.xss_data[lsigp_idx:lsigp_idx + num_photon_reactions]
                 
                 if debug:
@@ -117,7 +115,7 @@ def read_xs_locator_blocks(ace: Ace, debug=False):
                     logger.debug(f"  ERROR: NMT index {nmt_idx} is out of bounds ({len(ace.xss_data)})")
                 continue
                 
-            nmt = int(ace.xss_data[nmt_idx].value)
+            nmt = int(ace.xss_data[nmt_idx])
             
             if debug:
                 logger.debug(f"  NMT = XSS[{nmt_idx}] = {nmt} → Number of MT reactions for this particle")
@@ -140,7 +138,7 @@ def read_xs_locator_blocks(ace: Ace, debug=False):
                     logger.debug(f"  ERROR: LSIGH pointer {lsigh_idx_ptr} is out of bounds ({len(ace.xss_data)})")
                 continue
                 
-            lsigh = int(ace.xss_data[lsigh_idx_ptr].value)
+            lsigh = int(ace.xss_data[lsigh_idx_ptr])
             
             if debug:
                 logger.debug(f"  LSIGH = XSS[{lsigh_idx_ptr}] = {lsigh} → 1-indexed location of XS locators")
@@ -156,7 +154,6 @@ def read_xs_locator_blocks(ace: Ace, debug=False):
                     logger.debug(f"  ERROR: LSIGH would read past end of XSS array: {lsigh+nmt} > {len(ace.xss_data)}")
                 continue
                 
-            # Store XssEntry objects directly
             xs_locators = ace.xss_data[lsigh:lsigh + nmt]
             ace.xs_locators.particle_production[i_python] = xs_locators
             

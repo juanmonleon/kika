@@ -21,7 +21,7 @@ def reaction_xs_repr(self):
     header += " " * ((header_width - len(header_text)) // 2) + header_text + "\n"
     header += "=" * header_width + "\n\n"
     
-    # Description of the reaction cross section - handle both XssEntry and int types for mt
+    # Description of the reaction cross section
     mt_value = self.mt if self.mt else 'Unknown'
     
     description = f"This object contains cross section data for reaction MT={mt_value}.\n\n"

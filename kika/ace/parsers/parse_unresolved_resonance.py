@@ -31,7 +31,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
     unr_data.has_data = False
     
     # Check if we have the necessary data
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping UNR block: required data missing")
         return unr_data
@@ -58,7 +58,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
         logger.debug(f"UNR block starts at index {unr_idx} (FORTRAN 1-indexed)")
     
     # Read the number of incident energies (N)
-    num_energies = int(ace.xss_data[unr_idx].value)
+    num_energies = int(ace.xss_data[unr_idx])
     
     if debug:
         logger.debug(f"Number of incident energies (N): {num_energies}")
@@ -74,7 +74,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
             logger.debug(f"ERROR: Not enough data to read table length")
         return unr_data
     
-    table_length = int(ace.xss_data[unr_idx + 1].value)
+    table_length = int(ace.xss_data[unr_idx + 1])
     
     if debug:
         logger.debug(f"Table length (M): {table_length}")
@@ -90,7 +90,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
             logger.debug(f"ERROR: Not enough data to read interpolation parameter")
         return unr_data
     
-    interpolation = int(ace.xss_data[unr_idx + 2].value)
+    interpolation = int(ace.xss_data[unr_idx + 2])
     
     if debug:
         logger.debug(f"Interpolation parameter (INT): {interpolation} → {interpolation==2 and 'linear-linear' or interpolation==5 and 'log-log' or 'unknown'}")
@@ -101,7 +101,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
             logger.debug(f"ERROR: Not enough data to read inelastic flag")
         return unr_data
     
-    inelastic_flag = int(ace.xss_data[unr_idx + 3].value)
+    inelastic_flag = int(ace.xss_data[unr_idx + 3])
     
     if debug:
         if inelastic_flag < 0:
@@ -117,7 +117,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
             logger.debug(f"ERROR: Not enough data to read absorption flag")
         return unr_data
     
-    other_absorption_flag = int(ace.xss_data[unr_idx + 4].value)
+    other_absorption_flag = int(ace.xss_data[unr_idx + 4])
     
     if debug:
         if other_absorption_flag < 0:
@@ -133,7 +133,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
             logger.debug(f"ERROR: Not enough data to read factors flag")
         return unr_data
     
-    factors_flag = int(ace.xss_data[unr_idx + 5].value)
+    factors_flag = int(ace.xss_data[unr_idx + 5])
     
     if debug:
         if factors_flag == 0:
@@ -149,7 +149,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
             logger.debug(f"ERROR: Not enough data for energy grid")
         return unr_data
     
-    # Read the energy grid - store the XssEntry objects
+    # Read the energy grid (view of xss_data)
     energies = ace.xss_data[unr_idx + 6:unr_idx + 6 + num_energies]
     
     if debug:
@@ -187,7 +187,7 @@ def read_unresolved_resonance_block(ace: Ace, debug=False) -> Optional[Unresolve
     
     # Loop over each energy point
     for i in range(num_energies):
-        energy_value = energies[i].value
+        energy_value = float(energies[i])
         table = ProbabilityTable(energy=energy_value)
         
         if debug and i == 0:

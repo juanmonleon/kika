@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import numpy as np
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika._utils import create_repr_section
 
@@ -18,7 +17,7 @@ class TabularEnergyDistribution(EnergyDistribution):
     law: int = 1
     interpolation: int = 0  # Interpolation scheme (1=histogram, 2=lin-lin)
     n_incident_energies: int = 0  # Number of incident energies
-    incident_energies: List[XssEntry] = field(default_factory=list)  # Incident energy values
+    incident_energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Incident energy values (view of xss_data)
     
     # For each incident energy, there's a tabular distribution of outgoing energies
     # Each distribution has a number of points, an interpolation scheme, and energy-pdf pairs
@@ -42,7 +41,7 @@ class TabularEnergyDistribution(EnergyDistribution):
             Tuple of (energies, probabilities)
         """
         # Extract incident energy values
-        incident_energy_values = [e.value for e in self.incident_energies]
+        incident_energy_values = [float(e) for e in self.incident_energies]
         
         # If energy is outside the tabulated range or we don't have enough data, return empty lists
         if not incident_energy_values or not self.distribution_data:
@@ -50,11 +49,11 @@ class TabularEnergyDistribution(EnergyDistribution):
             
         if incident_energy <= incident_energy_values[0]:
             dist = self.distribution_data[0]
-            return [e.value for e in dist['e_out']], [p.value for p in dist['pdf']]
+            return [float(e) for e in dist['e_out']], [float(p) for p in dist['pdf']]
             
         if incident_energy >= incident_energy_values[-1]:
             dist = self.distribution_data[-1]
-            return [e.value for e in dist['e_out']], [p.value for p in dist['pdf']]
+            return [float(e) for e in dist['e_out']], [float(p) for p in dist['pdf']]
         
         # Find the energy interval containing the incident energy
         idx = np.searchsorted(incident_energy_values, incident_energy) - 1
@@ -68,11 +67,10 @@ class TabularEnergyDistribution(EnergyDistribution):
         energy_high = incident_energy_values[idx + 1]
         factor = (incident_energy - energy_low) / (energy_high - energy_low)
         
-        # Extract values from XssEntry objects
-        e_out_low = [e.value for e in dist_low['e_out']]
-        pdf_low = [p.value for p in dist_low['pdf']]
-        e_out_high = [e.value for e in dist_high['e_out']]
-        pdf_high = [p.value for p in dist_high['pdf']]
+        e_out_low = [float(e) for e in dist_low['e_out']]
+        pdf_low = [float(p) for p in dist_low['pdf']]
+        e_out_high = [float(e) for e in dist_high['e_out']]
+        pdf_high = [float(p) for p in dist_high['pdf']]
         
         # For simplicity, we'll use the energy grid from the lower distribution
         # and interpolate the PDF values 
@@ -123,10 +121,10 @@ class TabularEnergyDistribution(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # Show energy ranges if available
-        if self.incident_energies:
+        if len(self.incident_energies) > 0:
             try:
-                min_energy = self.incident_energies[0].value if hasattr(self.incident_energies[0], 'value') else self.incident_energies[0]
-                max_energy = self.incident_energies[-1].value if hasattr(self.incident_energies[-1], 'value') else self.incident_energies[-1]
+                min_energy = self.incident_energies[0]
+                max_energy = self.incident_energies[-1]
                 properties += "{:<{width1}} {:<{width2}}\n".format(
                     "Incident Energy Range", f"{min_energy:.4e} - {max_energy:.4e} MeV",
                     width1=property_col_width, width2=value_col_width)
@@ -234,7 +232,7 @@ class ContinuousTabularDistribution(EnergyDistribution):
             Dictionary containing the interpolated distribution data
         """
         # Find the bracketing incident energies
-        if not self.incident_energies or incident_energy <= self.incident_energies[0]:
+        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
             # Below the minimum incident energy, return the first distribution
             return self.get_distribution(0) if self.distributions else None
         
@@ -334,7 +332,7 @@ class ContinuousTabularDistribution(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # Show energy ranges if available
-        if self.incident_energies and len(self.incident_energies) >= 2:
+        if len(self.incident_energies) >= 2:
             properties += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", f"{self.incident_energies[0]:.4e} - {self.incident_energies[-1]:.4e} MeV",
                 width1=property_col_width, width2=value_col_width)

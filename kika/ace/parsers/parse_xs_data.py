@@ -1,4 +1,6 @@
 import logging
+
+import numpy as np
 from kika.ace.classes.cross_section.cross_section_data import CrossSectionData, ReactionCrossSection
 
 # Setup logger
@@ -48,7 +50,7 @@ def read_xs_data_block(ace, debug=False):
         ace.cross_section = CrossSectionData()
     
     # Store energy grid for convenience
-    if ace.esz_block and ace.esz_block.energies:
+    if ace.esz_block and len(ace.esz_block.energies):
         ace.cross_section.set_energy_grid(ace.esz_block.energies)
     
     # Get the starting index for SIG block
@@ -84,8 +86,8 @@ def read_xs_data_block(ace, debug=False):
     
     # Process each reaction
     for i, (mt_entry, locator_entry) in enumerate(zip(mt_entries, locator_entries)):
-        mt_value = int(mt_entry.value)
-        locator_value = int(locator_entry.value)
+        mt_value = int(mt_entry)
+        locator_value = int(locator_entry)
         
         # Calculate absolute index - FIX: Subtract 1 to match documentation
         # According to Table 16: LXS + LOCA_i - 1
@@ -103,8 +105,8 @@ def read_xs_data_block(ace, debug=False):
             
         try:
             # Read energy grid index and number of energies
-            energy_idx = int(ace.xss_data[abs_idx].value)
-            num_energies = int(ace.xss_data[abs_idx + 1].value)
+            energy_idx = int(ace.xss_data[abs_idx])
+            num_energies = int(ace.xss_data[abs_idx + 1])
             
             if debug:
                 logger.debug(f"  Energy grid index from ACE: {energy_idx} (1-indexed FORTRAN style)")
@@ -148,17 +150,16 @@ def read_xs_data_block(ace, debug=False):
                 logger.debug(f"  XS data range: XSS[{xs_start}:{xs_end}]")
             
             if xs_end <= len(ace.xss_data):
-                # Store references to the original XssEntry objects instead of just their values
+                # A view: perturbing the reaction writes the XSS array
                 xs_entries = ace.xss_data[xs_start:xs_end]
                 
                 # Get energy entries for this reaction
-                if ace.esz_block and ace.esz_block.energies:
+                if ace.esz_block and len(ace.esz_block.energies):
                     end_energy_idx = min(python_energy_idx + num_energies, len(ace.esz_block.energies))
                     energy_entries = ace.esz_block.energies[python_energy_idx:end_energy_idx]
                 else:
-                    energy_entries = []
+                    energy_entries = np.empty(0)
                 
-                # Create and store ReactionCrossSection with original XssEntry objects
                 reaction_xs = ReactionCrossSection(
                     mt=mt_value,
                     energy_idx=python_energy_idx,

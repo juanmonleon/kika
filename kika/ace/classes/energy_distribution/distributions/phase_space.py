@@ -117,7 +117,7 @@ class NBodyPhaseSpaceDistribution(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # Show ξ grid range if available
-        if self.xi_grid:
+        if len(self.xi_grid) > 0:
             xi_range = f"{min(self.xi_grid):.6g} - {max(self.xi_grid):.6g}"
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "ξ Grid Range", xi_range,

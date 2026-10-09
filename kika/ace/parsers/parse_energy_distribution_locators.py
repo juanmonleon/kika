@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
+import numpy as np
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.locators import EnergyDistributionLocators
-from kika.ace.classes.xss import XssEntry
 import logging
 
 # Setup logger
@@ -41,7 +41,7 @@ def read_energy_locator_blocks(ace: Ace, debug: bool = False) -> EnergyDistribut
     result = EnergyDistributionLocators()
     
     # Check if we have the necessary base data structures
-    if not ace.header or not ace.header.jxs_array or not ace.header.nxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or not ace.header.nxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping energy distribution locator blocks: required data missing")
         return result
@@ -115,7 +115,7 @@ def read_energy_locator_blocks(ace: Ace, debug: bool = False) -> EnergyDistribut
     return result
 
 
-def read_ldlw_block(ace: Ace, jxs10: int, num_reactions: int, debug: bool = False) -> List[XssEntry]:
+def read_ldlw_block(ace: Ace, jxs10: int, num_reactions: int, debug: bool = False) -> np.ndarray:
     """
     Read the LDLW block for incident neutron reaction energy distribution locators.
     
@@ -135,7 +135,7 @@ def read_ldlw_block(ace: Ace, jxs10: int, num_reactions: int, debug: bool = Fals
         
     Returns
     -------
-    List[XssEntry]
+    numpy.ndarray
         List of energy distribution locators for incident neutron reactions
     """
     if jxs10 <= 0:
@@ -154,27 +154,27 @@ def read_ldlw_block(ace: Ace, jxs10: int, num_reactions: int, debug: bool = Fals
             logger.debug(f"LDLW block truncated: need {num_reactions} entries, but only {len(ace.xss_data) - jxs10} available")
         return []
     
-    # Read the energy distribution locators - store XssEntry objects directly
+    # Read the energy distribution locators - a view of xss_data
     locators = ace.xss_data[jxs10:jxs10 + num_reactions]
     
     if debug:
         logger.debug(f"Successfully read {len(locators)} incident neutron energy distribution locators")
         # Print the first few LOCC values to verify
         sample_size = min(3, len(locators))
-        locc_values = [int(locators[i].value) for i in range(sample_size)]
+        locc_values = [int(locators[i]) for i in range(sample_size)]
         logger.debug(f"First {sample_size} LDLW LOCC values: {locc_values}")
-        logger.debug(f"First {sample_size} LDLW indices: {[locators[i].index for i in range(sample_size)]}")
+        logger.debug(f"First {sample_size} LDLW indices: {[jxs10 + i for i in range(sample_size)]}")
         
-        if locators:
+        if len(locators) > 0:
             # Check if locators are monotonically increasing
-            is_monotonic = all(locators[i].value <= locators[i+1].value for i in range(len(locators)-1))
+            is_monotonic = all(locators[i] <= locators[i+1] for i in range(len(locators)-1))
             logger.debug(f"Locators are {'monotonically increasing' if is_monotonic else 'NOT monotonically increasing'}")
             logger.debug(f"Note: These locators are relative to JXS(19) = {ace.header.jxs_array[19]}")
     
     return locators
 
 
-def read_ldlwp_block(ace: Ace, jxs18: int, num_photon_reactions: int, debug: bool = False) -> List[XssEntry]:
+def read_ldlwp_block(ace: Ace, jxs18: int, num_photon_reactions: int, debug: bool = False) -> np.ndarray:
     """
     Read the LDLWP block for photon production energy distribution locators.
     
@@ -195,7 +195,7 @@ def read_ldlwp_block(ace: Ace, jxs18: int, num_photon_reactions: int, debug: boo
         
     Returns
     -------
-    List[XssEntry]
+    numpy.ndarray
         List of energy distribution locators for photon production
     """
     if jxs18 <= 0:
@@ -214,7 +214,7 @@ def read_ldlwp_block(ace: Ace, jxs18: int, num_photon_reactions: int, debug: boo
             logger.debug(f"LDLWP block truncated: need {num_photon_reactions} entries, but only {len(ace.xss_data) - jxs18} available")
         return []
     
-    # Read the photon production energy distribution locators - store XssEntry objects directly
+    # Read the photon production energy distribution locators - a view of xss_data
     locators = ace.xss_data[jxs18:jxs18 + num_photon_reactions]
     
     if debug:
@@ -222,20 +222,20 @@ def read_ldlwp_block(ace: Ace, jxs18: int, num_photon_reactions: int, debug: boo
         # Print the first few LOCC values to verify
         sample_size = min(3, len(locators))
         if sample_size > 0:
-            locc_values = [int(locators[i].value) for i in range(sample_size)]
+            locc_values = [int(locators[i]) for i in range(sample_size)]
             logger.debug(f"First {sample_size} LDLWP LOCC values: {locc_values}")
-            logger.debug(f"First {sample_size} LDLWP indices: {[locators[i].index for i in range(sample_size)]}")
+            logger.debug(f"First {sample_size} LDLWP indices: {[jxs18 + i for i in range(sample_size)]}")
         
-        if locators:
+        if len(locators) > 0:
             # Check if locators are monotonically increasing
-            is_monotonic = all(locators[i].value <= locators[i+1].value for i in range(len(locators)-1))
+            is_monotonic = all(locators[i] <= locators[i+1] for i in range(len(locators)-1))
             logger.debug(f"Locators are {'monotonically increasing' if is_monotonic else 'NOT monotonically increasing'}")
             logger.debug(f"Note: These locators are relative to JXS(19) = {ace.header.jxs_array[19]}")
     
     return locators
 
 
-def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool = False) -> List[List[XssEntry]]:
+def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool = False) -> List[np.ndarray]:
     """
     Read the LDLWH block for other particle production energy distribution locators.
     
@@ -257,7 +257,7 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
         
     Returns
     -------
-    List[List[XssEntry]]
+    List[numpy.ndarray]
         List of lists of energy distribution locators for each particle type
     """
     if jxs31 <= 0:
@@ -300,7 +300,7 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
             particle_production_locators.append([])
             continue
         
-        num_mt_values = int(ace.xss_data[mt_count_idx].value)
+        num_mt_values = int(ace.xss_data[mt_count_idx])
         
         if debug:
             logger.debug(f"Particle type {i} has {num_mt_values} MT values")
@@ -315,7 +315,7 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
             continue
         
         # Get the actual pointer value
-        ldlwh_pointer = int(ace.xss_data[ldlwh_pointer_idx].value)
+        ldlwh_pointer = int(ace.xss_data[ldlwh_pointer_idx])
         
         if debug:
             logger.debug(f"LDLWH pointer for particle type {i}: {ldlwh_pointer}")
@@ -334,7 +334,7 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
             particle_production_locators.append([])
             continue
         
-        # 6. Read the locators for this particle type. Store XssEntry objects directly
+        # 6. Read the locators for this particle type. A view of xss_data
         locators = ace.xss_data[ldlwh_pointer:ldlwh_pointer + num_mt_values]
         particle_production_locators.append(locators)
         
@@ -343,25 +343,25 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
             # Print the first few LOCC values to verify
             sample_size = min(3, len(locators))
             if sample_size > 0:
-                locc_values = [int(locators[j].value) for j in range(sample_size)]
+                locc_values = [int(locators[j]) for j in range(sample_size)]
                 logger.debug(f"First {sample_size} LDLWH LOCC values for particle {i}: {locc_values}")
-                logger.debug(f"First {sample_size} LDLWH indices for particle {i}: {[locators[j].index for j in range(sample_size)]}")
+                logger.debug(f"First {sample_size} LDLWH indices for particle {i}: {[ldlwh_pointer + j for j in range(sample_size)]}")
             
-            if locators:
+            if len(locators) > 0:
                 # Check if locators are monotonically increasing
-                is_monotonic = all(locators[j].value <= locators[j+1].value for j in range(len(locators)-1))
+                is_monotonic = all(locators[j] <= locators[j+1] for j in range(len(locators)-1))
                 logger.debug(f"Locators are {'monotonically increasing' if is_monotonic else 'NOT monotonically increasing'}")
                 
                 # Get the JED value - these locators are relative to XSS(JXS(32) + 10*(i-1) + 8)
                 jed_idx = jxs32 + 10 * (i - 1) + 8
                 if jed_idx < len(ace.xss_data):
-                    jed = int(ace.xss_data[jed_idx].value)
+                    jed = int(ace.xss_data[jed_idx])
                     logger.debug(f"Note: These locators are relative to JED = {jed}")
     
     return particle_production_locators
 
 
-def read_dnedl_block(ace: Ace, jxs26: int, num_precursors: int, debug: bool = False) -> List[XssEntry]:
+def read_dnedl_block(ace: Ace, jxs26: int, num_precursors: int, debug: bool = False) -> np.ndarray:
     """
     Read the DNEDL block for delayed neutron energy distribution locators.
     
@@ -381,7 +381,7 @@ def read_dnedl_block(ace: Ace, jxs26: int, num_precursors: int, debug: bool = Fa
         
     Returns
     -------
-    List[XssEntry]
+    numpy.ndarray
         List of energy distribution locators for delayed neutron groups
     """
     if jxs26 <= 0:
@@ -400,7 +400,7 @@ def read_dnedl_block(ace: Ace, jxs26: int, num_precursors: int, debug: bool = Fa
             logger.debug(f"DNEDL block truncated: need {num_precursors} entries, but only {len(ace.xss_data) - jxs26} available")
         return []
     
-    # Read the delayed neutron energy distribution locators - store XssEntry objects directly
+    # Read the delayed neutron energy distribution locators - a view of xss_data
     locators = ace.xss_data[jxs26:jxs26 + num_precursors]
     
     if debug:
@@ -408,13 +408,13 @@ def read_dnedl_block(ace: Ace, jxs26: int, num_precursors: int, debug: bool = Fa
         # Print the first few LOCC values to verify
         sample_size = min(3, len(locators))
         if sample_size > 0:
-            locc_values = [int(locators[i].value) for i in range(sample_size)]
+            locc_values = [int(locators[i]) for i in range(sample_size)]
             logger.debug(f"First {sample_size} DNEDL LOCC values: {locc_values}")
-            logger.debug(f"First {sample_size} DNEDL indices: {[locators[i].index for i in range(sample_size)]}")
+            logger.debug(f"First {sample_size} DNEDL indices: {[jxs26 + i for i in range(sample_size)]}")
         
-        if locators:
+        if len(locators) > 0:
             # Check if locators are monotonically increasing
-            is_monotonic = all(locators[i].value <= locators[i+1].value for i in range(len(locators)-1))
+            is_monotonic = all(locators[i] <= locators[i+1] for i in range(len(locators)-1))
             logger.debug(f"Locators are {'monotonically increasing' if is_monotonic else 'NOT monotonically increasing'}")
     
     return locators

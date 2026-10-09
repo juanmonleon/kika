@@ -48,7 +48,7 @@ class MaxwellFissionSpectrum(EnergyDistribution):
         float
             The θ parameter value (temperature)
         """
-        if not self.incident_energies or len(self.incident_energies) == 0:
+        if len(self.incident_energies) == 0:
             return 0.0
             
         # If energy is outside the tabulated range, use the closest value
@@ -148,14 +148,14 @@ class MaxwellFissionSpectrum(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # If we have incident energies, show the range
-        if self.incident_energies:
+        if len(self.incident_energies) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", 
                 f"{min(self.incident_energies):.6g} - {max(self.incident_energies)::.6g} MeV", 
                 width1=property_col_width, width2=value_col_width)
         
         # If we have temperatures, show the range
-        if self.temperatures:
+        if len(self.temperatures) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Temperature Parameter Range", 
                 f"{min(self.temperatures):.6g} - {max(self.temperatures)::.6g} MeV", 

@@ -19,8 +19,8 @@ class ParticleProductionCrossSection:
     """
     energy_grid_index: int = 0  # Starting index in the energy grid
     num_energies: int = 0       # Number of energy points
-    xs_values: List[Any] = field(default_factory=list)  # Cross section values (as XssEntry objects)
-    heating_numbers: List[Any] = field(default_factory=list)  # Heating numbers (as XssEntry objects)
+    xs_values: np.ndarray = field(default_factory=lambda: np.empty(0))  # Cross section values (view of xss_data)
+    heating_numbers: np.ndarray = field(default_factory=lambda: np.empty(0))  # Heating numbers (view of xss_data)
     
     def get_xs_values(self) -> List[float]:
         """
@@ -31,7 +31,7 @@ class ParticleProductionCrossSection:
         List[float]
             The cross section values in barns
         """
-        return [entry.value for entry in self.xs_values]
+        return [float(entry) for entry in self.xs_values]
     
     def get_heating_values(self) -> List[float]:
         """
@@ -44,7 +44,7 @@ class ParticleProductionCrossSection:
         List[float]
             The heating number values
         """
-        return [entry.value for entry in self.heating_numbers]
+        return [float(entry) for entry in self.heating_numbers]
     
     def get_xs_at_energy(self, energy: float, energy_grid: List[float]) -> float:
         """

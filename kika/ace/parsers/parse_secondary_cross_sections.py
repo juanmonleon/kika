@@ -38,7 +38,7 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
     result = SecondaryParticleCrossSections()
     
     # Check if we have the necessary basic data structures
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping production cross sections: required base data structures missing")
         return result
@@ -119,10 +119,10 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
             continue
         
         # Read the energy grid index (IE)
-        ie = int(ace.xss_data[hpd_idx].value)
+        ie = int(ace.xss_data[hpd_idx])
         
         # Read the number of consecutive energies (N_E)
-        ne = int(ace.xss_data[hpd_idx + 1].value)
+        ne = int(ace.xss_data[hpd_idx + 1])
         
         if debug:
             logger.debug(f"Energy grid index: {ie}, Number of energy points: {ne}")
@@ -139,11 +139,11 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
             num_energies=ne
         )
         
-        # Read the cross section values - store XssEntry objects
-        particle_data.xs_values = [ace.xss_data[hpd_idx + 2 + i] for i in range(ne)]
+        # Read the cross section values (view of xss_data)
+        particle_data.xs_values = ace.xss_data[hpd_idx + 2:hpd_idx + 2 + ne]
         
-        # Read the heating numbers - store XssEntry objects
-        particle_data.heating_numbers = [ace.xss_data[hpd_idx + 2 + ne + i] for i in range(ne)]
+        # Read the heating numbers (view of xss_data)
+        particle_data.heating_numbers = ace.xss_data[hpd_idx + 2 + ne:hpd_idx + 2 + 2 * ne]
         
         # Add the data to the container
         result.particle_data[j] = particle_data

@@ -2,7 +2,6 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.angular_distribution.base import AngularDistribution
 from kika.ace.classes.angular_distribution.types import AngularDistributionType
 from kika._utils import create_repr_section
@@ -12,9 +11,9 @@ from kika._utils import create_repr_section
 class TabulatedAngularDistribution(AngularDistribution):
     """Angular distribution for tabulated scattering."""
     interpolation: List[int] = field(default_factory=list)  # Interpolation flag for each energy
-    _cosine_grid: List[List[XssEntry]] = field(default_factory=list)  # Cosine grid for each energy
-    _pdf: List[List[XssEntry]] = field(default_factory=list)  # PDF for each energy
-    _cdf: List[List[XssEntry]] = field(default_factory=list)  # CDF for each energy
+    _cosine_grid: List[np.ndarray] = field(default_factory=list)  # Cosine grid for each energy (views of xss_data)
+    _pdf: List[np.ndarray] = field(default_factory=list)  # PDF for each energy (views of xss_data)
+    _cdf: List[np.ndarray] = field(default_factory=list)  # CDF for each energy (views of xss_data)
     
     def __post_init__(self):
         super().__post_init__()
@@ -23,17 +22,17 @@ class TabulatedAngularDistribution(AngularDistribution):
     @property
     def cosine_grid(self) -> List[List[float]]:
         """Get cosine grid values as lists of floats."""
-        return [[c.value for c in cosine_list] for cosine_list in self._cosine_grid]
+        return [[float(c) for c in cosine_list] for cosine_list in self._cosine_grid]
     
     @property
     def pdf(self) -> List[List[float]]:
         """Get PDF values as lists of floats."""
-        return [[p.value for p in pdf_list] for pdf_list in self._pdf]
+        return [[float(p) for p in pdf_list] for pdf_list in self._pdf]
     
     @property
     def cdf(self) -> List[List[float]]:
         """Get CDF values as lists of floats."""
-        return [[c.value for c in cdf_list] for cdf_list in self._cdf]
+        return [[float(c) for c in cdf_list] for cdf_list in self._cdf]
     
     
     def to_dataframe(self, energy: float, num_points: int = 100, interpolate: bool = False) -> Optional[pd.DataFrame]:
@@ -57,7 +56,7 @@ class TabulatedAngularDistribution(AngularDistribution):
         """
             
         # If no energies in this distribution, return isotropic for all directions
-        if not self._energies:
+        if len(self._energies) == 0:
             # For specific energy, return isotropic distribution
             if interpolate:
                 cosines = np.linspace(-1, 1, num_points)
@@ -75,7 +74,7 @@ class TabulatedAngularDistribution(AngularDistribution):
                 })
         
         # If energy is outside our range, return uniform distribution
-        if energy < self._energies[0].value or energy > self._energies[-1].value:
+        if energy < self._energies[0] or energy > self._energies[-1]:
             if interpolate:
                 cosines = np.linspace(-1, 1, num_points)
                 return pd.DataFrame({
@@ -208,7 +207,7 @@ class TabulatedAngularDistribution(AngularDistribution):
         """
         header_width = 85
         header = "=" * header_width + "\n"
-        mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+        mt_value = int(self.mt)
         header += f"{'Tabulated Angular Distribution for MT=' + str(mt_value):^{header_width}}\n"
         header += "=" * header_width + "\n\n"
         

@@ -67,7 +67,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     result = PhotonYieldMultipliers()
     
     # Check if we have the necessary data
-    if not ace.header or not ace.header.nxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.nxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping YP block: required data missing")
         return result
@@ -99,7 +99,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     
     # Read NYP (number of MTs to follow)
     nyp_entry = ace.xss_data[ly]
-    nyp = int(nyp_entry.value)
+    nyp = int(nyp_entry)
     
     if debug:
         logger.debug(f"NYP = {nyp} → Number of yield multiplier MT numbers")
@@ -121,7 +121,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     
     for i in range(nyp):
         mt_entry = ace.xss_data[ly + 1 + i]  # Skip the first value (which is NYP)
-        mt = int(mt_entry.value)
+        mt = int(mt_entry)
         result.multiplier_mts.append(mt)
         
         if debug:
@@ -161,7 +161,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
     result = SecondaryParticleYieldMultipliers()
     
     # Check if we have the necessary data
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping YH block: required data missing")
         return result
@@ -239,7 +239,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         
         # Get the value at JED, which is LY
         ly_entry = ace.xss_data[jed_idx]
-        ly = int(ly_entry.value)
+        ly = int(ly_entry)
         
         if debug:
             logger.debug(f"  LY = {ly} → Location of yield multiplier data")
@@ -257,7 +257,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         
         # Read NYH (number of MTs to follow)
         nyh_entry = ace.xss_data[ly]
-        nyh = int(nyh_entry.value)
+        nyh = int(nyh_entry)
         
         if debug:
             logger.debug(f"  NYH = {nyh} → Number of yield multiplier MT numbers")
@@ -280,7 +280,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         particle_mts = []
         for j in range(nyh):
             mt_entry = ace.xss_data[ly + 1 + j]  # Skip the first value (which is NYH)
-            mt = int(mt_entry.value)
+            mt = int(mt_entry)
             particle_mts.append(mt)
             
             if debug:

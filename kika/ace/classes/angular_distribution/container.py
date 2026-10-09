@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Union, Tuple, Any
 import pandas as pd
 import numpy as np
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.angular_distribution.base import AngularDistribution
 from kika.ace.classes.angular_distribution.utils import (
     ErrorMessageDict,
@@ -99,15 +98,15 @@ def _get_xs_at_energy(ace, mt: int, energy: float) -> Optional[float]:
         return None
 
     # Handle standard reactions stored in esz_block
-    if mt == 1 and hasattr(ace, 'esz_block') and ace.esz_block and ace.esz_block.total_xs:
-        energies = [e.value for e in ace.esz_block.energies]
-        xs_values = [x.value for x in ace.esz_block.total_xs]
-    elif mt == 2 and hasattr(ace, 'esz_block') and ace.esz_block and ace.esz_block.elastic_xs:
-        energies = [e.value for e in ace.esz_block.energies]
-        xs_values = [x.value for x in ace.esz_block.elastic_xs]
-    elif mt == 101 and hasattr(ace, 'esz_block') and ace.esz_block and ace.esz_block.absorption_xs:
-        energies = [e.value for e in ace.esz_block.energies]
-        xs_values = [x.value for x in ace.esz_block.absorption_xs]
+    if mt == 1 and hasattr(ace, 'esz_block') and ace.esz_block and len(ace.esz_block.total_xs) > 0:
+        energies = ace.esz_block.energies.tolist()
+        xs_values = ace.esz_block.total_xs.tolist()
+    elif mt == 2 and hasattr(ace, 'esz_block') and ace.esz_block and len(ace.esz_block.elastic_xs) > 0:
+        energies = ace.esz_block.energies.tolist()
+        xs_values = ace.esz_block.elastic_xs.tolist()
+    elif mt == 101 and hasattr(ace, 'esz_block') and ace.esz_block and len(ace.esz_block.absorption_xs) > 0:
+        energies = ace.esz_block.energies.tolist()
+        xs_values = ace.esz_block.absorption_xs.tolist()
     elif hasattr(ace, 'cross_section') and ace.cross_section and mt in ace.cross_section.reaction:
         reaction = ace.cross_section.reaction[mt]
         energies = reaction.energies
@@ -224,10 +223,7 @@ class AngularDistributionContainer:
                     result[idx] = sorted(particle_data.keys_as_int())
                 else:
                     mt_keys = particle_data.keys()
-                    if mt_keys and isinstance(next(iter(mt_keys)), XssEntry):
-                        result[idx] = sorted([int(mt.value) for mt in mt_keys])
-                    else:
-                        result[idx] = sorted(list(mt_keys))
+                    result[idx] = sorted(int(mt) for mt in mt_keys)
             return result
             
         # If particle_idx is specified, return list for that particle
@@ -249,19 +245,10 @@ class AngularDistributionContainer:
         
         particle_data = self.particle_production[particle_idx]
         
-        # Extract the MT values from XssEntry objects before sorting
         if isinstance(particle_data, ErrorMessageDict):
             return sorted(particle_data.keys_as_int())
         else:
-            mt_keys = particle_data.keys()
-            
-            # Check if the keys are XssEntry objects or integers
-            if mt_keys and isinstance(next(iter(mt_keys)), XssEntry):
-                # If they are XssEntry objects, get their values first
-                return sorted([int(mt.value) for mt in mt_keys])
-            else:
-                # If they are already integers, sort them directly
-                return sorted(list(mt_keys))
+            return sorted(int(mt) for mt in particle_data.keys())
     
     def get_particle_production_info(self) -> Dict[int, Dict[str, Any]]:
         """
@@ -295,11 +282,7 @@ class AngularDistributionContainer:
             if isinstance(particle_data, ErrorMessageDict):
                 mt_numbers = sorted(particle_data.keys_as_int())
             else:
-                mt_keys = particle_data.keys()
-                if mt_keys and isinstance(next(iter(mt_keys)), XssEntry):
-                    mt_numbers = sorted([int(mt.value) for mt in mt_keys])
-                else:
-                    mt_numbers = sorted(list(mt_keys))
+                mt_numbers = sorted(int(mt) for mt in particle_data.keys())
             
             # Count distribution types
             distribution_types = {}
@@ -370,9 +353,9 @@ class AngularDistributionContainer:
             (cosine, values) arrays with folded angular distribution
         """
         # Get ACE energy bounds
-        if hasattr(ace, 'esz_block') and ace.esz_block and ace.esz_block.energies:
-            e_min = ace.esz_block.energies[0].value
-            e_max = ace.esz_block.energies[-1].value
+        if hasattr(ace, 'esz_block') and ace.esz_block and len(ace.esz_block.energies) > 0:
+            e_min = float(ace.esz_block.energies[0])
+            e_max = float(ace.esz_block.energies[-1])
         else:
             # Fallback: use a reasonable range
             e_min = 1e-11

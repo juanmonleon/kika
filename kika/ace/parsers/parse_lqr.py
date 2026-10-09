@@ -1,7 +1,6 @@
 import logging
 from typing import List, Optional
 from kika.ace.classes.q_values import QValues
-from kika.ace.classes.xss import XssEntry
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -52,7 +51,6 @@ def read_lqr_block(ace, debug=False):
                 logger.debug(f"LQR block range: XSS[{lqr_idx}:{lqr_idx+num_reactions}]")
             
             if (lqr_idx + num_reactions <= len(ace.xss_data)):
-                # Store the XssEntry objects directly
                 ace.q_values.q_values = ace.xss_data[lqr_idx:lqr_idx + num_reactions]
                 
                 if debug:

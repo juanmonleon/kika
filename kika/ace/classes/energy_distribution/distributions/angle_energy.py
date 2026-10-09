@@ -117,7 +117,7 @@ class TabulatedAngleEnergyDistribution(EnergyDistribution):
             Dictionary containing the interpolated distribution data
         """
         # Find the bracketing incident energies
-        if not self.incident_energies or incident_energy <= self.incident_energies[0]:
+        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
             # Below the minimum incident energy, return the first distribution
             return self.get_distribution(0) if self.distributions else None
         
@@ -219,9 +219,9 @@ class TabulatedAngleEnergyDistribution(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # Show energy ranges if available
-        if self.incident_energies and len(self.incident_energies) >= 2:
+        if len(self.incident_energies) >= 2:
             properties += "{:<{width1}} {:<{width2}}\n".format(
-                "Incident Energy Range", f"{self.incident_energies[0].value:.4e} - {self.incident_energies[-1].value:.4e} MeV",
+                "Incident Energy Range", f"{self.incident_energies[0]:.4e} - {self.incident_energies[-1]:.4e} MeV",
                 width1=property_col_width, width2=value_col_width)
         
         # Count distributions and angular tables
@@ -350,7 +350,7 @@ class LaboratoryAngleEnergyDistribution(EnergyDistribution):
             Dictionary containing the distribution data or None if not available
         """
         # Find the bracketing incident energies
-        if not self.incident_energies or incident_energy <= self.incident_energies[0]:
+        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
             # Below the minimum incident energy, return the first distribution
             return self.get_distribution(0)
         
@@ -410,7 +410,7 @@ class LaboratoryAngleEnergyDistribution(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # Show energy ranges if available
-        if self.incident_energies and len(self.incident_energies) >= 2:
+        if len(self.incident_energies) >= 2:
             properties += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", f"{self.incident_energies[0]:.4e} - {self.incident_energies[-1]:.4e} MeV",
                 width1=property_col_width, width2=value_col_width)

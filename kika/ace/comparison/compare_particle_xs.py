@@ -53,16 +53,16 @@ def compare_particle_production_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6
             return False
         
         # Compare cross section values
-        xs_values1 = [xs.value for xs in xs_data1.xs_values]
-        xs_values2 = [xs.value for xs in xs_data2.xs_values]
+        xs_values1 = [float(xs) for xs in xs_data1.xs_values]
+        xs_values2 = [float(xs) for xs in xs_data2.xs_values]
         
         if not compare_arrays(xs_values1, xs_values2, tolerance, 
                              f"Particle type {particle_idx} cross section values", verbose):
             return False
         
         # Compare heating numbers
-        heating1 = [h.value for h in xs_data1.heating_numbers]
-        heating2 = [h.value for h in xs_data2.heating_numbers]
+        heating1 = [float(h) for h in xs_data1.heating_numbers]
+        heating2 = [float(h) for h in xs_data2.heating_numbers]
         
         if not compare_arrays(heating1, heating2, tolerance, 
                              f"Particle type {particle_idx} heating numbers", verbose):

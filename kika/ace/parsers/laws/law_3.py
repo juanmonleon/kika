@@ -49,13 +49,13 @@ def parse_level_scattering(ace: Ace, base_dist: EnergyDistribution, idat_idx: in
     if idat_idx + 1 < len(ace.xss_data):
         # LDAT(1): (A + 1)/A|Q|
         aplusoaabsq_entry = ace.xss_data[idat_idx]
-        distribution.aplusoaabsq = aplusoaabsq_entry.value
+        distribution.aplusoaabsq = float(aplusoaabsq_entry)
         if debug:
             logger.debug(f"(A + 1)/A|Q| value: {distribution.aplusoaabsq}")
         
         # LDAT(2): (A / (A + 1))^2
         asquare_entry = ace.xss_data[idat_idx + 1]
-        distribution.asquare = asquare_entry.value
+        distribution.asquare = float(asquare_entry)
         if debug:
             logger.debug(f"(A / (A + 1))^2 value: {distribution.asquare}")
     else:

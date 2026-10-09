@@ -126,7 +126,7 @@ def ace_repr(self):
             name, status, width1=method_col_width, width2=desc_col_width)
     
     # Add note about XSS data
-    if self.xss_data and len(self.xss_data) > 0:
+    if self.xss_data is not None and len(self.xss_data) > 0:
         xss_note = f"Raw XSS array available via .xss_data ({len(self.xss_data)} elements)"
         summary += "-" * header_width + "\n"
         summary += xss_note + "\n"

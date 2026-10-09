@@ -82,7 +82,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
     
     # Read the number of interpolation regions (N_R) - LDAT(1)
     try:
-        distribution.n_interp_regions = int(ace.xss_data[idat_idx].value)
+        distribution.n_interp_regions = int(ace.xss_data[idat_idx])
         if debug:
             logger.debug(f"LDAT(1): N_R={distribution.n_interp_regions} (at index {idat_idx})")
     except (IndexError, AttributeError, ValueError) as e:
@@ -98,13 +98,13 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
         
         try:
             # Read NBT values - LDAT(2..1+N_R)
-            distribution.nbt = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+            distribution.nbt = [int(ace.xss_data[idx + i]) for i in range(n_r)]
             if debug:
                 logger.debug(f"LDAT(2..1+N_R): NBT values: {distribution.nbt} (at indices {idx}..{idx+n_r-1})")
             idx += n_r
             
             # Read INT values - LDAT(2+N_R..1+2*N_R)
-            distribution.interp = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+            distribution.interp = [int(ace.xss_data[idx + i]) for i in range(n_r)]
             if debug:
                 logger.debug(f"LDAT(2+N_R..1+2*N_R): INT values: {distribution.interp} (at indices {idx}..{idx+n_r-1})")
             idx += n_r
@@ -116,7 +116,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
         if idx >= len(ace.xss_data):
             raise Law61ParseError(f"Index {idx} out of bounds for XSS data when reading N_E")
         
-        distribution.n_energies = int(ace.xss_data[idx].value)
+        distribution.n_energies = int(ace.xss_data[idx])
         if debug:
             logger.debug(f"LDAT(2+2*N_R): N_E={distribution.n_energies} (at index {idx})")
     except (IndexError, AttributeError, ValueError) as e:
@@ -134,9 +134,9 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
     
     # Read the incident energies - LDAT(3+2*N_R..2+2*N_R+N_E)
     try:
-        distribution.incident_energies = [ace.xss_data[idx + i] for i in range(n_e)]
+        distribution.incident_energies = ace.xss_data[idx:idx + n_e]
         if debug:
-            energy_values = [e.value for e in distribution.incident_energies]
+            energy_values = [float(e) for e in distribution.incident_energies]
             logger.debug(f"LDAT(3+2*N_R..2+2*N_R+N_E): Incident energies: {energy_values[:3]}...{energy_values[-3:] if len(energy_values) > 3 else ''}")
             logger.debug(f"  (at indices {idx}..{idx+n_e-1})")
     except (IndexError, AttributeError) as e:
@@ -150,7 +150,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
     
     # Read the distribution locations (L values) - LDAT(3+2*N_R+N_E..2+2*N_R+2*N_E)
     try:
-        distribution.distribution_locations = [int(ace.xss_data[idx + i].value) for i in range(n_e)]
+        distribution.distribution_locations = [int(ace.xss_data[idx + i]) for i in range(n_e)]
         if debug:
             logger.debug(f"LDAT(3+2*N_R+N_E..2+2*N_R+2*N_E): L values: {distribution.distribution_locations[:3]}...{distribution.distribution_locations[-3:] if len(distribution.distribution_locations) > 3 else ''}")
             logger.debug(f"  (at indices {idx}..{idx+n_e-1})")
@@ -207,7 +207,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
         L = distribution.distribution_locations[i]
         if debug:
             logger.debug(f"\nProcessing distribution for incident energy {i+1}/{n_e}")
-            logger.debug(f"  Energy value: {distribution.incident_energies[i].value} MeV")
+            logger.debug(f"  Energy value: {distribution.incident_energies[i]} MeV")
             logger.debug(f"  L={L} (distribution location)")
         
         if L <= 0:
@@ -222,7 +222,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
         if debug:
             logger.debug(f"  Secondary energy distribution index: JED + L = {jed} + {L} - 1 = {dist_idx}")
             if dist_idx < len(ace.xss_data):
-                logger.debug(f"  Value at this index: {ace.xss_data[dist_idx].value}")
+                logger.debug(f"  Value at this index: {ace.xss_data[dist_idx]}")
         
         # Check if we're within bounds
         if dist_idx >= len(ace.xss_data):
@@ -230,7 +230,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
         
         # Read the combined interpolation parameter (INTT') from Table 46
         try:
-            intt_prime = int(ace.xss_data[dist_idx].value)
+            intt_prime = int(ace.xss_data[dist_idx])
             # Separate into N_D (number of discrete lines) and INTT (interpolation scheme)
             n_discrete = intt_prime // 10
             intt = intt_prime % 10
@@ -241,7 +241,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
         
         # Read the number of points (N_p) from Table 46
         try:
-            n_points = int(ace.xss_data[dist_idx + 1].value)
+            n_points = int(ace.xss_data[dist_idx + 1])
             if debug:
                 logger.debug(f"  N_p={n_points} (number of points in distribution)")
         except (IndexError, AttributeError, ValueError) as e:
@@ -257,22 +257,22 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
         
         try:
             # Read the outgoing energy grid (E_out) from Table 46
-            e_out = [ace.xss_data[dist_idx + 2 + j] for j in range(n_points)]
+            e_out = ace.xss_data[dist_idx + 2:dist_idx + 2 + n_points]
             
             # Read the probability density function (PDF) from Table 46
-            pdf = [ace.xss_data[dist_idx + 2 + n_points + j] for j in range(n_points)]
+            pdf = ace.xss_data[dist_idx + 2 + n_points:dist_idx + 2 + n_points + n_points]
             
             # Read the cumulative density function (CDF) from Table 46
-            cdf = [ace.xss_data[dist_idx + 2 + 2*n_points + j] for j in range(n_points)]
+            cdf = ace.xss_data[dist_idx + 2 + 2*n_points:dist_idx + 2 + 2*n_points + n_points]
             
             # Read the angular distribution location (LC) from Table 46
-            LC_values = [int(ace.xss_data[dist_idx + 2 + 3*n_points + j].value) for j in range(n_points)]
+            LC_values = [int(ace.xss_data[dist_idx + 2 + 3*n_points + j]) for j in range(n_points)]
             
             if debug:
                 if n_points > 0:
-                    logger.debug(f"  E_out range: [{e_out[0].value:.5e} - {e_out[-1].value:.5e}]")
-                    logger.debug(f"  PDF range: [{pdf[0].value:.5e} - {pdf[-1].value:.5e}]")
-                    logger.debug(f"  CDF range: [{cdf[0].value:.5e} - {cdf[-1].value:.5e}]")
+                    logger.debug(f"  E_out range: [{e_out[0]:.5e} - {e_out[-1]:.5e}]")
+                    logger.debug(f"  PDF range: [{pdf[0]:.5e} - {pdf[-1]:.5e}]")
+                    logger.debug(f"  CDF range: [{cdf[0]:.5e} - {cdf[-1]:.5e}]")
                 logger.debug(f"  LC values: {LC_values[:5]}...{LC_values[-5:] if len(LC_values) > 5 else ''}")
         except (IndexError, AttributeError, ValueError) as e:
             raise Law61ParseError(f"Failed to read energy distribution data for incident energy {i+1}: {str(e)}")
@@ -316,7 +316,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
             if debug:
                 logger.debug(f"  Angular dist index: JED + |LC| = {jed} + {abs_LC} - 1 = {ang_dist_idx}")
                 if ang_dist_idx < len(ace.xss_data):
-                    logger.debug(f"  Value at this index: {ace.xss_data[ang_dist_idx].value}")
+                    logger.debug(f"  Value at this index: {ace.xss_data[ang_dist_idx]}")
             
             # Check if we're within bounds with no fallback
             if ang_dist_idx >= len(ace.xss_data):
@@ -327,7 +327,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
             
             try:
                 # Read the interpolation flag (JJ) from Table 47
-                jj = int(ace.xss_data[ang_dist_idx].value)
+                jj = int(ace.xss_data[ang_dist_idx])
                 if debug:
                     logger.debug(f"  JJ={jj} (interpolation flag for angular distribution)")
                     if jj not in [1, 2]:
@@ -367,7 +367,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
 #            if debug:
 #                logger.debug(f"  Angular dist index (neutron): JXS(11) + |LC| = {jxs_dlw} + {abs_LC} - 1 = {ang_dist_idx}")
 #                if ang_dist_idx < len(ace.xss_data):
-#                    logger.debug(f"  Value at this index: {ace.xss_data[ang_dist_idx].value}")
+#                    logger.debug(f"  Value at this index: {ace.xss_data[ang_dist_idx]}")
 #            
 #            # Check if we're within bounds
 #            angular_data_source = "neutron"
@@ -378,7 +378,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
 #                if debug:
 #                    logger.debug(f"  Angular dist index (photon): JXS(19) + |LC| - 1 = {jxs_dlwp} + {abs_LC} = {ang_dist_idx}")
 #                    if ang_dist_idx < len(ace.xss_data):
-#                        logger.debug(f"  Value at this index: {ace.xss_data[ang_dist_idx].value}")
+#                        logger.debug(f"  Value at this index: {ace.xss_data[ang_dist_idx]}")
 #                
 #                if ang_dist_idx >= len(ace.xss_data):
 #                    raise Law61ParseError(
@@ -388,7 +388,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
 #            
 #            try:
 #                # Read the interpolation flag (JJ) from Table 47
-#                jj = int(ace.xss_data[ang_dist_idx].value)
+#                jj = int(ace.xss_data[ang_dist_idx])
 #                if debug:
 #                    logger.debug(f"  JJ={jj} (interpolation flag for angular distribution)")
 #                    if jj not in [1, 2]:
@@ -398,7 +398,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
             
             try:
                 # Read the number of points (N_p) from Table 47
-                ang_n_points = int(ace.xss_data[ang_dist_idx + 1].value)
+                ang_n_points = int(ace.xss_data[ang_dist_idx + 1])
                 if debug:
                     logger.debug(f"  N_p={ang_n_points} (number of points in angular distribution)")
             except (IndexError, AttributeError, ValueError) as e:
@@ -413,26 +413,26 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
             
             try:
                 # Read the cosine scattering grid (Cos_out) from Table 47
-                cosines = [ace.xss_data[ang_dist_idx + 2 + j] for j in range(ang_n_points)]
+                cosines = ace.xss_data[ang_dist_idx + 2:ang_dist_idx + 2 + ang_n_points]
                 
                 # Read the probability density function (PDF) from Table 47
-                ang_pdf = [ace.xss_data[ang_dist_idx + 2 + ang_n_points + j] for j in range(ang_n_points)]
+                ang_pdf = ace.xss_data[ang_dist_idx + 2 + ang_n_points:ang_dist_idx + 2 + ang_n_points + ang_n_points]
                 
                 # Read the cumulative density function (CDF) from Table 47
-                ang_cdf = [ace.xss_data[ang_dist_idx + 2 + 2*ang_n_points + j] for j in range(ang_n_points)]
+                ang_cdf = ace.xss_data[ang_dist_idx + 2 + 2*ang_n_points:ang_dist_idx + 2 + 2*ang_n_points + ang_n_points]
                 
                 if debug:
                     if ang_n_points > 0:
-                        logger.debug(f"  Cosine range: [{cosines[0].value:.5f} - {cosines[-1].value:.5f}]")
-                        logger.debug(f"  Angular PDF range: [{ang_pdf[0].value:.5e} - {ang_pdf[-1].value:.5e}]")
-                        logger.debug(f"  Angular CDF range: [{ang_cdf[0].value:.5e} - {ang_cdf[-1].value:.5e}]")
+                        logger.debug(f"  Cosine range: [{cosines[0]:.5f} - {cosines[-1]:.5f}]")
+                        logger.debug(f"  Angular PDF range: [{ang_pdf[0]:.5e} - {ang_pdf[-1]:.5e}]")
+                        logger.debug(f"  Angular CDF range: [{ang_cdf[0]:.5e} - {ang_cdf[-1]:.5e}]")
             except (IndexError, AttributeError) as e:
                 raise Law61ParseError(f"Failed to read angular distribution data for LC={LC}: {str(e)}")
             
             # Validate that the cosines are in the expected range [-1, 1]
             if ang_n_points > 0:
-                min_cos = min(cos.value for cos in cosines)
-                max_cos = max(cos.value for cos in cosines)
+                min_cos = min(float(cos) for cos in cosines)
+                max_cos = max(float(cos) for cos in cosines)
                 if min_cos < -1.001 or max_cos > 1.001:  # Allow slight numerical error
                     if debug:
                         logger.debug(f"  WARNING: Cosine values outside expected range [-1,1]: min={min_cos}, max={max_cos}")

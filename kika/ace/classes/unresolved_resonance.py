@@ -1,4 +1,3 @@
-from kika.ace.classes.xss import XssEntry
 from dataclasses import dataclass, field
 from typing import List, Optional
 import numpy as np
@@ -10,12 +9,13 @@ class ProbabilityTable:
     Class representing a single probability table at a given energy.
     """
     energy: float = 0.0
-    cumulative_probabilities: List[XssEntry] = field(default_factory=list)
-    total_xs: List[XssEntry] = field(default_factory=list)
-    elastic_xs: List[XssEntry] = field(default_factory=list)
-    fission_xs: List[XssEntry] = field(default_factory=list)
-    capture_xs: List[XssEntry] = field(default_factory=list)
-    heating_numbers: List[XssEntry] = field(default_factory=list)
+    # Views of xss_data for parsed tables; plain arrays for interpolated ones
+    cumulative_probabilities: np.ndarray = field(default_factory=lambda: np.empty(0))
+    total_xs: np.ndarray = field(default_factory=lambda: np.empty(0))
+    elastic_xs: np.ndarray = field(default_factory=lambda: np.empty(0))
+    fission_xs: np.ndarray = field(default_factory=lambda: np.empty(0))
+    capture_xs: np.ndarray = field(default_factory=lambda: np.empty(0))
+    heating_numbers: np.ndarray = field(default_factory=lambda: np.empty(0))
     
     @property
     def num_entries(self) -> int:
@@ -43,10 +43,10 @@ class ProbabilityTable:
         
         # Function to add cross section summary
         def add_xs_summary(name, xs_list):
-            if not xs_list:
+            if len(xs_list) == 0:
                 return f"{name:<{property_col_width}} {'No':<10} {'-':<20} {'-':<20}\n"
             
-            values = [xs.value for xs in xs_list]
+            values = [float(xs) for xs in xs_list]
             return f"{name:<{property_col_width}} {'Yes':<10} {min(values):<20.6e} {max(values):<20.6e}\n"
         
         # Add summaries for each cross section type
@@ -58,8 +58,8 @@ class ProbabilityTable:
         output += "-" * header_width + "\n"
         
         # Add probability distribution info
-        if self.cumulative_probabilities:
-            prob_values = [p.value for p in self.cumulative_probabilities]
+        if len(self.cumulative_probabilities) > 0:
+            prob_values = [float(p) for p in self.cumulative_probabilities]
             output += "\nCumulative Probability Range: "
             output += f"{min(prob_values):.6f} to {max(prob_values):.6f}\n"
         
@@ -79,7 +79,7 @@ class UnresolvedResonanceTables:
     inelastic_flag: int = 0        # ILF - Inelastic competition flag
     other_absorption_flag: int = 0 # IOA - Other absorption flag
     factors_flag: int = 0          # IFF - Factors flag (0=cross sections, 1=factors)
-    energies: List[XssEntry] = field(default_factory=list)  # Incident energies
+    energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Incident energies (view of xss_data)
     tables: List[ProbabilityTable] = field(default_factory=list)  # Probability tables for each energy
     
     def __repr__(self) -> str:
@@ -159,8 +159,8 @@ class UnresolvedResonanceTables:
             width1=property_col_width, width2=value_col_width)
         
         # Energy range
-        if self.energies:
-            energy_values = [e.value for e in self.energies]
+        if len(self.energies) > 0:
+            energy_values = [float(e) for e in self.energies]
             energy_range = f"{min(energy_values):.6e} to {max(energy_values):.6e} MeV"
             output += "{:<{width1}} {:<{width2}}\n".format(
                 "Energy range", energy_range,
@@ -184,32 +184,32 @@ class UnresolvedResonanceTables:
             
             for table in self.tables:
                 # Process total XS
-                if table.total_xs:
-                    table_values = [xs.value for xs in table.total_xs]
+                if len(table.total_xs) > 0:
+                    table_values = [float(xs) for xs in table.total_xs]
                     table_min = min(table_values)
                     table_max = max(table_values)
                     total_min = min(total_min, table_min)
                     total_max = max(total_max, table_max)
                 
                 # Process elastic XS
-                if table.elastic_xs:
-                    table_values = [xs.value for xs in table.elastic_xs]
+                if len(table.elastic_xs) > 0:
+                    table_values = [float(xs) for xs in table.elastic_xs]
                     table_min = min(table_values)
                     table_max = max(table_values)
                     elastic_min = min(elastic_min, table_min)
                     elastic_max = max(elastic_max, table_max)
                 
                 # Process fission XS
-                if table.fission_xs:
-                    table_values = [xs.value for xs in table.fission_xs]
+                if len(table.fission_xs) > 0:
+                    table_values = [float(xs) for xs in table.fission_xs]
                     table_min = min(table_values)
                     table_max = max(table_values)
                     fission_min = min(fission_min, table_min)
                     fission_max = max(fission_max, table_max)
                 
                 # Process capture XS
-                if table.capture_xs:
-                    table_values = [xs.value for xs in table.capture_xs]
+                if len(table.capture_xs) > 0:
+                    table_values = [float(xs) for xs in table.capture_xs]
                     table_min = min(table_values)
                     table_max = max(table_values)
                     capture_min = min(capture_min, table_min)
@@ -274,11 +274,11 @@ class UnresolvedResonanceTables:
         Optional[ProbabilityTable]
             The probability table for the specified energy, or None if out of range
         """
-        if not self.has_data or not self.energies or not self.tables:
+        if not self.has_data or len(self.energies) == 0 or not self.tables:
             return None
         
         # Extract energy values for comparison
-        energy_values = [e.value for e in self.energies]
+        energy_values = [float(e) for e in self.energies]
         
         # Check if energy is outside the range
         if energy < energy_values[0] or energy > energy_values[-1]:
@@ -317,15 +317,14 @@ class UnresolvedResonanceTables:
                 lower_vals = getattr(lower_table, attr)
                 upper_vals = getattr(upper_table, attr)
                 
-                if lower_vals and upper_vals:
+                if len(lower_vals) > 0 and len(upper_vals) > 0:
                     # Extract values for interpolation
-                    lower_values = [entry.value for entry in lower_vals]
-                    upper_values = [entry.value for entry in upper_vals]
+                    lower_values = [float(entry) for entry in lower_vals]
+                    upper_values = [float(entry) for entry in upper_vals]
                     
-                    # Create new XssEntry objects for interpolated values
-                    # Note: this is creating new objects since we're interpolating
-                    interp_vals = [XssEntry(-1, lower_values[i] + factor * (upper_values[i] - lower_values[i])) 
-                                  for i in range(len(lower_vals))]
+                    # Interpolated values are new data, not views of xss_data
+                    interp_vals = np.array([lower_values[i] + factor * (upper_values[i] - lower_values[i]) 
+                                  for i in range(len(lower_vals))], dtype=float)
                     setattr(interp_table, attr, interp_vals)
                 
         elif self.interpolation == 5:  # Log-log
@@ -337,10 +336,10 @@ class UnresolvedResonanceTables:
                 lower_vals = getattr(lower_table, attr)
                 upper_vals = getattr(upper_table, attr)
                 
-                if lower_vals and upper_vals:
+                if len(lower_vals) > 0 and len(upper_vals) > 0:
                     # Extract values for interpolation
-                    lower_values = [entry.value for entry in lower_vals]
-                    upper_values = [entry.value for entry in upper_vals]
+                    lower_values = [float(entry) for entry in lower_vals]
+                    upper_values = [float(entry) for entry in upper_vals]
                     
                     # Handle zero values in log-log interpolation
                     interp_vals = []
@@ -350,10 +349,9 @@ class UnresolvedResonanceTables:
                             val = lower_values[i] + (energy - lower_energy) * (upper_values[i] - lower_values[i]) / (upper_energy - lower_energy)
                         else:
                             val = lower_values[i] * (upper_values[i] / lower_values[i]) ** log_factor
-                        # Create new XssEntry with interpolated value
-                        interp_vals.append(XssEntry(-1, val))
+                        interp_vals.append(val)
                     
-                    setattr(interp_table, attr, interp_vals)
+                    setattr(interp_table, attr, np.array(interp_vals, dtype=float))
         else:
             # Unknown interpolation method, default to nearest neighbor
             return self.tables[lower_idx] if (energy - lower_energy) < (upper_energy - energy) else self.tables[upper_idx]

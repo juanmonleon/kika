@@ -1198,7 +1198,7 @@ def apply_perturbation_factor_to_ace(ace, sample, sample_index, energy_grid, mt_
 
 
 def _apply_factors_to_mt(ace, mt, factors, boundaries, verbose=True):
-    """Multiply each entry.value by factors[group] for this mt,
+    """Multiply each cross-section value by factors[group] for this mt,
     **unless any factor is non-positive**.
     """
     logger = _get_logger()
@@ -1215,11 +1215,10 @@ def _apply_factors_to_mt(ace, mt, factors, boundaries, verbose=True):
 
     reac       = ace.cross_section.reaction[mt]
     energies   = np.asarray(reac.energies)
-    xs_entries = reac._xs_entries
+    xs_entries = reac._xs_entries  # view of ace.xss_data: written in place
     bin_idx    = np.digitize(energies, boundaries) - 1
 
-    for i, entry in enumerate(xs_entries):
-        grp = bin_idx[i]
-        if 0 <= grp < len(factors):
-            entry.value *= float(factors[grp])  # Convert to float for multiplication
+    grp = bin_idx[:len(xs_entries)]
+    inside = (grp >= 0) & (grp < len(factors))
+    xs_entries[inside] *= factors.astype(np.float64)[grp[inside]]
 

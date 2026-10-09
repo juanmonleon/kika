@@ -60,8 +60,8 @@ def compare_neutron_mt_data(ace1: Ace, ace2: Ace, tolerance: float, verbose: boo
         return False
     
     # Compare MT values
-    mt_values1 = [mt.value for mt in ace1.reaction_mt_data.incident_neutron]
-    mt_values2 = [mt.value for mt in ace2.reaction_mt_data.incident_neutron]
+    mt_values1 = [float(mt) for mt in ace1.reaction_mt_data.incident_neutron]
+    mt_values2 = [float(mt) for mt in ace2.reaction_mt_data.incident_neutron]
     
     return compare_arrays(mt_values1, mt_values2, tolerance, "Neutron reaction MT numbers", verbose)
 
@@ -88,8 +88,8 @@ def compare_photon_mt_data(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool
         return False
     
     # Compare MT values
-    mt_values1 = [mt.value for mt in ace1.reaction_mt_data.photon_production]
-    mt_values2 = [mt.value for mt in ace2.reaction_mt_data.photon_production]
+    mt_values1 = [float(mt) for mt in ace1.reaction_mt_data.photon_production]
+    mt_values2 = [float(mt) for mt in ace2.reaction_mt_data.photon_production]
     
     return compare_arrays(mt_values1, mt_values2, tolerance, "Photon production MT numbers", verbose)
 
@@ -136,8 +136,8 @@ def compare_particle_mt_data(ace1: Ace, ace2: Ace, tolerance: float, verbose: bo
             return False
         
         # Compare MT values for this particle type
-        mt_values1 = [mt.value for mt in mt_list1]
-        mt_values2 = [mt.value for mt in mt_list2]
+        mt_values1 = [float(mt) for mt in mt_list1]
+        mt_values2 = [float(mt) for mt in mt_list2]
         
         if not compare_arrays(mt_values1, mt_values2, tolerance, f"Particle type {i} MT numbers", verbose):
             return False
@@ -167,7 +167,7 @@ def compare_secondary_neutron_mt_data(ace1: Ace, ace2: Ace, tolerance: float, ve
         return False
     
     # Compare MT values
-    mt_values1 = [mt.value for mt in ace1.reaction_mt_data.secondary_neutron_mt]
-    mt_values2 = [mt.value for mt in ace2.reaction_mt_data.secondary_neutron_mt]
+    mt_values1 = [float(mt) for mt in ace1.reaction_mt_data.secondary_neutron_mt]
+    mt_values2 = [float(mt) for mt in ace2.reaction_mt_data.secondary_neutron_mt]
     
     return compare_arrays(mt_values1, mt_values2, tolerance, "Secondary neutron MT numbers", verbose)

@@ -79,9 +79,9 @@ def read_gpd_block(ace, debug=False):
             logger.debug(f"ERROR: GPD block would extend beyond XSS array: {gpd_idx + n_energy} > {len(ace.xss_data)}")
         return None
     
-    # Extract total photon production cross section - store XssEntry objects
+    # Extract total photon production cross section (view of xss_data)
     # This is σ_γ(l), l = 1,…,NES from Table 53
-    result.total_xs = [ace.xss_data[gpd_idx + i] for i in range(n_energy)]
+    result.total_xs = ace.xss_data[gpd_idx:gpd_idx + n_energy]
     
     if debug:
         logger.debug(f"Successfully read {n_energy} total photon production XS values")
@@ -113,8 +113,8 @@ def read_gpd_block(ace, debug=False):
                 logger.debug(f"Reading first energy group from XSS[{start_idx}:{end_idx}]")
             
             # Extract the 20 equiprobable outgoing photon energies for this neutron energy group
-            # Store XssEntry objects
-            group_energies = [ace.xss_data[start_idx + j] for j in range(20)]
+            # View of xss_data
+            group_energies = ace.xss_data[start_idx:start_idx + 20]
             outgoing_energies.append(group_energies)
         
         result.outgoing_energies = outgoing_energies

@@ -12,8 +12,8 @@ class PhotonProductionData:
     on the energy grid from the ESZ Block. It may also include outgoing photon
     energies in an obsolete 30×20 matrix format used in older datasets.
     """
-    total_xs: List = field(default_factory=list)  # Total photon production cross section as XssEntry objects
-    outgoing_energies: Optional[List[List]] = None  # 30x20 matrix of outgoing photon energies as XssEntry objects
+    total_xs: np.ndarray = field(default_factory=lambda: np.empty(0))  # Total photon production cross section (view of xss_data)
+    outgoing_energies: Optional[List[np.ndarray]] = None  # 30x20 matrix of outgoing photon energies (views of xss_data)
     neutron_energy_boundaries: Optional[List[float]] = None  # 30 neutron energy group boundaries
     
     @property
@@ -51,8 +51,7 @@ class PhotonProductionData:
         if energy < energy_grid[0] or energy > energy_grid[-1]:
             return None
         
-        # Extract values from XssEntry objects for interpolation
-        xs_values = [entry.value for entry in self.total_xs]
+        xs_values = [float(entry) for entry in self.total_xs]
         
         # Use numpy for efficient interpolation
         return np.interp(energy, energy_grid, xs_values)
@@ -85,9 +84,9 @@ class PhotonProductionData:
         if neutron_energy >= self.neutron_energy_boundaries[-1]:
             group_idx = len(self.neutron_energy_boundaries) - 1
             
-        # Return the corresponding group of photon energies (extract values from XssEntry objects)
+        # Return the corresponding group of photon energies as floats
         if 0 <= group_idx < len(self.outgoing_energies):
-            return [entry.value for entry in self.outgoing_energies[group_idx]]
+            return [float(entry) for entry in self.outgoing_energies[group_idx]]
         
         return None
     
@@ -139,8 +138,7 @@ class PhotonProductionData:
             _, ax = plt.subplots(figsize=(10, 6))
         
         if self.has_data and len(self.total_xs) == len(energy_grid):
-            # Extract values from XssEntry objects for plotting
-            xs_values = [entry.value for entry in self.total_xs]
+            xs_values = [float(entry) for entry in self.total_xs]
             
             ax.plot(energy_grid, xs_values, label="Total photon production", **kwargs)
             ax.set_xscale('log')
@@ -191,7 +189,7 @@ class PhotonProductionData:
             for idx in sample_indices:
                 if idx < len(self.neutron_energy_boundaries) and idx < len(self.outgoing_energies):
                     e_neutron = self.neutron_energy_boundaries[idx]
-                    energies = [e.value for e in self.outgoing_energies[idx]]
+                    energies = [float(e) for e in self.outgoing_energies[idx]]
                     probs = [1.0/len(energies)] * len(energies)
                     ax.step(energies, probs, where='post', 
                            label=f"E_neutron = {e_neutron:.2e} MeV", **kwargs)

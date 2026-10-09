@@ -36,7 +36,7 @@ def parse_ixs_block(ace: Ace, debug=False) -> SecondaryParticleDataLocators:
     result = SecondaryParticleDataLocators()
     
     # Check if we have the necessary basic data structures
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping data locations: required base data structures missing")
         return result
@@ -109,16 +109,16 @@ def parse_ixs_block(ace: Ace, debug=False) -> SecondaryParticleDataLocators:
         
         # Create a locator set for this particle type
         locator_set = result.create_locator_set(
-            hpd=int(ace.xss_data[ltype].value),
-            mtrh=int(ace.xss_data[ltype + 1].value),
-            tyrh=int(ace.xss_data[ltype + 2].value),
-            lsigh=int(ace.xss_data[ltype + 3].value),
-            sigh=int(ace.xss_data[ltype + 4].value),
-            landh=int(ace.xss_data[ltype + 5].value),
-            andh=int(ace.xss_data[ltype + 6].value),
-            ldlwh=int(ace.xss_data[ltype + 7].value),
-            dlwh=int(ace.xss_data[ltype + 8].value),
-            yh=int(ace.xss_data[ltype + 9].value)
+            hpd=int(ace.xss_data[ltype]),
+            mtrh=int(ace.xss_data[ltype + 1]),
+            tyrh=int(ace.xss_data[ltype + 2]),
+            lsigh=int(ace.xss_data[ltype + 3]),
+            sigh=int(ace.xss_data[ltype + 4]),
+            landh=int(ace.xss_data[ltype + 5]),
+            andh=int(ace.xss_data[ltype + 6]),
+            ldlwh=int(ace.xss_data[ltype + 7]),
+            dlwh=int(ace.xss_data[ltype + 8]),
+            yh=int(ace.xss_data[ltype + 9])
         )
         
         result.locator_sets.append(locator_set)

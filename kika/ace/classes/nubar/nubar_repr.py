@@ -57,7 +57,7 @@ def nudata_repr(self) -> str:
                 width1=property_col_width, width2=value_col_width)
             
             if num_points > 0:
-                energy_range = f"{self.tabulated.energies[0].value:.6g} - {self.tabulated.energies[-1].value:.6g} MeV"
+                energy_range = f"{self.tabulated.energies[0]:.6g} - {self.tabulated.energies[-1]:.6g} MeV"
                 info_table += "{:<{width1}} {:<{width2}}\n".format(
                     "Energy Range", energy_range,
                     width1=property_col_width, width2=value_col_width)

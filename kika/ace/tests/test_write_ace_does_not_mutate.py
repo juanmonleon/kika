@@ -1,18 +1,12 @@
 """``write_ace`` must not rewrite the object it was handed.
 
-It used to. The guard read element 0 to decide whether the XSS still held raw
-numbers::
-
-    if not hasattr(ace.xss_data[0], 'index'):
-        ace.xss_data = [XssEntry(index=i, value=val) for i, val in enumerate(...)]
-
-but ``read_xss`` seeds index 0 with a bare ``0`` as the FORTRAN 1-based
-placeholder, and ``hasattr(0, 'index')`` is False. So the branch fired on every
-parsed file and re-wrapped each already-wrapped entry into
-``XssEntry(index=i, value=XssEntry(...))`` — on the caller's object, not a copy.
-
-Two private helpers existed only to paper over it: ``unwrap_value`` inside the
-writer and a copy of it in the round-trip test. Both are gone with the fix.
+It used to. When the XSS was a list of ``XssEntry`` objects, a guard that read
+element 0 (the bare ``0`` placeholder) re-wrapped every entry into
+``XssEntry(index=i, value=XssEntry(...))`` — on the caller's object, not a
+copy. The XSS is now one float64 array and the writer only reads it, but the
+contract the fix established still holds and is pinned here: the caller's
+array comes back as the same object with the same values, writing is
+idempotent, and a plain list of numbers is still accepted.
 
 These tests are deliberately free of any ACE tape, so they run in CI where the
 rest of ``kika/ace`` cannot.
@@ -20,18 +14,17 @@ rest of ``kika/ace`` cannot.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.header import Header
-from kika.ace.classes.xss import XssEntry
 from kika.ace.writers.write_ace import write_ace
+
+VALUES = [11.0, 2.5, 3.0, 4.25, 5.0, 6.5, 7.0]
 
 
 def _tiny_ace() -> Ace:
-    """An Ace shaped like a parsed one: bare 0 placeholder, then XssEntry."""
-    values = [11.0, 2.5, 3.0, 4.25, 5.0, 6.5, 7.0]
-    xss = [0] + [XssEntry(index=i, value=v) for i, v in enumerate(values, start=1)]
+    """An Ace shaped like a parsed one: 0.0 placeholder, then the XSS."""
+    xss = np.array([0.0] + VALUES)
     header = Header(
         format_version="legacy",
         zaid=26056,
@@ -48,37 +41,16 @@ def _tiny_ace() -> Ace:
     return Ace(filename=None, header=header, xss_data=xss)
 
 
-def _values(ace) -> list:
-    return [getattr(entry, "value", entry) for entry in ace.xss_data]
-
-
 def test_write_ace_leaves_its_input_alone(tmp_path):
     ace = _tiny_ace()
-    before_types = [type(entry) for entry in ace.xss_data]
-    before_values = _values(ace)
-    before_identity = [id(entry) for entry in ace.xss_data]
+    xss = ace.xss_data
+    before = xss.copy()
 
     write_ace(ace, str(tmp_path / "out.02c"), overwrite=True)
 
-    assert [type(e) for e in ace.xss_data] == before_types, (
-        "write_ace changed the type of the caller's XSS entries"
-    )
-    assert _values(ace) == before_values, "write_ace changed the caller's XSS values"
-    assert [id(e) for e in ace.xss_data] == before_identity, (
-        "write_ace replaced the caller's XSS entry objects"
-    )
-
-
-def test_no_entry_ends_up_wrapping_another_entry(tmp_path):
-    """The specific corruption: XssEntry(value=XssEntry(...))."""
-    ace = _tiny_ace()
-    write_ace(ace, str(tmp_path / "out.02c"), overwrite=True)
-
-    nested = [
-        entry for entry in ace.xss_data
-        if isinstance(getattr(entry, "value", None), XssEntry)
-    ]
-    assert not nested, f"{len(nested)} XSS entries wrap another entry"
+    assert ace.xss_data is xss, "write_ace replaced the caller's XSS array"
+    assert ace.xss_data.dtype == np.float64
+    np.testing.assert_array_equal(ace.xss_data, before)
 
 
 def test_writing_twice_gives_the_same_file(tmp_path):
@@ -94,7 +66,7 @@ def test_writing_twice_gives_the_same_file(tmp_path):
 
 
 def test_raw_float_input_is_still_accepted(tmp_path):
-    """The wrapping branch existed for a reason: a caller may pass raw numbers."""
+    """A caller may pass a plain list of numbers."""
     ace = _tiny_ace()
     ace.xss_data = [0.0, 1.0, 2.0, 3.0]
 
@@ -104,7 +76,7 @@ def test_raw_float_input_is_still_accepted(tmp_path):
 
 
 def test_values_reach_the_file(tmp_path):
-    """Guard against the mutation fix quietly dropping the payload.
+    """Guard against the payload being dropped.
 
     The XSS block is the tail of the file, after the header's IZAW/NXS/JXS
     arrays — which are numeric too, hence the tail slice rather than a scan.
@@ -122,5 +94,4 @@ def test_values_reach_the_file(tmp_path):
             break
         numeric = row + numeric
 
-    expected = [entry.value for entry in _tiny_ace().xss_data[1:]]
-    np.testing.assert_allclose(numeric[-len(expected):], expected)
+    np.testing.assert_allclose(numeric[-len(VALUES):], VALUES)

@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
-from kika.ace.classes.xss import XssEntry
+import numpy as np
 
 @dataclass
 class QValues:
     """Container for reaction Q-values from the LQR block."""
-    q_values: List[XssEntry] = field(default_factory=list)  # List of Q-values for each reaction
+    q_values: np.ndarray = field(default_factory=lambda: np.empty(0))  # List of Q-values for each reaction
     
     @property
     def has_q_values(self) -> bool:
@@ -27,7 +27,7 @@ class QValues:
             The Q-value, or None if the reaction index is invalid
         """
         if 0 <= reaction_index < len(self.q_values):
-            return self.q_values[reaction_index].value
+            return float(self.q_values[reaction_index])
         return None
     
     def get_all_q_values(self) -> List[float]:
@@ -39,4 +39,4 @@ class QValues:
         List[float]
             List of all Q-values
         """
-        return [q.value for q in self.q_values]
+        return self.q_values.tolist()

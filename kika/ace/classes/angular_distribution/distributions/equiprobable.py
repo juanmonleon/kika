@@ -2,7 +2,6 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.angular_distribution.base import AngularDistribution
 from kika.ace.classes.angular_distribution.types import AngularDistributionType
 from kika._utils import create_repr_section
@@ -11,7 +10,7 @@ from kika._utils import create_repr_section
 @dataclass
 class EquiprobableAngularDistribution(AngularDistribution):
     """Angular distribution for 32 equiprobable bin scattering."""
-    _cosine_bins: List[List[XssEntry]] = field(default_factory=list)  # List of 33 cosines for each energy
+    _cosine_bins: List[np.ndarray] = field(default_factory=list)  # 33 cosines for each energy (views of xss_data)
     
     def __post_init__(self):
         super().__post_init__()
@@ -20,7 +19,7 @@ class EquiprobableAngularDistribution(AngularDistribution):
     @property
     def cosine_bins(self) -> List[List[float]]:
         """Get cosine bin values as lists of floats."""
-        return [[c.value for c in cosine_list] for cosine_list in self._cosine_bins]
+        return [[float(c) for c in cosine_list] for cosine_list in self._cosine_bins]
 
     def to_dataframe(self, energy: float, num_points: int = 100, interpolate: bool = False) -> Optional[pd.DataFrame]:
         """
@@ -43,7 +42,7 @@ class EquiprobableAngularDistribution(AngularDistribution):
             Returns None if pandas is not available
         """
         # If no energies in this distribution, return isotropic for all directions
-        if not self._energies:
+        if len(self._energies) == 0:
             # For specific energy, return isotropic distribution
             if interpolate:
                 cosines = np.linspace(-1, 1, num_points)
@@ -60,7 +59,7 @@ class EquiprobableAngularDistribution(AngularDistribution):
                 })
         
         # If energy is outside our range, return uniform distribution
-        if energy < self._energies[0].value or energy > self._energies[-1].value:
+        if energy < self._energies[0] or energy > self._energies[-1]:
             if interpolate:
                 cosines = np.linspace(-1, 1, num_points)
                 return pd.DataFrame({
@@ -184,7 +183,7 @@ class EquiprobableAngularDistribution(AngularDistribution):
         """
         header_width = 85
         header = "=" * header_width + "\n"
-        mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+        mt_value = int(self.mt)
         header += f"{'Equiprobable Angular Distribution for MT=' + str(mt_value):^{header_width}}\n"
         header += f"{self.distribution_type.name:^{header_width}}\n"
         header += "=" * header_width + "\n\n"

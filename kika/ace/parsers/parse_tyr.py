@@ -79,18 +79,18 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
             
             if debug:
                 logger.debug(f"TYR block range: XSS[{tyr_idx}:{end_idx+1}]")
-                logger.debug(f"First value at XSS[{tyr_idx}] = {ace.xss_data[tyr_idx].value}")
+                logger.debug(f"First value at XSS[{tyr_idx}] = {ace.xss_data[tyr_idx]}")
             
             try:
-                # Read the TYR block - store XssEntry objects directly
+                # Read the TYR block (view of xss_data)
                 ty_entries = ace.xss_data[tyr_idx:end_idx+1]
                 
                 if debug:
-                    logger.debug(f"TYR values read: {[int(entry.value) for entry in ty_entries]}")
+                    logger.debug(f"TYR values read: {[int(entry) for entry in ty_entries]}")
                 
                 # Validate TY values
                 for i, entry in enumerate(ty_entries):
-                    ty_value = int(entry.value)
+                    ty_value = int(entry)
                     valid = _is_valid_ty_value(ty_value)
                     if debug:
                         logger.debug(f"  TY[{i+1}] = {ty_value} → {'VALID' if valid else 'INVALID'}")
@@ -146,7 +146,7 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
                 logger.error(error_msg)
                 raise IndexError(error_msg)
                 
-            nmt = int(ace.xss_data[nmt_idx].value)
+            nmt = int(ace.xss_data[nmt_idx])
             if debug:
                 logger.debug(f"  NMT = XSS[{nmt_idx}] = {nmt} → Number of MT reactions for this particle")
             
@@ -168,7 +168,7 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
                 logger.error(error_msg)
                 raise IndexError(error_msg)
                 
-            ltyr = int(ace.xss_data[ltyr_idx_ptr].value)
+            ltyr = int(ace.xss_data[ltyr_idx_ptr])
             
             if debug:
                 logger.debug(f"  LTYR = XSS[{ltyr_idx_ptr}] = {ltyr} → location of TY values")
@@ -189,16 +189,16 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
             # Read the TY values for this particle type
             try:
                 ty_range = f"{ltyr}:{ltyr+nmt}"
-                # Store XssEntry objects directly
+                # View of xss_data
                 ty_entries = ace.xss_data[ltyr:ltyr+nmt]
                 
                 if debug:
                     logger.debug(f"  Reading TY values from XSS[{ty_range}]")
-                    logger.debug(f"  TY values: {[int(entry.value) for entry in ty_entries]}")
+                    logger.debug(f"  TY values: {[int(entry) for entry in ty_entries]}")
                 
                 # Validate TY values
                 for j, entry in enumerate(ty_entries):
-                    ty_value = int(entry.value)
+                    ty_value = int(entry)
                     valid = _is_valid_ty_value(ty_value)
                     if debug:
                         logger.debug(f"    TY[{j+1}] = {ty_value} → {'VALID' if valid else 'INVALID'}")

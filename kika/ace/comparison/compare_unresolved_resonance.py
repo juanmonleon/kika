@@ -23,8 +23,8 @@ def compare_unresolved_resonance(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, 
         return False
     
     # Compare energy grid
-    energy_values1 = [e.value for e in ace1.unresolved_resonance.energies]
-    energy_values2 = [e.value for e in ace2.unresolved_resonance.energies]
+    energy_values1 = [float(e) for e in ace1.unresolved_resonance.energies]
+    energy_values2 = [float(e) for e in ace2.unresolved_resonance.energies]
     
     if not compare_arrays(energy_values1, energy_values2, tolerance, "Unresolved resonance energies", verbose):
         return False
@@ -96,8 +96,8 @@ def compare_probability_tables(ace1: Ace, ace2: Ace, tolerance: float, verbose: 
         
         # Compare each component of the table
         for component in ["cumulative_probabilities", "total_xs", "elastic_xs", "fission_xs", "capture_xs", "heating_numbers"]:
-            values1 = [entry.value for entry in getattr(table1, component)]
-            values2 = [entry.value for entry in getattr(table2, component)]
+            values1 = [float(entry) for entry in getattr(table1, component)]
+            values2 = [float(entry) for entry in getattr(table2, component)]
             
             if not compare_arrays(values1, values2, tolerance, f"Probability table {i} {component}", verbose):
                 return False

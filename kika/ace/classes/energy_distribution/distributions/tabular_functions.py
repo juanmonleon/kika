@@ -81,7 +81,7 @@ class TabularLinearFunctions(EnergyDistribution):
             Dictionary containing the function data or None if not available
         """
         # Find the bracketing incident energies
-        if not self.incident_energies or incident_energy <= self.incident_energies[0]:
+        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
             # Below the minimum incident energy, return the first function data
             return self.get_function_data(0) if self.function_data else None
         
@@ -138,7 +138,7 @@ class TabularLinearFunctions(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # If we have incident energies, show the range
-        if self.incident_energies:
+        if len(self.incident_energies) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", 
                 f"{min(self.incident_energies):.6g} - {max(self.incident_energies):.6g} MeV", 
@@ -252,7 +252,7 @@ class TabularEnergyMultipliers(EnergyDistribution):
             Interpolated multiplier table or None if not available
         """
         # Find the bracketing incident energies
-        if not self.incident_energies or incident_energy <= self.incident_energies[0]:
+        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
             # Below the minimum incident energy, return the first table
             return self.get_multiplier_table(0)
         
@@ -267,8 +267,9 @@ class TabularEnergyMultipliers(EnergyDistribution):
         table_low = self.get_multiplier_table(idx)
         table_high = self.get_multiplier_table(idx + 1)
         
-        if not table_low or not table_high or len(table_low) != len(table_high):
-            return table_low if table_low else table_high
+        if (table_low is None or table_high is None or len(table_low) == 0
+                or len(table_high) == 0 or len(table_low) != len(table_high)):
+            return table_low if table_low is not None and len(table_low) > 0 else table_high
             
         # Calculate interpolation factor
         energy_low = self.incident_energies[idx]
@@ -326,7 +327,7 @@ class TabularEnergyMultipliers(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # If we have incident energies, show the range
-        if self.incident_energies:
+        if len(self.incident_energies) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", 
                 f"{min(self.incident_energies):.6g} - {max(self.incident_energies):.6g} MeV", 
@@ -338,7 +339,7 @@ class TabularEnergyMultipliers(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # Add information about the first table if available
-        if self.multiplier_tables and self.multiplier_tables[0]:
+        if self.multiplier_tables and len(self.multiplier_tables[0]) > 0:
             first_table = self.multiplier_tables[0]
             mult_range = f"{min(first_table):.6g} - {max(first_table):.6g}"
             info_table += "{:<{width1}} {:<{width2}}\n".format(

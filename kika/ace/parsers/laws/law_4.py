@@ -64,7 +64,7 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
     
     # Read the number of interpolation regions (N_R)
     n_interp_regions_entry = ace.xss_data[idat_idx]
-    distribution.n_interp_regions = int(n_interp_regions_entry.value)
+    distribution.n_interp_regions = int(n_interp_regions_entry)
     if debug:
         logger.debug(f"Number of interpolation regions (N_R): {distribution.n_interp_regions}")
     idx = idat_idx + 1
@@ -73,13 +73,13 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
     # Read the interpolation parameters if present
     if n_r > 0 and idx + 2*n_r - 1 < len(ace.xss_data):
         # Read NBT values
-        distribution.nbt = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+        distribution.nbt = [int(ace.xss_data[idx + i]) for i in range(n_r)]
         if debug:
             logger.debug(f"NBT values: {distribution.nbt}")
         idx += n_r
         
         # Read INT values
-        distribution.interp = [int(ace.xss_data[idx + i].value) for i in range(n_r)]
+        distribution.interp = [int(ace.xss_data[idx + i]) for i in range(n_r)]
         if debug:
             logger.debug(f"INT values: {distribution.interp}")
         idx += n_r
@@ -93,7 +93,7 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
         return distribution
     
     n_energies_entry = ace.xss_data[idx]
-    distribution.n_energies = int(n_energies_entry.value)
+    distribution.n_energies = int(n_energies_entry)
     if debug:
         logger.debug(f"Number of incident energies (N_E): {distribution.n_energies}")
     idx += 1
@@ -105,10 +105,10 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
             logger.debug(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
         return distribution
     
-    # Read the incident energies - store the original XssEntry objects
-    distribution.incident_energies = [ace.xss_data[idx + i] for i in range(n_e)]
+    # Read the incident energies - a view of xss_data
+    distribution.incident_energies = ace.xss_data[idx:idx + n_e]
     if debug and n_e > 0:
-        logger.debug(f"Incident energies range: [{distribution.incident_energies[0].value}, {distribution.incident_energies[-1].value}]")
+        logger.debug(f"Incident energies range: [{distribution.incident_energies[0]}, {distribution.incident_energies[-1]}]")
     idx += n_e
     
     # Check if we have enough data for the locations
@@ -118,7 +118,7 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
         return distribution
     
     # Read the distribution locations (L values)
-    distribution.distribution_locations = [int(ace.xss_data[idx + i].value) for i in range(n_e)]
+    distribution.distribution_locations = [int(ace.xss_data[idx + i]) for i in range(n_e)]
     if debug:
         logger.debug(f"Distribution locations: {distribution.distribution_locations}")
     
@@ -152,7 +152,7 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
         
         # Read the combined interpolation parameter (INTT')
         intt_prime_entry = ace.xss_data[dist_idx]
-        intt_prime = int(intt_prime_entry.value)
+        intt_prime = int(intt_prime_entry)
         
         # Separate into N_D (number of discrete lines) and INTT (interpolation scheme)
         n_discrete = intt_prime // 10
@@ -162,7 +162,7 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
         
         # Read the number of points (N_p)
         n_points_entry = ace.xss_data[dist_idx + 1]
-        n_points = int(n_points_entry.value)
+        n_points = int(n_points_entry)
         if debug:
             logger.debug(f"Number of points (N_p): {n_points}")
         
@@ -174,17 +174,17 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
             continue
         
         # Read the outgoing energy grid (E_out)
-        e_out = [ace.xss_data[dist_idx + 2 + j].value for j in range(n_points)]
+        e_out = ace.xss_data[dist_idx + 2:dist_idx + 2 + n_points].tolist()
         if debug and n_points > 0:
             logger.debug(f"E_out range: [{e_out[0]}, {e_out[-1]}]")
         
         # Read the probability density function (PDF)
-        pdf = [ace.xss_data[dist_idx + 2 + n_points + j].value for j in range(n_points)]
+        pdf = ace.xss_data[dist_idx + 2 + n_points:dist_idx + 2 + 2*n_points].tolist()
         if debug and n_points > 0:
             logger.debug(f"PDF range: [{pdf[0]}, {pdf[-1]}]")
         
         # Read the cumulative density function (CDF)
-        cdf = [ace.xss_data[dist_idx + 2 + 2*n_points + j].value for j in range(n_points)]
+        cdf = ace.xss_data[dist_idx + 2 + 2*n_points:dist_idx + 2 + 3*n_points].tolist()
         if debug and n_points > 0:
             logger.debug(f"CDF range: [{cdf[0]}, {cdf[-1]}]")
         

@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.angular_distribution.types import AngularDistributionType
 from kika._utils import create_repr_section
 
@@ -10,20 +9,20 @@ from kika._utils import create_repr_section
 @dataclass
 class AngularDistribution:
     """Base class for angular distributions."""
-    mt: XssEntry = None  # MT number for this reaction
-    _energies: List[XssEntry] = field(default_factory=list)  # Energy grid with XssEntry objects
+    mt: int = None  # MT number for this reaction
+    _energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Energy grid (view of xss_data)
     distribution_type: AngularDistributionType = AngularDistributionType.ISOTROPIC
     
     def __post_init__(self):
         """Initialize after creation, ensuring values are properly stored."""
-        # Convert XssEntry to value if needed
-        if hasattr(self.mt, 'value'):
-            self.mt = int(self.mt.value)
+        # Store the MT number as a plain int
+        if self.mt is not None:
+            self.mt = int(self.mt)
     
     @property
     def energies(self) -> List[float]:
         """Get energy values as floats."""
-        return [entry.value for entry in self._energies]
+        return [float(e) for e in self._energies]
     
     @property
     def is_isotropic(self) -> bool:
@@ -81,7 +80,7 @@ class AngularDistribution:
         """
         header_width = 85
         header = "=" * header_width + "\n"
-        mt_value = int(self.mt.value) if hasattr(self.mt, 'value') else int(self.mt)
+        mt_value = int(self.mt)
         header += f"{'Angular Distribution for MT=' + str(mt_value):^{header_width}}\n"
         header += f"{self.distribution_type.name:^{header_width}}\n"
         header += "=" * header_width + "\n\n"

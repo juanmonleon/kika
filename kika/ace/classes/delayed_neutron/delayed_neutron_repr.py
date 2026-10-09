@@ -23,7 +23,7 @@ def precursor_repr(self) -> str:
     info_table += "-" * header_width + "\n"
     
     # Decay constant
-    decay_constant = self.decay_constant.value if self.decay_constant else "Not specified"
+    decay_constant = self.decay_constant if self.decay_constant is not None else "Not specified"
     info_table += "{:<{width1}} {:<{width2}}\n".format(
         "Decay Constant", f"{decay_constant:.6g} 1/s" if isinstance(decay_constant, float) else decay_constant,
         width1=property_col_width, width2=value_col_width)
@@ -36,7 +36,7 @@ def precursor_repr(self) -> str:
     
     # Energy range if available
     if num_points > 0:
-        energy_range = f"{self.energies[0].value:.6g} - {self.energies[-1].value:.6g} MeV"
+        energy_range = f"{self.energies[0]:.6g} - {self.energies[-1]:.6g} MeV"
         info_table += "{:<{width1}} {:<{width2}}\n".format(
             "Energy Range", energy_range,
             width1=property_col_width, width2=value_col_width)
@@ -114,7 +114,7 @@ def delayed_neutron_data_repr(self) -> str:
     # Decay constants if available
     if num_groups > 0:
         decay_constants = [
-            precursor.decay_constant.value if precursor.decay_constant else 0.0
+            precursor.decay_constant if precursor.decay_constant is not None else 0.0
             for precursor in self.precursors
         ]
         

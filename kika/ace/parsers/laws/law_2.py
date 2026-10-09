@@ -56,13 +56,13 @@ def parse_discrete_energy_distribution(ace: Ace, base_dist: EnergyDistribution, 
     
     # Read LP (indicator of whether photon is primary or non-primary)
     lp_entry = ace.xss_data[idat_idx]
-    lp = int(lp_entry.value)
+    lp = int(lp_entry)
     if debug:
         logger.debug(f"LP (primary photon indicator): {lp}")
     
     # Read EG (photon energy or binding energy)
     eg_entry = ace.xss_data[idat_idx + 1]
-    eg = eg_entry.value
+    eg = float(eg_entry)
     if debug:
         logger.debug(f"EG (photon energy or binding energy): {eg}")
     
