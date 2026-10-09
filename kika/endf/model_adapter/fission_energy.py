@@ -45,7 +45,8 @@ model; only what the model cannot hold comes from the provenance.
 **MF1/460, the delayed photons, has no GNDS node** -- §18.4 has the delayed
 gamma *energy* (EGD, a term above) and nothing for the source function, and
 FUDGE's reader skips the section. It cannot be modelled before the photon files
-it refers to (MF12 and MF15, roadmap E5) are. So it travels verbatim in the
+it refers to (MF12 and MF15, roadmap E5) are, and E5 leaves it out on purpose:
+no tape carries one. So it travels verbatim in the
 suite's provenance and the tape comes back with it, declared. No tape in the
 three libraries on this machine carries one.
 """
@@ -231,8 +232,8 @@ def attachFissionEnergyRelease(suite, mf1, report: Optional[ConversionReport] = 
             suite.provenance.headerFields[MF1MT460_KEY] = str(section).split("\n")
         report.unsupportedNode(
             f"MF1/460 (delayed photons, LO={getattr(section, 'lo', None)}) has "
-            f"no GNDS node and refers to MF12/MF15, which kika does not read; "
-            f"its records are kept verbatim in the suite's provenance and the "
+            f"no GNDS node (its photons would be described in MF12/MF15, whose "
+            f"model form is roadmap E5); its records are kept verbatim in the suite's provenance and the "
             f"tape is written back with them"
         )
 

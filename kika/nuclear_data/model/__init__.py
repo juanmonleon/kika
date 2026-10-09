@@ -40,10 +40,9 @@ whichever applies. Do not take that on this docstring's word —
 ``kika/tests/test_read_front_door.py`` holds it up, asserting for each of the
 three that the door is a *route* and not a fourth decoder.
 
-What the decoders do not reach is the shorter list. **MF12-15** have no parser
-at all. Of **MF5** only the tabulated LF=1 spectra become model nodes; the six
-analytic laws of §18.3 and every NK>1 partial are carried as bytes in the
-provenance, so they return to the tape without ever being modelled. Of **MF6**
+What the decoders do not reach is the shorter list. **MF12-15** are parsed by
+``read_endf`` (roadmap E5a, 2026-10-09) and not yet decoded into the model; the
+decoder says so, per file. **MF5** has a node for every law since roadmap E2. Of **MF6**
 every law but LAW=5 does — measured 2026-08-24, the charged-particle elastic
 expansion is the one shape no GNDS evaluation in the distributed library
 carries, so there is nothing to map it onto — and a subsection whose LAW is

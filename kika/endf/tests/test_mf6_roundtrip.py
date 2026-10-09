@@ -302,18 +302,17 @@ def test_law_bodies_get_the_class_their_law_says():
 # What the section says it does not have
 # ---------------------------------------------------------------------------
 
-def test_deferred_photon_distributions_are_reported_as_gaps():
-    """``LAW=-15`` sends the distribution to MF15, which kika does not read.
+def test_deferred_photon_distributions_point_at_a_file_kika_reads():
+    """``LAW=-15`` sends the distribution to MF15, which kika reads since E5a.
 
-    Every law is decoded and ``report_gaps()`` is still not empty, which is the
-    whole point of it: the section is complete as *read*, and incomplete as
-    *data*, and only the second is a statement about the evaluation.
+    Until 2026-10-09 this was the one MF6 gap every actinide MT18 reported: the
+    section was complete as *read* and incomplete as *data*, because MF15 had no
+    parser. It has one now, so the pointer is a pointer and not a gap.
     """
     section = all_sections(FIXTURES["u235"])[18]
-    gaps = section.report_gaps()
-    assert len(gaps) == sum(1 for p in section.products if p.law == -15)
-    assert all("MF15" in g for g in gaps)
-    assert all("does not parse" in g for g in gaps)
+    assert any(p.law == -15 for p in section.products)
+    assert section.report_gaps() == []
+    assert all(p.law_data.is_reachable for p in section.products if p.law < 0)
 
 
 def test_neutron_deferrals_are_not_reported_because_mf5_is_read():

@@ -187,6 +187,16 @@ def format_endf_number_precise(value, width=11):
         while places >= 0:
             fixed = f"{value:.{places}f}"
             if len(fixed) <= width:
+                # The fewest places that still name the same double. The finest
+                # quantum writes 20000000.1 as ``20000000.10``, eleven columns
+                # with no blank before it, where JEFF-4.0 B-10 writes
+                # `` 20000000.1``: the same value, and only the latter is the
+                # source's text.
+                while places > 0:
+                    shorter = f"{value:.{places - 1}f}"
+                    if parse_number(shorter) != parse_number(fixed):
+                        break
+                    fixed, places = shorter, places - 1
                 candidates.append(fixed.rjust(width))
                 break
             places -= 1

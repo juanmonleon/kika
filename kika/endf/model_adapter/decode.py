@@ -77,6 +77,10 @@ SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 #: way, one product at a time rather than one section.
 COVARIANCE_MF = (31, 32, 33, 34, 35)
 
+#: The photon production files, which ``read_endf`` parses (roadmap E5a) and
+#: this decoder does not decode yet.
+PHOTON_MF = (12, 13, 14, 15)
+
 
 def _za(section) -> int:
     """ZA, **rounded** rather than truncated.
@@ -416,10 +420,19 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             report = _attachEnergyAngleDistributions(suite, mf6.mt[mt], mt, report)
 
     present = set(getattr(endf, "mf", {}))
-    for mf in sorted(present - set(SUPPORTED_MF)):
+    for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF)):
         report.unsupportedNode(
             f"MF{mf} is present in the file and kika's parser registry does not "
             f"cover it; it is absent from this reactionSuite"
+        )
+    # Parsed (roadmap E5a) and not decoded yet: without this the photon files
+    # would be read and then pass in silence, since they are now in the parser
+    # registry and so no longer "present and uncovered".
+    for mf in sorted(present & set(PHOTON_MF)):
+        report.unsupportedNode(
+            f"MF{mf} is present and parsed; its photon data has no model form "
+            f"yet (roadmap E5b-E5d), so it is absent from this reactionSuite and "
+            f"a tape written from it comes back without MF{mf}"
         )
     for mf in sorted((present & set(SUPPORTED_MF)) & set(COVARIANCE_MF)):
         report.unsupportedNode(

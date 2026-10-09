@@ -16,6 +16,7 @@ from .parse_mf4 import parse_mf4
 from .parse_mf5 import parse_mf5
 from .parse_mf6 import parse_mf6
 from .parse_mf7 import parse_mf7
+from .parse_photons import parse_mf12, parse_mf13, parse_mf14, parse_mf15
 from .parse_mf31 import parse_mf31
 from .parse_mf32 import parse_mf32
 from .parse_mf33 import parse_mf33
@@ -37,6 +38,10 @@ MF_PARSERS = {
     5: parse_mf5,
     6: parse_mf6,
     7: parse_mf7,
+    12: parse_mf12,
+    13: parse_mf13,
+    14: parse_mf14,
+    15: parse_mf15,
     31: parse_mf31,
     32: parse_mf32,
     33: parse_mf33,
