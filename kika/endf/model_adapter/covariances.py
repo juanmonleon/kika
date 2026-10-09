@@ -50,6 +50,9 @@ from kika.nuclear_data.model import (
     CovarianceSuite,
     DataLink,
     EndfProvenance,
+    Mixed,
+    ShortRangeSelfScalingVariance,
+    Sum,
 )
 
 from .parameter_covariances import MF32MT151_KEY, decodeMF32MT, encodeMF32MT
@@ -460,6 +463,46 @@ def _covarianceSections(source, mf: int, mt: int):
     return selected
 
 
+def _faithfulMF34(sections, mt: int, report, mat):
+    """MF34 written section by section (G6), FUDGE's layout
+    (``toENDF6/covariances/covarianceSuite.py``): LTT=3 when an order-0 row is
+    given and 1 otherwise, one subsection (NMT1=1, MAT1=0, MT1=MT) with NL/NL1
+    the distinct row/column orders, and per (L, L1) a CONT with LCT from the
+    frame and NI = the components, each written by :func:`_niRecord`."""
+    from kika.endf.classes.mf34.mf34 import (MF34MT, Subsection, SubSubsection,
+                                             SubSubsectionRecord)
+
+    provenance = sections[0].provenance
+    rows, cols, blocks = [], [], []
+    for covariance in sections:
+        column = covariance.columnData if covariance.columnData is not None else covariance.rowData
+        l, l1 = _legendreOrder(covariance.rowData), _legendreOrder(column)
+        rows.append(l)
+        cols.append(l1)
+        components = (covariance.form.components if isinstance(covariance.form, Mixed)
+                      else [covariance.form])
+        frame = getattr(components[0], "productFrame", None)
+        lct = {"lab": 1, "centerOfMass": 2}.get(str(getattr(frame, "value", frame)), 1)
+        records = []
+        for component in components:
+            one = _niRecord(component, mt, report)
+            record = SubSubsectionRecord()
+            for name in ("ls", "lb", "nt", "ne", "lt", "np", "energies", "matrix",
+                         "e_table_k", "f_table_k", "row_energies", "col_energies",
+                         "rect_matrix"):
+                if hasattr(record, name):
+                    setattr(record, name, getattr(one, name, None))
+            records.append(record)
+        blocks.append(SubSubsection(l=l, l1=l1, lct=lct, ni=len(records), records=records))
+    ltt = 3 if 0 in rows else 1
+    sub = Subsection(mt1=mt, nl=len(set(rows)), nl1=len(set(cols)), mat1=0,
+                     sub_subsections=blocks)
+    return MF34MT(number=mt, _za=float(provenance.za), _awr=float(provenance.awr),
+                  _ltt=ltt, _nmt1=1,
+                  _mat=int(mat if mat is not None else getattr(provenance, "mat", 0) or 0),
+                  _subsections=[sub])
+
+
 def encodeMF34MT(source, mt: int, mat: Optional[int] = None,
                  report: Optional[ConversionReport] = None):
     """A :class:`CovarianceSuite` → an ``MF34MT`` for one MT.
@@ -474,6 +517,8 @@ def encodeMF34MT(source, mt: int, mat: Optional[int] = None,
 
     report = report if report is not None else ConversionReport()
     sections = _covarianceSections(source, 34, mt)
+    if _faithful(sections):
+        return _faithfulMF34(sections, mt, report, mat), report
 
     covmat = LegendreCovariance()
     isotope = None
@@ -487,8 +532,12 @@ def encodeMF34MT(source, mt: int, mat: Optional[int] = None,
         covmat.reaction_rows.append(_endfMT(section.rowData))
         covmat.l_rows.append(_legendreOrder(section.rowData))
         covmat.isotope_cols.append(za)
-        covmat.reaction_cols.append(_endfMT(section.columnData))
-        covmat.l_cols.append(_legendreOrder(section.columnData))
+        # A GNDS self-covariance states ENDF_MFMT on the row only (§25.2.3):
+        # its column is the same reaction, sliced at its own Legendre order.
+        column = section.columnData if section.columnData is not None else section.rowData
+        covmat.reaction_cols.append(_endfMT(column) if column.ENDF_MT is not None
+                                    else _endfMT(section.rowData))
+        covmat.l_cols.append(_legendreOrder(column))
         covmat.matrices.append(np.asarray(form.matrix, dtype=float))
         covmat.energy_grids.append([float(e) for e in form.rowGrid])
         covmat.is_relative.append(bool(form.isRelative))
@@ -509,6 +558,117 @@ def encodeMF34MT(source, mt: int, mat: Optional[int] = None,
         f"preserved; the file's original per-record split is not."
     )
     return section, report
+
+
+def _faithful(sections) -> bool:
+    """Whether to write each component as its own record (G6), not collapsed."""
+    return any(not isinstance(s.form, CovarianceMatrix)
+               or getattr(s.provenance, "sourceFormat", None) == "derived"
+               for s in sections)
+
+
+def _niRecord(form, mt: int, report):
+    """One NI sub-subsection for a §25 matrix form, with FUDGE's LB rule.
+
+    ``toENDF6/covariances/base.py`` and ``shortRangeSelfScalingVariance.py``:
+    a diagonal array is LB=1 (LB=0 when absolute), a symmetric one LB=5 LS=1,
+    a full square one LB=5 LS=0, a rectangular one LB=6; the short-range
+    self-scaling variance is LB=8 (LB=9 when it scales directly with the group
+    width). The array's storage is ``CovarianceMatrix.arrayStorage``, as GNDS
+    stated it; without it, the matrix's own shape decides.
+    """
+    from kika.endf.classes.mf33.mf33 import NISubSubsectionRecord
+
+    if isinstance(form, ShortRangeSelfScalingVariance):
+        inner = form.matrix
+        grid = [float(v) for v in inner.rowGrid]
+        values = [float(v) for v in np.diagonal(np.asarray(inner.matrix, dtype=float))] + [0.0]
+        lb = 9 if (form.dependenceOnProcessedGroupWidth or "") == "direct" else 8
+        return NISubSubsectionRecord(lb=lb, lt=0, ls=0, nt=2 * len(grid), np=len(grid),
+                                     ne=len(grid), e_table_k=grid, f_table_k=values)
+    matrix = np.asarray(form.matrix, dtype=float)
+    rows = [float(v) for v in form.rowGrid]
+    cols = [float(v) for v in form.columnGrid] if form.columnGrid is not None else rows
+    storage = getattr(form, "arrayStorage", None)
+    if storage is None:
+        offDiagonal = matrix - np.diag(np.diagonal(matrix)) if matrix.shape[0] == matrix.shape[1] else matrix
+        storage = ("diagonal" if rows == cols and not offDiagonal.any()
+                   else "symmetric" if rows == cols and np.array_equal(matrix, matrix.T)
+                   else "full")
+    if storage == "diagonal":
+        values = [float(v) for v in np.diagonal(matrix)] + [0.0]
+        return NISubSubsectionRecord(lb=1 if form.isRelative else 0, lt=0, ls=0,
+                                     nt=2 * len(rows), np=len(rows), ne=len(rows),
+                                     e_table_k=rows, f_table_k=values)
+    linked = getattr(form, "columnGridIsRowGrid", None)
+    if rows != cols or (linked is False and storage == "full"):
+        flat = [float(v) for v in matrix.reshape(-1)]
+        return NISubSubsectionRecord(lb=6, ls=0, nt=len(rows) + len(cols) + len(flat),
+                                     ne=len(rows), row_energies=rows, col_energies=cols,
+                                     rect_matrix=flat)
+    n = matrix.shape[0]
+    if storage == "symmetric":
+        upper = [float(matrix[i, j]) for i in range(n) for j in range(i, n)]
+        return NISubSubsectionRecord(lb=5, ls=1, nt=len(rows) + len(upper), ne=len(rows),
+                                     energies=rows, matrix=upper)
+    flat = [float(v) for v in matrix.reshape(-1)]
+    return NISubSubsectionRecord(lb=5, ls=0, nt=len(rows) + len(flat), ne=len(rows),
+                                 energies=rows, matrix=flat)
+
+
+def _ncRecord(form):
+    """An NC sub-subsection (LTY=0) for a §25 ``sum``: FUDGE's ``summed.py``."""
+    from kika.endf.classes.mf33.mf33 import NCSubSubsection
+
+    mts = [float(int(str(s.ENDF_MFMT).split(",")[1])) for s in form.summands]
+    return NCSubSubsection(lty=0, e1=float(form.domainMin or 0.0),
+                           e2=float(form.domainMax or 0.0), nci=len(mts),
+                           ci=[float(s.coefficient) for s in form.summands], xmti=mts)
+
+
+def _otherMaterial(link) -> int:
+    """MAT1: 0 for this material, else the MAT of the evaluation a link points into.
+
+    A GNDS cross-material covariance names the other evaluation by its external
+    file's label (``$Li6#/reactionSuite/...``), which is the target's id; its
+    MAT is ENDF-6's table entry, as FUDGE looks it up
+    (``toENDF6/covariances/covarianceSuite.py``).
+    """
+    import re
+
+    from kika._constants import ZAID_TO_ENDF_MAT
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    href = getattr(link, "href", "") or ""
+    match = re.match(r"\$([^#]+)#", href)
+    if match is None or match.group(1) in ("reactions",):
+        return 0
+    try:
+        return int(ZAID_TO_ENDF_MAT.get(zaFromPid(match.group(1)), 0))
+    except ValueError:
+        return 0
+
+
+def _faithfulSection(sections, mf: int, mt: int, za, awr, mat, report):
+    """MF31/MF33 written component by component (G6): NI per matrix, NC per sum."""
+    from kika.endf.classes.mf33.mf33 import MF33MT, Subsection
+
+    section = MF33MT(number=mt, _za=float(za), _awr=float(awr), _mat=int(mat or 0), _mf=mf)
+    for covariance in sections:
+        colMT = (_endfMT(covariance.columnData) if covariance.columnData is not None else mt)
+        components = (covariance.form.components if isinstance(covariance.form, Mixed)
+                      else [covariance.form])
+        sub = Subsection(xmf1=0.0, xlfs1=0.0, mat1=_otherMaterial(covariance.columnData),
+                         mt1=colMT)
+        for component in components:
+            if isinstance(component, Sum):
+                sub.nc_records.append(_ncRecord(component))
+            else:
+                sub.ni_records.append(_niRecord(component, mt, report))
+        sub.nc, sub.ni = len(sub.nc_records), len(sub.ni_records)
+        section._subsections.append(sub)
+    section._nl = len(section._subsections)
+    return section
 
 
 def encodeMF33MT(source, mt: int, mat: Optional[int] = None,
@@ -533,6 +693,8 @@ def encodeMF33MT(source, mt: int, mat: Optional[int] = None,
             f"invented. Decode from ENDF, where the header comes from the file."
         )
     resolvedMat = mat if mat is not None else getattr(provenance, "mat", None)
+    if _faithful(sections):
+        return _faithfulSection(sections, 33, mt, za, awr, resolvedMat, report), report
 
     built = None
     for section in sections:
@@ -588,6 +750,8 @@ def encodeMF31MT(source, mt: int, mat: Optional[int] = None,
             f"invented. Decode from ENDF, where the header comes from the file."
         )
     resolvedMat = mat if mat is not None else getattr(provenance, "mat", None)
+    if _faithful(sections):
+        return _faithfulSection(sections, 31, mt, za, awr, resolvedMat, report), report
 
     built = None
     for section in sections:

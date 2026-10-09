@@ -302,7 +302,8 @@ def test_mf13_photons_carry_fudges_esk_flag():
     suite, _ = decode("n14")
     flags = EndfConversionFlags.of(suite)
     assert flags is not None
-    mf13 = [f for _, f in flags.conversions if f.startswith("MF13,ESk=")]
+    # FUDGE's spelling: "MF13", plus ",ESk=..." only when ES is not 0.
+    mf13 = [f for _, f in flags.conversions if f.split(",")[0] == "MF13"]
     assert len(mf13) == sum(len(photons(suite.reactionByENDF_MT(mt).outputChannel))
                             for mt in (4, 103, 104, 105, 107))
 

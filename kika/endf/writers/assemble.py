@@ -203,7 +203,11 @@ def _mf3Bearing(suite):
     concatenating the two lists is what keeps the sections in the order a tape
     states them, which is the order the round-trip gate compares.
     """
-    both = list(suite.reactions) + list(suite.sums)
+    # MT851-870 are lumped covariance reactions (ENDF-6 §33.2): GNDS states
+    # them as crossSectionSums (NNDC's U-235 has `lump0`, `lump1`), and ENDF
+    # has no MF3 section for them -- they exist in MF33 only.
+    both = list(suite.reactions) + [s for s in suite.sums
+                                    if not (s.ENDF_MT is not None and 851 <= int(s.ENDF_MT) <= 870)]
     return sorted(both, key=lambda r: (r.ENDF_MT is None, r.ENDF_MT or 0))
 
 
@@ -437,8 +441,13 @@ def _mf6Sections(suite, mat, report, label=None):
         listed = {record["label"] for record in header["mf6"].get("products", ())
                   if record.get("label") is not None}
         forms = {}
-        for product in reaction.outputChannel.products:
-            if (product.label or product.pid) not in listed:
+        # The reaction's products, then the products of their decays: MF6 can
+        # list a residual's de-excitation photon (FUDGE does), and the model
+        # keeps that photon where GNDS puts it, in the residual's decay.
+        decays = [d for p in reaction.outputChannel.products
+                  for d in (getattr(getattr(p, "outputChannel", None), "products", None) or ())]
+        for product in list(reaction.outputChannel.products) + decays:
+            if (product.label or product.pid) not in listed or (product.label or product.pid) in forms:
                 continue
             form = _evaluatedForm(product, label)
             if form is not None and label != EVAL_LABEL:
@@ -511,6 +520,13 @@ def _covarianceSections(suite, mat, report):
         section, report = encode(covarianceSuite, mt, mat, report)
         sections.append((mf, mt, section))
 
+    # Lumped covariance components (ENDF-6 §33.2): a reaction that is part of
+    # lump MT851-870 has an MF33 section of its own holding only its HEAD, with
+    # MTL naming the lump. GNDS states the same membership as the summands of
+    # the lump's crossSectionSum (NNDC's U-235: `lump0`, `lump1`), so a suite
+    # read from GNDS gets those sections from them.
+    sections.extend(_lumpedComponents(suite, mat, present, report))
+
     # §25.3 lives in its own container, and it is **not** reachable through the
     # loop above -- `parameterCovariances` are not `covarianceSections`, so a
     # tape whose only covariance is MF32 produced an empty `present` and, until
@@ -521,6 +537,36 @@ def _covarianceSections(suite, mat, report):
         if section is not None:
             sections.append((32, 151, section))
     return sections, report
+
+
+def _lumpedComponents(suite, mat, present, report):
+    """The MTL-only MF33 sections of the reactions a lump (MT851-870) sums."""
+    import re
+
+    from kika.endf.classes.mf33.mf33 import MF33MT
+
+    provenance = getattr(suite, "provenance", None)
+    za, awr = getattr(provenance, "za", None), getattr(provenance, "awr", None)
+    byLabel = {r.label: r for r in list(suite.reactions) + list(suite.sums)}
+    out = []
+    for lump in suite.sums:
+        if lump.ENDF_MT is None or not 851 <= int(lump.ENDF_MT) <= 870:
+            continue
+        for summand in getattr(lump, "summands", None) or []:
+            href = getattr(summand, "href", "")
+            match = re.search(r"\[@label='([^']*)'\]", href)
+            member = byLabel.get(match.group(1)) if match else None
+            if member is None or member.ENDF_MT is None or (33, int(member.ENDF_MT)) in present:
+                continue
+            if za is None or awr is None:
+                report.lost(f"MF33/MT{member.ENDF_MT}: a lumped component with no ZA/AWR "
+                            f"to write its header with")
+                continue
+            out.append((33, int(member.ENDF_MT),
+                        MF33MT(number=int(member.ENDF_MT), _za=float(za), _awr=float(awr),
+                               _mtl=int(lump.ENDF_MT), _nl=0,
+                               _mat=int(mat if mat is not None else getattr(provenance, "mat", 0) or 0))))
+    return out
 
 
 def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,

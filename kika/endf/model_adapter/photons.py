@@ -133,6 +133,14 @@ def _function1d(interp, x, y, axes=None):
 
 
 def _tab1Of(function) -> Tuple[List[Tuple[int, int]], List[float], List[float]]:
+    from kika.nuclear_data.model.functions.simple import Constant1d
+
+    if isinstance(function, Constant1d):
+        # A constant multiplicity (GNDS writes one for a photon of a suite that
+        # never saw ENDF): its two end points, lin-lin -- FUDGE's
+        # toPointwise_withLinearXYs, which is how its toENDF6 writes it.
+        lo, hi, c = float(function.domainMin), float(function.domainMax), float(function.constant)
+        return [(2, 2)], [lo, hi], [c, c]
     x, y, pairs = function.toEndfRegions()
     return ([(int(a), int(b)) for a, b in pairs],
             [float(v) for v in x], [float(v) for v in y])
@@ -523,7 +531,7 @@ def _attach(suite, host: _Host, sections, mt, report) -> Optional[str]:
         fields["interps"] = [[list(i) for i in p.interp] for p in production.photons]
         fields["totalInterp"] = ([list(i) for i in production.total.interp]
                                  if production.total else None)
-        _flagMF13(suite, channelPath, labels, production)
+    _flagPhotons(suite, channelPath, labels, production, mf)
     provenance.headerFields[f"mf{mf}"] = fields
     if mf14 is not None:
         provenance.headerFields["mf14"] = _mf14Fields(mf14, production, labels)
@@ -543,18 +551,26 @@ def _attach(suite, host: _Host, sections, mt, report) -> Optional[str]:
     return None
 
 
-def _flagMF13(suite, channelPath, labels, production) -> None:
-    """FUDGE's ``MF13,ESk=`` on each photon, so FUDGE can return MF13 (J3)."""
+def _flagPhotons(suite, channelPath, labels, production, mf: int) -> None:
+    """FUDGE's flags on each photon (decision J3), as its ENDF->GNDS writes them
+    (``ENDF_ITYPE_0_Misc.addGammaProduct``): ``MF13`` on a photon of MF13, and
+    ``ESk=`` on any photon of MF12 or MF13 whose origin level ES is not 0 -- so
+    FUDGE, and kika's own GNDS->ENDF (E5e), can give both back."""
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
 
+    wanted = []
+    for label, photon in zip(labels, production.photons):
+        items = (["MF13"] if mf == 13 else []) + (
+            [f"ESk={float(photon.es)!r}"] if photon.es else [])
+        if items:
+            wanted.append((f"{channelPath}/products/product[@label='{label}']", ",".join(items)))
+    if not wanted:
+        return
     flags = EndfConversionFlags.of(suite)
     if flags is None:
         flags = EndfConversionFlags()
         suite.applicationData.entries.append(flags)
-    for label, photon in zip(labels, production.photons):
-        flags.conversions.append(
-            (f"{channelPath}/products/product[@label='{label}']",
-             f"MF13,ESk={float(photon.es)!r}"))
+    flags.conversions.extend(wanted)
 
 
 def _mf14Fields(mf14, production, labels) -> dict:
@@ -910,14 +926,21 @@ def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
     if series[2] == 0:
         return "LO=2 on the ground state of a series, which has nothing to decay to"
     energies = _levelEnergies(suite, sections12, series)
-    levelEnergy = float(section.es_ns)
+    # The level's energy in PoPs is MF3's QM - QI: the Q the reaction states is
+    # the one FUDGE's toENDF6 writes back as QI + level (reactions/base.py), so
+    # a suite written to GNDS and read back derives the tape's QM exactly.
+    # MF12's own ES_NS, when it differs (94 sections of ENDF/B-VIII.1, 1 740
+    # of JEFF-4.0), is kept for the section and written back with it.
+    esNs = float(section.es_ns)
     qm, qi = getattr(provenance, "qm", None), getattr(reaction.outputChannel.Q, "value", None)
-    if qm is not None and qi is not None and float(qm) - float(qi) != levelEnergy:
-        report.warn(
-            f"MT{mt}: MF12 states the level at ES={levelEnergy!r} eV and MF3's "
-            f"QM-QI gives {float(qm) - float(qi)!r} eV; the level energy is "
-            f"MF12's and the decay Q stays MF3's (FUDGE keeps whichever has more "
-            f"digits; kika keeps both)")
+    levelEnergy = esNs
+    if qm is not None and qi is not None:
+        levelEnergy = float(qm) - float(qi)
+        if levelEnergy != esNs:
+            report.warn(
+                f"MT{mt}: MF12 states the level at ES={esNs!r} eV and MF3's QM-QI "
+                f"gives {levelEnergy!r} eV; PoPs carries MF3's, the MF12 section "
+                f"keeps its own (FUDGE keeps whichever has more digits)")
 
     lg = int(section.lg)
     modes = DecayModes()
@@ -970,9 +993,10 @@ def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
         **_head(section), "lo": 2, "lg": lg, "ns": section._ns, "n2": section._n2,
         "listC2": section.list_c2, "lp": section.lp, "listL2": section.list_l2,
         "nt": section.nt, "pad": _pad(section), "level": levelPid,
+        "esNs": esNs, "levelEnergy": levelEnergy,
         "host": residual.label, "finals": finals,
         "lines": str(section).split("\n"),
-        "digest": _cascadeDigest(levelEnergy, section.transitions),
+        "digest": _cascadeDigest(esNs, section.transitions),
     }
     if mf14 is not None:
         provenance.headerFields["mf14"] = _mf14Fields(mf14, None, [])
@@ -1000,8 +1024,17 @@ def _cascadeRows(suite, fields, mt):
               if mode.photonEmissionProbabilities is not None else None)
         rows.append((es, float(mode.probability), gp) if fields["lg"] == 2
                     else (es, float(mode.probability)))
+    if fields.get("sortDescending"):
+        # A cascade derived for a GNDS-read suite (E5e): FUDGE's order,
+        # decreasing final-level energy.
+        rows.sort(key=lambda row: row[0], reverse=True)
     energy = getattr(level, "energy", None)
-    return (float(energy.value) if energy is not None else 0.0), rows
+    value = float(energy.value) if energy is not None else 0.0
+    if fields.get("esNs") is not None and value == fields.get("levelEnergy"):
+        # The level was not moved: the section's own ES_NS, which may differ
+        # from MF3's QM - QI that PoPs carries.
+        value = float(fields["esNs"])
+    return value, rows
 
 
 def _encodeCascade(suite, fields, mt, mat, report):

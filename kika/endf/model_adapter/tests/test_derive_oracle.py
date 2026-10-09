@@ -13,7 +13,12 @@ with the phase that closes it**, and the test fails both ways --
 The phases are those of ``docs/library/gnds_to_endf_plan.md`` and
 ``endf_coverage_remaining_plan.md``. Measured 2026-10-09 on ``develop`` with the
 projectile fix of this change (an alpha tape used to decode as neutron-incident,
-so AWI and NSUB could not be derived back).
+so AWI and NSUB could not be derived back). G3 (MF4's LTT/LI/LCT/NM,
+``derive/products.py``) closed the products' ``<node>`` row the same day; on
+131 whole tapes sampled from the three libraries it derives LTT, LI and LCT
+exactly. G4a (the nu-bars, MF1/458) and G4b (MF5: tables, the five §18.3 laws,
+weighted sums and MT455's families) closed their rows next: every MF5 block of
+the cuts, kept bytes included, is derived as the file states it.
 """
 from __future__ import annotations
 
@@ -34,16 +39,32 @@ TAPES = sorted(p for p in DATA.glob("micro_*.endf") if "tsl" not in p.name)
 #: start of its message.
 PENDING = {
     # -- the files no deriver writes yet --------------------------------------
-    ("Product", "<node>"): "G3 (MF4) and G4b/G4c (MF5, MF6)",
-    ("Multiplicity", "<node>"): "G4a (MF1/452-456)",
-    ("DelayedNeutrons", "<node>"): "G4a (MF1/455)",
-    ("FissionEnergyRelease", "<node>"): "G4a (MF1/458)",
-    ("Reaction", "headerFields.mf6"): "G4c (MF6)",
-    ("Reaction", "headerFields.mf12"): "E5e (photons from the model)",
-    ("Reaction", "headerFields.mf13"): "E5e",
-    ("Reaction", "headerFields.mf14"): "E5e",
-    ("Reaction", "headerFields.mf15"): "E5e",
-    ("ReactionSuite", "headerFields.photonsVerbatim"): "E5c (MF12 LO=2 kept as bytes)",
+    ("FissionEnergyRelease", "headerFields.replaced"):
+        "MF1/458 LFC=1: the thermal value and σ the LIST repeats beside a "
+        "tabulated term are not in the model (FUDGE writes σ=0)",
+    ("Reaction", "headerFields.mf6"):
+        "G4c derives every MF6 of the neutron cuts; what is left is what the "
+        "model does not hold: LAW=5 (charged-particle elastic, refused by name) "
+        "and the LAW=4 recoil of it, a particle the evaluation gives two masses "
+        "(alpha AWP beside the He-4 target's AWR; C-12's MT5 residual) where "
+        "PoPs holds one, ND>0 (Be-9 MT701's discrete photon point), and "
+        "U-235's MT18 at JP=11 with its P(nu) subsections (no model node, J8)",
+    ("Reaction", "headerFields.mf12"):
+        "E5e derives MF12 from the model; what differs is what the model does "
+        "not hold: an LO=2 section's own bytes and SHA-256 (the derived one is "
+        "rebuilt from PoPs, in FUDGE's decreasing order and with its LP=0), and "
+        "LP of a line with ES != 0 (FUDGE's rule writes 1; Li-7 and N-14 state 0)",
+    ("Reaction", "headerFields.mf13"):
+        "E5e derives MF13; the model holds the multiplicity on MF13's grid "
+        "united with sigma's (decision J5), so the derived sigma_gamma is on that "
+        "grid and not on the file's own, and LP follows FUDGE's rule as in MF12",
+    ("ReactionSuite", "headerFields.photonsVerbatim"):
+        "MF12 LO=2 cascades whose ES_i name no level of the cut (Fe-56 without "
+        "MT51) and MF13 on an MT with no MF3 (N-14 MT28/32): kept as bytes",
+    ("Product", "headerFields.nm"):
+        "the libraries' NM disagrees with their data (JEFF-4.0 Fe-56 states 31 "
+        "beside a 32nd-order row; 74 of 131 sampled tapes state 0); derived is "
+        "the highest order, ENDF-102's and FUDGE's",
     ("Resonances", "<node>"): "G5 (MF2), outside this line (D5)",
     # -- not derivable, by nature --------------------------------------------
     ("ReactionSuite", "headerFields.tpid"):
@@ -54,14 +75,36 @@ PENDING = {
         "tape LRP follows MF2, which is G5",
     ("ReactionSuite", "headerFields.lfi"):
         "Cm-243's cut keeps MT51-53 only, so nothing in it says fissionable",
+    ("Product", "headerFields.ltt"):
+        "Cf-252's cut keeps MF5/MT18 and not its MF4: the decoder gives the "
+        "neutron an isotropic angular half, which derives an MF4 the cut lacks",
+    ("Product", "headerFields.li"): "see ltt",
+    ("Product", "headerFields.lct"): "see ltt",
     ("ReactionSuite", "headerFields.awi"):
-        "alpha on He-4: projectile and target share the id He4, and one PoPs "
-        "entry carries one mass (AWR's, not AWI's)",
+        "alpha on He-4, d on H-2: projectile and target share one id, and one "
+        "PoPs entry carries one mass (AWR's, not AWI's)",
     # -- tapes that are not whole evaluations --------------------------------
     ("refused", "MF1/451 needs EMAX"):
         "covariance-only cuts (MF1 + MF31-35): no MF3, no energy domain; G6",
     ("refused", "no ENDF MAT for the target 'unknown'"):
         "synthetic covariance tapes with no MF1/451",
+}
+
+
+#: Kinds that are a cut's artefact may occur on that cut only: anywhere else
+#: they would be a deriver's error, not the named exception.
+ONLY_ON = {
+    ("Product", "headerFields.ltt"): {"micro_cf252_pfns"},
+    ("Product", "headerFields.li"): {"micro_cf252_pfns"},
+    ("Product", "headerFields.lct"): {"micro_cf252_pfns"},
+    ("ReactionSuite", "headerFields.lfi"): {"micro_cm243_photons"},
+    ("ReactionSuite", "headerFields.awi"): {"micro_a_he4_mf6", "micro_d_h2_mf6"},
+    ("Reaction", "headerFields.mf6"): {"micro_a_he4_mf6", "micro_be9_mf6",
+                                       "micro_c12_mf6", "micro_d_h2_mf6",
+                                       "micro_h3_he4_mf6", "micro_p_he3_mf6",
+                                       "micro_t_li7_mf6", "micro_u235_mf6",
+                                       "micro_u235_photons"},
+    ("FissionEnergyRelease", "headerFields.replaced"): {"micro_u235_fission_energy"},
 }
 
 
@@ -94,6 +137,12 @@ def test_the_corpus_is_the_micro_tapes():
 def test_every_remaining_mismatch_is_a_named_pending_phase(table):
     unexpected = {key: where[:3] for key, where in table.items() if key not in PENDING}
     assert not unexpected, f"mismatches no phase accounts for: {unexpected}"
+
+
+def test_a_cuts_artefact_occurs_on_that_cut_only(table):
+    stray = {key: [w for w in table[key] if w.split(":")[0] not in tapes]
+             for key, tapes in ONLY_ON.items() if key in table}
+    assert not {k: v for k, v in stray.items() if v}, stray
 
 
 def test_g1_and_g2_fields_derive_exactly(table):

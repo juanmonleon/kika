@@ -63,6 +63,7 @@ from kika.nuclear_data.model import (
     Polynomial1d,
     Product,
     Regions1d,
+    XYs1d,
     multiplicityAxes,
 )
 
@@ -414,7 +415,9 @@ def nubarNode(suite, mt: int):
 def _tab1FromMultiplicity(multiplicity, mt: int, label: str = EVAL_LABEL):
     """``(interpolation, energies, values)`` out of a tabulated multiplicity."""
     function = _formUnder(multiplicity, label)
-    if isinstance(function, Regions1d):
+    # An XYs1d too: a nu-bar read from GNDS is one (NNDC writes MT452/455 as
+    # XYs1d), and it is one region of the same TAB1.
+    if isinstance(function, (Regions1d, XYs1d)):
         xs, ys, pairs = function.toEndfRegions()
         return [(int(nbt), int(code)) for nbt, code in pairs], list(xs), list(ys)
     raise ValueError(

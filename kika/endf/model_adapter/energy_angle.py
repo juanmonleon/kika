@@ -87,6 +87,7 @@ from kika.nuclear_data.model import (
     Legendre,
     Multiplicity,
     NBodyPhaseSpace,
+    PhysicalQuantity,
     Regions1d,
     Uncorrelated,
     Unspecified,
@@ -575,16 +576,21 @@ def _phaseSpace(body, frame: Frame) -> Uncorrelated:
     ``isotropic2d`` angular half and an ``NBodyPhaseSpace`` energy half with
     ``numberOfProducts`` and no mass.
 
-    **``APSX`` stays in the provenance and ``mass`` stays ``None``.** ENDF gives
-    the total mass of the N products in units of the neutron mass and
-    :class:`~kika.nuclear_data.model.distributions.NBodyPhaseSpace` states it as
-    a :class:`~kika.nuclear_data.model.quantities.PhysicalQuantity`, so filling
-    it means choosing a neutron mass and writing a number the evaluator did not.
-    The §4.1 scattering radius made that mistake expensive once already.
+    **``mass`` is ``APSX`` neutron masses, in amu** -- the rule the target's
+    mass follows (AWR times :data:`~kika._constants.NEUTRON_MASS_AMU`), so the
+    number derives back to the file's APSX exactly. It used to stay ``None``,
+    on the argument that filling it chooses a neutron mass; but the distributed
+    GNDS writes it (Li-6 MT41: 7.0278 amu) and FUDGE's ``toENDF6`` reads it,
+    so a suite without it could not be written back to MF6 by anyone (roadmap
+    G4c). The provenance keeps the file's APSX for the ENDF round trip as before.
     """
+    from kika._constants import NEUTRON_MASS_AMU
+
     return Uncorrelated(
         angular=Isotropic2d(productFrame=frame),
-        energy=NBodyPhaseSpace(numberOfProducts=int(body.npsx)),
+        energy=NBodyPhaseSpace(numberOfProducts=int(body.npsx),
+                               mass=PhysicalQuantity(value=float(body.apsx) * NEUTRON_MASS_AMU,
+                                                     unit="amu")),
         productFrame=frame,
     )
 
@@ -849,7 +855,19 @@ def _restoreLaw(record: dict, form, mt: int):
         return _restoreKalbachMann(form, fields, index, mt)
 
     if law == 1 and fields.get("lang") == 1:
-        if isinstance(form, Uncorrelated):
+        from kika.nuclear_data.model import DiscreteGamma
+
+        if isinstance(form, Uncorrelated) and isinstance(form.energy, DiscreteGamma):
+            # A discrete line (ND=1 at both ends of its domain): what FUDGE
+            # writes for a residual's de-excitation photon in MF6.
+            from types import SimpleNamespace
+
+            line = form.energy
+            nodes = [SimpleNamespace(outerDomainValue=float(line.domainMin)),
+                     SimpleNamespace(outerDomainValue=float(line.domainMax))]
+            pairs = [(2, 2)]
+            rows = [[float(line.value), 1.0], [float(line.value), 1.0]]
+        elif isinstance(form, Uncorrelated):
             nodes, pairs = toEndfTab2(form.energy)
             rows = [_interleave(node.xs, node.ys) for node in nodes]
         elif isinstance(form, EnergyAngular):
@@ -1093,7 +1111,7 @@ def encodeMF6MT(forms: Optional[Dict[str, object]],
 
     report = report if report is not None else ConversionReport()
     fields = (provenance.headerFields.get("mf6")
-              if provenance is not None and provenance.sourceFormat == "endf"
+              if provenance is not None and provenance.sourceFormat in ("endf", "derived")
               else None)
     if fields is None:
         raise ValueError(

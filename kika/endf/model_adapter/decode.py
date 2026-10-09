@@ -190,7 +190,10 @@ def _projectile(headerProvenance) -> Tuple[str, Optional[Particle]]:
     if ipart < 1000:
         return "n", _neutron()
     awi = fields.get("awi")
-    mass = (PhysicalQuantity(value=float(awi) * NEUTRON_MASS_AMU, unit="amu")
+    # AWI of a light ion is its nuclear mass; PoPs carries the atomic one.
+    from .light_masses import atomicFromRatio
+
+    mass = (PhysicalQuantity(value=atomicFromRatio(ipart, awi), unit="amu")
             if awi else None)
     pid = pidFromZA(ipart)
     return pid, Nuclide(id=pid, Z=ipart // 1000, A=ipart % 1000, mass=mass)
@@ -274,9 +277,12 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
         # toENDF6 reads it (`target.energy[0]`) and stops without it, so a
         # GNDS file kika writes from a tape could not be written back to ENDF
         # by FUDGE (found by the E5c oracle, test_fudge_in_the_loop).
+        # LIS too: a metastable target (ENDF/B-VIII.1 Re-186m1, LIS=4) is
+        # that level, and MF1/451's LIS/ELIS/LISO are derived back from it.
         elis = getattr(mt451, "_elis", None)
         pops.add(Nuclide(id=pidFromZA(za), Z=za // 1000, A=za % 1000, mass=mass,
                          halflife=halflife,
+                         nuclearLevel=int(getattr(mt451, "_lis", 0) or 0),
                          energy=PhysicalQuantity(value=float(elis or 0.0), unit="eV")))
 
     style = Evaluated(
@@ -835,7 +841,75 @@ def _attachEnergyAngleDistributions(suite: ReactionSuite, mf6mt, mt: int,
             product.distribution = Distribution()
         product.distribution[EVAL_LABEL] = distribution
 
+    _addProductsToPoPs(suite, provenance.headerFields["mf6"]["products"])
+    _flagMF6(suite, reaction, provenance.headerFields["mf6"])
     return report
+
+
+def _flagMF6(suite, reaction, fields) -> None:
+    """FUDGE's ``ENDFconversionFlags`` ``MF6`` on the products of an MF6 section.
+
+    What NNDC's GNDS carries (U-235: ``MF6`` on the neutron of every level
+    reaction) and what FUDGE's ENDF->GNDS writes, for the reason it exists: a
+    two-body reaction or a photon continuum stated in MF6 would otherwise go
+    back to MF4 or MF15 by the form rule, which is not the file kika read.
+    Writing FUDGE's flag is the precedent of ``MF13,ESk=`` (decision J3), not
+    a hint of kika's own (D4). A section with a deferring subsection (LAW<0,
+    the P(nu) records of a JP>0 fission section) is not flagged: the model has
+    no node for those, so MF6 could not be derived back from it anyway.
+    """
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    from .derive.reactions import reactionHref
+
+    records = fields.get("products") or []
+    if any(int(r["law"]) < 0 for r in records) or int(fields.get("jp", 0) or 0):
+        return
+    flags = EndfConversionFlags.of(suite)
+    if flags is None:
+        flags = EndfConversionFlags()
+        suite.applicationData.entries.append(flags)
+    base = reactionHref(reaction) + "/outputChannel/products/product"
+    for record in records:
+        if record.get("label") is not None:
+            flags.conversions.append((f"{base}[@label='{record['label']}']", "MF6"))
+
+
+def _addProductsToPoPs(suite, records) -> None:
+    """Every particle MF6 names, in PoPs with the mass AWP states (G4c).
+
+    MF6 gives each product's mass as AWP in neutron masses, and the model has
+    one place for a mass: PoPs. Without this an ENDF-decoded suite lost every
+    product mass but the target's, so a GNDS file written from it had none --
+    FUDGE's has them all -- and MF6 could not be derived back (its AWP had no
+    source). The target's mass is AWR neutron masses by the same rule.
+    """
+    from kika._constants import NEUTRON_MASS_AMU
+    from kika.nuclear_data.model import Particle
+
+    pops = getattr(suite, "PoPs", None)
+    if pops is None:
+        return
+    for record in records:
+        pid = record.get("pid")
+        if pid is None or pid in pops.particles or pid == "n":
+            continue
+        if pid == "photon":
+            pops.add(Particle(id="photon", mass=PhysicalQuantity(value=0.0, unit="amu"),
+                              spin=PhysicalQuantity(value=1.0, unit="hbar"),
+                              parity=1, charge=0, halflife="stable"))
+            continue
+        za = int(round(float(record["zap"])))
+        if za < 1000:
+            continue
+        # Atomic in PoPs, as FUDGE and the distributed files have it: AWP of a
+        # hydrogen or helium isotope is a nuclear mass (light_masses.py).
+        from .light_masses import atomicFromRatio
+
+        pops.add(Nuclide(id=pid, Z=za // 1000, A=za % 1000,
+                         nuclearLevel=int(record.get("lip", 0) or 0),
+                         mass=PhysicalQuantity(value=atomicFromRatio(za, record["awp"]),
+                                               unit="amu")))
 
 
 def _attachMultiplicity(product, multiplicity, pid: str, mt: int,

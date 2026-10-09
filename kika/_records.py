@@ -86,20 +86,23 @@ def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
 
     sign_char = "-" if value < 0 else " "
     abs_val = abs(value)
-    exponent = int(math.floor(math.log10(abs_val)))
-    mantissa = abs_val / (10 ** exponent)
 
-    # Select the number of decimals so that sign + mantissa + exponent sign +
-    # exponent digits stays exactly 11 characters: one decimal is given up for
-    # each extra digit the exponent needs.
-    prec = _mantissa_precision(exponent)
-    mantissa_str = f"{mantissa:1.{prec}f}"
-    # Rounding overflow: e.g. 9.9999999 -> "10.000000" (length > prec + 2)
-    if len(mantissa_str) > prec + 2:
-        mantissa /= 10.0
-        exponent += 1
+    # Python's own scientific formatting rounds the exact binary value once,
+    # correctly. The mantissa used to be ``abs_val / 10**exponent`` rounded
+    # afterwards -- a division that rounds first and a format that rounds
+    # again, so 7.0760435e-4 (NNDC's Fe-56 MT103) came out 7.076043 where
+    # FUDGE and any correct rounding write 7.076044. The reader had the same
+    # defect and lost it on 2026-08-24 (memory `endf-float-parse-rounded-twice`).
+    # The number of decimals keeps the field at 11 characters: one is given up
+    # for each extra digit the exponent needs, and a carry that changes the
+    # exponent's width (9.99999e9 -> 1.0e10) is formatted again.
+    prec = _mantissa_precision(int(math.floor(math.log10(abs_val))))
+    while True:
+        mantissa_str, exponent_str = f"{abs_val:.{prec}e}".split("e")
+        exponent = int(exponent_str)
+        if _mantissa_precision(exponent) == prec:
+            break
         prec = _mantissa_precision(exponent)
-        mantissa_str = f"{mantissa:1.{prec}f}"
 
     exp_str = f"{abs(exponent):d}" if abs(exponent) < 10 else (
         f"{abs(exponent):02d}" if abs(exponent) < 100

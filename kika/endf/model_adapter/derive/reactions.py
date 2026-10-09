@@ -176,6 +176,29 @@ def _continuum(reaction, mt: int, qi, context: DerivationContext, report):
     return qm, lr
 
 
+def _nonNeutrinoEnergy(reaction) -> Optional[float]:
+    """MF1/458's ER (the energy release less the neutrinos) at thermal, or ``None``."""
+    from kika.nuclear_data.model import Polynomial1d
+
+    data = getattr(getattr(reaction, "outputChannel", None), "fissionFragmentData", None)
+    releases = list(getattr(data, "fissionEnergyReleases", None) or [])
+    if not releases:
+        return None
+    term = getattr(releases[0], "nonNeutrinoEnergy", None)
+    if not isinstance(term, Polynomial1d) or not len(term.coefficients):
+        return None
+    return float(term.coefficients[0])
+
+
+def _levelEnergy(suite, residual) -> Optional[float]:
+    """The PoPs energy of an excited residual level, or ``None``."""
+    particle = suite.PoPs.particles.get(residual.pid) if suite.PoPs is not None else None
+    if particle is None or not getattr(particle, "nuclearLevel", 0):
+        return None
+    energy = getattr(particle, "energy", None)
+    return float(energy.value) if energy is not None else None
+
+
 def _q(value) -> Optional[float]:
     return None if value is None else float(value)
 
@@ -201,8 +224,14 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
         residual = None if isinstance(reaction, CrossSectionSum) else _decayingResidual(reaction)
         if residual is not None:
             decayQ = _q(getattr(residual.outputChannel.Q, "value", None))
-            qm = None if qi is None or decayQ is None else qi + decayQ
             lr = _lr(residual, reaction.label, report)
+            # FUDGE's rule (toENDF6/reactions/base.py): a breakup's QM is QI plus
+            # the decay's Q, a gamma cascade's is QI plus the level's energy in
+            # PoPs. They differ where the evaluation's MF12 ES and its MF3
+            # QM - QI do (NNDC's Fe-56 MT802: decay Q 1006270.0, level 1006270.1).
+            level = _levelEnergy(context.suite, residual) if lr == 0 else None
+            shift = level if level is not None else decayQ
+            qm = None if qi is None or shift is None else qi + shift
         elif mt == 4 and context.suite.projectile == "n" and "_e" not in context.suite.target:
             qm = 0.0
         elif mt in _CONTINUUM_SERIES and not isinstance(reaction, CrossSectionSum):
@@ -210,14 +239,43 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
         else:
             qm = qi
 
+    # A fission reaction's MF3 QM and QI are the energy release less the
+    # neutrinos, MF1/458's ER at thermal: FUDGE's rule
+    # (toENDF6/reactionData/crossSection.py:65-69) and what the libraries
+    # write (ENDF/B-VIII.1 U-235: 1.94077e8 eV, where GNDS's Q is 1.812389e8).
+    released = _nonNeutrinoEnergy(reaction)
+    if released is not None:
+        qi = qm = released
+
     regions = []
     if EVAL_LABEL in reaction.crossSection and hasattr(reaction.crossSection[EVAL_LABEL], "toEndfRegions"):
         _, _, regions = reaction.crossSection[EVAL_LABEL].toEndfRegions()
 
+    header = {"qi": qi} if qi != q else {}
+    # G4c: a reaction whose distributions only MF6 states carries the MF6
+    # block on its own provenance, as one read from ENDF does.
+    from .energy_angle import goesToMF6, mf6Fields
+
+    inMF6 = False
+    if (not isinstance(reaction, CrossSectionSum) or reaction.outputChannel is not None) \
+            and getattr(reaction, "outputChannel", None) is not None \
+            and goesToMF6(reaction, context):
+        fields = mf6Fields(reaction, context, report)
+        if fields is not None:
+            header["mf6"] = fields
+            inMF6 = True
+    # E5e: its photons' MF12-15, from the model (a level's cascade from PoPs).
+    if not isinstance(reaction, CrossSectionSum):
+        from .photons import photonFields
+
+        orphan = any(reaction is o for o in context.suite.orphanProducts)
+        path = (f"/reactionSuite/orphanProducts/orphanProduct[@label='{reaction.label}']"
+                if orphan else reactionHref(reaction))
+        header.update(photonFields(reaction, context, report, path, inMF6=inMF6))
     return EndfProvenance(sourceFormat=DERIVED, mat=context.mat, za=context.za,
                           awr=context.awr, qm=qm, lr=lr,
                           interpolationRegions=[tuple(pair) for pair in regions],
-                          headerFields={"qi": qi} if qi != q else {})
+                          headerFields=header)
 
 
 def _isReaction(node) -> bool:
