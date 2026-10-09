@@ -151,9 +151,9 @@ from .pops import MetaStable, Nuclide, Particle, PoPs, Unorthodox, pidFromZA, za
 from .fission_yields import (CUMULATIVE, INDEPENDENT, ElapsedTime, IncidentEnergy,
                              ProductYield, Yields)
 from .decay import (AVERAGE_ENERGY_LABELS, ELECTROMAGNETIC, SPECTRUM_LABELS,
-                    TRANSITION_TYPES, Continuum, Decay, DecayData, DecayMode,
+                    TRANSITION_TYPES, CascadeLine, Continuum, Decay, DecayData, DecayMode,
                     DecayModes, DecayPath, Discrete, PhotonEmissionProbabilities, Shell,
-                    Spectrum)
+                    Spectrum, cascadeLines)
 from .provenance import (AceProvenance, EndfProvenance, G4NDLCaptureProvenance,
                          G4NDLFissionProvenance,
                          G4NDLInelasticProvenance,
@@ -251,7 +251,7 @@ __all__ = [
     "PoPs", "Particle", "Nuclide", "Unorthodox", "pidFromZA", "zaFromPid",
     "DecayData", "DecayModes", "DecayMode", "DecayPath", "Decay",
     "PhotonEmissionProbabilities", "Shell", "ELECTROMAGNETIC",
-    "Spectrum", "Discrete", "Continuum", "TRANSITION_TYPES", "SPECTRUM_LABELS",
+    "Spectrum", "Discrete", "CascadeLine", "cascadeLines", "Continuum", "TRANSITION_TYPES", "SPECTRUM_LABELS",
     "AVERAGE_ENERGY_LABELS", "MetaStable",
     "ProductYield", "ElapsedTime", "IncidentEnergy", "Yields", "INDEPENDENT",
     "CUMULATIVE",

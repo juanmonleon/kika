@@ -27,7 +27,7 @@ is still reported rather than read.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .output_channel import Product
 from .quantities import PhysicalQuantity
@@ -35,7 +35,8 @@ from .quantities import PhysicalQuantity
 __all__ = ["Shell", "PhotonEmissionProbabilities", "Decay", "DecayPath",
            "DecayMode", "DecayModes", "DecayData", "ELECTROMAGNETIC",
            "Spectrum", "Discrete", "Continuum", "TRANSITION_TYPES",
-           "SPECTRUM_LABELS", "AVERAGE_ENERGY_LABELS"]
+           "SPECTRUM_LABELS", "AVERAGE_ENERGY_LABELS", "CascadeLine",
+           "cascadeLines"]
 
 #: The ``mode`` of a gamma transition, as §12 and FUDGE spell it.
 ELECTROMAGNETIC = "electroMagnetic"
@@ -213,3 +214,84 @@ class DecayData:
         spectra = sum(len(m.spectra) for m in self.decayModes)
         tail = f", {spectra} spectrum(a)" if spectra else ""
         return f"DecayData({len(self.decayModes)} decayMode(s){tail})"
+
+
+# ---------------------------------------------------------------------------
+# A level's gamma lines, the whole cascade down
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CascadeLine:
+    """One gamma line a level emits on its way to the ground state.
+
+    ``photons`` is the number of photons of this line per decay of the level
+    the cascade started from: the probability of reaching ``initial``, times
+    the transition's probability (TP), times its photon emission probability
+    (GP, 1 when the level states none). ``energy`` is ENDF's E_i - E_f, in eV,
+    without the recoil the nucleus takes.
+    """
+
+    initial: str
+    final: str
+    energy: float
+    photons: float
+
+
+def _levelEnergy(particle) -> Optional[float]:
+    """A level's excitation energy in eV; a ground state that states none is 0."""
+    energy = getattr(particle, "energy", None)
+    if energy is None:
+        return 0.0 if particle is not None and getattr(particle, "nuclearLevel", None) == 0 else None
+    return float(energy.convertedTo("eV").value) if energy.unit else float(energy.value)
+
+
+def cascadeLines(pops, pid: str) -> List[CascadeLine]:
+    """Every gamma line of ``pid``'s decay, with its photons per decay of ``pid``.
+
+    A level's ``decayData`` states only its own transitions (MF12 LO=2: TP and
+    GP to each level below); a level below decays again by its own, and so on
+    to a level with no ``decayData``, usually the ground state. Following the
+    cascade gives what a reaction leaving the residual in ``pid`` emits: the
+    lines of every level it passes through, each weighted by the probability of
+    passing. Lines are ordered by decreasing energy; an empty list means
+    ``pid`` has no decay data. A transition to a level not in ``pops``, or with
+    no energy, is skipped, since its photon energy is unknown.
+
+    Conversion electrons (GP < 1) still move the nucleus down: the level below
+    is reached with probability TP whatever GP is.
+    """
+    particles = pops.particles
+    population: Dict[str, float] = {pid: 1.0}
+    lines: Dict[tuple, float] = {}
+    # Visit levels from the top down, so a level's population is complete
+    # (every path into it summed) before its own transitions spread it on.
+    pending = {pid}
+    while pending:
+        current = max(pending, key=lambda p: _levelEnergy(particles.get(p)) or 0.0)
+        pending.discard(current)
+        particle = particles.get(current)
+        data = getattr(particle, "decayData", None)
+        energy = _levelEnergy(particle)
+        if data is None or energy is None:
+            continue
+        weight = population[current]
+        for mode in data.decayModes:
+            if mode.mode != ELECTROMAGNETIC:
+                continue
+            final = mode.finalState()
+            finalEnergy = _levelEnergy(particles.get(final)) if final is not None else None
+            if finalEnergy is None or finalEnergy >= energy:
+                continue
+            reach = weight * float(mode.probability)
+            gp = (mode.photonEmissionProbabilities.total()
+                  if mode.photonEmissionProbabilities is not None else None)
+            key = (current, final)
+            lines[key] = lines.get(key, 0.0) + reach * (1.0 if gp is None else float(gp))
+            population[final] = population.get(final, 0.0) + reach
+            pending.add(final)
+    out = [CascadeLine(initial=i, final=f,
+                       energy=_levelEnergy(particles[i]) - _levelEnergy(particles[f]),
+                       photons=n)
+           for (i, f), n in lines.items()]
+    out.sort(key=lambda line: -line.energy)
+    return out
