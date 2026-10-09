@@ -199,6 +199,14 @@ PERMANENT_IMPORTERS = {
     # `kika.endf.model_adapter.decay_sublibrary` and `.fission_yields` in its
     # hiddenimports (handoff note of 2026-10-09).
     "kika/endf/writers/sublibrary.py",
+    # G4NDL's photon bodies are ENDF's MF12-15 field for field, and D10-2
+    # (roadmap E5f.3) puts them in the model through the ENDF photon adapter on
+    # purpose: one path for photons into the model, not two. Imported inside the
+    # functions that decode or encode a final state, so parsing G4NDL does not
+    # wake the model. Frozen build: `kika.g4ndl.photons` and
+    # `kika.endf.model_adapter.photons` go in kika-api.spec's hiddenimports
+    # (kika-app/docs/PHOTONS_DECAY_PLAN.md).
+    "kika/g4ndl/photons.py",
     # Layer 1 for MF32 (2026-10-06). Its rows are resonance parameters, and the
     # only reader of the §32 layouts is `decodeMF32MT`; a second one inside the
     # checks is what the plan rules out. The import is inside `check_mf32`, so
