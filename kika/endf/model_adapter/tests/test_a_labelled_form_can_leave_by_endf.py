@@ -168,3 +168,34 @@ def test_a_fully_perturbed_suite_still_declares_itself(suite):
     (line,) = [m for m in report.warnings if REALIZATION in m]
     assert "MT [1, 2, 102] carry it" in line
     assert "MT none fell back" in line
+
+
+def test_an_mf6_product_form_under_the_label_is_the_one_written(monkeypatch):
+    """MF6 read ``eval`` unconditionally, so a realisation that perturbed a
+    distribution stated in File 6 left the whole-tape emitter unperturbed.
+    The selection is what is pinned: the encoder receives the labelled form,
+    and the report names the MT that carried it."""
+    import copy
+    from pathlib import Path
+
+    import kika.endf.model_adapter as adapter
+
+    tape = Path(__file__).resolve().parents[2] / "tests" / "data" / "micro_u235_mf6.endf"
+    decoded, _ = decodeReactionSuite(read_endf(str(tape)))
+    product = next(p for p in decoded.reactionByENDF_MT(800).outputChannel.products
+                   if p.pid == "He4")
+    labelled = copy.deepcopy(product.distribution[EVAL_LABEL])
+    product.distribution[REALIZATION] = labelled
+
+    seen = {}
+    original = adapter.encodeMF6MT
+
+    def spy(forms, provenance, mt, report):
+        seen[mt] = forms
+        return original(forms, provenance, mt, report)
+
+    monkeypatch.setattr(adapter, "encodeMF6MT", spy)
+    _, report, _ = encodeTapeSections(decoded, label=REALIZATION)
+
+    assert seen[800]["He4"] is labelled
+    assert any("MF6" in line and "800" in line for line in report.warnings)

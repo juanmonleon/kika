@@ -386,8 +386,14 @@ def _mf5Form(form):
 
 
 
-def _mf6Sections(suite, mat, report):
+def _mf6Sections(suite, mat, report, label=None):
     """MF6 for every reaction whose provenance carries one.
+
+    *label* selects the §9.1 form of each product, falling back to ``eval``
+    product by product, as :func:`_mf3And4And5Sections` does. It used to read
+    ``eval`` unconditionally, so a realisation that perturbed a distribution
+    stated in File 6 -- JENDL-5's actinide PFNS is LAW=1 there -- came out of
+    the whole-tape emitter unperturbed, with nothing said.
 
     **The provenance decides, and it has to.** An MF6 section is a list of
     products in the evaluator's order with the evaluator's ``ZAP``/``AWP``/
@@ -407,7 +413,8 @@ def _mf6Sections(suite, mat, report):
 
     from ..model_adapter import encodeMF6MT
 
-    sections = []
+    label = EVAL_LABEL if label is None else label
+    sections, carried = [], []
     for reaction in _mf3Bearing(suite):
         provenance = getattr(reaction, "provenance", None)
         header = getattr(provenance, "headerFields", None) or {}
@@ -425,13 +432,23 @@ def _mf6Sections(suite, mat, report):
 
         forms = {}
         for product in reaction.outputChannel.products:
-            form = _evaluatedForm(product, EVAL_LABEL)
+            form = _evaluatedForm(product, label)
+            if form is not None and label != EVAL_LABEL:
+                carried.append(mt)
+            if form is None and label != EVAL_LABEL:
+                form = _evaluatedForm(product, EVAL_LABEL)
             if form is not None:
                 forms[product.label or product.pid] = form
 
         section, report = encodeMF6MT(forms, provenance, mt, report)
         sections.append((6, mt, section))
 
+    if label != EVAL_LABEL and sections:
+        report.warn(
+            f"MF6 written with the {label!r} form where a product has one: "
+            f"MT {sorted(set(carried)) or 'none'} carry it, the rest fell back "
+            f"to {EVAL_LABEL!r}"
+        )
     return sections, report
 
 
@@ -526,7 +543,7 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
     sections: List[Tuple[int, int, object]] = []
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
                   _mf6Sections, _mf7Sections, _photonSections, _covarianceSections):
-        if build in (_mf1Sections, _mf3And4And5Sections):
+        if build in (_mf1Sections, _mf3And4And5Sections, _mf6Sections):
             built, report = build(suite, mat, report, label)
         else:
             built, report = build(suite, mat, report)

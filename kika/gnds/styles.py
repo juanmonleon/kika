@@ -140,9 +140,8 @@ def writeStyles(root: ET.Element, styles: Styles, number,
     both roots therefore cannot be right, and the first version that tried
     produced a covariance file rejected on its fifth line.
 
-    Where it is written it is empty, which is both valid — every child of
-    ``DocumentationType`` is optional — and honest: kika read no documentation
-    and invents none.
+    What is written is what was read (``documentation.py``: texts, authors,
+    dates); a style read with none gets none, and kika invents nothing.
     """
     container = ET.SubElement(root, "styles")
     for style in styles:

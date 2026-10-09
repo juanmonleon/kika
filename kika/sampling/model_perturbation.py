@@ -46,8 +46,11 @@ Three things it does differently, each of them deliberate:
   only the files a realisation touched and patches them into the tape that was
   read, so everything else survives verbatim and ``cmp`` between two samples
   still means something. ``endf-tape`` and ``gnds`` write the whole model, which
-  is less than the tape holds -- MF7, MF12-15 and MF32 have no model to come
-  from -- and the report says so rather than the file being quietly shorter.
+  can be less than the tape holds -- whatever the decoder kept only as declared
+  bytes (MF12 LO=2 until E5c, MF1/460, MF8-10) and the covariance a realisation
+  does not restate -- and the report says so rather than the file being quietly
+  shorter. MF7, MF12-15 (LO=1, MF13-15) and MF32 do have a model since E4, E5
+  and E1.
 """
 from __future__ import annotations
 
@@ -71,9 +74,9 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 #:
 #: ``"endf-delta"``
 #:     Re-encode only the sections the realisation touched and patch them into
-#:     the source tape. The fidelity option: MF7, MF12-15, MF32 and anything
-#:     else the model does not carry survive byte for byte, because they are
-#:     never re-rendered. This is what a propagation run wants.
+#:     the source tape. The fidelity option: every section the realisation did
+#:     not touch, modelled or not, survives byte for byte, because it is never
+#:     re-rendered. This is what a propagation run wants.
 #: ``"endf-tape"``
 #:     ``kika.write(..., format='endf')``: the whole tape assembled from the
 #:     model, under the realisation's label with a fall back to ``eval`` for

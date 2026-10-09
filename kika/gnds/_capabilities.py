@@ -405,10 +405,12 @@ _one("averageProductData", Coverage.PARTIAL, None, "aceOnlyStyles",
      "mandatory too, so the same write is invalid")
 
 _one("documentation", Coverage.PARTIAL, 'documentation', "documentation",
-     "the node survives and its text does not. Skipped on read "
-     "(decode.py:106 lists it in IGNORED), counted once per style, and "
-     "written back **empty** because RS_EvaluatedType "
-     "(gnds.xsd:96-108) requires the element to be there")
+     "read and written on a style (styles.py, documentation.py): its "
+     "attributes doi/publicationDate/version and the children of the "
+     "documentationModelled group. Text directly inside it and every other "
+     "collection are reported lost; anywhere outside a style it is skipped "
+     "(decode.py:106 lists it in IGNORED). A covariance root does not admit "
+     "it, so there it is reported lost too")
 
 _one("reference", Coverage.PARTIAL, None, "referenceForm",
      "round trips as a §16.1.1 crossSection form and as a §17.3 "
@@ -456,19 +458,27 @@ _group("popsDecay", Coverage.UNSUPPORTED, 'decayData',
 
 _group("documentationContent", Coverage.UNSUPPORTED, 'documentation',
        "free-text provenance (gnds.xsd:191-470) for which the model has "
-       "no node. It is counted where it hangs off a style and skipped "
-       "elsewhere (decode.py:106). `endfCompatible` is the verbatim "
-       "ENDF-6 header and is the one members of this group whose loss is "
-       "numerical rather than editorial",
+       "no node. Reported lost where it hangs off a style "
+       "(documentation.py:39-40) and skipped elsewhere (decode.py:106)",
        """
-       authors author contributors contributor collaborations
-       collaboration affiliations affiliation dates date copyright
+       contributors contributor collaborations
+       collaboration affiliations affiliation copyright
        acknowledgements acknowledgement keywords keyword relatedItems
-       relatedItem title abstract body computerCodes computerCode
+       relatedItem computerCodes computerCode
        codeRepo executionArguments inputDecks inputDeck outputDecks
        outputDeck experimentalDataSets exforDataSets exforDataSet
-       covarianceScript correctionScript bibliography bibitem
-       endfCompatible note
+       covarianceScript correctionScript bibliography bibitem note
+       """)
+
+_group("documentationModelled", Coverage.PARTIAL, 'documentation',
+       "the part of a style's documentation the model carries "
+       "(documentation.py:23-38): texts with their "
+       "encoding/markup/label, authors with name/orcid/email, dates with "
+       "value/dateType. Nested markup inside a text and child metadata of an "
+       "author or date are reported lost. `endfCompatible` is the verbatim "
+       "ENDF-6 header, so it now survives a GNDS round trip",
+       """
+       authors author dates date title abstract body endfCompatible
        """)
 
 _group("applicationData", Coverage.PARTIAL, 'applicationData',

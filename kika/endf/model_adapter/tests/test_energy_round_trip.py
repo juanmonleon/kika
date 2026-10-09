@@ -85,13 +85,18 @@ def test_a_weighted_sum_of_tabulated_laws_still_comes_back(u235_tape):
     the per-precursor delayed spectra. It is why the provenance keeps the bytes
     of every partial that does not reach the model, whatever its law, and not
     only of the analytic ones.
+
+    Since E2 (2026-10-08) MT455 with NK>1 is **not** a ``weightedFunctionals``:
+    it is one spectrum per precursor family of ``delayedNeutrons``, as in
+    FUDGE. Decoded alone, the section has no MF1/455 families to hang them on,
+    so the report names that instead; the bytes still come back.
     """
     section = read_endf(str(u235_tape)).mf[5].mt[455]
     assert [p.lf for p in section.partials] == [1] * 8
 
     encoded, form, _, report = _roundTrip(section, 455)
     assert form is None, "one partial of a weighted sum is not the distribution"
-    assert any("weightedFunctionals" in line for line in report.unsupported)
+    assert any("precursor family" in line for line in report.unsupported)
     assert str(encoded) == str(section)
 
 

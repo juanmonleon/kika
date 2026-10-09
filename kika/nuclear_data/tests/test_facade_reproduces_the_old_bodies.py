@@ -150,25 +150,23 @@ def test_nuclide_info_matches_the_old_body_except_for_the_za_fix(micro_tape):
 
 
 @pytest.mark.parametrize("tape", ["th232_tape", "pu241_tape"])
-def test_nuclide_info_reads_za_the_same_way_on_a_tape_that_trips_mf3(request, tape):
-    """D1 is **not** observable through MF1/451, and that is worth pinning.
+def test_nuclide_info_reads_za_the_same_way_on_a_tape_that_used_to_trip_mf3(request, tape):
+    """D1 is no longer observable on these tapes, and that is worth pinning.
 
-    Th-232's ZA reads back as ``90231.99999999999`` from an **MF3** section and
-    as exactly ``90232.0`` from MF1/451 — same nuclide, same tape, different
-    field, different rounding. So this class was never affected, and a test
-    asserting otherwise would be asserting a fiction. The place the fix bites is
-    ``CrossSection``; see ``test_cross_section_rounds_za...``.
+    Th-232's ZA used to read back as ``90231.99999999999`` from an **MF3**
+    section and exactly ``90232.0`` from MF1/451. The ENDF float parse rounded
+    twice (``mantissa * 10**exp``); since the fix of 2026-08-24 both fields
+    parse exactly, so MF1/451 and MF3 agree and this class reads the same ZA
+    either way. If the MF3 ZA ever parses inexactly again, the rounding in
+    ``CrossSection`` is what keeps the nuclide right; see
+    ``test_the_flat_path_round_trips_the_tape...``.
     """
     endf = read_endf(str(request.getfixturevalue(tape)))
     fromHeader = float(endf.mf[1].mt[451].zaid)
     fromSection = float(endf.mf[3].mt[2].zaid)
 
-    assert int(fromHeader) == round(fromHeader), (
-        "MF1/451's ZA has started parsing inexactly too; this test's premise is gone"
-    )
-    assert int(fromSection) != round(fromSection), (
-        f"{tape}'s MF3 ZA now parses exactly, so D1 is unobservable on it"
-    )
+    assert fromHeader == round(fromHeader), "MF1/451's ZA parses inexactly"
+    assert fromSection == fromHeader, f"{tape}'s MF3 ZA parses inexactly again"
     assert NuclideInfo.from_endf(endf.mf[1].mt[451]).nuclide_id == round(fromHeader)
 
 

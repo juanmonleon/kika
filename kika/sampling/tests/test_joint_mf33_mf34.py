@@ -255,6 +255,26 @@ def test_a_tape_with_marginals_but_no_a0_blocks_is_refused_by_default(
     assert not m[:index["n_sigma"], index["n_sigma"]:].any()
 
 
+def test_an_mf34_that_runs_out_of_memory_is_named_not_mistaken_for_absent(
+        a0cross_tape, monkeypatch):
+    """The 570 MiB deliverable once lost MF34 to a MemoryError with no trace.
+
+    ``parse_mf34`` catches every exception per MT, and ``str(MemoryError())``
+    is empty, so the log said "Error parsing MT2 in MF34:" and the tape came
+    back as if it had no MF34. The parser now keeps the failure, type included,
+    in ``MF.parse_errors``; the joint reader has to raise on it by name.
+    """
+    import kika.endf.parsers.parse_mf34 as parse_mf34
+
+    def _outOfMemory(lines, mt):
+        raise MemoryError()
+
+    monkeypatch.setattr(parse_mf34, "parse_mf34_mt", _outOfMemory)
+    tape, _ = a0cross_tape
+    with pytest.raises(ValueError, match=r"MemoryError.*out of memory"):
+        load_joint_mf33_mf34(tape, mt=MT, isotope=ISO, l_max=LMAX)
+
+
 # ── the base tape ─────────────────────────────────────────────────────────────
 
 def test_the_base_tape_drops_the_covariance_and_nothing_else(a0cross_tape, tmp_path):

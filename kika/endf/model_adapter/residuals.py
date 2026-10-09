@@ -167,12 +167,12 @@ def attachResiduals(suite, report):
     from kika.nuclear_data.model import Nuclide, Product, pidFromZA
     from kika.nuclear_data.model.pops import zaFromPid
 
-    targetZA = None
     try:
         targetZA = zaFromPid(suite.target)
+        projectileZA = zaFromPid(suite.projectile or "n")
     except ValueError:
         return report
-    if suite.projectile != "n" or not targetZA:
+    if not targetZA:
         return report
 
     for reaction in suite.reactions:
@@ -187,7 +187,9 @@ def attachResiduals(suite, report):
             continue
 
         _, ejectile, level = series
-        residualZA = targetZA + 1 - ejectile
+        # The projectile's ZA, not a neutron's: a charged-particle tape names
+        # its projectile through NSUB (decode._projectile).
+        residualZA = targetZA + projectileZA - ejectile
         decay = _decayChannel(residualZA, lr, qm - qi, report, mt, _domain(reaction))
         if decay is None:
             continue

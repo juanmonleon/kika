@@ -86,17 +86,17 @@ def test_the_same_holds_on_real_tapes(request, tape):
         assert str(viaModel) == str(section), f"{tape} MT{mt} differs from the file"
 
 
-def test_the_flat_path_now_round_trips_a_tape_whose_za_does_not_parse_exactly(th232_tape):
+def test_the_flat_path_round_trips_the_tape_whose_za_did_not_parse_exactly(th232_tape):
     """This was a strict xfail until phase 3d, and the XPASS is why it changed.
 
     ``CrossSection.nuclide_id`` truncated ZA, so all 57 Th-232 MF3 sections came
     back naming ZA 90231 — Ac-231. The façade rounds. See
     ``docs/library/library-gaps.md`` D1.
+    Since the float-parse fix of 2026-08-24 the ZA parses exactly as well, so
+    the round trip holds for two reasons; the test keeps it on the tape that
+    exposed the truncation.
     """
     endf = read_endf(str(th232_tape))
-    assert int(float(endf.mf[3].mt[2].zaid)) != round(float(endf.mf[3].mt[2].zaid)), (
-        "Th-232's ZA now parses exactly, so this test no longer measures anything"
-    )
     for mt in sorted(endf.mf[3].mt):
         section = endf.mf[3].mt[mt]
         assert str(CrossSection.from_endf(section).to_endf()) == str(section)

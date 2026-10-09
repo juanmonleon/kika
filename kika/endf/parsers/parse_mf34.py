@@ -260,6 +260,6 @@ def parse_mf34(lines: List[str]) -> MF:
                 mt_section.num_lines = line_counts[mt]
         except Exception as e:
             mf.parse_errors[mt] = f"{type(e).__name__}: {e}"
-            logger.warning(f"Error parsing MT{mt} in MF34: {e}")
+            logger.warning(f"Error parsing MT{mt} in MF34: {mf.parse_errors[mt]}")
 
     return mf
