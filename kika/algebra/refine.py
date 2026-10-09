@@ -171,8 +171,8 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
     n_points, evaluations, unresolved = n, 0, 0
     passes = 0
     tiny = np.finfo(float).eps
-    cache_keys=cache_values=None
-    key_dtype=np.dtype([('owner',np.int64),('x',np.float64)])
+    cache_keys=cache_values=cache_x=cache_owner=None
+    key_dtype=np.dtype([('x',np.float64),('owner',np.int64)])
 
     while owner.size:
         if passes == max_passes:
@@ -199,9 +199,16 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
             nonlocal evaluations
             missing=indices
             if reuse_probes and cache_keys is not None and len(cache_keys):
-                at=np.searchsorted(cache_keys,keys[indices])
+                # Search the numeric abscissa first. Most probes have only one
+                # starting owner at this energy; compound comparisons are only
+                # needed at repeated/snapped boundaries shared by owners.
+                query=keys[indices]
+                at=np.searchsorted(cache_x,query['x'])
                 at=np.minimum(at,len(cache_keys)-1)
-                hit=cache_keys[at]==keys[indices]
+                ambiguous=(cache_x[at]==query['x']) & (cache_owner[at]!=query['owner'])
+                if np.any(ambiguous):
+                    at[ambiguous]=np.minimum(np.searchsorted(cache_keys,query[ambiguous]),len(cache_keys)-1)
+                hit=(cache_x[at]==query['x']) & (cache_owner[at]==query['owner'])
                 actual[indices[hit]]=cache_values[at[hit]]
                 missing=indices[~hit]
             if len(missing):
@@ -276,8 +283,11 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         actual=actual.reshape(q.shape+y.shape[1:])
         if reuse_probes:
             retain=available&np.repeat(split,q.shape[1])
-            order=np.argsort(keys[retain],kind='stable')
-            cache_keys=keys[retain][order]
+            retained_keys=keys[retain]
+            order=np.lexsort((retained_keys['owner'],retained_keys['x']))
+            cache_keys=retained_keys[order]
+            cache_x=np.ascontiguousarray(cache_keys['x'])
+            cache_owner=np.ascontiguousarray(cache_keys['owner'])
             cache_values=actual.reshape((flat.size,)+y.shape[1:])[retain][order]
         order = np.argsort(q, axis=1, kind="stable")
         qs = np.take_along_axis(q, order, axis=1)

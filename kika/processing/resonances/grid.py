@@ -50,7 +50,19 @@ VERIFICATION_FRACTIONS=np.array([.1127016653792583,.276393202250021,
 
 
 def error_ratio(actual, linear, options):
-    return np.abs(actual-linear)/(options.atol+options.rtol*np.maximum(np.abs(actual),np.abs(linear)))
+    difference=np.abs(actual-linear)
+    scale=np.maximum(np.abs(actual),np.abs(linear))
+    # Reuse owned float64 temporaries on the production path, keeping the
+    # expression's arithmetic order. Other dtypes retain ordinary promotion.
+    if (isinstance(difference,np.ndarray) and isinstance(scale,np.ndarray)
+            and difference.dtype==np.float64 and scale.dtype==np.float64
+            and difference.shape==scale.shape
+            and np.result_type(scale,options.rtol,options.atol)==np.float64):
+        np.multiply(options.rtol,scale,out=scale)
+        np.add(options.atol,scale,out=scale)
+        np.divide(difference,scale,out=difference)
+        return difference
+    return difference/(options.atol+options.rtol*scale)
 
 
 def check_dense_workspace(size,work_bytes):
@@ -61,7 +73,7 @@ def check_dense_workspace(size,work_bytes):
             category='memory-budget-exhausted')
 
 
-def linearize(evaluate, seeds, options, point_budget, *, constants=None):
+def linearize(evaluate, seeds, options, point_budget, *, constants=None, deferred=None):
     """Refine independent seed-panel chunks on the same shared reaction mesh.
 
     The workspace target sizes starting chunks; final tables and an adaptive
@@ -72,24 +84,28 @@ def linearize(evaluate, seeds, options, point_budget, *, constants=None):
     never inferred from equal samples. They retain output and diagnostics but
     need no adaptive column. Workspace sizing uses the active column count;
     retained complete output tables remain additional storage.
+    ``deferred`` maps untouched piecewise-linear source columns to their own
+    readers. They are checked at all seven final probes after refining the
+    active columns; any failure repeats the chunk with every column active.
+    Source knots must be seeds. Deferral never skips accepted-panel checks.
     """
     x=np.unique(np.asarray(seeds,dtype=float))
     if len(x)>point_budget:
         raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
     first=evaluate(x)
-    count=max(1,sum(mt not in (constants or {}) for mt in first))
+    count=max(1,sum(mt not in (constants or {}) and mt not in (deferred or {}) for mt in first))
     # Conservative live-array estimate for seven probes, sorting, chords,
     # ratios, kept probes, and child panels. Adaptive growth remains explicit.
     panels=max(1,min(4096,options.max_work_bytes//(1024*(count+1))))
     if len(x)-1<=panels:
-        return _linearize_chunk(evaluate,x,options,point_budget,first=first,constants=constants)
+        return _linearize_chunk(evaluate,x,options,point_budget,first=first,constants=constants,deferred=deferred)
     chunks=[];checks=[];points=0
     for start in range(0,len(x)-1,panels):
         end=min(start+panels,len(x)-1)
         future_seeds=len(x)-end-1
         budget=point_budget-points-future_seeds+(1 if start else 0)
         grid,values,check=_linearize_chunk(evaluate,x[start:end+1],options,budget,
-            first={mt:v[start:end+1] for mt,v in first.items()},constants=constants)
+            first={mt:v[start:end+1] for mt,v in first.items()},constants=constants,deferred=deferred)
         keep=slice(1,None) if start else slice(None)
         chunks.append((grid[keep],{mt:v[keep] for mt,v in values.items()}))
         checks.append(check);points+=len(grid[keep])
@@ -105,7 +121,7 @@ def linearize(evaluate, seeds, options, point_budget, *, constants=None):
     return grid,values,check
 
 
-def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, constants=None):
+def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, constants=None, deferred=None):
     """Return a common grid, values and checks; retain node evaluations.
 
     The refinement itself is :func:`kika.algebra.refine`, the one adaptive
@@ -125,7 +141,8 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
     first=evaluate(x) if first is None else first
     seeded=len(x)
     constants={} if constants is None else constants
-    mts=[mt for mt in first if mt not in constants]
+    deferred={} if deferred is None else deferred
+    mts=[mt for mt in first if mt not in constants and mt not in deferred]
     # Keep one real column even on an entirely constant span, preserving the
     # ordinary probe/budget/unresolvable checks and reporting conventions.
     if not mts:mts=[next(iter(first))]
@@ -151,17 +168,35 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
     actual_fractions=(probes-x[:-1,None])/np.diff(x)[:,None]
     weights=np.array([5/18,4/9,5/18])
     gauss_indices=[3,1,6]
+    energy=probes[:,gauss_indices]
+    factor=np.diff(x)[:,None]*weights
+    factors=(('dE',factor),('dE_over_E',factor*(1/energy)))
     maxima={}
     integrals={}
-    for j,mt in enumerate(mts):
+    for mt in first:
+        if mt not in mts and mt not in deferred:continue
+        if mt in mts:
+            samples=actual[:,:,mts.index(mt)]
+        else:
+            y[mt]=np.asarray(deferred[mt](x),dtype=float)
+            samples=np.asarray(deferred[mt](probes.ravel()),dtype=float).reshape(probes.shape)
         linear=y[mt][:-1,None]+(y[mt][1:]-y[mt][:-1])[:,None]*actual_fractions
-        ratio=error_ratio(actual[:,:,j],linear,options)
+        ratio=error_ratio(samples,linear,options)
+        if mt in deferred and (np.any(~np.isfinite(ratio)) or np.any(ratio>.5)):
+            # Deferral is only scheduling: a column that fails any ordinary
+            # accepted-panel probe must take part in a fresh complete refine.
+            extra_evaluations=result.evaluations
+            # Release retained candidate probes before allocating the retry.
+            result=x=y=probes=actual=actual_fractions=samples=linear=ratio=None
+            factors=factor=energy=a=None
+            grid,values,check=_linearize_chunk(evaluate,seeds,options,point_budget,
+                first=first,constants=constants)
+            check['evaluations']+=extra_evaluations
+            return grid,values,check
         maxima[mt]=(float(np.max(ratio[:,:3])),float(np.max(ratio[:,3:])))
-        a=actual[:,gauss_indices,j]
-        energy=probes[:,gauss_indices]
+        a=samples[:,gauss_indices]
         integrals[mt]={}
-        for name,weight in (('dE',1.),('dE_over_E',1/energy)):
-            factor=np.diff(x)[:,None]*weights*weight
+        for name,factor in factors:
             integrals[mt][name]={'reference_estimate':float(np.sum(factor*a)),
                                 'linear_estimate':float(np.sum(factor*linear[:,gauss_indices])),
                                 'absolute_difference_estimate':float(np.sum(factor*np.abs(a-linear[:,gauss_indices])))}
@@ -171,8 +206,7 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
         y[mt]=np.full(len(x),value)
         maxima[mt]=(0.,0.)
         integrals[mt]={}
-        for name,weight in (('dE',1.),('dE_over_E',1/energy)):
-            factor=np.diff(x)[:,None]*weights*weight
+        for name,factor in factors:
             estimate=float(np.sum(factor*value))
             integrals[mt][name]=dict(reference_estimate=estimate,
                 linear_estimate=estimate,absolute_difference_estimate=float(np.sum(factor*0.)))
