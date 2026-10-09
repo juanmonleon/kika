@@ -11,3 +11,9 @@ kika/sinbad/tests/data/** -text
 # (test_fixtures.py); los de Gammas/ son texto y con core.autocrlf=true en
 # Windows salian como CRLF y el digest ya no casaba.
 kika/g4ndl/tests/data/** -text
+# Las cintas de las subbibliotecas de decaimiento y de rendimientos de fision
+# (roadmap E7) se comprueban byte a byte contra lo que kika escribe; con
+# core.autocrlf=true saldrian como CRLF y la comparacion fallaria.
+kika/endf/tests/data/dec-*.endf -text
+kika/endf/tests/data/nfy-*.endf -text
+kika/endf/tests/data/sfy-*.endf -text
