@@ -89,6 +89,23 @@ def test_on_tape_reports_a_failed_tape_as_not_ok(tmp_path):
     assert seen == [(1, 1, "broken.endf", False)]
 
 
+def test_on_result_hands_over_each_tape_for_a_running_tally(tmp_path):
+    (tmp_path / "broken.endf").write_text("not ENDF\n")
+    seen = []
+    report = check_covariance_library([*CUTS[:2], tmp_path / "broken.endf"], progress=False,
+                                      on_result=lambda *a: seen.append(a))
+    assert [(d, n) for d, n, _ in seen] == [(1, 3), (2, 3), (3, 3)]
+    assert [t for _, _, t in seen] == list(report.tapes)
+    assert seen[-1][2].ok is False and seen[-1][2].target is None
+
+
+def test_each_tape_knows_its_nuclide_even_without_mf1(tmp_path):
+    report = check_covariance_library([NE20, DATA / "micro_fe56_cov.endf"], progress=False)
+    assert [t.target for t in report.tapes] == ["Ne20", "Fe56"]
+    d = report.to_dict()
+    assert [(t["za"], t["target"]) for t in d["tapes"]] == [(10020, "Ne20"), (26056, "Fe56")]
+
+
 def test_should_stop_returns_the_partial_report():
     seen = []
     report = check_covariance_library(CUTS, progress=False, on_tape=lambda *a: seen.append(a),
@@ -196,6 +213,18 @@ def test_library_pages_and_write_to_path(tmp_path):
     for name in (p.name for p in CUTS):
         assert name in md and name in html
     assert "### micro_ne20_covcheck.endf (MAT 1025)" in md
+    # The index of files by nuclide, each chip a link to that tape's findings
+    # or its row; and a summary by file beside the one by check.
+    assert '<h2 id="files">' in html and '<h2 id="by-file">Summary by file</h2>' in html
+    i = next(k for k, t in enumerate(report.tapes) if t.target == "Ne20")
+    assert f'href="#tape-{i}"' in html and f'id="tape-{i}"' in html
+    assert "## Summary by file" in md and "Main findings" in md
+
+
+def test_a_library_without_a_name_or_directory_is_titled_by_its_tapes():
+    report = check_covariance_library(CUTS[:2], progress=False)
+    assert "<h1>2 ENDF tapes</h1>" in report.to_html()
+    assert report.to_markdown().startswith("# Covariance check of 2 ENDF tapes")
 
 
 # ---- 6. tape_inventory ----------------------------------------------------
