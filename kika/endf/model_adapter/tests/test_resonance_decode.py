@@ -362,8 +362,8 @@ def test_an_unresolved_region_carries_the_same_spin(request, tape):
     """Under ``--deep``. The URR half of the same requirement.
 
     The unresolved cross sections carry the same ``g_J`` factor the resolved
-    ones do, so ``urr_formulas`` needs I exactly as much as
-    ``resonance_formulas`` does. Before this the two halves of one calculation
+    ones do, so the URR physics needs I exactly as much as the resolved
+    physics does. Before this the two halves of one calculation
     asked for the same number in two different ways — the resolved half from
     the formalism, the unresolved half from provenance.
 

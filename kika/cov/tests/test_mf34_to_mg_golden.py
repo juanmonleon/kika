@@ -15,6 +15,17 @@ This golden is deliberately written *before* the sigma source changes, so the
 next commit can say by how much rather than hoping it was small. It is a
 characterization test: it asserts today's numbers, not correct ones.
 
+**2026-10-08: the weight is now a constant sigma of 1 b, stated in the
+fixture.** Until then it was the legacy in-Python reconstructor, removed with
+its defects (reconstruction roadmap §4). The weight here is not meant to be the
+right sigma -- production passes NJOY or ``kika.processing.resonances`` -- but a
+fixed, engine-free one, so a change to the collapse cannot hide behind a change
+to some reconstructor. The tape's own MF3 was tried first and rejected: below
+850 keV it is Fe-56's background, ~0 b, which zeroes the lowest group and
+leaves it untested. The new engine was tried too: on this 320-level slice it
+exceeds its default point budget, which is a correct refusal and no fixture.
+Both goldens were regenerated in that commit.
+
 Regenerate after an intentional change with::
 
     REGEN_NUMERIC_GOLDENS=1 pytest kika/cov/tests/test_mf34_to_mg_golden.py
@@ -31,6 +42,7 @@ import numpy as np
 import pytest
 
 from kika.cov.multigroup import MF34_to_MG
+from kika.cov.multigroup.collapse import _pendf_grid
 from kika.endf import read_endf
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -88,19 +100,18 @@ def _check_golden(name: str, produced: dict) -> None:
 def collapsed(micro_tape):
     """MF34/MT2 collapsed onto GRID_EV, weighted by a sigma stated here.
 
-    ``endf.pendf`` is populated explicitly with the in-Python reconstruction,
-    which is what ``MF34_to_MG`` used to reach for on its own. Naming it makes
-    this a test of the *collapse* at a fixed sigma, instead of a test of the
-    collapse and an unaccountable weight together — so a future change to
-    either one is attributable.
-
-    NJOY would be the better sigma and is what production should pass, but it
-    is not available in CI and would put this golden behind the njoy marker.
+    ``endf.pendf`` is populated explicitly with a constant 1 b over the tape's
+    domain, so the weight is the flux alone. Naming it makes this a test of the
+    *collapse* at a fixed sigma, instead of a test of the collapse and an
+    unaccountable weight together — so a future change to either one is
+    attributable. See the module docstring for why not MF3 or a reconstructor.
     """
-    from kika.endf.processing.reconstruct import reconstruct as endf_reconstruct
+    from kika.nuclear_data.cross_section import CrossSection
 
     endf = read_endf(str(micro_tape))
-    endf.pendf = endf_reconstruct(endf.mf[2].mt[151], endf.files.get(3))
+    endf.pendf = {2: CrossSection(energies=np.array([1.0e-5, 1.5e8]),
+                                  values=np.array([1.0, 1.0]),
+                                  reaction=2, nuclide_id=26056)}
     result = MF34_to_MG(endf, energy_grid=GRID_EV, mt=2)
     return endf, result
 
@@ -141,7 +152,7 @@ def test_the_sigma_weight_golden(collapsed):
     Pinning the collapse alone would say *that* something changed; pinning
     sigma says what, and lets the two be compared independently.
 
-    Summarised rather than stored whole: the reconstructed grid runs to ~10^5
+    Summarised rather than stored whole: a reconstructed grid runs to ~10^5
     points per MT, which is megabytes of fixture for a number that only has to
     be comparable. Six statistics catch any real change.
 
@@ -166,8 +177,7 @@ def test_the_sigma_weight_golden(collapsed):
     arrays = {}
     for mt in sorted(endf.pendf):
         section = endf.pendf[mt]
-        energies = np.asarray(section.energies, dtype=float)
-        values = np.asarray(section.cross_sections, dtype=float)
+        energies, values = _pendf_grid(section)
         arrays[f"mt{mt}_summary"] = np.array([
             energies.size,
             energies[0], energies[-1],

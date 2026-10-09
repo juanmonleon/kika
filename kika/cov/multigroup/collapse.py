@@ -22,8 +22,9 @@ def _pendf_grid(section: Any) -> Tuple[np.ndarray, np.ndarray]:
     """``(energies, sigma)`` from a ``pendf`` section of either shape.
 
     ``ENDF.pendf`` takes ``{MT: section}``, and its two producers disagree on
-    what a section looks like: ``kika.endf.processing.reconstruct`` yields
-    ``MF3MT``, whose arrays are ``_energies`` / ``_cross_sections``, while
+    what a section looks like: an ``MF3MT`` (the tape's own MF3, or the
+    legacy reconstructor removed 2026-10-08) has ``_energies`` /
+    ``_cross_sections``, while
     ``kika.processing.njoy_reconstruct`` yields ``CrossSection``, whose arrays
     are ``energies`` / ``values``.
 

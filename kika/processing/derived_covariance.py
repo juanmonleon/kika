@@ -20,8 +20,8 @@ caller should know which one the sum rule was resolved against.
 
 This used to fall back to an in-Python reconstructor, ``endf.reconstruct_xs()``,
 whose own docstring said it produced incorrect cross sections on real
-evaluations. It has been removed; ``kika.processing.reconstruct`` still exists
-and is still under test, but nothing calls it behind a caller's back.
+evaluations. It has been removed, and so has the reconstructor under it
+(2026-10-08); nothing reconstructs behind a caller's back.
 
 Callers that already have a preferred σ source (a pre-computed PENDF, an
 ACE file) can bypass this module and pass the map straight to

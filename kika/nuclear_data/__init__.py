@@ -11,8 +11,8 @@ removal in kika-nd 1.0.
 Three of the four route their ``from_endf`` through
 ``kika.endf.model_adapter``. ``CrossSection`` does not, and the reason is
 measured rather than preferred: a model round trip in its constructor costs 2.5x
-and ``kika/processing/reconstruct.py`` builds one per MT per call, which the
-cluster runs per sample per temperature. It exposes :meth:`CrossSection.to_model`
+and the legacy reconstructor (removed 2026-10-08) built one per MT per call,
+which the cluster ran per sample per temperature. It exposes :meth:`CrossSection.to_model`
 instead, so a caller who wants the model pays for it at the point of asking.
 
 **Nothing is imported until it is used.** The names below resolve through a

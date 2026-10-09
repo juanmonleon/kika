@@ -206,9 +206,9 @@ class ENDF:
         ``energies`` and ``cross_sections``, ``CrossSection`` exposes
         ``energies`` and ``values``. Only ``energies`` is common.
 
-        The asymmetry is load-bearing, because the two producers disagree —
-        ``kika.endf.processing.reconstruct`` yields ``MF3MT``,
-        ``kika.processing.njoy_reconstruct`` yields ``CrossSection``. A
+        The asymmetry is load-bearing, because producers disagree — the
+        tape's own MF3 is ``MF3MT``, ``kika.processing.njoy_reconstruct``
+        yields ``CrossSection``. A
         consumer that reads one spelling silently rejects half its callers,
         which is what ``MF34_to_MG`` did until
         ``kika.cov.multigroup.collapse._pendf_grid`` was written. Read sigma

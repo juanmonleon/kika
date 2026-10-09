@@ -2,7 +2,7 @@
 
 **Why this exists.** Phase 3d rewrites the flat classes' method bodies to route
 through the GNDS model: ``CrossSection.from_endf`` will build a ``ReactionSuite``
-and project it back. ``kika/processing/reconstruct.py:274`` constructs one
+and project it back. The legacy reconstructor (removed 2026-10-08) built one
 ``CrossSection`` per MT per call, and the cluster pipeline calls that per sample
 per temperature — so a round trip that costs a few milliseconds each time is a
 real cost, paid thousands of times, on a machine nobody is watching. The plan's
@@ -45,8 +45,8 @@ deliberately, on a quiet machine, as part of accepting P9.
   Python version. Comparing a wall-clock number across machines is not evidence,
   so a mismatch **skips** rather than passing or failing. Saying "no regression"
   on a different CPU would be worse than saying nothing.
-* ``reconstruct`` takes ~8 s per call and is measured twice, so this file costs
-  around 40 s when it runs.
+* The legacy ``reconstruct`` measurement left with its reconstructor
+  (2026-10-08); the new engine's cost belongs to resonance milestone R8.
 
 Run the gate with ``RUN_PERF_GATE=1 pytest kika/tests/test_performance_baseline.py``.
 Regenerate the baseline with ``REGEN_PERF_BASELINE=1 pytest kika/tests/test_performance_baseline.py``,
@@ -145,21 +145,10 @@ def _measurePendfRead(tapePath: str) -> float:
     return _bestAndSpread(lambda: read_pendf_mf3_sections(tapePath), repeats=10)
 
 
-def _measureReconstruct(tapePath: str) -> float:
-    """The hot path: one ``CrossSection`` per MT, per sample, per temperature."""
-    from kika.endf.processing.reconstruct import reconstruct
-    from kika.endf.read_endf import read_endf
-
-    endf = read_endf(tapePath)
-    mf2, mf3 = endf.mf[2].mt[151], endf.files.get(3)
-    return _bestAndSpread(lambda: reconstruct(mf2, mf3), repeats=2)
-
-
 #: name -> (callable, is_slow). Adding one here and regenerating extends the gate.
 MEASUREMENTS = {
     "cross_section_from_endf_all_mts": (_measureFlatConstruction, False),
     "read_pendf_mf3_sections": (_measurePendfRead, False),
-    "endf_reconstruct_adapter": (_measureReconstruct, True),
 }
 
 
@@ -244,15 +233,4 @@ def _checkOne(name: str, micro_tape) -> None:
     "name", [n for n, (_, slow) in MEASUREMENTS.items() if not slow]
 )
 def test_no_cheap_path_regressed(name, micro_tape):
-    _checkOne(name, micro_tape)
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    "name", [n for n, (_, slow) in MEASUREMENTS.items() if slow]
-)
-def test_no_slow_path_regressed(name, micro_tape):  # noqa: D401
-    """``reconstruct`` is ~11 s a call, so it is out of the fast lane. It is also
-    the path that matters most: one ``CrossSection`` per MT, per sample, per
-    temperature, on the cluster."""
     _checkOne(name, micro_tape)

@@ -3,8 +3,8 @@
 **Why.** Every flat class carries ``metadata: Dict`` — "format-specific extras
 preserved for lossless round-trips". Four packages reach into it by string key
 and nothing declares what the keys are. ``CrossSection.to_endf`` fails without
-``qm``/``qi``/``lr``; ``kika/processing/reconstruct.py`` reads ``awr`` and
-``mat``. An untyped dict with load-bearing keys is API whether it is documented
+``qm``/``qi``/``lr``; the legacy reconstructor (removed 2026-10-08) read
+``awr`` and ``mat``. An untyped dict with load-bearing keys is API whether it is documented
 or not.
 
 Phase 3c replaces this dict with a typed ``Provenance``. The conversion is

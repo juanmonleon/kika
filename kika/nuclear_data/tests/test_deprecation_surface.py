@@ -112,8 +112,8 @@ def test_the_warning_names_a_replacement_and_admits_its_limits():
 def test_construction_does_not_warn():
     """Per-instance warnings would land on the reconstruction hot path.
 
-    ``kika/processing/reconstruct.py`` builds one ``CrossSection`` per MT per
-    call, per sample, per temperature. A ``__post_init__`` warning there is a
+    The legacy reconstructor (removed 2026-10-08) built one ``CrossSection``
+    per MT per call, per sample, per temperature. A ``__post_init__`` warning there is a
     performance problem and an unreadable log, which is why the deprecation is
     on the *name* and not on the object.
     """
