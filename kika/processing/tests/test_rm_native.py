@@ -1,0 +1,146 @@
+"""Optional contraction versus the independent direct-level solver."""
+import numpy as np
+import pytest
+from kika.processing.resonances import _rm_acceleration as backend
+from kika.processing.resonances.reich_moore import RMGroup,RMLevel,solve_collision
+
+
+def problem(c=3):
+    rng=np.random.default_rng(926)
+    er=np.linspace(1.,70.,73)
+    gamma=rng.uniform(.02,.2,len(er))
+    a=rng.normal(0,.1,(len(er),c))
+    e=np.r_[np.geomspace(.1,100.,151),er]
+    f=rng.uniform(.1,1.3,(len(e),c))
+    return e,er,gamma,a,f
+
+
+def test_prepared_coefficients_are_immutable_and_cached():
+    from copy import deepcopy
+    import pickle
+    levels=(RMLevel(1.,.5,.1,.2,0.,neutron_amplitude=.3,fission_amplitudes=(0.,.4)),
+            RMLevel(2.,.5,.2,.3,0.,neutron_amplitude=.4,fission_amplitudes=(0.,-.5)))
+    group=RMGroup(0,None,None,levels)
+    arrays=group.kernel_data
+    assert arrays is group.kernel_data
+    np.testing.assert_array_equal(arrays[2],[[.3,.4],[.4,-.5]])
+    for array in arrays:
+        with pytest.raises(ValueError):array.flags.writeable=True
+    for copied in (deepcopy(group),pickle.loads(pickle.dumps(group))):
+        for actual,expected in zip(copied.kernel_data,arrays):
+            np.testing.assert_array_equal(actual,expected)
+            with pytest.raises(ValueError):actual.flags.writeable=True
+    assert RMGroup(0,None,None,()).kernel_data[2].shape==(0,1)
+
+
+@pytest.mark.parametrize('c',[1,2,3])
+@pytest.mark.parametrize('entrance',[0,1,2])
+@pytest.mark.parametrize('width',[None,1e-30,0.])
+def test_native_matches_direct(c,entrance,width):
+    if entrance>=c:pytest.skip('entrance absent')
+    if backend._native is None:pytest.skip('optional extension unavailable')
+    e,er,gamma,a,f=problem(c)
+    if width is not None:gamma[:]=width
+    kwargs=dict(entrance=entrance,reduced=a,channel_factors=f,return_absorption=True)
+    expected=solve_collision(e,er,gamma,None,**kwargs)
+    diagnostics={}
+    actual=solve_collision(e,er,gamma,None,diagnostics,absorption_rtol=1e-8,**kwargs)
+    assert diagnostics['rm_native_energies']==len(e)
+    np.testing.assert_allclose(actual[0],expected[0],rtol=3e-11,atol=1e-12)
+    np.testing.assert_allclose(actual[1],expected[1],rtol=3e-11,atol=0.)
+
+
+@pytest.mark.parametrize('case',['undamped','coincident','tiny','large','weak','missing','strict'])
+def test_reference_limits_retained(case,monkeypatch):
+    e,er,gamma,a,f=problem()
+    if case=='undamped':gamma[:]=0.
+    if case=='coincident':
+        gamma[:2]=0.;er[1]=er[0];e=np.r_[e,er[0]];f=np.vstack([f,f[0]])
+    if case=='tiny':gamma[:]=1e-200
+    if case=='large':a*=1e25
+    if case=='weak':f*=1e-200
+    if case=='missing':monkeypatch.setattr(backend,'_native',None)
+    kwargs=dict(reduced=a,channel_factors=f,return_absorption=True)
+    with np.errstate(all='ignore'):
+        try:expected=solve_collision(e,er,gamma,None,**kwargs)
+        except (FloatingPointError,np.linalg.LinAlgError) as error:
+            with pytest.raises(type(error)):
+                solve_collision(e,er,gamma,None,absorption_rtol=1e-8,**kwargs)
+            return
+        actual=solve_collision(e,er,gamma,None,absorption_rtol=1e-10 if case=='strict' else 1e-8,**kwargs)
+    for x,y in zip(actual,expected):np.testing.assert_allclose(x,y,rtol=3e-11,atol=1e-12)
+
+
+def test_independent_reference_never_accelerates(monkeypatch):
+    e,er,gamma,a,f=problem()
+    def forbidden(*args,**kwargs):raise AssertionError('witness used acceleration')
+    monkeypatch.setattr(backend,'solve',forbidden)
+    solve_collision(e,er,gamma,None,reduced=a,channel_factors=f,return_absorption=True)
+
+
+@pytest.mark.parametrize('reason',['width','missing','rejected'])
+def test_streaming_fallback_limits_reference_arrays(reason,monkeypatch):
+    import kika.processing.resonances.reich_moore as rm
+    e,er,gamma,a,f=problem()
+    if reason=='width':gamma[:]=1e-200
+    expected=solve_collision(e,er,gamma,None,reduced=a,channel_factors=f,return_absorption=True)
+    if reason=='missing':monkeypatch.setattr(backend,'_native',None)
+    if reason=='rejected':monkeypatch.setattr(backend,'solve',lambda *args,**kwargs:None)
+    sizes=[];original=rm.level_matrix
+    def observed(reciprocal,reduced):
+        sizes.append(len(reciprocal));return original(reciprocal,reduced)
+    monkeypatch.setattr(rm,'level_matrix',observed)
+    work=256*1024
+    actual=solve_collision(e,er,gamma,None,reduced=a,channel_factors=f,
+        work_bytes=work,return_absorption=True,absorption_rtol=1e-8)
+    assert sizes and max(sizes)<=backend.reference_block_size(len(er),a.shape[1],work)
+    np.testing.assert_allclose(actual[0],expected[0],rtol=3e-11,atol=1e-12)
+    np.testing.assert_allclose(actual[1],expected[1],rtol=3e-11,atol=0.)
+
+
+def test_native_streaming_workspace_plan_retains_reference_limit(monkeypatch):
+    from types import SimpleNamespace
+    from kika.processing.resonances.prepare import energy_block_size
+    from kika.processing.resonances.grid import ReconstructionConvergenceError
+    _,er,gamma,a,_=problem()
+    levels=tuple(RMLevel(float(e),.5,.1,float(g),0.,neutron_amplitude=float(row[0]),
+        fission_amplitudes=tuple(row[1:])) for e,g,row in zip(er,gamma,a))
+    region=SimpleNamespace(approximation='ReichMoore',groups=(RMGroup(0,None,None,levels),))
+    reference=energy_block_size(region,work_bytes=1024*1024)
+    if backend._native is not None:
+        assert energy_block_size(region,work_bytes=1024*1024,absorption_rtol=1e-8)>reference
+    monkeypatch.setattr(backend,'_native',None)
+    assert energy_block_size(region,work_bytes=1024*1024,absorption_rtol=1e-8)==reference
+    with pytest.raises(ReconstructionConvergenceError):
+        energy_block_size(region,work_bytes=1,absorption_rtol=1e-8)
+
+
+@pytest.mark.parametrize('bad',['short','float32','strided','readonly','unaligned','dimensions'])
+def test_native_rejects_invalid_buffers(bad):
+    if backend._native is None:pytest.skip('optional extension unavailable')
+    e,er,gamma,a,f=problem();n=len(er);c=a.shape[1]
+    out=np.empty((len(e),c,c),complex).view(float).ravel();flags=np.zeros(len(e),np.uint8)
+    args=[len(e),n,c,e,er,gamma,a.ravel(),f.ravel(),out,flags]
+    if bad=='short':args[3]=e[:-1]
+    if bad=='float32':args[3]=e.astype('f')
+    if bad=='strided':args[3]=np.tile(e,2)[::2]
+    if bad=='readonly':out.flags.writeable=False
+    if bad=='unaligned':args[3]=np.ndarray(e.shape,dtype='d',buffer=bytearray(e.nbytes+1),offset=1)
+    if bad=='dimensions':args[0]=2**62
+    with pytest.raises((ValueError,BufferError)):backend._native.matrices(*args)
+
+
+def test_direct_positive_capture_and_empty_buffers():
+    if backend._native is None:pytest.skip('optional extension unavailable')
+    e,er,gamma,a,f=problem();c=a.shape[1]
+    r=np.empty((len(e),c,c),complex);flags=np.zeros(len(e),np.uint8)
+    backend._native.matrices(len(e),len(er),c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),flags)
+    assert not flags.any()
+    matrix=np.eye(c)[None,:,:]-1j*r
+    rhs=np.zeros((len(e),c,1),complex);rhs[:,0]=1.
+    y=np.ascontiguousarray(np.linalg.solve(matrix,rhs)[:,:,0]);cap=np.empty(len(e))
+    backend._native.absorption(len(e),len(er),c,e,er,gamma,a.ravel(),f.ravel(),y.view(float).ravel(),cap)
+    expected=solve_collision(e,er,gamma,None,reduced=a,channel_factors=f,return_absorption=True)[1]
+    np.testing.assert_allclose(cap,expected,rtol=3e-11,atol=1e-12)
+    empty=np.empty(0)
+    backend._native.matrices(0,0,1,empty,empty,empty,empty,empty,empty,np.empty(0,np.uint8))

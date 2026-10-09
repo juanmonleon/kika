@@ -54,3 +54,8 @@ AGENTS.md
 # wheel. Read kika/endf/remote/catalog.py; build it with
 #   python -m kika.scripts.build_endf_catalog
 kika/endf/remote/endf_catalog.json.gz
+
+# Optional native build products
+*.pyd
+*.so
+build/

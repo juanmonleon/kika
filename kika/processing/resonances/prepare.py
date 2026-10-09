@@ -321,7 +321,7 @@ def group_breaks(group):
     return breaks
 
 
-def energy_block_size(region, maximum=2048, work_bytes=64*1024**2):
+def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_rtol=0.):
     """Size exact RM/RML energy batches from a conservative workspace estimate.
 
     Covers level/channel temporaries per energy, not retained tables, parser
@@ -341,6 +341,20 @@ def energy_block_size(region, maximum=2048, work_bytes=64*1024**2):
         from .grid import ReconstructionConvergenceError
         raise ReconstructionConvergenceError('one RM/RML energy exceeds the temporary workspace target',
             category='memory-budget-exhausted')
+    if region.approximation=='ReichMoore' and absorption_rtol==1e-8:
+        from ._rm_acceleration import eligible
+        # The reference single-energy limit above is retained: exceptional
+        # rows must still be solvable within the requested workspace target.
+        streaming=True;native_fixed=65536;native_per_energy=1
+        for group in region.groups:
+            if not group.levels:continue
+            er,gamma,a=group.kernel_data;c=a.shape[1]
+            if not eligible(np.zeros(1),er,gamma,a,np.ones((1,c)),work_bytes,True,absorption_rtol):
+                streaming=False;break
+            native_fixed=max(native_fixed,65536+32*len(er)*c*c)
+            native_per_energy=max(native_per_energy,256*(c*c+c+1))
+        if streaming and native_fixed+native_per_energy<=work_bytes:
+            return max(1,min(maximum,(work_bytes-native_fixed)//native_per_energy))
     return max(1,min(maximum,(work_bytes-fixed)//largest))
 
 
@@ -359,7 +373,7 @@ def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*102
     if region.approximation=='ReichMoore':
         # Limit temporary level/channel arrays independently of caller block size.
         out={mt:np.zeros_like(energies) for mt in (1,2,18,102)}
-        block=energy_block_size(region,work_bytes=work_bytes)
+        block=energy_block_size(region,work_bytes=work_bytes,absorption_rtol=absorption_rtol)
         for start in range(0,len(energies),block):
             sl=slice(start,start+block)
             for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes,absorption_rtol=absorption_rtol).items():out[mt][sl]=value

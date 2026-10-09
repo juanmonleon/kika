@@ -5,6 +5,7 @@ Solves channel systems away from naked poles and an augmented channel/level
 system at poles. No inverse, epsilon width, energy displacement or clipping.
 """
 from dataclasses import dataclass
+from functools import cached_property
 import numpy as np
 from .channel_functions import neutral_channel_functions
 from .breit_wigner import Level, Group
@@ -50,6 +51,29 @@ class RMGroup(Group):
     spin: float = 0.
     channel_spin: float = .5
 
+    def __getstate__(self):
+        # NumPy's deepcopy/pickle makes read-only arrays writable. Rebuild
+        # the private coefficient cache lazily from the immutable levels.
+        return {key:value for key,value in self.__dict__.items() if key!='kernel_data'}
+
+    def __setstate__(self,state):
+        self.__dict__.update({key:value for key,value in state.items() if key!='kernel_data'})
+
+    @cached_property
+    def kernel_data(self):
+        """Immutable coefficient arrays from the immutable prepared levels."""
+        energies=np.array([level.energy for level in self.levels])
+        gamma=np.array([level.capture for level in self.levels])
+        neutron=np.array([level.neutron_amplitude for level in self.levels])
+        fission=np.array([level.fission_amplitudes for level in self.levels])
+        if not self.levels:fission=np.empty((0,0))
+        fission=fission[:,np.any(fission!=0,axis=0)]
+        amplitudes=np.column_stack((neutron,fission))
+        # A read-only flag alone can be reversed by the consumer. Bytes own
+        # these snapshots, so callers cannot edit the prepared physics.
+        freeze=lambda a:np.frombuffer(np.asarray(a,dtype=float).tobytes(),dtype=float).reshape(a.shape)
+        return tuple(freeze(a) for a in (energies,gamma,amplitudes))
+
 
 def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=None, *, entrance=0,
                     reduced=None,channel_factors=None,work_bytes=64*1024**2,
@@ -79,6 +103,24 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
     else:
         a=np.asarray(amplitudes);n,c=a.shape[1:]
     if not isinstance(entrance,int) or not 0<=entrance<c:raise ValueError('invalid entrance channel')
+    if separable and return_absorption and absorption_rtol == 1e-8:
+        from ._rm_acceleration import solve as accelerated_solve,reference_block_size
+        accelerated=accelerated_solve(e,levels,radiative_widths,None,diagnostics,
+            entrance=entrance,reduced=reduced,channel_factors=factors,
+            work_bytes=work_bytes,return_absorption=True,absorption_rtol=absorption_rtol)
+        if accelerated is not None:return accelerated
+        # Streaming production batches may be larger than reference batches.
+        # Ineligible factors or a rejected native solve must not restore a
+        # large energy x level temporary when falling back to NumPy.
+        block=reference_block_size(n,c,work_bytes)
+        if len(e)>block:
+            w=np.empty((len(e),c),complex);capture=np.empty(len(e))
+            for start in range(0,len(e),block):
+                sl=slice(start,start+block)
+                w[sl],capture[sl]=solve_collision(e[sl],levels,radiative_widths,None,diagnostics,
+                    entrance=entrance,reduced=reduced,channel_factors=factors[sl],
+                    work_bytes=work_bytes,return_absorption=True,absorption_rtol=0.)
+            return w,capture
     d=np.asarray(levels)[None,:]-e[:,None]-.5j*np.asarray(radiative_widths)[None,:]
     w=np.zeros((len(e),c),complex)
     x=np.zeros(len(e)) if return_absorption else np.zeros((len(e),n),complex)
@@ -193,15 +235,12 @@ def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2
         g=(2*group.spin+1)/(2*(2*ctx.target_spin+1))
         if not group.levels:
             elastic+=beta*g*4*np.sin(phi)**2;continue
-        levels=group.levels;gamma=np.array([level.capture for level in levels])
-        reduced=np.array([level.neutron_amplitude for level in levels])
-        af=np.array([level.fission_amplitudes for level in levels])
-        af=af[:,np.any(af!=0,axis=0)]  # Zero-strength exit channels have no observable effect.
+        level_energies,gamma,amplitudes=group.kernel_data
+        reduced=amplitudes[:,0]
         p=neutral_channel_functions(group.l,np.sqrt(k2)*group.channel_radius.evaluate(energies))[0]
         if np.any(p==0) and np.any(reduced):raise FloatingPointError('RM neutron penetrability underflows')
-        factors=np.ones((len(energies),1+af.shape[1]));factors[:,0]=np.sqrt(p)
-        amplitudes=np.column_stack((reduced,af))
-        w,absorption=solve_collision(energies,[level.energy for level in levels],gamma,None,diagnostics,
+        factors=np.ones((len(energies),amplitudes.shape[1]));factors[:,0]=np.sqrt(p)
+        w,absorption=solve_collision(energies,level_energies,gamma,None,diagnostics,
             reduced=amplitudes,channel_factors=factors,work_bytes=work_bytes,
             return_absorption=True,absorption_rtol=absorption_rtol)
         # Stable 1-U_nn, avoiding the cancellation of hard-sphere phase.
