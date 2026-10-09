@@ -101,12 +101,19 @@ def _head(path: Path) -> str:
         return handle.read(_HEAD_BYTES).decode("ascii", errors="replace")
 
 
-def _candidates(root: Path) -> List[Path]:
+def _candidates(root: Path, recursive: bool = False) -> List[Path]:
+    """The files of *root*, sorted; with *recursive*, of every subdirectory too.
+
+    Hidden files and directories (``.git``, ``.DS_Store``) are skipped.
+    """
     if root.is_file():
         return [root]
     if not root.is_dir():
         raise FileNotFoundError(f"Neither a file nor a directory: {root}")
-    return sorted(p for p in root.iterdir() if p.is_file() and not p.name.startswith("."))
+    if not recursive:
+        return sorted(p for p in root.iterdir() if p.is_file() and not p.name.startswith("."))
+    return sorted(p for p in root.rglob("*") if p.is_file()
+                  and not any(part.startswith(".") for part in p.relative_to(root).parts))
 
 
 def _dedupe(files: List[IndexedFile], key) -> Tuple[List[IndexedFile], List[str]]:
@@ -165,12 +172,16 @@ def _endf_header(text: str):
     return za, awr, mat, liso, nsub, temp
 
 
-def index_endf(root: Union[str, os.PathLike]) -> LibraryIndex:
-    """Index a directory of ENDF tapes (or one tape) from their MF1/MT451 headers."""
+def index_endf(root: Union[str, os.PathLike], recursive: bool = False) -> LibraryIndex:
+    """Index a directory of ENDF tapes (or one tape) from their MF1/MT451 headers.
+
+    With *recursive*, the subdirectories too: JEFF and JENDL are sometimes
+    unpacked one directory per element or sublibrary.
+    """
     root = Path(root)
     files: List[IndexedFile] = []
     unreadable: List[str] = []
-    for path in _candidates(root):
+    for path in _candidates(root, recursive):
         try:
             header = _endf_header(_head(path))
         except (OSError, ValueError):
@@ -232,16 +243,17 @@ def _zaid_nuclide(zaid: str, awr: float) -> Optional[Tuple[int, Optional[int], i
     return Z, A, int(isomer)
 
 
-def index_ace(root: Union[str, os.PathLike]) -> LibraryIndex:
+def index_ace(root: Union[str, os.PathLike], recursive: bool = False) -> LibraryIndex:
     """Index a directory of ACE tables (or one table) from their first line.
 
     Only continuous-energy neutron tables (``c``/``nc`` suffix) are indexed;
     thermal (``t``), photon and dosimetry tables are reported as unreadable.
+    *recursive* walks the subdirectories too.
     """
     root = Path(root)
     files: List[IndexedFile] = []
     unreadable: List[str] = []
-    for path in _candidates(root):
+    for path in _candidates(root, recursive):
         if path.name.lower() in ("xsdir", "xsdir.txt") or path.suffix.lower() in (".pdf", ".md", ".txt", ".json"):
             continue
         try:

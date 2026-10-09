@@ -157,6 +157,17 @@ def test_write_keeps_the_indices_integers(tmp_path):
 
 # ---- 4. Markdown and HTML -------------------------------------------------
 
+def _md_rows_under(md: str, prefix: str) -> int:
+    """Table rows of the Markdown groups whose heading starts with *prefix*."""
+    n, inside = 0, False
+    for line in md.split("## Findings")[1].split("## Method")[0].splitlines():
+        if line.startswith("#"):
+            inside = line.startswith(prefix)
+        elif inside and line.startswith("| ") and not line.startswith("| Location"):
+            n += 1
+    return n
+
+
 def test_the_pages_carry_summary_findings_method_and_identity(ne20):
     md = ne20.to_markdown()
     html = ne20.to_html()
@@ -168,8 +179,12 @@ def test_the_pages_carry_summary_findings_method_and_identity(ne20):
         assert "11 notes not listed" in page  # notes are counted, not listed
     assert "<link" not in html and "<script" not in html and "http" not in html
     assert "inert_rows" in md.split("## Findings")[0]  # but they are in the summary
-    assert md.split("## Findings")[1].count("| note |") == 0
-    assert ne20.to_markdown(level="note").split("## Findings")[1].count("| note |") == 11
+    assert "### Note ·" not in md.split("## Findings")[1]
+    assert _md_rows_under(ne20.to_markdown(level="note"), "### Note ·") == 11
+    # A check is named by its title first, its id beside it; levels in full.
+    assert r"| **Defect** | \|ρ\| > 1 (`correlation_out_of_bounds`)" in md
+    assert '<span class="badge defect">' in html and ">Defects</div>" in html
+    assert '<code class="id">correlation_out_of_bounds</code>' in html
 
 
 def test_library_pages_and_write_to_path(tmp_path):
@@ -272,9 +287,9 @@ def test_the_legend_agrees_with_what_the_cuts_give():
 def test_the_pages_end_with_the_legend_of_their_checks(ne20):
     md, html = ne20.to_markdown(), ne20.to_html()
     legend = md.split("## What each finding means")[1]
-    assert "### `ls1_in_cross_block`" in legend and "### `inert_rows`" in legend
+    assert "(`ls1_in_cross_block`)" in legend and "(`inert_rows`)" in legend
     assert "sum_rule_violated" not in legend  # only the checks of this report
-    assert '<h3 id="check-ls1_in_cross_block">' in html
+    assert 'id="check-ls1_in_cross_block"' in html
     assert set(ne20.to_dict()["checks"]) == {f.check for f in ne20}
 
 

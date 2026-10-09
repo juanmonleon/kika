@@ -57,3 +57,16 @@ def test_ace_first_lines_give_the_table_and_its_temperature(tmp_path):
     assert got == {"Fe56": ("26056.10c", 293.6), "Am242m1": ("95342.42c", 600.0)}
     assert d["temperatures"] == [293.6, 600.0]
     assert d["unreadable"] == 1   # the thermal table; xsdir is skipped silently
+
+
+def test_recursive_walks_the_subdirectories_and_skips_hidden_ones(tmp_path):
+    (tmp_path / "Fe").mkdir()
+    (tmp_path / "Fe" / "n-026_Fe_056.endf").write_text(_endf(26056, 55.4544, 2631))
+    (tmp_path / "n-095_Am_242m1.endf").write_text(_endf(95242, 239.9801, 9547, liso=1))
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "n-026_Fe_056.endf").write_text(_endf(26056, 55.4544, 2631))
+    flat = index_endf(tmp_path).describe()
+    assert [e["target"] for e in flat["isotopes"]] == ["Am242m1"]
+    deep = index_endf(tmp_path, recursive=True).describe()
+    assert [e["target"] for e in deep["isotopes"]] == ["Fe56", "Am242m1"]
+    assert deep["duplicates"] == 0 and deep["unreadable"] == 0
