@@ -309,7 +309,10 @@ def test_the_table_is_not_a_room_of_one_status():
     kinds = {e.coverage for e in counted}
     assert kinds == set(Coverage), f"only {kinds} occur"
     full = sum(1 for e in counted if e.coverage is Coverage.FULL)
-    assert 100 < full < 200, f"{full} full rows; the table was written at 134"
+    # Written at 134 full rows; 218 once the decay and fission-yield
+    # sublibraries landed (roadmap E7). The upper bound is the guard against
+    # a table that is all one status, not a count.
+    assert 100 < full < 270, f"{full} full rows; the table was written at 134"
     assert len({e.group for e in CAPABILITIES.values()}) > 25
 
 

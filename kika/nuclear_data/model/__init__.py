@@ -148,6 +148,8 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
 from .pops import MetaStable, Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
+from .fission_yields import (CUMULATIVE, INDEPENDENT, ElapsedTime, IncidentEnergy,
+                             ProductYield, Yields)
 from .decay import (AVERAGE_ENERGY_LABELS, ELECTROMAGNETIC, SPECTRUM_LABELS,
                     TRANSITION_TYPES, Continuum, Decay, DecayData, DecayMode,
                     DecayModes, DecayPath, Discrete, PhotonEmissionProbabilities, Shell,
@@ -251,6 +253,8 @@ __all__ = [
     "PhotonEmissionProbabilities", "Shell", "ELECTROMAGNETIC",
     "Spectrum", "Discrete", "Continuum", "TRANSITION_TYPES", "SPECTRUM_LABELS",
     "AVERAGE_ENERGY_LABELS", "MetaStable",
+    "ProductYield", "ElapsedTime", "IncidentEnergy", "Yields", "INDEPENDENT",
+    "CUMULATIVE",
     # §14 the root
     "ReactionSuite", "ExternalFile", "ExternalFiles", "ApplicationData",
     "CROSS_SECTION_UNITS",

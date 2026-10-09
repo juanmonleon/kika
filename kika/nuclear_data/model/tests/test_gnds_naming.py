@@ -77,7 +77,7 @@ GNDS_NODES: dict[str, tuple[str, ...]] = {
     "Add": ("href",),
     # §12 PoPs: a level's energy and its electromagnetic decay (gnds.xsd:539-575)
     "Nuclide": ("id", "mass", "spin", "parity", "charge", "halflife", "Z", "A",
-                "nuclearLevel", "energy", "decayData"),
+                "nuclearLevel", "energy", "decayData", "fissionFragmentData"),
     "DecayData": ("decayModes", "averageEnergies"),
     "DecayModes": ("decayModes",),
     "DecayMode": ("label", "mode", "probability", "decayPath",
@@ -93,6 +93,11 @@ GNDS_NODES: dict[str, tuple[str, ...]] = {
                  "internalPairFormationCoefficient"),
     "Continuum": ("spectrum",),
     "MetaStable": ("id", "pid", "metaStableIndex"),
+    # §18.4 fission product yields (gnds.xsd FissionProductYieldType)
+    "ProductYield": ("label", "nuclides", "elapsedTimes"),
+    "ElapsedTime": ("label", "time", "yields", "incidentEnergies"),
+    "IncidentEnergy": ("label", "energy", "yields"),
+    "Yields": ("nuclides", "values", "uncertainty"),
     # §7
     "Uncertainty": ("standard", "covariance", "listOfCovariances"),
     "Covariance": ("href", "label"),

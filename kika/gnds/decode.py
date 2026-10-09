@@ -353,6 +353,9 @@ class _SuiteReader:
             decayData=self.readDecayData(nucleus.find("decayData") if onNucleus
                                          else element.find("decayData")),
             decayDataOnNucleus=onNucleus,
+            fissionFragmentData=(self.readFissionFragmentData(
+                element.find("fissionFragmentData"), f"PoPs nuclide {element.attrib['id']}")
+                if element.find("fissionFragmentData") is not None else None),
         )
 
     @staticmethod
@@ -526,9 +529,8 @@ class _SuiteReader:
     def readFissionFragmentData(self, element: ET.Element, path: str):
         """§18.4: the delayed-neutron families and the energy release.
 
-        The inverse of the writer's ``fissionFragmentData``. ``productYields``
-        is reported, not read -- the model keeps its slot empty (MF8/454, /459
-        is roadmap E7).
+        The inverse of the writer's ``fissionFragmentData``, product yields
+        included (MF8/454, /459, roadmap E7c: :mod:`kika.gnds.fission_yields`).
         """
         from kika.nuclear_data.model import (DelayedNeutron, FissionEnergyRelease,
                                              FissionFragmentData, Product)
@@ -560,12 +562,8 @@ class _SuiteReader:
                 setattr(release, name, self.form(term[0], f"{here}/{name}", name))
             data.fissionEnergyReleases.append(release)
 
-        if element.find("productYields") is not None:
-            self.unsupported(
-                "productYields", here,
-                "fission product yields (ENDF MF8/454, /459) have a model slot "
-                "and no reader; roadmap E7"
-            )
+        from .fission_yields import readProductYields
+        data.productYields = readProductYields(element.find("productYields"), self.tally)
         return data
 
     def readQ(self, element: ET.Element, path: str) -> Q:

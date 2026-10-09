@@ -172,3 +172,10 @@ def _nuclideProperties(node: ET.Element, nuclide: Nuclide) -> None:
         _set(ET.SubElement(ET.SubElement(nucleus, "energy"), "double"),
              label="eval", value=_number(nuclide.energy.value),
              unit=nuclide.energy.unit or "eV")
+    data = getattr(nuclide, "fissionFragmentData", None)
+    if data is not None:
+        # A fission yield sublibrary's yields (roadmap E7c). Only the product
+        # yields: delayed neutrons and the energy release belong to a reaction.
+        from .fission_yields import writeProductYields
+        holder = ET.SubElement(node, "fissionFragmentData")
+        writeProductYields(holder, data.productYields)

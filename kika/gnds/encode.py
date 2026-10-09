@@ -652,11 +652,8 @@ class _SuiteWriter:
                         continue
                     _function(term, form, self.report, f"{here} {name}")
 
-        if data.productYields:
-            self.report.unsupportedNode(
-                f"{here}: productYields (MF8/454, /459) has a slot in the model "
-                f"and nothing fills or writes it"
-            )
+        from .fission_yields import writeProductYields
+        writeProductYields(element, data.productYields, self.report)
 
     def Q(self, parent: ET.Element, q, where: str) -> None:
         element = ET.SubElement(parent, "Q")

@@ -435,9 +435,10 @@ class FissionFragmentData:
 
     ``delayedNeutrons`` is filled from MF1/455 and ``fissionEnergyReleases``
     from MF1/458, one :class:`FissionEnergyRelease` per style label -- ENDF
-    gives one, the evaluated. ``productYields`` (MF8/454, /459) keeps its slot
-    so that the file which would fill it does not have to restructure this
-    node when it lands; no decoder fills it yet.
+    gives one, the evaluated. ``productYields`` holds
+    :class:`~kika.nuclear_data.model.fission_yields.ProductYield` nodes, from
+    MF8/454 and /459 (roadmap E7c): in a fission sublibrary evaluation they
+    hang off the target nuclide in PoPs, which is where GNDS puts them.
     """
 
     delayedNeutrons: DelayedNeutrons = field(default_factory=DelayedNeutrons)

@@ -66,6 +66,9 @@ class Nuclide(Particle):
     #: writes it). Both are §12; the flag keeps a file's choice through a read
     #: and a write.
     decayDataOnNucleus: bool = False
+    #: §18.4 ``fissionFragmentData`` on the nuclide: the fission product
+    #: yields of a fission yield sublibrary evaluation (roadmap E7c).
+    fissionFragmentData: Optional[object] = None
 
     @property
     def ZA(self) -> Optional[int]:

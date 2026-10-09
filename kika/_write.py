@@ -129,7 +129,20 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         )
     if resonance_extensions and format != 'gnds':
         raise ValueError('resonance_extensions is a GNDS-only option')
-    from kika.nuclear_data.model import PoPs
+    from kika.nuclear_data.model import FissionFragmentData, PoPs
+    if isinstance(suite, FissionFragmentData):
+        # Fission product yields alone (roadmap E7c): FUDGE's neutron-induced
+        # yield file, root fissionFragmentData. GNDS only.
+        if format != "gnds":
+            raise ValueError("a fissionFragmentData alone is written as GNDS; write the PoPs "
+                             "that carries it to get the ENDF tape")
+        from kika.gnds.encode import serialise
+        from kika.gnds.fission_yields import writeFissionFragmentDataDocument
+        tree, report = writeFissionFragmentDataDocument(suite)
+        target = Path(os.fspath(path))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(serialise(tree))
+        return report
     if isinstance(suite, PoPs):
         # A decay evaluation (roadmap E7b): an ENDF decay sublibrary tape, or
         # a GNDS file whose root is PoPs.
@@ -154,8 +167,8 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
 
 def _writePoPs(pops, path: Path, format: str, mat=None, tapeId=None):
     if format == "endf":
-        from kika.endf.model_adapter.decay_sublibrary import writeDecayTape
-        return writeDecayTape(pops, path, mat=mat, tapeId=tapeId)
+        from kika.endf.writers.sublibrary import writeSublibraryTape
+        return writeSublibraryTape(pops, path, mat=mat, tapeId=tapeId)
     if format != "gnds":
         raise ValueError(f"a decay evaluation (PoPs) is written as 'endf' or 'gnds', "
                          f"not {format!r}")

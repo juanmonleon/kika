@@ -275,11 +275,14 @@ def _readEndf(path, covariances: bool):
     endf = read_endf(str(path))
     mt451 = getattr(endf, "mf", {}).get(1)
     mt451 = getattr(mt451, "mt", {}).get(451) if mt451 is not None else None
-    if getattr(mt451, "_nsub", None) == 4:
-        # A radioactive decay sublibrary evaluation (roadmap E7b): one nuclide
-        # and how it decays, which GNDS writes as a standalone PoPs.
-        from kika.endf.model_adapter.decay_sublibrary import decodeDecaySublibrary
-        pops, report = decodeDecaySublibrary(endf, sourcePath=path)
+    if getattr(mt451, "_nsub", None) in (4, 5, 11):
+        # A radioactive decay (NSUB=4, roadmap E7b) or fission yield (NSUB=5,
+        # 11, E7c) evaluation: one nuclide and how it decays or what its
+        # fission leaves, which GNDS writes as a standalone PoPs.
+        from kika.endf.model_adapter.decay_sublibrary import (
+            decodeDecaySublibrary, decodeFissionYieldSublibrary)
+        decode = decodeDecaySublibrary if mt451._nsub == 4 else decodeFissionYieldSublibrary
+        pops, report = decode(endf, sourcePath=path)
         _noteUnparsedMFs(path, endf, report)
         pops.report = report
         return pops
@@ -325,6 +328,11 @@ def _readGnds(path, covariances: bool):
     from kika.gnds.xpath import Document, readExternalFiles
 
     document = Document.parse(path)
+    if document.root.tag == "fissionFragmentData":
+        # FUDGE's neutron-induced fission yields (roadmap E7c).
+        from kika.gnds.fission_yields import readFissionFragmentDataDocument
+        data, _ = readFissionFragmentDataDocument(document)
+        return data
     if document.root.tag == "PoPs":
         # A decay evaluation (roadmap E7b): a standalone PoPs, no reactionSuite.
         from kika.gnds.decay import readPoPsDocument

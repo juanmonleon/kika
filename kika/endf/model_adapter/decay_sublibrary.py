@@ -44,11 +44,21 @@ from kika.nuclear_data.model.enums import (ENDF_INT_TO_INTERPOLATION,
                                            INTERPOLATION_TO_ENDF_INT, Interpolation)
 from kika.nuclear_data.model.quantities import Uncertainty
 
-__all__ = ["decodeDecaySublibrary", "encodeDecaySublibrary", "writeDecayTape",
-           "DECAY_KEY", "DECAY_NSUB"]
+__all__ = ["decodeDecaySublibrary", "decodeFissionYieldSublibrary", "encodeSublibrary",
+           "writeSublibraryTape", "encodeDecaySublibrary", "writeDecayTape",
+           "DECAY_KEY", "TAPE_KEY", "DECAY_NSUB", "SFY_NSUB", "NFY_NSUB", "MF8_SUBLIBRARIES"]
 
 DECAY_NSUB = 4
+SFY_NSUB = 5
+NFY_NSUB = 11
+#: The ENDF sublibraries whose evaluation is a standalone PoPs.
+MF8_SUBLIBRARIES = (DECAY_NSUB, SFY_NSUB, NFY_NSUB)
 DECAY_KEY = "mf8_457"
+#: The tape's own conventions (sequence numbers, control records), kept so the
+#: copy is byte for byte.
+TAPE_KEY = "endf_tape"
+#: Sections a sublibrary tape carries that a PoPs has no node for, as read.
+VERBATIM_KEY = "verbatim_sections"
 NEUTRON_MASS_AMU = 1.00866491595
 
 #: RTYP's digits → the decay mode's name, FUDGE's ``decayType``.
@@ -138,7 +148,7 @@ def decodeDecaySublibrary(endf, report: Optional[ConversionReport] = None,
         pops.report = report
         return pops, report
     for mt in sorted(getattr(mf8, "mt", {})):
-        if mt != 457:
+        if mt not in (454, 457, 459):
             report.unsupportedNode(f"MF8/MT{mt} in a decay sublibrary tape is not decoded")
 
     za = int(round(section._za))
@@ -197,20 +207,19 @@ def decodeDecaySublibrary(endf, report: Optional[ConversionReport] = None,
     for spectrum in section.spectra:
         layout.append(_decodeSpectrum(spectrum, decayData, byKey, report))
 
-    raw = (getattr(mt451, "_text_lines", None) or [""])[0].rstrip("\r\n")
     book = {"layout": layout, "nc": len(energies) // 2, "mat": section._mat,
-            "pad": (section.pad.pairs, section.pad.values, section.pad.interp),
-            # NNDC's decay tapes stop at column 75: no sequence numbers.
-            "sequence": len(raw) > 75}
+            "pad": (section.pad.pairs, section.pad.values, section.pad.interp)}
     rebuilt = str(_buildSection(pops, nuclide, book)).split("\n")[:-1]
     source = str(section).split("\n")[:-1]
     if sourcePath is not None:
         raw = _rawSection(sourcePath, 8, 457)
         if raw:
             source = raw
-            book["control"] = _controlRecords(sourcePath)
     book["overrides"] = _overrides(rebuilt, source, report)
     provenance.headerFields[DECAY_KEY] = book
+    _keepTapeConventions(provenance, mt451, sourcePath)
+    _attachYields(nuclide, mf8, False, provenance, sourcePath, report)
+    _keepUnmodelledSections(provenance, endf, sourcePath, report)
     if not len(decayData.decayModes) and not decayData.averageEnergies:
         # A stable nuclide states nothing to decay: no decayData, as FUDGE
         # writes it (the empty one above was only for the rebuild).
@@ -352,13 +361,33 @@ def _discrete(line, styp: int) -> Discrete:
 # ---------------------------------------------------------------------------
 
 def _decayNuclide(pops: PoPs) -> Particle:
-    nuclides = [p for p in pops.particles.values() if p.decayData is not None]
+    """The one particle a sublibrary evaluation is about: the one with decay data
+    or fission yields, or the only particle there is (a stable nuclide)."""
+    nuclides = [p for p in pops.particles.values()
+                if p.decayData is not None or getattr(p, "fissionFragmentData", None) is not None]
     if not nuclides and len(pops.particles) == 1:
-        nuclides = list(pops.particles.values())          # a stable nuclide
+        nuclides = list(pops.particles.values())
     if len(nuclides) != 1:
-        raise ValueError(f"a decay sublibrary evaluation is one nuclide with decayData; this "
-                         f"PoPs has {len(nuclides)}")
+        raise ValueError(f"a decay or fission-yield evaluation is about one nuclide; this "
+                         f"PoPs has {len(nuclides)} candidates")
     return nuclides[0]
+
+
+def _productYield(nuclide):
+    data = getattr(nuclide, "fissionFragmentData", None)
+    yields = list(getattr(data, "productYields", None) or [])
+    return yields[0] if yields else None
+
+
+def _nsub(pops: PoPs, nuclide) -> int:
+    fields = getattr(pops.provenance, "headerFields", None) or {}
+    if fields.get("nsub") in MF8_SUBLIBRARIES:
+        return int(fields["nsub"])
+    if nuclide.decayData is not None or nuclide.halflife == "stable":
+        return DECAY_NSUB
+    productYield = _productYield(nuclide)
+    induced = productYield is not None and any(e.incidentEnergies for e in productYield.elapsedTimes)
+    return NFY_NSUB if induced else SFY_NSUB
 
 
 def _rfs(pops: PoPs, mode: DecayMode) -> int:
@@ -529,10 +558,10 @@ def _fields(line: str) -> List[str]:
     return [text[k:k + 11] for k in range(0, 66, 11)]
 
 
-def _overrides(rebuilt: List[str], source: List[str], report) -> dict:
+def _overrides(rebuilt: List[str], source: List[str], report, what: str = "MF8/MT457") -> dict:
     """Every field of *source* the rebuild did not reproduce: ``(rebuilt, tape)``."""
     if len(rebuilt) != len(source):
-        report.warn(f"MF8/MT457: the section rebuilt from the model has {len(rebuilt)} records "
+        report.warn(f"{what}: the section rebuilt from the model has {len(rebuilt)} records "
                     f"where the tape has {len(source)}; it is kept verbatim for the way back")
         return {"verbatim": source}
     out = {}
@@ -545,15 +574,16 @@ def _overrides(rebuilt: List[str], source: List[str], report) -> dict:
     return {"fields": out, "records": len(source)}
 
 
-def _applyOverrides(text: List[str], overrides: dict, report) -> List[str]:
+def _applyOverrides(text: List[str], overrides: dict, report,
+                    what: str = "MF8/MT457") -> List[str]:
     if not overrides:
         return text
     if "verbatim" in overrides:
-        report.warn("MF8/MT457 is written as it was read: the model could not rebuild it")
+        report.warn(f"{what} is written as it was read: the model could not rebuild it")
         return list(overrides["verbatim"])
     if overrides.get("records") != len(text):
-        report.warn("MF8/MT457: the section changed length, so the fields kept from the tape "
-                    "are not applied")
+        report.warn(f"{what}: the section changed length, so the fields kept from the tape "
+                    f"are not applied")
         return text
     lines = list(text)
     stale = 0
@@ -566,7 +596,7 @@ def _applyOverrides(text: List[str], overrides: dict, report) -> List[str]:
         fields[k] = tape
         lines[i] = "".join(fields) + lines[i][66:]
     if stale:
-        report.warn(f"MF8/MT457: {stale} field(s) kept from the tape were not applied because "
+        report.warn(f"{what}: {stale} field(s) kept from the tape were not applied because "
                     f"the model changed them")
     return lines
 
@@ -574,32 +604,68 @@ def _applyOverrides(text: List[str], overrides: dict, report) -> List[str]:
 class _TextSection:
     """A section whose text is already final (overrides applied)."""
 
-    def __init__(self, lines: List[str], mat: int):
+    def __init__(self, lines: List[str], mat: int, mf: int = 8):
         from kika.endf.utils import format_endf_send_record
-        self._text = "\n".join(lines + [format_endf_send_record(mat, 8)])
+        self._text = "\n".join(lines + [format_endf_send_record(mat, mf)])
 
     def __str__(self) -> str:
         return self._text
 
 
-def encodeDecaySublibrary(pops: PoPs, mat: Optional[int] = None,
-                          report: Optional[ConversionReport] = None):
-    """A decay PoPs → ``[(1, 451, section), (8, 457, section)]`` and the MAT."""
-    from .decode import TAPE_ID_KEY  # noqa: F401  (documented coupling)
+def encodeSublibrary(pops: PoPs, mat: Optional[int] = None,
+                     report: Optional[ConversionReport] = None):
+    """A decay or fission-yield PoPs → ``[(MF, MT, section), …]``, the MAT, the report.
+
+    MF1/451 always; MF8/457 for a decay evaluation; MF8/454 and /459 for the
+    fission yields the nuclide carries.
+    """
     from .encode import encodeMF1MT451
+    from .fission_yields import FPY_KEY, encodeFissionYields
 
     report = report if report is not None else ConversionReport()
     nuclide = _decayNuclide(pops)
     provenance = pops.provenance if pops.provenance is not None else _synthesiseProvenance(pops, report)
     mat = int(mat if mat is not None else provenance.mat)
-    book = dict((provenance.headerFields or {}).get(DECAY_KEY) or {})
-    book["mat"] = mat
-    section = _buildSection(pops, nuclide, book, report)
-    lines = str(section).split("\n")[:-1]
-    lines = _applyOverrides(lines, book.get("overrides"), report)
+    fields = provenance.headerFields or {}
     mt451, report = encodeMF1MT451(SimpleNamespace(styles=pops.styles, provenance=provenance),
                                    mat=mat, report=report)
-    return [(1, 451, mt451), (8, 457, _TextSection(lines, mat))], mat, report
+    sections = [(1, 451, mt451)]
+    awr = float(nuclide.mass.value) / NEUTRON_MASS_AMU if nuclide.mass is not None else 0.0
+    za = getattr(nuclide, "ZA", None) or zaFromPid(nuclide.id)
+    productYield = _productYield(nuclide)
+    if _nsub(pops, nuclide) == DECAY_NSUB:
+        book = dict(fields.get(DECAY_KEY) or {})
+        book["mat"] = mat
+        section = _buildSection(pops, nuclide, book, report)
+        lines = str(section).split("\n")[:-1]
+        lines = _applyOverrides(lines, book.get("overrides"), report)
+        yieldSections = (encodeFissionYields(productYield, za, awr, fields.get(FPY_KEY) or {},
+                                             mat, report) if productYield is not None else [])
+        # ENDF's order within MF8: MT454, MT457, MT459.
+        sections += [s for s in yieldSections if s[1] == 454]
+        sections.append((8, 457, _TextSection(lines, mat)))
+        sections += [s for s in yieldSections if s[1] == 459]
+    elif productYield is not None:
+        sections += encodeFissionYields(productYield, za, awr, fields.get(FPY_KEY) or {},
+                                        mat, report)
+    else:
+        report.lost("this fission-yield evaluation's nuclide carries no productYield, so the "
+                    "tape has MF1 only")
+    for mf, mt, lines in fields.get(VERBATIM_KEY) or []:
+        sections.append((mf, mt, _TextSection([line[:66].ljust(66) + _idColumns(mat, mf, mt, n + 1)
+                                               for n, line in enumerate(lines)], mat, mf)))
+    sections.sort(key=lambda item: (item[0], item[1]))
+    return sections, mat, report
+
+
+def _idColumns(mat: int, mf: int, mt: int, ns: int) -> str:
+    return f"{mat:>4}{mf:>2}{mt:>3}{ns:>5}"
+
+
+def encodeDecaySublibrary(pops: PoPs, mat: Optional[int] = None,
+                          report: Optional[ConversionReport] = None):
+    """The name E7b gave :func:`encodeSublibrary`."""
+    return encodeSublibrary(pops, mat, report)
 
 
 def _synthesiseProvenance(pops: PoPs, report: ConversionReport):
@@ -623,6 +689,12 @@ def _synthesiseProvenance(pops: PoPs, report: ConversionReport):
                          "none; pass mat=")
     version = _parseVersion(getattr(style, "version", None)) or (0, 0, 0)
     modes = list(nuclide.decayData.decayModes) if nuclide.decayData is not None else []
+    nsub = _nsub(pops, nuclide)
+    productYield = _productYield(nuclide)
+    emax = 0.0
+    if nsub == NFY_NSUB and productYield is not None:
+        emax = max((ie.energy.value for e in productYield.elapsedTimes for ie in e.incidentEnergies),
+                   default=0.0)
     fields = {"lrp": -1, "lfi": int(any(m.mode == "SF" for m in modes)),
               "nlib": nlibFromLibrary(getattr(style, "library", None)) or 0,
               "nmod": version[2],
@@ -630,10 +702,10 @@ def _synthesiseProvenance(pops: PoPs, report: ConversionReport):
               "sta": 1 if modes else 0, "lis": int(getattr(nuclide, "nuclearLevel", 0)),
               "liso": next((a.metaStableIndex for a in pops.aliases.values()
                             if a.pid == nuclide.id), 0),
-              "nfor": 6, "awi": 0.0, "emax": 0.0, "lrel": version[1], "nsub": DECAY_NSUB,
-              "nver": version[0], "ldrv": 0, "temp": 0.0}
-    report.warn("MF1/451 of the decay tape is derived from the PoPs, FUDGE's rule (LRP=-1, "
-                "EMAX=0, MAT from the documentation's third record)")
+              "nfor": 6, "awi": 1.0 if nsub == NFY_NSUB else 0.0, "emax": emax,
+              "lrel": version[1], "nsub": nsub, "nver": version[0], "ldrv": 0, "temp": 0.0}
+    report.warn(f"MF1/451 of the NSUB={nsub} tape is derived from the PoPs, FUDGE's rule "
+                f"(LRP=-1, MAT from the documentation's third record)")
     awr = float(nuclide.mass.value) / NEUTRON_MASS_AMU if nuclide.mass is not None else 0.0
     za = getattr(nuclide, "ZA", None) or zaFromPid(nuclide.id)
     return EndfProvenance(mat=int(match.group(1)), awr=awr, za=za, headerFields=fields,
@@ -642,7 +714,14 @@ def _synthesiseProvenance(pops: PoPs, report: ConversionReport):
 
 def writeDecayTape(pops: PoPs, path, mat: Optional[int] = None, tapeId: Optional[str] = None,
                    report: Optional[ConversionReport] = None) -> ConversionReport:
-    """Write a decay PoPs out as an ENDF-6 decay sublibrary tape."""
+    """The name E7b gave :func:`writeSublibraryTape`."""
+    return writeSublibraryTape(pops, path, mat, tapeId, report)
+
+
+def writeSublibraryTape(pops: PoPs, path, mat: Optional[int] = None,
+                        tapeId: Optional[str] = None,
+                        report: Optional[ConversionReport] = None) -> ConversionReport:
+    """Write a decay or fission-yield PoPs out as its ENDF-6 sublibrary tape."""
     import os
     from pathlib import Path
 
@@ -650,16 +729,22 @@ def writeDecayTape(pops: PoPs, path, mat: Optional[int] = None, tapeId: Optional
     from kika.endf.writers.update_directory import update_mf1_directory
     from .decode import TAPE_ID_KEY
 
-    sections, mat, report = encodeDecaySublibrary(pops, mat, report)
+    sections, mat, report = encodeSublibrary(pops, mat, report)
     kept = None
     if tapeId is None and pops.provenance is not None:
         kept = (pops.provenance.headerFields or {}).get(TAPE_ID_KEY)
     path = Path(os.fspath(path))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(assembleTape(sections, mat, tapeId, tapeRecord=kept), newline="\n")
-    if not update_mf1_directory(str(path), added_sections={(mf, mt) for mf, mt, _ in sections}):
-        report.warn(f"the MF1/451 directory of {path.name} could not be rebuilt")
-    book = ((pops.provenance.headerFields or {}).get(DECAY_KEY) or {}) if pops.provenance else {}
+    text = assembleTape(sections, mat, tapeId, tapeRecord=kept)
+    path.write_text(text, newline="\n")
+    book = ((pops.provenance.headerFields or {}).get(TAPE_KEY) or {}) if pops.provenance else {}
+    # The directory as read stays when no section changed length: nine decay
+    # tapes of ENDF/B-VIII.1 state an NC one or two records off (Br-88 says
+    # 535 for a 537-record MT457), and a copy should be a copy. Otherwise the
+    # counts are rebuilt from what was written.
+    if book.get("counts") is None or book["counts"] != _sectionCounts(text.split("\n")):
+        if not update_mf1_directory(str(path), added_sections={(mf, mt) for mf, mt, _ in sections}):
+            report.warn(f"the MF1/451 directory of {path.name} could not be rebuilt")
     if book.get("sequence") is False or book.get("control"):
         # The source tape's conventions, so the round trip is byte for byte:
         # no sequence numbers (columns 76-80), and each SEND/FEND/MEND/TEND
@@ -695,6 +780,114 @@ def _rawSection(path, mf: int, mt: int) -> List[str]:
             if lmf == mf and lmt == mt:
                 out.append(line)
     return out
+
+
+def _keepUnmodelledSections(provenance, endf, sourcePath, report) -> None:
+    """Every section but MF1/451 and MF8/454/457/459, as read, and named.
+
+    36 decay tapes of ENDF/B-VIII.1 carry spontaneous-fission neutron data
+    (Cf-252: MF1/452/455/456, MF5/18/455, MF31, MF35). A PoPs has no node for
+    a reaction's multiplicities or spectra -- FUDGE's ``ENDF_ITYPE_4`` drops
+    them -- so they ride along in the provenance and only the ENDF route
+    writes them back.
+    """
+    kept = []
+    for mf in sorted(getattr(endf, "mf", {})):
+        for mt in sorted(getattr(endf.mf[mf], "mt", {})):
+            if (mf, mt) == (1, 451) or (mf == 8 and mt in (454, 457, 459)):
+                continue
+            lines = _rawSection(sourcePath, mf, mt) if sourcePath is not None else []
+            if not lines:
+                lines = str(endf.mf[mf].mt[mt]).split("\n")[:-1]
+            kept.append((mf, mt, [line[:66] for line in lines]))
+    if kept:
+        provenance.headerFields[VERBATIM_KEY] = kept
+        report.unsupportedNode(
+            f"{len(kept)} section(s) ({', '.join(f'MF{mf}/MT{mt}' for mf, mt, _ in kept)}) "
+            f"have no node in a decay or fission-yield PoPs (spontaneous-fission neutron "
+            f"data); they are kept as read for the ENDF route and absent from GNDS")
+
+
+def _keepTapeConventions(provenance, mt451, sourcePath) -> None:
+    raw = (getattr(mt451, "_text_lines", None) or [""])[0].rstrip("\r\n")
+    # NNDC's decay and yield tapes stop at column 75: no sequence numbers.
+    book = {"sequence": len(raw) > 75}
+    if sourcePath is not None:
+        book["control"] = _controlRecords(sourcePath)
+        with open(sourcePath, encoding="latin-1") as handle:
+            book["counts"] = _sectionCounts([line.rstrip("\r\n") for line in handle])
+    provenance.headerFields[TAPE_KEY] = book
+
+
+def _sectionCounts(lines) -> dict:
+    """``{"MF/MT": records}`` over the data records of a tape (SEND and the like out)."""
+    counts: dict = {}
+    for line in lines[1:]:
+        if len(line) < 75 or _isControl(line):
+            continue
+        try:
+            key = f"{int(line[70:72])}/{int(line[72:75])}"
+        except ValueError:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _attachYields(nuclide, mf8, induced: bool, provenance, sourcePath, report) -> None:
+    from kika.nuclear_data.model import FissionFragmentData
+    from .fission_yields import FPY_KEY, decodeFissionYields
+
+    if mf8 is None:
+        return
+    productYield, book = decodeFissionYields(mf8, induced, sourcePath, report)
+    if productYield is None:
+        return
+    nuclide.fissionFragmentData = FissionFragmentData(productYields=[productYield])
+    provenance.headerFields[FPY_KEY] = book
+
+
+def decodeFissionYieldSublibrary(endf, report: Optional[ConversionReport] = None,
+                                 sourcePath=None) -> Tuple[PoPs, ConversionReport]:
+    """A fission yield tape (NSUB=5 spontaneous, 11 neutron-induced) → a PoPs whose
+    target nuclide carries the yields, as FUDGE writes a spontaneous one."""
+    from .decode import TAPE_ID_KEY, decodeMF1MT451
+
+    report = report if report is not None else ConversionReport()
+    mt451 = endf.mf[1].mt[451]
+    basePops, style, provenance, report = decodeMF1MT451(mt451, report)
+    tapeId = getattr(endf, "tape_id", None)
+    if tapeId is not None:
+        provenance.headerFields[TAPE_ID_KEY] = tapeId
+    pops = PoPs(name="protare_internal", version="1.0", styles=[style], provenance=provenance)
+    nuclides = [p for p in basePops.particles.values() if isinstance(p, Nuclide)]
+    if len(nuclides) != 1:
+        raise ValueError("MF1/451 of a fission yield tape names no target nuclide")
+    nuclide = nuclides[0]
+    lis = int(getattr(mt451, "_lis", 0) or 0)
+    liso = int(getattr(mt451, "_liso", 0) or 0)
+    if lis:
+        nuclide.id = pidFromZA(nuclide.ZA, lis)
+        alias = MetaStable(id=f"{_isotope(nuclide.ZA)}_m{liso}", pid=nuclide.id,
+                           metaStableIndex=liso)
+        pops.aliases[alias.id] = alias
+    if nuclide.halflife is None:
+        nuclide.halflife = "unstable"           # FUDGE's ENDF_ITYPE_5
+    if nuclide.charge is None:
+        nuclide.charge = 0                      # the atom, as FUDGE writes it
+    pops.add(nuclide)
+    mf8 = endf.mf.get(8)
+    if mf8 is None:
+        report.lost("this fission yield tape has no MF8")
+    else:
+        for mt in sorted(getattr(mf8, "mt", {})):
+            if mt not in (454, 459):
+                report.unsupportedNode(f"MF8/MT{mt} in a fission yield tape is not decoded")
+    nsub = int(getattr(mt451, "_nsub", 0) or 0)
+    _attachYields(nuclide, mf8, nsub == NFY_NSUB, provenance, sourcePath, report)
+    _keepTapeConventions(provenance, mt451, sourcePath)
+    _keepUnmodelledSections(provenance, endf, sourcePath, report)
+    pops.report = report
+    return pops, report
 
 
 def _controlRecords(path) -> List[str]:

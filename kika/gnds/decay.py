@@ -250,7 +250,8 @@ def readAliases(element: Optional[ET.Element], tally) -> dict:
                                metaStableIndex=int(child.attrib["metaStableIndex"]))
             aliases[alias.id] = alias
         else:
-            tally(f"PoPs <aliases><{child.tag}>: only metaStable is read")
+            tally(f"PoPs <{child.tag}>: outside kika's §12 particle model (only metaStable "
+                  f"is read)")
     return aliases
 
 
