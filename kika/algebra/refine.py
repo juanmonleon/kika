@@ -85,7 +85,8 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
            snap: Optional[Callable] = None, insert: str = "worst",
            max_passes: int = 40, max_points: Optional[int] = None,
            min_width_ulps: float = 0.0, unresolvable: str = "raise",
-           keep_probes: bool = False) -> RefineResult:
+           keep_probes: bool = False, precheck: int = 0,
+           reuse_probes: bool = False) -> RefineResult:
     """Add nodes to ``(x, y)`` until every chord passes *exceeds*.
 
     Parameters
@@ -128,11 +129,22 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
     keep_probes
         Return the probes of every final panel (requires every interval to be
         active).
+    precheck
+        Check this prefix of fractions first. Panels that already fail need
+        not evaluate the remaining fractions until their children are tested.
+        Accepted panels always pass all fractions. Zero uses one evaluation.
+    reuse_probes
+        Reuse exact (abscissa, starting interval) values from the previous
+        pass; requires a deterministic evaluator. No rounded cache keys.
     """
     if insert not in ("worst", "balanced", "all"):
         raise ValueError(f"insert must be 'worst', 'balanced' or 'all', got {insert!r}")
     if unresolvable not in ("raise", "accept"):
         raise ValueError(f"unresolvable must be 'raise' or 'accept', got {unresolvable!r}")
+    if not isinstance(precheck,int) or isinstance(precheck,bool) or not 0<=precheck<=len(fractions):
+        raise ValueError('precheck must be an integer prefix length of fractions')
+    if precheck and insert=='all':
+        raise ValueError("precheck cannot skip fractions with insert='all'")
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     fractions = np.asarray(fractions, dtype=float)
@@ -159,6 +171,8 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
     n_points, evaluations, unresolved = n, 0, 0
     passes = 0
     tiny = np.finfo(float).eps
+    cache_keys=cache_values=None
+    key_dtype=np.dtype([('owner',np.int64),('x',np.float64)])
 
     while owner.size:
         if passes == max_passes:
@@ -174,18 +188,49 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
             q = np.asarray(snap(q.ravel()), dtype=float).reshape(q.shape)
         q = np.maximum(x1[:, None], np.minimum(x2[:, None], q))
         usable = (q > x1[:, None]) & (q < x2[:, None])
-        actual = np.asarray(evaluate(q.ravel(), np.repeat(owner, q.shape[1])),
-                            dtype=float).reshape(q.shape + y.shape[1:])
-        evaluations += q.size
+        flat=q.ravel();flat_owner=np.repeat(owner,q.shape[1])
+        actual=np.empty((flat.size,)+y.shape[1:])
+        available=np.zeros(flat.size,dtype=bool)
+        keys=None
+        if reuse_probes:
+            keys=np.empty(flat.size,dtype=key_dtype)
+            keys['owner']=flat_owner;keys['x']=flat
+        def fetch(indices):
+            nonlocal evaluations
+            missing=indices
+            if reuse_probes and cache_keys is not None and len(cache_keys):
+                at=np.searchsorted(cache_keys,keys[indices])
+                at=np.minimum(at,len(cache_keys)-1)
+                hit=cache_keys[at]==keys[indices]
+                actual[indices[hit]]=cache_values[at[hit]]
+                missing=indices[~hit]
+            if len(missing):
+                actual[missing]=np.asarray(evaluate(flat[missing],flat_owner[missing]),dtype=float)
+                evaluations+=len(missing)
+            available[indices]=True
+        primary=precheck or q.shape[1]
+        first=np.flatnonzero(np.tile(np.arange(q.shape[1])<primary,len(owner)))
+        fetch(first)
+        actual=actual.reshape(q.shape+y.shape[1:])
         frac = (q - x1[:, None]) / (x2 - x1)[:, None]
-        if y.ndim > 1:
-            frac_k = frac[..., None]
-            chord = y1[:, None, :] + (y2 - y1)[:, None, :] * frac_k
-            ratio = np.max(exceeds(actual, chord), axis=-1)
-        else:
-            chord = y1[:, None] + (y2 - y1)[:, None] * frac
-            ratio = exceeds(actual, chord)
-        ratio = np.where(usable, ratio, 0.0)
+        chord=(y1[:,None,:]+(y2-y1)[:,None,:]*frac[...,None] if y.ndim>1
+               else y1[:,None]+(y2-y1)[:,None]*frac)
+        ratio=np.zeros(q.shape)
+        def ratios(indices):
+            if not len(indices):return
+            a=actual.reshape((flat.size,)+y.shape[1:])[indices]
+            b=chord.reshape((flat.size,)+y.shape[1:])[indices]
+            r=exceeds(a,b)
+            if y.ndim>1:r=np.max(r,axis=-1)
+            ratio.ravel()[indices]=np.where(usable.ravel()[indices],r,0.)
+        ratios(first)
+        if primary<q.shape[1]:
+            remaining=np.flatnonzero(np.repeat(~np.any(ratio>1.,axis=1),q.shape[1])&~available)
+            # fetch writes the flattened array even after the shaped view is made.
+            actual=actual.reshape((flat.size,)+y.shape[1:])
+            fetch(remaining)
+            actual=actual.reshape(q.shape+y.shape[1:])
+            ratios(remaining)
         bad = np.any(ratio > 1.0, axis=1)
 
         narrow = (x2 - x1) <= min_width_ulps * tiny * (np.abs(x1) + np.abs(x2))
@@ -197,6 +242,11 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
                     f"panel [{x1[i]!r}, {x2[i]!r}] fails its tolerance and cannot "
                     f"be split further in float64", "unresolvable")
             unresolved += int(stuck.sum())
+            if keep_probes:
+                remaining=np.flatnonzero(np.repeat(stuck,q.shape[1])&~available)
+                actual=actual.reshape((flat.size,)+y.shape[1:])
+                fetch(remaining)
+                actual=actual.reshape(q.shape+y.shape[1:])
         settle = ~bad | stuck
         if keep_probes and settle.any():
             done_x1.append(x1[settle])
@@ -218,6 +268,17 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         else:
             pick = usable.copy()
         pick &= split[:, None]
+        # A balanced midpoint can be outside a caller's precheck prefix.
+        # Every inserted node needs its own evaluated value.
+        missing=np.flatnonzero(pick.ravel()&~available)
+        actual=actual.reshape((flat.size,)+y.shape[1:])
+        fetch(missing)
+        actual=actual.reshape(q.shape+y.shape[1:])
+        if reuse_probes:
+            retain=available&np.repeat(split,q.shape[1])
+            order=np.argsort(keys[retain],kind='stable')
+            cache_keys=keys[retain][order]
+            cache_values=actual.reshape((flat.size,)+y.shape[1:])[retain][order]
         order = np.argsort(q, axis=1, kind="stable")
         qs = np.take_along_axis(q, order, axis=1)
         ps = np.take_along_axis(pick, order, axis=1)

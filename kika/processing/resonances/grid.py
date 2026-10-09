@@ -66,7 +66,7 @@ def linearize(evaluate, seeds, options, point_budget):
 
     The workspace target sizes starting chunks; final tables and an adaptive
     chunk's growth are additional storage. It is not a bound on process RSS.
-    All probes and error budgets are unchanged. A failing panel gains its
+    Accepted panels retain all probes and the same error budgets. A failing panel gains its
     worst probe and the midpoint; adding all seven probes multiplies output size.
     """
     x=np.unique(np.asarray(seeds,dtype=float))
@@ -105,9 +105,11 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None):
     """Return a common grid, values and checks; retain node evaluations.
 
     The refinement itself is :func:`kika.algebra.refine`, the one adaptive
-    engine in kika: every panel is probed at the refinement and verification
-    fractions, a panel whose mixed error ratio exceeds one half anywhere gains
-    its worst probe and midpoint, and only the panels a pass creates are probed again.
+    engine in kika: the three primary fractions reject failing panels first;
+    a candidate accepted panel also passes all four verification fractions.
+    A panel whose mixed error ratio exceeds one half anywhere gains
+    its worst tested probe and midpoint. Exact previous-pass probes are reused
+    on new panels; only missing energies are evaluated.
     (Until October 2026 every pass re-probed every panel, converged ones
     included, which asked the physics the same question once per pass.)
     """
@@ -125,7 +127,8 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None):
         result=refine(x,columns(first),lambda q,owner:columns(evaluate(q)),
                       lambda actual,linear:error_ratio(actual,linear,options)/.5,
                       fractions=fractions,insert='balanced',max_passes=options.max_iterations,
-                      max_points=point_budget,keep_probes=True)
+                      max_points=point_budget,keep_probes=True,
+                      precheck=3,reuse_probes=True)
     except RefinementError as exc:
         message={'points':'refinement exceeds max_points',
                  'passes':'refinement exceeds max_iterations',

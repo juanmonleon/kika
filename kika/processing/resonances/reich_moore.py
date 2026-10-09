@@ -100,7 +100,7 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
         regular=~np.any(poles,axis=1)
     maximum=0.;singular=0
     if np.any(regular):
-        dr=d[regular]
+        dr=d if np.all(regular) else d[regular]
         if separable:
             reciprocal=1/dr
             r=level_matrix(reciprocal,reduced)
