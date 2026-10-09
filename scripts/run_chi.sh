@@ -415,7 +415,7 @@ R98=/share_snc/snc/JuanMonleon/ENDF_samples/new_test_98_meshraw
 # 2026-08-23 (noche): anadidos los tres brazos de la serie 104. Misma cinta
 # (`_a0cross.endf`, dead=carry) y mismo camino que 103R2/103R4, asi que las
 # cinco son comparables de una sola variable.
-CHIARM="${1:?falta el brazo. Uso: sbatch run_chi.sh B1   -- brazos validos: R2 R4 S1 S2 S3 T1 T2 TH77 B1..B14 C9..C14 CT}"
+CHIARM="${1:?falta el brazo. Uso: sbatch run_chi.sh B1   -- brazos validos: R2 R4 S1 S2 S3 T1 T2 TH77 TH77P B1..B14 C9..C14 CT}"
 case "$CHIARM" in
   # ── 2026-09-09 — TH77: LA TABLA DE LA TESIS, RE-PUNTUADA ────────────────────
   #
@@ -453,6 +453,16 @@ case "$CHIARM" in
   # CHICROSS=0: `precompute_chi2_exfor_c0.py` no lee bloques a_0.
   TH77) CHIDIR=new_test_77 ; CHITAG=TH77 ; CHIMETH=exfor_c0
         CHIENDF=26-Fe-56g_nominal_mg.endf ; CHICROSS=0 ;;
+  # ── 2026-10-09 — TH77P: LA TABLA DE LA TESIS SIN EL ROMPECABEZAS DE PEELLE ──
+  # Misma cinta, mismo corpus y misma metodologia que TH77. Cambian dos cosas
+  # del codigo, no del brazo: el c0 de JEFF/JENDL se ajusta con los modos
+  # multiplicativos referidos al MODELO (antes al dato: JEFF salia un 18 % bajo
+  # en la mediana de Kinney) y el chi2 refiere u, v a y_eval. Se lee contra
+  # run_TH77. ⚠ Desde este despliegue TH77 YA NO SE REPRODUCE relanzandolo: su
+  # referencia es la salida archivada CHI_Figures/chi2_exfor_c0/run_TH77/.
+  # Plan: kika-workspace docs/thesis/ppp_chi2_update_plan_2026-10-09.md
+  TH77P) CHIDIR=new_test_77 ; CHITAG=TH77P ; CHIMETH=exfor_c0
+         CHIENDF=26-Fe-56g_nominal_mg.endf ; CHICROSS=0 ;;
   R2) CHIDIR=new_test_103R2_base         ; CHITAG=103R2 ;;
   R4) CHIDIR=new_test_103R4_malla1etapa  ; CHITAG=103R4 ;;
   S1) CHIDIR=new_test_104S1_fixsingleton ; CHITAG=104S1 ;;
@@ -558,7 +568,7 @@ case "$CHIARM" in
   C14) CHIDIR=/share_snc/snc/JuanMonleon/splines/deliverable ; CHITAG=bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_corr
        CHIENDF=26-Fe-56g_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_GATEFAIL.endf ; CHICROSS=1 ; CHICORR=1
        CHICORRFILE=/share_snc/snc/JuanMonleon/splines/deliverable/corrections/w18_v6_y5s_efficiencies.csv ;;
-  *)  echo "⛔ '$CHIARM' no es R2, R4, S1, S2, S3, T1, T2, TH77, B1-B14, C9-C14 ni CT"; exit 2 ;;
+  *)  echo "⛔ '$CHIARM' no es R2, R4, S1, S2, S3, T1, T2, TH77, TH77P, B1-B14, C9-C14 ni CT"; exit 2 ;;
 esac
 # Un CHIDIR que empieza por / es una ruta completa (brazo B1); el resto cuelga
 # de ENDF_samples como siempre. CHIENDF y CHICROSS conservan su valor de antes

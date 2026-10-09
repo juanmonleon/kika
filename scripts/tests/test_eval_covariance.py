@@ -165,8 +165,9 @@ def test_chi2_diagonal_matches_rank2_woodbury():
     # Brute-force reference via explicit inverse: Σ = D + uuᵀ + vvᵀ + diag(σ_eval²)
     # where D = diag(σ_stat²) and σ_dep enters as the second rank-1 column.
     D = sigma_stat ** 2 + sigma_eval_diag ** 2
-    u = sigma_indep * y_exp
-    v = sigma_dep_rel * y_exp
+    # u, v referred to the evaluation, not the data (Peelle, 2026-10-09).
+    u = sigma_indep * y_eval
+    v = sigma_dep_rel * y_eval
     r = y_exp - y_eval
     Sigma = np.diag(D) + np.outer(u, u) + np.outer(v, v)
     chi2_ref = float(r @ np.linalg.solve(Sigma, r))
