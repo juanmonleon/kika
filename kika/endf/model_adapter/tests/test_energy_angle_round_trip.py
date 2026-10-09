@@ -567,8 +567,10 @@ def test_law_six_is_an_uncorrelated_holding_an_n_body_phase_space():
     """Li-6's MT41, three of the library's five LAW=6 products.
 
     The distributed GNDS translation writes an ``isotropic2d`` angular half and
-    an ``NBodyPhaseSpace`` energy half with ``numberOfProducts`` and no mass.
+    an ``NBodyPhaseSpace`` energy half with ``numberOfProducts`` and a mass
+    (Li-6 MT41: 7.0278 amu), which FUDGE's ``toENDF6`` reads back as APSX.
     """
+    from kika._constants import NEUTRON_MASS_AMU
     from kika.nuclear_data.model import NBodyPhaseSpace
 
     endf = read_endf("kika/endf/tests/data/micro_li6_mf6.endf", mf_numbers=[6])
@@ -580,12 +582,14 @@ def test_law_six_is_an_uncorrelated_holding_an_n_body_phase_space():
         assert isinstance(form.angular, Isotropic2d)
         assert isinstance(form.energy, NBodyPhaseSpace)
         assert form.energy.numberOfProducts == section.products[index].law_data.npsx
-        # APSX is in units of the neutron mass; putting it in `mass` would mean
-        # choosing a neutron mass and writing a number the evaluator did not.
-        assert form.energy.mass is None
+        # APSX neutron masses, by the rule the target's AWR follows, so it
+        # derives back exactly (roadmap G4c).
+        apsx = section.products[index].law_data.apsx
+        assert form.energy.mass.unit == "amu"
+        assert form.energy.mass.value / NEUTRON_MASS_AMU == pytest.approx(apsx, rel=1e-14)
 
 
-def test_apsx_survives_in_the_provenance_and_not_in_the_model():
+def test_apsx_survives_in_the_provenance_too():
     endf = read_endf("kika/endf/tests/data/micro_li6_mf6.endf", mf_numbers=[6])
     section = endf.mf[6].mt[41]
     _e, _entries, provenance, _r = _roundTrip(section, 41)

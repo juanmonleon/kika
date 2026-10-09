@@ -2226,6 +2226,10 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                        # A skipped quantity is true of every sample and stated
                        # by no output file, which is exactly what notes are for.
                        notes=list(resonanceNotes) + list(skipped))
+    orphanNote = _orphanPhotonNote(suite, index)
+    if orphanNote is not None:
+        result.notes.append(orphanNote)
+        log.note(orphanNote)
     if _perturbsASpectrum(index):
         result.notes.append(MF35_UNCHANGED_NOTE)
         log.note(MF35_UNCHANGED_NOTE)
@@ -2391,6 +2395,26 @@ def _jsonableMoments(moments) -> Dict[str, Any]:
     """``spectrumMoments`` with string keys, for ``run_metadata.json``."""
     return {str(mt): {str(band): dict(record) for band, record in bands.items()}
             for mt, bands in moments.items()}
+
+
+def _orphanPhotonNote(suite, index) -> Optional[str]:
+    """Decision J9 of the E5 plan, said once per run: the photons of a sum stay put.
+
+    MT3/MT4/MT103-107 photons are ``orphanProducts`` of the sum (roadmap E5d).
+    A realisation that moves MF3 does not move their multiplicities -- that
+    would need a rule for how a partial's change reaches the sum's photons, and
+    nothing asks for one until there is UQ of gamma heating. MF13 production on
+    a sum whose σ moved is re-multiplied by the new σ (decision J2), which is a
+    consequence of σ, not a perturbation of the photons.
+    """
+    orphans = sorted({int(o.ENDF_MT) for o in getattr(suite, "orphanProducts", ())
+                      if o.ENDF_MT is not None})
+    if not orphans or not any(component.mf == 3 for meta in index.values()
+                              for component in meta["components"]):
+        return None
+    return (f"photon multiplicities of the sums MT{orphans} (orphanProducts) are "
+            f"written as evaluated: they do not follow a perturbed MF3 (decision "
+            f"J9); MF13 production on a moved sum is re-multiplied by its new σ (J2)")
 
 
 def _perturbsASpectrum(index) -> bool:

@@ -195,6 +195,12 @@ def _float_list(values: list) -> str:
 # ------------------------------------------------------------------
 
 
+def _int(token) -> int:
+    """An integer card field. NJOY reads list-directed input, so ``26056.`` is a
+    valid ZA (ENDF/B-VIII.1's ``tsl-026_Fe_056.leapr`` writes it so)."""
+    return int(float(token))
+
+
 def parse(card_lines: list[str]) -> dict:
     """Parse LEAPR card lines into a parameter dict."""
     idx = 0
@@ -205,7 +211,7 @@ def parse(card_lines: list[str]) -> dict:
     c1 = parse_card_values(card_lines[idx])
     lm["nout"] = [idx]
     idx += 1
-    nout = int(c1[0])
+    nout = _int(c1[0])
 
     # Card 2: 'title'/
     title = parse_quoted_string(card_lines[idx])
@@ -216,19 +222,19 @@ def parse(card_lines: list[str]) -> dict:
     c3 = parse_card_values(card_lines[idx])
     lm["ntempr"] = [idx]; lm["iprint"] = [idx]; lm["nphon"] = [idx]
     idx += 1
-    ntempr = int(c3[0])
-    iprint = int(c3[1]) if len(c3) > 1 else 0
-    nphon = int(c3[2]) if len(c3) > 2 else 100
+    ntempr = _int(c3[0])
+    iprint = _int(c3[1]) if len(c3) > 1 else 0
+    nphon = _int(c3[2]) if len(c3) > 2 else 100
 
     # Card 4: mat za [isabt] [ilog] [smin]
     c4 = parse_card_values(card_lines[idx])
     lm["mat"] = [idx]; lm["za"] = [idx]; lm["isabt"] = [idx]
     lm["ilog"] = [idx]; lm["smin"] = [idx]
     idx += 1
-    mat = int(c4[0])
-    za = int(c4[1])
-    isabt = int(c4[2]) if len(c4) > 2 else 0
-    ilog = int(c4[3]) if len(c4) > 3 else 0
+    mat = _int(c4[0])
+    za = _int(c4[1])
+    isabt = _int(c4[2]) if len(c4) > 2 else 0
+    ilog = _int(c4[3]) if len(c4) > 3 else 0
     smin = float(c4[4]) if len(c4) > 4 else None
 
     # Card 5: awr spr [npr] [iel] [ncold] [nsk]
@@ -238,29 +244,29 @@ def parse(card_lines: list[str]) -> dict:
     idx += 1
     awr = float(c5[0])
     spr = float(c5[1])
-    npr = int(c5[2]) if len(c5) > 2 else 1
-    iel = int(c5[3]) if len(c5) > 3 else 0
-    ncold = int(c5[4]) if len(c5) > 4 else 0
-    nsk = int(c5[5]) if len(c5) > 5 else 0
+    npr = _int(c5[2]) if len(c5) > 2 else 1
+    iel = _int(c5[3]) if len(c5) > 3 else 0
+    ncold = _int(c5[4]) if len(c5) > 4 else 0
+    nsk = _int(c5[5]) if len(c5) > 5 else 0
 
     # Card 6: nss [b7] [aws] [sps] [mss]
     c6 = parse_card_values(card_lines[idx])
     lm["nss"] = [idx]; lm["b7"] = [idx]; lm["aws"] = [idx]
     lm["sps"] = [idx]; lm["mss"] = [idx]
     idx += 1
-    nss = int(c6[0])
-    b7 = int(c6[1]) if len(c6) > 1 else 0
+    nss = _int(c6[0])
+    b7 = _int(c6[1]) if len(c6) > 1 else 0
     aws = float(c6[2]) if len(c6) > 2 else 0.0
     sps = float(c6[3]) if len(c6) > 3 else 0.0
-    mss = int(c6[4]) if len(c6) > 4 else 0
+    mss = _int(c6[4]) if len(c6) > 4 else 0
 
     # Card 7: nalpha nbeta [lat]
     c7 = parse_card_values(card_lines[idx])
     lm["nalpha"] = [idx]; lm["nbeta"] = [idx]; lm["lat"] = [idx]
     idx += 1
-    nalpha = int(c7[0])
-    nbeta = int(c7[1])
-    lat = int(c7[2]) if len(c7) > 2 else 1
+    nalpha = _int(c7[0])
+    nbeta = _int(c7[1])
+    lat = _int(c7[2]) if len(c7) > 2 else 1
 
     # Card 8: alphas (may span multiple lines)
     alpha_vals, alpha_lines = parse_multiline_card(card_lines, idx)
@@ -339,7 +345,7 @@ def _parse_temperature_block(
     # Card 11: delta ni
     c11 = parse_card_values(card_lines[idx]); idx += 1
     block["delta"] = float(c11[0])
-    block["ni"] = int(c11[1])
+    block["ni"] = _int(c11[1])
 
     # Card 12: rho values
     block["rho"] = [float(v) for v in parse_card_values(card_lines[idx])]; idx += 1
@@ -352,7 +358,7 @@ def _parse_temperature_block(
 
     # Card 14: nd
     c14 = parse_card_values(card_lines[idx]); idx += 1
-    nd = int(c14[0])
+    nd = _int(c14[0])
     block["nd"] = nd
 
     # Cards 15-16: discrete oscillator energies and weights
@@ -363,7 +369,7 @@ def _parse_temperature_block(
     # Cards 17-19: pair correlation (principal scatterer only)
     if nsk != 0:
         c17 = parse_card_values(card_lines[idx]); idx += 1
-        nka = int(c17[0])
+        nka = _int(c17[0])
         dka = float(c17[1])
         block["nka"] = nka
         block["dka"] = dka

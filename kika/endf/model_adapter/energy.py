@@ -482,8 +482,11 @@ def encodeMF5MT(energyForm, provenance: Optional[EndfProvenance], mt: int,
     from kika.endf.classes.mf5.base import MF5MT
 
     report = report if report is not None else ConversionReport()
+    # "derived": the block G4b builds for a suite read from GNDS
+    # (`derive/energy.py`); a parametrised one is checked against the model
+    # below exactly like one kept from a tape.
     fields = (provenance.headerFields.get("mf5")
-              if provenance is not None and provenance.sourceFormat == "endf"
+              if provenance is not None and provenance.sourceFormat in ("endf", "derived")
               else None)
     if fields is None:
         raise ValueError(

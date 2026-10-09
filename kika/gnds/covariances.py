@@ -246,6 +246,17 @@ def _readCovarianceMatrix(element: ET.Element, resolve, report) -> CovarianceMat
             f"a covarianceMatrix holding no gridded2d: {sorted(c.tag for c in element)}"
         )
     matrix, rowGrid, columnGrid, _ = _readGridded2d(gridded, resolve)
+    array = gridded.find("array")
+    storage = None
+    if array is not None:
+        if array.attrib.get("compression") == "diagonal":
+            storage = "diagonal"
+        elif array.attrib.get("symmetry") in ("lower", "upper"):
+            storage = "symmetric"
+        else:
+            storage = "full"
+    columnAxis = gridded.find("axes/grid[@index='1']")
+    linked = (columnAxis.find("link") is not None) if columnAxis is not None else None
     return CovarianceMatrix(
         matrix=matrix,
         rowGrid=rowGrid,
@@ -253,6 +264,8 @@ def _readCovarianceMatrix(element: ET.Element, resolve, report) -> CovarianceMat
         isRelative=element.attrib.get("type") == "relative",
         label=element.attrib.get("label"),
         productFrame=element.attrib.get("productFrame"),
+        arrayStorage=storage,
+        columnGridIsRowGrid=linked,
     )
 
 

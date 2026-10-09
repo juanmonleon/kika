@@ -74,6 +74,40 @@ _MF1_EVALUATION_INFO = (
 )
 
 
+def backgroundTable(form, name: str, report=None):
+    """§16.1.1's background, as the one MF3 table ENDF states (G2, NNDC GNDS).
+
+    MF3 *is* the background: ENDF adds the resonances to it at processing time
+    and GNDS says so with ``resonancesWithBackground``. FUDGE writes the three
+    regions joined (``toENDF6/reactionData/crossSection.py:114-151``), and so
+    does this: the resolved, unresolved and fast terms in order, a point shared
+    at a boundary written once, and a boundary between two regions of the same
+    interpolation law removed -- FUDGE's merge, which gives back the single
+    region the evaluation states across the resonance-range edge.
+    """
+    from kika.nuclear_data.model import Regions1d
+
+    background = getattr(form, "background", None)
+    pieces = []
+    for term in (getattr(background, "resolvedRegion", None),
+                 getattr(background, "unresolvedRegion", None),
+                 getattr(background, "fastRegion", None)):
+        if term is None:
+            continue
+        pieces.extend(term.function1ds if isinstance(term, Regions1d) else [term])
+    if not pieces:
+        raise TypeError(f"the resonancesWithBackground of {name} has no background to write")
+    joined = Regions1d(function1ds=pieces, axes=pieces[0].axes)
+    energies, values, pairs = joined.toEndfRegions()
+    merged = []
+    for nbt, code in pairs:
+        if merged and merged[-1][1] == code:
+            merged[-1] = (int(nbt), int(code))
+        else:
+            merged.append((int(nbt), int(code)))
+    return Regions1d.fromEndfRegions(energies, values, merged, axes=pieces[0].axes)
+
+
 def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
                 report: Optional[ConversionReport] = None, *,
                 label: str = EVAL_LABEL, precision: str = "legacy"):
@@ -111,6 +145,10 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
             f"file, and there is nothing to write"
         )
     form = reaction.crossSection[label]
+    from kika.nuclear_data.model.cross_section_forms import ResonancesWithBackground
+
+    if isinstance(form, ResonancesWithBackground):
+        form = backgroundTable(form, reaction.label, report)
     if not hasattr(form, "toEndfRegions"):
         raise TypeError(
             f"the {label!r} form of {reaction.label} is a "

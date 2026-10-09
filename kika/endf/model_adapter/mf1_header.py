@@ -102,8 +102,13 @@ def _massAmu(particle) -> Optional[float]:
         return None
 
 
-def _awr(pops, pid: str, za: int, neutronAmu: float, what: str, report) -> float:
-    """Mass ratio to the neutron, from PoPs when it says, else kika's table."""
+def _awr(pops, pid: str, za: int, neutronAmu: float, what: str, report,
+         nuclear: bool = False) -> float:
+    """Mass ratio to the neutron, from PoPs when it says, else kika's table.
+
+    ``nuclear`` for a projectile: ENDF's AWI of a hydrogen or helium isotope is
+    its nuclear mass, while PoPs carries the atomic one (``light_masses``).
+    """
     from kika._constants import ATOMIC_MASS
 
     particle = pops.particles.get(pid) if pops is not None else None
@@ -120,6 +125,11 @@ def _awr(pops, pid: str, za: int, neutronAmu: float, what: str, report) -> float
             f"MF1/451: the {what} mass ({pid}) is not in PoPs, so it was taken "
             f"from kika's atomic mass table ({amu} amu)"
         )
+    if nuclear:
+        from .light_masses import ELECTRON_MASS_AMU, _BINDING_AMU, isLight
+
+        if isLight(za):
+            amu -= ELECTRON_MASS_AMU * (za // 1000) + _BINDING_AMU[za]
     return amu / neutronAmu
 
 
@@ -225,7 +235,7 @@ def synthesiseMF1Header(suite, report, *, targetZA: Optional[int] = None
     ipart = _ipart(projectile)
     awi = 1.0 if projectile == "n" else (
         0.0 if ipart == 0 else _awr(suite.PoPs, projectile, ipart, neutronAmu,
-                                     "projectile", report))
+                                     "projectile", report, nuclear=True))
     mts = {getattr(reaction, "ENDF_MT", None) for reaction in suite.reactions}
     # ENDF-102 §1.1: ITYPE 2 is thermal neutron scattering (NSUB = 12).
     itype = 2 if thermal else (

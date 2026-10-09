@@ -50,7 +50,19 @@ def strip(suite):
     return bare
 
 
+def _fields(record: str):
+    """An ENDF record's six 11-column fields, a blank one read as the 0 it means."""
+    text = record[:66].ljust(66)
+    return [text[k:k + 11].strip() or "0" for k in range(0, 66, 11)]
+
+
 def _same(a, b) -> bool:
+    if isinstance(a, str) and isinstance(b, str) and a != b and max(len(a), len(b)) >= 60:
+        # Kept records (MF5's raw lines): an evaluator who pads an interpolation
+        # record with zeros and a writer that pads it with blanks state the same
+        # numbers. ENDF reads a blank integer field as 0, so this compares what
+        # the record says, not its spelling.
+        return _fields(a) == _fields(b)
     if isinstance(a, float) or isinstance(b, float):
         try:
             return math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-12)
@@ -59,6 +71,10 @@ def _same(a, b) -> bool:
     if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
         return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
     if isinstance(a, dict) and isinstance(b, dict):
+        # "pad" is how a section's writer spelled its short records (blank or
+        # zero), not a number the section states; the derived side has none.
+        a = {k: v for k, v in a.items() if k != "pad"}
+        b = {k: v for k, v in b.items() if k != "pad"}
         return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
     return a == b
 

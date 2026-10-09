@@ -184,6 +184,18 @@ class CovarianceMatrix:
     isRelative: bool = False
     label: Optional[str] = None
     productFrame: Optional[str] = None
+    #: How the file stored the array: ``"diagonal"`` (§5.2's
+    #: ``compression="diagonal"``), ``"symmetric"`` (``symmetry="lower"`` or
+    #: ``"upper"``) or ``"full"``; ``None`` when not read from GNDS. It is the
+    #: statement ENDF's LB rests on -- a diagonal array is LB=1, a symmetric one
+    #: LB=5 LS=1 -- and a dense matrix whose off-diagonal terms happen to be zero
+    #: is not the same statement (roadmap G6, FUDGE's toENDF6 reads it the same).
+    arrayStorage: Optional[str] = None
+    #: Whether the column axis is a link to the row axis (§5.1.3) rather than
+    #: a grid of its own. ``None`` when not read from GNDS. ENDF says the same
+    #: thing with LB=5 LS=0 (one grid) against LB=6 (two grids that may happen
+    #: to hold the same values), so it is what FUDGE's toENDF6 chooses by.
+    columnGridIsRowGrid: Optional[bool] = None
 
     def __post_init__(self) -> None:
         self.matrix = np.asarray(self.matrix, dtype=float)

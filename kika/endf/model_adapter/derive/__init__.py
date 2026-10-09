@@ -59,8 +59,24 @@ DERIVERS: List[Tuple[str, Callable[[object], bool],
                      Callable[[object, str, DerivationContext, object], Optional[object]]]] = []
 
 
+#: The order the derivers run in, by name. **Explicit, not import order**: the
+#: suite deriver sets the MAT, ZA and AWR every other one stamps, and a test
+#: that imported ``derive.reactions`` first used to register it ahead of
+#: ``derive.suite``, so every reaction came out with ZA and AWR of ``None``.
+#: A deriver not named here runs after these, in registration order.
+RUN_ORDER = ("suite", "reactions", "products", "multiplicities",
+             "fissionEnergyRelease", "delayedNeutrons", "covariances")
+
+
 def register(name: str, applies, derive) -> None:
+    if any(entry[0] == name for entry in DERIVERS):
+        return
     DERIVERS.append((name, applies, derive))
+
+
+def _inRunOrder():
+    rank = {name: k for k, name in enumerate(RUN_ORDER)}
+    return sorted(DERIVERS, key=lambda entry: rank.get(entry[0], len(rank)))
 
 
 def hasEndfProvenance(node) -> bool:
@@ -135,6 +151,12 @@ def provenanceNodes(suite) -> Iterator[Tuple[str, object]]:
                 return
             for index, value in enumerate(items):
                 yield from walk(value, f"{path}[{name(value, index)}]")
+            # `Sums` iterates its crossSectionSums and holds §21.1's other
+            # child beside them: without this the nu-bars of MT452/455, which
+            # are multiplicitySums, were never visited.
+            extra = getattr(obj, "multiplicitySums", None)
+            if extra is not None:
+                yield from walk(extra, f"{path}.multiplicitySums")
 
     yield from walk(suite, "suite")
 
@@ -149,6 +171,9 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
 
     from . import suite as _suite  # noqa: F401  registers, in run order
     from . import reactions as _reactions  # noqa: F401
+    from . import products as _products  # noqa: F401
+    from . import fission as _fission  # noqa: F401
+    from . import covariances as _covariances  # noqa: F401
 
     report = report if report is not None else ConversionReport()
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
@@ -162,7 +187,7 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
         # Nodes added to a suite that did come from a tape take its numbers.
         context.mat = mat if mat is not None else suite.provenance.mat
         context.za, context.awr = suite.provenance.za, suite.provenance.awr
-    for name, applies, derive in DERIVERS:
+    for name, applies, derive in _inRunOrder():
         for path, node in provenanceNodes(suite):
             if hasEndfProvenance(node) or not applies(node):
                 continue

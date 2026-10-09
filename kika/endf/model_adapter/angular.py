@@ -265,16 +265,20 @@ def encodeMF4MT(distribution, provenance: EndfProvenance, mt: int,
                 report: Optional[ConversionReport] = None):
     """The inverse of :func:`decodeMF4MT`, byte-identical to the source section.
 
-    Requires the ENDF provenance: LTT, LI, LCT and NM have no GNDS counterpart,
-    and re-deriving LTT from the shape of the model would be a guess that
-    happens to be right on the tapes tested and wrong on the first one that is
-    not.
+    Requires an ENDF provenance: LTT, LI, LCT and NM have no GNDS counterpart.
+    A suite read from ENDF writes back the file's own header, never a derived
+    one; a suite read from GNDS gets one from ``derive/products.py`` (G3),
+    whose rules the oracle checks against every stated header of the corpus
+    (``test_derive_oracle.py``) rather than against the tapes it was written on.
     """
     report = report if report is not None else ConversionReport()
-    if provenance is None or provenance.sourceFormat != "endf":
+    # "derived": the header G3 derived from the model for a suite read from
+    # GNDS (`derive/products.py`), stated by the same rules FUDGE writes it by.
+    if provenance is None or provenance.sourceFormat not in ("endf", "derived"):
         raise ValueError(
-            "encodeMF4MT needs the EndfProvenance decodeMF4MT produced: LTT, LI "
-            "and LCT are not recoverable from the model alone"
+            "encodeMF4MT needs the EndfProvenance decodeMF4MT produced, or the "
+            "one model_adapter.derive gives a GNDS-read suite: LTT, LI and LCT "
+            "are not in the model as such"
         )
 
     ltt = provenance.headerFields.get("ltt")

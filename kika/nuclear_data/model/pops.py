@@ -41,6 +41,9 @@ class Particle:
     #: ``gaugeBoson``: a PoPs written without it does not validate, and this is
     #: the one §12 property whose absence a writer cannot report its way out of.
     halflife: Optional[Union[PhysicalQuantity, str]] = None
+    #: §12 ``decayData``: the electromagnetic decay of an excited level (ENDF
+    #: MF12 LO=2, roadmap E5c). See :mod:`~kika.nuclear_data.model.decay`.
+    decayData: Optional[object] = None
 
     def __post_init__(self) -> None:
         if self.mass is not None:
@@ -54,6 +57,9 @@ class Nuclide(Particle):
     Z: Optional[int] = None
     A: Optional[int] = None
     nuclearLevel: int = 0
+    #: §12 ``nucleus/energy``: the level's excitation energy, in eV. ``None`` is
+    #: "not stated"; a ground state reads as 0 eV from GNDS.
+    energy: Optional[PhysicalQuantity] = None
 
     @property
     def ZA(self) -> Optional[int]:

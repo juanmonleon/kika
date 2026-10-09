@@ -283,6 +283,7 @@ class _SuiteReader:
                 id=particle.attrib["id"],
                 mass=self.readPhysicalQuantity(particle.find("mass/double")),
                 charge=self.readInteger(particle.find("charge/integer")),
+                decayData=self.readDecayData(particle.find("decayData")),
             ))
         for chemicalElement in element.iter("chemicalElement"):
             Z = int(chemicalElement.attrib["Z"])
@@ -294,7 +295,9 @@ class _SuiteReader:
         for dropped, name in (
             (len(element.findall("aliases/alias")), "PoPs <alias>"),
             (len(element.findall("aliases/metaStable")), "PoPs <metaStable>"),
-            (len(list(element.iter("decayData"))), "PoPs <decayData>"),
+            # A particle's own decayData is read (readDecayData); one on a
+            # <nucleus> is the decay sublibrary's shape (roadmap E7).
+            (len(element.findall(".//nucleus/decayData")), "PoPs <nucleus><decayData>"),
         ):
             for _ in range(dropped):
                 self.tally(f"{name}: outside kika's minimal §12 particle model")
@@ -308,7 +311,53 @@ class _SuiteReader:
             parity=self.readInteger(element.find("parity/integer")),
             charge=self.readInteger(element.find("charge/integer")),
             halflife=self.readHalflife(element.find("halflife")),
+            decayData=self.readDecayData(element.find("decayData")),
         )
+
+    def readDecayData(self, element: Optional[ET.Element]):
+        """§12 ``decayData``: its ``decayModes`` (roadmap E5c); the rest is E7's.
+
+        Every mode is read with its probability, its photon-emission
+        probabilities and its decay path -- that is the electromagnetic decay of
+        a level, which is what an ENDF MF12 LO=2 cascade becomes. ``Q``,
+        ``spectra``, ``internalConversionCoefficients`` and ``averageEnergies``
+        belong to the decay sublibrary and are counted, not read.
+        """
+        if element is None:
+            return None
+        from kika.nuclear_data.model import (Decay, DecayData, DecayMode, DecayModes,
+                                             DecayPath, PhotonEmissionProbabilities,
+                                             Product, Shell)
+
+        if element.find("averageEnergies") is not None:
+            self.tally("PoPs <decayData><averageEnergies>: decay sublibrary data (roadmap E7)")
+        modes = DecayModes()
+        for mode in element.findall("decayModes/decayMode"):
+            for name in ("internalConversionCoefficients", "Q", "spectra"):
+                if mode.find(name) is not None:
+                    self.tally(f"PoPs <decayMode><{name}>: decay sublibrary data (roadmap E7)")
+            quantity = mode.find("probability/double")
+            if quantity is None or len(quantity):
+                self.tally("PoPs <decayMode><probability>: only a plain <double> is read")
+            probability = (float(quantity.attrib.get("value", "nan"))
+                           if quantity is not None else float("nan"))
+            emission = mode.find("photonEmissionProbabilities")
+            photons = None
+            if emission is not None:
+                photons = PhotonEmissionProbabilities(shells=[
+                    Shell(label=shell.attrib["label"], value=float(shell.attrib["value"]))
+                    for shell in emission.findall("shell")])
+            path = DecayPath(decays=[
+                Decay(index=int(decay.attrib["index"]), mode=decay.attrib.get("mode"),
+                      products=[Product(pid=product.attrib["pid"],
+                                        label=product.attrib.get("label"))
+                                for product in decay.findall("products/product")])
+                for decay in mode.findall("decayPath/decay")])
+            modes.decayModes.append(DecayMode(
+                label=mode.attrib["label"], mode=mode.attrib["mode"],
+                probability=probability, decayPath=path,
+                photonEmissionProbabilities=photons))
+        return DecayData(decayModes=modes)
 
     def readHalflife(self, element: Optional[ET.Element]):
         """§12's two spellings: a ``<double>`` in seconds, or ``<string>`` "stable"."""
@@ -324,21 +373,11 @@ class _SuiteReader:
 
         GNDS separates the atom from its nucleus; kika's minimal PoPs has one
         particle. The two carry different things — the mass and the net charge
-        are the atom's, the spin, the parity and the level index are the
-        nucleus's — so folding loses nothing here, and the level *energy*, which
-        has no slot, is counted in the tallies.
+        are the atom's, the spin, the parity, the level index and the level
+        energy are the nucleus's — so folding loses nothing here.
         """
         nucleus = element.find("nucleus")
         nucleus = nucleus if nucleus is not None else ET.Element("nucleus")
-        energy = nucleus.find("energy/double")
-        # A ground state's energy is 0 and `nuclearLevel=0` reproduces it
-        # exactly, so only an excited level is a loss. Counting the ground
-        # states too would put 171 entries in Fe-56's report for 3 real ones.
-        if energy is not None and float(energy.attrib.get("value", 0)) != 0.0:
-            self.tally(
-                "PoPs <nucleus><energy>: the excitation energy of an excited "
-                "level, for which the model carries only the level index"
-            )
         return Nuclide(
             id=element.attrib["id"],
             mass=self.readPhysicalQuantity(element.find("mass/double")),
@@ -348,6 +387,8 @@ class _SuiteReader:
             halflife=self.readHalflife(nucleus.find("halflife")),
             Z=Z, A=A,
             nuclearLevel=int(nucleus.attrib.get("index", 0)),
+            energy=self.readPhysicalQuantity(nucleus.find("energy/double")),
+            decayData=self.readDecayData(element.find("decayData")),
         )
 
     @staticmethod

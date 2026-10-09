@@ -19,6 +19,11 @@ What it reports is what kika's ENDF decoder also builds, in plain lists:
 * ``photons`` — per MT, every photon product (of the reaction and of the decay
   of its residual): its multiplicity, the kind and value of its energy form,
   its continuum table and its Legendre rows (roadmap E5b).
+* ``pops`` — FUDGE's PoPs as XML, where the level energies and the MF12 LO=2
+  cascades live (roadmap E5c); kika parses it on its own side.
+
+Given a neutron GNDS file kika wrote (a name ending in ``.xml``), it reports
+that file's ``pops`` and FUDGE's ``toENDF6`` of it under ``endf``.
 """
 import json
 import os
@@ -200,6 +205,20 @@ def main(tapeText, name):
         # The other direction (roadmap E4b): a GNDS file kika wrote, read by
         # FUDGE and reported exactly as an ENDF translation would be.
         reactionSuite = _readGnds(tapeText)
+        if str(reactionSuite.interaction) != "thermalNeutronScatteringLaw":
+            # A neutron evaluation kika wrote (roadmap E5c): FUDGE's PoPs of
+            # it, and FUDGE's ENDF of it.
+            import brownies.legacy.toENDF6.toENDF6  # noqa: F401 - attaches toENDF6
+            out = {"pops": "\n".join(reactionSuite.PoPs.toXML_strList())}
+            try:
+                out["endf"] = reactionSuite.toENDF6("eval", {"verbosity": 0})
+            except Exception as error:  # reported, so the PoPs half still runs
+                import traceback
+
+                out["endfError"] = f"{type(error).__name__}: {error}"
+                out["endfTraceback"] = traceback.format_exc()
+            sys.stdout.write("\n" + JSON_MARKER + json.dumps(out) + "\n")
+            return
         out = {"tsl": _tsl(reactionSuite)}
         if str(reactionSuite.interaction) == "thermalNeutronScatteringLaw":
             # And on to ENDF, which FUDGE can only do with the MAT=…,ZA=… note
@@ -252,6 +271,7 @@ def main(tapeText, name):
         if photons:
             out.setdefault("photons", {})[str(mt)] = photons
     out["resonances"] = _resonanceEnergies(reactionSuite)
+    out["pops"] = "\n".join(reactionSuite.PoPs.toXML_strList())
     sys.stdout.write("\n" + JSON_MARKER + json.dumps(out) + "\n")
 
 
