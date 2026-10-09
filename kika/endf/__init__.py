@@ -14,6 +14,7 @@ from .read_endf import (
     read_mf4_mt,
     read_mf7_mt,
 )
+from .lazy import LazyFiles, TapeChangedError, open_endf
 from .classes.mf7.scatterer import ThermalScatterer, thermal_scatterer
 from . import dcs
 from .checks import check_covariance_library, check_covariances
@@ -43,6 +44,9 @@ __all__ = [
     "TapeInventory",
     # Local file reading
     "read_endf",
+    "open_endf",
+    "LazyFiles",
+    "TapeChangedError",
     "read_mt451",
     "read_mf2",
     "read_mf3_mt",

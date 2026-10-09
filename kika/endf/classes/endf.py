@@ -82,14 +82,29 @@ class ENDF:
         metal) that means nothing arithmetically. Use
         :func:`kika.endf.thermal_scatterer` for the identity instead.
 
-        Requires MF1 to have been parsed; ``False`` if it was not.
+        Requires MF1 to have been parsed (or the tape opened with
+        :func:`kika.endf.open_endf`); ``False`` if it was not.
         """
-        mf1 = self.files.get(1)
-        mt451 = mf1.sections.get(451) if mf1 is not None else None
+        mt451 = self.mt451
         if mt451 is None:
             return False
         from .mf7.scatterer import THERMAL_SCATTERING_NSUB
         return mt451.sublibrary == THERMAL_SCATTERING_NSUB
+
+    @property
+    def mt451(self):
+        """MF1/MT451, the tape's identity and directory, or None.
+
+        On a tape opened with :func:`kika.endf.open_endf` this parses MT451
+        alone -- not the rest of MF1, which on a fissile tape holds the nubar
+        and fission-energy sections. Otherwise it is ``files[1].sections[451]``
+        when MF1 was parsed.
+        """
+        lazy = getattr(self.files, "mt451", None)
+        if callable(lazy):
+            return lazy()
+        mf1 = self.files.get(1)
+        return mf1.sections.get(451) if mf1 is not None else None
 
     @property
     def mf(self) -> Dict[int, MF]:

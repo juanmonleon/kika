@@ -37,6 +37,12 @@ def read_endf(filepath: str, mf_numbers: Optional[Union[int, List[int]]] = None)
         note has drifted from before. Other MF sections are skipped with a
         warning.
 
+        A full read parses all of them, whatever the caller then uses. To
+        parse each MF only when it is first accessed, use
+        :func:`kika.endf.open_endf`, which returns the same ``ENDF`` with the
+        same MF objects (JENDL-5 U-238: 4.35 s here, 0.08 s to open there and
+        0.015 s more for MF3).
+
     Examples:
         # Parse all MF sections with registered parsers
         endf = read_endf("path/to/file")
