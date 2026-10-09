@@ -42,7 +42,7 @@ from kika.g4ndl.physics import (
     _blocks, _distribution, _segmentValues, _tableArrays, _tableMoments,
 )
 
-__all__ = ["angularBulk", "angularMTs", "crossSections", "isotopeSummary",
+__all__ = ["angularBulk", "angularMTs", "crossSections", "pointwiseCrossSection", "isotopeSummary",
            "LINEARISATION_POINTS", "PROJECTION_ORDER", "REPRESENTATIONS",
            "INELASTIC_TOTAL", "inelasticTotal", "captureSummary", "fissionSummary"]
 
@@ -114,17 +114,35 @@ def angularMTs(suite) -> List[int]:
     return sorted(out)
 
 
+def pointwiseCrossSection(suite, mt: int):
+    """``(E, sigma)`` of ``mt``: the ``recon`` form when the suite has one,
+    else the evaluated form when it is already pointwise.
+
+    A G4NDL suite labels every cross section ``recon``. A GNDS file translated
+    by FUDGE carries ``recon`` only where the evaluation holds resonance
+    parameters (``resonancesWithBackground``); every other reaction is an
+    ``eval`` ``XYs1d``/``regions1d``, which is pointwise as it stands. Raises
+    ``KeyError`` when neither exists, ``TypeError`` when the only form is not
+    tabulated (resonances with no reconstruction beside them).
+    """
+    try:
+        return suite.cross_section(int(mt), form="recon")
+    except KeyError:
+        return suite.cross_section(int(mt), form="eval")
+
+
 def crossSections(suite) -> Dict[int, Any]:
-    """MT → ``(E, sigma)`` (eV, b, 0 K, ``recon``) for every reaction and every
-    sum with an ENDF MT; the process total is :func:`inelasticTotal`."""
+    """MT → ``(E, sigma)`` (eV, b, 0 K, :func:`pointwiseCrossSection`) for every
+    reaction and every sum with an ENDF MT; the process total is
+    :func:`inelasticTotal`."""
     out: Dict[int, Any] = {}
     for node in list(suite.reactions) + list(suite.sums):
         mt = node.ENDF_MT
         if mt is None:
             continue
         try:
-            out[int(mt)] = suite.cross_section(int(mt), form="recon")
-        except KeyError:
+            out[int(mt)] = pointwiseCrossSection(suite, int(mt))
+        except (KeyError, TypeError):
             continue
     return dict(sorted(out.items()))
 
@@ -203,6 +221,10 @@ def angularBulk(suite, maxOrder: Optional[int] = None, mt: int = 2) -> Dict[str,
         distribution = _distribution(suite)
         repFlag = getattr(getattr(suite, "provenance", None), "repFlag", None)
         angular = distribution.angular if hasattr(distribution, "angular") else None
+        if angular is not None and _isIsotropic(angular):
+            angular = None
+        if repFlag is None:                     # not G4NDL: read it off the blocks
+            repFlag = 0 if angular is None else _repFlag(_blocks(angular))
     else:
         distribution = _neutronDistribution(suite, mt)
         angular = _angular(distribution)
@@ -213,7 +235,7 @@ def angularBulk(suite, maxOrder: Optional[int] = None, mt: int = 2) -> Dict[str,
             angular = None
         repFlag = 0 if angular is None else _repFlag(_blocks(angular))
     if angular is None:                                       # isotropic
-        energies, _ = suite.cross_section(mt, form="recon")
+        energies, _ = pointwiseCrossSection(suite, mt)
         span = [float(energies[0]), float(energies[-1])]
         return dict(energies=span, max_order=0, coefficients_by_order={"0": [1.0, 1.0]},
                     energy_interpolation=None, representation=0 if repFlag is None else repFlag,

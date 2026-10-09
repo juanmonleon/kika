@@ -281,9 +281,12 @@ def _interpolation(element: ET.Element) -> Interpolation:
 #: FUDGE also defines ``unitbase-unscaled``, ``correspondingPoints-unscaled``,
 #: ``cumulativePoints`` and ``cumulativePointsUnscaled``, none of which §3.4.5
 #: allows, and it does *not* define ``correspondingEnergies``, which §3.4.5 does
-#: — its source even carries a comment saying so. None of those occur in the
-#: neutron distribution, so none is mapped here: meeting one raises, naming it,
-#: rather than being folded onto a near neighbour.
+#: — its source even carries a comment saying so. None is mapped here: meeting
+#: one raises, naming it, rather than being folded onto a near neighbour.
+#: **Measured 2026-10-08** over the 558 neutron files of ENDF/B-VIII.1-GNDS:
+#: ``unitbase-unscaled`` occurs in 11 of them (Mo-94/95/96/98, Yb-170..174,
+#: Hf-181/182), on outgoing-energy spectra (``XYs2d`` of ``flat`` ``XYs1d``),
+#: so those 11 do not read today. The other three occur nowhere.
 #:
 #: Accepted **silently**, without a report entry. A warning on every qualified
 #: node would mean roughly 500 warnings on a single evaluation, which is how a
