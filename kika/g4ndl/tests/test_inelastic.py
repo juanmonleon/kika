@@ -235,12 +235,17 @@ def test_the_law_mapping_is_the_endf_adapters():
     assert isinstance(gd.angular, XYs2d) and isinstance(gd.angular.function1ds[0], XYs1d)
 
 
-def test_what_is_not_modelled_is_kept_and_reported():
+def test_the_photons_of_a_channel_reach_the_model():
+    """D10-2: Hg-196 MT17's dataType 12, 14 and 15 are its photons' MF12-15."""
     suite = G4.read("Hg196")
-    p = suite.reactions[17].provenance
-    verbatim = [e["dataType"] for e in p.sections if e.get("verbatim") is not None]
-    assert verbatim == [12, 14, 15]
-    assert any("inelastic sections are not in the model" in m for m in suite.report.unsupported)
+    r = suite.reactions[17]
+    p = r.provenance
+    assert [e["dataType"] for e in p.sections if e.get("verbatim") is not None] == []
+    photons = [x for x in r.outputChannel.products if x.pid == "photon"]
+    assert photons and all(x.multiplicity is not None for x in photons)
+    mean = next(e for e in p.sections if e["dataType"] in (12, 13))
+    assert {"endf", "g4ndl", "targetMass"} <= set(mean["photons"])
+    assert [e.get("photonsOf") for e in p.sections if e["dataType"] in (14, 15)] == [12, 12]
 
 
 def test_code_1_is_read_lin_lin_and_written_back(tmp_path):

@@ -29,10 +29,11 @@ pytestmark = pytest.mark.tape
 #: library -> (fission isotopes, chance files {dir: (files, with a final state)},
 #: FF files, sections kept as text {(infoType, dataType): count}).
 CENSUS = {
+    # The photons (1, 12/14/15) reach the model since D10-2 (2026-10-09).
     "g4ndl_g4ndl471_library": (70, {"FC": (38, 5), "SC": (38, 5), "TC": (36, 3), "LC": (35, 2)},
-                               11, {(1, 12): 61, (1, 14): 61, (1, 15): 61, (3, 5): 1}),
+                               11, {(3, 5): 1}),
     "g4ndl_jeff40_library": (75, {"FC": (33, 1), "SC": (33, 1), "TC": (33, 1), "LC": (33, 1)},
-                             0, {(1, 12): 50, (1, 14): 50, (1, 15): 50}),
+                             0, {}),
 }
 
 

@@ -137,6 +137,28 @@ def _sameUpToTheTranslation(ours, theirs):
             assert np.array_equal(ea.rows, eb.rows[:, :k])
 
 
+def _close(ours, theirs, rtol, path="body"):
+    """Every field where two G4NDL bodies differ beyond *rtol* (exact for integers)."""
+    import dataclasses
+
+    out = []
+    if dataclasses.is_dataclass(ours):
+        for f in dataclasses.fields(ours):
+            out += _close(getattr(ours, f.name), getattr(theirs, f.name), rtol, f"{path}.{f.name}")
+    elif isinstance(ours, (tuple, list)):
+        if len(ours) != len(theirs):
+            return [f"{path}: {len(ours)} != {len(theirs)} items"]
+        for i, (x, y) in enumerate(zip(ours, theirs)):
+            out += _close(x, y, rtol, f"{path}[{i}]")
+    elif isinstance(ours, (np.ndarray, float)):
+        x, y = np.asarray(ours, dtype=float), np.asarray(theirs, dtype=float)
+        if x.shape != y.shape or not np.allclose(x, y, rtol=rtol, atol=0):
+            out.append(path)
+    elif ours != theirs:
+        out.append(f"{path}: {ours!r} != {theirs!r}")
+    return out
+
+
 @pytest.mark.njoy
 @pytest.mark.tape
 def test_fe56_jeff40_inelastic_against_the_iaea_translation(tmp_path, fe56_jeff40_tape,
@@ -152,15 +174,18 @@ def test_fe56_jeff40_inelastic_against_the_iaea_translation(tmp_path, fe56_jeff4
     assert sorted(files) == iaea.inelasticChannels("Fe56")
     # MT600-649's MF4 is the proton's, and the adapter puts it on the proton.
     assert [p.pid for p in suite.findReactionByENDF_MT(600).outputChannel.products] == ["H1"]
-    missing = set()
+    photons = set()
     for ch, ours in files.items():
         theirs = iaea.inelasticFinalState("Fe56", ch)
         mine = {(s.sfType, s.dataType): s.body for s in ours.sections}
         for s in theirs.sections:
             key = (s.sfType, s.dataType)
             if s.dataType >= 12:
-                missing.add(s.dataType)       # photon production: not in the model
-                assert key not in mine
+                # D10-2: MF12-15 reach the model and come back as the IAEA's
+                # sections, to the six digits the translation prints.
+                photons.add(s.dataType)
+                assert key in mine, (ch, key)
+                assert _close(mine[key], s.body, 5e-6) == [], (ch, key)
                 continue
             if s.dataType == 3:
                 a, b = s.body.points, mine[key].points
@@ -169,4 +194,4 @@ def test_fe56_jeff40_inelastic_against_the_iaea_translation(tmp_path, fe56_jeff4
                     <= 1.5e-3 * a.y.max(), (ch, key)
                 continue
             _sameUpToTheTranslation(mine[key], s.body)
-    assert missing == {12, 14}
+    assert photons == {12, 14}

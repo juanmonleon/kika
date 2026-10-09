@@ -77,16 +77,58 @@ def test_the_final_state_from_an_endf_tape_is_the_iaea_translation(
     assert finalStateDifferences(theirs, ours) == diffs
 
 
-def test_an_endf_tape_with_its_capture_photons_in_mf12_writes_no_final_state(
-        fe56_jeff40_tape, g4ndl_jeff40_library):
-    """N-14: MF12-15 photons, which the ENDF adapter does not read (D10-2)."""
-    from kika.nuclear_data.model import ConversionReport
+def _close(ours, theirs, rtol, path="record"):
+    """Every field where two records differ beyond *rtol* (exact for integers)."""
+    import dataclasses
 
-    report = ConversionReport()
-    assert captureFinalState(_jeff40(fe56_jeff40_tape.parent, "n_7-N-014g.jeff"),
-                             report=report) is None
-    assert any("G4PhotonEvaporation" in m for m in report.warnings)
-    assert g4ndl.open(g4ndl_jeff40_library).captureFinalStateDirectory("N14") == "Capture/FS"
+    out = []
+    if dataclasses.is_dataclass(ours):
+        for f in dataclasses.fields(ours):
+            if f.name != "path":
+                out += _close(getattr(ours, f.name), getattr(theirs, f.name), rtol,
+                              f"{path}.{f.name}")
+    elif isinstance(ours, (tuple, list)):
+        if len(ours) != len(theirs):
+            return [f"{path}: {len(ours)} != {len(theirs)} items"]
+        for i, (a, b) in enumerate(zip(ours, theirs)):
+            out += _close(a, b, rtol, f"{path}[{i}]")
+    elif isinstance(ours, np.ndarray) or isinstance(ours, float):
+        a, b = np.asarray(ours, dtype=float), np.asarray(theirs, dtype=float)
+        if a.shape != b.shape or not np.allclose(a, b, rtol=rtol, atol=0):
+            out.append(path)
+    elif ours != theirs:
+        out.append(f"{path}: {ours!r} != {theirs!r}")
+    return out
+
+
+def test_an_endf_tapes_mf12_capture_photons_are_the_iaea_fs(fe56_jeff40_tape,
+                                                            g4ndl_jeff40_library):
+    """D10-2: a JEFF-4.0 tape whose capture photons are MF12-15 gives the
+    ``Capture/FS`` the IAEA translation has, for all 22 isotopes that have one.
+
+    The translation prints six significant digits (the AWR, and on Li-7, B-10,
+    F-19, Si-28, Cl-35 and Cl-37 the photon energies and grids too, where kika
+    keeps the tape's seven), so the numbers agree to that and the rest exactly.
+    """
+    import re
+
+    from kika.g4ndl.capture import CapturePhotonsRecord
+
+    lib = g4ndl.open(g4ndl_jeff40_library)
+    tapes = fe56_jeff40_tape.parent
+    seen = 0
+    for key in lib.isotopes("capture"):
+        theirs = lib.captureFinalState(key)
+        if not isinstance(theirs, CapturePhotonsRecord):
+            continue
+        symbol, mass = re.match(r"([A-Za-z]+)(\d+)", str(key)).groups()
+        (tape,) = tapes.glob(f"n_*-{symbol}-{int(mass):03d}g.jeff")
+        suite = kika.read(str(tape), format="endf", covariances=False)
+        ours = captureFinalState(suite)
+        assert isinstance(ours, CapturePhotonsRecord), key
+        assert _close(ours, theirs, rtol=5e-6) == [], key
+        seen += 1
+    assert seen == 22
 
 
 def _groupAverages(x, y, edges, extra):
