@@ -9,8 +9,9 @@ a different job from being correct. What the fixed point catches is the thing
 that matters: **a quantity that does not survive the trip.**
 
 Its blind spot is stated so nobody has to find it: anything the model does not
-carry is equally absent from both sides, so the comparison passes. MF5 and MF6
-were exactly that until their adapters landed, and MF7 and MF12-15 still are.
+carry is equally absent from both sides, so the comparison passes. MF5, MF6,
+MF7 and MF12-15 were exactly that until their adapters landed, and whatever the
+decoder keeps only as declared bytes (MF1/460, MF8-10) still is.
 The fixed point is necessary and not sufficient, and the
 :class:`ConversionReport` is the other half — which is why
 :func:`test_the_report_names_every_file_that_did_not_survive` is here and is not

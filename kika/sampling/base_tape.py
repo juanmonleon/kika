@@ -87,14 +87,17 @@ def strip_covariance_files(
     content = Path(source).read_text(encoding="utf-8", errors="replace")
     stripped, removed = remove_sections(
         content, [(int(mf), None) for mf in mf_numbers])
-    Path(output).write_text(stripped, encoding="utf-8")
+    # ``newline=""`` writes the LF that ``read_text`` folded every line ending
+    # to: on Windows a plain ``write_text`` turns each one into CRLF, and the
+    # "smaller tape" came out one byte per line larger.
+    Path(output).write_text(stripped, encoding="utf-8", newline="")
     update_mf1_directory(str(output))
     return {
         "source": str(source),
         "output": str(output),
         "mf_removed": [int(mf) for mf in mf_numbers],
         "sections_removed": int(removed),
-        "bytes_before": len(content),
+        "bytes_before": Path(source).stat().st_size,
         "bytes_after": Path(output).stat().st_size,
     }
 

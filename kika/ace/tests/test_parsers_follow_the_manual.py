@@ -80,6 +80,42 @@ def test_kalbach_angular_is_the_marginal_over_outgoing_energy(table):
     # energy=None used to call a method that does not exist
     df = km.to_dataframe(None, table)
     assert sorted(df["energy"].unique()) == [11.3, 20.0]
+    np.testing.assert_array_equal(km.incident_energies(table), [11.3, 20.0])
+
+
+def _locb_minus_one(*laws):
+    """A LOCB=-1 reaction (MT16) whose DLW holds *laws*, and an ace to hold them."""
+    from kika.ace.classes.angular_distribution.distributions.kalbach_mann import (
+        KalbachMannAngularDistribution,
+    )
+    ace = types.SimpleNamespace(energy_distributions=types.SimpleNamespace(
+        get_neutron_distribution=lambda mt: list(laws)))
+    return KalbachMannAngularDistribution(mt=16), ace
+
+
+def test_a_phase_space_reaction_is_isotropic_in_the_centre_of_mass():
+    # NJOY writes LAW=66 with LOCB=-1 (H-2 MT16 of Lib81); the manual names
+    # only LAW=44, and kika refused it, so the reaction had no angle at all.
+    from kika.ace.classes.energy_distribution.distributions.phase_space import (
+        NBodyPhaseSpaceDistribution,
+    )
+    law = NBodyPhaseSpaceDistribution(
+        law=66, npsx=3, ap=2.0, applicability_energies=np.array([3.34, 20.0]),
+        applicability_probabilities=np.array([1.0, 1.0]))
+    km, ace = _locb_minus_one(law)
+    mu = np.linspace(-1, 1, 5)
+    np.testing.assert_array_equal(km.angular_pdf(10.0, ace, mu), np.full(5, 0.5))
+    # it has no incident-energy tables; the applicability energies stand in
+    np.testing.assert_array_equal(km.incident_energies(ace), [3.34, 20.0])
+    assert sorted(km.to_dataframe(None, ace)["energy"].unique()) == [3.34, 20.0]
+
+
+def test_a_locb_minus_one_law_that_gives_no_angle_is_refused_by_name():
+    from kika.ace.classes.angular_distribution.utils import Law44DataError
+
+    km, ace = _locb_minus_one(EnergyDistribution(law=4))
+    with pytest.raises(Law44DataError, match=r"laws \[4\]; only LAW=44, 61 and 66"):
+        km.angular_pdf(10.0, ace, [0.0])
 
 
 # --- energy distributions ---------------------------------------------------

@@ -232,9 +232,9 @@ def test_the_whole_tape_emitter_is_not_the_delta_emitter(run):
     """It writes what the model carries, which is less than the tape held.
 
     Stated as a test rather than only in a docstring because the difference is
-    invisible in the file: MF7, MF12-15 and MF32 are simply absent, and here MF33
-    and MF34 are too, since a realisation does not restate the covariance it was
-    drawn from.
+    invisible in the file: MF33 and MF34 are absent, since a realisation does
+    not restate the covariance it was drawn from, and so is anything the model
+    keeps only as declared bytes.
     """
     whole = _blocks(str(run.samples[0]["files"]["endf-tape"]))
     delta = _blocks(str(run.samples[0]["files"]["endf-delta"]))

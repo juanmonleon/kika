@@ -16,8 +16,8 @@ still the low road, as ``read_endf`` and ``read_ace`` are.
 
 **The low road stays first-class.** ``read_endf`` and ``read_ace`` are not
 deprecated and are not going away. Two reasons, both concrete. The model does not
-yet cover MF12-15, which ``read_endf`` parses (roadmap E5a) and the model does not
-decode yet, nor MF6 LAW=5 — so a user who needs those needs the file itself; and evaluators legitimately work in ENDF's own terms — the Fe-56 chi2
+cover everything the file says — MF8-10, MF6 LAW=5, MF1/460, the MF6 P(nu)
+subsections — so a user who needs those needs the file itself; and evaluators legitimately work in ENDF's own terms — the Fe-56 chi2
 work reads MF33/MF34 structure directly and should keep doing so. What this door
 adds is a *default*, not a monopoly.
 
