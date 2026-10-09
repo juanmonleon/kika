@@ -18,11 +18,20 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 packages = [{include = "kika"}]
+include = [
+    {path = "build_native.py", format = "sdist"},
+    {path = "kika/processing/resonances/_rm_native.c", format = "sdist"},
+    {path = "kika/processing/resonances/_rm_kernel.h", format = "sdist"},
+    {path = "kika/processing/resonances/_rm_native*.pyd", format = "wheel"},
+    {path = "kika/processing/resonances/_rm_native*.so", format = "wheel"},
+]
 exclude = [
     "kika/**/tests",
     "kika/**/tests/**",
     "kika/**/test_*.py",
     "kika/**/*.ipynb",
+    "kika/processing/resonances/_rm_native.c",
+    "kika/processing/resonances/_rm_kernel.h",
     "kika/UQ/output_directory/**",
     "kika/**/*.sdf",
     "kika/ace/writers/test_writing.02c",
@@ -61,8 +70,11 @@ myst-parser = "^4.0.1"
 sphinx-autobuild = "^2024.10.3"
 sphinx-rtd-theme = "^3.0.2"
 
+[tool.poetry.build]
+script = "build_native.py"
+
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.2,<3", "setuptools>=80"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]

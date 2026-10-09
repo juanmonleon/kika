@@ -225,7 +225,12 @@ def test_linear_background_keeps_own_knots_while_master_grid_is_verified():
 
 @pytest.mark.parametrize('gamma',[.03,1e-30,1e-310,0.])
 @pytest.mark.parametrize('roundoff',[1e-11,1e-8])
-def test_guarded_gram_capture_matches_direct_levels_and_preserves_poles(gamma,roundoff):
+def test_guarded_gram_capture_matches_direct_levels_and_preserves_poles(gamma,roundoff,monkeypatch):
+    # This gate isolates the NumPy capture optimization, whose collision
+    # contraction is bit-identical. Compiled contractions have separate
+    # direct-reference gates and may change the final rounding of W.
+    from kika.processing.resonances import _rm_acceleration
+    monkeypatch.setattr(_rm_acceleration,'_native',None)
     rng=np.random.default_rng(782)
     reduced=rng.normal(size=(73,3))*.2
     levels=np.linspace(50.,150.,73);widths=np.full(73,gamma)

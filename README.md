@@ -79,6 +79,26 @@ pip install kika-nd[docs]
 
 ## Quick Start
 
+### Optional resonance acceleration
+
+Source builds attempt to compile a small CPython extension for Reich–Moore
+physics. It uses float64, retains every resonance level, and requires no NumPy
+C ABI. Without a compatible extension, reconstruction uses NumPy. Independent
+physical verification always uses the direct NumPy calculation; stricter
+roundoff requests, unsupported channel counts and extreme numeric regimes also
+retain that calculation. The extension does not change the nuclear data model.
+
+For a source checkout, run `python build_native.py` with a C compiler available.
+On Windows the default compiler is MSVC; MinGW users can set
+`KIKA_NATIVE_COMPILER=mingw32` and put GCC on `PATH`. Close processes using the
+extension before rebuilding it on Windows. `KIKA_BUILD_NATIVE=0` skips
+compilation; a fresh source distribution then produces a NumPy-only package.
+Built binaries belong in platform wheels, not Git. GCC/Clang x86 builds select
+AVX2 only on a compatible CPU; `KIKA_RM_BASELINE=1`, set before import, selects
+the portable kernel for diagnosis. Other builds use the portable kernel.
+
+### Basic usage
+
 ```python
 import kika
 
