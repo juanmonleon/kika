@@ -4,8 +4,8 @@ Per-experiment covariance for one (library, experiment) block:
 
     Sigma = D + u u^T + v v^T + Sigma_eval,
         D          = diag(sigma_stat^2)                            [EXFOR uncorrelated]
-        u          = sigma_indep_rel * y_exp                       [EXFOR rank-1 normalization]
-        v          = sigma_dep_rel  * y_exp                        [EXFOR rank-1 shape]
+        u          = sigma_indep_rel * y_eval                      [EXFOR rank-1 normalization]
+        v          = sigma_dep_rel  * y_eval                       [EXFOR rank-1 shape]
         Sigma_eval = dense N x N from MF34 (and MF33 in the library pipeline),
                      built per (library, experiment) by scripts.eval_covariance.
 
@@ -74,6 +74,13 @@ def _components(
     D carries σ_stat² only — σ_dep no longer goes on the diagonal because it's
     a correlated shape mode, not independent noise. Both u (normalization) and
     v (shape) are rank-1 contributions handled in `_per_group_sigma`.
+
+    u and v are referred to the evaluation under test (y_eval), not to the
+    measured y_exp. Built on y_exp they are Peelle's Pertinent Puzzle
+    (Neudecker, Frühwirth & Leeb, NSE 170 (2012) 54): the metric then rewards
+    an evaluation that sits below the data over one that sits above it by the
+    same amount. Measured 2026-10-09 (kika-workspace
+    docs/chi2-mf4/ppp_peelle_assessment_2026-10-09.md): V2 moves +3…+20 %.
     """
     missing = set(REQUIRED_COLUMNS) - set(df.columns)
     if missing:
@@ -82,13 +89,14 @@ def _components(
     y_exp = df["y_exp"].to_numpy()
     sigma_stat = df["sigma_exp_stat"].to_numpy()
     sigma_stat = np.maximum(sigma_stat, SIGMA_STAT_FLOOR_REL * np.abs(y_exp))
-    u = df["sigma_sys_indep_rel"].to_numpy() * y_exp
-    v = df["sigma_sys_dep_rel"].to_numpy() * y_exp
+    y_eval = df["y_eval"].to_numpy()
+    u = df["sigma_sys_indep_rel"].to_numpy() * y_eval
+    v = df["sigma_sys_dep_rel"].to_numpy() * y_eval
 
     D = sigma_stat ** 2
     floor = (DIAGONAL_FLOOR_REL * np.abs(y_exp)) ** 2 + DIAGONAL_FLOOR_ABS
     D = np.maximum(D, floor)
-    r = y_exp - df["y_eval"].to_numpy()
+    r = y_exp - y_eval
     return D, u, v, r
 
 

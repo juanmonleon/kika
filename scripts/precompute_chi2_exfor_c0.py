@@ -399,10 +399,19 @@ def fit_c0_from_ks(
     Model: y_j = c_0 * b_j with b_j = 1 + sum_{l>=1} (2l+1) a_l P_l(mu_j).
     GLS uses the rank-2 Woodbury form Σ = D + u uᵀ + v vᵀ with:
         D_jj = σ_stat,j² (σ_dep is NOT on the diagonal)
-        u_j  = σ_indep_rel · y_j  (per-experiment normalization)
-        v_j  = σ_dep_rel,j · y_j  (per-experiment shape, per-row amplitude)
+        u_j  = σ_indep_rel · c_0 b_j  (per-experiment normalization)
+        v_j  = σ_dep_rel,j · c_0 b_j  (per-experiment shape, per-row amplitude)
     Both u and v are correlated within an experiment per the manifest. WLS
     fallback uses diagonal (stat² + sys²) and is only invoked if GLS fails.
+
+    The multiplicative modes are referred to the MODEL c_0·b, not to the
+    measured y, and iterated with c_0 (Chiba-Smith). Built on y they are
+    Peelle's Pertinent Puzzle (Neudecker, Frühwirth & Leeb, NSE 170 (2012) 54):
+    the fit buys χ² by lowering the level, by a factor ≈ 1/(1 + σ_N²·χ²_w).
+    Measured on run TH77, that put JEFF-4.0's c_0 18 % low at the median Kinney
+    energy (kika-workspace docs/chi2-mf4/ppp_peelle_assessment_2026-10-09.md).
+    With σ_dep constant over the block the modes are parallel to b and c_0 is
+    exactly the stat-only WLS estimate; the normalization only widens its SE.
     """
     mu = ks_df["mu"].to_numpy(dtype=float)
     y = ks_df["value"].to_numpy(dtype=float)
@@ -422,37 +431,53 @@ def fit_c0_from_ks(
     if use_gls:
         d = np.maximum(sigma_stat ** 2, 1e-300)
         d_inv = 1.0 / d
-        u = ks_df["sigma_sys_indep_rel"].to_numpy(dtype=float) * y
-        v = ks_df["sigma_sys_dep_rel"].to_numpy(dtype=float) * y
-        # 2×2 Woodbury middle matrix M = I₂ + Uᵀ D⁻¹ U
-        s_uu = float(np.sum(u * u * d_inv))
-        s_vv = float(np.sum(v * v * d_inv))
-        s_uv = float(np.sum(u * v * d_inv))
-        M_uu = 1.0 + s_uu
-        M_vv = 1.0 + s_vv
-        det = M_uu * M_vv - s_uv ** 2
-        if det <= 0.0:
-            return float("nan"), float("nan")
-        # Inner products with b and y projected on [u, v]
-        bd_u = float(np.sum(b * u * d_inv))
-        bd_v = float(np.sum(b * v * d_inv))
-        yd_u = float(np.sum(y * u * d_inv))
-        yd_v = float(np.sum(y * v * d_inv))
+        indep_rel = ks_df["sigma_sys_indep_rel"].to_numpy(dtype=float)
+        dep_rel = ks_df["sigma_sys_dep_rel"].to_numpy(dtype=float)
         bdy = float(np.sum(b * y * d_inv))
         bdb = float(np.sum(b * b * d_inv))
-        # bᵀ Σ⁻¹ y = bᵀD⁻¹y - z_bᵀ M⁻¹ z_y  with z = [bd_u, bd_v]ᵀ, etc.
-        # M⁻¹ = (1/det) [[M_vv, -s_uv], [-s_uv, M_uu]]
-        inv_det = 1.0 / det
-        bSi_y = bdy - inv_det * (
-            M_vv * bd_u * yd_u
-            - s_uv * (bd_u * yd_v + bd_v * yd_u)
-            + M_uu * bd_v * yd_v
-        )
-        bSi_b = bdb - inv_det * (
-            M_vv * bd_u ** 2
-            - 2.0 * s_uv * bd_u * bd_v
-            + M_uu * bd_v ** 2
-        )
+        if bdb <= 0.0 or not np.isfinite(bdb):
+            return float("nan"), float("nan")
+        c0_ref = bdy / bdb  # stat-only WLS: the starting model level
+        for _ in range(20):
+            ref = c0_ref * b
+            u = indep_rel * ref
+            v = dep_rel * ref
+            # 2×2 Woodbury middle matrix M = I₂ + Uᵀ D⁻¹ U
+            s_uu = float(np.sum(u * u * d_inv))
+            s_vv = float(np.sum(v * v * d_inv))
+            s_uv = float(np.sum(u * v * d_inv))
+            M_uu = 1.0 + s_uu
+            M_vv = 1.0 + s_vv
+            det = M_uu * M_vv - s_uv ** 2
+            if det <= 0.0:
+                return float("nan"), float("nan")
+            # Inner products with b and y projected on [u, v]
+            bd_u = float(np.sum(b * u * d_inv))
+            bd_v = float(np.sum(b * v * d_inv))
+            yd_u = float(np.sum(y * u * d_inv))
+            yd_v = float(np.sum(y * v * d_inv))
+            # bᵀ Σ⁻¹ y = bᵀD⁻¹y - z_bᵀ M⁻¹ z_y  with z = [bd_u, bd_v]ᵀ, etc.
+            # M⁻¹ = (1/det) [[M_vv, -s_uv], [-s_uv, M_uu]]
+            inv_det = 1.0 / det
+            bSi_y = bdy - inv_det * (
+                M_vv * bd_u * yd_u
+                - s_uv * (bd_u * yd_v + bd_v * yd_u)
+                + M_uu * bd_v * yd_v
+            )
+            bSi_b = bdb - inv_det * (
+                M_vv * bd_u ** 2
+                - 2.0 * s_uv * bd_u * bd_v
+                + M_uu * bd_v ** 2
+            )
+            if bSi_b <= 0 or not np.isfinite(bSi_b):
+                return float("nan"), float("nan")
+            c0_new = bSi_y / bSi_b
+            if not np.isfinite(c0_new) or c0_new <= 0.0:
+                return float("nan"), float("nan")
+            converged = abs(c0_new - c0_ref) <= 1e-12 * abs(c0_ref)
+            c0_ref = c0_new
+            if converged:
+                break
     else:
         sigma2 = sigma_stat ** 2 + sigma_sys ** 2
         sigma2 = np.maximum(sigma2, 1e-300)

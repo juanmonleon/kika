@@ -1401,6 +1401,17 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² — cinta de la tesis (run 077) re-puntuada con la σ del manifiesto arreglada",
         "systematic_block_col": "energy_mev",
     },
+    # 2026-10-09 — TH77P: la MISMA cinta y el MISMO corpus que TH77, sin el
+    # rompecabezas de Peelle: c₀ de JEFF/JENDL con los modos referidos al modelo
+    # (precompute_chi2_exfor_c0.fit_c0_from_ks) y u, v ∝ y_eval en el χ²
+    # (chi2_metrics._components). Se lee contra run_TH77, que es la tabla del
+    # cap. 3. Plan: kika-workspace docs/thesis/ppp_chi2_update_plan_2026-10-09.md.
+    "exfor_c0_TH77P": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_TH77P.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_exfor_c0",
+        "title":      "χ² — cinta de la tesis (run 077) sin PPP (c₀ y modos referidos al modelo)",
+        "systematic_block_col": "energy_mev",
+    },
     "library_c0": {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_library_c0_82.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_library_c0",
@@ -1831,7 +1842,9 @@ def coverage_table(
 ) -> pd.DataFrame:
     """% of points within k·σ_total for k=1,2,3 (V1 textbook σ).
 
-    σ_total² = σ_stat² + (σ_indep·y)² + (σ_dep·y)² + σ_eval_diag²
+    σ_total² = σ_stat² + (σ_indep·y_eval)² + (σ_dep·y_eval)² + σ_eval_diag²
+    (multiplicative terms referred to the evaluation, as in chi2_metrics —
+    Peelle's Pertinent Puzzle, 2026-10-09)
     Target N(0,1): 68.3% / 95.4% / 99.7%. Values below target = under-coverage
     (uncertainty too tight); values above = over-coverage.
     """
@@ -1844,8 +1857,9 @@ def coverage_table(
         r = y - sub["y_eval"].to_numpy()
         sstat = np.maximum(sub["sigma_exp_stat"].to_numpy(),
                            0.01 * np.abs(y))
-        u = sub["sigma_sys_indep_rel"].to_numpy() * y
-        v = sub["sigma_sys_dep_rel"].to_numpy() * y
+        y_ev = sub["y_eval"].to_numpy()
+        u = sub["sigma_sys_indep_rel"].to_numpy() * y_ev
+        v = sub["sigma_sys_dep_rel"].to_numpy() * y_ev
         sed = sub["sigma_eval_diag"].to_numpy()
         sigma = np.sqrt(np.maximum(sstat ** 2 + u ** 2 + v ** 2 + sed ** 2,
                                    1e-300))
