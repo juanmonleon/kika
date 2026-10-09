@@ -148,6 +148,8 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
 from .pops import Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
+from .decay import (ELECTROMAGNETIC, Decay, DecayData, DecayMode, DecayModes,
+                    DecayPath, PhotonEmissionProbabilities, Shell)
 from .provenance import (AceProvenance, EndfProvenance, G4NDLCaptureProvenance,
                          G4NDLFissionProvenance,
                          G4NDLInelasticProvenance,
@@ -243,6 +245,8 @@ __all__ = [
     "Heated", "HeatedMultiGroup", "GriddedCrossSection", "URR_probabilityTables",
     # §12 PoPs
     "PoPs", "Particle", "Nuclide", "Unorthodox", "pidFromZA", "zaFromPid",
+    "DecayData", "DecayModes", "DecayMode", "DecayPath", "Decay",
+    "PhotonEmissionProbabilities", "Shell", "ELECTROMAGNETIC",
     # §14 the root
     "ReactionSuite", "ExternalFile", "ExternalFiles", "ApplicationData",
     "CROSS_SECTION_UNITS",

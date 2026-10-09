@@ -75,6 +75,17 @@ GNDS_NODES: dict[str, tuple[str, ...]] = {
     "MultiplicitySum": ("label", "multiplicity", "summands", "ENDF_MT"),
     "MultiplicitySums": ("multiplicitySums",),
     "Add": ("href",),
+    # §12 PoPs: a level's energy and its electromagnetic decay (gnds.xsd:539-575)
+    "Nuclide": ("id", "mass", "spin", "parity", "charge", "halflife", "Z", "A",
+                "nuclearLevel", "energy", "decayData"),
+    "DecayData": ("decayModes",),
+    "DecayModes": ("decayModes",),
+    "DecayMode": ("label", "mode", "probability", "decayPath",
+                  "photonEmissionProbabilities"),
+    "DecayPath": ("decays",),
+    "Decay": ("index", "mode", "products"),
+    "PhotonEmissionProbabilities": ("shells",),
+    "Shell": ("label", "value"),
     # §7
     "Uncertainty": ("standard", "covariance", "listOfCovariances"),
     "Covariance": ("href", "label"),
@@ -111,6 +122,14 @@ DIVERGENCES: dict[str, str] = {
                  "class, never a node: nothing is written as `<component>`, and "
                  "`CrossSection` and `Distribution` keep their own GNDS names. It "
                  "exists because the two hand-written copies had already diverged",
+    "Nuclide.Z": "§12 spells Z and A on the isotope, `<isotope symbol A>`, and "
+                 "an `index` on `<nucleus>`; a flat nuclide keeps them as fields, "
+                 "and `nuclearLevel` is that `index` under its ENDF meaning",
+    "Nuclide.A": "see Nuclide.Z",
+    "Nuclide.nuclearLevel": "see Nuclide.Z",
+    "Nuclide.energy": "§12 puts it on `<nucleus>`, a child of the nuclide; the "
+                      "nucleus is folded into the nuclide as its spin and parity "
+                      "already were",
     "ScalarUncertainty": "§2.3.3's scalar uncertainty and §7's functional "
                          "`uncertainty` are different nodes with the same name; the "
                          "scalar one is re-exported under a distinguishing alias",

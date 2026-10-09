@@ -336,9 +336,9 @@ _group("sums", Coverage.FULL, None,
 
 _group("outputChannel", Coverage.FULL, None,
        "§17.1-17.2, including §17.2.1's recursion where a product "
-       "carries its own outputChannel. The identically named nodes under "
-       "§12's decayData sit under an unsupported parent and are not "
-       "counted -- see the parent rule above",
+       "carries its own outputChannel. The identically named `products` "
+       "and `product` under §12's decayData are read and written since "
+       "roadmap E5c (decode.py readDecayData)",
        """
        outputChannel products product multiplicity
        """)
@@ -429,10 +429,10 @@ _one("Q", Coverage.PARTIAL, 'Q', "qValue",
      "cannot hold and which the reader reports instead: constant1d 56 "
      "846 occurrences against XYs1d zero")
 
-_one("energy", Coverage.PARTIAL, 'energy', "levelEnergy",
-     "full as §18.3's uncorrelated/energy. As a nucleus's level energy "
-     "(gnds.xsd:668) the model carries a level index and not an "
-     "energy, so only a non-zero excitation is counted as a loss")
+_one("energy", Coverage.FULL, None, "levelEnergy",
+     "full as §18.3's uncorrelated/energy, and as a nucleus's level "
+     "energy (gnds.xsd:494) since roadmap E5c: Nuclide.energy, read by "
+     "decode.py readNuclide and written by encode_pops.py")
 
 # -- unsupported ----------------------------------------------------------
 
@@ -445,15 +445,26 @@ _group("popsAliases", Coverage.UNSUPPORTED, 'aliases',
        """)
 
 _group("popsDecay", Coverage.UNSUPPORTED, 'decayData',
-       "§12's decay database (gnds.xsd:700-801) is its own project and "
-       "kika does not model any of it; every subtree is counted once by "
-       "the reader rather than walked",
+       "§12's decay-sublibrary data (gnds.xsd:525-600): spectra, "
+       "conversion coefficients and average energies. Roadmap E7; each "
+       "occurrence is counted by decode.py readDecayData, not read",
+       """
+       spectra spectrum discrete continuum intensity
+       internalConversionCoefficients positronEmissionIntensity
+       internalPairFormationCoefficient averageEnergies averageEnergy
+       """)
+
+_group("popsDecayElectromagnetic", Coverage.PARTIAL, 'decayData',
+       "a particle's decayModes, each with its probability, photon "
+       "emission probabilities and decay path, read by decode.py "
+       "readDecayData and written by encode_pops.py _decayData (roadmap "
+       "E5c: an ENDF MF12 LO=2 cascade). Partial because a decayMode's "
+       "Q and spectra, a decayData's averageEnergies, a probability "
+       "with an uncertainty and a decay's `complete` attribute are not "
+       "carried (gnds.xsd:544-565)",
        """
        decayData decayModes decayMode decayPath decay probability
-       spectra spectrum discrete continuum intensity
-       internalConversionCoefficients photonEmissionProbabilities
-       positronEmissionIntensity internalPairFormationCoefficient shell
-       averageEnergies averageEnergy
+       photonEmissionProbabilities shell
        """)
 
 _group("documentationContent", Coverage.UNSUPPORTED, 'documentation',
