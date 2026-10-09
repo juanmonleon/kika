@@ -252,3 +252,10 @@ def test_the_report_declares_the_absent_evaluation(decoded):
 def test_the_report_declares_the_absence_of_covariances(decoded):
     _, report = decoded
     assert any("no covariances" in entry for entry in report.unsupported)
+
+
+def test_the_photons_the_ace_carries_are_declared_not_dropped(ace, decoded):
+    """Roadmap E5f.2: ACE photon production is parsed and not yet decoded."""
+    _, report = decoded
+    assert ace.photon_production_xs
+    assert any("photon production" in line for line in report.unsupported)

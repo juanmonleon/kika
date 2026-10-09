@@ -901,7 +901,14 @@ def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
     if residual is None or residual.outputChannel is None:
         return "the residual's decay channel could not be built (see the report)"
 
+    # The level is the series' own, whatever pid the residual product carries:
+    # an MF6 that states the recoil writes it with LIP=0 (ENDF/B-VIII.1 Ni-58
+    # MT51 gives `Ni58`), and hanging the cascade on that pid put a decay and
+    # an excitation energy on the *target*.
     residualZA = zaFromPid(residual.pid)
+    levelPid = pidFromZA(residualZA, series[2])
+    if series[2] == 0:
+        return "LO=2 on the ground state of a series, which has nothing to decay to"
     energies = _levelEnergies(suite, sections12, series)
     levelEnergy = float(section.es_ns)
     qm, qi = getattr(provenance, "qm", None), getattr(reaction.outputChannel.Q, "value", None)
@@ -937,12 +944,14 @@ def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
                 Product(pid="photon", label="photon"), Product(pid=final, label=final)])])))
         finals.append((final, es))
 
-    level = suite.PoPs.particles.get(residual.pid)
+    level = suite.PoPs.particles.get(levelPid)
     if level is None:
-        return f"the residual {residual.pid!r} has no PoPs entry to carry its decay"
+        level = Nuclide(id=levelPid, Z=residualZA // 1000, A=residualZA % 1000,
+                        nuclearLevel=series[2])
+        suite.PoPs.add(level)
     decayData = DecayData(decayModes=modes)
     if getattr(level, "decayData", None) is not None and level.decayData != decayData:
-        return (f"{residual.pid} already has a different decay from another section, "
+        return (f"{levelPid} already has a different decay from another section, "
                 f"and one level decays one way")
     level.energy = PhysicalQuantity(value=levelEnergy, unit="eV")
     level.decayData = decayData
@@ -960,7 +969,7 @@ def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
     provenance.headerFields["mf12"] = {
         **_head(section), "lo": 2, "lg": lg, "ns": section._ns, "n2": section._n2,
         "listC2": section.list_c2, "lp": section.lp, "listL2": section.list_l2,
-        "nt": section.nt, "pad": _pad(section), "level": residual.pid,
+        "nt": section.nt, "pad": _pad(section), "level": levelPid,
         "host": residual.label, "finals": finals,
         "lines": str(section).split("\n"),
         "digest": _cascadeDigest(levelEnergy, section.transitions),
