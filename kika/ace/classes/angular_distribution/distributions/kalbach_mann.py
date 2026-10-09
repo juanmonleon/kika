@@ -34,256 +34,126 @@ class KalbachMannAngularDistribution(AngularDistribution):
     
     def _find_law44_distribution(self, ace):
         """
-        Find the Law=44 (Kalbach-Mann) distribution in the energy distribution container.
-        
-        Parameters
-        ----------
-        ace : Ace
-            ACE object containing the distribution data
-            
+        Find the correlated energy-angle laws of this reaction.
+
+        LOCB=-1 says the angle is given with the energy in the DLW block, by
+        LAW=44 (Kalbach-87) or LAW=61 (tabular in angle); both are accepted.
+
         Returns
         -------
-        KalbachMannDistribution or None
-            The Law=44 distribution or None if not found
-            
+        list of EnergyDistribution
+            The laws of the reaction, in DLW order
+
         Raises
         ------
         Law44DataError
-            If the ACE object is not provided or missing required data
+            If the ACE object is not provided or holds no correlated law for this MT
         """
-        if ace is None:
-            mt_value = int(self.mt)
-            raise Law44DataError(
-                f"ACE object must be provided for Kalbach-Mann (Law=44) angular distribution (MT={mt_value})"
-            )
-            
-        if ace.energy_distributions is None:
-            mt_value = int(self.mt)
-            raise Law44DataError(
-                f"Energy distributions missing in ACE object for Kalbach-Mann distribution (MT={mt_value})"
-            )
-            
-        # Get MT number
         mt_value = int(self.mt)
-        
-        # Get the appropriate container based on the particle type
+        if ace is None:
+            raise Law44DataError(
+                f"ACE object must be provided for the correlated angular distribution (MT={mt_value})"
+            )
+        if ace.energy_distributions is None:
+            raise Law44DataError(
+                f"Energy distributions missing in ACE object for MT={mt_value}"
+            )
         if self.is_particle_production:
-            # Get particle production distributions
-            if (self.particle_idx < 0 or 
-                self.particle_idx >= len(ace.energy_distributions.particle_production)):
+            if (self.particle_idx < 0 or
+                    self.particle_idx >= len(ace.energy_distributions.particle_production)):
                 raise Law44DataError(
                     f"Particle index {self.particle_idx} out of bounds for MT={mt_value}"
                 )
-                
-            # Get distributions for this MT
             distributions = ace.energy_distributions.get_particle_distribution(
                 self.particle_idx, mt_value)
         else:
-            # Get incident neutron distributions
             distributions = ace.energy_distributions.get_neutron_distribution(mt_value)
-            
+
+        where = f"MT={mt_value}" + (f", particle={self.particle_idx}" if self.is_particle_production else "")
         if not distributions:
-            raise Law44DataError(
-                f"No energy distributions found for MT={mt_value}"
-                f"{f', particle={self.particle_idx}' if self.is_particle_production else ''}"
-            )
-            
-        # Find the Law=44 distribution
-        for dist in distributions:
-            if dist.law == 44:  # Law=44 is Kalbach-Mann
-                return dist
-                
-        raise Law44DataError(
-            f"Law=44 distribution not found for MT={mt_value}"
-            f"{f', particle={self.particle_idx}' if self.is_particle_production else ''}"
-        )
-    
+            raise Law44DataError(f"No energy distributions found for {where}")
+        if not all(d.law in (44, 61) for d in distributions):
+            laws = [d.law for d in distributions]
+            raise Law44DataError(f"{where} has LOCB=-1 but laws {laws}; only LAW=44 and 61 carry the angle")
+        return list(distributions)
+
+    def angular_pdf(self, energy: float, ace, cosines) -> np.ndarray:
+        """
+        Angular density at an incident energy, marginal over the outgoing energy.
+
+        With several laws, law ``j`` is used with probability ``P_j(E)`` times
+        the probability that no earlier law was (manual Table 25), the last law
+        taking what remains.
+
+        Parameters
+        ----------
+        energy : float
+            Incident energy in MeV
+        ace : Ace
+            ACE object holding the DLW data
+        cosines : array_like
+            Cosines at which to evaluate the density
+
+        Returns
+        -------
+        numpy.ndarray
+            Density in mu (centre of mass for a negative TY)
+        """
+        mu = np.asarray(cosines, dtype=float)
+        laws = self._find_law44_distribution(ace)
+        out = np.zeros_like(mu)
+        remaining = 1.0
+        for j, law in enumerate(laws):
+            w = remaining if j == len(laws) - 1 else remaining * law.get_applicability_probability(energy)
+            out += w * law.angular_pdf(energy, mu)
+            remaining -= w
+        return out
+
     def to_dataframe(self, energy: Optional[float] = None, ace=None, num_points: int = 100, interpolate: bool = True) -> Optional[pd.DataFrame]:
         """
-        Convert Kalbach-Mann angular distribution to a pandas DataFrame.
-        
+        Convert the correlated angular distribution to a pandas DataFrame.
+
+        The density is the marginal over the outgoing energy of the LAW=44 or
+        LAW=61 data (see :meth:`angular_pdf`), on a regular cosine grid.
+
         Parameters
         ----------
         energy : float, optional
-            Incident energy to evaluate the distribution at. If None and ace is provided, 
-            returns data for a range of energies in the Law=44 distribution.
-        ace : Ace, optional
-            ACE object containing the Law=44 distribution data
+            Incident energy to evaluate the distribution at. If None, five
+            incident energies spread over the tables of the law are returned.
+        ace : Ace
+            ACE object containing the DLW data
         num_points : int, optional
             Number of angular points to generate, defaults to 100
         interpolate : bool, optional
-            Whether to interpolate onto a regular grid - always True for Kalbach-Mann
-            as there are no raw data points to return
-            
+            Kept for a common signature; the result is always on a regular grid
+
         Returns
         -------
-        pandas.DataFrame or None
-            When energy is specified: DataFrame with 'cosine' and 'pdf' columns
-            When energy is None: DataFrame with 'energy', 'cosine', and 'pdf' columns for a range of energies
-            Returns None if pandas is not available
-            
+        pandas.DataFrame
+            'energy', 'cosine' and 'pdf' columns
+
         Raises
         ------
         Law44DataError
-            If the ACE object is not provided or the Law=44 data is missing/invalid
+            If the ACE object is not provided or the correlated data is missing
         """
-        # For Kalbach-Mann, we always interpolate since there's no "raw data"
-        # to return in the same sense as the other distribution types
-        try:
-            
-            mt_value = int(self.mt)
-            
-            # If no ACE data is provided, raise an error
-            if ace is None:
-                raise Law44DataError(
-                    f"ACE object must be provided for Kalbach-Mann (Law=44) angular distribution (MT={mt_value})"
-                )
-            
-            # Find the Law=44 distribution (this will raise Law44DataError if not found)
-            km_dist = self._find_law44_distribution(ace)
-            
-            # If no specific energy is requested, return data for a range of energies
-            if energy is None:
-                # Get incident energies from the Law=44 distribution
-                km_energies = km_dist.get_incident_energies()
-                if not km_energies:
-                    raise Law44DataError(f"No incident energies found in Law=44 data for MT={mt_value}")
-                
-                # Sample a few energies (or use all if there are fewer than 5)
-                sample_energies = km_energies
-                if len(sample_energies) > 5:
-                    # Sample 5 evenly spaced energies
-                    indices = np.linspace(0, len(sample_energies)-1, 5, dtype=int)
-                    sample_energies = [sample_energies[i] for i in indices]
-                
-                # Create rows for each energy/cosine combination
-                rows = []
-                cosines = np.linspace(-1, 1, num_points)
-                
-                for e in sample_energies:
-                    try:
-                        # Get the interpolated distribution for this energy
-                        dist = km_dist.get_interpolated_distribution(e)
-                        if not dist or 'r' not in dist or 'a' not in dist:
-                            continue
-                        
-                        # Use middle outgoing energy point for R and A parameters
-                        if 'e_out' in dist and len(dist['e_out']) > 0:
-                            middle_idx = len(dist['e_out']) // 2
-                            r_value = dist['r'][middle_idx]
-                            a_value = dist['a'][middle_idx]
-                            
-                            r_value = float(r_value)
-                            a_value = float(a_value)
-                            
-                            # Calculate PDF values
-                            for cosine in cosines:
-                                # If a is very small, use isotropic
-                                if abs(a_value) < 1.0e-3:
-                                    pdf = 0.5
-                                else:
-                                    # Calculate Kalbach-Mann PDF
-                                    sinh_a = np.sinh(a_value)
-                                    normalization = (a_value / 2.0) / sinh_a
-                                    pdf = normalization * (
-                                        np.cosh(a_value * cosine) + r_value * np.sinh(a_value * cosine)
-                                    )
-                                
-                                rows.append({
-                                    'energy': e,
-                                    'cosine': cosine,
-                                    'pdf': pdf,
-                                    'r': r_value,
-                                    'a': a_value
-                                })
-                    except Exception as e:
-                        # Skip this energy if there's an error
-                        continue
-                
-                # Return the dataframe if we have data
-                if rows:
-                    return pd.DataFrame(rows)
-                else:
-                    raise Law44DataError(f"Could not generate data for any energies in Law=44 distribution for MT={mt_value}")
-            
-            # For specific energy, use the existing implementation
-            # Get the interpolated distribution for this energy
-            dist = km_dist.get_interpolated_distribution(energy)
-            if not dist:
-                raise Law44DataError(
-                    f"No distribution data found for energy {energy} MeV in MT={mt_value}"
-                )
-            
-            # Verify that we have e_out, r, and a data and they're non-empty
-            if ('e_out' not in dist or 'r' not in dist or 'a' not in dist or 
-                len(dist['e_out']) == 0 or len(dist['r']) == 0 or len(dist['a']) == 0):
-                raise Law44DataError(
-                    f"Incomplete Law=44 data for MT={mt_value} at energy {energy} MeV"
-                )
-            
-            # Convert all lengths to integers explicitly to avoid type issues
-            e_out_len = int(len(dist['e_out']))
-            r_len = int(len(dist['r']))
-            a_len = int(len(dist['a']))
-            
-            # Make sure r and a arrays are at least as long as e_out
-            if r_len < e_out_len or a_len < e_out_len:
-                raise Law44DataError(
-                    f"Inconsistent Law=44 data lengths for MT={mt_value}: "
-                    f"e_out={e_out_len}, r={r_len}, a={a_len}"
-                )
-            
-            # For simplicity, use the R and A parameters from the middle of the E_out range
-            middle_idx = min(e_out_len // 2, r_len - 1, a_len - 1)
-            
-            # Extract values with explicit conversion to float
-            r_value = dist['r'][middle_idx]
-            a_value = dist['a'][middle_idx]
-            
-            r_value = float(r_value)
-            a_value = float(a_value)
-            
-            # Generate a fine cosine grid
-            cosines = np.linspace(-1, 1, num_points)
-            
-            # Calculate PDF values for the Kalbach-Mann distribution
-            pdf_values = np.zeros_like(cosines)
-            
-            # If a is very small, use isotropic distribution
-            if abs(a_value) < 1.0e-3:
-                pdf_values.fill(0.5)
-            else:
-                # Calculate Kalbach-Mann PDF: p(μ) = (a/2)/sinh(a) * [cosh(aμ) + r*sinh(aμ)]
-                sinh_a = np.sinh(a_value)
-                normalization = (a_value / 2.0) / sinh_a
-                
-                for i, mu in enumerate(cosines):
-                    pdf_values[i] = normalization * (
-                        np.cosh(a_value * mu) + r_value * np.sinh(a_value * mu)
-                    )
-            
-            # Create arrays for the scalar values to ensure consistent length
-            r_values = np.full_like(cosines, r_value, dtype=float)
-            a_values = np.full_like(cosines, a_value, dtype=float)
-            energy_values = np.full_like(cosines, energy, dtype=float)
-            
-            return pd.DataFrame({
-                'energy': energy_values,
-                'cosine': cosines,
-                'pdf': pdf_values,
-                'r': r_values,
-                'a': a_values
-            })
+        cosines = np.linspace(-1, 1, num_points)
+        if energy is None:
+            laws = self._find_law44_distribution(ace)
+            incident = np.asarray(laws[0].incident_energies, dtype=float)
+            if len(incident) == 0:
+                raise Law44DataError(f"No incident energies in the DLW data of MT={int(self.mt)}")
+            picks = np.unique(np.linspace(0, len(incident) - 1, min(5, len(incident))).astype(int))
+            energies = incident[picks]
+        else:
+            energies = [energy]
+        frames = [pd.DataFrame({'energy': np.full_like(cosines, e, dtype=float),
+                                'cosine': cosines,
+                                'pdf': self.angular_pdf(float(e), ace, cosines)})
+                  for e in energies]
+        return pd.concat(frames, ignore_index=True)
 
-        except Law44DataError:
-            # Re-raise Law44DataError exceptions
-            raise
-        except Exception as e:
-            # Convert other exceptions to Law44DataError with a clear message
-            raise Law44DataError(
-                f"Error calculating Kalbach-Mann distribution for MT={mt_value}: {str(e)}"
-            ) from e
-    
     def __str__(self) -> str:
         """Human-readable string representation."""
         mt_value = int(self.mt)

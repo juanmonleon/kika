@@ -52,8 +52,8 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
@@ -122,7 +122,8 @@ def parse_tabular_linear_functions(ace: Ace, base_dist: EnergyDistribution, idat
     distribution.function_data = []
     
     # Read the function data for each incident energy
-    base_idx = idat_idx  # Base address for locators
+    # LOCE(l) is relative to JED, like every other locator in the DLW block
+    base_idx = base_dist.jed
     
     for i in range(n_e):
         locator = distribution.table_locators[i]

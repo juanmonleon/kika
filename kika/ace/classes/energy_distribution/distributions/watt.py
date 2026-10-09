@@ -118,7 +118,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
         Calculate the normalization constant I for the Watt spectrum.
         
         I = (1/2) * sqrt(π * a^3 * b / 4) * exp(b * a / 4) *
-            [erf((E − U)/a + sqrt(ab)/2) + erf(sqrt((E − U)/a − sqrt(ab)/2))]
+            [erf(sqrt((E − U)/a) + sqrt(ab)/2) + erf(sqrt((E − U)/a) − sqrt(ab)/2)]
             − a * exp(−(E − U)/a) * sinh(sqrt(b * (E − U)))
         
         Parameters
@@ -155,7 +155,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
         term1 = 0.5 * np.sqrt(np.pi * a**3 * b / 4.0) * np.exp(b * a / 4.0)
         
         # Error function terms
-        arg1 = e_minus_u_over_a + sqrt_ab / 2.0
+        arg1 = np.sqrt(e_minus_u_over_a) + sqrt_ab / 2.0
         arg2 = np.sqrt(e_minus_u_over_a) - sqrt_ab / 2.0
         
         if arg2 < 0:
@@ -165,7 +165,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
             erf_term = special.erf(arg1) + special.erf(arg2)
             
         # Sinh term
-        sinh_term = a * np.exp(-e_minus_u_over_a) * np.sinh(sqrt_ab * sqrt_e_minus_u / a)
+        sinh_term = a * np.exp(-e_minus_u_over_a) * np.sinh(np.sqrt(b) * sqrt_e_minus_u)
         
         # Calculate I using equation 11
         normalization = term1 * erf_term - sinh_term

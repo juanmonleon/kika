@@ -26,7 +26,7 @@ import logging
 # Setup logger
 logger = logging.getLogger(__name__)
 
-class EnergyDistributionParseError(Exception):
+class EnergyDistributionParseError(ValueError):
     """Exception raised for errors in parsing energy distribution data."""
     pass
 
@@ -244,12 +244,8 @@ def read_dlw_block(ace: Ace, result: EnergyDistributionContainer, jxs_dlw: int, 
                 result.incident_neutron[mt_value] = distributions
                 if debug: logger.debug(f"Stored distributions for MT={mt_value} (type: {type(mt_value)})")
             elif debug: logger.debug(f"No distributions found for MT={mt_value}")
-        except ValueError as e:
-            if debug: logger.debug(f"Error parsing energy distribution for MT={mt_value}: {e}")
-        except IndexError as e:
-            if debug:
-                logger.debug(f"Index error parsing energy distribution for MT={mt_value}: {e}")
-                logger.debug(f"Problematic offset: {offset}, locator: {locator_value}, jxs_dlw: {jxs_dlw}")
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Error parsing energy distribution for MT={mt_value}: {e}")
     
     # Process energy-dependent yields for neutron reactions
     if ace.particle_release and ace.particle_release.has_neutron_data:
@@ -285,12 +281,8 @@ def read_dlw_block(ace: Ace, result: EnergyDistributionContainer, jxs_dlw: int, 
                                 first_e = yield_data.energies[0]
                                 last_e = yield_data.energies[-1]
                                 logger.debug(f"Energy range: {first_e} to {last_e} MeV")
-                except ValueError as e:
-                    if debug: logger.debug(f"Error parsing energy-dependent yield for MT={mt_value}: {e}")
-                except IndexError as e:
-                    if debug:
-                        logger.debug(f"Index error parsing yield for MT={mt_value}: {e}")
-                        logger.debug(f"Problematic KY: {ky}, TY: {ty_value}, jxs_dlw: {jxs_dlw}")
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Error parsing energy-dependent yield for MT={mt_value}: {e}")
     
     if debug:
         logger.debug(f"Final incident_neutron keys: {list(result.incident_neutron.keys())}")
@@ -361,56 +353,8 @@ def read_dlwp_block(ace: Ace, result: EnergyDistributionContainer, jxs_dlwp: int
                 if debug: logger.debug(f"Successfully read {len(distributions)} distributions for MT={mt_value}")
                 result.photon_production[mt_value] = distributions
             elif debug: logger.debug(f"No distributions found for MT={mt_value}")
-        except ValueError as e:
-            if debug: logger.debug(f"Error parsing photon energy distribution for MT={mt_value}: {e}")
-        except IndexError as e:
-            if debug:
-                logger.debug(f"Index error parsing photon energy distribution for MT={mt_value}: {e}")
-                logger.debug(f"Problematic offset: {offset}, locator: {locator}, jxs_dlwp: {jxs_dlwp}")
-    
-    # Process energy-dependent yields for photon production similarly to neutron reactions
-    if ace.particle_release and ace.particle_release.has_neutron_data:
-        if debug: logger.debug("Processing energy-dependent yields for photon production")
-        if ace.reaction_mt_data and ace.reaction_mt_data.has_neutron_mt_data:
-            neutron_mts = ace.reaction_mt_data.incident_neutron
-            
-            for i, ty in enumerate(ace.particle_release.incident_neutron):
-                ty_value = int(ty)
-                
-                # According to documentation, yields are specified for TY values > 100 in absolute value
-                if abs(ty_value) > 100 and i < len(neutron_mts):
-                    mt_item = neutron_mts[i]
-                    mt_value = int(mt_item)
-                    
-                    # Formula from Table 52: KY = JED + |TY_i| - 101 (where JED is DLWP block)
-                    ky = int(jxs_dlwp + abs(ty_value) - 101)
-                    
-                    if debug: 
-                        logger.debug(f"Energy-dependent yield for MT={mt_value}, TY={ty_value}")
-                        logger.debug(f"KY calculation: JED + |TY_i| - 101 = {jxs_dlwp} + {abs(ty_value)} - 101 = {ky}")
-                    
-                    if ky >= len(ace.xss_data):
-                        if debug: logger.debug(f"Warning: KY={ky} out of range for XSS data of length {len(ace.xss_data)}")
-                        continue
-                    
-                    try:
-                        yield_data = parse_energy_dependent_yield(ace, ky)
-                        result.photon_yields[mt_value] = yield_data
-                        if debug: 
-                            logger.debug(f"Successfully parsed energy-dependent yield data for MT={mt_value}")
-                            if yield_data and hasattr(yield_data, 'energies') and len(yield_data.energies) > 0:
-                                num_points = len(yield_data.energies)
-                                logger.debug(f"Yield has {num_points} energy points")
-                                if num_points > 0:
-                                    first_e = yield_data.energies[0]
-                                    last_e = yield_data.energies[-1]
-                                    logger.debug(f"Energy range: {first_e} to {last_e} MeV")
-                    except ValueError as e:
-                        if debug: logger.debug(f"Error parsing energy-dependent yield for MT={mt_value}: {e}")
-                    except IndexError as e:
-                        if debug:
-                            logger.debug(f"Index error parsing yield for MT={mt_value}: {e}")
-                            logger.debug(f"Problematic KY: {ky}, TY: {ty_value}, jxs_dlwp: {jxs_dlwp}")
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Error parsing photon energy distribution for MT={mt_value}: {e}")
     
     if debug:
         logger.debug("Finished read_dlwp_block")
@@ -507,12 +451,8 @@ def read_dlwh_block(ace: Ace, result: EnergyDistributionContainer, debug: bool =
                     if debug: logger.debug(f"Successfully read {len(distributions)} distributions for MT={mt_value}")
                     result.particle_production[i][mt_value] = distributions
                 elif debug: logger.debug(f"No distributions found for MT={mt_value}")
-            except ValueError as e:
-                if debug: logger.debug(f"Error parsing particle energy distribution for particle {i+1}, MT={mt_value}: {e}")
-            except IndexError as e:
-                if debug:
-                    logger.debug(f"Index error parsing distribution for particle {i+1}, MT={mt_value}: {e}")
-                    logger.debug(f"Problematic offset: {offset}, locator: {locator_value}, JED: {jed}")
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Error parsing particle energy distribution for particle {i+1}, MT={mt_value}: {e}")
     
     if debug:
         logger.debug("Finished read_dlwh_block")
@@ -569,12 +509,8 @@ def read_dned_block(ace: Ace, result: EnergyDistributionContainer, jxs_dned: int
                 result.delayed_neutron.append(distributions[0])
                 if debug: logger.debug(f"Successfully read distribution for group {i+1}")
             elif debug: logger.debug(f"No distributions found for group {i+1}")
-        except ValueError as e:
-            if debug: logger.debug(f"Error parsing delayed neutron energy distribution for group {i+1}: {e}")
-        except IndexError as e:
-            if debug:
-                logger.debug(f"Index error parsing distribution for group {i+1}: {e}")
-                logger.debug(f"Problematic offset: {offset}, locator: {locator_value}, jxs_dned: {jxs_dned}")
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Error parsing delayed neutron energy distribution for group {i+1}: {e}")
     
     if debug: logger.debug("Finished read_dned_block")
 
@@ -837,8 +773,8 @@ def create_energy_distribution(
     )
     base_distribution.applicability_energies = applicability_energies
     base_distribution.applicability_probabilities = applicability_probabilities
-    base_distribution.nbt = nbt
-    base_distribution.interp = interp
+    base_distribution.applicability_nbt = nbt
+    base_distribution.applicability_interp = interp
     
 
     # Store the actual JED value - this should always be used

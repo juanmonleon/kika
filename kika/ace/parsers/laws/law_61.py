@@ -73,8 +73,8 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
@@ -297,6 +297,9 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
 
 
         for j, LC in enumerate(LC_values):
+            # LC=0: isotropic at this outgoing energy, no table follows
+            if LC == 0:
+                continue
             # Skip if we've already processed this LC
             if LC in angular_tables_dict:
                 if debug:
@@ -439,6 +442,7 @@ def parse_tabulated_angle_energy_distribution(ace: Ace, base_dist: EnergyDistrib
             
             # Store the angular distribution
             ang_data = {
+                'lc': LC,  # the locator the 'lc' lists of the distributions refer to
                 'jj': jj,
                 'n_points': ang_n_points,
                 'cosines': cosines,

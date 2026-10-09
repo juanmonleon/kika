@@ -14,6 +14,11 @@ class EnergyDistribution:
     # Law applicability parameters
     applicability_energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Energies at which to check if law applies (view of xss_data)
     applicability_probabilities: np.ndarray = field(default_factory=lambda: np.empty(0))  # Probability of law validity at each energy (view of xss_data)
+    # NBT/INT of the law-validity table P(E) (manual Table 25). Kept apart from
+    # ``nbt``/``interp``, which the tabular laws use for the interpolation
+    # between their incident-energy tables (LDAT(1..)).
+    applicability_nbt: List[int] = field(default_factory=list)
+    applicability_interp: List[int] = field(default_factory=list)
     nbt: List[int] = field(default_factory=list)  # NBT interpolation parameters
     interp: List[int] = field(default_factory=list)  # INT interpolation scheme
     

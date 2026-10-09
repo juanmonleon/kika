@@ -55,19 +55,19 @@ def write_header(header):
             header.temperature is None or header.comment_line_count is None):
             raise ValueError("Required header fields missing for 2.0.1 format")
             
-        # Line 1: Version (10 chars), ZAID (12 chars), Source (24 chars)
+        # Manual Table 2. Line 1: VERS A10, SZAID A24, SRC A24
         version = header.ace_version or ""
-        # Format ZAID with extension if present
         zaid_str = f"{header.zaid}"
         if header.extension:
             zaid_str += header.extension
         source1 = header.source or ""
-        line1 = f"{version:<10}{zaid_str:<12}{source1:<24}"
+        line1 = f"{version:<10}{zaid_str:>24}{source1:>24}"
         result.append(line1)
         
-        # Line 2: AWR (12 chars), Temperature (12 chars), Comment line count (8 chars), Source (remaining)
-        source2 = ""  # Additional source info, if different from line 1
-        line2 = f"{header.atomic_weight_ratio:<12.6f}{header.temperature:<12.6f}{header.comment_line_count:<8d}{source2}"
+        # Line 2: AW E12.0, TZ E12.0, 1X, HD A10, N I10
+        date = header.date or ""
+        line2 = (f"{header.atomic_weight_ratio:12.6f}{header.temperature:12.4E} "
+                 f"{date:<10}{header.comment_line_count:10d}")
         result.append(line2)
         
         # Add comment lines

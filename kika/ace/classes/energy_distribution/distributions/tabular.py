@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import numpy as np
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
+from kika.ace.classes.energy_distribution import tabular_math
 from kika._utils import create_repr_section
 
 
@@ -26,60 +27,33 @@ class TabularEnergyDistribution(EnergyDistribution):
     def get_outgoing_energy_distribution(self, incident_energy: float) -> Tuple[List[float], List[float]]:
         """
         Get the outgoing energy distribution for a given incident energy.
-        
-        For Law 1, this involves interpolating between the tabular distributions
-        at the closest incident energies.
-        
+
+        Each table holds the NET boundaries of NET-1 equally likely bins. Between
+        two incident energies the boundaries are interpolated (lin-lin, or the
+        lower table for INT=1), and the result is again NET-1 equally likely bins.
+        Outside the tabulated range the end table is used.
+
         Parameters
         ----------
         incident_energy : float
             The incident neutron energy
-            
+
         Returns
         -------
         Tuple[List[float], List[float]]
-            Tuple of (energies, probabilities)
+            Bin boundaries and the histogram density on each (0 at the last one)
         """
-        # Extract incident energy values
-        incident_energy_values = [float(e) for e in self.incident_energies]
-        
-        # If energy is outside the tabulated range or we don't have enough data, return empty lists
-        if not incident_energy_values or not self.distribution_data:
+        if len(self.incident_energies) == 0 or not self.distribution_data:
             return [], []
-            
-        if incident_energy <= incident_energy_values[0]:
-            dist = self.distribution_data[0]
-            return [float(e) for e in dist['e_out']], [float(p) for p in dist['pdf']]
-            
-        if incident_energy >= incident_energy_values[-1]:
-            dist = self.distribution_data[-1]
-            return [float(e) for e in dist['e_out']], [float(p) for p in dist['pdf']]
-        
-        # Find the energy interval containing the incident energy
-        idx = np.searchsorted(incident_energy_values, incident_energy) - 1
-        
-        # Get the distributions for the bracketing energies
-        dist_low = self.distribution_data[idx]
-        dist_high = self.distribution_data[idx + 1]
-        
-        # Calculate interpolation factor
-        energy_low = incident_energy_values[idx]
-        energy_high = incident_energy_values[idx + 1]
-        factor = (incident_energy - energy_low) / (energy_high - energy_low)
-        
-        e_out_low = [float(e) for e in dist_low['e_out']]
-        pdf_low = [float(p) for p in dist_low['pdf']]
-        e_out_high = [float(e) for e in dist_high['e_out']]
-        pdf_high = [float(p) for p in dist_high['pdf']]
-        
-        # For simplicity, we'll use the energy grid from the lower distribution
-        # and interpolate the PDF values 
-        pdf_high_interp = np.interp(e_out_low, e_out_high, pdf_high)
-        pdf_interp = [(1.0 - factor) * p_low + factor * p_high 
-                      for p_low, p_high in zip(pdf_low, pdf_high_interp)]
-        
-        return e_out_low, pdf_interp
-    
+        i, frac = tabular_math.bracket(self.incident_energies, incident_energy)
+        bounds = np.asarray(self.distribution_data[i]['e_out'], dtype=float)
+        if frac > 0.0 and tabular_math.interval_scheme(self.nbt, self.interp, i) != 1:
+            upper = np.asarray(self.distribution_data[i + 1]['e_out'], dtype=float)
+            bounds = (1.0 - frac) * bounds + frac * upper
+        widths = np.diff(bounds)
+        density = np.divide(1.0 / len(widths), widths, out=np.zeros_like(widths), where=widths > 0)
+        return bounds.tolist(), np.append(density, 0.0).tolist()
+
     def __repr__(self) -> str:
         """Returns a formatted string representation of the TabularEnergyDistribution object.
         
@@ -217,81 +191,24 @@ class ContinuousTabularDistribution(EnergyDistribution):
             return self.distributions[energy_idx]
         return None
     
-    def get_interpolated_distribution(self, incident_energy: float) -> Dict:
+    def get_interpolated_distribution(self, incident_energy: float) -> Optional[Dict]:
         """
-        Get an interpolated distribution for a specific incident energy.
-        
-        Parameters
-        ----------
-        incident_energy : float
-            The incident energy
-            
+        Outgoing-energy distribution at an incident energy.
+
+        Between two tables the lin-lin rule of the ACE format applies (random
+        choice of table plus unit-base scaling of the continuous part, INT=1
+        taking the lower table); see :mod:`kika.ace.classes.energy_distribution.tabular_math`.
+        Outside the tabulated range the end table is returned.
+
         Returns
         -------
-        Dict
-            Dictionary containing the interpolated distribution data
+        dict or None
+            ``e_out``, ``pdf`` and ``cdf`` of the continuous part, and
+            ``discrete_energies`` / ``discrete_probabilities`` of the lines.
         """
-        # Find the bracketing incident energies
-        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
-            # Below the minimum incident energy, return the first distribution
-            return self.get_distribution(0) if self.distributions else None
-        
-        if incident_energy >= self.incident_energies[-1]:
-            # Above the maximum incident energy, return the last distribution
-            return self.get_distribution(len(self.incident_energies) - 1) if self.distributions else None
-        
-        # Find the energy interval containing the incident energy
-        idx = np.searchsorted(self.incident_energies, incident_energy, side='right') - 1
-        
-        # Get the distributions for the bracketing energies
-        dist_low = self.get_distribution(idx)
-        dist_high = self.get_distribution(idx + 1)
-        
-        if not dist_low or not dist_high:
-            return None
-            
-        # Interpolate the distributions based on the incident energy
-        energy_low = self.incident_energies[idx]
-        energy_high = self.incident_energies[idx + 1]
-        
-        # Determine the interpolation scheme from the regions
-        # For simplicity, assume linear-linear interpolation
-        # In a full implementation, we would determine this from the NBT and INT arrays
-        
-        # Interpolation fraction
-        frac = (incident_energy - energy_low) / (energy_high - energy_low)
-        
-        # Interpolate the distribution arrays
-        e_out_interp = np.interp(
-            dist_low['e_out'],  # x-coordinates from first distribution
-            dist_high['e_out'],  # x-coordinates from second distribution
-            frac  # interpolation fraction
-        )
-        
-        pdf_interp = np.interp(
-            dist_low['pdf'],  # y-coordinates from first distribution
-            dist_high['pdf'],  # y-coordinates from second distribution
-            frac  # interpolation fraction
-        )
-        
-        cdf_interp = np.interp(
-            dist_low['cdf'],  # y-coordinates from first distribution
-            dist_high['cdf'],  # y-coordinates from second distribution
-            frac  # interpolation fraction
-        )
-        
-        # Create interpolated distribution
-        interp_dist = {
-            'intt': dist_low['intt'],  # Use the INTT from the lower energy
-            'n_discrete': dist_low['n_discrete'],  # Use discrete count from lower energy
-            'n_points': len(e_out_interp),
-            'e_out': e_out_interp,
-            'pdf': pdf_interp,
-            'cdf': cdf_interp
-        }
-        
-        return interp_dist
-    
+        return tabular_math.distribution_at(
+            self.incident_energies, self.distributions, self.nbt, self.interp, incident_energy)
+
     def __repr__(self) -> str:
         """Returns a formatted string representation of the ContinuousTabularDistribution object.
         

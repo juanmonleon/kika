@@ -96,131 +96,69 @@ def read_and_block(ace: Ace, and_idx: int, debug: bool = False) -> None:
     if and_idx <= 0:
         return  # No AND block
     
-    try:
-        # Make sure elastic scattering locator is available
-        if ace.angular_locators.elastic_scattering is None:
-            return
-            
-        elastic_locb_value = int(ace.angular_locators.elastic_scattering)
-        
-        if elastic_locb_value > 0:
-            # Process elastic scattering angular distribution
-            elastic_data_idx = and_idx + elastic_locb_value - 1  
-            
+    locators = ace.angular_locators
+    mts = []
+    if ace.reaction_mt_data and ace.reaction_mt_data.has_neutron_mt_data:
+        mts = ace.reaction_mt_data.incident_neutron
+
+    # Elastic: LOCB(1), always present in LAND. LOCB=0 means isotropic in the
+    # centre of mass, and a NE=0 or all-LC=0 array reads back as isotropic too.
+    if locators.elastic_scattering is not None:
+        elastic_locb = int(locators.elastic_scattering)
+        if elastic_locb > 0:
+            elastic_data_idx = and_idx + elastic_locb - 1
             if debug:
-                logger.debug(f"Elastic scattering data index: and_idx + locb - 1 = {and_idx} + {elastic_locb_value} - 1 = {elastic_data_idx}")
-            
-            if elastic_data_idx >= len(ace.xss_data):
-                raise ValueError(f"Elastic scattering data index out of bounds: {elastic_data_idx} >= {len(ace.xss_data)}")
-            
+                logger.debug(f"Elastic scattering data index: and_idx + locb - 1 = {and_idx} + {elastic_locb} - 1 = {elastic_data_idx}")
             try:
-                # Get MT=2 for elastic from MT data if available
-                mt_entry = None
-                if ace.reaction_mt_data and len(ace.reaction_mt_data.incident_neutron) > 0:
-                    for entry in ace.reaction_mt_data.incident_neutron:
-                        if int(entry) == 2:  # MT=2 for elastic
-                            mt_entry = int(entry)
-                            break
-                
-                # If not found in reaction_mt_data, use MT=2 for elastic
-                if mt_entry is None:
-                    mt_entry = 2  # MT=2 for elastic
-                
-                elastic_dist = read_angular_distribution(ace, elastic_data_idx, mt_entry, and_idx, debug)  # Pass and_idx as base_idx
-                if elastic_dist:
-                    ace.angular_distributions.elastic = elastic_dist
-                    if debug:
-                        logger.debug(f"Read elastic scattering distribution (MT=2)")
+                ace.angular_distributions.elastic = read_angular_distribution(
+                    ace, elastic_data_idx, 2, and_idx, debug)
             except ValueError as e:
                 raise ValueError(f"Error reading elastic scattering distribution: {e}")
-        
-        # Process other neutron reaction angular distributions
-        for i, locb_entry in enumerate(ace.angular_locators.incident_neutron):
-            locb_value = int(locb_entry)
-            
-            if locb_value == 0:
-                # Isotropic distribution, no data needed
-                continue
-            elif locb_value == -1:
-                # Angular distribution is in the DLW block using Law=44
-                mt_entry = None
-                if ace.reaction_mt_data and ace.reaction_mt_data.has_neutron_mt_data:
-                    # Offset by 1 since this list doesn't include elastic scattering
-                    if i < len(ace.reaction_mt_data.incident_neutron):
-                        mt_entry = int(ace.reaction_mt_data.incident_neutron[i])
-                
-                if mt_entry is None:
-                    continue  # Skip if MT number not available
-                
-                mt_value = int(mt_entry)
-                
-                if debug:
-                    logger.debug(f"Neutron reaction MT={mt_value}: LOCB=-1 → Kalbach-Mann (Law=44) angular distribution")
-                    logger.debug(f"  NOTE: This distribution requires data from the energy distribution Law=44 in the DLW block")
-                    
-                # Create a Kalbach-Mann distribution object with the reaction index
-                # This will be used to lookup the appropriate Law=44 distribution in the DLW block
-                dist = KalbachMannAngularDistribution(
-                    mt=mt_entry,
-                    reaction_index=i,  # Store the reaction index for lookup in DLW
-                    is_particle_production=False,
-                    requires_law44_data=True  # Explicitly flag that this needs Law=44 data
-                )
-                
-                # Store using the MT value as the key
-                ace.angular_distributions.incident_neutron[mt_value] = dist
-                continue
-            elif locb_value < -1:  # Invalid negative value
-                continue
-            
-            # Get the corresponding MT number
-            mt_entry = None
-            if ace.reaction_mt_data and ace.reaction_mt_data.has_neutron_mt_data:
-                # Offset by 1 since this list doesn't include elastic scattering
-                if i < len(ace.reaction_mt_data.incident_neutron):
-                    mt_entry = int(ace.reaction_mt_data.incident_neutron[i])
-            
-            if mt_entry is None:
-                continue  # Skip if MT number not available
-            
-            # Calculate the data index
-            data_idx = and_idx + locb_value - 1
-            
+        elif elastic_locb == 0:
+            ace.angular_distributions.elastic = IsotropicAngularDistribution(mt=2)
+
+    # LOCB(2..NXS(5)+1) belong to the first NXS(5) reactions of the MTR block,
+    # the ones that emit neutrons (manual Tables 16-17).
+    if len(locators.incident_neutron) > len(mts):
+        logger.warning(
+            f"LAND has {len(locators.incident_neutron)} reaction locators but MTR only "
+            f"{len(mts)} MTs; the angular distributions past MTR are not read")
+    for i, locb_entry in enumerate(locators.incident_neutron[:len(mts)]):
+        locb_value = int(locb_entry)
+        mt_value = int(mts[i])
+
+        if locb_value == 0:
+            # No data: isotropic, in the frame the TYR sign gives (manual 4.3.9)
+            ace.angular_distributions.incident_neutron[mt_value] = IsotropicAngularDistribution(mt=mt_value)
+            continue
+        if locb_value == -1:
+            # The angle is correlated with the energy and lives in the DLW
+            # block (LAW=44, 61 or 67)
             if debug:
-                logger.debug(f"Angular distribution data index: and_idx + locb - 1 = {and_idx} + {locb_value} - 1 = {data_idx}")
-            
-            # Check if the index is valid before trying to read
-            if data_idx < 0 or data_idx >= len(ace.xss_data):
-                # Continue instead of failing if just one reaction has an issue
-                continue
-            
-            try:
-                # Read the angular distribution
-                dist = read_angular_distribution(ace, data_idx, mt_entry, and_idx, debug)  # Pass and_idx as base_idx
-                if dist and i < 3:  # Print info for first 3 distributions
-                    mt_value = int(mt_entry)
-                    if debug:
-                        logger.debug(f"First few values from angular distribution for MT={mt_value}:")
-                    if isinstance(dist, EquiprobableAngularDistribution) and len(dist.cosine_bins) > 0:
-                        # Access the cosine bins directly since they're already float values
-                        sample = [dist.cosine_bins[0][j] for j in range(min(3, len(dist.cosine_bins[0])))]
-                        if debug:
-                            logger.debug(f"  First 3 cosine values: {sample}")
-                    elif isinstance(dist, TabulatedAngularDistribution) and len(dist.cosine_grid) > 0:
-                        # Access the cosine grid directly since they're already float values
-                        sample = [dist.cosine_grid[0][j] for j in range(min(3, len(dist.cosine_grid[0])))]
-                        if debug:
-                            logger.debug(f"  First 3 cosine grid values: {sample}")
-                    
-                    # Store using the MT value as the key
-                    ace.angular_distributions.incident_neutron[mt_value] = dist
-                    if debug:
-                        logger.debug(f"Read neutron reaction distribution for MT={mt_value}")
-            except ValueError:
-                # Skip this reaction if there's an issue
-                continue
-    except Exception as e:
-        raise ValueError(f"Error reading AND block: {e}")
+                logger.debug(f"Neutron reaction MT={mt_value}: LOCB=-1 → angular data in the DLW block")
+            ace.angular_distributions.incident_neutron[mt_value] = KalbachMannAngularDistribution(
+                mt=mt_value,
+                reaction_index=i,
+                is_particle_production=False,
+                requires_law44_data=True,
+            )
+            continue
+        if locb_value < -1:
+            logger.warning(f"Invalid LAND locator {locb_value} for MT={mt_value}; angular distribution not read")
+            continue
+
+        data_idx = and_idx + locb_value - 1
+        if debug:
+            logger.debug(f"Angular distribution data index: and_idx + locb - 1 = {and_idx} + {locb_value} - 1 = {data_idx}")
+        if data_idx >= len(ace.xss_data):
+            logger.warning(f"AND locator for MT={mt_value} points past the XSS array ({data_idx}); not read")
+            continue
+        try:
+            dist = read_angular_distribution(ace, data_idx, mt_value, and_idx, debug)
+        except ValueError as e:
+            logger.warning(f"Angular distribution for MT={mt_value} could not be read: {e}")
+            continue
+        ace.angular_distributions.incident_neutron[mt_value] = dist
 
 def read_andp_block(ace: Ace, andp_idx: int, debug: bool = False) -> None:
     """
@@ -703,18 +641,12 @@ def read_angular_distribution(ace: Ace, data_idx: int, mt_entry: int, base_idx: 
         # All non-zero locators are positive - equiprobable bin distribution
         return read_equiprobable_distribution(ace, base_idx, mt_entry, num_energies, energies, locc_entries, debug)
     
-    elif all(lc_val < 0 for lc_val in locc_values if lc_val != 0):
-        if debug:
-            logger.debug("All non-zero LOCC values are negative → tabulated distribution")
-        # All non-zero locators are negative - tabulated distribution
-        return read_tabulated_distribution(ace, base_idx, mt_entry, num_energies, energies, locc_entries, debug)
-    
-    else:
-        # Mixed locator signs - this shouldn't happen according to the format
-        error_msg = f"Mixed angular distribution locator types found: {locc_values[:10]}..."
-        if debug:
-            logger.error(error_msg)
-        raise ValueError(error_msg)
+    # Negative locators, or a mix of both signs: the sign is a per-energy flag
+    # (manual 4.3.9), so a mixed array is legal. It is read as tabulated, with
+    # each 32-bin table carried as the histogram it is.
+    if debug:
+        logger.debug("Negative or mixed LOCC values → tabulated distribution")
+    return read_tabulated_distribution(ace, base_idx, mt_entry, num_energies, energies, locc_entries, debug)
 
 def read_equiprobable_distribution(ace: Ace, base_idx: int, mt_entry: int, 
                                    num_energies: int, energies: np.ndarray, 
@@ -847,7 +779,9 @@ def read_tabulated_distribution(ace: Ace, base_idx: int, mt_entry: int,
         if locc_value == 0:
             # Isotropic distribution at this energy
             # Add a simple two-point distribution: μ=[-1,1], PDF=[0.5,0.5], CDF=[0,1]
-            distribution.interpolation.append(1)  # linear-linear (JJ=1 per ACE Table 20)
+            # JJ follows ENDF (1 histogram, 2 lin-lin), which is what NJOY
+            # writes; manual Table 20 says 0/1, but no processed table uses that.
+            distribution.interpolation.append(2)
             
             # The simple two-point distribution (not part of xss_data)
             cosines = np.array([-1.0, 1.0])
@@ -864,6 +798,21 @@ def read_tabulated_distribution(ace: Ace, base_idx: int, mt_entry: int,
             
             continue
         
+        if locc_value > 0:
+            # 32 equiprobable bins in an otherwise tabulated array: the 33
+            # edges become a histogram (JJ=1) with 1/32 in each bin.
+            data_loc = base_idx + locc_value - 1
+            if data_loc + 33 > len(ace.xss_data):
+                raise ValueError(f"Equiprobable bin data truncated at energy {energies[i]}")
+            edges = np.array(ace.xss_data[data_loc:data_loc + 33])
+            widths = np.diff(edges)
+            density = np.divide(1.0 / 32.0, widths, out=np.zeros_like(widths), where=widths > 0)
+            distribution.interpolation.append(1)
+            distribution._cosine_grid.append(edges)
+            distribution._pdf.append(np.append(density, density[-1]))
+            distribution._cdf.append(np.arange(33) / 32.0)
+            continue
+
         # Negative locator points to tabulated distribution
         lc_abs = abs(locc_value)
         # LC is relative to the base block, not the specific distribution data

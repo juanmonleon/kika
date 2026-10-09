@@ -105,7 +105,7 @@ def read_header(header, lines, debug=False):
         try:
             header.ace_version = line1[:10].strip()  # Version format string
             
-            zaid_str = line1[10:22].strip()  # ZAID
+            zaid_str = line1[10:34].strip()  # SZAID, A24 (manual Table 2)
             # Extract the numeric part of ZAID and extension using regex
             za_match = re.match(r'(\d+)(\.\d+[a-z]*)?', zaid_str)
             if za_match:
@@ -114,15 +114,15 @@ def read_header(header, lines, debug=False):
             else:
                 raise ValueError(f"Could not extract ZA from ZAID: {zaid_str}")
                 
-            header.source = line1[22:46].strip()  # Evaluation source
+            header.source = line1[34:58].strip()  # SRC, A24
             
-            header.atomic_weight_ratio = float(line2[:12].strip())
-            header.temperature = float(line2[12:24].strip())
-            header.comment_line_count = int(line2[24:32].strip())
-            
-            src = line2[32:].strip()  # Evaluation source
-            if src:  # Only set if not empty
-                header.source = src
+            # Line 2: AW E12.0, TZ E12.0, 1X, HD A10, N I10. Read by fields so a
+            # writer that does not pad to the exact widths is still understood.
+            aw, tz, date, n_comments = line2.split()[:4]
+            header.atomic_weight_ratio = float(aw)
+            header.temperature = float(tz)
+            header.date = date
+            header.comment_line_count = int(n_comments)
                 
             if debug:
                 logger.debug(f"Parsed 2.0.1 header: ZAID={header.zaid}, AWR={header.atomic_weight_ratio}, "

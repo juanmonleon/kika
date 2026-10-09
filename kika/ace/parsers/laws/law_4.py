@@ -53,8 +53,8 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
@@ -124,7 +124,9 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
     
     # Now read each distribution and store it
     distribution.distributions = []
-    jed = idat_idx  # Base address for JED
+    # L(l) is relative to JED, the start of the DLW/DLWP/DNED block (manual
+    # Tables 28, 36, 38, 42), not to IDAT.
+    jed = base_dist.jed
     
     for i in range(n_e):
         # Get the location of this distribution

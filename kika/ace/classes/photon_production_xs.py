@@ -282,6 +282,28 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
       contains the total production cross section for each particle type.
     """
     particle_types: Dict[int, List[int]] = field(default_factory=dict)
+    # particle type (1-based, PTYPE order) -> MT -> cross section. The
+    # inherited ``cross_sections`` stays empty: an MT alone is ambiguous here.
+    particle_cross_sections: Dict[int, Dict[int, YieldBasedCrossSection]] = field(default_factory=dict)
+    
+    def get_reaction_xs(self, mt: int, particle_type: int) -> Optional[YieldBasedCrossSection]:
+        """
+        Cross section of reaction ``mt`` for one particle type.
+        
+        Parameters
+        ----------
+        mt : int
+            The MT number of the reaction
+        particle_type : int
+            The particle type index (1-based)
+        """
+        return self.particle_cross_sections.get(particle_type, {}).get(mt)
+    
+    def get_available_mts(self, particle_type: Optional[int] = None) -> List[int]:
+        """MTs with a cross section, for one particle type or for any."""
+        if particle_type is not None:
+            return sorted(self.particle_cross_sections.get(particle_type, {}))
+        return sorted({mt for by_mt in self.particle_cross_sections.values() for mt in by_mt})
     
     def get_particle_mts(self, particle_type: int) -> List[int]:
         """
@@ -300,7 +322,7 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
         return self.particle_types.get(particle_type, [])
     
     def get_particle_production_xs(self, mt: int, energy: float, 
-                                 mt_xs_function) -> Optional[float]:
+                                 mt_xs_function, particle_type: int) -> Optional[float]:
         """
         Get the particle production cross section for a specific MT at a specific energy.
         
@@ -318,7 +340,7 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
         float or None
             The particle production cross section, or None if not available
         """
-        xs_data = self.get_reaction_xs(mt)
+        xs_data = self.get_reaction_xs(mt, particle_type)
         if not xs_data:
             return None
             
@@ -341,7 +363,7 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
         for particle_type, mts in sorted(self.particle_types.items()):
             output += f"Particle Type {particle_type}: {len(mts)} reactions\n"
             for mt in mts:
-                xs = self.get_reaction_xs(mt)
+                xs = self.get_reaction_xs(mt, particle_type)
                 if xs:
                     output += f"  {xs.get_description()}\n"
         

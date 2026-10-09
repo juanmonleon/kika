@@ -43,16 +43,16 @@ def parse_ixs_block(ace: Ace, debug=False) -> SecondaryParticleDataLocators:
     
     # This block should be present if PTYPE block is present
     # First check if PTYPE data is available
-    if (not hasattr(ace, "secondary_particles") or 
-        not ace.secondary_particles or 
-        not hasattr(ace.secondary_particles, "particle_ids") or
-        not ace.secondary_particles.particle_ids):
+    if (not hasattr(ace, "secondary_particle_types") or 
+        not ace.secondary_particle_types or 
+        not hasattr(ace.secondary_particle_types, "particle_ids") or
+        not ace.secondary_particle_types.particle_ids):
         if debug:
             logger.debug("Skipping data locations: no secondary particle types defined")
         return result
     
     # Get the number of particle types
-    ntype = ace.secondary_particles.num_secondary_particles
+    ntype = ace.secondary_particle_types.num_secondary_particles
     
     if debug:
         logger.debug(f"Number of secondary particle types: {ntype}")
@@ -96,8 +96,8 @@ def parse_ixs_block(ace: Ace, debug=False) -> SecondaryParticleDataLocators:
         
         if debug:
             logger.debug(f"\nProcessing secondary particle type {j}:")
-            particle_id = ace.secondary_particles.particle_ids[j-1] if j-1 < len(ace.secondary_particles.particle_ids) else "?"
-            particle_name = ace.secondary_particles.get_particle_name(particle_id) if hasattr(ace.secondary_particles, "get_particle_name") else f"Type {j}"
+            particle_id = ace.secondary_particle_types.particle_ids[j-1] if j-1 < len(ace.secondary_particle_types.particle_ids) else "?"
+            particle_name = ace.secondary_particle_types.get_particle_name(particle_id) if hasattr(ace.secondary_particle_types, "get_particle_name") else f"Type {j}"
             logger.debug(f"  Particle: {particle_name.capitalize()} (ID: {particle_id})")
             logger.debug(f"  Index calculation: {next_idx} + 10*({j}-1) = {ltype}")
         

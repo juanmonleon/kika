@@ -73,7 +73,7 @@ class MaxwellFissionSpectrum(EnergyDistribution):
         """
         Calculate the normalization constant I.
         
-        I = (θ^3 * sqrt(π) / 2) * [ erf(√((E - U)/θ)) - √((E - U)/θ) * exp(−(E - U)/θ) ]
+        I = θ^(3/2) * [ (sqrt(π)/2) erf(√((E - U)/θ)) - √((E - U)/θ) * exp(−(E - U)/θ) ]
         
         Parameters
         ----------
@@ -94,13 +94,11 @@ class MaxwellFissionSpectrum(EnergyDistribution):
         if arg <= 0:
             return 1.0  # Default value if restriction exceeds incident energy
         
-        # Calculate I
+        # I = θ^(3/2) [ (√π/2) erf(√x) − √x e^(−x) ],  x = (E − U)/θ  (manual eq. 8),
+        # the integral of √E' e^(−E'/θ) over [0, E − U]
         sqrt_arg = np.sqrt(arg)
-        erf_term = special.erf(sqrt_arg)
-        exp_term = sqrt_arg * np.exp(-arg)
-        
-        # I = (θ^3 * sqrt(π) / 2) * [ erf(√((E - U)/θ)) - √((E - U)/θ) * exp(−(E - U)/θ) ]
-        normalization = (temperature**3 * np.sqrt(np.pi) / 2.0) * (erf_term - exp_term)
+        normalization = temperature**1.5 * (
+            0.5 * np.sqrt(np.pi) * special.erf(sqrt_arg) - sqrt_arg * np.exp(-arg))
         
         return max(normalization, 1.0e-30)  # Prevent division by zero
     

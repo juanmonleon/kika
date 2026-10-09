@@ -59,8 +59,8 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
@@ -129,12 +129,10 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
     # Initialize the angle-energy distributions list
     distribution.angle_energy_distributions = []
     
-    # Get the JXS values for the relevant blocks
-    jxs_dlw = ace.header.jxs_array[10] - 1  # JXS(11), convert to 0-indexed
-    jxs_dlwp = ace.header.jxs_array[18] - 1  # JXS(19), convert to 0-indexed
-    jxs_dned = ace.header.jxs_array[26] - 1  # JXS(27), convert to 0-indexed
-    if debug:
-        logger.debug(f"JXS indices: DLW={jxs_dlw}, DLWP={jxs_dlwp}, DNED={jxs_dned}")
+    # L(l) and LMU(l) are relative to JED, the start of the block this law
+    # sits in (DLW, DLWP or DNED), as every DLW locator is. No processed table
+    # at hand uses LAW=67, so this layout is checked against the manual only.
+    jed = base_dist.jed
     
     # Now read each angle-energy distribution
     for i in range(n_e):
@@ -149,13 +147,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
             distribution.angle_energy_distributions.append(None)
             continue
         
-        # Calculate base address depending on data type
-        # For simplicity, we'll use JXS(11) for now, but in a full implementation
-        # we'd need to determine which JXS to use based on the data type
-        base_idx = jxs_dlw
-        
-        # Convert to absolute index
-        dist_idx = base_idx + loc - 1  # -1 for 0-indexing
+        dist_idx = jed + loc - 1
         if debug:
             logger.debug(f"Absolute index for distribution {i+1}: {dist_idx}")
         
@@ -212,18 +204,8 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
                 energy_distributions.append(None)
                 continue
                 
-            # Calculate energy distribution index
-            # Try with both neutron reactions and photon production
-            energy_dist_idx = jxs_dlw + lmu - 1  # First try with neutron reactions
-            if debug:
-                logger.debug(f"First attempt at absolute index: {energy_dist_idx} (DLW based)")
-            
-            # If out of bounds, try with photon production
-            if energy_dist_idx >= len(ace.xss_data):
-                energy_dist_idx = jxs_dlwp + lmu - 1
-                if debug:
-                    logger.debug(f"Second attempt at absolute index: {energy_dist_idx} (DLWP based)")
-                
+            energy_dist_idx = jed + lmu - 1
+
             # Skip if still out of bounds
             if energy_dist_idx >= len(ace.xss_data):
                 if debug:

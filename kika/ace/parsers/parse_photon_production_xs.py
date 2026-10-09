@@ -413,7 +413,9 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
                     logger.debug(f"    Processing yield-based cross section (MFTYPE={mftype})")
                 xs = read_yield_based_xs(ace.xss_data, xs_start_idx, mt_value, mftype, debug)
                 if xs:
-                    result.cross_sections[mt_value] = xs
+                    # Keyed by particle type too: the same MT (e.g. MT5)
+                    # produces several particles
+                    result.particle_cross_sections.setdefault(i, {})[mt_value] = xs
                     result.has_data = True
                     if debug:
                         logger.debug(f"    Successfully read yield-based cross section for MT={mt_value}")
@@ -422,10 +424,11 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
                     logger.debug(f"    Unsupported MFTYPE: {mftype}")
     
     # Add this check at the end to ensure consistency
-    if result.cross_sections:
+    if result.particle_cross_sections:
         result.has_data = True
         if debug:
-            logger.debug(f"Successfully processed {len(result.cross_sections)} reaction cross sections for {len(result.particle_types)} particle types")
+            n_xs = sum(len(v) for v in result.particle_cross_sections.values())
+            logger.debug(f"Successfully processed {n_xs} reaction cross sections for {len(result.particle_types)} particle types")
     else:
         result.has_data = False
         if debug:

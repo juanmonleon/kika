@@ -47,7 +47,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     Read photon yield multiplier MT numbers (YP block).
     
     For the YP Block (Table 60):
-    - LY = NXS(6)
+    - LY = JXS(20) (manual Table 55)
     - NYP is at location LY
     - MTY values are at locations LY+1 through LY+NYP
     
@@ -75,21 +75,17 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     if debug:
         logger.debug("\n----- PHOTON YIELD MULTIPLIERS (YP BLOCK) -----")
     
-    # For YP, LY = NXS(6)
-    if len(ace.header.nxs_array) <= 6:
-        if debug:
-            logger.debug("Skipping YP block: NXS array too short (no NXS(6))")
-        return result
-    
-    ly = ace.header.nxs_array[6]  # NXS(6) - Location of YP block
+    # YP starts at JXS(20) (manual Table 55); NXS(6) is the number of
+    # photon-production reactions, not a locator
+    ly = ace.header.jxs_array[20]
     
     if debug:
-        logger.debug(f"NXS(6) = {ly} → Location of YP block (LY)")
+        logger.debug(f"JXS(20) = {ly} → Location of YP block (LY)")
     
     # This block is only present if LY is nonzero
     if ly <= 0:
         if debug:
-            logger.debug(f"No YP block present: NXS(6)={ly} ≤ 0")
+            logger.debug(f"No YP block present: JXS(20)={ly} ≤ 0")
         return result
     
     if ly >= len(ace.xss_data):
@@ -140,7 +136,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
     
     For the YH Block:
     - For each particle type i (1 to NTYPE):
-      - JED = XSS(JXS(32) + 10*(i-1) + 8)
+      - LY = XSS(JXS(32) + 10*(i-1) + 9), the YH word of the IXS block
       - LY = JED
       - NYH is at location LY
       - MTY values are at locations LY+1 through LY+NYH
@@ -226,11 +222,12 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
             particle_name = secondary_particles.get_particle_name(particle_id) if hasattr(secondary_particles, "get_particle_name") else f"Type {i}"
             logger.debug(f"\nProcessing particle type {i}: {particle_name} (ID: {particle_id})")
         
-        # Calculate JED index: JED = XSS(JXS(32) + 10 * (i - 1) + 8)
-        jed_idx = jxs32_idx + 10 * (i - 1) + 8
+        # YH is the 10th IXS word of the particle (HPD, MTRH, TYRH, LSIGH, SIGH,
+        # LANDH, ANDH, LDLWH, DLWH, YH); the 9th, +8, is DLWH
+        jed_idx = jxs32_idx + 10 * (i - 1) + 9
         
         if debug:
-            logger.debug(f"  JED index calculation: JXS(32) + 10*(i-1) + 8 = {jxs32_idx} + 10*({i}-1) + 8 = {jed_idx}")
+            logger.debug(f"  YH index calculation: JXS(32) + 10*(i-1) + 9 = {jxs32_idx} + 10*({i}-1) + 9 = {jed_idx}")
         
         if jed_idx >= len(ace.xss_data):
             if debug:

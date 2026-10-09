@@ -4,8 +4,8 @@ Module for comparing energy distribution data in ACE format.
 
 from typing import List
 from kika.ace.classes.ace import Ace
-from kika.ace.classes.energy_distribution.energy_distribution import EnergyDistribution
-from kika.ace.comparison.compare_ace import compare_arrays
+from kika.ace.classes.energy_distribution.base import EnergyDistribution
+from kika.ace.comparison.compare_utils import compare_arrays
 
 def compare_energy_distributions(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
     """Compare energy distributions between two ACE objects."""
@@ -215,35 +215,6 @@ def compare_yields(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool) -> boo
             yield2 = ace2.energy_distributions.neutron_yields[mt]
             
             if not compare_energy_distribution(yield1, yield2, tolerance, f"Neutron yield MT={mt}", verbose):
-                return False
-    
-    # Compare photon yields
-    has_photon_yields1 = (ace1.energy_distributions and ace1.energy_distributions.has_photon_yields)
-    has_photon_yields2 = (ace2.energy_distributions and ace2.energy_distributions.has_photon_yields)
-    
-    if has_photon_yields1 != has_photon_yields2:
-        if verbose:
-            print("Energy-dependent photon yields mismatch: Presence differs")
-        return False
-    
-    if has_photon_yields1 and has_photon_yields2:
-        # Compare MT numbers for photon yields
-        mt_numbers1 = set(ace1.energy_distributions.photon_yields.keys())
-        mt_numbers2 = set(ace2.energy_distributions.photon_yields.keys())
-        
-        if mt_numbers1 != mt_numbers2:
-            if verbose:
-                print("Photon yields mismatch: Different MT numbers")
-                print(f"MT numbers only in first: {sorted(mt_numbers1 - mt_numbers2)}")
-                print(f"MT numbers only in second: {sorted(mt_numbers2 - mt_numbers1)}")
-            return False
-        
-        # Compare yield values for each MT
-        for mt in sorted(mt_numbers1):
-            yield1 = ace1.energy_distributions.photon_yields[mt]
-            yield2 = ace2.energy_distributions.photon_yields[mt]
-            
-            if not compare_energy_distribution(yield1, yield2, tolerance, f"Photon yield MT={mt}", verbose):
                 return False
     
     # Compare particle yields

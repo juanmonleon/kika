@@ -22,9 +22,6 @@ class EnergyDistributionContainer:
     # Energy-dependent neutron yields (MT → yield)
     neutron_yields: Dict[int, EnergyDistribution] = field(default_factory=dict)
     
-    # Energy-dependent photon yields (MT → yield)
-    photon_yields: Dict[int, EnergyDistribution] = field(default_factory=dict)
-    
     # Energy-dependent particle yields (particle index → MT → yield)
     particle_yields: List[Dict[int, EnergyDistribution]] = field(default_factory=list)
     
@@ -52,11 +49,6 @@ class EnergyDistributionContainer:
     def has_neutron_yields(self) -> bool:
         """Check if energy-dependent neutron yields are available."""
         return len(self.neutron_yields) > 0
-    
-    @property
-    def has_photon_yields(self) -> bool:
-        """Check if energy-dependent photon yields are available."""
-        return len(self.photon_yields) > 0
     
     @property
     def has_particle_yields(self) -> bool:
@@ -238,11 +230,6 @@ class EnergyDistributionContainer:
             "Energy-Dependent Neutron Yields", f"{'Available' if n_neutron_yields > 0 else 'None'} ({n_neutron_yields} MT numbers)", 
             width1=property_col_width, width2=value_col_width)
         
-        n_photon_yields = len(self.photon_yields)
-        data_summary += "{:<{width1}} {:<{width2}}\n".format(
-            "Energy-Dependent Photon Yields", f"{'Available' if n_photon_yields > 0 else 'None'} ({n_photon_yields} MT numbers)", 
-            width1=property_col_width, width2=value_col_width)
-        
         data_summary += "-" * header_width + "\n\n"
         
         # Summary of distribution types
@@ -399,8 +386,7 @@ class EnergyDistributionContainer:
         
         # Print energy-dependent yields information if available
         yield_categories = [
-            ("Neutron", self.neutron_yields, "neutron_yields"),
-            ("Photon", self.photon_yields, "photon_yields")
+            ("Neutron", self.neutron_yields, "neutron_yields")
         ]
         
         for yield_name, yield_dict, attr_name in yield_categories:

@@ -45,8 +45,8 @@ def parse_discrete_energy_distribution(ace: Ace, base_dist: EnergyDistribution, 
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx + 1 >= len(ace.xss_data):

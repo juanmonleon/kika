@@ -284,12 +284,12 @@ def particle_production_cross_sections_repr(self) -> str:
     info_table += "-" * header_width + "\n"
     
     info_table += "{:<{width1}} {:<{width2}}\n".format(
-        "Data Present", "Yes" if self.has_data and self.cross_sections else "No",
+        "Data Present", "Yes" if self.has_data and self.particle_cross_sections else "No",
         width1=property_col_width, width2=value_col_width)
     
-    if self.has_data and self.cross_sections:
+    if self.has_data and self.particle_cross_sections:
         info_table += "{:<{width1}} {:<{width2}}\n".format(
-            "Number of Reactions", len(self.cross_sections),
+            "Number of Reactions", sum(len(v) for v in self.particle_cross_sections.values()),
             width1=property_col_width, width2=value_col_width)
         
         info_table += "{:<{width1}} {:<{width2}}\n".format(

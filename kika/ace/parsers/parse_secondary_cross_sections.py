@@ -50,10 +50,10 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
         return result
     
     # Check if PTYPE block is present
-    if (not hasattr(ace, "secondary_particles") or 
-        not ace.secondary_particles or 
-        not hasattr(ace.secondary_particles, "particle_ids") or
-        not ace.secondary_particles.particle_ids):
+    if (not hasattr(ace, "secondary_particle_types") or 
+        not ace.secondary_particle_types or 
+        not hasattr(ace.secondary_particle_types, "particle_ids") or
+        not ace.secondary_particle_types.particle_ids):
         if debug:
             logger.debug("Skipping production cross sections: no secondary particle types defined")
         return result
@@ -77,7 +77,7 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
         return result
     
     # Get the number of particle types
-    ntype = ace.secondary_particles.num_secondary_particles
+    ntype = ace.secondary_particle_types.num_secondary_particles
     
     if debug:
         logger.debug(f"Processing {ntype} secondary particle types")
@@ -85,8 +85,8 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
     # Process each particle type
     for j in range(1, ntype + 1):
         if debug:
-            particle_id = ace.secondary_particles.particle_ids[j-1] if j-1 < len(ace.secondary_particles.particle_ids) else "?"
-            particle_name = ace.secondary_particles.get_particle_name(particle_id) if hasattr(ace.secondary_particles, "get_particle_name") else f"Type {j}"
+            particle_id = ace.secondary_particle_types.particle_ids[j-1] if j-1 < len(ace.secondary_particle_types.particle_ids) else "?"
+            particle_name = ace.secondary_particle_types.get_particle_name(particle_id) if hasattr(ace.secondary_particle_types, "get_particle_name") else f"Type {j}"
             logger.debug(f"Processing: {particle_name.capitalize()} (ID: {particle_id})")
             
         # Get the locator set for this particle

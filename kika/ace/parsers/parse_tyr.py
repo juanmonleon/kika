@@ -1,3 +1,4 @@
+import numpy as np
 import logging
 from kika.ace.classes.particle_release.particle_release import ParticleRelease
 
@@ -43,24 +44,15 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
     
     if debug:
         logger.debug(f"JXS(5) = {tyr_idx} → Starting index of TYR block")
-        logger.debug(f"NXS(4) = {num_reactions} → Total number of reactions including elastic")
+        logger.debug(f"NXS(4) = {num_reactions} → Number of reactions, elastic excluded")
     
-    # Initialize the incident_neutron list even if we don't find data
-    # This prevents the 'NoneType' error
-    ace.particle_release.incident_neutron = []
+    # Empty until read, as every other absent block
+    ace.particle_release.incident_neutron = np.empty(0)
     
     if num_reactions > 0:
-        # Make sure we handle files with only elastic scattering correctly
-        if num_reactions == 1:
-            if debug:
-                logger.debug("Only elastic scattering present, no TYR block to read")
-            return
-            
-        # Adjust for elastic scattering (not included in TYR)
-        num_reactions_tyr = num_reactions - 1
-        
-        if debug:
-            logger.debug(f"Reactions in TYR block: {num_reactions_tyr} (NXS(4)-1, elastic excluded)")
+        # NXS(4) already excludes elastic (manual Table 3) and TYR holds one
+        # entry per MTR reaction (Table 12)
+        num_reactions_tyr = num_reactions
         
         if tyr_idx > 0 and num_reactions_tyr > 0:
             
@@ -75,7 +67,9 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
                 raise IndexError(error_msg)
                 
             # End index calculation
-            end_idx = min(tyr_idx + num_reactions_tyr - 1, len(ace.xss_data) - 1)
+            end_idx = tyr_idx + num_reactions_tyr - 1
+            if end_idx >= len(ace.xss_data):
+                raise IndexError(f"TYR block of {num_reactions_tyr} entries runs past the XSS array")
             
             if debug:
                 logger.debug(f"TYR block range: XSS[{tyr_idx}:{end_idx+1}]")
@@ -230,7 +224,7 @@ def _is_valid_ty_value(ty: int) -> bool:
     According to documentation, allowed values are:
     ±1, ±2, ±3, ±4, ±19, 0, and integers > 100 in absolute value
     
-    Not included in documentation but found in some files is ±5
+    The manual's list stops at ±4, but any neutron count is a valid TY.
     
     Parameters
     ----------
@@ -246,8 +240,9 @@ def _is_valid_ty_value(ty: int) -> bool:
     if ty == 0:
         return True
         
-    # Check common cases: ±1, ±2, ±3, ±4, ±5, ±19
-    if abs(ty) in (1, 2, 3, 4, 5, 19):
+    # A neutron count (the manual lists ±1..±4, but ENDF has (n,5n) to (n,8n),
+    # MT 152/153/160/161, and NJOY writes their multiplicity) or 19 for fission
+    if 1 <= abs(ty) <= 100:
         return True
         
     # Check large values (energy-dependent multiplicities)

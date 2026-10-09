@@ -75,13 +75,12 @@ def read_angular_locator_blocks(ace: Ace, debug=False) -> AngularDistributionLoc
         logger.debug(f"JXS(31) = {jxs31_idx} → Locator for NMT values")
         logger.debug(f"JXS(32) = {jxs32_idx} → Base index for particle data blocks")
     
-    # Read LAND block (incident neutron reactions with secondary neutrons)
-    if num_secondary_neutron_reactions > 0:
-        if debug:
-            logger.debug("\n----- LAND Block -----")
-        read_land_block(ace, land_idx, num_secondary_neutron_reactions, debug)
-    elif debug:
-        logger.debug("No LAND block to process (no secondary neutron reactions)")
+    # Read LAND block. It always exists (manual Table 16): its first locator is
+    # the elastic one, followed by one per secondary-neutron reaction, so a
+    # table with NXS(5)=0 (H-1, He-4) still carries the elastic locator.
+    if debug:
+        logger.debug("\n----- LAND Block -----")
+    read_land_block(ace, land_idx, num_secondary_neutron_reactions, debug)
     
     # Read LANDP block (photon production)
     if num_photon_production_reactions > 0:

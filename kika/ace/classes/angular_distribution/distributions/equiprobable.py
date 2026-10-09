@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 import pandas as pd
 from dataclasses import dataclass, field
 from kika.ace.classes.angular_distribution.base import AngularDistribution
@@ -24,7 +25,12 @@ class EquiprobableAngularDistribution(AngularDistribution):
     def to_dataframe(self, energy: float, num_points: int = 100, interpolate: bool = False) -> Optional[pd.DataFrame]:
         """
         Convert equiprobable bin distribution to a pandas DataFrame.
-        
+
+        Each table is 32 bins of probability 1/32. Between two incident energies
+        the two tables are mixed with weights ``1-f`` and ``f`` (the table is
+        chosen at random, as MCNP samples it), on the union of their bin edges.
+        Outside the tabulated range the end table is used.
+
         Parameters
         ----------
         energy : float
@@ -32,145 +38,41 @@ class EquiprobableAngularDistribution(AngularDistribution):
         num_points : int, optional
             Number of angular points to generate when interpolating, defaults to 100
         interpolate : bool, optional
-            Whether to interpolate onto a regular grid (True) or return original points (False)
-            
+            Whether to interpolate onto a regular grid (True) or return the bins (False)
+
         Returns
         -------
         pandas.DataFrame or None
-            DataFrame with 'energy', 'cosine', and 'pdf' columns,
-            optionally with bin boundary columns if not interpolating
-            Returns None if pandas is not available
+            With ``interpolate=False``: one row per bin, 'cosine' at its centre,
+            its density in 'pdf' and its edges in 'bin_low'/'bin_high'.
+            Otherwise 'energy', 'cosine' and 'pdf' on a regular grid.
         """
-        # If no energies in this distribution, return isotropic for all directions
         if len(self._energies) == 0:
-            # For specific energy, return isotropic distribution
-            if interpolate:
-                cosines = np.linspace(-1, 1, num_points)
-                return pd.DataFrame({
-                    'energy': np.full_like(cosines, energy, dtype=float),
-                    'cosine': cosines,
-                    'pdf': np.ones_like(cosines) * 0.5
-                })
-            else:
-                return pd.DataFrame({
-                    'energy': [energy, energy],
-                    'cosine': [-1.0, 1.0],
-                    'pdf': [0.5, 0.5]
-                })
-        
-        # If energy is outside our range, return uniform distribution
-        if energy < self._energies[0] or energy > self._energies[-1]:
-            if interpolate:
-                cosines = np.linspace(-1, 1, num_points)
-                return pd.DataFrame({
-                    'energy': np.full_like(cosines, energy, dtype=float),
-                    'cosine': cosines,
-                    'pdf': np.ones_like(cosines) * 0.5
-                })
-            else:
-                return pd.DataFrame({
-                    'energy': [energy, energy],
-                    'cosine': [-1.0, 1.0],
-                    'pdf': [0.5, 0.5]
-                })
-        
-        # Find bounding energy indices
-        energy_values = self.energies
-        idx = np.searchsorted(energy_values, energy)
-        
-        # Get appropriate cosine bins based on energy
-        if idx == 0:
-            bin_values = self.cosine_bins[0]
-        elif idx >= len(energy_values):
-            bin_values = self.cosine_bins[-1]
-        else:
-            # Interpolate between energy points
-            e_low = energy_values[idx-1]
-            e_high = energy_values[idx]
-            frac = (energy - e_low) / (e_high - e_low)
-            
-            # Get the cosine values at the two bounding energies
-            cosines_low = self.cosine_bins[idx-1]
-            cosines_high = self.cosine_bins[idx]
-            
-            # Interpolate cosine bin boundaries
-            bin_values = [(1-frac)*cl + frac*ch for cl, ch in zip(cosines_low, cosines_high)]
-        
-        if not interpolate:
-            # Return the actual bin boundaries and their probabilities
-            # For equiprobable bins, each bin has probability 1/32
-            prob_per_bin = 1.0 / 32.0
-            
-            # Calculate probability density for each bin (constant within bin)
-            pdf_values = []
-            bin_centers = []
-            bin_lows = []
-            bin_highs = []
-            energy_values = []
-            
-            for i in range(len(bin_values) - 1):
-                bin_width = bin_values[i+1] - bin_values[i]
-                if bin_width > 0:
-                    pdf = prob_per_bin / bin_width
-                else:
-                    pdf = 0.0
-                
-                # Use bin center as the cosine value
-                bin_center = (bin_values[i] + bin_values[i+1]) / 2
-                
-                bin_centers.append(bin_center)
-                pdf_values.append(pdf)
-                bin_lows.append(bin_values[i])
-                bin_highs.append(bin_values[i+1])
-                energy_values.append(energy)
-            
-            # Verify all arrays have the same length
-            array_lengths = [len(bin_centers), len(pdf_values), len(bin_lows), len(bin_highs), len(energy_values)]
-            if len(set(array_lengths)) > 1:
-                # If lengths don't match, truncate to the shortest length
-                min_length = min(array_lengths)
-                bin_centers = bin_centers[:min_length]
-                pdf_values = pdf_values[:min_length]
-                bin_lows = bin_lows[:min_length]
-                bin_highs = bin_highs[:min_length]
-                energy_values = energy_values[:min_length]
-            
-            return pd.DataFrame({
-                'energy': energy_values,
-                'cosine': bin_centers,
-                'pdf': pdf_values,
-                'bin_low': bin_lows,
-                'bin_high': bin_highs
-            })
-        
-        # If interpolation requested, use the existing code
-        # Generate a fine cosine grid
-        cosines = np.linspace(-1, 1, num_points)
-        
-        # Calculate PDF (should be constant within each bin)
-        # For a 32-bin equiprobable distribution, each bin has probability of 1/32
-        prob_per_bin = 1.0 / 32.0
-        
-        # Initialize PDF array
-        pdf_values = np.zeros_like(cosines)
-        
-        # Assign PDF values based on bin membership
-        for i, mu in enumerate(cosines):
-            # Find which bin the cosine falls into
-            bin_idx = 0
-            while bin_idx < 32 and bin_values[bin_idx] <= mu:
-                bin_idx += 1
-            
-            if bin_idx > 0 and bin_idx <= 32:
-                bin_width = bin_values[bin_idx] - bin_values[bin_idx-1]
-                if bin_width > 0:
-                    pdf_values[i] = prob_per_bin / bin_width
-        
-        return pd.DataFrame({
-            'energy': np.full_like(cosines, energy, dtype=float),
-            'cosine': cosines,
-            'pdf': pdf_values
-        })
+            cosines = np.linspace(-1, 1, num_points) if interpolate else np.array([-1.0, 1.0])
+            return pd.DataFrame({'energy': np.full_like(cosines, energy, dtype=float),
+                                 'cosine': cosines, 'pdf': np.full_like(cosines, 0.5)})
+
+        i, frac = tabular_math.bracket(self._energies, energy)
+        members = [(i, 1.0)] if frac == 0.0 else [(i, 1.0 - frac), (i + 1, frac)]
+
+        def density(k, grid):
+            edges = np.asarray(self._cosine_bins[k], dtype=float)
+            widths = np.diff(edges)
+            dens = np.divide(1.0 / (len(edges) - 1), widths, out=np.zeros_like(widths), where=widths > 0)
+            return tabular_math.pdf_on_grid(edges, np.append(dens, 0.0), 1, grid)
+
+        if interpolate:
+            cosines = np.linspace(-1, 1, num_points)
+            pdf = sum(w * density(k, cosines) for k, w in members)
+            return pd.DataFrame({'energy': np.full_like(cosines, energy, dtype=float),
+                                 'cosine': cosines, 'pdf': pdf})
+
+        edges = np.unique(np.concatenate([np.asarray(self._cosine_bins[k], dtype=float) for k, _ in members]))
+        centres = 0.5 * (edges[:-1] + edges[1:])
+        pdf = sum(w * density(k, centres) for k, w in members)
+        return pd.DataFrame({'energy': np.full_like(centres, energy, dtype=float),
+                             'cosine': centres, 'pdf': pdf,
+                             'bin_low': edges[:-1], 'bin_high': edges[1:]})
 
     def __repr__(self) -> str:
         """

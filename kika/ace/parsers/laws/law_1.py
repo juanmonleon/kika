@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika.ace.classes.energy_distribution.distributions.tabular import TabularEnergyDistribution
@@ -47,8 +48,8 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
@@ -82,6 +83,8 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
                     int_values = [float(entry) for entry in e_out_int]
                     logger.debug(f"INT values: {int_values}")
                 idx += n_r
+                distribution.nbt = [int(v) for v in e_out_nbt]
+                distribution.interp = [int(v) for v in e_out_int]
             else:
                 if debug:
                     logger.debug(f"Not enough data to read INT values. Need index up to {idx + n_r - 1}, have {len(ace.xss_data)}")
@@ -147,11 +150,19 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
             logger.debug(f"E_out table {i+1} range: [{e_out_values[0]}, {e_out_values[-1]}]")
         idx += net
         
-        # Calculate the probability (uniform across bins)
-        p_out = [1.0 / (net - 1)] * (net - 1) + [0.0]  # NET-1 equal probability bins
-        
-        # Store with interpolation scheme (always linear-linear for equiprobable bins)
-        distribution.distribution_data.append((net, 2, e_out, p_out))
+        # NET boundaries of NET-1 equally likely bins (manual Table 26): a
+        # histogram whose density in bin k is 1/((NET-1) * width_k). Stored in
+        # the same layout as the LAW=4 tables, the last point closing the range.
+        widths = np.diff(e_out)
+        density = np.divide(1.0 / (net - 1), widths, out=np.zeros_like(widths), where=widths > 0)
+        distribution.distribution_data.append({
+            'intt': 1,
+            'n_discrete': 0,
+            'n_points': net,
+            'e_out': e_out,
+            'pdf': np.append(density, 0.0),
+            'cdf': np.arange(net) / (net - 1),
+        })
         if debug:
             logger.debug(f"Successfully stored E_out table {i+1}")
     
