@@ -2,7 +2,6 @@ import os
 import io
 import numpy as np
 from kika.ace.classes.ace import Ace
-from kika.ace.classes.xss import XssEntry
 from kika.ace.writers.write_header import write_header
 
 def write_ace(ace: Ace, filepath: str = None, overwrite: bool = False) -> str:
@@ -27,40 +26,12 @@ def write_ace(ace: Ace, filepath: str = None, overwrite: bool = False) -> str:
     if os.path.exists(filepath) and not overwrite:
         raise FileExistsError(f"File {filepath} already exists and overwrite is False")
     
-    # Work on a local view: wrap only what is not already an XssEntry, and never
-    # assign back to ace.xss_data. read_xss seeds index 0 with a bare 0 as the
-    # FORTRAN 1-based placeholder, so something has to cover it before the index
-    # checks below — but wrapping the whole list, as this used to, re-wrapped
-    # every real entry into XssEntry(value=XssEntry(...)) on the caller's object.
-    entries = [
-        entry if isinstance(entry, XssEntry) else XssEntry(index=i, value=entry)
-        for i, entry in enumerate(ace.xss_data)
-    ]
-
-    xss_length = len(entries)
-    indices = [entry.index for entry in entries]
-
-    # Validate indices
-    if any(idx is None for idx in indices):
-        raise ValueError("Found XSS entry with no index")
-    if min(indices) < 0 or max(indices) >= xss_length:
-        raise ValueError(f"Invalid XSS indices (valid range: 0 to {xss_length-1})")
-    if len(set(indices)) != xss_length:
-        missing = set(range(xss_length)) - set(indices)
-        raise ValueError(f"Missing XSS indices: {sorted(missing)}")
-    
-    # If the data is not already sorted, sort it by index
-    if any(entries[i].index > entries[i+1].index for i in range(xss_length - 1)):
-        sorted_xss = sorted(entries, key=lambda entry: entry.index)
-    else:
-        sorted_xss = entries
-
-    # Skip the 0th element if there are multiple entries
-    start_idx = 1 if len(sorted_xss) > 1 else 0
-
-    # Extract the numeric values and convert to a NumPy array for fast processing
-    values_list = [entry.value for entry in sorted_xss[start_idx:]]
-    values = np.array(values_list, dtype=float)  # using float for uniformity
+    # xss_data[0] is the FORTRAN 1-based placeholder, not part of the table.
+    values = np.asarray(ace.xss_data, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("XSS data must be a 1-D array")
+    if values.size > 1:
+        values = values[1:]
 
     # Determine the formatting string: use integer formatting if all values are integers
     if np.all(np.abs(values - np.rint(values)) < 1e-12):

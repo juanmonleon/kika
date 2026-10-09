@@ -3,7 +3,7 @@ Module for comparing energy distribution locators in ACE format.
 """
 
 from kika.ace.classes.ace import Ace
-from kika.ace.comparison.compare_ace import compare_arrays
+from kika.ace.comparison.compare_utils import compare_arrays
 
 def compare_energy_dist_locators(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
     """Compare energy distribution locators between two ACE objects."""

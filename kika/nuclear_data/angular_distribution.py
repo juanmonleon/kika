@@ -33,8 +33,8 @@ def ace_reaction_frame(ace: "Ace", mt: int) -> str:
     if mt == 2:
         return "CM"
     try:
-        mts = [int(e.value) for e in ace.reaction_mt_data.incident_neutron]
-        ty = int(ace.particle_release.incident_neutron[mts.index(mt)].value)
+        mts = [int(e) for e in ace.reaction_mt_data.incident_neutron]
+        ty = int(ace.particle_release.incident_neutron[mts.index(mt)])
     except (AttributeError, ValueError, IndexError, TypeError):
         return "LAB"
     return "CM" if ty < 0 else "LAB"

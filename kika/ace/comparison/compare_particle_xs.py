@@ -3,9 +3,16 @@ Module for comparing particle production cross section data in ACE format.
 """
 
 from kika.ace.classes.ace import Ace
-from kika.ace.comparison.compare_ace import compare_arrays
+from kika.ace.comparison.compare_utils import compare_arrays
 
 def compare_particle_production_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
+    """Compare the particle production data: HPD totals and the SIGH yields per particle."""
+    from kika.ace.comparison.compare_photon_xs import compare_particle_yield_xs
+    return (_compare_particle_hpd(ace1, ace2, tolerance, verbose)
+            and compare_particle_yield_xs(ace1, ace2, tolerance, verbose))
+
+
+def _compare_particle_hpd(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
     """Compare particle production cross section data between two ACE objects."""
     # Check if both objects have particle production cross section data
     has_particle_xs1 = (ace1.secondary_particle_cross_sections is not None and 
@@ -53,16 +60,16 @@ def compare_particle_production_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6
             return False
         
         # Compare cross section values
-        xs_values1 = [xs.value for xs in xs_data1.xs_values]
-        xs_values2 = [xs.value for xs in xs_data2.xs_values]
+        xs_values1 = [float(xs) for xs in xs_data1.xs_values]
+        xs_values2 = [float(xs) for xs in xs_data2.xs_values]
         
         if not compare_arrays(xs_values1, xs_values2, tolerance, 
                              f"Particle type {particle_idx} cross section values", verbose):
             return False
         
         # Compare heating numbers
-        heating1 = [h.value for h in xs_data1.heating_numbers]
-        heating2 = [h.value for h in xs_data2.heating_numbers]
+        heating1 = [float(h) for h in xs_data1.heating_numbers]
+        heating2 = [float(h) for h in xs_data2.heating_numbers]
         
         if not compare_arrays(heating1, heating2, tolerance, 
                              f"Particle type {particle_idx} heating numbers", verbose):
@@ -85,7 +92,7 @@ def compare_particle_production(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, v
         # We don't fail the comparison just for different locator values
         pass
     
-    # Compare particle production cross section data (HPD blocks)
+    # Compare particle production cross sections (HPD totals and SIGH yields)
     if not compare_particle_production_xs(ace1, ace2, tolerance, verbose):
         return False
     
@@ -99,12 +106,6 @@ def compare_particle_production(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, v
     if hasattr(ace1, 'particle_release') and hasattr(ace2, 'particle_release'):
         from kika.ace.comparison.compare_particle_release import compare_particle_production_release
         if not compare_particle_production_release(ace1, ace2, tolerance, verbose):
-            return False
-    
-    # Compare particle production cross sections (SIGH blocks)
-    if hasattr(ace1, 'particle_production_xs') and hasattr(ace2, 'particle_production_xs'):
-        from kika.ace.comparison.compare_photon_xs import compare_particle_production_xs as compare_particle_xs_blocks
-        if not compare_particle_xs_blocks(ace1, ace2, tolerance, verbose):
             return False
     
     # Compare particle production angular distributions (ANDH blocks)

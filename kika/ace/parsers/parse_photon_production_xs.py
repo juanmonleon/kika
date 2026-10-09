@@ -1,5 +1,7 @@
 import logging
 from typing import List, Optional, Tuple
+
+import numpy as np
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.photon_production_xs import (
     PhotonProductionCrossSections, ParticleProductionCrossSections,
@@ -72,7 +74,7 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
     
     # Check if we have the necessary data
     if (not ace.header or not ace.header.jxs_array or not ace.header.nxs_array or 
-        not ace.xss_data):
+        ace.xss_data is None or len(ace.xss_data) == 0):
         if debug:
             logger.debug("Skipping SIGP block: required data missing")
         return result
@@ -80,7 +82,7 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
     # Check if reaction MT data is available
     if (not hasattr(ace, "reaction_mt_data") or not ace.reaction_mt_data or
         not hasattr(ace.reaction_mt_data, "photon_production") or 
-        not ace.reaction_mt_data.photon_production):
+        len(ace.reaction_mt_data.photon_production) == 0):
         if debug:
             logger.debug("Skipping SIGP block: no photon production MT data available")
         return result
@@ -119,7 +121,7 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
     
     # Check if cross section locators are available
     if (not hasattr(ace, "xs_locators") or not ace.xs_locators or 
-        not hasattr(ace.xs_locators, "photon_production") or not ace.xs_locators.photon_production):
+        not hasattr(ace.xs_locators, "photon_production") or len(ace.xs_locators.photon_production) == 0):
         if debug:
             logger.debug("Skipping SIGP block: no photon production locators available")
         return result
@@ -128,7 +130,7 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
     mts = ace.reaction_mt_data.photon_production
     locators = ace.xs_locators.photon_production
     
-    if not mts or not locators or len(mts) != len(locators):
+    if len(mts) == 0 or len(locators) == 0 or len(mts) != len(locators):
         if debug:
             logger.debug(f"Invalid data: mts={len(mts) if mts else 0}, locators={len(locators) if locators else 0}")
         return result
@@ -138,8 +140,8 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
     
     # Process each reaction
     for i, (mt, loc) in enumerate(zip(mts, locators)):
-        mt_value = int(mt.value)
-        loc_value = int(loc.value)
+        mt_value = int(mt)
+        loc_value = int(loc)
         
         if debug:
             logger.debug(f"\nReaction {i+1}: MT={mt_value}")
@@ -160,7 +162,7 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
         
         # Read the cross section data based on MFTYPE
         mftype_entry = ace.xss_data[xs_start_idx]
-        mftype = int(mftype_entry.value)
+        mftype = int(mftype_entry)
         
         if debug:
             logger.debug(f"  MFTYPE = {mftype}")
@@ -214,7 +216,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
     result = ParticleProductionCrossSections()
     
     # Check if we have the necessary data
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping SIGH block: required data missing")
         return result
@@ -318,7 +320,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             continue
         
         nmt_entry = ace.xss_data[nmt_idx]
-        nmt = int(nmt_entry.value)
+        nmt = int(nmt_entry)
         
         if debug:
             logger.debug(f"  NMT = {nmt} → Number of reactions for this particle")
@@ -335,7 +337,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             continue
         
         sig_idx_entry = ace.xss_data[sig_idx_loc]
-        sig_idx = int(sig_idx_entry.value)
+        sig_idx = int(sig_idx_entry)
         
         if debug:
             logger.debug(f"  SIG = {sig_idx} → Starting index for cross section data")
@@ -366,7 +368,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
         mts = ace.reaction_mt_data.particle_production[i-1]
         locators = ace.xs_locators.particle_production[i-1]
         
-        if not mts or not locators or len(mts) != len(locators):
+        if len(mts) == 0 or len(locators) == 0 or len(mts) != len(locators):
             if debug:
                 logger.debug(f"  Invalid data: mts={len(mts) if mts else 0}, locators={len(locators) if locators else 0}")
             continue
@@ -375,12 +377,12 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             logger.debug(f"  Processing {len(mts)} reactions for particle type {i}")
         
         # Store the MT numbers for this particle type
-        result.particle_types[i] = [int(mt.value) for mt in mts]
+        result.particle_types[i] = [int(mt) for mt in mts]
         
         # Process each reaction for this particle type
         for j, (mt, loc) in enumerate(zip(mts, locators)):
-            mt_value = int(mt.value)
-            loc_value = int(loc.value)
+            mt_value = int(mt)
+            loc_value = int(loc)
             
             if debug:
                 logger.debug(f"\n  Reaction {j+1}: MT={mt_value}")
@@ -401,7 +403,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             
             # Read the cross section data based on MFTYPE
             mftype_entry = ace.xss_data[xs_start_idx]
-            mftype = int(mftype_entry.value)
+            mftype = int(mftype_entry)
             
             if debug:
                 logger.debug(f"    MFTYPE = {mftype}")
@@ -411,7 +413,9 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
                     logger.debug(f"    Processing yield-based cross section (MFTYPE={mftype})")
                 xs = read_yield_based_xs(ace.xss_data, xs_start_idx, mt_value, mftype, debug)
                 if xs:
-                    result.cross_sections[mt_value] = xs
+                    # Keyed by particle type too: the same MT (e.g. MT5)
+                    # produces several particles
+                    result.particle_cross_sections.setdefault(i, {})[mt_value] = xs
                     result.has_data = True
                     if debug:
                         logger.debug(f"    Successfully read yield-based cross section for MT={mt_value}")
@@ -420,10 +424,11 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
                     logger.debug(f"    Unsupported MFTYPE: {mftype}")
     
     # Add this check at the end to ensure consistency
-    if result.cross_sections:
+    if result.particle_cross_sections:
         result.has_data = True
         if debug:
-            logger.debug(f"Successfully processed {len(result.cross_sections)} reaction cross sections for {len(result.particle_types)} particle types")
+            n_xs = sum(len(v) for v in result.particle_cross_sections.values())
+            logger.debug(f"Successfully processed {n_xs} reaction cross sections for {len(result.particle_types)} particle types")
     else:
         result.has_data = False
         if debug:
@@ -431,7 +436,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
     
     return result
 
-def read_yield_based_xs(xss: List, start_idx: int, mt: int, mftype: int, debug=False) -> Optional[YieldBasedCrossSection]:
+def read_yield_based_xs(xss: np.ndarray, start_idx: int, mt: int, mftype: int, debug=False) -> Optional[YieldBasedCrossSection]:
     """
     Read yield-based cross section data (MFTYPE = 12 or 16).
     
@@ -445,8 +450,8 @@ def read_yield_based_xs(xss: List, start_idx: int, mt: int, mftype: int, debug=F
     
     Parameters
     ----------
-    xss : List
-        The XSS array containing XssEntry objects
+    xss : np.ndarray
+        The XSS array (ace.xss_data)
     start_idx : int
         Starting index in the XSS array (where MFTYPE is located)
     mt : int
@@ -470,14 +475,14 @@ def read_yield_based_xs(xss: List, start_idx: int, mt: int, mftype: int, debug=F
     
     # Read MTMULT
     mtmult_entry = xss[start_idx + 1]
-    xs.mtmult = int(mtmult_entry.value)
+    xs.mtmult = int(mtmult_entry)
     
     if debug:
         logger.debug(f"    MTMULT = {xs.mtmult} → MT whose cross section multiplies yield")
     
     # Read number of interpolation regions (NR)
     num_regions_entry = xss[start_idx + 2]
-    xs.num_regions = int(num_regions_entry.value)
+    xs.num_regions = int(num_regions_entry)
     
     if debug:
         logger.debug(f"    NR = {xs.num_regions} → Number of interpolation regions")
@@ -491,17 +496,17 @@ def read_yield_based_xs(xss: List, start_idx: int, mt: int, mftype: int, debug=F
                 logger.debug(f"    ERROR: Not enough data for interpolation regions")
             return None
         
-        # Read NBT array - store XssEntry objects
-        xs.interpolation_bounds = [xss[current_idx + i] for i in range(xs.num_regions)]
+        # Read NBT array (view of xss_data)
+        xs.interpolation_bounds = xss[current_idx:current_idx + xs.num_regions]
         current_idx += xs.num_regions
         
-        # Read INT array - store XssEntry objects
-        xs.interpolation_schemes = [xss[current_idx + i] for i in range(xs.num_regions)]
+        # Read INT array (view of xss_data)
+        xs.interpolation_schemes = xss[current_idx:current_idx + xs.num_regions]
         current_idx += xs.num_regions
         
         if debug:
-            bounds = [int(b.value) for b in xs.interpolation_bounds]
-            schemes = [int(s.value) for s in xs.interpolation_schemes]
+            bounds = [int(b) for b in xs.interpolation_bounds]
+            schemes = [int(s) for s in xs.interpolation_schemes]
             logger.debug(f"    NBT (interpolation bounds): {bounds}")
             logger.debug(f"    INT (interpolation schemes): {schemes}")
     
@@ -512,7 +517,7 @@ def read_yield_based_xs(xss: List, start_idx: int, mt: int, mftype: int, debug=F
         return None
         
     num_energies_entry = xss[current_idx]
-    xs.num_energies = int(num_energies_entry.value)
+    xs.num_energies = int(num_energies_entry)
     current_idx += 1
     
     if debug:
@@ -524,19 +529,19 @@ def read_yield_based_xs(xss: List, start_idx: int, mt: int, mftype: int, debug=F
             logger.debug(f"    ERROR: Not enough data for energy/yield points")
         return None
     
-    # Read energies (E array) - store XssEntry objects
-    xs.energies = [xss[current_idx + i] for i in range(xs.num_energies)]
+    # Read energies (E array) (view of xss_data)
+    xs.energies = xss[current_idx:current_idx + xs.num_energies]
     current_idx += xs.num_energies
     
-    # Read yields (Y array) - store XssEntry objects
-    xs.yields = [xss[current_idx + i] for i in range(xs.num_energies)]
+    # Read yields (Y array) (view of xss_data)
+    xs.yields = xss[current_idx:current_idx + xs.num_energies]
     
     if debug:
         logger.debug(f"    Successfully read {xs.num_energies} energy/yield points")
     
     return xs
 
-def read_direct_xs(xss: List, start_idx: int, mt: int, debug=False) -> Optional[DirectCrossSection]:
+def read_direct_xs(xss: np.ndarray, start_idx: int, mt: int, debug=False) -> Optional[DirectCrossSection]:
     """
     Read direct cross section data (MFTYPE = 13).
     
@@ -548,8 +553,8 @@ def read_direct_xs(xss: List, start_idx: int, mt: int, debug=False) -> Optional[
     
     Parameters
     ----------
-    xss : List
-        The XSS array containing XssEntry objects
+    xss : np.ndarray
+        The XSS array (ace.xss_data)
     start_idx : int
         Starting index in the XSS array (where MFTYPE is located)
     mt : int
@@ -571,14 +576,14 @@ def read_direct_xs(xss: List, start_idx: int, mt: int, debug=False) -> Optional[
     
     # Read energy grid index (IE)
     energy_grid_idx_entry = xss[start_idx + 1]
-    xs.energy_grid_index = int(energy_grid_idx_entry.value)
+    xs.energy_grid_index = int(energy_grid_idx_entry)
     
     if debug:
         logger.debug(f"    IE = {xs.energy_grid_index} → Energy grid index")
     
     # Read number of entries (NE)
     num_entries_entry = xss[start_idx + 2]
-    xs.num_entries = int(num_entries_entry.value)
+    xs.num_entries = int(num_entries_entry)
     
     if debug:
         logger.debug(f"    NE = {xs.num_entries} → Number of consecutive entries")
@@ -589,8 +594,8 @@ def read_direct_xs(xss: List, start_idx: int, mt: int, debug=False) -> Optional[
             logger.debug(f"    ERROR: Not enough data for cross section values")
         return None
     
-    # Read cross section values - store XssEntry objects
-    xs.cross_sections = [xss[start_idx + 3 + i] for i in range(xs.num_entries)]
+    # Read cross section values (view of xss_data)
+    xs.cross_sections = xss[start_idx + 3:start_idx + 3 + xs.num_entries]
     
     if debug:
         logger.debug(f"    Successfully read {xs.num_entries} cross section values")

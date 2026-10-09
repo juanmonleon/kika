@@ -22,9 +22,6 @@ class EnergyDistributionContainer:
     # Energy-dependent neutron yields (MT → yield)
     neutron_yields: Dict[int, EnergyDistribution] = field(default_factory=dict)
     
-    # Energy-dependent photon yields (MT → yield)
-    photon_yields: Dict[int, EnergyDistribution] = field(default_factory=dict)
-    
     # Energy-dependent particle yields (particle index → MT → yield)
     particle_yields: List[Dict[int, EnergyDistribution]] = field(default_factory=list)
     
@@ -54,36 +51,17 @@ class EnergyDistributionContainer:
         return len(self.neutron_yields) > 0
     
     @property
-    def has_photon_yields(self) -> bool:
-        """Check if energy-dependent photon yields are available."""
-        return len(self.photon_yields) > 0
-    
-    @property
     def has_particle_yields(self) -> bool:
         """Check if energy-dependent particle yields are available."""
         return len(self.particle_yields) > 0
     
     def get_neutron_reaction_mt_numbers(self) -> List[int]:
         """Get a list of all MT numbers with neutron reaction energy distributions."""
-        # Extract values from XssEntry objects if needed
-        mt_numbers = []
-        for mt in self.incident_neutron.keys():
-            if hasattr(mt, 'value'):
-                mt_numbers.append(int(mt.value))
-            else:
-                mt_numbers.append(int(mt))
-        return sorted(mt_numbers)
+        return sorted(int(mt) for mt in self.incident_neutron.keys())
     
     def get_photon_production_mt_numbers(self) -> List[int]:
         """Get a list of all MT numbers with photon production energy distributions."""
-        # Extract values from XssEntry objects if needed
-        mt_numbers = []
-        for mt in self.photon_production.keys():
-            if hasattr(mt, 'value'):
-                mt_numbers.append(int(mt.value))
-            else:
-                mt_numbers.append(int(mt))
-        return sorted(mt_numbers)
+        return sorted(int(mt) for mt in self.photon_production.keys())
     
     def get_particle_production_mt_numbers(self, particle_idx: int = 0) -> List[int]:
         """
@@ -117,14 +95,8 @@ class EnergyDistributionContainer:
         Optional[List[EnergyDistribution]]
             List of energy distributions for the reaction, or None if not found
         """
-        # First try direct lookup
         if mt in self.incident_neutron:
             return self.incident_neutron[mt]
-        
-        # Try looking up with XssEntry objects
-        for key in self.incident_neutron:
-            if hasattr(key, 'value') and int(key.value) == mt:
-                return self.incident_neutron[key]
         
         # Not found
         return None
@@ -143,14 +115,8 @@ class EnergyDistributionContainer:
         Optional[List[EnergyDistribution]]
             List of energy distributions for the reaction, or None if not found
         """
-        # First try direct lookup
         if mt in self.photon_production:
             return self.photon_production[mt]
-        
-        # Try looking up with XssEntry objects
-        for key in self.photon_production:
-            if hasattr(key, 'value') and int(key.value) == mt:
-                return self.photon_production[key]
         
         # Not found
         return None
@@ -177,14 +143,8 @@ class EnergyDistributionContainer:
         # Get the particle's dictionary
         particle_dict = self.particle_production[particle_idx]
         
-        # First try direct lookup
         if mt in particle_dict:
             return particle_dict[mt]
-        
-        # Try looking up with XssEntry objects
-        for key in particle_dict:
-            if hasattr(key, 'value') and int(key.value) == mt:
-                return particle_dict[key]
         
         # Not found
         return None
@@ -268,11 +228,6 @@ class EnergyDistributionContainer:
         n_neutron_yields = len(self.neutron_yields)
         data_summary += "{:<{width1}} {:<{width2}}\n".format(
             "Energy-Dependent Neutron Yields", f"{'Available' if n_neutron_yields > 0 else 'None'} ({n_neutron_yields} MT numbers)", 
-            width1=property_col_width, width2=value_col_width)
-        
-        n_photon_yields = len(self.photon_yields)
-        data_summary += "{:<{width1}} {:<{width2}}\n".format(
-            "Energy-Dependent Photon Yields", f"{'Available' if n_photon_yields > 0 else 'None'} ({n_photon_yields} MT numbers)", 
             width1=property_col_width, width2=value_col_width)
         
         data_summary += "-" * header_width + "\n\n"
@@ -376,7 +331,7 @@ class EnergyDistributionContainer:
             print("-" * header_width)
             
             for mt, dist_list in sorted(data_dict.items()):
-                mt_value = mt.value if hasattr(mt, 'value') else mt
+                mt_value = mt
                 
                 # Determine the access method string
                 if particle_idx is not None:
@@ -431,8 +386,7 @@ class EnergyDistributionContainer:
         
         # Print energy-dependent yields information if available
         yield_categories = [
-            ("Neutron", self.neutron_yields, "neutron_yields"),
-            ("Photon", self.photon_yields, "photon_yields")
+            ("Neutron", self.neutron_yields, "neutron_yields")
         ]
         
         for yield_name, yield_dict, attr_name in yield_categories:
@@ -443,7 +397,7 @@ class EnergyDistributionContainer:
                 print("-" * header_width)
                 
                 for mt, dist in sorted(yield_dict.items()):
-                    mt_value = mt.value if hasattr(mt, 'value') else mt
+                    mt_value = mt
                     dist_type = dist.__class__.__name__
                     access = f".{attr_name}[{mt_value}]"
                     print(f"{mt_value:<8} {dist_type:<30} {access:<50}")
@@ -457,7 +411,7 @@ class EnergyDistributionContainer:
                 print("-" * header_width)
                 
                 for mt, dist in sorted(particle_dict.items()):
-                    mt_value = mt.value if hasattr(mt, 'value') else mt
+                    mt_value = mt
                     dist_type = dist.__class__.__name__
                     access = f".particle_yields[{idx}][{mt_value}]"
                     print(f"{mt_value:<8} {dist_type:<30} {access:<50}")

@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Union
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.cross_section.cross_section_repr import reaction_xs_repr, xs_data_repr
 from kika._constants import MT_GROUPS, MT_COMPOSITES, MT_COMPOSITE_ORDER
 import numpy as np
@@ -13,24 +12,19 @@ class ReactionCrossSection:
     mt: int = 0  # MT number for this reaction 
     energy_idx: int = 0  # Starting energy grid index
     num_energies: int = 0  # Number of consecutive energy points
-    _xs_entries: List[XssEntry] = field(default_factory=list)  # Original XssEntry objects for cross section values
-    _energy_entries: List[XssEntry] = field(default_factory=list)  # Original XssEntry objects for energy values
-    
-    def __post_init__(self):
-        """Initialize after creation, ensuring values are properly stored."""
-        # Convert XssEntry to value if needed
-        if hasattr(self.mt, 'value'):
-            self.mt = int(self.mt.value)
-    
+    # Views of ace.xss_data: writing into _xs_entries writes the table.
+    _xs_entries: np.ndarray = field(default_factory=lambda: np.empty(0))
+    _energy_entries: np.ndarray = field(default_factory=lambda: np.empty(0))
+
     @property
     def xs_values(self) -> List[float]:
         """Get cross section values as floats."""
-        return [entry.value for entry in self._xs_entries]
-    
+        return self._xs_entries.tolist()
+
     @property
     def energies(self) -> List[float]:
         """Get energy values as floats."""
-        return [entry.value for entry in self._energy_entries]
+        return self._energy_entries.tolist()
     
     def plot(self, ax=None, **kwargs):
         """
@@ -51,7 +45,7 @@ class ReactionCrossSection:
         if ax is None:
             _, ax = plt.subplots(figsize=(10, 6))
         
-        if not self._xs_entries or not self._energy_entries:
+        if len(self._xs_entries) == 0 or len(self._energy_entries) == 0:
             raise ValueError("No cross section values or energies available for plotting")
         
         # Get the energy points and cross section values as DataFrame
@@ -78,17 +72,17 @@ class ReactionCrossSection:
         pd.DataFrame
             DataFrame with energy and cross section values
         """
-        if not self._xs_entries or not self._energy_entries:
+        if len(self._xs_entries) == 0 or len(self._energy_entries) == 0:
             return pd.DataFrame({"Energy": [], "Cross Section": []})
         
         # Ensure they have the same length
         if len(self._energy_entries) != len(self._xs_entries):
             num_points = min(len(self._energy_entries), len(self._xs_entries))
-            energies = [e.value for e in self._energy_entries[:num_points]]
-            xs_values = [xs.value for xs in self._xs_entries[:num_points]]
+            energies = self._energy_entries[:num_points].tolist()
+            xs_values = self._xs_entries[:num_points].tolist()
         else:
-            energies = [e.value for e in self._energy_entries]
-            xs_values = [xs.value for xs in self._xs_entries]
+            energies = self._energy_entries.tolist()
+            xs_values = self._xs_entries.tolist()
         
         # Create DataFrame
         return pd.DataFrame({
@@ -103,16 +97,16 @@ class ReactionCrossSection:
 class CrossSectionData:
     """Container for all reaction cross sections from the SIG block."""
     reaction: Dict[int, ReactionCrossSection] = field(default_factory=dict)  # MT number -> cross section data
-    energy_grid: Optional[List[XssEntry]] = None  # Store energy grid for convenience
+    energy_grid: Optional[np.ndarray] = None  # ESZ energy grid (view of ace.xss_data)
     _composite_cache: Dict[int, ReactionCrossSection] = field(default_factory=dict)  # Cache for computed composites
     
-    def set_energy_grid(self, energy_grid: List[XssEntry]) -> None:
+    def set_energy_grid(self, energy_grid: np.ndarray) -> None:
         """
         Set the energy grid for this cross section data.
         
         Parameters
         ----------
-        energy_grid : List[XssEntry]
+        energy_grid : numpy.ndarray
             The energy grid to use for plotting and interpolation
         """
         self.energy_grid = energy_grid
@@ -137,38 +131,38 @@ class CrossSectionData:
             return
             
         # Add total cross section (MT=1)
-        if esz_block.total_xs and len(esz_block.total_xs) > 0:
+        if len(esz_block.total_xs) > 0:
             # Create a ReactionCrossSection for MT=1 (total)
             total_xs = ReactionCrossSection(
                 mt=1,  # Total XS
                 energy_idx=0,  # Start from beginning of energy grid
                 num_energies=len(esz_block.total_xs),
-                _xs_entries=esz_block.total_xs,  # Store original XssEntry objects
-                _energy_entries=esz_block.energies  # Store original XssEntry objects
+                _xs_entries=esz_block.total_xs,
+                _energy_entries=esz_block.energies
             )
             self.reaction[1] = total_xs
             
         # Add elastic cross section (MT=2)
-        if esz_block.elastic_xs and len(esz_block.elastic_xs) > 0:
+        if len(esz_block.elastic_xs) > 0:
             # Create a ReactionCrossSection for MT=2 (elastic)
             elastic_xs = ReactionCrossSection(
                 mt=2,  # Elastic XS
                 energy_idx=0,  # Start from beginning of energy grid
                 num_energies=len(esz_block.elastic_xs),
-                _xs_entries=esz_block.elastic_xs,  # Store original XssEntry objects
-                _energy_entries=esz_block.energies  # Store original XssEntry objects
+                _xs_entries=esz_block.elastic_xs,
+                _energy_entries=esz_block.energies
             )
             self.reaction[2] = elastic_xs
             
         # Add absorption cross section (MT=101)
-        if esz_block.absorption_xs and len(esz_block.absorption_xs) > 0:
+        if len(esz_block.absorption_xs) > 0:
             # Create a ReactionCrossSection for MT=101 (absorption)
             absorption_xs = ReactionCrossSection(
                 mt=101,  # Absorption XS
                 energy_idx=0,  # Start from beginning of energy grid
                 num_energies=len(esz_block.absorption_xs),
-                _xs_entries=esz_block.absorption_xs,  # Store original XssEntry objects
-                _energy_entries=esz_block.energies  # Store original XssEntry objects
+                _xs_entries=esz_block.absorption_xs,
+                _energy_entries=esz_block.energies
             )
             self.reaction[101] = absorption_xs
     
@@ -384,19 +378,12 @@ class CrossSectionData:
             if actual_len > 0 and actual_len <= len(comp_xs):
                 xs_sum[start_idx:end_idx] += np.array(comp_xs[:actual_len])
 
-        # Create XssEntry-like objects for the summed cross sections
-        class XssValue:
-            def __init__(self, val):
-                self.value = val
-
-        xs_entries = [XssValue(val) for val in xs_sum]
-
-        # Create and return the computed reaction
+        # A computed composite owns its array: it is not part of the table.
         return ReactionCrossSection(
             mt=mt,
             energy_idx=0,  # Computed composite covers full energy grid
             num_energies=num_energies,
-            _xs_entries=xs_entries,
+            _xs_entries=xs_sum,
             _energy_entries=energy_entries
         )
     
@@ -434,7 +421,7 @@ class CrossSectionData:
         # Plot each requested MT
         for mt_num in mt_list:
             reaction = self._get_or_compute_reaction(mt_num)
-            if reaction and reaction._xs_entries and reaction._energy_entries:
+            if reaction and len(reaction._xs_entries) and len(reaction._energy_entries):
                 # Get data for this reaction
                 energies = reaction.energies
                 xs_values = reaction.xs_values
@@ -477,7 +464,7 @@ class CrossSectionData:
             raise ValueError("Energy grid is required but none is available")
         
         # Get the energy values
-        energy_values = [e.value for e in self.energy_grid]
+        energy_values = self.energy_grid.tolist()
         
         # Create DataFrame with energy column
         result = {"Energy": energy_values}
@@ -494,7 +481,7 @@ class CrossSectionData:
             reaction = self._get_or_compute_reaction(mt)
             
             if reaction is not None:
-                if reaction._xs_entries:
+                if len(reaction._xs_entries):
                     # Create array of zeros for the full energy grid
                     xs_values = np.zeros(len(energy_values))
                     
@@ -507,7 +494,7 @@ class CrossSectionData:
                         # Place the values (clipping if necessary)
                         actual_length = min(len(reaction._xs_entries), min(end_idx, len(energy_values)) - start_idx)
                         if actual_length > 0:
-                            xs_values[start_idx:start_idx + actual_length] = [xs.value for xs in reaction._xs_entries[:actual_length]]
+                            xs_values[start_idx:start_idx + actual_length] = reaction._xs_entries[:actual_length]
                     
                     result[f"MT={mt}"] = xs_values
                 else:
@@ -639,7 +626,7 @@ class CrossSectionData:
             raise ValueError("Energy grid is required but none is available")
 
         # Get full energy grid
-        energy_values = [e.value for e in self.energy_grid]
+        energy_values = self.energy_grid.tolist()
         num_energies = len(energy_values)
 
         # Determine which MTs to include
@@ -657,7 +644,7 @@ class CrossSectionData:
 
             available_mts.append(mt)
 
-            if not reaction._xs_entries:
+            if len(reaction._xs_entries) == 0:
                 # No data - fill with zeros
                 xs_by_mt[mt] = [0.0] * num_energies
                 continue
@@ -671,8 +658,7 @@ class CrossSectionData:
 
             if start_idx >= 0 and start_idx < num_energies:
                 actual_length = min(len(reaction._xs_entries), end_idx - start_idx)
-                for i in range(actual_length):
-                    xs_values[start_idx + i] = reaction._xs_entries[i].value
+                xs_values[start_idx:start_idx + actual_length] = reaction._xs_entries[:actual_length].tolist()
 
             xs_by_mt[mt] = xs_values
 

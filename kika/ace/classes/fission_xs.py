@@ -1,6 +1,7 @@
-from kika.ace.classes.xss import XssEntry
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+import numpy as np
 
 @dataclass
 class FissionCrossSection:
@@ -13,7 +14,7 @@ class FissionCrossSection:
     has_data: bool = False
     energy_grid_index: int = 0    # IE - Starting index in the energy grid
     num_entries: int = 0          # NE - Number of consecutive entries
-    cross_sections: List[XssEntry] = field(default_factory=list)  # Cross section values as XssEntry objects
+    cross_sections: np.ndarray = field(default_factory=lambda: np.empty(0))  # Cross section values (view of xss_data)
     
     def __repr__(self) -> str:
         if not self.has_data:
@@ -24,9 +25,9 @@ class FissionCrossSection:
         output += f"Energy grid index: {self.energy_grid_index}\n"
         output += f"Number of entries: {self.num_entries}\n"
         
-        if self.cross_sections:
+        if len(self.cross_sections) > 0:
             # Extract values for min/max calculation
-            xs_values = [xs.value for xs in self.cross_sections]
+            xs_values = [float(xs) for xs in self.cross_sections]
             min_xs = min(xs_values)
             max_xs = max(xs_values)
             output += f"Cross section range: {min_xs:.6e} to {max_xs:.6e} barns\n"

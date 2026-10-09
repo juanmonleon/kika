@@ -1,7 +1,7 @@
-from kika.ace.classes.xss import XssEntry
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Union, Tuple
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.photon_production_xs_repr import (
     yield_based_cross_section_repr,
     direct_cross_section_repr,
@@ -32,19 +32,19 @@ class YieldBasedCrossSection(ProductionCrossSection):
     """
     mtmult: int = 0  # MT number of the cross section to multiply by yield
     num_regions: int = 0  # Number of interpolation regions
-    interpolation_bounds: List[XssEntry] = field(default_factory=list)  # NBT array as XssEntry objects
-    interpolation_schemes: List[XssEntry] = field(default_factory=list)  # INT array as XssEntry objects
+    interpolation_bounds: np.ndarray = field(default_factory=lambda: np.empty(0))  # NBT array (view of xss_data)
+    interpolation_schemes: np.ndarray = field(default_factory=lambda: np.empty(0))  # INT array (view of xss_data)
     num_energies: int = 0  # Number of energy points
-    energies: List[XssEntry] = field(default_factory=list)  # Energy grid as XssEntry objects
-    yields: List[XssEntry] = field(default_factory=list)  # Yield values as XssEntry objects
+    energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Energy grid (view of xss_data)
+    yields: np.ndarray = field(default_factory=lambda: np.empty(0))  # Yield values (view of xss_data)
     
     def get_energy_values(self) -> List[float]:
         """Get the energy grid values as a list of floats."""
-        return [entry.value for entry in self.energies]
+        return self.energies.tolist()
     
     def get_yield_values(self) -> List[float]:
         """Get the yield values as a list of floats."""
-        return [entry.value for entry in self.yields]
+        return self.yields.tolist()
     
     def get_interpolated_yield(self, energy: float) -> float:
         """
@@ -60,18 +60,8 @@ class YieldBasedCrossSection(ProductionCrossSection):
         float
             The interpolated yield value
         """
-        energies = self.get_energy_values()
-        yields = self.get_yield_values()
-        
-        # Basic bounds checking
-        if energy <= energies[0]:
-            return yields[0]
-        if energy >= energies[-1]:
-            return yields[-1]
-        
-        # Use numpy for fast linear interpolation
-        return np.interp(energy, energies, yields)
-    
+        return tabular_math.tab1(self.energies, self.yields, self.interpolation_bounds,
+                                 self.interpolation_schemes, energy)
     def reconstruct_xs(self, energy: float, mt_xs_function) -> float:
         """
         Reconstruct the production cross section at a specific energy using equation 20.
@@ -115,11 +105,11 @@ class DirectCrossSection(ProductionCrossSection):
     """
     energy_grid_index: int = 0  # IE - Starting index in the energy grid
     num_entries: int = 0        # NE - Number of consecutive entries
-    cross_sections: List[XssEntry] = field(default_factory=list)  # Cross section values as XssEntry objects
+    cross_sections: np.ndarray = field(default_factory=lambda: np.empty(0))  # Cross section values (view of xss_data)
     
     def get_xs_values(self) -> List[float]:
         """Get the cross section values as a list of floats."""
-        return [entry.value for entry in self.cross_sections]
+        return self.cross_sections.tolist()
     
     def get_value(self, energy: float, energy_grid: List[float]) -> float:
         """
@@ -148,9 +138,10 @@ class DirectCrossSection(ProductionCrossSection):
         energy_range = energy_grid[idx_start:idx_end]
         xs_values = self.get_xs_values()
         
-        # Basic bounds checking
-        if energy <= energy_range[0]:
-            return xs_values[0]
+        # Below its first grid point (IE) the reaction has no cross section
+        # (manual Table 51); the last point is the end of the energy grid
+        if energy < energy_range[0]:
+            return 0.0
         if energy >= energy_range[-1]:
             return xs_values[-1]
         
@@ -283,6 +274,28 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
       contains the total production cross section for each particle type.
     """
     particle_types: Dict[int, List[int]] = field(default_factory=dict)
+    # particle type (1-based, PTYPE order) -> MT -> cross section. The
+    # inherited ``cross_sections`` stays empty: an MT alone is ambiguous here.
+    particle_cross_sections: Dict[int, Dict[int, YieldBasedCrossSection]] = field(default_factory=dict)
+    
+    def get_reaction_xs(self, mt: int, particle_type: int) -> Optional[YieldBasedCrossSection]:
+        """
+        Cross section of reaction ``mt`` for one particle type.
+        
+        Parameters
+        ----------
+        mt : int
+            The MT number of the reaction
+        particle_type : int
+            The particle type index (1-based)
+        """
+        return self.particle_cross_sections.get(particle_type, {}).get(mt)
+    
+    def get_available_mts(self, particle_type: Optional[int] = None) -> List[int]:
+        """MTs with a cross section, for one particle type or for any."""
+        if particle_type is not None:
+            return sorted(self.particle_cross_sections.get(particle_type, {}))
+        return sorted({mt for by_mt in self.particle_cross_sections.values() for mt in by_mt})
     
     def get_particle_mts(self, particle_type: int) -> List[int]:
         """
@@ -301,7 +314,7 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
         return self.particle_types.get(particle_type, [])
     
     def get_particle_production_xs(self, mt: int, energy: float, 
-                                 mt_xs_function) -> Optional[float]:
+                                 mt_xs_function, particle_type: int) -> Optional[float]:
         """
         Get the particle production cross section for a specific MT at a specific energy.
         
@@ -319,7 +332,7 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
         float or None
             The particle production cross section, or None if not available
         """
-        xs_data = self.get_reaction_xs(mt)
+        xs_data = self.get_reaction_xs(mt, particle_type)
         if not xs_data:
             return None
             
@@ -342,7 +355,7 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
         for particle_type, mts in sorted(self.particle_types.items()):
             output += f"Particle Type {particle_type}: {len(mts)} reactions\n"
             for mt in mts:
-                xs = self.get_reaction_xs(mt)
+                xs = self.get_reaction_xs(mt, particle_type)
                 if xs:
                     output += f"  {xs.get_description()}\n"
         

@@ -1,7 +1,6 @@
 import logging
-from typing import List
+import numpy as np
 from kika.ace.classes.nubar.nubar import NuData, NuPolynomial, NuTabulated, NuContainer
-from kika.ace.classes.xss import XssEntry
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -50,10 +49,9 @@ def read_nubar_data(ace, debug=False):
         
         # Check bounds
         if jxs2 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Error: JXS(2)={jxs2} is out of bounds for XSS array of length {len(ace.xss_data)}")
+            logger.warning(f"JXS(2)={jxs2} points past the XSS array ({len(ace.xss_data)}); NU block not read")
             ace.nubar.has_nubar = False
-            return
+            return ace.nubar
         
         # NU Block exists - check XSS(JXS(2)) value to determine format
         ace.nubar.has_nubar = True
@@ -67,7 +65,7 @@ def read_nubar_data(ace, debug=False):
                     logger.debug(f"Value at xss_data[{jxs2}]: {ace.xss_data[jxs2]}")
                     logger.debug(f"Type of xss_data[{jxs2}]: {type(ace.xss_data[jxs2])}")
             
-            xss_jxs2_value = ace.xss_data[jxs2].value
+            xss_jxs2_value = ace.xss_data[jxs2]
             
             if debug:
                 logger.debug(f"Value at XSS(JXS(2)) = {xss_jxs2_value}")
@@ -157,9 +155,9 @@ def read_nubar_data(ace, debug=False):
         
         # Check bounds
         if dnu_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Error: JXS(24)={dnu_idx} is out of bounds for XSS array of length {len(ace.xss_data)}")
-            return
+            # keep the prompt/total nu already read
+            logger.warning(f"JXS(24)={dnu_idx} points past the XSS array ({len(ace.xss_data)}); delayed nu not read")
+            return ace.nubar
         
         # Delayed ν is given when JXS(24) > 0
         ace.nubar.has_delayed = True
@@ -198,7 +196,7 @@ def read_nubar_data(ace, debug=False):
     
     return ace.nubar  # Ensure we're explicitly returning the nubar object
 
-def parse_nubar_array(xss_data: List[XssEntry], idx: int, debug=False) -> NuData:
+def parse_nubar_array(xss_data: np.ndarray, idx: int, debug=False) -> NuData:
     """
     Parse a single nubar array from the XSS data.
     
@@ -243,9 +241,9 @@ def parse_nubar_array(xss_data: List[XssEntry], idx: int, debug=False) -> NuData
         if debug:
             logger.debug(f"Accessing xss_data[{idx}]")
             logger.debug(f"xss_data[{idx}] = {xss_data[idx]}")
-            logger.debug(f"xss_data[{idx}].value = {xss_data[idx].value}")
+            logger.debug(f"xss_data[{idx}] = {xss_data[idx]}")
         
-        format_int = int(xss_data[idx].value)
+        format_int = int(xss_data[idx])
         
         if debug:
             logger.debug(f"Format flag (LNU) = {format_int}")
@@ -268,17 +266,17 @@ def parse_nubar_array(xss_data: List[XssEntry], idx: int, debug=False) -> NuData
         logger.debug(f"Nubar format (LNU): {format_int} → {result.format}")
     
     if result.format == "polynomial":  # Polynomial form (LNU = 1)
-        n_coeff = int(xss_data[idx + 1].value)  # Number of coefficients
+        n_coeff = int(xss_data[idx + 1])  # Number of coefficients
         
         if debug:
             logger.debug(f"Polynomial form with {n_coeff} coefficients")
         
         # Create a NuPolynomial object and populate it
         result.polynomial = NuPolynomial()
-        result.polynomial.coefficients = list(xss_data[idx + 2:idx + 2 + n_coeff])
+        result.polynomial.coefficients = xss_data[idx + 2:idx + 2 + n_coeff]
         
     elif result.format == "tabulated":  # Tabulated form (LNU = 2)
-        n_regions = int(xss_data[idx + 1].value)  # Number of interpolation regions
+        n_regions = int(xss_data[idx + 1])  # Number of interpolation regions
         
         if debug:
             logger.debug(f"Tabulated form with {n_regions} interpolation regions")
@@ -292,11 +290,11 @@ def parse_nubar_array(xss_data: List[XssEntry], idx: int, debug=False) -> NuData
         # Read interpolation regions if present
         if n_regions > 0:
             # Read NBT array
-            nbt = [int(x.value) for x in xss_data[pos:pos + n_regions]]
+            nbt = [int(x) for x in xss_data[pos:pos + n_regions]]
             pos += n_regions
             
             # Read INT array
-            interp = [int(x.value) for x in xss_data[pos:pos + n_regions]]
+            interp = [int(x) for x in xss_data[pos:pos + n_regions]]
             pos += n_regions
             
             # Store interpolation regions
@@ -306,7 +304,7 @@ def parse_nubar_array(xss_data: List[XssEntry], idx: int, debug=False) -> NuData
                 logger.debug(f"Interpolation regions: {result.tabulated.interpolation_regions}")
         
         # Read number of energy points
-        n_energies = int(xss_data[pos].value)
+        n_energies = int(xss_data[pos])
         pos += 1
         
         if debug:

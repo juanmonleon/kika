@@ -334,20 +334,12 @@ def compare_xss_data(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: boo
     # Only compare values from index 1 onwards if arrays have more than 1 element
     start_idx = 1 if len(ace1.xss_data) > 1 else 0
     
-    # Compare each XSS entry value (ignoring indices since they might differ between files)
-    xss_values1 = [entry.value for entry in ace1.xss_data[start_idx:]]
-    xss_values2 = [entry.value for entry in ace2.xss_data[start_idx:]]
+    # Compare the XSS values position by position. xss_data is a numpy array
+    # whose position IS the XSS index, so there is no separate index to compare.
+    xss_values1 = ace1.xss_data[start_idx:]
+    xss_values2 = ace2.xss_data[start_idx:]
     
     if not compare_arrays(xss_values1, xss_values2, tolerance, "XSS data values", verbose):
         return False
-    
-    if verbose:
-        xss_indices1 = [entry.index for entry in ace1.xss_data[start_idx:]]
-        xss_indices2 = [entry.index for entry in ace2.xss_data[start_idx:]]
-        
-        # This is just for information, not affecting the result
-        different_indices = sum(1 for i1, i2 in zip(xss_indices1, xss_indices2) if i1 != i2)
-        if different_indices > 0:
-            print(f"Note: {different_indices} XSS entries have different indices, but values match within tolerance.")
     
     return True

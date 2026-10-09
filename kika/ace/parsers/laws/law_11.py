@@ -1,7 +1,6 @@
 import logging
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
-from kika.ace.classes.xss import XssEntry
 from kika.ace.classes.energy_distribution.distributions.watt import EnergyDependentWattSpectrum
 
 # Setup logger
@@ -61,8 +60,8 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
@@ -74,7 +73,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     
     # Read the number of interpolation regions for parameter a (N_Ra)
     n_a_interp_regions_entry = ace.xss_data[idat_idx]
-    distribution.n_a_interp_regions = int(n_a_interp_regions_entry.value)
+    distribution.n_a_interp_regions = int(n_a_interp_regions_entry)
     n_ra = distribution.n_a_interp_regions
     if debug:
         logger.debug(f"Number of interpolation regions for parameter a (N_Ra): {n_ra}")
@@ -84,7 +83,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     if n_ra > 0:
         # Read NBT_a values
         if idx + n_ra <= len(ace.xss_data):
-            distribution.a_nbt = [int(ace.xss_data[idx + i].value) for i in range(n_ra)]
+            distribution.a_nbt = [int(ace.xss_data[idx + i]) for i in range(n_ra)]
             if debug:
                 logger.debug(f"NBT_a values: {distribution.a_nbt}")
             idx += n_ra
@@ -93,7 +92,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
         
         # Read INT_a values
         if idx + n_ra <= len(ace.xss_data):
-            distribution.a_interp = [int(ace.xss_data[idx + i].value) for i in range(n_ra)]
+            distribution.a_interp = [int(ace.xss_data[idx + i]) for i in range(n_ra)]
             if debug:
                 logger.debug(f"INT_a values: {distribution.a_interp}")
             idx += n_ra
@@ -103,7 +102,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     # Read the number of incident energies for parameter a (N_Ea)
     if idx < len(ace.xss_data):
         n_a_energies_entry = ace.xss_data[idx]
-        distribution.n_a_energies = int(n_a_energies_entry.value)
+        distribution.n_a_energies = int(n_a_energies_entry)
         n_ea = distribution.n_a_energies
         if debug:
             logger.debug(f"Number of incident energies for parameter a (N_Ea): {n_ea}")
@@ -113,22 +112,22 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
             logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
         return distribution
     
-    # Read the incident energy table for parameter a - store the XssEntry objects
+    # Read the incident energy table for parameter a - a view of xss_data
     if idx + n_ea <= len(ace.xss_data):
-        distribution.a_incident_energies = [ace.xss_data[idx + i] for i in range(n_ea)]
+        distribution.a_incident_energies = ace.xss_data[idx:idx + n_ea]
         if debug:
-            logger.debug(f"Incident energy table for parameter a range: [{distribution.a_incident_energies[0].value if n_ea > 0 else 'N/A'}, {distribution.a_incident_energies[-1].value if n_ea > 0 else 'N/A'}]")
+            logger.debug(f"Incident energy table for parameter a range: [{distribution.a_incident_energies[0] if n_ea > 0 else 'N/A'}, {distribution.a_incident_energies[-1] if n_ea > 0 else 'N/A'}]")
         idx += n_ea
     else:
         if debug:
             logger.debug(f"Not enough data to read incident energy table for parameter a. Need index up to {idx + n_ea}, have {len(ace.xss_data)}")
         return distribution
     
-    # Read the a parameter values - store the XssEntry objects
+    # Read the a parameter values - a view of xss_data
     if idx + n_ea <= len(ace.xss_data):
-        distribution.a_values = [ace.xss_data[idx + i] for i in range(n_ea)]
+        distribution.a_values = ace.xss_data[idx:idx + n_ea]
         if debug:
-            logger.debug(f"Parameter a values range: [{distribution.a_values[0].value if n_ea > 0 else 'N/A'}, {distribution.a_values[-1].value if n_ea > 0 else 'N/A'}]")
+            logger.debug(f"Parameter a values range: [{distribution.a_values[0] if n_ea > 0 else 'N/A'}, {distribution.a_values[-1] if n_ea > 0 else 'N/A'}]")
         idx += n_ea
     else:
         if debug:
@@ -145,7 +144,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     # Read the number of interpolation regions for parameter b (N_Rb)
     if idx < len(ace.xss_data):
         n_b_interp_regions_entry = ace.xss_data[idx]
-        distribution.n_b_interp_regions = int(n_b_interp_regions_entry.value)
+        distribution.n_b_interp_regions = int(n_b_interp_regions_entry)
         n_rb = distribution.n_b_interp_regions
         if debug:
             logger.debug(f"Number of interpolation regions for parameter b (N_Rb): {n_rb}")
@@ -159,7 +158,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     if n_rb > 0:
         # Read NBT_b values
         if idx + n_rb <= len(ace.xss_data):
-            distribution.b_nbt = [int(ace.xss_data[idx + i].value) for i in range(n_rb)]
+            distribution.b_nbt = [int(ace.xss_data[idx + i]) for i in range(n_rb)]
             if debug:
                 logger.debug(f"NBT_b values: {distribution.b_nbt}")
             idx += n_rb
@@ -168,7 +167,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
         
         # Read INT_b values
         if idx + n_rb <= len(ace.xss_data):
-            distribution.b_interp = [int(ace.xss_data[idx + i].value) for i in range(n_rb)]
+            distribution.b_interp = [int(ace.xss_data[idx + i]) for i in range(n_rb)]
             if debug:
                 logger.debug(f"INT_b values: {distribution.b_interp}")
             idx += n_rb
@@ -178,7 +177,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     # Read the number of incident energies for parameter b (N_Eb)
     if idx < len(ace.xss_data):
         n_b_energies_entry = ace.xss_data[idx]
-        distribution.n_b_energies = int(n_b_energies_entry.value)
+        distribution.n_b_energies = int(n_b_energies_entry)
         n_eb = distribution.n_b_energies
         if debug:
             logger.debug(f"Number of incident energies for parameter b (N_Eb): {n_eb}")
@@ -188,22 +187,22 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
             logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
         return distribution
     
-    # Read the incident energy table for parameter b - store the XssEntry objects
+    # Read the incident energy table for parameter b - a view of xss_data
     if idx + n_eb <= len(ace.xss_data):
-        distribution.b_incident_energies = [ace.xss_data[idx + i] for i in range(n_eb)]
+        distribution.b_incident_energies = ace.xss_data[idx:idx + n_eb]
         if debug:
-            logger.debug(f"Incident energy table for parameter b range: [{distribution.b_incident_energies[0].value if n_eb > 0 else 'N/A'}, {distribution.b_incident_energies[-1].value if n_eb > 0 else 'N/A'}]")
+            logger.debug(f"Incident energy table for parameter b range: [{distribution.b_incident_energies[0] if n_eb > 0 else 'N/A'}, {distribution.b_incident_energies[-1] if n_eb > 0 else 'N/A'}]")
         idx += n_eb
     else:
         if debug:
             logger.debug(f"Not enough data to read incident energy table for parameter b. Need index up to {idx + n_eb}, have {len(ace.xss_data)}")
         return distribution
     
-    # Read the b parameter values - store the XssEntry objects
+    # Read the b parameter values - a view of xss_data
     if idx + n_eb <= len(ace.xss_data):
-        distribution.b_values = [ace.xss_data[idx + i] for i in range(n_eb)]
+        distribution.b_values = ace.xss_data[idx:idx + n_eb]
         if debug:
-            logger.debug(f"Parameter b values range: [{distribution.b_values[0].value if n_eb > 0 else 'N/A'}, {distribution.b_values[-1].value if n_eb > 0 else 'N/A'}]")
+            logger.debug(f"Parameter b values range: [{distribution.b_values[0] if n_eb > 0 else 'N/A'}, {distribution.b_values[-1] if n_eb > 0 else 'N/A'}]")
         idx += n_eb
     else:
         if debug:
@@ -214,8 +213,7 @@ def parse_energy_dependent_watt_spectrum(ace: Ace, base_dist: EnergyDistribution
     
     # Read the restriction energy (U)
     if idx < len(ace.xss_data):
-        restriction_energy_entry = XssEntry(idx, ace.xss_data[idx])
-        distribution.restriction_energy = restriction_energy_entry.value
+        distribution.restriction_energy = float(ace.xss_data[idx])
         if debug:
             logger.debug(f"Restriction energy (U): {distribution.restriction_energy}")
     elif debug:

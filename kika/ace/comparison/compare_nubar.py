@@ -99,8 +99,8 @@ def compare_nudata(nudata1: NuData, nudata2: NuData, tolerance: float, name: str
             return False
             
         # Compare polynomial coefficients
-        coef1 = [c.value for c in nudata1.polynomial.coefficients]
-        coef2 = [c.value for c in nudata2.polynomial.coefficients]
+        coef1 = [float(c) for c in nudata1.polynomial.coefficients]
+        coef2 = [float(c) for c in nudata2.polynomial.coefficients]
         
         if not compare_arrays(coef1, coef2, tolerance, f"{name} polynomial coefficients", verbose):
             return False
@@ -128,15 +128,15 @@ def compare_nudata(nudata1: NuData, nudata2: NuData, tolerance: float, name: str
                 return False
         
         # Compare energy grid
-        energy1 = [e.value for e in nudata1.tabulated.energies]
-        energy2 = [e.value for e in nudata2.tabulated.energies]
+        energy1 = [float(e) for e in nudata1.tabulated.energies]
+        energy2 = [float(e) for e in nudata2.tabulated.energies]
         
         if not compare_arrays(energy1, energy2, tolerance, f"{name} energy grid", verbose):
             return False
         
         # Compare nubar values
-        values1 = [n.value for n in nudata1.tabulated.nubar_values]
-        values2 = [n.value for n in nudata2.tabulated.nubar_values]
+        values1 = [float(n) for n in nudata1.tabulated.nubar_values]
+        values2 = [float(n) for n in nudata2.tabulated.nubar_values]
         
         if not compare_arrays(values1, values2, tolerance, f"{name} values", verbose):
             return False

@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika.ace.classes.energy_distribution.distributions.tabular import TabularEnergyDistribution
@@ -47,8 +48,8 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
@@ -58,7 +59,7 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
     
     # Read the number of interpolation regions (N_R)
     n_r_entry = ace.xss_data[idat_idx]
-    n_r = int(n_r_entry.value)
+    n_r = int(n_r_entry)
     if debug:
         logger.debug(f"Number of interpolation regions (N_R): {n_r}")
     idx = idat_idx + 1
@@ -67,21 +68,23 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
     e_out_nbt = []
     e_out_int = []
     if n_r > 0:
-        # Read NBT values - store references to the original XssEntry objects
+        # Read NBT values - a view of xss_data
         if idx + n_r - 1 < len(ace.xss_data):
-            e_out_nbt = [ace.xss_data[idx + i] for i in range(n_r)]
+            e_out_nbt = ace.xss_data[idx:idx + n_r]
             if debug:
-                nbt_values = [entry.value for entry in e_out_nbt]
+                nbt_values = [float(entry) for entry in e_out_nbt]
                 logger.debug(f"NBT values: {nbt_values}")
             idx += n_r
         
-            # Read INT values - store references to the original XssEntry objects
+            # Read INT values - a view of xss_data
             if idx + n_r - 1 < len(ace.xss_data):
-                e_out_int = [ace.xss_data[idx + i] for i in range(n_r)]
+                e_out_int = ace.xss_data[idx:idx + n_r]
                 if debug:
-                    int_values = [entry.value for entry in e_out_int]
+                    int_values = [float(entry) for entry in e_out_int]
                     logger.debug(f"INT values: {int_values}")
                 idx += n_r
+                distribution.nbt = [int(v) for v in e_out_nbt]
+                distribution.interp = [int(v) for v in e_out_int]
             else:
                 if debug:
                     logger.debug(f"Not enough data to read INT values. Need index up to {idx + n_r - 1}, have {len(ace.xss_data)}")
@@ -96,7 +99,7 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
         return distribution
     
     n_e_entry = ace.xss_data[idx]
-    n_e = int(n_e_entry.value)
+    n_e = int(n_e_entry)
     distribution.n_incident_energies = n_e
     if debug:
         logger.debug(f"Number of incident energies (N_E): {n_e}")
@@ -108,11 +111,11 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
             logger.debug(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
         return distribution
     
-    # Read the list of incident energies - store references to the original XssEntry objects
-    incident_energies = [ace.xss_data[idx + i] for i in range(n_e)]
+    # Read the list of incident energies - a view of xss_data
+    incident_energies = ace.xss_data[idx:idx + n_e]
     distribution.incident_energies = incident_energies
     if debug and n_e > 0:
-        energy_values = [entry.value for entry in incident_energies]
+        energy_values = [float(entry) for entry in incident_energies]
         logger.debug(f"Incident energies range: [{energy_values[0]}, {energy_values[-1]}]")
     idx += n_e
     
@@ -123,7 +126,7 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
         return distribution
     
     net_entry = ace.xss_data[idx]
-    net = int(net_entry.value)
+    net = int(net_entry)
     if debug:
         logger.debug(f"Number of outgoing energies (NET): {net}")
     idx += 1
@@ -141,17 +144,25 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
             break
         
         # Get the outgoing energy boundaries for this incident energy
-        e_out = [ace.xss_data[idx + j] for j in range(net)]
+        e_out = ace.xss_data[idx:idx + net]
         if debug and net > 0:
-            e_out_values = [entry.value for entry in e_out]
+            e_out_values = [float(entry) for entry in e_out]
             logger.debug(f"E_out table {i+1} range: [{e_out_values[0]}, {e_out_values[-1]}]")
         idx += net
         
-        # Calculate the probability (uniform across bins)
-        p_out = [1.0 / (net - 1)] * (net - 1) + [0.0]  # NET-1 equal probability bins
-        
-        # Store with interpolation scheme (always linear-linear for equiprobable bins)
-        distribution.distribution_data.append((net, 2, e_out, p_out))
+        # NET boundaries of NET-1 equally likely bins (manual Table 26): a
+        # histogram whose density in bin k is 1/((NET-1) * width_k). Stored in
+        # the same layout as the LAW=4 tables, the last point closing the range.
+        widths = np.diff(e_out)
+        density = np.divide(1.0 / (net - 1), widths, out=np.zeros_like(widths), where=widths > 0)
+        distribution.distribution_data.append({
+            'intt': 1,
+            'n_discrete': 0,
+            'n_points': net,
+            'e_out': e_out,
+            'pdf': np.append(density, 0.0),
+            'cdf': np.arange(net) / (net - 1),
+        })
         if debug:
             logger.debug(f"Successfully stored E_out table {i+1}")
     

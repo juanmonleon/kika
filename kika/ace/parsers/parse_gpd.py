@@ -48,15 +48,17 @@ def read_gpd_block(ace, debug=False):
         logger.debug("\n===== GPD BLOCK PARSING =====")
         logger.debug(f"Header info: ZAID={ace.header.zaid}")
     
-    # Check if GPD block exists: JXS(12) ≠ 0 and JXS(13) = 0
+    # The GPD block (total photon production xs, Table 46) exists whenever
+    # JXS(12) ≠ 0; only the obsolete 30×20 outgoing-energy matrix that may
+    # follow it (Table 48, footnote 4) needs JXS(13) = 0
     gpd_idx = ace.header.jxs_array[12]
     jxs_13 = ace.header.jxs_array[13]
     
     if debug:
         logger.debug(f"JXS(12) = {gpd_idx} → Locator for GPD block (S_GPD)")
-        logger.debug(f"JXS(13) = {jxs_13} → Must be 0 for obsolete GPD format")
+        logger.debug(f"JXS(13) = {jxs_13} → 0 only in the obsolete format with the 30×20 matrix")
     
-    if gpd_idx <= 0 or jxs_13 != 0:
+    if gpd_idx <= 0:
         if debug:
             logger.debug(f"No GPD block present: JXS(12)={gpd_idx}, JXS(13)={jxs_13}")
         return None
@@ -79,9 +81,9 @@ def read_gpd_block(ace, debug=False):
             logger.debug(f"ERROR: GPD block would extend beyond XSS array: {gpd_idx + n_energy} > {len(ace.xss_data)}")
         return None
     
-    # Extract total photon production cross section - store XssEntry objects
+    # Extract total photon production cross section (view of xss_data)
     # This is σ_γ(l), l = 1,…,NES from Table 53
-    result.total_xs = [ace.xss_data[gpd_idx + i] for i in range(n_energy)]
+    result.total_xs = ace.xss_data[gpd_idx:gpd_idx + n_energy]
     
     if debug:
         logger.debug(f"Successfully read {n_energy} total photon production XS values")
@@ -95,8 +97,9 @@ def read_gpd_block(ace, debug=False):
         logger.debug(f"Checking for outgoing photon energies at index {outgoing_start}")
         logger.debug(f"Need {outgoing_size} additional values for 30×20 matrix of outgoing energies")
     
-    # There should be 30 groups with 20 energies each = 600 values
-    if outgoing_start + outgoing_size <= len(ace.xss_data):
+    # The matrix is there only in the obsolete format (JXS(13) = 0); otherwise
+    # the words after the cross section belong to the next block
+    if jxs_13 == 0 and outgoing_start + outgoing_size <= len(ace.xss_data):
         if debug:
             logger.debug("Outgoing photon energies data found (obsolete 30×20 matrix format)")
         
@@ -113,8 +116,8 @@ def read_gpd_block(ace, debug=False):
                 logger.debug(f"Reading first energy group from XSS[{start_idx}:{end_idx}]")
             
             # Extract the 20 equiprobable outgoing photon energies for this neutron energy group
-            # Store XssEntry objects
-            group_energies = [ace.xss_data[start_idx + j] for j in range(20)]
+            # View of xss_data
+            group_energies = ace.xss_data[start_idx:start_idx + 20]
             outgoing_energies.append(group_energies)
         
         result.outgoing_energies = outgoing_energies

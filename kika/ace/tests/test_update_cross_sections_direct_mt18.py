@@ -8,20 +8,15 @@ guard protects every composite (MT=3/4/101/103-107 and MT=1).
 The repo ships no ``.ace`` fixtures, so these tests build lightweight stubs that
 mirror the exact attribute interface ``update_cross_sections`` touches:
 ``ace.cross_section.reaction`` is a dict of reaction objects, each exposing
-``energies``, ``xs_values`` (live view of the entries), and ``_xs_entries``
-whose elements carry a mutable ``value``.
+``energies``, ``xs_values`` (live view of the entries), and ``_xs_entries``,
+the float array (a view of the XSS array in a parsed file) it writes into.
 """
 
 import types
 
+import numpy as np
+
 from kika.ace.classes.ace import Ace
-
-
-class _Entry:
-    __slots__ = ("value",)
-
-    def __init__(self, value):
-        self.value = float(value)
 
 
 class _Reaction:
@@ -29,12 +24,12 @@ class _Reaction:
 
     def __init__(self, energies, values):
         self.energies = list(energies)
-        self._xs_entries = [_Entry(v) for v in values]
+        self._xs_entries = np.array(values, dtype=float)
 
     @property
     def xs_values(self):
         # Live view: reflects whatever update_cross_sections wrote into entries.
-        return [e.value for e in self._xs_entries]
+        return self._xs_entries.tolist()
 
 
 def _make_ace(reactions):

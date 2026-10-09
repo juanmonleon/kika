@@ -1,6 +1,6 @@
 import logging
 from kika.ace.classes.ace import Ace
-from kika.ace.classes.xss import XssEntry
+import numpy as np
 from kika.ace.classes.header import Header
 from kika.ace.parsers.parse_esz import read_esz_block
 from kika.ace.parsers import read_header, read_nubar_data
@@ -32,8 +32,11 @@ def read_ace(filename, debug=False):
     """
     Read and parse an ACE format file.
     
-    This implementation eagerly loads all data except energy distribution data
-    which is still loaded on-demand when accessed.
+    Every block is parsed when the file is read; nothing is loaded on demand.
+    Once the XSS is an array, parsing all the blocks takes 5-25 % of the read
+    (0.03 s of 0.19 s for U-238 B-VIII.0, 0.18 s of 0.73 s for Fe-56 Lib81)
+    and the rest is turning the XSS text into numbers, so deferring blocks
+    would buy little.
     
     Parameters
     ----------
@@ -47,7 +50,6 @@ def read_ace(filename, debug=False):
     ace : Ace
         An Ace object containing the parsed data
     """
-    debug1 = True
 
     if debug:
         logger.debug(f"Reading ACE file: {filename}")
@@ -57,25 +59,28 @@ def read_ace(filename, debug=False):
     ace.header = Header()
     ace._debug = debug  # Store debug flag for later use by parsers
     
-    with open(filename, 'r') as file:
-        lines = file.readlines()
+    # The header is read line by line and the XSS straight from the file in
+    # chunks: a list of lines would hold ~1.6x the file in str objects just to
+    # be split again.
+    with open(filename, 'rb') as file:
+        lines = _read_header_lines(file)
+
+        # Determine if it's a legacy or 2.0.1 header and read it
+        if lines and "2.0.1" in lines[0][:10]:
+            ace.header.format_version = "2.0.1"
+        else:
+            ace.header.format_version = "legacy"
+
+        if debug:
+            logger.debug(f"ACE format version: {ace.header.format_version}")
+
+        # Read the entire header (opening and arrays)
+        read_header(ace.header, lines, debug=debug)
+
+        # Read the XSS array - essential data needed for all parsers
+        ace.xss_data = read_xss_file(file, ace.header.nxs_array[1])
     
-    # Determine if it's a legacy or 2.0.1 header and read it
-    if lines and "2.0.1" in lines[0][:10]:
-        ace.header.format_version = "2.0.1"
-    else:
-        ace.header.format_version = "legacy"
-    
-    if debug:
-        logger.debug(f"ACE format version: {ace.header.format_version}")
-    
-    # Read the entire header (opening and arrays)
-    line_idx = read_header(ace.header, lines, debug=debug)
-    
-    # Read the XSS array - essential data needed for all parsers
-    ace.xss_data = read_xss(lines[line_idx:])
-    
-    # Eagerly load all components except energy distribution data
+    # Parse every block
     
     # ESZ Block
     ace.esz_block = read_esz_block(ace, debug)
@@ -147,40 +152,173 @@ def read_ace(filename, debug=False):
     
     return ace
 
-def read_xss(lines):
+#: Lines of XSS parsed per chunk (4 values each).
+_XSS_CHUNK_LINES = 65536
+
+#: Header lines after the opening: IZAW (4), NXS (2) and JXS (4).
+_HEADER_ARRAY_LINES = 10
+
+
+def _read_header_lines(file):
     """
-    Read the XSS array from an ACE file and convert it to a list of XssEntry.
-    
-    The array uses 1-based indexing to match FORTRAN style indexing.
-    Index 0 contains a placeholder value (0) to facilitate 1-based indexing.
-    
+    Read the header lines of a table from a file opened in binary mode.
+
+    The header is the two-line opening, the NC comment lines of a 2.0.1 header
+    (none in a legacy one) and the IZAW, NXS and JXS arrays. Lines are decoded
+    as ASCII, with any other byte replaced, and end in ``\\n``.
+    """
+    def line():
+        return file.readline().rstrip(b"\r\n").decode("ascii", "replace") + "\n"
+
+    lines = [line(), line()]
+    n_comments = 0
+    if "2.0.1" in lines[0][:10]:
+        try:
+            n_comments = int(lines[1].split()[3])
+        except (IndexError, ValueError):
+            pass  # read_header reports the malformed opening
+    lines += [line() for _ in range(n_comments + _HEADER_ARRAY_LINES)]
+    return lines
+
+
+def read_xss_file(file, n_values):
+    """
+    Read the XSS array from a binary file positioned just after the header.
+
+    ACE writes the XSS as 4E20.11 (integers as I20): four 20-character fields
+    per 80-character line. When every line has that shape the fields are read
+    through a structured dtype, a chunk of lines at a time, so the text is
+    never held whole and no token strings are made: the peak is the array plus
+    one chunk. Anything else (another line length, a blank or non-numeric
+    field) is read again from the start by :func:`read_xss`, line by line.
+
     Parameters
     ----------
-    lines : list
-        List of lines from the file containing the XSS array
-        
+    file : binary file object
+        Seekable, positioned at the first XSS line.
+    n_values : int
+        ``NXS(1)``, the declared length of the XSS array.
+
     Returns
     -------
-    list
-        The XSS array as a list of XssEntry objects starting at index 1
+    numpy.ndarray
+        ``float64`` array of length ``n_values + 1``, ``[0]`` = 0.0.
     """
-    xss_data = [0]  # Placeholder at index 0 for FORTRAN-style 1-based indexing
-    xss_index = 1  # Start at 1 for FORTRAN-style indexing
-    
+    start = file.tell()
+    xss = _read_xss_fixed_lines(file, n_values) if n_values else None
+    if xss is None:
+        file.seek(start)
+        lines = file.read().decode("ascii", "replace").splitlines(keepends=True)
+        xss = read_xss(lines, n_values)
+    return xss
+
+
+def _read_xss_fixed_lines(file, n_values):
+    """The fast path of :func:`read_xss_file`; ``None`` if it does not apply."""
+    first = file.readline()
+    width = len(first)  # 80 columns + "\n" or "\r\n"
+    if width not in (81, 82) or first[80:] != b"\r\n"[82 - width:]:
+        return None
+    eol = first[80:]
+    line_dtype = np.dtype({
+        "names": ["f0", "f1", "f2", "f3", "eol"],
+        "formats": ["S20", "S20", "S20", "S20", f"S{width - 80}"],
+        "offsets": [0, 20, 40, 60, 80],
+        "itemsize": width,
+    })
+    n_full, n_last = divmod(n_values, 4)
+
+    xss = np.empty(n_values + 1, dtype=np.float64)
+    xss[0] = 0.0
+    pending = first
+    done = 0  # full lines read so far
+    try:
+        while done < n_full:
+            take = min(_XSS_CHUNK_LINES, n_full - done)
+            chunk = pending + file.read(take * width - len(pending))
+            pending = b""
+            if len(chunk) < take * width:
+                return None
+            rows = np.frombuffer(chunk, dtype=line_dtype, count=take)
+            if not (rows["eol"] == eol).all():
+                return None
+            values = xss[1 + 4 * done:1 + 4 * (done + take)]
+            for k in range(4):
+                values[k::4] = rows[f"f{k}"].astype(np.float64)
+            done += take
+        if n_last:
+            # n_full > 0 here: a table shorter than one line fails the width check.
+            last = file.read(n_last * 20)
+            if len(last) < n_last * 20:
+                return None
+            xss[1 + 4 * n_full:] = np.frombuffer(
+                last, dtype="S20", count=n_last
+            ).astype(np.float64)
+    except ValueError:  # a blank or non-numeric field
+        return None
+    return xss
+
+
+def read_xss(lines, n_values=None):
+    """
+    Read the XSS array of an ACE table into a float64 numpy array.
+
+    The array uses 1-based indexing to match the FORTRAN ``XSS(i)`` of the ACE
+    manual: index 0 holds a 0.0 placeholder and ``xss[i]`` is ``XSS(i)``.
+    Blocks parsed from it are views of this array (see
+    :mod:`kika.ace.classes.xss`).
+
+    Parameters
+    ----------
+    lines : list of str
+        The lines of the file after the header.
+    n_values : int, optional
+        ``NXS(1)``, the declared length of the XSS array. When given, only the
+        lines that hold it are read, and the count is checked.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``float64`` array of length ``n + 1``.
+    """
+    if n_values:
+        lines = lines[:-(-n_values // 4)]  # 4 values per line, last one partial
+
+    # Whitespace split is ~4x faster than slicing 4E20 fields and agrees with it
+    # whenever adjacent fields are separated by a blank, which every E20.11 /
+    # I20 value is. A glued pair, or a token float() rejects, changes the count,
+    # and that falls back to the fixed-width reading.
+    # Parsed in chunks so the transient token strings stay bounded (a single
+    # split of a 5.8 M-value table holds ~350 MB of str objects at once).
+    try:
+        values = np.concatenate([np.empty(0)] + [
+            np.array(" ".join(lines[i:i + _XSS_CHUNK_LINES]).split(), dtype=np.float64)
+            for i in range(0, len(lines), _XSS_CHUNK_LINES)
+        ])
+    except ValueError:
+        values = None
+    if values is None or (n_values and values.size != n_values):
+        values = _read_xss_fixed_width(lines)
+    if n_values and values.size != n_values:
+        raise ValueError(
+            f"XSS array has {values.size} values, NXS(1) declares {n_values}"
+        )
+
+    xss = np.empty(values.size + 1, dtype=np.float64)
+    xss[0] = 0.0
+    xss[1:] = values
+    return xss
+
+
+def _read_xss_fixed_width(lines):
+    """4E20 field-by-field reading; skips blank and non-numeric fields."""
+    values = []
     for line in lines:
-        # Each line contains 4 numbers in 4E20.0 format
         for i in range(4):
-            start_idx = i * 20
-            if start_idx + 20 <= len(line):
-                value_str = line[start_idx:start_idx+20].strip()
-                if value_str:
-                    try:
-                        value = float(value_str)
-                        # Create XssEntry with the current index in the array
-                        xss_data.append(XssEntry(xss_index, value))
-                        xss_index += 1
-                    except ValueError:
-                        # Skip non-numeric entries
-                        pass
-    
-    return xss_data
+            field = line[i * 20:(i + 1) * 20].strip()
+            if field:
+                try:
+                    values.append(float(field))
+                except ValueError:
+                    pass
+    return np.array(values, dtype=np.float64)

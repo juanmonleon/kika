@@ -1,15 +1,16 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
-from kika.ace.classes.xss import XssEntry
+import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.delayed_neutron.delayed_neutron_repr import precursor_repr, delayed_neutron_data_repr
 
 @dataclass
 class DelayedNeutronPrecursor:
     """Data for a single delayed neutron precursor group."""
-    decay_constant: Optional[XssEntry] = None  # Decay constant for the group
+    decay_constant: Optional[float] = None  # Decay constant for the group
     interpolation_regions: List[Tuple[int, int]] = field(default_factory=list)  # (NBT, INT) pairs
-    energies: List[XssEntry] = field(default_factory=list)  # Energy points
-    probabilities: List[XssEntry] = field(default_factory=list)  # Corresponding probabilities
+    energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Energy points (view of xss_data)
+    probabilities: np.ndarray = field(default_factory=lambda: np.empty(0))  # Corresponding probabilities
     
     def evaluate(self, energy: float) -> float:
         """
@@ -25,27 +26,11 @@ class DelayedNeutronPrecursor:
         float
             The probability value at the given energy
         """
-        # Simple linear interpolation for now
-        if not self.energies or not self.probabilities:
+        if len(self.energies) == 0 or len(self.probabilities) == 0:
             return 0.0
-            
-        if energy <= self.energies[0].value:
-            return self.probabilities[0].value
-        
-        if energy >= self.energies[-1].value:
-            return self.probabilities[-1].value
-        
-        # Find the bracketing energy points
-        for i in range(len(self.energies) - 1):
-            if self.energies[i].value <= energy <= self.energies[i + 1].value:
-                # Linear interpolation
-                x1, x2 = self.energies[i].value, self.energies[i + 1].value
-                y1, y2 = self.probabilities[i].value, self.probabilities[i + 1].value
-                return y1 + (y2 - y1) * (energy - x1) / (x2 - x1)
-        
-        # Shouldn't reach here, but just in case
-        return self.probabilities[-1].value
-        
+        nbt = [int(b) for b, _ in self.interpolation_regions]
+        interp = [int(i) for _, i in self.interpolation_regions]
+        return tabular_math.tab1(self.energies, self.probabilities, nbt, interp, energy)
     # Define repr explicitly as a method to ensure it's picked up correctly
     def __repr__(self):
         return precursor_repr(self)
@@ -95,7 +80,7 @@ class DelayedNeutronData:
             return None
         
         precursor = self.precursors[group_idx]
-        return precursor.decay_constant.value if precursor.decay_constant else None
+        return precursor.decay_constant if precursor.decay_constant is not None else None
         
     # Define repr explicitly as a method to ensure it's picked up correctly
     def __repr__(self):

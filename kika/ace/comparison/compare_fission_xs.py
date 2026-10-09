@@ -3,7 +3,7 @@ Module for comparing fission cross section data in ACE format.
 """
 
 from kika.ace.classes.ace import Ace
-from kika.ace.comparison.compare_ace import compare_arrays
+from kika.ace.comparison.compare_utils import compare_arrays
 
 def compare_fission_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
     """Compare fission cross section data between two ACE objects."""
@@ -33,8 +33,8 @@ def compare_fission_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: b
         return False
     
     # Compare cross section values
-    xs_values1 = [xs.value for xs in ace1.fission_xs.cross_sections]
-    xs_values2 = [xs.value for xs in ace2.fission_xs.cross_sections]
+    xs_values1 = [float(xs) for xs in ace1.fission_xs.cross_sections]
+    xs_values2 = [float(xs) for xs in ace2.fission_xs.cross_sections]
     
     # Note: We are directly comparing the cross sections here, assuming they're defined 
     # on the same energy grid. In a more sophisticated comparison, we might want to 

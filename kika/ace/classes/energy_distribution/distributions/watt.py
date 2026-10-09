@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika._utils import create_repr_section
 
@@ -57,27 +58,8 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
         float
             The a parameter value
         """
-        if not self.a_incident_energies or len(self.a_incident_energies) == 0:
-            return 0.0
-            
-        # If energy is outside the tabulated range, use the closest value
-        if incident_energy <= self.a_incident_energies[0]:
-            return self.a_values[0]
-        if incident_energy >= self.a_incident_energies[-1]:
-            return self.a_values[-1]
-            
-        # Use linear interpolation to get parameter a
-        # In a full implementation, we would use the interpolation scheme from a_nbt and a_interp
-        idx = np.searchsorted(self.a_incident_energies, incident_energy) - 1
-        e_low = self.a_incident_energies[idx]
-        e_high = self.a_incident_energies[idx + 1]
-        a_low = self.a_values[idx]
-        a_high = self.a_values[idx + 1]
-        
-        # Linear interpolation
-        a = a_low + (a_high - a_low) * (incident_energy - e_low) / (e_high - e_low)
-        return a
-    
+        return tabular_math.tab1(self.a_incident_energies, self.a_values,
+                                 self.a_nbt, self.a_interp, incident_energy)
     def get_b_parameter(self, incident_energy: float) -> float:
         """
         Get the b parameter for a given incident energy.
@@ -92,33 +74,14 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
         float
             The b parameter value
         """
-        if not self.b_incident_energies or len(self.b_incident_energies) == 0:
-            return 0.0
-            
-        # If energy is outside the tabulated range, use the closest value
-        if incident_energy <= self.b_incident_energies[0]:
-            return self.b_values[0]
-        if incident_energy >= self.b_incident_energies[-1]:
-            return self.b_values[-1]
-            
-        # Use linear interpolation to get parameter b
-        # In a full implementation, we would use the interpolation scheme from b_nbt and b_interp
-        idx = np.searchsorted(self.b_incident_energies, incident_energy) - 1
-        e_low = self.b_incident_energies[idx]
-        e_high = self.b_incident_energies[idx + 1]
-        b_low = self.b_values[idx]
-        b_high = self.b_values[idx + 1]
-        
-        # Linear interpolation
-        b = b_low + (b_high - b_low) * (incident_energy - e_low) / (e_high - e_low)
-        return b
-    
+        return tabular_math.tab1(self.b_incident_energies, self.b_values,
+                                 self.b_nbt, self.b_interp, incident_energy)
     def calculate_normalization_constant(self, incident_energy: float, a: float, b: float) -> float:
         """
         Calculate the normalization constant I for the Watt spectrum.
         
         I = (1/2) * sqrt(π * a^3 * b / 4) * exp(b * a / 4) *
-            [erf((E − U)/a + sqrt(ab)/2) + erf(sqrt((E − U)/a − sqrt(ab)/2))]
+            [erf(sqrt((E − U)/a) + sqrt(ab)/2) + erf(sqrt((E − U)/a) − sqrt(ab)/2)]
             − a * exp(−(E − U)/a) * sinh(sqrt(b * (E − U)))
         
         Parameters
@@ -155,7 +118,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
         term1 = 0.5 * np.sqrt(np.pi * a**3 * b / 4.0) * np.exp(b * a / 4.0)
         
         # Error function terms
-        arg1 = e_minus_u_over_a + sqrt_ab / 2.0
+        arg1 = np.sqrt(e_minus_u_over_a) + sqrt_ab / 2.0
         arg2 = np.sqrt(e_minus_u_over_a) - sqrt_ab / 2.0
         
         if arg2 < 0:
@@ -165,7 +128,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
             erf_term = special.erf(arg1) + special.erf(arg2)
             
         # Sinh term
-        sinh_term = a * np.exp(-e_minus_u_over_a) * np.sinh(sqrt_ab * sqrt_e_minus_u / a)
+        sinh_term = a * np.exp(-e_minus_u_over_a) * np.sinh(np.sqrt(b) * sqrt_e_minus_u)
         
         # Calculate I using equation 11
         normalization = term1 * erf_term - sinh_term
@@ -217,7 +180,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
             "Parameter a - Data Points", self.n_a_energies, 
             width1=property_col_width, width2=value_col_width)
         
-        if self.a_incident_energies and self.a_values:
+        if len(self.a_incident_energies) > 0 and len(self.a_values) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Parameter a - Energy Range", 
                 f"{min(self.a_incident_energies):.6g} - {max(self.a_incident_energies):.6g} MeV", 
@@ -232,7 +195,7 @@ class EnergyDependentWattSpectrum(EnergyDistribution):
             "Parameter b - Data Points", self.n_b_energies, 
             width1=property_col_width, width2=value_col_width)
         
-        if self.b_incident_energies and self.b_values:
+        if len(self.b_incident_energies) > 0 and len(self.b_values) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Parameter b - Energy Range", 
                 f"{min(self.b_incident_energies):.6g} - {max(self.b_incident_energies):.6g} MeV", 

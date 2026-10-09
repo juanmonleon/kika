@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import numpy as np
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
+from kika.ace.classes.energy_distribution import tabular_math
 from kika._utils import create_repr_section
 
 @dataclass
@@ -72,85 +73,46 @@ class KalbachMannDistribution(EnergyDistribution):
             return self.distributions[energy_idx]
         return None
     
-    def get_interpolated_distribution(self, incident_energy: float) -> Dict:
+    def get_interpolated_distribution(self, incident_energy: float) -> Optional[Dict]:
         """
-        Get an interpolated distribution for a specific incident energy.
-        
+        Outgoing-energy distribution at an incident energy.
+
+        Between two tables the lin-lin rule of the ACE format applies (random
+        choice of table plus unit-base scaling of the continuous part, INT=1
+        taking the lower table); see :mod:`kika.ace.classes.energy_distribution.tabular_math`.
+        Outside the tabulated range the end table is returned.
+
+        Returns
+        -------
+        dict or None
+            ``e_out``, ``pdf`` and ``cdf`` of the continuous part, and
+            ``discrete_energies`` / ``discrete_probabilities`` of the lines.
+        """
+        return tabular_math.distribution_at(
+            self.incident_energies, self.distributions, self.nbt, self.interp, incident_energy)
+
+    def angular_pdf(self, incident_energy: float, cosines) -> np.ndarray:
+        """
+        Kalbach-87 angular density at an incident energy, marginal over the
+        outgoing energy (in the frame of the reaction, the centre of mass for
+        a negative TY).
+
         Parameters
         ----------
         incident_energy : float
-            The incident energy
-            
+            Incident energy in MeV
+        cosines : array_like
+            Cosines at which to evaluate the density
+
         Returns
         -------
-        Dict
-            Dictionary containing the interpolated distribution data
+        numpy.ndarray
+            Density in mu, normalised to the probability the tables carry
         """
-        # Convert incident energies from XssEntry to float values for comparison
-        incident_energy_values = [e.value if hasattr(e, 'value') else float(e) for e in self.incident_energies]
-        
-        # Find the bracketing incident energies
-        if not incident_energy_values or incident_energy <= incident_energy_values[0]:
-            # Below the minimum incident energy, return the first distribution
-            return self.get_distribution(0) if self.distributions else None
-        
-        if incident_energy >= incident_energy_values[-1]:
-            # Above the maximum incident energy, return the last distribution
-            return self.get_distribution(len(self.distributions) - 1) if self.distributions else None
-        
-        # Find the energy interval containing the incident energy
-        idx = np.searchsorted(incident_energy_values, incident_energy, side='right') - 1
-        
-        # Get the distributions for the bracketing energies
-        dist_low = self.get_distribution(idx)
-        dist_high = self.get_distribution(idx + 1)
-        
-        if not dist_low or not dist_high:
-            return dist_low if dist_low else dist_high
-            
-        # Interpolate the distributions based on the incident energy
-        energy_low = self.incident_energies[idx]
-        energy_high = self.incident_energies[idx + 1]
-        
-        # Determine the interpolation scheme from the regions
-        # For simplicity, assume linear-linear interpolation
-        # In a full implementation, we would determine this from the NBT and INT arrays
-        
-        # Interpolation fraction
-        frac = (incident_energy - energy_low) / (energy_high - energy_low)
-        
-        # Create common grid for interpolation (use outgoing energy points from low distribution)
-        e_out = dist_low['e_out']
-        
-        # Interpolate PDF values
-        pdf_high_interp = np.interp(e_out, dist_high['e_out'], dist_high['pdf'])
-        pdf_interp = (1.0 - frac) * np.array(dist_low['pdf']) + frac * pdf_high_interp
-        
-        # Interpolate CDF values
-        cdf_high_interp = np.interp(e_out, dist_high['e_out'], dist_high['cdf'])
-        cdf_interp = (1.0 - frac) * np.array(dist_low['cdf']) + frac * cdf_high_interp
-        
-        # Interpolate r values (precompound fraction)
-        r_high_interp = np.interp(e_out, dist_high['e_out'], dist_high['r'])
-        r_interp = (1.0 - frac) * np.array(dist_low['r']) + frac * r_high_interp
-        
-        # Interpolate a values (angular distribution slope)
-        a_high_interp = np.interp(e_out, dist_high['e_out'], dist_high['a'])
-        a_interp = (1.0 - frac) * np.array(dist_low['a']) + frac * a_high_interp
-        
-        # Create interpolated distribution
-        interp_dist = {
-            'intt': dist_low['intt'],  # Use the INTT from the lower energy
-            'n_discrete': dist_low['n_discrete'],  # Use discrete count from lower energy
-            'n_points': len(e_out),
-            'e_out': e_out,
-            'pdf': pdf_interp.tolist(),
-            'cdf': cdf_interp.tolist(),
-            'r': r_interp.tolist(),
-            'a': a_interp.tolist()
-        }
-        
-        return interp_dist
+        mu = np.asarray(cosines, dtype=float)
+        return tabular_math.angular_at(
+            self.incident_energies, self.distributions, self.nbt, self.interp, incident_energy,
+            lambda table: tabular_math.kalbach_angular_table(table, mu))
 
     def __repr__(self) -> str:
         """
@@ -198,7 +160,7 @@ class KalbachMannDistribution(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # If we have incident energies, show the range
-        incident_energy_values = [e.value if hasattr(e, 'value') else float(e) for e in self.incident_energies]
+        incident_energy_values = [float(e) for e in self.incident_energies]
         if incident_energy_values:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", 

@@ -35,12 +35,12 @@ def mtr_repr(self) -> str:
         mt_str = f"Available - {neutron_mt_count} reactions"
         # Show a sample of MT numbers if there aren't too many
         if neutron_mt_count <= 10:
-            mt_values = [str(int(mt.value)) for mt in self.incident_neutron]
+            mt_values = [str(int(mt)) for mt in self.incident_neutron]
             mt_str += f" (MT: {', '.join(mt_values)})"
         elif neutron_mt_count > 10:
             # Show first 5 and last 5 with ellipsis in between
-            first_mt = [str(int(mt.value)) for mt in self.incident_neutron[:5]]
-            last_mt = [str(int(mt.value)) for mt in self.incident_neutron[-5:]]
+            first_mt = [str(int(mt)) for mt in self.incident_neutron[:5]]
+            last_mt = [str(int(mt)) for mt in self.incident_neutron[-5:]]
             mt_str += f" (MT: {', '.join(first_mt)}, ..., {', '.join(last_mt)})"
         info_table += "{:<{width1}} {:<{width2}}\n".format(
             "Neutron Reactions (MTR)", mt_str, width1=property_col_width, width2=value_col_width)
@@ -54,7 +54,7 @@ def mtr_repr(self) -> str:
         mt_str = f"Available - {photon_mt_count} reactions"
         # Show a sample of MT numbers if there aren't too many
         if photon_mt_count <= 10:
-            mt_values = [str(int(mt.value)) for mt in self.photon_production]
+            mt_values = [str(int(mt)) for mt in self.photon_production]
             mt_str += f" (MT: {', '.join(mt_values)})"
         info_table += "{:<{width1}} {:<{width2}}\n".format(
             "Photon Production (MTRP)", mt_str, width1=property_col_width, width2=value_col_width)
@@ -68,7 +68,7 @@ def mtr_repr(self) -> str:
         mt_str = f"Available - {sec_neutron_count} reactions"
         # Show a sample of MT numbers if there aren't too many
         if sec_neutron_count <= 10:
-            mt_values = [str(int(mt.value)) for mt in self.secondary_neutron_mt]
+            mt_values = [str(int(mt)) for mt in self.secondary_neutron_mt]
             mt_str += f" (MT: {', '.join(mt_values)})"
         info_table += "{:<{width1}} {:<{width2}}\n".format(
             "Secondary Neutron Reactions", mt_str, width1=property_col_width, width2=value_col_width)
@@ -90,7 +90,7 @@ def mtr_repr(self) -> str:
                 if mt_count > 0:
                     mt_str = f"{mt_count} reactions"
                     if mt_count <= 8:
-                        mt_values = [str(int(mt.value)) for mt in mt_list]
+                        mt_values = [str(int(mt)) for mt in mt_list]
                         mt_str += f" (MT: {', '.join(mt_values)})"
                     info_table += "{:<{width1}} {:<{width2}}\n".format(
                         f"  Particle Type {i+1}", mt_str, width1=property_col_width, width2=value_col_width)

@@ -3,43 +3,28 @@ Module for comparing energy distribution data in ACE format.
 """
 
 from typing import List
-from kika.ace.classes.xss import XssEntry
+import numpy as np
+
 from kika.ace.classes.ace import Ace
-from kika.ace.classes.energy_distribution.energy_distribution import EnergyDistribution
-from kika.ace.comparison.compare_ace import compare_arrays
+from kika.ace.classes.energy_distribution.base import EnergyDistribution
+from kika.ace.comparison.compare_utils import compare_arrays
 
 def compare_energy_distributions(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
     """Compare energy distributions between two ACE objects."""
-    # Check if both objects have energy distribution data
     if ace1.energy_distributions is None and ace2.energy_distributions is None:
         return True
-    
     if ace1.energy_distributions is None or ace2.energy_distributions is None:
         if verbose:
             print("Energy distribution mismatch: One ACE object has no energy distribution data")
         return False
-    
-    # Compare neutron energy distributions
-    if not compare_neutron_energy_dist(ace1, ace2, tolerance, verbose):
-        return False
-    
-    # Compare photon production energy distributions
-    if not compare_photon_energy_dist(ace1, ace2, tolerance, verbose):
-        return False
-    
-    # Compare particle production energy distributions
-    if not compare_particle_energy_dist(ace1, ace2, tolerance, verbose):
-        return False
-    
-    # Compare delayed neutron energy distributions
-    if not compare_delayed_neutron_dist(ace1, ace2, tolerance, verbose):
-        return False
-    
-    # Compare energy-dependent yields
-    if not compare_yields(ace1, ace2, tolerance, verbose):
-        return False
-    
-    return True
+    return all(compare(ace1, ace2, tolerance, verbose) for compare in (
+        compare_neutron_energy_dist,
+        compare_photon_energy_dist,
+        compare_particle_energy_dist,
+        compare_delayed_neutron_dist,
+        compare_yields,
+    ))
+
 
 def compare_neutron_energy_dist(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool) -> bool:
     """Compare neutron energy distributions."""
@@ -218,35 +203,6 @@ def compare_yields(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool) -> boo
             if not compare_energy_distribution(yield1, yield2, tolerance, f"Neutron yield MT={mt}", verbose):
                 return False
     
-    # Compare photon yields
-    has_photon_yields1 = (ace1.energy_distributions and ace1.energy_distributions.has_photon_yields)
-    has_photon_yields2 = (ace2.energy_distributions and ace2.energy_distributions.has_photon_yields)
-    
-    if has_photon_yields1 != has_photon_yields2:
-        if verbose:
-            print("Energy-dependent photon yields mismatch: Presence differs")
-        return False
-    
-    if has_photon_yields1 and has_photon_yields2:
-        # Compare MT numbers for photon yields
-        mt_numbers1 = set(ace1.energy_distributions.photon_yields.keys())
-        mt_numbers2 = set(ace2.energy_distributions.photon_yields.keys())
-        
-        if mt_numbers1 != mt_numbers2:
-            if verbose:
-                print("Photon yields mismatch: Different MT numbers")
-                print(f"MT numbers only in first: {sorted(mt_numbers1 - mt_numbers2)}")
-                print(f"MT numbers only in second: {sorted(mt_numbers2 - mt_numbers1)}")
-            return False
-        
-        # Compare yield values for each MT
-        for mt in sorted(mt_numbers1):
-            yield1 = ace1.energy_distributions.photon_yields[mt]
-            yield2 = ace2.energy_distributions.photon_yields[mt]
-            
-            if not compare_energy_distribution(yield1, yield2, tolerance, f"Photon yield MT={mt}", verbose):
-                return False
-    
     # Compare particle yields
     has_particle_yields1 = (ace1.energy_distributions and ace1.energy_distributions.has_particle_yields)
     has_particle_yields2 = (ace2.energy_distributions and ace2.energy_distributions.has_particle_yields)
@@ -285,15 +241,8 @@ def compare_yields(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool) -> boo
                     print(f"Particle type {particle_idx} yields mismatch: One has yields, the other doesn't")
                 return False
             
-            # Check if the keys are XssEntry objects or integers
-            if mt_dict1 and isinstance(next(iter(mt_dict1.keys())), XssEntry):
-                # If they are XssEntry objects, extract values first
-                mt_numbers1 = set(key.value for key in mt_dict1.keys())
-                mt_numbers2 = set(key.value for key in mt_dict2.keys())
-            else:
-                # If they are already integers
-                mt_numbers1 = set(mt_dict1.keys())
-                mt_numbers2 = set(mt_dict2.keys())
+            mt_numbers1 = set(mt_dict1.keys())
+            mt_numbers2 = set(mt_dict2.keys())
             
             if mt_numbers1 != mt_numbers2:
                 if verbose:
@@ -304,15 +253,8 @@ def compare_yields(ace1: Ace, ace2: Ace, tolerance: float, verbose: bool) -> boo
             
             # Compare yield values for each MT
             for mt in sorted(mt_numbers1):
-                # Get the yield objects, accounting for XssEntry keys if needed
-                if isinstance(next(iter(mt_dict1.keys())), XssEntry):
-                    mt_key1 = next(key for key in mt_dict1.keys() if key.value == mt)
-                    mt_key2 = next(key for key in mt_dict2.keys() if key.value == mt)
-                    yield1 = mt_dict1[mt_key1]
-                    yield2 = mt_dict2[mt_key2]
-                else:
-                    yield1 = mt_dict1[mt]
-                    yield2 = mt_dict2[mt]
+                yield1 = mt_dict1[mt]
+                yield2 = mt_dict2[mt]
                 
                 if not compare_energy_distribution(yield1, yield2, tolerance, 
                                                  f"Particle type {particle_idx} yield MT={mt}", verbose):
@@ -416,21 +358,21 @@ def compare_energy_distribution(dist1, dist2, tolerance: float, name: str, verbo
     
     # Attributes common to EnergyDistribution objects
     if hasattr(dist1, 'law'):
-        common_attrs.extend(["idat", "nbt", "interp"])
+        common_attrs.extend(["nbt", "interp"])
     
     # Attributes common to both EnergyDistribution and EnergyDependentYield
     if hasattr(dist1, 'energies') and hasattr(dist2, 'energies'):
         # Compare energies
-        energies1 = [e.value for e in dist1.energies] if dist1.energies else []
-        energies2 = [e.value for e in dist2.energies] if dist2.energies else []
+        energies1 = [float(e) for e in dist1.energies]
+        energies2 = [float(e) for e in dist2.energies]
         
         if not compare_arrays(energies1, energies2, tolerance, f"{name} energies", verbose):
             return False
     
     # Compare yield values for EnergyDependentYield objects
     if hasattr(dist1, 'yields') and hasattr(dist2, 'yields'):
-        yields1 = [y.value for y in dist1.yields] if dist1.yields else []
-        yields2 = [y.value for y in dist2.yields] if dist2.yields else []
+        yields1 = [float(y) for y in dist1.yields]
+        yields2 = [float(y) for y in dist2.yields]
         
         if not compare_arrays(yields1, yields2, tolerance, f"{name} yields", verbose):
             return False
@@ -465,20 +407,71 @@ def compare_energy_distribution(dist1, dist2, tolerance: float, name: str, verbo
     
     # Compare applicability data for EnergyDistribution objects
     if hasattr(dist1, "applicability_energies") and hasattr(dist2, "applicability_energies"):
-        energies1 = [e.value for e in dist1.applicability_energies] if dist1.applicability_energies else []
-        energies2 = [e.value for e in dist2.applicability_energies] if dist2.applicability_energies else []
+        energies1 = [float(e) for e in dist1.applicability_energies]
+        energies2 = [float(e) for e in dist2.applicability_energies]
         
         if not compare_arrays(energies1, energies2, tolerance, f"{name} applicability energies", verbose):
             return False
         
-        probs1 = [p.value for p in dist1.applicability_probabilities] if dist1.applicability_probabilities else []
-        probs2 = [p.value for p in dist2.applicability_probabilities] if dist2.applicability_probabilities else []
+        probs1 = [float(p) for p in dist1.applicability_probabilities]
+        probs2 = [float(p) for p in dist2.applicability_probabilities]
         
         if not compare_arrays(probs1, probs2, tolerance, f"{name} applicability probabilities", verbose):
             return False
     
-    # More detailed comparison would need to check law-specific attributes
-    # This would be quite extensive given the many different energy distribution laws
-    # For now, we'll just check the common attributes and rely on the law number matching
-    
+    # The law's own data, field by field
+    return compare_law_data(dist1, dist2, tolerance, name, verbose)
+
+
+#: Fields that say where data sits in the XSS, not what it is; the locator
+#: blocks are compared on their own (compare_energy_dist_locators).
+_LAYOUT_FIELDS = {"idat", "jed", "jxs_dlw", "distribution_locations", "table_locators",
+                  "energy_dist_locations", "lc"}
+
+_NUMBER = (int, float, np.integer, np.floating)
+
+
+def _compare_values(v1, v2, tolerance: float, path: str, verbose: bool) -> bool:
+    """Compare two values of a law's data: numbers, arrays, lists and dicts of them."""
+    if isinstance(v1, dict) or isinstance(v2, dict):
+        if not (isinstance(v1, dict) and isinstance(v2, dict)) or set(v1) != set(v2):
+            if verbose:
+                print(f"{path} mismatch: different keys")
+            return False
+        return all(_compare_values(v1[k], v2[k], tolerance, f"{path}[{k!r}]", verbose)
+                   for k in sorted(v1, key=str) if k not in _LAYOUT_FIELDS)
+    if v1 is None or v2 is None:
+        if v1 is None and v2 is None:
+            return True
+        if verbose:
+            print(f"{path} mismatch: one value is None")
+        return False
+    if isinstance(v1, _NUMBER) and isinstance(v2, _NUMBER):
+        return compare_arrays([float(v1)], [float(v2)], tolerance, path, verbose)
+    if isinstance(v1, (list, tuple, np.ndarray)) and isinstance(v2, (list, tuple, np.ndarray)):
+        if len(v1) != len(v2):
+            if verbose:
+                print(f"{path} mismatch: length differs ({len(v1)} vs {len(v2)})")
+            return False
+        if isinstance(v1, np.ndarray) and isinstance(v2, np.ndarray) and v1.dtype.kind in "fiu" and v2.dtype.kind in "fiu":
+            return compare_arrays(v1.ravel(), v2.ravel(), tolerance, path, verbose)
+        if all(isinstance(x, _NUMBER) for x in v1) and all(isinstance(x, _NUMBER) for x in v2):
+            return compare_arrays(np.asarray(v1, dtype=float), np.asarray(v2, dtype=float), tolerance, path, verbose)
+        return all(_compare_values(x, y, tolerance, f"{path}[{i}]", verbose)
+                   for i, (x, y) in enumerate(zip(v1, v2)))
+    if v1 != v2:
+        if verbose:
+            print(f"{path} mismatch: {v1!r} vs {v2!r}")
+        return False
+    return True
+
+
+def compare_law_data(dist1, dist2, tolerance: float, name: str, verbose: bool) -> bool:
+    """Compare every data field of two distributions of the same law."""
+    for field_name in sorted(set(vars(dist1)) | set(vars(dist2))):
+        if field_name in _LAYOUT_FIELDS or field_name.startswith("_"):
+            continue
+        if not _compare_values(getattr(dist1, field_name, None), getattr(dist2, field_name, None),
+                               tolerance, f"{name} {field_name}", verbose):
+            return False
     return True

@@ -42,20 +42,20 @@ def parse_level_scattering(ace: Ace, base_dist: EnergyDistribution, idat_idx: in
     # Copy applicability data from base_dist
     distribution.applicability_energies = base_dist.applicability_energies
     distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.nbt = base_dist.nbt
-    distribution.interp = base_dist.interp
+    distribution.applicability_nbt = base_dist.applicability_nbt
+    distribution.applicability_interp = base_dist.applicability_interp
     
     # Read the two parameters for Law 3
     if idat_idx + 1 < len(ace.xss_data):
         # LDAT(1): (A + 1)/A|Q|
         aplusoaabsq_entry = ace.xss_data[idat_idx]
-        distribution.aplusoaabsq = aplusoaabsq_entry.value
+        distribution.aplusoaabsq = float(aplusoaabsq_entry)
         if debug:
             logger.debug(f"(A + 1)/A|Q| value: {distribution.aplusoaabsq}")
         
         # LDAT(2): (A / (A + 1))^2
         asquare_entry = ace.xss_data[idat_idx + 1]
-        distribution.asquare = asquare_entry.value
+        distribution.asquare = float(asquare_entry)
         if debug:
             logger.debug(f"(A / (A + 1))^2 value: {distribution.asquare}")
     else:

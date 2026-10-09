@@ -1,5 +1,4 @@
 from typing import Optional, Tuple
-from kika.ace.classes.xss import XssEntry
 
 
 class ErrorMessageDict(dict):
@@ -25,14 +24,8 @@ class ErrorMessageDict(dict):
             raise KeyError(error_msg)
     
     def keys_as_int(self):
-        """Get keys as integers for better display, handling XssEntry objects."""
-        result = []
-        for key in self.keys():
-            if isinstance(key, XssEntry):
-                result.append(int(key.value))
-            else:
-                result.append(int(key))
-        return result
+        """Get keys as integers for better display."""
+        return [int(key) for key in self.keys()]
 
 
 class ErrorMessageList(list):

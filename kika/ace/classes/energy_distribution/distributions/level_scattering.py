@@ -63,13 +63,12 @@ class LevelScattering(EnergyDistribution):
         if e_cm <= 0.0:
             return 0.0
         
-        # Calculate the A value from LDAT(2)
-        # LDAT(2) = (A/(A+1))^2, so A+1 = A/sqrt(LDAT(2))
-        a_plus_1 = 1.0 / np.sqrt(self.asquare)
+        # LDAT(2) = (A/(A+1))^2, so sqrt(LDAT(2)) = A/(A+1) and A+1 = 1/(1 - sqrt(LDAT(2)))
+        a_plus_1 = 1.0 / (1.0 - np.sqrt(self.asquare))
         
-        # Calculate the second term
+        # Manual eq. 5: E_lab = E_cm + [E + 2 mu (A+1) sqrt(E E_cm)] / (A+1)^2
         term1 = incident_energy
-        term2 = 2.0 * cm_cosine * np.sqrt(incident_energy * e_cm)
+        term2 = 2.0 * cm_cosine * a_plus_1 * np.sqrt(incident_energy * e_cm)
         second_term = (term1 + term2) / (a_plus_1 * a_plus_1)
         
         # Calculate the lab energy

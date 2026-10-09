@@ -47,7 +47,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     Read photon yield multiplier MT numbers (YP block).
     
     For the YP Block (Table 60):
-    - LY = NXS(6)
+    - LY = JXS(20) (manual Table 55)
     - NYP is at location LY
     - MTY values are at locations LY+1 through LY+NYP
     
@@ -67,7 +67,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     result = PhotonYieldMultipliers()
     
     # Check if we have the necessary data
-    if not ace.header or not ace.header.nxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.nxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping YP block: required data missing")
         return result
@@ -75,21 +75,17 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     if debug:
         logger.debug("\n----- PHOTON YIELD MULTIPLIERS (YP BLOCK) -----")
     
-    # For YP, LY = NXS(6)
-    if len(ace.header.nxs_array) <= 6:
-        if debug:
-            logger.debug("Skipping YP block: NXS array too short (no NXS(6))")
-        return result
-    
-    ly = ace.header.nxs_array[6]  # NXS(6) - Location of YP block
+    # YP starts at JXS(20) (manual Table 55); NXS(6) is the number of
+    # photon-production reactions, not a locator
+    ly = ace.header.jxs_array[20]
     
     if debug:
-        logger.debug(f"NXS(6) = {ly} → Location of YP block (LY)")
+        logger.debug(f"JXS(20) = {ly} → Location of YP block (LY)")
     
     # This block is only present if LY is nonzero
     if ly <= 0:
         if debug:
-            logger.debug(f"No YP block present: NXS(6)={ly} ≤ 0")
+            logger.debug(f"No YP block present: JXS(20)={ly} ≤ 0")
         return result
     
     if ly >= len(ace.xss_data):
@@ -99,7 +95,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     
     # Read NYP (number of MTs to follow)
     nyp_entry = ace.xss_data[ly]
-    nyp = int(nyp_entry.value)
+    nyp = int(nyp_entry)
     
     if debug:
         logger.debug(f"NYP = {nyp} → Number of yield multiplier MT numbers")
@@ -121,7 +117,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     
     for i in range(nyp):
         mt_entry = ace.xss_data[ly + 1 + i]  # Skip the first value (which is NYP)
-        mt = int(mt_entry.value)
+        mt = int(mt_entry)
         result.multiplier_mts.append(mt)
         
         if debug:
@@ -140,7 +136,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
     
     For the YH Block:
     - For each particle type i (1 to NTYPE):
-      - JED = XSS(JXS(32) + 10*(i-1) + 8)
+      - LY = XSS(JXS(32) + 10*(i-1) + 9), the YH word of the IXS block
       - LY = JED
       - NYH is at location LY
       - MTY values are at locations LY+1 through LY+NYH
@@ -161,7 +157,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
     result = SecondaryParticleYieldMultipliers()
     
     # Check if we have the necessary data
-    if not ace.header or not ace.header.jxs_array or not ace.xss_data:
+    if not ace.header or not ace.header.jxs_array or ace.xss_data is None or len(ace.xss_data) == 0:
         if debug:
             logger.debug("Skipping YH block: required data missing")
         return result
@@ -226,11 +222,12 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
             particle_name = secondary_particles.get_particle_name(particle_id) if hasattr(secondary_particles, "get_particle_name") else f"Type {i}"
             logger.debug(f"\nProcessing particle type {i}: {particle_name} (ID: {particle_id})")
         
-        # Calculate JED index: JED = XSS(JXS(32) + 10 * (i - 1) + 8)
-        jed_idx = jxs32_idx + 10 * (i - 1) + 8
+        # YH is the 10th IXS word of the particle (HPD, MTRH, TYRH, LSIGH, SIGH,
+        # LANDH, ANDH, LDLWH, DLWH, YH); the 9th, +8, is DLWH
+        jed_idx = jxs32_idx + 10 * (i - 1) + 9
         
         if debug:
-            logger.debug(f"  JED index calculation: JXS(32) + 10*(i-1) + 8 = {jxs32_idx} + 10*({i}-1) + 8 = {jed_idx}")
+            logger.debug(f"  YH index calculation: JXS(32) + 10*(i-1) + 9 = {jxs32_idx} + 10*({i}-1) + 9 = {jed_idx}")
         
         if jed_idx >= len(ace.xss_data):
             if debug:
@@ -239,7 +236,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         
         # Get the value at JED, which is LY
         ly_entry = ace.xss_data[jed_idx]
-        ly = int(ly_entry.value)
+        ly = int(ly_entry)
         
         if debug:
             logger.debug(f"  LY = {ly} → Location of yield multiplier data")
@@ -257,7 +254,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         
         # Read NYH (number of MTs to follow)
         nyh_entry = ace.xss_data[ly]
-        nyh = int(nyh_entry.value)
+        nyh = int(nyh_entry)
         
         if debug:
             logger.debug(f"  NYH = {nyh} → Number of yield multiplier MT numbers")
@@ -280,7 +277,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         particle_mts = []
         for j in range(nyh):
             mt_entry = ace.xss_data[ly + 1 + j]  # Skip the first value (which is NYH)
-            mt = int(mt_entry.value)
+            mt = int(mt_entry)
             particle_mts.append(mt)
             
             if debug:

@@ -1,7 +1,8 @@
 import logging
 from kika.ace.classes.delayed_neutron.delayed_neutron import DelayedNeutronPrecursor, DelayedNeutronData
-from kika.ace.classes.xss import XssEntry
-from typing import List, Tuple
+from typing import Tuple
+
+import numpy as np
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -78,13 +79,13 @@ def read_delayed_neutron_data(ace, debug=False):
     # Always return the DelayedNeutronData object
     return delayed_neutron_data
 
-def parse_precursor_data(xss_data: List[XssEntry], idx: int, debug=False) -> Tuple[DelayedNeutronPrecursor, int]:
+def parse_precursor_data(xss_data: np.ndarray, idx: int, debug=False) -> Tuple[DelayedNeutronPrecursor, int]:
     """
     Parse data for a single delayed neutron precursor group.
     
     Parameters
     ----------
-    xss_data : List[XssEntry]
+    xss_data : np.ndarray
         The XSS data array
     idx : int
         Starting index in the XSS array for the precursor data
@@ -104,15 +105,15 @@ def parse_precursor_data(xss_data: List[XssEntry], idx: int, debug=False) -> Tup
     precursor = DelayedNeutronPrecursor()
     
     # Get the decay constant
-    precursor.decay_constant = xss_data[idx]
+    precursor.decay_constant = float(xss_data[idx])
     
     if debug:
-        logger.debug(f"Decay constant: {precursor.decay_constant.value}")
+        logger.debug(f"Decay constant: {precursor.decay_constant}")
     
     current_idx = idx + 1
     
     # Get the number of interpolation regions
-    n_regions = int(xss_data[current_idx].value)
+    n_regions = int(xss_data[current_idx])
     
     if debug:
         logger.debug(f"Number of interpolation regions: {n_regions}")
@@ -122,11 +123,11 @@ def parse_precursor_data(xss_data: List[XssEntry], idx: int, debug=False) -> Tup
     # Read interpolation regions if present
     if n_regions > 0:
         # Read NBT array
-        nbt = [int(x.value) for x in xss_data[current_idx:current_idx + n_regions]]
+        nbt = [int(x) for x in xss_data[current_idx:current_idx + n_regions]]
         current_idx += n_regions
         
         # Read INT array
-        interp = [int(x.value) for x in xss_data[current_idx:current_idx + n_regions]]
+        interp = [int(x) for x in xss_data[current_idx:current_idx + n_regions]]
         current_idx += n_regions
         
         # Store interpolation regions
@@ -136,7 +137,7 @@ def parse_precursor_data(xss_data: List[XssEntry], idx: int, debug=False) -> Tup
             logger.debug(f"Interpolation regions: {precursor.interpolation_regions}")
     
     # Read number of energy points
-    n_energies = int(xss_data[current_idx].value)
+    n_energies = int(xss_data[current_idx])
     
     if debug:
         logger.debug(f"Number of energy points: {n_energies}")

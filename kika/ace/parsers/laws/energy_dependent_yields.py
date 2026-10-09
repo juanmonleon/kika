@@ -36,39 +36,39 @@ def parse_energy_dependent_yield(ace: Ace, ky_idx: int) -> EnergyDependentYield:
         return yield_obj
     
     # Read the number of interpolation regions (N_R)
-    yield_obj.n_interp_regions = int(ace.xss_data[ky_idx].value)
+    yield_obj.n_interp_regions = int(ace.xss_data[ky_idx])
     n_r = yield_obj.n_interp_regions
     idx = ky_idx + 1
     
     # Read interpolation parameters for regions if present
     if n_r > 0:
-        # Read NBT values - store the XssEntry objects
+        # Read NBT values - a view of xss_data
         if idx + n_r <= len(ace.xss_data):
-            yield_obj.nbt = [ace.xss_data[idx + i] for i in range(n_r)]
+            yield_obj.nbt = ace.xss_data[idx:idx + n_r]
             idx += n_r
         
-        # Read INT values - store the XssEntry objects
+        # Read INT values - a view of xss_data
         if idx + n_r <= len(ace.xss_data):
-            yield_obj.interp = [ace.xss_data[idx + i] for i in range(n_r)]
+            yield_obj.interp = ace.xss_data[idx:idx + n_r]
             idx += n_r
     
     # Read the number of energies (N_E)
     if idx < len(ace.xss_data):
-        yield_obj.n_energies = int(ace.xss_data[idx].value)
+        yield_obj.n_energies = int(ace.xss_data[idx])
         n_e = yield_obj.n_energies
         idx += 1
     else:
         return yield_obj
     
-    # Read the tabular energy points - store the XssEntry objects
+    # Read the tabular energy points - a view of xss_data
     if idx + n_e <= len(ace.xss_data):
-        yield_obj.energies = [ace.xss_data[idx + i] for i in range(n_e)]
+        yield_obj.energies = ace.xss_data[idx:idx + n_e]
         idx += n_e
     else:
         return yield_obj
     
-    # Read the corresponding yields - store the XssEntry objects
+    # Read the corresponding yields - a view of xss_data
     if idx + n_e <= len(ace.xss_data):
-        yield_obj.yields = [ace.xss_data[idx + i] for i in range(n_e)]
+        yield_obj.yields = ace.xss_data[idx:idx + n_e]
     
     return yield_obj

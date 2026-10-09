@@ -3,7 +3,7 @@ Module for comparing cross section data in ACE format.
 """
 
 from kika.ace.classes.ace import Ace
-from kika.ace.comparison.compare_ace import compare_arrays
+from kika.ace.comparison.compare_utils import compare_arrays
 
 def compare_cross_sections(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
     """Compare cross sections between two ACE objects."""
@@ -29,29 +29,29 @@ def compare_standard_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: 
         return False
     
     # Compare total cross section
-    total_xs1 = [x.value for x in ace1.esz_block.total_xs] if ace1.esz_block.total_xs else []
-    total_xs2 = [x.value for x in ace2.esz_block.total_xs] if ace2.esz_block.total_xs else []
+    total_xs1 = [float(x) for x in ace1.esz_block.total_xs] if ace1.esz_block.total_xs is not None else []
+    total_xs2 = [float(x) for x in ace2.esz_block.total_xs] if ace2.esz_block.total_xs is not None else []
     
     if not compare_arrays(total_xs1, total_xs2, tolerance, "Total cross section", verbose):
         return False
     
     # Compare elastic cross section
-    elastic_xs1 = [x.value for x in ace1.esz_block.elastic_xs] if ace1.esz_block.elastic_xs else []
-    elastic_xs2 = [x.value for x in ace2.esz_block.elastic_xs] if ace2.esz_block.elastic_xs else []
+    elastic_xs1 = [float(x) for x in ace1.esz_block.elastic_xs] if ace1.esz_block.elastic_xs is not None else []
+    elastic_xs2 = [float(x) for x in ace2.esz_block.elastic_xs] if ace2.esz_block.elastic_xs is not None else []
     
     if not compare_arrays(elastic_xs1, elastic_xs2, tolerance, "Elastic cross section", verbose):
         return False
     
     # Compare absorption cross section
-    abs_xs1 = [x.value for x in ace1.esz_block.absorption_xs] if ace1.esz_block.absorption_xs else []
-    abs_xs2 = [x.value for x in ace2.esz_block.absorption_xs] if ace2.esz_block.absorption_xs else []
+    abs_xs1 = [float(x) for x in ace1.esz_block.absorption_xs] if ace1.esz_block.absorption_xs is not None else []
+    abs_xs2 = [float(x) for x in ace2.esz_block.absorption_xs] if ace2.esz_block.absorption_xs is not None else []
     
     if not compare_arrays(abs_xs1, abs_xs2, tolerance, "Absorption cross section", verbose):
         return False
     
     # Compare heating numbers
-    heating1 = [x.value for x in ace1.esz_block.heating_numbers] if ace1.esz_block.heating_numbers else []
-    heating2 = [x.value for x in ace2.esz_block.heating_numbers] if ace2.esz_block.heating_numbers else []
+    heating1 = [float(x) for x in ace1.esz_block.heating_numbers] if ace1.esz_block.heating_numbers is not None else []
+    heating2 = [float(x) for x in ace2.esz_block.heating_numbers] if ace2.esz_block.heating_numbers is not None else []
     
     if not compare_arrays(heating1, heating2, tolerance, "Heating numbers", verbose):
         return False

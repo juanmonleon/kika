@@ -1,13 +1,13 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
-from kika.ace.classes.xss import XssEntry
+import numpy as np
 
 @dataclass
 class CrossSectionLocators:
     """Container for cross section locators from LSIG, LSIGP, and LSIGH blocks."""
-    incident_neutron: List[XssEntry] = field(default_factory=list)  # LSIG Block - neutron reaction xs locators
-    photon_production: List[XssEntry] = field(default_factory=list)  # LSIGP Block - photon production xs locators
-    particle_production: List[List[XssEntry]] = field(default_factory=list)  # LSIGH Block - particle production xs locators
+    incident_neutron: np.ndarray = field(default_factory=lambda: np.empty(0))  # LSIG Block - neutron reaction xs locators
+    photon_production: np.ndarray = field(default_factory=lambda: np.empty(0))  # LSIGP Block - photon production xs locators
+    particle_production: List[np.ndarray] = field(default_factory=list)  # LSIGH Block - particle production xs locators
     
     @property
     def has_neutron_data(self) -> bool:
@@ -24,7 +24,7 @@ class CrossSectionLocators:
         """Check if particle production cross section locators are available."""
         return len(self.particle_production) > 0
     
-    def get_particle_production_locators(self, particle_idx: int = 0) -> Optional[List[XssEntry]]:
+    def get_particle_production_locators(self, particle_idx: int = 0) -> Optional[np.ndarray]:
         """
         Get the list of particle production cross section locators for a specific particle type.
         
@@ -35,20 +35,20 @@ class CrossSectionLocators:
             
         Returns
         -------
-        List[XssEntry] or None
+        numpy.ndarray or None
             The list of locators, or None if the particle type doesn't exist
         """
         if particle_idx < 0 or particle_idx >= len(self.particle_production):
             return None
         return self.particle_production[particle_idx]
     
-    def get_locator_value(self, locator: XssEntry) -> int:
+    def get_locator_value(self, locator: float) -> int:
         """
         Get the integer value of a locator.
         
         Parameters
         ----------
-        locator : XssEntry
+        locator : float
             The locator entry
             
         Returns
@@ -56,4 +56,4 @@ class CrossSectionLocators:
         int
             The integer value of the locator
         """
-        return int(locator.value)
+        return int(locator)

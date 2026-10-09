@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika._utils import create_repr_section
 
@@ -48,32 +49,14 @@ class MaxwellFissionSpectrum(EnergyDistribution):
         float
             The θ parameter value (temperature)
         """
-        if not self.incident_energies or len(self.incident_energies) == 0:
-            return 0.0
-            
-        # If energy is outside the tabulated range, use the closest value
-        if incident_energy <= self.incident_energies[0]:
-            return self.temperatures[0]
-        if incident_energy >= self.incident_energies[-1]:
-            return self.temperatures[-1]
-            
-        # Use linear interpolation to get temperature
-        # In a full implementation, we would use the interpolation scheme from temp_nbt and temp_interp
-        idx = np.searchsorted(self.incident_energies, incident_energy) - 1
-        e_low = self.incident_energies[idx]
-        e_high = self.incident_energies[idx + 1]
-        t_low = self.temperatures[idx]
-        t_high = self.temperatures[idx + 1]
-        
-        # Linear interpolation
-        t = t_low + (t_high - t_low) * (incident_energy - e_low) / (e_high - e_low)
-        return t
-    
+        # theta(E) read with its own NBT/INT; the end value holds outside
+        return tabular_math.tab1(self.incident_energies, self.temperatures,
+                                 self.temp_nbt, self.temp_interp, incident_energy)
     def calculate_normalization_constant(self, incident_energy: float, temperature: float) -> float:
         """
         Calculate the normalization constant I.
         
-        I = (θ^3 * sqrt(π) / 2) * [ erf(√((E - U)/θ)) - √((E - U)/θ) * exp(−(E - U)/θ) ]
+        I = θ^(3/2) * [ (sqrt(π)/2) erf(√((E - U)/θ)) - √((E - U)/θ) * exp(−(E - U)/θ) ]
         
         Parameters
         ----------
@@ -94,13 +77,11 @@ class MaxwellFissionSpectrum(EnergyDistribution):
         if arg <= 0:
             return 1.0  # Default value if restriction exceeds incident energy
         
-        # Calculate I
+        # I = θ^(3/2) [ (√π/2) erf(√x) − √x e^(−x) ],  x = (E − U)/θ  (manual eq. 8),
+        # the integral of √E' e^(−E'/θ) over [0, E − U]
         sqrt_arg = np.sqrt(arg)
-        erf_term = special.erf(sqrt_arg)
-        exp_term = sqrt_arg * np.exp(-arg)
-        
-        # I = (θ^3 * sqrt(π) / 2) * [ erf(√((E - U)/θ)) - √((E - U)/θ) * exp(−(E - U)/θ) ]
-        normalization = (temperature**3 * np.sqrt(np.pi) / 2.0) * (erf_term - exp_term)
+        normalization = temperature**1.5 * (
+            0.5 * np.sqrt(np.pi) * special.erf(sqrt_arg) - sqrt_arg * np.exp(-arg))
         
         return max(normalization, 1.0e-30)  # Prevent division by zero
     
@@ -148,14 +129,14 @@ class MaxwellFissionSpectrum(EnergyDistribution):
             width1=property_col_width, width2=value_col_width)
         
         # If we have incident energies, show the range
-        if self.incident_energies:
+        if len(self.incident_energies) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Incident Energy Range", 
                 f"{min(self.incident_energies):.6g} - {max(self.incident_energies)::.6g} MeV", 
                 width1=property_col_width, width2=value_col_width)
         
         # If we have temperatures, show the range
-        if self.temperatures:
+        if len(self.temperatures) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Temperature Parameter Range", 
                 f"{min(self.temperatures):.6g} - {max(self.temperatures)::.6g} MeV", 

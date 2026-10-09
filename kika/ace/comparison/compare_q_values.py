@@ -3,7 +3,7 @@ Module for comparing Q-values data in ACE format.
 """
 
 from kika.ace.classes.ace import Ace
-from kika.ace.comparison.compare_ace import compare_arrays
+from kika.ace.comparison.compare_utils import compare_arrays
 
 def compare_q_values(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
     """Compare Q-values between two ACE objects."""
@@ -29,7 +29,7 @@ def compare_q_values(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: boo
         return False
     
     # Compare Q-values
-    qvalues1 = [q.value for q in ace1.q_values.q_values]
-    qvalues2 = [q.value for q in ace2.q_values.q_values]
+    qvalues1 = [float(q) for q in ace1.q_values.q_values]
+    qvalues2 = [float(q) for q in ace2.q_values.q_values]
     
     return compare_arrays(qvalues1, qvalues2, tolerance, "Q-values", verbose)

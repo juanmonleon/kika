@@ -32,7 +32,6 @@ def read_esz_block(ace, debug=False):
         logger.debug("\n===== ESZ BLOCK PARSING =====")
         logger.debug(f"Header info: ZAID={ace.header.zaid}")
 
-    # Create a new EszBlock - for both eager and lazy loading
     esz_block = EszBlock()
     
     # Get the starting index for ESZ block

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import List
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika._utils import create_repr_section
 
 @dataclass
@@ -19,11 +20,11 @@ class EnergyDependentYield:
     - Y(l), l = 1,...,N_E: Corresponding energy-dependent yields
     """
     n_interp_regions: int = 0  # Number of interpolation regions
-    nbt: List[int] = field(default_factory=list)  # ENDF interpolation parameters
-    interp: List[int] = field(default_factory=list)  # ENDF interpolation scheme
+    nbt: np.ndarray = field(default_factory=lambda: np.empty(0))  # ENDF interpolation parameters (view of xss_data)
+    interp: np.ndarray = field(default_factory=lambda: np.empty(0))  # ENDF interpolation scheme (view of xss_data)
     n_energies: int = 0  # Number of energy points
-    energies: List[float] = field(default_factory=list)  # Tabular energy points
-    yields: List[float] = field(default_factory=list)  # Corresponding yields
+    energies: np.ndarray = field(default_factory=lambda: np.empty(0))  # Tabular energy points (view of xss_data)
+    yields: np.ndarray = field(default_factory=lambda: np.empty(0))  # Corresponding yields (view of xss_data)
     
     def get_yield(self, energy: float) -> float:
         """
@@ -39,19 +40,9 @@ class EnergyDependentYield:
         float
             The interpolated yield value
         """
-        if not self.energies or not self.yields:
+        if len(self.energies) == 0 or len(self.yields) == 0:
             return 0.0
-            
-        # If energy is outside the tabulated range, use the closest value
-        if energy <= self.energies[0]:
-            return self.yields[0]
-        if energy >= self.energies[-1]:
-            return self.yields[-1]
-            
-        # Use linear interpolation to get yield value
-        # In a full implementation, we would use the interpolation scheme from nbt and interp
-        return np.interp(energy, self.energies, self.yields)
-    
+        return tabular_math.tab1(self.energies, self.yields, self.nbt, self.interp, energy)
     def __repr__(self) -> str:
         """
         Returns a formatted string representation of the EnergyDependentYield object.
@@ -92,12 +83,12 @@ class EnergyDependentYield:
             width1=property_col_width, width2=value_col_width)
         
         # Add information about energy range and yield range if data exists
-        if self.energies and len(self.energies) > 0:
+        if len(self.energies) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Energy Range", f"{min(self.energies):.6g} - {max(self.energies):.6g} MeV", 
                 width1=property_col_width, width2=value_col_width)
         
-        if self.yields and len(self.yields) > 0:
+        if len(self.yields) > 0:
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Yield Range", f"{min(self.yields):.6g} - {max(self.yields):.6g}", 
                 width1=property_col_width, width2=value_col_width)
@@ -110,15 +101,15 @@ class EnergyDependentYield:
                     "Estimated Threshold Energy", f"{threshold_energy:.6g} MeV", 
                     width1=property_col_width, width2=value_col_width)
             
-            max_yield_idx = self.yields.index(max(self.yields))
+            max_yield_idx = list(self.yields).index(max(self.yields))
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Maximum Yield", f"{self.yields[max_yield_idx]:.6g} at {self.energies[max_yield_idx]:.6g} MeV", 
                 width1=property_col_width, width2=value_col_width)
         
         # Interpolation information
-        if self.interp:
+        if len(self.interp) > 0:
             interp_schemes = {1: "Histogram", 2: "Linear-linear", 3: "Linear-log", 4: "Log-linear", 5: "Log-log"}
-            scheme_strs = [interp_schemes.get(i, f"Unknown ({i})") for i in self.interp]
+            scheme_strs = [interp_schemes.get(int(i), f"Unknown ({int(i)})") for i in self.interp]
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Interpolation Schemes", ", ".join(scheme_strs), 
                 width1=property_col_width, width2=value_col_width)

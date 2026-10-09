@@ -41,14 +41,8 @@ from kika.ace.writers.write_ace import write_ace
 
 
 def xss_array(ace) -> np.ndarray:
-    """The XSS block as plain floats.
-
-    Index 0 is the bare ``0`` ``read_xss`` seeds for FORTRAN 1-based indexing;
-    every entry after it is an ``XssEntry``.
-    """
-    return np.array(
-        [getattr(entry, "value", entry) for entry in ace.xss_data], dtype=float
-    )
+    """The XSS block, index 0 being the FORTRAN 1-based placeholder."""
+    return np.asarray(ace.xss_data, dtype=float)
 
 
 @pytest.fixture(scope="module")
@@ -103,7 +97,7 @@ def test_roundtrip_preserves_the_line_count(roundtripped):
         "real and the consequence is not: the values are unaffected (the "
         "companion test proves the XSS is bitwise identical) and MCNP's "
         "list-directed reads accept both spellings, while a fix needs a "
-        "per-entry spelling flag on XssEntry and gives up the np.savetxt fast "
+        "per-entry spelling flag on the XSS array and gives up the np.savetxt fast "
         "path over 820 000 entries, in a pipeline that writes one ACE per "
         "sample per temperature. Recording how a number was written is a job "
         "for the canonical model in phase 3. The mirror-image defect on the "

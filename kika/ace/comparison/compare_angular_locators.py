@@ -60,8 +60,8 @@ def compare_angular_locators(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verb
         return False
     
     if ace1.angular_locators.has_elastic_data and ace2.angular_locators.has_elastic_data:
-        elastic_loc1 = ace1.angular_locators.elastic_scattering.value
-        elastic_loc2 = ace2.angular_locators.elastic_scattering.value
+        elastic_loc1 = ace1.angular_locators.elastic_scattering
+        elastic_loc2 = ace2.angular_locators.elastic_scattering
         if not compare_floats(elastic_loc1, elastic_loc2, tolerance, "Elastic scattering angular locator", verbose):
             return False
     
@@ -102,8 +102,8 @@ def compare_neutron_angular_locators(ace1: Ace, ace2: Ace, tolerance: float, ver
         return False
     
     # Compare locator values
-    locators1 = [loc.value for loc in ace1.angular_locators.incident_neutron]
-    locators2 = [loc.value for loc in ace2.angular_locators.incident_neutron]
+    locators1 = ace1.angular_locators.incident_neutron.tolist()
+    locators2 = ace2.angular_locators.incident_neutron.tolist()
     
     return compare_arrays(locators1, locators2, tolerance, "Neutron reaction angular locators", verbose)
 
@@ -130,8 +130,8 @@ def compare_photon_angular_locators(ace1: Ace, ace2: Ace, tolerance: float, verb
         return False
     
     # Compare locator values
-    locators1 = [loc.value for loc in ace1.angular_locators.photon_production]
-    locators2 = [loc.value for loc in ace2.angular_locators.photon_production]
+    locators1 = ace1.angular_locators.photon_production.tolist()
+    locators2 = ace2.angular_locators.photon_production.tolist()
     
     return compare_arrays(locators1, locators2, tolerance, "Photon production angular locators", verbose)
 
@@ -167,8 +167,8 @@ def compare_particle_angular_locators(ace1: Ace, ace2: Ace, tolerance: float, ve
             return False
         
         # Compare locator values for this particle type
-        locators1 = [loc.value for loc in loc_list1]
-        locators2 = [loc.value for loc in loc_list2]
+        locators1 = [float(loc) for loc in loc_list1]
+        locators2 = [float(loc) for loc in loc_list2]
         
         if not compare_arrays(locators1, locators2, tolerance, f"Particle type {i} angular locators", verbose):
             return False

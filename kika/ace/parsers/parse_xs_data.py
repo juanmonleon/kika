@@ -1,4 +1,6 @@
 import logging
+
+import numpy as np
 from kika.ace.classes.cross_section.cross_section_data import CrossSectionData, ReactionCrossSection
 
 # Setup logger
@@ -48,7 +50,7 @@ def read_xs_data_block(ace, debug=False):
         ace.cross_section = CrossSectionData()
     
     # Store energy grid for convenience
-    if ace.esz_block and ace.esz_block.energies:
+    if ace.esz_block and len(ace.esz_block.energies):
         ace.cross_section.set_energy_grid(ace.esz_block.energies)
     
     # Get the starting index for SIG block
@@ -78,14 +80,13 @@ def read_xs_data_block(ace, debug=False):
         logger.debug(f"Found {len(mt_entries)} MT entries and {len(locator_entries)} locator entries")
     
     if len(mt_entries) != len(locator_entries):
-        if debug:
-            logger.debug(f"Number of MT entries ({len(mt_entries)}) doesn't match locator entries ({len(locator_entries)})")
+        logger.warning(f"MTR has {len(mt_entries)} reactions but LSIG {len(locator_entries)} locators; SIG not read")
         return None
     
     # Process each reaction
     for i, (mt_entry, locator_entry) in enumerate(zip(mt_entries, locator_entries)):
-        mt_value = int(mt_entry.value)
-        locator_value = int(locator_entry.value)
+        mt_value = int(mt_entry)
+        locator_value = int(locator_entry)
         
         # Calculate absolute index - FIX: Subtract 1 to match documentation
         # According to Table 16: LXS + LOCA_i - 1
@@ -97,14 +98,13 @@ def read_xs_data_block(ace, debug=False):
             logger.debug(f"  Absolute index: sig_idx + locator - 1 = {sig_idx} + {locator_value} - 1 = {abs_idx}")
         
         if abs_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  ERROR: Absolute index {abs_idx} is out of bounds ({len(ace.xss_data)})")
+            logger.warning(f"SIG of MT={mt_value}: Absolute index {abs_idx} is out of bounds ({len(ace.xss_data)})")
             continue
             
         try:
             # Read energy grid index and number of energies
-            energy_idx = int(ace.xss_data[abs_idx].value)
-            num_energies = int(ace.xss_data[abs_idx + 1].value)
+            energy_idx = int(ace.xss_data[abs_idx])
+            num_energies = int(ace.xss_data[abs_idx + 1])
             
             if debug:
                 logger.debug(f"  Energy grid index from ACE: {energy_idx} (1-indexed FORTRAN style)")
@@ -116,23 +116,21 @@ def read_xs_data_block(ace, debug=False):
             
             # Validate that indices make sense
             if energy_idx <= 0:
-                if debug:
-                    logger.debug(f"  ERROR: Invalid energy index {energy_idx} (must be > 0)")
+                logger.warning(f"SIG of MT={mt_value}: Invalid energy index {energy_idx} (must be > 0)")
                 continue
                 
             if num_energies <= 0:
-                if debug:
-                    logger.debug(f"  ERROR: Invalid number of energies {num_energies} (must be > 0)")
+                logger.warning(f"SIG of MT={mt_value}: Invalid number of energies {num_energies} (must be > 0)")
                 continue
                 
             # Verify energy index doesn't exceed the energy grid size (use Python-style index for check)
             if python_energy_idx >= len(ace.esz_block.energies):
-                if debug:
-                    logger.debug(f"  ERROR: Energy index {energy_idx} (0-indexed: {python_energy_idx}) exceeds energy grid size {len(ace.esz_block.energies)}")
+                logger.warning(f"SIG of MT={mt_value}: Energy index {energy_idx} (0-indexed: {python_energy_idx}) exceeds energy grid size {len(ace.esz_block.energies)}")
                 continue
                 
             # Check if num_energies would make the cross section extend beyond the energy grid
             if python_energy_idx + num_energies > len(ace.esz_block.energies):
+                logger.warning(f"SIG of MT={mt_value} runs past the energy grid; truncated to the grid")
                 if debug:
                     logger.debug(f"  WARNING: Cross section would extend beyond energy grid: "
                                f"start={energy_idx} (0-indexed: {python_energy_idx}), length={num_energies}, "
@@ -148,17 +146,16 @@ def read_xs_data_block(ace, debug=False):
                 logger.debug(f"  XS data range: XSS[{xs_start}:{xs_end}]")
             
             if xs_end <= len(ace.xss_data):
-                # Store references to the original XssEntry objects instead of just their values
+                # A view: perturbing the reaction writes the XSS array
                 xs_entries = ace.xss_data[xs_start:xs_end]
                 
                 # Get energy entries for this reaction
-                if ace.esz_block and ace.esz_block.energies:
+                if ace.esz_block and len(ace.esz_block.energies):
                     end_energy_idx = min(python_energy_idx + num_energies, len(ace.esz_block.energies))
                     energy_entries = ace.esz_block.energies[python_energy_idx:end_energy_idx]
                 else:
-                    energy_entries = []
+                    energy_entries = np.empty(0)
                 
-                # Create and store ReactionCrossSection with original XssEntry objects
                 reaction_xs = ReactionCrossSection(
                     mt=mt_value,
                     energy_idx=python_energy_idx,
@@ -173,12 +170,10 @@ def read_xs_data_block(ace, debug=False):
                 if debug:
                     logger.debug(f"  Successfully read {len(xs_entries)} XS values for MT={mt_value}")
             else:
-                if debug:
-                    logger.debug(f"  ERROR: XS data would extend beyond XSS array: {xs_end} > {len(ace.xss_data)}")
+                logger.warning(f"SIG of MT={mt_value}: XS data would extend beyond XSS array: {xs_end} > {len(ace.xss_data)}")
         except (IndexError, ValueError) as e:
             # Skip reaction if there's an error
-            if debug:
-                logger.debug(f"  ERROR processing reaction: {str(e)}")
+            logger.warning(f"SIG of MT={mt_value}: {str(e)}")
             continue
     
     if debug:
