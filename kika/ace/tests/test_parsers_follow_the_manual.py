@@ -23,6 +23,7 @@ from kika.ace.classes.energy_distribution.distributions.maxwell import MaxwellFi
 from kika.ace.classes.energy_distribution.distributions.tabular import ContinuousTabularDistribution
 from kika.ace.classes.energy_distribution.distributions.watt import EnergyDependentWattSpectrum
 from kika.ace.classes.header import Header
+from kika.ace.classes.xss import xss_position
 from kika.ace.parsers.laws.law_1 import parse_tabular_energy_distribution
 from kika.ace.parsers.parse_ace import read_ace
 from kika.ace.parsers.parse_gpd import read_gpd_block
@@ -267,3 +268,42 @@ def test_particle_blocks_are_read_per_particle_type(fe56_ace):
     assert sorted(sigh.particle_cross_sections) == list(range(1, n_types + 1))
     # MT5 produces every particle type; each keeps its own yield
     assert all(sigh.get_reaction_xs(5, i) is not None for i in range(1, n_types + 1))
+
+
+# --- parameter tables read with their own NBT/INT ---------------------------------
+
+def test_parameter_tables_follow_their_interpolation_regions():
+    import dataclasses
+    from kika.ace.classes.nubar.nubar import NuData, NuTabulated
+    assert dataclasses.is_dataclass(NuData) and dataclasses.is_dataclass(NuTabulated)
+    theta = MaxwellFissionSpectrum(incident_energies=np.array([1.0, 3.0]), temperatures=np.array([1.0, 2.0]),
+                                   temp_nbt=[2], temp_interp=[1])
+    assert theta.get_temperature(2.5) == 1.0                 # histogram region
+    assert MaxwellFissionSpectrum(incident_energies=np.array([1.0, 3.0]),
+                                  temperatures=np.array([1.0, 2.0])).get_temperature(2.0) == 1.5
+    nu = NuTabulated(interpolation_regions=[(2, 5)], energies=np.array([1.0, 4.0]), nubar_values=np.array([2.0, 8.0]))
+    assert nu.evaluate(2.0) == pytest.approx(4.0)           # log-log: 2 * (2/1)^1
+    assert nu.evaluate(10.0) == 8.0                         # held past the table
+
+
+def test_a_direct_photon_xs_is_zero_below_its_first_grid_point():
+    from kika.ace.classes.photon_production_xs import DirectCrossSection
+    xs = DirectCrossSection(energy_grid_index=2, num_entries=2, cross_sections=np.array([1.0, 3.0]))
+    assert xs.get_value(0.5, [0.0, 1.0, 2.0]) == 0.0
+    assert xs.get_value(1.5, [0.0, 1.0, 2.0]) == pytest.approx(2.0)
+
+
+# --- comparison localises a difference to its block --------------------------------
+
+def test_comparison_flags_the_block_that_changed(tmp_path):
+    from kika.ace.comparison import compare_ace_objects
+    path = write_table(tmp_path / "t.ace")
+    a = read_ace(str(path))
+    law = a.energy_distributions.incident_neutron[16][0]
+    changed = a.copy()
+    pos = xss_position(law.distributions[1]["a"]) + 1          # the second Kalbach slope of table 2
+    changed.xss_data[pos] = 2.5
+    write_ace(changed, str(tmp_path / "c.ace"), overwrite=True)
+    ok, flags = compare_ace_objects(a, read_ace(str(tmp_path / "c.ace")), verbose=False)
+    assert not ok
+    assert [k for k, v in flags.items() if v is False] == ["energy_distributions", "xss_data"]

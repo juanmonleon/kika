@@ -1,3 +1,4 @@
+import numpy as np
 import logging
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.cross_section.cross_section_locators import CrossSectionLocators
@@ -93,7 +94,7 @@ def read_xs_locator_blocks(ace: Ace, debug=False):
     
     if jxs31 > 0 and jxs32 > 0 and num_particle_types > 0:
         # Initialize list for each particle type
-        ace.xs_locators.particle_production = [[] for _ in range(num_particle_types)]
+        ace.xs_locators.particle_production = [np.empty(0) for _ in range(num_particle_types)]
         
         # Process each particle type
         for i_python in range(num_particle_types):

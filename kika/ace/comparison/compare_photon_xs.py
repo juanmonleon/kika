@@ -157,82 +157,35 @@ def compare_direct_xs(xs1: DirectCrossSection, xs2: DirectCrossSection,
     
     return True
 
-def compare_particle_production_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
-    """Compare particle production cross section data between two ACE objects."""
-    # Check if both objects have particle production cross section data
-    has_particle_xs1 = (ace1.particle_production_xs is not None and 
-                       ace1.particle_production_xs.has_data)
-    
-    has_particle_xs2 = (ace2.particle_production_xs is not None and 
-                       ace2.particle_production_xs.has_data)
-    
-    if not has_particle_xs1 and not has_particle_xs2:
+def compare_particle_yield_xs(ace1: Ace, ace2: Ace, tolerance: float = 1e-6, verbose: bool = True) -> bool:
+    """Compare the SIGH blocks: per particle type, the yield-based production xs of each MT."""
+    sigh1, sigh2 = ace1.particle_production_xs, ace2.particle_production_xs
+    has1 = sigh1 is not None and sigh1.has_data
+    has2 = sigh2 is not None and sigh2.has_data
+    if not has1 and not has2:
         return True
-    
-    if has_particle_xs1 != has_particle_xs2:
+    if has1 != has2:
         if verbose:
-            print("Particle production cross section mismatch: Presence differs")
+            print("Particle production (SIGH) mismatch: Presence differs")
         return False
-    
-    # Compare particle types
-    particle_types1 = set(ace1.particle_production_xs.particle_types.keys())
-    particle_types2 = set(ace2.particle_production_xs.particle_types.keys())
-    
-    if particle_types1 != particle_types2:
+    if sigh1.particle_types != sigh2.particle_types:
         if verbose:
-            print("Particle production cross section mismatch: Different particle types")
-            print(f"Particle types only in first: {sorted(particle_types1 - particle_types2)}")
-            print(f"Particle types only in second: {sorted(particle_types2 - particle_types1)}")
+            print("Particle production (SIGH) mismatch: Different particle types or MT lists")
         return False
-    
-    # Compare MT numbers for each particle type
-    for ptype in sorted(particle_types1):
-        mt_list1 = set(ace1.particle_production_xs.particle_types.get(ptype, []))
-        mt_list2 = set(ace2.particle_production_xs.particle_types.get(ptype, []))
-        
-        if mt_list1 != mt_list2:
-            if verbose:
-                print(f"Particle type {ptype} production cross section mismatch: Different MT numbers")
-                print(f"MT numbers only in first: {sorted(mt_list1 - mt_list2)}")
-                print(f"MT numbers only in second: {sorted(mt_list2 - mt_list1)}")
-            return False
-    
-    # Compare reaction MT numbers for cross sections
-    mt_numbers1 = set(ace1.particle_production_xs.cross_sections.keys())
-    mt_numbers2 = set(ace2.particle_production_xs.cross_sections.keys())
-    
-    if mt_numbers1 != mt_numbers2:
+    by_type1, by_type2 = sigh1.particle_cross_sections, sigh2.particle_cross_sections
+    if {p: sorted(v) for p, v in by_type1.items()} != {p: sorted(v) for p, v in by_type2.items()}:
         if verbose:
-            print("Particle production cross section mismatch: Different MT numbers")
-            print(f"MT numbers only in first: {sorted(mt_numbers1 - mt_numbers2)}")
-            print(f"MT numbers only in second: {sorted(mt_numbers2 - mt_numbers1)}")
+            print("Particle production (SIGH) mismatch: Different (particle, MT) pairs")
         return False
-    
-    # Compare each reaction's cross section data (same as for photon production)
-    for mt in sorted(mt_numbers1):
-        xs1 = ace1.particle_production_xs.cross_sections[mt]
-        xs2 = ace2.particle_production_xs.cross_sections[mt]
-        
-        # Compare cross section types
-        if type(xs1) != type(xs2):
-            if verbose:
-                print(f"Particle production MT={mt} cross section mismatch: Types differ "
-                      f"({type(xs1).__name__} vs {type(xs2).__name__})")
-            return False
-        
-        # Compare MF format type
-        if xs1.mftype != xs2.mftype:
-            if verbose:
-                print(f"Particle production MT={mt} cross section mismatch: MF types differ "
-                      f"({xs1.mftype} vs {xs2.mftype})")
-            return False
-        
-        # Compare appropriate specific data based on cross section type
-        if isinstance(xs1, YieldBasedCrossSection):
+    for ptype in sorted(by_type1):
+        for mt in sorted(by_type1[ptype]):
+            xs1, xs2 = by_type1[ptype][mt], by_type2[ptype][mt]
+            if type(xs1) != type(xs2):
+                if verbose:
+                    print(f"Particle {ptype} MT={mt} production xs mismatch: types differ")
+                return False
             if not compare_yield_based_xs(xs1, xs2, mt, tolerance, verbose):
+                if verbose:
+                    print(f"  (particle type {ptype})")
                 return False
-        elif isinstance(xs1, DirectCrossSection):
-            if not compare_direct_xs(xs1, xs2, mt, tolerance, verbose):
-                return False
-    
     return True

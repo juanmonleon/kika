@@ -49,10 +49,9 @@ def read_nubar_data(ace, debug=False):
         
         # Check bounds
         if jxs2 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Error: JXS(2)={jxs2} is out of bounds for XSS array of length {len(ace.xss_data)}")
+            logger.warning(f"JXS(2)={jxs2} points past the XSS array ({len(ace.xss_data)}); NU block not read")
             ace.nubar.has_nubar = False
-            return
+            return ace.nubar
         
         # NU Block exists - check XSS(JXS(2)) value to determine format
         ace.nubar.has_nubar = True
@@ -156,9 +155,9 @@ def read_nubar_data(ace, debug=False):
         
         # Check bounds
         if dnu_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Error: JXS(24)={dnu_idx} is out of bounds for XSS array of length {len(ace.xss_data)}")
-            return
+            # keep the prompt/total nu already read
+            logger.warning(f"JXS(24)={dnu_idx} points past the XSS array ({len(ace.xss_data)}); delayed nu not read")
+            return ace.nubar
         
         # Delayed ν is given when JXS(24) > 0
         ace.nubar.has_delayed = True

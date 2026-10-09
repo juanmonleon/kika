@@ -80,8 +80,7 @@ def read_xs_data_block(ace, debug=False):
         logger.debug(f"Found {len(mt_entries)} MT entries and {len(locator_entries)} locator entries")
     
     if len(mt_entries) != len(locator_entries):
-        if debug:
-            logger.debug(f"Number of MT entries ({len(mt_entries)}) doesn't match locator entries ({len(locator_entries)})")
+        logger.warning(f"MTR has {len(mt_entries)} reactions but LSIG {len(locator_entries)} locators; SIG not read")
         return None
     
     # Process each reaction
@@ -99,8 +98,7 @@ def read_xs_data_block(ace, debug=False):
             logger.debug(f"  Absolute index: sig_idx + locator - 1 = {sig_idx} + {locator_value} - 1 = {abs_idx}")
         
         if abs_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  ERROR: Absolute index {abs_idx} is out of bounds ({len(ace.xss_data)})")
+            logger.warning(f"SIG of MT={mt_value}: Absolute index {abs_idx} is out of bounds ({len(ace.xss_data)})")
             continue
             
         try:
@@ -118,23 +116,21 @@ def read_xs_data_block(ace, debug=False):
             
             # Validate that indices make sense
             if energy_idx <= 0:
-                if debug:
-                    logger.debug(f"  ERROR: Invalid energy index {energy_idx} (must be > 0)")
+                logger.warning(f"SIG of MT={mt_value}: Invalid energy index {energy_idx} (must be > 0)")
                 continue
                 
             if num_energies <= 0:
-                if debug:
-                    logger.debug(f"  ERROR: Invalid number of energies {num_energies} (must be > 0)")
+                logger.warning(f"SIG of MT={mt_value}: Invalid number of energies {num_energies} (must be > 0)")
                 continue
                 
             # Verify energy index doesn't exceed the energy grid size (use Python-style index for check)
             if python_energy_idx >= len(ace.esz_block.energies):
-                if debug:
-                    logger.debug(f"  ERROR: Energy index {energy_idx} (0-indexed: {python_energy_idx}) exceeds energy grid size {len(ace.esz_block.energies)}")
+                logger.warning(f"SIG of MT={mt_value}: Energy index {energy_idx} (0-indexed: {python_energy_idx}) exceeds energy grid size {len(ace.esz_block.energies)}")
                 continue
                 
             # Check if num_energies would make the cross section extend beyond the energy grid
             if python_energy_idx + num_energies > len(ace.esz_block.energies):
+                logger.warning(f"SIG of MT={mt_value} runs past the energy grid; truncated to the grid")
                 if debug:
                     logger.debug(f"  WARNING: Cross section would extend beyond energy grid: "
                                f"start={energy_idx} (0-indexed: {python_energy_idx}), length={num_energies}, "
@@ -174,12 +170,10 @@ def read_xs_data_block(ace, debug=False):
                 if debug:
                     logger.debug(f"  Successfully read {len(xs_entries)} XS values for MT={mt_value}")
             else:
-                if debug:
-                    logger.debug(f"  ERROR: XS data would extend beyond XSS array: {xs_end} > {len(ace.xss_data)}")
+                logger.warning(f"SIG of MT={mt_value}: XS data would extend beyond XSS array: {xs_end} > {len(ace.xss_data)}")
         except (IndexError, ValueError) as e:
             # Skip reaction if there's an error
-            if debug:
-                logger.debug(f"  ERROR processing reaction: {str(e)}")
+            logger.warning(f"SIG of MT={mt_value}: {str(e)}")
             continue
     
     if debug:

@@ -50,7 +50,8 @@ def compare_particle_production_locators(ace1: Ace, ace2: Ace, tolerance: float 
                 # This might not necessarily be an error - locators can differ 
                 # between ACE files while the underlying data is still identical
                 # Just issue a warning but continue checking other locators
-                print(f"  Note: Different locator values may be acceptable if data content is identical")
+                if verbose:
+                    print(f"  Note: Different locator values may be acceptable if data content is identical")
     
     # For locators, we don't fail the comparison if locator values differ
     # since that can happen with equivalent data

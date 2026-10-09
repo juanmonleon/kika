@@ -1,3 +1,4 @@
+import numpy as np
 from typing import List, Optional
 import logging
 from kika.ace.classes.mt_reaction.mtr import ReactionMTData
@@ -61,6 +62,9 @@ def read_mtr_blocks(ace, debug=False):
                 
                 if debug:
                     logger.debug(f"Secondary neutron MT numbers: {[int(entry) for entry in reaction_mt_data.secondary_neutron_mt]}")
+            else:
+                raise ValueError(f"MTR block of NXS(4)={num_reactions} entries at JXS(3)={mtr_idx} "
+                                 f"runs past the XSS array ({len(ace.xss_data)})")
     
     # Read MTRP block (photon production MT numbers) if present
     mtrp_idx = ace.header.jxs_array[13]  # JXS(13)
@@ -79,6 +83,8 @@ def read_mtr_blocks(ace, debug=False):
                 if debug:
                     logger.debug(f"Read {len(reaction_mt_data.photon_production)} MT values from MTRP block")
                     logger.debug(f"Photon production MT values: {[int(entry) for entry in reaction_mt_data.photon_production]}")
+            else:
+                logger.warning(f"MTRP block of NXS(6)={num_photon_reactions} entries runs past the XSS array; not read")
     
     # Read MTRH block (particle production MT numbers) if present
     jxs31 = ace.header.jxs_array[31]  # JXS(31)
@@ -93,7 +99,7 @@ def read_mtr_blocks(ace, debug=False):
     
     if jxs31 > 0 and jxs32 > 0 and num_particle_types > 0:
         # Initialize list for each particle type
-        reaction_mt_data.particle_production = [[] for _ in range(num_particle_types)]
+        reaction_mt_data.particle_production = [np.empty(0) for _ in range(num_particle_types)]
         
         # Process each particle type
         for i_python in range(num_particle_types):

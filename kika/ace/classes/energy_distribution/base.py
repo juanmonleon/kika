@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.energy_distribution.types import EnergyDistributionType
 from kika._utils import create_repr_section
 
@@ -59,26 +60,11 @@ class EnergyDistribution:
         float
             Probability between 0 and 1 that this law applies
         """
-        # If there's no applicability data, this is the only law
+        # A single law has no table: it always applies
         if len(self.applicability_energies) == 0 or len(self.applicability_probabilities) == 0:
             return 1.0
-        
-        # Convert applicability_energies and applicability_probabilities to lists of float values
-        energy_values = [float(e) for e in self.applicability_energies]
-        prob_values = [float(p) for p in self.applicability_probabilities]
-        
-        # If energy is outside the tabulated range, use the closest value
-        if energy <= energy_values[0]:
-            return prob_values[0]
-        if energy >= energy_values[-1]:
-            return prob_values[-1]
-        
-        # Otherwise, interpolate
-        # Note: For a complete implementation, we would use the NBT and INT arrays
-        # to determine the interpolation scheme for each region
-        # For simplicity, we use linear interpolation here
-        return np.interp(energy, energy_values, prob_values)
-    
+        return tabular_math.tab1(self.applicability_energies, self.applicability_probabilities,
+                                 self.applicability_nbt, self.applicability_interp, energy)
     def __repr__(self) -> str:
         """
         Returns a formatted string representation of an EnergyDistribution object.

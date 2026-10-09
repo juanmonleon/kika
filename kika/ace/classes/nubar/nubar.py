@@ -4,6 +4,7 @@ from kika._utils import create_repr_section
 from kika.ace.classes.nubar.nubar_repr import nudata_repr, nucontainer_repr
 import pandas as pd
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 
 @dataclass
 class NuPolynomial:
@@ -38,23 +39,12 @@ class NuTabulated:
         :returns: The nubar value at the given energy
         :rtype: float
         """
-        # Simple linear interpolation for now
-        if energy <= self.energies[0]:
-            return self.nubar_values[0]
-        
-        if energy >= self.energies[-1]:
-            return self.nubar_values[-1]
-        
-        # Find the bracketing energy points
-        for i in range(len(self.energies) - 1):
-            if self.energies[i] <= energy <= self.energies[i + 1]:
-                # Linear interpolation
-                x1, x2 = self.energies[i], self.energies[i + 1]
-                y1, y2 = self.nubar_values[i], self.nubar_values[i + 1]
-                return y1 + (y2 - y1) * (energy - x1) / (x2 - x1)
-        
-        # Shouldn't reach here, but just in case
-        return self.nubar_values[-1]
+        if len(self.energies) == 0 or len(self.nubar_values) == 0:
+            return 0.0
+        nbt = [int(b) for b, _ in self.interpolation_regions]
+        interp = [int(i) for _, i in self.interpolation_regions]
+        return tabular_math.tab1(self.energies, self.nubar_values, nbt, interp, energy)
+
 
 @dataclass
 class NuData:

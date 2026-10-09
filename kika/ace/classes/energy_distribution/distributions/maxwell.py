@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika._utils import create_repr_section
 
@@ -48,27 +49,9 @@ class MaxwellFissionSpectrum(EnergyDistribution):
         float
             The θ parameter value (temperature)
         """
-        if len(self.incident_energies) == 0:
-            return 0.0
-            
-        # If energy is outside the tabulated range, use the closest value
-        if incident_energy <= self.incident_energies[0]:
-            return self.temperatures[0]
-        if incident_energy >= self.incident_energies[-1]:
-            return self.temperatures[-1]
-            
-        # Use linear interpolation to get temperature
-        # In a full implementation, we would use the interpolation scheme from temp_nbt and temp_interp
-        idx = np.searchsorted(self.incident_energies, incident_energy) - 1
-        e_low = self.incident_energies[idx]
-        e_high = self.incident_energies[idx + 1]
-        t_low = self.temperatures[idx]
-        t_high = self.temperatures[idx + 1]
-        
-        # Linear interpolation
-        t = t_low + (t_high - t_low) * (incident_energy - e_low) / (e_high - e_low)
-        return t
-    
+        # theta(E) read with its own NBT/INT; the end value holds outside
+        return tabular_math.tab1(self.incident_energies, self.temperatures,
+                                 self.temp_nbt, self.temp_interp, incident_energy)
     def calculate_normalization_constant(self, incident_energy: float, temperature: float) -> float:
         """
         Calculate the normalization constant I.

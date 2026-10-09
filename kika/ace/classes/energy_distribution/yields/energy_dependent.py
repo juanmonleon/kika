@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import List
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika._utils import create_repr_section
 
 @dataclass
@@ -41,17 +42,7 @@ class EnergyDependentYield:
         """
         if len(self.energies) == 0 or len(self.yields) == 0:
             return 0.0
-            
-        # If energy is outside the tabulated range, use the closest value
-        if energy <= self.energies[0]:
-            return self.yields[0]
-        if energy >= self.energies[-1]:
-            return self.yields[-1]
-            
-        # Use linear interpolation to get yield value
-        # In a full implementation, we would use the interpolation scheme from nbt and interp
-        return np.interp(energy, self.energies, self.yields)
-    
+        return tabular_math.tab1(self.energies, self.yields, self.nbt, self.interp, energy)
     def __repr__(self) -> str:
         """
         Returns a formatted string representation of the EnergyDependentYield object.

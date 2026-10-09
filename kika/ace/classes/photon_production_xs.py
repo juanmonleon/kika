@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Union, Tuple
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.photon_production_xs_repr import (
     yield_based_cross_section_repr,
     direct_cross_section_repr,
@@ -59,18 +60,8 @@ class YieldBasedCrossSection(ProductionCrossSection):
         float
             The interpolated yield value
         """
-        energies = self.get_energy_values()
-        yields = self.get_yield_values()
-        
-        # Basic bounds checking
-        if energy <= energies[0]:
-            return yields[0]
-        if energy >= energies[-1]:
-            return yields[-1]
-        
-        # Use numpy for fast linear interpolation
-        return np.interp(energy, energies, yields)
-    
+        return tabular_math.tab1(self.energies, self.yields, self.interpolation_bounds,
+                                 self.interpolation_schemes, energy)
     def reconstruct_xs(self, energy: float, mt_xs_function) -> float:
         """
         Reconstruct the production cross section at a specific energy using equation 20.
@@ -147,9 +138,10 @@ class DirectCrossSection(ProductionCrossSection):
         energy_range = energy_grid[idx_start:idx_end]
         xs_values = self.get_xs_values()
         
-        # Basic bounds checking
-        if energy <= energy_range[0]:
-            return xs_values[0]
+        # Below its first grid point (IE) the reaction has no cross section
+        # (manual Table 51); the last point is the end of the energy grid
+        if energy < energy_range[0]:
+            return 0.0
         if energy >= energy_range[-1]:
             return xs_values[-1]
         

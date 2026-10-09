@@ -2,6 +2,8 @@
 Module for comparing angular distribution data in ACE format.
 """
 
+import numpy as np
+
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.angular_distribution.types import AngularDistributionType
 from kika.ace.comparison.compare_utils import compare_arrays
@@ -265,72 +267,51 @@ def compare_angular_distribution_data(dist1, dist2, tolerance: float, name: str,
     bool
         True if distributions are equivalent, False otherwise
     """
-    # If both are isotropic, nothing else to compare
-    if dist1.distribution_type == AngularDistributionType.ISOTROPIC and \
-       dist2.distribution_type == AngularDistributionType.ISOTROPIC:
+    if dist1.distribution_type != dist2.distribution_type:
+        if verbose:
+            print(f"{name} angular distribution mismatch: Types differ "
+                  f"({dist1.distribution_type} vs {dist2.distribution_type})")
+        return False
+
+    # Isotropic: nothing else to compare. Correlated (LOCB=-1): the angle lives
+    # in the DLW laws, which compare_energy_distributions checks.
+    if dist1.distribution_type in (AngularDistributionType.ISOTROPIC,
+                                   AngularDistributionType.KALBACH_MANN):
         return True
-    
-    # Compare equiprobable distributions
+
+    # The raw per-energy arrays: the public properties rebuild every table as
+    # a list of lists on each access, which made this loop quadratic.
     if dist1.distribution_type == AngularDistributionType.EQUIPROBABLE:
-        # Compare cosine bins for each energy
-        if len(dist1.cosine_bins) != len(dist2.cosine_bins):
-            if verbose:
-                print(f"{name} angular distribution mismatch: Different number of energy points for cosine bins "
-                      f"({len(dist1.cosine_bins)} vs {len(dist2.cosine_bins)})")
-            return False
-        
-        for i, (bins1, bins2) in enumerate(zip(dist1.cosine_bins, dist2.cosine_bins)):
-            bins_values1 = [float(b) for b in bins1]
-            bins_values2 = [float(b) for b in bins2]
-            
-            if not compare_arrays(bins_values1, bins_values2, tolerance, 
-                                 f"{name} angular distribution cosine bins at energy point {i}", verbose):
-                return False
-        
-        return True
-    
-    # Compare tabulated distributions
-    if dist1.distribution_type == AngularDistributionType.TABULATED:
-        # Compare interpolation flags
-        if dist1.interpolation != dist2.interpolation:
+        tables = [("cosine bins", dist1._cosine_bins, dist2._cosine_bins)]
+    elif dist1.distribution_type == AngularDistributionType.TABULATED:
+        if list(dist1.interpolation) != list(dist2.interpolation):
             if verbose:
                 print(f"{name} angular distribution mismatch: Different interpolation flags "
                       f"({dist1.interpolation} vs {dist2.interpolation})")
             return False
-        
-        # Compare number of tabulated points
-        if len(dist1.cosine_grid) != len(dist2.cosine_grid):
+        tables = [("cosine grid", dist1._cosine_grid, dist2._cosine_grid),
+                  ("PDF", dist1._pdf, dist2._pdf),
+                  ("CDF", dist1._cdf, dist2._cdf)]
+    else:
+        if verbose:
+            print(f"{name} angular distribution has an unknown type: {dist1.distribution_type}")
+        return False
+
+    for label, list1, list2 in tables:
+        if len(list1) != len(list2):
             if verbose:
-                print(f"{name} angular distribution mismatch: Different number of energy points for cosine grid "
-                      f"({len(dist1.cosine_grid)} vs {len(dist2.cosine_grid)})")
+                print(f"{name} angular distribution mismatch: Different number of energy points for {label} "
+                      f"({len(list1)} vs {len(list2)})")
             return False
-        
-        # Compare cosine grids, PDFs, and CDFs for each energy
-        for i in range(len(dist1.cosine_grid)):
-            # Cosine grid
-            grid1 = [float(c) for c in dist1.cosine_grid[i]]
-            grid2 = [float(c) for c in dist2.cosine_grid[i]]
-            if not compare_arrays(grid1, grid2, tolerance, 
-                                 f"{name} angular distribution cosine grid at energy point {i}", verbose):
-                return False
-            
-            # PDF
-            pdf1 = [float(p) for p in dist1.pdf[i]]
-            pdf2 = [float(p) for p in dist2.pdf[i]]
-            if not compare_arrays(pdf1, pdf2, tolerance, 
-                                 f"{name} angular distribution PDF at energy point {i}", verbose):
-                return False
-            
-            # CDF
-            cdf1 = [float(c) for c in dist1.cdf[i]]
-            cdf2 = [float(c) for c in dist2.cdf[i]]
-            if not compare_arrays(cdf1, cdf2, tolerance, 
-                                 f"{name} angular distribution CDF at energy point {i}", verbose):
-                return False
-        
-        return True
-    
-    # Unknown or mismatched distribution types
-    if verbose:
-        print(f"{name} angular distribution has unknown or mismatched type: {dist1.distribution_type}")
-    return False
+        lengths1 = [len(t) for t in list1]
+        if lengths1 != [len(t) for t in list2]:
+            if verbose:
+                print(f"{name} angular distribution mismatch: {label} lengths differ")
+            return False
+        if not list1:
+            continue
+        # one vectorised comparison for every energy point at once
+        if not compare_arrays(np.concatenate(list1), np.concatenate(list2), tolerance,
+                              f"{name} angular distribution {label}", verbose):
+            return False
+    return True

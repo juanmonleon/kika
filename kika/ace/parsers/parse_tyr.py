@@ -117,7 +117,7 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
     
     if jxs31 > 0 and jxs32 > 0 and num_particle_types > 0:
         # Initialize list for each particle type
-        ace.particle_release.particle_production = [[] for _ in range(num_particle_types)]
+        ace.particle_release.particle_production = [np.empty(0) for _ in range(num_particle_types)]
     
         if debug:
             logger.debug(f"XSS array length = {len(ace.xss_data)-1}") 

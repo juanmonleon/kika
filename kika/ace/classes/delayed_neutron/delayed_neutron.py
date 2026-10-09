@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
 import numpy as np
+from kika.ace.classes.energy_distribution import tabular_math
 from kika.ace.classes.delayed_neutron.delayed_neutron_repr import precursor_repr, delayed_neutron_data_repr
 
 @dataclass
@@ -25,27 +26,11 @@ class DelayedNeutronPrecursor:
         float
             The probability value at the given energy
         """
-        # Simple linear interpolation for now
         if len(self.energies) == 0 or len(self.probabilities) == 0:
             return 0.0
-            
-        if energy <= self.energies[0]:
-            return self.probabilities[0]
-        
-        if energy >= self.energies[-1]:
-            return self.probabilities[-1]
-        
-        # Find the bracketing energy points
-        for i in range(len(self.energies) - 1):
-            if self.energies[i] <= energy <= self.energies[i + 1]:
-                # Linear interpolation
-                x1, x2 = self.energies[i], self.energies[i + 1]
-                y1, y2 = self.probabilities[i], self.probabilities[i + 1]
-                return y1 + (y2 - y1) * (energy - x1) / (x2 - x1)
-        
-        # Shouldn't reach here, but just in case
-        return self.probabilities[-1]
-        
+        nbt = [int(b) for b, _ in self.interpolation_regions]
+        interp = [int(i) for _, i in self.interpolation_regions]
+        return tabular_math.tab1(self.energies, self.probabilities, nbt, interp, energy)
     # Define repr explicitly as a method to ensure it's picked up correctly
     def __repr__(self):
         return precursor_repr(self)

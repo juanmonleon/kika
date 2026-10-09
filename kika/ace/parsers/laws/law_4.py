@@ -176,17 +176,17 @@ def parse_continuous_energy_angle_distribution(ace: Ace, base_dist: EnergyDistri
             continue
         
         # Read the outgoing energy grid (E_out)
-        e_out = ace.xss_data[dist_idx + 2:dist_idx + 2 + n_points].tolist()
+        e_out = ace.xss_data[dist_idx + 2:dist_idx + 2 + n_points]
         if debug and n_points > 0:
             logger.debug(f"E_out range: [{e_out[0]}, {e_out[-1]}]")
         
         # Read the probability density function (PDF)
-        pdf = ace.xss_data[dist_idx + 2 + n_points:dist_idx + 2 + 2*n_points].tolist()
+        pdf = ace.xss_data[dist_idx + 2 + n_points:dist_idx + 2 + 2*n_points]
         if debug and n_points > 0:
             logger.debug(f"PDF range: [{pdf[0]}, {pdf[-1]}]")
         
         # Read the cumulative density function (CDF)
-        cdf = ace.xss_data[dist_idx + 2 + 2*n_points:dist_idx + 2 + 3*n_points].tolist()
+        cdf = ace.xss_data[dist_idx + 2 + 2*n_points:dist_idx + 2 + 3*n_points]
         if debug and n_points > 0:
             logger.debug(f"CDF range: [{cdf[0]}, {cdf[-1]}]")
         

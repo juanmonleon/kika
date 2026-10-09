@@ -59,6 +59,12 @@ class PhotonProductionData:
     def get_photon_energy_group(self, neutron_energy: float) -> Optional[List[float]]:
         """
         Get the appropriate group of 20 outgoing photon energies for a given incident neutron energy.
+
+        The 30 boundaries are read as upper bounds, as manual Table 47 heads
+        them. Table 48 instead lays group i out as EN(i) <= E < EN(i+1), which
+        would shift every energy one group down. No table in Lib81 or JEFF-4.0
+        carries this obsolete matrix (it needs JXS(13)=0), so neither reading
+        can be checked against data.
         
         Parameters
         ----------

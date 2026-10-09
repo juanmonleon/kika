@@ -141,18 +141,18 @@ def read_ldlw_block(ace: Ace, jxs10: int, num_reactions: int, debug: bool = Fals
     if jxs10 <= 0:
         if debug:
             logger.debug(f"Invalid LDLW block index: {jxs10}")
-        return []
+        return np.empty(0)
     
     if jxs10 >= len(ace.xss_data):
         if debug:
             logger.debug(f"LDLW block index out of bounds: {jxs10} >= {len(ace.xss_data)}")
-        return []
+        return np.empty(0)
     
     # Make sure we have enough data
     if jxs10 + num_reactions > len(ace.xss_data):
         if debug:
             logger.debug(f"LDLW block truncated: need {num_reactions} entries, but only {len(ace.xss_data) - jxs10} available")
-        return []
+        return np.empty(0)
     
     # Read the energy distribution locators - a view of xss_data
     locators = ace.xss_data[jxs10:jxs10 + num_reactions]
@@ -201,18 +201,18 @@ def read_ldlwp_block(ace: Ace, jxs18: int, num_photon_reactions: int, debug: boo
     if jxs18 <= 0:
         if debug:
             logger.debug(f"Invalid LDLWP block index: {jxs18}")
-        return []
+        return np.empty(0)
     
     if jxs18 >= len(ace.xss_data):
         if debug:
             logger.debug(f"LDLWP block index out of bounds: {jxs18} >= {len(ace.xss_data)}")
-        return []
+        return np.empty(0)
     
     # Make sure we have enough data
     if jxs18 + num_photon_reactions > len(ace.xss_data):
         if debug:
             logger.debug(f"LDLWP block truncated: need {num_photon_reactions} entries, but only {len(ace.xss_data) - jxs18} available")
-        return []
+        return np.empty(0)
     
     # Read the photon production energy distribution locators - a view of xss_data
     locators = ace.xss_data[jxs18:jxs18 + num_photon_reactions]
@@ -297,7 +297,7 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
         if mt_count_idx >= len(ace.xss_data):
             if debug:
                 logger.debug(f"MT count index out of bounds for particle type {i}: {mt_count_idx} >= {len(ace.xss_data)}")
-            particle_production_locators.append([])
+            particle_production_locators.append(np.empty(0))
             continue
         
         num_mt_values = int(ace.xss_data[mt_count_idx])
@@ -311,7 +311,7 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
         if ldlwh_pointer_idx >= len(ace.xss_data):
             if debug:
                 logger.debug(f"LDLWH pointer index out of bounds for particle type {i}: {ldlwh_pointer_idx} >= {len(ace.xss_data)}")
-            particle_production_locators.append([])
+            particle_production_locators.append(np.empty(0))
             continue
         
         # Get the actual pointer value
@@ -324,14 +324,14 @@ def read_ldlwh_block(ace: Ace, jxs31: int, num_particle_types: int, debug: bool 
         if ldlwh_pointer <= 0:
             if debug:
                 logger.debug(f"No energy distribution data for particle type {i}")
-            particle_production_locators.append([])
+            particle_production_locators.append(np.empty(0))
             continue
         
         # 5. Make sure we have enough data for all MT values
         if ldlwh_pointer + num_mt_values > len(ace.xss_data):
             if debug:
                 logger.debug(f"LDLWH block truncated for particle type {i}: need {num_mt_values} entries, but only {len(ace.xss_data) - ldlwh_pointer} available")
-            particle_production_locators.append([])
+            particle_production_locators.append(np.empty(0))
             continue
         
         # 6. Read the locators for this particle type. A view of xss_data
@@ -387,18 +387,18 @@ def read_dnedl_block(ace: Ace, jxs26: int, num_precursors: int, debug: bool = Fa
     if jxs26 <= 0:
         if debug:
             logger.debug(f"Invalid DNEDL block index: {jxs26}")
-        return []
+        return np.empty(0)
     
     if jxs26 >= len(ace.xss_data):
         if debug:
             logger.debug(f"DNEDL block index out of bounds: {jxs26} >= {len(ace.xss_data)}")
-        return []
+        return np.empty(0)
     
     # Make sure we have enough data
     if jxs26 + num_precursors > len(ace.xss_data):
         if debug:
             logger.debug(f"DNEDL block truncated: need {num_precursors} entries, but only {len(ace.xss_data) - jxs26} available")
-        return []
+        return np.empty(0)
     
     # Read the delayed neutron energy distribution locators - a view of xss_data
     locators = ace.xss_data[jxs26:jxs26 + num_precursors]

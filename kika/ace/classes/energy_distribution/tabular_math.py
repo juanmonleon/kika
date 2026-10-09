@@ -318,3 +318,23 @@ def angular_at(incident_energies, tables, nbt, interp, energy: float, table_pdf)
     if frac == 0.0 or i + 1 >= len(tables) or interval_scheme(nbt, interp, i) == 1:
         return table_pdf(tables[i])
     return (1.0 - frac) * table_pdf(tables[i]) + frac * table_pdf(tables[i + 1])
+
+
+def tab1(x, y, nbt, interp, q: float) -> float:
+    """An ENDF TAB1 read with its own (NBT, INT) regions, held at the ends.
+
+    The parameter tables of the ACE laws (temperatures, Watt a and b, yields,
+    nu, probabilities) carry NBT/INT like any ENDF TAB1; NR=0 means lin-lin.
+    Outside the table the end value holds, as MCNP reads them.
+    """
+    from kika.algebra.evaluate import evaluate
+    from kika.algebra.laws import interval_laws
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if len(x) == 0:
+        return 0.0
+    if len(x) == 1:
+        return float(y[0])
+    pairs = [(int(b), int(s)) for b, s in zip(nbt, interp)]
+    return float(evaluate(x, y, interval_laws(len(x), pairs), q, outside="hold"))
