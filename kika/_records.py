@@ -382,11 +382,11 @@ def parse_record_values(line: str) -> Tuple[Optional[Union[float, int]], ...]:
     Short lines and invalid ID fields keep parse_line's existing behavior.
     """
     if len(line) >= 75:
-        int(line[66:70].strip() or '0')
-        int(line[70:72].strip() or '0')
-        int(line[72:75].strip() or '0')
-    if len(line) >= 80:
-        int(line[75:80].strip() or '0')
+        for field in (line[66:70], line[70:72], line[72:75]):
+            if field.strip():
+                int(field)
+    if len(line) >= 80 and line[75:80].strip():
+        int(line[75:80])
     if len(line) < 66:
         return (None,) * 6
     return (parse_number(line[:11]), parse_number(line[11:22]),

@@ -10,7 +10,7 @@ from kika.endf.parsers.parse_mf33 import _read_list_values
 from kika.endf.parsers.parse_mf34 import _read_floats
 
 
-def record(fields, ids="2631 33102    1"):
+def record(fields, ids="263133102    1"):
     return "".join(str(f).rjust(11) for f in fields) + ids
 
 
@@ -62,9 +62,11 @@ def test_invalid_identification_columns_still_raise(column):
     line = record([1, 2, 3, 4, 5, 6])
     a, b = column
     line = line[:a] + "x".rjust(b-a) + line[b:]
-    for read in (parse_line, parse_record_values):
-        with pytest.raises(ValueError):
-            read(line)
+    with pytest.raises(ValueError) as header:
+        parse_line(line)
+    with pytest.raises(ValueError) as body:
+        parse_record_values(line)
+    assert str(header.value) == str(body.value)
 
 
 @pytest.mark.parametrize("width", [65, 66, 74, 75, 79, 80])
