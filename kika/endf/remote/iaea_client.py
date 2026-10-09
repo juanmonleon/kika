@@ -15,6 +15,7 @@ from kika._constants import (
 from .cache import ENDFCache, get_cache
 from .constants import (
     IAEA_BASE_URL,
+    IAEA_USER_AGENT,
     get_library_filename_style,
     get_library_path,
     list_available_libraries,
@@ -209,7 +210,7 @@ def build_iaea_url(
 
 
 _HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0",
+    "User-Agent": IAEA_USER_AGENT,
     "Accept": "application/zip, application/octet-stream, */*",
 }
 

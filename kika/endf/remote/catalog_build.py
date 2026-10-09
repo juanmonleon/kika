@@ -34,7 +34,7 @@ from typing import Callable
 
 import httpx
 
-from .constants import IAEA_BASE_URL
+from .constants import IAEA_BASE_URL, IAEA_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ class CatalogBuilder:
         self._client = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
-            headers={"User-Agent": "kika-nd catalogue builder (+https://kika-app.com)"},
+            headers={"User-Agent": IAEA_USER_AGENT},
         )
 
     def _get(self, url: str, attempts: int = 4) -> str:

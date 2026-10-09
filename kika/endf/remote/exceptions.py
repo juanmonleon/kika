@@ -40,8 +40,10 @@ class AccessBlockedError(NetworkError):
 
     The IAEA put ``nds.iaea.org`` behind a Cloudflare managed challenge (seen
     October 2026): every non-browser request gets a 403 carrying
-    ``cf-mitigated: challenge`` and an HTML "Just a moment..." page, whatever
-    its User-Agent. Retrying does not help; a web browser still gets through.
+    ``cf-mitigated: challenge`` and an HTML "Just a moment..." page, unless
+    it sends the allowlisted ``IAEA_USER_AGENT``. Seeing this error means that
+    allowlist entry no longer works. Retrying does not help; a web browser
+    still gets through.
     """
 
     def __init__(self, url: str | None = None):
