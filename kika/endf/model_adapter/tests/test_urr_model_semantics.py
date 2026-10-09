@@ -205,6 +205,41 @@ def test_the_urr_policy_survives_gnds_as_fudge_writes_it():
     assert reread.unresolved.tabulatedWidths.scatteringRadius == 9.
 
 
+def test_a_urr_without_the_flag_is_read_as_naps_zero():
+    # GNDS 2.0/2.1 never stored calculateChannelRadius on tabulatedWidths;
+    # FUDGE reads its absence as True, and all 351 B-VIII.1 URRs omit it.
+    for nro in (0, 1):
+        model, _, _ = decodeMF2MT151(au197_like(nro=nro))
+        root = ET.Element("reactionSuite")
+        writeResonances(root, model, ConversionReport(), ("1e-5", "2e7"))
+        del root.find("resonances/unresolved/tabulatedWidths").attrib["calculateChannelRadius"]
+        read = ConversionReport()
+        reread = readResonances(root.find("resonances"), "/reactionSuite", None, read, lambda e: None)
+        policy = reread.unresolved.tabulatedWidths.radiusPolicy
+        assert policy.channelMode == "mass"
+        assert (policy.phaseRadius is not None) == (nro == 1)
+        assert any("calculateChannelRadius" in w for w in read.warnings)
+
+
+def test_an_energy_dependent_hard_sphere_radius_is_reported_where_unread():
+    from kika.gnds.resonances import _ResonanceReader
+    radius = ('<hardSphereRadius><XYs1d><axes><axis index="1" label="energy_in" unit="eV"/>'
+              '<axis index="0" label="radius" unit="fm"/></axes>'
+              '<values>1e-5 5 1e3 6</values></XYs1d></hardSphereRadius>')
+    bw = ET.fromstring(
+        '<BreitWigner label="eval" approximation="MultiLevel">'
+        '<scatteringRadius><constant1d value="5" domainMin="1e-5" domainMax="1e3"><axes>'
+        '<axis index="1" label="energy_in" unit="eV"/><axis index="0" label="radius" unit="fm"/>'
+        f'</axes></constant1d></scatteringRadius>{radius}</BreitWigner>')
+    read = ConversionReport()
+    _ResonanceReader(None, read, lambda e: None).readBreitWigner(bw, "/x")
+    assert any("BreitWigner/hardSphereRadius" in u for u in read.unsupported)
+    channel = ET.fromstring(f'<channel label="c" resonanceReaction="n" L="0">{radius}</channel>')
+    read = ConversionReport()
+    _ResonanceReader(None, read, lambda e: None).readChannel(channel, "/x")
+    assert any("energy-dependent" in u for u in read.unsupported)
+
+
 def test_a_phase_mode_table_is_the_gnds_scattering_radius():
     model, _, _ = decodeMF2MT151(au197_like(nro=1, naps=1))
     root = ET.Element("reactionSuite")
