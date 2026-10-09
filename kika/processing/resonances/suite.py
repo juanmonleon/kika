@@ -551,8 +551,23 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         for key in order:
             if all(part in constants for part in graph[key]):
                 constants[key]=sum((constants[part] for part in graph[key]),0.)
+        deferred={}
+        for key,curve in s.curves.items():
+            if key in graph or key in affected or key in constants or curve is None:continue
+            source_x=np.asarray(curve.x)
+            laws=np.broadcast_to(curve.law,(len(source_x)-1,))
+            relevant=(source_x[:-1]<high)&(source_x[1:]>s.low)
+            # Source knots are included in seeds, so these untouched columns
+            # are affine inside each seed panel. Still check all seven final
+            # probes; a failure falls back to the full adaptive column set.
+            if np.all(laws[relevant]==2):
+                def read(e,curve=curve,s=s):
+                    e=np.asarray(e,dtype=float).copy()
+                    if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
+                    return curve.evaluate(e)
+                deferred[key]=read
         x,y,check=linearize(lambda e:result._evaluate_segment(s,e,constant_values=constants),
-            seeds,options,options.max_points-points,constants=constants)
+            seeds,options,options.max_points-points,constants=constants,deferred=deferred)
         points+=len(x);tables.append((x,y));checks.append(dict(domain=(s.low,s.high),points=len(x),**check))
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')]);output={}
     from kika.algebra import compress_flat

@@ -65,6 +65,33 @@ def test_constant_projection_preserves_full_tables_and_checks(monkeypatch):
     assert optimized.report['points']==reference.report['points']
 
 
+def test_linear_background_deferral_keeps_source_knots_and_physical_sums(monkeypatch):
+    import kika.processing.resonances.suite as module
+    suite=suite_model()
+    suite.reactions['extra'].crossSection['eval']=XYs1d(
+        [10.,37.,110.,300.,1000.],[.3,1.,.1,.9,1.8],axes=AXES,label='eval')
+    actual_linearize=module.linearize;declarations=[]
+    def track(*args,**kwargs):
+        declarations.append(kwargs.get('deferred',{}))
+        return actual_linearize(*args,**kwargs)
+    monkeypatch.setattr(module,'linearize',track)
+    optimized=run(suite)
+    extra=ReactionKey('reactions','extra')
+    assert any(extra in d for d in declarations)
+    assert all(ReactionKey('reactions','elastic') not in d for d in declarations[:1])
+    def ordinary(*args,**kwargs):
+        kwargs.pop('deferred',None)
+        return actual_linearize(*args,**kwargs)
+    monkeypatch.setattr(module,'linearize',ordinary)
+    baseline=run(suite)
+    for key,form in optimized.forms.items():
+        for a,b in zip(form.function1ds,baseline.forms[key].function1ds):
+            np.testing.assert_array_equal(a.xs,b.xs)
+            np.testing.assert_array_equal(a.ys,b.ys)
+    attach_reconstruction(suite,optimized)
+    assert max(optimized.verify_suite(suite).values())<=1
+
+
 def test_shared_backgrounds_keep_sums_and_independent_readers(monkeypatch):
     from kika.nuclear_data.model.enums import Interpolation
     from kika.algebra.prepared import _SharedLinearEvaluator

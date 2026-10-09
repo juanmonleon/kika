@@ -193,6 +193,12 @@ PERMANENT_IMPORTERS = {
     "kika/sampling/model_perturbation.py",
     "kika/sampling/joint_mf33_mf34.py",
     "kika/endf/writers/assemble.py",
+    # The ENDF door for a decay or fission-yield evaluation (roadmap E7), which
+    # is a PoPs and not a reactionSuite; `kika.write` reaches it as it reaches
+    # `assemble`. Frozen build: kika-api.spec needs
+    # `kika.endf.model_adapter.decay_sublibrary` and `.fission_yields` in its
+    # hiddenimports (handoff note of 2026-10-09).
+    "kika/endf/writers/sublibrary.py",
     # Layer 1 for MF32 (2026-10-06). Its rows are resonance parameters, and the
     # only reader of the §32 layouts is `decodeMF32MT`; a second one inside the
     # checks is what the plan rules out. The import is inside `check_mf32`, so

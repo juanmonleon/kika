@@ -22,6 +22,57 @@ def prepared(m=None):
 def constant(value):return XYs1d([10.,300.],[value,value],axes=AXES)
 
 
+@pytest.mark.parametrize('dtype',[np.float64,np.float32,np.int64])
+def test_error_ratio_reuses_only_owned_float64_arrays(dtype):
+    from kika.processing.resonances.grid import error_ratio
+    a=np.array([-3,0,5],dtype=dtype);b=np.array([2,0,-4],dtype=dtype)
+    a.flags.writeable=b.flags.writeable=False
+    options=ReconstructionOptions()
+    expected=np.abs(a-b)/(options.atol+options.rtol*np.maximum(np.abs(a),np.abs(b)))
+    np.testing.assert_array_equal(error_ratio(a,b,options),expected)
+    assert error_ratio(3.,2.,options)==1./(options.atol+options.rtol*3.)
+
+
+def test_error_ratio_preserves_extended_scalar_promotion():
+    from kika.processing.resonances.grid import error_ratio
+    options=ReconstructionOptions(rtol=np.longdouble('0.001'),atol=np.longdouble('1e-8'))
+    a=np.array([1.,-3.]);b=np.array([2.,-2.])
+    expected=np.abs(a-b)/(options.atol+options.rtol*np.maximum(np.abs(a),np.abs(b)))
+    actual=error_ratio(a,b,options)
+    assert actual.dtype==expected.dtype
+    np.testing.assert_array_equal(actual,expected)
+
+
+def test_deferred_source_columns_keep_all_panel_checks_and_exact_values():
+    from kika.processing.resonances.grid import linearize
+    options=ReconstructionOptions()
+    def evaluate(q):return {2:q*q,16:np.interp(q,[1.,1.5,2.],[4.,1.,3.])}
+    x,y,check=linearize(evaluate,[1.,1.5,2.],options,options.max_points,
+        deferred={16:lambda q:evaluate(q)[16]})
+    bx,by,bc=linearize(evaluate,[1.,1.5,2.],options,options.max_points)
+    np.testing.assert_array_equal(x,bx)
+    for mt in y:np.testing.assert_array_equal(y[mt],by[mt])
+    assert check==bc
+
+
+def test_curved_deferred_column_retries_full_refinement():
+    from kika.processing.resonances.grid import linearize
+    options=ReconstructionOptions()
+    calls=[]
+    def evaluate(q):
+        calls.append(len(q))
+        return {2:q,16:q*q}
+    x,y,check=linearize(evaluate,[1.,2.],options,options.max_points,
+        deferred={16:lambda q:q*q})
+    assert len(x)>2
+    bx,by,bc=linearize(evaluate,[1.,2.],options,options.max_points)
+    np.testing.assert_array_equal(x,bx)
+    for mt in y:np.testing.assert_array_equal(y[mt],by[mt])
+    assert check['evaluations']>bc['evaluations']
+    for key in ('refinement_maxima','verification_maxima','integrals'):
+        assert check[key]==bc[key]
+
+
 def assert_budget(result,points):
     for mt,value in result.evaluate(points).items():
         actual=result.forms[mt].evaluate(points)
