@@ -1,4 +1,10 @@
-"""The radioactive decay sublibrary (ENDF NSUB=4, MF8/MT457) ↔ a standalone §12 PoPs.
+"""The ENDF sublibraries whose evaluation is a nuclide ↔ a standalone §12 PoPs.
+
+Radioactive decay (NSUB=4, MF8/MT457, roadmap E7b) and fission product yields
+(NSUB=5 spontaneous, NSUB=11 neutron-induced, MF8/MT454 and MT459, E7c; the
+yields themselves are :mod:`.fission_yields`). One reader per sublibrary
+(:func:`decodeDecaySublibrary`, :func:`decodeFissionYieldSublibrary`) and one
+writer for all (:func:`encodeSublibrary`, :func:`writeSublibraryTape`).
 
 A decay evaluation is a nuclide and how it decays, nothing else. GNDS writes it
 as a ``PoPs`` file whose nuclide's ``nucleus`` carries ``halflife``, ``spin``,
