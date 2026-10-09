@@ -18,10 +18,10 @@ class _Segment:
     backgrounds: object
     left_high: bool
 
-    def evaluate(self,energy,context,graph,order,block_size,work_bytes=64*1024**2):
+    def evaluate(self,energy,context,graph,order,block_size,work_bytes=64*1024**2,*,absorption_rtol=0.):
         e=np.asarray(energy,dtype=float).copy()
         if self.left_high:e[e==self.high]=np.nextafter(self.high,self.low)
-        return evaluate_assembled(self.region,context,e,self.backgrounds,graph,order,block_size,work_bytes)
+        return evaluate_assembled(self.region,context,e,self.backgrounds,graph,order,block_size,work_bytes,absorption_rtol=absorption_rtol)
 
 
 @dataclass(frozen=True)
@@ -203,7 +203,8 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
     checks=[]
     points=0
     for s in segments:
-        def evaluate(e):return s.evaluate(e,prepared.context,graph,order,options.block_size,options.max_work_bytes)
+        def evaluate(e):return s.evaluate(e,prepared.context,graph,order,options.block_size,options.max_work_bytes,
+            absorption_rtol=min(1e-8,options.rtol*1e-5))
         x,y,check=linearize(evaluate,_seeds(s,prepared.context),options,options.max_points-points)
         points+=len(x)
         tables.append((x,y))

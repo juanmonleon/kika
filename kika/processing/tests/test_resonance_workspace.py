@@ -186,3 +186,71 @@ def test_explicit_domain_api_also_verifies_master_when_first_sum_is_constant(mon
     monkeypatch.setattr(_Segment,'evaluate',record)
     assert max(result.verify_forms(result.forms).values())<=1
     assert len(seen)==sum(len(g)+4*(len(g)-1) for g in result._grids)
+
+
+def test_physical_witness_rechecks_changed_tables_without_recomputing_kernel(monkeypatch):
+    from test_resonance_suite import suite_model
+    from kika.processing.resonances import reconstruct_suite,attach_reconstruction
+    import kika.processing.resonances.suite as module
+    suite=suite_model();result=reconstruct_suite(suite,NeutronContext(56.,0.))
+    attach_reconstruction(suite,result)
+    witnesses=result._verification_cache['physical_witnesses'][1]
+    frozen=next(value for batch in witnesses.values() for _,partial in batch.values() for value in partial.values())
+    with pytest.raises(ValueError):frozen.setflags(write=True)
+    def forbidden(*args,**kwargs):raise AssertionError('frozen physical reference was recomputed')
+    monkeypatch.setattr(module,'evaluate_region',forbidden)
+    curve=suite.reactions['capture'].crossSection['recon'].function1ds[0]
+    curve.ys*=1.+1e-7
+    assert max(result.verify_suite(suite).values())<=1
+    curve.ys*=2.
+    with pytest.raises(ReconstructionConvergenceError,match='budget'):
+        result.verify_suite(suite)
+
+
+def test_linear_background_keeps_own_knots_while_master_grid_is_verified():
+    from kika.nuclear_data.model import XYs1d
+    from test_resonance_tabulation import AXES
+    from kika.algebra import evaluate
+    suite=suite_model()
+    suite.reactions['extra'].crossSection['eval']=XYs1d([10.,42.,1000.],[.5,.9,1.2],axes=AXES,label='eval')
+    result=run(suite);form=result.forms_by_mt[16]
+    assert sum(len(c.xs) for c in form.function1ds)==5
+    assert sum(len(g) for g in result._grids)>100
+    attach_reconstruction(suite,result)
+    for c in suite.reactions['extra'].crossSection['recon'].function1ds:
+        e=np.linspace(c.domainMin,c.domainMax,101)
+        np.testing.assert_allclose(evaluate(c.xs,c.ys,2,e),evaluate([10.,42.,1000.],[.5,.9,1.2],2,e),rtol=2e-15)
+    assert max(result.verify_suite(suite).values())<=1
+
+
+@pytest.mark.parametrize('gamma',[.03,1e-30,1e-310,0.])
+@pytest.mark.parametrize('roundoff',[1e-11,1e-8])
+def test_guarded_gram_capture_matches_direct_levels_and_preserves_poles(gamma,roundoff):
+    rng=np.random.default_rng(782)
+    reduced=rng.normal(size=(73,3))*.2
+    levels=np.linspace(50.,150.,73);widths=np.full(73,gamma)
+    e=np.unique(np.r_[np.linspace(20.,180.,101),levels[0],levels[36]])
+    factors=np.ones((len(e),3));factors[:,0]=np.sqrt(e/100.)
+    w,x=solve_collision(e,levels,widths,None,reduced=reduced,channel_factors=factors)
+    diagnostics={}
+    fast,capture=solve_collision(e,levels,widths,None,diagnostics,reduced=reduced,
+        channel_factors=factors,return_absorption=True,absorption_rtol=roundoff)
+    np.testing.assert_array_equal(fast,w)
+    np.testing.assert_allclose(capture,2*np.sum(widths[None,:]*abs(x)**2,axis=1),rtol=2e-12,atol=0.)
+    assert np.all(capture>=0)
+    if gamma==.03:assert diagnostics['rm_gram_capture_energies']>0
+
+
+def test_gram_capture_falls_back_for_cancellation_and_tighter_accuracy():
+    e=np.array([100.,150.]);a=np.array([[.3,.4]])
+    factors=np.ones((2,2));widths=np.array([1e-4])
+    diagnostics={}
+    w,x=solve_collision(e,[100.],widths,None,reduced=a,channel_factors=factors)
+    _,capture=solve_collision(e,[100.],widths,None,diagnostics,reduced=a,
+        channel_factors=factors,return_absorption=True,absorption_rtol=1e-11)
+    assert diagnostics['rm_direct_capture_energies']>=1
+    np.testing.assert_allclose(capture,2*np.sum(widths[None,:]*abs(x)**2,axis=1),rtol=2e-12)
+    diagnostics={}
+    solve_collision(e,[100.],widths,None,diagnostics,reduced=a,channel_factors=factors,
+        return_absorption=True,absorption_rtol=1e-20)
+    assert diagnostics['rm_direct_capture_energies']==len(e)

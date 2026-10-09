@@ -14,7 +14,7 @@ import numpy as np
 
 from .assemble import prepare_backgrounds
 from .breit_wigner import evaluate_bw
-from .prepare import evaluate_region, group_radii, group_knots, group_breaks
+from .prepare import evaluate_region, group_radii, group_knots, group_breaks, region_mts
 from .context import NeutronContext
 from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize, error_ratio, verification_batches
 from .prepare import PreparedResonances, prepare_resonances, UnsupportedResonanceError
@@ -218,7 +218,7 @@ class SuiteReconstructionResult:
     _grids: tuple=()
     _verification_cache: object=field(default_factory=dict,init=False,repr=False,compare=False)
 
-    def _evaluate_segment(self,s,points,include_resonances=True):
+    def _evaluate_segment(self,s,points,include_resonances=True,*,physical_witness=None):
         e=np.asarray(points,dtype=float).copy()
         if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
         values={key:(curve.evaluate(e) if curve is not None and
@@ -229,13 +229,23 @@ class SuiteReconstructionResult:
         if include_resonances and s.region is not None:
             for start in range(0,len(e),self.options.block_size):
                 sl=slice(start,start+self.options.block_size)
-                physical=evaluate_region(e[sl],s.region,self._prepared.context,work_bytes=self.options.max_work_bytes)
-                for g in s.region.groups:
-                    if g.competitive_in_background:
+                if physical_witness is not None and start in physical_witness:
+                    saved_e,physical=physical_witness[start]
+                    if not np.array_equal(saved_e,e[sl]):raise ValueError('physical witness energy mismatch')
+                else:
+                    physical=evaluate_region(e[sl],s.region,self._prepared.context,work_bytes=self.options.max_work_bytes,
+                        absorption_rtol=0. if physical_witness is not None else min(1e-8,self.options.rtol*1e-5))
+                    for g in s.region.groups:
+                        if not g.competitive_in_background:continue
                         owner = self._mt_keys.get(g.competitive_mt)
                         if owner is None or owner in self._graph:
                             raise UnsupportedResonanceError("competitive background requires an exclusive model reaction")
                         physical[g.competitive_mt]-=evaluate_bw(e[sl],(g,),s.region.approximation,self._prepared.context)[g.competitive_mt]
+                    if physical_witness is not None:
+                        # Store the physical partials, never the candidate table
+                        # or the assembled sums. Bytes own an immutable snapshot.
+                        freeze=lambda a:np.frombuffer(np.ascontiguousarray(a,dtype=float).tobytes(),dtype=float)
+                        physical_witness[start]=(freeze(e[sl]),{mt:freeze(v) for mt,v in physical.items() if mt!=1})
                 for mt,value in physical.items():
                     if mt==1:continue
                     key=self._physical_owners.get(mt)
@@ -311,6 +321,11 @@ class SuiteReconstructionResult:
             digest.update(repr((value.dtype.str,value.shape)).encode())
             digest.update(memoryview(value).cast('B'))
         for grid in grids:array(grid)
+        reference_signature=digest.digest()
+        witnesses=self._verification_cache.get('physical_witnesses')
+        if witnesses is None or witnesses[0]!=reference_signature:
+            witnesses=(reference_signature,{})
+            self._verification_cache['physical_witnesses']=witnesses
         for key,curves in checked.items():
             digest.update(repr(key).encode())
             for curve in curves:
@@ -332,8 +347,11 @@ class SuiteReconstructionResult:
                 try:evaluators[key]=prepare_evaluator(curve.xs,curve.ys,2)
                 except ValueError as exc:raise ReconstructionConvergenceError('invalid serialized table') from exc
             verification_batch=max(1,min(32768,self.options.max_work_bytes//(64*(len(checked)+1))))
-            for points in verification_batches(grid,verification_batch,fractions):
-                reference=self._evaluate_segment(segment,points)
+            for batch,points in enumerate(verification_batches(grid,verification_batch,fractions)):
+                # Fresh/edited/rounded output is checked again at every original
+                # node and probe. Only the immutable physical reference is reused.
+                witness=witnesses[1].setdefault((i,batch),{})
+                reference=self._evaluate_segment(segment,points,physical_witness=witness)
                 serialized={}
                 for key,evaluator in evaluators.items():
                     values=np.asarray(evaluator(points))
@@ -496,7 +514,25 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     for key in entries:
         children=[]
         for i,(x,y) in enumerate(tables):
-            cx,cy,_=compress_flat(x,y[key],2)
+            s=segments[i];curve=s.curves[key]
+            affected=s.region is not None and key in {physical_owners.get(mt) for mt in region_mts(s.region)}
+            if curve is not None and key not in graph and not affected:
+                original_x=np.asarray(curve.x)
+                laws=np.broadcast_to(curve.law,(len(original_x)-1,))
+                relevant=(original_x[:-1]<s.high)&(original_x[1:]>s.low)
+                if np.all(laws[relevant]==2):
+                    # An untouched lin-lin background already has an exact
+                    # representation on its own knots. It need not inherit
+                    # every other reaction's resonance or fast-region knot.
+                    x=np.unique(np.r_[s.low,original_x[(original_x>s.low)&(original_x<s.high)],s.high])
+                    if not s.left_high and original_x[-1]==s.high and curve.endpoint_jump:
+                        x=np.unique(np.r_[x,np.nextafter(s.high,s.low)])
+                    query=x.copy()
+                    if s.left_high:query[query==s.high]=np.nextafter(s.high,s.low)
+                    values=curve.evaluate(query)
+                else:values=y[key]
+            else:values=y[key]
+            cx,cy,_=compress_flat(x,values,2)
             children.append(XYs1d(cx,cy,axes=axes,index=i))
         output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
         output[key].label=label

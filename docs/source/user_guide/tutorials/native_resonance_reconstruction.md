@@ -116,9 +116,16 @@ panel. A previous successful check can be reused only when all selected table
 contents, units and the physical reference match exactly. Editing a table
 forces another check. ENDF rounding usually changes the contents, so the
 reloaded file receives its own physical verification.
+The first independent check retains immutable physical partials on its probe
+energies. Later checks against the same frozen reference reuse those partials,
+while evaluating the candidate tables and checking the assembled sums again.
+This avoids repeating the physical solve without accepting edits automatically.
+Retained witnesses add memory proportional to the physical partials and probes.
 
 Physics is refined on a common grid within each segment. Stored curves compact
-only exactly constant spans, preserving boundaries and steps. Verification
+exactly constant spans, preserving boundaries and steps. Untouched lin-lin
+backgrounds keep their own source knots and the segment boundaries, rather
+than inheriting the dense grids of unrelated reactions. Verification
 retains an independent, immutable copy of the original computation grids,
 including probes for reactions whose stored curves become constant.
 `result.report["points"]` counts computation nodes;

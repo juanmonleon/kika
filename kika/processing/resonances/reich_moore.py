@@ -30,6 +30,15 @@ def level_matrix(reciprocal,reduced):
     return result
 
 
+def level_excitation(excitation,reduced):
+    """Contract complex channel excitation with real level amplitudes."""
+    if len(reduced)<32:return excitation@reduced.T
+    result=np.empty((len(excitation),len(reduced)),complex)
+    result.real=excitation.real@reduced.T
+    result.imag=excitation.imag@reduced.T
+    return result
+
+
 @dataclass(frozen=True)
 class RMLevel(Level):
     fission_amplitudes: tuple[float, ...] = ()
@@ -43,15 +52,24 @@ class RMGroup(Group):
 
 
 def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=None, *, entrance=0,
-                    reduced=None,channel_factors=None,work_bytes=64*1024**2):
+                    reduced=None,channel_factors=None,work_bytes=64*1024**2,
+                    return_absorption=False,absorption_rtol=0.):
     """Return W[:, :, entrance] and absorption-level amplitudes.
 
     amplitudes: (energy, level, open channel), with entrance at index zero.
     The kernel is independent of resonance-model and format classes. Identical
     undamped poles may have dark states: their minimum-norm limit is accepted
     only if the linear-system residual is small.
+    With return_absorption, the second output is the positive radiative
+    probability instead of level amplitudes. A guarded channel-space Gram
+    contraction can avoid materializing the latter; rejected roundoff
+    estimates and all naked poles retain the direct level calculation.
     """
     e=np.asarray(energies)
+    if not np.isfinite(absorption_rtol) or not 0<=absorption_rtol<=1e-8:
+        raise ValueError('absorption_rtol must be finite in [0, 1e-8]')
+    if return_absorption and np.any(np.asarray(radiative_widths)<0):
+        raise ValueError('absorption requires nonnegative radiative widths')
     separable=reduced is not None
     if separable:
         reduced=np.asarray(reduced,dtype=float);factors=np.asarray(channel_factors,dtype=float)
@@ -62,17 +80,30 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
         a=np.asarray(amplitudes);n,c=a.shape[1:]
     if not isinstance(entrance,int) or not 0<=entrance<c:raise ValueError('invalid entrance channel')
     d=np.asarray(levels)[None,:]-e[:,None]-.5j*np.asarray(radiative_widths)[None,:]
-    w=np.zeros((len(e),c),complex);x=np.zeros((len(e),n),complex)
-    if not n:return w,x
+    w=np.zeros((len(e),c),complex)
+    x=np.zeros(len(e)) if return_absorption else np.zeros((len(e),n),complex)
+    if not n or not len(e):return w,x
     # Near naked poles retain level unknowns rather than first dividing by d.
-    strength=(factors*factors)@(reduced*reduced).T if separable else np.sum(a*a,axis=2)
-    poles=(np.abs(d)<=1e-6*strength) | (d==0)
-    regular=~np.any(poles,axis=1)
+    if separable:
+        # Bound the positive pole-test threshold outwards. All levels still
+        # enter the collision matrix, including levels excluded from this test.
+        upper=(reduced*reduced)@np.max(factors*factors,axis=0)
+        upper=np.nextafter(upper*(1+16*c*np.finfo(float).eps),np.inf)
+        candidates=np.flatnonzero((.5*abs(np.asarray(radiative_widths))<=1e-6*upper)|
+                                  (np.asarray(radiative_widths)==0))
+        strength=(factors*factors)@(reduced[candidates]*reduced[candidates]).T
+        candidate_poles=(abs(d[:,candidates])<=1e-6*strength)|(d[:,candidates]==0)
+        regular=~np.any(candidate_poles,axis=1)
+    else:
+        strength=np.sum(a*a,axis=2)
+        poles=(np.abs(d)<=1e-6*strength) | (d==0)
+        regular=~np.any(poles,axis=1)
     maximum=0.;singular=0
     if np.any(regular):
         dr=d[regular]
         if separable:
-            r=level_matrix(1/dr,reduced)
+            reciprocal=1/dr
+            r=level_matrix(reciprocal,reduced)
             f=factors[regular]
             r*=f[:,:,None]*f[:,None,:]
         else:
@@ -84,9 +115,47 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
         residual=matrix@y[:,:,None]-rhs
         maximum=float(np.max(np.abs(residual)/(np.linalg.norm(matrix,axis=(1,2))[:,None,None]*np.linalg.norm(y,axis=1)[:,None,None]+1.)))
         w[regular]=np.einsum('ecd,ed->ec',r,y)
-        x[regular]=((y*f)@reduced.T if separable else np.einsum('enc,ec->en',ar,y))/dr
+        if return_absorption and separable and absorption_rtol>0:
+            # Im(R) is the positive Gram sum of radiative level amplitudes:
+            # 4 y* Im(R) y = 2 sum_n gamma_n |X_n|^2. It is NOT a flux
+            # subtraction. Signed off-diagonal terms can cancel, so accept
+            # this contraction only under a conservative roundoff estimate.
+            gamma=np.asarray(radiative_widths)
+            b=r.imag;diag=np.diagonal(b,axis1=1,axis2=2)
+            value=4*np.real(np.sum(y.conj()*np.einsum('eij,ej->ei',b,y),axis=1))
+            majorant=4*np.sum(abs(y)*np.sqrt(np.maximum(diag,0.)),axis=1)**2
+            eps=np.finfo(float).eps;tiny=np.finfo(float).tiny
+            scale=8*(n+32*c+64)*eps
+            bound=scale/(1-scale)*majorant if scale<1 else np.full(len(y),np.inf)
+            radiative=gamma>0
+            active=np.any((reduced!=0)&radiative[:,None],axis=0)
+            normal=np.all((diag>=tiny)|~active[None,:],axis=1)
+            # The usual relative-roundoff model excludes underflowed products.
+            normal &= np.all((reciprocal.imag>=tiny)|~radiative[None,:],axis=1)
+            normal &= np.all((f*f>=tiny)|(f==0),axis=1)
+            squares=reduced*reduced
+            normal &= np.all((squares>=tiny)|(reduced==0)) and np.all((gamma>=tiny)|~radiative)
+            accepted=normal & np.isfinite(value)&(value>=tiny)&(majorant>=tiny)&(bound<=absorption_rtol*value)&(bound<=1e-10)
+            if not np.any(radiative):accepted[:]=True;value[:]=0.
+            absorption=value.copy()
+            fallback=~accepted
+            if np.any(fallback):
+                excitation=level_excitation(y[fallback]*f[fallback],reduced)/dr[fallback]
+                absorption[fallback]=2*np.sum(gamma[None,:]*abs(excitation)**2,axis=1)
+            x[regular]=absorption
+            if diagnostics is not None:
+                diagnostics['rm_gram_capture_energies']=diagnostics.get('rm_gram_capture_energies',0)+int(accepted.sum())
+                diagnostics['rm_direct_capture_energies']=diagnostics.get('rm_direct_capture_energies',0)+int(fallback.sum())
+                if np.any(accepted) and np.any(radiative):
+                    diagnostics['rm_max_capture_relative_roundoff_estimate']=max(diagnostics.get('rm_max_capture_relative_roundoff_estimate',0.),float(np.max(bound[accepted]/value[accepted])))
+        else:
+            excitation=(level_excitation(y*f,reduced) if separable else np.einsum('enc,ec->en',ar,y))/dr
+            x[regular]=2*np.sum(np.asarray(radiative_widths)[None,:]*abs(excitation)**2,axis=1) if return_absorption else excitation
     for index in np.flatnonzero(~regular):
-        pole=poles[index];other=~pole
+        if separable:
+            pole=np.zeros(n,bool);pole[candidates]=candidate_poles[index]
+        else:pole=poles[index]
+        other=~pole
         local=reduced*factors[index] if separable else a[index]
         ap=local[pole];ao=local[other]
         r=(ao.T/d[index,other])@ao
@@ -101,7 +170,12 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
         maximum=max(maximum,float(residual))
         y=solution[:c];xp=solution[c:]
         w[index]=r@y+ap.T@xp
-        x[index,other]=ao@y/d[index,other];x[index,pole]=xp
+        if return_absorption:
+            excitation=np.empty(n,complex)
+            excitation[other]=ao@y/d[index,other];excitation[pole]=xp
+            x[index]=2*np.sum(np.asarray(radiative_widths)*abs(excitation)**2)
+        else:
+            x[index,other]=ao@y/d[index,other];x[index,pole]=xp
     if maximum>1e-11 or np.any(~np.isfinite(w)) or np.any(~np.isfinite(x)):
         raise FloatingPointError('RM linear solve failed residual/finite-value check')
     if diagnostics is not None:
@@ -110,7 +184,7 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
     return w,x
 
 
-def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2):
+def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2,absorption_rtol=0.):
     elastic,capture,fission=(np.zeros_like(energies) for _ in range(3))
     for group in groups:
         ctx=group.context or context;k2=ctx.k_squared_per_ev*energies
@@ -127,12 +201,12 @@ def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2
         if np.any(p==0) and np.any(reduced):raise FloatingPointError('RM neutron penetrability underflows')
         factors=np.ones((len(energies),1+af.shape[1]));factors[:,0]=np.sqrt(p)
         amplitudes=np.column_stack((reduced,af))
-        w,x=solve_collision(energies,[level.energy for level in levels],gamma,None,diagnostics,
-            reduced=amplitudes,channel_factors=factors,work_bytes=work_bytes)
+        w,absorption=solve_collision(energies,[level.energy for level in levels],gamma,None,diagnostics,
+            reduced=amplitudes,channel_factors=factors,work_bytes=work_bytes,
+            return_absorption=True,absorption_rtol=absorption_rtol)
         # Stable 1-U_nn, avoiding the cancellation of hard-sphere phase.
         amplitude=2j*np.exp(-1j*phi)*np.sin(phi)-2j*np.exp(-2j*phi)*w[:,0]
         elastic+=beta*g*np.abs(amplitude)**2
-        absorption=2*np.sum(gamma[None,:]*np.abs(x)**2,axis=1)
         capture+=beta*g*absorption
         fission+=beta*g*4*np.sum(np.abs(w[:,1:])**2,axis=1)
         flux=1-np.abs(1+2j*w[:,0])**2-4*np.sum(np.abs(w[:,1:])**2,axis=1)

@@ -10,7 +10,7 @@ from .breit_wigner import Group
 from .channel_functions import neutral_channel_functions
 from scipy.special import gammaln, logsumexp
 from .grid import check_dense_workspace
-from .reich_moore import level_matrix
+from .reich_moore import level_matrix,level_excitation
 
 
 def closed_neutral_shift(l, kappa):
@@ -231,7 +231,7 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
         maximum = float(np.max(residual/scale))
         excitation[regular] = y
         w[regular] = np.einsum('ecd,ed->ec',r,y)
-        x[regular] = (y@a.T)/d[regular]
+        x[regular] = level_excitation(y,a)/d[regular]
         regular_indices = np.flatnonzero(regular)
         for local in np.flatnonzero(np.any(missing[regular],axis=1)):
             i = regular_indices[local]

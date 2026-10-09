@@ -130,13 +130,13 @@ def prepare_sums(sums,available):
     return graph,tuple(order)
 
 
-def evaluate_assembled(region,context,e,backgrounds,graph,order,block_size,work_bytes=64*1024**2):
+def evaluate_assembled(region,context,e,backgrounds,graph,order,block_size,work_bytes=64*1024**2,*,absorption_rtol=0.):
     e=np.asarray(e,dtype=float)
     mts=region_mts(region)|set(backgrounds)|set(graph)
     out={mt:np.zeros(len(e)) for mt in mts}
     for start in range(0,len(e),block_size):
         sl=slice(start,start+block_size)
-        values=evaluate_region(e[sl],region,context,work_bytes=work_bytes)
+        values=evaluate_region(e[sl],region,context,work_bytes=work_bytes,absorption_rtol=absorption_rtol)
         # Subtract each owned group's contribution separately: the same MT
         # can occur in other groups whose competition is not already in MF3.
         owned=[g for g in region.groups if g.competitive_in_background]

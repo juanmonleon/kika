@@ -344,7 +344,7 @@ def energy_block_size(region, maximum=2048, work_bytes=64*1024**2):
     return max(1,min(maximum,(work_bytes-fixed)//largest))
 
 
-def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*1024**2):
+def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*1024**2,absorption_rtol=0.):
     if region.approximation == 'Unresolved':
         from .unresolved import evaluate_unresolved
         return evaluate_unresolved(energies,region,diagnostics)
@@ -362,6 +362,6 @@ def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*102
         block=energy_block_size(region,work_bytes=work_bytes)
         for start in range(0,len(energies),block):
             sl=slice(start,start+block)
-            for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes).items():out[mt][sl]=value
+            for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes,absorption_rtol=absorption_rtol).items():out[mt][sl]=value
         return out
     return evaluate_bw(energies,region.groups,region.approximation,context,work_bytes=work_bytes)
