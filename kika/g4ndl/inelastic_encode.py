@@ -311,7 +311,7 @@ def _reactionSections(channel, composite, reaction, p, suite, targetMass, report
                        int(entry["dummy"]) if composite and entry.get("dummy") is not None
                        else (0 if composite else None), None)
         if entry.get("verbatim") is not None:
-            if dt in (DT_ANGULAR, DT_ENERGY, DT_ENERGY_ANGLE) and dt in modelled:
+            if dt in (DT_ANGULAR, DT_ENERGY, DT_ENERGY_ANGLE, 12, 13, 14, 15) and dt in modelled:
                 # The model now holds what the file held verbatim: the model wins.
                 continue
             out.append((entry["position"], mt, (entry["verbatim"], head)))
@@ -410,7 +410,18 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
     # and what FUDGE's GNDS carries too) states no multiplicity and an
     # `unspecified` distribution: G4NDL has nowhere to put it and Geant4 makes the
     # recoil from kinematics, so it is not a product G4NDL writes.
-    products = [p for p in products if not _isBareResidual(p, EMITTED[channel])]
+    mf6Labels = {r.get("label") for r in ((_entry(entries, DT_ENERGY_ANGLE)
+                                           or (_fromEndfMF6(reaction) if not entries else {}))
+                                          .get("products") or [])}
+    products = [p for p in products if not _isBareResidual(p, EMITTED[channel], mf6Labels)]
+    # The photons of the MF12-15 sections (D10-2) are written as dataType
+    # 12-15 below, not as an MF4/MF5/MF6 product.
+    photonFields, photonEntry = _photonFields(reaction, entries)
+    if photonFields is not None:
+        from kika.g4ndl.photons import photonLabels
+        labels = set(photonLabels(photonFields))
+        products = [p for p in products if p.label not in labels]
+        out.update(_photonSections(reaction, photonEntry, suite, targetMass, where, report))
     if form is None and (products or any(e["dataType"] == DT_CROSS_SECTION for e in entries)):
         raise G4NDLUnsupportedError(
             f"{where} has no '{RECONSTRUCTED_LABEL}' cross section: G4NDL is pointwise "
@@ -450,16 +461,53 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
     return out
 
 
-def _isBareResidual(product, emitted) -> bool:
-    """A product that says nothing but that it exists: no multiplicity, and only
-    ``unspecified`` distributions. Never the channel's emitted particle."""
+def _photonFields(reaction, entries):
+    """``(ENDF photon headerFields, the G4NDL photon entry)`` of a reaction, or ``(None, None)``."""
+    for entry in entries:
+        if entry.get("photons") is not None and entry.get("verbatim") is None:
+            return entry["photons"].get("endf"), entry["photons"]
+    endf = _endfProvenance(reaction)
+    fields = getattr(endf, "headerFields", None) or {}
+    if not entries and ({"mf12", "mf13"} & set(fields)):
+        return fields, None
+    return None, None
+
+
+def _photonSections(reaction, bag, suite, targetMass, where, report) -> Dict[int, object]:
+    from kika.g4ndl.photons import photonBodiesFromModel
+
+    mass = targetMass if targetMass is not None else (bag or {}).get("targetMass")
+    mat = getattr(_endfProvenance(reaction), "mat", None) or 0
+    bodies = photonBodiesFromModel(suite, reaction, bag, mat, report, mass)
+    if bodies is None:
+        report.warn(f"{where}: the photons could not be written from the model (a "
+                    f"cascade, or no MF12/MF13 bookkeeping); they are not written")
+        return {}
+    mean, angular, energies = bodies
+    out = {13 if mean.__class__.__name__ == "PhotonPartialsBody" else 12: mean}
+    if angular is not None:
+        out[14] = angular
+    if energies is not None and energies.needed:
+        out[15] = energies
+    return out
+
+
+def _isBareResidual(product, emitted, mf6Labels=()) -> bool:
+    """A product that says nothing but that it exists: only ``unspecified``
+    distributions, and no multiplicity -- or the multiplicity 1 and decay channel
+    of a level's residual (roadmap E5c, where a cascade hangs) that no MF6
+    section states. Never the channel's emitted particle."""
     from kika.nuclear_data.model import Unspecified
 
-    if product.pid in (emitted, "photon") or product.multiplicity is not None:
+    if product.pid in (emitted, "photon"):
         return False
     d = product.distribution
     forms = list(d.forms.values()) if d is not None else []
-    return bool(forms) and all(isinstance(f, Unspecified) for f in forms)
+    if not (bool(forms) and all(isinstance(f, Unspecified) for f in forms)):
+        return False
+    if product.multiplicity is None:
+        return True
+    return product.outputChannel is not None and product.label not in set(mf6Labels)
 
 
 def _evalForm(product):

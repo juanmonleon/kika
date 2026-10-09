@@ -28,20 +28,20 @@ files, and kika refuses a library that does rather than pick one silently.
 with its σ under ``recon`` (lin-lin, 0 K, as every G4NDL σ) and its Q. An
 ``FSMF6`` body becomes its products, by the same mapping as the inelastic MF6
 (:func:`kika.g4ndl.inelastic_decode._energyAngle`): the capture γ spectrum
-reaches the model. An ``FS`` body does **not**: the model has no
-photon-production form yet (roadmap Fase 10, D10-2), so it travels whole as
-G4NDL text in the reaction's
-:class:`~kika.nuclear_data.model.provenance.G4NDLCaptureProvenance`, the
-report says so, and the encoder writes it back unchanged.
+reaches the model. An ``FS`` body is ENDF's MF12/14/15 and reaches it too
+(roadmap D10-2, :mod:`kika.g4ndl.photons`): its photons become the reaction's
+photon products, through the same ENDF adapter an ENDF tape's MF12-15 go
+through. Only a cascade (``repFlag=2``), which names levels a final state does
+not carry, still travels as G4NDL text in the reaction's
+:class:`~kika.nuclear_data.model.provenance.G4NDLCaptureProvenance`, and the
+report says so.
 
 **Writing.** σ, Q and the products come from the model; the bookkeeping the
 model has no slot for comes from the provenance while it still describes the
 model. A suite read from ENDF carries its MF6 bookkeeping
 (:func:`kika.g4ndl.inelastic_encode._fromEndfMF6`), so an evaluation with an
 MF6 for MT102 (JEFF-4.0) gives an ``FSMF6``; one whose capture photons are
-MF12-15 gives no final state, since the ENDF adapter does not read those
-files either, and the report says that Geant4 will fall back to photon
-evaporation. Every text is parsed back with the strict reader and compared
+MF12-15 gives an ``FS`` (D10-2). Every text is parsed back with the strict reader and compared
 record for record before anything is written.
 """
 from __future__ import annotations
@@ -246,10 +246,20 @@ def decodeCapture(crossSection: CrossSectionRecord, finalState: Optional[Capture
                 # but printed to full precision.
                 reaction.outputChannel.Q.value = qs.pop()
         else:
-            entry["verbatim"] = _bodyText(finalState)
-            report.unsupportedNode(
-                f"{where} FS: capture photon production (MF12-15) has no model form yet; "
-                f"kept as G4NDL text in the provenance and written back unchanged")
+            from kika.g4ndl.photons import attachPhotonBodies
+            from kika.nuclear_data.model.pops import zaFromPid
+
+            suite.reactions.append(reaction)
+            try:
+                za = float(zaFromPid(suite.target))
+            except (ValueError, TypeError):
+                za = 0.0
+            entry["targetMass"] = float(finalState.mean.targetMass)
+            if not attachPhotonBodies(suite, reaction, finalState.mean, finalState.angular,
+                                      finalState.energies, entry, f"{where} FS", report, za):
+                entry.clear()
+                entry["verbatim"] = _bodyText(finalState)
+            return report
     suite.reactions.append(reaction)
     return report
 
@@ -333,6 +343,10 @@ def captureFinalState(suite, *, header=None, targetMass: Optional[float] = None,
     carriedHeader = provenance.finalStateHeader if provenance is not None else None
     products = [p for p in (reaction.outputChannel.products if reaction.outputChannel else ())
                 if p.multiplicity is not None or p.distribution]
+    photons = _photonFinalState(suite, reaction, entry, targetMass, header, carriedHeader,
+                                where, report)
+    if photons is not None:
+        return photons
     if products:
         if entry.get("verbatim") is not None:
             report.warn(f"{where}: the {provenance.finalState} final state the file had is "
@@ -351,12 +365,47 @@ def captureFinalState(suite, *, header=None, targetMass: Optional[float] = None,
                              f"read back: {exc}") from None
         if kind == "FS":
             report.warn(f"{where}: the capture photons (FS) are written back as they were "
-                        f"read; kika does not model photon production yet")
+                        f"read: a cascade (repFlag=2) the model does not carry")
         return dataclasses.replace(record, path=None, header=_header(header, carriedHeader))
-    report.warn(f"{where}: the suite has no capture final state (an ENDF tape's capture "
-                f"photons are MF12-15, which kika does not read yet), so none is written "
+    report.warn(f"{where}: the suite has no capture final state, so none is written "
                 f"and Geant4 samples the photons from G4PhotonEvaporation")
     return None
+
+
+def _photonFinalState(suite, reaction, entry, targetMass, header, carriedHeader, where,
+                      report) -> Optional[CapturePhotonsRecord]:
+    """The model's MT102 photons as ``Capture/FS`` (D10-2), or ``None`` if it has none.
+
+    From the ENDF bookkeeping a G4NDL ``FS`` read kept, or from the reaction's
+    own ENDF provenance (an ENDF tape whose capture photons are MF12-15).
+    """
+    from kika.g4ndl.photons import photonBodiesFromModel
+
+    if entry.get("verbatim") is not None:
+        return None
+    header12 = (getattr(reaction.provenance, "headerFields", None) or {}) \
+        if getattr(reaction.provenance, "sourceFormat", None) == "endf" else {}
+    if entry.get("endf") is None and not ({"mf12", "mf13"} & set(header12)):
+        return None
+    from kika.g4ndl.photons import photonLabels
+    labels = set(photonLabels(entry.get("endf") if entry.get("endf") is not None else header12))
+    present = {p.label for p in reaction.outputChannel.products if p.pid == "photon"}
+    if not labels or not labels <= present:
+        report.warn(f"{where}: the photons the FS was read with are no longer the model's "
+                    f"products, so the products are written as they are")
+        return None
+    mass = targetMass if targetMass is not None else entry.get("targetMass")
+    mat = getattr(reaction.provenance, "mat", None) or 0
+    bodies = photonBodiesFromModel(suite, reaction, entry, mat, report, mass)
+    if bodies is None:
+        return None
+    mean, angular, energies = bodies
+    if angular is None:
+        report.warn(f"{where}: the photons have no angular distribution (no MF14); "
+                    f"Capture/FS needs InitAngular, so they are written isotropic")
+        from kika.g4ndl.inelastic_records import PhotonAngularBody
+        angular = PhotonAngularBody(1)
+    return CapturePhotonsRecord(None, _header(header, carriedHeader), mean, angular, energies)
 
 
 def encodeCapture(suite, *, header=None, targetMass: Optional[float] = None, report=None

@@ -432,9 +432,9 @@ def fissionSummary(suite) -> Optional[Dict[str, Any]]:
     spectrum's law and where the neutron's angle is stated; the energy release
     at thermal (``ET``, ``ER``, the fragments' kinetic energy); the chances
     (MT19, 20, 21, 38) with their σ range, Q and whether they carry a final
-    state of their own; where the photons live (``"verbatim"``, as G4NDL text,
-    or ``None`` without) and whether the fragment yields (``Fission/FF``) are
-    kept."""
+    state of their own; where the photons live (``"model"`` when they reached
+    it, D10-2; ``"verbatim"`` when any travels as G4NDL text; ``None``
+    without) and whether the fragment yields (``Fission/FF``) are kept."""
     reaction = suite.findReactionByENDF_MT(18)
     if reaction is None:
         return None
@@ -477,8 +477,9 @@ def fissionSummary(suite) -> Optional[Dict[str, Any]]:
         chances.append(dict(mt=mt, directory=name, cross_section=sigma,
                             q_value=None if q is None else float(q), final_state=own))
     sections = list(getattr(prov, "sections", None) or [])
-    photons = "verbatim" if any(e.get("dataType", 0) >= 12 and e.get("verbatim") is not None
-                                for e in sections) else None
+    photonEntries = [e for e in sections if e.get("dataType", 0) >= 12]
+    photons = ("verbatim" if any(e.get("verbatim") is not None for e in photonEntries)
+               else "model" if photonEntries else None)
     kept = [f"({e['infoType']}, {e['dataType']})" for e in sections
             if e.get("verbatim") is not None and e.get("dataType", 0) < 12]
     try:

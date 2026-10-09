@@ -174,9 +174,11 @@ def zaFromPid(pid: str) -> int:
 
     Returns ``ZA`` alone: the excited-state number is *not* recovered, because
     an encoder that needs ``LIP`` reads it from the provenance where it was
-    kept, and inferring it here would give two sources for one field.
+    kept, and inferring it here would give two sources for one field. A
+    metastable alias's ``_m`` suffix (``Cd115_m1``, the target of a G4NDL
+    metastable isotope) names the same nuclide and is ignored too.
     """
-    name = pid.split("_e")[0]
+    name = pid.split("_e")[0].split("_m")[0]
     if name in _SPECIAL_PID:
         return _SPECIAL_PID[name]
     if name.startswith("ZA") and name[2:].isdigit():

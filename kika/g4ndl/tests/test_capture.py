@@ -136,13 +136,32 @@ def test_mt102_and_what_reaches_the_model():
     assert p.finalStateEntry["products"][0]["distLaw"] == 1
 
 
-def test_photon_files_are_kept_verbatim_and_reported():
+def test_capture_photons_reach_the_model():
+    """D10-2: an ``FS`` body is ENDF's MF12/14/15 and reaches the model through
+    the ENDF photon adapter: one photon product per InitMean line."""
     suite = G4.read("N14")
     r = suite.findReactionByENDF_MT(102)
-    assert list(r.outputChannel.products) == []
-    assert r.provenance.finalState == "FS" and "verbatim" in r.provenance.finalStateEntry
+    record = _record("N14")
+    photons = list(r.outputChannel.products)
+    assert len(photons) == len(record.mean.lines) and all(p.pid == "photon" for p in photons)
+    assert all(isinstance(p.distribution["eval"], Uncorrelated) for p in photons)
+    first, line = photons[0], record.mean.lines[0]
+    assert np.array_equal(first.multiplicity.form.ys, line.yield_.y)
+    entry = r.provenance.finalStateEntry
+    assert r.provenance.finalState == "FS" and "verbatim" not in entry
+    assert {"endf", "g4ndl"} <= set(entry)
     assert r.outputChannel.Q.value == float(G4.captureCrossSection("N14").bookkeeping[0])
-    assert any("MF12-15" in m for m in suite.report.unsupported)
+    assert not any("MF12-15" in m for m in suite.report.unsupported)
+
+
+def test_an_edit_to_a_capture_photon_is_what_is_written():
+    suite = G4.read("N14")
+    r = suite.findReactionByENDF_MT(102)
+    r.outputChannel.products[0].multiplicity.form.ys[:] *= 2.0
+    _, fs, _ = encodeCapture(suite)
+    assert np.array_equal(fs.mean.lines[0].yield_.y, 2.0 * _record("N14").mean.lines[0].yield_.y)
+    assert [d for d in finalStateDifferences(_record("N14"), fs)
+            if "lines[0].yield_" not in d] == []
 
 
 def test_model_edits_are_what_is_written(tmp_path):
@@ -174,15 +193,15 @@ def test_a_suite_without_a_final_state_writes_none_and_removes_the_stale_one(tmp
     assert g4ndl.open(tmp_path).captureFinalState("N15") is None
 
 
-def test_model_products_replace_a_verbatim_photon_file():
-    """Products in the model win over the FS text the provenance kept."""
+def test_model_products_replace_the_photon_file():
+    """Other products in the model win over the FS the provenance describes."""
     donor = G4.read("N15").findReactionByENDF_MT(102)
     suite = G4.read("N14")
     r = suite.findReactionByENDF_MT(102)
     r.outputChannel.products.products[:] = list(donor.outputChannel.products)
+    r.provenance.finalStateEntry.clear()
     r.provenance.finalStateEntry.update(
         {k: v for k, v in donor.provenance.finalStateEntry.items()})
-    del r.provenance.finalStateEntry["verbatim"]
     from kika.nuclear_data.model import ConversionReport
     fs = captureFinalState(suite, report=ConversionReport())
     assert isinstance(fs, CaptureMF6Record)
@@ -285,7 +304,8 @@ def test_the_capture_summary_says_where_the_photons_live():
     h1 = captureSummary(G4.read("H1"))
     assert h1["products"] == ["photon", "H2"]
     n14 = captureSummary(G4.read("N14"))
-    assert (n14["final_state"], n14["photons"], n14["products"]) == ("FS", "verbatim", [])
+    assert (n14["final_state"], n14["photons"]) == ("FS", "model")
+    assert n14["products"] and all(label.startswith("photon") for label in n14["products"])
     suite = G4.read("N15")
     r = suite.findReactionByENDF_MT(102)
     r.outputChannel.products.products[:] = []

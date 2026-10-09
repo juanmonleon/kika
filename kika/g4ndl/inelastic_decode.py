@@ -36,8 +36,10 @@ capture and fission.
        1 LANG=1 ``uncorrelated`` (NA=0) or ``energyAngular``, 1 LANG=2
        ``KalbachMann``, 2 and 3 ``angularTwoBody``, 4 a recoil, 6
        ``NBodyPhaseSpace``, 7 ``angularEnergy``
-12-15  **not modelled**: kika's model has no photon-production forms yet, for
-       ENDF either (``kika/_write.py``)
+12-15  the reaction's photons, ENDF's MF12-15, through :mod:`kika.g4ndl.photons`
+       (D10-2): the photon products the ENDF adapter makes from a tape. A
+       cascade (12 with repFlag=2) goes to its residual level's ``decayData``
+       in PoPs, once every level of the isotope has been read
 =====  =========================================================================
 
 **What is not modelled is kept, not dropped.** Such a section goes to the
@@ -268,13 +270,17 @@ def decodeInelastic(crossSection: Optional[CrossSectionRecord],
     libraryName = library.root.name if library is not None else None
     channelReactions: List[Tuple[str, object]] = []
     counts = {"modelled": 0, "verbatim": 0}
+    cascades: List[tuple] = []
     for record in files:
-        for reaction in _decodeFile(record, libraryRoot, libraryName, report, counts):
+        for reaction in _decodeFile(record, libraryRoot, libraryName, report, counts, suite,
+                                    cascades):
             if isinstance(reaction, CrossSectionSum):
                 suite.sums.append(reaction)
             else:
                 suite.reactions.append(reaction)
                 channelReactions.append(reaction)
+    if cascades:
+        _cascades(suite, cascades, report, counts)
     if crossSection is not None:
         suite.sums.append(_inelasticSum(crossSection, channelReactions, libraryRoot,
                                         libraryName))
@@ -315,7 +321,8 @@ def _groups(record: InelasticFSRecord) -> "OrderedDict[int, List[Tuple[int, Sect
     return groups
 
 
-def _decodeFile(record: InelasticFSRecord, libraryRoot, libraryName, report, counts):
+def _decodeFile(record: InelasticFSRecord, libraryRoot, libraryName, report, counts,
+                suite=None, cascades=None):
     groups = _groups(record)
     where = record.path.name if record.path is not None else record.channel
     sha = _sha256(record.path)
@@ -332,7 +339,7 @@ def _decodeFile(record: InelasticFSRecord, libraryRoot, libraryName, report, cou
             Qvalue=record.Qvalue, Qdummy=record.Qdummy,
             sfType=mt if record.composite else None, nSections=len(record.sections))
         reaction = _decodeReaction(record, mt, sections, provenance,
-                                   f"{where} MT{mt}", report, counts)
+                                   f"{where} MT{mt}", report, counts, suite, cascades)
         sumOnly = (record.composite and isLumped(mt) and partialMTs
                    and all(s.dataType == DT_CROSS_SECTION or e.get("verbatim") is not None
                            for (_, s), e in zip(sections, provenance.sections))
@@ -347,7 +354,8 @@ def _decodeFile(record: InelasticFSRecord, libraryRoot, libraryName, report, cou
     return out
 
 
-def _decodeReaction(record, mt, sections, provenance, where, report, counts) -> Reaction:
+def _decodeReaction(record, mt, sections, provenance, where, report, counts,
+                    suite=None, cascades=None) -> Reaction:
     q = record.Qvalue if not record.composite else None
     for _, s in sections:
         if s.dataType == DT_CROSS_SECTION and record.composite:
@@ -363,10 +371,14 @@ def _decodeReaction(record, mt, sections, provenance, where, report, counts) -> 
     channel = reaction.outputChannel
     pid = EMITTED[record.channel]
     angularEntry = None
+    photonSections = []
     for position, s in sections:
         entry = {"position": position, "infoType": s.infoType, "dataType": s.dataType,
                  "dummy": s.dummy}
         provenance.sections.append(entry)
+        if s.dataType in (12, 13, 14, 15):
+            photonSections.append((s, entry))   # one reaction's photons go in together
+            continue
         try:
             if s.dataType == DT_CROSS_SECTION:
                 _crossSection(s.body, reaction, entry)
@@ -402,7 +414,79 @@ def _decodeReaction(record, mt, sections, provenance, where, report, counts) -> 
             if s.dataType == DT_ANGULAR:
                 angularEntry = entry
                 _dropProduct(channel, pid)
+    if photonSections:
+        _photons(record, reaction, photonSections, suite, where, report, counts, cascades)
     return reaction
+
+
+def _photons(record, reaction, photonSections, suite, where, report, counts,
+             cascades=None) -> None:
+    """One reaction's dataType 12/13, 14 and 15 (ENDF MF12-15) into the model
+    through :mod:`kika.g4ndl.photons` (D10-2), or kept as text if they cannot be.
+    A cascade waits in *cascades* until every level of the isotope is known."""
+    from kika.g4ndl.inelastic_records import PhotonCascadeBody
+    from kika.g4ndl.photons import attachPhotonBodies
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    byType = {s.dataType: (s, entry) for s, entry in photonSections}
+    mean = byType.get(12) or byType.get(13)
+    if (cascades is not None and suite is not None and mean is not None
+            and isinstance(mean[0].body, PhotonCascadeBody)
+            and len(byType) == len(photonSections)):
+        cascades.append((record, reaction, photonSections, byType, where))
+        return
+    done = False
+    if suite is not None and mean is not None and len(byType) == len(photonSections):
+        try:
+            za = float(zaFromPid(suite.target))
+        except (ValueError, TypeError):
+            za = 0.0
+        bag = {"targetMass": float(mean[0].body.targetMass)}
+        angular = byType[14][0].body if 14 in byType else None
+        energies = byType[15][0].body if 15 in byType else None
+        done = attachPhotonBodies(suite, reaction, mean[0].body, angular, energies, bag,
+                                  f"{where} photons", report, za, reaction.ENDF_MT)
+        if done:
+            mean[1]["photons"] = bag
+            for s, entry in photonSections:
+                if entry is not mean[1]:
+                    entry["photonsOf"] = mean[0].dataType
+    for s, entry in photonSections:
+        if done:
+            counts["modelled"] += 1
+        else:
+            entry["verbatim"] = formatSectionBody(s, record.composite)
+            counts["verbatim"] += 1
+
+
+def _cascades(suite, cascades, report, counts) -> None:
+    """The deferred cascades of an isotope, attached together (D10-2)."""
+    from kika.g4ndl.photons import attachCascades
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    try:
+        za = float(zaFromPid(suite.target))
+    except (ValueError, TypeError):
+        za = 0.0
+    items = []
+    for record, reaction, photonSections, byType, where in cascades:
+        mean = byType.get(12) or byType.get(13)
+        bag = {"targetMass": float(mean[0].body.targetMass)}
+        items.append((reaction, mean[0].body, byType[14][0].body if 14 in byType else None,
+                      byType[15][0].body if 15 in byType else None, bag, f"{where} photons"))
+    done = attachCascades(suite, items, report, za)
+    for ok, (record, reaction, photonSections, byType, where), item in zip(done, cascades, items):
+        mean = byType.get(12) or byType.get(13)
+        for s, entry in photonSections:
+            if ok:
+                if entry is mean[1]:
+                    entry["photons"] = item[4]
+                else:
+                    entry["photonsOf"] = mean[0].dataType
+                counts["modelled"] += 1
+            else:
+                entry["verbatim"] = formatSectionBody(s, record.composite)
+                counts["verbatim"] += 1
 
 
 def _dropProduct(channel, pid):
