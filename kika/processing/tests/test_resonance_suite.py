@@ -37,6 +37,64 @@ def suite_model():
 def run(suite=None,**kwargs):return reconstruct_suite(suite_model() if suite is None else suite,NeutronContext(56.,0.),**kwargs)
 
 
+def test_constant_projection_preserves_full_tables_and_checks(monkeypatch):
+    import kika.processing.resonances.suite as module
+    reference=run()
+    actual_linearize=module.linearize
+    declarations=[]
+    def projected(*args,**kwargs):
+        declarations.append(kwargs.get('constants',{}))
+        return actual_linearize(*args,**kwargs)
+    monkeypatch.setattr(module,'linearize',projected)
+    optimized=run()
+    assert any(ReactionKey('reactions','extra') in c for c in declarations)
+    def original(*args,**kwargs):
+        kwargs.pop('constants',None)
+        return actual_linearize(*args,**kwargs)
+    monkeypatch.setattr(module,'linearize',original)
+    baseline=run()
+    for key,form in optimized.forms.items():
+        for a,b in zip(getattr(form,'function1ds',[form]),
+                       getattr(baseline.forms[key],'function1ds',[baseline.forms[key]])):
+            np.testing.assert_array_equal(a.xs,b.xs)
+            np.testing.assert_array_equal(a.ys,b.ys)
+    for a,b in zip(optimized.report['regions'],baseline.report['regions']):
+        assert a['evaluations']==b['evaluations']
+        assert a['refinement_maxima']==b['refinement_maxima']
+        assert a['verification_maxima']==b['verification_maxima']
+    assert optimized.report['points']==reference.report['points']
+
+
+def test_shared_backgrounds_keep_sums_and_independent_readers(monkeypatch):
+    from kika.nuclear_data.model.enums import Interpolation
+    from kika.algebra.prepared import _SharedLinearEvaluator
+    suite=suite_model()
+    def mixed(values):
+        return Regions1d([XYs1d([10.,100.],values[:2],axes=AXES,
+                                interpolation=Interpolation.loglog),
+                          XYs1d([100.,1000.],values[1:],axes=AXES)],label='eval')
+    suite.reactions['extra'].crossSection['eval']=mixed([.5,.7,1.2])
+    suite.reactions.append(Reaction(ReactionId('second-extra',ENDF_MT=17),
+        CrossSection({'eval':mixed([.4,.6,.9])})))
+    suite.sums[1].summands.append(Add(href('second-extra')))
+    result=run(suite)
+    segment=result._segments[0]
+    calls=[];original=_SharedLinearEvaluator.__call__
+    def track(self,q,**kwargs):
+        value=original(self,q,**kwargs)
+        if value is not None:calls.append(len(np.atleast_1d(q)))
+        return value
+    monkeypatch.setattr(_SharedLinearEvaluator,'__call__',track)
+    q=np.array([110.,200.,250.])
+    fast=result._evaluate_segment(segment,q)
+    assert calls
+    reference=result._evaluate_segment(segment,q,shared_linear=False)
+    for key in fast:np.testing.assert_array_equal(fast[key],reference[key])
+    calls.clear()
+    result._evaluate_segment(segment,q,physical_witness={})
+    assert not calls
+
+
 def test_complete_domains_sums_and_nonresonant_data():
     suite=suite_model();result=run(suite)
     assert suite.styles.labels==['eval']

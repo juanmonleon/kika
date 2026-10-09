@@ -125,8 +125,16 @@ def _read_checked(x, y, laws, q, side: str, outside: str):
         x1, x2, y1, y2, law = x[k], x[k + 1], y[k], y[k + 1], laws[k]
         wide = x2 > x1
         value = np.empty(p.shape)
-        value[wide] = panel_value(x1[wide], y1[wide], x2[wide], y2[wide],
-                                  law[wide], p[wide])
+        if np.all(law[wide] == LINLIN):
+            # A mixed-law source often receives queries only in its lin-lin
+            # part. Keep panel_value's exact operations, without broadcasting
+            # five arrays and discovering the same law on every call.
+            with np.errstate(divide='ignore',invalid='ignore',over='ignore'):
+                value[wide] = ((y2[wide]-y1[wide])/(x2[wide]-x1[wide])
+                               *(p[wide]-x1[wide])+y1[wide])
+        else:
+            value[wide] = panel_value(x1[wide], y1[wide], x2[wide], y2[wide],
+                                      law[wide], p[wide])
         value[~wide] = y2[~wide]
         # Tabulated abscissae read their tabulated value, untouched.
         at_start = p == x1

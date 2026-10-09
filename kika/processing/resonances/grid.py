@@ -61,31 +61,35 @@ def check_dense_workspace(size,work_bytes):
             category='memory-budget-exhausted')
 
 
-def linearize(evaluate, seeds, options, point_budget):
+def linearize(evaluate, seeds, options, point_budget, *, constants=None):
     """Refine independent seed-panel chunks on the same shared reaction mesh.
 
     The workspace target sizes starting chunks; final tables and an adaptive
     chunk's growth are additional storage. It is not a bound on process RSS.
     Accepted panels retain all probes and the same error budgets. A failing panel gains its
     worst probe and the midpoint; adding all seven probes multiplies output size.
+    ``constants`` declares functions proven constant by their source model,
+    never inferred from equal samples. They retain output and diagnostics but
+    need no adaptive column. Workspace sizing uses the active column count;
+    retained complete output tables remain additional storage.
     """
     x=np.unique(np.asarray(seeds,dtype=float))
     if len(x)>point_budget:
         raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
     first=evaluate(x)
-    count=len(first)
+    count=max(1,sum(mt not in (constants or {}) for mt in first))
     # Conservative live-array estimate for seven probes, sorting, chords,
     # ratios, kept probes, and child panels. Adaptive growth remains explicit.
     panels=max(1,min(4096,options.max_work_bytes//(1024*(count+1))))
     if len(x)-1<=panels:
-        return _linearize_chunk(evaluate,x,options,point_budget,first=first)
+        return _linearize_chunk(evaluate,x,options,point_budget,first=first,constants=constants)
     chunks=[];checks=[];points=0
     for start in range(0,len(x)-1,panels):
         end=min(start+panels,len(x)-1)
         future_seeds=len(x)-end-1
         budget=point_budget-points-future_seeds+(1 if start else 0)
         grid,values,check=_linearize_chunk(evaluate,x[start:end+1],options,budget,
-            first={mt:v[start:end+1] for mt,v in first.items()})
+            first={mt:v[start:end+1] for mt,v in first.items()},constants=constants)
         keep=slice(1,None) if start else slice(None)
         chunks.append((grid[keep],{mt:v[keep] for mt,v in values.items()}))
         checks.append(check);points+=len(grid[keep])
@@ -101,7 +105,7 @@ def linearize(evaluate, seeds, options, point_budget):
     return grid,values,check
 
 
-def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None):
+def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, constants=None):
     """Return a common grid, values and checks; retain node evaluations.
 
     The refinement itself is :func:`kika.algebra.refine`, the one adaptive
@@ -120,7 +124,11 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None):
         raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
     first=evaluate(x) if first is None else first
     seeded=len(x)
-    mts=list(first)
+    constants={} if constants is None else constants
+    mts=[mt for mt in first if mt not in constants]
+    # Keep one real column even on an entirely constant span, preserving the
+    # ordinary probe/budget/unresolvable checks and reporting conventions.
+    if not mts:mts=[next(iter(first))]
     columns=lambda values:np.column_stack([np.asarray(values[mt],dtype=float) for mt in mts])
     fractions=np.r_[REFINEMENT_FRACTIONS,VERIFICATION_FRACTIONS]
     try:
@@ -157,6 +165,18 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None):
             integrals[mt][name]={'reference_estimate':float(np.sum(factor*a)),
                                 'linear_estimate':float(np.sum(factor*linear[:,gauss_indices])),
                                 'absolute_difference_estimate':float(np.sum(factor*np.abs(a-linear[:,gauss_indices])))}
+    for mt in first:
+        if mt in y:continue
+        value=constants[mt]
+        y[mt]=np.full(len(x),value)
+        maxima[mt]=(0.,0.)
+        integrals[mt]={}
+        for name,weight in (('dE',1.),('dE_over_E',1/energy)):
+            factor=np.diff(x)[:,None]*weights*weight
+            estimate=float(np.sum(factor*value))
+            integrals[mt][name]=dict(reference_estimate=estimate,
+                linear_estimate=estimate,absolute_difference_estimate=float(np.sum(factor*0.)))
+    y={mt:y[mt] for mt in first}
     return x,y,dict(iterations=result.passes,evaluations=seeded+result.evaluations,
                    refinement_maxima={mt:v[0] for mt,v in maxima.items()},
                    verification_maxima={mt:v[1] for mt,v in maxima.items()},

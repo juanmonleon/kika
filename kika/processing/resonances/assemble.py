@@ -44,6 +44,10 @@ class BackgroundCurve:
         """The curve under its law (:func:`kika.algebra.evaluate`), zero off it."""
         return self._evaluate(np.asarray(e,dtype=float))
 
+    def constant_on(self,low,high):
+        """A constant certified by the algebra snapshot, or None."""
+        return self._evaluate.constant_on(low,high)
+
 
 def prepare_backgrounds(backgrounds):
     from kika.nuclear_data.model import XYs1d,Regions1d,Background,ResonancesWithBackground

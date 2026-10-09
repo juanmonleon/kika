@@ -199,6 +199,24 @@ class _SuiteSegment:
     curves: object
     region: object
     left_high: bool
+    _shared_linear: object=field(init=False,repr=False,compare=False)
+
+    def __post_init__(self):
+        from kika.algebra.prepared import _prepare_shared_linear_evaluator
+        groups={}
+        for key,curve in self.curves.items():
+            if curve is None or len(curve.x)<2:continue
+            laws=tuple(np.broadcast_to(curve._laws,(len(curve.x)-1,)))
+            # Uniform lin-lin tables already use NumPy's efficient interp.
+            if all(law==2 for law in laws):continue
+            groups.setdefault((tuple(curve.x),laws),[]).append((key,curve))
+        shared=[]
+        for (x,laws),members in groups.items():
+            if len(members)<2:continue
+            ys=np.column_stack([curve.y for _,curve in members])
+            shared.append((tuple(key for key,_ in members),
+                           _prepare_shared_linear_evaluator(x,ys,laws)))
+        object.__setattr__(self,'_shared_linear',tuple(shared))
 
 
 @dataclass(frozen=True)
@@ -218,12 +236,27 @@ class SuiteReconstructionResult:
     _grids: tuple=()
     _verification_cache: object=field(default_factory=dict,init=False,repr=False,compare=False)
 
-    def _evaluate_segment(self,s,points,include_resonances=True,*,physical_witness=None):
+    def _evaluate_segment(self,s,points,include_resonances=True,*,physical_witness=None,constant_values=None,shared_linear=True):
         e=np.asarray(points,dtype=float).copy()
         if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
-        values={key:(curve.evaluate(e) if curve is not None and
-                    (not include_resonances or key not in self._graph) else np.zeros(len(e)))
-                for key,curve in s.curves.items()}
+        constant_values={} if constant_values is None else constant_values
+        grouped={}
+        # Independent verification keeps the ordinary background readers as
+        # well as the direct NumPy physical kernel.
+        if shared_linear and physical_witness is None:
+            for keys,reader in s._shared_linear:
+                needed=[(i,key) for i,key in enumerate(keys) if key not in constant_values
+                        and (not include_resonances or key not in self._graph)]
+                if len(needed)<2:continue
+                batch=reader(e,max_cells=max(1,min(65536,self.options.max_work_bytes//64)))
+                if batch is not None:grouped.update((key,batch[:,i]) for i,key in needed)
+        values={}
+        for key,curve in s.curves.items():
+            if key in constant_values:values[key]=np.full(len(e),constant_values[key])
+            elif key in grouped:values[key]=grouped[key]
+            elif curve is not None and (not include_resonances or key not in self._graph):
+                values[key]=curve.evaluate(e)
+            else:values[key]=np.zeros(len(e))
         total=self._mt_keys.get(1)
         total_parts=_sum_leaves(total,self._graph) if total is not None else None
         if include_resonances and s.region is not None:
@@ -507,7 +540,19 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 source_worst[key]=dict(energy_eV=float(probe[index]),side='left-limit' if s.left_high and probe[index]==s.high else 'point',stated_b=float(original[key][index]),components_b=float(summed[index]),error_ratio=maximum)
             source_balance[key]=max(source_balance[key],maximum)
             original[key]=summed
-        x,y,check=linearize(lambda e:result._evaluate_segment(s,e),seeds,options,options.max_points-points)
+        affected=({physical_owners.get(mt) for mt in region_mts(s.region)}
+                  if s.region is not None else set())
+        constants={}
+        high=np.nextafter(s.high,s.low) if s.left_high else s.high
+        for key,curve in s.curves.items():
+            if key in graph or key in affected:continue
+            value=(0. if curve is None else curve.constant_on(s.low,high)) if high>s.low else None
+            if value is not None:constants[key]=value
+        for key in order:
+            if all(part in constants for part in graph[key]):
+                constants[key]=sum((constants[part] for part in graph[key]),0.)
+        x,y,check=linearize(lambda e:result._evaluate_segment(s,e,constant_values=constants),
+            seeds,options,options.max_points-points,constants=constants)
         points+=len(x);tables.append((x,y));checks.append(dict(domain=(s.low,s.high),points=len(x),**check))
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')]);output={}
     from kika.algebra import compress_flat
