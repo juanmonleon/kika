@@ -379,18 +379,27 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
 
 
 def _deferralMessage(mt: int, index: int, product) -> str:
-    """Why a negative-LAW subsection produces no product, in its own terms."""
+    """Why a negative-LAW subsection produces no product, in its own terms.
+
+    Every file a negative LAW can point at is read since roadmap E5a (MF14 and
+    MF15 joined MF4 and MF5), so what this says is no longer "kika cannot follow
+    the pointer" but "there is no node for what the pointer stands for". For the
+    130 photon subsections of ENDF/B-VIII.1's U-235, U-238 and Pu-239 MT18
+    (JP=11, ``LIP=1..N``) that is, **on our reading of ENDF-102's JP, still to be
+    checked against the manual**, the multiplicity distribution P(nu): the yield
+    of subsection *i* being the probability of emitting *i* photons. FUDGE
+    declines it by the same name (``Multiplicity dependent fission data,
+    P(nu)``), and GNDS-2.1 has no node for it (plan decision J8).
+    """
     where = {4: "MF4", 5: "MF5", 14: "MF14", 15: "MF15"}.get(
         abs(product.law), f"MF{abs(product.law)}")
-    reachable = abs(product.law) in (4, 5)
     return (
         f"MF6/MT{mt} product {index} (ZAP={product.za}, LIP={product.lip}) has "
         f"LAW={product.law}: it states no distribution of its own and defers to "
-        f"{where}, which kika {'reads' if reachable else 'does not read'}. It "
-        f"is not given a product of its own — its LIP is a line index and not "
-        f"an excited state, and ENDF/B-VIII.1's U-235 MT18 states 54 of these "
-        f"beside two real products. The subsection is kept in the provenance, "
-        f"so the section still comes back"
+        f"{where}, which kika reads. It is not given a product of its own -- its "
+        f"LIP indexes a multiplicity (P(nu) on a JP>0 fission section) rather "
+        f"than an excited state, and GNDS has no node for that. The subsection "
+        f"is kept in the provenance, so the section still comes back"
     )
 
 

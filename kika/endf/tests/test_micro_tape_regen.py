@@ -293,6 +293,48 @@ def cov_check_fixture_path(key: str) -> Path:
     return DATA / f"micro_{key}_covcheck.endf"
 
 
+def photon_fixture_path(key: str) -> Path:
+    """Committed photon (MF12-15) micro-tape *key*."""
+    return DATA / f"micro_{key}_photons.endf"
+
+
+#: The photon micro-tapes of roadmap E5, ``key -> (tape, keep)``, cut verbatim
+#: by :func:`build_cov_check`. Picked from the census of the three libraries
+#: (kika-workspace ``docs/library/endf_photons_e5_plan.md`` §2.7):
+#:
+#: * ``n14`` (ENDF/B-VIII.1): MF12 LO=1 on MT102 with discrete and primary lines
+#:   and a continuum, MF13 on MT4/28/32/103-107, an anisotropic (LI=0, LTT=1)
+#:   MF14 and an MF15. MF13 on **MT28 and MT32 has no MF3** on this tape, which
+#:   is the case FUDGE drops without a word; NNDC's GNDS of N-14 carries the
+#:   five orphanProducts of the others.
+#: * ``fe56`` (ENDF/B-VIII.1): MF12 LO=2, the level schemes of five levels and
+#:   two charged-particle levels (MT801-802). MT51 is left out because its MF3
+#:   alone is 926 lines of resonance region.
+#: * ``u235`` (ENDF/B-VIII.1): MT18 with MF6 (JP=11, LAW=0/-5/-15) beside MF12,
+#:   MF14 and MF15 -- the three-file case the 130 LAW=-15 subsections live in.
+#: * ``cm243`` (JEFF-4.0): LO=2 with LG=1 (no GP), which Fe-56 and S-36 lack.
+#:   The smallest LG=1 carrier in JEFF-4.0; ENDF/B-VIII.1's smallest is Cd-111.
+#: * ``li7`` (JEFF-4.0): an LO=1 photon on a discrete level (MT51), which is the
+#:   decay of the excited residual and so lands in *its* output channel.
+#: * ``s36`` (JENDL-5): the smallest LO=2 with LP=1.
+#: * ``hf182`` (JENDL-5): the photons on MT3, MF12 LO=1 and an MF15 of 1397
+#:   lines, the shape 95 JENDL-5 sections have.
+PHOTON_FIXTURES = {
+    "n14": ("n14_b81", {1: {451}, 3: {4, 102, 103, 104, 105, 107},
+                        12: None, 13: None, 14: None, 15: None}),
+    "fe56": ("fe56_b81", {1: {451}, 3: {52, 53, 54, 55, 801, 802},
+                          12: {52, 53, 54, 55, 801, 802},
+                          14: {52, 53, 54, 55, 801, 802}}),
+    "u235": ("u235_b81", {1: {451}, 3: {18}, 6: {18}, 12: {18}, 14: {18}, 15: {18}}),
+    "cm243": ("cm243_jeff40", {1: {451}, 3: {51, 52, 53}, 12: {51, 52, 53},
+                               14: {51, 52, 53}}),
+    "li7": ("li7_jeff40", {1: {451}, 3: {51}, 12: {51}, 14: {51}}),
+    "s36": ("s36_jendl", {1: {451}, 3: {51, 52, 53}, 12: {51, 52, 53},
+                          14: {51, 52, 53}}),
+    "hf182": ("hf182_jendl", {1: {451}, 3: {3}, 12: {3}, 14: {3}, 15: {3}}),
+}
+
+
 #: Fe-56 identity, shared by both fixtures.
 ZA, AWR, MAT, MT = 26056.0, 55.36735, 2631, 2
 
@@ -835,9 +877,38 @@ def test_regenerate_cov_check_micro_tapes(ne20_jeff40_tape, w186_jeff40_tape,
     assert all(cov_check_fixture_path(k).stat().st_size > 0 for k in COV_CHECK_FIXTURES)
 
 
+@pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
+def test_regenerate_photon_micro_tapes(n14_b81_tape, fe56_b81_tape, u235_b81_tape,
+                                       s36_jendl_tape, hf182_jendl_tape,
+                                       cm243_jeff40_tape, li7_jeff40_tape, request):
+    """Rebuild just the photon fixtures, for the same reason as the MF6 ones."""
+    DATA.mkdir(parents=True, exist_ok=True)
+    for key, (tape, keep) in PHOTON_FIXTURES.items():
+        source = request.getfixturevalue(f"{tape}_tape")
+        build_cov_check(Path(source), photon_fixture_path(key), keep)
+    assert all(photon_fixture_path(k).stat().st_size > 0 for k in PHOTON_FIXTURES)
+
+
 # ---------------------------------------------------------------------------
 # What the committed fixtures must satisfy
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("key", sorted(PHOTON_FIXTURES))
+def test_photon_inventories_are_exactly_what_we_kept(key):
+    inventory = section_inventory(photon_fixture_path(key).read_text())
+    keep = PHOTON_FIXTURES[key][1]
+    assert set(inventory) == set(keep)
+    for mf, mts in keep.items():
+        if mts is not None:
+            assert set(inventory[mf]) == mts, f"MF{mf} MT set drifted"
+
+
+def test_photon_micro_tapes_stay_small():
+    """N-14 keeps all of its MF13 (3 653 lines): it is the MF13 witness."""
+    for key in PHOTON_FIXTURES:
+        size = photon_fixture_path(key).stat().st_size
+        assert size < 450_000, f"{key} is {size} bytes"
+
 
 def test_mf33_inventory_is_exactly_what_we_kept():
     """The cross-reaction fixture kept MF3 and MF33 for MT4 and MT16, nothing else."""

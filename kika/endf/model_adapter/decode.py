@@ -77,6 +77,10 @@ SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 #: way, one product at a time rather than one section.
 COVARIANCE_MF = (31, 32, 33, 34, 35)
 
+#: The photon production files. Decoded by :mod:`.photons` (roadmap E5b), which
+#: declares per MT what it keeps verbatim instead.
+PHOTON_MF = (12, 13, 14, 15)
+
 
 def _za(section) -> int:
     """ZA, **rounded** rather than truncated.
@@ -416,7 +420,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             report = _attachEnergyAngleDistributions(suite, mf6.mt[mt], mt, report)
 
     present = set(getattr(endf, "mf", {}))
-    for mf in sorted(present - set(SUPPORTED_MF)):
+    for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF)):
         report.unsupportedNode(
             f"MF{mf} is present in the file and kika's parser registry does not "
             f"cover it; it is absent from this reactionSuite"
@@ -464,6 +468,12 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # product of its own.
     from .residuals import attachResiduals
     report = attachResiduals(suite, report)
+
+    # The photons, after the residuals: a discrete level's photons are the
+    # decay of the excited residual and go into the channel `attachResiduals`
+    # just built (roadmap E5b).
+    from .photons import attachPhotons
+    report = attachPhotons(suite, endf, report)
 
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)

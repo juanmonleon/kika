@@ -16,6 +16,9 @@ What it reports is what kika's ENDF decoder also builds, in plain lists:
 * ``legendre`` — per MT, the outgoing neutron's Legendre coefficients per
   incident energy, ``a0`` included, across every Legendre region;
 * ``resonances`` — every resolved resonance energy, sorted.
+* ``photons`` — per MT, every photon product (of the reaction and of the decay
+  of its residual): its multiplicity, the kind and value of its energy form,
+  its continuum table and its Legendre rows (roadmap E5b).
 """
 import json
 import os
@@ -70,6 +73,45 @@ def _legendre(reaction):
                              [float(c) for c in function.coefficients]])
         return rows
     return None
+
+
+def _photonsOf(channel):
+    """Every photon product of *channel* and of the decay channels inside it (E5b)."""
+    out = []
+    for product in channel.products:
+        if product.pid == "photon":
+            out.append(_photon(product))
+        inner = getattr(product, "outputChannel", None)
+        if inner is not None:
+            out.extend(_photonsOf(inner))
+    return out
+
+
+def _photon(product):
+    entry = {"label": product.label}
+    multiplicity = product.multiplicity.evaluated
+    try:
+        entry["multiplicity"] = _pairs(multiplicity)
+    except (TypeError, ValueError):
+        entry["multiplicity"] = None
+    form = product.distribution.evaluated
+    energy = getattr(form, "energySubform", None)
+    energy = getattr(energy, "data", energy)
+    kind = type(energy).__name__
+    entry["kind"] = kind
+    if kind in ("DiscreteGamma", "PrimaryGamma"):
+        entry["value"] = float(energy.value)
+        entry["domain"] = [float(energy.domainMin), float(energy.domainMax)]
+    elif kind == "XYs2d":
+        entry["energy"] = [[float(f.outerDomainValue), _pairs(f)] for f in energy]
+    angular = getattr(form, "angularSubform", None)
+    angular = getattr(angular, "data", angular)
+    if type(angular).__name__ == "XYs2d":
+        entry["angular"] = [[float(f.outerDomainValue), [float(c) for c in f.coefficients]]
+                            for f in angular]
+    else:
+        entry["angular"] = type(angular).__name__
+    return entry
 
 
 def _resonanceEnergies(reactionSuite):
@@ -206,6 +248,9 @@ def main(tapeText, name):
         rows = _legendre(reaction)
         if rows:
             out["legendre"][str(mt)] = rows
+        photons = _photonsOf(reaction.outputChannel)
+        if photons:
+            out.setdefault("photons", {})[str(mt)] = photons
     out["resonances"] = _resonanceEnergies(reactionSuite)
     sys.stdout.write("\n" + JSON_MARKER + json.dumps(out) + "\n")
 

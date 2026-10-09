@@ -749,6 +749,12 @@ class PerturbationSet:
         channel = getattr(reaction, "outputChannel", None)
         candidates, refused = [], []
         for product in (getattr(channel, "products", None) or ()):
+            # MF35 is the covariance of a particle's spectrum, never a photon's.
+            # Since roadmap E5b the photons of MF12/MF15 are products too, and
+            # the continuum one carries a table of P(E'|E) as well: without this,
+            # U-235's MT18 has two candidates and every PFNS draw refuses.
+            if product.pid == "photon":
+                continue
             distribution = getattr(product, "distribution", None)
             if distribution is None:
                 continue
@@ -988,6 +994,12 @@ class PerturbationSet:
         channel = getattr(reaction, "outputChannel", None)
         candidates = []
         for product in (getattr(channel, "products", None) or ()):
+            # MF34 is the covariance of the distribution MF4 describes, which is
+            # never a photon's. Photons (roadmap E5b) carry an angular half too,
+            # an isotropic one at the least, and would make every MT with
+            # photons a two-candidate refusal.
+            if product.pid == "photon":
+                continue
             distribution = getattr(product, "distribution", None)
             if distribution is None:
                 continue

@@ -233,6 +233,18 @@ _TAPES: Dict[str, Sequence[str]] = {
     # of 111.94 between relative variances of 2.8e-6 and 0.035), verified on the
     # ENDF text without kika.
     "o16_b81": ("endfb81/n-008_O_016.endf", "n-008_O_016.endf"),
+    # The photon witnesses of roadmap E5 (``PHOTON_TAPES`` below; the census
+    # that picked them is kika-workspace ``docs/library/endf_photons_e5_plan.md``
+    # §2.7). N-14 carries MF12 LO=1, MF13, an anisotropic MF14 and MF15 in one
+    # 1.25 MB tape, and NNDC's GNDS of it has the five orphanProducts MF13 makes;
+    # S-36 is the smallest LO=2 with LP=1; Hf-182 the smallest JENDL-5 tape with
+    # its photons on MT3; Cm-243 the smallest JEFF-4.0 LO=2 with LG=1; Li-7 the
+    # smallest JEFF-4.0 tape with an LO=1 photon on a discrete level (MT51).
+    "n14_b81": ("endfb81/n-007_N_014.endf", "endfb81/neutrons/n-007_N_014.endf"),
+    "s36_jendl": ("jendl5/n_016-S-036.dat", "jendl5/neutrons/n_016-S-036.dat"),
+    "hf182_jendl": ("jendl5/n_072-Hf-182.dat", "jendl5/neutrons/n_072-Hf-182.dat"),
+    "cm243_jeff40": ("jeff40/n_96-Cm-243g.jeff", "jeff40/neutrons/n_96-Cm-243g.jeff"),
+    "li7_jeff40": ("jeff40/n_3-Li-007g.jeff", "jeff40/neutrons/n_3-Li-007g.jeff"),
     # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
     # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
     # validation that picked them is kika-workspace
@@ -438,7 +450,7 @@ def _missing(request: pytest.FixtureRequest, what: str, detail: str):
 _TAPE_FIXTURES = frozenset(
     {f"{name}_tape" for name in _TAPES}
     | {f"g4ndl_{name}_library" for name in _G4NDL_LIBRARIES}
-    | {"serpent_input", "fe56_ace", "tape_root"}
+    | {"serpent_input", "fe56_ace", "tape_root", "neutron_libraries"}
 )
 #: Fixtures whose presence means the test spawns NJOY.
 _NJOY_FIXTURES = frozenset({"njoy_exe"})
@@ -659,6 +671,42 @@ MF32_TAPES = (
 for _name in MF32_TAPES:
     globals()[f"{_name}_tape"] = _tape_fixture(_name)
 del _name
+
+#: The photon witnesses (roadmap E5), for the same reason as ``MF32_TAPES``.
+PHOTON_TAPES = ("n14_b81", "s36_jendl", "hf182_jendl", "cm243_jeff40", "li7_jeff40")
+for _name in PHOTON_TAPES:
+    globals()[f"{_name}_tape"] = _tape_fixture(_name)
+del _name
+
+#: Whole neutron sublibraries, by the directory name every root uses for them.
+#: The WSL workstation nests them one deeper (``<lib>/neutrons/``).
+NEUTRON_LIBRARIES = ("endfb81", "jeff40", "jendl5")
+
+
+def resolve_library(name: str) -> Optional[Path]:
+    """The directory holding the whole *name* neutron sublibrary, or ``None``."""
+    for root in _search_roots():
+        for candidate in (root / name / "neutrons", root / name):
+            if candidate.is_dir() and any(candidate.glob("n*")):
+                return candidate
+    return None
+
+
+@pytest.fixture(scope="session")
+def neutron_libraries(request: pytest.FixtureRequest) -> Dict[str, Path]:
+    """``{name: directory}`` for every library in ``NEUTRON_LIBRARIES``.
+
+    All three or nothing: a census over two of them would report a different
+    set of numbers and look like a regression. At home the libraries are under
+    ``NuclearData/endf``; point ``KIKA_LIB_TAPES`` there.
+    """
+    found = {name: resolve_library(name) for name in NEUTRON_LIBRARIES}
+    missing = [name for name, path in found.items() if path is None]
+    if missing:
+        _missing(request, "libraries:" + ",".join(missing),
+                 "set KIKA_LIB_TAPES to the directory holding "
+                 + ", ".join(f"{m}/" for m in NEUTRON_LIBRARIES))
+    return found
 
 
 @pytest.fixture(scope="session")

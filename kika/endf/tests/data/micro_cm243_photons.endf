@@ -1,0 +1,318 @@
+JEFF-4.0 Incident Neutron File                                       1 0  0    0
+ 9.624300+4 2.409730+2          1          1          2          19634 1451    1
+ 0.000000+0 0.000000+0          0          0          0          69634 1451    2
+ 1.000000+0 2.000000+7          3          0         10          39634 1451    3
+ 0.000000+0 0.000000+0          0          0        230         109634 1451    4
+ 96-Cm-243 KAERI      EVAL-NOV12 H.I.Kim,C.S.Gil,D.H.Kim,Y.O.Lee  9634 1451    5
+                      DIST-DEC17 REV3-DEC17          2020171231   9634 1451    6
+---JEFF-3.3           MATERIAL 9634                               9634 1451    7
+-----INCIDENT NEUTRON DATA                                        9634 1451    8
+------ENDF-6 FORMAT                                               9634 1451    9
+*****************************  JEFF-3.2    ***********************9634 1451   10
+==================================================================9634 1451   11
+ New evaluation based on model calculations from 40 keV to 20 MeV 9634 1451   12
+    Hyeong Il KIm, Choop-Sup Gil, Do Heon Kim and Young-Ouk Lee   9634 1451   13
+                       KAERI/NDC                                  9634 1451   14
+==================================================================9634 1451   15
+                                                                  9634 1451   16
+ ******* ORIGIN ************************************************  9634 1451   17
+ Data < 40 keV  : JENDL-4.0                                       9634 1451   18
+ Data  40 keV - 20 MeV : New evaluation                           9634 1451   19
+ 23/11/2016  P. Leconte on behalf of CEA Reverted MF=1/5, MT=455  9634 1451   20
+     delayed neutron data to previous 8-group data from JEFF311   9634 1451   21
+****************************************************************  9634 1451   22
+ EVALUATION PROCEDURE                                             9634 1451   23
+                                                                  9634 1451   24
+ Adopted procedure is based on careful theoretical                9634 1451   25
+ analysis utilizing available experimental data and               9634 1451   26
+ nuclear reaction model calculations.                             9634 1451   27
+                                                                  9634 1451   28
+ Available experimental data were interpreted  using              9634 1451   29
+ nuclear reaction model code EMPIRE-3 by M. Herman                9634 1451   30
+ et al [EMP]. This code integrates into a single                  9634 1451   31
+ system a number of important modules and features:               9634 1451   32
+                                                                  9634 1451   33
+ - Spherical and deformed Optical Model including                 9634 1451   34
+   coupled-channels (ECIS06 by J. Raynal)                         9634 1451   35
+ - Hauser-Feshbach statistical model including                    9634 1451   36
+   HRTW width fluctuation correction                              9634 1451   37
+ - Quantum-mechanical MSD TUL model (codes ORION &                9634 1451   38
+   TRISTAN by H. Lenske), and MSC NVWY model                      9634 1451   39
+ - Exciton model with angular momentum coupling                   9634 1451   40
+   (code DEGAS by E. Betak and P. Oblozinsky) that                9634 1451   41
+   represents a good approximation to the DSD model               9634 1451   42
+ - Exciton model with Iwamoto-Harada cluster                      9634 1451   43
+   emission and Kalbach systematic angular distr.                 9634 1451   44
+   (code PCROSS by R.Capote et al)                                9634 1451   45
+ - Complete gamma-ray cascade after emission of                   9634 1451   46
+   each particle, including realistic treatment of                9634 1451   47
+   discrete transitions                                           9634 1451   48
+ - Access to OM segment of the RIPL library [RIPL]                9634 1451   49
+ - Built-in input parameter files, such as masses,                9634 1451   50
+   level density, discrete levels, fission barriers               9634 1451   51
+   and gamma strength functions based on the RIPL                 9634 1451   52
+   library [RIPL]                                                 9634 1451   53
+ - Automatic retrieval of experimental data from the              9634 1451   54
+   EXFOR/CSISRS library                                           9634 1451   55
+ - ENDF-6 formatting (code EMPEND by A. Trkov)                    9634 1451   56
+   coupled to graphical presentation capabilities                 9634 1451   57
+   (code ZVView by V. Zerkin) through the chain of                9634 1451   58
+   PrePro codes by R. Cullen                                      9634 1451   59
+ - Checking codes (CHECKR, FIZCON, PSYCHE)                        9634 1451   60
+ - Support for NJOY                                               9634 1451   61
+                                                                  9634 1451   62
+ PARAMETERIZATIONS                                                9634 1451   63
+                                                                  9634 1451   64
+ Following models and parameters were used in the                 9634 1451   65
+ current evaluation:                                              9634 1451   66
+                                                                  9634 1451   67
+ Discrete levels were taken from the RIPL-3 level                 9634 1451   68
+ file, based on the 2007 version of ENSDF.                        9634 1451   69
+ EMPIRE-specific level densities                                  9634 1451   70
+ ENDF formatting enabled                                          9634 1451   71
+ Exclusive spectra available up to emission loop #  5             9634 1451   72
+ Coupled Channels (ECIS) used for direct inelastic scattering     9634 1451   73
+ Emission width of ejectile 0 from 244Cm multiplied by   3.265    9634 1451   74
+ Exciton model calculations with code PCROSS                      9634 1451   75
+ Cluster emission in terms of the Iwamoto-Harada model            9634 1451   76
+ Kalbach systematics angular distributions (see RIPL-1)           9634 1451   77
+ Mean free path parameter in PCROSS set to  1.4 (Recommended ~ 1.59634 1451   78
+ Exciton model calculations with code DEGAS                       9634 1451   79
+ For all nuclei: advanced treatment of fission                    9634 1451   80
+ FISBAR  in all nuclei set to  0.000                              9634 1451   81
+ FISDEN  in all nuclei set to  1.000                              9634 1451   82
+ FISOPT  in all nuclei set to  1.000                              9634 1451   83
+ E1 strength function set to MLO3                                 9634 1451   84
+ GDR parameters from RIPL-2/Exp.data+Plujko systematics           9634 1451   85
+                                                                  9634 1451   86
+                       Use of preequilibrium models               9634 1451   87
+                       ----------------------------               9634 1451   88
+                                                                  9634 1451   89
+ Exit channel      ECIS    MSD    MSC   DEGAS   HMS   PCROSS      9634 1451   90
+                                                                  9634 1451   91
+ n to levels         1      0      0      0      0      0         9634 1451   92
+ n to continuum      0      0      0      0      0      1         9634 1451   93
+ p to levels         0      0      0      0      0      0         9634 1451   94
+ p to continuum      0      0      0      0      0      1         9634 1451   95
+ gammas              0      0      0      1      0      0         9634 1451   96
+ a to continuum      0      0      0      0      0      1         9634 1451   97
+ d to continuum      0      0      0      0      0      1         9634 1451   98
+ t to continuum      0      0      0      0      0      1         9634 1451   99
+ h to continuum      0      0      0      0      0      1         9634 1451  100
+LI to continuum      0      0      0      0      0      0         9634 1451  101
+ a to levels         0      0      0      0      0      0         9634 1451  102
+ d to levels         0      0      0      0      0      0         9634 1451  103
+ t to levels         0      0      0      0      0      0         9634 1451  104
+ h to levels         0      0      0      0      0      0         9634 1451  105
+                                                                  9634 1451  106
+  Collective levels used in direct calcualtions                   9634 1451  107
+  96 243     nucleus is treated as deformed                       9634 1451  108
+                                                                  9634 1451  109
+    Ncoll  Lmax IDef  Kgs  (Def(1,j),j=2,IDef,2)                  9634 1451  110
+       3    8    6   2.5  0.240E+00  0.730E-01 -0.300E-01         9634 1451  111
+                                                                  9634 1451  112
+  N  E[MeV]   J  pi  Nph L  K  Dyn. Def.                          9634 1451  113
+  1  0.0000  2.5  1.  0  0  0  0.100E-01                          9634 1451  114
+  2  0.0420  3.5  1.  0  0  0  0.200E-01                          9634 1451  115
+  4  0.0940  4.5  1.  0  0  0  0.200E-01                          9634 1451  116
+                                                                  9634 1451  117
+                                                                  9634 1451  118
+ Inelastic o. m. parameters: RIPL catalog number         2408     9634 1451  119
+ Neutron   o. m. parameters: RIPL catalog number         2408     9634 1451  120
+ Proton    o. m. parameters: RIPL catalog number         5405     9634 1451  121
+ Alpha     o. m. parameters: RIPL catalog number         9600     9634 1451  122
+ Deuteron  o. m. parameters: RIPL catalog number         6200     9634 1451  123
+ Triton    o. m. parameters: RIPL catalog number         7100     9634 1451  124
+ He-3      o. m. parameters: RIPL catalog number         8100     9634 1451  125
+                                                                  9634 1451  126
+                         E j e c t i l e    m a s s e s   [amu]   9634 1451  127
+                                                                  9634 1451  128
+                     1n        1p        4He       2d        3t   9634 1451  129
+                                                                  9634 1451  130
+                 1.008665   1.007276   4.001506   2.013553   3.0159634 1451  131
+                                                                  9634 1451  132
+                         B i n d i n g    e n e r g i e s [MeV]   9634 1451  133
+                                                                  9634 1451  134
+    Nucleus          1n        1p        4He       2d        3t   9634 1451  135
+                                                                  9634 1451  136
+  96-Cm-244         6.800     6.009    -5.902    10.152     9.432 9634 1451  137
+  96-Cm-243         5.693     5.576    -6.169     8.889     9.273 9634 1451  138
+  96-Cm-242         6.970     5.420    -6.215     9.837     9.537 9634 1451  139
+  96-Cm-241         6.089     5.091    -6.185     8.824     9.669 9634 1451  140
+                                                                  9634 1451  141
+ *********** F I L E    I N F O R M A T I O N ******************  9634 1451  142
+                                                                  9634 1451  143
+ MF=1 General information                                         9634 1451  144
+   MT=452,455,456 JENDL-4.0                                       9634 1451  145
+                                                                  9634 1451  146
+ MF=2 Resonance parameters                                        9634 1451  147
+   MT=151 JENDL-4.0                                               9634 1451  148
+                                                                  9634 1451  149
+  Calculated thermal cross sections & resonance integrals:        9634 1451  150
+      ---------------------------------------------               9634 1451  151
+      Reaction       Cross section    Res. integral               9634 1451  152
+                        (barn)           (barn)                   9634 1451  153
+      Total           7.27363E+02           -                     9634 1451  154
+      Elastic         8.83507E+00           -                     9634 1451  155
+      Fission         5.87155E+02      1.54439E+03                9634 1451  156
+      Capture         1.31373E+02      2.05310E+02                9634 1451  157
+      ---------------------------------------------               9634 1451  158
+                                                                  9634 1451  159
+ MF=3 Neutron cross sections                                      9634 1451  160
+      EMPIRE calculations were adopted for:                       9634 1451  161
+    MT=1 Total                                                    9634 1451  162
+    MT=2 Elastic scattering                                       9634 1451  163
+    MT=4, 51-91 Inelastic scattering                              9634 1451  164
+    MT=102 Capture                                                9634 1451  165
+    MT=16   (n,2n)                                                9634 1451  166
+    MT=17   (n,3n)                                                9634 1451  167
+    MT=18   (n,f)                                                 9634 1451  168
+    MT=22   (n,na)                                                9634 1451  169
+    MT=24   (n,2na)                                               9634 1451  170
+    MT=28   (n,np+pn)                                             9634 1451  171
+    MT=37   (n,4n)                                                9634 1451  172
+    MT=45   (n,npa)                                               9634 1451  173
+    MT=103, 600-649 (n,p)                                         9634 1451  174
+    MT=104, (n,d)                                                 9634 1451  175
+    MT=105, (n,t)                                                 9634 1451  176
+    MT=106, (n,He-3)                                              9634 1451  177
+    MT=107, 800-849 (n,a)                                         9634 1451  178
+    MT=112  (n,pa)                                                9634 1451  179
+                                                                  9634 1451  180
+ MF=4 Angular distributions of secondary neutrons                 9634 1451  181
+      EMPIRE calculations were adopted                            9634 1451  182
+                                                                  9634 1451  183
+ MF=5 JENDL-4.0                                                   9634 1451  184
+                                                                  9634 1451  185
+ MF=6 Energy-angle distributions of reaction                      9634 1451  186
+      products; EMPIRE calculations were adopted                  9634 1451  187
+                                                                  9634 1451  188
+      Primary capture gammas are entered as                       9634 1451  189
+      discrete lines                                              9634 1451  190
+                                                                  9634 1451  191
+ MF=12 Transition probability arrays for photon                   9634 1451  192
+       production; taken from the RIPL library                    9634 1451  193
+   MT=18 JENDL-4.0                                                9634 1451  194
+                                                                  9634 1451  195
+ MF=14 Photon angular distributions                               9634 1451  196
+       isotropic distributions were assumed                       9634 1451  197
+                                                                  9634 1451  198
+ MF=15 JENDL-4.0                                                  9634 1451  199
+                                                                  9634 1451  200
+ MF=31 JENDL-4.0                                                  9634 1451  201
+                                                                  9634 1451  202
+ MF=33 Covariances of neutron cross sections                      9634 1451  203
+    Covariances were produced using the nuclear reaction code     9634 1451  204
+  EMPIRE and the Bayesian code KALMAN.                            9634 1451  205
+                                                                  9634 1451  206
+ REFERENCES                                                       9634 1451  207
+                                                                  9634 1451  208
+ [EMP]                                                            9634 1451  209
+   M.Herman, R.Capote, B.Carlson, P.Oblozinsky,                   9634 1451  210
+   M.Sin, A.Trkov, H.Wienke and V.Zerkin                          9634 1451  211
+                                                                  9634 1451  212
+  "EMPIRE: Nuclear Reaction Model Code System                     9634 1451  213
+            for data evaluation"                                  9634 1451  214
+   Nuclear Data Sheets 108 (2007) 2655-2715                       9634 1451  215
+                                                                  9634 1451  216
+ [RIPL]                                                           9634 1451  217
+   R.Capote, M.Herman, P.Oblozinsky, P.G.Young,                   9634 1451  218
+   S.Goriely, T.Belgya, A.V.Ignatyuk, A.J.Koning,                 9634 1451  219
+   S.Hilaire, V.A.Plujko, M.Avrigeanu,                            9634 1451  220
+   Zhigang Ge, Yinlu Han, S.Kailas, J.Kopecky,                    9634 1451  221
+   V.M.Maslov, G.Reffo, M.Sin,                                    9634 1451  222
+   E.Sh.Soukhovitskii and P. Talou                                9634 1451  223
+                                                                  9634 1451  224
+  "RIPL - Reference Input Parameter Library for                   9634 1451  225
+          Calculation of Nuclear Reactions and                    9634 1451  226
+          Nuclear Data Evaluations",                              9634 1451  227
+                                                                  9634 1451  228
+   Nuclear Data Sheets 110 (2009) 3107-3214                       9634 1451  229
+                                                                  9634 1451  230
+   Data available online at                                       9634 1451  231
+    http://www-nds.iaea.org/RIPL-3/                               9634 1451  232
+                                                                  9634 1451  233
+ ************************************************                 9634 1451  234
+                                1        451        244          19634 1451  235
+                                3         51         15          19634 1451  236
+                                3         52         15          19634 1451  237
+                                3         53         15          19634 1451  238
+                               12         51          3          19634 1451  239
+                               12         52          3          19634 1451  240
+                               12         53          3          19634 1451  241
+                               14         51          1          19634 1451  242
+                               14         52          1          19634 1451  243
+                               14         53          1          19634 1451  244
+ 0.000000+0 0.000000+0          0          0          0          09634 1  099999
+ 0.000000+0 0.000000+0          0          0          0          09634 0  0    0
+ 9.624300+4 2.409730+2          0          0          0          09634 3 51    1
+ 0.000000+0-4.200000+4          0          0          1         369634 3 51    2
+         36          2                                            9634 3 51    3
+ 4.217429+4 0.000000+0 5.000000+4 4.913900-3 6.000000+4 1.207600-29634 3 51    4
+ 8.000000+4 2.799890-2 1.000000+5 4.460850-2 2.000000+5 1.146560-19634 3 51    5
+ 3.000000+5 1.579510-1 4.000000+5 1.995500-1 5.000000+5 2.101160-19634 3 51    6
+ 6.000000+5 2.337020-1 8.000000+5 2.474700-1 1.000000+6 2.573440-19634 3 51    7
+ 1.200000+6 2.665120-1 1.800000+6 2.862460-1 2.000000+6 2.904320-19634 3 51    8
+ 2.500000+6 2.902540-1 3.000000+6 2.790850-1 3.500000+6 2.630510-19634 3 51    9
+ 4.000000+6 2.458430-1 4.500000+6 2.298380-1 5.000000+6 2.163950-19634 3 51   10
+ 5.500000+6 2.057530-1 6.000000+6 1.973340-1 7.000000+6 1.842240-19634 3 51   11
+ 9.000000+6 1.617440-1 1.000000+7 1.509670-1 1.100000+7 1.405830-19634 3 51   12
+ 1.200000+7 1.306080-1 1.300000+7 1.212390-1 1.400000+7 1.127150-19634 3 51   13
+ 1.500000+7 1.051490-1 1.600000+7 9.853750-2 1.700000+7 9.282550-29634 3 51   14
+ 1.800000+7 8.794770-2 1.900000+7 8.381620-2 2.000000+7 8.033470-29634 3 51   15
+ 0.000000+0 0.000000+0          0          0          0          09634 3  099999
+ 9.624300+4 2.409730+2          0          0          0          09634 3 52    1
+ 0.000000+0-8.740000+4          0          0          1         359634 3 52    2
+         35          2                                            9634 3 52    3
+ 8.776270+4 0.000000+0 1.000000+5 2.052270-3 2.000000+5 1.442430-29634 3 52    4
+ 3.000000+5 1.988990-2 4.000000+5 2.647860-2 5.000000+5 2.374200-29634 3 52    5
+ 6.000000+5 2.565420-2 8.000000+5 1.918720-2 1.000000+6 1.373530-29634 3 52    6
+ 1.200000+6 1.005260-2 1.400000+6 6.520850-3 1.800000+6 2.904570-39634 3 52    7
+ 2.000000+6 1.905660-3 2.500000+6 6.168060-4 3.000000+6 2.030610-49634 3 52    8
+ 3.500000+6 7.004790-5 4.000000+6 2.539810-5 4.500000+6 9.609080-69634 3 52    9
+ 5.000000+6 3.793120-6 5.500000+6 1.565350-6 6.000000+6 6.748000-79634 3 52   10
+ 7.000000+6 1.382760-7 8.000000+6 3.095580-8 9.000000+6 7.456630-99634 3 52   11
+ 1.000000+7 1.922320-9 1.100000+7 5.27040-10 1.200000+7 1.52400-109634 3 52   12
+ 1.300000+7 4.60600-11 1.400000+7 1.44780-11 1.500000+7 4.72750-129634 3 52   13
+ 1.600000+7 1.60480-12 1.700000+7 5.65500-13 1.800000+7 2.07080-139634 3 52   14
+ 1.900000+7 7.87550-14 2.000000+7 3.10520-14                      9634 3 52   15
+ 0.000000+0 0.000000+0          0          0          0          09634 3  099999
+ 9.624300+4 2.409730+2          0          0          0          09634 3 53    1
+ 0.000000+0-9.300000+4          0          0          1         349634 3 53    2
+         34          2                                            9634 3 53    3
+ 9.338590+4 0.000000+0 1.000000+5 2.200060-3 2.000000+5 5.077710-29634 3 53    4
+ 3.000000+5 9.086560-2 4.000000+5 1.262680-1 5.000000+5 1.422780-19634 3 53    5
+ 6.000000+5 1.625710-1 8.000000+5 1.813250-1 1.000000+6 1.969410-19634 3 53    6
+ 1.200000+6 2.110340-1 1.400000+6 2.203690-1 1.800000+6 2.290440-19634 3 53    7
+ 2.000000+6 2.272430-1 2.500000+6 2.119090-1 3.000000+6 1.934940-19634 3 53    8
+ 3.500000+6 1.779950-1 4.000000+6 1.653130-1 4.500000+6 1.546690-19634 3 53    9
+ 5.000000+6 1.457870-1 5.500000+6 1.384810-1 6.000000+6 1.323990-19634 3 53   10
+ 7.000000+6 1.216660-1 9.000000+6 9.924750-2 1.000000+7 8.932030-29634 3 53   11
+ 1.100000+7 8.076110-2 1.200000+7 7.322320-2 1.300000+7 6.655440-29634 3 53   12
+ 1.400000+7 6.074530-2 1.500000+7 5.576540-2 1.600000+7 5.151840-29634 3 53   13
+ 1.700000+7 4.787810-2 1.800000+7 4.473820-2 1.900000+7 4.203000-29634 3 53   14
+ 2.000000+7 3.970400-2                                            9634 3 53   15
+ 0.000000+0 0.000000+0          0          0          0          09634 3  099999
+ 0.000000+0 0.000000+0          0          0          0          09634 0  0    0
+ 9.624300+4 2.409730+2          2          1          1          0963412 51    1
+ 4.200000+4 0.000000+0          0          0          2          1963412 51    2
+ 0.000000+0 1.000000+0                                            963412 51    3
+ 0.000000+0 0.000000+0          0          0          0          0963412  099999
+ 9.624300+4 2.409730+2          2          1          2          0963412 52    1
+ 8.740000+4 0.000000+0          0          0          2          1963412 52    2
+ 0.000000+0 1.000000+0                                            963412 52    3
+ 0.000000+0 0.000000+0          0          0          0          0963412  099999
+ 9.624300+4 2.409730+2          2          1          3          0963412 53    1
+ 9.300000+4 0.000000+0          0          0          2          1963412 53    2
+ 0.000000+0 1.000000+0                                            963412 53    3
+ 0.000000+0 0.000000+0          0          0          0          0963412  099999
+ 0.000000+0 0.000000+0          0          0          0          09634 0  0    0
+ 9.624300+4 2.409730+2          1          0          1          0963414 51    1
+ 0.000000+0 0.000000+0          0          0          0          0963414  099999
+ 9.624300+4 2.409730+2          1          0          1          0963414 52    1
+ 0.000000+0 0.000000+0          0          0          0          0963414  099999
+ 9.624300+4 2.409730+2          1          0          1          0963414 53    1
+ 0.000000+0 0.000000+0          0          0          0          0963414  099999
+ 0.000000+0 0.000000+0          0          0          0          09634 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+                                                                    -1 0  0    0

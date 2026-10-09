@@ -26,10 +26,10 @@ fixed point is necessary and not sufficient, and it leans on
 :class:`~kika.nuclear_data.model.conversion.ConversionReport` being honest about
 what did not come through.
 
-**Sections come only from what the model has.** MF7 and MF12-15 are not in
-it. A tape carrying those comes back without them, reported loudly rather than
-written as an empty shell: a tape missing its photon or thermal data and not
-saying so is worse than one that says so. MF5 comes back whole — its analytic
+**Sections come only from what the model has**, or from what the decoder kept
+verbatim beside it and said so. MF12-15 come back from the photon products
+(roadmap E5b) and, where the model does not carry them yet (LO=2, MF13, photons
+with no reaction), from the text the decoder kept. MF5 comes back whole — its analytic
 spectra have had nodes since roadmap E2 — and MF32 is written into the section
 the decoder kept (E1). So does **all of MF6**: what the model does
 not carry there — LAW=5, and any subsection whose LAW is negative — is kept
@@ -56,9 +56,9 @@ __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 
 #: The MF numbers an encoder exists for, in the order ENDF-6 puts them on the
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
-#: of *coverage* rather than of order: MF7, MF12-15 and MF32 are absent because
-#: nothing can write them, not because they sort late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
+#: of *coverage* rather than of order: an MF absent here is one nothing can
+#: write, not one that sorts late.
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 31, 32, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -435,6 +435,13 @@ def _mf6Sections(suite, mat, report):
     return sections, report
 
 
+def _photonSections(suite, mat, report):
+    """MF12-15: from the model where the decoder modelled them, else as kept (roadmap E5b)."""
+    from ..model_adapter.photons import encodePhotonSections
+
+    return encodePhotonSections(suite, mat, report)
+
+
 def _mf7Sections(suite, mat, report):
     """MF7 for a thermal-scattering suite (roadmap E4); nothing for any other."""
     from ..model_adapter.thermal_scattering import encodeMF7Sections
@@ -518,7 +525,7 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
 
     sections: List[Tuple[int, int, object]] = []
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
-                  _mf6Sections, _mf7Sections, _covarianceSections):
+                  _mf6Sections, _mf7Sections, _photonSections, _covarianceSections):
         if build in (_mf1Sections, _mf3And4And5Sections):
             built, report = build(suite, mat, report, label)
         else:

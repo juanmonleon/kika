@@ -38,15 +38,31 @@ def levelSeries(mt: int) -> Optional[Tuple[int, int, int]]:
     return None
 
 
+def _suffix(n: int) -> str:
+    """0 → ``a``, 25 → ``z``, 26 → ``aa``: FUDGE's ``incrementSuffix`` sequence."""
+    letters = ""
+    n += 1
+    while n:
+        n, r = divmod(n - 1, 26)
+        letters = "abcdefghijklmnopqrstuvwxyz"[r] + letters
+    return letters
+
+
 def _uniqueLabel(pid: str, taken: set) -> str:
-    """FUDGE's ``uniqueLabel``: ``He4``, then ``He4__a``, ``He4__b``…"""
+    """FUDGE's ``uniqueLabel``: ``He4``, then ``He4__a`` … ``He4__z``, ``He4__aa``…
+
+    The two-letter tail is not hypothetical: ENDF/B-VIII.1 N-14's capture
+    states 59 photon lines, and NNDC's GNDS of it runs to ``photon__bf``
+    (``fudge/suites.py`` ``uniqueLabel``).
+    """
     if pid not in taken:
         return pid
-    for suffix in "abcdefghijklmnopqrstuvwxyz":
-        label = f"{pid}__{suffix}"
+    n = 0
+    while True:
+        label = f"{pid}__{_suffix(n)}"
         if label not in taken:
             return label
-    raise ValueError(f"more than 27 {pid} products in one channel")
+        n += 1
 
 
 def _unspecified():

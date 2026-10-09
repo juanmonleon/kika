@@ -43,8 +43,13 @@ NO_BODY_LAWS = (0, 3, 4)
 #: ``|LAW|`` → the file the distribution was deferred to, and whether kika reads
 #: that file today. Kept as data because the second column is the whole reason
 #: :meth:`MF6LawElsewhere.report_gaps` exists.
+#:
+#: MF14 and MF15 became readable with roadmap E5a (2026-10-09). A LAW=-14/-15
+#: subsection now points at a file kika parses, so it is no longer a gap *of the
+#: file*; what the model does with it is the adapter's business and is reported
+#: there.
 DEFERRED_FILES = {4: ("MF4", True), 5: ("MF5", True),
-                  14: ("MF14", False), 15: ("MF15", False)}
+                  14: ("MF14", True), 15: ("MF15", True)}
 
 
 def _emit_list(c1, c2, l1, l2, values, mat, mf, mt, line_num,
