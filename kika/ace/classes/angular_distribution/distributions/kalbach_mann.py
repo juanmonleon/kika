@@ -7,6 +7,10 @@ from kika.ace.classes.angular_distribution.types import AngularDistributionType
 from kika._utils import create_repr_section
 from kika.ace.classes.angular_distribution.utils import Law44DataError
 
+#: The DLW laws a reaction with LOCB=-1 may use: they carry its angle (44, 61)
+#: or make it isotropic in the centre of mass (66).
+_LOCB_MINUS_ONE_LAWS = (44, 61, 66)
+
 
 @dataclass
 class KalbachMannAngularDistribution(AngularDistribution):
@@ -37,7 +41,9 @@ class KalbachMannAngularDistribution(AngularDistribution):
         Find the correlated energy-angle laws of this reaction.
 
         LOCB=-1 says the angle is given with the energy in the DLW block, by
-        LAW=44 (Kalbach-87) or LAW=61 (tabular in angle); both are accepted.
+        LAW=44 (Kalbach-87) or LAW=61 (tabular in angle), or not at all by
+        LAW=66 (N-body phase space, isotropic in the centre of mass). The
+        manual names only LAW=44; NJOY writes all three.
 
         Returns
         -------
@@ -72,10 +78,38 @@ class KalbachMannAngularDistribution(AngularDistribution):
         where = f"MT={mt_value}" + (f", particle={self.particle_idx}" if self.is_particle_production else "")
         if not distributions:
             raise Law44DataError(f"No energy distributions found for {where}")
-        if not all(d.law in (44, 61) for d in distributions):
+        if not all(d.law in _LOCB_MINUS_ONE_LAWS for d in distributions):
             laws = [d.law for d in distributions]
-            raise Law44DataError(f"{where} has LOCB=-1 but laws {laws}; only LAW=44 and 61 carry the angle")
+            raise Law44DataError(
+                f"{where} has LOCB=-1 but laws {laws}; only LAW=44, 61 and 66 give its angle"
+            )
         return list(distributions)
+
+    def incident_energies(self, ace) -> np.ndarray:
+        """
+        The incident energies the correlated data is given at, sorted and unique.
+
+        The union of the incident-energy grids of the laws. A LAW=66 has none
+        (its angle does not depend on the energy); a reaction given by LAW=66
+        alone returns the energies of its law-applicability table instead.
+
+        Parameters
+        ----------
+        ace : Ace
+            ACE object holding the DLW data
+
+        Returns
+        -------
+        numpy.ndarray
+            Incident energies in MeV
+        """
+        laws = self._find_law44_distribution(ace)
+        grids = [np.asarray(law.incident_energies, dtype=float)
+                 for law in laws if getattr(law, "incident_energies", None) is not None]
+        grids = [g for g in grids if g.size]
+        if not grids:
+            grids = [np.asarray(law.applicability_energies, dtype=float) for law in laws]
+        return np.unique(np.concatenate(grids)) if grids else np.empty(0)
 
     def angular_pdf(self, energy: float, ace, cosines) -> np.ndarray:
         """
@@ -140,8 +174,7 @@ class KalbachMannAngularDistribution(AngularDistribution):
         """
         cosines = np.linspace(-1, 1, num_points)
         if energy is None:
-            laws = self._find_law44_distribution(ace)
-            incident = np.asarray(laws[0].incident_energies, dtype=float)
+            incident = self.incident_energies(ace)
             if len(incident) == 0:
                 raise Law44DataError(f"No incident energies in the DLW data of MT={int(self.mt)}")
             picks = np.unique(np.linspace(0, len(incident) - 1, min(5, len(incident))).astype(int))

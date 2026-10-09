@@ -58,6 +58,28 @@ class NBodyPhaseSpaceDistribution(EnergyDistribution):
         term1 = (self.ap - 1.0) / self.ap
         term2 = (awr / (awr + 1.0)) * incident_energy + q_value
         return term1 * term2
+
+    def angular_pdf(self, incident_energy: float, cosines) -> np.ndarray:
+        """
+        Angular density at an incident energy: isotropic, 1/2 at every cosine.
+
+        LAW=66 carries no angle. NJOY writes such a reaction with LOCB=-1 and
+        a negative TY, and MCNP and OpenMC sample its cosine uniformly in the
+        centre of mass, so the density in that frame is flat.
+
+        Parameters
+        ----------
+        incident_energy : float
+            Incident energy in MeV (the density does not depend on it)
+        cosines : array_like
+            Cosines at which to evaluate the density
+
+        Returns
+        -------
+        numpy.ndarray
+            0.5 at each cosine
+        """
+        return np.full(np.shape(cosines), 0.5)
     
     def __repr__(self) -> str:
         """

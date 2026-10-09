@@ -358,12 +358,6 @@ def read_landh_block(ace: Ace, jxs31_idx: int, jxs32_idx: int, num_particle_type
             if display_count > 0:
                 locb_sample = [int(locb_values[j]) for j in range(display_count)]
                 logger.debug(f"  First {display_count} LOCB values: {locb_sample}")
-                
-                # Look for suspicious LOCB values (extremely small positive values might be errors)
-                small_positive_locbs = [int(v) for v in locb_values if 0 < int(v) <= 5]
-                if small_positive_locbs:
-                    logger.warning(f"  WARNING: Found {len(small_positive_locbs)} suspiciously small positive LOCB values: {small_positive_locbs}")
-                    logger.warning("  Small positive LOCB values may indicate data integrity issues")
     
     if debug:
         logger.debug(f"\nSuccessfully read angular distribution locators for {len(ace.angular_locators.particle_production)} particle types")
