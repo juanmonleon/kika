@@ -13,6 +13,7 @@ import html
 import math
 import numbers
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -143,6 +144,8 @@ def _tape_dict(tape) -> Dict[str, Any]:
         "name": tape.name,
         "path": str(tape.path),
         "mat": _int(tape.mat),
+        "za": _int(tape.za),
+        "target": tape.target,
         "mf": [int(m) for m in tape.mf],
         "ok": tape.ok,
         "error": tape.error,
@@ -212,79 +215,86 @@ def _pct(x: float) -> str:
     return f"{x * 100:g} %"
 
 
-def method_sections() -> List[Tuple[str, List[str]]]:
-    """``[(heading, [paragraph, ...])]``: what was checked and where each level starts."""
+def _g(x: float) -> str:
+    """``1e-6``, not ``1e-06``."""
+    return re.sub(r"e([+-])0(\d)", r"e\1\2", f"{x:g}").replace("e+", "e")
+
+
+#: A rule of the method: the level it gives (``None`` for a plain statement) and when.
+Rule = Tuple[Optional[str], str]
+
+
+def method_sections() -> List[Tuple[str, str, List[Rule]]]:
+    """``[(heading, intro, [(level, rule), ...])]``: what was checked and where each level starts.
+
+    Short on purpose: one sentence of context, then one line per rule. The
+    legend says what each check means; this says how the levels are drawn.
+    """
     from . import covariances as c
     from .mf35 import SUM_RULE_DEFECT
 
+    quanta = ", ".join(_g(q) for q in c.RHO_QUANTA)
     return [
-        ("Scope", [
-            "Layer 1: each covariance section (MF31, MF32, MF33, MF34, MF35, MF40) is "
-            "checked as it is written in the file, read with kika's ENDF parser, before "
-            "any processing. Nothing in the file is changed, and no finding blocks "
-            "anything. Processed (multigroup, NJOY/ERRORR) matrices are not checked, nor "
-            "blocks against another material (MAT1 != 0), which one file cannot evaluate.",
-            "Levels: a *note* is true and worth knowing but not a fault (rounding, rows "
-            "with no variance, a grid that stops short of MF3); a *warning* is probably a "
-            "fault, or one that only matters in some uses; a *defect* means the section "
-            "is not what ENDF-6 says it should be, or is not a covariance.",
-        ]),
-        ("Structure and completeness", [
-            "Counts against the ENDF-6 manual (2023, chapters 31-40): NL, NMT1, NI, NC, "
-            "NT against NE/LS, LB/LTY/LCT valid for the file, orders within NL/NL1, grids "
-            "strictly increasing (a repeated point is a warning), duplicate and missing "
-            "blocks, cross blocks without their self blocks, and NC references that do "
-            "not resolve. LS=1 (symmetric storage) in a cross block is a defect: kika, "
-            "like any processor, mirrors the stored triangle, and the mirror of a cross "
-            "block is not its transpose.",
-        ]),
-        ("Correlations", [
-            f"|rho| above 1 + {c.RHO_DEFECT:g} is a defect; between 1 + {c.RHO_ROUNDING:g} "
-            f"and 1 + {c.RHO_DEFECT:g} it is a rounding note. Each block is summed on its "
-            "union grid as kika sums it; a cross block is compared with the variances of "
-            "its two self blocks on a common grid.",
-            "Negative variances and covariances on rows without variance are defects; "
-            "rows that are exactly zero (max == min == 0) are notes. Self blocks stored "
-            f"in full (LS=0) are compared with their transpose: an asymmetry above "
-            f"{c.ASYM_DEFECT:g} is a defect, above {c.ASYM_NOTE:g} a note.",
-        ]),
-        ("Positive semi-definiteness", [
-            "On the sum of each self block, without the rows that are exactly zero. "
-            f"|lambda_min| / lambda_max below {c.PSD_NOTE:g} is rounding (note); up to "
-            f"{c.PSD_DEFECT:g} a warning; above it a defect. Each LB=5 record is also "
-            "decomposed alone, to say which one is already indefinite. MF32 is judged on "
-            "its correlation matrix, because resonance parameters mix scales.",
-            f"A warning becomes a note when the negative eigenvalue fits in the rounding "
-            f"of each element to the {c.ENDF_DIGITS} significant figures of an ENDF field, "
-            f"or when at least {_pct(c.RHO_QUANTUM_SHARE)} of the correlations sit on a "
-            f"lattice of {', '.join(f'{q:g}' for q in c.RHO_QUANTA)} and the eigenvalue "
-            "fits in what that rounding can produce.",
-            "A remaining warning is then graded by its consequence: if clipping the "
-            "negative eigenvalues changes no sigma (of the rows with sigma at least "
-            f"{_pct(c.PSD_IMPACT_FLOOR)} of the largest) by {_pct(c.PSD_IMPACT_NOTE)} or "
-            f"more, it becomes a note; if it changes one by {_pct(c.PSD_IMPACT_DEFECT)} or "
-            "more, a defect. Notes and defects are never regraded.",
-        ]),
-        ("Magnitude of the uncertainty", [
-            "Large variances are judged against the central values, never on the "
-            "relative uncertainty alone. Central values: sigma-bar from a PENDF when one "
-            "is attached, otherwise MF3 only above the upper limit of the MF2 ranges (MF33); "
-            "nu-bar from MF1 (MF31); the Legendre coefficients of MF4 (MF34); the spectra "
-            "of MF5 (MF35). MF40's central values are in MF10, which is not read.",
-            "MF31/MF33: a cross section has no upper bound, so sigma_rel > 1 is a note "
-            "(with the probability of a negative sample if drawn from a normal); "
-            f"sigma_rel > {c.RELATIVE_IMPLAUSIBLE:g} where sigma-bar is at least "
-            f"{_pct(c.RELATIVE_THRESHOLD_ZONE)} of the reaction's maximum is a warning "
-            "(the measured edge in ENDF/B-VIII.1, JEFF-4.0 and JENDL-5).",
-            "MF34: |a_l| <= 1 for l >= 1, so sigma(a_l) > 1 is impossible (Popoviciu) and "
-            "a defect; a_0 is excluded, and the relative sigma is scaled by the smallest "
-            "|a_l| in the bin.",
-            f"MF35: the sum rule max_i |sum_j C_ij| / max |C| above {SUM_RULE_DEFECT:g} is "
-            "a defect, as is var(P) > P(1 - P) with P from MF5.",
-            "A block mixing absolute and relative components (MF33 LB=8 with LB=5) needs "
-            "the cross sections to be summed; without a PENDF only its relative part is "
-            "checked, and a note says so.",
-        ]),
+        ("Scope",
+         "Layer 1: each covariance section (MF31, MF32, MF33, MF34, MF35, MF40) as it is "
+         "written in the file, read with kika's ENDF parser, before any processing. Nothing "
+         "in the file is changed, and no finding blocks anything.",
+         [(DEFECT, "the section is not what ENDF-6 says it should be, or is not a covariance."),
+          (WARN, "probably a fault, or one that only matters in some uses."),
+          (NOTE, "true and worth knowing, but not a fault: rounding, rows with no variance, "
+                 "a grid that stops short of MF3."),
+          (None, "Not checked: processed (multigroup, NJOY/ERRORR) matrices, and blocks "
+                 "against another material (MAT1 != 0), which one file cannot evaluate.")]),
+        ("Structure and completeness",
+         "Counts and indices against the ENDF-6 manual (2023, chapters 31-40).",
+         [(DEFECT, "a count (NL, NMT1, NI, NC, NT) that does not match the content; an LB, LTY "
+                   "or LCT not valid for the file; an order outside NL/NL1; a grid that "
+                   "decreases; duplicate or missing blocks, cross blocks without their self "
+                   "blocks, NC references that do not resolve."),
+          (DEFECT, "LS=1 (symmetric storage) in a cross block: processors mirror the stored "
+                   "triangle, and the mirror of a cross block is not its transpose."),
+          (WARN, "a repeated grid point.")]),
+        ("Correlations",
+         "Each block is summed on its union grid, as kika sums it; a cross block is compared "
+         "with the variances of its two self blocks on a common grid.",
+         [(DEFECT, f"|rho| > 1 + {_g(c.RHO_DEFECT)}."),
+          (NOTE, f"1 + {_g(c.RHO_ROUNDING)} < |rho| <= 1 + {_g(c.RHO_DEFECT)}: rounding."),
+          (DEFECT, "a negative variance, or a covariance on a row without variance."),
+          (NOTE, "rows that are exactly zero (max == min == 0)."),
+          (DEFECT, f"a self block stored in full (LS=0) differs from its transpose by more than "
+                   f"{_g(c.ASYM_DEFECT)}; a note above {_g(c.ASYM_NOTE)}.")]),
+        ("Positive semi-definiteness",
+         "On the sum of each self block, without its zero rows, with r = |lambda_min| / "
+         "lambda_max. Each LB=5 record is also decomposed alone, to say which one is already "
+         "indefinite. MF32 is judged on its correlation matrix: resonance parameters mix scales.",
+         [(NOTE, f"r < {_g(c.PSD_NOTE)}: rounding."),
+          (WARN, f"{_g(c.PSD_NOTE)} <= r <= {_g(c.PSD_DEFECT)}."),
+          (DEFECT, f"r > {_g(c.PSD_DEFECT)}."),
+          (None, f"A warning becomes a note when the negative eigenvalue fits in rounding each "
+                 f"element to the {c.ENDF_DIGITS} figures of an ENDF field, or when "
+                 f"{_pct(c.RHO_QUANTUM_SHARE)} of the correlations sit on a lattice of {quanta} "
+                 "and the eigenvalue fits in that rounding."),
+          (None, "A warning left is graded by what clipping the negative eigenvalues does to "
+                 f"sigma (rows with sigma >= {_pct(c.PSD_IMPACT_FLOOR)} of the largest): under "
+                 f"{_pct(c.PSD_IMPACT_NOTE)} everywhere it becomes a note, "
+                 f"{_pct(c.PSD_IMPACT_DEFECT)} or more anywhere a defect. Notes and defects are "
+                 "never regraded.")]),
+        ("Magnitude of the uncertainty",
+         "Large variances are judged against the central values, never on the relative "
+         "uncertainty alone: sigma-bar from a PENDF if one is attached, otherwise MF3 above "
+         "the MF2 ranges (MF33); nu-bar from MF1 (MF31); the Legendre coefficients of MF4 "
+         "(MF34); the spectra of MF5 (MF35). MF40's central values are in MF10, not read.",
+         [(NOTE, "MF31/MF33: sigma_rel > 1 (a cross section has no upper bound), with the "
+                 "probability of a negative sample under a normal."),
+          (WARN, f"MF31/MF33: sigma_rel > {_g(c.RELATIVE_IMPLAUSIBLE)} where sigma-bar is at "
+                 f"least {_pct(c.RELATIVE_THRESHOLD_ZONE)} of the reaction's maximum (the "
+                 "measured edge in ENDF/B-VIII.1, JEFF-4.0 and JENDL-5)."),
+          (DEFECT, "MF34: sigma(a_l) > 1 for l >= 1, impossible since |a_l| <= 1 (Popoviciu). "
+                   "a_0 is excluded; the relative sigma is scaled by the smallest |a_l| in "
+                   "the bin."),
+          (DEFECT, f"MF35: max_i |sum_j C_ij| / max |C| > {_g(SUM_RULE_DEFECT)} (sum rule), or "
+                   "var(P) > P(1 - P) with P from MF5."),
+          (NOTE, "MF33 LB=8 mixed with LB=5 and no PENDF: only the relative part is checked.")]),
     ]
 
 
@@ -293,10 +303,11 @@ def method_sections() -> List[Tuple[str, List[str]]]:
 # ---------------------------------------------------------------------------
 #
 # Both pages read in the same order: what was checked, the verdict and the
-# count per level, the summary by check (worst level first), the tapes (worst
-# first), the findings grouped by check within each tape, then the method and
-# the legend. A check is named by its title; the ``check`` id, which is what
-# the data, the TSV and the code use, goes beside it.
+# count per level, the summaries (by check, and for a library by file), the
+# findings grouped by check within each tape, then the method and the legend.
+# A library page also opens with an index of its files by nuclide. A check is
+# named by its title; the ``check`` id, which is what the data, the TSV and
+# the code use, goes beside it.
 
 #: How each level is written for a reader. The data keeps ``warn``.
 LEVEL_LABEL = {DEFECT: "Defect", WARN: "Warning", NOTE: "Note"}
@@ -310,6 +321,8 @@ _LEVEL_MEANS = {
 #: A mark beside the colour, so the level reads without it (print, colour blindness).
 _LEVEL_MARK = {DEFECT: "\u2715", WARN: "!", NOTE: "i"}
 _WORST_FIRST = (DEFECT, WARN, NOTE)
+#: Checks named in a file's row of the summary by file; the rest are counted.
+_MAIN_FINDINGS = 3
 
 
 def _now() -> str:
@@ -372,6 +385,17 @@ def _groups(findings: Sequence[CovarianceFinding]) -> List[Tuple[str, str, List[
     return [(level, check, fs) for (level, check), fs in out.items()]
 
 
+def _main_findings(tape) -> List[Tuple[str, str, int]]:
+    """``[(level, check, n)]`` of a tape, worst level first, then the most frequent."""
+    if tape.report is None:
+        return []
+    counts: Dict[Tuple[str, str], int] = {}
+    for f in tape.report:
+        counts[(f.level, f.check)] = counts.get((f.level, f.check), 0) + 1
+    return [(lv, ck, n) for (lv, ck), n in
+            sorted(counts.items(), key=lambda kv: (-_RANK[kv[0][0]], -kv[1], kv[0][1]))]
+
+
 def _verdict(counts: Mapping[str, int], library=None) -> Tuple[Optional[str], str, str]:
     """``(level, headline, detail)``: the one sentence the page opens with."""
     worst = _worst(counts)
@@ -390,17 +414,27 @@ def _verdict(counts: Mapping[str, int], library=None) -> Tuple[Optional[str], st
     return worst, headline, detail
 
 
-def _tape_order(library) -> List:
-    """Failed tapes first, then by defects, warnings and notes; ties keep their order."""
-    def key(t):
+def _tape_order(library) -> List[Tuple[int, Any]]:
+    """``[(index, tape)]``: failed first, then by defects, warnings and notes; ties keep their order."""
+    def key(item):
+        t = item[1]
         return (t.ok, -t.count(DEFECT), -t.count(WARN), -t.count(NOTE))
-    return sorted(library.tapes, key=key)
+    return sorted(enumerate(library.tapes), key=key)
 
 
 def _tape_status(tape) -> str:
     if not tape.ok:
         return f"failed: {tape.error}"
     return "checked" if tape.has_covariances else "no covariances"
+
+
+def _tape_state(tape) -> str:
+    """The class a tape is drawn with: its worst level, or why it has none."""
+    if not tape.ok:
+        return "failed"
+    if not tape.has_covariances:
+        return "nocov"
+    return next((lv for lv in _WORST_FIRST if tape.count(lv)), "clean")
 
 
 def _base(library) -> Optional[Path]:
@@ -427,11 +461,13 @@ def _rel(tape, base: Optional[Path]) -> str:
 
 
 def _library_title(library) -> str:
+    """The library's tag, else the directory walked, else how many tapes it is."""
     if library.library:
         return library.library
     if library.directory:
         return Path(library.directory).name or str(library.directory)
-    return "a library"
+    n = len(library.tapes)
+    return f"{n} ENDF tape{'s' if n != 1 else ''}"
 
 
 def _library_status(library, counts: Mapping[str, Any]) -> str:
@@ -440,6 +476,30 @@ def _library_status(library, counts: Mapping[str, Any]) -> str:
     if library.stopped:
         status += f"; stopped after {counts['tapes']} of {counts['planned']}"
     return status
+
+
+def _mf_span(mf: Sequence[int]) -> str:
+    """``31-35, 40``: the MF checked, runs of consecutive files joined."""
+    out: List[str] = []
+    run: List[int] = []
+    for m in sorted(mf):
+        if run and m != run[-1] + 1:
+            out.append(f"{run[0]}-{run[-1]}" if len(run) > 2 else ", ".join(map(str, run)))
+            run = []
+        run.append(m)
+    if run:
+        out.append(f"{run[0]}-{run[-1]}" if len(run) > 2 else ", ".join(map(str, run)))
+    return ", ".join(out)
+
+
+def _split_target(target: Optional[str]) -> Tuple[str, str]:
+    """``("Fe", "56")``, ``("Am", "242m1")``, ``("C", "nat")``."""
+    if not target:
+        return "", ""
+    i = next((k for k, ch in enumerate(target) if ch.isdigit()), len(target))
+    if target.endswith("nat"):
+        return target[:-3], "nat"
+    return target[:i], target[i:]
 
 
 # ---- Markdown ---------------------------------------------------------------
@@ -454,13 +514,38 @@ def _md_verdict(counts: Mapping[str, int], library=None) -> List[str]:
 
 
 def _md_summary(rows: Sequence[Dict[str, Any]], tapes: bool) -> List[str]:
-    out = ["## Summary", ""]
+    out = ["## Summary by check", ""]
     if not rows:
         return out + ["Nothing found.", ""]
     header = ("Level", "Check", "MF", "Findings") + (("Tapes",) if tapes else ())
     body = [(f"**{LEVEL_LABEL[r['level']]}**", _md_check(r["check"]), _mf(r["mf"]), r["findings"])
             + ((r["tapes"],) if tapes else ()) for r in _display_rows(rows)]
     return out + _md_table(header, body) + [""]
+
+
+def _main_text(tape) -> str:
+    if not tape.ok:
+        return f"Failed: {tape.error}"
+    if not tape.has_covariances:
+        return "No covariances"
+    main = _main_findings(tape)
+    if not main:
+        return "Nothing found"
+    text = "; ".join(f"{LEVEL_LABEL[lv]}: {to_symbols(_title(ck))} ×{n}"
+                     for lv, ck, n in main[:_MAIN_FINDINGS])
+    if len(main) > _MAIN_FINDINGS:
+        text += f"; +{len(main) - _MAIN_FINDINGS} more"
+    return text
+
+
+def _md_files(library) -> List[str]:
+    out = ["## Summary by file", ""]
+    out += _md_table(("File", "Nuclide", "MAT", "MF checked", "Defects", "Warnings", "Notes",
+                      "Main findings", "Path"),
+                     [(t.name, t.target, t.mat, ", ".join(map(str, t.mf)), t.count(DEFECT),
+                       t.count(WARN), t.count(NOTE), _main_text(t), str(Path(t.path).resolve()))
+                      for _, t in _tape_order(library)])
+    return out + [""]
 
 
 def _md_findings(findings: Sequence[CovarianceFinding], depth: str) -> List[str]:
@@ -477,10 +562,11 @@ def _md_findings(findings: Sequence[CovarianceFinding], depth: str) -> List[str]
 
 def _md_method() -> List[str]:
     out = ["## Method and thresholds", ""]
-    for heading, paragraphs in method_sections():
-        out += [f"### {heading}", ""]
-        for p in paragraphs:
-            out += [to_symbols(p), ""]
+    for heading, intro, rules in method_sections():
+        out += [f"### {heading}", "", to_symbols(intro), ""]
+        out += [f"- **{LEVEL_LABEL[lv]}**: {to_symbols(text)}" if lv else f"- {to_symbols(text)}"
+                for lv, text in rules]
+        out.append("")
     return out
 
 
@@ -542,14 +628,10 @@ def library_markdown(library, level: str = WARN) -> str:
     out.append("")
     rows = library_summary_rows(library)
     out += _md_summary(rows, tapes=True)
-    out += ["## Tapes", ""]
-    out += _md_table(("File", "MAT", "MF checked", "Defects", "Warnings", "Notes", "Status", "Path"),
-                     [(t.name, t.mat, ", ".join(map(str, t.mf)), t.count(DEFECT), t.count(WARN),
-                       t.count(NOTE), _tape_status(t), str(Path(t.path).resolve()))
-                      for t in _tape_order(library)])
-    out += ["", "## Findings", ""]
+    out += _md_files(library)
+    out += ["## Findings", ""]
     any_listed = False
-    for t in _tape_order(library):
+    for _, t in _tape_order(library):
         if t.report is None:
             continue
         listed = _findings_at(t.report.findings, level)
@@ -584,6 +666,8 @@ _CSS = """
 --note:#9fbbe0;--note-bg:#1d2836;--note-line:#34495f;
 --ok:#6fd19f;--ok-bg:#16301f;--ok-line:#2b5a3f}}
 *{box-sizing:border-box}
+html{scroll-behavior:smooth}
+[id]{scroll-margin-top:64px}
 body{font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--fg);
 background:var(--bg);max-width:1180px;margin:0 auto;padding:32px 20px 64px}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
@@ -595,6 +679,7 @@ h1{font-size:28px;line-height:1.2;margin:4px 0 2px;word-break:break-word}
 .meta div{display:flex;gap:6px}.meta dt{font-weight:600;color:var(--fg)}.meta dd{margin:0}
 h2{font-size:20px;margin:40px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 h3{font-size:16px;margin:22px 0 8px}
+p.lead{color:var(--muted);margin:-4px 0 12px}
 .verdict{display:flex;gap:14px;align-items:flex-start;border:1px solid var(--line);
 border-left-width:6px;border-radius:10px;padding:14px 18px;margin:0 0 16px;background:var(--panel)}
 .verdict .big{font-size:18px;font-weight:700;margin:0}.verdict p{margin:2px 0 0}
@@ -612,8 +697,9 @@ border-left-width:6px;border-radius:10px;padding:14px 18px;margin:0 0 16px;backg
 .card.warn{border-top-color:var(--warn)}.card.warn .n{color:var(--warn)}
 .card.note{border-top-color:var(--note)}.card.note .n{color:var(--note)}
 .card.zero .n{color:var(--faint)}
-.toc{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13px;margin:18px 0 0;padding:10px 0;
-border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.toc{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13px;
+margin:18px 0 0;padding:10px 0;background:var(--bg);border-bottom:1px solid var(--line)}
+.toc a{font-weight:600}
 .mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
 border-radius:50%;font-size:11px;font-weight:800;line-height:1;color:#fff;flex:none}
 .defect .mark,.mark.defect{background:var(--defect)}.warn .mark,.mark.warn{background:var(--warn)}
@@ -624,6 +710,8 @@ font-size:13px;font-weight:700;white-space:nowrap;border:1px solid}
 .badge.defect{color:var(--defect);background:var(--defect-bg);border-color:var(--defect-line)}
 .badge.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
 .badge.note{color:var(--note);background:var(--note-bg);border-color:var(--note-line)}
+.bullet{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--faint);
+margin:0 6px 1px 5px;flex:none}
 .pill{display:inline-block;min-width:28px;padding:0 8px;border-radius:999px;text-align:center;
 font-weight:700;font-size:13px;font-variant-numeric:tabular-nums;border:1px solid}
 .pill.defect{color:var(--defect);background:var(--defect-bg);border-color:var(--defect-line)}
@@ -638,8 +726,30 @@ font-weight:600;background:var(--panel)}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 tbody tr:hover{background:var(--panel)}
 .ck .ttl{font-weight:600;color:var(--fg)}.id{color:var(--faint);font-size:12px;margin-left:6px}
-.file{font-weight:600}.path{display:block;color:var(--faint);font-size:12px;word-break:break-all}
+.file{font-weight:600}.fname{display:block;color:var(--faint);font-size:12px;word-break:break-all}
+.main{list-style:none;margin:0;padding:0}.main li{display:flex;gap:6px;align-items:baseline;margin:1px 0}
+.main .mark{width:15px;height:15px;font-size:9px;position:relative;top:2px}.main .ck{color:var(--fg)}
+.mfs{white-space:nowrap}.main .x{color:var(--muted);font-variant-numeric:tabular-nums}
+.main .more{color:var(--faint);font-size:12px}
 .status-failed{color:var(--defect);font-weight:600}.status-none{color:var(--faint)}
+.status-clean{color:var(--ok);font-weight:600}
+.index{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));column-gap:28px;
+border:1px solid var(--line);border-radius:10px;padding:8px 14px}
+.el{display:flex;gap:10px;align-items:baseline;padding:3px 0;border-bottom:1px dashed var(--line)}
+.el .sym{flex:none;width:42px;font-weight:700;font-size:15px}
+.el .chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{display:inline-block;min-width:34px;padding:1px 8px;border-radius:6px;text-align:center;
+font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;border:1px solid var(--line);
+color:var(--fg);background:var(--bg)}
+.chip:hover{text-decoration:none;outline:2px solid var(--accent)}
+.chip.defect{color:var(--defect);background:var(--defect-bg);border-color:var(--defect-line)}
+.chip.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
+.chip.note{color:var(--note);background:var(--note-bg);border-color:var(--note-line)}
+.chip.clean{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+.chip.nocov{color:var(--faint);border-style:dashed}
+.chip.failed{color:#fff;background:var(--defect);border-color:var(--defect)}
+.keys{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:8px 0 0}
+.keys span{display:inline-flex;align-items:center;gap:5px}.keys .chip{min-width:18px;padding:0 5px;font-size:11px}
 details.tape{border:1px solid var(--line);border-radius:10px;margin:0 0 12px;background:var(--bg)}
 details.tape>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;gap:8px 12px;
 align-items:center;padding:10px 14px;background:var(--panel);border-radius:10px}
@@ -657,15 +767,24 @@ table.f td.loc{width:30%;white-space:nowrap}
 details.more>summary{cursor:pointer;color:var(--accent);font-size:13px;margin:0 0 6px}
 table.f{margin-top:2px}
 p.muted{color:var(--muted)}
-.method p{max-width:80ch}
-.legend{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
-.entry{border:1px solid var(--line);border-radius:10px;padding:12px 16px;scroll-margin-top:16px}
+.mblock{border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:0 0 12px}
+.mblock h3{margin:0 0 4px}.mblock>p{margin:0 0 8px;color:var(--muted)}
+.rules{list-style:none;margin:0;padding:0}
+.rules li{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:baseline;
+padding:5px 0;border-top:1px solid var(--line)}
+.rules li .badge{justify-self:start}
+.legend{display:flex;flex-direction:column;gap:10px}
+.entry{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:6px 28px;
+border:1px solid var(--line);border-radius:10px;padding:14px 18px}
 .entry:target{outline:2px solid var(--accent)}
-.entry h3{margin:0 0 2px;font-size:15px}.entry .id{margin:0}
-.entry ul{list-style:none;padding:0;margin:8px 0}.entry li{margin:4px 0;display:flex;gap:8px;align-items:baseline}
-.entry li .badge{flex:none}.entry p{margin:6px 0 0;color:var(--muted);font-size:14px}
+.entry h3{margin:0 0 2px;font-size:16px}.entry .id{margin:0}
+.entry .desc{margin:8px 0 0;color:var(--muted);font-size:14px}
+.entry ul{list-style:none;padding:0;margin:0}
+.entry li{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:baseline;padding:4px 0}
+.entry li+li{border-top:1px solid var(--line)}.entry li .badge{justify-self:start}
+@media (max-width:760px){.entry{grid-template-columns:1fr}.rules li,.entry li{grid-template-columns:1fr;gap:2px}}
 @media print{body{max-width:none;padding:0}.toc{display:none}details.tape>summary::before{content:none}
-tbody tr:hover{background:none}h2{break-after:avoid}.entry,.card,.group{break-inside:avoid}}
+tbody tr:hover{background:none}h2{break-after:avoid}.entry,.card,.group,.mblock{break-inside:avoid}}
 """
 
 
@@ -695,18 +814,19 @@ def _check_cell(check: str) -> _Html:
 
 def _html_table(header: Sequence[str], rows: Iterable[Sequence[Any]], *,
                 numeric: Sequence[int] = (), code_col: Optional[int] = None,
-                css: str = "") -> List[str]:
+                css: str = "", row_ids: Optional[Sequence[Optional[str]]] = None) -> List[str]:
     head = "".join(f'<th{" class=" + chr(34) + "n" + chr(34) if i in numeric else ""}>{_e(h)}</th>'
                    for i, h in enumerate(header))
     out = [f'<div class="wrap"><table{f" class={chr(34)}{css}{chr(34)}" if css else ""}>',
            f"<thead><tr>{head}</tr></thead><tbody>"]
-    for row in rows:
+    for k, row in enumerate(rows):
         cells = []
         for i, v in enumerate(row):
             cls = "n" if i in numeric else ("loc" if i == code_col else "")
             cell = v if isinstance(v, _Html) else _e(v)
             cells.append(f"<td{f' class={chr(34)}{cls}{chr(34)}' if cls else ''}>{cell}</td>")
-        out.append("<tr>" + "".join(cells) + "</tr>")
+        rid = row_ids[k] if row_ids else None
+        out.append(f"<tr{f' id={chr(34)}{rid}{chr(34)}' if rid else ''}>" + "".join(cells) + "</tr>")
     out.append("</tbody></table></div>")
     return out
 
@@ -789,12 +909,21 @@ def _html_groups(findings: Sequence[CovarianceFinding]) -> List[str]:
     return out
 
 
+def _rule_mark(level: Optional[str]) -> str:
+    return str(_badge(level)) if level else '<span class="bullet"></span>'
+
+
 def _html_method() -> List[str]:
-    out = ['<h2 id="method">Method and thresholds</h2>', '<div class="method">']
-    for heading, paragraphs in method_sections():
-        out.append(f"<h3>{_e(heading)}</h3>")
-        out += [f"<p>{to_html_symbols(p)}</p>" for p in paragraphs]
-    return out + ["</div>"]
+    out = ['<h2 id="method">Method and thresholds</h2>',
+           '<p class="lead">How each level is drawn. What each check means is in '
+           '<a href="#legend">What each finding means</a>.</p>']
+    for heading, intro, rules in method_sections():
+        out.append(f'<div class="mblock"><h3>{_e(heading)}</h3><p>{to_html_symbols(intro)}</p>'
+                   '<ul class="rules">')
+        out += [f"<li>{_rule_mark(lv)}<span>{to_html_symbols(text)}</span></li>"
+                for lv, text in rules]
+        out.append("</ul></div>")
+    return out
 
 
 def _html_legend(names: Sequence[str]) -> List[str]:
@@ -802,14 +931,16 @@ def _html_legend(names: Sequence[str]) -> List[str]:
     if not entries:
         return []
     out = ['<h2 id="legend">What each finding means</h2>',
-           f'<p class="muted">{_e(_LEGEND_INTRO)}</p>', '<div class="legend">']
+           f'<p class="lead">{_e(_LEGEND_INTRO)}</p>', '<div class="legend">']
     for name, d in entries:
-        out.append(f'<div class="entry" id="check-{_e(name)}"><h3>{to_html_symbols(d.title)}</h3>'
+        out.append(f'<div class="entry" id="check-{_e(name)}"><div>'
+                   f"<h3>{to_html_symbols(d.title)}</h3>"
                    f'<code class="id">{_e(name)}</code> '
-                   f'<span class="id">· MF {_e(", ".join(map(str, d.mf)))}</span><ul>')
+                   f'<span class="id">· MF {_e(", ".join(map(str, d.mf)))}</span>'
+                   f'<p class="desc">{to_html_symbols(d.description)}</p></div><ul>')
         out += [f"<li>{_badge(lv)}<span>{to_html_symbols(d.levels[lv])}</span></li>"
                 for lv in _WORST_FIRST if lv in d.levels]
-        out += ["</ul>", f"<p>{to_html_symbols(d.description)}</p></div>"]
+        out.append("</ul></div>")
     return out + ["</div>"]
 
 
@@ -819,10 +950,6 @@ def _html_page(title: str, body: List[str]) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         f"<title>{_e(title)}</title>", f"<style>{_CSS}</style>", "</head>", "<body>",
         *body, "</body>", "</html>", ""])
-
-
-_TOC = (("summary", "Summary"), ("findings", "Findings"), ("method", "Method"),
-        ("legend", "What each finding means"))
 
 
 def report_html(report, level: str = WARN) -> str:
@@ -835,7 +962,8 @@ def report_html(report, level: str = WARN) -> str:
         ("kika", kika_version()), ("Generated", _now())])
     body += _html_verdict(counts)
     body += _html_cards(counts)
-    body += _html_toc(_TOC)
+    body += _html_toc((("summary", "Summary by check"), ("findings", "Findings"),
+                       ("method", "Method"), ("legend", "What each finding means")))
     rows = summary_rows(report.findings)
     body += _html_summary(rows, tapes=False)
     body.append('<h2 id="findings">Findings</h2>')
@@ -851,23 +979,83 @@ def report_html(report, level: str = WARN) -> str:
     return _html_page(f"Covariance check of {name}", body)
 
 
-def _html_tapes(library) -> List[str]:
-    rows = []
-    base = _base(library)
-    for t in _tape_order(library):
-        status = _tape_status(t)
-        cls = "status-failed" if not t.ok else ("" if t.has_covariances else "status-none")
-        # The full path on hover; under the name only where the name alone is not it.
+_STATE_WORD = {DEFECT: "defects", WARN: "warnings", NOTE: "notes only", "clean": "nothing found",
+               "nocov": "no covariances", "failed": "could not be checked"}
+
+
+def _html_index(library, anchors: Mapping[int, str]) -> List[str]:
+    """The files by element, one chip per tape coloured by its worst level."""
+    rows: Dict[Tuple[int, str], List[Tuple[Tuple, int, Any]]] = {}
+    seen: Dict[Optional[str], int] = {}
+    for t in library.tapes:
+        seen[t.target] = seen.get(t.target, 0) + 1
+    for i, t in enumerate(library.tapes):
+        sym, mass = _split_target(t.target)
+        if t.za is not None and sym:
+            Z, A = divmod(t.za, 1000)
+            # Two files of one nuclide (two evaluations side by side): the
+            # mass number alone would not tell them apart.
+            text = mass if seen[t.target] == 1 else f"{mass} · {t.name}"
+            rows.setdefault((Z, sym), []).append(((A, t.liso, t.name), i, text))
+        else:
+            rows.setdefault((10**6, "Other"), []).append(((0, 0, t.name), i, t.name))
+    out = ['<h2 id="files">Files</h2>',
+           '<p class="lead">Every file checked, by nuclide. A file links to its findings, or to '
+           'its row in the summary by file when it has none to list.</p>', '<div class="index">']
+    for (_, sym), chips in sorted(rows.items()):
+        out.append(f'<div class="el"><span class="sym">{_e(sym)}</span><span class="chips">')
+        for _, i, text in sorted(chips, key=lambda c: c[0]):
+            t = library.tapes[i]
+            state = _tape_state(t)
+            tip = (f"{t.name}: " + (f"{t.count(DEFECT)} defects, {t.count(WARN)} warnings, "
+                                    f"{t.count(NOTE)} notes" if t.report is not None
+                                    else _STATE_WORD[state]))
+            out.append(f'<a class="chip {state}" href="#{anchors[i]}" title="{_e(tip)}">'
+                       f"{_e(text)}</a>")
+        out.append("</span></div>")
+    out.append("</div>")
+    keys = [(DEFECT, "Defects"), (WARN, "Warnings"), (NOTE, "Notes only"), ("clean", "Nothing found"),
+            ("nocov", "No covariances"), ("failed", "Could not be checked")]
+    out.append('<div class="keys">' + "".join(
+        f'<span><span class="chip {k}">&nbsp;</span>{_e(w)}</span>' for k, w in keys) + "</div>")
+    return out
+
+
+def _html_main(tape) -> _Html:
+    if not tape.ok:
+        return _Html(f'<span class="status-failed">Failed: {_e(tape.error)}</span>')
+    if not tape.has_covariances:
+        return _Html('<span class="status-none">No covariances</span>')
+    main = _main_findings(tape)
+    if not main:
+        return _Html('<span class="status-clean">Nothing found</span>')
+    items = [f'<li class="{lv}"><span class="mark">{_LEVEL_MARK[lv]}</span>'
+             f'<span><a class="ck" href="#check-{_e(ck)}">{to_html_symbols(_title(ck))}</a> '
+             f'<span class="x">×{n}</span></span></li>' for lv, ck, n in main[:_MAIN_FINDINGS]]
+    if len(main) > _MAIN_FINDINGS:
+        items.append(f'<li class="more">+{len(main) - _MAIN_FINDINGS} more</li>')
+    return _Html('<ul class="main">' + "".join(items) + "</ul>")
+
+
+def _html_files(library, anchors: Mapping[int, str]) -> List[str]:
+    rows, ids = [], []
+    for i, t in _tape_order(library):
         full = _e(Path(t.path).resolve())
-        rel = _rel(t, base)
+        label = t.target or t.name
+        link = anchors[i]
+        name = (f'<a class="file" href="#{link}" title="{full}">{_e(label)}</a>'
+                if link.startswith("tape-") else f'<span class="file" title="{full}">{_e(label)}</span>')
         rows.append((
-            _Html(f'<span class="file" title="{full}">{_e(t.name)}</span>'
-                  + (f'<span class="path">{_e(rel)}</span>' if rel != t.name else "")),
-            t.mat, ", ".join(map(str, t.mf)),
+            _Html(name + (f'<span class="fname">{_e(t.name)}</span>' if t.target else "")),
+            t.mat, _Html(f'<span class="mfs">{_e(_mf_span(t.mf))}</span>'),
             _pill(DEFECT, t.count(DEFECT)), _pill(WARN, t.count(WARN)), _pill(NOTE, t.count(NOTE)),
-            _Html(f'<span class="{cls}">{_e(status.capitalize())}</span>')))
-    return _html_table(("File", "MAT", "MF checked", "Defects", "Warnings", "Notes", "Status"),
-                       rows, numeric=(1, 3, 4, 5))
+            _html_main(t)))
+        ids.append(f"file-{i}")
+    return (['<h2 id="by-file">Summary by file</h2>',
+             '<p class="lead">Worst first. The main findings are the worst checks of each file, '
+             'the most frequent first.</p>']
+            + _html_table(("File", "MAT", "MF checked", "Defects", "Warnings", "Notes",
+                           "Main findings"), rows, numeric=(1, 3, 4, 5), row_ids=ids))
 
 
 def library_html(library, level: str = WARN) -> str:
@@ -875,6 +1063,10 @@ def library_html(library, level: str = WARN) -> str:
     counts = _library_counts(library)
     base = _base(library)
     title = _library_title(library)
+    listed = {i: _findings_at(t.report.findings, level)
+              for i, t in enumerate(library.tapes) if t.report is not None}
+    anchors = {i: (f"tape-{i}" if listed.get(i) else f"file-{i}")
+               for i in range(len(library.tapes))}
     body = _html_header("kika · covariance check of a library", title,
                         str(base) if base else None, [
                             ("Tapes", _library_status(library, counts)),
@@ -882,26 +1074,28 @@ def library_html(library, level: str = WARN) -> str:
     body += _html_verdict(counts["findings"], library)
     tapes_with = {lv: sum(1 for t in library.tapes if t.count(lv)) for lv in _WORST_FIRST}
     body += _html_cards(counts["findings"], tapes_with)
-    body += _html_toc(_TOC[:1] + (("tapes", "Tapes"),) + _TOC[1:])
+    body += _html_toc((("files", "Files"), ("summary", "Summary by check"),
+                       ("by-file", "Summary by file"), ("findings", "Findings"),
+                       ("method", "Method"), ("legend", "What each finding means")))
+    body += _html_index(library, anchors)
     rows = library_summary_rows(library)
     body += _html_summary(rows, tapes=True)
-    body.append('<h2 id="tapes">Tapes</h2>')
-    body += _html_tapes(library)
+    body += _html_files(library, anchors)
     body.append('<h2 id="findings">Findings</h2>')
     any_listed = False
-    for t in _tape_order(library):
-        if t.report is None:
-            continue
-        listed = _findings_at(t.report.findings, level)
-        if not listed:
+    for i, t in _tape_order(library):
+        if not listed.get(i):
             continue
         any_listed = True
         pills = "".join(_pill(lv, t.count(lv)) for lv in _WORST_FIRST)
         mat = f'<span class="muted">MAT {_e(t.mat)}</span>' if t.mat is not None else ""
-        body.append(f'<details class="tape" open><summary><span class="tname">'
-                    f"{_e(_rel(t, base))}</span>{mat}"
+        nuclide = f"<strong>{_e(t.target)}</strong> · " if t.target else ""
+        # Open where there is something to act on; a tape of notes only folds.
+        is_open = " open" if t.count(DEFECT) or t.count(WARN) else ""
+        body.append(f'<details class="tape" id="tape-{i}"{is_open}><summary>'
+                    f'<span class="tname">{nuclide}{_e(_rel(t, base))}</span>{mat}'
                     f'<span class="pills">{pills}</span></summary><div class="tbody">')
-        body += _html_groups(listed)
+        body += _html_groups(listed[i])
         body.append("</div></details>")
     hidden = _hidden_line(counts["findings"], level)
     if hidden:

@@ -12,6 +12,7 @@ Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
 """
 from __future__ import annotations
 
+import functools
 import json
 import sys
 import time
@@ -50,6 +51,8 @@ _SUPPORT_MF = {31: (1,), 32: (2,), 33: (2, 3), 34: (4, 33), 35: (5,), 40: ()}
 Progress = Union[bool, None, Callable[[str], None]]
 #: ``on_tape(done, total, name, ok)``, called when each tape is done.
 OnTape = Callable[[int, int, str, bool], None]
+#: ``on_result(done, total, tape)``: the same moment, with the whole :class:`TapeCheck`.
+OnResult = Callable[[int, int, "TapeCheck"], None]
 
 
 @dataclass(frozen=True)
@@ -67,11 +70,25 @@ class TapeCheck:
     #: Set only when two tapes of a walk share a file name: the path that tells
     #: them apart (relative to the directory walked, or as given).
     label: Optional[str] = None
+    #: ZA and isomeric state from the head of MF1/MT451, read even when the
+    #: tape fails or has no covariances: what the report sorts and indexes by.
+    za: Optional[int] = None
+    liso: int = 0
 
     @property
     def name(self) -> str:
         """The file name, or :attr:`label` where the file name is not unique."""
         return self.label or self.path.name
+
+    @property
+    def target(self) -> Optional[str]:
+        """The nuclide in the G4NDL spelling (``Fe56``, ``Am242m1``), when the header gave one."""
+        if self.za is None:
+            return None
+        from kika.library_index import target_name
+
+        Z, A = divmod(self.za, 1000)
+        return target_name(Z, A or None, self.liso)
 
     @property
     def mat(self) -> Optional[int]:
@@ -270,6 +287,32 @@ class CovarianceLibraryReport:
         return "\n".join(lines)
 
 
+def _nuclide(path: Path) -> Tuple[Optional[int], int]:
+    """``(ZA, LISO)`` from the head of the tape; ``(None, 0)`` when it has none.
+
+    MF1/MT451 gives both. A tape without it (a covariance-only file, a cut)
+    still opens with the HEAD of its first section, whose ZA is the nuclide;
+    the isomeric state is then unknown and taken as the ground state.
+    """
+    from kika.library_index import _endf_float, _endf_header, _head
+
+    try:
+        text = _head(path)
+        header = _endf_header(text)
+    except (OSError, ValueError):
+        return None, 0
+    if header is not None and header[0] > 0:
+        return header[0], header[3]
+    for line in text.splitlines():
+        try:
+            if int(line[70:72]) > 0 and int(line[72:75]) > 0:
+                za = int(round(_endf_float(line[0:11])))
+                return (za, 0) if za > 0 else (None, 0)
+        except ValueError:
+            continue
+    return None, 0
+
+
 def _labels(paths: Sequence[Path], root: Optional[Path]) -> List[Optional[str]]:
     """A label for each tape whose file name another tape of the walk shares."""
     seen: Dict[str, int] = {}
@@ -336,6 +379,7 @@ def check_covariance_library(
     progress: Progress = True,
     on_tape: Optional[OnTape] = None,
     should_stop: Optional[Callable[[], bool]] = None,
+    on_result: Optional[OnResult] = None,
 ) -> CovarianceLibraryReport:
     """Run :func:`check_covariances` on every tape of a library, one at a time.
 
@@ -367,6 +411,10 @@ def check_covariance_library(
         from 1 to ``total``; ``name`` is :attr:`TapeCheck.name` and ``ok`` is
         False for a tape that could not be read or checked. An exception in it
         is not caught.
+    on_result : callable, optional
+        ``on_result(done, total, tape)``, at the same moments as *on_tape*,
+        with the :class:`TapeCheck` itself: its counts by level, MAT and
+        nuclide, for a caller that keeps a running tally.
     should_stop : callable, optional
         Asked before each tape; when it returns true the walk stops there and
         the report of the tapes done so far comes back with ``stopped=True``.
@@ -401,6 +449,12 @@ def check_covariance_library(
     stopped = False
     started = time.perf_counter()
 
+    def _done(done: int) -> None:
+        if on_tape is not None:
+            on_tape(done, len(paths), out[-1].name, out[-1].ok)
+        if on_result is not None:
+            on_result(done, len(paths), out[-1])
+
     # The parser warns about every MF it skips and logs every quirk it repairs;
     # over hundreds of tapes that drowns the progress line. What matters is in
     # the reports, and a failure is on its row.
@@ -411,21 +465,23 @@ def check_covariance_library(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             for i, (path, label) in enumerate(zip(paths, labels), 1):
-                if out and on_tape is not None:
-                    on_tape(i - 1, len(paths), out[-1].name, out[-1].ok)
+                if out:
+                    _done(i - 1)
                 if should_stop is not None and should_stop():
                     stopped = True
                     break
                 wanted = per_tape.get(path, default)
+                za, liso = _nuclide(path)
+                make = functools.partial(TapeCheck, path, mf=wanted, label=label, za=za, liso=liso)
                 read_mf = sorted(set(wanted).union(*(_SUPPORT_MF[m] for m in wanted)))
                 report(i, f"[{i}/{len(paths)}] {label or path.name} ...", False)
                 t0 = time.perf_counter()
                 try:
                     endf = read_endf(str(path), mf_numbers=read_mf)
                 except Exception as exc:  # noqa: BLE001 - recorded, the walk goes on
-                    out.append(TapeCheck(path, mf=wanted, label=label,
-                                         error=f"read: {type(exc).__name__}: {exc}",
-                                         read_seconds=time.perf_counter() - t0))
+                    out.append(make(
+                        error=f"read: {type(exc).__name__}: {exc}",
+                        read_seconds=time.perf_counter() - t0))
                     n_failed += 1
                     continue
                 t1 = time.perf_counter()
@@ -433,36 +489,35 @@ def check_covariance_library(
                     # read_endf returns an empty tape for a file that is not
                     # ENDF at all; in a census that is a failure, not a tape
                     # without covariances.
-                    out.append(TapeCheck(path, mf=wanted, label=label,
-                                         error="read: no ENDF section found in the file",
-                                         read_seconds=t1 - t0))
+                    out.append(make(
+                        error="read: no ENDF section found in the file",
+                        read_seconds=t1 - t0))
                     n_failed += 1
                     continue
                 if not any(m in endf.files for m in wanted):
-                    out.append(TapeCheck(path, mf=wanted, label=label, has_covariances=False,
-                                         read_seconds=t1 - t0))
+                    out.append(make(has_covariances=False, read_seconds=t1 - t0))
                     del endf
                     continue
                 try:
                     tape_report = check_covariances(endf, mf=wanted)
                 except Exception as exc:  # noqa: BLE001
-                    out.append(TapeCheck(path, mf=wanted, label=label,
-                                         error=f"check: {type(exc).__name__}: {exc}",
-                                         read_seconds=t1 - t0,
-                                         check_seconds=time.perf_counter() - t1))
+                    out.append(make(
+                        error=f"check: {type(exc).__name__}: {exc}",
+                        read_seconds=t1 - t0,
+                        check_seconds=time.perf_counter() - t1))
                     n_failed += 1
                     del endf
                     continue
                 del endf
-                tape = TapeCheck(path, mf=wanted, label=label, report=tape_report,
-                                 read_seconds=t1 - t0, check_seconds=time.perf_counter() - t1)
+                tape = make(report=tape_report, read_seconds=t1 - t0,
+                            check_seconds=time.perf_counter() - t1)
                 out.append(tape)
                 n_defect += bool(tape.count(DEFECT))
                 report(i, f"[{i}/{len(paths)}] {tape.name}: {tape.count(DEFECT)} defects, "
                        f"{tape.count(WARN)} warnings  (so far {n_defect} tapes with defects, "
                        f"{n_failed} failed)", False)
-        if out and on_tape is not None and not stopped:
-            on_tape(len(out), len(paths), out[-1].name, out[-1].ok)
+        if out and not stopped:
+            _done(len(out))
     finally:
         kika_log.setLevel(level)
     head = (f"stopped after {len(out)} of {len(paths)} tapes" if stopped
