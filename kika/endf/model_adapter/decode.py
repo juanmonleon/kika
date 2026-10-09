@@ -467,6 +467,16 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
 
     present = set(getattr(endf, "mf", {}))
     for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF)):
+        if mf == 8:
+            # Parsed since roadmap E7a; in an incident-neutron evaluation its
+            # MTs are the radioactive products of reactions (activation, E6).
+            mts = sorted(getattr(endf.mf[8], "mt", {}))
+            report.unsupportedNode(
+                f"MF8 (MT{mts[:6]}{'...' if len(mts) > 6 else ''}) is read and kept "
+                f"as the file states it; the radioactive products of a reaction "
+                f"are activation data (roadmap E6) and are not in this reactionSuite"
+            )
+            continue
         report.unsupportedNode(
             f"MF{mf} is present in the file and kika's parser registry does not "
             f"cover it; it is absent from this reactionSuite"

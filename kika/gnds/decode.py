@@ -292,15 +292,8 @@ class _SuiteReader:
                 for nuclide in isotope.iter("nuclide"):
                     pops.add(self.readNuclide(nuclide, Z, A))
 
-        for dropped, name in (
-            (len(element.findall("aliases/alias")), "PoPs <alias>"),
-            (len(element.findall("aliases/metaStable")), "PoPs <metaStable>"),
-            # A particle's own decayData is read (readDecayData); one on a
-            # <nucleus> is the decay sublibrary's shape (roadmap E7).
-            (len(element.findall(".//nucleus/decayData")), "PoPs <nucleus><decayData>"),
-        ):
-            for _ in range(dropped):
-                self.tally(f"{name}: outside kika's minimal §12 particle model")
+        from .decay import readAliases
+        pops.aliases = readAliases(element.find("aliases"), self.tally)
         return pops
 
     def readParticle(self, element: ET.Element) -> Particle:
@@ -315,58 +308,26 @@ class _SuiteReader:
         )
 
     def readDecayData(self, element: Optional[ET.Element]):
-        """§12 ``decayData``: its ``decayModes`` (roadmap E5c); the rest is E7's.
-
-        Every mode is read with its probability, its photon-emission
-        probabilities and its decay path -- that is the electromagnetic decay of
-        a level, which is what an ENDF MF12 LO=2 cascade becomes. ``Q``,
-        ``spectra``, ``internalConversionCoefficients`` and ``averageEnergies``
-        belong to the decay sublibrary and are counted, not read.
-        """
-        if element is None:
-            return None
-        from kika.nuclear_data.model import (Decay, DecayData, DecayMode, DecayModes,
-                                             DecayPath, PhotonEmissionProbabilities,
-                                             Product, Shell)
-
-        if element.find("averageEnergies") is not None:
-            self.tally("PoPs <decayData><averageEnergies>: decay sublibrary data (roadmap E7)")
-        modes = DecayModes()
-        for mode in element.findall("decayModes/decayMode"):
-            for name in ("internalConversionCoefficients", "Q", "spectra"):
-                if mode.find(name) is not None:
-                    self.tally(f"PoPs <decayMode><{name}>: decay sublibrary data (roadmap E7)")
-            quantity = mode.find("probability/double")
-            if quantity is None or len(quantity):
-                self.tally("PoPs <decayMode><probability>: only a plain <double> is read")
-            probability = (float(quantity.attrib.get("value", "nan"))
-                           if quantity is not None else float("nan"))
-            emission = mode.find("photonEmissionProbabilities")
-            photons = None
-            if emission is not None:
-                photons = PhotonEmissionProbabilities(shells=[
-                    Shell(label=shell.attrib["label"], value=float(shell.attrib["value"]))
-                    for shell in emission.findall("shell")])
-            path = DecayPath(decays=[
-                Decay(index=int(decay.attrib["index"]), mode=decay.attrib.get("mode"),
-                      products=[Product(pid=product.attrib["pid"],
-                                        label=product.attrib.get("label"))
-                                for product in decay.findall("products/product")])
-                for decay in mode.findall("decayPath/decay")])
-            modes.decayModes.append(DecayMode(
-                label=mode.attrib["label"], mode=mode.attrib["mode"],
-                probability=probability, decayPath=path,
-                photonEmissionProbabilities=photons))
-        return DecayData(decayModes=modes)
+        """§12 ``decayData`` in full (E5c's cascade, E7b's decay sublibrary):
+        :func:`kika.gnds.decay.readDecayData`."""
+        from .decay import readDecayData
+        return readDecayData(element, self.tally)
 
     def readHalflife(self, element: Optional[ET.Element]):
-        """§12's two spellings: a ``<double>`` in seconds, or ``<string>`` "stable"."""
+        """§12's two spellings: a ``<double>`` in seconds (with its standard
+        uncertainty, when stated), or ``<string>`` "stable"."""
         if element is None:
             return None
         text = element.find("string")
         if text is not None:
             return text.attrib.get("value")
-        return self.readPhysicalQuantity(element.find("double"))
+        from .decay import readQuantity
+        quantity = readQuantity(element.find("double"))
+        if quantity is None:
+            return None
+        from kika.nuclear_data.model import PhysicalQuantity
+        return PhysicalQuantity(value=quantity.value, unit=quantity.unit,
+                                uncertainty=quantity.uncertainty)
 
     def readNuclide(self, element: ET.Element, Z: int, A: int) -> Nuclide:
         """One ``nuclide``, with its ``nucleus``'s spin and parity folded in.
@@ -378,6 +339,7 @@ class _SuiteReader:
         """
         nucleus = element.find("nucleus")
         nucleus = nucleus if nucleus is not None else ET.Element("nucleus")
+        onNucleus = element.find("decayData") is None and nucleus.find("decayData") is not None
         return Nuclide(
             id=element.attrib["id"],
             mass=self.readPhysicalQuantity(element.find("mass/double")),
@@ -388,7 +350,12 @@ class _SuiteReader:
             Z=Z, A=A,
             nuclearLevel=int(nucleus.attrib.get("index", 0)),
             energy=self.readPhysicalQuantity(nucleus.find("energy/double")),
-            decayData=self.readDecayData(element.find("decayData")),
+            decayData=self.readDecayData(nucleus.find("decayData") if onNucleus
+                                         else element.find("decayData")),
+            decayDataOnNucleus=onNucleus,
+            fissionFragmentData=(self.readFissionFragmentData(
+                element.find("fissionFragmentData"), f"PoPs nuclide {element.attrib['id']}")
+                if element.find("fissionFragmentData") is not None else None),
         )
 
     @staticmethod
@@ -562,9 +529,8 @@ class _SuiteReader:
     def readFissionFragmentData(self, element: ET.Element, path: str):
         """§18.4: the delayed-neutron families and the energy release.
 
-        The inverse of the writer's ``fissionFragmentData``. ``productYields``
-        is reported, not read -- the model keeps its slot empty (MF8/454, /459
-        is roadmap E7).
+        The inverse of the writer's ``fissionFragmentData``, product yields
+        included (MF8/454, /459, roadmap E7c: :mod:`kika.gnds.fission_yields`).
         """
         from kika.nuclear_data.model import (DelayedNeutron, FissionEnergyRelease,
                                              FissionFragmentData, Product)
@@ -596,12 +562,8 @@ class _SuiteReader:
                 setattr(release, name, self.form(term[0], f"{here}/{name}", name))
             data.fissionEnergyReleases.append(release)
 
-        if element.find("productYields") is not None:
-            self.unsupported(
-                "productYields", here,
-                "fission product yields (ENDF MF8/454, /459) have a model slot "
-                "and no reader; roadmap E7"
-            )
+        from .fission_yields import readProductYields
+        data.productYields = readProductYields(element.find("productYields"), self.tally)
         return data
 
     def readQ(self, element: ET.Element, path: str) -> Q:

@@ -23,6 +23,8 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
     container = ET.SubElement(root, "PoPs")
     _set(container, name=pops.name or "protare_internal",
          version=pops.version or "1.0", format="2.0")
+    from .decay import writeAliases
+    writeAliases(container, getattr(pops, "aliases", None))
     nuclides = [p for p in pops.particles.values()
                 if isinstance(p, Nuclide)]
     unorthodoxes = [p for p in pops.particles.values()
@@ -109,31 +111,9 @@ def _particleProperties(node: ET.Element, particle) -> None:
 
 
 def _decayData(node: ET.Element, decayData) -> None:
-    """§12 ``decayData/decayModes`` (roadmap E5c), in the schema's order:
-    ``probability``, ``photonEmissionProbabilities``, ``decayPath``."""
-    if decayData is None:
-        return
-    element = ET.SubElement(node, "decayData")
-    if not len(decayData.decayModes):
-        return
-    modes = ET.SubElement(element, "decayModes")
-    for mode in decayData.decayModes:
-        child = _set(ET.SubElement(modes, "decayMode"), label=mode.label, mode=mode.mode)
-        _set(ET.SubElement(ET.SubElement(child, "probability"), "double"),
-             label="eval", value=_number(mode.probability))
-        if mode.photonEmissionProbabilities is not None:
-            emission = ET.SubElement(child, "photonEmissionProbabilities")
-            for shell in mode.photonEmissionProbabilities.shells:
-                _set(ET.SubElement(emission, "shell"), label=shell.label,
-                     value=_number(shell.value))
-        path = ET.SubElement(child, "decayPath")
-        for decay in mode.decayPath:
-            step = _set(ET.SubElement(path, "decay"), index=str(decay.index), mode=decay.mode)
-            if decay.products:
-                products = ET.SubElement(step, "products")
-                for product in decay.products:
-                    _set(ET.SubElement(products, "product"),
-                         label=product.label or product.pid, pid=product.pid)
+    """§12 ``decayData`` in full: :func:`kika.gnds.decay.writeDecayData`."""
+    from .decay import writeDecayData
+    writeDecayData(node, decayData)
 
 
 def _halflife(node: ET.Element, halflife) -> None:
@@ -152,8 +132,11 @@ def _halflife(node: ET.Element, halflife) -> None:
         _set(ET.SubElement(element, "string"), label="eval",
              value=halflife, unit="s")
     else:
-        _set(ET.SubElement(element, "double"), label="eval",
-             value=_number(halflife.value), unit=halflife.unit or "s")
+        double = _set(ET.SubElement(element, "double"), label="eval",
+                      value=_number(halflife.value), unit=halflife.unit or "s")
+        if getattr(halflife, "uncertainty", None) is not None:
+            from .decay import _writeUncertainty
+            _writeUncertainty(double, float(halflife.uncertainty.value))
 
 
 def _nuclideProperties(node: ET.Element, nuclide: Nuclide) -> None:
@@ -166,7 +149,9 @@ def _nuclideProperties(node: ET.Element, nuclide: Nuclide) -> None:
     if nuclide.charge is not None:
         _set(ET.SubElement(ET.SubElement(node, "charge"), "integer"),
              label="eval", value=str(nuclide.charge), unit="e")
-    _decayData(node, nuclide.decayData)
+    onNucleus = getattr(nuclide, "decayDataOnNucleus", False)
+    if not onNucleus:
+        _decayData(node, nuclide.decayData)
     nucleus = ET.SubElement(node, "nucleus")
     _set(nucleus, id=nuclide.id.lower(), index=str(nuclide.nuclearLevel))
     if nuclide.spin is not None:
@@ -181,7 +166,16 @@ def _nuclideProperties(node: ET.Element, nuclide: Nuclide) -> None:
              label="eval", value=str(nuclide.Z), unit="e")
     if nuclide.halflife is not None:
         _halflife(nucleus, nuclide.halflife)
+    if onNucleus:
+        _decayData(nucleus, nuclide.decayData)
     if nuclide.energy is not None:
         _set(ET.SubElement(ET.SubElement(nucleus, "energy"), "double"),
              label="eval", value=_number(nuclide.energy.value),
              unit=nuclide.energy.unit or "eV")
+    data = getattr(nuclide, "fissionFragmentData", None)
+    if data is not None:
+        # A fission yield sublibrary's yields (roadmap E7c). Only the product
+        # yields: delayed neutrons and the energy release belong to a reaction.
+        from .fission_yields import writeProductYields
+        holder = ET.SubElement(node, "fissionFragmentData")
+        writeProductYields(holder, data.productYields)

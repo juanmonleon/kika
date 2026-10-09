@@ -521,7 +521,25 @@ def attachThermalScattering(suite, endf, report: ConversionReport) -> Conversion
         if form is not None:
             form.principal.boundAtomCrossSectionByNuclide = dict(byNuclide)
             suite.reactions.append(_reaction(form, 4, _provenance(mt4, book), domain))
+    _sayWhenTheZaIsNotThePseudoZa(sections, report)
     return report
+
+
+def _sayWhenTheZaIsNotThePseudoZa(sections, report: ConversionReport) -> None:
+    """Name a TSL header ZA other than MAT + 100: only the ENDF route keeps it.
+
+    Five tapes of ENDF/B-VIII.0 (H and D in D2O/H2O/YH2, O in D2O) put the
+    principal atom's ZA there -- and HinYH2's 1005 is not a nuclide at all. GNDS
+    states the target as an ``unorthodox`` particle with no ZA, so a suite written
+    to GNDS and back writes MAT + 100, FUDGE's rule (``derive/suite.py``).
+    """
+    for mt, section in sorted(sections.items()):
+        za, mat = getattr(section, "_za", None), getattr(section, "_mat", None)
+        if za is None or mat is None or int(round(za)) == int(mat) + 100:
+            continue
+        report.warn(f"MF7/MT{mt}: the header ZA is {za:g}, not the pseudo-ZA MAT + 100 = "
+                    f"{int(mat) + 100}; the ENDF route keeps it, a GNDS file has no field "
+                    f"for it and its way back writes MAT + 100 (FUDGE's rule)")
 
 
 # ---------------------------------------------------------------------------

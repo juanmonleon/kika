@@ -12,13 +12,14 @@ the model where the rule bites, and it bites here on purpose.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, Optional, Union
+from typing import Dict, Iterator, List, Optional, Union
 
 from ..._constants import ATOMIC_NUMBER_TO_SYMBOL, SYMBOL_TO_ATOMIC_NUMBER
 from .quantities import PhysicalQuantity
 from .units import check_mass_unit
 
-__all__ = ["Particle", "Nuclide", "Unorthodox", "PoPs", "pidFromZA", "zaFromPid"]
+__all__ = ["Particle", "Nuclide", "Unorthodox", "MetaStable", "PoPs", "pidFromZA",
+           "zaFromPid"]
 
 
 @dataclass
@@ -60,6 +61,14 @@ class Nuclide(Particle):
     #: §12 ``nucleus/energy``: the level's excitation energy, in eV. ``None`` is
     #: "not stated"; a ground state reads as 0 eV from GNDS.
     energy: Optional[PhysicalQuantity] = None
+    #: Where GNDS states ``decayData``: on the ``nuclide`` (a level's gamma
+    #: cascade, E5c) or on its ``nucleus`` (the decay sublibrary, E7b, as FUDGE
+    #: writes it). Both are §12; the flag keeps a file's choice through a read
+    #: and a write.
+    decayDataOnNucleus: bool = False
+    #: §18.4 ``fissionFragmentData`` on the nuclide: the fission product
+    #: yields of a fission yield sublibrary evaluation (roadmap E7c).
+    fissionFragmentData: Optional[object] = None
 
     @property
     def ZA(self) -> Optional[int]:
@@ -84,12 +93,36 @@ class Unorthodox(Particle):
 
 
 @dataclass
+class MetaStable:
+    """§12 ``aliases/metaStable``: ``Am242_m1`` names the level ``Am242_e2``.
+
+    ENDF counts isomers (LISO, RFS) where GNDS counts levels; this alias is the
+    bridge FUDGE writes.
+    """
+
+    id: str
+    pid: str
+    metaStableIndex: int
+
+
+@dataclass
 class PoPs:
-    """§12. The particle database for one evaluation."""
+    """§12. The particle database for one evaluation.
+
+    Inside a ``reactionSuite`` it is the evaluation's particles. Standing alone
+    it is a whole file -- a decay sublibrary evaluation is one -- and then it
+    carries its own ``styles`` and, when it was read from ENDF, the
+    ``provenance`` the ENDF writer needs to give the tape back.
+    """
 
     particles: Dict[str, Particle] = field(default_factory=dict)
     name: Optional[str] = None
     version: Optional[str] = None
+    aliases: Dict[str, MetaStable] = field(default_factory=dict)
+    styles: List[object] = field(default_factory=list)
+    provenance: Optional[object] = None
+    #: The conversion report of the read that built a standalone PoPs.
+    report: Optional[object] = None
 
     def __len__(self) -> int:
         return len(self.particles)

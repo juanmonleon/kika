@@ -437,31 +437,45 @@ _one("energy", Coverage.FULL, None, "levelEnergy",
 # -- unsupported ----------------------------------------------------------
 
 _group("popsAliases", Coverage.UNSUPPORTED, 'aliases',
-       "outside kika's minimal §12 particle model (gnds.xsd:513-518). "
-       "The reader counts them into one aggregated report line each "
-       "rather than into 34 375",
+       "a particle alias (gnds.xsd:513-518) other than a metaStable is "
+       "outside kika's §12 particle model; the reader counts each kind "
+       "into one aggregated report line",
        """
-       aliases alias metaStable
+       alias
        """)
 
-_group("popsDecay", Coverage.UNSUPPORTED, 'decayData',
-       "§12's decay-sublibrary data (gnds.xsd:525-600): spectra, "
-       "conversion coefficients and average energies. Roadmap E7; each "
-       "occurrence is counted by decode.py readDecayData, not read",
+_group("popsMetaStable", Coverage.FULL, None,
+       "PoPs aliases/metaStable (gnds.xsd:513-518; ``Am242_m1`` names ``Am242_e2``), read "
+       "and written by gnds/decay.py readAliases/writeAliases: the bridge "
+       "between ENDF's isomer counting (LISO, RFS, FPS) and GNDS's level "
+       "counting, which the decay and fission-yield sublibraries need "
+       "(roadmap E7b/E7c)",
+       """
+       aliases metaStable
+       """)
+
+_group("popsDecay", Coverage.FULL, None,
+       "§12's decay-sublibrary data (gnds.xsd:525-600): spectra of "
+       "discrete lines (intensity, energy, transition type, conversion "
+       "coefficients, positron emission intensity, pair formation) and "
+       "continua, and the average energies, read and written by "
+       "gnds/decay.py (roadmap E7b). A decay evaluation is a file whose "
+       "root is PoPs; ENDF/B-VIII.1's 3 821 decay tapes go through GNDS "
+       "and back to the same model",
        """
        spectra spectrum discrete continuum intensity
        internalConversionCoefficients positronEmissionIntensity
        internalPairFormationCoefficient averageEnergies averageEnergy
        """)
 
-_group("popsDecayElectromagnetic", Coverage.PARTIAL, 'decayData',
-       "a particle's decayModes, each with its probability, photon "
-       "emission probabilities and decay path, read by decode.py "
-       "readDecayData and written by encode_pops.py _decayData (roadmap "
-       "E5c: an ENDF MF12 LO=2 cascade). Partial because a decayMode's "
-       "Q and spectra, a decayData's averageEnergies, a probability "
-       "with an uncertainty and a decay's `complete` attribute are not "
-       "carried (gnds.xsd:544-565)",
+_group("popsDecayElectromagnetic", Coverage.FULL, None,
+       "a particle's decayModes, each with its probability (and its "
+       "uncertainty), photon emission probabilities, Q, decay path and "
+       "spectra, a decay's `complete`, read and written by gnds/decay.py "
+       "(roadmap E5c for an ENDF MF12 LO=2 cascade, E7b for a decay "
+       "sublibrary). Only a decayMode-level internalConversionCoefficients, "
+       "which no evaluation read so far states, is counted rather than read "
+       "(gnds.xsd:539-575)",
        """
        decayData decayModes decayMode decayPath decay probability
        photonEmissionProbabilities shell
@@ -618,11 +632,12 @@ _group("fissionFragmentData", Coverage.FULL, None,
        nonNeutrinoEnergy totalEnergy
        """)
 
-_group("fissionProductYields", Coverage.UNSUPPORTED, 'fissionFragmentData',
+_group("fissionProductYields", Coverage.FULL, None,
        "fission product yields (gnds.xsd:1339 onwards), ENDF MF8/454 and "
-       "/459. The model keeps a productYields slot and nothing fills it; "
-       "the reader reports the container. Roadmap E7 (kika-workspace "
-       "docs/library/endf_coverage_roadmap.md)",
+       "/459, read and written by gnds/fission_yields.py (roadmap E7c) "
+       "under a reaction, a PoPs nuclide or as a file's root. The "
+       "uncertainty read is the diagonal covariance ENDF's DY gives; a "
+       "full matrix is counted, not read",
        """
        productYields productYield elapsedTimes elapsedTime time yields
        incidentEnergies incidentEnergy
