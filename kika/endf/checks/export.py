@@ -658,16 +658,18 @@ _CSS = """
 --defect:#b42318;--defect-bg:#fdecea;--defect-line:#f4b9b2;
 --warn:#9a5b00;--warn-bg:#fff4e0;--warn-line:#f2cd8d;
 --note:#3d5a80;--note-bg:#eaf1f8;--note-line:#bcd0e5;
---ok:#1f7a4d;--ok-bg:#e8f5ee;--ok-line:#b5dcc6}
+--ok:#1f7a4d;--ok-bg:#e8f5ee;--ok-line:#b5dcc6;
+--nav-bg:#1f3a5a;--nav-fg:#f2f6fb;--nav-hover:rgba(255,255,255,.14)}
 @media (prefers-color-scheme:dark){:root{--fg:#e7e9ed;--muted:#a3aab5;--faint:#7c8490;
 --bg:#14161a;--panel:#1c1f25;--line:#2f343c;--accent:#8fb6dd;
 --defect:#ff8a7d;--defect-bg:#3a1d1b;--defect-line:#6e2e28;
 --warn:#f2b54f;--warn-bg:#352a14;--warn-line:#6b5222;
 --note:#9fbbe0;--note-bg:#1d2836;--note-line:#34495f;
---ok:#6fd19f;--ok-bg:#16301f;--ok-line:#2b5a3f}}
+--ok:#6fd19f;--ok-bg:#16301f;--ok-line:#2b5a3f;
+--nav-bg:#2a4466;--nav-fg:#f2f6fb;--nav-hover:rgba(255,255,255,.12)}}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-[id]{scroll-margin-top:64px}
+[id]{scroll-margin-top:84px}
 body{font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--fg);
 background:var(--bg);max-width:1180px;margin:0 auto;padding:32px 20px 64px}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
@@ -697,9 +699,11 @@ border-left-width:6px;border-radius:10px;padding:14px 18px;margin:0 0 16px;backg
 .card.warn{border-top-color:var(--warn)}.card.warn .n{color:var(--warn)}
 .card.note{border-top-color:var(--note)}.card.note .n{color:var(--note)}
 .card.zero .n{color:var(--faint)}
-.toc{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13px;
-margin:18px 0 0;padding:10px 0;background:var(--bg);border-bottom:1px solid var(--line)}
-.toc a{font-weight:600}
+.toc{position:sticky;top:8px;z-index:5;display:flex;flex-wrap:wrap;gap:4px;font-size:14.5px;
+margin:22px 0 0;padding:6px;background:var(--nav-bg);border-radius:12px;
+box-shadow:0 4px 14px rgba(15,30,50,.18)}
+.toc a{font-weight:600;color:var(--nav-fg);padding:6px 12px;border-radius:8px}
+.toc a:hover{background:var(--nav-hover);text-decoration:none}
 .mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
 border-radius:50%;font-size:11px;font-weight:800;line-height:1;color:#fff;flex:none}
 .defect .mark,.mark.defect{background:var(--defect)}.warn .mark,.mark.warn{background:var(--warn)}
@@ -726,7 +730,7 @@ font-weight:600;background:var(--panel)}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 tbody tr:hover{background:var(--panel)}
 .ck .ttl{font-weight:600;color:var(--fg)}.id{color:var(--faint);font-size:12px;margin-left:6px}
-.file{font-weight:600}.fname{display:block;color:var(--faint);font-size:12px;word-break:break-all}
+.file{font-weight:600}.fname{display:block;color:var(--faint);font-size:12px;overflow-wrap:anywhere}
 .main{list-style:none;margin:0;padding:0}.main li{display:flex;gap:6px;align-items:baseline;margin:1px 0}
 .main .mark{width:15px;height:15px;font-size:9px;position:relative;top:2px}.main .ck{color:var(--fg)}
 .mfs{white-space:nowrap}.main .x{color:var(--muted);font-variant-numeric:tabular-nums}
@@ -736,12 +740,14 @@ tbody tr:hover{background:var(--panel)}
 .index{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));column-gap:28px;
 border:1px solid var(--line);border-radius:10px;padding:8px 14px}
 .el{display:flex;gap:10px;align-items:baseline;padding:3px 0;border-bottom:1px dashed var(--line)}
-.el .sym{flex:none;width:42px;font-weight:700;font-size:15px}
-.el .chips{display:flex;flex-wrap:wrap;gap:4px}
-.chip{display:inline-block;min-width:34px;padding:1px 8px;border-radius:6px;text-align:center;
+.el .sym{flex:none;width:30px;font-weight:600;font-size:13px;color:var(--muted)}
+.el .chips{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
+.chip{display:inline-flex;align-items:baseline;gap:6px;max-width:100%;min-width:34px;padding:1px 8px;
+border-radius:6px;justify-content:center;white-space:nowrap;
 font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;border:1px solid var(--line);
 color:var(--fg);background:var(--bg)}
 .chip:hover{text-decoration:none;outline:2px solid var(--accent)}
+.chip .twin{font-weight:400;font-size:12px;opacity:.8;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .chip.defect{color:var(--defect);background:var(--defect-bg);border-color:var(--defect-line)}
 .chip.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
 .chip.note{color:var(--note);background:var(--note-bg);border-color:var(--note-line)}
@@ -995,23 +1001,25 @@ def _html_index(library, anchors: Mapping[int, str]) -> List[str]:
             Z, A = divmod(t.za, 1000)
             # Two files of one nuclide (two evaluations side by side): the
             # mass number alone would not tell them apart.
-            text = mass if seen[t.target] == 1 else f"{mass} · {t.name}"
-            rows.setdefault((Z, sym), []).append(((A, t.liso, t.name), i, text))
+            rows.setdefault((Z, sym), []).append(((A, t.liso, t.name), i, (t.target, seen[t.target] > 1)))
         else:
-            rows.setdefault((10**6, "Other"), []).append(((0, 0, t.name), i, t.name))
+            rows.setdefault((10**6, "Other"), []).append(((0, 0, t.name), i, (t.name, False)))
     out = ['<h2 id="files">Files</h2>',
            '<p class="lead">Every file checked, by nuclide. A file links to its findings, or to '
            'its row in the summary by file when it has none to list.</p>', '<div class="index">']
     for (_, sym), chips in sorted(rows.items()):
         out.append(f'<div class="el"><span class="sym">{_e(sym)}</span><span class="chips">')
-        for _, i, text in sorted(chips, key=lambda c: c[0]):
+        for _, i, (text, twin) in sorted(chips, key=lambda c: c[0]):
             t = library.tapes[i]
             state = _tape_state(t)
             tip = (f"{t.name}: " + (f"{t.count(DEFECT)} defects, {t.count(WARN)} warnings, "
                                     f"{t.count(NOTE)} notes" if t.report is not None
                                     else _STATE_WORD[state]))
+            # Two files of one nuclide (two evaluations side by side): the
+            # name tells them apart, cut short; the tooltip has it whole.
+            extra = f'<span class="twin">{_e(t.name)}</span>' if twin else ""
             out.append(f'<a class="chip {state}" href="#{anchors[i]}" title="{_e(tip)}">'
-                       f"{_e(text)}</a>")
+                       f"{_e(text)}{extra}</a>")
         out.append("</span></div>")
     out.append("</div>")
     keys = [(DEFECT, "Defects"), (WARN, "Warnings"), (NOTE, "Notes only"), ("clean", "Nothing found"),

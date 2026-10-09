@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, fields
@@ -314,17 +315,29 @@ def _nuclide(path: Path) -> Tuple[Optional[int], int]:
 
 
 def _labels(paths: Sequence[Path], root: Optional[Path]) -> List[Optional[str]]:
-    """A label for each tape whose file name another tape of the walk shares."""
-    seen: Dict[str, int] = {}
+    """A label for each tape whose file name another tape of the walk shares.
+
+    The path under the directory walked; for tapes given one by one, the path
+    under the deepest directory the tapes of that name share
+    (``endfb7.1/n/92235.endf`` and ``endfb8.1/n/92235.endf``, not two full paths).
+    """
+    groups: Dict[str, List[Path]] = {}
     for p in paths:
-        seen[p.name] = seen.get(p.name, 0) + 1
+        groups.setdefault(p.name, []).append(p)
     out: List[Optional[str]] = []
     for p in paths:
-        if seen[p.name] == 1:
+        same = groups[p.name]
+        if len(same) == 1:
             out.append(None)
             continue
+        base = root
+        if base is None:
+            try:
+                base = Path(os.path.commonpath([str(q.resolve().parent) for q in same]))
+            except ValueError:  # different drives
+                base = None
         try:
-            out.append(p.relative_to(root).as_posix() if root else str(p))
+            out.append(p.resolve().relative_to(base.resolve()).as_posix() if base else str(p))
         except ValueError:
             out.append(str(p))
     return out
