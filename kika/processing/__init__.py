@@ -20,7 +20,7 @@ from .multigroup import (
     relative_to_absolute,
     absolute_to_relative,
 )
-from .group_averaging import resonance_group_average
+from .group_averaging import resonance_group_average, resonance_window_average
 from .derived_covariance import resolve_derived_covariance
 from .njoy_pendf_cache import (
     DEFAULT_PENDF_CACHE_DIR,
@@ -42,6 +42,7 @@ __all__ = [
     "relative_to_absolute",
     "absolute_to_relative",
     "resonance_group_average",
+    "resonance_window_average",
     "resolve_derived_covariance",
     "DEFAULT_PENDF_CACHE_DIR",
     "mf33_needs_pendf",
