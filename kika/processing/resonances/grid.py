@@ -115,6 +115,9 @@ def linearize(evaluate, seeds, options, point_budget, *, constants=None, deferre
         evaluations=sum(c['evaluations'] for c in checks)-(len(checks)-1),
         refinement_maxima={mt:max(c['refinement_maxima'][mt] for c in checks) for mt in first},
         verification_maxima={mt:max(c['verification_maxima'][mt] for c in checks) for mt in first},
+        verification_worst={mt:max(((c['verification_maxima'][mt],c['verification_worst'][mt]) for c in checks
+                                    if mt in c.get('verification_worst',{})),key=lambda t:t[0])[1]
+                            for mt in first if any(mt in c.get('verification_worst',{}) for c in checks)},
         integrals={mt:{weight:{name:sum(c['integrals'][mt][weight][name] for c in checks)
             for name in checks[0]['integrals'][mt][weight]} for weight in ('dE','dE_over_E')} for mt in first},
         refinement_chunks=len(chunks))
@@ -172,6 +175,7 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
     factor=np.diff(x)[:,None]*weights
     factors=(('dE',factor),('dE_over_E',factor*(1/energy)))
     maxima={}
+    worst={}
     integrals={}
     for mt in first:
         if mt not in mts and mt not in deferred:continue
@@ -194,6 +198,9 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
             check['evaluations']+=extra_evaluations
             return grid,values,check
         maxima[mt]=(float(np.max(ratio[:,:3])),float(np.max(ratio[:,3:])))
+        # Where the verification maximum sits: (energy, sampled, tabulated).
+        panel,probe=np.unravel_index(int(np.argmax(ratio[:,3:])),ratio[:,3:].shape);probe+=3
+        worst[mt]=(float(probes[panel,probe]),float(samples[panel,probe]),float(linear[panel,probe]))
         a=samples[:,gauss_indices]
         integrals[mt]={}
         for name,factor in factors:
@@ -222,7 +229,7 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
     return x,y,dict(iterations=result.passes,evaluations=seeded+result.evaluations,
                    refinement_maxima={mt:v[0] for mt,v in maxima.items()},
                    verification_maxima={mt:v[1] for mt,v in maxima.items()},
-                   integrals=integrals)
+                   verification_worst=worst,integrals=integrals)
 
 
 def verification_batches(grid,batch_size,fractions=VERIFICATION_FRACTIONS):

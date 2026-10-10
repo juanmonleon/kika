@@ -139,7 +139,14 @@ def test_report_document_without_a_pendf(reconstruction, tmp_path):
     assert all(0 <= v <= 1 for v in d["verification"]["tabulation"].values())
 
     text = report.to_text()
-    assert text.isascii() and "RESONANCE RANGES" in text and "no reload check" in text
+    assert text.isascii() and "RESONANCE RANGES" in text and "write_pendf() adds a reload check" in text
+    assert text.index("SUMMARY") < text.index("MATERIAL")
+    summary = d["summary"]
+    assert summary["verified"] and summary["pendf"] is None and summary["negative_values"] == 0
+    worst = summary["worst_tabulation"]
+    assert worst["max_ratio"] == max(d["verification"]["tabulation"].values())
+    for row in d["verification"]["tabulation_rows"]:
+        assert row["at_eV"] is not None and row["reference_b"] != row["tabulated_b"]
     html = report.to_html()
     assert html.startswith("<!doctype html>") and "prefers-color-scheme:dark" in html
     assert "<script" not in html.lower() and "http" not in html
@@ -147,3 +154,9 @@ def test_report_document_without_a_pendf(reconstruction, tmp_path):
     for name in ("r.txt", "r.html", "r.json"):
         assert report.save(tmp_path / name).stat().st_size > 0
     assert json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))["schema"] == d["schema"]
+
+
+def test_charged_particle_level_mts_have_names():
+    from kika.endf.reconstruction_report import reaction_name
+    assert [reaction_name(mt) for mt in (600, 601, 649, 800, 849, 750)] == [
+        "(n,p0)", "(n,p1)", "(n,pc)", "(n,α0)", "(n,αc)", "(n,³He0)"]

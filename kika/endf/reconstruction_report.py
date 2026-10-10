@@ -124,7 +124,7 @@ def build(rec) -> dict:
     ranges = evaluation.pop("resonance_ranges", [])
     key_mt = {key: mt for mt, key in result._mt_keys.items()}
     name = lambda key: (f"MT{key_mt[key]}" if key in key_mt else str(getattr(key, "label", key)))
-    reaction = lambda mt: MT_TO_REACTION.get(mt)
+    reaction = lambda mt: reaction_name(mt, MT_TO_REACTION)
 
     context = rec.context
     material = dict(
@@ -174,9 +174,14 @@ def build(rec) -> dict:
     # Per reaction: the tables the user gets, plus the engine's own diagnostics.
     tables = rec.tables_by_mt()
     per_key_verification = {}
+    per_key_worst = {}
     integrals = {}
     for check in report.get("regions", ()):
         for key, value in (check.get("verification_maxima") or {}).items():
+            if float(value) >= per_key_verification.get(key, 0.):
+                worst = (check.get("verification_worst") or {}).get(key)
+                if worst is not None and float(value) > 0:
+                    per_key_worst[key] = worst
             per_key_verification[key] = max(per_key_verification.get(key, 0.), float(value))
         for key, weights in (check.get("integrals") or {}).items():
             acc = integrals.setdefault(key, [0., 0.])
@@ -245,6 +250,32 @@ def build(rec) -> dict:
         clean_for_cross_sections=bool(conversion.isCleanFor("cross-sections")) if conversion is not None else None,
         preparation=list(report.get("preparation_notes") or ()))
 
+    order = lambda key: key_mt.get(key, 10**9)
+    tabulation_rows = [dict(mt=key_mt.get(k), name=name(k), reaction=reaction(key_mt.get(k)), max_ratio=float(v),
+                            at_eV=_num(per_key_worst.get(k, (None,))[0]),
+                            reference_b=_num(per_key_worst.get(k, (None, None))[1]),
+                            tabulated_b=_num(per_key_worst.get(k, (None, None, None))[2]))
+                       for k, v in sorted(per_key_verification.items(), key=lambda kv: order(kv[0])) if v > 0]
+
+    def worst_of(rows):
+        return max(rows, key=lambda r: r["max_ratio"]) if rows else None
+    tab = worst_of(tabulation_rows)
+    pub_worst = worst_of(publication["rows"]) if publication else None
+    sums = worst_of(discrepancies)
+    negatives = sum(r["negatives"]["count"] for r in reactions if r["negatives"])
+    issues = len(notes["losses"]) + len(notes["approximations"]) + len(notes["unsupported"])
+    passed = (tab is None or tab["max_ratio"] <= 1) and (pub_worst is None or pub_worst["max_ratio"] <= 1)
+    summary = dict(
+        verified=passed,
+        worst_tabulation=tab, worst_publication=pub_worst, worst_source_sum=sums,
+        source_sums_consistent=sums is None or sums["max_ratio"] <= 1,
+        negative_values=negatives,
+        reactions_with_negatives=[r["mt"] for r in reactions if r["negatives"]],
+        conversion_issues=issues, clean_for_cross_sections=notes["clean_for_cross_sections"],
+        reactions=len(reactions), stored_points=report.get("stored_points"),
+        total_time_s=float(sum((rec.timings or {}).values())),
+        pendf=publication["file"] if publication else None)
+
     low, high = report.get("domain", (None, None))
     return _jsonable(dict(
         schema=SCHEMA,
@@ -262,7 +293,9 @@ def build(rec) -> dict:
         verification=dict(empirical=bool(report.get("empirical_verification")),
                           global_error_bound=bool(report.get("global_error_bound")),
                           tabulation={name(k): float(v) for k, v in per_key_verification.items()},
+                          tabulation_rows=tabulation_rows,
                           publication=publication),
+        summary=summary,
         notes=notes,
         timings_s={k: float(v) for k, v in (rec.timings or {}).items()},
         fingerprints=dict(source_model_sha256=report.get("source_sha256"),
@@ -283,11 +316,12 @@ class ReconstructionReport:
     def to_json(self, **kwargs) -> str:
         return json.dumps(self._data, **({"indent": 1} | kwargs))
 
-    def to_text(self) -> str:
-        return _render_text(self._data)
+    def to_text(self, *, verbose=False) -> str:
+        """``verbose`` lists every background-only segment instead of one summary row."""
+        return _render_text(self._data, verbose=verbose)
 
-    def to_html(self) -> str:
-        return _render_html(self._data)
+    def to_html(self, *, verbose=False) -> str:
+        return _render_html(self._data, verbose=verbose)
 
     def save(self, path):
         """Write by extension: ``.html``/``.htm``, ``.json``, anything else as text."""
@@ -311,125 +345,183 @@ class ReconstructionReport:
 
 # --------------------------------------------------------------------------- shared rows
 
-def _sections(d):
-    """(title, headers, rows, notes) per section; both renderers walk this."""
+def _summary_rows(d):
+    s = d["summary"]
+    tab, pub, sums = s["worst_tabulation"], s["worst_publication"], s["worst_source_sum"]
+    at = lambda r: f"{r['name']} at {_E(r['at_eV'])} eV" if r.get("at_eV") is not None else r["name"]
+    verdict = "VERIFIED" if s["verified"] else "FAILED"
+    if tab is not None:
+        verdict += f": worst tabulation error {_r(tab['max_ratio'])} of the budget ({at(tab)})"
+    rows = [("Verdict", verdict)]
+    rows.append(("PENDF", "not written (tables only); write_pendf() adds a reload check" if pub is None else
+                 f"{s['pendf']} written, reloaded and verified: worst {_r(pub['max_ratio'])} of the budget ({at(pub)})"))
+    if sums is None:
+        rows.append(("Evaluation's sums", "none stored"))
+    elif s["source_sums_consistent"]:
+        rows.append(("Evaluation's sums", f"consistent with their parts (worst {_r(sums['max_ratio'])}, {sums['name']})"))
+    else:
+        rows.append(("Evaluation's sums", f"{sums['name']} disagrees with the sum of its parts: {sums['max_ratio']:.1f}x the "
+                     f"budget at {_E(sums['at_eV'])} eV; the output uses the sum of the parts"))
+    rows.append(("Negative values", "none" if not s["negative_values"] else
+                 f"{s['negative_values']} in " + ", ".join(f"MT{mt}" for mt in s["reactions_with_negatives"])
+                 + " (kept as computed)"))
+    rows.append(("Conversion", "clean, nothing lost or approximated" if not s["conversion_issues"] else
+                 f"{s['conversion_issues']} declared issue(s); clean for cross sections: "
+                 f"{'yes' if s['clean_for_cross_sections'] else 'NO'} (see notes)"))
+    rows.append(("Output", f"{s['reactions']} reactions, {s['stored_points']:,} points"))
+    rows.append(("Time", f"{s['total_time_s']:.1f} s"))
+    return rows
+
+
+def _content(r):
+    parts = [f"{r[k]} {label}" for k, label in
+             (("l_values", "l-values"), ("spin_groups", "J groups"), ("resonances", "resonances"),
+              ("channels", "channels"), ("energy_points", "energies")) if r.get(k) is not None]
+    text = ", ".join(parts) or "-"
+    if r.get("particle_pairs"):
+        text += "; pairs MT " + ", ".join(str(x) for x in r["particle_pairs"])
+    return text
+
+
+def _segment_rows(d, verbose):
+    rows, background = [], []
+    row = lambda s, kind: (_rng(s["low_eV"], s["high_eV"]), kind, f"{s['points']:,}", str(s["iterations"]),
+                           f"{s['evaluations']:,}", _r(s["refinement_max"]), _r(s["verification_max"]))
+    for s in d["segments"]:
+        if s["kind"] == "background only" and not verbose:
+            background.append(s)
+        else:
+            rows.append(row(s, s["kind"]))
+    if background:
+        merged = dict(low_eV=min(s["low_eV"] for s in background), high_eV=max(s["high_eV"] for s in background),
+                      points=sum(s["points"] for s in background),
+                      iterations=max(s["iterations"] for s in background),
+                      evaluations=sum(s["evaluations"] for s in background),
+                      refinement_max=max((s["refinement_max"] or 0.) for s in background),
+                      verification_max=max((s["verification_max"] or 0.) for s in background))
+        rows.append(row(merged, f"background only ({len(background)} segment{'s' if len(background) > 1 else ''})"))
+    return rows
+
+
+def _sections(d, verbose=False):
+    """(id, title, headers, rows, notes) per section; headers None means key/value."""
+    yield ("summary", "Summary", None, _summary_rows(d), [])
     m, ev, sw, op = d["material"], d["evaluation"], d["software"], d["options"]
-    yield ("Material", None, [
-        ("Material", f"{m.get('zsymam') or m.get('target')}   ZA={_s(m.get('za'))}   MAT={_s(m.get('mat'))}"),
-        ("Target / projectile", f"{_s(m.get('target'))} / {_s(m.get('projectile'))}"),
-        ("AWR used", f"{_g(m.get('awr_used'))}   (MF1 AWR {_g(m.get('awr_mf1'))})"),
-        ("Target spin", _g(m.get("target_spin"))),
-        ("Mass and spin from", _s(m.get("context_source")))], [])
     lib = " ".join(x for x in (ev.get("library"), _vers(ev)) if x) or "-"
-    yield ("Evaluation", None, [
-        ("File", _s(ev.get("file"))), ("SHA-256", _s(ev.get("sha256"))),
-        ("Library", f"{lib}   (NLIB={_s(ev.get('nlib'))} NVER={_s(ev.get('nver'))} "
-                    f"LREL={_s(ev.get('lrel'))} NMOD={_s(ev.get('nmod'))})"),
-        ("Evaluated", " / ".join(_s(ev.get(k)) for k in ("laboratory", "evaluation_date", "authors"))),
+    yield ("material", "Material and evaluation", None, [
+        ("Material", f"{m.get('zsymam') or m.get('target')}"),
+        ("ZA / MAT", f"{_s(m.get('za'))} / {_s(m.get('mat'))}"),
+        ("Target / projectile", f"{_s(m.get('target'))} / {_s(m.get('projectile'))}"),
+        ("AWR used", f"{_g(m.get('awr_used'))} (MF1: {_g(m.get('awr_mf1'))})"),
+        ("Target spin", _g(m.get("target_spin"))),
+        ("Mass and spin from", _s(m.get("context_source"))),
+        ("Library", f"{lib} (NLIB={_s(ev.get('nlib'))}, NVER={_s(ev.get('nver'))}, "
+                    f"LREL={_s(ev.get('lrel'))}, NMOD={_s(ev.get('nmod'))})"),
+        ("Laboratory / date", f"{_s(ev.get('laboratory'))} / {_s(ev.get('evaluation_date'))}"),
+        ("Authors", _s(ev.get("authors"))),
         ("LRP / LFI", f"{_s(ev.get('lrp'))} / {_s(ev.get('lfi'))}"),
-        ("Upper energy", f"{_g(ev.get('emax_eV'))} eV")], [])
-    yield ("Processing", None, [
+        ("Upper energy", f"{_E(ev.get('emax_eV'))} eV"),
+        ("File", _s(ev.get("file"))),
+        ("SHA-256", _s(ev.get("sha256")))], [])
+    yield ("processing", "Processing", None, [
         ("Generated (UTC)", d["generated_utc"]),
-        ("kika", f"{sw['kika_version']}   engine {sw['engine_version']}"),
+        ("kika / engine", f"{sw['kika_version']} / {sw['engine_version']}"),
         ("C kernel", "loaded" if sw["native_kernel"] else "NOT loaded (NumPy fallback, slower)"),
-        ("Tolerance", f"rtol={_g(op['rtol'])}  atol={_g(op['atol_b'])} b   budget = atol + rtol*|sigma|"),
+        ("Tolerance", f"rtol {_g(op['rtol'])}, atol {_g(op['atol_b'])} b; budget = atol + rtol·|σ|"),
         ("Budget split", "half for tabulation, half kept for serialization"),
-        ("Limits", f"max_points={op['max_points']:,}  max_iterations={op['max_iterations']}"),
+        ("Limits", f"max_points {op['max_points']:,}, max_iterations {op['max_iterations']}"),
         ("Temperature", "0 K (no Doppler broadening)"),
-        ("Domain", f"{_g(d['domain_eV'][0])} - {_g(d['domain_eV'][1])} eV"),
-        ("Points", f"{_s(d['points']['tabulated'])} on the shared grid, {_s(d['points']['stored'])} stored over all reactions")],
-        [])
+        ("Domain", f"{_rng(*d['domain_eV'])} eV"),
+        ("Points", f"{_s(d['points']['tabulated'])} on the shared grid, {_s(d['points']['stored'])} stored")], [])
 
-    rows = []
-    for r in d["resonance_ranges"]:
-        ap = _g(r.get("ap_fm")) + (f" + AP(E), {r['ap_energy_points']} pts" if r.get("ap_energy_points") else "")
-        counts = "  ".join(f"{label}={r[k]}" for k, label in
-                           (("l_values", "l"), ("spin_groups", "J-groups"), ("resonances", "res"),
-                            ("channels", "channels"), ("energy_points", "NE")) if r.get(k) is not None)
-        if r.get("particle_pairs"):
-            counts += "  pairs MT " + ",".join(str(x) for x in r["particle_pairs"])
-        rows.append((f"{_g(r['el_eV'])} - {_g(r['eh_eV'])}", f"{r['lru']}/{r['lrf']}", r.get("formalism", "-"),
-                     f"{r['nro']}/{r['naps']}", ap, counts or "-"))
-    notes = [f"{_g(r['el_eV'])} - {_g(r['eh_eV'])} eV: {r['treatment']}" for r in d["resonance_ranges"]
-             if r.get("treatment")]
-    yield ("Resonance ranges (MF2)", ("E range (eV)", "LRU/LRF", "Formalism", "NRO/NAPS", "AP (fm)", "Content"),
-           rows, notes)
+    rows = [(_rng(r["el_eV"], r["eh_eV"]), f"{r['lru']}/{r['lrf']}", r.get("formalism", "-"),
+             f"{r['nro']}/{r['naps']}",
+             _g(r.get("ap_fm")) + (f" + AP(E), {r['ap_energy_points']} pts" if r.get("ap_energy_points") else ""),
+             _content(r)) for r in d["resonance_ranges"]]
+    notes = [f"{_rng(r['el_eV'], r['eh_eV'])} eV: {r['treatment']}" for r in d["resonance_ranges"] if r.get("treatment")]
+    yield ("mf2", "Resonance ranges (MF2)",
+           ("E range (eV)", "LRU/LRF", "Formalism", "NRO/NAPS", "AP (fm)", "Content"), rows, notes)
 
-    yield ("Segments", ("E range (eV)", "Kind", "Points", "Iter", "Evaluations", "Refine max", "Verify max"),
-           [(f"{_g(s['low_eV'])} - {_g(s['high_eV'])}", s["kind"], f"{s['points']:,}", str(s["iterations"]),
-             f"{s['evaluations']:,}", _r(s["refinement_max"]), _r(s["verification_max"])) for s in d["segments"]],
+    yield ("segments", "Segments",
+           ("E range (eV)", "Kind", "Points", "Iter", "Evaluations", "Refine max", "Verify max"),
+           _segment_rows(d, verbose),
            ["Refine max: largest panel error over the budget while refining (target <= 0.5).",
-            "Verify max: largest error at independent probes of the final table (must be <= 1)."])
+            "Verify max: largest error at independent probes of the final table (must be <= 1)."]
+           + ([] if verbose else ["Background-only segments copy the evaluated tables; verbose=True lists each."]))
 
     rows, notes = [], []
     for r in d["reactions"]:
         neg = r["negatives"]
         rows.append((str(r["mt"]) + (" (sum)" if r["derived_sum"] else ""), _s(r["reaction"]), f"{r['points']:,}",
-                     f"{_g(r['e_min_eV'])} - {_g(r['e_max_eV'])}", str(r["jumps"]),
-                     _e(r["min_relative_spacing"]) + (f" @ {_g(r['min_relative_spacing_at_eV'])}"
-                                                    if r["min_relative_spacing_at_eV"] else ""),
-                     "-" if neg is None else f"{neg['count']} (min {_g(neg['min_b'])} b @ {_g(neg['at_eV'])})",
+                     _rng(r["e_min_eV"], r["e_max_eV"]), str(r["jumps"]),
+                     _e(r["min_relative_spacing"]) + (f" at {_E(r['min_relative_spacing_at_eV'])}"
+                                                       if r["min_relative_spacing_at_eV"] else ""),
+                     "-" if neg is None else f"{neg['count']} (min {_E(neg['min_b'])} b at {_E(neg['at_eV'])})",
                      _r(r["tabulation_verification_max"]), _e(r["integral_relative_difference"])))
         if neg is not None:
             notes.append(f"MT{r['mt']}: {neg['count']} negative values kept as computed (reported, not clipped).")
-    notes.insert(0, "Jumps: repeated energies, each a real discontinuity (range boundary); keep both points.")
-    notes.insert(1, "Min dE/E: the finest relative grid spacing and the energy where it occurs.")
-    notes.insert(2, "Integral diff: |linear - exact| / exact of the integral of sigma dE, from the engine's quadrature.")
-    yield ("Tabulated reactions", ("MT", "Reaction", "Points", "E range (eV)", "Jumps", "Min dE/E",
-                                   "Negative", "Verify max", "Integral diff"), rows, notes)
+    notes[:0] = ["Jumps: repeated energies, each a real discontinuity (range boundary); keep both points.",
+                 "Min dE/E: the finest relative grid spacing and the energy (eV) where it occurs.",
+                 "Integral diff: |linear - exact| / exact for the integral of σ dE, from the engine's quadrature."]
+    yield ("reactions", "Tabulated reactions", ("MT", "Reaction", "Points", "E range (eV)", "Jumps", "Min dE/E",
+                                               "Negative", "Verify max", "Integral diff"), rows, notes)
 
     s = d["sums"]
-    yield ("Sums", ("Aggregate", "Derived from"), [(g["name"], g["parts_text"]) for g in s["graph"]],
-           [f"Policy: {s['policy']} - every aggregate is rebuilt from its exclusive leaves; "
+    yield ("sums", "Sums", ("Aggregate", "Derived from"), [(g["name"], g["parts_text"]) for g in s["graph"]],
+           [f"Policy: {s['policy']}. Every aggregate is rebuilt from its exclusive leaves; "
             "the evaluation's own aggregate is only compared, never kept."])
-    yield ("Evaluation's sums vs reconstructed", ("Aggregate", "Max / budget", "At E (eV)", "Stated (b)", "Sum of parts (b)"),
-           [(x["name"], _r(x["max_ratio"]), _g(x["at_eV"]), _g(x["stated_b"]), _g(x["components_b"]))
+    yield ("source-sums", "Evaluation's sums against their parts",
+           ("Aggregate", "Max / budget", "At E (eV)", "Stated (b)", "Sum of parts (b)"),
+           [(x["name"], _r(x["max_ratio"]), _E(x["at_eV"]), _V(x["stated_b"]), _V(x["components_b"]))
             for x in s["source_discrepancies"]],
-           ["A ratio above 1 means the evaluation's stored aggregate disagrees with the sum of its parts "
-            "by more than the tolerance; the output uses the sum of the parts."] if s["source_discrepancies"] else [])
+           ["Above 1: the stored aggregate differs from the sum of its parts by more than the tolerance; "
+            "the output uses the sum of the parts."] if s["source_discrepancies"] else [])
 
     v = d["verification"]
+    total = len(v["tabulation"])
+    shown = v["tabulation_rows"]
+    rest = total - len(shown)
+    yield ("verification", "Verification of the tabulation",
+           ("Reaction", "Max / budget", "At E (eV)", "Exact (b)", "Tabulated (b)"),
+           [(f"{x['name']} {x['reaction'] or ''}".strip(), _r(x["max_ratio"]), _E(x["at_eV"]),
+             _V(x["reference_b"]), _V(x["tabulated_b"])) for x in shown],
+           ([f"{rest} other reactions lie outside the resonance ranges: their evaluated lin-lin tables are "
+             "passed through exactly (0.000)."] if rest else [])
+           + ["Checked at four independent probes per panel against the physics; empirical, not a global bound."])
     pub = v["publication"]
-    if pub is None:
-        touched = {k: x for k, x in v["tabulation"].items() if x > 0}
-        rest = len(v["tabulation"]) - len(touched)
-        yield ("Verification", ("Reaction", "Max / budget"),
-               [(k, _r(x)) for k, x in touched.items()],
-               ([f"{rest} other reactions are their evaluated lin-lin tables, copied exactly (0.000)."] if rest else [])
-               + ["Tabulation check at independent probes of each panel. No PENDF was written, so there is "
-                "no reload check; write_pendf() adds it.",
-                "Empirical check at finite probes, not a global mathematical bound."])
-    else:
-        yield ("Verification (PENDF reloaded)", ("Reaction", "Max / budget", "At E (eV)", "Reference (b)", "Serialized (b)"),
-               [(x["name"], _r(x["max_ratio"]), _g(x["at_eV"]), _g(x["reference_b"]), _g(x["serialized_b"]))
-                for x in pub["rows"]],
+    if pub is not None:
+        rows = [(x["name"], _r(x["max_ratio"]), _E(x["at_eV"]), _V(x["reference_b"]), _V(x["serialized_b"]))
+                for x in pub["rows"] if x["max_ratio"] > 0]
+        rest = len(pub["rows"]) - len(rows)
+        yield ("publication", "Verification of the PENDF (reloaded)",
+               ("Reaction", "Max / budget", "At E (eV)", "Reference (b)", "Serialized (b)"), rows,
                [f"Written to {pub['file']} (MAT {_s(pub['mat'])}), read back and checked against the physics "
-                "at every node and four interior probes per panel.",
-                "Empirical check at finite probes, not a global mathematical bound."])
+                "at every node and four interior probes per panel."]
+               + ([f"{rest} other reactions: 0.000."] if rest else []))
 
     n = d["notes"]
     excluded = {e["message"]: e["scopes"] for e in n["scope_exclusions"]}
     rows = [(kind + (f" (not relevant to {', '.join(excluded[msg])})" if msg in excluded else ""), msg)
             for kind in ("losses", "approximations", "unsupported", "warnings") for msg in n[kind]]
     rows += [("engine", msg) for msg in n["preparation"]]
-    yield ("Conversion and preparation notes", ("Kind", "Message"), rows,
+    yield ("notes", "Conversion and preparation notes", ("Kind", "Message"), rows,
            ["Nothing to declare: the evaluation converted cleanly."] if not rows else
            [f"Clean for cross sections: {'yes' if n['clean_for_cross_sections'] else 'NO'}."])
 
     t = d["timings_s"]
-    yield ("Timings", ("Stage", "Seconds"), [(k, f"{x:.2f}") for k, x in t.items()] +
-           [("total", f"{sum(t.values()):.2f}")], [])
+    yield ("timings", "Timings", ("Stage", "Seconds"),
+           [(k, f"{x:.2f}") for k, x in t.items()] + [("total", f"{sum(t.values()):.2f}")], [])
 
 
 # --------------------------------------------------------------------------- text
 
-def _render_text(d, width=100):
+def _render_text(d, width=100, verbose=False):
     out = []
     bar = "=" * width
     m = d["material"]
     out += [bar, f" KIKA RESONANCE RECONSTRUCTION  -  {m.get('zsymam') or m.get('target')}  MAT {_s(m.get('mat'))}".rstrip(),
             bar]
-    for title, headers, rows, notes in _sections(d):
+    for _, title, headers, rows, notes in _sections(d, verbose):
         out += ["", f" {title.upper()}", " " + "-" * (len(title))]
         if headers is None:
             k = max(len(a) for a, _ in rows)
@@ -449,37 +541,62 @@ def _render_text(d, width=100):
 # --------------------------------------------------------------------------- html
 
 _CSS = """
-:root{--bg:#ffffff;--fg:#1f2328;--muted:#656d76;--line:#d8dee4;--head:#f6f8fa;--accent:#2a78d6;--warn:#b35900}
-@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--line:#30363d;--head:#161b22;--accent:#58a6ff;--warn:#e3a14b}}
+.kika-report{--bg:#ffffff;--fg:#1f2328;--muted:#656d76;--line:#d8dee4;--head:#f6f8fa;--accent:#2a78d6;
+ --warn:#b35900;--ok:#1a7f37;--box:#f6f8fa}
+@media (prefers-color-scheme:dark){.kika-report{--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--line:#30363d;
+ --head:#161b22;--accent:#58a6ff;--warn:#e3a14b;--ok:#3fb950;--box:#161b22}}
 .kika-report{background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
- max-width:1100px;margin:0 auto;padding:16px}
+ max-width:1100px;margin:0 auto;padding:16px;font-variant-numeric:tabular-nums}
 .kika-report h1{font-size:20px;margin:0 0 4px}
-.kika-report .sub{color:var(--muted);margin:0 0 16px}
+.kika-report .sub{color:var(--muted);margin:0 0 12px}
+.kika-report nav{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;margin:0 0 8px;padding:6px 0;
+ border-bottom:1px solid var(--line)}
+.kika-report nav a{color:var(--accent);text-decoration:none}
+.kika-report nav a:hover{text-decoration:underline}
 .kika-report h2{font-size:15px;margin:22px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--line);color:var(--accent)}
-.kika-report .wrap{overflow-x:auto}
-.kika-report table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+.kika-report .wrap{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:6px}
+.kika-report table{border-collapse:collapse;width:100%}
 .kika-report th,.kika-report td{text-align:left;padding:4px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-.kika-report th{background:var(--head);font-weight:600;white-space:nowrap}
-.kika-report table.kv th{width:200px;background:none;color:var(--muted);font-weight:500}
+.kika-report thead th{background:var(--head);font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:1}
 .kika-report td.num{text-align:right;white-space:nowrap}
+.kika-report td.e{white-space:nowrap}
 .kika-report .bad{color:var(--warn);font-weight:600}
+.kika-report .ok{color:var(--ok);font-weight:600}
+.kika-report dl.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 24px;margin:0}
+.kika-report dl.grid div{display:grid;grid-template-columns:150px 1fr;gap:8px;padding:3px 0;border-bottom:1px solid var(--line)}
+.kika-report dl.summary{display:grid;grid-template-columns:170px 1fr;gap:4px 14px;margin:0;padding:10px 14px;
+ background:var(--box);border:1px solid var(--line);border-radius:6px}
+.kika-report dt{color:var(--muted)}
+.kika-report dd{margin:0;overflow-wrap:anywhere}
 .kika-report ul{margin:6px 0 0;padding-left:20px;color:var(--muted)}
-.kika-report code{font-family:ui-monospace,Consolas,monospace;font-size:12px;word-break:break-all}
+.kika-report code{font-family:ui-monospace,Consolas,monospace;font-size:12px}
 """
 
 
-def _render_html(d, fragment=False):
+def _render_html(d, fragment=False, verbose=False):
     e = _html.escape
     m = d["material"]
-    title = f"{m.get('zsymam') or m.get('target')} - MAT {_s(m.get('mat'))}"
+    title = f"{m.get('zsymam') or m.get('target')}, MAT {_s(m.get('mat'))}"
+    sections = list(_sections(d, verbose))
     body = [f'<div class="kika-report"><h1>Resonance reconstruction: {e(title)}</h1>',
-            f'<p class="sub">kika {e(d["software"]["kika_version"])}, engine {e(str(d["software"]["engine_version"]))}, '
-            f'{e(d["generated_utc"])}</p>']
-    for heading, headers, rows, notes in _sections(d):
-        body.append(f"<h2>{e(heading)}</h2>")
-        if headers is None:
-            body.append('<table class="kv">' + "".join(
-                f"<tr><th>{e(a)}</th><td>{_cell(b, a == 'SHA-256')}</td></tr>" for a, b in rows) + "</table>")
+            f'<p class="sub">kika {e(str(d["software"]["kika_version"]))}, engine '
+            f'{e(str(d["software"]["engine_version"]))}, {e(d["generated_utc"])}</p>',
+            "<nav>" + "".join(f'<a href="#kr-{sid}">{e(heading)}</a>' for sid, heading, *_ in sections) + "</nav>"]
+    for sid, heading, headers, rows, notes in sections:
+        body.append(f'<h2 id="kr-{sid}">{e(heading)}</h2>')
+        if headers is None and sid == "summary":
+            items = []
+            for a, b in rows:
+                cls = ""
+                if a == "Verdict":
+                    cls = ' class="ok"' if b.startswith("VERIFIED") else ' class="bad"'
+                elif a == "Evaluation's sums" and "disagrees" in b or a == "Negative values" and b != "none":
+                    cls = ' class="bad"'
+                items.append(f"<dt>{e(a)}</dt><dd{cls}>{e(b)}</dd>")
+            body.append('<dl class="summary">' + "".join(items) + "</dl>")
+        elif headers is None:
+            body.append('<dl class="grid">' + "".join(
+                f"<div><dt>{e(a)}</dt><dd>{_cell(b, a == 'SHA-256')}</dd></div>" for a, b in rows) + "</dl>")
         elif rows:
             head = "".join(f"<th>{e(h)}</th>" for h in headers)
             trs = "".join("<tr>" + "".join(_td(c, h) for c, h in zip(r, headers)) + "</tr>" for r in rows)
@@ -495,18 +612,23 @@ def _render_html(d, fragment=False):
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta name="color-scheme" content="light dark">'
-            f"<title>Reconstruction {e(title)}</title></head><body style=\"margin:0\">{content}</body></html>")
+            f"<title>Reconstruction {e(title)}</title></head>"
+            f'<body style="margin:0;background:Canvas">{content}</body></html>')
 
 
 _NUMERIC = {"Points", "Iter", "Evaluations", "Refine max", "Verify max", "Jumps", "Integral diff",
-            "Max / budget", "Seconds", "Stated (b)", "Sum of parts (b)", "Reference (b)", "Serialized (b)"}
+            "Max / budget", "Seconds", "Stated (b)", "Sum of parts (b)", "Reference (b)", "Serialized (b)",
+            "Exact (b)", "Tabulated (b)", "At E (eV)"}
 _RATIO = {"Refine max", "Verify max", "Max / budget"}
+_NOWRAP = {"E range (eV)", "Min dE/E", "Negative"}
 
 
 def _td(value, header):
     cls = []
     if header in _NUMERIC:
         cls.append("num")
+    if header in _NOWRAP:
+        cls.append("e")
     if header in _RATIO:
         try:
             if float(value) > 1:
@@ -592,6 +714,33 @@ def _g(v):
     return "-" if v is None else f"{float(v):.6g}"
 
 
+def _E(v):
+    """Energies and cross sections: four significant figures, always scientific."""
+    return "-" if v is None else f"{float(v):.3e}"
+
+
+def _V(v):
+    """Compared cross sections: seven significant figures, so the difference shows."""
+    return "-" if v is None else f"{float(v):.6e}"
+
+
+def _rng(a, b):
+    return f"{_E(a)} – {_E(b)}"
+
+
+def reaction_name(mt, known=None):
+    """Reaction label for an MT, including the per-level charged-particle MTs."""
+    if mt is None:
+        return None
+    if known and mt in known:
+        return known[mt]
+    for base, particle in ((600, "p"), (650, "d"), (700, "t"), (750, "³He"), (800, "α")):
+        if base <= mt < base + 50:
+            level = mt - base
+            return f"(n,{particle}{'c' if level == 49 else level})"
+    return None
+
+
 def _r(v):
     return "-" if v is None else f"{float(v):.3f}"
 
@@ -602,7 +751,7 @@ def _e(v):
 
 def _ascii(text):
     text = str(text)
-    text = text.translate(str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789"))
+    text = text.translate(str.maketrans("₀₁₂₃₄₅₆₇₈₉³", "01234567893"))
     for a, b in (("α", "a"), ("γ", "g"), ("σ", "sigma"), ("–", "-"), ("—", "-"), ("′", "'"), ("·", "*")):
         text = text.replace(a, b)
     return text.encode("ascii", "replace").decode("ascii")
