@@ -22,7 +22,8 @@ extensions = [
 ]
 
 templates_path = ['_templates']
-exclude_patterns = []
+# drafts/ holds pages not yet reviewed (docs/WRITING_DOCS.md §9).
+exclude_patterns = ['drafts']
 
 # Napoleon settings
 napoleon_google_docstring = True
