@@ -658,9 +658,11 @@ def rescale_threshold_bins_congruence(
     Rescale specific diagonal entries to per-index target variances via a
     congruence transform. One-sided: never inflates a variance.
 
-    For each flagged index ``i`` with target ``t_i``:
+    For each flagged index ``i`` with target ``t_i``::
+
         s_i = sqrt(t_i / σ²_i)   if σ²_i > t_i
               1.0                 otherwise
+
     Then ``Σ' = diag(s) @ Σ @ diag(s)``. PSD-preserving, correlation-preserving.
 
     This complements ``cap_variance_congruence`` (which applies a single global
@@ -964,6 +966,7 @@ def nearest_psd_higham(
     -------
     Tuple[np.ndarray, dict]
         (X_psd, info) where info contains diagnostic metadata:
+
         - iterations, converged, frobenius_distance, relative_frobenius_error,
           max_diagonal_change, eigenvalue_range_before, eigenvalue_range_after,
           n_negative_eigenvalues_before
@@ -1305,7 +1308,8 @@ def cholesky_decomposition(
         "linear" or "log" space for decomposition
     psd_method : str
         PSD enforcement method when the matrix is not already PD:
-        - "auto" (default): one eigendecomposition; if |λ_min|/λ_max is
+
+        - "auto" (default): one eigendecomposition; if ``|λ_min|/λ_max`` is
           below the module threshold use clip, otherwise Higham.
         - "higham": iterative diagonal-preserving projection.
         - "clip":  zero negative eigenvalues, reconstruct, then Cholesky.
@@ -1534,7 +1538,7 @@ def eigen_decomposition(
     psd_method : str or None
         PSD correction method: "auto" (default), "higham", "clip", or "none".
         If None, resolved from *clip_negatives*: True → "auto", False → "none".
-        "auto" picks clip when |λ_min|/λ_max is below the module threshold,
+        "auto" picks clip when ``|λ_min|/λ_max`` is below the module threshold,
         otherwise Higham.
     verbose : bool
         Whether to log progress
@@ -1615,7 +1619,7 @@ def svd_decomposition(
     psd_method : str or None
         PSD correction method: "auto" (default), "higham", "clip", or "none".
         If None, resolved from *clip_negatives*: True → "auto", False → "none".
-        "auto" picks clip when |λ_min|/λ_max is below the module threshold,
+        "auto" picks clip when ``|λ_min|/λ_max`` is below the module threshold,
         otherwise Higham.
     verbose : bool
         Whether to log progress

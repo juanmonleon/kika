@@ -889,7 +889,7 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
     frameConversion
         As in :func:`applyLegendreFactors`: the factors act on the coefficients
         of the covariance's frame. On a table that change is closed form
-        (:mod:`~kika.nuclear_data.model.angular_tables`, roadmap T9): project
+        (:mod:`~kika.nuclear_data.model.angular_tables`): project
         onto the other frame's ``P_l``, and carry the shift back as a density
         with the Jacobian of the cosine map. A node where ``γ ≥ 1`` is left as
         the evaluation has it and counted in ``frame["n_degenerate"]``.
@@ -905,7 +905,7 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
         ``max_integral_change`` (the worst ``|int f' - int f|`` relative to
         ``int f``, under the table's own law) and ``positivity_events``.
 
-    **A limitation of the method, not a defect** (D-F of the roadmap). With a
+    **A limitation of the method, not a defect.** With a
     relative covariance the change is ``(c_l - 1) a_l``, which vanishes where
     ``a_l`` does. And ``a_l`` is this module's projection of the table, so if
     the evaluator built the MF34 against a different one, the absolute
