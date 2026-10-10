@@ -50,7 +50,9 @@ hold an evaluated form labelled `eval` and a reconstructed one labelled `recon`;
 `styles` node records that `recon` was derived from `eval`. The labels kika uses are
 `eval` (what the file states), `recon` (the resonance region reconstructed, from kika's
 own reconstruction or from an NJOY PENDF file) and, for a perturbed realisation,
-`realization-NNNN`.
+`realization-NNNN`. A suite decoded from ACE carries no `eval` form at all: its
+cross-sections are labelled `gridded`, under a `heated` style at the file's temperature,
+because that is what an ACE table holds.
 
 **Functions are the GNDS functional containers** (§6). The two that matter most:
 

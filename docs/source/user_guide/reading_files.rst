@@ -51,10 +51,11 @@ Start with ``summary()``, which says what the file actually contained:
 Check what was dropped
 ----------------------
 
-That last line matters. kika does not yet model every ENDF section — MF1, 2,
-3, 4, 5, 6 and the covariance files 31-35 are decoded into the model; MF7 and
-MF12-15 are not read at all — so a decode is often **partial**, and
-``ev.report`` is the only thing that says so:
+That last line matters. kika does not model every ENDF section — MF1 to 7,
+MF12-15 and the covariance files 31-35 are decoded into the model; MF8 on a
+neutron tape, MF23, 27, 28 and 40 are not — so a decode can be **partial**, and
+``ev.report`` is the only thing that says so (the full list, section by section,
+is in the methods page on reading and writing ENDF):
 
 .. code-block:: python
 
@@ -115,7 +116,7 @@ full rather than glossing:
 
    >>> import kika.gnds
    >>> print(kika.gnds.capabilities().summary())
-   300 of GNDS's nodes: 134 full, 7 partial, 159 unsupported (17 lost without
+   300 of GNDS's nodes: 218 full, 17 partial, 65 unsupported (13 lost without
    a report line); and 12 nodes kika names that gnds.xsd does not declare
 
 The left-hand column is every element ``gnds.xsd`` and ``covariances.xsd``
@@ -128,9 +129,8 @@ line of the source:
    >>> print(kika.gnds.capabilities(group="thermalScattering").text())
    >>> print(kika.gnds.capabilities(coverage="partial").text())
 
-The covariance chapter, §25, is the one kika covers completely. The thermal
-scattering law and the double-differential cross sections are not read at all.
-``capabilities().silent`` is the short list of nodes that are dropped with
+The numbers change as coverage grows; ``capabilities()`` always states the
+current ones. ``capabilities().silent`` is the short list of nodes that are dropped with
 nothing said — everything else that is lost produces a line in ``ev.report``.
 
 ``capabilities()`` says what the *library* can lose, without opening a file.
