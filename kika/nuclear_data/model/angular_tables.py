@@ -44,6 +44,22 @@ What it guarantees by construction:
   the lin-lin interpolant of a polynomial does not integrate to zero. ``info``
   carries the size of that, and refining mu is decision D3.
 
+**A covariance in the other frame** (MF34's LCT, ENDF-6 §34.1; roadmap T9).
+When MF34 states LAB coefficients and the table is in CM (or the reverse), the
+factors scale the *other* frame's coefficients ``b_l``. Both steps stay closed
+form on a table, because a table is only ever evaluated:
+
+    b_l = int f(mu) P_l(m(mu)) dmu,       Δf(mu_i) = Δg(m(mu_i)) m'(mu_i)
+
+with ``m`` the cosine map into the covariance's frame and ``Δg`` the finite
+Legendre series of the shifts there (:func:`kika._legendre_frames.correctionBasis`).
+The LAB orders the covariance does not name come out exactly unperturbed, and
+this is the limit the Legendre path's padded solve
+(:func:`kika._legendre_frames.scaleInOtherFrame`) converges to -- measured at
+1e-12 against it for A = 12 to 236. ``int Δf = Δb_0 = 0`` in the continuum, as
+before. The integrand of ``b_l`` is no longer a polynomial, only smooth inside a
+panel, so it takes :data:`FRAME_PANEL_POINTS` per panel.
+
 Positivity is **reported, not enforced**, which is what the Legendre applier
 does too: whether a sample may carry a negative probability is the sampler's
 call. With lin-lin in mu, ``f' >= 0`` at every node is ``f' >= 0`` everywhere,
@@ -63,6 +79,13 @@ __all__ = ["legendreMoments", "perturbTabulatedAngular", "tableIntegral",
 #: ENDF INT codes whose panels the projection integrates exactly: histogram
 #: and lin-lin.
 EXACT_ANGULAR_LAWS = (1, 2)
+
+#: Gauss points per panel for the moments in another frame, where ``P_l(m(mu))``
+#: is algebraic, not polynomial. The worst panel is a whole-range one (an
+#: isotropic two-node table): measured 2026-10-10, sixteen points leave 2e-14
+#: there for A >= 12 and 2e-8 at γ = 0.5, where eight leave 5e-4. On 20 panels
+#: eight and 32 already agree to 2e-16.
+FRAME_PANEL_POINTS = 16
 
 #: How far a table's mu range may sit from [-1, 1] and still be the full range.
 MU_RANGE_ATOL = 1.0e-9
@@ -101,13 +124,18 @@ def _checkTable(mu: np.ndarray, p: np.ndarray, laws: np.ndarray) -> None:
 
 
 def legendreMoments(mu, p, orders: Sequence[int],
-                    pairs: Optional[Sequence[Tuple[int, int]]] = None
+                    pairs: Optional[Sequence[Tuple[int, int]]] = None,
+                    frame: Optional[Tuple[float, str]] = None
                     ) -> Dict[int, float]:
     """``{l: a_l}`` with ``a_l = int_{-1}^{1} f(mu) P_l(mu) dmu``, exactly.
 
     *pairs* is the table's ``(NBT, INT)`` list; ``None`` means one lin-lin
     region. No normalisation is applied: ``a_0`` is the table's own integral,
     and a relative factor on ``a_l`` means the same thing either way.
+
+    With *frame* ``(γ, direction)`` these are the other frame's coefficients,
+    ``int f(mu) P_l(m(mu)) dmu`` -- the change of variable absorbs the Jacobian
+    -- integrated with :data:`FRAME_PANEL_POINTS` per panel instead of exactly.
     """
     mu = np.asarray(mu, dtype=float)
     p = np.asarray(p, dtype=float)
@@ -120,15 +148,22 @@ def legendreMoments(mu, p, orders: Sequence[int],
 
     lo, hi = mu[:-1], mu[1:]
     half, mid = 0.5 * (hi - lo), 0.5 * (hi + lo)
-    nodes, weights = _legendre.leggauss(math.ceil((max(orders) + 2) / 2))
+    points = math.ceil((max(orders) + 2) / 2)
+    if frame is not None:
+        from kika._legendre_frames import cosineMap
+
+        mapping = cosineMap(*frame)[0]
+        points = max(points, FRAME_PANEL_POINTS)
+    nodes, weights = _legendre.leggauss(points)
     x = mid[:, None] + half[:, None] * nodes[None, :]          # (panels, q)
     slope = np.where(hi > lo, (p[1:] - p[:-1]) / np.where(hi > lo, hi - lo, 1.0), 0.0)
     linear = p[:-1, None] + slope[:, None] * (x - lo[:, None])
     flat = np.broadcast_to(p[:-1, None], x.shape)
     f = np.where((laws == 1)[:, None], flat, linear)
     scale = half[:, None] * weights[None, :]
+    at = mapping(x) if frame is not None else x
 
-    return {order: float(np.sum(f * _legendre.legval(x, _unit(order)) * scale))
+    return {order: float(np.sum(f * _legendre.legval(at, _unit(order)) * scale))
             for order in orders}
 
 
@@ -149,7 +184,8 @@ def tableIntegral(mu, p, pairs=None) -> float:
 
 
 def perturbTabulatedAngular(mu, p, orderFactors: Mapping[int, float], *,
-                            pairs: Optional[Sequence[Tuple[int, int]]] = None
+                            pairs: Optional[Sequence[Tuple[int, int]]] = None,
+                            frame: Optional[Tuple[float, str]] = None
                             ) -> Tuple[np.ndarray, dict]:
     """``(pPrime, info)`` -- one table, perturbed by one factor per order.
 
@@ -162,6 +198,11 @@ def perturbTabulatedAngular(mu, p, orderFactors: Mapping[int, float], *,
         section's magnitude and is refused, as it is by the Legendre applier.
     pairs
         The table's ``(NBT, INT)``; ``None`` is one lin-lin region.
+    frame
+        ``(γ, direction)`` when the factors were drawn for the coefficients of
+        the other frame (:class:`kika._legendre_frames.FrameConversion`, its
+        ``gamma(E)`` and ``direction``); ``None`` when they are this table's.
+        ``γ`` must be below 1: the caller leaves a node at or above it alone.
 
     Returns
     -------
@@ -170,7 +211,8 @@ def perturbTabulatedAngular(mu, p, orderFactors: Mapping[int, float], *,
     info
         ``moments`` (``a_l``), ``deltas`` (``(c_l - 1) a_l``), ``min_p``,
         ``n_negative`` (nodes with ``f' < 0``), ``integral_before`` and
-        ``integral_after`` under the table's law.
+        ``integral_after`` under the table's law, and ``frame`` as given. In
+        another frame, ``moments`` and ``deltas`` are that frame's.
     """
     mu = np.asarray(mu, dtype=float)
     p = np.asarray(p, dtype=float)
@@ -180,11 +222,17 @@ def perturbTabulatedAngular(mu, p, orderFactors: Mapping[int, float], *,
             "Legendre order 0 is the cross-section magnitude, not a shape "
             "coefficient; its factor belongs on the cross section")
 
-    moments = legendreMoments(mu, p, sorted(factors), pairs)
+    moments = legendreMoments(mu, p, sorted(factors), pairs, frame)
     deltas = {order: (factors[order] - 1.0) * moments[order] for order in factors}
     active = {order: delta for order, delta in deltas.items() if delta != 0.0}
 
-    if active:
+    if active and frame is not None:
+        from kika._legendre_frames import correctionBasis
+
+        orders = sorted(active)
+        pPrime = p + correctionBasis(mu, orders, frame) @ np.array(
+            [active[order] for order in orders])
+    elif active:
         series = np.zeros(max(active) + 1)
         for order, delta in active.items():
             series[order] = 0.5 * (2 * order + 1) * delta
@@ -200,5 +248,6 @@ def perturbTabulatedAngular(mu, p, orderFactors: Mapping[int, float], *,
         "n_negative": int(np.sum(pPrime < 0.0)),
         "integral_before": tableIntegral(mu, p, pairs),
         "integral_after": tableIntegral(mu, pPrime, pairs),
+        "frame": frame,
     }
     return pPrime, info

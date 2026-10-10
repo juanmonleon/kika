@@ -29,6 +29,14 @@ is an infinite series, so ``N`` is grown past the highest perturbed order until
 what spills into higher LAB orders is negligible. :data:`PAD_TOLERANCE` sets the
 cut-off and :func:`scaleInOtherFrame` documents it.
 
+**A table of f(μ) needs none of that.** It is only ever evaluated, never
+expanded, so the LAB shift comes back to the CM nodes in closed form: the
+finite LAB series at the mapped cosine times the Jacobian of the map
+(:func:`cosineMap`, :func:`correctionBasis`). That is the limit the pad
+converges to, measured at 1e-12 for A = 12 to 236, and it is what
+:mod:`kika.nuclear_data.model.angular_tables` uses (roadmap T9 of
+``docs/library/mf4_tabulated_perturbation_roadmap.md``).
+
 **The kinematics is two-body neutron scattering**, ``A(n,n')A*``: elastic
 (MT2) and the discrete inelastic levels (MT51-90). The ratio of the
 centre-of-mass speed to the neutron's speed in the CM frame is
@@ -58,7 +66,7 @@ import numpy as np
 __all__ = ["LAB", "CM", "normaliseFrame", "FrameConversion",
            "cos_lab_from_cos_cm", "cos_cm_from_cos_lab",
            "twoBodyGamma", "transferMatrix", "scaleInOtherFrame",
-           "TWO_BODY_NEUTRON_MTS"]
+           "cosineMap", "correctionBasis", "TWO_BODY_NEUTRON_MTS"]
 
 LAB = "LAB"
 CM = "CM"
@@ -101,6 +109,60 @@ def cos_cm_from_cos_lab(mu_lab, alpha: float):
     mu_lab = np.asarray(mu_lab, dtype=float)
     s = 1.0 - mu_lab * mu_lab
     return -alpha * s + mu_lab * np.sqrt(np.maximum(1.0 - alpha * alpha * s, 0.0))
+
+
+def _dlab_dcm(mu_cm, alpha: float):
+    r""":math:`d\mu_L/d\mu_C = (1 + \alpha\mu_C)/(1 + 2\alpha\mu_C + \alpha^2)^{3/2}`."""
+    mu_cm = np.asarray(mu_cm, dtype=float)
+    return (1.0 + alpha * mu_cm) / (1.0 + 2.0 * alpha * mu_cm + alpha * alpha) ** 1.5
+
+
+def cosineMap(gamma: float, direction: str):
+    """``(mapping, jacobian)`` from the distribution's cosine to the other frame's.
+
+    *direction* is :attr:`FrameConversion.direction`, ``"<distribution>-><covariance>"``.
+    ``mapping(mu)`` is the cosine of the same direction in the covariance's
+    frame and ``jacobian(mu)`` its derivative, both as functions of the
+    distribution's cosine. A density in the covariance's frame ``g`` reads
+    ``g(mapping(mu)) * jacobian(mu)`` in the distribution's. Positive and
+    one-to-one for ``γ < 1`` only.
+    """
+    if not 0.0 <= gamma < 1.0:
+        raise ValueError(f"γ={gamma!r}: the CM/LAB cosine map is one-to-one "
+                         f"only for γ < 1")
+    if direction == "CM->LAB":
+        return (lambda mu: cos_lab_from_cos_cm(mu, gamma),
+                lambda mu: _dlab_dcm(mu, gamma))
+    if direction == "LAB->CM":
+        return (lambda mu: cos_cm_from_cos_lab(mu, gamma),
+                lambda mu: 1.0 / _dlab_dcm(cos_cm_from_cos_lab(mu, gamma), gamma))
+    raise ValueError(f"direction must be 'CM->LAB' or 'LAB->CM', got {direction!r}")
+
+
+def correctionBasis(mu, orders, frame=None) -> np.ndarray:
+    """``C[i, j]``: the density at ``mu[i]`` of a unit shift of order ``orders[j]``.
+
+    A shift ``d_l`` of the coefficient ``a_l`` changes the density by
+    ``(2l+1)/2 d_l P_l``. With *frame* ``None`` that is in the distribution's own
+    cosine. With *frame* ``(γ, direction)`` the shift is of the covariance
+    frame's coefficient, and the column is the same polynomial carried back as a
+    density: ``(2l+1)/2 P_l(mapping(mu)) * jacobian(mu)`` (:func:`cosineMap`).
+    That is exact -- the CM image of a finite LAB series is an infinite CM
+    series, but on a table it is only ever evaluated, never expanded -- so this
+    is the closed form :func:`scaleInOtherFrame` converges to as its pad grows.
+    """
+    from numpy.polynomial.legendre import legvander
+
+    mu = np.asarray(mu, dtype=float)
+    orders = [int(order) for order in orders]
+    weight = np.ones_like(mu)
+    at = mu
+    if frame is not None:
+        mapping, jacobian = cosineMap(*frame)
+        at, weight = mapping(mu), jacobian(mu)
+    vander = legvander(at, max(orders) if orders else 0)
+    return np.column_stack([0.5 * (2 * order + 1) * vander[:, order] * weight
+                            for order in orders]) if orders else np.zeros((mu.size, 0))
 
 
 def normaliseFrame(value) -> Optional[str]:

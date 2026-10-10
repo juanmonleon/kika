@@ -857,7 +857,7 @@ def _replaceRegions(angular, rebuilt):
 
 
 def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
-                          repair=None):
+                          repair=None, frameConversion=None):
     """Perturb the tabulated ``f(mu)`` of an angular distribution, order by order.
 
     The tables' counterpart of :func:`applyLegendreFactors`, with the same
@@ -884,14 +884,23 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
         the table to keep and a record of what it did (``None`` for nothing).
         Whether a sample may carry a negative probability is the sampler's
         decision, as it is for the Legendre applier, so the default leaves the
-        table as computed and only counts it.
+        table as computed and only counts it. Its *info* carries ``frame``, so
+        a repair in another frame moves that frame's shifts.
+    frameConversion
+        As in :func:`applyLegendreFactors`: the factors act on the coefficients
+        of the covariance's frame. On a table that change is closed form
+        (:mod:`~kika.nuclear_data.model.angular_tables`, roadmap T9): project
+        onto the other frame's ``P_l``, and carry the shift back as a density
+        with the Jacobian of the cosine map. A node where ``γ ≥ 1`` is left as
+        the evaluation has it and counted in ``frame["n_degenerate"]``.
 
     Returns
     -------
     (perturbed, diagnostics)
         ``per_order``, ``n_inserted`` and ``orders_absent`` as
         :func:`applyLegendreFactors` has them -- the last always empty, since a
-        table holds every order implicitly -- plus ``min_p``,
+        table holds every order implicitly -- and ``frame`` when there is a
+        conversion, plus ``min_p``,
         ``n_negative_nodes`` (energies with any ``f' < 0`` before a repair),
         ``max_integral_change`` (the worst ``|int f' - int f|`` relative to
         ``int f``, under the table's own law) and ``positivity_events``.
@@ -942,6 +951,7 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
     inserted, negative, worstIntegral, minP = 0, 0, 0.0, np.inf
     events = []
     rebuilt = {}
+    frameInfo = {"n_converted": 0, "n_degenerate": 0, "max_gamma": 0.0}
     for container, position, region in regions:
         refined, added = _refineTabulatedRegion(region, allEdges)
         inserted += added
@@ -957,8 +967,19 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
             if all(c == 1.0 for c in nodeFactors.values()):
                 tables.append(function)
                 continue
+            frame = None
+            if frameConversion is not None:
+                gamma = frameConversion.gamma(xs[at])
+                if not gamma < 1.0:
+                    frameInfo["n_degenerate"] += 1
+                    tables.append(function)
+                    continue
+                frame = (gamma, frameConversion.direction)
+                frameInfo["n_converted"] += 1
+                frameInfo["max_gamma"] = max(frameInfo["max_gamma"], gamma)
             mu, p, pairs = _tableOf(function)
-            pPrime, info = perturbTabulatedAngular(mu, p, nodeFactors, pairs=pairs)
+            pPrime, info = perturbTabulatedAngular(mu, p, nodeFactors, pairs=pairs,
+                                                   frame=frame)
             for order, c in nodeFactors.items():
                 if c != 1.0:
                     stats = perOrder[order]
@@ -992,6 +1013,10 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
         "max_integral_change": worstIntegral,
         "positivity_events": events,
     }
+    if frameConversion is not None:
+        diagnostics["frame"] = {"direction": frameConversion.direction,
+                                "awr": frameConversion.awr,
+                                "q": frameConversion.q, **frameInfo}
     return _replaceRegions(angular, rebuilt), diagnostics
 
 

@@ -39,16 +39,6 @@ N = 1024
 
 pytestmark = pytest.mark.skipif(not TAPE.is_file(), reason=f"{TAPE} missing")
 
-#: U-238 of ENDF/B-VIII.1 states MF34 in LAB and MF4 in CM, and its MF34 runs
-#: past where the tables start, so these factors land on tables of f(mu) in the
-#: other frame. The CM/LAB change exists for Legendre coefficients only
-#: (``kika._legendre_frames``), so the perturbation refuses instead of mixing
-#: frames. Strict: these start passing the day tables get the frame change.
-#: Open item in ``docs/library/mf4_tabulated_perturbation_roadmap.md``.
-NEEDS_TABLE_FRAMES = pytest.mark.xfail(
-    strict=True, raises=NotImplementedError,
-    reason="CM/LAB change on tables of f(mu) not implemented")
-
 
 def _draw(samplingMethod):
     return perturbFromModel(TAPE, REQUEST, N, seed=11, dryRun=True,
@@ -93,7 +83,6 @@ def _correlation(a, b):
     return za.T @ zb / a.shape[0]
 
 
-@NEEDS_TABLE_FRAMES
 def test_the_request_draws_sigma_from_mf33_and_the_shape_from_l1_l2(run):
     sample = run.samples[0]
     assert sample["set"].components() == (ComponentKey(ZA, 33, MT, 0),
@@ -110,7 +99,6 @@ def test_the_request_draws_sigma_from_mf33_and_the_shape_from_l1_l2(run):
             assert info["tables"]["max_integral_change"] < 1e-3
 
 
-@NEEDS_TABLE_FRAMES
 def test_each_component_carries_the_variance_the_file_states(run, stated):
     """Per bin, sample variance over stated variance, at N=1024.
 
@@ -131,7 +119,6 @@ def test_each_component_carries_the_variance_the_file_states(run, stated):
             f"{component.describe()}: a bin with no stated variance moved")
 
 
-@NEEDS_TABLE_FRAMES
 def test_sigma_and_shape_are_drawn_independently(run):
     """The file states no sigma <-> a_l correlation, so the draw has none.
 

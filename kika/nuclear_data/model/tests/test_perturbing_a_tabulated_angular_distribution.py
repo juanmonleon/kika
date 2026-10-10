@@ -291,3 +291,156 @@ def test_a_repair_callback_sees_every_negative_node_and_its_answer_is_kept():
     assert len(seen) == 2 and all(v < 0 for v in seen)
     assert info["n_negative_nodes"] == 2 and len(info["positivity_events"]) == 2
     assert min(float(f.ys.min()) for f in out.function1ds) == 0.0
+
+
+# ----------------------------------------------------------------------
+# T9: a covariance in the other frame (MF34's LCT) on a table
+# ----------------------------------------------------------------------
+
+from kika._legendre_frames import (FrameConversion, correctionBasis,  # noqa: E402
+                                   scaleInOtherFrame, transferMatrix)
+
+FE56_AWR = 55.454
+
+
+@pytest.mark.parametrize("direction", ["CM->LAB", "LAB->CM"])
+@pytest.mark.parametrize("awr", [236.0, FE56_AWR, 11.9])
+def test_the_closed_form_is_what_the_padded_solve_converges_to(direction, awr):
+    """With the other frame's moments exact, the table's correction is the
+    Legendre path's to rounding. Measured 2026-10-10: 2e-13 to 8e-13."""
+    gamma = 1.0 / awr
+    a = np.exp(-0.5 * np.arange(20) * (np.arange(20) + 1) / 40.0)
+    a[0] = 1.0
+    factors = {1: 1.07, 2: 0.94, 3: 1.03}
+    scaled, _ = scaleInOtherFrame(a, factors, gamma, direction)
+    b = transferMatrix(gamma, 4, a.size, direction) @ a
+    shifts = np.array([(factors[order] - 1.0) * b[order] for order in (1, 2, 3)])
+    mu = np.cos(np.linspace(np.pi, 0.0, 201))
+    closed = correctionBasis(mu, [1, 2, 3], (gamma, direction)) @ shifts
+    legendre = _pdf(scaled, mu) - _pdf(a, mu)
+    assert np.max(np.abs(closed - legendre)) < 1e-11 * np.max(np.abs(legendre))
+
+
+def test_every_factor_one_in_another_frame_gives_the_table_back_bit_for_bit():
+    mu, p = _forwardPeaked()
+    pPrime, info = perturbTabulatedAngular(mu, p, {1: 1.0, 2: 1.0},
+                                           frame=(1.0 / FE56_AWR, "CM->LAB"))
+    assert np.array_equal(pPrime, p)
+    assert info["frame"] == (1.0 / FE56_AWR, "CM->LAB")
+
+
+def test_the_other_frames_moments_shift_by_the_deltas_and_nothing_else_moves():
+    """Read back in the covariance's frame: the named orders move by their
+    delta, the others by the lin-lin floor only. In the table's own frame the
+    same draw moves order 3 too -- the frame change is not a relabelling."""
+    lab = (1.0 / 11.9, "CM->LAB")
+    mu = np.cos(np.linspace(np.pi, 0.0, 401))
+    p = _pdf([1.0, 0.4, 0.2, 0.1], mu)
+    pPrime, info = perturbTabulatedAngular(mu, p, {1: 1.10, 2: 0.95}, frame=lab)
+    before = legendreMoments(mu, p, range(0, 8), frame=lab)
+    after = legendreMoments(mu, pPrime, range(0, 8), frame=lab)
+    for order in range(0, 8):
+        expected = info["deltas"].get(order, 0.0)
+        assert after[order] - before[order] == pytest.approx(expected, abs=1e-5), order
+    cm = legendreMoments(mu, pPrime, [3])[3] - legendreMoments(mu, p, [3])[3]
+    assert abs(cm) > 1e-4
+
+
+def test_a_single_panel_table_is_projected_to_rounding_in_another_frame():
+    """The worst case for the per-panel rule: one panel across [-1, 1]."""
+    gamma = 1.0 / 11.9
+    exact = transferMatrix(gamma, 5, 1, "CM->LAB", nQuad=400)[:, 0]
+    moments = legendreMoments([-1.0, 1.0], [0.5, 0.5], range(1, 5),
+                              frame=(gamma, "CM->LAB"))
+    for order in range(1, 5):
+        assert moments[order] == pytest.approx(exact[order], abs=1e-12)
+
+
+@pytest.mark.parametrize("awr", [FE56_AWR, 11.9])
+def test_the_two_appliers_agree_across_frames_to_the_projection_floor(fe56, awr):
+    """The T2 gate with a LAB covariance on the CM distribution.
+
+    The Fe-56 coefficients are tabulated on 401 nodes; both appliers get the
+    same factors and the same conversion. They may differ by the tabulation's
+    floor on the LAB moments, carried back by a Jacobian of at most
+    (1+γ)/(1-γ)², and by nothing the frame change adds. Measured 2026-10-10:
+    3.0e-5 against a bound of 4.4e-4 at A = 55.5 (4.0e-5 / 5.4e-4 at A = 11.9),
+    the same as T2 without a frame change; the LAB factors applied in CM miss
+    by 1.7e-2 (9.0e-2).
+    """
+    legendre, factors, edges = fe56
+    conversion = FrameConversion.between("CM", "LAB", awr=awr, mt=2)
+    gamma = conversion.gamma(1.0e6)
+    mu = np.cos(np.linspace(np.pi, 0.0, 401))
+    table = _tabulated(legendre, mu)
+    floor = 0.0
+    for f, t in zip(legendre.function1ds, table.function1ds):
+        exact = transferMatrix(gamma, max(ORDERS) + 1, f.coefficients.size,
+                               "CM->LAB") @ f.coefficients
+        moments = legendreMoments(t.xs, t.ys, ORDERS, frame=(gamma, "CM->LAB"))
+        floor = max(floor, max(abs(moments[order] - exact[order]) for order in ORDERS))
+
+    byLegendre, legendreInfo = applyLegendreFactors(legendre, factors, edges,
+                                                    frameConversion=conversion)
+    byTable, info = applyTabulatedFactors(table, factors, edges,
+                                          frameConversion=conversion)
+    assert ([f.outerDomainValue for f in byLegendre.function1ds]
+            == [f.outerDomainValue for f in byTable.function1ds])
+    worst = max(float(np.max(np.abs(_pdf(a.coefficients, b.xs) - b.ys)))
+                for a, b in zip(byLegendre.function1ds, byTable.function1ds))
+    largestFactor = max(float(np.max(np.abs(np.asarray(f) - 1.0)))
+                        for f in factors.values())
+    jacobian = (1.0 + gamma) / (1.0 - gamma) ** 2
+    bound = jacobian * largestFactor * floor * sum(0.5 * (2 * l + 1) for l in ORDERS)
+    assert floor < 1e-3
+    assert worst <= bound, f"{worst:.2e} > {bound:.2e} (floor {floor:.2e})"
+    assert info["frame"]["n_converted"] == legendreInfo["frame"]["n_converted"] > 0
+    assert info["frame"]["n_degenerate"] == 0
+    # Applying the LAB factors in CM instead would not pass the gate.
+    wrong, _ = applyTabulatedFactors(table, factors, edges)
+    missed = max(float(np.max(np.abs(_pdf(a.coefficients, b.xs) - b.ys)))
+                 for a, b in zip(byLegendre.function1ds, wrong.function1ds))
+    assert missed > 10 * bound
+
+
+def test_a_node_at_an_inelastic_threshold_is_left_alone_and_counted():
+    """At the threshold γ is infinite: no CM table has the LAB coefficients
+    the factors ask for, so the node keeps the evaluation's, as in Legendre."""
+    q = -846.8e3
+    threshold = -q * (FE56_AWR + 1.0) / FE56_AWR
+    conversion = FrameConversion.between("CM", "LAB", awr=FE56_AWR, q=q, mt=51)
+    mu = np.linspace(-1.0, 1.0, 41)
+    angular = XYs2d(function1ds=[XYs1d(xs=mu.copy(), ys=_pdf([1.0, a1], mu),
+                                       outerDomainValue=e, index=i)
+                                 for i, (e, a1) in enumerate([(threshold, 0.1),
+                                                              (4e6, 0.3)])])
+    out, info = applyTabulatedFactors(angular, {1: np.array([1.2])},
+                                      {1: np.array([threshold, 5e6])},
+                                      frameConversion=conversion)
+    assert out.function1ds[0] is angular.function1ds[0]
+    assert not np.array_equal(out.function1ds[1].ys, angular.function1ds[1].ys)
+    assert info["frame"]["n_degenerate"] == 1
+    assert info["frame"]["n_converted"] == 1
+    assert 0.0 < info["frame"]["max_gamma"] < 1.0
+
+
+def test_a_repair_in_another_frame_moves_that_frames_shifts():
+    """The repair sees ``info["frame"]`` and keeps the table positive with the
+    LAB shifts as its unknowns: what it adds lies in the span of the LAB basis
+    carried back, which the CM polynomials of the same orders do not span."""
+    from kika.sampling.mf4_positivity import repair_tabulated_positivity
+
+    lab = (1.0 / 11.9, "CM->LAB")
+    mu = np.linspace(-1.0, 1.0, 41)
+    p = _pdf([1.0, 0.3], mu)
+    assert p.min() > 0.0
+    pPrime, info = perturbTabulatedAngular(mu, p, {1: 1.8, 2: 1.0}, frame=lab)
+    assert info["n_negative"]
+    repaired, event = repair_tabulated_positivity(mu, p, pPrime, info)
+    assert event["min_after"] > -1e-9
+    labBasis = correctionBasis(mu, sorted(info["deltas"]), lab)
+    shifts, *_ = np.linalg.lstsq(labBasis, repaired - p, rcond=None)
+    np.testing.assert_allclose(labBasis @ shifts, repaired - p, atol=1e-12)
+    cmBasis = correctionBasis(mu, sorted(info["deltas"]))
+    shifts, *_ = np.linalg.lstsq(cmBasis, repaired - p, rcond=None)
+    assert np.max(np.abs(cmBasis @ shifts - (repaired - p))) > 1e-6

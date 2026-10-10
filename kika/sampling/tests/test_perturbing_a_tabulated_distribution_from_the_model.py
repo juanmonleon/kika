@@ -28,19 +28,10 @@ import numpy as np
 import pytest
 
 import l0_fixture
+from kika._legendre_frames import twoBodyGamma
 from kika.endf import read_endf
 from kika.nuclear_data.model.angular_tables import legendreMoments
 from kika.sampling.model_perturbation import perturbFromModel
-
-#: U-238 of ENDF/B-VIII.1 states MF34 in LAB and MF4 in CM, and its MF34 runs
-#: past where the tables start, so these factors land on tables of f(mu) in the
-#: other frame. The CM/LAB change exists for Legendre coefficients only
-#: (``kika._legendre_frames``), so the perturbation refuses instead of mixing
-#: frames. Strict: these start passing the day tables get the frame change.
-#: Open item in ``docs/library/mf4_tabulated_perturbation_roadmap.md``.
-NEEDS_TABLE_FRAMES = pytest.mark.xfail(
-    strict=True, raises=NotImplementedError,
-    reason="CM/LAB change on tables of f(mu) not implemented")
 
 TAPE = (Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
         / "micro_u238_ltt2_mf34.endf")
@@ -163,14 +154,22 @@ def test_repair_leaves_no_negative_node(covariance):
             assert info["tables"]["min_p"] > -1e-10 or info["tables"]["n_repaired"]
 
 
-@NEEDS_TABLE_FRAMES
 def test_a_real_covariance_from_another_library_comes_back_out_of_the_tables(realRun, base):
     """T7.3 with ENDF/B-VIII.1's MF34 on JEFF-4.0's tables, N=8, read back.
 
-    Measured 2026-10-05: 1.2e-5 on the perturbed orders, 1e-7 on the others.
+    ENDF/B-VIII.1 states this MF34 in LAB and the tables are in CM, so the
+    factors scale the tables' LAB moments, and that is where they are read
+    back (roadmap T9). Measured 2026-10-10: 1.4e-5 on the perturbed orders and
+    2e-7 on the others -- what ENDF's seven digits leave, as in the tables' own
+    frame on 2026-10-05. Read in CM, the perturbed orders miss by 3.5e-4: that
+    is the frame change, and the reason this reads LAB.
     """
     assert {c.index for c in realRun.samples[0]["set"].components()} == {1, 2}
     assert any("states L=0" in note for note in realRun.notes)
+    (frame,) = {(info["tables"]["frame"]["awr"], info["tables"]["frame"]["direction"])
+                for info in realRun.samples[0]["applied"].values()}
+    awr, direction = frame
+    assert direction == "CM->LAB"
     worstPerturbed, worstOther = 0.0, 0.0
     for sample in realRun.samples:
         blocks = {c.index: (np.asarray(v), np.asarray(sample["set"].binEdges[c]))
@@ -181,8 +180,9 @@ def test_a_real_covariance_from_another_library_comes_back_out_of_the_tables(rea
             if len(mu) < 3 or energy in grid or not grid[0] <= energy < grid[-1]:
                 continue
             at = out.energies.index(energy)
-            before = legendreMoments(mu, p, range(1, 7))
-            after = legendreMoments(mu, out.probabilities[at], range(1, 7))
+            lab = (twoBodyGamma(energy, awr), direction)
+            before = legendreMoments(mu, p, range(1, 7), frame=lab)
+            after = legendreMoments(mu, out.probabilities[at], range(1, 7), frame=lab)
             for order in (1, 2):
                 factors, edges = blocks[order]
                 k = int(np.searchsorted(edges, energy, side="right") - 1)

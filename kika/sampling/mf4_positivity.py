@@ -21,6 +21,8 @@ from typing import Dict, Optional
 import numpy as np
 from numpy.polynomial.legendre import legval, legvander
 
+from kika._legendre_frames import correctionBasis
+
 
 def _legendre_weights(L_plus_one: int) -> np.ndarray:
     return 2.0 * np.arange(L_plus_one) + 1.0
@@ -168,7 +170,10 @@ def repair_tabulated_positivity(mu, p, p_prime, info, pairs=None):
     drawn shifts of the perturbed orders (``info["deltas"]``); this finds the
     ``d*`` nearest to them in L^2 with ``f + sum (2l+1)/2 d*_l P_l(mu_i) >= 0``
     at every node. Lin-lin in mu makes the node constraints the whole
-    constraint.
+    constraint. When the covariance is in the other frame (``info["frame"]``),
+    the ``d_l`` are that frame's shifts and the basis carries them back with the
+    cosine map's Jacobian (:func:`kika._legendre_frames.correctionBasis`): the
+    repair moves the coefficients the covariance describes.
 
     **Never a clip and a renormalisation.** Only the perturbed orders move, and
     by as little as positivity needs; the evaluated table, and every order the
@@ -183,8 +188,7 @@ def repair_tabulated_positivity(mu, p, p_prime, info, pairs=None):
     p = np.asarray(p, dtype=float)
     orders = sorted(int(order) for order in info["deltas"])
     target = np.array([info["deltas"][order] for order in orders], dtype=float)
-    C = np.column_stack([0.5 * (2 * order + 1) * legval(mu, _unit(order))
-                         for order in orders])
+    C = correctionBasis(mu, orders, info.get("frame"))
     shifts = _nearest_satisfying(target, C, p, x0=target,
                                  bounds=[(None, None)] * len(orders))
     repaired = p + C @ shifts
@@ -194,9 +198,3 @@ def repair_tabulated_positivity(mu, p, p_prime, info, pairs=None):
         "max_delta_change": float(np.max(np.abs(shifts - target))),
     }
     return repaired, event
-
-
-def _unit(order: int) -> np.ndarray:
-    coefficients = np.zeros(order + 1)
-    coefficients[order] = 1.0
-    return coefficients

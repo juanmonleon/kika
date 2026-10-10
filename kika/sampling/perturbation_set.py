@@ -948,6 +948,11 @@ class PerturbationSet:
         work's tables start at 45 MeV with MF34 ending at 20; JENDL-5 crosses
         at 20 MeV with one bin of zero variance).
 
+        A covariance in the other frame than the distribution's (MF34's LCT)
+        is applied in that frame on both halves: the Legendre applier by its
+        padded solve, the tabulated one in closed form (roadmap T9). Each half
+        reports its own conversion, under ``frame`` and ``tables["frame"]``.
+
         A negative node in a perturbed table is counted and, under the default
         ``positivity="report"``, left as computed: the Legendre path does not
         enforce positivity either. ``"repair"`` hands the applier
@@ -985,17 +990,8 @@ class PerturbationSet:
 
             angular, tables = applyTabulatedFactors(
                 angular, factors, edges,
-                repair=repair_tabulated_positivity if positivity == "repair" else None)
-            # An LTT=3 table usually starts above where MF34 ends (D1), so a
-            # covariance in the other frame only matters once a factor lands on
-            # a table, and the CM/LAB change exists for Legendre coefficients.
-            if frameConversion is not None and any(
-                    stats["n_scaled"] for stats in tables["per_order"].values()):
-                raise NotImplementedError(
-                    f"{[c.describe() for c in orders.values()]}: the covariance "
-                    f"is in another frame than this distribution's tables of "
-                    f"f(mu); the CM/LAB change is implemented for Legendre "
-                    f"coefficients only")
+                repair=repair_tabulated_positivity if positivity == "repair" else None,
+                frameConversion=frameConversion)
             info["n_inserted"] += tables["n_inserted"]
             for order, stats in tables["per_order"].items():
                 merged = info["per_order"].setdefault(
@@ -1006,6 +1002,8 @@ class PerturbationSet:
             info["tables"] = {key: tables[key] for key in
                               ("min_p", "n_negative_nodes", "max_integral_change")}
             info["tables"]["n_repaired"] = len(tables["positivity_events"])
+            if "frame" in tables:
+                info["tables"]["frame"] = tables["frame"]
         return angular, info
 
     def _frameConversion(self, suite, reaction, product, mt: int,
