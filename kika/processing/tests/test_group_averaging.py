@@ -204,3 +204,45 @@ def test_detect_bounds_skips_scattering_only_and_stubs():
 def test_detect_bounds_handles_none():
     from kika.endf.processing import detect_resonance_bounds
     assert detect_resonance_bounds(None) is None
+
+
+# ---------------------------------------------------------------------------
+# resonance_window_average
+# ---------------------------------------------------------------------------
+
+from kika.processing import resonance_window_average  # noqa: E402
+
+
+def test_window_average_at_group_centres_is_the_group_average():
+    energies = np.geomspace(1.0, 1e4, 3001)
+    sigma = 5.0 + 4.0 * np.sin(3.0 * np.log(energies)) ** 2
+    edges = equal_lethargy_grid(10.0, 1e3, 20)
+    _, groups = resonance_group_average(energies, sigma, edges)
+    centres = np.sqrt(edges[:-1] * edges[1:])
+    width = np.log(edges[1] / edges[0])
+    window = resonance_window_average(energies, sigma, centres, width)
+    np.testing.assert_allclose(window, groups, rtol=1e-12)
+
+
+def test_window_average_of_a_constant_is_the_constant_up_to_the_edges():
+    energies = np.array([1.0, 10.0, 100.0])
+    centres = np.geomspace(1.0, 100.0, 9)
+    out = resonance_window_average(energies, np.full(3, 7.0), centres, 0.5)
+    np.testing.assert_allclose(out, 7.0, rtol=1e-14)
+
+
+def test_window_average_rejects_bad_width():
+    with pytest.raises(ValueError):
+        resonance_window_average(np.array([1.0, 2.0]), np.ones(2), np.array([1.5]), 0.0)
+
+
+def test_window_average_stays_inside_the_bounds():
+    # Flat 1 b below 10 eV, 100 b above: a window centred just under 10 eV
+    # averages the jump in unless the span being compared stops it at 10 eV.
+    energies = np.array([1.0, 10.0, 10.0, 100.0])
+    sigma = np.array([1.0, 1.0, 100.0, 100.0])
+    centre = np.array([9.0])
+    free = resonance_window_average(energies, sigma, centre, 0.5)
+    bounded = resonance_window_average(energies, sigma, centre, 0.5, bounds=(1.0, 10.0))
+    assert free[0] > 10.0
+    assert bounded[0] == pytest.approx(1.0)

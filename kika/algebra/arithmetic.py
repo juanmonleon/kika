@@ -18,7 +18,7 @@ width.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Union
 
 import numpy as np
 
@@ -27,7 +27,7 @@ from .grid import union
 from .laws import validate
 from .refine import LINEARIZATION_TOLERANCE, to_linlin
 
-__all__ = ["add", "domain_steps"]
+__all__ = ["add", "domain_steps", "on_common_grid"]
 
 
 def domain_steps(x: np.ndarray, y: np.ndarray, lo: float, hi: float) -> list:
@@ -74,3 +74,43 @@ def add(tables: Sequence, coefficients: Optional[Sequence[float]] = None, *,
     for c, (lx, ly) in zip(coefficients, linear):
         total += float(c) * sample_on_union(lx, ly, 2, u)
     return u, total
+
+
+def on_common_grid(tables: Sequence, grid: Union[str, int] = "union"):
+    """Several tables read on one grid, over the span they all cover.
+
+    *tables* are ``(x, y, laws)`` triples, each read under its own laws.
+    *grid* is ``"union"`` -- every abscissa of every table, steps kept
+    (:func:`~kika.algebra.grid.union`) -- or the index of the table whose own
+    abscissae are used. Returns ``(u, values)`` with ``values`` of shape
+    ``(len(tables), u.size)``; a repeated abscissa of *u* carries the left
+    limit on its first copy and the right limit on its last
+    (:func:`~kika.algebra.evaluate.sample_on_union`).
+
+    This is how two evaluations are compared point by point. On the union no
+    table loses a node: the difference of two lin-lin tables is itself lin-lin
+    there, so its extremes are among the returned points. On one table's grid
+    the other is only sampled, and a peak of it that falls between the chosen
+    nodes is not in the result at all.
+    """
+    tables = [validate(*t) for t in tables]
+    if not tables:
+        raise ValueError("no tables to read")
+    if any(x.size == 0 for x, _, _ in tables):
+        raise ValueError("an empty table has no domain to share")
+    lo = max(float(x[0]) for x, _, _ in tables)
+    hi = min(float(x[-1]) for x, _, _ in tables)
+    if not lo < hi:
+        raise ValueError(f"the tables share no span: [{lo!r}, {hi!r}]")
+    if isinstance(grid, str):
+        if grid != "union":
+            raise ValueError(f"grid must be 'union' or a table index, got {grid!r}")
+        u = union([x for x, _, _ in tables])
+    else:
+        u = tables[int(grid)][0]
+    u = u[(u >= lo) & (u <= hi)]
+    # A step at an end of the shared span would read its outer limit there --
+    # zero, off some table's domain -- so the ends are kept once, as values.
+    u = u[(np.r_[True, u[1:] != u[:-1]] | (u != lo)) & (np.r_[u[1:] != u[:-1], True] | (u != hi))]
+    values = np.vstack([sample_on_union(x, y, laws, u) for x, y, laws in tables])
+    return u, values

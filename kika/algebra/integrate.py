@@ -45,7 +45,8 @@ from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate, vanishing
 from .refine import LINEARIZATION_TOLERANCE, to_linlin
 
 __all__ = ["panel_integrals", "cumulative_integral", "integral", "group_integrals",
-           "group_averages", "legendre_moments", "legendre_coefficients", "WEIGHTS"]
+           "group_averages", "interval_integrals", "interval_averages",
+           "legendre_moments", "legendre_coefficients", "WEIGHTS"]
 
 #: The weights :func:`panel_integrals` knows: none, and ``1/x``.
 WEIGHTS = (None, "1/x")
@@ -216,6 +217,57 @@ def group_averages(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarra
     else:
         if np.any(edges <= 0):
             raise ValueError("a 1/x weight needs positive group edges")
+        den = np.log(hi / lo)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(den > 0, num / den, np.nan)
+
+
+def interval_integrals(x, y, laws, lo, hi, weight: Optional[str] = None) -> np.ndarray:
+    """``int_{lo_i}^{hi_i} y w dx`` for intervals that may overlap.
+
+    :func:`group_integrals` needs edges that tile the line; here each interval
+    stands on its own -- a window sliding along the table, say. The intervals'
+    ends are sorted into one grid, the table is integrated exactly on every
+    piece of it, and each interval sums only its own pieces. Differencing a
+    running total instead would cancel: a 0.05-wide lethargy window at 1 keV
+    holds ~1e-6 of the 1/E integral that U-235's thermal range puts below it.
+    The cost is the number of piece ends inside each interval, summed, so
+    overlapping intervals are cheap when there are thousands of them and
+    quadratic when every one spans most of the others. ``hi <= lo`` gives zero.
+    """
+    lo = np.asarray(lo, dtype=float)
+    hi = np.asarray(hi, dtype=float)
+    if lo.shape != hi.shape or lo.ndim != 1:
+        raise ValueError("lo and hi must be 1-d arrays of one shape")
+    if lo.size == 0:
+        return np.zeros(0)
+    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+        raise ValueError("interval ends must be finite")
+    ends = np.unique(np.concatenate((lo, hi)))
+    pieces = np.append(group_integrals(x, y, laws, ends, weight), 0.0)
+    a = np.searchsorted(ends, lo)
+    b = np.searchsorted(ends, np.maximum(hi, lo))
+    # reduceat over (a_0, b_0, a_1, b_1, ...) sums pieces[a_i:b_i] at even
+    # positions; an empty interval (a == b) returns pieces[a] and is zeroed.
+    sums = np.add.reduceat(pieces, np.column_stack((a, b)).ravel())[::2]
+    return np.where(b > a, sums, 0.0)
+
+
+def interval_averages(x, y, laws, lo, hi, weight: Optional[str] = None) -> np.ndarray:
+    """``int y w / int w`` over each interval ``[lo_i, hi_i]``, which may overlap.
+
+    The same mean as :func:`group_averages` -- zero outside the table, ``nan``
+    for an interval of zero weight -- for intervals that need not tile the
+    line (:func:`interval_integrals`).
+    """
+    lo = np.asarray(lo, dtype=float)
+    hi = np.asarray(hi, dtype=float)
+    num = interval_integrals(x, y, laws, lo, hi, weight)
+    if weight is None:
+        den = hi - lo
+    else:
+        if np.any(lo <= 0) or np.any(hi <= 0):
+            raise ValueError("a 1/x weight needs positive interval ends")
         den = np.log(hi / lo)
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(den > 0, num / den, np.nan)

@@ -29,6 +29,9 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+from kika.algebra import (LINLIN, LINLOG, LOGLIN, LOGLOG, evaluate,
+                         on_common_grid, sample_on_union)
+
 from .plot_data import PlotData, DifferencePlotData, PlotItem
 from .plot_builder import PlotBuilder, _NOT_SET
 from .styles import (
@@ -66,6 +69,33 @@ _INTERPOLATION_DEFAULTS = {
 # Interpolation utility
 # ---------------------------------------------------------------------------
 
+#: The interpolation names the comparison accepts, as ENDF law codes.
+#: ``'log-lin'`` is log x / linear y (ENDF 3), ``'lin-log'`` linear x / log y (4).
+_METHOD_LAWS = {'lin-lin': LINLIN, 'log-lin': LINLOG, 'lin-log': LOGLIN, 'log-log': LOGLOG}
+_LIN_Y = {LOGLIN: LINLIN, LOGLOG: LINLOG}
+
+
+def method_laws(y_source: np.ndarray, method: str) -> np.ndarray:
+    """One law per interval for reading a series under *method*.
+
+    *method* is the reader's choice of interpolation, not a law the series
+    states, so where a log-y law has no value -- an interval with an end at or
+    below zero, a Legendre coefficient crossing zero say -- that interval is
+    read with the same x law and a linear y. Only those intervals change;
+    the app's data table reads the same way (``interpolateAt`` in
+    ``kika-app/frontend/src/utils/plotter.ts``).
+    """
+    if method not in _METHOD_LAWS:
+        raise ValueError(f"unknown interpolation {method!r}; "
+                         f"expected one of {sorted(_METHOD_LAWS)}")
+    y = np.asarray(y_source, dtype=float)
+    law = _METHOD_LAWS[method]
+    laws = np.full(max(y.size - 1, 0), law, dtype=np.int64)
+    if law in _LIN_Y and y.size > 1:
+        laws[(y[:-1] <= 0) | (y[1:] <= 0)] = _LIN_Y[law]
+    return laws
+
+
 def interpolate_to_grid(
     x_target: np.ndarray,
     x_source: np.ndarray,
@@ -76,22 +106,22 @@ def interpolate_to_grid(
     """
     Interpolate ``(x_source, y_source)`` onto *x_target*.
 
+    The table is read by :mod:`kika.algebra` under the laws
+    :func:`method_laws` gives, so a repeated source abscissa is a step and a
+    repeated target abscissa reads its left then its right limit.
+
     Parameters
     ----------
     x_target : array-like
-        Target x-grid to interpolate onto.
+        Target x-grid, non-decreasing.
     x_source : array-like
-        Source x-grid (must be monotonically increasing).
+        Source x-grid, non-decreasing (a repeated value is a step).
     y_source : array-like
         Source y-values corresponding to *x_source*.
     method : str
-        Interpolation space:
-
-        * ``'log-log'`` – log-space in both axes (standard for cross
-          sections that span many orders of magnitude).
-        * ``'lin-lin'`` – linear interpolation in linear space.
-        * ``'log-lin'`` – log x, linear y.
-        * ``'lin-log'`` – linear x, log y.
+        Interpolation space: ``'log-log'``, ``'lin-lin'``, ``'log-lin'``
+        (log x, linear y) or ``'lin-log'`` (linear x, log y). Intervals where
+        a log y has no value are read linear in y (:func:`method_laws`).
     fill_value : float
         Value assigned to target points outside the source range.
         Default ``np.nan`` so out-of-range points are clearly marked.
@@ -112,47 +142,53 @@ def interpolate_to_grid(
             f"Got {len(x_src)} and {len(y_src)}"
         )
 
-    # Points inside the source range
-    in_range = (x_tgt >= x_src[0]) & (x_tgt <= x_src[-1])
     result = np.full_like(x_tgt, fill_value, dtype=float)
-
+    if x_src.size == 0:
+        return result
+    in_range = (x_tgt >= x_src[0]) & (x_tgt <= x_src[-1])
     if not np.any(in_range):
         return result
-
-    x_in = x_tgt[in_range]
-
-    log_x = method in ('log-log', 'log-lin')
-    log_y = method in ('log-log', 'lin-log')
-
-    # --- x transform ---
-    if log_x:
-        if np.any(x_src <= 0) or np.any(x_in <= 0):
-            raise ValueError(
-                f"method='{method}' requires positive x values. "
-                f"Source x range: [{x_src.min()}, {x_src.max()}]"
-            )
-        xi = np.log(x_in)
-        xs = np.log(x_src)
+    if method in ('log-log', 'log-lin') and (np.any(x_src <= 0) or np.any(x_tgt[in_range] <= 0)):
+        raise ValueError(
+            f"method='{method}' requires positive x values. "
+            f"Source x range: [{x_src.min()}, {x_src.max()}]"
+        )
+    laws = method_laws(y_src, method)
+    q = x_tgt[in_range]
+    if np.all(np.diff(q) >= 0):
+        result[in_range] = sample_on_union(x_src, y_src, laws, q)
     else:
-        xi = x_in
-        xs = x_src
-
-    # --- y transform + interpolation ---
-    if log_y:
-        safe = y_src > 0
-        if np.all(safe):
-            ys = np.log(y_src)
-            yi = np.interp(xi, xs, ys)
-            result[in_range] = np.exp(yi)
-        else:
-            # Fallback to linear when some y values are non-positive
-            yi = np.interp(xi, xs, y_src)
-            result[in_range] = yi
-    else:
-        yi = np.interp(xi, xs, y_src)
-        result[in_range] = yi
-
+        result[in_range] = evaluate(x_src, y_src, laws, q)
     return result
+
+
+def _read_on_common_grid(ref, cmp, method, grid):
+    """Both series on one grid over their shared span (:func:`kika.algebra.on_common_grid`).
+
+    A non-finite value is a hole in a series, not a number: the series is read
+    without it, and every point of the grid in an interval that touches it is
+    ``nan`` -- what ``numpy.interp`` gave before the comparison moved onto
+    :mod:`kika.algebra`.
+    """
+    method = method or 'lin-lin'
+    tables, holes = [], []
+    for x, y in (ref, cmp):
+        finite = np.isfinite(y)
+        tables.append((x[finite], y[finite], method_laws(y[finite], method)))
+        holes.append((x, finite))
+    if method in ('log-log', 'log-lin') and any(np.any(t[0] <= 0) for t in tables):
+        raise ValueError(f"method='{method}' requires positive x values.")
+    u, values = on_common_grid(tables, grid)
+    for row, (x, finite) in zip(values, holes):
+        if finite.all():
+            continue
+        bad = ~finite
+        # The interval [x_k, x_k+1] around each grid point, by the series' own nodes.
+        k = np.clip(np.searchsorted(x, u, side='right') - 1, 0, x.size - 1)
+        touching = bad[k] | bad[np.minimum(k + 1, x.size - 1)]
+        row[touching & (u != x[k])] = np.nan
+        row[bad[k] & (u == x[k])] = np.nan
+    return u, values
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +225,7 @@ def compute_difference(
     comparison: PlotData,
     mode: Literal['relative', 'absolute'] = 'relative',
     interpolation: Optional[str] = 'log-log',
-    grid: Literal['reference', 'comparison', 'union'] = 'reference',
+    grid: Literal['reference', 'comparison', 'union'] = 'union',
     relative_in_percent: bool = True,
 ) -> ComparisonResult:
     """
@@ -211,11 +247,14 @@ def compute_difference(
     grid : {'reference', 'comparison', 'union'}
         Which grid to use as common grid.
 
-        * ``'reference'`` (default): interpolate comparison onto the
-          reference grid.  Standard practice — the reference is left
-          unmodified.
-        * ``'comparison'``: interpolate reference onto comparison grid.
-        * ``'union'``: sorted union of both grids (both are interpolated).
+        * ``'union'`` (default): every abscissa of both series
+          (:func:`kika.algebra.on_common_grid`). Neither loses a node, so the
+          extremes of the difference of two lin-lin tables are all in it.
+        * ``'reference'``: the reference's own grid; the comparison is only
+          sampled there. Whatever it has between those nodes is not seen: on
+          six ENDF/B-VIII.1 materials, KIKA against NJOY's grid showed a
+          maximum difference of 5e-4 where the union shows 1.0-2.0e-3.
+        * ``'comparison'``: the comparison's own grid, likewise.
     relative_in_percent : bool
         If ``True`` and *mode* is ``'relative'``, multiply by 100.
 
@@ -244,27 +283,11 @@ def compute_difference(
             f"Comparison: [{x_cmp[0]:.6e}, {x_cmp[-1]:.6e}]"
         )
 
-    # Build common grid
-    if grid == 'reference':
-        common_x = x_ref[(x_ref >= x_lo) & (x_ref <= x_hi)]
-    elif grid == 'comparison':
-        common_x = x_cmp[(x_cmp >= x_lo) & (x_cmp <= x_hi)]
-    elif grid == 'union':
-        both = np.concatenate([
-            x_ref[(x_ref >= x_lo) & (x_ref <= x_hi)],
-            x_cmp[(x_cmp >= x_lo) & (x_cmp <= x_hi)],
-        ])
-        common_x = np.unique(both)
-    else:
+    if grid not in ('reference', 'comparison', 'union'):
         raise ValueError(f"Unknown grid option: {grid!r}")
-
-    # Interpolate both onto common grid
-    y_ref_interp = interpolate_to_grid(
-        common_x, x_ref, y_ref, method=interpolation,
-    )
-    y_cmp_interp = interpolate_to_grid(
-        common_x, x_cmp, y_cmp, method=interpolation,
-    )
+    common_x, (y_ref_interp, y_cmp_interp) = _read_on_common_grid(
+        (x_ref, y_ref), (x_cmp, y_cmp), interpolation,
+        {'reference': 0, 'comparison': 1, 'union': 'union'}[grid])
 
     # Valid mask: both must be finite
     valid = np.isfinite(y_ref_interp) & np.isfinite(y_cmp_interp)
@@ -356,7 +379,7 @@ class ComparisonBuilder:
         notebook_mode: Optional[bool] = None,
         interactive: Optional[bool] = None,
         interpolation: Optional[str] = None,
-        grid_strategy: Literal['reference', 'comparison', 'union'] = 'reference',
+        grid_strategy: Literal['reference', 'comparison', 'union'] = 'union',
     ):
         get_style(style)  # fail early on an unknown style name
         self._style = style

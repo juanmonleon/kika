@@ -30,7 +30,8 @@ Submodules: :mod:`.laws` (law codes and their ENDF ``(NBT, INT)`` spelling),
 :mod:`.evaluate` (values and one-sided limits), :mod:`.grid` (unions of grids,
 discontinuities, regions), :mod:`.integrate` (closed-form integrals, group
 integrals, 1/x weight), :mod:`.refine` (the adaptive refinement engine and
-:func:`to_linlin`), :mod:`.arithmetic` (sums), :mod:`.fold` (Gaussian folds).
+:func:`to_linlin`), :mod:`.arithmetic` (sums, and tables read on one common
+grid to compare them), :mod:`.fold` (Gaussian folds).
 """
 from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS,
                    interval_laws, laws_on_refinement, pairs_from_laws,
@@ -39,11 +40,11 @@ from .evaluate import (evaluate, interpolate_between, left_limit, right_limit,
                        sample_on_union)
 from .grid import compress_flat, discontinuities, join_pieces, split_at_discontinuities, union
 from .integrate import (cumulative_integral, group_averages, group_integrals,
-                        integral, legendre_coefficients, legendre_moments,
-                        panel_integrals)
+                        integral, interval_averages, interval_integrals,
+                        legendre_coefficients, legendre_moments, panel_integrals)
 from .fold import box_gaussian_fold_nodes, fold_tabulated, gaussian_fold_nodes
 from .refine import RefinementError, RefineResult, refine, to_linlin
-from .arithmetic import add
+from .arithmetic import add, on_common_grid
 from .prepared import prepare_evaluator
 
 __all__ = [
@@ -52,7 +53,8 @@ __all__ = [
     "evaluate", "interpolate_between", "left_limit", "right_limit", "sample_on_union",
     "compress_flat", "discontinuities", "join_pieces", "split_at_discontinuities", "union",
     "cumulative_integral", "group_averages", "group_integrals", "integral",
+    "interval_averages", "interval_integrals",
     "legendre_coefficients", "legendre_moments", "panel_integrals", "box_gaussian_fold_nodes", "fold_tabulated", "gaussian_fold_nodes",
     "RefinementError", "RefineResult", "refine", "to_linlin",
-    "add", "prepare_evaluator",
+    "add", "on_common_grid", "prepare_evaluator",
 ]
