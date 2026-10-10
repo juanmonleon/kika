@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="456" viewBox="0 0 760 456">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5568"/></marker></defs>
+<rect width="760" height="456" fill="#ffffff"/>
+<rect x="20" y="20" width="720" height="74" rx="6" fill="#eef2f7" stroke="#4a5568" stroke-width="1.2"/>
+<text x="32" y="50" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#1a202c">Doors and consumers</text>
+<text x="32" y="70" font-family="sans-serif" font-size="11" font-weight="normal" text-anchor="start" fill="#1a202c">import any layer below</text>
+<rect x="215.0" y="40" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="297.5" y="62" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.read / kika.write</text>
+<rect x="390.0" y="40" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="472.5" y="62" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.sampling</text>
+<rect x="565.0" y="40" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="647.5" y="62" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.njoy</text>
+<line x1="380.0" y1="98" x2="380.0" y2="130" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="390.0" y="118.0" font-family="sans-serif" font-size="11" font-weight="normal" text-anchor="start" fill="#1a202c">imports</text>
+<rect x="20" y="134" width="720" height="74" rx="6" fill="#e6f0e6" stroke="#4a5568" stroke-width="1.2"/>
+<text x="32" y="164" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#1a202c">Format layer</text>
+<text x="32" y="184" font-family="sans-serif" font-size="11" font-weight="normal" text-anchor="start" fill="#1a202c">import the layers below</text>
+<rect x="215.0" y="154" width="121.2" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="275.625" y="176" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.endf</text>
+<rect x="346.2" y="154" width="121.2" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="406.875" y="176" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.gnds</text>
+<rect x="477.5" y="154" width="121.2" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="538.125" y="176" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.ace</text>
+<rect x="608.8" y="154" width="121.2" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="669.375" y="176" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.g4ndl</text>
+<line x1="380.0" y1="212" x2="380.0" y2="244" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="390.0" y="232.0" font-family="sans-serif" font-size="11" font-weight="normal" text-anchor="start" fill="#1a202c">imports</text>
+<rect x="20" y="248" width="720" height="74" rx="6" fill="#f6efe3" stroke="#4a5568" stroke-width="1.2"/>
+<text x="32" y="278" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#1a202c">Calculation layer</text>
+<text x="32" y="298" font-family="sans-serif" font-size="11" font-weight="normal" text-anchor="start" fill="#1a202c">import no format package</text>
+<rect x="215.0" y="268" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="297.5" y="290" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.nuclear_data.model</text>
+<rect x="390.0" y="268" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="472.5" y="290" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.processing</text>
+<rect x="565.0" y="268" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="647.5" y="290" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.cov</text>
+<line x1="380.0" y1="326" x2="380.0" y2="358" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="390.0" y="346.0" font-family="sans-serif" font-size="11" font-weight="normal" text-anchor="start" fill="#1a202c">imports</text>
+<rect x="20" y="362" width="720" height="74" rx="6" fill="#f0e8f3" stroke="#4a5568" stroke-width="1.2"/>
+<text x="32" y="392" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#1a202c">Leaves</text>
+<text x="32" y="412" font-family="sans-serif" font-size="11" font-weight="normal" text-anchor="start" fill="#1a202c">import nothing from kika</text>
+<rect x="215.0" y="382" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="297.5" y="404" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika.algebra</text>
+<rect x="390.0" y="382" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="472.5" y="404" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika._records</text>
+<rect x="565.0" y="382" width="165.0" height="34" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="0.8"/>
+<text x="647.5" y="404" font-family="monospace" font-size="12" font-weight="normal" text-anchor="middle" fill="#1a202c">kika._legendre_frames</text>
+</svg>
