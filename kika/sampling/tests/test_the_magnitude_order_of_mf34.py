@@ -11,6 +11,7 @@ evaluated tape carries an L=0 section small enough to read in a test.
 """
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +22,12 @@ from kika.endf import read_endf
 from kika.endf.model_adapter import decodeCovarianceSuite
 from kika.sampling.joint_blocks import ComponentKey, collectEntries, samplingGroups
 from kika.sampling.model_perturbation import _touchedFiles, perturbFromModel
+
+# A micro-tape: NJOY cannot read it (RECONR stops at its orphan FEND records), so
+# the resonance region is perturbed as stated, as in every other micro-tape test;
+# the reconstruction is tested on full tapes, in
+# test_the_resonance_region_is_perturbed_as_reconstructed.py.
+perturbFromModel = partial(perturbFromModel, resonanceRegion="evaluated")
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 FE56 = DATA / "micro_fe56_xs_and_angular.endf"

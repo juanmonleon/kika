@@ -97,7 +97,10 @@ ONLY_ON = {
     ("Product", "headerFields.ltt"): {"micro_cf252_pfns"},
     ("Product", "headerFields.li"): {"micro_cf252_pfns"},
     ("Product", "headerFields.lct"): {"micro_cf252_pfns"},
-    ("ReactionSuite", "headerFields.lfi"): {"micro_cm243_photons"},
+    # U-238 cut to MT2 keeps the fissile LFI=1 with no fission reaction left.
+    ("ReactionSuite", "headerFields.lfi"): {"micro_cm243_photons",
+                                            "micro_u238_ltt2_mf34",
+                                            "micro_u238_mf34_l0"},
     ("ReactionSuite", "headerFields.awi"): {"micro_a_he4_mf6", "micro_d_h2_mf6"},
     ("Reaction", "headerFields.mf6"): {"micro_a_he4_mf6", "micro_be9_mf6",
                                        "micro_c12_mf6", "micro_d_h2_mf6",
