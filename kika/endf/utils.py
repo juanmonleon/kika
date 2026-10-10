@@ -618,7 +618,7 @@ def format_intg(entries: Sequence[Tuple[int, int, Sequence[int]]], ndigit: int,
     Write INTG records. Counterpart of :func:`parse_intg`.
 
     Zeros are written as blank fields, which is what every evaluation measured
-    for ``docs/library/mf32-notes.md`` does; §32.2.3 permits an explicit ``0`` too, so a
+    does; §32.2.3 permits an explicit ``0`` too, so a
     tape written this way may differ from its source in whitespace alone. That
     is why the round-trip path re-emits stored text instead of calling this —
     this function is for covariance matrices kika *builds*, not ones it read.

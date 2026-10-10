@@ -218,9 +218,9 @@ class RunResult:
     #: Run-level files: the factors table and its index, the plan, the
     #: metadata, the log. Per-sample files are on each entry of ``samples``.
     files: Dict[str, Path] = field(default_factory=dict)
-    #: C10 (PD-9), for a run that perturbs a fission spectrum: what each MF35
-    #: band states for ``<E'>`` and the tail fractions, against independent
-    #: knowledge where the roadmap has read some. ``{mt: {band: record}}``;
+    #: For a run that perturbs a fission spectrum: what each MF35 band states
+    #: for ``<E'>`` and the tail fractions, against independent knowledge where
+    #: kika has some. ``{mt: {band: record}}``;
     #: :func:`kika.sampling.pfns_moments.statedSpectrumMoments`. Reported, not
     #: a gate, and it changes nothing that is drawn.
     spectrumMoments: Dict[int, Dict[Any, Dict[str, Any]]] = field(

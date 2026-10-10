@@ -232,7 +232,7 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
     ReactionSuite or PoPs
         A **PoPs** for a radioactive decay evaluation -- an ENDF decay
         sublibrary tape (NSUB=4) or a GNDS file whose root is ``PoPs`` -- whose
-        one nuclide carries ``halflife`` and ``decayData`` (roadmap E7b); a
+        one nuclide carries ``halflife`` and ``decayData``; a
         :class:`~kika.ace.classes.photoatomic.PhotoatomicAce` for a
         photo-atomic ACE table (``.84p``, ``.14p``...), which the model has
         no suite for yet; a :class:`ReactionSuite` for everything else.

@@ -31,5 +31,6 @@ Module Reference
    cov
    uq
    benchmarks
+   model
    endf
    sampling
