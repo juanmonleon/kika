@@ -4,12 +4,11 @@ name: test
 # data tree or a local NJOY build, neither of which exists on a GitHub runner;
 # those run on the workstation with `pytest --deep`. See conftest.py.
 
-# `develop` is where the work actually lands, so it has to be a push trigger.
-# With `[main]` alone the gate only ran on pull requests and a direct push to
-# develop was untested.
+# No push trigger (Juan, 2026-10-11): several sessions push to develop through
+# the day and every push started a run. Run it by hand from the Actions tab
+# (or `gh workflow run test --ref develop`) when a check is wanted; pull
+# requests still run it.
 on:
-  push:
-    branches: [main, develop]
   pull_request:
   workflow_dispatch:
 
