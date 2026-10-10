@@ -215,6 +215,15 @@ PERMANENT_IMPORTERS = {
     # hiddenimports (line 276), and the app's only route into the checks, the
     # pre-flight's `_attachLayer1`, asks for MF31/33/34 and never reaches MF32.
     "kika/endf/checks/mf32.py",
+    # The ENDF door into kika's own resonance reconstruction (2026-10-10), the
+    # engine the desktop app and its generated scripts use instead of NJOY. A
+    # tape has to be decoded into the model before the format-free engine can
+    # run, exactly as `kika/_read.py` does. Imported inside `reconstruct_endf`,
+    # so `import kika.endf` does not wake the model. Frozen build: kika-api
+    # calls this module, so `kika.endf.reconstruction`, `kika.endf.model_adapter`,
+    # `kika.processing.resonances.*` and `_rm_native` must be in kika-api.spec's
+    # hiddenimports (the app's session for this change owns that list).
+    "kika/endf/reconstruction.py",
 }
 
 ALLOWED_IMPORTERS = FACADE_IMPORTERS | PERMANENT_IMPORTERS

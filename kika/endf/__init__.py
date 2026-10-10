@@ -19,6 +19,7 @@ from .classes.mf7.scatterer import ThermalScatterer, thermal_scatterer
 from . import dcs
 from .checks import check_covariance_library, check_covariances
 from .inventory import TapeInventory, tape_inventory
+from .reconstruction import EndfReconstruction, ReconstructedTable, reconstruct_endf
 from .remote import (
     fetch_endf,
     download_endf,
@@ -42,6 +43,10 @@ __all__ = [
     # The sections of a tape from its MT451 directory, without parsing it
     "tape_inventory",
     "TapeInventory",
+    # Resonance reconstruction with kika's engine (MF2 -> pointwise sigma, PENDF)
+    "reconstruct_endf",
+    "EndfReconstruction",
+    "ReconstructedTable",
     # Local file reading
     "read_endf",
     "open_endf",

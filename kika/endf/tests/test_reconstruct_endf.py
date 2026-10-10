@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 
 import kika.processing as processing
+from kika.endf import reconstruct_endf
 from kika.processing import (ENGINE_VERSION, REJECTION_CATEGORIES, ReconstructionConvergenceError,
-                             UnsupportedResonanceError, native_available, reconstruct_endf)
+                             UnsupportedResonanceError, native_available)
 
 TAPE = Path(__file__).resolve().parents[2] / "endf/tests/data/micro_fe56_structural.endf"
 
@@ -85,7 +86,8 @@ def test_pendf_is_written_reloaded_and_not_reconstructed_twice(tmp_path):
 def test_every_category_the_engine_raises_is_declared():
     root = Path(processing.__file__).resolve().parents[1]
     used = set()
-    for path in list((root / "processing/resonances").glob("*.py")) + [root / "endf/writers/assemble.py"]:
+    for path in (list((root / "processing/resonances").glob("*.py"))
+                 + [root / "endf/writers/assemble.py", root / "endf/reconstruction.py"]):
         used |= set(re.findall(r"category=['\"]([a-z0-9-]+)['\"]", path.read_text(encoding="utf-8")))
     for cls in (UnsupportedResonanceError, ReconstructionConvergenceError):
         used.add(cls("x").category)

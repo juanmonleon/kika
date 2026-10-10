@@ -5,20 +5,17 @@ Format-independent processing that operates on canonical types from
 ``kika.nuclear_data``.  Each submodule implements one processing step:
 
 - ``resonances``      — resonance reconstruction on the model (MF2 → pointwise σ);
-  ``reconstruct_endf`` is its end-to-end entry for an ENDF-6 tape
+  its end-to-end entry for an ENDF-6 tape is ``kika.endf.reconstruct_endf``
 - ``njoy_reconstruct`` — the same through NJOY RECONR, chosen explicitly
 """
 
 from .resonances import (
     ENGINE_VERSION,
     REJECTION_CATEGORIES,
-    EndfReconstruction,
-    ReconstructedTable,
     ReconstructionConvergenceError,
     ReconstructionOptions,
     UnsupportedResonanceError,
     native_available,
-    reconstruct_endf,
 )
 from .njoy_reconstruct import (
     NjoyReconstructError,
@@ -45,9 +42,6 @@ from .njoy_pendf_cache import (
 )
 
 __all__ = [
-    "reconstruct_endf",
-    "EndfReconstruction",
-    "ReconstructedTable",
     "ReconstructionOptions",
     "UnsupportedResonanceError",
     "ReconstructionConvergenceError",
