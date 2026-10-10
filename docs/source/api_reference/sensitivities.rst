@@ -7,6 +7,7 @@ The sensitivities module provides functionality for sensitivity analysis and wor
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Submodules
 ----------

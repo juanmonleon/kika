@@ -1,15 +1,11 @@
-kika.mctal
-===========
+MCNP tally output (MCTAL)
+=========================
 
-The mctal module provides functionality for processing MCNP tally output files.
+The modules of :mod:`kika.mcnp` that read MCNP tally output files.
+:func:`kika.mcnp.read_mctal` is the entry point.
 
-.. automodule:: kika.mctal
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Submodules
-----------
+Modules
+-------
 
 kika.mcnp.mctal
 -----------------
