@@ -816,11 +816,12 @@ def _resample_reconstructed_endf(suite, label):
     return output
 
 
-#: Share of publication time per step, measured on ENDF/B-VIII.1 Fe-56; only
-#: the progress bar uses it. The first verification usually runs earlier, in
+#: Share of publication time per step, measured on ENDF/B-VIII.1 U-238 with the
+#: compiled verification and the batch writer (190/2/77/28/20 s); only the
+#: progress bar uses it. The first verification usually runs earlier, in
 #: ``attach_reconstruction``, and is then a cache hit here; the caller can map
 #: that call onto the "verify" share (``PUBLICATION_VERIFY_SHARE``).
-_PUBLICATION_STEPS = (("verify", .40), ("resample", .06), ("write", .32), ("reload", .10), ("reverify", .12))
+_PUBLICATION_STEPS = (("verify", .58), ("resample", .01), ("write", .24), ("reload", .09), ("reverify", .08))
 PUBLICATION_VERIFY_SHARE = _PUBLICATION_STEPS[0][1]
 
 

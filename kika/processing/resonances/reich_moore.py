@@ -106,7 +106,7 @@ class RMGroup(Group):
 
 def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=None, *, entrance=0,
                     reduced=None,channel_factors=None,work_bytes=64*1024**2,
-                    return_absorption=False,absorption_rtol=0.):
+                    return_absorption=False,absorption_rtol=0.,native=False):
     """Return W[:, :, entrance] and absorption-level amplitudes.
 
     amplitudes: (energy, level, open channel), with entrance at index zero.
@@ -132,7 +132,9 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
     else:
         a=np.asarray(amplitudes);n,c=a.shape[1:]
     if not isinstance(entrance,int) or not 0<=entrance<c:raise ValueError('invalid entrance channel')
-    if separable and return_absorption and absorption_rtol == 1e-8:
+    # native with absorption_rtol=0: the compiled all-level sums with direct
+    # capture everywhere, the exact quantities of this NumPy solver.
+    if separable and return_absorption and (absorption_rtol == 1e-8 or native and absorption_rtol == 0.):
         from ._rm_acceleration import solve as accelerated_solve,reference_block_size
         accelerated=accelerated_solve(e,levels,radiative_widths,None,diagnostics,
             entrance=entrance,reduced=reduced,channel_factors=factors,
@@ -259,7 +261,7 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
     return w,x
 
 
-def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2,absorption_rtol=0.):
+def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2,absorption_rtol=0.,native=False):
     elastic,capture,fission=(np.zeros_like(energies) for _ in range(3))
     for group in groups:
         ctx=group.context or context;k2=ctx.k_squared_per_ev*energies
@@ -277,7 +279,7 @@ def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2
         factors=np.ones((len(energies),amplitudes.shape[1]));factors[:,0]=np.sqrt(p)
         w,absorption=solve_collision(energies,level_energies,gamma,None,diagnostics,
             reduced=amplitudes,channel_factors=factors,work_bytes=work_bytes,
-            return_absorption=True,absorption_rtol=absorption_rtol)
+            return_absorption=True,absorption_rtol=absorption_rtol,native=native)
         # Stable 1-U_nn, avoiding the cancellation of hard-sphere phase.
         amplitude=2j*np.exp(-1j*phi)*np.sin(phi)-2j*np.exp(-2j*phi)*w[:,0]
         elastic+=beta*g*np.abs(amplitude)**2

@@ -1,4 +1,10 @@
-"""Optional all-level contraction; independent verification stays in NumPy.
+"""Optional compiled Reich-Moore all-level sums.
+
+Production (``absorption_rtol=1e-8``) also accepts the channel-space Gram
+capture where its roundoff bound allows. Publication verification
+(``absorption_rtol=0`` with ``native=True``) uses the same sums with direct
+capture at every energy, the exact quantities of the NumPy reference solver,
+which the tests hold this path to.
 
 No runtime compilation. Unavailable binaries or ineligible numeric regimes
 return None to the reference solver. The extension uses bounded stack tiles;
@@ -15,7 +21,9 @@ except (ImportError, AttributeError):
 
 def eligible(energies, levels, widths, reduced, factors, work_bytes,
              return_absorption, absorption_rtol):
-    if (_native is None or not return_absorption or absorption_rtol != 1e-8
+    # 1e-8: production, Gram capture where its roundoff bound allows.
+    # 0: exact, direct capture at every energy (publication verification).
+    if (_native is None or not return_absorption or absorption_rtol not in (0., 1e-8)
             or reduced is None or work_bytes < 65536):return False
     e,er,g,a,f=(np.asarray(v) for v in (energies,levels,widths,reduced,factors))
     if (e.ndim!=1 or er.ndim!=1 or g.shape!=er.shape or a.ndim!=2
@@ -101,6 +109,7 @@ def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entranc
                 lower=np.nextafter(.5*gamma[radiative].min()/upper,0.)
             normal &= lower>=tiny
         accepted=normal&np.isfinite(cap)&(cap>=tiny)&(majorant>=tiny)&(bound<=absorption_rtol*cap)&(bound<=1e-10)
+        if absorption_rtol==0.:accepted[:]=False
         if not np.any(radiative):accepted[:]=True;cap[:]=0.
         fallback=~accepted
         if np.any(fallback):

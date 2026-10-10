@@ -50,10 +50,16 @@ def test_prepared_coefficients_are_immutable_and_cached():
     assert RMGroup(0,None,None,()).kernel_data[2].shape==(0,1)
 
 
+#: Production (Gram capture where allowed) and publication verification
+#: (compiled sums, direct capture everywhere) against the NumPy solver.
+MODES=[dict(absorption_rtol=1e-8),dict(absorption_rtol=0.,native=True)]
+
+
+@pytest.mark.parametrize('mode',MODES)
 @pytest.mark.parametrize('c',[1,2,3])
 @pytest.mark.parametrize('entrance',[0,1,2])
 @pytest.mark.parametrize('width',[None,1e-30,0.])
-def test_native_matches_direct(c,entrance,width):
+def test_native_matches_direct(c,entrance,width,mode):
     if entrance>=c:pytest.skip('entrance absent')
     if backend._native is None:pytest.skip('optional extension unavailable')
     e,er,gamma,a,f=problem(c)
@@ -61,14 +67,17 @@ def test_native_matches_direct(c,entrance,width):
     kwargs=dict(entrance=entrance,reduced=a,channel_factors=f,return_absorption=True)
     expected=solve_collision(e,er,gamma,None,**kwargs)
     diagnostics={}
-    actual=solve_collision(e,er,gamma,None,diagnostics,absorption_rtol=1e-8,**kwargs)
+    actual=solve_collision(e,er,gamma,None,diagnostics,**mode,**kwargs)
     assert diagnostics['rm_native_energies']==len(e)
+    # Without radiative widths capture is exactly zero, counted as Gram.
+    if mode['absorption_rtol']==0. and width!=0.:assert diagnostics.get('rm_native_gram_energies',0)==0
     np.testing.assert_allclose(actual[0],expected[0],rtol=3e-11,atol=1e-12)
     np.testing.assert_allclose(actual[1],expected[1],rtol=3e-11,atol=0.)
 
 
+@pytest.mark.parametrize('mode',MODES)
 @pytest.mark.parametrize('case',['undamped','coincident','tiny','large','weak','missing','strict'])
-def test_reference_limits_retained(case,monkeypatch):
+def test_reference_limits_retained(case,mode,monkeypatch):
     e,er,gamma,a,f=problem()
     if case=='undamped':gamma[:]=0.
     if case=='coincident':
@@ -82,9 +91,10 @@ def test_reference_limits_retained(case,monkeypatch):
         try:expected=solve_collision(e,er,gamma,None,**kwargs)
         except (FloatingPointError,np.linalg.LinAlgError) as error:
             with pytest.raises(type(error)):
-                solve_collision(e,er,gamma,None,absorption_rtol=1e-8,**kwargs)
+                solve_collision(e,er,gamma,None,**mode,**kwargs)
             return
-        actual=solve_collision(e,er,gamma,None,absorption_rtol=1e-10 if case=='strict' else 1e-8,**kwargs)
+        if case=='strict' and mode['absorption_rtol']:mode=dict(absorption_rtol=1e-10)
+        actual=solve_collision(e,er,gamma,None,**mode,**kwargs)
     for x,y in zip(actual,expected):np.testing.assert_allclose(x,y,rtol=3e-11,atol=1e-12)
 
 
@@ -221,3 +231,28 @@ def test_native_channel_solver_checks_buffers(kind):
     if kind=='dimensions':args[0]=2**62
     if kind=='entrance':args[2]=3
     with pytest.raises((ValueError,BufferError)):backend._native.channel_solve(*args)
+
+
+def test_the_exact_native_witness_is_the_numpy_reference_on_a_real_region():
+    """Publication verification: compiled exact physics against the NumPy solver."""
+    if backend._native is None:pytest.skip('optional extension unavailable')
+    from pathlib import Path
+    from kika.endf.read_endf import read_endf
+    from kika.endf.model_adapter import decodeReactionSuite
+    from kika.endf.reconstruction import context_from_endf
+    from kika.processing.resonances.prepare import evaluate_region, prepare_resonances
+    from kika.processing.resonances.prepare_r_matrix import normalize_suite_pairs
+    from kika.processing.resonances.unresolved import normalize_unresolved_links
+    tape=read_endf(str(Path(__file__).resolve().parents[2]/'endf/tests/data/micro_fe56_structural.endf'),mf_numbers=[1,2,3])
+    suite,report=decodeReactionSuite(tape);suite.report=report
+    context,_=context_from_endf(tape,suite)
+    resonances=normalize_unresolved_links(suite,normalize_suite_pairs(suite,context),'eval')
+    (region,)=prepare_resonances(resonances,context,conversion_report=report,allow_empty=True).regions
+    assert region.approximation=='ReichMoore'
+    e=np.geomspace(1e-5,region.high,4000)[:-1]
+    diagnostics={}
+    exact=evaluate_region(e,region,context,absorption_rtol=0.)
+    native=evaluate_region(e,region,context,diagnostics,absorption_rtol=0.,native=True)
+    assert diagnostics['rm_native_energies']>0 and diagnostics.get('rm_native_gram_energies',0)==0
+    for mt in (1,2,102):
+        np.testing.assert_allclose(native[mt],exact[mt],rtol=1e-11,atol=1e-14)

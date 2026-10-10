@@ -241,8 +241,8 @@ class SuiteReconstructionResult:
         if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
         constant_values={} if constant_values is None else constant_values
         grouped={}
-        # Independent verification keeps the ordinary background readers as
-        # well as the direct NumPy physical kernel.
+        # Verification keeps the ordinary background readers and evaluates the
+        # physics exactly (direct capture, no Gram contraction).
         if shared_linear and physical_witness is None:
             for keys,reader in s._shared_linear:
                 needed=[(i,key) for i,key in enumerate(keys) if key not in constant_values
@@ -266,8 +266,11 @@ class SuiteReconstructionResult:
                     saved_e,physical=physical_witness[start]
                     if not np.array_equal(saved_e,e[sl]):raise ValueError('physical witness energy mismatch')
                 else:
+                    # The verification witness is exact (no Gram capture), computed
+                    # by the compiled kernel; tests hold that to the NumPy solver.
                     physical=evaluate_region(e[sl],s.region,self._prepared.context,work_bytes=self.options.max_work_bytes,
-                        absorption_rtol=0. if physical_witness is not None else min(1e-8,self.options.rtol*1e-5))
+                        absorption_rtol=0. if physical_witness is not None else min(1e-8,self.options.rtol*1e-5),
+                        native=physical_witness is not None)
                     for g in s.region.groups:
                         if not g.competitive_in_background:continue
                         owner = self._mt_keys.get(g.competitive_mt)

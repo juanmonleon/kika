@@ -321,7 +321,7 @@ def group_breaks(group):
     return breaks
 
 
-def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_rtol=0.):
+def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_rtol=0.,native=False):
     """Size exact RM/RML energy batches from a conservative workspace estimate.
 
     Covers level/channel temporaries per energy, not retained tables, parser
@@ -345,7 +345,8 @@ def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_r
         not g.level_metric and all(not ch.charge_strength and ch.external is None
             and ch.boundary==0. and (ch.shift!='calculate' or ch.l==0 or ch.effective)
             for ch in g.channels) for g in region.groups))
-    if (region.approximation=='ReichMoore' or diagonal_rml) and absorption_rtol==1e-8:
+    if ((region.approximation=='ReichMoore' or diagonal_rml) and absorption_rtol==1e-8
+            or region.approximation=='ReichMoore' and native and absorption_rtol==0.):
         from ._rm_acceleration import eligible
         # The reference single-energy limit above is retained: exceptional
         # rows must still be solvable within the requested workspace target.
@@ -366,7 +367,16 @@ def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_r
     return max(1,min(maximum,(work_bytes-fixed)//largest))
 
 
-def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*1024**2,absorption_rtol=0.):
+def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*1024**2,absorption_rtol=0.,native=False):
+    """Cross sections of one prepared region at ``energies``.
+
+    ``absorption_rtol=0`` is exact. By default it is the NumPy reference
+    solver; ``native=True`` computes the same exact quantities in the compiled
+    kernel (Reich-Moore: all-level sums and direct capture, no Gram
+    contraction; Breit-Wigner: the same level sums), falling back to NumPy
+    wherever the kernel is unavailable or a row is ineligible. Publication
+    verification uses it; the tests hold it to the NumPy reference.
+    """
     if region.approximation == 'Unresolved':
         from .unresolved import evaluate_unresolved
         return evaluate_unresolved(energies,region,diagnostics)
@@ -381,9 +391,11 @@ def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*102
     if region.approximation=='ReichMoore':
         # Limit temporary level/channel arrays independently of caller block size.
         out={mt:np.zeros_like(energies) for mt in (1,2,18,102)}
-        block=energy_block_size(region,work_bytes=work_bytes,absorption_rtol=absorption_rtol)
+        block=energy_block_size(region,work_bytes=work_bytes,absorption_rtol=absorption_rtol,native=native)
         for start in range(0,len(energies),block):
             sl=slice(start,start+block)
-            for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes,absorption_rtol=absorption_rtol).items():out[mt][sl]=value
+            for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes,
+                                        absorption_rtol=absorption_rtol,native=native).items():out[mt][sl]=value
         return out
-    return evaluate_bw(energies,region.groups,region.approximation,context,work_bytes=work_bytes,accelerated=absorption_rtol==1e-8)
+    return evaluate_bw(energies,region.groups,region.approximation,context,work_bytes=work_bytes,
+                       accelerated=absorption_rtol==1e-8 or native)
