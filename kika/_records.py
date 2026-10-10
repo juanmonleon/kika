@@ -40,6 +40,29 @@ def _mantissa_precision(exponent: int) -> int:
     return 4
 
 
+def _scientific_parts(abs_val):
+    """``(mantissa digits, exponent)`` of the 11-column scientific field.
+
+    The decimals depend on the exponent's width and the exponent on the
+    rounding, so the two are iterated together. Just below 1e-9 or 1e-99 they
+    have no common fixed point: 9.999995000000001e-10 rounds to 1.00000e-09
+    with five decimals and back to 9.999995e-10 with six. That used to loop
+    forever. The field that fits is the carried one, ``1.000000-9``.
+    """
+    prec = _mantissa_precision(int(math.floor(math.log10(abs_val))))
+    seen = {}
+    while True:
+        mantissa_str, exponent_str = f"{abs_val:.{prec}e}".split("e")
+        exponent = int(exponent_str)
+        if _mantissa_precision(exponent) == prec:
+            return mantissa_str, exponent
+        seen[prec] = exponent
+        prec = _mantissa_precision(exponent)
+        if prec in seen:
+            carried = max(seen[prec], exponent)
+            return "1." + "0" * _mantissa_precision(carried), carried
+
+
 def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
     """
     Format a number according to ENDF specifications.
@@ -96,13 +119,7 @@ def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
     # The number of decimals keeps the field at 11 characters: one is given up
     # for each extra digit the exponent needs, and a carry that changes the
     # exponent's width (9.99999e9 -> 1.0e10) is formatted again.
-    prec = _mantissa_precision(int(math.floor(math.log10(abs_val))))
-    while True:
-        mantissa_str, exponent_str = f"{abs_val:.{prec}e}".split("e")
-        exponent = int(exponent_str)
-        if _mantissa_precision(exponent) == prec:
-            break
-        prec = _mantissa_precision(exponent)
+    mantissa_str, exponent = _scientific_parts(abs_val)
 
     exp_str = f"{abs(exponent):d}" if abs(exponent) < 10 else (
         f"{abs(exponent):02d}" if abs(exponent) < 100
@@ -209,6 +226,62 @@ def format_endf_number_precise(value, width=11):
                 return legacy
             places -= 1
     return legacy
+
+
+def format_endf_fields(values, data_format=None):
+    """Many floats as 11-column fields, the same text as one call per value.
+
+    ``data_format`` is ``ENDF_FORMAT_PRECISE`` or ``ENDF_FORMAT_FLOAT``. It
+    repeats :func:`format_endf_number` and :func:`format_endf_number_precise`
+    operation for operation, without their per-value overhead: the legacy
+    field is read back with ``float()`` on its own digits instead of the ENDF
+    grammar. A PENDF body is millions of these (U-238: ~3.3 M).
+    """
+    precise = data_format == ENDF_FORMAT_PRECISE
+    out = []
+    append = out.append
+    floor, log10, isfinite = math.floor, math.log10, math.isfinite
+    for value in values:
+        value = float(value)
+        if value == 0:
+            append(" 0.000000+0")
+            continue
+        if not isfinite(value):
+            raise ValueError(f"Cannot format non-finite ENDF value: {value}")
+        abs_val = -value if value < 0 else value
+        exponent0 = int(floor(log10(abs_val)))
+        mantissa_str, exponent = _scientific_parts(abs_val)
+        sign_char = "-" if value < 0 else " "
+        exp_sign = "+" if exponent >= 0 else "-"
+        legacy = f"{sign_char}{mantissa_str}{exp_sign}{abs(exponent)}"
+        if not precise:
+            append(legacy)
+            continue
+        digits = exponent0 + 1 if exponent0 >= 0 else 1
+        sign = 1 if value < 0 else 0
+        if digits + sign > 11:
+            append(legacy)
+            continue
+        places = 11 - digits - sign - 1
+        if places < 0:
+            places = 0
+        chosen = legacy
+        while places >= 0:
+            fixed = f"{value:.{places}f}"
+            if len(fixed) <= 11:
+                named = float(fixed)
+                while places > 0:
+                    shorter = f"{value:.{places - 1}f}"
+                    if float(shorter) != named:
+                        break
+                    fixed, places = shorter, places - 1
+                legacy_value = float(f"{sign_char.strip()}{mantissa_str}e{exp_sign}{abs(exponent)}")
+                if abs(named - value) < abs(legacy_value - value):
+                    chosen = fixed.rjust(11)
+                break
+            places -= 1
+        append(chosen)
+    return out
 
 
 def round_to_precise_endf_field(values):

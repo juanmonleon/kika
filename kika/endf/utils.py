@@ -31,6 +31,7 @@ from .._records import (
     ENDF_FORMAT_PRESERVE,
     MAX_SEQUENCE_NUMBER,
     format_endf_data_line,
+    format_endf_fields,
     format_endf_id_columns,
     format_endf_number,
     parse_endf_id,
@@ -718,6 +719,10 @@ def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK,
     lines : list of str
     next_line_num : int
     """
+    if data_format in (ENDF_FORMAT_PRECISE, ENDF_FORMAT_FLOAT):
+        fast = _format_float_pairs(x_data, y_data, mat, mf, mt, start_line, pad, data_format)
+        if fast is not None:
+            return fast
     result_lines = []
     line_num = start_line
     n = len(x_data)
@@ -737,6 +742,34 @@ def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK,
         line_num += 1
         i += 3
     return result_lines, line_num
+
+
+def _format_float_pairs(x_data, y_data, mat, mf, mt, start_line, pad, data_format):
+    """The float body of a TAB1 in one pass: same text as the line-by-line path.
+
+    A PENDF is mostly this (U-238: tens of millions of fields), so the fields
+    are formatted in a batch and joined six to a line. Returns None for data
+    that is not plain floats, which keeps the general path.
+    """
+    x = np.asarray(x_data)
+    y = np.asarray(y_data)
+    if x.dtype.kind != "f" or y.dtype.kind != "f" or x.shape != y.shape or x.ndim != 1:
+        return None
+    pairs = np.empty(2 * len(x))
+    pairs[0::2], pairs[1::2] = x, y
+    fields = format_endf_fields(pairs.tolist(), data_format)
+    remainder = len(fields) % 6
+    if remainder:
+        filler = " 0.000000+0" if pad == PAD_ZERO else " " * 11
+        fields.extend([filler] * (6 - remainder))
+    prefix = f"{mat:4d}{mf:2d}{mt:3d}"
+    lines = []
+    line_num = start_line
+    for start in range(0, len(fields), 6):
+        sequence = line_num if line_num <= MAX_SEQUENCE_NUMBER else ((line_num - 1) % MAX_SEQUENCE_NUMBER) + 1
+        lines.append("".join(fields[start:start + 6]) + f"{prefix}{sequence:5d}")
+        line_num += 1
+    return lines, line_num
 
 
 class NonMonotonicTable(ValueError):
