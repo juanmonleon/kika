@@ -395,7 +395,7 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
 
     # -- §9 styles. Declaration only: `writeStyles` is already table-driven by
     #    `gndsNodeName`, so there is no dispatch here to convert -- what the
-    #    table adds is the count. Two are read, twelve can be written, and
+    #    table adds is the count. Three are read, twelve can be written, and
     #    `RS_StylesType` (gnds.xsd:87-93) admits four.
     _spec("evaluated", "style", "§9.2.1", Evaluated, Status.PAIRED),
     _spec("crossSectionReconstructed", "style", "§9.3.1",
@@ -410,18 +410,14 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     _spec("CoulombPlusNuclearElasticMuCutoff", "style", "§9.3.3",
           CoulombPlusNuclearElasticMuCutoff, Status.WRITE_ONLY,
           "as `realization`. Not in RS_StylesType (gnds.xsd:87-93)"),
-    _spec("heated", "style", "§9.4.1", Heated, Status.WRITE_ONLY,
-          "as `realization`, and **built live** by "
-          "kika/ace/model_adapter/decode.py:141 — an ACE-decoded suite written "
-          "with kika.write emits a style its own reader will not take back. "
-          "Legal in RS_StylesType"),
+    _spec("heated", "style", "§9.4.1", Heated, Status.PAIRED),
     _spec("averageProductData", "style", "§9.4.2", AverageProductData,
           Status.WRITE_ONLY, "as `realization`. Legal in RS_StylesType (gnds.xsd:87-93)"),
     _spec("MonteCarlo_cdf", "style", "§9.4.3", MonteCarlo_cdf,
           Status.WRITE_ONLY, "as `realization`. Not in RS_StylesType (gnds.xsd:87-93)"),
     _spec("griddedCrossSection", "style", "§9.4.4", GriddedCrossSection,
           Status.WRITE_ONLY,
-          "as `heated`, built by kika/ace/model_adapter/decode.py:141, and "
+          "built by kika/ace/model_adapter/decode.py:141, and "
           "**not** in RS_StylesType — so the file kika writes from an ACE "
           "decode is rejected by FUDGE's own schema"),
     _spec("URR_probabilityTables", "style", "§9.4.5", URR_probabilityTables,

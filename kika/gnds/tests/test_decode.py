@@ -665,13 +665,13 @@ def test_a_subtract_summand_is_reported(h2_gnds):
 
 
 def test_an_unmodelled_style_is_reported_rather_than_dropped(h2_gnds):
-    """``heated`` is modelled and occurs in no distributed neutron evaluation."""
+    """Styles without an implemented codec remain explicitly reported."""
     tree = ET.parse(h2_gnds)
     styles = tree.getroot().find("styles")
-    ET.SubElement(styles, "heated").attrib.update(
+    ET.SubElement(styles, "heatedMultiGroup").attrib.update(
         {"label": "heated300", "derivedFrom": "eval"}
     )
 
     suite, report = readReactionSuite(Document(root=tree.getroot()))
     assert suite.styles.labels == ["eval"]
-    assert any("/styles/heated:" in entry for entry in report.unsupported)
+    assert any("/styles/heatedMultiGroup:" in entry for entry in report.unsupported)

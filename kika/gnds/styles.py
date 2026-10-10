@@ -6,41 +6,34 @@ here rather than in either reader: the first version put it on the reactionSuite
 reader alone, and the covariance file kika wrote came out without a ``styles``
 and failed validation on the first line after ``externalFiles``.
 
-Only the two style nodes the library uses are built — ``evaluated`` (558 files)
-and ``crossSectionReconstructed`` (482). The rest of §9 is modelled and occurs
-in no distributed neutron evaluation, so meeting one is reported rather than
-guessed at.
+Evaluated and reconstructed styles describe the distributed evaluations;
+``heated`` additionally preserves processed cross sections and their temperature.
+Other styles are reported when their reader is not implemented.
 """
 from __future__ import annotations
 
+import math
 import xml.etree.ElementTree as ET
 from typing import Optional
 
 from kika.gnds.nodes import reads, writes
 from kika.nuclear_data.model import (ConversionReport, CrossSectionReconstructed,
-                                     Evaluated, PhysicalQuantity, RangeQuantity,
+                                     Evaluated, Heated, PhysicalQuantity, RangeQuantity,
                                      Style, Styles, TargetInfo, TargetInfoElement,
                                      TargetInfoNuclide)
 
 __all__ = ["STYLES", "WRITABLE_STYLES", "readStyles", "writeStyles",
            "readPhysicalQuantity", "readRange"]
 
-#: §9 node name → the class it becomes. **The reader's whole vocabulary**: two
-#: of the twelve styles the model declares.
+#: §9 node name → supported reader class.
 STYLES = {
     "evaluated": Evaluated,
     "crossSectionReconstructed": CrossSectionReconstructed,
+    "heated": Heated,
 }
 
-#: What :func:`writeStyles` can emit, derived from the model rather than listed:
-#: it writes ``style.gndsNodeName``, so any style class the model declares comes
-#: out. Twelve, against ``STYLES``'s two — and against the **four**
-#: ``RS_StylesType`` admits (``gnds.xsd:87-93``). The asymmetry is not
-#: 2-against-12: it is 2 read / 12 written / 4 legal, and two of the illegal
-#: eight are built live by ``kika/ace/model_adapter/decode.py:141``.
-#:
-#: Derived so that a style class added to the model is a node
-#: ``kika/gnds/nodes.py`` must declare — the import fails until it does.
+#: Writer vocabulary derived from the model. Some other styles still have no
+#: reader; Heated has an explicit, validated temperature codec in both directions.
 WRITABLE_STYLES = tuple(sorted(cls.gndsNodeName for cls in Style.__subclasses__()))
 
 
@@ -49,6 +42,23 @@ def readPhysicalQuantity(element: Optional[ET.Element]) -> Optional[PhysicalQuan
         return None
     return PhysicalQuantity(value=float(element.attrib["value"]),
                             unit=element.attrib.get("unit", ""))
+
+
+def _heatedTemperature(style: Heated) -> PhysicalQuantity:
+    """Reject incomplete processed metadata instead of losing its meaning."""
+    temperature = style.temperature
+    if (not isinstance(temperature, PhysicalQuantity)
+            or temperature.unit != "K"
+            or isinstance(temperature.value, bool)
+            or not isinstance(temperature.value, (int, float))
+            or not math.isfinite(temperature.value)
+            or temperature.value < 0):
+        raise ValueError(
+            f"heated style {style.label!r} requires a finite non-negative temperature in K"
+        )
+    if not isinstance(style.derivedFrom, str) or not style.derivedFrom.strip():
+        raise ValueError(f"heated style {style.label!r} requires derivedFrom")
+    return temperature
 
 
 def readRange(element: Optional[ET.Element]) -> Optional[RangeQuantity]:
@@ -120,6 +130,9 @@ def readStyles(element: ET.Element, path: str, report: ConversionReport,
             info = child.find("targetInfo")
             if info is not None:
                 style.targetInfo = readTargetInfo(info)
+        if isinstance(style, Heated):
+            style.temperature = readPhysicalQuantity(child.find("temperature"))
+            _heatedTemperature(style)
         document = child.find("documentation")
         if document is not None and (len(document) or document.attrib or (document.text or "").strip()):
             from .documentation import readDocumentation
@@ -143,6 +156,10 @@ def writeStyles(root: ET.Element, styles: Styles, number,
     What is written is what was read (``documentation.py``: texts, authors,
     dates); a style read with none gets none, and kika invents nothing.
     """
+    # Validate mutable Heated metadata before changing the output tree.
+    for style in styles:
+        if isinstance(style, Heated):
+            _heatedTemperature(style)
     container = ET.SubElement(root, "styles")
     for style in styles:
         element = ET.SubElement(container, style.gndsNodeName)
@@ -159,6 +176,11 @@ def writeStyles(root: ET.Element, styles: Styles, number,
             else:
                 from .documentation import writeDocumentation
                 writeDocumentation(element, style.documentation)
+        if isinstance(style, Heated):
+            temperature = _heatedTemperature(style)
+            node = ET.SubElement(element, "temperature")
+            node.attrib["value"] = number(temperature.value)
+            node.attrib["unit"] = temperature.unit
         if not isinstance(style, Evaluated):
             continue
         for name, value in (("library", style.library),
