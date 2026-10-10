@@ -580,7 +580,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             seeds,options,options.max_points-points,constants=constants,deferred=deferred)
         points+=len(x);tables.append((x,y));checks.append(dict(domain=(s.low,s.high),points=len(x),**check))
         if progress is not None:
-            progress(min(1.,np.log(s.high/low)/span) if span else len(tables)/len(segments))
+            progress(float(min(1.,np.log(s.high/low)/span)) if span else len(tables)/len(segments))
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')]);output={}
     from kika.algebra import compress_flat
     for key in entries:

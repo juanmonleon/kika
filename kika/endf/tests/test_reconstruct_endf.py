@@ -56,6 +56,7 @@ def test_progress_reports_each_stage_in_order(reconstruction):
     assert stages[:4] == ["read", "read", "decode", "decode"] and stages[4] == "reconstruct"
     fractions = [f for s, f in events if s == "reconstruct" and f is not None]
     assert fractions and np.all(np.diff(fractions) >= 0) and fractions[-1] == pytest.approx(1.0)
+    assert all(type(f) is float for _, f in events if f is not None)
 
 
 def test_a_failed_write_is_a_typed_publication_failure(reconstruction, monkeypatch, tmp_path):
