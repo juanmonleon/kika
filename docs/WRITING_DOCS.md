@@ -13,27 +13,38 @@ pages stay as they are until they are rewritten.
 
 ## 1. What the documentation is for
 
-**The test for the whole manual: someone who has never read the code can answer "how does
-kika compute this, under which assumptions, and how do we know it is right?" from the
-pages alone.** This includes a referee, a user whose numbers disagree with NJOY's, and
-the author six months from now.
+**The test for the whole manual: someone who has never read the code can answer "how is
+kika built, how does it read and represent the data, how does it compute this, under which
+assumptions, and how do we know it is right?" from the pages alone.** This includes a
+referee, a user whose numbers disagree with NJOY's, a contributor about to add a format,
+and the author six months from now.
+
+**Design decisions are documented with their reasons.** Every structural choice (the
+layers, the canonical model, how a format is read, what is refused) is stated as the
+decision, why kika makes it, and what follows from it. An alternative is named only to
+say, in the present tense, why kika does not do it.
 
 The documentation answers questions about kika. It does not record how kika got there:
-history, rejected alternatives, dates of decisions and work in progress belong in the
-project's development notes, never on these pages.
+history, dates of decisions, the order things were built in and work in progress belong
+in the project's development notes, never on these pages.
 
-## 2. The four sections, and where a paragraph goes
+## 2. The five sections, and where a paragraph goes
 
 | Section | Directory | Answers | Changes when |
 |---|---|---|---|
 | **User guide** | `user_guide/` | *How do I do X with kika?* Task-oriented: a goal, the calls that reach it, what comes back. Tutorials are worked examples of the same thing. | The API changes |
-| **Methods** | `methods/` | *How does kika compute X, and why that way?* The theory manual: equations, conventions, limits, validation. | The algorithm changes |
+| **Architecture** | `architecture/` | *How is kika built, and why that way?* The layers and the direction of their dependencies, the canonical model every format goes through, the format adapters, the algebra layer, and the tests that hold them in place. | The structure changes |
+| **Methods** | `methods/` | *How does kika compute X, and why that way?* The theory manual: equations, conventions, limits, validation. Its `formats/` chapter answers *how does kika read and write format X?* | An algorithm, or the reading of a format, changes |
 | **API reference** | `api_reference/` | *What exactly does this function take and return?* Generated from docstrings by autodoc. | A signature changes |
 | **About** | `about/` | What kika is, licence, how to cite. | Rarely |
 
 **The placement test, applied per paragraph, not per page:**
 
 - It tells the reader which calls to make and in what order → **User guide.**
+- It would stay true if an algorithm changed, but not if the layers, the model or the
+  way formats reach it changed → **Architecture.**
+- It says what kika reads from a file, what it assumes where the file is silent, what it
+  refuses, or what is lost writing it back → **Methods, `formats/` chapter.**
 - It would stay true if the function were renamed, but not if the algorithm changed →
   **Methods.**
 - It is the contract of one function (parameters, return value, exceptions) → the
@@ -52,7 +63,12 @@ guides: a reader of this site cannot follow a link into them. When a methods pag
 app guide explain the same thing, the methods page is the authority on what kika
 computes, and the app guide follows it.
 
-## 3. Methods pages: the template
+## 3. Page templates
+
+Methods pages, format pages and architecture pages each have a fixed template (§3.1-§3.3).
+User-guide pages are free in form but follow §5-§6.
+
+### 3.1 Methods pages
 
 Every methods page has these sections, **in this order, with these headings**. A section
 that genuinely has nothing to say keeps its heading and one line saying so ("None: the
@@ -109,11 +125,125 @@ A page that covers a family (e.g. the R-matrix formalisms) may repeat **What it 
 → **Limits** per member under h3 headings, but keeps one Validation, one Implementation
 and one References section.
 
+### 3.2 Format pages (`methods/formats/`)
+
+One page per format (ENDF, GNDS, ACE, G4NDL), on how kika reads it into the canonical
+model and writes the model back. A format with much to say may split reading and
+writing into two pages; both keep the template. The sections, in this order, with these
+headings:
+
+````markdown
+# Reading and writing <format>
+
+```{admonition} At a glance
+:class: note
+**Reads:** what kika decodes, in one sentence.
+**Writes:** what it encodes.
+**Into:** the model objects it produces (link the architecture page).
+**Entry points:** `module.function`.
+**Status:** stable | experimental — since <version>.
+```
+
+## Background
+The format at the minimum needed to read the page: its units, its records, how its data
+is organised, with citations to the format's own manual.
+
+## Coverage
+A table: each part of the format (section, record type, node) → what kika does with it
+(decoded into which model object, kept verbatim, or refused), with the reason in a few
+words when it is not decoded.
+
+## Reading
+How the file becomes the model, step by step: the grammar rules that change a number
+(how a float is parsed, how interpolation regions map to model functions, how a step is
+spelled), and which model object each part lands in.
+
+## Assumptions and defaults
+What kika assumes where the file is silent (a default value, a unit, a frame), one bullet
+each, with its reason.
+
+## Ambiguous and inconsistent input
+Each case where the file allows more than one reading, or contradicts itself: what kika
+does, why, and what it reports.
+
+## Refused
+What kika will not read, the exception it raises, and why it raises instead of guessing.
+
+## Writing
+How the model is written back: what is derived because the model does not carry it,
+the formatting rules, what is recomputed (counts, pointers, sums).
+
+## What the round trip keeps and loses
+Read → model → write: what comes back bit for bit, what comes back numerically equal,
+what is not preserved, and why.
+
+## Report
+The entries a user finds in the conversion report, what each means, and which ones
+should worry them.
+
+## Validation
+The round-trip and oracle checks (another reader, FUDGE, NJOY), on which files, with the
+test that enforces each.
+
+## Implementation
+Which module does which step. No line numbers.
+
+## References
+````
+
+### 3.3 Architecture pages (`architecture/`)
+
+On the structure of kika: an overview that maps the whole, and one page per structural
+element (the layers, the canonical model, the format adapters, the algebra layer). The
+sections, in this order, with these headings:
+
+````markdown
+# <The element, as a noun phrase>           ← "The canonical model"
+
+```{admonition} At a glance
+:class: note
+**Decides:** the structural rule, in one sentence.
+**Packages:** the packages it covers.
+**Enforced by:** the test or mechanism that holds it, or "convention only".
+```
+
+## The structure
+What exists and how the parts connect, with a figure when the connections are more than
+a list.
+
+## Design decisions
+One h3 per decision: the decision, why kika makes it, and what follows from it (what it
+costs, what it makes possible). The heart of the page.
+
+## What it rules out
+What code may not do under this structure, and how a violation is caught.
+
+## Known exceptions
+Every place the code does not yet follow the structure, why it stands, and what keeps it
+from growing. "None." when there are none.
+
+## Extending it
+Where new work goes: which layer a new format, quantity or algorithm belongs to, and the
+test it has to pass.
+
+## Implementation
+Which module holds which part. No line numbers.
+
+## References
+````
+
+The overview page is the exception: it keeps **The structure** and **Design decisions**,
+then a short section per element linking its page, and no **Known exceptions** of its
+own.
+
 ## 4. Level of detail
 
 **The reproducibility bar.** A methods page is detailed enough that a competent reader
 could reimplement the method from the page alone and land within the tolerances its
-Validation section quotes. Below that bar it is a summary. Above it (every branch of the
+Validation section quotes. A format page is detailed enough that a competent reader
+could write a reader producing the same model from the same file, and predict what kika
+does with any section of it. An architecture page is detailed enough that a reader can
+say, for any piece of code, which layer it belongs to and which imports it may not make. Below that bar it is a summary. Above it (every branch of the
 code, every guard) it is a code listing in prose; that detail belongs in the code.
 
 Concretely:
@@ -245,9 +375,9 @@ Every page, every author, the same four steps.
 1. **Understand.** Read the code that implements the method, its tests, and any existing
    page or docstring on it. List the conventions and refusals you found in the code.
 2. **Place.** Decide the section (§2) and the file name (`methods/<chapter>/<slug>.md`,
-   lower-case, hyphenated). Check no other page already covers it. Name the notation
+   `methods/formats/<format>.md` or `architecture/<slug>.md`, lower-case, hyphenated). Check no other page already covers it. Name the notation
    it needs and whether it is in `notation.md`.
-3. **Write** to the template (§3), at the level of §4, under the rules of §5-§6.
+3. **Write** to the template of its kind (§3.1-§3.3), at the level of §4, under the rules of §5-§6.
 4. **Verify.** Re-read every claim against the code. Trace every number to a test.
    Build with `-W`. Then hand over with a list of what was checked, what is marked
    `TODO`, and what you were unsure about.
