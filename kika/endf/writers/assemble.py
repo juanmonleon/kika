@@ -817,15 +817,15 @@ def _resample_reconstructed_endf(suite, label):
 
 
 #: Share of publication time per step, measured on ENDF/B-VIII.1 U-238 with the
-#: compiled verification and the batch writer (190/2/77/28/20 s); only the
+#: compiled verification on four threads and the batch writer (64/2/66/22/22 s); only the
 #: progress bar uses it. The first verification usually runs earlier, in
 #: ``attach_reconstruction``, and is then a cache hit here; the caller can map
 #: that call onto the "verify" share (``PUBLICATION_VERIFY_SHARE``).
-_PUBLICATION_STEPS = (("verify", .58), ("resample", .01), ("write", .24), ("reload", .09), ("reverify", .08))
+_PUBLICATION_STEPS = (("verify", .36), ("resample", .01), ("write", .38), ("reload", .12), ("reverify", .13))
 PUBLICATION_VERIFY_SHARE = _PUBLICATION_STEPS[0][1]
 
 
-def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progress=None):
+def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progress=None, workers=None):
     """Write, reload and verify before replacing the requested destination.
 
     The result must already be attached to the suite. A new derived tape uses
@@ -849,7 +849,7 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progr
             start, share = starts[step]
             progress(float(min(1., start + share * fraction)))
     result.verify_source(suite)
-    result.verify_suite(suite, progress=lambda f: advance("verify", f))
+    result.verify_suite(suite, progress=lambda f: advance("verify", f), workers=workers)
     advance("verify")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -869,7 +869,7 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progr
         if not conversion.isCleanFor('cross-sections'):
             raise ValueError(f'reconstructed ENDF reload is incomplete: {vars(conversion)}')
         advance("reload")
-        result.verify_suite(reloaded, label='eval', progress=lambda f: advance("reverify", f))
+        result.verify_suite(reloaded, label='eval', progress=lambda f: advance("reverify", f), workers=workers)
         provisional.replace(target)
         if progress is not None:
             progress(1.0)

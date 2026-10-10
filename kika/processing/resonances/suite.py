@@ -266,17 +266,15 @@ class SuiteReconstructionResult:
                     saved_e,physical=physical_witness[start]
                     if not np.array_equal(saved_e,e[sl]):raise ValueError('physical witness energy mismatch')
                 else:
-                    # The verification witness is exact (no Gram capture), computed
-                    # by the compiled kernel; tests hold that to the NumPy solver.
-                    physical=evaluate_region(e[sl],s.region,self._prepared.context,work_bytes=self.options.max_work_bytes,
-                        absorption_rtol=0. if physical_witness is not None else min(1e-8,self.options.rtol*1e-5),
-                        native=physical_witness is not None)
-                    for g in s.region.groups:
-                        if not g.competitive_in_background:continue
-                        owner = self._mt_keys.get(g.competitive_mt)
-                        if owner is None or owner in self._graph:
-                            raise UnsupportedResonanceError("competitive background requires an exclusive model reaction")
-                        physical[g.competitive_mt]-=evaluate_bw(e[sl],(g,),s.region.approximation,self._prepared.context)[g.competitive_mt]
+                    self._check_competitive_owners(s.region)
+                    if physical_witness is not None:
+                        # The verification witness is exact (no Gram capture), computed
+                        # by the compiled kernel; tests hold that to the NumPy solver.
+                        physical=_exact_physical_block(s.region,self._prepared.context,e[sl],self.options.max_work_bytes)
+                    else:
+                        physical=evaluate_region(e[sl],s.region,self._prepared.context,work_bytes=self.options.max_work_bytes,
+                            absorption_rtol=min(1e-8,self.options.rtol*1e-5))
+                        _subtract_competitive(physical,s.region,self._prepared.context,e[sl])
                     if physical_witness is not None:
                         # Store the physical partials, never the candidate table
                         # or the assembled sums. Bytes own an immutable snapshot.
@@ -294,6 +292,52 @@ class SuiteReconstructionResult:
             for key in self._order:values[key]=sum((values[part] for part in self._graph[key]),np.zeros(len(e)))
         if any(np.any(~np.isfinite(v)) for v in values.values()):raise FloatingPointError('nonfinite suite cross section')
         return values
+
+    def _check_competitive_owners(self,region):
+        for g in region.groups:
+            if not g.competitive_in_background:continue
+            owner=self._mt_keys.get(g.competitive_mt)
+            if owner is None or owner in self._graph:
+                raise UnsupportedResonanceError("competitive background requires an exclusive model reaction")
+
+    def _precompute_witnesses(self,witnesses,grids,verification_batch,fractions,workers,progress):
+        """Fill the exact physical witnesses on worker threads (see ``parallel``).
+
+        Returns False, leaving the serial path to compute them, when the work
+        is too small to be worth it. The blocks are the serial path's blocks
+        and the numbers are bit-identical.
+        """
+        from . import parallel
+        items=[];work=0.
+        for i,(segment,grid) in enumerate(zip(self._segments,grids)):
+            if segment.region is None:continue
+            self._check_competitive_owners(segment.region)
+            levels=sum(len(getattr(g,'levels',()) or ()) for g in segment.region.groups) or 1
+            for batch,points in enumerate(verification_batches(grid,verification_batch,fractions)):
+                if (i,batch) in witnesses[1]:continue
+                e=np.asarray(points,dtype=float).copy()
+                if segment.left_high:e[e==segment.high]=np.nextafter(segment.high,segment.low)
+                size=self.options.block_size
+                for start in range(0,len(e),size):
+                    items.append((i,batch,start,e[start:start+size]))
+                work+=len(e)*levels
+        if not items or work<parallel.PARALLEL_WORK_THRESHOLD:return False
+        freeze=lambda a:np.frombuffer(np.ascontiguousarray(a,dtype=float).tobytes(),dtype=float)
+        context=self._prepared.context;work_bytes=self.options.max_work_bytes
+        def compute(item):
+            i,_,_,e=item
+            return _exact_physical_block(self._segments[i].region,context,e,work_bytes)
+        def store(item,physical):
+            i,batch,start,e=item
+            witnesses[1].setdefault((i,batch),{})[start]=(freeze(e),{mt:freeze(v) for mt,v in physical.items() if mt!=1})
+        try:
+            parallel.compute_blocks(items,compute,workers,store,progress)
+        except BaseException:
+            # Never leave a partly filled batch behind: the serial path would
+            # treat its missing blocks as computed.
+            for i,batch,_,_ in items:witnesses[1].pop((i,batch),None)
+            raise
+        return True
 
     def evaluate(self,energies):
         e=np.asarray(energies,dtype=float)
@@ -323,11 +367,14 @@ class SuiteReconstructionResult:
         if _fingerprint(candidate, self.source_style) != self._source_hash:
             raise ValueError('evaluated source changed since reconstruction')
 
-    def verify_suite(self,suite,*,label=None,progress=None):
+    def verify_suite(self,suite,*,label=None,progress=None,workers=None):
         """Verify a complete model reloaded from GNDS or a processed ENDF tape.
 
         ``progress(fraction)`` is called after each batch with the share of
-        checked energies, a plain float in (0, 1].
+        checked energies, a plain float in (0, 1]. ``workers`` threads share
+        the exact physics of large materials (default
+        ``parallel.default_workers()``, at most four, low priority); 1 keeps
+        everything on this thread. The numbers are bit-identical either way.
         """
         from kika.nuclear_data.model import Regions1d
         from kika.algebra import prepare_evaluator
@@ -378,8 +425,18 @@ class SuiteReconstructionResult:
             self._verification_cache['last']=(dict(cached[1]),dict(cached[2]))
             return dict(cached[1])
         total=sum(len(g)+4*max(0,len(g)-1) for g in grids);done=0
+        fractions=np.array([.1732050807568877,.3819660112501051,.6180339887498949,.8267949192431123])
+        verification_batch=max(1,min(32768,self.options.max_work_bytes//(64*(len(checked)+1))))
+        if workers is None:
+            from .parallel import default_workers
+            workers=default_workers()
+        # Parallel physics first (0-90 % of the bar), then the comparison.
+        share=1.
+        if workers>1 and self._precompute_witnesses(witnesses,grids,verification_batch,fractions,workers,
+                (lambda f:progress(float(.9*f))) if progress is not None else None):
+            share=.1
+        report=(lambda f:progress(float(1-share+share*f))) if progress is not None else None
         for i,(segment,grid) in enumerate(zip(self._segments,grids)):
-            fractions=np.array([.1732050807568877,.3819660112501051,.6180339887498949,.8267949192431123])
             evaluators={}
             for key,curves in checked.items():
                 curve=curves[i]
@@ -388,7 +445,6 @@ class SuiteReconstructionResult:
                     raise ReconstructionConvergenceError('serialized units or interpolation changed')
                 try:evaluators[key]=prepare_evaluator(curve.xs,curve.ys,2)
                 except ValueError as exc:raise ReconstructionConvergenceError('invalid serialized table') from exc
-            verification_batch=max(1,min(32768,self.options.max_work_bytes//(64*(len(checked)+1))))
             for batch,points in enumerate(verification_batches(grid,verification_batch,fractions)):
                 # Fresh/edited/rounded output is checked again at every original
                 # node and probe. Only the immutable physical reference is reused.
@@ -411,7 +467,7 @@ class SuiteReconstructionResult:
                     if np.any(error_ratio(serialized[key],components,self.options)>1):
                         raise ReconstructionConvergenceError(f'serialized sum does not close within the total budget: {key}')
                 done+=len(points)
-                if progress is not None and total:progress(float(min(1.,done/total)))
+                if report is not None and total:report(float(min(1.,done/total)))
         if any(not np.isfinite(v) or v>1 for v in maxima.values()):raise ReconstructionConvergenceError(f'reloaded suite exceeds total budget: {maxima}; worst (eV, reference b, serialized b): {worst}')
         self._verification_cache['entry']=(signature,dict(maxima),dict(worst))
         self._verification_cache['last']=(dict(maxima),dict(worst))
@@ -426,6 +482,19 @@ class SuiteReconstructionResult:
         """
         last=self._verification_cache.get('last')
         return None if last is None else (dict(last[0]),dict(last[1]))
+
+
+def _subtract_competitive(physical,region,context,e):
+    for g in region.groups:
+        if g.competitive_in_background:
+            physical[g.competitive_mt]-=evaluate_bw(e,(g,),region.approximation,context)[g.competitive_mt]
+    return physical
+
+
+def _exact_physical_block(region,context,e,work_bytes):
+    """Exact physical partials of one verification block (serial and workers)."""
+    physical=evaluate_region(e,region,context,work_bytes=work_bytes,absorption_rtol=0.,native=True)
+    return _subtract_competitive(physical,region,context,e)
 
 
 #: Identifies the reconstruction physics, not the commit. Change it when a
@@ -648,7 +717,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         tuple(np.frombuffer(x.tobytes(),dtype=x.dtype) for x,_ in tables))
 
 
-def attach_reconstruction(suite,result,*,progress=None):
+def attach_reconstruction(suite,result,*,progress=None,workers=None):
     """Validate and attach a complete result atomically, preserving evaluated forms.
 
     ``progress(fraction)`` follows the verification, as in ``verify_suite``.
@@ -665,7 +734,7 @@ def attach_reconstruction(suite,result,*,progress=None):
     candidate=deepcopy(suite)
     for key,reaction in _entries(candidate).items():reaction.crossSection[result.label]=deepcopy(result.forms[key])
     candidate.styles.add(CrossSectionReconstructed(result.label,derivedFrom=result.source_style))
-    result.verify_suite(candidate,progress=progress)
+    result.verify_suite(candidate,progress=progress,workers=workers)
     # Publish prebuilt containers only after every operation that can fail.
     candidates=_entries(candidate)
     containers={}

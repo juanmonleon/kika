@@ -160,3 +160,21 @@ def test_charged_particle_level_mts_have_names():
     from kika.endf.reconstruction_report import reaction_name
     assert [reaction_name(mt) for mt in (600, 601, 649, 800, 849, 750)] == [
         "(n,p0)", "(n,p1)", "(n,pc)", "(n,α0)", "(n,αc)", "(n,³He0)"]
+
+
+def test_threaded_verification_is_the_serial_one(monkeypatch):
+    import kika.processing.resonances.parallel as parallel
+    from kika.processing.resonances import attach_reconstruction
+    monkeypatch.setattr(parallel, "PARALLEL_WORK_THRESHOLD", 0)
+    rec = reconstruct_endf(TAPE)
+    threads = []
+    original = parallel.compute_blocks
+    monkeypatch.setattr(parallel, "compute_blocks",
+                        lambda *a, **k: threads.append(1) or original(*a, **k))
+    attach_reconstruction(rec.suite, rec.result, workers=2)
+    assert threads, "the threaded path did not run"
+    parallel_maxima, parallel_worst = rec.result.last_verification
+    rec.result._verification_cache.clear()
+    serial = rec.result.verify_suite(rec.suite, workers=1)
+    assert serial == parallel_maxima and rec.result.last_verification[1] == parallel_worst
+    assert parallel.default_workers() in (1, 2, 3, 4)

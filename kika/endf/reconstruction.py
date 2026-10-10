@@ -141,10 +141,14 @@ class EndfReconstruction:
                                          None if lr is None else int(lr))
         return out
 
-    def write_pendf(self, path, *, progress: Progress | None = None, mat=None):
+    def write_pendf(self, path, *, progress: Progress | None = None, mat=None, workers: int | None = None):
         """Write the PENDF, reload it and verify it; the destination is replaced
         only if all of that passes. Raises ``ReconstructionConvergenceError``
-        (``verification-failed`` or ``publication-failed``) otherwise."""
+        (``verification-failed`` or ``publication-failed``) otherwise.
+
+        ``workers``: threads for the verification physics of heavy materials.
+        Default ``min(4, cores // 2)`` at below-normal priority; 1 keeps it in
+        this thread. The result is the same either way."""
         from kika.endf.writers.assemble import PUBLICATION_VERIFY_SHARE, writeReconstructedEndfTape
         from kika.processing.resonances import (ReconstructionConvergenceError,
                                                 UnsupportedResonanceError, attach_reconstruction)
@@ -153,10 +157,10 @@ class EndfReconstruction:
             progress("write", None)
         try:
             if not self._attached:
-                attach_reconstruction(self.suite, self.result, progress=(
+                attach_reconstruction(self.suite, self.result, workers=workers, progress=(
                     lambda f: progress("write", PUBLICATION_VERIFY_SHARE * f)) if progress else None)
                 self._attached = True
-            report = writeReconstructedEndfTape(self.suite, self.result, path, mat=mat,
+            report = writeReconstructedEndfTape(self.suite, self.result, path, mat=mat, workers=workers,
                                                 progress=(lambda f: progress("write", f)) if progress else None)
         except (ReconstructionConvergenceError, UnsupportedResonanceError):
             raise
