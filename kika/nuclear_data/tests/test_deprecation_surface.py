@@ -34,6 +34,13 @@ import pytest
 import kika.nuclear_data as nd
 
 
+#: The warnings raised by kika's own code (or by the test's ``-c`` body), not
+#: by a dependency imported on the way: with NumPy 2.5, xarray's import emits
+#: DeprecationWarnings of its own ("'generic' unit for NumPy timedelta"), and
+#: counting those would make these tests about the venv and not about kika.
+_OURS = "ours = [w for w in caught if 'site-packages' not in w.filename.replace(chr(92), '/')]\n"
+
+
 def _inSubprocess(body: str) -> str:
     completed = subprocess.run(
         [sys.executable, "-c", "import sys\n" + body],
@@ -77,7 +84,8 @@ def test_the_warning_fires_on_first_access_and_not_again():
         "    warnings.simplefilter('always')\n"
         "    import kika.nuclear_data as nd\n"
         "    nd.CrossSection; nd.CrossSection; nd.CrossSection\n"
-        "print(len(caught), caught[0].category.__name__)"
+        + _OURS +
+        "print(len(ours), ours[0].category.__name__)"
     )
     assert output == "1 DeprecationWarning"
 
@@ -89,7 +97,8 @@ def test_the_warning_does_not_fire_at_import():
         "with warnings.catch_warnings(record=True) as caught:\n"
         "    warnings.simplefilter('always')\n"
         "    import kika.nuclear_data\n"
-        "print(len([w for w in caught if w.category is DeprecationWarning]))"
+        + _OURS +
+        "print(len([w for w in ours if w.category is DeprecationWarning]))"
     )
     assert output == "0"
 
