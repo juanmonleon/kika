@@ -80,8 +80,8 @@ Inputs → outputs, in words, then the defining equation of the result.
 
 ## Method
 The algorithm, step by step, with every equation that defines the result. Numbered
-display equations. A derivation longer than a few lines goes in a "Derivation"
-dropdown at the end of this section.
+display equations. A derivation longer than a few lines goes in a "### Derivation"
+subsection at the end of this section.
 
 ## Conventions and choices
 One bullet per decision a careful reader could have made differently: the choice, then
@@ -159,6 +159,10 @@ Present tense, describing what the code on the default branch does. Never on a p
   page is defined there, and pages use it exactly as defined. A new shared symbol goes
   into that page in the same change.
 - A symbol used on only one page is defined on that page, at first use.
+- Math syntax (MyST `dollarmath` and `amsmath`, enabled in `conf.py`): `$…$` inline;
+  a display equation as `$$ … $$ (label)` on its own lines, which numbers it, and is
+  referenced as ``{eq}`label` ``. Labels are `eq-<page-slug>-<name>`, so they stay
+  unique across the site. Multi-line equations use `\begin{align} … \end{align}`.
 - Fixed choices: `\sigma(E)` cross-section, `\mu = \cos\theta`, `a_\ell` Legendre
   coefficients with `f(\mu) = \sum_\ell \frac{2\ell+1}{2} a_\ell P_\ell(\mu)`, `E` incident
   energy in eV, CM/LAB for the frames, `\gamma` for the CM/LAB speed ratio.

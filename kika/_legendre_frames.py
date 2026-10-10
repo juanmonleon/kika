@@ -44,6 +44,11 @@ centre-of-mass speed to the neutron's speed in the CM frame is
     γ(E) = (1/A) · sqrt( E / (E + Q (A+1)/A) )
 
 which is ``1/A`` for elastic and grows without bound at an inelastic threshold.
+It is the inverse of NJOY's effective mass ratio ``R`` (MacFarlane et al., *The
+NJOY Nuclear Data Processing System, Version 2016*, §8.12, Eq. 311, with
+``A' = 1``), and :func:`cos_lab_from_cos_cm` is that section's Eq. 309 divided
+through by ``R``. For elastic scattering the same map and its Jacobian are
+Eqs. D.71-D.72 of the ENDF-6 Formats Manual.
 The conversion needs ``γ < 1``, where the CM/LAB cosine map is one-to-one. At or
 just above a threshold, where ``γ ≥ 1``, every CM direction is thrown forward in
 LAB, and no CM distribution has the LAB coefficients the factors ask for. Those

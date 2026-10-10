@@ -21,6 +21,9 @@ extensions = [
     'sphinx.ext.intersphinx',
 ]
 
+# $...$ and $$...$$ math, and amsmath environments (docs/WRITING_DOCS.md §5.3).
+myst_enable_extensions = ['dollarmath', 'amsmath']
+
 templates_path = ['_templates']
 # drafts/ holds pages not yet reviewed (docs/WRITING_DOCS.md §9).
 exclude_patterns = ['drafts']
