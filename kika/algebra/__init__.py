@@ -8,6 +8,19 @@ above this package, which **imports nothing from kika** -- ``kika/tests/
 test_layering.py`` enforces it -- so the model, the format adapters and the
 physics can all build on it without a cycle.
 
+**This package is mathematics only, and that is its purpose.** A function here
+takes and returns numbers, tables and laws: no energies or cross sections as
+such, no flux, no reaction, no evaluation, no physical model or constant. The
+law codes are ENDF's numbering of the five interpolation laws, which is a
+convention for the mathematics, not physics. A docstring may say *where* a rule
+was learned -- a tape that broke a sum, a processor that disagreed -- but
+nothing here depends on it. Something that needs a physical model (the ENDF
+fission-spectrum laws, a resonance formalism, a flux shape with physical
+parameters) belongs in the calculation layer that builds on this one: the
+spectra moved to :mod:`kika.nuclear_data.spectrum_laws` in October 2026 for
+that reason. ``tests/test_algebra.py`` freezes the list of submodules so that a
+new one is added on purpose.
+
 The rules every function in the package keeps:
 
 * **One implementation per operation.** Evaluating, integrating or summing a

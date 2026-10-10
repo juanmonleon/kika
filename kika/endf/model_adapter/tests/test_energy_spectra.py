@@ -17,7 +17,7 @@ fixture                            what it carries
 =================================  ==========================================
 
 What is asserted: the model evaluates the same spectrum the ENDF reader does
-(one implementation, :mod:`kika.algebra.spectra`); the tape comes back with the
+(one implementation, :mod:`kika.nuclear_data.spectrum_laws`); the tape comes back with the
 section byte for byte; GNDS carries every parameter back; an edit to a
 parametrised spectrum is refused on the way to ENDF rather than lost; and the
 MF35 sampler refuses one by name (PD-3).

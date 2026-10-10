@@ -245,6 +245,23 @@ def test_algebra_imports_nothing_from_kika():
     assert not offenders, offenders
 
 
+#: The package's submodules. The package is mathematics only (its docstring
+#: says why and what that excludes), so a new module is added here on purpose,
+#: after asking whether it is mathematics. ``spectra`` (the ENDF-6 fission
+#: spectrum laws) failed that question and moved to
+#: ``kika.nuclear_data.spectrum_laws`` in October 2026.
+MATHEMATICS_ONLY = {"__init__", "arithmetic", "evaluate", "fold", "grid",
+                    "integrate", "laws", "prepared", "refine"}
+
+
+def test_algebra_holds_only_its_mathematical_submodules():
+    root = Path(A.__file__).parent
+    found = {p.stem for p in root.glob("*.py")}
+    found |= {p.name for p in root.iterdir()
+              if p.is_dir() and p.name not in ("tests", "__pycache__")}
+    assert found == MATHEMATICS_ONLY, sorted(found ^ MATHEMATICS_ONLY)
+
+
 # ---------------------------------------------------------------------------
 # Legendre moments
 # ---------------------------------------------------------------------------

@@ -4,9 +4,14 @@ Five laws are stated by a few energy-dependent parameters instead of a table.
 Their *shapes* and the integrals that normalise them live here, once, so that
 the ENDF reader (:mod:`kika.endf.classes.mf5.analytic`) and the model's §18.3
 nodes (:mod:`kika.nuclear_data.model.energy_spectra`) evaluate the same
-spectrum with the same arithmetic. Like the rest of :mod:`kika.algebra` this
-knows nothing of formats, units or reactions: energies are plain floats in
-whatever unit the caller keeps consistent (eV everywhere in kika).
+spectrum with the same arithmetic. It knows nothing of formats or units:
+energies are plain floats in whatever unit the caller keeps consistent (eV
+everywhere in kika).
+
+These are physics -- the evaporation, Watt and Madland-Nix fission-spectrum
+models -- so they live in the calculation layer, not in :mod:`kika.algebra`,
+which holds only the mathematics of tabulated functions. Until October 2026
+this module was ``kika.algebra.spectra``.
 
 =====================  ====  ===================================================
 law                    LF    unnormalised shape of E'

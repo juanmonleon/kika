@@ -3,7 +3,7 @@
 LF=1 writes chi(E->E') out point by point; LF=5, 7, 9, 11 and 12 write a
 handful of energy-dependent parameters and leave the shape to a formula. This
 module reads those five. The formulae themselves are
-:mod:`kika.algebra.spectra`'s, shared with the model's §18.3 nodes, so the
+:mod:`kika.nuclear_data.spectrum_laws`'s, shared with the model's §18.3 nodes, so the
 reader and the model cannot evaluate two different spectra.
 
 **Decoded for reading, emitted from bytes.** Every class here subclasses
@@ -50,7 +50,8 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ....algebra import evaluate, integral, interval_laws, spectra
+from ....algebra import evaluate, integral, interval_laws
+from ....nuclear_data import spectrum_laws as spectra
 from .partials import MF5PartialRaw
 
 #: Points in the display grid a law builds for itself when the caller does not
