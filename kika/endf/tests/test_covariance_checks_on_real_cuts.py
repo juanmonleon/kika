@@ -193,6 +193,20 @@ def test_mf32_clean_evaluations_give_notes_only(name):
     assert set(f.check for f in report) <= {"inert_rows", "relative_uncertainty_above_one"}
 
 
+def test_mf32_rml_widths_are_compared_channel_by_channel():
+    """LRF=7 (Cl-35): all 272 resonances are compared with MF2, and one channel
+    width moved in MF2 is found in its own spin group."""
+    endf = read_endf(str(DATA / "micro_cl35_mf32.endf"))
+    group = endf.files[2].mt[151].isotopes[0].energy_ranges[0].parameters.spin_groups[1]
+    resonance = group.resonances[0]
+    before = resonance.widths[0]
+    resonance.widths[0] = 1.5 * before
+    (f,) = check_covariances(endf, mf=(32,)).by_check("widths_differ_from_mf2")
+    assert f.level == "warn" and (f.evidence["n"], f.evidence["of"]) == (1, 272)
+    assert f.evidence["examples"] == [{"er": resonance.er, "parameter": "GAM1",
+                                       "mf32": before, "mf2": 1.5 * before}]
+
+
 def test_u239_mf35_not_the_covariance_of_a_normalised_spectrum():
     """JEFF-4.0 U-239: 21 bands whose rows do not sum to zero, the first of them
     empty, and sigma(P) up to 2919 for a probability."""

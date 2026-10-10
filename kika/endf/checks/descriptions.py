@@ -387,7 +387,8 @@ def _build() -> Dict[str, CheckDescription]:
              NOTE: "every difference is under 0.1 sigma: a copy with fewer digits"},
             "MF32 repeats the File 2 parameters next to their covariances. Resonances whose "
             "energy matches MF2 but whose widths do not (to 1e-5) make the covariance one of a "
-            "parameter set the cross sections are not built from."),
+            "parameter set the cross sections are not built from. R-Matrix Limited (LRF=7) is "
+            "compared channel by channel, within the spin group the covariance names."),
         "spin_uncertainty": D(
             "Uncertainty on the spin J", (32,),
             {WARN: "always"},

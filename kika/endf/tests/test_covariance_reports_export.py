@@ -193,10 +193,14 @@ def test_the_pages_carry_summary_findings_method_and_identity(ne20):
         assert "Method and thresholds" in page and "0.25" not in page  # thresholds as %
         assert "25 %" in page and "2 %" in page
         assert "correlation_out_of_bounds" in page
-        assert "11 notes not listed" in page  # notes are counted, not listed
+        # Left out means left out: one line says how many, nothing else shows them.
+        assert "11 notes left out of this report" in page
+        assert "inert_rows" not in page
     assert "<link" not in html and "<script" not in html and "http" not in html
-    assert "inert_rows" in md.split("## Findings")[0]  # but they are in the summary
-    assert "### Note ·" not in md.split("## Findings")[1]
+    assert 'class="card note' not in html
+    with_notes = ne20.to_markdown(level="note")
+    assert "inert_rows" in with_notes.split("## Findings")[0]
+    assert "left out" not in with_notes
     assert _md_rows_under(ne20.to_markdown(level="note"), "### Note ·") == 11
     # A check is named by its title first, its id beside it; levels in full.
     assert r"| **Defect** | \|ρ\| > 1 (`correlation_out_of_bounds`)" in md
@@ -314,9 +318,11 @@ def test_the_legend_agrees_with_what_the_cuts_give():
 
 
 def test_the_pages_end_with_the_legend_of_their_checks(ne20):
-    md, html = ne20.to_markdown(), ne20.to_html()
+    md, html = ne20.to_markdown(level="note"), ne20.to_html(level="note")
     legend = md.split("## What each finding means")[1]
     assert "(`ls1_in_cross_block`)" in legend and "(`inert_rows`)" in legend
+    # Without notes, a check found only as a note has no entry.
+    assert "(`inert_rows`)" not in ne20.to_markdown().split("## What each finding means")[1]
     assert "sum_rule_violated" not in legend  # only the checks of this report
     assert 'id="check-ls1_in_cross_block"' in html
     assert set(ne20.to_dict()["checks"]) == {f.check for f in ne20}

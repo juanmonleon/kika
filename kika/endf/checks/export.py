@@ -325,6 +325,30 @@ _WORST_FIRST = (DEFECT, WARN, NOTE)
 _MAIN_FINDINGS = 3
 
 
+# The *level* of a page applies to all of it: a level left out is not listed,
+# counted, summarised or explained anywhere but in one line saying how many
+# were left out. The plain data (``report_dict``) keeps every count.
+
+def _shown(level: str) -> Tuple[str, ...]:
+    """The levels a page at *level* shows, worst first."""
+    return tuple(lv for lv in _WORST_FIRST if _RANK[lv] >= _RANK[level])
+
+
+def _counts_at(counts: Mapping[str, int], level: str) -> Dict[str, int]:
+    return {lv: counts.get(lv, 0) for lv in _shown(level)}
+
+
+def _rows_at(rows: Iterable[Dict[str, Any]], level: str) -> List[Dict[str, Any]]:
+    return [r for r in rows if _RANK[r["level"]] >= _RANK[level]]
+
+
+def _clean_word(level: str) -> str:
+    """What a tape with nothing at *level* or worse is called."""
+    if level == NOTE:
+        return "Nothing found"
+    return "No " + " or ".join(_LEVEL_PLURAL[lv].lower() for lv in _shown(level))
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -357,8 +381,8 @@ def _hidden_line(counts: Dict[str, int], level: str) -> Optional[str]:
     hidden = {lv: n for lv, n in counts.items() if n and _RANK[lv] < _RANK[level]}
     if not hidden:
         return None
-    return (f"{_tally(hidden)} not listed (counted in the summary; "
-            f"level='{min(hidden, key=_RANK.get)}' lists them).")
+    return (f"{_tally(hidden)} left out of this report "
+            f"(level='{min(hidden, key=_RANK.get)}' includes them).")
 
 
 def _title(check: str) -> str:
@@ -385,23 +409,32 @@ def _groups(findings: Sequence[CovarianceFinding]) -> List[Tuple[str, str, List[
     return [(level, check, fs) for (level, check), fs in out.items()]
 
 
-def _main_findings(tape) -> List[Tuple[str, str, int]]:
-    """``[(level, check, n)]`` of a tape, worst level first, then the most frequent."""
+def _main_findings(tape, level: str = NOTE) -> List[Tuple[str, str, int]]:
+    """``[(level, check, n)]`` of a tape at *level* or worse, worst first, then the most frequent."""
     if tape.report is None:
         return []
     counts: Dict[Tuple[str, str], int] = {}
     for f in tape.report:
-        counts[(f.level, f.check)] = counts.get((f.level, f.check), 0) + 1
+        if _RANK[f.level] >= _RANK[level]:
+            counts[(f.level, f.check)] = counts.get((f.level, f.check), 0) + 1
     return [(lv, ck, n) for (lv, ck), n in
             sorted(counts.items(), key=lambda kv: (-_RANK[kv[0][0]], -kv[1], kv[0][1]))]
 
 
-def _verdict(counts: Mapping[str, int], library=None) -> Tuple[Optional[str], str, str]:
-    """``(level, headline, detail)``: the one sentence the page opens with."""
-    worst = _worst(counts)
+def _verdict(counts: Mapping[str, int], library=None,
+             level: str = NOTE) -> Tuple[Optional[str], str, str]:
+    """``(level, headline, detail)``: the one sentence the page opens with.
+
+    *counts* are all of them; what lies below *level* is only said to be left out.
+    """
+    shown = _counts_at(counts, level)
+    worst = _worst(shown)
     headline = {DEFECT: "Defects found", WARN: "No defects, warnings to review",
-                NOTE: "No defects or warnings, notes only", None: "Nothing found"}[worst]
-    detail = _tally(dict(counts)).capitalize() + "."
+                NOTE: "No defects or warnings, notes only", None: _clean_word(level)}[worst]
+    detail = _tally(shown).capitalize() + "."
+    hidden = _hidden_line(dict(counts), level)
+    if hidden:
+        detail += " " + hidden[0].upper() + hidden[1:]
     if library is not None:
         checked = library.checked
         hit = sum(1 for t in checked if t.count(DEFECT))
@@ -428,13 +461,13 @@ def _tape_status(tape) -> str:
     return "checked" if tape.has_covariances else "no covariances"
 
 
-def _tape_state(tape) -> str:
-    """The class a tape is drawn with: its worst level, or why it has none."""
+def _tape_state(tape, level: str = NOTE) -> str:
+    """The class a tape is drawn with: its worst level shown, or why it has none."""
     if not tape.ok:
         return "failed"
     if not tape.has_covariances:
         return "nocov"
-    return next((lv for lv in _WORST_FIRST if tape.count(lv)), "clean")
+    return next((lv for lv in _shown(level) if tape.count(lv)), "clean")
 
 
 def _base(library) -> Optional[Path]:
@@ -508,8 +541,8 @@ def _md_check(check: str) -> str:
     return f"{to_symbols(_title(check))} (`{check}`)"
 
 
-def _md_verdict(counts: Mapping[str, int], library=None) -> List[str]:
-    _, headline, detail = _verdict(counts, library)
+def _md_verdict(counts: Mapping[str, int], library=None, level: str = NOTE) -> List[str]:
+    _, headline, detail = _verdict(counts, library, level)
     return [f"> **{headline}.** {detail}", ""]
 
 
@@ -523,14 +556,14 @@ def _md_summary(rows: Sequence[Dict[str, Any]], tapes: bool) -> List[str]:
     return out + _md_table(header, body) + [""]
 
 
-def _main_text(tape) -> str:
+def _main_text(tape, level: str = NOTE) -> str:
     if not tape.ok:
         return f"Failed: {tape.error}"
     if not tape.has_covariances:
         return "No covariances"
-    main = _main_findings(tape)
+    main = _main_findings(tape, level)
     if not main:
-        return "Nothing found"
+        return _clean_word(level)
     text = "; ".join(f"{LEVEL_LABEL[lv]}: {to_symbols(_title(ck))} ×{n}"
                      for lv, ck, n in main[:_MAIN_FINDINGS])
     if len(main) > _MAIN_FINDINGS:
@@ -538,12 +571,14 @@ def _main_text(tape) -> str:
     return text
 
 
-def _md_files(library) -> List[str]:
+def _md_files(library, level: str = NOTE) -> List[str]:
+    shown = _shown(level)
     out = ["## Summary by file", ""]
-    out += _md_table(("File", "Nuclide", "MAT", "MF checked", "Defects", "Warnings", "Notes",
-                      "Main findings", "Path"),
-                     [(t.name, t.target, t.mat, ", ".join(map(str, t.mf)), t.count(DEFECT),
-                       t.count(WARN), t.count(NOTE), _main_text(t), str(Path(t.path).resolve()))
+    out += _md_table(("File", "Nuclide", "MAT", "MF checked",
+                      *(_LEVEL_PLURAL[lv] for lv in shown), "Main findings", "Path"),
+                     [(t.name, t.target, t.mat, ", ".join(map(str, t.mf)),
+                       *(t.count(lv) for lv in shown), _main_text(t, level),
+                       str(Path(t.path).resolve()))
                       for _, t in _tape_order(library)])
     return out + [""]
 
@@ -594,13 +629,13 @@ def report_markdown(report, level: str = WARN) -> str:
     counts = _level_counts(report.findings)
     title = tape["name"] or "ENDF tape"
     out = [f"# Covariance check of {title}", ""]
-    out += _md_verdict(counts)
+    out += _md_verdict(counts, level=level)
     out += _md_table(("", ""), [
         ("Tape", tape["name"]), ("Path", tape["path"]), ("MAT", tape["mat"]),
         ("MF checked", ", ".join(map(str, tape["mf"]))),
         ("kika", kika_version()), ("Generated", _now())])
     out.append("")
-    rows = summary_rows(report.findings)
+    rows = _rows_at(summary_rows(report.findings), level)
     out += _md_summary(rows, tapes=False)
     listed = _findings_at(report.findings, level)
     out += ["## Findings", ""]
@@ -619,16 +654,16 @@ def library_markdown(library, level: str = WARN) -> str:
     _RANK[level]
     counts = _library_counts(library)
     out = [f"# Covariance check of {_library_title(library)}", ""]
-    out += _md_verdict(counts["findings"], library)
+    out += _md_verdict(counts["findings"], library, level)
     base = _base(library)
     out += _md_table(("", ""), [
         ("Library", library.library), ("Directory", base),
         ("Tapes", _library_status(library, counts)),
         ("kika", kika_version()), ("Generated", _now())])
     out.append("")
-    rows = library_summary_rows(library)
+    rows = _rows_at(library_summary_rows(library), level)
     out += _md_summary(rows, tapes=True)
-    out += _md_files(library)
+    out += _md_files(library, level)
     out += ["## Findings", ""]
     any_listed = False
     for _, t in _tape_order(library):
@@ -699,8 +734,8 @@ border-left-width:6px;border-radius:10px;padding:14px 18px;margin:0 0 16px;backg
 .card.warn{border-top-color:var(--warn)}.card.warn .n{color:var(--warn)}
 .card.note{border-top-color:var(--note)}.card.note .n{color:var(--note)}
 .card.zero .n{color:var(--faint)}
-.toc{position:sticky;top:8px;z-index:5;display:flex;flex-wrap:wrap;gap:4px;font-size:14.5px;
-margin:22px 0 0;padding:6px;background:var(--nav-bg);border-radius:12px;
+.toc{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:4px;font-size:14.5px;
+margin:22px 0 0;padding:6px;background:var(--nav-bg);border-radius:0 0 12px 12px;
 box-shadow:0 4px 14px rgba(15,30,50,.18)}
 .toc a{font-weight:600;color:var(--nav-fg);padding:6px 12px;border-radius:8px}
 .toc a:hover{background:var(--nav-hover);text-decoration:none}
@@ -848,8 +883,8 @@ def _html_header(eyebrow: str, title: str, sub: Optional[str],
     return out
 
 
-def _html_verdict(counts: Mapping[str, int], library=None) -> List[str]:
-    level, headline, detail = _verdict(counts, library)
+def _html_verdict(counts: Mapping[str, int], library=None, shown: str = NOTE) -> List[str]:
+    level, headline, detail = _verdict(counts, library, shown)
     cls = level or "none"
     mark = (f'<span class="mark {level}">{_LEVEL_MARK[level]}</span>' if level
             else '<span class="mark" style="background:var(--ok)">\u2713</span>')
@@ -857,9 +892,10 @@ def _html_verdict(counts: Mapping[str, int], library=None) -> List[str]:
             f"<p>{_e(detail)}</p></div></div>"]
 
 
-def _html_cards(counts: Mapping[str, int], tapes: Optional[Mapping[str, int]] = None) -> List[str]:
+def _html_cards(counts: Mapping[str, int], tapes: Optional[Mapping[str, int]] = None,
+                level: str = NOTE) -> List[str]:
     out = ['<div class="cards">']
-    for lv in _WORST_FIRST:
+    for lv in _shown(level):
         n = counts.get(lv, 0)
         where = ""
         if tapes is not None and n:
@@ -966,11 +1002,11 @@ def report_html(report, level: str = WARN) -> str:
     body = _html_header("kika · covariance check", name, tape["path"], [
         ("MAT", tape["mat"]), ("MF checked", ", ".join(map(str, tape["mf"]))),
         ("kika", kika_version()), ("Generated", _now())])
-    body += _html_verdict(counts)
-    body += _html_cards(counts)
+    body += _html_verdict(counts, shown=level)
+    body += _html_cards(counts, level=level)
     body += _html_toc((("summary", "Summary by check"), ("findings", "Findings"),
                        ("method", "Method"), ("legend", "What each finding means")))
-    rows = summary_rows(report.findings)
+    rows = _rows_at(summary_rows(report.findings), level)
     body += _html_summary(rows, tapes=False)
     body.append('<h2 id="findings">Findings</h2>')
     listed = _findings_at(report.findings, level)
@@ -989,7 +1025,7 @@ _STATE_WORD = {DEFECT: "defects", WARN: "warnings", NOTE: "notes only", "clean":
                "nocov": "no covariances", "failed": "could not be checked"}
 
 
-def _html_index(library, anchors: Mapping[int, str]) -> List[str]:
+def _html_index(library, anchors: Mapping[int, str], level: str = NOTE) -> List[str]:
     """The files by element, one chip per tape coloured by its worst level."""
     rows: Dict[Tuple[int, str], List[Tuple[Tuple, int, Any]]] = {}
     seen: Dict[Optional[str], int] = {}
@@ -1011,10 +1047,10 @@ def _html_index(library, anchors: Mapping[int, str]) -> List[str]:
         out.append(f'<div class="el"><span class="sym">{_e(sym)}</span><span class="chips">')
         for _, i, (text, twin) in sorted(chips, key=lambda c: c[0]):
             t = library.tapes[i]
-            state = _tape_state(t)
-            tip = (f"{t.name}: " + (f"{t.count(DEFECT)} defects, {t.count(WARN)} warnings, "
-                                    f"{t.count(NOTE)} notes" if t.report is not None
-                                    else _STATE_WORD[state]))
+            state = _tape_state(t, level)
+            tip = (f"{t.name}: " + (", ".join(f"{t.count(lv)} {_LEVEL_PLURAL[lv].lower()}"
+                                              for lv in _shown(level))
+                                    if t.report is not None else _STATE_WORD[state]))
             # Two files of one nuclide (two evaluations side by side): the
             # name tells them apart, cut short; the tooltip has it whole.
             extra = f'<span class="twin">{_e(t.name)}</span>' if twin else ""
@@ -1022,21 +1058,22 @@ def _html_index(library, anchors: Mapping[int, str]) -> List[str]:
                        f"{_e(text)}{extra}</a>")
         out.append("</span></div>")
     out.append("</div>")
-    keys = [(DEFECT, "Defects"), (WARN, "Warnings"), (NOTE, "Notes only"), ("clean", "Nothing found"),
-            ("nocov", "No covariances"), ("failed", "Could not be checked")]
+    keys = ([(lv, "Notes only" if lv == NOTE else _LEVEL_PLURAL[lv]) for lv in _shown(level)]
+            + [("clean", _clean_word(level)), ("nocov", "No covariances"),
+               ("failed", "Could not be checked")])
     out.append('<div class="keys">' + "".join(
         f'<span><span class="chip {k}">&nbsp;</span>{_e(w)}</span>' for k, w in keys) + "</div>")
     return out
 
 
-def _html_main(tape) -> _Html:
+def _html_main(tape, level: str = NOTE) -> _Html:
     if not tape.ok:
         return _Html(f'<span class="status-failed">Failed: {_e(tape.error)}</span>')
     if not tape.has_covariances:
         return _Html('<span class="status-none">No covariances</span>')
-    main = _main_findings(tape)
+    main = _main_findings(tape, level)
     if not main:
-        return _Html('<span class="status-clean">Nothing found</span>')
+        return _Html(f'<span class="status-clean">{_e(_clean_word(level))}</span>')
     items = [f'<li class="{lv}"><span class="mark">{_LEVEL_MARK[lv]}</span>'
              f'<span><a class="ck" href="#check-{_e(ck)}">{to_html_symbols(_title(ck))}</a> '
              f'<span class="x">×{n}</span></span></li>' for lv, ck, n in main[:_MAIN_FINDINGS]]
@@ -1045,7 +1082,8 @@ def _html_main(tape) -> _Html:
     return _Html('<ul class="main">' + "".join(items) + "</ul>")
 
 
-def _html_files(library, anchors: Mapping[int, str]) -> List[str]:
+def _html_files(library, anchors: Mapping[int, str], level: str = NOTE) -> List[str]:
+    shown = _shown(level)
     rows, ids = [], []
     for i, t in _tape_order(library):
         full = _e(Path(t.path).resolve())
@@ -1056,14 +1094,15 @@ def _html_files(library, anchors: Mapping[int, str]) -> List[str]:
         rows.append((
             _Html(name + (f'<span class="fname">{_e(t.name)}</span>' if t.target else "")),
             t.mat, _Html(f'<span class="mfs">{_e(_mf_span(t.mf))}</span>'),
-            _pill(DEFECT, t.count(DEFECT)), _pill(WARN, t.count(WARN)), _pill(NOTE, t.count(NOTE)),
-            _html_main(t)))
+            *(_pill(lv, t.count(lv)) for lv in shown),
+            _html_main(t, level)))
         ids.append(f"file-{i}")
     return (['<h2 id="by-file">Summary by file</h2>',
              '<p class="lead">Worst first. The main findings are the worst checks of each file, '
              'the most frequent first.</p>']
-            + _html_table(("File", "MAT", "MF checked", "Defects", "Warnings", "Notes",
-                           "Main findings"), rows, numeric=(1, 3, 4, 5), row_ids=ids))
+            + _html_table(("File", "MAT", "MF checked", *(_LEVEL_PLURAL[lv] for lv in shown),
+                           "Main findings"), rows,
+                          numeric=(1, *range(3, 3 + len(shown))), row_ids=ids))
 
 
 def library_html(library, level: str = WARN) -> str:
@@ -1079,23 +1118,23 @@ def library_html(library, level: str = WARN) -> str:
                         str(base) if base else None, [
                             ("Tapes", _library_status(library, counts)),
                             ("kika", kika_version()), ("Generated", _now())])
-    body += _html_verdict(counts["findings"], library)
-    tapes_with = {lv: sum(1 for t in library.tapes if t.count(lv)) for lv in _WORST_FIRST}
-    body += _html_cards(counts["findings"], tapes_with)
+    body += _html_verdict(counts["findings"], library, level)
+    tapes_with = {lv: sum(1 for t in library.tapes if t.count(lv)) for lv in _shown(level)}
+    body += _html_cards(counts["findings"], tapes_with, level)
     body += _html_toc((("files", "Files"), ("summary", "Summary by check"),
                        ("by-file", "Summary by file"), ("findings", "Findings"),
                        ("method", "Method"), ("legend", "What each finding means")))
-    body += _html_index(library, anchors)
-    rows = library_summary_rows(library)
+    body += _html_index(library, anchors, level)
+    rows = _rows_at(library_summary_rows(library), level)
     body += _html_summary(rows, tapes=True)
-    body += _html_files(library, anchors)
+    body += _html_files(library, anchors, level)
     body.append('<h2 id="findings">Findings</h2>')
     any_listed = False
     for i, t in _tape_order(library):
         if not listed.get(i):
             continue
         any_listed = True
-        pills = "".join(_pill(lv, t.count(lv)) for lv in _WORST_FIRST)
+        pills = "".join(_pill(lv, t.count(lv)) for lv in _shown(level))
         mat = f'<span class="muted">MAT {_e(t.mat)}</span>' if t.mat is not None else ""
         nuclide = f"<strong>{_e(t.target)}</strong> · " if t.target else ""
         # Open where there is something to act on; a tape of notes only folds.

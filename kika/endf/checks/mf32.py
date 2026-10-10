@@ -261,6 +261,54 @@ def _mf2_rows(twin) -> Optional[List[Tuple[float, Dict[str, float]]]]:
     return rows
 
 
+def _rml_rows(twin) -> Optional[List[List[Tuple[float, Dict[str, float]]]]]:
+    """Per spin group, [(ER, {"ER", "GAM1" ... "GAM<NCH>"})] of an LRF=7 range of MF2."""
+    p = twin.parameters
+    if p is None or not hasattr(p, "spin_groups"):
+        return None
+    return [[(float(r.er), {"ER": float(r.er),
+                            **{f"GAM{c + 1}": float(w) for c, w in enumerate(r.widths)}})
+             for r in g.resonances] for g in p.spin_groups]
+
+
+def _mf2_lookup(twin):
+    """``(label, ER) -> [MF2 rows]`` at that energy, or None when MF2 gives no rows.
+
+    LRF=1/2/3: every resonance of the range at that energy (several J may share
+    one). LRF=7: the resonances of the same spin group first, the label naming
+    it (``spinGroup<g>/...``, the order of §32.2.3.3 and of File 2), and any
+    spin group when that one has none at the energy.
+    """
+    def near(er, at):
+        return abs(at - er) <= _E_RTOL * max(abs(er), 1.0)
+
+    if int(twin.lrf) == 7:
+        groups = _rml_rows(twin)
+        if not groups:
+            return None
+        flat = [row for g in groups for row in g]
+
+        def lookup(label, er):
+            g = label.split("/", 1)[0]
+            k = int(g[len("spinGroup"):]) if g.startswith("spinGroup") else -1
+            own = [row for at, row in (groups[k] if 0 <= k < len(groups) else []) if near(er, at)]
+            return own or [row for at, row in flat if near(er, at)]
+        return lookup
+
+    rows = _mf2_rows(twin)
+    if not rows:
+        return None
+    by_energy: Dict[float, List[Dict[str, float]]] = {}
+    for er, row in rows:
+        by_energy.setdefault(er, []).append(row)
+    ref = np.array(sorted(by_energy))
+
+    def lookup(label, er):
+        j = int(np.argmin(np.abs(ref - er)))
+        return by_energy[float(ref[j])] if near(er, ref[j]) else []
+    return lookup
+
+
 def _widths_in_mf2(form, rng, mf2_ranges, loc, out) -> None:
     """The widths MF32 states for a resonance against the ones MF2 has for it.
 
@@ -269,9 +317,10 @@ def _widths_in_mf2(form, rng, mf2_ranges, loc, out) -> None:
     resonance whose energy matches but whose widths do not is a covariance of a
     parameter set that is not the one the cross sections are built from. Several
     MF2 resonances may share an energy (different J), so the closest of them is
-    the one compared. LRF=7 keeps its widths per channel and is not compared.
+    the one compared. LRF=7 compares its widths channel by channel (GAM1 ...
+    GAM<NCH>), within the spin group the covariance names.
     """
-    if int(rng.lru) != 1 or int(rng.lrf) not in (1, 2, 3):
+    if int(rng.lru) != 1 or int(rng.lrf) not in (1, 2, 3, 7):
         return
     if int(rng.lrf) == 3 and type(rng.body).__name__ == "LCOMP0Body":
         return  # LCOMP=0 reads GN/GG/GF from the LRF=1/2 slots (§32.2.1)
@@ -280,15 +329,11 @@ def _widths_in_mf2(form, rng, mf2_ranges, loc, out) -> None:
         twin = _match(rng, ranges) or twin
     if twin is None or int(twin.lru) != 1 or int(twin.lrf) != int(rng.lrf):
         return
-    rows = _mf2_rows(twin)
-    if not rows:
+    lookup = _mf2_lookup(twin)
+    if lookup is None:
         return
     names, labels = _names(form), _labels(form)
     values = np.asarray(form.parameterValues, dtype=float)
-    by_energy: Dict[float, List[Dict[str, float]]] = {}
-    for er, row in rows:
-        by_energy.setdefault(er, []).append(row)
-    ref = np.array(sorted(by_energy))
     # One resonance of the covariance = consecutive rows with the same label.
     groups: Dict[str, List[int]] = {}
     for i, lab in enumerate(labels[:values.size]):
@@ -305,12 +350,12 @@ def _widths_in_mf2(form, rng, mf2_ranges, loc, out) -> None:
         widths = [n for n in mine if n not in ("ER", "AJ", "?")]
         if er is None or not widths:
             continue
-        j = int(np.argmin(np.abs(ref - er)))
-        if abs(ref[j] - er) > _E_RTOL * max(abs(er), 1.0):
+        cands = lookup(labels[idx[0]], er)
+        if not cands:
             continue  # parameters_not_in_mf2 reports it
         n_res += 1
         best = None
-        for cand in by_energy[float(ref[j])]:
+        for cand in cands:
             dev = max(abs(mine[n] - cand[n]) / max(abs(cand[n]), abs(mine[n]), 1e-30)
                       for n in widths if n in cand)
             if best is None or dev < best[0]:
