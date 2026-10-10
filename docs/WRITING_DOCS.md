@@ -386,5 +386,5 @@ A page is **published** (wired into a toctree) only after the maintainer has rea
 Until then it lives under `docs/source/drafts/`. The published build leaves `drafts/`
 out. A **review build** includes it, under a "Drafts (under review)" section and with a
 banner on every draft page: `KIKA_DOCS_DRAFTS=1` locally, and on Read the Docs every
-pull-request preview and the `develop` version (`docs/source/conf.py`). To publish a
+version except the published `latest` and `stable` (`docs/source/conf.py`). To publish a
 page, move it out of `drafts/` to its place and add it to its section's toctree.

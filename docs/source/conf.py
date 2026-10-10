@@ -21,12 +21,13 @@ version = release
 # (docs/WRITING_DOCS.md §9). The published site (Read the Docs "latest" and
 # "stable") leaves them out. A review build includes them, under their own
 # "Drafts" section and with a banner on every page: set KIKA_DOCS_DRAFTS=1
-# locally; on Read the Docs, pull-request previews and the "develop" version
-# are review builds.
+# locally; on Read the Docs every version except the published "latest" and
+# "stable" is a review build (pull-request previews, "develop", any review
+# branch the maintainer activates).
+_RTD_VERSION = os.environ.get("READTHEDOCS_VERSION")
 BUILD_DRAFTS = (
     os.environ.get("KIKA_DOCS_DRAFTS") == "1"
-    or os.environ.get("READTHEDOCS_VERSION_TYPE") == "external"
-    or os.environ.get("READTHEDOCS_VERSION") == "develop"
+    or (_RTD_VERSION is not None and _RTD_VERSION not in ("latest", "stable"))
 )
 
 # -- General configuration ---------------------------------------------------
