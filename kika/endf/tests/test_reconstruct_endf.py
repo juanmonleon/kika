@@ -78,7 +78,18 @@ def test_pendf_is_written_reloaded_and_not_reconstructed_twice(tmp_path):
     stages = []
     path = tmp_path / "fe56.pendf"
     assert rec.write_pendf(path, progress=lambda s, f: stages.append((s, f))).isClean
-    assert stages == [("write", None), ("write", 1.0)] and path.stat().st_size > 0
+    assert stages[0] == ("write", None) and stages[-1] == ("write", 1.0) and path.stat().st_size > 0
+    fractions = [f for s, f in stages[1:]]
+    assert {s for s, _ in stages} == {"write"} and all(type(f) is float for f in fractions)
+    assert len(fractions) > 5 and np.all(np.diff(fractions) >= 0)
+    # The report gains the reload check once the PENDF exists.
+    report = rec.report_document().to_dict()
+    publication = report["verification"]["publication"]
+    assert publication["file"] == "fe56.pendf" and publication["mat"] == 2631
+    rows = {row["mt"]: row for row in publication["rows"]}
+    assert {1, 2, 102} <= set(rows) and all(0 <= row["max_ratio"] <= 1 for row in rows.values())
+    assert all(row["at_eV"] is not None for row in rows.values() if row["max_ratio"] > 0)
+    assert "write_verify" in report["timings_s"]
     with pytest.raises(UnsupportedResonanceError) as failure:
         reconstruct_endf(path)
     assert failure.value.category == "already-reconstructed"
@@ -98,3 +109,41 @@ def test_every_category_the_engine_raises_is_declared():
 
 def test_native_kernel_flag_is_a_bool():
     assert isinstance(native_available(), bool)
+
+
+def test_report_document_without_a_pendf(reconstruction, tmp_path):
+    import json
+    rec, _ = reconstruction
+    report = rec.report_document()
+    d = report.to_dict()
+    assert d["schema"] == "kika-reconstruction-report/1"
+    assert json.loads(json.dumps(d)) == d
+    assert d["material"]["mat"] == 2631 and d["material"]["context_source"] == rec.context_source
+    assert d["evaluation"]["sha256"] and len(d["evaluation"]["sha256"]) == 64
+    assert d["software"]["engine_version"] == ENGINE_VERSION
+    assert d["software"]["native_kernel"] is native_available()
+    assert d["options"]["rtol"] == rec.result.options.rtol
+    (rrr,) = d["resonance_ranges"]
+    assert (rrr["lru"], rrr["lrf"], rrr["formalism"]) == (1, 3, "Reich-Moore") and rrr["resonances"] > 0
+    rows = {r["mt"]: r for r in d["reactions"]}
+    tables = rec.tables_by_mt()
+    assert set(rows) == set(tables)
+    for mt, row in rows.items():
+        assert row["points"] == len(tables[mt].energies)
+        assert row["jumps"] == int(np.count_nonzero(np.diff(tables[mt].energies) == 0))
+    assert rows[1]["derived_sum"] and not rows[2]["derived_sum"]
+    assert d["sums"]["policy"] == "derive-from-leaves"
+    assert d["sums"]["graph"] == [dict(mt=1, name="MT1", parts=["MT2", "MT102"], parts_text="MT2 + MT102")]
+    assert {x["mt"] for x in d["sums"]["source_discrepancies"]} == {1}
+    assert d["verification"]["publication"] is None
+    assert all(0 <= v <= 1 for v in d["verification"]["tabulation"].values())
+
+    text = report.to_text()
+    assert text.isascii() and "RESONANCE RANGES" in text and "no reload check" in text
+    html = report.to_html()
+    assert html.startswith("<!doctype html>") and "prefers-color-scheme:dark" in html
+    assert "<script" not in html.lower() and "http" not in html
+    assert report._repr_html_().startswith("<style>")
+    for name in ("r.txt", "r.html", "r.json"):
+        assert report.save(tmp_path / name).stat().st_size > 0
+    assert json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))["schema"] == d["schema"]

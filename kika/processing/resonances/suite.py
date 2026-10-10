@@ -320,8 +320,12 @@ class SuiteReconstructionResult:
         if _fingerprint(candidate, self.source_style) != self._source_hash:
             raise ValueError('evaluated source changed since reconstruction')
 
-    def verify_suite(self,suite,*,label=None):
-        """Verify a complete model reloaded from GNDS or a processed ENDF tape."""
+    def verify_suite(self,suite,*,label=None,progress=None):
+        """Verify a complete model reloaded from GNDS or a processed ENDF tape.
+
+        ``progress(fraction)`` is called after each batch with the share of
+        checked energies, a plain float in (0, 1].
+        """
         from kika.nuclear_data.model import Regions1d
         from kika.algebra import prepare_evaluator
         for name in ('projectile','target','projectileFrame'):
@@ -368,7 +372,9 @@ class SuiteReconstructionResult:
         signature=digest.digest()
         cached=self._verification_cache.get('entry')
         if cached is not None and cached[0]==signature:
+            self._verification_cache['last']=(dict(cached[1]),dict(cached[2]))
             return dict(cached[1])
+        total=sum(len(g)+4*max(0,len(g)-1) for g in grids);done=0
         for i,(segment,grid) in enumerate(zip(self._segments,grids)):
             fractions=np.array([.1732050807568877,.3819660112501051,.6180339887498949,.8267949192431123])
             evaluators={}
@@ -401,9 +407,22 @@ class SuiteReconstructionResult:
                     components=sum((serialized[part] for part in self._graph[key]),np.zeros(len(points)))
                     if np.any(error_ratio(serialized[key],components,self.options)>1):
                         raise ReconstructionConvergenceError(f'serialized sum does not close within the total budget: {key}')
+                done+=len(points)
+                if progress is not None and total:progress(float(min(1.,done/total)))
         if any(not np.isfinite(v) or v>1 for v in maxima.values()):raise ReconstructionConvergenceError(f'reloaded suite exceeds total budget: {maxima}; worst (eV, reference b, serialized b): {worst}')
-        self._verification_cache['entry']=(signature,dict(maxima))
+        self._verification_cache['entry']=(signature,dict(maxima),dict(worst))
+        self._verification_cache['last']=(dict(maxima),dict(worst))
         return maxima
+
+    @property
+    def last_verification(self):
+        """``(maxima, worst)`` of the last :meth:`verify_suite` that passed, or None.
+
+        ``maxima[key]`` is the largest error over the budget ``atol+rtol*|sigma|``;
+        ``worst[key]`` is ``(energy eV, reference b, serialized b)`` at that point.
+        """
+        last=self._verification_cache.get('last')
+        return None if last is None else (dict(last[0]),dict(last[1]))
 
 
 #: Identifies the reconstruction physics, not the commit. Change it when a
@@ -626,8 +645,11 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         tuple(np.frombuffer(x.tobytes(),dtype=x.dtype) for x,_ in tables))
 
 
-def attach_reconstruction(suite,result):
-    """Validate and attach a complete result atomically, preserving evaluated forms."""
+def attach_reconstruction(suite,result,*,progress=None):
+    """Validate and attach a complete result atomically, preserving evaluated forms.
+
+    ``progress(fraction)`` follows the verification, as in ``verify_suite``.
+    """
     from kika.nuclear_data.model import CrossSectionReconstructed
     if not isinstance(result,SuiteReconstructionResult):raise TypeError('expected SuiteReconstructionResult')
     if _fingerprint(suite,result.source_style)!=result._source_hash:
@@ -640,7 +662,7 @@ def attach_reconstruction(suite,result):
     candidate=deepcopy(suite)
     for key,reaction in _entries(candidate).items():reaction.crossSection[result.label]=deepcopy(result.forms[key])
     candidate.styles.add(CrossSectionReconstructed(result.label,derivedFrom=result.source_style))
-    result.verify_suite(candidate)
+    result.verify_suite(candidate,progress=progress)
     # Publish prebuilt containers only after every operation that can fail.
     candidates=_entries(candidate)
     containers={}

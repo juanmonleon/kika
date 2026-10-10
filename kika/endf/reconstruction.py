@@ -6,6 +6,7 @@ The entry point an application or a script calls without knowing the model:
     rec = reconstruct_endf("n-092_U_235.endf")
     tables = rec.tables_by_mt()          # for plotting; seconds to minutes
     rec.write_pendf("U235.pendf")        # on demand; written, reloaded, verified
+    rec.report_document().save("U235_report.html")   # or .txt / .json
 
 Reconstruction and publication are separate on purpose. The tables are what a
 plot needs; the PENDF costs a write, a full reload and a second verification
@@ -94,11 +95,24 @@ class EndfReconstruction:
     context_source: str
     timings: dict = field(default_factory=dict)
     engine_version: str = ""
+    #: MF1/451 identification and the MF2 ranges as the tape states them.
+    evaluation: dict = field(default_factory=dict, repr=False)
+    #: Whether the compiled kernel was loaded for this run.
+    native_kernel: bool | None = None
+    #: Set by :meth:`write_pendf`: path, MAT and the reload verification.
+    publication: dict | None = None
     _attached: bool = field(default=False, repr=False)
 
     @property
     def report(self):
         return self.result.report
+
+    def report_document(self):
+        """The full report as a :class:`~kika.endf.reconstruction_report.ReconstructionReport`
+        (``to_dict()``, ``to_text()``, ``to_html()``, ``save(path)``). Works before
+        and after :meth:`write_pendf`; after it, verification includes the reload."""
+        from .reconstruction_report import ReconstructionReport, build
+        return ReconstructionReport(build(self))
 
     def tables_by_mt(self) -> dict[int, ReconstructedTable]:
         """``{MT: ReconstructedTable}`` for every reaction with an ENDF MT."""
@@ -131,7 +145,7 @@ class EndfReconstruction:
         """Write the PENDF, reload it and verify it; the destination is replaced
         only if all of that passes. Raises ``ReconstructionConvergenceError``
         (``verification-failed`` or ``publication-failed``) otherwise."""
-        from kika.endf.writers.assemble import writeReconstructedEndfTape
+        from kika.endf.writers.assemble import PUBLICATION_VERIFY_SHARE, writeReconstructedEndfTape
         from kika.processing.resonances import (ReconstructionConvergenceError,
                                                 UnsupportedResonanceError, attach_reconstruction)
         t0 = time.perf_counter()
@@ -139,16 +153,19 @@ class EndfReconstruction:
             progress("write", None)
         try:
             if not self._attached:
-                attach_reconstruction(self.suite, self.result)
+                attach_reconstruction(self.suite, self.result, progress=(
+                    lambda f: progress("write", PUBLICATION_VERIFY_SHARE * f)) if progress else None)
                 self._attached = True
-            report = writeReconstructedEndfTape(self.suite, self.result, path, mat=mat)
+            report = writeReconstructedEndfTape(self.suite, self.result, path, mat=mat,
+                                                progress=(lambda f: progress("write", f)) if progress else None)
         except (ReconstructionConvergenceError, UnsupportedResonanceError):
             raise
         except ValueError as error:
             raise ReconstructionConvergenceError(str(error), category="publication-failed") from error
         self.timings["write_verify"] = time.perf_counter() - t0
-        if progress:
-            progress("write", 1.0)
+        maxima, worst = self.result.last_verification or ({}, {})
+        self.publication = dict(path=str(Path(path)), mat=mat if mat is not None else
+                                (self.evaluation or {}).get("mat"), maxima=maxima, worst=worst)
         return report
 
 
@@ -162,7 +179,9 @@ def reconstruct_endf(path, *, options=None,
     """
     from kika.endf.read_endf import read_endf
     from kika.endf.model_adapter import decodeReactionSuite
-    from kika.processing.resonances import ENGINE_VERSION, ReconstructionOptions, reconstruct_suite
+    from kika.processing.resonances import (ENGINE_VERSION, ReconstructionOptions, native_available,
+                                            reconstruct_suite)
+    from .reconstruction_report import evaluation_summary
     options = ReconstructionOptions(max_points=DEFAULT_MAX_POINTS) if options is None else options
     report = (lambda stage, fraction: progress(stage, fraction)) if progress else (lambda *_: None)
     timings = {}
@@ -171,6 +190,7 @@ def reconstruct_endf(path, *, options=None,
     t0 = time.perf_counter()
     report("read", None)
     tape = read_endf(str(path), mf_numbers=[1, 2, 3])
+    evaluation = evaluation_summary(tape, path)
     timings["read"] = time.perf_counter() - t0
     report("read", 1.0)
 
@@ -187,4 +207,5 @@ def reconstruct_endf(path, *, options=None,
     result = reconstruct_suite(suite, context, options=options,
                                progress=lambda f: report("reconstruct", f))
     timings["reconstruct"] = time.perf_counter() - t0
-    return EndfReconstruction(path, suite, result, context, source, timings, ENGINE_VERSION)
+    return EndfReconstruction(path, suite, result, context, source, timings, ENGINE_VERSION,
+                              evaluation=evaluation, native_kernel=native_available())

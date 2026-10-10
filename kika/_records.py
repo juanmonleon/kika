@@ -180,12 +180,14 @@ def format_endf_number_precise(value, width=11):
     legacy = format_endf_number(value, width)
     if value is None or value == 0:
         return legacy
-    candidates = [legacy]
     digits = max(1, int(math.floor(math.log10(abs(value)))) + 1)
     sign = int(value < 0)
     if digits + sign <= width:
         # Among fixed decimals the finest fitting quantum cannot round worse
         # than a coarser one. A rounding carry may require one fewer place.
+        # Fixed text is plain Python float syntax, so float() reads it back
+        # exactly as parse_number would; only the legacy field needs the
+        # ENDF grammar. This is the PENDF writer's hottest loop.
         places = max(0, width-digits-sign-1)
         while places >= 0:
             fixed = f"{value:.{places}f}"
@@ -195,15 +197,18 @@ def format_endf_number_precise(value, width=11):
                 # with no blank before it, where JEFF-4.0 B-10 writes
                 # `` 20000000.1``: the same value, and only the latter is the
                 # source's text.
+                named = float(fixed)
                 while places > 0:
                     shorter = f"{value:.{places - 1}f}"
-                    if parse_number(shorter) != parse_number(fixed):
+                    if float(shorter) != named:
                         break
                     fixed, places = shorter, places - 1
-                candidates.append(fixed.rjust(width))
-                break
+                # Ties keep the legacy field, as min() over [legacy, fixed] did.
+                if abs(named - value) < abs(parse_number(legacy) - value):
+                    return fixed.rjust(width)
+                return legacy
             places -= 1
-    return min(candidates, key=lambda field: abs(parse_number(field)-value))
+    return legacy
 
 
 def round_to_precise_endf_field(values):

@@ -816,7 +816,15 @@ def _resample_reconstructed_endf(suite, label):
     return output
 
 
-def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
+#: Share of publication time per step, measured on ENDF/B-VIII.1 Fe-56; only
+#: the progress bar uses it. The first verification usually runs earlier, in
+#: ``attach_reconstruction``, and is then a cache hit here; the caller can map
+#: that call onto the "verify" share (``PUBLICATION_VERIFY_SHARE``).
+_PUBLICATION_STEPS = (("verify", .40), ("resample", .06), ("write", .32), ("reload", .10), ("reverify", .12))
+PUBLICATION_VERIFY_SHARE = _PUBLICATION_STEPS[0][1]
+
+
+def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progress=None):
     """Write, reload and verify before replacing the requested destination.
 
     The result must already be attached to the suite. A new derived tape uses
@@ -824,13 +832,24 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
     failures abort publication and leave an existing destination intact.
     Only the model's represented ENDF sections can be preserved; inspect the
     source conversion report before preparing a reconstruction.
+    ``progress(fraction)`` receives a plain float in (0, 1] as the steps
+    (verify, resample, write, reload, verify the reload) advance.
     """
     import tempfile
     from ..read_endf import read_endf
     from ..model_adapter import decodeReactionSuite
 
+    starts, at = {}, 0.
+    for step, share in _PUBLICATION_STEPS:
+        starts[step] = (at, share)
+        at += share
+    def advance(step, fraction=1.):
+        if progress is not None:
+            start, share = starts[step]
+            progress(float(min(1., start + share * fraction)))
     result.verify_source(suite)
-    result.verify_suite(suite)
+    result.verify_suite(suite, progress=lambda f: advance("verify", f))
+    advance("verify")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix='.'+target.name+'.',
@@ -839,15 +858,20 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
     provisional = Path(name)
     try:
         serialized = _resample_reconstructed_endf(suite, result.label)
+        advance("resample")
         report = writeEndfTape(serialized, provisional, mat=mat,
             tapeId=DEFAULT_TAPE_ID if tapeId is None else tapeId, label=result.label)
+        advance("write")
         if not report.isClean:
             raise ValueError(f'reconstructed ENDF conversion is incomplete: {vars(report)}')
         reloaded, conversion = decodeReactionSuite(read_endf(str(provisional)))
         if not conversion.isCleanFor('cross-sections'):
             raise ValueError(f'reconstructed ENDF reload is incomplete: {vars(conversion)}')
-        result.verify_suite(reloaded, label='eval')
+        advance("reload")
+        result.verify_suite(reloaded, label='eval', progress=lambda f: advance("reverify", f))
         provisional.replace(target)
+        if progress is not None:
+            progress(1.0)
         return report
     finally:
         provisional.unlink(missing_ok=True)
