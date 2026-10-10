@@ -228,6 +228,19 @@ class _ResonanceReader:
             return None, None
         return self.toModelUnits(value, self.constantUnit(wrapper), where)
 
+    def scalarRadius(self, wrapper: Optional[ET.Element], where: str):
+        """:meth:`modelRadius` for a radius the model holds as a bare float.
+
+        A channel's or a resonance reaction's radius is a number in the model,
+        but the schema lets either be an ``XYs1d`` (``HardSphereRadiusType``).
+        None of the 560 ENDF/B-VIII.1 files uses one (measured 2026-10-09);
+        until one does, a table here is reported rather than read as absent.
+        """
+        if wrapper is not None and wrapper.find("XYs1d") is not None:
+            self.unsupported(wrapper.tag, where,
+                             "energy-dependent; the model holds this radius as a constant")
+        return self.modelRadius(wrapper, where)
+
     def constantUnit(self, wrapper: Optional[ET.Element]) -> Optional[str]:
         """The radius unit out of the same wrapper :func:`_constant` reads.
 
@@ -338,7 +351,7 @@ class _ResonanceReader:
             here = f"{path}/resonanceReactions/resonanceReaction" \
                    f"[@label='{child.attrib.get('label', '')}']"
             link = child.find("link")
-            reactionRadius, reactionRadiusUnit = self.modelRadius(
+            reactionRadius, reactionRadiusUnit = self.scalarRadius(
                 child.find("scatteringRadius"), here)
             # §19.3.3 allows a hard-sphere radius here as well as one per
             # channel (§19.3.4). This used to be reported and dropped, on the
@@ -347,7 +360,7 @@ class _ResonanceReader:
             # file states, and a reader that drops the second cannot write the
             # file back. Four nodes in three files carry one (V-51, Ca-40,
             # Cl-35; measured 2026-08-24 over the 558 distributed evaluations).
-            reactionHardSphere, hardSphereUnit = self.modelRadius(
+            reactionHardSphere, hardSphereUnit = self.scalarRadius(
                 child.find("hardSphereRadius"), here)
             linked = None
             if link is not None and link.attrib.get("href") and self.resolve is not None:
@@ -422,9 +435,9 @@ class _ResonanceReader:
         label = element.attrib.get("label", "")
         channelSpin = element.attrib.get("channelSpin")
         where = f"{path}/channels/channel[@label='{label}']"
-        channelRadius, channelRadiusUnit = self.modelRadius(
+        channelRadius, channelRadiusUnit = self.scalarRadius(
             element.find("scatteringRadius"), where)
-        hardSphere, hardSphereUnit = self.modelRadius(
+        hardSphere, hardSphereUnit = self.scalarRadius(
             element.find("hardSphereRadius"), where)
         return Channel(
             label=label,
@@ -546,6 +559,13 @@ class _ResonanceReader:
         radiusWrapper = element.find("scatteringRadius")
         localRadius = (self.readScatteringRadius(radiusWrapper, here)
                        if radiusWrapper is not None and radiusWrapper.find("XYs1d") is not None else None)
+        if element.find("hardSphereRadius") is not None:
+            # The schema allows it (BreitWignerType) and FUDGE's BW
+            # reconstruction ignores it; none of the 560 ENDF/B-VIII.1 files
+            # has one (measured 2026-10-09). Reported, not read, until a file
+            # or GNDS 2.2 says which radius it replaces.
+            self.unsupported("hardSphereRadius", here,
+                             "on a BreitWigner; the phase radius is read from scatteringRadius only")
         pops = element.find("PoPs")
         approximation = element.attrib.get("approximation")
         if approximation not in BREIT_WIGNER_APPROXIMATIONS:
@@ -668,13 +688,22 @@ class _ResonanceReader:
             else:
                 table = self.readScatteringRadius(hardSphere, here)
         stated = element.attrib.get("calculateChannelRadius")
-        if stated is None and table is not None:
+        # GNDS before 2.2 has no calculateChannelRadius on tabulatedWidths: the
+        # flag was put on the resolved formalisms and left off the URR by
+        # oversight. All 351 URRs of the 560 ENDF/B-VIII.1 GNDS files omit it
+        # (measured 2026-10-09). FUDGE reads the absence as True, i.e. NAPS=0
+        # (resonances/unresolved.py:358-360), and so does this reader. That is
+        # safe only because version.ACCEPTED stops at 2.1: once 2.2 is read,
+        # this branch must test the format, since 2.2 states the flag. The one
+        # known exception is Re-185 (NAPS=1 in ENDF), which a 2.0 file cannot
+        # express; it is LSSF=1, so no cross section is computed from it.
+        if stated is None:
             self.report.warn(
-                f"{here}: no calculateChannelRadius beside an energy-dependent "
-                f"radius; GNDS before 2.2 had no such flag for the URR and meant "
-                f"NAPS=0, so P/S are taken from the radius as GNDS 2.2 says")
-        policy = None if stated is None and table is None else RadiusPolicy(
-            channelMode="mass" if _isTrue(element, "calculateChannelRadius") else "phase",
+                f"{here}: no calculateChannelRadius; GNDS before 2.2 did not "
+                f"store it for the URR, and it is read as true (NAPS=0) as "
+                f"FUDGE reads it")
+        policy = RadiusPolicy(
+            channelMode="mass" if stated is None or _isTrue(element, "calculateChannelRadius") else "phase",
             phaseRadius=table)
         if stated is not None and not _isTrue(element,"calculateChannelRadius") and hardSphere is not None and urrRadius is not None:
             # GNDS states P/S on scatteringRadius and the phase separately on
