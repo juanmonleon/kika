@@ -13,7 +13,7 @@ same kind of object every time:
 
    ev = kika.read("Fe56.endf")     # or an ACE file
    ev.reactions[102]               # capture, by MT
-   ev.reactions["capture"]         # the same reaction, by GNDS label
+   ev.reactions["MT102"]           # the same reaction, by label (from ENDF: "MT<n>")
    E, xs = ev.cross_section(102)   # two numpy arrays
 
 The format is detected from the file's **content**, not its extension — ``.dat``,
