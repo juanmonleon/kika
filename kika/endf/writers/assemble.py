@@ -52,7 +52,7 @@ from ..utils import (format_endf_fend_record, format_endf_mend_record,
 
 __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
            "encodeTapeSections", "assembleTape", "writeEndfTape",
-           "writeEndfTapes", "writeReconstructedEndfTape"]
+           "writeEndfTapes", "writeReconstructedEndfTape", "writeHeatedEndfTape"]
 
 #: The MF numbers an encoder exists for, in the order ENDF-6 puts them on the
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
@@ -119,19 +119,43 @@ def _mf1Sections(suite, mat, report, label=None):
 
     sections = []
     header, report = encodeMF1MT451(suite, mat, report)
-    from kika.nuclear_data.model import CrossSectionReconstructed
+    from kika.nuclear_data.model import CrossSectionReconstructed, Heated, PhysicalQuantity
     try:
         selected_style = suite.styles[label]
     except KeyError:
         selected_style = None
-    if isinstance(selected_style, CrossSectionReconstructed):
+    if isinstance(selected_style, (CrossSectionReconstructed, Heated)):
         missing = [r.label for r in _mf3Bearing(suite) if label not in r.crossSection]
         if missing:
-            raise ValueError(f"reconstructed ENDF export cannot mix evaluated cross sections: {missing}")
+            raise ValueError(f"processed ENDF export cannot mix evaluated cross sections: {missing}")
         # ENDF-102 §1.1: keep MF2, but MF3 already contains its contribution.
         # Change the encoded header only; the evaluated model remains intact.
         header._lrp = 2
         header._ldrv = 1
+    if isinstance(selected_style, Heated):
+        import math
+        temperature = selected_style.temperature
+        if (not isinstance(temperature, PhysicalQuantity) or temperature.unit != 'K'
+                or isinstance(temperature.value, bool)
+                or not isinstance(temperature.value, (int, float))
+                or not math.isfinite(temperature.value) or temperature.value < 0
+                or not selected_style.derivedFrom):
+            raise ValueError('heated ENDF export requires finite nonnegative Kelvin temperature and derivedFrom')
+        forms = [r.crossSection[label] for r in _mf3Bearing(suite)]
+        domains = {(f.domainMin, f.domainMax) for f in forms}
+        if len(domains) != 1:
+            raise ValueError('heated ENDF export requires common cross-section coverage')
+        lo, hi = next(iter(domains))
+        header._temp = temperature.value
+        header._emax = hi
+        # A derived pointwise tape must not invite another resonance addition.
+        # Distributions/covariances are retained at their source styles, not heated.
+        comments = [f'KIKA HEATED {label}: TEMP={temperature.value:g} K',
+                    f'POINTWISE MF3 DOMAIN {lo:g} TO {hi:g} EV; LRP=2',
+                    'SECONDARY DISTRIBUTIONS AND COVARIANCES NOT DOPPLER PROCESSED']
+        header._text_lines.extend(comments)
+        header._nwd += len(comments)
+        report.warn('heated pointwise MF3 only; secondary distributions and covariances retain source styles')
     sections.append((1, 451, header))
 
     # 452, 455, 456 -- ascending, which is the order they sit in on the tape.
@@ -257,9 +281,9 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
         # holes in it.
         formLabel = label if label in reaction.crossSection else EVAL_LABEL
         (written if formLabel == label else fellBack).append(mt)
-        from kika.nuclear_data.model import CrossSectionReconstructed
+        from kika.nuclear_data.model import CrossSectionReconstructed, Heated
         try:
-            reconstructed = isinstance(suite.styles[formLabel], CrossSectionReconstructed)
+            reconstructed = isinstance(suite.styles[formLabel], (CrossSectionReconstructed, Heated))
         except KeyError:
             reconstructed = False
         section, report = encodeMF3MT(reaction, mat, report, label=formLabel,
@@ -873,6 +897,74 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progr
         provisional.replace(target)
         if progress is not None:
             progress(1.0)
+        return report
+    finally:
+        provisional.unlink(missing_ok=True)
+
+
+def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
+    """Publish attached scalar Doppler results after ENDF relecture checks.
+
+    Uses the selected Heated temperature and complete represented MF3 coverage.
+    The inherited input-table accuracy scope and restricted output domain remain
+    explicit; this does not heat secondary distributions or make transport data.
+    Any conversion loss or numerical rejection preserves an existing destination.
+    Returns the conversion report; numerical checks consume the result's existing
+    table and serialization budgets, without adjusting its options.
+    """
+    import tempfile
+    import numpy as np
+    from kika.processing.doppler import SuiteDopplerResult, DopplerConvergenceError
+    from kika.nuclear_data.model import Regions1d
+    from ..read_endf import read_endf
+    from ..model_adapter import decodeMF3MT
+    from ..model_adapter.pendf import pendfHeader
+    if not isinstance(result, SuiteDopplerResult):
+        raise TypeError('SuiteDopplerResult required')
+    result.verify_suite(suite)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='.'+target.name+'.', suffix='.pendf', dir=target.parent)
+    os.close(fd)
+    provisional = Path(name)
+    try:
+        serialized = _resample_reconstructed_endf(suite, result.label)
+        report = writeEndfTape(serialized, provisional, mat=mat,
+                              tapeId=tapeId or DEFAULT_TAPE_ID, label=result.label)
+        if not report.isClean:
+            raise ValueError('heated ENDF conversion loses represented data: '+report.summary())
+        header = pendfHeader(provisional)
+        if header['temp'] != result.temperature:
+            raise ValueError('heated ENDF temperature changed on relecture')
+        tape = read_endf(str(provisional), mf_numbers=[1, 3])
+        if tape.mf[1].mt[451]._lrp != 2:
+            raise ValueError('heated ENDF must declare MF3 includes resonances')
+        published = {}
+        for mt, key in result._mt_keys.items():
+            reaction, _ = decodeMF3MT(tape.mf[3].mt[mt])
+            form = reaction.crossSection['eval']
+            form.label = result.label
+            published[key] = form
+        if set(published) != set(result.forms):
+            raise ValueError('heated ENDF cannot represent every processed reaction')
+        # Compare both faces and union knots of piecewise-linear tables. This
+        # also detects formatting collisions and semantic boundary movement.
+        def pieces(form):
+            return form.function1ds if isinstance(form, Regions1d) else [form]
+        for key, original in result.forms.items():
+            left, right = pieces(original), pieces(published[key])
+            if len(left) != len(right):
+                raise DopplerConvergenceError('publication', 'ENDF region topology changed')
+            for a, b in zip(left, right):
+                if (a.domainMin, a.domainMax) != (b.domainMin, b.domainMax):
+                    raise DopplerConvergenceError('publication', 'ENDF boundary not representable')
+                q = np.unique(np.r_[a.xs, b.xs])
+                before, after = np.interp(q, a.xs, a.ys), np.interp(q, b.xs, b.ys)
+                budget = result.options.atol+result.options.rtol*np.abs(before)
+                if np.max(abs(after-before)/budget) > result.options.serialization_share:
+                    raise DopplerConvergenceError('publication', 'ENDF serialization budget exceeded')
+        result.verify_table(forms=published, total_budget=True)
+        os.replace(provisional, target)
         return report
     finally:
         provisional.unlink(missing_ok=True)

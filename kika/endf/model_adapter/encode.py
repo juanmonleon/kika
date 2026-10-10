@@ -158,7 +158,7 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
     energies, values, regions = form.toEndfRegions()
 
     kept = getattr(provenance, "interpolationRegions", None)
-    if kept:
+    if kept and label == EVAL_LABEL:
         # Prefer the file's own pairs. They and the reconstructed ones agree --
         # a test asserts it -- but preferring the original means a round trip
         # does not depend on that agreement holding for every tape ever written.

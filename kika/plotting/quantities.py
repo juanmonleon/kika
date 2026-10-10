@@ -857,7 +857,9 @@ def _suite_cross_section(suite: Any, *, mt: int, form: Optional[str] = None,
     if form is None:
         form = 'eval' if 'eval' in labels or not labels else labels[0]
     energies, values = suite.cross_section(mt, form=form)
-    state = 'heated' if 'heat' in form.lower() or 'grid' in form.lower() else 'evaluated'
+    selected_style = next((s for s in suite.styles if s.label == form), None)
+    heated = getattr(selected_style, 'gndsNodeName', None) == 'heated'
+    state = 'heated' if heated or 'heat' in form.lower() or 'grid' in form.lower() else 'evaluated'
     return PlotItem(PlotData(x=np.asarray(energies, dtype=float), y=np.asarray(values, dtype=float),
                              provenance=_suite_provenance(suite, mt, state)))
 
