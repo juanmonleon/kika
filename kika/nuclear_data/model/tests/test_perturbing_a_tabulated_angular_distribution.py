@@ -206,7 +206,7 @@ def test_the_two_appliers_agree_to_the_projection_floor(fe56):
     assert info["n_inserted"] > 0
 
 
-def test_a_coarse_mu_grid_is_what_decision_d3_is_about(fe56):
+def test_a_coarse_mu_grid_raises_the_projection_floor(fe56):
     """At 21 nodes the gate still holds against its own floor, but the floor is
     0.13 in a_l and the integral moves 1.7e-3 -- the size that D3 (refining mu)
     has to answer, measured rather than argued."""
