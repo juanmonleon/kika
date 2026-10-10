@@ -68,8 +68,8 @@ def build_xsdir_line(
     kT_MeV : float
         Temperature in MeV (kT).
 
-    Keyword-only parameters
-    -----------------------
+    Other Parameters
+    ----------------
     dir_field : str | int, default 0
     file_type : int, default 1
         1 = text (sequential), 2 = binary (direct access).
@@ -82,7 +82,7 @@ def build_xsdir_line(
     Returns
     -------
     str
-        The complete xsdir entry (may contain embedded "\n" for continuation).
+        The complete xsdir entry (may contain embedded newlines for continuation).
     """
     fields = [
         zaid_with_ext,

@@ -1195,7 +1195,8 @@ class CrossSectionCovariance:
     def clean_cov(self, isotope: int) -> "CrossSectionCovariance":
         """
         Return a new CrossSectionCovariance containing only sub-matrices for *isotope*,
-        always dropping reaction 1 and applying the mid/high-range rules:
+        always dropping reaction 1 and applying the mid/high-range rules::
+
             4 → 51-91, 103 → 600-649, 104 → 650-699,
             105 → 700-749, 106 → 750-799, 107 → 800
         """
@@ -1490,7 +1491,7 @@ class CrossSectionCovariance:
             Diagonal variances above this threshold are clamped.
         clamp_target
             Target variance assigned to clamped diagonals (off-diagonals
-            rescaled by sqrt(target/|old|) to preserve correlations).
+            rescaled by ``sqrt(target/|old|)`` to preserve correlations).
         accept_tol
             Minimum eigenvalue tolerated for acceptance.
         clamp_max_iter
@@ -1637,20 +1638,22 @@ class CrossSectionCovariance:
         ----
         idx        : Index of the eigenvalue to inspect (overrides *which*).
         which      : If *idx* is None, choose 'max' or 'min' eigenvalue.
-        top_n      : Return only the *top_n* largest |contribution| entries.
-        tol        : Skip blocks with |contribution| ≤ tol.
+        top_n      : Return only the *top_n* largest ``|contribution|`` entries.
+        tol        : Skip blocks with ``|contribution| ≤ tol``.
         symmetric  : If True, include only pairs with i ≤ j (avoids duplicates).
-        relative   : If True, report each block's share of |λ|.
+        relative   : If True, report each block's share of ``|λ|``.
 
         Returns
         -------
-        A dict with:
-            'index'        : eigenvalue index used.
-            'eigenvalue'   : eigenvalue λ.
-            'contributions': list of dicts:
-                { 'block': (param_pairs[i], param_pairs[j]),
-                    'contribution': c_ij,
-                    'weight': |c_ij| / |λ|   # only if relative=True }
+        dict
+            With these keys::
+
+                'index'        : eigenvalue index used.
+                'eigenvalue'   : eigenvalue λ.
+                'contributions': list of dicts:
+                    { 'block': (param_pairs[i], param_pairs[j]),
+                        'contribution': c_ij,
+                        'weight': |c_ij| / |λ|   # only if relative=True }
         """
         M = self.covariance_matrix               # full (n × n) matrix
         G = self.num_groups                      # rows per single block
@@ -3210,7 +3213,7 @@ class CrossSectionCovariance:
     ) -> Tuple["CrossSectionCovariance", Dict[str, Any]]:
         """
         Cap diagonal variances larger than `high_val_thresh` to `clamp_target`
-        and rescale the connected row/column by sqrt(target/|old|) so that
+        and rescale the connected row/column by ``sqrt(target/|old|)`` so that
         correlations remain untouched.
 
         verbose=True prints the [CLAMP #N] header and per-clamp adjusted-count
@@ -3594,6 +3597,7 @@ class CrossSectionCovariance:
         Main method for your UI graph.
 
         Returns a JSON-friendly payload with:
+
         - center node
         - nodes + edges within BFS depth
         - (if depth >= 2) a grouped mapping of second-level nodes per first-level neighbor,
@@ -3605,7 +3609,7 @@ class CrossSectionCovariance:
             1 -> show center + its neighbors
             2 -> also include neighbors-of-neighbors
         require_nonzero : bool
-            True: only create edges if the covariance block has any |value| > tol
+            True: only create edges if the covariance block has any ``|value| > tol``
             False: edge exists if the block exists (even if all zeros)
         tol : float
             Threshold for nonzero detection when require_nonzero=True
@@ -3956,12 +3960,12 @@ class CrossSectionCovariance:
         Parameters
         ----------
         max_abs_corr
-            Any correlation with |ρ| > max_abs_corr (but ≤ zero_threshold)
+            Any correlation with ``|ρ| > max_abs_corr`` (but ≤ zero_threshold)
             is clipped to ±max_abs_corr.
         zero_threshold
-            Any |ρ| > zero_threshold is set to 0.
+            Any ``|ρ| > zero_threshold`` is set to 0.
         report_tol
-            Minimum |old–new| change to actually log.
+            Minimum ``|old–new|`` change to actually log.
         eigen_floor
             Floor for eigenvalues when projecting to PSD.
         project_psd
