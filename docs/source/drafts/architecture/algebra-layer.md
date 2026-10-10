@@ -90,7 +90,8 @@ step; none turns it into a ramp. The value at the step is the right-hand limit;
 
 A table is zero outside $[x_1, x_n]$ unless the caller asks otherwise (`outside="hold"`
 keeps the end values, `"raise"` refuses). A table that starts at a non-zero value
-therefore starts with a step: its left limit at $x_1$ is the outside value.
+therefore starts with a step: its left limit at $x_1$ is the outside value. The Gaussian
+fold is the exception: it holds the end values outside the table.
 
 ### One law per interval, and not ENDF's regions
 
