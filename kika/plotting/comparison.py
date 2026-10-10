@@ -63,6 +63,14 @@ def _unwrap(data):
 # Auto-interpolation defaults by PlotData subclass
 # ---------------------------------------------------------------------------
 
+#: Where the 'ref: <label>' annotation goes, per corner: axes x, y, ha, va.
+_REFERENCE_LABEL_ANCHORS = {
+    'upper left': (0.02, 0.97, 'left', 'top'),
+    'upper right': (0.98, 0.97, 'right', 'top'),
+    'lower left': (0.02, 0.03, 'left', 'bottom'),
+    'lower right': (0.98, 0.03, 'right', 'bottom'),
+}
+
 _INTERPOLATION_DEFAULTS = {
     'CrossSectionPlotData': 'log-log',
     'AngularDistributionPlotData': 'lin-lin',
@@ -302,6 +310,7 @@ class ComparisonBuilder:
         # "ref: <label>" annotation on the diff and diff-only panels.
         self._show_reference_label: bool = True
         self._reference_label_fontsize: float = 11
+        self._reference_label_loc: str = 'upper left'
 
     # ---- fluent API -------------------------------------------------------
 
@@ -494,17 +503,37 @@ class ComparisonBuilder:
         return self
 
     def set_reference_label(
-        self, show: bool = True, fontsize: Optional[float] = None
+        self, show: bool = True, fontsize: Optional[float] = None,
+        loc: Optional[str] = None,
     ) -> 'ComparisonBuilder':
         """Toggle the 'ref: <label>' annotation on the diff panel.
 
         ``fontsize`` scales the annotation; pass the legend fontsize so the
-        label tracks it. ``None`` keeps the current value.
+        label tracks it. ``loc`` is the corner it sits in, one of
+        ``'upper left'`` (the default), ``'upper right'``, ``'lower left'``
+        and ``'lower right'``, so it can be moved off a curve that runs
+        under it. ``None`` keeps the current value of either.
         """
+        if loc is not None and loc not in _REFERENCE_LABEL_ANCHORS:
+            raise ValueError(f"loc must be one of {sorted(_REFERENCE_LABEL_ANCHORS)}, "
+                             f"got {loc!r}")
         self._show_reference_label = show
         if fontsize is not None:
             self._reference_label_fontsize = fontsize
+        if loc is not None:
+            self._reference_label_loc = loc
         return self
+
+    def _draw_reference_label(self, ax) -> None:
+        """The 'ref: <label>' annotation in its corner of *ax*, when shown."""
+        if not self._show_reference_label:
+            return
+        x, y, ha, va = _REFERENCE_LABEL_ANCHORS[self._reference_label_loc]
+        ax.text(
+            x, y, f"ref: {self._reference.label or 'reference'}",
+            transform=ax.transAxes, fontsize=self._reference_label_fontsize,
+            va=va, ha=ha, fontstyle='italic', alpha=0.7,
+        )
 
     # ---- interpolation inference ------------------------------------------
 
@@ -844,15 +873,7 @@ class ComparisonBuilder:
                 y=0, color='grey', linestyle='--', linewidth=0.8, alpha=0.7,
             )
 
-        # Reference annotation (diff-only panel)
-        if self._show_reference_label:
-            ref_label = self._reference.label or 'reference'
-            ax.text(
-                0.02, 0.97, f'ref: {ref_label}',
-                transform=ax.transAxes,
-                fontsize=self._reference_label_fontsize, va='top', ha='left',
-                fontstyle='italic', alpha=0.7,
-            )
+        self._draw_reference_label(ax)
 
         if show:
             plt.show()
@@ -1082,14 +1103,7 @@ class ComparisonBuilder:
             )
 
         # Reference annotation — colors match the main panel legend
-        if self._show_reference_label:
-            ref_label = self._reference.label or 'reference'
-            ax_diff.text(
-                0.02, 0.97, f'ref: {ref_label}',
-                transform=ax_diff.transAxes,
-                fontsize=self._reference_label_fontsize, va='top', ha='left',
-                fontstyle='italic', alpha=0.7,
-            )
+        self._draw_reference_label(ax_diff)
 
         if show:
             plt.show()

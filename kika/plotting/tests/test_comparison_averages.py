@@ -255,3 +255,30 @@ def test_an_unknown_display_is_refused():
         PlotBuilder().set_group_average(main_display="avg")
     with pytest.raises(ValueError):
         ComparisonBuilder().set_group_average(main_display="avg")
+
+
+# ---------------------------------------------------------------------------
+# The 'ref: <label>' annotation, in a corner of choice
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("only", [False, True])
+@pytest.mark.parametrize("loc, xy, ha, va", [
+    (None, (0.02, 0.97), "left", "top"),
+    ("upper right", (0.98, 0.97), "right", "top"),
+    ("lower left", (0.02, 0.03), "left", "bottom"),
+    ("lower right", (0.98, 0.03), "right", "bottom"),
+])
+def test_the_reference_label_sits_in_the_corner_asked_for(only, loc, xy, ha, va):
+    builder = ComparisonBuilder(interpolation="lin-lin")
+    builder.set_reference(_pointwise("ref", 2.0)).add_comparison(_pointwise("cmp", 2.2))
+    builder.set_difference_panel(only=only)
+    builder.set_reference_label(loc=loc)
+    ax = builder.build().axes[-1]
+    (text,) = [t for t in ax.texts if t.get_text() == "ref: ref"]
+    assert text.get_position() == pytest.approx(xy)
+    assert (text.get_ha(), text.get_va()) == (ha, va)
+
+
+def test_an_unknown_reference_label_corner_is_refused():
+    with pytest.raises(ValueError):
+        ComparisonBuilder().set_reference_label(loc="best")
