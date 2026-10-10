@@ -94,6 +94,12 @@ html_short_title = "KIKA"
 # XeLaTeX reads the Unicode the pages and docstrings use (Greek, ℓ, ⁻, ·)
 # directly; pdflatex stops at the first character it has no mapping for.
 latex_engine = 'xelatex'
+# The PDF is the manual, not the API reference: its root is pdf_index.rst, which
+# holds every section except api_reference/ (generated from the code, and read
+# online). One document, built from that root.
+latex_documents = [
+    ('pdf_index', 'kika.tex', 'KIKA Documentation', author, 'manual'),
+]
 
 # -- EPUB (also built by Read the Docs) ----------------------------------------
 # A figure's PDF twin (for LaTeX) and the script that draws it live next to it
@@ -110,6 +116,7 @@ epub_exclude_files = sorted(
 
 # -- Drafts wiring -----------------------------------------------------------
 
+# The architecture overview opens its section; everything else follows by name.
 _DRAFTS_TOCTREE = """
 
 .. toctree::
@@ -117,8 +124,13 @@ _DRAFTS_TOCTREE = """
    :caption: Drafts (under review)
    :glob:
 
+   drafts/architecture/index
+   drafts/architecture/**
    drafts/**
 """
+
+#: The documents that carry the top-level toctrees: the site's, and the PDF's.
+_ROOTS = ("index", "pdf_index")
 
 _DRAFT_BANNER = """
 ```{warning}
@@ -130,7 +142,7 @@ it may change before it is.
 
 def _wireDrafts(app, docname, source):
     """Add the drafts section to the root toctree, and the banner to each draft."""
-    if docname == app.config.root_doc:
+    if docname in _ROOTS:
         source[0] += _DRAFTS_TOCTREE
     elif docname.startswith("drafts/"):
         lines = source[0].split("\n")
