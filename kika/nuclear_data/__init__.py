@@ -58,6 +58,16 @@ _MODULES = {
     "NuclideInfo": "nuclide_info",
 }
 
+#: name -> module, for the names here that are **not** deprecated. They live in
+#: this package because they work on any suite of the model, whatever format it
+#: was read from, and resolve lazily like the rest, without a warning. They are
+#: kept out of ``__all__``, which is the deprecated façade surface and is pinned
+#: as such by tests/test_flat_class_surface.py.
+_CURRENT = {
+    "PhotonProduction": "photon_production",
+    "PhotonProductionError": "photon_production",
+}
+
 #: Names already warned about, so the message appears once per process per name
 #: rather than once per access. ``warnings``' own registry would mostly do this,
 #: but it is keyed on the *call site*, so a name reached from twenty notebooks
@@ -67,6 +77,12 @@ _WARNED: set = set()
 
 def __getattr__(name: str):
     """Resolve a deprecated name, warning once, on first access (PEP 562)."""
+    current = _CURRENT.get(name)
+    if current is not None:
+        value = getattr(importlib.import_module(f".{current}", __name__), name)
+        globals()[name] = value
+        return value
+
     module = _MODULES.get(name)
     if module is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

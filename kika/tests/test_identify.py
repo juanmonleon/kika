@@ -326,3 +326,16 @@ def test_a_serpent_output_listing_is_refused_rather_than_called_mcnp(tmp_path):
         encoding="utf-8")
     with pytest.raises(UnknownFormatError, match="Serpent output listing"):
         identify(path)
+
+
+def test_photoatomic_data_is_read_by_the_reader_of_its_format():
+    """An ENDF photo-atomic tape is ``endf`` and an ACE ``p`` table is ``ace``:
+    no kind of their own, since the same readers open them (see ``KINDS``)."""
+    data = Path(kika.__file__).parent / "endf" / "tests" / "data"
+    for name in ("micro_fe_photoatomic.endf", "micro_fe_relaxation.endf"):
+        if (data / name).exists():
+            assert identify(data / name) == "endf"
+    from kika.ace.tests.test_photoatomic_ace import EPRDATA14_FE, MCPLIB84_FE
+    for table in (EPRDATA14_FE, MCPLIB84_FE):
+        if table.is_file():
+            assert identify(table) == "ace"

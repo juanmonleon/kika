@@ -1,0 +1,92 @@
+Retrieved by E4-util: 2018/02/07,17:59:34                            1 0  0    0
+ 2.600000+4 5.536723+1         -1          0          0          02600 1451    1
+ 0.000000+0 0.000000+0          0          0          0          62600 1451    2
+ 0.000000+0                     0          0          6          82600 1451    3
+ 0.000000+0 0.000000+0          0          0         67          22600 1451    4
+ 26-Fe-  0 NDS,IAEA   Eval-Dec17 D.E.Cullen                       2600 1451    5
+ NDS-IAEA-224         DIST-FEB18                                  2600 1451    6
+----ENDF/B-VIII.0     MATERIAL  100                               2600 1451    7
+-----ATOMIC RELAXATION DATA                                       2600 1451    8
+------ENDF-6 FORMAT                                               2600 1451    9
+==================================================================2600 1451   10
+The Livermore Evaluated Atomic Data Library (EADL) in the         2600 1451   11
+ENDF-6 Format. Translated from the Livermore ENDL format          2600 1451   12
+to the ENDF-6 Format.                                             2600 1451   13
+==================================================================2600 1451   14
+  Contents                                                        2600 1451   15
+==================================================================2600 1451   16
+  MF/MT    Description                                            2600 1451   17
+==================================================================2600 1451   18
+  28/533   Atomic Relaxation Data for Electrons and Photons       2600 1451   19
+==================================================================2600 1451   20
+  Warning                                                         2600 1451   21
+==================================================================2600 1451   22
+  MF/MT combinations used to define ALL electron interaction data 2600 1451   23
+  are newly defined MF/MT numbers for ENDF/B-VI that did not exist2600 1451   24
+  in earlier versions of ENDF/B.                                  2600 1451   25
+==================================================================2600 1451   26
+  Definition of Data                                              2600 1451   27
+==================================================================2600 1451   28
+  Atomic Relaxation Data for Electrons and Photons                2600 1451   29
+==================================================================2600 1451   30
+1) An atom can be ionized by a photon or an electron interaction. 2600 1451   31
+2) The atomic relaxation data included here describes how a       2600 1451   32
+   singly ionized atom returns to neutrality, by emitting photons 2600 1451   33
+   (x-rays) and/or electrons (Auger, Coster-Kronig).              2600 1451   34
+3) Data is given to define the transition probabilities between   2600 1451   35
+   subshells for radiative (x-ray emission) and non-radiative     2600 1451   36
+   (Auger, Coster-Kronig) transitions.                            2600 1451   37
+4) The complete spectrum of emitted photons and electrons can be  2600 1451   38
+   calculated using the data included here, e.g., see ref. 2,     2600 1451   39
+   below, for am example of a computer code that analytically     2600 1451   40
+   calculates these spectra.                                      2600 1451   41
+==================================================================2600 1451   42
+  References                                                      2600 1451   43
+==================================================================2600 1451   44
+1) S.T. Perkins, D.E. Cullen, etal., "Tables and Graphs of Atomic 2600 1451   45
+   Subshell and Relaxation Data Derived from the LLNL Evaluated   2600 1451   46
+   Atomic Data Library (EADL), Z = 1 - 100", UCRL-50400, Vol. 30, 2600 1451   47
+   Lawrence Livermore National Laboratory (1991).                 2600 1451   48
+2) D.E. Cullen "Program RELAX: A Code Designed to Calculate X-Ray 2600 1451   49
+   and Electron Emission Spectra as Singly Charged Atoms Relax    2600 1451   50
+   Back to Neutrality", UCRL-ID-110438, Lawrence Livermore        2600 1451   51
+   National Laboratory (1992).                                    2600 1451   52
+3) D.E. Cullen "A Survey of Atomic Binding Energies for use       2600 1451   53
+   in EPICS2017" ,IAEA-NDS-224, (2017), Nuclear Data Section,     2600 1451   54
+   IAEA, Vienna, Austria                                          2600 1451   55
+                                                                  2600 1451   56
+  These are the primary references to the contents of this library2600 1451   57
+  and they contain a complete list of references to the sources   2600 1451   58
+  of data used in this library, methods of evaluation, accuracy   2600 1451   59
+  of the data, etc.                                               2600 1451   60
+==================================================================2600 1451   61
+  History                                                         2600 1451   62
+==================================================================2600 1451   63
+ (1) November, 1991 - Initial release in the ENDL format.         2600 1451   64
+ (2) November, 2001 - Initial release in the ENDF-6 format.       2600 1451   65
+ (3) September,2014 - Insure Standard C, C++, FORTRAN Format      2600 1451   66
+ (4) September,2014 - Updated based on recently publshed data     2600 1451   67
+ (5) September,2017 - New Binding Energies (see: ref.3)           2600 1451   68
+                      Same Transition Probabilities               2600 1451   69
+==================================================================2600 1451   70
+ **************** Program DICTIN (VERSION 2017-1) ****************2600 1451   71
+                                1        451         73          02600 1451   72
+                               28        533         12          02600 1451   73
+ 0.000000+0 0.000000+0          0          0          0          02600 1  099999
+                                                                  2600 0  0    0
+ 2.600000+4 55.3672319          0          0          2          0260028533    1
+ 1.000000+0 0.000000+0          0          0         48          7260028533    2
+ 7.117000+3 2.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0260028533    3
+ 3.000000+0 0.000000+0 6.349850+3 1.013910-1 0.000000+0 0.000000+0260028533    4
+ 4.000000+0 0.000000+0 6.362710+3 1.986210-1 0.000000+0 0.000000+0260028533    5
+ 6.000000+0 0.000000+0 7.015360+3 1.221110-2 0.000000+0 0.000000+0260028533    6
+ 7.000000+0 0.000000+0 7.016950+3 2.400420-2 0.000000+0 0.000000+0260028533    7
+ 8.000000+0 0.000000+0 7.070490+3 6.007940-6 0.000000+0 0.000000+0260028533    8
+ 9.000000+0 0.000000+0 7.070660+3 8.772260-6 0.000000+0 0.000000+0260028533    9
+ 2.000000+0 2.000000+0 5.397480+3 4.470390-2 0.000000+0 0.000000+0260028533   10
+ 1.000000+1 0.000000+0          0          0          6          0260028533   11
+ 7.870000+0 2.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0260028533   12
+                                                                  260028  099999
+                                                                  2600 0  0    0
+                                                                     0 0  0    0
+                                                                    -1 0  0    0

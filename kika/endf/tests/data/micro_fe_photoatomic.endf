@@ -1,0 +1,274 @@
+Retrieved by E4-util: 2018/02/07,17:58:04                            1 0  0    0
+ 2.600000+4 5.536730+1         -1          0          0          32600 1451    1
+ 0.000000+0 0.000000+0          0          0          0          62600 1451    2
+ 0.000000+0 1.00000+11          0          0          3          82600 1451    3
+ 0.000000+0 0.000000+0          0          0        156         142600 1451    4
+ 26-Fe-  0 NDS,IAEA   Eval-Dec17 D.E.Cullen, et al.               2600 1451    5
+ NDS-IAEA-225         DIST-FEB18                                  2600 1451    6
+----ENDF/B-VIII.0     MATERIAL 2600                               2600 1451    7
+----- PHOTO-ATOMIC INTERACTION DATA                               2600 1451    8
+------ ENDF/B-6                                                   2600 1451    9
+ =================================================================2600 1451   10
+ The Livermore Evaluated Photon Data Library (EPDL97) in the      2600 1451   11
+ ENDF-6 Format.                                                   2600 1451   12
+ =================================================================2600 1451   13
+  Contents                                                        2600 1451   14
+ =================================================================2600 1451   15
+  MF/MT     Description                                           2600 1451   16
+ =================================================================2600 1451   17
+  23/501   Total cross sections                                   2600 1451   18
+  23/502   Coherent scattering cross sections                     2600 1451   19
+  23/504   Incoherent scattering cross sections                   2600 1451   20
+  23/515   Pair production cross sections, Electron field         2600 1451   21
+  23/516   Pair production cross sections, Total                  2600 1451   22
+  23/517   Pair production cross sections, Nuclear field          2600 1451   23
+  23/522   Total photoionization cross section                    2600 1451   24
+  23/534   K (1S1/2)    Photoionization subshell cross section    2600 1451   25
+  23/535   L1 (2S1/2)   Photoionization subshell cross section    2600 1451   26
+  23/536   L2 (2P1/2)   Photoionization subshell cross section    2600 1451   27
+  23/537   L3 (2P3/2)   Photoionization subshell cross section    2600 1451   28
+  23/538   M1 (3S1/2)   Photoionization subshell cross section    2600 1451   29
+  23/539   M2 (3P1/2)   Photoionization subshell cross section    2600 1451   30
+  23/540   M3 (3P3/2)   Photoionization subshell cross section    2600 1451   31
+  23/541   M4 (3D3/2)   Photoionization subshell cross section    2600 1451   32
+  23/542   M5 (3D5/2)   Photoionization subshell cross section    2600 1451   33
+  23/543   N1 (4S1/2)   Photoionization subshell cross section    2600 1451   34
+ =================================================================2600 1451   35
+  27/502   Coherent scattering form factors                       2600 1451   36
+  27/504   Incoherent scattering functions                        2600 1451   37
+  27/505   Imaginary anomalous scattering factor                  2600 1451   38
+  27/506   Real anomalous scattering factor                       2600 1451   39
+ =================================================================2600 1451   40
+  Warning                                                         2600 1451   41
+ =================================================================2600 1451   42
+  MF/MT combinations used to define photoionization subshell cross2600 1451   43
+  sections (MF=23, MT=534-572) and coherent anomalous scattering  2600 1451   44
+  factors (MF=27, MT=505 AND 506) are newly defined MF/MT numbers 2600 1451   45
+  for ENDF/B-VI that did not exist in earlier versions of ENDF/B. 2600 1451   46
+  If you are not prepared to use this data you need merely delete 2600 1451   47
+  it and all of the remaining data will still be consistent and   2600 1451   48
+  equivalent to the types of data in earlier versions of ENDF/B.  2600 1451   49
+  However, this will limit the range of problems to which this    2600 1451   50
+  data can be applied (see: ref. 1 for details).                  2600 1451   51
+ =================================================================2600 1451   52
+  Definition of new types of data                                 2600 1451   53
+ =================================================================2600 1451   54
+  1) The total photoionization cross section is equal to the sum  2600 1451   55
+     of the photoionization subshell cross sections.              2600 1451   56
+                                                                  2600 1451   57
+     For each subshell on the second line of a section the C1 and 2600 1451   58
+     C2 fields are defined as,                                    2600 1451   59
+                                                                  2600 1451   60
+     EPE = The photoionization edge energy (similar to Q-value)   2600 1451   61
+     EFL = The fluorescence yield (eV/photoionization)            2600 1451   62
+                                                                  2600 1451   63
+  2) The angular distribution of coherently scattered photons is, 2600 1451   64
+                                                                  2600 1451   65
+     S(E,MU) = 3*T/8*(1 + MU**2)*((FF(M)+F1(E))**2+(F2(E))**2)    2600 1451   66
+                                                                  2600 1451   67
+     S(E,MU) = Angular distributions (barns per unit cosine)      2600 1451   68
+     T       = The Thomson cross section                          2600 1451   69
+     MU      = The cosine of the scattering angle                 2600 1451   70
+     FF(M)   = The atomic form factor                             2600 1451   71
+     M       = Momentum transfer = SIN(THETA/2)/LAMBDA/4*PI       2600 1451   72
+     F1(E)   = The real anomalous scattering factor               2600 1451   73
+     F2(E)   = The imaginary anomalous scattering factor          2600 1451   74
+                                                                  2600 1451   75
+     F1(E) and F2(E) are isotropic.                               2600 1451   76
+                                                                  2600 1451   77
+     When F1(E) = F2(E) = 0 this reduces to the result obtained   2600 1451   78
+     using only form factors (the older ENDF/B convention).       2600 1451   79
+ =================================================================2600 1451   80
+ Differences between EPDL97 and the data base presented here      2600 1451   81
+ =================================================================2600 1451   82
+ 1) Energy range - EPDL97 - 1 eV to 100 GeV                       2600 1451   83
+                   Here   - 1 eV TO 100 GeV (previously 100 MeV)  2600 1451   84
+ 2) Type of Data - EPDL97 - Photon interaction including          2600 1451   85
+                            photoexcitation                       2600 1451   86
+                   Here   - Photon interaction  - ENDF/B-VI has   2600 1451   87
+                            no provision for photoexcitation      2600 1451   88
+ 3) Secondary E  - EPDL97 - Average energy of each secondary      2600 1451   89
+                            (photons, electrons, positrons)       2600 1451   90
+                   HERE   - No secondary energy data              2600 1451   91
+ 4) Interpolation- EPDL97 - Cross sections are Log X vs. Log Y    2600 1451   92
+                            interpolable - the total cross        2600 1451   93
+                            section is not included               2600 1451   94
+                          - Form factors and scattering functions 2600 1451   95
+                            are Log X vs. Log y, except first     2600 1451   96
+                            interval.                             2600 1451   97
+                          - Anomalous scattering factors linearly 2600 1451   98
+                            interpolable (they can be negative)   2600 1451   99
+                   Here   - Up through ENDF/B-V photon interaction2600 1451  100
+                            cross sections were Log X vs. Log Y.  2600 1451  101
+                          - For the first two Mods. of ENDF/B-VI  2600 1451  102
+                            in order to consistently define the   2600 1451  103
+                            total cross sections at ALL energies  2600 1451  104
+                            all cross sections were linearized.   2600 1451  105
+                            This was NOT a good idea.             2600 1451  106
+                          - Starting with Mod. 3, cross sections  2600 1451  107
+                            are left in Log X vs. Log. Y form so  2600 1451  108
+                            that they are IDENTICAL to what's in  2600 1451  109
+                            EPDL97.                               2600 1451  110
+                            The total is defined ONLY at the      2600 1451  111
+                            energies tabulated in any other cross 2600 1451  112
+                            section.                              2600 1451  113
+                 WARNING  - As a result the total cross section   2600 1451  114
+                            MUST NOT be interpolated to define the2600 1451  115
+                            total between tabulated energies. The 2600 1451  116
+                            ONLY consist way to define the total  2600 1451  117
+                            between tabulated energies is to      2600 1451  118
+                            interpolate all of the partials and   2600 1451  119
+                            add them up.                          2600 1451  120
+ =================================================================2600 1451  121
+  References                                                      2600 1451  122
+ =================================================================2600 1451  123
+  1) D.E. Cullen, M.H. Chen, J.H. Hubbell, S.T. Perkins,          2600 1451  124
+  E.F. Plechaty, J.A. Rathkopf and J.H. Scofield, Tables and      2600 1451  125
+  graphs of photon interaction cross sections from 10 eV to 100   2600 1451  126
+  GeV derived from the LLNL Evaluated Photon data library (EPDL), 2600 1451  127
+  UCRL-50400, Vol. 6, Rev. 4, Part A: Z = 1 to 50 and Part B:     2600 1451  128
+  Z = 51 to 100, Lawrence Livermore National Laboratory (1989)    2600 1451  129
+                                                                  2600 1451  130
+  2) D.E. Cullen, J.H. Hubbell and L.D. Kissel, EPDL97: the       2600 1451  131
+  Evaluated Photon Data Library, '97 Version, UCRL-50400, Vol. 6, 2600 1451  132
+  Rev. 5, Lawrence Livermore National Laboratory (1997)           2600 1451  133
+                                                                  2600 1451  134
+  3) D.E. Cullen "A Survey of Atomic Binding Energies for use     2600 1451  135
+  in EPICS2017" ,IAEA-NDS-224, (2017), Nuclear Data Section,      2600 1451  136
+  IAEA, Vienna, Austria                                           2600 1451  137
+                                                                  2600 1451  138
+  4) D.E. Cullen "A Survey of Photon Cross Section Data for use   2600 1451  139
+  in EPICS2017" ,IAEA-NDS-225, (2017), Nuclear Data Section,      2600 1451  140
+  IAEA, Vienna, Austria                                           2600 1451  141
+                                                                  2600 1451  142
+  These are the primary references to the contents of this library2600 1451  143
+  and they contain a complete list of references to the sources   2600 1451  144
+  of data used in this library, methods of evaluation, accuracy   2600 1451  145
+  of the data, etc.                                               2600 1451  146
+ =================================================================2600 1451  147
+  History                                                         2600 1451  148
+ =================================================================2600 1451  149
+ 1) Oct. 1989 - Initial Release                                   2600 1451  150
+ 2) Aug. 1990 - Updated Photoelectic (total+shellS)               2600 1451  151
+ 3) July 1997 - Complete re-evaluation                            2600 1451  152
+ 4) Sept.2014 - Updated based on recently published data.         2600 1451  153
+              - Insured Standard C, C++, FORTRAN format           2600 1451  154
+ 5) Nov. 2017 - New Binding Energies (see, ref. 3)                2600 1451  155
+              - New Photoelectric and Coherent Cross Sections     2600 1451  156
+              - New Anomalous Scattering Factors (see, ref. 4)    2600 1451  157
+              - ALL Cross Sections Lin-Lin Interpolable           2600 1451  158
+ =================================================================2600 1451  159
+ **************** Program DICTIN (VERSION 2017-1) ****************2600 1451  160
+                                1        451        174          32600 1451  161
+                               23        501          7          32600 1451  162
+                               23        502          6          32600 1451  163
+                               23        504          6          32600 1451  164
+                               23        515          6          32600 1451  165
+                               23        516          6          32600 1451  166
+                               23        517          6          32600 1451  167
+                               23        522          7          32600 1451  168
+                               23        534          6          32600 1451  169
+                               23        535          6          32600 1451  170
+                               27        502          6          32600 1451  171
+                               27        504          6          32600 1451  172
+                               27        505          6          32600 1451  173
+                               27        506          6          32600 1451  174
+ 0.000000+0 0.000000+0          0          0          0          02600 1  099999
+                                                                  2600 0  0    0
+ 2.600000+4 5.536730+1          0          0          0          0260023501    1
+ 0.000000+0 0.000000+0          0          0          1         10260023501    2
+         10          2                                            260023501    3
+ 1.000000+0 2.441530-5 7.870000+00.279110747 7.870000+0 1287628.88260023501    4
+ 7.410000+2 1408203.69 8000.28528 28256.8493 49154.4146 190.802573260023501    5
+ 306813.905 10.0571947 3496813.97 3.18564471  459886102 4.74147874260023501    6
+ 1.00000+11 5.18284338                                            260023501    7
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023502    1
+ 0.000000+0 0.000000+0          0          0          1          8260023502    2
+          8          2                                            260023502    3
+ 1.000000+0 2.333450-5 7.714210560.207539133 44.9476991  31.165424260023502    4
+ 688.225091 30.2865185 1099.11031 423.050073 58336.4657 9.33733687260023502    5
+  4570881.9 1.934048-3 1.00000+11 4.04120-12                      260023502    6
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023504    1
+ 0.000000+0 0.000000+0          0          0          1          8260023504    2
+          8          2                                            260023504    3
+ 1.000000+0 1.080800-6 1.258900+1 1.712800-4 167.8817360.030171386260023504    4
+  28184.005  11.835759 6978329.17 1.71332133  1678817360.137419112260023504    5
+ 4.217000+9 8.023257-3 1.00000+11 4.432800-4                      260023504    6
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023515    1
+ 0.000000+0 0.000000+0          0          0          1          8260023515    2
+          8          2                                            260023515    3
+ 2.044000+6 0.000000+0 2125534.15 1.823990-6 2209916.04 1.369080-5260023515    4
+ 2419298.36 1.208060-4 3030773.26 1.117846-3 6.750000+6 1.652270-2260023515    5
+ 1.000000+8 1.362000-1 1.00000+11 2.224000-1                      260023515    6
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023516    1
+ 0.000000+0 0.000000+0          0          0          1          8260023516    2
+          8          2                                            260023516    3
+ 1.022000+6 0.000000+0 1034324.85 1.811250-6 1077298.33 1.448770-4260023516    4
+ 1.331800+6 1.335740-2 2129984.440.154929282 2.446800+60.225825827260023516    5
+ 5.500000+6 8.380992-1 1.00000+11 5.182400+0                      260023516    6
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023517    1
+ 0.000000+0 0.000000+0          0          0          1          8260023517    2
+          8          2                                            260023517    3
+ 1.022000+6 0.000000+0 1029757.26 4.261950-7 1042074.53 7.667860-6260023517    4
+ 1.076200+6 1.370480-4  1178082.2 2.492601-3 1.617200+6 5.104100-2260023517    5
+ 1.800000+7 2.027000+0 1.00000+11 4.960000+0                      260023517    6
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023522    1
+ 0.000000+0 0.000000+0          0          0          1         10260023522    2
+         10          2                                            260023522    3
+ 7.870000+0  1287628.6 9.000000+0 467231.463 9.000000+0 3687110.14260023522    4
+ 1159.99375 594742.443 8714.33713 22556.8726 42139.3195 262.899005260023522    5
+ 193382.387 2.50083164 3983937.51 3.423843-3  571785871 1.673800-5260023522    6
+ 1.00000+11 9.534010-8                                            260023522    7
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023534    1
+ 7.117000+3 0.000000+0          0          0          1          8260023534    2
+          8          2                                            260023534    3
+ 7.117000+3 33116.3511  33196.613 479.532277 131306.594 7.36891428260023534    4
+ 5.623413+5 1.088767-1 5.956621+6 1.843857-3 1.445440+8 6.006650-5260023534    5
+ 3.878710+9 2.216140-6 1.00000+11 8.587000-8                      260023534    6
+                                                                  260023  099999
+ 2.600000+4 5.536730+1          0          0          0          0260023535    1
+ 8.510000+2 0.000000+0          0          0          1          8260023535    2
+          8          2                                            260023535    3
+ 8.510000+2  145410.34 8.912509+3 1.356025+3 49669.9562  12.365366260023535    4
+ 239313.5420.108239217  1827574.4 8.988590-4   56397312 1.449710-5260023535    5
+ 2.314880+9 3.437070-7 1.00000+11 7.946100-9                      260023535    6
+                                                                  260023  099999
+                                                                  2600 0  0    0
+ 2.600000+4 5.536730+1          0          0          0          0260027502    1
+ 0.000000+0 2.600000+1          0          0          1          8260027502    2
+          8          2                                            260027502    3
+ 0.000000+0 2.600000+1 1.753900+1 6.012230-2 251.879731 4.171950-6260027502    4
+ 4430.47716 3.81970-10 96412.1469 3.86490-14 2129996.19 4.64000-18260027502    5
+ 47813900.4 4.73210-22 1.000000+9 5.47220-26                      260027502    6
+                                                                  260027  099999
+ 2.600000+4 5.536730+1          0          0          0          0260027504    1
+ 0.000000+0 2.600000+1          0          0          1          8260027504    2
+          8          2                                            260027504    3
+ 0.000000+0 0.000000+0 1.546080-6 1.195180-9 2.421380-5 2.931540-7260027504    4
+ 4.000000-4 8.000000-5 6.405641-30.020516114 2.875000-1 8.116620+0260027504    5
+ 9.057900+0 2.591580+1 1.000000+9 2.600000+1                      260027504    6
+                                                                  260027  099999
+ 2.600000+4 5.536730+1          0          0          0          0260027505    1
+ 0.000000+0 2.600000+1          0          0          1          8260027505    2
+          8          2                                            260027505    3
+ 1.000000+0 0.000000+0 7.68180369 3.248620-4 14.91240550.855265518260027505    4
+ 99.1402368 9.66303119 736.617197 15.7234246 7.079458+3 1.63028837260027505    5
+ 364596.735 2.395923-3 1.000000+7 0.000000+0                      260027505    6
+                                                                  260027  099999
+ 2.600000+4 5.536730+1          0          0          0          0260027506    1
+ 0.000000+0 2.600000+1          0          0          1          8260027506    2
+          8          2                                            260027506    3
+ 1.000000+0-26.0059225 7.68180369 -26.542187 14.9124055-26.9504121260027506    4
+ 99.1402368-19.6637657 736.617197-25.9332741 7.079458+3 -5.7157488260027506    5
+ 364596.735 5.971197-3 1.000000+7 0.000000+0                      260027506    6
+                                                                  260027  099999
+                                                                  2600 0  0    0
+                                                                     0 0  0    0
+                                                                    -1 0  0    0

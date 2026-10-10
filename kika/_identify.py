@@ -35,6 +35,14 @@ __all__ = ["identify", "KINDS"]
 
 #: Every answer :func:`identify` can give.
 #:
+#: Photo-atomic data is not a kind of its own, on purpose. An ACE ``p`` table
+#: is ``ace`` and an ENDF photo-atomic or atomic-relaxation tape (NSUB=3, 6;
+#: MF23/27/28) is ``endf``: the same reader opens each (``read_ace`` returns a
+#: ``PhotoatomicAce`` for a ``p`` table, ``read_endf`` parses MF23/27/28), and
+#: a caller that needs to tell them apart asks the object it gets back. A new
+#: kind here would make every consumer of ``identify`` learn a format it
+#: already reads.
+#:
 #: The three covariance kinds are kept apart on purpose. ``read_covfil``,
 #: ``read_coverx`` and ``read_boxer`` are three readers, and a caller that knows
 #: which one to call avoids ``load_covariance``'s try-each-in-turn.

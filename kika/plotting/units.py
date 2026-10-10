@@ -47,17 +47,22 @@ _UNITS: Dict[str, Tuple[str, float]] = {
     'mu': ('cosine', 1.0),
     # probability density per unit cosine, f(mu)
     '1/mu': ('density/mu', 1.0),
+    # gamma energy production, sum of sigma * Y * E_gamma (canonical b*eV)
+    'b*eV': ('area*energy', 1.0),
+    'b*keV': ('area*energy', 1.0e3),
+    'b*MeV': ('area*energy', 1.0e6),
 }
 
 #: Canonical unit of each dimension.
 CANONICAL: Dict[str, str] = {
     'energy': 'eV', 'area': 'b', 'area/sr': 'b/sr', 'area/mu': 'b/mu',
-    'ratio': '1', 'cosine': 'mu', 'density/mu': '1/mu',
+    'ratio': '1', 'cosine': 'mu', 'density/mu': '1/mu', 'area*energy': 'b*eV',
 }
 
 #: How a unit is written in an axis label. The empty string means "no unit shown".
 _DISPLAY: Dict[str, str] = {
     '1': '', 'mu': '', '1/mu': '', 'ub': 'µb',
+    'b*eV': 'b·eV', 'b*keV': 'b·keV', 'b*MeV': 'b·MeV',
 }
 
 # Aliases people actually type; normalised before lookup.
@@ -65,6 +70,8 @@ _ALIASES: Dict[str, str] = {
     'barn': 'b', 'barns': 'b', 'millibarn': 'mb', 'ev': 'eV', 'kev': 'keV', 'mev': 'MeV',
     'percent': '%', '': '1', 'fraction': '1', 'dimensionless': '1',
     'cos': 'mu', 'cosine': 'mu', 'μ': 'mu',
+    'b·ev': 'b*eV', 'b·kev': 'b*keV', 'b·mev': 'b*MeV',
+    'b ev': 'b*eV', 'b kev': 'b*keV', 'b mev': 'b*MeV',
 }
 
 
@@ -177,6 +184,18 @@ QUANTITIES: Dict[str, Quantity] = {q.name: q for q in (
     Quantity('relative_uncertainty', 'Relative uncertainty',
              'Incident energy', 'Relative uncertainty', 'eV', '%',
              interpolation='lin-lin', log_x=True),
+    # Photons (kika.nuclear_data.photon_production). Three quantities and not
+    # one with a switch: production, photons per reaction and the energy they
+    # carry are in different units, and an axis is labelled from its quantity.
+    Quantity('photon_production', 'Photon production cross section',
+             'Incident energy', r'Photon production $\sigma_\gamma$', 'eV', 'b',
+             interpolation='lin-lin', log_x=True, log_y=True),
+    Quantity('photon_multiplicity', 'Photon multiplicity',
+             'Incident energy', 'Photons per reaction', 'eV', '1',
+             interpolation='lin-lin', log_x=True),
+    Quantity('photon_energy', 'Gamma energy released',
+             'Incident energy', r'Gamma energy released $\sum Y E_\gamma$', 'eV', 'b*eV',
+             interpolation='lin-lin', log_x=True, log_y=True),
     Quantity('spectrum_relative_uncertainty', 'Spectrum relative uncertainty',
              'Outgoing energy', 'Relative uncertainty', 'eV', '%',
              interpolation='lin-lin', log_x=True),

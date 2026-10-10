@@ -207,6 +207,15 @@ PERMANENT_IMPORTERS = {
     # `kika.endf.model_adapter.photons` go in kika-api.spec's hiddenimports
     # (kika-app/docs/PHOTONS_DECAY_PLAN.md).
     "kika/g4ndl/photons.py",
+    # The photon quantities of `kika.plotting` (2026-10-10). A photon line is
+    # read from the model (`kika.nuclear_data.photon_production`), which is
+    # format-free, so an ENDF tape handed to `plottable(..., "photon_production")`
+    # has to be decoded into it first, once, and cached on the tape. Imported
+    # inside `_endf_photon_suite`, so `import kika.plotting` does not wake the
+    # model. Frozen build: the app reads photons through kika-api's own decode
+    # (`kika.endf.model_adapter` is in kika-api.spec's hiddenimports) and only
+    # the generated scripts reach this path, outside the frozen binary.
+    "kika/plotting/quantities.py",
     # Layer 1 for MF32 (2026-10-06). Its rows are resonance parameters, and the
     # only reader of the §32 layouts is `decodeMF32MT`; a second one inside the
     # checks is what the plan rules out. The import is inside `check_mf32`, so

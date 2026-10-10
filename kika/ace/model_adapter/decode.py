@@ -209,14 +209,11 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
         "ACE carries no covariances at all, so there is no covarianceSuite to "
         "build from one"
     )
-    if getattr(ace, "photon_production_xs", None):
-        # Roadmap E5f.2: the ENDF side carries MF12-15 into the model, the ACE
-        # side does not yet, and a reader of this suite has to be told.
-        report.unsupportedNode(
-            "the ACE file's photon production (MTRP/SIGP/LANDP/ANDP/DLWP/YP) is "
-            "parsed by kika.ace but not decoded into the model; read the photons "
-            "from the ENDF evaluation it was processed from"
-        )
+    # Roadmap E5f.2: the photon production blocks (MTRP/SIGP/LANDP/ANDP/DLWP)
+    # become photon products, the shape the ENDF adapter gives MF12-15.
+    from .photons import attachAcePhotons
+
+    attachAcePhotons(ace, suite, report, provenance=provenance)
     # Both ways to the same object: the tuple is unchanged, and the
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report

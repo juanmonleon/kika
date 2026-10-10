@@ -17,6 +17,7 @@ from .read_endf import (
 from .lazy import LazyFiles, TapeChangedError, open_endf
 from .classes.mf7.scatterer import ThermalScatterer, thermal_scatterer
 from . import dcs
+from .photoatomic import form_factors, photoatomic_cross_sections, photoatomic_summary
 from .checks import check_covariance_library, check_covariances
 from .inventory import TapeInventory, tape_inventory
 from .reconstruction import EndfReconstruction, ReconstructedTable, reconstruct_endf
@@ -37,6 +38,10 @@ __all__ = [
     # Differential cross sections from MF4 + MF3 (angular reconstruction, the
     # elastic frame transform, and the three readings of sigma(E))
     "dcs",
+    # Photo-atomic data (MF23/MF27/MF28) as plain arrays
+    "photoatomic_summary",
+    "photoatomic_cross_sections",
+    "form_factors",
     # Layer-1 checks of the covariance files as written
     "check_covariances",
     "check_covariance_library",

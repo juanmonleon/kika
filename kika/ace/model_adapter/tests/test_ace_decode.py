@@ -254,8 +254,12 @@ def test_the_report_declares_the_absence_of_covariances(decoded):
     assert any("no covariances" in entry for entry in report.unsupported)
 
 
-def test_the_photons_the_ace_carries_are_declared_not_dropped(ace, decoded):
-    """Roadmap E5f.2: ACE photon production is parsed and not yet decoded."""
-    _, report = decoded
-    assert ace.photon_production_xs
-    assert any("photon production" in line for line in report.unsupported)
+def test_the_photons_the_ace_carries_are_decoded_not_dropped(ace, decoded):
+    """Roadmap E5f.2: every MTRP entry is a photon product (test_ace_photons.py
+    has the detail)."""
+    suite, _ = decoded
+    if not ace.photon_production_xs:
+        pytest.skip("this ACE table carries no photon production")
+    photons = sum(1 for node in list(suite.reactions) + list(suite.orphanProducts)
+                  for p in node.outputChannel.products if p.pid == "photon")
+    assert photons == len(ace.photon_production_xs.cross_sections)

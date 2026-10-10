@@ -24,6 +24,7 @@ from kika.ace.parsers.parse_secondary_particle_types import parse_ptype_block
 from kika.ace.parsers.parse_secondary_reaction_counts import parse_ntro_block
 from kika.ace.parsers.parse_secondary_data_locators import parse_ixs_block
 from kika.ace.parsers.parse_secondary_cross_sections import parse_hpd_block
+from kika.ace.parsers.parse_photoatomic import is_photoatomic_extension, parse_photoatomic
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -47,8 +48,10 @@ def read_ace(filename, debug=False):
         
     Returns
     -------
-    ace : Ace
-        An Ace object containing the parsed data
+    ace : Ace or PhotoatomicAce
+        An Ace object containing the parsed data, or, for a photo-atomic
+        table (ZAID suffix ending in ``p``), a
+        :class:`~kika.ace.classes.photoatomic.PhotoatomicAce`.
     """
 
     if debug:
@@ -79,7 +82,14 @@ def read_ace(filename, debug=False):
 
         # Read the XSS array - essential data needed for all parsers
         ace.xss_data = read_xss_file(file, ace.header.nxs_array[1])
-    
+
+    # A photo-atomic table ('p') shares only the header with a neutron one:
+    # its NXS and JXS mean other things, so the neutron block parsers below
+    # would read garbage from it. It is decoded on its own and returned as a
+    # PhotoatomicAce.
+    if is_photoatomic_extension(ace.header.extension):
+        return parse_photoatomic(ace.header, ace.xss_data, filename)
+
     # Parse every block
     
     # ESZ Block

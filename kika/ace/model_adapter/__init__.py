@@ -9,8 +9,10 @@ costs for the cluster pipeline and the desktop app.
 """
 from .decode import (EVALUATED_LABEL, GRIDDED_LABEL, HEATED_LABEL, URR_LABEL,
                      aceStyles, decodeAce, decodeAceReaction, qValuesByMT)
+from .photons import PHOTON_LABEL, attachAcePhotons, photonProductionTotal
 
 __all__ = [
     "decodeAce", "decodeAceReaction", "aceStyles", "qValuesByMT",
+    "attachAcePhotons", "photonProductionTotal", "PHOTON_LABEL",
     "EVALUATED_LABEL", "HEATED_LABEL", "GRIDDED_LABEL", "URR_LABEL",
 ]

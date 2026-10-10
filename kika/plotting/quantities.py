@@ -29,7 +29,11 @@ format is sniffed from content). New ones are added with :func:`register_adapter
 
 **Quantities** are listed in :data:`kika.plotting.units.QUANTITIES`:
 ``cross_section``, ``legendre_coefficient``, ``angular_distribution``,
-``differential_cross_section``, ``relative_uncertainty``.
+``differential_cross_section``, ``relative_uncertainty``, and the photon ones,
+``photon_production`` (sigma Y, b), ``photon_multiplicity`` (Y, per reaction) and
+``photon_energy`` (sum of sigma Y E_gamma, b·eV), computed by
+:class:`kika.nuclear_data.photon_production.PhotonProduction` for ENDF tapes and
+any ``ReactionSuite``.
 
 **What is derived, and how honestly it says so.** Some pairs are not stored in
 the file and are computed (the :class:`~kika.plotting.Provenance` ``state`` and
@@ -226,6 +230,10 @@ def auto_label(quantity: str, prov: Optional[Provenance], *, order: Optional[int
         text += f' L={order}'
     if quantity in ('angular_distribution', 'differential_cross_section') and energy is not None:
         text += f' @ {format_energy(energy)}'
+    if quantity in ('photon_production', 'photon_multiplicity'):
+        text += f" {photon_line_text(_.get('line'))}"
+    if quantity == 'photon_energy':
+        text += ' γ energy'
     suffix = prov.describe()
     if suffix:
         text = f'{text} · {suffix}' if text else suffix
@@ -934,6 +942,190 @@ def _suite_legendre(suite: Any, *, mt: int = 2, order: int = 1, uncertainty: boo
     return PlotItem(PlotData(x=np.asarray(bulk['energies'], dtype=float),
                              y=np.asarray(bulk['coefficients_by_order'][str(order)], dtype=float),
                              provenance=prov))
+
+
+# -----------------------------------------------------------------------------
+# Photons: production, multiplicity and the energy they carry
+# -----------------------------------------------------------------------------
+#
+# The physics is kika.nuclear_data.photon_production.PhotonProduction, which
+# works on the model; an ENDF tape is decoded onto it once and the suite cached
+# on the tape. ``line`` picks one curve of PhotonProduction.curves: a line key
+# ('cascade:Fe56_e1:Fe56', 'line:846778', 'primary:102:10829100'), a continuum
+# key ('continuum:91:0') or 'total'. The gamma energy, sum of Y * E_gamma, is
+# its own quantity, 'photon_energy', because its unit is not the others'.
+
+_PHOTON_SUITE_ATTR = '_kika_photon_suite'
+
+
+def photon_line_text(line: Optional[str]) -> Optional[str]:
+    """A line key as a legend reads it: ``'line:846778'`` -> ``'846.8 keV γ'``."""
+    if not line or line == 'total':
+        return 'all photons'
+    kind, _, rest = line.partition(':')
+    if kind == 'cascade':
+        initial, _, final = rest.partition(':')
+        return f'γ {initial} → {final}'
+    if kind == 'line':
+        try:
+            return f'{float(rest) / 1e3:.1f} keV γ'
+        except ValueError:
+            return line
+    if kind == 'primary':
+        _, _, binding = rest.partition(':')
+        try:
+            return f'primary γ {float(binding) / 1e3:.1f} keV'
+        except ValueError:
+            return line
+    if kind == 'continuum':
+        return 'continuum γ'
+    return line
+
+
+def _endf_photon_suite(endf: Any) -> Any:
+    suite = getattr(endf, _PHOTON_SUITE_ATTR, None)
+    if suite is None:
+        from kika.endf.model_adapter import decodeReactionSuite
+
+        suite, _ = decodeReactionSuite(endf)
+        try:
+            setattr(endf, _PHOTON_SUITE_ATTR, suite)
+        except AttributeError:
+            pass
+    return suite
+
+
+def _endf_photons(endf: Any, reconstructed: Union[bool, str]) -> Tuple[Any, Optional[str]]:
+    """A PhotonProduction for an ENDF tape, and the state its sigma is in.
+
+    The rule is the cross section's: ``endf.pendf`` overrides MF3 where it has
+    the MT; ``'auto'`` leaves out, below the resonance range, the background
+    reactions it does not have (NaN, and named in the legend); ``True`` raises
+    :class:`ReconstructionRequired` instead; ``False`` uses MF3 as written.
+    """
+    from kika.nuclear_data.photon_production import PhotonProduction, resonance_background
+
+    if reconstructed not in (True, False, 'auto'):
+        raise ValueError("reconstructed must be True, False or 'auto'")
+    suite = _endf_photon_suite(endf)
+    pendf = getattr(endf, 'pendf', None) or {}
+    background = [] if _endf_is_pendf(endf) else resonance_background(endf)[0]
+    if _endf_is_pendf(endf) or reconstructed is False:
+        mts, top = [], 0.0
+    else:
+        mts, top = resonance_background(endf)
+    override = ({int(mt): _sigma_arrays(section) for mt, section in pendf.items()}
+                if (pendf and reconstructed is not False) else None)
+    production = PhotonProduction(suite, cross_section=override, background_mts=mts,
+                                  resonance_top=top)
+    if reconstructed is True and mts:
+        emitting = {c['mt'] for c in production.contributions()}
+        missing = sorted((set(mts) & emitting) - set(override or {}))
+        if missing:
+            raise ReconstructionRequired(
+                f"MT{', MT'.join(str(m) for m in missing)} emit photons and this evaluation has "
+                f"resonance parameters (MF2), so their MF3 is only the background. Reconstruct "
+                f"(kika.processing.njoy_reconstruct) and set endf.pendf, or pass "
+                f"reconstructed=False to use the background.")
+    if _endf_is_pendf(endf):
+        state = 'reconstructed'
+    elif reconstructed is False and background:
+        state = 'background'
+    else:
+        state = None
+    return production, state
+
+
+def _photon_item(production: Any, quantity: str, line: str, mt: Optional[int],
+                 provenance: Callable[..., Provenance], state: Optional[str],
+                 per_reaction: bool = False) -> PlotItem:
+    """One curve of a PhotonProduction as a PlotItem, provenance and units filled in."""
+    from kika.nuclear_data.photon_production import PhotonProductionError
+
+    if line == 'energy' and quantity != 'photon_energy':
+        raise NotPlottable("the gamma energy is the 'photon_energy' quantity: its unit is "
+                           "b·eV (or eV per reaction), not the one this axis is in")
+    which = 'multiplicity' if (quantity == 'photon_multiplicity' or per_reaction) else 'production'
+    try:
+        x, y, info = production.curve('energy' if quantity == 'photon_energy' else line,
+                                      mt=mt, quantity=which)
+    except PhotonProductionError as exc:
+        raise NotPlottable(str(exc)) from None
+    detail = None
+    if info['excluded']:
+        top = info['resonance_top_ev']
+        left_out = ', '.join(f"MT{row['mt']}" for row in info['excluded'])
+        detail = (f'{left_out} left out' + (f' below {format_energy(top)}' if top else '')
+                  + ' (MF3 is only the background there)')
+    if which == 'production' and info['xs_source'] == 'reconstructed':
+        state = 'reconstructed'
+    data = PlotData(x=x, y=y, provenance=provenance(mt, state, detail=detail))
+    if quantity == 'photon_energy':
+        data.y_unit = 'eV' if which == 'multiplicity' else 'b*eV'
+    return PlotItem(data)
+
+
+@register_adapter(_ENDF, 'photon_production')
+def _endf_photon_production(endf: Any, *, mt: Optional[int] = None, line: str = 'total',
+                            reconstructed: Union[bool, str] = 'auto') -> PlotItem:
+    """sigma_gamma(E) = sigma(E) Y(E), barns, of one photon line or of all of them.
+
+    ``mt`` None sums every reaction. ``line`` is a key of
+    :class:`kika.nuclear_data.photon_production.PhotonProduction` or ``'total'``.
+    ``reconstructed`` follows the cross section's rule (see :func:`_endf_photons`)."""
+    production, state = _endf_photons(endf, reconstructed)
+    return _photon_item(production, 'photon_production', line, mt,
+                        lambda m, s, **kw: _endf_provenance(endf, m, state=s, **kw), state)
+
+
+@register_adapter(_ENDF, 'photon_multiplicity')
+def _endf_photon_multiplicity(endf: Any, *, mt: int, line: str = 'total') -> PlotItem:
+    """Y(E), photons per reaction of ``mt``: one line, or ``'total'``."""
+    production, _ = _endf_photons(endf, False)
+    return _photon_item(production, 'photon_multiplicity', line, mt,
+                        lambda m, s, **kw: _endf_provenance(endf, m, state='evaluated', **kw), None)
+
+
+@register_adapter(_ENDF, 'photon_energy')
+def _endf_photon_energy(endf: Any, *, mt: Optional[int] = None, per_reaction: bool = False,
+                        reconstructed: Union[bool, str] = 'auto') -> PlotItem:
+    """Gamma energy released, sum of sigma Y E_gamma (b·eV), or of Y E_gamma per
+    reaction of ``mt`` (eV) with ``per_reaction=True``. A continuum counts at its
+    mean energy."""
+    production, state = _endf_photons(endf, False if per_reaction else reconstructed)
+    return _photon_item(production, 'photon_energy', 'energy', mt,
+                        lambda m, s, **kw: _endf_provenance(endf, m, state=s, **kw),
+                        None if per_reaction else state, per_reaction=per_reaction)
+
+
+def _suite_photons(suite: Any) -> Any:
+    from kika.nuclear_data.photon_production import PhotonProduction
+
+    return PhotonProduction(suite)
+
+
+@register_adapter(_SUITE, 'photon_production')
+def _suite_photon_production(suite: Any, *, mt: Optional[int] = None, line: str = 'total') -> PlotItem:
+    """sigma_gamma(E) of a ``ReactionSuite``. sigma is the ``eval`` form, or ``recon``
+    where ``eval`` is resonances plus a background (published GNDS)."""
+    return _photon_item(_suite_photons(suite), 'photon_production', line, mt,
+                        lambda m, s, **kw: _suite_provenance(suite, m, s, **kw), None)
+
+
+@register_adapter(_SUITE, 'photon_multiplicity')
+def _suite_photon_multiplicity(suite: Any, *, mt: int, line: str = 'total') -> PlotItem:
+    """Y(E), photons per reaction of ``mt``, from a ``ReactionSuite``."""
+    return _photon_item(_suite_photons(suite), 'photon_multiplicity', line, mt,
+                        lambda m, s, **kw: _suite_provenance(suite, m, s, **kw), None)
+
+
+@register_adapter(_SUITE, 'photon_energy')
+def _suite_photon_energy(suite: Any, *, mt: Optional[int] = None,
+                         per_reaction: bool = False) -> PlotItem:
+    """Gamma energy released by a ``ReactionSuite``'s reactions (b·eV, or eV per reaction)."""
+    return _photon_item(_suite_photons(suite), 'photon_energy', 'energy', mt,
+                        lambda m, s, **kw: _suite_provenance(suite, m, s, **kw), None,
+                        per_reaction=per_reaction)
 
 
 # -----------------------------------------------------------------------------

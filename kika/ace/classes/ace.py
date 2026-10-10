@@ -116,7 +116,26 @@ class Ace:
         if self.esz_block and len(self.esz_block.elastic_xs):
             return self.esz_block.elastic_xs.tolist()
         return None
-    
+
+    def photon_production_total(self):
+        """The GPD block: total photon production cross section on the ESZ grid.
+
+        Returns ``(energies, sigma)`` as float arrays, energies in MeV and sigma
+        in barns, or ``None`` when the table has no GPD block. It is the sum the
+        transport code samples photon *creation* from, Σ_i y_i(E)·σ_i(E) over
+        every MTRP entry, which is why it is worth having beside the per-line
+        data: it is the independent check that the per-line yields were read
+        right (``kika.ace.model_adapter`` tests rebuild it from them).
+        """
+        gpd = self.photon_production_data
+        if gpd is None or not gpd.has_data or not self.esz_block:
+            return None
+        energies = np.asarray(self.esz_block.energies, dtype=float)
+        sigma = np.asarray(gpd.total_xs, dtype=float)
+        if energies.size != sigma.size:
+            return None
+        return energies.copy(), sigma.copy()
+
     def copy(self) -> 'Ace':
         """
         Create an exact copy of the Ace object.

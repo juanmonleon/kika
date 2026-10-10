@@ -233,7 +233,9 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
         A **PoPs** for a radioactive decay evaluation -- an ENDF decay
         sublibrary tape (NSUB=4) or a GNDS file whose root is ``PoPs`` -- whose
         one nuclide carries ``halflife`` and ``decayData`` (roadmap E7b); a
-        :class:`ReactionSuite` for everything else.
+        :class:`~kika.ace.classes.photoatomic.PhotoatomicAce` for a
+        photo-atomic ACE table (``.84p``, ``.14p``...), which the model has
+        no suite for yet; a :class:`ReactionSuite` for everything else.
         With ``suite.report`` set — what the decode lost, approximated or could
         not represent. Check it. A partial decode is normal today (MF12-15 are
         not read at all, of MF5 only its tabulated LF=1 reaches the model, and
@@ -391,6 +393,13 @@ def _readAce(path):
     from kika.ace.parsers.parse_ace import read_ace
 
     ace = read_ace(str(path))
+    from kika.ace.classes.photoatomic import PhotoatomicAce
+    if isinstance(ace, PhotoatomicAce):
+        # Photon interaction data has no home in the ReactionSuite yet (GNDS
+        # would put it in a photo-atomic suite of its own), and decodeAce
+        # reads neutron blocks. Handing back the decoded table is honest;
+        # forcing it into a suite would not be.
+        return ace
     suite, report = decodeAce(ace)
     suite.report = report
     return suite
