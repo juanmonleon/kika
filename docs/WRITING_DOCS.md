@@ -171,7 +171,9 @@ Present tense, describing what the code on the default branch does. Never on a p
 
 - Cross-reference with MyST roles (`{doc}`, `{ref}`, `{py:func}`), never with a bare URL
   to this site. Every function named in prose links to its API entry the first time it
-  appears on a page.
+  appears on a page. If the function has no API entry yet, add it to the matching page
+  under `api_reference/` in the same change; a role whose target does not exist renders
+  as plain code, silently.
 - Cite at the statement, not in a bucket at the end: the ENDF-6 manual by section
   ("ENDF-6 §34.1"), papers by author–year with the full entry under References. A
   formalism kika did not invent is cited where it is stated.
@@ -223,12 +225,18 @@ A figure carries a caption that says what to look at.
   checks this the same way they check the tests.
 - A page names its tests in Validation. When one of those tests changes its tolerance or
   its measured number, the page changes with it.
-- Pages are built with warnings as errors before they are handed over:
+- Pages are built with warnings as errors before they are handed over. Read the Docs
+  builds the same way (`fail_on_warning` in `.readthedocs.yaml`), so a warning fails the
+  published site too:
 
   ```bash
-  pip install -r docs-requirements.txt        # in a separate environment
+  # in a separate environment, in this order, as Read the Docs does
+  pip install . -r docs-requirements.txt
   sphinx-build -W -b html docs/source docs/_build/html
+  KIKA_DOCS_DRAFTS=1 sphinx-build -W -b html docs/source docs/_build/review
   ```
+
+  The second build includes `drafts/` (§9); a draft page is only checked by it.
 
 ## 9. Procedure for writing a page
 
@@ -245,4 +253,8 @@ Every page, every author, the same four steps.
    `TODO`, and what you were unsure about.
 
 A page is **published** (wired into a toctree) only after the maintainer has read it.
-Until then it lives under `docs/source/drafts/`, which is excluded from the build.
+Until then it lives under `docs/source/drafts/`. The published build leaves `drafts/`
+out. A **review build** includes it, under a "Drafts (under review)" section and with a
+banner on every draft page: `KIKA_DOCS_DRAFTS=1` locally, and on Read the Docs every
+pull-request preview and the `develop` version (`docs/source/conf.py`). To publish a
+page, move it out of `drafts/` to its place and add it to its section's toctree.
