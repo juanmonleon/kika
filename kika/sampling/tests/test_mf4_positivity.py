@@ -112,3 +112,40 @@ def test_projection_preserves_low_order_when_possible():
     sigma = _sigma_un_normalized(projected, n=1001)
     assert sigma.min() >= -1e-3 * sigma.max()
     assert projected[0] == pytest.approx(1.0, abs=1e-10)
+
+
+# ----------------------------------------------------------------------
+# The tabulated twin: repairing a table through its perturbed orders only
+# ----------------------------------------------------------------------
+
+def _negativeTable():
+    from kika.nuclear_data.model.angular_tables import perturbTabulatedAngular
+
+    mu = np.linspace(-1.0, 1.0, 41)
+    p = 0.5 * (1.0 + 3.0 * 0.3 * mu) + 0.5 * 5.0 * 0.05 * (1.5 * mu**2 - 0.5)
+    pPrime, info = perturbTabulatedAngular(mu, p, {1: 1.6})
+    return mu, p, pPrime, info
+
+
+def test_a_negative_table_is_repaired_to_non_negative_nodes():
+    from kika.sampling.mf4_positivity import repair_tabulated_positivity
+
+    mu, p, pPrime, info = _negativeTable()
+    assert info["n_negative"] > 0
+    repaired, event = repair_tabulated_positivity(mu, p, pPrime, info)
+    assert repaired.min() > -1e-10
+    assert event["min_before"] < 0.0 and event["min_after"] > -1e-10
+    assert 0.0 < event["max_delta_change"] < abs(info["deltas"][1])
+
+
+def test_the_repair_moves_only_the_perturbed_orders():
+    """a_2 is in the table and not in the factors: it must come out untouched."""
+    from kika.nuclear_data.model.angular_tables import legendreMoments
+    from kika.sampling.mf4_positivity import repair_tabulated_positivity
+
+    mu, p, pPrime, info = _negativeTable()
+    repaired, _event = repair_tabulated_positivity(mu, p, pPrime, info)
+    before = legendreMoments(mu, p, [0, 2, 3])
+    after = legendreMoments(mu, repaired, [0, 2, 3])
+    for order in (0, 2, 3):
+        assert after[order] == pytest.approx(before[order], abs=1e-12)

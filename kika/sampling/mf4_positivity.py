@@ -103,19 +103,6 @@ def project_mf4_to_positive(
     if np.all(C @ a >= 0.0):
         return a
 
-    def objective(c):
-        diff = c - a
-        return 0.5 * float(diff @ diff)
-
-    def grad(c):
-        return c - a
-
-    constraints = {
-        "type": "ineq",
-        "fun": lambda c: C @ c,
-        "jac": lambda c: C,
-    }
-
     # a_0 = 1 always, plus any extra pins from the caller.
     pins: Dict[int, float] = {0: 1.0}
     if frozen_indices:
@@ -133,6 +120,33 @@ def project_mf4_to_positive(
         if 0 <= idx < n:
             x0[idx] = val
 
+    return _nearest_satisfying(a, C, np.zeros(C.shape[0]), x0=x0, bounds=bounds)
+
+
+def _nearest_satisfying(target: np.ndarray, C: np.ndarray, offset: np.ndarray,
+                        *, x0: np.ndarray, bounds) -> np.ndarray:
+    """``argmin 1/2 ||x - target||^2`` subject to ``offset + C x >= 0``, by SLSQP.
+
+    The problem both projections here are: on Legendre coefficients, where
+    ``offset`` is zero and ``x`` is the whole a-vector, and on a tabulated
+    table's corrections, where ``offset`` is the evaluated table and ``x`` the
+    shifts of the perturbed orders.
+    """
+    from scipy.optimize import minimize
+
+    def objective(c):
+        diff = c - target
+        return 0.5 * float(diff @ diff)
+
+    def grad(c):
+        return c - target
+
+    constraints = {
+        "type": "ineq",
+        "fun": lambda c: offset + C @ c,
+        "jac": lambda c: C,
+    }
+
     result = minimize(
         objective,
         x0=x0,
@@ -144,3 +158,45 @@ def project_mf4_to_positive(
     )
 
     return np.asarray(result.x, dtype=float)
+
+
+def repair_tabulated_positivity(mu, p, p_prime, info, pairs=None):
+    """The model applier's ``repair`` for a tabulated f(mu): the nearest positive table.
+
+    ``applyTabulatedFactors`` calls this for a node whose perturbed table went
+    negative. The table is ``f + sum_l (2l+1)/2 d_l P_l`` with ``d_l`` the
+    drawn shifts of the perturbed orders (``info["deltas"]``); this finds the
+    ``d*`` nearest to them in L^2 with ``f + sum (2l+1)/2 d*_l P_l(mu_i) >= 0``
+    at every node. Lin-lin in mu makes the node constraints the whole
+    constraint.
+
+    **Never a clip and a renormalisation.** Only the perturbed orders move, and
+    by as little as positivity needs; the evaluated table, and every order the
+    covariance does not name, stay what they were -- the same rule
+    ``project_mf4_to_positive`` keeps with its frozen tail.
+
+    Returns ``(table, event)`` where *event* is ``{"min_before", "min_after",
+    "max_delta_change"}`` -- the shape of the ENDF path's positivity events,
+    less the MT and energy that the applier and the set add.
+    """
+    mu = np.asarray(mu, dtype=float)
+    p = np.asarray(p, dtype=float)
+    orders = sorted(int(order) for order in info["deltas"])
+    target = np.array([info["deltas"][order] for order in orders], dtype=float)
+    C = np.column_stack([0.5 * (2 * order + 1) * legval(mu, _unit(order))
+                         for order in orders])
+    shifts = _nearest_satisfying(target, C, p, x0=target,
+                                 bounds=[(None, None)] * len(orders))
+    repaired = p + C @ shifts
+    event = {
+        "min_before": float(np.min(p_prime)),
+        "min_after": float(np.min(repaired)),
+        "max_delta_change": float(np.max(np.abs(shifts - target))),
+    }
+    return repaired, event
+
+
+def _unit(order: int) -> np.ndarray:
+    coefficients = np.zeros(order + 1)
+    coefficients[order] = 1.0
+    return coefficients

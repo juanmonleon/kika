@@ -64,7 +64,7 @@ __all__ = ["ComponentKey", "Selection", "QUANTITY_OF_MF", "MF_OF_QUANTITY",
            "SUPPORTED_MF", "PER_SECTION_MF", "GROUPINGS", "collectEntries",
            "samplingGroups", "requestIndex", "assembleRequest",
            "describeRequest", "componentDomains", "normaliseRequest",
-           "rowFamilies", "pruneRequest"]
+           "rowFamilies", "pruneRequest", "resolveMagnitudeOrder"]
 
 
 #: What each covariance file is a covariance *of*, in the model's vocabulary
@@ -354,6 +354,120 @@ def pruneRequest(suite, request):
         else:  # pragma: no cover - collectEntries raises instead
             dropped.append((selection, "matched nothing"))
     return kept, dropped
+
+
+#: MF34's Legendre order 0: the cross section's magnitude, not a shape
+#: coefficient. Same value as ``kika.nuclear_data.model.perturbation.MAGNITUDE_ORDER``.
+MAGNITUDE_ORDER = 0
+
+#: Below this, an MF34 L0xLl section states no sigma <-> a_l correlation. The
+#: one real tape to hand that carries L=0 with a cross section beside it (U-238
+#: of ENDF/B-VIII.1, MT2) writes its cross blocks as noise at 2e-19 and its
+#: L0xL0 as a single bin of zero variance.
+NULL_MAGNITUDE_COVARIANCE = 1.0e-12
+
+
+def resolveMagnitudeOrder(suite, request):
+    """``(request, notes)`` -- MF34's L=0 kept out unless it was asked for.
+
+    In MF4 ``a_0`` is identically 1, so an MF34 section with L=0 is not about
+    the shape: L0xL0 is the variance of sigma(E) of that MT on MF34's grid, and
+    L0xLl its correlation with ``a_l``. An MF34 selection that named no orders
+    used to take every order, L=0 included, and the L=0 factors land on the
+    cross section -- so asking for the angular distribution rewrote MF3, and
+    asking for cross section *and* angular distribution was refused because
+    MF33 and L=0 claimed the same sigma.
+
+    Now an MF34 selection without orders takes the **orders from 1**, and every
+    dropped L=0 is a note:
+
+    * **angular only** -- sigma is not being perturbed, so neither its variance
+      nor its correlation with the shape is wanted.
+    * **with MF33 for the same MT** -- MF33 states sigma's variance and the
+      L>=1 the shape. The cross term L0xLl is what a joint draw would add; it
+      is not drawn yet (pista J, J3 of
+      ``docs/library/mf4_tabulated_perturbation_roadmap.md``), and the note says
+      whether the file's cross blocks carry anything.
+
+    Orders named explicitly are left alone, L=0 included: that is a request to
+    perturb sigma from MF34, which :class:`PerturbationSet` still refuses next
+    to MF33 for the same reaction.
+    """
+    selections = _asSelections(request)
+    crossSectionMTs: Optional[set] = set()
+    for selection in selections:
+        if selection.mf == 33:
+            if selection.mt is None:
+                crossSectionMTs = None
+                break
+            crossSectionMTs.update(_asIntSet(selection.mt))
+
+    notes: List[str] = []
+    out: List[Selection] = []
+    changed = False
+    for selection in selections:
+        if selection.mf != 34 or selection.index is not None:
+            out.append(selection)
+            continue
+        found = _mf34_entries(suite, mt=selection.mt, relative=selection.relative)
+        orders = sorted({int(key[2]) for row, col, *_ in found for key in (row, col)})
+        if MAGNITUDE_ORDER not in orders:
+            out.append(selection)
+            continue
+        changed = True
+        shape = [order for order in orders if order != MAGNITUDE_ORDER]
+        if not shape:
+            notes.append(
+                f"MF34 states only L=0 for MT{_mtsOf(found)}: that is the cross "
+                f"section's magnitude, not a shape, so the angular distribution "
+                f"was not perturbed there")
+            continue
+        out.append(Selection(mf=34, mt=selection.mt, index=shape,
+                             relative=selection.relative))
+        for mt in _mtsOf(found, withOrder=MAGNITUDE_ORDER):
+            withSigma = crossSectionMTs is None or mt in crossSectionMTs
+            notes.append(_magnitudeNote(found, mt, withSigma))
+    if not changed:
+        return request, notes
+    if isinstance(request, dict):
+        # Only the MF34 line is rewritten; every other line keeps the spelling
+        # it was given in, which is what the run records.
+        resolved = {mf: value for mf, value in request.items() if int(mf) != 34}
+        resolved.update({s.mf: s for s in out if s.mf == 34})
+        return resolved, notes
+    return out, notes
+
+
+def _asIntSet(value) -> set:
+    if isinstance(value, (int, np.integer)):
+        return {int(value)}
+    return {int(v) for v in value}
+
+
+def _mtsOf(found, withOrder=None) -> List[int]:
+    return sorted({int(row[1]) for row, col, *_ in found
+                   if withOrder is None or withOrder in (row[2], col[2])})
+
+
+def _magnitudeNote(found, mt: int, withSigma: bool) -> str:
+    """The line a run records for a dropped L=0, and what the drop cost."""
+    cross = [np.asarray(matrix, dtype=float) for row, col, matrix, *_ in found
+             if int(row[1]) == mt
+             and (row[2] == MAGNITUDE_ORDER) != (col[2] == MAGNITUDE_ORDER)]
+    largest = max((float(np.max(np.abs(m))) for m in cross if m.size), default=0.0)
+    carried = (f"its L0xLl blocks are null (max |cov| {largest:.1e}), so nothing "
+               f"is lost" if largest <= NULL_MAGNITUDE_COVARIANCE else
+               f"its L0xLl blocks reach |cov| {largest:.3g}, and that "
+               f"correlation is not in the draw")
+    if withSigma:
+        return (f"MF34/MT{mt} states L=0 (the variance of sigma and its "
+                f"correlation with the a_l). MF33 gives sigma's variance and the "
+                f"L>=1 the shape; the sigma <-> a_l cross term is not drawn -- "
+                f"{carried}")
+    return (f"MF34/MT{mt} states L=0 (the variance of sigma and its correlation "
+            f"with the a_l); it is not used because only the angular "
+            f"distribution is perturbed -- {carried}. Name order 0 explicitly "
+            f"to perturb sigma from MF34")
 
 
 def rowFamilies(index) -> Dict[Hashable, List[str]]:

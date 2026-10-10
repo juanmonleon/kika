@@ -422,6 +422,41 @@ MF35_UNCHANGED_NOTE = (
     "(mf35_unchanged)")
 
 
+def _tabulatedAngularNote(applied) -> Optional[str]:
+    """What perturbing a tabulated f(mu) did that the tape does not show.
+
+    Two things, both measured per realisation by ``applyTabulatedFactors``:
+    nodes where the perturbed table went negative (counted and left as
+    computed, as the Legendre path leaves a negative series), and how far the
+    lin-lin integral of the table moved -- the correction integrates to zero
+    in the continuum but not between nodes, and a coarse cosine grid is where
+    that stops being small (decision D3 of the roadmap).
+
+    The text is the same for every sample, so the run records it once; the
+    numbers are per realisation and live in its diagnostics under ``tables``.
+    A second note is raised the first time any realisation goes negative.
+    """
+    tabulated = sorted({c.mt for c, info in applied.items()
+                        if c.mf == 34 and info.get("tables")})
+    if not tabulated:
+        return None
+    negative = sorted({c.mt for c, info in applied.items()
+                       if c.mf == 34 and (info.get("tables") or {}).get("n_negative_nodes")})
+    repaired = sorted({c.mt for c, info in applied.items()
+                       if c.mf == 34 and (info.get("tables") or {}).get("n_repaired")})
+    note = (f"MF4/MT{tabulated} tabulated and perturbed as a table: the correction "
+            f"is added on the evaluator's own cosine nodes and the lin-lin "
+            f"integral is not renormalised (per-realisation numbers under "
+            f"'tables')")
+    if repaired:
+        note += (f". Some realisations of MT{repaired} went negative and were "
+                 f"repaired by moving the perturbed orders")
+    elif negative:
+        note += (f". Some realisations of MT{negative} go negative at some "
+                 f"node and are left as computed")
+    return note
+
+
 def _spectrumNote(applied) -> Optional[str]:
     """How much of the spectrum an MF35 realisation did *not* perturb.
 
@@ -1621,6 +1656,7 @@ class _SampleContext:
     #: needed no reconstruction.
     originalSourcePath: Optional[Path] = None
     pendfPath: Optional[Path] = None
+    angularPositivity: str = "report"
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1649,7 +1685,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                                     crossSectionSums=ctx.crossSectionSums,
                                     sumBlocks=ctx.sumBlocks,
                                     lumped=ctx.lumped,
-                                    remainders=ctx.remainders)
+                                    remainders=ctx.remainders,
+                                    angularPositivity=ctx.angularPositivity)
         info["components"] = [c.describe() for c in applied]
         # MF34 stated in another frame than MF4: what the conversion did, per
         # reaction, including the nodes at threshold it had to leave alone.
@@ -1712,7 +1749,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                                                ctx.sumBlocks),
                                _sumRuleNote(applied),
                                _spectrumNote(applied), _droppedStepsNote(applied),
-                               _pointBandNote(applied))
+                               _pointBandNote(applied),
+                               _tabulatedAngularNote(applied))
              if note is not None]
     _forget(suite, pset, applied)
     return {"sample": number, "label": label, "set": pset, "files": files,
@@ -1800,6 +1838,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      resonanceRegion: str = "reconstructed",
                      reconstructionTolerance: float = 0.001,
                      njoyExe=None,
+                     angularPositivity: str = "report",
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
@@ -1956,6 +1995,15 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         log, a line in :attr:`RunResult.notes` and an entry in
         ``run_metadata.json``. A request where *nothing* matches still raises,
         because that is a run with no perturbation in it.
+    angularPositivity
+        What to do where a perturbed **table** of f(mu) goes negative at a
+        node. ``"report"`` (the default) counts it and leaves it, which is what
+        the Legendre path does with a negative series. ``"repair"`` moves the
+        perturbed orders by the least amount that makes every node
+        non-negative (:func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`).
+        A strongly forward-peaked table -- U-238 above 17 MeV, with
+        ``f(-1) ~ 1e-4`` -- goes negative under a few percent on ``a_1``, so
+        on such tapes this is a choice and not a detail.
     covarianceSource
         A second ENDF tape to take the covariance from, leaving the model to
         come from *source*. ``None`` (the default) is the normal case: an
@@ -2011,6 +2059,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
               resonanceRegion=resonanceRegion,
               reconstructionTolerance=reconstructionTolerance,
+              angularPositivity=angularPositivity,
               source=str(source) if isinstance(source, (str, Path)) else "<parsed>",
               covarianceSource=(str(covarianceSource)
                                 if covarianceSource is not None else None),
@@ -2128,6 +2177,12 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             log.warning(note, subject=f"MF{selection.mf}")
         if dropped:
             request = {selection.mf: selection for selection in kept}
+    from kika.sampling.joint_blocks import resolveMagnitudeOrder
+
+    request, magnitudeNotes = resolveMagnitudeOrder(covariances, request)
+    for note in magnitudeNotes:
+        skipped.append(note)
+        log.warning(note, subject="MF34")
     log.event("request", _describeRequestForPeople(request),
               request={str(k): _jsonableRequest(v) for k, v in request.items()}
               if isinstance(request, Mapping) else str(request),
@@ -2249,7 +2304,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints,
         crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
         lumped=lumped, remainders=remainders,
-        originalSourcePath=originalSourcePath, pendfPath=pendfPath)
+        originalSourcePath=originalSourcePath, pendfPath=pendfPath,
+        angularPositivity=angularPositivity)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:

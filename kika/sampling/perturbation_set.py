@@ -550,7 +550,8 @@ class PerturbationSet:
                      maxOutgoingPoints: Optional[int] = None,
                      crossSectionSums: bool = True,
                      sumBlocks: str = "undecomposed",
-                     lumped=None, remainders=None
+                     lumped=None, remainders=None,
+                     angularPositivity: str = "report"
                      ) -> Dict[ComponentKey, Dict[str, Any]]:
         """Put a perturbed form under :attr:`label` on every node this set covers.
 
@@ -639,7 +640,8 @@ class PerturbationSet:
             product, angular = self._angularOf(reaction, mt)
             conversion = self._frameConversion(suite, reaction, product, mt,
                                                orders)
-            perturbed, info = self._applyAngular(angular, orders, conversion)
+            perturbed, info = self._applyAngular(angular, orders, conversion,
+                                                 positivity=angularPositivity)
             self._putRealisation(product, perturbed)
             for order, component in orders.items():
                 diagnostics[component] = {
@@ -647,6 +649,8 @@ class PerturbationSet:
                     **info["per_order"].get(order, {}),
                     **({"frame": info["frame"]} if "frame" in info else {}),
                 }
+                if "tables" in info:
+                    diagnostics[component]["tables"] = info["tables"]
 
         spectra = [c for c in self.components() if c.mf == 35]
         if spectra:
@@ -930,15 +934,79 @@ class PerturbationSet:
 
 
     def _applyAngular(self, angular, orders: Mapping[int, ComponentKey],
-                      frameConversion=None):
-        from kika.nuclear_data.model.perturbation import applyLegendreFactors
+                      frameConversion=None, *, positivity: str = "report"):
+        """Perturb every region of one reaction's angular distribution.
 
-        return applyLegendreFactors(
-            angular,
-            {order: self.factors[component] for order, component in orders.items()},
-            {order: self.binEdges[component] for order, component in orders.items()},
-            frameConversion=frameConversion,
-        )
+        A Legendre region gets its coefficients scaled
+        (:func:`~kika.nuclear_data.model.perturbation.applyLegendreFactors`); a
+        tabulated one gets the same factors applied to its table
+        (:func:`~kika.nuclear_data.model.perturbation.applyTabulatedFactors`).
+        An LTT=3 distribution has one of each and gets both, so a bin that
+        reaches above the transition energy is applied on both sides of it --
+        decision D1 of ``docs/library/mf4_tabulated_perturbation_roadmap.md``,
+        taken after measuring that no thesis tape moves (JEFF-4.0 and this
+        work's tables start at 45 MeV with MF34 ending at 20; JENDL-5 crosses
+        at 20 MeV with one bin of zero variance).
+
+        A negative node in a perturbed table is counted and, under the default
+        ``positivity="report"``, left as computed: the Legendre path does not
+        enforce positivity either. ``"repair"`` hands the applier
+        :func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`. The
+        realisation's diagnostics carry the count under ``tables`` either way.
+        """
+        if positivity not in ("report", "repair"):
+            raise ValueError(f"positivity must be 'report' or 'repair', got "
+                             f"{positivity!r}")
+        from kika.nuclear_data.model.perturbation import (_legendreRegions,
+                                                          _tabulatedRegions,
+                                                          applyLegendreFactors,
+                                                          applyTabulatedFactors)
+
+        factors = {order: self.factors[component] for order, component in orders.items()}
+        edges = {order: self.binEdges[component] for order, component in orders.items()}
+        hasLegendre = bool(_legendreRegions(angular))
+        hasTables = bool(_tabulatedRegions(angular))
+        if not (hasLegendre or hasTables):
+            raise ValueError(
+                f"{[c.describe() for c in orders.values()]}: this angular "
+                f"distribution has neither Legendre coefficients nor tables of "
+                f"f(mu), so an MF34 perturbation has nothing to act on")
+
+        info ={"per_order": {}, "n_inserted": 0}
+        if hasLegendre:
+            angular, legendre = applyLegendreFactors(
+                angular, factors, edges, frameConversion=frameConversion)
+            info = {"per_order": legendre["per_order"],
+                    "n_inserted": legendre["n_inserted"]}
+            if "frame" in legendre:
+                info["frame"] = legendre["frame"]
+        if hasTables:
+            from kika.sampling.mf4_positivity import repair_tabulated_positivity
+
+            angular, tables = applyTabulatedFactors(
+                angular, factors, edges,
+                repair=repair_tabulated_positivity if positivity == "repair" else None)
+            # An LTT=3 table usually starts above where MF34 ends (D1), so a
+            # covariance in the other frame only matters once a factor lands on
+            # a table, and the CM/LAB change exists for Legendre coefficients.
+            if frameConversion is not None and any(
+                    stats["n_scaled"] for stats in tables["per_order"].values()):
+                raise NotImplementedError(
+                    f"{[c.describe() for c in orders.values()]}: the covariance "
+                    f"is in another frame than this distribution's tables of "
+                    f"f(mu); the CM/LAB change is implemented for Legendre "
+                    f"coefficients only")
+            info["n_inserted"] += tables["n_inserted"]
+            for order, stats in tables["per_order"].items():
+                merged = info["per_order"].setdefault(
+                    order, {"min_factor": 1.0, "max_factor": 1.0, "n_scaled": 0})
+                merged["min_factor"] = min(merged["min_factor"], stats["min_factor"])
+                merged["max_factor"] = max(merged["max_factor"], stats["max_factor"])
+                merged["n_scaled"] += stats["n_scaled"]
+            info["tables"] = {key: tables[key] for key in
+                              ("min_p", "n_negative_nodes", "max_integral_change")}
+            info["tables"]["n_repaired"] = len(tables["positivity_events"])
+        return angular, info
 
     def _frameConversion(self, suite, reaction, product, mt: int,
                          orders: Mapping[int, ComponentKey]):
