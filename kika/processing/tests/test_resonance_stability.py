@@ -49,3 +49,27 @@ def test_tabulated_radius_jump_is_not_smoothed_by_difference():
     radius=RadiusFunction(energies=(1.,100.,1000.),values=(5.,7.,9.),interpolation=((3,1),))
     x=np.array([np.nextafter(100.,1.),100.,np.nextafter(100.,1000.),1000.])
     np.testing.assert_array_equal(radius.difference(100.,x),[2.,0.,0.,-2.])
+
+
+@pytest.mark.parametrize('l',[1,2])
+def test_low_orbital_phase_against_independent_bessel_functions(l):
+    from scipy.special import spherical_jn, spherical_yn
+    x=np.unique(np.r_[np.geomspace(1e-30,1e4,12000),1.,np.nextafter(1.,0.),np.nextafter(1.,2.)])
+    actual=neutral_channel_functions(l,x)[2]
+    expected=np.arctan2(spherical_jn(l,x),-spherical_yn(l,x))
+    np.testing.assert_allclose(np.exp(1j*actual),np.exp(1j*expected),rtol=0.,atol=8e-15)
+    np.testing.assert_allclose(actual[x<1],expected[x<1],rtol=8e-14,atol=0.)
+    assert neutral_channel_functions(l,.3)[2]==pytest.approx(float(neutral_channel_functions(l,np.array([.3]))[2][0]),rel=2e-15)
+    p,s,phase=neutral_channel_functions(l,x,phase=False)
+    np.testing.assert_array_equal(p,neutral_channel_functions(l,x)[0])
+    assert phase is None
+
+
+@pytest.mark.parametrize('l',[1,2])
+@pytest.mark.parametrize('z',[1e-20,1e-6,.1,1.,10.,1e12])
+def test_rational_shift_difference_at_adjacent_energies(l,z):
+    zr=np.nextafter(z,np.inf)
+    with localcontext() as context:
+        context.prec=100
+        expected=float(decimal_shift(l,Decimal.from_float(zr))-decimal_shift(l,Decimal.from_float(z)))
+    assert float(neutral_shift_difference(l,zr,z,zr-z))==pytest.approx(expected,rel=3e-14,abs=0.)

@@ -15,6 +15,73 @@ from test_resonance_suite import run,suite_model
 from kika.processing.resonances import attach_reconstruction
 
 
+@pytest.mark.parametrize('approximation',['SingleLevel','MultiLevel'])
+@pytest.mark.parametrize('l',[0,1,2])
+def test_native_bw_matches_reference_all_levels_and_missing_spin_sectors(l,approximation,monkeypatch):
+    from kika.processing.resonances import _rm_acceleration
+    native=_rm_acceleration._native
+    if native is None or not hasattr(native,'breit_wigner'):pytest.skip('optional BW extension unavailable')
+    ctx=NeutronContext(90.,1.);radius=RadiusFunction(constant=6.)
+    levels=tuple(Level(-10. if i==0 else 100.+i*.7,.5 if i%3 else 1.5,
+        .001*(i+1),.01,.003) for i in range(80))
+    groups=(Group(l,radius,radius,levels),Group(l,radius,radius,levels[:11]))
+    energies=np.unique(np.r_[np.geomspace(.001,1e6,400),[lv.energy for lv in levels if lv.energy>0]])
+    expected=evaluate_bw(energies,groups,approximation,ctx)
+    actual=evaluate_bw(energies,groups,approximation,ctx,accelerated=True)
+    for mt in expected:np.testing.assert_allclose(actual[mt],expected[mt],rtol=5e-13,atol=1e-14)
+    monkeypatch.setattr(_rm_acceleration,'_native',None)
+    fallback=evaluate_bw(energies,groups,approximation,ctx,accelerated=True)
+    for mt in expected:np.testing.assert_array_equal(fallback[mt],expected[mt])
+
+
+@pytest.mark.parametrize('shift',['zero','calculate'])
+@pytest.mark.parametrize('multiple',[False,True])
+def test_streamed_rml_retains_real_shifts_closed_channels_and_pole_limits(shift,multiple,monkeypatch):
+    from kika.processing.resonances import _rm_acceleration
+    if _rm_acceleration._native is None:pytest.skip('optional extension unavailable')
+    model,ctx=rml_model(multiple=multiple,shift=shift,boundary=0. if shift=='zero' else .2)
+    sg=model.resolved[0].formalism.spinGroups[0]
+    # Include signed interference, an undamped exact pole and enough levels
+    # to exercise the native all-level contraction.
+    sg.energies=[100.+i*.4 for i in range(40)]
+    sg.widths=[list(sg.widths[i%2]) for i in range(40)]
+    sg.widths[0][2]=0.
+    region=prepare_resonances(model,ctx).regions[0]
+    e=np.unique(np.r_[np.geomspace(10.,299.,300),75.,100.,100.4])
+    expected=evaluate_region(e,region,ctx)
+    diagnostics={}
+    actual=evaluate_region(e,region,ctx,diagnostics,absorption_rtol=1e-8)
+    for mt in expected:np.testing.assert_allclose(actual[mt],expected[mt],rtol=2e-11,atol=1e-10)
+    assert diagnostics.get('rml_native_energies',0)+diagnostics.get('rm_native_energies',0)>0
+    monkeypatch.setattr(_rm_acceleration,'_native',None)
+    fallback=evaluate_region(e,region,ctx,absorption_rtol=1e-8)
+    for mt in expected:np.testing.assert_allclose(fallback[mt],expected[mt],rtol=2e-12,atol=1e-11)
+
+
+def test_extreme_neutral_penetrability_retains_general_bounded_rml(monkeypatch):
+    from kika.processing.resonances.r_matrix import RMLChannel
+    original=RMLChannel.functions
+    def weak(self,e,*,logarithmic=False):
+        p,log,phase,lp=original(self,e,logarithmic=True)
+        p=p*1e-200
+        log=log.real+1j*p
+        lp=lp+np.log(1e-200)
+        return (p,log,phase,lp) if logarithmic else (p,log,phase)
+    model,ctx=rml_model(shift='zero',boundary=0.)
+    sg=model.resolved[0].formalism.spinGroups[0]
+    sg.energies=[100.+i*.4 for i in range(40)]
+    sg.widths=[list(sg.widths[i%2]) for i in range(40)]
+    region=prepare_resonances(model,ctx).regions[0]
+    monkeypatch.setattr(RMLChannel,'functions',weak)
+    e=np.linspace(90.,130.,150)
+    expected=evaluate_region(e,region,ctx,work_bytes=131072)
+    diagnostics={}
+    actual=evaluate_region(e,region,ctx,diagnostics,work_bytes=131072,absorption_rtol=1e-8)
+    assert np.any(expected[102]>0)
+    for mt in expected:np.testing.assert_allclose(actual[mt],expected[mt],rtol=2e-12,atol=0.)
+    assert not diagnostics.get('rm_native_energies',0) and not diagnostics.get('rml_native_energies',0)
+
+
 def test_verification_reuses_only_unchanged_numeric_contents(monkeypatch):
     suite=suite_model();result=run(suite);attach_reconstruction(suite,result)
     calls=[];original=type(result)._evaluate_segment

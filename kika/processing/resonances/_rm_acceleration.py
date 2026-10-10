@@ -1,4 +1,4 @@
-"""Optional all-level RM contraction; independent verification stays in NumPy.
+"""Optional all-level contraction; independent verification stays in NumPy.
 
 No runtime compilation. Unavailable binaries or ineligible numeric regimes
 return None to the reference solver. The extension uses bounded stack tiles;
@@ -58,16 +58,18 @@ def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entranc
     if np.any(regular):
         rr=r[regular];matrix=np.eye(c)[None,:,:]-1j*rr
         rhs=np.zeros((len(rr),c,1),complex);rhs[:,entrance,0]=1.
-        try:y=np.ascontiguousarray(np.linalg.solve(matrix,rhs)[:,:,0])
+        try:y=np.ascontiguousarray((1/matrix[:,0,0])[:,None] if c==1 else np.linalg.solve(matrix,rhs)[:,:,0])
         except np.linalg.LinAlgError:return None
         if np.any(np.linalg.norm(y,axis=1)>1+1e-8):return None
         residual=matrix@y[:,:,None]-rhs
         maximum=float(np.max(abs(residual)/(np.linalg.norm(matrix,axis=(1,2))[:,None,None]*np.linalg.norm(y,axis=1)[:,None,None]+1.)))
         if maximum>1e-11:return None
-        w[regular]=np.einsum('ecd,ed->ec',rr,y)
+        w[regular]=rr[:,0,:]*y if c==1 else np.einsum('ecd,ed->ec',rr,y)
         b=rr.imag;diag=np.diagonal(b,axis1=1,axis2=2)
-        cap=4*np.real(np.sum(y.conj()*np.einsum('eij,ej->ei',b,y),axis=1))
-        majorant=4*np.sum(abs(y)*np.sqrt(np.maximum(diag,0.)),axis=1)**2
+        cap=(4*np.real(y[:,0].conj()*(b[:,0,0]*y[:,0])) if c==1 else
+             4*np.real(np.sum(y.conj()*np.einsum('eij,ej->ei',b,y),axis=1)))
+        majorant=(4*(abs(y[:,0])*np.sqrt(np.maximum(diag[:,0],0.)))**2 if c==1 else
+                  4*np.sum(abs(y)*np.sqrt(np.maximum(diag,0.)),axis=1)**2)
         eps=np.finfo(float).eps;tiny=np.finfo(float).tiny
         scale=8*(len(er)+32*c+64)*eps
         bound=scale/(1-scale)*majorant if scale<1 else np.full(len(y),np.inf)

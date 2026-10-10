@@ -341,14 +341,22 @@ def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_r
         from .grid import ReconstructionConvergenceError
         raise ReconstructionConvergenceError('one RM/RML energy exceeds the temporary workspace target',
             category='memory-budget-exhausted')
-    if region.approximation=='ReichMoore' and absorption_rtol==1e-8:
+    diagonal_rml = (region.approximation=='RMatrixNeutral' and all(
+        not g.level_metric and all(not ch.charge_strength and ch.external is None
+            and ch.boundary==0. and (ch.shift!='calculate' or ch.l==0 or ch.effective)
+            for ch in g.channels) for g in region.groups))
+    if (region.approximation=='ReichMoore' or diagonal_rml) and absorption_rtol==1e-8:
         from ._rm_acceleration import eligible
         # The reference single-energy limit above is retained: exceptional
         # rows must still be solvable within the requested workspace target.
         streaming=True;native_fixed=65536;native_per_energy=1
         for group in region.groups:
             if not group.levels:continue
-            er,gamma,a=group.kernel_data;c=a.shape[1]
+            if diagonal_rml:
+                er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
+                a=np.asarray(group.reduced).reshape(len(er),len(group.channels))
+            else:er,gamma,a=group.kernel_data
+            c=a.shape[1]
             if not eligible(np.zeros(1),er,gamma,a,np.ones((1,c)),work_bytes,True,absorption_rtol):
                 streaming=False;break
             native_fixed=max(native_fixed,65536+32*len(er)*c*c)
@@ -365,10 +373,10 @@ def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*102
     if region.approximation == 'RMatrixNeutral':
         from .r_matrix import evaluate_rml
         out = {mt:np.zeros_like(energies) for mt in region_mts(region)}
-        block=energy_block_size(region,work_bytes=work_bytes)
+        block=energy_block_size(region,work_bytes=work_bytes,absorption_rtol=absorption_rtol)
         for start in range(0,len(energies),block):
             sl = slice(start,start+block)
-            for mt,value in evaluate_rml(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes).items():out[mt][sl] = value
+            for mt,value in evaluate_rml(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes,absorption_rtol=absorption_rtol).items():out[mt][sl] = value
         return out
     if region.approximation=='ReichMoore':
         # Limit temporary level/channel arrays independently of caller block size.
@@ -378,4 +386,4 @@ def evaluate_region(energies,region,context,diagnostics=None,*,work_bytes=64*102
             sl=slice(start,start+block)
             for mt,value in evaluate_rm(energies[sl],region.groups,context,diagnostics,work_bytes=work_bytes,absorption_rtol=absorption_rtol).items():out[mt][sl]=value
         return out
-    return evaluate_bw(energies,region.groups,region.approximation,context,work_bytes=work_bytes)
+    return evaluate_bw(energies,region.groups,region.approximation,context,work_bytes=work_bytes,accelerated=absorption_rtol==1e-8)

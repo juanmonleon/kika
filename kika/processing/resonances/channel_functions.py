@@ -7,7 +7,37 @@ import numpy as np
 from scipy.special import spherical_jn, spherical_yn
 
 
-def neutral_channel_functions(l, rho):
+def _low_j_coefficients(l):
+    values=[1.]
+    for k in range(1,11):values.append(-values[-1]/(2*k*(2*l+2*k+1)))
+    return tuple(values)
+
+
+_LOW_J_COEFFICIENTS={l:_low_j_coefficients(l) for l in (1,2)}
+
+
+def _low_phase(l, x):
+    """Riccati-Bessel ratio for L=1/2, with a regular small-x numerator."""
+    z=x*x
+    if l==1:
+        numerator=np.sin(x)-x*np.cos(x)
+        denominator=np.cos(x)+x*np.sin(x)
+    else:
+        numerator=(3-z)*np.sin(x)-3*x*np.cos(x)
+        denominator=(3-z)*np.cos(x)+3*x*np.sin(x)
+    numerator=np.asarray(numerator).copy()
+    small=x<1.
+    zs=z[small]
+    coefficients=_LOW_J_COEFFICIENTS[l]
+    series=np.full_like(zs,coefficients[-1])
+    for coefficient in reversed(coefficients[:-1]):
+        series *= zs
+        series += coefficient
+    numerator[small] = (x[small]**3/3 if l==1 else x[small]**5/15)*series
+    return np.arctan2(numerator,denominator)
+
+
+def neutral_channel_functions(l, rho, *, phase=True):
     """Return P_l, S_l, phi_l for finite positive rho, L=0..64.
 
     Extremely small penetrabilities can underflow; width-reference preparation
@@ -22,10 +52,11 @@ def neutral_channel_functions(l, rho):
     for ll in range(1, l + 1):
         denominator = (ll - s)**2 + p**2
         p, s = x**2 * p / denominator, x**2 * (ll - s) / denominator - ll
-    phase = x.copy() if l == 0 else np.arctan2(spherical_jn(l, x), -spherical_yn(l, x))
-    if np.any(~np.isfinite(p)) or np.any(~np.isfinite(s)) or np.any(~np.isfinite(phase)):
+    phi = (x.copy() if l == 0 else _low_phase(l,x) if l<=2
+           else np.arctan2(spherical_jn(l, x), -spherical_yn(l, x))) if phase else None
+    if np.any(~np.isfinite(p)) or np.any(~np.isfinite(s)) or (phase and np.any(~np.isfinite(phi))):
         raise FloatingPointError("neutral-channel functions exceeded floating-point range")
-    return p, s, phase
+    return p, s, phi
 
 
 
@@ -41,6 +72,13 @@ def neutral_shift_difference(l, reference_squared, squared, difference):
     zr, z, dz = np.broadcast_arrays(reference_squared, squared, difference)
     if np.any(~np.isfinite(zr+z+dz)) or np.any(zr <= 0) or np.any(z <= 0):
         raise ValueError("finite positive squared channel arguments required")
+    # Exact divided differences of S_1=-1/(1+z) and
+    # S_2=-3*(z+6)/(z*z+3*z+9). No subtraction of near-equal
+    # shifts, and no square-root recurrence intermediates.
+    if l==1:
+        return dz/(1+zr)/(1+z)
+    if l==2 and np.all(np.maximum(zr,z)<1e50) and np.all(abs(dz)<1e50):
+        return 3*dz*(zr*z+6*(zr+z)+9)/((zr*zr+3*zr+9)*(z*z+3*z+9))
     pr, p = np.sqrt(zr), np.sqrt(z)
     dp = dz/(pr+p)
     cr, c, dc = np.zeros_like(z), np.zeros_like(z), np.zeros_like(z)

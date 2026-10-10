@@ -15,6 +15,23 @@ def problem(c=3):
     return e,er,gamma,a,f
 
 
+@pytest.mark.parametrize('amplitude',[.1,1000.])
+def test_envelope_guard_against_independent_sum_outside_all_poles(amplitude):
+    if backend._native is None:pytest.skip('optional extension unavailable')
+    from kika.processing.resonances.reich_moore import level_matrix
+    n=5000;c=3;er=np.linspace(1.,70.,n);gamma=np.full(n,.1)
+    a=np.full((n,c),amplitude);e=np.array([100.,1e12]);f=np.ones((len(e),c))
+    r=np.empty((len(e),c,c),complex);unsafe=np.zeros(len(e),np.uint8)
+    backend._native.matrices(len(e),n,c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),unsafe)
+    reciprocal=1/(er[None,:]-e[:,None]-.5j*gamma[None,:])
+    expected=level_matrix(reciprocal,a)
+    np.testing.assert_allclose(r,expected,rtol=4e-13,atol=0.)
+    envelope=np.sum((abs(reciprocal.real)+abs(reciprocal.imag))@ (a*a),axis=1)
+    np.testing.assert_array_equal(unsafe,envelope>1e8)
+    assert unsafe[1]==0
+    assert unsafe[0]==(amplitude==1000.)
+
+
 def test_prepared_coefficients_are_immutable_and_cached():
     from copy import deepcopy
     import pickle

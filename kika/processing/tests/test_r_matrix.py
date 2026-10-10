@@ -373,8 +373,8 @@ def test_missing_rml_parity_is_rejected():
 def test_active_open_channel_underflow_is_rejected_but_closed_channel_is_retained(monkeypatch):
     from kika.processing.resonances import r_matrix
     original = r_matrix.neutral_channel_functions
-    def lost_penetrability(l,rho):
-        p,s,phase = original(l,rho)
+    def lost_penetrability(l,rho,**kwargs):
+        p,s,phase = original(l,rho,**kwargs)
         return np.zeros_like(p),s,phase
     source,ctx = rml_model()
     prepared = prepare_resonances(source,ctx)

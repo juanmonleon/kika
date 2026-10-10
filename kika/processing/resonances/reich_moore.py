@@ -231,13 +231,15 @@ def evaluate_rm(energies,groups,context,diagnostics=None,*,work_bytes=64*1024**2
     for group in groups:
         ctx=group.context or context;k2=ctx.k_squared_per_ev*energies
         beta=np.pi*.01/k2
-        phi=np.zeros_like(energies) if group.phase_radius.constant==0. else neutral_channel_functions(group.l,np.sqrt(k2)*group.phase_radius.evaluate(energies))[2]
+        phase_functions=None if group.phase_radius.constant==0. else neutral_channel_functions(group.l,np.sqrt(k2)*group.phase_radius.evaluate(energies))
+        phi=np.zeros_like(energies) if phase_functions is None else phase_functions[2]
         g=(2*group.spin+1)/(2*(2*ctx.target_spin+1))
         if not group.levels:
             elastic+=beta*g*4*np.sin(phi)**2;continue
         level_energies,gamma,amplitudes=group.kernel_data
         reduced=amplitudes[:,0]
-        p=neutral_channel_functions(group.l,np.sqrt(k2)*group.channel_radius.evaluate(energies))[0]
+        p=(phase_functions[0] if phase_functions is not None and group.phase_radius==group.channel_radius else
+           neutral_channel_functions(group.l,np.sqrt(k2)*group.channel_radius.evaluate(energies),phase=False)[0])
         if np.any(p==0) and np.any(reduced):raise FloatingPointError('RM neutron penetrability underflows')
         factors=np.ones((len(energies),amplitudes.shape[1]));factors[:,0]=np.sqrt(p)
         w,absorption=solve_collision(energies,level_energies,gamma,None,diagnostics,

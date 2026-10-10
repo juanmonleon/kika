@@ -9,7 +9,7 @@ import numpy as np
 from scipy.integrate import quad,IntegrationWarning
 
 
-def width_products(means,degrees,*,entrance=0,diagnostics=None):
+def width_products(means,degrees,*,entrance=0,diagnostics=None,accelerated=True):
     """Return all Q_nc in the same units as finite nonnegative mean widths."""
     m=np.asarray(means,dtype=float);nu=np.asarray(degrees,dtype=float)
     if (m.ndim!=1 or m.shape!=nu.shape or not 0<=entrance<len(m)
@@ -41,9 +41,22 @@ def width_products(means,degrees,*,entrance=0,diagnostics=None):
         # Fixed exit widths share exactly the same Laplace integral.
         key=log_theta[c] if fluctuating[c] else None
         if key not in integrals:
+            callback=integrand
+            if accelerated:
+                from ._rm_acceleration import _native
+                if _native is not None and hasattr(_native,'URR_INTEGRAND'):
+                    import ctypes
+                    from scipy import LowLevelCallable
+                    # Keep this contiguous owner alive through the synchronous
+                    # quad call. Fixed widths have theta=-inf (zero softplus).
+                    parameters=np.r_[np.count_nonzero(fluctuating),
+                        -np.inf if fixed==0 else np.log(fixed),log_theta[entrance],
+                        log_theta[c],np.column_stack((.5*nu[fluctuating],log_theta[fluctuating])).ravel()]
+                    callback=LowLevelCallable(_native.URR_INTEGRAND,
+                        ctypes.c_void_p(parameters.ctypes.data))
             with warnings.catch_warnings():
                 warnings.simplefilter('error',IntegrationWarning)
-                try:integrals[key]=quad(integrand,-np.inf,np.inf,epsabs=0.,epsrel=2e-12,limit=250)
+                try:integrals[key]=quad(callback,-np.inf,np.inf,epsabs=0.,epsrel=2e-12,limit=250)
                 except IntegrationWarning as exc:
                     raise FloatingPointError('URR Laplace quadrature did not converge') from exc
         value,error=integrals[key]

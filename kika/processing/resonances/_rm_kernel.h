@@ -1,4 +1,4 @@
-/* Included twice to emit portable and optional AVX2 kernels. */
+/* Portable/AVX2 kernels, with ordinary and certified envelope paths. */
 static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
         const double *e,const double *er,const double *gamma,const double *a,
         const double *f,double *out,unsigned char *unsafe) {
@@ -11,7 +11,10 @@ static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
     }
     for (Py_ssize_t start=0;start<ne;start+=TILE) {
         Py_ssize_t count=ne-start<TILE?ne-start:TILE;
-        double rr[9*TILE]={0},ri[9*TILE]={0},envelope[3*TILE]={0};
+        double rr[9*TILE]={0},ri[9*TILE]={0};
+#ifndef RM_SKIP_ENVELOPE
+        double envelope[3*TILE]={0};
+#endif
         double qr[TILE],qi[TILE];
         for (Py_ssize_t i=0;i<count;i++) unsafe[start+i]=0;
         for (Py_ssize_t k=0;k<n;k++) {
@@ -44,9 +47,11 @@ static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
                 }
             }
             for (Py_ssize_t j=0;j<c;j++) {
+#ifndef RM_SKIP_ENVELOPE
                 double square=a[k*c+j]*a[k*c+j];
                 for (Py_ssize_t i=0;i<count;i++)
                     envelope[j*TILE+i]+=square*(fabs(qr[i])+fabs(qi[i]));
+#endif
                 for (Py_ssize_t l=j;l<c;l++) {
                     double product=a[k*c+j]*a[k*c+l];Py_ssize_t base=(j*c+l)*TILE;
                     for (Py_ssize_t i=0;i<count;i++) {
@@ -56,9 +61,11 @@ static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
             }
         }
         for (Py_ssize_t i=0;i<count;i++) {
+#ifndef RM_SKIP_ENVELOPE
             double total=0.;
             for (Py_ssize_t j=0;j<c;j++) total+=envelope[j*TILE+i]*f[(start+i)*c+j]*f[(start+i)*c+j];
             if (!(isfinite(total) && total<=ENVELOPE_LIMIT)) unsafe[start+i]=1;
+#endif
             for (Py_ssize_t j=0;j<c;j++) for (Py_ssize_t l=j;l<c;l++) {
                 double scale=f[(start+i)*c+j]*f[(start+i)*c+l];
                 Py_ssize_t base=(j*c+l)*TILE+i;
@@ -71,6 +78,7 @@ static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
     }
 }
 
+#ifndef RM_SKIP_ABSORPTION
 static RM_TARGET void RM_ABSORPTION(Py_ssize_t ne,Py_ssize_t n,Py_ssize_t c,
         const double *e,const double *er,const double *gamma,const double *a,
         const double *f,const double *y,double *out) {
@@ -108,3 +116,5 @@ static RM_TARGET void RM_ABSORPTION(Py_ssize_t ne,Py_ssize_t n,Py_ssize_t c,
     }
 }
 
+
+#endif

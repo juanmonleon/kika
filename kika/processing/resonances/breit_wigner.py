@@ -45,6 +45,32 @@ def _accumulate_columns(target, values):
     target[:]=values[:,-1]
 
 
+def _native_levels(energies, group, p, reference_p, beta, ctx, approximation,
+                   sin2, sin_double, elastic, capture, fission, work_bytes):
+    from ._rm_acceleration import _native
+    if (_native is None or not hasattr(_native,'breit_wigner') or group.l>2
+            or group.channel_radius.constant is None or len(group.levels)<8
+            or any(lv.competitive for lv in group.levels)):
+        return None
+    spins=list(dict.fromkeys(lv.spin for lv in group.levels))
+    if len(spins)>128 or len(energies)*8*(8+2*len(spins))>work_bytes:return None
+    levels=np.array([(lv.energy,lv.neutron,lv.capture,lv.fission,
+        (2*lv.spin+1)/(2*(2*ctx.target_spin+1)),pr,spins.index(lv.spin))
+        for lv,pr in zip(group.levels,reference_p)])
+    data=np.column_stack((energies,p,beta,sin2,sin_double))
+    if any(np.any(~np.isfinite(a)) or np.any(abs(a)>1e20) for a in (levels,data)):return None
+    if np.any(reference_p<=0) or np.any((levels[:,1:4]!=0)&(abs(levels[:,1:4])<1e-40)):return None
+    coefficient=ctx.k_squared_per_ev*group.channel_radius.constant**2
+    if coefficient<=0 or coefficient*max(np.max(energies),np.max(abs(levels[:,0])))>1e20:return None
+    out=np.zeros((len(energies),3+2*len(spins)))
+    out[:,0]=capture;out[:,1]=fission;out[:,2]=elastic
+    accepted=_native.breit_wigner(len(energies),len(levels),len(spins),group.l,
+        int(approximation=='MultiLevel'),coefficient,data.ravel(),levels.ravel(),out.ravel())
+    if not accepted or np.any(~np.isfinite(out)):return None
+    capture[:]=out[:,0];fission[:]=out[:,1];elastic[:]=out[:,2]
+    return {spin:(out[:,3+2*i],out[:,4+2*i]) for i,spin in enumerate(spins)}
+
+
 def _s_wave(energies,levels,p,reference_p,beta,context,approximation,
             sin2,sin_double,elastic,capture,fission,work_bytes):
     """Exact L=0, no-competition BW; vectorize bounded groups of levels.
@@ -79,7 +105,7 @@ def _s_wave(energies,levels,p,reference_p,beta,context,approximation,
     return amplitudes
 
 
-def evaluate_bw(energies, groups, approximation, context, *, work_bytes=64*1024**2):
+def evaluate_bw(energies, groups, approximation, context, *, work_bytes=64*1024**2, accelerated=False):
     elastic, capture, fission = (np.zeros_like(energies) for _ in range(3))
     competitive = {}
     for group in groups:
@@ -88,10 +114,12 @@ def evaluate_bw(energies, groups, approximation, context, *, work_bytes=64*1024*
         beta = np.pi * 0.01 / k2  # fm^2 -> barn
         l = group.l
         radius = group.channel_radius.evaluate(energies)
-        p, s, _ = neutral_channel_functions(l, np.sqrt(k2) * radius)
+        same_radius=group.channel_radius==group.phase_radius
+        p, s, phi = neutral_channel_functions(l, np.sqrt(k2) * radius, phase=same_radius)
         if any(level.neutron for level in group.levels) and np.any(p == 0):
             raise FloatingPointError('neutron penetrability underflows at an evaluation energy')
-        _, _, phi = neutral_channel_functions(l, np.sqrt(k2) * group.phase_radius.evaluate(energies))
+        if not same_radius:
+            _, _, phi = neutral_channel_functions(l, np.sqrt(k2) * group.phase_radius.evaluate(energies))
         sin2 = np.sin(phi)**2
         sin_double = np.sin(2 * phi)
         potential = 4 * sin2
@@ -102,9 +130,11 @@ def evaluate_bw(energies, groups, approximation, context, *, work_bytes=64*1024*
         # invoking table/channel validation for every level in every block.
         reference_energies=np.asarray([abs(level.energy) for level in group.levels])
         reference_radii=group.channel_radius.evaluate(reference_energies)
-        reference_p=neutral_channel_functions(l,np.sqrt(ctx.k_squared_per_ev*reference_energies)*reference_radii)[0]
-        if l==0 and len(group.levels)>=32 and not any(level.competitive for level in group.levels):
-            amplitudes=_s_wave(energies,group.levels,p,reference_p,beta,ctx,approximation,
+        reference_p=neutral_channel_functions(l,np.sqrt(ctx.k_squared_per_ev*reference_energies)*reference_radii,phase=False)[0]
+        native=_native_levels(energies,group,p,reference_p,beta,ctx,approximation,
+            sin2,sin_double,elastic,capture,fission,work_bytes) if accelerated and len(energies) else None
+        if native is not None or (l==0 and len(group.levels)>=32 and not any(level.competitive for level in group.levels)):
+            amplitudes=native if native is not None else _s_wave(energies,group.levels,p,reference_p,beta,ctx,approximation,
                 sin2,sin_double,elastic,capture,fission,work_bytes)
             if group.competitive_mt is not None:competitive.setdefault(group.competitive_mt,np.zeros_like(energies))
             if approximation=='MultiLevel':
@@ -112,7 +142,7 @@ def evaluate_bw(energies, groups, approximation, context, *, work_bytes=64*1024*
                 for spin,(t1,t2) in amplitudes.items():
                     g=(2*spin+1)/(2*(2*ctx.target_spin+1));represented_weight+=g
                     elastic+=beta*g*((2*sin2-t1)**2+(sin_double+t2)**2)
-                elastic+=beta*(1-represented_weight)*potential
+                elastic+=beta*(2*l+1-represented_weight)*potential
             continue
         for level_index,level in enumerate(group.levels):
             pr=reference_p[level_index]

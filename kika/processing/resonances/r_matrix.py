@@ -85,24 +85,28 @@ class RMLChannel:
                     # KRL changes k through the two-body invariant.
                     eta = self.charge_strength/np.sqrt(self.k_squared(channel_energy[opened]))
                     if logarithmic:
-                        lp,so,_ = charged_channel_log_functions(self.l,eta,rho[opened])
+                        lp,so,channel_phase = charged_channel_log_functions(self.l,eta,rho[opened])
                         po = np.exp(lp)
                     else:
-                        po,so,_ = charged_channel_functions(self.l,eta,rho[opened])
+                        po,so,channel_phase = charged_channel_functions(self.l,eta,rho[opened])
                 else:
-                    po, so, _ = neutral_channel_functions(self.l, rho[opened])
+                    po, so, channel_phase = neutral_channel_functions(self.l, rho[opened],
+                        phase=self.radius==self.phase_radius and self.phase_function is None)
                 p[opened] = po if self.penetrability == 'calculate' else 1.
                 if self.penetrability != 'calculate':log_p[opened] = 0.
                 elif self.charge_strength and logarithmic:log_p[opened] = lp
                 else:
                     with np.errstate(divide='ignore'):log_p[opened] = np.log(po)
                 s[opened] = so
-                if self.phase_radius.constant != 0.:
-                    phase_rho = np.sqrt(self.k_squared(channel_energy[opened]))*self.phase_radius.evaluate(e[opened])
-                    if self.charge_strength:
-                        phase[opened] = (charged_channel_log_functions if logarithmic else charged_channel_functions)(self.l,eta,phase_rho)[2]
+                if self.phase_radius.constant != 0. and self.phase_function is None:
+                    if self.phase_radius==self.radius:
+                        phase[opened]=channel_phase
                     else:
-                        phase[opened] = neutral_channel_functions(self.l,phase_rho)[2]
+                        phase_rho = np.sqrt(self.k_squared(channel_energy[opened]))*self.phase_radius.evaluate(e[opened])
+                        if self.charge_strength:
+                            phase[opened] = (charged_channel_log_functions if logarithmic else charged_channel_functions)(self.l,eta,phase_rho)[2]
+                        else:
+                            phase[opened] = neutral_channel_functions(self.l,phase_rho)[2]
             if np.any(~opened):
                 if self.charge_strength:
                     from .coulomb import closed_charged_shift,charged_threshold_shift
@@ -287,7 +291,80 @@ def _check_underflow_bound(log_value,log_error):
         raise FloatingPointError('underflow correction exceeds the amplitude accuracy bound')
 
 
-def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1024**2):
+def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnostics, work_bytes):
+    """All-level native sums with the general RML channel solve and direct capture.
+
+    Real L-B and external diagonal terms remain in the solve. Exceptional
+    poles use bounded reference batches; no level absorption array is retained.
+    """
+    from ._rm_acceleration import _native, eligible, reference_block_size
+    er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
+    a=np.require(reduced,dtype=float,requirements=['C','A']);f=np.ones_like(p)
+    if not eligible(e,er,gamma,a,f,work_bytes,True,1e-8):return None
+    if np.any(~np.isfinite(logarithmic)) or np.any(abs(logarithmic)>1e20):return None
+    if (np.any((p!=0)&(p<1e-80)) or np.any(p>1e20)
+            or np.any(abs(external)>1e20)):return None
+    target_diagnostics=diagnostics
+    if diagnostics is not None:diagnostics=dict(diagnostics)
+    c=a.shape[1];e=np.require(e,dtype=float,requirements=['C','A'])
+    r=np.empty((len(e),c,c),complex);unsafe=np.zeros(len(e),np.uint8)
+    _native.matrices(len(e),len(er),c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),unsafe)
+    # RML's pole threshold also depends on |L-B|. The existing native
+    # flags cover the unit threshold; test only additional candidate levels.
+    strength=np.sum(a*a,axis=1);scale=np.maximum(1.,np.max(abs(logarithmic),axis=1))
+    candidates=np.flatnonzero(.5*gamma<=1e-6*strength*scale.max())
+    for k in candidates:
+        unsafe |= (abs(er[k]-e-.5j*gamma[k])<=1e-6*strength[k]*scale)
+    regular=unsafe==0
+    w=np.empty_like(p,dtype=complex);y=np.empty_like(w);absorption=np.empty(len(e))
+    if np.any(regular):
+        rr=r[regular].copy();index=np.arange(c);rr[:,index,index]+=external[regular]
+        matrix=np.eye(c)[None,:,:]-logarithmic[regular,:,None]*rr
+        rhs=np.zeros((len(rr),c,1),complex);rhs[:,entrance,0]=1.
+        try:yr=np.ascontiguousarray(np.linalg.solve(matrix,rhs)[:,:,0])
+        except np.linalg.LinAlgError:return None
+        if np.any((abs(yr)!=0)&(abs(yr)<1e-40)) or np.any(abs(yr)>1e40):return None
+        residual=np.linalg.norm((matrix@yr[:,:,None]-rhs)[:,:,0],axis=1)
+        maximum=float(np.max(residual/(np.linalg.norm(matrix,axis=(1,2))*np.linalg.norm(yr,axis=1)+1.)))
+        if maximum>1e-11:return None
+        y[regular]=yr;w[regular]=np.einsum('ecd,ed->ec',rr,yr)
+        direct=np.empty(len(rr))
+        _native.absorption(len(rr),len(er),c,np.ascontiguousarray(e[regular]),er,gamma,
+            a.ravel(),np.ascontiguousarray(f[regular]).ravel(),yr.view(float).ravel(),direct)
+        absorption[regular]=p[regular,entrance]*(direct+4*np.sum(external[regular].imag*abs(yr)**2,axis=1))
+        if diagnostics is not None:
+            diagnostics['rml_max_solver_residual']=max(diagnostics.get('rml_max_solver_residual',0.),maximum)
+    indexes=np.flatnonzero(~regular);block=reference_block_size(len(er),c,work_bytes)
+    for start in range(0,len(indexes),block):
+        ix=indexes[start:start+block]
+        w[ix],x,y[ix]=solve_rml(e[ix],er,gamma,a,logarithmic[ix],external[ix],
+            entrance=entrance,diagnostics=diagnostics,work_bytes=work_bytes)
+        absorption[ix]=2*p[ix,entrance]*np.sum(gamma[None,:]*abs(x)**2,axis=1)+4*p[ix,entrance]*np.sum(external[ix].imag*abs(y[ix])**2,axis=1)
+    if any(np.any(~np.isfinite(v)) for v in (w,y,absorption)) or np.any(absorption<0):return None
+    collision=2j*np.sqrt(p)*np.sqrt(p[:,entrance,None])*w
+    collision[:,entrance]+=1.
+    if np.any(abs(1-np.sum(abs(collision)**2,axis=1)-absorption)>1e-9):return None
+    if diagnostics is not None:
+        diagnostics['rml_native_energies']=diagnostics.get('rml_native_energies',0)+int(regular.sum())
+        target_diagnostics.update(diagnostics)
+    return w,absorption
+
+
+def _reference_rml_observables(e,group,reduced,logarithmic,external,p,entrance,diagnostics,work_bytes):
+    """Keep neutral fallback level arrays bounded after a streaming batch."""
+    from ._rm_acceleration import reference_block_size
+    er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
+    w=np.empty_like(p,dtype=complex);absorption=np.empty(len(e))
+    block=reference_block_size(len(er),p.shape[1],work_bytes)
+    for start in range(0,len(e),block):
+        sl=slice(start,start+block)
+        w[sl],x,y=solve_rml(e[sl],er,gamma,reduced,logarithmic[sl],external[sl],
+            entrance=entrance,diagnostics=diagnostics,work_bytes=work_bytes)
+        absorption[sl]=2*p[sl,entrance]*np.sum(gamma[None,:]*abs(x)**2,axis=1)+4*p[sl,entrance]*np.sum(external[sl].imag*abs(y)**2,axis=1)
+    return w,absorption
+
+
+def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1024**2, absorption_rtol=0.):
     e = np.asarray(energies)
     mts = {1, 2, 18, 102} | {mt for g in groups for mt in g.reaction_mts}
     result = {mt: np.zeros_like(e) for mt in mts}
@@ -316,17 +393,47 @@ def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1
                              for ch in group.channels], axis=1)
         if np.any(external.imag < 0):
             raise ValueError('negative external absorption is outside the passive KRM3 profile')
+        # With L-B=iP and no external term, congruence by sqrt(P) gives
+        # exactly the RM channel system. Keep the general level-space path
+        # for independent verification, real shifts and underflow bounds.
+        diagonal = (absorption_rtol == 1e-8 and not group.level_metric
+                    and not np.any(log.real) and not np.any(external)
+                    and not np.any(limited) and not np.any(charged)
+                    and np.all((p==0)|((p>=1e-80)&(p<=1e20)))
+                    and np.all(abs(e)<=1e20)
+                    and np.all((reduced==0)|((abs(reduced)>=1e-40)&(abs(reduced)<=1e20)))
+                    and all(v==0 or 1e-100<=v<=1e20 for v in group.radiation))
         for entrance in group.entrances:
             bounds = {}
-            w, x, y = solve_rml(e, [lv.energy for lv in group.levels], group.radiation,
-                reduced, log,
-                external, entrance=entrance, diagnostics=diagnostics,
-                log_penetrability=log_p,error_bounds=bounds,
-                level_metric=group.level_metric if group.level_metric else None,
-                level_energy=group.level_energy if group.level_metric else None,
-                level_origin=group.level_origin,work_bytes=work_bytes)
-            underflow = np.any(bounds['missing'],axis=1)
-            core = 2j*np.sqrt(p)*np.sqrt(p[:, entrance, None])*w
+            streamed=None
+            if absorption_rtol==1e-8 and not diagonal and not group.level_metric and not np.any(charged) and not np.any(limited):
+                streamed=_streamed_rml(e,group,reduced,log,external,p,entrance,diagnostics,work_bytes)
+                if streamed is None and not np.any(np.isfinite(log_p)&(log.imag==0)):
+                    from ._rm_acceleration import reference_block_size
+                    if len(e)>reference_block_size(len(group.levels),len(group.channels),work_bytes):
+                        streamed=_reference_rml_observables(e,group,reduced,log,external,p,entrance,diagnostics,work_bytes)
+            if diagonal:
+                from .reich_moore import solve_collision
+                scaled, direct_absorption = solve_collision(e, [lv.energy for lv in group.levels],
+                    group.radiation, None, diagnostics, entrance=entrance, reduced=reduced,
+                    channel_factors=np.sqrt(p), work_bytes=work_bytes,
+                    return_absorption=True, absorption_rtol=absorption_rtol)
+                underflow = np.zeros(len(e), dtype=bool)
+                core = 2j*scaled
+            elif streamed is not None:
+                w,direct_absorption=streamed
+                underflow=np.zeros(len(e),dtype=bool)
+                core=2j*np.sqrt(p)*np.sqrt(p[:,entrance,None])*w
+            else:
+                w, x, y = solve_rml(e, [lv.energy for lv in group.levels], group.radiation,
+                    reduced, log,
+                    external, entrance=entrance, diagnostics=diagnostics,
+                    log_penetrability=log_p,error_bounds=bounds,
+                    level_metric=group.level_metric if group.level_metric else None,
+                    level_energy=group.level_energy if group.level_metric else None,
+                    level_origin=group.level_origin,work_bytes=work_bytes)
+                underflow = np.any(bounds['missing'],axis=1)
+                core = 2j*np.sqrt(p)*np.sqrt(p[:, entrance, None])*w
             if np.any(underflow):
                 with np.errstate(divide='ignore'):
                     log_core = np.log(2.)+.5*(log_p+log_p[:,entrance,None])+np.log(abs(w))
@@ -355,7 +462,7 @@ def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1
                         _check_underflow_bound((np.log(abs(core_collision[:,out]))+.5*np.log(beta))[underflow],
                             (log_core_error[:,out]+.5*np.log(beta))[underflow])
                 result[channel.mt] += sigma
-            absorption = (2*p[:, entrance]*np.sum(np.asarray(group.radiation)[None, :]*abs(x)**2, axis=1)
+            absorption = direct_absorption if diagonal or streamed is not None else (2*p[:, entrance]*np.sum(np.asarray(group.radiation)[None, :]*abs(x)**2, axis=1)
                           +4*p[:, entrance]*np.sum(external.imag*abs(y)**2, axis=1))
             if np.any(underflow):
                 with np.errstate(divide='ignore'):
