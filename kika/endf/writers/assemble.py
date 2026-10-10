@@ -780,6 +780,42 @@ def writeEndfTapes(suites, path, mats: Optional[Sequence[Optional[int]]] = None,
     return reports
 
 
+def _resample_reconstructed_endf(suite, label):
+    """Keep ordinates at the energies actually representable by ENDF fields.
+
+    Moving x while retaining y can exceed the budget on steep resonance
+    flanks. Resample the verified linear table at rounded x through algebra.
+    Unrepresentable boundaries or colliding knots retain the original form;
+    the mandatory reload check then decides whether publication is possible.
+    """
+    from copy import deepcopy
+    import numpy as np
+    from kika._records import format_endf_number_precise, parse_number
+    from kika.algebra import evaluate
+    from kika.nuclear_data.model import Regions1d
+    output = deepcopy(suite)
+    for reaction in (*output.reactions, *output.sums):
+        form = reaction.crossSection.get(label)
+        if form is None:
+            continue
+        curves = form.function1ds if isinstance(form, Regions1d) else [form]
+        for curve in curves:
+            x = np.asarray(curve.xs)
+            rounded = np.array([parse_number(format_endf_number_precise(v)) for v in x])
+            if rounded[0] != x[0] or rounded[-1] != x[-1]:
+                continue
+            # Keep both sides of a colliding pair (including real jumps),
+            # while still correcting the ordinary flanks elsewhere.
+            collisions = np.flatnonzero(np.diff(rounded) <= 0)
+            kept = np.unique(np.r_[collisions, collisions+1])
+            rounded[kept] = x[kept]
+            y = evaluate(x, curve.ys, 2, rounded)
+            y[kept] = np.asarray(curve.ys)[kept]
+            curve.xs = rounded
+            curve.ys = np.asarray(y)
+    return output
+
+
 def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
     """Write, reload and verify before replacing the requested destination.
 
@@ -802,7 +838,8 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None):
     os.close(descriptor)
     provisional = Path(name)
     try:
-        report = writeEndfTape(suite, provisional, mat=mat,
+        serialized = _resample_reconstructed_endf(suite, result.label)
+        report = writeEndfTape(serialized, provisional, mat=mat,
             tapeId=DEFAULT_TAPE_ID if tapeId is None else tapeId, label=result.label)
         if not report.isClean:
             raise ValueError(f'reconstructed ENDF conversion is incomplete: {vars(report)}')

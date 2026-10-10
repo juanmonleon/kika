@@ -221,6 +221,38 @@ def test_full_gnds_written_read_and_verified(tmp_path):
     assert max(result.verify_suite(reloaded).values())<=1
 
 
+def test_endf_rounding_resamples_steep_flanks_without_mutating_source():
+    from kika.endf.writers.assemble import _resample_reconstructed_endf
+    from kika._records import format_endf_number_precise, parse_number
+    from kika.algebra import evaluate
+    suite=ReactionSuite('rounding','n','U238')
+    x=np.array([16689.,16689.06538420718,16689.065603114654,16690.])
+    y=200*(x-16689.065)+.8
+    original=XYs1d(x,y,axes=AXES,label='recon')
+    suite.reactions.append(Reaction(ReactionId('elastic',ENDF_MT=2),CrossSection({'recon':original})))
+    rounded=_resample_reconstructed_endf(suite,'recon').reactions['elastic'].crossSection['recon']
+    expected_x=np.array([parse_number(format_endf_number_precise(v)) for v in x])
+    np.testing.assert_array_equal(rounded.xs,expected_x)
+    np.testing.assert_allclose(rounded.ys,200*(expected_x-16689.065)+.8,atol=1e-12)
+    probe=np.array([16689.065467822395])
+    np.testing.assert_allclose(evaluate(rounded.xs,rounded.ys,2,probe),evaluate(x,y,2,probe),atol=1e-12)
+    np.testing.assert_array_equal(original.xs,x)
+    np.testing.assert_array_equal(original.ys,y)
+
+
+@pytest.mark.parametrize('x',[[16689.,16689.0656001,16689.0656002,16690.],
+                              [16689.0000001,16689.0656001,16690.]])
+def test_endf_resampling_keeps_collisions_and_unrepresentable_boundaries(x):
+    from kika.endf.writers.assemble import _resample_reconstructed_endf
+    suite=ReactionSuite('rounding','n','U238')
+    y=np.arange(len(x),dtype=float)
+    form=XYs1d(x,y,axes=AXES,label='recon')
+    suite.reactions.append(Reaction(ReactionId('elastic',ENDF_MT=2),CrossSection({'recon':form})))
+    output=_resample_reconstructed_endf(suite,'recon').reactions['elastic'].crossSection['recon']
+    np.testing.assert_array_equal(output.xs,x)
+    np.testing.assert_array_equal(output.ys,y)
+
+
 @pytest.mark.parametrize('mode',['cycle','duplicate','external','other_style'])
 def test_native_sum_links_reject_invalid_graphs(mode):
     suite=suite_model()
