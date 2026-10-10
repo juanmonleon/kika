@@ -87,7 +87,7 @@ def on_common_grid(tables: Sequence, grid: Union[str, int] = "union"):
     limit on its first copy and the right limit on its last
     (:func:`~kika.algebra.evaluate.sample_on_union`).
 
-    This is how two evaluations are compared point by point. On the union no
+    This is how two tables are compared point by point. On the union no
     table loses a node: the difference of two lin-lin tables is itself lin-lin
     there, so its extremes are among the returned points. On one table's grid
     the other is only sampled, and a peak of it that falls between the chosen

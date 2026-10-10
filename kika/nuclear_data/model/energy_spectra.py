@@ -31,7 +31,7 @@ no library carries. Decision PD-3 (Juan, 2026-10-08): refuse it by name. What
 these nodes offer instead is :meth:`toPointwise`: the spectrum tabulated, as an
 ``XYs2d`` the caller asked for, never filed under the evaluated label.
 
-**The arithmetic is** :mod:`kika.algebra.spectra`'s, the same functions the
+**The arithmetic is** :mod:`kika.nuclear_data.spectrum_laws`'s, the same functions the
 ENDF reader evaluates with, so the two cannot disagree. Every form is
 normalised over its own support: ``[0, E - U]`` for the four with a ``U``,
 ``[0, inf)`` for Madland-Nix, which the ``E - U`` rule would truncate to
@@ -44,7 +44,8 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
-from kika.algebra import integral, interval_laws, spectra
+from kika.algebra import integral, interval_laws
+from kika.nuclear_data import spectrum_laws as spectra
 
 from .axes import energyAxes
 from .functions import Function1d, Regions1d, XYs1d, XYs2d
@@ -263,7 +264,7 @@ class GeneralEvaporation(_Spectrum):
 class MadlandNix(_Spectrum):
     """LF=12: ``EFL``, ``EFH`` and ``T_M(E)`` (``gnds.xsd:1722``). No ``U``.
 
-    Normalised over ``[0, inf)`` analytically; see :func:`kika.algebra.spectra.madland_nix`.
+    Normalised over ``[0, inf)`` analytically; see :func:`kika.nuclear_data.spectrum_laws.madland_nix`.
     """
 
     EFL: Optional[PhysicalQuantity] = None

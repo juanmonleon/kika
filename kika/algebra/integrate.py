@@ -20,7 +20,7 @@ taken for every decreasing ``y`` steeper than ``1/x`` and has the wrong sign on
 its third term, +6 % for ``y ~ x^-2`` on ``[1, 2]``). Here there is no branch:
 ``expm1(s)/s`` is exact for any ``s`` and is one at zero.
 
-The weight ``1/x`` (a lethargy or ``1/E`` flux) is also closed form on every
+The weight ``1/x`` (an average that is uniform in ``ln x``) is also closed form on every
 law but log-lin, whose ``int e^{kx}/x dx`` is an exponential integral; a
 log-lin table has to be :func:`~kika.algebra.refine.to_linlin`-ed first, and is
 refused here rather than approximated.
@@ -229,8 +229,9 @@ def interval_integrals(x, y, laws, lo, hi, weight: Optional[str] = None) -> np.n
     stands on its own -- a window sliding along the table, say. The intervals'
     ends are sorted into one grid, the table is integrated exactly on every
     piece of it, and each interval sums only its own pieces. Differencing a
-    running total instead would cancel: a 0.05-wide lethargy window at 1 keV
-    holds ~1e-6 of the 1/E integral that U-235's thermal range puts below it.
+    running total instead would cancel: a narrow interval far from a region
+    where ``y w`` is large can hold 1e-6 of the total below it, and the
+    difference of two totals would lose those six digits.
     The cost is the number of piece ends inside each interval, summed, so
     overlapping intervals are cheap when there are thousands of them and
     quadratic when every one spans most of the others. ``hi <= lo`` gives zero.

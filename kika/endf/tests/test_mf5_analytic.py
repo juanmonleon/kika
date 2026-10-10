@@ -313,7 +313,7 @@ def test_lf12_integrates_to_one_and_has_the_closed_form_mean(energy):
     """Its two closed forms, against quadrature -- no tape here carries LF=12."""
     from scipy import integrate
 
-    from kika.algebra.spectra import madland_nix_mean
+    from kika.nuclear_data.spectrum_laws import madland_nix_mean
 
     partial = madland_nix_partial()
     tm = partial.tm(energy)
