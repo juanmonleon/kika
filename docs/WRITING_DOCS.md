@@ -256,8 +256,9 @@ Concretely:
   result.
 - **Every refusal is on the page.** If the code raises instead of guessing, the reader
   needs to know which inputs it refuses and why.
-- **Length: one to four screens.** Longer means it is two methods. Split it and link the
-  halves.
+- **No length limit.** A page is as long as its subject needs. A page that turns out to
+  cover two methods is split into two, because each method has its own page, not
+  because of its length.
 
 ## 5. Content rules
 
