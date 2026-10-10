@@ -126,3 +126,132 @@ def test_the_primary_layer_carries_the_label_and_the_bridge():
     assert steps.get_label() == "ref"
     labels = [ln.get_label() for ln in ax_main.get_lines()]
     assert "ref (window avg)" in labels
+
+
+# ---------------------------------------------------------------------------
+# One side averaged: the averages against the other's pointwise curve
+# ---------------------------------------------------------------------------
+
+def _pointwise(label, level):
+    x = np.geomspace(1.0, 1000.0, 50)
+    return PlotData(x=x, y=np.full_like(x, level), label=label, color="C1")
+
+
+def test_window_against_pointwise_at_the_same_constant_is_zero():
+    for ref, cmp in ((_series("ref", 2.0), _pointwise("cmp", 2.0)),
+                     (_pointwise("ref", 2.0), _series("cmp", 2.0))):
+        _, _, ax_diff = _build(ref, cmp)
+        (line,) = _lines_at(ax_diff, CENTRES)
+        assert np.allclose(line.get_ydata(), 0.0)
+        plt.close("all")
+
+
+@pytest.mark.parametrize("averaged_is_ref, expected", [(True, 10.0), (False, 100 * (2.0 - 2.2) / 2.2)])
+def test_one_sided_relative_divides_by_the_reference(averaged_is_ref, expected):
+    if averaged_is_ref:
+        ref, cmp = _series("ref", 2.0), _pointwise("cmp", 2.2)
+    else:
+        ref, cmp = _pointwise("ref", 2.2), _series("cmp", 2.0)
+    _, _, ax_diff = _build(ref, cmp)
+    (line,) = _lines_at(ax_diff, CENTRES)
+    assert np.allclose(line.get_ydata(), expected)
+
+
+def test_steps_against_pointwise_is_a_curve_on_the_pointwise_grid():
+    ref = _series("ref", 2.0, window=False, steps=True)
+    _, _, ax_diff = _build(ref, _pointwise("cmp", 2.2))
+    lines = [ln for ln in ax_diff.get_lines()
+             if np.asarray(ln.get_xdata()).min() == BOUNDS[0]
+             and np.asarray(ln.get_xdata()).max() == BOUNDS[1]]
+    (steps,) = lines
+    x = np.asarray(steps.get_xdata())
+    assert steps.get_drawstyle() == "default"
+    # Each inner edge twice, the pointwise nodes in between.
+    for edge in EDGES[1:-1]:
+        assert np.count_nonzero(x == edge) == 2
+    assert x.size > len(EDGES) + 2
+    assert np.allclose(steps.get_ydata(), 10.0)
+
+
+def test_the_pointwise_diff_stands_outside_the_averaged_span():
+    _, _, ax_diff = _build(_series("ref", 2.0), _pointwise("cmp", 2.2))
+    (pointwise,) = [ln for ln in ax_diff.get_lines() if len(ln.get_xdata()) > len(CENTRES)
+                    and not np.allclose(ln.get_ydata(), 0.0)]
+    x, y = np.asarray(pointwise.get_xdata()), np.asarray(pointwise.get_ydata())
+    outside = (x < BOUNDS[0]) | (x > BOUNDS[1])
+    assert np.allclose(y[outside], 10.0)
+    assert np.isnan(y[(x > BOUNDS[0]) & (x < BOUNDS[1])][1:-1]).all()
+
+
+def test_a_series_compared_with_its_own_average():
+    # The use case behind per-series averaging: duplicate a curve, average one.
+    x = np.geomspace(1.0, 1000.0, 400)
+    y = 2.0 + 1.0 / (1.0 + ((x - 30.0) / 1.0) ** 2)
+    from kika.processing import resonance_window_average
+    plain = PlotData(x=x, y=y, label="pointwise", color="C0")
+    averaged = PlotData(x=x, y=y.copy(), label="averaged", color="C1")
+    values = resonance_window_average(x, y, CENTRES, 0.3, bounds=BOUNDS)
+    averaged.metadata["group_average_overlay"] = {
+        "bounds_used": BOUNDS, "weighting": "lethargy", "centres": list(CENTRES),
+        "values": list(values)}
+    _, _, ax_diff = _build(plain, averaged)
+    (line,) = _lines_at(ax_diff, CENTRES)
+    # The average against the curve it averages, at each centre (lin-lin here).
+    at_centres = np.interp(CENTRES, x, y)
+    assert np.allclose(line.get_ydata(), 100 * (values - at_centres) / at_centres)
+
+
+def test_no_average_anywhere_leaves_the_comparison_as_it_was():
+    _, ax_main, ax_diff = _build(_pointwise("ref", 2.0), _pointwise("cmp", 2.2))
+    assert not _lines_at(ax_diff, CENTRES)
+    assert all(np.isfinite(ln.get_ydata()).all() for ln in ax_diff.get_lines()
+               if len(ln.get_xdata()) == 50)
+
+
+# ---------------------------------------------------------------------------
+# A plain plot draws the averages too
+# ---------------------------------------------------------------------------
+
+def _plain(*series, display="average", shade=False):
+    from kika.plotting import PlotBuilder
+    builder = PlotBuilder()
+    for data in series:
+        builder.add_data(data)
+    builder.set_scales(log_x=True)
+    builder.set_group_average(main_display=display, shade_range=shade)
+    return builder.build().axes[0]
+
+
+def test_a_plain_plot_draws_the_layers_of_an_averaged_series():
+    ax = _plain(_series("xs", 2.0, steps=True), _pointwise("other", 3.0), shade=True)
+    (window,) = _lines_at(ax, CENTRES)
+    (steps,) = _lines_at(ax, EDGES)
+    assert window.get_label() == "xs" and steps.get_label() == "xs (group avg)"
+    assert steps.get_drawstyle() == "steps-post"
+    # Drawn in the series' own color, the pointwise curve masked inside the span.
+    assert window.get_color() == "C0"
+    (masked,) = [ln for ln in ax.get_lines() if len(ln.get_xdata()) == 50
+                 and np.isnan(ln.get_ydata()).any()]
+    assert len(ax.patches) == 1
+    labels = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert labels.count("xs") == 1 and "other" in labels
+
+
+def test_a_plain_plot_in_pointwise_mode_draws_no_layer():
+    ax = _plain(_series("xs", 2.0, steps=True), display="pointwise")
+    assert not _lines_at(ax, CENTRES) and not _lines_at(ax, EDGES)
+
+
+def test_a_plain_plot_fits_y_to_the_layers():
+    data = _series("xs", 2.0)
+    data.metadata["group_average_overlay"]["values"][4] = 100.0
+    ax = _plain(data)
+    assert ax.get_ylim()[1] >= 100.0
+
+
+def test_an_unknown_display_is_refused():
+    from kika.plotting import PlotBuilder
+    with pytest.raises(ValueError):
+        PlotBuilder().set_group_average(main_display="avg")
+    with pytest.raises(ValueError):
+        ComparisonBuilder().set_group_average(main_display="avg")

@@ -46,7 +46,7 @@ from .refine import LINEARIZATION_TOLERANCE, to_linlin
 
 __all__ = ["panel_integrals", "cumulative_integral", "integral", "group_integrals",
            "group_averages", "interval_integrals", "interval_averages",
-           "legendre_moments", "legendre_coefficients", "WEIGHTS"]
+           "log_window_averages", "legendre_moments", "legendre_coefficients", "WEIGHTS"]
 
 #: The weights :func:`panel_integrals` knows: none, and ``1/x``.
 WEIGHTS = (None, "1/x")
@@ -272,6 +272,36 @@ def interval_averages(x, y, laws, lo, hi, weight: Optional[str] = None) -> np.nd
         den = np.log(hi / lo)
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(den > 0, num / den, np.nan)
+
+
+def log_window_averages(x, y, laws, centres, width: float,
+                        weight: Optional[str] = None, bounds=None) -> np.ndarray:
+    """The mean of the table over a window of fixed width in ``ln x``, at each centre.
+
+    At a centre ``c`` the window is ``[c e^(-width/2), c e^(width/2)]``, clipped
+    to the table's domain and to *bounds* ``(lo, hi)`` if given, and the mean is
+    :func:`interval_averages`' exact one. Clipping means near either end the
+    window is one-sided rather than averaging in the zero outside the table.
+    Sliding the window gives a smooth curve with no group edges to place: at
+    the geometric centre of a group of an equal-``ln x`` grid of that width it
+    *is* that group's :func:`group_averages`. ``nan`` where the clipped window
+    is empty.
+    """
+    x = np.asarray(x, dtype=float)
+    centres = np.asarray(centres, dtype=float)
+    if x.size < 2:
+        raise ValueError("need at least 2 abscissae")
+    if centres.ndim != 1 or np.any(centres <= 0):
+        raise ValueError("centres must be a 1-d array of positive abscissae")
+    if not (np.isfinite(width) and width > 0):
+        raise ValueError("width must be a positive interval of ln x")
+    floor, ceiling = float(x[0]), float(x[-1])
+    if bounds is not None:
+        floor, ceiling = max(floor, float(bounds[0])), min(ceiling, float(bounds[1]))
+    half = np.exp(0.5 * float(width))
+    lo = np.clip(centres / half, floor, ceiling)
+    hi = np.clip(centres * half, floor, ceiling)
+    return interval_averages(x, y, laws, lo, hi, weight)
 
 
 def legendre_moments(x, y, laws, max_order: int,

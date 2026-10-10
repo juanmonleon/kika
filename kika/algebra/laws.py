@@ -32,7 +32,7 @@ import numpy as np
 
 __all__ = ["HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS",
            "interval_laws", "pairs_from_laws", "laws_on_refinement", "validate",
-           "vanishing_panels", "LOG_X", "LOG_Y"]
+           "vanishing_panels", "LOG_X", "LOG_Y", "METHODS", "method_laws"]
 
 HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG = 1, 2, 3, 4, 5
 LAWS = (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG)
@@ -40,6 +40,32 @@ LAWS = (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG)
 #: Laws that interpolate in ln x, and in ln y.
 LOG_X = (LINLOG, LOGLOG)
 LOG_Y = (LOGLIN, LOGLOG)
+
+#: A reader's names for the four continuous laws, as ``'<x>-<y>'`` spaces:
+#: ``'log-lin'`` is log x / linear y (code 3), ``'lin-log'`` linear x / log y (4).
+METHODS = {'lin-lin': LINLIN, 'log-lin': LINLOG, 'lin-log': LOGLIN, 'log-log': LOGLOG}
+_LIN_Y = {LOGLIN: LINLIN, LOGLOG: LINLOG}
+
+
+def method_laws(y, method: str) -> np.ndarray:
+    """One law per interval for reading the ordinates *y* under *method*.
+
+    *method* is a key of :data:`METHODS`: the reader's choice of interpolation,
+    not a law the table states. So where a log-y law has no value -- an
+    interval with an end at or below zero, a coefficient crossing zero say --
+    that interval is read with the same x law and a linear y. Only those
+    intervals change; the app's data table reads the same way
+    (``interpolateAt`` in ``kika-app/frontend/src/utils/plotter.ts``).
+    """
+    if method not in METHODS:
+        raise ValueError(f"unknown interpolation {method!r}; "
+                         f"expected one of {sorted(METHODS)}")
+    y = np.asarray(y, dtype=float)
+    law = METHODS[method]
+    laws = np.full(max(y.size - 1, 0), law, dtype=np.int64)
+    if law in _LIN_Y and y.size > 1:
+        laws[(y[:-1] <= 0) | (y[1:] <= 0)] = _LIN_Y[law]
+    return laws
 
 
 def _check_codes(codes: np.ndarray) -> None:

@@ -24,6 +24,12 @@ group of an equal-lethargy grid of that width it *is* the group average.
 Until October 2026 the 1/E integral was a trapezoid in ``u = ln E``, which is
 exact only for a constant sigma: on a table of three points
 ``[1e5, 1e6, 2e7] -> [1, 10, 1]`` it was 7 % low, and 8e-7 off on a fine one.
+
+Both functions are adapters, not implementations: they name the weight in
+physical terms (lethargy, ``1/E``) and hand the table to :mod:`kika.algebra`,
+whose :func:`~kika.algebra.group_averages` and
+:func:`~kika.algebra.log_window_averages` do the integrals. The comparison of a
+series with these averages is :mod:`kika.algebra.compare`.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ from typing import Literal, Optional, Tuple
 
 import numpy as np
 
-from kika.algebra import group_averages, interval_averages
+from kika.algebra import group_averages, log_window_averages
 
 __all__ = ["resonance_group_average", "resonance_window_average"]
 
@@ -161,11 +167,6 @@ def resonance_window_average(
         raise ValueError(f"unknown weighting: {weighting!r}")
     if weighting == "lethargy" and energies[0] <= 0.0:
         raise ValueError("lethargy weighting requires strictly positive energies")
-    floor, ceiling = energies[0], energies[-1]
-    if bounds is not None:
-        floor, ceiling = max(floor, float(bounds[0])), min(ceiling, float(bounds[1]))
-    half = np.exp(0.5 * float(width))
-    lo = np.clip(centres / half, floor, ceiling)
-    hi = np.clip(centres * half, floor, ceiling)
     weight = "1/x" if weighting == "lethargy" else None
-    return interval_averages(energies, cross_sections, 2, lo, hi, weight)
+    return log_window_averages(energies, cross_sections, 2, centres, width,
+                               weight, bounds)

@@ -29,9 +29,10 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from kika.algebra import (LINLIN, LINLOG, LOGLIN, LOGLOG, evaluate,
-                         on_common_grid, sample_on_union)
+from kika.algebra import (difference, interpolate_to_grid, method_laws,
+                          read_pair, steps_difference, window_difference)
 
+from . import averages as _averages
 from .plot_data import PlotData, DifferencePlotData, PlotItem
 from .plot_builder import PlotBuilder, _NOT_SET
 from .styles import (
@@ -46,6 +47,12 @@ from ._backend_utils import (
     _configure_figure_interactivity,
 )
 
+# ``interpolate_to_grid`` and ``method_laws`` moved to :mod:`kika.algebra` in
+# October 2026 with the rest of the arithmetic of a comparison; they stay
+# importable from here.
+__all__ = ["ComparisonBuilder", "ComparisonResult", "compute_difference",
+           "interpolate_to_grid", "method_laws"]
+
 
 def _unwrap(data):
     """PlotItem -> its PlotData; anything else unchanged."""
@@ -56,12 +63,6 @@ def _unwrap(data):
 # Auto-interpolation defaults by PlotData subclass
 # ---------------------------------------------------------------------------
 
-#: Legend suffix of each averaged layer when it is not the series' only trace.
-_LAYER_NAMES = {'window': 'window avg', 'steps': 'group avg'}
-
-#: Opacity of a pointwise trace drawn under its averages, so they read on top.
-_FADED_POINTWISE_ALPHA = 0.35
-
 _INTERPOLATION_DEFAULTS = {
     'CrossSectionPlotData': 'log-log',
     'AngularDistributionPlotData': 'lin-lin',
@@ -69,132 +70,6 @@ _INTERPOLATION_DEFAULTS = {
     'MultigroupCrossSectionPlotData': 'lin-lin',
     'MultigroupUncertaintyPlotData': 'lin-lin',
 }
-
-
-# ---------------------------------------------------------------------------
-# Interpolation utility
-# ---------------------------------------------------------------------------
-
-#: The interpolation names the comparison accepts, as ENDF law codes.
-#: ``'log-lin'`` is log x / linear y (ENDF 3), ``'lin-log'`` linear x / log y (4).
-_METHOD_LAWS = {'lin-lin': LINLIN, 'log-lin': LINLOG, 'lin-log': LOGLIN, 'log-log': LOGLOG}
-_LIN_Y = {LOGLIN: LINLIN, LOGLOG: LINLOG}
-
-
-def method_laws(y_source: np.ndarray, method: str) -> np.ndarray:
-    """One law per interval for reading a series under *method*.
-
-    *method* is the reader's choice of interpolation, not a law the series
-    states, so where a log-y law has no value -- an interval with an end at or
-    below zero, a Legendre coefficient crossing zero say -- that interval is
-    read with the same x law and a linear y. Only those intervals change;
-    the app's data table reads the same way (``interpolateAt`` in
-    ``kika-app/frontend/src/utils/plotter.ts``).
-    """
-    if method not in _METHOD_LAWS:
-        raise ValueError(f"unknown interpolation {method!r}; "
-                         f"expected one of {sorted(_METHOD_LAWS)}")
-    y = np.asarray(y_source, dtype=float)
-    law = _METHOD_LAWS[method]
-    laws = np.full(max(y.size - 1, 0), law, dtype=np.int64)
-    if law in _LIN_Y and y.size > 1:
-        laws[(y[:-1] <= 0) | (y[1:] <= 0)] = _LIN_Y[law]
-    return laws
-
-
-def interpolate_to_grid(
-    x_target: np.ndarray,
-    x_source: np.ndarray,
-    y_source: np.ndarray,
-    method: str = 'log-log',
-    fill_value: float = np.nan,
-) -> np.ndarray:
-    """
-    Interpolate ``(x_source, y_source)`` onto *x_target*.
-
-    The table is read by :mod:`kika.algebra` under the laws
-    :func:`method_laws` gives, so a repeated source abscissa is a step and a
-    repeated target abscissa reads its left then its right limit.
-
-    Parameters
-    ----------
-    x_target : array-like
-        Target x-grid, non-decreasing.
-    x_source : array-like
-        Source x-grid, non-decreasing (a repeated value is a step).
-    y_source : array-like
-        Source y-values corresponding to *x_source*.
-    method : str
-        Interpolation space: ``'log-log'``, ``'lin-lin'``, ``'log-lin'``
-        (log x, linear y) or ``'lin-log'`` (linear x, log y). Intervals where
-        a log y has no value are read linear in y (:func:`method_laws`).
-    fill_value : float
-        Value assigned to target points outside the source range.
-        Default ``np.nan`` so out-of-range points are clearly marked.
-
-    Returns
-    -------
-    np.ndarray
-        Interpolated y-values on *x_target*.  Points outside the source
-        range are set to *fill_value*.
-    """
-    x_src = np.asarray(x_source, dtype=float)
-    y_src = np.asarray(y_source, dtype=float)
-    x_tgt = np.asarray(x_target, dtype=float)
-
-    if len(x_src) != len(y_src):
-        raise ValueError(
-            f"x_source and y_source must have the same length. "
-            f"Got {len(x_src)} and {len(y_src)}"
-        )
-
-    result = np.full_like(x_tgt, fill_value, dtype=float)
-    if x_src.size == 0:
-        return result
-    in_range = (x_tgt >= x_src[0]) & (x_tgt <= x_src[-1])
-    if not np.any(in_range):
-        return result
-    if method in ('log-log', 'log-lin') and (np.any(x_src <= 0) or np.any(x_tgt[in_range] <= 0)):
-        raise ValueError(
-            f"method='{method}' requires positive x values. "
-            f"Source x range: [{x_src.min()}, {x_src.max()}]"
-        )
-    laws = method_laws(y_src, method)
-    q = x_tgt[in_range]
-    if np.all(np.diff(q) >= 0):
-        result[in_range] = sample_on_union(x_src, y_src, laws, q)
-    else:
-        result[in_range] = evaluate(x_src, y_src, laws, q)
-    return result
-
-
-def _read_on_common_grid(ref, cmp, method, grid):
-    """Both series on one grid over their shared span (:func:`kika.algebra.on_common_grid`).
-
-    A non-finite value is a hole in a series, not a number: the series is read
-    without it, and every point of the grid in an interval that touches it is
-    ``nan`` -- what ``numpy.interp`` gave before the comparison moved onto
-    :mod:`kika.algebra`.
-    """
-    method = method or 'lin-lin'
-    tables, holes = [], []
-    for x, y in (ref, cmp):
-        finite = np.isfinite(y)
-        tables.append((x[finite], y[finite], method_laws(y[finite], method)))
-        holes.append((x, finite))
-    if method in ('log-log', 'log-lin') and any(np.any(t[0] <= 0) for t in tables):
-        raise ValueError(f"method='{method}' requires positive x values.")
-    u, values = on_common_grid(tables, grid)
-    for row, (x, finite) in zip(values, holes):
-        if finite.all():
-            continue
-        bad = ~finite
-        # The interval [x_k, x_k+1] around each grid point, by the series' own nodes.
-        k = np.clip(np.searchsorted(x, u, side='right') - 1, 0, x.size - 1)
-        touching = bad[k] | bad[np.minimum(k + 1, x.size - 1)]
-        row[touching & (u != x[k])] = np.nan
-        row[bad[k] & (u == x[k])] = np.nan
-    return u, values
 
 
 # ---------------------------------------------------------------------------
@@ -291,27 +166,14 @@ def compute_difference(
 
     if grid not in ('reference', 'comparison', 'union'):
         raise ValueError(f"Unknown grid option: {grid!r}")
-    common_x, (y_ref_interp, y_cmp_interp) = _read_on_common_grid(
-        (x_ref, y_ref), (x_cmp, y_cmp), interpolation,
+    if mode not in ('relative', 'absolute'):
+        raise ValueError(f"Unknown mode: {mode!r}")
+    common_x, (y_ref_interp, y_cmp_interp) = read_pair(
+        (x_ref, y_ref), (x_cmp, y_cmp), interpolation or 'lin-lin',
         {'reference': 0, 'comparison': 1, 'union': 'union'}[grid])
 
-    # Valid mask: both must be finite
     valid = np.isfinite(y_ref_interp) & np.isfinite(y_cmp_interp)
-
-    # Compute difference
-    diff = np.full_like(common_x, np.nan)
-    if mode == 'relative':
-        nonzero = valid & (np.abs(y_ref_interp) > 0)
-        diff[nonzero] = (
-            (y_cmp_interp[nonzero] - y_ref_interp[nonzero])
-            / y_ref_interp[nonzero]
-        )
-        if relative_in_percent:
-            diff *= 100.0
-    elif mode == 'absolute':
-        diff[valid] = y_cmp_interp[valid] - y_ref_interp[valid]
-    else:
-        raise ValueError(f"Unknown mode: {mode!r}")
+    diff = difference(y_ref_interp, y_cmp_interp, mode, relative_in_percent)
 
     # Build output PlotData objects preserving original styling
     ref_out = PlotData(
@@ -432,16 +294,9 @@ class ComparisonBuilder:
         self._show_minor_grid_x: Optional[bool] = None
         self._show_minor_grid_y: Optional[bool] = None
 
-        # Resonance-region averages. Each PlotData whose metadata holds a
-        # 'group_average_overlay' dict (see set_group_average) carries one
-        # or two averaged layers, a sliding-window curve and group steps:
-        #   'pointwise' — no layer drawn; diff panel still shows the
-        #       averaged diff inside [bounds_used].
-        #   'average'   — pointwise masked inside [bounds_used] on both
-        #       panels; the averaged layers drawn there.
-        #   'both'      — pointwise faded across the full range of the main
-        #       panel, the averaged layers on top inside [bounds_used]; the
-        #       diff panel as in 'average'.
+        # Averages. A series is averaged on its own, by carrying a
+        # 'group_average_overlay' (kika.plotting.averages); these say how
+        # every averaged series is drawn (see set_group_average).
         self._main_display: Literal['pointwise', 'average', 'both'] = 'both'
         self._shade_average_range: bool = False
         # "ref: <label>" annotation on the diff and diff-only panels.
@@ -603,40 +458,37 @@ class ComparisonBuilder:
         main_display: Literal['pointwise', 'average', 'both'] = 'both',
         shade_range: bool = False,
     ) -> 'ComparisonBuilder':
-        """Configure the rendering of resonance-region averages.
+        """How averaged series are drawn, on the main panel and the diff.
 
-        The averages themselves are attached per series via
-        ``PlotData.metadata['group_average_overlay']``, a dict with
-        ``bounds_used`` and ``weighting`` and one or both of two layers:
+        Averaging is not a mode of the comparison: each series is averaged or
+        not on its own, by carrying ``PlotData.metadata['group_average_overlay']``
+        (the payload, and what ``main_display`` does on the main panel, are in
+        :mod:`kika.plotting.averages`; the main panel is a
+        :class:`PlotBuilder` and draws them with
+        :meth:`PlotBuilder.set_group_average`). The comparison compares
+        whatever each series draws, so a series can be compared with its own
+        average.
 
-        * ``centres``, ``values`` -- a sliding-window average
-          (:func:`kika.processing.resonance_window_average`), drawn as a
-          solid curve;
-        * ``edges``, ``xs`` -- group averages
-          (:func:`kika.processing.resonance_group_average`), drawn as
-          dashed steps.
+        On the diff panel, for each comparison:
 
-        With both, ``primary`` (``'window'``, the default, or ``'steps'``)
-        names the one being compared: it carries the series label and the
-        pointwise trace meets it at the range's edges.
+        * both averaged -- the diff of every layer they both carry on the
+          same abscissae, value by value;
+        * one averaged -- each of its layers against the other's pointwise
+          curve: a window at its centres, the steps against the pointwise
+          curve on its own grid, group by group (:mod:`kika.algebra.compare`);
+        * neither -- the pointwise diff alone.
 
-        ``main_display`` controls what is drawn inside ``bounds_used``:
-
-        * ``'pointwise'`` — only pointwise curves, no averaged layer.
-        * ``'average'`` — pointwise masked inside the range, averaged
-          layers drawn there; pointwise continues outside.
-        * ``'both'`` — pointwise faded across the full range, averaged
-          layers on top inside the range.
-
-        The diff panel shows the averaged diff of every layer the
-        reference and a comparison both carry on the same abscissae, and
-        the pointwise diff only outside the range: inside it, a pointwise
-        diff through resonances is a solid band that hides the averages,
-        whatever the main panel shows. Unless the y limits are set, each
-        panel's y axis covers the averaged layers too.
-        ``shade_range`` tints ``bounds_used`` on every panel, so a range
-        narrower than the plot is visible.
+        Inside the averaged span the pointwise diff gives way to the averaged
+        one whatever ``main_display`` is: through resonances a pointwise diff
+        is a solid band that hides it. A relative diff divides by the
+        reference, averaged or not. Unless the y limits are set, each panel's
+        y axis covers the averaged layers too. ``shade_range`` tints the
+        averaged span on every panel, so a span narrower than the plot is
+        visible.
         """
+        if main_display not in _averages.DISPLAYS:
+            raise ValueError(f"main_display must be one of {_averages.DISPLAYS}, "
+                             f"got {main_display!r}")
         self._main_display = main_display
         self._shade_average_range = shade_range
         return self
@@ -663,139 +515,65 @@ class ComparisonBuilder:
         class_name = type(data).__name__
         return _INTERPOLATION_DEFAULTS.get(class_name, 'log-log')
 
-    # ---- group-average overlay helpers ------------------------------------
+    # ---- averaged layers on the difference panel ---------------------------
 
-    @staticmethod
-    def _overlay_from(data: PlotData) -> Optional[dict]:
-        """Return the ``group_average_overlay`` payload from a series, or None."""
-        overlay = data.metadata.get('group_average_overlay') if data.metadata else None
-        if not overlay or overlay.get('bounds_used') is None:
-            return None
-        if not ComparisonBuilder._overlay_layers(overlay):
-            return None
-        return overlay
+    def _layers_diff(
+        self, ref: PlotData, cmp: PlotData, interpolation: str,
+    ) -> Optional[Tuple[List[Tuple[str, np.ndarray, np.ndarray]], Tuple[float, float]]]:
+        """Return ``(layers, bounds)`` of averaged diffs for one comparison, or None.
 
-    @staticmethod
-    def _overlay_layers(overlay: dict) -> List[Tuple[str, np.ndarray, np.ndarray]]:
-        """The averaged layers an overlay carries, as ``(kind, x, y)``.
+        Either side may be averaged, both, or neither (None):
 
-        For ``'window'`` x are the centres and y the averages at them; for
-        ``'steps'`` x are the group edges and y the one value per group. The
-        overlay's ``primary`` layer comes first (the window when unstated):
-        it carries the series label and the pointwise trace is bridged to it.
+        * both -- each layer both carry on the same abscissae is diffed value
+          by value; the app averages every series over one range with one
+          width, so they match. A layer they do not share is dropped, and
+          None (no layer left) leaves the pointwise diff standing.
+        * one -- each of its layers against the other's pointwise curve, read
+          under *interpolation*: a window at its centres
+          (:func:`kika.algebra.window_difference`), the steps on the pointwise
+          grid group by group (:func:`kika.algebra.steps_difference`).
+
+        A relative diff divides by the reference, averaged or not.
         """
+        ref_overlay, cmp_overlay = _averages.overlay_of(ref), _averages.overlay_of(cmp)
+        if ref_overlay is None and cmp_overlay is None:
+            return None
+        mode, percent = self._diff_mode, self._relative_in_percent
         layers: List[Tuple[str, np.ndarray, np.ndarray]] = []
-        if overlay.get('centres') is not None and overlay.get('values') is not None:
-            x = np.asarray(overlay['centres'], dtype=float)
-            y = np.asarray(overlay['values'], dtype=float)
-            if x.size >= 2 and y.size == x.size:
-                layers.append(('window', x, y))
-        if overlay.get('edges') is not None and overlay.get('xs') is not None:
-            x = np.asarray(overlay['edges'], dtype=float)
-            y = np.asarray(overlay['xs'], dtype=float)
-            if x.size >= 2 and y.size == x.size - 1:
-                layers.append(('steps', x, y))
-        if overlay.get('primary') == 'steps':
-            layers.sort(key=lambda layer: layer[0] != 'steps')
-        return layers
-
-    @staticmethod
-    def _plot_layer(ax, kind: str, x: np.ndarray, y: np.ndarray, *,
-                    dashed: bool, **kwargs) -> None:
-        """Draw one averaged layer: a curve for a window, steps for groups."""
-        linestyle = '--' if dashed else '-'
-        if kind == 'steps':
-            # steps-post needs one extra y to match the edges; repeat the last.
-            ax.plot(x, np.concatenate([y, y[-1:]]), drawstyle='steps-post',
-                    linestyle=linestyle, **kwargs)
+        if ref_overlay is not None and cmp_overlay is not None:
+            cmp_layers = {kind: (x, y) for kind, x, y in _averages.overlay_layers(cmp_overlay)}
+            for kind, ref_x, ref_y in _averages.overlay_layers(ref_overlay):
+                if kind not in cmp_layers:
+                    continue
+                cmp_x, cmp_y = cmp_layers[kind]
+                if ref_x.shape != cmp_x.shape or not np.allclose(ref_x, cmp_x):
+                    continue
+                layers.append((kind, ref_x, difference(ref_y, cmp_y, mode, percent)))
+            spans = (ref_overlay['bounds_used'], cmp_overlay['bounds_used'])
         else:
-            ax.plot(x, y, linestyle=linestyle, **kwargs)
-
-    def _draw_main_overlay(
-        self, ax, data: PlotData, color: Optional[str],
-    ) -> bool:
-        """Draw the averaged layers of one series on the main panel.
-
-        The window curve is solid, the group steps dashed. Returns True if
-        anything was drawn (so the caller refreshes the legend).
-        """
-        if self._main_display == 'pointwise':
-            return False
-        overlay = self._overlay_from(data)
-        if overlay is None:
-            return False
-        line_color = color or data.color
-        series_label = data.label or ''
-        for k, (kind, x, y) in enumerate(self._overlay_layers(overlay)):
-            # In 'average' mode the pointwise legend entry is suppressed
-            # (see _pointwise_mask_for_main), so the first layer stands for
-            # the series under its own label. Otherwise each layer says
-            # which average it is.
-            if self._main_display == 'average' and k == 0:
-                label = series_label or None
+            if ref_overlay is not None:
+                overlay, pointwise, side = ref_overlay, cmp, 'reference'
             else:
-                label = f'{series_label} ({_LAYER_NAMES[kind]})' if series_label else None
-            self._plot_layer(
-                ax, kind, x, y, dashed=(kind == 'steps'),
-                linewidth=(data.linewidth or 1.5), color=line_color,
-                label=label, alpha=0.95,
-            )
-        return True
-
-    def _pointwise_mask_for_main(self, data: PlotData) -> Optional[PlotData]:
-        """Return the copy of ``data`` the main panel draws, or None for ``data`` itself.
-
-        In ``'average'`` mode the pointwise y is masked inside the averaging
-        range, and its first and last masked values are bridged to the first
-        layer's end values so the pointwise line meets the average at the
-        boundaries instead of dropping into a NaN gap. The copy has
-        ``label = None``: the averaged layer carries the series label, and
-        without this the legend lists both lines and ``'average'`` looks
-        like ``'both'``.
-
-        In ``'both'`` mode the copy is the whole pointwise curve, faded so
-        the averages on top of it read as the thing being shown.
-        """
-        if self._main_display not in ('average', 'both'):
+                overlay, pointwise, side = cmp_overlay, ref, 'comparison'
+            px = np.asarray(pointwise.x, dtype=float)
+            py = np.asarray(pointwise.y, dtype=float)
+            for kind, x, y in _averages.overlay_layers(overlay):
+                if kind == 'window':
+                    layers.append((kind, x, window_difference(
+                        x, y, px, py, interpolation, average_is=side,
+                        mode=mode, percent=percent)))
+                else:
+                    u, diff = steps_difference(
+                        x, y, px, py, interpolation, average_is=side,
+                        mode=mode, percent=percent)
+                    if u.size:
+                        layers.append((kind, u, diff))
+            spans = (overlay['bounds_used'],)
+        if not layers:
             return None
-        overlay = self._overlay_from(data)
-        if overlay is None:
-            return None
-
-        import copy as _copy
-        masked = _copy.copy(data)
-        masked.metadata = dict(data.metadata)
-        masked.metadata.pop('group_average_overlay', None)
-        if self._main_display == 'both':
-            masked.alpha = _FADED_POINTWISE_ALPHA
-            return masked
-        masked.label = None
-
-        lo, hi = float(overlay['bounds_used'][0]), float(overlay['bounds_used'][1])
-        first_layer = self._overlay_layers(overlay)[0][2]
-        x = np.asarray(data.x, dtype=float)
-        y = np.asarray(data.y, dtype=float)
-        in_range = (x >= lo) & (x <= hi)
-        if not np.any(in_range):
-            # No points to mask, but we still return the copy so the
-            # label suppression takes effect (avoids a duplicate legend
-            # entry when the averaged layer draws with the series label).
-            masked.x = x
-            masked.y = y
-            return masked
-        idx = np.where(in_range)[0]
-        first_in, last_in = int(idx[0]), int(idx[-1])
-        new_y = y.copy()
-        new_y[first_in:last_in + 1] = np.nan
-        # Bridge to the averaged layer's leading / trailing values.
-        if np.isfinite(first_layer[0]):
-            new_y[first_in] = float(first_layer[0])
-        if last_in > first_in and np.isfinite(first_layer[-1]):
-            new_y[last_in] = float(first_layer[-1])
-
-        masked.x = x
-        masked.y = new_y
-        return masked
+        lo = float(min(span[0] for span in spans))
+        hi = float(max(span[1] for span in spans))
+        return layers, (lo, hi)
 
     @staticmethod
     def _mask_pointwise_in_range(
@@ -830,45 +608,8 @@ class ComparisonBuilder:
                 y[last_in] = float(right)
         diff_data.y = y
 
-    def _compute_overlay_diff(
-        self, ref_overlay: dict, cmp_overlay: dict,
-    ) -> Optional[Tuple[List[Tuple[str, np.ndarray, np.ndarray]], Tuple[float, float]]]:
-        """Return ``(layers, bounds)`` of averaged diffs, or None.
-
-        A layer is diffed when the reference and the comparison both carry
-        it on the same abscissae -- the frontend averages every series over
-        one range with one width, so they do. Both are averages over the
-        same windows, so the diff is taken value by value with no
-        interpolation. A mismatch (defensive guard) drops that layer, and
-        None means no layer survived and the pointwise diff stands.
-        """
-        cmp_layers = {kind: (x, y) for kind, x, y in self._overlay_layers(cmp_overlay)}
-        layers: List[Tuple[str, np.ndarray, np.ndarray]] = []
-        for kind, ref_x, ref_y in self._overlay_layers(ref_overlay):
-            if kind not in cmp_layers:
-                continue
-            cmp_x, cmp_y = cmp_layers[kind]
-            if ref_x.shape != cmp_x.shape or not np.allclose(ref_x, cmp_x):
-                continue
-            with np.errstate(divide='ignore', invalid='ignore'):
-                if self._diff_mode == 'relative':
-                    nonzero = np.abs(ref_y) > 0
-                    diff = np.full_like(ref_y, np.nan)
-                    diff[nonzero] = (cmp_y[nonzero] - ref_y[nonzero]) / ref_y[nonzero]
-                    if self._relative_in_percent:
-                        diff *= 100.0
-                else:
-                    diff = cmp_y - ref_y
-            layers.append((kind, ref_x, diff))
-        if not layers:
-            return None
-        lo = float(min(ref_overlay['bounds_used'][0], cmp_overlay['bounds_used'][0]))
-        hi = float(max(ref_overlay['bounds_used'][1], cmp_overlay['bounds_used'][1]))
-        return layers, (lo, hi)
-
     def _apply_overlay_diff(
-        self, diff_data: DifferencePlotData, ref_overlay: Optional[dict],
-        cmp_data: PlotData,
+        self, diff_data: DifferencePlotData, cmp_data: PlotData, interpolation: str,
     ) -> Optional[List[Tuple[str, np.ndarray, np.ndarray]]]:
         """Diff the averaged layers of one comparison and mask its pointwise diff.
 
@@ -876,10 +617,7 @@ class ComparisonBuilder:
         is masked inside the range and bridged to the first layer, in every
         display mode (see :meth:`set_group_average`).
         """
-        cmp_overlay = self._overlay_from(cmp_data)
-        if ref_overlay is None or cmp_overlay is None:
-            return None
-        overlay_diff = self._compute_overlay_diff(ref_overlay, cmp_overlay)
+        overlay_diff = self._layers_diff(self._reference, cmp_data, interpolation)
         if overlay_diff is None:
             return None
         layers, (lo, hi) = overlay_diff
@@ -887,20 +625,6 @@ class ComparisonBuilder:
         bridge = (float(first[0]), float(first[-1])) if first.size else (np.nan, np.nan)
         self._mask_pointwise_in_range(diff_data, lo, hi, bridge_values=bridge)
         return layers
-
-    @staticmethod
-    def _fit_y_to_layers(ax, y_lim) -> None:
-        """Rescale the y axis to everything drawn, layers included, unless set.
-
-        The panel's limits are fixed when its builder renders, before the
-        averaged layers exist; with the pointwise trace masked inside the
-        range, they would fit only what is left of it outside.
-        """
-        if y_lim is not None and any(v is not None for v in y_lim):
-            return
-        ax.relim(visible_only=True)
-        ax.set_autoscaley_on(True)
-        ax.autoscale_view(scalex=False, scaley=True)
 
     def _draw_overlay_diff(
         self, ax, layers: List[Tuple[str, np.ndarray, np.ndarray]],
@@ -913,21 +637,18 @@ class ComparisonBuilder:
         as on the main panel.
         """
         for kind, x, y in layers:
-            self._plot_layer(
+            _averages.plot_layer(
                 ax, kind, x, y, dashed=(kind == 'steps' and len(layers) > 1),
                 linewidth=linewidth or 1.5, color=color, label=None, alpha=1.0,
             )
 
     def _shade_range(self, *axes) -> None:
-        """Tint the averaging range on each axis, when asked to."""
+        """Tint the averaged span on each axis, when asked to."""
         if not self._shade_average_range:
             return
-        overlay = self._overlay_from(self._reference)
-        if overlay is None:
-            return
-        lo, hi = (float(v) for v in overlay['bounds_used'])
-        for ax in axes:
-            ax.axvspan(lo, hi, color='grey', alpha=0.08, linewidth=0, zorder=0)
+        series = [self._reference] + [data for data, _ in self._comparisons]
+        _averages.shade(axes, _averages.average_bounds(series))
+
 
     # ---- build ------------------------------------------------------------
 
@@ -1038,7 +759,6 @@ class ComparisonBuilder:
 
         colors = _get_color_palette(self._style)
         overlay_diff_draws: List[Tuple[List[Tuple[str, np.ndarray, np.ndarray]], str, float]] = []
-        ref_overlay = self._overlay_from(self._reference)
         for i, (result, (cmp_data, _)) in enumerate(
             zip(results, self._comparisons)
         ):
@@ -1055,7 +775,7 @@ class ComparisonBuilder:
             color_idx = (i + 1) % len(colors)
             diff_color = cmp_data.color if cmp_data.color else colors[color_idx]
 
-            layers = self._apply_overlay_diff(diff_data, ref_overlay, cmp_data)
+            layers = self._apply_overlay_diff(diff_data, cmp_data, interpolation)
             if layers is not None:
                 overlay_diff_draws.append((layers, diff_color, cmp_data.linewidth or 1.5))
 
@@ -1115,7 +835,7 @@ class ComparisonBuilder:
         for layers, color, lw in overlay_diff_draws:
             self._draw_overlay_diff(ax, layers, color, lw)
         if overlay_diff_draws:
-            self._fit_y_to_layers(ax, diff_only_y_lim)
+            _averages.fit_y_to_layers(ax, diff_only_y_lim)
         self._shade_range(ax)
 
         # Zero reference line
@@ -1150,11 +870,9 @@ class ComparisonBuilder:
             interactive=self._interactive,
         )
 
-        ref_for_main = self._pointwise_mask_for_main(self._reference) or self._reference
-        builder.add_data(ref_for_main, **self._reference_styling)
+        builder.add_data(self._reference, **self._reference_styling)
         for cmp_data, styling in self._comparisons:
-            cmp_for_main = self._pointwise_mask_for_main(cmp_data) or cmp_data
-            builder.add_data(cmp_for_main, **styling)
+            builder.add_data(cmp_data, **styling)
         for ovl_data, ovl_styling in self._overlays:
             builder.add_data(ovl_data, **ovl_styling)
         for ovl_data, ovl_styling in self._scatter_overlays:
@@ -1175,25 +893,9 @@ class ComparisonBuilder:
             show_minor_y=self._show_minor_grid_y,
         )
 
+        # The averaged layers are drawn by the builder itself.
+        builder.set_group_average(self._main_display, self._shade_average_range)
         fig = builder.build(show=False)
-        ax = fig.axes[0]
-        overlay_drawn = self._draw_main_overlay(ax, self._reference, self._reference.color)
-        for cmp_data, _styling in self._comparisons:
-            if self._draw_main_overlay(ax, cmp_data, cmp_data.color):
-                overlay_drawn = True
-        if overlay_drawn:
-            self._fit_y_to_layers(ax, self._y_lim)
-        self._shade_range(ax)
-        if overlay_drawn:
-            _existing_legend = ax.get_legend()
-            if _existing_legend is not None:
-                _existing_legend.remove()
-            handles, labels = ax.get_legend_handles_labels()
-            if handles:
-                legend_kwargs = {'loc': self._legend_loc}
-                if self._legend_ncol:
-                    legend_kwargs['ncol'] = self._legend_ncol
-                ax.legend(handles, labels, **legend_kwargs)
 
         if show:
             plt.show()
@@ -1255,13 +957,12 @@ class ComparisonBuilder:
             font_family=self._font_family,
             notebook_mode=notebook,
         )
-        # With averages, the pointwise traces are masked inside the range
-        # ('average') or faded ('both') -- see _pointwise_mask_for_main.
-        ref_for_main = self._pointwise_mask_for_main(self._reference) or self._reference
-        main_builder.add_data(ref_for_main, **self._reference_styling)
+        # The builder draws the averaged layers of every averaged series, with
+        # its pointwise trace masked or faded (kika.plotting.averages).
+        main_builder.add_data(self._reference, **self._reference_styling)
         for cmp_data, styling in self._comparisons:
-            cmp_for_main = self._pointwise_mask_for_main(cmp_data) or cmp_data
-            main_builder.add_data(cmp_for_main, **styling)
+            main_builder.add_data(cmp_data, **styling)
+        main_builder.set_group_average(self._main_display, self._shade_average_range)
         for ovl_data, ovl_styling in self._overlays:
             main_builder.add_data(ovl_data, **ovl_styling)
         for ovl_data, ovl_styling in self._scatter_overlays:
@@ -1280,27 +981,6 @@ class ComparisonBuilder:
         )
         main_builder.build()
 
-        # Averaged layers on the main panel, in the pointwise trace's color.
-        overlay_drawn = False
-        if self._draw_main_overlay(ax_main, self._reference, self._reference.color):
-            overlay_drawn = True
-        for cmp_data, _styling in self._comparisons:
-            if self._draw_main_overlay(ax_main, cmp_data, cmp_data.color):
-                overlay_drawn = True
-
-        # Refresh the legend so the overlay entries appear.
-        if overlay_drawn:
-            self._fit_y_to_layers(ax_main, self._y_lim)
-            _existing_legend = ax_main.get_legend()
-            if _existing_legend is not None:
-                _existing_legend.remove()
-            handles, labels = ax_main.get_legend_handles_labels()
-            if handles:
-                legend_kwargs = {'loc': self._legend_loc}
-                if self._legend_ncol:
-                    legend_kwargs['ncol'] = self._legend_ncol
-                ax_main.legend(handles, labels, **legend_kwargs)
-
         # Hide x-axis labels on main panel (shared with diff panel)
         ax_main.set_xlabel('')
         ax_main.tick_params(axis='x', labelbottom=False)
@@ -1317,7 +997,6 @@ class ComparisonBuilder:
         # pointwise traces — this way the step trace sits on top of
         # the masked pointwise and shares the same axis limits.
         overlay_diff_draws: List[Tuple[List[Tuple[str, np.ndarray, np.ndarray]], str, float]] = []
-        ref_overlay = self._overlay_from(self._reference)
         for i, (result, (cmp_data, _)) in enumerate(
             zip(results, self._comparisons)
         ):
@@ -1337,7 +1016,7 @@ class ComparisonBuilder:
             # If both reference and this comparison carry averages, diff
             # them, fade or mask the pointwise diff, and queue the averaged
             # diff to draw on top.
-            layers = self._apply_overlay_diff(diff_data, ref_overlay, cmp_data)
+            layers = self._apply_overlay_diff(diff_data, cmp_data, interpolation)
             if layers is not None:
                 overlay_diff_draws.append((layers, diff_color, cmp_data.linewidth or 1.5))
 
@@ -1387,8 +1066,9 @@ class ComparisonBuilder:
         for layers, color, lw in overlay_diff_draws:
             self._draw_overlay_diff(ax_diff, layers, color, lw)
         if overlay_diff_draws:
-            self._fit_y_to_layers(ax_diff, self._diff_y_lim)
-        self._shade_range(ax_main, ax_diff)
+            _averages.fit_y_to_layers(ax_diff, self._diff_y_lim)
+        # The main panel's builder shaded its own.
+        self._shade_range(ax_diff)
 
         # Remove legend from diff panel — colors match the main panel
         _diff_legend = ax_diff.get_legend()

@@ -249,8 +249,11 @@ def test_algebra_imports_nothing_from_kika():
 #: says why and what that excludes), so a new module is added here on purpose,
 #: after asking whether it is mathematics. ``spectra`` (the ENDF-6 fission
 #: spectrum laws) failed that question and moved to
-#: ``kika.nuclear_data.spectrum_laws`` in October 2026.
-MATHEMATICS_ONLY = {"__init__", "arithmetic", "evaluate", "fold", "grid",
+#: ``kika.nuclear_data.spectrum_laws`` in October 2026. ``compare`` (differences
+#: of two tables, and of a table against its own averages) came in from
+#: ``kika.plotting.comparison`` the same month: reading a table on another's grid
+#: and subtracting is arithmetic, whoever draws the result.
+MATHEMATICS_ONLY = {"__init__", "arithmetic", "compare", "evaluate", "fold", "grid",
                     "integrate", "laws", "prepared", "refine"}
 
 

@@ -34,6 +34,7 @@ from .styles import (
     _adjust_dpi_for_notebook,
     format_energy_axis_ticks
 )
+from . import averages as _averages
 from ._backend_utils import (
     _is_notebook,
     _detect_interactive_backend,
@@ -219,6 +220,11 @@ class PlotBuilder:
         self._ylabel_fontsize: Optional[float] = None
         self._tick_labelsize: Optional[float] = None
         self._legend_fontsize: Optional[float] = None
+
+        # How averaged series are drawn (see set_group_average); a series is
+        # averaged when it carries a 'group_average_overlay'.
+        self._average_display: str = 'both'
+        self._shade_average_range: bool = False
         
         # Setup figure and axes
         if ax is not None:
@@ -540,6 +546,29 @@ class PlotBuilder:
         self._minor_grid_alpha = minor_alpha
         self._show_minor_grid_x = show_minor if show_minor_x is None else show_minor_x
         self._show_minor_grid_y = show_minor if show_minor_y is None else show_minor_y
+        return self
+
+    def set_group_average(
+        self,
+        main_display: str = 'both',
+        shade_range: bool = False,
+    ) -> 'PlotBuilder':
+        """How the series that carry averages are drawn.
+
+        A series is averaged on its own, by carrying
+        ``PlotData.metadata['group_average_overlay']`` (the payload is
+        described in :mod:`kika.plotting.averages`); a series without one is
+        drawn as always. *main_display* is ``'pointwise'`` (no averaged
+        layer), ``'average'`` (the pointwise curve masked inside the averaged
+        span, the layers there) or ``'both'`` (the default: the pointwise
+        curve faded, the layers on top). *shade_range* tints the averaged span.
+        Unless the y limits are set, the y axis covers the layers.
+        """
+        if main_display not in _averages.DISPLAYS:
+            raise ValueError(f"main_display must be one of {_averages.DISPLAYS}, "
+                             f"got {main_display!r}")
+        self._average_display = main_display
+        self._shade_average_range = shade_range
         return self
     
     def set_tick_params(
@@ -934,8 +963,14 @@ class PlotBuilder:
                 else:
                     self.ax.fill_between(band.x, y_lower, y_upper, **fill_kwargs)
         
+        # An averaged series is drawn as the copy its display asks for (masked
+        # or faded), with its layers on top once every trace is down.
+        drawn_list = [_averages.main_panel_copy(d, self._average_display) or d
+                      for d in self._data_list]
+        averaged = []
+
         # Plot each data object
-        for i, (data, styling_overrides) in enumerate(zip(self._data_list, self._custom_styling)):
+        for i, (data, styling_overrides) in enumerate(zip(drawn_list, self._custom_styling)):
             # Merge styling: data defaults < custom overrides
             plot_kwargs = data.get_plot_kwargs()
             plot_kwargs.update(styling_overrides)
@@ -1062,6 +1097,15 @@ class PlotBuilder:
             
             else:
                 raise ValueError(f"Unknown plot_type: {data.plot_type}")
+
+            if data is not self._data_list[i]:
+                averaged.append((self._data_list[i], plot_kwargs.get('color'),
+                                 plot_kwargs.get('linewidth')))
+
+        layer_y = []
+        for data, color, linewidth in averaged:
+            if _averages.draw_layers(self.ax, data, color, linewidth, self._average_display):
+                layer_y.append(_averages.layer_values(data, self._average_display))
         
         # Apply scales
         if self._use_log_x:
@@ -1095,9 +1139,11 @@ class PlotBuilder:
         if self._y_lim is None and self._data_list:
             # Find the data range across all datasets (including uncertainty bands)
             y_values = []
-            for data in self._data_list:
+            for data in drawn_list:
                 if len(data.y) > 0:
                     y_values.extend(data.y)
+            for values in layer_y:
+                y_values.extend(values)
             # Also include uncertainty band values
             for band, data_idx in self._uncertainty_bands:
                 if band.is_relative():
@@ -1150,6 +1196,9 @@ class PlotBuilder:
                     self.ax.set_ylim(bottom=y_lo)
                 elif y_hi is not None:
                     self.ax.set_ylim(top=y_hi)
+
+        if self._shade_average_range:
+            _averages.shade([self.ax], _averages.average_bounds(self._data_list))
 
         # Apply axis labels. Curves that know their quantity label the axes
         # themselves; the old guesses below are for curves that do not.
