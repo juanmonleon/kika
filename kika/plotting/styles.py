@@ -315,15 +315,19 @@ def register_style(style: Style, *, replace: bool = False) -> Style:
     if not replace and (key in _REGISTRY or key in _ALIASES):
         raise ValueError(f"A style named {style.name!r} already exists")
     _REGISTRY[key] = style
-    # Colour maps given as stops are registered with matplotlib under
-    # 'kika-<style>-<kind>', so the name works anywhere a cmap name does.
+    _register_cmaps(style)
+    return style
+
+
+def _register_cmaps(style: Style) -> None:
+    """Register ``style``'s colour maps given as stops with matplotlib, under
+    'kika-<style>-<kind>', so the name works anywhere a cmap name does."""
     for kind in ('sequential', 'diverging'):
         if not isinstance(getattr(style, kind), str):
             name = style.cmap_name(kind)
             if name in mpl.colormaps:
                 mpl.colormaps.unregister(name)
             mpl.colormaps.register(style.cmap(kind), name=name)
-    return style
 
 
 def get_style(style: Union[str, Style, None] = None) -> Style:
@@ -447,6 +451,192 @@ register_style(Style(
                      background='#0b1d29', figure_background='#07151f')},
     dark=True, light_variant='signature', band_alpha=0.28, neutral='#9bb1bc',
 ))
+
+
+# -----------------------------------------------------------------------------
+# Composed styles: one style built from the parts of others
+# -----------------------------------------------------------------------------
+
+# Palettes offered besides each style's own. Okabe-Ito is the reference
+# colour-blind-safe set; tab10 is matplotlib's default.
+_EXTRA_PALETTES: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+    'okabe-ito': ('Okabe-Ito', ('#E69F00', '#56B4E9', '#009E73', '#F0E442',
+                                '#0072B2', '#D55E00', '#CC79A7', '#000000')),
+    'tab10': ('Tableau 10', _TAB10),
+}
+
+# matplotlib colour maps offered besides each style's own, by kind.
+_EXTRA_COLORMAPS: Tuple[Tuple[str, str, str], ...] = (
+    ('viridis', 'Viridis', 'sequential'),
+    ('cividis', 'Cividis', 'sequential'),
+    ('magma', 'Magma', 'sequential'),
+    ('RdBu_r', 'Red-blue', 'diverging'),
+    ('coolwarm', 'Cool-warm', 'diverging'),
+)
+
+# Font choices: key -> (label, generic family, font list). `serif` is
+# matplotlib's own serif list (what `classic` draws in); `stix` also switches
+# mathtext to STIX so equations match the text, as `journal` does.
+_FONTS: Dict[str, Tuple[str, str, List[str]]] = {
+    'sans': ('Sans-serif', 'sans-serif', _SANS),
+    'humanist': ('Humanist', 'sans-serif', _HUMANIST),
+    'serif': ('Serif', 'serif', list(mpl.rcParamsDefault['font.serif'])),
+    'stix': ('STIX (LaTeX)', 'serif', _SERIF_STIX),
+    'mono': ('Monospace', 'monospace', ['Consolas', 'Menlo', 'DejaVu Sans Mono']),
+}
+
+# Names compose_style has produced. A caller may register a composed style
+# (replace=True) and compose again under the same name; a built-in style's name
+# may never be reused, or its registered colour maps would be overwritten.
+_COMPOSED: set = set()
+
+
+def _resolve_colormap(spec: str, kind: str) -> ColormapSpec:
+    """A colour-map choice: a style name gives that style's map of ``kind``;
+    anything else must be a matplotlib colour map name."""
+    key = _ALIASES.get(spec.lower(), spec.lower())
+    if key in _REGISTRY:
+        return getattr(_REGISTRY[key], kind)
+    if spec in mpl.colormaps:
+        return spec
+    raise ValueError(
+        f"Unknown {kind} colour map {spec!r}: give a style name "
+        f"({', '.join(style_names())}) or a matplotlib colour map name"
+    )
+
+
+def _resolve_palette(spec: Union[str, Sequence[str]]) -> Tuple[str, ...]:
+    """A palette choice: an extra palette's name, a style name, or the colours."""
+    if isinstance(spec, str):
+        key = spec.lower()
+        if key in _EXTRA_PALETTES:
+            return _EXTRA_PALETTES[key][1]
+        key = _ALIASES.get(key, key)
+        if key in _REGISTRY:
+            return _REGISTRY[key].palette
+        names = style_names() + list(_EXTRA_PALETTES)
+        raise ValueError(f"Unknown palette {spec!r}. Available palettes: {', '.join(names)}")
+    colors = tuple(spec)
+    if not colors:
+        raise ValueError("A palette needs at least one colour")
+    bad = [c for c in colors if not (isinstance(c, str) and mpl.colors.is_color_like(c))]
+    if bad:
+        raise ValueError(f"Not colours: {bad!r}")
+    return tuple(mpl.colors.to_hex(c) for c in colors)
+
+
+def compose_style(
+    base: Union[str, Style],
+    *,
+    palette: Union[str, Sequence[str], None] = None,
+    sequential: Optional[str] = None,
+    diverging: Optional[str] = None,
+    font: Optional[str] = None,
+    grid: Optional[bool] = None,
+    name: str = 'custom',
+    label: str = 'Custom',
+) -> Style:
+    """
+    A style made from the parts of registered ones.
+
+    ``base`` gives everything not chosen here: the page and axes, the ink, the
+    rcParams, ``dark``, ``light_variant``, ``band_alpha`` and ``neutral``.
+
+    Parameters
+    ----------
+    base : str or Style
+        A registered style name (or alias), or a :class:`Style`.
+    palette : str or sequence of str, optional
+        A palette from :func:`style_parts` (a style name, ``'okabe-ito'``,
+        ``'tab10'``) or explicit colours.
+    sequential, diverging : str, optional
+        A style name (that style's map of this kind) or a matplotlib colour map
+        name such as ``'viridis'`` or ``'RdBu_r'``.
+    font : str, optional
+        A font key from :func:`style_parts`: ``'sans'``, ``'humanist'``,
+        ``'serif'``, ``'stix'`` or ``'mono'``.
+    grid : bool, optional
+        Whether axes draw a grid.
+    name, label : str
+        Name and label of the result. The name must not be a built-in style's.
+
+    The result is **not** registered: pass it to the builders directly, or
+    register it with ``register_style(style, replace=True)``. Colour maps given
+    as stops are registered with matplotlib under :meth:`Style.cmap_name`
+    either way, and composing again under the same name replaces them.
+
+    Raises
+    ------
+    ValueError
+        For an unknown base, palette, colour map or font, or a reserved name.
+    """
+    base_style = get_style(base)
+    key = name.lower()
+    if key in _ALIASES or (key in _REGISTRY and key not in _COMPOSED):
+        raise ValueError(f"{name!r} is the name of a built-in style; choose another")
+
+    rc = dict(base_style.rc)
+    font_family = base_style.font_family
+    if font is not None:
+        if font not in _FONTS:
+            raise ValueError(f"Unknown font {font!r}. Available fonts: {', '.join(_FONTS)}")
+        _, font_family, fonts = _FONTS[font]
+        rc[f'font.{font_family}'] = list(fonts)
+        # The font owns the maths type: STIX for STIX text, matplotlib's otherwise
+        # (a `journal` base would else keep STIX equations under sans-serif text).
+        if font == 'stix':
+            rc['mathtext.fontset'] = 'stix'
+        else:
+            rc.pop('mathtext.fontset', None)
+    if grid is not None:
+        rc['axes.grid'] = bool(grid)
+
+    chosen = [f"{part} {value}" for part, value in (
+        ('palette', palette if palette is None or isinstance(palette, str) else 'custom'),
+        ('sequential', sequential), ('diverging', diverging), ('font', font),
+    ) if value is not None]
+    style = Style(
+        name=name, label=label,
+        description=f"Built on {base_style.label}" + (f": {', '.join(chosen)}." if chosen else "."),
+        palette=base_style.palette if palette is None else _resolve_palette(palette),
+        sequential=(base_style.sequential if sequential is None
+                    else _resolve_colormap(sequential, 'sequential')),
+        diverging=(base_style.diverging if diverging is None
+                   else _resolve_colormap(diverging, 'diverging')),
+        rc=rc,
+        font_family=font_family,
+        dark=base_style.dark,
+        light_variant=base_style.light_variant,
+        band_alpha=base_style.band_alpha,
+        neutral=base_style.neutral,
+    )
+    _register_cmaps(style)
+    _COMPOSED.add(key)
+    return style
+
+
+def style_parts() -> Dict[str, List[Dict[str, Any]]]:
+    """The pieces :func:`compose_style` accepts, JSON-serialisable for a UI.
+
+    Colour maps carry 11 evenly spaced stops, as in :meth:`Style.to_dict`.
+    Composed styles, registered or not, are not offered as parts.
+    """
+    styles = [s for s in list_styles() if s.name.lower() not in _COMPOSED]
+
+    def stops(cmap: mpl.colors.Colormap) -> List[str]:
+        return [mpl.colors.to_hex(cmap(p)) for p in np.linspace(0.0, 1.0, 11)]
+
+    palettes = [{'name': s.name, 'label': s.label, 'colors': [_hex(c) for c in s.palette]}
+                for s in styles]
+    palettes += [{'name': key, 'label': label, 'colors': [_hex(c) for c in colors]}
+                 for key, (label, colors) in _EXTRA_PALETTES.items()]
+    colormaps = [{'name': s.name, 'label': s.label, 'kind': kind, 'stops': stops(s.cmap(kind))}
+                 for kind in ('sequential', 'diverging') for s in styles]
+    colormaps += [{'name': cmap, 'label': label, 'kind': kind, 'stops': stops(plt.get_cmap(cmap))}
+                  for cmap, label, kind in _EXTRA_COLORMAPS]
+    fonts = [{'name': key, 'label': label, 'family': family, 'fonts': list(names)}
+             for key, (label, family, names) in _FONTS.items()]
+    return {'palettes': palettes, 'colormaps': colormaps, 'fonts': fonts}
 
 
 # -----------------------------------------------------------------------------

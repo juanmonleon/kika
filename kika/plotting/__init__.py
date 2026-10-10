@@ -44,10 +44,12 @@ from .quantities import (
 )
 from .styles import (
     Style,
+    compose_style,
     get_style,
     list_styles,
     register_style,
     style_names,
+    style_parts,
 )
 from .plot_builder import PlotBuilder
 from .heatmap_builder import HeatmapBuilder
@@ -87,10 +89,12 @@ __all__ = [
     'NotPlottable',
     'ReconstructionRequired',
     'Style',
+    'compose_style',
     'get_style',
     'list_styles',
     'register_style',
     'style_names',
+    'style_parts',
     'PlotBuilder',
     'HeatmapBuilder',
     'heatmap_grid',
