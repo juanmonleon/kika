@@ -1165,8 +1165,11 @@ def MF34_to_MG(endf_object,
                 )
 
                 def sigma_phi_antideriv(energy):
-                    E = np.atleast_1d(np.asarray(energy, dtype=float))
-                    return np.interp(E, E_grid, cumul)
+                    # A scalar in, a scalar out: the cell loop stores
+                    # ``F(E_hi) - F(E_lo)`` in a float array, and NumPy 2.x
+                    # refuses a one-element array there where 1.x let it pass.
+                    out = np.interp(np.asarray(energy, dtype=float), E_grid, cumul)
+                    return float(out) if np.ndim(out) == 0 else out
                 return sigma_phi_antideriv
 
             phi_func = _make_sigma_phi(_pendf_mt, _base_phi_func)
