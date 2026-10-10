@@ -4,10 +4,22 @@ Nuclear data processing — kika's "homemade NJOY".
 Format-independent processing that operates on canonical types from
 ``kika.nuclear_data``.  Each submodule implements one processing step:
 
-- ``resonances``      — resonance reconstruction on the model (MF2 → pointwise σ)
+- ``resonances``      — resonance reconstruction on the model (MF2 → pointwise σ);
+  ``reconstruct_endf`` is its end-to-end entry for an ENDF-6 tape
 - ``njoy_reconstruct`` — the same through NJOY RECONR, chosen explicitly
 """
 
+from .resonances import (
+    ENGINE_VERSION,
+    REJECTION_CATEGORIES,
+    EndfReconstruction,
+    ReconstructedTable,
+    ReconstructionConvergenceError,
+    ReconstructionOptions,
+    UnsupportedResonanceError,
+    native_available,
+    reconstruct_endf,
+)
 from .njoy_reconstruct import (
     NjoyReconstructError,
     njoy_reconstruct,
@@ -33,6 +45,15 @@ from .njoy_pendf_cache import (
 )
 
 __all__ = [
+    "reconstruct_endf",
+    "EndfReconstruction",
+    "ReconstructedTable",
+    "ReconstructionOptions",
+    "UnsupportedResonanceError",
+    "ReconstructionConvergenceError",
+    "REJECTION_CATEGORIES",
+    "ENGINE_VERSION",
+    "native_available",
     "njoy_reconstruct",
     "njoy_reconstruct_stream",
     "NjoyReconstructError",

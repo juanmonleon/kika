@@ -406,7 +406,13 @@ class SuiteReconstructionResult:
         return maxima
 
 
-def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',options=None):
+#: Identifies the reconstruction physics, not the commit. Change it when a
+#: kernel, grid or publication change alters any reconstructed value, so
+#: caches keyed on it are invalidated exactly then.
+ENGINE_VERSION='kika-native-suite-1'
+
+
+def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',options=None,progress=None):
     """Reconstruct a complete supported resonance model suite without mutating it.
 
     Local References and native summand links are resolved. All sums must have
@@ -414,6 +420,9 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     are derived from their exclusive leaves and must close after publication.
     Existing partials are preserved outside supported resonance domains; output aggregates are
     rebuilt once from exclusive leaves. No partial success or automatic fallback.
+    ``progress(fraction)``, if given, is called after each energy segment with
+    the completed fraction of the material domain in lethargy (segments are
+    uneven in cost, so it is an indication, not an estimate of time left).
     """
     from kika.nuclear_data.model import ReactionSuite,CrossSectionReconstructed,Evaluated,Axis,Axes,XYs1d,Regions1d
     if not isinstance(suite,ReactionSuite):raise TypeError('expected model ReactionSuite')
@@ -510,6 +519,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     result=SuiteReconstructionResult(MappingProxyType({}),MappingProxyType({}),source_style,label,options,prepared,
         tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
     tables=[];checks=[];points=0;source_balance={key:0. for key in graph};source_worst={}
+    span=np.log(high/low) if low>0 else None
     for s in segments:
         seed_curves={i:(c,) for i,(key,c) in enumerate(s.curves.items()) if c is not None and key not in graph}
         if s.region is not None:
@@ -569,6 +579,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         x,y,check=linearize(lambda e:result._evaluate_segment(s,e,constant_values=constants),
             seeds,options,options.max_points-points,constants=constants,deferred=deferred)
         points+=len(x);tables.append((x,y));checks.append(dict(domain=(s.low,s.high),points=len(x),**check))
+        if progress is not None:
+            progress(min(1.,np.log(s.high/low)/span) if span else len(tables)/len(segments))
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')]);output={}
     from kika.algebra import compress_flat
     for key in entries:
@@ -598,7 +610,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         output[key].label=label
     normalized_hash=hashlib.sha256((source_hash+repr(context)+repr(options)).encode()).hexdigest()
     minima={key:min(float(np.min(y[key])) for _,y in tables) for key in entries}
-    report=dict(engine='kika-native-suite-1',scope='all modeled cross sections across evaluated domain',
+    report=dict(engine=ENGINE_VERSION,scope='all modeled cross sections across evaluated domain',
         source_sha256=source_hash,normalized_sha256=normalized_hash,minima=minima,
         projectile=str(suite.projectile),target=str(suite.target),projectileFrame=str(suite.projectileFrame),
         domain=(low,high),points=points,regions=checks,source_sum_error_ratios=source_balance,

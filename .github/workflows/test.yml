@@ -67,7 +67,18 @@ jobs:
     # Guards the `exclude` list in pyproject.toml. Test fixtures — including
     # the 2 MB micro-tape — must stay out of the distribution, and every
     # module that `import kika` needs must stay in it.
-    runs-on: ubuntu-latest
+    #
+    # The compiled resonance kernel is part of the package, not an extra: the
+    # app and generated scripts reconstruct whole actinides with it. Every
+    # platform the app ships on builds the wheel and must find it loaded.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -81,11 +92,17 @@ jobs:
       - name: Build the wheel
         run: poetry build
 
-      - name: Install it into a clean environment and import it
+      - name: Install it into a clean environment, import it, find the kernel
         run: |
-          python -m venv /tmp/wheel-check
-          /tmp/wheel-check/bin/pip install --quiet dist/*.whl
-          /tmp/wheel-check/bin/python -c "import kika; print(kika.__version__)"
+          python -m venv "$RUNNER_TEMP/wheel-check"
+          bin="$RUNNER_TEMP/wheel-check/bin"; [ -d "$bin" ] || bin="$RUNNER_TEMP/wheel-check/Scripts"
+          "$bin/python" -m pip install --quiet dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$bin/python" -c "import kika; print(kika.__version__)"
+          "$bin/python" -c "from kika.processing import native_available; assert native_available(), 'compiled resonance kernel missing from the wheel'"
+
+      - name: The kernel is inside the wheel
+        run: python -m zipfile -l dist/*.whl | grep -E "_rm_native.*\.(so|pyd)"
 
       - name: No test files or fixtures in the distribution
         run: |
