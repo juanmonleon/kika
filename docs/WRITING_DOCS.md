@@ -334,8 +334,14 @@ The code is open; a page explains it, and does not reproduce it.
 - Inline code names things (a function, a module, a key of a report, an MF number as the
   file spells it). It is not a substitute for saying what the thing does.
 
-The PDF is the manual: it holds every section except the API reference, which is
-generated from the code and read online (`docs/source/pdf_index.rst`).
+**The PDF is the manual of methods and architecture**: the architecture section and
+the methods (formats included), with the about pages. The user guide and the API
+reference are online only: they are for using kika, and the API is generated from the
+code (`docs/source/pdf_index.rst`). This follows the physics codes' manuals (theory and
+methods in the manual, the generated API online). When the user guide is rewritten
+around tasks, a short chapter of worked examples may join the PDF; it is one line in
+`pdf_index.rst`. A page published out of `drafts/` goes into the toctrees of both
+`index.rst` and `pdf_index.rst`.
 
 ## 6. Prose and style
 

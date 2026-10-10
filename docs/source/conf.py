@@ -94,9 +94,9 @@ html_short_title = "KIKA"
 # XeLaTeX reads the Unicode the pages and docstrings use (Greek, ℓ, ⁻, ·)
 # directly; pdflatex stops at the first character it has no mapping for.
 latex_engine = 'xelatex'
-# The PDF is the manual, not the API reference: its root is pdf_index.rst, which
-# holds every section except api_reference/ (generated from the code, and read
-# online). One document, built from that root.
+# The PDF is the manual of methods and architecture: its root is pdf_index.rst,
+# which leaves out the user guide and api_reference/ (both read online;
+# docs/WRITING_DOCS.md §5.6). One document, built from that root.
 latex_documents = [
     ('pdf_index', 'kika.tex', 'KIKA Documentation', author, 'manual'),
 ]
