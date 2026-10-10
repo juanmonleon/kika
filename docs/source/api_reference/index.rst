@@ -8,8 +8,7 @@ Package Overview
 
 KIKA is structured into several subpackages:
 
-* **kika.input**: For working with MCNP input files (materials, PERT cards)
-* **kika.mctal**: For processing MCNP tally output files
+* **kika.mcnp**: For MCNP input files (materials, PERT cards) and tally output (MCTAL)
 * **kika.sensitivities**: For sensitivity analysis and SDF file generation
 * **kika.ace**: For parsing ACE format nuclear data files
 * **kika.cov**: For covariance matrix handling and visualization
@@ -17,6 +16,7 @@ KIKA is structured into several subpackages:
 * **kika.benchmarks**: For DICE/ICSBEP SQLite profiles and benchmark ranking
 * **kika.endf**: For reading Evaluated Nuclear Data Files (ENDF)
 * **kika.energy_grids**: Predefined energy group structures
+* **kika.sampling** and **kika.nuclear_data.model**: Drawing realisations from a covariance and applying them to an evaluation
 
 Module Reference
 ----------------
@@ -32,3 +32,4 @@ Module Reference
    uq
    benchmarks
    endf
+   sampling

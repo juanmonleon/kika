@@ -1,15 +1,11 @@
-kika.input
-===========
+MCNP input files
+================
 
-The input module provides functionality for working with MCNP input files.
+The modules of :mod:`kika.mcnp` that read MCNP input files, their materials, and
+write PERT cards. :func:`kika.mcnp.read_mcnp` is the entry point.
 
-.. automodule:: kika.input
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Submodules
-----------
+Modules
+-------
 
 kika.mcnp.input
 -----------------

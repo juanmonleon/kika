@@ -7,6 +7,7 @@ The endf module provides functionality for reading and working with Evaluated Nu
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Submodules
 ----------
