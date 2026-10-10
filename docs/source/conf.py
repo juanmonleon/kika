@@ -95,6 +95,18 @@ html_short_title = "KIKA"
 # directly; pdflatex stops at the first character it has no mapping for.
 latex_engine = 'xelatex'
 
+# -- EPUB (also built by Read the Docs) ----------------------------------------
+# A figure's PDF twin (for LaTeX) and the script that draws it live next to it
+# under _static/ (docs/WRITING_DOCS.md §5.5). An EPUB has no media type for
+# either, and says so as a warning, so they are left out of it; the EPUB uses
+# the SVG.
+_STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_static")
+epub_exclude_files = sorted(
+    os.path.relpath(os.path.join(root, name), os.path.dirname(_STATIC))
+    for root, _dirs, names in os.walk(_STATIC)
+    for name in names if name.endswith((".pdf", ".py"))
+)
+
 
 # -- Drafts wiring -----------------------------------------------------------
 
