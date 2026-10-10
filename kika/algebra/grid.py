@@ -29,10 +29,19 @@ def compress_flat(x, y, laws=LINLIN):
     x, y, laws = validate(x, y, laws)
     if y.ndim != 1:
         raise ValueError('flat compression requires one-dimensional ordinates')
+    if len(x)>16 and laws[0] in (1,2) and np.all(laws==laws[0]):
+        value=y[0]
+        if (np.all(y==value) and (value!=0 or not np.any(np.signbit(y)))
+                and np.all(np.diff(x)>0)):
+            with np.errstate(over='ignore'):
+                if np.isfinite(x[-1]-x[0]):
+                    # A proven constant needs two endpoints. Retain the
+                    # generic path for steps, law boundaries and signed zero.
+                    return x[[0,-1]],y[[0,-1]],laws[[0]]
     keep = np.ones(len(x), dtype=bool)
     if len(x) > 2:
         keep[1:-1] = ~((y[:-2] == y[1:-1]) & (y[1:-1] == y[2:])
-            & (laws[:-1] == laws[1:]) & np.isin(laws[:-1], [1, 2])
+            & (laws[:-1] == laws[1:]) & ((laws[:-1] == 1) | (laws[:-1] == 2))
             & (x[:-2] < x[1:-1]) & (x[1:-1] < x[2:])
             & ~((y[:-2] == 0) & np.signbit(y[:-2]))
             & ~((y[1:-1] == 0) & np.signbit(y[1:-1]))
@@ -41,7 +50,8 @@ def compress_flat(x, y, laws=LINLIN):
     with np.errstate(over='ignore'):
         if np.any(~np.isfinite(np.diff(x[indices]))):
             return x.copy(), y.copy(), laws.copy()
-    return x[indices].copy(), y[indices].copy(), laws[indices[:-1]].copy()
+    # Advanced indexing already owns its result; a second copy is redundant.
+    return x[indices], y[indices], laws[indices[:-1]]
 
 
 def union(grids: Iterable[np.ndarray], steps: Iterable[float] = ()) -> np.ndarray:

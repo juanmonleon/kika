@@ -161,3 +161,63 @@ def test_direct_positive_capture_and_empty_buffers():
     np.testing.assert_allclose(cap,expected,rtol=3e-11,atol=1e-12)
     empty=np.empty(0)
     backend._native.matrices(0,0,1,empty,empty,empty,empty,empty,empty,np.empty(0,np.uint8))
+
+
+@pytest.mark.parametrize('c',[1,2,3])
+@pytest.mark.parametrize('entrance',[0,1,2])
+def test_pivoted_native_channel_solve(c,entrance):
+    if entrance>=c:pytest.skip('entrance absent')
+    if backend._native is None or not hasattr(backend._native,'channel_solve'):
+        pytest.skip('optional channel solver unavailable')
+    rng=np.random.default_rng(415)
+    matrix=rng.normal(size=(211,c,c))+1j*rng.normal(size=(211,c,c))
+    if c>1:matrix[0]=np.eye(c)[::-1]
+    matrix*=np.geomspace(1e-30,1e7,len(matrix))[:,None,None]
+    rhs=np.zeros((len(matrix),c,1),complex);rhs[:,entrance]=1.
+    output=np.empty((len(matrix),c),complex)
+    assert backend._native.channel_solve(len(matrix),c,entrance,
+        matrix.view(float).ravel(),output.view(float).ravel())
+    expected=np.linalg.solve(matrix,rhs)[:,:,0]
+    np.testing.assert_allclose(output,expected,rtol=4e-13,atol=0.)
+    residual=matrix@output[:,:,None]-rhs
+    ratio=abs(residual)/(np.linalg.norm(matrix,axis=(1,2))[:,None,None]*np.linalg.norm(output,axis=1)[:,None,None]+1.)
+    assert np.max(ratio)<1e-14
+
+
+@pytest.mark.parametrize('kind',['singular','nonfinite','large'])
+def test_native_channel_solve_refuses_unsafe_matrix(kind):
+    if backend._native is None or not hasattr(backend._native,'channel_solve'):
+        pytest.skip('optional channel solver unavailable')
+    matrix=np.eye(3,dtype=complex)[None].copy()
+    matrix[0,0,0]={'singular':0.,'nonfinite':np.nan,'large':1e100}[kind]
+    output=np.empty((1,3),complex)
+    assert not backend._native.channel_solve(1,3,0,matrix.view(float).ravel(),output.view(float).ravel())
+
+
+def test_older_binary_without_channel_solver(monkeypatch):
+    from types import SimpleNamespace
+    if backend._native is None:pytest.skip('optional extension unavailable')
+    e,er,gamma,a,f=problem(3)
+    expected=backend.solve(e,er,gamma,None,reduced=a,channel_factors=f,
+        return_absorption=True,absorption_rtol=1e-8)
+    monkeypatch.setattr(backend,'_native',SimpleNamespace(
+        matrices=backend._native.matrices,absorption=backend._native.absorption))
+    actual=backend.solve(e,er,gamma,None,reduced=a,channel_factors=f,
+        return_absorption=True,absorption_rtol=1e-8)
+    for x,y in zip(actual,expected):np.testing.assert_allclose(x,y,rtol=3e-11,atol=1e-12)
+
+
+@pytest.mark.parametrize('kind',['short','float32','strided','readonly','unaligned','dimensions','entrance'])
+def test_native_channel_solver_checks_buffers(kind):
+    if backend._native is None or not hasattr(backend._native,'channel_solve'):
+        pytest.skip('optional channel solver unavailable')
+    matrix=np.eye(3,dtype=complex)[None].view(float).ravel()
+    output=np.empty(6);args=[1,3,0,matrix,output]
+    if kind=='short':args[3]=matrix[:-1]
+    if kind=='float32':args[3]=matrix.astype('f')
+    if kind=='strided':args[3]=np.tile(matrix,2)[::2]
+    if kind=='readonly':output.flags.writeable=False
+    if kind=='unaligned':args[3]=np.ndarray(matrix.shape,dtype='d',buffer=bytearray(matrix.nbytes+1),offset=1)
+    if kind=='dimensions':args[0]=2**62
+    if kind=='entrance':args[2]=3
+    with pytest.raises((ValueError,BufferError)):backend._native.channel_solve(*args)

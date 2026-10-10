@@ -130,3 +130,17 @@ retains an independent, immutable copy of the original computation grids,
 including probes for reactions whose stored curves become constant.
 `result.report["points"]` counts computation nodes;
 `result.report["stored_points"]` counts nodes across all stored curves.
+
+## Optional acceleration
+
+The optional C extension accelerates eligible neutral resonance sums, small
+channel systems and the unresolved fluctuation integrand. Small systems use
+pivoted elimination and retain the processor's residual and physical checks.
+Unsupported numeric regimes and older or unavailable binaries use NumPy/SciPy;
+there is no compilation during reconstruction and no additional runtime
+dependency. Independent verification uses the NumPy physical kernels.
+
+ENDF publication rounds energies to the fields the writer can represent and
+resamples the verified linear tables at those energies. A vector calculation
+reproduces scalar readback, with scalar fallback near ambiguous decimal
+rounding. This preserves the publication checks and the requested tolerance.

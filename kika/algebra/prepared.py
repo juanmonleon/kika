@@ -3,7 +3,7 @@
 No global cache and no reference to mutable source arrays. Values and limits
 use the same evaluator as the ordinary algebra entry points.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 from .laws import validate
 from .evaluate import _read_checked, OUTSIDE
@@ -19,11 +19,23 @@ class _Evaluator:
     _x: object
     _y: object
     _laws: object
+    _linlin: bool = field(init=False, repr=False)
+
+    def __post_init__(self):
+        # This is an owned immutable snapshot. Discover its law once rather
+        # than scan a potentially large source table on every small query.
+        object.__setattr__(self, '_linlin', bool(np.all(self._laws == 2)))
+
+    def __reduce__(self):
+        # NumPy restores writable arrays when copied/pickled. Rebuild the
+        # owned snapshot and its law certificate together.
+        return prepare_evaluator,(self._x,self._y,self._laws)
 
     def _read(self, q, side, outside):
         if outside not in OUTSIDE:
             raise ValueError(f'outside must be one of {OUTSIDE}, got {outside!r}')
-        return _read_checked(self._x, self._y, self._laws, q, side, outside)
+        return _read_checked(self._x, self._y, self._laws, q, side, outside,
+                             linlin=self._linlin)
 
     def __call__(self, q, outside='zero'):
         return self._read(q, 'point', outside)

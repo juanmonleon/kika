@@ -84,13 +84,13 @@ def _read(x, y, laws, q, side: str, outside: str):
     return _read_checked(x, y, laws, q, side, outside)
 
 
-def _read_checked(x, y, laws, q, side: str, outside: str):
+def _read_checked(x, y, laws, q, side: str, outside: str, *, linlin=None):
     """:func:`_read` on a table :func:`validate` has already passed."""
     scalar = np.ndim(q) == 0
     q = np.asarray(q, dtype=float)
     flat = q.reshape(-1)
-    out = np.zeros(flat.shape, dtype=float)
     if x.size == 0:
+        out = np.zeros(flat.shape, dtype=float)
         if outside == "raise" and flat.size:
             raise ValueError("an empty table has no domain")
         return float(out[0]) if scalar else out.reshape(q.shape)
@@ -101,13 +101,22 @@ def _read_checked(x, y, laws, q, side: str, outside: str):
         inside = (flat >= x[0]) & (flat < x[-1])
     else:
         inside = (flat >= x[0]) & (flat <= x[-1])
+    if side == 'point' and x.size>1:
+        linlin=(linlin if linlin is not None else laws.min() == laws.max() == LINLIN)
+        if linlin and inside.all():
+            # No outside values to initialize and no boolean gather/scatter.
+            # The same np.interp supplies node/jump values and arithmetic.
+            value=np.interp(flat,x,y)
+            return float(value[0]) if scalar else value.reshape(q.shape)
+    out = np.zeros(flat.shape, dtype=float)
     if not inside.all():
         off = ~inside
         out[off] = _outside_value(y, outside, flat[off] <= x[0])
 
     if inside.any() and x.size == 1:
         out[inside] = y[0]
-    elif inside.any() and side == "point" and laws.min() == laws.max() == LINLIN:
+    elif inside.any() and side == "point" and (linlin if linlin is not None else
+                                               laws.min() == laws.max() == LINLIN):
         # np.interp is this same arithmetic (see panel_value), right-continuous
         # at a repeated abscissa and exact at the nodes, and it binary-searches
         # with a hint -- several times faster on the sorted queries most

@@ -27,3 +27,21 @@ def test_log_laws_and_nonconstant_nodes_are_not_thinned():
         np.testing.assert_array_equal(compress_flat(x,y,law)[0],x)
     y[2]=np.nextafter(1.,2.)
     np.testing.assert_array_equal(compress_flat(x,y,2)[0],x)
+
+
+@pytest.mark.parametrize('case',['constant','step','negative_zero','law_boundary','overflow'])
+def test_long_constant_tables_preserve_limits_and_numeric_regimes(case):
+    x=np.arange(1.,102.);y=np.zeros(len(x));laws=np.full(len(x)-1,2)
+    if case=='step':x[50]=x[49]
+    if case=='negative_zero':y[50]=-0.
+    if case=='law_boundary':laws[50:]=1
+    if case=='overflow':x=np.r_[np.linspace(-1e308,-1e307,51),np.linspace(1e307,1e308,50)]
+    cx,cy,cl=compress_flat(x,y,laws)
+    for reader in (evaluate,left_limit,right_limit):
+        np.testing.assert_array_equal(reader(cx,cy,cl,x),reader(x,y,laws,x))
+    if case=='constant':assert len(cx)==2
+    if case=='step':assert np.count_nonzero(cx==x[49])==2
+    if case=='negative_zero':assert np.signbit(cy).sum()==1
+    if case=='law_boundary':assert set(cl)=={1,2}
+    if case=='overflow':np.testing.assert_array_equal(cx,x)
+    assert not np.shares_memory(cx,x) and not np.shares_memory(cy,y)

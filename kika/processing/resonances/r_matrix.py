@@ -224,7 +224,10 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
         regular = ~np.any(poles,axis=1)
         pole_indices = np.flatnonzero(~regular)
     if np.any(regular):
-        r = level_matrix(1/d[regular],a)
+        # Ordinary batches contain no pole rows. Boolean indexing copied
+        # the large energy x level array twice even in that common case.
+        dr=d if np.all(regular) else d[regular]
+        r = level_matrix(1/dr,a)
         indexes = np.arange(c)
         r[:,indexes,indexes] += z[regular]
         matrix = np.eye(c)[None,:,:]-logarithmic[regular,:,None]*r
@@ -235,7 +238,7 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
         maximum = float(np.max(residual/scale))
         excitation[regular] = y
         w[regular] = np.einsum('ecd,ed->ec',r,y)
-        x[regular] = level_excitation(y,a)/d[regular]
+        x[regular] = level_excitation(y,a)/dr
         regular_indices = np.flatnonzero(regular)
         for local in np.flatnonzero(np.any(missing[regular],axis=1)):
             i = regular_indices[local]
@@ -297,7 +300,7 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     Real L-B and external diagonal terms remain in the solve. Exceptional
     poles use bounded reference batches; no level absorption array is retained.
     """
-    from ._rm_acceleration import _native, eligible, reference_block_size
+    from ._rm_acceleration import _native, eligible, reference_block_size, channel_solution
     er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
     a=np.require(reduced,dtype=float,requirements=['C','A']);f=np.ones_like(p)
     if not eligible(e,er,gamma,a,f,work_bytes,True,1e-8):return None
@@ -318,10 +321,10 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     regular=unsafe==0
     w=np.empty_like(p,dtype=complex);y=np.empty_like(w);absorption=np.empty(len(e))
     if np.any(regular):
-        rr=r[regular].copy();index=np.arange(c);rr[:,index,index]+=external[regular]
+        rr=r[regular];index=np.arange(c);rr[:,index,index]+=external[regular]
         matrix=np.eye(c)[None,:,:]-logarithmic[regular,:,None]*rr
         rhs=np.zeros((len(rr),c,1),complex);rhs[:,entrance,0]=1.
-        try:yr=np.ascontiguousarray(np.linalg.solve(matrix,rhs)[:,:,0])
+        try:yr=channel_solution(matrix,rhs,entrance)
         except np.linalg.LinAlgError:return None
         if np.any((abs(yr)!=0)&(abs(yr)<1e-40)) or np.any(abs(yr)>1e40):return None
         residual=np.linalg.norm((matrix@yr[:,:,None]-rhs)[:,:,0],axis=1)

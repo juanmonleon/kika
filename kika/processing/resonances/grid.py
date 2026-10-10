@@ -200,6 +200,7 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
             integrals[mt][name]={'reference_estimate':float(np.sum(factor*a)),
                                 'linear_estimate':float(np.sum(factor*linear[:,gauss_indices])),
                                 'absolute_difference_estimate':float(np.sum(factor*np.abs(a-linear[:,gauss_indices])))}
+    constant_integrals={}
     for mt in first:
         if mt in y:continue
         value=constants[mt]
@@ -207,9 +208,16 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
         maxima[mt]=(0.,0.)
         integrals[mt]={}
         for name,factor in factors:
-            estimate=float(np.sum(factor*value))
+            # Many modeled partials are identically zero on a resonance
+            # span. Their quadrature is the same calculation; do it once
+            # per constant, preserving the original reduction order.
+            token=(name,float(value).hex())
+            if token not in constant_integrals:
+                constant_integrals[token]=(float(np.sum(factor*value)),
+                                            float(np.sum(factor*0.)))
+            estimate,difference=constant_integrals[token]
             integrals[mt][name]=dict(reference_estimate=estimate,
-                linear_estimate=estimate,absolute_difference_estimate=float(np.sum(factor*0.)))
+                linear_estimate=estimate,absolute_difference_estimate=difference)
     y={mt:y[mt] for mt in first}
     return x,y,dict(iterations=result.passes,evaluations=seeded+result.evaluations,
                    refinement_maxima={mt:v[0] for mt,v in maxima.items()},

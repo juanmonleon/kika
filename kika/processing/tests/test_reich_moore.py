@@ -9,6 +9,34 @@ from kika.processing.resonances.reich_moore import solve_collision
 from kika.processing.resonances.channel_functions import neutral_channel_functions
 
 
+@pytest.mark.parametrize('width',[0.,1e-100,.2,1e10])
+@pytest.mark.parametrize('amplitude',[1e-100,1e-20,.1,1e10])
+def test_single_channel_direct_capture_matches_level_amplitudes(width,amplitude):
+    rng=np.random.default_rng(710)
+    er=np.linspace(1.,100.,173);gamma=np.full(len(er),width)
+    reduced=rng.normal(size=(len(er),1))*amplitude
+    e=np.r_[np.geomspace(.01,1000.,127),er[::11]]
+    factors=np.geomspace(.1,2.,len(e))[:,None]
+    kwargs=dict(reduced=reduced,channel_factors=factors)
+    w,excitation=solve_collision(e,er,gamma,None,**kwargs)
+    actual_w,actual=solve_collision(e,er,gamma,None,return_absorption=True,**kwargs)
+    expected=2*np.sum(gamma[None,:]*abs(excitation)**2,axis=1)
+    np.testing.assert_allclose(actual_w,w,rtol=2e-13,atol=0.)
+    np.testing.assert_allclose(actual,expected,rtol=3e-13,atol=0.)
+
+
+@pytest.mark.parametrize('dtype',[np.float64,np.int64,np.uint64])
+def test_direct_single_channel_capture_does_not_multiply_widths_as_integers(dtype):
+    er=np.array([1.,2.,3.]);e=np.array([.5,1.,4.])
+    gamma=np.full(len(er),8e18 if dtype!=np.uint64 else 1e19,dtype=dtype)
+    reduced=np.array([[.1],[-.2],[.3]]);factors=np.ones((len(e),1))
+    kwargs=dict(reduced=reduced,channel_factors=factors)
+    _,amplitudes=solve_collision(e,er,gamma,None,**kwargs)
+    _,capture=solve_collision(e,er,gamma,None,return_absorption=True,**kwargs)
+    expected=2*np.sum(gamma[None,:]*abs(amplitudes)**2,axis=1)
+    np.testing.assert_allclose(capture,expected,rtol=3e-13,atol=0.)
+
+
 def rm_model(energies=(100.,),widths=((.1,.2,0.,0.),),spins=None,l=0,spin=.5,channel_spin=.5,amplitudes=False):
     channels=[Channel(name,name,L=l,channelSpin=channel_spin if name=='elastic' else 0.,columnIndex=i, radiusUnit='fm') for i,name in enumerate(('elastic','capture','fissionA','fissionB'))]
     reactions=[ResonanceReaction('elastic',reactionMT=2),ResonanceReaction('capture',reactionMT=102,eliminated=True),ResonanceReaction('fissionA',reactionMT=18),ResonanceReaction('fissionB',reactionMT=18)]

@@ -190,6 +190,82 @@ static PyObject *breit_wigner(PyObject *self,PyObject *args) {
     release(b);return PyBool_FromLong(!unsafe);
 }
 
+typedef struct {double r,i;} rm_complex;
+static rm_complex rm_sub(rm_complex a,rm_complex b) {
+    rm_complex z={a.r-b.r,a.i-b.i};return z;
+}
+static rm_complex rm_mul(rm_complex a,rm_complex b) {
+    rm_complex z={a.r*b.r-a.i*b.i,a.r*b.i+a.i*b.r};return z;
+}
+static rm_complex rm_div(rm_complex a,rm_complex b) {
+    /* Scaled complex division, without squaring the pivot magnitude. */
+    double ratio,den;rm_complex z;
+    if (fabs(b.r)>=fabs(b.i)) {
+        ratio=b.i/b.r;den=b.r+b.i*ratio;
+        z.r=(a.r+a.i*ratio)/den;z.i=(a.i-a.r*ratio)/den;
+    } else {
+        ratio=b.r/b.i;den=b.i+b.r*ratio;
+        z.r=(a.r*ratio+a.i)/den;z.i=(a.i*ratio-a.r)/den;
+    }
+    return z;
+}
+
+static PyObject *channel_solve(PyObject *self,PyObject *args) {
+    Py_ssize_t ne,c,entrance;PyObject *input,*output;Py_buffer b[7]={0};
+    if (!PyArg_ParseTuple(args,"nnnOO",&ne,&c,&entrance,&input,&output)) return NULL;
+    if (!dimensions(ne,0,c)) return NULL;
+    if (entrance<0 || entrance>=c) {
+        PyErr_SetString(PyExc_ValueError,"invalid native entrance channel");return NULL;
+    }
+    if (!buffer(input,&b[0],2*ne*c*c,"d",0) || !buffer(output,&b[1],2*ne*c,"d",1)) {
+        release(b);return NULL;
+    }
+    int failed=0;const double *matrix=b[0].buf;double *out=b[1].buf;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t row=0;row<ne;row++) {
+        rm_complex a[9],rhs[3]={{0}},solution[3];
+        rhs[entrance].r=1.;
+        for (Py_ssize_t j=0;j<c*c;j++) {
+            a[j].r=matrix[2*(row*c*c+j)];a[j].i=matrix[2*(row*c*c+j)+1];
+            if (!isfinite(a[j].r) || !isfinite(a[j].i) ||
+                    fabs(a[j].r)>1e8 || fabs(a[j].i)>1e8) failed=1;
+        }
+        if (failed) break;
+        /* Ordinary Gaussian elimination with partial pivoting. No explicit
+         * inverse or determinant formula; Python independently checks the
+         * residual, passivity and flux of the candidate solution. */
+        for (Py_ssize_t k=0;k<c;k++) {
+            Py_ssize_t pivot=k;double largest=0.;
+            for (Py_ssize_t j=k;j<c;j++) {
+                double magnitude=hypot(a[j*c+k].r,a[j*c+k].i);
+                if (magnitude>largest) {largest=magnitude;pivot=j;}
+            }
+            if (!(largest>=DBL_MIN && isfinite(largest))) {failed=1;break;}
+            if (pivot!=k) {
+                for (Py_ssize_t j=k;j<c;j++) {
+                    rm_complex saved=a[k*c+j];a[k*c+j]=a[pivot*c+j];a[pivot*c+j]=saved;
+                }
+                rm_complex saved=rhs[k];rhs[k]=rhs[pivot];rhs[pivot]=saved;
+            }
+            for (Py_ssize_t j=k+1;j<c;j++) {
+                rm_complex factor=rm_div(a[j*c+k],a[k*c+k]);
+                for (Py_ssize_t l=k+1;l<c;l++) a[j*c+l]=rm_sub(a[j*c+l],rm_mul(factor,a[k*c+l]));
+                rhs[j]=rm_sub(rhs[j],rm_mul(factor,rhs[k]));
+            }
+        }
+        if (failed) break;
+        for (Py_ssize_t j=c;j-->0;) {
+            rm_complex value=rhs[j];
+            for (Py_ssize_t k=j+1;k<c;k++) value=rm_sub(value,rm_mul(a[j*c+k],solution[k]));
+            solution[j]=rm_div(value,a[j*c+j]);
+            if (!isfinite(solution[j].r) || !isfinite(solution[j].i)) failed=1;
+            out[2*(row*c+j)]=solution[j].r;out[2*(row*c+j)+1]=solution[j].i;
+        }
+    }
+    Py_END_ALLOW_THREADS
+    release(b);return PyBool_FromLong(!failed);
+}
+
 static double softplus(double t) {
     return fmax(t,0.)+log1p(exp(-fabs(t)));
 }
@@ -207,6 +283,7 @@ static double urr_integrand(double s,void *context) {
 }
 
 static PyMethodDef methods[]={
+    {"channel_solve",channel_solve,METH_VARARGS,"Solve small channel systems by pivoted elimination; false requires NumPy fallback."},
     {"breit_wigner",breit_wigner,METH_VARARGS,"Accumulate all constant-radius BW levels in source order."},
     {"matrices",matrices,METH_VARARGS,"Fill all-level collision sums and reference-fallback flags."},
     {"absorption",absorption,METH_VARARGS,"Fill positive radiative probabilities using compensated level sums."},

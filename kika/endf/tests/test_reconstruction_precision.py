@@ -5,6 +5,21 @@ from kika._records import (format_endf_number,format_endf_number_precise,
     parse_number,format_endf_data_line,ENDF_FORMAT_PRECISE)
 
 
+def test_vector_precise_readback_matches_scalar_bits_at_ties_and_boundaries():
+    from kika._records import round_to_precise_endf_field
+    rng=np.random.default_rng(808)
+    values=np.sign(rng.normal(size=4000))*10.**rng.uniform(-300.,300.,4000)
+    powers=10.**np.arange(-300.,301.)
+    ties=np.array([1.2345678905,12.345678905,123.45678905,1234.5678905,
+                   999999999.95,9999999999.5,1e-9,1e-10,1e10])
+    values=np.r_[values,powers,-powers,np.nextafter(powers,0.),np.nextafter(powers,np.inf),
+        ties,-ties,np.nextafter(ties,0.),np.nextafter(ties,np.inf),0.,-0.,np.nextafter(0.,1.)]
+    values=np.tile(values,6)  # Exercise the bounded multi-batch readback too.
+    expected=np.array([parse_number(format_endf_number_precise(float(v))) for v in values],dtype=float)
+    actual=round_to_precise_endf_field(values)
+    np.testing.assert_array_equal(actual.view(np.uint64),expected.view(np.uint64))
+
+
 @pytest.mark.parametrize('value',[0.,100.44989981925573,988832.1445758647,-988832.1445758647,
     1e-100,1e100,1e-12,1e12,9.9999999,9999999999.,-9999999999.])
 def test_best_precision_is_never_worse_than_legacy(value):

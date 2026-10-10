@@ -4,6 +4,19 @@ from kika.algebra.prepared import prepare_evaluator
 from kika.algebra import evaluate, left_limit, right_limit
 
 
+@pytest.mark.parametrize('laws',[2,[2,4,5]])
+def test_copied_and_pickled_snapshots_keep_owned_laws_and_limits(laws):
+    from copy import deepcopy
+    import pickle
+    table=prepare_evaluator([1.,2.,3.,4.],[1.,3.,2.,5.],laws)
+    q=np.array([1.,1.5,2.,2.5,3.,3.5,4.,np.nan])
+    for restored in (deepcopy(table),pickle.loads(pickle.dumps(table))):
+        for name in ('__call__','left_limit','right_limit'):
+            np.testing.assert_array_equal(getattr(restored,name)(q),getattr(table,name)(q))
+        for array in (restored._x,restored._y,restored._laws):
+            with pytest.raises(ValueError):array.setflags(write=True)
+
+
 @pytest.mark.parametrize('law', [1, 2, 3, 4, 5])
 def test_snapshot_matches_values_limits_steps_and_outside(law):
     x=np.array([1., 2., 2., 4.]);y=np.array([3., 5., 7., 9.])

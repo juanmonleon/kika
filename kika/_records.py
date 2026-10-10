@@ -206,6 +206,50 @@ def format_endf_number_precise(value, width=11):
     return min(candidates, key=lambda field: abs(parse_number(field)-value))
 
 
+def round_to_precise_endf_field(values):
+    """Readback of the closest 11-column field, without ordinary-case strings.
+
+    Exact integer powers of ten let one division round the chosen fixed
+    decimal to float64. Ambiguous ties, exponent boundaries and carries use
+    the scalar formatter. Scientific notation retains the existing guarded
+    readback calculation. Returns a flat array, as ``round_to_endf_field``.
+    """
+    import numpy as np
+    v=np.asarray(values,dtype=float).ravel()
+    if len(v)>32768:
+        # The returned grid is retained output; bound the additional decimal
+        # temporaries independently of a material's millions of ordinates.
+        out=np.empty_like(v)
+        for start in range(0,len(v),32768):
+            out[start:start+32768]=round_to_precise_endf_field(v[start:start+32768])
+        return out
+    with np.errstate(over='ignore',under='ignore',divide='ignore',invalid='ignore'):
+        out=round_to_endf_field(v)
+    a=np.abs(v);live=np.flatnonzero((a>0)&(a<1e11))
+    if not len(live):return out
+    magnitude=a[live];sign=(v[live]<0).astype(np.int64)
+    exponent=np.floor(np.log10(magnitude)).astype(np.int64)
+    digits=np.maximum(1,exponent+1)
+    places=np.maximum(0,11-digits-sign-1)
+    factor=np.power(10.,places)
+    scaled=magnitude*factor;integer=np.rint(scaled)
+    fixed=np.copysign(integer/factor,v[live])
+    eps=np.finfo(float).eps
+    # Log10 near a power of ten and rounding across a digit boundary can
+    # change how many decimals fit. These uncommon inputs stay scalar.
+    with np.errstate(over='ignore',under='ignore'):
+        lower=np.power(10.,exponent);upper=lower*10
+    slow=((abs(scaled-np.floor(scaled)-.5)<=8*eps*np.maximum(1.,scaled))
+          | (abs(magnitude-lower)<=8*eps*magnitude)
+          | (abs(magnitude-upper)<=8*eps*magnitude)
+          | (integer>=np.power(10.,digits+places))
+          | (digits+sign>11))
+    better=abs(fixed-v[live])<abs(out[live]-v[live])
+    at=live[better&~slow];out[at]=fixed[better&~slow]
+    for at in live[slow]:out[at]=parse_number(format_endf_number_precise(float(v[at])))
+    return out
+
+
 # Format constants for ENDF data types
 ENDF_FORMAT_PRECISE = 'float_precise'
 ENDF_FORMAT_FLOAT = 'float'       # Scientific notation (e.g., " 1.234567+5")

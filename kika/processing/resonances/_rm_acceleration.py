@@ -2,7 +2,8 @@
 
 No runtime compilation. Unavailable binaries or ineligible numeric regimes
 return None to the reference solver. The extension uses bounded stack tiles;
-channel solves and positive-capture acceptance checks remain in Python.
+Candidate small solves use pivoted C elimination when available; independent
+residual/passivity and positive-capture acceptance checks remain in Python.
 """
 import numpy as np
 try:
@@ -39,6 +40,20 @@ def reference_block_size(n,c,work_bytes):
     return max(1,int((work_bytes-32*n*c*c)//(128*(n+c*c+1))))
 
 
+def channel_solution(matrix,rhs,entrance):
+    """Optional pivoted small solve; unsupported/older binaries use LAPACK.
+
+    Callers must still apply their residual, finite-value and physical checks.
+    The ordinary independent NumPy solvers never call this function.
+    """
+    c=matrix.shape[1]
+    if c in (2,3) and _native is not None and hasattr(_native,'channel_solve'):
+        y=np.empty((len(matrix),c),complex)
+        if _native.channel_solve(len(matrix),c,entrance,
+                np.ascontiguousarray(matrix).view(float).ravel(),y.view(float).ravel()):return y
+    return np.ascontiguousarray(np.linalg.solve(matrix,rhs)[:,:,0])
+
+
 def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entrance=0,
           reduced=None,channel_factors=None,work_bytes=64*1024**2,
           return_absorption=False,absorption_rtol=0.):
@@ -58,7 +73,9 @@ def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entranc
     if np.any(regular):
         rr=r[regular];matrix=np.eye(c)[None,:,:]-1j*rr
         rhs=np.zeros((len(rr),c,1),complex);rhs[:,entrance,0]=1.
-        try:y=np.ascontiguousarray((1/matrix[:,0,0])[:,None] if c==1 else np.linalg.solve(matrix,rhs)[:,:,0])
+        try:
+            if c==1:y=np.ascontiguousarray((1/matrix[:,0,0])[:,None])
+            else:y=channel_solution(matrix,rhs,entrance)
         except np.linalg.LinAlgError:return None
         if np.any(np.linalg.norm(y,axis=1)>1+1e-8):return None
         residual=matrix@y[:,:,None]-rhs

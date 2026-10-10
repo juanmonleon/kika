@@ -40,6 +40,35 @@ def level_excitation(excitation,reduced):
     return result
 
 
+def _single_channel_absorption(reciprocal, excitation, amplitudes, gamma):
+    """Direct positive all-level sum, factored only for one open channel.
+
+    The common channel excitation factors out of the independent NumPy
+    reference's positive sum. No channel Gram cancellation or flux subtraction
+    is involved. Conservative normal-range guards retain the level-amplitude
+    calculation when regrouping could underflow or overflow.
+    """
+    # Widths supplied directly to the numerical kernel may be integer arrays.
+    # Promote before doubling, rather than overflowing their integer dtype.
+    gamma=np.asarray(gamma,dtype=float)
+    with np.errstate(over='ignore', under='ignore', invalid='ignore'):
+        weights=2*gamma*amplitudes**2
+        scale=np.abs(excitation)**2
+        squared=reciprocal.real**2
+        squared+=reciprocal.imag**2
+    active=(gamma>0)&(amplitudes!=0)
+    if not np.any(active):return np.zeros(len(reciprocal))
+    if (np.any(~np.isfinite(weights)) or np.any(weights[active]<1e-80)
+            or np.any(weights>1e80) or np.any(scale<1e-80) or np.any(scale>1e80)
+            or np.any(~np.isfinite(scale))):return None
+    # The large level array needs only two reductions, without allocating
+    # three separate boolean masks. NaN extrema fail the chained comparison.
+    if not 1e-80<=np.min(squared)<=np.max(squared)<=1e80:return None
+    value=(squared@weights)*scale
+    if np.any(~np.isfinite(value)):return None
+    return value
+
+
 @dataclass(frozen=True)
 class RMLevel(Level):
     fission_amplitudes: tuple[float, ...] = ()
@@ -191,8 +220,12 @@ def solve_collision(energies, levels, radiative_widths, amplitudes, diagnostics=
                 if np.any(accepted) and np.any(radiative):
                     diagnostics['rm_max_capture_relative_roundoff_estimate']=max(diagnostics.get('rm_max_capture_relative_roundoff_estimate',0.),float(np.max(bound[accepted]/value[accepted])))
         else:
-            excitation=(level_excitation(y*f,reduced) if separable else np.einsum('enc,ec->en',ar,y))/dr
-            x[regular]=2*np.sum(np.asarray(radiative_widths)[None,:]*abs(excitation)**2,axis=1) if return_absorption else excitation
+            direct=(_single_channel_absorption(reciprocal,(y*f)[:,0],reduced[:,0],np.asarray(radiative_widths))
+                    if return_absorption and separable and c==1 else None)
+            if direct is not None:x[regular]=direct
+            else:
+                excitation=(level_excitation(y*f,reduced) if separable else np.einsum('enc,ec->en',ar,y))/dr
+                x[regular]=2*np.sum(np.asarray(radiative_widths)[None,:]*abs(excitation)**2,axis=1) if return_absorption else excitation
     for index in np.flatnonzero(~regular):
         if separable:
             pole=np.zeros(n,bool);pole[candidates]=candidate_poles[index]

@@ -790,7 +790,7 @@ def _resample_reconstructed_endf(suite, label):
     """
     from copy import deepcopy
     import numpy as np
-    from kika._records import format_endf_number_precise, parse_number
+    from kika._records import round_to_precise_endf_field
     from kika.algebra import evaluate
     from kika.nuclear_data.model import Regions1d
     output = deepcopy(suite)
@@ -801,7 +801,7 @@ def _resample_reconstructed_endf(suite, label):
         curves = form.function1ds if isinstance(form, Regions1d) else [form]
         for curve in curves:
             x = np.asarray(curve.xs)
-            rounded = np.array([parse_number(format_endf_number_precise(v)) for v in x])
+            rounded = round_to_precise_endf_field(x)
             if rounded[0] != x[0] or rounded[-1] != x[-1]:
                 continue
             # Keep both sides of a colliding pair (including real jumps),

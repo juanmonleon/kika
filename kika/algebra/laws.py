@@ -69,6 +69,10 @@ def method_laws(y, method: str) -> np.ndarray:
 
 
 def _check_codes(codes: np.ndarray) -> None:
+    # The supported codes are a contiguous integer range. Sorting every
+    # valid table is unnecessary; retain the detailed diagnostic on failure.
+    if np.all((codes >= HISTOGRAM) & (codes <= LOGLOG)):
+        return
     bad = sorted(set(np.unique(codes).tolist()) - set(LAWS))
     if bad:
         two_d = [c for c in bad if 11 <= c <= 15 or 21 <= c <= 25]
@@ -196,16 +200,17 @@ def validate(x, y, laws) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     _check_codes(laws)
     if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
         raise ValueError("table has non-finite values")
-    if np.any(np.diff(x) < 0):
+    dx = np.diff(x)
+    if np.any(dx < 0):
         raise ValueError("abscissae must be non-decreasing")
     if n_intervals:
-        wide = np.diff(x) > 0
-        logx = wide & np.isin(laws, LOG_X)
+        wide = dx > 0
+        logx = wide & ((laws == LINLOG) | (laws == LOGLOG))
         if np.any(logx & (x[:-1] <= 0)):
             i = int(np.flatnonzero(logx & (x[:-1] <= 0))[0])
             raise ValueError(f"law {laws[i]} interpolates in ln x but interval "
                              f"{i} starts at x = {x[i]!r}")
-        logy = wide & np.isin(laws, LOG_Y)
+        logy = wide & ((laws == LOGLIN) | (laws == LOGLOG))
         if logy.any():
             y1, y2 = y[:-1], y[1:]
             nonpositive = (y1 < 0) | (y2 < 0)
