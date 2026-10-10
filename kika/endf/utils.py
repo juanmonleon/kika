@@ -1073,7 +1073,7 @@ def auto_trim_legendre_tail(
     min_order: int = 0
 ) -> Dict[int, Union[float, np.ndarray]]:
     """
-    Auto-trim to smallest L such that sum_{ℓ>L} |a_ℓ| < tol.
+    Auto-trim to smallest L such that ``sum_{ℓ>L} |a_ℓ| < tol``.
     If values are arrays over energies, use a *global* L that satisfies the condition for all energies,
     so dictionary keys remain consistent.
     

@@ -2109,7 +2109,7 @@ class LegendreCovariance:
         **IMPORTANT**: MF34 data is typically stored as RELATIVE covariances (fractional uncertainties δA_ℓ/A_ℓ).
         This method returns the uncertainties as stored in MF34, along with an 'is_relative' flag.
         
-        To convert relative uncertainties to absolute: σ_abs = σ_rel × |A_ℓ|
+        To convert relative uncertainties to absolute: ``σ_abs = σ_rel × |A_ℓ|``
         where A_ℓ are the Legendre coefficients from ENDF MF=4 data.
         
         Parameters
@@ -2128,6 +2128,7 @@ class LegendreCovariance:
                 - 'energies': np.ndarray - Energy bin boundaries (N+1 points for N bins) in eV or MeV
                 - 'uncertainties': np.ndarray - Uncertainties (√diagonal of covariance) for each bin
                 - 'is_relative': bool - True if relative (δA_ℓ/A_ℓ), False if absolute (δA_ℓ)
+
             For list of ints: Dictionary mapping L coefficient to uncertainty data (or None if not found).
             
         Notes
@@ -2236,7 +2237,7 @@ class LegendreCovariance:
             'energy_grid': np.ndarray — bin boundaries (N+1 points)
             'l_values': list of int — sorted Legendre orders present
             'correlations': list of np.ndarray — one L×L correlation matrix per energy bin
-            'mean_abs_offdiag': float — mean |off-diagonal| across all bins
+            'mean_abs_offdiag': float — mean ``|off-diagonal|`` across all bins
         """
         # Collect all sub-matrices matching (isotope, mt)
         blocks = {}  # (l_row, l_col) -> (energy_grid, matrix)

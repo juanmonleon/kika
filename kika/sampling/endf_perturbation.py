@@ -795,12 +795,14 @@ def perturb_ENDF_files(
         Matrix decomposition method: "svd", "cholesky", "eigen", or "pca"
     psd_method : str, default "none"
         How to handle a non-PSD covariance during decomposition:
-            "none"   — do not modify the matrix (default); SVD silently folds
-                       negative eigenvalues to their absolute value. A WARN
-                       line is logged when |λ_min|/λ_max exceeds 1e-8.
-            "auto"   — clip mild negatives, Higham for severe ones.
-            "clip"   — zero out negative eigenvalues.
-            "higham" — nearest-PSD Higham projection.
+
+        - "none": do not modify the matrix (default); SVD silently folds
+          negative eigenvalues to their absolute value. A WARN line is logged
+          when ``|λ_min|/λ_max`` exceeds 1e-8.
+        - "auto": clip mild negatives, Higham for severe ones.
+        - "clip": zero out negative eigenvalues.
+        - "higham": nearest-PSD Higham projection.
+
         Use `higham_projection=True` as a shortcut for "higham".
     higham_projection : bool, default False
         Convenience flag — when True, force `psd_method="higham"`. Raises if
@@ -851,24 +853,6 @@ def perturb_ENDF_files(
         None means perturb all energies. Examples:
         - [(0, 0.85e6), (4e6, 20e6)] : perturb up to 0.85 MeV and from 4 MeV onward
         - [(1e6, 4e6)] : perturb only between 1-4 MeV
-
-    Notes
-    -----
-    Default behavior samples directly from the MF34 covariance with no
-    repair (`psd_method="none"`). Mild negative eigenvalues from numerical
-    noise are silently folded to their magnitude by SVD; a WARN line is
-    logged when the negative spectrum is non-trivial
-    (|λ_min|/λ_max > 1e-8). To repair the matrix, set
-    `higham_projection=True` (Higham projection) or pass an explicit
-    `psd_method` ("auto", "clip", or "higham"). The two are mutually
-    exclusive.
-    
-    When generate_ace=True, the output directory structure will include:
-    - output_dir/endf/zaid/sample_num/ : perturbed ENDF files
-    - output_dir/ace/temp/zaid/sample_num/ : ACE files organized by temperature (temp uses exact input format)
-    - output_dir/njoy_files/temp/zaid/ : NJOY auxiliary files
-    - output_dir/xsdir/ : modified xsdir files (if xsdir_file provided)
-    - output_dir/*.log and *.parquet : log and master perturbation files
     precomputed : list of dict or None, default None
         One entry per ENDF file (``None`` for a file that should still draw its
         own). An entry carries ``factors`` (num_samples x n_params),
@@ -886,6 +870,25 @@ def perturb_ENDF_files(
 
         ``None`` — the default — leaves every existing call unchanged, down to
         the seed and the drawn bytes.
+
+    Notes
+    -----
+    Default behavior samples directly from the MF34 covariance with no
+    repair (`psd_method="none"`). Mild negative eigenvalues from numerical
+    noise are silently folded to their magnitude by SVD; a WARN line is
+    logged when the negative spectrum is non-trivial
+    (``|λ_min|/λ_max > 1e-8``). To repair the matrix, set
+    `higham_projection=True` (Higham projection) or pass an explicit
+    `psd_method` ("auto", "clip", or "higham"). The two are mutually
+    exclusive.
+    
+    When generate_ace=True, the output directory structure will include:
+
+    - output_dir/endf/zaid/sample_num/ : perturbed ENDF files
+    - output_dir/ace/temp/zaid/sample_num/ : ACE files organized by temperature (temp uses exact input format)
+    - output_dir/njoy_files/temp/zaid/ : NJOY auxiliary files
+    - output_dir/xsdir/ : modified xsdir files (if xsdir_file provided)
+    - ``output_dir/*.log`` and ``*.parquet`` : log and master perturbation files
 
     """
     global _logger

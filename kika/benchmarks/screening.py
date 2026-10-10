@@ -69,7 +69,7 @@ def find_sensitive_benchmarks(
     sensitivity_threshold : float
         Minimum absolute integral sensitivity in the region.
     fraction_threshold : float, optional
-        Minimum |region sensitivity| / (sum of |sensitivity|) for the reaction.
+        Minimum ``|region sensitivity| / sum(|sensitivity|)`` for the reaction.
     preferred_only : bool
         Only consider the preferred profile per benchmark (default True).
     limit : int

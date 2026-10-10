@@ -1,13 +1,9 @@
 KIKA Documentation
 ===================
 
-.. image:: https://img.shields.io/badge/version-0.1.2-blue.svg
-   :target: https://github.com/juanmonleon/kika
-   :alt: Version
+**A Python toolkit for nuclear data analysis**
 
-**A comprehensive Python toolkit for nuclear data analysis**
-
-KIKA |version| is a powerful library for nuclear data analysis, Monte Carlo simulation support, and uncertainty quantification. It provides functionality for:
+KIKA |version| is a library for nuclear data analysis, Monte Carlo simulation support, and uncertainty quantification. It provides functionality for:
 
 - **MCNP Processing**: Parse and manipulate MCNP input and output files
 - **Sensitivity Analysis**: Compute sensitivities and generate SDF files compatible with SCALE
