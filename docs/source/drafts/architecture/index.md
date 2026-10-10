@@ -29,7 +29,7 @@ and a format is only the way an answer is read in or written out.
 
 The code is arranged in four layers, and an import may only point downwards:
 
-```{figure} /_static/architecture/layers.svg
+```{figure} /_static/architecture/layers.*
 :alt: Four stacked layers: doors and consumers, format layer, calculation layer, leaves, with arrows pointing down.
 :width: 100%
 
