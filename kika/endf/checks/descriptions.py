@@ -147,7 +147,10 @@ def _build() -> Dict[str, CheckDescription]:
             "symmetric matrix. A cross block (L != L1, or MT != MT1) is not symmetric: the "
             "stored triangle may be valid, but the matrix kika and other processors build "
             "by mirroring it is not what the evaluator meant, and it often gives |rho| > 1 "
-            "(Ne-20 of JEFF-4.0: 0.877 stored, 4.63 mirrored)."),
+            "(Ne-20 of JEFF-4.0: 0.877 stored, 4.63 mirrored). Where this defect is "
+            "present, the |rho| > 1, covariance-without-variance and not-PSD findings on "
+            "the same block are usually its consequences, not separate problems: fix this "
+            "one first."),
         # ---- values ---------------------------------------------------------
         "correlation_out_of_bounds": D(
             "|rho| > 1", ALL,
