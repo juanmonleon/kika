@@ -57,8 +57,12 @@ class WeightingFunction:
 
     @staticmethod
     def fission_spectrum(energy: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
-        """Simplified fission spectrum phi(E) = sqrt(E) * exp(-E/1.29e6)."""
-        return np.sqrt(energy) * np.exp(-energy / 1.29e6)  # 1.29 MeV average
+        """Simplified fission spectrum phi(E) = sqrt(E) * exp(-E/theta), theta = 1.29 MeV.
+
+        A Maxwellian: theta is its temperature, and its mean energy is
+        1.5 theta = 1.94 MeV.
+        """
+        return np.sqrt(energy) * np.exp(-energy / 1.29e6)  # theta = 1.29 MeV
 
     @staticmethod
     def fission_spectrum_antiderivative(energy: Union[float, np.ndarray]) -> Union[float, np.ndarray]:

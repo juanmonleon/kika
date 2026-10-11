@@ -26,6 +26,12 @@ leaves it untested. The new engine was tried too: on this 320-level slice it
 exceeds its default point budget, which is a correct refusal and no fixture.
 Both goldens were regenerated in that commit.
 
+**2026-10-11: the lowest group moved, and it was wrong before.** The union
+grid spans the MF34 grid, which starts far below 100 keV, and every union cell
+below the first group was clipped into it: group 0 averaged over 1e-5 eV to
+100 keV as well as its own range. Its relative variance for one order was 255
+(now 1.12); its absolute diagonals move by 36-71 %. Only group 0 moved.
+
 Regenerate after an intentional change with::
 
     REGEN_NUMERIC_GOLDENS=1 pytest kika/cov/tests/test_mf34_to_mg_golden.py
@@ -187,14 +193,27 @@ def test_the_sigma_weight_golden(collapsed):
 
 
 def test_the_collapse_is_symmetric(collapsed):
-    """Structural, so it survives the sigma source changing under it."""
+    """Structural, so it survives the sigma source changing under it.
+
+    Self blocks only: a cross block (L != L1) is an off-diagonal partition and
+    is not symmetrised; it is symmetric only if MF34 states it so.
+    """
     _, result = collapsed
     for i, matrix in enumerate(result.relative_matrices):
+        if (result.reaction_rows[i], result.l_rows[i]) != (result.reaction_cols[i],
+                                                           result.l_cols[i]):
+            continue
         matrix = np.asarray(matrix, dtype=float)
         np.testing.assert_allclose(
             matrix, matrix.T, rtol=1e-10, atol=0.0,
             err_msg=f"relative matrix {i} is not symmetric",
         )
+
+
+def test_unknown_normalisation_is_refused(micro_tape):
+    endf = read_endf(str(micro_tape))
+    with pytest.raises(ValueError, match="relative_normalization"):
+        MF34_to_MG(endf, energy_grid=GRID_EV, mt=2, relative_normalization="mf34")
 
 
 def test_the_grid_is_what_was_asked_for(collapsed):
