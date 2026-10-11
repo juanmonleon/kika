@@ -496,8 +496,6 @@ def _augment_nubar_grid(
         # ``edge == hi`` still needs a shoulder: the table's last point sits on
         # a bin boundary and (side='right') takes the *upper* bin's factor, so
         # without one the whole top of that bin ramps towards its neighbour.
-        # ``bins[-1]`` is excluded because ``clamp_top_edge`` already pulls a
-        # point there back into the last bin — there is no step to resolve.
         if not (lo < edge <= hi):
             continue
         if edge < hi:
@@ -505,6 +503,18 @@ def _augment_nubar_grid(
         shoulder_e = edge * (1.0 - shoulder)
         if shoulder_e > lo:
             candidates.append(shoulder_e)
+    # The outer MF31 edges are steps too when the table runs past them: outside
+    # the grid the factor is 1. ``bins[-1]``'s own node takes the last bin's
+    # factor (``clamp_top_edge``), so its step is just above it.
+    first, last = float(b[0]), float(b[-1])
+    if lo < first < hi:
+        candidates.append(first)
+        if first * (1.0 - shoulder) > lo:
+            candidates.append(first * (1.0 - shoulder))
+    if lo < last < hi:
+        candidates.append(last)
+        if last * (1.0 + shoulder) < hi:
+            candidates.append(last * (1.0 + shoulder))
 
     if candidates:
         cand = np.unique(np.asarray(candidates, dtype=float))
