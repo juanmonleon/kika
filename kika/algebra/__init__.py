@@ -46,7 +46,8 @@ integrals, 1/x weight), :mod:`.refine` (the adaptive refinement engine and
 :func:`to_linlin`), :mod:`.arithmetic` (sums, and tables read on one common
 grid to compare them), :mod:`.fold` (Gaussian folds), :mod:`.compare`
 (differences of two tables, and of a table against its own window or group
-averages).
+averages), :mod:`.thin` (dropping points of tables on one grid to a stated
+error).
 """
 from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS, METHODS,
                    interval_laws, laws_on_refinement, method_laws,
@@ -61,6 +62,7 @@ from .fold import box_gaussian_fold_nodes, fold_tabulated, gaussian_fold_nodes
 from .refine import RefinementError, RefineResult, refine, to_linlin
 from .arithmetic import add, on_common_grid
 from .prepared import prepare_evaluator
+from .thin import thin_common_grid
 from .compare import (difference, interpolate_to_grid, read_pair,
                       steps_difference, window_difference)
 
@@ -75,4 +77,5 @@ __all__ = [
     "RefinementError", "RefineResult", "refine", "to_linlin",
     "add", "on_common_grid", "prepare_evaluator",
     "difference", "interpolate_to_grid", "read_pair", "steps_difference", "window_difference",
+    "thin_common_grid",
 ]

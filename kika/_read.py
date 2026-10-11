@@ -452,10 +452,12 @@ def _noteUnparsedMFs(path, endf, report) -> None:
         report.warn(f"could not rescan {path} for unparsed MF sections: {exc}")
         return
     for mf in sorted(onTape - set(getattr(endf, "mf", {}))):
+        # MF2 and MF3 have parsers whatever else is on the tape, so an unread
+        # MF is never one that states a cross section kika reconstructs.
         report.unsupportedNode(
             f"MF{mf} is on the tape and kika has no parser for it; it was never "
-            f"read, so nothing in this suite reflects it"
-        )
+            f"read, so nothing in this suite reflects it",
+            unaffectedScopes=("cross-sections",) if mf not in (2, 3) else ())
 
 
 def _dropRedirectsWeActedOn(report, decodedCovarianceMFs) -> None:
@@ -478,4 +480,7 @@ def _dropRedirectsWeActedOn(report, decodedCovarianceMFs) -> None:
     prefixes = tuple(f"MF{mf} is present and parsed;" for mf in decodedCovarianceMFs)
     report.unsupported[:] = [
         entry for entry in report.unsupported if not entry.startswith(prefixes)
+    ]
+    report.scopeExclusions[:] = [
+        entry for entry in report.scopeExclusions if not entry["message"].startswith(prefixes)
     ]

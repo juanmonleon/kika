@@ -346,7 +346,10 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
     ejectile: Optional[str] = None
     for index, product in enumerate(mf6mt.products):
         if product.law < 0:
-            report.unsupportedNode(_deferralMessage(mt, index, product))
+            # A LAW<0 subsection points at MF5/MF15 for a distribution and
+            # carries no cross section: it cannot change MF3 or MF2.
+            report.unsupportedNode(_deferralMessage(mt, index, product),
+                                   unaffectedScopes=("cross-sections",))
             records.append(_productRecord(product, index, None, None, False,
                                           mat, mt, pad))
             continue

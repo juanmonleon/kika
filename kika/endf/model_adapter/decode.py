@@ -491,7 +491,9 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         report.unsupportedNode(
             f"MF{mf} is present and parsed; it is a covariance file, so it "
             f"belongs to the covarianceSuite (§25.1.1) and not to this "
-            f"reactionSuite. Call decodeCovarianceSuite for it."
+            f"reactionSuite. Call decodeCovarianceSuite for it.",
+            # Uncertainties, not values: no cross section depends on them.
+            unaffectedScopes=("cross-sections",),
         )
 
     # MF5 is decoded above, one section at a time. What stays here is the part

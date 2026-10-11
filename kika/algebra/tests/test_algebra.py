@@ -254,7 +254,7 @@ def test_algebra_imports_nothing_from_kika():
 #: ``kika.plotting.comparison`` the same month: reading a table on another's grid
 #: and subtracting is arithmetic, whoever draws the result.
 MATHEMATICS_ONLY = {"__init__", "arithmetic", "compare", "evaluate", "fold", "grid",
-                    "integrate", "laws", "prepared", "refine"}
+                    "integrate", "laws", "prepared", "refine", "thin"}
 
 
 def test_algebra_holds_only_its_mathematical_submodules():
