@@ -848,6 +848,8 @@ def _dropUnstatedReactions(suite, entries, onMissing, skipped, log):
 
     claimed = {int(key.mt) for rowKey, colKey, *_rest in entries
                for key in (rowKey, colKey) if key.mf == 33}
+    if not claimed:
+        return entries
     present, _sums = suiteSumLayout(suite)
     unstated = set(unstatedClaims(claimed, present))
     if not unstated:
@@ -1676,7 +1678,8 @@ def _refuseSumRuleBreakingRepairs(blocks, index, plan) -> None:
             "hides it. Use 'clip' for these blocks.")
 
 
-def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFindings=()):
+def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFindings=(),
+               stated=None):
     """Stage 2 and 3 of the pre-flight, as the pipeline runs them.
 
     ``None`` (the default) inspects the assembled blocks and applies
@@ -1692,6 +1695,10 @@ def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFinding
     whatever the mode -- warnings and defects one by one, notes counted -- and
     in ``auto`` mode each pre-flight finding that blocks or distorts is traced
     to them. They change nothing that is decided here.
+
+    *stated* maps the key of a block handed over as ``log1p(Σ)`` to Σ as the
+    file states it, so the pre-flight can tell a correlation above 1 the file
+    states from one the log transform makes.
 
     Returns ``(blocks, plan, report, applied, mode, attribution)``.
     """
@@ -1716,7 +1723,8 @@ def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFinding
             # `predict=False`: the recommendation only needs the spectrum, and
             # measuring three remedies on every block is the interactive
             # pre-flight's job, not the pipeline's.
-            report = inspect_blocks(blocks, families=families, predict=False)
+            report = inspect_blocks(blocks, families=families, predict=False,
+                                    stated=stated)
             info["summary"] = report.summary()
             info["samplable"] = report.samplable
             info["faithful"] = report.faithful
@@ -2490,7 +2498,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     blocks = [(key, np.log1p(np.asarray(matrix, dtype=float)) if key in logKeys
                else matrix) for key, matrix in blocks]
     blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
-        blocks, index, conditioningPlan, log, labels, layer1)
+        blocks, index, conditioningPlan, log, labels, layer1,
+        stated={key: statedBlocks[key] for key in logKeys})
 
     with log.timed("drawn", f"drew {nSamples} sample(s) of {len(blocks)} block(s)"):
         samples, drawDiagnostics = _drawEverything(
