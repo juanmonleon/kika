@@ -283,21 +283,126 @@ def relativiseAbsoluteSections(suite, binCentral, unionGrid, *, mf: int = 33,
                 )
             continue
 
-        rowGrid = np.asarray(form.rowGrid, dtype=float)
-        colGrid = (rowGrid if form.columnGrid is None
-                   else np.asarray(form.columnGrid, dtype=float))
-        lifted = (_lift_matrix(rowGrid, union)
-                  @ np.asarray(form.matrix, dtype=float)
-                  @ _lift_matrix(colGrid, union).T)
-        relative = _absolute_to_relative(
-            lifted, binCentral[mtRow], binCentral[mtCol])
-
-        kept.append(dataclasses.replace(
-            section,
-            form=dataclasses.replace(form, matrix=relative, isRelative=True,
-                             rowGrid=union.copy(), columnGrid=union.copy()),
-        ))
+        kept.append(_relativisedSection(section, form, union, union,
+                                        binCentral[mtRow], binCentral[mtCol]))
     return kept
+
+
+def _relativisedSection(section, form, rowUnion, colUnion, rowCentral, colCentral):
+    """*section*, stated absolute, restated relative on ``rowUnion x colUnion``.
+
+    The block is lifted onto the grids it will be assembled on first, and only
+    then divided by the central values binned on those same grids:
+    ``C_rel[i, j] = C_abs[i, j] / (σ̄_row[i] σ̄_col[j])``, a row or column whose
+    σ̄ is below the inert floor of :func:`_absolute_to_relative` set to zero.
+    """
+    from kika.sampling.model_blocks import _lift_matrix
+
+    rowUnion = np.asarray(rowUnion, dtype=float)
+    colUnion = np.asarray(colUnion, dtype=float)
+    rowGrid = np.asarray(form.rowGrid, dtype=float)
+    colGrid = (rowGrid if form.columnGrid is None
+               else np.asarray(form.columnGrid, dtype=float))
+    lifted = (_lift_matrix(rowGrid, rowUnion)
+              @ np.asarray(form.matrix, dtype=float)
+              @ _lift_matrix(colGrid, colUnion).T)
+    relative = _absolute_to_relative(lifted, rowCentral, colCentral)
+    return dataclasses.replace(
+        section,
+        form=dataclasses.replace(form, matrix=relative, isRelative=True,
+                                 rowGrid=rowUnion.copy(), columnGrid=colUnion.copy()),
+    )
+
+
+def binAveragedCentral(section, grid) -> np.ndarray:
+    """The central value of *section* averaged over each bin of *grid*.
+
+    The same average the carrier divides by (:func:`_bin_average_xs`): 1/E
+    weighted, exact under the table's own interpolation laws. *section* is an
+    MF3-like table (``energies`` and ``cross_sections`` or ``values``, and
+    ``energy_interpolation`` when it states laws, read lin-lin otherwise).
+    """
+    energies = np.asarray(section.energies, dtype=float)
+    values = getattr(section, "cross_sections", None)
+    if values is None:
+        values = section.values
+    return _bin_average_xs(
+        energies, np.asarray(values, dtype=float), list(grid),
+        interval_laws(energies.size, list(getattr(section, "energy_interpolation", ()))),
+    )
+
+
+def relativiseOnAssemblyGrids(suite, central, gridOf, *, mfs=(31, 33), mts=None):
+    """Restate every absolute MF31/MF33 section of *suite* as relative.
+
+    The model route's form of :func:`relativiseAbsoluteSections`, for a request
+    whose blocks may be laid out per component: each side of a section is
+    lifted onto the grid its own component is assembled on, ``gridOf(za, mf,
+    mt)``, and divided by its own central value binned there. Under the
+    ``global`` layout both grids are the one union and the matrix is the one
+    :func:`relativiseAbsoluteSections` gives.
+
+    *central* maps ``mf -> {mt: section}`` (:func:`binAveragedCentral` reads
+    them). *mts* maps ``mf`` to the MTs the request covers (``None`` for all of
+    that file); a section with a side outside it is left as it is, because the
+    request does not draw it.
+
+    Returns ``(sections, converted, unresolved, inertBins)``: the new section
+    list (*suite* is not modified); ``"MF33 MT2 x MT2"`` labels of the sections
+    converted; the labels of absolute sections whose MT has no central value,
+    left out of the list; and, per converted label, the number of bins where
+    the block states variance and σ̄ is below the inert floor, so the relative
+    covariance there is zero.
+    """
+    from kika._covariance_forms import require_single_matrix
+    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _za_of
+
+    out, converted, unresolved, inertBins = [], [], [], {}
+    for section in getattr(suite, "covarianceSections", suite):
+        mf = next((m for m in mfs if _is_endf_mf(section.rowData, m)), None)
+        if mf is None:
+            out.append(section)
+            continue
+        form = require_single_matrix(
+            getattr(section, "form", None),
+            f"MF{mf} covariance section {getattr(section, 'label', '?')!r}",
+        )
+        colData = section.columnData if section.columnData is not None else section.rowData
+        mtRow, mtCol = _endf_mt(section.rowData), _endf_mt(colData)
+        wanted = None if mts is None else mts.get(mf)
+        if form.isRelative or (wanted is not None
+                               and not (mtRow in wanted and mtCol in wanted)):
+            out.append(section)
+            continue
+        label = f"MF{mf} MT{mtRow} x MT{mtCol}"
+        table = central.get(mf, {})
+        if table.get(mtRow) is None or table.get(mtCol) is None:
+            unresolved.append(label)
+            continue
+        za = _za_of(suite, section)
+        rowUnion, colUnion = gridOf(za, mf, mtRow), gridOf(za, mf, mtCol)
+        rowCentral = binAveragedCentral(table[mtRow], rowUnion)
+        colCentral = binAveragedCentral(table[mtCol], colUnion)
+        result = _relativisedSection(section, form, rowUnion, colUnion,
+                                     rowCentral, colCentral)
+        converted.append(label)
+        lifted = np.asarray(require_single_matrix(result.form, "").matrix)
+        stated = (_lift_matrix_diag(form, rowUnion) if mtRow == mtCol else None)
+        if stated is not None:
+            dead = (stated != 0.0) & (np.diag(lifted) == 0.0)
+            if dead.any():
+                inertBins[label] = int(dead.sum())
+        out.append(result)
+    return out, converted, unresolved, inertBins
+
+
+def _lift_matrix_diag(form, union) -> np.ndarray:
+    """The diagonal of an absolute self block lifted onto *union*."""
+    from kika.sampling.model_blocks import _lift_matrix
+
+    grid = np.asarray(form.rowGrid, dtype=float)
+    lift = _lift_matrix(grid, np.asarray(union, dtype=float))
+    return np.einsum("ij,jk,ik->i", lift, np.asarray(form.matrix, dtype=float), lift)
 
 
 def loadCrossSectionBlocks(endfObj, mtList, centralSections, *, mf: int = 33,
@@ -792,8 +897,8 @@ def _absolute_to_relative(
     floor_c = max(SIGMA_FLOOR_REL * sc_max, SIGMA_FLOOR_ABS)
     sr = np.where(sigma_row > floor_r, sigma_row, 0.0)
     sc = np.where(sigma_col > floor_c, sigma_col, 0.0)
-    inv_sr = np.where(sr > 0, 1.0 / sr, 0.0)
-    inv_sc = np.where(sc > 0, 1.0 / sc, 0.0)
+    inv_sr = np.divide(1.0, sr, out=np.zeros_like(sr, dtype=float), where=sr > 0)
+    inv_sc = np.divide(1.0, sc, out=np.zeros_like(sc, dtype=float), where=sc > 0)
     return (mat_abs * inv_sr[:, None]) * inv_sc[None, :]
 
 

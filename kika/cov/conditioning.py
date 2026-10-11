@@ -838,7 +838,23 @@ def _check_negative_variance(matrix: np.ndarray) -> Optional[Finding]:
     )
 
 
-def _check_correlation_bound(matrix: np.ndarray) -> Optional[Finding]:
+def _worst_correlation(matrix: np.ndarray) -> float:
+    """Largest |ρ| of *matrix* over its rows with a positive finite variance."""
+    diagonal = np.diag(matrix)
+    usable = np.isfinite(diagonal) & (diagonal > 0.0)
+    if usable.sum() < 2:
+        return 0.0
+    sub = matrix[np.ix_(usable, usable)]
+    sigma = np.sqrt(np.diag(sub))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        correlation = np.abs(sub / np.outer(sigma, sigma))
+    np.fill_diagonal(correlation, 0.0)
+    correlation = correlation[np.isfinite(correlation)]
+    return float(correlation.max()) if correlation.size else 0.0
+
+
+def _check_correlation_bound(matrix: np.ndarray,
+                             stated: Optional[np.ndarray] = None) -> Optional[Finding]:
     diagonal = np.diag(matrix)
     usable = np.isfinite(diagonal) & (diagonal > 0.0)
     if usable.sum() < 2:
@@ -860,6 +876,25 @@ def _check_correlation_bound(matrix: np.ndarray) -> Optional[Finding]:
     # will find the tiny negative eigenvalue and recommend clip), not a reason
     # to refuse the draw. Measured on U-235 JEFF-4.0 MF33: six correlations at
     # 1.0000002, nothing else wrong with the matrix.
+    # A matrix sampled in log space is log1p(Σ), and log1p is concave: a pair
+    # the file states fully correlated with different σ comes out with
+    # log1p(σ_i σ_j) > sqrt(log1p σ_i² · log1p σ_j²), i.e. |ρ| > 1. No
+    # lognormal reproduces such a pair exactly, but the file is not at fault,
+    # so this is not a refusal: the definiteness check finds the negative
+    # eigenvalue it implies and recommends clip, whose projection restores
+    # |ρ| <= 1 and only raises variances. *stated* is Σ as the file gives it.
+    if stated is not None and _worst_correlation(np.asarray(stated, dtype=float)) - 1.0 <= CORRELATION_ROUNDOFF:
+        return Finding(
+            check="correlation_bound",
+            severity=NOTE,
+            summary=(
+                f"{count} correlation(s) of the log-space matrix above 1, worst "
+                f"|ρ| = {worst:.4f}, from the log1p transform of correlations the "
+                f"file states within [-1, 1]; left to the definiteness check"
+            ),
+            evidence={"n_out_of_range": count, "max_abs_correlation": worst,
+                      "roundoff": False, "log_transform": True},
+        )
     if worst - 1.0 <= CORRELATION_ROUNDOFF:
         return Finding(
             check="correlation_bound",
@@ -1270,6 +1305,7 @@ def inspect_matrix(
     psd_candidates: Sequence[str] = DEFAULT_PSD_CANDIDATES,
     predict: bool = True,
     predict_max_order: int = PREDICT_MAX_ORDER,
+    stated=None,
 ) -> BlockReport:
     """Run every check against one covariance matrix.
 
@@ -1299,6 +1335,11 @@ def inspect_matrix(
         Whether to run those repairs at all. Turning it off makes the
         inspection cheap and leaves the definiteness finding with unmeasured
         options; blocks over ``predict_max_order`` turn it off themselves.
+    stated :
+        When *matrix* is ``log1p(Σ)`` of a relative covariance to be drawn in
+        log space, Σ as the file states it. A correlation above 1 that only
+        the log transform produces (the file's are within [-1, 1]) is then a
+        note left to the definiteness check, not a refusal.
 
     Returns
     -------
@@ -1349,7 +1390,7 @@ def inspect_matrix(
         _check_finite(matrix),
         _check_negative_variance(matrix),
         _check_symmetry(matrix),
-        _check_correlation_bound(matrix),
+        _check_correlation_bound(matrix, stated),
         _check_definiteness(
             matrix, spectrum=spectrum, predict=do_predict,
             candidates=psd_candidates, inert_floor=inert_floor,
@@ -1378,7 +1419,8 @@ def _per_block(value, key, default=None):
     return value
 
 
-def inspect_blocks(blocks, *, families=None, square_form=None, **kwargs) -> ConditioningReport:
+def inspect_blocks(blocks, *, families=None, square_form=None, stated=None,
+                   **kwargs) -> ConditioningReport:
     """Run :func:`inspect_matrix` over a set of blocks.
 
     *blocks* takes the same three shapes :func:`kika.sampling.core.draw_samples`
@@ -1400,6 +1442,7 @@ def inspect_blocks(blocks, *, families=None, square_form=None, **kwargs) -> Cond
             key=key,
             families=_per_block(families, key),
             square_form=_per_block(square_form, key, default=True),
+            stated=None if stated is None else stated.get(key),
             **kwargs,
         )
         for key, matrix in as_blocks(blocks)

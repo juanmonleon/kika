@@ -152,6 +152,13 @@ class ScatteringRadius:
     #: and its goldens did not move. :mod:`kika.processing.resonances` works in
     #: fm natively.
     unit: Optional[str] = None
+    #: The energy domain, in eV, over which a *constant* radius is stated: the
+    #: ``domainMin``/``domainMax`` of GNDS's ``constant1d``. ``None`` when the
+    #: source did not state one (ENDF keeps it on the range record, in
+    #: provenance). It is what an ENDF writer needs for the EL/EH of an MF2
+    #: range that holds the radius alone.
+    domainMin: Optional[float] = None
+    domainMax: Optional[float] = None
 
     @property
     def isEnergyDependent(self) -> bool:

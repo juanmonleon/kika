@@ -59,10 +59,11 @@ __all__ = ["PerturbationSet", "SEMANTICS", "EDGE_RULE", "FACTORS_STEM",
 SEMANTICS = ("multiplicative-relative", "additive-absolute")
 
 #: Which of :data:`SEMANTICS` a block of each file acts under, read off the
-#: file rather than chosen. MF31, MF33 and MF34 are drawn from their relative
-#: sections -- an absolute section is left out of the draw on the model route,
-#: and the run records it (``joint_blocks.absoluteSectionsLeftOut``) -- so
-#: their blocks are factors and the applier multiplies. **MF35
+#: file rather than chosen. MF31, MF33 and MF34 are drawn as relative
+#: covariances -- an absolute MF31/MF33 section is made relative before the
+#: draw, and an absolute MF34 section is left out and recorded
+#: (``joint_blocks.absoluteSectionsLeftOut``) -- so their blocks are factors
+#: and the applier multiplies. **MF35
 #: is the exception and it is not a variant of the same thing**: LB=7 is the
 #: covariance of group-integrated *probabilities*, which are dimensionless and
 #: sum to one, so a draw of it is a vector of absolute deltas on quantities the

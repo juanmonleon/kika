@@ -848,6 +848,8 @@ def _dropUnstatedReactions(suite, entries, onMissing, skipped, log):
 
     claimed = {int(key.mt) for rowKey, colKey, *_rest in entries
                for key in (rowKey, colKey) if key.mf == 33}
+    if not claimed:
+        return entries
     present, _sums = suiteSumLayout(suite)
     unstated = set(unstatedClaims(claimed, present))
     if not unstated:
@@ -1379,6 +1381,161 @@ def _readCovarianceFrom(path, expectedZaid, log):
 RESONANCE_REGION_MODES = ("reconstructed", "evaluated")
 
 
+def _centralValuesForConversion(endfObj, sourcePath, mfs, tolerance, njoyExe):
+    """``{mf: {mt: section}}``: what an absolute MF31/MF33 section is relative to.
+
+    MF33 is a covariance of the cross section itself, resonances included, so
+    its central value is the full σ(E). A tape whose MF3 already is that (no
+    resonance region, or the LRP=2 base the reconstructed route writes) gives
+    it directly. One whose MF3 is only a background (LRP=1 with resonance
+    ranges, i.e. ``resonanceRegion="evaluated"``) gives it through NJOY RECONR
+    at the run's tolerance: the reconstruction the ``reconstructed`` route and
+    the decoder's mixed-block conversion use, so a block converts to the same
+    relative matrix whichever route is taken. A summation reaction absent from
+    MF3 is the sum of its partials (``cross_section_or_sum``).
+
+    MF31's central value is ν̄ from MF1, read the way the file-level sampler
+    reads it. A GNDS source carries no ENDF tape, so it offers neither.
+    """
+    if endfObj is None:
+        return {}
+    central = {}
+    if 33 in mfs:
+        from kika.endf.classes.mf33.mf33 import cross_section_or_sum
+        from kika.sampling.resonance_region import needsReconstruction
+
+        if needsReconstruction(endfObj):
+            from kika.processing.njoy_pendf_cache import attach_pendf
+
+            xs = attach_pendf(
+                endfObj, endf_path=sourcePath, njoy_executable=njoyExe,
+                tolerance=tolerance,
+                why="making an absolute MF33 section relative to the cross "
+                    "section of a resonance region")
+        else:
+            mf3 = endfObj.get_file(3) if hasattr(endfObj, "get_file") else None
+            xs = dict(getattr(mf3, "sections", None) or {})
+        central[33] = {mt: cross_section_or_sum(xs, mt) for mt in _mtsOfCovariances(endfObj, 33)}
+    if 31 in mfs:
+        from kika.sampling.mf31_sampling import _nubar_central_values
+
+        mf1 = endfObj.get_file(1) if hasattr(endfObj, "get_file") else None
+        central[31] = _nubar_central_values(mf1) if mf1 is not None else {}
+    return central
+
+
+def _mtsOfCovariances(endfObj, mf):
+    """Every MT a covariance file of *endfObj* names, on either side of a block."""
+    covFile = endfObj.get_file(mf) if hasattr(endfObj, "get_file") else None
+    mts = set()
+    for mt, section in (getattr(covFile, "sections", None) or {}).items():
+        mts.add(int(mt))
+        for sub in getattr(section, "subsections", ()) or ():
+            mt1 = getattr(sub, "mt1", None)
+            if mt1 is not None:
+                mts.add(int(mt1))
+    return sorted(mts)
+
+
+def _relativiseAbsoluteSections(covariances, request, endfObj, sourcePath, *,
+                                grouping, onMissing, tolerance, njoyExe,
+                                skipped, log):
+    """*covariances* with its requested absolute MF31/MF33 sections made relative.
+
+    The appliers multiply, so a block is drawn as a relative covariance. An
+    absolute section ``C_abs`` (barns², or ν̄²) is restated as
+    ``C_abs[i, j] / (σ̄_i σ̄_j)``, each side lifted onto the grid its component
+    is assembled on and divided by its central value averaged over those bins
+    (:func:`kika.sampling.mf33_sampling.relativiseOnAssemblyGrids`). For a
+    cross-section-only request, laid out on one union grid, that is the matrix
+    the file-level sampler converts to.
+
+    A side whose central value cannot be found raises under
+    ``onMissing="raise"``; under ``"skip"`` the section is left out and a note
+    says so. Bins where σ̄ is below the inert floor get zero relative
+    covariance, and a note counts them.
+
+    Returns ``(covariances, notes)``.
+    """
+    import dataclasses
+
+    from kika.sampling.joint_blocks import (CROSS_SECTION_MF, _asSelections,
+                                            _crossSectionKey, collectEntries,
+                                            requestIndex)
+    from kika.sampling.mf33_sampling import relativiseOnAssemblyGrids
+    from kika.sampling.model_blocks import _cross_section_entries, _selection
+
+    selections = _asSelections(request)
+    wanted = [sel for sel in selections
+              if sel.mf in CROSS_SECTION_MF and sel.relative is True]
+    if not wanted or not any(
+            _cross_section_entries(covariances, mf=sel.mf, mt=sel.mt, relative=False)
+            for sel in wanted):
+        return covariances, []
+
+    mfs = sorted({sel.mf for sel in wanted})
+    mts = {}
+    for sel in wanted:
+        chosen = _selection(sel.mt)
+        if sel.mf not in mts:
+            mts[sel.mf] = chosen
+        elif mts[sel.mf] is None or chosen is None:
+            mts[sel.mf] = None
+        else:
+            mts[sel.mf] = frozenset(mts[sel.mf]) | chosen
+
+    # The grids the blocks will be assembled on, with the absolute sections in:
+    # the conversion divides by σ̄ binned on exactly those bins.
+    widened = [dataclasses.replace(sel, relative=None)
+               if (sel.mf in CROSS_SECTION_MF and sel.relative is True) else sel
+               for sel in selections]
+    index = requestIndex(collectEntries(covariances, widened), grouping=grouping)
+    grids = {key: grid for meta in index.values()
+             for key, grid in meta["grids"].items()}
+
+    def gridOf(za, mf, mt):
+        return np.asarray(grids[_crossSectionKey((za, mt), mf)], dtype=float)
+
+    central = _centralValuesForConversion(endfObj, sourcePath, mfs, tolerance, njoyExe)
+    sections, converted, unresolved, inertBins = relativiseOnAssemblyGrids(
+        covariances, central, gridOf, mfs=tuple(mfs), mts=mts)
+
+    notes = []
+    if unresolved:
+        why = ("this source is GNDS and carries no ENDF tape to take a central "
+               "value from" if endfObj is None else
+               "the evaluation states no central value (MF3 or MF1) for the "
+               "reaction, nor the partials of a sum")
+        message = (f"{len(unresolved)} absolute covariance section(s) cannot be "
+                   f"made relative, because {why}: {', '.join(unresolved)}")
+        if onMissing == "raise":
+            raise ValueError(
+                message + ". Drop them from the request, or pass "
+                "onMissing='skip' to perturb the rest and record the omission")
+        note = message + "; they were not drawn"
+        skipped.append(note)
+        log.warning(note, subject="absolute sections", sections=list(unresolved))
+    if converted:
+        note = (f"{len(converted)} absolute covariance section(s) made relative, "
+                f"divided by the central value averaged over each bin (1/E "
+                f"weighted): {', '.join(converted)}")
+        notes.append(note)
+        log.event("request", note, subject="absolute sections",
+                  sections=list(converted))
+    for label, count in inertBins.items():
+        note = (f"{label}: {count} bin(s) state an absolute variance where the "
+                f"central value is below the inert floor, so the relative "
+                f"covariance there is zero and nothing is perturbed")
+        notes.append(note)
+        log.note(note, subject="absolute sections")
+
+    if dataclasses.is_dataclass(covariances):
+        covariances = dataclasses.replace(covariances, covarianceSections=sections)
+    else:
+        covariances = sections
+    return covariances, notes
+
+
 def _reconstructResonanceRegion(sourcePath: Path, endfObj, njoyExe, tolerance: float,
                                 log):
     """``(suite, endfObj, basePath, pendfPath)`` for a tape whose MF3 is a background.
@@ -1521,7 +1678,8 @@ def _refuseSumRuleBreakingRepairs(blocks, index, plan) -> None:
             "hides it. Use 'clip' for these blocks.")
 
 
-def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFindings=()):
+def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFindings=(),
+               stated=None):
     """Stage 2 and 3 of the pre-flight, as the pipeline runs them.
 
     ``None`` (the default) inspects the assembled blocks and applies
@@ -1537,6 +1695,10 @@ def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFinding
     whatever the mode -- warnings and defects one by one, notes counted -- and
     in ``auto`` mode each pre-flight finding that blocks or distorts is traced
     to them. They change nothing that is decided here.
+
+    *stated* maps the key of a block handed over as ``log1p(Σ)`` to Σ as the
+    file states it, so the pre-flight can tell a correlation above 1 the file
+    states from one the log transform makes.
 
     Returns ``(blocks, plan, report, applied, mode, attribution)``.
     """
@@ -1561,7 +1723,8 @@ def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFinding
             # `predict=False`: the recommendation only needs the spectrum, and
             # measuring three remedies on every block is the interactive
             # pre-flight's job, not the pipeline's.
-            report = inspect_blocks(blocks, families=families, predict=False)
+            report = inspect_blocks(blocks, families=families, predict=False,
+                                    stated=stated)
             info["summary"] = report.summary()
             info["samplable"] = report.samplable
             info["faithful"] = report.faithful
@@ -1898,7 +2061,12 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     source
         A path to an ENDF tape, a path to a GNDS ``reactionSuite`` whose
         covariance sibling sits beside it, or an already parsed ENDF object.
-        ``endf-delta`` needs the ENDF path, because it patches that file.
+        ``endf-delta`` needs the ENDF path, because it patches that file. A
+        GNDS source is written to ``endf-tape`` and ``ace`` through the ENDF
+        bookkeeping derived from the model (:mod:`kika.endf.model_adapter.derive`),
+        unless it has resolved or unresolved resonance parameters: those are
+        not written to MF2, and the run refuses instead of writing a tape whose
+        MF3 there is only the background.
     request
         What to perturb, in either spelling
         :func:`~kika.sampling.joint_blocks.normaliseRequest` accepts. By
@@ -2136,15 +2304,22 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         )
     if sourceFormat == "gnds":
         needsTape = [f for f in formats if f in ("endf-tape", "ace")]
-        hasHeader = bool(getattr(getattr(suite, "provenance", None), "headerFields", None))
-        if needsTape and not hasHeader and not dryRun and outputDir is not None:
+        resonances = getattr(suite, "resonances", None)
+        withParameters = resonances is not None and (
+            bool(resonances.resolved) or resonances.unresolved is not None)
+        hasMF2 = getattr(getattr(resonances, "provenance", None),
+                         "sourceFormat", None) == "endf"
+        if (needsTape and withParameters and not hasMF2
+                and not dryRun and outputDir is not None):
             raise ValueError(
-                f"{needsTape} need an ENDF tape written from the model, and a "
-                f"suite read from GNDS cannot be written as one yet: it carries "
-                f"no MF1/451 header, no AWR and no Q/LR for its summed reactions, "
-                f"and the ENDF encoders refuse to invent them, so a GNDS "
-                f"source can be perturbed to 'gnds' only. (MAT would be "
-                f"{_matOf(suite)} from the library's table when it does.)"
+                f"{needsTape} need an ENDF tape written from the model, and the "
+                f"resonance parameters of a suite read from GNDS are not written "
+                f"to MF2: QX, LRX, LAD and the particle-pair columns have no "
+                f"model node to derive them from. Without MF2 the tape's MF3 in "
+                f"the resonance region is only the background, so this GNDS "
+                f"source can be perturbed to 'gnds' only. A GNDS evaluation "
+                f"with no resolved or unresolved region is written as a tape "
+                f"(MAT {_matOf(suite)} from the library's table)."
             )
         if mat is None:
             mat = _matOf(suite)
@@ -2234,13 +2409,18 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     for note in magnitudeNotes:
         skipped.append(note)
         log.warning(note, subject="MF34")
+    covariances, conversionNotes = _relativiseAbsoluteSections(
+        covariances, request, endfObj, originalSourcePath, grouping=grouping,
+        onMissing=onMissing, tolerance=reconstructionTolerance,
+        njoyExe=njoyExe or (ace.njoyExe if ace is not None else None),
+        skipped=skipped, log=log)
     from kika.sampling.joint_blocks import absoluteSectionsLeftOut
 
     leftOut = absoluteSectionsLeftOut(covariances, request)
     if leftOut:
         note = (f"{len(leftOut)} absolute covariance section(s) not drawn -- "
-                f"the appliers multiply, and the model route does not convert "
-                f"an absolute section to a relative one: {', '.join(leftOut)}")
+                f"the appliers multiply, and an absolute MF34 section is not "
+                f"made relative: {', '.join(leftOut)}")
         skipped.append(note)
         log.warning(note, subject="absolute sections", sections=leftOut)
     log.event("request", _describeRequestForPeople(request),
@@ -2318,7 +2498,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     blocks = [(key, np.log1p(np.asarray(matrix, dtype=float)) if key in logKeys
                else matrix) for key, matrix in blocks]
     blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
-        blocks, index, conditioningPlan, log, labels, layer1)
+        blocks, index, conditioningPlan, log, labels, layer1,
+        stated={key: statedBlocks[key] for key in logKeys})
 
     with log.timed("drawn", f"drew {nSamples} sample(s) of {len(blocks)} block(s)"):
         samples, drawDiagnostics = _drawEverything(
@@ -2349,7 +2530,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                        aceOptions=ace if "ace" in formats else None,
                        # A skipped quantity is true of every sample and stated
                        # by no output file, which is exactly what notes are for.
-                       notes=list(resonanceNotes) + list(skipped))
+                       notes=list(resonanceNotes) + list(conversionNotes)
+                       + list(skipped))
     orphanNote = _orphanPhotonNote(suite, index)
     if orphanNote is not None:
         result.notes.append(orphanNote)
