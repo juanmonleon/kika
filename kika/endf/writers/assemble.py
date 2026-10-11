@@ -809,15 +809,18 @@ def _resample_reconstructed_endf(suite, label):
 
     Moving x while retaining y can exceed the budget on steep resonance
     flanks. Resample the verified linear table at rounded x through algebra.
-    Unrepresentable boundaries or colliding knots retain the original form;
-    the mandatory reload check then decides whether publication is possible.
+    Unrepresentable boundaries retain the original form for mandatory reload
+    rejection. Reconstructed forms keep colliding knots. Continuous Heated
+    regions coalesce rounded knots and resample once per representable energy;
+    mandatory reload and serialization checks decide whether that is acceptable.
     """
     from copy import deepcopy
     import numpy as np
     from kika._records import round_to_precise_endf_field
     from kika.algebra import evaluate
-    from kika.nuclear_data.model import Regions1d
+    from kika.nuclear_data.model import Regions1d, Heated
     output = deepcopy(suite)
+    coalesce = any(isinstance(style, Heated) and style.label == label for style in output.styles)
     for reaction in (*output.reactions, *output.sums):
         form = reaction.crossSection.get(label)
         if form is None:
@@ -827,6 +830,16 @@ def _resample_reconstructed_endf(suite, label):
             x = np.asarray(curve.xs)
             rounded = round_to_precise_endf_field(x)
             if rounded[0] != x[0] or rounded[-1] != x[-1]:
+                continue
+            if coalesce:
+                # Within each continuous Heated region, rounded knots can
+                # coincide even when the float inputs differ by one ULP.
+                # Actual jumps remain in separate regions. Resample once per
+                # representable energy; the writer still checks both faces,
+                # union knots and its original serialization budget.
+                rounded = np.unique(rounded)
+                curve.ys = np.asarray(evaluate(x, curve.ys, 2, rounded))
+                curve.xs = rounded
                 continue
             # Keep both sides of a colliding pair (including real jumps),
             # while still correcting the ordinary flanks elsewhere.

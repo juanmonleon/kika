@@ -92,6 +92,31 @@ def test_verified_heated_publication(tmp_path, processed):
     assert report.isClean and pendfHeader(path)['temp'] == 600.
 
 
+def test_verified_heated_publication_coalesces_redundant_ulp_knots(tmp_path, processed):
+    suite, result = processed
+    before = {}
+    for reaction in (*suite.reactions, *suite.sums):
+        form = reaction.crossSection['hot']
+        index = len(form.xs)//2
+        energy = float(form.xs[index])
+        neighbour = np.nextafter(energy, np.inf)
+        value = np.interp(neighbour, form.xs, form.ys)
+        form.xs = np.insert(form.xs, index+1, neighbour)
+        form.ys = np.insert(form.ys, index+1, value)
+        before[reaction.ENDF_MT] = (form.xs.copy(), form.ys.copy())
+    path = tmp_path/'coalesced.pendf'
+    assert writeHeatedEndfTape(suite, result, path).isClean
+    tape = read_endf(str(path), mf_numbers=[3])
+    for reaction in (*suite.reactions, *suite.sums):
+        section = tape.mf[3].mt[reaction.ENDF_MT]
+        assert np.all(np.diff(section.energies)>0)
+        x,y = before[reaction.ENDF_MT]
+        np.testing.assert_array_equal(reaction.crossSection['hot'].xs,x)
+        np.testing.assert_array_equal(reaction.crossSection['hot'].ys,y)
+        reread = np.interp(x,section.energies,section.cross_sections)
+        assert np.max(abs(reread-y)/(result.options.atol+result.options.rtol*abs(y))) <= result.options.serialization_share
+
+
 @pytest.mark.parametrize('date', ['2026-10-11','20261011','2026-W41-7'])
 def test_explicit_processing_date_and_invalid_date(processed,date):
     from kika.nuclear_data.model import Styles
