@@ -119,10 +119,13 @@ def test_in_log_space_the_plan_path_moment_matches_the_matrix_it_samples(blocks)
     null-direction debris; it is not -- truncating the null directions leaves
     the number unchanged, and the identity below is exact.
     """
+    # In log space the run conditions and samples log1p(Σ), the covariance of
+    # ln f, so that is the matrix whose diagonal the mean correction reads.
+    logBlocks = [(key, np.log1p(matrix)) for key, matrix in blocks]
     plan = ConditioningPlan(steps=tuple(
         PlanStep(key=key, remedy="clip", reason="pipeline gate")
         for key, _matrix in blocks))
-    conditioned, _applied = apply_plan(blocks, plan)
+    conditioned, _applied = apply_plan(logBlocks, plan)
 
     planned = perturbFromModel(TAPE, REQUEST, 1, seed=SEED, conditioningPlan=plan,
                                psdMethod="none", space="log")
@@ -130,7 +133,7 @@ def test_in_log_space_the_plan_path_moment_matches_the_matrix_it_samples(blocks)
                                  space="log", conditioningPlan=False)
 
     somethingMoved = False
-    for (key, stated), (_key, clipped) in zip(blocks, conditioned):
+    for (key, stated), (_key, clipped) in zip(logBlocks, conditioned):
         components = planned.index[key]["components"]
         stride = planned.index[key]["stride"]
         for at, component in enumerate(components):

@@ -212,3 +212,26 @@ def test_eigen_and_svd_agree_on_the_covariance_they_realise():
     assert svd[0]["rank"] == eig[0]["rank"]
     assert eig[0]["realised_covariance_error"] < 0.1
     assert svd[0]["realised_covariance_error"] < 0.1
+
+
+def test_log_space_factors_reproduce_the_relative_covariance():
+    """sigma_rel = 50 %: Cov(f) must be Sigma, not expm1(Sigma) (14 % wider).
+
+    Sigma used to be decomposed as the covariance of ln f directly.
+    """
+    sigma = np.array([[0.25, 0.10], [0.10, 0.16]])
+    samples, _ = draw_samples([("x", sigma)], 2 ** 16, space="log",
+                              returns="factors", sampling_method="random", seed=3)
+    f = samples["x"]
+    np.testing.assert_allclose(f.mean(axis=0), 1.0, atol=0.01)
+    np.testing.assert_allclose(np.cov(f, rowvar=False), sigma, rtol=0.04, atol=0.003)
+    assert np.cov(f, rowvar=False)[0, 0] < np.expm1(0.25) * 0.97
+
+
+def test_a_prepared_log_matrix_is_not_transformed_twice():
+    from kika.sampling.core import draw_prepared_samples
+    sigma = np.array([[0.25]])
+    a, _ = draw_samples([("x", sigma)], 64, space="log", returns="factors", seed=5)
+    b, _ = draw_prepared_samples([("x", np.log1p(sigma))], 64, space="log",
+                                 returns="factors", seed=5)
+    np.testing.assert_array_equal(a["x"], b["x"])

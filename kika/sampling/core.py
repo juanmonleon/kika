@@ -57,7 +57,7 @@ from ..cov.decomposition import eigen_decomposition, svd_decomposition
 # core → generators and generators does not import core, so there is no cycle.
 from .generators import _uncorrelated
 
-__all__ = ["draw_samples", "BLOCK_SEED_STRIDE"]
+__all__ = ["draw_samples", "draw_prepared_samples", "BLOCK_SEED_STRIDE"]
 
 #: Added to the base seed once per block index. A prime, so that two callers
 #: whose seeds differ by a small integer do not end up sharing draws on some
@@ -107,9 +107,12 @@ def draw_samples(
         Number of realisations per block.
     space
         ``"linear"`` draws ``Y = Z L^T`` from the matrix as given.
-        ``"log"`` treats the matrix as the covariance of ``log`` of the
-        quantity and moment-matches so the factors have unit mean. Only
-        meaningful together with ``returns="factors"``.
+        ``"log"`` takes the matrix as a **relative** covariance Σ and draws
+        lognormal factors that reproduce it exactly: ``ln f`` is normal with
+        covariance ``log1p(Σ)`` and mean ``-diag(log1p Σ)/2``, so
+        ``E[f] = 1`` and ``Cov(f) = Σ``. Only meaningful together with
+        ``returns="factors"``. A caller whose matrix is already ``log1p(Σ)``
+        (it conditioned it in that space) calls :func:`draw_prepared_samples`.
     returns
         ``"deltas"`` returns ``Y`` — absolute departures, which is what an
         absolute covariance describes. ``"factors"`` returns ``Y + 1`` (linear)
@@ -167,30 +170,45 @@ def draw_samples(
         the extreme eigenvalue ratio and the realised-versus-input covariance
         error on the retained subspace.
     """
-    if returns not in ("deltas", "factors"):
-        raise ValueError(f"returns must be 'deltas' or 'factors', got {returns!r}")
-    if space not in ("linear", "log"):
-        raise ValueError(f"space must be 'linear' or 'log', got {space!r}")
-    if space == "log" and returns == "deltas":
-        raise ValueError(
-            "space='log' with returns='deltas' is not a thing: a log-space draw "
-            "describes multiplicative factors, so ask for returns='factors'"
-        )
+    method = _validated_method(space, returns, decomposition_method)
+    items = _as_blocks(blocks)
+    if space == "log":
+        # A relative covariance Σ is the covariance of f = exp(g) with
+        # Cov(g) = log1p(Σ): Cov(f)_ij = exp(Cov(g)_ij) - 1. Drawing g from Σ
+        # itself would give Cov(f) = expm1(Σ), 14 % too wide at 50 %.
+        items = [(key, np.log1p(np.asarray(matrix, dtype=float)))
+                 for key, matrix in items]
+    return draw_prepared_samples(
+        items, n_samples, space=space, returns=returns,
+        decomposition_method=method, sampling_method=sampling_method,
+        seed=seed, psd_method=psd_method, null_tol=null_tol, dtype=dtype,
+        verbose=verbose, logger=logger)
 
-    method = decomposition_method.lower()
-    if method == "cholesky":
-        raise ValueError(
-            "Cholesky is refused here. These covariances are rank deficient by "
-            "construction — an MF35 band typically has two thirds of its "
-            "directions null — so a Cholesky factor is either a failure or a "
-            "fiction. Use 'svd' (default) or 'eigen'."
-        )
-    if method not in ("svd", "eigen"):
-        raise ValueError(
-            f"decomposition_method must be 'svd' or 'eigen', got "
-            f"{decomposition_method!r}"
-        )
 
+def draw_prepared_samples(
+    blocks,
+    n_samples: int,
+    *,
+    space: str = "linear",
+    returns: str = "deltas",
+    decomposition_method: str = "svd",
+    sampling_method: str = "sobol",
+    seed: Optional[int] = None,
+    psd_method: str = "auto",
+    null_tol: Optional[float] = DEFAULT_NULL_TOL,
+    dtype=np.float64,
+    verbose: bool = True,
+    logger=None,
+) -> Tuple[Dict[Hashable, np.ndarray], Dict[Hashable, Dict[str, Any]]]:
+    """:func:`draw_samples` for blocks already in the space the draw happens in.
+
+    With ``space="log"`` each matrix is taken as ``log1p(Σ)`` -- the covariance
+    of ``ln f`` -- and not transformed again. That is what a caller that
+    conditions the matrix in log space holds
+    (:func:`kika.sampling.multigroup_draw.draw_relative_factors`). Everything
+    else is :func:`draw_samples`'.
+    """
+    method = _validated_method(space, returns, decomposition_method)
     items = _as_blocks(blocks)
     samples: Dict[Hashable, np.ndarray] = {}
     diagnostics: Dict[Hashable, Dict[str, Any]] = {}
@@ -216,6 +234,35 @@ def draw_samples(
         diagnostics[key] = info
 
     return samples, diagnostics
+
+
+def _validated_method(space: str, returns: str, decomposition_method: str) -> str:
+    """The checks both entry points make; returns the lower-cased method."""
+    if returns not in ("deltas", "factors"):
+        raise ValueError(f"returns must be 'deltas' or 'factors', got {returns!r}")
+    if space not in ("linear", "log"):
+        raise ValueError(f"space must be 'linear' or 'log', got {space!r}")
+    if space == "log" and returns == "deltas":
+        raise ValueError(
+            "space='log' with returns='deltas' is not a thing: a log-space draw "
+            "describes multiplicative factors, so ask for returns='factors'"
+        )
+
+    method = decomposition_method.lower()
+    if method == "cholesky":
+        raise ValueError(
+            "Cholesky is refused here. These covariances are rank deficient by "
+            "construction — an MF35 band typically has two thirds of its "
+            "directions null — so a Cholesky factor is either a failure or a "
+            "fiction. Use 'svd' (default) or 'eigen'."
+        )
+    if method not in ("svd", "eigen"):
+        raise ValueError(
+            f"decomposition_method must be 'svd' or 'eigen', got "
+            f"{decomposition_method!r}"
+        )
+
+    return method
 
 
 def _draw_one_block(

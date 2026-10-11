@@ -21,6 +21,8 @@ matrices. This file exists for the one property that needs a real covariance.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -34,7 +36,8 @@ from kika.sampling.core import draw_samples
 from kika.sampling.endf_perturbation import load_mf34_suite
 from kika.sampling.model_blocks import legendre_covariance_blocks
 
-STRUCTURAL = "kika/endf/tests/data/micro_fe56_structural.endf"
+DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
+STRUCTURAL = str(DATA / "micro_fe56_structural.endf")
 
 #: What the pipeline ships: linear, svd, random.
 DRAW = dict(space="linear", returns="factors", decomposition_method="svd",
@@ -136,7 +139,7 @@ def test_a_derived_plan_closes_the_same_loop_as_a_psd_one():
     from kika.sampling.mf33_sampling import load_mf33_covariance
     from kika.sampling.multigroup_draw import draw_relative_factors
 
-    micro = "kika/endf/tests/data/micro_fe56_mf33.endf"
+    micro = str(DATA / "micro_fe56_mf33.endf")
     cov, _mf3, grid, present = load_mf33_covariance(
         micro, None, [4, 16], energy_unit="eV",
     )

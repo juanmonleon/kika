@@ -1231,8 +1231,14 @@ def resolveSpaces(blocks, index, space):
 
 def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod,
                     samplingMethod, psdMethod, nullTol, logger,
-                    statedBlocks=None):
+                    statedBlocks=None, inDrawSpace=False):
     """Draw every block, each under the convention its covariance states.
+
+    *inDrawSpace* says the relative blocks drawn in log space are already
+    ``log1p(Σ)`` -- the run conditions them in the space they are drawn in, as
+    the format pipeline does -- so they go to
+    :func:`~kika.sampling.core.draw_prepared_samples` rather than through a
+    second ``log1p``.
 
     Returns the merged ``(samples, diagnostics)``, keyed exactly as a single
     call would have keyed them.
@@ -1265,7 +1271,8 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
     * and reported per band with the legacy run summary's numbers
       (:func:`~kika.sampling.mf35_sampling.band_draw_report`).
     """
-    from kika.sampling.core import BLOCK_SEED_STRIDE, draw_samples
+    from kika.sampling.core import (BLOCK_SEED_STRIDE, draw_prepared_samples,
+                                    draw_samples)
 
     factorBlocks, deltaBlocks = _splitBySemantics(blocks, index)
     samples: Dict[Hashable, np.ndarray] = {}
@@ -1284,7 +1291,8 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
                  if spaces[key] == wanted]
         if not group:
             continue
-        drawn, info = draw_samples(
+        draw = draw_prepared_samples if inDrawSpace else draw_samples
+        drawn, info = draw(
             group, nSamples, space=wanted, returns="factors",
             decomposition_method=decompositionMethod,
             sampling_method=samplingMethod,
@@ -2305,6 +2313,14 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
 
     layer1 = relevantFindings(sectionFindings(covariances), index)
     statedBlocks = {key: matrix for key, matrix in blocks}
+    # A relative block drawn in log space is conditioned and decomposed as
+    # log1p(Σ), the covariance of ln f -- the matrix the draw actually samples,
+    # and the space the format pipeline conditions in (multigroup_draw).
+    factorBlocks, _deltaBlocks = _splitBySemantics(blocks, index)
+    logKeys = {key for key, wanted in resolveSpaces(factorBlocks, index, space).items()
+               if wanted == "log"}
+    blocks = [(key, np.log1p(np.asarray(matrix, dtype=float)) if key in logKeys
+               else matrix) for key, matrix in blocks]
     blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
         blocks, index, conditioningPlan, log, labels, layer1)
 
@@ -2313,7 +2329,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             blocks, index, nSamples, seed=seed, space=space,
             decompositionMethod=decompositionMethod,
             samplingMethod=samplingMethod, psdMethod=psdMethod, nullTol=nullTol,
-            logger=None, statedBlocks=statedBlocks)
+            logger=None, statedBlocks=statedBlocks, inDrawSpace=True)
     for key, diag in drawDiagnostics.items():
         log.event("drawn", f"rank {diag['rank']} of {diag['n']}, "
                   f"{diag['n_null']} null direction(s)",
