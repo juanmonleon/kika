@@ -117,7 +117,7 @@ def compute_difference(
     reference: PlotData,
     comparison: PlotData,
     mode: Literal['relative', 'absolute'] = 'relative',
-    interpolation: Optional[str] = 'log-log',
+    interpolation: Optional[str] = 'lin-lin',
     grid: Literal['reference', 'comparison', 'union'] = 'union',
     relative_in_percent: bool = True,
 ) -> ComparisonResult:
@@ -136,7 +136,9 @@ def compute_difference(
         * ``'relative'``: ``(comparison - reference) / reference``
         * ``'absolute'``: ``comparison - reference``
     interpolation : str
-        Interpolation method passed to :func:`interpolate_to_grid`.
+        Interpolation method passed to :func:`interpolate_to_grid`. Lin-lin
+        by default, the law of a PENDF or ACE table; pass the data's own law
+        when it states another.
     grid : {'reference', 'comparison', 'union'}
         Which grid to use as common grid.
 
