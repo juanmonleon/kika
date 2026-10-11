@@ -87,3 +87,18 @@ def test_a_missing_covariance_file_says_so():
     with pytest.raises(ValueError, match="covariance file not found"):
         perturbFromModel(FE56, {33: None}, 1, seed=1, dryRun=True,
                          covarianceSource=DATA / "no_such_tape.endf")
+
+
+def test_a_reaction_only_the_covariance_states_is_refused_or_noted():
+    """MT4 and MT16 of the covariance file have nothing to move on this tape.
+
+    It used to escape as a raw KeyError from the sum screening, even with
+    onMissing='skip'.
+    """
+    other = DATA / "micro_fe56_mf33.endf"
+    with pytest.raises(ValueError, match="MT4, MT16: the covariance states them"):
+        perturbFromModel(FE56, {33: None}, 1, seed=1, dryRun=True,
+                         covarianceSource=other)
+    with pytest.raises(ValueError, match="nothing is left to perturb"):
+        perturbFromModel(FE56, {33: None}, 1, seed=1, dryRun=True,
+                         covarianceSource=other, onMissing="skip")

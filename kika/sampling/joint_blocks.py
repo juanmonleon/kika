@@ -157,12 +157,12 @@ class Selection:
     ``relative`` defaults to ``True`` and that default is load-bearing: the
     appliers multiply by what comes back, and an absolute covariance does not
     describe a factor. ``load_mf34_covariance`` has always dropped absolute MF34
-    sections before a draw for that reason. MF33's absolute sections are not
-    dropped but *converted*, and the conversion divides by a central value this
-    module does not have -- so a caller assembling MF33 from a tape with
-    absolute blocks converts first, through
+    sections before a draw for that reason. An absolute MF31/MF33 section is
+    left out too: converting it divides by a central value this module does not
+    have, so a caller that wants it converts first, through
     :func:`~kika.sampling.mf33_sampling.relativiseAbsoluteSections`, and hands
-    the converted sections here.
+    the converted sections here. :func:`absoluteSectionsLeftOut` names what a
+    request leaves out, and ``perturbFromModel`` records it.
     """
 
     mf: int
@@ -354,6 +354,36 @@ def pruneRequest(suite, request):
         else:  # pragma: no cover - collectEntries raises instead
             dropped.append((selection, "matched nothing"))
     return kept, dropped
+
+
+def absoluteSectionsLeftOut(suite, request) -> List[str]:
+    """The absolute MF31/MF33/MF34 sections a relative request does not draw.
+
+    A selection with ``relative=True`` -- the default -- keeps only relative
+    sections, because the appliers multiply. The model route does **not**
+    convert an absolute section to a relative one (that needs a central value
+    binned on a grid, and the choice of grid is a method decision the carrier
+    makes and this route has not), so those sections are left out of the draw.
+    This names them, so the run can say so instead of perturbing fewer
+    components than the file states without a word.
+    """
+    from kika.sampling.model_blocks import _cross_section_entries, _mf34_entries
+
+    left: List[str] = []
+    for selection in _asSelections(request):
+        if selection.relative is not True or selection.mf == 35:
+            continue
+        if selection.mf in CROSS_SECTION_MF:
+            found = _cross_section_entries(suite, mf=selection.mf,
+                                           mt=selection.mt, relative=False)
+            left += [f"MF{selection.mf} MT{row[1]} x MT{col[1]}"
+                     for row, col, *_ in found]
+        else:
+            found = _mf34_entries(suite, mt=selection.mt, orders=selection.index,
+                                  relative=False)
+            left += [f"MF34 MT{row[1]} L{row[2]} x MT{col[1]} L{col[2]}"
+                     for row, col, *_ in found]
+    return left
 
 
 #: MF34's Legendre order 0: the cross section's magnitude, not a shape

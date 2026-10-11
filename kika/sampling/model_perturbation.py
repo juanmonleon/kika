@@ -831,6 +831,45 @@ def _missingReactions(request, entries) -> Dict[int, List[int]]:
     return missing
 
 
+def _dropUnstatedReactions(suite, entries, onMissing, skipped, log):
+    """The entries whose cross section the evaluation states; refuse or note the rest.
+
+    Only reachable with ``covarianceSource``: a covariance from another file
+    can state a reaction (MT16, say) the evaluation has neither as a section
+    nor through partials, so its factor has nothing to move. ``onMissing``
+    decides, as it does for a reaction the request names and the covariance
+    lacks.
+    """
+    from kika.sampling.cross_section_sums import suiteSumLayout, unstatedClaims
+
+    claimed = {int(key.mt) for rowKey, colKey, *_rest in entries
+               for key in (rowKey, colKey) if key.mf == 33}
+    present, _sums = suiteSumLayout(suite)
+    unstated = set(unstatedClaims(claimed, present))
+    if not unstated:
+        return entries
+    names = ", ".join(f"MT{mt}" for mt in sorted(unstated))
+    if onMissing == "raise":
+        raise ValueError(
+            f"{names}: the covariance states {'it' if len(unstated) == 1 else 'them'} "
+            f"and the evaluation does not -- no section and no partials -- so a "
+            f"factor would have nothing to move. Pass onMissing='skip' to "
+            f"perturb the rest and record the omission")
+    kept = [entry for entry in entries
+            if not any(key.mf == 33 and int(key.mt) in unstated
+                       for key in entry[:2])]
+    if not kept:
+        raise ValueError(
+            f"every cross-section block the request reaches is for a reaction "
+            f"the evaluation does not state ({names}), so nothing is left to "
+            f"perturb")
+    note = (f"{names}: stated by the covariance and not by the evaluation, so "
+            f"not perturbed")
+    skipped.append(note)
+    log.warning(note, subject="MF33", reactions=sorted(unstated))
+    return kept
+
+
 def _statedCrossSectionMTs(covariances) -> set:
     """The MTs MF33 states a covariance for (a diagonal section), unassembled.
 
@@ -2183,6 +2222,15 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     for note in magnitudeNotes:
         skipped.append(note)
         log.warning(note, subject="MF34")
+    from kika.sampling.joint_blocks import absoluteSectionsLeftOut
+
+    leftOut = absoluteSectionsLeftOut(covariances, request)
+    if leftOut:
+        note = (f"{len(leftOut)} absolute covariance section(s) not drawn -- "
+                f"the appliers multiply, and the model route does not convert "
+                f"an absolute section to a relative one: {', '.join(leftOut)}")
+        skipped.append(note)
+        log.warning(note, subject="absolute sections", sections=leftOut)
     log.event("request", _describeRequestForPeople(request),
               request={str(k): _jsonableRequest(v) for k, v in request.items()}
               if isinstance(request, Mapping) else str(request),
@@ -2203,6 +2251,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                 f"{'it' if len(absent) == 1 else 'them'} from the request, or "
                 f"pass onMissing='skip' to perturb the rest and record the "
                 f"omission")
+        entries = _dropUnstatedReactions(suite, entries, onMissing, skipped, log)
         sumRecord: Dict[str, Any] = {"mode": sumBlocks}
         if crossSectionSums:
             entries, sumRecord, sumNotes = _screenSumBlocks(

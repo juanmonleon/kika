@@ -294,21 +294,29 @@ def _effectiveClaims(claims: Mapping[int, object], present: set,
     return out, lumpOf
 
 
-def _virtualClaims(claims: Iterable[int], present: set) -> set:
-    """Claimed MTs the tape states no MF3 section for, only partials of."""
+def unstatedClaims(claims: Iterable[int], present: Iterable[int]) -> List[int]:
+    """Claimed MTs the tape states neither as a section nor through partials.
+
+    A covariance can name such a reaction when it comes from another file
+    (``covarianceSource``); there is nothing on the tape for its factor to move.
+    """
     from kika.endf.writers.redundant import resolve_sum_components
 
-    virtual = set()
-    for mt in claims:
-        if int(mt) in present:
-            continue
-        if not resolve_sum_components(int(mt), present):
-            raise KeyError(
-                f"no reaction with ENDF_MT {mt} anywhere in this suite, and none "
-                f"of its partials either: the realisation perturbs a cross "
-                f"section the tape does not state")
-        virtual.add(int(mt))
-    return virtual
+    available = {int(mt) for mt in present}
+    return sorted(int(mt) for mt in claims
+                  if int(mt) not in available
+                  and not resolve_sum_components(int(mt), available))
+
+
+def _virtualClaims(claims: Iterable[int], present: set) -> set:
+    """Claimed MTs the tape states no MF3 section for, only partials of."""
+    unstated = unstatedClaims(claims, present)
+    if unstated:
+        raise KeyError(
+            f"no reaction with ENDF_MT {unstated[0]} anywhere in this suite, and "
+            f"none of its partials either: the realisation perturbs a cross "
+            f"section the tape does not state")
+    return {int(mt) for mt in claims if int(mt) not in present}
 
 
 @dataclass(frozen=True)
