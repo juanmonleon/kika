@@ -168,8 +168,11 @@ class SuiteDopplerResult:
         return _sum(values,errors,self._graph,self._order)
 
     def verify_table(self,forms=None,*,total_budget=False):
+        return self._verify_table(forms,total_budget=total_budget)
+
+    def _verify_table(self,forms=None,*,total_budget=False,evaluator=None):
         forms=self.forms if forms is None else forms
-        result=_verify(forms,self._tables,self._evaluate,self.options,
+        result=_verify(forms,self._tables,self._evaluate if evaluator is None else evaluator,self.options,
                        share=1. if total_budget else self.options.table_share,label=self.label)
         # Shared output grid gives exact linear closure apart from roundoff.
         # For caller/reloaded grids also check all union knots; piecewise linear
@@ -331,8 +334,10 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
                              MappingProxyType(per_options),MappingProxyType(graph),order,(),source_hash,
                              MappingProxyType(mt_keys),declaration)
     keys=tuple(entries)
+    from .table import _ConstructionSamples
+    construction=_ConstructionSamples(result._evaluate,keys,options)
     tables_forms,tables,tab_report=_tabulate(tuple(prepared.values()),tuple(per_options.values()),temperature,
-                                             domain,options,result._evaluate,keys,label,progress)
+                                             domain,options,construction,keys,label,progress)
     if any(o.threshold_policy=='zero_below' for o in per_options.values()):
         model='free-gas-plus-threshold-convention'
     elif source_model!='convolution':model=source_model
@@ -357,7 +362,8 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
                 tabulation=tab_report,empirical_verification=False,global_error_bound=False)
     result=SuiteDopplerResult(MappingProxyType(tables_forms),MappingProxyType(report),source_style,label,temperature,
                 options,result._prepared,result._per_options,result._graph,order,tables,source_hash,result._mt_keys,declaration)
-    checks=result.verify_table()
+    checks=result._verify_table(evaluator=construction)
+    report['tabulation']['construction_samples']=construction.finish()
     report['verification_ratios']={f'{k.container}/{k.label}':v for k,v in checks.items()}
     if _fingerprint(suite,source_style)!=source_hash:raise DopplerInputError('stale-source','suite changed during processing')
     # JSON is a canonical, independent provenance snapshot used during attachment.

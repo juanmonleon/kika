@@ -6,6 +6,7 @@ of the resonance linearizer's max(actual, chord) error scaling.
 """
 from dataclasses import dataclass, asdict
 import math
+from collections import OrderedDict
 from types import MappingProxyType
 import numpy as np
 
@@ -16,6 +17,61 @@ from .core import (PreparedDopplerCurve, DopplerOptions, DopplerInputError,
 REFINE = (.25, .5, .75)
 CHECK = (.1127016653792583, .276393202250021, .723606797749979, .8872983346207417)
 VERIFY = (.0694318442029737, .3300094782075719, .6699905217924281, .9305681557970262)
+
+
+class _ConstructionSamples:
+    """Bounded deterministic samples of immutable sources, construction only.
+
+    Keys distinguish semantic left limits. Every requested probe still passes
+    through the table checks; later user verification always uses fresh samples.
+    The allowance is one eighth of max_work_bytes, with conservative per-entry
+    accounting for Python containers and the values/errors of each channel.
+    """
+    def __init__(self, evaluate, keys, options):
+        self.evaluate = evaluate
+        self.keys = tuple(keys)
+        self.entry_estimate = 256*(len(keys)+1)
+        self.limit = options.max_work_bytes//(8*self.entry_estimate)
+        self.batch = max(1,min(options.block_size,options.max_work_bytes//(2048*(len(keys)+1))))
+        self.samples = OrderedDict()
+        self.hits = self.evaluations = 0
+
+    def __call__(self, q, left_boundary=None):
+        q=np.asarray(q,dtype=float)
+        values={k:np.empty(len(q)) for k in self.keys}
+        errors={k:np.empty(len(q)) for k in self.keys}
+        for start in range(0,len(q),self.batch):
+            v,e=self._batch(q[start:start+self.batch],left_boundary)
+            for k in self.keys:
+                values[k][start:start+self.batch]=v[k]
+                errors[k][start:start+self.batch]=e[k]
+        return values,errors
+
+    def _batch(self, q, left_boundary):
+        identifiers=[(float(e),left_boundary if e==left_boundary else None) for e in q]
+        found={key:self.samples[key] for key in identifiers if key in self.samples}
+        missing={key:float(q[i]) for i,key in enumerate(identifiers) if key not in found}
+        if missing:
+            values,errors=self.evaluate(np.array(list(missing.values())),left_boundary)
+            self.evaluations+=len(missing)
+            for i,key in enumerate(missing):
+                found[key]=tuple((float(values[k][i]),float(errors[k][i])) for k in self.keys)
+        self.hits+=len(identifiers)-len(missing)
+        values={k:np.array([found[key][j][0] for key in identifiers]) for j,k in enumerate(self.keys)}
+        errors={k:np.array([found[key][j][1] for key in identifiers]) for j,k in enumerate(self.keys)}
+        if self.limit:
+            for key in identifiers:
+                self.samples[key]=found[key]
+                self.samples.move_to_end(key)
+                if len(self.samples)>self.limit:self.samples.popitem(last=False)
+        return values,errors
+
+    def finish(self):
+        diagnostics=dict(reused_samples=self.hits,source_evaluations=self.evaluations,
+                         maximum_entries=self.limit,cache_allowance_bytes=self.limit*self.entry_estimate,
+                         retained_entries_after_construction=0)
+        self.samples.clear()
+        return diagnostics
 
 
 def _options(options):
@@ -110,7 +166,7 @@ def _adaptive(evaluate, seeds, options, budget, keys):
     # node is inserted inside it. Keep only acceptance ratios, never probe
     # arrays. Independent reserved verification still evaluates every interval.
     accepted_intervals = {}
-    cache_limit = options.max_work_bytes // 256
+    cache_limit = options.max_work_bytes // 1024
     maxrefine, maxcheck, evaluations = 0., 0., len(seeds)
     for iteration in range(options.max_iterations):
         grid = np.array(sorted(nodes))
@@ -356,7 +412,8 @@ def broaden_curve(prepared, *, temperature, options=None, output_domain=None, la
     def evaluate(q,left_boundary=None):
         v,e=_evaluate_curve(prepared,q,temperature,options,left_boundary)
         return {0:v},{0:e}
-    forms,tables,report=_tabulate((prepared,),(options,),temperature,domain,options,evaluate,(0,),label,progress)
+    construction=_ConstructionSamples(evaluate,(0,),options)
+    forms,tables,report=_tabulate((prepared,),(options,),temperature,domain,options,construction,(0,),label,progress)
     report.update(engine='doppler-table-1',core_engine=ENGINE_VERSION,backend=_selected_backend(options),source_hash=prepared.source_hash,temperature_source=prepared.source_temperature,
                   temperature_final=temperature,options=asdict(options),accuracy_scope='input_table',
                   delta_temperature=temperature-prepared.source_temperature,mass=asdict(prepared.context),
@@ -368,7 +425,10 @@ def broaden_curve(prepared, *, temperature, options=None, output_domain=None, la
                   result_minimum=min(float(np.min(y[0])) for _,y in tables),
                   distribution_temperature_treatment='not-processed',covariance_temperature_treatment='not-processed')
     result=DopplerResult(forms[0],MappingProxyType(report),prepared,temperature,options,tables)
-    ratio=result.verify_table()
+    # Check all output nodes and reserved probes against the same immutable
+    # source function; repeated identical probes can reuse a source evaluation.
+    ratio=_verify({0:result.form},tables,construction,options,share=options.table_share,label=label)[0]
+    report['construction_samples']=construction.finish()
     report['verification_ratio']=ratio
     report['table_verification']='separate-fractions-against-production'
     return result

@@ -9,13 +9,14 @@ from dataclasses import dataclass, asdict
 from hashlib import sha256
 import math
 import numbers
+from functools import cached_property
 
 import numpy as np
 from scipy.special import erfc
 from kika._constants import BOLTZMANN_CONSTANT
 
 KB = BOLTZMANN_CONSTANT * 1e6
-ENGINE_VERSION = "doppler-analytic-3"
+ENGINE_VERSION = "doppler-analytic-7"
 EPS = np.finfo(float).eps
 try:
     from importlib import import_module
@@ -61,6 +62,15 @@ def _immutable(v):
 
 # Default five moment reductions. Immutable, shared 3200-byte workspace.
 _MOMENT_WEIGHTS = _immutable(1. / (np.arange(5)[:, None] + np.arange(80)[None, :] + 1.))
+
+def _tail_terms(radius):
+    e = math.exp(-radius*radius)
+    i0 = math.sqrt(math.pi)*float(erfc(radius))/2
+    return i0, e/2, radius*e/2+i0/2
+
+# Keep the reference special-function values and operation order in C blocks.
+_NATIVE_TAIL_TERMS = _immutable([_tail_terms(r) for r in range(27)])
+
 
 
 @dataclass(frozen=True)
@@ -134,6 +144,12 @@ class PreparedDopplerCurve:
     negative_policy: str = "reject"
     source_temperature_origin: str = "explicit"
 
+    def __reduce__(self):
+        # Recreate numeric caches on deserialisation; capsules are process local.
+        return (type(self), (self.regions, self.context, self.support,
+                            self.source_temperature, self.negative_policy,
+                            self.source_temperature_origin))
+
     def __post_init__(self):
         if not isinstance(self.context, DopplerContext) or not isinstance(self.support, SupportPolicy):
             raise DopplerInputError("invalid-context", "context/support types")
@@ -169,12 +185,21 @@ class PreparedDopplerCurve:
             panels.append((0., float(x[0]), float(y[0]), float(y[0]),
                            self.support.lower, "lower", float(x[0])))
         for n, (x, y) in enumerate(result):
+            owner = f"region-{n}"
             panels.extend((float(x[i]), float(x[i+1]), float(y[i]), float(y[i+1]),
-                           "linlin", f"region-{n}", 0.) for i in range(len(x)-1))
+                           "linlin", owner, 0.) for i in range(len(x)-1))
         x, y = result[-1]
         if self.support.upper == "constant":
             panels.append((float(x[-1]), math.inf, float(y[-1]), float(y[-1]), "constant", "upper", 0.))
         object.__setattr__(self, "_panels", tuple(panels))
+        # Cache belongs to this immutable source and owns its labels. The
+        # Python path retains the original tuples; a missing native build
+        # remains supported and does not create an opaque cache.
+        cache, cache_bytes = (None, 0)
+        if _native is not None and hasattr(_native, "prepare_panels"):
+            cache, cache_bytes = _native.prepare_panels(self._panels)
+        object.__setattr__(self, "_native_panels", cache)
+        object.__setattr__(self, "_native_panel_bytes", cache_bytes)
         object.__setattr__(self, "_starts", _immutable([p[0] for p in panels]))
         object.__setattr__(self, "_ends", _immutable([p[1] for p in panels]))
         m = max(float(np.max(np.abs(y))) for _, y in result)
@@ -182,12 +207,12 @@ class PreparedDopplerCurve:
         k = abs(float(y[0])) * math.sqrt(float(x[0])) if self.support.lower == "one_over_v" else 0.
         object.__setattr__(self, "_envelope", (m, k))
 
-    @property
+    @cached_property
     def source_hash(self):
         h = sha256(repr((self.context, self.support, self.source_temperature,
                          self.negative_policy, self.source_temperature_origin)).encode())
         for x, y in self.regions:
-            h.update(x.tobytes()); h.update(y.tobytes())
+            h.update(x); h.update(y)
         return h.hexdigest()
 
     def evaluate_source(self, energy):
@@ -303,6 +328,35 @@ def _moments(s, d, z, terms):
     return moments, remainder, norm
 
 
+def _geometry_error(s, d, z, ds, slo, lower, upper, qleft, qright,
+                    narrow, kind, v0, v1, energy, lo, hi, h, norm, pnorm):
+    """Conservative float64 sensitivity provision, not interval arithmetic.
+
+    Rationalised source widths avoid subtracting neighbouring square roots.
+    Partial narrow-panel clipping still amplifies location error by 1/ds.
+    Include its effect on width and interpolated height explicitly.
+    """
+    relative = 64*EPS*(1+abs(s)+d)**2
+    sigma_error = 0.
+    left_touch = lower >= slo-32*EPS*(abs(slo)+abs(lower)+ds) if narrow else False
+    right_touch = upper <= slo+ds+32*EPS*(abs(slo)+abs(upper)+ds) if narrow else False
+    if narrow and (left_touch or right_touch):
+        boundary = (abs(lower) if left_touch else 0.) + (abs(upper) if right_touch else 0.)
+        displacement = 32*EPS*(abs(slo)+boundary+ds)
+        relative += displacement/d
+        if kind == 'linlin':
+            sigma_error += abs(v1-v0)*displacement/ds
+    if kind == 'linlin':
+        scale = abs(v0)+abs(v1-v0)
+        if not narrow:
+            x = math.sqrt(energy)
+            scale += abs(v1-v0)*(abs(energy-lo)+abs(h*s)*(2*x+abs(h*s)))/(hi-lo)
+        sigma_error += 64*EPS*scale
+    elif kind == 'constant':
+        sigma_error += 64*EPS*abs(v0)
+    return d/math.sqrt(math.pi)*norm*(pnorm*relative+sigma_error*(abs(1+s/z)+d/z)**2)
+
+
 def _point(curve, energy, h, options):
     x = math.sqrt(energy); z = x/h
     if not math.isfinite(z) or z <= 0 or not math.isfinite(z*z) or z*z == 0:
@@ -321,13 +375,23 @@ def _point(curve, energy, h, options):
     if options.backend != "python" and _native is not None:
         try:
             value, error, components, count = _native.integrate(
-                curve._panels, first, last, energy, h, lower_s, upper_s,
+                (curve._native_panels if curve._native_panels is not None else curve._panels), first, last, energy, h, lower_s, upper_s,
                 options.max_series_terms, options.max_panels)
         except OverflowError as exc:
             raise DopplerConvergenceError("resources", str(exc), energy=energy) from exc
         except ArithmeticError as exc:
             raise DopplerConvergenceError("unresolvable-scale", str(exc), energy=energy) from exc
         budget = options.kernel_share*(options.atol+options.rtol*abs(value))
+        if error > budget:
+            try:
+                value, error, components, count = _native.integrate(
+                    (curve._native_panels if curve._native_panels is not None else curve._panels), first, last, energy, h, lower_s, upper_s,
+                    options.max_series_terms, options.max_panels, False)
+            except OverflowError as exc:
+                raise DopplerConvergenceError("resources", str(exc), energy=energy) from exc
+            except ArithmeticError as exc:
+                raise DopplerConvergenceError("unresolvable-scale", str(exc), energy=energy) from exc
+            budget = options.kernel_share*(options.atol+options.rtol*abs(value))
         if error > budget:
             raise DopplerConvergenceError("kernel-budget-exhausted", "analytic error estimate exceeds budget", energy=energy, budget=budget)
         if curve.negative_policy == "reject" and value < 0:
@@ -380,6 +444,9 @@ def _point(curve, energy, h, options):
             factor = d/math.sqrt(math.pi)
             value = factor*math.fsum(p*v for p, v in zip(poly, moments))
             err = factor*math.fsum(abs(p) for p in poly)*(remainder+256*EPS*norm)
+            err += _geometry_error(s,d,z,ds,slo,lower_s,upper_s,qleft,qright,
+                                   narrow,kind,v0,v1,energy,lo,hi,h,norm,
+                                   math.fsum(abs(p) for p in poly))
             if not math.isfinite(value) or not math.isfinite(err):
                 raise DopplerConvergenceError("unresolvable-scale", "panel overflow", energy=energy)
             values.append(value); errors.append(err)
@@ -393,6 +460,24 @@ def _point(curve, energy, h, options):
     if curve.negative_policy == "reject" and value < 0:
         raise DopplerConvergenceError("negative-output", "recalculate with stable higher precision", energy=energy)
     return value, error, _tail(z, h, m, k, radius), components, count, radius
+
+
+def _point_block(curve, energies, h, options):
+    if options.backend != "python" and _native is not None and hasattr(_native, "evaluate_block") and curve._native_panels is not None:
+        m, k = curve._envelope
+        if not math.isfinite(m) or not math.isfinite(k):
+            raise DopplerConvergenceError("unresolvable-scale", "tail envelope overflow", energy=float(energies[0]))
+        try:
+            return _native.evaluate_block(curve._native_panels, np.ascontiguousarray(energies),
+                _NATIVE_TAIL_TERMS, h, m, k, options.atol, options.rtol,
+                options.tail_share, options.kernel_share, options.max_series_terms,
+                options.max_panels, options.max_radius, curve.negative_policy == "reject")
+        except (ArithmeticError, OverflowError) as exc:
+            category = getattr(exc, "doppler_code", "resources" if isinstance(exc, OverflowError) else "unresolvable-scale")
+            raise DopplerConvergenceError(category, str(exc),
+                energy=getattr(exc, "energy", float(energies[0])),
+                budget=getattr(exc, "budget", None) if category == "kernel-budget-exhausted" else None) from exc
+    return (_point(curve, float(energy), h, options) for energy in energies)
 
 
 def _selected_backend(options):
@@ -434,20 +519,40 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
     if dt > 0 and (a <= 0 or not math.isfinite(a)):
         raise DopplerConvergenceError("unresolvable-increment", "thermal scale")
     h = math.sqrt(a)
+    native_blocks = dt > 0 and backend == "native" and hasattr(_native, "evaluate_block") and prepared._native_panels is not None
+    block_size = options.block_size
+    if native_blocks:
+        # Account for buffer copies, row tuples, scalars and component dictionaries.
+        owners = len(prepared.regions) + int(prepared.regions[0][0][0] > 0 and prepared.support.lower != "zero") + int(prepared.support.upper != "zero")
+        per_point = 512+128*owners
+        base = 4096+options.max_series_terms*128+options.max_panels*128
+        block_size = min(block_size, (options.max_work_bytes-base)//per_point)
+        if block_size < 1:
+            raise DopplerConvergenceError("resources", "native block scratch exceeds max_work_bytes")
+        scratch = base+block_size*per_point
     values, errors, tails, removed = [], [], [], []
+    removed_errors, removed_tails = [], []
     totals, count, maxradius = {}, 0, 0
-    for start in range(0, len(energies), options.block_size):
-        for energy in energies[start:start+options.block_size]:
-            if dt == 0:
-                v, err, tail, comp, n, radius = prepared.evaluate_source(float(energy)), 0., 0., {"identity": prepared.evaluate_source(float(energy))}, 0, 0
-            else:
-                v, err, tail, comp, n, radius = _point(prepared, float(energy), h, options)
+    for start in range(0, len(energies), block_size):
+        block = energies[start:start+block_size]
+        if dt == 0:
+            rows = ((prepared.evaluate_source(float(e)), 0., 0.,
+                     {"identity": prepared.evaluate_source(float(e))}, 0, 0) for e in block)
+        else:
+            rows = _point_block(prepared, block, h, options)
+        for energy, (v, err, tail, comp, n, radius) in zip(block, rows):
             drop = v if options.threshold_policy == "zero_below" and energy < options.threshold else 0.
             values.append(0. if options.threshold_policy == "zero_below" and energy < options.threshold else v)
-            errors.append(err); tails.append(tail); removed.append(drop)
+            forced = options.threshold_policy == "zero_below" and energy < options.threshold
+            # Uncertainty belongs to the published function. An imposed exact
+            # zero has no convolution error; retain the discarded uncertainty.
+            errors.append(0. if forced else err); tails.append(0. if forced else tail); removed.append(drop)
+            removed_errors.append(err if forced else 0.); removed_tails.append(tail if forced else 0.)
             count += n; maxradius = max(maxradius, radius)
             for owner, contribution in comp.items(): totals[owner] = totals.get(owner, 0.)+contribution
-    report = dict(engine=ENGINE_VERSION, backend=backend, source_hash=prepared.source_hash,
+        del rows, comp  # Release the previous block before allocating the next.
+    report = dict(engine=ENGINE_VERSION, backend=backend,
+                  native_method="conditioned-closed-local-series" if backend=="native" else None, source_hash=prepared.source_hash,
                   temperature_source=prepared.source_temperature, temperature_final=temperature,
                   delta_temperature=dt, atomic_weight_ratio=prepared.context.atomic_weight_ratio,
                   mass_origin=prepared.context.mass_origin, kB_eV_per_K=KB,
@@ -460,8 +565,12 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
                   model="free-gas-plus-threshold-convention" if options.threshold_policy=="zero_below" else "free-gas",
                   negative_policy=prepared.negative_policy, analytic_subpanels=count,
                   max_thermal_radius=maxradius, scratch_estimate_bytes=scratch,
+                  native_block_size=block_size if native_blocks else None,
+                  retained_prepared_native_bytes=prepared._native_panel_bytes,
                   retained_result_bytes=len(energies)*5*8, components_sum_over_probes=totals,
                   source_minimum=min(float(np.min(y)) for _, y in prepared.regions),
                   result_minimum=min(values),
+                  max_removed_kernel_error=max(removed_errors),
+                  max_removed_tail_bound=max(removed_tails),
                   distribution_temperature_treatment="not-processed")
     return DopplerEvaluation(*(_immutable(a) for a in (energies, values, errors, tails, removed)), report)
