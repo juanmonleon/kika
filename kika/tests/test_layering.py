@@ -76,8 +76,9 @@ GUARDED_PACKAGES = ("kika/processing", "kika/nuclear_data", "kika/cov")
 #: to break it is stronger here than for ENDF, because the model is *named*
 #: after GNDS and an import from ``kika/nuclear_data`` into ``kika/gnds`` would
 #: read like tidying rather than like an inversion. ``kika.g4ndl`` joined the
-#: same way, on the day the package was created.
-FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl")
+#: same way, on the day the package was created, and so did ``kika.hdf5``
+#: (OpenMC's HDF5 format, roadmap H0).
+FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf5")
 
 #: Runtime imports of a format package, per module. May only decrease.
 #:

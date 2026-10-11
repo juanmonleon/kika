@@ -83,7 +83,9 @@ from .functions import (
     XYs1d,
     XYs2d,
     XYs3d,
+    Xs_pdf_cdf1d,
     Ys1d,
+    cumulativeOf,
     fromEndfTab2,
     fromEndfTab3,
     toEndfTab2,
@@ -133,6 +135,7 @@ from .distributions import (
     Uncorrelated,
     Unspecified,
 )
+from .processed_forms import DiscretePhotonEnergy, EnergyAngularMC, LevelEnergy
 from .energy_spectra import (ANALYTIC_SPECTRA, Evaporation, GeneralEvaporation,
                              MadlandNix, SimpleMaxwellianFission, Watt, Weighted,
                              WeightedFunctionals)
@@ -158,7 +161,7 @@ from .decay import (AVERAGE_ENERGY_LABELS, ELECTROMAGNETIC, SPECTRUM_LABELS,
 from .provenance import (AceProvenance, EndfProvenance, G4NDLCaptureProvenance,
                          G4NDLFissionProvenance,
                          G4NDLInelasticProvenance,
-                         G4NDLProvenance, GndsProvenance, Provenance)
+                         G4NDLProvenance, GndsProvenance, Hdf5Provenance, Provenance)
 from .quantities import PhysicalQuantity, RangeQuantity
 from .quantities import Uncertainty as ScalarUncertainty
 from .reaction_id import ReactionId
@@ -208,6 +211,7 @@ from .styles import (
     GriddedCrossSection,
     Heated,
     HeatedMultiGroup,
+    MonteCarlo_cdf,
     Realization,
     Style,
     TargetInfo,
@@ -240,7 +244,7 @@ __all__ = [
     "Ys1d", "Legendre", "Gridded1d", "Gridded2d", "Gridded3d",
     "Function2d", "XYs2d", "Regions2d", "fromEndfTab2", "toEndfTab2",
     "fromEndfTab3", "toEndfTab3",
-    "XYs3d", "Regions3d",
+    "XYs3d", "Regions3d", "Xs_pdf_cdf1d", "cumulativeOf",
     # §7
     "Uncertainty", "Covariance", "ListOfCovariances",
     # §9-10 styles
@@ -248,6 +252,7 @@ __all__ = [
     "TargetInfo", "TargetInfoElement", "TargetInfoNuclide",
     "CrossSectionReconstructed", "AngularDistributionReconstructed",
     "Heated", "HeatedMultiGroup", "GriddedCrossSection", "URR_probabilityTables",
+    "MonteCarlo_cdf",
     # §12 PoPs
     "PoPs", "Particle", "Nuclide", "Unorthodox", "pidFromZA", "zaFromPid",
     "DecayData", "DecayModes", "DecayMode", "DecayPath", "Decay",
@@ -284,6 +289,7 @@ __all__ = [
     "EnergyAngular", "AngularEnergy", "KalbachMann", "Branching3d",
     "NBodyPhaseSpace",
     "DiscreteGamma", "PrimaryGamma",
+    "EnergyAngularMC", "LevelEnergy", "DiscretePhotonEnergy",
     "Recoil", "NOT_IMPLEMENTED_DISTRIBUTIONS",
     # §19 resonances, by formalism
     "Resonances", "ResolvedRegion", "UnresolvedRegion", "ScatteringRadius",
@@ -301,6 +307,7 @@ __all__ = [
     "G4NDLFissionProvenance",
     "G4NDLInelasticProvenance",
     "G4NDLProvenance",
+    "Hdf5Provenance",
     # §25 covariances
     "CovarianceSuite", "CovarianceSection", "DataLink", "CovarianceMatrix",
     "Mixed", "Sum", "Summand", "ShortRangeSelfScalingVariance",

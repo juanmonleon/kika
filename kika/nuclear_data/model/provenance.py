@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 __all__ = ["Provenance", "EndfProvenance", "AceProvenance",
            "GndsProvenance", "G4NDLProvenance", "G4NDLInelasticProvenance",
-           "G4NDLCaptureProvenance", "G4NDLFissionProvenance"]
+           "G4NDLCaptureProvenance", "G4NDLFissionProvenance", "Hdf5Provenance"]
 
 
 @dataclass
@@ -356,3 +356,22 @@ class G4NDLFissionProvenance(Provenance):
     fragmentYieldsPath: Optional[str] = None
     fragmentYieldsSha256: Optional[str] = None
     fragmentYieldsHeader: Optional[Tuple[str, str]] = None
+
+
+@dataclass
+class Hdf5Provenance(Provenance):
+    """Where a node read from an OpenMC HDF5 file came from, and its bookkeeping.
+
+    ``node`` is the HDF5 path (``/U235/reactions/reaction_018/product_0``).
+    ``attributes`` holds what the file states about the node and the model has
+    no slot for -- a reaction's ``label`` and ``center_of_mass``, a product's
+    ``emission_mode``, whether a single distribution carried an
+    ``applicability`` dataset -- as plain Python values. The encoder writes them
+    back when present and derives them when absent, so a suite that never came
+    from HDF5 needs none of this.
+    """
+
+    sourceFormat: str = "hdf5"
+    path: Optional[str] = None
+    node: Optional[str] = None
+    attributes: Dict[str, object] = field(default_factory=dict)
