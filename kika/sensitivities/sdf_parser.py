@@ -258,7 +258,8 @@ def read_sdf(
             raise ValueError("Sensitivity values count mismatch")
 
         # Read errors (reversed order) until we have ngroups numbers. The compact
-        # dialect has no error block, so errors default to zeros.
+        # dialect has no error block: zeros fill the field and the reaction is
+        # marked error_known=False, so nothing downstream reads them as exact.
         if compact:
             err_vals = [0.0] * ngroups_declared
         else:
@@ -356,7 +357,9 @@ def read_sdf(
 
         # Construct reaction data (nuclide symbol & reaction name resolved in __post_init__).
         # Provide reaction_name so unknown MT numbers are preserved.
-        reaction = SDFReactionData(zaid=zaid, mt=mt, sensitivity=sens_vals, error=err_vals, reaction_name=reaction_name, unit=unit, region=region)
+        reaction = SDFReactionData(zaid=zaid, mt=mt, sensitivity=sens_vals, error=err_vals,
+                                   reaction_name=reaction_name, unit=unit, region=region,
+                                   error_known=not compact)
         reactions.append(reaction)
 
     if len(reactions) != nprofiles_declared:

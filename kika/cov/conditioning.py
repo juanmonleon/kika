@@ -352,7 +352,8 @@ class ConditioningReport:
         threshold, Higham above it — because the plan's job here is to make the
         current behaviour visible, not to change it. The one override is a
         block carrying a sum rule: ``C·1 ≈ 0`` is destroyed by any congruence
-        and degraded ~500x by Higham, so those get ``clip`` with the reason
+        (~500x on the Cf-252 MF35 bands with ``clip_rescale``) and degraded
+        ~40x by Higham, so those get ``clip`` with the reason
         recorded.
         """
         steps: List[PlanStep] = []
@@ -645,8 +646,13 @@ def _effect(
     one of them by 1e-19 in absolute terms reports as 6.8e+15 %. True, and it
     tells you nothing about the variances the evaluation actually stated.
 
-    So the diagonal is split at the same floor the pipelines use to decide a
-    row is inert. ``stated_diagonal_max_relative_change`` covers rows the file
+    So the diagonal is split in two at ``inert_floor`` times the block's
+    largest variance. That is **not** the predicate the pipelines use to decide
+    a row is inert (:func:`inert_row_mask`, an absolute floor, which the
+    ``inert_rows`` finding, the ``mask_inert`` remedy and the multigroup draw
+    share): this split is relative so that it also reads an absolute block,
+    whose variances can all sit below the absolute floor.
+    ``stated_diagonal_max_relative_change`` covers rows the file
     gives real variance and answers "did my uncertainties move". ``inert_rows_
     gaining_variance`` counts rows the file gives none that came out with some,
     and answers the question that number was hiding — which is the whole reason
@@ -1558,6 +1564,8 @@ def apply_plan(
             seconds = time.perf_counter() - start
 
             diagonal_before, diagonal_after = np.diag(current), np.diag(repaired)
+            # Relative split, as in `_effect` (see there why it is not
+            # `inert_row_mask`).
             largest = float(np.max(np.abs(diagonal_before))) if diagonal_before.size else 0.0
             stated = (
                 np.abs(diagonal_before) >= INERT_VARIANCE_FLOOR * largest

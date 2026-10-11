@@ -14,7 +14,7 @@ import warnings
 from ..legendre_covariance import LegendreCovariance
 from .mg_legendre_covariance import MultigroupLegendreCovariance
 from ...energy_grids import grids
-from ...exfor.angular_distribution import ExforAngularDistribution
+from ..._legendre_frames import TWO_BODY_NEUTRON_MTS, cos_lab_from_cos_cm, twoBodyGamma
 from ...processing.multigroup import (compute_rebin_operator, collapse_covariance, relative_to_absolute, absolute_to_relative, WeightingFunction)
 
 
@@ -97,7 +97,7 @@ class LegendreSource:
 def legendre_source_from_endf(mf4_mt_data,
                               fallback_grid: np.ndarray,
                               max_order: int,
-                              cm_to_lab_alpha: Optional[float] = None) -> LegendreSource:
+                              cm_to_lab: Optional[Tuple[float, float]] = None) -> LegendreSource:
     """Sample an ENDF MF4 section into a :class:`LegendreSource`.
 
     This is the ENDF half of the seam, and it is the only place in the collapse
@@ -106,9 +106,12 @@ def legendre_source_from_endf(mf4_mt_data,
     numbers.
 
     The CM->lab transformation is applied *here* rather than downstream because
-    it is nonlinear and couples every order: a source built for the lab frame
-    has to be extracted at full order first, which is what ``extract_order = 64``
-    below is for.
+    it couples every order: a source built for the lab frame has to be
+    extracted at full order first, which is what ``extract_order = 64`` below
+    is for. ``cm_to_lab`` is ``(awr, q)``, the target's mass ratio and the
+    reaction's QI in eV, and the kinematics are two-body: ``γ`` is evaluated at
+    each native energy by :func:`kika._legendre_frames.twoBodyGamma`, constant
+    ``1/AWR`` for elastic and energy-dependent for a discrete level.
     """
     # The section's own breakpoints, since integrating a_l(E) between them is
     # what the means are for. For LTT=3 the two representations meet, so both
@@ -125,7 +128,7 @@ def legendre_source_from_endf(mf4_mt_data,
 
     # When CM-to-lab is requested, extract ALL available Legendre orders
     # because the nonlinear transformation couples all orders together
-    if cm_to_lab_alpha is not None:
+    if cm_to_lab is not None:
         extract_order = 64  # large enough; capped by file max inside extract
     else:
         extract_order = max_order
@@ -138,11 +141,13 @@ def legendre_source_from_endf(mf4_mt_data,
     coeffs_native = mf4_mt_data.extract_legendre_coefficients(native_E, extract_order, **extract_kwargs)
 
     # Apply CM→lab frame transformation if requested
-    if cm_to_lab_alpha is not None:
+    if cm_to_lab is not None:
         # Ensure l=0 is included for the distribution reconstruction
         if 0 not in coeffs_native:
             coeffs_native[0] = np.ones(len(native_E))
-        coeffs_native = cm_to_lab_legendre(coeffs_native, cm_to_lab_alpha)
+        awr, q = cm_to_lab
+        gamma = np.array([twoBodyGamma(E, awr, q) for E in native_E])
+        coeffs_native = cm_to_lab_legendre(coeffs_native, gamma)
 
     return LegendreSource(
         native_energies=native_E,
@@ -259,7 +264,7 @@ def legendre_source_from_model(angular, max_order: int,
 def resolve_legendre_source(mf4_mt_data,
                             fallback_grid: np.ndarray,
                             max_order: int,
-                            cm_to_lab_alpha: Optional[float] = None,
+                            cm_to_lab: Optional[Tuple[float, float]] = None,
                             cache: Optional[Dict] = None) -> LegendreSource:
     """:func:`legendre_source_from_endf`, memoised across one collapse.
 
@@ -271,13 +276,13 @@ def resolve_legendre_source(mf4_mt_data,
     above the first. Hence the ``max_order`` check on the hit, not just the key.
     Pinned by ``kika/cov/tests/test_collapse_coeff_cache.py``.
     """
-    key = (id(mf4_mt_data), cm_to_lab_alpha)
+    key = (id(mf4_mt_data), cm_to_lab)
     cached = cache.get(key) if cache is not None else None
     if cached is not None and cached.coefficients and cached.max_order >= max_order:
         return cached
 
     source = legendre_source_from_endf(
-        mf4_mt_data, fallback_grid, max_order, cm_to_lab_alpha
+        mf4_mt_data, fallback_grid, max_order, cm_to_lab
     )
     if cache is not None:
         cache[key] = source
@@ -362,9 +367,13 @@ def _build_overlap_from_flux(union_grid: np.ndarray, mg_grid: np.ndarray,
                              flux_integrals: np.ndarray) -> np.ndarray:
     """Build overlap-weight matrix from per-cell flux integrals.
 
-    Each union cell lies entirely within one MG group (by construction of the
-    union grid), so each row of the returned matrix has exactly one nonzero
-    entry equal to the corresponding flux integral.
+    Each union cell inside the group structure lies entirely within one MG
+    group (by construction of the union grid), so its row has exactly one
+    nonzero entry, equal to its flux integral. A cell outside the structure --
+    the union grid spans the MF34 grid too, which can start below the first
+    group or end above the last -- belongs to no group and its row is zero. It
+    used to be clipped into the first or last group, which then averaged over
+    energies it does not contain.
 
     Parameters
     ----------
@@ -383,13 +392,15 @@ def _build_overlap_from_flux(union_grid: np.ndarray, mg_grid: np.ndarray,
     N_union = len(union_grid) - 1
     N_mg = len(mg_grid) - 1
     midpoints = 0.5 * (union_grid[:-1] + union_grid[1:])
-    group_idx = np.clip(np.searchsorted(mg_grid, midpoints, side='right') - 1, 0, N_mg - 1)
+    group_idx = np.searchsorted(mg_grid, midpoints, side='right') - 1
+    inside = (group_idx >= 0) & (group_idx < N_mg)
     weights = np.zeros((N_union, N_mg))
-    weights[np.arange(N_union), group_idx] = flux_integrals
+    rows = np.arange(N_union)[inside]
+    weights[rows, group_idx[inside]] = np.asarray(flux_integrals)[inside]
     return weights
 
 
-def cm_to_lab_legendre(coeffs_cm: Dict[int, np.ndarray], alpha: float,
+def cm_to_lab_legendre(coeffs_cm: Dict[int, np.ndarray], alpha,
                        n_quad: int = 64) -> Dict[int, np.ndarray]:
     """Transform Legendre coefficients from CM to lab frame.
 
@@ -402,8 +413,12 @@ def cm_to_lab_legendre(coeffs_cm: Dict[int, np.ndarray], alpha: float,
     coeffs_cm : Dict[int, np.ndarray]
         {l_order: array_of_values_at_native_energies} in CM frame.
         Must include l=0 if present; missing orders are treated as zero.
-    alpha : float
-        Mass ratio m_projectile / m_target (= 1/AWR for neutrons).
+    alpha : float or np.ndarray
+        ``γ = V_cm / v'_cm``: one value for every energy, or one per energy
+        (the same length as the coefficient arrays). ``1/AWR`` for elastic
+        neutron scattering; for a discrete level it depends on the energy,
+        :func:`kika._legendre_frames.twoBodyGamma`. Where it is not finite
+        (at or below threshold) the coefficients are left as they are.
     n_quad : int
         Number of Gauss-Legendre quadrature points (default 64).
 
@@ -416,14 +431,13 @@ def cm_to_lab_legendre(coeffs_cm: Dict[int, np.ndarray], alpha: float,
     from scipy.special import eval_legendre
 
     mu_q, w_q = leggauss(n_quad)  # quadrature on [-1, 1]
-    mu_lab_q = ExforAngularDistribution.cos_lab_from_cos_cm(mu_q, alpha)
 
     max_l = max(coeffs_cm.keys())
     N_energies = len(next(iter(coeffs_cm.values())))
+    gamma = np.broadcast_to(np.asarray(alpha, dtype=float), (N_energies,))
 
-    # Precompute Legendre polynomials at quadrature points (CM and lab cosines)
+    # Precompute Legendre polynomials at quadrature points (CM cosines)
     P_cm = np.array([eval_legendre(k, mu_q) for k in range(max_l + 1)])      # (L+1, n_quad)
-    P_lab = np.array([eval_legendre(k, mu_lab_q) for k in range(max_l + 1)])  # (L+1, n_quad)
 
     # Build coefficient matrix: shape (max_l+1, N_energies)
     coeff_matrix = np.zeros((max_l + 1, N_energies))
@@ -437,12 +451,19 @@ def cm_to_lab_legendre(coeffs_cm: Dict[int, np.ndarray], alpha: float,
     weighted_coeffs = weight_factors[:, None] * coeff_matrix  # (L+1, N_energies)
     f_cm = P_cm.T @ weighted_coeffs  # (n_quad, N_energies)
 
-    # Project onto lab-frame Legendre polynomials:
-    # a_l^lab[e] = sum_q w_q[q] * f_cm[q, e] * P_lab[l, q]
-    coeffs_lab = {}
-    for l in coeffs_cm:
-        # (n_quad,) * (n_quad, N_energies) summed over quadrature axis
-        coeffs_lab[l] = (w_q[:, None] * f_cm * P_lab[l, :, None]).sum(axis=0)
+    # Project onto lab-frame Legendre polynomials, one lab-cosine table per
+    # distinct gamma (one for elastic, one per energy for a discrete level):
+    # a_l^lab[e] = sum_q w_q[q] * f_cm[q, e] * P_l(mu_lab(mu_q, gamma_e))
+    coeffs_lab = {l: np.array(coeffs_cm[l], dtype=float, copy=True) for l in coeffs_cm}
+    finite = np.isfinite(gamma)
+    values, inverse = np.unique(gamma[finite], return_inverse=True)
+    energy_index = np.flatnonzero(finite)
+    for u, g in enumerate(values):
+        cols = energy_index[inverse == u]
+        mu_lab_q = cos_lab_from_cos_cm(mu_q, g)
+        weighted = f_cm[:, cols] * w_q[:, None]                  # (n_quad, n_cols)
+        for l in coeffs_cm:
+            coeffs_lab[l][cols] = eval_legendre(l, mu_lab_q) @ weighted
 
     return coeffs_lab
 
@@ -901,7 +922,9 @@ def expand_matrix_to_union_grid(mf34_matrix: np.ndarray,
 
     Each union cell is mapped to its parent MF34 cell. If union cell k belongs
     to MF34 cell i and union cell l belongs to MF34 cell j, then
-    R_union[k,l] = R_mf34[i,j].
+    R_union[k,l] = R_mf34[i,j]. A union cell outside the MF34 grid (the group
+    structure reaches further) has no parent: MF34 states no covariance there,
+    so its row and column are zero rather than a copy of the nearest bin.
 
     Parameters
     ----------
@@ -924,11 +947,13 @@ def expand_matrix_to_union_grid(mf34_matrix: np.ndarray,
     # Use midpoints of union cells to determine which MF34 cell they belong to
     union_midpoints = 0.5 * (union_grid[:-1] + union_grid[1:])
     parent_idx = np.searchsorted(mf34_grid, union_midpoints, side='right') - 1
-    # Clip to valid range
-    parent_idx = np.clip(parent_idx, 0, N_mf34 - 1)
+    inside = (parent_idx >= 0) & (parent_idx < N_mf34)
 
     # Build expanded matrix using vectorized fancy indexing
-    expanded = mf34_matrix[np.ix_(parent_idx, parent_idx)]
+    safe = np.where(inside, parent_idx, 0)
+    expanded = mf34_matrix[np.ix_(safe, safe)].astype(float, copy=True)
+    expanded[~inside, :] = 0.0
+    expanded[:, ~inside] = 0.0
 
     return expanded
 
@@ -973,7 +998,8 @@ def MF34_to_MG(endf_object,
         - "lethargy": phi(E) = 1/E
         - "maxwellian": Maxwellian spectrum
         - "fission": Fission spectrum
-        - Callable: Custom function
+        A callable is refused (``NotImplementedError``): the collapse needs the
+        antiderivative of phi as well, and there is no argument to pass it in.
     relative_normalization : str, optional
         Normalization scheme for relative covariances:
         - "mf34_cell": Use MF34-derived MG means (ENDF-preserving, default)
@@ -989,6 +1015,9 @@ def MF34_to_MG(endf_object,
         - "same" (default): preserve the MF4 native frame (backward compatible)
         - "lab": apply CM→lab kinematic transformation if MF4 is in CM frame
           (no-op if already in lab frame). Matches NJOY GROUPR convention.
+          The kinematics are two-body, so this is done for MT2 and MT51-90
+          only (the level's QI read from MF3) and refused for any other
+          reaction given in CM.
     project_to_psd : bool, optional
         Whether to project output matrices to positive semi-definite (default True).
         Set to False to skip eigendecomposition for faster execution when PSD
@@ -1008,6 +1037,11 @@ def MF34_to_MG(endf_object,
     output_frame = output_frame.lower()
     if output_frame not in ("same", "lab"):
         raise ValueError(f"output_frame must be 'same' or 'lab', got '{output_frame}'")
+    if str(relative_normalization).lower() not in ("mf34_cell", "mg_cell"):
+        raise ValueError(
+            f"relative_normalization must be 'mf34_cell' or 'mg_cell', got "
+            f"{relative_normalization!r}"
+        )
 
     # Validate inputs and extract data
     if not hasattr(endf_object, 'mf') or 4 not in endf_object.mf or 34 not in endf_object.mf:
@@ -1053,13 +1087,11 @@ def MF34_to_MG(endf_object,
         else:
             raise ValueError(f"Unknown weighting function: {weighting_function}")
     else:
-        phi_func = weighting_function
-        phi_antiderivative = None  # User must provide if needed
-        weight_desc = "custom"
-
-    # Check if antiderivative is available for custom functions
-    if phi_antiderivative is None and weight_desc == "custom":
-        raise NotImplementedError(f"Custom weighting functions require providing the antiderivative")
+        raise NotImplementedError(
+            "a callable weighting function is not supported: the collapse also "
+            "needs its antiderivative, and there is no argument to pass it in; "
+            "use 'constant', 'lethargy', 'maxwellian' or 'fission'"
+        )
 
     # Sigma-weighting is always applied, so a sigma(E) is mandatory. This used
     # to call endf_object.reconstruct_xs() — no try/except, no test — which
@@ -1078,12 +1110,13 @@ def MF34_to_MG(endf_object,
         )
     _base_phi_func = phi_func
     _base_phi_antiderivative = phi_antiderivative
-    weight_desc += " (sigma-weighted)"
+    # MTs that had no sigma(E) in the PENDF and fell back to phi alone; the
+    # label says so instead of calling every matrix sigma-weighted.
+    _flux_only_mts: List[int] = []
 
     # Create result object
     result = MultigroupLegendreCovariance()
     result.energy_grid = mg_energy_edges
-    result.weighting_function = weight_desc
     result.relative_normalization = relative_normalization
     result.energy_unit = mf34_covmat.energy_unit  # Propagate energy unit from source data
 
@@ -1183,6 +1216,8 @@ def MF34_to_MG(endf_object,
             phi_func = _base_phi_func
             phi_antiderivative = _base_phi_antiderivative
             _pendf_energies = None
+            if _mt_for_sigma not in _flux_only_mts:
+                _flux_only_mts.append(_mt_for_sigma)
 
         # Validate frame consistency for both row and column
         mf4_frame_row = mf4_mt_data_row.frame if hasattr(mf4_mt_data_row, 'frame') else "unknown"
@@ -1190,16 +1225,16 @@ def MF34_to_MG(endf_object,
         validate_frame_consistency(mf4_frame_row, frame)
         validate_frame_consistency(mf4_frame_col, frame)
 
-        # Determine CM→lab alpha for this matrix pair (if output_frame='lab')
+        # Two-body CM→lab kinematics for this matrix pair (if output_frame='lab')
         _alpha_row = None
         _alpha_col = None
         _effective_frame = frame
         if output_frame == "lab":
             if mf4_frame_row == "CM" and hasattr(mf4_mt_data_row, '_awr') and mf4_mt_data_row._awr:
-                _alpha_row = 1.0 / mf4_mt_data_row._awr
+                _alpha_row = _two_body_kinematics(endf_object, reaction_row, mf4_mt_data_row)
                 _effective_frame = "LAB"
             if mf4_frame_col == "CM" and hasattr(mf4_mt_data_col, '_awr') and mf4_mt_data_col._awr:
-                _alpha_col = 1.0 / mf4_mt_data_col._awr
+                _alpha_col = _two_body_kinematics(endf_object, reaction_col, mf4_mt_data_col)
                 _effective_frame = "LAB"
 
         # Compute MG means directly on the MG grid (cached across iterations)
@@ -1245,17 +1280,17 @@ def MF34_to_MG(endf_object,
             # Direct collapse of relative covariance, matching NJOY ERRORR.
             #
             # The MF34 relative covariance R(i,j) is piecewise constant on its
-            # coarse energy grid.  When a_l(E) varies strongly (including sign
-            # changes) within an MF34 cell, converting R→absolute using the
-            # cell-mean a_l dilutes the uncertainty through sign cancellation.
-            # NJOY avoids this by collapsing R directly with flux-fraction
-            # weights:
+            # coarse energy grid. NJOY collapses it on the union grid with
+            # weights w_i^g (the sigma*phi integral of union cell i in group g)
+            # and the cell means A_{l,i} of the coefficients:
             #
-            #   R_MG(g,g') = Σ_{i,j} f_i^g  f_j^{g'}  R(i,j)
+            #   R_MG(g,g') = Σ_{i,j} w_i^g A_{l,i} R(i,j) A_{l',j} w_j^{g'}
+            #                / (W_g ā_{l,g} · W_{g'} ā_{l',g'})
             #
-            # where f_i^g = W_i / W_g is the fraction of group g's flux that
-            # falls in union cell i.  The absolute covariance is then derived
-            # from the collapsed R_MG and the MG-mean Legendre coefficients.
+            # with W_g = Σ_i w_i^g and ā_{l,g} = Σ_i w_i^g A_{l,i} / W_g -- the
+            # absolute covariance collapsed and divided by the group means
+            # (collapse_relative_covariance). The absolute covariance is then
+            # derived from R_MG and the group-mean Legendre coefficients.
 
             # 1) Build union grid (MF34 + MG boundaries)
             union_grid = build_union_grid(mf34_energy_grid, mg_energy_edges)
@@ -1330,13 +1365,10 @@ def MF34_to_MG(endf_object,
 
             col_vals_symmetric = mg_means_col_vals if mg_base_means_col is not mg_base_means_row else mg_means_row_vals
             if relative_normalization.lower() == "mg_cell":
-                absolute_fine = relative_to_absolute(
-                    relative_fine, mg_means_row_vals, col_vals_symmetric
-                )
+                _abs_means = (mg_means_row_vals, col_vals_symmetric)
             else:  # "mf34_cell" (default, ENDF-preserving)
-                absolute_fine = relative_to_absolute(
-                    relative_fine, mf34_mg_means_row, mf34_mg_means_col
-                )
+                _abs_means = (mf34_mg_means_row, mf34_mg_means_col)
+            absolute_fine = relative_to_absolute(relative_fine, *_abs_means)
             mg_means_row_vals_to_store = mg_means_row_vals
             mg_means_col_vals_to_store = col_vals_symmetric
         else:
@@ -1351,9 +1383,27 @@ def MF34_to_MG(endf_object,
             mg_means_row_vals_to_store = mg_means_row_vals
             mg_means_col_vals_to_store = mg_means_col_vals
 
-        # Apply quality checks and add to result
-        mg_relative = enforce_matrix_quality(relative_fine, "relative", project_to_psd=project_to_psd)
-        mg_absolute = enforce_matrix_quality(absolute_fine, "absolute", project_to_psd=project_to_psd)
+        # Apply quality checks and add to result. Only a self block -- the same
+        # (isotope, MT, L) on both sides -- is a covariance matrix with a
+        # symmetry and a sign: a cross block (L != L1, or two reactions) is an
+        # off-diagonal partition, and symmetrising or projecting it on its own
+        # changes it into something MF34 does not state. A self block is
+        # projected once, in the form the file states it, and the other form
+        # derived from it with the same means, so the two stay one covariance
+        # (a congruence keeps the result PSD).
+        is_self = (isotope_row == isotope_col and reaction_row == reaction_col
+                   and l_row == l_col)
+        if not is_self:
+            mg_relative, mg_absolute = relative_fine, absolute_fine
+        elif is_relative:
+            mg_relative = enforce_matrix_quality(relative_fine, "relative",
+                                                 project_to_psd=project_to_psd)
+            mg_absolute = relative_to_absolute(mg_relative, *_abs_means)
+        else:
+            mg_absolute = enforce_matrix_quality(absolute_fine, "absolute",
+                                                 project_to_psd=project_to_psd)
+            mg_relative = absolute_to_relative(mg_absolute, mg_means_row_vals,
+                                               mg_means_col_vals)
         result.add_matrix(
             isotope_row, reaction_row, l_row,
             isotope_col, reaction_col, l_col,
@@ -1362,7 +1412,39 @@ def MF34_to_MG(endf_object,
             _effective_frame
         )
 
+    result.weighting_function = (
+        weight_desc + " (sigma-weighted)" if not _flux_only_mts else
+        weight_desc + " (sigma-weighted; flux-only for "
+        + ", ".join(f"MT{m}" for m in _flux_only_mts) + ", which had no PENDF)"
+    )
     return result
+
+
+def _two_body_kinematics(endf_object, mt: int, mf4_mt_data) -> Tuple[float, float]:
+    """``(awr, q)`` for the CM→lab change of a two-body neutron reaction.
+
+    Elastic is ``γ = 1/AWR``; a discrete level needs its QI, which MF3 holds.
+    Any other reaction is not two-body, and converting it with these
+    kinematics would give a lab distribution of a different reaction.
+    """
+    mt = int(mt)
+    if mt not in TWO_BODY_NEUTRON_MTS:
+        raise ValueError(
+            f"MT{mt}: output_frame='lab' converts CM coefficients with two-body "
+            f"kinematics, which hold only for elastic (MT2) and discrete "
+            f"inelastic levels (MT51-90); use output_frame='same' for this tape"
+        )
+    q = 0.0
+    if mt != 2:
+        mf3 = endf_object.mf[3] if 3 in endf_object.mf else None
+        section = mf3.mt[mt] if mf3 is not None and mt in mf3.mt else None
+        if section is None:
+            raise ValueError(
+                f"MT{mt}: the CM→lab change of a discrete level needs its QI, "
+                f"which lives in MF3, and this tape has no MF3/MT{mt}"
+            )
+        q = float(section.q_reaction)
+    return float(mf4_mt_data._awr), q
 
 
 collapse_to_multigroup = MF34_to_MG

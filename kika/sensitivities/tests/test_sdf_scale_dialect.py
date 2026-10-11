@@ -97,3 +97,28 @@ def test_scale_dialect_gzip_roundtrip(tmp_path):
         plain.write_text(f.read())
     sdf = read_sdf(str(plain))
     assert len(sdf.data) == 3
+
+
+def test_compact_dialect_uncertainties_are_unknown_not_zero(tmp_path):
+    """TSUNAMI-1D writes no error block: the profile says "unknown", not "exact".
+
+    They used to come back as 0, which the sandwich bootstrap treated as exact.
+    """
+    text = "\n".join([
+        "compact case",
+        "         4 number of neutron groups",
+        "         1   number of sensitivity profiles          1 are region integrated",
+        "  1.000000 +/-   0.000100  k-eff from the forward case",
+        "energy boundaries:",
+        "  2.000000E+07  1.000000E+05  6.250000E-01  1.000000E-05  1.000000E-11",
+        "fe-56        elastic           26056      2      0  1.000000E-02",
+        "  1.000000E-02",
+        "  4.000000E-03  3.000000E-03  2.000000E-03  1.000000E-03",
+    ]) + "\n"
+    p = tmp_path / "compact.sdf"
+    p.write_text(text)
+    sdf = read_sdf(str(p))
+    (reaction,) = sdf.data
+    assert reaction.error_known is False
+    profile = sdf.to_sensitivity_profile()
+    assert profile.reactions[0].uncertainty is None
