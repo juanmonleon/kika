@@ -54,6 +54,20 @@ def _xs_section(xs_sections: Optional[Dict[int, object]], mt: int,
     """
     if not xs_sections or not mixesAbsoluteAndRelative(ni_records):
         return None
+    return cross_section_or_sum(xs_sections, mt)
+
+
+def cross_section_or_sum(xs_sections: Optional[Dict[int, object]], mt: int
+                         ) -> Optional[object]:
+    """σ(E) of ``mt`` from ``xs_sections`` (MT → MF3-like section), or its sum.
+
+    A section the map holds is returned as it is. A summation reaction it does
+    not hold is the ENDF-6 sum of the partials it does, by the rules
+    ``kika.endf.writers.redundant`` rebuilds MF3 with, returned as
+    ``energies``/``values`` read lin-lin. ``None`` when neither resolves.
+    """
+    if not xs_sections:
+        return None
     if mt in xs_sections:
         return xs_sections[mt]
     from types import SimpleNamespace
