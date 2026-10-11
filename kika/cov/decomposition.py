@@ -960,7 +960,7 @@ def nearest_psd_higham(
         wall-time without improving the projection.
     tol : float, optional
         Convergence tolerance on relative Frobenius change between iterations.
-        Also the bound, relative to the largest |eigenvalue|, under which a
+        Also the bound, relative to the largest eigenvalue magnitude, under which a
         negative eigenvalue counts as rounding and the matrix as already PSD.
         ``None`` (default) auto-selects: 1e-10 for matrices ≤ 1000×1000,
         1e-8 for larger ones — at n ≳ 1000, rel_change ≲ 1e-8 is already
