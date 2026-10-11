@@ -166,7 +166,7 @@ def test_the_tape_the_ace_needs_is_written_on_demand(fakeNjoy, tmp_path):
 
 
 def test_a_gnds_source_cannot_make_an_ace_yet_and_says_why(fakeNjoy, tmp_path):
-    """ACE needs an ENDF tape, and GNDS->ENDF is the deferred §6.3 increment.
+    """ACE needs an ENDF tape, and a suite read from GNDS is not written as an ENDF tape here.
 
     Measured 2026-09-06 on the fixture round-tripped through GNDS: with the
     MF1/451 header and the AWR borrowed from the ENDF original, the writer
@@ -181,7 +181,7 @@ def test_a_gnds_source_cannot_make_an_ace_yet_and_says_why(fakeNjoy, tmp_path):
     gnds.parent.mkdir()
     kika.write(kika.read(TAPE), str(gnds), format="gnds")
     options = AceOptions(temperatures=[293.6], njoyExe=str(exe))
-    with pytest.raises(ValueError, match="§6.3") as refused:
+    with pytest.raises(ValueError, match="cannot be written as one yet") as refused:
         perturbFromModel(str(gnds), REQUEST, 1, seed=1, outputDir=tmp_path / "run",
                          formats=("ace",), ace=options)
     assert "MAT would be 2631" in str(refused.value)
