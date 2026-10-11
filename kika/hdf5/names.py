@@ -14,7 +14,9 @@ from kika._constants import ATOMIC_NUMBER_TO_SYMBOL, SYMBOL_TO_ATOMIC_NUMBER
 __all__ = ["K_BOLTZMANN", "EV_PER_MEV", "HDF5_VERSION", "temperatureName",
            "temperatureFromName", "gndsName", "parseGndsName", "reactionLabel",
            "REACTION_NAME", "FISSION_MTS", "KEEP_REDUNDANT_MTS", "SUBSHELLS",
-           "isFission", "isDisappearance", "isInelasticScatter"]
+           "isFission", "isDisappearance", "isInelasticScatter",
+           "EVAL_LABEL", "RECON_LABEL", "MONTE_CARLO_LABEL", "heatedLabel",
+           "urrLabel", "temperatureOfLabel"]
 
 #: eV/K. ``openmc.data.K_BOLTZMANN`` (from the ``endf`` package OpenMC uses).
 #: kika's own ``BOLTZMANN_CONSTANT`` is the CODATA-2018 value to two more
@@ -140,3 +142,38 @@ def isInelasticScatter(mt: int) -> bool:
     if mt <= 200:
         return not isDisappearance(mt)
     return 875 <= mt <= 891
+
+
+# ----------------------------------------------------------------------
+# Style labels (roadmap D9)
+# ----------------------------------------------------------------------
+# GNDS §9 fixes the style *node* names and leaves the labels to the writer.
+# These are kika's for a suite read from, or written to, OpenMC's HDF5.
+
+#: The evaluated style. A file read from HDF5 refers to an evaluation it does
+#: not contain, as an ACE file does, so this style is declared and empty.
+EVAL_LABEL = "eval"
+#: ``crossSectionReconstructed``: the 0 K pointwise cross sections (the
+#: ``0K`` grid and the elastic's ``0K/xs``).
+RECON_LABEL = "recon"
+#: ``MonteCarlo_cdf``: the tabulated distributions and yields a transport code
+#: samples -- temperature-independent, so one style for all of them.
+MONTE_CARLO_LABEL = "MonteCarlo"
+
+
+def heatedLabel(temperature: str) -> str:
+    """The ``heated`` style of one temperature group: ``"294K"`` → ``"heated_294K"``."""
+    return f"heated_{temperature}"
+
+
+def urrLabel(temperature: str) -> str:
+    """The ``URR_probabilityTables`` style of one temperature: ``"URR_294K"``."""
+    return f"URR_{temperature}"
+
+
+def temperatureOfLabel(label: str) -> str:
+    """``"heated_294K"`` or ``"URR_294K"`` → ``"294K"``."""
+    for prefix in ("heated_", "URR_"):
+        if label.startswith(prefix):
+            return label[len(prefix):]
+    raise ValueError(f"{label!r} is not a per-temperature label")

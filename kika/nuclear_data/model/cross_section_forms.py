@@ -136,10 +136,19 @@ class ThermalNeutronScatteringLaw1d:
 
 @dataclass
 class URR_probabilityTables1d:  # noqa: N801 - GNDS node name, see tests/test_gnds_naming.py
-    """§16.1.1. Unresolved-region probability tables, a processed representation."""
+    """§16.1.1. Unresolved-region probability tables, a processed representation.
+
+    ``table`` holds the tables themselves when the source carried them -- a
+    :class:`~kika.nuclear_data.model.processed_forms.ProbabilityTables`, read
+    from an OpenMC HDF5 file's ``urr/<T>`` or produced for one. The tables
+    belong to the nuclide, not to one reaction (their rows are elastic, fission
+    and capture together), so every reaction they apply to carries the same
+    object. Without it the node is a reference only, as ACE's decoder leaves it.
+    """
 
     href: Optional[str] = None
     label: Optional[str] = None
+    table: Optional[object] = None
 
 
 @dataclass(repr=False)

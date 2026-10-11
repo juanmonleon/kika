@@ -64,7 +64,7 @@ __all__ = ["read", "sniff_format", "UnknownFormatError"]
 #: **5.97 s as ENDF-6** (25.6 MB, MF1/2/3/4/33; the figure predates MF6 and
 #: MF12-15 being read, so today's cost is higher). Neither is
 #: the six minutes the JEFF host tape costs; that tape is larger and carries MF34.
-FORMATS = ("endf", "ace", "gnds", "g4ndl")
+FORMATS = ("endf", "ace", "gnds", "g4ndl", "hdf5")
 
 #: MF numbers whose content belongs to the covarianceSuite rather than the
 #: reactionSuite (GNDS §25.1.1). Kept here because the door has to know which
@@ -156,6 +156,26 @@ def _looksLikeGnds(lines) -> bool:
     return False
 
 
+def _looksLikeHdf5(path) -> bool:
+    """The HDF5 signature in the first eight bytes, and an OpenMC ``filetype``.
+
+    Binary, so it is checked before the text sniffers read the file as lines.
+    Only OpenMC's data files are a format kika reads; another HDF5 file is
+    reported as unknown rather than half-opened (roadmap D1: the ``filetype``
+    attribute is what tells them apart).
+    """
+    from kika.hdf5.api import HDF5_SIGNATURE, filetype
+
+    with open(path, "rb") as handle:
+        if handle.read(8) != HDF5_SIGNATURE:
+            return False
+
+    try:
+        return filetype(path).startswith("data_")
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
 def sniff_format(path) -> str:
     """Which of :data:`FORMATS` this file is, decided on **content**.
 
@@ -178,6 +198,8 @@ def sniff_format(path) -> str:
             f"{path} is a directory without Elastic/CrossSection and Elastic/FS, "
             f"so it is not a G4NDL library root (the IAEA tarballs nest one, "
             f"e.g. JEFF-4.0/JEFF-4.0); every other format is a file")
+    if _looksLikeHdf5(path):
+        return "hdf5"
     lines = _headLines(path)
     if _looksLikeGnds(lines):
         return "gnds"
@@ -187,8 +209,9 @@ def sniff_format(path) -> str:
         return "endf"
     raise UnknownFormatError(
         f"{path} is not an ENDF tape (no MAT/MF/MT in columns 67-75), not a "
-        f"type-1 ACE file (first line is not 'ZAID AWR TEMP DATE') and not GNDS "
-        f"XML. If you know what it is, pass format= explicitly."
+        f"type-1 ACE file (first line is not 'ZAID AWR TEMP DATE'), not GNDS "
+        f"XML and not an OpenMC HDF5 data file. If you know what it is, pass "
+        f"format= explicitly."
     )
 
 
@@ -205,7 +228,8 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
     path
         The file. Its format is detected from content unless ``format`` is given.
     format
-        ``'endf'``, ``'ace'``, ``'gnds'`` or ``'g4ndl'``, forcing the choice.
+        ``'endf'``, ``'ace'``, ``'gnds'``, ``'g4ndl'`` or ``'hdf5'`` (OpenMC's
+        HDF5 data, :mod:`kika.hdf5`), forcing the choice.
         For the file whose header is malformed, or an ACE 2.0 file the sniffer
         cannot place.
     covariances
@@ -256,6 +280,11 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
 
     if format == "g4ndl":
         return _readG4ndl(path, target)
+    if format == "hdf5":
+        from kika.hdf5.api import read as readHdf5
+
+        # Processed data: no covariances to follow.
+        return readHdf5(path)
     if format == "gnds":
         return _readGnds(path, covariances=covariances)
     if format == "ace":

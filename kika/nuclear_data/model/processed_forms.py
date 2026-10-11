@@ -23,15 +23,18 @@ writer emits exactly that back (roadmap H2, gate 1).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 import numpy as np
 
 from .enums import Frame
 from .functions import Function2d, XYs2d, XYs3d
 
-__all__ = ["LevelEnergy", "DiscretePhotonEnergy", "EnergyAngularMC"]
+__all__ = ["LevelEnergy", "DiscretePhotonEnergy", "EnergyAngularMC", "DistributionMixture",
+           "ProbabilityTables", "PROBABILITY_TABLE_ROWS", "CoherentElasticXS",
+           "IncoherentElasticXS", "SumOfFunctions", "CoherentElasticMC", "IncoherentElasticMC",
+           "IncoherentElasticDiscreteMC", "IncoherentInelasticDiscreteMC", "MixedElasticMC"]
 
 
 @dataclass
@@ -95,3 +98,168 @@ class EnergyAngularMC:
     @property
     def isComplete(self) -> bool:
         return self.energy is not None and self.energyAngular is not None
+
+
+@dataclass
+class DistributionMixture:
+    """Several distributions of one product, one drawn per collision by ``p_k(E)``.
+
+    ACE chains a product's energy laws with a probability each (the ``LNW``
+    list) and OpenMC keeps them as ``distribution_0..k`` with an
+    ``applicability`` function per distribution, sampling distribution ``k``
+    with probability ``p_k(E)`` (``reaction_product.cpp``). GNDS states a
+    weighted sum only for energy spectra (``weightedFunctionals``); this is the
+    same statement one level up, for whole angle-energy forms. Each
+    :class:`~kika.nuclear_data.model.energy_spectra.Weighted` holds ``p_k`` as
+    ``weight`` and the form as ``functional``.
+
+    OpenMC writes an ``applicability`` even for a product with **one**
+    distribution, and the official libraries carry thousands of them; a mixture
+    of one keeps that dataset through a read and a write.
+    """
+
+    weighted: List[object] = field(default_factory=list)
+    label: Optional[str] = None
+
+    def __len__(self) -> int:
+        return len(self.weighted)
+
+
+#: Rows of OpenMC's ``urr/<T>/table`` (``urr.py:17-24``).
+PROBABILITY_TABLE_ROWS = ("cdf", "total", "elastic", "fission", "capture", "heating")
+
+
+@dataclass
+class ProbabilityTables:
+    """Unresolved-resonance probability tables at one temperature (PURR's output).
+
+    ``table`` is ``(N, 6, M)``: for each of the N incident ``energies``, the M
+    bands' cumulative probability and their total, elastic, fission, capture
+    and heating values (:data:`PROBABILITY_TABLE_ROWS`). With
+    ``multiplySmooth`` the values are factors on the smooth cross sections;
+    otherwise they are cross sections in barns. ``inelastic`` and
+    ``absorption`` name the MT whose smooth cross section stands for the
+    competition (``<= 0``: none); ``interpolation`` is 2 (lin-lin) or 5
+    (log-log) between incident energies (``urr.py:132-162``).
+
+    OpenMC's C++ uses the cdf, elastic, fission and capture rows and the
+    reaction ``inelastic`` names; the total and heating rows are stored and
+    not used in transport (``nuclide.cpp:963-987``).
+    """
+
+    energies: np.ndarray
+    table: np.ndarray
+    interpolation: int = 2
+    inelastic: int = 0
+    absorption: int = 0
+    multiplySmooth: bool = True
+
+    def __post_init__(self) -> None:
+        self.energies = np.asarray(self.energies, dtype=float)
+        self.table = np.asarray(self.table, dtype=float)
+        if self.table.ndim != 3 or self.table.shape[:2] != (len(self.energies), 6):
+            raise ValueError(f"a probability table is (N, 6, M) over N energies; got "
+                             f"{self.table.shape} for {len(self.energies)} energies")
+
+    @property
+    def bands(self) -> int:
+        return int(self.table.shape[2])
+
+    def row(self, name: str) -> np.ndarray:
+        """``(N, M)`` values of one row, by name."""
+        return self.table[:, PROBABILITY_TABLE_ROWS.index(name), :]
+
+
+# ----------------------------------------------------------------------
+# Thermal scattering, processed (one temperature per form)
+# ----------------------------------------------------------------------
+# An evaluated TSL is a law: S(alpha, beta, T), Bragg edges with S(E, T), a
+# Debye-Waller integral W'(T) (:mod:`~kika.nuclear_data.model.thermal_scattering`).
+# A processed library states what a transport code samples at each
+# temperature, and these are those forms -- OpenMC's ``data_thermal`` objects
+# (``thermal.py``, ``thermal_angle_energy.py``), each filed under the
+# ``heated_<T>`` label of its temperature.
+
+
+@dataclass
+class CoherentElasticXS:
+    """σ_coh(E) = s_i / E between Bragg edges, at one temperature (OpenMC ``CoherentElastic``)."""
+
+    braggEdges: np.ndarray
+    structureFactors: np.ndarray
+
+    def __post_init__(self) -> None:
+        self.braggEdges = np.asarray(self.braggEdges, dtype=float)
+        self.structureFactors = np.asarray(self.structureFactors, dtype=float)
+
+    def evaluate(self, energies):
+        e = np.asarray(energies, dtype=float)
+        index = np.searchsorted(self.braggEdges, e, side="right") - 1
+        held = np.where(index >= 0, self.structureFactors[np.clip(index, 0, None)], 0.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(e > 0, held / np.where(e > 0, e, 1.0), 0.0)
+
+
+@dataclass
+class IncoherentElasticXS:
+    """σ_inc(E) = σ_b/2 (1 - e^(-4EW'))/(2EW') at one temperature (OpenMC ``IncoherentElastic``)."""
+
+    boundCrossSection: float
+    debyeWaller: float
+
+    def evaluate(self, energies):
+        e = np.asarray(energies, dtype=float)
+        x = 2.0 * e * self.debyeWaller
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(x > 0, -np.expm1(-2.0 * x) / np.where(x > 0, x, 1.0), 2.0)
+        return 0.5 * self.boundCrossSection * ratio
+
+
+@dataclass
+class SumOfFunctions:
+    """A cross section stated as a sum (OpenMC ``Sum``): a mixed elastic's coherent + incoherent."""
+
+    functions: List[object] = field(default_factory=list)
+
+    def evaluate(self, energies):
+        return sum(np.asarray(f.evaluate(energies), dtype=float) for f in self.functions)
+
+
+@dataclass
+class CoherentElasticMC:
+    """Outgoing angle of Bragg scattering: from the edges of the reaction's cross section."""
+
+
+@dataclass
+class IncoherentElasticMC:
+    """Outgoing angle of incoherent elastic scattering, from the Debye-Waller integral (1/eV)."""
+
+    debyeWaller: float
+
+
+@dataclass
+class IncoherentElasticDiscreteMC:
+    """Equiprobable outgoing cosines per incident energy, ``muOut`` (NE, n)."""
+
+    muOut: np.ndarray
+
+
+@dataclass
+class IncoherentInelasticDiscreteMC:
+    """Equiprobable outgoing energies and cosines per incident energy (ACE ``nxs[7] != 2``).
+
+    ``energyOut`` (NE, n_E'), ``muOut`` (NE, n_E', n_mu); ``skewed`` is ACE's
+    flag for the skewed outgoing-energy weighting.
+    """
+
+    energyOut: np.ndarray
+    muOut: np.ndarray
+    skewed: bool = False
+
+
+@dataclass
+class MixedElasticMC:
+    """A mixed elastic's two angular laws, coherent and incoherent."""
+
+    coherent: object = None
+    incoherent: object = None

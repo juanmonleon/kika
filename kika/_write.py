@@ -48,7 +48,7 @@ from typing import Optional
 __all__ = ["write"]
 
 #: Formats the door can write.
-WRITE_FORMATS = ("gnds", "endf", "g4ndl")
+WRITE_FORMATS = ("gnds", "endf", "g4ndl", "hdf5")
 
 #: Where a covariance sibling goes, relative to the evaluation. The layout the
 #: ENDF/B-VIII.1 GNDS distribution uses, so a pair kika writes sits where a
@@ -59,7 +59,7 @@ COVARIANCE_SUBDIRECTORY = "Covariances"
 def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
           mat: Optional[int] = None, tapeId: Optional[str] = None,
           label: Optional[str] = None, compressed: bool = False, *,
-          resonance_extensions: bool = False):
+          resonance_extensions: bool = False, temperatures=None, **options):
     """Write a :class:`ReactionSuite` out, and say what did not go with it.
 
     Parameters
@@ -107,6 +107,14 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
     compressed
         G4NDL only: write ``<name>.z`` (zlib, what Geant4 distributes) instead
         of plain text.
+    temperatures
+        HDF5 only: the temperatures to write, in kelvin (or OpenMC group names
+        such as ``"294K"``). ``path`` is then a directory: the nuclide's
+        ``<name>.h5`` goes in it and ``cross_sections.xml`` beside it indexes
+        it. A suite read from an OpenMC file is written as it is; an
+        evaluation is reconstructed, broadened to each temperature and
+        tabulated first (:func:`kika.hdf5.writer.writeSuite`, which takes the
+        remaining ``options``).
     resonance_extensions
         GNDS only. Preserve KPS, tabulated resonance backgrounds and the
         URR's cross-section INT in the versioned KIKA applicationData
@@ -130,6 +138,12 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         )
     if resonance_extensions and format != 'gnds':
         raise ValueError('resonance_extensions is a GNDS-only option')
+    if (temperatures is not None or options) and format != "hdf5":
+        raise ValueError("temperatures= and the processing options are for format='hdf5'")
+    if format == "hdf5":
+        from kika.hdf5.writer import writeSuite
+
+        return writeSuite(suite, Path(os.fspath(path)), temperatures=temperatures, **options)
     from kika.nuclear_data.model import FissionFragmentData, PoPs
     if isinstance(suite, FissionFragmentData):
         # Fission product yields alone (roadmap E7c): FUDGE's neutron-induced

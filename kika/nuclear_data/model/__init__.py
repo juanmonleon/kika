@@ -135,7 +135,11 @@ from .distributions import (
     Uncorrelated,
     Unspecified,
 )
-from .processed_forms import DiscretePhotonEnergy, EnergyAngularMC, LevelEnergy
+from .processed_forms import (PROBABILITY_TABLE_ROWS, CoherentElasticMC, CoherentElasticXS,
+                              DiscretePhotonEnergy, DistributionMixture, EnergyAngularMC,
+                              IncoherentElasticDiscreteMC, IncoherentElasticMC,
+                              IncoherentElasticXS, IncoherentInelasticDiscreteMC, LevelEnergy,
+                              MixedElasticMC, ProbabilityTables, SumOfFunctions)
 from .energy_spectra import (ANALYTIC_SPECTRA, Evaporation, GeneralEvaporation,
                              MadlandNix, SimpleMaxwellianFission, Watt, Weighted,
                              WeightedFunctionals)
@@ -289,7 +293,10 @@ __all__ = [
     "EnergyAngular", "AngularEnergy", "KalbachMann", "Branching3d",
     "NBodyPhaseSpace",
     "DiscreteGamma", "PrimaryGamma",
-    "EnergyAngularMC", "LevelEnergy", "DiscretePhotonEnergy",
+    "EnergyAngularMC", "LevelEnergy", "DiscretePhotonEnergy", "DistributionMixture", "ProbabilityTables", "PROBABILITY_TABLE_ROWS",
+    "CoherentElasticXS", "IncoherentElasticXS", "SumOfFunctions", "CoherentElasticMC",
+    "IncoherentElasticMC", "IncoherentElasticDiscreteMC", "IncoherentInelasticDiscreteMC",
+    "MixedElasticMC",
     "Recoil", "NOT_IMPLEMENTED_DISTRIBUTIONS",
     # §19 resonances, by formalism
     "Resonances", "ResolvedRegion", "UnresolvedRegion", "ScatteringRadius",
