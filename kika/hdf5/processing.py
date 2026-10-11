@@ -786,7 +786,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
             target = m.CrossSectionSum(id=m.ReactionId(label=f"MT{mt}", ENDF_MT=mt),
                                        crossSection=summedForms(levels),
                                        outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
-                                       provenance=m.Hdf5Provenance(attributes=_sumAttributes(mt)))
+                                       provenance=m.Hdf5Provenance(attributes=_sumAttributes(mt, _hasURR(work))))
             out.sums.append(target)
         # The photons' range is the sum's, as the evaluation states it.
         source = work.findReactionByENDF_MT(mt)
@@ -840,7 +840,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
             id=m.ReactionId(label=f"MT{inelastic}", ENDF_MT=inelastic),
             crossSection=summedForms(levels),
             outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
-            provenance=m.Hdf5Provenance(attributes=_sumAttributes(inelastic))))
+            provenance=m.Hdf5Provenance(attributes=_sumAttributes(inelastic, True))))
         report.warn(f"MT{inelastic} written as the redundant sum of {len(levels)} levels, "
                     f"because the URR tables name it")
     for piece in omit:
@@ -859,10 +859,16 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     return out
 
 
-def _sumAttributes(mt):
-    """A redundant sum's attributes as the official exporter writes them: MT3 and MT4
-    in the centre of mass (O-16's reaction_004, Pu-240's reaction_003), the others not."""
-    return {"redundant": 1, "center_of_mass": 1 if mt in (3, 4) else 0}
+def _sumAttributes(mt, urr=False):
+    """A redundant sum's attributes as the official exporter writes them.
+
+    A sum OpenMC builds itself takes ``Reaction``'s default frame, the centre of
+    mass: MT3 (Pu-240) and MT4 carrying photons (O-16). An MT4 that comes from
+    the ACE table -- ACER writes it for a nuclide with URR tables, which name it
+    as the inelastic competition -- has TYR = 0 there, so the lab (U-235,
+    U-238, Pu-240). The frame of a redundant reaction is never sampled.
+    """
+    return {"redundant": 1, "center_of_mass": 1 if mt == 3 or (mt == 4 and not urr) else 0}
 
 
 def _thin(grid, values, rtol):
