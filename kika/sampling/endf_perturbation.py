@@ -790,7 +790,8 @@ def perturb_ENDF_files(
         read from the ENDF files themselves (MF34 section). If provided, can be a 
         single file (used for all ENDF files) or one file per ENDF file.
     space : str, default "linear"
-        Sampling space: "linear"/"lin" (factors = 1 + X) or "log" (factors = exp(Y))
+        Sampling space: "linear"/"lin" (factors = 1 + X) or "log"
+        (factors = exp(Y - diag(Σ_log)/2), Y ~ N(0, Σ_log), Σ_log = log1p(Σ): unit mean, Cov = Σ)
     decomposition_method : str, default "svd"
         Matrix decomposition method: "svd", "cholesky", "eigen", or "pca"
     psd_method : str, default "none"

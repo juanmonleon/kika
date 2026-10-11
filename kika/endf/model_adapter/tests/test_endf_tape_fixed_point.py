@@ -313,8 +313,8 @@ def test_the_mf5_section_a_tape_gets_back_is_byte_identical(micro_pfns_tape):
 def test_a_tape_with_mf6_comes_back_with_all_of_it(micro_mf6_tape, tmp_path):
     """The other half of what MF5 closed, and it closes differently.
 
-    MF5 comes back only where kika models the law: a section of analytic spectra
-    is reported and *not written*. MF6 comes back whole whatever its laws,
+    MF5 comes back law by law, the analytic spectra included. MF6 comes back
+    whole whatever its laws,
     because its provenance keeps the records of a subsection that did not reach
     a §18 node — so LAW=5 and every negative LAW ride out on the bytes they came
     in as. What the report says about them is a statement about the *model*,

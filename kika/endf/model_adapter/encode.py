@@ -1,14 +1,15 @@
 """:class:`~kika.nuclear_data.model.suite.ReactionSuite` → ENDF section objects.
 
-The gate for phase 3c is **not** "ENDF -> model -> ENDF is byte-identical". The
-writer is patch-in-place, so whatever it is not handed survives verbatim and
-that assertion stays true even if the model computes garbage. The gate this
-module is written against is stronger and narrower: for every MT,
+The gate is **not** "ENDF -> model -> ENDF is byte-identical" through the
+patch-in-place writer, which leaves whatever it is not handed verbatim and so
+stays true even if the model computes garbage. The gate this module is written
+against is stronger and narrower: for every section,
 
-    str(encodeMF3MT(reaction))  ==  str(CrossSection.from_endf(section).to_endf())
+    str(encodeMF3MT(reaction))  ==  str(section)
 
-byte for byte. That compares what the model produced against what the flat path
-produces from the same input, which is the claim phase 3 actually makes.
+byte for byte -- the model's output against the file itself
+(``tests/test_endf_round_trip.py`` says why the comparison moved off the flat
+path).
 """
 from __future__ import annotations
 

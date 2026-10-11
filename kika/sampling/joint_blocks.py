@@ -415,9 +415,8 @@ def resolveMagnitudeOrder(suite, request):
       nor its correlation with the shape is wanted.
     * **with MF33 for the same MT** -- MF33 states sigma's variance and the
       L>=1 the shape. The cross term L0xLl is what a joint draw would add; it
-      is not drawn yet (pista J, J3 of
-      ``docs/library/mf4_tabulated_perturbation_roadmap.md``), and the note says
-      whether the file's cross blocks carry anything.
+      is not drawn yet, and the note says whether the file's cross blocks
+      carry anything.
 
     Orders named explicitly are left alone, L=0 included: that is a request to
     perturb sigma from MF34, which :class:`PerturbationSet` still refuses next

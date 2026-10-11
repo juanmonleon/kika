@@ -5,9 +5,8 @@ GNDS: a library directory (``Elastic/CrossSection``, ``Elastic/FS``, ...) of
 per-isotope token streams, optionally zlib-compressed as ``<name>.z``. Geant4
 itself is **not** a dependency of kika — not even an optional one. The contract
 the reader follows is the consumer's source, Geant4 v11.4.3
-``source/processes/hadronic/models/particle_hp``, written down with line
-references in ``kika-workspace/docs/library/G4NDL_token_spec.md``; checking
-against a real Geant4 build happens outside this repository.
+``source/processes/hadronic/models/particle_hp``; checking against a real
+Geant4 build happens outside this repository.
 
 **Scope today: elastic, inelastic, capture and fission**, read and written:
 ``Elastic/CrossSection`` and ``Elastic/FS`` (MT2); ``Inelastic/CrossSection``,

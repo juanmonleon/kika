@@ -10,8 +10,8 @@ own version and the three can disagree. Here the operation is on the node --
 format is a way of writing the answer down afterwards.
 
 The arithmetic is not new. It reproduces
-:func:`kika.sampling.mf33_sampling.apply_factors_to_pendf_mf3`, which is what
-the thesis pipeline runs, and the gate is byte-identity of the section that
+:func:`kika.sampling.mf33_sampling.apply_factors_to_pendf_mf3`, the format
+route's applier, and the gate is byte-identity of the section that
 comes out of ``encodeMF3MT`` against the section that applier writes. Three
 pieces:
 
@@ -28,7 +28,7 @@ pieces:
    pairs fall out of :meth:`Regions1d.toEndfRegions` counting region lengths.
    The format applier computes ``new_NBT_i = NBT_i + sum(n for pos < NBT_i)``
    by hand; that arithmetic and the point count were two sources of truth for
-   the same fact, which is exactly the defect D28 was.
+   the same fact, and they once disagreed.
 
 **Where this deliberately does not reproduce the format applier.** The value
 inserted at a bin edge that the table does not already carry has to be
@@ -903,7 +903,7 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
     frameConversion
         As in :func:`applyLegendreFactors`: the factors act on the coefficients
         of the covariance's frame. On a table that change is closed form
-        (:mod:`~kika.nuclear_data.model.angular_tables`, roadmap T9): project
+        (:mod:`~kika.nuclear_data.model.angular_tables`): project
         onto the other frame's ``P_l``, and carry the shift back as a density
         with the Jacobian of the cosine map. A node where ``γ ≥ 1`` is left as
         the evaluation has it and counted in ``frame["n_degenerate"]``.
@@ -919,7 +919,7 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
         ``max_integral_change`` (the worst ``|int f' - int f|`` relative to
         ``int f``, under the table's own law) and ``positivity_events``.
 
-    **A limitation of the method, not a defect** (D-F of the roadmap). With a
+    **A limitation of the method, not a defect.** With a
     relative covariance the change is ``(c_l - 1) a_l``, which vanishes where
     ``a_l`` does. And ``a_l`` is this module's projection of the table, so if
     the evaluator built the MF34 against a different one, the absolute
@@ -1271,8 +1271,7 @@ def applyNubarFactors(function1d, factors: ArrayLike, binEdges: ArrayLike, *,
 # section and a nu-bar are scaled: refine at the bin edges, multiply. A fission
 # spectrum is not, because MF35 is not the covariance of chi(E') -- it is the
 # covariance of the *group-integrated probabilities*
-# ``P_j = int_{g_j}^{g_j+1} chi``, measured three independent ways
-# (``docs/pfns/pfns_mf5_mf35_roadmap.md`` fact 4). So the perturbation is stated
+# ``P_j = int_{g_j}^{g_j+1} chi`` (ENDF-6 §35). So the perturbation is stated
 # on quantities the node does not store, and applying it means integrating the
 # node, turning a delta on the integral into a ratio, scaling the table so the
 # integral comes out right, and then checking that it did.

@@ -870,7 +870,8 @@ class PerturbationSet:
         "total fission neutron multiplicity" and "delayed fission neutron
         multiplicity", because §18.4 puts delayed neutrons on precursor families
         and the aggregate is a sum over them. All three carry a real
-        ``Regions1d``, so the *arithmetic* is :func:`applyFactors` unchanged.
+        ``Regions1d``, and the arithmetic is
+        :func:`~kika.nuclear_data.model.perturbation.applyNubarFactors`.
 
         **And where the realisation goes is no longer special.** It is
         ``multiplicity[label] = form``, beside the evaluated one, exactly as for

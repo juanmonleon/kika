@@ -35,14 +35,11 @@ products plus the delayed sum).
 **What ENDF has that the model does not get filled with.** MF1/455 gives the
 *aggregate* delayed nu-bar and NNF decay constants. The per-family
 multiplicities — what the aggregate is the sum of — are the MF5/455 subsection
-weights — and those are LF=5 partials of an NK=6 section, which the MF5 adapter
-refuses whole: §18.3's node for a weighted sum of laws is ``weightedFunctionals``
-and kika models none of the six analytic spectra. **So this gap outlived the
-MF5 adapter**, and it is a missing model node now rather than a missing
-adapter. So the families are
-created with their rates and an empty multiplicity, the aggregate goes on the
-``multiplicitySum``, and the ``summands`` list stays empty rather than being
-filled with links to nodes that hold nothing.
+weights. This module creates the families with their rates and an empty
+multiplicity and puts the aggregate on the ``multiplicitySum``; the MF5 pass
+(``fission_energy.attachDelayedSpectra``) then places each family's weight and
+spectrum. The families stay empty only when the file has no MF5/455 to place,
+and the decoder reports that case (``decode._sayWhenFamiliesStayEmpty``).
 """
 from __future__ import annotations
 

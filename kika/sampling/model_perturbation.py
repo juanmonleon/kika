@@ -28,7 +28,6 @@ Three things it does differently, each of them deliberate:
   as stated. A new pipeline starts without autofix so that nobody has to take
   it away later; ``psd_method`` therefore defaults to ``"none"`` here, because
   by the time the draw happens the repairs have already been made and named.
-  The whole argument is in ``docs/library/autofix_in_the_model.md``.
 
 * **It keeps a log of events, and it can rehearse.** Every stage is a timed
   event with its numbers on a :class:`~kika.sampling.run_log.RunLog`, written
@@ -36,12 +35,11 @@ Three things it does differently, each of them deliberate:
   it but the tapes, so a run can be checked on a laptop before it is launched.
 
 * **One factors table per run.** Every realisation goes to ``factors.parquet``
-  with one ``factors_index.json``, rather than a JSON per sample.
+  with its index in the table's own metadata, rather than a JSON per sample.
 * **One suite, labelled forms, no ``deepcopy``.** §9.1's multi-form container
   holds the realisation beside the evaluation, which is what it is for; the
   label is removed again once the sample is written, so memory does not grow
-  with the ensemble. The measurement that decided this is D6 in
-  ``docs/library/perturbation_model_roadmap.md``.
+  with the ensemble.
 * **The emitters declare what they cannot carry.** ``endf-delta`` re-encodes
   only the files a realisation touched and patches them into the tape that was
   read, so everything else survives verbatim and ``cmp`` between two samples
@@ -226,7 +224,7 @@ class RunResult:
     files: Dict[str, Path] = field(default_factory=dict)
     #: C10 (PD-9), for a run that perturbs a fission spectrum: what each MF35
     #: band states for ``<E'>`` and the tail fractions, against independent
-    #: knowledge where the roadmap has read some. ``{mt: {band: record}}``;
+    #: knowledge where there is some. ``{mt: {band: record}}``;
     #: :func:`kika.sampling.pfns_moments.statedSpectrumMoments`. Reported, not
     #: a gate, and it changes nothing that is drawn.
     spectrumMoments: Dict[int, Dict[Any, Dict[str, Any]]] = field(
@@ -436,7 +434,7 @@ def _tabulatedAngularNote(applied) -> Optional[str]:
     computed, as the Legendre path leaves a negative series), and how far the
     lin-lin integral of the table moved -- the correction integrates to zero
     in the continuum but not between nodes, and a coarse cosine grid is where
-    that stops being small (decision D3 of the roadmap).
+    that stops being small.
 
     The text is the same for every sample, so the run records it once; the
     numbers are per realisation and live in its diagnostics under ``tables``.
@@ -932,7 +930,7 @@ def _expandNamedSums(suite, covariances, request, log, lumped=None,
 
     Asking for MT4 on a tape that states covariances for MT51 and MT52 is
     asking to perturb inelastic scattering, and the file says that is done
-    through MT51 and MT52 (Juan, 2026-10-07): they are added to the request,
+    through MT51 and MT52: they are added to the request,
     the sum stays in it (its block is then discarded, or carried to the rest
     with ``sumBlocks="fill"``), and the run says so. A sum whose covariance is
     only *derived* -- B-VIII.1 U-235's MT1, stated as the sum of its channels
@@ -1493,7 +1491,7 @@ def _readSource(source, log, covarianceSource=None):
 #: it -- measured to *improve* the residual (4.2e-6 -> 3.0e-6 on Cf-252). A
 #: congruence (``clip_rescale``, ``cap``) maps 1 to D·1 and took it to 2.2e-3;
 #: Higham degraded it ~40x. The masks and rescales drop or move rows, which
-#: breaks the sum on the retained subspace. ``pfns_mf5_mf35_roadmap.md`` L1.
+#: breaks the sum on the retained subspace.
 SUM_RULE_SAFE_REMEDIES = ("none", "clip")
 
 
@@ -2013,8 +2011,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         run on a laptop is what a full run on the cluster will do, minus the
         files that take the time.
     writeFactors
-        Write every realisation's factors to **one** ``factors.parquet`` with
-        its ``factors_index.json`` -- see
+        Write every realisation's factors to **one** ``factors.parquet``, its
+        index in the file's metadata -- see
         :func:`~kika.sampling.perturbation_set.writeFactorsTable`. On by
         default.
     writeSets
@@ -2144,9 +2142,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                 f"{needsTape} need an ENDF tape written from the model, and a "
                 f"suite read from GNDS cannot be written as one yet: it carries "
                 f"no MF1/451 header, no AWR and no Q/LR for its summed reactions, "
-                f"and the ENDF encoders refuse to invent them. That is the "
-                f"GNDS->ENDF increment deferred as §6.3 of "
-                f"docs/library/gnds_endf_conflicts.md; until it lands a GNDS "
+                f"and the ENDF encoders refuse to invent them, so a GNDS "
                 f"source can be perturbed to 'gnds' only. (MAT would be "
                 f"{_matOf(suite)} from the library's table when it does.)"
             )
@@ -2527,9 +2523,9 @@ def _jsonableMoments(moments) -> Dict[str, Any]:
 
 
 def _orphanPhotonNote(suite, index) -> Optional[str]:
-    """Decision J9 of the E5 plan, said once per run: the photons of a sum stay put.
+    """Said once per run: the photons of a sum stay put.
 
-    MT3/MT4/MT103-107 photons are ``orphanProducts`` of the sum (roadmap E5d).
+    MT3/MT4/MT103-107 photons are ``orphanProducts`` of the sum.
     A realisation that moves MF3 does not move their multiplicities -- that
     would need a rule for how a partial's change reaches the sum's photons, and
     nothing asks for one until there is UQ of gamma heating. MF13 production on

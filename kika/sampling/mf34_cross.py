@@ -15,7 +15,7 @@ The χ² could not read them, for two separate reasons:
 
 1. `eval_covariance.build_mf34_block` skips any block with `l_r < 1`. That skip
    is deliberate and it STAYS — it is what makes "no double counting"
-   structural rather than asserted (roadmap §L8).
+   structural rather than asserted.
 2. `MF34MT.to_ang_covmat` projects every LB=6 record onto ``union(row, col)``
    and hands back a SQUARE matrix on one grid, because `LegendreCovariance`
    stores one energy grid per block. The projection is value-preserving, but
@@ -34,8 +34,8 @@ So this module parses MF34 once and splits it:
       `build_mf33_mf34_cross_block` already consumes, guarded and correct.
 
 ⚑ ONE PARSE, AND THAT IS THE POINT. Routing the cross term through a second
-reader is the shape of every failure in this track's history — §L, §L3 and §L9
-are all "a joint was certified that was not the joint being shipped". Returning
+reader is the shape of every failure in this track's history: each was "a
+joint was certified that was not the joint being shipped". Returning
 both objects from a single `read_endf` makes "same file, same MT, same MT1,
 same LTT" structural. Do not add an entry point that reads the a₀ blocks
 without also producing the marginals they must be Cauchy–Schwarz-compatible
@@ -45,8 +45,8 @@ WHY IT LIVES IN THE LIBRARY (moved 2026-08-24). It used to be
 ``scripts/mf34_cross_reader.py``, read only by the chi^2. The sampler needs the
 same blocks -- an ensemble drawn from an ``_a0cross`` tape without them is drawn
 from a distribution the file does not describe -- and two readers of the same
-bytes is the shape of every failure this track has had (§L, §L3, §L9: "a joint
-was certified that was not the joint being shipped"). So there is one reader and
+bytes is the shape of every failure this track has had ("a joint was certified
+that was not the joint being shipped"). So there is one reader and
 both callers import it. ``scripts/mf34_cross_reader`` is now a re-export and
 raises loudly, not silently, against a stale wheel.
 """
@@ -135,7 +135,7 @@ def _a0_block_from(sub_subsec, l1: int) -> Tuple[np.ndarray, np.ndarray, np.ndar
         raise ValueError(
             f"MF34 a_0 block (0, {l1}) is LB={lb}, expected LB=6. Only LB=6 "
             f"carries an independent row grid, and without one the magnitude "
-            f"leg cannot be placed on the MF33 grid (roadmap §10.7-2(a))."
+            f"leg cannot be placed on the MF33 grid."
         )
     row = np.asarray(rec.row_energies, dtype=float)
     col = np.asarray(rec.col_energies, dtype=float)
@@ -227,10 +227,10 @@ def read_mf34_split(
       stops being a congruence. Orders need NOT share one grid — a mesh per
       order is legal ENDF-6 and folds correctly, because the union projection
       `to_ang_covmat` applies to a rectangular record is exact refinement and
-      leaves `mat[bin_L, bin_L1]` recoverable (roadmap §10.8, §L18).
+      leaves `mat[bin_L, bin_L1]` recoverable.
     * every a₀ block's ROW grid equals ``mf33_grid_ev``, so the magnitude leg is
       literally `_mf33_magnitude_map`'s output with no regridding.
-    * every a₀ block is relative, matching the family (§L13).
+    * every a₀ block is relative, matching the family.
     * the (0,0) block is null, because the magnitude self-covariance belongs to
       MF33 and counting it twice would double the magnitude variance.
     """
@@ -290,7 +290,7 @@ def read_mf34_split(
 
     # ---- the grid each ORDER's axis lives on --------------------------------
     #
-    # ⚑ ONE GRID PER ORDER, NOT ONE GRID FOR ALL OF THEM (roadmap §10.8).
+    # ⚑ ONE GRID PER ORDER, NOT ONE GRID FOR ALL OF THEM.
     #
     # This used to demand a single shape grid across every block, and that was
     # too strong. The congruence needs the SHAPE LEG OF ORDER L to reach the
@@ -352,9 +352,8 @@ def read_mf34_split(
                 f"{order_grid[l_r].size} and {order_grid[l_c].size} edges, "
                 f"whose union is {want.size}. An off-diagonal written on any "
                 f"other grid was not written on the two meshes, so "
-                f"`mat[bin_L, bin_L1]` cannot be read back out of it — that is "
-                f"§L18's four-grid problem, and it silently breaks the "
-                f"congruence. Emit (L, L1) as an LB=6 record on "
+                f"`mat[bin_L, bin_L1]` cannot be read back out of it, and that "
+                f"silently breaks the congruence. Emit (L, L1) as an LB=6 record on "
                 f"mesh_L x mesh_L1."
             )
 
@@ -426,8 +425,7 @@ def read_mf34_split(
                 f"edges, but order {l1}'s self block is on "
                 f"{order_grid[l1].size}. The shape leg of the cross term must "
                 f"reach the points through the SAME map as the self block of "
-                f"ITS OWN order, or Sigma_eval is not M J M^T (roadmap "
-                f"§10.7-2(a)). Collapse the cross with the same weights the "
+                f"ITS OWN order, or Sigma_eval is not M J M^T. Collapse the cross with the same weights the "
                 f"mesh collapses the marginals with."
             )
         if mf33_grid is not None and not _grids_equal(row, mf33_grid, grid_rtol):
@@ -436,7 +434,7 @@ def read_mf34_split(
                 why = ("The magnitude leg must be `_mf33_magnitude_map` on the "
                        "MF33 grid, unmodified -- a cross term is "
                        "Cauchy-Schwarz-compatible only with the marginals it "
-                       "was built from (§10.1). Pad it out to the file's grid "
+                       "was built from. Pad it out to the file's grid "
                        "with zeros rather than regridding it.")
             else:
                 _s = np.maximum(np.abs(row), np.abs(mf33_grid))
@@ -448,7 +446,7 @@ def read_mf34_split(
                        "row grid was built from an in-memory array instead of "
                        "from the one MF33 was read back into. Write the file's "
                        "own floats -- that round trip is idempotent, a "
-                       "reconstruction is not (§10.7-10, 0.7).")
+                       "reconstruction is not.")
             raise ValueError(
                 f"{path} a_0 block (0, {l1}) magnitude grid does not match the "
                 f"file's MF33 grid ({d}). {why}"
@@ -493,7 +491,7 @@ def read_mf34_split(
         # The widest mesh, kept under the old name because callers print it.
         # `shape_bins_by_order` is the honest description once the meshes
         # differ, and it equals {l: n_shape_bins} for every tape written
-        # before roadmap §10.8.
+        # before per-order meshes.
         n_shape_bins=int(max(g.size for g in order_grid.values()) - 1),
         shape_bins_by_order={l: int(g.size - 1)
                              for l, g in sorted(order_grid.items())},

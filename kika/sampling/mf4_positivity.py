@@ -177,8 +177,9 @@ def repair_tabulated_positivity(mu, p, p_prime, info, pairs=None):
 
     **Never a clip and a renormalisation.** Only the perturbed orders move, and
     by as little as positivity needs; the evaluated table, and every order the
-    covariance does not name, stay what they were -- the same rule
-    ``project_mf4_to_positive`` keeps with its frozen tail.
+    covariance does not name, stay what they were. ``project_mf4_to_positive``
+    is close but not the same: it pins a_0 and the orders *above* the highest
+    perturbed one, so an unperturbed order below it may still move.
 
     Returns ``(table, event)`` where *event* is ``{"min_before", "min_after",
     "max_delta_change"}`` -- the shape of the ENDF path's positivity events,

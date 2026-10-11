@@ -157,7 +157,7 @@ def build(rec) -> dict:
                 row["treatment"] = "LSSF=1: MF3 already holds the dilute cross section; MF2 adds nothing at 0 K"
             else:
                 law = getattr(data, "law", None)
-                row["treatment"] = ("infinite-dilution average with Hauser-Feshbach fluctuation integrals, "
+                row["treatment"] = ("infinite-dilution average with chi-squared width-fluctuation integrals, "
                                     + (f"computed on the evaluation's grid and interpolated with INT={law}"
                                        if law else "evaluated at every grid energy from the parameter functions"))
                 row["urr_interpolation"] = law

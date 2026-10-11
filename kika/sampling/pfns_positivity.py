@@ -116,9 +116,9 @@ def project_ratios_to_simplex(
     w_active = weights[active]
 
     # Already feasible? Then t = 0 and x = r *exactly*, no arithmetic applied.
-    # This is the common case — the drift is ~3e-5 — and passing the vector
-    # through untouched is what keeps the projection from being a second,
-    # invisible perturbation on every sample.
+    # It needs the weighted sum to hit the target bit for bit, which a drawn
+    # vector rarely does (its drift is ~3e-5), so most samples go through the
+    # projection below; there t comes out ~1e-5 and moves every ratio by that.
     current = float(np.dot(w_active, r_active))
     if r_active.min() >= 0.0 and current == s_target:
         return r.copy(), 0.0, 0

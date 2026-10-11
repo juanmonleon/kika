@@ -7,9 +7,6 @@ and a realisation that perturbs MT1 *and* MT2 from their own blocks leaves a
 total that is not the sum of anything. Both tapes parse; neither is an
 evaluation.
 
-The rule this module applies is decision 3 of
-``kika-workspace/docs/library/perturbation_model_roadmap.md``, completed on
-2026-10-07, with its casuistry in ``mf3_perturbation_casuistry.md`` beside it.
 Its principle: **the file says with which covariance each section moves, and a
 sum's covariance is used only where the file does not break the sum down.**
 
