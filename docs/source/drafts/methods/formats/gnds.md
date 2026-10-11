@@ -75,7 +75,8 @@ follows its link to the `covarianceSuite` beside it unless `covariances=False`; 
 sibling is a report entry, not an error.
 
 **4. Units and values** are kept as the file states them, on the axes; nothing is
-rescaled on read.
+rescaled on read. A constant scattering radius keeps the energy domain its `constant1d`
+states, and the writer writes it back.
 
 ## Assumptions and defaults
 
@@ -113,6 +114,11 @@ its SHA-1 written to match the file actually written. The writer:
 
 Byte identity with FUDGE's output is not a goal: number spelling, indentation and
 attribute order differ.
+
+A suite read from GNDS can also be written as ENDF (`format="endf"`): the ENDF
+bookkeeping GNDS does not store (MAT, AWR, the MF 1/451 header, QM and LR) is derived from
+the model, and resolved and unresolved resonance parameters are not written to MF 2. What
+is derived, and from what, is in {doc}`endf`.
 
 ## What the round trip keeps and loses
 

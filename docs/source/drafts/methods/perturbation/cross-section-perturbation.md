@@ -39,8 +39,11 @@ that a reaction's covariance is a lump of several (a non-zero MTL, MT 851-870) o
 combination of others (an NC-type subsection with LTY=0) (ENDF-6 §33.2). A sample of the
 covariance is one factor $c_{rk}$ per reaction $r$ and bin $k = 1, \dots, K$ of edges
 $E_0 < E_1 < \dots < E_K$ (how the factors are drawn is in
-{doc}`../sampling/perturbation-pipeline`). This page is how kika puts those factors on the
-tabulated cross-sections.
+{doc}`../sampling/perturbation-pipeline`). A section stated as absolute (in b²) is drawn
+as the relative covariance it implies, divided by the evaluation's cross-section averaged
+over each bin, so it too becomes one factor per bin
+({eq}`eq-perturbation-pipeline-relativise`). This page is how kika puts those factors on
+the tabulated cross-sections.
 
 On a tape with LRP=1 in MF 1/451, MF 2 gives resonance parameters for the resolved (LRU=1)
 and unresolved (LRU=2) ranges, and MF 3 there is only a background added to the
@@ -258,6 +261,9 @@ Refused:
 - under `"never"`, a request naming an undecomposed sum with `onMissing="raise"`, or a request
   every block of which is a sum's this mode does not use (`ValueError`);
 - a requested MT that MF 33 gives no covariance for, unless `onMissing="skip"`;
+- in a run, an absolute MF 33 section whose reaction has no cross-section to divide by
+  (neither in MF 3 nor as a sum of stated partials, or a GNDS source): a `ValueError`, or
+  left out with a note under `onMissing="skip"`;
 - a perturbed MT the tape does not state, nor any of its partials: in a run, a block for
   such a reaction (one a `covarianceSource` states and the evaluation does not) is refused
   before the draw (`ValueError`), or left out with a note under `onMissing="skip"`; a
@@ -360,6 +366,12 @@ The ACE comparison (`::test_the_ace_carries_the_perturbation_in_the_resolved_ran
 requires a median deviation of the ACE ratio from the factor below $10^{-5}$ and a 99th
 percentile below $10^{-3}$ over more than 1 000 energies below 850 keV): `TODO(check)`: not
 re-run.
+
+**Absolute sections.** An absolute MF 33 section is made relative as the file-level sampler
+makes it, bit for bit on its grid, and assembles to its relative covariance; bins below
+the inert floor are counted, and a section with no cross-section to divide by is refused or
+skipped with a note
+(`kika/sampling/tests/test_an_absolute_section_is_made_relative.py`, passed 2026-10-11).
 
 ## Diagnostics
 

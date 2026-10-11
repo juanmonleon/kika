@@ -121,9 +121,24 @@ run.notes[...]   # 'angularDistribution was asked for and is not stated by this
 
 A request where nothing matches still raises, under either setting.
 
-A request is relative by default, and the appliers multiply, so an **absolute** MF 31,
-MF 33 or MF 34 section the request reaches is not drawn; the run names each one in
-`run.notes` and the log.
+A request is relative by default, and the appliers multiply, so an **absolute** MF 31 or
+MF 33 section the request reaches is made relative before the draw: divided by the
+evaluation's cross-section (or $\bar\nu$) averaged over each covariance bin. The run says
+which sections it converted, and how many bins had no cross-section to divide by (those
+get zero relative covariance), in `run.notes` and the log:
+
+```text
+1 absolute covariance section(s) made relative, divided by the central value averaged
+over each bin (1/E weighted): MF33 MT4 x MT4
+```
+
+On a tape whose resonance region is stated as parameters and `resonanceRegion="evaluated"`,
+the cross-section it divides by is reconstructed by NJOY RECONR, so NJOY is needed. A
+section with no central value to divide by (a GNDS source, or a reaction the evaluation
+states neither in MF 3 nor as a sum of its partials) follows `onMissing`: a `ValueError`,
+or left out with a line in `run.notes`. An absolute MF 34 section is not drawn, and the run
+names it. How the conversion is done is in
+{doc}`../methods/sampling/perturbation-pipeline`.
 
 ## Choosing the output formats
 
@@ -154,8 +169,12 @@ lists one emitter's files in sample order. `writeSets=True` adds each sample's f
 `perturbation.json`, which the run's factors table already holds.
 
 An unknown emitter is refused before anything is read. From a GNDS source, a run that
-writes files refuses `endf-delta` (there is no tape to patch), and `endf-tape` and `ace`
-while the suite carries no MF 1 header to write an ENDF tape with; `gnds` works.
+writes files refuses `endf-delta` (there is no tape to patch). `gnds` works, and so do
+`endf-tape` and `ace`: the tape is written from the model, with its MAT from ENDF-6's table
+for the target (or `mat=`) and the rest of its bookkeeping derived from what the GNDS file
+states (see {doc}`../methods/formats/endf`). They are refused when the suite has resolved or
+unresolved resonance parameters, which are not written to MF 2: without MF 2 the tape's
+MF 3 in the resonance region would be only the background.
 
 ### ACE files
 
@@ -505,6 +524,7 @@ All passed on 2026-10-11 unless marked:
 - `onMissing`: `kika/sampling/tests/test_a_request_can_be_written_for_many_files.py`;
 - `space` per quantity: `kika/sampling/tests/test_a_space_can_be_stated_per_quantity.py`;
 - `covarianceSource`: `kika/sampling/tests/test_covariance_can_come_from_another_file.py`;
+- absolute sections: `kika/sampling/tests/test_an_absolute_section_is_made_relative.py`;
 - the ACE emitter: `kika/sampling/tests/test_ace_is_an_emitter.py` (its NJOY run on a
   full tape, `TODO(check)`: skipped here, not re-run);
 - the emitters end to end, $\bar\nu$ included:

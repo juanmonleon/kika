@@ -34,8 +34,10 @@ MF 31 states the covariance of these multiplicities in exactly the records MF 33
 cross-sections (ENDF-6 Ch. 31): mostly relative, on energy bins that need not be the MF 1
 grid, with cross-blocks between the members where the evaluator correlated them. How the
 blocks are assembled and drawn, and how a draw becomes one factor $f_k$ per bin $k$ with
-$\mathbb{E}[f_k] = 1$, is {doc}`../sampling/perturbation-pipeline`. This page starts from
-the factors.
+$\mathbb{E}[f_k] = 1$, is {doc}`../sampling/perturbation-pipeline`; an absolute block
+(LB=0, in $\bar\nu^2$) is drawn as the relative covariance it implies, divided by $\bar\nu$
+from MF 1 averaged over each bin ({eq}`eq-perturbation-pipeline-relativise`). This page
+starts from the factors.
 
 ## What it computes
 
@@ -194,12 +196,8 @@ Refused (`ValueError`):
   (only when `PerturbationSet.applyToSuite` is called directly; `perturbFromModel` always
   passes one).
 
-Not supported:
-
-- **absolute MF 31 blocks (LB=0).** The model decode keeps them absolute and the default
-  request selects relative sections only, so on the model path an absolute block is not
-  drawn; the run names it in its notes (see {doc}`../sampling/perturbation-pipeline`). The
-  file-level sampler converts it with bin-averaged $\bar\nu$.
+In a run, an absolute MF 31 block whose member has no $\bar\nu$ in MF 1 to divide by
+(or whose source is GNDS) is refused, or left out with a note under `onMissing="skip"`.
 
 Limits of the method:
 
@@ -274,6 +272,11 @@ emitters carry the realisation
 (`::test_a_gnds_nubar_realisation_sits_beside_its_evaluation`,
 `::test_the_whole_tape_emitter_writes_the_perturbed_nubar`,
 `::test_a_gnds_nubar_realisation_comes_back_when_the_file_is_read`).
+
+An absolute MF 31 block assembles to the relative covariance it implies, divided by
+$\bar\nu$ from MF 1
+(`kika/sampling/tests/test_an_absolute_section_is_made_relative.py::test_an_absolute_mf31_section_is_drawn_as_its_relative_covariance`,
+passed 2026-10-11).
 
 ## Diagnostics
 

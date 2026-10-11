@@ -73,13 +73,41 @@ evaluation states a covariance between them (an MF 34 L=0 section correlated wit
 MF 33, for example). `grouping="stated"` splits further, into connected components of
 the blocks the file states.
 
+An **absolute** MF 33 or MF 31 section the request reaches (a covariance in b² or in
+$\bar\nu^2$) is restated as a relative one before the blocks are assembled, because the
+appliers multiply. Each side is lifted onto the grid its component is assembled on, and
+divided by the central value averaged over those bins:
+
+$$
+\Sigma_{ij} = \frac{C^\text{abs}_{ij}}{\bar\sigma_i\,\bar\sigma_j},
+\qquad
+\bar\sigma_i = \frac{\int_{E_i}^{E_{i+1}} \sigma(E)\,E^{-1}\,dE}{\int_{E_i}^{E_{i+1}} E^{-1}\,dE},
+$$ (eq-perturbation-pipeline-relativise)
+
+the $1/E$-weighted average, integrated exactly under the table's own interpolation laws.
+For MF 33 the central value is the full cross-section, resonances included: MF 3 when it
+already is (no resonance region, or the reconstructed base of the default
+`resonanceRegion="reconstructed"`), and NJOY RECONR at `reconstructionTolerance` when MF 3
+is only a background (`resonanceRegion="evaluated"` on an LRP=1 tape). A summation
+reaction absent from MF 3 is the sum of its partials. For MF 31 the central value is
+$\bar\nu$ from MF 1. A bin whose $\bar\sigma$ is below the inert floor,
+$\max(10^{-3}\,\bar\sigma_\text{max}, 10^{-9})$, gets zero relative covariance: there is
+no cross-section there to perturb. Absolute MF 34 sections are not converted.
+
 **4. Pre-flight.** A relative block drawn in log space is first transformed element by
 element into the covariance of $\ln f$ ({eq}`eq-perturbation-pipeline-logcov`); the
 pre-flight, the conditioning plan and the decomposition all act on that matrix, the one
 the draw samples. A block drawn linearly, and MF 35, are used as stated. Every block is
 inspected before drawing
 (`kika.cov.conditioning.inspect_blocks`): non-finite entries, negative variances,
-correlations outside $[-1, 1]$, negative eigenvalues, sum rules. The recommended
+correlations outside $[-1, 1]$, negative eigenvalues, sum rules. In log space the
+correlation bound is judged against $\Sigma$ as the file states it: $\ln(1+x)$ is
+concave, so two bins stated fully correlated with different standard deviations come out
+of {eq}`eq-perturbation-pipeline-logcov` with a correlation above 1. No log-normal pair
+reproduces such a pair exactly, the file is not at fault, and the finding is a note left
+to the definiteness repair below, whose projection brings every $|\rho|$ back to at most 1
+and only raises variances. A correlation above 1 that the file states still blocks the
+draw. The recommended
 **conditioning plan repairs definiteness and nothing else**: a block with a negative
 eigenvalue is projected onto the positive semi-definite cone by clipping the eigenvalues
 when $|\lambda_\text{min}|/\lambda_\text{max} < 10^{-2}$, and by Higham's nearest-PSD
@@ -94,7 +122,9 @@ SVD (or an eigendecomposition; Cholesky is refused, since these matrices are
 rank-deficient by construction), $M = V \Lambda V^\top$. A direction with a negative
 eigenvalue, which a block drawn without conditioning can carry, gets zero variance: a
 negative variance cannot be realised, and drawing it with $|\lambda_i|$ would add variance
-in a direction the evaluation does not state. The directions kept are those with
+in a direction the evaluation does not state. Zeroing a direction lowers no component's
+variance: the diagonal of $V \max(\Lambda, 0) V^\top$ is that of $M$ plus
+$\sum_{\lambda_k<0} |\lambda_k|\, v_{ik}^2$ (see {doc}`../covariance/conditioning-and-psd`). The directions kept are those with
 $\lambda_i > \tau\,\lambda_\text{max}$; with the default $\tau$ for relative blocks every
 direction is kept, and for MF 35 $\tau = 10^{-10}$. With $V_r, \Lambda_r$ the kept part,
 $F = V_r \Lambda_r^{1/2}$, and $z^{(s)}$ a vector of independent standard normals,
@@ -227,6 +257,14 @@ Refused:
 - Cholesky as the decomposition (`ValueError`);
 - a request for a quantity the evaluation does not state, unless `onMissing="skip"`;
   a request where nothing matches, always;
+- an absolute MF 31 or MF 33 section with no central value to divide by (the evaluation
+  states neither the reaction in MF 3 or MF 1 nor its partials, or the source is GNDS,
+  which carries no ENDF tape to take one from): a `ValueError` under `onMissing="raise"`,
+  a note and the section left out under `onMissing="skip"`;
+- from a GNDS source, `endf-delta` (there is no tape to patch), and `endf-tape` and `ace`
+  when the suite has resolved or unresolved resonance parameters, which are not written
+  to MF 2: without MF 2 the tape's MF 3 in the resonance region would be only the
+  background;
 - with `covarianceSource`, a cross-section block for a reaction the evaluation does not
   state at all (no section and no partials, so a factor has nothing to move): a
   `ValueError` under `onMissing="raise"`, a note and the block left out under
@@ -235,9 +273,10 @@ Refused:
 
 Reported instead of done: null directions; the repairs the plan made; sums left stale when
 `crossSectionSums=False`; selections dropped under `onMissing="skip"`; what an emitter
-could not carry; absolute MF 31, 33 or 34 sections of a relative request, which are not
-drawn (the appliers multiply, and this route does not convert an absolute section to a
-relative one), named in a note; a perturbed angular distribution with $f(\mu) < 0$, a
+could not carry; the absolute MF 31 and MF 33 sections made relative, named in a note,
+with the number of bins the inert floor set to zero; absolute MF 34 sections, which are
+not drawn (converting them would divide by $\bar a_\ell$, which can be zero or negative),
+named in a note; a perturbed angular distribution with $f(\mu) < 0$, a
 Legendre series checked at 101 cosines or a table at its nodes, counted and left as
 computed unless `angularPositivity="repair"` moves the perturbed orders to the nearest
 non-negative distribution (orders above the highest perturbed one and $a_0$ are kept; see
@@ -285,8 +324,18 @@ The tests below passed on 2026-10-11 unless marked.
   (`kika/sampling/tests/test_the_delta_emitter_leaves_the_rest_of_the_tape_alone.py`);
   worker processes write the same samples
   (`kika/sampling/tests/test_samples_are_written_by_worker_processes.py`); an absolute
-  section left out of a relative request is named
-  (`kika/sampling/tests/test_a_request_in_the_models_vocabulary.py::test_an_absolute_section_left_out_of_a_relative_request_is_named`);
+  section is made relative as the file-level sampler makes it, bit for bit on its grid
+  (`kika/sampling/tests/test_an_absolute_section_is_made_relative.py::test_the_conversion_is_the_carriers_on_its_grid`),
+  absolute MF 33 and MF 31 sections assemble to their relative covariance
+  (`::test_an_absolute_mf33_section_is_drawn_as_its_relative_covariance`,
+  `::test_an_absolute_mf31_section_is_drawn_as_its_relative_covariance`), bins below the
+  inert floor are counted (`::test_variance_where_the_central_value_is_zero_is_counted`),
+  and a section with no central value is refused or skipped with a note
+  (`::test_a_section_with_no_central_value_raises_or_is_skipped_and_said`); a GNDS source
+  with only a scattering radius is written to an ENDF tape and an ACE file, and one with
+  resonance parameters is refused
+  (`kika/sampling/tests/test_ace_is_an_emitter.py::test_a_gnds_source_with_the_radius_alone_makes_a_tape_and_an_ace`,
+  `::test_a_gnds_source_with_resonance_parameters_cannot_make_an_ace`);
   a reaction only the covariance source states is refused or noted
   (`kika/sampling/tests/test_covariance_can_come_from_another_file.py::test_a_reaction_only_the_covariance_states_is_refused_or_noted`);
   a negative Legendre series is counted, and repaired within the perturbed band on request
@@ -294,6 +343,9 @@ The tests below passed on 2026-10-11 unless marked.
 - **Pre-flight.** Conditioning first and drawing gives what repairing inside the draw
   gives, for every PSD method
   (`kika/sampling/tests/test_conditioning_matches_the_sampler.py::test_conditioning_first_draws_what_repairing_inside_the_draw_draws`).
+  A correlation above 1 made by the log transform is a note that the clip repairs
+  without lowering any variance, and one the file states still blocks
+  (`kika/cov/tests/test_a_log_transform_correlation_is_not_a_refusal.py`).
 - **Resonance region.** The resonance cross-section moves by its factor and the ACE file
   carries the perturbation in the resolved range
   (`kika/sampling/tests/test_the_resonance_region_is_perturbed_as_reconstructed.py`).
@@ -315,7 +367,8 @@ The tests below passed on 2026-10-11 unless marked.
 - `sectionFindings`, `attribution`: the structural checks of the covariance sections as
   written, and each pre-flight finding traced to the sections that explain it.
 - `notes`: things true of every sample that no file states (a stale sum, a dropped
-  selection, an absolute section left out, an assumption `sumBlocks="fill"` made). **Read
+  selection, an absolute section made relative or left out, an assumption
+  `sumBlocks="fill"` made). **Read
   them.**
 - `log` and `files`: the run log and the run-level files.
 

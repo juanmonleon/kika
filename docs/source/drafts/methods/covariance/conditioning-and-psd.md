@@ -101,7 +101,7 @@ not computed when the block has non-finite entries.
 | `finiteness` | any entry is NaN or infinite | `blocks` |
 | `negative_variance` | a finite diagonal entry is $C_{ii} < 0$ | `blocks`, and no repair offered |
 | `symmetry` | $a = \max\lvert C - C^\top\rvert / \max\lvert C\rvert > 10^{-12}$ | `distorts` if $a < 10^{-6}$, `blocks` otherwise |
-| `correlation_bound` | an off-diagonal $\lvert\rho_{ij}\rvert - 1 > 10^{-10}$ | `note` if the worst excess is at most $10^{-4}$, `blocks` otherwise |
+| `correlation_bound` | an off-diagonal $\lvert\rho_{ij}\rvert - 1 > 10^{-10}$ | `note` if the worst excess is at most $10^{-4}$, or if the block is $\ln(1+\Sigma)$ and $\Sigma$ as stated has no excess above $10^{-4}$; `blocks` otherwise |
 | `definiteness` | {eq}`eq-conditioning-and-psd-ratio` holds | `distorts` |
 | `variance_outliers` | $C_{ii}$ exceeds 1000 times the median variance of its family | `distorts` |
 | `inert_rows` | a row's variance is non-finite or $\lvert C_{ii}\rvert < 10^{-12}$ | `note` |
@@ -390,6 +390,17 @@ signs as $\operatorname{sign}(v_i^\top C v_i)$.
   the ratio of two rounded variances moves it further. Such a matrix is only slightly
   indefinite, which the definiteness check handles. A correlation read back from an INTG
   matrix at the wrong number of digits is wrong by $10^{-3}$ or more, and is refused.
+- **In log space the correlation bound is judged against the file.** A relative block
+  drawn in log space is inspected as $\ln(1+\Sigma)$, the matrix the draw samples, and
+  $\ln(1+x)$ is concave: two bins the file states fully correlated with different standard
+  deviations $s_i \ne s_j$ have $\ln(1+s_i s_j) > \sqrt{\ln(1+s_i^2)\,\ln(1+s_j^2)}$, a
+  correlation above 1. No pair of log-normal factors reproduces that pair exactly, but the
+  file is not at fault, so when $\Sigma$ as stated (passed as `stated` to
+  `kika.cov.conditioning.inspect_blocks`) has no correlation above
+  $1 + 10^{-4}$, the finding is a note and the definiteness check takes over: the
+  negative eigenvalue the excess implies is clipped, which brings every $\lvert\rho\rvert$
+  back to at most 1 and only raises variances. A correlation above 1 the file states still
+  blocks.
 - **The sum-rule tolerance is $10^{-3}$** because a stated MF 35 band satisfies
   $C\mathbf{1} = 0$ only to the six digits the file holds, while a block without a sum
   rule has $s(C)$ of order one: a row sum of unrelated entries does not cancel.
@@ -441,8 +452,19 @@ Limits of the methods:
   $\lambda_i < 0$ zero variance, under the SVD as under the eigendecomposition, and counts
   it in `n_null`. A negative variance cannot be realised, and drawing
   $\lvert\lambda_i\rvert$ would add variance in a direction the evaluation does not state.
-  The realised covariance is then $V\max(\Lambda, 0)V^\top$, whose diagonal can differ from
-  the stated one; the pre-flight is the place to choose a repair that keeps it. The
+  The realised covariance is then $V\max(\Lambda, 0)V^\top$, and **zeroing a direction
+  lowers no component's variance**:
+
+  $$
+  \big(V\max(\Lambda, 0)V^\top\big)_{ii} = C_{ii} + \sum_{\lambda_k < 0} \lvert\lambda_k\rvert\, v_{ik}^2
+  \;\ge\; C_{ii},
+  $$ (eq-conditioning-and-psd-zeroed-diagonal)
+
+  while drawing $V\lvert\Lambda\rvert V^\top$ adds twice that sum. A negative eigenvalue at
+  the level of the file's rounding (a few $10^{-7}\lambda_{\max}$ on six-digit values)
+  moves the variances by that much and no more; a clearly negative one raises the variances
+  of the bins its eigenvector spans, which is conservative. The pre-flight is the place to
+  choose a repair that keeps the diagonal exactly (`clip_rescale`, `higham`). The
   file-level samplers `perturb_ENDF_files` and `draw_relative_factors` (see
   {doc}`../../user_guide/legacy-samplers`) keep the SVD's $\lvert\lambda_i\rvert$
   (`negative_directions="fold"`), so that they reproduce their published draws.
@@ -475,7 +497,12 @@ $10^{-6}$ gives `clip`, of 0.5 gives `higham`),
 `::test_a_cross_block_runs_only_the_checks_that_mean_anything`. A correlation of
 $1 + 2\cdot10^{-7}$ is a note and the plan clips the block; one of $1 + 10^{-3}$ blocks
 (`kika/cov/tests/test_correlation_roundoff_is_a_note.py::test_roundoff_above_one_is_a_note_and_definiteness_takes_over`,
-`::test_a_real_excess_still_blocks`).
+`::test_a_real_excess_still_blocks`). In log space, a correlation above 1 that only
+$\ln(1+\Sigma)$ makes (two fully correlated bins with standard deviations 0.1 and 1) is a
+note, the recommended clip leaves the block positive semi-definite without lowering any
+diagonal entry, and a correlation of 1.2 the file states still blocks
+(`kika/cov/tests/test_a_log_transform_correlation_is_not_a_refusal.py::test_the_log_transform_excess_is_a_note_and_clip_repairs_it`,
+`::test_a_correlation_above_one_the_file_states_still_blocks`).
 
 **The negative mass.** On a two-family block made indefinite through its cross block, the
 masses sum to $\sum_k \lambda_k$ and the shares to 1, and the cross pair is named with a

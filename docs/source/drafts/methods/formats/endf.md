@@ -210,7 +210,22 @@ memory) lacks ENDF's own fields. The writer derives them on a copy: each field c
 the model, from FUDGE's ENDF conversion flags carried in the GNDS file, or from a named
 default, and the report records the derivation. The material number comes from the
 caller, then from FUDGE's flag, then from the ENDF material table, and is refused
-otherwise. A suite read from ENDF is never derived.
+otherwise. AWR is the target's mass in `PoPs` over the neutron's; the MF 1/451 header
+comes from the evaluated style (temperature, projectile energy domain, library) and its
+descriptive text from the style's ENDF-compatible documentation; a section's QM and LR
+come from the reaction's Q value and from what its residual decays into (LR from the
+light particles of the breakup, by ENDF-6's LR table). A suite read from ENDF is never
+derived.
+
+MF 2/151 is derived when the resonances hold a scattering radius and nothing else: one
+isotope (abundance 1) with one LRU=0 range, LRP=0. EL and EH are the radius' own energy
+domain, or the evaluation's projectile energy domain when the radius states none (the
+report says so); SPI is the target's spin in `PoPs`; AP is the constant radius, converted
+from fm to $10^{-12}$ cm. A radius that depends on energy, or a target whose spin `PoPs`
+does not state, leaves MF 2 unwritten and reported lost; SPI is not assumed. Resolved and
+unresolved parameters are not derived: they need fields the model has no node for (QX,
+LRX, LAD and the particle-pair columns), so MF 2 is reported lost and the tape's header
+can state LRP=1 with no MF 2 after it.
 
 **Splicing into an existing tape.** The sampling pipeline's `endf-delta` output copies
 the source tape, re-encodes only the sections a realisation changed (MF 3, MF 4, MF 5,
@@ -282,6 +297,12 @@ All tests below passed on 2026-10-11 unless marked otherwise.
   The same MF 3 gate on whole evaluations (Fe-56 from JEFF-4.0 and JENDL-5, U-235,
   Th-232) runs with `--deep` (`test_endf_round_trip.py::test_the_same_holds_on_real_tapes`);
   `TODO(check)`: not re-run for this page, the tapes are not on this machine.
+- **A suite read from GNDS** is written as an ENDF tape with MAT 128 for H-2, every
+  reaction and an MF 2 holding the scattering radius alone
+  (`kika/gnds/tests/test_encode.py::test_a_gnds_sourced_suite_writes_an_endf_tape`); that
+  MF 2 states what the radius and `PoPs` state, and a target with no spin gets no MF 2
+  (`kika/endf/model_adapter/tests/test_a_gnds_radius_reaches_mf2.py::test_the_radius_alone_is_written_as_the_tape_states_it`,
+  `::test_a_target_without_a_spin_is_not_given_one`).
 - **Splicing an unchanged section** leaves the rest of the tape byte-identical
   (`kika/endf/tests/test_a_splice_keeps_the_tapes_format.py::test_a_splice_of_an_unchanged_section_leaves_the_rest_byte_identical`).
 - **Refusals**: Adler-Adler is named and stops the parser and the decoder
