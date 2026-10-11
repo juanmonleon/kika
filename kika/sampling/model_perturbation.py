@@ -114,9 +114,11 @@ class AceOptions:
         Kelvin, one ACE per value. A value below 1.0 is read as MeV, as the
         NJOY runner has always done.
     njoyExe
-        Path to the NJOY executable. Defaults to the ``NJOY_EXE`` environment
-        variable; a run that cannot find NJOY is refused before anything is
-        drawn, and a dry run says so too.
+        Path to the NJOY executable. Defaults to ``$NJOY_EXECUTABLE``, else
+        ``njoy`` on PATH -- the lookup the resonance reconstruction uses
+        (:func:`~kika.processing.njoy_pendf_cache.find_njoy_executable`); a run
+        that cannot find NJOY is refused before anything is drawn, and a dry
+        run says so too.
     libraryName
         For the ACE title and the library digit of the suffix -- ``'jeff40'``,
         ``'endfb81'``, see ``kika._constants.NDLIBRARY_TO_SUFFIX``.
@@ -149,7 +151,11 @@ class AceOptions:
         if self.extensions is not None:
             object.__setattr__(self, "extensions", tuple(str(e) for e in self.extensions))
         if self.njoyExe is None:
-            object.__setattr__(self, "njoyExe", os.environ.get("NJOY_EXE"))
+            import shutil
+            from kika.processing.njoy_pendf_cache import NJOY_ENV_VAR
+
+            object.__setattr__(self, "njoyExe",
+                               os.environ.get(NJOY_ENV_VAR) or shutil.which("njoy"))
 
     def validate(self) -> None:
         """Refuse now what NJOY would refuse later, with the reason."""
@@ -161,8 +167,8 @@ class AceOptions:
                 f"temperature(s): give one per temperature, or none")
         if not self.njoyExe:
             raise ValueError(
-                "no NJOY executable: pass AceOptions(njoyExe=...) or set the "
-                "NJOY_EXE environment variable")
+                "no NJOY executable: pass AceOptions(njoyExe=...), set the "
+                "NJOY_EXECUTABLE environment variable, or put njoy on PATH")
         if not Path(self.njoyExe).is_file():
             raise FileNotFoundError(f"NJOY executable not found: {self.njoyExe}")
 
@@ -2035,11 +2041,13 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         ``run_metadata.json``. A request where *nothing* matches still raises,
         because that is a run with no perturbation in it.
     angularPositivity
-        What to do where a perturbed **table** of f(mu) goes negative at a
-        node. ``"report"`` (the default) counts it and leaves it, which is what
-        the Legendre path does with a negative series. ``"repair"`` moves the
-        perturbed orders by the least amount that makes every node
-        non-negative (:func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`).
+        What to do where a perturbed angular distribution has f(mu) < 0 -- a
+        Legendre series negative somewhere in mu, or a table negative at a
+        node. ``"report"`` (the default) counts it and leaves it. ``"repair"``
+        moves the perturbed orders by the least amount that makes it
+        non-negative (:func:`~kika.sampling.mf4_positivity.project_mf4_to_positive`
+        for a series, :func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`
+        for a table).
         A strongly forward-peaked table -- U-238 above 17 MeV, with
         ``f(-1) ~ 1e-4`` -- goes negative under a few percent on ``a_1``, so
         on such tapes this is a choice and not a detail.

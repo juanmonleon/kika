@@ -8,7 +8,7 @@ the results land under ``NNNN/ace/`` and ``NNNN/njoy/``, a failed call is an
 ``error`` event that does not stop the run, and the metadata says which
 failed.
 
-What is pinned **with** NJOY, when ``NJOY_EXE`` points at one and a full tape
+What is pinned **with** NJOY, when ``NJOY_EXECUTABLE`` points at one and a full tape
 is at hand (``KIKA_FULL_TAPE``): a real ACE comes out of a real perturbed tape.
 That gate is opt-in because it takes minutes and needs files the repository
 does not carry; it was run on 2026-09-06 on U-235 JEFF-4.0.
@@ -92,7 +92,8 @@ def test_ace_without_options_is_refused_before_anything_is_read():
 
 
 def test_the_options_are_validated_up_front(tmp_path, monkeypatch):
-    monkeypatch.delenv("NJOY_EXE", raising=False)
+    monkeypatch.delenv("NJOY_EXECUTABLE", raising=False)
+    monkeypatch.setattr("shutil.which", lambda name, *a, **k: None)
     with pytest.raises(ValueError, match="at least one temperature"):
         AceOptions().validate()
     with pytest.raises(ValueError, match="no NJOY executable"):
@@ -104,7 +105,7 @@ def test_the_options_are_validated_up_front(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="one per temperature"):
         AceOptions(temperatures=[293.6, 600.0], extensions=["02c"],
                    njoyExe=str(exe)).validate()
-    monkeypatch.setenv("NJOY_EXE", str(exe))
+    monkeypatch.setenv("NJOY_EXECUTABLE", str(exe))
     options = AceOptions(temperatures=293.6)
     options.validate()
     assert options.temperatures == (293.6,) and options.njoyExe == str(exe)
@@ -214,8 +215,8 @@ def test_a_failed_njoy_run_is_an_error_event_and_the_run_goes_on(fakeNjoy, tmp_p
 # The real thing, opt-in
 # ----------------------------------------------------------------------
 
-@pytest.mark.skipif(not (os.environ.get("NJOY_EXE") and os.environ.get("KIKA_FULL_TAPE")),
-                    reason="needs NJOY_EXE and KIKA_FULL_TAPE (a full evaluation tape)")
+@pytest.mark.skipif(not (os.environ.get("NJOY_EXECUTABLE") and os.environ.get("KIKA_FULL_TAPE")),
+                    reason="needs NJOY_EXECUTABLE and KIKA_FULL_TAPE (a full evaluation tape)")
 def test_a_real_ace_comes_out_of_a_real_perturbed_tape(tmp_path):
     from kika.endf import read_endf
 

@@ -90,6 +90,44 @@ _FORMAT_VERSION = 3
 _READABLE_VERSIONS = (2, 3)
 
 
+#: mu points the Legendre positivity check evaluates f(mu) on, as the format
+#: route does (``positivity_check_points``).
+LEGENDRE_POSITIVITY_POINTS = 101
+
+
+def _legendrePositivity(angular, maxPerturbedOrder: int, *, repair: bool) -> dict:
+    """Count -- and under *repair* project -- the perturbed Legendre series with f(mu) < 0.
+
+    The rule is the format route's (``endf_perturbation``): orders above the
+    highest perturbed one are pinned at their values, and a_0 at 1, so the
+    projection only redistributes within the perturbed band. The nodes are the
+    applier's fresh output, so replacing their coefficients touches nothing the
+    evaluation holds.
+    """
+    from kika.nuclear_data.model.perturbation import _legendreRegions
+    from kika.sampling.mf4_positivity import (check_mf4_positivity,
+                                              project_mf4_to_positive)
+
+    negative, repaired, minimum = 0, 0, None
+    for _container, _position, region in _legendreRegions(angular):
+        for function in region.function1ds:
+            a = np.asarray(function.coefficients, dtype=float)
+            if a.size < 2:
+                continue
+            positive, low = check_mf4_positivity(a, n_points=LEGENDRE_POSITIVITY_POINTS)
+            if positive:
+                continue
+            negative += 1
+            minimum = low if minimum is None else min(minimum, low)
+            if repair:
+                frozen = {i: float(a[i]) for i in range(maxPerturbedOrder + 1, a.size)}
+                function.coefficients = project_mf4_to_positive(
+                    a, n_points=LEGENDRE_POSITIVITY_POINTS, frozen_indices=frozen)
+                repaired += 1
+    return {"n_negative_series": negative, "n_repaired": repaired,
+            "min_sum": minimum}
+
+
 @dataclass(frozen=True)
 class PerturbationSet:
     """One drawn realisation of an evaluation, over one or more quantities.
@@ -652,6 +690,8 @@ class PerturbationSet:
                 }
                 if "tables" in info:
                     diagnostics[component]["tables"] = info["tables"]
+                if "legendre" in info:
+                    diagnostics[component]["legendre"] = info["legendre"]
 
         spectra = [c for c in self.components() if c.mf == 35]
         if spectra:
@@ -943,22 +983,21 @@ class PerturbationSet:
         tabulated one gets the same factors applied to its table
         (:func:`~kika.nuclear_data.model.perturbation.applyTabulatedFactors`).
         An LTT=3 distribution has one of each and gets both, so a bin that
-        reaches above the transition energy is applied on both sides of it --
-        decision D1 of ``docs/library/mf4_tabulated_perturbation_roadmap.md``,
-        taken after measuring that no thesis tape moves (JEFF-4.0 and this
-        work's tables start at 45 MeV with MF34 ending at 20; JENDL-5 crosses
-        at 20 MeV with one bin of zero variance).
+        reaches above the transition energy is applied on both sides of it.
 
         A covariance in the other frame than the distribution's (MF34's LCT)
         is applied in that frame on both halves: the Legendre applier by its
         padded solve, the tabulated one in closed form (roadmap T9). Each half
         reports its own conversion, under ``frame`` and ``tables["frame"]``.
 
-        A negative node in a perturbed table is counted and, under the default
-        ``positivity="report"``, left as computed: the Legendre path does not
-        enforce positivity either. ``"repair"`` hands the applier
+        Positivity of f(mu) is checked on both halves. Under the default
+        ``positivity="report"`` a negative series or table node is counted and
+        left as computed; ``"repair"`` moves it to the nearest non-negative
+        one -- a Legendre vector by
+        :func:`~kika.sampling.mf4_positivity.project_mf4_to_positive`, with the
+        orders above the highest perturbed one pinned, a table by
         :func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`. The
-        realisation's diagnostics carry the count under ``tables`` either way.
+        counts are in the diagnostics under ``legendre`` and ``tables``.
         """
         if positivity not in ("report", "repair"):
             raise ValueError(f"positivity must be 'report' or 'repair', got "
@@ -986,6 +1025,8 @@ class PerturbationSet:
                     "n_inserted": legendre["n_inserted"]}
             if "frame" in legendre:
                 info["frame"] = legendre["frame"]
+            info["legendre"] = _legendrePositivity(
+                angular, max(orders), repair=positivity == "repair")
         if hasTables:
             from kika.sampling.mf4_positivity import repair_tabulated_positivity
 
