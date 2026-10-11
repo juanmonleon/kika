@@ -62,6 +62,8 @@ HEATR_APPROXIMATIONS = (
     "compound nucleus' recoil E/(A+1), in the KERMA and in the damage (HEATR's output)",
     "damage of particle emission: capdam's single particle at min(Q + AE/(A+1), Coulomb "
     "barrier), deuterons and alphas of a continuum taken as protons",
+    "mean energy of a lab-frame MF6 spectrum by trapezoids over E'·f(E') (getsix), lower "
+    "than the exact mean of the density OpenMC samples on wide panels",
 )
 
 _GL4 = np.polynomial.legendre.leggauss(4)
@@ -122,8 +124,12 @@ def _isFlat(table) -> bool:
     return table.interpolation == Interpolation.flat
 
 
-def _expect(table, g: Callable[[np.ndarray], np.ndarray]) -> float:
-    """``∫ g(x) p(x) dx`` over an ``Xs_pdf_cdf1d`` (lines first, then the continuum), normalised."""
+def _expect(table, g: Callable[[np.ndarray], np.ndarray], trapezoid: bool = False) -> float:
+    """``∫ g(x) p(x) dx`` over an ``Xs_pdf_cdf1d`` (lines first, then the continuum), normalised.
+
+    ``trapezoid`` takes the continuum by trapezoids over ``g·p`` at the
+    tabulated points, as HEATR does for MF6 spectra in the lab.
+    """
     x = np.asarray(table.xs, dtype=float)
     p = np.asarray(table.pdf, dtype=float)
     nd = int(getattr(table, "numberOfDiscrete", 0) or 0)
@@ -134,7 +140,12 @@ def _expect(table, g: Callable[[np.ndarray], np.ndarray]) -> float:
         total += float(w.sum())
         value += float(np.sum(w * g(x[:nd])))
     cx, cp = x[nd:], p[nd:]
-    if len(cx) > 1:
+    if len(cx) > 1 and trapezoid and not _isFlat(table):
+        dx = np.diff(cx)
+        gp = g(cx) * cp
+        total += float(np.sum(0.5 * (cp[:-1] + cp[1:]) * dx))
+        value += float(np.sum(0.5 * (gp[:-1] + gp[1:]) * dx))
+    elif len(cx) > 1:
         a, b = cx[:-1], cx[1:]
         nodes, weights = _GL4
         half = 0.5 * (b - a)
@@ -200,6 +211,11 @@ class _Kinematics:
     A: float               # target mass ratio
     Q: float               # the reaction's QI
     awp: float = 1.0       # emitted particle's mass ratio
+    #: HEATR's mean of a lab-frame MF6 spectrum: trapezoids over E'·f(E')
+    #: (``getsix``), not the exact integral of the lin-lin density. On wide
+    #: panels it is lower: U-235 MT91's photons at 5.382 MeV average 1.473 MeV
+    #: by trapezoids and 1.515 MeV exactly.
+    trapezoid: bool = False
 
 
 def _cmToLab(grid, ecm, sqrtMu, k: _Kinematics):
@@ -257,8 +273,13 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
         if energy is None:
             raise ValueError("an uncorrelated form without an energy distribution")
         energies, tables, flat = _tables(energy)
-        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment) for t in tables], grid, flat)
-        if not cm or k.awp == 0.0:
+        lab = not cm or k.awp == 0.0
+        # HEATR's trapezoids are for the mean; the photons' second moment
+        # (capture recoil) it integrates by Gauss points (tabsqr, tabsq6).
+        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment,
+                                          k.trapezoid and lab and moment == 1)
+                                  for t in tables], grid, flat)
+        if lab:
             return mean
         if moment != 1:
             raise NotImplementedError("second moment of a centre-of-mass spectrum")
@@ -266,7 +287,8 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
         return _cmToLab(grid, mean, root * _meanMu(form.angular, grid), k)
     if isinstance(form, m.EnergyAngularMC):
         energies, tables, flat = _tables(form.energy)
-        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment) for t in tables], grid, flat)
+        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment, k.trapezoid and not cm)
+                                  for t in tables], grid, flat)
         if not cm:
             return mean
         inner = list(form.energyAngular.function2ds)
@@ -551,6 +573,15 @@ def _particleDamage(form, grid, k, zp, ap, Z, A, ed):
 # The whole suite
 # ----------------------------------------------------------------------
 
+def _statedInMF6(evaluation, mt) -> bool:
+    """The evaluation states this reaction's products in MF6 (its ENDF provenance says so)."""
+    if evaluation is None:
+        return False
+    source = evaluation.findReactionByENDF_MT(mt)
+    fields = getattr(getattr(source, "provenance", None), "headerFields", None) or {}
+    return bool(fields.get("mf6"))
+
+
 def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
               qm: Optional[Dict[int, float]] = None, ed: Optional[float] = None,
               evaluation=None, zaTarget: Optional[int] = None,
@@ -585,9 +616,10 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         s = np.asarray(sigma[mt], dtype=float)
         Q = float(reaction.outputChannel.Q.value or 0.0)
         Qbal = float(qm.get(mt, Q))
-        k = _Kinematics(A=A, Q=Q)
+        mf6 = _statedInMF6(evaluation, mt)
+        k = _Kinematics(A=A, Q=Q, trapezoid=mf6)
         # A photon has no mass: a centre-of-mass photon spectrum is its lab one.
-        photon = _Kinematics(A=A, Q=Q, awp=0.0)
+        photon = _Kinematics(A=A, Q=Q, awp=0.0, trapezoid=mf6)
         neutrons, photons = [], []
         for product in reaction.outputChannel.products:
             if product.pid not in ("n", "photon"):
@@ -601,8 +633,14 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             emitted = emitted + _yield(product, grid) * _meanEnergyOf(form, grid, k)
         deposit = grid + Qbal - emitted
         gammas = np.zeros(len(grid))
+        exact = np.zeros(len(grid))
+        exactPhoton = _Kinematics(A=A, Q=Q, awp=0.0)
         for product, form in photons:
-            gammas = gammas + _yield(product, grid) * _meanEnergyOf(form, grid, photon)
+            y = _yield(product, grid)
+            gammas = gammas + y * _meanEnergyOf(form, grid, photon)
+            exact = exact + (y * _meanEnergyOf(form, grid, exactPhoton) if mf6 else 0.0)
+        if not mf6:
+            exact = gammas
         heavy = (_heavyProducts(reaction, evaluation, grid, A, Z, zaTarget or 1000 * Z, ed, notes)
                  if evaluation is not None and mt not in (2, 102) and not 51 <= mt <= 90 else None)
         if mt == 5:
@@ -625,11 +663,11 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             carried = deposit - gammas
         live = s > 0
         kerma += np.where(live, s * carried, 0.0)
-        # MT901 is MT301 plus the energy of the photons the reaction emits, as
-        # OpenMC's files carry it (Fe-56 capture at 0.0253 eV: 901 - 301 is the
-        # photons' 7.489 MeV, not HEATR's local=1 balance E + Q = 7.646 MeV).
-        # It differs from the balance only where the balance is not used: capture.
-        local += np.where(live, s * (carried + gammas), 0.0)
+        # MT901 is HEATR's MT301 plus the energy of the photons the reaction
+        # emits, taken exactly from the tables -- what OpenMC's files carry
+        # (Fe-56 capture at 0.0253 eV: 901 - 301 is the photons' 7.489 MeV, not
+        # HEATR's local=1 balance E + Q = 7.646 MeV).
+        local += np.where(live, s * (carried + exact), 0.0)
         # damage
         if mt == 2 or (51 <= mt <= 90 and neutrons):
             d = _twoBodyDamage(neutrons[0][1], grid, A, Q, Z, ed, elastic=(mt == 2)) if neutrons \
@@ -647,7 +685,7 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         else:
             d = np.zeros(len(grid))
         damage += np.where(live, s * d, 0.0)
-        perReaction[mt] = (carried, carried + gammas, d)
+        perReaction[mt] = (carried, carried + exact, d)
     # Photons stated on a sum (MF13 on MT4, 103-107): carried away for MT301 and
     # deposited for MT901, as HEATR's gheat does with σ_sum·y·Ē (= σ_γ·Ē).
     for reaction in getattr(suite, "sums", ()):
