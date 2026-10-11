@@ -319,9 +319,9 @@ class SensitivityFile:
         """
         Build perturbation index list from MT numbers and/or Legendre orders.
         - mt: int or list[int] of MT values (e.g., 1, 2, 102, ...). 
-          Note: MT 500X are automatically recognized as Legendre moments.
+          Note: MT 400X are automatically recognized as Legendre moments.
         - leg: int or list[int] of Legendre orders (L), e.g., 1, 2, 3
-          These are converted to MT 500X format internally.
+          These are converted to MT 400X format internally, the code the label parser gives them (kika.serpent.utils).
         - leg_channel: deprecated (Legendre moments are elastic only), kept for backward compatibility
         If both mt and leg are None, returns ALL perturbations.
         """
@@ -335,9 +335,9 @@ class SensitivityFile:
         mt_set = _to_set(mt)
         leg_set = _to_set(leg)
 
-        # Convert Legendre orders to MT 500X format and merge with mt_set
+        # Convert Legendre orders to MT 400X format and merge with mt_set
         if leg_set is not None:
-            leg_as_mt = {5000 + L for L in leg_set}  # L=1 -> MT=5001, L=2 -> MT=5002, etc.
+            leg_as_mt = {4000 + L for L in leg_set}  # L=1 -> MT=4001, L=2 -> MT=4002, etc.
             if mt_set is not None:
                 mt_set = mt_set | leg_as_mt
             else:
@@ -346,7 +346,7 @@ class SensitivityFile:
         if mt_set is None:
             return list(range(self.n_perturbations))
 
-        # Find perturbations matching the MT numbers (including 500X for Legendre)
+        # Find perturbations matching the MT numbers (including 400X for Legendre)
         idxs: List[int] = []
         for p in self.perturbations:
             if p.mt is not None and p.mt in mt_set:
