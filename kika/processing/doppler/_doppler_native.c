@@ -447,16 +447,16 @@ static PyObject *evaluate_block(PyObject *self,PyObject *args) {
         if(!isfinite(energy) || energy<=0 || !isfinite(z*z) || z*z==0) {
             PyErr_SetString(PyExc_ArithmeticError,"scaled energy");goto failed;
         }
-        Py_ssize_t radius=maxradius<8?maxradius:8;
-        while(1) {
-            tail=point_tail(z,h,m,k,tails.buf,radius);
-            if(!isfinite(tail)) {PyErr_SetString(PyExc_ArithmeticError,"tail envelope overflow");goto failed;}
-            if(tail<=tail_share*atol)break;
-            if(radius==maxradius) {
-                code="tail-budget-exhausted";PyErr_SetString(PyExc_ArithmeticError,"thermal radius limit");goto failed;
-            }
-            radius++;
-        }
+        /* The first radius tried is FIRST_RADIUS = 6 Doppler widths; the tail is
+         * charged to tail_share of atol + rtol*|value|, as the kernel error is,
+         * and the radius grows (and the point is integrated again) only where
+         * that fails. core.py:_point does the same. */
+        Py_ssize_t radius=maxradius<6?maxradius:6;
+        int absoluteOk;
+radius_again:
+        tail=point_tail(z,h,m,k,tails.buf,radius);
+        if(!isfinite(tail)) {PyErr_SetString(PyExc_ArithmeticError,"tail envelope overflow");goto failed;}
+        absoluteOk=tail<=tail_share*atol;
         double lower=fmax(-z,-(double)radius),upper=(double)radius;
         double low=fmax(0.,x+h*lower),high=x+h*upper;low=low*low;high=high*high;
         Py_ssize_t a=0,b=packed->size;
@@ -477,6 +477,14 @@ static PyObject *evaluate_block(PyObject *self,PyObject *args) {
                 Py_CLEAR(integral);
                 if(attempt==0)continue;
                 code="kernel-budget-exhausted";PyErr_SetString(PyExc_ArithmeticError,"analytic error estimate exceeds budget");goto failed;
+            }
+            if(!absoluteOk && tail>tail_share*(atol+rtol*fmax(fabs(value)-tail,0.))) {
+                Py_CLEAR(integral);
+                if(radius==maxradius) {
+                    code="tail-budget-exhausted";PyErr_SetString(PyExc_ArithmeticError,"thermal radius limit");goto failed;
+                }
+                radius++;
+                goto radius_again;
             }
             if(reject_negative && value<0) {
                 code="negative-output";PyErr_SetString(PyExc_ArithmeticError,"recalculate with stable higher precision");goto failed;

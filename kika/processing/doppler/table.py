@@ -109,9 +109,15 @@ def _breaks(curves, per_options, temperature, domain):
 
 def _seeds(curves, temperature, lo, hi, point_budget, work_bytes):
     seeds = {lo, hi}
-    # A coarse lethargy guard plus all source knots inside this output segment.
-    # Thermal flanks of extrema/boundaries are included even when feature lies
-    # outside output domain. This prevents a midpoint-only missed narrow peak.
+    # A coarse lethargy guard plus the thermal flanks of every extremum and
+    # boundary of the source, even when the feature lies outside the output
+    # domain: that prevents a midpoint-only missed narrow peak. The source
+    # knots themselves are not seeds. The broadened curve is smoother than the
+    # source, and seeding every knot (Fe-56 below 850 keV: 102 230 of them,
+    # against 582 extrema) put the table at the source's density before the
+    # first probe; the refinement and its reserved verification add a node
+    # wherever the chord misses, so the tolerance is met as before, on fewer
+    # nodes.
     n = max(2, math.ceil(math.log(hi/lo)/math.log(2))+1)
     if n > point_budget:
         raise DopplerConvergenceError('resources', 'lethargy seeds exceed max_points')
@@ -119,10 +125,6 @@ def _seeds(curves, temperature, lo, hi, point_budget, work_bytes):
     for c in curves:
         h = math.sqrt(KB*(temperature-c.source_temperature)/c.context.atomic_weight_ratio)
         for xs, ys in c.regions:
-            first, last = np.searchsorted(xs, [lo, hi])
-            if last-first > point_budget:
-                raise DopplerConvergenceError('resources', 'source knots exceed seed budget')
-            seeds.update(xs[first:last].tolist())
             # Input extrema include peaks thinner than any output probe spacing.
             window_lo=max(0.,math.sqrt(lo)-26*h)**2
             window_hi=(math.sqrt(hi)+26*h)**2
@@ -152,6 +154,10 @@ def _ratio(reference, candidate, eta, options, share):
     return (np.abs(candidate-reference)+eta)/available
 
 
+def nodes_eta(nodes, grid, j):
+    return [nodes[float(x)][1][j] for x in grid]
+
+
 def _adaptive(evaluate, seeds, options, budget, keys):
     if len(seeds)*len(keys) > budget:
         raise DopplerConvergenceError('resources', 'initial table exceeds max_points')
@@ -166,64 +172,77 @@ def _adaptive(evaluate, seeds, options, budget, keys):
     # node is inserted inside it. Keep only acceptance ratios, never probe
     # arrays. Independent reserved verification still evaluates every interval.
     accepted_intervals = {}
+    verified = {}
+    reserved_seen = 0.
     cache_limit = options.max_work_bytes // 1024
     maxrefine, maxcheck, evaluations = 0., 0., len(seeds)
     for iteration in range(options.max_iterations):
         grid = np.array(sorted(nodes))
         data = {k:np.array([nodes[float(x)][0][j] for x in grid]) for j,k in enumerate(keys)}
         additions = {}
-        iteration_refine = max((v[0] for v in accepted_intervals.values()), default=0.)
-        iteration_check = max((v[1] for v in accepted_intervals.values()), default=0.)
-        for start in range(0, len(grid)-1, batch):
-            left, right = grid[start:start+batch], grid[start+1:start+batch+1]
-            # Equal-sized arrays at final chunk.
-            left = left[:len(right)]
-            selected = np.array([i for i, (a,b) in enumerate(zip(left,right))
-                                 if (float(a),float(b)) not in accepted_intervals], dtype=int)
-            if not len(selected):
-                continue
-            left, right = left[selected], right[selected]
-            fractions = np.array(REFINE+CHECK)
-            q = left[:,None]+(right-left)[:,None]*fractions
-            actual, eta = evaluate(q.ravel()); evaluations += q.size
-            ratios = np.zeros(q.shape)
+        # Refinement by prediction, with no probe: the chord error of each
+        # interval is estimated from the second differences of the values
+        # already at the nodes, (Δx²/8)·|f''|, and the nodes it needs are
+        # inserted at once, n = ceil(1.1·sqrt(ratio)) equal parts. Acceptance
+        # stays with the reserved verification family below, which probes
+        # every interval and refines wherever it fails; a feature the
+        # prediction cannot see between nodes is caught there, and the seeds
+        # already flank every extremum of the source.
+        iteration_refine = 0.
+        if len(grid) >= 3:
+            dx = np.diff(grid)
+            insert = []
             for k in keys:
-                chord = data[k][start+selected,None]+(data[k][start+selected+1]-data[k][start+selected])[:,None]*fractions
-                ratios = np.maximum(ratios, _ratio(actual[k].reshape(q.shape), chord,
-                                                 eta[k].reshape(q.shape), options, options.table_share))
-            iteration_refine = max(iteration_refine, float(np.max(ratios[:,:3])))
-            iteration_check = max(iteration_check, float(np.max(ratios[:,3:])))
-            for row in np.flatnonzero(np.max(ratios,axis=1)<=1):
-                if len(accepted_intervals) >= cache_limit:
-                    break
-                accepted_intervals[(float(left[row]),float(right[row]))] = (
-                    float(np.max(ratios[row,:3])), float(np.max(ratios[row,3:])))
-            for row in np.flatnonzero(np.max(ratios,axis=1)>1):
-                worst = int(np.argmax(ratios[row]))
-                for column in {1, worst}:
-                    point = float(q[row,column])
-                    if point <= left[row] or point >= right[row]:
-                        raise DopplerConvergenceError('unresolvable-grid', 'cannot represent refinement point', energy=point)
-                    index = row*7+column
-                    additions[point] = (tuple(actual[k][index] for k in keys), tuple(eta[k][index] for k in keys))
-            if (len(nodes)+len(additions))*len(keys) > budget:
-                raise DopplerConvergenceError('resources', 'refinement exceeds max_points')
+                y = data[k]
+                slope = np.diff(y)/dx
+                curvature = np.zeros(len(grid))
+                curvature[1:-1] = 2*np.abs(np.diff(slope))/(grid[2:]-grid[:-2])
+                curvature[0], curvature[-1] = curvature[1], curvature[-2]
+                local = np.maximum(curvature[:-1], curvature[1:])
+                predicted = dx*dx/8*local
+                eta = np.maximum(np.abs(np.asarray(nodes_eta(nodes, grid, keys.index(k)))), 0.)
+                reference = np.minimum(np.abs(y[:-1]), np.abs(y[1:]))
+                available = options.table_share*(options.atol + options.rtol*np.maximum(reference-eta[:-1], 0.))
+                ratio = predicted/available
+                insert.append(ratio)
+            ratio = np.max(np.vstack(insert), axis=0)
+            iteration_refine = float(np.max(ratio)) if len(ratio) else 0.
+            failing = np.flatnonzero(ratio > 1)
+            if len(failing):
+                counts = np.minimum(np.ceil(1.1*np.sqrt(ratio[failing])).astype(int), 64)
+                points = np.concatenate([grid[i] + dx[i]*np.arange(1, n)/n for i, n in zip(failing, counts)])
+                points = points[(points > grid[0]) & (points < grid[-1])]
+                if (len(nodes)+len(points))*len(keys) > budget:
+                    raise DopplerConvergenceError('resources', 'refinement exceeds max_points')
+                for start in range(0, len(points), batch*7):
+                    chunk = points[start:start+batch*7]
+                    actual, eta = evaluate(chunk); evaluations += len(chunk)
+                    for i, point in enumerate(chunk):
+                        additions[float(point)] = (tuple(actual[k][i] for k in keys), tuple(eta[k][i] for k in keys))
+        iteration_check = 0.
         maxrefine, maxcheck = iteration_refine, iteration_check
         if not additions:
-            reserved_maximum=0.
             # A separate probe family must pass before accepting. Failed
             # verification refines the mesh; it never widens the tolerance.
-            for start in range(0,len(grid)-1,batch):
-                left,right=grid[start:start+batch],grid[start+1:start+batch+1]
-                left=left[:len(right)]
+            # An interval that passed is the same function and chord until a
+            # node is inserted inside it, so it is verified once.
+            pending=np.array([i for i in range(len(grid)-1)
+                              if (float(grid[i]),float(grid[i+1])) not in verified],dtype=int)
+            for start in range(0,len(pending),batch):
+                rows=pending[start:start+batch]
+                left,right=grid[rows],grid[rows+1]
                 fractions=np.array(VERIFY)
                 q=left[:,None]+(right-left)[:,None]*fractions
                 actual,eta=evaluate(q.ravel());evaluations+=q.size
                 ratios=np.zeros(q.shape)
                 for k in keys:
-                    chord=data[k][start:start+len(left),None]+(data[k][start+1:start+len(left)+1]-data[k][start:start+len(left)])[:,None]*fractions
+                    chord=data[k][rows,None]+(data[k][rows+1]-data[k][rows])[:,None]*fractions
                     ratios=np.maximum(ratios,_ratio(actual[k].reshape(q.shape),chord,eta[k].reshape(q.shape),options,options.table_share))
-                reserved_maximum=max(reserved_maximum,float(np.max(ratios)))
+                for row in np.flatnonzero(np.max(ratios,axis=1)<=1):
+                    reserved_seen=max(reserved_seen,float(np.max(ratios[row])))
+                    # Bounded like the acceptance cache (max_work_bytes).
+                    if len(verified) < cache_limit:
+                        verified[(float(left[row]),float(right[row]))]=float(np.max(ratios[row]))
                 for row in np.flatnonzero(np.max(ratios,axis=1)>1):
                     accepted_intervals.pop((float(left[row]),float(right[row])), None)
                     column=int(np.argmax(ratios[row]));point=float(q[row,column]);index=row*len(VERIFY)+column
@@ -233,6 +252,7 @@ def _adaptive(evaluate, seeds, options, budget, keys):
                 if (len(nodes)+len(additions))*len(keys)>budget:
                     raise DopplerConvergenceError('resources','verification refinement exceeds max_points')
             if not additions:
+                reserved_maximum=reserved_seen
                 return grid,data,dict(iterations=iteration+1,evaluations=evaluations,
                                       refinement_ratio=maxrefine,check_ratio=maxcheck,
                                       reserved_verification_ratio=reserved_maximum)

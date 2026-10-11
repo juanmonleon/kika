@@ -357,16 +357,34 @@ def _geometry_error(s, d, z, ds, slo, lower, upper, qleft, qright,
     return d/math.sqrt(math.pi)*norm*(pnorm*relative+sigma_error*(abs(1+s/z)+d/z)**2)
 
 
+#: The first thermal radius tried, in Doppler widths (e^-36 ~ 2e-16 of the
+#: Gaussian beyond it, so the kernel stays exact in double precision). The tail is
+#: charged to its share of the whole budget, atol + rtol·|σ|, as the kernel
+#: error is; it grows only where that fails (σ near zero, steep envelopes).
+FIRST_RADIUS = 6
+
+
 def _point(curve, energy, h, options):
     x = math.sqrt(energy); z = x/h
     if not math.isfinite(z) or z <= 0 or not math.isfinite(z*z) or z*z == 0:
         raise DopplerConvergenceError("unresolvable-scale", "scaled energy", energy=energy)
     m, k = curve._envelope
-    radius = min(8, options.max_radius)
-    while _tail(z, h, m, k, radius) > options.tail_share * options.atol:
+    radius = min(FIRST_RADIUS, options.max_radius)
+    while True:
+        tail = _tail(z, h, m, k, radius)
+        if tail <= options.tail_share * options.atol:
+            return _pointAt(curve, energy, h, options, radius)
+        result = _pointAt(curve, energy, h, options, radius)
+        if tail <= options.tail_share * (options.atol + options.rtol * max(abs(result[0]) - tail, 0.)):
+            return result
         radius += 1
         if radius > options.max_radius:
             raise DopplerConvergenceError("tail-budget-exhausted", "thermal radius limit", energy=energy)
+
+
+def _pointAt(curve, energy, h, options, radius):
+    x = math.sqrt(energy); z = x/h
+    m, k = curve._envelope
     lower_s = max(-z, -float(radius)); upper_s = float(radius)
     # searchsorted on prepared panel edges, no output-energy × input-grid matrix.
     elow = max(0., x+h*lower_s)**2; ehigh = (x+h*upper_s)**2

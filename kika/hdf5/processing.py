@@ -318,7 +318,6 @@ def _dopplerSource(form, lo, top):
 
 def _broadened(suite, temperature, thnmax, options):
     """``{reaction label: heated form below thnmax}`` from kika's free-gas broadening."""
-    from kika.processing.doppler import DopplerOptions, SupportPolicy, broaden_suite
     from kika.processing.resonances.suite import _entries, _graph
 
     # Orphan photon products (MF13 on a sum) carry no 0 K form: nothing to broaden.
@@ -335,12 +334,40 @@ def _broadened(suite, temperature, thnmax, options):
     # The redundant sums are left out too -- the writer rebuilds the ones it
     # writes from the partials -- which spares broaden_suite's check of each
     # source sum, a point-by-point Python loop that dominated the cost.
-    active = []
+    active, counts = [], {}
     for key in leaves:
         x, y = _flatten(entries[key].crossSection[RECON_LABEL])
         if np.any(y[x < hi] != 0):
             active.append(key)
-    top = min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in active)
+            counts[key] = int(np.count_nonzero(x < hi))
+    # Broadened in two groups, each on its own adaptive grid. broaden_suite
+    # puts all the curves it is given on one output grid; a smooth MF3
+    # reaction given with the resonant ones is evaluated, probes and all, at
+    # every point the resonances need (Fe-56: 73 smooth reactions on 126 781
+    # points). Apart, it converges on the few points it needs, and the writer
+    # puts every reaction on the union grid afterwards.
+    dense = max(counts.values())
+    resonant = [k for k in active if counts[k] >= 0.2 * dense]
+    smooth = [k for k in active if counts[k] < 0.2 * dense]
+    out = {}
+    for group in (resonant, smooth):
+        if group:
+            out.update(_broadenGroup(suite, entries, group, lo, hi, temperature, options))
+    zero = None
+    for key in leaves:
+        if key.label not in out:
+            if zero is None:
+                grid = _flatten(next(iter(out.values())))[0]
+                zero = _m().XYs1d(xs=grid, ys=np.zeros_like(grid))
+            out[key.label] = zero
+    return out, hi
+
+
+def _broadenGroup(suite, entries, keys, lo, hi, temperature, options):
+    """``{label: heated form}`` of the leaves ``keys``, broadened together by broaden_suite."""
+    from kika.processing.doppler import DopplerOptions, SupportPolicy, broaden_suite
+
+    top = min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in keys)
     def sourced(reaction):
         clone = copy.copy(reaction)
         clone.crossSection = copy.copy(reaction.crossSection)
@@ -349,9 +376,9 @@ def _broadened(suite, temperature, thnmax, options):
         return clone
     reduced = copy.copy(suite)
     reduced.reactions = type(suite.reactions)(
-        [sourced(entries[k]) for k in active if k.container == "reactions"])
+        [sourced(entries[k]) for k in keys if k.container == "reactions"])
     reduced.fissionComponents = type(suite.fissionComponents)(
-        [sourced(entries[k]) for k in active if k.container == "fissionComponents"])
+        [sourced(entries[k]) for k in keys if k.container == "fissionComponents"])
     # The evaluated domain declared to the broadening is the one it is given.
     reduced.styles = copy.deepcopy(suite.styles)
     evaluated = reduced.styles.evaluatedFor(RECON_LABEL)
@@ -360,7 +387,7 @@ def _broadened(suite, temperature, thnmax, options):
     for name in ("sums", "productions", "orphanProducts", "incompleteReactions"):
         setattr(reduced, name, type(getattr(suite, name))())
     reduced.sums.multiplicitySums = suite.sums.multiplicitySums
-    support = {k: SupportPolicy("one_over_v", "constant") for k in active}
+    support = {k: SupportPolicy("one_over_v", "constant") for k in keys}
     opts = options or DopplerOptions(max_points=400_000_000, max_work_bytes=4_000_000_000)
     extra = {}
     if suite.resonances is not None and suite.resonances.unresolved is not None:
@@ -375,15 +402,7 @@ def _broadened(suite, temperature, thnmax, options):
                            temperature=float(temperature), support=support,
                            source_temperature=0.0, options=opts, output_domain=(lo, hi),
                            negative_policy="preserve_signed", **extra)
-    out = {key.label: form for key, form in result.forms.items()}
-    zero = None
-    for key in leaves:
-        if key.label not in out:
-            if zero is None:
-                grid = _flatten(next(iter(out.values())))[0]
-                zero = _m().XYs1d(xs=grid, ys=np.zeros_like(grid))
-            out[key.label] = zero
-    return out, hi
+    return {key.label: form for key, form in result.forms.items()}
 
 
 def _broadenOne(args):
