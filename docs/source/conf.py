@@ -126,11 +126,10 @@ _DRAFTS_TOCTREE = """
 
    drafts/architecture/index
    drafts/architecture/**
-   drafts/**
+   drafts/methods/index
+   drafts/methods/**
+   drafts/user_guide/**
 """
-
-#: The documents that carry the top-level toctrees: the site's, and the PDF's.
-_ROOTS = ("index", "pdf_index")
 
 _DRAFT_BANNER = """
 ```{warning}
@@ -142,8 +141,12 @@ it may change before it is.
 
 def _wireDrafts(app, docname, source):
     """Add the drafts section to the root toctree, and the banner to each draft."""
-    if docname in _ROOTS:
+    if docname == "index":
         source[0] += _DRAFTS_TOCTREE
+    elif docname == "pdf_index":
+        # The PDF is the manual of methods and architecture (WRITING_DOCS §5.6):
+        # the user-guide drafts stay online.
+        source[0] += _DRAFTS_TOCTREE.replace("   drafts/user_guide/**\n", "")
     elif docname.startswith("drafts/"):
         lines = source[0].split("\n")
         title = next((i for i, line in enumerate(lines) if line.startswith("# ")), -1)

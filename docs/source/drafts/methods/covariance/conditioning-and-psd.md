@@ -158,12 +158,12 @@ $S = \{ i : \lvert C_{ii}\rvert \ge 10^{-12} \max_j \lvert C_{jj}\rvert \}$, the
 repair is:
 
 $$
-\begin{align}
+\begin{aligned}
 \delta_{\text{diag}} &= \max_{i \in S} \frac{\lvert C'_{ii} - C_{ii}\rvert}{\lvert C_{ii}\rvert}, \qquad
 \delta_F = \frac{\lVert C' - C\rVert_F}{\lVert C\rVert_F}, \\
 \delta_{\text{inert}} &= \max_{i \notin S} \lvert C'_{ii} - C_{ii}\rvert, \qquad
 r' = \frac{\lambda_{\min}(C')}{\lambda_{\max}(C')}, \qquad s(C'),
-\end{align}
+\end{aligned}
 $$ (eq-conditioning-and-psd-effect)
 
 with the number of non-stated rows that come out with a variance above the same floor,
@@ -242,10 +242,10 @@ With $P_S$ the projection {eq}`eq-conditioning-and-psd-clip` (floor `eigval_floo
 symmetrisation) and $P_U$ the projection that puts back the stated diagonal $d$,
 
 $$
-\begin{align}
+\begin{aligned}
 R_k &= Y_k - \Delta S_k, \qquad X_k = P_S(R_k), \qquad \Delta S_{k+1} = X_k - R_k,\\
 Y_{k+1} &= \tfrac12\left(P_U(X_k) + P_U(X_k)^\top\right), \qquad Y_0 = C,\ \Delta S_0 = 0,
-\end{align}
+\end{aligned}
 $$ (eq-conditioning-and-psd-higham)
 
 until $\lVert Y_{k+1} - Y_k\rVert_F / \lVert Y_k\rVert_F < \text{tol}$. By default

@@ -163,9 +163,10 @@ deviation the realised variance is 1.005 times the stated one, for 50 % it is 1.
 - **The stated relative covariance is taken as the covariance of $\ln f$**, with no
   $\ln(1+\Sigma)$ transformation, so the factors reproduce the stated covariance to first
   order ({eq}`eq-perturbation-pipeline-lognormal`). `TODO(check)`: the file-level samplers
-  (`kika.sampling.mf33_sampling`, `kika.sampling.endf_perturbation`) apply
-  $\ln(1+\Sigma)$ first, which reproduces $\Sigma$ exactly; the two paths differ for large
-  uncertainties.
+  of PENDF, $\bar\nu$ and ACE files (through `kika.sampling.multigroup_draw`) apply
+  $\ln(1+\Sigma)$ first, which reproduces $\Sigma$ exactly, so the two paths differ for large
+  uncertainties (the file-level MF 34 sampler refuses log space altogether); see
+  {doc}`../../user_guide/legacy-samplers`.
 - **Log space by default** for relative covariances: a cross-section is a positive
   magnitude and a log-normal factor cannot be negative. **Linear per quantity when the
   quantity is signed**: a Legendre coefficient near zero has an uncertainty that
@@ -274,8 +275,8 @@ The tests below passed on 2026-10-11 unless marked.
   selection, an assumption `sumBlocks="fill"` made). **Read them.**
 - `log` and `files`: the run log and the run-level files.
 
-In the run directory: `factors.parquet` with `factors_index.json` (every realisation's
-factors, one table per run), `conditioning_plan.json`, `run.log` and `run.log.jsonl`,
+In the run directory: `factors.parquet` (every realisation's factors, one table per run,
+with its index in the file's metadata; `readFactorsIndex` reads it), `conditioning_plan.json`, `run.log` and `run.log.jsonl`,
 `run_metadata.json`, and one directory per sample with its files.
 
 ## Implementation

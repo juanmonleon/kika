@@ -293,7 +293,8 @@ Present tense, describing what the code on the default branch does. Never on a p
 - Math syntax (MyST `dollarmath` and `amsmath`, enabled in `conf.py`): `$…$` inline;
   a display equation as `$$ … $$ (label)` on its own lines, which numbers it, and is
   referenced as ``{eq}`label` ``. Labels are `eq-<page-slug>-<name>`, so they stay
-  unique across the site. Multi-line equations use `\begin{align} … \end{align}`.
+  unique across the site. Multi-line equations use `\begin{aligned} … \end{aligned}` inside the `$$` block
+  (a bare `align` there renders on the web and breaks the PDF build).
 - Fixed choices: `\sigma(E)` cross-section, `\mu = \cos\theta`, `a_\ell` Legendre
   coefficients with `f(\mu) = \sum_\ell \frac{2\ell+1}{2} a_\ell P_\ell(\mu)`, `E` incident
   energy in eV, CM/LAB for the frames, `\gamma` for the CM/LAB speed ratio.
