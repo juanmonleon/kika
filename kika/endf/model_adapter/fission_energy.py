@@ -489,7 +489,9 @@ def _familyMultiplicity(nubarForm, weight, label: str, report):
         f"delayedNeutron {label!r}: its multiplicity is p_k(E) * nu_d(E) with a "
         f"p_k that is not constant, sampled on the {grid.size}-point union of "
         f"both grids and joined lin-lin -- the product of two tables is not a "
-        f"table of either law"
+        f"table of either law",
+        # A delayed family's multiplicity, not a cross section MF3/MF2 states.
+        unaffectedScopes=("cross-sections",),
     )
     return Multiplicity(form=XYs1d(xs=grid, ys=values, axes=multiplicityAxes()))
 

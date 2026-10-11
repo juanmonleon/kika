@@ -487,7 +487,10 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             continue
         report.unsupportedNode(
             f"MF{mf} is present in the file and this decoder does not convert "
-            f"it; it is absent from this reactionSuite"
+            f"it; it is absent from this reactionSuite",
+            # A covariance file (MF40: activation covariances) changes no cross
+            # section MF3/MF2 states; any other MF it does not convert might.
+            unaffectedScopes=("cross-sections",) if 30 <= mf <= 40 else (),
         )
     for mf in sorted((present & set(SUPPORTED_MF)) & set(COVARIANCE_MF)):
         report.unsupportedNode(

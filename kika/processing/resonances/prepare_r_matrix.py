@@ -160,9 +160,14 @@ def prepare_rml(region, resonances, context, notes):
                 raise ValueError('Brune shift requires the Brune boundary convention')
             if ch.radiusUnit not in (None, 'fm') or f.radiusUnit not in (None, 'fm'):
                 raise UnsupportedResonanceError('RML radii must be normalized to fm')
-            l, s = ch.L, ch.channelSpin
-            if not isinstance(l, (int, np.integer)) or not 0 <= l <= 64 or s is None or not math.isfinite(s):
+            l, signed = ch.L, ch.channelSpin
+            if not isinstance(l, (int, np.integer)) or not 0 <= l <= 64 or signed is None or not math.isfinite(signed):
                 raise ValueError('invalid RML L/s/J coupling')
+            # ENDF-6 RML (and SAMMY) let SCH be negative: the sign only tells
+            # apart channels of the same |s| (JEFF-4.0 O-16's n + 13C... alpha
+            # channels are s = -1/2). The coupling is |s|'s; the sign stays in
+            # the channel's identity below.
+            s = abs(signed)
             mt = 18 if rr.reactionMT == 19 else rr.reactionMT
             effective = mt in (18,102)
             strength = 0.
@@ -231,7 +236,7 @@ def prepare_rml(region, resonances, context, notes):
                     if f.boundaryCondition == 'Given':raise ValueError('Given boundary requires a declared channel/global value')
                     boundary = 0.
             if not math.isfinite(boundary):raise ValueError('nonfinite boundary constant')
-            identity = (ch.resonanceReaction,l,s)
+            identity = (ch.resonanceReaction,l,signed)
             # Effective fission/radiative exits are orthogonal channels whose
             # quantum numbers need not identify their deformation/radiative
             # state. Keep each width column, even for identical pair/L/S.
