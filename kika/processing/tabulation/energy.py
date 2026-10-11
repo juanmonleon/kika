@@ -69,6 +69,14 @@ def _tableAt(function, k, options, discrete, clipped):
     return table
 
 
+def _histogramLaw(law) -> bool:
+    """A general evaporation whose g(x) is one histogram (flat) table."""
+    m = _m()
+    g = getattr(law, "g", None)
+    return (isinstance(law, m.GeneralEvaporation) and isinstance(g, m.XYs1d)
+            and getattr(g, "interpolation", None) == m.Interpolation.flat)
+
+
 def _tabulateLaw(law, options: TabulationOptions, incident: Optional[Sequence[float]] = None):
     """A parametrised spectrum → an XYs2d of xs_pdf_cdf1d on adaptive outgoing grids."""
     m = _m()
@@ -80,6 +88,17 @@ def _tabulateLaw(law, options: TabulationOptions, incident: Optional[Sequence[fl
             # Below the law's support: a spectrum concentrated at E' = 0.
             seeds = np.array([0.0, max(float(energy) * 1e-9, 1e-11)])
             table, _ = pdfTable(seeds, [1.0, 1.0], histogram=True, options=options, outer=energy)
+            tables.append(table)
+            continue
+        if _histogramLaw(law):
+            # g(x) is a histogram (LF=5 with INT=1: delayed-neutron spectra):
+            # P(E'|E) = g(E'/theta)/theta is itself a histogram on theta*x_i,
+            # written exactly as one. A lin-lin refinement of its steps never
+            # converges (ACER also writes these as histograms).
+            mids = 0.5 * (seeds[:-1] + seeds[1:])
+            y = np.append(law.evaluate(float(energy), mids), 0.0)
+            table, _ = pdfTable(seeds, y, histogram=True, options=options, outer=energy,
+                                what=f"{type(law).__name__} at {energy:g} eV")
             tables.append(table)
             continue
         x, y = refine(lambda e: law.evaluate(float(energy), e), seeds, options)

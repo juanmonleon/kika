@@ -703,9 +703,19 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         return channel
 
     zaTarget = 1000 * Z + A
+    # Fission given as chances under a summed MT18: when MF3 gives the chances
+    # (19, 20, 21, 38) and MT18 only as their sum, the fission products (nu,
+    # prompt and delayed neutrons, MF13 photons) are stated on MT18. The
+    # official exporter writes MT18 as the fission reaction, not redundant,
+    # with σ the sum of the chances and those products, and leaves the chances
+    # out (Pu-240); written as chances, the file had no fission neutrons.
+    summedFission = next((r for r in work.sums if r.ENDF_MT == 18), None) \
+        if chances and 18 not in present else None
     for leaf in leaves:
         reaction = leaf.reaction
         mt = leaf.mt
+        if summedFission is not None and mt in chances:
+            continue
         cs = heatedForms(mt)
         if mt == 2:
             x, y = _strictly(*_flatten(reaction.crossSection[RECON_LABEL]))
@@ -728,6 +738,16 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
             id=rid, crossSection=cs, outputChannel=channel,
             provenance=m.Hdf5Provenance(attributes={"redundant": redundant}))
         (out.sums if redundant else (out.fissionComponents if mt in chances else out.reactions)).append(new)
+    if summedFission is not None:
+        channel = channelOf(summedFission)
+        _products(summedFission, channel, 18, awr, zaTarget, tabOptions, report, work.PoPs)
+        out.reactions.append(m.Reaction(
+            id=m.ReactionId(label=summedFission.label, ENDF_MT=18),
+            crossSection=summedForms(sorted(chances)), outputChannel=channel,
+            provenance=m.Hdf5Provenance(attributes={"redundant": 0})))
+        report.warn(f"fission written as MT18, the sum of the chances {sorted(chances)} that "
+                    f"carries the fission products, as the official exporter writes it; the "
+                    f"chances themselves are not written")
 
     # --- level sums 4, 16, 103-107 ----------------------------------------
     for mt, levels in LEVEL_SUMS.items():
@@ -755,7 +775,10 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         mt = orphan.ENDF_MT
         target = out.findReactionByENDF_MT(mt)
         if target is None:
-            levels = [c for c in LEVEL_SUMS.get(mt, ()) if c in present]
+            # MT3, the nonelastic, is every partial but the elastic (Pu-240 and
+            # Pu-241 state photons on it; the official file writes it redundant).
+            levels = ([c for c in sorted(present) if c != 2] if mt == 3 else
+                      [c for c in LEVEL_SUMS.get(mt, ()) if c in present])
             if not levels:
                 report.lost(f"MT{mt}: {len(orphan.outputChannel.products)} photons stated on a "
                             f"sum the evaluation gives no partials of; not written")
@@ -822,14 +845,24 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                     f"because the URR tables name it")
     for piece in omit:
         report.lost(f"{piece} was not written: omitted on request")
+    # Photons the ENDF reader kept verbatim (no cross section to hang from:
+    # Pu-241's MF13 on MT3, which MF3 does not give) are not in the model, so
+    # not in the file either; the official file has them on a redundant MT3.
+    from kika.endf.model_adapter.photons import PHOTONS_VERBATIM_KEY
+
+    kept = (getattr(getattr(work, "provenance", None), "headerFields", None) or {}).get(PHOTONS_VERBATIM_KEY) or {}
+    for mt in sorted({int(key.split("/")[1]) for key in kept}):
+        files = "/".join(sorted(key.split("/")[0] for key in kept if int(key.split("/")[1]) == mt))
+        report.lost(f"MT{mt}: the photons of MF{files} were kept verbatim by the ENDF reader "
+                    f"(no MF3 cross section to hang from) and are not written")
     out.report = report
     return out
 
 
 def _sumAttributes(mt):
-    """A redundant sum's attributes as the official exporter writes them: MT4, the
-    inelastic levels, in the centre of mass (O-16's reaction_004), the others not."""
-    return {"redundant": 1, "center_of_mass": 1 if mt == 4 else 0}
+    """A redundant sum's attributes as the official exporter writes them: MT3 and MT4
+    in the centre of mass (O-16's reaction_004, Pu-240's reaction_003), the others not."""
+    return {"redundant": 1, "center_of_mass": 1 if mt in (3, 4) else 0}
 
 
 def _thin(grid, values, rtol):
