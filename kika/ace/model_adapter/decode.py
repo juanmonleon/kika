@@ -197,6 +197,7 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
             suite.reactions.append(reaction)
 
     _attachURR(ace, suite, report)
+    _reportUnconverted(ace, report)
 
     # What ACE genuinely does not have. Stated per item, because "ACE carries no
     # Q values" was the previous formulation and it is false.
@@ -218,6 +219,62 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report
     return suite, report
+
+
+def _reportUnconverted(ace, report: ConversionReport) -> None:
+    """Name every neutron-side block the file has and this decoder does not convert.
+
+    Only cross sections, Q values, URR references and the photon blocks reach
+    the model. The secondary-neutron distributions, the multiplicities and the
+    delayed-neutron data are in the file and not in the suite, and a
+    conversion that dropped them without a word would read as a file that does
+    not have them. None of it changes a cross section, and the entries say so.
+    """
+    SCOPES = ("cross-sections",)
+    angular = getattr(ace, "angular_distributions", None)
+    if angular is not None:
+        mts = sorted(int(mt) for mt in getattr(angular, "incident_neutron", {}) or {})
+        if getattr(angular, "elastic", None) is not None:
+            mts = [2] + [mt for mt in mts if mt != 2]
+        if mts:
+            report.unsupportedNode(
+                f"ACE's neutron angular distributions (AND block, MT "
+                f"{', '.join(map(str, mts))}) are not converted",
+                unaffectedScopes=SCOPES)
+        if any(getattr(angular, "particle_production", []) or []):
+            report.unsupportedNode(
+                "ACE's secondary-particle angular distributions are not converted",
+                unaffectedScopes=SCOPES)
+    energy = getattr(ace, "energy_distributions", None)
+    if energy is not None:
+        mts = sorted(int(mt) for mt in getattr(energy, "incident_neutron", {}) or {})
+        if mts:
+            report.unsupportedNode(
+                f"ACE's neutron energy distributions (DLW block, MT "
+                f"{', '.join(map(str, mts))}) are not converted",
+                unaffectedScopes=SCOPES)
+        if getattr(energy, "delayed_neutron", None):
+            report.unsupportedNode(
+                "ACE's delayed-neutron energy spectra (DNED block) are not converted",
+                unaffectedScopes=SCOPES)
+        if any(getattr(energy, "particle_production", []) or []):
+            report.unsupportedNode(
+                "ACE's secondary-particle energy distributions are not converted",
+                unaffectedScopes=SCOPES)
+    nubar = getattr(ace, "nubar", None)
+    if nubar is not None:
+        kinds = [name for name in ("prompt", "total", "delayed")
+                 if getattr(nubar, name, None) is not None]
+        if kinds:
+            report.unsupportedNode(
+                f"ACE's nu-bar ({', '.join(kinds)}; NU/DNU blocks) is not converted",
+                unaffectedScopes=SCOPES)
+    delayed = getattr(ace, "delayed_neutron_data", None)
+    if delayed is not None and getattr(delayed, "precursors", None):
+        report.unsupportedNode(
+            f"ACE's delayed-neutron precursor data (BDD block, "
+            f"{len(delayed.precursors)} groups) is not converted",
+                unaffectedScopes=SCOPES)
 
 
 def _mtNumbers(ace) -> List[int]:
