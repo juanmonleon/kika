@@ -60,9 +60,13 @@ and a distribution changes frame as a density, $f_L(\mu_L) = f_C(\mu_C)\, d\mu_C
 
 **3. The readings of $\sigma(E)$.**
 
-- *Nominal*: the table at $E$.
+- *Nominal*: the table at $E$, interpolated under the table's own (NBT, INT) law
+  (`xs_interpolation`; one lin-lin region when it is not given). Outside the table the
+  end values are held.
 - *Bin-averaged* over $[E_\text{lo}, E_\text{hi}]$ with weight $w(E) = 1/E$ (lethargy) or 1:
-  $\langle\sigma\rangle = \int \sigma w\,dE / \int w\,dE$.
+  $\langle\sigma\rangle = \int \sigma w\,dE / \int w\,dE$, integrated exactly under the
+  same law by the group average of {doc}`group-averaging` (`kika.algebra.group_averages`),
+  over the part of the bin the table covers.
 - *Folded* with a Gaussian resolution of width $\sigma_E(E)$:
   $\tilde\sigma(E_0) = \int \sigma(E)\, \mathcal{N}(E; E_0, \sigma_E^2)\, dE$, computed
   exactly on the lin-lin interpolant of the table (`kika.algebra.fold_tabulated`).
@@ -97,11 +101,14 @@ $\sigma$ is flat across the window.
   kernel tends to the interpolated value, as it should.
 - **A reading whose inputs are missing falls back to the nominal one**, so a curve never
   has a hole.
-- **The nominal reading and the bin average sample $\sigma$ log-log, while the fold samples
-  it lin-lin.** `TODO(check)`: a PENDF and an ACE file are lin-lin, so the log-log reading
-  differs from the table between its points, and the bin average is a trapezoid, a second
-  implementation beside the exact group average of
-  {doc}`group-averaging`.
+- **$\sigma$ is read under the law its table states, lin-lin by default.** A PENDF and an
+  ACE file are lin-lin, and so is an evaluation's MF 3 above the resonance region; reading
+  such a table log-log changes its values between points. An MF 3 with other laws is read
+  under them by passing its (NBT, INT) pairs. The fold always uses the lin-lin interpolant,
+  which is where its closed form holds.
+- **One averaging implementation.** The bin averages of $\sigma$ and of the $a_\ell$
+  (`coefficients_bin_averaged`, under the MF 4 law) are the exact group average of
+  {doc}`group-averaging`, not a separate quadrature.
 
 ## Limits and failure modes
 
@@ -110,12 +117,12 @@ $\sigma$ is flat across the window.
 - The lethargy weight diverges at $E = 0$; a bin that reaches zero is truncated at the first
   positive grid point inside it.
 - Folding needs $E > 0$, $L > 0$ and $\delta t > 0$; otherwise $\sigma_E = 0$ and the fold
-  returns the lin-lin value of the table at $E$, which is not the nominal (log-log) reading
-  between table points.
+  returns the lin-lin value of the table at $E$, which equals the nominal reading of a
+  lin-lin table and differs from it between points when the table states another law.
 
 ## Validation
 
-`kika/endf/tests/test_dcs.py` and `kika/algebra/tests/test_fold.py`, 138 tests passed on
+`kika/endf/tests/test_dcs.py` and `kika/algebra/tests/test_fold.py`, 141 tests passed on
 2026-10-11, among them: the bin width matches the TOF resolution
 (`test_dcs.py::test_bin_edges_for_width_tof_matches_the_resolution`); folding is exact on a
 linear coefficient and returns a constant unchanged
@@ -123,7 +130,9 @@ linear coefficient and returns a constant unchanged
 `::test_coefficients_folded_returns_a_constant_unchanged`); the bin-averaged coefficients
 match the bin-averaged cross-section row by row
 (`::test_coefficients_bin_averaged_matches_sigma_bin_averaged_row_by_row`); the four readings
-are independent (`::test_the_four_readings_are_independent`).
+are independent (`::test_the_four_readings_are_independent`); $\sigma$ is read lin-lin by
+default and under a stated law when given, and the bin average is exact for a lin-lin
+table under both weights (`test_dcs.py::TestSigmaUnderTheTablesLaw`).
 
 ## Diagnostics
 

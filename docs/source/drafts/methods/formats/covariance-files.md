@@ -61,7 +61,7 @@ a block is relative or absolute; what kika assumes is under *Assumptions and def
 | BOXER, ITYPE 1 (cross-sections) | Decoded into `cross_sections`. |
 | BOXER, ITYPE 2 (standard deviations) | Read and used to turn a correlation matrix into a covariance; not kept. |
 | BOXER, ITYPE 3 (covariance matrix) | Decoded into a block. |
-| BOXER, ITYPE 4 (correlation matrix) | Decoded and converted into a covariance block, {eq}`eq-covariance-files-correlation`. |
+| BOXER, ITYPE 4 (correlation matrix) | Decoded and converted into a covariance block, {eq}`eq-covariance-files-correlation`; refused without the ITYPE 2 deviations it needs. |
 | BOXER, HLIB and HDESCR fields | Read and discarded. |
 | COVFIL, tape header line | Skipped. |
 | COVFIL, MF 1 / MT 451 | ZA, AWR, temperature, NGRP and the group boundaries decoded; AWR and temperature go to `metadata`. |
@@ -170,7 +170,7 @@ $$ (eq-covariance-files-correlation)
 
 **Identifiers and grid.** MAT numbers are translated to ZAID through kika's ENDF MAT table
 (a MAT not in the table is kept as the number it is). The group boundaries are kept in the
-file's order and units.
+file's order; they are in eV, and `energy_unit="MeV"` multiplies them by $10^{-6}$.
 
 ### COVFIL
 
@@ -196,7 +196,8 @@ zero. A sub-section ends at its row NG, or at the end of the section. MAT1 = 0 m
 column parameter is the tape's own material. The section that follows MF 1 and MF 3
 decides the result: MF 33 gives a {py:class}`~kika.cov.CrossSectionCovariance`, MF 34 a
 {py:class}`~kika.cov.LegendreCovariance` whose blocks carry Legendre orders $(L, L_1)$ and
-the MF 1 grid. MAT numbers are translated to ZAID as for BOXER.
+the MF 1 grid. MAT numbers are translated to ZAID as for BOXER. The grid is in eV, and
+`energy_unit="MeV"` multiplies it by $10^{-6}$.
 
 `from_gendf` and `from_covfil` are the same reader; both raise `TypeError` when the tape is
 MF 34, which `LegendreCovariance.from_covfil` reads.
@@ -204,20 +205,23 @@ MF 34, which `LegendreCovariance.from_covfil` reads.
 ## Assumptions and defaults
 
 - **COVERX and BOXER blocks carry no relative/absolute flag.** The two formats do not
-  state it, and kika leaves `is_relative` empty. Most consumers in kika then treat the
-  block as relative; `CrossSectionCovariance.project_to_grid` treats it as absolute.
-  `TODO(check)`: the two defaults disagree (see the handover notes).
+  state it, and kika leaves `is_relative` empty. Every consumer in `kika.cov`, including
+  `CrossSectionCovariance.project_to_grid`, reads an unstated class as relative, the form
+  in which multigroup covariance libraries are normally distributed.
 - **COVFIL blocks are relative.** Relative covariances are what ERRORR is normally asked
   for; a COVFIL written with absolute covariances would be read with the wrong flag.
   `TODO(check)`: confirm against the ERRORR input options. MF 34 blocks from COVFIL are in
   an unknown frame, because the records kika reads do not state one.
-- **Energies are in eV** in all three formats; `energy_unit="MeV"` on reading only
-  changes the reported unit (and, for COVERX, the values; see *Ambiguous and inconsistent
-  input*).
+- **Energies are in eV** in all three formats; `energy_unit="MeV"` on reading converts the
+  boundaries to MeV, and any other unit is refused.
 - **Group 1 is the lowest group** after a COVERX read with `ascending=True`. BOXER and
   COVFIL grids are kept in the file's order.
 - **One material per COVFIL.** The MAT of the first data line is the tape's material; a
-  second material is not read.
+  second material is not read, and the writer refuses to write more than one.
+- **An all-zero block is not stored.** Every reader skips a block whose entries are all
+  exactly zero, which states nothing an absent block does not. A block whose entries are
+  small, or whose anticorrelations cancel its variances so that it sums to about zero, is
+  kept.
 - **An unstated block is not zero.** Only the blocks a file states are stored; the
   assembled matrix (`CrossSectionCovariance.covariance_matrix`) mirrors each off-diagonal
   block into its transpose position and leaves a block never stated as NaN.
@@ -228,17 +232,6 @@ MF 34, which `LegendreCovariance.from_covfil` reads.
   follows that order and stores the block under its row parameter. A reader that took the
   first pair as the row would transpose every cross-reaction block. `TODO(check)`: the
   test of this against the SCALE 44-group library was not re-run.
-- **A block whose entries sum to almost zero is dropped.** The binary COVERX, BOXER and
-  COVFIL readers skip a block when the sum of its entries is within $10^{-8}$ of zero
-  (the text COVERX reader does not). That discards empty blocks, and also a non-empty
-  block of anticorrelations that cancel, or one of very small variances. Nothing is
-  reported. `TODO(check)`: listed as a possible defect in the handover notes.
-- **A BOXER correlation matrix without its standard deviations** (no ITYPE 2 card for the
-  row or the column parameter) is stored as it is, a correlation in place of a
-  covariance, with no warning.
-- **`energy_unit="MeV"` on BOXER and COVFIL** labels the grid MeV without converting the
-  eV values the file holds. Only the COVERX reader converts. `TODO(check)`: listed as a
-  possible defect.
 - **A COVFIL sub-section that does not end at row NG** has no terminator the reader can
   see, so its next CONT would be read as a row. kika's writer always writes row NG (a
   single zero when the row is empty).
@@ -252,12 +245,22 @@ MF 34, which `LegendreCovariance.from_covfil` reads.
   corrupt or not COVERX, and every later offset would be wrong.
 - A COVERX text file with fewer or more group boundaries than NGROUP + 1, or a boundary
   that is not a number (`InvalidDataFormatError`).
+- A BOXER correlation matrix (ITYPE 4) without the ITYPE 2 standard deviations of its row
+  or its column parameter (`InvalidDataFormatError`): a correlation cannot be turned into
+  a covariance without them, and storing it as one would be wrong by the square of the
+  deviations.
 - A file from which no block was decoded, and a COVFIL whose first covariance section is
   neither MF 33 nor MF 34 (`EmptyParsingError`).
+- An `energy_unit` other than `"eV"` or `"MeV"` (`ValueError`).
 - `CrossSectionCovariance.from_covfil` (or `from_gendf`) on an MF 34 tape, and
   `LegendreCovariance.from_covfil` on an MF 33 tape (`TypeError`).
 - Writing a {py:class}`~kika.cov.LegendreCovariance` to COVERX or BOXER (`TypeError`):
   neither format has Legendre orders.
+- Writing a COVFIL from a covariance with rows for more than one isotope, or an MF 34
+  COVFIL with a block whose column isotope is another material (`ValueError`): a COVFIL
+  holds one material, and an MF 34 sub-section has no MAT1 field to name another.
+- Writing a BOXER file with a MAT above 99999, or a COVFIL with a MAT above 9999
+  (`ValueError`): the number does not fit its field, and the file would be corrupt.
 - `kika.identify` refuses, by name, an NJOY group tape with no MF 33 or MF 34 (a groupr
   GENDF), and ERRORR output carrying only MF 31 or MF 35: kika has no reader for them, and
   `read_covfil` reads MF 33 and MF 34 only.
@@ -304,13 +307,14 @@ to the one above become positive controls, runs of a repeated new value a negati
 control and one value. NCF is the narrowest width that fits every control integer. The
 value format is `nvf` (default 10, 1P8E10.3); the writer warns for `nvf` ≤ 10 and suggests
 14. MAT numbers come from kika's ZAID-to-MAT table; one above 99999 does not fit the I5
-field, and the writer warns that the output will be corrupt and writes it.
+field, and the writer refuses it.
 
 **COVFIL** writes a tape header, MF 1 / MT 451, MF 3 when cross-sections are stored (MF 33
 only), and the MF 33 or MF 34 sections, then FEND, MEND and TEND. The writer derives:
 
-- the material (MAT and ZA) from the first block's row isotope; MAT1 = 0 for a column
-  parameter of that material, its MAT otherwise;
+- the material (MAT and ZA) from the row isotope, which is the same for every block (see
+  *Refused*); MAT1 = 0 for a column parameter of that material, its MAT otherwise; only
+  that material's cross-sections go into MF 3;
 - the MF 1 HEAD as (ZA, AWR, 6, 0, −G, 0) and the CONT as (TEMP, 0, G, 0, G+1, 0).
   `TODO(check)`: the fields L1 = 6 and N1 = −G have not been compared with an ERRORR
   tape; kika's reader does not use them;
@@ -321,32 +325,28 @@ only), and the MF 33 or MF 34 sections, then FEND, MEND and TEND. The writer der
   written, except row G, which is always written so the reader can see the end;
 - sequence numbers restarting at 1 in each section.
 
-A MAT above 9999 does not fit the four-column field; the writer warns and writes it.
+A MAT above 9999 does not fit the four-column field, and the writer refuses it.
 
 ## What the round trip keeps and loses
 
 | Path | Kept | Lost or changed |
 |---|---|---|
-| COVFIL → model → COVFIL | Blocks, grid, cross-sections, AWR, temperature, relative flag, numerically equal (ENDF floats). | The tape label, any second material. `to_covfil` writes temperature 0 unless passed one (it does not read `metadata`). |
+| COVFIL → model → COVFIL | Blocks, grid, cross-sections, AWR, temperature, relative flag, numerically equal (ENDF floats). | The tape label, any second material. |
 | COVERX binary | Blocks, grid and cross-sections to float32 (relative difference within $2 \cdot 10^{-7}$ in the test). | Title, MWGT, error vectors, Legendre blocks above order 0, unknown MTs, the relative flag. |
 | COVERX text | Blocks and grid to E15.7. | Cross-sections, title, unknown MTs, the relative flag. |
 | BOXER (`nvf=14`) | Blocks, grid and cross-sections, equal to $10^{-12}$ in the test. | HLIB and HDESCR, the relative flag; the lower triangle of a diagonal block that is not exactly symmetric (the upper one is kept and mirrored). With the default `nvf=10`, values keep four significant figures. |
 
-Several properties do not survive a write in every case: a block whose entries sum to
-almost zero is dropped on the way back in (see *Ambiguous and inconsistent input*); the
-COVFIL writer groups blocks by row MT only, so a covariance holding more than one isotope
-comes back with every row filed under the first isotope (`TODO(check)`: listed as a
-possible defect); and COVERX keeps the model's isotope identifiers while BOXER and COVFIL
-translate them to MAT and back, which is the identity only for nuclides in kika's MAT
-table.
+An all-zero block does not come back, since no reader stores one. COVERX keeps the model's
+isotope identifiers while BOXER and COVFIL translate them to MAT and back, which is the
+identity only for nuclides in kika's MAT table.
 
 ## Report
 
 None: the readers return the covariance object and keep no conversion report. What a
-reader or writer cannot carry is said as a Python `UserWarning` at write time (float32
-precision, lost cross-sections, MeV converted to eV, a BOXER value format of ten columns
-or fewer, a MAT number too wide for its field). **The MAT warnings deserve attention**:
-the file is written anyway, and it is corrupt. Everything listed as silent under
+writer cannot carry is said as a Python `UserWarning` at write time (float32 precision,
+lost cross-sections, MeV converted to eV, a BOXER value format of ten columns or fewer).
+What it cannot write correctly at all (a MAT number too wide for its field, a second
+material in a COVFIL) is refused, under *Refused*. Everything listed as silent under
 *Ambiguous and inconsistent input* has no warning.
 
 ## Validation
@@ -370,6 +370,16 @@ vectors.
   relative (`::test_covfil_gendf_reader_roundtrip_and_metadata`).
 - **Chain COVFIL → COVERX binary → BOXER**: the end equals the start to the float32
   tolerance (`::test_covfil_coverx_boxer_cross_format_chain`).
+- **Edge cases**: a block that sums to about zero without being zero comes back from
+  BOXER, COVFIL and binary COVERX (`::test_a_block_that_sums_to_nearly_zero_is_kept`);
+  `energy_unit="MeV"` scales the BOXER and COVFIL grids
+  (`::test_mev_converts_the_values_not_just_the_label`); a COVFIL with two materials and a
+  MAT too wide for its field are refused (`::test_covfil_refuses_two_materials`,
+  `::test_a_mat_too_wide_for_its_field_is_refused`); `to_covfil` keeps the temperature it
+  read (`::test_to_covfil_keeps_the_temperature_it_read`); a BOXER correlation without
+  deviations is refused (`::test_a_boxer_correlation_without_deviations_is_refused`);
+  `project_to_grid` reads an unstated class as relative
+  (`::test_project_to_grid_reads_an_unstated_class_as_relative`).
 - **Identification**: files written by the three writers are recognised as `covfil`,
   `coverx` (binary and text) and `boxer`; a groupr tape and ERRORR MF 35 output are refused
   by name (`kika/tests/test_identify.py::test_each_kind_is_recognised_as_itself`,

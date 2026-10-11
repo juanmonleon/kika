@@ -33,7 +33,12 @@ constant over each pair of bins, with $f(\mu, E) = \sum_\ell \frac{2\ell+1}{2} a
 P_\ell(\mu)$ the angular distribution of MF 4. A sub-subsection (L, L1) of MF 34 may be
 made of several LIST records with different LB flags and grids (ENDF-6 Ch. 34, with the
 LB flags of MF 33, ENDF-6 Ch. 33); kika sums them, each projected onto the union of
-their grids, into one matrix per (MT, L, MT1, L1) before any collapse. A matrix with
+their grids, into one matrix per (MT, L, MT1, L1) before any collapse. An LB=0 record
+states an absolute covariance and every other LB a relative one, so in a sub-subsection
+that mixes the two the LB=0 part is first divided by $\bar a_{\ell,i}\,\bar a_{\ell',j}$,
+the exact cell means of the coefficients from MF 4 on that record's own grid (a cell whose
+mean is zero gets zero), and the sum is relative; a sub-subsection stated wholly in LB=0
+stays absolute. Negative variances are kept as the file states them. A matrix with
 L $\ne$ L1 is a cross-covariance between two orders and need not be symmetric. The flag
 LCT says whether the coefficients are in the laboratory (LAB) or centre-of-mass (CM)
 frame, or in the frame of MF 4 (LCT=0).
@@ -109,12 +114,21 @@ the orders the file carries (up to 64) and projected onto the LAB polynomials by
 $$
 a^{\mathrm{LAB}}_\ell = \sum_{q=1}^{64} w_q\, f(\mu_q)\, P_\ell\big(\mu_L(\mu_q)\big),
 \qquad
-\mu_L = \frac{\mu_C + \alpha}{\sqrt{1 + 2\alpha\mu_C + \alpha^2}},\quad \alpha = \frac{1}{A},
+\mu_L = \frac{\mu_C + \gamma}{\sqrt{1 + 2\gamma\mu_C + \gamma^2}},
 $$ (eq-multigroup-collapse-cm-lab)
 
-with $(\mu_q, w_q)$ the Gauss nodes and weights and $A$ the AWR. This is
+with $(\mu_q, w_q)$ the Gauss nodes and weights. This is
 $\int f_L(\mu_L) P_\ell(\mu_L)\,d\mu_L$ after the change of variable
-$f_L\,d\mu_L = f_C\,d\mu_C$.
+$f_L\,d\mu_L = f_C\,d\mu_C$. The speed ratio $\gamma$ is that of two-body kinematics for a
+neutron of energy $E$ on a target of mass ratio $A$ (the AWR) with reaction Q-value $Q$:
+
+$$
+\gamma(E) = \frac{1}{A}\sqrt{\frac{E}{E + Q\,(A+1)/A}},
+$$ (eq-multigroup-collapse-gamma)
+
+which is $1/A$ at every energy for elastic scattering (MT 2, $Q = 0$) and depends on $E$
+for a discrete inelastic level (MT 51-90, with $Q$ the level's QI read from MF 3). At or
+below the threshold, where the root is not real, the coefficients are left as they are.
 
 **3. Cell means.** On a grid of cells $[E_i, E_{i+1}]$ (the group structure, or the union
 grid of step 5), the weighted mean of $a_\ell$ over each cell is
@@ -154,13 +168,16 @@ with $m$ the slope of $a_\ell$ on the segment and $w_i = \ln(E_{i+1}/E_i)$.
 ### MF 34: a relative block
 
 **5. The union grid.** The MF 34 bin edges and the group edges are merged (sorted, unique),
-so every cell of the union grid lies inside one MF 34 bin and one group. The relative
-matrix is carried onto it by copying: a union cell takes the row and column of the MF 34
-bin that contains its midpoint.
+so every cell of the union grid lies inside at most one MF 34 bin and at most one group.
+The relative matrix is carried onto it by copying: a union cell takes the row and column
+of the MF 34 bin that contains its midpoint. A union cell outside the MF 34 grid (where
+the group structure reaches further) gets a zero row and column, since MF 34 states no
+covariance there.
 
 **6. Group means.** Steps 3 and 4 run on the union grid, for the row order $\ell$ and the
-column order $\ell'$. Each union cell is assigned to the group that contains its midpoint,
-and
+column order $\ell'$. Each union cell is assigned to the group that contains its midpoint;
+a cell outside the group structure (where the MF 34 grid reaches further) belongs to no
+group and enters no sum. Then
 
 $$
 W_g = \sum_{i \in g} w_i,
@@ -181,7 +198,7 @@ stored with the result are always the latter.
 
 ### MF 34: an absolute block
 
-**9.** A sub-subsection that contains an LB=0 record (absolute covariance) is collapsed
+**9.** A sub-subsection stated wholly in LB=0 records (absolute covariance) is collapsed
 with the operator of {eq}`eq-multigroup-collapse-rebin`, from the MF 34 bins to the
 groups, with $\phi$ replaced by $\sigma\phi$ (its integral taken as the cumulative
 trapezoid of $\sigma\phi$ on the $\sigma(E)$ table, interpolated linearly). The relative
@@ -191,16 +208,20 @@ until step 10, which treats it as zero.
 
 ### MF 34: conditioning each block
 
-**10.** Every relative and every absolute block is symmetrised,
-$C \leftarrow \frac12 (C + C^\top)$, and, with `project_to_psd=True` (the default), made
-positive semi-definite by the automatic rule of
+**10.** Only a self block (the same isotope, MT and $L$ on both sides) is conditioned, and
+once, in the form the file states it: a relative block in relative form, an absolute
+block in absolute form. It is symmetrised, $C \leftarrow \frac12 (C + C^\top)$, and, with
+`project_to_psd=True` (the default), made positive semi-definite by the automatic rule of
 `kika.cov.decomposition`: with $\lambda_{\min}$, $\lambda_{\max}$ the extreme eigenvalues
 (of a copy whose non-finite entries are zero), the eigenvalues are clipped at zero,
 $C \leftarrow V \max(\Lambda, 0) V^\top$, when
 $\max(-\lambda_{\min}, 0)/\lambda_{\max} < 10^{-2}$, and the matrix is replaced by the
 nearest positive semi-definite matrix with the same diagonal
-({py:func}`kika.cov.decomposition.nearest_psd_higham`, Higham 1988) otherwise. Both
-repairs are defined in {doc}`conditioning-and-psd`.
+({py:func}`kika.cov.decomposition.nearest_psd_higham`) otherwise. Both repairs are defined
+in {doc}`conditioning-and-psd`. The other form is then derived from the conditioned one
+with the same group means (step 12), so the relative and the absolute block remain one
+covariance. A cross block ($L \ne L_1$, or two reactions) is an off-diagonal part of a
+larger covariance matrix, has no symmetry or sign of its own, and is stored as collapsed.
 
 ### A covariance on bins
 
@@ -249,17 +270,26 @@ absolute covariance in b².
 - **Each block is conditioned on its own.** A block is the unit MF 34 states, and the
   result keeps the blocks separate; a positive semi-definite projection of the assembled
   matrix (`MultigroupLegendreCovariance.covariance_matrix`) is left to the caller (see {doc}`conditioning-and-psd` and
-  `kika.cov.conditioning`). The relative and the absolute block are projected
-  independently, so after a projection $C^{\mathrm{MG}}$ is no longer exactly
-  $\operatorname{diag}(\bar a)\,R^{\mathrm{MG}}\operatorname{diag}(\bar a')$.
+  `kika.cov.conditioning`). A self block is projected in the form the file states and the
+  other form is derived from the projected one, so
+  $C^{\mathrm{MG}} = \operatorname{diag}(\bar a)\,R^{\mathrm{MG}}\operatorname{diag}(\bar a')$
+  holds after a projection too (a congruence of a PSD matrix is PSD).
+- **Cross blocks are not conditioned.** Symmetrising or projecting an off-diagonal part on
+  its own changes it into something MF 34 does not state; whether the joint matrix is PSD
+  is a property of the whole, checked where it is assembled.
+- **Nothing outside the group structure, no covariance outside MF 34.** A group average is
+  an integral over the group, so the weight of energies outside every group is not added
+  to the end groups; and a group, or part of one, outside the MF 34 grid has no stated
+  covariance, so it gets none, and no copy of the nearest MF 34 bin.
 - **In the LAB output frame, only the coefficients change frame.** The relative block of
   a CM covariance is kept as the relative covariance of the LAB coefficients, and the
   block is labelled LAB. A relative covariance is not invariant under the frame change
   (each LAB coefficient mixes every CM order), so this is an approximation.
   TODO(check): its size has not been measured.
-- **The CM-to-LAB map uses $\alpha = 1/A$** at every energy, the elastic kinematics. It
-  is exact for elastic scattering only; for discrete inelastic levels the ratio depends on
-  $E$ and $Q$.
+- **The CM-to-LAB map is two-body.** {eq}`eq-multigroup-collapse-gamma` holds for elastic
+  scattering and for a discrete inelastic level, the reactions whose MF 4 is a two-body
+  angular distribution; for any other reaction a CM distribution has no single LAB
+  counterpart at a given angle, and `output_frame="lab"` refuses it.
 - **A bin-centre $\sigma$ in `project_to_grid`.** The relative-to-absolute step uses
   $\sigma$ at the midpoint of each source bin, not its bin average; on a bin that spans a
   resonance the two differ.
@@ -270,8 +300,12 @@ Refused by `MF34_to_MG`:
 
 - no MF 4 or no MF 34 in the object; a named grid that `kika.energy_grids.grids` does not
   have; a grid with fewer than two edges or not strictly increasing; an unknown
-  `weighting_function` name; `output_frame` other than `"same"` or `"lab"`; `pendf` not set
+  `weighting_function` name; `output_frame` other than `"same"` or `"lab"`;
+  `relative_normalization` other than `"mf34_cell"` or `"mg_cell"`; `pendf` not set
   (`ValueError`);
+- with `output_frame="lab"`, a reaction stated in CM that is neither elastic (MT 2) nor a
+  discrete inelastic level (MT 51-90), and a level whose QI cannot be read because the tape
+  has no MF 3 section for it (`ValueError`);
 - a `weighting_function` given as a callable (`NotImplementedError`): the collapse needs
   its antiderivative and has no way to receive one;
 - a `pendf` entry that exposes neither `energies`/`values` nor `energies`/`cross_sections`
@@ -288,29 +322,21 @@ reader's job; `on_tabulated` other than `"raise"` or `"skip"` (`ValueError`). Un
 Reported instead of done (as Python warnings): a block whose reaction has no MF 4 section
 is skipped; an MF 4 section without a Legendre mesh is integrated on the MF 34 grid; a
 reaction with no $\sigma(E)$ in `pendf` is weighted by $\phi$ alone. In the MF 34 reader,
-negative diagonal entries below $-10^{-9}$ of an L=L1 matrix are set to zero, and an
-LB=0 record summed with relative records is added as though relative, both with a logged
-warning.
+negative diagonal entries below $-10^{-9}$ of an L=L1 matrix are kept as stated, with a
+logged warning; repairing them is the conditioning step's decision. The reader refuses
+(`ValueError`) a sub-subsection that mixes LB=0 and relative records when it is given no
+MF 4 to divide by; `MF34_to_MG` always passes the MF 4 of the object.
 
 Limits of the method and of the code:
 
-- **Union cells outside the group structure are counted in the end groups.** A cell is
-  assigned to a group by its midpoint, clipped to the first and last group, so where the
-  MF 34 grid extends below $G_0$ (or above $G_n$) its cells' weight and coefficients enter
-  the first (last) group. Likewise a union cell outside the MF 34 grid takes the
-  covariance of the nearest MF 34 bin. TODO(check): to avoid both, give a group structure
-  that lies inside the MF 34 range of every block.
-- **L $\ne$ L1 blocks are symmetrised and projected like L=L1 blocks.** A
-  cross-covariance between two orders need not be symmetric nor positive semi-definite,
-  so step 10 can change it. TODO(check): whether any evaluation has an asymmetric or
-  indefinite collapsed cross block.
+- **A group outside the MF 34 grid has zero covariance**, and a group that only partly
+  overlaps it carries the covariance of the overlapping part only: its relative variance
+  is that of the stated part diluted by the group's whole weight.
 - With $\sigma$ in the weight the integrals of step 3 are trapezoidal on a mesh that
   includes every energy of the $\sigma(E)$ table, so their accuracy is that of the table.
 - A relative element is undefined where a group mean $\bar a_{\ell,g}$ is near zero; it is
   set to zero (relative blocks) or NaN before conditioning (absolute input), and a small but non-zero group
   mean can give a large relative variance.
-- `relative_normalization` is not validated: any value other than `"mg_cell"` is treated as
-  `"mf34_cell"`.
 
 ## Validation
 
@@ -326,10 +352,20 @@ All tests below were run on 2026-10-11 and passed.
   (`kika/cov/tests/test_mf34_to_mg_golden.py::test_collapsed_matrices_golden`), and the
   weight used is frozen beside it (`::test_the_sigma_weight_golden`). These are
   characterisation tests: they detect a change and do not say the numbers are right. The
-  slice's MF 34 grid starts at $10^{-5}$ eV, so they freeze the end-group behaviour of
-  *Limits* too. The result is symmetric to $10^{-10}$ (`::test_the_collapse_is_symmetric`,
-  which step 10 guarantees), on the grid asked for (`::test_the_grid_is_what_was_asked_for`),
-  and is refused without a $\sigma$ (`::test_it_refuses_to_guess_a_sigma`).
+  slice's MF 34 grid starts at $10^{-5}$ eV, far below the first group, so they also
+  freeze that the cells below it carry no weight. Every self block is symmetric to
+  $10^{-10}$ (`::test_the_collapse_is_symmetric`, which step 10 guarantees); the result is
+  on the grid asked for (`::test_the_grid_is_what_was_asked_for`), is refused without a
+  $\sigma$ (`::test_it_refuses_to_guess_a_sigma`) and with an unknown normalisation
+  (`::test_unknown_normalisation_is_refused`).
+- **The edges.** Union cells outside the groups carry no weight, and the covariance is zero
+  outside the MF 34 grid
+  (`kika/cov/tests/test_collapse_edges_and_frames.py::test_cells_outside_the_groups_carry_no_weight`,
+  `::test_the_covariance_stops_where_mf34_does`).
+- **The MF 34 reader.** An LB=0 part of a mixed sub-subsection is divided by the MF 4 cell
+  means before the sum, a mixed sub-subsection without MF 4 is refused, a wholly LB=0 one
+  stays absolute, and a negative variance is kept
+  (`kika/endf/tests/test_mf34_reader_mixed_and_negative.py`).
 - **The $\sigma$ table's shape does not move the result.** $\sigma$ given as an ENDF MF 3
   section and as a `CrossSection` gives bit-identical matrices
   (`kika/tests/test_duck_typed_consumers.py::test_mf34_to_mg_gives_the_same_answer_for_both_pendf_shapes`);
@@ -350,7 +386,15 @@ All tests below were run on 2026-10-11 and passed.
 - **The CM-to-LAB transform.** {eq}`eq-multigroup-collapse-cm-lab` agrees with an
   independent transfer matrix to $10^{-13}$ absolute for $A$ = 1.9, 11.9, 55.45 and 236
   (`kika/sampling/tests/test_mf34_frame_conversion.py::test_the_transfer_matrix_agrees_with_the_collapse_transform`).
-  The test uses 256 quadrature points; the collapse uses 64.
+  The test uses 256 quadrature points; the collapse uses 64. The collapse's conversion
+  agrees with the frame module's transfer matrix to $10^{-10}$ for $\gamma = 1/55.45$ and
+  0.3, one $\gamma$ per energy gives the conversion at each energy, and below threshold the
+  coefficients are unchanged
+  (`kika/cov/tests/test_collapse_edges_and_frames.py::test_the_lab_coefficients_match_the_frame_module`,
+  `::test_one_gamma_per_energy_is_one_conversion_per_energy`); elastic and a level get their
+  own kinematics, and a reaction that is not two-body is refused
+  (`::test_elastic_and_a_level_get_their_own_kinematics`,
+  `::test_a_reaction_that_is_not_two_body_is_refused`).
 
 TODO(check): no test compares `MF34_to_MG` with NJOY ERRORR's multigroup MF 34 output,
 nor the lethargy, Maxwellian or fission weighting against an independent integral.
@@ -366,8 +410,9 @@ nor the lethargy, Maxwellian or fission weighting against an independent integra
 - `legendre_coefficients`: the group means $\bar a_{\ell,g}$ per (isotope, MT, L), from
   the group structure;
 - `weighting_function`, a label such as `"constant (sigma-weighted)"`, and
-  `relative_normalization`. The label says sigma-weighted even for a reaction that fell
-  back to $\phi$ alone; **the warning is the only record of that fallback.**
+  `relative_normalization`. **When a reaction fell back to $\phi$ alone, the label names
+  it**, for example `"constant (sigma-weighted; flux-only for MT51, which had no PENDF)"`;
+  its blocks are weighted differently from the others.
 
 **Worth a look:** a relative variance much larger than the MF 34 one marks a group whose
 mean $\bar a_{\ell,g}$ is near zero; a row of zeros marks a group with no weight or no
@@ -378,11 +423,12 @@ covariance. `summary()` lists the blocks.
 - `kika.cov.multigroup.collapse`: `MF34_to_MG` (validation, weights, the loop over
   blocks); `LegendreSource`, `legendre_source_from_endf`, `legendre_source_from_model`
   and `resolve_legendre_source` (the coefficients, memoised per collapse);
-  `cm_to_lab_legendre`; `compute_base_cell_means`; `build_union_grid`,
+  `cm_to_lab_legendre`, with the two-body $\gamma$ of `kika._legendre_frames.twoBodyGamma`;
+  `compute_base_cell_means`; `build_union_grid`,
   `expand_matrix_to_union_grid` and `compute_mg_means`; `collapse_relative_covariance`
   and `collapse_absolute_covariance`; `compute_overlap_weights`, which builds the
   overlap integrals of $\phi$ for a base and a group grid; `enforce_matrix_quality`
-  (symmetrisation and the per-block projection).
+  (symmetrisation and the projection of a self block).
 - `kika.processing.multigroup`: `WeightingFunction` (the fluxes and their
   antiderivatives), `compute_rebin_operator`, `collapse_covariance`,
   `relative_to_absolute`, `absolute_to_relative`; format-free, also used by
@@ -392,13 +438,12 @@ covariance. `summary()` lists the blocks.
 - `kika.cov.multigroup.mg_legendre_covariance`: the result class and its assembly of the
   full matrix from the blocks.
 - `kika.endf.classes.mf34`: the MF 34 reader that sums the LIST records of a
-  sub-subsection (`to_ang_covmat`).
+  sub-subsection, dividing an LB=0 part of a mixed one by the MF 4 cell means
+  (`to_ang_covmat`).
 
 ## References
 
 - D. A. Brown (ed.), *ENDF-6 Formats Manual*, Brookhaven National Laboratory (2023),
   doi:10.2172/2007538: Ch. 33 (LB flags), Ch. 34 and §34.1 (MF 34).
-- N. J. Higham, "Computing a nearest symmetric positive semidefinite matrix", *Linear
-  Algebra and its Applications* 103, 103-118 (1988).
 - TODO(ref): the NJOY ERRORR module, for the $\sigma\phi$-weighted collapse of relative
   covariances.

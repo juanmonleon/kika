@@ -196,7 +196,8 @@ On each self block, summed on the union grid of its records:
 - correlations, {eq}`eq-covariance-checks-rho`, over the rows with positive variance of
   the symmetrised block (`correlation_out_of_bounds`): nothing up to $1 + 10^{-6}$ (an
   ENDF field keeps six or seven significant figures), a note up to $1 + 10^{-3}$, a
-  defect above. The evidence counts the entries above $1 + 10^{-3}$.
+  defect above. The evidence counts the pairs above $1 + 10^{-3}$: a self block is
+  symmetric, so each pair is counted once (its upper triangle), as in MF 32.
 
 ### Positive semi-definiteness
 
@@ -281,9 +282,10 @@ its self blocks and cross blocks, each on the node's own grid. In MF 34, an $a_0
 own $(0, 0)$ block is absent or null takes MF 33's self block of that MT (ENDF-6 §34.3),
 so a magnitude-shape cross block joins MF 33 and MF 34. A node whose self block mixes
 relative and absolute parts is left out; when a cross block is relative and its nodes
-absolute (or the reverse), the second of its two nodes is left out with all its blocks.
-Dropping only the cross block could make the joint look indefinite, and dropping a whole
-node (a principal submatrix) cannot.
+absolute (or the reverse), the second of its two nodes is left out with all its blocks,
+and the note `joint_node_left_out` names that node, so a joint check that passes is not
+read as covering a reaction it never saw. Dropping only the cross block could make the
+joint look indefinite, and dropping a whole node (a principal submatrix) cannot.
 
 What the cross blocks add is graded, not what the self blocks already hold. With
 $\lambda_\text{min}(S_m)$ the smallest eigenvalue of self block $m$,
@@ -526,7 +528,9 @@ $\sqrt{1 + \text{depth}/(2a)} - 1$ to $10^{-6}$
 correlations rounded to $10^{-3}$ explain a warning-tier eigenvalue
 (`::test_correlations_rounded_to_a_lattice_explain_a_small_negative_eigenvalue`);
 pairwise-compatible blocks make an indefinite joint
-(`::test_pairwise_compatible_blocks_can_make_an_indefinite_joint`); $\sigma(a_1) = 2$ is a
+(`::test_pairwise_compatible_blocks_can_make_an_indefinite_joint`); a reaction whose self
+block is absolute while its cross blocks are relative is left out of the joint and named
+(`::test_a_node_left_out_of_the_joint_is_reported`); $\sigma(a_1) = 2$ is a
 defect (`::test_mf34_sigma_wider_than_the_physical_range_of_a_l`). MF 35 and MF 40 are in
 `kika/endf/tests/test_covariance_checks_mf35_mf40.py`.
 
@@ -536,7 +540,7 @@ committed cuts of real tapes, each a closed verbatim extract:
 | Tape and section | What the checks find | Test |
 |---|---|---|
 | JEFF-4.0 Ne-20 MF 34 MT 2 | 10 LS=1 cross blocks; 7 with $\lvert\rho\rvert > 1$, worst 4.6 where the stored triangle alone is 0.88; joint $r_J$ = 0.17 | `::test_ne20_mf34_the_mirror_of_an_ls1_triangle_is_what_breaks_rho` |
-| JEFF-4.0 W-186 MF 34 MT 51 $L=1$ | $\lvert\rho\rvert$ up to 49 (224 entries above $1 + 10^{-3}$), 10 negative variances, $r$ = 0.41, already in NI[0] | `::test_w186_mf34_rho_49_a_negative_variance_and_an_indefinite_block` |
+| JEFF-4.0 W-186 MF 34 MT 51 $L=1$ | $\lvert\rho\rvert$ up to 49 (112 pairs above $1 + 10^{-3}$), 10 negative variances, $r$ = 0.41, already in NI[0] | `::test_w186_mf34_rho_49_a_negative_variance_and_an_indefinite_block` |
 | JEFF-4.0 Fe-57 MF 33 | 5 NC LTY=0 references to MTs with no section | `::test_fe57_mf33_sum_rules_that_name_reactions_with_no_section` |
 | ENDF/B-VIII.1 Si-28 MF 33 | MT 1 derived from MT 4 over a range where MT 4 is itself derived | `::test_si28_mf33_a_constituent_derived_over_the_same_range` |
 | JEFF-4.0 Hf-176 MF 33 MT 107 | $\sigma^\text{rel}$ = 11 at 9-10 MeV where $\bar\sigma$ is 1.3 % of its maximum (warning); 14 at 5-5.5 MeV, at the threshold, a note | `::test_hf176_mf33_a_repeated_point_and_an_implausible_sigma_rel` |
@@ -576,8 +580,9 @@ A `CovarianceCheckReport` iterates over its findings and offers `defects`, `warn
 level and check) and `to_dataframe()`. A location prints as, for example,
 `MF33 MT2xMT102 NI[0] LB=5 LS=1`. The evidence keys that matter most:
 
-- `max_abs_rho`, `n_above`, `at`: the worst $|\rho|$, how many entries exceed
-  $1 + 10^{-3}$, and the two bins where the worst sits; `stored_triangle_max_abs_rho`
+- `max_abs_rho`, `n_above`, `at`: the worst $|\rho|$, how many pairs exceed
+  $1 + 10^{-3}$ (each pair of a self block once, every entry of a cross block), and the
+  two bins where the worst sits; `stored_triangle_max_abs_rho`
   when an LS=1 triangle is involved. **A value well above 1** means the block cannot be
   sampled as stated.
 - `lambda_min`, `lambda_max`, `ratio`, `n_negative`, `rounding_bound`,
@@ -586,7 +591,8 @@ level and check) and `to_dataframe()`. A location prints as, for example,
   **above a few per cent**, any PSD repair changes the stated uncertainties, and the
   repair has to be chosen with care.
 - `records_indefinite_alone` (self blocks) and `pairs_indefinite_alone`, `excess_ratio`
-  (joint): where the indefiniteness comes from.
+  (joint): where the indefiniteness comes from. `node` and `relative` (the relative flag
+  of the cross block and of its two self blocks) for `joint_node_left_out`.
 - `worst_rel`, `worst_bin`, `central_over_max`, `p_negative_if_normal` for magnitudes;
   `worst_sigma_abs`, `worst_sigma`, `worst_bound` for the physical bounds;
   `row_sum_residual` for MF 35.

@@ -40,9 +40,9 @@ What kika does with each block of a neutron table:
 | MTR, LSIG, SIG (reaction cross-sections) | read | one reaction per MT, `gridded`; sums (MT 4, 18, 101, ...) summed on demand |
 | LQR (Q-values) | read | the reaction's Q, in eV |
 | TYR (multiplicity and frame) | read | not decoded |
-| LAND, AND (angular distributions) | read: isotropic, equiprobable bins, tabulated, and Kalbach-Mann (the angular part of law 44) | **not decoded, not reported** |
-| LDLW, DLW (energy distributions) | read: laws 1, 2, 3, 4, 5, 7, 9, 11, 22, 24, 44 (Kalbach-Mann), 61, 66, 67 | **not decoded, not reported** |
-| NU, DNU, BDD (multiplicities, delayed neutrons) | read | **not decoded, not reported** |
+| LAND, AND (angular distributions) | read: isotropic, equiprobable bins, tabulated, and Kalbach-Mann (the angular part of law 44) | not decoded (reported) |
+| LDLW, DLW, DNED (energy distributions, delayed-neutron spectra) | read: laws 1, 2, 3, 4, 5, 7, 9, 11, 22, 24, 44 (Kalbach-Mann), 61, 66, 67 | not decoded (reported) |
+| NU, DNU, BDD (multiplicities, delayed-neutron precursors) | read | not decoded (reported) |
 | GPD, MTRP, SIGP, LANDP, ANDP, DLWP, YP (photon production) | read | photon products, as the ENDF decoder makes them from MF 12-15 |
 | UNR (probability tables) | read | declared by reference; contents not converted (reported) |
 | FIS, secondary-particle blocks (PTYPE, NTRO, IXS, HPD) | read | not decoded |
@@ -109,15 +109,21 @@ uses), and `create_xsdir_files_for_ace` writes the `xsdir` lines for a set of ta
 - **Model:** the evaluation behind the table is not in the file and is reported as lost;
   QM and LR have no ACE counterpart (reported); ACE has no covariances (reported). The
   angular and energy distributions, multiplicities and delayed-neutron data are not
-  decoded, and the report does not mention them. `TODO(check)`: whether these should be
-  reported, as everything else that does not reach the model is.
+  decoded (reported, as not affecting cross-sections).
 
 ## Report
 
 Entries a user meets after `kika.read` of an ACE file: the absent evaluation (a loss, on
 every table); no LQR block (a loss); a reaction with no Q (a loss, normal for sums); QM,
 LR and covariances (unsupported, on every table); the probability tables declared by
-reference (unsupported); photon production entries for laws without a model node.
+reference (unsupported); photon production entries for laws without a model node; one
+unsupported entry per block of secondary-particle data the table carries and the model
+does not receive: the neutron angular distributions (AND, with their MTs), the neutron
+energy distributions (DLW, with their MTs), the delayed-neutron spectra (DNED), the
+secondary-particle angular and energy distributions, $\bar\nu$ (NU/DNU, naming prompt,
+total, delayed) and the delayed-neutron precursors (BDD, with the number of groups). These
+entries state that cross-sections are unaffected, so they do not make the conversion
+unclean for a cross-section use; a block absent from the table produces no entry.
 
 ## Validation
 
@@ -128,7 +134,9 @@ reference (unsupported); photon production entries for laws without a model node
   (`kika/ace/tests/test_update_cross_sections_direct_mt18.py`); photo-atomic tables
   (`kika/ace/tests/test_photoatomic_ace.py`); the model decoder and its photons
   (`kika/ace/model_adapter/tests/test_ace_decode.py`, `test_ace_photons.py`). 90 tests
-  passed on 2026-10-11.
+  passed on 2026-10-11. Every unconverted block is named and the conversion stays clean for
+  cross-sections; an absent block says nothing
+  (`kika/ace/model_adapter/tests/test_ace_decode_reports_what_it_drops.py`).
 - Reading a real Fe-56 table and writing it back returns all XSS entries bitwise identical
   (`kika/ace/tests/test_ace_roundtrip.py`). `TODO(check)`: needs a full ACE file and
   `--deep`; not re-run for this page.

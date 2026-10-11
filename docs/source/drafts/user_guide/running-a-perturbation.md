@@ -121,6 +121,10 @@ run.notes[...]   # 'angularDistribution was asked for and is not stated by this
 
 A request where nothing matches still raises, under either setting.
 
+A request is relative by default, and the appliers multiply, so an **absolute** MF 31,
+MF 33 or MF 34 section the request reaches is not drawn; the run names each one in
+`run.notes` and the log.
+
 ## Choosing the output formats
 
 `formats` takes any of the emitters in `kika.sampling.model_perturbation.EMITTERS`:
@@ -175,9 +179,8 @@ The options are checked before anything is drawn, dry run included: at least one
 temperature, one extension per temperature when extensions are given, and an NJOY
 executable that exists. `formats=("ace",)` without `ace=` raises `ValueError`; an
 `njoyExe` that does not exist raises `FileNotFoundError`. When `njoyExe` is not given,
-`AceOptions` takes it from the environment variable `NJOY_EXE` (note: not
-`NJOY_EXECUTABLE`, which is what the resonance reconstruction looks for when no
-`njoyExe=` is passed to `perturbFromModel`). With extensions, each ACE file is
+`AceOptions` takes the environment variable `NJOY_EXECUTABLE`, else `njoy` on the path,
+the same lookup the resonance reconstruction uses. With extensions, each ACE file is
 `<ZAID>.<ext>` with its xsdir line beside it. `keepNjoyFiles=True` (the default) keeps
 NJOY's input, output and listing. After a run, `run.aceFailures()` lists every
 `(sample, temperature, return code)` whose NJOY run failed.
@@ -425,7 +428,11 @@ you asserted, not one the evaluation declares
 
 A covariance for a different nuclide is refused (`ValueError: Cf252.endf states
 covariance for ZAID 98252, and the evaluation being perturbed is ZAID 26056...`), and so
-is a covariance file that does not exist.
+is a covariance file that does not exist. When the second tape states a cross-section
+covariance for a reaction the evaluation does not carry at all (neither the section nor
+any partial of it, MT 16 on a tape without it, say), its factor would have nothing to
+move: under `onMissing="raise"` the run refuses it with a `ValueError` naming the MT, and
+under `onMissing="skip"` it leaves those blocks out and says so in `run.notes`.
 
 ## Using several processes: `nWorkers`
 

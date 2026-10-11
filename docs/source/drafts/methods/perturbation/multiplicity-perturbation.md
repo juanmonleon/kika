@@ -6,8 +6,8 @@
 (total, delayed and prompt), given one factor per MF 31 energy bin and member, such that
 $\bar\nu_\text{total} = \bar\nu_d + \bar\nu_p$ holds exactly on every realisation.
 
-**Applies to:** MF 1 MT 452, 455 and 456 tabulated as $\bar\nu(E)$ (LNU=2), with an MF 31
-covariance; the model nodes the ENDF adapter maps them to (the fission product's
+**Applies to:** MF 1 MT 452, 455 and 456, tabulated as $\bar\nu(E)$ (LNU=2) or stated as a
+polynomial (LNU=1, tabulated first), with an MF 31 covariance; the model nodes the ENDF adapter maps them to (the fission product's
 `multiplicity` for MT 456, the `multiplicitySum` nodes for MT 452 and MT 455).
 
 **Entry points:** {py:func}`kika.sampling.model_perturbation.perturbFromModel`;
@@ -64,6 +64,12 @@ Which factor vector each member takes depends on what MF 31 covers:
 
 ## Method
 
+**0. Tabulate a polynomial.** A member stated as a polynomial in $E$ (LNU=1) cannot take a
+factor per bin on its coefficients, so it is first evaluated on a table: each MF 31 bin
+divided into eight geometrically equal intervals, clipped to the polynomial's own range,
+whose two ends are kept. The member is perturbed as that table and written as one
+(LNU=2).
+
 **1. Refine the table where the factor steps.** The factor is piecewise constant in $E$,
 but a member of the family cannot carry a repeated energy (see *Conventions and choices*),
 so the step is approximated. For every interior edge $g_k$, $0 < k < K$, with
@@ -75,7 +81,12 @@ g_k \;(\text{if } g_k < E_\text{last}), \qquad g_k\,(1 - s), \quad s = 10^{-3}
 \;(\text{if } g_k(1-s) > E_\text{first}).
 $$ (eq-multiplicity-perturbation-nodes)
 
-The first and last edges $g_0$ and $g_K$ are not candidates. A candidate within a relative
+The outer edges are steps too where the table runs past them, since outside
+$[g_0, g_K]$ the factor is 1: if $E_\text{first} < g_0 < E_\text{last}$, the candidates are
+$g_0$ and the shoulder $g_0(1-s)$ below it; if $E_\text{first} < g_K < E_\text{last}$, they
+are $g_K$ and the shoulder $g_K(1+s)$ above it (the node at $g_K$ takes the last bin's
+factor, step 2). A table that ends on an outer edge has no step there and gains nothing.
+A candidate within a relative
 $10^{-6}$ of a node already in the table is dropped: ENDF's eleven-character field would
 write the two as one energy. Every inserted node is valued by lin-lin interpolation on the
 **original** table, so the refined table is the same function as the evaluated one.
@@ -85,7 +96,8 @@ $c(E) = f_k$ for $g_k \le E < g_{k+1}$, so a node at an interior edge takes the 
 the bin above it and the shoulder $g_k(1-s)$ that of the bin below. A node at exactly
 $g_K$ takes $f_{K-1}$ (the last bin is closed at the top). A node outside $[g_0, g_K]$
 takes 1. The ramp between two neighbouring factors is therefore confined to
-$[g_k(1-s), g_k]$, inside the lower bin.
+$[g_k(1-s), g_k]$, inside the lower bin, and at the outer edges to $[g_0(1-s), g_0]$ and
+$[g_K, g_K(1+s)]$, outside the grid.
 
 **3. Scale.** Each node value is multiplied by its factor,
 {eq}`eq-multiplicity-perturbation-result`, and the result is written as one lin-lin
@@ -173,7 +185,9 @@ Refused (`ValueError`):
 - a family with no $\bar\nu$ node at all;
 - blocks of one family stated on different grids (the family is perturbed on one grid,
   which MF 31 guarantees when it is assembled on the global union, as the pipeline does);
-- a factor vector whose length is not the number of bins, or fewer than two bin edges;
+- a factor vector whose length is not the number of bins, fewer than two bin edges, or
+  bin edges that are not strictly ascending (a bin lookup on a descending grid would put
+  every factor on the wrong bin);
 - a derived member whose contributor carries no table (a polynomial component with no
   block of its own): skipping it would drop that component from the total;
 - a multiplicity perturbation without the resolver that maps an MT to its model node
@@ -182,25 +196,18 @@ Refused (`ValueError`):
 
 Not supported:
 
-- **a polynomial (LNU=1) member that has a block of its own.** The model holds it as a
-  polynomial, which `applyNubarFactors` cannot refine, and the call fails with an
-  `AttributeError` instead of a refusal by name. The file-level sampler
-  (`kika.sampling.mf31_sampling.apply_factors_to_mf1_nubar`) reconstructs a polynomial on
-  eight geometric points per MF 31 bin first. `TODO(check)`: the model path has no such
-  reconstruction and no test for it.
-- `TODO(check)`: absolute MF 31 blocks (LB=0). The model decode keeps them absolute and the
-  default request selects relative sections only, so on the model path an absolute block
-  is not drawn; the file-level sampler converts it with bin-averaged $\bar\nu$.
+- **absolute MF 31 blocks (LB=0).** The model decode keeps them absolute and the default
+  request selects relative sections only, so on the model path an absolute block is not
+  drawn; the run names it in its notes (see {doc}`../sampling/perturbation-pipeline`). The
+  file-level sampler converts it with bin-averaged $\bar\nu$.
 
 Limits of the method:
 
 - the factor is a step only to within the shoulder ramp,
   {eq}`eq-multiplicity-perturbation-ramp`;
-- **coverage edges are ramps, not steps.** $g_0$ and $g_K$ are not inserted. Where a
-  table reaches past the last edge $g_K$ and has no node exactly there, the factor runs
-  lin-lin from $f_{K-1}$ at the last node inside the grid to 1 at the first node outside,
-  so the top of the last bin is under-perturbed and the energies just above it are
-  perturbed by a covariance that does not cover them;
+- the step at a coverage edge is a shoulder ramp of the same width, outside the grid;
+- a polynomial member is perturbed on its eight-point-per-bin table, so its perturbed form
+  is the lin-lin interpolant of the polynomial there, not the polynomial itself;
 - MT 452 is written on the union of the components' grids, not on its own;
 - a realisation of a covariance stated on coarse bins perturbs $\bar\nu$ by a step function.
 
@@ -224,7 +231,11 @@ the model reproduces the one on MF 1 sections point for point
 a node and a shoulder go in at every interior edge, on the original interpolant
 (`::test_a_node_and_a_shoulder_go_in_at_every_interior_edge`); the last point of a table
 on the last edge takes the last bin's factor
-(`::test_the_last_point_of_a_table_takes_the_last_bins_factor`); the perturbed node stays
+(`::test_the_last_point_of_a_table_takes_the_last_bins_factor`); a table that runs past
+the grid steps back to the evaluation at the outer edge, and the file-level applier inserts
+the same nodes (`::test_a_table_past_the_grid_steps_back_to_baseline_at_the_last_edge`,
+`::test_the_two_appliers_agree_past_the_grid`); a polynomial member is tabulated and scaled
+(`::test_a_polynomial_nubar_is_tabulated_and_scaled`); the perturbed node stays
 writable as one lin-lin region (`::test_a_perturbed_multiplicity_is_still_writable`). On
 a six-point table across 15 bins with factors alternating $\pm 5\,\%$, the realised
 bin-averaged factor is within 0.01 of the drawn one
@@ -273,7 +284,7 @@ In each sample's `applied` entry of a
   refined table), `frac_out_of_coverage` (the fraction of its nodes outside
   $[g_0, g_K]$, which kept factor 1), `n_inserted` (edges and shoulders added) and
   `regions_collapsed`. **A `frac_out_of_coverage` well above zero** means a good part of
-  the table lies where MF 31 states nothing; read *Limits* on the coverage edges.
+  the table lies where MF 31 states nothing.
 - for the derived member (keyed MT 452 even though the request did not name it):
   `derived_from_sum_rule`, `n_points`, `contributors`, and `baseline_residual`, the
   evaluation's own departure from {eq}`eq-multiplicity-perturbation-sum` before anything

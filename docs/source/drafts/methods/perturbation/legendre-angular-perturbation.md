@@ -192,20 +192,23 @@ directly ({doc}`./tabulated-angular-perturbation`, Derivation).
   unless told otherwise; for a coefficient whose uncertainty straddles zero,
   `space={34: "linear"}` is the choice that can represent it (see
   {doc}`../sampling/perturbation-pipeline`).
-- **No renormalisation, no positivity enforcement on the model path.** $a_0$ is kept (in the
+- **No renormalisation; positivity is the caller's decision.** $a_0$ is kept (in the
   other frame to rounding, since row 0 of $T$ is $(1, 0, \dots)$), so $\int f'\,d\mu = 1$
   holds. A large enough factor can make
-  {eq}`eq-legendre-angular-perturbation-series` negative at some $\mu$; the model applier
+  {eq}`eq-legendre-angular-perturbation-series` negative at some $\mu$; the applier itself
   leaves it as computed, because whether a sample may carry a negative probability is a
-  decision about the sample. The file-level sampler instead projects such a vector, as
-  below.
+  decision about the sample. `perturbFromModel` checks every perturbed vector and, by
+  default (`angularPositivity="report"`), counts the negative ones and leaves them;
+  `angularPositivity="repair"` projects them as below. The file-level sampler projects
+  them under `enforce_positivity=True`.
 
-### Positivity in the file-level sampler
+### Positivity
 
-`perturb_ENDF_files(enforce_positivity=True)` checks every perturbed vector on
-$n = 101$ equally spaced cosines (`positivity_check_points`), using
-`kika.sampling.mf4_positivity.check_mf4_positivity`. A vector negative at any of them is
-replaced by `kika.sampling.mf4_positivity.project_mf4_to_positive`,
+`perturbFromModel` and `perturb_ENDF_files(enforce_positivity=True)` apply the same rule.
+Every perturbed vector is checked on $n = 101$ equally spaced cosines
+(`positivity_check_points`), using `kika.sampling.mf4_positivity.check_mf4_positivity`. A
+vector negative at any of them is, under a repair, replaced by
+`kika.sampling.mf4_positivity.project_mf4_to_positive`,
 
 $$
 a^\star = \arg\min_{x} \tfrac12 \|x - a'\|_2^2
@@ -217,8 +220,9 @@ $$ (eq-legendre-angular-perturbation-projection)
 with $\ell_{\max}$ the highest perturbed order, solved by SLSQP (tolerance $10^{-12}$,
 500 iterations at most). The constraint holds at the check points only, so a projected
 vector can still dip slightly below zero between them; orders at or below $\ell_{\max}$
-that the covariance does not name can move. Each projection is logged as a positivity
-event (MT, energy, the minimum before, the largest change).
+that the covariance does not name can move. The file-level sampler logs each projection
+as a positivity event (MT, energy, the minimum before, the largest change); a run of
+`perturbFromModel` reports the counts under `legendre` (see *Diagnostics*).
 
 ## Limits and failure modes
 
@@ -226,7 +230,7 @@ Refused (`ValueError` unless stated):
 
 - a factor block for order 0 handed to the Legendre applier: it is the magnitude;
 - orders with factors and no bin edges, or edges and no factors, or a number of factors
-  that is not the number of bins;
+  that is not the number of bins, or bin edges that are not strictly ascending;
 - a distribution with no Legendre region (a pure table goes to
   {doc}`./tabulated-angular-perturbation`);
 - `coverageEdges` other than `"step"` or `"ramp"`;
@@ -310,13 +314,16 @@ the cross-section node, and MF 33 with L=0 on one reaction is refused
 The file-level applier skips L=0 factors without touching the coefficients
 (`kika/sampling/tests/test_mf4_l0_magnitude.py`, 4 tests).
 
-**Positivity in the file-level sampler.** A vector that is already non-negative comes back
+**Positivity.** A vector that is already non-negative comes back
 unchanged; $a_1 = 0.9$, negative at $\mu = -1$, is projected with $a_0$ held at 1 to
 10⁻¹⁰ and is non-negative on the 101 check points to 10⁻⁷ and on 1 001 points to
 10⁻³ of its maximum; frozen orders stay at their values
 (`kika/sampling/tests/test_mf4_positivity.py::test_already_positive_returns_unchanged`,
 `::test_forward_peaked_violates_positivity_at_backscatter`,
-`::test_frozen_indices_are_pinned`).
+`::test_frozen_indices_are_pinned`). On the model route a negative series is counted and
+left under `"report"`, and under `"repair"` projected with $a_0$ and the orders above the
+perturbed one unchanged, a series that was non-negative left alone
+(`kika/sampling/tests/test_a_perturbed_legendre_series_is_checked_for_positivity.py`).
 
 ## Diagnostics
 
@@ -341,7 +348,9 @@ perturbed distribution:
   the tolerance.
 
 In a run of `perturbFromModel`, each sample's `applied` entry for an MF 34 component
-carries `n_inserted`, its order's `per_order` values, and `frame`; an L=0 component
+carries `n_inserted`, its order's `per_order` values, `frame`, and `legendre`
+(`n_negative_series`, `n_repaired`, `min_sum`: the negative vectors found, those repaired,
+and the lowest value of $\sum_\ell (2\ell+1)\, a_\ell P_\ell(\mu) = 2f(\mu)$ on the check points); an L=0 component
 carries the cross-section applier's diagnostics. The notes of the run
 (`RunResult.notes`) say which L=0 sections were left out and whether their correlation
 with the shape is lost.

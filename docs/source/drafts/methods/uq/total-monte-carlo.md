@@ -48,7 +48,7 @@ $$
 \sigma_\text{ND}^2 = \max\!\left(\sigma_\text{obs}^2 - \overline{\sigma_\text{stat}^2},\, 0\right),
 $$ (eq-total-monte-carlo-estimators)
 
-each reported as a percentage of $\bar y$ ($100\,\sigma/\bar y$), with percentile bootstrap
+each reported as a percentage of $|\bar y|$ ($100\,\sigma/|\bar y|$), with percentile bootstrap
 intervals, and a flag that says whether the decomposition can be used,
 
 $$
@@ -93,8 +93,21 @@ runs:
 
 - Shapiro-Wilk, on all values up to 5000 and on a random subsample of 5000 (fixed seed 42)
   above; normal when $p > \alpha$ (default 0.05);
-- Anderson-Darling, normal when the statistic is below the critical value at the 5 %
-  level;
+- Anderson-Darling, with the p-value of D'Agostino and Stephens (1986, Table 4.9) for a
+  normal distribution whose mean and variance are estimated: the statistic $A^2$ is
+  corrected to $A^{*2} = A^2\,(1 + 0.75/N + 2.25/N^2)$ and
+
+  $$
+  p =
+  \begin{cases}
+  \exp(1.2937 - 5.709\,A^{*2} + 0.0186\,A^{*4}) & A^{*2} \ge 0.6,\\
+  \exp(0.9177 - 4.279\,A^{*2} - 1.38\,A^{*4}) & 0.34 \le A^{*2} < 0.6,\\
+  1 - \exp(-8.318 + 42.796\,A^{*2} - 59.938\,A^{*4}) & 0.2 \le A^{*2} < 0.34,\\
+  1 - \exp(-13.436 + 101.14\,A^{*2} - 223.73\,A^{*4}) & A^{*2} < 0.2,
+  \end{cases}
+  $$ (eq-total-monte-carlo-anderson-darling)
+
+  clipped to $[0, 1]$; normal when $p > \alpha$;
 - D'Agostino-Pearson $K^2$, with at least 20 values; normal when $p > \alpha$.
 
 `histogram_data` gives a density histogram (default 30 bins) and the normal density with
@@ -117,10 +130,10 @@ deviation.
   the one to report, and the printed summary says so.
 - **Pairs are resampled together.** Each bootstrap replicate keeps $y_i$ with its own
   $s_i$, so the interval for $\sigma_\text{ND}$ includes the variability of both terms.
-- **Percentages of the mean.** `fastTMC` divides by $\bar y$ and `convergence_analysis` by
-  $|\bar y|$. For a negative response the first gives negative percentages, and its
-  reliability test (which requires a positive observed percentage) flags the result as
-  unreliable whatever the ratio.
+- **Percentages of the magnitude of the mean.** `fastTMC` and `convergence_analysis` divide
+  by $|\bar y|$, in the estimates and in every bootstrap replicate, so a negative response
+  (a reactivity difference, say) has the same positive relative uncertainties as its
+  opposite.
 - **Prefixes, not resamples, for convergence.** The running statistics follow the samples
   in the order they were drawn, which is what a run that stopped at $n$ would have given.
   A Sobol' sequence is balanced only at powers of two, so only those points are shown; a
@@ -143,13 +156,23 @@ list for fewer than 2 samples, `normality_tests` for fewer than 8.
 Limits of the method: {eq}`eq-total-monte-carlo-decomposition` assumes that the statistical
 error of each run is independent of the sample and that its stated uncertainty is right;
 the decomposition needs $N$ large enough for $\sigma_\text{obs}$ itself to be known, which
-the bootstrap intervals and the convergence curves show. The Anderson-Darling decision uses
-the 5 % critical value whatever $\alpha$ is.
+the bootstrap intervals and the convergence curves show.
 
 ## Validation
 
-None in the repository: no test exercises `kika.UQ.fastTMC`, `kika.UQ.convergence` or
-`kika.UQ.normality`.
+In `kika/UQ/tests/test_fast_tmc_and_normality.py`:
+
+- a negative response gets positive percentages and intervals, equal to those of its
+  opposite (`::test_a_negative_response_has_a_positive_relative_uncertainty`);
+- the summary table leaves out a response with zero mean
+  (`::test_the_summary_table_skips_a_zero_mean_without_failing`);
+- {eq}`eq-total-monte-carlo-anderson-darling` gives 0.10, 0.05 and 0.01 to $2\cdot10^{-3}$
+  at the tabulated critical values 0.631, 0.752 and 1.035 for large $N$
+  (`::test_the_anderson_darling_p_value_meets_the_tabulated_critical_values`), and the
+  decision follows $\alpha$ (`::test_the_anderson_darling_decision_follows_alpha`).
+
+No test exercises `kika.UQ.convergence`, the bootstrap intervals' coverage, or the
+Shapiro-Wilk and D'Agostino-Pearson tests.
 
 ## Diagnostics
 
@@ -166,8 +189,7 @@ None in the repository: no test exercises `kika.UQ.fastTMC`, `kika.UQ.convergenc
   `running_unc_pct`, their intervals, and with uncertainties `running_stat_unc_pct`,
   `running_nd_unc_pct` and the interval of the latter). **An interval that is still
   shrinking at $n = N$** means more samples would change the answer.
-- `normality_tests`: per test `test_name`, `statistic`, `p_value` and `is_normal`. For
-  Anderson-Darling, `p_value` holds the 5 % critical value, not a probability.
+- `normality_tests`: per test `test_name`, `statistic`, `p_value` and `is_normal`.
 
 ## Implementation
 
@@ -180,4 +202,6 @@ None in the repository: no test exercises `kika.UQ.fastTMC`, `kika.UQ.convergenc
 
 - `TODO(ref)`: Total Monte Carlo (Koning and Rochman).
 - `TODO(ref)`: Fast TMC (Rochman et al.).
-- `TODO(ref)`: the normality tests (Shapiro-Wilk, Anderson-Darling, D'Agostino-Pearson).
+- R. B. D'Agostino and M. A. Stephens (eds.), *Goodness-of-Fit Techniques*, Marcel Dekker
+  (1986): Table 4.9, the Anderson-Darling p-value with estimated parameters.
+- `TODO(ref)`: the Shapiro-Wilk and D'Agostino-Pearson tests.

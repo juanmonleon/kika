@@ -150,9 +150,8 @@ readers for MF 33 and 34 skip blank fields instead. How a short last line was pa
   no MF 4** gives a warning.
 - **An MF 1/455 with LDG=1** (energy-dependent delayed groups): reported as unsupported,
   its records kept in the provenance.
-- **A TAB1 point whose x or y does not parse** is dropped, so fewer than NP points can
-  come back, and a non-blank LIST field that does not parse is skipped. Neither is
-  reported. `TODO(check)`: whether these two silent cases should be reported.
+- **A blank field in a LIST or TAB1 body** is read as zero, which is what ENDF-6 means by
+  one; NP points and the declared number of LIST values always come back.
 
 ## Refused
 
@@ -164,6 +163,9 @@ readers for MF 33 and 34 skip blank fields instead. How a short last line was pa
 - **An INTG record (MF 32) with NDIGIT outside 2-6** (`ValueError`): ENDF-6 §32.2.3 allows
   only those widths.
 - **Non-numeric MAT, MF or MT columns** (`ValueError`).
+- **A LIST or TAB1 body field that is neither blank nor a number** (`ValueError`, naming the
+  field and the line): skipping it would shift every later value by one slot, or return
+  fewer points than NP, and the section would read as valid.
 - **A PENDF attached as the `recon` form** that is not 0 K, not lin-lin (so not the
   output of RECONR), or of another material (`ValueError`).
 
@@ -261,7 +263,8 @@ All tests below passed on 2026-10-11 unless marked otherwise.
   (`kika/endf/tests/test_fast_record_reading.py::test_implicit_exponents_are_one_correctly_rounded_decimal_conversion`);
   the two spellings of one value read as the same double
   (`kika/endf/tests/test_format_constants.py::test_the_two_spellings_of_one_value_read_as_the_same_double`);
-  blank, malformed and non-finite fields behave as stated under *Reading*
+  blank, malformed and non-finite fields behave as stated under *Reading* and *Refused* (a
+  blank LIST or TAB1 body field reads as zero, an unreadable one raises)
   (`kika/endf/tests/test_fast_record_reading.py::test_standard_syntax_and_legacy_fallback`,
   `::test_positional_fields_keep_padding_truncation_and_zero_policies`).
 - **The model is a fixed point of a whole-tape write**, on the committed micro-tape of

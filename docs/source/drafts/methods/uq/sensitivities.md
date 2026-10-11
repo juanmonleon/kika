@@ -164,12 +164,17 @@ block against them. ZAI values ending in 0 (the ground state) lose that digit, s
 `260560` becomes ZAID 26056. Perturbation labels are mapped to MT numbers: `total xs` to
 1, `mt N xs` to $N$, an inelastic-scattering label to 4, `nubar total`, `prompt`,
 `delayed` to 452, 456, 455, `chi total`, `prompt`, `delayed` to 1018, 1019, 1020, and a
-Legendre moment `<channel> leg mom L` to $4000 + L$. Responses written per bin
-(`<name>_BIN_<k>`) are grouped under their base name.
+Legendre moment `<channel> leg mom L` to $4000 + L$, which is also what the `leg=`
+selector of `kika.serpent.sens.SensitivityFile` looks up for an order $L$. Responses
+written per bin (`<name>_BIN_<k>`) are grouped under their base name.
 {py:func}`~kika.sensitivities.sensitivity_processing.create_sdf_from_serpent` takes, for
 every material, nuclide and MT, the energy-dependent values and relative errors of one
 response, converts the errors to absolute ones as above and skips profiles whose every
-value is below $10^{-15}$ in magnitude. Several files can be combined if their energy grids
+value is below $10^{-15}$ in magnitude. When one MT carries two labels (Serpent writes
+`mt 4 xs` and an inelastic-scattering label for the same reaction), its profile is their
+average: the arithmetic mean of the values and the root mean square of the relative
+errors. A material or nuclide filter selects the entries the file has; an entry the file
+lacks is reported with a warning and selects nothing. Several files can be combined if their energy grids
 agree. The grid is taken as Serpent writes it, as MeV (`TODO(check)`: Serpent's unit for
 `SENS_E`). Serpent states no response value, so $(R_0, \sigma_{R_0})$ default to
 $(1.0, 0.01)$ unless given.
@@ -206,8 +211,10 @@ recognised per profile by its header line:
   a `unit region` line (trailing text is ignored), a second metadata line, the five
   scalars, the sensitivities and the standard deviations;
 - **compact**: six fields, `<nuclide> <reaction> <ZAID> <MT> <unit> <value>`, one summary
-  line and the sensitivities only. The unit is the header's, the region is set to 0, and
-  the standard deviations are set to zero because the dialect does not state them.
+  line and the sensitivities only. The unit is the header's and the region is set to 0.
+  The dialect states no standard deviations, so they are unknown: the reaction is marked
+  `error_known=False`, its `error` field holds zeros only because the format needs
+  numbers, and a profile built from it carries `uncertainty=None`.
 
 The response line may carry `+/-` and an uncertainty or not (then $\sigma_{R_0} = 0$).
 Boundaries are converted from eV to MeV and both the grid and the groups are put in
@@ -305,19 +312,18 @@ Refused (`ValueError` unless named otherwise):
 
 Reported instead of done: profiles that are zero in every group are skipped with a
 printed message; SDF scalar mismatches are logged as warnings; in
-`create_sdf_from_serpent`, a material or nuclide filter that names nothing in the file is
-dropped with a printed warning (all materials or nuclides are then used), and a profile
-that cannot be extracted is skipped with a printed warning.
+`create_sdf_from_serpent`, a material or nuclide named by a filter and absent from the file
+is reported with a warning (and selects nothing), and a profile that cannot be extracted is
+skipped with a printed warning.
 
 Limits of the method: the coefficients are first-order; their statistical errors neglect
 the correlations described above; `generate_pert_cards` writes cross-section cards only,
 so sensitivities to angular distributions, $\bar\nu$ or the fission spectrum come from
 Serpent or SCALE files and not from MCNP; when `pert_material` and `pert_density` are not
 given, the cards name the original material at its original density, and the
-perturbation is not the one {eq}`eq-sensitivities-perturbed-material` defines. When
-Serpent states the same MT twice for one nuclide, the profile is skipped with a warning.
-A compact-dialect profile carries zero standard deviations, which later steps (the
-bootstrap of {doc}`sandwich`) read as exact values and not as unknown ones.
+perturbation is not the one {eq}`eq-sensitivities-perturbed-material` defines. A
+compact-dialect profile has unknown uncertainties, so the bootstrap of {doc}`sandwich`
+refuses it.
 
 ## Validation
 
@@ -344,8 +350,15 @@ The tests below passed on 2026-10-11.
   (`kika/sensitivities/tests/test_sdf.py::test_read_scale_dialect_sdf`); reaction names
   with spaces (`::test_read_verbose_reaction_name_with_spaces`); unit and region indices,
   a trailing footer and a response line without an uncertainty
-  (`kika/sensitivities/tests/test_sdf_scale_dialect.py`, 3 tests). No test reads a
-  compact-dialect file.
+  (`kika/sensitivities/tests/test_sdf_scale_dialect.py`, 3 tests); a compact-dialect file
+  gives profiles with unknown uncertainties
+  (`::test_compact_dialect_uncertainties_are_unknown_not_zero`).
+- **Serpent.** The `leg=` selector finds the Legendre moments the label parser names
+  (`kika/serpent/tests/test_serpent_perturbation_label.py::test_the_leg_selector_finds_what_the_parser_labels`);
+  two labels of one MT are averaged into one profile, and a filter that matches nothing
+  selects nothing
+  (`kika/sensitivities/tests/test_serpent_to_sdf_filters.py::test_two_labels_for_one_mt_are_averaged_into_one_profile`,
+  `::test_a_filter_that_matches_nothing_selects_nothing`).
 - **Condensation.** A hand case gives $S = (-1, 7)$ and $\sigma = (\sqrt{0.1^2+0.2^2},
   \sqrt{0.3^2+0.4^2})$
   (`kika/sensitivities/tests/test_condensation.py::test_exact_condensation_sums_sensitivity_and_propagates_absolute_sigma`);

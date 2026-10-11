@@ -48,8 +48,9 @@ fig = (ComparisonBuilder(grid_strategy="union")
 ```
 
 The difference is computed on the union of the two grids (`grid_strategy`: also the
-reference's or the comparison's), interpolating by data type (log-log for cross-sections by
-default; `interpolation=` to choose); `set_difference_panel` chooses a relative or
+reference's or the comparison's), interpolating each curve under the law its data states,
+or lin-lin when it states none (the law of a PENDF or an ACE file; `interpolation=` to
+choose); `set_difference_panel` chooses a relative or
 absolute difference panel.
 `set_group_average()` on either builder overlays group averages (see
 {doc}`../methods/processing/group-averaging`), which is how to compare evaluations in the

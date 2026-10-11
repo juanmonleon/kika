@@ -249,7 +249,7 @@ range, then with `resonanceRegion="reconstructed"` (the default):
 Refused:
 
 - a factor block whose length is not the number of bins, or bin edges that are not a
-  one-dimensional array of at least two energies (`ValueError`);
+  strictly ascending one-dimensional array of at least two energies (`ValueError`);
 - a request with both an MF 33 block and an MF 34 order-0 block for one reaction
   (`ValueError`);
 - an additive block on a cross-section under the sum rules (`ValueError`);
@@ -257,8 +257,11 @@ Refused:
   (`ValueError`);
 - under `"never"`, a request naming an undecomposed sum with `onMissing="raise"`, or a request
   every block of which is a sum's this mode does not use (`ValueError`);
-- a requested MT that MF 33 gives no covariance for, unless `onMissing="skip"`; a perturbed
-  MT the tape does not state, nor any of its partials (`KeyError`);
+- a requested MT that MF 33 gives no covariance for, unless `onMissing="skip"`;
+- a perturbed MT the tape does not state, nor any of its partials: in a run, a block for
+  such a reaction (one a `covarianceSource` states and the evaluation does not) is refused
+  before the draw (`ValueError`), or left out with a note under `onMissing="skip"`; a
+  `PerturbationSet` that reaches one when applied directly raises `KeyError`;
 - reconstructing the resonance region from a parsed object instead of a path (`ValueError`),
   or without an NJOY executable.
 
@@ -271,8 +274,6 @@ are barely perturbed.
 
 Limits of the method:
 
-- The bin edges are not checked for being ascending; descending edges give a wrong bin rule
-  without an error.
 - A covariance on bins coarser than the evaluation's grid perturbs $\sigma(E)$ by a step
   function, with a discontinuity at every bin edge.
 - A re-derived sum can go negative only when the evaluation states it below its partials.
@@ -306,7 +307,9 @@ region boundary keeps the pair adjacent
 (`::test_a_region_boundary_edge_keeps_the_pair_adjacent_in_the_flat_table`); factors 2 and 3
 on edges 1, 5, 9 give 2, 2, 3, 1 on 1, 5, 5, 9 (`::test_the_step_takes_the_lower_bin_on_its_first_half`);
 points outside the grid keep their value (`::test_points_outside_the_grid_keep_their_value`);
-a mismatched block is refused (`::test_a_factor_block_that_does_not_match_its_grid_is_refused`).
+a mismatched block is refused (`::test_a_factor_block_that_does_not_match_its_grid_is_refused`),
+and so is a descending grid (`::test_a_descending_grid_is_refused`); the first copy of the
+pair at the last edge counts as covered (`::test_the_first_copy_at_the_last_edge_counts_as_covered`).
 
 **The sum rules.** In
 `kika/sampling/tests/test_the_cross_section_sums_hold_on_a_realisation.py`:
@@ -362,7 +365,8 @@ re-run.
 
 {py:func}`~kika.nuclear_data.model.perturbation.applyFactors` returns, with the perturbed
 node: `min_factor`, `max_factor` (over the tabulated energies), `frac_out_of_coverage` (the
-fraction of the refined table's energies outside the covariance's grid) and `n_inserted`.
+fraction of the refined table's energies no bin covers, which keep factor 1; the first copy
+of the pair at $E_K$ carries the last bin's factor and is covered) and `n_inserted`.
 **`frac_out_of_coverage` near 1** means the block hardly reaches the reaction.
 
 In a run of {py:func}`~kika.sampling.model_perturbation.perturbFromModel`, each sample's

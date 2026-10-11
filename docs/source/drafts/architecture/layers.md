@@ -91,7 +91,7 @@ top-level module that imports nothing from kika, and both sides import it:
 - `kika._records`: the fixed-width record grammar (11-column fields, ENDF-style floats).
   It is not ENDF's property: the COVERX, COVFIL and BOXER covariance formats in
   `kika.cov` use the same convention.
-- `kika._legendre_frames`: the CM/LAB cosine maps and the change of frame of Legendre
+- `kika._legendre_frames`: the CM/LAB cosine maps, their Jacobian, and the change of frame of Legendre
   coefficients, needed by the model's perturbation code and by the sampler, which may
   import neither each other nor `kika.endf`.
 - `kika._covariance_forms`: what a covariance form must be before it can be computed on,
@@ -145,7 +145,6 @@ Run-time format imports the ratchet allows, all of them deferred to call time:
 | `kika/nuclear_data/cross_section.py` | 3 | The same, plus reading Q-values from ACE through the ACE adapter. |
 | `kika/nuclear_data/nuclide_info.py` | 2 | A deprecated flat class that builds an ENDF MF 1 header. |
 | `kika/nuclear_data/resonance_parameters.py` | 2 | A deprecated flat class. |
-| `kika/nuclear_data/forward.py` | 1 | Uses a CM/LAB Jacobian that still lives in `kika.endf.dcs`; it belongs with the kinematics in `kika._legendre_frames`. |
 | `kika/processing/derived_covariance.py`, `njoy_pendf_cache.py`, `njoy_reconstruct.py` | 1 each | Each reads a PENDF written by NJOY with the ENDF reader: a real dependency on a file format. |
 
 Type-checking imports allowed: `legendre_covariance.py` 1, `angular_distribution.py` 2,

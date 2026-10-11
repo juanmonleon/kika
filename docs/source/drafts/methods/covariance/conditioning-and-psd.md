@@ -236,8 +236,7 @@ $(C_{\text{clip}} + C_{\text{clip}}^\top)/2$; the one used for drawing does not.
 
 **Higham's diagonal-preserving projection.** The nearest PSD matrix with the stated
 diagonal, in the Frobenius norm, found by alternating projections with Dykstra's
-correction (`TODO(ref)`: Higham 2002 for the alternating-projection algorithm, and Dykstra
-for the correction). The input is symmetrised and its non-finite entries are set to zero.
+correction (Higham 2002; `TODO(ref)`: Dykstra for the correction). The input is symmetrised and its non-finite entries are set to zero.
 With $P_S$ the projection {eq}`eq-conditioning-and-psd-clip` (floor `eigval_floor`, no
 symmetrisation) and $P_U$ the projection that puts back the stated diagonal $d$,
 
@@ -254,8 +253,10 @@ for $n \le 2000$ and 200 above. The last iterate has the stated diagonal but may
 eigenvalues slightly below zero; if it does, it is clipped once more,
 {eq}`eq-conditioning-and-psd-clip` with the same floor, without restoring the diagonal, so
 the diagonal is kept to the size of those eigenvalues and not exactly. A matrix whose
-smallest eigenvalue is at least $-\text{tol}$ is returned symmetrised and otherwise as it
-came. With `preserve_diagonal=False` the function is a single clip.
+smallest eigenvalue is at least $-\text{tol}\cdot\max_i\lvert\lambda_i\rvert$ is returned
+symmetrised and otherwise as it came. The test is relative to the spectrum's scale, so a
+matrix whose entries are all of order $10^{-12}$ (an absolute covariance in b², say) is
+judged by the same standard as one of order one. With `preserve_diagonal=False` the function is a single clip.
 
 **Clip and rescale.** Clip, then put the stated diagonal back by a congruence:
 
@@ -327,12 +328,18 @@ $$
 \end{cases}
 $$ (eq-conditioning-and-psd-auto)
 
-reusing that eigendecomposition on the clip path. `"auto"` never resolves to
-`clip_rescale`.
+reusing that eigendecomposition on the clip path. The repair and the decomposition that
+follow act on that same matrix, with its non-finite entries set to zero, so under `"auto"`
+a NaN never reaches the SVD, the eigensolver or the Cholesky factorisation. (A Cholesky
+factorisation does not fail on a NaN, it returns a NaN factor, so the cleaning comes before
+its first attempt.) `"auto"` never resolves to `clip_rescale`.
 
 - {py:func}`kika.cov.decomposition.svd_decomposition` repairs the matrix as asked (clip
   with floor 0, unsymmetrised, with an already-PSD matrix passed through untouched), then
-  returns its SVD $U\Sigma V^\top$. This is the decomposition a draw uses by default.
+  returns its SVD $U\Sigma V^\top$. This is the decomposition a draw uses by default. For a
+  symmetric matrix the singular values are $\lvert\lambda_i\rvert$, and the sign of
+  $\lambda_i$ is the sign of $u_i^\top v_i$; the draw uses it to tell a negative direction
+  from a positive one (see *Limits*).
 - {py:func}`kika.cov.decomposition.eigen_decomposition` returns $(\lambda, V)$. Under
   `clip` the eigenvectors are those of the input and the negative eigenvalues are set to
   zero; under `higham` and `clip_rescale` the repaired matrix is decomposed again.
@@ -341,9 +348,11 @@ reusing that eigendecomposition on the clip path. `"auto"` never resolves to
   `clip` floors the eigenvalues at $10^{-14}$; `higham` runs
   {eq}`eq-conditioning-and-psd-higham` with floor $10^{-14}$ and, if it did not converge
   and is more than 1 % away from the input in the relative Frobenius norm, discards the
-  result and clips the input at $10^{-14}$ instead; `none` adds
-  {eq}`eq-conditioning-and-psd-jitter`. If the factorisation still fails after a clip or
-  Higham, the jitter is added to the repaired matrix and the factorisation tried once more.
+  result and clips the input at $10^{-14}$ instead; `clip_rescale` applies
+  {eq}`eq-conditioning-and-psd-rescale`; `none` adds
+  {eq}`eq-conditioning-and-psd-jitter`. If the factorisation still fails after a clip,
+  Higham or `clip_rescale` (a clip at floor 0 can leave the matrix singular), the jitter is
+  added to the repaired matrix and the factorisation tried once more.
 
 If the symmetric eigensolver fails to converge, every one of these falls back to an SVD of
 the symmetric matrix, whose singular values are $\lvert\lambda_i\rvert$, and recovers the
@@ -421,26 +430,30 @@ Limits of the methods:
 - **No repair keeps eigenvectors, diagonal and sum rule together.** `clip` moves the
   stated variances, `clip_rescale` destroys the sum rule, and Higham moves the sum rule
   and keeps the diagonal only to the size of its final clip.
-- **Higham's early exit is absolute.** A matrix with $\lambda_{\min} \ge -\text{tol}$
-  ($10^{-10}$ by default) is treated as PSD whatever its scale, so a matrix whose entries
-  are all below about $10^{-10}$ can come back with negative eigenvalues.
-  `TODO(check)`: whether this should be relative to $\lambda_{\max}$.
 - **Higham may not converge** within its iteration limit, and reports so; the Cholesky path
   then falls back to clipping when the result is more than 1 % from the input.
 - **The jitter of {eq}`eq-conditioning-and-psd-jitter` is capped** at $10^{-3}\lVert
   C\rVert_F$; a more negative matrix stays indefinite and the factorisation raises
   `numpy.linalg.LinAlgError`.
-- **`cholesky_decomposition` with `psd_method="clip_rescale"`** is accepted, but goes down
-  the `none` branch and adds jitter. `TODO(check)`: no test covers it.
-- **`psd_method="none"` with the SVD on an indefinite matrix** does not draw from that
-  matrix: its singular values are $\lvert\lambda_i\rvert$, so the factor reproduces
-  $V\lvert\Lambda\rvert V^\top$. A block drawn as stated should be PSD, which is what the
-  pre-flight is for; `min_over_max_eigenvalue` in the draw's diagnostics shows it.
-- **Inert rows: two floors.** The `inert_rows` check and `mask_inert` use an absolute
-  floor, $\lvert C_{ii}\rvert < 10^{-12}$; the stated rows $S$ in
+- **A block drawn as stated cannot keep a negative eigenvalue.** With `psd_method="none"`
+  on an indefinite matrix (the pipeline's draw with `conditioningPlan=False`, or residue a
+  repair leaves), {py:func}`kika.sampling.core.draw_samples` gives each direction with
+  $\lambda_i < 0$ zero variance, under the SVD as under the eigendecomposition, and counts
+  it in `n_null`. A negative variance cannot be realised, and drawing
+  $\lvert\lambda_i\rvert$ would add variance in a direction the evaluation does not state.
+  The realised covariance is then $V\max(\Lambda, 0)V^\top$, whose diagonal can differ from
+  the stated one; the pre-flight is the place to choose a repair that keeps it. The
+  file-level samplers `perturb_ENDF_files` and `draw_relative_factors` (see
+  {doc}`../../user_guide/legacy-samplers`) keep the SVD's $\lvert\lambda_i\rvert$
+  (`negative_directions="fold"`), so that they reproduce their published draws.
+  `min_over_max_eigenvalue` in the draw's diagnostics shows whether a block was indefinite.
+- **Inert rows: two floors.** The `inert_rows` check, `mask_inert` and the multigroup draw
+  use an absolute floor, $\lvert C_{ii}\rvert < 10^{-12}$: in a relative block, a variance
+  that small is a row the file leaves empty. The stated rows $S$ in
   {eq}`eq-conditioning-and-psd-effect` and in the applied records use a relative one,
-  $10^{-12}\max_j\lvert C_{jj}\rvert$. They agree only when the largest variance is of
-  order one.
+  $10^{-12}\max_j\lvert C_{jj}\rvert$, because the effect measurements also read absolute
+  blocks (an MF 35 band, for instance), whose variances can all lie below the absolute
+  floor. The two agree only when the largest variance is of order one.
 - **The recommendation does not look at outliers.** A bin with a variance $10^9$ times its
   neighbours is drawn as stated unless a plan rescales it.
 - **A cross block cannot be conditioned alone**; it is conditioned inside the joint matrix
@@ -448,7 +461,7 @@ Limits of the methods:
 
 ## Validation
 
-The tests below were run on 2026-10-11 (85 tests, all passed).
+The tests below were run on 2026-10-11 and passed.
 
 **The checks.** Each check fires on a matrix built to trigger it and no other:
 `kika/cov/tests/test_conditioning.py::test_a_well_conditioned_matrix_reports_nothing`,
@@ -485,6 +498,20 @@ share above 1
   `::test_the_result_is_psd`, `::test_a_component_with_no_stated_variance_gets_an_empty_row`,
   `::test_the_symmetric_result_is_exactly_symmetric`); `auto` gives the same eigenvalues as
   `clip` and not those of `clip_rescale` (`::test_it_is_not_reachable_from_auto`).
+- The decompositions' edge cases. Cholesky with `clip_rescale` factorises
+  $\begin{pmatrix}1&2\\2&1\end{pmatrix}$ and keeps its diagonal
+  (`kika/cov/tests/test_decomposition_edge_cases.py::test_cholesky_clip_rescale_is_its_own_branch`).
+  Higham repairs that matrix scaled to $10^{-12}$, and leaves a rounding-level negative
+  eigenvalue alone at either scale
+  (`::test_higham_judges_definiteness_relative_to_the_matrix`). Under `auto` each
+  decomposition of a block with a NaN gives a finite result
+  (`::test_auto_hands_the_cleaned_matrix_on`).
+- The draw gives a direction stated with negative variance zero variance under both
+  decompositions, and `negative_directions="fold"` keeps its magnitude
+  (`kika/sampling/tests/test_a_negative_direction_is_not_folded.py`). On the Fe-56 MF 34
+  joint of the committed micro-tape, the folded draw has 87 null directions and the default
+  draw 93
+  (`kika/sampling/tests/test_mf34_migration_equivalence.py::test_the_draw_itself_is_bit_for_bit`).
 - The single clip reproduces each former call site's arithmetic bit for bit, and returns a
   PSD matrix as the same object
   (`kika/cov/tests/test_conditioning_plan.py::test_clip_projection_reproduces_each_call_sites_old_arithmetic`,
@@ -585,7 +612,8 @@ of an off-diagonal correlation.
   its threshold; the eigensolver with its SVD fallback; the three decompositions and the
   `verify_*` checks.
 - `kika.sampling.core`: the draw, which zeroes non-finite entries, decomposes with the
-  chosen `psd_method` and truncates the null directions.
+  chosen `psd_method`, gives the negative directions zero variance and truncates the null
+  directions.
 - `kika.sampling.model_perturbation`: the pipeline's use of the pre-flight (inspect,
   recommend, apply, draw with `psd_method="none"`); see
   {doc}`../sampling/perturbation-pipeline`.
@@ -596,5 +624,6 @@ of an off-diagonal correlation.
   doi:10.2172/2007538: Ch. 30-35 (covariances), Ch. 32 (INTG records), Ch. 35 (MF 35).
 - N. J. Higham, "Computing a nearest symmetric positive semidefinite matrix", *Linear
   Algebra and its Applications* 103, 103-118 (1988).
-- `TODO(ref)`: the alternating-projection algorithm with a fixed diagonal (Higham 2002, on
-  the nearest correlation matrix) and Dykstra's correction.
+- N. J. Higham, "Computing the nearest correlation matrix: a problem from finance", *IMA
+  Journal of Numerical Analysis* 22, 329-343 (2002).
+- `TODO(ref)`: Dykstra's correction to alternating projections.

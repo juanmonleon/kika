@@ -19,19 +19,14 @@ given). Their arguments are snake_case (`num_samples`, `output_dir`, `dry_run`,
 
 ## How they differ from `perturbFromModel`
 
-Four differences move numbers, so an ensemble drawn one way is not reproduced the other
-way:
+The log-space draw is the same on both paths: the relative covariance is transformed
+element by element, $\Sigma^{\log}_{kl} = \ln(1 + \Sigma_{kl})$, and
+$f_k = \exp(y_k - \tfrac12\Sigma^{\log}_{kk})$ is drawn with $y$ of covariance
+$\Sigma^{\log}$, so the factors reproduce $\Sigma$ exactly (see
+{doc}`../methods/sampling/perturbation-pipeline`; on the file-level samplers,
+`kika.sampling.multigroup_draw.draw_relative_factors`). Four differences move numbers, so
+an ensemble drawn one way is not reproduced the other way:
 
-- **The log-space draw.** The samplers that draw relative cross-section and $\bar\nu$
-  factors in log space (`perturb_PENDF_files`, `perturb_nubar_files`,
-  `perturb_ACE_files`, and the MF 33 half of the combined sampler) first transform the
-  relative covariance element by element, $\Sigma^{\log}_{kl} = \ln(1 + \Sigma_{kl})$,
-  and draw $f_k = \exp(y_k - \tfrac12\Sigma^{\log}_{kk})$ with $y$ of covariance
-  $\Sigma^{\log}$ (`kika.sampling.multigroup_draw.draw_relative_factors`). The factors
-  then reproduce $\Sigma$ exactly. `perturbFromModel` takes $\Sigma$ itself as the
-  covariance of $\ln f$, which reproduces it to first order (see
-  {doc}`../methods/sampling/perturbation-pipeline`). The two agree for small
-  uncertainties and part for large ones.
 - **Repairs inside the draw.** The same samplers apply, by default and in a fixed order:
   a rescale of bins that straddle a reaction threshold (when the thresholds are known:
   the PENDF and ACE samplers know them, the $\bar\nu$ one does not), a rescale of
@@ -48,9 +43,15 @@ way:
   goes negative onto the nearest non-negative one by default (`enforce_positivity=True`,
   checked on 101 cosines, skipped in a dry run); `perturbFromModel` reports it by default
   (`angularPositivity="report"`).
+- **Negative eigenvalues.** A direction the matrix being decomposed states with a negative
+  eigenvalue is drawn by `perturbFromModel` with zero variance. The file-level samplers
+  draw it with the magnitude the SVD returns, $|\lambda|$
+  (`negative_directions="fold"`), which matters for `perturb_ENDF_files`, whose default
+  `psd_method="none"` decomposes MF 34 as stated; the samplers that repair definiteness
+  first leave only numerical residue there.
 
-The draw itself (scrambled Sobol by default, SVD, one seed per block) is the same
-function, `kika.sampling.core.draw_samples`, on both paths.
+The draw itself (scrambled Sobol by default, SVD, one seed per block) is the same code,
+`kika.sampling.core`, on both paths.
 
 ## The samplers
 

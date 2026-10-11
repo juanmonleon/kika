@@ -462,10 +462,10 @@ as $\ln P$, and the solve then bounds the error that its omission makes in every
 observable (relative $2\cdot10^{-12}$); an unbounded case raises.
 
 **Limits and failure modes.** Refused: KRM=1, 2 (SLBW, MLBW written as LRF=7); a
-formalism that is neither "ReichMoore" nor "RMatrixLimited" in the model;
-`TODO(check)`: an ENDF LRF=7 range with KRM=4 is decoded with the approximation name
-"Full" and is refused ("RML requires KRM3 or KRM4"), so KRM=4 is reconstructed today only
-from a model that names it "RMatrixLimited"; a global radius policy on LRF=7 (the
+formalism whose approximation is neither `ReichMoore` (KRM=3) nor `FullRMatrix` (KRM=4),
+the GNDS-2.0 names (an ENDF LRF=7 range decodes to them from KRM, and the GNDS reader maps
+the spellings `Reich_Moore` and `Full R-Matrix` that some published files carry to the
+same two); an unknown boundary condition; a global radius policy on LRF=7 (the
 channels carry their radii); an attractive charged exit; a charged pair on a neutron MT;
 an inconsistent parity, spin or channel spin; a missing Q; an elastic pair that disagrees
 with the incident target; a capture channel not eliminated under KRM=3, or an external
@@ -575,11 +575,11 @@ budget or a check failed), each with a `category` listed in
 - `budget-exhausted`, `memory-budget-exhausted`: `max_points`, or a dense pole system
   larger than `max_work_bytes` (default 64 MiB);
 - `verification-failed`, `publication-failed`: a check above failed, or the file could
-  not be written and reloaded cleanly.
-
-`TODO(check)`: the refinement also raises with categories `iterations-exhausted` and
-`float64-separation`, and the unresolved preparation with `invalid-J`, which are not in
-`REJECTION_CATEGORIES`.
+  not be written and reloaded cleanly;
+- `invalid-J`: an unresolved spin $J$ that the target spin and $\ell$ cannot reach;
+- `iterations-exhausted`: the refinement passes ran out before the table converged;
+- `float64-separation`: two energies the refinement needs cannot be separated in double
+  precision.
 
 Limits of the method: a resonance narrower than the spacing of representable doubles at
 its energy cannot be tabulated; a resonance narrow enough that rounding its energy to an
@@ -626,7 +626,9 @@ test.
   parameters against Brune's equation 33 and the formal transform, $3\cdot10^{-11}$
   (`kika/processing/tests/test_r_matrix_completion.py::test_brune_collision_against_independent_equation_33_and_formal_transform`);
   threshold Coulomb shifts against 70- and 90-digit Whittaker references
-  (`::test_threshold_coulomb_against_independent_70_and_90_digit_whittaker`).
+  (`::test_threshold_coulomb_against_independent_70_and_90_digit_whittaker`); an ENDF
+  LRF=7 section with KRM=4 reconstructs under the approximation it decodes to
+  (`kika/processing/tests/test_r_matrix_advanced.py::test_an_endf_krm4_section_reconstructs_without_overriding_the_approximation`).
 - **Tabulation.** The table's integral against an independent adaptive quadrature of the
   physics, within the budget
   (`kika/processing/tests/test_resonance_tabulation.py::test_tabulated_integral_against_independent_adaptive_quadrature`);

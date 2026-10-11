@@ -103,6 +103,8 @@ None: the functions return the averages. `NaN` marks a group the table does not 
   hand the table to the algebra.
 - `kika/algebra/integrate.py`: `group_averages`, `log_window_averages`, the closed-form panel
   integrals with weight 1 or $1/x$.
+- `kika/endf/dcs.py`: the bin averages of {doc}`differential-cross-sections` call the same
+  `group_averages`, under the interpolation law of the table they average.
 - `kika/energy_grids/`: standard group structures and `equal_lethargy_grid`.
 
 ## References

@@ -185,7 +185,7 @@ polynomial does not integrate to zero. The difference shrinks with the node spac
 - **No renormalisation.** The change of $\int f'\,d\mu$ is reported (see *Diagnostics*),
   never corrected: rescaling the table would move every order, including those the
   covariance does not name.
-- **Positivity is reported, not enforced,** as on the Legendre path. With lin-lin or
+- **Positivity is reported, not enforced, by default,** as on the Legendre path. With lin-lin or
   histogram panels, $f' \ge 0$ at every node is $f' \ge 0$ everywhere, so the count of
   negative nodes is exact. `perturbFromModel(angularPositivity="repair")` instead replaces
   the shifts $\Delta_\ell$ by the nearest ones (least squares on the vector of shifts) that
@@ -220,7 +220,8 @@ Refused:
 - a frame change for a reaction other than MT 2 and MT 51-90, which are not two-body neutron
   scattering, or without the target's AWR (`ValueError`);
 - orders of one reaction stated in different frames, factors without a grid or a grid
-  without factors, or a distribution with no tabulated region (`ValueError`).
+  without factors, a grid that is not strictly ascending, or a distribution with no
+  tabulated region (`ValueError`).
 
 Reported instead of done: a node with $\gamma \ge 1$ is left unperturbed and counted; a
 negative $f'$ is left as computed and counted; the change of the integral is measured and

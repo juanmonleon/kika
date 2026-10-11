@@ -40,7 +40,7 @@ MF 35, of absolute deltas) per component and covariance bin,
 
 $$
 f^{(s)}_{k} \;\text{with}\; \mathbb{E}\big[f^{(s)}_k\big] = 1,\qquad
-\operatorname{Cov}\!\left(\ln f_k, \ln f_l\right) = \Sigma_{kl},
+\operatorname{Cov}\!\left(f_k, f_l\right) = \Sigma_{kl},
 $$ (eq-perturbation-pipeline-target)
 
 applied to the model nodes the components belong to, and written in the formats asked
@@ -73,7 +73,11 @@ evaluation states a covariance between them (an MF 34 L=0 section correlated wit
 MF 33, for example). `grouping="stated"` splits further, into connected components of
 the blocks the file states.
 
-**4. Pre-flight.** Every block is inspected before drawing
+**4. Pre-flight.** A relative block drawn in log space is first transformed element by
+element into the covariance of $\ln f$ ({eq}`eq-perturbation-pipeline-logcov`); the
+pre-flight, the conditioning plan and the decomposition all act on that matrix, the one
+the draw samples. A block drawn linearly, and MF 35, are used as stated. Every block is
+inspected before drawing
 (`kika.cov.conditioning.inspect_blocks`): non-finite entries, negative variances,
 correlations outside $[-1, 1]$, negative eigenvalues, sum rules. The recommended
 **conditioning plan repairs definiteness and nothing else**: a block with a negative
@@ -84,9 +88,13 @@ clipped, because a congruence destroys $\Sigma\mathbf{1} = 0$. The plan is writt
 run directory. A caller may hand in an edited plan, or `conditioningPlan=False` to draw
 every block exactly as stated.
 
-**5. Draw.** Each block $\Sigma$ ($n \times n$) is decomposed by SVD (or an
-eigendecomposition; Cholesky is refused, since these matrices are rank-deficient by
-construction), $\Sigma = V \Lambda V^\top$. The directions kept are those with
+**5. Draw.** Each block $M$ ($n \times n$: $\Sigma^{\ln}$ of
+{eq}`eq-perturbation-pipeline-logcov` in log space, $\Sigma$ otherwise) is decomposed by
+SVD (or an eigendecomposition; Cholesky is refused, since these matrices are
+rank-deficient by construction), $M = V \Lambda V^\top$. A direction with a negative
+eigenvalue, which a block drawn without conditioning can carry, gets zero variance: a
+negative variance cannot be realised, and drawing it with $|\lambda_i|$ would add variance
+in a direction the evaluation does not state. The directions kept are those with
 $\lambda_i > \tau\,\lambda_\text{max}$; with the default $\tau$ for relative blocks every
 direction is kept, and for MF 35 $\tau = 10^{-10}$. With $V_r, \Lambda_r$ the kept part,
 $F = V_r \Lambda_r^{1/2}$, and $z^{(s)}$ a vector of independent standard normals,
@@ -102,7 +110,7 @@ seeded with $\text{seed} + 1009\, i$, so that two blocks never draw the same $z$
 $$
 f^{(s)}_k =
 \begin{cases}
-\exp\!\big(y^{(s)}_k - \tfrac12 \Sigma_{kk}\big) & \text{log space (default)},\\[2pt]
+\exp\!\big(y^{(s)}_k - \tfrac12 \Sigma^{\ln}_{kk}\big) & \text{log space (default)},\\[2pt]
 1 + y^{(s)}_k & \text{linear space},
 \end{cases}
 \qquad
@@ -146,27 +154,40 @@ write tapes.
 
 ### Derivation
 
-*Why the log-space factors have unit mean.* If $y_k \sim \mathcal{N}(0, \Sigma_{kk})$,
-then $\mathbb{E}[e^{y_k}] = e^{\Sigma_{kk}/2}$, so $f_k = e^{y_k - \Sigma_{kk}/2}$ has
-$\mathbb{E}[f_k] = 1$, and $\ln f$ has covariance $\Sigma$. The relative covariance of the
-factors themselves is then
+*Why the log-space factors reproduce the stated covariance.* If $y \sim
+\mathcal{N}(0, \Sigma^{\ln})$, then $\mathbb{E}[e^{y_k}] = e^{\Sigma^{\ln}_{kk}/2}$, so
+$f_k = e^{y_k - \Sigma^{\ln}_{kk}/2}$ has $\mathbb{E}[f_k] = 1$, and the covariance of two
+log-normal factors with unit mean is
 
 $$
-\operatorname{Cov}(f_k, f_l) = e^{\Sigma_{kl}} - 1 = \Sigma_{kl} + O(\Sigma^2),
+\operatorname{Cov}(f_k, f_l) = e^{\Sigma^{\ln}_{kl}} - 1 .
 $$ (eq-perturbation-pipeline-lognormal)
 
-which equals the stated relative covariance to first order: for a 10 % relative standard
-deviation the realised variance is 1.005 times the stated one, for 50 % it is 1.14 times.
+Choosing
+
+$$
+\Sigma^{\ln}_{kl} = \ln\!\left(1 + \Sigma_{kl}\right)
+$$ (eq-perturbation-pipeline-logcov)
+
+makes it equal to the stated relative covariance $\Sigma_{kl}$ exactly, at any size of the
+uncertainty. (Taking $\Sigma$ itself as the covariance of $\ln f$ would give
+$e^{\Sigma_{kl}} - 1$, a variance 1.14 times the stated one at a 50 % relative standard
+deviation.)
 
 ## Conventions and choices
 
-- **The stated relative covariance is taken as the covariance of $\ln f$**, with no
-  $\ln(1+\Sigma)$ transformation, so the factors reproduce the stated covariance to first
-  order ({eq}`eq-perturbation-pipeline-lognormal`). `TODO(check)`: the file-level samplers
-  of PENDF, $\bar\nu$ and ACE files (through `kika.sampling.multigroup_draw`) apply
-  $\ln(1+\Sigma)$ first, which reproduces $\Sigma$ exactly, so the two paths differ for large
-  uncertainties (the file-level MF 34 sampler refuses log space altogether); see
-  {doc}`../../user_guide/legacy-samplers`.
+- **The log-space draw reproduces the stated relative covariance exactly**: $\ln f$ is
+  drawn from $\ln(1+\Sigma)$ ({eq}`eq-perturbation-pipeline-logcov`), the transformation the
+  file-level samplers of PENDF, $\bar\nu$ and ACE files (through
+  `kika.sampling.multigroup_draw`) also apply (see
+  {doc}`../../user_guide/legacy-samplers`).
+- **The pre-flight conditions the matrix that is sampled.** In log space that is
+  $\ln(1+\Sigma)$, so a definiteness repair, a threshold or an edited plan acts on it, and
+  the covariance of the factors is $e^{M} - 1$ of the repaired $M$.
+- **A negative eigenvalue is drawn with zero variance.** With conditioning (the default)
+  only numerical residue is left negative; with `conditioningPlan=False` a block stated as
+  indefinite is drawn in its non-negative part, and its negative directions count as null
+  in the diagnostics.
 - **Log space by default** for relative covariances: a cross-section is a positive
   magnitude and a log-normal factor cannot be negative. **Linear per quantity when the
   quantity is signed**: a Legendre coefficient near zero has an uncertainty that
@@ -206,15 +227,25 @@ Refused:
 - Cholesky as the decomposition (`ValueError`);
 - a request for a quantity the evaluation does not state, unless `onMissing="skip"`;
   a request where nothing matches, always;
+- with `covarianceSource`, a cross-section block for a reaction the evaluation does not
+  state at all (no section and no partials, so a factor has nothing to move): a
+  `ValueError` under `onMissing="raise"`, a note and the block left out under
+  `onMissing="skip"`;
 - a covariance taken from a tape of another nuclide.
 
 Reported instead of done: null directions; the repairs the plan made; sums left stale when
 `crossSectionSums=False`; selections dropped under `onMissing="skip"`; what an emitter
-could not carry; negative probabilities in perturbed angular tables (see
+could not carry; absolute MF 31, 33 or 34 sections of a relative request, which are not
+drawn (the appliers multiply, and this route does not convert an absolute section to a
+relative one), named in a note; a perturbed angular distribution with $f(\mu) < 0$, a
+Legendre series checked at 101 cosines or a table at its nodes, counted and left as
+computed unless `angularPositivity="repair"` moves the perturbed orders to the nearest
+non-negative distribution (orders above the highest perturbed one and $a_0$ are kept; see
+{doc}`../perturbation/legendre-angular-perturbation` and
 {doc}`../perturbation/tabulated-angular-perturbation`).
 
-Limits of the method: the realised covariance converges to the stated one as
-$N \to \infty$ (with the first-order caveat above for log space); with a few hundred
+Limits of the method: the realised covariance converges to the stated one (to the
+conditioned one where the plan repaired it) as $N \to \infty$; with a few hundred
 samples, correlations near zero are poorly resolved. A covariance stated on energy bins
 coarser than the evaluation's grid perturbs the cross-section by a step function.
 
@@ -228,7 +259,12 @@ The tests below passed on 2026-10-11 unless marked.
   (`::test_a_component_with_no_stated_variance_gets_no_delta`); a zero-sum covariance
   draws zero-sum deltas (`::test_a_zero_sum_covariance_draws_zero_sum_deltas`); rank
   deficiency is recorded and not repaired (`::test_rank_deficiency_is_recorded_and_not_repaired`);
-  block seeds differ by a fixed stride (`::test_seeds_differ_per_block_by_a_fixed_stride`).
+  block seeds differ by a fixed stride (`::test_seeds_differ_per_block_by_a_fixed_stride`);
+  log-space factors reproduce a relative covariance with 50 % standard deviations
+  (`::test_log_space_factors_reproduce_the_relative_covariance`), and a matrix already in
+  log space is not transformed twice (`::test_a_prepared_log_matrix_is_not_transformed_twice`);
+  a direction stated with negative variance is drawn with none
+  (`kika/sampling/tests/test_a_negative_direction_is_not_folded.py`).
 - **Against the shipped MF 33 sampler.** With the same plan, the draw is bit-identical to
   `generate_samples`
   (`kika/sampling/tests/test_mf33_migration_equivalence.py::test_the_draw_is_bit_identical`),
@@ -248,7 +284,13 @@ The tests below passed on 2026-10-11 unless marked.
   delta emitter leaves the rest of the tape alone
   (`kika/sampling/tests/test_the_delta_emitter_leaves_the_rest_of_the_tape_alone.py`);
   worker processes write the same samples
-  (`kika/sampling/tests/test_samples_are_written_by_worker_processes.py`).
+  (`kika/sampling/tests/test_samples_are_written_by_worker_processes.py`); an absolute
+  section left out of a relative request is named
+  (`kika/sampling/tests/test_a_request_in_the_models_vocabulary.py::test_an_absolute_section_left_out_of_a_relative_request_is_named`);
+  a reaction only the covariance source states is refused or noted
+  (`kika/sampling/tests/test_covariance_can_come_from_another_file.py::test_a_reaction_only_the_covariance_states_is_refused_or_noted`);
+  a negative Legendre series is counted, and repaired within the perturbed band on request
+  (`kika/sampling/tests/test_a_perturbed_legendre_series_is_checked_for_positivity.py`).
 - **Pre-flight.** Conditioning first and drawing gives what repairing inside the draw
   gives, for every PSD method
   (`kika/sampling/tests/test_conditioning_matches_the_sampler.py::test_conditioning_first_draws_what_repairing_inside_the_draw_draws`).
@@ -262,7 +304,8 @@ The tests below passed on 2026-10-11 unless marked.
 {py:func}`~kika.sampling.model_perturbation.perturbFromModel` returns a `RunResult`:
 
 - `samples`: per sample, its label, its `PerturbationSet`, the files written and each
-  applier's diagnostics (`applied`).
+  applier's diagnostics (`applied`; for an angular distribution, `legendre` and `tables`
+  count the negative series and table nodes and what was repaired).
 - `diagnostics`: per block, from the draw: `n`, `rank`, `n_null`, `null_fraction`,
   `min_over_max_eigenvalue`, `realised_covariance_error`, `space`, `seed`. **A large
   `realised_covariance_error` or a negative `min_over_max_eigenvalue`** means the matrix
@@ -272,7 +315,8 @@ The tests below passed on 2026-10-11 unless marked.
 - `sectionFindings`, `attribution`: the structural checks of the covariance sections as
   written, and each pre-flight finding traced to the sections that explain it.
 - `notes`: things true of every sample that no file states (a stale sum, a dropped
-  selection, an assumption `sumBlocks="fill"` made). **Read them.**
+  selection, an absolute section left out, an assumption `sumBlocks="fill"` made). **Read
+  them.**
 - `log` and `files`: the run log and the run-level files.
 
 In the run directory: `factors.parquet` (every realisation's factors, one table per run,
@@ -286,7 +330,9 @@ with its index in the file's metadata; `readFactorsIndex` reads it), `conditioni
   grouping.
 - `kika.cov.conditioning`: the pre-flight and the conditioning plan;
   `kika.cov.decomposition`: SVD, eigendecomposition, clip and Higham projections.
-- `kika.sampling.core`: `draw_samples`; `kika.sampling.generators`: the Sobol, Latin
+- `kika.sampling.core`: `draw_samples` (from the stated relative covariance) and
+  `draw_prepared_samples` (from a block already in the space of the draw);
+  `kika.sampling.generators`: the Sobol, Latin
   hypercube and pseudo-random normals.
 - `kika.sampling.perturbation_set`: a sample's factors, applied to the model, and the
   factors table.
