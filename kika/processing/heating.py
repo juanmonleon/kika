@@ -125,13 +125,13 @@ def _isFlat(table) -> bool:
 
 
 def _expect(table, g: Callable[[np.ndarray], np.ndarray], trapezoid: bool = False) -> float:
-    """``∫ g(x) p(x) dx`` over an ``Xs_pdf_cdf1d`` (lines first, then the continuum), normalised.
+    """``∫ g(x) p(x) dx`` over an ``Xs_pdf_cdf1d`` or ``XYs1d`` (lines first, then the continuum), normalised.
 
     ``trapezoid`` takes the continuum by trapezoids over ``g·p`` at the
     tabulated points, as HEATR does for MF6 spectra in the lab.
     """
     x = np.asarray(table.xs, dtype=float)
-    p = np.asarray(table.pdf, dtype=float)
+    p = np.asarray(table.pdf if hasattr(table, "pdf") else table.ys, dtype=float)
     nd = int(getattr(table, "numberOfDiscrete", 0) or 0)
     total = 0.0
     value = 0.0
@@ -165,7 +165,7 @@ def _expect(table, g: Callable[[np.ndarray], np.ndarray], trapezoid: bool = Fals
 def _pdfAt(table, x):
     """The continuum density of a table at ``x`` (0 outside)."""
     xs = np.asarray(table.xs, dtype=float)
-    p = np.asarray(table.pdf, dtype=float)
+    p = np.asarray(table.pdf if hasattr(table, "pdf") else table.ys, dtype=float)
     nd = int(getattr(table, "numberOfDiscrete", 0) or 0)
     xs, p = xs[nd:], p[nd:]
     if _isFlat(table):
@@ -177,9 +177,16 @@ def _pdfAt(table, x):
 
 
 def _tables(form):
-    """``(incident energies, tables, flat)`` of an XYs2d or Regions2d of tables."""
+    """``(incident energies, tables, flat)`` of an XYs2d or Regions2d of tables.
+
+    A parametrised spectrum (MF5 LF=7/9/11/12; OpenMC keeps them as laws, so the
+    Monte Carlo form is the law) is tabulated first, at the incident energies
+    its parameters are given at (``_Spectrum.toPointwise``).
+    """
     from kika.nuclear_data.model import Interpolation
 
+    if not hasattr(form, "function1ds") and not hasattr(form, "function2ds") and hasattr(form, "toPointwise"):
+        form = form.toPointwise()
     regions = getattr(form, "function2ds", None)
     if regions is None:
         tables = list(form.function1ds)
