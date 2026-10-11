@@ -76,3 +76,20 @@ def test_purr_grid_shades_the_ends_and_fills_wide_gaps():
     # 2250.001 -> 3000 is too: 2500 goes in.
     assert 2500.0 in grid
     assert np.all(np.diff(grid) > 0)
+
+
+def test_ladder_special_functions():
+    """The URR kernel's own exp/sin/cos (to the ulp) and Humlicek's W4 (to its 1e-4)."""
+    import math
+    from scipy.special import wofz
+    native = pytest.importorskip("kika.processing.resonances._rm_native")
+    for a in np.r_[np.linspace(-60., 60., 2401), [1e-10, 1e-3, 0.785398, 1e3]]:
+        e, s, c, _, _ = native.special(float(a), 1.0)
+        assert abs(s - math.sin(a)) <= 2.3e-16 and abs(c - math.cos(a)) <= 2.3e-16
+        ref = math.exp(-abs(a))
+        assert (e == 0.0) if ref == 0.0 else abs(e / ref - 1) <= 4.5e-16
+    for x in np.linspace(-20., 20., 161):
+        for y in np.r_[np.geomspace(1e-6, 1., 13), [3., 10., 20.]]:
+            *_, wr, wi = native.special(float(x), float(y))
+            ref = wofz(x + 1j * y)
+            assert abs(complex(wr, wi) - ref) <= 1e-4 * abs(ref)

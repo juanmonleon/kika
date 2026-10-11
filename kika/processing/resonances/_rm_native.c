@@ -289,6 +289,47 @@ static double urr_integrand(double s,void *context) {
  * capture and fission contributions added. The Doppler line shapes use
  * Humlicek's W4 approximation of the Faddeeva function (relative error about
  * 1e-4, the accuracy class of PURR's own rational approximations). */
+/* exp, sin and cos for the Faddeeva function below. The MinGW-w64 UCRT
+ * libm takes ~35 ns per exp and ~30 per sin or cos, and the fourth region of
+ * Humlicek's W4 needs all three in every call: they were most of a URR
+ * ladder. kexp is _doppler_native.c's (Cody-Waite + degree-13 Taylor,
+ * <= 0.7 ulp); ksincos reduces by pi/2 with fdlibm's two-term split and uses
+ * fdlibm's __kernel_sin/__kernel_cos polynomials (<= 1 ulp on |r| <= pi/4).
+ * Both are checked in tests/test_probability_tables.py; W4 itself is good to
+ * ~1e-4, so they change nothing it states. */
+static double kexp(double x) {
+    if(!(x>-745.2)) return x!=x?x:0.;
+    if(x>709.78) return INFINITY;
+    double k=floor(x*1.44269504088896338700+.5);
+    double r=(x-k*6.93147180369123816490e-01)-k*1.90821492927058770002e-10;
+    double p=1.+r*(1.+r*(1./2+r*(1./6+r*(1./24+r*(1./120+r*(1./720+r*(1./5040
+             +r*(1./40320+r*(1./362880+r*(1./3628800+r*(1./39916800+r*(1./479001600
+             +r*(1./6227020800.)))))))))))));
+    int n=(int)k;
+    if(n>=-1021) {
+        uint64_t bits=(uint64_t)(n+1023)<<52;double scale;memcpy(&scale,&bits,sizeof scale);
+        return p*scale;
+    }
+    return ldexp(p,n);
+}
+
+static void ksincos(double a,double *sine,double *cosine) {
+    if(!(fabs(a)<1e5)) {*sine=sin(a);*cosine=cos(a);return;}
+    double k=floor(a*6.36619772367581382433e-01+.5);
+    double r=(a-k*1.57079632673412561417e+00)-k*6.07710050650619224932e-11;
+    double z=r*r;
+    double sr=r+r*z*(-1.66666666666666324348e-01+z*(8.33333333332248946124e-03+z*(-1.98412698298579493134e-04
+              +z*(2.75573137070700676789e-06+z*(-2.50507602534068634195e-08+z*1.58969099521155010221e-10)))));
+    double cr=1.-.5*z+z*z*(4.16666666666666019037e-02+z*(-1.38888888888741095749e-03+z*(2.48015872894767294178e-05
+              +z*(-2.75573143513906633035e-07+z*(2.08757232129817482790e-09+z*-1.13596475577881948265e-11)))));
+    switch(((long long)k)&3) {
+        case 0: *sine=sr;*cosine=cr;break;
+        case 1: *sine=cr;*cosine=-sr;break;
+        case 2: *sine=-sr;*cosine=-cr;break;
+        default: *sine=-cr;*cosine=sr;break;
+    }
+}
+
 static void humlicek(double x,double y,double *wr,double *wi) {
     double s=fabs(x)+y;rm_complex t={y,-x},w;
     if (s>=15.) {
@@ -314,7 +355,8 @@ static void humlicek(double x,double y,double *wr,double *wi) {
         rm_complex num={a[6],0.},den={b[7],0.};
         for (int k=5;k>=0;k--) {num=rm_mul(u,num);num.r=a[k]-num.r;num.i=-num.i;}
         for (int k=6;k>=0;k--) {den=rm_mul(u,den);den.r=b[k]-den.r;den.i=-den.i;}
-        rm_complex e={exp(u.r)*cos(u.i),exp(u.r)*sin(u.i)};
+        double magnitude=kexp(u.r),sine,cosine;ksincos(u.i,&sine,&cosine);
+        rm_complex e={magnitude*cosine,magnitude*sine};
         rm_complex q=rm_div(rm_mul(t,num),den);
         w=rm_sub(e,q);
     }
@@ -362,7 +404,15 @@ static PyObject *urr_ladder(PyObject *self,PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *special_probe(PyObject *self,PyObject *args) {
+    double x,y,sine,cosine,wr,wi;
+    if(!PyArg_ParseTuple(args,"dd",&x,&y)) return NULL;
+    ksincos(x,&sine,&cosine);humlicek(x,y,&wr,&wi);
+    return Py_BuildValue("ddddd",kexp(-fabs(x)),sine,cosine,wr,wi);
+}
+
 static PyMethodDef methods[]={
+    {"special",special_probe,METH_VARARGS,"Private kexp(-|x|), sin x, cos x, W4(x, y) diagnostic."},
     {"channel_solve",channel_solve,METH_VARARGS,"Solve small channel systems by pivoted elimination; false requires NumPy fallback."},
     {"breit_wigner",breit_wigner,METH_VARARGS,"Accumulate all constant-radius BW levels in source order."},
     {"matrices",matrices,METH_VARARGS,"Fill all-level collision sums and reference-fallback flags."},
