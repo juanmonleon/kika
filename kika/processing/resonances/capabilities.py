@@ -19,10 +19,13 @@ REJECTION_CATEGORIES = (
     "sum-without-graph",
     "incomplete-total-graph",
     "missing-radius-policy",
+    "invalid-J",                  # a URR spin J incompatible with the target spin and L
     # Physics the engine does not implement.
     "unsupported-physics",
     # Numerical limits and checks; never relaxed.
-    "budget-exhausted",           # point or iteration budget
+    "budget-exhausted",           # point budget
+    "iterations-exhausted",       # refinement passes ran out before the table converged
+    "float64-separation",         # adjacent energies the refinement needs are not separable in float64
     "memory-budget-exhausted",
     "verification-failed",        # a table, sum or reload falls outside the budget
     "publication-failed",         # the processed file could not be written cleanly

@@ -76,10 +76,16 @@ def evaluation_summary(tape, path) -> dict:
     return out
 
 
+def _ap_fm(ap):
+    """ENDF writes AP in 10^-12 cm; one of those is 10 fm."""
+    value = _num(ap)
+    return None if value is None else 10.0 * value
+
+
 def _range_row(isotope, rng) -> dict:
     p = rng.parameters
     row = dict(el_eV=_num(rng.el), eh_eV=_num(rng.eh), lru=_int(rng.lru), lrf=_int(rng.lrf),
-               nro=_int(rng.nro), naps=_int(rng.naps), ap_fm=_num(getattr(p, "ap", None)),
+               nro=_int(rng.nro), naps=_int(rng.naps), ap_fm=_ap_fm(getattr(p, "ap", None)),
                ap_energy_points=len(rng.ap_e.energies) if getattr(rng, "ap_e", None) else 0,
                lfw=_int(getattr(isotope, "lfw", None)), za=_int(getattr(isotope, "za", None)),
                abundance=_num(getattr(isotope, "abn", None)))
