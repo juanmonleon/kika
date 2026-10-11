@@ -237,7 +237,7 @@ def test_tabulator_includes_threshold_and_passes_independent_points():
 def test_unsupported_capabilities_are_not_silently_replaced(capability):
     source,ctx = rml_model();f = source.resolved[0].formalism
     if capability == 'brune':f.boundaryCondition = 'Brune'
-    elif capability == 'KRM4':f.approximation = 'RMatrixLimited'
+    elif capability == 'KRM4':f.approximation = 'FullRMatrix'
     elif capability == 'KPS':f.spinGroups[0].phaseShiftMode = 1
     else:
         rr = f.resonanceReactions[1];p = rr.kinematics

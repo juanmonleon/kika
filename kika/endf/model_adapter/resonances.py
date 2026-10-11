@@ -74,7 +74,7 @@ KRM_TO_APPROXIMATION = {
     1: "SingleLevelBreitWigner",
     2: "MultiLevelBreitWigner",
     3: "ReichMoore",
-    4: "Full",
+    4: "FullRMatrix",
 }
 
 

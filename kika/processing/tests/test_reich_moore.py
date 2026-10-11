@@ -149,7 +149,7 @@ def test_rm_tabulates_with_strict_existing_multireaction_budget():
         assert np.max(ratio)<=1.
 
 
-@pytest.mark.parametrize('field,value',[('boundaryCondition','Brune'),('relativisticKinematics',True),('approximation','RMatrixLimited')])
+@pytest.mark.parametrize('field,value',[('boundaryCondition','Brune'),('relativisticKinematics',True),('approximation','FullRMatrix')])
 def test_unimplemented_rm_conventions_reject(field,value):
     model=rm_model();setattr(model.resolved[0].formalism,field,value)
     with pytest.raises(UnsupportedResonanceError):prepare_resonances(model,NeutronContext(56.,0.))
