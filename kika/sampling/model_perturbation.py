@@ -2660,7 +2660,7 @@ def _writeRunMetadata(result: RunResult, outputDir: Path, covReport, suiteReport
         ],
         "notes": list(result.notes),
         **({"mf35_unchanged": True} if _perturbsASpectrum(result.index) else {}),
-        # C10 (PD-9): what MF35 states for <E'>, beside the ensemble drawn
+        # What MF35 states for <E'>, beside the ensemble drawn
         # from it. Reported, not a gate.
         **({"mf35StatedMoments": _jsonableMoments(result.spectrumMoments)}
            if result.spectrumMoments else {}),

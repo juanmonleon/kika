@@ -233,7 +233,7 @@ def attachFissionEnergyRelease(suite, mf1, report: Optional[ConversionReport] = 
         report.unsupportedNode(
             f"MF1/460 (delayed photons, LO={getattr(section, 'lo', None)}) has "
             f"no GNDS node (its photons would be described in MF12/MF15, whose "
-            f"model form is roadmap E5); its records are kept verbatim in the suite's provenance and the "
+            f"model form is not built from MF1/460); its records are kept verbatim in the suite's provenance and the "
             f"tape is written back with them"
         )
 
