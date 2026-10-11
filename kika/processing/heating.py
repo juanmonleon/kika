@@ -686,6 +686,24 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             d = np.zeros(len(grid))
         damage += np.where(live, s * d, 0.0)
         perReaction[mt] = (carried, carried + exact, d)
+    # Fission's damage: HEATR's conbar gives a fission the recoil of one
+    # emission from its prompt-neutron spectrum (tabdam, one neutron, not ν̄;
+    # the fragments are not followed): U-235 at thermal, ~6.9 keV per fission.
+    # MT444 keeps it -- unlike the KERMA, whose fission part comes from MF1/458.
+    chances = [r for r in getattr(suite, "fissionComponents", ()) if r.ENDF_MT in FISSION_MTS]
+    fissions = chances or [r for r in suite.reactions if r.ENDF_MT in FISSION_MTS]
+    for reaction in fissions:
+        mt = reaction.ENDF_MT
+        if mt not in sigma:
+            continue
+        prompt = next(((p, _distribution(p)) for p in reaction.outputChannel.products
+                       if p.pid == "n" and _distribution(p) is not None), None)
+        if prompt is None:
+            continue
+        s = np.asarray(sigma[mt], dtype=float)
+        d = _emissionDamage(prompt[1], grid, A, Z, ed)
+        damage += np.where(s > 0, s * d, 0.0)
+        perReaction[mt] = (np.zeros(len(grid)), np.zeros(len(grid)), d)
     # Photons stated on a sum (MF13 on MT4, 103-107): carried away for MT301 and
     # deposited for MT901, as HEATR's gheat does with σ_sum·y·Ē (= σ_γ·Ē).
     for reaction in getattr(suite, "sums", ()):
