@@ -147,6 +147,8 @@ def _scatteringRadius(parent: ET.Element, radius: Optional[ScatteringRadius],
         )
         return
     node = ET.SubElement(element, "constant1d")
+    if radius.domainMin is not None and radius.domainMax is not None:
+        domain = (_number(radius.domainMin), _number(radius.domainMax))
     _set(node, label="eval", value=_number(radius.constant),
          domainMin=domain[0], domainMax=domain[1])
     _radiusAxes(node, unit)

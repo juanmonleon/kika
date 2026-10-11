@@ -165,14 +165,12 @@ def test_the_tape_the_ace_needs_is_written_on_demand(fakeNjoy, tmp_path):
     assert calls[0]["endf_path"] == files["endf-delta"]
 
 
-def test_a_gnds_source_cannot_make_an_ace_yet_and_says_why(fakeNjoy, tmp_path):
-    """ACE needs an ENDF tape, and a suite read from GNDS is not written as an ENDF tape here.
-
-    Measured 2026-09-06 on the fixture round-tripped through GNDS: with the
-    MF1/451 header and the AWR borrowed from the ENDF original, the writer
-    still refuses on MT1's missing Q/LR. Three things, not one, so the
-    refusal names all three and points at the increment; the MAT it would
-    use comes from the library's table, not from the user.
+def test_a_gnds_source_with_resonance_parameters_cannot_make_an_ace(fakeNjoy, tmp_path):
+    """ACE needs an ENDF tape, and the resonance parameters of a GNDS suite do
+    not reach MF2: QX, LRX, LAD and the particle-pair columns have no model node.
+    Without MF2 the tape's MF3 in the resolved range is only the background, so
+    the run refuses before NJOY is called; the MAT it would use comes from the
+    library's table, not from the user.
     """
     import kika
 
@@ -181,16 +179,35 @@ def test_a_gnds_source_cannot_make_an_ace_yet_and_says_why(fakeNjoy, tmp_path):
     gnds.parent.mkdir()
     kika.write(kika.read(TAPE), str(gnds), format="gnds")
     options = AceOptions(temperatures=[293.6], njoyExe=str(exe))
-    with pytest.raises(ValueError, match="cannot be written as one yet") as refused:
+    with pytest.raises(ValueError, match="not written to MF2") as refused:
         perturbFromModel(str(gnds), REQUEST, 1, seed=1, outputDir=tmp_path / "run",
                          formats=("ace",), ace=options)
-    assert "MAT would be 2631" in str(refused.value)
+    assert "MAT 2631" in str(refused.value)
     assert calls == []
     # A dry run of the same request goes through: the options are checked,
     # nothing is written, and the note records the MAT the table gives.
     run = perturbFromModel(str(gnds), REQUEST, 1, seed=1, outputDir=tmp_path / "dry",
                            formats=("ace",), ace=options, dryRun=True)
     assert any("MAT 2631" in e.message for e in run.log.of("note"))
+
+
+def test_a_gnds_source_with_the_radius_alone_makes_a_tape_and_an_ace(fakeNjoy, tmp_path):
+    """NNDC's H-2 GNDS (ENDF/B-VIII.1) has no resonance region, only AP: its MF2
+    is derived (LRU=0), so the realisation is written as an ENDF tape and NJOY
+    is handed that tape. MT 2 only: the file's MT 16 block states |rho| = 2.06,
+    which the pre-flight refuses to sample."""
+    from kika.endf import read_endf
+
+    exe, calls = fakeNjoy
+    h2 = Path(__file__).resolve().parents[2] / "gnds" / "tests" / "data" / "n-001_H_002.endf.gnds.xml"
+    options = AceOptions(temperatures=[293.6], njoyExe=str(exe))
+    run = perturbFromModel(str(h2), {33: [2]}, 1, seed=1, outputDir=tmp_path,
+                           formats=("endf-tape", "ace"), ace=options)
+    tape = run.samples[0]["files"]["endf-tape"]
+    assert calls and calls[0]["endf_path"] == tape
+    written = read_endf(str(tape))
+    assert 2 in written.mf and 3 in written.mf
+    assert written.mf[1].mt[451]._lrp == 0
 
 
 def test_a_failed_njoy_run_is_an_error_event_and_the_run_goes_on(fakeNjoy, tmp_path):

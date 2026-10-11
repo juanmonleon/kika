@@ -19,8 +19,10 @@ MF12-15 and MF31-35 (MF32 from the section the decoder kept); MF6 has every
 law but LAW=5, and MF1/460 is written back from the records the decoder kept;
 what the decoder kept only as declared bytes (MF8-10) is absent — so a model that never held something writes a tape without
 it, and the returned report names each one. A model that came from GNDS has
-no ENDF bookkeeping, and the files kika cannot derive yet are named as well
-(``model_adapter/derive``). The gate the writer
+no ENDF bookkeeping: it is derived from the model (``model_adapter/derive``),
+MF2 included when the resonances hold the scattering radius alone, and what
+cannot be derived -- resolved and unresolved parameters, which need QX, LRX,
+LAD and the particle-pair columns -- is named as well. The gate the writer
 was built against is a fixed point *inside the model* — read, write, read again,
 compare — and not byte identity against the tape it came from; §2.8 says why,
 and says what that gate cannot see.

@@ -181,7 +181,21 @@ class _ResonanceReader:
         if constant is not None:
             value, unit = self.toModelUnits(
                 float(constant.attrib["value"]), self.radiusUnit(constant), here)
-            return ScatteringRadius(constant=value, unit=unit)
+            domain = (None, None)
+            if "domainMin" in constant.attrib and "domainMax" in constant.attrib:
+                axes = readAxes(constant, self.resolve)
+                energyUnit = (next((a.unit for a in axes if a.index == 1), "eV")
+                              if axes is not None else "eV")
+                try:
+                    factor = conversion_factor(energyUnit or "eV", "eV")
+                except UnitError as error:
+                    self.unsupported("scatteringRadius", here, str(error))
+                    factor = None
+                if factor is not None:
+                    domain = (float(constant.attrib["domainMin"]) * factor,
+                              float(constant.attrib["domainMax"]) * factor)
+            return ScatteringRadius(constant=value, unit=unit,
+                                    domainMin=domain[0], domainMax=domain[1])
         table = element.find("XYs1d")
         if table is None:
             self.unsupported(

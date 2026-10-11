@@ -1516,8 +1516,8 @@ def test_a_gnds_sourced_suite_writes_an_endf_tape(h2_gnds, tmp_path):
     Until then this refused twice: no MAT, then no MF1/451 header, then MT1's
     QM/LR. All three are derived now, the way FUDGE's ``toENDF6`` derives them
     (``kika/endf/model_adapter/derive``): MAT from ENDF-6's table, the header
-    from the evaluated style and PoPs, QM/LR from the residual's decay. What
-    cannot be derived yet is in the report, not silently missing.
+    from the evaluated style and PoPs, QM/LR from the residual's decay, and
+    H-2's MF2 -- the scattering radius alone -- from the radius and PoPs' spin.
     """
     suite = kika.read(h2_gnds, covariances=False)
     path = tmp_path / "out.endf"
@@ -1526,7 +1526,9 @@ def test_a_gnds_sourced_suite_writes_an_endf_tape(h2_gnds, tmp_path):
     assert back.provenance.mat == 128
     assert sorted(r.ENDF_MT for r in back.reactions) \
         == sorted(r.ENDF_MT for r in suite.reactions)
-    assert any("MF2/151 cannot be written" in loss for loss in report.losses)
+    assert not any("MF2" in loss for loss in report.losses)
+    from kika.endf import read_endf
+    assert 2 in read_endf(str(path)).mf
 
 
 def test_an_unknown_format_is_refused_by_name(h2_gnds, tmp_path):

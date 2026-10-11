@@ -7,9 +7,8 @@ the ``QI`` of a continuum reaction whose GNDS ``Q`` is the ground-state one, the
 MAT of an isomer, a product that goes to MF6 rather than MF4/MF5. Each note is a
 ``flags`` string attached to an ``href`` into the suite.
 
-Modelled rather than dropped because the ENDF writer needs it
-(``docs/library/gnds_to_endf_plan.md`` D2), and typed rather than kept as XML
-(``gnds_endf_conflicts.md`` §6.3). It lives in the suite's ``applicationData``,
+Modelled rather than dropped because the ENDF writer needs it, and typed
+rather than kept as XML. It lives in the suite's ``applicationData``,
 as it does in the file, under FUDGE's institution label.
 """
 from __future__ import annotations
