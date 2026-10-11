@@ -321,7 +321,8 @@ def _broadened(suite, temperature, thnmax, options):
     from kika.processing.doppler import DopplerOptions, SupportPolicy, broaden_suite
     from kika.processing.resonances.suite import _entries, _graph
 
-    entries = _entries(suite)
+    # Orphan photon products (MF13 on a sum) carry no 0 K form: nothing to broaden.
+    entries = {k: r for k, r in _entries(suite).items() if RECON_LABEL in r.crossSection.forms}
     graph, _ = _graph(entries, RECON_LABEL)
     leaves = [k for k in entries if k not in graph]
     lows = [_flatten(entries[k].crossSection[RECON_LABEL])[0][0] for k in leaves]
@@ -488,7 +489,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     heated: Dict[str, Dict[int, Tuple[np.ndarray, int]]] = {}
     grids: Dict[str, np.ndarray] = {}
     if thnmax == "njoy":
-        thresholds = [_flatten(leaf.reaction.crossSection[RECON_LABEL])[0][0] for leaf in leaves
+        # The thresholds MF3 states (the 0 K forms may start lower, with zeros).
+        thresholds = [_reactionRange(leaf.reaction)[0] for leaf in leaves
                       if (leaf.reaction.outputChannel.Q.value or 0.0) < 0]
         thnmax = njoyThnmax(work, min(thresholds) if thresholds else None)
     broadened = _broadenAll(work, temperatures, float(thnmax), doppler, workers)
@@ -606,6 +608,30 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                                      provenance=m.Hdf5Provenance(attributes={"redundant": 1}))
         out.sums.append(reaction)
 
+    # --- photons stated on a sum (MF13 on MT4, 103-107: orphan products) -----
+    # The official exporter writes them as the products of that sum, written
+    # redundant (O-16: reaction_004 with 15 photons, reaction_103 with 4).
+    for orphan in work.orphanProducts:
+        mt = orphan.ENDF_MT
+        target = out.findReactionByENDF_MT(mt)
+        if target is None:
+            levels = [c for c in LEVEL_SUMS.get(mt, ()) if c in present]
+            if not levels:
+                report.lost(f"MT{mt}: {len(orphan.outputChannel.products)} photons stated on a "
+                            f"sum the evaluation gives no partials of; not written")
+                continue
+            target = m.CrossSectionSum(id=m.ReactionId(label=f"MT{mt}", ENDF_MT=mt),
+                                       crossSection=summedForms(levels),
+                                       outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
+                                       provenance=m.Hdf5Provenance(attributes=_sumAttributes(mt)))
+            out.sums.append(target)
+        # The photons' range is the sum's, as the evaluation states it.
+        source = work.findReactionByENDF_MT(mt)
+        proxy = copy.copy(orphan)
+        if source is not None:
+            proxy.crossSection = source.crossSection
+        _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report)
+
     # --- gas production -----------------------------------------------------
     for gasMT, cs in _gas(work, leaves, heated, grids).items():
         out.productions.append(m.Reaction(id=m.ReactionId(label=f"MT{gasMT}", ENDF_MT=gasMT),
@@ -651,13 +677,19 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
             id=m.ReactionId(label=f"MT{inelastic}", ENDF_MT=inelastic),
             crossSection=summedForms(levels),
             outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
-            provenance=m.Hdf5Provenance(attributes={"redundant": 1})))
+            provenance=m.Hdf5Provenance(attributes=_sumAttributes(inelastic))))
         report.warn(f"MT{inelastic} written as the redundant sum of {len(levels)} levels, "
                     f"because the URR tables name it")
     for piece in omit:
         report.lost(f"{piece} was not written: omitted on request")
     out.report = report
     return out
+
+
+def _sumAttributes(mt):
+    """A redundant sum's attributes as the official exporter writes them: MT4, the
+    inelastic levels, in the centre of mass (O-16's reaction_004), the others not."""
+    return {"redundant": 1, "center_of_mass": 1 if mt == 4 else 0}
 
 
 def _thin(grid, values, rtol):
@@ -880,7 +912,7 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
                                 Q=reaction.outputChannel.Q.value, pid=product.pid,
                                 zaEmitted=_zaOf(product.pid) if product.pid != "photon" else 0,
                                 discrete=discrete, options=options, report=report)
-    if form is None:
+    if form is None or isinstance(form, m.Isotropic2d):
         if mt == 2 or (product.pid == "n" and 51 <= mt <= 90):
             # Isotropic in the centre of mass where the evaluation gives no MF4.
             form = m.AngularTwoBody(angular=m.Isotropic2d(), productFrame=m.Frame.centerOfMass)
@@ -1054,6 +1086,12 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
         for reaction in out.reactions:
             form = reaction.crossSection.forms.get(label)
             if form is not None and reaction.ENDF_MT is not None:
+                values = np.zeros_like(grid)
+                values[len(grid) - len(form):] = form.ys
+                sigma[reaction.ENDF_MT] = values
+        for reaction in out.sums:
+            form = reaction.crossSection.forms.get(label)
+            if form is not None and reaction.ENDF_MT is not None and reaction.ENDF_MT not in sigma:
                 values = np.zeros_like(grid)
                 values[len(grid) - len(form):] = form.ys
                 sigma[reaction.ENDF_MT] = values

@@ -962,6 +962,12 @@ def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
                                    nuclearLevel=index,
                                    energy=(PhysicalQuantity(value=energies[index], unit="eV")
                                            if index else None)))
+        elif index and getattr(suite.PoPs.particles[final], "energy", None) is None:
+            # A level built earlier as a reaction's residual, with no cascade of
+            # its own to state its energy (O-16's 6.049 MeV 0+, which decays by
+            # pair emission): the transition into it names it, and without an
+            # energy every line feeding it was dropped from the cascades.
+            suite.PoPs.particles[final].energy = PhysicalQuantity(value=energies[index], unit="eV")
         emission = (PhotonEmissionProbabilities(shells=[Shell(label="total",
                                                               value=float(row[2]))])
                     if lg == 2 else None)

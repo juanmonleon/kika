@@ -648,6 +648,24 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             d = np.zeros(len(grid))
         damage += np.where(live, s * d, 0.0)
         perReaction[mt] = (carried, carried + gammas, d)
+    # Photons stated on a sum (MF13 on MT4, 103-107): carried away for MT301 and
+    # deposited for MT901, as HEATR's gheat does with σ_sum·y·Ē (= σ_γ·Ē).
+    for reaction in getattr(suite, "sums", ()):
+        mt = reaction.ENDF_MT
+        if mt is None or mt not in sigma:
+            continue
+        photons = [(p, _distribution(p)) for p in reaction.outputChannel.products
+                   if p.pid == "photon"]
+        photons = [(p, f) for p, f in photons if f is not None]
+        if not photons:
+            continue
+        s = np.asarray(sigma[mt], dtype=float)
+        photon = _Kinematics(A=A, Q=0.0, awp=0.0)
+        gammas = np.zeros(len(grid))
+        for product, form in photons:
+            gammas = gammas + _yield(product, grid) * _meanEnergyOf(form, grid, photon)
+        kerma -= np.where(s > 0, s * gammas, 0.0)
+        notes.append(f"MT{mt}: {len(photons)} photons stated on the sum, taken out of MT301")
     if report is not None:
         for note in notes:
             report.warn(note)
