@@ -790,8 +790,8 @@ def encodePhotonSections(suite, mat: Optional[int] = None,
             if "mf6" not in header and _hasPhotons(node.outputChannel):
                 report.lost(
                     f"{node.label}: its photons have no ENDF bookkeeping (the "
-                    f"suite was not read from ENDF), and deriving MF12-15 from the "
-                    f"model is roadmap E5e; the tape is written without them")
+                    f"suite was not read from ENDF), and kika does not derive MF12-15 "
+                    f"from the model; the tape is written without them")
             continue
         mt = int(node.ENDF_MT)
         fields = header[f"mf{mf}"]

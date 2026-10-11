@@ -28,8 +28,8 @@ class MF8Raw(MT):
         return "\n".join(list(self.raw_lines) + [format_endf_send_record(mat, 8)])
 
     def report_gaps(self) -> List[str]:
-        return [f"MF8/MT{self.number}: radioactive products of a reaction (roadmap "
-                f"E6) are kept as read and not interpreted"]
+        return [f"MF8/MT{self.number}: radioactive products of a reaction "
+                f"are kept as read and not interpreted"]
 
     def __repr__(self) -> str:
         return f"MF8Raw(MT{self.number}, {len(self.raw_lines)} lines)"
