@@ -97,9 +97,23 @@ latex_engine = 'xelatex'
 # The PDF is the manual of methods and architecture: its root is pdf_index.rst,
 # which leaves out the user guide and api_reference/ (both read online;
 # docs/WRITING_DOCS.md §5.6). One document, built from that root.
+# The title page has no room for the email beside the name.
 latex_documents = [
-    ('pdf_index', 'kika.tex', 'KIKA Documentation', author, 'manual'),
+    ('pdf_index', 'kika.tex', 'KIKA Documentation',
+     'Juan Antonio Monleon de la Lluvia', 'manual'),
 ]
+# An inline literal can only break after . , ; ? ! / by default, so a test
+# reference such as file.py::test_a_long_name ran off the page. Let it break
+# after : and _ as well. A code line with nowhere to break is cut anyway.
+latex_elements = {
+    'sphinxsetup': 'verbatimforcewraps=true',
+    'preamble': r'''
+\makeatletter
+\g@addto@macro\sphinxbreaksafteractivelist{\do\:}
+\g@addto@macro\sphinxbreaksviaactive{\def\_{\textunderscore\allowbreak}}
+\makeatother
+''',
+}
 
 # -- EPUB (also built by Read the Docs) ----------------------------------------
 # A figure's PDF twin (for LaTeX) and the script that draws it live next to it
