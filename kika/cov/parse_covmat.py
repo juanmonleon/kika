@@ -160,6 +160,14 @@ def _detect_endianness(file_path: str) -> str:
     )
 
 
+def _ev_grid_in(values, energy_unit: str) -> List[float]:
+    """An eV grid from a file, in *energy_unit* (``'eV'`` or ``'MeV'``)."""
+    if energy_unit not in ("eV", "MeV"):
+        raise ValueError("energy_unit must be 'eV' or 'MeV'")
+    values = [float(v) for v in values]
+    return [v * 1.0e-6 for v in values] if energy_unit == "MeV" else values
+
+
 def _coverx_energy_grid(
     values: List[float],
     energy_unit: str,
@@ -449,8 +457,10 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
                     matrix[j, start_col:start_col + jband[j]] = vals[offset:offset + jband[j]]
                     offset += jband[j]
 
-            # Skip zero-sum matrices
-            if np.isclose(matrix.sum(), 0.0):
+            # Skip blocks that are exactly zero. Not "sums to about zero": a
+            # small relative covariance, or one whose negative correlations
+            # cancel its variances, sums to nearly nothing and is still data.
+            if not np.any(matrix):
                 continue
 
             # Skip unknown reaction types
@@ -1075,6 +1085,7 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
         Path to the BOXER file.
     energy_unit : str, optional
         Energy unit for the energy grid: ``'eV'`` (default) or ``'MeV'``.
+        BOXER holds eV; ``'MeV'`` converts the values, not just the label.
 
     Returns
     -------
@@ -1085,7 +1096,11 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
     ------
     EmptyParsingError
         If no valid covariance matrices were found.
+    InvalidDataFormatError
+        If a correlation matrix (ITYPE 4) comes without the standard
+        deviations (ITYPE 2) of both its reactions.
     """
+    _ev_grid_in([], energy_unit)  # validates the unit before reading anything
     with open(file_path, 'r') as f:
         lines = f.readlines()
 
@@ -1131,6 +1146,7 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
             # Decompress the vector
             vec = _decompress_boxer(xval, icons, nrowh, ncolh if ncolh > 0 else 1)
             energy_grid = vec[:, 0].tolist() if vec.shape[1] == 1 else vec[0, :].tolist()
+            energy_grid = _ev_grid_in(energy_grid, energy_unit)  # BOXER holds eV
             covmat.energy_grid = energy_grid
             covmat.num_groups = len(energy_grid) - 1
 
@@ -1181,10 +1197,19 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
                     # Correlation → covariance
                     sd_row = stddevs.get((zaid_row, cur_mt))
                     sd_col = stddevs.get((zaid_col, cur_mt1))
-                    if sd_row is not None and sd_col is not None:
-                        cur_matrix = cur_matrix * np.outer(sd_row, sd_col)
+                    if sd_row is None or sd_col is None:
+                        missing = [f"MAT{m} MT{r}" for m, r, s in
+                                   ((cur_mat, cur_mt, sd_row), (cur_mat1, cur_mt1, sd_col))
+                                   if s is None]
+                        raise InvalidDataFormatError(
+                            f"BOXER correlation matrix (ITYPE 4) MAT{cur_mat} MT{cur_mt} x "
+                            f"MAT{cur_mat1} MT{cur_mt1} has no standard deviations "
+                            f"(ITYPE 2) for {', '.join(missing)}, so it cannot be turned "
+                            f"into a covariance: {file_path}"
+                        )
+                    cur_matrix = cur_matrix * np.outer(sd_row, sd_col)
 
-                if not np.isclose(cur_matrix.sum(), 0.0):
+                if np.any(cur_matrix):  # only an exactly-zero block is skipped
                     covmat.add_matrix(zaid_row, cur_mt, zaid_col, cur_mt1, cur_matrix)
 
                 cur_matrix = None
@@ -1216,7 +1241,8 @@ def write_boxer(
     hdescr : str, optional
         Description (32 chars max). Default ``''``.
     nvf : int, optional
-        Value format code (7–14). Default 10 (``1P8E10.3``).
+        Value format code (7–14). Default 10 (``1P8E10.3``, four significant
+        figures).
     """
     if isinstance(data, LegendreCovariance):
         raise TypeError(
@@ -1232,17 +1258,16 @@ def write_boxer(
             if mat_val > 99999:
                 bad_zaids.add(zaid)
     if bad_zaids:
-        warnings.warn(
+        raise ValueError(
             f"BOXER MAT field is 5 characters (max 99999). "
-            f"The following isotope IDs exceed this limit and will produce "
+            f"The following isotope IDs exceed this limit and would produce "
             f"corrupted output: {sorted(bad_zaids)}. "
-            f"Use write_coverx() for these isotopes.",
-            stacklevel=2,
+            f"Use write_coverx() for these isotopes."
         )
 
     if nvf <= 10:
         warnings.warn(
-            f"BOXER NVF={nvf} provides ~{nvf - 7} significant figures. "
+            f"BOXER NVF={nvf} provides {nvf - 6} significant figures. "
             f"Consider nvf=14 for higher precision.",
             stacklevel=2,
         )
@@ -1544,7 +1569,7 @@ def _parse_covfil_mf33(
                     if irow == ng:
                         break
 
-            if not np.isclose(sub_mat.sum(), 0.0):
+            if np.any(sub_mat):  # only an exactly-zero block is skipped
                 blocks.append((zaid, mt_row, iso_col, mt1, sub_mat))
 
     return blocks, cursor
@@ -1616,7 +1641,7 @@ def _parse_covfil_mf34(
                     if irow == ng:
                         break
 
-            if not np.isclose(sub_mat.sum(), 0.0):
+            if np.any(sub_mat):  # only an exactly-zero block is skipped
                 blocks.append((zaid, mt_row, l_row, zaid, mt1, l_col, sub_mat))
 
     return blocks, cursor
@@ -1637,6 +1662,7 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
         Path to the NJOY-generated covariance file.
     energy_unit : str, optional
         Energy unit for the energy grid: ``'eV'`` (default) or ``'MeV'``.
+        The file holds eV; ``'MeV'`` converts the values, not just the label.
 
     Returns
     -------
@@ -1654,8 +1680,9 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
     # Line 0 is tape header — skip it
     cursor = 1
 
-    # --- MF1 MT451: energy grid ---
+    # --- MF1 MT451: energy grid (eV in the file) ---
     za, awr, temperature, ngrp, energy_grid, cursor = _parse_covfil_mf1(lines, cursor)
+    energy_grid = _ev_grid_in(energy_grid, energy_unit)
     mat, _, _ = parse_endf_id(lines[1])  # MAT from first data line
 
     # --- MF3: cross sections (optional) ---
@@ -1981,13 +2008,29 @@ def write_covfil(
             if mat_val > 9999:
                 bad_zaids.add(zaid)
     if bad_zaids:
-        warnings.warn(
+        raise ValueError(
             f"COVFIL MAT field is 4 characters (max 9999). "
-            f"The following isotope IDs exceed this limit and will produce "
+            f"The following isotope IDs exceed this limit and would produce "
             f"corrupted output: {sorted(bad_zaids)}. "
-            f"Use write_coverx() for these isotopes.",
-            stacklevel=2,
+            f"Use write_coverx() for these isotopes."
         )
+
+    # 31: a COVFIL is one material. Every section is filed under the MAT of the
+    # tape, so a second row isotope would be written as if it were the first
+    # (and read_covfil reads one material back).
+    row_isotopes = sorted({int(z) for z in data.isotope_rows})
+    if len(row_isotopes) > 1:
+        raise ValueError(
+            f"a COVFIL holds one material, and these covariances have rows for "
+            f"{len(row_isotopes)} isotopes ({row_isotopes}); write one file per "
+            f"isotope, or use write_coverx() / write_boxer()"
+        )
+    if not is_mf33:
+        other = sorted({int(z) for z in data.isotope_cols} - set(row_isotopes))
+        if other:
+            raise ValueError(
+                f"an MF34 COVFIL section has no MAT1 field, so the cross-material "
+                f"blocks with isotopes {other} cannot be written")
 
     # Determine MAT, ZA, NGRP. AWR is taken from the resolved parameter above
     # (data.awr by default, or an explicit override).
@@ -2049,6 +2092,8 @@ def write_covfil(
         # --- MF3: cross sections (CrossSectionCovariance only) ---
         if is_mf33 and data.cross_sections:
             for (xs_zaid, xs_mt), xs_vals in sorted(data.cross_sections.items()):
+                if int(xs_zaid) != int(za):
+                    continue  # another material's cross section has no place here
                 seq = 1
                 n = len(xs_vals)
                 head3 = format_endf_data_line(

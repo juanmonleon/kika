@@ -289,3 +289,96 @@ def test_real_fe56_mf34_gendf_against_raw_reference_values():
     assert covariance.matrices[0][53, 53] == pytest.approx(9.374141e-5)
     assert covariance.matrices[0][55, 53] == pytest.approx(6.947195e-6)
     assert covariance.matrices[0][55, 55] == pytest.approx(2.321248e-4)
+
+
+# ---------------------------------------------------------------------------
+# Defects found while documenting the formats (11-oct-2026)
+# ---------------------------------------------------------------------------
+
+def _tiny_covariance(scale):
+    """A block whose entries sum to about zero without being zero."""
+    covariance = make_covariance()
+    covariance.add_matrix(FE56, 2, FE56, 18, scale * np.array(
+        [[1.0, -1.0, 0.0, 0.0], [-1.0, 1.0, 0.0, 0.0],
+         [0.0, 0.0, 1.0, -1.0], [0.0, 0.0, -1.0, 1.0]]), is_relative=True)
+    return covariance
+
+
+@pytest.mark.parametrize("fmt", ["boxer", "covfil", "coverx_binary"])
+def test_a_block_that_sums_to_nearly_zero_is_kept(tmp_path, fmt):
+    source = _tiny_covariance(1.0e-9)
+    path = tmp_path / f"tiny.{fmt}"
+    if fmt == "boxer":
+        write_boxer(source, str(path), nvf=14)
+        back = read_boxer(str(path))
+    elif fmt == "covfil":
+        write_covfil(source, str(path))
+        back = read_covfil(str(path))
+    else:
+        write_coverx(source, str(path), fmt="binary")
+        back = read_coverx(str(path))
+    assert (FE56, 2, FE56, 18) in matrix_map(back) or (FE56, 18, FE56, 2) in matrix_map(back)
+
+
+@pytest.mark.parametrize("fmt", ["boxer", "covfil"])
+def test_mev_converts_the_values_not_just_the_label(tmp_path, fmt):
+    path = tmp_path / f"unit.{fmt}"
+    if fmt == "boxer":
+        write_boxer(make_covariance(), str(path), nvf=14)
+        back = read_boxer(str(path), energy_unit="MeV")
+    else:
+        write_covfil(make_covariance(), str(path))
+        back = read_covfil(str(path), energy_unit="MeV")
+    assert back.energy_unit == "MeV"
+    np.testing.assert_allclose(back.energy_grid, GRID_EV * 1e-6, rtol=1e-6)
+
+
+def test_covfil_refuses_two_materials(tmp_path):
+    source = make_covariance()
+    source.add_matrix(92235, 18, 92235, 18, np.diag([0.01] * 4), is_relative=True)
+    with pytest.raises(ValueError, match="one material"):
+        write_covfil(source, str(tmp_path / "two.gendf"))
+
+
+def test_to_covfil_keeps_the_temperature_it_read(tmp_path):
+    first, second = tmp_path / "a.gendf", tmp_path / "b.gendf"
+    write_covfil(make_covariance(), str(first))
+    read_covfil(str(first)).to_covfil(str(second))
+    assert read_covfil(str(second)).metadata["temperature"] == pytest.approx(293.6)
+
+
+def test_a_mat_too_wide_for_its_field_is_refused(tmp_path):
+    source = CrossSectionCovariance(num_groups=4, energy_grid=GRID_EV.tolist())
+    source.add_matrix(1001001, 2, 1001001, 2, np.diag([0.01] * 4), is_relative=True)
+    with pytest.raises(ValueError, match="MAT field"):
+        write_covfil(source, str(tmp_path / "wide.gendf"))
+    with pytest.raises(ValueError, match="MAT field"):
+        write_boxer(source, str(tmp_path / "wide.boxer"), nvf=14)
+
+
+def test_a_boxer_correlation_without_deviations_is_refused(tmp_path):
+    from kika.cov.parse_covmat import InvalidDataFormatError
+
+    path = tmp_path / "corr.boxer"
+    write_boxer(make_covariance(), str(path), nvf=14)
+    text = path.read_text().splitlines(keepends=True)
+    out, skip = [], False
+    for line in text:
+        if line[:1].isdigit() and line[0] in "0123" and len(line) > 60:
+            skip = line[0] == "2"
+            line = ("4" + line[1:]) if line[0] == "3" else line
+        if not skip:
+            out.append(line)
+    path.write_text("".join(out))
+    with pytest.raises(InvalidDataFormatError, match="ITYPE 2"):
+        read_boxer(str(path))
+
+
+def test_project_to_grid_reads_an_unstated_class_as_relative():
+    from types import SimpleNamespace
+
+    covariance = CrossSectionCovariance()
+    covariance.add_matrix(FE56, 2, FE56, 2, np.array([[0.01]]), energy_grid=[1.0, 10.0])
+    sigma = SimpleNamespace(energies=np.array([0.1, 100.0]), values=np.array([2.0, 2.0]))
+    projected = covariance.project_to_grid(np.array([1.0, 10.0]), xs_source=sigma)
+    assert projected[0, 0] == pytest.approx(0.04)  # 0.01 relative x (2 b)^2
