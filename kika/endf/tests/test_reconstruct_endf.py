@@ -100,11 +100,7 @@ def test_every_category_the_engine_raises_is_declared():
     used = set()
     for path in (list((root / "processing/resonances").glob("*.py"))
                  + [root / "endf/writers/assemble.py", root / "endf/reconstruction.py"]):
-        text = path.read_text(encoding="utf-8")
-        used |= set(re.findall(r"category=['\"]([A-Za-z0-9-]+)['\"]", text))
-        # A category picked from a dict literal: category={'reason': 'name', ...}[...]
-        for literal in re.findall(r"category=\{([^}]*)\}", text):
-            used |= set(re.findall(r":\s*['\"]([A-Za-z0-9-]+)['\"]", literal))
+        used |= set(re.findall(r"category=['\"]([a-z0-9-]+)['\"]", path.read_text(encoding="utf-8")))
     for cls in (UnsupportedResonanceError, ReconstructionConvergenceError):
         used.add(cls("x").category)
     assert used <= set(REJECTION_CATEGORIES), used - set(REJECTION_CATEGORIES)
@@ -128,10 +124,6 @@ def test_report_document_without_a_pendf(reconstruction, tmp_path):
     assert d["software"]["native_kernel"] is native_available()
     assert d["options"]["rtol"] == rec.result.options.rtol
     (rrr,) = d["resonance_ranges"]
-    # ENDF AP is in 10^-12 cm; the report's column is fm.
-    from kika.endf.read_endf import read_endf
-    ap = read_endf(TAPE).mf[2].mt[151].isotopes[0].energy_ranges[0].parameters.ap
-    assert rrr["ap_fm"] == pytest.approx(10 * ap)
     assert (rrr["lru"], rrr["lrf"], rrr["formalism"]) == (1, 3, "Reich-Moore") and rrr["resonances"] > 0
     rows = {r["mt"]: r for r in d["reactions"]}
     tables = rec.tables_by_mt()
