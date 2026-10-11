@@ -29,6 +29,7 @@ from .angular import tabulateAngular
 from .correlated import tabulateAngularEnergy, tabulateEnergyAngular, tabulateKalbachMann
 from .energy import tabulateEnergy
 from .tables import TabulationOptions
+from kika._constants import NEUTRON_MASS_MEV
 
 __all__ = ["TabulationContext", "tabulateDistribution", "isLevelMT", "levelEnergy",
            "MONTE_CARLO_LABEL"]
@@ -105,6 +106,18 @@ def tabulateDistribution(form, context: TabulationContext):
         if isLevelMT(context.mt) and context.Q is not None:
             return m.Uncorrelated(angular=tabAngular, energy=levelEnergy(context.Q, context.awr),
                                   label=MONTE_CARLO_LABEL, productFrame=form.productFrame)
+        if context.pid == "photon" and context.Q is not None and context.awr is not None:
+            # A two-body photon (H-1 capture, MF6 LAW=2): one line per incident
+            # energy, E_gamma = Q - Q^2/(2(A+1) m_n c^2) + A/(A+1) E -- a primary
+            # photon, which is what ACER's table holds (2 223 300 eV at thermal).
+            if isinstance(tabAngular, m.Isotropic2d):
+                tabAngular, _ = tabulateAngular(_isotropicXYs2d(), options)
+            q = float(context.Q)
+            binding = q - q * q / (2.0 * (float(context.awr) + 1.0) * NEUTRON_MASS_MEV * 1.0e6)
+            return m.Uncorrelated(angular=tabAngular,
+                                  energy=m.DiscretePhotonEnergy(primaryFlag=2, energy=binding,
+                                                                atomicWeightRatio=float(context.awr)),
+                                  label=MONTE_CARLO_LABEL, productFrame=m.Frame.lab)
         return None
     if isinstance(form, m.Uncorrelated):
         energy = form.energy

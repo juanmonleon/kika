@@ -1049,6 +1049,21 @@ def _cascadePhotons(pops, reaction, awr):
     if pops is None:
         return []
     residuals = [p.pid for p in reaction.outputChannel.products if p.pid not in ("n", "photon")]
+    # A discrete-level reaction whose residual came as the ground state (U-234
+    # MT52: the recoil the two-body MF4 adapter made, to which the level's
+    # decay was then attached) de-excites the level its MT names.
+    from kika.endf.model_adapter.residuals import levelSeries
+
+    series = levelSeries(int(reaction.ENDF_MT)) if reaction.ENDF_MT is not None else None
+    if series is not None and series[2] > 0:
+        for i, pid in enumerate(residuals):
+            try:
+                za = m.zaFromPid(pid)
+            except ValueError:
+                continue
+            level = m.pidFromZA(za, series[2])
+            if level != pid and level in pops and m.pidFromZA(za, 0) == pid:
+                residuals[i] = level
     out = []
     lo, hi = _reactionRange(reaction)
     for pid in residuals:
