@@ -14,7 +14,7 @@ write ``provenance`` as they always have, whether a read or this pass put it
 there — and a suite that came from ENDF is never touched, so the ENDF → ENDF
 path stays byte-identical.
 
-**Three kinds of field** (decided 2026-10-08, ``docs/library/gnds_to_endf_plan.md``):
+**Three kinds of field**:
 derived from the model; taken from the file's own FUDGE ``ENDFconversionFlags``
 when it has them; or a documented neutral default, named in the report. A field
 with no neutral default is **refused**, never invented.
@@ -64,7 +64,7 @@ DERIVERS: List[Tuple[str, Callable[[object], bool],
 #: that imported ``derive.reactions`` first used to register it ahead of
 #: ``derive.suite``, so every reaction came out with ZA and AWR of ``None``.
 #: A deriver not named here runs after these, in registration order.
-RUN_ORDER = ("suite", "reactions", "products", "multiplicities",
+RUN_ORDER = ("suite", "reactions", "resonances", "products", "multiplicities",
              "fissionEnergyRelease", "delayedNeutrons", "covariances")
 
 
@@ -170,6 +170,7 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
     from kika.nuclear_data.model import ConversionReport
 
     from . import suite as _suite  # noqa: F401  registers, in run order
+    from . import resonances as _resonances  # noqa: F401
     from . import reactions as _reactions  # noqa: F401
     from . import products as _products  # noqa: F401
     from . import fission as _fission  # noqa: F401
@@ -209,7 +210,7 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
     for kind, count in sorted(underived.items()):
         report.lost(
             f"{count} {kind} node(s) have no ENDF bookkeeping that kika can derive "
-            f"yet (docs/library/gnds_to_endf_plan.md), so their sections are not "
+            f"yet, so their sections are not "
             f"in the written tape"
         )
     return report
