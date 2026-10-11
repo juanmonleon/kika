@@ -18,9 +18,10 @@ serialises, without editing the one it was given:
    the evaluation does not give them, as ``from_ace`` does for depletion -- and
    18 when the fission chances are given; gas production 203-207 as
    Σ multiplicity × σ over the reactions that emit p, d, t, ³He, α (what
-   GASPR computes); KERMA 301/901 and damage 444 from NJOY (D7); the URR
-   probability tables by kika's PURR
-   (:mod:`kika.processing.resonances.probability_tables`, H8).
+   GASPR computes); KERMA 301/901 and damage 444 by kika's HEATR
+   (:mod:`kika.processing.heating`, H8) and the URR probability tables by
+   kika's PURR (:mod:`kika.processing.resonances.probability_tables`, H8). No
+   NJOY: every piece of a neutron file is kika's.
 4. **Distributions and yields** tabulated with their CDF
    (:mod:`kika.processing.tabulation`); neutrons and photons only, the
    products OpenMC's files carry.
@@ -39,7 +40,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .exceptions import HDF5FormatError, MissingNJOYPieceError
+from .exceptions import HDF5FormatError
 from .names import (EVAL_LABEL, FISSION_MTS, K_BOLTZMANN, MONTE_CARLO_LABEL, RECON_LABEL,
                     heatedLabel, temperatureName, urrLabel)
 
@@ -401,18 +402,19 @@ def _broadenAll(suite, temperatures, thnmax, options, workers):
 
 
 def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX,
-                 njoy=None, endf=None, omit: Sequence[str] = (), awr: Optional[float] = None,
+                 endf=None, omit: Sequence[str] = (), awr: Optional[float] = None,
                  context=None, doppler=None, tabulation=None, ed: Optional[float] = None,
-                 njoyPieces=None, thinning: Optional[float] = 1.0e-3,
+                 thinning: Optional[float] = 1.0e-3,
                  workers: Optional[int] = None, label: Optional[str] = None,
                  urrTables: Optional[Dict[float, object]] = None):
     """The processed suite of ``suite`` at ``temperatures`` (kelvin; default 293.6 K).
 
-    ``endf`` is the ENDF tape NJOY processes for the D7 pieces (``kerma``,
-    ``damage``); without it, or without NJOY, they must be named in ``omit``.
-    The URR probability tables are kika's (H8; ``omit=("urr",)`` leaves them
-    out). ``njoyPieces`` passes pieces already computed
-    (:func:`kika.hdf5.njoy_pieces.runNjoyPieces`). ``awr`` overrides the
+    ``endf`` is the ENDF tape the suite was read from, for the target's mass
+    ratio and spin as MF1/MF2 state them (the reconstruction's context).
+    KERMA, damage and the URR probability tables are kika's (H8); ``omit``
+    leaves any of ``"urr"``, ``"kerma"``, ``"damage"`` out. ``ed`` is the
+    displacement threshold of the damage (default: HEATR's table by Z).
+    ``awr`` overrides the
     atomic weight ratio (D11; default MF1/451's, as ACER takes it).
     ``thinning`` is the relative tolerance to which each temperature's grid is
     thinned (roadmap H5): points are dropped while every reaction, read
@@ -440,7 +442,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     omit = tuple(omit)
     unknown = set(omit) - {"urr", "kerma", "damage"}
     if unknown:
-        raise ValueError(f"omit names pieces {sorted(unknown)} that are not taken from NJOY")
+        raise ValueError(f"omit names {sorted(unknown)}; the pieces that can be left out are "
+                         f"urr, kerma and damage")
     tabOptions = tabulation or TabulationOptions()
 
     target = suite.PoPs[suite.target] if suite.target in suite.PoPs else None
@@ -630,19 +633,10 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     if urrTables:
         _attachURR(out, urrTables)
 
-    # --- NJOY pieces --------------------------------------------------------
+    # --- KERMA and damage (kika's HEATR, H8) ---------------------------------
     wanted = [p for p in ("kerma", "damage") if p not in omit]
     if wanted:
-        if njoyPieces is None:
-            if endf is None:
-                raise MissingNJOYPieceError(
-                    f"the pieces {wanted} are taken from NJOY (roadmap D7) and need the ENDF tape: "
-                    f"pass endf=..., or omit={tuple(wanted)} to write without them", wanted)
-            from .njoy_pieces import runNjoyPieces
-            mat = getattr(suite.provenance, "mat", None)
-            njoyPieces = runNjoyPieces(endf, temperatures, mat=int(mat), njoy=njoy, urr=False,
-                                       ed=_displacementEnergy(Z) if ed is None else ed)
-        _attachNjoy(out, njoyPieces, temperatures, styleKT, grids, heated, wanted, report)
+        _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report)
     # The URR tables name the reaction whose smooth cross section stands for
     # the inelastic competition, and the C++ requires it to exist
     # (nuclide.cpp:308-320): MT4 is written for that, as the official exporter
@@ -746,11 +740,6 @@ def _hasURR(suite) -> bool:
     return suite.resonances is not None and suite.resonances.unresolved is not None
 
 
-def _displacementEnergy(Z: int) -> float:
-    """HEATR's default ``ed`` is 25 eV; OpenMC passes 0 and lets HEATR choose (``make_ace``)."""
-    return 0.0
-
-
 # ----------------------------------------------------------------------
 # Products
 # ----------------------------------------------------------------------
@@ -819,7 +808,14 @@ def _isotropicPhotonAngle(lo, hi):
 
 
 def _reactionRange(reaction):
-    x = _flatten(reaction.crossSection[RECON_LABEL])[0]
+    """``(threshold, top)`` as the evaluation states them: MF3's first and last
+    energy, which ACER takes for the reaction's range. The 0 K forms may run
+    lower, with zeros, when the reconstruction put them on its union grid."""
+    m = _m()
+    form = reaction.crossSection.forms.get(EVAL_LABEL)
+    if not isinstance(form, (m.XYs1d, m.Regions1d)):
+        form = reaction.crossSection[RECON_LABEL]
+    x = _flatten(form)[0]
     return float(x[0]), float(x[-1])
 
 
@@ -854,6 +850,10 @@ def _cascadePhotons(pops, reaction, awr):
         if pid not in pops:
             continue
         for line in m.cascadeLines(pops, pid):
+            if not line.photons > 0:
+                # A transition with no photons (all conversion electrons, or a
+                # zero branching) is not written, as ACER does not write it.
+                continue
             product = m.Product(pid="photon", label="photon")
             product.multiplicity = m.Multiplicity(form=m.XYs1d(xs=[lo, hi], ys=[line.photons] * 2))
             product.distribution = m.Distribution()
@@ -1021,9 +1021,23 @@ def _totalOn(out, T, grid):
     return total, fission
 
 
-def _attachNjoy(out, pieces, temperatures, styleKT, grids, heated, wanted, report):
+def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report):
+    """MT301, MT901 and MT444 by :func:`kika.processing.heating.heatingOf`, plus fission.
+
+    The fission part comes from MF1/458 as OpenMC's ``from_njoy`` adds it to
+    HEATR's ``301 − 318``: ``(EFR + EB)·σ_f`` for 301, ``(EFR + EGP + EGD + EB)·σ_f``
+    for 901.
+    """
     m = _m()
+    from kika.processing.heating import heatingOf
     from .fission_energy import evaluate
+
+    qm = {}
+    for container in (work.reactions, work.sums, work.fissionComponents):
+        for reaction in container:
+            value = getattr(reaction.provenance, "qm", None)
+            if reaction.ENDF_MT is not None and value is not None:
+                qm[reaction.ENDF_MT] = float(value)
 
     release = None
     fission = next((r for r in out.reactions if r.ENDF_MT in FISSION_MTS), None)
@@ -1031,16 +1045,24 @@ def _attachNjoy(out, pieces, temperatures, styleKT, grids, heated, wanted, repor
         releases = fission.outputChannel.fissionFragmentData.fissionEnergyReleases
         release = releases[0] if releases else None
     responses = {301: m.CrossSection(), 901: m.CrossSection(), 444: m.CrossSection()}
+    notes = None
     for temperature, (T, kT) in zip(temperatures, styleKT.items()):
-        piece = pieces.temperatures.get(float(temperature))
-        if piece is None:
-            raise MissingNJOYPieceError(f"no NJOY pieces at {temperature} K", wanted)
         grid = grids[T]
         total, sigmaF = _totalOn(out, T, grid)
         label = heatedLabel(T)
+        sigma = {}
+        for reaction in out.reactions:
+            form = reaction.crossSection.forms.get(label)
+            if form is not None and reaction.ENDF_MT is not None:
+                values = np.zeros_like(grid)
+                values[len(grid) - len(form):] = form.ys
+                sigma[reaction.ENDF_MT] = values
+        result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, ed=ed, evaluation=work,
+                           zaTarget=1000 * Z + A)
+        notes = result.notes
         if "kerma" in wanted:
-            nonlocal_ = np.interp(grid, *piece.kerma) * total
-            local = np.interp(grid, *piece.kermaLocal) * total
+            nonlocal_ = result.kerma
+            local = result.kermaLocal
             if release is not None:
                 efr = evaluate(release.promptProductKE, grid)
                 eb = evaluate(release.delayedBetaEnergy, grid)
@@ -1050,9 +1072,8 @@ def _attachNjoy(out, pieces, temperatures, styleKT, grids, heated, wanted, repor
                 local = local + (efr + egp + egd + eb) * sigmaF
             responses[301][label] = m.XYs1d(xs=grid, ys=nonlocal_, label=label)
             responses[901][label] = m.XYs1d(xs=grid, ys=local, label=label)
-        if "damage" in wanted and piece.damage is not None:
-            responses[444][label] = m.XYs1d(xs=grid, ys=np.interp(grid, *piece.damage) * total,
-                                            label=label)
+        if "damage" in wanted:
+            responses[444][label] = m.XYs1d(xs=grid, ys=result.damage, label=label)
     names = {301: "heating", 901: "heating-local", 444: "damage-energy"}
     for mt, cs in responses.items():
         if len(cs.forms):
@@ -1061,4 +1082,5 @@ def _attachNjoy(out, pieces, temperatures, styleKT, grids, heated, wanted, repor
                 outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
                 provenance=m.Hdf5Provenance(attributes={
                     "redundant": 1, "center_of_mass": 0 if mt == 444 else 1})))
-    report.warn(f"from NJOY ({pieces.njoy}), per roadmap D7: {', '.join(wanted)}")
+    for note in notes or ():
+        report.warn(note)

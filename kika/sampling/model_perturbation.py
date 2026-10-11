@@ -102,11 +102,9 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 #:     library is named -- ``NNNN/cross_sections.xml``, an overlay sending the
 #:     nuclide to the sample's file and everything else to the base library.
 #:     The realisation is multiplied at 0 K and broadened to each temperature
-#:     by kika (roadmap D12); the URR probability tables (kika's) and the
-#:     pieces taken from NJOY (KERMA, damage) are computed **once**, on the
-#:     unperturbed evaluation, and shared: the URR tables are not perturbed,
-#:     and the KERMA is the unperturbed heating number times the sample's
-#:     total. Needs an
+#:     by kika (roadmap D12), with the sample's own KERMA and damage. The
+#:     URR probability tables are computed **once**, on the unperturbed
+#:     evaluation, and shared: they are not perturbed. Needs an
 #:     :class:`HDF5Options`.
 EMITTERS = ("endf-delta", "endf-tape", "gnds", "ace", "hdf5")
 
@@ -121,14 +119,12 @@ class HDF5Options:
 
     ``temperatures`` in kelvin, all in one file per sample. ``baseLibrary``:
     the ``cross_sections.xml`` (or its directory) each sample's overlay points
-    the other materials at. ``njoy``, ``omit``: the NJOY pieces (roadmap D7),
-    as :func:`kika.hdf5.processing.processSuite` takes them. ``thnmax`` and
-    ``thinning`` as there too.
+    the other materials at. ``omit``, ``thnmax`` and ``thinning`` as
+    :func:`kika.hdf5.processing.processSuite` takes them.
     """
 
     temperatures: Tuple[float, ...] = (293.6,)
     baseLibrary: Optional[str] = None
-    njoy: Optional[object] = None
     omit: Tuple[str, ...] = ()
     thnmax: object = "njoy"
     thinning: Optional[float] = 1.0e-3
@@ -1927,8 +1923,7 @@ def _emitHdf5(suite, pset, sampleDir: Path, ctx, log, number: int) -> Dict[str, 
     folder = sampleDir / "hdf5"
     shared = ctx.hdf5Pieces or {}
     report = writeSuite(suite, folder, temperatures=list(options.temperatures),
-                        label=pset.label, njoyPieces=shared.get("njoy"),
-                        urrTables=shared.get("urr"), omit=tuple(options.omit),
+                        label=pset.label, urrTables=shared.get("urr"), omit=tuple(options.omit),
                         thnmax=options.thnmax, thinning=options.thinning, workers=1)
     files = {"h5": next(folder.glob("*.h5"))}
     if options.baseLibrary is not None:
@@ -1940,8 +1935,8 @@ def _emitHdf5(suite, pset, sampleDir: Path, ctx, log, number: int) -> Dict[str, 
 
 
 def _hdf5Pieces(options, suite, tape, log):
-    """The pieces every sample shares (D12), computed once on the unperturbed
-    evaluation: ``{"urr": {kelvin: tables}, "njoy": NJOY pieces}``."""
+    """What every sample shares (D12), computed once on the unperturbed
+    evaluation: ``{"urr": {kelvin: tables}}``."""
     shared = {}
     unresolved = suite.resonances is not None and suite.resonances.unresolved is not None
     if "urr" not in options.omit and unresolved:
@@ -1956,21 +1951,6 @@ def _hdf5Pieces(options, suite, tape, log):
         with log.timed("note", "URR probability tables for the hdf5 emitter (unperturbed)",
                        subject="hdf5"):
             shared["urr"] = urrTablesOf(suite, list(options.temperatures), context=context)
-    wanted = [p for p in ("kerma", "damage") if p not in options.omit]
-    if wanted:
-        if tape is None:
-            raise ValueError("the 'hdf5' emitter takes KERMA and damage from NJOY on the "
-                             "evaluation's tape, and the source has no path; name them in "
-                             "HDF5Options.omit to write without them")
-        from kika.hdf5.njoy_pieces import runNjoyPieces
-
-        mat = getattr(suite.provenance, "mat", None)
-        with log.timed("note", "NJOY pieces for the hdf5 emitter (unperturbed)",
-                       subject="hdf5") as info:
-            pieces = runNjoyPieces(tape, list(options.temperatures), mat=int(mat),
-                                   njoy=options.njoy, urr=False)
-            info["njoy"] = pieces.njoy
-        shared["njoy"] = pieces
     return shared or None
 
 

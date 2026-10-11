@@ -123,7 +123,7 @@ def processThermal(thermal, neutron, *, name: str, temperatures=None, njoy=None,
     m = _m()
     import kika
     from .ace_thermal import nuclidesFromPairs, readAceTable, thermalForms
-    from .njoy_pieces import _runCommand
+    from .njoy_run import runCommand
     from .thermal_names import THERMAL_DATA
 
     report = report if report is not None else m.ConversionReport()
@@ -153,7 +153,7 @@ def processThermal(thermal, neutron, *, name: str, temperatures=None, njoy=None,
         shutil.copyfile(thermal, base / "tape21")
         (base / "input").write_text(deck)
         if isinstance(njoy, (list, tuple)):
-            result = _runCommand(njoy, base, deck)
+            result = runCommand(njoy, base, deck)
         else:
             from kika.njoy.run_njoy import _run_njoy_deck
             from kika.processing.njoy_pendf_cache import find_njoy_executable
