@@ -9,16 +9,15 @@ one object type going through. What comes back is not the file — it is the
 cannot tell you what is missing from it and the report can.
 
 **GNDS and ENDF-6.** ``format="endf"`` assembles a whole tape from the model
-(``kika/endf/writers/assemble.py``, ``gnds_endf_conflicts.md`` §2.8) and is a
-different thing from ``kika/endf/write_endf.py``, which is a *patch-in-place*
-editor: that one rewrites the sections it is given inside a tape it already
+(``kika/endf/writers/assemble.py``) and is a different thing from
+``kika/endf/writers/endf_writer.py``, which is a *patch-in-place* editor: that one rewrites the sections it is given inside a tape it already
 read, and cannot produce a tape it was not handed. This door can, which is what
 makes a GNDS file convertible to ENDF at all.
 
 **What it cannot carry, it says.** A model read from ENDF carries MF1-7,
 MF12-15 and MF31-35 (MF32 from the section the decoder kept); MF6 has every
-law but LAW=5, and what the decoder kept only as declared bytes (MF1/460,
-MF8-10) is absent — so a model that never held something writes a tape without
+law but LAW=5, and MF1/460 is written back from the records the decoder kept;
+what the decoder kept only as declared bytes (MF8-10) is absent — so a model that never held something writes a tape without
 it, and the returned report names each one. A model that came from GNDS has
 no ENDF bookkeeping, and the files kika cannot derive yet are named as well
 (``model_adapter/derive``). The gate the writer
@@ -35,8 +34,8 @@ broken link and the second is an honest absence.
 
 **Where this is not for.** The thesis pipeline perturbs ENDF tapes and scores
 ENDF tapes; nothing here is on that path. This exists so that a model built or
-modified in kika can leave in a format somebody else's code reads — phase 8's
-``realization`` ensemble is the case it was built for.
+modified in kika can leave in a format somebody else's code reads — a
+perturbation run's ``realization`` forms, for instance.
 """
 from __future__ import annotations
 
@@ -91,8 +90,8 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         with a guess.
     tapeId
         ENDF only. The 66 text columns of the tape identification record.
-        ``read_endf`` does not keep a tape's first line, so a round trip cannot
-        reproduce the original and the default label says as much in the report.
+        By default the tape identification the suite was read with (``read_endf``
+        keeps it), else a generic label.
     label
         ENDF only. Which §9.1 style label to write out of each multi-form
         container; the default is ``'eval'``. Naming a ``realization`` label

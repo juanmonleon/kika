@@ -6,7 +6,9 @@ Attributes (§14.1.1, all required): ``evaluation``, ``format``, ``projectile``,
 ``sums``, ``fissionComponents``, ``productions``, ``incompleteReactions``,
 ``applicationData``.
 
-**Every child is present as an empty container, never as ``None``.** §14.1.2
+**Every child is present as an empty container, never as ``None`` -- except
+``resonances``,** which is ``None`` when the evaluation states no resonance
+data. §14.1.2
 notes that most children are optional so libraries can set their own
 requirements, which is exactly what lets kika ship a partially-filled hierarchy
 honestly — a slot that exists and is empty says "kika models this and this file

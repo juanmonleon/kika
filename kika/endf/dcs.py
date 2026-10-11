@@ -37,7 +37,7 @@ from kika._constants import FWHM_TO_SIGMA, NEUTRON_MASS_AMU
 from kika.processing.interpolation import interpolate_1d
 from kika.utils.energy_folding import tof_energy_resolution
 from kika.algebra import fold_tabulated, gaussian_fold_nodes, group_averages, interval_laws
-from kika._legendre_frames import cos_cm_from_cos_lab, cos_lab_from_cos_cm
+from kika._legendre_frames import cos_cm_from_cos_lab, cos_lab_from_cos_cm, jacobian_cm_to_lab
 
 __all__ = [
     "TofResolution",
@@ -265,16 +265,6 @@ def frame_alpha(*, awr: Optional[float] = None, mass_number: Optional[float] = N
 
 # `cos_lab_from_cos_cm` and `cos_cm_from_cos_lab` live in `kika._legendre_frames`,
 # where the sampler's MF34 frame change uses them too; imported above.
-
-
-def jacobian_cm_to_lab(mu_cm, alpha: float):
-    r"""Solid-angle Jacobian :math:`J = d\Omega_C/d\Omega_L` at :math:`\mu_C`.
-
-    .. math::
-        J = \frac{(1 + \alpha^2 + 2\alpha\mu_C)^{3/2}}{|1 + \alpha\mu_C|}
-    """
-    mu_cm = np.asarray(mu_cm, dtype=float)
-    return np.power(1.0 + alpha * alpha + 2.0 * alpha * mu_cm, 1.5) / np.abs(1.0 + alpha * mu_cm)
 
 
 def transform_angular_curve(

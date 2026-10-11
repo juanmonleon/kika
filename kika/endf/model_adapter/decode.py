@@ -6,8 +6,10 @@ format to calculation: ``kika.endf`` may import ``kika.nuclear_data``, never the
 reverse. Putting the adapter in the model would recreate exactly the inverted
 dependency phase 2 spent an increment straightening.
 
-**Nothing outside this package may import it.** Not ``kika/endf/__init__.py``,
-not ``read_endf``. A module-level import from either would put the model on the
+**Only an allow-listed module outside this package may import it**, and only
+from inside a function (``ALLOWED_IMPORTERS`` in
+``tests/test_nothing_imports_the_adapter.py``). Never ``kika/endf/__init__.py``,
+never ``read_endf``. A module-level import from either would put the model on the
 ``read_endf`` critical path and change what ``import kika`` costs for the
 cluster and the app — and ``kika.endf.model_adapter`` is deliberately absent
 from kika-app's PyInstaller ``hiddenimports``, so a lazy import from an
@@ -64,8 +66,9 @@ TAPE_ID_KEY = "tpid"
 
 __all__ = ["decodeMF3MT", "decodeMF1MT451", "decodeReactionSuite"]
 
-#: MF numbers kika's parser registry covers. Everything else is declared
-#: unsupported by the report rather than silently skipped.
+#: MF numbers this decoder converts into the model (the photon files, MF12-15,
+#: are handled beside them). Everything else the tape carries -- parsed or
+#: not -- is declared unsupported by the report rather than silently skipped.
 SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 
 #: Of those, the ones whose content belongs to the ``covarianceSuite``
@@ -85,9 +88,11 @@ PHOTON_MF = (12, 13, 14, 15)
 def _za(section) -> int:
     """ZA, **rounded** rather than truncated.
 
-    ENDF's fixed-format floats do not round-trip exactly: Th-232's
-    ``9.023200+4`` reads back as ``90231.99999999999``, and ``int()`` on that
-    names Ac-231. See :func:`kika.nuclear_data.model.provenance._asEndfInt`.
+    ``parse_number`` now converts an ENDF float with one correctly rounded
+    decimal conversion, so Th-232's ``9.023200+4`` reads exactly 90232; before
+    that fix it read ``90231.99999999999``, and ``int()`` on that named Ac-231.
+    Rounding stays because a ZA is an integer whatever float a file writes.
+    See :func:`kika.nuclear_data.model.provenance._asEndfInt`.
     """
     value = getattr(section, "zaid", None)
     if value is None:
@@ -337,7 +342,8 @@ def _summationMTs(present) -> set:
 def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     """A parsed ``ENDF`` object → a :class:`ReactionSuite`, plus the report.
 
-    MF1 (451 and the nu-bars), MF2, MF3 and MF4 are read. The covariances are
+    MF1 (451, the nu-bars, 458 and 460), MF2-7 and the photon files MF12-15
+    are read. The covariances are
     **not** part of a ``reactionSuite``: §25.1.1 makes ``covarianceSuite`` a
     root node in its own right, linked through ``externalFiles``, so
     MF31/33/34/35 go through
@@ -478,8 +484,8 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             )
             continue
         report.unsupportedNode(
-            f"MF{mf} is present in the file and kika's parser registry does not "
-            f"cover it; it is absent from this reactionSuite"
+            f"MF{mf} is present in the file and this decoder does not convert "
+            f"it; it is absent from this reactionSuite"
         )
     for mf in sorted((present & set(SUPPORTED_MF)) & set(COVARIANCE_MF)):
         report.unsupportedNode(

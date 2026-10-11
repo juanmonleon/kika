@@ -15,9 +15,10 @@ The middle, which is this module and ``core``, is shared. That is why
 load, draw and apply into one file, and only two thirds of that is really tied
 to a format.
 
-Nothing here imports :mod:`kika.nuclear_data.model`, and that is enforced
-elsewhere by the layering ratchet: these functions duck-type the suite so that
-``import kika.sampling`` never drags the model onto the critical path.
+Nothing here imports :mod:`kika.nuclear_data.model`: these functions duck-type
+the suite so that ``import kika.sampling`` never drags the model onto the
+critical path. No test enforces it -- ``kika/sampling`` is not one of the
+packages ``kika/tests/test_layering.py`` guards -- so keep it that way by hand.
 :mod:`kika._covariance_forms`, the one thing they do import, duck-types it for
 the same reason and imports nothing itself.
 """

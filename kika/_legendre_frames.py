@@ -116,6 +116,16 @@ def cos_cm_from_cos_lab(mu_lab, alpha: float):
     return -alpha * s + mu_lab * np.sqrt(np.maximum(1.0 - alpha * alpha * s, 0.0))
 
 
+def jacobian_cm_to_lab(mu_cm, alpha: float):
+    r"""Solid-angle Jacobian :math:`J = d\Omega_C/d\Omega_L` at :math:`\mu_C`.
+
+    .. math::
+        J = \frac{(1 + \alpha^2 + 2\alpha\mu_C)^{3/2}}{|1 + \alpha\mu_C|}
+    """
+    mu_cm = np.asarray(mu_cm, dtype=float)
+    return np.power(1.0 + alpha * alpha + 2.0 * alpha * mu_cm, 1.5) / np.abs(1.0 + alpha * mu_cm)
+
+
 def _dlab_dcm(mu_cm, alpha: float):
     r""":math:`d\mu_L/d\mu_C = (1 + \alpha\mu_C)/(1 + 2\alpha\mu_C + \alpha^2)^{3/2}`."""
     mu_cm = np.asarray(mu_cm, dtype=float)

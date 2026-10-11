@@ -1,7 +1,8 @@
 """kika's canonical nuclear-data model, shaped and named after GNDS-2.1.
 
 **Dormant on purpose.** ``kika/nuclear_data/__init__.py`` does not import this
-package, and must not until phase 3d. Everything under ``kika/`` reaches
+package at module scope, and must not: the flat classes reach it from inside
+their methods only. Everything under ``kika/`` reaches
 ``kika.nuclear_data`` transitively on ``import kika`` — ``kika/__init__.py:13``
 does ``from . import nuclear_data`` at module scope — so an import error, a
 circular import or a slow table build in here would break the cluster pipeline,
