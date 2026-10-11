@@ -54,6 +54,13 @@ def _block(size: int) -> np.ndarray:
     return 1.0 + 0.05 * np.cos(np.arange(size, dtype=float))
 
 
+def _linlin(xs, ys):
+    from kika.nuclear_data.model.enums import Interpolation
+    from kika.nuclear_data.model.functions.xys1d import XYs1d
+    return XYs1d(xs=np.asarray(xs, dtype=float), ys=np.asarray(ys, dtype=float),
+                 interpolation=Interpolation.linlin)
+
+
 def _table(form):
     xs, ys, pairs = form.toEndfRegions()
     return np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), pairs
@@ -176,3 +183,50 @@ def test_a_perturbed_multiplicity_is_still_writable(tape):
     assert len(pairs) == 1 and pairs[0][1] == 2, (
         "the perturbed table is one lin-lin region, which is what the format "
         "applier writes and what the sum rule is stated on")
+
+
+def test_a_table_past_the_grid_steps_back_to_baseline_at_the_last_edge():
+    """Outside the grid the factor is 1, and it steps there, not over a ramp.
+
+    A nu-bar to 30 MeV under a block that stops at 10 MeV used to ramp from 0.9
+    to 1 across 10-30 MeV, because the block's outer edges were never inserted.
+    """
+    xs = np.array([1.0e-5, 1.0e6, 3.0e7])
+    ys = np.full(3, 2.5)
+    form = Regions1d(function1ds=[_linlin(xs, ys)])
+    edges = np.array([1.0, 1.0e6, 1.0e7])
+
+    perturbed, _diagnostics = applyNubarFactors(form, np.array([0.9, 0.9]), edges)
+    probe = np.array([0.5, 5.0, 5.0e6, 9.99e6, 1.002e7, 2.0e7])
+    newXs, newYs, _pairs = _table(perturbed)
+    np.testing.assert_allclose(np.interp(probe, newXs, newYs) / 2.5,
+                               [1.0, 0.9, 0.9, 0.9, 1.0, 1.0], atol=1e-12)
+
+
+def test_the_two_appliers_agree_past_the_grid():
+    """The format applier's grid augmentation states the same outer steps."""
+    from kika.sampling.mf31_sampling import _augment_nubar_grid
+    xs = np.array([1.0e-5, 1.0e6, 3.0e7])
+    ys = np.array([2.4, 2.5, 4.0])
+    edges = np.array([1.0, 1.0e6, 1.0e7])
+    model, _ = refineForNubar(xs, ys, edges)
+    shipped, _n, _interp = _augment_nubar_grid(xs, ys, edges)
+    np.testing.assert_array_equal(model, shipped)
+
+
+def test_a_polynomial_nubar_is_tabulated_and_scaled():
+    """LNU=1 used to fail: Polynomial1d has no toEndfRegions."""
+    from kika.nuclear_data.model.functions.simple import Polynomial1d
+    poly = Polynomial1d(coefficients=np.array([2.4, 1.0e-7]),
+                        domainMin_=1.0e-5, domainMax_=2.0e7)
+    edges = np.array([1.0e-5, 1.0e6, 2.0e7])
+    perturbed, diagnostics = applyNubarFactors(poly, np.array([1.1, 0.9]), edges)
+
+    assert isinstance(perturbed, Regions1d)
+    assert diagnostics["regions_collapsed"]
+    newXs, newYs, _pairs = _table(perturbed)
+    assert newXs[0] == 1.0e-5 and newXs[-1] == 2.0e7
+    assert np.all(np.diff(newXs) > 0)
+    for energy, factor in ((5.0e5, 1.1), (1.0e7, 0.9)):
+        nearest = np.argmin(np.abs(newXs - energy))
+        assert newYs[nearest] == pytest.approx(factor * poly.evaluate(newXs[nearest]))

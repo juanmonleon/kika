@@ -388,15 +388,23 @@ def _axesUnlessNested(element: ET.Element, form, report: ConversionReport,
 
     The reader hands a container's ``Axes`` **object** to each of its children,
     so ``child.axes is parent.axes`` is how inheritance is spelled in the model
-    and is silent here. A child holding a *different* axes object is something
-    no distributed file does and the schema has no slot for, so it is reported
-    rather than written into a position that would make the file invalid.
+    and is silent here. Separate plain axes with identical fields inherit too.
+    Differing child axes have no schema slot and are reported rather than written
+    into a position that would make the file invalid. Grid-valued axes retain the
+    identity rule so array comparisons cannot silently discard a distinct grid.
     """
     if not nested:
         _axes(element, form.axes)
         return
     own = getattr(form, "axes", None)
-    if own is not None and own is not parentAxes:
+    # Numerically generated regions can own separate but identical plain Axes.
+    # Their values inherit without loss; object identity is not physics.
+    from kika.nuclear_data.model import Axis, Axes
+    equivalent = (isinstance(own, Axes) and isinstance(parentAxes, Axes)
+                  and own.href == parentAxes.href
+                  and all(type(a) is Axis for a in (*own.axes, *parentAxes.axes))
+                  and own.axes == parentAxes.axes)
+    if own is not None and own is not parentAxes and not equivalent:
         report.lost(
             f"{where}: a nested {type(form).__name__} carries axes of its own, "
             f"which §5.1.1 has no slot for on a child; they are not written"

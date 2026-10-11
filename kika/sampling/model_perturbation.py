@@ -28,7 +28,6 @@ Three things it does differently, each of them deliberate:
   as stated. A new pipeline starts without autofix so that nobody has to take
   it away later; ``psd_method`` therefore defaults to ``"none"`` here, because
   by the time the draw happens the repairs have already been made and named.
-  The whole argument is in ``docs/library/autofix_in_the_model.md``.
 
 * **It keeps a log of events, and it can rehearse.** Every stage is a timed
   event with its numbers on a :class:`~kika.sampling.run_log.RunLog`, written
@@ -36,12 +35,11 @@ Three things it does differently, each of them deliberate:
   it but the tapes, so a run can be checked on a laptop before it is launched.
 
 * **One factors table per run.** Every realisation goes to ``factors.parquet``
-  with one ``factors_index.json``, rather than a JSON per sample.
+  with its index in the table's own metadata, rather than a JSON per sample.
 * **One suite, labelled forms, no ``deepcopy``.** §9.1's multi-form container
   holds the realisation beside the evaluation, which is what it is for; the
   label is removed again once the sample is written, so memory does not grow
-  with the ensemble. The measurement that decided this is D6 in
-  ``docs/library/perturbation_model_roadmap.md``.
+  with the ensemble.
 * **The emitters declare what they cannot carry.** ``endf-delta`` re-encodes
   only the files a realisation touched and patches them into the tape that was
   read, so everything else survives verbatim and ``cmp`` between two samples
@@ -114,9 +112,11 @@ class AceOptions:
         Kelvin, one ACE per value. A value below 1.0 is read as MeV, as the
         NJOY runner has always done.
     njoyExe
-        Path to the NJOY executable. Defaults to the ``NJOY_EXE`` environment
-        variable; a run that cannot find NJOY is refused before anything is
-        drawn, and a dry run says so too.
+        Path to the NJOY executable. Defaults to ``$NJOY_EXECUTABLE``, else
+        ``njoy`` on PATH -- the lookup the resonance reconstruction uses
+        (:func:`~kika.processing.njoy_pendf_cache.find_njoy_executable`); a run
+        that cannot find NJOY is refused before anything is drawn, and a dry
+        run says so too.
     libraryName
         For the ACE title and the library digit of the suffix -- ``'jeff40'``,
         ``'endfb81'``, see ``kika._constants.NDLIBRARY_TO_SUFFIX``.
@@ -149,7 +149,11 @@ class AceOptions:
         if self.extensions is not None:
             object.__setattr__(self, "extensions", tuple(str(e) for e in self.extensions))
         if self.njoyExe is None:
-            object.__setattr__(self, "njoyExe", os.environ.get("NJOY_EXE"))
+            import shutil
+            from kika.processing.njoy_pendf_cache import NJOY_ENV_VAR
+
+            object.__setattr__(self, "njoyExe",
+                               os.environ.get(NJOY_ENV_VAR) or shutil.which("njoy"))
 
     def validate(self) -> None:
         """Refuse now what NJOY would refuse later, with the reason."""
@@ -161,8 +165,8 @@ class AceOptions:
                 f"temperature(s): give one per temperature, or none")
         if not self.njoyExe:
             raise ValueError(
-                "no NJOY executable: pass AceOptions(njoyExe=...) or set the "
-                "NJOY_EXE environment variable")
+                "no NJOY executable: pass AceOptions(njoyExe=...), set the "
+                "NJOY_EXECUTABLE environment variable, or put njoy on PATH")
         if not Path(self.njoyExe).is_file():
             raise FileNotFoundError(f"NJOY executable not found: {self.njoyExe}")
 
@@ -430,7 +434,7 @@ def _tabulatedAngularNote(applied) -> Optional[str]:
     computed, as the Legendre path leaves a negative series), and how far the
     lin-lin integral of the table moved -- the correction integrates to zero
     in the continuum but not between nodes, and a coarse cosine grid is where
-    that stops being small (decision D3 of the roadmap).
+    that stops being small.
 
     The text is the same for every sample, so the run records it once; the
     numbers are per realisation and live in its diagnostics under ``tables``.
@@ -831,6 +835,45 @@ def _missingReactions(request, entries) -> Dict[int, List[int]]:
     return missing
 
 
+def _dropUnstatedReactions(suite, entries, onMissing, skipped, log):
+    """The entries whose cross section the evaluation states; refuse or note the rest.
+
+    Only reachable with ``covarianceSource``: a covariance from another file
+    can state a reaction (MT16, say) the evaluation has neither as a section
+    nor through partials, so its factor has nothing to move. ``onMissing``
+    decides, as it does for a reaction the request names and the covariance
+    lacks.
+    """
+    from kika.sampling.cross_section_sums import suiteSumLayout, unstatedClaims
+
+    claimed = {int(key.mt) for rowKey, colKey, *_rest in entries
+               for key in (rowKey, colKey) if key.mf == 33}
+    present, _sums = suiteSumLayout(suite)
+    unstated = set(unstatedClaims(claimed, present))
+    if not unstated:
+        return entries
+    names = ", ".join(f"MT{mt}" for mt in sorted(unstated))
+    if onMissing == "raise":
+        raise ValueError(
+            f"{names}: the covariance states {'it' if len(unstated) == 1 else 'them'} "
+            f"and the evaluation does not -- no section and no partials -- so a "
+            f"factor would have nothing to move. Pass onMissing='skip' to "
+            f"perturb the rest and record the omission")
+    kept = [entry for entry in entries
+            if not any(key.mf == 33 and int(key.mt) in unstated
+                       for key in entry[:2])]
+    if not kept:
+        raise ValueError(
+            f"every cross-section block the request reaches is for a reaction "
+            f"the evaluation does not state ({names}), so nothing is left to "
+            f"perturb")
+    note = (f"{names}: stated by the covariance and not by the evaluation, so "
+            f"not perturbed")
+    skipped.append(note)
+    log.warning(note, subject="MF33", reactions=sorted(unstated))
+    return kept
+
+
 def _statedCrossSectionMTs(covariances) -> set:
     """The MTs MF33 states a covariance for (a diagonal section), unassembled.
 
@@ -887,7 +930,7 @@ def _expandNamedSums(suite, covariances, request, log, lumped=None,
 
     Asking for MT4 on a tape that states covariances for MT51 and MT52 is
     asking to perturb inelastic scattering, and the file says that is done
-    through MT51 and MT52 (Juan, 2026-10-07): they are added to the request,
+    through MT51 and MT52: they are added to the request,
     the sum stays in it (its block is then discarded, or carried to the rest
     with ``sumBlocks="fill"``), and the run says so. A sum whose covariance is
     only *derived* -- B-VIII.1 U-235's MT1, stated as the sum of its channels
@@ -1186,8 +1229,14 @@ def resolveSpaces(blocks, index, space):
 
 def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod,
                     samplingMethod, psdMethod, nullTol, logger,
-                    statedBlocks=None):
+                    statedBlocks=None, inDrawSpace=False):
     """Draw every block, each under the convention its covariance states.
+
+    *inDrawSpace* says the relative blocks drawn in log space are already
+    ``log1p(Σ)`` -- the run conditions them in the space they are drawn in, as
+    the format pipeline does -- so they go to
+    :func:`~kika.sampling.core.draw_prepared_samples` rather than through a
+    second ``log1p``.
 
     Returns the merged ``(samples, diagnostics)``, keyed exactly as a single
     call would have keyed them.
@@ -1220,7 +1269,8 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
     * and reported per band with the legacy run summary's numbers
       (:func:`~kika.sampling.mf35_sampling.band_draw_report`).
     """
-    from kika.sampling.core import BLOCK_SEED_STRIDE, draw_samples
+    from kika.sampling.core import (BLOCK_SEED_STRIDE, draw_prepared_samples,
+                                    draw_samples)
 
     factorBlocks, deltaBlocks = _splitBySemantics(blocks, index)
     samples: Dict[Hashable, np.ndarray] = {}
@@ -1239,7 +1289,8 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
                  if spaces[key] == wanted]
         if not group:
             continue
-        drawn, info = draw_samples(
+        draw = draw_prepared_samples if inDrawSpace else draw_samples
+        drawn, info = draw(
             group, nSamples, space=wanted, returns="factors",
             decomposition_method=decompositionMethod,
             sampling_method=samplingMethod,
@@ -1440,7 +1491,7 @@ def _readSource(source, log, covarianceSource=None):
 #: it -- measured to *improve* the residual (4.2e-6 -> 3.0e-6 on Cf-252). A
 #: congruence (``clip_rescale``, ``cap``) maps 1 to D·1 and took it to 2.2e-3;
 #: Higham degraded it ~40x. The masks and rescales drop or move rows, which
-#: breaks the sum on the retained subspace. ``pfns_mf5_mf35_roadmap.md`` L1.
+#: breaks the sum on the retained subspace.
 SUM_RULE_SAFE_REMEDIES = ("none", "clip")
 
 
@@ -1960,8 +2011,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         run on a laptop is what a full run on the cluster will do, minus the
         files that take the time.
     writeFactors
-        Write every realisation's factors to **one** ``factors.parquet`` with
-        its ``factors_index.json`` -- see
+        Write every realisation's factors to **one** ``factors.parquet``, its
+        index in the file's metadata -- see
         :func:`~kika.sampling.perturbation_set.writeFactorsTable`. On by
         default.
     writeSets
@@ -1996,11 +2047,13 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         ``run_metadata.json``. A request where *nothing* matches still raises,
         because that is a run with no perturbation in it.
     angularPositivity
-        What to do where a perturbed **table** of f(mu) goes negative at a
-        node. ``"report"`` (the default) counts it and leaves it, which is what
-        the Legendre path does with a negative series. ``"repair"`` moves the
-        perturbed orders by the least amount that makes every node
-        non-negative (:func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`).
+        What to do where a perturbed angular distribution has f(mu) < 0 -- a
+        Legendre series negative somewhere in mu, or a table negative at a
+        node. ``"report"`` (the default) counts it and leaves it. ``"repair"``
+        moves the perturbed orders by the least amount that makes it
+        non-negative (:func:`~kika.sampling.mf4_positivity.project_mf4_to_positive`
+        for a series, :func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`
+        for a table).
         A strongly forward-peaked table -- U-238 above 17 MeV, with
         ``f(-1) ~ 1e-4`` -- goes negative under a few percent on ``a_1``, so
         on such tapes this is a choice and not a detail.
@@ -2089,9 +2142,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                 f"{needsTape} need an ENDF tape written from the model, and a "
                 f"suite read from GNDS cannot be written as one yet: it carries "
                 f"no MF1/451 header, no AWR and no Q/LR for its summed reactions, "
-                f"and the ENDF encoders refuse to invent them. That is the "
-                f"GNDS->ENDF increment deferred as §6.3 of "
-                f"docs/library/gnds_endf_conflicts.md; until it lands a GNDS "
+                f"and the ENDF encoders refuse to invent them, so a GNDS "
                 f"source can be perturbed to 'gnds' only. (MAT would be "
                 f"{_matOf(suite)} from the library's table when it does.)"
             )
@@ -2183,6 +2234,15 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     for note in magnitudeNotes:
         skipped.append(note)
         log.warning(note, subject="MF34")
+    from kika.sampling.joint_blocks import absoluteSectionsLeftOut
+
+    leftOut = absoluteSectionsLeftOut(covariances, request)
+    if leftOut:
+        note = (f"{len(leftOut)} absolute covariance section(s) not drawn -- "
+                f"the appliers multiply, and the model route does not convert "
+                f"an absolute section to a relative one: {', '.join(leftOut)}")
+        skipped.append(note)
+        log.warning(note, subject="absolute sections", sections=leftOut)
     log.event("request", _describeRequestForPeople(request),
               request={str(k): _jsonableRequest(v) for k, v in request.items()}
               if isinstance(request, Mapping) else str(request),
@@ -2203,6 +2263,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                 f"{'it' if len(absent) == 1 else 'them'} from the request, or "
                 f"pass onMissing='skip' to perturb the rest and record the "
                 f"omission")
+        entries = _dropUnstatedReactions(suite, entries, onMissing, skipped, log)
         sumRecord: Dict[str, Any] = {"mode": sumBlocks}
         if crossSectionSums:
             entries, sumRecord, sumNotes = _screenSumBlocks(
@@ -2248,6 +2309,14 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
 
     layer1 = relevantFindings(sectionFindings(covariances), index)
     statedBlocks = {key: matrix for key, matrix in blocks}
+    # A relative block drawn in log space is conditioned and decomposed as
+    # log1p(Σ), the covariance of ln f -- the matrix the draw actually samples,
+    # and the space the format pipeline conditions in (multigroup_draw).
+    factorBlocks, _deltaBlocks = _splitBySemantics(blocks, index)
+    logKeys = {key for key, wanted in resolveSpaces(factorBlocks, index, space).items()
+               if wanted == "log"}
+    blocks = [(key, np.log1p(np.asarray(matrix, dtype=float)) if key in logKeys
+               else matrix) for key, matrix in blocks]
     blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
         blocks, index, conditioningPlan, log, labels, layer1)
 
@@ -2256,7 +2325,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             blocks, index, nSamples, seed=seed, space=space,
             decompositionMethod=decompositionMethod,
             samplingMethod=samplingMethod, psdMethod=psdMethod, nullTol=nullTol,
-            logger=None, statedBlocks=statedBlocks)
+            logger=None, statedBlocks=statedBlocks, inDrawSpace=True)
     for key, diag in drawDiagnostics.items():
         log.event("drawn", f"rank {diag['rank']} of {diag['n']}, "
                   f"{diag['n_null']} null direction(s)",
@@ -2454,9 +2523,9 @@ def _jsonableMoments(moments) -> Dict[str, Any]:
 
 
 def _orphanPhotonNote(suite, index) -> Optional[str]:
-    """Decision J9 of the E5 plan, said once per run: the photons of a sum stay put.
+    """Said once per run: the photons of a sum stay put.
 
-    MT3/MT4/MT103-107 photons are ``orphanProducts`` of the sum (roadmap E5d).
+    MT3/MT4/MT103-107 photons are ``orphanProducts`` of the sum.
     A realisation that moves MF3 does not move their multiplicities -- that
     would need a rule for how a partial's change reaches the sum's photons, and
     nothing asks for one until there is UQ of gamma heating. MF13 production on

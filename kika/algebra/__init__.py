@@ -4,8 +4,8 @@ A tabulated function here is three arrays: abscissae ``x`` (non-decreasing),
 ordinates ``y``, and one interpolation law per *interval*, ``laws``, with the
 ENDF/GNDS codes 1-5 (histogram, lin-lin, lin-log, log-lin, log-log). Nothing
 else: no units, no reaction numbers, no file formats, no physics. Those live
-above this package, which **imports nothing from kika** -- ``kika/tests/
-test_layering.py`` enforces it -- so the model, the format adapters and the
+above this package, which **imports nothing from kika** --
+``kika/algebra/tests/test_algebra.py`` enforces it -- so the model, the format adapters and the
 physics can all build on it without a cycle.
 
 **This package is mathematics only, and that is its purpose.** A function here

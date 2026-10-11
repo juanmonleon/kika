@@ -100,7 +100,7 @@ def test_ifg1_gnds_mixed_energy_and_amplitude_units_roundtrip(capture_explicit):
     from kika.nuclear_data.model import ConversionReport
     source,ctx=rml_model();f=source.resolved[0].formalism
     if capture_explicit:
-        f.approximation='RMatrixLimited';f.resonanceReactions[2].eliminated=False
+        f.approximation='FullRMatrix';f.resonanceReactions[2].eliminated=False
         f.spinGroups[0].channels[2].boundaryConditionValue=0.
     root=ET.Element('reactionSuite');report=ConversionReport()
     represented=deepcopy(source)
@@ -215,7 +215,7 @@ def test_krm4_ifg1_native_suite_publication(tmp_path):
     from kika.gnds.xpath import Document
     suite=writable_suite();source,ctx=rml_model();suite.resonances=source
     f=source.resolved[0].formalism;g=f.spinGroups[0]
-    f.approximation='RMatrixLimited';f.resonanceReactions[2].eliminated=False
+    f.approximation='FullRMatrix';f.resonanceReactions[2].eliminated=False
     f.resonanceReactions=[f.resonanceReactions[i] for i in (0,2)]
     g.channels=[g.channels[i] for i in (0,2)];g.widths=[[row[i] for i in (0,2)] for row in g.widths]
     g.channels[1].boundaryConditionValue=0.
@@ -264,7 +264,7 @@ def test_split_coherent_sectors_preserve_shared_channel_interference():
 @pytest.mark.parametrize('amplitudes',[False,True])
 def test_explicit_capture_krm4_against_independent_level_matrix(amplitudes):
     source,ctx=rml_model(amplitudes=amplitudes)
-    f=source.resolved[0].formalism;f.approximation='RMatrixLimited'
+    f=source.resolved[0].formalism;f.approximation='FullRMatrix'
     f.resonanceReactions[2].eliminated=False
     f.spinGroups[0].channels[2].boundaryConditionValue=0.
     # A second explicit photon channel preserves coherent off-diagonal level
@@ -292,7 +292,7 @@ def test_single_level_explicit_capture_matches_eliminated_capture():
     source,ctx=rml_model();g=source.resolved[0].formalism.spinGroups[0]
     g.energies=g.energies[:1];g.widths=g.widths[:1]
     explicit=deepcopy(source);f=explicit.resolved[0].formalism
-    f.approximation='RMatrixLimited';f.resonanceReactions[2].eliminated=False
+    f.approximation='FullRMatrix';f.resonanceReactions[2].eliminated=False
     f.spinGroups[0].channels[2].boundaryConditionValue=0.
     e=np.array([30.,75.,99.9,100.,100.1,180.])
     a=prepare_resonances(source,ctx).evaluate(e);b=prepare_resonances(explicit,ctx).evaluate(e)
@@ -390,7 +390,7 @@ def test_relativistic_charged_against_independent_60_digit_level_matrix(q,explic
     # Constants from the independent invariant/Coulomb/level-space gate,
     # archived in workspace evidence. No production kernel generates them.
     source,ctx=rml_model(amplitudes=amplitudes);f=source.resolved[0].formalism
-    f.relativisticKinematics=True;f.approximation='RMatrixLimited' if explicit else 'ReichMoore'
+    f.relativisticKinematics=True;f.approximation='FullRMatrix' if explicit else 'ReichMoore'
     f.resonanceReactions[2].eliminated=not explicit
     f.spinGroups[0].channels[2].boundaryConditionValue=0.
     rr=f.resonanceReactions[1];rr.reactionMT=103;rr.Q=q
@@ -439,7 +439,7 @@ def test_passive_kps_level_matrix_and_separate_reaction_ownership(explicit):
     from kika.nuclear_data.model.resonances import ResonanceReaction
     source,ctx=rml_model();f=source.resolved[0].formalism;g=f.spinGroups[0]
     if explicit:
-        f.approximation='RMatrixLimited';f.resonanceReactions[2].eliminated=False
+        f.approximation='FullRMatrix';f.resonanceReactions[2].eliminated=False
         g.channels[2].boundaryConditionValue=0.
     f.resonanceReactions.append(ResonanceReaction('opticalLoss',reactionMT=18,
         kinematics=deepcopy(f.resonanceReactions[2].kinematics)))
@@ -642,3 +642,26 @@ def test_kps_first_chance_fission_ownership_uses_the_kernel_fission_total():
     actual=prepare_resonances(source,ctx).evaluate(np.array([100.1]))
     assert 19 not in actual and actual[18][0]>0
     np.testing.assert_allclose(actual[1],actual[2]+actual[51]+actual[102]+actual[18],rtol=2e-14)
+
+
+def test_an_endf_krm4_section_reconstructs_without_overriding_the_approximation():
+    # LRF=7 KRM=4 read from ENDF used to decode to approximation='Full', which
+    # the engine rejected; the tests only passed by setting the name by hand.
+    from kika.endf.classes.mf2.mf2mt151 import (MF2MT151,Isotope,EnergyRange,RMatrixLimited,
+        RML_ParticlePair,RML_Channel,RML_SpinGroup,RML_Resonance)
+    from kika.endf.parsers.parse_mf2 import parse_mf2_mt151
+    from kika.endf.model_adapter import decodeMF2MT151
+    from kika.processing.resonances import NeutronContext
+    p=RMatrixLimited(0,4,0,.5,.5,
+        [RML_ParticlePair(1.,56.,0.,26.,.5,.5,0.,1,0,2,1.,1.),RML_ParticlePair(0.,0.,0.,0.,0.,0.,1e6,-1,0,102,1.,1.)],
+        [RML_SpinGroup(1.,1.,0,0,[RML_Channel(1,0,1.,.2,0.,.5),RML_Channel(2,0,0.,0.,0.,0.)],
+          [RML_Resonance(100.,[.1,.2])])])
+    section=MF2MT151(number=151);section._za,section._awr,section._mat,section._nis=26056,56.,2631,1
+    section._isotopes=[Isotope(26056,1.,0,1,[EnergyRange(10.,300.,1,7,0,1,p)])]
+    model,_,report=decodeMF2MT151(parse_mf2_mt151(str(section).splitlines(),151))
+    assert report.isClean
+    f=model.resolved[0].formalism
+    assert f.approximation=='FullRMatrix'
+    assert not any(rr.eliminated for rr in f.resonanceReactions)
+    value=prepare_resonances(model,NeutronContext(56.,.5)).evaluate(np.array([50.,100.,150.]))
+    assert value[102][1]>value[102][0]>0

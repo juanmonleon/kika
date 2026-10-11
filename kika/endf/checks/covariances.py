@@ -24,7 +24,8 @@ never a threshold on sigma), covariance where the variance is zero, and the size
 of the uncertainty against the central values -- MF3 or a PENDF for MF33, nu-bar
 of MF1 for MF31, the a_l of MF4 for MF34. Only bounds that hold are used: sigma(a_l)
 > 1 is impossible (|a_l| <= 1), while a cross section has no upper bound, so its
-sigma_rel > 1 is a note and only sigma_rel > 10 outside a threshold region -- past
+sigma_rel > 1 is a note and only sigma_rel > 10 outside a threshold region (bins
+whose average is under 1 % of the largest bin average) -- past
 anything the three major libraries state -- a warning. Without central values a
 block is reported "not evaluable", not guessed.
 
@@ -115,8 +116,9 @@ RHO_QUANTUM_SHARE = 0.98
 #: Slack on the spectral norm of a symmetric rounding error, ~2 s sqrt(n).
 RHO_QUANTUM_SLACK = 1.5
 
-#: MF33/MF31: sigma_bar below this fraction of the reaction's maximum is a
-#: threshold region, where any relative uncertainty is legitimate.
+#: MF33/MF31: sigma_bar below this fraction of the reaction's largest bin average
+#: (over the covariance grid, not the pointwise peak) is a threshold region, where
+#: any relative uncertainty is legitimate.
 RELATIVE_THRESHOLD_ZONE = 0.01
 #: The measured edge of sigma_rel outside threshold regions in ENDF/B-VIII.1,
 #: JEFF-4.0 and JENDL-5 (6-oct-2026): nothing reaches it.
@@ -515,7 +517,9 @@ def _rho_finding(corr: np.ndarray, rows: np.ndarray, cols: np.ndarray, grid, loc
     if worst <= 1 + RHO_ROUNDING:
         return
     i, j = np.unravel_index(int(np.argmax(a)), a.shape)
-    n_bad = int(np.sum(a > 1 + RHO_DEFECT))
+    # A self block is symmetric, so count each pair once (the upper triangle), as
+    # the MF32 check does; a cross block has no mirror and every entry is a pair.
+    n_bad = int(np.sum((np.triu(a, 1) if self_block else a) > 1 + RHO_DEFECT))
     level = DEFECT if worst > 1 + RHO_DEFECT else NOTE
     evidence = {
         "max_abs_rho": worst,
@@ -524,7 +528,8 @@ def _rho_finding(corr: np.ndarray, rows: np.ndarray, cols: np.ndarray, grid, loc
     }
     if extra:
         evidence.update(extra)
-    summary = (f"|rho| up to {worst:.4g} ({n_bad} entries above 1+{RHO_DEFECT:g})"
+    summary = (f"|rho| up to {worst:.4g} ({n_bad} {'pairs' if self_block else 'entries'} "
+               f"above 1+{RHO_DEFECT:g})"
                if level == DEFECT else
                f"|rho| up to {worst:.7g}, within rounding of the stored values")
     if extra and extra.get("stored_triangle_max_abs_rho") is not None:
@@ -701,7 +706,8 @@ def _relative_uncertainty(rel: np.ndarray, central: np.ndarray, valid: np.ndarra
       to make. Over the three libraries thousands of bins sit between 1 and 10,
       outside threshold regions too: there is no edge at 1 to call a defect.
     * ``implausible_relative_uncertainty`` (warn) -- sigma_rel > 10 where sigma_bar
-      is at least 1 % of the reaction's maximum (outside a threshold region,
+      is at least 1 % of the largest bin average of the reaction on the covariance
+      grid (outside a threshold region,
       where sigma_bar -> 0 makes any ratio legitimate). That is past the measured
       edge of the distribution: in ENDF/B-VIII.1, JEFF-4.0 and JENDL-5 no bin
       outside a threshold region reaches it, so what does is an outlier of the
@@ -726,7 +732,7 @@ def _relative_uncertainty(rel: np.ndarray, central: np.ndarray, valid: np.ndarra
         out.append(CovarianceFinding(
             "implausible_relative_uncertainty", WARN,
             f"sigma_rel up to {rel[w]:.3g} in {j.size} bins where the cross section is not "
-            f"near a threshold (sigma_bar {central[w]:.4g}, {central[w] / smax:.0%} of its maximum), "
+            f"near a threshold (sigma_bar {central[w]:.4g}, {central[w] / smax:.0%} of its largest bin average), "
             f"past the largest value any of the three major libraries states there "
             f"({RELATIVE_IMPLAUSIBLE:g})", loc,
             {"n": int(j.size), "worst_rel": float(rel[w]), "worst_bin": _bins(grid, [w])[0],
@@ -734,7 +740,7 @@ def _relative_uncertainty(rel: np.ndarray, central: np.ndarray, valid: np.ndarra
     out.append(CovarianceFinding(
         "relative_uncertainty_above_one", NOTE,
         f"sigma_rel above 100 % in {idx.size} bins (worst {rel[k]:.3g} at "
-        f"{grid[k]:.4g}-{grid[k + 1]:.4g} eV, sigma_bar {central[k] / smax:.1%} of the maximum); "
+        f"{grid[k]:.4g}-{grid[k + 1]:.4g} eV, sigma_bar {central[k] / smax:.1%} of the largest bin average); "
         f"a normal draw there is negative with probability {p_negative(rel[k]):.0%}", loc,
         {"n": int(idx.size), "n_outside_threshold_zone": int((above & bulk).sum()),
          "worst_rel": float(rel[k]), "worst_bin": _bins(grid, [k])[0],
@@ -1692,6 +1698,25 @@ def _joint_psd(nodes, grids, selfs, cross, describe, loc, out) -> None:
                                      loc(members), evidence))
 
 
+def _left_out_finding(node: str, block: str, rel_block: bool, rel_row: bool,
+                      rel_col: bool, loc, out) -> None:
+    """A node the joint check leaves out because a cross block's class disagrees.
+
+    Relative and absolute covariances cannot share one joint matrix, and dropping
+    the cross block alone could fake an indefinite joint, so the second node goes
+    with all its blocks. Said here, so a joint check that passes is not read as
+    covering a reaction it never saw.
+    """
+    def word(r):
+        return "relative" if r else "absolute"
+
+    out.append(CovarianceFinding(
+        "joint_node_left_out", NOTE,
+        f"the cross block {block} is {word(rel_block)} while its self blocks are "
+        f"{word(rel_row)} and {word(rel_col)}; the joint matrix is checked without {node}",
+        loc, {"node": node, "relative": [rel_block, rel_row, rel_col]}))
+
+
 def _joint33(ctx, mf_number: int, sections, usable, out) -> None:
     """MF31/MF33: every MT of the file joined by its cross blocks."""
     rel: Dict[int, bool] = {}
@@ -1727,6 +1752,11 @@ def _joint33(ctx, mf_number: int, sections, usable, out) -> None:
         if res is None or res[3] or res[2] != rel[a] or rel[a] != rel[b]:
             # Leaving a cross block out could make the joint look indefinite; leaving
             # out a whole reaction (a principal submatrix) cannot.
+            if res is not None and not res[3] and b not in dropped:
+                mat = sections[mt]._mat
+                _left_out_finding(f"MT{b}", f"MT{mt}xMT{mt1}", res[2], rel[mt], rel[mt1],
+                                  CovarianceLocation(mat=mat, mf=mf_number, mt=mt, mt1=mt1),
+                                  out)
             dropped.add(b)
             continue
         block = res[0] if mt == a else res[0].T
@@ -1779,6 +1809,12 @@ def _joint34(ctx, sections, usable, out) -> None:
         union = sorted(set(grid_of[a]) | set(grid_of[b]))
         res = _assemble34(sec, [r for _, r in good], union)
         if res is None or res[3] or res[2] != rel[a] or rel[a] != rel[b]:
+            if res is not None and not res[3] and b not in dropped:
+                mt, l, mt1, l1 = key
+                _left_out_finding(f"MT{b[0]} a_{b[1]}", f"MT{mt} a_{l} x MT{mt1} a_{l1}",
+                                  res[2], rel[(mt, l)], rel[(mt1, l1)],
+                                  CovarianceLocation(mat=sec._mat, mf=34, mt=mt, mt1=mt1,
+                                                     l=l, l1=l1), out)
             dropped.add(b)
             continue
         block = res[0] if key[:2] == a else res[0].T

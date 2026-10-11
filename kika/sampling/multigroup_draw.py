@@ -11,7 +11,9 @@ read, edit, serialise and later refuse.
 
 So the migration off ``generate_samples`` is not a port of the sampler. It is
 this: the repairs become a plan, the plan is applied ahead of the draw, and
-``draw_samples`` gets a matrix that needs nothing done to it.
+:func:`~kika.sampling.core.draw_prepared_samples` gets a matrix that needs
+nothing done to it -- already ``log1p``-ed, which is why it is not
+``draw_samples``, which would apply ``log1p`` a second time.
 
 **The sequence, and it is `generators.py`'s.** For the record, because the
 whole value of this module is that the order is written down rather than
@@ -52,7 +54,7 @@ from kika.cov.decomposition import (
     flag_outlier_variance_bins,
     flag_threshold_bins,
 )
-from kika.sampling.core import draw_samples
+from kika.sampling.core import draw_prepared_samples
 from kika.sampling.errors import CovarianceFixError, SoftAutofixWarning
 
 __all__ = [
@@ -337,7 +339,7 @@ def draw_relative_factors(
         reduced = repaired
 
     # 6 — the draw, and back to full width.
-    samples, diagnostics = draw_samples(
+    samples, diagnostics = draw_prepared_samples(
         {key: reduced},
         n_samples,
         space=space,
@@ -347,6 +349,10 @@ def draw_relative_factors(
         seed=seed,
         psd_method=psd_method,
         null_tol=null_tol,
+        # Frozen format-level sampler: keeps the SVD's |λ| for a direction
+        # stated with negative variance, exactly as the published draws did.
+        # New code takes the default, which gives it zero variance.
+        negative_directions="fold",
         dtype=np.float64,
         verbose=verbose,
         logger=logger,

@@ -89,13 +89,14 @@ def prepare_external(channel, low, high):
 def prepare_rml(region, resonances, context, notes):
     from .prepare import UnsupportedResonanceError
     f = region.formalism
-    if f.approximation not in ('ReichMoore','RMatrixLimited'):
-        raise UnsupportedResonanceError('RML requires KRM3 or KRM4')
+    if f.approximation not in ('ReichMoore','FullRMatrix'):
+        raise UnsupportedResonanceError(f'R-matrix approximation {f.approximation!r} is not reconstructed; '
+                                        f"only 'ReichMoore' (KRM=3) and 'FullRMatrix' (KRM=4) are")
     eliminated_capture = f.approximation == 'ReichMoore'
     if f.radiusPolicy is not None:
         raise UnsupportedResonanceError('RML uses explicit per-channel APT/APE, not an unnormalized global radius policy')
     if f.boundaryCondition not in (None, 'Given', 'NegativeOrbitalMomentum', 'EliminateShiftFunction', 'Brune'):
-        raise UnsupportedResonanceError('Brune/unknown boundary convention requires a separate certification')
+        raise UnsupportedResonanceError(f'unknown boundary condition {f.boundaryCondition!r}')
     reactions = {r.label:r for r in f.resonanceReactions}
     if len(reactions) != len(f.resonanceReactions):
         raise ValueError('duplicate resonance reaction labels')
@@ -367,7 +368,7 @@ def normalize_suite_pairs(suite, context):
     resolved = suite.resonances
     if resolved is None:return resolved
     candidates = [r for r in resolved.resolved if isinstance(r.formalism,RMatrix)
-                  and (r.formalism.approximation=='RMatrixLimited' or r.formalism.relativisticKinematics or r.formalism.boundaryCondition in ('Given','NegativeOrbitalMomentum','Brune')
+                  and (r.formalism.approximation=='FullRMatrix' or r.formalism.relativisticKinematics or r.formalism.boundaryCondition in ('Given','NegativeOrbitalMomentum','Brune')
                        or any(ch.additionalPhaseShift is not None or ch.phaseShiftMode or ch.phaseAbsorptionReaction is not None for g in r.formalism.spinGroups for ch in g.channels)
                        or any(rr.reactionMT not in (None,2,18,19,102) for rr in r.formalism.resonanceReactions)
                        or any(sum(ch.resonanceReaction==rr.label for ch in g.channels)>1

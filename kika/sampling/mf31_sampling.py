@@ -496,8 +496,6 @@ def _augment_nubar_grid(
         # ``edge == hi`` still needs a shoulder: the table's last point sits on
         # a bin boundary and (side='right') takes the *upper* bin's factor, so
         # without one the whole top of that bin ramps towards its neighbour.
-        # ``bins[-1]`` is excluded because ``clamp_top_edge`` already pulls a
-        # point there back into the last bin — there is no step to resolve.
         if not (lo < edge <= hi):
             continue
         if edge < hi:
@@ -505,6 +503,18 @@ def _augment_nubar_grid(
         shoulder_e = edge * (1.0 - shoulder)
         if shoulder_e > lo:
             candidates.append(shoulder_e)
+    # The outer MF31 edges are steps too when the table runs past them: outside
+    # the grid the factor is 1. ``bins[-1]``'s own node takes the last bin's
+    # factor (``clamp_top_edge``), so its step is just above it.
+    first, last = float(b[0]), float(b[-1])
+    if lo < first < hi:
+        candidates.append(first)
+        if first * (1.0 - shoulder) > lo:
+            candidates.append(first * (1.0 - shoulder))
+    if lo < last < hi:
+        candidates.append(last)
+        if last * (1.0 + shoulder) < hi:
+            candidates.append(last * (1.0 + shoulder))
 
     if candidates:
         cand = np.unique(np.asarray(candidates, dtype=float))
@@ -666,8 +676,8 @@ def perturb_nubar_family(
     """Apply sampled factors to the 452/455/456 family, enforcing the sum rule.
 
     Each member is perturbed on *its own* compact grid (its tabulated energies
-    plus single interpolated points at the interior MF31 bin edges and inside
-    under-resolved bins). The derived total is then built on the union of the
+    plus single interpolated points at the MF31 bin edges and a shoulder just
+    beside each, see :func:`_augment_nubar_grid`). The derived total is then built on the union of the
     perturbed members' grids and evaluated as nu_d + nu_p; because no member
     carries duplicate energies, that union sum is exact (a piecewise-linear
     identity), so the sum rule holds to machine precision without bloating the
@@ -935,11 +945,12 @@ def perturbNubarFamilyOnModel(
 ) -> Tuple[Dict[int, object], Dict[int, dict]]:
     """:func:`perturb_nubar_family`, on model nodes instead of MF1 sections.
 
-    Same rule, same four coverage patterns, same derived member, and it lives
+    Same rule, same three coverage patterns, same derived member, and it lives
     beside the original **on purpose**: they are one convention with two
     implementations, and a reader who changes one has to see the other. The gate
-    is ``test_the_nubar_family_on_the_model_reproduces_the_sections``, which
-    compares the tables the two produce point for point.
+    is ``test_a_mixed_request_groups_what_the_file_correlates.py::
+    test_the_family_rule_on_the_model_reproduces_the_one_on_the_sections``,
+    which compares the tables the two produce point for point.
 
     *forms* maps ``MT -> the multiplicity's form`` for the members the suite
     carries (452/455/456); *factor_blocks* maps ``MT -> per-bin factors`` for

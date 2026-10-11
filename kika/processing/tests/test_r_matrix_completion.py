@@ -30,7 +30,7 @@ def test_brune_collision_against_independent_equation_33_and_formal_transform(kr
         for row in f.spinGroups[0].widths:row[-1]=1e-13
     for ch in f.spinGroups[0].channels:ch.boundaryConditionValue=None
     if krm4:
-        f.approximation='RMatrixLimited';f.resonanceReactions[-1].eliminated=False
+        f.approximation='FullRMatrix';f.resonanceReactions[-1].eliminated=False
     p=prepare_resonances(source,ctx);g=p.regions[0].groups[0]
     er=np.array([v.energy for v in g.levels]);a=np.asarray(g.reduced);gg=np.asarray(g.radiation)
     metric=np.asarray(g.level_metric);nmat=np.asarray(g.level_energy)

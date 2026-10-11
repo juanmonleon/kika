@@ -8,9 +8,9 @@ rests on two independent sources:
   version 2.0"* whose changes *"focus on improving handling for thermal neutron
   scattering law data, along with many fixes for inconsistencies and errors in
   the previous specification document"* — against **149** approved change
-  requests for 1.9 → 2.0, which it calls *"a major update"*. kika reads no
-  thermal scattering law data at all: its ENDF parser registry has no MF7, and
-  ``ThermalNeutronScatteringLaw1d`` in the model is a pointer with no payload.
+  requests for 1.9 → 2.0, which it calls *"a major update"*. kika reads
+  thermal scattering law data (ENDF MF7 and the GNDS TSL nodes), so that part
+  of the 2.0 change is one it does consume.
 * FUDGE 6.10.0 — the reference implementation, and the translator that produced
   every GNDS file in circulation — lists ``2.1`` among its allowed format
   versions and contains **no branch on it anywhere**. Its only version-dependent

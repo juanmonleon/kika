@@ -6,8 +6,10 @@ format to calculation: ``kika.endf`` may import ``kika.nuclear_data``, never the
 reverse. Putting the adapter in the model would recreate exactly the inverted
 dependency phase 2 spent an increment straightening.
 
-**Nothing outside this package may import it.** Not ``kika/endf/__init__.py``,
-not ``read_endf``. A module-level import from either would put the model on the
+**Only an allow-listed module outside this package may import it**, and only
+from inside a function (``ALLOWED_IMPORTERS`` in
+``tests/test_nothing_imports_the_adapter.py``). Never ``kika/endf/__init__.py``,
+never ``read_endf``. A module-level import from either would put the model on the
 ``read_endf`` critical path and change what ``import kika`` costs for the
 cluster and the app — and ``kika.endf.model_adapter`` is deliberately absent
 from kika-app's PyInstaller ``hiddenimports``, so a lazy import from an
@@ -64,8 +66,9 @@ TAPE_ID_KEY = "tpid"
 
 __all__ = ["decodeMF3MT", "decodeMF1MT451", "decodeReactionSuite"]
 
-#: MF numbers kika's parser registry covers. Everything else is declared
-#: unsupported by the report rather than silently skipped.
+#: MF numbers this decoder converts into the model (the photon files, MF12-15,
+#: are handled beside them). Everything else the tape carries -- parsed or
+#: not -- is declared unsupported by the report rather than silently skipped.
 SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 
 #: Of those, the ones whose content belongs to the ``covarianceSuite``
@@ -77,7 +80,7 @@ SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 #: way, one product at a time rather than one section.
 COVARIANCE_MF = (31, 32, 33, 34, 35)
 
-#: The photon production files. Decoded by :mod:`.photons` (roadmap E5b), which
+#: The photon production files. Decoded by :mod:`.photons`, which
 #: declares per MT what it keeps verbatim instead.
 PHOTON_MF = (12, 13, 14, 15)
 
@@ -85,9 +88,11 @@ PHOTON_MF = (12, 13, 14, 15)
 def _za(section) -> int:
     """ZA, **rounded** rather than truncated.
 
-    ENDF's fixed-format floats do not round-trip exactly: Th-232's
-    ``9.023200+4`` reads back as ``90231.99999999999``, and ``int()`` on that
-    names Ac-231. See :func:`kika.nuclear_data.model.provenance._asEndfInt`.
+    ``parse_number`` now converts an ENDF float with one correctly rounded
+    decimal conversion, so Th-232's ``9.023200+4`` reads exactly 90232; before
+    that fix it read ``90231.99999999999``, and ``int()`` on that named Ac-231.
+    Rounding stays because a ZA is an integer whatever float a file writes.
+    See :func:`kika.nuclear_data.model.provenance._asEndfInt`.
     """
     value = getattr(section, "zaid", None)
     if value is None:
@@ -337,7 +342,8 @@ def _summationMTs(present) -> set:
 def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     """A parsed ``ENDF`` object → a :class:`ReactionSuite`, plus the report.
 
-    MF1 (451 and the nu-bars), MF2, MF3 and MF4 are read. The covariances are
+    MF1 (451, the nu-bars, 458 and 460), MF2-7 and the photon files MF12-15
+    are read. The covariances are
     **not** part of a ``reactionSuite``: §25.1.1 makes ``covarianceSuite`` a
     root node in its own right, linked through ``externalFiles``, so
     MF31/33/34/35 go through
@@ -365,7 +371,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # The projectile, after the target is named from the header's nuclide. An
     # ENDF tape states it only through NSUB, but a GNDS file has to: FUDGE's
     # toENDF6 looks up `PoPs[projectile]`, and a suite without it cannot be
-    # written back to ENDF by anyone but kika (roadmap T6). The neutron goes in
+    # written back to ENDF by anyone but kika. The neutron goes in
     # on every suite, as before: products name it even when it is not incident.
     if headerProvenance is not None:
         if "n" not in pops.particles:
@@ -376,7 +382,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     if style is not None:
         suite.styles.add(style)
     suite.provenance = headerProvenance
-    # The tape's first line, verbatim, for writeEndfTape (roadmap T1). A tape
+    # The tape's first line, verbatim, for writeEndfTape. A tape
     # is a container of materials and its label belongs to no one of them, so
     # it can only live beside the header, in the provenance.
     tapeId = getattr(endf, "tape_id", None)
@@ -405,7 +411,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
                 suite.reactions.append(reaction)
     elif 7 in getattr(endf, "mf", {}):
         # A TSL tape (NSUB=12) has no MF3 by construction: its cross sections
-        # are the scattering law, which MF7 states (roadmap E4).
+        # are the scattering law, which MF7 states.
         from .thermal_scattering import attachThermalScattering
 
         report = attachThermalScattering(suite, endf, report)
@@ -468,18 +474,18 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     present = set(getattr(endf, "mf", {}))
     for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF)):
         if mf == 8:
-            # Parsed since roadmap E7a; in an incident-neutron evaluation its
-            # MTs are the radioactive products of reactions (activation, E6).
+            # In an incident-neutron evaluation the MTs of MF8 are the
+            # radioactive products of reactions (activation data).
             mts = sorted(getattr(endf.mf[8], "mt", {}))
             report.unsupportedNode(
                 f"MF8 (MT{mts[:6]}{'...' if len(mts) > 6 else ''}) is read and kept "
                 f"as the file states it; the radioactive products of a reaction "
-                f"are activation data (roadmap E6) and are not in this reactionSuite"
+                f"are activation data and are not in this reactionSuite"
             )
             continue
         report.unsupportedNode(
-            f"MF{mf} is present in the file and kika's parser registry does not "
-            f"cover it; it is absent from this reactionSuite"
+            f"MF{mf} is present in the file and this decoder does not convert "
+            f"it; it is absent from this reactionSuite"
         )
     for mf in sorted((present & set(SUPPORTED_MF)) & set(COVARIANCE_MF)):
         report.unsupportedNode(
@@ -527,7 +533,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
 
     # The photons, after the residuals: a discrete level's photons are the
     # decay of the excited residual and go into the channel `attachResiduals`
-    # just built (roadmap E5b).
+    # just built.
     from .photons import attachPhotons
     report = attachPhotons(suite, endf, report)
 
@@ -697,7 +703,7 @@ def _attachEnergyDistribution(suite: ReactionSuite, mf5mt, mt: int,
     # which is a true sentence that leaves the reader with the wrong idea.
     if mt == 455:
         # Not a weighted sum: one spectrum per precursor family, and its home
-        # is §18.4's delayedNeutrons on the fission channel (roadmap E2).
+        # is §18.4's delayedNeutrons on the fission channel.
         from .fission_energy import attachDelayedSpectra
 
         placed, report = attachDelayedSpectra(suite, mf5mt, report)
@@ -835,7 +841,7 @@ def _attachEnergyAngleDistributions(suite: ReactionSuite, mf6mt, mt: int,
         # On a fission channel MF4/MF5 got here first (ENDF/B-VIII.1 U-235:
         # JP=11, a LAW=0 neutron, and the prompt spectrum in MF5/MT18), and
         # replacing their `uncorrelated` with an `unspecified` threw the PFNS
-        # away -- the defect PF-6 of the PFNS roadmap. The distributed GNDS
+        # away. The distributed GNDS
         # file keeps the MF5 spectrum on that neutron, and so does this. The
         # MF6 section still comes back whole: LAW=0 is re-encoded from the
         # provenance with no body, whatever form the product carries.

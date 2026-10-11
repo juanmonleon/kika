@@ -1,8 +1,8 @@
-"""Piece D of ``docs/library/autofix_in_the_model.md``: one factors file per run.
+"""One factors file per run.
 
 A thousand samples used to be a thousand ``perturbation.json`` files, every one
 repeating the same bin edges and the same provenance. Now a run writes
-``factors.parquet`` and ``factors_index.json``; the gate is that sample *i*
+``factors.parquet``, with the index in its metadata; the gate is that sample *i*
 read back from the table is the :class:`PerturbationSet` that was applied, to
 the bit, and that reading one sample does not mean reading the others.
 """

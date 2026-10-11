@@ -75,6 +75,14 @@ BREIT_WIGNER_APPROXIMATIONS = {
     "MultiLevel": BreitWignerApproximation.multiLevel,
 }
 
+#: Two GNDS-2.0 spellings of the RMatrix ``approximation`` that some published
+#: files carry instead of the spec's ``ReichMoore`` / ``FullRMatrix``. FUDGE
+#: reads them the same way (``RMatrix.Approximation.checkEnumOrString``).
+RMATRIX_APPROXIMATION_SPELLINGS = {
+    "Reich_Moore": "ReichMoore",
+    "Full R-Matrix": "FullRMatrix",
+}
+
 #: §19.3.6's table columns that are *not* widths. Everything else in the header
 #: is one, and is matched to a model field by name.
 BREIT_WIGNER_INDEX_COLUMNS = ("energy", "L", "J")
@@ -321,7 +329,8 @@ class _ResonanceReader:
             )
         return RMatrix(
             label=label,
-            approximation=element.attrib.get("approximation"),
+            approximation=RMATRIX_APPROXIMATION_SPELLINGS.get(
+                element.attrib.get("approximation"), element.attrib.get("approximation")),
             boundaryCondition=element.attrib.get("boundaryCondition"),
             boundaryConditionValue=_optionalFloat(element,"boundaryConditionValue"),
             calculateChannelRadius=_isTrue(element, "calculateChannelRadius"),

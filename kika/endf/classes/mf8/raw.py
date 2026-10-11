@@ -1,4 +1,4 @@
-"""An MF8 section of a neutron tape (radioactive products of a reaction, roadmap E6).
+"""An MF8 section of a neutron tape (radioactive products of a reaction).
 
 ENDF-6 §8.2: an incident-neutron evaluation's MF8 says which radioactive
 nuclides a reaction produces and points at MF9/MF10 for how many. kika does not

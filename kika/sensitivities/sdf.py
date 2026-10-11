@@ -118,7 +118,8 @@ class SDFReactionData:
     :type mt: int
     :ivar sensitivity: List of sensitivity coefficients
     :type sensitivity: List[float]
-    :ivar error: List of absolute one-sigma standard deviations
+    :ivar error: List of absolute one-sigma standard deviations (zeros, with
+        ``error_known=False``, when the source states none)
     :type error: List[float]
     :ivar nuclide: Nuclide symbol (calculated from ZAID)
     :type nuclide: str
@@ -139,6 +140,11 @@ class SDFReactionData:
     # information. Used by the benchmarks subpackage to keep only system totals.
     unit: int | None = None
     region: int | None = None
+    # False when the source states no uncertainty for these coefficients (the
+    # compact TSUNAMI-1D dialect has no error block). ``error`` then holds
+    # zeros only because the format needs a number; a profile built from this
+    # reaction carries ``uncertainty=None`` ("unknown"), never "exact".
+    error_known: bool = True
 
     def __post_init__(self):
         """Calculate and store nuclide symbol and reaction name after initialization.
@@ -404,10 +410,12 @@ class SDFData:
             if (reaction.unit or 0) != 0 or (reaction.region or 0) != 0:
                 continue
             sensitivity = np.asarray(reaction.sensitivity, dtype=float)
-            uncertainty = np.asarray(reaction.error, dtype=float)
+            uncertainty = (np.asarray(reaction.error, dtype=float)
+                           if reaction.error_known else None)
             if reverse:
                 sensitivity = sensitivity[::-1]
-                uncertainty = uncertainty[::-1]
+                if uncertainty is not None:
+                    uncertainty = uncertainty[::-1]
             reactions.append(
                 SensitivityReaction(
                     zaid=reaction.zaid,

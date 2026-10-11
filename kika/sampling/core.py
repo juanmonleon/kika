@@ -57,7 +57,7 @@ from ..cov.decomposition import eigen_decomposition, svd_decomposition
 # core → generators and generators does not import core, so there is no cycle.
 from .generators import _uncorrelated
 
-__all__ = ["draw_samples", "BLOCK_SEED_STRIDE"]
+__all__ = ["draw_samples", "draw_prepared_samples", "BLOCK_SEED_STRIDE"]
 
 #: Added to the base seed once per block index. A prime, so that two callers
 #: whose seeds differ by a small integer do not end up sharing draws on some
@@ -90,6 +90,7 @@ def draw_samples(
     seed: Optional[int] = None,
     psd_method: str = "auto",
     null_tol: Optional[float] = DEFAULT_NULL_TOL,
+    negative_directions: str = "zero",
     dtype=np.float64,
     verbose: bool = True,
     logger=None,
@@ -107,9 +108,12 @@ def draw_samples(
         Number of realisations per block.
     space
         ``"linear"`` draws ``Y = Z L^T`` from the matrix as given.
-        ``"log"`` treats the matrix as the covariance of ``log`` of the
-        quantity and moment-matches so the factors have unit mean. Only
-        meaningful together with ``returns="factors"``.
+        ``"log"`` takes the matrix as a **relative** covariance Σ and draws
+        lognormal factors that reproduce it exactly: ``ln f`` is normal with
+        covariance ``log1p(Σ)`` and mean ``-diag(log1p Σ)/2``, so
+        ``E[f] = 1`` and ``Cov(f) = Σ``. Only meaningful together with
+        ``returns="factors"``. A caller whose matrix is already ``log1p(Σ)``
+        (it conditioned it in that space) calls :func:`draw_prepared_samples`.
     returns
         ``"deltas"`` returns ``Y`` — absolute departures, which is what an
         absolute covariance describes. ``"factors"`` returns ``Y + 1`` (linear)
@@ -147,14 +151,28 @@ def draw_samples(
 
         **The rank reported here and the rank a pre-flight reports are not the
         same number, and neither is wrong.** This one is taken on the singular
-        values the draw actually decomposes — *after* ``psd_method`` has acted,
-        and SVD folds a negative eigenvalue to its magnitude. A direction the
-        file states as negative-variance therefore survives as a retained
-        direction here while ``conditioning.inspect_blocks``, which reads the
-        eigenvalues of the matrix as stated, counts it null. Measured on that
-        same Fe-56 joint: 615 null directions in the draw against 669 in the
-        pre-flight, the difference being directions the evaluation states as
-        unphysical.
+        values the draw actually decomposes — *after* ``psd_method`` has acted.
+        With ``negative_directions="fold"`` an SVD folds a negative eigenvalue
+        to its magnitude, so a direction the file states as negative-variance
+        survives as a retained direction here while
+        ``conditioning.inspect_blocks``, which reads the eigenvalues of the
+        matrix as stated, counts it null. Measured on that same Fe-56 joint:
+        615 null directions in the folded draw against 669 in the pre-flight,
+        the difference being directions the evaluation states as unphysical.
+        With the default ``"zero"`` those directions count null here too.
+    negative_directions
+        What the draw does with a direction the matrix it decomposes states
+        with a **negative** eigenvalue — one ``psd_method`` left in place
+        (``"none"``), or numerical residue after a repair. ``"zero"`` (the
+        default) gives it zero variance, which is what the eigen path has
+        always done and the closest a draw can come to "as stated": a negative
+        variance cannot be realised. ``"fold"`` keeps what an SVD returns, the
+        magnitude ``|λ|``, i.e. draws from ``V|Λ|Vᵀ`` and adds variance in a
+        direction the evaluation does not state. It exists only so the frozen
+        format-level samplers (``perturb_ENDF_files`` and
+        :func:`kika.sampling.multigroup_draw.draw_relative_factors`) keep
+        drawing exactly what produced the published results; nothing new
+        should ask for it. A zeroed direction counts as null in ``n_null``.
     dtype
         Output dtype. float64 by default and on purpose; see the module
         docstring.
@@ -167,6 +185,87 @@ def draw_samples(
         the extreme eigenvalue ratio and the realised-versus-input covariance
         error on the retained subspace.
     """
+    method = _validated_method(space, returns, decomposition_method)
+    _validated_negative_directions(negative_directions)
+    items = _as_blocks(blocks)
+    if space == "log":
+        # A relative covariance Σ is the covariance of f = exp(g) with
+        # Cov(g) = log1p(Σ): Cov(f)_ij = exp(Cov(g)_ij) - 1. Drawing g from Σ
+        # itself would give Cov(f) = expm1(Σ), 14 % too wide at 50 %.
+        items = [(key, np.log1p(np.asarray(matrix, dtype=float)))
+                 for key, matrix in items]
+    return draw_prepared_samples(
+        items, n_samples, space=space, returns=returns,
+        decomposition_method=method, sampling_method=sampling_method,
+        seed=seed, psd_method=psd_method, null_tol=null_tol,
+        negative_directions=negative_directions, dtype=dtype,
+        verbose=verbose, logger=logger)
+
+
+def draw_prepared_samples(
+    blocks,
+    n_samples: int,
+    *,
+    space: str = "linear",
+    returns: str = "deltas",
+    decomposition_method: str = "svd",
+    sampling_method: str = "sobol",
+    seed: Optional[int] = None,
+    psd_method: str = "auto",
+    null_tol: Optional[float] = DEFAULT_NULL_TOL,
+    negative_directions: str = "zero",
+    dtype=np.float64,
+    verbose: bool = True,
+    logger=None,
+) -> Tuple[Dict[Hashable, np.ndarray], Dict[Hashable, Dict[str, Any]]]:
+    """:func:`draw_samples` for blocks already in the space the draw happens in.
+
+    With ``space="log"`` each matrix is taken as ``log1p(Σ)`` -- the covariance
+    of ``ln f`` -- and not transformed again. That is what a caller that
+    conditions the matrix in log space holds
+    (:func:`kika.sampling.multigroup_draw.draw_relative_factors`). Everything
+    else is :func:`draw_samples`'.
+    """
+    method = _validated_method(space, returns, decomposition_method)
+    _validated_negative_directions(negative_directions)
+    items = _as_blocks(blocks)
+    samples: Dict[Hashable, np.ndarray] = {}
+    diagnostics: Dict[Hashable, Dict[str, Any]] = {}
+
+    for index, (key, matrix) in enumerate(items):
+        if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+            raise ValueError(
+                f"block {key!r}: a covariance is a square 2-D matrix, got shape "
+                f"{matrix.shape}"
+            )
+
+        block_seed = None if seed is None else int(seed) + index * BLOCK_SEED_STRIDE
+        draw, info = _draw_one_block(
+            matrix, n_samples,
+            space=space, returns=returns, method=method,
+            sampling_method=sampling_method, seed=block_seed,
+            psd_method=psd_method, null_tol=null_tol,
+            negative_directions=negative_directions,
+            verbose=verbose, logger=logger, label=str(key),
+        )
+        samples[key] = draw.astype(dtype, copy=False)
+        info["seed"] = block_seed
+        info["block_index"] = index
+        diagnostics[key] = info
+
+    return samples, diagnostics
+
+
+def _validated_negative_directions(negative_directions: str) -> None:
+    if negative_directions not in ("zero", "fold"):
+        raise ValueError(
+            f"negative_directions must be 'zero' or 'fold', got "
+            f"{negative_directions!r}"
+        )
+
+
+def _validated_method(space: str, returns: str, decomposition_method: str) -> str:
+    """The checks both entry points make; returns the lower-cased method."""
     if returns not in ("deltas", "factors"):
         raise ValueError(f"returns must be 'deltas' or 'factors', got {returns!r}")
     if space not in ("linear", "log"):
@@ -191,31 +290,7 @@ def draw_samples(
             f"{decomposition_method!r}"
         )
 
-    items = _as_blocks(blocks)
-    samples: Dict[Hashable, np.ndarray] = {}
-    diagnostics: Dict[Hashable, Dict[str, Any]] = {}
-
-    for index, (key, matrix) in enumerate(items):
-        if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
-            raise ValueError(
-                f"block {key!r}: a covariance is a square 2-D matrix, got shape "
-                f"{matrix.shape}"
-            )
-
-        block_seed = None if seed is None else int(seed) + index * BLOCK_SEED_STRIDE
-        draw, info = _draw_one_block(
-            matrix, n_samples,
-            space=space, returns=returns, method=method,
-            sampling_method=sampling_method, seed=block_seed,
-            psd_method=psd_method, null_tol=null_tol,
-            verbose=verbose, logger=logger, label=str(key),
-        )
-        samples[key] = draw.astype(dtype, copy=False)
-        info["seed"] = block_seed
-        info["block_index"] = index
-        diagnostics[key] = info
-
-    return samples, diagnostics
+    return method
 
 
 def _draw_one_block(
@@ -229,6 +304,7 @@ def _draw_one_block(
     seed: Optional[int],
     psd_method: str,
     null_tol: Optional[float],
+    negative_directions: str,
     verbose: bool,
     logger,
     label: str,
@@ -241,11 +317,17 @@ def _draw_one_block(
         matrix = np.where(finite, matrix, 0.0)
 
     if method == "svd":
-        basis, spectrum, _ = svd_decomposition(
+        basis, spectrum, vt = svd_decomposition(
             space=space, psd_method=psd_method, verbose=verbose,
             logger=logger, matrix=matrix,
         )
         spectrum = np.asarray(spectrum, dtype=float)
+        if negative_directions == "zero":
+            # For a symmetric matrix the SVD returns |λ|; the sign of λ_i is
+            # the sign of u_i · v_i (v_i = ±u_i). A negative one gets zero
+            # variance, as the eigen branch below gives it.
+            negative = np.einsum("ki,ik->i", basis, vt) < 0.0
+            spectrum = np.where(negative, 0.0, spectrum)
     else:
         values, vectors = eigen_decomposition(
             space=space, psd_method=psd_method, verbose=verbose,

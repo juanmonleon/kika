@@ -262,3 +262,23 @@ def test_the_original_is_not_touched():
 
     np.testing.assert_array_equal(fn.xs, [1.0, 5.0, 9.0])
     np.testing.assert_array_equal(fn.ys, [1.0, 1.0, 1.0])
+
+
+def test_a_descending_grid_is_refused():
+    """searchsorted on a reversed grid returns indices without complaint."""
+    fn = XYs1d(xs=np.array([1.0, 9.0]), ys=np.array([1.0, 1.0]),
+               interpolation=Interpolation.linlin)
+    with pytest.raises(ValueError, match="strictly ascending"):
+        applyFactors(fn, [2.0, 3.0], [9.0, 5.0, 1.0])
+
+
+def test_the_first_copy_at_the_last_edge_counts_as_covered():
+    """It carries the last bin's factor, so it is not outside coverage."""
+    fn = XYs1d(xs=np.array([1.0, 5.0, 10.0]), ys=np.array([1.0, 1.0, 1.0]),
+               interpolation=Interpolation.linlin)
+    perturbed, diagnostics = applyFactors(fn, [2.0], [1.0, 5.0])
+
+    np.testing.assert_array_equal(perturbed.xs, [1.0, 5.0, 5.0, 10.0])
+    np.testing.assert_allclose(perturbed.ys, [2.0, 2.0, 1.0, 1.0])
+    # Out of coverage: the second copy at 5 and the point at 10.
+    assert diagnostics["frac_out_of_coverage"] == pytest.approx(2 / 4)

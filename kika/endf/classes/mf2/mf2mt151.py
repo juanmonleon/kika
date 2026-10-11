@@ -65,14 +65,14 @@ class LValueBlock:
 class ScatteringRadiusOnly:
     """Parameters for an energy range with LRU=0 (scattering radius only)."""
     spi: float          # Target spin
-    ap: float           # Scattering radius (fm)
+    ap: float           # Scattering radius (10^-12 cm)
 
 
 @dataclass
 class ResolvedResonanceRange:
     """Parameters for an energy range with LRU=1 (resolved resonances)."""
     spi: float          # Target spin
-    ap: float           # Scattering radius (fm)
+    ap: float           # Scattering radius (10^-12 cm)
     nls: int            # Number of l-values
     nlsc: int           # Number of l-values for convergence
     l_values: List[LValueBlock] = field(default_factory=list)
@@ -88,7 +88,7 @@ class EnergyDependentScatteringRadius:
     """TAB1 record for energy-dependent scattering radius (NRO=1)."""
     interpolation: List[Tuple[int, int]]  # (NBT, INT) pairs
     energies: List[float]                  # E values (eV)
-    ap_values: List[float]                 # AP(E) (fm)
+    ap_values: List[float]                 # AP(E) (10^-12 cm)
 
 
 # ======================================================================
@@ -119,7 +119,7 @@ class URR_LValue_CaseA:
 class UnresolvedCaseA:
     """Unresolved resonance parameters: LFW=0, LRF=1 (energy-independent)."""
     spi: float          # Target spin
-    ap: float           # Scattering radius (fm)
+    ap: float           # Scattering radius (10^-12 cm)
     lssf: int           # Self-shielding only/all flag
     nls: int            # Number of l-values
     l_values: List[URR_LValue_CaseA] = field(default_factory=list)
@@ -151,7 +151,7 @@ class URR_LValue_CaseB:
 class UnresolvedCaseB:
     """Unresolved resonance parameters: LFW=1, LRF=1 (energy-dependent fission)."""
     spi: float          # Target spin
-    ap: float           # Scattering radius (fm)
+    ap: float           # Scattering radius (10^-12 cm)
     lssf: int           # Self-shielding only/all flag
     ne: int             # Number of energy points
     nls: int            # Number of l-values
@@ -196,7 +196,7 @@ class URR_LValue_CaseC:
 class UnresolvedCaseC:
     """Unresolved resonance parameters: LRF=2 (all energy-dependent)."""
     spi: float          # Target spin
-    ap: float           # Scattering radius (fm)
+    ap: float           # Scattering radius (10^-12 cm)
     lssf: int           # Self-shielding only/all flag
     nls: int            # Number of l-values
     l_values: List[URR_LValue_CaseC] = field(default_factory=list)
@@ -230,8 +230,8 @@ class RML_Channel:
     l: int              # Orbital angular momentum
     sch: float          # Channel spin
     bnd: float          # Boundary condition
-    ape: float          # Effective channel radius (fm)
-    apt: float          # True channel radius (fm)
+    ape: float          # Effective channel radius (10^-12 cm)
+    apt: float          # True channel radius (10^-12 cm)
 
 
 @dataclass
@@ -332,7 +332,7 @@ class RMatrixLimited:
     krm: int            # Formalism: 1=SLBW, 2=MLBW, 3=RM, 4=full R-matrix
     krl: int            # 0=non-relativistic, 1=relativistic
     spi: float          # Target spin
-    ap: float           # Scattering radius (fm)
+    ap: float           # Scattering radius (ENDF units, 10^-12 cm)
     particle_pairs: List[RML_ParticlePair] = field(default_factory=list)
     spin_groups: List[RML_SpinGroup] = field(default_factory=list)
 
@@ -429,7 +429,7 @@ class MF2MT151(MT):
 
     @property
     def scattering_radius(self) -> Optional[float]:
-        """AP from the first energy range (fm)."""
+        """AP from the first energy range (10^-12 cm)."""
         er = self._first_energy_range()
         if er is None or er.parameters is None:
             return None

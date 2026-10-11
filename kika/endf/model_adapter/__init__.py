@@ -1,7 +1,9 @@
 """ENDF ↔ the GNDS-shaped canonical model.
 
-**Import rule, enforced by a test.** Nothing outside this package and its tests
-may import it. A module-level import from ``kika/endf/__init__.py`` or
+**Import rule, enforced by a test.** Outside this package and its tests, only
+the modules listed in ``ALLOWED_IMPORTERS`` of
+``tests/test_nothing_imports_the_adapter.py`` may import it, each from inside a
+function. A module-level import from ``kika/endf/__init__.py`` or
 ``read_endf`` would put the model on the ``read_endf`` critical path and change
 what ``import kika`` costs for the cluster pipeline and the desktop app. The
 package is also deliberately absent from kika-app's PyInstaller

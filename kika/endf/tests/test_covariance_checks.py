@@ -190,6 +190,8 @@ def test_rho_above_one_in_a_self_block_and_rounding_below_the_line():
     bad = [[0.01, 0.02, 0.0], [0.02, 0.01, 0.0], [0.0, 0.0, 0.01]]  # rho = 2
     f = _only(check_covariances(_tape(_section({1: [_lb5(bad)]}))), "correlation_out_of_bounds")
     assert f.level == DEFECT and f.evidence["max_abs_rho"] == pytest.approx(2.0)
+    # One pair (0, 1), not its two mirrored entries.
+    assert f.evidence["n_above"] == 1 and "1 pairs above" in f.summary
     edge = [[0.01, 0.01 * (1 + 1e-5), 0.0], [0.01 * (1 + 1e-5), 0.01, 0.0], [0.0, 0.0, 0.01]]
     report = check_covariances(_tape(_section({1: [_lb5(edge)]})))
     assert _only(report, "correlation_out_of_bounds").level == NOTE
@@ -738,6 +740,21 @@ def test_pairwise_compatible_blocks_can_make_an_indefinite_joint():
     assert f.evidence["lambda_min"] == pytest.approx(expected)
     # The same correlations with a consistent sign are a valid joint matrix.
     report = check_covariances(_joint_tape(0.9, 0.9, 0.9))
+    assert report.by_check("joint_not_positive_semidefinite") == ()
+
+
+def test_a_node_left_out_of_the_joint_is_reported():
+    # MT102's self block is absolute (LB=0) and its cross blocks relative: one
+    # matrix cannot hold both, so the joint runs without MT102 and says so.
+    def lb5(v):
+        return _lb5([[v]], grid=ONE, ls=0)
+    tape = _tape(_section({2: [_lb5([[1.0]], grid=ONE)], 4: [lb5(0.9)], 102: [lb5(0.9)]}, mt=2),
+                 _section({4: [_lb5([[1.0]], grid=ONE)], 102: [lb5(-0.9)]}, mt=4),
+                 _section({102: [_lb1([1.0], grid=ONE, lb=0)]}, mt=102))
+    report = check_covariances(tape)
+    f = _only(report, "joint_node_left_out")
+    assert f.level == NOTE and f.evidence["node"] == "MT102"
+    assert (f.location.mt, f.location.mt1) == (2, 102)
     assert report.by_check("joint_not_positive_semidefinite") == ()
 
 

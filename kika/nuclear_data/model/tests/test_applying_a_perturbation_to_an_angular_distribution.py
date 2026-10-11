@@ -16,7 +16,8 @@ the diagonal blocks, 15 and 12 for the cross-order ones. Three properties of
 that tape make it the one worth gating on: the orders genuinely differ in grid,
 so the per-order factor blocks are exercised rather than assumed; the
 distribution is *mixed*, so the applier has to leave the tabulated region alone;
-and the number of coefficients varies with energy (5, 7 and 9 across the file),
+and the number of coefficients varies with energy (NL from 4 to 32 across the
+file),
 so the "this order does not exist here" branch is real.
 
 **The factors are constructed, not drawn.** What is being measured is the

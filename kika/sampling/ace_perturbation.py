@@ -789,7 +789,8 @@ def perturb_ACE_files(
     num_samples : int
         Number of perturbed ACE files to generate
     space : str, default "log"
-        Sampling space: "linear" (factors = 1 + X) or "log" (factors = exp(Y))
+        Sampling space: "linear" (factors = 1 + X) or "log"
+        (factors = exp(Y - diag(Σ_log)/2), Y ~ N(0, Σ_log), Σ_log = log1p(Σ): unit mean, Cov = Σ)
     decomposition_method : str, default "svd"
         Matrix decomposition method: "svd", "cholesky", "eigen", or "pca"
     sampling_method : str, default "sobol"

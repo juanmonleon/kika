@@ -55,14 +55,14 @@ __all__ = ["read", "sniff_format", "UnknownFormatError"]
 
 #: Formats the door can open. All four are served. ``g4ndl`` is the odd one:
 #: a G4NDL library is a *directory* of per-isotope files, so it is opened with
-#: ``target=`` naming the isotope, and only its elastic channel is read today.
+#: ``target=`` naming the isotope; its elastic, inelastic, capture and fission
+#: processes are read.
 #:
 #: Measured on this machine, warm cache, nothing else running: ENDF/B-VIII.1's
 #: Fe-56 through this door costs **2.85 s as GNDS** (18.8 MB, and that includes
 #: following the externalFile and reading its 7 covariance sections) against
-#: **5.97 s as ENDF-6** (25.6 MB, MF1/2/3/4/33 — the tape's MF12 and MF14 have
-#: no parser and are not read at all; its MF6 was in that list until MF6 gained
-#: one, so this figure predates six MF6 sections now being read). Neither is
+#: **5.97 s as ENDF-6** (25.6 MB, MF1/2/3/4/33; the figure predates MF6 and
+#: MF12-15 being read, so today's cost is higher). Neither is
 #: the six minutes the JEFF host tape costs; that tape is larger and carries MF34.
 FORMATS = ("endf", "ace", "gnds", "g4ndl")
 
@@ -223,9 +223,10 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
         read — ``"Fe56"``, ``"Am242m1"``, ``26056``, ``(26, 56)``. A G4NDL
         library is a directory holding hundreds of isotopes, and the lookup is
         exact: kika does not substitute the natural element or a neighbour the
-        way Geant4 does. Only the elastic channel (MT2) is read, with the cross
-        section under the ``recon`` style — ``suite.cross_section(2,
-        form="recon")`` — and the report lists the processes left unread.
+        way Geant4 does. The elastic (MT2), inelastic, capture (MT102) and
+        fission (MT18) processes are read, the cross sections under the
+        ``recon`` style — ``suite.cross_section(2, form="recon")`` — and the
+        report lists anything left unread.
 
     Returns
     -------
@@ -237,10 +238,9 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
         photo-atomic ACE table (``.84p``, ``.14p``...), which the model has
         no suite for yet; a :class:`ReactionSuite` for everything else.
         With ``suite.report`` set — what the decode lost, approximated or could
-        not represent. Check it. A partial decode is normal today (MF12-15 are
-        not read at all, of MF5 only its tabulated LF=1 reaches the model, and
-        of MF6 every law but LAW=5) and the report is the only thing that says
-        so.
+        not represent. Check it. A partial decode is still possible (of MF6,
+        every law but LAW=5 reaches the model) and the report is the only thing
+        that says so.
     """
     if format is None:
         format = sniff_format(path)

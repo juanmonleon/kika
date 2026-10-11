@@ -756,7 +756,7 @@ MICRO_TAPE_DIR = REPO_ROOT / "kika" / "endf" / "tests" / "data"
 
 @pytest.fixture(scope="session")
 def micro_tape() -> Path:
-    """Committed Fe-56 slice: MF1/451, MF2/151, MF3/MT2, MF4/MT2, verbatim.
+    """Committed Fe-56 slice: MF1/451, MF2/151, MF3/MT1, 2 and 102, MF4/MT2 and MF34/MT2, verbatim.
 
     Real ENDF text cut section-by-section from the JEFF-4.0 host tape, with the
     MF1/451 directory rebuilt. No record was reformatted, so anything that

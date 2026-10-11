@@ -392,7 +392,8 @@ class LegendreCovariance:
         result.metadata.setdefault("source_path", str(file_path))
         return result
 
-    def to_covfil(self, file_path: Union[str, 'Path'], tape_label: str = '', temperature: float = 0.0) -> None:
+    def to_covfil(self, file_path: Union[str, 'Path'], tape_label: str = '',
+                  temperature: Optional[float] = None) -> None:
         """
         Write this LegendreCovariance to an NJOY COVFIL/GENDF text file.
 
@@ -403,7 +404,8 @@ class LegendreCovariance:
         tape_label : str, optional
             Label for the tape header line (max 66 chars)
         temperature : float, optional
-            Temperature in K for MF1 MT451 CONT record
+            Temperature in K for MF1 MT451 CONT record. ``None`` (default)
+            keeps the one :func:`read_covfil` stored in ``metadata``, else 0.
         """
         from kika.cov.parse_covmat import write_covfil
         write_covfil(self, str(file_path), tape_label=tape_label, temperature=temperature)

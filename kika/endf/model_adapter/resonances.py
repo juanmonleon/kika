@@ -11,8 +11,8 @@ named widths, an ``RMatrix`` with widths that belong to *channels*, a
 ``TabulatedWidths`` for the unresolved region.
 
 **The l-dependent scattering radius.** Phase 1 found MF2/151's APL was being
-dropped outright — on the committed Fe-56 slice, AP is 0.5444 fm overall but
-0.5002 fm for L=1, which moves elastic by a median 2% and up to 42% locally.
+dropped outright — on the committed Fe-56 slice, AP is 0.5444 overall but
+0.5002 for L=1 (ENDF units, 10^-12 cm), which moves elastic by a median 2% and up to 42% locally.
 ``EnergyRange.scattering_radius_for_l`` already resolves it against the LRF (the
 same field is QX under LRF=1/2 and must never be read as a radius), so this
 decoder asks it rather than reading C2, and a test asserts the L=1 value
@@ -74,7 +74,7 @@ KRM_TO_APPROXIMATION = {
     1: "SingleLevelBreitWigner",
     2: "MultiLevelBreitWigner",
     3: "ReichMoore",
-    4: "Full",
+    4: "FullRMatrix",
 }
 
 

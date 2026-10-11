@@ -253,9 +253,11 @@ def generate_pert_cards(inputfile, cell, reactions, material, energies=None,
         Material identifier(s) for perturbation. Must exist in the input file.
         Can be single value or list for multiple materials.
     energies : array-like, optional
-        Energy bin boundaries in eV, must be in ascending order. Used in consecutive
-        pairs to define energy bins. If None, ERG keyword is omitted (energy-integrated).
-        Built-in grids available via ``kika.energy_grids`` (e.g., SCALE44, VITAMINJ175).
+        Energy bin boundaries in MeV, the unit of MCNP's ERG keyword; they are
+        written as given, with no conversion. Must be in ascending order. Used in
+        consecutive pairs to define energy bins. If None, ERG keyword is omitted
+        (energy-integrated). Built-in grids, in MeV, are available via
+        ``kika.energy_grids`` (e.g., SCALE44, VITAMINJ175).
     energy_range : tuple of (float or None, float or None), optional
         Filters ``energies`` to only include boundaries within the range [min, max].
         Either bound can be None to leave it open. For example,

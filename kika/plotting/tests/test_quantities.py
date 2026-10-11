@@ -355,3 +355,10 @@ def test_relative_uncertainty_of_nubar_without_mf31_is_not_plottable(u235_b81_ta
     endf = read_endf(str(u235_b81_tape), mf_numbers=[1])
     with pytest.raises(NotPlottable, match="MF31/MT456"):
         plottable(endf, "relative_uncertainty", mt=456)
+
+
+def test_a_cross_section_without_a_stated_law_is_compared_lin_lin():
+    """PENDF and ACE tables are lin-lin; the default used to read them log-log."""
+    from kika.plotting.comparison import _INTERPOLATION_DEFAULTS
+    assert _INTERPOLATION_DEFAULTS["CrossSectionPlotData"] == "lin-lin"
+    assert _INTERPOLATION_DEFAULTS["LegendreCoeffPlotData"] == "lin-lin"

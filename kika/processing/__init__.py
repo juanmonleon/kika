@@ -1,8 +1,8 @@
 """
 Nuclear data processing — kika's "homemade NJOY".
 
-Format-independent processing that operates on canonical types from
-``kika.nuclear_data``.  Each submodule implements one processing step:
+Format-independent processing. Most steps take the canonical types from
+``kika.nuclear_data`` (and the model); some take plain arrays or file paths.  Each submodule implements one processing step:
 
 - ``resonances``      — resonance reconstruction on the model (MF2 → pointwise σ);
   its end-to-end entry for an ENDF-6 tape is ``kika.endf.reconstruct_endf``

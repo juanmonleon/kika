@@ -293,7 +293,7 @@ class RMatrixSpinGroup:
 class RMatrix:
     """§19.3.1. A resolved region in the R-Matrix formalism."""
 
-    approximation: Optional[str] = None   # 'ReichMoore', 'RMatrixLimited', ...
+    approximation: Optional[str] = None   # GNDS: 'ReichMoore' (KRM=3) or 'FullRMatrix' (KRM=4)
     resonanceReactions: List[ResonanceReaction] = field(default_factory=list)
     spinGroups: List[RMatrixSpinGroup] = field(default_factory=list)
     PoPs: Optional[object] = None

@@ -46,15 +46,22 @@ def test_positional_fields_keep_padding_truncation_and_zero_policies():
     lines = [record(["1.000000+0", "", "invalid", 2, 3, 4]),
              record([5, 6, "", "", "", ""])]
     assert parse_record_values(lines[0]) == (1, None, None, 2, 3, 4)
-    # The generic LIST reader treats blanks as zeros, not invalid text.
-    assert parse_data_values(lines, 0, 7) == ([1, 0.0, 2, 3, 4, 5, 6], 2)
     # MF33/MF34 keep their historical skip-blank policy and consume another
     # line when the requested number of actual values has not been reached.
     assert _read_list_values(lines, 0, 6) == ([1, 2, 3, 4, 5, 6], 2)
     assert _read_floats(lines, 0, 6) == ([1, 2, 3, 4, 5, 6], 2)
-    assert parse_data_pairs(lines, 0, 2) == ([3], [4], 1)
     assert parse_interp_pairs(lines, 0, 2) == ([], 1)
     assert parse_record_values("short") == (None,) * 6
+    # The generic LIST and TAB1 readers treat a blank as a zero and refuse
+    # text that is not a number: skipping it shifted every later value, or
+    # returned fewer points than NP, and nothing said so.
+    clean = [record(["1.000000+0", "", 7, 2, 3, 4]), record([5, 6, "", "", "", ""])]
+    assert parse_data_values(clean, 0, 8) == ([1, 0.0, 7, 2, 3, 4, 5, 6], 2)
+    assert parse_data_pairs(clean, 0, 4) == ([1, 7, 3, 5], [0.0, 2, 4, 6], 2)
+    with pytest.raises(ValueError, match="unreadable number"):
+        parse_data_values(lines, 0, 7)
+    with pytest.raises(ValueError, match="unreadable number"):
+        parse_data_pairs(lines, 0, 2)
 
 
 @pytest.mark.parametrize("column", [(66, 70), (70, 72), (72, 75), (75, 80)])

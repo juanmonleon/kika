@@ -133,8 +133,6 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
     A panel whose mixed error ratio exceeds one half anywhere gains
     its worst tested probe and midpoint. Exact previous-pass probes are reused
     on new panels; only missing energies are evaluated.
-    (Until October 2026 every pass re-probed every panel, converged ones
-    included, which asked the physics the same question once per pass.)
     """
     from kika.algebra import RefinementError, refine
 

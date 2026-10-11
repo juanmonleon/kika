@@ -4,6 +4,7 @@ This module contains functions for computing sensitivity coefficients from MCNP 
 creating SDF data objects from sensitivity data, and other related utility functions.
 """
 
+import warnings
 from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from kika.mcnp.parse_input import read_mcnp
@@ -1005,26 +1006,31 @@ def _process_single_serpent_file(
     from kika.serpent.sens import SensitivityFile
     import numpy as np
     
-    # Prepare filters (existing logic)
+    # Prepare filters. An entry the file does not have selects nothing: it used
+    # to widen the filter to every material (or nuclide) of the file.
+    def _matching(selection, locate, kind):
+        found, missing = [], []
+        for item in selection:
+            try:
+                found.append(locate(item))
+            except KeyError:
+                missing.append(item)
+        if missing:
+            warnings.warn(f"{kind} {missing} not in this SERPENT file; "
+                          f"{'skipped' if found else 'nothing selected from this file'}")
+        return found
+
     if material_filter is not None:
         if isinstance(material_filter, str):
             material_filter = [material_filter]
-        try:
-            material_indices = [serpent_file._material_index(mat) for mat in material_filter]
-        except KeyError as e:
-            print(f"Warning: {e}. Skipping material filter for this file.")
-            material_indices = list(range(serpent_file.n_materials))
+        material_indices = _matching(material_filter, serpent_file._material_index, "material(s)")
     else:
         material_indices = list(range(serpent_file.n_materials))
-    
+
     if nuclide_filter is not None:
         if isinstance(nuclide_filter, int):
             nuclide_filter = [nuclide_filter]
-        try:
-            nuclide_indices = [serpent_file._nuclide_index(nuc) for nuc in nuclide_filter]
-        except KeyError as e:
-            print(f"Warning: {e}. Skipping nuclide filter for this file.")
-            nuclide_indices = list(range(serpent_file.n_nuclides))
+        nuclide_indices = _matching(nuclide_filter, serpent_file._nuclide_index, "nuclide(s)")
     else:
         nuclide_indices = list(range(serpent_file.n_nuclides))
     
@@ -1099,26 +1105,26 @@ def _process_single_serpent_file(
                         continue
                         
                 else:
-                    # Multiple perturbations for same MT - average them
+                    # Several labels for one MT (SERPENT writes "mt 4 xs" and
+                    # "inl scatt xs" for the same reaction) - average them.
                     print(f"Warning: Multiple perturbations found for MT={mt}, ZAI={zaid}. Taking average.")
-                    
+
                     try:
-                        all_values = []
-                        all_errors = []
-                        
-                        for pert_idx in pert_indices:
-                            values, rel_errors = serpent_file.get_energy_dependent(
-                                response_name, 
-                                mat=mat_idx, 
-                                zai=nuc_idx, 
-                                mt=mt
-                            )
-                            all_values.append(np.squeeze(values))
-                            all_errors.append(np.squeeze(rel_errors))
-                        
+                        # One call returns every perturbation with this MT, one
+                        # row each; asking once per index returned all of them
+                        # each time and the "average" stayed 2-D.
+                        values, rel_errors = serpent_file.get_energy_dependent(
+                            response_name,
+                            mat=mat_idx,
+                            zai=nuc_idx,
+                            mt=mt
+                        )
+                        all_values = np.asarray(values, dtype=float).reshape(len(pert_indices), -1)
+                        all_errors = np.asarray(rel_errors, dtype=float).reshape(len(pert_indices), -1)
+
                         # Average values and combine the native relative errors before conversion
                         avg_values = np.mean(all_values, axis=0).tolist()
-                        avg_rel_errors = np.sqrt(np.mean(np.array(all_errors)**2, axis=0)).tolist()
+                        avg_rel_errors = np.sqrt(np.mean(all_errors**2, axis=0)).tolist()
 
                         # Skip if all sensitivity coefficients are zero
                         if all(abs(v) < 1e-15 for v in avg_values):

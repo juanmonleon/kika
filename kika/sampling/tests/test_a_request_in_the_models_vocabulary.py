@@ -180,3 +180,14 @@ def test_a_source_of_another_format_is_refused(tmp_path):
         pytest.skip("no ACE fixture to refuse")
     with pytest.raises(ValueError, match="perturbation source is an ENDF tape or"):
         perturbFromModel(str(ace), BY_FILE, 1)
+
+
+def test_an_absolute_section_left_out_of_a_relative_request_is_named():
+    """The model route does not convert absolute sections; it must not hide them."""
+    from kika.sampling.joint_blocks import absoluteSectionsLeftOut
+    suite = kika.read(str(DATA / "micro_fe56_mf33.endf")).covarianceSuite
+    assert absoluteSectionsLeftOut(suite, {33: None}) == []
+    suite.covarianceSections[0].form.isRelative = False
+    assert len(collectEntries(suite, {33: None})) == 1
+    assert absoluteSectionsLeftOut(suite, {33: None}) == ["MF33 MT4 x MT4"]
+    assert absoluteSectionsLeftOut(suite, {33: [16]}) == []

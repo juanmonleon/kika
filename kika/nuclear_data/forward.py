@@ -208,7 +208,7 @@ class ElasticView:
         """``(mu_native, J)`` for a laboratory cosine: J = dΩ_native/dΩ_lab."""
         if self.frame == "lab":
             return float(mu_lab), 1.0
-        from kika.endf.dcs import cos_cm_from_cos_lab, jacobian_cm_to_lab
+        from kika._legendre_frames import cos_cm_from_cos_lab, jacobian_cm_to_lab
 
         mu_cm = float(cos_cm_from_cos_lab(mu_lab, self.alpha))
         return mu_cm, float(jacobian_cm_to_lab(mu_cm, self.alpha))

@@ -16,7 +16,8 @@ module is collected, the model is already in ``sys.modules`` — pytest imported
 it to get here.
 
 If this ever fails, do not relax it. Find what started importing the model and
-stop it, until phase 3d deliberately wires it in.
+stop it: the façades wired in by phase 3d reach the model from inside their
+methods, never at module scope.
 """
 from __future__ import annotations
 

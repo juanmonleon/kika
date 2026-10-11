@@ -333,7 +333,8 @@ class MF34MT(MT):
         logger.debug(f"Native grid NE={ne}, Matrix size M={m}x{m}")
 
         if record.lb == 0: # Absolute variance, diagonal on intervals
-            # Needs division by <Xk><Yk> from MF4 for relative - DEFERRED
+            # Absolute: to_ang_covmat divides it by the a_L cell means from MF4
+            # when the block also has relative components.
             # Fk corresponds to Ek, map to interval k = [Ek, Ek+1)
             for k in range(m):
                 # Use Fk associated with the start of the interval Ek
@@ -543,6 +544,43 @@ class MF34MT(MT):
         return projected_matrix
 
 
+    def _absolute_components_to_relative(self, component_matrices, native_grids_map,
+                                         sub_subsec, mt1, l, l1, mf4_data):
+        """The LB=0 components of a mixed block, divided by ``a_L a_L1``.
+
+        ``C_rel[i, j] = C_abs[i, j] / (ā_L,i ā_L1,j)`` with ``ā`` the exact
+        cell means of the coefficients from MF4 on the component's own grid.
+        A cell whose mean is zero has no relative covariance and gets zero.
+        Without MF4 there is nothing to divide by, and summing the two as they
+        stand would add a covariance of a_L to a covariance of a_L/a_L, so the
+        block is refused rather than given a wrong value.
+        """
+        where = f"MF34 MT{self.number} x MT{mt1}, (L, L1) = ({l}, {l1})"
+        mts = (self.number, mt1)
+        if (mf4_data is None or not hasattr(mf4_data, 'mt')
+                or any(m not in mf4_data.mt for m in mts)
+                or any(not hasattr(mf4_data.mt[m], 'legendre_cell_averages') for m in mts)):
+            raise ValueError(
+                f"{where} mixes absolute (LB=0) and relative components; the "
+                f"absolute part can only be summed after dividing it by a_L "
+                f"from MF4. Pass mf4_data (with MT{self.number} and MT{mt1}) "
+                f"to to_ang_covmat")
+        converted = []
+        for idx, matrix, is_lb6 in component_matrices:
+            if sub_subsec.records[idx].lb != 0:
+                converted.append((idx, matrix, is_lb6))
+                continue
+            grid = np.asarray(native_grids_map[idx][0], dtype=float)
+            a_row = np.asarray(mf4_data.mt[self.number].legendre_cell_averages(grid, l)[l], dtype=float)
+            a_col = np.asarray(mf4_data.mt[mt1].legendre_cell_averages(grid, l1)[l1], dtype=float)
+            denom = np.outer(a_row, a_col)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                rel = np.where(denom != 0.0, matrix / denom, 0.0)
+            logger.info(f"{where}: LB=0 component {idx + 1} divided by a_{l} a_{l1} from MF4 "
+                        "before summing with the relative ones")
+            converted.append((idx, rel, is_lb6))
+        return converted
+
     def to_ang_covmat(self, energy_unit: str = 'eV', mf4_data=None) -> 'LegendreCovariance':
         """
         Convert the MF34MT data to an LegendreCovariance object, aggregating LIST records
@@ -554,9 +592,16 @@ class MF34MT(MT):
             Energy unit for the energy grids: 'eV' (default) or 'MeV'
         mf4_data : MF4-like object, optional
             MF4 file object whose ``.mt[reaction]`` entries provide
-            ``extract_legendre_coefficients()``.  When supplied, grouped
+            ``legendre_cell_averages()``.  When supplied, grouped
             Legendre coefficients are computed on the covariance energy grid
-            and stored in ``ang_covmat.legendre_coefficients``.
+            and stored in ``ang_covmat.legendre_coefficients``. Required for
+            a sub-subsection that mixes absolute (LB=0) and relative
+            components: the absolute part is divided by the cell means of
+            a_L, a_L1 before the sum, and without MF4 such a block raises.
+
+        A block stated wholly in LB=0 stays absolute (``is_relative=False``).
+        Negative variances are kept as the file states them (a warning is
+        logged); repairing them is the conditioning pre-flight's job.
 
         Returns
         -------
@@ -631,9 +676,6 @@ class MF34MT(MT):
                         
                         if record.lb in (0, 1, 2):
                             component_matrix, native_grid = self._decode_lb012_matrix(record)
-                            if record.lb == 0:
-                                logger.warning("LB=0 matrix generated is absolute variance. Needs MF4 data for relative conversion (Deferred). Treating as relative for summation.")
-                                # TODO: Implement MF4 lookup and conversion here when available
                         elif record.lb == 5:
                             component_matrix, native_grid = self._decode_lb5_matrix(record)
                         elif record.lb == 6:
@@ -685,6 +727,16 @@ class MF34MT(MT):
                     if _debug:
                         logger.debug("Skipping sub-subsection - No valid energies/components found after decoding.")
                     continue
+
+                # LB=0 is absolute, every other LB here relative. A block made
+                # of both cannot be summed as it stands: the absolute part is
+                # put in relative form first, divided by the cell means of a_L
+                # and a_L1 from MF4 on its own grid (as MF33 does with sigma).
+                lbs_used = {sub_subsec.records[idx].lb for idx, _, _ in component_matrices}
+                if 0 in lbs_used and lbs_used - {0}:
+                    component_matrices = self._absolute_components_to_relative(
+                        component_matrices, native_grids_map, sub_subsec, mt1, l, l1, mf4_data)
+                    encountered_lbs.discard(0)
 
                 union_point_grid = sorted(list(all_energies_set))
                 union_ne = len(union_point_grid)
@@ -793,10 +845,13 @@ class MF34MT(MT):
                      logger.error(f"Final matrix shape {total_cov_matrix.shape} != expected ({union_m}, {union_m}) for L={l}, L1={l1}")
                      continue # Skip adding this matrix
 
-                # 2. Diagonal Positivity - only enforce for variance matrices (L=L1)
+                # 2. Diagonal Positivity - reported for variance matrices
+                #    (L=L1), never changed: the reader gives what the file
+                #    states, and a repair is the conditioning pre-flight's to
+                #    decide and record (kika.cov.conditioning).
                 if is_variance_matrix and not np.all(np.diag(total_cov_matrix) >= -1e-9):
                      neg_diags = np.where(np.diag(total_cov_matrix) < -1e-9)[0]
-                     logger.warning(f"Negative diagonal elements found in VARIANCE matrix for L=L1={l} at indices {neg_diags}. Clamping to zero.")
+                     logger.warning(f"Negative diagonal elements found in VARIANCE matrix for L=L1={l} at indices {neg_diags}; kept as stated.")
 
                      if _debug:
                          final_diag = np.diag(total_cov_matrix)
@@ -809,7 +864,6 @@ class MF34MT(MT):
                          logger.debug(f"Sub-subsection: L=L1={l}")
                          logger.debug(f"Number of components summed: {len(component_matrices)}")
 
-                     total_cov_matrix[np.diag_indices_from(total_cov_matrix)] = np.maximum(np.diag(total_cov_matrix), 0)
                 elif not is_variance_matrix and _debug:
                     # For covariance matrices, just report final state without clamping
                     final_diag = np.diag(total_cov_matrix)

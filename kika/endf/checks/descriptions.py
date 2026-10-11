@@ -125,7 +125,8 @@ def _build() -> Dict[str, CheckDescription]:
             "state a variance, which has no meaning off the diagonal."),
         "magnitude_covariance_in_mf34": D(
             "Non-null L=L1=0 block in MF34", (34,),
-            {WARN: "always"},
+            {WARN: "the block differs from MF33's self block of the reaction",
+             NOTE: "the block repeats MF33's self block"},
             "ENDF-6 34.3 keeps the covariance of the integrated cross section in MF33 and asks "
             "for null (L=0, L1=0) components in MF34. A non-null one counts that covariance "
             "a second time when the two files are combined."),
@@ -214,6 +215,13 @@ def _build() -> Dict[str, CheckDescription]:
             "combinations of quantities with negative variance. Only what the cross blocks add "
             "is graded: how far lambda_min of the joint falls below the smallest eigenvalue "
             "of its self blocks. The evidence names the cross blocks that do it on their own."),
+        "joint_node_left_out": D(
+            "Reaction left out of the joint check", (31, 33, 34),
+            {NOTE: "always"},
+            "A cross block is relative while its self blocks are absolute, or the reverse. "
+            "One matrix cannot hold both, and leaving out only the cross block could make "
+            "the joint look indefinite, so the second node of the pair is left out of the "
+            "joint check with all its blocks. The joint result says nothing about it."),
         "relative_uncertainty_above_one": D(
             "Relative uncertainty above 100 %", (31, 32, 33),
             {NOTE: "always"},

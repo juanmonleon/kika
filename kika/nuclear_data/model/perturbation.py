@@ -10,8 +10,8 @@ own version and the three can disagree. Here the operation is on the node --
 format is a way of writing the answer down afterwards.
 
 The arithmetic is not new. It reproduces
-:func:`kika.sampling.mf33_sampling.apply_factors_to_pendf_mf3`, which is what
-the thesis pipeline runs, and the gate is byte-identity of the section that
+:func:`kika.sampling.mf33_sampling.apply_factors_to_pendf_mf3`, the format
+route's applier, and the gate is byte-identity of the section that
 comes out of ``encodeMF3MT`` against the section that applier writes. Three
 pieces:
 
@@ -28,7 +28,7 @@ pieces:
    pairs fall out of :meth:`Regions1d.toEndfRegions` counting region lengths.
    The format applier computes ``new_NBT_i = NBT_i + sum(n for pos < NBT_i)``
    by hand; that arithmetic and the point count were two sources of truth for
-   the same fact, which is exactly the defect D28 was.
+   the same fact, and they once disagreed.
 
 **Where this deliberately does not reproduce the format applier.** The value
 inserted at a bin edge that the table does not already carry has to be
@@ -182,9 +182,19 @@ def refineAtBinEdges(function1d: Function1dT, binEdges: ArrayLike) -> Function1d
     return _rebuild(function1d, regions)
 
 
+def _requireAscending(edges: np.ndarray, what: str = "binEdges") -> None:
+    """A factor grid is strictly ascending, or every bin lookup is wrong.
+
+    ``searchsorted`` on a descending grid returns indices without complaint, so
+    a reversed grid would put each factor on the wrong bin silently.
+    """
+    if edges.size >= 2 and not np.all(np.diff(edges) > 0):
+        raise ValueError(f"{what} must be strictly ascending energies")
+
+
 def _flatFactors(xs: np.ndarray, factors: np.ndarray,
-                 binEdges: np.ndarray) -> np.ndarray:
-    """The factor each abscissa of the flat table takes.
+                 binEdges: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """The factor each abscissa of the flat table takes, and whether a bin covers it.
 
     The duplicate-aware rule, and it is stated on the **flat** table rather than
     per region on purpose. A repeated abscissa is a property of the ENDF table,
@@ -205,7 +215,7 @@ def _flatFactors(xs: np.ndarray, factors: np.ndarray,
     covered = (index >= 0) & (index < nGroups)
     out = np.ones(xs.size, dtype=float)
     out[covered] = factors[index[covered]]
-    return out
+    return out, covered
 
 
 def applyFactors(function1d: Function1dT, factors: ArrayLike,
@@ -252,13 +262,15 @@ def applyFactors(function1d: Function1dT, factors: ArrayLike,
             f"{factors.size} factor(s) for {binEdges.size - 1} bin(s): a factor "
             f"block and its grid have to describe the same binning"
         )
+    _requireAscending(binEdges)
 
     before = sum(r.xs.size for r in _regionsOf(function1d))
     refined = refineAtBinEdges(function1d, binEdges)
     regions = _regionsOf(refined)
 
     xs, _, _ = refined.toEndfRegions()
-    perPoint = _flatFactors(np.asarray(xs, dtype=float), factors, binEdges)
+    perPoint, coveredPoints = _flatFactors(np.asarray(xs, dtype=float),
+                                           factors, binEdges)
 
     # Scatter back onto the regions. Region i>0 repeats the boundary abscissa
     # that the flat table states once, so it re-reads the same entry rather
@@ -276,10 +288,9 @@ def applyFactors(function1d: Function1dT, factors: ArrayLike,
                             axes=region.axes, index=region.index))
         cursor = start + n
 
-    covered = float(np.mean(
-        (np.searchsorted(binEdges, xs, side="right") - 1 >= 0)
-        & (np.searchsorted(binEdges, xs, side="right") - 1 < factors.size)
-    )) if len(xs) else 0.0
+    # Coverage is the rule the factors used: the first copy of the pair at the
+    # last edge takes the last bin's factor, so it is covered.
+    covered = float(np.mean(coveredPoints)) if len(xs) else 0.0
 
     diagnostics = {
         "min_factor": float(perPoint.min()) if perPoint.size else 1.0,
@@ -538,8 +549,9 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step",
     Returns
     -------
     (perturbed, diagnostics)
-        A node of the same kind, and ``per_order`` (min and max factor and how
-        many coefficients were scaled, per order), ``n_inserted``, and
+        A node of the same kind, and ``per_order`` (min and max factor, and
+        ``n_scaled``: how many coefficients of that order were multiplied,
+        counting those outside the block's coverage whose factor is 1), ``n_inserted``, and
         ``orders_absent`` -- the requested orders the distribution carries at no
         energy. That last is a real case, not a defensive check: a file may
         state a covariance for an order the evaluation itself stops short of,
@@ -591,6 +603,8 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step",
         nBins = len(np.asarray(binEdges[order])) - 1
         if nFactors != nBins:
             raise ValueError(f"L={order}: {nFactors} factor(s) on {nBins} bin(s)")
+        _requireAscending(np.asarray(binEdges[order], dtype=float),
+                          f"L={order} binEdges")
 
     regions = _legendreRegions(angular)
     if not regions:
@@ -625,7 +639,7 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step",
         coefficients = [np.array(f.coefficients, dtype=float, copy=True)
                         for f in refined.function1ds]
         perPoints = {order: _flatFactors(xs, np.asarray(factors[order], dtype=float),
-                                         np.asarray(binEdges[order], dtype=float))
+                                         np.asarray(binEdges[order], dtype=float))[0]
                      for order in orders}
         if frameConversion is None:
             for order in orders:
@@ -930,6 +944,8 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
         nBins = len(np.asarray(binEdges[order])) - 1
         if nFactors != nBins:
             raise ValueError(f"L={order}: {nFactors} factor(s) on {nBins} bin(s)")
+        _requireAscending(np.asarray(binEdges[order], dtype=float),
+                          f"L={order} binEdges")
     if coverageEdges not in COVERAGE_EDGES:
         raise ValueError(f"coverageEdges must be one of {COVERAGE_EDGES}, got "
                          f"{coverageEdges!r}")
@@ -958,7 +974,7 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
         xs = np.array([float(f.outerDomainValue) for f in refined.function1ds],
                       dtype=float)
         perPoint = {order: _flatFactors(xs, np.asarray(factors[order], dtype=float),
-                                        np.asarray(binEdges[order], dtype=float))
+                                        np.asarray(binEdges[order], dtype=float))[0]
                     for order in orders}
 
         tables = []
@@ -1035,6 +1051,32 @@ NUBAR_STEP_SHOULDER = 1.0e-3
 #: exists to avoid.
 NUBAR_ENERGY_RTOL = 1.0e-6
 
+#: Geometric nodes per factor bin when a polynomial (LNU=1) nu-bar is tabulated
+#: before scaling. ``kika.sampling.mf31_sampling.NUBAR_NODES_PER_BIN``'s value.
+NUBAR_POLYNOMIAL_NODES_PER_BIN = 8
+
+
+def _tabulatePolynomialNubar(polynomial, edges: np.ndarray):
+    """A polynomial nu-bar as lin-lin ``(xs, ys)`` on the factor grid.
+
+    A per-bin factor cannot multiply polynomial coefficients, so the polynomial
+    is evaluated on each bin subdivided geometrically -- the grid
+    ``kika.sampling.mf31_sampling._lnu1_reconstruction_grid`` builds -- clipped
+    to the polynomial's own domain, whose ends are kept so nothing of the
+    original range is lost.
+    """
+    segments = []
+    for x0, x1 in zip(edges[:-1], edges[1:]):
+        if not x1 > x0:
+            continue
+        if x0 <= 0:
+            x0 = min(x1 * 1.0e-6, 1.0e-5)
+        segments.append(np.geomspace(x0, x1, NUBAR_POLYNOMIAL_NODES_PER_BIN + 1))
+    lo, hi = float(polynomial.domainMin), float(polynomial.domainMax)
+    xs = np.unique(np.concatenate(segments + [np.array([lo, hi])]))
+    xs = xs[(xs >= lo) & (xs <= hi)]
+    return xs, np.asarray(polynomial.evaluate(xs), dtype=float)
+
 
 def refineForNubar(xs: ArrayLike, ys: ArrayLike, binEdges: ArrayLike, *,
                    shoulder: float = NUBAR_STEP_SHOULDER):
@@ -1075,9 +1117,7 @@ def refineForNubar(xs: ArrayLike, ys: ArrayLike, binEdges: ArrayLike, *,
         edge = float(edge)
         # ``edge == hi`` still wants a shoulder: the table's last point sits on
         # a bin boundary and takes the *upper* bin's factor, so without one the
-        # whole top of that bin ramps towards its neighbour. The block's own
-        # last edge is excluded because the top-edge clamp below already pulls a
-        # point there back into the last bin -- there is no step to resolve.
+        # whole top of that bin ramps towards its neighbour.
         if not (lo < edge <= hi):
             continue
         if edge < hi:
@@ -1085,6 +1125,20 @@ def refineForNubar(xs: ArrayLike, ys: ArrayLike, binEdges: ArrayLike, *,
         shoulderEnergy = edge * (1.0 - shoulder)
         if shoulderEnergy > lo:
             candidates.append(shoulderEnergy)
+    # The block's own outer edges are steps too when the table runs past them:
+    # outside the grid the factor is 1. Below the first edge the node outside
+    # is the shoulder ``E0 (1 - s)``; above the last edge -- whose own node
+    # takes the last bin's factor -- it is ``EN (1 + s)``. A table that ends on
+    # an outer edge has no step there and gets nothing.
+    first, last = float(edges[0]), float(edges[-1])
+    if lo < first < hi:
+        candidates.append(first)
+        if first * (1.0 - shoulder) > lo:
+            candidates.append(first * (1.0 - shoulder))
+    if lo < last < hi:
+        candidates.append(last)
+        if last * (1.0 + shoulder) < hi:
+            candidates.append(last * (1.0 + shoulder))
 
     if not candidates:
         return xs, ys
@@ -1123,7 +1177,9 @@ def _oneLinLinRegion(template, xs, ys):
                    ys=np.asarray(ys, dtype=float),
                    interpolation=Interpolation.linlin,
                    axes=getattr(template, "axes", None))
-    if isinstance(template, Regions1d):
+    from .functions.simple import Polynomial1d
+
+    if isinstance(template, (Regions1d, Polynomial1d)):
         return Regions1d(function1ds=[region], axes=template.axes,
                          label=template.label,
                          outerDomainValue=template.outerDomainValue,
@@ -1150,9 +1206,10 @@ def applyNubarFactors(function1d, factors: ArrayLike, binEdges: ArrayLike, *,
       of a table whose domain ends where the covariance does comes back
       unperturbed, which reads as a ramp to baseline over the final bin.
 
-    Returns ``(perturbed, diagnostics)``. The perturbed node is an
-    :class:`~kika.nuclear_data.model.functions.xys1d.XYs1d` with one lin-lin
-    region **whatever went in**, because that is what the format applier writes
+    Returns ``(perturbed, diagnostics)``. The perturbed node holds one lin-lin
+    region **whatever went in** -- a ``Regions1d`` with one region when the
+    input was a ``Regions1d`` or a polynomial (LNU=1, tabulated on the factor
+    grid first), an ``XYs1d`` otherwise -- because that is what the format applier writes
     (``_set_nubar`` passes ``[(N, 2)]``) and because the sum rule is stated on
     lin-lin interpolants. A multi-region or non-lin-lin input is therefore
     flattened, and ``regions_collapsed`` in the diagnostics says so rather than
@@ -1170,24 +1227,29 @@ def applyNubarFactors(function1d, factors: ArrayLike, binEdges: ArrayLike, *,
         raise ValueError(
             f"{factors.size} factor(s) for {edges.size - 1} bin(s): a factor "
             f"block and its grid have to describe the same binning")
+    _requireAscending(edges)
 
-    regions = _regionsOf(function1d)
-    xs, ys, pairs = function1d.toEndfRegions()
-    xs = np.asarray(xs, dtype=float)
-    ys = np.asarray(ys, dtype=float)
-    collapsed = len(pairs) > 1 or any(
-        region.interpolation is not Interpolation.linlin for region in regions)
+    from .functions.simple import Polynomial1d
+
+    if isinstance(function1d, Polynomial1d):
+        # LNU=1: tabulated first, so the result is an LNU=2 table.
+        xs, ys = _tabulatePolynomialNubar(function1d, edges)
+        collapsed = True
+    else:
+        regions = _regionsOf(function1d)
+        xs, ys, pairs = function1d.toEndfRegions()
+        xs = np.asarray(xs, dtype=float)
+        ys = np.asarray(ys, dtype=float)
+        collapsed = len(pairs) > 1 or any(
+            region.interpolation is not Interpolation.linlin for region in regions)
 
     before = xs.size
     xs, ys = refineForNubar(xs, ys, edges, shoulder=shoulder)
 
-    perPoint = _flatFactors(xs, factors, edges)
+    perPoint, covered = _flatFactors(xs, factors, edges)
     atTop = np.isclose(xs, edges[-1], rtol=1e-12, atol=0.0)
     if atTop.any():
         perPoint = np.where(atTop, factors[-1], perPoint)
-
-    covered = (np.searchsorted(edges, xs, side="right") - 1 >= 0) & (
-        np.searchsorted(edges, xs, side="right") - 1 < factors.size)
     covered = covered | atTop
 
     perturbed = _oneLinLinRegion(function1d, xs, ys * perPoint)
@@ -1209,8 +1271,7 @@ def applyNubarFactors(function1d, factors: ArrayLike, binEdges: ArrayLike, *,
 # section and a nu-bar are scaled: refine at the bin edges, multiply. A fission
 # spectrum is not, because MF35 is not the covariance of chi(E') -- it is the
 # covariance of the *group-integrated probabilities*
-# ``P_j = int_{g_j}^{g_j+1} chi``, measured three independent ways
-# (``docs/pfns/pfns_mf5_mf35_roadmap.md`` fact 4). So the perturbation is stated
+# ``P_j = int_{g_j}^{g_j+1} chi`` (ENDF-6 §35). So the perturbation is stated
 # on quantities the node does not store, and applying it means integrating the
 # node, turning a delta on the integral into a ratio, scaling the table so the
 # integral comes out right, and then checking that it did.

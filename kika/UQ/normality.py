@@ -53,18 +53,16 @@ def normality_tests(y_val: np.ndarray, alpha: float = 0.05) -> List[Dict]:
         "is_normal": bool(sw_p > alpha),
     })
 
-    # Anderson-Darling
-    ad_result = stats.anderson(y_val, dist="norm")
-    # Use the 5% significance level critical value
-    ad_critical_idx = list(ad_result.significance_level).index(5.0) if 5.0 in ad_result.significance_level else 2
-    ad_is_normal = ad_result.statistic < ad_result.critical_values[ad_critical_idx]
-    # Anderson-Darling doesn't return a p-value directly, approximate
-    # Using the statistic vs critical value at 5%
+    # Anderson-Darling. scipy gives the statistic and critical values only;
+    # the p-value is D'Agostino & Stephens' approximation for a normal with
+    # estimated mean and variance, and the decision uses alpha like the others.
+    ad_stat = float(stats.anderson(y_val, dist="norm").statistic)
+    ad_p = anderson_darling_normal_p_value(ad_stat, n)
     results.append({
         "test_name": "Anderson-Darling",
-        "statistic": float(ad_result.statistic),
-        "p_value": float(ad_result.critical_values[ad_critical_idx]),  # critical value at 5%
-        "is_normal": bool(ad_is_normal),
+        "statistic": ad_stat,
+        "p_value": ad_p,
+        "is_normal": bool(ad_p > alpha),
     })
 
     # D'Agostino-Pearson K² (requires N >= 20)
@@ -81,6 +79,25 @@ def normality_tests(y_val: np.ndarray, alpha: float = 0.05) -> List[Dict]:
             pass
 
     return results
+
+
+def anderson_darling_normal_p_value(statistic: float, n: int) -> float:
+    """p-value of the Anderson-Darling test of normality, mean and variance estimated.
+
+    R. B. D'Agostino and M. A. Stephens, *Goodness-of-Fit Techniques* (1986),
+    Table 4.9: the statistic is corrected to ``A*² = A²(1 + 0.75/n + 2.25/n²)``
+    and the p-value read from four exponential fits in ``A*²``.
+    """
+    a = float(statistic) * (1.0 + 0.75 / n + 2.25 / (n * n))
+    if a >= 0.6:
+        p = np.exp(1.2937 - 5.709 * a + 0.0186 * a * a)
+    elif a >= 0.34:
+        p = np.exp(0.9177 - 4.279 * a - 1.38 * a * a)
+    elif a >= 0.2:
+        p = 1.0 - np.exp(-8.318 + 42.796 * a - 59.938 * a * a)
+    else:
+        p = 1.0 - np.exp(-13.436 + 101.14 * a - 223.73 * a * a)
+    return float(min(max(p, 0.0), 1.0))
 
 
 def histogram_data(y_val: np.ndarray, n_bins: int = 30) -> Dict:

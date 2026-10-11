@@ -10,8 +10,7 @@ way round: the covariance is of LAB coefficients and MF4 is in CM, for MT2 and M
 A covariance of LAB coefficients describes LAB factors, so a sample has to be
 applied **in the LAB frame and brought back**. Applying the LAB factors to the
 CM coefficients would perturb a different quantity from the one the covariance
-describes. This module does that round trip, node by node (option A of
-``docs/library/cov_checks_roadmap.md``, N2):
+describes. This module does that round trip, node by node:
 
 1. ``b = T a``. These are the LAB coefficients of the evaluated CM vector ``a``.
    ``T`` is linear but couples every order.
@@ -34,8 +33,7 @@ expanded, so the LAB shift comes back to the CM nodes in closed form: the
 finite LAB series at the mapped cosine times the Jacobian of the map
 (:func:`cosineMap`, :func:`correctionBasis`). That is the limit the pad
 converges to, measured at 1e-12 for A = 12 to 236, and it is what
-:mod:`kika.nuclear_data.model.angular_tables` uses (roadmap T9 of
-``docs/library/mf4_tabulated_perturbation_roadmap.md``).
+:mod:`kika.nuclear_data.model.angular_tables` uses.
 
 **The kinematics is two-body neutron scattering**, ``A(n,n')A*``: elastic
 (MT2) and the discrete inelastic levels (MT51-90). The ratio of the
@@ -114,6 +112,16 @@ def cos_cm_from_cos_lab(mu_lab, alpha: float):
     mu_lab = np.asarray(mu_lab, dtype=float)
     s = 1.0 - mu_lab * mu_lab
     return -alpha * s + mu_lab * np.sqrt(np.maximum(1.0 - alpha * alpha * s, 0.0))
+
+
+def jacobian_cm_to_lab(mu_cm, alpha: float):
+    r"""Solid-angle Jacobian :math:`J = d\Omega_C/d\Omega_L` at :math:`\mu_C`.
+
+    .. math::
+        J = \frac{(1 + \alpha^2 + 2\alpha\mu_C)^{3/2}}{|1 + \alpha\mu_C|}
+    """
+    mu_cm = np.asarray(mu_cm, dtype=float)
+    return np.power(1.0 + alpha * alpha + 2.0 * alpha * mu_cm, 1.5) / np.abs(1.0 + alpha * mu_cm)
 
 
 def _dlab_dcm(mu_cm, alpha: float):

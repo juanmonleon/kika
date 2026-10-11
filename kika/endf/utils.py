@@ -283,6 +283,28 @@ def parse_interp_pairs(lines, start, nr):
     return pairs, idx
 
 
+def _body_value(line, position, value):
+    """Field *position* (0-5) of a LIST/TAB1 body line, as a float.
+
+    A blank field is a zero, which is what ENDF-6 means by one. A field that is
+    neither blank nor a number is refused: skipping it would shift every later
+    value one slot, or return fewer points than the record declares, and the
+    section would read as valid.
+    """
+    if value is not None:
+        return value
+    text = line[position * 11:(position + 1) * 11]
+    if not text.strip():
+        return 0.0
+    # parse_record_values gives a short line (< 66 columns) no values at all.
+    value = parse_number(text)
+    if value is not None:
+        return value
+    raise ValueError(
+        f"unreadable number {text!r} in field {position + 1} of ENDF line "
+        f"{line[66:80].strip() or line.rstrip()!r}")
+
+
 def parse_data_pairs(lines, start, np_count):
     """
     Read NP x/y data pairs (3 pairs per line) from ENDF lines.
@@ -309,16 +331,14 @@ def parse_data_pairs(lines, start, np_count):
     for _ in range(num_lines_needed):
         if idx >= len(lines):
             break
-        values = parse_record_values(lines[idx])
+        line = lines[idx]
+        values = parse_record_values(line)
         idx += 1
         for i in range(3):
             if len(x_list) >= np_count:
                 break
-            x = values[i * 2]
-            y = values[i * 2 + 1]
-            if x is not None and y is not None:
-                x_list.append(x)
-                y_list.append(y)
+            x_list.append(_body_value(line, i * 2, values[i * 2]))
+            y_list.append(_body_value(line, i * 2 + 1, values[i * 2 + 1]))
     return x_list, y_list, idx
 
 
@@ -510,15 +530,11 @@ def parse_data_values(lines, start, n_values):
         for i in range(1, 7):
             if len(values) >= n_values:
                 break
-            v = fields[i - 1]
-            if v is not None:
-                values.append(v)
-            elif not line[(i - 1) * 11:i * 11].strip():
-                # A blank field inside a LIST body is a zero, not an absent
-                # value. Skipping it shifted every later value one slot: JEFF-4.0
-                # Gd-155/157 leave two RML channel columns blank, and their
-                # whole MF2 was lost behind a logged IndexError.
-                values.append(0.0)
+            # A blank field inside a LIST body is a zero, not an absent value.
+            # Skipping it shifted every later value one slot: JEFF-4.0
+            # Gd-155/157 leave two RML channel columns blank, and their whole
+            # MF2 was lost behind a logged IndexError.
+            values.append(_body_value(line, i - 1, fields[i - 1]))
     return values, idx
 
 

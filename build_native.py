@@ -1,4 +1,4 @@
-"""Build the compiled resonance kernel. Required: a failed build is an error.
+"""Build the compiled resonance and Doppler kernels. Required: a failed build is an error.
 
 The app and generated scripts reconstruct with it; without it the NumPy
 reference path is correct but too slow for whole actinides, and a silent
@@ -26,7 +26,9 @@ class StrictBuild(build_ext):
 def _run(compiler=None):
     distribution=Distribution({'ext_modules':[Extension(
         'kika.processing.resonances._rm_native',
-        ['kika/processing/resonances/_rm_native.c'],depends=['kika/processing/resonances/_rm_kernel.h'])]})
+        ['kika/processing/resonances/_rm_native.c'],depends=['kika/processing/resonances/_rm_kernel.h']), Extension(
+        'kika.processing.doppler._doppler_native',
+        ['kika/processing/doppler/_doppler_native.c'])]})
     command=StrictBuild(distribution)
     command.inplace=True
     if compiler:command.compiler=compiler
@@ -40,7 +42,7 @@ def build():
         _run(forced)
     except (FileNotFoundError,PlatformError,CCompilerError) as error:
         if forced or sys.platform!='win32' or not shutil.which('gcc'):
-            raise RuntimeError('kika requires its compiled resonance kernel and it did not build: '
+            raise RuntimeError('kika requires its compiled numerical kernels and they did not build: '
                 f'{error}. Install a C compiler (MSVC, gcc or clang), or set '
                 'KIKA_BUILD_NATIVE=0 to skip it knowingly.') from error
         _run('mingw32')

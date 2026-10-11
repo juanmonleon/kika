@@ -16,9 +16,10 @@ original formulation was ``== str(CrossSection.from_endf(s).to_endf())``: what
 the model produced against what the code it replaces produces. That catches a
 model that drops a field, but it cannot catch a model that inherits a *defect*
 from the code it is copying — and one was there. ENDF writes ZA as a
-fixed-format float, kika's reader rebuilds it as ``mantissa * 10**exponent``,
-and Th-232's ``9.023200+4`` comes back as ``90231.99999999999``; both paths did
-``int()`` on it and agreed on 90231. Comparing against the file instead makes
+fixed-format float, kika's reader then rebuilt it as ``mantissa * 10**exponent``
+(``parse_number`` has since been fixed to round once), and Th-232's
+``9.023200+4`` came back as ``90231.99999999999``; both paths did ``int()`` on
+it and agreed on 90231. Comparing against the file instead makes
 all 57 Th-232 sections and all 53 Pu-241 sections fail, which is the truth. The
 flat path's version of that loss is pinned as an xfail below.
 """

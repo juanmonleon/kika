@@ -11,26 +11,16 @@ slice of it:
 **Byte-identical.** MF3/MT1, MF3/MT2 and MF3/MT102 come back exactly as
 written, all 15 127 lines. That is the gate, and it is asserted exactly.
 
-**One formatting defect, three symptoms.** kika writes an ENDF floating-point
-field as an integer when its value is zero. It shows up in the SEND record that
-closes every section (``0.000000+0`` six times becomes ``0`` six times), and in
-the STA field of the second MF1/451 record. Consequence: splicing an
-*unmodified* section back into a tape changes the tape, which is the operation
-``kika.sampling`` and the thesis scripts perform on every sample.
-
-**Two content divergences.** The l-dependent scattering radius APL of the
-MF2/151 L=1 block is dropped, and MF4/MT2 re-emits one AWR where the source
-carried two slightly different ones.
-
-**One spec deviation.** ``update_mf1_directory`` writes its own line number in
-the sequence-number field of the MF1/451 SEND record, where ENDF-6 requires the
-literal 99999.
-
-Each of the last three groups is pinned by a test written the way it *should*
-pass, marked ``xfail(strict=True)``. When the defect is fixed the test starts
-passing, the strict marker turns that into a failure, and whoever fixed it is
-forced to come here and delete the marker. Phase 0 records defects; it does not
-fix them.
+**What this file found, and what is left.** Phase 0 recorded five defects:
+zero floats written as integers (in every SEND record and MF1/451's STA field),
+the MF2/151 L=1 scattering radius APL dropped, MF4/MT2 re-emitting one AWR where
+the source carries two, and ``update_mf1_directory`` writing its own line number
+where ENDF-6 requires 99999 in the MF1/451 SEND record. All but the AWR one were
+fixed in the phase-1 burn-down and are now asserted as ordinary tests. The AWR
+case stays pinned by a test written the way it *should* pass, marked
+``xfail(strict=True)``: when it is fixed the test starts passing, the strict
+marker turns that into a failure, and whoever fixed it is forced to come here
+and delete the marker.
 """
 from __future__ import annotations
 

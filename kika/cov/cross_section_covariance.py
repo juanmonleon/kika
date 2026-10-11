@@ -374,7 +374,8 @@ class CrossSectionCovariance:
             )
         return result
 
-    def to_covfil(self, file_path: Union[str, 'Path'], tape_label: str = '', temperature: float = 0.0) -> None:
+    def to_covfil(self, file_path: Union[str, 'Path'], tape_label: str = '',
+                  temperature: Optional[float] = None) -> None:
         """
         Write this CrossSectionCovariance to an NJOY COVFIL/GENDF text file.
 
@@ -385,7 +386,8 @@ class CrossSectionCovariance:
         tape_label : str, optional
             Label for the tape header line (max 66 chars)
         temperature : float, optional
-            Temperature in K for MF1 MT451 CONT record
+            Temperature in K for MF1 MT451 CONT record. ``None`` (default)
+            keeps the one :func:`read_covfil` stored in ``metadata``, else 0.
         """
         from kika.cov.parse_covmat import write_covfil
         write_covfil(self, str(file_path), tape_label=tape_label, temperature=temperature)
@@ -563,7 +565,7 @@ class CrossSectionCovariance:
             # and every distributed covariance file writes one; kika's ENDF
             # adapter writes a slash. Requiring the slash made this raise "has
             # no ENDF_MFMT" at a section that had a perfectly good one, which
-            # is the misleading half of `docs/library/gnds_endf_conflicts.md` §3.1.
+            # is a conflict between the GNDS and ENDF spellings, not a defect of the section.
             mfmt = getattr(getattr(section, 'rowData', None), 'ENDF_MFMT', None)
             parts = str(mfmt).replace('/', ',').split(',') if mfmt else []
             if len(parts) != 2 or not parts[1].strip().isdigit():
@@ -991,7 +993,8 @@ class CrossSectionCovariance:
                 continue
             native_grid = np.asarray(self.energy_grids[i], dtype=float)
             native_mat = np.asarray(self.matrices[i], dtype=float)
-            is_rel = bool(self.is_relative[i]) if i < len(self.is_relative) else False
+            # An unstated class is relative, as everywhere else in kika.cov.
+            is_rel = bool(self.is_relative[i]) if i < len(self.is_relative) else True
 
             if is_rel:
                 if xs_source is None:

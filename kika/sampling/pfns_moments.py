@@ -23,9 +23,7 @@ the written spectrum moves by ``w . dP`` exactly, and its stated variance is
 
 ``w`` is centred on ``q`` before the sandwich (``C 1 ~ 0`` for a probability
 covariance, so centring only removes the drift of a matrix whose rows do not
-sum to exactly zero). These are the numbers of
-``kika_dev/sampling/checks/pfns_c10_stated_moments.py``, computed on the
-model's node and exactly: ``P_g`` and ``a_g`` are closed-form group integrals
+sum to exactly zero). They are computed on the model's node and exactly: ``P_g`` and ``a_g`` are closed-form group integrals
 (:func:`kika.algebra.group_integrals`), and ``e_g`` is an 8-point
 Gauss-Legendre rule on every panel of the table cut at the group edges, which
 is exact for a lin-lin table (``x chi`` is quadratic on a panel) and good to

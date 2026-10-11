@@ -220,7 +220,7 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
         forms[mt]=curves[0] if len(curves)==1 else Regions1d(curves,axes=axes,label=label)
         forms[mt].label=label
     fingerprint=hashlib.sha256(repr((prepared,background,graph,options)).encode()).hexdigest()
-    report=dict(engine='kika-bw-rrr-tabulator-1',scope='prepared resonance domains',normalized_sha256=fingerprint,
+    report=dict(engine='kika-resonance-tabulator-1',scope='prepared resonance domains',normalized_sha256=fingerprint,
                 context=prepared.context,options=options,regions=checks,points=points,
                 stored_points=sum(len(c.xs) for f in forms.values() for c in (f.function1ds if isinstance(f,Regions1d) else [f])),
                 units=dict(energy='eV',cross_section='b'),background_mts=tuple(sorted(background)),
