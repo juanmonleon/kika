@@ -387,22 +387,17 @@ _one("styles", Coverage.PARTIAL, None, "stylesContext",
      "so the file kika writes stays valid -- this is a read loss and "
      "not an invalid write")
 
-_one("heated", Coverage.PARTIAL, None, "aceOnlyStyles",
-     "write only: **built live** by "
-     "kika/ace/model_adapter/decode.py:141 and emitted, while "
-     "kika/gnds/styles.py reports it on read rather than guessing at "
-     "what it means. And what is emitted is invalid -- RS_HeatedType "
-     "(gnds.xsd:120-124) makes <temperature> mandatory and the writer "
-     "attaches one only to an Evaluated")
+_one("heated", Coverage.FULL, None, "heatedStyle",
+     "§9.4.1, read and written: kika/gnds/styles.py carries the mandatory "
+     "<temperature> of RS_HeatedType (gnds.xsd:120-124) in both directions "
+     "and rejects one that is missing or not a finite kelvin value "
+     "(tests/test_heated_styles.py). It is also built live by "
+     "kika/ace/model_adapter/decode.py and by the HDF5 decoder")
 
 _one("averageProductData", Coverage.PARTIAL, None, "aceOnlyStyles",
-     # Self-standing on purpose. The render groups by (group, why), so this
-     # entry and `heated` come out as two blocks in an order neither of them
-     # chooses -- and "as `heated`" alone reads as a dangling reference when
-     # this block lands first, which it does.
-     "write only, and on the same terms as the `heated` style it accompanies: "
+     "write only: kika/gnds/styles.py has no codec for it, and "
      "RS_AverageProductDataType (gnds.xsd:130-134) makes <temperature> "
-     "mandatory too, so the same write is invalid")
+     "mandatory, which the writer does not attach, so the write is invalid")
 
 _one("documentation", Coverage.PARTIAL, 'documentation', "documentation",
      "read and written on a style (styles.py, documentation.py): its "
