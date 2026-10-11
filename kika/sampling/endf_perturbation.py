@@ -1271,6 +1271,10 @@ def perturb_ENDF_files(
                         # rather than as a side effect of changing which object the
                         # covariance arrives in.
                         null_tol=None,
+                        # Frozen format-level sampler: keeps the SVD's |λ| for a direction
+                        # stated with negative variance, exactly as the published draws did.
+                        # New code takes the default, which gives it zero variance.
+                        negative_directions="fold",
                         dtype=np.float32,
                         verbose=verbose,
                     )

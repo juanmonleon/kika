@@ -349,6 +349,10 @@ def draw_relative_factors(
         seed=seed,
         psd_method=psd_method,
         null_tol=null_tol,
+        # Frozen format-level sampler: keeps the SVD's |λ| for a direction
+        # stated with negative variance, exactly as the published draws did.
+        # New code takes the default, which gives it zero variance.
+        negative_directions="fold",
         dtype=np.float64,
         verbose=verbose,
         logger=logger,

@@ -90,6 +90,7 @@ def draw_samples(
     seed: Optional[int] = None,
     psd_method: str = "auto",
     null_tol: Optional[float] = DEFAULT_NULL_TOL,
+    negative_directions: str = "zero",
     dtype=np.float64,
     verbose: bool = True,
     logger=None,
@@ -150,14 +151,28 @@ def draw_samples(
 
         **The rank reported here and the rank a pre-flight reports are not the
         same number, and neither is wrong.** This one is taken on the singular
-        values the draw actually decomposes — *after* ``psd_method`` has acted,
-        and SVD folds a negative eigenvalue to its magnitude. A direction the
-        file states as negative-variance therefore survives as a retained
-        direction here while ``conditioning.inspect_blocks``, which reads the
-        eigenvalues of the matrix as stated, counts it null. Measured on that
-        same Fe-56 joint: 615 null directions in the draw against 669 in the
-        pre-flight, the difference being directions the evaluation states as
-        unphysical.
+        values the draw actually decomposes — *after* ``psd_method`` has acted.
+        With ``negative_directions="fold"`` an SVD folds a negative eigenvalue
+        to its magnitude, so a direction the file states as negative-variance
+        survives as a retained direction here while
+        ``conditioning.inspect_blocks``, which reads the eigenvalues of the
+        matrix as stated, counts it null. Measured on that same Fe-56 joint:
+        615 null directions in the folded draw against 669 in the pre-flight,
+        the difference being directions the evaluation states as unphysical.
+        With the default ``"zero"`` those directions count null here too.
+    negative_directions
+        What the draw does with a direction the matrix it decomposes states
+        with a **negative** eigenvalue — one ``psd_method`` left in place
+        (``"none"``), or numerical residue after a repair. ``"zero"`` (the
+        default) gives it zero variance, which is what the eigen path has
+        always done and the closest a draw can come to "as stated": a negative
+        variance cannot be realised. ``"fold"`` keeps what an SVD returns, the
+        magnitude ``|λ|``, i.e. draws from ``V|Λ|Vᵀ`` and adds variance in a
+        direction the evaluation does not state. It exists only so the frozen
+        format-level samplers (``perturb_ENDF_files`` and
+        :func:`kika.sampling.multigroup_draw.draw_relative_factors`) keep
+        drawing exactly what produced the published results; nothing new
+        should ask for it. A zeroed direction counts as null in ``n_null``.
     dtype
         Output dtype. float64 by default and on purpose; see the module
         docstring.
@@ -171,6 +186,7 @@ def draw_samples(
         error on the retained subspace.
     """
     method = _validated_method(space, returns, decomposition_method)
+    _validated_negative_directions(negative_directions)
     items = _as_blocks(blocks)
     if space == "log":
         # A relative covariance Σ is the covariance of f = exp(g) with
@@ -181,7 +197,8 @@ def draw_samples(
     return draw_prepared_samples(
         items, n_samples, space=space, returns=returns,
         decomposition_method=method, sampling_method=sampling_method,
-        seed=seed, psd_method=psd_method, null_tol=null_tol, dtype=dtype,
+        seed=seed, psd_method=psd_method, null_tol=null_tol,
+        negative_directions=negative_directions, dtype=dtype,
         verbose=verbose, logger=logger)
 
 
@@ -196,6 +213,7 @@ def draw_prepared_samples(
     seed: Optional[int] = None,
     psd_method: str = "auto",
     null_tol: Optional[float] = DEFAULT_NULL_TOL,
+    negative_directions: str = "zero",
     dtype=np.float64,
     verbose: bool = True,
     logger=None,
@@ -209,6 +227,7 @@ def draw_prepared_samples(
     else is :func:`draw_samples`'.
     """
     method = _validated_method(space, returns, decomposition_method)
+    _validated_negative_directions(negative_directions)
     items = _as_blocks(blocks)
     samples: Dict[Hashable, np.ndarray] = {}
     diagnostics: Dict[Hashable, Dict[str, Any]] = {}
@@ -226,6 +245,7 @@ def draw_prepared_samples(
             space=space, returns=returns, method=method,
             sampling_method=sampling_method, seed=block_seed,
             psd_method=psd_method, null_tol=null_tol,
+            negative_directions=negative_directions,
             verbose=verbose, logger=logger, label=str(key),
         )
         samples[key] = draw.astype(dtype, copy=False)
@@ -234,6 +254,14 @@ def draw_prepared_samples(
         diagnostics[key] = info
 
     return samples, diagnostics
+
+
+def _validated_negative_directions(negative_directions: str) -> None:
+    if negative_directions not in ("zero", "fold"):
+        raise ValueError(
+            f"negative_directions must be 'zero' or 'fold', got "
+            f"{negative_directions!r}"
+        )
 
 
 def _validated_method(space: str, returns: str, decomposition_method: str) -> str:
@@ -276,6 +304,7 @@ def _draw_one_block(
     seed: Optional[int],
     psd_method: str,
     null_tol: Optional[float],
+    negative_directions: str,
     verbose: bool,
     logger,
     label: str,
@@ -288,11 +317,17 @@ def _draw_one_block(
         matrix = np.where(finite, matrix, 0.0)
 
     if method == "svd":
-        basis, spectrum, _ = svd_decomposition(
+        basis, spectrum, vt = svd_decomposition(
             space=space, psd_method=psd_method, verbose=verbose,
             logger=logger, matrix=matrix,
         )
         spectrum = np.asarray(spectrum, dtype=float)
+        if negative_directions == "zero":
+            # For a symmetric matrix the SVD returns |λ|; the sign of λ_i is
+            # the sign of u_i · v_i (v_i = ±u_i). A negative one gets zero
+            # variance, as the eigen branch below gives it.
+            negative = np.einsum("ki,ik->i", basis, vt) < 0.0
+            spectrum = np.where(negative, 0.0, spectrum)
     else:
         values, vectors = eigen_decomposition(
             space=space, psd_method=psd_method, verbose=verbose,

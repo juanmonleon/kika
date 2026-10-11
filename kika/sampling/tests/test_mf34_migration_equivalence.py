@@ -120,11 +120,21 @@ def test_the_draw_itself_is_bit_for_bit(both):
         blocks, 8, space="linear", returns="factors",
         decomposition_method="svd", sampling_method="random", seed=SEED,
         psd_method="none", null_tol=None, dtype=np.float32, verbose=False,
+        negative_directions="fold",
     )
 
     assert diagnostics[key]["n"] == 252
     assert diagnostics[key]["n_null"] == 87
     np.testing.assert_array_equal(samples[key], old)
+
+    # The default gives the six directions this joint states with negative
+    # variance zero variance instead of |λ|, so they count null too.
+    _samples, zeroed = draw_samples(
+        blocks, 8, space="linear", returns="factors",
+        decomposition_method="svd", sampling_method="random", seed=SEED,
+        psd_method="none", null_tol=None, dtype=np.float32, verbose=False,
+    )
+    assert zeroed[key]["n_null"] == 93
 
 
 def test_truncation_would_have_moved_every_column(both):
@@ -141,7 +151,8 @@ def test_truncation_would_have_moved_every_column(both):
 
     common = dict(space="linear", returns="factors", decomposition_method="svd",
                   sampling_method="random", seed=SEED, psd_method="none",
-                  dtype=np.float32, verbose=False)
+                  dtype=np.float32, verbose=False,
+                  negative_directions="fold")
     kept, _ = draw_samples(blocks, 8, null_tol=None, **common)
     truncated, _ = draw_samples(blocks, 8, **common)
 
