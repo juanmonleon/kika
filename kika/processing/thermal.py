@@ -26,6 +26,7 @@ ACER reads it back from there; that round trip is not repeated here.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -60,6 +61,10 @@ class ThermalInelasticOptions:
     nbin: int = 16
     #: Outgoing points one incident energy may have.
     capacity: int = 50000
+    #: Threads for the incident energies (``calcem`` releases the GIL; each
+    #: energy is independent, so the tables do not depend on it). ``None``:
+    #: up to 8, bounded by the machine.
+    workers: Optional[int] = None
 
 
 @dataclass
@@ -290,9 +295,16 @@ def inelasticTables(law, temperature: float, *, nmix: int = 1, awr: Optional[flo
     # ACE stores them in MeV to 12 significant figures (1PE20.11) and OpenMC
     # multiplies by 1e6 on read: 4.9 eV reads back 4.8999999999999995.
     stored = [float(f"{e * 1e-6:.11e}") * 1e6 for e in energies]
+    workers = options.workers if options.workers is not None else min(8, os.cpu_count() or 1)
+    if workers > 1 and len(energies) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            kernels = list(pool.map(lambda e: _calcem(inputs, e, options), energies))
+    else:
+        kernels = [_calcem(inputs, e, options) for e in energies]
     xs, spectra, angular = [], [], []
-    for enow, eout in zip(energies, stored):
-        x, y, xsi = _calcem(inputs, enow, options)
+    for (x, y, xsi), eout in zip(kernels, stored):
         ex, pdf, cdf, cos = _acer(*_tpend(x, y, xsi), nang)
         tables = [_discrete(c, e) for c, e in zip(cos, ex)]
         if len(cdf) and cdf[0] > 0.0:
