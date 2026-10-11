@@ -282,11 +282,92 @@ static double urr_integrand(double s,void *context) {
     return exp(s-deterministic-sum-softplus(s+v[2])-softplus(s+v[3]));
 }
 
+
+/* URR probability-table ladders (kika.processing.resonances.probability_tables).
+ * For each resonance, the sample energies inside its reach are found by binary
+ * search on the sorted sample grid and its SLBW Doppler-broadened elastic,
+ * capture and fission contributions added. The Doppler line shapes use
+ * Humlicek's W4 approximation of the Faddeeva function (relative error about
+ * 1e-4, the accuracy class of PURR's own rational approximations). */
+static void humlicek(double x,double y,double *wr,double *wi) {
+    double s=fabs(x)+y;rm_complex t={y,-x},w;
+    if (s>=15.) {
+        rm_complex u=rm_mul(t,t);u.r+=0.5;
+        w=rm_div((rm_complex){t.r*0.5641896,t.i*0.5641896},u);
+    } else if (s>=5.5) {
+        rm_complex u=rm_mul(t,t);
+        rm_complex num=rm_mul(t,(rm_complex){1.410474+u.r*0.5641896,u.i*0.5641896});
+        rm_complex den=rm_mul(u,(rm_complex){3.+u.r,u.i});den.r+=0.75;
+        w=rm_div(num,den);
+    } else if (y>=0.195*fabs(x)-0.176) {
+        rm_complex num={3.778987+t.r*0.5642236,t.i*0.5642236};
+        num=rm_mul(t,num);num.r+=11.96482;num=rm_mul(t,num);num.r+=20.20933;
+        num=rm_mul(t,num);num.r+=16.4955;
+        rm_complex den={6.699398+t.r,t.i};
+        den=rm_mul(t,den);den.r+=21.69274;den=rm_mul(t,den);den.r+=39.27121;
+        den=rm_mul(t,den);den.r+=38.82363;den=rm_mul(t,den);den.r+=16.4955;
+        w=rm_div(num,den);
+    } else {
+        rm_complex u=rm_mul(t,t);
+        static const double a[7]={36183.31,3321.9905,1540.787,219.0313,35.76683,1.320522,0.56419};
+        static const double b[8]={32066.6,24322.84,9022.228,2186.181,364.2191,61.57037,1.841439,1.};
+        rm_complex num={a[6],0.},den={b[7],0.};
+        for (int k=5;k>=0;k--) {num=rm_mul(u,num);num.r=a[k]-num.r;num.i=-num.i;}
+        for (int k=6;k>=0;k--) {den=rm_mul(u,den);den.r=b[k]-den.r;den.i=-den.i;}
+        rm_complex e={exp(u.r)*cos(u.i),exp(u.r)*sin(u.i)};
+        rm_complex q=rm_div(rm_mul(t,num),den);
+        w=rm_sub(e,q);
+    }
+    *wr=w.r;*wi=w.i;
+}
+
+static PyObject *urr_ladder(PyObject *self,PyObject *args) {
+    Py_ssize_t ns,nr;double c2,s2,delta,reachw,reachd;PyObject *o[10];Py_buffer b[10]={0};
+    if (!PyArg_ParseTuple(args,"nnddddd" "OOOOOOOOOO",&ns,&nr,&c2,&s2,&delta,&reachw,&reachd,
+                          &o[0],&o[1],&o[2],&o[3],&o[4],&o[5],&o[6],&o[7],&o[8],&o[9])) return NULL;
+    if (ns<0 || nr<0 || !isfinite(c2) || !isfinite(s2) || !(delta>=0) || !isfinite(delta)) {
+        PyErr_SetString(PyExc_ValueError,"invalid URR ladder arguments");return NULL;
+    }
+    Py_ssize_t sizes[10]={ns,nr,nr,nr,nr,nr,nr,ns,ns,ns};
+    for (int i=0;i<10;i++) {
+        if (!buffer(o[i],&b[i],sizes[i],"d",i>=7)) {
+            for (int j=0;j<10;j++) if (b[j].obj!=NULL) PyBuffer_Release(&b[j]);
+            return NULL;
+        }
+    }
+    const double *es=b[0].buf,*er=b[1].buf,*gt=b[2].buf,*gn=b[3].buf,*gg=b[4].buf,*gf=b[5].buf,*s0=b[6].buf;
+    double *el=b[7].buf,*ca=b[8].buf,*fi=b[9].buf;
+    const double rpi=1.7724538509055160273;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t r=0;r<nr;r++) {
+        if (!(gt[r]>0)) continue;
+        double reach=reachw*gt[r]+fmax(reachw*gt[r],reachd*delta);
+        double lo=er[r]-reach,hi=er[r]+reach;
+        Py_ssize_t a=0,z=ns;
+        while (a<z) {Py_ssize_t m=(a+z)/2;if (es[m]<lo) a=m+1; else z=m;}
+        double ratio=gn[r]/gt[r],cel=s0[r]*(c2-(1.-ratio)),sel=s0[r]*s2;
+        double ccap=s0[r]*gg[r]/gt[r],cfis=s0[r]*gf[r]/gt[r];
+        double xi=delta>0?gt[r]/delta:0.;
+        for (Py_ssize_t i=a;i<ns && es[i]<=hi;i++) {
+            double x=2.*(es[i]-er[r])/gt[r],psi,chi;
+            if (delta>0) {
+                double wr,wi;humlicek(0.5*xi*x,0.5*xi,&wr,&wi);
+                psi=0.5*rpi*xi*wr;chi=0.5*rpi*xi*wi;
+            } else {double d=1.+x*x;psi=1./d;chi=x/d;}
+            el[i]+=cel*psi+sel*chi;ca[i]+=ccap*psi;fi[i]+=cfis*psi;
+        }
+    }
+    Py_END_ALLOW_THREADS
+    for (int j=0;j<10;j++) if (b[j].obj!=NULL) PyBuffer_Release(&b[j]);
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef methods[]={
     {"channel_solve",channel_solve,METH_VARARGS,"Solve small channel systems by pivoted elimination; false requires NumPy fallback."},
     {"breit_wigner",breit_wigner,METH_VARARGS,"Accumulate all constant-radius BW levels in source order."},
     {"matrices",matrices,METH_VARARGS,"Fill all-level collision sums and reference-fallback flags."},
     {"absorption",absorption,METH_VARARGS,"Fill positive radiative probabilities using compensated level sums."},
+    {"urr_ladder",urr_ladder,METH_VARARGS,"Accumulate SLBW Doppler-broadened URR ladder contributions on sorted samples."},
     {NULL,NULL,0,NULL}
 };
 static struct PyModuleDef module={PyModuleDef_HEAD_INIT,"_rm_native",NULL,0,methods};

@@ -38,11 +38,17 @@ class ConversionReport:
     def warn(self, message: str) -> None:
         self.warnings.append(message)
 
-    def lost(self, message: str) -> None:
+    def lost(self, message: str, *, unaffectedScopes=()) -> None:
         self.losses.append(message)
+        self._exclude('losses', message, unaffectedScopes)
 
-    def approximated(self, message: str) -> None:
+    def approximated(self, message: str, *, unaffectedScopes=()) -> None:
         self.approximations.append(message)
+        self._exclude('approximations', message, unaffectedScopes)
+
+    def _exclude(self, kind: str, message: str, scopes) -> None:
+        if scopes:
+            self.scopeExclusions.append(dict(kind=kind, message=message, scopes=list(scopes)))
 
     def unsupportedNode(self, message: str, *, unaffectedScopes=()) -> None:
         """Declare a limitation, optionally proven irrelevant to named consumers.
@@ -51,9 +57,7 @@ class ConversionReport:
         scoped checks; consumers must not infer scope by parsing messages.
         """
         self.unsupported.append(message)
-        if unaffectedScopes:
-            self.scopeExclusions.append(dict(kind='unsupported', message=message,
-                                             scopes=list(unaffectedScopes)))
+        self._exclude('unsupported', message, unaffectedScopes)
 
     def extend(self, other: "ConversionReport") -> None:
         self.warnings.extend(other.warnings)

@@ -678,7 +678,8 @@ def _continuumLegendre(body, index: int, mt: int, frame: Frame,
     interpolation = ENDF_INT_TO_INTERPOLATION.get(body.lep, "lin-lin")
 
     if any(nd for nd in body.nd):
-        report.lost(_discreteLinesMessage(mt, index, body))
+        # The lines are outgoing energies of a product, not a cross section.
+        report.lost(_discreteLinesMessage(mt, index, body), unaffectedScopes=("cross-sections",))
 
     if not any(body.na):
         axes = energyAxes()
@@ -778,7 +779,8 @@ def _kalbachMann(body, index: int, mt: int, frame: Frame,
         return None, False, report
 
     if any(nd for nd in body.nd):
-        report.lost(_discreteLinesMessage(mt, index, body))
+        # The lines are outgoing energies of a product, not a cross section.
+        report.lost(_discreteLinesMessage(mt, index, body), unaffectedScopes=("cross-sections",))
 
     columns = {"f": 1, "r": 2}
     if body.na and body.na[0] >= 2:

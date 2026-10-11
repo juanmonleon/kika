@@ -341,7 +341,9 @@ def _keepVerbatim(suite, sections, mt, why, report) -> None:
     report.unsupportedNode(
         f"MT{mt}: the photons of MF{files} are not in this reactionSuite because "
         f"{why}. The sections are kept verbatim in the suite's provenance and an "
-        f"ENDF tape written from it carries them unchanged"
+        f"ENDF tape written from it carries them unchanged",
+        # Photons kept aside: no cross section MF3/MF2 states depends on them.
+        unaffectedScopes=("cross-sections",),
     )
 
 
@@ -464,13 +466,16 @@ def _attach(suite, host: _Host, sections, mt, report) -> Optional[str]:
     if zeros:
         report.approximated(
             f"MT{mt}: MF13 divided by σ (decision J5) meets σ = 0 at {zeros} "
-            f"point(s); the multiplicity there is written as 0")
+            f"point(s); the multiplicity there is written as 0",
+            unaffectedScopes=("cross-sections",))
     if mf == 13:
         report.approximated(
             f"MT{mt}: MF13 states production cross sections and GNDS a "
             f"multiplicity, so each photon's is σ_γ/σ, lin-lin on MF13's grid ∪ "
             f"σ's (conflicts §2.6). The ENDF section comes back as its own bytes "
-            f"while neither changes")
+            f"while neither changes",
+            # Photon multiplicities: the reaction's own σ is untouched.
+            unaffectedScopes=("cross-sections",))
 
     channel, hostLabel, channelPath = _channel(host, mt)
     # The residual's decay channel arrives with a placeholder photon: no

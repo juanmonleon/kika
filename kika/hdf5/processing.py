@@ -18,7 +18,9 @@ serialises, without editing the one it was given:
    the evaluation does not give them, as ``from_ace`` does for depletion -- and
    18 when the fission chances are given; gas production 203-207 as
    Σ multiplicity × σ over the reactions that emit p, d, t, ³He, α (what
-   GASPR computes); KERMA 301/901 and damage 444 from NJOY (D7).
+   GASPR computes); KERMA 301/901 and damage 444 from NJOY (D7); the URR
+   probability tables by kika's PURR
+   (:mod:`kika.processing.resonances.probability_tables`, H8).
 4. **Distributions and yields** tabulated with their CDF
    (:mod:`kika.processing.tabulation`); neutrons and photons only, the
    products OpenMC's files carry.
@@ -31,6 +33,7 @@ five significant figures), which is what the official libraries' ``kTs`` hold.
 from __future__ import annotations
 
 import copy
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -183,6 +186,22 @@ def _promote(component, label):
         component.forms[EVAL_LABEL] = form
 
 
+def _mf3HoldsTheResonances(suite) -> bool:
+    """The evaluated cross sections already include the resonance contribution.
+
+    True for ENDF LRP=2 (parameters given for information, MF3 complete) and
+    LRP<=0 (no parameters to add), or when the suite has no resonance regions.
+    LRP=1 -- the common case -- puts only the background in MF3, pointwise as
+    every MF3 is, so the shape of the forms says nothing.
+    """
+    resonances = suite.resonances
+    if resonances is None or (not resonances.resolved and resonances.unresolved is None):
+        return True
+    fields = getattr(suite.provenance, "headerFields", None) or {}
+    lrp = fields.get("lrp")
+    return lrp is not None and int(lrp) != 1
+
+
 def _reconstructed(suite, context, report):
     """The suite with a ``recon`` style, reconstructed if it has none.
 
@@ -196,7 +215,8 @@ def _reconstructed(suite, context, report):
     from kika.processing.resonances.suite import _entries
 
     entries = _entries(suite)
-    if all(_pointwise(r.crossSection.forms.get(EVAL_LABEL)) for r in entries.values()):
+    if _mf3HoldsTheResonances(suite) and all(_pointwise(r.crossSection.forms.get(EVAL_LABEL))
+                                             for r in entries.values()):
         working = copy.deepcopy(suite)
         for reaction in _entries(working).values():
             reaction.crossSection[RECON_LABEL] = reaction.crossSection[EVAL_LABEL]
@@ -204,11 +224,22 @@ def _reconstructed(suite, context, report):
         report.warn("the evaluated cross sections are pointwise (the 0 K reconstruction is in the "
                     "file) and were taken as the 0 K forms")
         return working
-    from kika.processing.resonances import attach_reconstruction, reconstruct_suite
+    from kika.endf.reconstruction import DEFAULT_MAX_POINTS
+    from kika.processing.resonances import (ReconstructionOptions, attach_reconstruction,
+                                            reconstruct_suite)
 
     working = copy.deepcopy(suite)
-    result = reconstruct_suite(working, context)
+    # Orphan products (MF13 photons on a sum, MT4/103-107) carry production
+    # cross sections with no resonance contribution, under the sum's MT; the
+    # reconstructor takes the shared MT as ambiguous. They sit out.
+    orphans = working.orphanProducts
+    working.orphanProducts = type(orphans)()
+    # The point budget kika.endf.reconstruct_endf reconstructs with (U-238
+    # needs more than the engine's default).
+    result = reconstruct_suite(working, context,
+                               options=ReconstructionOptions(max_points=DEFAULT_MAX_POINTS))
     attach_reconstruction(working, result)
+    working.orphanProducts = orphans
     report.warn("the 0 K cross sections were reconstructed by kika from the resonance "
                 "parameters (kika.processing.resonances)")
     return working
@@ -340,7 +371,8 @@ def _broadened(suite, temperature, thnmax, options):
                      input_accuracy=DopplerInputAccuracy(infinite_dilution=True))
     result = broaden_suite(reduced, None, source_style=RECON_LABEL, label=heatedLabel("tmp"),
                            temperature=float(temperature), support=support,
-                           source_temperature=0.0, options=opts, output_domain=(lo, hi), **extra)
+                           source_temperature=0.0, options=opts, output_domain=(lo, hi),
+                           negative_policy="preserve_signed", **extra)
     out = {key.label: form for key, form in result.forms.items()}
     zero = None
     for key in leaves:
@@ -372,12 +404,14 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                  njoy=None, endf=None, omit: Sequence[str] = (), awr: Optional[float] = None,
                  context=None, doppler=None, tabulation=None, ed: Optional[float] = None,
                  njoyPieces=None, thinning: Optional[float] = 1.0e-3,
-                 workers: Optional[int] = None, label: Optional[str] = None):
+                 workers: Optional[int] = None, label: Optional[str] = None,
+                 urrTables: Optional[Dict[float, object]] = None):
     """The processed suite of ``suite`` at ``temperatures`` (kelvin; default 293.6 K).
 
-    ``endf`` is the ENDF tape NJOY processes for the D7 pieces (``urr``,
-    ``kerma``, ``damage``); without it, or without NJOY, they must be named in
-    ``omit``. ``njoyPieces`` passes pieces already computed
+    ``endf`` is the ENDF tape NJOY processes for the D7 pieces (``kerma``,
+    ``damage``); without it, or without NJOY, they must be named in ``omit``.
+    The URR probability tables are kika's (H8; ``omit=("urr",)`` leaves them
+    out). ``njoyPieces`` passes pieces already computed
     (:func:`kika.hdf5.njoy_pieces.runNjoyPieces`). ``awr`` overrides the
     atomic weight ratio (D11; default MF1/451's, as ACER takes it).
     ``thinning`` is the relative tolerance to which each temperature's grid is
@@ -387,10 +421,16 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     union grid. The 0 K elastic is thinned to the same tolerance (RECONR's
     ``err`` for the official files). ``workers`` broadens that
     many temperatures at once, one process each (default: one per temperature,
-    at most four -- the broadening is single-threaded). ``label`` processes
+    at most four -- the broadening is single-threaded), and computes that many
+    URR energies at once (default: up to eight). Processes are spawned on
+    Windows, so a script that calls this needs the usual
+    ``if __name__ == "__main__":`` guard; ``workers=1`` stays in-process. ``label`` processes
     the forms of that style -- a perturbation run's ``realization`` -- in
     place of the evaluated ones wherever it has them (roadmap H7, D12: the
     sample is multiplied at 0 K and broadened, never the reverse).
+    ``urrTables`` passes URR probability tables already computed
+    (:func:`urrTablesOf`, ``{kelvin: ProbabilityTables}``), as a perturbation
+    run shares the unperturbed evaluation's between its samples (D12).
     """
     m = _m()
     from kika.processing.tabulation import TabulationContext, TabulationOptions, tabulateDistribution
@@ -466,6 +506,12 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
             hot = _onGrid(below[label], grid)
             cold = _onGrid(reconForms[label], grid)
             y = np.where(grid <= hi, hot, cold)
+            if np.any(y < 0):
+                # OpenMC clips a negative cross section to zero when it reads
+                # one (reaction.py:1102-1106); the file carries it clipped.
+                report.approximated(f"{T} MT{leaf.mt}: negative cross section down to "
+                                    f"{float(y.min()):.3e} b set to 0, as OpenMC does on read")
+                y = np.maximum(y, 0.0)
             first = _flatten(reconForms[label])[0]
             nonzero = np.flatnonzero(np.asarray(_flatten(reconForms[label])[1]) != 0)
             start = first[max(int(nonzero[0]) - 1, 0)] if nonzero.size else first[0]
@@ -568,8 +614,24 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     # --- fission ------------------------------------------------------------
     _fission(work, out, report)
 
+    # --- unresolved-resonance probability tables (kika's PURR, H8) --------
+    if "urr" in omit or not _hasURR(work):
+        urrTables = {}
+    elif urrTables is not None:
+        missing = [t for t in temperatures if float(t) not in urrTables]
+        if missing:
+            raise ValueError(f"urrTables has no tables at {missing} K")
+        urrTables = {T: urrTables[float(t)] for t, T in zip(temperatures, styleKT)}
+        report.warn("URR probability tables passed in, computed on another suite (D12: a "
+                    "perturbation run's unperturbed evaluation); they are not perturbed")
+    else:
+        byKelvin = urrTablesOf(work, temperatures, context=context, workers=workers, report=report)
+        urrTables = {T: byKelvin[float(t)] for t, T in zip(temperatures, styleKT)}
+    if urrTables:
+        _attachURR(out, urrTables)
+
     # --- NJOY pieces --------------------------------------------------------
-    wanted = [p for p in ("urr", "kerma", "damage") if p not in omit]
+    wanted = [p for p in ("kerma", "damage") if p not in omit]
     if wanted:
         if njoyPieces is None:
             if endf is None:
@@ -578,30 +640,28 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                     f"pass endf=..., or omit={tuple(wanted)} to write without them", wanted)
             from .njoy_pieces import runNjoyPieces
             mat = getattr(suite.provenance, "mat", None)
-            njoyPieces = runNjoyPieces(endf, temperatures, mat=int(mat), njoy=njoy,
-                                       urr="urr" in wanted and _hasURR(suite),
+            njoyPieces = runNjoyPieces(endf, temperatures, mat=int(mat), njoy=njoy, urr=False,
                                        ed=_displacementEnergy(Z) if ed is None else ed)
         _attachNjoy(out, njoyPieces, temperatures, styleKT, grids, heated, wanted, report)
-        # The URR tables name the reaction whose smooth cross section stands
-        # for the inelastic competition, and the C++ requires it to exist
-        # (nuclide.cpp:308-320): MT4 is written for that, as the official
-        # exporter writes it, redundant and summed from the levels.
-        for piece in njoyPieces.temperatures.values():
-            inelastic = int(piece.urr.inelastic) if piece.urr is not None else 0
-            if inelastic > 0 and out.findReactionByENDF_MT(inelastic) is None:
-                levels = [c for c in LEVEL_SUMS.get(inelastic, ()) if c in present]
-                if not levels:
-                    raise HDF5FormatError(f"the URR tables name MT{inelastic} and the "
-                                          f"evaluation has none of its levels")
-                out.sums.append(m.CrossSectionSum(
-                    id=m.ReactionId(label=f"MT{inelastic}", ENDF_MT=inelastic),
-                    crossSection=summedForms(levels),
-                    outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
-                    provenance=m.Hdf5Provenance(attributes={"redundant": 1})))
-                report.warn(f"MT{inelastic} written as the redundant sum of {len(levels)} levels, "
-                            f"because the URR tables name it")
+    # The URR tables name the reaction whose smooth cross section stands for
+    # the inelastic competition, and the C++ requires it to exist
+    # (nuclide.cpp:308-320): MT4 is written for that, as the official exporter
+    # writes it, redundant and summed from the levels.
+    inelastic = int(next(iter(urrTables.values())).inelastic) if urrTables else 0
+    if inelastic > 0 and out.findReactionByENDF_MT(inelastic) is None:
+        levels = [c for c in LEVEL_SUMS.get(inelastic, ()) if c in present]
+        if not levels:
+            raise HDF5FormatError(f"the URR tables name MT{inelastic} and the "
+                                  f"evaluation has none of its levels")
+        out.sums.append(m.CrossSectionSum(
+            id=m.ReactionId(label=f"MT{inelastic}", ENDF_MT=inelastic),
+            crossSection=summedForms(levels),
+            outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
+            provenance=m.Hdf5Provenance(attributes={"redundant": 1})))
+        report.warn(f"MT{inelastic} written as the redundant sum of {len(levels)} levels, "
+                    f"because the URR tables name it")
     for piece in omit:
-        report.lost(f"{piece} was not written: omitted on request (it is taken from NJOY, D7)")
+        report.lost(f"{piece} was not written: omitted on request")
     out.report = report
     return out
 
@@ -632,6 +692,54 @@ def _demote(out, mt):
                                            outputChannel=reaction.outputChannel,
                                            provenance=m.Hdf5Provenance(attributes={"redundant": 1}))
                 out.sums.append(summed)
+
+
+def _urrContext(suite, context):
+    """The NeutronContext of the URR: the given one, or the model's mass and spin."""
+    if context is not None:
+        return context
+    from kika.processing.resonances.context import NeutronContext
+
+    target, neutron = suite.PoPs[suite.target], suite.PoPs[suite.projectile]
+    return NeutronContext(target.mass.convertedTo("amu").value / neutron.mass.convertedTo("amu").value,
+                          target.spin.convertedTo("hbar").value)
+
+
+def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None):
+    """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR (roadmap H8).
+
+    The tables :func:`processSuite` writes. ``context`` is the target's
+    NeutronContext (default: the model's mass and spin).
+    """
+    from kika.processing.resonances.probability_tables import (ProbabilityTableOptions,
+                                                               probabilityTables, purrGrid,
+                                                               purrInputs)
+
+    temperatures = [float(t) for t in temperatures]
+    region = suite.resonances.unresolved
+    energies = purrGrid(region)
+    background, competing = purrInputs(suite, energies, form=_evaluated)
+    options = ProbabilityTableOptions()
+    tables = probabilityTables(region, _urrContext(suite, context), energies, temperatures,
+                               background=background, competing=competing, options=options,
+                               workers=workers or min(len(energies), os.cpu_count() or 1, 8))
+    if report is not None:
+        report.warn(f"URR probability tables computed by kika (PURR's method: {options.ladders} "
+                    f"ladders of {options.samples} samples, {options.bins} bands, on "
+                    f"{len(energies)} energies); statistically, not bitwise, equal to NJOY PURR's")
+    return tables
+
+
+def _attachURR(out, tables):
+    m = _m()
+    for T, table in tables.items():
+        ulabel = urrLabel(T)
+        if ulabel not in out.styles.labels:
+            out.styles.add(m.URR_probabilityTables(label=ulabel, derivedFrom=heatedLabel(T)))
+        for mt in (2, 18, 102):
+            reaction = out.findReactionByENDF_MT(mt)
+            if reaction is not None:
+                reaction.crossSection[ulabel] = m.URR_probabilityTables1d(label=ulabel, table=table)
 
 
 def _hasURR(suite) -> bool:
@@ -945,15 +1053,6 @@ def _attachNjoy(out, pieces, temperatures, styleKT, grids, heated, wanted, repor
         if "damage" in wanted and piece.damage is not None:
             responses[444][label] = m.XYs1d(xs=grid, ys=np.interp(grid, *piece.damage) * total,
                                             label=label)
-        if "urr" in wanted and piece.urr is not None:
-            ulabel = urrLabel(T)
-            if ulabel not in out.styles.labels:
-                out.styles.add(m.URR_probabilityTables(label=ulabel, derivedFrom=label))
-            for mt in (2, 18, 102):
-                reaction = out.findReactionByENDF_MT(mt)
-                if reaction is not None:
-                    reaction.crossSection[ulabel] = m.URR_probabilityTables1d(label=ulabel,
-                                                                             table=piece.urr)
     names = {301: "heating", 901: "heating-local", 444: "damage-energy"}
     for mt, cs in responses.items():
         if len(cs.forms):

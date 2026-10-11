@@ -83,7 +83,8 @@ def fakeNjoy(tmp_path, monkeypatch):
 
 def test_ace_is_among_the_emitters_and_the_tape_ones_are_not_it():
     assert "ace" in EMITTERS and "ace" not in TAPE_EMITTERS
-    assert set(TAPE_EMITTERS) | {"ace"} == set(EMITTERS)
+    # The processed emitters: ACE (through NJOY) and OpenMC HDF5 (kika's writer).
+    assert set(TAPE_EMITTERS) | {"ace", "hdf5"} == set(EMITTERS)
 
 
 def test_ace_without_options_is_refused_before_anything_is_read():
