@@ -19,7 +19,7 @@ def _assertTable(table):
 
 
 def test_refine_reaches_the_tolerance():
-    options = TabulationOptions(rtol=1e-4)
+    options = TabulationOptions(rtol=1e-4, atol=0.0)
     x, y = refine(np.exp, [0.0, 5.0], options)
     q = np.linspace(0, 5, 10001)
     assert np.max(np.abs(np.interp(q, x, y) - np.exp(q)) / np.exp(q)) < 2e-4

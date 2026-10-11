@@ -480,7 +480,9 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             report.unsupportedNode(
                 f"MF8 (MT{mts[:6]}{'...' if len(mts) > 6 else ''}) is read and kept "
                 f"as the file states it; the radioactive products of a reaction "
-                f"are activation data and are not in this reactionSuite"
+                f"are activation data and are not in this reactionSuite",
+                # Decay products and their yields, not a cross section MF3 states.
+                unaffectedScopes=("cross-sections",),
             )
             continue
         report.unsupportedNode(

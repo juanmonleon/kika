@@ -220,9 +220,13 @@ def wslNjoy(linuxExecutable: str, distro: str = "Ubuntu", libraryPath: Optional[
     a binary linked against a private toolchain.
     """
     env = "LC_ALL=C LC_NUMERIC=C LANG=C" + (f" LD_LIBRARY_PATH='{libraryPath}'" if libraryPath else "")
-    script = (f"set -e; here=\"$PWD\"; work=$(mktemp -d); cp tape20 \"$work\"/; cd \"$work\"; "
+    # Every tape present before the run is an input; every other tape and the
+    # listing are copied back.
+    script = (f"set -e; here=\"$PWD\"; work=$(mktemp -d); inputs=$(ls tape* 2>/dev/null || true); "
+              f"for f in $inputs; do cp \"$f\" \"$work\"/; done; cd \"$work\"; "
               f"env {env} '{linuxExecutable}' || true; "
-              f"for f in output {' '.join(TAPES)}; do [ -f \"$f\" ] && cp \"$f\" \"$here\"/; done; "
+              f"for f in output tape*; do case \" $inputs \" in *\" $f \"*) ;; "
+              f"*) [ -f \"$f\" ] && cp \"$f\" \"$here\"/ ;; esac; done; "
               f"cd /; rm -rf \"$work\"")
     return ["wsl.exe", "-d", distro, "--exec", "bash", "-c", script]
 

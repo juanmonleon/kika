@@ -565,9 +565,11 @@ def attachDelayedSpectra(suite, mf5mt, report: Optional[ConversionReport] = None
             angular=Isotropic2d(), energy=form, productFrame=Frame.lab)
     if total is not None and links:
         total.summands.summands = links
-    report.approximated(
-        f"MF5/MT455: {len(families)} family spectra placed on their "
-        f"delayedNeutron products with an isotropic lab angular half -- ENDF "
-        f"states no angle for them, and isotropy is §5's convention"
-    )
+    message = (f"MF5/MT455: {len(families)} family spectra placed on their "
+               f"delayedNeutron products with an isotropic lab angular half -- ENDF "
+               f"states no angle for them, and isotropy is §5's convention")
+    report.approximated(message)
+    # An angle on delayed neutrons cannot change a cross section.
+    report.scopeExclusions.append(dict(kind="approximations", message=message,
+                                       scopes=["cross-sections"]))
     return True, report

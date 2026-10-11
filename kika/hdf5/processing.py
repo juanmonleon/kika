@@ -142,10 +142,68 @@ class _Leaf:
 # Steps
 # ----------------------------------------------------------------------
 
+def _pointwise(form) -> bool:
+    m = _m()
+    return isinstance(form, (m.XYs1d, m.Regions1d))
+
+
+def _fromLabel(suite, label):
+    """A copy whose evaluated forms are the ``label`` ones where they exist.
+
+    What a perturbation run's realisation looks like to this module: the
+    sample's forms sit beside the evaluation under a ``realization`` label
+    (:mod:`kika.sampling.model_perturbation`), and processing the sample is
+    processing those forms -- cross sections, multiplicities, distributions --
+    and the evaluation everywhere the sample left alone.
+    """
+    work = copy.deepcopy(suite)
+    for container in ("reactions", "sums", "fissionComponents", "productions", "orphanProducts",
+                      "incompleteReactions"):
+        for reaction in getattr(work, container):
+            _promote(reaction.crossSection, label)
+            channel = reaction.outputChannel
+            products = list(channel.products)
+            if channel.fissionFragmentData is not None:
+                products += [d.product for d in channel.fissionFragmentData.delayedNeutrons
+                             if d.product is not None]
+            for product in products:
+                if product.multiplicity is not None:
+                    _promote(product.multiplicity, label)
+                if product.distribution is not None:
+                    _promote(product.distribution, label)
+    for total in work.sums.multiplicitySums:
+        if total.multiplicity is not None:
+            _promote(total.multiplicity, label)
+    return work
+
+
+def _promote(component, label):
+    if label in component.forms:
+        form = component.forms.pop(label)
+        component.forms[EVAL_LABEL] = form
+
+
 def _reconstructed(suite, context, report):
-    """The suite with a ``recon`` style, reconstructed if it has none."""
+    """The suite with a ``recon`` style, reconstructed if it has none.
+
+    A suite whose cross sections are already pointwise everywhere -- read from
+    a tape whose MF3 holds the 0 K reconstruction (LRP=2), as a perturbation
+    run's base tape does -- takes them as its ``recon`` forms unchanged.
+    """
     if RECON_LABEL in suite.styles.labels:
         return suite
+    m = _m()
+    from kika.processing.resonances.suite import _entries
+
+    entries = _entries(suite)
+    if all(_pointwise(r.crossSection.forms.get(EVAL_LABEL)) for r in entries.values()):
+        working = copy.deepcopy(suite)
+        for reaction in _entries(working).values():
+            reaction.crossSection[RECON_LABEL] = reaction.crossSection[EVAL_LABEL]
+        working.styles.add(m.CrossSectionReconstructed(label=RECON_LABEL, derivedFrom=EVAL_LABEL))
+        report.warn("the evaluated cross sections are pointwise (the 0 K reconstruction is in the "
+                    "file) and were taken as the 0 K forms")
+        return working
     from kika.processing.resonances import attach_reconstruction, reconstruct_suite
 
     working = copy.deepcopy(suite)
@@ -154,6 +212,76 @@ def _reconstructed(suite, context, report):
     report.warn("the 0 K cross sections were reconstructed by kika from the resonance "
                 "parameters (kika.processing.resonances)")
     return working
+
+
+#: The tolerance a 0 K form under another law is re-expressed lin-lin to:
+#: ten times inside the thinning tolerance, so the two errors do not add up
+#: to more than the official files' 0.1 %.
+LINEARISATION_TOLERANCE = 1.0e-4
+
+
+def _linearised(suite, report):
+    """Every ``recon`` form re-expressed lin-lin (OpenMC interpolates lin-lin only).
+
+    Outside the resonance region a reconstruction keeps MF3 as the evaluation
+    states it, and MF3 may use any of ENDF's laws; RECONR linearises them to its
+    tolerance, and so does this, with :func:`kika.algebra.to_linlin`.
+    """
+    m = _m()
+    from kika.algebra import interval_laws, to_linlin
+    from kika.processing.resonances.suite import _entries
+
+    changed = []
+    for reaction in _entries(suite).values():
+        form = reaction.crossSection.forms.get(RECON_LABEL)
+        if form is None:
+            continue
+        regions = form.function1ds if isinstance(form, m.Regions1d) else [form]
+        if all(r.interpolation == m.Interpolation.linlin for r in regions):
+            continue
+        whole = form if isinstance(form, m.Regions1d) else m.Regions1d(function1ds=[form])
+        x, y, pairs = whole.toEndfRegions()
+        lx, ly = to_linlin(x, y, interval_laws(len(x), pairs), tol=LINEARISATION_TOLERANCE)
+        reaction.crossSection[RECON_LABEL] = _pieces(lx, ly)
+        changed.append(reaction.ENDF_MT)
+    if changed:
+        report.approximated(f"0 K cross sections of MT{changed} re-expressed lin-lin to "
+                            f"{LINEARISATION_TOLERANCE:g} (RECONR does the same to its tolerance)")
+
+
+def _pieces(x, y):
+    """A lin-lin table as one XYs1d, or a regions1d cut at each step (a repeated abscissa)."""
+    m = _m()
+    from kika.algebra import LINLIN, split_at_discontinuities
+
+    pieces = split_at_discontinuities(np.asarray(x, float), np.asarray(y, float),
+                                      np.full(max(len(x) - 1, 0), LINLIN))
+    forms = [m.XYs1d(xs=px, ys=py) for px, py, _ in pieces]
+    if len(forms) == 1:
+        forms[0].label, forms[0].axes = RECON_LABEL, m.crossSectionAxes()
+        return forms[0]
+    return m.Regions1d(function1ds=forms, axes=m.crossSectionAxes(), label=RECON_LABEL)
+
+
+def _dopplerSource(form, lo, top):
+    """``form`` on exactly ``[lo, top]``, zero-padded below its start, cut at steps.
+
+    ``broaden_suite`` asks every leaf to cover one common domain; only the
+    region below the broadening ceiling matters, so each leaf is cut at the
+    shortest leaf's end (above the ceiling) and, if it starts late, padded with
+    zeros from ``lo`` -- what it is there.
+    """
+    x, y = _flatten(form)
+    keep = x <= top
+    x, y = x[keep], y[keep]
+    if x[-1] < top:
+        x, y = np.append(x, top), np.append(y, np.interp(top, *_flatten(form)))
+    if x[0] > lo:
+        if y[0] != 0.0:
+            x, y = np.concatenate([[lo, x[0]], x]), np.concatenate([[0.0, 0.0], y])
+        else:
+            x, y = np.concatenate([[lo], x]), np.concatenate([[0.0], y])
+    return _pieces(x, y)
 
 
 def _broadened(suite, temperature, thnmax, options):
@@ -179,18 +307,40 @@ def _broadened(suite, temperature, thnmax, options):
         x, y = _flatten(entries[key].crossSection[RECON_LABEL])
         if np.any(y[x < hi] != 0):
             active.append(key)
+    top = min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in active)
+    def sourced(reaction):
+        clone = copy.copy(reaction)
+        clone.crossSection = copy.copy(reaction.crossSection)
+        clone.crossSection.forms = dict(reaction.crossSection.forms)
+        clone.crossSection[RECON_LABEL] = _dopplerSource(reaction.crossSection[RECON_LABEL], lo, top)
+        return clone
     reduced = copy.copy(suite)
-    reduced.reactions = type(suite.reactions)([entries[k] for k in active if k.container == "reactions"])
+    reduced.reactions = type(suite.reactions)(
+        [sourced(entries[k]) for k in active if k.container == "reactions"])
     reduced.fissionComponents = type(suite.fissionComponents)(
-        [entries[k] for k in active if k.container == "fissionComponents"])
+        [sourced(entries[k]) for k in active if k.container == "fissionComponents"])
+    # The evaluated domain declared to the broadening is the one it is given.
+    reduced.styles = copy.deepcopy(suite.styles)
+    evaluated = reduced.styles.evaluatedFor(RECON_LABEL)
+    if evaluated.projectileEnergyDomain is not None:
+        evaluated.projectileEnergyDomain = _m().RangeQuantity(lo, top, "eV")
     for name in ("sums", "productions", "orphanProducts", "incompleteReactions"):
         setattr(reduced, name, type(getattr(suite, name))())
     reduced.sums.multiplicitySums = suite.sums.multiplicitySums
     support = {k: SupportPolicy("one_over_v", "constant") for k in active}
     opts = options or DopplerOptions(max_points=400_000_000, max_work_bytes=4_000_000_000)
+    extra = {}
+    if suite.resonances is not None and suite.resonances.unresolved is not None:
+        # The 0 K forms in the unresolved range are the infinitely dilute
+        # average reconstruction (kika's or RECONR's), which is the statement
+        # broaden_suite asks to be made explicitly before it accepts a URR.
+        from kika.processing.doppler import DopplerInputAccuracy
+
+        extra = dict(urr_policy="dilute_mean",
+                     input_accuracy=DopplerInputAccuracy(infinite_dilution=True))
     result = broaden_suite(reduced, None, source_style=RECON_LABEL, label=heatedLabel("tmp"),
                            temperature=float(temperature), support=support,
-                           source_temperature=0.0, options=opts, output_domain=(lo, hi))
+                           source_temperature=0.0, options=opts, output_domain=(lo, hi), **extra)
     out = {key.label: form for key, form in result.forms.items()}
     zero = None
     for key in leaves:
@@ -222,7 +372,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                  njoy=None, endf=None, omit: Sequence[str] = (), awr: Optional[float] = None,
                  context=None, doppler=None, tabulation=None, ed: Optional[float] = None,
                  njoyPieces=None, thinning: Optional[float] = 1.0e-3,
-                 workers: Optional[int] = None):
+                 workers: Optional[int] = None, label: Optional[str] = None):
     """The processed suite of ``suite`` at ``temperatures`` (kelvin; default 293.6 K).
 
     ``endf`` is the ENDF tape NJOY processes for the D7 pieces (``urr``,
@@ -234,9 +384,13 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     thinned (roadmap H5): points are dropped while every reaction, read
     lin-lin, reproduces every dropped point to it. 1e-3 is what the official
     libraries are processed to (BROADR's ``errthn``); ``None`` keeps the full
-    union grid. The 0 K elastic is never thinned. ``workers`` broadens that
+    union grid. The 0 K elastic is thinned to the same tolerance (RECONR's
+    ``err`` for the official files). ``workers`` broadens that
     many temperatures at once, one process each (default: one per temperature,
-    at most four -- the broadening is single-threaded).
+    at most four -- the broadening is single-threaded). ``label`` processes
+    the forms of that style -- a perturbation run's ``realization`` -- in
+    place of the evaluated ones wherever it has them (roadmap H7, D12: the
+    sample is multiplied at 0 K and broadened, never the reverse).
     """
     m = _m()
     from kika.processing.tabulation import TabulationContext, TabulationOptions, tabulateDistribution
@@ -269,7 +423,11 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         from kika.endf.reconstruction import context_from_endf
 
         context, _ = context_from_endf(read_endf(str(endf), mf_numbers=[1, 2]), suite)
+    if label is not None and label != EVAL_LABEL:
+        suite = _fromLabel(suite, label)
+        report.warn(f"processed the {label!r} forms where they exist, the evaluation elsewhere")
     work = _reconstructed(suite, context, report)
+    _linearised(work, report)
 
     # --- which reactions --------------------------------------------------
     leaves: List[_Leaf] = []
@@ -360,6 +518,16 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         cs = heatedForms(mt)
         if mt == 2:
             x, y = _strictly(*_flatten(reaction.crossSection[RECON_LABEL]))
+            if thinning:
+                # The 0 K elastic (resonance scattering's source) thinned to the
+                # tolerance RECONR is run at for the official files (err 0.001):
+                # the same accuracy class, at RECONR's density rather than at
+                # kika's finer reconstruction tolerance.
+                from kika.algebra import thin_common_grid
+
+                kept = thin_common_grid(x, y[None, :], rtol=float(thinning),
+                                        atol=1.0e-10 * float(np.max(np.abs(y))))
+                x, y = x[kept], y[kept]
             cs[RECON_LABEL] = m.XYs1d(xs=x, ys=y, axes=m.crossSectionAxes(), label=RECON_LABEL)
         channel = channelOf(reaction)
         _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs)

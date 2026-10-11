@@ -66,7 +66,8 @@ from kika.sampling.joint_blocks import (assembleRequest, collectEntries,
 from kika.sampling.model_blocks import mf34_frames
 from kika.sampling.perturbation_set import PerturbationSet
 
-__all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOptions"]
+__all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOptions",
+           "HDF5Options"]
 
 #: The formats a realisation can be written as, and what each one is for.
 #:
@@ -95,11 +96,51 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 #:     ``endf-tape`` written from the model, produced on demand if neither was
 #:     asked for. A dry run validates the options (the executable exists, the
 #:     temperatures are given) and runs nothing.
-EMITTERS = ("endf-delta", "endf-tape", "gnds", "ace")
+#: ``"hdf5"``
+#:     OpenMC's HDF5 (:mod:`kika.hdf5`), one ``<nuclide>.h5`` per sample under
+#:     ``NNNN/hdf5/`` with every temperature asked for, and -- when a base
+#:     library is named -- ``NNNN/cross_sections.xml``, an overlay sending the
+#:     nuclide to the sample's file and everything else to the base library.
+#:     The realisation is multiplied at 0 K and broadened to each temperature
+#:     by kika (roadmap D12); the pieces taken from NJOY (URR tables, KERMA,
+#:     damage) are computed **once**, on the unperturbed evaluation, and
+#:     shared: the URR tables are not perturbed, and the KERMA is the
+#:     unperturbed heating number times the sample's total. Needs an
+#:     :class:`HDF5Options`.
+EMITTERS = ("endf-delta", "endf-tape", "gnds", "ace", "hdf5")
 
 #: The emitters that need nothing beyond the run itself -- every one but
 #: ``"ace"``, which needs NJOY and an :class:`AceOptions`.
 TAPE_EMITTERS = ("endf-delta", "endf-tape", "gnds")
+
+
+@dataclass(frozen=True)
+class HDF5Options:
+    """What the ``"hdf5"`` emitter needs beyond the perturbation.
+
+    ``temperatures`` in kelvin, all in one file per sample. ``baseLibrary``:
+    the ``cross_sections.xml`` (or its directory) each sample's overlay points
+    the other materials at. ``njoy``, ``omit``: the NJOY pieces (roadmap D7),
+    as :func:`kika.hdf5.processing.processSuite` takes them. ``thnmax`` and
+    ``thinning`` as there too.
+    """
+
+    temperatures: Tuple[float, ...] = (293.6,)
+    baseLibrary: Optional[str] = None
+    njoy: Optional[object] = None
+    omit: Tuple[str, ...] = ()
+    thnmax: object = "njoy"
+    thinning: Optional[float] = 1.0e-3
+
+    def validate(self) -> None:
+        if not self.temperatures:
+            raise ValueError("HDF5Options needs at least one temperature")
+        unknown = set(self.omit) - {"urr", "kerma", "damage"}
+        if unknown:
+            raise ValueError(f"HDF5Options.omit names {sorted(unknown)}; the NJOY pieces are "
+                             f"urr, kerma and damage")
+        if self.baseLibrary is not None and not Path(self.baseLibrary).exists():
+            raise ValueError(f"HDF5Options.baseLibrary {self.baseLibrary} does not exist")
 
 
 @dataclass(frozen=True)
@@ -1871,6 +1912,48 @@ class _SampleContext:
     originalSourcePath: Optional[Path] = None
     pendfPath: Optional[Path] = None
     angularPositivity: str = "report"
+    #: ``"hdf5"`` only: the options, and the NJOY pieces computed once.
+    hdf5: Optional[HDF5Options] = None
+    hdf5Pieces: Optional[Any] = None
+
+
+def _emitHdf5(suite, pset, sampleDir: Path, ctx, log, number: int) -> Dict[str, Path]:
+    """One sample as OpenMC HDF5, plus its overlay index. See :data:`EMITTERS`."""
+    from kika.hdf5.library import overlay
+    from kika.hdf5.writer import writeSuite
+
+    options = ctx.hdf5
+    folder = sampleDir / "hdf5"
+    report = writeSuite(suite, folder, temperatures=list(options.temperatures),
+                        label=pset.label, njoyPieces=ctx.hdf5Pieces, omit=tuple(options.omit),
+                        thnmax=options.thnmax, thinning=options.thinning, workers=1)
+    files = {"h5": next(folder.glob("*.h5"))}
+    if options.baseLibrary is not None:
+        name = files["h5"].stem
+        files["cross_sections"] = sampleDir / "cross_sections.xml"
+        overlay(options.baseLibrary, {name: files["h5"]}, files["cross_sections"])
+    files["report"] = report.summary()
+    return files
+
+
+def _hdf5Pieces(options, suite, tape, log):
+    """The NJOY pieces of the unperturbed evaluation, once for every sample (D12)."""
+    wanted = [p for p in ("urr", "kerma", "damage") if p not in options.omit]
+    if not wanted:
+        return None
+    if tape is None:
+        raise ValueError("the 'hdf5' emitter takes URR tables, KERMA and damage from NJOY on the "
+                         "evaluation's tape, and the source has no path; name them in "
+                         "HDF5Options.omit to write without them")
+    from kika.hdf5.njoy_pieces import runNjoyPieces
+
+    mat = getattr(suite.provenance, "mat", None)
+    with log.timed("njoy", "NJOY pieces for the hdf5 emitter (unperturbed)", subject="hdf5") as info:
+        unresolved = suite.resonances is not None and suite.resonances.unresolved is not None
+        pieces = runNjoyPieces(tape, list(options.temperatures), mat=int(mat), njoy=options.njoy,
+                               urr="urr" in wanted and unresolved)
+        info["njoy"] = pieces.njoy
+    return pieces
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -1919,7 +2002,7 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
         # ACE needs an ENDF tape on disk. The delta is the faithful one
         # when there is a tape to patch; otherwise the whole tape from the
         # model. Either is written on demand if it was not asked for.
-        tapeFormats = [fmt for fmt in ctx.formats if fmt != "ace"]
+        tapeFormats = [fmt for fmt in ctx.formats if fmt not in ("ace", "hdf5")]
         if "ace" in ctx.formats and not any(
                 fmt in tapeFormats for fmt in ("endf-delta", "endf-tape")):
             tapeFormats.append("endf-delta" if ctx.sourceFormat == "endf"
@@ -1954,6 +2037,11 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
             good = [r["ace"] for r in aceProduced if r["ace"] and r["returncode"] == 0]
             if good:
                 files["ace"] = [Path(p) for p in good]
+        if "hdf5" in ctx.formats:
+            with log.timed("emitted", "hdf5", subject="hdf5", sample=number) as info:
+                files["hdf5"] = _emitHdf5(suite, pset, sampleDir, ctx, log, number)
+                info["path"] = str(files["hdf5"]["h5"])
+                info["bytes"] = files["hdf5"]["h5"].stat().st_size
         if ctx.writeSets:
             files["perturbation-set"] = pset.write(
                 sampleDir / "perturbation.json")
@@ -2043,6 +2131,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      writeFactors: bool = True,
                      writeSets: bool = False,
                      ace: Optional[AceOptions] = None,
+                     hdf5: Optional[HDF5Options] = None,
                      nWorkers: int = 1,
                      covarianceSource=None,
                      onMissing: str = "raise",
@@ -2258,6 +2347,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                 "formats includes 'ace' and no AceOptions were given: NJOY, "
                 "the temperatures and the library have to be named")
         ace.validate()
+    if "hdf5" in formats:
+        if hdf5 is None:
+            raise ValueError("formats includes 'hdf5' and no HDF5Options were given: the "
+                             "temperatures have to be named")
+        hdf5.validate()
     nWorkers = int(nWorkers)
     if nWorkers < 1:
         raise ValueError(f"nWorkers must be at least 1, got {nWorkers}")
@@ -2556,7 +2650,10 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
         lumped=lumped, remainders=remainders,
         originalSourcePath=originalSourcePath, pendfPath=pendfPath,
-        angularPositivity=angularPositivity)
+        angularPositivity=angularPositivity,
+        hdf5=hdf5 if "hdf5" in formats else None,
+        hdf5Pieces=_hdf5Pieces(hdf5, suite, originalSourcePath or sourcePath, log)
+        if ("hdf5" in formats and emitTapes) else None)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:

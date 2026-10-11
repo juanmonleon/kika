@@ -249,6 +249,12 @@ def test_the_whole_tape_emitter_is_not_the_delta_emitter(run):
 
 def test_an_unknown_emitter_is_refused_before_anything_is_drawn():
     with pytest.raises(ValueError, match="unknown emitter"):
+        perturbFromModel(TAPE, REQUEST, 1, formats=("openmc-xml",))
+
+
+def test_the_hdf5_emitter_needs_its_options_before_anything_is_drawn():
+    """OpenMC's HDF5 is an emitter (roadmap H7); it needs the temperatures named."""
+    with pytest.raises(ValueError, match="HDF5Options"):
         perturbFromModel(TAPE, REQUEST, 1, formats=("hdf5",))
 
 

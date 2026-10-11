@@ -26,14 +26,19 @@ class TabulationOptions:
     """Tolerances of the tabulation (roadmap D6).
 
     ``rtol``/``atol`` bound the lin-lin interpolation error of a refined table
-    against the function it tabulates, ``|f - lin| <= rtol*|f| + atol*max|f|``.
+    against the function it tabulates, ``|f - lin| <= rtol*|f| + atol*max|f|``
+    at the midpoint of every interval.
     0.1 % is the tolerance the official libraries are processed to (RECONR,
     BROADR, ACER). ``maxPoints`` caps one table; reaching it is an error, not a
     silent truncation.
     """
 
     rtol: float = 1.0e-3
-    atol: float = 1.0e-6
+    #: Relative to the table's largest value. 1e-3 puts Fe-56's 3 979 elastic
+    #: tables (ENDF/B-VIII.1) at 120 809 points where ACER puts 153 265 and
+    #: 1e-6 would put 271 771 (measured 2026-10-11): the error stays bounded at
+    #: every point, 0.1 % of the value or of the table's peak.
+    atol: float = 1.0e-3
     maxPoints: int = 2000
     negative: str = "clip"
     #: Initial points of an angular table refined from a Legendre series.

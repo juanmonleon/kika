@@ -71,6 +71,21 @@ def writeSuite(suite, directory, temperatures=None, *, report=None, index: bool 
     if suite.interaction == "thermalNeutronScatteringLaw":
         from .thermal_encode import writeThermal
 
+        if not isProcessed(suite):
+            # An evaluation (MF7): processed as OpenMC's from_njoy processes it.
+            # The evaluation's tape and its principal nuclide's are needed, for
+            # NJOY THERMR (roadmap D7), and the OpenMC table name.
+            from .thermal_processing import processThermal
+
+            missing = [k for k in ("endf", "neutron", "name") if k not in options]
+            if missing:
+                raise ValueError(f"writing a thermal evaluation needs {missing}: the paths of its "
+                                 f"tape (endf=) and of its principal nuclide's (neutron=), and "
+                                 f"the OpenMC table name (name='c_H_in_H2O')")
+            suite = processThermal(options.pop("endf"), options.pop("neutron"),
+                                   name=options.pop("name"), temperatures=temperatures,
+                                   report=report, **options)
+            temperatures = None
         return writeThermal(suite, directory, temperatures=temperatures, report=report,
                             index=index, fileName=fileName)
     if not isProcessed(suite):
