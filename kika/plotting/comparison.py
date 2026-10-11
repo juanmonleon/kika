@@ -71,10 +71,14 @@ _REFERENCE_LABEL_ANCHORS = {
     'lower right': (0.98, 0.03, 'right', 'bottom'),
 }
 
+#: Used only when the data does not state its own law. Lin-lin throughout:
+#: it is what a PENDF and an ACE file state for sigma(E), what MF4 states for
+#: a_l(E) above the resonance region, and reading lin-lin data log-log moves
+#: values between the points (by up to 14 % on a simple case).
 _INTERPOLATION_DEFAULTS = {
-    'CrossSectionPlotData': 'log-log',
+    'CrossSectionPlotData': 'lin-lin',
     'AngularDistributionPlotData': 'lin-lin',
-    'LegendreCoeffPlotData': 'log-log',
+    'LegendreCoeffPlotData': 'lin-lin',
     'MultigroupCrossSectionPlotData': 'lin-lin',
     'MultigroupUncertaintyPlotData': 'lin-lin',
 }
@@ -542,7 +546,7 @@ class ComparisonBuilder:
         if getattr(data, 'interpolation', None) in ('log-log', 'lin-lin', 'log-lin', 'lin-log'):
             return data.interpolation
         class_name = type(data).__name__
-        return _INTERPOLATION_DEFAULTS.get(class_name, 'log-log')
+        return _INTERPOLATION_DEFAULTS.get(class_name, 'lin-lin')
 
     # ---- averaged layers on the difference panel ---------------------------
 

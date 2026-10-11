@@ -164,6 +164,29 @@ class TestInterpolateLogLog:
         assert got == pytest.approx(2.0)
 
 
+class TestSigmaUnderTheTablesLaw:
+    """A PENDF or ACE table is lin-lin; sigma used to be read log-log regardless."""
+
+
+    def test_nominal_is_lin_lin_by_default(self):
+        grid, xs = np.array([1.0, 3.0]), np.array([10.0, 1.0])
+        assert dcs.sigma_nominal(grid, xs, 2.0) == pytest.approx(5.5)
+        assert dcs.interpolate_log_log(grid, xs, 2.0) != pytest.approx(5.5, rel=0.05)
+
+    def test_the_tables_own_law_is_honoured(self):
+        grid, xs = np.array([1.0, 3.0]), np.array([10.0, 1.0])
+        loglog = dcs.sigma_nominal(grid, xs, 2.0, xs_interpolation=[(2, 5)])
+        assert loglog == pytest.approx(dcs.interpolate_log_log(grid, xs, 2.0), rel=1e-12)
+
+    def test_bin_average_is_exact_for_the_lin_lin_table(self):
+        # Constant weight over [1, 3] of the line 10 -> 1: the midpoint value.
+        grid, xs = np.array([1.0, 3.0]), np.array([10.0, 1.0])
+        assert dcs.sigma_bin_averaged(grid, xs, 1.0, 3.0, "constant") == pytest.approx(5.5)
+        # Lethargy weight: int y/E dE / ln 3 for y = 14.5 - 4.5 E, in closed form.
+        expected = (14.5 * np.log(3.0) - 4.5 * 2.0) / np.log(3.0)
+        assert dcs.sigma_bin_averaged(grid, xs, 1.0, 3.0) == pytest.approx(expected, rel=1e-12)
+
+
 class TestBinEdges:
     def test_interior_point_uses_midpoints(self):
         assert dcs.bin_edges_for_energy([1.0, 2.0, 4.0], 1) == (1.5, 3.0)

@@ -36,7 +36,7 @@ import numpy as np
 from kika._constants import FWHM_TO_SIGMA, NEUTRON_MASS_AMU
 from kika.processing.interpolation import interpolate_1d
 from kika.utils.energy_folding import tof_energy_resolution
-from kika.algebra import fold_tabulated, gaussian_fold_nodes
+from kika.algebra import fold_tabulated, gaussian_fold_nodes, group_averages, interval_laws
 from kika._legendre_frames import cos_cm_from_cos_lab, cos_lab_from_cos_cm
 
 __all__ = [
@@ -425,9 +425,32 @@ def bin_edges_for_width(
     return max(e - half, 0.0), e + half
 
 
-def sigma_nominal(xs_energies_ev, xs_values, energy_ev):
-    r"""Pointwise :math:`\sigma(E)`, log-log interpolated (ENDF convention)."""
-    return interpolate_log_log(xs_energies_ev, xs_values, energy_ev)
+def _xs_pairs(xs_energies_ev, xs_interpolation):
+    """The table's ``(NBT, INT)`` regions; ``None`` is one lin-lin region.
+
+    Lin-lin is the default because it is what a PENDF and an ACE file state,
+    and what an evaluation's MF3 states above the resonance region. A table
+    with other laws passes its own regions.
+    """
+    n = len(xs_energies_ev)
+    return list(xs_interpolation) if xs_interpolation else [(n, 2)]
+
+
+def _sigma_at(xs_energies_ev, xs_values, energy_ev, xs_interpolation=None):
+    """sigma at *energy_ev* under the table's own law, held at the ends."""
+    return interpolate_1d(xs_energies_ev, xs_values,
+                          _xs_pairs(xs_energies_ev, xs_interpolation),
+                          energy_ev, out_of_range="hold")
+
+
+def sigma_nominal(xs_energies_ev, xs_values, energy_ev, xs_interpolation=None):
+    r"""Pointwise :math:`\sigma(E)`, interpolated under the table's own law.
+
+    ``xs_interpolation`` is the table's ``(NBT, INT)`` pairs; ``None`` means
+    one lin-lin region, which is what a PENDF or an ACE file states. Values
+    outside the table hold its end values.
+    """
+    return _sigma_at(xs_energies_ev, xs_values, energy_ev, xs_interpolation)
 
 
 def sigma_bin_averaged(
@@ -436,17 +459,20 @@ def sigma_bin_averaged(
     e_lo_ev: float,
     e_hi_ev: float,
     weighting: Weighting = "lethargy",
+    xs_interpolation=None,
 ) -> float:
     r"""Flux-averaged :math:`\sigma` over ``[e_lo, e_hi]``.
 
     .. math::
         \langle\sigma\rangle = \frac{\int \sigma(E) w(E)\,dE}{\int w(E)\,dE}
 
-    Trapezoidal on the union of the bin edges and the grid points strictly
-    inside the bin, with :math:`\sigma` sampled log-log.  ``weighting``:
-    ``'lethargy'`` uses :math:`w = 1/E` (flux flat per unit lethargy, the
-    neutronics default); ``'constant'`` uses :math:`w = 1`.  A degenerate bin
-    returns :math:`\sigma(e_{lo})`.
+    Exact for the table under its own interpolation law
+    (:func:`kika.algebra.group_averages`; ``xs_interpolation`` as in
+    :func:`sigma_nominal`). ``weighting``: ``'lethargy'`` uses :math:`w = 1/E`
+    (flux flat per unit lethargy, the neutronics default); ``'constant'`` uses
+    :math:`w = 1`. The window is clipped to the table's domain, so the average
+    is over the part the table covers. A degenerate window returns
+    :math:`\sigma(e_{lo})`.
 
     The lethargy weight is not integrable at :math:`E = 0`, and the lowest bin
     of an MF4 grid does reach zero once its half-width is mirrored.  Both
@@ -455,34 +481,24 @@ def sigma_bin_averaged(
     inside it rather than evaluated at the singularity.
     """
     grid = np.asarray(xs_energies_ev, dtype=float)
+    values = np.asarray(xs_values, dtype=float)
     if not (e_hi_ev > e_lo_ev):
-        return float(sigma_nominal(grid, xs_values, e_lo_ev))
+        return float(sigma_nominal(grid, values, e_lo_ev, xs_interpolation))
 
     if weighting == "lethargy" and e_lo_ev <= 0.0:
         positive = grid[(grid > 0.0) & (grid < e_hi_ev)]
         e_lo_ev = float(positive[0]) if positive.size else e_hi_ev * 1e-6
         if not (e_hi_ev > e_lo_ev):
-            return float(sigma_nominal(grid, xs_values, e_hi_ev))
+            return float(sigma_nominal(grid, values, e_hi_ev, xs_interpolation))
 
-    # Slice the bin by binary search rather than masking the whole grid: this is
-    # called once per output energy, and an MF3 grid runs to hundreds of
-    # thousands of points, so a full scan here is the difference between a
-    # sub-second sweep and a three-minute one.
-    lo_i = int(np.searchsorted(grid, e_lo_ev, side="right"))
-    hi_i = int(np.searchsorted(grid, e_hi_ev, side="left"))
-    inside = grid[lo_i:hi_i]
-    points = np.concatenate(([e_lo_ev], inside, [e_hi_ev]))
-    values = np.atleast_1d(interpolate_log_log(grid, xs_values, points))
-    w = 1.0 / points if weighting == "lethargy" else np.ones_like(points)
-
-    d_e = np.diff(points)
-    keep = d_e > 0
-    if not np.any(keep):
-        return float(sigma_nominal(grid, xs_values, e_lo_ev))
-    fw = values * w
-    num = np.sum(0.5 * (fw[:-1] + fw[1:])[keep] * d_e[keep])
-    den = np.sum(0.5 * (w[:-1] + w[1:])[keep] * d_e[keep])
-    return float(num / den) if den > 0 else float(sigma_nominal(grid, xs_values, e_lo_ev))
+    lo, hi = max(float(e_lo_ev), float(grid[0])), min(float(e_hi_ev), float(grid[-1]))
+    if not (hi > lo):
+        return float(sigma_nominal(grid, values, e_lo_ev, xs_interpolation))
+    laws = interval_laws(grid.size, _xs_pairs(grid, xs_interpolation))
+    average = group_averages(grid, values, laws, [lo, hi],
+                             weight="1/x" if weighting == "lethargy" else None)[0]
+    return float(average) if np.isfinite(average) else float(
+        sigma_nominal(grid, values, e_lo_ev, xs_interpolation))
 
 
 def sigma_folded(xs_energies_ev, xs_values, energy_ev, tof: TofResolution):
@@ -517,6 +533,7 @@ def resolve_sigma(
     bin_edges: Optional[Tuple[float, float]] = None,
     tof: Optional[TofResolution] = None,
     weighting: Weighting = "lethargy",
+    xs_interpolation=None,
 ):
     r"""Dispatch to the requested reading of :math:`\sigma(E)`.
 
@@ -526,10 +543,11 @@ def resolve_sigma(
     a UI toggle can never produce a hole in the curve.
     """
     if mode == "binavg" and bin_edges is not None:
-        return sigma_bin_averaged(xs_energies_ev, xs_values, bin_edges[0], bin_edges[1], weighting)
+        return sigma_bin_averaged(xs_energies_ev, xs_values, bin_edges[0], bin_edges[1],
+                                  weighting, xs_interpolation)
     if mode == "folded" and tof is not None:
         return sigma_folded(xs_energies_ev, xs_values, energy_ev, tof)
-    return sigma_nominal(xs_energies_ev, xs_values, energy_ev)
+    return sigma_nominal(xs_energies_ev, xs_values, energy_ev, xs_interpolation)
 
 
 # =============================================================================
@@ -814,12 +832,13 @@ def coefficients_bin_averaged(
     *,
     weighting: Weighting = "lethargy",
     max_order: Optional[int] = None,
+    nbt_int_pairs=None,
 ) -> np.ndarray:
     r"""Flux-averaged :math:`a_\ell` over one window per query point.
 
     The angular counterpart of :func:`sigma_bin_averaged`, and averaged the same
-    way — trapezoidal over the window edges plus every grid point strictly
-    inside, under the same flux weight.
+    way: exactly, under the MF4 interpolation law ``nbt_int_pairs`` (lin-lin by
+    default) and the same flux weight.
 
     ``bin_edges`` is one ``(lo, hi)`` per output point.  Returns an
     ``(L, len(bin_edges))`` array.
@@ -833,7 +852,7 @@ def coefficients_bin_averaged(
     out = np.empty((matrix.shape[0], len(edges)), dtype=float)
     for i, row in enumerate(matrix):
         for j, (lo, hi) in enumerate(edges):
-            out[i, j] = sigma_bin_averaged(grid, row, lo, hi, weighting)
+            out[i, j] = sigma_bin_averaged(grid, row, lo, hi, weighting, nbt_int_pairs)
     return out
 
 
@@ -890,7 +909,8 @@ def resolve_coefficients(
         )
     if mode == "binavg" and bin_edges is not None:
         return coefficients_bin_averaged(
-            energies_ev, coefficients, bin_edges, weighting=weighting, max_order=max_order
+            energies_ev, coefficients, bin_edges, weighting=weighting, max_order=max_order,
+            nbt_int_pairs=nbt_int_pairs,
         )
     if mode == "folded" and tof is not None:
         return coefficients_folded(
@@ -988,6 +1008,7 @@ def coefficients_sigma_weighted(
     bin_edges: Optional[Tuple[float, float]] = None,
     nbt_int_pairs=None,
     max_order: Optional[int] = None,
+    xs_interpolation=None,
 ) -> Tuple[np.ndarray, float]:
     r"""The angular shape and cross section a resolution-limited measurement sees.
 
@@ -998,8 +1019,9 @@ def coefficients_sigma_weighted(
     \langle\sigma\rangle f_\mathrm{eff}(\mu)/2\pi = \langle\sigma f\rangle/2\pi`.
 
     :math:`\sigma` is read linearly inside a fold (``numpy.interp``, as
-    :func:`sigma_folded`) and log-log otherwise (as :func:`sigma_nominal` and
-    :func:`sigma_bin_averaged`).  Nominal, it is the file at :math:`E_0`.
+    :func:`sigma_folded`) and under the table's own law otherwise
+    (``xs_interpolation``, as :func:`sigma_nominal`; lin-lin by default).
+    Nominal, it is the file at :math:`E_0`.
     """
     grid = np.asarray(energies_ev, dtype=float)
     xs_grid = np.asarray(xs_energies_ev, dtype=float)
@@ -1010,7 +1032,7 @@ def coefficients_sigma_weighted(
     folded = mode == "folded" and tof is not None
     sigma_at = (
         np.interp(nodes, xs_grid, xs) if folded
-        else np.atleast_1d(interpolate_log_log(xs_grid, xs, nodes))
+        else np.atleast_1d(_sigma_at(xs_grid, xs, nodes, xs_interpolation))
     )
     a_at = coefficients_at_energies(
         grid, coefficients, nodes, nbt_int_pairs=nbt_int_pairs, max_order=max_order,
@@ -1150,6 +1172,7 @@ def differential_xs_vs_energy(
     nbt_int_pairs: Optional[Sequence[Tuple[int, int]]] = None,
     max_order: Optional[int] = None,
     pdf_at_energies: Optional[Callable[[float, np.ndarray], np.ndarray]] = None,
+    xs_interpolation: Optional[Sequence[Tuple[int, int]]] = None,
 ) -> dict:
     r""":math:`d\sigma/d\Omega` at a **fixed angle**, against incident energy.
 
@@ -1166,9 +1189,13 @@ def differential_xs_vs_energy(
     mu
         Target cosine, expressed in ``mu_frame``.
     xs_energies_ev, xs_values
-        MF3 :math:`\sigma(E)`.  Omit both to get the bare PDF :math:`f(\mu, E)`,
+        :math:`\sigma(E)`.  Omit both to get the bare PDF :math:`f(\mu, E)`,
         which is the useful view when only the *shape*'s energy dependence
         matters.
+    xs_interpolation
+        The sigma table's ``(NBT, INT)`` pairs. ``None`` is one lin-lin region,
+        which is what a PENDF or an ACE file states; pass an evaluation's MF3
+        regions to read it under its own laws.
     query_energies_ev
         Output grid.  Defaults to the MF4 grid; a denser grid is interpolated
         through :func:`coefficients_at_energies` under ``nbt_int_pairs`` and
@@ -1280,6 +1307,7 @@ def differential_xs_vs_energy(
             xs_mode,
             tof,
             pdf_at,
+            xs_interpolation,
         )
         values = differential_xs_factor(folded_product, per_steradian) * jacobian
         return {
@@ -1300,7 +1328,8 @@ def differential_xs_vs_energy(
     # 4b. Nominal: sigma(E) at the energy.
     sigma = None
     if has_xs:
-        sigma = np.atleast_1d(sigma_nominal(xs_energies_ev, xs_values, out_e))
+        sigma = np.atleast_1d(sigma_nominal(xs_energies_ev, xs_values, out_e,
+                                            xs_interpolation))
 
     if sigma is None:
         values = pdf
@@ -1333,6 +1362,7 @@ def _sigma_weighted_average_at_mu(
     mode: XsMode,
     tof: Optional[TofResolution],
     pdf_at: Callable[[np.ndarray], np.ndarray],
+    xs_interpolation=None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     r""":math:`\langle\sigma\rangle` and :math:`\langle\sigma f\rangle` at one cosine, per energy.
 
@@ -1362,7 +1392,7 @@ def _sigma_weighted_average_at_mu(
 
     sigma_n = (
         np.interp(nodes, xs_grid, xs) if mode == "folded"
-        else np.atleast_1d(interpolate_log_log(xs_grid, xs, nodes))
+        else np.atleast_1d(_sigma_at(xs_grid, xs, nodes, xs_interpolation))
     )
     f_n = pdf_at(nodes)
     sigma_avg = np.add.reduceat(weights * sigma_n, starts)
