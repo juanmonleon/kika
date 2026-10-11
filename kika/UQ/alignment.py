@@ -153,7 +153,7 @@ def _require_grid_match(
         raise AlignmentError(
             f"{source} energy grid does not exactly match the sensitivity grid after unit "
             "conversion. Partial alignment is not performed; explicitly condense the "
-            "sensitivity profile or covariance grid first (roadmap B4)."
+            "sensitivity profile or covariance grid first."
         )
 
 

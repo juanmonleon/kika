@@ -148,11 +148,13 @@ def create_summary_table(results_dict: Dict[str, Dict]) -> pd.DataFrame:
         Summary table with key uncertainty metrics and separate CI columns.
     """
     summary_data = []
-    
+    tally_names = []
+
     for tally_name, result in results_dict.items():
         if result['mean_tally'] == 0:
-            continue
-        
+            continue  # no relative uncertainty to tabulate
+
+        tally_names.append(tally_name)
         summary_data.append({
             'Mean_Tally': result['mean_tally'],
             'Total_Unc_%': result['percent_unc_observed'],
@@ -167,7 +169,7 @@ def create_summary_table(results_dict: Dict[str, Dict]) -> pd.DataFrame:
             'Mean_Tally_CI_Upper': result['ci']['mean_tally'][1]
         })
     
-    summary_df = pd.DataFrame(summary_data, index=list(results_dict.keys()))
+    summary_df = pd.DataFrame(summary_data, index=tally_names)
     summary_df.index.name = 'Tally'
     
     return summary_df
@@ -210,10 +212,12 @@ def _single_tally_analysis(
     std_stat = np.sqrt(mean_var_within)
     std_nuc = np.sqrt(var_nuclear)
     
-    # Convert to percentages
-    pct_obs = std_obs / mean_tally * 100.0
-    pct_stat = std_stat / mean_tally * 100.0
-    pct_nuc = std_nuc / mean_tally * 100.0
+    # Convert to percentages of |mean|: a negative response (a reactivity
+    # difference, say) has a positive relative uncertainty, as in convergence.py.
+    scale = abs(mean_tally)
+    pct_obs = std_obs / scale * 100.0
+    pct_stat = std_stat / scale * 100.0
+    pct_nuc = std_nuc / scale * 100.0
     
     # Reliability check: statistical uncertainty must be LESS than reliability_threshold * observed
     # to ensure reliable decomposition (i.e., statistical doesn't dominate)
@@ -267,7 +271,7 @@ def _values_only_analysis(
     mean_tally = y.mean()
     var_observed = np.var(y, ddof=1)
     std_obs = np.sqrt(var_observed)
-    pct_obs = std_obs / mean_tally * 100.0 if mean_tally != 0 else 0.0
+    pct_obs = std_obs / abs(mean_tally) * 100.0 if mean_tally != 0 else 0.0
 
     # Bootstrap for CIs on mean and observed uncertainty (vectorized, see
     # _bootstrap_analysis — same RNG stream as the old per-replicate loop)
@@ -282,7 +286,7 @@ def _values_only_analysis(
         means = y_bs.mean(axis=1)
         bs_mean[start:stop] = means
         std_obs_bs = np.sqrt(y_bs.var(axis=1, ddof=1))
-        bs_obs[start:stop] = np.where(means != 0, std_obs_bs / means * 100.0, 0.0)
+        bs_obs[start:stop] = np.where(means != 0, std_obs_bs / np.abs(means) * 100.0, 0.0)
 
     alpha = 1 - ci_level
     lo, hi = 100 * (alpha / 2), 100 * (1 - alpha / 2)
@@ -499,12 +503,12 @@ def _bootstrap_analysis(
 
         # Observed (total) uncertainty for each replicate
         var_obs_bs = y_bs.var(axis=1, ddof=1)
-        bs_obs[start:stop] = np.sqrt(var_obs_bs) / means * 100.0
+        bs_obs[start:stop] = np.sqrt(var_obs_bs) / np.abs(means) * 100.0
 
         # Nuclear data uncertainty for each replicate
         var_within_bs = abs_err_sq[idx].mean(axis=1)
         var_nuc_bs = np.maximum(var_obs_bs - var_within_bs, 0.0)
-        bs_nuc[start:stop] = np.sqrt(var_nuc_bs) / means * 100.0
+        bs_nuc[start:stop] = np.sqrt(var_nuc_bs) / np.abs(means) * 100.0
 
     return {
         'mean_tally': bs_mean,

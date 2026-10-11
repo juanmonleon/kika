@@ -25,9 +25,15 @@ from kika._constants import (
     NUBAR_COMPONENT_MTS,
 )
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# The verbose output goes through this module's own logger and handler.
+# logging.basicConfig here configured the root logger of whoever imported kika.
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 
 @dataclass
@@ -86,9 +92,13 @@ class UncertaintyResult:
     Attributes
     ----------
     total_variance : float
-        Total propagated variance
+        Total propagated variance, ``SᵀCS`` with relative sensitivities and a
+        relative covariance: a *relative* variance, (σ/μ)².
     total_uncertainty : float
-        Total uncertainty (1-sigma, square root of variance)
+        Its square root, so the relative one-sigma uncertainty σ/μ, the same
+        number as ``relative_uncertainty`` (kept under both names because
+        callers read both). The absolute σ is
+        ``relative_uncertainty * abs(response_value)``.
     relative_uncertainty : float
         Relative uncertainty (σ/μ)
     response_value : float
