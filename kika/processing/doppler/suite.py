@@ -338,7 +338,8 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
     elif source_model!='convolution':model=source_model
     elif not known_model and input_accuracy is None:model='unknown'
     else:model='convolution'
-    report=dict(schema='kika-doppler-suite-1',engine='doppler-suite-1',source_style=source_style,label=label,
+    from .core import ENGINE_VERSION, _selected_backend
+    report=dict(core_engine=ENGINE_VERSION,backend=_selected_backend(options),schema='kika-doppler-suite-1',engine='doppler-suite-1',source_style=source_style,label=label,
                 source_hash=source_hash,temperature_source=t0,temperature_final=temperature,temperature_model=model,
                 delta_temperature=temperature-t0,source_temperature_origin=origin,kB_eV_per_K=KB,
                 units=dict(energy='eV',cross_section='b',temperature='K'),output_domain=domain,

@@ -38,6 +38,14 @@ Pointwise evaluation returns values with kernel-error estimates, tail bounds
 and diagnostics. Tabulation adds adaptive mesh checks. The selected output
 window restricts the table; integration still uses the complete source support.
 For an input beginning at zero, supply a strictly positive output minimum.
+The default `backend="auto"` uses the compiled kernel when available. Select
+`DopplerOptions(backend="python")` for the reference implementation or
+`DopplerOptions(backend="native")` to require compilation; an unavailable native
+kernel raises an explicit error. The report records the backend actually used.
+Package builds compile the numerical extensions; `KIKA_BUILD_NATIVE=0` explicitly
+opts into a pure-Python development build. Neither backend changes the requested
+accuracy or support conventions.
+
 Cooling is rejected. Equal source/destination temperatures preserve the source
 function and its semantic boundaries.
 

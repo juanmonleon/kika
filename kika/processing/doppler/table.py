@@ -11,7 +11,7 @@ import numpy as np
 
 from .core import (PreparedDopplerCurve, DopplerOptions, DopplerInputError,
                    DopplerConvergenceError, evaluate_broadened, _immutable,
-                   _quantity, KB)
+                   _quantity, KB, ENGINE_VERSION, _selected_backend)
 
 REFINE = (.25, .5, .75)
 CHECK = (.1127016653792583, .276393202250021, .723606797749979, .8872983346207417)
@@ -106,26 +106,42 @@ def _adaptive(evaluate, seeds, options, budget, keys):
     batch = max(1, min(options.block_size//7, options.max_work_bytes//(2048*(len(keys)+1))))
     if 2048*(len(keys)+1) > options.max_work_bytes:
         raise DopplerConvergenceError('resources', 'table scratch exceeds max_work_bytes')
+    # An accepted interval remains exactly the same function/chord until a
+    # node is inserted inside it. Keep only acceptance ratios, never probe
+    # arrays. Independent reserved verification still evaluates every interval.
+    accepted_intervals = {}
+    cache_limit = options.max_work_bytes // 256
     maxrefine, maxcheck, evaluations = 0., 0., len(seeds)
     for iteration in range(options.max_iterations):
         grid = np.array(sorted(nodes))
         data = {k:np.array([nodes[float(x)][0][j] for x in grid]) for j,k in enumerate(keys)}
         additions = {}
-        iteration_refine = iteration_check = 0.
+        iteration_refine = max((v[0] for v in accepted_intervals.values()), default=0.)
+        iteration_check = max((v[1] for v in accepted_intervals.values()), default=0.)
         for start in range(0, len(grid)-1, batch):
             left, right = grid[start:start+batch], grid[start+1:start+batch+1]
             # Equal-sized arrays at final chunk.
             left = left[:len(right)]
+            selected = np.array([i for i, (a,b) in enumerate(zip(left,right))
+                                 if (float(a),float(b)) not in accepted_intervals], dtype=int)
+            if not len(selected):
+                continue
+            left, right = left[selected], right[selected]
             fractions = np.array(REFINE+CHECK)
             q = left[:,None]+(right-left)[:,None]*fractions
             actual, eta = evaluate(q.ravel()); evaluations += q.size
             ratios = np.zeros(q.shape)
             for k in keys:
-                chord = data[k][start:start+len(left),None]+(data[k][start+1:start+len(left)+1]-data[k][start:start+len(left)])[:,None]*fractions
+                chord = data[k][start+selected,None]+(data[k][start+selected+1]-data[k][start+selected])[:,None]*fractions
                 ratios = np.maximum(ratios, _ratio(actual[k].reshape(q.shape), chord,
                                                  eta[k].reshape(q.shape), options, options.table_share))
             iteration_refine = max(iteration_refine, float(np.max(ratios[:,:3])))
             iteration_check = max(iteration_check, float(np.max(ratios[:,3:])))
+            for row in np.flatnonzero(np.max(ratios,axis=1)<=1):
+                if len(accepted_intervals) >= cache_limit:
+                    break
+                accepted_intervals[(float(left[row]),float(right[row]))] = (
+                    float(np.max(ratios[row,:3])), float(np.max(ratios[row,3:])))
             for row in np.flatnonzero(np.max(ratios,axis=1)>1):
                 worst = int(np.argmax(ratios[row]))
                 for column in {1, worst}:
@@ -153,6 +169,7 @@ def _adaptive(evaluate, seeds, options, budget, keys):
                     ratios=np.maximum(ratios,_ratio(actual[k].reshape(q.shape),chord,eta[k].reshape(q.shape),options,options.table_share))
                 reserved_maximum=max(reserved_maximum,float(np.max(ratios)))
                 for row in np.flatnonzero(np.max(ratios,axis=1)>1):
+                    accepted_intervals.pop((float(left[row]),float(right[row])), None)
                     column=int(np.argmax(ratios[row]));point=float(q[row,column]);index=row*len(VERIFY)+column
                     if not left[row]<point<right[row]:
                         raise DopplerConvergenceError('unresolvable-grid','verification cannot refine')
@@ -340,7 +357,7 @@ def broaden_curve(prepared, *, temperature, options=None, output_domain=None, la
         v,e=_evaluate_curve(prepared,q,temperature,options,left_boundary)
         return {0:v},{0:e}
     forms,tables,report=_tabulate((prepared,),(options,),temperature,domain,options,evaluate,(0,),label,progress)
-    report.update(engine='doppler-table-1',source_hash=prepared.source_hash,temperature_source=prepared.source_temperature,
+    report.update(engine='doppler-table-1',core_engine=ENGINE_VERSION,backend=_selected_backend(options),source_hash=prepared.source_hash,temperature_source=prepared.source_temperature,
                   temperature_final=temperature,options=asdict(options),accuracy_scope='input_table',
                   delta_temperature=temperature-prepared.source_temperature,mass=asdict(prepared.context),
                   source_temperature_origin=prepared.source_temperature_origin,kB_eV_per_K=KB,

@@ -15,8 +15,15 @@ from scipy.special import erfc
 from kika._constants import BOLTZMANN_CONSTANT
 
 KB = BOLTZMANN_CONSTANT * 1e6
-ENGINE_VERSION = "doppler-analytic-2"
+ENGINE_VERSION = "doppler-analytic-3"
 EPS = np.finfo(float).eps
+try:
+    from importlib import import_module
+    _native = import_module(__package__ + '._doppler_native')
+except ModuleNotFoundError as exc:
+    if exc.name != __package__ + '._doppler_native':
+        raise
+    _native = None
 
 
 class DopplerInputError(ValueError):
@@ -94,8 +101,11 @@ class DopplerOptions:
     max_radius: int = 26
     threshold_policy: str = "convolution"
     threshold: float | None = None
+    backend: str = "auto"
 
     def __post_init__(self):
+        if not isinstance(self.backend, str) or self.backend not in ("auto", "python", "native"):
+            raise DopplerInputError("invalid-options", "backend must be auto, python or native")
         for n in ("rtol", "atol", "kernel_share", "tail_share", "table_share", "serialization_share"):
             object.__setattr__(self,n,_quantity(getattr(self, n), n))
         if self.rtol >= 1 or self.kernel_share + self.tail_share + self.table_share + self.serialization_share > 1:
@@ -308,6 +318,21 @@ def _point(curve, energy, h, options):
     elow = max(0., x+h*lower_s)**2; ehigh = (x+h*upper_s)**2
     first = int(np.searchsorted(curve._ends, elow, side="left"))
     last = int(np.searchsorted(curve._starts, ehigh, side="right"))
+    if options.backend != "python" and _native is not None:
+        try:
+            value, error, components, count = _native.integrate(
+                curve._panels, first, last, energy, h, lower_s, upper_s,
+                options.max_series_terms, options.max_panels)
+        except OverflowError as exc:
+            raise DopplerConvergenceError("resources", str(exc), energy=energy) from exc
+        except ArithmeticError as exc:
+            raise DopplerConvergenceError("unresolvable-scale", str(exc), energy=energy) from exc
+        budget = options.kernel_share*(options.atol+options.rtol*abs(value))
+        if error > budget:
+            raise DopplerConvergenceError("kernel-budget-exhausted", "analytic error estimate exceeds budget", energy=energy, budget=budget)
+        if curve.negative_policy == "reject" and value < 0:
+            raise DopplerConvergenceError("negative-output", "recalculate with stable higher precision", energy=energy)
+        return value, error, _tail(z, h, m, k, radius), components, count, radius
     values, errors, components = [], [], {}
     count = 0
     for panel_index in range(first, last):
@@ -370,17 +395,28 @@ def _point(curve, energy, h, options):
     return value, error, _tail(z, h, m, k, radius), components, count, radius
 
 
+def _selected_backend(options):
+    if options.backend == "native" and _native is None:
+        raise UnsupportedDopplerError("native-unavailable", "build the native Doppler extension or select backend='python'")
+    return "native" if options.backend != "python" and _native is not None else "python"
+
+
 def evaluate_broadened(prepared, energies, *, temperature, options=None):
     """Evaluate complete supported input on requested energies, no tabulation.
 
     Returns immutable arrays and diagnostics. The resource limit controls working
     scratch, not retained inputs/results or process RSS. Fail without partial result.
+    ``options.backend`` selects auto (compiled when available), native (required),
+    or the Python reference. The report records the backend actually used.
+    Native integration uses the same Taylor recurrence with a coefficient-tail
+    stopping diagnostic charged to the kernel budget; no fast-math or thinning.
     """
     if not isinstance(prepared, PreparedDopplerCurve):
         raise DopplerInputError("invalid-prepared", "prepare_curve required")
     options = options or DopplerOptions()
     if not isinstance(options, DopplerOptions):
         raise DopplerInputError("invalid-options", "DopplerOptions required")
+    backend = _selected_backend(options)
     temperature = _quantity(temperature, "temperature", True)
     dt = temperature-prepared.source_temperature
     if dt < 0: raise DopplerInputError("cooling", "T1<T0")
@@ -411,7 +447,7 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
             errors.append(err); tails.append(tail); removed.append(drop)
             count += n; maxradius = max(maxradius, radius)
             for owner, contribution in comp.items(): totals[owner] = totals.get(owner, 0.)+contribution
-    report = dict(engine=ENGINE_VERSION, source_hash=prepared.source_hash,
+    report = dict(engine=ENGINE_VERSION, backend=backend, source_hash=prepared.source_hash,
                   temperature_source=prepared.source_temperature, temperature_final=temperature,
                   delta_temperature=dt, atomic_weight_ratio=prepared.context.atomic_weight_ratio,
                   mass_origin=prepared.context.mass_origin, kB_eV_per_K=KB,

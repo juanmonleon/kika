@@ -65,17 +65,39 @@ M_j=\sum_{n=0}^{N-1}\frac{D_n}{n+j+1},\qquad
 \sigma_{panel}=\frac{d}{\sqrt\pi}\sum_{j=0}^4p_jM_j.
 $$ (eq-doppler-moments)
 
-For 80 terms, an immutable matrix $W_{jn}=1/(n+j+1)$ computes the five reductions
-with NumPy; other requested term counts use scalar compensated sums. Recurrence
-and panel totals remain unchanged. Let $\mathcal N=\sum_n|D_n|$ and
-$R=4\sum_{n=N-4}^{N-1}|D_n|$. The moment diagnostic uses
-$R+256\epsilon\mathcal N$ and charges another $83\epsilon\mathcal N$ for the
-default matrix reduction. The panel diagnostic multiplies it by
+The Python reference uses an immutable matrix $W_{jn}=1/(n+j+1)$ for the
+default 80 terms and scalar compensated sums for other requested counts.
+The compiled C kernel uses the same recurrence, compensated totals and strict
+float64 arithmetic without fast-math. It contracts the polynomial into the
+coefficient weights before accumulating the panel integral.
+
+For the default maximum of 80 terms, the compiled recurrence may stop early.
+Suppose the absolute coefficients obey
+$|c_k|\le A|c_{k-1}|/k+B|c_{k-2}|/k$. Summing this inequality beyond coefficient
+$n$, for $n+1>A+B$, bounds the omitted coefficient norm by
+
+$$
+T_n\le\frac{(A+B)|c_n|+B|c_{n-1}|}{n+1-A-B}.
+$$ (eq-doppler-coefficient-tail)
+
+For each Gaussian sequence, $A=2|b_\pm|d$ and $B=2d^2$; add their bounds.
+For the coupled low-$z$ recurrence, use $|D_n|+|H_n|$ and
+$A=2(|z+s_0|+z)d$. The omitted moment is at most $T_n/(n+2)$.
+The diagnostic pads the coefficient bound by $1+128\epsilon$ and permits
+stopping after at least nine coefficients only when that moment bound is
+at most $4\epsilon$ times the accumulated difference norm. Other maximum
+term counts retain the requested number of coefficients.
+
+Let $\mathcal N$ be the accumulated absolute difference norm, including the
+omitted coefficient bound. For an early stop, $R$ is the omitted moment bound;
+for a full series, $R=4\sum_{n=N-4}^{N-1}|D_n|$. The moment diagnostic uses
+$R+256\epsilon\mathcal N$, with another $83\epsilon\mathcal N$ for default
+reciprocal-weight reductions. The panel diagnostic multiplies it by
 $d\sum_j|p_j|/\sqrt\pi$; accumulated panel totals add
-$8\epsilon\sum|\sigma_{panel}|$. These are floating-point diagnostics, not a
-rigorous truncation certificate. Very narrow input panels use their normalised
-local coordinate to preserve the input width. Identically zero source panels
-contribute exactly zero and skip moment evaluation.
+$8\epsilon\sum|\sigma_{panel}|$. The floating-point implementation and
+full-series stopping diagnostics are not interval-arithmetic certificates.
+Very narrow source panels use their normalised local coordinate to preserve
+the input width. Identically zero source panels skip moment evaluation.
 
 ### Support and tails
 
@@ -100,7 +122,10 @@ relevant panels, and output evaluation proceeds in blocks.
 Structural seeds retain source knots and thermal flanks of peaks/valleys. Three
 refinement fractions and four check fractions guide insertion. A separate family
 of four fractions must pass before acceptance; a failing final check inserts a
-point and repeats refinement. For candidate table value $c$, reference $r$ and
+point and repeats refinement. Already accepted, unchanged intervals reuse their
+acceptance ratios in later refinement iterations. The bounded cache retains no
+probe arrays, and independent verification still evaluates every interval.
+For candidate table value $c$, reference $r$ and
 reference uncertainty estimate $\eta$, acceptance uses
 
 $$
@@ -154,12 +179,16 @@ The same file tests inverse-velocity behaviour, identity, narrow increments,
 sign/linearity and block invariance. Independent numerical quadrature checks
 local moments in
 `kika/processing/doppler/tests/test_moments.py::test_weighted_moments_against_independent_quadrature`.
+`kika/processing/doppler/tests/test_native.py` checks compiled moments against
+independent quadrature, compiled/Python pointwise agreement, narrow-peak tables,
+resource failures, unavailable-backend behaviour and accuracy after interval reuse.
 Table/suite tests cover thresholds, graphs, freshness, temperature history,
 rejection and atomic attachment in `test_table_suite.py`.
 
 ## Diagnostics
 
-Pointwise reports distinguish kernel estimates and tail bounds. Table reports
+Pointwise reports distinguish kernel estimates and tail bounds. Pointwise, table
+and suite reports identify the resolved `backend` and core engine version. Table reports
 give points, regions, evaluations/iterations and acceptance ratios. Suite reports
 add source hashes, mass/temperature origins, graph, source balance and unresolved
 resonance semantics. `global_error_bound=False` always distinguishes these checks
@@ -168,7 +197,9 @@ ratio have different denominators and must not be conflated.
 
 ## Implementation
 
-`kika.processing.doppler.core` prepares immutable curves and integrates panels.
+`kika.processing.doppler.core` prepares immutable curves and dispatches analytic
+panel integration to `_doppler_native` or the Python reference. The package build
+compiles the C kernel without the NumPy C ABI.
 `table` refines and verifies interpolated forms; `suite` prepares semantic input,
 derives sums and attaches an independent Heated copy atomically. Temperature
 styles do not automatically heat every other object in a reaction suite.

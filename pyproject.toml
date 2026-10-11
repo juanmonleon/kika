@@ -19,6 +19,9 @@ classifiers = [
 ]
 packages = [{include = "kika"}]
 include = [
+    {path = "kika/processing/doppler/_doppler_native.c", format = "sdist"},
+    {path = "kika/processing/doppler/_doppler_native*.pyd", format = "wheel"},
+    {path = "kika/processing/doppler/_doppler_native*.so", format = "wheel"},
     {path = "build_native.py", format = "sdist"},
     {path = "kika/processing/resonances/_rm_native.c", format = "sdist"},
     {path = "kika/processing/resonances/_rm_kernel.h", format = "sdist"},
@@ -26,6 +29,7 @@ include = [
     {path = "kika/processing/resonances/_rm_native*.so", format = "wheel"},
 ]
 exclude = [
+    "kika/processing/doppler/_doppler_native.c",
     "kika/**/tests",
     "kika/**/tests/**",
     "kika/**/test_*.py",
