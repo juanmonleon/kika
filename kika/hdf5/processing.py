@@ -34,6 +34,7 @@ five significant figures), which is what the official libraries' ``kTs`` hold.
 from __future__ import annotations
 
 import copy
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -419,14 +420,39 @@ def _broadened(suite, temperature, thnmax, options):
     return _broadenAll(suite, [temperature], thnmax, options, 1)[temperature]
 
 
-def _reducedSuite(suite, entries, keys, lo):
+THERMAL_REACH = 27.0
+"""Doppler widths of 0 K source a chunk keeps on each side of its output domain."""
+
+
+def _window(form, a, b):
+    """``form`` restricted to ``a``..``b`` (end values read lin-lin)."""
+    x, y = _flatten(form)
+    keep = (x > a) & (x < b)
+    return _pieces(np.concatenate([[a], x[keep], [b]]),
+                   np.concatenate([[np.interp(a, x, y)], y[keep], [np.interp(b, x, y)]]))
+
+
+def _reducedSuite(suite, entries, keys, lo, window=None):
     """The suite broaden_suite is given for the leaves ``keys``: those leaves alone,
-    their 0 K forms cut and padded by ``_dopplerSource``, no sums."""
+    their 0 K forms cut and padded by ``_dopplerSource``, no sums.
+
+    ``window`` (eV pair) restricts the 0 K forms further, for one energy chunk:
+    the kernel never integrates beyond 26 Doppler widths (``max_radius``) and
+    the Gaussian is exactly 0 in double beyond 27 (e^-729), so a source cut
+    THERMAL_REACH widths around the chunk gives the chunk's points the same
+    integrals, and spares broaden_suite the preparation and fingerprint of
+    the whole tape for every chunk (U-235: 127 chunks of a 500 000-point source).
+    The tail envelope is then the window's max |sigma|, a bound of everything
+    the kernel weighs.
+    """
     top = min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in keys)
     def sourced(reaction):
         clone = copy.copy(reaction)
         clone.crossSection = copy.copy(reaction.crossSection)
-        clone.crossSection.forms = {RECON_LABEL: _dopplerSource(reaction.crossSection[RECON_LABEL], lo, top)}
+        form = _dopplerSource(reaction.crossSection[RECON_LABEL], lo, top)
+        if window is not None:
+            form = _window(form, *window)
+        clone.crossSection.forms = {RECON_LABEL: form}
         return clone
     reduced = copy.copy(suite)
     reduced.reactions = type(suite.reactions)(
@@ -437,7 +463,13 @@ def _reducedSuite(suite, entries, keys, lo):
     reduced.styles = copy.deepcopy(suite.styles)
     evaluated = reduced.styles.evaluatedFor(RECON_LABEL)
     if evaluated.projectileEnergyDomain is not None:
-        evaluated.projectileEnergyDomain = _m().RangeQuantity(lo, top, "eV")
+        evaluated.projectileEnergyDomain = _m().RangeQuantity(*(window or (lo, top)), "eV")
+    if suite.resonances is not None:
+        # broaden_suite reads the resonances only to ask whether there is an
+        # unresolved range (whose 0 K forms must be declared dilute means);
+        # the resolved parameters are not sent with every chunk.
+        reduced.resonances = copy.copy(suite.resonances)
+        reduced.resonances.resolved = []
     for name in ("sums", "productions", "orphanProducts", "incompleteReactions"):
         setattr(reduced, name, type(getattr(suite, name))())
     reduced.sums.multiplicitySums = suite.sums.multiplicitySums
@@ -471,48 +503,39 @@ def _broadenReduced(reduced, lo, hi, temperature, options, domain=None):
     return {key.label: form for key, form in result.forms.items()}
 
 
-def _broadenGroup(suite, entries, keys, lo, hi, temperature, options, domain=None):
-    """``{label: heated form}`` of the leaves ``keys``, broadened together by broaden_suite."""
-    return _broadenReduced(_reducedSuite(suite, entries, keys, lo), lo, hi, temperature, options, domain)
-
-
-_POOL_GROUPS = None
-
-
-def _poolGroups(groups):
-    """Worker initialiser: each group's reduced suite is sent once per process."""
-    global _POOL_GROUPS
-    _POOL_GROUPS = groups
-
-
 def _broadenTask(args):
     """One (temperature, group, chunk) of ``_broadenAll``, in a worker process."""
-    temperature, group, lo, hi, domain, options = args
-    return _broadenReduced(_POOL_GROUPS[group], lo, hi, temperature, options, domain)
+    reduced, lo, hi, temperature, options, domain = args
+    return _broadenReduced(reduced, lo, hi, temperature, options, domain)
 
 
 def _broadenAll(suite, temperatures, thnmax, options, workers):
     """``{T: (heated forms, ceiling)}``; every temperature and energy chunk in parallel processes."""
+    from kika.processing.doppler.suite import _mass
+
     entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax)
-    # One reduced suite per group of leaves, shared by its chunks (and the
-    # only data a worker process receives).
-    groups, index = [], []
-    for keys, _ in tasks:
-        labels = [key.label for key in keys]
-        if not groups or groups[-1][0] != labels:
-            groups.append((labels, _reducedSuite(suite, entries, keys, lo)))
-        index.append(len(groups) - 1)
-    reduced = [g for _, g in groups]
-    jobs = [(t, i, lo, hi, domain, options)
-            for t in temperatures for i, (_, domain) in zip(index, tasks)]
+    awr = _mass(suite, None).atomic_weight_ratio
+    top = {id(keys): min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in keys)
+           for keys, _ in tasks}
+    jobs = []
+    for t in temperatures:
+        h = math.sqrt(K_BOLTZMANN * t / awr)
+        for keys, domain in tasks:
+            window = None
+            if domain != (lo, hi):
+                a, b = domain
+                window = (max(lo, (max(0.0, math.sqrt(a) - THERMAL_REACH * h)) ** 2),
+                          min(top[id(keys)], (math.sqrt(b) + THERMAL_REACH * h) ** 2))
+                if window == (lo, top[id(keys)]):
+                    window = None
+            jobs.append((_reducedSuite(suite, entries, keys, lo, window), lo, hi, t, options, domain))
     workers = min(len(jobs), os.cpu_count() or 1, 8) if workers is None else max(1, int(workers))
     if workers == 1 or len(jobs) <= 1:
-        results = [_broadenReduced(reduced[i], lo, hi, t, options, domain)
-                   for t, i, _, _, domain, _ in jobs]
+        results = [_broadenTask(job) for job in jobs]
     else:
         from concurrent.futures import ProcessPoolExecutor
 
-        with ProcessPoolExecutor(max_workers=workers, initializer=_poolGroups, initargs=(reduced,)) as pool:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(_broadenTask, jobs))
     n = len(tasks)
     return {t: _assembled(leaves, hi, tasks, results[i * n:(i + 1) * n])

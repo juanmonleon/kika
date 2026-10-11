@@ -287,7 +287,7 @@ static PyObject *closed_probe(PyObject *self,PyObject *args) {
 /* Prepared immutable numeric panels own the original tuple (and its labels).
  * They avoid Python conversions and sqrt/slope preparation at each point. */
 typedef struct {
-    double lo,hi,v0,v1,anchor,ylo,yhi,slope;
+    double lo,hi,v0,v1,anchor,ylo,yhi,slope,dsh;
     int lin,inv,constant;
     PyObject *owner;
 } NumericPanel;
@@ -313,6 +313,8 @@ static int read_panel(PyObject *panel,NumericPanel *v) {
     }
     v->ylo=sqrt(v->lo);v->yhi=sqrt(v->hi);
     v->slope=v->lin?(v->v1-v->v0)/(v->hi-v->lo):0;
+    /* The panel's width in velocity, independent of the point: ds = dsh/h. */
+    v->dsh=isinf(v->hi)?INFINITY:(v->hi-v->lo)/(v->yhi+v->ylo);
     return 1;
 }
 
@@ -419,7 +421,12 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
      * the same zero there. */
     NodeMoments node_cache[2]={{0},{0}};
     int node_path=hybrid && terms==80 && 2*z+lower>27.3;
-    Sum values={0},errors={0},absolute={0};
+    /* The value is summed compensated (panels of either sign can cancel);
+     * the error bounds and |values| are sums of nonnegative terms, whose
+     * rounding the final (1 + 2 n eps) factor covers. */
+    Sum values={0};double errors=0,absolute=0;
+    /* A panel's right node is the next panel's left: its s is reused. */
+    double previous_hi=NAN,previous_s=0,invz=1/z;
     for(Py_ssize_t p=first;p<last;p++) {
         NumericPanel temporary;
         const NumericPanel *v;
@@ -436,11 +443,12 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
         if(v0==0 && v1==0) include=1;
         else {
             double ylo=v->ylo,yhi=v->yhi;
-            double slo=(lo-energy)/(h*(ylo+x));
+            double slo=lo==previous_hi?previous_s:(lo-energy)/(h*(ylo+x));
             double shi=isinf(hi)?INFINITY:(hi-energy)/(h*(yhi+x));
+            previous_hi=hi;previous_s=shi;
             double left=fmax(lower,slo),right=fmin(upper,shi);
             if(left>=right) continue;
-            double ds=isinf(hi)?INFINITY:(hi-lo)/(h*(yhi+ylo));
+            double ds=v->dsh/h;
             int narrow=ds<1;
             if(ds<=0) {PyErr_SetString(PyExc_ArithmeticError,"panel overflow");goto done;}
             double qleft=narrow?fmax(0,(lower-slo)/ds):0;
@@ -458,7 +466,7 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
              * spike, or a node-dense flank) keep the conditioned series. */
             if(node_path && width>=1e-3) {
                 double a=left,b=right,c[5]={0},cs[5]={0},S[3],Sabs[3];int nc;
-                double iz=1/z;
+                double iz=invz;
                 if(inv) {
                     double w=v0*sqrt(anchor)/x;
                     c[0]=w;c[1]=w*iz;cs[0]=fabs(w);cs[1]=fabs(w)*iz;nc=2;
@@ -484,22 +492,23 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
                 }
                 double I[5],mag[5],ea,eb;
                 node_integral(node_cache,a,b,nc,I,mag,&ea,&eb);
-                Sum sum={0};double bound=0;
+                /* Plain sum: <= nc eps sum|c_k I_k|, inside the 16 eps provision. */
+                double sum=0,bound=0;
                 for(int k=0;k<nc;k++) {
-                    add(&sum,c[k]*I[k]);
+                    sum+=c[k]*I[k];
                     /* Coefficient rounding (64 eps of their scale) plus the
                      * node values' and the difference's rounding. */
                     bound+=64*DBL_EPSILON*cs[k]*mag[k]+16*DBL_EPSILON*fabs(c[k])*mag[k];
                 }
                 const double rootpi=1.772453850905516027298167483341145;
-                double value=total(sum)/rootpi;
+                double value=sum/rootpi;
                 /* Float64 position of the two nodes, |dP e^-s^2/ds| times it. */
                 double pa=0,pb=0;
                 for(int k=nc-1;k>=0;k--) {pa=pa*fabs(a)+cs[k];pb=isinf(b)?0:pb*fabs(b)+cs[k];}
                 double position=64*DBL_EPSILON*((1+fabs(a))*(1+fabs(a))*pa*ea+(isinf(b)?0:(1+fabs(b))*(1+fabs(b))*pb*eb));
                 double err=(bound+position)/rootpi;
                 if(!isfinite(value) || !isfinite(err)) {PyErr_SetString(PyExc_ArithmeticError,"panel overflow");goto done;}
-                add(&values,value);add(&errors,err);add(&absolute,fabs(value));add(&contribution,value);
+                add(&values,value);errors+=err;absolute+=fabs(value);add(&contribution,value);
                 count++;include=1;
                 goto panel_done;
             }
@@ -555,7 +564,7 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
                 } else if(constant) sigma_error+=64*DBL_EPSILON*fabs(v0);
                 err+=factor*norm*(total(pnorm)*relative+sigma_error*(fabs(yr)+dr)*(fabs(yr)+dr));
                 if(!isfinite(value) || !isfinite(err)) {PyErr_SetString(PyExc_ArithmeticError,"panel overflow");goto done;}
-                add(&values,value);add(&errors,err);add(&absolute,fabs(value));add(&contribution,value);
+                add(&values,value);errors+=err;absolute+=fabs(value);add(&contribution,value);
                 count++;include=1;
             }
         }
@@ -576,7 +585,8 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
         if((p-first)%1024==0 && PyErr_CheckSignals()<0) goto done;
     }
     if(component_owner!=NULL && store_component(components,component_owner,component_value)<0)goto done;
-    double value=total(values),error=total(errors)+8*DBL_EPSILON*total(absolute);
+    double inflation=1+2*(double)(count+1)*DBL_EPSILON;
+    double value=total(values),error=errors*inflation+8*DBL_EPSILON*absolute*inflation;
     if(!isfinite(value) || !isfinite(error)) {
         PyErr_SetString(PyExc_ArithmeticError,"aggregate overflow");goto done;
     }
