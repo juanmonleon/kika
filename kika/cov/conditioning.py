@@ -352,7 +352,8 @@ class ConditioningReport:
         threshold, Higham above it — because the plan's job here is to make the
         current behaviour visible, not to change it. The one override is a
         block carrying a sum rule: ``C·1 ≈ 0`` is destroyed by any congruence
-        and degraded ~500x by Higham, so those get ``clip`` with the reason
+        (~500x on the Cf-252 MF35 bands with ``clip_rescale``) and degraded
+        ~40x by Higham, so those get ``clip`` with the reason
         recorded.
         """
         steps: List[PlanStep] = []
