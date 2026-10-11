@@ -156,13 +156,12 @@ class Selection:
 
     ``relative`` defaults to ``True`` and that default is load-bearing: the
     appliers multiply by what comes back, and an absolute covariance does not
-    describe a factor. ``load_mf34_covariance`` has always dropped absolute MF34
-    sections before a draw for that reason. An absolute MF31/MF33 section is
-    left out too: converting it divides by a central value this module does not
-    have, so a caller that wants it converts first, through
-    :func:`~kika.sampling.mf33_sampling.relativiseAbsoluteSections`, and hands
-    the converted sections here. :func:`absoluteSectionsLeftOut` names what a
-    request leaves out, and ``perturbFromModel`` records it.
+    describe a factor. Making an absolute MF31/MF33 section relative divides by
+    a central value this module does not have, so the caller converts first and
+    hands the converted sections here: ``perturbFromModel`` does, through
+    :func:`~kika.sampling.mf33_sampling.relativiseOnAssemblyGrids`. An absolute
+    MF34 section is not converted, and :func:`absoluteSectionsLeftOut` names
+    it so the run can record it.
     """
 
     mf: int
@@ -360,12 +359,11 @@ def absoluteSectionsLeftOut(suite, request) -> List[str]:
     """The absolute MF31/MF33/MF34 sections a relative request does not draw.
 
     A selection with ``relative=True`` -- the default -- keeps only relative
-    sections, because the appliers multiply. The model route does **not**
-    convert an absolute section to a relative one (that needs a central value
-    binned on a grid, and the choice of grid is a method decision the carrier
-    makes and this route has not), so those sections are left out of the draw.
-    This names them, so the run can say so instead of perturbing fewer
-    components than the file states without a word.
+    sections, because the appliers multiply. ``perturbFromModel`` makes the
+    absolute MF31/MF33 sections of a request relative before it asks, so what
+    this names there is the absolute MF34 sections, which are not converted.
+    The run records them instead of perturbing fewer components than the file
+    states without a word.
     """
     from kika.sampling.model_blocks import _cross_section_entries, _mf34_entries
 

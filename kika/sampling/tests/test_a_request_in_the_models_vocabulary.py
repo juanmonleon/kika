@@ -183,7 +183,7 @@ def test_a_source_of_another_format_is_refused(tmp_path):
 
 
 def test_an_absolute_section_left_out_of_a_relative_request_is_named():
-    """The model route does not convert absolute sections; it must not hide them."""
+    """The helper names the absolute sections a relative selection does not draw."""
     from kika.sampling.joint_blocks import absoluteSectionsLeftOut
     suite = kika.read(str(DATA / "micro_fe56_mf33.endf")).covarianceSuite
     assert absoluteSectionsLeftOut(suite, {33: None}) == []

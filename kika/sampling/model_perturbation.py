@@ -1379,6 +1379,161 @@ def _readCovarianceFrom(path, expectedZaid, log):
 RESONANCE_REGION_MODES = ("reconstructed", "evaluated")
 
 
+def _centralValuesForConversion(endfObj, sourcePath, mfs, tolerance, njoyExe):
+    """``{mf: {mt: section}}``: what an absolute MF31/MF33 section is relative to.
+
+    MF33 is a covariance of the cross section itself, resonances included, so
+    its central value is the full σ(E). A tape whose MF3 already is that (no
+    resonance region, or the LRP=2 base the reconstructed route writes) gives
+    it directly. One whose MF3 is only a background (LRP=1 with resonance
+    ranges, i.e. ``resonanceRegion="evaluated"``) gives it through NJOY RECONR
+    at the run's tolerance: the reconstruction the ``reconstructed`` route and
+    the decoder's mixed-block conversion use, so a block converts to the same
+    relative matrix whichever route is taken. A summation reaction absent from
+    MF3 is the sum of its partials (``cross_section_or_sum``).
+
+    MF31's central value is ν̄ from MF1, read the way the file-level sampler
+    reads it. A GNDS source carries no ENDF tape, so it offers neither.
+    """
+    if endfObj is None:
+        return {}
+    central = {}
+    if 33 in mfs:
+        from kika.endf.classes.mf33.mf33 import cross_section_or_sum
+        from kika.sampling.resonance_region import needsReconstruction
+
+        if needsReconstruction(endfObj):
+            from kika.processing.njoy_pendf_cache import attach_pendf
+
+            xs = attach_pendf(
+                endfObj, endf_path=sourcePath, njoy_executable=njoyExe,
+                tolerance=tolerance,
+                why="making an absolute MF33 section relative to the cross "
+                    "section of a resonance region")
+        else:
+            mf3 = endfObj.get_file(3) if hasattr(endfObj, "get_file") else None
+            xs = dict(getattr(mf3, "sections", None) or {})
+        central[33] = {mt: cross_section_or_sum(xs, mt) for mt in _mtsOfCovariances(endfObj, 33)}
+    if 31 in mfs:
+        from kika.sampling.mf31_sampling import _nubar_central_values
+
+        mf1 = endfObj.get_file(1) if hasattr(endfObj, "get_file") else None
+        central[31] = _nubar_central_values(mf1) if mf1 is not None else {}
+    return central
+
+
+def _mtsOfCovariances(endfObj, mf):
+    """Every MT a covariance file of *endfObj* names, on either side of a block."""
+    covFile = endfObj.get_file(mf) if hasattr(endfObj, "get_file") else None
+    mts = set()
+    for mt, section in (getattr(covFile, "sections", None) or {}).items():
+        mts.add(int(mt))
+        for sub in getattr(section, "subsections", ()) or ():
+            mt1 = getattr(sub, "mt1", None)
+            if mt1 is not None:
+                mts.add(int(mt1))
+    return sorted(mts)
+
+
+def _relativiseAbsoluteSections(covariances, request, endfObj, sourcePath, *,
+                                grouping, onMissing, tolerance, njoyExe,
+                                skipped, log):
+    """*covariances* with its requested absolute MF31/MF33 sections made relative.
+
+    The appliers multiply, so a block is drawn as a relative covariance. An
+    absolute section ``C_abs`` (barns², or ν̄²) is restated as
+    ``C_abs[i, j] / (σ̄_i σ̄_j)``, each side lifted onto the grid its component
+    is assembled on and divided by its central value averaged over those bins
+    (:func:`kika.sampling.mf33_sampling.relativiseOnAssemblyGrids`). For a
+    cross-section-only request, laid out on one union grid, that is the matrix
+    the file-level sampler converts to.
+
+    A side whose central value cannot be found raises under
+    ``onMissing="raise"``; under ``"skip"`` the section is left out and a note
+    says so. Bins where σ̄ is below the inert floor get zero relative
+    covariance, and a note counts them.
+
+    Returns ``(covariances, notes)``.
+    """
+    import dataclasses
+
+    from kika.sampling.joint_blocks import (CROSS_SECTION_MF, _asSelections,
+                                            _crossSectionKey, collectEntries,
+                                            requestIndex)
+    from kika.sampling.mf33_sampling import relativiseOnAssemblyGrids
+    from kika.sampling.model_blocks import _cross_section_entries, _selection
+
+    selections = _asSelections(request)
+    wanted = [sel for sel in selections
+              if sel.mf in CROSS_SECTION_MF and sel.relative is True]
+    if not wanted or not any(
+            _cross_section_entries(covariances, mf=sel.mf, mt=sel.mt, relative=False)
+            for sel in wanted):
+        return covariances, []
+
+    mfs = sorted({sel.mf for sel in wanted})
+    mts = {}
+    for sel in wanted:
+        chosen = _selection(sel.mt)
+        if sel.mf not in mts:
+            mts[sel.mf] = chosen
+        elif mts[sel.mf] is None or chosen is None:
+            mts[sel.mf] = None
+        else:
+            mts[sel.mf] = frozenset(mts[sel.mf]) | chosen
+
+    # The grids the blocks will be assembled on, with the absolute sections in:
+    # the conversion divides by σ̄ binned on exactly those bins.
+    widened = [dataclasses.replace(sel, relative=None)
+               if (sel.mf in CROSS_SECTION_MF and sel.relative is True) else sel
+               for sel in selections]
+    index = requestIndex(collectEntries(covariances, widened), grouping=grouping)
+    grids = {key: grid for meta in index.values()
+             for key, grid in meta["grids"].items()}
+
+    def gridOf(za, mf, mt):
+        return np.asarray(grids[_crossSectionKey((za, mt), mf)], dtype=float)
+
+    central = _centralValuesForConversion(endfObj, sourcePath, mfs, tolerance, njoyExe)
+    sections, converted, unresolved, inertBins = relativiseOnAssemblyGrids(
+        covariances, central, gridOf, mfs=tuple(mfs), mts=mts)
+
+    notes = []
+    if unresolved:
+        why = ("this source is GNDS and carries no ENDF tape to take a central "
+               "value from" if endfObj is None else
+               "the evaluation states no central value (MF3 or MF1) for the "
+               "reaction, nor the partials of a sum")
+        message = (f"{len(unresolved)} absolute covariance section(s) cannot be "
+                   f"made relative, because {why}: {', '.join(unresolved)}")
+        if onMissing == "raise":
+            raise ValueError(
+                message + ". Drop them from the request, or pass "
+                "onMissing='skip' to perturb the rest and record the omission")
+        note = message + "; they were not drawn"
+        skipped.append(note)
+        log.warning(note, subject="absolute sections", sections=list(unresolved))
+    if converted:
+        note = (f"{len(converted)} absolute covariance section(s) made relative, "
+                f"divided by the central value averaged over each bin (1/E "
+                f"weighted): {', '.join(converted)}")
+        notes.append(note)
+        log.event("request", note, subject="absolute sections",
+                  sections=list(converted))
+    for label, count in inertBins.items():
+        note = (f"{label}: {count} bin(s) state an absolute variance where the "
+                f"central value is below the inert floor, so the relative "
+                f"covariance there is zero and nothing is perturbed")
+        notes.append(note)
+        log.note(note, subject="absolute sections")
+
+    if dataclasses.is_dataclass(covariances):
+        covariances = dataclasses.replace(covariances, covarianceSections=sections)
+    else:
+        covariances = sections
+    return covariances, notes
+
+
 def _reconstructResonanceRegion(sourcePath: Path, endfObj, njoyExe, tolerance: float,
                                 log):
     """``(suite, endfObj, basePath, pendfPath)`` for a tape whose MF3 is a background.
@@ -2234,13 +2389,18 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     for note in magnitudeNotes:
         skipped.append(note)
         log.warning(note, subject="MF34")
+    covariances, conversionNotes = _relativiseAbsoluteSections(
+        covariances, request, endfObj, originalSourcePath, grouping=grouping,
+        onMissing=onMissing, tolerance=reconstructionTolerance,
+        njoyExe=njoyExe or (ace.njoyExe if ace is not None else None),
+        skipped=skipped, log=log)
     from kika.sampling.joint_blocks import absoluteSectionsLeftOut
 
     leftOut = absoluteSectionsLeftOut(covariances, request)
     if leftOut:
         note = (f"{len(leftOut)} absolute covariance section(s) not drawn -- "
-                f"the appliers multiply, and the model route does not convert "
-                f"an absolute section to a relative one: {', '.join(leftOut)}")
+                f"the appliers multiply, and an absolute MF34 section is not "
+                f"made relative: {', '.join(leftOut)}")
         skipped.append(note)
         log.warning(note, subject="absolute sections", sections=leftOut)
     log.event("request", _describeRequestForPeople(request),
@@ -2349,7 +2509,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                        aceOptions=ace if "ace" in formats else None,
                        # A skipped quantity is true of every sample and stated
                        # by no output file, which is exactly what notes are for.
-                       notes=list(resonanceNotes) + list(skipped))
+                       notes=list(resonanceNotes) + list(conversionNotes)
+                       + list(skipped))
     orphanNote = _orphanPhotonNote(suite, index)
     if orphanNote is not None:
         result.notes.append(orphanNote)
