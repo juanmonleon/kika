@@ -1898,7 +1898,12 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     source
         A path to an ENDF tape, a path to a GNDS ``reactionSuite`` whose
         covariance sibling sits beside it, or an already parsed ENDF object.
-        ``endf-delta`` needs the ENDF path, because it patches that file.
+        ``endf-delta`` needs the ENDF path, because it patches that file. A
+        GNDS source is written to ``endf-tape`` and ``ace`` through the ENDF
+        bookkeeping derived from the model (:mod:`kika.endf.model_adapter.derive`),
+        unless it has resolved or unresolved resonance parameters: those are
+        not written to MF2, and the run refuses instead of writing a tape whose
+        MF3 there is only the background.
     request
         What to perturb, in either spelling
         :func:`~kika.sampling.joint_blocks.normaliseRequest` accepts. By
@@ -2136,15 +2141,22 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         )
     if sourceFormat == "gnds":
         needsTape = [f for f in formats if f in ("endf-tape", "ace")]
-        hasHeader = bool(getattr(getattr(suite, "provenance", None), "headerFields", None))
-        if needsTape and not hasHeader and not dryRun and outputDir is not None:
+        resonances = getattr(suite, "resonances", None)
+        withParameters = resonances is not None and (
+            bool(resonances.resolved) or resonances.unresolved is not None)
+        hasMF2 = getattr(getattr(resonances, "provenance", None),
+                         "sourceFormat", None) == "endf"
+        if (needsTape and withParameters and not hasMF2
+                and not dryRun and outputDir is not None):
             raise ValueError(
-                f"{needsTape} need an ENDF tape written from the model, and a "
-                f"suite read from GNDS cannot be written as one yet: it carries "
-                f"no MF1/451 header, no AWR and no Q/LR for its summed reactions, "
-                f"and the ENDF encoders refuse to invent them, so a GNDS "
-                f"source can be perturbed to 'gnds' only. (MAT would be "
-                f"{_matOf(suite)} from the library's table when it does.)"
+                f"{needsTape} need an ENDF tape written from the model, and the "
+                f"resonance parameters of a suite read from GNDS are not written "
+                f"to MF2: QX, LRX, LAD and the particle-pair columns have no "
+                f"model node to derive them from. Without MF2 the tape's MF3 in "
+                f"the resonance region is only the background, so this GNDS "
+                f"source can be perturbed to 'gnds' only. A GNDS evaluation "
+                f"with no resolved or unresolved region is written as a tape "
+                f"(MAT {_matOf(suite)} from the library's table)."
             )
         if mat is None:
             mat = _matOf(suite)
