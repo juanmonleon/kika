@@ -316,8 +316,16 @@ def _dopplerSource(form, lo, top):
     return _pieces(x, y)
 
 
-def _broadened(suite, temperature, thnmax, options):
-    """``{reaction label: heated form below thnmax}`` from kika's free-gas broadening."""
+CHUNK_KNOTS = 4000
+"""Source knots per energy chunk of the resonant group (see ``_broadenPlan``)."""
+
+
+def _broadenPlan(suite, thnmax):
+    """What ``_broadened`` broadens, independent of the temperature.
+
+    ``(entries, leaves, lo, hi, tasks)``; each task is ``(keys, domain)``, a
+    group of leaves broadened together on the output domain ``domain``.
+    """
     from kika.processing.resonances.suite import _entries, _graph
 
     # Orphan photon products (MF13 on a sum) carry no 0 K form: nothing to broaden.
@@ -334,25 +342,68 @@ def _broadened(suite, temperature, thnmax, options):
     # The redundant sums are left out too -- the writer rebuilds the ones it
     # writes from the partials -- which spares broaden_suite's check of each
     # source sum, a point-by-point Python loop that dominated the cost.
-    active, counts = [], {}
+    active, counts, knots = [], {}, {}
     for key in leaves:
         x, y = _flatten(entries[key].crossSection[RECON_LABEL])
         if np.any(y[x < hi] != 0):
             active.append(key)
             counts[key] = int(np.count_nonzero(x < hi))
+            knots[key] = x[x < hi]
     # Broadened in two groups, each on its own adaptive grid. broaden_suite
     # puts all the curves it is given on one output grid; a smooth MF3
     # reaction given with the resonant ones is evaluated, probes and all, at
     # every point the resonances need (Fe-56: 73 smooth reactions on 126 781
     # points). Apart, it converges on the few points it needs, and the writer
     # puts every reaction on the union grid afterwards.
-    dense = max(counts.values())
-    resonant = [k for k in active if counts[k] >= 0.2 * dense]
-    smooth = [k for k in active if counts[k] < 0.2 * dense]
-    out = {}
-    for group in (resonant, smooth):
-        if group:
-            out.update(_broadenGroup(suite, entries, group, lo, hi, temperature, options))
+    tasks = []
+    if active:
+        dense = max(counts.values())
+        resonant = [k for k in active if counts[k] >= 0.2 * dense]
+        smooth = [k for k in active if counts[k] < 0.2 * dense]
+        # The resonant group is cut into energy chunks of CHUNK_KNOTS source
+        # knots, broadened independently (in parallel by _broadenAll). Each
+        # chunk sees the whole 0 K source, so its thermal neighbourhood is
+        # complete; only the output domain is the chunk's. The refinement
+        # accepts every interval on its own verification, so a chunked table
+        # meets the same tolerance, and the shared boundary is one exact
+        # evaluation of the same point in both chunks. The cuts depend on the
+        # data alone, never on the number of workers, so the result does not.
+        grid = np.unique(np.concatenate([knots[k] for k in resonant]))
+        grid = grid[(grid > lo) & (grid < hi)]
+        pieces = max(1, len(grid) // CHUNK_KNOTS)
+        cuts = [lo]
+        for i in range(1, pieces):
+            j = i * len(grid) // pieces
+            # Between two distinct knots, never on a discontinuity.
+            cuts.append(float(np.sqrt(grid[j - 1] * grid[j])))
+        cuts.append(hi)
+        tasks += [(resonant, (a, b)) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
+        if smooth:
+            tasks.append((smooth, (lo, hi)))
+    return entries, leaves, lo, hi, tasks
+
+
+def _joined(parts):
+    """One heated form from chunk forms in increasing energy that share their ends."""
+    xs, ys = [], []
+    for form in parts:
+        x, y = _flatten(form)
+        if xs and x[0] == xs[-1][-1]:
+            x, y = x[1:], y[1:]
+        xs.append(x)
+        ys.append(y)
+    return _pieces(np.concatenate(xs), np.concatenate(ys))
+
+
+def _assembled(leaves, hi, tasks, results):
+    """``({label: heated form}, hi)`` from the results of ``_broadenPlan``'s tasks."""
+    byLabel = {}
+    for (_, domain), result in zip(tasks, results):
+        for label, form in result.items():
+            byLabel.setdefault(label, []).append((domain[0], form))
+    out = {label: parts[0][1] if len(parts) == 1
+           else _joined([form for _, form in sorted(parts, key=lambda p: p[0])])
+           for label, parts in byLabel.items()}
     zero = None
     for key in leaves:
         if key.label not in out:
@@ -363,16 +414,19 @@ def _broadened(suite, temperature, thnmax, options):
     return out, hi
 
 
-def _broadenGroup(suite, entries, keys, lo, hi, temperature, options):
-    """``{label: heated form}`` of the leaves ``keys``, broadened together by broaden_suite."""
-    from kika.processing.doppler import DopplerOptions, SupportPolicy, broaden_suite
+def _broadened(suite, temperature, thnmax, options):
+    """``{reaction label: heated form below thnmax}`` from kika's free-gas broadening, in-process."""
+    return _broadenAll(suite, [temperature], thnmax, options, 1)[temperature]
 
+
+def _reducedSuite(suite, entries, keys, lo):
+    """The suite broaden_suite is given for the leaves ``keys``: those leaves alone,
+    their 0 K forms cut and padded by ``_dopplerSource``, no sums."""
     top = min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in keys)
     def sourced(reaction):
         clone = copy.copy(reaction)
         clone.crossSection = copy.copy(reaction.crossSection)
-        clone.crossSection.forms = dict(reaction.crossSection.forms)
-        clone.crossSection[RECON_LABEL] = _dopplerSource(reaction.crossSection[RECON_LABEL], lo, top)
+        clone.crossSection.forms = {RECON_LABEL: _dopplerSource(reaction.crossSection[RECON_LABEL], lo, top)}
         return clone
     reduced = copy.copy(suite)
     reduced.reactions = type(suite.reactions)(
@@ -387,10 +441,22 @@ def _broadenGroup(suite, entries, keys, lo, hi, temperature, options):
     for name in ("sums", "productions", "orphanProducts", "incompleteReactions"):
         setattr(reduced, name, type(getattr(suite, name))())
     reduced.sums.multiplicitySums = suite.sums.multiplicitySums
-    support = {k: SupportPolicy("one_over_v", "constant") for k in keys}
+    return reduced
+
+
+def _broadenReduced(reduced, lo, hi, temperature, options, domain=None):
+    """``{label: heated form}`` of every leaf of ``reduced`` (from ``_reducedSuite``).
+
+    The 0 K source spans ``lo``..``hi``; the heated table covers ``domain``
+    (default all of it).
+    """
+    from kika.processing.doppler import DopplerOptions, SupportPolicy, broaden_suite
+    from kika.processing.resonances.suite import _entries
+
+    support = {k: SupportPolicy("one_over_v", "constant") for k in _entries(reduced)}
     opts = options or DopplerOptions(max_points=400_000_000, max_work_bytes=4_000_000_000)
     extra = {}
-    if suite.resonances is not None and suite.resonances.unresolved is not None:
+    if reduced.resonances is not None and reduced.resonances.unresolved is not None:
         # The 0 K forms in the unresolved range are the infinitely dilute
         # average reconstruction (kika's or RECONR's), which is the statement
         # broaden_suite asks to be made explicitly before it accepts a URR.
@@ -400,25 +466,57 @@ def _broadenGroup(suite, entries, keys, lo, hi, temperature, options):
                      input_accuracy=DopplerInputAccuracy(infinite_dilution=True))
     result = broaden_suite(reduced, None, source_style=RECON_LABEL, label=heatedLabel("tmp"),
                            temperature=float(temperature), support=support,
-                           source_temperature=0.0, options=opts, output_domain=(lo, hi),
+                           source_temperature=0.0, options=opts, output_domain=domain or (lo, hi),
                            negative_policy="preserve_signed", **extra)
     return {key.label: form for key, form in result.forms.items()}
 
 
-def _broadenOne(args):
-    suite, temperature, thnmax, options = args
-    return temperature, _broadened(suite, temperature, thnmax, options)
+def _broadenGroup(suite, entries, keys, lo, hi, temperature, options, domain=None):
+    """``{label: heated form}`` of the leaves ``keys``, broadened together by broaden_suite."""
+    return _broadenReduced(_reducedSuite(suite, entries, keys, lo), lo, hi, temperature, options, domain)
+
+
+_POOL_GROUPS = None
+
+
+def _poolGroups(groups):
+    """Worker initialiser: each group's reduced suite is sent once per process."""
+    global _POOL_GROUPS
+    _POOL_GROUPS = groups
+
+
+def _broadenTask(args):
+    """One (temperature, group, chunk) of ``_broadenAll``, in a worker process."""
+    temperature, group, lo, hi, domain, options = args
+    return _broadenReduced(_POOL_GROUPS[group], lo, hi, temperature, options, domain)
 
 
 def _broadenAll(suite, temperatures, thnmax, options, workers):
-    """``{T: (heated forms, ceiling)}``, the temperatures in parallel processes."""
-    workers = min(len(temperatures), 4) if workers is None else max(1, int(workers))
-    if workers == 1 or len(temperatures) == 1:
-        return {t: _broadened(suite, t, thnmax, options) for t in temperatures}
-    from concurrent.futures import ProcessPoolExecutor
+    """``{T: (heated forms, ceiling)}``; every temperature and energy chunk in parallel processes."""
+    entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax)
+    # One reduced suite per group of leaves, shared by its chunks (and the
+    # only data a worker process receives).
+    groups, index = [], []
+    for keys, _ in tasks:
+        labels = [key.label for key in keys]
+        if not groups or groups[-1][0] != labels:
+            groups.append((labels, _reducedSuite(suite, entries, keys, lo)))
+        index.append(len(groups) - 1)
+    reduced = [g for _, g in groups]
+    jobs = [(t, i, lo, hi, domain, options)
+            for t in temperatures for i, (_, domain) in zip(index, tasks)]
+    workers = min(len(jobs), os.cpu_count() or 1, 8) if workers is None else max(1, int(workers))
+    if workers == 1 or len(jobs) <= 1:
+        results = [_broadenReduced(reduced[i], lo, hi, t, options, domain)
+                   for t, i, _, _, domain, _ in jobs]
+    else:
+        from concurrent.futures import ProcessPoolExecutor
 
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        return dict(pool.map(_broadenOne, [(suite, t, thnmax, options) for t in temperatures]))
+        with ProcessPoolExecutor(max_workers=workers, initializer=_poolGroups, initargs=(reduced,)) as pool:
+            results = list(pool.map(_broadenTask, jobs))
+    n = len(tasks)
+    return {t: _assembled(leaves, hi, tasks, results[i * n:(i + 1) * n])
+            for i, t in enumerate(temperatures)}
 
 
 def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX,

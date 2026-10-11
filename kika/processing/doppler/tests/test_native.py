@@ -105,3 +105,29 @@ def test_interval_reuse_keeps_the_mesh_and_independent_accuracy():
     assert full[2]['evaluations']<=limited[2]['evaluations']
     q=np.linspace(.1,4.,6001)
     assert np.max(np.abs(np.interp(q,full[0],full[1][0])-function(q))/(1e-8+1e-3*np.abs(function(q))))<.45
+
+
+def test_kernel_special_functions_meet_the_provisions(native):
+    """The kernel's own exp, e^-y^2 and erfc against exact references (16 eps is the
+    smallest provision they enter)."""
+    from decimal import Decimal, getcontext
+    getcontext().prec = 60
+    pi = Decimal('3.14159265358979323846264338327950288419716939937510582097494')
+
+    def erfc(y):
+        y = Decimal(y)
+        if y < 3:
+            total, term, n = Decimal(0), y, 0
+            while abs(term/(2*n+1)) > Decimal('1e-55'):
+                total += term/(2*n+1); n += 1; term = -term*y*y/n
+            return 1-2/pi.sqrt()*total
+        fraction = y
+        for k in range(600, 0, -1): fraction = y+Decimal(k)/2/fraction
+        return (-y*y).exp()/pi.sqrt()/fraction
+
+    eps = np.finfo(float).eps
+    for y in np.r_[np.linspace(0., 6., 241), np.linspace(6., 26.5, 83), [1e-12, 1e-6, .46875, 4.]]:
+        y = float(y)
+        e, c, g = native.special(y)
+        for got, ref in ((e, (-Decimal(y)).exp()), (g, (-Decimal(y)**2).exp()), (c, erfc(y))):
+            assert abs(Decimal(got)/ref-1) <= 6*eps

@@ -22,6 +22,78 @@ static void add(Sum *a, double v) {
 static double total(Sum a) { return a.sum+a.correction; }
 static double weights[80][5];
 
+/* The kernel's own exp and erfc. The MinGW-w64 UCRT libm takes 35 ns per exp
+ * and 83 ns per erfc, and they are most of the cost of a panel; these take a
+ * few. Accuracy is checked against the reference values in
+ * tests/test_native.py (special): <= 2 ulp for kexp, <= 4e-16 relative for
+ * kerfc, inside the 16-64 eps provisions the integrator charges.
+ *
+ * kexp: Cody-Waite reduction x = k ln2 + r, |r| <= ln2/2, with fdlibm's
+ * split of ln2, and the degree-13 Taylor polynomial of e^r (truncation
+ * < 4e-18 relative), scaled by 2^k through the exponent bits. */
+static double kexp(double x) {
+    if(!(x>-745.2)) return x!=x?x:0.;
+    if(x>709.78) return INFINITY;
+    double k=floor(x*1.44269504088896338700+.5);
+    double r=(x-k*6.93147180369123816490e-01)-k*1.90821492927058770002e-10;
+    double p=1.+r*(1.+r*(1./2+r*(1./6+r*(1./24+r*(1./120+r*(1./720+r*(1./5040
+             +r*(1./40320+r*(1./362880+r*(1./3628800+r*(1./39916800+r*(1./479001600
+             +r*(1./6227020800.)))))))))))));
+    int n=(int)k;
+    if(n>=-1021) {
+        uint64_t bits=(uint64_t)(n+1023)<<52;double scale;memcpy(&scale,&bits,sizeof scale);
+        return p*scale;
+    }
+    return ldexp(p,n);
+}
+
+/* e^-(y^2) for y >= 0 without the rounding of y*y: y^2 = hi + lo exactly
+ * (Dekker's product, Veltkamp split), and e^-y^2 = e^-hi (1 - lo), whose
+ * neglected term lo^2/2 is below 4e-27 for y <= 27.3. */
+static double kgauss(double y) {
+    if(y>27.3) return 0.;
+    double hi=y*y,c=134217729.*y,yh=c-(c-y),yl=y-yh;
+    double lo=((yh*yh-hi)+2*yh*yl)+yl*yl;
+    return kexp(-hi)*(1-lo);
+}
+
+/* erfc(y), y >= 0, by W. J. Cody's rational Chebyshev approximations
+ * (Math. Comp. 23 (1969) 631; SPECFUN CALERF): relative error of the
+ * approximations below 1e-18, plus the rounding of their evaluation.
+ * Returns e^-(y^2) through *gauss as well, which the caller shares. */
+static double kerfc(double y,double *gauss) {
+    static const double A[5]={3.16112374387056560e00,1.13864154151050156e02,3.77485237685302021e02,
+                              3.20937758913846947e03,1.85777706184603153e-1};
+    static const double B[4]={2.36012909523441209e01,2.44024637934444173e02,1.28261652607737228e03,
+                              2.84423683343917062e03};
+    static const double C[9]={5.64188496988670089e-1,8.88314979438837594e00,6.61191906371416295e01,
+                              2.98635138197400131e02,8.81952221241769090e02,1.71204761263407058e03,
+                              2.05107837782607147e03,1.23033935479799725e03,2.15311535474403846e-8};
+    static const double D[8]={1.57449261107098347e01,1.17693950891312499e02,5.37181101862009858e02,
+                              1.62138957456669019e03,3.29079923573345963e03,4.36261909014324716e03,
+                              3.43936767414372164e03,1.23033935480374942e03};
+    static const double P[6]={3.05326634961232344e-1,3.60344899949804439e-1,1.25781726111229246e-1,
+                              1.60837851487422766e-2,6.58749161529837803e-4,1.63153871373020978e-2};
+    static const double Q[5]={2.56852019228982242e00,1.87295284992346725e00,5.27905102951428412e-1,
+                              6.05183413124413191e-2,2.33520497626869185e-3};
+    double g=kgauss(y);*gauss=g;
+    if(y<=.46875) {
+        double ysq=y*y,xnum=A[4]*ysq,xden=ysq;
+        for(int i=0;i<3;i++) {xnum=(xnum+A[i])*ysq;xden=(xden+B[i])*ysq;}
+        return 1.-y*(xnum+A[3])/(xden+B[3]);
+    }
+    if(y<=4.) {
+        double xnum=C[8]*y,xden=y;
+        for(int i=0;i<7;i++) {xnum=(xnum+C[i])*y;xden=(xden+D[i])*y;}
+        return g*(xnum+C[7])/(xden+D[7]);
+    }
+    if(g==0) return 0.;
+    double ysq=1./(y*y),xnum=P[5]*ysq,xden=ysq;
+    for(int i=0;i<4;i++) {xnum=(xnum+P[i])*ysq;xden=(xden+Q[i])*ysq;}
+    double result=ysq*(xnum+P[4])/(xden+Q[4]);
+    return g*(5.6418958354775628695e-1-result)/y;
+}
+
 /* For |c_k| <= A/k |c_(k-1)| + B/k |c_(k-2)|, the coefficient
  * tail after n is bounded by
  * ((A+B)|c_n| + B|c_(n-1)|)/(n+1-A-B).
@@ -39,7 +111,9 @@ static double coefficient_tail(double A,double B,double cn,double prior,Py_ssize
 
 static Py_ssize_t moments(double s,double d,double z,Py_ssize_t terms,
                     double *dif,double *other,double *out,double *rem,double *norm,int nmom,const double *poly) {
-    double plus=exp(-s*s),t=z+s,minus=plus*exp(-4*z*t);
+    /* exp(-x) is exactly 0 in double for x > 745.14: skipping the call for
+     * x > 800 gives the same bits. */
+    double plus=kgauss(fabs(s)),t=z+s,minus=4*z*t>800?0.:plus*kexp(-4*z*t);
     Py_ssize_t used=terms;
     double omitted=0;
     Sum seen={0};
@@ -55,6 +129,23 @@ static Py_ssize_t moments(double s,double d,double z,Py_ssize_t terms,
             if(terms==80 && n>=(poly==NULL?8:2)) {
                 double bound=coefficient_tail(2*(fabs(t)+z)*d,2*d*d,
                     fabs(dif[n])+fabs(other[n]),fabs(dif[n-1])+fabs(other[n-1]),n);
+                if(bound/(n+2)<=4*DBL_EPSILON*total(seen)) {used=n+1;omitted=bound;break;}
+            }
+        }
+    } else if (minus==0) {
+        /* The reflected Gaussian has underflowed (every point but the lowest
+         * energies): its coefficients are all exact zeros, contribute 0 to
+         * the tail bound and to the difference, so the loop below without
+         * them gives the same bits at half the work. */
+        dif[0]=plus;
+        add(&seen,fabs(plus));
+        for (Py_ssize_t n=1;n<terms;n++) {
+            double a=-2*s*d*dif[n-1];
+            if (n>1) a-=2*d*d*dif[n-2];
+            dif[n]=a/n;
+            add(&seen,fabs(dif[n]));
+            if(terms==80 && n>=(poly==NULL?8:2)) {
+                double bound=coefficient_tail(2*fabs(s)*d,2*d*d,fabs(dif[n]),fabs(dif[n-1]),n);
                 if(bound/(n+2)<=4*DBL_EPSILON*total(seen)) {used=n+1;omitted=bound;break;}
             }
         }
@@ -251,6 +342,52 @@ static PyObject *prepare_panels(PyObject *self,PyObject *source) {
     return Py_BuildValue("Nn",capsule,(Py_ssize_t)sizeof(PackedPanels)+(n?n:1)*(Py_ssize_t)sizeof(NumericPanel));
 }
 
+/* Node-shared Gaussian moments (the BROADR/SIGMA1 arrangement): the upper
+ * tails U_k(w) = int_w^inf t^k e^-t^2 dt, w >= 0, k <= 4, from
+ * U_0 = sqrt(pi)/2 erfc(w), U_1 = e^-w^2/2 and
+ * U_k = (k-1)/2 U_(k-2) + w^(k-1) e^-w^2/2 -- every term positive, so each
+ * U_k is good to a few ulps. A node is shared by the two panels that meet
+ * there, so it is computed once. */
+typedef struct {double s;double u[5];int valid;} NodeMoments;
+static const double U_ZERO[5]={0.886226925452758013649083741670572591,0.5,
+    0.443113462726379006824541870835286296,0.5,0.664670194089568510236812806252929444};
+
+static const double *node_moments(NodeMoments *cache,int slot,double s) {
+    NodeMoments *c=&cache[slot];
+    if(c->valid && c->s==s) return c->u;
+    double w=fabs(s);
+    if(isinf(w)) {for(int k=0;k<5;k++)c->u[k]=0;}
+    else {
+        double gauss,complement=kerfc(w,&gauss),g=gauss/2;
+        c->u[0]=0.886226925452758013649083741670572591*complement;
+        c->u[1]=g;
+        c->u[2]=.5*c->u[0]+w*g;
+        c->u[3]=c->u[1]+w*w*g;
+        c->u[4]=1.5*c->u[2]+w*w*w*g;
+    }
+    c->s=s;c->valid=1;
+    return c->u;
+}
+
+/* int_a^b t^k e^-t^2 dt for k < n, and a bound on the magnitude of the terms
+ * combined (for the rounding provision). L_k(s) = (-1)^k U_k(-s) for s <= 0. */
+static void node_integral(NodeMoments *cache,double a,double b,int n,double *I,double *mag,
+                          double *ga,double *gb) {
+    const double *ua=node_moments(cache,0,a);
+    double ub[5];
+    const double *pb=node_moments(cache,1,b);
+    for(int k=0;k<5;k++) ub[k]=pb[k];
+    *ga=2*ua[1];*gb=2*ub[1];               /* e^-a^2, e^-b^2 */
+    for(int k=0;k<n;k++) {
+        double sign=(k&1)?-1.:1.;
+        if(b<=0) {I[k]=sign*(ub[k]-ua[k]);mag[k]=ub[k]+ua[k];}
+        else if(a>=0) {I[k]=ua[k]-ub[k];mag[k]=ua[k]+ub[k];}
+        else {I[k]=sign*(U_ZERO[k]-ua[k])+(U_ZERO[k]-ub[k]);mag[k]=2*U_ZERO[k]+ua[k]+ub[k];}
+    }
+    /* The right node of this panel is the left node of the next. */
+    NodeMoments t=cache[0];cache[0]=cache[1];cache[1]=t;
+}
+
 static int store_component(PyObject *components,PyObject *owner,double value) {
     PyObject *number=PyFloat_FromDouble(value);if(number==NULL)return -1;
     int rc=PyDict_SetItem(components,owner,number);Py_DECREF(number);return rc;
@@ -276,6 +413,12 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
     if(work==NULL) return PyErr_NoMemory();
     components=PyDict_New(); if(components==NULL) goto done;
     PyObject *component_owner=NULL; double component_value=0;
+    /* Node-shared closed moments wherever the reflected Gaussian
+     * e^-(s+2z)^2 is exactly 0 in double over the whole window (s >= lower,
+     * so s+2z >= 2z+lower > 27.3 and e^-745 underflows): the series takes
+     * the same zero there. */
+    NodeMoments node_cache[2]={{0},{0}};
+    int node_path=hybrid && terms==80 && 2*z+lower>27.3;
     Sum values={0},errors={0},absolute={0};
     for(Py_ssize_t p=first;p<last;p++) {
         NumericPanel temporary;
@@ -308,6 +451,58 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
                 PyErr_SetString(PyExc_OverflowError,"analytic subpanel limit");goto done;
             }
             Py_ssize_t planned=(Py_ssize_t)subdivisions;reserved+=planned;
+            /* A panel at least 1/1000 of a Doppler width wide is integrated in
+             * one piece from its two nodes' moments: the difference of the
+             * node values loses at most eps/width of the panel's part, which
+             * the provision below charges. Narrower panels (an isolated
+             * spike, or a node-dense flank) keep the conditioned series. */
+            if(node_path && width>=1e-3) {
+                double a=left,b=right,c[5]={0},cs[5]={0},S[3],Sabs[3];int nc;
+                double iz=1/z;
+                if(inv) {
+                    double w=v0*sqrt(anchor)/x;
+                    c[0]=w;c[1]=w*iz;cs[0]=fabs(w);cs[1]=fabs(w)*iz;nc=2;
+                } else {
+                    if(lin) {
+                        double slope=v->slope;
+                        S[0]=v0+(v1-v0)*((energy-lo)/(hi-lo));S[1]=slope*2*x*h;S[2]=slope*h*h;
+                        Sabs[0]=fabs(v0)+fabs(v1-v0)*(1+fabs(energy-lo)/(hi-lo));
+                        Sabs[1]=fabs(S[1]);Sabs[2]=fabs(S[2]);
+                    } else {S[0]=v0;S[1]=0;S[2]=0;Sabs[0]=fabs(v0);Sabs[1]=0;Sabs[2]=0;}
+                    /* P(s) = sigma(s) (1+s/z)^2, sigma(s) = S0+S1 s+S2 s^2. */
+                    c[0]=S[0];
+                    c[1]=S[1]+2*S[0]*iz;
+                    c[2]=S[2]+2*S[1]*iz+S[0]*iz*iz;
+                    c[3]=2*S[2]*iz+S[1]*iz*iz;
+                    c[4]=S[2]*iz*iz;
+                    cs[0]=Sabs[0];
+                    cs[1]=Sabs[1]+2*Sabs[0]*iz;
+                    cs[2]=Sabs[2]+2*Sabs[1]*iz+Sabs[0]*iz*iz;
+                    cs[3]=2*Sabs[2]*iz+Sabs[1]*iz*iz;
+                    cs[4]=Sabs[2]*iz*iz;
+                    nc=lin?5:3;
+                }
+                double I[5],mag[5],ea,eb;
+                node_integral(node_cache,a,b,nc,I,mag,&ea,&eb);
+                Sum sum={0};double bound=0;
+                for(int k=0;k<nc;k++) {
+                    add(&sum,c[k]*I[k]);
+                    /* Coefficient rounding (64 eps of their scale) plus the
+                     * node values' and the difference's rounding. */
+                    bound+=64*DBL_EPSILON*cs[k]*mag[k]+16*DBL_EPSILON*fabs(c[k])*mag[k];
+                }
+                const double rootpi=1.772453850905516027298167483341145;
+                double value=total(sum)/rootpi;
+                /* Float64 position of the two nodes, |dP e^-s^2/ds| times it. */
+                double pa=0,pb=0;
+                for(int k=nc-1;k>=0;k--) {pa=pa*fabs(a)+cs[k];pb=isinf(b)?0:pb*fabs(b)+cs[k];}
+                double position=64*DBL_EPSILON*((1+fabs(a))*(1+fabs(a))*pa*ea+(isinf(b)?0:(1+fabs(b))*(1+fabs(b))*pb*eb));
+                double err=(bound+position)/rootpi;
+                if(!isfinite(value) || !isfinite(err)) {PyErr_SetString(PyExc_ArithmeticError,"panel overflow");goto done;}
+                add(&values,value);add(&errors,err);add(&absolute,fabs(value));add(&contribution,value);
+                count++;include=1;
+                goto panel_done;
+            }
             Py_ssize_t nsub=hybrid && terms==80 && width>=1?1:planned;
             for(Py_ssize_t i=0;i<nsub;i++) {
                 double d=width/nsub;
@@ -364,6 +559,7 @@ static PyObject *integrate(PyObject *self,PyObject *args) {
                 count++;include=1;
             }
         }
+        panel_done:
         if(include) {
             /* Preserve the original ordered additions, including revisited
              * labels, but materialise one Python float per owner run. */
@@ -506,12 +702,21 @@ done:
     return rows;
 }
 
+static PyObject *special_probe(PyObject *self,PyObject *args) {
+    double y;
+    if(!PyArg_ParseTuple(args,"d",&y)) return NULL;
+    if(!(y>=0)) {PyErr_SetString(PyExc_ValueError,"y >= 0 required");return NULL;}
+    double gauss,complement=kerfc(y,&gauss);
+    return Py_BuildValue("ddd",kexp(-y),complement,gauss);
+}
+
 static PyMethodDef methods[]={
     {"prepare_panels",prepare_panels,METH_O,"Prepare immutable numeric source panels."},
     {"evaluate_block",evaluate_block,METH_VARARGS,"Evaluate bounded point blocks with original budgets."},
     {"integrate",integrate,METH_VARARGS,"Integrate validated analytic source panels."},
     {"moments",moment_probe,METH_VARARGS,"Private recurrence and remainder diagnostic."},
     {"closed_moments",closed_probe,METH_VARARGS,"Private closed-moment conditioning diagnostic."},
+    {"special",special_probe,METH_VARARGS,"Private kexp(-y), erfc(y), exp(-y*y) diagnostic."},
     {NULL,NULL,0,NULL}};
 static struct PyModuleDef module={PyModuleDef_HEAD_INIT,"_doppler_native",NULL,-1,methods};
 PyMODINIT_FUNC PyInit__doppler_native(void) {
