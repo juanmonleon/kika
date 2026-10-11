@@ -1,8 +1,10 @@
 """Checks of ENDF sections as they are written in the file (layer 1).
 
-:func:`check_covariances` reports what is wrong with the MF31/MF33/MF34 of a
-tape -- structure, values, positive semi-definiteness -- without changing
-anything; :func:`check_covariance_library` does it for every tape of a directory. Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
+:func:`check_covariances` reports what is wrong with the covariance files of a
+tape (MF31, MF32, MF33, MF34, MF35 and MF40) -- structure, values, positive
+semi-definiteness -- without changing anything; :func:`check_covariance_library`
+does it for every tape of a directory. Plan: kika-workspace
+``docs/library/cov_checks_roadmap.md``.
 """
 from .covariances import check_covariances
 from .descriptions import CHECKS, CheckDescription

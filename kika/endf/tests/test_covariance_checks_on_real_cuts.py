@@ -67,7 +67,7 @@ def test_w186_mf34_rho_49_a_negative_variance_and_an_indefinite_block():
     assert all((f.location.mt, f.location.l, f.location.l1) == (51, 1, 1)
                for f in report.at_least("warn"))
     rho = report.by_check("correlation_out_of_bounds")[0].evidence
-    assert rho["max_abs_rho"] == pytest.approx(49.05, abs=0.01) and rho["n_above"] == 224
+    assert rho["max_abs_rho"] == pytest.approx(49.05, abs=0.01) and rho["n_above"] == 112  # pairs, each counted once
     assert report.by_check("negative_variance")[0].evidence["n"] == 10
     psd = report.by_check("not_positive_semidefinite")[0].evidence
     assert psd["ratio"] == pytest.approx(0.414, abs=1e-3)
