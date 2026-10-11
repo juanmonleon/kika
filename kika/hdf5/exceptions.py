@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 __all__ = ["HDF5Error", "HDF5FormatError", "HDF5UnsupportedError",
-           "NuclideNotFoundError", "MissingNJOYPieceError"]
+           "NuclideNotFoundError"]
 
 
 class HDF5Error(Exception):
@@ -44,15 +44,3 @@ class HDF5UnsupportedError(HDF5Error, NotImplementedError):
 
 class NuclideNotFoundError(HDF5Error, LookupError):
     """``cross_sections.xml`` names no file for this exact material."""
-
-
-class MissingNJOYPieceError(HDF5Error, RuntimeError):
-    """A piece the writer takes from NJOY (D7) could not be produced.
-
-    ``pieces`` names them. Writing without them is a request
-    (``omit=("urr", ...)``), never a silent fallback.
-    """
-
-    def __init__(self, message: str, pieces=()):
-        self.pieces = tuple(pieces)
-        super().__init__(message)

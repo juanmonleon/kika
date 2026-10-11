@@ -27,6 +27,9 @@ include = [
     {path = "kika/processing/resonances/_rm_kernel.h", format = "sdist"},
     {path = "kika/processing/resonances/_rm_native*.pyd", format = "wheel"},
     {path = "kika/processing/resonances/_rm_native*.so", format = "wheel"},
+    {path = "kika/processing/_thermal_native.c", format = "sdist"},
+    {path = "kika/processing/_thermal_native*.pyd", format = "wheel"},
+    {path = "kika/processing/_thermal_native*.so", format = "wheel"},
 ]
 exclude = [
     "kika/processing/doppler/_doppler_native.c",
@@ -36,6 +39,7 @@ exclude = [
     "kika/**/*.ipynb",
     "kika/processing/resonances/_rm_native.c",
     "kika/processing/resonances/_rm_kernel.h",
+    "kika/processing/_thermal_native.c",
     "kika/UQ/output_directory/**",
     "kika/**/*.sdf",
     "kika/ace/writers/test_writing.02c",

@@ -28,7 +28,9 @@ def _run(compiler=None):
         'kika.processing.resonances._rm_native',
         ['kika/processing/resonances/_rm_native.c'],depends=['kika/processing/resonances/_rm_kernel.h']), Extension(
         'kika.processing.doppler._doppler_native',
-        ['kika/processing/doppler/_doppler_native.c'])]})
+        ['kika/processing/doppler/_doppler_native.c']), Extension(
+        'kika.processing._thermal_native',
+        ['kika/processing/_thermal_native.c'])]})
     command=StrictBuild(distribution)
     command.inplace=True
     if compiler:command.compiler=compiler

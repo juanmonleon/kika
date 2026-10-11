@@ -1,67 +1,36 @@
 """A thermal scattering evaluation → the processed suite the thermal encoder writes (H9b, H9c).
 
 As OpenMC's ``ThermalScattering.from_njoy`` builds its official files
-(``thermal.py:966-1038``, ``njoy.py:595-760``):
+(``thermal.py:966-1038``, ``njoy.py:595-760``), without NJOY:
 
-- the **inelastic** part comes from NJOY (roadmap D7): RECONR and BROADR on the
-  principal nuclide's evaluation, THERMR twice (free gas, MT 221; bound, MT 222)
-  and ACER per temperature (``iwt=2``: continuous outgoing energies with
-  equiprobable cosines), read with :mod:`kika.hdf5.ace_thermal`. kika has no
-  THERMR of its own yet (``openmc_hdf5_roadmap.md`` §2.1);
-- the **elastic** part is ACER's for a coherent elastic, and the evaluation's own
-  for an incoherent or mixed one (``use_endf_data``): σ_b and W'(T) of MF7/MT2
-  (:class:`IncoherentElasticXS`), with the coherent half of a mixed one from
-  the evaluation's Bragg edges too, at the temperatures the evaluation states.
+- the **inelastic** part by kika's THERMR + ACER
+  (:func:`kika.processing.thermal.inelasticTables`): continuous outgoing
+  energies with 16 equiprobable cosines (ACER ``iwt=2``), on THERMR's incident
+  grid, at each temperature the evaluation tabulates;
+- the **elastic** part from the evaluation (``use_endf_data``): σ_b and W'(T)
+  of MF7/MT2 for an incoherent one (:class:`IncoherentElasticXS`), the Bragg
+  edges and the cumulative structure factors at the temperature for a
+  coherent one, both for a mixed one.
 
 The table's name (``c_H_in_H2O``) keys OpenMC's registry
-(:mod:`kika.hdf5.thermal_names`) for the ACE name, the ZAIDs and ``nmix`` ACER
-is given.
+(:mod:`kika.hdf5.thermal_names`) for the ZAIDs and ``nmix``.
 """
 from __future__ import annotations
 
-import shutil
-import tempfile
-from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List
 
 import numpy as np
 
-from .exceptions import HDF5FormatError, MissingNJOYPieceError
+from .exceptions import HDF5FormatError
 from .names import EVAL_LABEL, heatedLabel, temperatureName
 
-__all__ = ["processThermal", "thermalDeck"]
+__all__ = ["processThermal"]
 
 
 def _m():
     from kika.nuclear_data import model
 
     return model
-
-
-def thermalDeck(*, mat: int, matThermal: int, temperatures: Sequence[float], aceName: str,
-                zaids: Sequence[int], nmix: int, elastic: int, elasticType: int, natom: int,
-                energyMax: float, library: str = "kika", nbin: int = 16, iwt: int = 2,
-                error: float = 0.001) -> str:
-    """The NJOY input of ``make_ace_thermal``, card for card."""
-    temps = " ".join(str(t) for t in temperatures)
-    mtElastic = 223 if elastic else 0
-    lines = ["reconr", "20 22", f"'{library} PENDF'/", f"{mat} 2/",
-             f"{error} 0. {10 * error} 5.0e-8/", "'kika'/", "'Processed by NJOY for kika'/", "0/",
-             "broadr", "20 22 23", f"{mat} {len(temperatures)} 0 0 0. /", f"{error}/", temps, "0/",
-             "thermr", "0 23 24", f"0 {mat} {nbin} {len(temperatures)} 1 0 0 1 221 1/", temps,
-             f"{error} {energyMax}",
-             "thermr", "21 24 25",
-             f"{matThermal} {mat} {nbin} {len(temperatures)} 2 {elastic} 0 {natom} 222 1/", temps,
-             f"{error} {energyMax}"]
-    for i, temperature in enumerate(temperatures):
-        nace = 26 + 2 * i
-        lines += ["acer", f"20 25 0 {nace} {nace + 1}", f"2 0 1 .{i + 1:02d}/",
-                  f"'{library}: thermal scattering processed by NJOY'/",
-                  f"{mat} {temperature} '{aceName}' {len(zaids)} /",
-                  " ".join(str(z) for z in zaids) + " /",
-                  f"222 64 {mtElastic} {elasticType} {nmix} {energyMax} {iwt}/"]
-    lines.append("stop")
-    return "\n".join(lines) + "\n"
 
 
 def _law(suite, kind):
@@ -76,30 +45,6 @@ def _law(suite, kind):
     return None
 
 
-def _endfElastic(suite, T: float):
-    """The evaluation's incoherent (or mixed) elastic at ``T`` as processed forms, or ``None``."""
-    m = _m()
-    coherent = _law(suite, m.CoherentElastic)
-    incoherent = _law(suite, m.IncoherentElastic)
-    if incoherent is None:
-        return None
-    temps = incoherent.temperatures
-    if not np.any(np.isclose(temps, T, rtol=0, atol=0.05)):
-        return None
-    W = incoherent.debyeWaller(float(T))
-    sigma = float(incoherent.boundAtomCrossSection.convertedTo("b").value)
-    inc = (m.IncoherentElasticXS(boundCrossSection=sigma, debyeWaller=W), m.IncoherentElasticMC(debyeWaller=W))
-    if coherent is None:
-        return inc
-    match = [t for t in coherent.temperatures if abs(t - T) < 0.05]
-    if not match:
-        return None
-    coh = m.CoherentElasticXS(braggEdges=coherent.braggEdges(),
-                              structureFactors=coherent.cumulativeS(match[0]))
-    return (m.SumOfFunctions(functions=[coh, inc[0]]),
-            m.MixedElasticMC(coherent=m.CoherentElasticMC(), incoherent=inc[1]))
-
-
 def _evaluationTemperatures(suite) -> List[float]:
     m = _m()
     law = _law(suite, m.IncoherentInelastic)
@@ -112,18 +57,25 @@ def _evaluationTemperatures(suite) -> List[float]:
     return [float(t) * conversion_factor(grid.unit or "K", "K") for t in grid.values]
 
 
-def processThermal(thermal, neutron, *, name: str, temperatures=None, njoy=None,
-                   useEndfData: bool = True, report=None, workdir=None, keep: bool = False):
-    """The processed thermal suite of the evaluation at ``thermal`` (path), its
-    principal nuclide's evaluation at ``neutron`` (path).
+def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
+                   useEndfData: bool = True, report=None, options=None):
+    """The processed thermal suite of the evaluation at ``thermal`` (path).
 
     ``name`` is the OpenMC table name (``c_H_in_H2O``); ``temperatures`` in
-    kelvin, by default every temperature the evaluation tabulates.
+    kelvin, by default every temperature the evaluation tabulates. The
+    incoherent inelastic tables are kika's (:func:`kika.processing.thermal.inelasticTables`,
+    THERMR + ACER, roadmap H9c); the elastic comes from the evaluation, as
+    OpenMC's ``from_njoy`` takes it with ``use_endf_data``: incoherent from
+    σ_b and the Debye-Waller integral, coherent from the Bragg edges and the
+    cumulative structure factors at the temperature. ``neutron`` (the
+    principal nuclide's tape) is no longer read; it is accepted so a caller of
+    the NJOY-era signature keeps working.
     """
     m = _m()
     import kika
-    from .ace_thermal import nuclidesFromPairs, readAceTable, thermalForms
-    from .njoy_run import runCommand
+    from kika.processing.thermal import ThermalInelasticOptions, inelasticTables
+    from .ace_thermal import nuclidesFromPairs
+    from .processing import aceKT
     from .thermal_names import THERMAL_DATA
 
     report = report if report is not None else m.ConversionReport()
@@ -132,81 +84,141 @@ def processThermal(thermal, neutron, *, name: str, temperatures=None, njoy=None,
                               f"{sorted(THERMAL_DATA)[:5]}...")
     entry = THERMAL_DATA[name]
     tsl = kika.read(str(thermal), covariances=False)
-    matThermal, mat = _matOf(thermal), _matOf(neutron)
     inelastic = _law(tsl, m.IncoherentInelastic)
-    principal = inelastic.principal
-    energyMax = float(principal.e_max.convertedTo("eV").value)
-    natom = int(principal.numberPerMolecule)
-    coherent, incoherent = _law(tsl, m.CoherentElastic), _law(tsl, m.IncoherentElastic)
-    elastic = int(coherent is not None or incoherent is not None)
-    lhtr = 3 if (coherent and incoherent) else (1 if coherent else (2 if incoherent else 0))
-    elasticType = max(lhtr - 1, 0)
+    if inelastic is None:
+        raise HDF5FormatError("the thermal evaluation has no incoherent inelastic law")
     temps = [float(t) for t in (temperatures or _evaluationTemperatures(tsl))]
-    deck = thermalDeck(mat=mat, matThermal=matThermal, temperatures=temps, aceName=entry.name,
-                       zaids=entry.zaids, nmix=entry.nmix, elastic=elastic, elasticType=elasticType,
-                       natom=natom, energyMax=energyMax)
+    awr = _principalAwr(tsl, inelastic)
+    # The table's AWR is ACER's: the principal nuclide's, read from its neutron
+    # tape (graphite 11.89365, Zr 89.1324), where the scattering law's B(3)
+    # differs (11.898, 90.436). THERMR computes with B(3).
+    headerAwr = _tapeAwr(neutron) if neutron is not None else awr
+    suite = m.ReactionSuite(evaluation=tsl.evaluation or "", projectile="n", target=name,
+                            interaction="thermalNeutronScatteringLaw")
+    suite.PoPs.add(m.Particle(id="n"))
+    suite.styles.add(m.Evaluated(label=EVAL_LABEL))
+    reactions = {}
+    energyMax = None
+    for T in temps:
+        kT = aceKT(T)
+        label = heatedLabel(temperatureName(kT))
+        suite.styles.add(m.Heated(label=label, derivedFrom=EVAL_LABEL,
+                                  temperature=m.PhysicalQuantity(value=kT, unit="eV/k")))
+        inXs, inDist, energyMaxT = inelasticTables(inelastic, T, nmix=entry.nmix, awr=awr,
+                                                   options=options or ThermalInelasticOptions())
+        elXs, elDist = _evaluatedElastic(tsl, T, report, entry.nmix)
+        for kind, mt, xs, dist in (("elastic", 2, elXs, elDist), ("inelastic", 4, inXs, inDist)):
+            if xs is None:
+                continue
+            reaction = reactions.get(kind)
+            if reaction is None:
+                product = m.Product(pid="n", label="n", distribution=m.Distribution())
+                channel = m.OutputChannel(process=f"thermalNeutronScatteringLaw {kind}")
+                channel.products.products.append(product)
+                reaction = reactions[kind] = m.Reaction(id=m.ReactionId(label=kind, ENDF_MT=mt),
+                                                        outputChannel=channel)
+            reaction.crossSection[label] = xs
+            reaction.outputChannel.products[0].distribution[label] = dist
+        if energyMax is None:
+            energyMax = energyMaxT
+    for kind in ("elastic", "inelastic"):
+        if kind in reactions:
+            suite.reactions.append(reactions[kind])
+    suite.provenance = m.Hdf5Provenance(attributes={
+        # The ACE header's AWR, written with six decimals (ACER's f12.6).
+        "atomic_weight_ratio": round(float(headerAwr), 6), "energy_max": float(energyMax),
+        "nuclides": nuclidesFromPairs([(z, 0.0) for z in entry.zaids])})
+    report.warn("thermal inelastic by kika (THERMR's calcem and ACER's iwt=2, roadmap H9c); "
+                "elastic from the evaluation (use_endf_data)")
+    suite.report = report
+    return suite
 
-    base = Path(workdir) if workdir is not None else Path(tempfile.mkdtemp(prefix="kika_thermr_"))
-    try:
-        base.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(neutron, base / "tape20")
-        shutil.copyfile(thermal, base / "tape21")
-        (base / "input").write_text(deck)
-        if isinstance(njoy, (list, tuple)):
-            result = runCommand(njoy, base, deck)
-        else:
-            from kika.njoy.run_njoy import _run_njoy_deck
-            from kika.processing.njoy_pendf_cache import find_njoy_executable
 
-            result = _run_njoy_deck(find_njoy_executable(njoy, why="thermal inelastic (D7)"), base, deck)
-        (base / "output.txt").write_bytes(result.stdout or b"")
-        suite = m.ReactionSuite(evaluation=tsl.evaluation or "", projectile="n", target=name,
-                                interaction="thermalNeutronScatteringLaw")
-        suite.PoPs.add(m.Particle(id="n"))
-        suite.styles.add(m.Evaluated(label=EVAL_LABEL))
-        reactions = {}
-        awr = nuclides = maxE = None
-        for i, T in enumerate(temps):
-            acePath = base / f"tape{26 + 2 * i}"
-            if not acePath.is_file():
-                raise MissingNJOYPieceError(f"ACER wrote no table at {T} K; see {base / 'output.txt'}",
-                                            ("thermal inelastic",))
-            ace = readAceTable(acePath)
-            inXs, inDist, elXs, elDist, energyMaxT = thermalForms(ace)
-            kT = ace.kT * 1.0e6
-            label = heatedLabel(temperatureName(kT))
-            suite.styles.add(m.Heated(label=label, derivedFrom=EVAL_LABEL,
-                                      temperature=m.PhysicalQuantity(value=kT, unit="eV/k")))
-            if useEndfData:
-                exact = _endfElastic(tsl, T)
-                if exact is not None:
-                    elXs, elDist = exact
-            for kind, mt, xs, dist in (("elastic", 2, elXs, elDist), ("inelastic", 4, inXs, inDist)):
-                if xs is None:
-                    continue
-                reaction = reactions.get(kind)
-                if reaction is None:
-                    product = m.Product(pid="n", label="n", distribution=m.Distribution())
-                    channel = m.OutputChannel(process=f"thermalNeutronScatteringLaw {kind}")
-                    channel.products.products.append(product)
-                    reaction = reactions[kind] = m.Reaction(id=m.ReactionId(label=kind, ENDF_MT=mt),
-                                                            outputChannel=channel)
-                reaction.crossSection[label] = xs
-                reaction.outputChannel.products[0].distribution[label] = dist
-            if awr is None:
-                awr, nuclides, maxE = ace.awr, nuclidesFromPairs(ace.pairs), energyMaxT
-        for kind in ("elastic", "inelastic"):
-            if kind in reactions:
-                suite.reactions.append(reactions[kind])
-        suite.provenance = m.Hdf5Provenance(attributes={
-            "atomic_weight_ratio": float(awr), "energy_max": float(maxE), "nuclides": nuclides})
-        report.warn(f"thermal inelastic from NJOY THERMR + ACER (roadmap D7)"
-                    + ("; incoherent elastic from the evaluation (use_endf_data)" if useEndfData else ""))
-        suite.report = report
-        return suite
-    finally:
-        if not keep and workdir is None:
-            shutil.rmtree(base, ignore_errors=True)
+def _tapeAwr(path) -> float:
+    """MF1/MT451's AWR (the HEAD record's C2) of an ENDF tape."""
+    import re
+
+    with open(path, errors="replace") as handle:
+        for line in handle:
+            if len(line) >= 75 and line[70:72].strip() == "1" and line[72:75].strip() == "451":
+                field = line[11:22].strip()
+                match = re.fullmatch(r"([+-]?[\d.]+)([+-]\d+)", field)
+                return float(f"{match.group(1)}e{match.group(2)}") if match else float(field)
+    raise HDF5FormatError(f"no MF1/MT451 in {path}")
+
+
+def _principalAwr(tsl, law) -> float:
+    """The principal atom's mass ratio as the tape states it (B(3)), else its mass."""
+    from kika._constants import NEUTRON_MASS_AMU
+
+    fields = getattr(getattr(tsl, "provenance", None), "headerFields", None) or {}
+    for key in ("mf7", "MF7"):
+        block = fields.get(key)
+        if isinstance(block, dict) and block.get("b"):
+            return float(block["b"][2])
+    return float(law.principal.mass.convertedTo("amu").value) / NEUTRON_MASS_AMU
+
+
+def inelasticEmax(tsl) -> float:
+    m = _m()
+    return float(_law(tsl, m.IncoherentInelastic).principal.e_max.convertedTo("eV").value)
+
+
+def _acerBraggEdges(edges, cumulative, emax, nmix=1):
+    """The Bragg edges ACER keeps (``aceth.f90:192-214``): walking up the edges, one
+    is written when the cumulative E·σ grows by more than ``(c_last + 1)/1e6``
+    (eV·b), and the walk stops at ``emax``. An edge of zero weight never passes;
+    graphite's edges above ~1.1 eV add less than the threshold and are dropped."""
+    from kika.processing._thermal_native import endf11, sigfig
+
+    edges = np.asarray(edges, dtype=float)
+    cumulative = np.asarray(cumulative, dtype=float)
+    keptE, keptS = [], []
+    last = 0.0
+    for i, (e, c) in enumerate(zip(edges, cumulative)):
+        following = edges[i + 1] if i + 1 < len(edges) else np.inf
+        if following > emax or abs(following - emax) <= 1e-5:
+            break
+        # ACER reads THERMR's coherent σ at the point just above the edge,
+        # sigfig(E, 7, +1), as the tape stores it (NJOY's a11), and takes E·σ.
+        shaded = sigfig(e, 7, +1)
+        sigma = np.array([sigfig(c / shaded, 7, 0)])
+        endf11(sigma)
+        c = shaded * float(sigma[0])
+        if c - last > (last + 1) / 1.0e6:
+            keptE.append(shaded)
+            keptS.append(c)
+            last = c
+    # ACE stores both in MeV to 12 figures, the factors divided by nmix
+    # (aceth.f90:729-730); OpenMC multiplies by 1e6 on read.
+    keptE = [float(f"{e * 1e-6:.11e}") * 1e6 for e in keptE]
+    keptS = [float(f"{c * 1e-6 / nmix:.11e}") * 1e6 for c in keptS]
+    return np.asarray(keptE), np.asarray(keptS)
+
+
+def _evaluatedElastic(tsl, T: float, report, nmix: int = 1):
+    """The evaluation's elastic at ``T`` as processed forms: ``(xs, distribution)`` or Nones."""
+    m = _m()
+    coherent = _law(tsl, m.CoherentElastic)
+    incoherent = _law(tsl, m.IncoherentElastic)
+    inc = coh = None
+    if incoherent is not None:
+        W = incoherent.debyeWaller(float(T))
+        sigma = float(incoherent.boundAtomCrossSection.convertedTo("b").value)
+        inc = (m.IncoherentElasticXS(boundCrossSection=sigma, debyeWaller=W),
+               m.IncoherentElasticMC(debyeWaller=W))
+    if coherent is not None:
+        match = [t for t in coherent.temperatures if abs(t - T) < 0.05]
+        if not match:
+            raise HDF5FormatError(f"the coherent elastic is not tabulated at {T} K")
+        edges, factors = _acerBraggEdges(coherent.braggEdges(), coherent.cumulativeS(match[0]),
+                                         float(inelasticEmax(tsl)), nmix)
+        coh = (m.CoherentElasticXS(braggEdges=edges, structureFactors=factors),
+               m.CoherentElasticMC())
+    if coh and inc:
+        return (m.SumOfFunctions(functions=[coh[0], inc[0]]),
+                m.MixedElasticMC(coherent=coh[1], incoherent=inc[1]))
+    return coh or inc or (None, None)
 
 
 def _matOf(path) -> int:

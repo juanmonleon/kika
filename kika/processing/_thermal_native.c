@@ -1,0 +1,567 @@
+/* Thermal incoherent inelastic scattering, NJOY THERMR's calcem/sigl/sig/terpq
+ * (thermr.f90, NJOY2016) ported line for line, for kika.processing.thermal.
+ *
+ * One call computes one incident energy: the adaptive outgoing-energy grid,
+ * sigma(E->E') and the nbin equiprobable cosines at each E', and the
+ * integrated cross section, exactly as calcem writes them before ACER. The
+ * control flow keeps THERMR's labels as gotos so it can be read beside the
+ * Fortran. Float64 only, strict IEEE: no fast-math.
+ */
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <float.h>
+#include <math.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#ifdef __FAST_MATH__
+#error "the thermal kernel requires strict floating-point arithmetic"
+#endif
+
+#define SABFLG (-225.0)
+#define IMAX 20
+#define NLMAX 65
+
+typedef struct {
+    double tev, tevz, az, sb, sb2, az2, teff, teff2, cliq;
+    int lat, lasym;
+    Py_ssize_t na, nb;
+    const double *alpha, *beta, *sab;   /* sab[ia + na*ib], 0-based */
+} Ctx;
+
+#define SAB(c, ia, ib) ((c)->sab[(ia) + (c)->na * (ib)])
+
+/* util.f90 sigfig */
+static double sigfig(double x, int ndig, int idig) {
+    double xx = 0.0;
+    if (x != 0.0) {
+        double aa = log10(fabs(x));
+        int ipwr = (int)aa;
+        if (aa < 0) ipwr = ipwr - 1;
+        ipwr = ndig - 1 - ipwr;
+        double v = x * pow(10.0, ipwr) + pow(10.0, ndig - 11);
+        long long ii = (long long)(v >= 0 ? floor(v + 0.5) : -floor(-v + 0.5));
+        long long lim = 1;
+        for (int k = 0; k < ndig; k++) lim *= 10;
+        if (ii >= lim) { ii = ii / 10; ipwr = ipwr - 1; }
+        ii = ii + idig;
+        xx = (double)ii * pow(10.0, -ipwr);
+    }
+    return xx * 1.0000000000001;
+}
+
+/* endf.f90 terp1, laws 2 (lin-lin) and 3 (y linear in ln x) */
+static double terp1(double x1, double y1, double x2, double y2, double x, int law) {
+    if (x2 == x1) return y1;
+    if (law == 3) {
+        if (x1 <= 0 || x2 <= 0 || x <= 0) return y1;
+        return y1 + (y2 - y1) * log(x / x1) / log(x2 / x1);
+    }
+    return y1 + (y2 - y1) * (x - x1) / (x2 - x1);
+}
+
+static double terpq(double x1, double y1, double x2, double y2,
+                    double x3, double y3, double x) {
+    double y;
+    if (x < x1) {
+        if (y1 > y2) y = y1;
+        else y = terp1(x1, y1, x2, y2, x, 3);
+    } else if (x > x3) {
+        if (y3 > y2) y = y3;
+        else y = terp1(x2, y2, x3, y3, x, 2);
+    } else if (fabs(y1 - y2) > 2.0 || fabs(y2 - y3) > 2.0) {
+        if (x < x2) y = terp1(x1, y1, x2, y2, x, 2);
+        else y = terp1(x2, y2, x3, y3, x, 2);
+    } else {
+        double b = (y2 - y1) * (x3 - x1) / ((x2 - x1) * (x3 - x2));
+        b = b - (y3 - y1) * (x2 - x1) / ((x3 - x1) * (x3 - x2));
+        double c = (y3 - y1) / ((x3 - x1) * (x3 - x2));
+        c = c - (y2 - y1) / ((x2 - x1) * (x3 - x2));
+        y = y1 + b * (x - x1) + c * (x - x1) * (x - x1);
+    }
+    if (y < SABFLG) y = SABFLG;
+    return y;
+}
+
+/* thermr.f90 sig, iinc=2 (tabulated S(alpha,beta)) */
+static double sig(const Ctx *c, double e, double ep, double u) {
+    const double sigmin = 1e-10, amin = 1e-6, test1 = 0.2, test2 = 30.0;
+    double tev = c->tev, rtev = 1.0 / tev;
+    double bb = (ep - e) * rtev;
+    double a = (e + ep - 2 * u * sqrt(e * ep)) / (c->az * tev);
+    if (a < amin) a = amin;
+    double sigc = sqrt(ep / e) * rtev / 2;
+    double b = fabs(bb);
+    double cc = sqrt(4 * M_PI);
+    double s, s1, s2, s3, bbb, arg, out;
+    Py_ssize_t na = c->na, nb = c->nb, ia = 0, ib = 0, i;
+    if (c->lat == 1) { b = b * tev / c->tevz; a = a * tev / c->tevz; }
+    if (a > c->alpha[na - 1]) goto l170;
+    if (c->lasym == 1) {
+        double bbm = bb;
+        if (c->lat == 1) bbm = bb * tev / c->tevz;
+        if (bbm > c->beta[nb - 1]) goto l170;
+        if (bbm < c->beta[0]) goto l170;
+    } else {
+        if (b > c->beta[nb - 1]) goto l170;
+    }
+    bbb = b;
+    if (c->lasym == 1 && bb < 0) bbb = -b;
+    for (i = 0; i < nb - 1; i++) { ib = i; if (bbb < c->beta[i + 1]) break; }
+    for (i = 0; i < na - 1; i++) { ia = i; if (a < c->alpha[i + 1]) break; }
+    if (c->cliq == 0.0 || a >= c->alpha[0]) goto l150;
+    if (c->lasym == 1) goto l150;
+    if (b > test1) goto l150;
+    s = SAB(c, 0, 0) + log(c->alpha[0] / a) / 2 - c->cliq * b * b / a;
+    if (s < SABFLG) s = SABFLG;
+    goto l160;
+l150:
+    if (a * c->az < test2 && b < test2) goto l155;
+    if (SAB(c, ia, ib) <= SABFLG) goto l170;
+    if (SAB(c, ia + 1, ib) <= SABFLG) goto l170;
+    if (SAB(c, ia, ib + 1) <= SABFLG) goto l170;
+    if (SAB(c, ia + 1, ib + 1) <= SABFLG) goto l170;
+l155:
+    if (ia + 1 == na - 1) ia = ia - 1;
+    if (ib + 1 == nb - 1) ib = ib - 1;
+    s1 = terpq(c->alpha[ia], SAB(c, ia, ib), c->alpha[ia + 1], SAB(c, ia + 1, ib),
+               c->alpha[ia + 2], SAB(c, ia + 2, ib), a);
+    s2 = terpq(c->alpha[ia], SAB(c, ia, ib + 1), c->alpha[ia + 1], SAB(c, ia + 1, ib + 1),
+               c->alpha[ia + 2], SAB(c, ia + 2, ib + 1), a);
+    s3 = terpq(c->alpha[ia], SAB(c, ia, ib + 2), c->alpha[ia + 1], SAB(c, ia + 1, ib + 2),
+               c->alpha[ia + 2], SAB(c, ia + 2, ib + 2), a);
+    s = terpq(c->beta[ib], s1, c->beta[ib + 1], s2, c->beta[ib + 2], s3, bbb);
+l160:
+    out = 0;
+    if (s - bb / 2 > SABFLG) out = exp(s - bb / 2);
+    out = sigc * c->sb * out;
+    if (out < sigmin) out = 0;
+    return out;
+l170:
+    if (c->lat == 1) { b = b * c->tevz * rtev; a = a * c->tevz * rtev; }
+    s = 0;
+    arg = (a - b) * (a - b) * tev / (4 * a * c->teff) + (b + bb) / 2;
+    if (-arg > SABFLG) s = exp(-arg) / (cc * sqrt(a * c->teff * rtev));
+    out = sigc * c->sb * s;
+    if (c->sb2 > 0) {
+        a = a * c->az / c->az2;
+        arg = (a - b) * (a - b) * tev / (4 * a * c->teff2) + (b + bb) / 2;
+        s2 = 0;
+        if (-arg > SABFLG) s2 = exp(-arg) / (cc * sqrt(a * c->teff2 * rtev));
+        out = out + sigc * c->sb2 * s2;
+    }
+    if (out < sigmin) out = 0;
+    return out;
+}
+
+/* thermr.f90 sigl with nlin < 0: s[0] = sigma(E->E'), s[1..nl-1] equiprobable cosines.
+ * Arrays are 1-based as in the Fortran (index 0 unused). */
+static void sigl(const Ctx *c, double e, double ep, int nl, double tolin, double *s) {
+    const double xtol = 0.00001, ytol = 0.001, half = 0.5, third = 0.333333333;
+    const double sigmin = 1e-32, eps = 1e-3, shade = 0.99999999;
+    double x[IMAX + 1], y[IMAX + 1];
+    double tol = half * tolin, b = fabs((ep - c->tev * 0 - e) / c->tev);
+    double seep = 0, sum, xl, yl, ymax, xm, ym, yt, test, test2;
+    int i, j, nbin, il;
+    double rnbin, fract, rfract, gral, add, xil, xn = 0, f, rf, disc, yn, xbar;
+    b = fabs((ep - e) / c->tev);
+    if (c->lat == 1) b = b * c->tev / c->tevz;
+    double s1bb = sqrt(1 + b * b);
+    if (ep != 0) seep = 1 / sqrt(e * ep);
+
+    /* adaptive calculation of cross section */
+    i = 3;
+    sum = 0;
+    x[3] = -1;
+    xl = x[3];
+    y[3] = sig(c, e, ep, x[3]);
+    yl = y[3];
+    if (ep == 0) x[2] = 0;
+    if (ep != 0) x[2] = half * (e + ep - (s1bb - 1) * c->az * c->tev) * seep;
+    if (fabs(x[2]) > 1 - eps) x[2] = 0.99;
+    x[2] = sigfig(x[2], 8, 0);
+    y[2] = sig(c, e, ep, x[2]);
+    x[1] = +1;
+    y[1] = sig(c, e, ep, x[1]);
+    ymax = y[2];
+    if (y[1] > ymax) ymax = y[1];
+    if (y[3] > ymax) ymax = y[3];
+    if (ymax < eps) ymax = eps;
+l110:
+    if (i == IMAX) goto l120;
+    xm = half * (x[i - 1] + x[i]);
+    xm = sigfig(xm, 8, 0);
+    ym = half * (y[i - 1] + y[i]);
+    yt = sig(c, e, ep, xm);
+    test = tol * fabs(yt) + tol * ymax / 50;
+    test2 = ym + ymax / 100;
+    if (fabs(yt - ym) <= test && fabs(y[i - 1] - y[i]) <= test2 && (x[i - 1] - x[i]) < half) goto l120;
+    if (x[i - 1] - x[i] < xtol) goto l120;
+    i = i + 1;
+    x[i] = x[i - 1];
+    y[i] = y[i - 1];
+    x[i - 1] = xm;
+    y[i - 1] = yt;
+    goto l110;
+l120:
+    sum = sum + half * (y[i] + yl) * (x[i] - xl);
+    xl = x[i];
+    yl = y[i];
+    i = i - 1;
+    if (i > 1) goto l110;
+    if (i == 1) goto l120;
+    s[0] = sum;
+    if (sum > sigmin) goto l130;
+    for (il = 0; il < nl; il++) s[il] = 0;
+    return;
+
+l130:
+    nbin = nl - 1;
+    rnbin = 1.0 / nbin;
+    fract = sum * rnbin;
+    rfract = 1 / fract;
+    sum = 0;
+    gral = 0;
+    for (il = 1; il < nl; il++) s[il] = 0;
+    j = 0;
+    i = 3;
+    x[3] = -1;
+    xl = x[3];
+    y[3] = sig(c, e, ep, x[3]);
+    if (ep == 0) x[2] = 0;
+    if (ep != 0) x[2] = half * (e + ep - (s1bb - 1) * c->az * c->tev) * seep;
+    if (fabs(x[2]) > 1 - eps) x[2] = 0.99;
+    x[2] = sigfig(x[2], 8, 0);
+    y[2] = sig(c, e, ep, x[2]);
+    x[1] = +1;
+    y[1] = sig(c, e, ep, x[1]);
+    ymax = y[1];
+    if (y[2] > ymax) ymax = y[2];
+    if (y[3] > ymax) ymax = y[3];
+    if (ymax < eps) ymax = eps;
+    /* yl carries over from the first pass's last point? No: THERMR does not
+     * reset yl here; at this point yl is y(1) of the first pass (mu = +1). The
+     * first panel of the second pass starts at xl = -1, so add() uses y(3)
+     * through yl only after the first accepted point. Keep THERMR's value. */
+l150:
+    if (i == IMAX) goto l160;
+    xm = half * (x[i - 1] + x[i]);
+    xm = sigfig(xm, 8, 0);
+    ym = half * (y[i - 1] + y[i]);
+    yt = sig(c, e, ep, xm);
+    test = tol * fabs(yt) + tol * ymax / 50;
+    test2 = ym + ymax / 100;
+    if (fabs(yt - ym) <= test && fabs(y[i - 1] - y[i]) <= test2 && (x[i - 1] - x[i]) < half) goto l160;
+    if (x[i - 1] - x[i] < xtol) goto l160;
+    i = i + 1;
+    x[i] = x[i - 1];
+    y[i] = y[i - 1];
+    x[i - 1] = xm;
+    y[i - 1] = yt;
+    goto l150;
+l160:
+    add = half * (y[i] + yl) * (x[i] - xl);
+    if (x[i] == xl) goto l250;
+    xil = 1 / (x[i] - xl);
+    if (i == 1 && j == nbin - 1) goto l165;
+    if (sum + add >= fract * shade && j < nbin - 1) goto l170;
+    sum = sum + add;
+    gral = gral + half * (yl * x[i] - y[i] * xl) * (x[i] + xl)
+           + third * (y[i] - yl) * (x[i] * x[i] + x[i] * xl + xl * xl);
+    goto l250;
+l165:
+    xn = x[i];
+    j = j + 1;
+    goto l190;
+l170:
+    j = j + 1;
+    if (yl < sigmin) goto l175;
+    test = (fract - sum) * (y[i] - yl) / ((x[i] - xl) * yl * yl);
+    if (fabs(test) > ytol) goto l175;
+    xn = xl + (fract - sum) / yl;
+    if (xn > x[i]) goto l180;
+    if (xn >= xl && xn <= x[i]) goto l190;
+    goto l180;  /* THERMR stops with 'no legal solution'; take the panel end */
+l175:
+    f = (y[i] - yl) * xil;
+    rf = 1 / f;
+    disc = (yl * rf) * (yl * rf) + 2 * (fract - sum) * rf;
+    if (disc < 0) disc = fabs(disc);
+    if (f > 0) xn = xl - (yl * rf) + sqrt(disc);
+    if (f < 0) xn = xl - (yl * rf) - sqrt(disc);
+    if (xn > xl && xn <= x[i]) goto l190;
+    if (xn > xl && xn < (x[i] + ytol * (x[i] - xl))) goto l180;
+l180:
+    xn = x[i];
+l190:
+    yn = yl + (y[i] - yl) * (xn - xl) * xil;
+    gral = gral + (xn - xl) * (yl * half * (xn + xl)
+           + (y[i] - yl) * xil * (-xl * half * (xn + xl)
+           + third * (xn * xn + xn * xl + xl * xl)));
+    xbar = gral * rfract;
+    s[j] = xbar;           /* s(j+1) in 1-based Fortran */
+    xl = xn;
+    yl = yn;
+    sum = 0;
+    gral = 0;
+    if (j == nbin) return;
+    if (xl < x[i]) goto l160;
+l250:
+    xl = x[i];
+    yl = y[i];
+    i = i - 1;
+    if (i > 1) goto l150;
+    if (i == 1) goto l160;
+    return;
+}
+
+/* thermr.f90 calcem, one incident energy (labels 310-430). Writes up to cap
+ * points (E', y[0..nl-1]) into xs/ys and returns the count; xsi gets the
+ * integrated cross section. Points carry THERMR's sigfig rounding. */
+static Py_ssize_t calcem_energy(const Ctx *c, double enow, int nl, double tol,
+                                double *xs, double *ys, Py_ssize_t cap, double *xsiOut, int *overflow) {
+    const double tolmin = 5e-7, em9 = 1e-9, half = 0.5, uumin = 1e-5;
+    double x[IMAX + 1], y[NLMAX][IMAX + 1], yt[NLMAX];
+    Py_ssize_t j = 0, jnz = 0;
+    int i, il, k, jbeta, iskip = 0;
+    double xsi = 0, ep, xm, ym, uu, uum, test, test2, xlast = 0, ylast = 0;
+    Py_ssize_t nb = c->nb;
+    *overflow = 0;
+
+#define STORE(jj, xv, yv) do { \
+        if ((jj) - 1 >= cap) { *overflow = 1; return 0; } \
+        xs[(jj) - 1] = (xv); \
+        double y1_ = (yv)[0]; \
+        ys[((jj) - 1) * nl] = (y1_ >= em9) ? sigfig(y1_, 9, 0) : sigfig(y1_, 8, 0); \
+        for (int q_ = 1; q_ < nl; q_++) { \
+            double v_ = sigfig((yv)[q_], 9, 0); \
+            if (v_ > 1.0) v_ = 1.0; \
+            if (v_ < -1.0) v_ = -1.0; \
+            ys[((jj) - 1) * nl + q_] = v_; \
+        } \
+    } while (0)
+
+    ep = 0;
+    x[1] = ep;
+    sigl(c, enow, ep, nl, tol, yt);
+    for (il = 0; il < nl; il++) y[il][1] = yt[il];
+    jbeta = -(int)nb;
+    if (c->lasym > 0) jbeta = 1;
+    j = 0;
+    iskip = 0;
+l311:
+    x[2] = x[1];
+    for (il = 0; il < nl; il++) y[il][2] = y[il][1];
+l313:
+    if (jbeta == 0) jbeta = 1;
+    if (jbeta <= 0) {
+        if (c->lat == 1) ep = enow - c->beta[-jbeta - 1] * c->tevz;
+        else ep = enow - c->beta[-jbeta - 1] * c->tev;
+        if (ep == enow) ep = sigfig(enow, 8, -1);
+        else ep = sigfig(ep, 8, 0);
+    } else {
+        if (c->lat == 1) ep = enow + c->beta[jbeta - 1] * c->tevz;
+        else ep = enow + c->beta[jbeta - 1] * c->tev;
+        if (ep == enow) { ep = sigfig(enow, 8, +1); iskip = 1; }
+        else ep = sigfig(ep, 8, 0);
+    }
+    if (ep > x[2]) goto l316;
+    jbeta = jbeta + 1;
+    goto l313;
+l316:
+    ep = sigfig(ep, 8, 0);
+    x[1] = ep;
+    sigl(c, enow, ep, nl, tol, yt);
+    for (il = 0; il < nl; il++) y[il][1] = yt[il];
+    i = 2;
+l330:
+    if (i == IMAX) goto l360;
+    if (iskip == 1) { iskip = 0; goto l360; }
+    if (half * (y[0][i - 1] + y[0][i]) * (x[i - 1] - x[i]) < tolmin) goto l360;
+    xm = half * (x[i - 1] + x[i]);
+    xm = sigfig(xm, 8, 0);
+    if (xm <= x[i] || xm >= x[i - 1]) goto l360;
+    sigl(c, enow, xm, nl, tol, yt);
+    uu = 0;
+    uum = 0;
+    for (k = 0; k < nl; k++) {
+        ym = terp1(x[i], y[k][i], x[i - 1], y[k][i - 1], xm, 2);
+        if (k > 0) { uu = uu + yt[k]; uum = uum + ym; }
+        test = tol * fabs(yt[k]);
+        test2 = test;
+        if (k > 0) test2 = tol;
+        if (fabs(yt[k] - ym) > test2) goto l410;
+    }
+    test = 2 * tol * fabs(uu) + uumin;
+    if (fabs(uu - uum) > test) goto l410;
+l360:
+    j = j + 1;
+    if (j > 1) xsi = xsi + (x[i] - xlast) * (y[0][i] + ylast) * half;
+    if (j == 3 && xsi < tolmin) j = 2;
+    {
+        double v[NLMAX];
+        for (il = 0; il < nl; il++) v[il] = y[il][i];
+        STORE(j, x[i], v);
+    }
+    xlast = x[i];
+    ylast = y[0][i];
+    if (ylast != 0) jnz = j;
+    i = i - 1;
+    if (i >= 2) goto l330;
+    jbeta = jbeta + 1;
+    if (jbeta <= (int)nb) goto l311;
+    for (il = 0; il < nl; il++) y[il][i] = 0;
+    goto l430;
+l410:
+    i = i + 1;
+    x[i] = x[i - 1];
+    x[i - 1] = xm;
+    for (il = 0; il < nl; il++) { y[il][i] = y[il][i - 1]; y[il][i - 1] = yt[il]; }
+    goto l330;
+l430:
+    j = j + 1;
+    xsi = xsi + (x[i] - xlast) * (y[0][i] + ylast) * half;
+    xsi = sigfig(xsi, 9, 0);
+    {
+        double v[NLMAX];
+        for (il = 0; il < nl; il++) v[il] = y[il][i];
+        STORE(j, x[i], v);
+    }
+    if (y[0][1] != 0) jnz = j;
+    if (jnz < j) j = jnz + 1;
+    *xsiOut = xsi;
+    return j;
+#undef STORE
+}
+
+static int buffer(PyObject *obj, Py_buffer *b, Py_ssize_t count, int writable) {
+    int flags = PyBUF_FORMAT | PyBUF_C_CONTIGUOUS;
+    if (writable) flags |= PyBUF_WRITABLE;
+    if (PyObject_GetBuffer(obj, b, flags) < 0) return 0;
+    if (b->ndim != 1 || b->itemsize != 8 || b->format == NULL || strcmp(b->format, "d") != 0 ||
+        b->len < count * 8) {
+        PyErr_SetString(PyExc_ValueError, "thermal kernel requires contiguous float64 buffers");
+        return 0;
+    }
+    return 1;
+}
+
+static PyObject *calcem(PyObject *self, PyObject *args) {
+    double enow, tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, tol;
+    int lat, lasym, nl;
+    Py_ssize_t na, nb, cap;
+    PyObject *o[5];
+    Py_buffer b[5] = {{0}};
+    if (!PyArg_ParseTuple(args, "ddddddddddiiidnnnOOOOO", &enow, &tev, &tevz, &az, &sb, &sb2, &az2,
+                          &teff, &teff2, &cliq, &lat, &lasym, &nl, &tol, &na, &nb, &cap,
+                          &o[0], &o[1], &o[2], &o[3], &o[4]))
+        return NULL;
+    if (nl < 2 || nl > NLMAX || na < 3 || nb < 3 || cap < 2) {
+        PyErr_SetString(PyExc_ValueError, "invalid thermal kernel dimensions");
+        return NULL;
+    }
+    Py_ssize_t sizes[5] = {na, nb, na * nb, cap, cap * nl};
+    for (int q = 0; q < 5; q++) {
+        if (!buffer(o[q], &b[q], sizes[q], q >= 3)) {
+            for (int r = 0; r < 5; r++) if (b[r].obj) PyBuffer_Release(&b[r]);
+            return NULL;
+        }
+    }
+    Ctx c = {tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, lat, lasym, na, nb,
+             b[0].buf, b[1].buf, b[2].buf};
+    double xsi = 0;
+    int overflow = 0;
+    Py_ssize_t n;
+    Py_BEGIN_ALLOW_THREADS
+    n = calcem_energy(&c, enow, nl, tol, b[3].buf, b[4].buf, cap, &xsi, &overflow);
+    Py_END_ALLOW_THREADS
+    for (int r = 0; r < 5; r++) if (b[r].obj) PyBuffer_Release(&b[r]);
+    if (overflow) {
+        PyErr_SetString(PyExc_MemoryError, "outgoing-energy grid exceeds the capacity given");
+        return NULL;
+    }
+    return Py_BuildValue("nd", n, xsi);
+}
+
+static PyObject *py_sig(PyObject *self, PyObject *args) {
+    double e, ep, u, tev, tevz, az, sb, sb2, az2, teff, teff2, cliq;
+    int lat, lasym;
+    Py_ssize_t na, nb;
+    PyObject *o[3];
+    Py_buffer b[3] = {{0}};
+    if (!PyArg_ParseTuple(args, "ddddddddddddiinnOOO", &e, &ep, &u, &tev, &tevz, &az, &sb, &sb2,
+                          &az2, &teff, &teff2, &cliq, &lat, &lasym, &na, &nb, &o[0], &o[1], &o[2]))
+        return NULL;
+    Py_ssize_t sizes[3] = {na, nb, na * nb};
+    for (int q = 0; q < 3; q++) {
+        if (!buffer(o[q], &b[q], sizes[q], 0)) {
+            for (int r = 0; r < 3; r++) if (b[r].obj) PyBuffer_Release(&b[r]);
+            return NULL;
+        }
+    }
+    Ctx c = {tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, lat, lasym, na, nb,
+             b[0].buf, b[1].buf, b[2].buf};
+    double v = sig(&c, e, ep, u);
+    for (int r = 0; r < 3; r++) if (b[r].obj) PyBuffer_Release(&b[r]);
+    return PyFloat_FromDouble(v);
+}
+
+static PyObject *py_sigfig(PyObject *self, PyObject *args) {
+    double x;
+    int ndig, idig;
+    if (!PyArg_ParseTuple(args, "dii", &x, &ndig, &idig)) return NULL;
+    return PyFloat_FromDouble(sigfig(x, ndig, idig));
+}
+
+/* endf.f90 a11: the value an 11-column ENDF field written by NJOY reads back as.
+ * Positive values in (0.1, 1e7): the extended 9-figure fixed form (8 decimals
+ * below 1); everything else: 7, 6 or 5 significant figures by exponent width. */
+static double endf11(double x) {
+    char buf[64];
+    if (x == 0.0) return 0.0;
+    if (x > 0.1 && x < 0.999999999e7) {
+        if (x < 0.999999999) snprintf(buf, sizeof buf, "%.8f", x);
+        else snprintf(buf, sizeof buf, "%.8e", x);          /* 9 significant figures */
+        return strtod(buf, NULL);
+    }
+    double ax = fabs(x);
+    int n = (int)floor(log10(ax));
+    int e = n < 0 ? -n : n;
+    int digits = e < 10 ? 7 : (e < 100 ? 6 : 5);
+    snprintf(buf, sizeof buf, "%.*e", digits - 1, x);
+    return strtod(buf, NULL);
+}
+
+static PyObject *py_endf11(PyObject *self, PyObject *args) {
+    PyObject *o;
+    Py_buffer b = {0};
+    if (!PyArg_ParseTuple(args, "O", &o)) return NULL;
+    if (PyObject_GetBuffer(o, &b, PyBUF_FORMAT | PyBUF_C_CONTIGUOUS | PyBUF_WRITABLE) < 0) return NULL;
+    if (b.itemsize != 8 || b.format == NULL || strcmp(b.format, "d") != 0) {
+        PyBuffer_Release(&b);
+        PyErr_SetString(PyExc_ValueError, "endf11 needs a writable contiguous float64 array");
+        return NULL;
+    }
+    double *v = b.buf;
+    Py_ssize_t n = b.len / 8;
+    for (Py_ssize_t i = 0; i < n; i++) v[i] = endf11(v[i]);
+    PyBuffer_Release(&b);
+    Py_RETURN_NONE;
+}
+
+static PyMethodDef methods[] = {
+    {"endf11", py_endf11, METH_VARARGS, "Round an array in place as NJOY writes ENDF fields (a11)."},
+    {"calcem", calcem, METH_VARARGS, "THERMR calcem for one incident energy: (count, xsi)."},
+    {"sig", py_sig, METH_VARARGS, "THERMR sig: the double-differential cross section."},
+    {"sigfig", py_sigfig, METH_VARARGS, "NJOY sigfig."},
+    {NULL, NULL, 0, NULL}
+};
+static struct PyModuleDef module = {PyModuleDef_HEAD_INIT, "_thermal_native", NULL, 0, methods};
+PyMODINIT_FUNC PyInit__thermal_native(void) {
+    PyObject *m = PyModule_Create(&module);
+    if (m == NULL) return NULL;
+    if (PyModule_AddIntConstant(m, "API_VERSION", 1) < 0) { Py_DECREF(m); return NULL; }
+    return m;
+}
