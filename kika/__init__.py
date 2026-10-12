@@ -1,4 +1,5 @@
 from .mcnp.parse_mctal import read_mctal
+from .mcnp.parse_meshtal import read_meshtal
 from .mcnp.parse_input import read_mcnp
 from .mcnp.pert_generator import generate_pert_cards, generate_PERTcards, perturb_material, perturb_materials
 from .sensitivities.sensitivity_processing import create_sdf_data, compute_sensitivity, compute_total_sensitivity, plot_sens_comparison
@@ -70,7 +71,7 @@ def __dir__():
 
 __all__ = [
     'read', 'write', 'sniff_format', 'identify',
-    'read_mctal',
+    'read_mctal', 'read_meshtal',
     'read_mcnp', 'generate_pert_cards', 'generate_PERTcards', 'perturb_material', 'perturb_materials',
     'compute_sensitivity', 'compute_total_sensitivity', 'plot_sens_comparison',
     'SDFData', 'create_sdf_data', 'read_sdf',

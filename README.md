@@ -15,7 +15,7 @@ A comprehensive Python toolkit for nuclear data analysis, Monte Carlo simulation
 
 ### MCNP Processing
 - Parse and manipulate MCNP input files (materials, PERT cards)
-- Read and analyze MCTAL output files
+- Read and analyze MCTAL output files and FMESH mesh tallies (MESHTAL text and the MCNP 6.3+ HDF5 runtape)
 - Tally data extraction and visualization
 
 ### Sensitivity Analysis
@@ -107,6 +107,10 @@ input_data = kika.read_mcnp("path/to/input_file")
 
 # Read a MCTAL file
 mctal = kika.read_mctal("path/to/mctal_file")
+tally = mctal[4].to_xarray()
+
+# Read FMESH results (MESHTAL file or runtpe.h5 with out=xdmf)
+meshtal = kika.read_meshtal("path/to/meshtal")
 
 # Access materials
 materials = input_data.materials
