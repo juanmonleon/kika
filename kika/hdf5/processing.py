@@ -509,8 +509,12 @@ def _broadenTask(args):
     return _broadenReduced(reduced, lo, hi, temperature, options, domain)
 
 
-def _broadenAll(suite, temperatures, thnmax, options, workers):
-    """``{T: (heated forms, ceiling)}``; every temperature and energy chunk in parallel processes."""
+def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
+    """``{T: (heated forms, ceiling)}``; every temperature and energy chunk in parallel processes.
+
+    ``progress(index, fraction)`` is called as the chunks of ``temperatures[index]``
+    finish (``kika.endf.process_endf`` reports it); the result does not depend on it.
+    """
     from kika.processing.doppler.suite import _mass
 
     entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax)
@@ -530,14 +534,27 @@ def _broadenAll(suite, temperatures, thnmax, options, workers):
                     window = None
             jobs.append((_reducedSuite(suite, entries, keys, lo, window), lo, hi, t, options, domain))
     workers = min(len(jobs), os.cpu_count() or 1, 8) if workers is None else max(1, int(workers))
+    n = len(tasks)
+    done = [0] * len(temperatures)
+
+    def finished(i):
+        if progress is not None:
+            done[i // n] += 1
+            progress(i // n, done[i // n] / n)
+
+    results = [None] * len(jobs)
     if workers == 1 or len(jobs) <= 1:
-        results = [_broadenTask(job) for job in jobs]
+        for i, job in enumerate(jobs):
+            results[i] = _broadenTask(job)
+            finished(i)
     else:
-        from concurrent.futures import ProcessPoolExecutor
+        from concurrent.futures import ProcessPoolExecutor, as_completed
 
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_broadenTask, jobs))
-    n = len(tasks)
+            futures = {pool.submit(_broadenTask, job): i for i, job in enumerate(jobs)}
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+                finished(futures[future])
     return {t: _assembled(leaves, hi, tasks, results[i * n:(i + 1) * n])
             for i, t in enumerate(temperatures)}
 
@@ -910,11 +927,12 @@ def _urrContext(suite, context):
                           target.spin.convertedTo("hbar").value)
 
 
-def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None):
+def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None, options=None):
     """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR (roadmap H8).
 
     The tables :func:`processSuite` writes. ``context`` is the target's
-    NeutronContext (default: the model's mass and spin).
+    NeutronContext (default: the model's mass and spin); ``options`` a
+    ``ProbabilityTableOptions`` (default: PURR's 20 bands, 64 ladders).
     """
     from kika.processing.resonances.probability_tables import (ProbabilityTableOptions,
                                                                probabilityTables, purrGrid,
@@ -924,7 +942,7 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None)
     region = suite.resonances.unresolved
     energies = purrGrid(region)
     background, competing = purrInputs(suite, energies, form=_evaluated)
-    options = ProbabilityTableOptions()
+    options = options or ProbabilityTableOptions()
     tables = probabilityTables(region, _urrContext(suite, context), energies, temperatures,
                                background=background, competing=competing, options=options,
                                workers=workers or min(len(energies), os.cpu_count() or 1, 8))

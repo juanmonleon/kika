@@ -21,6 +21,8 @@ from .photoatomic import form_factors, photoatomic_cross_sections, photoatomic_s
 from .checks import check_covariance_library, check_covariances
 from .inventory import TapeInventory, tape_inventory
 from .reconstruction import EndfReconstruction, ReconstructedTable, reconstruct_endf
+from .process import (PROCESSING_REJECTION_CATEGORIES, EndfProcessing, ProcessingPlan,
+                      StageReport, inspect_endf_processing, process_endf)
 from .remote import (
     fetch_endf,
     download_endf,
@@ -52,6 +54,13 @@ __all__ = [
     "reconstruct_endf",
     "EndfReconstruction",
     "ReconstructedTable",
+    # Staged processing: reconstruction, Doppler, URR tables (NJOY RECONR/BROADR/PURR)
+    "process_endf",
+    "inspect_endf_processing",
+    "ProcessingPlan",
+    "EndfProcessing",
+    "StageReport",
+    "PROCESSING_REJECTION_CATEGORIES",
     # Local file reading
     "read_endf",
     "open_endf",
