@@ -291,3 +291,72 @@ def test_gnds_has_a_heated_style_per_temperature(run, tmp_path):
     assert np.allclose(np.interp(x[keep], xb, yb), y[keep], rtol=1e-12, atol=0)
     write = result.stages[-1]
     assert write.details["format"] == "gnds" and write.details["styles"] == ["recon", "heated_000", "heated_001"]
+
+
+#: FUDGE's H-2 (ENDF/B-VIII.1), committed whole: no resonance parameters, a
+#: production under MT102. The committed resonance fixtures are trimmed and do
+#: not span their evaluated domain, so none of them can be reconstructed.
+H2_GNDS = Path(__file__).resolve().parents[2] / "gnds/tests/data/n-001_H_002.endf.gnds.xml"
+
+
+@pytest.fixture(scope="module")
+def gnds_run():
+    import kika.gnds
+    return kika.gnds.process_gnds(H2_GNDS, ProcessingPlan(temperatures=(600.0,), workers=2))
+
+
+def test_process_gnds_runs_every_stage(gnds_run):
+    from kika.endf import EndfProcessing
+    assert isinstance(gnds_run, EndfProcessing) and gnds_run.source_format == "gnds"
+    status = {s.stage: s.status for s in gnds_run.stages}
+    assert status["reconstruct"] == "done" and status["broaden"] == "done"
+    assert gnds_run.stage("decode").details["source_format"] == "gnds"
+    assert gnds_run.reconstruction.evaluation["mat"] == 128
+    assert {1, 2, 102} <= set(gnds_run.cross_sections()) and gnds_run.temperatures == (600.0,)
+
+
+def test_process_gnds_outputs(gnds_run, tmp_path):
+    import kika
+    from kika.endf import ProcessingOutputError
+    with pytest.raises(ProcessingOutputError) as caught:
+        gnds_run.write_pendf(tmp_path / "h2.pendf")
+    assert caught.value.category == "pendf-needs-endf-source"
+    back = kika.read(gnds_run.write_gnds(tmp_path / "h2.gnds.xml"), format="gnds", covariances=False)
+    assert {"eval", "recon", "heated_000"} <= {s.label for s in back.styles}
+    assert gnds_run.write_hdf5(tmp_path / "h2.h5").exists()
+    formats = [(s.details["format"], s.status) for s in gnds_run.stages if s.stage == "write"]
+    assert formats == [("pendf", "rejected"), ("gnds", "done"), ("hdf5", "done")]
+
+
+def test_process_gnds_sets_aside_the_files_reconstruction(run, tmp_path):
+    """kika's own processed GNDS carries recon and heated styles; they are set
+    aside. Its PoPs states no target spin (the ENDF decoder does not move MF2's
+    SPI there), so the reconstruction is refused by name, not by a ValueError."""
+    from kika.endf import process_gnds
+    from kika.processing.resonances import UnsupportedResonanceError
+    result, _ = run
+    source = result.write_gnds(tmp_path / "fe56.gnds.xml")
+    with pytest.raises(UnsupportedResonanceError) as caught:
+        process_gnds(source, ProcessingPlan(temperatures=()))
+    assert caught.value.category == "context-missing"
+
+
+def test_gnds_and_endf_routes_agree_once_broadened(tmp_path):
+    """The same evaluation through both doors: Au-197 B-VIII.1, ENDF and GNDS."""
+    from conftest import resolve_library  # noqa: F401  (library roots, as the other library tests)
+    import os
+    root = Path(os.environ.get("KIKA_LIB_TAPES", "/share_snc/lib/endf"))
+    endf = root / "endfb81/n-079_Au_197.endf"
+    gnds = root.parent / "gnds/endfb81/n-079_Au_197.endf.gnds.xml"
+    if not (endf.exists() and gnds.exists()):
+        pytest.skip("Au-197 B-VIII.1 in ENDF and GNDS not on this machine")
+    from kika.endf import process_gnds
+    plan = ProcessingPlan(temperatures=(293.6,), urr=False)
+    a, b = process_endf(endf, plan), process_gnds(gnds, plan)
+    assert b.reconstruction.evaluation["mat"] == 7925
+    assert b.stage("decode").details["source_reconstruction"] == "recon in the file, ignored"
+    for mt in (1, 2, 102):
+        xa, ya = a.cross_sections(293.6)[mt]
+        xb, yb = b.cross_sections(293.6)[mt]
+        rel = np.abs(np.interp(xa, xb, yb) - ya) / np.maximum(np.abs(ya), 1e-8)
+        assert np.quantile(rel, 0.999) < 1e-3, mt

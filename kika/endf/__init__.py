@@ -22,7 +22,7 @@ from .checks import check_covariance_library, check_covariances
 from .inventory import TapeInventory, tape_inventory
 from .reconstruction import EndfReconstruction, ReconstructedTable, reconstruct_endf
 from .process import (PROCESSING_REJECTION_CATEGORIES, EndfProcessing, ProcessingOutputError, ProcessingPlan,
-                      StageReport, inspect_endf_processing, process_endf)
+                      StageReport, inspect_endf_processing, process_endf, process_gnds)
 from .remote import (
     fetch_endf,
     download_endf,
@@ -56,6 +56,7 @@ __all__ = [
     "ReconstructedTable",
     # Staged processing: reconstruction, Doppler, URR tables (NJOY RECONR/BROADR/PURR)
     "process_endf",
+    "process_gnds",
     "inspect_endf_processing",
     "ProcessingPlan",
     "EndfProcessing",

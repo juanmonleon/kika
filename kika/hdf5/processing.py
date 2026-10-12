@@ -1000,9 +1000,23 @@ def _zaOf(pid: str) -> int:
 
 
 def _evaluated(component):
+    """The evaluated function of a component. A GNDS ``resonancesWithBackground``
+    is an instruction plus a background; its function is the background, its
+    three regions joined in one ``regions1d`` (what an ENDF tape's MF3 states)."""
     if component is None or not component.forms:
         return None
-    return component.forms.get(EVAL_LABEL) or next(iter(component.forms.values()))
+    form = component.forms.get(EVAL_LABEL) or next(iter(component.forms.values()))
+    m = _m()
+    if isinstance(form, m.ResonancesWithBackground) and form.background is not None:
+        background = form.background
+        pieces = [v for v in (background.resolvedRegion, background.unresolvedRegion,
+                              background.fastRegion) if v is not None]
+        children = [c for piece in pieces
+                    for c in (piece.function1ds if isinstance(piece, m.Regions1d) else [piece])]
+        if children:
+            children.sort(key=lambda c: c.domainMin)
+            return m.Regions1d(function1ds=children, axes=children[0].axes)
+    return form
 
 
 def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None):

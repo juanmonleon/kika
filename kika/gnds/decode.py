@@ -128,6 +128,7 @@ class _SuiteReader:
         #: Counters for the losses that would otherwise be reported once per
         #: node. Emitted as one aggregated entry each at the end of the read.
         self.tallies: Dict[str, int] = {}
+        self.tallyScopes: Dict[str, tuple] = {}
 
     # -- reporting ---------------------------------------------------------
 
@@ -137,13 +138,19 @@ class _SuiteReader:
     def unsupported(self, tag: str, path: str, reason: str) -> None:
         self.report.unsupportedNode(f"{path}/{tag}: {reason}")
 
-    def tally(self, key: str) -> None:
+    def tally(self, key: str, unaffectedScopes=()) -> None:
+        """Count one occurrence of a loss. ``unaffectedScopes`` names what it
+        cannot touch (``"cross-sections"`` for a back-link or a particle
+        alias), so a consumer that needs only that scope is not refused."""
         self.tallies[key] = self.tallies.get(key, 0) + 1
+        if unaffectedScopes:
+            self.tallyScopes[key] = tuple(unaffectedScopes)
 
     def flushTallies(self) -> None:
         """Turn the counters into one report line each, in a stable order."""
         for key in sorted(self.tallies):
-            self.report.lost(f"{self.tallies[key]} x {key}")
+            self.report.lost(f"{self.tallies[key]} x {key}",
+                             unaffectedScopes=self.tallyScopes.get(key, ()))
 
     def form(self, element: ET.Element, path: str, owner: str):
         """A functional child → its model object, or ``None`` plus a report line."""
@@ -501,7 +508,8 @@ class _SuiteReader:
         self.tally(
             f"<{owner}><uncertainty>: the back-link from a form to its "
             f"covariance, which the covarianceSuite states in the other "
-            f"direction through rowData/href"
+            f"direction through rowData/href",
+            unaffectedScopes=("cross-sections",),
         )
 
     # -- outputChannel -----------------------------------------------------

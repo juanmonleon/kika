@@ -102,4 +102,12 @@ from ._capabilities import (CAPABILITIES, Capabilities, Capability, Coverage,
 #: itself on first access — the first call returns the function and every later
 #: one returns the module. ``kika/__init__.py:40-43`` documents the same trap.
 __all__ = ["capabilities", "Capabilities", "Capability", "Coverage",
-           "CAPABILITIES", "NOT_IN_SCHEMA"]
+           "CAPABILITIES", "NOT_IN_SCHEMA", "process_gnds"]
+
+
+def process_gnds(path, plan=None, progress=None):
+    """Process a GNDS neutron evaluation stage by stage; see
+    :func:`kika.endf.process.process_gnds` (the same stages, contract and
+    outputs as ``kika.endf.process_endf``)."""
+    from kika.endf.process import process_gnds as run
+    return run(path, plan, progress)

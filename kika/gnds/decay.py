@@ -250,8 +250,9 @@ def readAliases(element: Optional[ET.Element], tally) -> dict:
                                metaStableIndex=int(child.attrib["metaStableIndex"]))
             aliases[alias.id] = alias
         else:
+            # An alias names a particle another way; no cross section depends on it.
             tally(f"PoPs <{child.tag}>: outside kika's §12 particle model (only metaStable "
-                  f"is read)")
+                  f"is read)", unaffectedScopes=("cross-sections",))
     return aliases
 
 

@@ -339,7 +339,8 @@ class _ResonanceReader:
                 f"a reconstructor can do with these parameters rather than a "
                 f"property of them; kika has no node for it, and will not — it "
                 f"is FUDGE's capability and not the evaluation's (65 files set "
-                f"it; gnds_endf_conflicts.md §6.4)"
+                f"it; gnds_endf_conflicts.md §6.4)",
+                unaffectedScopes=("cross-sections",),
             )
         return RMatrix(
             label=label,

@@ -102,6 +102,9 @@ PROCESSING_REJECTION_CATEGORIES = {
         "A temperature asked for in the PENDF was not broadened in this run.",
     "pendf-failed": "The PENDF could not be written, or did not read back as it was written.",
     "gnds-failed": "The GNDS file could not be written, or did not read back as it was written.",
+    "pendf-needs-endf-source":
+        "A PENDF can only be written for an evaluation read from ENDF-6 for now: kika cannot yet "
+        "write the resonance parameters (MF2) of a GNDS evaluation back to ENDF-6.",
 }
 
 #: The Doppler engine's categories (``DopplerInputError.category``) gathered
@@ -297,7 +300,8 @@ def _contiguous(x):
 class EndfProcessing:
     """The result of :func:`process_endf`. Picklable; every array is float64."""
 
-    def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables, *, broadened=None):
+    def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables, *, broadened=None,
+                 source_format="endf"):
         #: The :class:`~kika.endf.EndfReconstruction` (0 K), unchanged.
         self.reconstruction = reconstruction
         self.plan = plan
@@ -312,6 +316,9 @@ class EndfProcessing:
         # for the outputs that rebuild from them (write_hdf5) instead of
         # broadening again.
         self._broadened = broadened or {}
+        #: ``"endf"`` or ``"gnds"``: what the evaluation was read from.
+        self.source_format = source_format
+        self._aside = {}                 # GNDS: containers set aside for the reconstruction
 
     def _written(self, fmt, t0, path, error=None, summary="", **details):
         """Append this output's own ``write`` stage (several outputs, several stages)."""
@@ -406,7 +413,14 @@ class EndfProcessing:
         path = Path(path)
         report = progress or (lambda *_: None)
         report("write", None)
+        if mat is None:
+            mat = (self.reconstruction.evaluation or {}).get("mat")
         try:
+            if self.source_format != "endf":
+                # GNDS -> ENDF-6 cannot write MF2/151 without the ENDF bookkeeping
+                # a GNDS file does not carry (QX, LRX, LAD, the particle pairs).
+                raise ProcessingOutputError(
+                    "pendf-needs-endf-source", PROCESSING_REJECTION_CATEGORIES["pendf-needs-endf-source"])
             wanted = [0.0] + list(self.temperatures) if temperatures is None \
                 else sorted({float(t) for t in temperatures})
             for T in wanted:
@@ -509,6 +523,23 @@ class EndfProcessing:
         processing itself reads MF1-MF3 only."""
         from kika.endf.read_endf import read_endf
         from kika.endf.model_adapter import decodeReactionSuite
+        if self.source_format == "gnds":
+            # Read whole already; the reconstruction's own suite, copied, with
+            # the containers it was reconstructed without.
+            suite = copy.deepcopy(self.reconstruction.suite)
+            for name, container in self._aside.items():
+                setattr(suite, name, copy.deepcopy(container))
+            for reaction in _entries_of(suite):
+                reaction.crossSection.forms.pop(self.reconstruction.result.label, None)
+            labels = [st.label for st in suite.styles if st.label == self.reconstruction.result.label]
+            if labels:
+                from kika.nuclear_data.model import Styles
+                suite.styles = Styles([st for st in suite.styles if st.label not in labels])
+            try:
+                work, _ = _working_suite(self.reconstruction, suite)
+            except ValueError as error:
+                raise ProcessingOutputError(category, str(error)) from error
+            return work
         try:
             suite, conversion = decodeReactionSuite(read_endf(str(self.reconstruction.path)))
         except Exception as error:
@@ -713,6 +744,11 @@ def _heated_tables(work, label, broadened, hi, thinning):
     return {mts[k]: (grid[starts[k]:], _contiguous(values[k][starts[k]:])) for k in mts}
 
 
+def _entries_of(suite):
+    from kika.processing.resonances.suite import _entries
+    return _entries(suite).values()
+
+
 #: The label of the broadened forms a PENDF material is written from.
 HEATED_LABEL = "heated"
 
@@ -827,8 +863,8 @@ def _working_suite(rec, suite=None):
     which stays untouched so ``write_pendf`` still attaches and verifies the
     reconstruction itself, or ``suite``, a fresh decode of the whole tape for
     an output that needs the distributions too. Its orphan products (photons
-    stated on a sum) carry no 0 K form; any other reaction must be one the
-    reconstruction covered."""
+    stated on a sum) and productions (MF10) carry no 0 K form; any other
+    reaction must be one the reconstruction covered."""
     from kika.hdf5 import processing as hp
     from kika.nuclear_data.model import CrossSectionReconstructed
     from kika.processing.resonances.suite import _entries
@@ -836,7 +872,7 @@ def _working_suite(rec, suite=None):
     label = rec.result.label
     for key, reaction in _entries(work).items():
         if key not in rec.result.forms:
-            if key.container == "orphanProducts":
+            if key.container in ("orphanProducts", "productions"):
                 continue
             raise ValueError(f"{key} is in the tape but not in the reconstruction")
         reaction.crossSection[label] = copy.deepcopy(rec.result.forms[key])
@@ -933,15 +969,26 @@ def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | 
     Called from a daemonic process, which may not start children, the
     broadening and the URR tables run in this process (``workers=1``); the
     results do not depend on the number of workers."""
+    from .reconstruction import reconstruct_endf
+    plan, report = _start(plan, progress)
+    rec = reconstruct_endf(path, options=plan.reconstruction, progress=report)
+    return _finish(rec, plan, report, "endf")
+
+
+def _start(plan, progress):
+    """The plan (one worker in a daemonic process, which may not start
+    children) and the progress callback."""
     import multiprocessing
     from dataclasses import replace
-    from .reconstruction import reconstruct_endf
     plan = ProcessingPlan() if plan is None else plan
     if multiprocessing.current_process().daemon and plan.workers != 1:
         plan = replace(plan, workers=1)
     report = (lambda stage, fraction: progress(stage, fraction)) if progress else (lambda *_: None)
-    rec = reconstruct_endf(path, options=plan.reconstruction, progress=report)
+    return plan, report
 
+
+def _finish(rec, plan, report, source_format, decode_details=None):
+    """Every stage after the reconstruction, the same for ENDF and GNDS."""
     ev = rec.evaluation or {}
     resolved, unresolved = _ranges(ev)
     stats = rec.report
@@ -953,8 +1000,11 @@ def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | 
                     dict(mat=ev.get("mat"), za=ev.get("za"), library=ev.get("library"),
                          temperature_K=ev.get("temperature_K"))),
         StageReport("decode", "done", rec.timings.get("decode"), None,
-                    f"{len(rec.result.forms)} reactions; mass and spin from {rec.context_source}",
-                    dict(n_reactions=len(rec.result.forms), context_source=rec.context_source)),
+                    f"{len(rec.result.forms)} reactions; mass and spin from {rec.context_source}"
+                    + ("; the file's own reconstruction is ignored, kika reconstructs from the "
+                       "evaluated resonances" if (decode_details or {}).get("source_reconstruction") else ""),
+                    dict(n_reactions=len(rec.result.forms), context_source=rec.context_source,
+                         **(decode_details or {}))),
         StageReport("reconstruct", "done", rec.timings.get("reconstruct"), None,
                     f"{_resonance_line(resolved, unresolved)}; {n_points:,} points at 0 K",
                     dict(n_points=n_points,
@@ -978,7 +1028,166 @@ def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | 
                                   summary=PROCESSING_REJECTION_CATEGORIES["heating-not-implemented"]))
     else:
         stages.append(StageReport("heating", "skipped", summary="not requested"))
-    return EndfProcessing(rec, plan, stages, heated, thnmax, urr_tables, broadened=raw)
+    return EndfProcessing(rec, plan, stages, heated, thnmax, urr_tables, broadened=raw,
+                          source_format=source_format)
+
+
+def process_gnds(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
+    """Process a GNDS neutron evaluation stage by stage: the same stages,
+    contract and outputs as :func:`process_endf`, read from a
+    ``reactionSuite`` instead of an ENDF tape.
+
+    The 0 K cross sections are always kika's, reconstructed from the evaluated
+    resonance parameters (``eval``). A ``crossSectionReconstructed`` (FUDGE's
+    ``recon``) or any other processed style the file carries is set aside, and
+    the ``decode`` stage says so (``details["source_reconstruction"]``): every
+    later table then has kika's tolerance and verification, as from ENDF.
+    A file with no resonance parameters takes its evaluated pointwise cross
+    sections as they are. The MAT of the outputs is the one the evaluation's
+    ``endfCompatible`` text states, when it does.
+    """
+    import kika
+    from kika.processing.resonances import ENGINE_VERSION, ReconstructionOptions, native_available, reconstruct_suite
+    from .reconstruction import DEFAULT_MAX_POINTS, EndfReconstruction
+    plan, report = _start(plan, progress)
+    path = Path(path)
+    timings = {}
+    t0 = time.perf_counter()
+    report("read", None)
+    suite = kika.read(str(path), format="gnds", covariances=False)
+    timings["read"] = time.perf_counter() - t0
+    report("read", 1.0)
+
+    t0 = time.perf_counter()
+    report("decode", None)
+    set_aside = _set_aside_processed(suite)
+    # Orphan products (photons stated on a sum, MT4/103-107) and productions
+    # (MF10-like, under a reaction's MT) share another reaction's MT and carry
+    # no resonance contribution: they sit out of the reconstruction, as an ENDF
+    # tape's MF1-MF3 read never has them, and come back for the outputs that
+    # carry them (write_hdf5, write_gnds).
+    aside = {name: getattr(suite, name) for name in ("orphanProducts", "productions")}
+    for name, container in aside.items():
+        setattr(suite, name, type(container)())
+    context, source = _context_from_model(suite)
+    evaluation = _gnds_evaluation(suite, path)
+    timings["decode"] = time.perf_counter() - t0
+    report("decode", 1.0)
+
+    t0 = time.perf_counter()
+    report("reconstruct", None)
+    options = ReconstructionOptions(max_points=DEFAULT_MAX_POINTS) if plan.reconstruction is None \
+        else plan.reconstruction
+    try:
+        result = reconstruct_suite(suite, context, options=options,
+                                   progress=lambda f: report("reconstruct", f))
+    except ValueError as error:
+        if "NeutronContext" not in str(error):
+            raise
+        from kika.processing.resonances import UnsupportedResonanceError
+        raise UnsupportedResonanceError(
+            "the GNDS file states no target mass or spin in PoPs, which the resonance "
+            "reconstruction needs", category="context-missing") from error
+    timings["reconstruct"] = time.perf_counter() - t0
+    rec = EndfReconstruction(path, suite, result, context, source, timings, ENGINE_VERSION,
+                             evaluation=evaluation, native_kernel=native_available())
+    details = dict(source_format="gnds")
+    if set_aside:
+        details["source_reconstruction"] = f"{', '.join(set_aside)} in the file, ignored"
+    run = _finish(rec, plan, report, "gnds", details)
+    run._aside = aside
+    return run
+
+
+def _set_aside_processed(suite):
+    """Drop every style that is not evaluated (FUDGE's ``recon``, ``heated``...)
+    and the cross-section forms under them; return their labels."""
+    from kika.nuclear_data.model import Evaluated, Styles
+    from kika.processing.resonances.suite import _entries
+    kept = [st for st in suite.styles if isinstance(st, Evaluated)]
+    dropped = [st.label for st in suite.styles if not isinstance(st, Evaluated)]
+    if not dropped:
+        return []
+    for reaction in _entries(suite).values():
+        for label in dropped:
+            if label in reaction.crossSection.forms:
+                del reaction.crossSection.forms[label]
+    suite.styles = Styles(kept)
+    return dropped
+
+
+def _context_from_model(suite):
+    """``(NeutronContext or None, source)``: the RML elastic pair when there is
+    one, as for ENDF; otherwise ``None``, and the reconstruction takes the
+    target's mass and spin from PoPs."""
+    from kika.processing.resonances import NeutronContext
+    resonances = suite.resonances
+    if resonances is None or (not resonances.resolved and resonances.unresolved is None):
+        return None, "no resonance physics"
+    for region in resonances.resolved or []:
+        for pair in getattr(region.formalism, "resonanceReactions", None) or []:
+            if getattr(pair, "reactionMT", None) == 2 and getattr(pair, "kinematics", None) is not None:
+                b = pair.kinematics.particleB
+                return NeutronContext(b.massRatio, b.spin), "RML elastic pair"
+    return None, "PoPs mass and spin"
+
+
+def _gnds_evaluation(suite, path):
+    """What ``evaluation_summary`` gives for an ENDF tape, from the model."""
+    import re
+    from kika.nuclear_data.model import Evaluated
+    from .reconstruction_report import KRM_NAMES, file_sha256
+    out = dict(file=Path(path).name, path=str(Path(path).resolve()), sha256=file_sha256(path),
+               library=getattr(suite, "evaluation", None) or None)
+    target = suite.PoPs[suite.target] if suite.target in suite.PoPs else None
+    if target is not None and getattr(target, "Z", None) is not None:
+        out["za"] = int(target.Z) * 1000 + int(target.A)
+        out["zsymam"] = str(suite.target)
+        try:
+            neutron = suite.PoPs[suite.projectile]
+            out["awr"] = target.mass.convertedTo("amu").value / neutron.mass.convertedTo("amu").value
+        except Exception:
+            pass
+    for st in suite.styles:
+        if isinstance(st, Evaluated):
+            temperature = getattr(st, "temperature", None)
+            if temperature is not None and getattr(temperature, "value", None) is not None:
+                out["temperature_K"] = float(temperature.value) if temperature.unit == "K" else None
+            text = _endf_compatible_text(st)
+            match = re.search(r"MATERIAL\s+(\d+)", text or "")
+            if match:
+                out["mat"] = int(match.group(1))
+            break
+    rows = []
+    resonances = suite.resonances
+    for region in (getattr(resonances, "resolved", None) or []) if resonances is not None else []:
+        f = region.formalism
+        if hasattr(f, "spinGroups"):
+            name = {"ReichMoore": "Reich-Moore", "FullRMatrix": f"R-Matrix Limited ({KRM_NAMES[4]})"}.get(
+                str(getattr(f, "approximation", "")), "R-Matrix")
+            count = sum(len(g.energies) for g in f.spinGroups)
+        else:
+            approx = str(getattr(getattr(f, "approximation", None), "value", getattr(f, "approximation", "")))
+            name = {"singleLevel": "SLBW", "multiLevel": "MLBW"}.get(approx, "Breit-Wigner")
+            count = sum(len(g.resonances) for g in f.resonanceParameters.spinGroups)
+        rows.append(dict(lru=1, lrf=None, nro=None, naps=None, formalism=name, el_eV=float(region.domainMin),
+                         eh_eV=float(region.domainMax), resonances=int(count)))
+    if resonances is not None and resonances.unresolved is not None:
+        u = resonances.unresolved
+        rows.append(dict(lru=2, lrf=None, nro=None, naps=None, formalism="unresolved", el_eV=float(u.domainMin),
+                         eh_eV=float(u.domainMax), urr_case=None, lssf=None))
+    out["resonance_ranges"] = rows
+    return out
+
+
+def _endf_compatible_text(style):
+    documentation = getattr(style, "documentation", None)
+    for name in ("endfCompatible", "body"):
+        part = getattr(documentation, name, None)
+        text = getattr(part, "text", part)
+        if isinstance(text, str) and "MATERIAL" in text:
+            return text
+    return None
 
 
 class ProcessingReport:
