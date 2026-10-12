@@ -564,7 +564,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                  context=None, doppler=None, tabulation=None, ed: Optional[float] = None,
                  thinning: Optional[float] = 1.0e-3,
                  workers: Optional[int] = None, label: Optional[str] = None,
-                 urrTables: Optional[Dict[float, object]] = None):
+                 urrTables: Optional[Dict[float, object]] = None,
+                 broadened: Optional[Dict[float, tuple]] = None):
     """The processed suite of ``suite`` at ``temperatures`` (kelvin; default 293.6 K).
 
     ``endf`` is the ENDF tape the suite was read from, for the target's mass
@@ -591,6 +592,9 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     ``urrTables`` passes URR probability tables already computed
     (:func:`urrTablesOf`, ``{kelvin: ProbabilityTables}``), as a perturbation
     run shares the unperturbed evaluation's between its samples (D12).
+    ``broadened`` passes the broadening already done on this suite's 0 K forms
+    (``_broadenAll``'s ``{kelvin: (heated forms, ceiling)}``, as
+    ``kika.endf.process_endf`` keeps it); each temperature's ceiling is its own.
     """
     m = _m()
     from kika.processing.tabulation import TabulationContext, TabulationOptions, tabulateDistribution
@@ -650,7 +654,12 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         thresholds = [_reactionRange(leaf.reaction)[0] for leaf in leaves
                       if (leaf.reaction.outputChannel.Q.value or 0.0) < 0]
         thnmax = njoyThnmax(work, min(thresholds) if thresholds else None)
-    broadened = _broadenAll(work, temperatures, float(thnmax), doppler, workers)
+    if broadened is None:
+        broadened = _broadenAll(work, temperatures, float(thnmax), doppler, workers)
+    else:
+        missing = [t for t in temperatures if t not in broadened]
+        if missing:
+            raise ValueError(f"broadened has no forms at {missing} K")
     for temperature in temperatures:
         kT = aceKT(temperature)
         T = temperatureName(kT)
@@ -991,9 +1000,23 @@ def _zaOf(pid: str) -> int:
 
 
 def _evaluated(component):
+    """The evaluated function of a component. A GNDS ``resonancesWithBackground``
+    is an instruction plus a background; its function is the background, its
+    three regions joined in one ``regions1d`` (what an ENDF tape's MF3 states)."""
     if component is None or not component.forms:
         return None
-    return component.forms.get(EVAL_LABEL) or next(iter(component.forms.values()))
+    form = component.forms.get(EVAL_LABEL) or next(iter(component.forms.values()))
+    m = _m()
+    if isinstance(form, m.ResonancesWithBackground) and form.background is not None:
+        background = form.background
+        pieces = [v for v in (background.resolvedRegion, background.unresolvedRegion,
+                              background.fastRegion) if v is not None]
+        children = [c for piece in pieces
+                    for c in (piece.function1ds if isinstance(piece, m.Regions1d) else [piece])]
+        if children:
+            children.sort(key=lambda c: c.domainMin)
+            return m.Regions1d(function1ds=children, axes=children[0].axes)
+    return form
 
 
 def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None):
