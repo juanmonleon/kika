@@ -48,6 +48,7 @@ scipy = "^1.15.2"
 pyarrow = "^20.0.0"
 httpx = "^0.28.0"
 pyyaml = "^6.0"
+h5py = "^3.16.0"
 
 [tool.poetry.group.dev]
 optional = true
