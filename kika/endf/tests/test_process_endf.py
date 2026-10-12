@@ -220,3 +220,52 @@ def test_hdf5_equals_the_hdf5_writer_from_scratch(cf252_b81_tape, tmp_path):
     suite, _ = decodeReactionSuite(read_endf(str(cf252_b81_tape)))
     writeSuite(suite, tmp_path, temperatures=[293.6], fileName="ref.h5", index=False, endf=cf252_b81_tape)
     assert R.compareTrees(R.readFile(tmp_path / "ref.h5"), R.readFile(tmp_path / "ours.h5"), limit=5) == []
+
+
+def _materials(path):
+    """``[(TEMP, LRP, {MF2 MTs})]`` per material of a tape, by its records."""
+    from kika._records import parse_number
+    out = []
+    for line in Path(path).read_text().split("\n"):
+        # MF1/451: LRP on the first record, TEMP on the fourth.
+        if line[70:75] == " 1451" and line[75:80].strip() == "1":
+            out.append([None, int(line[22:33]), set()])
+        elif line[70:75] == " 1451" and line[75:80].strip() == "4" and out:
+            out[-1][0] = parse_number(line[0:11])
+        elif line[70:72] == " 2" and line[72:75].strip() not in ("", "0") and out:
+            out[-1][2].add(int(line[72:75]))
+    return [tuple(m) for m in out]
+
+
+def test_pendf_has_one_material_per_temperature(run, tmp_path):
+    from kika.endf import process as staged_module
+    from kika.endf.read_endf import read_endf
+    result, _ = run
+    assert staged_module.PENDF_TEMPERATURES_SUPPORTED is True
+    path = result.write_pendf(tmp_path / "fe56.pendf")
+    materials = _materials(path)
+    assert [round(m[0], 3) for m in materials] == [0.0, *TEMPERATURES]
+    assert all(lrp == 2 for _, lrp, _ in materials)
+    # The first material reads back as the 0 K tape kika always wrote.
+    tape = read_endf(str(path), mf_numbers=[1, 3])
+    assert set(tape.mf[3].mt) >= {1, 2, 102}
+    write = result.stages[-1]
+    assert write.details["format"] == "pendf" and write.details["temperatures"] == [0.0, *TEMPERATURES]
+
+
+def test_pendf_refuses_an_unprocessed_temperature(run, tmp_path):
+    from kika.endf import ProcessingOutputError
+    result, _ = run
+    with pytest.raises(ProcessingOutputError) as caught:
+        result.write_pendf(tmp_path / "x.pendf", temperatures=[600.0])
+    assert caught.value.category == "pendf-temperature-not-processed"
+    assert not (tmp_path / "x.pendf").exists()
+
+
+def test_pendf_carries_mt153_at_each_temperature(cf252_b81_tape, tmp_path):
+    result = process_endf(cf252_b81_tape, ProcessingPlan(temperatures=(293.6, 600.0), urr_ladders=16))
+    path = result.write_pendf(tmp_path / "cf252.pendf", temperatures=[293.6, 600.0])
+    materials = _materials(path)
+    assert [round(m[0], 3) for m in materials] == [293.6, 600.0]
+    assert all(153 in mf2 and 151 in mf2 for _, _, mf2 in materials)
+    assert result.stages[-1].details["mt153"] == [293.6, 600.0]
