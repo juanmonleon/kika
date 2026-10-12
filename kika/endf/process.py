@@ -46,6 +46,16 @@ import numpy as np
 
 Progress = Callable[[str, "float | None"], None]
 
+
+class ProcessingOutputError(ValueError):
+    """An output of :class:`EndfProcessing` could not be written. ``category``
+    is a key of :data:`PROCESSING_REJECTION_CATEGORIES` (or, for the PENDF, of
+    ``kika.processing.REJECTION_CATEGORIES``)."""
+
+    def __init__(self, category, message):
+        super().__init__(message)
+        self.category = category
+
 #: Default temperature: room temperature as the official libraries state it.
 DEFAULT_TEMPERATURES = (293.6,)
 
@@ -78,6 +88,11 @@ PROCESSING_REJECTION_CATEGORIES = {
     "urr-failed": "The probability tables stopped with an internal error.",
     # heating (skipped)
     "heating-not-implemented": "Heating (KERMA) is not yet available in this processing chain.",
+    # write (ProcessingOutputError)
+    "hdf5-needs-temperature":
+        "An OpenMC HDF5 file needs at least one broadened temperature; process with one or more "
+        "temperatures and broadening on.",
+    "hdf5-failed": "The OpenMC HDF5 file could not be written.",
 }
 
 #: The Doppler engine's categories (``DopplerInputError.category``) gathered
@@ -273,7 +288,7 @@ def _contiguous(x):
 class EndfProcessing:
     """The result of :func:`process_endf`. Picklable; every array is float64."""
 
-    def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables):
+    def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables, *, broadened=None):
         #: The :class:`~kika.endf.EndfReconstruction` (0 K), unchanged.
         self.reconstruction = reconstruction
         self.plan = plan
@@ -284,6 +299,20 @@ class EndfProcessing:
         self.thnmax = thnmax
         self._urr = urr_tables           # {T: ProbabilityTables}
         self._cold = None
+        # The raw broadened forms ({T: (forms by reaction label, ceiling)}), kept
+        # for the outputs that rebuild from them (write_hdf5) instead of
+        # broadening again.
+        self._broadened = broadened or {}
+
+    def _written(self, fmt, t0, path, error=None, summary="", **details):
+        """Append this output's own ``write`` stage (several outputs, several stages)."""
+        details = dict(format=fmt, path=str(Path(path)), **details)
+        if error is None:
+            self.stages.append(StageReport("write", "done", time.perf_counter() - t0, None, summary, details))
+        else:
+            details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
+            self.stages.append(StageReport("write", "rejected", time.perf_counter() - t0,
+                                           getattr(error, "category", None), str(error), details))
 
     @property
     def temperatures(self) -> tuple:
@@ -348,20 +377,88 @@ class EndfProcessing:
         ``EndfReconstruction.write_pendf`` does; the stage is recorded either way.
         """
         t0 = time.perf_counter()
-        self.stages = [s for s in self.stages if s.stage != "write"]
         try:
             out = self.reconstruction.write_pendf(path, progress=progress, mat=mat, workers=workers)
         except Exception as error:
-            self.stages.append(StageReport("write", "rejected", time.perf_counter() - t0,
-                                           getattr(error, "category", None), str(error),
-                                           dict(path=str(path))))
+            self._written("pendf", t0, path, error)
             raise
         note = "0 K cross sections written and verified on reload"
         if self.temperatures:
             note += "; the broadened temperatures are not written to the PENDF yet"
-        self.stages.append(StageReport("write", "done", time.perf_counter() - t0, None, note,
-                                       dict(path=str(Path(path)), temperatures=[0.0])))
+        self._written("pendf", t0, path, summary=note, temperatures=[0.0])
         return out
+
+    def _full_suite(self, progress=None):
+        """The whole tape decoded (distributions, photons, fission data), with
+        the reconstruction attached as its 0 K forms. Read again here: the
+        processing itself reads MF1-MF3 only."""
+        from kika.endf.read_endf import read_endf
+        from kika.endf.model_adapter import decodeReactionSuite
+        try:
+            suite, conversion = decodeReactionSuite(read_endf(str(self.reconstruction.path)))
+        except Exception as error:
+            raise ProcessingOutputError("hdf5-failed", f"the tape could not be read whole: {error}") from error
+        suite.report = conversion
+        if progress:
+            progress("write", 0.1)
+        try:
+            work, _ = _working_suite(self.reconstruction, suite)
+        except ValueError as error:
+            raise ProcessingOutputError("hdf5-failed", str(error)) from error
+        return work
+
+    def write_hdf5(self, path, *, progress: Progress | None = None, index: bool = False) -> Path:
+        """Write an OpenMC HDF5 neutron file (``data_neutron``) at ``path``.
+
+        Every broadened temperature, on its own grid; the URR tables when the
+        URR stage produced them; the distributions tabulated for Monte Carlo,
+        KERMA (MT301/901), damage (MT444) and gas production, as
+        :func:`kika.hdf5.processing.processSuite` builds them. The broadening
+        and the URR tables are reused, not recomputed; the distributions and
+        heating are computed here, since only this format needs them, and are
+        the slow part. The file is read back and compared before it replaces
+        ``path``. ``index`` also writes or updates ``cross_sections.xml`` in
+        the same directory.
+
+        Raises :class:`ProcessingOutputError`: ``hdf5-needs-temperature``
+        when nothing was broadened (OpenMC needs a temperature), else
+        ``hdf5-failed``. Each call appends its own ``write`` stage.
+        """
+        from kika.hdf5.writer import writeSuite
+        t0 = time.perf_counter()
+        path = Path(path)
+        if progress:
+            progress("write", None)
+        temps = list(self.temperatures)
+        omitted = []
+        try:
+            if not temps or not self._broadened:
+                raise ProcessingOutputError(
+                    "hdf5-needs-temperature", PROCESSING_REJECTION_CATEGORIES["hdf5-needs-temperature"])
+            work = self._full_suite(progress)
+            omit = ()
+            resonances = work.resonances
+            if resonances is not None and resonances.unresolved is not None and not self._urr:
+                omit = ("urr",)
+                omitted.append("URR probability tables (the URR stage did not produce them)")
+            try:
+                writeSuite(
+                    work, path.parent, temperatures=temps, fileName=path.name, index=index,
+                    urrTables=dict(self._urr) or None, broadened={T: self._broadened[T] for T in temps},
+                    thnmax=self.thnmax, context=self.reconstruction.context, thinning=self.plan.thinning,
+                    workers=self.plan.workers, omit=omit)
+            except Exception as error:
+                raise ProcessingOutputError("hdf5-failed", f"{type(error).__name__}: {error}") from error
+        except ProcessingOutputError as error:
+            self._written("hdf5", t0, path, error, temperatures=temps)
+            raise
+        if progress:
+            progress("write", 1.0)
+        summary = (f"OpenMC HDF5 at {', '.join(f'{T:g}' for T in temps)} K"
+                   + ("; with URR probability tables" if self._urr else "")
+                   + ("; omitted: " + "; ".join(omitted) if omitted else ""))
+        self._written("hdf5", t0, path, summary=summary, temperatures=temps, omitted=omitted)
+        return path
 
     def report_document(self):
         """The reconstruction report with a section per processing stage
@@ -429,16 +526,24 @@ def _heated_tables(work, label, broadened, hi, thinning):
     return {mts[k]: (_contiguous(grid[starts[k]:]), _contiguous(values[k][starts[k]:])) for k in mts}
 
 
-def _working_suite(rec):
-    """A copy of the decoded suite with the reconstruction as its 0 K forms,
-    lin-lin, as the broadening reads them. The tape's own suite is untouched,
-    so ``write_pendf`` still attaches and verifies the reconstruction itself."""
+def _working_suite(rec, suite=None):
+    """A suite with the reconstruction as its 0 K forms, lin-lin, as the
+    broadening reads them: a copy of the reconstruction's own (MF1-MF3) suite,
+    which stays untouched so ``write_pendf`` still attaches and verifies the
+    reconstruction itself, or ``suite``, a fresh decode of the whole tape for
+    an output that needs the distributions too. Its orphan products (photons
+    stated on a sum) carry no 0 K form; any other reaction must be one the
+    reconstruction covered."""
     from kika.hdf5 import processing as hp
     from kika.nuclear_data.model import CrossSectionReconstructed
     from kika.processing.resonances.suite import _entries
-    work = copy.deepcopy(rec.suite)
+    work = copy.deepcopy(rec.suite) if suite is None else suite
     label = rec.result.label
     for key, reaction in _entries(work).items():
+        if key not in rec.result.forms:
+            if key.container == "orphanProducts":
+                continue
+            raise ValueError(f"{key} is in the tape but not in the reconstruction")
         reaction.crossSection[label] = copy.deepcopy(rec.result.forms[key])
     work.styles.add(CrossSectionReconstructed(label, derivedFrom=rec.result.source_style))
     notes = hp._m().ConversionReport()
@@ -447,7 +552,9 @@ def _working_suite(rec):
 
 
 def _broaden(rec, plan, report):
-    """``(StageReport, {T: tables}, thnmax)``; never raises."""
+    """``(StageReport, {T: tables}, thnmax, work, raw)``; never raises. ``work`` is
+    the suite with its 0 K forms and ``raw`` the broadened forms
+    (``{T: (forms, ceiling)}``), both ``None`` on a rejection."""
     from kika.hdf5 import processing as hp
     temps = plan.temperatures
     t0 = time.perf_counter()
@@ -476,13 +583,15 @@ def _broaden(rec, plan, report):
         return StageReport("broaden", "rejected", time.perf_counter() - t0, category,
                            f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})",
                            dict(temperatures=list(temps), thnmax_eV=thnmax, engine_category=engine,
-                                error="".join(traceback.format_exception_only(type(error), error)).strip())), {}, thnmax
+                                error="".join(traceback.format_exception_only(type(error), error)).strip())), \
+            {}, thnmax, None, None
     points ={T: int(max(len(x) for x, _ in t.values())) for T, t in heated.items()}
     summary = (f"broadened to {', '.join(f'{T:g}' for T in temps)} K below {thnmax:g} eV "
                f"(0 K values above, as NJOY BROADR); "
                + ", ".join(f"{n:,} points at {T:g} K" for T, n in points.items()))
     return StageReport("broaden", "done", time.perf_counter() - t0, None, summary,
-                       dict(temperatures=list(temps), thnmax_eV=thnmax, n_points=points)), heated, thnmax
+                       dict(temperatures=list(temps), thnmax_eV=thnmax, n_points=points)), \
+        heated, thnmax, work, broadened
 
 
 def _urr(rec, plan, unresolved, report):
@@ -560,9 +669,9 @@ def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | 
                          unresolved_range_eV=unresolved["range_eV"] if unresolved else None,
                          native_kernel=rec.native_kernel)),
     ]
-    heated, thnmax = {}, None
+    heated, thnmax, work, raw = {}, None, None, None
     if plan.temperatures and plan.broaden:
-        stage, heated, thnmax = _broaden(rec, plan, report)
+        stage, heated, thnmax, work, raw = _broaden(rec, plan, report)
     else:
         stage = StageReport("broaden", "skipped", summary="not requested" + (
             "" if plan.temperatures else " (0 K only)"))
@@ -574,7 +683,7 @@ def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | 
                                   summary=PROCESSING_REJECTION_CATEGORIES["heating-not-implemented"]))
     else:
         stages.append(StageReport("heating", "skipped", summary="not requested"))
-    return EndfProcessing(rec, plan, stages, heated, thnmax, urr_tables)
+    return EndfProcessing(rec, plan, stages, heated, thnmax, urr_tables, broadened=raw)
 
 
 class ProcessingReport:

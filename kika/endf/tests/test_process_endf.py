@@ -181,3 +181,42 @@ def test_urr_tables_without_broadening(cf252_b81_tape):
     assert set(result.probability_tables) == {293.6}
     with pytest.raises(KeyError):
         result.cross_sections(293.6)
+
+
+def test_outputs_append_one_write_stage_each(run, tmp_path):
+    result, _ = run
+    before = len(result.stages)
+    result.write_pendf(tmp_path / "fe56.pendf")
+    out = result.write_hdf5(tmp_path / "fe56.h5")
+    assert out.exists() and not (tmp_path / "cross_sections.xml").exists()
+    writes = result.stages[before:]
+    assert [(s.stage, s.status, s.details["format"]) for s in writes] == [
+        ("write", "done", "pendf"), ("write", "done", "hdf5")]
+    assert writes[1].details["temperatures"] == list(TEMPERATURES)
+    import kika
+    suite = kika.read(out, format="hdf5")
+    assert {"heated_294K", "heated_900K"} <= set(suite.styles.labels)
+
+
+def test_hdf5_needs_a_broadened_temperature(tmp_path):
+    from kika.endf import ProcessingOutputError
+    result = process_endf(TAPE, ProcessingPlan(temperatures=()))
+    with pytest.raises(ProcessingOutputError) as caught:
+        result.write_hdf5(tmp_path / "fe56.h5")
+    assert caught.value.category == "hdf5-needs-temperature"
+    assert caught.value.category in PROCESSING_REJECTION_CATEGORIES
+    last = result.stages[-1]
+    assert (last.stage, last.status, last.category) == ("write", "rejected", "hdf5-needs-temperature")
+
+
+def test_hdf5_equals_the_hdf5_writer_from_scratch(cf252_b81_tape, tmp_path):
+    """Reusing the broadening and URR tables changes nothing in the file."""
+    from kika.endf.model_adapter import decodeReactionSuite
+    from kika.endf.read_endf import read_endf
+    from kika.hdf5 import records as R
+    from kika.hdf5.writer import writeSuite
+    result = process_endf(cf252_b81_tape, ProcessingPlan(temperatures=(293.6,)))
+    result.write_hdf5(tmp_path / "ours.h5")
+    suite, _ = decodeReactionSuite(read_endf(str(cf252_b81_tape)))
+    writeSuite(suite, tmp_path, temperatures=[293.6], fileName="ref.h5", index=False, endf=cf252_b81_tape)
+    assert R.compareTrees(R.readFile(tmp_path / "ref.h5"), R.readFile(tmp_path / "ours.h5"), limit=5) == []

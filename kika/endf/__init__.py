@@ -21,7 +21,7 @@ from .photoatomic import form_factors, photoatomic_cross_sections, photoatomic_s
 from .checks import check_covariance_library, check_covariances
 from .inventory import TapeInventory, tape_inventory
 from .reconstruction import EndfReconstruction, ReconstructedTable, reconstruct_endf
-from .process import (PROCESSING_REJECTION_CATEGORIES, EndfProcessing, ProcessingPlan,
+from .process import (PROCESSING_REJECTION_CATEGORIES, EndfProcessing, ProcessingOutputError, ProcessingPlan,
                       StageReport, inspect_endf_processing, process_endf)
 from .remote import (
     fetch_endf,
@@ -61,6 +61,7 @@ __all__ = [
     "EndfProcessing",
     "StageReport",
     "PROCESSING_REJECTION_CATEGORIES",
+    "ProcessingOutputError",
     # Local file reading
     "read_endf",
     "open_endf",
