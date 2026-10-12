@@ -18,6 +18,7 @@ problem written twice, differing only in FMESH `out=`.
 | `mcnp630_xdmf.h5` | `/config_control` attributes and `/results` of the `out=xdmf` runtape (the rest of the 27 MB runtape dropped) |
 | `mcnp630_colsci_cfsci.msht` | the MESHTAL of the `out=colsci`/`cfsci` run |
 | `../mctal/mcnp630_check.m` | the MCTAL of the `out=xdmf` run |
+| `mcnp61_check.inp`, `mcnp61_col_ij.msht`, `../mctal/mcnp61_check.m` | the same problem under MCNP 6.1 (`out=col`, FMESH 64 as `out=ij`) |
 
 ## Licences
 

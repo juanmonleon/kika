@@ -356,3 +356,15 @@ def test_mcnp63_union_and_total_cell_bins():
     assert user.result.sel(user=0).item() == 1.69313e-05
     assert mctal[21].to_xarray().result.dims == ("surface", "segment")
     assert mctal[5].to_xarray().result.dims == ("detector", "flag", "energy")
+
+
+def test_mcnp61_and_mcnp63_mctal_agree():
+    """Same deck, data and seed under MCNP 6.1 and 6.3.0: same structure, same
+    values except the F2 surface flux (the codes differ there by ~1 %)."""
+    old = read_mctal(_DATA + "/mctal/mcnp61_check.m")
+    new = read_mctal(_DATA + "/mctal/mcnp630_check.m")
+    assert old.tally_numbers == new.tally_numbers
+    for tally in old:
+        assert tally.shape == new[tally.id].shape
+        if tally.id != 2:
+            np.testing.assert_array_equal(tally.result, new[tally.id].result)

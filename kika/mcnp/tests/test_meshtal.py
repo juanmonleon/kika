@@ -284,3 +284,20 @@ def test_detection():
     assert identify(TEXT) == "mcnp-meshtal"
     assert identify(RUNTAPE) == "mcnp-meshtal"
     assert detect_mcnp_file_type(TEXT) == "mcnp-meshtal"
+
+
+def test_mcnp61_col_equals_mcnp63_colsci(tmp_path):
+    """MCNP 6.1 (out=col) and 6.3.0 (out=colsci) on the same deck, data and seed
+    give the same numbers; the 6.1 file also carries an out=ij mesh, which is
+    refused, so the column tallies are read from the file cut before it."""
+    path = os.path.join(_DATA, "mcnp61_col_ij.msht")
+    with pytest.raises(NotImplementedError, match="mesh tally 64"):
+        read_meshtal(path)
+    lines = open(path).read().splitlines(keepends=True)
+    cut = next(i for i, line in enumerate(lines) if line.split()[:4] == ["Mesh", "Tally", "Number", "64"])
+    trimmed = tmp_path / "col_only.msht"
+    trimmed.write_text("".join(lines[:cut]))
+    old, new = read_meshtal(trimmed), read_meshtal(RUN63_TEXT)
+    assert old.version == "6.mpi" and old.build_date == "10/02/18"
+    for number in (34, 44, 54):
+        np.testing.assert_array_equal(old[number].result, new[number].result)
