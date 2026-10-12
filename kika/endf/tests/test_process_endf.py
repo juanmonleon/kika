@@ -269,3 +269,25 @@ def test_pendf_carries_mt153_at_each_temperature(cf252_b81_tape, tmp_path):
     assert [round(m[0], 3) for m in materials] == [293.6, 600.0]
     assert all(153 in mf2 and 151 in mf2 for _, _, mf2 in materials)
     assert result.stages[-1].details["mt153"] == [293.6, 600.0]
+
+
+def test_gnds_has_a_heated_style_per_temperature(run, tmp_path):
+    import kika
+    result, _ = run
+    path = result.write_gnds(tmp_path / "fe56.gnds.xml")
+    back = kika.read(path, format="gnds", covariances=False)
+    styles = {s.label: s for s in back.styles}
+    assert {"eval", "recon", "heated_000", "heated_001"} <= set(styles)
+    assert [float(styles[l].temperature.value) for l in ("heated_000", "heated_001")] == list(TEMPERATURES)
+    assert styles["heated_001"].derivedFrom == "recon"
+    elastic = next(r for r in back.reactions if r.ENDF_MT == 2)
+    x, y = result.cross_sections(900)[2]
+    from kika.hdf5.processing import _flatten
+    xb, yb = _flatten(elastic.crossSection["heated_001"])
+    # Off the steps (a nudged pair in memory, a repeated energy in the file).
+    step = np.flatnonzero(np.diff(x) <= 2e-12 * x[1:])
+    keep = np.ones(len(x), bool)
+    keep[step] = keep[step + 1] = False
+    assert np.allclose(np.interp(x[keep], xb, yb), y[keep], rtol=1e-12, atol=0)
+    write = result.stages[-1]
+    assert write.details["format"] == "gnds" and write.details["styles"] == ["recon", "heated_000", "heated_001"]

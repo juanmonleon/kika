@@ -33,7 +33,9 @@ Heating (HEATR) is not wired here yet: ``heating`` is reported ``skipped``.
 
 Outputs, each appending its own ``write`` stage: :meth:`EndfProcessing.write_pendf`
 (one material per temperature, MF2/MT153 where there are URR tables; MT301 not
-yet) and :meth:`EndfProcessing.write_hdf5` (OpenMC). A failed output raises
+yet), :meth:`EndfProcessing.write_hdf5` (OpenMC) and
+:meth:`EndfProcessing.write_gnds` (eval, recon and one ``heated`` style per
+temperature). A failed output raises
 :class:`ProcessingOutputError` and leaves any existing file in place.
 """
 from __future__ import annotations
@@ -99,6 +101,7 @@ PROCESSING_REJECTION_CATEGORIES = {
     "pendf-temperature-not-processed":
         "A temperature asked for in the PENDF was not broadened in this run.",
     "pendf-failed": "The PENDF could not be written, or did not read back as it was written.",
+    "gnds-failed": "The GNDS file could not be written, or did not read back as it was written.",
 }
 
 #: The Doppler engine's categories (``DopplerInputError.category``) gathered
@@ -500,7 +503,7 @@ class EndfProcessing:
             _check_mt153(path, self._urr[T])
         return has153
 
-    def _full_suite(self, progress=None):
+    def _full_suite(self, progress=None, category="hdf5-failed"):
         """The whole tape decoded (distributions, photons, fission data), with
         the reconstruction attached as its 0 K forms. Read again here: the
         processing itself reads MF1-MF3 only."""
@@ -509,15 +512,80 @@ class EndfProcessing:
         try:
             suite, conversion = decodeReactionSuite(read_endf(str(self.reconstruction.path)))
         except Exception as error:
-            raise ProcessingOutputError("hdf5-failed", f"the tape could not be read whole: {error}") from error
+            raise ProcessingOutputError(category, f"the tape could not be read whole: {error}") from error
         suite.report = conversion
         if progress:
             progress("write", 0.1)
         try:
             work, _ = _working_suite(self.reconstruction, suite)
         except ValueError as error:
-            raise ProcessingOutputError("hdf5-failed", str(error)) from error
+            raise ProcessingOutputError(category, str(error)) from error
         return work
+
+    def write_gnds(self, path, *, progress: Progress | None = None) -> Path:
+        """Write the processed evaluation as GNDS, as FUDGE's ``processProtare`` does.
+
+        The whole evaluation (``eval``), the 0 K reconstruction
+        (``crossSectionReconstructed``, ``recon``) and one ``heated`` style per
+        broadened temperature (``heated_000``, ``heated_001``... in increasing
+        temperature, derived from ``recon``), each with its cross sections.
+        The URR probability tables are **not** written: GNDS 2.0, the schema
+        kika writes and validates, has no element for them (they are 2.1); the
+        stage lists them under ``omitted``. Covariances are not written either.
+        The file is read back and its styles and temperatures checked before it
+        replaces ``path``.
+
+        Raises :class:`ProcessingOutputError` (``gnds-failed``). Each call
+        appends its own ``write`` stage.
+        """
+        import tempfile
+        import kika
+        t0 = time.perf_counter()
+        path = Path(path)
+        if progress:
+            progress("write", None)
+        temps = list(self.temperatures)
+        labels = {T: f"heated_{i:03d}" for i, T in enumerate(temps)}
+        omitted = []
+        if self._urr:
+            omitted.append("URR probability tables (GNDS 2.0 has no element for them)")
+        try:
+            suite = self._full_suite(progress, category="gnds-failed")
+            if getattr(suite, "covarianceSuite", None) is not None:
+                suite.covarianceSuite = None
+                omitted.append("covariances")
+            source = self.reconstruction.result.label
+            for T in temps:
+                _add_heated(suite, labels[T], T, self._heated[T], source)
+            if progress:
+                progress("write", 0.5)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix="kika-gnds-", dir=path.parent) as scratch:
+                provisional = Path(scratch) / path.name
+                try:
+                    kika.write(suite, provisional, format="gnds")
+                    back = kika.read(provisional, format="gnds", covariances=False)
+                except Exception as error:
+                    raise ProcessingOutputError("gnds-failed", f"{type(error).__name__}: {error}") from error
+                styles = {st.label: st for st in back.styles}
+                for T, label in labels.items():
+                    style = styles.get(label)
+                    if style is None or abs(float(style.temperature.value) - T) > 1e-9 * T:
+                        raise ProcessingOutputError("gnds-failed", f"{label} at {T:g} K did not read back")
+                if source not in styles:
+                    raise ProcessingOutputError("gnds-failed", "the 0 K reconstruction did not read back")
+                provisional.replace(path)
+        except ProcessingOutputError as error:
+            self._written("gnds", t0, path, error, temperatures=temps)
+            raise
+        if progress:
+            progress("write", 1.0)
+        summary = ("GNDS with eval, recon (0 K)"
+                   + "".join(f", {labels[T]} ({T:g} K)" for T in temps)
+                   + ("; omitted: " + "; ".join(omitted) if omitted else ""))
+        self._written("gnds", t0, path, summary=summary, temperatures=[0.0] + temps,
+                      styles=[source] + [labels[T] for T in temps], omitted=omitted)
+        return path
 
     def write_hdf5(self, path, *, progress: Progress | None = None, index: bool = False) -> Path:
         """Write an OpenMC HDF5 neutron file (``data_neutron``) at ``path``.
@@ -659,12 +727,18 @@ def _flat(form):
 
 
 def _heated_suite(rec, T, tables):
-    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T`` and
-    every reaction's broadened table under it, on the common union grid, steps
-    restored as repeated energies (regions) so the writer keeps both faces."""
+    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T``."""
+    suite = copy.deepcopy(rec.suite)
+    source = rec.result.label if rec.result.label in suite.styles.labels else "eval"
+    return _add_heated(suite, HEATED_LABEL, T, tables, source)
+
+
+def _add_heated(suite, label, T, tables, source):
+    """Add a ``heated`` style ``label`` at ``T`` (derived from ``source``) and every
+    reaction's broadened table under it, on the common union grid, steps
+    restored as repeated energies (regions) so a writer keeps both faces."""
     from kika.hdf5 import processing as hp
     from kika.nuclear_data.model import Heated, PhysicalQuantity
-    suite = copy.deepcopy(rec.suite)
     grid = max((x for x, _ in tables.values()), key=len)
     for mt, (x, _) in tables.items():
         if x[0] < grid[0]:
@@ -674,8 +748,7 @@ def _heated_suite(rec, T, tables):
     # same energy twice.
     nudged = np.flatnonzero(np.diff(xs) <= 2e-12 * xs[1:])
     xs[nudged + 1] = xs[nudged]
-    source = rec.result.label if rec.result.label in suite.styles.labels else "eval"
-    suite.styles.add(Heated(HEATED_LABEL, derivedFrom=source, temperature=PhysicalQuantity(float(T), "K")))
+    suite.styles.add(Heated(label, derivedFrom=source, temperature=PhysicalQuantity(float(T), "K")))
     for reaction in list(suite.reactions) + list(suite.sums) + list(suite.fissionComponents):
         mt = reaction.ENDF_MT
         if mt is None or mt not in tables:
@@ -684,8 +757,8 @@ def _heated_suite(rec, T, tables):
         full = np.zeros(len(grid))
         full[len(grid) - len(x):] = y
         form = hp._pieces(xs, full)
-        form.label = HEATED_LABEL
-        reaction.crossSection[HEATED_LABEL] = form
+        form.label = label
+        reaction.crossSection[label] = form
     return suite
 
 
