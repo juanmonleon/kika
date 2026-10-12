@@ -45,10 +45,11 @@ DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 CF252_MICRO = DATA / "micro_cf252_pfns.endf"
 
 
-def _legacyDraw(tape, n, seed):
+def _legacyDraw(tape, n, seed, samplingMethod="sobol"):
     endf = read_endf(str(tape), mf_numbers=[5, 35])
     suite, _mf5, _bands = build_pfns_covariance(endf, mt=18)
-    drawn, _info = generate_pfns_samples(suite, n, seed=seed, verbose=False)
+    drawn, _info = generate_pfns_samples(suite, n, seed=seed, verbose=False,
+                                         sampling_method=samplingMethod)
     return {key[-1]: value for key, value in drawn.items()}
 
 
@@ -103,27 +104,46 @@ def test_the_draw_is_the_legacy_draw_on_endfb81_cf252(cf252_b81_tape):
 
 def test_a_mixed_request_draws_the_spectrum_further_up_the_seed_ladder(
         cf252_b81_tape):
-    """Not equal to the MF35-only draw, and on purpose.
+    """Under a per-block seed, not equal to the MF35-only draw, and on purpose.
 
-    ``_drawEverything`` continues one ladder across the relative and the
-    absolute blocks, so a relative block drawn first pushes every band up by
-    ``BLOCK_SEED_STRIDE``. Restarting the absolute draw at *seed* would hand
-    band 0 the stream MF31 already used -- a correlation between ν̄ and χ that
-    nothing would report. So the spectrum of a mixed run is the legacy draw at
-    the shifted seed, exactly.
+    ``_drawEverything`` realises the relative and the absolute blocks in one
+    call, so under ``random`` the one ladder runs across both: the relative
+    block drawn first pushes every band up by ``BLOCK_SEED_STRIDE``. Restarting
+    the absolute draw at *seed* would hand band 0 the stream MF31 already used
+    -- a correlation between ν̄ and χ that nothing would report. So the
+    spectrum of a mixed run is the legacy draw at the shifted seed, exactly.
     """
     run = perturbFromModel(str(cf252_b81_tape), {31: None, 35: None},
-                           nSamples=4, seed=11, dryRun=True)
+                           nSamples=4, seed=11, dryRun=True,
+                           samplingMethod="random")
     relative = [key for key in run.diagnostics if key[1] != "MF35"]
     assert len(relative) == 1, relative
 
-    shifted = _legacyDraw(cf252_b81_tape, 4, seed=11 + BLOCK_SEED_STRIDE)
+    shifted = _legacyDraw(cf252_b81_tape, 4, seed=11 + BLOCK_SEED_STRIDE,
+                          samplingMethod="random")
     model = _modelSpectrumDeltas(run)
     for band in shifted:
         assert np.array_equal(model[band], shifted[band]), f"band {band}"
 
-    unshifted = _legacyDraw(cf252_b81_tape, 4, seed=11)
+    unshifted = _legacyDraw(cf252_b81_tape, 4, seed=11, samplingMethod="random")
     assert not np.array_equal(model[0], unshifted[0])
+
+
+def test_a_mixed_request_shares_one_sobol_sequence(cf252_b81_tape):
+    """Under Sobol, ν̄ and every χ band take disjoint columns of one sequence.
+
+    A seed ladder does not separate Sobol sequences: two of them, seeded
+    apart and paired by replica, share the lattice of each dimension and come
+    out correlated (D35). So the whole run is one ``Sobol(d=Σ rank, seed)``,
+    and what keeps ν̄ and χ independent is that no column is used twice.
+    """
+    run = perturbFromModel(str(cf252_b81_tape), {31: None, 35: None},
+                           nSamples=4, seed=11, dryRun=True)
+    info = run.diagnostics
+    assert {entry["seed"] for entry in info.values()} == {11}
+    columns = np.concatenate([entry["sobol_columns"] for entry in info.values()])
+    assert len(set(columns.tolist())) == len(columns)
+    assert sorted(columns.tolist()) == list(range(len(columns)))
 
 
 # ======================================================================

@@ -39,10 +39,13 @@ here so that the migration, when it happens, is a call rather than a rewrite.
 **Blocks are independent, and seeded independently.** MF35 gives no cross-band
 covariance, MF33 gives no cross-material one; a block-diagonal covariance is
 sampled block by block. That is also much cheaper — five band-wise SVDs on
-ENDF/B-VIII.1 U-235 cost ~1/125 of one 3205×3205 decomposition. The per-block
-seed offset is what stops every block drawing the same ``Z``, which is the
-quiet failure this arrangement invites: the samples look fine block by block
-and are perfectly correlated across blocks.
+ENDF/B-VIII.1 U-235 cost ~1/125 of one 3205×3205 decomposition. What stops
+the blocks drawing correlated ``Z`` is the quiet failure this arrangement
+invites -- the samples look fine block by block and are correlated across
+blocks -- and a per-block seed only prevents it for pseudo-random draws.
+Separately seeded Sobol sequences paired by replica are correlated too (D35),
+so under Sobol all blocks of a call share one sequence and take disjoint
+columns of it; see :func:`realise_blocks`.
 """
 from __future__ import annotations
 
@@ -57,9 +60,11 @@ from ..cov.decomposition import eigen_decomposition, svd_decomposition
 # core → generators and generators does not import core, so there is no cycle.
 from .generators import _uncorrelated
 
-__all__ = ["draw_samples", "draw_prepared_samples", "BLOCK_SEED_STRIDE"]
+__all__ = ["draw_samples", "draw_prepared_samples", "prepare_blocks",
+           "realise_blocks", "BLOCK_SEED_STRIDE"]
 
-#: Added to the base seed once per block index. A prime, so that two callers
+#: Added to the base seed once per block index under ``random``/``lhs`` (Sobol
+#: shares one sequence instead; see :func:`realise_blocks`). A prime, so that two callers
 #: whose seeds differ by a small integer do not end up sharing draws on some
 #: pair of blocks. Recorded in the diagnostics of every block, because a
 #: reproduction that cannot say which seed produced which block is not one.
@@ -125,7 +130,9 @@ def draw_samples(
         deficient by construction — two thirds of a typical MF35 band is null
         space — so a Cholesky factor either fails or is meaningless.
     seed
-        Base seed. Block *i* uses ``seed + i × BLOCK_SEED_STRIDE``.
+        Base seed. Under Sobol every block uses it, on its own columns of one
+        sequence (recorded as ``sobol_columns``); under ``random``/``lhs``
+        block *i* uses ``seed + i × BLOCK_SEED_STRIDE``.
     psd_method
         Passed through to the decomposition. ``"auto"`` routes the tiny
         negative eigenvalues these matrices carry to ``clip``, which rebuilds
@@ -226,34 +233,168 @@ def draw_prepared_samples(
     (:func:`kika.sampling.multigroup_draw.draw_relative_factors`). Everything
     else is :func:`draw_samples`'.
     """
+    prepared = prepare_blocks(
+        blocks, space=space, returns=returns,
+        decomposition_method=decomposition_method, psd_method=psd_method,
+        null_tol=null_tol, negative_directions=negative_directions,
+        verbose=verbose, logger=logger)
+    return realise_blocks(prepared, n_samples,
+                          sampling_method=sampling_method, seed=seed,
+                          dtype=dtype)
+
+
+def prepare_blocks(
+    blocks,
+    *,
+    space: str = "linear",
+    returns: str = "deltas",
+    decomposition_method: str = "svd",
+    psd_method: str = "auto",
+    null_tol: Optional[float] = DEFAULT_NULL_TOL,
+    negative_directions: str = "zero",
+    verbose: bool = True,
+    logger=None,
+) -> list:
+    """Decompose every block, draw nothing.
+
+    The first half of :func:`draw_prepared_samples`, separated so that blocks
+    asking for different spaces or conventions -- the relative MF33/MF34
+    blocks and the absolute MF35 bands of one run -- can be decomposed under
+    their own options and still be **realised together** by one
+    :func:`realise_blocks` call. That is what keeps them independent under
+    Sobol; see :func:`realise_blocks`.
+    """
     method = _validated_method(space, returns, decomposition_method)
     _validated_negative_directions(negative_directions)
-    items = _as_blocks(blocks)
-    samples: Dict[Hashable, np.ndarray] = {}
-    diagnostics: Dict[Hashable, Dict[str, Any]] = {}
-
-    for index, (key, matrix) in enumerate(items):
+    prepared = []
+    for key, matrix in _as_blocks(blocks):
         if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
             raise ValueError(
                 f"block {key!r}: a covariance is a square 2-D matrix, got shape "
                 f"{matrix.shape}"
             )
-
-        block_seed = None if seed is None else int(seed) + index * BLOCK_SEED_STRIDE
-        draw, info = _draw_one_block(
-            matrix, n_samples,
+        prepared.append(_PreparedBlock(key, *_decompose_one_block(
+            matrix,
             space=space, returns=returns, method=method,
-            sampling_method=sampling_method, seed=block_seed,
             psd_method=psd_method, null_tol=null_tol,
             negative_directions=negative_directions,
             verbose=verbose, logger=logger, label=str(key),
-        )
-        samples[key] = draw.astype(dtype, copy=False)
+        )))
+    return prepared
+
+
+def realise_blocks(
+    prepared,
+    n_samples: int,
+    *,
+    sampling_method: str = "sobol",
+    seed: Optional[int] = None,
+    dtype=np.float64,
+) -> Tuple[Dict[Hashable, np.ndarray], Dict[Hashable, Dict[str, Any]]]:
+    """Draw the uncorrelated normals for every prepared block and correlate them.
+
+    **Under Sobol the blocks share one sequence** (D35 in
+    ``library-gaps.md``). Each block used to get its own
+    ``qmc.Sobol(d=rank_i, seed=seed + i*stride)``, and the blocks were paired
+    by replica index. Scrambling randomises the values but keeps the lattice
+    of each dimension, so dimension *k* of two separately seeded Sobol
+    sequences is the same function of the replica index up to a digital flip:
+    measured |corr| 0.35-0.85 between the k-th columns, and blocks the file
+    leaves independent came out with p95 |rho| 0.20-0.39 (MF33 x MF34 of
+    U-238 B-VIII.1). Every block looked right on its own; the error was in
+    the covariance *between* blocks, where a response that depends on two of
+    them picks up a term the evaluation never stated, of either sign.
+
+    Now one ``qmc.Sobol(d=sum of ranks, seed=seed)`` is drawn and its columns
+    are dealt to the blocks **in turn**: the leading direction of every block
+    first, in block order, then every block's second, and so on, a block
+    dropping out when its rank is used up. The leading Sobol dimensions are
+    the best equidistributed, so every block's leading directions get good
+    ones. A block's own directions keep their order, which is what makes a
+    **single-block call bit-identical** to the old draw: its columns are
+    ``0..rank-1`` of ``Sobol(d=rank, seed=seed)``.
+
+    Dealing by rank position rather than by eigenvalue is deliberate. Merging
+    the directions of all blocks by share of variance gives slightly better
+    dimensions to the dominant directions, but it makes a block's columns
+    depend on the *spectra* of the other blocks: drawing MF34 in linear rather
+    than log space moved the MF33 draw of the same run. Dealt in turn, a
+    block's columns depend only on the ranks and order of the blocks.
+
+    ``"random"`` and ``"lhs"`` keep the per-block seed ladder
+    (``seed + i * BLOCK_SEED_STRIDE``): independently seeded pseudo-random
+    streams and independently permuted hypercubes are independent, so they
+    never had the defect, and leaving them alone keeps their draws unchanged.
+    """
+    prepared = list(prepared)
+    samples: Dict[Hashable, np.ndarray] = {}
+    diagnostics: Dict[Hashable, Dict[str, Any]] = {}
+    normals = _block_normals(prepared, n_samples, sampling_method, seed)
+
+    for index, (block, (z, block_seed, columns)) in enumerate(zip(prepared, normals)):
+        y = z @ block.factor.T
+        if block.returns == "deltas":
+            drawn = y
+        elif block.space == "linear":
+            drawn = y + 1.0
+        else:
+            drawn = np.exp(y - 0.5 * block.diagonal)
+
+        info = dict(block.info)
+        info["realised_covariance_error"] = _realised_error(
+            y, block.matrix, block.counting_tol)
         info["seed"] = block_seed
         info["block_index"] = index
-        diagnostics[key] = info
+        if columns is not None:
+            info["sobol_columns"] = columns
+        samples[block.key] = drawn.astype(dtype, copy=False)
+        diagnostics[block.key] = info
 
     return samples, diagnostics
+
+
+class _PreparedBlock:
+    """One decomposed block: its factor and what finishing the draw needs."""
+
+    __slots__ = ("key", "factor", "matrix", "diagonal", "space", "returns",
+                 "counting_tol", "info")
+
+    def __init__(self, key, factor, matrix, space, returns, counting_tol, info):
+        self.key = key
+        self.factor = factor
+        self.matrix = matrix
+        self.diagonal = np.diag(matrix)
+        self.space = space
+        self.returns = returns
+        self.counting_tol = counting_tol
+        self.info = info
+
+    @property
+    def rank(self) -> int:
+        return int(self.factor.shape[1])
+
+
+def _block_normals(prepared, n_samples, sampling_method, seed):
+    """``[(z, seed_recorded, sobol_columns_or_None), ...]``, one per block."""
+    if sampling_method.lower() != "sobol":
+        out = []
+        for index, block in enumerate(prepared):
+            block_seed = None if seed is None else int(seed) + index * BLOCK_SEED_STRIDE
+            z = _uncorrelated(dim=block.rank, n=n_samples,
+                              method=sampling_method, seed=block_seed)
+            out.append((z, block_seed, None))
+        return out
+
+    # Dealt in turn: direction j of block i goes before direction j of block
+    # i+1 and before direction j+1 of any block.
+    order = sorted((j, index) for index, block in enumerate(prepared)
+                   for j in range(block.rank))
+    columns = [np.empty(block.rank, dtype=np.int64) for block in prepared]
+    for dimension, (j, index) in enumerate(order):
+        columns[index][j] = dimension
+    total = sum(block.rank for block in prepared)
+    z = _uncorrelated(dim=total, n=n_samples, method="sobol", seed=seed)
+    return [(z[:, cols], seed, cols) for cols in columns]
 
 
 def _validated_negative_directions(negative_directions: str) -> None:
@@ -293,22 +434,20 @@ def _validated_method(space: str, returns: str, decomposition_method: str) -> st
     return method
 
 
-def _draw_one_block(
+def _decompose_one_block(
     matrix: np.ndarray,
-    n_samples: int,
     *,
     space: str,
     returns: str,
     method: str,
-    sampling_method: str,
-    seed: Optional[int],
     psd_method: str,
     null_tol: Optional[float],
     negative_directions: str,
     verbose: bool,
     logger,
     label: str,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple:
+    """Everything of one block's draw that does not touch the normals."""
     n = matrix.shape[0]
 
     finite = np.isfinite(matrix)
@@ -369,23 +508,13 @@ def _draw_one_block(
     # identically — every retained eigenvector has a zero there. It also drops
     # the QMC dimension from n to the rank, which is where Sobol is better
     # behaved anyway.
-    factor = basis[:, keep] @ np.diag(np.sqrt(np.clip(spectrum[keep], 0.0, None)))
-
-    z = _uncorrelated(dim=int(keep.sum()), n=n_samples,
-                      method=sampling_method, seed=seed)
-    y = z @ factor.T
-
-    if returns == "deltas":
-        drawn = y
-    elif space == "linear":
-        drawn = y + 1.0
-    else:
-        drawn = np.exp(y - 0.5 * np.diag(matrix))
+    retained = np.clip(spectrum[keep], 0.0, None)
+    factor = basis[:, keep] @ np.diag(np.sqrt(retained))
 
     raw_eigenvalues = np.linalg.eigvalsh(matrix)
     lam_max = float(raw_eigenvalues.max()) if raw_eigenvalues.size else 0.0
 
-    return drawn, {
+    info = {
         "n": n,
         "n_null": n_null,
         "rank": n - n_null,
@@ -398,9 +527,9 @@ def _draw_one_block(
         "min_over_max_eigenvalue": (
             float(raw_eigenvalues.min() / lam_max) if lam_max > 0 else 0.0
         ),
-        "realised_covariance_error": _realised_error(y, matrix, counting_tol),
         "label": label,
     }
+    return factor, matrix, space, returns, counting_tol, info
 
 
 def _realised_error(y: np.ndarray, matrix: np.ndarray, null_tol: float) -> float:

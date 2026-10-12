@@ -87,8 +87,15 @@ def test_the_dry_run_writes_no_tape_and_no_parquet(dry, micro_pfns_tape,
 
 
 def test_seeds_are_recorded_per_band_so_a_run_can_be_reproduced(dry):
-    seeds = [band["seed"] for band in dry["isotopes"]["98252"]["bands"]]
-    assert len(set(seeds)) == len(seeds), "two bands drew from the same seed"
+    """Under Sobol the bands share one seed and never a column of it (D35).
+
+    Separately seeded Sobol sequences paired by replica are correlated, so
+    what keeps the bands independent is one sequence dealt out, not a seed each.
+    """
+    bands = dry["isotopes"]["98252"]["bands"]
+    assert len({band["seed"] for band in bands}) == 1
+    columns = [c for band in bands for c in band["sobol_columns"]]
+    assert len(set(columns)) == len(columns), "two bands drew the same column"
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +144,15 @@ def test_the_perturbed_spectrum_actually_moved(run, micro_pfns_tape):
     A perturbation that silently vanishes — the float32 failure mode, a delta
     of zero, a splice that wrote the original back — produces tapes that pass
     every other test in this file.
+
+    The upper bound is for the opposite failure, decomposition debris divided
+    by a tail probability of ~1e-17 (x2.6e+7 on Cf-252 before the rank
+    truncation). It is **not** 1.0: the 12-15 MeV tail genuinely moves by more
+    than its own value. Measured 2026-10-12 over 256 samples of this tape,
+    largest relative move per sample: median 0.76, 18-20 % above 1.0, maximum
+    3.1 (Sobol) and 3.6 (random) -- the same distribution under both, so it is
+    the covariance and not the draw. 1.0 held only because the Sobol draw
+    before D35 happened to put none of its first three samples there.
     """
     _, out = run
     original = read_endf(str(micro_pfns_tape), mf_numbers=[5]).files[5]
@@ -152,7 +168,7 @@ def test_the_perturbed_spectrum_actually_moved(run, micro_pfns_tape):
         after = np.interp(probe, grid, values)
         moved = np.max(np.abs(after / before - 1.0))
         assert moved > 1e-4, f"the spectrum barely moved ({moved:.2e})"
-        assert moved < 1.0, f"the spectrum moved implausibly far ({moved:.2e})"
+        assert moved < 10.0, f"the spectrum moved implausibly far ({moved:.2e})"
 
 
 def test_the_tape_grows_but_not_without_bound(run, micro_pfns_tape):
