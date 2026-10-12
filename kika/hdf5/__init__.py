@@ -40,7 +40,7 @@ _LAZY = {
 
 _SUBMODULES = ("records", "library", "names", "functions", "distributions",
                "neutron_decode", "neutron_encode", "thermal_decode",
-               "thermal_encode", "patch", "api")
+               "thermal_encode", "patch", "api", "tables")
 
 
 def __getattr__(name):

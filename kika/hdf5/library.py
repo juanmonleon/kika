@@ -189,14 +189,60 @@ class Library:
 
         return read(self.path(material, type), **kwargs)
 
+    def describe(self) -> dict:
+        """The library as a viewer lists it, from the index and the file sizes
+        alone (no ``.h5`` is opened): one row per neutron nuclide, with its
+        ``Z``/``A``/``M`` parsed from the OpenMC name (``A`` is ``None`` for a
+        natural element, ``C0``), and the thermal and photon materials by name.
+        ``missing`` counts index entries whose file is not on disk;
+        ``single_file`` is true for a library opened from one ``.h5``."""
+        from .names import ATOMIC_NUMBER_TO_SYMBOL, parseGndsName
+
+        nuclides, unparsed, missing = [], [], 0
+        for entry in self.index.entries:
+            if entry.type != "neutron":
+                continue
+            path = self.index.resolve(entry)
+            try:
+                size = path.stat().st_size
+            except OSError:
+                missing += 1
+                continue
+            for material in entry.materials:
+                try:
+                    Z, A, M = parseGndsName(material)
+                except ValueError:
+                    unparsed.append(material)
+                    continue
+                nuclides.append(dict(target=material, id=material, Z=Z, A=A or None, M=M,
+                                     element=ATOMIC_NUMBER_TO_SYMBOL[Z], file_name=path.name,
+                                     size=size))
+        nuclides.sort(key=lambda n: (n["Z"], n["A"] or 0, n["M"]))
+        source = self.index.source
+        single = source is not None and source.suffix.lower() in (".h5", ".hdf5")
+        root = source.parent if source is not None else None
+        name = source.stem if single else (root.name if root else "")
+        return dict(root=str(source if single else root) if root else "",
+                    index="" if single else (str(source) if source else ""),
+                    name=name, single_file=single, isotopes=nuclides,
+                    thermal=self.materials("thermal"), photon=self.materials("photon"),
+                    unparsed=unparsed, missing=missing,
+                    depletion_chain=self.index.depletionChain)
+
 
 def open(path) -> Library:  # noqa: A001 - mirrors kika.g4ndl.open
-    """A library from its ``cross_sections.xml``, or from the directory holding one."""
+    """A library from its ``cross_sections.xml``, the directory holding one,
+    or a single ``.h5`` file: a library of that one file, indexed in memory
+    from the file itself (:func:`registerFile`), as GNDS opens one ``.gnds.xml``.
+    """
     path = Path(path)
     if path.is_dir():
         path = path / "cross_sections.xml"
     if not path.is_file():
         raise FileNotFoundError(f"no cross_sections.xml at {path}")
+    if path.suffix.lower() in (".h5", ".hdf5"):
+        entry = registerFile(path, relativeTo=path.parent)
+        return Library(CrossSectionsXml(entries=[entry], directory=str(path.parent), source=path))
     return Library(CrossSectionsXml.read(path))
 
 
