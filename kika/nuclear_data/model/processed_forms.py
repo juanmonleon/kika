@@ -32,7 +32,7 @@ from .enums import Frame
 from .functions import Function2d, XYs2d, XYs3d
 
 __all__ = ["LevelEnergy", "DiscretePhotonEnergy", "EnergyAngularMC", "DistributionMixture",
-           "ProbabilityTables", "PROBABILITY_TABLE_ROWS", "CoherentElasticXS",
+           "ProbabilityTables", "ProbabilityTableStatistics", "PROBABILITY_TABLE_ROWS", "CoherentElasticXS",
            "IncoherentElasticXS", "SumOfFunctions", "CoherentElasticMC", "IncoherentElasticMC",
            "IncoherentElasticDiscreteMC", "IncoherentInelasticDiscreteMC", "MixedElasticMC"]
 
@@ -130,6 +130,48 @@ PROBABILITY_TABLE_ROWS = ("cdf", "total", "elastic", "fission", "capture", "heat
 
 
 @dataclass
+class ProbabilityTableStatistics:
+    """The statistical error of a :class:`ProbabilityTables` (kika's PURR).
+
+    Over the N energies and M bands: the ``ladders`` drawn at each energy,
+    and delete-one-ladder jackknife standard errors -- the ladder is the
+    statistical unit -- of each band's probability (``probabilitySigma``,
+    (N, M)), of its total/elastic/fission/capture factors (``factorSigma``,
+    (N, 4, M)) and of its share ``p · factor`` of the dilute average
+    (``contributionSigma``, FRENDY's per-band statistic made relative). The
+    Bondarenko factors ``f(σ0)`` of the four rows at the backgrounds
+    ``sigma0`` (b), from the bands' cross sections, and their errors:
+    ``shielding``/``shieldingSigma``, (N, 4, K). With an ``errorTarget``,
+    ``converged`` says per energy whether it was reached before the cap.
+    """
+
+    ladders: np.ndarray
+    sigma0: np.ndarray
+    probabilitySigma: np.ndarray
+    factorSigma: np.ndarray
+    contributionSigma: np.ndarray
+    shielding: np.ndarray
+    shieldingSigma: np.ndarray
+    errorTarget: Optional[float] = None
+    converged: Optional[np.ndarray] = None
+
+    def worst(self) -> dict:
+        """The largest errors over energies and bands, per row: the band share
+        and the relative error of ``f`` at each ``sigma0``. A row without an
+        average (its factors exactly 1, without error) reports 0."""
+        rows = PROBABILITY_TABLE_ROWS[1:5]
+        f = np.where(self.shielding != 0, self.shielding, 1.0)
+        rel = self.shieldingSigma / np.abs(f)
+        out = {}
+        for r, row in enumerate(rows):
+            live = bool(np.any(self.factorSigma[:, r] > 0))
+            out[row] = dict(contribution=float(np.max(self.contributionSigma[:, r])) if live else 0.0,
+                            shielding={float(s0): float(np.max(rel[:, r, k])) if live else 0.0
+                                       for k, s0 in enumerate(self.sigma0)})
+        return out
+
+
+@dataclass
 class ProbabilityTables:
     """Unresolved-resonance probability tables at one temperature (PURR's output).
 
@@ -153,6 +195,9 @@ class ProbabilityTables:
     inelastic: int = 0
     absorption: int = 0
     multiplySmooth: bool = True
+    #: The tables' statistical error when kika computed them; not part of the
+    #: tables (two tables are equal whatever their statistics).
+    statistics: Optional[ProbabilityTableStatistics] = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         self.energies = np.asarray(self.energies, dtype=float)
