@@ -8,7 +8,7 @@ Package Overview
 
 KIKA is structured into several subpackages:
 
-* **kika.mcnp**: For MCNP input files (materials, PERT cards) and tally output (MCTAL)
+* **kika.mcnp**: For MCNP input files (materials, PERT cards) and tally output: MCTAL files and FMESH mesh tallies (MESHTAL, HDF5 runtape)
 * **kika.sensitivities**: For sensitivity analysis and SDF file generation
 * **kika.ace**: For parsing ACE format nuclear data files
 * **kika.cov**: For covariance matrix handling and visualization

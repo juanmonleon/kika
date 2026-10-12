@@ -1,24 +1,31 @@
-MCNP tally output (MCTAL)
-=========================
+MCNP tally output
+=================
 
-The modules of :mod:`kika.mcnp` that read MCNP tally output files.
-:func:`kika.mcnp.read_mctal` is the entry point.
+MCTAL files are read by :func:`kika.read_mctal`, FMESH mesh tallies (MESHTAL
+text or the MCNP 6.3+ HDF5 runtape) by :func:`kika.read_meshtal`.
 
-Modules
--------
+kika.mcnp.parse_mctal
+---------------------
+
+.. automodule:: kika.mcnp.parse_mctal
+   :members: read_mctal
 
 kika.mcnp.mctal
------------------
+---------------
 
 .. automodule:: kika.mcnp.mctal
    :members:
-   :undoc-members:
    :show-inheritance:
 
-kika.mcnp.parse_mctal
+kika.mcnp.parse_meshtal
 -----------------------
 
-.. automodule:: kika.mcnp.parse_mctal
+.. automodule:: kika.mcnp.parse_meshtal
+   :members: read_meshtal
+
+kika.mcnp.meshtal
+-----------------
+
+.. automodule:: kika.mcnp.meshtal
    :members:
-   :undoc-members:
    :show-inheritance:

@@ -178,6 +178,7 @@ def samples(tmp_path_factory, micro_tape, micro_cov_tape, h2_gnds):
         "coverx": [d / "coverx.bin", d / "coverx.txt"],
         "sdf": sorted(sdf.glob("*.sdf")),
         "mcnp-mctal": sorted((mcnp / "mctal").glob("*.m")),
+        "mcnp-meshtal": sorted((mcnp / "meshtal").glob("*.msht")) + sorted((mcnp / "meshtal").glob("*.h5")),
     })
     out["mcnp-input"] += [mcnp / "input" / "inputfile_test_1.i",
                           *sorted(sdf.glob("pertfile_*_PERT.i"))]

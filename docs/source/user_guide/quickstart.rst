@@ -83,6 +83,7 @@ Parse and analyze MCNP tally files:
 
 .. code-block:: python
 
+   import kika
    from kika import read_mctal
    
    # Parse a mctal file
@@ -92,10 +93,18 @@ Parse and analyze MCNP tally files:
    mctal
 
    # Access tallies
-   tally = mctal.tally[tally_number]
+   tally = mctal[tally_number]
    
    # Print a summary of the tally
    tally
+
+   # Labelled values (xarray), and the energy-integrated tally
+   tally.to_xarray()
+   tally.total("energy")
+
+   # FMESH mesh tallies: MESHTAL text or the MCNP 6.3+ HDF5 runtape
+   meshtal = kika.read_meshtal('path/to/meshtal')
+   meshtal[4].to_xarray()
 
 
 Working with Sensitivities

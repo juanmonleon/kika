@@ -135,32 +135,19 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
     except:
         group_dict_second = {}
 
-    tally_obj = mctal.tally[tally]
-    energy = tally_obj.energies
+    tally_obj = mctal[tally]
+    energy = tally_obj.energies if tally_obj.energies is not None else []
     n_energies = len(energy)
-    # For tallies with no energy bins (e.g. DPA with FM multiplier), results
-    # are stored as one value per cell.  Use n_energies_stride = max(1, ...)
-    # so cell_offset computation is correct.
-    n_energies_stride = max(n_energies, 1)
 
-    # Handle multi-cell tallies: select requested cell
-    n_cells = tally_obj.n_cells_surfaces if tally_obj.n_cells_surfaces > 0 else 1
-    cell_offset = 0
-    cell_idx = 0
-    if n_cells > 1:
-        if tally_obj.cell_surface_ids and cell in tally_obj.cell_surface_ids:
-            cell_idx = tally_obj.cell_surface_ids.index(cell)
-        else:
-            raise ValueError(
-                f"Cell {cell} not found in tally {tally}. "
-                f"Available cells: {tally_obj.cell_surface_ids}"
-            )
-        cell_offset = cell_idx * n_energies_stride
+    cell_values = {}
 
-    all_r0 = np.array(tally_obj.results)
-    all_e0 = np.array(tally_obj.errors)
-    r0 = all_r0[cell_offset:cell_offset + n_energies_stride]
-    e0 = all_e0[cell_offset:cell_offset + n_energies_stride]
+    def values(pert=None):
+        """(per-energy values, errors, energy integral, its error) of the cell."""
+        if pert not in cell_values:
+            cell_values[pert] = _cell_values(tally_obj, cell, pert)
+        return cell_values[pert]
+
+    r0, e0, integral_r0, integral_e0 = values()
 
     # Prepare all the data first before creating the SensitivityData object
     full_data = {}
@@ -185,8 +172,8 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
             sensErr = np.zeros(len(group_dict_first[rxn]))
 
             for j, pert in enumerate(group_dict_first[rxn]):
-                c1 = tally_obj.perturbation[pert].results[cell_offset + i]
-                e1 = tally_obj.perturbation[pert].errors[cell_offset + i]
+                c1 = values(pert)[0][i]
+                e1 = values(pert)[1][i]
                 sensCoef[j] = c1/r0[i]
                 sensErr[j] = np.sqrt(e0[i]**2 + e1**2)
 
@@ -210,14 +197,14 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
 
                 for j, pert in enumerate(group_dict_second[rxn]):
                     # Get first-order Taylor coefficient directly (not the sensitivity)
-                    c1 = tally_obj.perturbation[group_dict_first[rxn][j]].results[cell_offset + i]
-                    c1_err = tally_obj.perturbation[group_dict_first[rxn][j]].errors[cell_offset + i]
+                    c1 = values(group_dict_first[rxn][j])[0][i]
+                    c1_err = values(group_dict_first[rxn][j])[1][i]
                     c1_values.append(c1)
                     c1_errors.append(c1_err)
 
                     # Get second-order Taylor coefficient directly
-                    c2 = tally_obj.perturbation[pert].results[cell_offset + i]
-                    c2_err = tally_obj.perturbation[pert].errors[cell_offset + i]
+                    c2 = values(pert)[0][i]
+                    c2_err = values(pert)[1][i]
                     c2_values.append(c2)
                     c2_errors.append(c2_err)
 
@@ -245,23 +232,7 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
             coefficients[energy_str] = coeff_data
 
     # Process integral results if available
-    has_integral = False
-    integral_r0 = None
-    integral_e0 = None
-
-    if n_energies == 0:
-        # No energy bins — the single per-cell value IS the integral
-        has_integral = True
-        integral_r0 = float(r0[0])
-        integral_e0 = float(e0[0])
-    elif n_cells <= 1 and tally_obj.integral_result is not None:
-        has_integral = True
-        integral_r0 = tally_obj.integral_result
-        integral_e0 = tally_obj.integral_error
-    elif n_cells > 1 and hasattr(tally_obj, 'total_energy_values') and tally_obj.total_energy_values:
-        has_integral = True
-        integral_r0 = tally_obj.total_energy_values['results'][cell_idx]
-        integral_e0 = tally_obj.total_energy_values['errors'][cell_idx]
+    has_integral = integral_r0 is not None
 
     if has_integral:
         integral_data = {}
@@ -273,17 +244,7 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
 
             # Process first-order coefficients for integral results
             for j, pert in enumerate(group_dict_first[rxn]):
-                pert_obj = tally_obj.perturbation[pert]
-                if n_energies == 0:
-                    # No energy bins — result is directly per-cell
-                    c1_int = pert_obj.results[cell_idx]
-                    e1_int = pert_obj.errors[cell_idx]
-                elif n_cells > 1 and hasattr(pert_obj, 'total_energy_values') and pert_obj.total_energy_values:
-                    c1_int = pert_obj.total_energy_values['results'][cell_idx]
-                    e1_int = pert_obj.total_energy_values['errors'][cell_idx]
-                else:
-                    c1_int = pert_obj.integral_result
-                    e1_int = pert_obj.integral_error
+                _, _, c1_int, e1_int = values(pert)
                 sensCoef_int[j] = c1_int / integral_r0
                 sensErr_int[j] = np.sqrt(integral_e0**2 + e1_int**2)
 
@@ -306,30 +267,12 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
 
                 for j, pert in enumerate(group_dict_second[rxn]):
                     # Get first-order Taylor coefficient directly
-                    pert1_obj = tally_obj.perturbation[group_dict_first[rxn][j]]
-                    if n_energies == 0:
-                        c1_int_val = pert1_obj.results[cell_idx]
-                        c1_int_err = pert1_obj.errors[cell_idx]
-                    elif n_cells > 1 and hasattr(pert1_obj, 'total_energy_values') and pert1_obj.total_energy_values:
-                        c1_int_val = pert1_obj.total_energy_values['results'][cell_idx]
-                        c1_int_err = pert1_obj.total_energy_values['errors'][cell_idx]
-                    else:
-                        c1_int_val = pert1_obj.integral_result
-                        c1_int_err = pert1_obj.integral_error
+                    _, _, c1_int_val, c1_int_err = values(group_dict_first[rxn][j])
                     c1_values_int.append(c1_int_val)
                     c1_errors_int.append(c1_int_err)
 
                     # Get second-order Taylor coefficient directly
-                    pert2_obj = tally_obj.perturbation[pert]
-                    if n_energies == 0:
-                        c2_int_val = pert2_obj.results[cell_idx]
-                        c2_int_err = pert2_obj.errors[cell_idx]
-                    elif n_cells > 1 and hasattr(pert2_obj, 'total_energy_values') and pert2_obj.total_energy_values:
-                        c2_int_val = pert2_obj.total_energy_values['results'][cell_idx]
-                        c2_int_err = pert2_obj.total_energy_values['errors'][cell_idx]
-                    else:
-                        c2_int_val = pert2_obj.integral_result
-                        c2_int_err = pert2_obj.integral_error
+                    _, _, c2_int_val, c2_int_err = values(pert)
                     c2_values_int.append(c2_int_val)
                     c2_errors_int.append(c2_int_err)
 
@@ -360,12 +303,51 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
     return SensitivityData(
         tally_id=tally,
         pert_energies=pert_energies,
-        tally_name=mctal.tally[tally].name,
+        tally_name=mctal[tally].comment,
         zaid=zaid,
         label=label,
         data=full_data,
         coefficients=coefficients
     )
+
+
+def _cell_values(tally, cell: int, perturbation: Optional[int] = None):
+    """Per-energy values of one cell of a MCTAL tally, and its energy integral.
+
+    :param tally: A :class:`kika.mcnp.mctal.Tally` binned only in cells and energy.
+    :param cell: Cell (or surface) to select when the tally has more than one.
+    :param perturbation: PERT card number, or ``None`` for the unperturbed tally.
+    :returns: ``(values, errors, integral, integral_error)``. Without energy
+        bins the single value is its own integral; with energy bins but no
+        total bin, the integral is ``None``.
+    """
+    ds = tally.to_xarray(perturbation)
+    region = tally.region_name
+    extra = [d for d in ds.result.dims if d not in (region, "energy")]
+    if extra:
+        raise ValueError(
+            f"Tally {tally.id} is also binned in {extra}; sensitivities need a tally "
+            f"binned only in {region} and energy.")
+
+    def select(view):
+        if region not in view.dims:
+            return view
+        labels = list(view[f"{region}_id"].values if f"{region}_id" in view.coords else view[region].values)
+        if len(labels) == 1:
+            return view.isel({region: 0})
+        if cell not in labels:
+            raise ValueError(f"Cell {cell} not found in tally {tally.id}. Available cells: {labels}")
+        return view.isel({region: labels.index(cell)})
+
+    ds = select(ds)
+    values = np.atleast_1d(ds.result.values)
+    errors = np.atleast_1d(ds.error.values)
+    if "energy" not in ds.dims:
+        return values, errors, float(values[0]), float(errors[0])
+    if not tally.axes["e"].has_total:
+        return values, errors, None, None
+    total = select(tally.total("energy", perturbation=perturbation))
+    return values, errors, float(total.result), float(total.error)
 
 
 def compute_total_sensitivity(

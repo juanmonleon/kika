@@ -10,6 +10,7 @@ This section contains detailed tutorials to help you learn how to use KIKA effec
    
    input_files
    mctal_files
+   mesh_tallies
    pert_cards
    sensitivity_analysis
    native_resonance_reconstruction

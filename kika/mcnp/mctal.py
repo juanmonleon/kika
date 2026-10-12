@@ -1,1275 +1,606 @@
-from dataclasses import dataclass
-from typing import Optional, List, Dict, Union, Tuple, Any
-import matplotlib.pyplot as plt
-import pandas as pd
+"""Data model for MCNP MCTAL files.
+
+A MCTAL tally is an eight-dimensional array. MCNP writes the bins in the fixed
+order ``f d u s m c e t`` (cells/surfaces/detectors, flagged/direct, user,
+segment, multiplier, cosine, energy, time), with ``t`` varying fastest, and a
+``(result, relative error)`` pair per bin. :class:`Tally` keeps exactly that
+array, **including** the "total" bins MCNP appends when a bin line carries the
+``t`` suffix (``et``, ``ut``, ...), so nothing written in the file is lost.
+
+The labelled views drop the totals and the unbinned axes:
+
+* :meth:`Tally.to_xarray` returns the binned values, one named dimension per
+  axis that has bins;
+* :meth:`Tally.total` returns the total bin of one or more axes.
+
+The layout follows the MCTAL description in the MCNP manuals and the reader in
+LANL's ``mcnptools`` (BSD-3-Clause, Copyright 2022 Triad National Security,
+LLC), which this module and :mod:`kika.mcnp.parse_mctal` port to Python.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple
+
 import numpy as np
-# Add xarray import for multidimensional labeled data
-try:
-    import xarray as xr
-    XARRAY_AVAILABLE = True
-except ImportError:
-    XARRAY_AVAILABLE = False
+import pandas as pd
+import xarray as xr
+
+#: MCTAL bin axes in file order (``t`` varies fastest).
+AXIS_KEYS: Tuple[str, ...] = ("f", "d", "u", "s", "m", "c", "e", "t")
+
+#: Dimension name used for each axis in the labelled views. ``f`` is renamed
+#: per tally type by :attr:`Tally.region_name`.
+AXIS_NAMES: Dict[str, str] = {
+    "f": "cell",
+    "d": "flag",
+    "u": "user",
+    "s": "segment",
+    "m": "multiplier",
+    "c": "cosine",
+    "r": "radiography",
+    "e": "energy",
+    "t": "time",
+}
+
+#: Lower edge of the first bin of the bounded axes. MCNP prints only upper
+#: bounds; the first bin starts at these values.
+_FIRST_LOWER = {"c": -1.0, "e": 0.0, "t": -np.inf}
+
+#: MCNP6 particle designators in the order of the particle flag list that
+#: follows a ``tally`` line with a negative particle type.
+MCNP6_PARTICLES: Tuple[str, ...] = (
+    "n", "p", "e", "|", "q", "u", "v", "f", "h", "l", "+", "-", "x", "y",
+    "o", "!", "<", ">", "g", "/", "z", "k", "%", "^", "b", "_", "~", "c",
+    "w", "@", "d", "t", "s", "a", "*", "?", "#",
+)
+
+#: Bit flags of a positive particle type (MCNP5 and earlier).
+_MCNP5_PARTICLE_BITS = ((1, "n"), (2, "p"), (4, "e"))
+
+TALLY_KINDS: Dict[int, str] = {
+    1: "surface current",
+    2: "surface flux",
+    4: "cell flux",
+    5: "point detector",
+    6: "energy deposition",
+    7: "fission energy deposition",
+    8: "pulse height",
+}
+
+#: Column names of a KCODE cycle record, in file order (MCNP manual, MCTAL
+#: format; same enumeration as ``mcnptools.MctalKcode``). Records longer than
+#: this keep their extra columns under positional names.
+KCODE_COLUMNS: Tuple[str, ...] = (
+    "keff_collision",
+    "keff_absorption",
+    "keff_track_length",
+    "prompt_removal_lifetime_collision",
+    "prompt_removal_lifetime_absorption",
+    "avg_keff_collision",
+    "avg_keff_collision_std",
+    "avg_keff_absorption",
+    "avg_keff_absorption_std",
+    "avg_keff_track_length",
+    "avg_keff_track_length_std",
+    "avg_keff_combined",
+    "avg_keff_combined_std",
+    "avg_keff_combined_bias_corrected",
+    "avg_keff_combined_bias_corrected_std",
+    "prompt_removal_lifetime_combined",
+    "prompt_removal_lifetime_combined_std",
+    "cycle_histories",
+    "avg_keff_combined_fom",
+)
+
 
 @dataclass
-class Mctal:
-    """Container class for MCNP MCTAL file data.
+class BinAxis:
+    """One of the eight MCTAL bin axes of a tally.
 
-    :ivar code_name: Name of the MCNP code version
-    :type code_name: str
-    :ivar ver: Version number of MCNP
-    :type ver: str
-    :ivar probid: Problem ID string
-    :type probid: str
-    :ivar knod: Code specific parameter
-    :type knod: int
-    :ivar nps: Number of particle histories
-    :type nps: int
-    :ivar rnr: Random number
-    :type rnr: int
-    :ivar problem_id: Problem identification line
-    :type problem_id: str
-    :ivar ntal: Number of tallies
-    :type ntal: int
-    :ivar npert: Number of perturbations
-    :type npert: int
-    :ivar tally_numbers: List of tally numbers
-    :type tally_numbers: List[int]
-    :ivar tally: Dictionary mapping tally numbers to Tally objects
-    :type tally: Dict[int, Tally]
+    :ivar key: MCTAL letter (``f d u s m c e t``; ``r`` replaces ``c`` for
+        radiography tallies).
+    :ivar n: Bin count as written in the file, **including** the total bin.
+        ``0`` means the axis is not binned; it then still holds one value.
+    :ivar values: Numbers listed under the bin line (cell/surface numbers for
+        ``f``, upper bin bounds for ``c``/``e``/``t``), or ``None`` when MCNP
+        lists none (e.g. point detectors, user bins).
+    :ivar has_total: The last bin is the total over the others (``t`` suffix).
+    :ivar cumulative: The bins are cumulative (``c`` suffix).
+    :ivar flags: Extra integers on the bin line after the count, verbatim.
     """
-    # Header information
-    code_name: Optional[str] = None
-    ver: Optional[str] = None
-    probid: Optional[str] = None
-    knod: Optional[int] = None
-    nps: Optional[int] = None
-    rnr: Optional[int] = None
 
-    # Problem identification line
-    problem_id: Optional[str] = None
+    key: str
+    n: int = 0
+    values: Optional[np.ndarray] = None
+    has_total: bool = False
+    cumulative: bool = False
+    flags: Tuple[int, ...] = ()
 
-    # Tally information
-    ntal: Optional[int] = None  # Number of tallies
-    npert: Optional[int] = 0    # Number of perturbations (optional)
-    
-    # Remove n and m as they were incorrectly used
-    # Tally numbers list
-    tally_numbers: List[int] = None
+    @property
+    def size(self) -> int:
+        """Length of this axis in :attr:`Tally.result` (``max(n, 1)``)."""
+        return max(self.n, 1)
 
-    # Change tally to be a dictionary
-    tally: Dict[int, 'Tally'] = None
+    @property
+    def n_bins(self) -> int:
+        """Number of real bins, i.e. without the total bin."""
+        return self.size - int(self.has_total)
 
-    def __post_init__(self):
-        if self.tally_numbers is None:
-            self.tally_numbers = []
-        if self.tally is None:
-            self.tally = {}  
+    @property
+    def is_binned(self) -> bool:
+        """``True`` if the tally card asked for bins on this axis."""
+        return self.n > 0
 
-    def __repr__(self):
-        """Returns a formatted string representation of the MCTAL file data.
-        
-        This method is called when the object is evaluated in interactive environments
-        like Jupyter notebooks or the Python interpreter.
-        
-        :return: Formatted string representation of the MCTAL file
-        :rtype: str
+    @property
+    def has_edges(self) -> bool:
+        """The listed values are all ``n_bins + 1`` bin edges (image grids)."""
+        return self.values is not None and len(self.values) == self.n_bins + 1
+
+    @property
+    def is_bounded(self) -> bool:
+        """The listed values are bin bounds (cosine, energy, time, image grids)."""
+        if self.values is None or self.key == "f":
+            return False
+        return self.has_edges or (self.key in _FIRST_LOWER and len(self.values) >= self.n_bins)
+
+    @property
+    def upper(self) -> Optional[np.ndarray]:
+        """Upper bounds of the real bins, or ``None`` if the axis has no bounds."""
+        if not self.is_bounded:
+            return None
+        if self.has_edges:
+            return np.asarray(self.values[1:], dtype=float)
+        return np.asarray(self.values[: self.n_bins], dtype=float)
+
+    @property
+    def lower(self) -> Optional[np.ndarray]:
+        """Lower bounds of the real bins, or ``None`` if the axis has no bounds.
+
+        MCNP lists only upper bounds for cosine, energy and time; the first
+        lower bound is then ``-1``, ``0`` and ``-inf`` respectively, as MCNP
+        defines those bins.
         """
-        # Create a visually appealing header with a border
-        header_width = 70
-        header = "=" * header_width + "\n"
-        header += f"{'MCTAL File Summary':^{header_width}}\n"
-        header += "=" * header_width + "\n\n"
-        
-        # Create aligned key-value pairs with consistent width
-        label_width = 20
-        
-        # General information section
-        info_lines = []
-        if self.code_name:
-            info_lines.append(f"{'Code:':>{label_width}} {self.code_name} {self.ver}")
-        if self.probid:
-            info_lines.append(f"{'Problem ID:':>{label_width}} {self.probid}")
-        if self.nps:
-            info_lines.append(f"{'NPS:':>{label_width}} {self.nps:.2e}")
-        if self.problem_id:
-            info_lines.append(f"{'Title:':>{label_width}} {self.problem_id}")
-        
-        info_section = "\n".join(info_lines)
-        
-        # Tally information section
-        tally_section = "\n\nTally Information:\n"
-        tally_section += f"{'Total Tallies:':>{label_width}} {self.ntal}\n"
-        
-        if self.tally:
-            # Group tallies by type (last digit)
-            tally_types = {}
-            for tally_id in self.tally:
-                # MCNP tally type is determined by the last digit of the tally number
-                tally_type = f"F{tally_id % 10}"
-                if tally_type not in tally_types:
-                    tally_types[tally_type] = []
-                tally_types[tally_type].append(tally_id)
-            
-            if tally_types:
-                tally_section += "\nTally Type Distribution:\n"
-                tally_section += "-" * header_width + "\n"
-                tally_section += f"{'Type':^10}|{'Description':^30}|{'Tally IDs':^{header_width-42}}\n"
-                tally_section += "-" * header_width + "\n"
-                
-                # Descriptions of MCNP tally types
-                descriptions = {
-                    'F1': 'Surface current',
-                    'F2': 'Surface flux',
-                    'F4': 'Cell flux',
-                    'F5': 'Point detector',
-                    'F6': 'Energy deposition',
-                    'F7': 'Fission energy deposition',
-                    'F8': 'Pulse height'
-                }
-                
-                # Sort by tally type number
-                for tally_type in sorted(tally_types.keys()):
-                    description = descriptions.get(tally_type, 'Other')
-                    
-                    # Format the tally IDs in a readable way
-                    tally_ids = sorted(tally_types[tally_type])
-                    
-                    # Group consecutive tally IDs for more compact display
-                    grouped_ids = []
-                    start_id = tally_ids[0]
-                    prev_id = tally_ids[0]
-                    
-                    for i in range(1, len(tally_ids)):
-                        if tally_ids[i] > prev_id + 1:  # Not consecutive
-                            if start_id == prev_id:
-                                grouped_ids.append(str(start_id))
-                            else:
-                                grouped_ids.append(f"{start_id}-{prev_id}")
-                            start_id = tally_ids[i]
-                        prev_id = tally_ids[i]
-                    
-                    # Add the last group
-                    if start_id == prev_id:
-                        grouped_ids.append(str(start_id))
-                    else:
-                        grouped_ids.append(f"{start_id}-{prev_id}")
-                    
-                    # Format the grouped IDs as a comma-separated list
-                    tally_id_text = ", ".join(grouped_ids)
-                    
-                    # Handle wrapping for long tally ID lists
-                    id_width = header_width - 42
-                    if len(tally_id_text) > id_width:
-                        # Wrap the text
-                        wrapped_ids = []
-                        current_line = ""
-                        for group in grouped_ids:
-                            if len(current_line) + len(group) + 2 > id_width:  # +2 for ", "
-                                wrapped_ids.append(current_line)
-                                current_line = group
-                            else:
-                                if current_line:
-                                    current_line += ", " + group
-                                else:
-                                    current_line = group
-                        if current_line:
-                            wrapped_ids.append(current_line)
-                        
-                        # First line goes in the table row
-                        tally_section += f"{tally_type:^10}|{description:^30}|{wrapped_ids[0]:<{id_width}}\n"
-                        
-                        # Continuation lines
-                        for line in wrapped_ids[1:]:
-                            tally_section += f"{' ':^10}|{' ':^30}|{line:<{id_width}}\n"
-                    else:
-                        tally_section += f"{tally_type:^10}|{description:^30}|{tally_id_text:<{id_width}}\n"
-                
-                tally_section += "-" * header_width + "\n"
-        
-        # Perturbation summary
-        pert_section = ""
-        tallies_with_pert = [(tid, len(t.perturbation)) for tid, t in self.tally.items() if t.perturbation]
-        if tallies_with_pert:
-            pert_section = "\n\nPerturbation Data Summary:\n"
-            pert_section += "-" * header_width + "\n"
-            pert_section += f"{'Tally ID':^15}|{'Perturbations':^25}|{'Perturbation IDs':^{header_width-42}}\n"
-            pert_section += "-" * header_width + "\n"
-            
-            for tally_id, pert_count in sorted(tallies_with_pert):
-                # Get and format perturbation IDs
-                pert_ids = sorted(self.tally[tally_id].perturbation.keys())
-                
-                # Group consecutive perturbation IDs
-                grouped_ids = []
-                if pert_ids:
-                    start_id = pert_ids[0]
-                    prev_id = pert_ids[0]
-                    
-                    for i in range(1, len(pert_ids)):
-                        if pert_ids[i] > prev_id + 1:  # Not consecutive
-                            if start_id == prev_id:
-                                grouped_ids.append(str(start_id))
-                            else:
-                                grouped_ids.append(f"{start_id}-{prev_id}")
-                            start_id = pert_ids[i]
-                        prev_id = pert_ids[i]
-                    
-                    # Add the last group
-                    if start_id == prev_id:
-                        grouped_ids.append(str(start_id))
-                    else:
-                        grouped_ids.append(f"{start_id}-{prev_id}")
-                
-                pert_id_text = ", ".join(grouped_ids)
-                
-                # Handle wrapping for long perturbation ID lists
-                id_width = header_width - 42
-                if len(pert_id_text) > id_width:
-                    # First line with tally ID and count
-                    pert_section += f"{tally_id:^15}|{pert_count:^25}|{pert_id_text[:id_width]:<{id_width}}\n"
-                    
-                    # Continuation lines
-                    remaining = pert_id_text[id_width:]
-                    while remaining:
-                        next_chunk = remaining[:id_width]
-                        remaining = remaining[id_width:]
-                        pert_section += f"{' ':^15}|{' ':^25}|{next_chunk:<{id_width}}\n"
-                else:
-                    pert_section += f"{tally_id:^15}|{pert_count:^25}|{pert_id_text:<{id_width}}\n"
-            
-            pert_section += "-" * header_width + "\n"
-            pert_section += f"Total: {sum(count for _, count in tallies_with_pert)} perturbations across {len(tallies_with_pert)} tallies\n"
-        
-        # Add improved table-formatted information about methods
-        methods_section = "\n\nAvailable Methods:\n"
-        methods_section += "-" * header_width + "\n"
-        
-        # Set column widths for method and description
-        method_col_width = 25
-        desc_col_width = header_width - method_col_width - 3  # -3 for spacing and formatting
-        
-        methods_section += "{:<{width1}} {:<{width2}}\n".format(
-            "Method", "Description", width1=method_col_width, width2=desc_col_width)
-        methods_section += "-" * header_width + "\n"
-        
-        # Function to add a method and description with proper wrapping
-        def add_method(method, description):
-            nonlocal methods_section
-            if len(description) <= desc_col_width:
-                methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                    method, description, width1=method_col_width, width2=desc_col_width)
-            else:
-                # Handle wrapping for long descriptions
-                methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                    method, description[:desc_col_width], width1=method_col_width, width2=desc_col_width)
-                remaining = description[desc_col_width:]
-                while remaining:
-                    chunk = remaining[:desc_col_width].strip()
-                    remaining = remaining[len(chunk):].strip()
-                    methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                        "", chunk, width1=method_col_width, width2=desc_col_width)
-        
-        # Add each method with its description
-        add_method(".tally[tally_id]", "Access individual tallies")
-        
-        methods_section += "-" * header_width + "\n"
-        
-        # Combine all sections
-        return header + info_section + tally_section + pert_section + methods_section
+        if not self.is_bounded:
+            return None
+        if self.has_edges:
+            return np.asarray(self.values[:-1], dtype=float)
+        return np.concatenate(([_FIRST_LOWER[self.key]], self.upper[:-1]))
 
-class PerturbationCollection(dict):
-    """A collection class for perturbation data that provides a nice summary representation.
-    
-    This class extends the standard dictionary with a custom __repr__ method
-    to provide a formatted summary of the perturbation data.
+    @property
+    def is_informative(self) -> bool:
+        """The axis is worth a dimension: binned, and more than one bin or labelled."""
+        return self.is_binned and (self.n_bins > 1 or self.values is not None or self.key == "f")
+
+    def labels(self) -> np.ndarray:
+        """Coordinate values for the real bins of this axis.
+
+        Upper bounds for bounded axes, the listed numbers for ``f`` (a ``0``
+        there is a union of cells or surfaces), and the 1-based bin index
+        otherwise.
+        """
+        if self.is_bounded:
+            return self.upper
+        if self.values is not None and len(self.values) == self.n_bins:
+            vals = np.asarray(self.values)
+            if np.all(vals == np.round(vals)):
+                return vals.astype(np.int64)
+            return vals
+        return np.arange(1, self.n_bins + 1)
+
+
+@dataclass
+class Tfc:
+    """Tally fluctuation chart of one tally (or one perturbation of it).
+
+    :ivar bins: 0-based index, per axis key, of the bin MCNP tracks.
+    :ivar nps: Histories at each print.
+    :ivar result: Tally value at each print.
+    :ivar error: Relative error at each print.
+    :ivar fom: Figure of merit at each print (``0`` when MCNP omits it).
     """
-    
-    def __repr__(self):
-        """Returns a condensed formatted summary of the perturbation data.
-        
-        :return: Formatted string showing perturbation summary
-        :rtype: str
+
+    bins: Dict[str, int]
+    nps: np.ndarray
+    result: np.ndarray
+    error: np.ndarray
+    fom: np.ndarray
+
+    def to_dataframe(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {"nps": self.nps, "result": self.result, "error": self.error, "fom": self.fom}
+        )
+
+    def plot(self, figsize=(15, 5), show_error_bars: bool = True):
+        """Plot result, relative error and figure of merit against NPS.
+
+        :returns: The matplotlib figure.
         """
-        if not self:
-            return "No perturbation data available"
-            
-        # Get sorted perturbation numbers
-        pert_nums = sorted(self.keys())
-        
-        # Find ranges of consecutive perturbation numbers
-        ranges = []
-        start = pert_nums[0]
-        prev = pert_nums[0]
-        
-        for i in range(1, len(pert_nums)):
-            # If there's a gap in sequence
-            if pert_nums[i] > prev + 1:
-                # Add the completed range
-                if start == prev:
-                    ranges.append(str(start))
-                else:
-                    ranges.append(f"{start}-{prev}")
-                # Start a new range
-                start = pert_nums[i]
-            prev = pert_nums[i]
-        
-        # Add the last range
-        if start == prev:
-            ranges.append(str(start))
+        import matplotlib.pyplot as plt
+
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=figsize)
+        if show_error_bars:
+            ax1.errorbar(self.nps, self.result, yerr=self.error * np.abs(self.result),
+                         fmt="b.-", capsize=3, ecolor="lightblue")
         else:
-            ranges.append(f"{start}-{prev}")
-        
-        # Build the compact summary
-        width = 60
-        header = f"{'=' * width}\n"
-        header += f"{'Perturbation Collection':^{width}}\n"
-        header += f"{'=' * width}\n\n"
-        
-        # Summary line with total count
-        summary = f"Total: {len(self)} perturbations\n"
-        
-        # Ranges information
-        range_info = "Perturbation numbers: " + ", ".join(ranges) + "\n"
-        
-        # Access instructions
-        instructions = "\nAccess:\n- perturbation[num] for individual perturbations\n"
-        instructions += "- .to_dataframe() to convert all to DataFrame\n"
-        
-        return header + summary + range_info  + instructions
-    
-    def to_dataframe(self):
-        """Converts all perturbation data to a pandas DataFrame.
-        
-        :return: DataFrame containing data from all perturbations
-        :rtype: pandas.DataFrame
-        """
-        if not self:
-            return pd.DataFrame()
-        
-        data = []
-        for pert_num, pert_data in self.items():
-            if hasattr(pert_data, 'to_dataframe'):
-                df = pert_data.to_dataframe()
-                df['Perturbation'] = pert_num  # Add the perturbation number
-                data.append(df)
-        
-        if data:
-            return pd.concat(data, ignore_index=True)
-        else:
-            return pd.DataFrame()
+            ax1.plot(self.nps, self.result, "b.-")
+        ax1.set(xlabel="NPS", ylabel="Result", title="Result vs NPS")
+        ax2.plot(self.nps, self.error, "r.-")
+        ax2.set(xlabel="NPS", ylabel="Relative error", title="Error vs NPS")
+        ax3.plot(self.nps, self.fom, "g.-")
+        ax3.set(xlabel="NPS", ylabel="Figure of merit", title="FOM vs NPS")
+        for ax in (ax1, ax2, ax3):
+            ax.grid(True)
+        fig.tight_layout()
+        return fig
+
+
+@dataclass
+class Perturbation:
+    """Results of one PERT card for a tally; same shape as the unperturbed one.
+
+    :ivar number: PERT card number.
+    :ivar result: Values as MCNP writes them under ``vals pert`` (the
+        perturbed difference, or a Taylor coefficient with METHOD=2/3), with
+        the shape of :attr:`Tally.result`.
+    :ivar error: Relative errors, same shape.
+    :ivar tfc: Fluctuation chart of the perturbation, if written.
+    """
+
+    number: int
+    result: np.ndarray
+    error: np.ndarray
+    tfc: Optional[Tfc] = None
+
 
 @dataclass
 class Tally:
-    """Container for MCNP tally data.
+    """One tally of a MCTAL file.
 
-    :ivar tally_id: Unique identifier for the tally
-    :type tally_id: int
-    :ivar name: Name/description of the tally
-    :type name: str
-    :ivar n_cells_surfaces: Number of cells or surfaces where the tally is scored
-    :type n_cells_surfaces: int
-    :ivar cell_surface_ids: List of cell or surface IDs
-    :type cell_surface_ids: List[int]
-    :ivar n_direct_bins: Number of direct vs. total or flagged vs. unflagged bins
-    :type n_direct_bins: int
-    :ivar n_user_bins: Number of user bins
-    :type n_user_bins: int
-    :ivar _has_total_user_bin: Whether user bins include a total bin (private)
-    :type _has_total_user_bin: bool
-    :ivar _has_cumulative_user_bin: Whether user bins are cumulative (private)
-    :type _has_cumulative_user_bin: bool
-    :ivar n_segment_bins: Number of segment bins
-    :type n_segment_bins: int
-    :ivar _has_total_segment_bin: Whether segment bins include a total bin (private)
-    :type _has_total_segment_bin: bool
-    :ivar _has_cumulative_segment_bin: Whether segment bins are cumulative (private)
-    :type _has_cumulative_segment_bin: bool
-    :ivar n_multiplier_bins: Number of multiplier bins
-    :type n_multiplier_bins: int
-    :ivar _has_total_multiplier_bin: Whether multiplier bins include a total bin (private)
-    :type _has_total_multiplier_bin: bool
-    :ivar _has_cumulative_multiplier_bin: Whether multiplier bins are cumulative (private)
-    :type _has_cumulative_multiplier_bin: bool
-    :ivar n_cosine_bins: Number of cosine bins
-    :type n_cosine_bins: int
-    :ivar _has_total_cosine_bin: Whether cosine bins include a total bin (private)
-    :type _has_total_cosine_bin: bool
-    :ivar _has_cumulative_cosine_bin: Whether cosine bins are cumulative (private)
-    :type _has_cumulative_cosine_bin: bool
-    :ivar n_energy_bins: Number of energy bins
-    :type n_energy_bins: int
-    :ivar _has_total_energy_bin: Whether energy bins include a total bin (private)
-    :type _has_total_energy_bin: bool
-    :ivar _has_cumulative_energy_bin: Whether energy bins are cumulative (private)
-    :type _has_cumulative_energy_bin: bool
-    :ivar energies: Energy bin boundaries
-    :type energies: List[float]
-    :ivar n_time_bins: Number of time bins
-    :type n_time_bins: int
-    :ivar _has_total_time_bin: Whether time bins include a total bin (private)
-    :type _has_total_time_bin: bool
-    :ivar _has_cumulative_time_bin: Whether time bins are cumulative (private)
-    :type _has_cumulative_time_bin: bool
-    :ivar times: Time bin boundaries
-    :type times: List[float]
-    :ivar total_energy_result: Result for the total energy bin (if present)
-    :type total_energy_result: float
-    :ivar total_energy_error: Error for the total energy bin (if present)
-    :type total_energy_error: float
-    :ivar results: Tally results for each bin (excluding totals)
-    :type results: List[float]
-    :ivar errors: Relative errors for each bin (excluding totals)
-    :type errors: List[float]
-    :ivar integral_result: Integral result over all bins
-    :type integral_result: float
-    :ivar integral_error: Relative error of the integral result
-    :type integral_error: float
-    :ivar tfc_nps: Number of particles for TFC analysis
-    :type tfc_nps: List[int]
-    :ivar tfc_results: Results at each TFC step
-    :type tfc_results: List[float]
-    :ivar tfc_errors: Errors at each TFC step
-    :type tfc_errors: List[float]
-    :ivar tfc_fom: Figure of Merit at each TFC step
-    :type tfc_fom: List[float]
-    :ivar perturbation: Perturbation data keyed by perturbation index
-    :type perturbation: PerturbationCollection
+    :ivar id: Tally number.
+    :ivar particles: Particle designators the tally scores (``["n"]``, ...).
+    :ivar detector_type: Detector type from the ``tally`` line: 0 none,
+        1 point, 2 ring, 3 pinhole / 4 rectangular / 5 cylindrical radiograph;
+        for a TMESH tally minus the mesh type (-1 rectangular, -2 cylindrical,
+        -3 spherical).
+    :ivar modifier: Tally modifier from the ``tally`` line: 0 none, 1 for an
+        ``*F`` tally, 2 for a ``+F`` tally.
+    :ivar header: All integers of the ``tally`` line after the number, verbatim.
+    :ivar comment: FC card text (lines joined with newlines), ``""`` if none.
+    :ivar axes: The eight bin axes, keyed by MCTAL letter in file order.
+    :ivar result: Values, shape ``tuple(a.size for a in axes.values())``,
+        totals included.
+    :ivar error: Relative errors, same shape.
+    :ivar tfc: Fluctuation chart, if written.
+    :ivar perturbations: PERT results keyed by PERT card number.
     """
-    tally_id: int
-    name: str = ""
-    # Cell/surface attributes
-    n_cells_surfaces: int = 0
-    cell_surface_ids: List[int] = None
-    # Direct/total bins
-    n_direct_bins: int = 1
-    # User bin attributes
-    n_user_bins: int = 0
-    _has_total_user_bin: bool = False
-    _has_cumulative_user_bin: bool = False
-    # Segment bin attributes
-    n_segment_bins: int = 0
-    _has_total_segment_bin: bool = False
-    _has_cumulative_segment_bin: bool = False
-    # Multiplier bin attributes
-    n_multiplier_bins: int = 0
-    _has_total_multiplier_bin: bool = False
-    _has_cumulative_multiplier_bin: bool = False
-    # Cosine bin attributes
-    n_cosine_bins: int = 0
-    _has_total_cosine_bin: bool = False
-    _has_cumulative_cosine_bin: bool = False
-    # Energy bin attributes
-    n_energy_bins: int = 0
-    _has_total_energy_bin: bool = False
-    _has_cumulative_energy_bin: bool = False
-    energies: List[float] = None
-    # Time bin attributes
-    n_time_bins: int = 0
-    _has_total_time_bin: bool = False
-    _has_cumulative_time_bin: bool = False
-    times: List[float] = None
-    # Separate storage for total energy bin
-    total_energy_result: Optional[float] = None
-    total_energy_error: Optional[float] = None
-    # Result data
-    results: List[float] = None
-    errors: List[float] = None
-    integral_result: Optional[float] = None
-    integral_error: Optional[float] = None
-    # TFC data (unperturbed)
-    tfc_nps: List[int] = None
-    tfc_results: List[float] = None
-    tfc_errors: List[float] = None
-    tfc_fom: List[float] = None
-    # Perturbation data
-    perturbation: PerturbationCollection = None
-    
-    def __post_init__(self):
-        if self.energies is None:
-            self.energies = []
-        if self.results is None:
-            self.results = []
-        if self.errors is None:
-            self.errors = []
-        if self.tfc_nps is None:
-            self.tfc_nps = []
-        if self.tfc_results is None:
-            self.tfc_results = []
-        if self.tfc_errors is None:
-            self.tfc_errors = []
-        if self.tfc_fom is None:
-            self.tfc_fom = []
-        if self.cell_surface_ids is None:
-            self.cell_surface_ids = []
-        if self.times is None:
-            self.times = []
-        # Convert existing dictionary to PerturbationCollection or create a new one
-        if self.perturbation is None:
-            self.perturbation = PerturbationCollection()
-        elif not isinstance(self.perturbation, PerturbationCollection):
-            # Convert existing dict to PerturbationCollection
-            self.perturbation = PerturbationCollection(self.perturbation)
 
-    def __repr__(self):
-        """Returns a formatted string representation of the tally.
-        
-        This method is called when the object is evaluated in interactive environments
-        like Jupyter notebooks or the Python interpreter.
-        
-        :return: Formatted string representation of the tally
-        :rtype: str
-        """
-        # Create a visually appealing header with a border
-        header_width = 85
-        header = "=" * header_width + "\n"
-        header += f"{'MCNP Tally ' + str(self.tally_id):^{header_width}}\n"
-        if self.name:
-            header += f"{self.name:^{header_width}}\n"
-        header += "=" * header_width + "\n\n"
-        
-        # Create simplified section for dimensions with improved formatting
-        dimensions = self.get_dimensions()
-        dim_section = "Dimensions:\n"
-        dim_section += "-" * header_width + "\n"
-        
-        # Simplified table with just Dimension and Size columns
-        dim_table = "{:<20} {:<15}\n".format("Dimension", "Size")
-        dim_section += dim_table
-        dim_section += "-" * header_width + "\n"
-        
-        if dimensions:
-            # Add row for each dimension
-            if 'cell' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Cell/Surface", dimensions['cell'])
-            if 'user' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("User", dimensions['user'])
-            if 'segment' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Segment", dimensions['segment'])
-            if 'multiplier' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Multiplier", dimensions['multiplier'])
-            if 'cosine' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Cosine", dimensions['cosine'])
-            if 'energy' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Energy", dimensions['energy'])
-            if 'time' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Time", dimensions['time'])
-        else:
-            dim_section += "{:<20} {:<15}\n".format("None", "0")
-        
-        dim_section += "-" * header_width + "\n"
-        dim_section += f"Total Results: {len(self.results)}\n\n"
-        
-        # Additional information with aligned labels and bullet points
-        additional_info = []
-        if self._has_total_energy_bin and self.total_energy_result is not None:
-            additional_info.append("• Integral energy data available")
-        if self.perturbation:
-            additional_info.append(f"• {len(self.perturbation)} perturbations")
-        if self.tfc_nps:
-            additional_info.append(f"• {len(self.tfc_nps)} TFC data points")
-        
-        additional = ""
-        if additional_info:
-            additional = "\nAdditional Information:\n"
-            additional += "\n".join(additional_info)
-            additional += "\n\n"
-        
-        # Available methods in improved table format with better wrapping
-        methods_section = "\nAvailable Methods:\n"
-        methods_section += "-" * header_width + "\n"
-        
-        # Improved method table with better spacing
-        method_col_width = 33
-        desc_col_width = header_width - method_col_width - 3  # -3 for spacing and formatting
-        
-        methods_section += "{:<{width1}} {:<{width2}}\n".format(
-            "Method", "Description", width1=method_col_width, width2=desc_col_width)
-        methods_section += "-" * header_width + "\n"
-        
-        # Function to add a method and description with proper wrapping
-        def add_method(method, description):
-            nonlocal methods_section
-            if len(description) <= desc_col_width:
-                methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                    method, description, width1=method_col_width, width2=desc_col_width)
-            else:
-                # Handle wrapping for long descriptions
-                methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                    method, description[:desc_col_width], width1=method_col_width, width2=desc_col_width)
-                remaining = description[desc_col_width:]
-                while remaining:
-                    chunk = remaining[:desc_col_width].strip()
-                    remaining = remaining[len(chunk):].strip()
-                    methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                        "", chunk, width1=method_col_width, width2=desc_col_width)
-        
-        # Add each method with its description
-        add_method(".to_dataframe()", "Get results as pandas DataFrame")
-        if XARRAY_AVAILABLE:
-            add_method(".to_xarray()", "Get results as labeled multidimensional dataset")
-            add_method(".get_slice(...)", "Extract specific slices of the data")
-        add_method(".get_integral_energy_data()", "Get energy-integrated data as dictionary")
-        add_method(".get_integral_energy_dataframe()", "Get energy-integrated data as DataFrame")
-        add_method(".get_dimensions()", "Get dictionary of tally dimensions and sizes")
-        add_method(".plot_tfc_data()", "Visualize convergence with plots")
-        
-        if self.perturbation:
-            add_method(".perturbation", "Access perturbation collection")
-        
-        methods_section += "-" * header_width + "\n"
-        
-        return header + dim_section + additional + methods_section
+    id: int
+    particles: List[str] = field(default_factory=list)
+    detector_type: int = 0
+    modifier: int = 0
+    header: Tuple[int, ...] = ()
+    comment: str = ""
+    axes: Dict[str, BinAxis] = field(default_factory=dict)
+    result: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    error: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    tfc: Optional[Tfc] = None
+    perturbations: Dict[int, Perturbation] = field(default_factory=dict)
 
-    def _is_multidimensional(self) -> bool:
-        """Internal method to determine if the tally has multiple dimensions.
-        
-        :return: True if tally has multiple non-trivial dimensions, False otherwise
-        :rtype: bool
-        """
-        dimension_count = 0
-        if self.n_cells_surfaces > 0:
-            dimension_count += 1
-        if self.n_user_bins > 0:
-            dimension_count += 1
-        if self.n_segment_bins > 0:
-            dimension_count += 1
-        if self.n_multiplier_bins > 0:
-            dimension_count += 1
-        if self.n_cosine_bins > 0:
-            dimension_count += 1
-        if self.n_energy_bins > 0:
-            dimension_count += 1
-        if self.n_time_bins > 0:
-            dimension_count += 1
-        return dimension_count > 1
+    # -- descriptive -----------------------------------------------------
 
-    def get_dimensions(self) -> dict:
-        """Get all dimensions of the tally with their sizes.
-        
-        :return: Dictionary with dimension names as keys and their sizes as values,
-                 in order: cell, user, segment, multiplier, cosine, energy, time
-        :rtype: dict
-        """
-        dimensions = {}
-        if self.n_cells_surfaces > 0:
-            dimensions['cell'] = self.n_cells_surfaces
-        if self.n_user_bins > 0:
-            dimensions['user'] = self.n_user_bins
-        if self.n_segment_bins > 0:
-            dimensions['segment'] = self.n_segment_bins
-        if self.n_multiplier_bins > 0:
-            dimensions['multiplier'] = self.n_multiplier_bins
-        if self.n_cosine_bins > 0:
-            dimensions['cosine'] = self.n_cosine_bins
-        if self.n_energy_bins > 0:
-            energy_bin_count = self.n_energy_bins
-            if self._has_total_energy_bin:
-                energy_bin_count -= 1
-            dimensions['energy'] = energy_bin_count
-        if self.n_time_bins > 0:
-            dimensions['time'] = self.n_time_bins
-        return dimensions
+    @property
+    def kind(self) -> str:
+        """Tally type from the last digit of the number (``"cell flux"``...).
 
-    def get_shaped_results(self) -> np.ndarray:
-        """Reshape the flat results array into a multidimensional array.
-        
-        :return: Multidimensional array of results
-        :rtype: numpy.ndarray
+        A TMESH tally is ``"mesh"``: its number does not follow the F-card
+        convention.
         """
-        dimensions = self.get_dimensions()
-        dims = list(dimensions.values())
-        
-        if not dims:
-            return np.array(self.results)
-            
-        # Ensure the product of dimensions matches the result count
-        expected_size = np.prod(dims)
-        if len(self.results) != expected_size:
-            # If sizes don't match, provide detailed error message
-            raise ValueError(
-                f"Cannot reshape results array of size {len(self.results)} into shape {tuple(dims)}. "
-                f"Expected size: {expected_size}. Dimensions: {dimensions}"
-            )
-            
-        return np.array(self.results).reshape(dims)
+        if self.is_mesh:
+            return "mesh"
+        return TALLY_KINDS.get(self.id % 10, "other")
 
-    def get_shaped_errors(self) -> np.ndarray:
-        """Reshape the flat errors array into a multidimensional array.
-        
-        :return: Multidimensional array of errors
-        :rtype: numpy.ndarray
-        """
-        dimensions = self.get_dimensions()
-        dims = list(dimensions.values())
-        
-        if not dims:
-            return np.array(self.errors)
-            
-        # Ensure the product of dimensions matches the error count
-        expected_size = np.prod(dims)
-        if len(self.errors) != expected_size:
-            # If sizes don't match, provide detailed error message
-            raise ValueError(
-                f"Cannot reshape errors array of size {len(self.errors)} into shape {tuple(dims)}. "
-                f"Expected size: {expected_size}. Dimensions: {dimensions}"
-            )
-            
-        return np.array(self.errors).reshape(dims)
+    @property
+    def region_name(self) -> str:
+        """Name of the ``f`` dimension: ``surface``, ``detector`` or ``cell``."""
+        return {1: "surface", 2: "surface", 5: "detector"}.get(self.id % 10, "cell")
 
-    def _debug_dimensions(self):
-        """Debug helper to print dimension information.
-        
-        :return: Detailed dimension information
-        :rtype: str
-        """
-        dimensions = self.get_dimensions()
-        dims = list(dimensions.values())
-        dim_names = list(dimensions.keys())
-        
-        info = []
-        info.append(f"Results array size: {len(self.results)}")
-        info.append(f"Errors array size: {len(self.errors)}")
-        info.append(f"Dimension names: {dim_names}")
-        info.append(f"Dimension sizes: {dims}")
-        
-        if dims:
-            expected_size = np.prod(dims)
-            info.append(f"Expected size from dimensions: {expected_size}")
-            
-            if expected_size != len(self.results):
-                info.append("WARNING: Size mismatch between results and calculated dimensions!")
-                
-                # Add more detailed debug info
-                info.append("\nDetailed dimension information:")
-                if self.n_cells_surfaces > 0:
-                    info.append(f"  cells/surfaces: {self.n_cells_surfaces}")
-                if self.n_user_bins > 0:
-                    info.append(f"  user bins: {self.n_user_bins} (has_total: {self._has_total_user_bin})")
-                if self.n_segment_bins > 0:
-                    info.append(f"  segment bins: {self.n_segment_bins} (has_total: {self._has_total_segment_bin})")
-                if self.n_multiplier_bins > 0:
-                    info.append(f"  multiplier bins: {self.n_multiplier_bins} (has_total: {self._has_total_multiplier_bin})")
-                if self.n_cosine_bins > 0:
-                    info.append(f"  cosine bins: {self.n_cosine_bins} (has_total: {self._has_total_cosine_bin})")
-                if self.n_energy_bins > 0:
-                    info.append(f"  energy bins: {self.n_energy_bins} (has_total: {self._has_total_energy_bin})")
-                    info.append(f"  energy bin boundaries: {len(self.energies)}")
-                    if self._has_total_energy_bin:
-                        info.append(f"  total energy result: {self.total_energy_result is not None}")
-                if self.n_time_bins > 0:
-                    info.append(f"  time bins: {self.n_time_bins} (has_total: {self._has_total_time_bin})")
-                
-                # Add raw data size check
-                if self._has_total_energy_bin:
-                    n_energy_bins = self.n_energy_bins
-                    expected_total_vals = expected_size // (n_energy_bins - 1) if n_energy_bins > 1 else 0
-                    info.append(f"  expected total energy values: ~{expected_total_vals}")
-        
-        return "\n".join(info)
+    @property
+    def is_radiograph(self) -> bool:
+        """FIP/FIR/FIC image tally: ``s`` and ``c`` are the image grid axes."""
+        return self.detector_type >= 3
 
-    def to_xarray(self):
-        """Convert tally data to an xarray Dataset with labeled dimensions.
-        
-        :return: Dataset containing tally results and errors with labeled dimensions
-        :rtype: xarray.Dataset
-            
-        :note: This method does not include energy-integrated data. Use get_integral_energy_data()
-               to access energy-integrated results.
-        """
-        if not XARRAY_AVAILABLE:
-            raise ImportError("xarray is required for this method. Install with 'pip install xarray'")
-        
-        try:
-            # Define dimension names and coordinates
-            dimensions = self.get_dimensions()
-            dims = list(dimensions.keys())
-            coords = {}
-            
-            if 'cell' in dimensions:
-                coords['cell'] = self.cell_surface_ids
-            
-            if 'user' in dimensions:
-                # For user bins, we don't have specific coordinates, so use indices
-                coords['user'] = list(range(dimensions['user']))
-            
-            if 'segment' in dimensions:
-                coords['segment'] = list(range(dimensions['segment']))
-            
-            if 'multiplier' in dimensions:
-                coords['multiplier'] = list(range(dimensions['multiplier']))
-            
-            if 'cosine' in dimensions:
-                coords['cosine'] = list(range(dimensions['cosine']))
-            
-            if 'energy' in dimensions:
-                # For energy dimension, use the actual energy values if available
-                energy_bin_count = dimensions['energy']
-                
-                # Use energy values or indices as coordinates
-                if len(self.energies) > 0:
-                    coords['energy'] = self.energies
-                else:
-                    coords['energy'] = list(range(energy_bin_count))
-            
-            if 'time' in dimensions:
-                # For time bins, use the actual time values if available
-                if self.times:
-                    coords['time'] = self.times
-                else:
-                    # Otherwise use indices
-                    coords['time'] = list(range(dimensions['time']))
-            
-            # Get the shaped results and errors - these should now exclude total bins
-            shaped_results = self.get_shaped_results()
-            shaped_errors = self.get_shaped_errors()
-            
-            # Create the initial dataset with regular results
-            if not dims:  # No dimensions
-                data_vars = {
-                    'result': ([], self.results[0] if self.results else np.nan),
-                    'error': ([], self.errors[0] if self.errors else np.nan)
-                }
-            else:
-                data_vars = {
-                    'result': (dims, shaped_results),
-                    'error': (dims, shaped_errors)
-                }
-            
-            ds = xr.Dataset(data_vars=data_vars, coords=coords)
-            return ds
-            
-        except Exception as e:
-            # Include detailed debug information in the error message
-            error_msg = f"Failed to create xarray dataset: {str(e)}\n\n"
-            error_msg += self._debug_dimensions()
-            raise ValueError(error_msg)
+    @property
+    def is_mesh(self) -> bool:
+        """TMESH tally written to MCTAL: the ``f`` axis is a mesh."""
+        return self.detector_type < 0
 
-    def get_slice(self, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
-        """Extract a slice of results and errors by specifying dimension values.
-        
-        :param kwargs: Dimension name and value pairs. For dimensions with explicit 
-                       coordinates (like energy or time), use the coordinate value.
-                       For dimensions without explicit values, use the index.
-        :type kwargs: dict
-        :return: Tuple of (results, errors) arrays for the specified slice
-        :rtype: tuple(numpy.ndarray, numpy.ndarray)
-        
-        :example:
-            # Select by actual energy value (MeV)
-            tally.get_slice(energy=1.0)  
-            
-            # Select by segment index
-            tally.get_slice(segment=1)
-            
-            # Combine multiple dimensions
-            tally.get_slice(energy=1.0, segment=1)
-        """
-        if XARRAY_AVAILABLE:
-            # Use xarray for easier slicing with named dimensions
-            ds = self.to_xarray()
-            try:
-                sliced = ds.sel(**kwargs)
-                return sliced.result.values, sliced.error.values
-            except Exception as e:
-                raise ValueError(f"Failed to get slice: {str(e)}")
-        else:
-            # Fallback to numpy slicing
-            results = self.get_shaped_results()
-            errors = self.get_shaped_errors()
-            
-            dimensions = self.get_dimensions()
-            dim_names = list(dimensions.keys())
-            if not dim_names:
-                return results, errors
-            
-            # Create slice objects for each dimension
-            slices = [slice(None)] * len(dim_names)
-            
-            for dim_name, idx in kwargs.items():
-                if dim_name in dim_names:
-                    dim_idx = dim_names.index(dim_name)
-                    slices[dim_idx] = idx
-                else:
-                    raise ValueError(f"Unknown dimension: {dim_name}. Available dimensions: {dim_names}")
-            
-            return results[tuple(slices)], errors[tuple(slices)]
-
-    def to_dataframe(self):
-        """Converts tally data to a pandas DataFrame.
-        
-        For simple tallies with only energy dependence, creates a DataFrame with
-        'Energy', 'Result', and 'Error' columns. For multidimensional tallies,
-        creates a flattened DataFrame with columns for each dimension.
-        
-        :return: DataFrame containing the tally data
-        :rtype: pandas.DataFrame
-            
-        :note: This method does not include energy-integrated data. Use get_integral_energy_dataframe()
-               to access energy-integrated results.
-        """
-        try:
-            # For simple energy-only tallies with a straightforward structure
-            if (self.n_cells_surfaces <= 1 and
-                self.n_user_bins <= 1 and
-                self.n_segment_bins <= 1 and
-                self.n_multiplier_bins <= 1 and
-                self.n_cosine_bins <= 1 and
-                self.n_time_bins <= 1 and
-                len(self.energies) > 0):
-                
-                # Create DataFrame with energy bins and their results/errors
-                df = pd.DataFrame({
-                    'Energy': self.energies,
-                    'Result': self.results[:len(self.energies)],
-                    'Error': self.errors[:len(self.energies)]
-                })
-                return df
-            
-            # For multidimensional tallies, try using xarray
-            if XARRAY_AVAILABLE:
-                try:
-                    # Convert to xarray first (which handles dimension reshaping)
-                    ds = self.to_xarray()
-                    df = ds.to_dataframe().reset_index()
-                    
-                    # Convert all column names to title case
-                    df.columns = [col.title() if col != 'cell' else 'Cell' for col in df.columns]
-                    return df
-                except Exception as e:
-                    if "Failed to create xarray dataset" not in str(e):
-                        # Log the error and fall back to the direct method
-                        print(f"Warning: xarray conversion failed - {str(e)}")
-            
-            # Direct DataFrame creation (fallback approach)
-            # For flat results (no dimensions)
-            dimensions = self.get_dimensions()
-            dim_names = list(dimensions.keys())
-            if not dim_names:
-                df = pd.DataFrame({
-                    'Result': self.results,
-                    'Error': self.errors
-                })
-                return df
-            
-            # Create a DataFrame directly from the numpy arrays
-            # First get the shaped results - this should already exclude total bins
-            results = self.get_shaped_results()
-            errors = self.get_shaped_errors()
-            
-            # Build a DataFrame with one row per cell in the array
-            rows = []
-            for idx in np.ndindex(results.shape):
-                row = {}
-                # Add dimension coordinates
-                for i, name in enumerate(dim_names):
-                    if name == 'energy' and i < len(idx) and idx[i] < len(self.energies):
-                        # Use actual energy value
-                        row[name.title()] = self.energies[idx[i]]
-                    elif name == 'time' and i < len(idx) and idx[i] < len(self.times):
-                        # Use actual time value
-                        row[name.title()] = self.times[idx[i]]
-                    else:
-                        # Use index for other dimensions
-                        row[name.title()] = idx[i]
-                
-                # Add the result and error values
-                row['Result'] = results[idx]
-                row['Error'] = errors[idx]
-                rows.append(row)
-            
-            return pd.DataFrame(rows)
-            
-        except Exception as e:
-            # Create a detailed error message with debug info
-            error_msg = f"Failed to convert to DataFrame: {str(e)}\n\n"
-            error_msg += self._debug_dimensions()
-            raise ValueError(error_msg)
-    
-    def get_integral_energy_data(self):
-        """Get the results integrated over all energy bins.
-        
-        For multidimensional tallies, returns shaped arrays for all dimensions except energy.
-        
-        :return: Dictionary with 'Result' and 'Error' keys containing the energy-integrated data.
-                 For multidimensional tallies, these will be numpy arrays.
-        :rtype: dict or None
-        """
-        if not self._has_total_energy_bin or self.total_energy_result is None:
+    @property
+    def mesh_geometry(self) -> Optional[str]:
+        """``"rectangular"``, ``"cylindrical"`` or ``"spherical"`` for a TMESH tally."""
+        if not self.is_mesh:
             return None
-        
-        # Get all dimensions except energy
-        dimensions = self.get_dimensions()
-        if 'energy' in dimensions:
-            dimensions.pop('energy')
-        
-        # If no other dimensions or just a scalar, return simple dict
-        if not dimensions:
-            return {
-                'Result': self.total_energy_result,
-                'Error': self.total_energy_error
-            }
-        
-        # For multidimensional tallies, extract and shape all total energy values
-        dims = list(dimensions.values())
-        
-        # If total_energy_result is already a numpy array of the right shape, use it directly
-        if isinstance(self.total_energy_result, np.ndarray) and self.total_energy_result.shape == tuple(dims):
-            return {
-                'Result': self.total_energy_result,
-                'Error': self.total_energy_error
-            }
-        
-        # If we have total_values attribute, use that
-        if hasattr(self, 'total_energy_values') and self.total_energy_values is not None:
-            results = self.total_energy_values['results']
-            errors = self.total_energy_values['errors']
-            
-            # Check if we need to reshape
-            expected_size = np.prod(dims)
-            if len(results) == expected_size:
-                shaped_results = np.array(results).reshape(dims)
-                shaped_errors = np.array(errors).reshape(dims)
-                
-                return {
-                    'Result': shaped_results,
-                    'Error': shaped_errors
-                }
-        
-        # Fallback: if we just have a scalar, but need a multidimensional array,
-        # we'll create a constant array with the scalar value
-        # This is a fallback that won't give accurate results for truly multidimensional tallies
-        expected_size = np.prod(dims)
-        result_array = np.full(dims, self.total_energy_result)
-        error_array = np.full(dims, self.total_energy_error)
-        
-        return {
-            'Result': result_array,
-            'Error': error_array
-        }
-    
-    def get_integral_energy_dataframe(self):
-        """Get the energy-integrated results as a DataFrame.
-        
-        For multidimensional tallies, includes all dimensions except energy.
-        
-        :return: DataFrame containing the energy-integrated data
-        :rtype: pandas.DataFrame
+        return {1: "rectangular", 2: "cylindrical", 3: "spherical"}.get(-self.detector_type, "unknown")
+
+    @property
+    def mesh(self) -> Optional[Dict[str, np.ndarray]]:
+        """Bin edges of a TMESH tally, keyed ``cora``/``corb``/``corc``.
+
+        The ``f`` line of a mesh tally carries the three bin counts after the
+        total and its listed values are the concatenated edges of the three
+        coordinates. ``None`` for any other tally.
         """
-        data = self.get_integral_energy_data()
-        if data is None:
-            return pd.DataFrame()
-        
-        # Simple case - just one result/error pair
-        if np.isscalar(data['Result']):
-            return pd.DataFrame({
-                'Energy': ['Integral'],
-                'Result': [data['Result']],
-                'Error': [data['Error']]
-            })
-        
-        # For multidimensional data, create a flattened DataFrame
-        dimensions = self.get_dimensions()
-        if 'energy' in dimensions:
-            dimensions.pop('energy')
-        
-        # If no other dimensions, just return the simple case
-        if not dimensions:
-            return pd.DataFrame({
-                'Energy': ['Integral'],
-                'Result': [data['Result'].item() if isinstance(data['Result'], np.ndarray) else data['Result']],
-                'Error': [data['Error'].item() if isinstance(data['Error'], np.ndarray) else data['Error']]
-            })
-        
-        # Get the multidimensional arrays
-        results = data['Result']
-        errors = data['Error']
-        
-        # Create a DataFrame with one row per cell in the arrays
-        dim_names = list(dimensions.keys())
-        rows = []
-        
-        # For each cell in the multidimensional array
-        for idx in np.ndindex(results.shape):
-            row = {}
-            # Add dimension coordinates
-            for i, name in enumerate(dim_names):
-                if name == 'cell' and self.cell_surface_ids and i < len(idx) and idx[i] < len(self.cell_surface_ids):
-                    # Use actual cell/surface ID
-                    row[name.title()] = self.cell_surface_ids[idx[i]]
-                elif name == 'time' and self.times and i < len(idx) and idx[i] < len(self.times):
-                    # Use actual time value
-                    row[name.title()] = self.times[idx[i]]
+        if not self.is_mesh:
+            return None
+        f = self.axes["f"]
+        counts = f.flags[-3:]
+        if len(f.flags) < 3 or f.values is None or int(np.prod(counts)) != f.n \
+                or len(f.values) != sum(counts) + 3:
+            raise ValueError(f"tally {self.id}: f line {f.n} {f.flags} is not a mesh description")
+        edges, start = {}, 0
+        for name, count in zip(("cora", "corb", "corc"), counts):
+            edges[name] = np.asarray(f.values[start:start + count + 1], dtype=float)
+            start += count + 1
+        return edges
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return tuple(a.size for a in self.axes.values())
+
+    def dim_name(self, key: str) -> str:
+        """Dimension name of axis *key* in the labelled views."""
+        if key == "f":
+            return self.region_name
+        if self.is_radiograph and key in ("s", "c", "r"):
+            return {"s": "image_s"}.get(key, "image_t")
+        if self.is_mesh and key == "s":
+            return "quantity"  # one S bin per RMESH/CMESH/SMESH keyword
+        return AXIS_NAMES[key]
+
+    @property
+    def regions(self) -> np.ndarray:
+        """Cell, surface or detector labels of the ``f`` axis."""
+        return self.axes["f"].labels()
+
+    @property
+    def energies(self) -> Optional[np.ndarray]:
+        """Upper energy bounds of the energy bins (MeV), or ``None``."""
+        return self.axes["e"].upper
+
+    @property
+    def times(self) -> Optional[np.ndarray]:
+        """Upper time bounds of the time bins (shakes), or ``None``."""
+        return self.axes["t"].upper
+
+    def _labelled_keys(self) -> List[str]:
+        # An axis is a dimension when the tally card binned it and the bins say
+        # something: one unlabelled bin (the flag axis without a split, a single
+        # FM bin, the unit axes of a TMESH) is not a dimension.
+        return [k for k, a in self.axes.items() if a.is_informative and not (k == "d" and a.n == 1)]
+
+    # -- labelled views ---------------------------------------------------
+
+    def to_xarray(self, perturbation: Optional[int] = None) -> xr.Dataset:
+        """Binned values as a Dataset with ``result`` and ``error``.
+
+        Total bins are left out (see :meth:`total`), and so is every axis the
+        tally did not bin. Bounded axes carry their upper bounds as the
+        coordinate and a ``<name>_low`` coordinate with the lower bounds. When
+        the cell/surface numbers repeat (MCNP writes ``0`` for each union bin
+        and for the total of an F card ending in ``T``), the dimension is the
+        1-based bin index and the numbers are in ``<name>_id``.
+
+        :param perturbation: PERT card number to return instead of the
+            unperturbed tally.
+        """
+        return self._view(perturbation, total_keys=())
+
+    def total(self, *axes: str, perturbation: Optional[int] = None) -> xr.Dataset:
+        """Total bin(s) of one or more axes, as a Dataset over the others.
+
+        ``tally.total("energy")`` is the energy-integrated tally per cell (and
+        per any other binned axis).
+
+        :param axes: Dimension names (``"energy"``) or MCTAL letters (``"e"``).
+        :param perturbation: PERT card number, as in :meth:`to_xarray`.
+        :raises ValueError: If an axis has no total bin.
+        """
+        keys = []
+        for name in axes:
+            key = self._key(name)
+            if not self.axes[key].has_total:
+                raise ValueError(f"tally {self.id}: axis {name!r} has no total bin")
+            keys.append(key)
+        return self._view(perturbation, total_keys=tuple(keys))
+
+    def to_dataframe(self, perturbation: Optional[int] = None) -> pd.DataFrame:
+        """:meth:`to_xarray` flattened to one row per bin."""
+        ds = self.to_xarray(perturbation)
+        if not ds.result.dims:
+            return pd.DataFrame({"result": [float(ds.result)], "error": [float(ds.error)]})
+        return ds.to_dataframe().reset_index()
+
+    def _key(self, name: str) -> str:
+        if name in self.axes:
+            return name
+        for key in self.axes:
+            if self.dim_name(key) == name:
+                return key
+        raise KeyError(f"tally {self.id} has no axis {name!r}")
+
+    def _arrays(self, perturbation: Optional[int]) -> Tuple[np.ndarray, np.ndarray]:
+        if perturbation is None:
+            return self.result, self.error
+        try:
+            p = self.perturbations[perturbation]
+        except KeyError:
+            raise KeyError(f"tally {self.id} has no perturbation {perturbation}") from None
+        return p.result, p.error
+
+    def _view(self, perturbation: Optional[int], total_keys: Tuple[str, ...]) -> xr.Dataset:
+        result, error = self._arrays(perturbation)
+        index = []
+        dims: List[str] = []
+        coords: Dict[str, Tuple[str, np.ndarray]] = {}
+        labelled = self._labelled_keys()
+        for key, axis in self.axes.items():
+            if key in total_keys:
+                index.append(axis.size - 1)
+            elif key == "f" and self.is_mesh:
+                index.append(slice(None))
+                dims.append("f")
+            elif key in labelled:
+                index.append(slice(0, axis.n_bins))
+                name = self.dim_name(key)
+                dims.append(name)
+                labels = axis.labels()
+                if len(np.unique(labels)) < len(labels):
+                    # MCNP writes 0 for every union bin and for the total over
+                    # cells of an F card with T, so the numbers can repeat: index
+                    # the bins instead and keep the numbers alongside.
+                    coords[name] = (name, np.arange(1, len(labels) + 1))
+                    coords[f"{name}_id"] = (name, labels)
                 else:
-                    # Use index for other dimensions
-                    row[name.title()] = idx[i]
-            
-            # Add the result and error values
-            row['Result'] = results[idx]
-            row['Error'] = errors[idx]
-            # Add indicator that this is energy-integrated data
-            row['Energy'] = 'Integral'
-            rows.append(row)
-        
-        return pd.DataFrame(rows)
+                    coords[name] = (name, labels)
+                if axis.lower is not None:
+                    coords[f"{name}_low"] = (name, axis.lower)
+            else:
+                index.append(0)
+        result, error = result[tuple(index)], error[tuple(index)]
+        if self.is_mesh:
+            result, error, dims = self._unfold_mesh(result, error, dims, coords)
+        data = {"result": (dims, result), "error": (dims, error)}
+        attrs = {"tally": self.id, "kind": self.kind, "comment": self.comment}
+        if self.is_mesh:
+            attrs["mesh_geometry"] = self.mesh_geometry
+        if perturbation is not None:
+            attrs["perturbation"] = perturbation
+        if total_keys:
+            attrs["total_over"] = [self.dim_name(k) for k in total_keys]
+        return xr.Dataset(data, coords=coords, attrs=attrs)
 
-    def plot_tfc_data(self, figsize=(15, 5), show_error_bars=True):
-        """Creates and displays plots showing TFC convergence data.
+    def _unfold_mesh(self, result, error, dims, coords):
+        # The f index of a TMESH runs with CORA fastest and CORC slowest
+        # (MCNP 6.3.1 manual, section 6.3.4.1.3).
+        edges = self.mesh
+        axis = dims.index("f")
+        shape = tuple(len(edges[n]) - 1 for n in ("corc", "corb", "cora"))
+        new_dims = dims[:axis] + ["corc", "corb", "cora"] + dims[axis + 1:]
+        unfold = lambda a: a.reshape(a.shape[:axis] + shape + a.shape[axis + 1:])
+        order = list(range(len(new_dims)))
+        order[axis:axis + 3] = [axis + 2, axis + 1, axis]
+        new_dims = [new_dims[i] for i in order]
+        for name, e in edges.items():
+            coords[name] = (name, 0.5 * (e[1:] + e[:-1]))
+            coords[f"{name}_low"] = (name, e[:-1])
+            coords[f"{name}_high"] = (name, e[1:])
+        return (unfold(result).transpose(order), unfold(error).transpose(order), new_dims)
 
-        This method creates a figure with three subplots showing the TFC convergence data:
-        results vs NPS (with optional error bars), relative errors vs NPS, and figure of merit vs NPS.
-        The figure is displayed immediately.
+    def __repr__(self) -> str:
+        parts = [f"{self.dim_name(k)}={self.axes[k].n_bins}" + ("+total" if self.axes[k].has_total else "")
+                 for k in self._labelled_keys()]
+        if self.is_mesh:
+            parts[0] = "mesh=" + "x".join(str(len(e) - 1) for e in self.mesh.values())
+        dims = ", ".join(parts) or "scalar"
+        extra = f", {len(self.perturbations)} perturbations" if self.perturbations else ""
+        label = f" {self.comment.splitlines()[0]!r}" if self.comment else ""
+        return f"<Tally {self.id} ({self.kind}, {''.join(self.particles)}){label}: {dims}{extra}>"
 
-        :param figsize: Figure size in inches as (width, height)
-        :type figsize: tuple
-        :param show_error_bars: Whether to display error bars on the results plot
-        :type show_error_bars: bool
-        :raises ValueError: If no TFC data is available for plotting
-        :return: None
-        """
-        if not self.tfc_nps:
-            raise ValueError("No TFC data available for plotting")
-
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=figsize)
-        
-        # Plot results with or without error bars
-        y_values = np.array(self.tfc_results)
-        
-        if show_error_bars:
-            y_errors = np.array(self.tfc_errors) * np.abs(y_values)  # Convert relative errors to absolute
-            ax1.errorbar(self.tfc_nps, y_values, yerr=y_errors, fmt='b.-', capsize=3, ecolor='lightblue')
-            title_suffix = " (with error bars)"
-        else:
-            ax1.plot(self.tfc_nps, y_values, 'b.-')
-            title_suffix = ""
-            
-        ax1.set_xlabel('NPS')
-        ax1.set_ylabel('Results')
-        ax1.set_title(f'Result vs NPS{title_suffix}')
-        ax1.grid(True)
-        
-        # Plot errors
-        ax2.plot(self.tfc_nps, self.tfc_errors, 'r.-')
-        ax2.set_xlabel('NPS')
-        ax2.set_ylabel('Relative Error')
-        ax2.set_title('Error vs NPS')
-        ax2.grid(True)
-        
-        # Plot FOM
-        ax3.plot(self.tfc_nps, self.tfc_fom, 'g.-')
-        ax3.set_xlabel('NPS')
-        ax3.set_ylabel('Figure of Merit')
-        ax3.set_title('FOM vs NPS')
-        ax3.grid(True)
-        
-        plt.tight_layout()
-        plt.show()
 
 @dataclass
-class TallyPert(Tally):
-    """Container for perturbed tally data, inheriting from Tally.
-    
-    :ivar: Inherits all attributes from Tally class
-    :ivar perturbation_number: The perturbation index number
-    :type perturbation_number: int
+class Kcode:
+    """KCODE cycle records of a MCTAL file.
+
+    :ivar cycles: Number of cycles written.
+    :ivar settle: Inactive (settle) cycles.
+    :ivar data: Records, shape ``(cycles, n_columns)``; columns in
+        :data:`KCODE_COLUMNS` order.
     """
-    perturbation_number: int = None
-    
-    def __post_init__(self):
-        # Call parent post init to initialize lists/dict as needed.
-        super().__post_init__()
-        
-    def __repr__(self):
-        """Returns a concise string representation of the perturbed tally.
-        
-        :return: Formatted string representation of the perturbed tally
-        :rtype: str
-        """
-        # Create a more visually appealing header with a border
-        header_width = 70
-        header = "=" * header_width + "\n"
-        header += f"{'MCNP Tally ' + str(self.tally_id) + ' - Perturbation ' + str(self.perturbation_number):^{header_width}}\n"
-        header += "=" * header_width + "\n\n"
-        
-        # Create simplified section for dimensions
-        dimensions = self.get_dimensions()
-        dim_section = "Dimensions:\n"
-        dim_section += "-" * header_width + "\n"
-        
-        # Simplified table with just Dimension and Size columns
-        dim_table = "{:<20} {:<15}\n".format("Dimension", "Size")
-        dim_section += dim_table
-        dim_section += "-" * header_width + "\n"
-        
-        if dimensions:
-            # Add row for each dimension
-            if 'cell' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Cell/Surface", dimensions['cell'])
-            if 'user' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("User", dimensions['user'])
-            if 'segment' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Segment", dimensions['segment'])
-            if 'multiplier' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Multiplier", dimensions['multiplier'])
-            if 'cosine' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Cosine", dimensions['cosine'])
-            if 'energy' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Energy", dimensions['energy'])
-            if 'time' in dimensions:
-                dim_section += "{:<20} {:<15}\n".format("Time", dimensions['time'])
-        else:
-            dim_section += "{:<20} {:<15}\n".format("None", "0")
-        
-        dim_section += "-" * header_width + "\n"
-        dim_section += f"Total Results: {len(self.results)}\n\n"
-        
-        # Additional information with bullet points
-        additional_info = []
-        if self.integral_result is not None:
-            additional_info.append(f"• Integral Result: {self.integral_result:.6e}")
-            additional_info.append(f"• Integral Error: {self.integral_error:.6e}")
-        if self.tfc_nps:
-            additional_info.append(f"• {len(self.tfc_nps)} TFC data points")
-        
-        additional = ""
-        if additional_info:
-            additional = "\nAdditional Information:\n"
-            additional += "\n".join(additional_info)
-            additional += "\n\n"
-        
-        # Available methods in improved table format
-        methods_section = "\nAvailable Methods:\n"
-        methods_section += "-" * header_width + "\n"
-        
-        # Improved method table with better spacing
-        method_col_width = 25
-        desc_col_width = header_width - method_col_width - 3  # -3 for spacing and formatting
-        
-        methods_section += "{:<{width1}} {:<{width2}}\n".format(
-            "Method", "Description", width1=method_col_width, width2=desc_col_width)
-        methods_section += "-" * header_width + "\n"
-        
-        # Function to add a method and description with proper wrapping
-        def add_method(method, description):
-            nonlocal methods_section
-            if len(description) <= desc_col_width:
-                methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                    method, description, width1=method_col_width, width2=desc_col_width)
-            else:
-                # Handle wrapping for long descriptions
-                methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                    method, description[:desc_col_width], width1=method_col_width, width2=desc_col_width)
-                remaining = description[desc_col_width:]
-                while remaining:
-                    chunk = remaining[:desc_col_width].strip()
-                    remaining = remaining[len(chunk):].strip()
-                    methods_section += "{:<{width1}} {:<{width2}}\n".format(
-                        "", chunk, width1=method_col_width, width2=desc_col_width)
-        
-        # Add each method with its description
-        add_method(".to_dataframe()", "Get results as pandas DataFrame")
-        if self.tfc_nps:
-            add_method(".plot_tfc_data()", "Visualize convergence with plots")
-        
-        methods_section += "-" * header_width + "\n"
-        
-        return header + dim_section + additional + methods_section
+
+    cycles: int
+    settle: int
+    data: np.ndarray
+
+    @property
+    def columns(self) -> List[str]:
+        n = self.data.shape[1]
+        names = list(KCODE_COLUMNS[:n])
+        return names + [f"column_{i}" for i in range(len(names), n)]
+
+    def to_dataframe(self) -> pd.DataFrame:
+        df = pd.DataFrame(self.data, columns=self.columns)
+        df.index = pd.RangeIndex(1, self.cycles + 1, name="cycle")
+        return df
+
+    @property
+    def keff(self) -> Tuple[float, float]:
+        """Final combined keff and its standard deviation (last cycle)."""
+        last = self.data[-1]
+        i = KCODE_COLUMNS.index("avg_keff_combined")
+        return float(last[i]), float(last[i + 1])
+
+
+@dataclass
+class Mctal:
+    """Contents of an MCNP MCTAL file.
+
+    :ivar code: Code name (``mcnp6``...).
+    :ivar version: Code version string.
+    :ivar probid: Problem identification (date and time of the run).
+    :ivar dump: Dump number.
+    :ivar nps: Histories run.
+    :ivar random_numbers: Pseudorandom numbers used.
+    :ivar title: Problem title (first line of the input).
+    :ivar npert: Number of PERT cards (0 if none).
+    :ivar tally_numbers: Tally numbers in the order of the ``ntal`` list.
+    :ivar tallies: Tallies keyed by number.
+    :ivar kcode: KCODE records, if the run was a criticality calculation.
+    """
+
+    code: str = ""
+    version: str = ""
+    probid: str = ""
+    dump: int = 0
+    nps: int = 0
+    random_numbers: int = 0
+    title: str = ""
+    npert: int = 0
+    tally_numbers: List[int] = field(default_factory=list)
+    tallies: Dict[int, Tally] = field(default_factory=dict)
+    kcode: Optional[Kcode] = None
+
+    def __getitem__(self, number: int) -> Tally:
+        try:
+            return self.tallies[number]
+        except KeyError:
+            raise KeyError(f"no tally {number}; available: {self.tally_numbers}") from None
+
+    def __iter__(self) -> Iterator[Tally]:
+        return iter(self.tallies.values())
+
+    def __len__(self) -> int:
+        return len(self.tallies)
+
+    def __repr__(self) -> str:
+        lines = [f"<Mctal {self.code} {self.version} {self.probid}: nps={self.nps}, "
+                 f"{len(self.tallies)} tallies"
+                 + (f", {self.npert} perturbations" if self.npert else "")
+                 + (", kcode" if self.kcode is not None else "") + ">"]
+        if self.title:
+            lines.append(f"  {self.title}")
+        lines.extend(f"  {t!r}" for t in self.tallies.values())
+        return "\n".join(lines)
+
+
+def particles_from_header(ptype: int, flags: Sequence[int]) -> List[str]:
+    """Particle designators of a tally from its ``tally``-line particle type.
+
+    :param ptype: Particle type on the ``tally`` line. Negative: *flags* lists
+        one 0/1 entry per MCNP6 particle. Positive: MCNP5 bit flags (1 n, 2 p,
+        4 e).
+    :param flags: The particle flag list (used when *ptype* is negative).
+    """
+    if ptype < 0:
+        return [p for p, on in zip(MCNP6_PARTICLES, flags) if on]
+    return [p for bit, p in _MCNP5_PARTICLE_BITS if ptype & bit]
