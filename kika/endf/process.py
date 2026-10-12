@@ -73,7 +73,7 @@ PROCESSING_REJECTION_CATEGORIES = {
         "Doppler broadening stopped with an internal error.",
     # urr (skipped / rejected)
     "urr-absent": "The file has no unresolved resonance range; there are no probability tables to compute.",
-    "urr-no-temperature": "Probability tables are computed at the broadening temperatures, and none was requested.",
+    "urr-no-temperature": "Probability tables are computed at the requested temperatures, and none was requested.",
     "urr-unsupported": "The unresolved resonance parameters use data the probability-table method does not support.",
     "urr-failed": "The probability tables stopped with an internal error.",
     # heating (skipped)
@@ -111,7 +111,10 @@ class ProcessingPlan:
     temperature, broadening to where NJOY BROADR stops, URR tables, no heating.
 
     ``temperatures`` are kelvin, > 0; 0 K is the reconstruction and is always
-    there, so ``()`` stops after it. ``thnmax`` is the top of the broadening in
+    there, so ``()`` stops after it. They are the temperatures of both the
+    broadening and the URR tables; ``broaden=False`` skips the broadening and
+    keeps them for the URR tables alone (the tables do not depend on the
+    broadened MF3). ``thnmax`` is the top of the broadening in
     eV, or ``"njoy"`` for BROADR's default (the top of the resolved range).
     ``thinning`` is the relative tolerance each temperature's union grid is
     thinned to (BROADR's ``errthn``, 1e-3); ``None`` keeps every point.
@@ -120,6 +123,7 @@ class ProcessingPlan:
     eight).
     """
     temperatures: tuple = DEFAULT_TEMPERATURES
+    broaden: bool = True
     reconstruction: object = None
     thnmax: object = "njoy"
     thinning: float | None = 1.0e-3
@@ -557,10 +561,11 @@ def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | 
                          native_kernel=rec.native_kernel)),
     ]
     heated, thnmax = {}, None
-    if plan.temperatures:
+    if plan.temperatures and plan.broaden:
         stage, heated, thnmax = _broaden(rec, plan, report)
     else:
-        stage = StageReport("broaden", "skipped", summary="not requested (0 K only)")
+        stage = StageReport("broaden", "skipped", summary="not requested" + (
+            "" if plan.temperatures else " (0 K only)"))
     stages.append(stage)
     stage, urr_tables = _urr(rec, plan, unresolved, report)
     stages.append(stage)

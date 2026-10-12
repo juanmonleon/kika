@@ -170,3 +170,14 @@ def test_a_daemonic_caller_runs_in_process(monkeypatch):
     result = process_endf(TAPE, ProcessingPlan(temperatures=(600.0,)))
     assert seen["workers"] == 1 and result.stage("broaden").status == "done"
     assert result.plan.workers == 1
+
+
+def test_urr_tables_without_broadening(cf252_b81_tape):
+    result = process_endf(cf252_b81_tape, ProcessingPlan(temperatures=(293.6,), broaden=False,
+                                                         urr_ladders=16))
+    broaden = result.stage("broaden")
+    assert broaden.status == "skipped" and broaden.category is None
+    assert result.temperatures == () and result.stage("urr").status == "done"
+    assert set(result.probability_tables) == {293.6}
+    with pytest.raises(KeyError):
+        result.cross_sections(293.6)
