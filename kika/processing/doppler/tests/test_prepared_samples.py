@@ -51,7 +51,7 @@ def test_sample_keys_distinguish_left_limits_and_memory_is_bounded():
 
 def test_construction_cache_preserves_grid_and_later_verification_is_fresh(monkeypatch):
     p=prepared();cached=broaden_curve(p,temperature=600.)
-    assert cached.report['construction_samples']['reused_samples']>0
+    assert cached.report['construction_samples']['source_evaluations']<=sum(r['evaluations'] for r in cached.report['regions'])
     original=table._ConstructionSamples.__init__
     def disabled(self,*args):
         original(self,*args);self.limit=0

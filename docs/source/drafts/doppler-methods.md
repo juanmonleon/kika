@@ -134,6 +134,69 @@ full-series stopping diagnostics are not interval-arithmetic certificates.
 Very narrow source panels use their normalised local coordinate to preserve
 the input width. Identically zero source panels skip moment evaluation.
 
+### Moments of dense source blocks
+
+Dense, nonnegative linear-in-energy sources can reuse moments of contiguous
+source panels at one thermal scale $h$. Each block has centre $c$ and half-width
+$d$ in $y=\sqrt E$, with $d/h\le1/2$. For $t=(y-c)/d$, prepare
+
+$$
+\mu_j=\int_{c-d}^{c+d} y^2\sigma_0(y^2)t^j\,dy,
+\qquad j=0,\ldots,16.
+$$ (eq-doppler-source-block-moments)
+
+On a linear source panel, the integrand is a polynomial of degree at most
+$j+4$. An eleven-point Gauss-Legendre rule therefore evaluates these moments
+exactly in exact arithmetic, without replacing or compressing the source.
+Panel widths use rationalised square-root differences; interpolation uses the
+normalised panel coordinate. Positive source mass gives $|\mu_j|\le\mu_0$.
+For $s_\pm=(c\mp\sqrt E)/h$ and $\delta=d/h$, expand each Gaussian as
+
+$$
+e^{-(s+\delta t)^2}=e^{-s^2}\sum_{j=0}^{16}a_jt^j+\text{remainder},
+\quad a_0=1,\quad
+a_j=\frac{-2s\delta a_{j-1}-2\delta^2a_{j-2}}j,
+$$ (eq-doppler-block-expansion)
+
+where $a_{-1}=0$. Contract the coefficients with $\mu_j$ and divide the
+Gaussian difference by $\sqrt\pi hE$. With $A=2|s|\delta$ and $B=2\delta^2$,
+the coefficient-tail bound in {eq}`eq-doppler-coefficient-tail` bounds the
+omitted integral by $e^{-s^2}\mu_0T_{16}/(\sqrt\pi hE)$; it has no additional
+moment denominator because the source weight is arbitrary inside a block.
+
+Moment preparation uses a float64 diagnostic
+
+$$
+\eta_\mu=\mu_0[1024+8n]\epsilon(1+|c|/d),
+$$ (eq-doppler-block-roundoff)
+
+where $n$ is the source-panel count in the block. It covers the tested coordinate,
+quadrature, polynomial-power and summation sensitivity. With
+$N_a=\sum_{j=0}^{16}|a_j|$, each Gaussian charges
+$e^{-s^2}[(\mu_0+\eta_\mu)T_{16}+\eta_\mu N_a+
+512\epsilon\mu_0N_a]/(\sqrt\pi hE)$ to the kernel estimate. This float provision
+is empirical rather than directed interval arithmetic. When the reflected
+Gaussian has $s_+-\delta>8$, it may be omitted with the bound
+$(\mu_0+\eta_\mu)e^{-(s_+-\delta)^2}(1+64\epsilon)/(\sqrt\pi hE)$.
+
+Whole blocks intersecting the six-width thermal window cover that window and
+may also include part of its tails. The original support-tail envelope still
+bounds what is omitted and is never reduced to claim this overlap. Sparse gaps
+use the existing analytic panel evaluator. Poor conditioning, excessive error,
+negative results, larger required radii or exhausted point resources return to
+the original point evaluator. Low scaled energies $\sqrt E/h<1$ use that
+fallback to retain its cancellation treatment. Signed sources use the original
+path throughout.
+
+Preparation is a performance choice: the native path requires the default
+80-term setting, radius allowance at least six, at least 64 MiB of work and
+a sufficiently dense source/domain. Small direct requests do not initiate
+preparation. The prepared curve retains at most one thermal-scale cache;
+its native numeric storage is capped at one sixteenth of `max_work_bytes`.
+Changing temperature/work allowance replaces the cache, while pickling and
+deep copying discard it. A fresh verification reevaluates the kernel and its
+diagnostics; it may reuse these immutable source moments.
+
 ### Geometry sensitivity
 
 Rationalised source widths avoid subtracting neighbouring square roots, but
@@ -182,27 +245,48 @@ M\left(I_0+\frac{2I_1}{z}+\frac{I_2}{z^2}\right)
 +\frac{K}{hz}\left(I_0+\frac{I_1}{z}\right)\right].
 $$ (eq-doppler-tail)
 
-It is rounded conservatively in float64. Increase the radius from at most eight
-up to the configured maximum (26 by default) until the tail allocation is met.
+It is rounded conservatively in float64. Start at six thermal widths, or the
+configured maximum if smaller. An absolute tail bound below its allocation of
+`atol` passes immediately. Otherwise evaluate the convolution and require the
+tail to fit its allocation of $\mathrm{atol}+\mathrm{rtol}\max(|\sigma|-\eta_{tail},0)$;
+increase the radius up to the configured maximum (26 by default) if it fails.
 No output-energy by input-panel matrix is formed: sorted prepared edges select
 relevant panels, and output evaluation proceeds in blocks.
 
 ### Tables and sums
 
-Structural seeds retain source knots and thermal flanks of peaks/valleys. Three
-refinement fractions and four check fractions guide insertion. A separate family
-of four fractions must pass before acceptance; a failing final check inserts a
-point and repeats refinement. Already accepted, unchanged intervals reuse their
-acceptance ratios in later refinement iterations. That cache retains only
-ratios and uses a quarter of the scratch allowance. A second, construction-only
-cache reuses identical source values and error estimates, including reserved
-probes needed again for the final table check. It distinguishes semantic left
-limits, processes temporary data in bounded blocks and allows one eighth of
-`max_work_bytes` with conservative entry accounting. Every verification location
-and interpolation/error check is retained; these fractions remain distinct from
-the refinement/check families. Both caches are discarded before returning.
-Subsequent `verify_table()` calls compute fresh source values and still detect
-mutated or reread outputs.
+Heated tables start from a coarse lethargy mesh and thermal flanks of every
+source peak, valley, plateau transition and region boundary. Source extrema are
+detected in bounded chunks with both neighbouring slopes, so an artificial
+chunk edge cannot hide a feature. Cold knots are retained for an identity
+temperature increment; a heated table does not inherit their full density.
+
+Refinement predicts chord error from second differences of the node values.
+For interval width $\Delta E$ and the larger neighbouring curvature estimate
+$\kappa$, the prediction is
+
+$$
+e_{pred}=\frac{\Delta E^2}{8}\kappa.
+$$ (eq-doppler-chord-prediction)
+
+Intervals whose predicted error exceeds their table allocation receive
+$\lceil1.1\sqrt{e_{pred}/b}\rceil$ equal subdivisions, capped at 64 per
+iteration, where $b$ is the available table budget. This is an insertion
+heuristic; it does not certify an interval. A separate family of four reserved
+fractions must pass against the immutable source before acceptance. A failing
+reserved check inserts its worst probe and repeats refinement.
+
+Accepted intervals retain numeric endpoint pairs in a bounded certificate
+cache using one eighth of `max_work_bytes`, at 16 bytes per pair. A certificate
+is reused only while both endpoints remain neighbours; insertion invalidates
+the old chord. Off-grid values are not retained. Before returning, node
+uncertainties must also fit the table allocation and published arrays must
+match the checked nodes exactly. These checks reuse construction evidence;
+they are not a second independent source evaluation. The cache is discarded
+before returning. Subsequent `verify_table()` and attachment checks compute
+fresh source values at all nodes and reserved fractions, detecting mutable or
+reread output changes.
+
 For candidate table value $c$, reference $r$ and
 reference uncertainty estimate $\eta$, acceptance uses
 
@@ -214,7 +298,9 @@ Default allocations are kernel 0.15, tails 0.10, tabulation 0.45 and serialisati
 0.20, leaving 0.10 unallocated. The table allocation includes evaluator uncertainty.
 Suites heat exclusive leaves on a common mesh and derive all declared aggregates
 from their graph. Each sum has its own acceptance scale; cancellation cannot
-enlarge its relative allowance. The source sum balance is checked beforehand.
+enlarge its relative allowance. The source sum balance is checked beforehand on source knots, midpoints and
+left limits. Region-wise vector interpolation preserves right-owned boundaries;
+aggregate addition retains compensated `math.fsum` scaling.
 
 ## Conventions and choices
 
@@ -267,7 +353,12 @@ resource failures, unavailable-backend behaviour and accuracy after interval reu
 uncertainty; `test_hybrid.py` checks conditioned closed moments against
 independent quadrature and verifies fallback/resource behaviour.
 `test_prepared_samples.py` covers native storage ownership, serialisation,
-bounded semantic sample reuse and fresh verification after construction.
+bounded semantic sample evaluation and fresh verification after construction.
+`test_construction_certificates.py` covers exact publication, node uncertainty,
+certificate invalidation and extrema across chunk boundaries.
+`test_source_moment_blocks.py` checks moment estimates against the panel path,
+component closure, signed/low-temperature fallback, capsule ownership, cache
+replacement, scaled-energy rejection and unaligned buffers.
 Table/suite tests cover thresholds, graphs, freshness, temperature history,
 rejection and atomic attachment in `test_table_suite.py`.
 
@@ -284,7 +375,11 @@ give points, regions, evaluations/iterations and acceptance ratios. Suite report
 add source hashes, mass/temperature origins, graph, source balance and unresolved
 resonance semantics. `global_error_bound=False` always distinguishes these checks
 from certification. Fractions of the full accuracy budget and the table-specific
-ratio have different denominators and must not be conflated.
+ratio have different denominators and must not be conflated. The point report's
+`moment_blocks` distinguishes computed/accepted blocks, legacy fallbacks,
+query count and retained native cache bytes; cache preparation may have an
+upfront cost. `analytic_subpanels` includes accepted moment blocks as numerical
+integration units, so it is not the count of original source panels.
 
 ## Implementation
 
@@ -318,6 +413,11 @@ its contiguous buffers without temporary copies. Contiguous native float64 buffe
 include unaligned inputs, read with `memcpy`; strided inputs are copied within
 the bounded block. No NumPy C ABI is required. The scalar native controller and
 Python reference remain available as controls and compatibility fallbacks.
+`_blocks` prepares temperature-local source moments and applies the same point
+budgets with the original evaluator as fallback. The native moment capsule owns
+its source panels and labels. Cache arrays are copied and validated once;
+subsequent queries cannot alter them. Preparation and working blocks are bounded
+separately from retained source/result arrays.
 `table` refines and verifies interpolated forms; `suite` prepares semantic input,
 derives sums and attaches an independent Heated copy atomically. Temperature
 styles do not automatically heat every other object in a reaction suite.

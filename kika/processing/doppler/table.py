@@ -22,16 +22,16 @@ VERIFY = (.0694318442029737, .3300094782075719, .6699905217924281, .930568155797
 class _ConstructionSamples:
     """Bounded deterministic samples of immutable sources, construction only.
 
-    Keys distinguish semantic left limits. Every requested probe still passes
-    through the table checks; later user verification always uses fresh samples.
-    The allowance is one eighth of max_work_bytes, with conservative per-entry
-    accounting for Python containers and the values/errors of each channel.
+    The adaptive solver retains interval certificates rather than off-grid
+    values, so construction normally evaluates each requested point directly.
+    This avoids Python cache entries with no reuse. A bounded value cache is
+    retained as an internal diagnostic option; later verification is fresh.
     """
     def __init__(self, evaluate, keys, options):
         self.evaluate = evaluate
         self.keys = tuple(keys)
         self.entry_estimate = 256*(len(keys)+1)
-        self.limit = options.max_work_bytes//(8*self.entry_estimate)
+        self.limit = 0
         self.batch = max(1,min(options.block_size,options.max_work_bytes//(2048*(len(keys)+1))))
         self.samples = OrderedDict()
         self.hits = self.evaluations = 0
@@ -48,6 +48,10 @@ class _ConstructionSamples:
         return values,errors
 
     def _batch(self, q, left_boundary):
+        if not self.limit:
+            values,errors=self.evaluate(q,left_boundary)
+            self.evaluations+=len(q)
+            return values,errors
         identifiers=[(float(e),left_boundary if e==left_boundary else None) for e in q]
         found={key:self.samples[key] for key in identifiers if key in self.samples}
         missing={key:float(q[i]) for i,key in enumerate(identifiers) if key not in found}
@@ -107,6 +111,21 @@ def _breaks(curves, per_options, temperature, domain):
     return tuple(sorted(points))
 
 
+def _source_features(xs, ys, begin, end, work_bytes):
+    """Yield source extrema in bounded chunks, keeping both neighbour slopes."""
+    yield float(xs[0])
+    yield float(xs[-1])
+    # Two differences, masks and candidate indices fit in this conservative
+    # per-row allowance. Chunk edges are never treated as physical boundaries.
+    block=max(1,work_bytes//128)
+    for start in range(begin+1,end-1,block):
+        stop=min(end-1,start+block)
+        left=ys[start:stop]-ys[start-1:stop-1]
+        right=ys[start+1:stop+1]-ys[start:stop]
+        extrema=np.flatnonzero((left*right<0)|((left==0)!=(right==0)))+start
+        yield from xs[extrema]
+
+
 def _seeds(curves, temperature, lo, hi, point_budget, work_bytes):
     seeds = {lo, hi}
     # A coarse lethargy guard plus the thermal flanks of every extremum and
@@ -130,14 +149,8 @@ def _seeds(curves, temperature, lo, hi, point_budget, work_bytes):
             window_hi=(math.sqrt(hi)+26*h)**2
             begin=max(0,int(np.searchsorted(xs,window_lo))-1)
             end=min(len(xs),int(np.searchsorted(xs,window_hi,side='right'))+1)
-            local_x,local_y=xs[begin:end],ys[begin:end]
-            if len(local_x)*64>work_bytes:
-                raise DopplerConvergenceError('resources','feature-seeding scratch exceeds max_work_bytes')
-            dy = np.diff(local_y)
-            extrema = np.flatnonzero((dy[:-1]*dy[1:] < 0) | ((dy[:-1]==0) != (dy[1:]==0)))+1
-            features = np.r_[xs[0], xs[-1], local_x[extrema]]
-            relevant = features[(features >= window_lo) & (features <= window_hi)]
-            for knot in relevant:
+            for knot in _source_features(xs,ys,begin,end,work_bytes):
+                if not window_lo<=knot<=window_hi: continue
                 y = math.sqrt(float(knot))
                 for shift in (-8., -4., -2., -1., -.5, -.25, 0., .25, .5, 1., 2., 4., 8.):
                     shifted = y+shift*h
@@ -158,6 +171,23 @@ def nodes_eta(nodes, grid, j):
     return [nodes[float(x)][1][j] for x in grid]
 
 
+def _reused_intervals(grid, certificates):
+    """A certificate is valid only while both endpoints remain neighbours."""
+    passed=np.zeros(len(grid)-1,dtype=bool)
+    if len(certificates):
+        rows=np.searchsorted(grid,certificates[:,0])
+        inside=rows<len(grid)-1
+        rows=rows[inside];certificates=certificates[inside]
+        valid=(grid[rows]==certificates[:,0])&(grid[rows+1]==certificates[:,1])
+        passed[rows[valid]]=True
+    return passed
+
+
+def _retain_intervals(grid, passed, limit):
+    rows=np.flatnonzero(passed)[:limit]
+    return np.column_stack((grid[rows],grid[rows+1]))
+
+
 def _adaptive(evaluate, seeds, options, budget, keys):
     if len(seeds)*len(keys) > budget:
         raise DopplerConvergenceError('resources', 'initial table exceeds max_points')
@@ -168,13 +198,13 @@ def _adaptive(evaluate, seeds, options, budget, keys):
     batch = max(1, min(options.block_size//7, options.max_work_bytes//(2048*(len(keys)+1))))
     if 2048*(len(keys)+1) > options.max_work_bytes:
         raise DopplerConvergenceError('resources', 'table scratch exceeds max_work_bytes')
-    # An accepted interval remains exactly the same function/chord until a
-    # node is inserted inside it. Keep only acceptance ratios, never probe
-    # arrays. Independent reserved verification still evaluates every interval.
-    accepted_intervals = {}
-    verified = {}
-    reserved_seen = 0.
-    cache_limit = options.max_work_bytes // 1024
+    # Numeric endpoint pairs retain certificates in one eighth of the work
+    # allowance (16 bytes/pair). No source probe arrays survive an iteration.
+    # Stale pairs are dropped whenever their endpoints cease to be neighbours.
+    verified=np.empty((0,2),dtype=float)
+    reserved_seen=0.
+    cache_limit=options.max_work_bytes//128
+    maximum_certificates=0
     maxrefine, maxcheck, evaluations = 0., 0., len(seeds)
     for iteration in range(options.max_iterations):
         grid = np.array(sorted(nodes))
@@ -226,8 +256,8 @@ def _adaptive(evaluate, seeds, options, budget, keys):
             # verification refines the mesh; it never widens the tolerance.
             # An interval that passed is the same function and chord until a
             # node is inserted inside it, so it is verified once.
-            pending=np.array([i for i in range(len(grid)-1)
-                              if (float(grid[i]),float(grid[i+1])) not in verified],dtype=int)
+            passed=_reused_intervals(grid,verified)
+            pending=np.flatnonzero(~passed)
             for start in range(0,len(pending),batch):
                 rows=pending[start:start+batch]
                 left,right=grid[rows],grid[rows+1]
@@ -236,26 +266,37 @@ def _adaptive(evaluate, seeds, options, budget, keys):
                 actual,eta=evaluate(q.ravel());evaluations+=q.size
                 ratios=np.zeros(q.shape)
                 for k in keys:
-                    chord=data[k][rows,None]+(data[k][rows+1]-data[k][rows])[:,None]*fractions
+                    chord=np.interp(q.ravel(),grid,data[k]).reshape(q.shape)
                     ratios=np.maximum(ratios,_ratio(actual[k].reshape(q.shape),chord,eta[k].reshape(q.shape),options,options.table_share))
-                for row in np.flatnonzero(np.max(ratios,axis=1)<=1):
-                    reserved_seen=max(reserved_seen,float(np.max(ratios[row])))
-                    # Bounded like the acceptance cache (max_work_bytes).
-                    if len(verified) < cache_limit:
-                        verified[(float(left[row]),float(right[row]))]=float(np.max(ratios[row]))
-                for row in np.flatnonzero(np.max(ratios,axis=1)>1):
-                    accepted_intervals.pop((float(left[row]),float(right[row])), None)
+                maxima=np.max(ratios,axis=1)
+                accepted=maxima<=1
+                if np.any(accepted):
+                    reserved_seen=max(reserved_seen,float(np.max(maxima[accepted])))
+                    passed[rows[accepted]]=True
+                for row in np.flatnonzero(~accepted):
                     column=int(np.argmax(ratios[row]));point=float(q[row,column]);index=row*len(VERIFY)+column
                     if not left[row]<point<right[row]:
                         raise DopplerConvergenceError('unresolvable-grid','verification cannot refine')
                     additions[point]=(tuple(actual[k][index] for k in keys),tuple(eta[k][index] for k in keys))
                 if (len(nodes)+len(additions))*len(keys)>budget:
                     raise DopplerConvergenceError('resources','verification refinement exceeds max_points')
+            verified=_retain_intervals(grid,passed,cache_limit)
+            maximum_certificates=max(maximum_certificates,len(verified))
             if not additions:
-                reserved_maximum=reserved_seen
+                # Nodes carry the exact source values, but their numeric
+                # uncertainty must fit the table budget too.
+                node_maximum=max(float(np.max(_ratio(data[k],data[k],
+                    np.asarray(nodes_eta(nodes,grid,j)),options,options.table_share)))
+                    for j,k in enumerate(keys))
+                reserved_maximum=max(reserved_seen,node_maximum)
+                if reserved_maximum>1:
+                    raise DopplerConvergenceError('table-verification-failed','node uncertainty exceeds budget')
                 return grid,data,dict(iterations=iteration+1,evaluations=evaluations,
                                       refinement_ratio=maxrefine,check_ratio=maxcheck,
-                                      reserved_verification_ratio=reserved_maximum)
+                                      reserved_verification_ratio=reserved_maximum,
+                                      certificate_cache=dict(maximum_entries=maximum_certificates,
+                                          capacity=cache_limit,retained_numeric_bytes=verified.nbytes,
+                                          allowance_bytes=cache_limit*16))
         nodes.update(additions)
     raise DopplerConvergenceError('tabulation-budget-exhausted', 'max_iterations reached')
 
@@ -327,6 +368,39 @@ def _tabulate(curves, per_options, temperature, domain, options, evaluate, keys,
                               conserved_domains=[domain] if identity and not conventions else [],
                               convention_modified_domains=conventions,
                               unsupported_domains=[], thinning=False)
+
+
+def _verify_construction(forms, tables, diagnostics, label):
+    """Check publication against nodes already checked by the adaptive solver.
+
+    Each final chord passed VERIFY with np.interp and the immutable source;
+    nodes passed their numeric-error budget. These certificates apply only to
+    the freshly constructed table. Public verification and attachment still
+    evaluate the source afresh, including all nodes and reserved fractions.
+    """
+    from kika.nuclear_data.model import XYs1d, Regions1d
+    keys=set(tables[0][1])
+    if set(forms)!=keys:
+        raise DopplerInputError('coverage-changed','result reactions differ')
+    maximum=0.
+    for index,(grid,values) in enumerate(tables):
+        check=diagnostics[index]
+        ratio=0. if check.get('identity') else check['reserved_verification_ratio']
+        if not math.isfinite(ratio) or ratio>1:
+            raise DopplerConvergenceError('table-verification-failed','construction certificate exceeds budget')
+        maximum=max(maximum,ratio)
+        for key,form in forms.items():
+            children=form.function1ds if isinstance(form,Regions1d) else [form]
+            if form.label!=label:
+                raise DopplerInputError('label-conflict','output form label changed')
+            if len(children)!=len(tables):
+                raise DopplerInputError('region-structure-changed','regions differ')
+            child=children[index]
+            if not isinstance(child,XYs1d) or child.domainUnit!='eV' or child.rangeUnit!='b':
+                raise DopplerInputError('invalid-units','canonical eV/b output required')
+            if not np.array_equal(child.xs,grid) or not np.array_equal(child.ys,values[key]):
+                raise DopplerInputError('construction-table-changed','published nodes differ from checked source samples')
+    return {key:maximum for key in forms}
 
 
 def _verify(forms, tables, evaluate, options, *, share, label=None):
@@ -432,6 +506,8 @@ def broaden_curve(prepared, *, temperature, options=None, output_domain=None, la
     def evaluate(q,left_boundary=None):
         v,e=_evaluate_curve(prepared,q,temperature,options,left_boundary)
         return {0:v},{0:e}
+    from ._blocks import warm
+    warm(prepared,temperature,options,domain)
     construction=_ConstructionSamples(evaluate,(0,),options)
     forms,tables,report=_tabulate((prepared,),(options,),temperature,domain,options,construction,(0,),label,progress)
     report.update(engine='doppler-table-1',core_engine=ENGINE_VERSION,backend=_selected_backend(options),source_hash=prepared.source_hash,temperature_source=prepared.source_temperature,
@@ -445,10 +521,9 @@ def broaden_curve(prepared, *, temperature, options=None, output_domain=None, la
                   result_minimum=min(float(np.min(y[0])) for _,y in tables),
                   distribution_temperature_treatment='not-processed',covariance_temperature_treatment='not-processed')
     result=DopplerResult(forms[0],MappingProxyType(report),prepared,temperature,options,tables)
-    # Check all output nodes and reserved probes against the same immutable
-    # source function; repeated identical probes can reuse a source evaluation.
-    ratio=_verify({0:result.form},tables,construction,options,share=options.table_share,label=label)[0]
+    ratio=_verify_construction({0:result.form},tables,report['regions'],label)[0]
     report['construction_samples']=construction.finish()
     report['verification_ratio']=ratio
-    report['table_verification']='separate-fractions-against-production'
+    report['table_verification']='reserved-fractions-and-node-error-against-production'
+    report['construction_verification']='adaptive-certificates-and-exact-publication'
     return result

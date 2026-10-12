@@ -720,7 +720,143 @@ static PyObject *special_probe(PyObject *self,PyObject *args) {
     return Py_BuildValue("ddd",kexp(-y),complement,gauss);
 }
 
+/* Temperature-local, nonnegative source block moments. */
+#define BLOCK_ORDER 16
+#define BLOCK_STRIDE (BLOCK_ORDER+8)
+typedef struct {
+    PyObject *source;
+    PackedPanels *panels;
+    double *rows;
+    Py_ssize_t size;
+    double h;
+} MomentBlocks;
+static const char *block_capsule_name="kika.doppler.moment-blocks.v1";
+
+static void free_blocks(PyObject *capsule) {
+    MomentBlocks *cache=PyCapsule_GetPointer(capsule,block_capsule_name);
+    if(cache){Py_XDECREF(cache->source);PyMem_Free(cache->rows);PyMem_Free(cache);}
+}
+
+static PyObject *prepare_blocks(PyObject *self,PyObject *args) {
+    PyObject *source,*table,*capsule=NULL;Py_buffer b={0};double h;
+    if(!PyArg_ParseTuple(args,"OOd",&source,&table,&h))return NULL;
+    if(!PyCapsule_IsValid(source,capsule_name) || !isfinite(h) || h<=0) {
+        PyErr_SetString(PyExc_ValueError,"invalid block source/scale");return NULL;
+    }
+    if(PyObject_GetBuffer(table,&b,PyBUF_FORMAT|PyBUF_ND|PyBUF_C_CONTIGUOUS)<0)return NULL;
+    if(b.ndim!=2 || b.shape[1]!=BLOCK_STRIDE || b.itemsize!=sizeof(double) || !b.format ||
+       (strcmp(b.format,"d") && strcmp(b.format,"=d") && strcmp(b.format,"@d")) ||
+       b.shape[0]>PY_SSIZE_T_MAX/(BLOCK_STRIDE*(Py_ssize_t)sizeof(double))) {
+        PyErr_SetString(PyExc_ValueError,"blocks require contiguous float64 rows");goto done;
+    }
+    MomentBlocks *cache=PyMem_Calloc(1,sizeof(MomentBlocks));
+    if(!cache){PyErr_NoMemory();goto done;}
+    cache->size=b.shape[0];cache->h=h;
+    cache->panels=PyCapsule_GetPointer(source,capsule_name);
+    cache->rows=PyMem_Malloc((cache->size?cache->size:1)*BLOCK_STRIDE*sizeof(double));
+    if(!cache->rows){PyMem_Free(cache);PyErr_NoMemory();goto done;}
+    memcpy(cache->rows,b.buf,b.len);
+    Py_ssize_t previous=0;
+    for(Py_ssize_t i=0;i<cache->size;i++) {
+        double *r=cache->rows+i*BLOCK_STRIDE;
+        for(int j=0;j<BLOCK_STRIDE;j++)if(!isfinite(r[j]))goto invalid;
+        if(r[0]<0 || r[1]<=r[0] || r[2]<0 || r[3]<=0 || r[3]>.50000001 || r[6]<0 || r[7]<0 ||
+           r[4]<previous || r[5]<=r[4] || r[5]>cache->panels->size || floor(r[4])!=r[4] || floor(r[5])!=r[5])goto invalid;
+        Py_ssize_t first=(Py_ssize_t)r[4],last=(Py_ssize_t)r[5];
+        if(r[0]!=cache->panels->data[first].lo || r[1]!=cache->panels->data[last-1].hi)goto invalid;
+        for(Py_ssize_t p=first;p<last;p++) {
+            NumericPanel *v=cache->panels->data+p;
+            if(!v->lin || v->v0<0 || v->v1<0 || v->owner!=cache->panels->data[first].owner)goto invalid;
+            if(r[7]==0 && (v->v0!=0 || v->v1!=0))goto invalid;
+        }
+        previous=last;
+        continue;
+invalid:
+        PyMem_Free(cache->rows);PyMem_Free(cache);
+        PyErr_SetString(PyExc_ValueError,"invalid block geometry/moments");goto done;
+    }
+    cache->source=Py_NewRef(source);
+    capsule=PyCapsule_New(cache,block_capsule_name,free_blocks);
+    if(!capsule){Py_DECREF(cache->source);PyMem_Free(cache->rows);PyMem_Free(cache);goto done;}
+    capsule=Py_BuildValue("Nn",capsule,sizeof(MomentBlocks)+cache->size*BLOCK_STRIDE*(Py_ssize_t)sizeof(double));
+done:
+    PyBuffer_Release(&b);return capsule;
+}
+
+static PyObject *block_values_cached(PyObject *self,PyObject *args) {
+    PyObject *capsule,*query,*result=NULL;Py_buffer q={0};
+    if(!PyArg_ParseTuple(args,"OO",&capsule,&query))return NULL;
+    if(!PyCapsule_IsValid(capsule,block_capsule_name)) {
+        PyErr_SetString(PyExc_ValueError,"prepared moment blocks required");return NULL;
+    }
+    MomentBlocks *cache=PyCapsule_GetPointer(capsule,block_capsule_name);
+    if(PyObject_GetBuffer(query,&q,PyBUF_FORMAT|PyBUF_ND|PyBUF_C_CONTIGUOUS)<0)return NULL;
+    if(q.ndim!=1 || q.itemsize!=sizeof(double) || !q.format ||
+       (strcmp(q.format,"d") && strcmp(q.format,"=d") && strcmp(q.format,"@d"))) {
+        PyErr_SetString(PyExc_ValueError,"query requires contiguous float64 buffer");goto done;
+    }
+    result=PyList_New(q.shape[0]);if(!result)goto done;
+    double h=cache->h;
+    for(Py_ssize_t i=0;i<q.shape[0];i++) {
+        double e;memcpy(&e,(const char*)q.buf+i*sizeof(double),sizeof(double));
+        if(!isfinite(e) || e<=0) {PyErr_SetString(PyExc_ValueError,"positive finite query required");Py_CLEAR(result);goto done;}
+        double x=sqrt(e),z=x/h,low=fmax(0.,x+h*fmax(-z,-6.));low*=low;
+        double high=x+6*h;high*=high;
+        Sum value={0},error={0};PyObject *spans=PyList_New(0),*components=PyDict_New();
+        if(!spans || !components){Py_XDECREF(spans);Py_XDECREF(components);Py_CLEAR(result);goto done;}
+        Py_ssize_t a=0,c=cache->size,run_first=-1,run_last=-1,used=0;
+        PyObject *owner=NULL;double component_value=0.;
+        while(a<c){Py_ssize_t mid=(a+c)/2;if(cache->rows[mid*BLOCK_STRIDE+1]<low)a=mid+1;else c=mid;}
+        for(Py_ssize_t j=a;j<cache->size && cache->rows[j*BLOCK_STRIDE]<=high;j++) {
+            const double *r=cache->rows+j*BLOCK_STRIDE;
+            double s[2]={(r[2]-x)/h,(r[2]+x)/h};Sum integral={0},bounds={0};
+            for(int side=0;side<2;side++) {
+                if(side && s[side]-r[3]>8.) {
+                    add(&bounds,kgauss(s[side]-r[3])*(r[7]+r[6])*(1+64*DBL_EPSILON));
+                    continue;
+                }
+                double g=kgauss(fabs(s[side]));if(g==0)continue;
+                double A=-2*s[side]*r[3],B=-2*r[3]*r[3],prior=0.,cn=1.,norm=1.;Sum contracted={0};
+                add(&contracted,r[7]);
+                for(int k=1;k<=BLOCK_ORDER;k++) {
+                    double next=(A*cn+B*prior)/k;prior=cn;cn=next;
+                    norm+=fabs(cn);add(&contracted,cn*r[7+k]);
+                }
+                double rem=coefficient_tail(fabs(A),fabs(B),fabs(cn),fabs(prior),BLOCK_ORDER);
+                add(&integral,(side?-1.:1.)*g*total(contracted));
+                add(&bounds,g*((r[7]+r[6])*rem+r[6]*norm+512*DBL_EPSILON*r[7]*norm));
+            }
+            double scale=1./(sqrt(3.14159265358979323846)*h*e);
+            double v=scale*total(integral);add(&value,v);add(&error,scale*total(bounds));used++;
+            Py_ssize_t first=(Py_ssize_t)r[4],last=(Py_ssize_t)r[5];
+            PyObject *current=cache->panels->data[first].owner;
+            if(owner && owner!=current){if(store_component(components,owner,component_value)<0)goto failed;component_value=0.;}
+            owner=current;component_value+=v;
+            if(run_last==first)run_last=last;
+            else {
+                if(run_first>=0){PyObject *span=Py_BuildValue("nn",run_first,run_last);if(!span)goto failed;
+                    int rc=PyList_Append(spans,span);Py_DECREF(span);if(rc<0)goto failed;}
+                run_first=first;run_last=last;
+            }
+        }
+        if(owner && store_component(components,owner,component_value)<0)goto failed;
+        if(run_first>=0){PyObject *span=Py_BuildValue("nn",run_first,run_last);if(!span)goto failed;
+            int rc=PyList_Append(spans,span);Py_DECREF(span);if(rc<0)goto failed;}
+        PyObject *row=Py_BuildValue("ddNNn",total(value),total(error),spans,components,used);
+        if(!row){Py_CLEAR(result);goto done;}
+        PyList_SET_ITEM(result,i,row);
+        if(PyErr_CheckSignals()<0){Py_CLEAR(result);goto done;}
+        continue;
+failed:
+        Py_DECREF(spans);Py_DECREF(components);Py_CLEAR(result);goto done;
+    }
+done:
+    PyBuffer_Release(&q);return result;
+}
+
 static PyMethodDef methods[]={
+    {"prepare_blocks",prepare_blocks,METH_VARARGS,"Prepare temperature-local polynomial moments."},
+    {"block_values_cached",block_values_cached,METH_VARARGS,"Evaluate immutable source block moments."},
     {"prepare_panels",prepare_panels,METH_O,"Prepare immutable numeric source panels."},
     {"evaluate_block",evaluate_block,METH_VARARGS,"Evaluate bounded point blocks with original budgets."},
     {"integrate",integrate,METH_VARARGS,"Integrate validated analytic source panels."},

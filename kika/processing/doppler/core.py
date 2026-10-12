@@ -16,7 +16,7 @@ from scipy.special import erfc
 from kika._constants import BOLTZMANN_CONSTANT
 
 KB = BOLTZMANN_CONSTANT * 1e6
-ENGINE_VERSION = "doppler-analytic-7"
+ENGINE_VERSION = "doppler-analytic-8"
 EPS = np.finfo(float).eps
 try:
     from importlib import import_module
@@ -200,6 +200,7 @@ class PreparedDopplerCurve:
             cache, cache_bytes = _native.prepare_panels(self._panels)
         object.__setattr__(self, "_native_panels", cache)
         object.__setattr__(self, "_native_panel_bytes", cache_bytes)
+        object.__setattr__(self, "_block_moment_cache", {})
         object.__setattr__(self, "_starts", _immutable([p[0] for p in panels]))
         object.__setattr__(self, "_ends", _immutable([p[1] for p in panels]))
         m = max(float(np.max(np.abs(y))) for _, y in result)
@@ -481,6 +482,9 @@ def _pointAt(curve, energy, h, options, radius):
 
 
 def _point_block(curve, energies, h, options):
+    from ._blocks import try_evaluate
+    accelerated=try_evaluate(curve,energies,h,options)
+    if accelerated is not None:return accelerated
     if options.backend != "python" and _native is not None and hasattr(_native, "evaluate_block") and curve._native_panels is not None:
         m, k = curve._envelope
         if not math.isfinite(m) or not math.isfinite(k):
@@ -537,12 +541,16 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
     if dt > 0 and (a <= 0 or not math.isfinite(a)):
         raise DopplerConvergenceError("unresolvable-increment", "thermal scale")
     h = math.sqrt(a)
+    from ._blocks import warm, _MIN_DIRECT_QUERIES
+    if dt>0 and len(energies)>=_MIN_DIRECT_QUERIES:
+        warm(prepared,temperature,options)
     native_blocks = dt > 0 and backend == "native" and hasattr(_native, "evaluate_block") and prepared._native_panels is not None
     block_size = options.block_size
     if native_blocks:
         # Account for buffer copies, row tuples, scalars and component dictionaries.
         owners = len(prepared.regions) + int(prepared.regions[0][0][0] > 0 and prepared.support.lower != "zero") + int(prepared.support.upper != "zero")
-        per_point = 512+128*owners
+        active_moments=prepared._block_moment_cache.get((h,options.max_work_bytes))
+        per_point = (4096+256*owners) if active_moments else (512+128*owners)
         base = 4096+options.max_series_terms*128+options.max_panels*128
         block_size = min(block_size, (options.max_work_bytes-base)//per_point)
         if block_size < 1:
@@ -551,6 +559,8 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
     values, errors, tails, removed = [], [], [], []
     removed_errors, removed_tails = [], []
     totals, count, maxradius = {}, 0, 0
+    moment_diagnostics=dict(computed_blocks=0,accepted_blocks=0,queries=0,legacy_fallbacks=0,
+                            source_blocks=0,numeric_cache_bytes=0)
     for start in range(0, len(energies), block_size):
         block = energies[start:start+block_size]
         if dt == 0:
@@ -558,6 +568,12 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
                      {"identity": prepared.evaluate_source(float(e))}, 0, 0) for e in block)
         else:
             rows = _point_block(prepared, block, h, options)
+            diagnostics=getattr(rows,'moment_diagnostics',None)
+            if diagnostics:
+                for key in ('computed_blocks','accepted_blocks','queries','legacy_fallbacks'):
+                    moment_diagnostics[key]+=diagnostics[key]
+                for key in ('source_blocks','numeric_cache_bytes'):
+                    moment_diagnostics[key]=max(moment_diagnostics[key],diagnostics[key])
         for energy, (v, err, tail, comp, n, radius) in zip(block, rows):
             drop = v if options.threshold_policy == "zero_below" and energy < options.threshold else 0.
             values.append(0. if options.threshold_policy == "zero_below" and energy < options.threshold else v)
@@ -585,6 +601,7 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
                   max_thermal_radius=maxradius, scratch_estimate_bytes=scratch,
                   native_block_size=block_size if native_blocks else None,
                   retained_prepared_native_bytes=prepared._native_panel_bytes,
+                  moment_blocks=moment_diagnostics,
                   retained_result_bytes=len(energies)*5*8, components_sum_over_probes=totals,
                   source_minimum=min(float(np.min(y)) for _, y in prepared.regions),
                   result_minimum=min(values),

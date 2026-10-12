@@ -212,6 +212,28 @@ class SuiteDopplerResult:
         return self.verify_table({k:r.crossSection[self.label] for k,r in entries.items()},total_budget=total_budget)
 
 
+def _source_values(prepared, energies):
+    """Vector interpolation with the scalar source's right-owned boundaries."""
+    q=np.asarray(energies,dtype=float)
+    values=np.empty(q.shape)
+    covered=np.zeros(q.shape,dtype=bool)
+    for x,y in prepared.regions:
+        selected=(q>=x[0])&(q<=x[-1])
+        values[selected]=np.interp(q[selected],x,y)
+        covered|=selected
+    x,y=prepared.regions[0]
+    below=q<x[0]
+    if prepared.support.lower=='zero': values[below]=0.
+    elif prepared.support.lower=='constant': values[below]=y[0]
+    else: values[below]=y[0]*np.sqrt(x[0]/q[below])
+    x,y=prepared.regions[-1]
+    above=q>x[-1]
+    values[above]=y[-1] if prepared.support.upper=='constant' else 0.
+    if np.any(~(covered|below|above)):
+        raise DopplerInputError('invalid-domain','uncovered energy')
+    return values
+
+
 def broaden_suite(suite, context=None, *, source_style='recon', label='heated', temperature,
                   support, source_temperature=None, input_accuracy=None, urr_policy=None,
                   options=None, output_domain=None, negative_policy='reject',
@@ -321,10 +343,10 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
             mid=(base[:len(right)]+right)*.5
             left=np.nextafter(base[base>source_grid[0]],source_grid[0])
             q=np.unique(np.r_[base,mid,left])
-            v={k:np.array([p.evaluate_source(float(e)) for e in q]) for k,p in prepared.items()}
+            v={k:_source_values(p,q) for k,p in prepared.items()}
             for key in order:
                 summed=np.array([math.fsum(row) for row in zip(*(v[c] for c in graph[key]))])
-                original=np.array([source_curves[key].evaluate_source(float(e)) for e in q])
+                original=_source_values(source_curves[key],q)
                 ratio=float(np.max(np.abs(original-summed)/(options.atol+options.rtol*np.abs(summed))))
                 source_balance[key]=max(source_balance.get(key,0.),ratio)
                 if ratio>1:raise DopplerInputError('source-sum-not-closed','source aggregate and leaves disagree')
@@ -335,6 +357,8 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
                              MappingProxyType(mt_keys),declaration)
     keys=tuple(entries)
     from .table import _ConstructionSamples
+    from ._blocks import warm
+    for key,p in prepared.items():warm(p,temperature,per_options[key],domain)
     construction=_ConstructionSamples(result._evaluate,keys,options)
     tables_forms,tables,tab_report=_tabulate(tuple(prepared.values()),tuple(per_options.values()),temperature,
                                              domain,options,construction,keys,label,progress)
@@ -362,7 +386,9 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
                 tabulation=tab_report,empirical_verification=False,global_error_bound=False)
     result=SuiteDopplerResult(MappingProxyType(tables_forms),MappingProxyType(report),source_style,label,temperature,
                 options,result._prepared,result._per_options,result._graph,order,tables,source_hash,result._mt_keys,declaration)
-    checks=result._verify_table(evaluator=construction)
+    from .table import _verify_construction
+    checks=_verify_construction(result.forms,tables,tab_report['regions'],label)
+    tab_report['construction_verification']='adaptive-certificates-and-exact-publication'
     report['tabulation']['construction_samples']=construction.finish()
     report['verification_ratios']={f'{k.container}/{k.label}':v for k,v in checks.items()}
     if _fingerprint(suite,source_style)!=source_hash:raise DopplerInputError('stale-source','suite changed during processing')
