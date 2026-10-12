@@ -959,7 +959,29 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
         report.warn(f"URR probability tables computed by kika (PURR's method: {options.ladders} "
                     f"ladders of {options.samples} samples, {options.bins} bands, on "
                     f"{len(energies)} energies); statistically, not bitwise, equal to NJOY PURR's")
+        for T, table in tables.items():
+            report.warn(_urrErrorLine(T, table.statistics))
     return tables
+
+
+def _urrErrorLine(T, statistics) -> str:
+    """One line on a temperature's statistical error: per reaction with an
+    average, the worst relative error of f(σ0) at the smallest σ0 and the
+    worst band share ``p · factor``, over the energies."""
+    worst = statistics.worst()
+    s0 = float(statistics.sigma0[0])
+    parts = [f"{row} f({s0:g} b) {100 * w['shielding'][s0]:.2f} %, band {100 * w['contribution']:.2f} %"
+             for row, w in worst.items() if w["contribution"] > 0]
+    ladders = statistics.ladders
+    drawn = (f"{int(ladders.min())}" if ladders.min() == ladders.max()
+             else f"{int(ladders.min())}-{int(ladders.max())}")
+    target = ""
+    if statistics.errorTarget is not None:
+        missed = int((~statistics.converged).sum())
+        target = (f"; target {100 * statistics.errorTarget:g} % "
+                  + ("reached at every energy" if not missed else f"NOT reached at {missed} energies"))
+    return (f"URR {T:g} K statistical error (1 sigma, jackknife over {drawn} ladders, worst energy): "
+            + "; ".join(parts) + target)
 
 
 def _attachURR(out, tables):
