@@ -116,3 +116,18 @@ def test_energy_angular_legendre_becomes_mc():
     _assertTable(out.energy.function1ds[0])
     for t in out.energyAngular.function2ds[0].function1ds:
         _assertTable(t)
+
+
+def test_legendre_table_keeps_the_mean_cosine_where_a_midpoint_sits_on_the_chord():
+    """Fe-56 elastic at 1.438 MeV (ENDF/B-VIII.1): with three seeds and a midpoint-only
+    test, [-1, 0] passed as one segment (mu = -0.5 lies on the chord) and the table's
+    mean cosine came out 0.025 instead of a1 = -0.073."""
+    from kika.nuclear_data.model import Legendre
+    from kika.processing.tabulation.angular import muTable
+    from kika.processing.tabulation.tables import TabulationOptions
+
+    a = [1.0, -0.07297533, 0.2537618, 0.06656012, 0.005421167, 0.01914622, -0.01104767]
+    table, _ = muTable(Legendre(coefficients=a, outerDomainValue=1.438e6), TabulationOptions())
+    mu, cdf = np.asarray(table.xs), np.asarray(table.cdf)
+    mean = float(np.sum(np.diff(cdf) * 0.5 * (mu[1:] + mu[:-1])))
+    assert mean == pytest.approx(a[1], abs=2e-3)

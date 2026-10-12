@@ -55,9 +55,13 @@ def refine(function: Callable[[np.ndarray], np.ndarray], grid: Sequence[float],
            options: TabulationOptions) -> Tuple[np.ndarray, np.ndarray]:
     """``(x, f(x))`` on ``grid`` bisected until lin-lin reproduces ``function``.
 
-    Each pass tests the midpoint of every interval still open, all at once,
-    and splits those whose midpoint misses the chord by more than the
-    tolerance. Raises when ``maxPoints`` would be exceeded.
+    Each pass tests every interval still open at a quarter, the half and three
+    quarters of its width, all at once, and splits at the half those where any
+    of the three misses the chord by more than the tolerance. A midpoint alone
+    can sit on the chord by coincidence while the function bulges on both
+    sides of it (Fe-56's elastic at 1.438 MeV: [-1, 0] passed as one segment,
+    and the mean cosine came out +0.10 off). Raises when ``maxPoints`` would be
+    exceeded.
     """
     x = np.unique(np.asarray(grid, dtype=float))
     y = np.asarray(function(x), dtype=float)
@@ -67,8 +71,12 @@ def refine(function: Callable[[np.ndarray], np.ndarray], grid: Sequence[float],
         lo = np.flatnonzero(open_)
         mid = 0.5 * (x[lo] + x[lo + 1])
         fm = np.asarray(function(mid), dtype=float)
-        chord = 0.5 * (y[lo] + y[lo + 1])
-        bad = np.abs(fm - chord) > options.rtol * np.abs(fm) + options.atol * scale
+        bad = np.zeros(len(lo), dtype=bool)
+        for t, ft in ((0.5, fm),
+                      (0.25, np.asarray(function(x[lo] + 0.25 * (x[lo + 1] - x[lo])), dtype=float)),
+                      (0.75, np.asarray(function(x[lo] + 0.75 * (x[lo + 1] - x[lo])), dtype=float))):
+            chord = y[lo] + t * (y[lo + 1] - y[lo])
+            bad |= np.abs(ft - chord) > options.rtol * np.abs(ft) + options.atol * scale
         # Intervals already at floating-point resolution cannot split further.
         bad &= (x[lo + 1] - x[lo]) > 4 * np.spacing(np.maximum(np.abs(x[lo]), np.abs(x[lo + 1])))
         if not bad.any():
