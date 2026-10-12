@@ -47,3 +47,75 @@ def test_acer_merges_intervals_below_one_millionth_of_the_area():
     ex, pdf, cdf, cos = _acer(x, y, 2)
     assert ex.tolist() == [1.0, 2.0]                     # 1e-9, 2e-9 merged into 1.0
     assert cdf[-1] == pytest.approx(1.0)
+
+
+# -- free gas (THERMR iinc=1), roadmap NR-2 ------------------------------------------------
+from math import erf, exp, pi, sqrt  # noqa: E402
+
+from kika.processing import thermal as th  # noqa: E402
+
+
+def _free_gas_total(A, kT, E):
+    """sigma(E)/sigma_f of a free gas (target-at-rest sigma_f constant), closed form."""
+    y = sqrt(A * E / kT)
+    return (1 + 1 / (2 * y * y)) * erf(y) + exp(-y * y) / (y * sqrt(pi))
+
+
+def test_sig_free_gas_is_the_closed_form_kernel():
+    A, T = 15.858, 293.6
+    inputs = th.freeGasInputs(A, T, 10.0)
+    tev = inputs.tev
+    e, ep, u = 0.0253, 0.031, 0.3
+    got = native.sig(e, ep, u, tev, th.KT0, inputs.az, inputs.sb, 0.0, 0.0, tev, 0.0, 0.0, 0, 0,
+                     len(inputs.alpha), len(inputs.beta), inputs.alpha, inputs.beta, inputs.sab, 1)
+    a = (e + ep - 2 * u * sqrt(e * ep)) / (A * tev)
+    b = (ep - e) / tev
+    S = exp(-(a + b) ** 2 / (4 * a)) / sqrt(4 * pi * a)
+    expect = ((A + 1) / A) ** 2 / (2 * tev) * sqrt(ep / e) * S
+    assert got == pytest.approx(expect, rel=1e-13)
+
+
+@pytest.mark.parametrize("A", [0.99917, 15.858, pytest.param(236.006, id="236.006")])
+@pytest.mark.parametrize("E", [1e-5, 0.0253, 1.55])
+def test_calcem_free_gas_integral_within_the_declared_budget(A, E):
+    # PXB-T01: calcem's integral (sigma_f = 1) within 2e-3 of the closed form.
+    options = th.ThermalInelasticOptions(iinc=1)
+    inputs = th.freeGasInputs(A, 293.6, 10.0)
+    _, _, xsi = th._calcem(inputs, native.sigfig(E, 8, 0), options)
+    assert xsi == pytest.approx(_free_gas_total(A, inputs.tev, E), rel=2e-3)
+
+
+def test_free_gas_tables_carry_the_elastic_and_normalised_spectra():
+    E = np.array([1e-6, 1.0, 20.0])
+    sigma = np.array([30.0, 20.0, 20.0])
+    xs, form, emax = th.freeGasTables(15.858, 293.6, (E, sigma), emax=1.0,
+                                      options=th.ThermalInelasticOptions(iinc=1, workers=1))
+    assert emax < 1.0
+    assert np.allclose(xs.ys, np.interp(xs.xs, E, sigma), rtol=1e-9)
+    for spectrum in form.energy.function1ds:
+        assert spectrum.cdf[-1] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_free_gas_options_are_checked():
+    elastic = ([1e-5, 10.0], [20.0, 20.0])
+    with pytest.raises(ValueError, match="iinc"):
+        th.freeGasTables(1.0, 293.6, elastic, options=th.ThermalInelasticOptions())
+    with pytest.raises(ValueError, match="iinc"):
+        th.inelasticTables(None, 293.6, options=th.ThermalInelasticOptions(iinc=1))
+    with pytest.raises(ValueError, match="3000"):
+        th.freeGasInputs(1.0, 3500.0, 10.0)
+    with pytest.raises(ValueError, match="does not reach"):
+        th.freeGasTables(1.0, 293.6, ([1e-3, 10.0], [20.0, 20.0]), emax=0.1)
+
+
+def test_corrected_free_gas_pdf_and_cdf_describe_the_same_tail_mass():
+    # ACER can join a nonzero tail PDF to a distant zero after dropping tiny
+    # CDF increments. Normalising CDF[-1] alone does not catch that defect.
+    _, form, _ = th.freeGasTables(236.006,293.6,([1e-6,1.],[1.,1.]),emax=3e-5,
+                                  options=th.ThermalInelasticOptions(iinc=1,workers=2))
+    for spectrum in form.energy.function1ds:
+        x=np.asarray(spectrum.xs);p=np.asarray(spectrum.pdf);c=np.asarray(spectrum.cdf)
+        areas=np.diff(x)*(p[:-1]+p[1:])/2
+        np.testing.assert_allclose(np.diff(c),areas,rtol=1e-9,atol=2e-15)
+        assert areas.sum()==pytest.approx(1.,abs=1e-12)
+        assert np.all(p>=0)
