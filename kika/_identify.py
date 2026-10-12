@@ -173,11 +173,11 @@ def _isMcnpMeshRuntape(path) -> bool:
 
     Opening the file reads only its metadata, not the datasets.
     """
-    import h5py
     try:
+        import h5py
         with h5py.File(path, "r") as h5:
             return "results/mesh_tally" in h5
-    except OSError:
+    except (ImportError, OSError):
         return False
 
 
