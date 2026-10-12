@@ -11,6 +11,10 @@ from kika.mcnp import detect_mcnp_file_type, read_meshtal
 _DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "meshtal")
 TEXT = os.path.join(_DATA, "mcnptools_col_cf.msht")
 RUNTAPE = os.path.join(_DATA, "mcnp631_xdmf_crop.h5")
+# One MCNP 6.3.0 run written twice: out=xdmf (runtape) and out=colsci/cfsci (text).
+RUN63_H5 = os.path.join(_DATA, "mcnp630_xdmf.h5")
+RUN63_TEXT = os.path.join(_DATA, "mcnp630_colsci_cfsci.msht")
+RUN63_MCTAL = os.path.join(_DATA, "..", "mctal", "mcnp630_check.m")
 
 
 # ---------------------------------------------------------------------------
@@ -190,11 +194,11 @@ def test_runtape_rectangular():
 
 
 def _runtape(tmp_path, n_time, n_energy, totals):
-    """A runtape laid out as MCNP 6.3 documents it (appendix D.4): cylindrical,
-    theta in radians, data (time, energy, k, j, i). Values encode their index."""
+    """A runtape laid out as MCNP 6.3 writes it: cylindrical, theta in radians,
+    data (energy, time, k, j, i). Values encode their index."""
     r, z, t = np.array([0.0, 1, 2]), np.array([0.0, 5, 10, 15]), np.linspace(0, 2 * np.pi, 5)
     nt, ne = n_time + totals, n_energy + totals
-    idx = np.indices((nt, ne, len(t) - 1, len(z) - 1, len(r) - 1))
+    idx = np.indices((ne, nt, len(t) - 1, len(z) - 1, len(r) - 1))
     mean = (idx[0] * 10000 + idx[1] * 1000 + idx[2] * 100 + idx[3] * 10 + idx[4]).astype(float)
     path = tmp_path / "runtpe.h5"
     with h5py.File(path, "w") as h5:
@@ -222,8 +226,46 @@ def test_runtape_cylindrical_layout_and_totals(tmp_path):
     assert ds.result.dims == ("energy", "time", "r", "z", "theta")
     # energy bin 2, time bin 1, r bin 1, z bin 2, theta bin 3
     value = ds.result.isel(energy=2, time=1, r=1, z=2, theta=3).item()
-    assert value == 1 * 10000 + 2 * 1000 + 3 * 100 + 2 * 10 + 1
-    assert tally.total("energy", "time").result.isel(r=0, z=0, theta=0).item() == 2 * 10000 + 3 * 1000
+    assert value == 2 * 10000 + 1 * 1000 + 3 * 100 + 2 * 10 + 1
+    assert tally.total("energy", "time").result.isel(r=0, z=0, theta=0).item() == 3 * 10000 + 2 * 1000
+
+
+def test_mcnp63_runtape_equals_colsci_of_the_same_run():
+    """The same 6.3.0 run as out=xdmf and out=colsci/cfsci: cell by cell equal,
+    totals included, for rectangular and cylindrical meshes with energy and
+    time bins. This is what fixes the runtape layout (energy, time, k, j, i)
+    and theta in radians."""
+    h5, text = read_meshtal(RUN63_H5), read_meshtal(RUN63_TEXT)
+    assert (h5.code, h5.version) == ("mcnp6", "6.3.0")
+    assert (text.code, text.build_date) == ("mcnp6", "01/26/23") and text.nps == 200000.0
+    assert list(h5.tallies) == list(text.tallies) == [34, 44, 54, 64]
+    shapes = {34: (1, 1, 5, 3, 2), 44: (4, 4, 5, 3, 2), 54: (4, 1, 5, 4, 5), 64: (1, 4, 5, 4, 5)}
+    for number, a in h5.tallies.items():
+        b = text[number]
+        assert a.result.shape == b.result.shape == shapes[number]
+        assert (a.has_energy_total, a.has_time_total) == (b.has_energy_total, b.has_time_total)
+        for dim in a.spatial_dims:
+            np.testing.assert_allclose(a.bounds[dim], b.bounds[dim], rtol=6e-6)
+        np.testing.assert_allclose(a.result, b.result, rtol=6e-6, atol=0)
+        np.testing.assert_allclose(a.error, b.error, rtol=6e-6, atol=1e-6)
+    cyl = h5[54]
+    assert cyl.geometry == "cylindrical" and cyl.attrs["score_multiplier_type"] == "reaction"
+    np.testing.assert_allclose(cyl.bounds["theta"], [0, 1 / 12, 1 / 6, 0.25, 0.625, 1.0])
+    # cfsci adds the Volume column; it matches the volumes from the bounds
+    # (which the text prints to 6 digits: theta 8.33333E-02).
+    np.testing.assert_allclose(text[64].attrs["volume"], text[64].volumes, rtol=5e-5)
+    np.testing.assert_allclose(text[64].attrs["volume"], h5[64].volumes, rtol=1e-5)
+
+
+def test_mcnp63_tmesh_in_mctal_equals_fmesh_on_the_same_grid():
+    """TMESH 71 (MCTAL) and FMESH 34 share a 5x3x2 grid: the MCTAL mesh
+    unfolding (CORA fastest) against MCNP's self-labelled FMESH rows."""
+    from kika import read_mctal
+    tmesh = read_mctal(RUN63_MCTAL)[71].to_xarray()
+    fmesh = read_meshtal(RUN63_TEXT)[34].to_xarray()
+    assert tmesh.result.dims == ("cora", "corb", "corc")
+    np.testing.assert_array_equal(tmesh.cora, fmesh.x)
+    np.testing.assert_allclose(tmesh.result.values, fmesh.result.values, rtol=6e-6, atol=0)
 
 
 def test_runtape_without_mesh_results(tmp_path):

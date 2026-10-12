@@ -334,3 +334,25 @@ def test_dataframe_of_scalar_tally():
     df = read_mctal(_DATA + "/mctal/mctalfile_test_1.m")[14].to_dataframe()
     assert isinstance(df, pd.DataFrame)
     assert df.to_dict("list") == {"cell": [4], "result": [1.35263e-05], "error": [0.0023]}
+
+
+def test_mcnp63_union_and_total_cell_bins():
+    """F4 1 2 (1 2) T: MCNP writes 0 for the union bin and for the total, so
+    the bins are indexed and the numbers kept in cell_id (values checked
+    against the MCNP 6.3.0 output listing)."""
+    mctal = read_mctal(_DATA + "/mctal/mcnp630_check.m")
+    tally = mctal[4]
+    ds = tally.to_xarray()
+    assert list(ds.cell.values) == [1, 2, 3, 4] and list(ds.cell_id.values) == [1, 2, 0, 0]
+    np.testing.assert_array_equal(ds.multiplier, [1, 2])
+    np.testing.assert_array_equal(
+        ds.result.sel(cell=1, multiplier=1).values, [4.17322e-03, 7.72611e-04, 9.86075e-04])
+    np.testing.assert_array_equal(
+        ds.result.sel(cell=3, multiplier=1).values, [7.62492e-04, 2.40679e-04, 2.21262e-04])
+    assert tally.total("energy").result.sel(cell=1, multiplier=1).item() == 5.93191e-03
+
+    user = mctal[24].to_xarray()           # FT INC + FU 0 1 2 10 T
+    np.testing.assert_array_equal(user.user, [0, 1, 2, 10])
+    assert user.result.sel(user=0).item() == 1.69313e-05
+    assert mctal[21].to_xarray().result.dims == ("surface", "segment")
+    assert mctal[5].to_xarray().result.dims == ("detector", "flag", "energy")

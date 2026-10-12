@@ -9,6 +9,16 @@ fixtures for `kika.mcnp.read_meshtal`.
 | `mcnptools_col_cf.inp` | same repository, `inpgen` | the input deck that wrote it |
 | `mcnp631_xdmf_crop.h5` | OpenMC fundamental testing, `0.15.3/fundamental_testing/7224_ss/4/mcnp_run/c_source-batch.h5`, commit 775dc31f (MIT) | MCNP 6.3.1 HDF5 runtape written with `out=xdmf`, **cropped**: `/config_control` attributes and `/results/mesh_tally/mesh_tally_4` with x bins 0-4, y bins 28-31 and z bins 40-42 of the original 50x60x90 mesh (datasets sliced, attributes unchanged) |
 
+Own runs (kika project, no third-party licence): one MCNP 6.3.0 fixed-source
+problem written twice, differing only in FMESH `out=`.
+
+| File | What it holds |
+|---|---|
+| `mcnp630_check_xdmf.inp`, `mcnp630_check_sci.inp` | the two decks (rect + cyl FMESH with energy/time bins, TMESH 71 on FMESH 34's grid, every MCTAL bin axis) |
+| `mcnp630_xdmf.h5` | `/config_control` attributes and `/results` of the `out=xdmf` runtape (the rest of the 27 MB runtape dropped) |
+| `mcnp630_colsci_cfsci.msht` | the MESHTAL of the `out=colsci`/`cfsci` run |
+| `../mctal/mcnp630_check.m` | the MCTAL of the `out=xdmf` run |
+
 ## Licences
 
 ### LANL MCNPTools (BSD-3-Clause)

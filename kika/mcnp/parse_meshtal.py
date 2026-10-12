@@ -22,8 +22,9 @@ MESHTAL text (MCNP 5, 6.1, 6.2, 6.3)
 
 HDF5 runtape (MCNP 6.3+, ``out=xdmf``)
     ``/results/mesh_tally/mesh_tally_<n>`` (MCNP 6.3.1 manual, appendix D.4):
-    ``mean`` and ``relative_standard_error`` with the spatial axes stored
-    reversed (``k j i``), the ``grid_*`` edge datasets and the descriptive
+    ``mean`` and ``relative_standard_error`` stored as ``(energy, time, k, j,
+    i)`` with the totals as an extra last energy/time index, ``grid_t`` in
+    radians, the ``grid_*`` edge datasets and the descriptive
     attributes. Without ``out=xdmf`` MCNP does not write this group and the
     reader says so.
 """
@@ -319,9 +320,11 @@ def _hdf5_tally(group, tally_id: int, where: str) -> MeshTally:
 def _hdf5_layout(mean, rse, tally: MeshTally, where: str):
     """Put ``mean``/``rse`` in ``(energy, time, i, j, k)`` order.
 
-    MCNP stores ``(time, energy, k, j, i)`` (LANL LA-UR-21-26363: transposing
-    gives ``x y z e t``). The leading sizes are checked against the energy and
-    time grids, allowing one extra total bin each.
+    MCNP 6.3 stores ``(energy, time, k, j, i)``: measured on 6.3.0 runtapes
+    with 3 energy bins x 1 time bin (shape ``(4, 1, ...)``) and 1 x 3
+    (``(1, 4, ...)``), the extra index being the total, and cell by cell
+    against the ``colsci`` MESHTAL of the same run. (LANL's LA-UR-21-26363
+    slides give the opposite order for the first two axes; the files do not.)
     """
     if mean.ndim != 5 or mean.shape != rse.shape:
         raise ValueError(f"{where}: mean/relative_standard_error of shape {mean.shape}, expected 5-D")
@@ -329,17 +332,17 @@ def _hdf5_layout(mean, rse, tally: MeshTally, where: str):
     if mean.shape[2:] != grid[::-1]:
         raise ValueError(f"{where}: spatial shape {mean.shape[2:]} does not match the grids "
                          f"{grid} reversed")
-    n_t, n_e = tally.n_time, tally.n_energy
+    n_e, n_t = tally.n_energy, tally.n_time
 
     def fits(size, n):
         return size == n or (n > 1 and size == n + 1)
 
-    if not (fits(mean.shape[0], n_t) and fits(mean.shape[1], n_e)):
+    if not (fits(mean.shape[0], n_e) and fits(mean.shape[1], n_t)):
         raise ValueError(f"{where}: leading shape {mean.shape[:2]} does not match "
-                         f"(time, energy) = ({n_t}, {n_e}) bins")
-    order = (1, 0, 4, 3, 2)
+                         f"(energy, time) = ({n_e}, {n_t}) bins")
+    order = (0, 1, 4, 3, 2)
     return (mean.transpose(order).copy(), rse.transpose(order).copy(),
-            mean.shape[1] == n_e + 1, mean.shape[0] == n_t + 1)
+            mean.shape[0] == n_e + 1, mean.shape[1] == n_t + 1)
 
 
 def _text(value) -> str:

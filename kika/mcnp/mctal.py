@@ -386,7 +386,10 @@ class Tally:
 
         Total bins are left out (see :meth:`total`), and so is every axis the
         tally did not bin. Bounded axes carry their upper bounds as the
-        coordinate and a ``<name>_low`` coordinate with the lower bounds.
+        coordinate and a ``<name>_low`` coordinate with the lower bounds. When
+        the cell/surface numbers repeat (MCNP writes ``0`` for each union bin
+        and for the total of an F card ending in ``T``), the dimension is the
+        1-based bin index and the numbers are in ``<name>_id``.
 
         :param perturbation: PERT card number to return instead of the
             unperturbed tally.
@@ -451,7 +454,15 @@ class Tally:
                 index.append(slice(0, axis.n_bins))
                 name = self.dim_name(key)
                 dims.append(name)
-                coords[name] = (name, axis.labels())
+                labels = axis.labels()
+                if len(np.unique(labels)) < len(labels):
+                    # MCNP writes 0 for every union bin and for the total over
+                    # cells of an F card with T, so the numbers can repeat: index
+                    # the bins instead and keep the numbers alongside.
+                    coords[name] = (name, np.arange(1, len(labels) + 1))
+                    coords[f"{name}_id"] = (name, labels)
+                else:
+                    coords[name] = (name, labels)
                 if axis.lower is not None:
                     coords[f"{name}_low"] = (name, axis.lower)
             else:

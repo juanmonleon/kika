@@ -331,7 +331,7 @@ def _cell_values(tally, cell: int, perturbation: Optional[int] = None):
     def select(view):
         if region not in view.dims:
             return view
-        labels = list(view[region].values)
+        labels = list(view[f"{region}_id"].values if f"{region}_id" in view.coords else view[region].values)
         if len(labels) == 1:
             return view.isel({region: 0})
         if cell not in labels:
