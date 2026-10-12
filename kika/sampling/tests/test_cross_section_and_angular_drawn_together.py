@@ -137,14 +137,14 @@ def test_sigma_and_shape_are_drawn_independently(run):
         assert corr.max() < 5.0 / np.sqrt(N), f"L={order}: max |corr| {corr.max():.3f}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "draw_samples gives each block its own Sobol sequence and pairs blocks by "
-    "replica index (core.py:205), so two blocks the file leaves independent "
-    "come out correlated -- 95th percentile |corr| 0.20 (L=1) and 0.39 (L=2) "
-    "measured 2026-10-05, against 0.06 for random sampling. The same defect as "
-    "memory sobol-blocks-collide-across-materials, inside one call. Not fixed "
-    "here: core.py is shared with the frozen v2 pipeline."))
 def test_sigma_and_shape_are_independent_under_sobol_too():
+    """D35: was a strict xfail until the blocks shared one Sobol sequence.
+
+    Each block drew its own Sobol and the blocks were paired by replica, so two
+    blocks the file leaves independent came out correlated -- 95th percentile
+    |corr| 0.20 (L=1) and 0.39 (L=2), measured 2026-10-05, against 0.06 for
+    random sampling.
+    """
     factors = _factors(_draw("sobol"))
     sigma = factors[ComponentKey(ZA, 33, MT, 0)]
     for order in (1, 2):

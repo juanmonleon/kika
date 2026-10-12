@@ -219,7 +219,15 @@ def _photon_items(channel, parent: Optional[str]) -> List[Dict[str, Any]]:
                 items.append({"kind": "primary", "binding": float(energy.value),
                               "mult": multiplicity, "angular": angular})
             elif energy is not None and getattr(energy, "function1ds", None):
-                items.append({"kind": "continuum", "spectrum": energy, "mult": multiplicity})
+                items.append({"kind": "continuum", "spectrum": energy, "mult": multiplicity,
+                              "angular": angular, "product": product.label})
+            elif multiplicity is None and energy is None:
+                # A placeholder: the photon of a level whose decay the file
+                # states elsewhere (JENDL-5 gives Fe-56's level gammas in the
+                # reaction's MF6, and the residual level still lists a
+                # "photon" with nothing in it). There is nothing to draw and
+                # nothing missing, so nothing is said.
+                continue
             else:
                 items.append({"kind": "unsupported", "what": kind or mkind or "nothing"})
         if product.outputChannel is not None:
@@ -243,6 +251,9 @@ def _decode(suite) -> List[Dict[str, Any]]:
         items = _photon_items(node.outputChannel, None)
         if not items:
             continue
+        discrete = _mf6_discrete_points(node)
+        if discrete:
+            items = [part for item in items for part in _split_discrete(item, discrete)]
         continuum_index = 0
         for item in items:
             if item["kind"] == "cascade":
@@ -265,6 +276,107 @@ def _decode(suite) -> List[Dict[str, Any]]:
         setattr(suite, _CONTRIB_ATTR, out)
     except AttributeError:  # pragma: no cover - a slotted suite just recomputes
         pass
+    return out
+
+
+# -- MF6 LAW=1 discrete points -------------------------------------------------
+
+class _Tabulated:
+    """A yield ``y(E)`` times a weight tabulated at the incident nodes.
+
+    Just enough of a 1-d function for this module: ``xs`` for the axis and
+    ``evaluate`` for everything else.
+    """
+
+    def __init__(self, yield_form, nodes, weights):
+        self._y = yield_form
+        self._nodes = np.asarray(nodes, dtype=float)
+        self._weights = np.asarray(weights, dtype=float)
+        grid = _grid_of(yield_form) if yield_form is not None else np.empty(0)
+        self.xs = np.unique(np.concatenate([grid, self._nodes]))
+
+    def evaluate(self, energies):
+        energies = np.asarray(energies, dtype=float)
+        weight = np.interp(energies, self._nodes, self._weights)
+        y = _evaluate(self._y, energies) if self._y is not None else np.ones_like(energies)
+        return y * weight
+
+
+class _Node:
+    """One incident energy of a spectrum: what ``function1ds`` holds."""
+
+    def __init__(self, energy, xs, ys):
+        self.outerDomainValue = float(energy)
+        self.xs = np.asarray(xs, dtype=float)
+        self.ys = np.asarray(ys, dtype=float)
+
+    def evaluate(self, energies):
+        return np.interp(np.asarray(energies, dtype=float), self.xs, self.ys, left=0.0, right=0.0)
+
+
+class _Spectrum:
+    def __init__(self, nodes):
+        self.function1ds = nodes
+
+
+def _mf6_discrete_points(node) -> Dict[str, List[int]]:
+    """``{product label: ND per incident node}`` for the MF6 LAW=1 photons that
+    state discrete lines.
+
+    ENDF-6 LAW=1 lets the first ``ND`` outgoing points of each node be discrete
+    energies, each with the fraction of the yield it carries, ahead of the
+    continuum density. The model has no node for that statement; the decoder
+    keeps ``ND`` in the reaction's ENDF provenance, which is where it is read.
+    A GNDS or ACE suite has no such provenance (FUDGE writes those lines as
+    discrete gammas of their own), so for them this is empty.
+    """
+    provenance = getattr(node, "provenance", None)
+    fields = getattr(provenance, "headerFields", None) or {}
+    mf6 = fields.get("mf6") if isinstance(fields, dict) else None
+    out: Dict[str, List[int]] = {}
+    for record in (mf6 or {}).get("products", []) or []:
+        law = record.get("law_fields") or {}
+        nd = law.get("nd") or []
+        if record.get("law") == 1 and record.get("pid") == "photon" and any(nd):
+            out[record.get("label")] = [int(v) for v in nd]
+    return out
+
+
+def _split_discrete(item, discrete: Dict[str, List[int]]) -> List[Dict[str, Any]]:
+    """A continuum item whose nodes open with discrete points → lines (one per
+    distinct Eγ, weighted node by node; a negative one is a primary photon)
+    plus what is left of the continuum."""
+    if item.get("kind") != "continuum" or item.get("product") not in discrete:
+        return [item]
+    nd = discrete[item["product"]]
+    nodes = list(item["spectrum"].function1ds)
+    if len(nd) != len(nodes):
+        return [item]
+    energies = [float(f.outerDomainValue) for f in nodes]
+    weights: Dict[int, List[float]] = {}
+    exact: Dict[int, float] = {}
+    rest: List[_Node] = []
+    for i, (f, n) in enumerate(zip(nodes, nd)):
+        xs = np.asarray(f.xs, dtype=float)
+        ys = np.asarray(f.ys, dtype=float)
+        for x, y in zip(xs[:n], ys[:n]):
+            key = int(round(x))
+            exact.setdefault(key, float(x))
+            weights.setdefault(key, [0.0] * len(nodes))[i] += float(y)
+        if xs.size - n >= 2:
+            rest.append(_Node(f.outerDomainValue, xs[n:], ys[n:]))
+    # A negative discrete energy is a primary photon (ENDF-6 §6.2.3): it comes
+    # out at |EP| + AWR/(AWR+1)·E, so it is a primary line and not a line at -|EP|.
+    out: List[Dict[str, Any]] = [
+        {"kind": "primary", "binding": -exact[key], "angular": item.get("angular"),
+         "mult": _Tabulated(item["mult"], energies, w)}
+        if exact[key] < 0 else
+        {"kind": "line", "energy": exact[key], "angular": item.get("angular"),
+         "mult": _Tabulated(item["mult"], energies, w)}
+        for key, w in sorted(weights.items())
+    ]
+    if rest:
+        out.append({**item, "spectrum": _Spectrum(rest)})
     return out
 
 
@@ -590,15 +702,23 @@ class PhotonProduction:
         Thresholds, multiplicity nodes and continuum nodes, never the cross
         sections' resonance grids, plus 121 log-spaced points so decades the
         tables leave empty are still walked smoothly. At most 1500 points.
-        ``{"grid": [eV...], "min": eV|None, "max": eV|None}``.
+
+        ``thresholds`` are the energies where a reaction starts emitting, the
+        stops at which the spectrum gains lines (between two of them it only
+        changes in scale), lowest first: ``[{"energy_ev", "mts": [...]}]``.
+
+        ``{"grid": [eV...], "min": eV|None, "max": eV|None, "thresholds": [...]}``.
         """
         points = set()
         lo, hi = math.inf, -math.inf
+        starts: Dict[float, List[Any]] = {}
         for c in self._select(mt):
             dlo, dhi = _domain(c)
             if dlo <= dhi:
                 lo, hi = min(lo, dlo), max(hi, dhi)
                 points.update((dlo, dhi))
+                starts.setdefault(float(f"{dlo:.10g}"), []).append(
+                    c["mt"] if c["mt"] is not None else c["label"])
             for item in c["items"]:
                 mult = item.get("mult")
                 if mult is not None:
@@ -606,13 +726,14 @@ class PhotonProduction:
                 if item["kind"] == "continuum":
                     points.update(_nodes(item["spectrum"]))
         if not math.isfinite(lo):
-            return {"grid": [], "min": None, "max": None}
+            return {"grid": [], "min": None, "max": None, "thresholds": []}
         grid = np.array(sorted(p for p in points if lo <= p <= hi and p > 0))
         decades = np.logspace(math.log10(max(lo, 1e-5)), math.log10(hi), 121)
         # Ten digits: a decade point and a tabulated one that differ only in the
         # last bit of a float are one stop on the slider, not two.
         grid = np.unique(np.array([float(f"{v:.10g}") for v in np.concatenate([grid, decades])]))
-        return {"grid": _thin(grid, 1500).tolist(), "min": lo, "max": hi}
+        thresholds = [{"energy_ev": e, "mts": starts[e]} for e in sorted(starts)]
+        return {"grid": _thin(grid, 1500).tolist(), "min": lo, "max": hi, "thresholds": thresholds}
 
     # -- the spectrum at one incident energy ---------------------------------
 

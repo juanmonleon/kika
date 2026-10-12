@@ -1281,16 +1281,18 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
     Returns the merged ``(samples, diagnostics)``, keyed exactly as a single
     call would have keyed them.
 
-    **The seed ladder is continued rather than restarted.**
-    :func:`~kika.sampling.core.draw_samples` gives block *i* of a call the seed
-    ``seed + i * BLOCK_SEED_STRIDE``, counting from that call's own first block.
-    Two calls that both started at *seed* would hand two different blocks the
-    same stream, which is a correlation nobody asked for and nothing would
-    report. So the second call starts where the first left off, and the result
-    is the ladder one call would have produced. A run with no MF35 in it draws
-    exactly what it drew before this function existed: the delta list is empty,
-    the factor list is the whole thing in the same order, and the offset is
-    zero.
+    **Every block of the run is realised in one call**, whatever space or
+    convention it was decomposed under: the groups are prepared separately
+    (:func:`~kika.sampling.core.prepare_blocks`) and drawn together
+    (:func:`~kika.sampling.core.realise_blocks`). Under Sobol that is one
+    sequence whose columns are dealt to the blocks, which is what keeps blocks
+    the file leaves independent independent -- separately drawn Sobol
+    sequences paired by replica are not (D35 in ``library-gaps.md``; ν̄ and χ
+    of one run came out correlated that way). Under ``random``/``lhs`` block
+    *i* of the whole run keeps the seed ``seed + i * BLOCK_SEED_STRIDE``, the
+    ladder the earlier, one-call-per-group version continued by hand. A run
+    whose blocks all go to one group draws exactly what
+    :func:`~kika.sampling.core.draw_samples` draws for them.
 
     **The absolute (MF35) blocks are drawn as the shipped PFNS pipeline draws
     them**, because that is what makes the two paths one operation:
@@ -1309,38 +1311,30 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
     * and reported per band with the legacy run summary's numbers
       (:func:`~kika.sampling.mf35_sampling.band_draw_report`).
     """
-    from kika.sampling.core import (BLOCK_SEED_STRIDE, draw_prepared_samples,
-                                    draw_samples)
+    from kika.sampling.core import prepare_blocks, realise_blocks
 
     factorBlocks, deltaBlocks = _splitBySemantics(blocks, index)
-    samples: Dict[Hashable, np.ndarray] = {}
-    diagnostics: Dict[Hashable, Dict[str, Any]] = {}
 
-    # The relative blocks may not all want the same space, so they are drawn in
-    # runs of one space each. The ladder is continued across those runs exactly
-    # as it is continued into the delta draw below: block *i* of the whole
-    # sequence keeps the seed it would have had from one call, so asking for a
-    # per-quantity space does not move a block that was already drawn in the
-    # space it ends up with.
+    # The relative blocks may not all want the same space, so they are
+    # decomposed in runs of one space each, in the order SPACES gives; the
+    # absolute (MF35) blocks come last. That order is the block order of the
+    # realisation, so it is what the random/lhs seed ladder counts.
     spaces = resolveSpaces(factorBlocks, index, space)
-    drawnCount = 0
+    prepared = []
     for wanted in SPACES:
         group = [(key, matrix) for key, matrix in factorBlocks
                  if spaces[key] == wanted]
         if not group:
             continue
-        draw = draw_prepared_samples if inDrawSpace else draw_samples
-        drawn, info = draw(
-            group, nSamples, space=wanted, returns="factors",
-            decomposition_method=decompositionMethod,
-            sampling_method=samplingMethod,
-            seed=seed + drawnCount * BLOCK_SEED_STRIDE, psd_method=psdMethod,
+        if wanted == "log" and not inDrawSpace:
+            # What draw_samples does before draw_prepared_samples: a relative Σ
+            # is drawn as ln f with covariance log1p(Σ).
+            group = [(key, np.log1p(np.asarray(matrix, dtype=float)))
+                     for key, matrix in group]
+        prepared += prepare_blocks(
+            group, space=wanted, returns="factors",
+            decomposition_method=decompositionMethod, psd_method=psdMethod,
             null_tol=nullTol, verbose=False, logger=logger)
-        for key in drawn:
-            info[key]["space"] = wanted
-        samples.update(drawn)
-        diagnostics.update(info)
-        drawnCount += len(group)
 
     if deltaBlocks:
         from kika.sampling.mf35_sampling import (NULL_TOL, SAMPLING_SPACE,
@@ -1348,22 +1342,24 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
                                                  clamp_to_stated_sigma)
 
         deltaNullTol = NULL_TOL if nullTol is None else nullTol
-        offset = drawnCount * BLOCK_SEED_STRIDE
-        drawn, info = draw_samples(
-            deltaBlocks, nSamples, space=SAMPLING_SPACE, returns="deltas",
-            decomposition_method=decompositionMethod,
-            sampling_method=samplingMethod, seed=seed + offset,
-            psd_method=psdMethod, null_tol=deltaNullTol, verbose=False,
-            logger=logger)
+        prepared += prepare_blocks(
+            deltaBlocks, space=SAMPLING_SPACE, returns="deltas",
+            decomposition_method=decompositionMethod, psd_method=psdMethod,
+            null_tol=deltaNullTol, verbose=False, logger=logger)
+
+    samples, diagnostics = realise_blocks(
+        prepared, nSamples, sampling_method=samplingMethod, seed=seed)
+
+    if deltaBlocks:
         stated = dict(statedBlocks) if statedBlocks is not None else {}
         stated = {key: stated.get(key, matrix) for key, matrix in deltaBlocks}
-        clamp_to_stated_sigma(drawn, stated, info, sigma_clamp=SIGMA_CLAMP)
+        deltas = {key: samples[key] for key in stated}
+        clamp_to_stated_sigma(deltas, stated, diagnostics, sigma_clamp=SIGMA_CLAMP)
+        samples.update(deltas)
         for key, matrix in stated.items():
-            info[key]["null_tol"] = deltaNullTol
-            info[key].update(band_draw_report(drawn[key], matrix,
-                                              null_tol=deltaNullTol))
-        samples.update(drawn)
-        diagnostics.update(info)
+            diagnostics[key]["null_tol"] = deltaNullTol
+            diagnostics[key].update(band_draw_report(deltas[key], matrix,
+                                                     null_tol=deltaNullTol))
 
     return samples, diagnostics
 

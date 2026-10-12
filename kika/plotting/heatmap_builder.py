@@ -970,6 +970,11 @@ class HeatmapBuilder(PlotBuilder):
             'text.color': style.rc_value('text.color'),
             'xtick.color': style.rc_value('xtick.color'),
             'ytick.color': style.rc_value('ytick.color'),
+            # A style mutes its tick marks and keeps their labels in ink; the
+            # label colour defaults to 'inherit', so leaving it out drew the
+            # energy ticks in the marks' grey.
+            'xtick.labelcolor': style.rc_value('xtick.labelcolor', 'inherit'),
+            'ytick.labelcolor': style.rc_value('ytick.labelcolor', 'inherit'),
             'figure.constrained_layout.use': False,
             'pdf.fonttype': 42,
             'ps.fonttype': 42,

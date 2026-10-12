@@ -384,6 +384,10 @@ def _process_one_file(
             "n_null": info["n_null"],
             "null_fraction": info["null_fraction"],
             "seed": info["seed"],
+            # Under Sobol every band shares the seed; the columns are what tell
+            # them apart, so a reproduction needs them.
+            "sobol_columns": (info["sobol_columns"].tolist()
+                              if "sobol_columns" in info else None),
             "n_clamped": info["n_clamped"],
             "clamped_fraction": info["clamped_fraction"],
             "realised_covariance_error": info["realised_covariance_error"],

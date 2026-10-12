@@ -339,6 +339,35 @@ def _summationMTs(present) -> set:
     available = set(int(mt) for mt in present)
     return {mt for mt in available if resolve_sum_components(mt, available)}
 
+def _targetSpinFromMF2(suite, provenance) -> None:
+    """MF2's SPI as the target's spin in the suite's PoPs (D39).
+
+    FUDGE puts it there (``micro_fe56.gnds.xml``: the top-level ``fe56``
+    nucleus has its spin, besides the formalism's own PoPs), and it is where
+    the resonance reconstruction of a GNDS file looks: without it, a GNDS file
+    kika wrote from a tape could not be processed (``context-missing``).
+
+    An R-Matrix Limited range (LRF=7) has no SPI: its CONT record holds 0
+    there, and the target's spin is the elastic pair's (Cl-35 B-VIII.1: 0 in
+    the range, 3/2 on the pair). So RML speaks through the pair, not the range.
+
+    Only an unambiguous spin is moved: one isotope (NIS=1) and every range
+    stating the same one. A natural element with several isotopes has no
+    single target spin, and is left as the file is.
+    """
+    fields = getattr(provenance, "headerFields", None) or {}
+    if len(fields.get("isotopes") or []) != 1:
+        return
+    spins = {float(r["spi"]) for r in fields.get("regions") or []
+             if r.get("spi") is not None and (r.get("lru"), r.get("lrf")) != (1, 7)}
+    from .resonances import _elasticTargetSpin
+    spins |= {s for s in (_elasticTargetSpin(r.formalism) for r in suite.resonances.resolved) if s is not None}
+    target = suite.PoPs.particles.get(suite.target)
+    if len(spins) != 1 or target is None or target.spin is not None:
+        return
+    target.spin = PhysicalQuantity(value=spins.pop(), unit="hbar")
+
+
 def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     """A parsed ``ENDF`` object → a :class:`ReactionSuite`, plus the report.
 
@@ -438,6 +467,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         resonances, resonanceProvenance, report = decodeMF2MT151(mf2.mt[151], report)
         resonances.provenance = resonanceProvenance
         suite.resonances = resonances
+        _targetSpinFromMF2(suite, resonanceProvenance)
         from kika.nuclear_data.model.resonances import RMatrix
         for region in resonances.resolved:
             if isinstance(region.formalism, RMatrix):

@@ -233,6 +233,28 @@ PERMANENT_IMPORTERS = {
     # `kika.processing.resonances.*` and `_rm_native` must be in kika-api.spec's
     # hiddenimports (the app's session for this change owns that list).
     "kika/endf/reconstruction.py",
+    # Staged processing (2026-10-12), the `reconstruction.py` door carried on to
+    # Doppler, URR tables, heating and the HDF5/PENDF/GNDS writers. It decodes
+    # the whole tape into the model for the HDF5 writer (`_full_suite`) and one
+    # broadened MF3 back for each heated tape (`_write_heated_material`). Both
+    # imports are inside methods, so `import kika.endf` does not wake the model.
+    # Frozen build: kika-api runs it through `kika_processing_worker`;
+    # `kika.endf.model_adapter` is in kika-api.spec's hiddenimports, and
+    # `.residuals`, `kika.hdf5.processing` and `kika.hdf5.writer` were added
+    # there with this entry.
+    "kika/endf/process.py",
+    # The HDF5 writer's processing (`processSuite`) reads two facts only the
+    # ENDF adapter knows: the key under which it kept photons verbatim
+    # (`PHOTONS_VERBATIM_KEY`) and which level an MT names (`levelSeries`).
+    # Both are format bookkeeping the model has no field for, and copying them
+    # would be a second definition. Imported inside the functions that need
+    # them. Frozen build: as above.
+    "kika/hdf5/processing.py",
+    # The ENDF door of a thermal-scattering evaluation (2026-10-11): an MF7
+    # tape becomes a model suite exactly as `kika/_read.py` makes one, inside
+    # `read_tsl`. Frozen build: `kika.tsl.read` and `kika.endf.model_adapter`
+    # are both in kika-api.spec's hiddenimports.
+    "kika/tsl/read.py",
 }
 
 ALLOWED_IMPORTERS = FACADE_IMPORTERS | PERMANENT_IMPORTERS

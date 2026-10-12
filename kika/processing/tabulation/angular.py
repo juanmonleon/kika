@@ -66,7 +66,10 @@ def muTable(function, options: TabulationOptions, outer=None, what="angular"):
     m = _m()
     if isinstance(function, m.Legendre):
         density = legendreDensity(function.coefficients)
-        seeds = np.linspace(-1.0, 1.0, max(3, options.angularSeeds))
+        # A degree-N series has up to N-1 extrema: 4N+1 seeds leave none of
+        # them alone between two seeds for the refinement to miss.
+        order = len(function.coefficients) - 1
+        seeds = np.linspace(-1.0, 1.0, max(3, options.angularSeeds, 4 * order + 1))
         mu, p = refine(density, seeds, options)
         return pdfTable(mu, p, options=options, outer=outer, what=what)
     x, y, histogram = _linlinXY(function)

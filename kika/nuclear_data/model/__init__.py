@@ -139,7 +139,8 @@ from .processed_forms import (PROBABILITY_TABLE_ROWS, CoherentElasticMC, Coheren
                               DiscretePhotonEnergy, DistributionMixture, EnergyAngularMC,
                               IncoherentElasticDiscreteMC, IncoherentElasticMC,
                               IncoherentElasticXS, IncoherentInelasticDiscreteMC, LevelEnergy,
-                              MixedElasticMC, ProbabilityTables, SumOfFunctions)
+                              MixedElasticMC, ProbabilityTables,
+                              ProbabilityTableStatistics, SumOfFunctions)
 from .energy_spectra import (ANALYTIC_SPECTRA, Evaporation, GeneralEvaporation,
                              MadlandNix, SimpleMaxwellianFission, Watt, Weighted,
                              WeightedFunctionals)
@@ -293,7 +294,7 @@ __all__ = [
     "EnergyAngular", "AngularEnergy", "KalbachMann", "Branching3d",
     "NBodyPhaseSpace",
     "DiscreteGamma", "PrimaryGamma",
-    "EnergyAngularMC", "LevelEnergy", "DiscretePhotonEnergy", "DistributionMixture", "ProbabilityTables", "PROBABILITY_TABLE_ROWS",
+    "EnergyAngularMC", "LevelEnergy", "DiscretePhotonEnergy", "DistributionMixture", "ProbabilityTables", "ProbabilityTableStatistics", "PROBABILITY_TABLE_ROWS",
     "CoherentElasticXS", "IncoherentElasticXS", "SumOfFunctions", "CoherentElasticMC",
     "IncoherentElasticMC", "IncoherentElasticDiscreteMC", "IncoherentInelasticDiscreteMC",
     "MixedElasticMC",
