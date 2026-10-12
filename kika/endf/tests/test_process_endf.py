@@ -328,17 +328,25 @@ def test_process_gnds_outputs(gnds_run, tmp_path):
     assert formats == [("pendf", "rejected"), ("gnds", "done"), ("hdf5", "done")]
 
 
-def test_process_gnds_sets_aside_the_files_reconstruction(run, tmp_path):
+def test_process_gnds_reprocesses_kikas_own_gnds(run, tmp_path):
     """kika's own processed GNDS carries recon and heated styles; they are set
-    aside. Its PoPs states no target spin (the ENDF decoder does not move MF2's
-    SPI there), so the reconstruction is refused by name, not by a ValueError."""
+    aside, and the evaluation is reconstructed again from PoPs's target mass and
+    spin (D39: the ENDF decoder moves MF2's SPI there, as FUDGE does). Both
+    routes use MF2's AWRI, which the formalism's PoPs states as FUDGE does, so
+    they agree point by point to rounding."""
     from kika.endf import process_gnds
-    from kika.processing.resonances import UnsupportedResonanceError
     result, _ = run
     source = result.write_gnds(tmp_path / "fe56.gnds.xml")
-    with pytest.raises(UnsupportedResonanceError) as caught:
-        process_gnds(source, ProcessingPlan(temperatures=()))
-    assert caught.value.category == "context-missing"
+    back = process_gnds(source, ProcessingPlan(temperatures=()))
+    decode = back.stage("decode").details
+    assert decode["context_source"] == "PoPs mass and spin"
+    assert decode["source_reconstruction"] == "recon, heated_000, heated_001 in the file, ignored"
+    ours, theirs = result.reconstruction.tables_by_mt(), back.reconstruction.tables_by_mt()
+    assert set(ours) == set(theirs)
+    for mt, table in ours.items():
+        other = theirs[mt]
+        assert np.allclose(other.energies, table.energies, rtol=1e-13, atol=0)
+        assert np.allclose(other.values, table.values, rtol=1e-12, atol=0), mt
 
 
 def test_gnds_and_endf_routes_agree_once_broadened(tmp_path):
