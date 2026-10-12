@@ -27,6 +27,7 @@ S36 = DATA / "micro_s36_b81_photons.endf"
 U235 = DATA / "micro_u235_photons.endf"
 FE56_ENDF = Path(r"C:\Users\Usuario\.kika\endf_cache\endfb8.1\n\26056.endf")
 FE56_ACE = Path(r"C:\Users\Usuario\BaradDur\Dev\kika-files\ace\260560_81.02c")
+FE56_JENDL5 = Path(r"C:\Users\Usuario\.kika\endf_cache\jendl5\n\26056.endf")
 
 _SUITES: dict = {}
 
@@ -125,6 +126,11 @@ def test_the_axis_covers_the_photon_producing_range():
     axis = PhotonProduction(suite).incident_axis()
     assert axis["grid"] == sorted(axis["grid"])
     assert axis["min"] >= 1e-5 and axis["max"] > 8.0e6
+    # Each level reaction opens at its own threshold, the lowest at the axis start.
+    thresholds = axis["thresholds"]
+    assert [t["energy_ev"] for t in thresholds] == sorted(t["energy_ev"] for t in thresholds)
+    assert thresholds[0]["energy_ev"] == pytest.approx(axis["min"])
+    assert all(t["energy_ev"] in axis["grid"] for t in thresholds)
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +302,59 @@ def test_fe56_first_level_line_dominates_inelastic_at_2_mev():
     # MT102's MF3 is only the background below the resonance top: left out there.
     curves = production.curves()
     assert {"mt": 102, "reason": "background"} in curves["excluded"]
+
+
+# ---------------------------------------------------------------------------
+# MF6 LAW=1 discrete lines (JENDL-5 Fe-56 gives its level gammas there)
+# ---------------------------------------------------------------------------
+
+def test_mf6_discrete_points_become_lines_and_the_rest_stays_a_continuum():
+    """ND discrete points ahead of a density: lines weighted node by node."""
+    from kika.nuclear_data.photon_production import _Node, _Spectrum, _split_discrete
+
+    class _Flat:
+        xs = np.array([1e6, 2e7])
+
+        @staticmethod
+        def evaluate(e):
+            return np.full_like(np.asarray(e, dtype=float), 2.0)
+
+    nodes = [_Node(1e6, [846778.0, 0.0, 1e6], [0.6, 0.0, 8e-7]),
+             _Node(2e7, [846778.0, 1238300.0, 0.0, 1e6], [0.4, 0.2, 0.0, 8e-7])]
+    item = {"kind": "continuum", "spectrum": _Spectrum(nodes), "mult": _Flat(),
+            "angular": None, "product": "photon"}
+    parts = _split_discrete(item, {"photon": [1, 2]})
+    lines = [p for p in parts if p["kind"] == "line"]
+    assert [round(p["energy"]) for p in lines] == [846778, 1238300]
+    # y = 2 photons per reaction, the 846.8 keV line carrying 0.6 then 0.4 of it.
+    assert lines[0]["mult"].evaluate([1e6, 2e7]) == pytest.approx([1.2, 0.8])
+    # A line a node does not list has no weight there.
+    assert lines[1]["mult"].evaluate([1e6]) == pytest.approx([0.0])
+    (rest,) = [p for p in parts if p["kind"] == "continuum"]
+    assert [list(f.xs) for f in rest["spectrum"].function1ds] == [[0.0, 1e6], [0.0, 1e6]]
+    # A product with no discrete points is left alone.
+    assert _split_discrete(item, {"other": [1, 2]}) == [item]
+    # A negative discrete energy is a primary photon of that binding energy.
+    primary = {**item, "spectrum": _Spectrum([_Node(1e6, [-7646100.0], [1.0]),
+                                             _Node(2e7, [-7646100.0], [1.0])])}
+    (part,) = _split_discrete(primary, {"photon": [1, 1]})
+    assert part["kind"] == "primary" and part["binding"] == pytest.approx(7646100.0)
+
+
+@pytest.mark.skipif(not FE56_JENDL5.exists(), reason=f"{FE56_JENDL5} not available")
+def test_jendl5_fe56_level_gammas_in_mf6_are_lines():
+    """JENDL-5 states MT51's 846.8 keV gamma as MF6 LAW=1 with ND=1, and its
+    residual level carries an empty placeholder photon: one line, no warning."""
+    _, suite = _suite(FE56_JENDL5)
+    spectrum = PhotonProduction(suite).spectrum(2.0e6)
+    assert spectrum["warnings"] == []
+    first = max(spectrum["lines"], key=lambda l: l["value"])
+    assert first["energy_ev"] == pytest.approx(846.778e3, rel=1e-6)
+    assert first["value"] == pytest.approx(FE56_LINE, rel=0.02)
+    assert 51 in {c["mt"] for c in first["by_mt"]}
+    # Capture's primary photons (negative EP in MF6) come out above the binding.
+    assert all(l["energy_ev"] > 0 for l in spectrum["lines"])
+    assert any(l["origin"] == "primary" for l in spectrum["lines"])
 
 
 @pytest.mark.skipif(not FE56_ACE.exists(), reason=f"{FE56_ACE} not available")

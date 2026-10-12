@@ -666,8 +666,14 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         styleKT[T] = kT
         below, hi = broadened[temperature]
         reconForms = {leaf.reaction.label: leaf.reaction.crossSection[RECON_LABEL] for leaf in leaves}
-        hotGrid = np.unique(np.concatenate([_flatten(below[label])[0] for label in reconForms]))
-        coldGrid = np.unique(np.concatenate([_flatten(f)[0] for f in reconForms.values()]))
+        # Each form's abscissae with a step's repeated energy nudged up first, as
+        # ACER does (D36): a bare np.unique collapses the two faces of a step
+        # into one knot, and the jump becomes a ramp to the next point -- Au-197
+        # B-VIII.1's elastic at the top of the URR, 100 keV, ramped over 250 eV.
+        hotGrid = np.unique(np.concatenate([_strictly(*_flatten(below[label]))[0]
+                                            for label in reconForms]))
+        coldGrid = np.unique(np.concatenate([_strictly(*_flatten(f))[0]
+                                             for f in reconForms.values()]))
         grid = np.unique(np.concatenate([hotGrid, coldGrid[coldGrid > hi]]))
         grid, _ = _strictly(grid, grid)
         grids[T] = grid

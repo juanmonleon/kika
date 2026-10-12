@@ -314,12 +314,19 @@ _TAPES: Dict[str, Sequence[str]] = {
     # MF7/MT4 alone is 1.14 million records — which is why the committed
     # fixtures are small and the full-size witnesses are reached from here.
     #
-    # ENDF/B-VIII.1, one per format branch that needs a full-size witness:
-    "tsl_h_h2o": ("endfb81/tsl/tsl-HinH2O.endf",),        # 94 temperatures, NS=1
-    "tsl_ortho_h": ("endfb81/tsl/tsl-ortho-H.endf",),     # the only LASYM=1
-    "tsl_be_metal": ("endfb81/tsl/tsl-Be-metal.endf",),   # LTHR=1 + MF7/451
-    "tsl_un": ("endfb81/tsl/tsl-NinUN.endf",),            # LTHR=3
-    "tsl_s_ch4": ("endfb81/tsl/tsl-s-CH4.endf",),         # LTHR=2, LAT=0, NS=1
+    # ENDF/B-VIII.1, one per format branch that needs a full-size witness. The
+    # second path is NuclearData's layout (tsl/endfb81 beside endf/), reached
+    # from KIKA_LIB_TAPES.
+    "tsl_h_h2o": ("endfb81/tsl/tsl-HinH2O.endf",        # 94 temperatures, NS=1
+                 "../tsl/endfb81/tsl-HinH2O.endf"),
+    "tsl_ortho_h": ("endfb81/tsl/tsl-ortho-H.endf",     # the only LASYM=1
+                   "../tsl/endfb81/tsl-ortho-H.endf"),
+    "tsl_be_metal": ("endfb81/tsl/tsl-Be-metal.endf",   # LTHR=1 + MF7/451
+                    "../tsl/endfb81/tsl-Be-metal.endf"),
+    "tsl_un": ("endfb81/tsl/tsl-NinUN.endf",            # LTHR=3
+              "../tsl/endfb81/tsl-NinUN.endf"),
+    "tsl_s_ch4": ("endfb81/tsl/tsl-s-CH4.endf",         # LTHR=2, LAT=0, NS=1
+                 "../tsl/endfb81/tsl-s-CH4.endf"),
     # JEFF-4.0's own ``tsl/``, a different dialect and not merely different
     # content: 80-column records with sequence numbers, CRLF line endings,
     # elemental ZA (4000, not the pseudo-ZA 126 ENDF/B writes for the same

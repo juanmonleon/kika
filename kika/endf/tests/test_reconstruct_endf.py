@@ -7,6 +7,7 @@ import pytest
 
 import kika.processing as processing
 from kika.endf import reconstruct_endf
+from kika.endf.reconstruction_report import CHECKS
 from kika.processing import (ENGINE_VERSION, REJECTION_CATEGORIES, ReconstructionConvergenceError,
                              UnsupportedResonanceError, native_available)
 
@@ -138,9 +139,21 @@ def test_report_document_without_a_pendf(reconstruction, tmp_path):
     assert d["verification"]["publication"] is None
     assert all(0 <= v <= 1 for v in d["verification"]["tabulation"].values())
 
+    assert rrr["ap_fm"] > 1  # fm, not ENDF's 10^-12 cm
+
+    checks = {c["id"]: c for c in d["checks"]}
+    assert [c["id"] for c in d["checks"]] == [c.id for c in CHECKS if c.id in checks]
+    assert checks["pendf"]["status"] == "not run" and checks["tabulation"]["status"] == "passed"
+    assert all(c["status"] in c_levels(c["id"]) for c in d["checks"])
+    # The micro tape is a cut: its stored MT1 still holds the reactions that were removed.
+    assert checks["source_sums"]["status"] == "warning" and "MT1" in checks["source_sums"]["result"]
+    assert d["summary"]["status"] == "warning"
+
     text = report.to_text()
-    assert text.isascii() and "RESONANCE RANGES" in text and "write_pendf() adds a reload check" in text
-    assert text.index("SUMMARY") < text.index("MATERIAL")
+    assert text.isascii() and "WITH WARNINGS TO REVIEW" in text and "No PENDF written" in text
+    assert text.index("CHECKS") < text.index("WHAT WAS DONE") < text.index("ABOUT THE CHECKS")
+    for jargon in ("atol", "rtol", "budget", "write_pendf", "verbose", "derive-from-leaves", "NRO", "NAPS"):
+        assert jargon not in text, jargon
     summary = d["summary"]
     assert summary["verified"] and summary["pendf"] is None and summary["negative_values"] == 0
     worst = summary["worst_tabulation"]
@@ -149,11 +162,47 @@ def test_report_document_without_a_pendf(reconstruction, tmp_path):
         assert row["at_eV"] is not None and row["reference_b"] != row["tabulated_b"]
     html = report.to_html()
     assert html.startswith("<!doctype html>") and "prefers-color-scheme:dark" in html
+    # Numeric columns align header and cells alike.
+    assert '<th class=n>Points</th>' in html and 'id="kr-check-tabulation"' in html
     assert "<script" not in html.lower() and "http" not in html
     assert report._repr_html_().startswith("<style>")
     for name in ("r.txt", "r.html", "r.json"):
         assert report.save(tmp_path / name).stat().st_size > 0
     assert json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))["schema"] == d["schema"]
+
+
+def c_levels(check_id):
+    return {c.id: set(c.levels) for c in CHECKS}[check_id]
+
+
+def _with(d, **changes):
+    import copy
+    from kika.endf.reconstruction_report import evaluate_checks
+    d = copy.deepcopy(d)
+    for path, value in changes.items():
+        *head, last = path.split("__")
+        target = d
+        for key in head:
+            target = target[int(key)] if isinstance(target, list) else target[key]
+        target[last] = value
+    return {c["id"]: c for c in evaluate_checks(d)}
+
+
+def test_each_check_flags_what_it_should(reconstruction):
+    rec, _ = reconstruction
+    d = rec.report_document().to_dict()
+    disc = dict(d["sums"]["source_discrepancies"][0], max_ratio=3.0, at_eV=1e3, stated_b=2.0, components_b=1.9)
+    assert _with(d, sums__source_discrepancies=[disc])["source_sums"]["status"] == "warning"
+    neg = dict(count=2, min_b=-1e-3, at_eV=5.0)
+    flagged = _with(d, reactions__0__negatives=neg, summary__negative_values=2)["negatives"]
+    assert flagged["status"] == "warning" and "MT1" in flagged["items"][0]
+    assert _with(d, reactions__0__decreasing=1)["grid"]["status"] == "failed"
+    assert _with(d, reactions__0__jumps_at_eV=[123.0])["grid"]["status"] == "note"
+    adjusted = _with(d, notes__preparation=["E=1.5, L=0: rounded negative GX=-1e-09 to zero"])["parameters"]
+    assert adjusted["status"] == "note" and "1.5 eV" in adjusted["items"][0]
+    elsewhere = _with(d, notes__unsupported=["MF1/458 is LFC=1: something"])["conversion"]
+    assert elsewhere["status"] == "passed" and "not used here" in elsewhere["result"]
+    assert _with(d, notes__losses=["MF2/151: a width was dropped"])["conversion"]["status"] == "warning"
 
 
 def test_charged_particle_level_mts_have_names():

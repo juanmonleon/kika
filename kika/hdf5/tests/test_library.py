@@ -88,3 +88,34 @@ def test_overlay_refuses_a_file_whose_group_is_another_material(tmp_path):
     L.CrossSectionsXml(entries=[]).write(base / "cross_sections.xml")
     with pytest.raises(HDF5FormatError):
         L.overlay(base, {"U238": DATA / "U235.h5"}, tmp_path / "o.xml")
+
+
+def test_describe_lists_nuclides_from_the_index(tmp_path):
+    (tmp_path / "neutron").mkdir()
+    for name in ("Fe56", "Am242_m1", "C0"):
+        (tmp_path / "neutron" / f"{name}.h5").write_bytes(b"x" * 10)
+    index = L.CrossSectionsXml(entries=[
+        L.LibraryEntry(("Fe56",), "neutron/Fe56.h5", "neutron"),
+        L.LibraryEntry(("Am242_m1",), "neutron/Am242_m1.h5", "neutron"),
+        L.LibraryEntry(("C0",), "neutron/C0.h5", "neutron"),
+        L.LibraryEntry(("U235",), "neutron/U235.h5", "neutron"),          # not on disk
+        L.LibraryEntry(("c_H_in_H2O",), "thermal/c_H_in_H2O.h5", "thermal"),
+    ])
+    index.write(tmp_path / "cross_sections.xml")
+    info = L.open(tmp_path).describe()
+    assert [(n["target"], n["Z"], n["A"], n["M"]) for n in info["isotopes"]] == [
+        ("C0", 6, None, 0), ("Fe56", 26, 56, 0), ("Am242_m1", 95, 242, 1)]
+    assert info["missing"] == 1
+    assert info["thermal"] == ["c_H_in_H2O"]
+    assert info["name"] == tmp_path.name and info["isotopes"][1]["size"] == 10
+
+
+def test_a_single_h5_is_a_library_of_one():
+    pytest.importorskip("h5py")
+    library = L.open(DATA / "Fe56.h5")
+    assert library.materials() == ["Fe56"]
+    assert library.path("Fe56") == DATA / "Fe56.h5"
+    info = library.describe()
+    assert info["single_file"] and info["name"] == "Fe56"
+    assert [n["target"] for n in info["isotopes"]] == ["Fe56"]
+    assert library.read("Fe56").target == "Fe56"

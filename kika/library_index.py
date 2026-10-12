@@ -29,13 +29,14 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 __all__ = ["IndexedFile", "LibraryIndex", "index_endf", "index_ace", "target_name"]
 
 _HEAD_BYTES = 2048
+_THERMAL_SCATTERING_NSUB = 12
 _NEUTRON_MASS_AMU = 1.00866491595
 _K_PER_MEV = 1.160451812e10
 
@@ -63,6 +64,10 @@ class LibraryIndex:
     files: List[IndexedFile]
     unreadable: List[str]
     duplicates: List[str]
+    #: Thermal-scattering tapes (NSUB=12) found among ENDF files. They are not
+    #: nuclides -- their ZA is a pseudo-ZA -- so they are left out of ``files``
+    #: and listed here; :func:`kika.tsl.index_tsl` indexes them as materials.
+    thermal: List[str] = field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -83,7 +88,8 @@ class LibraryIndex:
             entries.append(entry)
         return dict(root=self.root, name=self.name, format=self.format, isotopes=entries,
                     temperatures=self.temperatures(),
-                    unreadable=len(self.unreadable), duplicates=len(self.duplicates))
+                    unreadable=len(self.unreadable), duplicates=len(self.duplicates),
+                    thermal=len(self.thermal))
 
 
 def target_name(Z: int, A: Optional[int], M: int = 0) -> str:
@@ -181,6 +187,7 @@ def index_endf(root: Union[str, os.PathLike], recursive: bool = False) -> Librar
     root = Path(root)
     files: List[IndexedFile] = []
     unreadable: List[str] = []
+    thermal: List[str] = []
     for path in _candidates(root, recursive):
         try:
             header = _endf_header(_head(path))
@@ -190,13 +197,16 @@ def index_endf(root: Union[str, os.PathLike], recursive: bool = False) -> Librar
             unreadable.append(str(path))
             continue
         za, awr, mat, liso, nsub, temp = header
+        if nsub == _THERMAL_SCATTERING_NSUB:
+            thermal.append(str(path))
+            continue
         Z, A = divmod(za, 1000)
         files.append(IndexedFile(
             target=target_name(Z, A or None, liso), Z=Z, A=A or None, M=liso,
             path=str(path), file_name=path.name, size=path.stat().st_size,
             awr=awr, temperature=temp, mat=mat, nsub=nsub))
     files, duplicates = _dedupe(files, lambda f: (f.target, f.nsub, f.temperature))
-    return LibraryIndex(str(root), "endf", files, unreadable, duplicates)
+    return LibraryIndex(str(root), "endf", files, unreadable, duplicates, thermal)
 
 
 # -------------------------------------------------------------------- ACE

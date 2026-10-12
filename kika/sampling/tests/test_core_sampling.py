@@ -78,20 +78,82 @@ def test_the_realised_covariance_reproduces_the_input():
     assert diagnostics[0]["realised_covariance_error"] < 0.05
 
 
-def test_seeds_differ_per_block_by_a_fixed_stride():
+@pytest.mark.parametrize("method", ["random", "lhs"])
+def test_seeds_differ_per_block_by_a_fixed_stride(method):
     """Otherwise every block draws the same Z and the blocks are identical.
 
     The quiet failure this prevents: each block looks right on its own, and the
-    ensemble is perfectly correlated across blocks.
+    ensemble is perfectly correlated across blocks. Pseudo-random and LHS draws
+    keep one seed per block; Sobol shares one sequence instead, below.
     """
     matrix = psd(8, 4, 0)
     samples, diagnostics = draw_samples([matrix, matrix, matrix], 32,
+                                        sampling_method=method,
                                         seed=100, verbose=False)
     assert [diagnostics[i]["seed"] for i in range(3)] == [
         100, 100 + BLOCK_SEED_STRIDE, 100 + 2 * BLOCK_SEED_STRIDE
     ]
     assert not np.allclose(samples[0], samples[1])
     assert not np.allclose(samples[1], samples[2])
+
+
+def test_sobol_blocks_take_disjoint_columns_of_one_sequence():
+    """Three identical blocks: one seed, and every Sobol dimension used once.
+
+    Equal spectra tie at every rank, so the columns interleave block by block
+    in input order: 0, 3, 6, 9 to the first block, and so on.
+    """
+    matrix = psd(8, 4, 0)
+    samples, diagnostics = draw_samples([matrix, matrix, matrix], 32,
+                                        seed=100, verbose=False)
+    assert [diagnostics[i]["seed"] for i in range(3)] == [100, 100, 100]
+    columns = [diagnostics[i]["sobol_columns"] for i in range(3)]
+    assert sorted(np.concatenate(columns).tolist()) == list(range(12))
+    assert columns[0].tolist() == [0, 3, 6, 9]
+    assert not np.allclose(samples[0], samples[1])
+    assert not np.allclose(samples[1], samples[2])
+
+
+def test_one_sobol_block_is_the_plain_sobol_draw():
+    """A single block takes columns 0..rank-1 of ``Sobol(d=rank, seed)``.
+
+    That is the draw every single-block call made before blocks shared a
+    sequence, so a one-block run (the whole v2 pipeline) is unmoved.
+    """
+    from scipy import stats
+    from scipy.stats import qmc
+
+    matrix = psd(10, 6, 2)
+    samples, diagnostics = draw_samples([matrix], 64, seed=9, verbose=False)
+    assert diagnostics[0]["sobol_columns"].tolist() == list(range(6))
+
+    values, vectors = np.linalg.eigh(matrix)
+    order = np.argsort(values)[::-1][:6]
+    z = stats.norm.ppf(qmc.Sobol(d=6, scramble=True, seed=9).random(64))
+    # Same subspace, same normals: projecting both draws on the retained
+    # eigenvectors and whitening gives back z up to the sign of each vector.
+    whitened = samples[0] @ vectors[:, order] / np.sqrt(values[order])
+    np.testing.assert_allclose(np.abs(whitened), np.abs(z), atol=1e-8)
+
+
+@pytest.mark.parametrize("method", ["sobol", "random", "lhs"])
+def test_blocks_are_drawn_independently_of_each_other(method):
+    """The covariance *between* two blocks is the zero the caller implied (D35).
+
+    Two separately seeded Sobol sequences paired by replica index share the
+    lattice of each dimension: the k-th columns of two of them correlate at
+    |r| 0.35-0.85. Drawn that way, two blocks with the same spectrum came out
+    with the k-th directions of both nearly in lock step. At N=1024 the
+    largest |corr| between 6x6 independent columns is about 4/sqrt(N).
+    """
+    n = 1024
+    a, b = psd(6, 6, 0), psd(6, 6, 1)
+    samples, _ = draw_samples([a, b], n, seed=4, verbose=False,
+                              sampling_method=method)
+    za = samples[0] - samples[0].mean(axis=0)
+    zb = samples[1] - samples[1].mean(axis=0)
+    corr = (za / za.std(axis=0)).T @ (zb / zb.std(axis=0)) / n
+    assert np.abs(corr).max() < 4.5 / np.sqrt(n), np.abs(corr).max()
 
 
 def test_the_same_seed_reproduces_the_same_draw():
@@ -167,14 +229,38 @@ def test_a_zero_sum_covariance_draws_zero_sum_deltas():
 def test_input_order_is_never_sorted():
     """Reordering the blocks must reorder the draws, not silently repair itself.
 
-    The block index sets the seed offset, so a sampler that sorted its input
-    would give different answers for inputs the caller considers equivalent —
-    and would do so only when the keys happened to be unsorted.
+    Under a per-block seed the block index sets the seed offset, so a sampler
+    that sorted its input would give different answers for inputs the caller
+    considers equivalent — and would do so only when the keys happened to be
+    unsorted.
     """
     a, b = psd(5, 2, 0), psd(5, 2, 1)
-    forward, _ = draw_samples([("b", b), ("a", a)], 16, seed=3, verbose=False)
-    reverse, _ = draw_samples([("a", a), ("b", b)], 16, seed=3, verbose=False)
+    forward, _ = draw_samples([("b", b), ("a", a)], 16, seed=3, verbose=False,
+                              sampling_method="random")
+    reverse, _ = draw_samples([("a", a), ("b", b)], 16, seed=3, verbose=False,
+                              sampling_method="random")
     assert not np.allclose(forward["a"], reverse["a"])
+
+
+def test_sobol_deals_columns_in_turn_and_in_input_order():
+    """Leading directions first, block by block; a short block drops out.
+
+    So a block's columns depend on the ranks and order of the blocks and on
+    nothing else -- not on the other blocks' spectra -- and reordering the
+    input reorders the draws, as under a per-block seed.
+    """
+    a, b = psd(5, 2, 0), psd(5, 4, 1)
+    forward, fi = draw_samples([("b", b), ("a", a)], 16, seed=3, verbose=False)
+    reverse, ri = draw_samples([("a", a), ("b", b)], 16, seed=3, verbose=False)
+    assert fi["b"]["sobol_columns"].tolist() == [0, 2, 4, 5]
+    assert fi["a"]["sobol_columns"].tolist() == [1, 3]
+    assert ri["a"]["sobol_columns"].tolist() == [0, 2]
+    assert not np.allclose(forward["a"], reverse["a"])
+
+    # Another spectrum of the same rank in the other slot moves nothing here.
+    other, _ = draw_samples([("b", 7.0 * psd(5, 4, 9)), ("a", a)], 16, seed=3,
+                            verbose=False)
+    np.testing.assert_array_equal(other["a"], forward["a"])
 
 
 # ---------------------------------------------------------------------------

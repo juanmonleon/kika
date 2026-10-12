@@ -503,6 +503,24 @@ def _exact_physical_block(region,context,e,work_bytes):
 ENGINE_VERSION='kika-native-suite-1'
 
 
+def _resonance_mass(resonances,target_id):
+    """The target mass a formalism's own PoPs states, first region first, else ``None``.
+
+    FUDGE writes MF2's AWRI there and MF1's AWR on the top-level target; the
+    resonance parameters were fitted with AWRI, which is also what the ENDF
+    route (``context_from_endf``) reconstructs with. So it wins over PoPs's.
+    """
+    sources=[r.formalism for r in resonances.resolved or []]
+    if resonances.unresolved is not None:sources.append(resonances.unresolved.tabulatedWidths)
+    for source in sources:
+        local=getattr(source,'PoPs',None)
+        if local is None:continue
+        particles=local.particles
+        particle=particles.get(target_id) or (next(iter(particles.values())) if len(particles)==1 else None)
+        if particle is not None and particle.mass is not None:return particle.mass
+    return None
+
+
 def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',options=None,progress=None):
     """Reconstruct a complete supported resonance model suite without mutating it.
 
@@ -538,7 +556,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         except KeyError as exc:raise ValueError('supply explicit NeutronContext when model particles are incomplete') from exc
         if target.mass is None or neutron.mass is None or target.spin is None:
             raise ValueError('supply explicit NeutronContext when model mass/spin are incomplete')
-        context=NeutronContext(target.mass.convertedTo('amu').value/neutron.mass.convertedTo('amu').value,
+        mass=_resonance_mass(suite.resonances,suite.target) or target.mass
+        context=NeutronContext(mass.convertedTo('amu').value/neutron.mass.convertedTo('amu').value,
                                target.spin.convertedTo('hbar').value)
     from .prepare_r_matrix import normalize_suite_pairs
     from .unresolved import normalize_unresolved_links

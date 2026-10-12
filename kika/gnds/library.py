@@ -102,6 +102,9 @@ class GNDSLibrary:
         self._index: Dict[str, IndexedTarget] = {}
         self.duplicates: List[Path] = []
         self.unreadable: List[Path] = []
+        #: Thermal-scattering files (interaction thermalNeutronScatteringLaw):
+        #: materials, not targets, set aside for :func:`kika.tsl.index_tsl`.
+        self.thermal: List[Path] = []
         for path in candidates:
             name = path.name
             if path is not self.root and (
@@ -113,6 +116,9 @@ class GNDSLibrary:
                 attrs = None
             if not attrs or "target" not in attrs:
                 self.unreadable.append(path)
+                continue
+            if attrs.get("interaction") == "thermalNeutronScatteringLaw":
+                self.thermal.append(path)
                 continue
             target = attrs["target"]
             parsed = parseTargetId(target)
@@ -130,6 +136,10 @@ class GNDSLibrary:
                 continue
             self._index[target] = entry
         if not self._index:
+            if self.thermal:
+                raise GNDSLibraryError(
+                    f"{self.root} holds only thermal scattering files ({len(self.thermal)}): "
+                    "open it as a TSL library")
             raise GNDSLibraryError(
                 f"{self.root} is not a GNDS reactionSuite file" if self.root.is_file()
                 else f"{self.root} holds no GNDS reactionSuite file (*.gnds.xml)")
@@ -189,7 +199,8 @@ class GNDSLibrary:
         return dict(root=str(self.root), name=self.name, single_file=self.root.is_file(),
                     isotopes=entries,
                     evaluations=self.evaluations, projectiles=self.projectiles,
-                    unreadable=len(self.unreadable), duplicates=len(self.duplicates))
+                    unreadable=len(self.unreadable), duplicates=len(self.duplicates),
+                    thermal=len(self.thermal))
 
 
 def open(root: Union[str, Path]) -> GNDSLibrary:  # noqa: A001 -- mirrors kika.g4ndl.open

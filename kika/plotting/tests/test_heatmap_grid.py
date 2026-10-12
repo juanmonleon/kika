@@ -12,7 +12,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from matplotlib.colors import TwoSlopeNorm  # noqa: E402
 
-from kika.plotting import HeatmapBuilder, heatmap_grid, shared_norm  # noqa: E402
+from kika.plotting import HeatmapBuilder, grid_columns, heatmap_grid, shared_norm  # noqa: E402
 from kika.plotting.plot_data import CovarianceHeatmapData  # noqa: E402
 
 
@@ -67,6 +67,32 @@ def test_four_panels_default_to_two_by_two():
     fig = heatmap_grid([_builder(_data(5)) for _ in range(4)])
     assert len(fig.subfigs) == 4
     assert tuple(fig.get_size_inches()) == pytest.approx((8.0, 9.6))   # 2 x 2, tall cells
+
+
+@pytest.mark.parametrize("n, cols", [(1, 1), (2, 2), (3, 2), (4, 2), (5, 3), (6, 3), (7, 3), (9, 3), (10, 4)])
+def test_the_grid_stays_as_square_as_it_can(n, cols):
+    assert grid_columns(n) == cols
+
+
+def test_three_panels_take_two_rows():
+    fig = heatmap_grid([_builder(_data(5)) for _ in range(3)])
+    assert tuple(fig.get_size_inches()) == pytest.approx((8.0, 9.6))   # 2 x 2, one cell empty
+
+
+def test_energy_tick_labels_are_in_ink_not_in_the_marks_grey():
+    """The styles mute tick marks and keep their labels in ink."""
+    data = _data(6)
+    builder = HeatmapBuilder(style="signature", figsize=(4, 4), dpi=50)
+    lim = (float(data.energy_grid[0]), float(data.energy_grid[-1]))
+    builder.set_limits(x_lim=lim, y_lim=lim)
+    builder.add_heatmap(data, show_block_labels=False)
+    fig = builder.build()
+    style = builder.heatmap_style()
+    ink = matplotlib.colors.to_rgba(style.rc_value("xtick.labelcolor"))
+    assert ink != matplotlib.colors.to_rgba(style.rc_value("xtick.color"))
+    labels = [t for ax in fig.axes for t in ax.get_xticklabels() + ax.get_yticklabels() if t.get_text()]
+    assert labels
+    assert all(matplotlib.colors.to_rgba(t.get_color()) == ink for t in labels)
 
 
 def test_shared_norm_keeps_correlations_symmetric():

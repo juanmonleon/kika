@@ -826,6 +826,15 @@ border:1px solid var(--line);border-radius:10px;padding:14px 18px}
 @media (max-width:760px){.entry{grid-template-columns:1fr}.rules li,.entry li{grid-template-columns:1fr;gap:2px}}
 @media print{body{max-width:none;padding:0}.toc{display:none}details.tape>summary::before{content:none}
 tbody tr:hover{background:none}h2{break-after:avoid}.entry,.card,.group,.mblock{break-inside:avoid}}
+@page{size:A4;margin:14mm 12mm}
+@media print{:root{--fg:#1b1e24;--muted:#5f6672;--faint:#8a919c;--bg:#fff;--panel:#f6f7f9;--line:#e1e4e8;
+--accent:#2f5d8a;--defect:#b42318;--defect-bg:#fdecea;--defect-line:#f4b9b2;--warn:#9a5b00;--warn-bg:#fff4e0;
+--warn-line:#f2cd8d;--note:#3d5a80;--note-bg:#eaf1f8;--note-line:#bcd0e5;--ok:#1f7a4d;--ok-bg:#e8f5ee;
+--ok-line:#b5dcc6}.mark{color:#fff}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+html{scroll-behavior:auto}.wrap{overflow:visible}thead{display:table-header-group}tr{break-inside:avoid}
+details:not([open])::details-content{content-visibility:visible;display:block}
+table{font-size:11.5px}th,td{padding:4px 6px}th{white-space:normal;font-size:10px}}
 """
 
 

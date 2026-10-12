@@ -27,7 +27,7 @@ from typing import List, Optional
 
 import numpy as np
 
-__all__ = ["PhononSpectrum", "leaprPhononSpectra", "flasshPhononSpectra",
+__all__ = ["PhononSpectrum", "leaprPhononSpectra", "leaprSummary", "flasshPhononSpectra",
            "phononSpectra"]
 
 
@@ -61,8 +61,15 @@ class _Cards:
     """NJOY's list-directed READ over the records of one module."""
 
     def __init__(self, lines):
-        self.records = _records(lines)
+        self.lines = list(lines)
+        self.records = _records(self.lines)
         self.at = 0
+
+    def text(self) -> str:
+        """The next record as text, up to its ``/``: a title card, read whole."""
+        line = self.lines[self.at] if self.at < len(self.lines) else ""
+        self.at += 1
+        return line.split("/")[0].strip().strip("'\"").strip()
 
     def read(self, count: Optional[int]):
         """Up to *count* values (all of a ``/``-ended card when ``None``)."""
@@ -130,11 +137,31 @@ def _spectrum(delta: float, rho: List[float]):
 
 def leaprPhononSpectra(path) -> List[PhononSpectrum]:
     """The phonon spectra of a LEAPR input (``tsl-*.leapr``), one per atom and temperature."""
+    spectra, _ = _readLeapr(path)
+    return spectra
+
+
+def leaprSummary(path) -> dict:
+    """How a LEAPR input made its tape: the deck's parameters and, per atom and
+    temperature, the spectrum's grid, the diffusion and the discrete oscillators.
+
+    The numbers a viewer shows beside the spectra; the spectra themselves are
+    :func:`leaprPhononSpectra`'s.
+    """
+    _, summary = _readLeapr(path)
+    return summary
+
+
+_NEUTRON_MASS_AMU = 1.00866491595
+
+
+def _readLeapr(path):
     path = Path(path)
     cards = _Cards(_leaprCards(path.read_text(encoding="latin-1")))
     cards.read(1)                                    # 1: nout
-    cards.read(1)                                    # 2: title (one quoted string)
-    ntempr = _int(cards.read(3)[0])                  # 3: ntempr iprint nphon
+    title = cards.text()                             # 2: title
+    c3 = cards.read(3)                               # 3: ntempr iprint nphon
+    ntempr = _int(c3[0])
     c4 = cards.read(5)                               # 4: mat za isabt ilog smin
     c5 = cards.read(6)                               # 5: awr spr npr iel ncold nsk
     nsk = _int(c5[5]) if len(c5) > 5 else 0
@@ -150,9 +177,26 @@ def leaprPhononSpectra(path) -> List[PhononSpectrum]:
     nss = _int(c6[0])
     b7 = _int(c6[1]) if len(c6) > 1 else 0
     c7 = cards.read(3)                               # 7: nalpha nbeta lat
-    cards.read(_int(c7[0]))                          # 8: alphas
-    cards.read(_int(c7[1]))                          # 9: betas
+    alphas = cards.read(_int(c7[0]))                 # 8: alphas
+    betas = cards.read(_int(c7[1]))                  # 9: betas
     mat, za = _int(c4[0]), _int(c4[1])
+
+    def number(values, index, default=None, cast=_float):
+        return cast(values[index]) if len(values) > index else default
+
+    summary = dict(
+        source=str(path),
+        title=title or None,
+        ntempr=ntempr, nphon=number(c3, 2, cast=_int), mat=mat, za=za,
+        isabt=number(c4, 2, 0, _int), ilog=number(c4, 3, 0, _int),
+        awr=number(c5, 0), spr=number(c5, 1), npr=number(c5, 2, cast=_int),
+        iel=number(c5, 3, 0, _int), ncold=number(c5, 4, 0, _int), nsk=nsk,
+        nss=nss, b7=b7, aws=number(c6, 2), sps=number(c6, 3), mss=number(c6, 4, cast=_int),
+        nalpha=_int(c7[0]), nbeta=_int(c7[1]), lat=number(c7, 2, 0, _int),
+        alpha_range=[_float(alphas[0]), _float(alphas[-1])] if alphas else None,
+        beta_range=[_float(betas[0]), _float(betas[-1])] if betas else None,
+        temperatures=[],
+    )
 
     out: List[PhononSpectrum] = []
 
@@ -160,17 +204,19 @@ def leaprPhononSpectra(path) -> List[PhononSpectrum]:
         previous = None
         for _ in range(ntempr):
             temperature = _float(cards.read(1)[0])   # 10
-            if temperature < 0 and previous is not None:
-                delta, rho = previous
+            reused = temperature < 0 and previous is not None
+            if reused:
+                delta, rho, physics = previous
             else:
                 c11 = cards.read(2)                  # 11: delta ni
                 delta, ni = _float(c11[0]), _int(c11[1])
                 rho = [_float(v) for v in cards.read(ni)]     # 12
-                cards.read(3)                        # 13: twt c tbeta
+                c13 = [_float(v) for v in cards.read(3)]      # 13: twt c tbeta
                 nd = _int(cards.read(1)[0])          # 14
+                energies, weights = [], []
                 if nd > 0:
-                    cards.read(nd)                   # 15
-                    cards.read(nd)                   # 16
+                    energies = [_float(v) for v in cards.read(nd)]   # 15
+                    weights = [_float(v) for v in cards.read(nd)]    # 16
                 if principal and nsk != 0:
                     c17 = cards.read(2)              # 17: nka dka
                     nka = _int(c17[0])
@@ -178,15 +224,33 @@ def leaprPhononSpectra(path) -> List[PhononSpectrum]:
                         cards.read(nka)              # 18
                     if nsk == 2:
                         cards.read(1)                # 19
-                previous = (delta, rho)
+                physics = dict(
+                    twt=c13[0] if c13 else None,
+                    c=c13[1] if len(c13) > 1 else None,
+                    tbeta=c13[2] if len(c13) > 2 else None,
+                    oscillators=[dict(energy=e, weight=w) for e, w in zip(energies, weights)])
+                previous = (delta, rho, physics)
             out.append(PhononSpectrum(atom=atom, spectrum=_spectrum(delta, rho),
                                       temperature=abs(temperature), source=str(path),
-                                      extra={"mat": mat, "za": za}))
+                                      extra={"mat": mat, "za": za, "reused": reused,
+                                             "symbol": symbols.get(atom), **physics}))
+            summary["temperatures"].append(dict(
+                atom=atom, temperature=abs(temperature), reused=reused,
+                delta=delta, points=len(rho), **physics))
+
+    # Which atom each block is: the masses (AWR x m_n) matched against the
+    # elements the file name gives, as for FLASSH sites.
+    elements = _elementsNamedBy(path)
+    symbols = {}
+    for atom, awr in (("principal", number(c5, 0)), ("secondary", number(c6, 2))):
+        if awr:
+            symbols[atom] = _symbolForMass(awr * _NEUTRON_MASS_AMU, elements or None)
+    summary["symbols"] = symbols
 
     temperatures("principal", True)
     if nss > 0 and b7 == 0:
         temperatures("secondary", False)
-    return out
+    return out, summary
 
 
 def flasshPhononSpectra(path) -> List[PhononSpectrum]:
@@ -220,8 +284,104 @@ def flasshPhononSpectra(path) -> List[PhononSpectrum]:
     if not rows or buffer:
         raise ValueError(f"{path.name}: the DOS values are not whole rows of the "
                          f"{count} points the file states")
-    return [PhononSpectrum(atom=labels[k], spectrum=_spectrum(delta, row), source=str(path))
-            for k, row in enumerate(rows)]
+    sites = _flasshSites(path, _elementsNamedBy(path))
+    out = []
+    for k, row in enumerate(rows):
+        label, extra = labels[k], {"row_label": labels[k]}
+        if k < len(sites):
+            extra.update(sites[k])
+            # "DOS 1" says nothing; the crystal file's site mass names the atom.
+            if re.fullmatch(r"DOS\s*\d+", label, re.IGNORECASE) and sites[k].get("symbol"):
+                label = sites[k]["symbol"]
+        # "DOS C", "O DOS", "H1 DOS": the word adds nothing beside a symbol.
+        bare = re.sub(r"\bDOS\b", "", label, flags=re.IGNORECASE).strip()
+        if bare and not bare.isdigit():
+            label = bare
+        out.append(PhononSpectrum(atom=label, spectrum=_spectrum(delta, row), source=str(path), extra=extra))
+    return out
+
+
+def _elementsNamedBy(path: Path) -> List[str]:
+    """The element symbols a TSL file name names: ``tsl-OinUO2-5P`` → O, U.
+
+    Heavy masses do not name an element on their own (enriched uranium's 237.98
+    is nearer Np-238 than any U), so the site masses are matched only against
+    the elements of the material.
+    """
+    from kika._constants import SYMBOL_TO_ATOMIC_NUMBER
+    from kika.tsl.naming import tsl_naming
+
+    stem = path.name.split("_flassh-")[0]
+    stem = re.sub(r"-(DOS|Control|Crystal|Header_Information)\.txt$", "", stem)
+    naming = tsl_naming(stem + ".endf")
+    found: List[str] = []
+    for text in (naming.principal or "", naming.compound):
+        for symbol in re.findall(r"[A-Z][a-z]?", text):
+            if (symbol in SYMBOL_TO_ATOMIC_NUMBER or symbol == "D") and symbol not in found:
+                found.append(symbol)
+    return found
+
+
+def _flasshSites(dos_path: Path, elements: Optional[List[str]] = None) -> List[dict]:
+    """The atom sites of the FLASSH ``-Crystal.txt`` beside a ``-DOS.txt``.
+
+    The crystal file states each non-equivalent site's mass and free-atom cross
+    section, in the order the DOS rows follow; the element is the one whose
+    mass is nearest (``7.016`` is Li-7, ``2.014`` is D, ``91.22`` natural Zr).
+    Empty when there is no crystal file or it does not state masses.
+    """
+    crystal = dos_path.with_name(dos_path.name[: -len("DOS.txt")] + "Crystal.txt")
+    if not crystal.is_file():
+        return []
+    masses: List[float] = []
+    free_xs: List[float] = []
+    for line in crystal.read_text(encoding="latin-1").splitlines():
+        data, _, comment = line.partition("/")
+        values = [v for v in data.replace(",", " ").split()]
+        comment = comment.lower()
+        try:
+            if "mass" in comment:
+                masses = [_float(v) for v in values]
+            elif "free atom cross section of each" in comment:
+                free_xs = [_float(v) for v in values]
+        except ValueError:
+            continue
+    sites = []
+    for k, mass in enumerate(masses):
+        site = {"mass": mass, "symbol": _symbolForMass(mass, elements)}
+        if k < len(free_xs):
+            site["free_xs"] = free_xs[k]
+        sites.append(site)
+    return sites
+
+
+def _symbolForMass(mass: float, elements: Optional[List[str]] = None) -> Optional[str]:
+    """The element (``D`` for hydrogen-2) whose isotope or natural mass is nearest *mass*.
+
+    With *elements*, only those are candidates; without, any element within
+    half a mass unit, which is reliable for light atoms only.
+    """
+    from kika._constants import (ATOMIC_MASS, ATOMIC_NUMBER_TO_SYMBOL, NATURAL_ABUNDANCE,
+                                 SYMBOL_TO_ATOMIC_NUMBER)
+
+    candidates = dict(ATOMIC_MASS)
+    if elements:
+        allowed = {SYMBOL_TO_ATOMIC_NUMBER.get("H" if e == "D" else e) for e in elements}
+        candidates = {za: m for za, m in candidates.items() if za // 1000 in allowed}
+        if "D" in elements and "H" not in elements:
+            candidates = {za: m for za, m in candidates.items() if za != 1001}
+    for za, abundances in NATURAL_ABUNDANCE.items():
+        if all(z in ATOMIC_MASS for z in abundances) and (not elements or za // 1000 in allowed):
+            candidates[za] = sum(f * ATOMIC_MASS[z] for z, f in abundances.items())
+    if not candidates:
+        return None
+    za, best = min(candidates.items(), key=lambda item: abs(item[1] - mass))
+    # Enriched uranium (235-238) still lands on U; an unrelated element does not.
+    if abs(best - mass) > (5.0 if elements else 0.5):
+        return None
+    if za == 1002:
+        return "D"
+    return ATOMIC_NUMBER_TO_SYMBOL.get(za // 1000)
 
 
 def phononSpectra(path) -> List[PhononSpectrum]:

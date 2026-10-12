@@ -25,6 +25,8 @@ fields. Unsupported representations are reported or rejected explicitly.
 from __future__ import annotations
 
 from typing import List, Optional
+
+from kika._constants import NEUTRON_MASS_AMU
 from dataclasses import replace
 
 import numpy as np
@@ -171,8 +173,29 @@ def _rangeFields(energyRange, isotope, isotopeIndex: int) -> dict:
     }
 
 
-def _targetPoPs(spi, za) -> Optional[PoPs]:
-    """The target nuclide and its spin, as the formalism's own ``PoPs`` (§19.3.1).
+def _elasticTargetSpin(formalism) -> Optional[float]:
+    """The target's spin as an RML elastic pair states it (IB), else ``None``."""
+    for pair in getattr(formalism, "resonanceReactions", None) or []:
+        if getattr(pair, "reactionMT", None) == 2 and getattr(pair, "kinematics", None) is not None:
+            return float(pair.kinematics.particleB.spin)
+    return None
+
+
+def _rangeAwri(parameters) -> Optional[float]:
+    """The AWRI of a range's first block that declares one, else ``None``.
+
+    The same rule as :func:`kika.endf.reconstruction.context_from_endf`, so the
+    mass the formalism's PoPs states is the one the ENDF route reconstructs with.
+    """
+    for block in getattr(parameters, "l_values", None) or []:
+        if getattr(block, "awri", None):
+            return float(block.awri)
+    return None
+
+
+def _targetPoPs(spi, za, awri=None) -> Optional[PoPs]:
+    """The target nuclide, its spin and its mass, as the formalism's own
+    ``PoPs`` (§19.3.1).
 
     **Why the formalism and not the suite.** ENDF writes SPI on every energy
     *range*, and reconstruction needs it: the statistical factor is
@@ -196,8 +219,14 @@ def _targetPoPs(spi, za) -> Optional[PoPs]:
     reconstructor that has to open an ENDF provenance to find a spin is not
     format-agnostic. If the two ever need to disagree, provenance is the file
     and the model is the physics — but nothing edits either today.
+
+    **The mass is MF2's AWRI, not MF1's AWR**, as FUDGE writes it: in
+    ``micro_fe56.gnds.xml`` the top-level ``Fe56`` has 55.93494 amu (MF1's AWR)
+    and the formalism's ``Fe56`` 55.93501 amu (MF2's AWRI). The resonance
+    parameters were fitted with AWRI, and NJOY and the ENDF route reconstruct
+    with it; stating it here lets the GNDS route do the same.
     """
-    if spi is None:
+    if spi is None and awri is None:
         return None
 
     identifier = None
@@ -219,7 +248,8 @@ def _targetPoPs(spi, za) -> Optional[PoPs]:
         id=identifier,
         Z=zNumber,
         A=aNumber,
-        spin=PhysicalQuantity(float(spi), "hbar"),
+        spin=PhysicalQuantity(float(spi), "hbar") if spi is not None else None,
+        mass=(PhysicalQuantity(awri * NEUTRON_MASS_AMU, "amu") if awri is not None else None),
     ))
     return pops
 
@@ -282,6 +312,7 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
             tabulated.PoPs = _targetPoPs(
                 fields.get("spi"),
                 getattr(isotope, "za", None) if isotope is not None else None,
+                _rangeAwri(parameters),
             )
         resonances.unresolved = UnresolvedRegion(
             domainMin=energyRange.el,
@@ -330,10 +361,16 @@ def _decodeRange(energyRange, resonances: Resonances, report: ConversionReport,
 
     # Additive: the encoder still writes SPI from provenance, so this cannot
     # move a byte. It is what makes the range self-sufficient for a calculation.
+    # An RML range has no SPI: its CONT holds 0 there and the target's spin is
+    # particle b of the elastic pair (Cl-35 B-VIII.1: 0 against 3/2). The
+    # preparation reads this PoPs, so a 0 here is a wrong g_J, not a label.
+    spi = fields.get("spi") if lrf != 7 else _elasticTargetSpin(formalism)
     if getattr(formalism, "PoPs", None) is None:
         formalism.PoPs = _targetPoPs(
-            fields.get("spi"),
+            spi,
             getattr(isotope, "za", None) if isotope is not None else None,
+            # RML has no AWRI: its masses are the particle pairs'.
+            _rangeAwri(parameters) if lrf != 7 else None,
         )
 
     resonances.resolved.append(ResolvedRegion(

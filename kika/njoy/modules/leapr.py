@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ._base import Lines, parse_iprint, parse_card_values, parse_quoted_string, parse_multiline_card
 
 
@@ -198,7 +200,47 @@ def _float_list(values: list) -> str:
 def _int(token) -> int:
     """An integer card field. NJOY reads list-directed input, so ``26056.`` is a
     valid ZA (ENDF/B-VIII.1's ``tsl-026_Fe_056.leapr`` writes it so)."""
-    return int(float(token))
+    return int(_float(token))
+
+
+def _float(token) -> float:
+    """A real card field, list-directed: ``5.569960-3`` (no ``E``) is valid."""
+    text = str(token).strip()
+    match = re.fullmatch(r"([+-]?\d*\.?\d*)([+-]\d+)", text)
+    if match and match.group(1) not in ("", "+", "-"):
+        return float(f"{match.group(1)}e{match.group(2)}")
+    return float(text)
+
+
+def _title(line: str) -> str:
+    """Card 2. NJOY's decks quote it (``'H in H2O'/``); ENDF/B-VIII.1's
+    ``.leapr`` inputs mostly do not (``H in H2O, CAB Model ... / TITLE``)."""
+    if "'" in line.split("/")[0]:
+        return parse_quoted_string(line)
+    return line.split("/")[0].strip()
+
+
+def _read_values(card_lines: list[str], idx: int, count: int) -> tuple[list[float], int]:
+    """*count* values of a card that may wrap over several lines.
+
+    List-directed, as NJOY reads it: the card takes records until it has
+    *count* values or meets a ``/``, and ``r*c`` is *c* repeated *r* times.
+    ENDF/B-VIII.1's decks write the 100-odd rho values of card 12 five per
+    line, and ``tsl-HinUH3.leapr`` writes ``58*0.00000E+00``.
+    """
+    values: list[float] = []
+    while len(values) < count and idx < len(card_lines):
+        line = card_lines[idx]
+        idx += 1
+        for token in parse_card_values(line):
+            head, star, tail = token.partition("*")
+            if star and head.isdigit():
+                values.extend([_float(tail)] * int(head))
+            else:
+                values.append(_float(token))
+        if "/" in line:
+            break
+    return values[:count], idx
 
 
 def parse(card_lines: list[str]) -> dict:
@@ -214,7 +256,7 @@ def parse(card_lines: list[str]) -> dict:
     nout = _int(c1[0])
 
     # Card 2: 'title'/
-    title = parse_quoted_string(card_lines[idx])
+    title = _title(card_lines[idx])
     lm["title"] = [idx]
     idx += 1
 
@@ -235,15 +277,15 @@ def parse(card_lines: list[str]) -> dict:
     za = _int(c4[1])
     isabt = _int(c4[2]) if len(c4) > 2 else 0
     ilog = _int(c4[3]) if len(c4) > 3 else 0
-    smin = float(c4[4]) if len(c4) > 4 else None
+    smin = _float(c4[4]) if len(c4) > 4 else None
 
     # Card 5: awr spr [npr] [iel] [ncold] [nsk]
     c5 = parse_card_values(card_lines[idx])
     lm["awr"] = [idx]; lm["spr"] = [idx]; lm["npr"] = [idx]
     lm["iel"] = [idx]; lm["ncold"] = [idx]; lm["nsk"] = [idx]
     idx += 1
-    awr = float(c5[0])
-    spr = float(c5[1])
+    awr = _float(c5[0])
+    spr = _float(c5[1])
     npr = _int(c5[2]) if len(c5) > 2 else 1
     iel = _int(c5[3]) if len(c5) > 3 else 0
     ncold = _int(c5[4]) if len(c5) > 4 else 0
@@ -256,8 +298,8 @@ def parse(card_lines: list[str]) -> dict:
     idx += 1
     nss = _int(c6[0])
     b7 = _int(c6[1]) if len(c6) > 1 else 0
-    aws = float(c6[2]) if len(c6) > 2 else 0.0
-    sps = float(c6[3]) if len(c6) > 3 else 0.0
+    aws = _float(c6[2]) if len(c6) > 2 else 0.0
+    sps = _float(c6[3]) if len(c6) > 3 else 0.0
     mss = _int(c6[4]) if len(c6) > 4 else 0
 
     # Card 7: nalpha nbeta [lat]
@@ -270,13 +312,13 @@ def parse(card_lines: list[str]) -> dict:
 
     # Card 8: alphas (may span multiple lines)
     alpha_vals, alpha_lines = parse_multiline_card(card_lines, idx)
-    alphas = [float(v) for v in alpha_vals]
+    alphas = [_float(v) for v in alpha_vals]
     lm["alphas"] = list(range(idx, idx + alpha_lines))
     idx += alpha_lines
 
     # Card 9: betas (may span multiple lines)
     beta_vals, beta_lines = parse_multiline_card(card_lines, idx)
-    betas = [float(v) for v in beta_vals]
+    betas = [_float(v) for v in beta_vals]
     lm["betas"] = list(range(idx, idx + beta_lines))
     idx += beta_lines
 
@@ -319,8 +361,12 @@ def parse(card_lines: list[str]) -> dict:
 
     # Secondary scatterer temperature blocks (nss > 0 and b7 == 0)
     if nss > 0 and b7 == 0:
+        # One block per temperature, as for the principal: the comment cards
+        # (card 20) follow, and are not temperatures.
         sec_temps = []
-        while idx < len(card_lines):
+        for _ in range(ntempr):
+            if idx >= len(card_lines):
+                break
             t_block, idx = _parse_temperature_block(card_lines, idx, 0)
             sec_temps.append(t_block)
         if sec_temps:
@@ -336,7 +382,7 @@ def _parse_temperature_block(
     """Parse one temperature block, returning (block_dict, next_idx)."""
     # Card 10: temp
     c10 = parse_card_values(card_lines[idx]); idx += 1
-    temp = float(c10[0])
+    temp = _float(c10[0])
     block: dict = {"temp": temp}
 
     if temp < 0:
@@ -344,17 +390,17 @@ def _parse_temperature_block(
 
     # Card 11: delta ni
     c11 = parse_card_values(card_lines[idx]); idx += 1
-    block["delta"] = float(c11[0])
+    block["delta"] = _float(c11[0])
     block["ni"] = _int(c11[1])
 
-    # Card 12: rho values
-    block["rho"] = [float(v) for v in parse_card_values(card_lines[idx])]; idx += 1
+    # Card 12: rho values, as many lines as it takes
+    block["rho"], idx = _read_values(card_lines, idx, block["ni"])
 
     # Card 13: twt c tbeta
     c13 = parse_card_values(card_lines[idx]); idx += 1
-    block["twt"] = float(c13[0])
-    block["c"] = float(c13[1])
-    block["tbeta"] = float(c13[2])
+    block["twt"] = _float(c13[0])
+    block["c"] = _float(c13[1])
+    block["tbeta"] = _float(c13[2])
 
     # Card 14: nd
     c14 = parse_card_values(card_lines[idx]); idx += 1
@@ -363,20 +409,20 @@ def _parse_temperature_block(
 
     # Cards 15-16: discrete oscillator energies and weights
     if nd > 0:
-        block["energies"] = [float(v) for v in parse_card_values(card_lines[idx])]; idx += 1
-        block["weights"] = [float(v) for v in parse_card_values(card_lines[idx])]; idx += 1
+        block["energies"], idx = _read_values(card_lines, idx, nd)
+        block["weights"], idx = _read_values(card_lines, idx, nd)
 
     # Cards 17-19: pair correlation (principal scatterer only)
     if nsk != 0:
         c17 = parse_card_values(card_lines[idx]); idx += 1
         nka = _int(c17[0])
-        dka = float(c17[1])
+        dka = _float(c17[1])
         block["nka"] = nka
         block["dka"] = dka
         if nka > 0:
-            block["kappas"] = [float(v) for v in parse_card_values(card_lines[idx])]; idx += 1
+            block["kappas"], idx = _read_values(card_lines, idx, nka)
         if nsk == 2:
             c19 = parse_card_values(card_lines[idx]); idx += 1
-            block["cfrac"] = float(c19[0])
+            block["cfrac"] = _float(c19[0])
 
     return block, idx
