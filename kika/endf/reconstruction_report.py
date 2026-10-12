@@ -1,4 +1,4 @@
-"""The reconstruction report: what was reconstructed, how, and how well.
+"""The reconstruction report: what was run, what was checked, what to know.
 
 ``EndfReconstruction.report_document()`` builds a :class:`ReconstructionReport`
 from what the run already knows; nothing is recomputed except cheap scans of
@@ -8,14 +8,16 @@ the output tables. It renders three ways from one dictionary:
 * ``to_text()``  fixed-width ASCII for a terminal or a ``.txt`` file;
 * ``to_html()``  a self-contained page (inline CSS, no script, light and dark).
 
-Sections: material and evaluation, software, options, resonance ranges, the
-segments the domain was cut into, one row per tabulated MT, the sum graph and
-the evaluation's own sums against the reconstructed ones, verification, the
-conversion notes, and timings.
+The page reads like the covariance check: a verdict, the list of checks with
+the result of each, the findings (only when there are any), what was done, one
+row per reaction, the run's metadata, and at the bottom what each check
+compares and what its levels mean. Engine internals (segments, iterations,
+the engine's own notes) are folded away under the run details.
 
-Error ratios are in units of the budget ``atol + rtol*|sigma|``: 1 means the
-difference uses the whole tolerance. Tabulation aims at half of it, leaving the
-other half for serialization (``ReconstructionOptions``).
+Errors are quoted against the tolerance: at each energy the table may differ
+from the reference by ``rtol*|sigma| + atol``, and 100 % uses all of it.
+Tabulation aims at half, leaving the other half for the rounding of the ENDF
+file (``ReconstructionOptions``).
 """
 from __future__ import annotations
 
@@ -23,11 +25,12 @@ import datetime as _dt
 import hashlib
 import html as _html
 import json
+import re
 from pathlib import Path
 
 import numpy as np
 
-__all__ = ["ReconstructionReport", "SCHEMA"]
+__all__ = ["ReconstructionReport", "SCHEMA", "CHECKS"]
 
 #: Bump when a key is renamed or removed; adding keys keeps the version.
 SCHEMA = "kika-reconstruction-report/1"
@@ -55,7 +58,7 @@ def file_sha256(path) -> str | None:
 def evaluation_summary(tape, path) -> dict:
     """MF1/451 identification and one dict per MF2 energy range, read from the
     tape before it is decoded (the model does not keep the ENDF flags)."""
-    out = dict(file=Path(path).name, sha256=file_sha256(path))
+    out = dict(file=Path(path).name, path=str(Path(path).resolve()), sha256=file_sha256(path))
     head = tape.mf[1].mt[451] if 1 in tape.mf and 451 in tape.mf[1].mt else None
     if head is not None:
         g = lambda name: getattr(head, "_" + name, None)
@@ -79,7 +82,7 @@ def evaluation_summary(tape, path) -> dict:
 def _range_row(isotope, rng) -> dict:
     p = rng.parameters
     row = dict(el_eV=_num(rng.el), eh_eV=_num(rng.eh), lru=_int(rng.lru), lrf=_int(rng.lrf),
-               nro=_int(rng.nro), naps=_int(rng.naps), ap_fm=_num(getattr(p, "ap", None)),
+               nro=_int(rng.nro), naps=_int(rng.naps), ap_fm=_fm(getattr(p, "ap", None)),
                ap_energy_points=len(rng.ap_e.energies) if getattr(rng, "ap_e", None) else 0,
                lfw=_int(getattr(isotope, "lfw", None)), za=_int(getattr(isotope, "za", None)),
                abundance=_num(getattr(isotope, "abn", None)))
@@ -135,7 +138,7 @@ def build(rec) -> dict:
         target_spin=_num(getattr(context, "target_spin", None)),
         context_source=rec.context_source)
     identification = {k: evaluation.get(k) for k in
-                      ("file", "sha256", "library", "nlib", "nver", "lrel", "nmod", "lrp", "lfi",
+                      ("file", "path", "sha256", "library", "nlib", "nver", "lrel", "nmod", "lrp", "lfi",
                        "temperature_K", "emax_eV", "evaluation_date", "laboratory", "authors")}
 
     # Resonance ranges: the tape's flags joined with how the engine prepared them.
@@ -144,19 +147,22 @@ def build(rec) -> dict:
         match = next((r for r in prepared if _close(r.low, row["el_eV"]) and _close(r.high, row["eh_eV"])), None)
         row["engine_approximation"] = getattr(match, "approximation", None)
         if row["lru"] == 1:
-            row["treatment"] = "pointwise at 0 K from the resonance parameters"
+            row["treatment"] = "computed point by point at 0 K from the resonance parameters"
         elif row["lru"] == 2:
             data = getattr(match, "unresolved", None)
             if row.get("lssf") == 1 or getattr(data, "self_shielding_only", False):
-                row["treatment"] = "LSSF=1: MF3 already holds the dilute cross section; MF2 adds nothing at 0 K"
+                row["treatment"] = ("the evaluation's own smooth cross sections (MF3) are used as they are; "
+                                    "its average parameters only describe self-shielding, which a 0 K "
+                                    "reconstruction does not compute")
             else:
                 law = getattr(data, "law", None)
-                row["treatment"] = ("infinite-dilution average with Hauser-Feshbach fluctuation integrals, "
-                                    + (f"computed on the evaluation's grid and interpolated with INT={law}"
-                                       if law else "evaluated at every grid energy from the parameter functions"))
+                row["treatment"] = ("average (infinitely dilute) cross sections computed from the average "
+                                    "parameters, with width-fluctuation corrections, "
+                                    + ("on the evaluation's energy grid and interpolated between its points"
+                                       if law else "at every energy of the output grid"))
                 row["urr_interpolation"] = law
         else:
-            row["treatment"] = "potential scattering only"
+            row["treatment"] = "potential scattering from the scattering radius, added to MF3"
 
     segments = []
     for check in report.get("regions", ()):
@@ -188,6 +194,10 @@ def build(rec) -> dict:
             dE = (weights or {}).get("dE") or {}
             acc[0] += float(dE.get("reference_estimate", 0.))
             acc[1] += float(dE.get("absolute_difference_estimate", 0.))
+
+    pub = getattr(rec, "publication", None) or None
+    pub_maxima, pub_worst_at = ((pub.get("maxima") or {}), (pub.get("worst") or {})) if pub else ({}, {})
+
     reactions = []
     for mt in sorted(tables):
         t = tables[mt]
@@ -196,18 +206,23 @@ def build(rec) -> dict:
         positive = np.flatnonzero(dx > 0)
         relative = dx[positive] / x[positive]
         negative = np.flatnonzero(y < 0)
+        nonzero = np.flatnonzero(y != 0)
+        repeated = np.flatnonzero(dx == 0)
         key = result._mt_keys[mt]
         ref, diff = integrals.get(key, (0., 0.))
         reactions.append(dict(
             mt=mt, reaction=reaction(mt), points=int(len(x)),
             e_min_eV=float(x[0]), e_max_eV=float(x[-1]),
-            jumps=int(np.count_nonzero(dx == 0)),
+            threshold_eV=float(x[nonzero[0]]) if len(nonzero) else None,
+            jumps=int(len(repeated)), jumps_at_eV=[float(x[i]) for i in repeated[:20]],
+            decreasing=int(np.count_nonzero(dx < 0)),
             min_relative_spacing=float(relative.min()) if len(positive) else None,
             min_relative_spacing_at_eV=float(x[positive[np.argmin(relative)]]) if len(positive) else None,
             negatives=(dict(count=int(len(negative)), min_b=float(y[negative].min()),
                             at_eV=float(x[negative[np.argmin(y[negative])]])) if len(negative) else None),
             derived_sum=key in result._graph,
             tabulation_verification_max=per_key_verification.get(key),
+            publication_verification_max=_num(pub_maxima.get(key)) if pub else None,
             integral_relative_difference=(diff / ref if ref > 0 else None),
             qm_eV=_num(t.qm), qi_eV=_num(t.qi), lr=t.lr))
 
@@ -227,17 +242,15 @@ def build(rec) -> dict:
                                   stated_b=_num(w.get("stated_b")), components_b=_num(w.get("components_b"))))
 
     publication = None
-    pub = getattr(rec, "publication", None)
     if pub:
-        maxima, worst = pub.get("maxima") or {}, pub.get("worst") or {}
         publication = dict(
             path=str(pub.get("path")), file=Path(str(pub.get("path"))).name, mat=pub.get("mat"),
             reloaded_and_verified=True,
             rows=[dict(mt=key_mt.get(key), name=name(key), max_ratio=float(value),
-                       at_eV=_num(worst.get(key, (None,))[0]),
-                       reference_b=_num(worst.get(key, (None, None))[1]),
-                       serialized_b=_num(worst.get(key, (None, None, None))[2]))
-                  for key, value in sorted(maxima.items(), key=lambda kv: key_mt.get(kv[0], 10**9))])
+                       at_eV=_num(pub_worst_at.get(key, (None,))[0]),
+                       reference_b=_num(pub_worst_at.get(key, (None, None))[1]),
+                       serialized_b=_num(pub_worst_at.get(key, (None, None, None))[2]))
+                  for key, value in sorted(pub_maxima.items(), key=lambda kv: key_mt.get(kv[0], 10**9))])
 
     conversion = report.get("source_conversion_report")
     notes = dict(
@@ -277,7 +290,7 @@ def build(rec) -> dict:
         pendf=publication["file"] if publication else None)
 
     low, high = report.get("domain", (None, None))
-    return _jsonable(dict(
+    data = _jsonable(dict(
         schema=SCHEMA,
         generated_utc=_dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat(),
         material=material, evaluation=identification,
@@ -300,6 +313,249 @@ def build(rec) -> dict:
         timings_s={k: float(v) for k, v in (rec.timings or {}).items()},
         fingerprints=dict(source_model_sha256=report.get("source_sha256"),
                           normalized_sha256=report.get("normalized_sha256"))))
+    data["checks"] = evaluate_checks(data)
+    data["summary"]["status"] = _overall(data["checks"])
+    return data
+
+
+# --------------------------------------------------------------------------- checks
+
+PASS, NOTE, WARN, FAIL, SKIP = "passed", "note", "warning", "failed", "not run"
+_RANK = {SKIP: -1, PASS: 0, NOTE: 1, WARN: 2, FAIL: 3}
+_LABEL = {PASS: "Passed", NOTE: "Note", WARN: "Warning", FAIL: "Failed", SKIP: "Not run"}
+_MARK = {PASS: "✓", NOTE: "i", WARN: "!", FAIL: "✕", SKIP: "–"}
+_TEXT_MARK = {PASS: "[ OK ]", NOTE: "[NOTE]", WARN: "[WARN]", FAIL: "[FAIL]", SKIP: "[ -- ]"}
+_CLASS = {PASS: "pass", NOTE: "note", WARN: "warn", FAIL: "fail", SKIP: "skip"}
+
+
+class Check:
+    """One entry of the legend: what a check compares and what each outcome means."""
+
+    def __init__(self, id, title, what, levels):
+        self.id, self.title, self.what, self.levels = id, title, what, levels
+
+
+#: Every check the report can run, in the order the page lists them.
+CHECKS = (
+    Check("tabulation", "Tables reproduce the reference cross sections",
+          "After the grid is refined, every reaction's table is interpolated linearly at four points "
+          "inside each interval that were not used to build it, and compared with the reference: the "
+          "cross section computed from the resonance parameters plus the evaluation's tabulated "
+          "background (MF3). Outside the resonance ranges the reference is the evaluation's own table, "
+          "copied unchanged. This is a test at sample points, not a mathematical bound between them.",
+          {PASS: "Every difference is within the tolerance. The grid aims at half of it, so the other "
+                 "half is left for rounding the values when a file is written.",
+           FAIL: "Somewhere the table differs from the reference by more than the tolerance. The tables "
+                 "should not be used; kika normally stops with an error rather than reach this."}),
+    Check("pendf", "The written PENDF reproduces the reference",
+          "The PENDF file is read back with kika's ENDF reader and every reaction is compared with the "
+          "reference at every grid energy and at four points inside each interval. This covers what "
+          "writing adds: the rounding of every number to the 11-character fields of ENDF-6.",
+          {PASS: "The file, as written, is within the tolerance everywhere checked.",
+           FAIL: "The file is not within the tolerance; it is not kept (the destination is only "
+                 "replaced when this check passes).",
+           SKIP: "No PENDF was written in this run; only the tables were produced."}),
+    Check("source_sums", "The evaluation's totals equal the sum of their parts",
+          "Where the evaluation stores a total (such as MT1 total or MT4 inelastic) together with the "
+          "reactions it is made of, the stored total is compared with the sum of those reactions. kika "
+          "always rebuilds totals from their parts, so this checks the evaluation, not the reconstruction.",
+          {PASS: "Each stored total agrees with the sum of its parts within the tolerance.",
+           WARN: "A stored total disagrees with the sum of its parts by more than the tolerance. The "
+                 "evaluation is not self-consistent there, and the reconstructed total (the sum) will "
+                 "differ from the total printed in the evaluation at those energies.",
+           SKIP: "The evaluation stores no total alongside its parts."}),
+    Check("negatives", "No negative cross sections",
+          "Every value of every table is checked for sign.",
+          {PASS: "All values are zero or positive.",
+           WARN: "Some values are negative. This comes from the evaluation (some resonance formalisms, "
+                 "such as SLBW or MLBW, or a negative background in MF3 can produce it). The values are "
+                 "kept as computed, not clipped, so the table stays faithful to the evaluation; "
+                 "transport and processing codes may set them to zero."}),
+    Check("grid", "Tables are well formed",
+          "Every table must have ascending energies. An energy may appear twice only where the cross "
+          "section genuinely jumps, typically at the boundary between two resonance ranges; both values "
+          "are then kept.",
+          {PASS: "Energies ascend; any repeated energy is a real jump at a resonance-range boundary.",
+           NOTE: "A jump lies away from the resonance-range boundaries. It comes from the evaluation's "
+                 "own tables (MF3) and is kept as stated.",
+           FAIL: "Energies decrease somewhere: the table is malformed."}),
+    Check("integrals", "Integrals over energy are preserved",
+          "The integral of each table over energy is compared with an accurate estimate of the "
+          "integral of the reference cross section.",
+          {PASS: "Every relative difference is within the relative tolerance.",
+           NOTE: "A larger relative difference, in a reaction small enough for the absolute part of "
+                 "the tolerance to dominate. Each point is still within the tolerance."}),
+    Check("parameters", "Resonance parameters used as stated",
+          "Preparing the resonance parameters may need small, documented adjustments, such as a width "
+          "that comes out slightly negative only because of rounding in the file.",
+          {PASS: "No adjustment was needed.",
+           NOTE: "Some parameters were adjusted within rounding, or a block uses its own declared mass "
+                 "ratio; each case is listed. None changes the cross section beyond the file's precision."}),
+    Check("conversion", "The evaluation was read completely",
+          "Reading the ENDF file into kika's data model declares anything it cannot represent exactly. "
+          "Only the resonance parameters (MF2) and the tabulated cross sections (MF3) matter here.",
+          {PASS: "Nothing was lost or approximated in the data the reconstruction uses. Messages about "
+                 "other parts of the file are listed under the run details.",
+           NOTE: "A warning or an approximation in the data the reconstruction uses; each is listed.",
+           WARN: "Something in the resonance parameters or the cross sections was lost or could not be "
+                 "represented; the result may not reflect the evaluation there."}),
+)
+_CHECK = {c.id: c for c in CHECKS}
+
+#: Engine notes that report an adjustment to the data, in words a reader can follow.
+_ADJUSTMENTS = (
+    (r"E=(\S+), L=(\d+): rounded negative GX=(\S+) to zero",
+     lambda m: f"Resonance at {_energy(float(m[1]))}, l = {m[2]}: the competitive width "
+               f"Γ − Γn − Γγ − Γf came out negative ({m[3]} eV) through rounding of the stored "
+               "widths and was set to zero."),
+    (r"E=(\S+), L=(\d+): GT=(\S+); using GN\+GG\+GF=(\S+) within rounding tolerance",
+     lambda m: f"Resonance at {_energy(float(m[1]))}, l = {m[2]}: the stated total width "
+               f"({_g(float(m[3]))} eV) differs from Γn + Γγ + Γf ({_g(float(m[4]))} eV) by rounding; "
+               "the sum is used."),
+    (r"(?:RM )?L=(\d+): (?:using )?declared AWRI=(\S+)",
+     lambda m: f"l = {m[1]}: this block declares its own target mass ratio (AWRI = {m[2]}), which is "
+               "used for it."),
+    (r"RM (.+): using declared neutron-pair target mass ratio=(\S+)",
+     lambda m: f"Spin group {m[1]}: uses the target mass ratio of its neutron channel, {m[2]}."),
+)
+
+
+def _adjustment(note):
+    for pattern, say in _ADJUSTMENTS:
+        m = re.fullmatch(pattern, note)
+        if m:
+            return say(m)
+    return None
+
+
+def _conversion_scope(d):
+    """``(relevant, other)``: ``[(kind, message)]`` about MF2/MF3, and about the rest of the file."""
+    n = d["notes"]
+    excluded = {(e["kind"], e["message"]) for e in n["scope_exclusions"] if "cross-sections" in e["scopes"]}
+    relevant, other = [], []
+    for kind in ("losses", "unsupported", "approximations", "warnings"):
+        for msg in n[kind]:
+            mf = re.match(r"\s*MF(\d+)", msg)
+            outside = (kind, msg) in excluded or (mf is not None and int(mf[1]) not in (2, 3))
+            (other if outside else relevant).append((kind, msg))
+    return relevant, other
+
+
+def evaluate_checks(d) -> list:
+    """``[{id, title, status, result, items}]`` from the report data, in ``CHECKS`` order.
+
+    ``items`` are the findings behind a warning or a note, one sentence each."""
+    tol = _tolerance(d)
+    s, ranges = d["summary"], d["resonance_ranges"]
+    out = []
+
+    def add(cid, status, result, items=()):
+        out.append(dict(id=cid, title=_CHECK[cid].title, status=status, result=result, items=list(items)))
+
+    tab = s["worst_tabulation"]
+    if tab is None:
+        add("tabulation", PASS, "Every table is the evaluation's own, copied unchanged.")
+    else:
+        add("tabulation", PASS if tab["max_ratio"] <= 1 else FAIL,
+            f"{len(d['reactions'])} reactions; worst difference {_pct(tab['max_ratio'])} of the tolerance "
+            f"({_who(tab)} at {_energy(tab['at_eV'])}).")
+
+    pub = s["worst_publication"]
+    if d["verification"]["publication"] is None:
+        add("pendf", SKIP, "No PENDF written in this run (tables only).")
+    elif pub is None:
+        add("pendf", PASS, f"{s['pendf']} read back; identical to the reference.")
+    else:
+        add("pendf", PASS if pub["max_ratio"] <= 1 else FAIL,
+            f"{s['pendf']} read back; worst difference {_pct(pub['max_ratio'])} of the tolerance "
+            f"({_who(pub)} at {_energy(pub['at_eV'])}).")
+
+    disc = d["sums"]["source_discrepancies"]
+    if not disc:
+        add("source_sums", SKIP, "The evaluation stores no total alongside its parts.")
+    else:
+        bad = [x for x in disc if x["max_ratio"] > 1]
+        names = ", ".join(x["name"] for x in disc)
+        if not bad:
+            worst = max(disc, key=lambda x: x["max_ratio"])
+            add("source_sums", PASS, f"{names} checked; worst {_pct(worst['max_ratio'])} of the tolerance "
+                                     f"({worst['name']}).")
+        else:
+            one = len(bad) == 1
+            add("source_sums", WARN, f"{', '.join(x['name'] for x in bad)} differ{'s' if one else ''} from the "
+                                     f"sum of {'its' if one else 'their'} parts, by up to "
+                                     f"{max(x['max_ratio'] for x in bad):.0f}× the tolerance.",
+                [f"{x['name']} at {_energy(x['at_eV'])}: the evaluation states {_b(x['stated_b'])}, its parts "
+                 f"add up to {_b(x['components_b'])} ({x['max_ratio']:.1f}× the tolerance). The output uses "
+                 "the sum of the parts." for x in bad])
+
+    neg = [r for r in d["reactions"] if r["negatives"]]
+    if not neg:
+        add("negatives", PASS, "No negative value in any table.")
+    else:
+        add("negatives", WARN, f"{s['negative_values']} negative values in {len(neg)} reaction(s), kept as computed.",
+            [f"{_mtname(r)}: {r['negatives']['count']} negative values, the lowest "
+             f"{_b(r['negatives']['min_b'])} at {_energy(r['negatives']['at_eV'])}." for r in neg])
+
+    bounds = [b for r in ranges for b in (r["el_eV"], r["eh_eV"])]
+    broken = [r for r in d["reactions"] if r.get("decreasing")]
+    stray = [(r, e) for r in d["reactions"] for e in r.get("jumps_at_eV", ())
+             if not any(_close(e, b) for b in bounds)]
+    jumps = sum(r["jumps"] for r in d["reactions"])
+    if broken:
+        add("grid", FAIL, f"Energies decrease in {len(broken)} table(s).",
+            [f"{_mtname(r)}: {r['decreasing']} decreasing step(s)." for r in broken])
+    elif stray:
+        add("grid", NOTE, f"{len(stray)} jump(s) away from the resonance-range boundaries.",
+            [f"{_mtname(r)}: jump at {_energy(e)}, from the evaluation's table." for r, e in stray])
+    else:
+        add("grid", PASS, "Energies ascend in every table" + (
+            f"; {jumps} jump(s), all at a resonance-range boundary." if jumps else "; no jumps."))
+
+    diffs = [r for r in d["reactions"] if r.get("integral_relative_difference") is not None]
+    if diffs:
+        over = [r for r in diffs if r["integral_relative_difference"] > tol["rtol"]]
+        worst = max(diffs, key=lambda r: r["integral_relative_difference"])
+        if not over:
+            add("integrals", PASS, f"{len(diffs)} reactions; worst relative difference "
+                                   f"{_rel(worst['integral_relative_difference'])} ({_mtname(worst)}).")
+        else:
+            add("integrals", NOTE, f"{len(over)} reaction(s) above the relative tolerance of {_rel(tol['rtol'])}.",
+                [f"{_mtname(r)}: {_rel(r['integral_relative_difference'])}." for r in over])
+
+    adjusted = [a for a in (_adjustment(n) for n in d["notes"]["preparation"]) if a]
+    add("parameters", NOTE if adjusted else PASS,
+        f"{len(adjusted)} adjustment(s) within rounding." if adjusted else "Used exactly as stated in the file.",
+        adjusted)
+
+    relevant, other = _conversion_scope(d)
+    serious = [x for x in relevant if x[0] in ("losses", "unsupported")]
+    tail = (f" {len(other)} message(s) about other parts of the file, not used here, are listed under the "
+            "run details." if other else "")
+    if serious:
+        add("conversion", WARN, f"{len(serious)} loss(es) in the data used." + tail,
+            [msg for _, msg in relevant])
+    elif relevant:
+        add("conversion", NOTE, f"{len(relevant)} message(s) about the data used." + tail,
+            [msg for _, msg in relevant])
+    else:
+        add("conversion", PASS, "Resonance parameters and cross sections read without loss." + tail)
+    return out
+
+
+def _overall(checks):
+    worst = max((c["status"] for c in checks), key=_RANK.get, default=PASS)
+    return worst if worst != SKIP else PASS
+
+
+def _tolerance(d):
+    o = d["options"]
+    return dict(rtol=float(o["rtol"]), atol=float(o["atol_b"]))
+
+
+def _tolerance_text(d):
+    t = _tolerance(d)
+    return f"{_rel(t['rtol'])} of σ + {_g(t['atol'])} b"
 
 
 # --------------------------------------------------------------------------- object
@@ -317,7 +573,7 @@ class ReconstructionReport:
         return json.dumps(self._data, **({"indent": 1} | kwargs))
 
     def to_text(self, *, verbose=False) -> str:
-        """``verbose`` lists every background-only segment instead of one summary row."""
+        """``verbose`` lists every background-only interval in the engine details."""
         return _render_text(self._data, verbose=verbose)
 
     def to_html(self, *, verbose=False) -> str:
@@ -334,59 +590,161 @@ class ReconstructionReport:
 
     def __repr__(self):
         d = self._data
-        m = d["material"]
-        return (f"<ReconstructionReport {m.get('zsymam') or m.get('target')} MAT={m.get('mat')}: "
-                f"{len(d['reactions'])} reactions, {d['points']['stored']} stored points, "
+        return (f"<ReconstructionReport {_nuclide(d)} MAT={d['material'].get('mat')}: "
+                f"{_VERDICT[d['summary']['status']][0].lower()}, {len(d['reactions'])} reactions, "
+                f"{d['points']['stored']} stored points, "
                 f"{'PENDF verified' if d['verification']['publication'] else 'no PENDF'}>")
 
     def _repr_html_(self):
         return _render_html(self._data, fragment=True)
 
 
-# --------------------------------------------------------------------------- shared rows
+# --------------------------------------------------------------------------- page content
 
-def _summary_rows(d):
+_VERDICT = {
+    PASS: ("Reconstructed and verified", "pass"),
+    NOTE: ("Reconstructed and verified, with notes", "pass"),
+    WARN: ("Reconstructed and verified, with warnings to review", "warn"),
+    FAIL: ("Verification failed", "fail"),
+}
+
+
+def _verdict(d):
     s = d["summary"]
-    tab, pub, sums = s["worst_tabulation"], s["worst_publication"], s["worst_source_sum"]
-    at = lambda r: f"{r['name']} at {_E(r['at_eV'])} eV" if r.get("at_eV") is not None else r["name"]
-    verdict = "VERIFIED" if s["verified"] else "FAILED"
-    if tab is not None:
-        verdict += f": worst tabulation error {_r(tab['max_ratio'])} of the budget ({at(tab)})"
-    rows = [("Verdict", verdict)]
-    rows.append(("PENDF", "not written (tables only); write_pendf() adds a reload check" if pub is None else
-                 f"{s['pendf']} written, reloaded and verified: worst {_r(pub['max_ratio'])} of the budget ({at(pub)})"))
-    if sums is None:
-        rows.append(("Evaluation's sums", "none stored"))
-    elif s["source_sums_consistent"]:
-        rows.append(("Evaluation's sums", f"consistent with their parts (worst {_r(sums['max_ratio'])}, {sums['name']})"))
+    status = s["status"]
+    low, high = d["domain_eV"]
+    counts = {lv: sum(1 for c in d["checks"] if c["status"] == lv) for lv in (FAIL, WARN, NOTE, PASS, SKIP)}
+    parts = [f"{s['reactions']} reactions from {_energy(low)} to {_energy(high)} at 0 K, "
+             f"{s['stored_points']:,} points."]
+    if status != FAIL:
+        parts.append(f"Every table is within the tolerance ({_tolerance_text(d)}) everywhere checked.")
+    parts.append(f"PENDF {s['pendf']} written, read back and verified." if s["pendf"] else
+                 "No PENDF written (tables only).")
+    tally = ", ".join(f"{n} {_LABEL[lv].lower()}{'' if n == 1 or lv in (PASS, FAIL, SKIP) else 's'}"
+                      for lv, n in counts.items() if n and lv != SKIP)
+    parts.append(f"Checks: {tally}" + (f", {counts[SKIP]} not run." if counts[SKIP] else "."))
+    return status, _VERDICT[status][0], " ".join(parts)
+
+
+def _steps(d):
+    """What the run did, in order, as sentences."""
+    m, ev, s = d["material"], d["evaluation"], d["summary"]
+    steps = [f"Read {ev.get('file') or 'the evaluation'}: {_library(ev)} evaluation of {_nuclide(d)} "
+             f"(MAT {_s(m.get('mat'))}), its resonance parameters (MF2) and cross sections (MF3)."]
+    if d["resonance_ranges"]:
+        steps.append(f"Computed the cross sections in {len(d['resonance_ranges'])} resonance range(s) "
+                     "(below) from the parameters, at 0 K, without Doppler broadening.")
     else:
-        rows.append(("Evaluation's sums", f"{sums['name']} disagrees with the sum of its parts: {sums['max_ratio']:.1f}x the "
-                     f"budget at {_E(sums['at_eV'])} eV; the output uses the sum of the parts"))
-    rows.append(("Negative values", "none" if not s["negative_values"] else
-                 f"{s['negative_values']} in " + ", ".join(f"MT{mt}" for mt in s["reactions_with_negatives"])
-                 + " (kept as computed)"))
-    rows.append(("Conversion", "clean, nothing lost or approximated" if not s["conversion_issues"] else
-                 f"{s['conversion_issues']} declared issue(s); clean for cross sections: "
-                 f"{'yes' if s['clean_for_cross_sections'] else 'NO'} (see notes)"))
-    rows.append(("Output", f"{s['reactions']} reactions, {s['stored_points']:,} points"))
-    rows.append(("Time", f"{s['total_time_s']:.1f} s"))
+        steps.append("No resonance parameters: the evaluation's tables are used as they are.")
+    steps.append(f"Built one energy grid of {_count(d['points']['tabulated'])} points shared by every reaction, "
+                 "refined until linear interpolation reproduces every cross section within half the tolerance.")
+    if d["sums"]["graph"]:
+        steps.append("Rebuilt every total from its parts (" + "; ".join(
+            f"{g['name']} = {g['parts_text']}" for g in d["sums"]["graph"][:2])
+            + ("; …" if len(d["sums"]["graph"]) > 2 else "") + "); the evaluation's own totals are only compared.")
+    steps.append(f"Checked the tables against the reference ({len(d['checks'])} checks, listed above)." )
+    if s["pendf"]:
+        steps.append(f"Wrote {s['pendf']}, read it back and checked it again.")
+    return steps
+
+
+def _range_rows(d):
+    rows = []
+    for r in d["resonance_ranges"]:
+        kind = {1: "Resolved", 2: "Unresolved", 0: "Scattering radius only"}.get(r["lru"], f"LRU={r['lru']}")
+        model = r.get("formalism", "-") if r["lru"] == 1 else _URR_MODEL.get(r.get("urr_case"), "-")
+        rows.append((_span(r["el_eV"], r["eh_eV"]), kind, model, _content(r), r.get("treatment") or "-",
+                     f"LRU={r['lru']}, LRF={r['lrf']}"))
     return rows
 
 
+#: The three ways ENDF-6 stores unresolved parameters (cases A, B and C of the manual).
+_URR_MODEL = {"A": "constant average parameters", "B": "energy-dependent fission widths",
+              "C": "energy-dependent average parameters"}
+
+
 def _content(r):
-    parts = [f"{r[k]} {label}" for k, label in
-             (("l_values", "l-values"), ("spin_groups", "J groups"), ("resonances", "resonances"),
-              ("channels", "channels"), ("energy_points", "energies")) if r.get(k) is not None]
+    parts = []
+    if r.get("resonances") is not None:
+        parts.append(f"{r['resonances']:,} resonances")
+    if r.get("spin_groups") is not None:
+        parts.append(f"{r['spin_groups']} spin groups")
+    if r.get("l_values"):
+        parts.append(f"l = 0–{r['l_values'] - 1}" if r["l_values"] > 1 else "l = 0")
+    if r.get("channels") is not None:
+        parts.append(f"{r['channels']} channels")
+    if r.get("energy_points"):
+        parts.append(f"{r['energy_points']} energies")
     text = ", ".join(parts) or "-"
-    if r.get("particle_pairs"):
-        text += "; pairs MT " + ", ".join(str(x) for x in r["particle_pairs"])
+    if r.get("ap_fm") is not None:
+        text += f"; scattering radius {r['ap_fm']:.4g} fm" + (
+            " (energy dependent)" if r.get("ap_energy_points") else "")
     return text
+
+
+def _reaction_rows(d):
+    pub = d["verification"]["publication"] is not None
+    rows = []
+    for r in d["reactions"]:
+        remark = []
+        if r["derived_sum"]:
+            remark.append("sum of its parts")
+        if r["negatives"]:
+            remark.append(f"{r['negatives']['count']} negative")
+        row = [str(r["mt"]), _s(r["reaction"]), f"{r['points']:,}", _energy(r["threshold_eV"]),
+               _pct(r["tabulation_verification_max"])]
+        if pub:
+            row.append(_pct(r["publication_verification_max"]))
+        row += [_rel(r["integral_relative_difference"]), "; ".join(remark) or ""]
+        rows.append(row)
+    head = ["MT", "Reaction", "Points", "Starts at", "Table error"] + (["PENDF error"] if pub else []) \
+        + ["Integral error", "Remark"]
+    return head, rows
+
+
+_SOURCE = (("MF2 AWRI", "the resonance parameters (MF2)"), ("MF1 AWR", "the file header (MF1)"),
+           ("RML elastic pair", "the R-matrix elastic channel (MF2)"),
+           ("no resonance physics", "not needed (no resonance parameters)"))
+_STAGES = {"read": "reading", "decode": "decoding", "reconstruct": "reconstruction",
+           "write_verify": "PENDF writing and check"}
+
+
+def _run_groups(d):
+    """``[(heading, [(label, value)])]``: the run's metadata."""
+    m, ev, sw, op = d["material"], d["evaluation"], d["software"], d["options"]
+    source = next((say for key, say in _SOURCE if (m.get("context_source") or "").startswith(key)),
+                  m.get("context_source"))
+    t = d["timings_s"]
+    timing = ", ".join(f"{_STAGES.get(k, k)} {v:.1f} s" for k, v in t.items())
+    return [
+        ("Material", [
+            ("Nuclide", f"{_nuclide(d)} (ZA {_s(m.get('za'))}, MAT {_s(m.get('mat'))})"),
+            ("Target mass", f"{_g(m.get('awr_used'))} neutron masses, from {_s(source)}"),
+            ("Target spin", _g(m.get("target_spin")))]),
+        ("Evaluation", [
+            ("Library", _library(ev)),
+            ("Laboratory", _s(ev.get("laboratory"))),
+            ("Date", _s(ev.get("evaluation_date"))),
+            ("Authors", _s(ev.get("authors"))),
+            ("File", _s(ev.get("path") or ev.get("file"))),
+            ("SHA-256", _s(ev.get("sha256")))]),
+        ("Run", [
+            ("Generated", d["generated_utc"].replace("T", " ").replace("+00:00", " UTC")),
+            ("kika", f"{sw['kika_version']} (engine {sw['engine_version']})"),
+            ("Compiled kernel", "used" if sw["native_kernel"] else "not available: pure-Python fallback, "
+                                                                   "same results, slower"),
+            ("Tolerance", _tolerance_text(d)),
+            ("Temperature", "0 K"),
+            ("Energy range", _span(*d["domain_eV"])),
+            ("Point limit", f"{op['max_points']:,}"),
+            ("Time", f"{sum(t.values()):.1f} s ({timing})" if t else "-")]),
+    ]
 
 
 def _segment_rows(d, verbose):
     rows, background = [], []
-    row = lambda s, kind: (_rng(s["low_eV"], s["high_eV"]), kind, f"{s['points']:,}", str(s["iterations"]),
-                           f"{s['evaluations']:,}", _r(s["refinement_max"]), _r(s["verification_max"]))
+    row = lambda s, kind: (_span(s["low_eV"], s["high_eV"]), kind, f"{s['points']:,}", str(s["iterations"]),
+                           f"{s['evaluations']:,}", _pct(s["verification_max"]))
     for s in d["segments"]:
         if s["kind"] == "background only" and not verbose:
             background.append(s)
@@ -397,120 +755,16 @@ def _segment_rows(d, verbose):
                       points=sum(s["points"] for s in background),
                       iterations=max(s["iterations"] for s in background),
                       evaluations=sum(s["evaluations"] for s in background),
-                      refinement_max=max((s["refinement_max"] or 0.) for s in background),
                       verification_max=max((s["verification_max"] or 0.) for s in background))
-        rows.append(row(merged, f"background only ({len(background)} segment{'s' if len(background) > 1 else ''})"))
+        rows.append(row(merged, f"no resonances ({len(background)} intervals)"))
     return rows
 
 
-def _sections(d, verbose=False):
-    """(id, title, headers, rows, notes) per section; headers None means key/value."""
-    yield ("summary", "Summary", None, _summary_rows(d), [])
-    m, ev, sw, op = d["material"], d["evaluation"], d["software"], d["options"]
-    lib = " ".join(x for x in (ev.get("library"), _vers(ev)) if x) or "-"
-    yield ("material", "Material and evaluation", None, [
-        ("Material", f"{m.get('zsymam') or m.get('target')}"),
-        ("ZA / MAT", f"{_s(m.get('za'))} / {_s(m.get('mat'))}"),
-        ("Target / projectile", f"{_s(m.get('target'))} / {_s(m.get('projectile'))}"),
-        ("AWR used", f"{_g(m.get('awr_used'))} (MF1: {_g(m.get('awr_mf1'))})"),
-        ("Target spin", _g(m.get("target_spin"))),
-        ("Mass and spin from", _s(m.get("context_source"))),
-        ("Library", f"{lib} (NLIB={_s(ev.get('nlib'))}, NVER={_s(ev.get('nver'))}, "
-                    f"LREL={_s(ev.get('lrel'))}, NMOD={_s(ev.get('nmod'))})"),
-        ("Laboratory / date", f"{_s(ev.get('laboratory'))} / {_s(ev.get('evaluation_date'))}"),
-        ("Authors", _s(ev.get("authors"))),
-        ("LRP / LFI", f"{_s(ev.get('lrp'))} / {_s(ev.get('lfi'))}"),
-        ("Upper energy", f"{_E(ev.get('emax_eV'))} eV"),
-        ("File", _s(ev.get("file"))),
-        ("SHA-256", _s(ev.get("sha256")))], [])
-    yield ("processing", "Processing", None, [
-        ("Generated (UTC)", d["generated_utc"]),
-        ("kika / engine", f"{sw['kika_version']} / {sw['engine_version']}"),
-        ("C kernel", "loaded" if sw["native_kernel"] else "NOT loaded (NumPy fallback, slower)"),
-        ("Tolerance", f"rtol {_g(op['rtol'])}, atol {_g(op['atol_b'])} b; budget = atol + rtol·|σ|"),
-        ("Budget split", "half for tabulation, half kept for serialization"),
-        ("Limits", f"max_points {op['max_points']:,}, max_iterations {op['max_iterations']}"),
-        ("Temperature", "0 K (no Doppler broadening)"),
-        ("Domain", f"{_rng(*d['domain_eV'])} eV"),
-        ("Points", f"{_s(d['points']['tabulated'])} on the shared grid, {_s(d['points']['stored'])} stored")], [])
-
-    rows = [(_rng(r["el_eV"], r["eh_eV"]), f"{r['lru']}/{r['lrf']}", r.get("formalism", "-"),
-             f"{r['nro']}/{r['naps']}",
-             _g(r.get("ap_fm")) + (f" + AP(E), {r['ap_energy_points']} pts" if r.get("ap_energy_points") else ""),
-             _content(r)) for r in d["resonance_ranges"]]
-    notes = [f"{_rng(r['el_eV'], r['eh_eV'])} eV: {r['treatment']}" for r in d["resonance_ranges"] if r.get("treatment")]
-    yield ("mf2", "Resonance ranges (MF2)",
-           ("E range (eV)", "LRU/LRF", "Formalism", "NRO/NAPS", "AP (fm)", "Content"), rows, notes)
-
-    yield ("segments", "Segments",
-           ("E range (eV)", "Kind", "Points", "Iter", "Evaluations", "Refine max", "Verify max"),
-           _segment_rows(d, verbose),
-           ["Refine max: largest panel error over the budget while refining (target <= 0.5).",
-            "Verify max: largest error at independent probes of the final table (must be <= 1)."]
-           + ([] if verbose else ["Background-only segments copy the evaluated tables; verbose=True lists each."]))
-
-    rows, notes = [], []
-    for r in d["reactions"]:
-        neg = r["negatives"]
-        rows.append((str(r["mt"]) + (" (sum)" if r["derived_sum"] else ""), _s(r["reaction"]), f"{r['points']:,}",
-                     _rng(r["e_min_eV"], r["e_max_eV"]), str(r["jumps"]),
-                     _e(r["min_relative_spacing"]) + (f" at {_E(r['min_relative_spacing_at_eV'])}"
-                                                       if r["min_relative_spacing_at_eV"] else ""),
-                     "-" if neg is None else f"{neg['count']} (min {_E(neg['min_b'])} b at {_E(neg['at_eV'])})",
-                     _r(r["tabulation_verification_max"]), _e(r["integral_relative_difference"])))
-        if neg is not None:
-            notes.append(f"MT{r['mt']}: {neg['count']} negative values kept as computed (reported, not clipped).")
-    notes[:0] = ["Jumps: repeated energies, each a real discontinuity (range boundary); keep both points.",
-                 "Min dE/E: the finest relative grid spacing and the energy (eV) where it occurs.",
-                 "Integral diff: |linear - exact| / exact for the integral of σ dE, from the engine's quadrature."]
-    yield ("reactions", "Tabulated reactions", ("MT", "Reaction", "Points", "E range (eV)", "Jumps", "Min dE/E",
-                                               "Negative", "Verify max", "Integral diff"), rows, notes)
-
-    s = d["sums"]
-    yield ("sums", "Sums", ("Aggregate", "Derived from"), [(g["name"], g["parts_text"]) for g in s["graph"]],
-           [f"Policy: {s['policy']}. Every aggregate is rebuilt from its exclusive leaves; "
-            "the evaluation's own aggregate is only compared, never kept."])
-    yield ("source-sums", "Evaluation's sums against their parts",
-           ("Aggregate", "Max / budget", "At E (eV)", "Stated (b)", "Sum of parts (b)"),
-           [(x["name"], _r(x["max_ratio"]), _E(x["at_eV"]), _V(x["stated_b"]), _V(x["components_b"]))
-            for x in s["source_discrepancies"]],
-           ["Above 1: the stored aggregate differs from the sum of its parts by more than the tolerance; "
-            "the output uses the sum of the parts."] if s["source_discrepancies"] else [])
-
-    v = d["verification"]
-    total = len(v["tabulation"])
-    shown = v["tabulation_rows"]
-    rest = total - len(shown)
-    yield ("verification", "Verification of the tabulation",
-           ("Reaction", "Max / budget", "At E (eV)", "Exact (b)", "Tabulated (b)"),
-           [(f"{x['name']} {x['reaction'] or ''}".strip(), _r(x["max_ratio"]), _E(x["at_eV"]),
-             _V(x["reference_b"]), _V(x["tabulated_b"])) for x in shown],
-           ([f"{rest} other reactions lie outside the resonance ranges: their evaluated lin-lin tables are "
-             "passed through exactly (0.000)."] if rest else [])
-           + ["Checked at four independent probes per panel against the physics; empirical, not a global bound."])
-    pub = v["publication"]
-    if pub is not None:
-        rows = [(x["name"], _r(x["max_ratio"]), _E(x["at_eV"]), _V(x["reference_b"]), _V(x["serialized_b"]))
-                for x in pub["rows"] if x["max_ratio"] > 0]
-        rest = len(pub["rows"]) - len(rows)
-        yield ("publication", "Verification of the PENDF (reloaded)",
-               ("Reaction", "Max / budget", "At E (eV)", "Reference (b)", "Serialized (b)"), rows,
-               [f"Written to {pub['file']} (MAT {_s(pub['mat'])}), read back and checked against the physics "
-                "at every node and four interior probes per panel."]
-               + ([f"{rest} other reactions: 0.000."] if rest else []))
-
-    n = d["notes"]
-    excluded = {e["message"]: e["scopes"] for e in n["scope_exclusions"]}
-    rows = [(kind + (f" (not relevant to {', '.join(excluded[msg])})" if msg in excluded else ""), msg)
-            for kind in ("losses", "approximations", "unsupported", "warnings") for msg in n[kind]]
-    rows += [("engine", msg) for msg in n["preparation"]]
-    yield ("notes", "Conversion and preparation notes", ("Kind", "Message"), rows,
-           ["Nothing to declare: the evaluation converted cleanly."] if not rows else
-           [f"Clean for cross sections: {'yes' if n['clean_for_cross_sections'] else 'NO'}."])
-
-    t = d["timings_s"]
-    yield ("timings", "Timings", ("Stage", "Seconds"),
-           [(k, f"{x:.2f}") for k, x in t.items()] + [("total", f"{sum(t.values()):.2f}")], [])
+_SEGMENT_HEAD = ("Energy range", "Kind", "Points", "Refinement passes", "Evaluations", "Worst error")
+_TOLERANCE_NOTE = ("Errors are given as a percentage of the tolerance: at each energy the table may differ "
+                   "from the reference by {tol}, and 100 % uses all of it. The grid is refined until the "
+                   "error is below 50 %, leaving the other half for the rounding of the values when a file "
+                   "is written.")
 
 
 # --------------------------------------------------------------------------- text
@@ -518,132 +772,337 @@ def _sections(d, verbose=False):
 def _render_text(d, width=100, verbose=False):
     out = []
     bar = "=" * width
-    m = d["material"]
-    out += [bar, f" KIKA RESONANCE RECONSTRUCTION  -  {m.get('zsymam') or m.get('target')}  MAT {_s(m.get('mat'))}".rstrip(),
-            bar]
-    for _, title, headers, rows, notes in _sections(d, verbose):
-        out += ["", f" {title.upper()}", " " + "-" * (len(title))]
-        if headers is None:
-            k = max(len(a) for a, _ in rows)
-            out += [f"   {a.ljust(k)} : {_ascii(b)}" for a, b in rows]
-        elif rows:
-            cells = [list(headers)] + [[_ascii(c) for c in r] for r in rows]
-            widths = [max(len(r[i]) for r in cells) for i in range(len(headers))]
-            fmt = lambda r: "   " + "  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip()
-            out += [fmt(cells[0]), "   " + "  ".join("-" * w for w in widths)] + [fmt(r) for r in cells[1:]]
-        else:
+    status, headline, detail = _verdict(d)
+    out += [bar, f" kika cross-section reconstruction  -  {_nuclide(d)}  MAT {_s(d['material'].get('mat'))}",
+            bar, "", f" {_TEXT_MARK[status]} {headline.upper()}"]
+    out += _wrap(detail, width, "   ")
+
+    def section(title):
+        out.extend(["", f" {title.upper()}", " " + "-" * len(title)])
+
+    def table(head, rows):
+        if not rows:
             out.append("   (none)")
-        out += [f"   * {_ascii(note)}" for note in notes]
+            return
+        cells = [list(head)] + [[_ascii(c) for c in r] for r in rows]
+        widths = [max(len(r[i]) for r in cells) for i in range(len(head))]
+        fmt = lambda r: "   " + "  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip()
+        out.extend([fmt(cells[0]), "   " + "  ".join("-" * w for w in widths)] + [fmt(r) for r in cells[1:]])
+
+    section("Checks")
+    for c in d["checks"]:
+        out.append(f"   {_TEXT_MARK[c['status']]} {c['title']}")
+        out += _wrap(c["result"], width, "          ")
+
+    flagged = [c for c in d["checks"] if c["items"]]
+    if flagged:
+        section("Findings")
+        for c in flagged:
+            out.append(f"   {_TEXT_MARK[c['status']]} {c['title']}")
+            for item in c["items"]:
+                out += _wrap(item, width, "          ", first="        - ")
+
+    section("What was done")
+    for i, step in enumerate(_steps(d), 1):
+        out += _wrap(step, width, "      ", first=f"   {i}. ")
+    if d["resonance_ranges"]:
+        out.append("")
+        table(("Energy range", "Kind", "Model", "Content", "ENDF"),
+              [(a, b, c, e, f) for a, b, c, e, _, f in _range_rows(d)])
+        for r in _range_rows(d):
+            out += _wrap(f"{r[0]}: {r[4]}.", width, "     ", first="   * ")
+
+    section("Reactions")
+    head, rows = _reaction_rows(d)
+    table(head, rows)
+    out += _wrap(_TOLERANCE_NOTE.format(tol=_tolerance_text(d)), width, "     ", first="   * ")
+
+    section("Run details")
+    for heading, items in _run_groups(d):
+        out.append(f"   {heading}")
+        k = max(len(a) for a, _ in items)
+        out += [f"     {a.ljust(k)} : {_ascii(b)}" for a, b in items]
+
+    section("Engine details")
+    table(_SEGMENT_HEAD, _segment_rows(d, verbose))
+    technical = _technical_notes(d)
+    if technical:
+        out.append("")
+        out.append("   Notes from the resonance engine:")
+        for msg in technical:
+            out += _wrap(msg, width, "       ", first="     - ")
+    _, other = _conversion_scope(d)
+    if other:
+        out.append("")
+        out.append("   Messages about parts of the file the reconstruction does not use:")
+        for kind, msg in other:
+            out += _wrap(f"({kind}) {msg}", width, "       ", first="     - ")
+
+    section("About the checks")
+    out += _wrap(_TOLERANCE_NOTE.format(tol=_tolerance_text(d)), width, "   ")
+    for c in CHECKS:
+        out += ["", f"   {c.title}"]
+        out += _wrap(c.what, width, "     ")
+        for lv in (PASS, NOTE, WARN, FAIL, SKIP):
+            if lv in c.levels:
+                out += _wrap(c.levels[lv], width, "            ", first=f"     {_TEXT_MARK[lv]} ")
     out += ["", bar]
-    return "\n".join(out) + "\n"
+    return "\n".join(_ascii(line) for line in out) + "\n"
+
+
+def _wrap(text, width, indent, first=None):
+    import textwrap
+    first = indent if first is None else first
+    return textwrap.wrap(_ascii(text), width=width, initial_indent=first, subsequent_indent=indent) or [first]
+
+
+def _technical_notes(d):
+    return [n for n in d["notes"]["preparation"] if _adjustment(n) is None]
 
 
 # --------------------------------------------------------------------------- html
 
 _CSS = """
-.kika-report{--bg:#ffffff;--fg:#1f2328;--muted:#656d76;--line:#d8dee4;--head:#f6f8fa;--accent:#2a78d6;
- --warn:#b35900;--ok:#1a7f37;--box:#f6f8fa}
-@media (prefers-color-scheme:dark){.kika-report{--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--line:#30363d;
- --head:#161b22;--accent:#58a6ff;--warn:#e3a14b;--ok:#3fb950;--box:#161b22}}
-.kika-report{background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
- max-width:1100px;margin:0 auto;padding:16px;font-variant-numeric:tabular-nums}
-.kika-report h1{font-size:20px;margin:0 0 4px}
-.kika-report .sub{color:var(--muted);margin:0 0 12px}
-.kika-report nav{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;margin:0 0 8px;padding:6px 0;
- border-bottom:1px solid var(--line)}
-.kika-report nav a{color:var(--accent);text-decoration:none}
-.kika-report nav a:hover{text-decoration:underline}
-.kika-report h2{font-size:15px;margin:22px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--line);color:var(--accent)}
-.kika-report .wrap{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:6px}
-.kika-report table{border-collapse:collapse;width:100%}
-.kika-report th,.kika-report td{text-align:left;padding:4px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-.kika-report thead th{background:var(--head);font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:1}
-.kika-report td.num{text-align:right;white-space:nowrap}
-.kika-report td.e{white-space:nowrap}
-.kika-report .bad{color:var(--warn);font-weight:600}
-.kika-report .ok{color:var(--ok);font-weight:600}
-.kika-report dl.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 24px;margin:0}
-.kika-report dl.grid div{display:grid;grid-template-columns:150px 1fr;gap:8px;padding:3px 0;border-bottom:1px solid var(--line)}
-.kika-report dl.summary{display:grid;grid-template-columns:170px 1fr;gap:4px 14px;margin:0;padding:10px 14px;
- background:var(--box);border:1px solid var(--line);border-radius:6px}
-.kika-report dt{color:var(--muted)}
-.kika-report dd{margin:0;overflow-wrap:anywhere}
-.kika-report ul{margin:6px 0 0;padding-left:20px;color:var(--muted)}
-.kika-report code{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.kika-report{--fg:#1b1e24;--muted:#5f6672;--faint:#8a919c;--bg:#fff;--panel:#f6f7f9;--line:#e1e4e8;
+--accent:#2f5d8a;--fail:#b42318;--fail-bg:#fdecea;--fail-line:#f4b9b2;--warn:#9a5b00;--warn-bg:#fff4e0;
+--warn-line:#f2cd8d;--note:#3d5a80;--note-bg:#eaf1f8;--note-line:#bcd0e5;--pass:#1f7a4d;--pass-bg:#e8f5ee;
+--pass-line:#b5dcc6;--skip:#6b7280;--skip-bg:#f1f2f4;--skip-line:#d6d9de;--nav-bg:#1f3a5a;--nav-fg:#f2f6fb}
+@media (prefers-color-scheme:dark){.kika-report{--fg:#e7e9ed;--muted:#a3aab5;--faint:#7c8490;--bg:#14161a;
+--panel:#1c1f25;--line:#2f343c;--accent:#8fb6dd;--fail:#ff8a7d;--fail-bg:#3a1d1b;--fail-line:#6e2e28;
+--warn:#f2b54f;--warn-bg:#352a14;--warn-line:#6b5222;--note:#9fbbe0;--note-bg:#1d2836;--note-line:#34495f;
+--pass:#6fd19f;--pass-bg:#16301f;--pass-line:#2b5a3f;--skip:#9aa1ab;--skip-bg:#22252b;--skip-line:#3a3f47;
+--nav-bg:#2a4466;--nav-fg:#f2f6fb}}
+.kika-report{color:var(--fg);background:var(--bg);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+max-width:1180px;margin:0 auto;padding:28px 20px 56px;box-sizing:border-box}
+.kika-report *{box-sizing:border-box}
+.kika-report [id]{scroll-margin-top:64px}
+.kika-report a{color:var(--accent);text-decoration:none}.kika-report a:hover{text-decoration:underline}
+.kika-report code{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px;overflow-wrap:anywhere}
+.kika-report .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0}
+.kika-report h1{font-size:28px;line-height:1.2;margin:4px 0 2px}
+.kika-report .sub{color:var(--muted);margin:0 0 14px;font-size:13px;overflow-wrap:anywhere}
+.kika-report h2{font-size:20px;margin:38px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.kika-report h3{font-size:15px;margin:18px 0 6px}
+.kika-report p.lead{color:var(--muted);margin:-2px 0 12px}
+.kika-report .verdict{display:flex;gap:14px;align-items:flex-start;border:1px solid var(--line);
+border-left-width:6px;border-radius:10px;padding:14px 18px;margin:0 0 18px;background:var(--panel)}
+.kika-report .verdict .big{font-size:18px;font-weight:700;margin:0}.kika-report .verdict p{margin:2px 0 0}
+.kika-report .verdict.pass{border-color:var(--pass-line);border-left-color:var(--pass);background:var(--pass-bg)}
+.kika-report .verdict.warn{border-color:var(--warn-line);border-left-color:var(--warn);background:var(--warn-bg)}
+.kika-report .verdict.fail{border-color:var(--fail-line);border-left-color:var(--fail);background:var(--fail-bg)}
+.kika-report .verdict.pass .big{color:var(--pass)}.kika-report .verdict.warn .big{color:var(--warn)}
+.kika-report .verdict.fail .big{color:var(--fail)}
+.kika-report .mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+border-radius:50%;font-size:11px;font-weight:800;line-height:1;color:#fff;flex:none}
+.kika-report .pass .mark{background:var(--pass)}.kika-report .note .mark{background:var(--note)}
+.kika-report .warn .mark{background:var(--warn)}.kika-report .fail .mark{background:var(--fail)}
+.kika-report .skip .mark{background:var(--skip)}
+@media (prefers-color-scheme:dark){.kika-report .mark{color:#14161a}}
+.kika-report .badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px 2px 3px;border-radius:999px;
+font-size:13px;font-weight:700;white-space:nowrap;border:1px solid}
+.kika-report .badge.pass{color:var(--pass);background:var(--pass-bg);border-color:var(--pass-line)}
+.kika-report .badge.note{color:var(--note);background:var(--note-bg);border-color:var(--note-line)}
+.kika-report .badge.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
+.kika-report .badge.fail{color:var(--fail);background:var(--fail-bg);border-color:var(--fail-line)}
+.kika-report .badge.skip{color:var(--skip);background:var(--skip-bg);border-color:var(--skip-line)}
+.kika-report nav.toc{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:4px;margin:22px 0 0;
+padding:6px;background:var(--nav-bg);border-radius:0 0 12px 12px}
+.kika-report nav.toc a{font-weight:600;font-size:14px;color:var(--nav-fg);padding:5px 12px;border-radius:8px}
+.kika-report nav.toc a:hover{background:rgba(255,255,255,.14);text-decoration:none}
+.kika-report .wrap{overflow:auto;border:1px solid var(--line);border-radius:8px;margin:6px 0 10px}
+.kika-report .wrap.tall{max-height:70vh}
+.kika-report table{border-collapse:collapse;width:100%;font-size:14px}
+.kika-report th,.kika-report td{padding:6px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+.kika-report tbody tr:last-child td{border-bottom:none}
+.kika-report thead th{position:sticky;top:0;z-index:1;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+color:var(--muted);font-weight:600;background:var(--panel);white-space:nowrap}
+.kika-report th.n,.kika-report td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.kika-report td.nw{white-space:nowrap}
+.kika-report td.hot{color:var(--fail);font-weight:700}
+.kika-report td.flag{color:var(--warn)}
+.kika-report .muted{color:var(--muted)}.kika-report .faint{color:var(--faint);font-size:12.5px}
+.kika-report table.checks td:first-child{width:1%}
+.kika-report table.checks .ttl{font-weight:600}
+.kika-report ol.steps{margin:0 0 10px;padding-left:22px}.kika-report ol.steps li{margin:3px 0}
+.kika-report .group{margin:12px 0}.kika-report .ghead{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.kika-report .ghead .ttl{font-weight:700}
+.kika-report ul.items{margin:6px 0 0;padding-left:22px}.kika-report ul.items li{margin:2px 0}
+.kika-report ul.notes{margin:4px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
+.kika-report .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.kika-report .meta section{border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.kika-report .meta h3{margin:0 0 6px}
+.kika-report .meta dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0}
+.kika-report .meta dt{color:var(--muted)}.kika-report .meta dd{margin:0;overflow-wrap:anywhere}
+.kika-report details{border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:0 14px}
+.kika-report details>summary{cursor:pointer;padding:10px 0;font-weight:600}
+.kika-report details[open]>summary{border-bottom:1px solid var(--line);margin-bottom:8px}
+.kika-report .entry{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:6px 28px;
+border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:0 0 10px}
+.kika-report .entry:target{outline:2px solid var(--accent)}
+.kika-report .entry h3{margin:0 0 4px}.kika-report .entry p{margin:0;color:var(--muted);font-size:14px}
+.kika-report .entry ul{list-style:none;padding:0;margin:0}
+.kika-report .entry li{display:grid;grid-template-columns:104px 1fr;gap:10px;align-items:baseline;padding:4px 0}
+.kika-report .entry li+li{border-top:1px solid var(--line)}.kika-report .entry li .badge{justify-self:start}
+.kika-report .tol{border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 12px;background:var(--panel)}
+@media (max-width:760px){.kika-report .entry{grid-template-columns:1fr}
+.kika-report .entry li{grid-template-columns:1fr;gap:2px}}
+@media print{.kika-report nav.toc{display:none}.kika-report .wrap.tall{max-height:none}
+.kika-report .entry,.kika-report .group{break-inside:avoid}}
+@page{size:A4;margin:14mm 12mm}
+@media print{.kika-report{--fg:#1b1e24;--muted:#5f6672;--faint:#8a919c;--bg:#fff;--panel:#f6f7f9;--line:#e1e4e8;
+--accent:#2f5d8a;--fail:#b42318;--fail-bg:#fdecea;--fail-line:#f4b9b2;--warn:#9a5b00;--warn-bg:#fff4e0;
+--warn-line:#f2cd8d;--note:#3d5a80;--note-bg:#eaf1f8;--note-line:#bcd0e5;--pass:#1f7a4d;--pass-bg:#e8f5ee;
+--pass-line:#b5dcc6;--skip:#6b7280;--skip-bg:#f1f2f4;--skip-line:#d6d9de}.kika-report .mark{color:#fff}
+html,body{background:#fff}.kika-report *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.kika-report .wrap{overflow:visible}.kika-report thead th{position:static}
+.kika-report thead{display:table-header-group}.kika-report tr{break-inside:avoid}
+.kika-report details:not([open])::details-content{content-visibility:visible;display:block}
+.kika-report table{font-size:11.5px}.kika-report th,.kika-report td{padding:4px 6px}
+.kika-report thead th{white-space:normal;font-size:10px}}
 """
 
 
+def _e(value):
+    return _html.escape("" if value is None else str(value))
+
+
+def _badge(status):
+    return (f'<span class="badge {_CLASS[status]}"><span class="mark">{_MARK[status]}</span>'
+            f"{_LABEL[status]}</span>")
+
+
+def _html_table(head, rows, *, numeric=(), nowrap=(), css="", tall=False, classes=None):
+    th = "".join(f'<th{" class=n" if i in numeric else ""}>{_e(h)}</th>' for i, h in enumerate(head))
+    body = []
+    for k, row in enumerate(rows):
+        tds = []
+        for i, v in enumerate(row):
+            cls = (["n"] if i in numeric else []) + (["nw"] if i in nowrap else []) \
+                + ([classes(k, i)] if classes and classes(k, i) else [])
+            cell = v.html if isinstance(v, _Raw) else _e(v)
+            tds.append(f"<td{' class=' + chr(34) + ' '.join(cls) + chr(34) if cls else ''}>{cell}</td>")
+        body.append("<tr>" + "".join(tds) + "</tr>")
+    return (f'<div class="wrap{" tall" if tall else ""}"><table{" class=" + chr(34) + css + chr(34) if css else ""}>'
+            f"<thead><tr>{th}</tr></thead><tbody>{''.join(body)}</tbody></table></div>")
+
+
+class _Raw:
+    """A cell already rendered as HTML."""
+
+    def __init__(self, html):
+        self.html = html
+
+
 def _render_html(d, fragment=False, verbose=False):
-    e = _html.escape
-    m = d["material"]
-    title = f"{m.get('zsymam') or m.get('target')}, MAT {_s(m.get('mat'))}"
-    sections = list(_sections(d, verbose))
-    body = [f'<div class="kika-report"><h1>Resonance reconstruction: {e(title)}</h1>',
-            f'<p class="sub">kika {e(str(d["software"]["kika_version"]))}, engine '
-            f'{e(str(d["software"]["engine_version"]))}, {e(d["generated_utc"])}</p>',
-            "<nav>" + "".join(f'<a href="#kr-{sid}">{e(heading)}</a>' for sid, heading, *_ in sections) + "</nav>"]
-    for sid, heading, headers, rows, notes in sections:
-        body.append(f'<h2 id="kr-{sid}">{e(heading)}</h2>')
-        if headers is None and sid == "summary":
-            items = []
-            for a, b in rows:
-                cls = ""
-                if a == "Verdict":
-                    cls = ' class="ok"' if b.startswith("VERIFIED") else ' class="bad"'
-                elif a == "Evaluation's sums" and "disagrees" in b or a == "Negative values" and b != "none":
-                    cls = ' class="bad"'
-                items.append(f"<dt>{e(a)}</dt><dd{cls}>{e(b)}</dd>")
-            body.append('<dl class="summary">' + "".join(items) + "</dl>")
-        elif headers is None:
-            body.append('<dl class="grid">' + "".join(
-                f"<div><dt>{e(a)}</dt><dd>{_cell(b, a == 'SHA-256')}</dd></div>" for a, b in rows) + "</dl>")
-        elif rows:
-            head = "".join(f"<th>{e(h)}</th>" for h in headers)
-            trs = "".join("<tr>" + "".join(_td(c, h) for c, h in zip(r, headers)) + "</tr>" for r in rows)
-            body.append(f'<div class="wrap"><table><thead><tr>{head}</tr></thead><tbody>{trs}</tbody></table></div>')
-        else:
-            body.append('<p class="sub">(none)</p>')
-        if notes:
-            body.append("<ul>" + "".join(f"<li>{e(n)}</li>" for n in notes) + "</ul>")
-    body.append("</div>")
-    content = "<style>" + _CSS + "</style>" + "".join(body)
+    status, headline, detail = _verdict(d)
+    nuclide = _nuclide(d)
+    mat = _s(d["material"].get("mat"))
+    ev = d["evaluation"]
+    out = ['<div class="kika-report">',
+           '<p class="eyebrow">kika · cross-section reconstruction</p>',
+           f"<h1>{_e(nuclide)} <span class=\"muted\">· MAT {_e(mat)}</span></h1>",
+           f'<p class="sub">{_e(_library(ev))} · {_e(ev.get("file"))} · kika {_e(d["software"]["kika_version"])} · '
+           f'{_e(d["generated_utc"].replace("T", " ").replace("+00:00", " UTC"))}</p>',
+           f'<div class="verdict {_VERDICT[status][1]}"><span class="mark">{_MARK[status]}</span>'
+           f'<div><p class="big">{_e(headline)}</p><p>{_e(detail)}</p></div></div>']
+
+    flagged = [c for c in d["checks"] if c["items"]]
+    toc = [("checks", "Checks")] + ([("findings", "Findings")] if flagged else []) + [
+        ("done", "What was done"), ("reactions", "Reactions"), ("run", "Run details"),
+        ("about", "About the checks")]
+    out.append('<nav class="toc">' + "".join(f'<a href="#kr-{a}">{_e(t)}</a>' for a, t in toc) + "</nav>")
+
+    out.append('<h2 id="kr-checks">Checks</h2>')
+    out.append('<p class="lead">What was verified in this run. Each check is explained under '
+               '<a href="#kr-about">About the checks</a>.</p>')
+    out.append(_html_table(("Status", "Check", "Result"), [
+        (_Raw(_badge(c["status"])), _Raw(f'<a class="ttl" href="#kr-check-{c["id"]}">{_e(c["title"])}</a>'),
+         c["result"]) for c in d["checks"]], css="checks"))
+
+    if flagged:
+        out.append('<h2 id="kr-findings">Findings</h2>')
+        out.append('<p class="lead">The cases behind each warning or note, and what they mean.</p>')
+        for c in flagged:
+            out.append(f'<div class="group"><div class="ghead">{_badge(c["status"])}'
+                       f'<span class="ttl">{_e(c["title"])}</span>'
+                       f'<span class="muted">{len(c["items"])} case(s)</span></div>')
+            meaning = _CHECK[c["id"]].levels.get(c["status"])
+            if meaning:
+                out.append(f'<p class="muted">{_e(meaning)}</p>')
+            shown = c["items"][:8]
+            out.append('<ul class="items">' + "".join(f"<li>{_e(x)}</li>" for x in shown) + "</ul>")
+            if len(c["items"]) > len(shown):
+                out.append(f'<details><summary>Show the other {len(c["items"]) - len(shown)}</summary>'
+                           '<ul class="items">' + "".join(f"<li>{_e(x)}</li>" for x in c["items"][len(shown):])
+                           + "</ul></details>")
+            out.append("</div>")
+
+    out.append('<h2 id="kr-done">What was done</h2>')
+    out.append('<ol class="steps">' + "".join(f"<li>{_e(s)}</li>" for s in _steps(d)) + "</ol>")
+    if d["resonance_ranges"]:
+        out.append("<h3>Resonance ranges</h3>")
+        out.append(_html_table(("Energy range", "Kind", "Model", "Content", "How it was used", "ENDF"),
+                               [r[:5] + (_Raw(f'<span class="faint">{_e(r[5])}</span>'),) for r in _range_rows(d)],
+                               nowrap=(0, 1, 5)))
+    if d["sums"]["graph"]:
+        out.append("<h3>Totals rebuilt from their parts</h3>")
+        out.append(_html_table(("Total", "Sum of"), [(g["name"], g["parts_text"]) for g in d["sums"]["graph"]],
+                               nowrap=(0,)))
+
+    out.append('<h2 id="kr-reactions">Reactions</h2>')
+    out.append(f'<p class="lead">{_e(_TOLERANCE_NOTE.format(tol=_tolerance_text(d)))} '
+               "“Starts at” is the first energy with a non-zero cross section.</p>")
+    head, rows = _reaction_rows(d)
+    error_key = {"Table error": "tabulation_verification_max", "PENDF error": "publication_verification_max"}
+
+    def hot(k, i):
+        r = d["reactions"][k]
+        if head[i] in error_key:
+            return "hot" if (r[error_key[head[i]]] or 0) > 1 else None
+        return "flag" if head[i] == "Remark" and r["negatives"] else None
+    numeric = {i for i, h in enumerate(head) if h in ("MT", "Points", "Starts at", "Table error",
+                                                      "PENDF error", "Integral error")}
+    out.append(_html_table(head, rows, numeric=numeric, tall=True, classes=hot))
+
+    out.append('<h2 id="kr-run">Run details</h2>')
+    out.append('<div class="meta">' + "".join(
+        f"<section><h3>{_e(h)}</h3><dl>" + "".join(
+            f"<dt>{_e(a)}</dt><dd>{f'<code>{_e(b)}</code>' if a in ('SHA-256', 'File') else _e(b)}</dd>"
+            for a, b in items) + "</dl></section>" for h, items in _run_groups(d)) + "</div>")
+    out.append("<details><summary>Engine details: how the energy range was divided and refined</summary>")
+    out.append(_html_table(_SEGMENT_HEAD, _segment_rows(d, verbose), numeric=(2, 3, 4, 5), nowrap=(0,)))
+    out.append('<ul class="notes"><li>Each interval is refined independently; “Refinement passes” is how '
+               "many times its grid was subdivided, “Evaluations” how many times the physics was computed. "
+               "Intervals with no resonances keep the evaluation's own points.</li></ul>")
+    technical = _technical_notes(d)
+    if technical:
+        out.append('<h3>Notes from the resonance engine</h3><ul class="notes">'
+                   + "".join(f"<li><code>{_e(n)}</code></li>" for n in technical) + "</ul>")
+    out.append("</details>")
+    _, other = _conversion_scope(d)
+    if other:
+        out.append(f"<details><summary>{len(other)} message(s) about parts of the file the reconstruction "
+                   "does not use</summary>")
+        out.append('<p class="muted">Reading the whole evaluation also reports on data outside resonance '
+                   "parameters and cross sections. None of it affects these results.</p>")
+        out.append('<ul class="notes">' + "".join(f"<li>{_e(m)}</li>" for _, m in other) + "</ul></details>")
+
+    out.append('<h2 id="kr-about">About the checks</h2>')
+    out.append(f'<div class="tol"><strong>Tolerance.</strong> '
+               f"{_e(_TOLERANCE_NOTE.format(tol=_tolerance_text(d)))}</div>")
+    for c in CHECKS:
+        out.append(f'<div class="entry" id="kr-check-{c.id}"><div><h3>{_e(c.title)}</h3><p>{_e(c.what)}</p></div><ul>'
+                   + "".join(f"<li>{_badge(lv)}<span>{_e(c.levels[lv])}</span></li>"
+                             for lv in (PASS, NOTE, WARN, FAIL, SKIP) if lv in c.levels) + "</ul></div>")
+    out.append("</div>")
+    content = "<style>" + _CSS + "</style>" + "\n".join(out)
     if fragment:
         return content
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta name="color-scheme" content="light dark">'
-            f"<title>Reconstruction {e(title)}</title></head>"
-            f'<body style="margin:0;background:Canvas">{content}</body></html>')
-
-
-_NUMERIC = {"Points", "Iter", "Evaluations", "Refine max", "Verify max", "Jumps", "Integral diff",
-            "Max / budget", "Seconds", "Stated (b)", "Sum of parts (b)", "Reference (b)", "Serialized (b)",
-            "Exact (b)", "Tabulated (b)", "At E (eV)"}
-_RATIO = {"Refine max", "Verify max", "Max / budget"}
-_NOWRAP = {"E range (eV)", "Min dE/E", "Negative"}
-
-
-def _td(value, header):
-    cls = []
-    if header in _NUMERIC:
-        cls.append("num")
-    if header in _NOWRAP:
-        cls.append("e")
-    if header in _RATIO:
-        try:
-            if float(value) > 1:
-                cls.append("bad")
-        except ValueError:
-            pass
-    if header == "Negative" and value != "-":
-        cls.append("bad")
-    attr = f' class="{" ".join(cls)}"' if cls else ""
-    return f"<td{attr}>{_html.escape(str(value))}</td>"
-
-
-def _cell(value, code=False):
-    text = _html.escape(str(value))
-    return f"<code>{text}</code>" if code else text
+            f"<title>Reconstruction of {_e(nuclide)}</title></head>"
+            '<body style="margin:0;background:Canvas">' + content + "</body></html>")
 
 
 # --------------------------------------------------------------------------- helpers
@@ -670,6 +1129,12 @@ def _num(v):
         return None if v is None else float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _fm(ap):
+    """ENDF states radii in 10^-12 cm; one of those is 10 fm."""
+    ap = _num(ap)
+    return None if ap is None else 10 * ap
 
 
 def _int(v):
@@ -701,9 +1166,41 @@ def _ranges_text(mts):
     return " + ".join(runs)
 
 
-def _vers(ev):
-    n = ev.get("nver")
-    return None if n is None else f"v{n}"
+_ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"}
+
+
+def _library(ev):
+    """``ENDF/B-VIII.1``, ``JEFF-4.0``: the library as people write it."""
+    name, nver, lrel = ev.get("library"), ev.get("nver"), ev.get("lrel")
+    if not name:
+        return "-" if ev.get("nlib") is None else f"library NLIB={ev['nlib']}"
+    if nver is None:
+        return name
+    version = _ROMAN.get(nver, str(nver)) if name.startswith("ENDF/B") else str(nver)
+    return f"{name}-{version}" + (f".{lrel}" if lrel is not None else "")
+
+
+def _nuclide(d):
+    """``Fe-56``, ``Am-242m1``."""
+    m = d["material"]
+    target = m.get("target") or ""
+    match = re.fullmatch(r"([A-Za-z]+)(\d+.*)", target)
+    if match:
+        return f"{match[1]}-{match[2]}"
+    return target or (m.get("zsymam") or "-").replace(" ", "")
+
+
+def _who(row):
+    mt = row.get("mt")
+    if mt is None:
+        return row.get("name") or "-"
+    from kika._constants import MT_TO_REACTION
+    label = reaction_name(mt, MT_TO_REACTION)
+    return f"MT{mt} {label}" if label else f"MT{mt}"
+
+
+def _mtname(r):
+    return f"MT{r['mt']} {r['reaction']}" if r.get("reaction") else f"MT{r['mt']}"
 
 
 def _s(v):
@@ -711,21 +1208,62 @@ def _s(v):
 
 
 def _g(v):
-    return "-" if v is None else f"{float(v):.6g}"
+    """``1e-8``, not ``1e-08``."""
+    if v is None:
+        return "-"
+    return re.sub(r"e([+-])0*(\d)", lambda m: "e" + ("-" if m[1] == "-" else "") + m[2], f"{float(v):.6g}")
 
 
-def _E(v):
-    """Energies and cross sections: four significant figures, always scientific."""
-    return "-" if v is None else f"{float(v):.3e}"
+def _energy(v):
+    """An energy in the unit a reader expects: ``671.2 keV``, ``2.53e-2 eV``."""
+    if v is None:
+        return "-"
+    v = float(v)
+    a = abs(v)
+    if a >= 1e6:
+        return f"{v / 1e6:.4g} MeV"
+    if a >= 1e3:
+        return f"{v / 1e3:.4g} keV"
+    if a >= 0.1 or a == 0:
+        return f"{v:.4g} eV"
+    return f"{_g(float(f'{v:.3g}'))} eV"
 
 
-def _V(v):
-    """Compared cross sections: seven significant figures, so the difference shows."""
-    return "-" if v is None else f"{float(v):.6e}"
+def _span(a, b):
+    return f"{_energy(a)} – {_energy(b)}"
 
 
-def _rng(a, b):
-    return f"{_E(a)} – {_E(b)}"
+def _pct(ratio):
+    """An error as a share of the tolerance."""
+    if ratio is None:
+        return "-"
+    ratio = float(ratio)
+    if ratio == 0:
+        return "0"
+    if ratio < 1e-3:
+        return "< 0.1 %"
+    return f"{100 * ratio:.1f} %"
+
+
+def _rel(v):
+    """A relative difference: ``0.1 %``, ``3e-5 %``."""
+    if v is None:
+        return "-"
+    v = 100 * float(v)
+    if v == 0:
+        return "0"
+    if v < 1e-4:
+        return "< 0.0001 %"
+    return f"{v:.3g} %" if v >= 1e-3 else f"{_g(float(f'{v:.1g}'))} %"
+
+
+def _count(v):
+    return "-" if v is None else f"{int(v):,}"
+
+
+def _b(v):
+    """A cross section precise enough for a difference to show."""
+    return "-" if v is None else f"{float(v):.7g} b"
 
 
 def reaction_name(mt, known=None):
@@ -741,17 +1279,10 @@ def reaction_name(mt, known=None):
     return None
 
 
-def _r(v):
-    return "-" if v is None else f"{float(v):.3f}"
-
-
-def _e(v):
-    return "-" if v is None else f"{float(v):.1e}"
-
-
 def _ascii(text):
     text = str(text)
     text = text.translate(str.maketrans("₀₁₂₃₄₅₆₇₈₉³", "01234567893"))
-    for a, b in (("α", "a"), ("γ", "g"), ("σ", "sigma"), ("–", "-"), ("—", "-"), ("′", "'"), ("·", "*")):
+    for a, b in (("α", "a"), ("γ", "g"), ("Γ", "G"), ("σ", "sigma"), ("–", "-"), ("—", "-"), ("−", "-"),
+                 ("′", "'"), ("·", "*"), ("×", "x"), ("…", "..."), ("“", '"'), ("”", '"'), ("✓", "ok")):
         text = text.replace(a, b)
     return text.encode("ascii", "replace").decode("ascii")

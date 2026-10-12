@@ -374,3 +374,14 @@ def test_read_outputs_have_greek_letters_and_ascii_ones_do_not(ne20, tmp_path):
     report = check_covariance_library([NE20], progress=False)
     paths = report.write(tmp_path, level="note")
     assert all(p.read_bytes().isascii() for p in paths.values())
+
+
+def test_the_html_prints_light_on_a4_with_every_section_open(ne20):
+    """Printed (or saved as PDF) from a dark OS, the page keeps its light palette
+    and its coloured verdicts, tables do not clip, and folded tapes print open."""
+    html = ne20.to_html()
+    printed = html[html.index("@page"):]
+    assert "size:A4" in printed
+    assert "print-color-adjust:exact" in printed and "--bg:#fff" in printed
+    assert ".wrap{overflow:visible}" in printed
+    assert "::details-content{content-visibility:visible" in printed
