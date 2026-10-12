@@ -151,3 +151,22 @@ def test_urr_tables_on_a_whole_tape(cf252_b81_tape):
         assert table[row].shape == (ne, 20) and table[row].dtype == np.float64
     assert np.allclose(table["cdf"][:, -1], 1.0) and np.all(np.diff(table["cdf"], axis=1) >= 0)
     assert table["factors"] is True
+
+
+def test_a_daemonic_caller_runs_in_process(monkeypatch):
+    import multiprocessing
+    from kika.hdf5 import processing as hp
+
+    class Daemon:
+        daemon = True
+    seen = {}
+    real = hp._broadenAll
+
+    def spy(suite, temperatures, thnmax, options, workers, progress=None):
+        seen["workers"] = workers
+        return real(suite, temperatures, thnmax, options, workers, progress=progress)
+    monkeypatch.setattr(multiprocessing, "current_process", lambda: Daemon())
+    monkeypatch.setattr(hp, "_broadenAll", spy)
+    result = process_endf(TAPE, ProcessingPlan(temperatures=(600.0,)))
+    assert seen["workers"] == 1 and result.stage("broaden").status == "done"
+    assert result.plan.workers == 1

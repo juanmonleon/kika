@@ -520,9 +520,17 @@ def _urr(rec, plan, unresolved, report):
 
 def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
     """Process an ENDF-6 neutron tape stage by stage (see the module doc for
-    the stages, the progress calls and the failure contract)."""
+    the stages, the progress calls and the failure contract).
+
+    Called from a daemonic process, which may not start children, the
+    broadening and the URR tables run in this process (``workers=1``); the
+    results do not depend on the number of workers."""
+    import multiprocessing
+    from dataclasses import replace
     from .reconstruction import reconstruct_endf
     plan = ProcessingPlan() if plan is None else plan
+    if multiprocessing.current_process().daemon and plan.workers != 1:
+        plan = replace(plan, workers=1)
     report = (lambda stage, fraction: progress(stage, fraction)) if progress else (lambda *_: None)
     rec = reconstruct_endf(path, options=plan.reconstruction, progress=report)
 
