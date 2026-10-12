@@ -25,7 +25,7 @@ from matplotlib.colors import Normalize, TwoSlopeNorm
 from .styles import _isolated_rc
 from .heatmap_builder import HeatmapBuilder
 
-__all__ = ["heatmap_grid", "shared_norm"]
+__all__ = ["heatmap_grid", "grid_columns", "shared_norm"]
 
 
 def _limits(norm) -> Optional[Tuple[float, float]]:
@@ -76,8 +76,9 @@ def heatmap_grid(
         becomes the size of its cell; the first one's size and dpi are used for
         every cell so the grid stays regular.
     ncols : int, optional
-        Columns. Default: all panels on one row up to three, then two columns
-        for four, three beyond.
+        Columns. Default: :func:`grid_columns`, the most nearly square layout
+        (two panels side by side, three and four on two rows, up to nine on
+        three).
     shared_scale : bool
         Override each panel's normalisation with one covering them all
         (:func:`shared_norm`). A panel given an explicit ``norm=`` keeps it.
@@ -96,7 +97,7 @@ def heatmap_grid(
 
     n = len(builders)
     if ncols is None:
-        ncols = n if n <= 3 else (2 if n == 4 else 3)
+        ncols = grid_columns(n)
     ncols = max(1, min(int(ncols), n))
     nrows = math.ceil(n / ncols)
 
@@ -129,6 +130,16 @@ def heatmap_grid(
         fig.suptitle(title, y=1.0 + 0.1 / nrows, va="bottom",
                      fontsize=title_fontsize if title_fontsize is not None else "x-large")
     return fig
+
+
+def grid_columns(n: int) -> int:
+    """Columns for ``n`` panels, keeping the grid as close to square as it gets.
+
+    ``ceil(sqrt(n))``: 2 panels on one row, 3 and 4 in a 2 x 2, 5 and 6 on two
+    rows of three, 7 to 9 in a 3 x 3. A single row of more than two square
+    panels grows wide and short, and every panel shrinks with it.
+    """
+    return max(1, math.ceil(math.sqrt(n)))
 
 
 def _norm_kwargs(norm) -> dict:
