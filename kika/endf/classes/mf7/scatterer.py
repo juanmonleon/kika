@@ -89,6 +89,16 @@ def _name_from_zsymam(zsymam: str):
     return None
 
 
+def split_tsl_name(text: str):
+    """``('HinH2O', 'H', 'H2O')`` from ``H(H2O)``, ``Be_BeO`` or ``NinUN``; else ``None``.
+
+    The string-level rule :func:`thermal_scatterer` applies to ZSYMAM, public so
+    an index that reads only the header text (:mod:`kika.tsl`) names a tape the
+    same way the parsed object does.
+    """
+    return _name_from_zsymam(text) if text else None
+
+
 def _name_from_filename(source: Union[str, Path]) -> str:
     """``tsl-Be-metal.endf`` → ``Be-metal``; ``tsl_4-Be.txt`` → ``4-Be``."""
     return _FILENAME_PREFIX.sub("", Path(source).stem)

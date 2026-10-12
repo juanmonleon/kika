@@ -147,6 +147,12 @@ def _looksLikeAce(lines) -> bool:
     return True
 
 
+def _looksLikeAceThermal(lines) -> bool:
+    """An ACE thermal table names itself, not a ZA: ``h-h2o.80t``, ``grph.72t``."""
+    from kika.tsl.ace import looks_like_ace_thermal
+    return looks_like_ace_thermal(lines)
+
+
 def _looksLikeGnds(lines) -> bool:
     for line in lines:
         stripped = line.strip()
@@ -191,6 +197,10 @@ def sniff_format(path) -> str:
     if os.path.isdir(path):
         # A G4NDL library is the one format that is a directory. Recognised by
         # the two subdirectories the elastic reader needs, as the index is.
+        # Its ThermalScattering folder (Coherent/Incoherent/Inelastic) is one too.
+        from kika.tsl.g4ndl import g4ndl_thermal_root
+        if os.path.basename(os.path.normpath(path)) == "ThermalScattering" and g4ndl_thermal_root(path):
+            return "g4ndl"
         if all(os.path.isdir(os.path.join(path, "Elastic", sub))
                for sub in ("CrossSection", "FS")):
             return "g4ndl"
@@ -203,7 +213,7 @@ def sniff_format(path) -> str:
     lines = _headLines(path)
     if _looksLikeGnds(lines):
         return "gnds"
-    if _looksLikeAce(lines):
+    if _looksLikeAce(lines) or _looksLikeAceThermal(lines):
         return "ace"
     if _looksLikeEndf(lines):
         return "endf"
@@ -412,6 +422,16 @@ def _attachGndsCovariances(document, suite, report,
 
 def _readG4ndl(path, target):
     from kika.g4ndl import open as openLibrary
+    from kika.tsl.g4ndl import g4ndl_thermal_root, list_g4ndl_thermal
+
+    # A thermal material (``h_water``) of the ThermalScattering folder: a TSL
+    # suite at every temperature the folder holds.
+    thermal = g4ndl_thermal_root(path)
+    if thermal is not None and isinstance(target, str) and target in list_g4ndl_thermal(thermal):
+        from kika.tsl.g4ndl import read_g4ndl_thermal
+        from kika.tsl.processed import processed_suite
+        suite, _report = processed_suite(read_g4ndl_thermal(thermal, target))
+        return suite
 
     # No covariances to follow: nominal G4NDL carries none (roadmap §5 Fase 4).
     return openLibrary(path).read(target)
@@ -420,6 +440,13 @@ def _readG4ndl(path, target):
 def _readAce(path):
     from kika.ace.model_adapter.decode import decodeAce
     from kika.ace.parsers.parse_ace import read_ace
+
+    if _looksLikeAceThermal(_headLines(path, 1)):
+        # A thermal table (``.NNt``): S(alpha,beta) processed by ACER, a TSL suite.
+        from kika.tsl.ace import read_ace_thermal
+        from kika.tsl.processed import processed_suite
+        suite, _report = processed_suite(read_ace_thermal(path))
+        return suite
 
     ace = read_ace(str(path))
     from kika.ace.classes.photoatomic import PhotoatomicAce
