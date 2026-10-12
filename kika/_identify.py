@@ -50,7 +50,7 @@ KINDS = (
     "endf", "ace", "gnds", "g4ndl",
     "covfil", "coverx", "boxer",
     "sdf",
-    "mcnp-input", "mcnp-mctal",
+    "mcnp-input", "mcnp-mctal", "mcnp-meshtal",
     "serpent-input", "serpent-sens", "serpent-det", "serpent-res",
     "serpent-his", "serpent-dep",
     "njoy-input",
@@ -90,9 +90,15 @@ def identify(path) -> str:
     if _isBinary(raw):
         if _looksLikeCoverxBinary(raw):
             return "coverx"
+        if raw.startswith(_HDF5_SIGNATURE):
+            if _isMcnpMeshRuntape(path):
+                return "mcnp-meshtal"
+            raise UnknownFormatError(
+                f"{path} is HDF5 but not an MCNP runtape with /results/mesh_tally "
+                f"(FMESH out=xdmf), the only HDF5 file identify recognises")
         raise UnknownFormatError(
             f"{path} is binary and does not open with a Fortran record marker, "
-            f"so it is not a binary COVERX file, the only binary format kika reads"
+            f"so it is not a binary COVERX file, the only other binary format kika reads"
         )
 
     text = raw.decode("utf-8", errors="replace")
@@ -108,9 +114,12 @@ def identify(path) -> str:
             f"{path} is a thermal-scattering ACE table ({lines[0].split()[0]}); "
             f"kika's ACE reader reads continuous-energy tables only")
 
-    from .mcnp.detect_file_type import _is_mctal
-    if _is_mctal([ln for ln in lines[:20] if ln.strip()][:4]):
+    from .mcnp.detect_file_type import _is_mctal, _is_meshtal
+    head = [ln for ln in lines[:20] if ln.strip()]
+    if _is_mctal(head[:4]):
         return "mcnp-mctal"
+    if _is_meshtal(head[:6]):
+        return "mcnp-meshtal"
 
     serpent = _serpentOutputKind(lines)
     if serpent:
@@ -146,7 +155,7 @@ def identify(path) -> str:
 
     raise UnknownFormatError(
         f"{path} matched none of the formats kika reads ({', '.join(KINDS)}). "
-        f"Checked: GNDS XML, ACE header, MCTAL header, Serpent MATLAB output, SDF "
+        f"Checked: GNDS XML, ACE header, MCTAL and MESHTAL headers, Serpent MATLAB output, SDF "
         f"header, ENDF MAT/MF/MT columns, BOXER and COVERX headers, NJOY module "
         f"names, MCNP and Serpent input cards, CSV."
     )
@@ -155,6 +164,22 @@ def identify(path) -> str:
 # ----------------------------------------------------------------------
 # Binary
 # ----------------------------------------------------------------------
+
+_HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
+
+
+def _isMcnpMeshRuntape(path) -> bool:
+    """An MCNP 6.3+ HDF5 runtape holding FMESH results (``/results/mesh_tally``).
+
+    Opening the file reads only its metadata, not the datasets.
+    """
+    try:
+        import h5py
+        with h5py.File(path, "r") as h5:
+            return "results/mesh_tally" in h5
+    except (ImportError, OSError):
+        return False
+
 
 def _isBinary(raw: bytes) -> bool:
     """A NUL byte, or a head that is mostly not text.

@@ -1,0 +1,69 @@
+kika tally-format check, MCNP 6.1 (MESHTAL col + ij)
+c ======================= cells =======================
+1  1 -1.0    -1        imp:n=1   $ water sphere r=10
+2  2 -7.86    1 -2     imp:n=1   $ iron shell 10-20
+3  0          2 -3     imp:n=1   $ void 20-40
+4  0          3        imp:n=0
+
+c ======================= surfaces =======================
+1   so 10
+2   so 20
+3   so 40
+11  pz 0
+
+c ======================= data =======================
+mode n
+m1     1001.03c 2  8016.03c 1
+m2     26056.03c 1
+sdef   pos=5 -3 2 erg=d1
+sp1    -3 0.988 2.249
+nps    200000
+prdmp  2j 1
+c --- MCTAL tallies: every bin axis, with and without totals
+f1:n   2
+fc1    surface current, cosine and time bins with totals
+c1     -0.5 0 1 T
+t1     1e2 1e3 1e5 T
+f2:n   2
+fc2    surface flux, energy bins
+e2     0.1 1 20
+f4:n   1 2 (1 2) T
+fc4    cell flux, union bin, total over cells, two multiplier bins
+e4     0.1 1 20
+fm4    (1) (-1 1 102)
+f21:n  2
+fc21   surface current segmented by pz 0 with total
+fs21   -11 T
+f24:n  2
+fc24   cell flux, collision-count user bins with total
+ft24   inc
+fu24   0 1 2 10 T
+f5:n   25 0 0 1
+fc5    point detector
+e5     0.1 1 20
+f6:n   1 2
+fc6    energy deposition
+c --- TMESH 71: same 5x3x2 grid as FMESH 34 (same tracks, same values)
+tmesh
+  rmesh71:n flux
+  cora71 -30 4i 30
+  corb71 -30 2i 30
+  corc71 -30 1i 30
+endmd
+c --- FMESH
+fmesh34:n geom=xyz origin=-30 -30 -30
+          imesh=30 iints=5 jmesh=30 jints=3 kmesh=30 kints=2 
+fc34      rectangular, same grid as TMESH 71
+fmesh44:n geom=xyz origin=-30 -30 -30
+          imesh=30 iints=5 jmesh=30 jints=3 kmesh=30 kints=2
+          emesh=0.1 1 20 tmesh=1e2 1e3 1e5 
+fc44      rectangular, energy and time bins
+fmesh54:n geom=cyl origin=0 0 -30 axs=0 0 1 vec=1 0 0
+          imesh=10 20 iints=2 3 jmesh=60 jints=4 kmesh=0.25 1 kints=3 2
+          emesh=0.1 1 20 
+fm54      -1 2 102
+fc54      cylindrical, energy bins, reaction-rate multiplier
+fmesh64:n geom=cyl origin=0 0 -30 axs=0 0 1 vec=1 0 0
+          imesh=10 20 iints=2 3 jmesh=60 jints=4 kmesh=0.25 1 kints=3 2
+          tmesh=1e2 1e3 1e5 out=ij
+fc64      cylindrical, time bins

@@ -1,211 +1,109 @@
 Working with MCTAL Files
 ========================
 
-This tutorial covers how to use KIKA to work with MCNP MCTAL output files, including parsing, accessing tally data, data analysis, and visualization.
+This tutorial covers reading MCNP MCTAL files with KIKA: the file header, the
+tallies and their bins, totals, perturbations, the tally fluctuation chart and
+the KCODE records.
 
-Loading MCTAL Files
--------------------
-
-Start by loading a MCTAL file:
+Loading a MCTAL file
+--------------------
 
 .. code-block:: python
 
    import kika
-   import pandas as pd
-   import numpy as np
-   import matplotlib.pyplot as plt
-   from pathlib import Path
-   
-   # Parse a mctal file
+
    mctal = kika.read_mctal('path/to/mctalfile.m')
+   mctal            # one-line summary per tally
 
-MCTAL File Structure
---------------------
+   print(mctal.code, mctal.version, mctal.probid)
+   print(f"histories: {mctal.nps:.2e}, title: {mctal.title}")
+   print(mctal.tally_numbers)
 
-The parsed MCTAL file is represented by a ``Mctal`` object containing header information and tally data.
+Every tally type is read: cell and surface tallies, point and ring detectors
+(``F5``, which list no cells), radiographs (``FIR``/``FIC``/``FIP``), TMESH mesh
+tallies, any particle, and every bin card (``FS``, ``FM``, ``FT``/``FU``, ``C``,
+``E``, ``T``, ``CF``/``SF``, with or without total bins).
 
-.. code-block:: python
+Tallies
+-------
 
-   # The Mctal object itself provides a nicely formatted summary
-   mctal
-
-   # Display specific header information
-   print(f"Code: {mctal.code_name} {mctal.ver}")
-   print(f"Problem ID: {mctal.probid}")
-   print(f"Number of particle histories: {mctal.nps:.2e}")
-   print(f"Problem Title: {mctal.problem_id}")
-   
-   # Display tally information
-   print(f"Number of tallies: {mctal.ntal}")
-   print(f"Tally numbers: {mctal.tally_numbers}")
-
-Working with Tallies
---------------------
-
-Tallies are the main output of MCNP simulations. The ``Mctal`` class provides access to all tallies in the MCTAL file:
+A tally is indexed by its number:
 
 .. code-block:: python
 
-   # Get a list of all tally IDs
-   tally_ids = list(mctal.tally.keys())
-   print(f"Available tally IDs: {tally_ids}")
-   
-   # Access a specific tally
-   tally_id = tally_ids[0]  # Select first tally as example
-   tally = mctal.tally[tally_id]
-   
-   # Display the tally information
-   display(tally)
-   
-   # Display tally dimensions and structure
-   print(f"Tally name: {tally.name}")
-   print(f"Tally dimensions: {tally.get_dimensions()}")
-   
-   # Display energy bin structure if available
-   if tally.energies:
-       print("Energy bin boundaries:")
-       for i, energy in enumerate(tally.energies):
-           print(f"  Bin {i}: {energy:.6e} MeV")
+   tally = mctal[4]
+   tally            # <Tally 4 (cell flux, n) 'shell Detector': cell=1, energy=3+total>
 
-Converting to DataFrame
+   tally.kind       # 'cell flux'
+   tally.particles  # ['n']
+   tally.comment    # the FC card
+   tally.energies   # upper energy bounds, or None
+
+MCNP writes a tally as an eight-dimensional array over the bins ``f d u s m c e
+t`` (cells/surfaces/detectors, flagged/direct, user, segment, multiplier, cosine,
+energy, time). ``tally.result`` and ``tally.error`` hold that array exactly as
+written, **including** the total bins. ``tally.axes`` describes each axis.
+
+The labelled view is an xarray Dataset with one named dimension per axis the
+tally card binned, without the total bins:
+
+.. code-block:: python
+
+   ds = tally.to_xarray()
+   ds.result.sel(energy=1.0)          # energy coordinate = upper bin bound
+   ds.energy_low                      # lower bounds (first one is 0)
+
+   tally.to_dataframe()               # one row per bin
+
+Dimension names are ``cell``/``surface``/``detector`` (by tally type), ``flag``,
+``user``, ``segment``, ``multiplier``, ``cosine``, ``energy`` and ``time``. An
+axis with a single unlabelled bin (the flag axis without ``CF``/``SF``, a single
+``FM`` bin) is not a dimension. Radiograph grids appear as ``image_s`` and
+``image_t``; a TMESH tally is unfolded into ``cora``, ``corb`` and ``corc``.
+
+Totals
+------
+
+The total bins MCNP appends (``et``, ``tt``, ``st``, ...) are read with
+:meth:`~kika.mcnp.mctal.Tally.total`, which returns the same kind of Dataset
+over the remaining axes:
+
+.. code-block:: python
+
+   tally.total("energy")              # energy-integrated value per cell, segment...
+   tally.total("energy", "time")
+
+Perturbations
+-------------
+
+PERT results (``vals pert``) have the shape of the unperturbed tally. Pass the
+PERT card number to the same views:
+
+.. code-block:: python
+
+   len(tally.perturbations)
+   tally.to_xarray(perturbation=174)
+   tally.total("energy", perturbation=174)
+
+Tally fluctuation chart
 -----------------------
 
-For more advanced data analysis, KIKA allows you to convert tally data to pandas DataFrames:
+.. code-block:: python
+
+   tally.tfc.to_dataframe()           # nps, result, error, fom
+   tally.tfc.plot()                   # result, error and FOM against NPS
+
+KCODE
+-----
+
+A criticality run carries the cycle records:
 
 .. code-block:: python
 
-   # Convert tally to DataFrame
-   tally_df = tally.to_dataframe()
-   
-   # Display the DataFrame
-   display(tally_df)
-   
-   # For energy-integrated data (if available)
-   integral_df = tally.get_integral_energy_dataframe()
-   if not integral_df.empty:
-       print("Energy-integrated data as DataFrame:")
-       display(integral_df)
+   mctal.kcode.keff                   # final combined keff and its standard deviation
+   mctal.kcode.to_dataframe()         # one row per cycle, named columns
 
-Working with Multidimensional Data
-----------------------------------
+Mesh tallies
+------------
 
-KIKA supports multidimensional data analysis using xarray, which provides labeled N-dimensional arrays:
-
-.. code-block:: python
-
-   # Convert tally data to xarray Dataset
-   ds = tally.to_xarray()
-   display(ds)
-   
-   # Extracting slices of multidimensional data
-   dims = tally.get_dimensions()
-   print(f"Tally dimensions: {dims}")
-   
-   # Get a slice for a specific energy value
-   results, errors = tally.get_slice(energy=tally.energies[2])
-   print(f"Results for selected energy bin: {results}")
-   print(f"Errors for selected energy bin: {errors}")
-   
-   # Get a slice for a specific segment
-   results, errors = tally.get_slice(segment=1)  # Segment numbering starts at 0
-   print(f"Results for second segment: {results}")
-   print(f"Errors for second segment: {errors}")
-
-Working with Energy-Integrated Data
------------------------------------
-
-For tallies with energy bins, KIKA provides methods to access energy-integrated data:
-
-.. code-block:: python
-
-   # Get the energy-integrated data
-   integral_data = tally.get_integral_energy_data()
-   
-   # Display the energy-integrated data
-   print(f"Result: {integral_data['Result']}")
-   print(f"Error: {integral_data['Error']}")
-   
-   # Convert to DataFrame for tabular view
-   integral_df = tally.get_integral_energy_dataframe()
-   display(integral_df)
-
-Analyzing Tally Convergence
----------------------------
-
-Use TFC (Tally Fluctuation Chart) data to analyze tally convergence:
-
-.. code-block:: python
-
-   # Check if TFC data is available
-   if hasattr(tally, 'tfc_nps') and tally.tfc_nps and len(tally.tfc_nps) > 0:
-       print(f"Tally has {len(tally.tfc_nps)} TFC data points")
-       
-       # Show some TFC data values
-       print("Sample of TFC data:")
-       print(f"{'NPS':<12} {'Result':<15} {'Error':<10} {'FOM':<10}")
-       for i in range(min(5, len(tally.tfc_nps))):  # Show up to first 5 points
-           print(f"{tally.tfc_nps[i]:<12} {tally.tfc_results[i]:<15.6e} {tally.tfc_errors[i]:<10.6f} {tally.tfc_fom[i]:<10.2f}")
-       
-       # Plot TFC data using the built-in method
-       tally.plot_tfc_data(figsize=(15, 4))
-       
-       # Plot without error bars for clearer visualization
-       tally.plot_tfc_data(figsize=(15, 4), show_error_bars=False)
-   else:
-       print("No TFC data available for this tally.")
-
-Working with Perturbations
---------------------------
-
-MCNP perturbation data is stored in the MCTAL file for perturbed tallies:
-
-.. code-block:: python
-
-   # Find tallies with perturbation data
-   tallies_with_pert = [tid for tid in tally_ids if hasattr(mctal.tally[tid], 'perturbation') and mctal.tally[tid].perturbation]
-   
-   if tallies_with_pert:
-       # Get the first tally with perturbation data
-       tally_id = tallies_with_pert[0]
-       tally = mctal.tally[tally_id]
-       
-       # Display the perturbation collection
-       print(f"Perturbation collection for Tally {tally_id}:")
-       display(tally.perturbation)
-       
-       # Get list of perturbation IDs
-       pert_ids = list(tally.perturbation.keys())
-       
-       if pert_ids:
-           # Access a specific perturbation
-           pert_id = pert_ids[0]
-           pert = tally.perturbation[pert_id]
-           
-           # Display the perturbation details
-           display(pert)
-
-Converting Perturbation Data to DataFrames
-------------------------------------------
-
-For better analysis, perturbation data can be converted to pandas DataFrames:
-
-.. code-block:: python
-
-   if tallies_with_pert:
-       tally_id = tallies_with_pert[0]
-       tally = mctal.tally[tally_id]
-       
-       # Convert all perturbations to a DataFrame
-       pert_df = tally.perturbation.to_dataframe()
-       
-       print("All perturbations as DataFrame:")
-       display(pert_df)
-       
-       # Analyze a single perturbation
-       if pert_ids:
-           pert_id = pert_ids[0]
-           single_pert = tally.perturbation[pert_id]
-           single_df = single_pert.to_dataframe()
-           
-           print(f"Perturbation {pert_id} as DataFrame:")
-           display(single_df)
+FMESH results are not written to MCTAL; see :doc:`mesh_tallies`.
