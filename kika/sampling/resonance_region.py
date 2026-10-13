@@ -130,33 +130,44 @@ def spliceMF3(target: Path, donor: Path, out: Path) -> Path:
     Lines keep *target*'s record width and line ending; the MF1 directory is
     rebuilt, since the MT list and the line counts change.
     """
-    from kika.endf.utils import record_width
     from kika.endf.writers.update_directory import update_mf1_directory
 
     lines, newline = _readLines(Path(target))
     donorLines, _ = _readLines(Path(donor))
+    out = Path(out)
+    _write(out, splicedMF3Lines(lines, donorLines, donor), newline)
+    update_mf1_directory(str(out))
+    return out
+
+
+def splicedMF3Lines(lines: List[str], donorLines: List[str], donor="the donor") -> List[str]:
+    """:func:`spliceMF3` on lines (no terminators), before the directory rebuild."""
+    from kika.endf.utils import record_width
+
     width = record_width(lines)
     a, b = _mf3Span(lines)
     c, d = _mf3Span(donorLines)
     block = [line[:width] if width else line for line in donorLines[c:d]]
     if c == d:
         raise ValueError(f"{donor} has no MF3 to splice")
-    out = Path(out)
-    _write(out, lines[:a] + block + lines[b:], newline)
-    update_mf1_directory(str(out))
-    return out
+    return lines[:a] + block + lines[b:]
 
 
 def setLRP(path: Path, value: int) -> None:
     """Set MF1/451's LRP (L1 of its HEAD record) in place."""
     lines, newline = _readLines(Path(path))
+    _write(Path(path), withLRP(lines, value, path), newline)
+
+
+def withLRP(lines: List[str], value: int, path="the tape") -> List[str]:
+    """:func:`setLRP` on lines (no terminators); *lines* is changed in place."""
     for i, line in enumerate(lines):
         if line[70:75] == " 1451":
             lines[i] = line[:22] + f"{int(value):11d}" + line[33:]
             break
     else:
         raise ValueError(f"{path} has no MF1/451")
-    _write(Path(path), lines, newline)
+    return lines
 
 
 def reconstructedBase(source: Path, pendf: Path, out: Path) -> Path:

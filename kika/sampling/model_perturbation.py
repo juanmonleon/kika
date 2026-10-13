@@ -168,6 +168,12 @@ class AceOptions:
         Keep NJOY's input, output and listing beside the ACE. On by default:
         an ACE that came out wrong is diagnosed from the listing, and the run
         that produced it is the only chance to keep one.
+    fullAceListing
+        Let the second ACER pass print the whole table into the listing
+        (``iprint=1``). Off by default: that dump is the ACE itself in another
+        layout and made the listing ~120 MB per sample and temperature for
+        Fe-56, 97 % of it. The consistency checks are printed either way, and
+        the ACE and xsdir are byte for byte the same.
     """
 
     temperatures: Tuple[float, ...] = ()
@@ -176,6 +182,7 @@ class AceOptions:
     extensions: Optional[Tuple[str, ...]] = None
     njoyVersion: str = "NJOY 2016.78"
     keepNjoyFiles: bool = True
+    fullAceListing: bool = False
 
     def __post_init__(self) -> None:
         import os
@@ -212,7 +219,8 @@ class AceOptions:
         return {"temperatures": list(self.temperatures), "njoyExe": self.njoyExe,
                 "libraryName": self.libraryName,
                 "extensions": list(self.extensions) if self.extensions else None,
-                "njoyVersion": self.njoyVersion, "keepNjoyFiles": self.keepNjoyFiles}
+                "njoyVersion": self.njoyVersion, "keepNjoyFiles": self.keepNjoyFiles,
+                "fullAceListing": self.fullAceListing}
 
 
 @dataclass
@@ -632,7 +640,7 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
         raise ValueError("this realisation touches nothing; there is no delta")
 
     outPath = Path(outPath)
-    shutil.copyfile(sourcePath, outPath)
+    encodedSections = []
     for mf, mts in touched.items():
         if endfObj.get_file(mf) is None:
             raise ValueError(
@@ -680,13 +688,137 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
             else:
                 raise NotImplementedError(
                     f"no delta encoder for MF{mf}")
-            writer = ENDFWriter(str(outPath))
-            if not writer.replace_mt_section(encoded, mf_number=mf,
-                                             output_filepath=str(outPath),
-                                             update_directory=False):
-                raise RuntimeError(f"writing MF{mf}/MT{mt} of {outPath} failed")
+            encodedSections.append((mf, mt, encoded))
+
+    source = _tape(sourcePath)
+    if source.inMemory:
+        outPath.write_bytes(_deltaBytes(source, encodedSections, outPath))
+        return outPath
+    shutil.copyfile(sourcePath, outPath)
+    for mf, mt, encoded in encodedSections:
+        writer = ENDFWriter(str(outPath))
+        if not writer.replace_mt_section(encoded, mf_number=mf,
+                                         output_filepath=str(outPath),
+                                         update_directory=False):
+            raise RuntimeError(f"writing MF{mf}/MT{mt} of {outPath} failed")
     update_mf1_directory(str(outPath))
     return outPath
+
+
+class _Tape:
+    """A tape read once, as each of the file-based splice steps would read it.
+
+    A sample used to cost the tape's size in reads and writes several times
+    over: a copy, then per section a fresh ``ENDFWriter`` (one read, one write),
+    the directory rebuild (another of each), and for ACE two MF3 splices and an
+    LRP edit with a directory rebuild each. Each of those steps is a pure
+    function of the text it reads, so the run holds the text and composes them
+    in memory, writing every file once -- and the bytes are the ones the chain
+    of files produced, because each step is reproduced with the reading
+    convention it had: ``ENDFWriter``'s text-mode read (universal newlines),
+    the directory's ``newline=''`` read, and ``resonance_region``'s
+    ``splitlines``. Those agree on an ASCII tape free of the other characters
+    ``str.splitlines`` breaks at, and they need not otherwise -- nor do the
+    locale and UTF-8 codecs the steps used -- so any other tape goes the old way
+    (``inMemory`` is false).
+    """
+
+    _OTHER_BREAKS = (b"\x0b", b"\x0c", b"\x1c", b"\x1d", b"\x1e")
+
+    def __init__(self, raw: bytes):
+        self.raw = raw
+        self.inMemory = raw.isascii() and not any(c in raw for c in self._OTHER_BREAKS)
+        if not self.inMemory:
+            return
+        self.text = raw.decode("ascii")
+        firstLine = self.text.split("\n", 1)[0]
+        # kika.endf.utils.line_ending: whatever ends the first line.
+        self.newline = "\r\n" if firstLine.endswith("\r") and "\n" in self.text else "\n"
+        #: ``ENDFWriter``: text-mode ``readlines`` (universal newlines).
+        universal = self.text.replace("\r\n", "\n").replace("\r", "\n")
+        parts = universal.split("\n")
+        self.textLines = [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+        #: ``resonance_region._readLines``: no terminators.
+        self.plainLines = self.text.splitlines()
+        self._textIds = None
+
+    @property
+    def textIds(self):
+        """``parse_endf_id`` of every one of :attr:`textLines`, computed once."""
+        if self._textIds is None:
+            from kika.endf.utils import parse_endf_id
+
+            self._textIds = [parse_endf_id(line) for line in self.textLines]
+        return self._textIds
+
+
+#: Per process: ``(path, mtime, size) -> _Tape`` for the tapes every sample of
+#: a run starts from (the source, the original tape and RECONR's PENDF).
+_TAPES: Dict[Tuple[str, int, int], _Tape] = {}
+#: Per process: the original tape's LRP, read once.
+_LRPS: Dict[Tuple[str, int, int], int] = {}
+
+
+def _tapeKey(path) -> Tuple[str, int, int]:
+    stat = Path(path).stat()
+    return (str(Path(path).resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def _tape(path) -> _Tape:
+    key = _tapeKey(path)
+    if key not in _TAPES:
+        if len(_TAPES) >= 4:
+            _TAPES.clear()
+        _TAPES[key] = _Tape(Path(path).read_bytes())
+    return _TAPES[key]
+
+
+def _deltaBytes(source: _Tape, encodedSections, outPath: Path) -> bytes:
+    """What the copy, the per-MT ``replace_mt_section`` and the directory wrote."""
+    from kika.endf.utils import NonMonotonicTable, parse_endf_id
+    from kika.endf.writers.endf_writer import ENDFWriter
+    from kika.endf.writers.update_directory import rebuild_mf1_directory_lines
+
+    if not encodedSections:
+        # The copy, read back by the directory rebuild with newline=''.
+        lines, ids = source.text.splitlines(keepends=True), None
+    else:
+        lines, ids = source.textLines, source.textIds
+        for mf, mt, encoded in encodedSections:
+            writer = ENDFWriter.from_lines(lines, source.newline, str(outPath), ids=ids)
+            try:
+                replacement = writer.mt_replacement(encoded, mf)
+            except NonMonotonicTable:
+                raise  # as replace_mt_section does
+            except Exception as error:
+                raise RuntimeError(f"writing MF{mf}/MT{mt} of {outPath} failed: {error}") from error
+            if replacement is None:
+                raise RuntimeError(f"writing MF{mf}/MT{mt} of {outPath} failed")
+            start, end, section = replacement
+            lines = lines[:start] + section + lines[end + 1:]
+            ids = ids[:start] + [parse_endf_id(line) for line in section] + ids[end + 1:]
+        # Written with newline=<the tape's>, read back with newline=''. An id
+        # is the same either way once the record reaches column 75, the
+        # terminator being past what parse_endf_id reads; a shorter line is
+        # parsed again, since its length -- terminator included -- decides it.
+        lines = [line[:-1] + source.newline if line.endswith("\n") else line
+                 for line in lines]
+        ids = [old if len(line) >= 75 + len(source.newline) else parse_endf_id(line)
+               for old, line in zip(ids, lines)]
+    rebuilt = rebuild_mf1_directory_lines(lines, ids=ids)
+    if rebuilt is None:
+        return source.raw if not encodedSections else "".join(lines).encode("ascii")
+    return "".join(rebuilt).encode("ascii")
+
+
+def _splicedText(targetLines, newline: str, donorLines, donor) -> str:
+    """``resonance_region.spliceMF3``'s file, from lines already in memory."""
+    from kika.endf.writers.update_directory import rebuild_mf1_directory_lines
+    from kika.sampling.resonance_region import splicedMF3Lines
+
+    written = newline.join(splicedMF3Lines(targetLines, donorLines, donor)) + newline
+    rebuilt = rebuild_mf1_directory_lines(written.splitlines(keepends=True))
+    return written if rebuilt is None else "".join(rebuilt)
 
 
 def _emitWholeFile(suite, pset, outPath, fmt, mat=None) -> Path:
@@ -710,12 +842,31 @@ def _njoyInputs(deltaTape: Path, originalSource: Path, pendf: Path,
     :mod:`kika.sampling.resonance_region`.
     """
     from kika.endf import read_endf
-    from kika.sampling.resonance_region import _lrp, setLRP, spliceMF3
+    from kika.sampling.resonance_region import _lrp, setLRP, spliceMF3, withLRP
 
     workDir.mkdir(parents=True, exist_ok=True)
-    samplePendf = spliceMF3(pendf, deltaTape, workDir / "perturbed.pendf")
-    njoyEndf = spliceMF3(deltaTape, originalSource, workDir / "njoy-input.endf")
-    setLRP(njoyEndf, _lrp(read_endf(str(originalSource), mf_numbers=[1])) or 1)
+    samplePendf = workDir / "perturbed.pendf"
+    njoyEndf = workDir / "njoy-input.endf"
+    lrpKey = _tapeKey(originalSource)
+    if lrpKey not in _LRPS:
+        _LRPS[lrpKey] = _lrp(read_endf(str(originalSource), mf_numbers=[1])) or 1
+    lrp = _LRPS[lrpKey]
+
+    delta = _Tape(Path(deltaTape).read_bytes())
+    original, pendfTape = _tape(originalSource), _tape(pendf)
+    if not (delta.inMemory and original.inMemory and pendfTape.inMemory):
+        spliceMF3(pendf, deltaTape, samplePendf)
+        spliceMF3(deltaTape, originalSource, njoyEndf)
+        setLRP(njoyEndf, lrp)
+        return njoyEndf, samplePendf
+
+    samplePendf.write_bytes(_splicedText(pendfTape.plainLines, pendfTape.newline,
+                                         delta.plainLines, deltaTape).encode("ascii"))
+    spliced = _Tape(_splicedText(delta.plainLines, delta.newline, original.plainLines,
+                                 originalSource).encode("ascii"))
+    # setLRP: read back with splitlines, written with the first line's ending.
+    njoyEndf.write_bytes((spliced.newline.join(withLRP(spliced.plainLines, lrp, njoyEndf))
+                          + spliced.newline).encode("ascii"))
     return njoyEndf, samplePendf
 
 
@@ -752,6 +903,7 @@ def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
                     additional_suffix=f"{sample:04d}" if extension is None else None,
                     extension=extension, ace_dir=aceDir, xsdir_dir=aceDir,
                     njoy_files_dir=njoyDir if options.keepNjoyFiles else Path(scratch),
+                    acer_iprint=1 if options.fullAceListing else 0,
                 )
                 if pendfPath is None:
                     result = run_njoy(njoy_exe=options.njoyExe, endf_path=endfPath,

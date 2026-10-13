@@ -14,7 +14,7 @@ from .locale_guard import (
     read_listing,
 )
 from .templates import NJOY_INPUT_TEMPLATE, NJOY_INPUT_TEMPLATE_WITH_PENDF
-from kika.endf.read_endf import read_endf
+from kika.endf import open_endf
 from kika._constants import K_TO_SUFFIX, NDLIBRARY_TO_SUFFIX
 from kika._utils import MeV_to_kelvin
 
@@ -135,13 +135,20 @@ def _render_title(isotope_label: str, T: float, library_name: str, njoy_version:
     return f"{isotope_label} - {T:.1f} K - {library_name.upper()} ({njoy_version})"
 
 def _render_njoy_input(mat: int, T: float, title: str, suff: str = None,
-                       template: str = NJOY_INPUT_TEMPLATE) -> str:
+                       template: str = NJOY_INPUT_TEMPLATE, acer_iprint: int = 1) -> str:
     if suff is None:
         # Use helper function to get temperature suffix (without 'c')
         _, temp_suffix = _get_temperature_info(T)
         suff = temp_suffix
     # Fill the template with the run-specific parameters
-    return dedent(template).format(mat=mat, T=T, title=title, suff=suff)
+    deck = dedent(template).format(mat=mat, T=T, title=title, suff=suff)
+    if int(acer_iprint) != 1:
+        # The check pass's card is "iopt iprint itype suff": only iprint moves.
+        check_card = "\n 7 1 1 -1 /\n"
+        if deck.count(check_card) != 1:
+            raise ValueError("the deck's second ACER card is not the expected one")
+        deck = deck.replace(check_card, f"\n 7 {int(acer_iprint)} 1 -1 /\n")
+    return deck
 
 # ---- 2) Runner ----
 #: Re-runs when NJOY misread the deck; the same budget as RECONR's
@@ -218,6 +225,7 @@ def run_njoy(
     ace_dir: str | Path | None = None,
     xsdir_dir: str | Path | None = None,
     njoy_files_dir: str | Path | None = None,
+    acer_iprint: int = 1,
 ) -> dict:
     """
     Run NJOY once using the provided ENDF file and parameters.
@@ -241,6 +249,11 @@ def run_njoy(
     additional_suffix : str | None
         Optional additional suffix to add to filenames to prevent overwrites.
         If None and files exist, a unique suffix will be generated automatically.
+    acer_iprint : int
+        Print option of the second (check) ACER pass. ``1`` (the default)
+        prints the whole table into the listing -- ~120 MB for Fe-56; ``0``
+        keeps the consistency checks and drops the dump. The ACE and xsdir
+        are the same either way.
 
     Returns
     -------
@@ -251,8 +264,9 @@ def run_njoy(
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Parse ENDF file to get MAT and isotope information
-    endf = read_endf(str(endf_path))
+    # MAT, ZAID and the isotope come off the headers: open_endf indexes the
+    # tape without parsing it (the full parse was ~4 s of a Fe-56 sample).
+    endf = open_endf(str(endf_path))
     
     if endf.mat is not None:
         mat = endf.mat
@@ -312,7 +326,8 @@ def run_njoy(
         suff = temp_suffix
 
     title = _render_title(isotope_label=isotope_symbol, T=temp_K, library_name=library_name, njoy_version=njoy_version)
-    njoy_input = _render_njoy_input(mat=mat, T=temperature, title=title, suff=suff)
+    njoy_input = _render_njoy_input(mat=mat, T=temperature, title=title, suff=suff,
+                                    acer_iprint=acer_iprint)
 
     workdir = Path(tempfile.mkdtemp(prefix="njoy_", dir=output_dir))
 
@@ -390,6 +405,7 @@ def run_njoy_with_pendf(
     ace_dir: str | Path | None = None,
     xsdir_dir: str | Path | None = None,
     njoy_files_dir: str | Path | None = None,
+    acer_iprint: int = 1,
 ) -> dict:
     """Run NJOY against a pre-existing (typically perturbed) PENDF, skipping RECONR.
 
@@ -415,7 +431,7 @@ def run_njoy_with_pendf(
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    endf = read_endf(str(endf_path))
+    endf = open_endf(str(endf_path))  # headers only; see run_njoy
     if endf.mat is None:
         raise ValueError(f"Could not determine MAT number from ENDF file {endf_path}")
     if endf.zaid is None:
@@ -470,7 +486,7 @@ def run_njoy_with_pendf(
     )
     njoy_input = _render_njoy_input(
         mat=mat, T=temperature, title=title, suff=suff,
-        template=NJOY_INPUT_TEMPLATE_WITH_PENDF,
+        template=NJOY_INPUT_TEMPLATE_WITH_PENDF, acer_iprint=acer_iprint,
     )
 
     workdir = Path(tempfile.mkdtemp(prefix="njoy_pendf_", dir=output_dir))
