@@ -280,6 +280,9 @@ def test_gnds_has_a_heated_style_per_temperature(run, tmp_path):
     assert {"eval", "recon", "heated_000", "heated_001"} <= set(styles)
     assert [float(styles[l].temperature.value) for l in ("heated_000", "heated_001")] == list(TEMPERATURES)
     assert styles["heated_001"].derivedFrom == "recon"
+    # gnds.xsd requires a date on every style; the derived ones carry the day
+    # they were made (D38: the file FUDGE reads should also validate).
+    assert all(styles[l].date for l in ("eval", "recon", "heated_000", "heated_001"))
     elastic = next(r for r in back.reactions if r.ENDF_MT == 2)
     x, y = result.cross_sections(900)[2]
     from kika.hdf5.processing import _flatten
