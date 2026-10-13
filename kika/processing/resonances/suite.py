@@ -12,7 +12,7 @@ import re
 from types import MappingProxyType
 import numpy as np
 
-from .assemble import prepare_backgrounds
+from .assemble import BackgroundCurve, prepare_backgrounds
 from .breit_wigner import evaluate_bw
 from .prepare import evaluate_region, group_radii, group_knots, group_breaks, region_mts
 from .context import NeutronContext
@@ -500,7 +500,51 @@ def _exact_physical_block(region,context,e,work_bytes):
 #: Identifies the reconstruction physics, not the commit. Change it when a
 #: kernel, grid or publication change alters any reconstructed value, so
 #: caches keyed on it are invalidated exactly then.
-ENGINE_VERSION='kika-native-suite-1'
+#: 2: thresholds below the kinematic one are raised as RECONR does (D37).
+ENGINE_VERSION='kika-native-suite-2'
+
+
+def _target_awr(suite,context):
+    """Target/neutron mass ratio for kinematic thresholds: PoPs's (MF1's AWR), else the context's."""
+    try:
+        target=suite.PoPs[suite.target];neutron=suite.PoPs[suite.projectile]
+        if target.mass is not None and neutron.mass is not None:
+            return target.mass.convertedTo('amu').value/neutron.mass.convertedTo('amu').value
+    except KeyError:pass
+    return None if context is None else context.atomic_weight_ratio
+
+
+def _raise_thresholds(curves,entries,graph,awr):
+    """RECONR's threshold rule (``reconr.f90`` lunion), applied to exclusive leaves.
+
+    A reaction with ``thrx = -Q (A+1)/A > 0`` whose table starts below
+    ``sigfig(thrx, 7, +1)`` has its first energy raised to that value, and any
+    following energies the move overtakes are pushed up one place in the
+    seventh figure each. Evaluations round the threshold to seven figures and
+    sometimes round it down, which leaves the reaction open a few ppm below
+    the kinematic limit; ACER flags that as a threshold error. Values are kept,
+    only abscissae move. Sums are rebuilt from their leaves, so they follow.
+    Returns ``{key: (old, new)}`` for the report.
+    """
+    from .probability_tables import sigfig
+    changed={}
+    for key,cs in curves.items():
+        if key in graph:continue
+        channel=entries[key].outputChannel
+        q=None if channel is None else channel.Q
+        if q is None or q.value is None or q.value>=0:continue
+        if q.unit!='eV':raise UnsupportedResonanceError(f'reaction Q of {key.label} is not in eV')
+        if awr is None:raise ValueError('a threshold reaction needs the target mass (PoPs or NeutronContext)')
+        threshold=sigfig(-q.value*(awr+1)/awr,7,+1)
+        first=cs[0];x=list(first.x)
+        if x[0]>=threshold:continue
+        old=x[0];x[0]=threshold;i=0
+        while i+1<len(x) and x[i+1]<=x[i]:
+            if i>=10:raise ValueError(f'ill-behaved threshold for {key.label}')
+            x[i+1]=sigfig(x[i],7,+1);i+=1
+        curves[key]=(BackgroundCurve(tuple(x),first.y,first.law),)+tuple(cs[1:])
+        changed[key]=(float(old),float(threshold))
+    return changed
 
 
 def _resonance_mass(resonances,target_id):
@@ -576,6 +620,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             raise UnsupportedResonanceError('resonance backgrounds require modeled resonance regions',category='missing-resonance-regions')
     graph,order=_graph(entries,source_style)
     curves=_curves(forms)
+    raised=_raise_thresholds(curves,entries,graph,_target_awr(suite,context))
     mt_keys={}
     for key,r in entries.items():
         if r.ENDF_MT is not None:
@@ -726,6 +771,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         domain=(low,high),points=points,regions=checks,source_sum_error_ratios=source_balance,
         stored_points=sum(len(c.xs) for f in output.values() for c in (f.function1ds if isinstance(f,Regions1d) else [f])),
         source_sum_policy='derive-from-leaves',source_sum_discrepancies=source_worst,
+        raised_thresholds=MappingProxyType({key.label:v for key,v in raised.items()}),
         source_conversion_report=deepcopy(suite.report),
         resonance_partial_owners=MappingProxyType(physical_owners),
         source_style=source_style,source_style_labels=tuple(suite.styles.labels),
