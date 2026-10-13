@@ -289,8 +289,16 @@ def _evaluatedElastic(tsl, T: float, report, nmix: int = 1):
         match = [t for t in coherent.temperatures if abs(t - T) < 0.05]
         if not match:
             raise HDF5FormatError(f"the coherent elastic is not tabulated at {T} K")
-        edges, factors = _acerBraggEdges(coherent.braggEdges(), coherent.cumulativeS(match[0]),
-                                         float(inelasticEmax(tsl)), nmix)
+        if incoherent is not None:
+            # OpenMC from_njoy(use_endf_data=True) replaces a mixed elastic
+            # law from the evaluated source, including its coherent part.
+            # Keep all physical edges and factors rather than truncating and
+            # rounding this part through ACE's coherent-only serialization.
+            edges = np.asarray(coherent.braggEdges(), dtype=float)
+            factors = np.asarray(coherent.cumulativeS(match[0]), dtype=float) / nmix
+        else:
+            edges, factors = _acerBraggEdges(coherent.braggEdges(), coherent.cumulativeS(match[0]),
+                                             float(inelasticEmax(tsl)), nmix)
         coh = (m.CoherentElasticXS(braggEdges=edges, structureFactors=factors),
                m.CoherentElasticMC())
     if coh and inc:

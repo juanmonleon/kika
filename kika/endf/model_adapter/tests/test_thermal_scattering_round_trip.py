@@ -247,3 +247,20 @@ def test_thermal_processing_refuses_a_declared_but_missing_elastic_law(monkeypat
     monkeypatch.setattr(kika, "read", lambda *args, **kwargs: partial)
     with pytest.raises(HDF5FormatError, match="incomplete thermal"):
         processThermal(_DATA / "micro_tsl_sch4.endf", name="c_H_in_CH4_solid")
+
+
+
+def test_mixed_elastic_retains_evaluated_coherent_edges_and_zero_increments(monkeypatch):
+    from types import SimpleNamespace as NS
+    from kika.nuclear_data import model as m
+    import kika.hdf5.thermal_processing as processing
+    edges=np.array([.1,.2,5.]);factors=np.array([1.,1.,2.])
+    coherent=NS(temperatures=[300.],braggEdges=lambda:edges,cumulativeS=lambda T:factors)
+    incoherent=NS(debyeWaller=lambda T:2.,boundAtomCrossSection=NS(convertedTo=lambda u:NS(value=4.)))
+    monkeypatch.setattr(processing,"_law",lambda suite,cls:coherent if cls is m.CoherentElastic else incoherent)
+    def forbidden(*args,**kwargs):raise AssertionError("mixed elastic must retain evaluated factors")
+    monkeypatch.setattr(processing,"_acerBraggEdges",forbidden)
+    xs,distribution=processing._evaluatedElastic(NS(),300.,m.ConversionReport())
+    assert isinstance(xs,m.SumOfFunctions) and isinstance(distribution,m.MixedElasticMC)
+    assert np.array_equal(xs.functions[0].braggEdges,edges)
+    assert np.array_equal(xs.functions[0].structureFactors,factors)
