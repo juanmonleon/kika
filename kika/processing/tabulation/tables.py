@@ -45,8 +45,16 @@ class TabulationOptions:
     angularSeeds: int = 3
     #: Initial points of an outgoing-energy table refined from a law.
     energySeeds: int = 64
+    #: Splitting a joint MF6 density into marginal/conditional tables requires
+    #: tighter accuracy than an ordinary one-dimensional density, especially
+    #: for CM energy moments. These are caps; stricter rtol/atol still apply.
+    correlatedRtol: float = 1.0e-4
+    correlatedAtol: float = 1.0e-6
 
     def __post_init__(self):
+        if (not np.isfinite(self.correlatedRtol) or not np.isfinite(self.correlatedAtol)
+                or self.correlatedRtol < 0 or self.correlatedAtol < 0):
+            raise ValueError("correlated tolerances must be finite and nonnegative")
         if self.negative not in NEGATIVE_POLICIES:
             raise ValueError(f"negative must be one of {NEGATIVE_POLICIES}")
 

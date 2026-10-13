@@ -22,8 +22,8 @@ in kika-workspace):
   recoils for capture (``gheat``), particle emission up to the Coulomb barrier
   for absorption (``capdam``).
 
-The mean energies come from the processed suite's Monte Carlo tables -- the
-distributions OpenMC samples -- and not from re-reading each ENDF law: one
+The mean energies integrate the processed suite's Monte Carlo densities exactly
+for polynomial moments on flat/linear panels (including MF6), from the distributions OpenMC samples, rather than from re-reading each ENDF law: one
 integral over a tabulated density covers every MF4/MF5/MF6 law the
 tabulation produced. HEATR's own interpolation between nodes (×1.1 in
 ``disbar``) is not copied; the moments are interpolated between the tables'
@@ -62,8 +62,6 @@ HEATR_APPROXIMATIONS = (
     "compound nucleus' recoil E/(A+1), in the KERMA and in the damage (HEATR's output)",
     "damage of particle emission: capdam's single particle at min(Q + AE/(A+1), Coulomb "
     "barrier), deuterons and alphas of a continuum taken as protons",
-    "mean energy of a lab-frame MF6 spectrum by trapezoids over E'·f(E') (getsix), lower "
-    "than the exact mean of the density OpenMC samples on wide panels",
 )
 
 _GL4 = np.polynomial.legendre.leggauss(4)
@@ -238,6 +236,70 @@ def _meanMu(form, grid):
     return _onGrid(energies, [_expect(t, lambda m: m) for t in tables], grid, flat)
 
 
+def _unitBaseCMMean(form, grid, k):
+    """Integrate a continuous unit-base joint law, before the lab transformation.
+
+    A blend of moments is not the moment of a unit-base blend. Each source
+    density is mapped to the interpolated support. Substitution sqrt(E')
+    makes the square-root cross moment polynomial on every linear panel.
+    Interpolation of the resulting lab mean is refined on three interior
+    probes to 0.1 eV + 1e-7 times incident energy; this is a sampled criterion.
+    """
+    energies,tables,flat=_tables(form.energy)
+    if flat:return None
+    if any(getattr(t,"numberOfDiscrete",0) for t in tables):return None
+    angular=list(form.energyAngular.function2ds)
+    mus=[np.array([_expect(u,lambda x:x) for u in a.function1ds]) for a in angular]
+    means=[_expect(t,lambda e:e) for t in tables]
+    ranges=[(float(t.xs[0]),float(t.xs[-1]-t.xs[0])) for t in tables]
+    if any(w<=0 for _,w in ranges):return None
+    for t,mu in zip(tables,mus):
+        if len(mu)!=len(t.xs):raise ValueError("energy-angle grids differ in unit-base moment")
+    def at(E):
+        j=int(np.clip(np.searchsorted(energies,E,side="right")-1,0,len(energies)-1))
+        upper=min(j+1,len(energies)-1)
+        theta=(E-energies[j])/(energies[upper]-energies[j]) if upper!=j else 0.
+        theta=float(np.clip(theta,0,1));weights=(1-theta,theta)
+        qa=sum(w*ranges[i][0] for w,i in zip(weights,(j,upper)))
+        qw=sum(w*ranges[i][1] for w,i in zip(weights,(j,upper)))
+        mean=cross=0.
+        for weight,i in zip(weights,(j,upper)):
+            if weight==0:continue
+            a,width=ranges[i];table=tables[i];x=np.asarray(table.xs);p=np.asarray(table.pdf);mu=mus[i]
+            mapped=qa+qw*(x-a)/width
+            root=np.sqrt(np.maximum(mapped,0));left=root[:-1,None];right=root[1:,None]
+            nodes,ww=_GL4;r=(left+right)/2+(right-left)/2*nodes
+            original=a+(r*r-qa)*width/qw
+            frac=(original-x[:-1,None])/np.maximum(np.diff(x)[:,None],1e-300)
+            density=p[:-1,None]+np.diff(p)[:,None]*frac
+            angle=mu[:-1,None]+np.diff(mu)[:,None]*frac
+            norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
+            integral=float(np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle))/norm
+            cross+=weight*integral
+            mean+=weight*(qa+qw*(means[i]-a)/width)
+        boost=k.awp/(k.A+1)**2
+        return mean+boost*E+2*np.sqrt(boost*E)*cross
+    lo=max(float(np.min(grid)),float(energies[0]));hi=min(float(np.max(grid)),float(energies[-1]))
+    if hi<lo:return np.array([at(float(E)) for E in grid])
+    nodes=np.unique(np.r_[lo,energies[(energies>lo)&(energies<hi)],hi])
+    values=np.array([at(float(E)) for E in nodes])
+    for iteration in range(30):
+        additions=[]
+        for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
+            if b==a:continue
+            for fraction in (.25,.5,.75):
+                E=a+(b-a)*fraction;v=at(float(E))
+                if abs(v-(va+(vb-va)*fraction))>.1+1e-7*E:additions.append(E)
+        if not additions:break
+        if len(nodes)+len(additions)>20000:raise ValueError("unit-base mean refinement exceeds capacity")
+        nodes=np.unique(np.r_[nodes,additions]);values=np.array([at(float(E)) for E in nodes])
+    else:raise ValueError("unit-base mean refinement did not converge")
+    output=np.interp(grid,nodes,values)
+    outside=(grid<lo)|(grid>hi)
+    for index in np.flatnonzero(outside):output[index]=at(float(grid[index]))
+    return output
+
+
 def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
     """``⟨E'^moment⟩`` in the lab of one Monte Carlo form, on ``grid``."""
     from kika.nuclear_data import model as m
@@ -286,6 +348,17 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
         mean = _onGrid(energies, [_expect(t, lambda e: e ** moment,
                                           k.trapezoid and lab and moment == 1)
                                   for t in tables], grid, flat)
+        qualifier=getattr(energy,"interpolationQualifier",None)
+        if lab and str(getattr(qualifier,"value",qualifier))=="unitBase" and moment in (1,2) and not any(getattr(t,"numberOfDiscrete",0) for t in tables):
+            lower=np.array([float(t.xs[0]) for t in tables]);width=np.array([float(t.xs[-1]-t.xs[0]) for t in tables])
+            if np.all(width>0):
+                first=np.array([_expect(t,lambda e:e) for t in tables])
+                u1=_onGrid(energies,(first-lower)/width,grid,flat)
+                a=_onGrid(energies,lower,grid,flat);span=_onGrid(energies,width,grid,flat)
+                if moment==1:return a+span*u1
+                second=np.array([_expect(t,lambda e:e*e) for t in tables])
+                u2=_onGrid(energies,(second-2*lower*first+lower*lower)/(width*width),grid,flat)
+                return a*a+2*a*span*u1+span*span*u2
         if lab:
             return mean
         if moment != 1:
@@ -293,6 +366,10 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
         root = _onGrid(energies, [_expect(t, np.sqrt) for t in tables], grid, flat)
         return _cmToLab(grid, mean, root * _meanMu(form.angular, grid), k)
     if isinstance(form, m.EnergyAngularMC):
+        qualifier=getattr(form.energy,"interpolationQualifier",None)
+        if cm and moment==1 and str(getattr(qualifier,"value",qualifier))=="unitBase":
+            exact=_unitBaseCMMean(form,grid,k)
+            if exact is not None:return exact
         energies, tables, flat = _tables(form.energy)
         mean = _onGrid(energies, [_expect(t, lambda e: e ** moment, k.trapezoid and not cm)
                                   for t in tables], grid, flat)
@@ -624,9 +701,9 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         Q = float(reaction.outputChannel.Q.value or 0.0)
         Qbal = float(qm.get(mt, Q))
         mf6 = _statedInMF6(evaluation, mt)
-        k = _Kinematics(A=A, Q=Q, trapezoid=mf6)
+        k = _Kinematics(A=A, Q=Q)
         # A photon has no mass: a centre-of-mass photon spectrum is its lab one.
-        photon = _Kinematics(A=A, Q=Q, awp=0.0, trapezoid=mf6)
+        photon = _Kinematics(A=A, Q=Q, awp=0.0)
         neutrons, photons = [], []
         for product in reaction.outputChannel.products:
             if product.pid not in ("n", "photon"):
@@ -641,12 +718,9 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         deposit = grid + Qbal - emitted
         gammas = np.zeros(len(grid))
         exact = np.zeros(len(grid))
-        exactPhoton = _Kinematics(A=A, Q=Q, awp=0.0)
         for product, form in photons:
             y = _yield(product, grid)
             gammas = gammas + y * _meanEnergyOf(form, grid, photon)
-            exact = exact + (y * _meanEnergyOf(form, grid, exactPhoton) if mf6 else 0.0)
-        if not mf6:
             exact = gammas
         heavy = (_heavyProducts(reaction, evaluation, grid, A, Z, zaTarget or 1000 * Z, ed, notes)
                  if evaluation is not None and mt not in (2, 102) and not 51 <= mt <= 90 else None)

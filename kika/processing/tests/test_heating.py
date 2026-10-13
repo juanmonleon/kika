@@ -87,3 +87,47 @@ def test_photon_lines_ignore_the_frame_and_primaries_take_the_neutron_energy():
     primary = m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=2, energy=7.6e6,
                                                            atomicWeightRatio=55.454))
     assert np.allclose(H._meanEnergyOf(primary, E, k), 7.6e6 + 55.454 / 56.454 * E)
+
+
+def test_mf6_continuum_photon_balance_integrates_density_instead_of_trapezoids(monkeypatch):
+    # p(E') = 2(1-E') on [0,1]: <E'> = 1/3, while endpoint trapezoids give zero.
+    # This exercises the whole heating path with MF6 provenance and conservation.
+    from types import SimpleNamespace as NS
+    spectrum = m.XYs2d(function1ds=[_table([0., 1.], [2., 0.], 2.)])
+    form = m.Uncorrelated(energy=spectrum, productFrame=m.Frame.lab)
+    photon = NS(pid="photon", distribution=NS(forms={"MonteCarlo": form}))
+    rx = NS(ENDF_MT=91, outputChannel=NS(Q=NS(value=0.), products=[photon]))
+    suite = NS(reactions=[rx])
+    monkeypatch.setattr(H, "_yield", lambda product, grid: np.ones(len(grid)))
+    monkeypatch.setattr(H, "_statedInMF6", lambda evaluation, mt: True)
+    result = H.heatingOf(suite, np.array([2.]), {91: np.array([3.])}, awr=55., Z=26)
+    assert result.kerma[0] == pytest.approx(5.)
+    assert result.kermaLocal[0] == pytest.approx(6.)
+    assert result.perReaction[91][0][0] == pytest.approx(5./3.)
+
+
+def test_unit_base_cm_mean_comes_from_the_joint_law_not_blended_lab_moments():
+    energy=m.XYs2d(function1ds=[_table([0.,1.],[1.,1.],10.),_table([0.,4.],[.5,0.],20.)],
+                    interpolationQualifier=m.InterpolationQualifier.unitBase)
+    angular=[]
+    for E,width,mean_mu in ((10.,1.,.2),(20.,4.,.1)):
+        children=[_table([-1.,1.],[.5-1.5*mean_mu,.5+1.5*mean_mu],x) for x in (0.,width)]
+        angular.append(m.XYs2d(function1ds=children,outerDomainValue=E))
+    form=m.EnergyAngularMC(energy=energy,energyAngular=m.XYs3d(function2ds=angular),productFrame=m.Frame.centerOfMass)
+    # At E=15 the unit support has width 2.5. Its density is a half-mixture
+    # of a uniform and a triangular law; the joint angular first moments
+    # travel with each source component under that mapping.
+    cm=2.5*(.5+1./3.)/2
+    cross=np.sqrt(2.5)*(.2*2./3.+.1*8./15.)/2
+    expected=cm+15./9.+2*np.sqrt(15./9.)*cross
+    got=H._meanEnergyOf(form,np.array([15.]),H._Kinematics(A=2.,Q=0.))
+    assert got[0]==pytest.approx(expected,abs=1e-12)
+
+
+def test_unit_base_photon_moments_map_both_support_and_density():
+    energy=m.XYs2d(function1ds=[_table([0.,1.],[1.,1.],10.),_table([0.,4.],[.5,0.],20.)],
+                    interpolationQualifier=m.InterpolationQualifier.unitBase)
+    form=m.Uncorrelated(energy=energy,productFrame=m.Frame.lab)
+    k=H._Kinematics(A=2.,Q=0.,awp=0.)
+    assert H._meanEnergyOf(form,np.array([15.]),k)[0]==pytest.approx(2.5*(.5+1./3.)/2)
+    assert H._meanEnergyOf(form,np.array([15.]),k,moment=2)[0]==pytest.approx(2.5**2*(1./3.+1./6.)/2)

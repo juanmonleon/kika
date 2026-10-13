@@ -116,3 +116,11 @@ def test_energy_angular_legendre_becomes_mc():
     _assertTable(out.energy.function1ds[0])
     for t in out.energyAngular.function2ds[0].function1ds:
         _assertTable(t)
+
+
+@pytest.mark.parametrize('field', ['correlatedRtol', 'correlatedAtol'])
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -1.])
+def test_correlated_accuracy_cannot_be_silently_disabled_by_nonfinite_or_negative_values(field, value):
+    from kika.processing.tabulation.tables import TabulationOptions
+    with pytest.raises(ValueError, match='finite and nonnegative'):
+        TabulationOptions(**{field: value})
