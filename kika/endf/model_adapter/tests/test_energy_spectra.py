@@ -207,11 +207,35 @@ def _gndsTrip(suite, tmp_path):
     return kika.read(str(out)), out
 
 
+def _withoutEdgeSteps(walked):
+    """The walked tree with a step at either end of a table taken out.
+
+    O-17's MT16 weight starts ``(4390210, 0), (4390210, 0.5)``: a step on the
+    first point of its domain. GNDS has no spelling for a table whose x repeats
+    and FUDGE's reader refuses one, so the writer drops the point on the far
+    side of the domain edge, as FUDGE's own ENDF->GNDS does (D38). The function
+    on its domain is the same; that is what this test holds the trip to.
+    """
+    if isinstance(walked, dict):
+        walked = {key: _withoutEdgeSteps(value) for key, value in walked.items()}
+        xs, ys = walked.get("xs"), walked.get("ys")
+        if isinstance(xs, list) and isinstance(ys, list) and len(xs) > 2:
+            if xs[0] == xs[1]:
+                xs, ys = xs[1:], ys[1:]
+            if xs[-1] == xs[-2]:
+                xs, ys = xs[:-1], ys[:-1]
+            walked["xs"], walked["ys"] = xs, ys
+        return walked
+    if isinstance(walked, list):
+        return [_withoutEdgeSteps(value) for value in walked]
+    return walked
+
+
 @pytest.mark.parametrize("path, mt", [(RA223, 18), (O17, 16), (U233, 18), (AM241, 18)])
 def test_the_spectrum_survives_gnds(path, mt, tmp_path):
     suite = kika.read(str(path))
     back, _out = _gndsTrip(suite, tmp_path)
-    assert _walk(_energy(back, mt)) == _walk(_energy(suite, mt))
+    assert _walk(_energy(back, mt)) == _withoutEdgeSteps(_walk(_energy(suite, mt)))
 
 
 def test_watt_and_madland_nix_survive_gnds(tmp_path):

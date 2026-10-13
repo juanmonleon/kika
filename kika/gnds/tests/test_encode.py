@@ -611,24 +611,23 @@ def test_a_suite_holding_a_mixed_can_be_written_at_all(gnds_data_dir, tmp_path):
 
 
 #: The schema errors an **ENDF-decoded** suite still has, by kind. Measured
-#: 2026-08-17 at twelve and written down in `docs/library/library-gaps.md` D20; seven
-#: since the MF4 angular `axes`, the single-region containers and the evaluated
-#: style's domain landed. None of them is the deliberate empty
-#: `<distribution/>` the GNDS fixtures produce -- these are gaps in the
-#: ENDF -> model -> GNDS path itself.
+#: 2026-08-17 at twelve and written down in `docs/library/library-gaps.md` D20;
+#: seven once the MF4 angular `axes`, the single-region containers and the
+#: evaluated style's domain landed, and **one** since D38/D20b (2026-10-13).
 #:
-#: **Every survivor is now a decision rather than a defect**, which is what
-#: makes the count worth pinning instead of chasing to zero: what an ENDF
-#: `AUG-2018` becomes, what `genre` an ENDF output channel has, where a
-#: `scatteringRadius` goes when `RMatrixType` admits no such child (§4.1), and
-#: what an output channel with no products should say. The five that were
-#: writer defects are gone.
+#: The six that went were decisions, taken the way FUDGE's ENDF->GNDS takes
+#: them: EDATE becomes an `xs:date` (month and year, day 01); the range radius
+#: is not written under `RMatrix`, where the schema has no slot, when it equals
+#: the top-level one (and goes on the channels when it does not); a channel
+#: with no genre gets the one its MT implies; and a product with no
+#: multiplicity gets the count its MT implies, or `unspecified`.
+#:
+#: The survivor is the micro-tape's MT102, which has **no product at all**
+#: because the tape was cut without MF12: an output channel GNDS requires at
+#: least one product in, and nothing kika could write there without inventing
+#: it. On a complete tape (ENDF/B-VIII.1 Fe-56, U-235) the count is zero.
 ENDF_SCHEMA_GAPS = (
-    "Element 'evaluated', attribute 'date'",
-    "Element 'scatteringRadius': This element is not expected",
-    "Element 'outputChannel': The attribute 'genre' is required but missing",
     "Element 'products': Missing child element",
-    "Element 'multiplicity': Missing child element",
 )
 
 
@@ -645,7 +644,7 @@ def test_the_endf_decoded_suites_schema_errors_are_pinned(micro_tape, tmp_path):
     ``Isotropic2d`` -- so nothing ever validated a file written from an ENDF
     decode, which is the direction that had an invalid node in it.
 
-    Seven errors survive today and every one is a known ENDF->GNDS gap
+    One error survives and it is a known ENDF->GNDS gap
     (:data:`ENDF_SCHEMA_GAPS`). Pinned by count and kind, the same shape as the
     GNDS half: fixing one lowers the number and this test is what notices.
 
@@ -659,7 +658,55 @@ def test_the_endf_decoded_suites_schema_errors_are_pinned(micro_tape, tmp_path):
     unknown = [e for e in errors
                if not any(kind in e for kind in ENDF_SCHEMA_GAPS)]
     assert unknown == [], unknown
-    assert len(errors) == 7
+    assert len(errors) == 1
+
+
+def test_an_endf_decoded_suite_is_written_the_way_fudge_reads_it(micro_tape, tmp_path):
+    """D38, checked without FUDGE or ``xmllint``, so it runs everywhere.
+
+    Each assertion is one place FUDGE's reader stopped on a file kika wrote
+    from this tape (``test_fudge_in_the_loop`` runs FUDGE itself, where it is
+    installed): a ``resonanceReaction`` with no ``link``, a channel with no
+    ``channelSpin``, a ``spinGroup`` with no ``parity``, a ``scatteringRadius``
+    under ``RMatrix``, an ``XYs1d`` whose x repeats (the MT2 step), an outer
+    value stated twice (MF4's 3.905 MeV), an ``outputChannel`` with no
+    ``genre``, a ``multiplicity`` with nothing in it, and EDATE as free text.
+    """
+    path, _ = _write(kika.read(micro_tape, covariances=False), tmp_path)
+    root = ET.parse(path).getroot()
+
+    rm = root.find("resonances/resolved/RMatrix")
+    reactions = rm.findall("resonanceReactions/resonanceReaction")
+    assert [r.get("label") for r in reactions] == ["elastic", "capture"]
+    assert all(r.find("link") is not None for r in reactions)
+    assert rm.find("scatteringRadius") is None
+    assert all(c.get("channelSpin") for c in rm.iter("channel"))
+    assert all(g.get("parity") for g in rm.iter("spinGroup"))
+
+    for node in root.iter("XYs1d"):
+        xs = np.array(node.find("values").text.split()[0::2], dtype=float)
+        assert np.all(np.diff(xs) > 0), node.attrib
+    for container in root.iter("function1ds"):
+        outer = [float(c.get("outerDomainValue")) for c in container
+                 if c.get("outerDomainValue") is not None]
+        assert np.all(np.diff(outer) > 0)
+
+    assert all(c.get("genre") for c in root.iter("outputChannel"))
+    assert all(len(m) for m in root.iter("multiplicity"))
+    assert root.find("styles/evaluated").get("date") == "2018-08-01"
+
+
+@pytest.mark.parametrize("edate, date", [
+    ("EVAL-SEP13", "2013-09-01"), ("AUG-2018", "2018-08-01"),
+    ("Eval-Oct22", "2022-10-01"), ("EVAL-DEC97", "1997-12-01"),
+    ("2018-05-02", "2018-05-02"), ("", None), ("EVAL-", None)])
+def test_an_endf_edate_becomes_the_xs_date_fudge_writes(edate, date):
+    """FUDGE's ``getENDFDate`` rule (month and year, day 01), on the spellings
+    the libraries use; text with no month and year gives no date rather than
+    today's, which is what FUDGE falls back to."""
+    from kika.endf.model_adapter.decode import gndsDate
+
+    assert gndsDate(edate) == date
 
 
 #: D25. What is wrong with a ``covarianceSuite`` **written from an ENDF decode**,
