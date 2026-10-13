@@ -30,11 +30,12 @@ LAT, LASYM                             ``calculatedAtThermal``, ``symmetric = LA
 **Three departures from FUDGE, declared.** (1) Atom identities come from
 MF7/MT451 matched by mass, never from the tape's file name. (2) LI = 0 is not
 rewritten to 2 (FUDGE's JENDL-5 workaround); it is kept, because kika
-reproduces the tape. (3) LLN = 1 (ln S stored) is **refused by name** rather
-than exponentiated with its interpolation laws relabelled -- FUDGE's own FIXME
-calls that unverified, and no tape measured uses LLN = 1. A diffusive secondary
-(B(6i+1) = 2), and α grids that differ between β, are refused the same way.
-FUDGE refuses all three too.
+reproduces the tape. (3) LLN=1 is normalized to physical S only when its
+interpolation and range can be represented by a GNDS float64 grid. Laws on
+ln(S) are transformed explicitly; unsupported laws or ranges are refused.
+A diffusive secondary (B(6i+1)=2), and alpha grids that differ between beta,
+are refused as well. Normalized LLN1 exports as LLN0, preserving the physical
+function rather than the original storage convention.
 
 **Unchanged means byte for byte.** The bookkeeping GNDS has no node for -- the
 B array as written (B(5), and the exact digits of the scalars converted to bound
@@ -86,8 +87,8 @@ MF7_KEY = "mf7"
 MF7MT451_KEY = "mf7mt451"
 
 LLN_REFUSAL = (
-    "MF7/MT4 LLN=1 (ln S stored) is not read by kika: no evaluation measured "
-    "uses it, and FUDGE's reading of it is marked unverified by FUDGE itself"
+    "MF7/MT4 LLN=1 cannot be normalized when its interpolation or range is "
+    "not representable as a GNDS float64 grid of physical S"
 )
 
 _LABELS = {CoherentElastic: "coherent-elastic",
@@ -306,8 +307,9 @@ def _secondaryPid(index: int, awr: float, composition, used: set,
 
 def _decodeMT4(mt4, composition, principalName: Optional[str],
                report: ConversionReport):
-    if (mt4.lln or 0) != 0:
-        report.unsupportedNode(f"{LLN_REFUSAL}; the section is absent from the model")
+    lln = int(mt4.lln or 0)
+    if lln not in (0, 1):
+        report.unsupportedNode(f"MF7/MT4 LLN={lln} is not defined by ENDF-6")
         return None, None
     if not mt4.has_tabulated_s or not mt4.blocks:
         report.unsupportedNode(
@@ -340,14 +342,37 @@ def _decodeMT4(mt4, composition, principalName: Optional[str],
     values = np.asarray([[block.table.values[t] for block in mt4.blocks]
                          for t in range(len(temperatures))], dtype=float)
     li = list(first.li)
+    alphaInterp = [tuple(p) for p in first.interp]
+    betaInterp = [tuple(p) for p in mt4.beta_interp]
+    if lln == 1:
+        # ENDF-102 7.4.1: laws apply to the stored ln(S), so lin-lin
+        # becomes log-lin on S and lin-log becomes log-log on S.
+        mapping = {0: 0, 1: 1, 2: 4, 3: 5}
+        codes = [c for _, c in alphaInterp+betaInterp]+li
+        if any(c not in mapping for c in codes):
+            report.unsupportedNode("MF7/MT4 LLN=1: interpolation on ln(S) uses "
+                "a law outside flat/lin-lin/lin-log; it cannot be represented "
+                "exactly as a GNDS gridded3d of physical S")
+            return None, None
+        if (not np.isfinite(values).all() or np.any(values < np.log(np.finfo(float).tiny))
+                or np.any(values > np.log(np.finfo(float).max))):
+            report.unsupportedNode("MF7/MT4 LLN=1: S is outside the normal float64 "
+                "range; converting with exp would lose the logarithmic values")
+            return None, None
+        values = np.exp(values)
+        alphaInterp = [(n, mapping[c]) for n, c in alphaInterp]
+        betaInterp = [(n, mapping[c]) for n, c in betaInterp]
+        li = [mapping[c] for c in li]
+        report.warn("MF7/MT4 LLN=1 normalized to physical S with transformed "
+                    "interpolation laws; ENDF export uses LLN=0")
     axes = Axes([
         Grid(3, "temperature", "K", style=GridStyle.points,
              interpolation=_law(li[0]) if li and li[0] else _law(2), values=temperatures),
         Grid(2, "beta", "", style=GridStyle.points,
-             interpolation=_law(mt4.beta_interp[0][1]) if mt4.beta_interp else _law(2),
+             interpolation=_law(betaInterp[0][1]) if betaInterp else _law(2),
              values=betas),
         Grid(1, "alpha", "", style=GridStyle.points,
-             interpolation=_law(first.interp[0][1]) if first.interp else _law(2),
+             interpolation=_law(alphaInterp[0][1]) if alphaInterp else _law(2),
              values=alphas),
         Axis(0, "S_alpha_beta", ""),
     ])
@@ -405,9 +430,9 @@ def _decodeMT4(mt4, composition, principalName: Optional[str],
                                label=EVAL_LABEL,
                                calculatedAtThermal=(mt4.lat or 0) != 0)
     bookkeeping = {
-        "b": b, "lln": mt4.lln or 0, "lasym": mt4.lasym or 0, "lat": mt4.lat or 0,
-        "betaInterp": [tuple(p) for p in mt4.beta_interp],
-        "alphaInterp": [tuple(p) for p in first.interp],
+        "b": b, "lln": 0, "sourceLln": lln, "lasym": mt4.lasym or 0, "lat": mt4.lat or 0,
+        "betaInterp": betaInterp,
+        "alphaInterp": alphaInterp,
         "li": li, "t0": first.t0,
         "teffInterp": [[tuple(p) for p in t.interp] for t in teff],
         "scalars": _mt4Scalars(b, len(secondaries)),

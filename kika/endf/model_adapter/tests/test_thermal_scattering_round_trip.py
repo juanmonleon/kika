@@ -180,12 +180,52 @@ def test_the_model_fixed_point_through_a_whole_tape(tape, tmp_path):
             assert [x.pid for x in a.scatteringAtoms] == [x.pid for x in b.scatteringAtoms]
 
 
-def test_lln1_is_refused_by_name():
+def _logarithmic_tape():
     endf = read_endf(str(_DATA / "micro_tsl_sch4.endf"))
-    endf.mf[7].mt[4]._lln = 1
+    section = endf.mf[7].mt[4]
+    section._lln = 1
+    section.beta_interp = [(n, 2) for n, _ in section.beta_interp]
+    for block in section.blocks:
+        block.table.interp = [(n, 3) for n, _ in block.table.interp]
+        block.table.li = [2 for _ in block.table.li]
+        block.table.values = np.log(np.maximum(block.table.values, 1e-20)).tolist()
+    return endf
+
+
+def test_lln1_preserves_nodes_and_transforms_interpolation_on_physical_s():
+    endf = _logarithmic_tape()
     suite, report = decodeReactionSuite(endf)
-    assert any(LLN_REFUSAL in u for u in report.unsupported)
+    assert not any("LLN=1" in u for u in report.unsupported)
+    form = next(f for r in suite.reactions for f in r.doubleDifferentialCrossSection.forms.values()
+                if isinstance(f, IncoherentInelastic))
+    kernel = form.principal.selfScatteringKernel.kernel
+    expected = np.asarray([b.table.values for b in endf.mf[7].mt[4].blocks]).transpose(1,0,2)
+    np.testing.assert_allclose(kernel.values, np.exp(expected), rtol=2e-15)
+    assert str(kernel.grids[2].interpolation) == 'log-log'
+    assert str(kernel.grids[1].interpolation) == 'log-lin'
+    written, _ = _mf7(suite)
+    assert written[4].lln == 0
+    np.testing.assert_allclose(np.asarray([b.table.values for b in written[4].blocks]).transpose(1,0,2),
+                               kernel.values, rtol=2e-15)
+    assert written[4].blocks[0].table.interp[0][1] == 5
+    assert written[4].beta_interp[0][1] == 4
+
+
+def test_lln1_refuses_unrepresentable_interpolation_instead_of_guessing():
+    endf = _logarithmic_tape()
+    endf.mf[7].mt[4].blocks[0].table.interp = [(len(endf.mf[7].mt[4].blocks[0].table.x), 4)]
+    for block in endf.mf[7].mt[4].blocks[1:]:
+        block.table.interp = endf.mf[7].mt[4].blocks[0].table.interp.copy()
+    suite, report = decodeReactionSuite(endf)
+    assert any("LLN=1" in u and "interpolation" in u for u in report.unsupported)
     assert [r.ENDF_MT for r in suite.reactions] == [2]
+
+
+def test_lln1_refuses_underflow_instead_of_losing_logarithmic_data():
+    endf = _logarithmic_tape()
+    endf.mf[7].mt[4].blocks[0].table.values[0][0] = -1000.
+    _, report = decodeReactionSuite(endf)
+    assert any("LLN=1" in u and "range" in u for u in report.unsupported)
 
 
 def test_alpha_grids_that_differ_between_betas_are_refused():
@@ -195,3 +235,15 @@ def test_alpha_grids_that_differ_between_betas_are_refused():
     block.table.x = [x * 1.01 for x in block.table.x]
     _suite, report = decodeReactionSuite(endf)
     assert any("differ between beta" in u for u in report.unsupported)
+
+
+def test_thermal_processing_refuses_a_declared_but_missing_elastic_law(monkeypatch):
+    from types import SimpleNamespace
+    import kika
+    from kika.hdf5.thermal_processing import processThermal
+    from kika.hdf5.exceptions import HDF5FormatError
+    _, suite, _ = _load("sch4")
+    partial = SimpleNamespace(reactions=[r for r in suite.reactions if r.ENDF_MT != 2])
+    monkeypatch.setattr(kika, "read", lambda *args, **kwargs: partial)
+    with pytest.raises(HDF5FormatError, match="incomplete thermal"):
+        processThermal(_DATA / "micro_tsl_sch4.endf", name="c_H_in_CH4_solid")

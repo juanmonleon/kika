@@ -93,9 +93,17 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
                               f"{sorted(THERMAL_DATA)[:5]}...")
     entry = THERMAL_DATA[name]
     tsl = kika.read(str(thermal), covariances=False)
+    # The low-level ENDF reader can report a malformed MT2 and continue with
+    # MT4. A valid inelastic kernel must not hide the missing elastic physics.
+    if (_declaresElastic(thermal) and _law(tsl, m.CoherentElastic) is None
+            and _law(tsl, m.IncoherentElastic) is None):
+        raise HDF5FormatError("the evaluation declares MF7/MT2 but its elastic law "
+                              "was not decoded; refusing an incomplete thermal file")
     inelastic = _law(tsl, m.IncoherentInelastic)
     if inelastic is None:
-        raise HDF5FormatError("the thermal evaluation has no incoherent inelastic law")
+        issues = getattr(getattr(tsl, "report", None), "unsupported", [])
+        detail = "; decoder: " + "; ".join(issues[:3]) if issues else ""
+        raise HDF5FormatError("the thermal evaluation has no incoherent inelastic law" + detail)
     temps = [float(t) for t in (temperatures or _evaluationTemperatures(tsl))]
     awr = _principalAwr(tsl, inelastic)
     # The table's AWR is ACER's: the principal nuclide's, read from its neutron
@@ -289,6 +297,23 @@ def _evaluatedElastic(tsl, T: float, report, nmix: int = 1):
         return (m.SumOfFunctions(functions=[coh[0], inc[0]]),
                 m.MixedElasticMC(coherent=coh[1], incoherent=inc[1]))
     return coh or inc or (None, None)
+
+
+def _declaresElastic(path) -> bool:
+    """Presence of MF7/MT2 in an ENDF source, only as a completeness guard.
+
+    Numerical values still come exclusively from the model. GNDS sources
+    have no ENDF directory and are not scanned as ENDF records.
+    """
+    with open(path, errors="replace") as handle:
+        first = handle.readline()
+        if first.lstrip("\ufeff \t\r\n").startswith("<"):
+            return False
+        for line in handle:
+            if (len(line) >= 75 and line[70:72].strip() == "7"
+                    and line[72:75].strip() == "2"):
+                return True
+    return False
 
 
 def _matOf(path) -> int:
