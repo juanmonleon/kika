@@ -9,8 +9,9 @@ in kika-workspace):
 - **energy balance** (MT301): a reaction deposits ``E + Q_M − Σ_n y_n Ē_n −
   Σ_γ y_γ Ē_γ`` -- everything but the neutrons and photons it emits (HEATR's
   ``nheat`` and then ``gheat``, ``local = 0``). Capture is the exception: with
-  its photons known, MT301 keeps only the recoil,
-  ``E/(A+1) + Σ_γ y_γ ⟨E_γ²⟩/(2(A+1)m_nc²)``.
+  its photons known, MT301 follows the stated capture branch: independent
+  cascade-photon kicks, or for an explicit two-body primary photon the
+  compound recoil ``E/(A+1)`` plus its fixed binding-energy kick.
 - **MT901** is MT301 plus the energy of the photons emitted, ``Σ_γ y_γ Ē_γ`` --
   what OpenMC's files carry (measured on Fe-56: at thermal 901 − 301 is the
   capture photons' 7.489 MeV, where HEATR's ``local = 1`` balance would give
@@ -23,7 +24,8 @@ in kika-workspace):
   for absorption (``capdam``).
 
 The mean energies integrate the processed suite's Monte Carlo densities exactly
-for polynomial moments on flat/linear panels (including MF6), from the distributions OpenMC samples, rather than from re-reading each ENDF law: one
+for polynomial moments on flat/linear panels (including MF6), from the
+distributions OpenMC samples, rather than from re-reading each ENDF law: one
 integral over a tabulated density covers every MF4/MF5/MF6 law the
 tabulation produced. HEATR's own interpolation between nodes (×1.1 in
 ``disbar``) is not copied; the moments are interpolated between the tables'
@@ -58,7 +60,7 @@ FISSION_MTS = (18, 19, 20, 21, 38)
 HEATR_APPROXIMATIONS = (
     "damage of the continuum neutron emission: one isotropic emission in the lab, the "
     "target's Z and A for the recoil (HEATR's tabdam)",
-    "capture: the recoil of each photon on its own, Σ y⟨E_γ²⟩/(2(A+1)m_nc²), without the "
+    "capture cascades: the recoil of each photon on its own, Σ y⟨E_γ²⟩/(2(A+1)m_nc²), without the "
     "compound nucleus' recoil E/(A+1), in the KERMA and in the damage (HEATR's output)",
     "damage of particle emission: capdam's single particle at min(Q + AE/(A+1), Coulomb "
     "barrier), deuterons and alphas of a continuum taken as protons",
@@ -657,6 +659,43 @@ def _particleDamage(form, grid, k, zp, ap, Z, A, ed):
 # The whole suite
 # ----------------------------------------------------------------------
 
+def _twoBodyCapture(photons, evaluation, grid, A):
+    """HEATR hgam102: compound recoil plus a discrete photon's fixed kick.
+
+    This is the explicitly declared two-body capture photon (MF6 LAW2),
+    not the MF12/13 gamma-cascade approximation. The line binding energy
+    comes from the processed physical distribution, never raw sidecars.
+    """
+    from kika.nuclear_data import model as m
+    source = evaluation.findReactionByENDF_MT(102) if evaluation is not None else None
+    if source is None or len(photons) != 1:
+        return None
+    original = next((p for p in source.outputChannel.products if p.pid == "photon"), None)
+    forms = getattr(getattr(original, "distribution", None), "forms", {})
+    evaluated = forms.get("eval") or (next(iter(forms.values())) if forms else None)
+    if not isinstance(evaluated, m.AngularTwoBody):
+        return None
+    product, form = photons[0]
+    if not isinstance(form, m.Uncorrelated):
+        raise ValueError("two-body capture photon has no uncorrelated line distribution")
+    if isinstance(form.energy, m.DiscretePhotonEnergy):
+        if form.energy.primaryFlag != 2:
+            raise ValueError("two-body capture photon must be a primary line")
+        binding = float(form.energy.energy)
+    else:
+        energies, tables, flat = _tables(form.energy)
+        if not tables or any(getattr(t, "numberOfDiscrete", 0) != 1 or len(t.xs) != 1 for t in tables):
+            raise ValueError("two-body capture requires exactly one discrete photon line")
+        binding = float(tables[0].xs[0]) - A / (A + 1) * energies[0]
+        predicted = binding + A / (A + 1) * np.asarray(energies)
+        if not np.allclose([t.xs[0] for t in tables], predicted, rtol=1e-6, atol=1e-6):
+            raise ValueError("two-body capture line does not follow the declared primary kinematics")
+    if not np.isfinite(binding) or binding <= 0:
+        raise ValueError("two-body capture binding energy must be positive and finite")
+    return _yield(product, grid) * (grid / (A + 1) + binding * binding /
+                                   (2 * NEUTRON_REST_ENERGY * (A + 1)))
+
+
 def _statedInMF6(evaluation, mt) -> bool:
     """The evaluation states this reaction's products in MF6 (its ENDF provenance says so)."""
     if evaluation is None:
@@ -700,7 +739,6 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         s = np.asarray(sigma[mt], dtype=float)
         Q = float(reaction.outputChannel.Q.value or 0.0)
         Qbal = float(qm.get(mt, Q))
-        mf6 = _statedInMF6(evaluation, mt)
         k = _Kinematics(A=A, Q=Q)
         # A photon has no mass: a centre-of-mass photon spectrum is its lab one.
         photon = _Kinematics(A=A, Q=Q, awp=0.0)
@@ -740,6 +778,11 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             # resonances (1.15, 73, 106 keV) the official MT301 is short of
             # E/(A+1)·σ_γ to the eV, though gheat's code reads as if it kept it.
             carried = second / (2.0 * tm)
+            twoBodyCapture = _twoBodyCapture(photons, evaluation, grid, A)
+            if twoBodyCapture is not None:
+                carried = twoBodyCapture
+                notes.append("MT102: explicit two-body primary photon; compound recoil "
+                             "plus fixed photon kick as HEATR hgam102")
         else:
             carried = deposit - gammas
         live = s > 0
@@ -754,7 +797,12 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             d = _twoBodyDamage(neutrons[0][1], grid, A, Q, Z, ed, elastic=(mt == 2)) if neutrons \
                 else np.zeros(len(grid))
         elif mt == 102:
-            d = _captureDamage(photons, grid, A, Z, ed, Q)
+            if photons and twoBodyCapture is not None:
+                y = _yield(photons[0][0], grid)
+                recoil = np.divide(carried, y, out=np.zeros_like(carried), where=y > 0)
+                d = y * lindhard(recoil, Z, A + 1, Z, A, ed)
+            else:
+                d = _captureDamage(photons, grid, A, Z, ed, Q)
         elif heavy is not None:
             d = heavy[1]
         elif neutrons:

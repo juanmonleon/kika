@@ -61,14 +61,69 @@ def _linlinXY(function):
     return lx, ly, False
 
 
+def _legendreMoments(coefficients, negative):
+    """Exact polynomial integrals, split at real roots for positive clipping."""
+    from numpy.polynomial import Legendre
+    c = np.asarray(coefficients, dtype=float)
+    law = Legendre(c * (2*np.arange(len(c))+1)/2)
+    roots = law.roots()
+    real = np.real(roots[np.abs(np.imag(roots)) < 1e-10])
+    edges = np.unique(np.r_[-1., real[(real > -1) & (real < 1)], 1.])
+    values = np.zeros(3)
+    mu = Legendre([0., 1.])
+    for a, b in zip(edges[:-1], edges[1:]):
+        if law((a+b)/2) < 0:
+            if negative == "raise":
+                raise ValueError("angular Legendre law has a negative interval")
+            continue
+        for power in range(3):
+            integral = (law * mu**power).integ()
+            values[power] += integral(b)-integral(a)
+    if not np.isfinite(values).all() or values[0] <= 0:
+        raise ValueError("angular Legendre law has no positive finite integral")
+    return values[1:]/values[0]
+
+
+def _tableMoments(table):
+    a, b = np.asarray(table.xs[:-1]), np.asarray(table.xs[1:])
+    pa, pb = np.asarray(table.pdf[:-1]), np.asarray(table.pdf[1:])
+    dx = b-a
+    first = np.sum(dx*(pa*(2*a+b)+pb*(a+2*b))/6)
+    second = np.sum(dx*(pa*(3*a*a+2*a*b+b*b)+pb*(a*a+2*a*b+3*b*b))/12)
+    return np.array([first, second])
+
+
 def muTable(function, options: TabulationOptions, outer=None, what="angular"):
     """One P(mu) (Legendre or tabulated) → ``(Xs_pdf_cdf1d, clipped)``."""
     m = _m()
     if isinstance(function, m.Legendre):
         density = legendreDensity(function.coefficients)
         seeds = np.linspace(-1.0, 1.0, max(3, options.angularSeeds))
+        target = _legendreMoments(function.coefficients, options.negative)
         mu, p = refine(density, seeds, options)
-        return pdfTable(mu, p, options=options, outer=outer, what=what)
+        for iteration in range(30):
+            table, clipped = pdfTable(mu, p, options=options, outer=outer, what=what)
+            if np.all(abs(_tableMoments(table)-target) <= options.angularMomentAtol):
+                return table, clipped
+            # A midpoint-only density check can miss cancellations in a
+            # higher-order polynomial. Probe three interior fractions and
+            # refine panels with the largest integrated shape discrepancy.
+            fraction = np.array([.25, .5, .75])
+            width = np.diff(mu)
+            probes = mu[:-1,None] + width[:,None]*fraction
+            actual = np.maximum(density(probes), 0.)
+            endpoints = np.maximum(p, 0.)
+            chord = endpoints[:-1,None] + np.diff(endpoints)[:,None]*fraction
+            score = width*np.max(abs(actual-chord), axis=1)
+            available = options.maxPoints-len(mu)
+            if available <= 0:
+                raise ValueError("angular moment refinement exceeds maxPoints")
+            order = np.argsort(score)[::-1]
+            count = max(1, int(np.searchsorted(np.cumsum(score[order]), .5*score.sum()))+1)
+            selected = order[:min(count, available)]
+            mu = np.sort(np.r_[mu, (mu[selected]+mu[selected+1])/2])
+            p = density(mu)
+        raise ValueError("angular moment refinement did not converge")
     x, y, histogram = _linlinXY(function)
     return pdfTable(x, y, histogram=histogram, options=options, outer=outer, what=what)
 

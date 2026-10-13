@@ -50,11 +50,16 @@ class TabulationOptions:
     #: for CM energy moments. These are caps; stricter rtol/atol still apply.
     correlatedRtol: float = 1.0e-4
     correlatedAtol: float = 1.0e-6
+    #: Absolute error in normalized first and second moments of a Legendre
+    #: angular law (after the explicitly selected negative-density policy).
+    angularMomentAtol: float = 1.0e-5
 
     def __post_init__(self):
         if (not np.isfinite(self.correlatedRtol) or not np.isfinite(self.correlatedAtol)
                 or self.correlatedRtol < 0 or self.correlatedAtol < 0):
             raise ValueError("correlated tolerances must be finite and nonnegative")
+        if not np.isfinite(self.angularMomentAtol) or self.angularMomentAtol < 0:
+            raise ValueError("angular moment tolerance must be finite and nonnegative")
         if self.negative not in NEGATIVE_POLICIES:
             raise ValueError(f"negative must be one of {NEGATIVE_POLICIES}")
 

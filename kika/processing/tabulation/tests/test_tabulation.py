@@ -124,3 +124,35 @@ def test_correlated_accuracy_cannot_be_silently_disabled_by_nonfinite_or_negativ
     from kika.processing.tabulation.tables import TabulationOptions
     with pytest.raises(ValueError, match='finite and nonnegative'):
         TabulationOptions(**{field: value})
+
+
+
+def test_angular_moment_control_matches_clipped_polynomial_integrals():
+    from kika.processing.tabulation.angular import muTable, _tableMoments
+    # p(mu)=1.5*mu, clipped positive on [0,1], with moments 2/3 and 1/2.
+    form = m.Legendre(coefficients=[0., 1.])
+    table, clipped = muTable(form, TabulationOptions(angularMomentAtol=1e-6))
+    assert clipped
+    assert np.allclose(_tableMoments(table), [2/3, 1/2], rtol=0, atol=1e-6)
+
+
+def test_angular_moment_control_detects_hidden_negative_interval():
+    from kika.processing.tabulation.angular import muTable
+    # p(mu)=.5 + 1.2 P2(mu), positive at +/-1, negative near zero.
+    with pytest.raises(ValueError, match="negative interval"):
+        muTable(m.Legendre(coefficients=[1., 0., .48]), TabulationOptions(negative="raise"))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.])
+def test_angular_moment_tolerance_is_validated(value):
+    with pytest.raises(ValueError, match="angular moment tolerance"):
+        TabulationOptions(angularMomentAtol=value)
+
+
+
+def test_angular_moments_catch_midpoint_cancellation_within_capacity():
+    from kika.processing.tabulation.angular import muTable, _tableMoments
+    c=[1.,.0455164863,.00692508399,.000996352270,-.00285652874,.00111578676,.00174842263]
+    table,_=muTable(m.Legendre(coefficients=c), TabulationOptions(rtol=1e-4,atol=1e-6))
+    assert len(table.xs)<500
+    assert np.allclose(_tableMoments(table), [c[1],1/3+2*c[2]/3], rtol=0,atol=1e-5)

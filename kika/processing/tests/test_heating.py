@@ -131,3 +131,30 @@ def test_unit_base_photon_moments_map_both_support_and_density():
     k=H._Kinematics(A=2.,Q=0.,awp=0.)
     assert H._meanEnergyOf(form,np.array([15.]),k)[0]==pytest.approx(2.5*(.5+1./3.)/2)
     assert H._meanEnergyOf(form,np.array([15.]),k,moment=2)[0]==pytest.approx(2.5**2*(1./3.+1./6.)/2)
+
+
+def test_two_body_capture_includes_compound_recoil_and_fixed_photon_kick(monkeypatch):
+    from types import SimpleNamespace as NS
+    A, binding = .9991673, 2223300.
+    grid = np.array([.0253, 1e6, 2e7])
+    line = m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=2,
+                            energy=binding, atomicWeightRatio=A), productFrame=m.Frame.lab)
+    photon = NS(pid="photon", distribution=NS(forms={"MonteCarlo": line}))
+    sourcePhoton = NS(pid="photon", distribution=NS(forms={"eval": m.AngularTwoBody(angular=m.Isotropic2d())}))
+    rx = NS(ENDF_MT=102, outputChannel=NS(Q=NS(value=2224648.), products=[photon]))
+    source = NS(outputChannel=NS(products=[sourcePhoton]))
+    evaluation = NS(findReactionByENDF_MT=lambda mt: source)
+    monkeypatch.setattr(H, "_yield", lambda product, grid: np.ones(len(grid)))
+    monkeypatch.setattr(H, "_statedInMF6", lambda evaluation, mt: True)
+    result = H.heatingOf(NS(reactions=[rx]), grid, {102: np.ones(len(grid))}, awr=A, Z=1, evaluation=evaluation)
+    recoil = grid/(A+1)+binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1))
+    assert np.allclose(result.kerma, recoil, rtol=1e-14)
+    assert np.allclose(result.kermaLocal-result.kerma, binding+A/(A+1)*grid)
+    assert np.allclose(result.damage, H.lindhard(recoil, 1, A+1, 1, A, 25.))
+
+
+def test_capture_cascade_does_not_take_two_body_recoil_branch():
+    from types import SimpleNamespace as NS
+    photon = NS(pid="photon", distribution=NS(forms={"eval": m.Uncorrelated()}))
+    evaluation = NS(findReactionByENDF_MT=lambda mt: NS(outputChannel=NS(products=[photon])))
+    assert H._twoBodyCapture([(photon,m.Uncorrelated())], evaluation, np.array([1.]), 55.) is None
