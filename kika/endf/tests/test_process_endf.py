@@ -368,3 +368,42 @@ def test_gnds_and_endf_routes_agree_once_broadened(tmp_path):
         xb, yb = b.cross_sections(293.6)[mt]
         rel = np.abs(np.interp(xa, xb, yb) - ya) / np.maximum(np.abs(ya), 1e-8)
         assert np.quantile(rel, 0.999) < 1e-3, mt
+
+
+@pytest.fixture(scope="module")
+def heated_run():
+    return process_endf(TAPE, ProcessingPlan(temperatures=(293.6,), heating=True, workers=1))
+
+
+def test_the_heating_stage_gives_mt301_and_mt444_on_each_mt1_grid(heated_run):
+    stage = heated_run.stage("heating")
+    assert (stage.status, stage.category) == ("done", None)
+    assert stage.details["temperatures"] == [0.0, 293.6] and stage.details["local"] == 0
+    heating = heated_run.heating
+    assert set(heating) == {0.0, 293.6}
+    for T, tables in heating.items():
+        assert set(tables) == {301, 444}
+        e1, _ = heated_run.cross_sections(T)[1]
+        x, h = tables[301]
+        assert len(x) == len(e1) and np.allclose(x, e1, rtol=1e-11)
+        assert np.all(np.isfinite(h)) and np.all(np.isfinite(tables[444][1]))
+        # Elastic and capture heat a structural nuclide at every energy.
+        assert np.all(h[x > 1.0] > 0)
+
+
+def test_the_pendf_carries_the_heating_in_every_material(heated_run, tmp_path):
+    from kika._records import parse_number
+    path = heated_run.write_pendf(tmp_path / "fe56.pendf")
+    per_material, directory = [], []
+    for line in Path(path).read_text().split("\n"):
+        if line[70:75] == " 1451" and line[75:80].strip() == "1":
+            per_material.append(set())
+            directory.append(set())
+        elif line[70:72] == " 3" and line[72:75].strip() not in ("", "0"):
+            per_material[-1].add(int(line[72:75]))
+        elif line[70:75] == " 1451" and line[:22].strip() == "" and line[22:33].strip() == "3":
+            directory[-1].add(int(line[33:44]))
+    assert len(per_material) == 2
+    assert all({301, 444} <= mts for mts in per_material)
+    assert all({301, 444} <= mts for mts in directory)
+    assert heated_run.stages[-1].details["heating"] == [301, 444]
