@@ -132,9 +132,47 @@ def _process_sample(
     output_dir: str,
     xsdir_file: Optional[str],
     mt_request: Optional[List[int]] = None,
+    template_path: Optional[str] = None,
 ):
     # — read & perturb ACE —
-    ace = read_ace(ace_file)
+    # With a template (written once per isotope by the caller) the table is
+    # read once per process and its XSS restored after every sample, and the
+    # file is written by patching the template: byte-identical to read_ace +
+    # write_ace, see kika.ace.writers.patch_writer.
+    writer = None
+    if template_path is not None:
+        ace, writer = _cached_ace(ace_file, template_path)
+    else:
+        ace = read_ace(ace_file)
+    try:
+        _perturb_and_write_sample(ace, writer, ace_file, sample, sample_index,
+                                  energy_grid, mt_numbers, output_dir,
+                                  xsdir_file, mt_request)
+    finally:
+        if writer is not None:
+            writer.restore(ace)
+
+
+#: Per process: ``ace_file -> (ace, AcePatchWriter)``, so a worker reads each
+#: table once however many samples it writes.
+_ACE_SAMPLE_CACHE: Dict[str, tuple] = {}
+
+
+def _cached_ace(ace_file: str, template_path: str):
+    from kika.ace.writers.patch_writer import AcePatchWriter
+
+    key = (ace_file, template_path)
+    if key not in _ACE_SAMPLE_CACHE:
+        _ACE_SAMPLE_CACHE.clear()
+        ace = read_ace(ace_file)
+        _ACE_SAMPLE_CACHE[key] = (ace, AcePatchWriter(ace, template_path,
+                                                      write_template=False))
+    return _ACE_SAMPLE_CACHE[key]
+
+
+def _perturb_and_write_sample(ace, writer, ace_file, sample, sample_index,
+                              energy_grid, mt_numbers, output_dir, xsdir_file,
+                              mt_request):
     apply_perturbation_factor_to_ace(
         ace, sample, sample_index, energy_grid, mt_numbers, False,
         mt_request=mt_request,
@@ -160,7 +198,10 @@ def _process_sample(
     ace.update_cross_sections()
     
     # Write ACE file without verbose output
-    write_ace(ace, out_ace, overwrite=True)
+    if writer is not None:
+        writer.write(ace, out_ace)
+    else:
+        write_ace(ace, out_ace, overwrite=True)
 
     # — write xsdir files using shared function —
     has_ptable = bool(getattr(ace.unresolved_resonance, 'has_data', False))
@@ -1569,7 +1610,15 @@ def perturb_ACE_files(
         # Create progress tracking variables
         report_interval = max(1, min(100, num_samples // 10))  # Report at most 10 times
 
-        tasks = [(ace_file, factors[j], j, energy_grid, mt_perturb_final, output_dir, xsdir_file, mt_request) for j in range(num_samples)]
+        # The unperturbed table, written once; every sample is a patch of it.
+        from kika.ace.writers.patch_writer import AcePatchWriter
+        template_dir = os.path.join(output_dir, "ace")
+        os.makedirs(template_dir, exist_ok=True)
+        template_path = os.path.join(
+            template_dir, f".template_{os.getpid()}_{os.path.basename(ace_file)}")
+        template = AcePatchWriter(ace, template_path)
+
+        tasks = [(ace_file, factors[j], j, energy_grid, mt_perturb_final, output_dir, xsdir_file, mt_request, template_path) for j in range(num_samples)]
 
         if nprocs > 1:
             # For parallel processing, just show start and end messages
@@ -1594,6 +1643,9 @@ def perturb_ACE_files(
                 if verbose and ((i + 1) % report_interval == 0 or i + 1 == num_samples):
                     progress = (i + 1) / num_samples * 100
                     _logger.info(f"  [INFO] [ACE] Progress: {i + 1}/{num_samples} samples ({progress:.1f}%)")
+
+        template.close()
+        _ACE_SAMPLE_CACHE.clear()
 
         # ====== End of ACE file processing ======
         _logger.info(f">> samples_generated = {num_samples}")
