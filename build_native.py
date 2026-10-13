@@ -27,6 +27,8 @@ def _run(compiler=None):
     distribution=Distribution({'ext_modules':[Extension(
         'kika.processing.resonances._rm_native',
         ['kika/processing/resonances/_rm_native.c'],depends=['kika/processing/resonances/_rm_kernel.h']), Extension(
+        'kika.processing.resonances._coulomb_native',
+        ['kika/processing/resonances/_coulomb_native.c']), Extension(
         'kika.processing.doppler._doppler_native',
         ['kika/processing/doppler/_doppler_native.c']), Extension(
         'kika.processing._thermal_native',

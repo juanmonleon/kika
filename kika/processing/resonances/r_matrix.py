@@ -367,16 +367,40 @@ def _reference_rml_observables(e,group,reduced,logarithmic,external,p,entrance,d
     return w,absorption
 
 
+class _ChannelFunctions:
+    """P, L, phase and ln(P) of each distinct channel, once per energy batch.
+
+    Spin groups repeat the same pair, L and radii (O-16's alpha exit appears
+    in every group). The functions do not depend on the spin group, the MT
+    label or the external R term, so channels equal in everything else share
+    one evaluation, which is the same computation.
+    """
+    def __init__(self,energies):
+        self.energies = energies;self.cache = {}
+
+    def __call__(self,channel):
+        from dataclasses import replace
+        try:
+            key = replace(channel,mt=0,spin=0.,reaction_label='',phase_absorption_mt=None,external=None)
+            hash(key)
+        except TypeError:
+            return channel.functions(self.energies,logarithmic=True)
+        if key not in self.cache:
+            self.cache[key] = channel.functions(self.energies,logarithmic=True)
+        return self.cache[key]
+
+
 def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1024**2, absorption_rtol=0.):
     e = np.asarray(energies)
     mts = {1, 2, 18, 102} | {mt for g in groups for mt in g.reaction_mts}
     result = {mt: np.zeros_like(e) for mt in mts}
+    functions = _ChannelFunctions(e)
     for group in groups:
         ctx = group.context or context
         incident = group.channels[group.entrances[0]]
         k2 = incident.k_squared(incident.channel_energy(e))
         beta = np.pi*.01/k2*(2*group.spin+1)/(2*(2*ctx.target_spin+1))
-        values = [ch.functions(e,logarithmic=True) for ch in group.channels]
+        values = [functions(ch) for ch in group.channels]
         p, log, phase, log_p = (np.stack([v[index] for v in values], axis=1) for index in range(4))
         # Subnormal P can retain only a few significant bits. Bound the
         # complete omitted term, and use ln(P) for charged exit observables.

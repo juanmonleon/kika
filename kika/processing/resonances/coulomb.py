@@ -5,6 +5,12 @@ to the independent development oracle. Only repulsive charged exits are supporte
 """
 import numpy as np
 from scipy.integrate import solve_ivp, quad
+from scipy.integrate._ivp import dop853_coefficients
+try:
+    from . import _coulomb_native as _native
+    if _native.API_VERSION != 1:_native=None
+except (ImportError, AttributeError):
+    _native=None
 from scipy.special import kve, digamma, loggamma, gammaln
 
 
@@ -79,9 +85,12 @@ def _outgoing_laplace(l,eta,rho):
     return -l+(slope/wave).real,np.log(rho)-2*log_wave
 
 
+_TINY = 1e-150
+
+
 def _fraction(initial, coefficients, max_iterations=20000):
     """Modified Lentz evaluation; require successive converged increments."""
-    tiny = 1e-150
+    tiny = _TINY
     f = complex(initial) if initial != 0 else complex(tiny)
     c = f; d = 0j; stable = 0
     for n in range(1,max_iterations+1):
@@ -105,11 +114,11 @@ def _regular(l,eta,rho):
     return _fraction(first/rho+eta/first,coefficients).real
 
 
-def _outgoing(l,eta,rho):
+def _outgoing(l,eta,rho,max_iterations=20000):
     a = l+1+1j*eta; b = -l+1j*eta
     def coefficients(n):
         return ((1j/rho)*a*b if n==1 else (a+n-1)*(b+n-1)), 2*(rho-eta+1j*n)
-    return _fraction(1j*(1-eta/rho),coefficients)
+    return _fraction(1j*(1-eta/rho),coefficients,max_iterations)
 
 
 def _transport(l,eta,start,stop,shift,log_p):
@@ -130,53 +139,145 @@ def _transport(l,eta,start,stop,shift,log_p):
     return result.y[:,-1]
 
 
+def _barrier_log_p(l,eta,rho,outgoing,regular):
+    """ln(P) inside the barrier from F, F'/F and Re(H'/H), by the Wronskian.
+
+    There P=rho*Im(H'/H) is a tiny imaginary part, which the continued
+    fraction for H'/H carries only to an absolute accuracy. F is small and its
+    power series (DLMF 33.6) has terms of one sign. With F'G-FG'=1 and
+    p=Re(H'/H), G solves (p-F'/F)G^2+G/F+(p-F'/F)F^2=0; its dominant root has
+    no cancellation, and P=rho/(F^2+G^2). Returns None where the series or
+    the root is not well conditioned, for the caller's general route.
+    """
+    log_c = l*np.log(2.)-.5*np.pi*eta+loggamma(l+1+1j*eta).real-gammaln(2*l+2)
+    previous,term,total,magnitude,quiet = 0.,1.,1.,1.,0
+    for j in range(1,10000):
+        term,previous = (2*eta*rho*term-rho*rho*previous)/(j*(2*l+1+j)),term
+        total += term;magnitude += abs(term)
+        if not np.isfinite(total) or total>1e280:return None
+        quiet = quiet+1 if abs(term)<1e-17*abs(total) else 0
+        if quiet>=2:break
+    else:return None
+    if total<=0 or magnitude>8*total:return None
+    log_f = log_c+(l+1)*np.log(rho)+np.log(total)
+    a = outgoing.real-regular
+    if not a<0:return None
+    disc = 1-np.exp(np.log(4*a*a)+4*log_f)
+    if not disc>=.25:return None
+    log_g = -log_f+np.log1p(np.sqrt(disc))-np.log(2*abs(a))
+    return np.log(rho)-2*log_g-np.log1p(np.exp(2*log_f-2*log_g))
+
+
+#: Iterations of the outgoing fraction allowed below rho=0.25: measured,
+#: S keeps a relative accuracy of 1e-12 up to about 3000.
+SMALL_RADIUS_FRACTION_ITERATIONS = 3000
+
+
+def _charged_point(l,h,r):
+    """ln(P), S and phase at one point; the reference for every branch."""
+    from .channel_functions import neutral_channel_functions
+    if h==0:
+        p,s,phase = neutral_channel_functions(l,r)
+        if p>0:
+            p = np.log(p)
+        else:
+            # Exact positive neutral denominator polynomial, evaluated
+            # logarithmically when its penetrability has underflowed.
+            from scipy.special import gammaln,logsumexp
+            n=np.arange(l+1)
+            coefficients=(gammaln(l+n+1)-gammaln(l-n+1)+gammaln(2*n+1)
+                -2*gammaln(n+1)-2*n*np.log(2.))
+            p=np.log(r)-logsumexp(coefficients-2*n*np.log(r))
+        return p,s,phase
+    turning = h+np.hypot(h,np.sqrt(l*(l+1)))
+    regular = None
+    if r<=.25 and h*r<=2.:
+        shift,lp=_small_radius_outgoing(l,h,r)
+    elif r<=.25:
+        # Deep in the barrier: the fraction and the Wronskian while the
+        # fraction stays short (its rounding in S grows with the iterations,
+        # about 100/rho of them); the Laplace integral nearer the threshold.
+        lp = None
+        try:
+            here = _outgoing(l,h,r,SMALL_RADIUS_FRACTION_ITERATIONS);regular = _regular(l,h,r)
+            lp = _barrier_log_p(l,h,r,here,regular);shift = r*here.real
+        except FloatingPointError:
+            pass
+        if lp is None:shift,lp=_outgoing_laplace(l,h,r)
+    else:
+        start = max(r,turning+8.)
+        lp = None
+        if start!=r:
+            # The fraction at rho carries P=rho*Im(H'/H) to full relative
+            # accuracy once P>=|S|/5 (measured: 3e-15 at P/|S|=0.2-0.3, 1e-13
+            # at 0.09). Deeper in the barrier S still comes from it and ln(P)
+            # from the Wronskian; the transport where that is not conditioned.
+            try:
+                here = _outgoing(l,h,r)
+                if here.imag>0 and r*here.imag>=.2*abs(r*here.real):
+                    shift = r*here.real;lp = np.log(r)+np.log(here.imag)
+                else:
+                    regular = _regular(l,h,r)
+                    lp = _barrier_log_p(l,h,r,here,regular)
+                    shift = r*here.real
+            except FloatingPointError:
+                lp = None
+        if lp is None:
+            derivative = _outgoing(l,h,start)
+            if derivative.imag<=0:
+                raise FloatingPointError('Coulomb outgoing flux lost precision')
+            shift = start*derivative.real; lp = np.log(start)+np.log(derivative.imag)
+            if start!=r:shift,lp = _transport(l,h,start,r,shift,lp)
+    penetration = np.exp(lp)
+    if not np.isfinite(lp+shift):
+        raise FloatingPointError('nonfinite scaled charged channel functions')
+    if regular is None:regular = _regular(l,h,r)
+    return lp,shift,np.arctan2(penetration,r*regular-shift)
+
+
+def _native_open_rows(l,eta,rho):
+    """`_charged_point` in the compiled kernel, outside the small-radius series."""
+    n = len(rho)
+    log_p,shift,phase = np.empty(n),np.empty(n),np.empty(n);ok = np.zeros(n,np.uint8)
+    _native.open_rows(int(l),n,np.ascontiguousarray(eta,dtype=float),np.ascontiguousarray(rho,dtype=float),
+                      *_TABLEAU,log_p,shift,phase,ok)
+    return log_p,shift,phase,ok.astype(bool)
+
+
+_STAGES = dop853_coefficients.N_STAGES
+_TABLEAU = tuple(np.ascontiguousarray(v,dtype=float).ravel() for v in (
+    dop853_coefficients.A[:_STAGES,:_STAGES],dop853_coefficients.B,dop853_coefficients.C[:_STAGES],
+    dop853_coefficients.E3,dop853_coefficients.E5))
+
+
 def charged_channel_log_functions(l,eta,rho):
     """Return ln(P),S,hard-sphere phase for finite rho>0, eta>=0.
 
     Phase is modulo pi, sufficient for neutral-incidence cross sections. A
     ln(P) remains available below the positive float range. A phase below
     that range rounds to zero; this does not change ln(P) or label P zero.
+    Points with eta>0, outside the small-radius series, go to the compiled kernel when it is
+    available, which runs the algorithm of `_charged_point`; any point it
+    does not complete, and every other point, is computed by
+    `_charged_point`, which computes it or raises.
     """
-    from .channel_functions import neutral_channel_functions
     if not isinstance(l,(int,np.integer)) or not 0<=l<=64:
         raise ValueError('charged orbital momentum must be L=0..64')
     eta,rho = np.broadcast_arrays(np.asarray(eta,dtype=float),np.asarray(rho,dtype=float))
     if np.any(~np.isfinite(eta+rho)) or np.any(eta<0) or np.any(rho<=0):
         raise ValueError('charged functions require finite eta>=0 and rho>0')
     p = np.empty_like(rho);s = np.empty_like(rho);phase = np.empty_like(rho)
-    for index in np.ndindex(rho.shape):
-        h,r = float(eta[index]),float(rho[index])
-        if h==0:
-            p[index],s[index],phase[index] = neutral_channel_functions(l,r)
-            if p[index]>0:
-                p[index] = np.log(p[index])
-            else:
-                # Exact positive neutral denominator polynomial, evaluated
-                # logarithmically when its penetrability has underflowed.
-                from scipy.special import gammaln,logsumexp
-                n=np.arange(l+1)
-                coefficients=(gammaln(l+n+1)-gammaln(l-n+1)+gammaln(2*n+1)
-                    -2*gammaln(n+1)-2*n*np.log(2.))
-                p[index]=np.log(r)-logsumexp(coefficients-2*n*np.log(r))
-            continue
-        turning = h+np.hypot(h,np.sqrt(l*(l+1)))
-        if r<=.25 and h*r<=2.:
-            shift,lp=_small_radius_outgoing(l,h,r)
-        elif r<=.25:
-            shift,lp=_outgoing_laplace(l,h,r)
-        else:
-            start = max(r,turning+8.)
-            derivative = _outgoing(l,h,start)
-            if derivative.imag<=0:
-                raise FloatingPointError('Coulomb outgoing flux lost precision')
-            shift = start*derivative.real; lp = np.log(start)+np.log(derivative.imag)
-            if start!=r:shift,lp = _transport(l,h,start,r,shift,lp)
-        penetration = np.exp(lp)
-        if not np.isfinite(lp+shift):
-            raise FloatingPointError('nonfinite scaled charged channel functions')
-        regular = _regular(l,h,r)
-        p[index] = lp;s[index] = shift
-        phase[index] = np.arctan2(penetration,r*regular-shift)
+    flat_eta,flat_rho = eta.ravel(),rho.ravel()
+    pf,sf,phf = p.reshape(-1),s.reshape(-1),phase.reshape(-1)
+    batch = np.flatnonzero((flat_eta>0)&((flat_rho>.25)|(flat_eta*flat_rho>2.)))
+    single = np.ones(len(flat_rho),bool)
+    if _native is not None and len(batch):
+        lp,shift,ph,ok = _native_open_rows(l,flat_eta[batch],flat_rho[batch])
+        done = batch[ok]
+        pf[done],sf[done],phf[done] = lp[ok],shift[ok],ph[ok]
+        single[done] = False
+    for index in np.flatnonzero(single):
+        pf[index],sf[index],phf[index] = _charged_point(l,float(flat_eta[index]),float(flat_rho[index]))
     return p,s,phase
 
 
@@ -203,26 +304,69 @@ def closed_charged_shift(l,eta,kappa):
     if not isinstance(l,(int,np.integer)) or not 0<=l<=64 or np.any(~np.isfinite(eta+kappa)) or np.any(eta<0) or np.any(kappa<=0):
         raise ValueError('closed charged functions require L=0..64, finite eta>=0, kappa>0')
     out = np.empty_like(kappa)
-    for index in np.ndindex(kappa.shape):
-        h,r = float(eta[index]),float(kappa[index])
-        if h==0:out[index] = closed_neutral_shift(l,r);continue
-        # Positive Laplace integral for Tricomi U, with u=kappa*t.
-        # The logarithmic derivative is l+1-kappa-2*mean(u). This scaling
-        # keeps eta*kappa finite at a threshold; there is no remote stiff ODE.
-        mode = .5*(l-r+np.sqrt((l-r)**2+2*(h+l)*r))
-        if mode<=0:mode = 1.
-        def log_weight(u):
-            return 2*l*np.log(u)-(h-l)*np.log1p(r/u)-2*u
-        peak = log_weight(mode)
-        def weight(v):
-            u = mode*v
-            return np.exp(log_weight(u)-peak) if v>0 else 0.
-        norm,norm_error = quad(weight,0,np.inf,epsabs=2e-12,epsrel=2e-12,limit=200)
-        moment,moment_error = quad(lambda v:v*weight(v),0,np.inf,epsabs=2e-12,epsrel=2e-12,limit=200)
-        if norm<=0 or not np.isfinite(norm+moment) or max(norm_error/norm,moment_error/moment)>1e-9:
-            raise FloatingPointError('closed Coulomb Laplace integral did not converge')
-        out[index] = l+1-r-2*mode*moment/norm
+    flat_eta,flat_kappa,flat_out = eta.ravel(),kappa.ravel(),out.reshape(-1)
+    single = np.ones(len(flat_out),bool)
+    charged = np.flatnonzero(flat_eta>0)
+    if _native is not None and len(charged):
+        shift = np.empty(len(charged));ok = np.zeros(len(charged),np.uint8)
+        _native.closed_rows(int(l),len(charged),np.ascontiguousarray(flat_eta[charged]),
+                            np.ascontiguousarray(flat_kappa[charged]),shift,ok)
+        done = ok.astype(bool)
+        flat_out[charged[done]] = shift[done];single[charged[done]] = False
+    for index in np.flatnonzero(single):
+        h,r = float(flat_eta[index]),float(flat_kappa[index])
+        if h==0:flat_out[index] = closed_neutral_shift(l,r);continue
+        value = _closed_fraction(l,h,r)
+        flat_out[index] = _closed_point(l,h,r) if value is None else value
     return out
+
+
+#: Iterations beyond which the closed-channel fraction is not used: its
+#: rounding grows with them (measured 1e-12 at about 750).
+CLOSED_FRACTION_ITERATIONS = 500
+
+
+def _closed_fraction(l,h,r):
+    """The closed shift from Steed's fraction for H+'/H+ at rho=i*kappa, eta=-i*eta_c.
+
+    There H+ is the decaying Whittaker function and every term of the
+    fraction is real or imaginary, so it runs in real arithmetic. It
+    converges slowly as kappa goes to zero; None beyond
+    CLOSED_FRACTION_ITERATIONS, for the Laplace integral.
+    """
+    a = l+1+h; b = -l+h
+    phi = 1+h/r; gamma = phi; delta = 0.; stable = 0
+    for n in range(1,CLOSED_FRACTION_ITERATIONS+1):
+        an = a*b/r if n==1 else (a+n-1)*(b+n-1)
+        beta = 2*(r+h+n)
+        delta = beta-an*delta; gamma = beta-an/gamma
+        if abs(delta)<_TINY:delta = _TINY
+        if abs(gamma)<_TINY:gamma = _TINY
+        delta = 1/delta; change = gamma*delta; phi *= change
+        stable = stable+1 if abs(change-1)<2e-14 else 0
+        if stable>=3:
+            return -r*phi if np.isfinite(phi) else None
+    return None
+
+
+def _closed_point(l,h,r):
+    """closed_charged_shift at one point with eta>0, by adaptive quadrature."""
+    # Positive Laplace integral for Tricomi U, with u=kappa*t.
+    # The logarithmic derivative is l+1-kappa-2*mean(u). This scaling
+    # keeps eta*kappa finite at a threshold; there is no remote stiff ODE.
+    mode = .5*(l-r+np.sqrt((l-r)**2+2*(h+l)*r))
+    if mode<=0:mode = 1.
+    def log_weight(u):
+        return 2*l*np.log(u)-(h-l)*np.log1p(r/u)-2*u
+    peak = log_weight(mode)
+    def weight(v):
+        u = mode*v
+        return np.exp(log_weight(u)-peak) if v>0 else 0.
+    norm,norm_error = quad(weight,0,np.inf,epsabs=2e-12,epsrel=2e-12,limit=200)
+    moment,moment_error = quad(lambda v:v*weight(v),0,np.inf,epsabs=2e-12,epsrel=2e-12,limit=200)
+    if norm<=0 or not np.isfinite(norm+moment) or max(norm_error/norm,moment_error/moment)>1e-9:
+        raise FloatingPointError('closed Coulomb Laplace integral did not converge')
+    return l+1-r-2*mode*moment/norm
 
 
 def charged_threshold_shift(l,eta_rho):
