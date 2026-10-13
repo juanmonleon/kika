@@ -524,9 +524,12 @@ def _raise_thresholds(curves,entries,graph,awr):
     sometimes round it down, which leaves the reaction open a few ppm below
     the kinematic limit; ACER flags that as a threshold error. Values are kept,
     only abscissae move. Sums are rebuilt from their leaves, so they follow.
-    Returns ``{key: (old, new)}`` for the report.
+    The moved energies are the seven-figure numbers RECONR writes, without
+    ``sigfig``'s 1e-13 bias, so a written tape reloads onto the same segment
+    boundaries. Returns ``{key: (old, new)}`` for the report.
     """
     from .probability_tables import sigfig
+    def figures(x,shade):return float(f'{sigfig(x,7,shade):.7g}')
     changed={}
     for key,cs in curves.items():
         if key in graph:continue
@@ -535,13 +538,13 @@ def _raise_thresholds(curves,entries,graph,awr):
         if q is None or q.value is None or q.value>=0:continue
         if q.unit!='eV':raise UnsupportedResonanceError(f'reaction Q of {key.label} is not in eV')
         if awr is None:raise ValueError('a threshold reaction needs the target mass (PoPs or NeutronContext)')
-        threshold=sigfig(-q.value*(awr+1)/awr,7,+1)
+        threshold=figures(-q.value*(awr+1)/awr,+1)
         first=cs[0];x=list(first.x)
         if x[0]>=threshold:continue
         old=x[0];x[0]=threshold;i=0
         while i+1<len(x) and x[i+1]<=x[i]:
             if i>=10:raise ValueError(f'ill-behaved threshold for {key.label}')
-            x[i+1]=sigfig(x[i],7,+1);i+=1
+            x[i+1]=figures(x[i],+1);i+=1
         curves[key]=(BackgroundCurve(tuple(x),first.y,first.law),)+tuple(cs[1:])
         changed[key]=(float(old),float(threshold))
     return changed

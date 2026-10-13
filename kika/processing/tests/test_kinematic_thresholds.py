@@ -8,12 +8,17 @@ move overtakes; ACER flags a table it did not fix as a threshold error.
 import numpy as np
 from kika.nuclear_data.model import Reaction, ReactionId, CrossSection, OutputChannel, Q, XYs1d, Regions1d
 from kika.processing.resonances import NeutronContext, reconstruct_suite
-from kika.processing.resonances.probability_tables import sigfig
+from kika.processing.resonances.probability_tables import sigfig as _sigfig
 from test_resonance_suite import suite_model
 from test_resonance_tabulation import AXES
 
 AWR = 56.0
 THRESHOLD = 500.00037  # sigfig(., 7, +1) = 500.0005
+
+
+def sigfig(x, digits, shade):
+    """RECONR's value as written: seven figures, without sigfig's 1e-13 bias."""
+    return float(f"{_sigfig(x, digits, shade):.7g}")
 
 
 def _with(label, mt, xs, ys, threshold):
