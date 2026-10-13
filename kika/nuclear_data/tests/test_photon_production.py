@@ -374,3 +374,48 @@ def test_an_ace_suite_has_no_eval_forms_and_still_answers():
     assert line["origin"] == "line"
     assert line["value"] == pytest.approx(FE56_LINE, rel=0.01)
     assert line["value"] == max(l["value"] for l in spectrum["lines"])
+
+
+# -- processed tables (HDF5) ---------------------------------------------------
+
+HDF5_FE56 = Path(__file__).resolve().parents[2] / "hdf5" / "tests" / "data" / "Fe56.h5"
+
+
+def test_hdf5_lines_and_density_tables():
+    """An OpenMC suite states lines as ``DiscretePhotonEnergy`` and continua as
+    ``Xs_pdf_cdf1d`` densities under ``MonteCarlo``: both are read."""
+    pytest.importorskip("h5py")
+    from kika.hdf5 import read
+
+    pp = PhotonProduction(read(HDF5_FE56))
+    spectrum = pp.spectrum(incident_energy=2.0e6)
+    line = next(l for l in spectrum["lines"] if abs(l["energy_ev"] - 846778.0) < 1.0)
+    assert line["value"] > 0 and [m["mt"] for m in line["by_mt"]] == [51]
+    assert spectrum["continua"]
+
+
+def test_density_table_steps_and_discrete_split():
+    from kika.nuclear_data.model.functions.pdf_cdf import Xs_pdf_cdf1d
+    from kika.nuclear_data.model.enums import Interpolation
+    from kika.nuclear_data.photon_production import _density_spectrum, _split_discrete
+
+    class _Energy:
+        function1ds = [
+            Xs_pdf_cdf1d(xs=[5.0e5, 1.0, 2.0, 3.0], pdf=[0.25, 0.5, 0.25, 0.0], cdf=[0.25, 0.25, 0.75, 1.0],
+                         interpolation=Interpolation.flat, outerDomainValue=1.0e6, numberOfDiscrete=1),
+            Xs_pdf_cdf1d(xs=[5.0e5, 1.0, 2.0, 3.0], pdf=[0.5, 0.25, 0.25, 0.0], cdf=[0.5, 0.5, 0.75, 1.0],
+                         interpolation=Interpolation.flat, outerDomainValue=2.0e6, numberOfDiscrete=1),
+        ]
+
+    spectrum, nd = _density_spectrum(_Energy())
+    assert nd == [1, 1]
+    node = spectrum.function1ds[0]
+    # The discrete point first, then the histogram as steps.
+    assert node.xs.tolist() == [5.0e5, 1.0, 2.0, 2.0, 3.0]
+    assert node.ys.tolist() == [0.25, 0.5, 0.5, 0.25, 0.25]
+    parts = _split_discrete({"kind": "continuum", "spectrum": spectrum, "mult": None,
+                             "angular": None, "product": "photon", "nd": nd}, {})
+    line = next(p for p in parts if p["kind"] == "line")
+    assert line["energy"] == 5.0e5
+    assert line["mult"].evaluate([1.0e6, 2.0e6]).tolist() == [0.25, 0.5]
+    assert next(p for p in parts if p["kind"] == "continuum")["spectrum"].function1ds[0].xs[0] == 1.0
