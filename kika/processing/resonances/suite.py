@@ -377,6 +377,7 @@ class SuiteReconstructionResult:
         everything on this thread. The numbers are bit-identical either way.
         """
         from kika.nuclear_data.model import Regions1d
+        from kika.nuclear_data.model.functions.regions1d import curvesOnDomains
         from kika.algebra import prepare_evaluator
         for name in ('projectile','target','projectileFrame'):
             if str(getattr(suite,name))!=self.report[name]:
@@ -392,8 +393,10 @@ class SuiteReconstructionResult:
             covered.add(target)
             form=entries[target].crossSection.get(chosen)
             if form is None:raise ValueError(f'reloaded suite lacks selected form for {key}')
-            curves=form.function1ds if isinstance(form,Regions1d) else [form]
-            if len(curves)!=len(self._segments):raise ReconstructionConvergenceError('serialized region structure changed')
+            # A TAB1 may state the segments as one region per law (NJOY reads
+            # at most 20); cut it back at the segment edges, or fail as before.
+            curves=curvesOnDomains(form,[(s.low,s.high) for s in self._segments])
+            if curves is None:raise ReconstructionConvergenceError('serialized region structure changed')
             checked[key]=curves
         if covered!=set(entries):raise ReconstructionConvergenceError('serialized reaction coverage changed')
         first=next(iter(self.forms.values()))

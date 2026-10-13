@@ -37,7 +37,7 @@ from kika.nuclear_data.model import (
 from kika.nuclear_data.model.enums import Interpolation
 
 __all__ = ["attachReconstruction", "readReconstructed", "pendfHeader",
-           "RECONSTRUCTED_LABEL"]
+           "trimDescription", "RECONSTRUCTED_LABEL"]
 
 RECONSTRUCTED_LABEL = "recon"
 
@@ -86,6 +86,45 @@ def pendfHeader(path) -> dict:
         "temp": _endfFloat(temps[0:11]),
         "err": _endfFloat(temps[11:22]),
     }
+
+
+#: MF1/451 text lines a PENDF kika writes keeps: ENDF-6's identification block
+#: (ZSYMAM/ALAB/EDATE/AUTH, REF/DDATE/RDATE/ENDATE and the three HSUB lines).
+PENDF_DESCRIPTION_LINES = 5
+
+
+def trimDescription(path, keep: int = PENDF_DESCRIPTION_LINES) -> int:
+    """Cut a one-material PENDF's MF1/451 text to its first *keep* lines.
+
+    RECONR does not carry an evaluation's documentation into its PENDF (it
+    writes the title it is given), and NJOY relies on that: HEATR crashed
+    (0xC0000374, heap corruption) on a kika PENDF of B-VIII.1 Fe-56, which kept
+    all 560 lines of the evaluation's text -- with 300 it ran, and MODER, BROADR
+    and the rest never noticed. The text is documentation of the evaluation,
+    not data; the evaluation still has it. Returns NWD as written; the
+    directory is rebuilt when it changes. ENDF-6 headers only.
+    """
+    from kika.endf.writers.update_directory import update_mf1_directory
+
+    path = Path(path)
+    with open(path, "r", newline="") as fh:
+        lines = fh.readlines()
+    head = [i for i, line in enumerate(lines) if line[70:75] == " 1451"]
+    if len(head) < 4 or int(lines[head[0] + 1][55:66].strip() or 0) < 6:
+        raise ValueError(f"{path}: no ENDF-6 MF1/MT451 header")
+    if len({line[66:70] for line in lines if line[70:72].strip() not in ("", "0")}) != 1:
+        raise ValueError(f"{path}: one material per tape expected")
+    record = head[0] + 3
+    nwd = int(lines[record][44:55])
+    if nwd <= keep:
+        return nwd
+    lines[record] = lines[record][:44] + f"{keep:11d}" + lines[record][55:]
+    del lines[record + 1 + keep:record + 1 + nwd]
+    with open(path, "w", newline="") as fh:
+        fh.writelines(lines)
+    if not update_mf1_directory(str(path)):
+        raise ValueError(f"{path}: the MF1 directory could not be rebuilt")
+    return keep
 
 
 def _linlin(form, mt: int) -> XYs1d:

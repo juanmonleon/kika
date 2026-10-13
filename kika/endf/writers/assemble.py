@@ -287,7 +287,8 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
         except KeyError:
             reconstructed = False
         section, report = encodeMF3MT(reaction, mat, report, label=formLabel,
-            precision="best" if reconstructed else "legacy")
+            precision="best" if reconstructed else "legacy",
+            mergeRegions=reconstructed)
         mf3.append((3, mt, section))
 
         # MF4 is about the particle the MT names (the p, d, t, He-3 or alpha
@@ -902,6 +903,8 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progr
         advance("write")
         if not report.isClean:
             raise ValueError(f'reconstructed ENDF conversion is incomplete: {vars(report)}')
+        from ..model_adapter.pendf import trimDescription
+        trimDescription(provisional)
         reloaded, conversion = decodeReactionSuite(read_endf(str(provisional)))
         if not conversion.isCleanFor('cross-sections'):
             raise ValueError(f'reconstructed ENDF reload is incomplete: {vars(conversion)}')
@@ -931,7 +934,8 @@ def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
     from kika.nuclear_data.model import Regions1d
     from ..read_endf import read_endf
     from ..model_adapter import decodeMF3MT
-    from ..model_adapter.pendf import pendfHeader
+    from kika.nuclear_data.model.functions.regions1d import curvesOnDomains
+    from ..model_adapter.pendf import pendfHeader, trimDescription
     if not isinstance(result, SuiteDopplerResult):
         raise TypeError('SuiteDopplerResult required')
     result.verify_suite(suite)
@@ -946,6 +950,7 @@ def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
                               tapeId=tapeId or DEFAULT_TAPE_ID, label=result.label)
         if not report.isClean:
             raise ValueError('heated ENDF conversion loses represented data: '+report.summary())
+        trimDescription(provisional)
         header = pendfHeader(provisional)
         if header['temp'] != result.temperature:
             raise ValueError('heated ENDF temperature changed on relecture')
@@ -956,6 +961,14 @@ def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
         for mt, key in result._mt_keys.items():
             reaction, _ = decodeMF3MT(tape.mf[3].mt[mt])
             form = reaction.crossSection['eval']
+            if key in result.forms:
+                # The tape states each table as one region per law
+                # (mergeRegions); cut it back at the regions it was written from.
+                original = result.forms[key]
+                cut = curvesOnDomains(form, [(c.domainMin, c.domainMax) for c in
+                    (original.function1ds if isinstance(original, Regions1d) else [original])])
+                if cut is not None and len(cut) > 1:
+                    form = Regions1d(function1ds=cut, axes=form.axes, label=form.label)
             form.label = result.label
             published[key] = form
         if set(published) != set(result.forms):

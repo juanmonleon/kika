@@ -109,9 +109,21 @@ def backgroundTable(form, name: str, report=None):
     return Regions1d.fromEndfRegions(energies, values, merged, axes=pieces[0].axes)
 
 
+def mergedInterpolationRegions(regions):
+    """*regions* with each run of neighbouring pairs of one INT made one pair."""
+    merged = []
+    for nbt, law in regions:
+        if merged and merged[-1][1] == law:
+            merged[-1] = (nbt, law)
+        else:
+            merged.append((nbt, law))
+    return merged
+
+
 def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
                 report: Optional[ConversionReport] = None, *,
-                label: str = EVAL_LABEL, precision: str = "legacy"):
+                label: str = EVAL_LABEL, precision: str = "legacy",
+                mergeRegions: bool = False):
     """A :class:`Reaction` → an ``MF3MT``.
 
     Everything comes from the model or from the provenance the decoder kept;
@@ -119,6 +131,18 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
     file's own, not a reconstruction from the regions — a reconstruction would
     be correct and would still be a second source of truth. Except when they no
     longer describe the table: :func:`usableInterpolationRegions`.
+
+    ``mergeRegions`` joins neighbouring ``(NBT, INT)`` pairs that share an INT.
+    That states the same function -- within one law, the interpolation between
+    two consecutive points does not depend on where a region boundary falls,
+    and a jump is the repeated energy either way -- and it is what tables kika
+    computes need: a reconstructed or heated MF3 is a ``regions1d`` with a
+    region per discontinuity (B-VIII.1 Fe-56 MT1: 73; JEFF-4.0: 688), and NJOY
+    holds at most 20 (``nbt(20)`` in ``endf.f90``), so MODER stopped on such a
+    PENDF with ``illegal TAB1, nbt(nr)/=np``. RECONR writes the same table as
+    one region with the energies repeated. A check that reads the output back
+    cuts the regions out again with
+    :func:`~kika.nuclear_data.model.functions.regions1d.curvesOnDomains`.
 
     ``label`` names which §9.1 form to write. It defaults to ``'eval'``, which
     is what §16.1.1 requires of an evaluated file and what every caller wants
@@ -175,6 +199,9 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
                 f"now has {energies.size}, so they are rebuilt from the "
                 f"regions1d. The model was edited after it was decoded"
             )
+
+    if mergeRegions:
+        regions = mergedInterpolationRegions(regions)
 
     q = reaction.outputChannel.Q
     # A continuum reaction FUDGE wrote carries its ground-state Q as the GNDS

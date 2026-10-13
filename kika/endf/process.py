@@ -512,6 +512,8 @@ class EndfProcessing:
         conversion = writeEndfTape(suite, path, mat=mat, label=HEATED_LABEL)
         if not conversion.isClean:
             raise ProcessingOutputError("pendf-failed", f"{T:g} K: the conversion lost data: {conversion}")
+        from kika.endf.model_adapter.pendf import trimDescription
+        trimDescription(path)  # NJOY's HEATR does not survive a long MF1 text
         has153 = T in (self._urr or {})
         if has153:
             ev = rec.evaluation or {}
@@ -908,7 +910,7 @@ def _heating_section(mt, energies, values, za, awr, mat):
     reaction = Reaction(ReactionId(f"MT{mt}", ENDF_MT=mt), CrossSection({HEATED_LABEL: form}),
                         outputChannel=OutputChannel(Q=Q(value=0.0, unit="eV")),
                         provenance=EndfProvenance(mat=mat, awr=awr, za=za, qm=0.0, lr=0))
-    section, _ = encodeMF3MT(reaction, mat, label=HEATED_LABEL)
+    section, _ = encodeMF3MT(reaction, mat, label=HEATED_LABEL, mergeRegions=True)
     return str(section).rstrip("\n").split("\n")
 
 
