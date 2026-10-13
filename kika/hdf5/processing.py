@@ -1061,10 +1061,16 @@ def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None):
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
+    from kika.endf.model_adapter.photon_lines import mergedLineSpectra
+
+    # An MF6 photon whose lines the decoder split into products (D40) goes back
+    # to one product with the lines first in its tables, as ACER writes it.
+    merged, hidden = mergedLineSpectra(reaction)
     explicitPhotons = False
     for product in reaction.outputChannel.products:
-        if product.pid not in ("n", "photon"):
+        if product.pid not in ("n", "photon") or product.label in hidden:
             continue
+        product = merged.get(product.label, product)
         new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report)
         if new is not None:
             channel.products.products.append(new)

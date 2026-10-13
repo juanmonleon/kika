@@ -48,7 +48,12 @@ PENDING = {
         "and the LAW=4 recoil of it, a particle the evaluation gives two masses "
         "(alpha AWP beside the He-4 target's AWR; C-12's MT5 residual) where "
         "PoPs holds one, ND>0 (Be-9 MT701's discrete photon point), and "
-        "U-235's MT18 at JP=11 with its P(nu) subsections (no model node, J8)",
+        "U-235's MT18 at JP=11 with its P(nu) subsections (no model node, J8). "
+        "A photon spectrum split into lines (D40) derives back as FUDGE's "
+        "gammasToENDF6_MF6 regroups it: every number ENDF writes is the file's "
+        "on Pt-190 MT102; what differs is the record's bookkeeping (the node "
+        "values as floats, the digest) and, with no continuum, LEP (FUDGE "
+        "writes 2, B-11 MT103 states 1)",
     ("Reaction", "headerFields.mf12"):
         "E5e derives MF12 from the model; what differs is what the model does "
         "not hold: an LO=2 section's own bytes and SHA-256 (the derived one is "
@@ -106,7 +111,8 @@ ONLY_ON = {
                                        "micro_c12_mf6", "micro_d_h2_mf6",
                                        "micro_h3_he4_mf6", "micro_p_he3_mf6",
                                        "micro_t_li7_mf6", "micro_u235_mf6",
-                                       "micro_u235_photons"},
+                                       "micro_u235_photons", "micro_b11_photons",
+                                       "micro_pt190_photons"},
     ("FissionEnergyRelease", "headerFields.replaced"): {"micro_u235_fission_energy"},
 }
 

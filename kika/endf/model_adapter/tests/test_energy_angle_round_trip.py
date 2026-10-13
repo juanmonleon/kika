@@ -40,7 +40,10 @@ def _roundTrip(section, mt):
     entries, provenance, report = decodeMF6MT(section)
     forms = {label: distribution
              for label, _pid, _multiplicity, distribution in entries}
-    encoded, report = encodeMF6MT(forms, provenance, mt, report)
+    # A photon line's multiplicity is its share of the yield (D40).
+    multiplicities = {label: multiplicity.form
+                      for label, _pid, multiplicity, _distribution in entries}
+    encoded, report = encodeMF6MT(forms, provenance, mt, report, multiplicities)
     return encoded, entries, provenance, report
 
 

@@ -896,7 +896,40 @@ def _attachEnergyAngleDistributions(suite: ReactionSuite, mf6mt, mt: int,
 
     _addProductsToPoPs(suite, provenance.headerFields["mf6"]["products"])
     _flagMF6(suite, reaction, provenance.headerFields["mf6"])
+    _totalLineMultiplicity(suite, reaction, mf6mt, provenance.headerFields["mf6"])
     return report
+
+
+def _totalLineMultiplicity(suite, reaction, mf6mt, fields) -> None:
+    """The yield of a photon subsection D40 split into lines, as the reaction's
+    total gamma multiplicity -- FUDGE's ``multiplicitySum`` for MF6 photons.
+
+    Each line carries ``P·y``, so without it ``y`` is only the sum of the
+    pieces, which differs from the file's in the seventh digit wherever the
+    evaluator's probabilities do not add to exactly one. A reaction whose MF12
+    already gave it a total keeps that one.
+    """
+    from kika.nuclear_data.model import multiplicityAxes
+    from kika.nuclear_data.model.sums import Add, MultiplicitySum
+
+    from .derive.reactions import reactionHref
+    from .energy_angle import _multiplicityOf
+    from .photon_lines import lineSpectrumLabels, LINES_KEY
+
+    mt = reaction.ENDF_MT
+    split = [r for r in fields.get("products") or []
+             if (r.get("law_fields") or {}).get(LINES_KEY)]
+    if len(split) != 1 or suite.sums.multiplicitySums.byENDF_MT(mt) is not None:
+        return
+    (record,) = split
+    product = mf6mt.products[record["index"]]
+    total = MultiplicitySum(label=f"{reaction.label} total gamma multiplicity",
+                            multiplicity=_multiplicityOf(product, multiplicityAxes()),
+                            ENDF_MT=int(mt))
+    base = reactionHref(reaction) + "/outputChannel/products/product"
+    for label in lineSpectrumLabels(record):
+        total.summands.append(Add(href=f"{base}[@label='{label}']/multiplicity"))
+    suite.sums.multiplicitySums.append(total)
 
 
 def _flagMF6(suite, reaction, fields) -> None:
@@ -922,10 +955,14 @@ def _flagMF6(suite, reaction, fields) -> None:
     if flags is None:
         flags = EndfConversionFlags()
         suite.applicationData.entries.append(flags)
+    from .photon_lines import lineSpectrumLabels
+
     base = reactionHref(reaction) + "/outputChannel/products/product"
     for record in records:
-        if record.get("label") is not None:
-            flags.conversions.append((f"{base}[@label='{record['label']}']", "MF6"))
+        # A photon subsection D40 split into lines is several products, and
+        # FUDGE flags each of them.
+        for label in lineSpectrumLabels(record):
+            flags.conversions.append((f"{base}[@label='{label}']", "MF6"))
 
 
 def _addProductsToPoPs(suite, records) -> None:

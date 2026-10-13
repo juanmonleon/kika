@@ -463,9 +463,11 @@ def _mf6Sections(suite, mat, report, label=None):
         # the photons of MF12/MF13 beside an MF6 that does not state them
         # (ENDF/B-VIII.1 S-36 MT22), an excited residual -- and those are
         # written by their own files.
-        listed = {record["label"] for record in header["mf6"].get("products", ())
-                  if record.get("label") is not None}
-        forms = {}
+        from ..model_adapter.photon_lines import lineSpectrumLabels
+
+        listed = {label for record in header["mf6"].get("products", ())
+                  for label in lineSpectrumLabels(record)}
+        forms, multiplicities = {}, {}
         # The reaction's products, then the products of their decays: MF6 can
         # list a residual's de-excitation photon (FUDGE does), and the model
         # keeps that photon where GNDS puts it, in the residual's decay.
@@ -481,8 +483,13 @@ def _mf6Sections(suite, mat, report, label=None):
                 form = _evaluatedForm(product, EVAL_LABEL)
             if form is not None:
                 forms[product.label or product.pid] = form
+            # A photon line's multiplicity is its share of the section's yield
+            # (D40), so the encoder needs it beside the form.
+            multiplicity = getattr(getattr(product, "multiplicity", None), "form", None)
+            if multiplicity is not None:
+                multiplicities[product.label or product.pid] = multiplicity
 
-        section, report = encodeMF6MT(forms, provenance, mt, report)
+        section, report = encodeMF6MT(forms, provenance, mt, report, multiplicities)
         sections.append((6, mt, section))
 
     if label != EVAL_LABEL and sections:

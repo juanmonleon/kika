@@ -406,6 +406,13 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
             (int(e3["LR"]) if e3.get("LR") is not None else 0) if composite else None,
             Pairs(np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)))
     products = list(reaction.outputChannel.products) if reaction.outputChannel else []
+    if products:
+        # An MF6 photon whose lines the ENDF decoder split into products (D40)
+        # is one MF6 product again, its lines first in each table.
+        from kika.endf.model_adapter.photon_lines import mergedLineSpectra
+
+        merged, hidden = mergedLineSpectra(reaction)
+        products = [merged.get(p.label, p) for p in products if p.label not in hidden]
     # The decaying residual of a level reaction (endf/model_adapter/residuals.py,
     # and what FUDGE's GNDS carries too) states no multiplicity and an
     # `unspecified` distribution: G4NDL has nowhere to put it and Geant4 makes the
