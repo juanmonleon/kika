@@ -86,6 +86,117 @@ class HeatingResult:
     #: ``mt -> (kerma, kermaLocal, damage)`` per reaction, eV per reaction
     #: (multiply by its cross section for its share of the KERMA).
     perReaction: Dict[int, tuple] = field(default_factory=dict)
+    #: Photon energy per reaction, including photons declared on redundant sums.
+    photonEnergy: Dict[int, np.ndarray] = field(default_factory=dict)
+
+    def partialsOf(self, sigma, requested, *, fissionKerma=None,
+                   fissionPhotonEnergy=None, local=False):
+        """Requested heating/damage responses in eV·b, using already computed moments.
+
+        ENDF-6 HEATR's selection rules apply, including charged-particle level
+        families in 401/403–407/447. Photon corrections declared on sums are
+        counted once. ``local`` deposits transported photons as well.
+
+        ``fissionKerma`` supplies independently calculated fission energy per
+        collision, keyed by the exclusive fission MTs. It is required for a
+        heating selection containing active fission; this class deliberately
+        does not fabricate release energies from neutron spectra. MT443 requires
+        a separate kinematic calculation and is rejected here. MT442 needs
+        ``fissionPhotonEnergy`` on active fission channels. When ``local`` is
+        true, the supplied fissionKerma must itself include local photon energy.
+        """
+        ids = tuple(requested)
+        if any(isinstance(mt, (bool, np.bool_)) or not isinstance(mt, (int, np.integer))
+               for mt in ids):
+            raise ValueError("partial response identifiers must be integers")
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate partial response identifiers")
+        allowed = {301, 303, 304, 318, 401, 442, 444, 445, 446, 447, 901}
+        allowed.update(300 + mt for mt in self.perReaction if 1 < mt <= 141)
+        allowed.update(range(403, 408))
+        unknown = set(ids) - allowed
+        if unknown:
+            raise ValueError(f"unsupported partial responses: {sorted(unknown)}")
+        cross = {}
+        for mt in set(self.perReaction) | set(self.photonEnergy):
+            if mt not in sigma:
+                raise ValueError(f"missing cross section for MT{mt}")
+            values = np.asarray(sigma[mt], dtype=float)
+            if values.shape != self.grid.shape or not np.all(np.isfinite(values)) or np.any(values < 0):
+                raise ValueError(f"invalid cross section for MT{mt}")
+            cross[mt] = values
+        fissionKerma = fissionKerma or {}
+        fissionPhotonEnergy = fissionPhotonEnergy or {}
+
+        def selected(response, mt):
+            if response in (301, 901, 442, 444):
+                return True
+            if response == 303:
+                return mt not in (2, 3)
+            if response in (304, 446):
+                return 51 <= mt <= 91
+            if response == 318:
+                return mt in FISSION_MTS
+            if response in (401, 447):
+                return 102 <= mt <= 120 or 600 <= mt <= 849
+            if response == 445:
+                return mt == 2
+            if 403 <= response <= 407:
+                first = 600 + 50 * (response - 403)
+                return mt == response - 300 or first <= mt <= first + 49
+            return mt == response - 300
+
+        output = {}
+        for response in ids:
+            if response == 444:
+                output[response] = self.damage.copy()
+                continue
+            values = np.zeros_like(self.grid)
+            damage = response in (445, 446, 447)
+            localResponse = local or response == 901
+            for mt, moments in self.perReaction.items():
+                if not selected(response, mt):
+                    continue
+                if response == 442:
+                    continue
+                if damage:
+                    energy = moments[2]
+                elif mt in FISSION_MTS:
+                    if not np.any(cross[mt] > 0):
+                        continue
+                    if mt not in fissionKerma:
+                        raise ValueError(f"fission heating requires release energy for MT{mt}")
+                    energy = np.asarray(fissionKerma[mt], dtype=float)
+                    if energy.shape != self.grid.shape or not np.all(np.isfinite(energy)):
+                        raise ValueError(f"invalid fission release energy for MT{mt}")
+                else:
+                    energy = moments[1 if localResponse else 0]
+                values += cross[mt] * energy
+            # Per-reaction moments already subtract their own photons. Sum
+            # photons, absent from perReaction, must be subtracted separately.
+            for mt, energy in self.photonEnergy.items():
+                # HEATR gheat maps MT4 photon production onto MT51 for
+                # partial selection, and MT3 onto the total. These are
+                # photon-production labels, never extra neutron reactions.
+                selectionMt = (51 if mt == 4 else 1 if mt == 3 else mt)
+                if not selected(response, selectionMt):
+                    continue
+                if response == 442:
+                    values += cross[mt] * energy
+                elif not damage and not localResponse and mt not in self.perReaction:
+                    values -= cross[mt] * energy
+            if response == 442:
+                for mt in self.perReaction:
+                    if mt not in FISSION_MTS or not np.any(cross[mt] > 0):
+                        continue
+                    if mt not in fissionPhotonEnergy:
+                        raise ValueError(f"fission photon response requires photon energy for MT{mt}")
+                    energy = np.asarray(fissionPhotonEnergy[mt], dtype=float)
+                    if energy.shape != self.grid.shape or not np.all(np.isfinite(energy)):
+                        raise ValueError(f"invalid fission photon energy for MT{mt}")
+                    values += cross[mt] * energy
+            output[response] = values
+        return output
 
 
 # ----------------------------------------------------------------------
@@ -223,6 +334,21 @@ class _Kinematics:
     #: panels it is lower: U-235 MT91's photons at 5.382 MeV average 1.473 MeV
     #: by trapezoids and 1.515 MeV exactly.
     trapezoid: bool = False
+
+
+def _qAt(value, grid):
+    """An auxiliary Q on its declared domain; never extrapolate a user table."""
+    grid = np.asarray(grid, dtype=float)
+    if hasattr(value, "evaluate"):
+        lo, hi = float(value.domainMin), float(value.domainMax)
+        if np.any(grid < lo) or np.any(grid > hi):
+            raise ValueError("qbar does not cover the heating energy grid")
+        result = np.asarray(value.evaluate(grid), dtype=float)
+    else:
+        result = np.full(grid.shape, float(value))
+    if result.shape != grid.shape or not np.all(np.isfinite(result)):
+        raise ValueError("auxiliary Q must give one finite value per incident energy")
+    return result
 
 
 def _cmToLab(grid, ecm, sqrtMu, k: _Kinematics):
@@ -432,7 +558,6 @@ def _distribution(product):
 def _twoBodyDamage(form, grid, A, Q, Z, ed, elastic):
     """``disbar``: ``E_R(μ) = E·A/(A+1)²·(1 − 2rμ + r²)`` over the angular tables, GL-64."""
     angular = form.angular if hasattr(form, "angular") else None
-    thr = (A + 1.0) / A * max(-Q, 0.0)
     nodesMu, weightsMu = _GL64
     if angular is None or type(angular).__name__ == "Isotropic2d":
         energies, pdfs = np.array([grid[0], grid[-1]]), [np.full(64, 0.5)] * 2
@@ -448,6 +573,7 @@ def _twoBodyDamage(form, grid, A, Q, Z, ed, elastic):
     w = np.where(span > 0, (nodes - energies[j]) / np.where(span > 0, span, 1.0), 0.0)
     w = np.clip(w, 0.0, 1.0)
     pdf = np.array([(1 - wi) * pdfs[a] + wi * pdfs[b] for wi, a, b in zip(w, j, jn)])
+    thr = (A + 1.0) / A * max(-Q, 0.0)
     r2 = np.clip(1.0 - thr / np.maximum(nodes, 1e-300), 0.0, None)
     r = np.sqrt(r2)
     er = nodes[:, None] * A / (A + 1.0) ** 2 * (1.0 - 2.0 * r[:, None] * nodesMu[None, :] + r2[:, None])
@@ -707,6 +833,7 @@ def _statedInMF6(evaluation, mt) -> bool:
 
 def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
               qm: Optional[Dict[int, float]] = None, ed: Optional[float] = None,
+              qa: Optional[Dict[int, float]] = None, qbar: Optional[Dict[int, object]] = None,
               evaluation=None, zaTarget: Optional[int] = None,
               report=None) -> HeatingResult:
     """KERMA (local and not) and damage of a processed suite on ``grid``.
@@ -720,13 +847,39 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     charged particles and recoils (which the processed suite, like OpenMC's
     files, does not keep) give MT5's deposit and the damage of every reaction
     that states them, as HEATR takes them from MF6.
+    Scalar ``qa`` replaces the ground-state balance Q on HEATR's supported
+    non-fission paths, without changing evaluated kinematics. ``qbar`` maps MTs
+    to model Function1d objects. It replaces the balance Q and the Q used by
+    the absorption/capture recoil fallback; evaluated outgoing distributions
+    and the two-body threshold remain unchanged, as HEATR disbar actually
+    initialises that threshold before reading qbar. Tables must cover the whole
+    requested grid. Capture with explicit photons and MT5 explicit
+    deposition keep their evaluated recoil/deposit convention.
+    Fission auxiliary-Q handling is not yet supported and raises explicitly.
     """
     grid = np.asarray(grid, dtype=float)
     A = float(awr)
     ed = displacementEnergy(Z) if not ed else float(ed)
     qm = qm or {}
+    qa, qbar = dict(qa or {}), dict(qbar or {})
+    if set(qa) & set(qbar):
+        raise ValueError("a reaction cannot have both scalar qa and tabulated qbar")
+    known = {r.ENDF_MT for r in suite.reactions}
+    if (set(qa) | set(qbar)) - known:
+        raise ValueError("auxiliary Q names an absent reaction")
+    if (set(qa) | set(qbar)) & set(FISSION_MTS):
+        raise NotImplementedError("fission auxiliary Q requires fission-release processing")
+    from kika.nuclear_data import model as m
+    for mt, value in qa.items():
+        if not np.isscalar(value) or not np.isfinite(float(value)):
+            raise ValueError(f"MT{mt} scalar qa must be finite")
+    for mt, value in qbar.items():
+        if not isinstance(value, m.Function1d):
+            raise TypeError(f"MT{mt} qbar must be a model Function1d")
+        _qAt(value, grid)
     tm = NEUTRON_REST_ENERGY * (A + 1.0)
     perReaction: Dict[int, tuple] = {}
+    photonEnergy: Dict[int, np.ndarray] = {}
     kerma = np.zeros(len(grid))
     local = np.zeros(len(grid))
     damage = np.zeros(len(grid))
@@ -739,6 +892,19 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         s = np.asarray(sigma[mt], dtype=float)
         Q = float(reaction.outputChannel.Q.value or 0.0)
         Qbal = float(qm.get(mt, Q))
+        Qkin = qbar.get(mt, Q)
+        if mt in qbar:
+            Qbal = _qAt(Qkin, grid)
+        elif mt in qa:
+            if mt <= 100 or _statedInMF6(evaluation, mt):
+                Qbal = float(qa[mt])
+            else:
+                notes.append(f"MT{mt}: scalar qa does not change this absorption balance, as HEATR")
+        if mt in qa or mt in qbar:
+            notes.append(f"MT{mt}: user auxiliary Q ({'qbar' if mt in qbar else 'qa'})")
+        # HEATR disbar initialises its threshold from evaluated Q before
+        # qbar is read at each energy. Auxiliary heating Q does not rewrite
+        # the processed Monte Carlo neutron distribution.
         k = _Kinematics(A=A, Q=Q)
         # A photon has no mass: a centre-of-mass photon spectrum is its lab one.
         photon = _Kinematics(A=A, Q=Q, awp=0.0)
@@ -802,7 +968,7 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
                 recoil = np.divide(carried, y, out=np.zeros_like(carried), where=y > 0)
                 d = y * lindhard(recoil, Z, A + 1, Z, A, ed)
             else:
-                d = _captureDamage(photons, grid, A, Z, ed, Q)
+                d = _captureDamage(photons, grid, A, Z, ed, _qAt(Qkin, grid))
         elif heavy is not None:
             d = heavy[1]
         elif neutrons:
@@ -810,11 +976,12 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             for product, form in neutrons[:1]:
                 d = _emissionDamage(form, grid, A, Z, ed)
         elif mt > 102:
-            d = _absorptionDamage(mt, grid, A, Z, ed, Q)
+            d = _absorptionDamage(mt, grid, A, Z, ed, _qAt(Qkin, grid))
         else:
             d = np.zeros(len(grid))
         damage += np.where(live, s * d, 0.0)
         perReaction[mt] = (carried, carried + exact, d)
+        photonEnergy[mt] = exact
     # Fission's damage: HEATR's conbar gives a fission the recoil of one
     # emission from its prompt-neutron spectrum (tabdam, one neutron, not ν̄;
     # the fragments are not followed): U-235 at thermal, ~6.9 keV per fission.
@@ -850,9 +1017,10 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         for product, form in photons:
             gammas = gammas + _yield(product, grid) * _meanEnergyOf(form, grid, photon)
         kerma -= np.where(s > 0, s * gammas, 0.0)
+        photonEnergy[mt] = gammas
         notes.append(f"MT{mt}: {len(photons)} photons stated on the sum, taken out of MT301")
     if report is not None:
         for note in notes:
             report.warn(note)
     return HeatingResult(grid=grid, kerma=kerma, kermaLocal=local, damage=damage, notes=notes,
-                         perReaction=perReaction)
+                         perReaction=perReaction, photonEnergy=photonEnergy)
