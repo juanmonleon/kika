@@ -205,6 +205,12 @@ class StageReport:
     details: dict = field(default_factory=dict)
 
 
+def _today() -> str:
+    from datetime import date
+
+    return date.today().isoformat()
+
+
 def _engine_category(error):
     from kika.processing.doppler import DopplerConvergenceError, UnsupportedDopplerError
     engine = getattr(error, "category", None)
@@ -807,7 +813,10 @@ def _add_heated(suite, label, T, tables, source):
     # same energy twice.
     nudged = np.flatnonzero(np.diff(xs) <= 2e-12 * xs[1:])
     xs[nudged + 1] = xs[nudged]
-    suite.styles.add(Heated(label, derivedFrom=source, temperature=PhysicalQuantity(float(T), "K")))
+    # The date the style was made, which gnds.xsd requires on every derived
+    # style (as `attach_broadening` dates its own).
+    suite.styles.add(Heated(label, derivedFrom=source, date=_today(),
+                            temperature=PhysicalQuantity(float(T), "K")))
     for reaction in list(suite.reactions) + list(suite.sums) + list(suite.fissionComponents):
         mt = reaction.ENDF_MT
         if mt is None or mt not in tables:
@@ -1084,7 +1093,8 @@ def _working_suite(rec, suite=None):
                 continue
             raise ValueError(f"{key} is in the tape but not in the reconstruction")
         reaction.crossSection[label] = copy.deepcopy(rec.result.forms[key])
-    work.styles.add(CrossSectionReconstructed(label, derivedFrom=rec.result.source_style))
+    work.styles.add(CrossSectionReconstructed(label, derivedFrom=rec.result.source_style,
+                                              date=_today()))
     notes = hp._m().ConversionReport()
     hp._linearised(work, notes)
     return work, label

@@ -801,7 +801,8 @@ def attach_reconstruction(suite,result,*,progress=None,workers=None):
     # Verify even if the caller edited the mutable canonical output forms.
     candidate=deepcopy(suite)
     for key,reaction in _entries(candidate).items():reaction.crossSection[result.label]=deepcopy(result.forms[key])
-    candidate.styles.add(CrossSectionReconstructed(result.label,derivedFrom=result.source_style))
+    from datetime import date as calendar_date
+    candidate.styles.add(CrossSectionReconstructed(result.label,derivedFrom=result.source_style,date=calendar_date.today().isoformat()))
     result.verify_suite(candidate,progress=progress,workers=workers)
     # Publish prebuilt containers only after every operation that can fail.
     candidates=_entries(candidate)

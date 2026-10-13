@@ -222,7 +222,9 @@ def _reconstructed(suite, context, report):
         working = copy.deepcopy(suite)
         for reaction in _entries(working).values():
             reaction.crossSection[RECON_LABEL] = reaction.crossSection[EVAL_LABEL]
-        working.styles.add(m.CrossSectionReconstructed(label=RECON_LABEL, derivedFrom=EVAL_LABEL))
+        from datetime import date
+        working.styles.add(m.CrossSectionReconstructed(label=RECON_LABEL, derivedFrom=EVAL_LABEL,
+                                                       date=date.today().isoformat()))
         report.warn("the evaluated cross sections are pointwise (the 0 K reconstruction is in the "
                     "file) and were taken as the 0 K forms")
         return working
