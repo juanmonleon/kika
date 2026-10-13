@@ -32,14 +32,19 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
     others = [p for p in pops.particles.values()
               if not isinstance(p, (Nuclide, Unorthodox))]
 
-    for particle in others:
-        wrapper = ("gaugeBosons" if particle.id == "photon" else "baryons")
-        group = container.find(wrapper)
-        if group is None:
-            group = ET.SubElement(container, wrapper)
-        node = ET.SubElement(group, wrapper[:-1])
-        node.attrib["id"] = particle.id
-        _particleProperties(node, particle)
+    # In the schema's order, gaugeBosons before baryons (`PoPs` is an
+    # `xs:sequence`), whatever order the particles were added in: a suite whose
+    # neutron came first wrote baryons first, and the file did not validate.
+    for wrapper in ("gaugeBosons", "baryons"):
+        members = [p for p in others
+                   if (p.id == "photon") == (wrapper == "gaugeBosons")]
+        if not members:
+            continue
+        group = ET.SubElement(container, wrapper)
+        for particle in members:
+            node = ET.SubElement(group, wrapper[:-1])
+            node.attrib["id"] = particle.id
+            _particleProperties(node, particle)
 
     if nuclides:
         elements = ET.SubElement(container, "chemicalElements")

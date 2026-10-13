@@ -622,3 +622,41 @@ def test_fudge_writes_the_cascades_back_from_the_gnds_kika_writes(cascadePair, f
         assert theirs[mt].transitions == ours[mt].transitions, mt
         assert theirs[mt].es_ns == ours[mt].es_ns
         assert theirs[mt].lp == 0
+
+
+# ----------------------------------------------------------------------
+# D38: FUDGE reads, and reconstructs from, the GNDS kika writes from a tape
+# ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", _TAPES)
+def test_fudge_reads_and_reconstructs_the_gnds_kika_writes(name, fudgePython, tmp_path):
+    """kika's GNDS of a Reich-Moore tape → FUDGE reads it, finds the tape's
+    resonances, and reconstructs from it.
+
+    Each step failed until D38 (2026-10-13): the first ``resonanceReaction``
+    (``fissionA`` with no ``link``, on an evaluation with no fission), then a
+    channel without ``channelSpin``, a ``spinGroup`` without ``parity``, the
+    step in MT2, the repeated 3.905 MeV of MF4, a channel without ``genre``;
+    and, past reading, the elastic channel's particle pair, which FUDGE's
+    reconstruction takes from MT2's products.
+
+    What the reconstruction gives is **not** compared here to FUDGE's
+    translation of the same tape, and on purpose: for l ≥ 1 with APL ≠ AP the
+    two disagree by design. FUDGE translates APL to the elastic channel's
+    ``hardSphereRadius`` (phase only); kika, like NJOY, uses it for the
+    penetrability too, and its GNDS says so. Measured on this tape:
+    2.6e-4 median in the resonance elastic, 2e-10 once the convention is
+    aligned (``docs/library/library-gaps.md``, D38).
+    """
+    import kika
+
+    tape = _DATA / name
+    suite, _ = decodeReactionSuite(read_endf(str(tape)))
+    gnds = tmp_path / "kika.gnds.xml"
+    kika.write(suite, gnds)
+    fromKika = _runFudge(fudgePython, gnds, name="suite.xml")
+    fromTape = _runFudge(fudgePython, tape)
+    assert "reconstructionError" not in fromKika, fromKika["reconstructionError"]
+    assert {"capture", "elastic", "total"} <= set(fromKika["reconstructed"])
+    np.testing.assert_allclose(fromKika["resonances"], fromTape["resonances"],
+                               rtol=RTOL, atol=0)
