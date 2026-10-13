@@ -154,6 +154,7 @@ class ProbabilityTableStatistics:
     shieldingSigma: np.ndarray
     errorTarget: Optional[float] = None
     converged: Optional[np.ndarray] = None
+    shieldingBasis: str = "ladder_cross_sections"
 
     def worst(self) -> dict:
         """The largest errors over energies and bands, per row: the band share

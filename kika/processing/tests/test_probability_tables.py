@@ -206,3 +206,57 @@ def test_report_line_names_only_reactions_with_an_average():
     assert worst["fission"]["contribution"] == 0.0 and worst["capture"]["contribution"] > 0
     line = _urrErrorLine(293.6, statistics)
     assert "capture f(1 b)" in line and "fission" not in line and "8 ladders" in line
+
+
+def test_transport_shielding_uses_partial_factors_and_ignores_the_total_row():
+    from kika.processing.resonances.probability_tables import _estimates
+
+    counts = np.array([25., 75.])
+    means = np.array([[100., 200.], [2., 6.], [0., 0.], [8., 2.]])
+    sums = counts * means
+    totals = sums.sum(-1)
+    smooth = (10., 0., 3., 4.)
+    result = _estimates(counts, sums, totals, (1.,), smooth)
+    # Partial factors restore [4, 12] b elastic and [48/7, 12/7] b
+    # non-fission absorption; add the constant 4 b inelastic competition.
+    p = counts / 100.
+    elastic = np.array([4., 12.])
+    capture = np.array([48./7., 12./7.])
+    weight = p / (elastic + capture + 4. + 1.)
+    expected = (weight * elastic).sum() / weight.sum() / 10.
+    assert result['shielding'][1, 0] == pytest.approx(expected)
+    # A corrupt/otherwise-normalised unused total cannot alter transport f.
+    sums[0] *= np.array([.01, 100.])
+    totals[0] = sums[0].sum()
+    changed = _estimates(counts, sums, totals, (1.,), smooth)
+    np.testing.assert_array_equal(changed['shielding'], result['shielding'])
+
+
+def test_transport_diagnostics_do_not_change_fixed_count_tables():
+    from kika.processing.resonances.probability_tables import _tablesAt
+
+    job = _job(ladders=8)
+    old, old_stats = _tablesAt(job)
+    new, new_stats = _tablesAt(job + ([(4., 0., 2., 1.)],))
+    np.testing.assert_array_equal(old, new)
+    assert not np.array_equal(old_stats[0]['shielding'], new_stats[0]['shielding'])
+    assert np.isfinite(new_stats[0]['shieldingSigma']).all()
+
+
+def test_processed_transport_absorption_excludes_redundant_sums():
+    from types import SimpleNamespace
+    from kika.nuclear_data import model as m
+    from kika.hdf5.processing import _urrTransportXS
+    from kika.hdf5.names import heatedLabel
+
+    label = heatedLabel('294K')
+    def reaction(mt, xs, redundant=0):
+        return SimpleNamespace(ENDF_MT=mt,
+            crossSection=SimpleNamespace(forms={label: m.XYs1d(xs=[1., 2.], ys=[xs, xs])}),
+            provenance=SimpleNamespace(attributes={'redundant': redundant}))
+    suite = SimpleNamespace(reactions=[reaction(2, 10.), reaction(102, 2.),
+                                      reaction(600, 3.), reaction(51, 4.), reaction(52, 5.)],
+                            fissionComponents=[reaction(19, 6.)],
+                            sums=[reaction(103, 3., 1), reaction(18, 6., 1)])
+    values = _urrTransportXS(suite, '294K', np.array([.5, 1.5]), 4)
+    np.testing.assert_array_equal(values, [[0., 0., 0., 0.], [10., 6., 5., 9.]])

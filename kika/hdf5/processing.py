@@ -849,7 +849,14 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         report.warn("URR probability tables passed in, computed on another suite (D12: a "
                     "perturbation run's unperturbed evaluation); they are not perturbed")
     else:
-        byKelvin = urrTablesOf(work, temperatures, context=context, workers=workers, report=report)
+        from kika.processing.resonances.probability_tables import purrGrid, purrInputs, competitionFlags
+        energyURR = purrGrid(work.resonances.unresolved)
+        _, competingURR = purrInputs(work, energyURR, form=_evaluated)
+        inelasticURR, _ = competitionFlags(competingURR)
+        transportXS = {float(kelvin): _urrTransportXS(out, T, energyURR, inelasticURR)
+                       for kelvin, T in zip(temperatures, styleKT)}
+        byKelvin = urrTablesOf(work, temperatures, context=context, workers=workers,
+                              report=report, transportXS=transportXS)
         urrTables = {T: byKelvin[float(t)] for t, T in zip(temperatures, styleKT)}
     if urrTables:
         _attachURR(out, urrTables)
@@ -942,7 +949,7 @@ def _urrContext(suite, context):
                           target.spin.convertedTo("hbar").value)
 
 
-def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None, options=None):
+def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None, options=None, transportXS=None):
     """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR (roadmap H8).
 
     The tables :func:`processSuite` writes. ``context`` is the target's
@@ -960,7 +967,7 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
     options = options or ProbabilityTableOptions()
     tables = probabilityTables(region, _urrContext(suite, context), energies, temperatures,
                                background=background, competing=competing, options=options,
-                               workers=workers or min(len(energies), os.cpu_count() or 1, 8))
+                               workers=workers or min(len(energies), os.cpu_count() or 1, 8), transportXS=transportXS)
     if report is not None:
         report.warn(f"URR probability tables computed by kika (PURR's method: {options.ladders} "
                     f"ladders of {options.samples} samples, {options.bins} bands, on "
@@ -986,7 +993,7 @@ def _urrErrorLine(T, statistics) -> str:
         missed = int((~statistics.converged).sum())
         target = (f"; target {100 * statistics.errorTarget:g} % "
                   + ("reached at every energy" if not missed else f"NOT reached at {missed} energies"))
-    return (f"URR {T:g} K statistical error (1 sigma, jackknife over {drawn} ladders, worst energy): "
+    return (f"URR {T:g} K statistical error (1 sigma, jackknife over {drawn} ladders, {statistics.shieldingBasis}, worst energy): "
             + "; ".join(parts) + target)
 
 
@@ -1299,6 +1306,44 @@ def _fission(work, out, report):
             nu = neutron.multiplicity.form if neutron is not None else None
             fission.outputChannel.fissionFragmentData = m.FissionFragmentData(
                 fissionEnergyReleases=[openmcTerms(source.fissionEnergyReleases[0], nu, report)])
+
+
+
+def _urrTransportXS(out, T, grid, inelastic):
+    """Smooth XS used by OpenMC's URR reader, on the probability-table grid.
+
+    Capture in the reader denotes all non-fission disappearance, not MT102
+    alone. Redundant sums are excluded from absorption and fission.
+    """
+    values = {}
+    result = np.zeros((len(grid), 4))
+    for container in (out.reactions, out.fissionComponents, out.sums):
+        for reaction in container:
+            mt = reaction.ENDF_MT
+            form = reaction.crossSection.forms.get(heatedLabel(T))
+            if mt is None or form is None:
+                continue
+            x = np.interp(grid, form.xs, form.ys, left=0., right=float(form.ys[-1]))
+            values[mt] = x
+            attributes = getattr(reaction.provenance, "attributes", {}) or {}
+            if attributes.get("redundant", 0):
+                continue
+            if mt == 2:
+                result[:, 0] += x
+            elif mt in FISSION_MTS:
+                result[:, 1] += x
+            elif (101 <= mt <= 117 or 600 <= mt <= 849
+                  or mt in (118, 119, 120, 121, 122, 124)):
+                result[:, 2] += x
+    if inelastic > 0:
+        if inelastic in values:
+            result[:, 3] = values[inelastic]
+        elif inelastic == 4:
+            result[:, 3] = sum((x for mt, x in values.items() if 51 <= mt <= 91),
+                               np.zeros(len(grid)))
+        else:
+            raise ValueError(f"URR competing MT{inelastic} has no processed smooth cross section")
+    return result
 
 
 def _totalOn(out, T, grid):

@@ -224,7 +224,7 @@ def _ladder(rng, seq, elow, ehigh):
     return er, widths
 
 
-def _estimates(C, S, T, sigma0):
+def _estimates(C, S, T, sigma0, transportXS=None):
     """A table's estimates from its ladder sums, over any leading axes.
 
     ``C`` (..., M) samples per band, ``S`` (..., 4, M) their sums of total,
@@ -240,6 +240,13 @@ def _estimates(C, S, T, sigma0):
     live = overall != 0
     factor = np.where(live[..., None], means / np.where(live, overall, 1.0)[..., None], 1.0)
     contribution = p[..., None, :] * factor
+    if transportXS is not None:
+        # OpenMC multiplies the partial factors by smooth elastic, fission
+        # and ALL non-fission absorption, then reconstructs the total. The
+        # published total row is not used by the transport reader.
+        elastic, fission, capture, inelastic = transportXS
+        means = factor * np.asarray([0., elastic, fission, capture])[..., None]
+        means[..., 0, :] = means[..., 1:4, :].sum(-2) + inelastic
     dilute = (p[..., None, :] * means).sum(-1)
     shielding = np.empty(means.shape[:-1] + (len(sigma0),))
     for k, s0 in enumerate(sigma0):
@@ -250,7 +257,7 @@ def _estimates(C, S, T, sigma0):
     return dict(probability=p, factor=factor, contribution=contribution, shielding=shielding)
 
 
-def _ladderStatistics(lc, ls, lt, sigma0):
+def _ladderStatistics(lc, ls, lt, sigma0, transportXS=None):
     """Estimates and their delete-one-ladder jackknife errors from per-ladder sums.
 
     ``lc`` (L, M), ``ls`` (L, 4, M), ``lt`` (L, 4): one row per ladder, the
@@ -260,13 +267,13 @@ def _ladderStatistics(lc, ls, lt, sigma0):
     lc, ls, lt = (np.asarray(a, dtype=float) for a in (lc, ls, lt))
     L = lc.shape[0]
     C, S, T = lc.sum(0), ls.sum(0), lt.sum(0)
-    full = _estimates(C, S, T, sigma0)
+    full = _estimates(C, S, T, sigma0, transportXS)
     out = dict(full, ladders=L)
     if L < 2:
         for key, value in full.items():
             out[key + "Sigma"] = np.full_like(value, np.inf)
         return out
-    loo = _estimates(C - lc, S - ls, T - lt, sigma0)
+    loo = _estimates(C - lc, S - ls, T - lt, sigma0, transportXS)
     for key, value in loo.items():
         out[key + "Sigma"] = np.sqrt((L - 1) / L * ((value - value.mean(0)) ** 2).sum(0))
     return out
@@ -294,7 +301,8 @@ def _tablesAt(job, keepLadders=False):
     """
     from kika._constants import BOLTZMANN_CONSTANT
 
-    prepared, A, E, ie, temperatures, bkg, competitionBkg, options = job
+    prepared, A, E, ie, temperatures, bkg, competitionBkg, options = job[:8]
+    transportXS = job[8] if len(job) > 8 else [None] * len(temperatures)
     native = _nativeKernel() if options.native else None
     rng = np.random.default_rng([options.seed, ie])
     nT, bins = len(temperatures), options.bins
@@ -382,12 +390,12 @@ def _tablesAt(job, keepLadders=False):
         if (options.errorTarget is not None and (ladder + 1) % options.checkEvery == 0
                 and ladder + 1 < options.ladders):
             n = ladder + 1
-            if _converged([_ladderStatistics(lc[it, :n], ls[it, :n], lt[it, :n], options.sigma0)
+            if _converged([_ladderStatistics(lc[it, :n], ls[it, :n], lt[it, :n], options.sigma0, transportXS[it])
                            for it in range(nT)], options.errorTarget):
                 used = n
                 break
     lc, ls, lt = lc[:, :used], ls[:, :used], lt[:, :used]
-    stats = [_ladderStatistics(lc[it], ls[it], lt[it], options.sigma0) for it in range(nT)]
+    stats = [_ladderStatistics(lc[it], ls[it], lt[it], options.sigma0, transportXS[it]) for it in range(nT)]
     converged = None if options.errorTarget is None else _converged(stats, options.errorTarget)
     for st in stats:
         st["converged"] = converged
@@ -413,7 +421,7 @@ def probabilityTables(region, context, energies, temperatures, *,
                       background: Optional[Dict[int, np.ndarray]] = None,
                       competing: Sequence[int] = (),
                       options: ProbabilityTableOptions = ProbabilityTableOptions(),
-                      workers: int = 1):
+                      workers: int = 1, transportXS=None):
     """``{T: ProbabilityTables}`` at the temperatures (K) on ``energies`` (eV).
 
     ``region`` is the model's :class:`UnresolvedRegion`, ``context`` the
@@ -424,13 +432,18 @@ def probabilityTables(region, context, energies, temperatures, *,
 
     Each table carries its statistical error as ``statistics``
     (:class:`ProbabilityTableStatistics`); ``options.errorTarget`` draws
-    ladders at each energy only until that error is reached.
+    ladders at each energy only until that error is reached. ``transportXS``
+    optionally maps each kelvin temperature to an (nE, 4) array of smooth
+    elastic, fission, non-fission absorption and competing inelastic XS (b).
+    With it, shielding and its stopping error follow OpenMC's actual reader;
+    without it they describe the unscaled ladder cross sections. Fixed-count
+    table values are unaffected by this diagnostic choice.
     """
     from kika.nuclear_data.model import ProbabilityTables, ProbabilityTableStatistics
 
     temperatures = [float(t) for t in np.atleast_1d(temperatures)]
     energies = np.asarray(energies, dtype=float)
-    results = _run(_tablesAt, region, context, energies, temperatures, background, options, workers)
+    results = _run(_tablesAt, region, context, energies, temperatures, background, options, workers, transportXS)
     tables = np.stack([r[0] for r in results], axis=1)              # (nT, nE, 6, bins)
     inelastic, absorption = competitionFlags(competing)
     out = {}
@@ -445,7 +458,8 @@ def probabilityTables(region, context, energies, temperatures, *,
             probabilitySigma=stack("probabilitySigma"), factorSigma=stack("factorSigma"),
             contributionSigma=stack("contributionSigma"), shielding=stack("shielding"),
             shieldingSigma=stack("shieldingSigma"), errorTarget=options.errorTarget,
-            converged=None if options.errorTarget is None else np.array([s["converged"] for s in st]))
+            converged=None if options.errorTarget is None else np.array([s["converged"] for s in st]),
+            shieldingBasis="openmc_transport" if transportXS is not None else "ladder_cross_sections")
         out[t] = ProbabilityTables(energies=energies, table=tables[it], interpolation=2,
                                    inelastic=inelastic, absorption=absorption, multiplySmooth=True,
                                    statistics=statistics)
@@ -462,10 +476,17 @@ def _ladderAccumulators(region, context, energies, temperatures, *, background=N
     return [r[2] for r in results]
 
 
-def _run(task, region, context, energies, temperatures, background, options, workers):
+def _run(task, region, context, energies, temperatures, background, options, workers, transportXS=None):
     """``task`` on every energy's job, in ``workers`` processes."""
     prepared = _prepared(region, context)
     background = background or {}
+    if transportXS is not None:
+        transportXS = {float(t): np.asarray(transportXS[float(t)], dtype=float)
+                       for t in temperatures}
+        for values in transportXS.values():
+            if values.shape != (len(energies), 4) or not np.isfinite(values).all() or np.any(values < 0):
+                raise ValueError("transportXS must provide finite nonnegative (nE, 4) arrays "
+                                 "of elastic, fission, non-fission absorption and inelastic XS")
 
     def bkgAt(mt, ie):
         return float(np.asarray(background[mt])[ie]) if mt in background else 0.0
@@ -475,7 +496,8 @@ def _run(task, region, context, energies, temperatures, background, options, wor
         bkg = {mt: bkgAt(mt, ie) for mt in (2, 18, 102)}
         competitionBkg = (bkgAt(1, ie) - bkg[2] - bkg[18] - bkg[102]) if 1 in background else 0.0
         jobs.append((prepared, float(context.atomic_weight_ratio), float(E), ie, temperatures,
-                     bkg, competitionBkg, options))
+                     bkg, competitionBkg, options,
+                     [None if transportXS is None else transportXS[t][ie] for t in temperatures]))
     if workers > 1 and len(jobs) > 1:
         from concurrent.futures import ProcessPoolExecutor
 
