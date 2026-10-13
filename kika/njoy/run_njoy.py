@@ -135,16 +135,16 @@ def _render_title(isotope_label: str, T: float, library_name: str, njoy_version:
     return f"{isotope_label} - {T:.1f} K - {library_name.upper()} ({njoy_version})"
 
 def _render_njoy_input(mat: int, T: float, title: str, suff: str = None,
-                       template: str = NJOY_INPUT_TEMPLATE, acer_iprint: int = 1) -> str:
+                       template: str = NJOY_INPUT_TEMPLATE, acer_iprint: int = 0) -> str:
     if suff is None:
         # Use helper function to get temperature suffix (without 'c')
         _, temp_suffix = _get_temperature_info(T)
         suff = temp_suffix
     # Fill the template with the run-specific parameters
     deck = dedent(template).format(mat=mat, T=T, title=title, suff=suff)
-    if int(acer_iprint) != 1:
+    if int(acer_iprint) != 0:
         # The check pass's card is "iopt iprint itype suff": only iprint moves.
-        check_card = "\n 7 1 1 -1 /\n"
+        check_card = "\n 7 0 1 -1 /\n"
         if deck.count(check_card) != 1:
             raise ValueError("the deck's second ACER card is not the expected one")
         deck = deck.replace(check_card, f"\n 7 {int(acer_iprint)} 1 -1 /\n")
@@ -225,7 +225,7 @@ def run_njoy(
     ace_dir: str | Path | None = None,
     xsdir_dir: str | Path | None = None,
     njoy_files_dir: str | Path | None = None,
-    acer_iprint: int = 1,
+    acer_iprint: int = 0,
 ) -> dict:
     """
     Run NJOY once using the provided ENDF file and parameters.
@@ -250,10 +250,10 @@ def run_njoy(
         Optional additional suffix to add to filenames to prevent overwrites.
         If None and files exist, a unique suffix will be generated automatically.
     acer_iprint : int
-        Print option of the second (check) ACER pass. ``1`` (the default)
-        prints the whole table into the listing -- ~120 MB for Fe-56; ``0``
-        keeps the consistency checks and drops the dump. The ACE and xsdir
-        are the same either way.
+        Print option of the second (check) ACER pass. ``0`` (the default)
+        prints its consistency checks; ``1`` adds a dump of the whole table,
+        which is the ACE again in another layout -- 97 % of a 122 MB listing
+        for Fe-56. The ACE and xsdir are the same either way.
 
     Returns
     -------
@@ -405,7 +405,7 @@ def run_njoy_with_pendf(
     ace_dir: str | Path | None = None,
     xsdir_dir: str | Path | None = None,
     njoy_files_dir: str | Path | None = None,
-    acer_iprint: int = 1,
+    acer_iprint: int = 0,
 ) -> dict:
     """Run NJOY against a pre-existing (typically perturbed) PENDF, skipping RECONR.
 
