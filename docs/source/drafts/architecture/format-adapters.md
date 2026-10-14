@@ -132,10 +132,12 @@ on `suite.covarianceSuite`; the GNDS writer writes it as a sibling file.
 
 ## Known exceptions
 
-- **No model-to-ACE encoder.** ACE is written from the parsed ACE object, or produced by
-  NJOY from an ENDF tape; `kika.write` does not offer ACE.
-- **ACE decodes into the `gridded` style**, not `eval`: its cross-sections are values on
-  ACE's unionised grid at the file's temperature, not the evaluation.
+- **ACE is not a `kika.write` target.** `encodeAce` writes a processed suite to an ACE
+  table at one temperature, but `kika.write` does not offer it, and an ACE table from an
+  evaluation is produced by NJOY.
+- **ACE decodes into the processed styles** (`heated_<T>`, `URR_<T>`, `MonteCarlo`), not
+  `eval`: its cross-sections are values on ACE's unionised grid at the file's temperature,
+  not the evaluation.
 - **Only GNDS has a capability census.** `kika.gnds.capabilities()` states, for every
   node of the GNDS schemas, whether kika reads and writes it. The other formats state
   their coverage on their methods page, and in the report of each conversion.

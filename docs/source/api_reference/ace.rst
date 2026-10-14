@@ -19,6 +19,12 @@ kika.ace.parsers.parse_ace
    :undoc-members:
    :show-inheritance:
 
+kika.ace.model_adapter
+----------------------
+
+.. automodule:: kika.ace.model_adapter
+   :members: decodeAce, encodeAce, AceEncodeError, aceLabels, aceStyles
+
 kika.ace.xsdir
 ---------------
 
