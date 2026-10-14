@@ -233,6 +233,30 @@ warning. Two neighbouring regions share their boundary point: it is written once
 the values on both sides agree, and twice (a repeated energy, a step) when they differ.
 Regions that are not adjacent cannot be written as one TAB1 and raise.
 
+**A PENDF** (the reconstructed or heated tables, {doc}`../processing/processing-chain`) is
+written so that NJOY reads it. A reconstructed or heated MF 3 has one model region per
+discontinuity, and NJOY holds at most 20 interpolation regions in a TAB1 (MODER stops on
+more), so neighbouring regions of one law are merged as RECONR writes them: the jump as a
+repeated energy inside one region, the same function. The same holds for the heating
+sections (MT 301, 444). The MF 1/451 descriptive text is cut to ENDF-6's five-line
+identification block, as RECONR leaves it: with the 560 lines of an evaluation's
+documentation NJOY 2016.78 HEATR stopped, and with 300 it ran (Fe-56 of ENDF/B-VIII.1,
+measured 2026-10-13). A heated material carries, for each reaction, only the points its
+own table needs, and not every point of the temperature's common grid (which made the
+293.6 K material of Fe-56 nine times the size of BROADR's).
+
+On kika's PENDF of Fe-56 of ENDF/B-VIII.1, NJOY 2016.78 (Windows build) runs MODER to ACER
+(measured 2026-10-14). At 0 K the ACE file agrees with the RECONR chain's ($10^{-3}$) to
+$4.7\cdot10^{-4}$ in MT 102 and $3.6\cdot10^{-4}$ in MT 1 at the 99th percentile of NJOY's
+points. At 293.6 K the two ACE files differ more in MT 102 ($3.1\cdot10^{-3}$ at the 99th
+percentile, all of it between 1 keV and 850 keV), and the difference is NJOY's. Against a
+pointwise broadening of each code's own 0 K MT 102 to $10^{-6}$, at 3 000 random energies
+in that range read lin-lin from each ACE file, kika's table is within $1.0\cdot10^{-3}$ at
+the 99th percentile (largest $1.3\cdot10^{-3}$: its broadening and thinning tolerances
+together) and BROADR's within $7.8\cdot10^{-3}$ (largest $9.9\cdot10^{-3}$). RECONR and
+BROADR allow up to ten times their tolerance (`errmax`, default $10\cdot$`err`) where
+their integral criterion permits it, and kika holds its tolerance at every point.
+
 **Numbers** are written in 11 columns without `E`, correctly rounded once:
 6 decimals in the mantissa for an exponent of one digit (7 significant figures), 5 for
 two digits, 4 for three. Zero is ` 0.000000+0`; a non-finite value raises. A value the
@@ -380,7 +404,7 @@ All tests below passed on 2026-10-11 unless marked otherwise.
   (`kika/endf/tests/test_mf2_adler_adler_is_refused_by_name.py::test_the_parser_names_adler_adler_and_stops`,
   `::test_the_model_decoder_names_it_too`); a repeated abscissa is written as a step
   (`kika/endf/tests/test_a_descending_table_is_never_written.py::test_a_repeated_abscissa_is_a_step_and_is_allowed`).
-- **Against FUDGE.** FUDGE's ENDF-to-GNDS translation and kika's read agree on every
+- **Against FUDGE** (6.14). FUDGE's ENDF-to-GNDS translation and kika's read agree on every
   cross-section, Legendre coefficient and resonance energy of the Fe-56 micro-tapes to a
   relative $10^{-14}$ (`kika/endf/model_adapter/tests/test_fudge_in_the_loop.py`,
   `::test_every_cross_section_reads_the_same`,

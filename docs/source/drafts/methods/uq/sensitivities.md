@@ -49,17 +49,17 @@ $$
 R(p) \approx R_0 + c_1\,p + c_2\,p^2 .
 $$ (eq-sensitivities-taylor)
 
-`TODO(ref)`: the MCNP manual for the PERT card and the differential-operator method.
+The PERT card and the differential-operator method are in the MCNP 6.3.0 manual.
 
 Serpent computes the sensitivities itself and writes them, with their relative
-statistical errors, to a `.sens` file. kika reads them and does not recompute them.
-`TODO(ref)`: the Serpent sensitivity documentation.
+statistical errors, to a `.sens` file (Aufiero et al. 2015). kika reads them and does not
+recompute them.
 
 The SCALE Sensitivity Data File (SDF) is the text format TSUNAMI writes and reads:
 a header with the number of groups and profiles, the response and its uncertainty, the
 group boundaries in eV from the highest down, then one block per (nuclide, reaction,
 unit, region) profile with the groupwise sensitivities and their standard deviations.
-`TODO(ref)`: the SCALE manual for the SDF format.
+(SCALE 6.3.1 manual, TSUNAMI.)
 
 ## What it computes
 
@@ -417,7 +417,10 @@ The tests below passed on 2026-10-11.
 
 ## References
 
-- `TODO(ref)`: the MCNP manual (PERT card, differential-operator perturbation method).
-- `TODO(ref)`: the Serpent documentation for sensitivity calculations and the `.sens`
-  output.
-- `TODO(ref)`: the SCALE manual (TSUNAMI, Sensitivity Data File format).
+- *MCNP Code Version 6.3.0 Theory & User Manual*, Los Alamos National Laboratory (2022): the PERT card and the differential-operator perturbation method.
+- M. Aufiero, A. Bidaud, M. Hursin, J. Leppänen, G. Palmiotti, S. Pelloni and P. Rubiolo,
+  "A collision history-based approach to sensitivity/perturbation calculations in the
+  continuous energy Monte Carlo code SERPENT", *Annals of Nuclear Energy* 85, 245-258
+  (2015), doi:10.1016/j.anucene.2015.05.008. `TODO(ref)`: the `.sens` output format.
+- W. Wieselquist and R. A. Lefebvre (eds.), *SCALE 6.3.1 User Manual*, ORNL/TM-SCALE-6.3.1,
+  Oak Ridge National Laboratory (2023), doi:10.2172/1959594: TSUNAMI and the Sensitivity Data File format.

@@ -243,6 +243,26 @@ range, then with `resonanceRegion="reconstructed"` (the default):
 - **The resonance region is perturbed as reconstructed.** A factor on an LRP=1 background
   perturbs almost nothing below the resonance boundary. Perturbing the cross-section RECONR
   reconstructs is what perturbing a PENDF does.
+- **Against SANDY** (version 1.2.0, from its source code, not from runs). SANDY processes
+  the covariances with NJOY ERRORR onto a multigroup grid, applies the factors to the PENDF
+  after RECONR, and resums every sum from scratch. Where kika differs, and why:
+  - *Depth.* SANDY passes an undecomposed sum's sample down one level only: with a
+    covariance for MT 1 alone, MT 2 takes the factor and the total is resummed, so the
+    relative uncertainty of the total comes out multiplied by $\sigma_2/\sigma_1$. kika
+    moves every leaf under the sum alike, and the total varies exactly as its covariance
+    states.
+  - *A named sum the file decomposes.* Asking SANDY for MT 4 gives MT 51 and MT 52 the
+    uncertainty of MT 4 even where the file states their own. kika keeps every stated
+    covariance and discards the sum's.
+  - *A partial with no covariance under a sum that has one* (MT 1 and MT 4 stated, MT 2
+    not): SANDY gives MT 2 the relative uncertainty of MT 1, the assumption kika makes only
+    under `"fill"`.
+  - *Resummed or moved by a delta.* On a PENDF the two agree, since RECONR has already made
+    MT 1 the sum of its parts; on an ENDF tape kika's delta keeps the evaluation's own sum
+    residual (see above).
+  - *The grid.* kika uses the covariance on its native MF 33 grid, with no weighting
+    spectrum and no collapse; SANDY uses ERRORR's group structure.
+  - *Where the factor goes* is the same in both: the cross-section RECONR reconstructs.
 - **MF 33 and the order 0 of MF 34 are not combined.** Both state the uncertainty of the same
   $\sigma(E)$; applying both would scale it twice. Which to use is part of the request (see
   {doc}`./legendre-angular-perturbation`).

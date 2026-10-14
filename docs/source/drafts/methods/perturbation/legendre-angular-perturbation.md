@@ -383,4 +383,6 @@ with the shape is lost.
   Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
   doi:10.2172/1338791: §8.12 (two-body kinematics), as used on
   {doc}`./tabulated-angular-perturbation`.
-- `TODO(ref)`: a reference for the SLSQP method (D. Kraft) used in the projection.
+- D. Kraft, *A Software Package for Sequential Quadratic Programming*, DFVLR-FB 88-28,
+  Deutsche Forschungs- und Versuchsanstalt für Luft- und Raumfahrt (1988): the SLSQP method
+  used in the projection.

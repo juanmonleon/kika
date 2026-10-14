@@ -481,6 +481,23 @@ anything else) and carry Greek letters and math signs in the dictionary and the 
   reported twice.
 - **MAT1 equal to the file's own MAT is the same material**, as kika reads it everywhere
   else; it is noted, not refused.
+- **Against FUDGE** (6.14.0, from its source, not from runs). FUDGE checks covariances
+  through the warning classes its `check()` methods raise (`fudge/warning.py`), with five
+  levels. Every one of them has a counterpart here: a non-monotonic grid or a dimension
+  mismatch (`grid_not_increasing`, `nt_mismatch`, `count_mismatch`), an empty matrix
+  (`inert_rows`, by rows), a negative variance or a correlation out of range
+  (`negative_variance`, `correlation_out_of_bounds`), negative eigenvalues
+  (`not_positive_semidefinite`), a cyclic dependency or an unresolved link (`nc_chained`,
+  `unresolved_reference`), a variance above 1000 % (`relative_uncertainty_above_one`,
+  `implausible_relative_uncertainty`). Four checks here come from FUDGE's ENDF-6
+  translation: MF 32 widths against MF 2 (`widths_differ_from_mf2`), an uncertainty on a
+  spin (`spin_uncertainty`), a last value of LB 0-4, 8, 9 that is not zero
+  (`trailing_value_not_zero`) and a covariance without its central values
+  (`missing_central_values`). Where kika goes further: FUDGE tests $\lvert\rho\rvert \le 1$
+  in MF 32 only; it does not test the matrix with its cross blocks (a `FIXME` in its
+  source), which `joint_not_positive_semidefinite` does; and it judges positivity against
+  an absolute eigenvalue of $-10^{-6}$, where kika normalises by the block and separates
+  round-off from defects ({eq}`eq-covariance-checks-ulp`).
 - **A library is checked one tape at a time**, so a library of hundreds of tapes runs in
   the memory of the largest one; failures are rows, because in a census they are
   findings too.

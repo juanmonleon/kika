@@ -34,8 +34,8 @@ $$ (eq-total-monte-carlo-decomposition)
 and the nuclear-data part is what is left when the mean statistical variance is subtracted
 from the observed one. Fast TMC uses this to run each sample with fewer histories
 (a larger $\sigma_{\text{stat},i}$) and still recover $\sigma_\text{ND}$, provided the
-statistical part does not dominate. `TODO(ref)`: Total Monte Carlo (Koning and Rochman)
-and Fast TMC (Rochman et al.).
+statistical part does not dominate (Total Monte Carlo: Koning and Rochman 2008; Fast TMC:
+Rochman et al. 2014).
 
 ## What it computes
 
@@ -200,8 +200,11 @@ Shapiro-Wilk and D'Agostino-Pearson tests.
 
 ## References
 
-- `TODO(ref)`: Total Monte Carlo (Koning and Rochman).
-- `TODO(ref)`: Fast TMC (Rochman et al.).
+- A. J. Koning and D. Rochman, "Towards sustainable nuclear energy: putting nuclear physics
+  to work", *Annals of Nuclear Energy* 35, 2024-2030 (2008), doi:10.1016/j.anucene.2008.06.004.
+- D. Rochman, W. Zwermann, S. C. van der Marck, A. J. Koning, H. Sjöstrand, P. Helgesson and
+  B. Krzykacz-Hausmann, "Efficient use of Monte Carlo: uncertainty propagation", *Nuclear
+  Science and Engineering* 177, 337-349 (2014), doi:10.13182/NSE13-32.
 - R. B. D'Agostino and M. A. Stephens (eds.), *Goodness-of-Fit Techniques*, Marcel Dekker
   (1986): Table 4.9, the Anderson-Darling p-value with estimated parameters.
 - `TODO(ref)`: the Shapiro-Wilk and D'Agostino-Pearson tests.

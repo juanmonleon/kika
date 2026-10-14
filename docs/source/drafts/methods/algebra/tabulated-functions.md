@@ -4,14 +4,16 @@
 :class: note
 **Computes:** the value of a tabulated function at any abscissa, its integral (with weight
 1 or $1/x$) over any interval or set of groups, its Legendre moments, its lin-lin form to
-a stated tolerance, the sum of several tables, and its convolution with a Gaussian.
+a stated tolerance, the sum of several tables, its convolution with a Gaussian, and the
+thinning of several tables on one grid to a stated tolerance.
 
 **Applies to:** any table $(x_i, y_i)$ with one ENDF/GNDS interpolation law per interval
 (codes 1-5).
 
-**Entry points:** `kika.algebra.evaluate`, `kika.algebra.integral`,
-`kika.algebra.group_averages`, `kika.algebra.legendre_moments`, `kika.algebra.to_linlin`,
-`kika.algebra.add`, `kika.algebra.fold_tabulated`.
+**Entry points:** {py:func}`kika.algebra.evaluate`, {py:func}`kika.algebra.integral`,
+{py:func}`kika.algebra.group_averages`, {py:func}`kika.algebra.legendre_moments`,
+{py:func}`kika.algebra.to_linlin`, {py:func}`kika.algebra.add`,
+{py:func}`kika.algebra.fold_tabulated`, {py:func}`kika.algebra.thin_common_grid`.
 
 **Status:** stable.
 ```
@@ -100,6 +102,22 @@ the fold holds the end values** (so a threshold reaction that starts at zero fol
 below it); this is the one operation that does not take the table as zero outside its
 domain. Where $\sigma \le 0$ the kernel is a delta and $y(x_0)$ is returned.
 
+**7. Thinning** (`thin_common_grid`). The inverse of linearisation, for several lin-lin
+tables $y_k$ on one grid: a point $x_j$ is dropped only if every table, read lin-lin
+between the points kept on either side, still reproduces its value there,
+
+$$
+\lvert \tilde y_k(x_j) - y_k(x_j) \rvert \le \varepsilon\,\lvert y_k(x_j) \rvert + a_k
+\quad \text{for every } k \text{ and every dropped } j,
+$$ (eq-tabulated-functions-thin)
+
+with a relative tolerance $\varepsilon$ (default $10^{-3}$) and an absolute floor $a_k$
+per table. The values at the points kept are never changed, so the thinned table is a
+subset of the original. The sweep is greedy from the left: from each kept point the
+farthest next point is found by doubling the step, then bisecting, each candidate tested
+on every table at once. The two ends, and any points named as mandatory, are always
+kept, and no interval spans one. Every dropped point is tested, not estimated.
+
 ## Conventions and choices
 
 - **One law per interval** inside the package, translated to and from ENDF's cumulative
@@ -134,7 +152,10 @@ Legendre moments are exact on a lin-lin table with a step
 (`::test_legendre_moments_are_exact_on_a_linlin_table_with_a_step`); the fold of a flat
 table is the identity and of a quadratic matches its analytic second moment
 (`test_fold.py::test_fold_flat_is_identity`,
-`::test_fold_quadratic_matches_analytic_second_moment`).
+`::test_fold_quadratic_matches_analytic_second_moment`); thinning reproduces every table at
+every dropped point, keeps the mandatory points and changes no value, and keeps a kink
+(`test_thin.py::test_every_row_is_reproduced_at_every_dropped_point`,
+`::test_mandatory_points_stay_and_values_are_untouched`, `::test_a_kink_is_kept`).
 
 ## Diagnostics
 
@@ -146,7 +167,8 @@ of panels accepted unresolved.
 `kika/algebra/`: `laws.py` (the codes, (NBT, INT) translation, validation), `evaluate.py`
 ({eq}`eq-tabulated-functions-laws`, one-sided limits), `grid.py` (unions that keep steps),
 `integrate.py` ({eq}`eq-tabulated-functions-integrals`, groups, windows, Legendre moments),
-`refine.py` (refinement, `to_linlin`), `arithmetic.py` (sums), `fold.py`
+`refine.py` (refinement, `to_linlin`), `arithmetic.py` (sums), `thin.py`
+({eq}`eq-tabulated-functions-thin`), `fold.py`
 ({eq}`eq-tabulated-functions-fold`), `compare.py` (differences of tables), `prepared.py`
 (validated read-only snapshots for repeated evaluation).
 

@@ -166,11 +166,13 @@ the resolved range the right-hand region owns the point and the jump is kept.
 
 ## Limits and failure modes
 
-What is **not** computed: self-shielded cross-sections, probability tables (NJOY PURR) or
-Bondarenko factors (NJOY UNRESR, MacFarlane et al. 2017); Doppler broadening; any
-temperature but 0 K; a competitive cross-section from MF 2; interference between the
-unresolved and resolved ranges. The result is the infinitely dilute average only, which is
-what a transport code needs where self-shielding in the range does not matter.
+What this page computes is the infinitely dilute average at 0 K, which is what a transport
+code needs where self-shielding in the range does not matter. Self-shielding is carried by
+probability tables and Bondarenko factors (what NJOY PURR produces, MacFarlane et al.
+2017), which kika computes from the same parameters at the temperatures asked for:
+{doc}`probability-tables`. What is computed nowhere: a competitive cross-section from
+MF 2; interference between the unresolved and resolved ranges; Bondarenko factors by NJOY
+UNRESR's quadrature (the probability tables give them by sampling, as PURR does).
 
 Refused (`UnsupportedResonanceError` or `ValueError`), before any evaluation:
 

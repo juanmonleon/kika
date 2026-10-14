@@ -1,8 +1,11 @@
 # Working with the model
 
-Whatever format a file is in, {py:func}`kika.read` returns the same kind of object, a
-`ReactionSuite` (see {doc}`../architecture/canonical-model` for why it is shaped as it is).
-This page is the everyday use of it.
+Whatever format a file is in (ENDF-6, GNDS, ACE, G4NDL, OpenMC HDF5, or a
+thermal-scattering table in any of them), {py:func}`kika.read` returns the same kind of
+object, a `ReactionSuite` (see {doc}`../architecture/canonical-model` for why it is shaped
+as it is). A processed file (ACE, HDF5) reads into its processed styles: one `heated`
+style per temperature and sampling tables under `MonteCarlo`, with no `eval` form. This
+page is the everyday use of it.
 
 ## Find what you need
 
@@ -47,12 +50,15 @@ A computation adds its result as a new form and leaves `eval` as it was.
 report = kika.write(ev, "Fe56.gnds.xml")              # GNDS; covariances as a second file
 report = kika.write(ev, "Fe56_out.endf", format="endf")
 report = kika.write(ev, "g4ndl_lib/", format="g4ndl")    # needs a pointwise 'recon' form
+report = kika.write(ev, "openmc_lib/", format="hdf5", temperatures=[293.6])   # processed first
 ```
 
 `kika.write` returns the conversion report of the writing: what the target format could not
 carry. The format pages say what each writer keeps and loses
 ({doc}`../methods/formats/endf`, {doc}`../methods/formats/gnds`,
-{doc}`../methods/formats/g4ndl`).
+{doc}`../methods/formats/g4ndl`, {doc}`../methods/formats/hdf5`). Writing an evaluation as HDF5
+processes it first; {doc}`processing-an-evaluation` does the same in stages and also
+writes a PENDF.
 
 ## Moving from the flat classes
 

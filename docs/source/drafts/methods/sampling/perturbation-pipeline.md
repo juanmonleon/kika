@@ -134,8 +134,14 @@ y^{(s)} = F\, z^{(s)}.
 $$ (eq-perturbation-pipeline-correlated)
 
 The normals come from a scrambled Sobol sequence (the default), a Latin hypercube or a
-pseudo-random generator, mapped through the inverse normal CDF; block $i$ of a run is
-seeded with $\text{seed} + 1009\, i$, so that two blocks never draw the same $z$. Then:
+pseudo-random generator, mapped through the inverse normal CDF. The blocks of one call
+must draw independent normals, since a dependence between them would add a covariance
+between blocks that the evaluation does not state. Under Sobol, one sequence is drawn with
+as many dimensions as the blocks have kept directions in total, and its columns are dealt
+to the blocks in turn: the leading direction of every block first, in block order, then
+every block's second, and so on, a block dropping out when its rank is used up (the
+columns each block received are reported as `sobol_columns`). Under the Latin hypercube
+and the pseudo-random generator, block $i$ is seeded with $\text{seed} + 1009\, i$. Then:
 
 $$
 f^{(s)}_k =
@@ -238,6 +244,19 @@ deviation.)
   a group probability of $10^{-17}$, would become a perturbation of order $10^7$.
 - **Quasi-random by default.** A scrambled Sobol sequence covers the sample space more
   evenly than pseudo-random draws for the same $N$.
+- **One Sobol sequence for all the blocks of a call, dealt by rank position.** A
+  scrambled Sobol sequence keeps the lattice of each dimension, so dimension $k$ of two
+  separately seeded sequences is the same function of the replica index up to a digital
+  flip, so drawing each block from its own sequence would correlate blocks the
+  evaluation leaves independent: 95th percentile $\lvert\rho\rvert$ 0.20 ($\ell = 1$) and
+  0.39 ($\ell = 2$) between MF 33 and MF 34 of U-238 of ENDF/B-VIII.1 over 1024 replicas,
+  against 0.06 for pseudo-random draws (measured 2026-10-05). With one sequence the 95th
+  percentile stays below $2.5/\sqrt{N}$
+  (`kika/sampling/tests/test_cross_section_and_angular_drawn_together.py::test_sigma_and_shape_are_independent_under_sobol_too`). Columns are dealt by rank position and not
+  by share of variance, so that a block's columns depend only on the ranks and order of the
+  blocks and not on the other blocks' spectra; a single-block call draws exactly what a
+  one-block sequence of the same seed gives. Independently seeded pseudo-random streams and
+  independently permuted hypercubes are already independent, and keep one seed per block.
 - **Sums are rebuilt from their partials**, never scaled by their own block. NJOY RECONR
   discards a tape's MT 1 and MT 4 and rebuilds them from the partials, so a perturbation
   put on MT 1 alone would never reach the ACE file.
@@ -298,7 +317,13 @@ The tests below passed on 2026-10-11 unless marked.
   (`::test_a_component_with_no_stated_variance_gets_no_delta`); a zero-sum covariance
   draws zero-sum deltas (`::test_a_zero_sum_covariance_draws_zero_sum_deltas`); rank
   deficiency is recorded and not repaired (`::test_rank_deficiency_is_recorded_and_not_repaired`);
-  block seeds differ by a fixed stride (`::test_seeds_differ_per_block_by_a_fixed_stride`);
+  under the Latin hypercube and pseudo-random draws, block seeds differ by a fixed stride
+  (`::test_seeds_differ_per_block_by_a_fixed_stride`); under Sobol the blocks take disjoint
+  columns of one sequence (`::test_sobol_blocks_take_disjoint_columns_of_one_sequence`),
+  dealt in turn and in input order (`::test_sobol_deals_columns_in_turn_and_in_input_order`),
+  a single block draws the plain Sobol sequence of its rank
+  (`::test_one_sobol_block_is_the_plain_sobol_draw`), and under all three methods the
+  blocks come out independent (`::test_blocks_are_drawn_independently_of_each_other`);
   log-space factors reproduce a relative covariance with 50 % standard deviations
   (`::test_log_space_factors_reproduce_the_relative_covariance`), and a matrix already in
   log space is not transformed twice (`::test_a_prepared_log_matrix_is_not_transformed_twice`);
@@ -359,7 +384,9 @@ The tests below passed on 2026-10-11 unless marked.
   applier's diagnostics (`applied`; for an angular distribution, `legendre` and `tables`
   count the negative series and table nodes and what was repaired).
 - `diagnostics`: per block, from the draw: `n`, `rank`, `n_null`, `null_fraction`,
-  `min_over_max_eigenvalue`, `realised_covariance_error`, `space`, `seed`. **A large
+  `min_over_max_eigenvalue`, `realised_covariance_error`, `space`, `seed`,
+  `block_index` and, under Sobol, `sobol_columns` (the columns of the shared sequence the
+  block drew). **A large
   `realised_covariance_error` or a negative `min_over_max_eigenvalue`** means the matrix
   was not drawn as stated; read `conditioning`.
 - `conditioningPlan`, `conditioning`, `conditioningMode`, `report`: the plan, the steps it
@@ -400,5 +427,8 @@ with its index in the file's metadata; `readFactorsIndex` reads it), `conditioni
   doi:10.2172/2007538: Ch. 30-35 (covariances).
 - N. J. Higham, "Computing a nearest symmetric positive semidefinite matrix", *Linear
   Algebra and its Applications* 103, 103-118 (1988).
-- `TODO(ref)`: a reference for Total Monte Carlo (Koning and Rochman) and for Sobol
-  sequences.
+- A. J. Koning and D. Rochman, "Towards sustainable nuclear energy: putting nuclear physics
+  to work", *Annals of Nuclear Energy* 35, 2024-2030 (2008), doi:10.1016/j.anucene.2008.06.004.
+- I. M. Sobol', "On the distribution of points in a cube and the approximate evaluation of
+  integrals", *USSR Computational Mathematics and Mathematical Physics* 7(4), 86-112
+  (1967), doi:10.1016/0041-5553(67)90144-9.

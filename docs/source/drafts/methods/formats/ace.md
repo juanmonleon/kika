@@ -50,6 +50,15 @@ What kika does with each block of a neutron table:
 A photo-atomic table (ZAID suffix ending in `p`) is parsed on its own, since its NXS and
 JXS mean other things, and returned as a `PhotoatomicAce`.
 
+A thermal-scattering table (`.NNt`, the ITIE, ITCE, ITXE and ITCA blocks THERMR and ACER
+write) is not a neutron table and is not read by `read_ace`. `kika.read` recognises it by
+its name field (`h-h2o.80t`, `grph.72t`) and reads it, as OpenMC reads it, into a
+processed thermal-scattering suite: the inelastic cross-section and, for the continuous
+representation, its outgoing-energy tables with equiprobable cosines; the coherent elastic
+Bragg edges (MeV·b converted to eV·b) or the incoherent elastic cross-section and cosines.
+See {doc}`hdf5` for the processed forms and
+{doc}`../../user_guide/thermal-scattering-libraries` for reading thermal libraries.
+
 ## Reading
 
 **1. Header.** The first line tells a 2.0.1 header from a legacy one; both are read into
@@ -102,6 +111,15 @@ uses), and `create_xsdir_files_for_ace` writes the `xsdir` lines for a set of ta
 `kika.write` does not write ACE: an ACE file is produced from an ENDF tape by NJOY (see
 {doc}`../processing/njoy`).
 
+**Many variants of one table.** A perturbed sample differs from its source table in a
+small part of XSS. Since
+every XSS value has a fixed place (four 20-column fields per line), `AcePatchWriter` writes
+the unperturbed table once and each sample as that text with only the changed lines
+re-formatted, with the format `write_ace` uses. The output is byte-identical to
+`write_ace`, and any case in which `write_ace` would lay the file out differently (another
+header, another XSS length, the integer format switching on or off) falls back to
+`write_ace` itself.
+
 ## What the round trip keeps and loses
 
 - **Parse layer, read and write:** every XSS value comes back bitwise identical; the text
@@ -140,6 +158,13 @@ unclean for a cross-section use; a block absent from the table produces no entry
 - Reading a real Fe-56 table and writing it back returns all XSS entries bitwise identical
   (`kika/ace/tests/test_ace_roundtrip.py`). `TODO(check)`: needs a full ACE file and
   `--deep`; not re-run for this page.
+- Patched samples are byte-identical to `write_ace` and a layout change falls back to it
+  (`kika/ace/tests/test_patch_writer_matches_write_ace.py::test_patched_samples_are_byte_identical`,
+  `::test_a_layout_change_falls_back_to_write_ace`).
+- A thermal table reads into the processed forms and encodes as OpenMC lays them out
+  (`kika/hdf5/tests/test_ace_thermal.py::test_the_table_reads_into_the_processed_forms`,
+  `::test_the_forms_encode_as_openmc_lays_them_out`), and `kika.read` returns its suite
+  (`kika/tsl/tests/test_tsl_formats.py::test_an_ace_thermal_table_is_read_into_the_model`).
 - `kika/ace/xsdir.py` and `kika/ace/comparison` have no tests.
 
 ## Implementation

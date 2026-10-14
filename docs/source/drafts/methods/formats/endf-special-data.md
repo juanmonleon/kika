@@ -58,6 +58,21 @@ by position. MF 13 states production cross-sections $\sigma_\gamma$; the model h
 multiplicities, $\sigma_\gamma/\sigma$, computed on the union of the two grids after making
 both lin-lin; where $\sigma = 0$ the multiplicity is 0 and the report says so.
 
+**Which photons come out** ({py:mod}`kika.nuclear_data.photon_production`, the reading of a
+suite in any format that answers "which gammas, and how many"). A continuum photon keeps
+its angular distribution and its product label. The first ND outgoing points of each
+incident energy of an MF 6 LAW=1 photon are discrete lines (ENDF-6 §6.2.3; a negative
+energy is a primary photon) and are listed as lines, weighted node by node, while the rest
+stays a continuum. A residual level that lists a photon with no data, because the
+evaluation states that level's gammas in the reaction's MF 6 (JENDL-5 Fe-56 does), is a
+placeholder and is skipped: nothing is missing, so nothing is reported.
+
+**Thermal scattering libraries as a whole.** A folder of thermal evaluations is indexed by
+{py:func}`kika.tsl.index_tsl` from the head of each file, and one material is read by
+{py:func}`kika.tsl.read_tsl`, whatever its format (ENDF-6 NSUB=12, GNDS, ACE, OpenMC HDF5,
+G4NDL); see {doc}`../processing/thermal-scattering-tables` for the tables kika computes
+from MF 7.
+
 **Decay and yields.** A decay evaluation is a nuclide in a standalone `PoPs`. MT 454 is the
 independent yield at elapsed time 0, MT 459 the cumulative one; a neutron-induced evaluation
 lists one incident energy per ENDF energy. The uncertainty is held as the variance
@@ -118,7 +133,10 @@ All passed on 2026-10-11 (94 passed, 17 skipped that need full tapes):
 `kika/endf/model_adapter/tests/test_thermal_scattering_round_trip.py`,
 `test_thermal_scattering_elastic_xs.py`, `test_photon_round_trip.py`,
 `test_photon_cascades.py`, `test_photon_ace.py`, `test_decay_sublibrary.py`,
-`test_fission_yields.py`, and `kika/endf/tests/test_photoatomic.py`. Comparisons against
+`test_fission_yields.py`, and `kika/endf/tests/test_photoatomic.py`. MF 6 discrete photon
+points become lines and the empty placeholder photon is skipped
+(`kika/nuclear_data/tests/test_photon_production.py::test_mf6_discrete_points_become_lines_and_the_rest_stays_a_continuum`,
+`::test_jendl5_fe56_level_gammas_in_mf6_are_lines`). Comparisons against
 NJOY RECONR on a kika-written photon tape (`test_photon_reconr.py`) and against FUDGE's
 decay translation need NJOY or FUDGE: `TODO(check)`, not re-run.
 
