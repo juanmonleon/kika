@@ -468,12 +468,15 @@ def resolveMagnitudeOrder(suite, request):
             continue
         joint: List[int] = []
         for mt in _mtsOf(found, withOrder=MAGNITUDE_ORDER):
-            withSigma = ((crossSectionMTs is None or mt in crossSectionMTs)
-                         and bool(_cross_section_entries(suite, mf=33, mt=mt)))
+            sigma = (_cross_section_entries(suite, mf=33, mt=mt)
+                     if crossSectionMTs is None or mt in crossSectionMTs else [])
+            withSigma = bool(sigma)
             drawn = withSigma and _largestCross(found, mt) > NULL_MAGNITUDE_COVARIANCE
             if drawn:
                 joint.append(mt)
-            notes.append(_magnitudeNote(found, mt, withSigma, drawn=drawn))
+            notes.append(_magnitudeNote(
+                found, mt, withSigma, drawn=drawn,
+                discrepancy=_sigmaDiscrepancy(found, sigma, mt) if drawn else None))
         out.append(Selection(mf=34, mt=selection.mt, index=shape,
                              relative=selection.relative,
                              magnitudeMts=tuple(joint) or None))
@@ -507,15 +510,52 @@ def _largestCross(found, mt: int) -> float:
     return max((float(np.max(np.abs(m))) for m in cross if m.size), default=0.0)
 
 
-def _magnitudeNote(found, mt: int, withSigma: bool, drawn: bool = False) -> str:
+def _sigmaDiscrepancy(found, sigma, mt: int) -> Optional[float]:
+    """``max |sd_L0 / sd_MF33 - 1|`` over the common grid, or None.
+
+    How far the file's L0xL0 -- the variance of sigma MF34 states, which the
+    joint does not use -- is from MF33's, bin by bin on the union of the two
+    grids. None when L0xL0 is null (this project's ``_a0cross`` tapes write it
+    as a one-bin zero block) or either side states no section for *mt*.
+    """
+    def own(entries, isSelf):
+        for row, col, matrix, rowGrid, *_ in entries:
+            if int(row[1]) == mt and int(col[1]) == mt and isSelf(row, col):
+                return np.asarray(matrix, dtype=float), np.asarray(rowGrid, dtype=float)
+        return None
+
+    l0 = own(found, lambda row, col: row[2] == col[2] == MAGNITUDE_ORDER)
+    mf33 = own(sigma, lambda row, col: True)
+    if l0 is None or mf33 is None or not l0[0].size or             float(np.max(np.abs(l0[0]))) <= NULL_MAGNITUDE_COVARIANCE:
+        return None
+    union = np.union1d(l0[1], mf33[1])
+    mids = 0.5 * (union[1:] + union[:-1])
+
+    def sd(matrix, grid):
+        at = np.searchsorted(grid, mids) - 1
+        inside = (at >= 0) & (at < grid.size - 1) & (at < matrix.shape[0])
+        out = np.full(mids.size, np.nan)
+        out[inside] = np.sqrt(np.clip(np.diag(matrix)[at[inside]], 0.0, None))
+        return out
+
+    a, b = sd(*l0), sd(*mf33)
+    both = np.isfinite(a) & np.isfinite(b) & (b > 0)
+    return float(np.max(np.abs(a[both] / b[both] - 1.0))) if both.any() else None
+
+
+def _magnitudeNote(found, mt: int, withSigma: bool, drawn: bool = False,
+                   discrepancy: Optional[float] = None) -> str:
     """The line a run records for MF34's L=0: drawn as the cross term, or dropped."""
     largest = _largestCross(found, mt)
     if drawn:
+        unused = ("L0xL0 is not used" if not discrepancy else
+                  f"L0xL0 is not used, and it states sigma's uncertainty up to "
+                  f"{discrepancy:.0%} away from MF33's (relative, on the common "
+                  f"grid)")
         return (f"MF34/MT{mt} states L=0 (the variance of sigma and its "
                 f"correlation with the a_l). MF33 gives sigma's variance and the "
                 f"L>=1 the shape, and the sigma <-> a_l cross term (L0xLl, max "
-                f"|cov| {largest:.3g}) is drawn with them in one matrix; L0xL0 "
-                f"is not used")
+                f"|cov| {largest:.3g}) is drawn with them in one matrix; {unused}")
     carried = (f"its L0xLl blocks are null (max |cov| {largest:.1e}), so nothing "
                f"is lost" if largest <= NULL_MAGNITUDE_COVARIANCE else
                f"its L0xLl blocks reach |cov| {largest:.3g}, and that "
