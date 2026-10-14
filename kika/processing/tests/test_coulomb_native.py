@@ -27,6 +27,28 @@ CLOSED = [
 ]
 
 
+# mpmath 1.3.0 at 40 digits, as BARRIER: points of Ca-40's proton and alpha
+# exits (ENDF/B-VIII.1) just above threshold, where the outgoing fraction
+# does not converge within its limit and the Laplace integral is used.
+LAPLACE = [
+    (1,134.86439767244536,0.02380852775070165,-837.86565174994330863,-2.6310109203188288278,2.2340917591681134966e-365),
+    (1,213.02295646329114,0.015073130182189524,-1328.9503007058227012,-2.6310824665238452326,1.1850566187753833841e-578),
+    (2,212.87156890341933,0.01508384971796251,-1330.7130463400663181,-3.1921340842864301728,1.6804712947618665043e-579),
+]
+
+
+@pytest.mark.parametrize('l,eta,rho,log_p,shift,phase',LAPLACE)
+def test_threshold_laplace_against_40_digit_reference(l,eta,rho,log_p,shift,phase):
+    with pytest.raises(FloatingPointError):
+        coulomb._outgoing(l,eta,rho,coulomb.SMALL_RADIUS_FRACTION_ITERATIONS)
+    for actual in (charged_channel_log_functions(l,eta,rho),coulomb._charged_point(l,eta,rho)):
+        assert float(actual[0])==pytest.approx(log_p,rel=2e-15)
+        assert float(actual[1])==pytest.approx(shift,rel=1e-14)
+        assert float(actual[2])==0.  # below the float range: rounds to zero
+    if coulomb._native is not None:
+        assert coulomb._native_open_rows(l,np.array([eta]),np.array([rho]))[3][0]
+
+
 @pytest.mark.parametrize('l,eta,rho,log_p,shift,phase',BARRIER)
 def test_barrier_functions_against_40_digit_reference(l,eta,rho,log_p,shift,phase):
     for actual in (charged_channel_log_functions(l,eta,rho),coulomb._charged_point(l,eta,rho)):

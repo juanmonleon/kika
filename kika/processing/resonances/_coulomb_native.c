@@ -8,7 +8,9 @@
  * control and initial step of scipy.integrate.solve_ivp (the coefficients
  * are passed in). The regular continued fraction at rho gives the phase.
  * Below rho=0.25 with eta*rho>2, the fraction and the Wronskian while the
- * fraction converges within SMALL_RADIUS_FRACTION_ITERATIONS.
+ * fraction converges within SMALL_RADIUS_FRACTION_ITERATIONS; nearer the
+ * threshold, the Laplace integral of coulomb._outgoing_laplace by the same
+ * trapezoidal rule as the closed channel's.
  *
  * closed_rows: coulomb._closed_fraction where it converges within its
  * iteration limit; elsewhere the Laplace integral of
@@ -230,14 +232,133 @@ static int barrier_log_p(int l,double eta,double rho,cx here,double reg,double *
     return isfinite(*out);
 }
 
+/* Neumaier-compensated accumulator. */
+typedef struct {double sum,carry;} acc;
+static void acc_add(acc *a,double v){
+    double t=a->sum+v;
+    if(fabs(a->sum)>=fabs(v))a->carry+=(a->sum-t)+v;
+    else a->carry+=(v-t)+a->sum;
+    a->sum=t;
+}
+static double acc_value(const acc *a){return a->sum+a->carry;}
+
+typedef struct {int l;double eta,rho,mode,peak;} open_problem;
+
+static double open_log_weight(const open_problem *p,double v){
+    return 2*p->l*log(v)+.5*p->l*log1p((p->rho/v)*(p->rho/v))-p->eta*atan2(p->rho,v)-2*v;
+}
+
+/* Integrands of wave and slope of coulomb._outgoing_laplace in x=ln(t),
+ * t=v/mode (the factor t of dt=t dx included), and their modulus. */
+static void open_terms(const open_problem *p,double x,cx *gw,cx *gs,double *modulus){
+    double t=exp(x),v=p->mode*t,ratio=p->rho/v,r2=ratio*ratio,denom=1+r2;
+    double angle=-p->l*atan(ratio)-.5*p->eta*log1p(r2);
+    double m=exp(open_log_weight(p,v)-p->peak)*t;
+    *gw=cx_make(m*cos(angle),m*sin(angle));
+    *gs=cx_mul(*gw,cx_make((p->l*r2-p->eta*ratio)/denom,-(p->l*ratio+p->eta*r2)/denom));
+    *modulus=m;
+}
+
+#define OPEN_LEVELS 22
+#define OPEN_SIDE_STEPS 200000
+#define OPEN_CANCELLATION 1e3
+
+/* coulomb._outgoing_laplace: S and ln(P) from Tricomi's Laplace integral
+ * rotated to the imaginary axis, by the trapezoidal rule in x=ln(t), halving
+ * the step until two levels agree to 1e-14. The integrand is analytic in a
+ * strip, so the rule converges geometrically; its phase turns at most at
+ * frequency eta in x (as v->0), and the first step resolves the largest
+ * frequency met inside the truncated range. Returns 0, for the Python
+ * reference, when the sum cancels by more than OPEN_CANCELLATION. */
+static int outgoing_laplace(int l,double eta,double rho,double *shift,double *log_p){
+    open_problem p;
+    p.l=l;p.eta=eta;p.rho=rho;
+    p.mode=.5*(l+hypot((double)l,sqrt(2*eta*rho)));
+    if(!(p.mode>0))return 0;
+    p.peak=open_log_weight(&p,p.mode);
+    if(!isfinite(p.peak))return 0;
+    /* Truncate each side where the modulus falls below 1e-20 of the largest
+     * seen; the walk uses a step of 1/8 in x and records the largest phase
+     * frequency (l*rho*v+eta*rho^2)/(v^2+rho^2) inside the kept range. */
+    const double walk=.125;
+    cx gw,gs;double m,top,lo=0.,hi=0.,omega=0.;
+    open_terms(&p,0.,&gw,&gs,&m);top=m;
+    for(int side=-1;side<=1;side+=2){
+        int quiet=0;
+        for(long k=1;;k++){
+            if(k>OPEN_SIDE_STEPS)return 0;
+            double x=side*k*walk;
+            open_terms(&p,x,&gw,&gs,&m);
+            if(!isfinite(m)||!isfinite(gs.re)||!isfinite(gs.im))return 0;
+            if(m>top)top=m;
+            if(m<1e-20*top){if(++quiet>=2){if(side<0)lo=x;else hi=x;break;}}
+            else{
+                quiet=0;
+                double v=p.mode*exp(x),w=(l*rho*v+eta*rho*rho)/(v*v+rho*rho);
+                if(w>omega)omega=w;
+            }
+        }
+    }
+    {
+        double v=p.mode,w=(l*rho*v+eta*rho*rho)/(v*v+rho*rho);
+        if(w>omega)omega=w;
+    }
+    double step=.5;
+    if(omega>0&&M_PI/(2*omega)<step)step=M_PI/(2*omega);
+    long n=(long)ceil((hi-lo)/step);
+    if(n<2)n=2;
+    if(n>OPEN_SIDE_STEPS)return 0;
+    step=(hi-lo)/n;
+    acc wr={0.,0.},wi={0.,0.},sr={0.,0.},si={0.,0.},am={0.,0.};
+    for(long k=0;k<=n;k++){
+        open_terms(&p,lo+k*step,&gw,&gs,&m);
+        double wgt=(k==0||k==n)?.5:1.;
+        acc_add(&wr,wgt*gw.re);acc_add(&wi,wgt*gw.im);
+        acc_add(&sr,wgt*gs.re);acc_add(&si,wgt*gs.im);acc_add(&am,wgt*m);
+    }
+    cx wave=cx_make(acc_value(&wr)*step,acc_value(&wi)*step);
+    cx slope=cx_make(acc_value(&sr)*step,acc_value(&si)*step);
+    for(int level=0;level<OPEN_LEVELS;level++){
+        double h=step/2;
+        for(long k=0;k<n;k++){
+            open_terms(&p,lo+(2*k+1)*h,&gw,&gs,&m);
+            acc_add(&wr,gw.re);acc_add(&wi,gw.im);
+            acc_add(&sr,gs.re);acc_add(&si,gs.im);acc_add(&am,m);
+        }
+        n*=2;step=h;
+        cx w2=cx_make(acc_value(&wr)*step,acc_value(&wi)*step);
+        cx s2=cx_make(acc_value(&sr)*step,acc_value(&si)*step);
+        double aw=cx_abs(w2);
+        if(!(aw>0)||!isfinite(aw)||!isfinite(s2.re)||!isfinite(s2.im))return 0;
+        int converged=cx_abs(cx_make(w2.re-wave.re,w2.im-wave.im))<=1e-14*aw
+                    &&cx_abs(cx_make(s2.re-slope.re,s2.im-slope.im))<=1e-14*(aw+cx_abs(s2));
+        wave=w2;slope=s2;
+        if(converged){
+            if(acc_value(&am)*step>OPEN_CANCELLATION*aw)return 0;
+            double log_wave=.5*M_PI*eta+(l+1)*log(2.)-l*log(rho)-log_abs_gamma(l,eta)
+                           +log(p.mode)+p.peak+log(aw);
+            *shift=-l+cx_div(slope,wave).re;
+            *log_p=log(rho)-2*log_wave;
+            return isfinite(*shift)&&isfinite(*log_p);
+        }
+    }
+    return 0;
+}
+
 /* coulomb._charged_point, branch rho<=0.25 and eta*rho>2: the fraction and
- * the Wronskian, while the fraction stays within its iteration limit. */
+ * the Wronskian, while the fraction stays within its iteration limit; the
+ * Laplace integral nearer the threshold. */
 static int small_point(int l,double eta,double rho,double *log_p,double *shift,double *phase){
     cx here;double reg;
-    if(!outgoing(l,eta,rho,SMALL_RADIUS_FRACTION_ITERATIONS,&here))return 0;
-    if(!regular(l,eta,rho,&reg)||!barrier_log_p(l,eta,rho,here,reg,log_p))return 0;
-    *shift=rho*here.re;
-    if(!isfinite(*shift))return 0;
+    int done=0;
+    if(outgoing(l,eta,rho,SMALL_RADIUS_FRACTION_ITERATIONS,&here)&&regular(l,eta,rho,&reg)
+       &&barrier_log_p(l,eta,rho,here,reg,log_p)){
+        *shift=rho*here.re;done=isfinite(*shift);
+    }
+    if(!done){
+        if(!outgoing_laplace(l,eta,rho,shift,log_p))return 0;
+        if(!regular(l,eta,rho,&reg))return 0;
+    }
     *phase=atan2(exp(*log_p),rho*reg-*shift);
     return isfinite(*phase);
 }
@@ -271,16 +392,6 @@ static int open_point(int l,double eta,double rho,const tableau *tb,
     *phase=atan2(exp(y[1]),rho*reg-y[0]);
     return isfinite(*phase);
 }
-
-/* Neumaier-compensated accumulator. */
-typedef struct {double sum,carry;} acc;
-static void acc_add(acc *a,double v){
-    double t=a->sum+v;
-    if(fabs(a->sum)>=fabs(v))a->carry+=(a->sum-t)+v;
-    else a->carry+=(v-t)+a->sum;
-    a->sum=t;
-}
-static double acc_value(const acc *a){return a->sum+a->carry;}
 
 typedef struct {int l;double eta,kappa,mode,peak;} closed_problem;
 

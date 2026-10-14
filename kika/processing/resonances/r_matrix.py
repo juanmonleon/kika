@@ -245,32 +245,50 @@ def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, 
             delta = bound(i,matrix[local],y[local],r[local])
             with np.errstate(divide='ignore'):
                 x_errors[i] = np.log(np.sum(abs(a),axis=1))-np.log(abs(d[i]))+delta
+    # Pole rows sharing the same pole levels are one stacked augmented
+    # system; a stack with a singular member is solved row by row.
+    patterns = {}
     for i in pole_indices:
-        pole = poles[i]
+        patterns.setdefault(poles[i].tobytes(),[]).append(i)
+    for rows in patterns.values():
+        rows = np.asarray(rows)
+        pole = poles[rows[0]]
         other = ~pole
-        r0 = np.diag(z[i])+(a[other].T/d[i, other])@a[other]
-        ap = a[pole]
-        check_dense_workspace(c+len(ap),work_bytes)
-        matrix = np.block([[np.eye(c)-logarithmic[i, :, None]*r0,
-                            -logarithmic[i, :, None]*ap.T],
-                           [-ap, np.diag(d[i, pole])]])
-        rhs = np.zeros(c+len(ap), complex); rhs[entrance] = 1.
+        ap = a[pole]; ao = a[other]; k = len(ap)
+        check_dense_workspace(c+k,work_bytes)
+        do = d[rows][:,other]
+        r0 = (ao.T[None,:,:]/do[:,None,:])@ao
+        r0[:,np.arange(c),np.arange(c)] += z[rows]
+        lr = logarithmic[rows]
+        matrix = np.zeros((len(rows),c+k,c+k),complex)
+        matrix[:,:c,:c] = np.eye(c)[None]-lr[:,:,None]*r0
+        matrix[:,:c,c:] = -lr[:,:,None]*ap.T[None]
+        matrix[:,c:,:c] = -ap[None]
+        matrix[:,c+np.arange(k),c+np.arange(k)] = d[rows][:,pole]
+        rhs = np.zeros((len(rows),c+k,1),complex); rhs[:,entrance,0] = 1.
         try:
-            solution = np.linalg.solve(matrix, rhs)
+            solution = np.linalg.solve(matrix,rhs)[:,:,0]
         except np.linalg.LinAlgError:
-            solution = np.linalg.lstsq(matrix, rhs, rcond=None)[0]; singular += 1
-        residual = np.linalg.norm(matrix@solution-rhs)/(np.linalg.norm(matrix)*np.linalg.norm(solution)+1.)
-        maximum = max(maximum, float(residual))
-        y = solution[:c]; xp = solution[c:]
-        excitation[i] = y
-        w[i] = r0@y+ap.T@xp
-        x[i, other] = a[other]@y/d[i, other]
-        x[i, pole] = xp
-        if np.any(missing[i]):
-            delta = bound(i,matrix,solution,np.concatenate((r0,ap.T),axis=1))
+            solution = np.empty((len(rows),c+k),complex)
+            for j in range(len(rows)):
+                try:
+                    solution[j] = np.linalg.solve(matrix[j],rhs[j,:,0])
+                except np.linalg.LinAlgError:
+                    solution[j] = np.linalg.lstsq(matrix[j],rhs[j,:,0],rcond=None)[0]; singular += 1
+        residual = (np.linalg.norm((matrix@solution[:,:,None]-rhs)[:,:,0],axis=1)
+                    /(np.linalg.norm(matrix,axis=(1,2))*np.linalg.norm(solution,axis=1)+1.))
+        maximum = max(maximum,float(np.max(residual)))
+        y = solution[:,:c]; xp = solution[:,c:]
+        excitation[rows] = y
+        w[rows] = (r0@y[:,:,None])[:,:,0]+xp@ap
+        x[np.ix_(rows,np.flatnonzero(other))] = y@ao.T/do
+        x[np.ix_(rows,np.flatnonzero(pole))] = xp
+        for j in np.flatnonzero(np.any(missing[rows],axis=1)):
+            i = rows[j]
+            delta = bound(i,matrix[j],solution[j],np.concatenate((r0[j],ap.T),axis=1))
             x_errors[i,pole] = delta
             with np.errstate(divide='ignore'):
-                x_errors[i,other] = np.log(np.sum(abs(a[other]),axis=1))-np.log(abs(d[i,other]))+delta
+                x_errors[i,other] = np.log(np.sum(abs(ao),axis=1))-np.log(abs(d[i,other]))+delta
     if maximum > 1e-11 or any(np.any(~np.isfinite(v)) for v in (w, x, excitation)):
         raise FloatingPointError('RML solve failed finite/residual check')
     if diagnostics is not None:
