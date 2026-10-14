@@ -350,7 +350,7 @@ def test_native_gnds_inelastic_threshold_resolves_declared_residual_and_q(tmp_pa
     for mt,value in prepare_resonances(normalized,ctx).evaluate(e).items():np.testing.assert_allclose(value,before[mt],rtol=4e-13)
 
 
-def test_signed_capture_width_is_a_sign_of_amplitude_and_negative_dummy_uses_absolute_lab_reference():
+def test_signed_capture_width_is_a_sign_of_amplitude_and_negative_dummy_uses_its_channel_energy():
     source,ctx=rml_model(amplitudes=False);source.resolved[0].formalism.spinGroups[0].energies[0]=-50.
     expected=prepare_resonances(source,ctx).evaluate(np.array([30.,100.]))
     source.resolved[0].formalism.spinGroups[0].widths[0][2]*=-1
@@ -358,7 +358,10 @@ def test_signed_capture_width_is_a_sign_of_amplitude_and_negative_dummy_uses_abs
     for mt,value in expected.items():np.testing.assert_array_equal(value,prepared.evaluate(np.array([30.,100.]))[mt])
     ch=prepared.regions[0].groups[0].channels[1]
     from kika.processing.resonances.channel_functions import neutral_channel_functions
-    reference=abs(50*56/57-75*56/57)
+    # The width of a level at -50 eV in a channel with a 75 eV threshold is
+    # referred to |E_c(-50)| = |-50-75|*56/57, as NJOY's betset and FUDGE do;
+    # not to E_c(|-50|).
+    reference=abs(-50*56/57-75*56/57)
     p=neutral_channel_functions(0,np.sqrt(ch.k2_cm*reference)*6.)[0]
     assert abs(prepared.regions[0].groups[0].reduced[0][1])==pytest.approx(np.sqrt(.2/(2*p)),rel=3e-15)
 

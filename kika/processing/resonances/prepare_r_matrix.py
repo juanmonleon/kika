@@ -271,9 +271,14 @@ def prepare_rml(region, resonances, context, notes):
                 else:
                     if ch.effective or ch.penetrability == 'unity':pr = 1.
                     else:
-                        # ENDF negative dummy levels use the absolute LAB
-                        # resonance energy before the channel Q is applied.
-                        reference = abs(float(ch.channel_energy(abs(er))))
+                        # The width is referred to the channel energy of the
+                        # level, then its magnitude: |E_c(E_lambda)|, as NJOY's
+                        # betset (ex=abs(eres-echan)) and FUDGE (rho(E-Xi)).
+                        # For the entrance channel this is |E_lambda|; for an
+                        # exit with a Q-value it is not: Ca-40's bound levels
+                        # read at |E_lambda| put the alpha channel 0.9 MeV too
+                        # high and its thermal (n,alpha) 6.4 times too low.
+                        reference = abs(float(ch.channel_energy(er)))
                         if reference == 0 and width != 0:raise UnsupportedResonanceError('physical width reference lies at channel threshold')
                         if reference == 0:pr = 1.
                         else:
