@@ -296,8 +296,9 @@ stopped after $n$ ladders is identical to one drawn with $n$ ladders.
   against. The error is far below the statistical error of the table.
 - **The statistics follow the ladder.** A per-sample error would treat the
   $N$ correlated samples of a ladder as independent and understate the error. The
-  jackknife holds the band boundaries fixed, as FRENDY's statistical check does
-  (`TODO(check)`: FRENDY's method, and a reference for it).
+  jackknife holds the band boundaries fixed. FRENDY estimates the same statistical
+  error with the central limit theorem on each band, which Tada and Endo (2023) found to
+  agree with the jackknife and the bootstrap at a lower cost.
 
 ## Limits and failure modes
 
@@ -479,6 +480,8 @@ this timing).
 - K. Tada, A. Yamamoto, S. Kunieda, C. Konno, R. Kondo, T. Endo, G. Chiba, M. Ono and
   M. Tojo, "Development of nuclear data processing code FRENDY version 2", *Journal of
   Nuclear Science and Technology* 61, 830-839 (2024), doi:10.1080/00223131.2023.2278600.
-  `TODO(check)`: whether it describes the statistical check of probability tables.
+- K. Tada and T. Endo, "Statistical uncertainty quantification of probability tables for
+  unresolved resonance cross sections", *EPJ Web of Conferences* 284, 14013 (2023),
+  doi:10.1051/epjconf/202328414013.
 - M. L. Mehta, *Random Matrices*, 3rd ed., Elsevier (2004): Wigner's spacing
   distribution.
