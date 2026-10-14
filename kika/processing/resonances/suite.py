@@ -10,6 +10,7 @@ from enum import Enum
 import hashlib
 import re
 from types import MappingProxyType
+from typing import NamedTuple
 import numpy as np
 
 from .assemble import BackgroundCurve, prepare_backgrounds
@@ -24,17 +25,15 @@ from .tabulate import _Segment, _seeds
 CONTAINERS=('reactions','sums','fissionComponents','productions','orphanProducts','incompleteReactions')
 
 
-@dataclass(frozen=True,order=True)
-class ReactionKey:
-    """Model identity; MT is used only to project BW partials and ENDF output."""
+class ReactionKey(NamedTuple):
+    """Model identity; MT is used only to project BW partials and ENDF output.
+
+    A tuple, so that hashing and comparing it is done in C: keys are hashed
+    tens of millions of times tabulating a material cut into thousands of
+    segments (JENDL-5 Cl-35: 42 M), where a dataclass's __hash__ cost 4 s.
+    """
     container: str
     label: str
-
-    def __hash__(self):
-        # Equality still compares both fields. The label alone is the cheap
-        # part of the identity, and keys are hashed tens of millions of times
-        # tabulating a material cut into thousands of segments.
-        return hash(self.label)
 
 
 def _entries(suite):
