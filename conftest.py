@@ -544,8 +544,11 @@ def pytest_collection_modifyitems(
     held = pytest.mark.skip(
         reason="expensive by default; run it with --deep, -m or -k"
     )
+    # The marks, not ``item.keywords``: keywords also hold the names of the
+    # directories a test lives in, so every test under ``kika/njoy/`` was held
+    # back as if it spawned NJOY, mocked or not.
     for item in items:
-        if set(item.keywords) & _EXPENSIVE_MARKS:
+        if {mark.name for mark in item.iter_markers()} & _EXPENSIVE_MARKS:
             item.add_marker(held)
 
 
