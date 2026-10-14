@@ -907,4 +907,7 @@ collects the largest solve residual and flux error of each formalism.
   (2002).
 - *NIST Digital Library of Mathematical Functions*, <https://dlmf.nist.gov/>: §10.29,
   §13.2, §33.8.
-- `TODO(ref)`: a reference for Reich-Moore and for R-matrix theory (Lane and Thomas).
+- A. M. Lane and R. G. Thomas, "R-matrix theory of nuclear reactions", *Reviews of
+  Modern Physics* 30, 257-353 (1958).
+- C. W. Reich and M. S. Moore, "Multilevel formula for the fission process", *Physical
+  Review* 111, 929-933 (1958).

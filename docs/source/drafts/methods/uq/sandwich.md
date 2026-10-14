@@ -35,7 +35,7 @@ ENDF (Evaluated Nuclear Data File) evaluations state their covariances mostly re
 (MF 33 for cross-sections, MF 34 for Legendre coefficients, ENDF-6 Ch. 33-34), processed
 into multigroup form, and a sensitivity is a relative derivative.
 Here $i$ runs over parameters (nuclide, reaction or Legendre order, energy group).
-`TODO(ref)`: a reference for first-order uncertainty propagation in reactor physics.
+(First-order propagation: Cacuci 2003.)
 
 ## What it computes
 
@@ -265,7 +265,8 @@ The tests below passed on 2026-10-11 unless marked.
   Nuclear Data Files ENDF/B-VI, ENDF/B-VII and ENDF/B-VIII*, Brookhaven National
   Laboratory (2023), doi:10.2172/2007538. Cited as ENDF-6: Ch. 33-34 (covariances of
   cross-sections and of angular distributions).
-- `TODO(ref)`: first-order (sandwich) uncertainty propagation.
+- D. G. Cacuci, *Sensitivity and Uncertainty Analysis, Volume I: Theory*, Chapman &
+  Hall/CRC (2003): first-order (sandwich) uncertainty propagation.
 - W. Wieselquist and R. A. Lefebvre (eds.), *SCALE 6.3.1 User Manual*, ORNL/TM-SCALE-6.3.1,
   Oak Ridge National Laboratory (2023), doi:10.2172/1959594: TSURFER (the alias table).
 - B. Petillon, P. Arthur, R. Vuiart, V. Jaiswal and M. Brovchenko, "CALINS: a new ASNR

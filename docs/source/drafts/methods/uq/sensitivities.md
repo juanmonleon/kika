@@ -421,6 +421,9 @@ The tests below passed on 2026-10-11.
 - M. Aufiero, A. Bidaud, M. Hursin, J. Leppänen, G. Palmiotti, S. Pelloni and P. Rubiolo,
   "A collision history-based approach to sensitivity/perturbation calculations in the
   continuous energy Monte Carlo code SERPENT", *Annals of Nuclear Energy* 85, 245-258
-  (2015), doi:10.1016/j.anucene.2015.05.008. `TODO(ref)`: the `.sens` output format.
+  (2015), doi:10.1016/j.anucene.2015.05.008.
+- V. Valtavirta, M. Aufiero and J. Leppänen, "Collision-history based
+  sensitivity/perturbation calculation capabilities in Serpent 2.1.30", BEPU 2018, Lucca
+  (2018): the sensitivity output of Serpent 2.
 - W. Wieselquist and R. A. Lefebvre (eds.), *SCALE 6.3.1 User Manual*, ORNL/TM-SCALE-6.3.1,
   Oak Ridge National Laboratory (2023), doi:10.2172/1959594: TSUNAMI and the Sensitivity Data File format.

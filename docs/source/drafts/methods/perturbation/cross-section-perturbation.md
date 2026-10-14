@@ -450,5 +450,5 @@ blocks, the negative sums). `run_metadata.json` records `crossSectionSums`, `sum
   (MF 1/451, LRP), Ch. 2 (resonance parameters), Ch. 3 (MF 3), §33.2 (MF 33).
 - R. E. MacFarlane, D. W. Muir, R. M. Boicourt, A. C. Kahler and J. L. Conlin, *The NJOY
   Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
-  doi:10.2172/1338791: RECONR and PURR. `TODO(ref)`: chapter numbers, and a citation for
-  RECONR's rebuilding of MT 1 and MT 4 from the partials.
+  doi:10.2172/1338791: the RECONR chapter (including its rebuilding of the redundant
+  MT 1 and MT 4 from the partials) and the PURR chapter.

@@ -24,7 +24,7 @@ tables (see {doc}`../../architecture/format-adapters`).
 ACE (A Compact ENDF) is the format of continuous-energy Monte Carlo codes such as MCNP and
 Serpent. A table is processed data, written by NJOY's ACER: the resonance region is
 already reconstructed, every cross-section is on one unionised energy grid, linearly
-interpolated, at one temperature (`TODO(ref)`: the ACE format specification). After a header, a table is
+interpolated, at one temperature (Conlin and Romano 2019). After a header, a table is
 three arrays: NXS (sizes), JXS (pointers) and XSS, one long array of reals holding every
 block. Energies are in MeV, cross-sections in barns, and the header temperature is $kT$
 in MeV.
@@ -178,7 +178,8 @@ unclean for a cross-section use; a block absent from the table produces no entry
 
 ## References
 
-- `TODO(ref)`: the ACE format specification, full citation.
+- J. L. Conlin (ed.) and P. Romano, *A Compact ENDF (ACE) Format Specification*,
+  LA-UR-19-29016, Los Alamos National Laboratory (2019), doi:10.2172/1561065.
 - R. E. MacFarlane, D. W. Muir, R. M. Boicourt, A. C. Kahler and J. L. Conlin, *The NJOY
   Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
   doi:10.2172/1338791: ACER.

@@ -41,7 +41,7 @@ SCALE 6.3.1 manual).
 The ICSBEP benchmarks distributed with DICE come with sensitivity profiles in SDF form,
 several per benchmark when it was modelled with more than one code, library or group
 structure. kika ships no benchmark data: the database is built from the user's own DICE
-files (Briggs 2005; `TODO(ref)`: DICE).
+files (Briggs 2005; Nouri et al. 2003).
 
 ## What it computes
 
@@ -236,8 +236,10 @@ The tests below passed on 2026-10-11 unless marked.
 - W. Wieselquist and R. A. Lefebvre (eds.), *SCALE 6.3.1 User Manual*, ORNL/TM-SCALE-6.3.1,
   Oak Ridge National Laboratory (2023), doi:10.2172/1959594: TSUNAMI-IP, the definition of $c_k$.
 - J. B. Briggs, "ICSBEP benchmarks for nuclear data applications", *AIP Conference
-  Proceedings* 769, 1717-1722 (2005), doi:10.1063/1.1945340. `TODO(ref)`: the DICE
-  database.
+  Proceedings* 769, 1717-1722 (2005), doi:10.1063/1.1945340.
+- A. Nouri, P. Nagel, J. B. Briggs and T. Ivanova, "DICE: database for the International
+  Criticality Safety Benchmark Evaluation Program Handbook", *Nuclear Science and
+  Engineering* 145, 11-19 (2003), doi:10.13182/NSE03-15.
 - B. Petillon, P. Arthur, R. Vuiart, V. Jaiswal and M. Brovchenko, "CALINS: a new ASNR
   software for sensitivity and uncertainty analysis in nuclear criticality safety
   evaluations", NCSD 2025, American Nuclear Society, 282-289 (2025),

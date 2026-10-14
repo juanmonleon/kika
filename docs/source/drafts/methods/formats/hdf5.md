@@ -267,7 +267,9 @@ re-run `compareNeutron` on the nine before review. The benchmark names and model
   "OpenMC: A state-of-the-art Monte Carlo code for research and development", *Annals of
   Nuclear Energy* 82 (2015) 90-97, doi:10.1016/j.anucene.2014.07.048.
 - The OpenMC Development Team, *OpenMC documentation*, version 0.16.0, "Nuclear Data File
-  Formats". `TODO(ref)`: the stable URL.
+  Formats", <https://docs.openmc.org/en/v0.16.0/io_formats/nuclear_data.html>.
 - D. A. Brown (ed.), *ENDF-6 Formats Manual*, Brookhaven National Laboratory (2023),
   doi:10.2172/2007538: MF 1/MT 458.
-- `TODO(ref)`: ENDF-102 §1.5.2.1 (the energy dependence of the fission energy release).
+- R. Sher and C. Beck, EPRI NP-1771, Electric Power Research Institute (1981): the energy
+  dependence of the fission energy release, as the ENDF-6 manual (CSEWG document
+  ENDF-102) recommends it for MF 1/MT 458.

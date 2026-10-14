@@ -261,5 +261,6 @@ were computed).
 - R. E. MacFarlane, D. W. Muir, R. M. Boicourt, A. C. Kahler and J. L. Conlin, *The NJOY
   Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
   doi:10.2172/1338791: UNRESR, PURR.
-- `TODO(ref)`: a reference for the $\chi^2$ (Porter-Thomas) width distributions and for
-  the width-fluctuation correction.
+- C. E. Porter and R. G. Thomas, "Fluctuations of nuclear reaction widths", *Physical
+  Review* 104, 483-491 (1956): the $\chi^2$ width distributions. The width-fluctuation
+  integrals are those of NJOY's UNRESR (MacFarlane et al. 2017, above).

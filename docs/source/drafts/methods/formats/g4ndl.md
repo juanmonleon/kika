@@ -157,4 +157,8 @@ name as `target`).
 
 ## References
 
-- `TODO(ref)`: Geant4, and its high-precision neutron (ParticleHP) models.
+- S. Agostinelli et al., "Geant4 -- a simulation toolkit", *Nuclear Instruments and
+  Methods in Physics Research A* 506, 250-303 (2003), doi:10.1016/S0168-9002(03)01368-8.
+- IAEA Nuclear Data Section, *Evaluated neutron cross section libraries for the Geant4
+  code*, <https://nds.iaea.org/geant4>: the G4NDL libraries of the high-precision
+  (ParticleHP) models.

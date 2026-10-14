@@ -207,4 +207,8 @@ Shapiro-Wilk and D'Agostino-Pearson tests.
   Science and Engineering* 177, 337-349 (2014), doi:10.13182/NSE13-32.
 - R. B. D'Agostino and M. A. Stephens (eds.), *Goodness-of-Fit Techniques*, Marcel Dekker
   (1986): Table 4.9, the Anderson-Darling p-value with estimated parameters.
-- `TODO(ref)`: the Shapiro-Wilk and D'Agostino-Pearson tests.
+- S. S. Shapiro and M. B. Wilk, "An analysis of variance test for normality (complete
+  samples)", *Biometrika* 52, 591-611 (1965).
+- R. B. D'Agostino and E. S. Pearson, "Tests for departure from normality. Empirical
+  results for the distributions of $b_2$ and $\sqrt{b_1}$", *Biometrika* 60, 613-622
+  (1973).

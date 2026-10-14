@@ -248,7 +248,7 @@ of a matrix whose rows do not sum exactly to zero.
   {eq}`eq-fission-spectrum-perturbation-moment`, is computed on the first evaluated node of
   each band and recorded with the run, beside the spread of the drawn deltas (before the
   projection). Where kika holds an independent value (only U-235 at 0.0253 eV, the IAEA
-  standards value $\langle E' \rangle = 2.000 \pm 0.009$ MeV, `TODO(ref)`), the ratio of
+  standards value $\langle E' \rangle = 2.000 \pm 0.009$ MeV, Carlson et al. 2018), the ratio of
   the two uncertainties goes into the run's notes.
 
 ## Limits and failure modes
@@ -454,5 +454,7 @@ reference exists.
 - D. A. Brown (ed.), *ENDF-6 Formats Manual: Data Formats and Procedures for the Evaluated
   Nuclear Data Files ENDF/B-VI, ENDF/B-VII and ENDF/B-VIII*, Brookhaven National
   Laboratory (2023), doi:10.2172/2007538. Cited as ENDF-6: Ch. 5 (MF 5), Ch. 35 (MF 35).
-- `TODO(ref)`: the IAEA neutron standards evaluation of the U-235 thermal prompt fission
-  neutron spectrum, the source of the reference mean energy.
+- A. D. Carlson, V. G. Pronyaev et al., "Evaluation of the neutron data standards",
+  *Nuclear Data Sheets* 148, 143-188 (2018), doi:10.1016/j.nds.2018.02.002: the U-235
+  thermal prompt fission neutron spectrum. `TODO(check)`: the page and table that give
+  the mean energy 2.000 ± 0.009 MeV.

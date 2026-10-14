@@ -479,5 +479,6 @@ this timing).
 - K. Tada, A. Yamamoto, S. Kunieda, C. Konno, R. Kondo, T. Endo, G. Chiba, M. Ono and
   M. Tojo, "Development of nuclear data processing code FRENDY version 2", *Journal of
   Nuclear Science and Technology* 61, 830-839 (2024), doi:10.1080/00223131.2023.2278600.
-  `TODO(ref)`: whether it describes the statistical check of probability tables.
-- `TODO(ref)`: Wigner's spacing distribution.
+  `TODO(check)`: whether it describes the statistical check of probability tables.
+- M. L. Mehta, *Random Matrices*, 3rd ed., Elsevier (2004): Wigner's spacing
+  distribution.

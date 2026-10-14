@@ -359,5 +359,8 @@ thermal energy); that of MT 444 is at most 0.25 % below 25 keV, at most 1.6 % up
   doi:10.2172/2007538: §1.5 (MF 1/MT 458, fission energy release).
 - M. J. Norgett, M. T. Robinson and I. M. Torrens, A proposed method of calculating
   displacement dose rates, *Nucl. Eng. Des.* 33 (1975) 50-54.
-- `TODO(ref)`: J. Lindhard et al. for the partition of the recoil energy; the source of
-  the Sher-Beck energy dependence of MF 1/MT 458.
+- J. Lindhard, V. Nielsen, M. Scharff and P. V. Thomsen, "Integral equations governing
+  radiation effects", *Matematisk-fysiske Meddelelser, Det Kongelige Danske
+  Videnskabernes Selskab* 33(10) (1963): the partition of the recoil energy.
+- R. Sher and C. Beck, EPRI NP-1771, Electric Power Research Institute (1981): the energy
+  dependence of MF 1/MT 458.
