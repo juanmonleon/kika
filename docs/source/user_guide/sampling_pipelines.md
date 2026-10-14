@@ -1,5 +1,12 @@
 # Cross-section perturbation pipelines
 
+```{note}
+These are kika's file-level samplers. For new work use
+{py:func}`kika.sampling.model_perturbation.perturbFromModel`, which draws all the blocks
+of a request together, including the covariance between $\sigma$ and the Legendre
+coefficients that MF 34 states when MF 33 and MF 34 of one reaction are requested.
+```
+
 Three pipelines live in `kika/sampling/` for sampling perturbed nuclear data:
 
 | Pipeline                       | Perturbs                  | Driven by   | Output                |
@@ -31,10 +38,9 @@ reuse the single-physics building blocks without re-running NJOY:
 independently, then calls Stage B with the *perturbed* ENDF + perturbed
 PENDF for sample i.
 
-The decoupling matters because MF33↔MF34 cross-correlations are
-structurally zero in our methodology (see
-`manuscript/notes/mf3_mf4_cross_correlations_methodology.md`), so the two
-samplings are genuinely independent and pairing-by-index is correct.
+These pipelines draw MF33 and MF34 apart and pair the samples by index, so they
+leave out any covariance between σ and the Legendre coefficients the file states
+(MF34's L=0 sections). `perturbFromModel` draws it.
 
 ---
 
@@ -169,8 +175,8 @@ perturb_ENDF_PENDF_combined()
 ### Seed handling
 
 A single `seed=S` reproduces the same paired set: MF33 sampling uses `S`,
-MF34 uses `S + 1`. The two draws stay independent (no MF33↔MF34 correlation
-is implied) but are repeatable.
+MF34 uses `S + 1`. The two draws are independent (no MF33↔MF34 covariance is
+drawn) and repeatable.
 
 ### Quick start
 

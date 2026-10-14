@@ -1,7 +1,7 @@
 """OpenMC's angle-energy distributions ↔ the model's Monte Carlo forms.
 
 Every table OpenMC stores is tabulated with its cumulative, and decodes to
-``xs_pdf_cdf1d`` nodes (roadmap D9):
+``xs_pdf_cdf1d`` nodes:
 
 =================================  ===========================================
 ``distribution_<i>/@type``         model form (label ``MonteCarlo``)

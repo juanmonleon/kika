@@ -98,7 +98,10 @@ def muTable(function, options: TabulationOptions, outer=None, what="angular"):
     m = _m()
     if isinstance(function, m.Legendre):
         density = legendreDensity(function.coefficients)
-        seeds = np.linspace(-1.0, 1.0, max(3, options.angularSeeds))
+        # Order-aware seeds reduce midpoint cancellations; the exact moment
+        # check below remains the accuracy gate.
+        degree = len(function.coefficients) - 1
+        seeds = np.linspace(-1.0, 1.0, max(3, options.angularSeeds, 4 * degree + 1))
         target = _legendreMoments(function.coefficients, options.negative)
         mu, p = refine(density, seeds, options)
         for iteration in range(30):

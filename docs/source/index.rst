@@ -1,14 +1,20 @@
 KIKA Documentation
 ===================
 
-**A Python toolkit for nuclear data analysis**
+**A Python library for nuclear data**
 
-KIKA |version| is a library for nuclear data analysis, Monte Carlo simulation support, and uncertainty quantification. It provides functionality for:
+KIKA |version| is a Python library for nuclear data. It
 
-- **MCNP Processing**: Parse and manipulate MCNP input and output files
-- **Sensitivity Analysis**: Compute sensitivities and generate SDF files compatible with SCALE
-- **Nuclear Data**: Work with ACE, ENDF, and covariance matrices
-- **Visualization**: Generate publication-quality plots for nuclear data
+- reads and writes ENDF-6, GNDS, ACE, G4NDL and OpenMC HDF5 through one in-memory
+  model, shaped after GNDS;
+- processes an evaluation for transport without NJOY: resonance reconstruction,
+  Doppler broadening, unresolved-resonance probability tables, heating; PENDF,
+  OpenMC HDF5 or GNDS out;
+- checks the covariances an evaluation states, and draws perturbed evaluations from
+  them for uncertainty quantification;
+- reads MCNP and Serpent inputs and outputs, PERT cards, sensitivities and SDF files,
+  for the sandwich rule and benchmark similarity (:math:`c_k`);
+- plots what it reads.
 
 Quick Links
 -----------

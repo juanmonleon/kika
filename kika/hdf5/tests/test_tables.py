@@ -78,3 +78,16 @@ def test_a_correlated_law_is_not_angular(fe56):
     if others:
         with pytest.raises(ValueError, match="no angular distribution"):
             T.angularBulk(fe56, mt=int(others[0]))
+
+
+def test_responses_are_served_with_their_unit(fe56):
+    # Gas production, KERMA and damage are suite.productions, not reactions.
+    responses = {int(n.ENDF_MT) for n in fe56.productions}
+    assert {203, 301, 444, 901} <= responses
+    reference = T.referenceTemperature(fe56)
+    xs = T.crossSections(fe56, reference)
+    assert responses <= set(xs)
+    rows = {r["mt"]: r for r in T.isotopeSummary(fe56)["reactions"]}
+    assert rows[301]["response"] and rows[301]["unit"] == "eV*b" and rows[301]["q_value"] is None
+    assert rows[203]["response"] and rows[203]["unit"] == "b"
+    assert not rows[2]["response"] and rows[2]["unit"] == "b"

@@ -1,4 +1,4 @@
-"""A thermal scattering evaluation → the processed suite the thermal encoder writes (H9b, H9c).
+"""A thermal scattering evaluation → the processed suite the thermal encoder writes.
 
 As OpenMC's ``ThermalScattering.from_njoy`` builds its official files
 (``thermal.py:966-1038``, ``njoy.py:595-760``), without NJOY:
@@ -14,6 +14,12 @@ As OpenMC's ``ThermalScattering.from_njoy`` builds its official files
 
 The table's name (``c_H_in_H2O``) keys OpenMC's registry
 (:mod:`kika.hdf5.thermal_names`) for the ZAIDs and ``nmix``.
+
+With ``ThermalInelasticOptions(iinc=1)`` the table is THERMR's **free gas** of
+a nuclide instead (:func:`kika.processing.thermal.freeGasTables`): the input is
+the nuclide's neutron tape, the cross section its elastic broadened by kika to
+each temperature (as THERMR copies BROADR's MT2), no elastic part, and the
+name is the caller's (it is not in OpenMC's registry).
 """
 from __future__ import annotations
 
@@ -64,12 +70,13 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
     ``name`` is the OpenMC table name (``c_H_in_H2O``); ``temperatures`` in
     kelvin, by default every temperature the evaluation tabulates. The
     incoherent inelastic tables are kika's (:func:`kika.processing.thermal.inelasticTables`,
-    THERMR + ACER, roadmap H9c); the elastic comes from the evaluation, as
+    THERMR + ACER); the elastic comes from the evaluation, as
     OpenMC's ``from_njoy`` takes it with ``use_endf_data``: incoherent from
     σ_b and the Debye-Waller integral, coherent from the Bragg edges and the
-    cumulative structure factors at the temperature. ``neutron`` (the
-    principal nuclide's tape) is no longer read; it is accepted so a caller of
-    the NJOY-era signature keeps working.
+    cumulative structure factors at the temperature. ``neutron`` is the
+    principal nuclide's neutron tape: its atomic weight ratio is the table's
+    header AWR, as ACER takes it (graphite 11.89365, where the scattering law's
+    B(3) is 11.898). Without it the header carries B(3).
     """
     m = _m()
     import kika
@@ -79,6 +86,9 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
     from .thermal_names import THERMAL_DATA
 
     report = report if report is not None else m.ConversionReport()
+    if options is not None and options.iinc == 1:
+        return _processFreeGas(thermal, name=name, temperatures=temperatures, report=report,
+                               options=options)
     if name not in THERMAL_DATA:
         raise HDF5FormatError(f"{name!r} is not in OpenMC's thermal registry; known: "
                               f"{sorted(THERMAL_DATA)[:5]}...")
@@ -128,10 +138,71 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
         # The ACE header's AWR, written with six decimals (ACER's f12.6).
         "atomic_weight_ratio": round(float(headerAwr), 6), "energy_max": float(energyMax),
         "nuclides": nuclidesFromPairs([(z, 0.0) for z in entry.zaids])})
-    report.warn("thermal inelastic by kika (THERMR's calcem and ACER's iwt=2, roadmap H9c); "
+    report.warn("thermal inelastic by kika (THERMR's calcem and ACER's iwt=2); "
                 "elastic from the evaluation (use_endf_data)")
     suite.report = report
     return suite
+
+
+def _processFreeGas(path, *, name: str, temperatures, report, options):
+    """THERMR ``iinc=1`` + ACER for the nuclide on the neutron tape ``path``."""
+    m = _m()
+    from kika.endf.process import ProcessingPlan, process_endf
+    from kika.processing.thermal import freeGasTables
+    from .ace_thermal import nuclidesFromPairs
+    from .processing import aceKT
+
+    if not temperatures:
+        raise HDF5FormatError("a free-gas table needs its temperatures: there is no scattering "
+                              "law on a neutron tape to take them from")
+    temps = [float(t) for t in temperatures]
+    awr = _tapeAwr(path)
+    za = _tapeZa(path)
+    processed = process_endf(str(path), ProcessingPlan(temperatures=tuple(temps), urr=False,
+                                                       workers=options.workers))
+    emax = options.emax if options.emax is not None else 10.0
+    suite = m.ReactionSuite(evaluation="", projectile="n", target=name,
+                            interaction="thermalNeutronScatteringLaw")
+    suite.PoPs.add(m.Particle(id="n"))
+    suite.styles.add(m.Evaluated(label=EVAL_LABEL))
+    product = m.Product(pid="n", label="n", distribution=m.Distribution())
+    channel = m.OutputChannel(process="thermalNeutronScatteringLaw inelastic")
+    channel.products.products.append(product)
+    reaction = m.Reaction(id=m.ReactionId(label="inelastic", ENDF_MT=4), outputChannel=channel)
+    energyMax = None
+    for T in temps:
+        kT = aceKT(T)
+        label = heatedLabel(temperatureName(kT))
+        suite.styles.add(m.Heated(label=label, derivedFrom=EVAL_LABEL,
+                                  temperature=m.PhysicalQuantity(value=kT, unit="eV/k")))
+        elastic = processed.cross_sections(T)[2]
+        xs, dist, energyMaxT = freeGasTables(awr, T, elastic, emax=emax, options=options,
+                                             report=report)
+        reaction.crossSection[label] = xs
+        product.distribution[label] = dist
+        if energyMax is None:
+            energyMax = energyMaxT
+    suite.reactions.append(reaction)
+    suite.provenance = m.Hdf5Provenance(attributes={
+        "atomic_weight_ratio": round(float(awr), 6), "energy_max": float(energyMax),
+        "nuclides": nuclidesFromPairs([(za, 0.0)])})
+    report.warn("thermal free gas by kika (analytic free-gas law, corrected singularity and tails, consistent PDF/CDF; cross section the elastic "
+                "broadened by kika)")
+    suite.report = report
+    return suite
+
+
+def _tapeZa(path) -> int:
+    """MF1/MT451's ZA (the HEAD record's C1) of an ENDF tape."""
+    import re
+
+    with open(path, errors="replace") as handle:
+        for line in handle:
+            if len(line) >= 75 and line[70:72].strip() == "1" and line[72:75].strip() == "451":
+                field = line[0:11].strip()
+                match = re.fullmatch(r"([+-]?[\d.]+)([+-]\d+)", field)
+                return int(round(float(f"{match.group(1)}e{match.group(2)}") if match else float(field)))
+    raise HDF5FormatError(f"no MF1/MT451 in {path}")
 
 
 def _tapeAwr(path) -> float:

@@ -108,7 +108,7 @@ def test_a_python_logger_still_gets_every_line(tmp_path):
 def test_a_failing_stage_is_recorded_before_it_raises(tmp_path):
     log = RunLog()
     with pytest.raises(ValueError, match="unknown emitter"):
-        perturbFromModel(TAPE, REQUEST, 1, formats=("hdf5",), runLog=log)
+        perturbFromModel(TAPE, REQUEST, 1, formats=("no-such-format",), runLog=log)
     # Refused before anything was read: no events but... none. The refusal is
     # a caller error, not a run event.
     assert len(log) == 0

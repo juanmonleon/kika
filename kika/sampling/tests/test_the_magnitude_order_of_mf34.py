@@ -99,8 +99,8 @@ def test_naming_order_zero_still_perturbs_sigma_from_mf34(covariance):
 def test_cross_section_and_angular_together_are_drawn(covariance):
     """``{33, 34}`` no longer refuses: MF33 gives sigma, L>=1 the shape.
 
-    The sigma <-> a_l term L0xLl is not drawn yet (J3), and on this fixture it
-    is not null, so the note has to say the correlation is missing.
+    And since J3 (2026-10-14) the sigma <-> a_l term L0xLl is drawn with them;
+    the gates are in ``test_the_sigma_shape_cross_term_is_drawn.py``.
     """
     run = _run(covariance, {33: None, 34: None})
     components = run.samples[0]["set"].components()
@@ -108,7 +108,7 @@ def test_cross_section_and_angular_together_are_drawn(covariance):
                           ComponentKey(ZA, 34, MT, 2))
     (note,) = [n for n in run.notes if "states L=0" in n]
     assert "MF33 gives sigma's variance" in note
-    assert "not in the draw" in note
+    assert "is drawn with them in one matrix" in note
 
 
 def test_orders_from_one_drop_the_sigma_shape_cross_term(covariance,

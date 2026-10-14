@@ -1,4 +1,4 @@
-"""An evaluation → the processed suite the OpenMC encoder writes (roadmap H4).
+"""An evaluation → the processed suite the OpenMC encoder writes.
 
 :func:`processSuite` takes a suite decoded from ENDF or GNDS (``eval`` forms)
 and builds a **new** suite in the shape :mod:`kika.hdf5.neutron_encode`
@@ -13,14 +13,14 @@ serialises, without editing the one it was given:
    cross sections above it, as BROADR leaves them. Every reaction
    is then on one grid per temperature, the union of the broadened grid
    below ``thnmax`` and the 0 K one above, each from its threshold index.
-3. **Reactions** (roadmap D5, the official exporter's set): every exclusive
+3. **Reactions**: every exclusive
    partial; the redundant sums 4, 16, 103-107 -- rebuilt from their levels when
    the evaluation does not give them, as ``from_ace`` does for depletion -- and
    18 when the fission chances are given; gas production 203-207 as
    Σ multiplicity × σ over the reactions that emit p, d, t, ³He, α (what
    GASPR computes); KERMA 301/901 and damage 444 by kika's HEATR
-   (:mod:`kika.processing.heating`, H8) and the URR probability tables by
-   kika's PURR (:mod:`kika.processing.resonances.probability_tables`, H8). No
+   (:mod:`kika.processing.heating`) and the URR probability tables by
+   kika's PURR (:mod:`kika.processing.resonances.probability_tables`). No
    NJOY: every piece of a neutron file is kika's.
 4. **Distributions and yields** tabulated with their CDF
    (:mod:`kika.processing.tabulation`); neutrons and photons only, the
@@ -222,7 +222,9 @@ def _reconstructed(suite, context, report):
         working = copy.deepcopy(suite)
         for reaction in _entries(working).values():
             reaction.crossSection[RECON_LABEL] = reaction.crossSection[EVAL_LABEL]
-        working.styles.add(m.CrossSectionReconstructed(label=RECON_LABEL, derivedFrom=EVAL_LABEL))
+        from datetime import date
+        working.styles.add(m.CrossSectionReconstructed(label=RECON_LABEL, derivedFrom=EVAL_LABEL,
+                                                       date=date.today().isoformat()))
         report.warn("the evaluated cross sections are pointwise (the 0 K reconstruction is in the "
                     "file) and were taken as the 0 K forms")
         return working
@@ -571,7 +573,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
 
     ``endf`` is the ENDF tape the suite was read from, for the target's mass
     ratio and spin as MF1/MF2 state them (the reconstruction's context).
-    KERMA, damage and the URR probability tables are kika's (H8); ``omit``
+    KERMA, damage and the URR probability tables are kika's; ``omit``
     leaves any of ``"urr"``, ``"kerma"``, ``"damage"`` out. ``ed`` is the
     displacement threshold of the damage (default: HEATR's table by Z).
     ``heatingPartials`` requests additional HEATR response identifiers, stored
@@ -581,9 +583,9 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     MT443 uses HEATR's diagnostic convention; unresolved explicit MF6
     recoil paths raise rather than silently omitting a contribution.
     ``awr`` overrides the
-    atomic weight ratio (D11; default MF1/451's, as ACER takes it).
+    atomic weight ratio (default MF1/451's, as ACER takes it).
     ``thinning`` is the relative tolerance to which each temperature's grid is
-    thinned (roadmap H5): points are dropped while every reaction, read
+    thinned: points are dropped while every reaction, read
     lin-lin, reproduces every dropped point to it. 1e-3 is what the official
     libraries are processed to (BROADR's ``errthn``); ``None`` keeps the full
     union grid. The 0 K elastic is thinned to the same tolerance (RECONR's
@@ -594,11 +596,11 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     Windows, so a script that calls this needs the usual
     ``if __name__ == "__main__":`` guard; ``workers=1`` stays in-process. ``label`` processes
     the forms of that style -- a perturbation run's ``realization`` -- in
-    place of the evaluated ones wherever it has them (roadmap H7, D12: the
+    place of the evaluated ones wherever it has them (the
     sample is multiplied at 0 K and broadened, never the reverse).
     ``urrTables`` passes URR probability tables already computed
     (:func:`urrTablesOf`, ``{kelvin: ProbabilityTables}``), as a perturbation
-    run shares the unperturbed evaluation's between its samples (D12).
+    run shares the unperturbed evaluation's between its samples.
     ``broadened`` passes the broadening already done on this suite's 0 K forms
     (``_broadenAll``'s ``{kelvin: (heated forms, ceiling)}``, as
     ``kika.endf.process_endf`` keeps it); each temperature's ceiling is its own.
@@ -859,10 +861,17 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         if missing:
             raise ValueError(f"urrTables has no tables at {missing} K")
         urrTables = {T: urrTables[float(t)] for t, T in zip(temperatures, styleKT)}
-        report.warn("URR probability tables passed in, computed on another suite (D12: a "
+        report.warn("URR probability tables passed in, computed on another suite (a "
                     "perturbation run's unperturbed evaluation); they are not perturbed")
     else:
-        byKelvin = urrTablesOf(work, temperatures, context=context, workers=workers, report=report)
+        from kika.processing.resonances.probability_tables import purrGrid, purrInputs, competitionFlags
+        energyURR = purrGrid(work.resonances.unresolved)
+        _, competingURR = purrInputs(work, energyURR, form=_evaluated)
+        inelasticURR, _ = competitionFlags(competingURR)
+        transportXS = {float(kelvin): _urrTransportXS(out, T, energyURR, inelasticURR)
+                       for kelvin, T in zip(temperatures, styleKT)}
+        byKelvin = urrTablesOf(work, temperatures, context=context, workers=workers,
+                              report=report, transportXS=transportXS)
         urrTables = {T: byKelvin[float(t)] for t, T in zip(temperatures, styleKT)}
     if urrTables:
         _attachURR(out, urrTables)
@@ -956,8 +965,8 @@ def _urrContext(suite, context):
                           target.spin.convertedTo("hbar").value)
 
 
-def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None, options=None):
-    """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR (roadmap H8).
+def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None, options=None, transportXS=None):
+    """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR.
 
     The tables :func:`processSuite` writes. ``context`` is the target's
     NeutronContext (default: the model's mass and spin); ``options`` a
@@ -974,12 +983,34 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
     options = options or ProbabilityTableOptions()
     tables = probabilityTables(region, _urrContext(suite, context), energies, temperatures,
                                background=background, competing=competing, options=options,
-                               workers=workers or min(len(energies), os.cpu_count() or 1, 8))
+                               workers=workers or min(len(energies), os.cpu_count() or 1, 8), transportXS=transportXS)
     if report is not None:
         report.warn(f"URR probability tables computed by kika (PURR's method: {options.ladders} "
                     f"ladders of {options.samples} samples, {options.bins} bands, on "
                     f"{len(energies)} energies); statistically, not bitwise, equal to NJOY PURR's")
+        for T, table in tables.items():
+            report.warn(_urrErrorLine(T, table.statistics))
     return tables
+
+
+def _urrErrorLine(T, statistics) -> str:
+    """One line on a temperature's statistical error: per reaction with an
+    average, the worst relative error of f(σ0) at the smallest σ0 and the
+    worst band share ``p · factor``, over the energies."""
+    worst = statistics.worst()
+    s0 = float(statistics.sigma0[0])
+    parts = [f"{row} f({s0:g} b) {100 * w['shielding'][s0]:.2f} %, band {100 * w['contribution']:.2f} %"
+             for row, w in worst.items() if w["contribution"] > 0]
+    ladders = statistics.ladders
+    drawn = (f"{int(ladders.min())}" if ladders.min() == ladders.max()
+             else f"{int(ladders.min())}-{int(ladders.max())}")
+    target = ""
+    if statistics.errorTarget is not None:
+        missed = int((~statistics.converged).sum())
+        target = (f"; target {100 * statistics.errorTarget:g} % "
+                  + ("reached at every energy" if not missed else f"NOT reached at {missed} energies"))
+    return (f"URR {T:g} K statistical error (1 sigma, jackknife over {drawn} ladders, {statistics.shieldingBasis}, worst energy): "
+            + "; ".join(parts) + target)
 
 
 def _attachURR(out, tables):
@@ -1291,6 +1322,44 @@ def _fission(work, out, report):
             nu = neutron.multiplicity.form if neutron is not None else None
             fission.outputChannel.fissionFragmentData = m.FissionFragmentData(
                 fissionEnergyReleases=[openmcTerms(source.fissionEnergyReleases[0], nu, report)])
+
+
+
+def _urrTransportXS(out, T, grid, inelastic):
+    """Smooth XS used by OpenMC's URR reader, on the probability-table grid.
+
+    Capture in the reader denotes all non-fission disappearance, not MT102
+    alone. Redundant sums are excluded from absorption and fission.
+    """
+    values = {}
+    result = np.zeros((len(grid), 4))
+    for container in (out.reactions, out.fissionComponents, out.sums):
+        for reaction in container:
+            mt = reaction.ENDF_MT
+            form = reaction.crossSection.forms.get(heatedLabel(T))
+            if mt is None or form is None:
+                continue
+            x = np.interp(grid, form.xs, form.ys, left=0., right=float(form.ys[-1]))
+            values[mt] = x
+            attributes = getattr(reaction.provenance, "attributes", {}) or {}
+            if attributes.get("redundant", 0):
+                continue
+            if mt == 2:
+                result[:, 0] += x
+            elif mt in FISSION_MTS:
+                result[:, 1] += x
+            elif (101 <= mt <= 117 or 600 <= mt <= 849
+                  or mt in (118, 119, 120, 121, 122, 124)):
+                result[:, 2] += x
+    if inelastic > 0:
+        if inelastic in values:
+            result[:, 3] = values[inelastic]
+        elif inelastic == 4:
+            result[:, 3] = sum((x for mt, x in values.items() if 51 <= mt <= 91),
+                               np.zeros(len(grid)))
+        else:
+            raise ValueError(f"URR competing MT{inelastic} has no processed smooth cross section")
+    return result
 
 
 def _totalOn(out, T, grid):

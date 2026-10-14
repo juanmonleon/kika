@@ -54,6 +54,18 @@ own reconstruction or from an NJOY PENDF file) and, for a perturbed realisation,
 cross-sections are labelled `gridded`, under a `heated` style at the file's temperature,
 because that is what an ACE table holds.
 
+**Processed data uses the processed styles of GNDS §9.4.** A suite read from an OpenMC
+HDF5 file, or produced by kika's own processing, carries one `heated` style per temperature
+(`heated_294K`, or `heated_000`, `heated_001`, … in a GNDS file kika writes), the 0 K
+forms as `recon`, the sampling tables a Monte Carlo code reads under `MonteCarlo`
+(`MonteCarlo_cdf`), and the unresolved-range probability tables under one
+`URR_probabilityTables` style per temperature. The forms these styles hold that GNDS has
+no node for are model classes of their own (`kika.nuclear_data.model.processed_forms`):
+the level and discrete-photon energy laws of ACE and OpenMC, the correlated
+energy-angle tables, the thermal-scattering forms, and the probability tables with their
+statistical errors (`ProbabilityTables`, `ProbabilityTableStatistics`). A derived style
+carries the date it was made, which `gnds.xsd` requires of every derived style.
+
 **Functions are the GNDS functional containers** (§6). The two that matter most:
 
 - {py:class}`~kika.nuclear_data.model.functions.xys1d.XYs1d`: a table of $(x, y)$ with

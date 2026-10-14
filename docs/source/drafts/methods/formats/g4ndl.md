@@ -36,7 +36,7 @@ Geant4 is not a dependency of kika.
 | `Inelastic/CrossSection`, `F01`-`F36`, `Gammas` | read and written; `kika.g4ndl.inelastic_decode` states what reaches the model |
 | `Capture/CrossSection`, `Capture/FS` or `FSMF6` (MT 102) | read and written |
 | `Fission/CrossSection`, `FS`, chances `FC` to `LC`, fragment yields `FF` (MT 18, 19-21, 38) | read and written |
-| `ThermalScattering` | not read; a library holding it is read in part, and the report says so |
+| `ThermalScattering` (`Coherent`, `Incoherent`, `Inelastic`) | read one material at a time, as a processed thermal-scattering suite (σ(E) and the Bragg table enter the model; the outgoing-neutron sampling tables stay beside it); not written. A neutron read of the same root leaves the folder out, and its report says so |
 
 ## Reading
 
@@ -112,7 +112,8 @@ files with those written from a suite, leaving every other file as it was, and r
 ## What the round trip keeps and loses
 
 Read and write gives the same records, array for array; tokens with no model slot come
-back from the provenance. Thermal scattering data is not read and therefore not written.
+back from the provenance. Thermal scattering data is read only as a suite of its own,
+and is not written.
 The distributed libraries print 7 significant figures, kika writes up to 17, so a file
 written by kika is not byte-identical to the one it was read from.
 
@@ -120,7 +121,8 @@ written by kika is not byte-identical to the one it was read from.
 
 Entries a user meets: an evaluation the files do not name (a loss); a code 1 in $\mu$ read
 as lin-lin (an approximation); `tempdep` not zero (a warning); a `ThermalScattering`
-directory not read (unsupported).
+directory left out of a neutron read (unsupported; the thermal material is read with its
+name as `target`).
 
 ## Validation
 
@@ -131,6 +133,9 @@ directory not read (unsupported).
   (`kika/g4ndl/tests/test_full_libraries.py`, `test_capture_full_libraries.py`,
   `test_fission_full_libraries.py`, `test_inelastic_full_libraries.py`). `TODO(check)`:
   they need the libraries on disk; not re-run for this page.
+- The `ThermalScattering` folder: a folder of materials is indexed, its Bragg table and
+  outgoing tables are read per temperature, and `kika.read` returns its suite
+  (`kika/tsl/tests/test_tsl_formats.py::test_a_g4ndl_thermal_folder_is_a_library_of_materials`).
 - Agreement with Geant4 itself is checked outside this repository, against a compiled
   Geant4.
 
@@ -144,10 +149,16 @@ directory not read (unsupported).
 - `kika/g4ndl/physics.py`: `checkElastic` (normalisation, positivity found from the roots
   of a Legendre sum's derivative, moments) and the evaluation of $p(\mu \mid E)$ and
   $d\sigma/d\Omega$; `tables.py`: summary tables.
+- `kika/tsl/g4ndl.py`: the `ThermalScattering` folder; `kika/tsl/processed.py`: the
+  processed thermal suite it is read into.
 - `kika/g4ndl/iterate.py`: the correction loop that alternates a measurement corrected
   with Geant4 and a library rewritten from the corrected evaluation; Geant4 runs outside
   kika.
 
 ## References
 
-- `TODO(ref)`: Geant4, and its high-precision neutron (ParticleHP) models.
+- S. Agostinelli et al., "Geant4 -- a simulation toolkit", *Nuclear Instruments and
+  Methods in Physics Research A* 506, 250-303 (2003), doi:10.1016/S0168-9002(03)01368-8.
+- IAEA Nuclear Data Section, *Evaluated neutron cross section libraries for the Geant4
+  code*, <https://nds.iaea.org/geant4>: the G4NDL libraries of the high-precision
+  (ParticleHP) models.

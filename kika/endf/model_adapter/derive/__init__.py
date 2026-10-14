@@ -64,7 +64,7 @@ DERIVERS: List[Tuple[str, Callable[[object], bool],
 #: that imported ``derive.reactions`` first used to register it ahead of
 #: ``derive.suite``, so every reaction came out with ZA and AWR of ``None``.
 #: A deriver not named here runs after these, in registration order.
-RUN_ORDER = ("suite", "reactions", "resonances", "products", "multiplicities",
+RUN_ORDER = ("suite", "productions", "reactions", "resonances", "products", "multiplicities",
              "fissionEnergyRelease", "delayedNeutrons", "covariances")
 
 
@@ -171,6 +171,7 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
 
     from . import suite as _suite  # noqa: F401  registers, in run order
     from . import resonances as _resonances  # noqa: F401
+    from . import productions as _productions  # noqa: F401
     from . import reactions as _reactions  # noqa: F401
     from . import products as _products  # noqa: F401
     from . import fission as _fission  # noqa: F401

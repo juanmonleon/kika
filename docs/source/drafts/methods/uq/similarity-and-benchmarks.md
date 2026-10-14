@@ -35,13 +35,13 @@ $$ (eq-similarity-and-benchmarks-ck)
 is the fraction of the two nuclear-data uncertainties they share: $c_k = 1$ when the
 profiles are proportional with a positive factor, $-1$ with a negative one, near 0 when
 the data that drive one hardly affect the other. A benchmark with $c_k$ close to 1 tests
-the same data, with the same weights, as the application. `TODO(ref)`: the definition of
-$c_k$ (TSUNAMI-IP).
+the same data, with the same weights, as the application ($c_k$ as TSUNAMI-IP defines it,
+SCALE 6.3.1 manual).
 
 The ICSBEP benchmarks distributed with DICE come with sensitivity profiles in SDF form,
 several per benchmark when it was modelled with more than one code, library or group
 structure. kika ships no benchmark data: the database is built from the user's own DICE
-files. `TODO(ref)`: ICSBEP handbook and DICE.
+files (Briggs 2005; Nouri et al. 2003).
 
 ## What it computes
 
@@ -203,8 +203,8 @@ The tests below passed on 2026-10-11 unless marked.
   covariance library: $c_k$ is required to match a frozen CALINS value to
   $5\cdot10^{-10}$ absolute
   (`kika/benchmarks/tests/test_real_dice_scale44.py::test_real_dice_scale44_sandwich_and_ck_match_frozen_calins_reference`).
-  `TODO(check)`: needs the user's DICE database and the COVERX file; not re-run (skipped
-  on 2026-10-11).
+  `TODO(check)`: needs the user's DICE database and the COVERX file, and is
+  skipped without them; not re-run for this page.
 
 ## Diagnostics
 
@@ -233,6 +233,14 @@ The tests below passed on 2026-10-11 unless marked.
 
 ## References
 
-- `TODO(ref)`: the definition of $c_k$ (SCALE TSUNAMI-IP).
-- `TODO(ref)`: the ICSBEP handbook and the DICE database.
-- `TODO(ref)`: CALINS (the comparison code of the validation).
+- W. Wieselquist and R. A. Lefebvre (eds.), *SCALE 6.3.1 User Manual*, ORNL/TM-SCALE-6.3.1,
+  Oak Ridge National Laboratory (2023), doi:10.2172/1959594: TSUNAMI-IP, the definition of $c_k$.
+- J. B. Briggs, "ICSBEP benchmarks for nuclear data applications", *AIP Conference
+  Proceedings* 769, 1717-1722 (2005), doi:10.1063/1.1945340.
+- A. Nouri, P. Nagel, J. B. Briggs and T. Ivanova, "DICE: database for the International
+  Criticality Safety Benchmark Evaluation Program Handbook", *Nuclear Science and
+  Engineering* 145, 11-19 (2003), doi:10.13182/NSE03-15.
+- B. Petillon, P. Arthur, R. Vuiart, V. Jaiswal and M. Brovchenko, "CALINS: a new ASNR
+  software for sensitivity and uncertainty analysis in nuclear criticality safety
+  evaluations", NCSD 2025, American Nuclear Society, 282-289 (2025),
+  doi:10.13182/NCSD25-47777.

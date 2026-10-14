@@ -44,6 +44,19 @@ def test_successful_publication_is_a_complete_processed_tape(tmp_path):
     assert not list(tmp_path.glob('.processed.endf.*'))
 
 
+def test_a_published_table_is_one_region_per_law(tmp_path):
+    """NJOY reads 20 regions at most; the jumps go in as repeated energies."""
+    suite=writable_suite();result=run(suite);attach_reconstruction(suite,result)
+    target=tmp_path/'processed.endf'
+    writeReconstructedEndfTape(suite,result,target)
+    tape=read_endf(str(target),mf_numbers=[3])
+    sections=tape.mf[3].mt
+    assert sections
+    for section in sections.values():
+        laws=[law for _,law in section._interpolation]
+        assert all(a!=b for a,b in zip(laws,laws[1:]))
+
+
 def test_unrepresentable_peak_does_not_replace_existing_file(tmp_path):
     suite=writable_suite(l=3);result=run(suite);attach_reconstruction(suite,result)
     target=tmp_path/'processed.endf';target.write_text('previous file')

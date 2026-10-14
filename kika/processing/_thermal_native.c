@@ -1,5 +1,6 @@
 /* Thermal incoherent inelastic scattering, NJOY THERMR's calcem/sigl/sig/terpq
  * (thermr.f90, NJOY2016) ported line for line, for kika.processing.thermal.
+ * iinc = 2 is the tabulated S(alpha,beta); iinc = 1 the free gas (sig label 200).
  *
  * One call computes one incident energy: the adaptive outgoing-energy grid,
  * sigma(E->E') and the nbin equiprobable cosines at each E', and the
@@ -15,6 +16,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef M_PI
+#define M_PI 3.141592653589793238462643383279502884
+#endif
 
 #ifdef __FAST_MATH__
 #error "the thermal kernel requires strict floating-point arithmetic"
@@ -26,7 +30,7 @@
 
 typedef struct {
     double tev, tevz, az, sb, sb2, az2, teff, teff2, cliq;
-    int lat, lasym;
+    int lat, lasym, iinc;
     Py_ssize_t na, nb;
     const double *alpha, *beta, *sab;   /* sab[ia + na*ib], 0-based */
 } Ctx;
@@ -85,18 +89,28 @@ static double terpq(double x1, double y1, double x2, double y2,
     return y;
 }
 
-/* thermr.f90 sig, iinc=2 (tabulated S(alpha,beta)) */
+/* thermr.f90 sig: iinc=2 (tabulated S(alpha,beta)) or iinc=1 (free gas) */
 static double sig(const Ctx *c, double e, double ep, double u) {
     const double sigmin = 1e-10, amin = 1e-6, test1 = 0.2, test2 = 30.0;
     double tev = c->tev, rtev = 1.0 / tev;
     double bb = (ep - e) * rtev;
     double a = (e + ep - 2 * u * sqrt(e * ep)) / (c->az * tev);
-    if (a < amin) a = amin;
+    if (c->iinc != 1 && a < amin) a = amin;
     double sigc = sqrt(ep / e) * rtev / 2;
     double b = fabs(bb);
     double cc = sqrt(4 * M_PI);
     double s, s1, s2, s3, bbb, arg, out;
     Py_ssize_t na = c->na, nb = c->nb, ia = 0, ib = 0, i;
+    if (c->iinc == 1) {
+        /* label 200: free gas, sb = ((az+1)/az)**2 per unit free cross section */
+        if(ep==0) return 0;
+        if(a<=0) return bb==0 ? INFINITY : 0;
+        s = 0;
+        arg = (a + bb) * (a + bb) / (4 * a);
+        if (-arg > SABFLG) s = exp(-arg) / (cc * sqrt(a));
+        out = sigc * c->sb * s;
+        return out;
+    }
     if (c->lat == 1) { b = b * tev / c->tevz; a = a * tev / c->tevz; }
     if (a > c->alpha[na - 1]) goto l170;
     if (c->lasym == 1) {
@@ -158,7 +172,83 @@ l170:
 
 /* thermr.f90 sigl with nlin < 0: s[0] = sigma(E->E'), s[1..nl-1] equiprobable cosines.
  * Arrays are 1-based as in the Fortran (index 0 unused). */
+/* Free-gas angular integration in u=sqrt(alpha). The Jacobian removes the
+ * integrable 1/sqrt(alpha) singularity without an alpha floor. */
+static double fg_erfcx(double x) {
+    if (x < 25.0) return exp(x*x)*erfc(x);
+    double t=1.0/(2*x*x), term=1.0, sum=1.0;
+    for (int k=1;k<=8;k++) { term*=-(2*k-1)*t;sum+=term; }
+    return sum/(sqrt(M_PI)*x);
+}
+static double fg_derf(double a,double b) {
+    if (a>=0 && b>=0) return erfc(a)-erfc(b);
+    if (a<=0 && b<=0) return erfc(-b)-erfc(-a);
+    return erf(b)-erf(a);
+}
+static double fg_weight(double u,double beta) {
+    if (u==0) return beta==0 ? 1.0 : 0.0;
+    double p=(u+beta/u)/2;
+    return exp(-p*p);
+}
+static const double fg_x8[4]={.1834346424956498,.5255324099163290,.7966664774136267,.9602898564975363};
+static const double fg_w8[4]={.3626837833783620,.3137066458778873,.2223810344533745,.1012285362903763};
+static double fg_quad(double a,double b,double beta,int moment,double ulo,double scale) {
+    double mid=(a+b)/2,half=(b-a)/2,sum=0;
+    for (int k=0;k<4;k++) for(int sign=-1;sign<=1;sign+=2) {
+        double u=mid+sign*half*fg_x8[k];
+        double value=fg_weight(u,beta);
+        if (moment) value*=1-scale*(u-ulo)*(u+ulo);
+        sum+=fg_w8[k]*value;
+    }
+    return sum*half;
+}
+static double fg_mass(double a,double b,double beta) {
+    if (b<=a) return 0;
+    if (beta==0) return sqrt(M_PI)*fg_derf(a/2,b/2);
+    double pa=(a+beta/a)/2,pb=(b+beta/b)/2;
+    double qa=(a-beta/a)/2,qb=(b-beta/b)/2;
+    double one=fg_derf(pa,pb),two;
+    if (beta<0) two=exp(-pa*pa)*fg_erfcx(qa)-exp(-pb*pb)*fg_erfcx(qb);
+    else two=exp(-beta)*fg_derf(qa,qb);
+    double value=sqrt(M_PI)*(one+two)/2;
+    /* Narrow intervals and cancelling tails use a direct, smooth integral. */
+    if (b-a<1e-5*fmax(1.0,b) || value<1e-8*(fabs(one)+fabs(two)))
+        value=fg_quad(a,b,beta,0,0,0);
+    return fmax(value,0.0);
+}
+static double fg_mean_integral(double a,double b,double beta,double ulo,double scale,int depth) {
+    double coarse=fg_quad(a,b,beta,1,ulo,scale),mid=(a+b)/2;
+    double fine=fg_quad(a,mid,beta,1,ulo,scale)+fg_quad(mid,b,beta,1,ulo,scale);
+    double mass=fg_mass(a,b,beta);
+    if (fabs(fine-coarse)<=1e-11*mass+1e-300 || depth>=20) return fine;
+    return fg_mean_integral(a,mid,beta,ulo,scale,depth+1)+fg_mean_integral(mid,b,beta,ulo,scale,depth+1);
+}
+static void freegas_sigl(const Ctx *c,double e,double ep,int nl,double *s) {
+    int bins=nl-1;
+    for(int j=0;j<nl;j++)s[j]=0;
+    if (ep<=0) {for(int j=1;j<=bins;j++)s[j]=-1+(2.0*j-1)/bins;return;}
+    double root=sqrt(c->az*c->tev),se=sqrt(e),sp=sqrt(ep);
+    double lo=fabs(sp-se)/root,hi=(sp+se)/root,beta=(ep-e)/c->tev;
+    double mass=fg_mass(lo,hi,beta);
+    if (!(mass>1e-290)) return;
+    s[0]=c->sb*c->az/(4*e*sqrt(M_PI))*mass;
+    double upper=hi,scale=c->az*c->tev/(2*sqrt(e*ep));
+    for(int j=1;j<=bins;j++) {
+        double target=mass*(1-(double)j/bins),a=lo,b=upper;
+        if(j<bins) for(int it=0;it<48;it++) {
+            double mid=(a+b)/2;
+            if(fg_mass(lo,mid,beta)<target)a=mid;else b=mid;
+        }
+        double edge=j==bins ? lo : (a+b)/2;
+        double area=fg_mass(edge,upper,beta);
+        s[j]=area>0 ? fg_mean_integral(edge,upper,beta,lo,scale,0)/area : 1-scale*((edge+upper)/2-lo)*((edge+upper)/2+lo);
+        s[j]=fmax(-1,fmin(1,s[j]));upper=edge;
+    }
+}
+
 static void sigl(const Ctx *c, double e, double ep, int nl, double tolin, double *s) {
+    if(c->iinc==1){freegas_sigl(c,e,ep,nl,s);return;}
+
     const double xtol = 0.00001, ytol = 0.001, half = 0.5, third = 0.333333333;
     const double sigmin = 1e-32, eps = 1e-3, shade = 0.99999999;
     double x[IMAX + 1], y[IMAX + 1];
@@ -167,7 +257,7 @@ static void sigl(const Ctx *c, double e, double ep, int nl, double tolin, double
     int i, j, nbin, il;
     double rnbin, fract, rfract, gral, add, xil, xn = 0, f, rf, disc, yn, xbar;
     b = fabs((ep - e) / c->tev);
-    if (c->lat == 1) b = b * c->tev / c->tevz;
+    if (c->lat == 1 && c->iinc == 2) b = b * c->tev / c->tevz;
     double s1bb = sqrt(1 + b * b);
     if (ep != 0) seep = 1 / sqrt(e * ep);
 
@@ -322,12 +412,15 @@ l250:
  * integrated cross section. Points carry THERMR's sigfig rounding. */
 static Py_ssize_t calcem_energy(const Ctx *c, double enow, int nl, double tol,
                                 double *xs, double *ys, Py_ssize_t cap, double *xsiOut, int *overflow) {
-    const double tolmin = 5e-7, em9 = 1e-9, half = 0.5, uumin = 1e-5;
+    const double tolmin = c->iinc==1 ? 0.0 : 5e-7, em9 = 1e-9, half = 0.5, uumin = 1e-5;
     double x[IMAX + 1], y[NLMAX][IMAX + 1], yt[NLMAX];
     Py_ssize_t j = 0, jnz = 0;
     int i, il, k, jbeta, iskip = 0;
     double xsi = 0, ep, xm, ym, uu, uum, test, test2, xlast = 0, ylast = 0;
     Py_ssize_t nb = c->nb;
+    /* Numerical floors apply only far below the reference checker’s 1%-of-peak
+     * region; retain relative refinement throughout that region. */
+    double freePeak=c->iinc==1 ? c->sb*c->az/(4*enow)*erf(sqrt(enow/(c->az*c->tev))) : 0;
     *overflow = 0;
 
 #define STORE(jj, xv, yv) do { \
@@ -387,9 +480,11 @@ l330:
     uu = 0;
     uum = 0;
     for (k = 0; k < nl; k++) {
+        if(c->iinc==1 && k>0 && yt[0]<1e-12*freePeak) continue;
         ym = terp1(x[i], y[k][i], x[i - 1], y[k][i - 1], xm, 2);
         if (k > 0) { uu = uu + yt[k]; uum = uum + ym; }
         test = tol * fabs(yt[k]);
+        if(c->iinc==1 && k==0) test+=tol*1e-8*freePeak;
         test2 = test;
         if (k > 0) test2 = tol;
         if (fabs(yt[k] - ym) > test2) goto l410;
@@ -450,14 +545,18 @@ static int buffer(PyObject *obj, Py_buffer *b, Py_ssize_t count, int writable) {
 
 static PyObject *calcem(PyObject *self, PyObject *args) {
     double enow, tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, tol;
-    int lat, lasym, nl;
+    int lat, lasym, nl, iinc = 2;
     Py_ssize_t na, nb, cap;
     PyObject *o[5];
     Py_buffer b[5] = {{0}};
-    if (!PyArg_ParseTuple(args, "ddddddddddiiidnnnOOOOO", &enow, &tev, &tevz, &az, &sb, &sb2, &az2,
+    if (!PyArg_ParseTuple(args, "ddddddddddiiidnnnOOOOO|i", &enow, &tev, &tevz, &az, &sb, &sb2, &az2,
                           &teff, &teff2, &cliq, &lat, &lasym, &nl, &tol, &na, &nb, &cap,
-                          &o[0], &o[1], &o[2], &o[3], &o[4]))
+                          &o[0], &o[1], &o[2], &o[3], &o[4], &iinc))
         return NULL;
+    if (iinc != 1 && iinc != 2) {
+        PyErr_SetString(PyExc_ValueError, "iinc is 1 (free gas) or 2 (S(alpha,beta))");
+        return NULL;
+    }
     if (nl < 2 || nl > NLMAX || na < 3 || nb < 3 || cap < 2) {
         PyErr_SetString(PyExc_ValueError, "invalid thermal kernel dimensions");
         return NULL;
@@ -469,7 +568,7 @@ static PyObject *calcem(PyObject *self, PyObject *args) {
             return NULL;
         }
     }
-    Ctx c = {tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, lat, lasym, na, nb,
+    Ctx c = {tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, lat, lasym, iinc, na, nb,
              b[0].buf, b[1].buf, b[2].buf};
     double xsi = 0;
     int overflow = 0;
@@ -487,13 +586,18 @@ static PyObject *calcem(PyObject *self, PyObject *args) {
 
 static PyObject *py_sig(PyObject *self, PyObject *args) {
     double e, ep, u, tev, tevz, az, sb, sb2, az2, teff, teff2, cliq;
-    int lat, lasym;
+    int lat, lasym, iinc = 2;
     Py_ssize_t na, nb;
     PyObject *o[3];
     Py_buffer b[3] = {{0}};
-    if (!PyArg_ParseTuple(args, "ddddddddddddiinnOOO", &e, &ep, &u, &tev, &tevz, &az, &sb, &sb2,
-                          &az2, &teff, &teff2, &cliq, &lat, &lasym, &na, &nb, &o[0], &o[1], &o[2]))
+    if (!PyArg_ParseTuple(args, "ddddddddddddiinnOOO|i", &e, &ep, &u, &tev, &tevz, &az, &sb, &sb2,
+                          &az2, &teff, &teff2, &cliq, &lat, &lasym, &na, &nb, &o[0], &o[1], &o[2],
+                          &iinc))
         return NULL;
+    if (iinc != 1 && iinc != 2) {
+        PyErr_SetString(PyExc_ValueError, "iinc is 1 (free gas) or 2 (S(alpha,beta))");
+        return NULL;
+    }
     Py_ssize_t sizes[3] = {na, nb, na * nb};
     for (int q = 0; q < 3; q++) {
         if (!buffer(o[q], &b[q], sizes[q], 0)) {
@@ -501,7 +605,7 @@ static PyObject *py_sig(PyObject *self, PyObject *args) {
             return NULL;
         }
     }
-    Ctx c = {tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, lat, lasym, na, nb,
+    Ctx c = {tev, tevz, az, sb, sb2, az2, teff, teff2, cliq, lat, lasym, iinc, na, nb,
              b[0].buf, b[1].buf, b[2].buf};
     double v = sig(&c, e, ep, u);
     for (int r = 0; r < 3; r++) if (b[r].obj) PyBuffer_Release(&b[r]);
@@ -562,6 +666,6 @@ static struct PyModuleDef module = {PyModuleDef_HEAD_INIT, "_thermal_native", NU
 PyMODINIT_FUNC PyInit__thermal_native(void) {
     PyObject *m = PyModule_Create(&module);
     if (m == NULL) return NULL;
-    if (PyModule_AddIntConstant(m, "API_VERSION", 1) < 0) { Py_DECREF(m); return NULL; }
+    if (PyModule_AddIntConstant(m, "API_VERSION", 2) < 0) { Py_DECREF(m); return NULL; }
     return m;
 }

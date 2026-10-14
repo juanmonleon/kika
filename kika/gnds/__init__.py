@@ -67,7 +67,7 @@ publishes in them and neither is implemented.
 **What is in here**, none of it exported from this module — import the module
 you want, or go through :func:`kika.read` / :func:`kika.write`:
 
-======================  ===================================================
+====================================  ============================================
 :mod:`~kika.gnds.version`             the format gate, ``ACCEPTED = ("2.0", "2.1")``
 :mod:`~kika.gnds.xpath`               ``href`` resolution, both dialects, and
                                       ``externalFile`` checksums
@@ -83,7 +83,7 @@ you want, or go through :func:`kika.read` / :func:`kika.write`:
 :mod:`~kika.gnds.covariances`         §25 ``covarianceSuite`` → the model
 :mod:`~kika.gnds.encode`              the model → XML, both roots
 :mod:`~kika.gnds.encode_resonances`   §19, the other direction
-======================  ===================================================
+====================================  ============================================
 
 **No intermediate format-classes layer**, unlike :mod:`kika.endf`'s
 parsers → classes → adapter. GNDS's tree *is* the model's shape, so this goes

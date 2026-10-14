@@ -102,6 +102,10 @@ subsection at the end of this section.
 ## Conventions and choices
 One bullet per decision a careful reader could have made differently: the choice, then
 its reason in one or two sentences. "Why not X?" questions are answered here, briefly.
+Where kika does something other than what NJOY, FUDGE, FRENDY or OpenMC do, the bullet
+says what they do, why kika does not, and what the difference buys (accuracy, physics,
+cost), with the evidence. When it is only a different route to the same result, it says
+so: equivalence is a valid outcome, and "better" is claimed only where it is measured.
 
 ## Limits and failure modes
 What it refuses (and the exception), what it reports instead of doing, and the known
@@ -275,9 +279,15 @@ Present tense, describing what the code on the default branch does. Never on a p
 
 ### 5.2 Numbers
 
-- **Every validation number traces to something a reader can run**: a test in this repo
-  (cite `path/to/test_file.py::test_name`) or a script under `examples/`. A number that
-  only exists in a notebook or a private note does not go on a page.
+- **Every validation number of kika against its own physics traces to something a
+  reader can run**: a test in this repo (cite `path/to/test_file.py::test_name`) or a
+  script under `examples/`. This is the evidence that kika computes what the page says.
+- **A comparison with another code** (NJOY, FUDGE, FRENDY, OpenMC) may be quoted without
+  a test in this repo, because those codes are not dependencies of kika and are not the
+  truth: a test pinned to their output would fail the day kika improves on it. The page
+  states the code and its version, the evaluation and material, the tolerances of both
+  sides, the metric and the date measured. When the two disagree, the page says which one
+  an independent reference supports, or that it is not known.
 - Give the comparison, the metric and the size: "maximum relative difference in σ(E)
   against NJOY 2016.76 RECONR, 0.1 % tolerance: 3·10⁻⁴ over 4 213 points". Never
   "agrees well".

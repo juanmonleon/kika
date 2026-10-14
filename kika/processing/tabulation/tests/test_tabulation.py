@@ -89,8 +89,10 @@ def test_level_reaction_gets_openmcs_kinematics():
     assert out.energy.massRatio == pytest.approx((A / (A + 1)) ** 2)
 
 
-def test_kalbach_slope_matches_openmc():
-    # openmc.data.kalbach_slope(14e6, 5e6, 1, 1, 26056) in OpenMC 0.16.0
+def test_kalbach_slope_is_of_order_one_and_grows_with_the_emitted_energy():
+    """Kalbach's systematics for n + Fe-56 at 14 MeV: finite, of order one, and
+    steeper (more forward) the more energy the neutron takes out. Not a
+    comparison with OpenMC's ``kalbach_slope``, which is not a dependency."""
     value = float(kalbachSlope(14e6, 5e6, 1, 26056))
     assert value == pytest.approx(0.0, abs=10)  # finite and of order unity
     assert np.all(np.diff(kalbachSlope(14e6, np.array([1e5, 1e6, 5e6]), 1, 26056)) > 0)
@@ -156,3 +158,18 @@ def test_angular_moments_catch_midpoint_cancellation_within_capacity():
     table,_=muTable(m.Legendre(coefficients=c), TabulationOptions(rtol=1e-4,atol=1e-6))
     assert len(table.xs)<500
     assert np.allclose(_tableMoments(table), [c[1],1/3+2*c[2]/3], rtol=0,atol=1e-5)
+
+
+def test_legendre_table_keeps_the_mean_cosine_where_a_midpoint_sits_on_the_chord():
+    """Fe-56 elastic at 1.438 MeV (ENDF/B-VIII.1): with three seeds and a midpoint-only
+    test, [-1, 0] passed as one segment (mu = -0.5 lies on the chord) and the table's
+    mean cosine came out 0.025 instead of a1 = -0.073."""
+    from kika.nuclear_data.model import Legendre
+    from kika.processing.tabulation.angular import muTable
+    from kika.processing.tabulation.tables import TabulationOptions
+
+    a = [1.0, -0.07297533, 0.2537618, 0.06656012, 0.005421167, 0.01914622, -0.01104767]
+    table, _ = muTable(Legendre(coefficients=a, outerDomainValue=1.438e6), TabulationOptions())
+    mu, cdf = np.asarray(table.xs), np.asarray(table.cdf)
+    mean = float(np.sum(np.diff(cdf) * 0.5 * (mu[1:] + mu[:-1])))
+    assert mean == pytest.approx(a[1], abs=2e-3)

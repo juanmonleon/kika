@@ -115,6 +115,27 @@ def test_a_doppler_rejection_keeps_the_0K_result(monkeypatch):
     assert result.temperatures == () and {1, 2, 102} <= set(result.cross_sections())
 
 
+def test_a_dead_worker_pool_says_what_usually_kills_it(monkeypatch):
+    """On Windows a script with no __main__ guard breaks the pool; say so."""
+    from concurrent.futures.process import BrokenProcessPool
+    from kika.hdf5 import processing as hp
+
+    def die(*args, **kwargs):
+        raise BrokenProcessPool("A process in the process pool was terminated abruptly.")
+    monkeypatch.setattr(hp, "_broadenAll", die)
+    broaden = process_endf(TAPE, ProcessingPlan(temperatures=(600.0,))).stage("broaden")
+    assert broaden.status == "rejected" and broaden.category == "doppler-failed"
+    assert '__name__ == "__main__"' in broaden.summary and "workers=1" in broaden.summary
+
+
+def test_a_worker_importing_an_unguarded_script_does_not_run_it(monkeypatch):
+    """A spawned worker re-imports the main script; a run at its top level stops."""
+    import multiprocessing
+    monkeypatch.setattr(multiprocessing.current_process(), "_inheriting", True, raising=False)
+    with pytest.raises(RuntimeError, match="__main__"):
+        process_endf(TAPE, ProcessingPlan(temperatures=(600.0,)))
+
+
 def test_zero_kelvin_only():
     result = process_endf(TAPE, ProcessingPlan(temperatures=()))
     assert result.stage("broaden").status == "skipped" and result.temperatures == ()
@@ -280,6 +301,9 @@ def test_gnds_has_a_heated_style_per_temperature(run, tmp_path):
     assert {"eval", "recon", "heated_000", "heated_001"} <= set(styles)
     assert [float(styles[l].temperature.value) for l in ("heated_000", "heated_001")] == list(TEMPERATURES)
     assert styles["heated_001"].derivedFrom == "recon"
+    # gnds.xsd requires a date on every style; the derived ones carry the day
+    # they were made (D38: the file FUDGE reads should also validate).
+    assert all(styles[l].date for l in ("eval", "recon", "heated_000", "heated_001"))
     elastic = next(r for r in back.reactions if r.ENDF_MT == 2)
     x, y = result.cross_sections(900)[2]
     from kika.hdf5.processing import _flatten
@@ -368,3 +392,42 @@ def test_gnds_and_endf_routes_agree_once_broadened(tmp_path):
         xb, yb = b.cross_sections(293.6)[mt]
         rel = np.abs(np.interp(xa, xb, yb) - ya) / np.maximum(np.abs(ya), 1e-8)
         assert np.quantile(rel, 0.999) < 1e-3, mt
+
+
+@pytest.fixture(scope="module")
+def heated_run():
+    return process_endf(TAPE, ProcessingPlan(temperatures=(293.6,), heating=True, workers=1))
+
+
+def test_the_heating_stage_gives_mt301_and_mt444_on_each_mt1_grid(heated_run):
+    stage = heated_run.stage("heating")
+    assert (stage.status, stage.category) == ("done", None)
+    assert stage.details["temperatures"] == [0.0, 293.6] and stage.details["local"] == 0
+    heating = heated_run.heating
+    assert set(heating) == {0.0, 293.6}
+    for T, tables in heating.items():
+        assert set(tables) == {301, 444}
+        e1, _ = heated_run.cross_sections(T)[1]
+        x, h = tables[301]
+        assert len(x) == len(e1) and np.allclose(x, e1, rtol=1e-11)
+        assert np.all(np.isfinite(h)) and np.all(np.isfinite(tables[444][1]))
+        # Elastic and capture heat a structural nuclide at every energy.
+        assert np.all(h[x > 1.0] > 0)
+
+
+def test_the_pendf_carries_the_heating_in_every_material(heated_run, tmp_path):
+    from kika._records import parse_number
+    path = heated_run.write_pendf(tmp_path / "fe56.pendf")
+    per_material, directory = [], []
+    for line in Path(path).read_text().split("\n"):
+        if line[70:75] == " 1451" and line[75:80].strip() == "1":
+            per_material.append(set())
+            directory.append(set())
+        elif line[70:72] == " 3" and line[72:75].strip() not in ("", "0"):
+            per_material[-1].add(int(line[72:75]))
+        elif line[70:75] == " 1451" and line[:22].strip() == "" and line[22:33].strip() == "3":
+            directory[-1].add(int(line[33:44]))
+    assert len(per_material) == 2
+    assert all({301, 444} <= mts for mts in per_material)
+    assert all({301, 444} <= mts for mts in directory)
+    assert heated_run.stages[-1].details["heating"] == [301, 444]

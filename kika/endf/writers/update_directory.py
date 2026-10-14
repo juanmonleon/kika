@@ -50,6 +50,28 @@ def update_mf1_directory(filepath: str, added_sections: Optional[Set[Tuple[int, 
         logger.error(f"Cannot read file for directory update: {e}")
         return False
 
+    new_file_lines = rebuild_mf1_directory_lines(lines, added_sections)
+    if new_file_lines is None:
+        return False
+
+    with open(filepath, 'w', newline='') as f:
+        f.writelines(new_file_lines)
+    return True
+
+
+def rebuild_mf1_directory_lines(lines: List[str],
+                                added_sections: Optional[Set[Tuple[int, int]]] = None,
+                                ids: Optional[List[Tuple]] = None,
+                                ) -> Optional[List[str]]:
+    """:func:`update_mf1_directory` on lines already in memory.
+
+    *lines* are what a ``newline=''`` read of the tape gives -- each with its
+    own terminator -- and the result is the lines that function writes back, or
+    ``None`` where it would leave the file alone (no MF1/MT451). It is the whole
+    of that function but the two file accesses, so a caller holding the tape in
+    memory gets the same bytes without a read and a write per call. *ids*, when
+    given, is ``parse_endf_id`` of each of *lines*, which spares the full scan.
+    """
     # --- Step 1: Find MF1/MT451 boundaries ---
     mt451_start = None
     mt451_end = None  # exclusive (first line AFTER MT451 + its SEND record)
@@ -78,7 +100,7 @@ def update_mf1_directory(filepath: str, added_sections: Optional[Set[Tuple[int, 
 
     if mt451_start is None:
         logger.warning("No MF1/MT451 section found — cannot update directory")
-        return False
+        return None
     if mt451_end is None:
         mt451_end = len(lines)
 
@@ -100,8 +122,7 @@ def update_mf1_directory(filepath: str, added_sections: Optional[Set[Tuple[int, 
     # --- Step 4: Count data lines only for allowed (MF, MT) pairs ---
     line_counts: Dict[Tuple[int, int], int] = OrderedDict()
 
-    for line in lines:
-        mat, mf, mt = parse_endf_id(line)
+    for mat, mf, mt in (ids if ids is not None else map(parse_endf_id, lines)):
         if mf is not None and mt is not None and mf > 0 and mt > 0:
             key = (mf, mt)
             if key in allowed_keys:
@@ -155,11 +176,8 @@ def update_mf1_directory(filepath: str, added_sections: Optional[Set[Tuple[int, 
 
     new_file_lines = lines[:mt451_start] + new_mt451_lines + lines[mt451_end:]
 
-    with open(filepath, 'w', newline='') as f:
-        f.writelines(new_file_lines)
-
     logger.debug(
         f"Updated MF1/MT451 directory: {nxc_new} entries "
         f"(was {len(mt451._directory)} before rebuild)"
     )
-    return True
+    return new_file_lines

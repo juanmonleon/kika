@@ -260,8 +260,15 @@ def _hostFor(suite, mt) -> Optional[_Host]:
             break
     else:
         label = f"Orphan product {len(suite.orphanProducts) + 1}"
+        # The sum's own Q (MF3's QI), as FUDGE writes it: GNDS requires one
+        # in every outputChannel, and an orphan with none was written `<Q/>`.
+        from copy import deepcopy
+        hostQ = getattr(getattr(reaction, "outputChannel", None), "Q", None)
+        channel = OutputChannel(genre="NBody")
+        if hostQ is not None and hostQ.isKnown:
+            channel.Q = deepcopy(hostQ)
         orphan = Reaction(id=ReactionId(label=label, ENDF_MT=int(mt)),
-                          outputChannel=OutputChannel(genre="NBody"))
+                          outputChannel=channel)
         orphan.crossSection[EVAL_LABEL] = Reference(
             href=(f"/reactionSuite/sums/crossSectionSums/crossSectionSum"
                   f"[@label='{reaction.label}']/crossSection/{_formTag(sigma)}"

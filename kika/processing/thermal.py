@@ -1,12 +1,12 @@
-"""Thermal incoherent inelastic scattering tables from S(alpha, beta) (roadmap H9c).
+"""Thermal incoherent inelastic scattering tables from S(alpha, beta).
 
 kika's own THERMR + ACER for the ``incoherent_inelastic`` group of an OpenMC
 thermal file: from the model's :class:`~kika.nuclear_data.model.IncoherentInelastic`
 law at one temperature, the inelastic cross section on THERMR's fixed incident
 grid and, at each incident energy, the outgoing-energy table with its pdf and
 cdf and the 16 equiprobable cosines at each outgoing energy -- the "continuous"
-representation (ACER ``iwt = 2``) the official libraries carry. The reading of
-the Fortran is ``docs/library/thermal_inelastic_plan.md`` in kika-workspace.
+representation (ACER ``iwt = 2``) the official libraries carry. The method is
+documented in the manual (``methods/processing/thermal-scattering-tables``).
 
 - **THERMR** (``thermr.f90`` ``calcem``/``sigl``/``sig``/``terpq``) runs in C
   (``kika/processing/_thermal_native.c``), ported line for line: the
@@ -23,6 +23,15 @@ the Fortran is ``docs/library/thermal_inelastic_plan.md`` in kika-workspace.
 The cross section is THERMR's integral at each incident energy. THERMR also
 writes it, Lagrange-interpolated, on the principal nuclide's PENDF grid, and
 ACER reads it back from there; that round trip is not repeated here.
+
+**Free gas** (THERMR ``iinc = 1``, :func:`freeGasTables`): adaptive calcem integration
+and a consistent PDF/CDF on the closed-form free-gas S(alpha, beta) of a nucleus of mass ratio
+``awr``, normalised to a free cross section of 1 b, over THERMR's fixed
+45-point beta grid. As THERMR does, the cross section is not the kernel's
+integral but the nuclide's elastic cross section at the temperature (BROADR's
+MT2, which THERMR copies to the inelastic MT), read lin-lin at the incident
+energies as ACER reads it. It is checked against a reference that is independent
+of this code.
 """
 from __future__ import annotations
 
@@ -32,7 +41,8 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-__all__ = ["ThermalInelasticOptions", "EGRID", "inelasticTables", "thermalInputs"]
+__all__ = ["ThermalInelasticOptions", "EGRID", "FREE_GAS_BETA", "inelasticTables",
+           "freeGasTables", "thermalInputs", "freeGasInputs"]
 
 #: THERMR's incident-energy grid (``thermr.f90:1587-1608``), eV.
 EGRID = np.array([
@@ -47,6 +57,14 @@ EGRID = np.array([
     1.70, 1.855, 2.02, 2.18, 2.36, 2.59, 2.855, 3.12, 3.42, 3.75, 4.07, 4.46, 4.90, 5.35,
     5.85, 6.40, 7.00, 7.65, 8.40, 9.15, 9.85, 10.00])
 
+#: THERMR's fixed beta grid for the free gas (``thermr.f90:1863-1907``): the
+#: outgoing-energy panels start at E +- beta kT, then refine adaptively.
+FREE_GAS_BETA = np.array([
+    0.0, 0.1, 2.0, 4.0, 6.0, 8.0, 10.0, 15.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0,
+    65.0, 70.0, 75.0, 80.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0, 250.0, 300.0, 350.0,
+    400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0, 1250.0, 1500.0, 1750.0, 2000.0, 2250.0,
+    2500.0, 2750.0, 3000.0, 3500.0])
+
 #: NJOY's Boltzmann constant (``phys.f90``) and THERMR's kT0.
 BOLTZMANN_EV = 8.617333262e-5
 KT0 = 0.0253
@@ -55,10 +73,20 @@ SABFLG = -225.0
 
 @dataclass(frozen=True)
 class ThermalInelasticOptions:
-    """THERMR's ``tol`` and ``nbin`` as OpenMC's ``make_ace_thermal`` passes them."""
+    """THERMR's ``tol``, ``nbin`` and ``iinc`` as OpenMC's ``make_ace_thermal`` passes them.
+
+    ``iinc`` is THERMR's inelastic option: 2 the evaluation's S(alpha, beta),
+    1 the free gas of the principal nuclide (:func:`freeGasTables`; there is
+    no scattering law to read, so the input is the nuclide's neutron tape).
+    """
 
     tol: float = 0.001
     nbin: int = 16
+    iinc: int = 2
+    #: THERMR's card-4 ``emax`` (eV) for the free gas; ``None`` is 10 eV, the
+    #: top of THERMR's incident grid. The S(alpha, beta) path takes the
+    #: evaluation's B(4) and does not accept an override yet.
+    emax: Optional[float] = None
     #: Outgoing points one incident energy may have.
     capacity: int = 50000
     #: Threads for the incident energies (``calcem`` releases the GIL; each
@@ -83,6 +111,7 @@ class _Inputs:
     cliq: float
     emax: float
     tev: float
+    iinc: int = 2
 
 
 def _native():
@@ -158,6 +187,33 @@ def thermalInputs(law, temperature: float, awr: Optional[float] = None) -> _Inpu
                    tev=float(temperature) * BOLTZMANN_EV)
 
 
+def freeGasInputs(awr: float, temperature: float, emax: float) -> _Inputs:
+    """THERMR's inputs for the free gas (``calcem`` label 200, ``thermr.f90:1858-1910``).
+
+    ``awr`` is the nuclide's mass ratio as its tape states it (THERMR reads it
+    from the PENDF); the bound cross section is ``((awr+1)/awr)**2``, a free
+    one of 1 b; no alpha table, ``lat = lasym = 0``. Above 3000 K THERMR
+    rescales the incident grid (``break``); that is not ported, so it is refused.
+    """
+    if not awr > 0:
+        raise ValueError(f"the free gas needs a mass ratio > 0, got {awr}")
+    if not 0 < temperature <= 3000.0:
+        raise ValueError(f"free gas at {temperature} K: kelvin in (0, 3000]; above 3000 K THERMR "
+                         f"rescales its incident grid, which kika does not port")
+    if not emax > 0:
+        raise ValueError(f"emax is an energy in eV > 0, got {emax}")
+    az = float(awr)
+    # calcem dimensions an alpha table it never reads for iinc=1; three nodes
+    # satisfy the kernel's size check.
+    alpha = np.array([1.0, 2.0, 3.0])
+    beta = FREE_GAS_BETA.copy()
+    sab = np.full(len(alpha) * len(beta), SABFLG)
+    tev = float(temperature) * BOLTZMANN_EV
+    return _Inputs(alpha=alpha, beta=beta, sab=sab, az=az, sb=((az + 1) / az) ** 2, sb2=0.0,
+                   az2=0.0, teff=tev, teff2=0.0, lat=0, lasym=0, cliq=0.0, emax=float(emax),
+                   tev=tev, iinc=1)
+
+
 def _calcem(inputs: _Inputs, enow: float, options: ThermalInelasticOptions):
     nl = options.nbin + 1
     xs = np.zeros(options.capacity)
@@ -166,7 +222,7 @@ def _calcem(inputs: _Inputs, enow: float, options: ThermalInelasticOptions):
         enow, inputs.tev, KT0, inputs.az, inputs.sb, inputs.sb2, inputs.az2, inputs.teff,
         inputs.teff2, inputs.cliq, inputs.lat, inputs.lasym, nl, options.tol,
         len(inputs.alpha), len(inputs.beta), options.capacity,
-        inputs.alpha, inputs.beta, inputs.sab, xs, ys)
+        inputs.alpha, inputs.beta, inputs.sab, xs, ys, inputs.iinc)
     return xs[:n].copy(), ys[:n * nl].reshape(n, nl).copy(), xsi
 
 
@@ -263,6 +319,18 @@ def _acer(x, y, nang):
     return (np.asarray(out_x), np.asarray(out_y) / total, area / total, np.asarray(out_c))
 
 
+def _linlin(table, x: float) -> float:
+    E, sigma = table
+    if not E[0] <= x <= E[-1]:
+        raise ValueError(f"the elastic cross section does not reach {x} eV "
+                         f"(it spans {E[0]}-{E[-1]} eV)")
+    i = int(np.searchsorted(E, x, side="right")) - 1
+    i = min(max(i, 0), len(E) - 2)
+    if E[i + 1] == E[i]:
+        return float(sigma[i + 1])
+    return float(sigma[i] + (sigma[i + 1] - sigma[i]) * (x - E[i]) / (E[i + 1] - E[i]))
+
+
 def _discrete(values, outer):
     from kika.nuclear_data import model as m
 
@@ -280,9 +348,37 @@ def inelasticTables(law, temperature: float, *, nmix: int = 1, awr: Optional[flo
     The cross section is per molecule as OpenMC stores it (THERMR's per
     principal atom, divided by ``nmix`` as ACER divides it).
     """
+    if options.iinc != 2:
+        raise ValueError(f"inelasticTables reads an S(alpha, beta) law (iinc=2); iinc="
+                         f"{options.iinc} is freeGasTables")
+    if options.emax is not None:
+        raise ValueError("emax overrides only the free gas; S(alpha, beta) takes the "
+                         "evaluation's B(4)")
+    inputs = thermalInputs(law, temperature, awr)
+    return _tables(inputs, temperature, nmix, options, report, None)
+
+
+def freeGasTables(awr: float, temperature: float, elastic, *, emax: float = 10.0, nmix: int = 1,
+                  options: ThermalInelasticOptions = ThermalInelasticOptions(iinc=1), report=None):
+    """Free-gas law with singularity-free angular integration: ``(cross section, EnergyAngularMC, energy_max)`` at ``temperature``.
+
+    ``awr`` is the nuclide's mass ratio; ``elastic`` its elastic cross section
+    at ``temperature`` as ``(E, sigma)`` arrays in eV and b (BROADR's MT2,
+    which THERMR writes as the inelastic cross section); ``emax`` is THERMR's
+    card-4 ``emax`` in eV. The distributions do not depend on ``elastic``.
+    """
+    if options.iinc != 1:
+        raise ValueError(f"freeGasTables is THERMR's iinc=1; the options say iinc={options.iinc}")
+    E, sigma = (np.asarray(v, dtype=float) for v in elastic)
+    if E.ndim != 1 or E.shape != sigma.shape or len(E) < 2 or np.any(np.diff(E) < 0):
+        raise ValueError("elastic is (E, sigma): two 1-d arrays of equal length, E ascending")
+    inputs = freeGasInputs(awr, temperature, emax)
+    return _tables(inputs, temperature, nmix, options, report, (E, sigma))
+
+
+def _tables(inputs: _Inputs, temperature, nmix, options, report, elastic):
     from kika.nuclear_data import model as m
 
-    inputs = thermalInputs(law, temperature, awr)
     nang = options.nbin
     energies = []
     for e in EGRID:
@@ -304,8 +400,22 @@ def inelasticTables(law, temperature: float, *, nmix: int = 1, awr: Optional[flo
     else:
         kernels = [_calcem(inputs, e, options) for e in energies]
     xs, spectra, angular = [], [], []
-    for (x, y, xsi), eout in zip(kernels, stored):
-        ex, pdf, cdf, cos = _acer(*_tpend(x, y, xsi), nang)
+    for (x, y, xsi), eout, enow in zip(kernels, stored, energies):
+        if inputs.iinc==1:
+            # ACER skips small CDF increments and joins the last nonzero PDF to
+            # a distant zero. That tail no longer integrates to its stored CDF
+            # and can corrupt the second moment despite a small KS difference.
+            # The corrected free-gas grid already controls density interpolation.
+            ex=np.asarray(x,dtype=float)
+            density=np.asarray(y[:,0],dtype=float)
+            areas=np.diff(ex)*(density[:-1]+density[1:])/2
+            cumulative=np.r_[0.,np.cumsum(areas)]
+            norm=float(cumulative[-1])
+            if not norm>0 or np.any(density<0):raise ValueError("invalid free-gas density")
+            pdf=density/norm;cdf=cumulative/norm
+            cos=np.clip(y[:,1:1+nang],-1.,1.)
+        else:
+            ex, pdf, cdf, cos = _acer(*_tpend(x, y, xsi), nang)
         tables = [_discrete(c, e) for c, e in zip(cos, ex)]
         if len(cdf) and cdf[0] > 0.0:
             ex, pdf, cdf = np.insert(ex, 0, 0.0), np.insert(pdf, 0, 0.0), np.insert(cdf, 0, 0.0)
@@ -314,10 +424,16 @@ def inelasticTables(law, temperature: float, *, nmix: int = 1, awr: Optional[flo
         spectra.append(m.Xs_pdf_cdf1d(xs=ex, pdf=pdf, cdf=cdf, interpolation=m.Interpolation.linlin,
                                       outerDomainValue=eout))
         angular.append(m.XYs2d(function1ds=tables, outerDomainValue=eout))
-        xs.append(xsi / nmix)
+        if elastic is None:
+            xs.append(xsi / nmix)
+        else:
+            # ACER's gety1 on THERMR's MT221, the PENDF elastic: lin-lin at the
+            # incident energy as THERMR left it (enow, before the ACE rounding).
+            xs.append(_linlin(elastic, enow) / nmix)
     form = m.EnergyAngularMC(energy=m.XYs2d(function1ds=spectra),
                              energyAngular=m.XYs3d(function2ds=angular))
     if report is not None:
-        report.warn(f"incoherent inelastic at {temperature:g} K by kika (THERMR's calcem and "
-                    f"ACER's iwt=2, {len(energies)} incident energies)")
+        kind = "free gas" if inputs.iinc == 1 else "incoherent inelastic"
+        method="singularity-free angular integration and consistent PDF/CDF" if inputs.iinc==1 else "THERMR calcem and ACER iwt=2"
+        report.warn(f"{kind} at {temperature:g} K by kika ({method}, {len(energies)} incident energies)")
     return m.XYs1d(xs=np.asarray(stored), ys=np.asarray(xs)), form, float(stored[-1])

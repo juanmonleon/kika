@@ -205,6 +205,13 @@ of a matrix whose rows do not sum exactly to zero.
   conditioning plan may repair a band only by eigenvalue clipping (`clip`) or not at all,
   since every other repair breaks $C\mathbf{1} \approx 0$. A plan that does otherwise is
   refused.
+- **Drawn in the same realisation as the rest of the run.** The MF 35 bands are
+  decomposed apart (they are absolute and drawn linearly) but realised in one call with
+  the relative blocks of the run (MF 31, 33, 34), so under Sobol they take their own
+  columns of the run's one sequence ({doc}`../sampling/perturbation-pipeline`). Separate
+  Sobol sequences paired by replica would correlate $\bar\nu$ and $\chi$ of one run, where
+  the file states no covariance between them. A run whose blocks are all MF 35 draws
+  exactly what the file-level path draws.
 - **Ratios, not deltas, on the table.** The node stores $\chi$; scaling a group by
   $x_j$ moves its probability by $x_j P^0_j - P^0_j = \delta_j$ (before projection), which
   is the delta that was drawn, and keeps the in-group shape the evaluator stated.
@@ -241,7 +248,8 @@ of a matrix whose rows do not sum exactly to zero.
   {eq}`eq-fission-spectrum-perturbation-moment`, is computed on the first evaluated node of
   each band and recorded with the run, beside the spread of the drawn deltas (before the
   projection). Where kika holds an independent value (only U-235 at 0.0253 eV, the IAEA
-  standards value $\langle E' \rangle = 2.000 \pm 0.009$ MeV, `TODO(ref)`), the ratio of
+  standards value $\langle E' \rangle = 2.00 \pm 0.01$ MeV, Carlson et al. 2018, p. 27), the
+  ratio of
   the two uncertainties goes into the run's notes.
 
 ## Limits and failure modes
@@ -447,5 +455,7 @@ reference exists.
 - D. A. Brown (ed.), *ENDF-6 Formats Manual: Data Formats and Procedures for the Evaluated
   Nuclear Data Files ENDF/B-VI, ENDF/B-VII and ENDF/B-VIII*, Brookhaven National
   Laboratory (2023), doi:10.2172/2007538. Cited as ENDF-6: Ch. 5 (MF 5), Ch. 35 (MF 35).
-- `TODO(ref)`: the IAEA neutron standards evaluation of the U-235 thermal prompt fission
-  neutron spectrum, the source of the reference mean energy.
+- A. D. Carlson, V. G. Pronyaev et al., "Evaluation of the neutron data standards",
+  *Nuclear Data Sheets* 148, 143-188 (2018), doi:10.1016/j.nds.2018.02.002: the U-235
+  thermal prompt fission neutron spectrum, mean energy $2.00 \pm 0.01$ MeV (p. 27; the
+  uncertainty raised from 5 keV to 10 keV for unrecognised shape uncertainties).

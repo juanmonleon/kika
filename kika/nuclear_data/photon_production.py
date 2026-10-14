@@ -218,9 +218,22 @@ def _photon_items(channel, parent: Optional[str]) -> List[Dict[str, Any]]:
             elif kind == "PrimaryGamma":
                 items.append({"kind": "primary", "binding": float(energy.value),
                               "mult": multiplicity, "angular": angular})
+            elif kind == "DiscretePhotonEnergy":
+                # A processed table's line (ACE law 2, OpenMC discrete_photon):
+                # LP = 2 is a primary photon, any other LP a line at `energy`.
+                if energy.primaryFlag == 2:
+                    items.append({"kind": "primary", "binding": float(energy.energy),
+                                  "mult": multiplicity, "angular": angular})
+                else:
+                    items.append({"kind": "line", "energy": float(energy.energy),
+                                  "mult": multiplicity, "angular": angular})
             elif energy is not None and getattr(energy, "function1ds", None):
-                items.append({"kind": "continuum", "spectrum": energy, "mult": multiplicity,
-                              "angular": angular, "product": product.label})
+                spectrum, nd = _density_spectrum(energy)
+                item = {"kind": "continuum", "spectrum": spectrum, "mult": multiplicity,
+                        "angular": angular, "product": product.label}
+                if any(nd):
+                    item["nd"] = nd
+                items.append(item)
             elif multiplicity is None and energy is None:
                 # A placeholder: the photon of a level whose decay the file
                 # states elsewhere (JENDL-5 gives Fe-56's level gammas in the
@@ -252,7 +265,7 @@ def _decode(suite) -> List[Dict[str, Any]]:
         if not items:
             continue
         discrete = _mf6_discrete_points(node)
-        if discrete:
+        if discrete or any("nd" in item for item in items):
             items = [part for item in items for part in _split_discrete(item, discrete)]
         continuum_index = 0
         for item in items:
@@ -342,13 +355,44 @@ def _mf6_discrete_points(node) -> Dict[str, List[int]]:
     return out
 
 
+def _density_spectrum(energy) -> Tuple[Any, List[int]]:
+    """``(spectrum, ND per node)``: an energy table whose nodes are densities.
+
+    A processed table (HDF5, ``Xs_pdf_cdf1d``) states each node as a density
+    with its cumulative, opening with ``numberOfDiscrete`` discrete points (ACE
+    law 4's ND) whose ``pdf`` is the fraction each carries. Those nodes become
+    ``(Eγ, p)`` nodes, a histogram drawn as steps, and their ND is returned so
+    the lines are split off as an MF6 LAW=1's are. Any other table is returned
+    as it is, with no discrete points.
+    """
+    nodes = list(energy.function1ds)
+    if not nodes or not all(hasattr(f, "pdf") for f in nodes):
+        return energy, [0] * len(nodes)
+    out, nd = [], []
+    for f in nodes:
+        n = int(getattr(f, "numberOfDiscrete", 0) or 0)
+        xs, ps = np.asarray(f.xs, dtype=float), np.asarray(f.pdf, dtype=float)
+        cx, cp = xs[n:], ps[n:]
+        if getattr(getattr(f, "interpolation", None), "value", None) == "flat" and cx.size >= 2:
+            # Each density holds up to the next point: a step, so the edges repeat.
+            cx = np.repeat(cx, 2)[1:-1]
+            cp = np.repeat(cp[:-1], 2)
+        out.append(_Node(f.outerDomainValue, np.concatenate([xs[:n], cx]),
+                         np.concatenate([ps[:n], cp])))
+        nd.append(n)
+    return _Spectrum(out), nd
+
+
 def _split_discrete(item, discrete: Dict[str, List[int]]) -> List[Dict[str, Any]]:
     """A continuum item whose nodes open with discrete points → lines (one per
     distinct Eγ, weighted node by node; a negative one is a primary photon)
-    plus what is left of the continuum."""
-    if item.get("kind") != "continuum" or item.get("product") not in discrete:
+    plus what is left of the continuum. The counts are the item's own (a
+    density table's) or its MF6 LAW=1's."""
+    if item.get("kind") != "continuum":
         return [item]
-    nd = discrete[item["product"]]
+    nd = item.pop("nd", None) or discrete.get(item.get("product"))
+    if not nd:
+        return [item]
     nodes = list(item["spectrum"].function1ds)
     if len(nd) != len(nodes):
         return [item]

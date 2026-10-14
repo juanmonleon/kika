@@ -1,4 +1,4 @@
-"""Unresolved-resonance probability tables from the model's URR parameters (roadmap H8).
+"""Unresolved-resonance probability tables from the model's URR parameters.
 
 kika's own PURR. At each energy of the unresolved grid the average parameters
 are frozen and resonance ladders are drawn from them -- spacings from Wigner's
@@ -31,13 +31,24 @@ partial cross sections. The procedure is NJOY PURR's (``purr.f90``,
 The random numbers are kika's (NumPy, seeded), so the tables agree with PURR's
 statistically, band by band, not bit for bit.
 
-``background`` adds the smooth cross section PURR takes from MF3: for LSSF=0
-the file's background, for LSSF=1 the file's value minus the dilute average.
+Every table carries its statistical error (:class:`ProbabilityTableStatistics`):
+the ladder is the statistical unit -- the samples of one ladder share its
+resonances and are not independent -- so the errors are delete-one-ladder
+jackknife errors over the ladders, with the bands held at the first ladder's
+bounds (as FRENDY's ``check_statistical_error``, which uses the CLT on each
+band's ``p · σ``). ``errorTarget`` stops drawing ladders once they are small
+enough, with ``ladders`` as the cap.
+
+``background`` adds the smooth cross section PURR takes from MF3 (:func:`purrInputs`):
+for LSSF=0 the file's MF3 values; for LSSF=1, where MF3 already holds the dilute
+average, no elastic, fission or capture background, and only the competition kept in
+the total.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Dict, Optional, Sequence
+from functools import partial
+from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -72,12 +83,29 @@ CHISQ = np.array([
 @dataclass(frozen=True)
 class ProbabilityTableOptions:
     bins: int = 20
+    #: Ladders per energy; with :attr:`errorTarget` the most that are drawn.
     ladders: int = 64
     samples: int = 10000
     seed: int = 1
     #: The C kernel of ``_rm_native`` (Humlicek's W4 line shapes) when built;
     #: ``False`` evaluates the Faddeeva function exactly in NumPy, the reference.
     native: bool = True
+    #: Stop drawing ladders at an energy once every statistical error checked
+    #: is at most this (``None``: always draw :attr:`ladders`, PURR's way). The
+    #: errors checked are each band's ``p_b · factor_b`` (its share of the
+    #: dilute average) and the relative error of ``f(σ0)`` at :attr:`sigma0`,
+    #: for every reaction with a nonzero average at every temperature.
+    errorTarget: Optional[float] = None
+    #: How often, in ladders, the target is checked (FRENDY: 10).
+    checkEvery: int = 10
+    #: Background cross sections (b) of the Bondarenko factors in the statistics.
+    sigma0: Tuple[float, ...] = (1.0, 10.0, 100.0, 1000.0, 10000.0)
+
+    def __post_init__(self):
+        if self.errorTarget is not None and not self.errorTarget > 0:
+            raise ValueError(f"errorTarget must be positive; got {self.errorTarget}")
+        if self.checkEvery < 2:
+            raise ValueError(f"checkEvery must be at least 2 ladders; got {self.checkEvery}")
 
 
 def _nativeKernel():
@@ -198,15 +226,85 @@ def _ladder(rng, seq, elow, ehigh):
     return er, widths
 
 
-def _tablesAt(job):
-    """The tables of one energy at every temperature: ``(nT, 6, bins)``.
+def _estimates(C, S, T, sigma0, transportXS=None):
+    """A table's estimates from its ladder sums, over any leading axes.
+
+    ``C`` (..., M) samples per band, ``S`` (..., 4, M) their sums of total,
+    elastic, fission and capture, ``T`` (..., 4) the sums over all samples.
+    Returns the band probabilities, the factors, each band's share
+    ``p · factor`` of the dilute average, and the Bondarenko factors ``f(σ0)``
+    of the four rows from the bands' cross sections, ``(..., 4, K)``.
+    """
+    n = C.sum(-1)
+    p = C / n[..., None]
+    means = np.where(C[..., None, :] > 0, S / np.maximum(C, 1)[..., None, :], 0.0)
+    overall = T / n[..., None]
+    live = overall != 0
+    factor = np.where(live[..., None], means / np.where(live, overall, 1.0)[..., None], 1.0)
+    contribution = p[..., None, :] * factor
+    if transportXS is not None:
+        # OpenMC multiplies the partial factors by smooth elastic, fission
+        # and ALL non-fission absorption, then reconstructs the total. The
+        # published total row is not used by the transport reader.
+        elastic, fission, capture, inelastic = transportXS
+        means = factor * np.asarray([0., elastic, fission, capture])[..., None]
+        means[..., 0, :] = means[..., 1:4, :].sum(-2) + inelastic
+    dilute = (p[..., None, :] * means).sum(-1)
+    shielding = np.empty(means.shape[:-1] + (len(sigma0),))
+    for k, s0 in enumerate(sigma0):
+        w = p / (means[..., 0, :] + s0)
+        shielding[..., k] = (w[..., None, :] * means).sum(-1) / w.sum(-1)[..., None]
+    shielding = np.where(dilute[..., None] != 0,
+                         shielding / np.where(dilute != 0, dilute, 1.0)[..., None], 1.0)
+    return dict(probability=p, factor=factor, contribution=contribution, shielding=shielding)
+
+
+def _ladderStatistics(lc, ls, lt, sigma0, transportXS=None):
+    """Estimates and their delete-one-ladder jackknife errors from per-ladder sums.
+
+    ``lc`` (L, M), ``ls`` (L, 4, M), ``lt`` (L, 4): one row per ladder, the
+    bands fixed. The ladders are independent and identically distributed
+    given the bands, so the jackknife over them is the error of the table.
+    """
+    lc, ls, lt = (np.asarray(a, dtype=float) for a in (lc, ls, lt))
+    L = lc.shape[0]
+    C, S, T = lc.sum(0), ls.sum(0), lt.sum(0)
+    full = _estimates(C, S, T, sigma0, transportXS)
+    out = dict(full, ladders=L)
+    if L < 2:
+        for key, value in full.items():
+            out[key + "Sigma"] = np.full_like(value, np.inf)
+        return out
+    loo = _estimates(C - lc, S - ls, T - lt, sigma0, transportXS)
+    for key, value in loo.items():
+        out[key + "Sigma"] = np.sqrt((L - 1) / L * ((value - value.mean(0)) ** 2).sum(0))
+    return out
+
+
+def _converged(stats, target):
+    """Every band share and every relative ``f(σ0)`` error of a live row within ``target``."""
+    for st in stats:
+        # A row without an average (fission of a non-fissile) is all ones.
+        for r in (r for r in range(4) if np.any(st["factor"][r] != 1.0)):
+            if not np.all(st["contributionSigma"][r] <= target):
+                return False
+            if not np.all(st["shieldingSigma"][r] <= target * np.abs(st["shielding"][r])):
+                return False
+    return True
+
+
+def _tablesAt(job, keepLadders=False):
+    """The tables of one energy at every temperature: ``(nT, 6, bins)``, with
+    their statistics (one dict per temperature) and, with ``keepLadders``,
+    the per-ladder sums.
 
     Its own random stream, seeded by ``(seed, index)``, so the tables do not
     depend on how the energies are split between processes.
     """
     from kika._constants import BOLTZMANN_CONSTANT
 
-    prepared, A, E, ie, temperatures, bkg, competitionBkg, options = job
+    prepared, A, E, ie, temperatures, bkg, competitionBkg, options = job[:8]
+    transportXS = job[8] if len(job) > 8 else [None] * len(temperatures)
     native = _nativeKernel() if options.native else None
     rng = np.random.default_rng([options.seed, ie])
     nT, bins = len(temperatures), options.bins
@@ -230,6 +328,12 @@ def _tablesAt(job):
     counts = np.zeros((nT, bins))
     sums = np.zeros((nT, 4, bins))
     everything = np.zeros((nT, 4))
+    # The same sums ladder by ladder, for the errors; the running sums above
+    # are the table's, untouched by them.
+    lc = np.zeros((nT, options.ladders, bins))
+    ls = np.zeros((nT, options.ladders, 4, bins))
+    lt = np.zeros((nT, options.ladders, 4))
+    used = options.ladders
     for ladder in range(options.ladders):
         es = np.sort(rng.uniform(emin, emax, options.samples))
         el = np.zeros((nT, len(es)))
@@ -281,6 +385,22 @@ def _tablesAt(job):
             for row, values in enumerate((totals, elastic, fission, capture)):
                 np.add.at(sums[it, row], which, values)
             everything[it] += [totals.sum(), elastic.sum(), fission.sum(), capture.sum()]
+            lc[it, ladder] = np.bincount(which, minlength=bins)
+            for row, values in enumerate((totals, elastic, fission, capture)):
+                ls[it, ladder, row] = np.bincount(which, values, bins)
+            lt[it, ladder] = [totals.sum(), elastic.sum(), fission.sum(), capture.sum()]
+        if (options.errorTarget is not None and (ladder + 1) % options.checkEvery == 0
+                and ladder + 1 < options.ladders):
+            n = ladder + 1
+            if _converged([_ladderStatistics(lc[it, :n], ls[it, :n], lt[it, :n], options.sigma0, transportXS[it])
+                           for it in range(nT)], options.errorTarget):
+                used = n
+                break
+    lc, ls, lt = lc[:, :used], ls[:, :used], lt[:, :used]
+    stats = [_ladderStatistics(lc[it], ls[it], lt[it], options.sigma0, transportXS[it]) for it in range(nT)]
+    converged = None if options.errorTarget is None else _converged(stats, options.errorTarget)
+    for st in stats:
+        st["converged"] = converged
     for it in range(nT):
         n = counts[it].sum()
         means = np.where(counts[it] > 0, sums[it] / np.maximum(counts[it], 1), 0.0)
@@ -294,14 +414,16 @@ def _tablesAt(job):
         # Not used in transport (nuclide.cpp:963-987): a unit factor in the
         # scale OpenMC stores it (it multiplies the row by 1e6 on read).
         tables[it, 5] = 1.0e6
-    return tables
+    if keepLadders:
+        return tables, stats, dict(counts=lc, sums=ls, totals=lt)
+    return tables, stats
 
 
 def probabilityTables(region, context, energies, temperatures, *,
                       background: Optional[Dict[int, np.ndarray]] = None,
                       competing: Sequence[int] = (),
                       options: ProbabilityTableOptions = ProbabilityTableOptions(),
-                      workers: int = 1):
+                      workers: int = 1, transportXS=None):
     """``{T: ProbabilityTables}`` at the temperatures (K) on ``energies`` (eV).
 
     ``region`` is the model's :class:`UnresolvedRegion`, ``context`` the
@@ -309,13 +431,64 @@ def probabilityTables(region, context, energies, temperatures, *,
     MT (1, 2, 18, 102) at each energy (:func:`purrInputs`); ``competing`` the
     MTs whose smooth cross sections compete in the URR, for the flags.
     ``workers`` computes that many energies at once, one process each.
+
+    Each table carries its statistical error as ``statistics``
+    (:class:`ProbabilityTableStatistics`); ``options.errorTarget`` draws
+    ladders at each energy only until that error is reached. ``transportXS``
+    optionally maps each kelvin temperature to an (nE, 4) array of smooth
+    elastic, fission, non-fission absorption and competing inelastic XS (b).
+    With it, shielding and its stopping error follow OpenMC's actual reader;
+    without it they describe the unscaled ladder cross sections. Fixed-count
+    table values are unaffected by this diagnostic choice.
     """
-    from kika.nuclear_data.model import ProbabilityTables
+    from kika.nuclear_data.model import ProbabilityTables, ProbabilityTableStatistics
 
     temperatures = [float(t) for t in np.atleast_1d(temperatures)]
-    prepared = _prepared(region, context)
     energies = np.asarray(energies, dtype=float)
+    results = _run(_tablesAt, region, context, energies, temperatures, background, options, workers, transportXS)
+    tables = np.stack([r[0] for r in results], axis=1)              # (nT, nE, 6, bins)
+    inelastic, absorption = competitionFlags(competing)
+    out = {}
+    for it, t in enumerate(temperatures):
+        st = [r[1][it] for r in results]
+
+        def stack(key):
+            return np.stack([s[key] for s in st])
+
+        statistics = ProbabilityTableStatistics(
+            ladders=np.array([s["ladders"] for s in st]), sigma0=np.asarray(options.sigma0, dtype=float),
+            probabilitySigma=stack("probabilitySigma"), factorSigma=stack("factorSigma"),
+            contributionSigma=stack("contributionSigma"), shielding=stack("shielding"),
+            shieldingSigma=stack("shieldingSigma"), errorTarget=options.errorTarget,
+            converged=None if options.errorTarget is None else np.array([s["converged"] for s in st]),
+            shieldingBasis="openmc_transport" if transportXS is not None else "ladder_cross_sections")
+        out[t] = ProbabilityTables(energies=energies, table=tables[it], interpolation=2,
+                                   inelastic=inelastic, absorption=absorption, multiplySmooth=True,
+                                   statistics=statistics)
+    return out
+
+
+def _ladderAccumulators(region, context, energies, temperatures, *, background=None,
+                        competing=(), options=ProbabilityTableOptions(), workers=1):
+    """Per energy, the per-ladder sums behind :func:`probabilityTables` (diagnostics):
+    ``counts`` (nT, L, M), ``sums`` (nT, L, 4, M), ``totals`` (nT, L, 4)."""
+    temperatures = [float(t) for t in np.atleast_1d(temperatures)]
+    results = _run(partial(_tablesAt, keepLadders=True), region, context,
+                   np.asarray(energies, dtype=float), temperatures, background, options, workers)
+    return [r[2] for r in results]
+
+
+def _run(task, region, context, energies, temperatures, background, options, workers, transportXS=None):
+    """``task`` on every energy's job, in ``workers`` processes."""
+    prepared = _prepared(region, context)
     background = background or {}
+    if transportXS is not None:
+        transportXS = {float(t): np.asarray(transportXS[float(t)], dtype=float)
+                       for t in temperatures}
+        for values in transportXS.values():
+            if values.shape != (len(energies), 4) or not np.isfinite(values).all() or np.any(values < 0):
+                raise ValueError("transportXS must provide finite nonnegative (nE, 4) arrays "
+                                 "of elastic, fission, non-fission absorption and inelastic XS")
 
     def bkgAt(mt, ie):
         return float(np.asarray(background[mt])[ie]) if mt in background else 0.0
@@ -325,19 +498,14 @@ def probabilityTables(region, context, energies, temperatures, *,
         bkg = {mt: bkgAt(mt, ie) for mt in (2, 18, 102)}
         competitionBkg = (bkgAt(1, ie) - bkg[2] - bkg[18] - bkg[102]) if 1 in background else 0.0
         jobs.append((prepared, float(context.atomic_weight_ratio), float(E), ie, temperatures,
-                     bkg, competitionBkg, options))
+                     bkg, competitionBkg, options,
+                     [None if transportXS is None else transportXS[t][ie] for t in temperatures]))
     if workers > 1 and len(jobs) > 1:
         from concurrent.futures import ProcessPoolExecutor
 
         with ProcessPoolExecutor(max_workers=min(workers, len(jobs))) as pool:
-            results = list(pool.map(_tablesAt, jobs))
-    else:
-        results = [_tablesAt(job) for job in jobs]
-    tables = np.stack(results, axis=1)              # (nT, nE, 6, bins)
-    inelastic, absorption = competitionFlags(competing)
-    return {t: ProbabilityTables(energies=energies, table=tables[it], interpolation=2,
-                                 inelastic=inelastic, absorption=absorption, multiplySmooth=True)
-            for it, t in enumerate(temperatures)}
+            return list(pool.map(task, jobs))
+    return [task(job) for job in jobs]
 
 
 # ----------------------------------------------------------------------

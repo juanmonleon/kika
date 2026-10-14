@@ -44,6 +44,34 @@ class ENDFWriter:
         self.redundant_updates = []
         self._load_original_file()
     
+    @classmethod
+    def from_lines(cls, lines: List[str], newline: str,
+                   original_filepath: Optional[str] = None,
+                   ids: Optional[List[Tuple]] = None) -> "ENDFWriter":
+        """A writer over a tape already in memory.
+
+        *lines* are what this class's own text-mode read gives (``'\\n'``
+        endings) and *newline* is the tape's line ending. With
+        :meth:`mt_replacement` it chains several replacements without
+        writing and re-reading the tape between them. *ids*, when given, is
+        ``parse_endf_id`` of every line, so the section searches do not parse
+        the tape again.
+        """
+        self = cls.__new__(cls)
+        self.original_filepath = original_filepath
+        self.original_lines = lines
+        self.redundant_updates = []
+        self.newline = newline
+        self.width = record_width(lines)
+        self._ids = ids
+        return self
+
+    def _line_ids(self):
+        ids = getattr(self, "_ids", None)
+        if ids is not None:
+            return ids
+        return (parse_endf_id(line) for line in self.original_lines)
+
     def _load_original_file(self):
         """Load the original ENDF file into memory."""
         if not os.path.exists(self.original_filepath):
@@ -77,8 +105,7 @@ class ENDFWriter:
         boundaries = []
         current_start = None
         
-        for i, line in enumerate(self.original_lines):
-            mat, mf, mt = parse_endf_id(line)
+        for i, (mat, mf, mt) in enumerate(self._line_ids()):
             
             if mf == mf_number and current_start is not None:
                 # Continue within MF section
@@ -116,8 +143,7 @@ class ENDFWriter:
         boundaries = []
         current_start = None
         
-        for i, line in enumerate(self.original_lines):
-            mat, mf, mt = parse_endf_id(line)
+        for i, (mat, mf, mt) in enumerate(self._line_ids()):
             
             if mf == mf_number and mt == mt_number:
                 if current_start is None:
@@ -260,32 +286,10 @@ class ENDFWriter:
         outright, with ``changed_mts=None``.
         """
         try:
-            # Find boundaries of the target MT section
-            boundaries = self.find_mt_boundaries_in_mf(mf_number, modified_mt.number)
-            
-            if not boundaries:
-                logger.error(f"MF{mf_number}/MT{modified_mt.number} section not found in original file")
+            new_lines = self.replace_mt_lines(modified_mt, mf_number)
+            if new_lines is None:
                 return False
-            
-            if len(boundaries) > 1:
-                logger.warning(f"Found {len(boundaries)} MF{mf_number}/MT{modified_mt.number} sections, replacing the first one")
-            
-            start_line, end_line = boundaries[0]
-            
-            # Get the modified content as lines
-            modified_content = str(modified_mt)
-            if not modified_content.endswith('\n'):
-                modified_content += '\n'
-            modified_lines = [line[:self.width] for line in
-                              modified_content.split('\n')[:-1]]  # Remove empty last element
 
-            # Create new file content
-            new_lines = (
-                self.original_lines[:start_line] +
-                [line + '\n' for line in modified_lines] +
-                self.original_lines[end_line + 1:]
-            )
-            
             # Write the result
             output_path = output_filepath if output_filepath else self.original_filepath
             with open(output_path, 'w', newline=self.newline) as f:
@@ -311,6 +315,46 @@ class ENDFWriter:
             logger.error(f"Error replacing MF{mf_number}/MT{modified_mt.number} section: {e}")
             return False
 
+
+    def replace_mt_lines(self, modified_mt: Union[MT, MF1MT451, MF4MT],
+                         mf_number: int) -> Optional[List[str]]:
+        """The tape's lines with *modified_mt* in place of its MF/MT section.
+
+        What :meth:`replace_mt_section` writes, returned instead: ``None`` (and
+        logged) when the section is not on the tape. Exceptions from
+        serialising *modified_mt* propagate.
+        """
+        replacement = self.mt_replacement(modified_mt, mf_number)
+        if replacement is None:
+            return None
+        start_line, end_line, section = replacement
+        return (self.original_lines[:start_line] + section +
+                self.original_lines[end_line + 1:])
+
+    def mt_replacement(self, modified_mt: Union[MT, MF1MT451, MF4MT],
+                       mf_number: int) -> Optional[Tuple[int, int, List[str]]]:
+        """``(start, end, lines)``: *modified_mt*'s lines replace lines
+        ``start..end`` (inclusive) of the tape. ``None`` (logged) if absent."""
+        # Find boundaries of the target MT section
+        boundaries = self.find_mt_boundaries_in_mf(mf_number, modified_mt.number)
+
+        if not boundaries:
+            logger.error(f"MF{mf_number}/MT{modified_mt.number} section not found in original file")
+            return None
+
+        if len(boundaries) > 1:
+            logger.warning(f"Found {len(boundaries)} MF{mf_number}/MT{modified_mt.number} sections, replacing the first one")
+
+        start_line, end_line = boundaries[0]
+
+        # Get the modified content as lines
+        modified_content = str(modified_mt)
+        if not modified_content.endswith('\n'):
+            modified_content += '\n'
+        modified_lines = [line[:self.width] for line in
+                          modified_content.split('\n')[:-1]]  # Remove empty last element
+
+        return start_line, end_line, [line + '\n' for line in modified_lines]
 
     def _resum_redundant(self, output_path: str, replaced_mt: int) -> None:
         """Rebuild the summation MTs that replacing *replaced_mt* invalidated."""

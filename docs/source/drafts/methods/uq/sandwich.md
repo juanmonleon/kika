@@ -35,7 +35,7 @@ ENDF (Evaluated Nuclear Data File) evaluations state their covariances mostly re
 (MF 33 for cross-sections, MF 34 for Legendre coefficients, ENDF-6 Ch. 33-34), processed
 into multigroup form, and a sensitivity is a relative derivative.
 Here $i$ runs over parameters (nuclide, reaction or Legendre order, energy group).
-`TODO(ref)`: a reference for first-order uncertainty propagation in reactor physics.
+(First-order propagation: Cacuci 2003.)
 
 ## What it computes
 
@@ -113,8 +113,7 @@ candidates is refused. When two keys of one profile map to the same covariance k
 one needing fewer changes wins (the exact key, then a ZAID alias, then an MT alias) and
 the other is excluded and recorded; a tie is refused. A key nothing covers is an error
 (`MissingCovarianceError`), unless `missing="drop"`, which drops it and records the loss.
-Any other negative MT is refused. `TODO(ref)`: the SCALE TSURFER documentation for the
-alias table.
+Any other negative MT is refused. The alias table is TSURFER's (SCALE 6.3.1 manual).
 
 **6. Assembly.** The covered keys are sorted (by kind, ZAID, MT, order) and laid out
 $G$ groups each, giving $S$ (zeros for a key a profile does not list) and the absolute
@@ -223,8 +222,8 @@ The tests below passed on 2026-10-11 unless marked.
   database condensed to SCALE 44 groups, with the SCALE 6.2.3 44-group covariance library,
   $u$ is required to match a frozen CALINS value to $5\cdot10^{-10}$ absolute
   (`kika/benchmarks/tests/test_real_dice_scale44.py::test_real_dice_scale44_sandwich_and_ck_match_frozen_calins_reference`).
-  `TODO(check)`: needs the user's DICE database and the COVERX file; not re-run (skipped
-  on 2026-10-11).
+  `TODO(check)`: needs the user's DICE database and the COVERX file, and is
+  skipped without them; not re-run for this page.
 
 ## Diagnostics
 
@@ -266,6 +265,11 @@ The tests below passed on 2026-10-11 unless marked.
   Nuclear Data Files ENDF/B-VI, ENDF/B-VII and ENDF/B-VIII*, Brookhaven National
   Laboratory (2023), doi:10.2172/2007538. Cited as ENDF-6: Ch. 33-34 (covariances of
   cross-sections and of angular distributions).
-- `TODO(ref)`: first-order (sandwich) uncertainty propagation.
-- `TODO(ref)`: SCALE TSURFER (alias table) and CALINS (the comparison code of the
-  validation).
+- D. G. Cacuci, *Sensitivity and Uncertainty Analysis, Volume I: Theory*, Chapman &
+  Hall/CRC (2003): first-order (sandwich) uncertainty propagation.
+- W. Wieselquist and R. A. Lefebvre (eds.), *SCALE 6.3.1 User Manual*, ORNL/TM-SCALE-6.3.1,
+  Oak Ridge National Laboratory (2023), doi:10.2172/1959594: TSURFER (the alias table).
+- B. Petillon, P. Arthur, R. Vuiart, V. Jaiswal and M. Brovchenko, "CALINS: a new ASNR
+  software for sensitivity and uncertainty analysis in nuclear criticality safety
+  evaluations", NCSD 2025, American Nuclear Society, 282-289 (2025),
+  doi:10.13182/NCSD25-47777.

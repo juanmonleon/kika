@@ -29,11 +29,12 @@ not admit is ``rejected`` with a category of
 The pieces are kika's own and are the ones the OpenMC HDF5 writer uses
 (:mod:`kika.hdf5.processing`): free-gas broadening up to ``thnmax`` with the
 0 K values above it, as NJOY BROADR leaves them, and PURR's probability tables.
-Heating (HEATR) is not wired here yet: ``heating`` is reported ``skipped``.
+Heating is HEATR's (``local = 0``): MT301 and MT444 at every temperature,
+when the plan asks for it (``heating=True``).
 
 Outputs, each appending its own ``write`` stage: :meth:`EndfProcessing.write_pendf`
-(one material per temperature, MF2/MT153 where there are URR tables; MT301 not
-yet), :meth:`EndfProcessing.write_hdf5` (OpenMC) and
+(one material per temperature, MF2/MT153 where there are URR tables, MT301 and
+MT444 when the heating stage ran), :meth:`EndfProcessing.write_hdf5` (OpenMC) and
 :meth:`EndfProcessing.write_gnds` (eval, recon and one ``heated`` style per
 temperature). A failed output raises
 :class:`ProcessingOutputError` and leaves any existing file in place.
@@ -91,8 +92,11 @@ PROCESSING_REJECTION_CATEGORIES = {
     "urr-no-temperature": "Probability tables are computed at the requested temperatures, and none was requested.",
     "urr-unsupported": "The unresolved resonance parameters use data the probability-table method does not support.",
     "urr-failed": "The probability tables stopped with an internal error.",
-    # heating (skipped)
+    # heating (skipped / rejected)
     "heating-not-implemented": "Heating (KERMA) is not yet available in this processing chain.",
+    "heating-unsupported":
+        "The evaluation lacks data HEATR's method needs for the heating (a fission without MF1/458).",
+    "heating-failed": "The heating (KERMA and damage) stopped with an internal error.",
     # write (ProcessingOutputError)
     "hdf5-needs-temperature":
         "An OpenMC HDF5 file needs at least one broadened temperature; process with one or more "
@@ -135,7 +139,9 @@ _DOPPLER_GROUPS = {
 class ProcessingPlan:
     """What :func:`process_endf` does. The defaults are what a user who touches
     nothing should get: the reconstruction as ``reconstruct_endf`` runs it, room
-    temperature, broadening to where NJOY BROADR stops, URR tables, no heating.
+    temperature, broadening to where NJOY BROADR stops, URR tables, no heating
+    (``heating=True`` adds HEATR's MT301 and MT444 at every temperature, 0 K
+    included; it tabulates the product distributions, which is slow).
 
     ``temperatures`` are kelvin, > 0; 0 K is the reconstruction and is always
     there, so ``()`` stops after it. They are the temperatures of both the
@@ -199,6 +205,12 @@ class StageReport:
     details: dict = field(default_factory=dict)
 
 
+def _today() -> str:
+    from datetime import date
+
+    return date.today().isoformat()
+
+
 def _engine_category(error):
     from kika.processing.doppler import DopplerConvergenceError, UnsupportedDopplerError
     engine = getattr(error, "category", None)
@@ -211,6 +223,23 @@ def _engine_category(error):
     if isinstance(error, DopplerConvergenceError):
         return "doppler-verification-failed", engine
     return "doppler-failed", engine
+
+
+def _describe(error) -> str:
+    """The error for a stage's summary; a dead worker pool says the likely cause.
+
+    Where processes are spawned (Windows, macOS) every worker imports the
+    caller's main script again. A script that starts the run at module level,
+    without the ``if __name__ == "__main__":`` guard, makes each worker start
+    it too, and multiprocessing stops them: the parent only sees a broken pool.
+    """
+    from concurrent.futures.process import BrokenProcessPool
+    if isinstance(error, BrokenProcessPool):
+        return (f"{error} A worker process stopped before doing any work. Where processes are "
+                f"spawned (Windows, macOS) this is what happens when the calling script starts "
+                f"the run without an `if __name__ == \"__main__\":` guard; add the guard, or "
+                f"run in one process with ProcessingPlan(workers=1)")
+    return str(error)
 
 
 def _ranges(evaluation):
@@ -286,8 +315,9 @@ def inspect_endf_processing(path) -> dict:
                  predicted_rejection=None if unresolved is not None else "urr-absent",
                  reason=(_resonance_line(None, unresolved) if unresolved
                          else PROCESSING_REJECTION_CATEGORIES["urr-absent"])),
-        heating=dict(applicable=False, predicted_rejection="heating-not-implemented",
-                     reason=PROCESSING_REJECTION_CATEGORIES["heating-not-implemented"]),
+        heating=dict(applicable=reject is None, predicted_rejection=None,
+                     reason=("MT301 and MT444 as NJOY HEATR (local = 0) at every temperature"
+                             if reject is None else "needs the 0 K reconstruction")),
     )
     return dict(evaluation=evaluation, resonance_ranges=ranges, resolved=resolved,
                 unresolved=unresolved, reactions=reactions, stages=stages)
@@ -319,6 +349,7 @@ class EndfProcessing:
         #: ``"endf"`` or ``"gnds"``: what the evaluation was read from.
         self.source_format = source_format
         self._aside = {}                 # GNDS: containers set aside for the reconstruction
+        self._heating = {}               # {T: {301: (E, h), 444: (E, d)}}, 0.0 for 0 K
 
     def _written(self, fmt, t0, path, error=None, summary="", **details):
         """Append this output's own ``write`` stage (several outputs, several stages)."""
@@ -381,9 +412,19 @@ class EndfProcessing:
         return out
 
     @property
-    def heating(self):
-        """KERMA by MT and temperature; ``None`` until the heating stage is wired."""
-        return None
+    def heating(self) -> dict | None:
+        """``{T: {301: (E, h), 444: (E, d)}}`` when the heating stage ran, else ``None``.
+
+        ``T`` in kelvin, ``0.0`` for the reconstruction. MT301 is the heating
+        (KERMA times cross section) and MT444 the damage energy production,
+        both eV·b on the temperature's MT1 grid, as NJOY HEATR writes them with
+        ``local = 0``: photons carried away, fission as ``sigma_f (EFR + EGP)``
+        from MF1/458 less its prompt photons. Not OpenMC's MT301, whose fission
+        part is ``(EFR + EB) sigma_f``; ``write_hdf5`` computes that one itself.
+        """
+        if not self._heating:
+            return None
+        return {T: dict(v) for T, v in self._heating.items()}
 
     def write_pendf(self, path, *, progress: Progress | None = None, temperatures=None,
                     mat=None, workers=None):
@@ -396,7 +437,8 @@ class EndfProcessing:
         a broadened one also carries MF2/MT153, the URR probability tables in
         PURR's layout, when the URR stage produced them at that temperature
         (written as factors, LSSF=1, with a zero heating row, as PURR leaves
-        it without HEATR). MT301 is not written yet.
+        it without HEATR). When the heating stage ran, every material carries
+        MF3/MT301 and MT444 as HEATR adds them (:attr:`heating`).
 
         The 0 K material is ``EndfReconstruction.write_pendf``'s: verified
         against the resonance physics before and after the reload. Each
@@ -441,6 +483,8 @@ class EndfProcessing:
                     else:
                         tables153.append(self._write_heated_material(one, T, mat))
                         step("write", 1.0)
+                    if self._heating:
+                        _insert_heating(one, self._heating[T], T)
                     pieces.append(one.read_text().rstrip("\n").split("\n"))
                 lines = [pieces[0][0]]
                 for body in pieces:
@@ -465,8 +509,10 @@ class EndfProcessing:
         summary = (f"PENDF with {len(wanted)} material{'s' if len(wanted) > 1 else ''} at "
                    f"{', '.join(f'{T:g}' for T in wanted)} K"
                    + (f"; URR tables (MT153) at {', '.join(f'{T:g}' for T in with153)} K" if with153 else "")
+                   + ("; heating (MT301, MT444) in every material" if self._heating else "")
                    + "; each material verified on reload")
-        self._written("pendf", t0, path, summary=summary, temperatures=wanted, mt153=with153)
+        self._written("pendf", t0, path, summary=summary, temperatures=wanted, mt153=with153,
+                      heating=sorted(HEATING_MTS) if self._heating else [])
         return path
 
     def _write_heated_material(self, path, T, mat=None) -> bool:
@@ -483,6 +529,8 @@ class EndfProcessing:
         conversion = writeEndfTape(suite, path, mat=mat, label=HEATED_LABEL)
         if not conversion.isClean:
             raise ProcessingOutputError("pendf-failed", f"{T:g} K: the conversion lost data: {conversion}")
+        from kika.endf.model_adapter.pendf import trimDescription
+        trimDescription(path)  # NJOY's HEATR does not survive a long MF1 text
         has153 = T in (self._urr or {})
         if has153:
             ev = rec.evaluation or {}
@@ -763,16 +811,30 @@ def _flat(form):
 
 
 def _heated_suite(rec, T, tables):
-    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T``."""
+    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T``,
+    each reaction on its own points (``ownPoints``), as BROADR writes a PENDF."""
     suite = copy.deepcopy(rec.suite)
     source = rec.result.label if rec.result.label in suite.styles.labels else "eval"
-    return _add_heated(suite, HEATED_LABEL, T, tables, source)
+    return _add_heated(suite, HEATED_LABEL, T, tables, source, ownPoints=True)
 
 
-def _add_heated(suite, label, T, tables, source):
+#: ``ownPoints``: a point a reaction holds only because another reaction needs
+#: it is dropped when the reaction, read lin-lin, reproduces it to this relative
+#: tolerance -- far below the seven figures of an ENDF number, so nothing written
+#: changes, while the table shrinks to its own grid.
+OWN_POINTS_RTOL = 1.0e-9
+
+
+def _add_heated(suite, label, T, tables, source, ownPoints=False):
     """Add a ``heated`` style ``label`` at ``T`` (derived from ``source``) and every
     reaction's broadened table under it, on the common union grid, steps
-    restored as repeated energies (regions) so a writer keeps both faces."""
+    restored as repeated energies (regions) so a writer keeps both faces.
+
+    ``ownPoints`` keeps, for each reaction, only the points its own table needs
+    (:data:`OWN_POINTS_RTOL`). On the union grid every reaction carries the
+    knots of all the others -- ~9x the lines of BROADR's material for Fe-56 --
+    and NJOY's ACER stops on such a tape."""
+    from kika.algebra import thin_common_grid
     from kika.hdf5 import processing as hp
     from kika.nuclear_data.model import Heated, PhysicalQuantity
     grid = max((x for x, _ in tables.values()), key=len)
@@ -784,7 +846,10 @@ def _add_heated(suite, label, T, tables, source):
     # same energy twice.
     nudged = np.flatnonzero(np.diff(xs) <= 2e-12 * xs[1:])
     xs[nudged + 1] = xs[nudged]
-    suite.styles.add(Heated(label, derivedFrom=source, temperature=PhysicalQuantity(float(T), "K")))
+    # The date the style was made, which gnds.xsd requires on every derived
+    # style (as `attach_broadening` dates its own).
+    suite.styles.add(Heated(label, derivedFrom=source, date=_today(),
+                            temperature=PhysicalQuantity(float(T), "K")))
     for reaction in list(suite.reactions) + list(suite.sums) + list(suite.fissionComponents):
         mt = reaction.ENDF_MT
         if mt is None or mt not in tables:
@@ -792,7 +857,13 @@ def _add_heated(suite, label, T, tables, source):
         x, y = tables[mt]
         full = np.zeros(len(grid))
         full[len(grid) - len(x):] = y
-        form = hp._pieces(xs, full)
+        if ownPoints:
+            first = len(grid) - len(x)
+            keep = thin_common_grid(xs, full[None, :], rtol=OWN_POINTS_RTOL, atol=0.0,
+                                    keep=[first] if first > 0 else None)
+            form = hp._pieces(xs[keep], full[keep])
+        else:
+            form = hp._pieces(xs, full)
         form.label = label
         reaction.crossSection[label] = form
     return suite
@@ -857,6 +928,191 @@ def _check_mt153(path, table):
         raise ProcessingOutputError("pendf-failed", "MF2/MT153 does not read back as written")
 
 
+#: The heating sections HEATR adds to a PENDF with its default request and damage.
+HEATING_MTS = (301, 444)
+
+
+def _heating_section(mt, energies, values, za, awr, mat):
+    """MF3/MT``mt`` text for one heating table, as HEATR writes it (QM = QI = 0)."""
+    from kika.endf.model_adapter import encodeMF3MT
+    from kika.hdf5 import processing as hp
+    from kika.nuclear_data.model import CrossSection, EndfProvenance, OutputChannel, Q, Reaction, ReactionId
+    xs = np.array(energies, dtype=float)
+    # A step was nudged up by ~1e-12 for the union grid; ENDF states it as the
+    # same energy twice (as _add_heated does).
+    nudged = np.flatnonzero(np.diff(xs) <= 2e-12 * xs[1:])
+    xs[nudged + 1] = xs[nudged]
+    form = hp._pieces(xs, np.asarray(values, float))
+    form.label = HEATED_LABEL
+    reaction = Reaction(ReactionId(f"MT{mt}", ENDF_MT=mt), CrossSection({HEATED_LABEL: form}),
+                        outputChannel=OutputChannel(Q=Q(value=0.0, unit="eV")),
+                        provenance=EndfProvenance(mat=mat, awr=awr, za=za, qm=0.0, lr=0))
+    section, _ = encodeMF3MT(reaction, mat, label=HEATED_LABEL, mergeRegions=True)
+    return str(section).rstrip("\n").split("\n")
+
+
+def _insert_heating(path, tables, T):
+    """Put MF3/MT301 and MT444 in the one-material tape at ``path``, in MT
+    order, rebuild the MF1 directory, and check they read back."""
+    from kika._records import parse_number
+    from kika.endf.read_endf import read_endf
+    from kika.endf.writers.update_directory import update_mf1_directory
+    lines = Path(path).read_text().rstrip("\n").split("\n")
+    head = lines[1]
+    mat = int(head[66:70])
+    za, awr = int(round(parse_number(head[0:11]))), parse_number(head[11:22])
+    for mt in HEATING_MTS:
+        x, y = tables[mt]
+        new = _heating_section(mt, x, y, za, awr, mat)
+        mf3 = [i for i, l in enumerate(lines) if l[70:72].strip() == "3" and l[66:70].strip() == str(mat)]
+        if not mf3:
+            raise ProcessingOutputError("pendf-failed", f"{T:g} K: no MF3 to put MT{mt} in")
+        # Before the first record of a higher MT, else before MF3's FEND (MT 0 and
+        # the last MF3 line).
+        at = next((i for i in mf3 if int(lines[i][72:75]) > mt), None)
+        if at is None:
+            at = mf3[-1]
+        lines[at:at] = new
+    Path(path).write_text("\n".join(lines) + "\n", newline="\n")
+    if not update_mf1_directory(str(path), added_sections={(3, mt) for mt in HEATING_MTS}):
+        raise ProcessingOutputError("pendf-failed", f"{T:g} K: the MF1 directory could not be rebuilt")
+    tape = read_endf(str(path), mf_numbers=[3])
+    for mt in HEATING_MTS:
+        x, y = tables[mt]
+        section = tape.mf[3].mt.get(mt)
+        if section is None:
+            raise ProcessingOutputError("pendf-failed", f"{T:g} K: MT{mt} missing on reload")
+        back = np.asarray(section._cross_sections, float)
+        scale = float(np.max(np.abs(y))) if len(y) else 1.0
+        if len(back) != len(y) or not np.allclose(back, y, rtol=1e-6, atol=1e-9 * (scale or 1.0)):
+            raise ProcessingOutputError("pendf-failed", f"{T:g} K: MT{mt} does not read back as written")
+
+
+def _on_grid(x, y, grid):
+    """``y(x)`` read lin-lin on ``grid``, both faces of a step kept, zero below ``x[0]``."""
+    from kika.hdf5 import processing as hp
+    xs, ys = hp._strictly(np.asarray(x, float), np.asarray(y, float))
+    return np.interp(grid, xs, ys, left=0.0, right=float(ys[-1]))
+
+
+def _heating_grid(run, T):
+    """``(grid, {MT: sigma on grid})`` at ``T``: the MT1 grid HEATR works on."""
+    from kika.hdf5 import processing as hp
+    tables = run.cross_sections(T)
+    if T:
+        # One union grid per temperature; each table is its tail from its threshold.
+        grid = max((x for x, _ in tables.values()), key=len)
+        sigma = {}
+        for mt, (x, y) in tables.items():
+            full = np.zeros(len(grid))
+            full[len(grid) - len(x):] = y
+            sigma[mt] = full
+        return grid, sigma
+    # 0 K: each reaction on its own compressed grid; read them all on MT1's.
+    x1 = tables[1][0] if 1 in tables else np.unique(np.concatenate([x for x, _ in tables.values()]))
+    grid, _ = hp._strictly(x1, np.zeros(len(x1)))
+    return grid, {mt: _on_grid(x, y, grid) for mt, (x, y) in tables.items()}
+
+
+def _fission_heating(out, work, grid, sigma, A):
+    """HEATR's fission KERMA, MT318 with ``local = 0`` (``heatr.f90`` nheat, gheat):
+    ``sigma_f (EFR + EGP)`` from MF1/458, less the energy of the prompt photons the
+    evaluation states for fission. ``None`` for a material that does not fission."""
+    from kika.hdf5.fission_energy import evaluate
+    from kika.processing import heating as h
+    from kika.processing.resonances import UnsupportedResonanceError
+    from kika.processing.resonances.suite import _entries
+    chances = [mt for mt in (19, 20, 21, 38) if mt in sigma]
+    if 18 in sigma:
+        sigma_f = sigma[18]
+    elif chances:
+        sigma_f = np.sum([sigma[mt] for mt in chances], axis=0)
+    else:
+        return None
+    release = None
+    for reaction in _entries(work).values():
+        data = getattr(reaction.outputChannel, "fissionFragmentData", None)
+        if reaction.ENDF_MT in h.FISSION_MTS and data is not None and data.fissionEnergyReleases:
+            release = data.fissionEnergyReleases[0]
+            break
+    if release is None:
+        raise UnsupportedResonanceError("a fission with no MF1/458: HEATR's fission heating needs "
+                                        "its energy release", category="heating-unsupported")
+    h0 = evaluate(release.promptProductKE, grid) + evaluate(release.promptGammaEnergy, grid)
+    photon = h._Kinematics(A=A, Q=0.0, awp=0.0)
+    gammas = np.zeros(len(grid))
+    fissions = [r for r in list(out.reactions) + list(out.fissionComponents) + list(out.sums)
+                if r.ENDF_MT in h.FISSION_MTS]
+    # The prompt photons of fission are stated once, on MT18 (or the first chance).
+    for reaction in sorted(fissions, key=lambda r: r.ENDF_MT != 18):
+        found = False
+        for product in reaction.outputChannel.products:
+            mode = (getattr(product.provenance, "attributes", None) or {}).get("emission_mode", "prompt")
+            form = h._distribution(product) if product.pid == "photon" and mode == "prompt" else None
+            if form is not None:
+                gammas = gammas + h._yield(product, grid) * h._meanEnergyOf(form, grid, photon)
+                found = True
+        if found:
+            break
+    return np.where(sigma_f > 0, sigma_f * (h0 - gammas), 0.0)
+
+
+def _heating(run, plan, report):
+    """``(StageReport, {T: {301: (E, h), 444: (E, d)}})``; never raises.
+
+    The product distributions come from the OpenMC processing
+    (:func:`kika.hdf5.processing.processSuite`, the slow part), reusing this
+    run's broadening; the KERMA from :func:`kika.processing.heating.heatingOf`
+    on each temperature's MT1 grid, as HEATR reads its PENDF."""
+    from kika.hdf5 import processing as hp
+    from kika.processing.heating import heatingOf
+    from kika.processing.resonances import UnsupportedResonanceError
+    from kika.processing.resonances.suite import _entries
+    t0 = time.perf_counter()
+    report("heating", None)
+    temps = [0.0] + list(run.temperatures)
+    details = dict(temperatures=temps, mts=list(HEATING_MTS), local=0)
+    try:
+        work = run._full_suite(category="heating-failed")
+        out = hp.processSuite(work, temperatures=list(run.temperatures), thnmax=run.thnmax or "njoy",
+                              context=run.reconstruction.context, thinning=plan.thinning,
+                              workers=plan.workers, omit=("urr", "kerma", "damage"),
+                              broadened={T: run._broadened[T] for T in run.temperatures})
+        report("heating", 0.5)
+        target = work.PoPs[work.target]
+        Z, A = int(target.Z), int(target.A)
+        awr = float(out.provenance.attributes["atomic_weight_ratio"])
+        qm = {r.ENDF_MT: float(r.provenance.qm) for r in _entries(work).values()
+              if r.ENDF_MT is not None and getattr(r.provenance, "qm", None) is not None}
+        tables, notes = {}, []
+        for i, T in enumerate(temps):
+            grid, sigma = _heating_grid(run, T)
+            result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, evaluation=work,
+                               zaTarget=1000 * Z + A)
+            kerma = result.kerma
+            fission = _fission_heating(out, work, grid, sigma, awr)
+            if fission is not None:
+                kerma = kerma + fission
+            grid = _contiguous(grid)
+            tables[T] = {301: (grid, _contiguous(kerma)), 444: (grid, _contiguous(result.damage))}
+            notes = result.notes
+            report("heating", 0.5 + 0.5 * (i + 1) / len(temps))
+    except Exception as error:
+        category = getattr(error, "category", None)
+        if category not in PROCESSING_REJECTION_CATEGORIES or not str(category).startswith("heating"):
+            category = "heating-unsupported" if isinstance(error, UnsupportedResonanceError) else "heating-failed"
+        details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
+        return StageReport("heating", "rejected", time.perf_counter() - t0, category,
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
+    details["notes"] = list(notes)
+    details["n_points"] = {T: int(len(t[301][0])) for T, t in tables.items()}
+    fissile = any(r.ENDF_MT in (18, 19) for r in _entries(work).values())
+    summary = (f"MT301 (KERMA) and MT444 (damage) at {', '.join(f'{T:g}' for T in temps)} K, as NJOY "
+               f"HEATR with local = 0" + ("; fission from MF1/458 (EFR + EGP) less its prompt photons"
+                                          if fissile else ""))
+    return StageReport("heating", "done", time.perf_counter() - t0, None, summary, details), tables
+
+
 def _working_suite(rec, suite=None):
     """A suite with the reconstruction as its 0 K forms, lin-lin, as the
     broadening reads them: a copy of the reconstruction's own (MF1-MF3) suite,
@@ -876,7 +1132,8 @@ def _working_suite(rec, suite=None):
                 continue
             raise ValueError(f"{key} is in the tape but not in the reconstruction")
         reaction.crossSection[label] = copy.deepcopy(rec.result.forms[key])
-    work.styles.add(CrossSectionReconstructed(label, derivedFrom=rec.result.source_style))
+    work.styles.add(CrossSectionReconstructed(label, derivedFrom=rec.result.source_style,
+                                              date=_today()))
     notes = hp._m().ConversionReport()
     hp._linearised(work, notes)
     return work, label
@@ -912,7 +1169,7 @@ def _broaden(rec, plan, report):
     except Exception as error:
         category, engine = _engine_category(error)
         return StageReport("broaden", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})",
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})",
                            dict(temperatures=list(temps), thnmax_eV=thnmax, engine_category=engine,
                                 error="".join(traceback.format_exception_only(type(error), error)).strip())), \
             {}, thnmax, None, None
@@ -950,7 +1207,7 @@ def _urr(rec, plan, unresolved, report):
         category = "urr-unsupported" if isinstance(error, UnsupportedResonanceError) else "urr-failed"
         details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
         return StageReport("urr", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})", details), {}
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     report("urr", 1.0)
     ne = len(next(iter(tables.values())).energies)
     details["n_energies"] = ne
@@ -980,6 +1237,15 @@ def _start(plan, progress):
     children) and the progress callback."""
     import multiprocessing
     from dataclasses import replace
+    if getattr(multiprocessing.current_process(), "_inheriting", False):
+        # A spawned worker is importing the caller's main script, and the
+        # script starts a run at module level. Running it here would redo the
+        # whole processing in every worker; stop at once, so the parent's pool
+        # breaks and its stage says why (_describe).
+        raise RuntimeError(
+            "process_endf/process_gnds was called while a worker process was importing the "
+            "main script: start the run under `if __name__ == \"__main__\":`, or use "
+            "ProcessingPlan(workers=1)")
     plan = ProcessingPlan() if plan is None else plan
     if multiprocessing.current_process().daemon and plan.workers != 1:
         plan = replace(plan, workers=1)
@@ -987,7 +1253,7 @@ def _start(plan, progress):
     return plan, report
 
 
-def _finish(rec, plan, report, source_format, decode_details=None):
+def _finish(rec, plan, report, source_format, decode_details=None, aside=None):
     """Every stage after the reconstruction, the same for ENDF and GNDS."""
     ev = rec.evaluation or {}
     resolved, unresolved = _ranges(ev)
@@ -1023,13 +1289,18 @@ def _finish(rec, plan, report, source_format, decode_details=None):
     stages.append(stage)
     stage, urr_tables = _urr(rec, plan, unresolved, report)
     stages.append(stage)
-    if plan.heating:
-        stages.append(StageReport("heating", "skipped", category="heating-not-implemented",
-                                  summary=PROCESSING_REJECTION_CATEGORIES["heating-not-implemented"]))
-    else:
+    run = EndfProcessing(rec, plan, stages, heated, thnmax, urr_tables, broadened=raw,
+                         source_format=source_format)
+    run._aside = aside or {}
+    if not plan.heating:
         stages.append(StageReport("heating", "skipped", summary="not requested"))
-    return EndfProcessing(rec, plan, stages, heated, thnmax, urr_tables, broadened=raw,
-                          source_format=source_format)
+    elif plan.temperatures and plan.broaden and not heated:
+        stages.append(StageReport("heating", "skipped", summary="the broadening was rejected; "
+                                  "heating needs every requested temperature"))
+    else:
+        stage, run._heating = _heating(run, plan, report)
+        stages.append(stage)
+    return run
 
 
 def process_gnds(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
@@ -1094,9 +1365,7 @@ def process_gnds(path, plan: ProcessingPlan | None = None, progress: Progress | 
     details = dict(source_format="gnds")
     if set_aside:
         details["source_reconstruction"] = f"{', '.join(set_aside)} in the file, ignored"
-    run = _finish(rec, plan, report, "gnds", details)
-    run._aside = aside
-    return run
+    return _finish(rec, plan, report, "gnds", details, aside)
 
 
 def _set_aside_processed(suite):

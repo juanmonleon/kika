@@ -44,6 +44,7 @@ submodules:
 | `arithmetic` | Sums of tables, exact between the nodes and at every step; tables read on one common grid. |
 | `fold` | Gaussian folds of a tabulated function, in closed form. |
 | `compare` | Differences of two tables, and of a table against its own window or group averages. |
+| `thin` | Thinning several tables that share one grid to a stated tolerance, keeping a subset of the points. |
 | `prepared` | A validated, read-only snapshot of a table for repeated evaluation. |
 
 The model's function containers, the processing code (group averages, resonance
@@ -140,7 +141,7 @@ forms, the refinement criterion, the fold) is documented on its own methods page
 ## Implementation
 
 `kika/algebra/`: `laws.py`, `evaluate.py`, `grid.py`, `integrate.py`, `refine.py`,
-`arithmetic.py`, `fold.py`, `compare.py`, `prepared.py`. The package exports the public
+`arithmetic.py`, `fold.py`, `compare.py`, `thin.py`, `prepared.py`. The package exports the public
 functions of all of them (`kika.algebra.evaluate`, `kika.algebra.integral`,
 `kika.algebra.to_linlin`, and the rest).
 

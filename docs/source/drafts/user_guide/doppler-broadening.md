@@ -152,6 +152,6 @@ style alone does not constitute a complete transport library at that temperature
 Use explicit output-style selection when publishing a heated result; read it
 back and check temperature, represented coverage and interpolation precision.
 
-See {doc}`doppler` for function signatures and result types.
+See {doc}`../api_reference/processing-doppler` for function signatures and result types.
 
-The defining operator, conventions and limits are in {doc}`doppler-methods`.
+The defining operator, conventions and limits are in {doc}`../methods/processing/doppler-broadening`.
