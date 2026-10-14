@@ -54,7 +54,7 @@ def test_missing_fission_release_is_not_silently_zero():
     assert np.array_equal(r.partialsOf(xs, [318])[318], np.zeros(2))
 
 
-@pytest.mark.parametrize('ids', [[443], [444, 444], [True], [304.0], [999]])
+@pytest.mark.parametrize('ids', [[493], [444, 444], [True], [304.0], [999]])
 def test_invalid_or_unimplemented_requests_fail_explicitly(ids):
     r, xs = result()
     with pytest.raises(ValueError):

@@ -89,8 +89,11 @@ class HeatingResult:
     #: Photon energy per reaction, including photons declared on redundant sums.
     photonEnergy: Dict[int, np.ndarray] = field(default_factory=dict)
 
+    #: HEATR diagnostic upper energy per collision; absent for unresolved recoils.
+    kinematicUpper: Dict[int, np.ndarray] = field(default_factory=dict)
+
     def partialsOf(self, sigma, requested, *, fissionKerma=None,
-                   fissionPhotonEnergy=None, local=False):
+                   fissionPhotonEnergy=None, fissionKinematicEnergy=None, local=False):
         """Requested heating/damage responses in eV·b, using already computed moments.
 
         ENDF-6 HEATR's selection rules apply, including charged-particle level
@@ -100,8 +103,10 @@ class HeatingResult:
         ``fissionKerma`` supplies independently calculated fission energy per
         collision, keyed by the exclusive fission MTs. It is required for a
         heating selection containing active fission; this class deliberately
-        does not fabricate release energies from neutron spectra. MT443 requires
-        a separate kinematic calculation and is rejected here. MT442 needs
+        does not fabricate release energies from neutron spectra. MT443 uses
+        HEATR's diagnostic convention (not a rigorous physical upper bound).
+        Undetermined active MF6 recoils raise rather than supplying a zero;
+        fission requires ``fissionKinematicEnergy``. MT442 needs
         ``fissionPhotonEnergy`` on active fission channels. When ``local`` is
         true, the supplied fissionKerma must itself include local photon energy.
         """
@@ -111,7 +116,7 @@ class HeatingResult:
             raise ValueError("partial response identifiers must be integers")
         if len(set(ids)) != len(ids):
             raise ValueError("duplicate partial response identifiers")
-        allowed = {301, 303, 304, 318, 401, 442, 444, 445, 446, 447, 901}
+        allowed = {301, 303, 304, 318, 401, 442, 443, 444, 445, 446, 447, 901}
         allowed.update(300 + mt for mt in self.perReaction if 1 < mt <= 141)
         allowed.update(range(403, 408))
         unknown = set(ids) - allowed
@@ -127,9 +132,10 @@ class HeatingResult:
             cross[mt] = values
         fissionKerma = fissionKerma or {}
         fissionPhotonEnergy = fissionPhotonEnergy or {}
+        fissionKinematicEnergy = fissionKinematicEnergy or {}
 
         def selected(response, mt):
-            if response in (301, 901, 442, 444):
+            if response in (301, 901, 442, 443, 444):
                 return True
             if response == 303:
                 return mt not in (2, 3)
@@ -159,7 +165,16 @@ class HeatingResult:
                     continue
                 if response == 442:
                     continue
-                if damage:
+                if response == 443:
+                    if not np.any(cross[mt] > 0):
+                        continue
+                    bounds = fissionKinematicEnergy if mt in FISSION_MTS else self.kinematicUpper
+                    if mt not in bounds:
+                        raise NotImplementedError(f"MT443 has no determined recoil energy for MT{mt}")
+                    energy = np.asarray(bounds[mt], dtype=float)
+                    if energy.shape != self.grid.shape or not np.all(np.isfinite(energy)):
+                        raise ValueError(f"invalid kinematic energy for MT{mt}")
+                elif damage:
                     energy = moments[2]
                 elif mt in FISSION_MTS:
                     if not np.any(cross[mt] > 0):
@@ -174,7 +189,7 @@ class HeatingResult:
                 values += cross[mt] * energy
             # Per-reaction moments already subtract their own photons. Sum
             # photons, absent from perReaction, must be subtracted separately.
-            for mt, energy in self.photonEnergy.items():
+            for mt, energy in (() if response == 443 else self.photonEnergy.items()):
                 # HEATR gheat maps MT4 photon production onto MT51 for
                 # partial selection, and MT3 onto the total. These are
                 # photon-production labels, never extra neutron reactions.
@@ -417,10 +432,16 @@ def _unitBaseCMMean(form, grid, k):
             if b==a:continue
             for fraction in (.25,.5,.75):
                 E=a+(b-a)*fraction;v=at(float(E))
-                if abs(v-(va+(vb-va)*fraction))>.1+1e-7*E:additions.append(E)
+                if abs(v-(va+(vb-va)*fraction))>.1+1e-7*E:additions.append((E,v))
         if not additions:break
         if len(nodes)+len(additions)>20000:raise ValueError("unit-base mean refinement exceeds capacity")
-        nodes=np.unique(np.r_[nodes,additions]);values=np.array([at(float(E)) for E in nodes])
+        # Each new node was already integrated while checking the error.
+        # Keep those exact values and the previous nodes' values; do not
+        # repeat quadrature on the enlarged mesh.
+        known = dict(zip(nodes, values))
+        known.update(additions)
+        nodes = np.array(sorted(known))
+        values = np.array([known[E] for E in nodes])
     else:raise ValueError("unit-base mean refinement did not converge")
     output=np.interp(grid,nodes,values)
     outside=(grid<lo)|(grid>hi)
@@ -831,11 +852,48 @@ def _statedInMF6(evaluation, mt) -> bool:
     return bool(fields.get("mf6"))
 
 
+
+def _kinematicUpperOf(mt, grid, A, Q, Qbal, emitted, neutronYield, carried,
+                      deposit, heavy, mf6, lr, twoBodyCapture, photons):
+    """HEATR nheat/gheat MT443 diagnostic, in eV per collision.
+
+    The historical high limit is a diagnostic approximation, not a certified
+    physical bound. Explicit MF6 recoil energy is mandatory on the MF6 path.
+    """
+    if mt == 2:
+        return carried
+    if mf6:
+        if mt == 102 and twoBodyCapture is not None:
+            return carried
+        if heavy is not None:
+            return heavy[0]
+        if 51 <= mt <= 90:
+            return grid + Q - emitted
+        return None
+    if mt == 102:
+        if photons:
+            # gheat replaces the single-photon kick of nheat with the
+            # independent kicks of the stated gamma cascade.
+            return grid / (A + 1) + carried
+        available = Q + A * grid / (A + 1)
+        return grid / (A + 1) + available * available / (2 * NEUTRON_REST_ENERGY * (A + 1))
+    if 51 <= mt <= 90:
+        return grid + (Qbal if lr not in (0, 31) else Q) - emitted
+    mean = np.divide(emitted, neutronYield, out=np.zeros_like(grid), where=neutronYield > 0)
+    if mt == 91:
+        return grid + Qbal - mean if lr not in (0, 31) else (grid + mean) / (A + 1)
+    if mt == 16 and A >= 10:
+        return np.minimum(deposit, (grid + mean) / (A - 1))
+    if mt == 17 and A >= 10:
+        return np.minimum(deposit, (grid + 2 * mean) / (A - 2))
+    return deposit
+
+
 def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
               qm: Optional[Dict[int, float]] = None, ed: Optional[float] = None,
               qa: Optional[Dict[int, float]] = None, qbar: Optional[Dict[int, object]] = None,
               evaluation=None, zaTarget: Optional[int] = None,
-              report=None) -> HeatingResult:
+              report=None, kinematic: bool = False) -> HeatingResult:
     """KERMA (local and not) and damage of a processed suite on ``grid``.
 
     ``suite`` is the processed suite (:func:`kika.hdf5.processing.processSuite`
@@ -855,6 +913,8 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     initialises that threshold before reading qbar. Tables must cover the whole
     requested grid. Capture with explicit photons and MT5 explicit
     deposition keep their evaluated recoil/deposit convention.
+    ``kinematic=True`` computes the additional MT443 diagnostic arrays.
+    They are omitted by default, saving time and memory for normal heating.
     Fission auxiliary-Q handling is not yet supported and raises explicitly.
     """
     grid = np.asarray(grid, dtype=float)
@@ -880,6 +940,7 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     tm = NEUTRON_REST_ENERGY * (A + 1.0)
     perReaction: Dict[int, tuple] = {}
     photonEnergy: Dict[int, np.ndarray] = {}
+    kinematicUpper: Dict[int, np.ndarray] = {}
     kerma = np.zeros(len(grid))
     local = np.zeros(len(grid))
     damage = np.zeros(len(grid))
@@ -917,8 +978,12 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
                 continue
             (neutrons if product.pid == "n" else photons).append((product, form))
         emitted = np.zeros(len(grid))
+        neutronYield = np.zeros(len(grid)) if kinematic else None
         for product, form in neutrons:
-            emitted = emitted + _yield(product, grid) * _meanEnergyOf(form, grid, k)
+            multiplicity = _yield(product, grid)
+            if kinematic:
+                neutronYield += multiplicity
+            emitted = emitted + multiplicity * _meanEnergyOf(form, grid, k)
         deposit = grid + Qbal - emitted
         gammas = np.zeros(len(grid))
         exact = np.zeros(len(grid))
@@ -936,6 +1001,7 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
                              "its deposit is left at zero, as HEATR leaves it")
             # ``deposit`` is with the photons in, as everywhere else.
             deposit = (heavy[0] if heavy is not None else np.zeros(len(grid))) + gammas
+        twoBodyCapture = None
         if mt == 102 and photons:
             second = np.zeros(len(grid))
             for product, form in photons:
@@ -982,6 +1048,14 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         damage += np.where(live, s * d, 0.0)
         perReaction[mt] = (carried, carried + exact, d)
         photonEnergy[mt] = exact
+        if kinematic:
+            fields = getattr(getattr(reaction, "provenance", None), "headerFields", None) or {}
+            mf6 = _statedInMF6(evaluation, mt) or bool(fields.get("mf6"))
+            lr = int(getattr(getattr(reaction, "provenance", None), "lr", 0) or 0)
+            upper = _kinematicUpperOf(mt, grid, A, _qAt(Qkin, grid), Qbal, emitted,
+                neutronYield, carried, deposit, heavy, mf6, lr, twoBodyCapture, photons)
+            if upper is not None:
+                kinematicUpper[mt] = upper
     # Fission's damage: HEATR's conbar gives a fission the recoil of one
     # emission from its prompt-neutron spectrum (tabdam, one neutron, not ν̄;
     # the fragments are not followed): U-235 at thermal, ~6.9 keV per fission.
@@ -1023,4 +1097,4 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         for note in notes:
             report.warn(note)
     return HeatingResult(grid=grid, kerma=kerma, kermaLocal=local, damage=damage, notes=notes,
-                         perReaction=perReaction, photonEnergy=photonEnergy)
+                         perReaction=perReaction, photonEnergy=photonEnergy, kinematicUpper=kinematicUpper)

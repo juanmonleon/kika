@@ -62,7 +62,7 @@ PARTICLE_TO_PID = {"neutron": "n", "photon": "photon", "electron": "e-", "positr
 PID_TO_PARTICLE = {pid: name for name, pid in PARTICLE_TO_PID.items()}
 
 #: Redundant MTs that are response functions, not reactions.
-RESPONSE_MTS = (203, 204, 205, 206, 207, 301, 444, 901)
+RESPONSE_MTS = (203, 204, 205, 206, 207, *range(301, 448), 901)
 
 #: ``fission_energy_release/<dataset>`` → FissionEnergyRelease term.
 FISSION_ENERGY_TERMS = {
