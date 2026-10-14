@@ -160,4 +160,15 @@ def tabulateAngular(form, options: TabulationOptions = TabulationOptions()) -> T
         table, wasClipped = muTable(function, options, outer=energy, what=f"P(mu|E={energy:g} eV)")
         tables.append(table)
         clipped += wasClipped
+    # OpenMC searches with lower_bound: a repeated coordinate selects the
+    # left law at the exact boundary, while NumPy/model interpolation selects
+    # the right one. Store the left limits on adjacent representable energies
+    # so both consumers retain each side and choose the right law at the jump.
+    # Only the processed table coordinates move; source functions are untouched.
+    if any(a.outerDomainValue > b.outerDomainValue for a, b in zip(tables, tables[1:])):
+        raise ValueError("angular incident energies must be nondecreasing")
+    for i in range(len(tables) - 2, -1, -1):
+        if tables[i].outerDomainValue >= tables[i + 1].outerDomainValue:
+            tables[i].outerDomainValue = float(np.nextafter(
+                tables[i + 1].outerDomainValue, -np.inf))
     return m.XYs2d(function1ds=tables, label="MonteCarlo"), clipped

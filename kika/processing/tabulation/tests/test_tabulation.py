@@ -67,15 +67,15 @@ def test_angular_regions_retain_both_sides_of_a_boundary():
     high = m.XYs2d(function1ds=[m.XYs1d(xs=[-1, 1], ys=[0.4, 0.6], outerDomainValue=2.0),
                                 m.XYs1d(xs=[-1, 1], ys=[0.3, 0.7], outerDomainValue=3.0)])
     form, _ = tabulateAngular(m.Regions2d(function2ds=[low, high]))
-    assert [t.outerDomainValue for t in form.function1ds] == [1.0, 2.0, 2.0, 3.0]
+    assert [t.outerDomainValue for t in form.function1ds] == [1.0, np.nextafter(2., -np.inf), 2.0, 3.0]
     assert form.function1ds[2].pdf[-1] == pytest.approx(0.6)
     from kika.processing.heating import _meanMu
     from kika.hdf5.distributions import encodeAngle, decodeAngle
-    E = np.array([1.5, 2., 2.5])
-    expected = [0.05, 1./15., 0.1]
+    E = np.array([1.5, np.nextafter(2., -np.inf), 2., 2.5])
+    expected = [0.05, 0.1, 1./15., 0.1]
     np.testing.assert_allclose(_meanMu(form, E), expected, rtol=0., atol=1e-6)
     decoded = decodeAngle(encodeAngle(form))
-    np.testing.assert_array_equal([t.outerDomainValue for t in decoded.function1ds], [1., 2., 2., 3.])
+    np.testing.assert_array_equal([t.outerDomainValue for t in decoded.function1ds], [1., np.nextafter(2., -np.inf), 2., 3.])
     np.testing.assert_allclose(_meanMu(decoded, E), expected, rtol=0., atol=1e-6)
 
 
@@ -181,3 +181,26 @@ def test_legendre_table_keeps_the_mean_cosine_where_a_midpoint_sits_on_the_chord
     mu, cdf = np.asarray(table.xs), np.asarray(table.cdf)
     mean = float(np.sum(np.diff(cdf) * 0.5 * (mu[1:] + mu[:-1])))
     assert mean == pytest.approx(a[1], abs=2e-3)
+
+
+def test_angular_boundary_coordinates_match_openmc_lower_bound_without_source_edits():
+    low = m.XYs2d(function1ds=[m.Legendre(coefficients=[1.], outerDomainValue=1.),
+                              m.Legendre(coefficients=[1., .1], outerDomainValue=2.)])
+    high = m.XYs2d(function1ds=[m.Legendre(coefficients=[1., .2], outerDomainValue=2.),
+                               m.Legendre(coefficients=[1., .3], outerDomainValue=3.)])
+    source = m.Regions2d(function2ds=[low, high])
+    converted, _ = tabulateAngular(source)
+    energies = np.array([t.outerDomainValue for t in converted.function1ds])
+    assert np.all(np.diff(energies) > 0)
+    assert low.function1ds[-1].outerDomainValue == 2.
+    assert high.function1ds[0].outerDomainValue == 2.
+    from kika.processing.heating import _meanMu
+    means = _meanMu(converted, energies)
+    probes = np.array([1.5, np.nextafter(2., -np.inf), 2., np.nextafter(2., np.inf), 2.5])
+    # OpenMC 0.16 get_energy_index / lower_bound_index, including exact-node
+    # selection; this arithmetic differs from np.interp on repeated energies.
+    ids = np.maximum(np.searchsorted(energies, probes, side='left') - 1, 0)
+    fraction = (probes - energies[ids]) / (energies[ids + 1] - energies[ids])
+    sampled_mean = (1-fraction)*means[ids] + fraction*means[ids+1]
+    np.testing.assert_allclose(sampled_mean, _meanMu(converted, probes), atol=1e-14, rtol=0.)
+    np.testing.assert_allclose(sampled_mean, [.05, .1, .2, .2, .25], atol=1e-5, rtol=0.)
