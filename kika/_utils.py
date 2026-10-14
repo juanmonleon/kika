@@ -161,6 +161,26 @@ def MeV_to_kelvin(temp: float) -> float:
     return round(temp / BOLTZMANN_CONSTANT, 2)
 
 
+def ace_temperature_suffix(temp_K: float, tolerance: float = 1.0) -> str:
+    """The ACE ZAID suffix kika gives a table at ``temp_K``: ``".02"`` for 293.6 K.
+
+    The temperatures of :data:`K_TO_SUFFIX`, matched within ``tolerance``
+    kelvin. A temperature that is not in it raises instead of falling back to
+    a suffix that names another temperature: pass the extension explicitly.
+
+    Raises
+    ------
+    ValueError
+        No temperature of :data:`K_TO_SUFFIX` within ``tolerance`` of ``temp_K``.
+    """
+    closest = min(K_TO_SUFFIX, key=lambda k: abs(k - temp_K))
+    if abs(closest - temp_K) > tolerance:
+        raise ValueError(
+            f"{temp_K:.2f} K has no ACE suffix in K_TO_SUFFIX ({sorted(K_TO_SUFFIX)} K); "
+            f"pass the extension explicitly (e.g. extension='12c')")
+    return K_TO_SUFFIX[closest]
+
+
 def temperature_to_suffix(temp_K: float) -> str:
     """
     Convert temperature in Kelvin to MCNP suffix based on K_TO_SUFFIX mapping.

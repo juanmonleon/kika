@@ -100,6 +100,17 @@ def test_without_ace_provenance_mtr_follows_njoys_rule(original, decoded):
                                    original.cross_section.reaction[mt]._xs_entries, rtol=1e-14)
 
 
+def test_a_suite_with_no_ace_suffix_takes_its_temperatures(decoded):
+    """The suffix kika's NJOY runs give: ``.02c`` at 293.6 K; ``extension=`` overrides it."""
+    suite, _ = decoded
+    s = copy.deepcopy(suite)
+    s.provenance.extension = None
+    written, _ = encodeAce(s)
+    assert written.header.extension == ".02c"
+    written, _ = encodeAce(s, extension=".12c")
+    assert written.header.extension == ".12c"
+
+
 def test_an_ace_table_holds_one_temperature(decoded):
     from kika.nuclear_data.model import Heated, PhysicalQuantity
 

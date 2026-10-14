@@ -856,6 +856,23 @@ class _Encoder:
         return h
 
 
+def _defaultExtension(kT: float) -> str:
+    """The ZAID suffix of a table kika processed itself: its temperature's, ``.02c`` for 293.6 K.
+
+    The suffix kika's NJOY runs give (:data:`kika._constants.K_TO_SUFFIX`), so
+    a table from kika's processing takes the place and the name of the one
+    NJOY made; the library goes in the file name and the xsdir line, not in
+    the ZAID. A temperature with no suffix raises: pass ``extension=``.
+    """
+    from kika._utils import ace_temperature_suffix
+    from kika.hdf5.names import K_BOLTZMANN
+
+    try:
+        return ace_temperature_suffix(kT / K_BOLTZMANN) + "c"
+    except ValueError as e:
+        raise AceEncodeError(str(e)) from None
+
+
 def _position(grid: np.ndarray, xs: np.ndarray) -> Optional[int]:
     """Where ``xs`` sits on the grid as a contiguous slice; the grid may repeat an energy."""
     for start in np.flatnonzero(grid == xs[0]):
@@ -884,8 +901,10 @@ def encodeAce(suite, temperature=None, *, zaid: Optional[int] = None, awr: Optio
     ``temperature`` names the ``heated_<T>`` style to write (a name such as
     ``"294K"`` or kelvins) when the suite has more than one. ``zaid``,
     ``awr`` and ``extension`` override the header the suite's
-    ``AceProvenance`` states (a suite kika processed itself has none; the
-    ZAID suffix is D-A10's). The table is laid out by the A2 encoders and read
+    ``AceProvenance`` states. A suite kika processed itself has none: its ZAID
+    is 1000·Z + A and its suffix its temperature's (``.02c`` for 293.6 K, the
+    one kika's NJOY runs give; :func:`kika._utils.ace_temperature_suffix`),
+    and a temperature with no suffix raises. The table is laid out by the A2 encoders and read
     back with the parser in ``strict`` mode, so a block that would not read
     raises here rather than in the code that opens the file.
     """
@@ -900,7 +919,7 @@ def encodeAce(suite, temperature=None, *, zaid: Optional[int] = None, awr: Optio
                        header={"zaid": zaid, "awr": awr, "extension": extension})
     view = encoder.encode()
     if view.header.extension is None:
-        raise AceEncodeError("no ZAID extension (D-A10 is open: pass extension=, e.g. '.80c')")
+        view.header.extension = _defaultExtension(encoder.kT)
     enc = encode_xss(view)
     ace = Ace()
     ace.header = copy.deepcopy(view.header)

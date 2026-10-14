@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from textwrap import dedent
+from typing import Optional
 from .launcher import build_njoy_command
 from .locale_guard import (
     LISTING_FILENAME,
@@ -15,8 +16,8 @@ from .locale_guard import (
 )
 from .templates import NJOY_INPUT_TEMPLATE, NJOY_INPUT_TEMPLATE_WITH_PENDF
 from kika.endf import open_endf
-from kika._constants import K_TO_SUFFIX, NDLIBRARY_TO_SUFFIX
-from kika._utils import MeV_to_kelvin
+from kika._constants import NDLIBRARY_TO_SUFFIX
+from kika._utils import MeV_to_kelvin, ace_temperature_suffix
 
 def _resolve_nd_suffix(library_name: str) -> str:
     """Return the ACE suffix for a library name, falling back to '00' if unknown."""
@@ -32,7 +33,7 @@ def _resolve_nd_suffix(library_name: str) -> str:
     return "00"
 
 
-def _get_temperature_info(temperature: float) -> tuple[float, str]:
+def _get_temperature_info(temperature: float) -> tuple[float, Optional[str]]:
     """
     Helper function to get temperature in Kelvin and corresponding suffix.
 
@@ -43,8 +44,11 @@ def _get_temperature_info(temperature: float) -> tuple[float, str]:
 
     Returns
     -------
-    tuple[float, str]
-        (temperature_in_kelvin, temperature_suffix)
+    tuple[float, str | None]
+        (temperature_in_kelvin, temperature_suffix). The suffix is ``None``
+        for a temperature not in ``K_TO_SUFFIX``: a caller that needs it
+        asks :func:`kika._utils.ace_temperature_suffix`, which raises, and a
+        caller given ``extension=`` does not need it.
     """
     # Convert temperature to Kelvin if needed
     if temperature < 1.0:
@@ -52,17 +56,10 @@ def _get_temperature_info(temperature: float) -> tuple[float, str]:
     else:
         temp_K = temperature
 
-    # Find the corresponding temperature suffix
-    if K_TO_SUFFIX:
-        closest_temp = min(K_TO_SUFFIX.keys(), key=lambda k: abs(k - temp_K))
-        if abs(closest_temp - temp_K) <= 1.0:
-            temp_suffix = K_TO_SUFFIX[closest_temp]
-        else:
-            temp_suffix = ".00"
-    else:
-        temp_suffix = ".00"
-
-    return temp_K, temp_suffix
+    try:
+        return temp_K, ace_temperature_suffix(temp_K)
+    except ValueError:
+        return temp_K, None
 
 
 def _suff_from_extension(extension: str) -> str:
@@ -138,8 +135,10 @@ def _render_njoy_input(mat: int, T: float, title: str, suff: str = None,
                        template: str = NJOY_INPUT_TEMPLATE, acer_iprint: int = 0) -> str:
     if suff is None:
         # Use helper function to get temperature suffix (without 'c')
-        _, temp_suffix = _get_temperature_info(T)
-        suff = temp_suffix
+        # A temperature with no suffix raises here (pass extension=), instead
+        # of ".00", which would name the table by a temperature it is not at.
+        temp_K, _ = _get_temperature_info(T)
+        suff = ace_temperature_suffix(temp_K)
     # Fill the template with the run-specific parameters
     deck = dedent(template).format(mat=mat, T=T, title=title, suff=suff)
     if int(acer_iprint) != 0:
@@ -303,7 +302,7 @@ def run_njoy(
         xsdir_filename = f"{zaid}.{extension}.xsdir"
         base_filename = ace_filename
     else:
-        temp_suffix = temp_suffix_legacy
+        temp_suffix = temp_suffix_legacy or ace_temperature_suffix(temp_K)
         ace_dir = Path(ace_dir) if ace_dir is not None else (
             output_dir / "ace" / library_name / f"{temp_K:.1f}K"
         )
@@ -458,7 +457,7 @@ def run_njoy_with_pendf(
         xsdir_filename = f"{zaid}.{extension}.xsdir"
         base_filename = ace_filename
     else:
-        temp_suffix = temp_suffix_legacy
+        temp_suffix = temp_suffix_legacy or ace_temperature_suffix(temp_K)
         ace_dir = Path(ace_dir) if ace_dir is not None else (
             output_dir / "ace" / library_name / f"{temp_K:.1f}K"
         )
