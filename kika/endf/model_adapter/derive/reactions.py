@@ -281,7 +281,9 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
 def _isReaction(node) -> bool:
     from kika.nuclear_data.model import Reaction
 
-    return isinstance(node, Reaction)
+    # A production (MF8-10) has its own deriver, `derive.productions`.
+    return (isinstance(node, Reaction)
+            and getattr(getattr(node, "outputChannel", None), "genre", None) != "production")
 
 
 register("reactions", _isReaction, deriveReaction)

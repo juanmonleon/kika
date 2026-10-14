@@ -31,7 +31,7 @@ def read_endf(filepath: str, mf_numbers: Optional[Union[int, List[int]]] = None)
         ENDF object with parsed data
         
     Notes:
-        Parsers are available for MF1-8, MF12-15, MF23, MF27, MF28 and
+        Parsers are available for MF1-10, MF12-15, MF23, MF27, MF28 and
         MF31-35 and MF40 — the registry is
         :data:`kika.endf.parsers.parse_endf.MF_PARSERS`, which is the list this
         note has drifted from before. Other MF sections are skipped with a

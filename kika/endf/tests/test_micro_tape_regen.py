@@ -335,6 +335,27 @@ PHOTON_FIXTURES = {
 }
 
 
+def activation_fixture_path(key: str) -> Path:
+    """Committed activation (MF8-10) micro-tape *key*."""
+    return DATA / f"micro_{key}_activation.endf"
+
+
+#: The activation micro-tapes of roadmap E6, ``key -> (tape, keep)``, cut
+#: verbatim by :func:`build_cov_check`:
+#:
+#: * ``co59`` (JENDL-5): MF8 with LMF=3 (MT17), LMF=9 (MT102, to Co60 and
+#:   Co60m) and LMF=10 (MT16 to Co58 and Co58m, MT111) on one tape, every state
+#:   with ``NO=1``.
+#: * ``am241`` (ENDF/B-VIII.1): MF9 on MT102 to Am242 and Am242m, with an MF8
+#:   whose states carry their decay LISTs (``NO=0``), the records the model has
+#:   no node for and the tape must get back.
+ACTIVATION_FIXTURES = {
+    "co59": ("co59_jendl", {1: {451}, 3: {16, 17, 102, 111}, 8: {16, 17, 102, 111},
+                            9: {102}, 10: {16, 111}}),
+    "am241": ("am241_b81", {1: {451}, 3: {102}, 8: {102}, 9: {102}}),
+}
+
+
 #: Fe-56 identity, shared by both fixtures.
 ZA, AWR, MAT, MT = 26056.0, 55.36735, 2631, 2
 
@@ -889,9 +910,28 @@ def test_regenerate_photon_micro_tapes(n14_b81_tape, fe56_b81_tape, u235_b81_tap
     assert all(photon_fixture_path(k).stat().st_size > 0 for k in PHOTON_FIXTURES)
 
 
+@pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
+def test_regenerate_activation_micro_tapes(co59_jendl_tape, am241_b81_tape, request):
+    """Rebuild just the activation fixtures (roadmap E6)."""
+    DATA.mkdir(parents=True, exist_ok=True)
+    for key, (tape, keep) in ACTIVATION_FIXTURES.items():
+        source = request.getfixturevalue(f"{tape}_tape")
+        build_cov_check(Path(source), activation_fixture_path(key), keep)
+    assert all(activation_fixture_path(k).stat().st_size > 0 for k in ACTIVATION_FIXTURES)
+
+
 # ---------------------------------------------------------------------------
 # What the committed fixtures must satisfy
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("key", sorted(ACTIVATION_FIXTURES))
+def test_activation_inventories_are_exactly_what_we_kept(key):
+    inventory = section_inventory(activation_fixture_path(key).read_text())
+    keep = ACTIVATION_FIXTURES[key][1]
+    assert set(inventory) == set(keep)
+    for mf, mts in keep.items():
+        assert set(inventory[mf]) == mts, f"MF{mf} MT set drifted"
+
 
 @pytest.mark.parametrize("key", sorted(PHOTON_FIXTURES))
 def test_photon_inventories_are_exactly_what_we_kept(key):

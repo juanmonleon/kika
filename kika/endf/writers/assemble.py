@@ -58,7 +58,7 @@ __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
 #: of *coverage* rather than of order: an MF absent here is one nothing can
 #: write, not one that sorts late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 31, 32, 33, 34, 35)
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 31, 32, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -501,6 +501,13 @@ def _photonSections(suite, mat, report):
     return encodePhotonSections(suite, mat, report)
 
 
+def _productionSections(suite, mat, report):
+    """MF8-10 from ``suite.productions``, and MF8 as kept where it still agrees (roadmap E6)."""
+    from ..model_adapter.productions import encodeProductionSections
+
+    return encodeProductionSections(suite, mat, report)
+
+
 def _mf7Sections(suite, mat, report):
     """MF7 for a thermal-scattering suite (roadmap E4); nothing for any other."""
     from ..model_adapter.thermal_scattering import encodeMF7Sections
@@ -621,7 +628,8 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
 
     sections: List[Tuple[int, int, object]] = []
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
-                  _mf6Sections, _mf7Sections, _photonSections, _covarianceSections):
+                  _mf6Sections, _mf7Sections, _productionSections, _photonSections,
+                  _covarianceSections):
         if build in (_mf1Sections, _mf3And4And5Sections, _mf6Sections):
             built, report = build(suite, mat, report, label)
         else:
