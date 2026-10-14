@@ -155,6 +155,11 @@ class ProbabilityTableStatistics:
     errorTarget: Optional[float] = None
     converged: Optional[np.ndarray] = None
     shieldingBasis: str = "ladder_cross_sections"
+    #: Absolute per-band cross-section standard errors in barns, (N, 4, M).
+    #: With transportXS, includes smooth partial scaling and reconstructed
+    #: total; otherwise uses the sampled ladder cross sections. Unlike
+    #: factorSigma this retains the uncertainty of the dilute normalization.
+    crossSectionSigma: Optional[np.ndarray] = None
 
     def worst(self) -> dict:
         """The largest errors over energies and bands, per row: the band share

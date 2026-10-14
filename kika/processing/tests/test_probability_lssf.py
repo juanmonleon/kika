@@ -37,3 +37,13 @@ def test_public_table_flag_follows_the_source_lssf(monkeypatch,relative):
     region=NS(tabulatedWidths=NS(selfShieldingOnly=relative))
     result=pt.probabilityTables(region,NS(atomic_weight_ratio=job[1]),[job[2]],[293.6],options=job[7])
     assert result[293.6].multiplySmooth is relative
+
+
+def test_absolute_band_uncertainty_retains_fluctuating_dilute_normalization():
+    # One band: all normalized factors are one, but absolute barns fluctuate.
+    counts=np.array([[1.],[1.]])
+    sums=np.array([[[3.],[1.],[0.],[2.]],[[7.],[3.],[0.],[4.]]])
+    total=sums[:,:,0]
+    statistics=pt._ladderStatistics(counts,sums,total,(10.,),None,False)
+    np.testing.assert_array_equal(statistics['factorSigma'],np.zeros((4,1)))
+    np.testing.assert_array_equal(statistics['crossSectionSigma'],np.array([[2.],[1.],[0.],[1.]]))

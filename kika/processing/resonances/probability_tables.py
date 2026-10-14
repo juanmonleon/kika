@@ -260,7 +260,7 @@ def _estimates(C, S, T, sigma0, transportXS=None, multiplySmooth=True):
         shielding[..., k] = (w[..., None, :] * means).sum(-1) / w.sum(-1)[..., None]
     shielding = np.where(dilute[..., None] != 0,
                          shielding / np.where(dilute != 0, dilute, 1.0)[..., None], 1.0)
-    return dict(probability=p, factor=factor, contribution=contribution, shielding=shielding)
+    return dict(probability=p, factor=factor, contribution=contribution, shielding=shielding, crossSection=means.copy())
 
 
 def _ladderStatistics(lc, ls, lt, sigma0, transportXS=None, multiplySmooth=True):
@@ -464,7 +464,7 @@ def probabilityTables(region, context, energies, temperatures, *,
             ladders=np.array([s["ladders"] for s in st]), sigma0=np.asarray(options.sigma0, dtype=float),
             probabilitySigma=stack("probabilitySigma"), factorSigma=stack("factorSigma"),
             contributionSigma=stack("contributionSigma"), shielding=stack("shielding"),
-            shieldingSigma=stack("shieldingSigma"), errorTarget=options.errorTarget,
+            shieldingSigma=stack("shieldingSigma"), crossSectionSigma=stack("crossSectionSigma"), errorTarget=options.errorTarget,
             converged=None if options.errorTarget is None else np.array([s["converged"] for s in st]),
             shieldingBasis="openmc_transport" if transportXS is not None else "ladder_cross_sections")
         out[t] = ProbabilityTables(energies=energies, table=tables[it], interpolation=2,
