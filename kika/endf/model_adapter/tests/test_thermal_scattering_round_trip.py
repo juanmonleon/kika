@@ -264,3 +264,17 @@ def test_mixed_elastic_retains_evaluated_coherent_edges_and_zero_increments(monk
     assert isinstance(xs,m.SumOfFunctions) and isinstance(distribution,m.MixedElasticMC)
     assert np.array_equal(xs.functions[0].braggEdges,edges)
     assert np.array_equal(xs.functions[0].structureFactors,factors)
+
+
+def test_lln1_distinguishes_invalid_log_ordinate_domain_from_valid_unsupported_law():
+    invalid = _logarithmic_tape()
+    section = invalid.mf[7].mt[4]
+    for block in section.blocks:
+        block.table.interp = [(len(block.table.x), 4)]
+    _, report = decodeReactionSuite(invalid)
+    assert any("source interpolation domain is invalid" in message for message in report.unsupported)
+    for block in section.blocks:
+        block.table.values = np.ones_like(block.table.values).tolist()
+    _, report = decodeReactionSuite(invalid)
+    assert any("exactly as a GNDS" in message for message in report.unsupported)
+    assert not any("domain is invalid" in message for message in report.unsupported)

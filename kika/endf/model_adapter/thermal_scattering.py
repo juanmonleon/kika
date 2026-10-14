@@ -347,6 +347,17 @@ def _decodeMT4(mt4, composition, principalName: Optional[str],
     if lln == 1:
         # ENDF-102 7.4.1: laws apply to the stored ln(S), so lin-lin
         # becomes log-lin on S and lin-log becomes log-log on S.
+        # LLN stores ln(S), which is the ordinate to which INT applies.
+        # A logarithm of that ordinate requires strictly positive ln(S).
+        # Identify this source-domain error before the representation guard.
+        lower = 0
+        for stop, code in alphaInterp:
+            if code in (4, 5) and np.any(values[..., lower:stop] <= 0):
+                report.unsupportedNode("MF7/MT4 LLN=1: alpha interpolation "
+                    "requires a logarithm of nonpositive stored ln(S); "
+                    "the source interpolation domain is invalid")
+                return None, None
+            lower = stop - 1
         mapping = {0: 0, 1: 1, 2: 4, 3: 5}
         codes = [c for _, c in alphaInterp+betaInterp]+li
         if any(c not in mapping for c in codes):
