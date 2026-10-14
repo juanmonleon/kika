@@ -248,8 +248,8 @@ of a matrix whose rows do not sum exactly to zero.
   {eq}`eq-fission-spectrum-perturbation-moment`, is computed on the first evaluated node of
   each band and recorded with the run, beside the spread of the drawn deltas (before the
   projection). Where kika holds an independent value (only U-235 at 0.0253 eV, the IAEA
-  standards value, which Carlson et al. 2018 give as $\langle E' \rangle = 2.00 \pm 0.01$ MeV
-  on p. 27 and kika holds as $2.000 \pm 0.009$ MeV), the ratio of
+  standards value $\langle E' \rangle = 2.00 \pm 0.01$ MeV, Carlson et al. 2018, p. 27), the
+  ratio of
   the two uncertainties goes into the run's notes.
 
 ## Limits and failure modes
