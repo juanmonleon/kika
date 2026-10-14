@@ -80,12 +80,19 @@ static int outgoing(int l,double eta,double rho,int limit,cx *out){
         cx an=n==1?cx_mul(cx_mul(cx_make(0.,1./rho),a),b)
                   :cx_mul(cx_make(a.re+n-1,a.im),cx_make(b.re+n-1,b.im));
         cx bn=cx_make(2*(rho-eta),2.*n);
-        d=cx_add(bn,cx_mul(an,d));c=cx_add(bn,cx_div(an,c));
-        if(cx_abs(d)<TINY)d=cx_make(TINY,0.);
-        if(cx_abs(c)<TINY)c=cx_make(TINY,0.);
-        d=cx_div(cx_make(1.,0.),d);
+        /* Moduli compared squared and quotients by the conjugate: the
+         * terms stay between TINY and ~1e3 here, and a non-finite result
+         * goes to the reference. */
+        double nc=c.re*c.re+c.im*c.im;
+        d=cx_add(bn,cx_mul(an,d));
+        c=cx_add(bn,cx_make((an.re*c.re+an.im*c.im)/nc,(an.im*c.re-an.re*c.im)/nc));
+        double nd=d.re*d.re+d.im*d.im;
+        if(nd<TINY*TINY){d=cx_make(TINY,0.);nd=TINY*TINY;}
+        if(c.re*c.re+c.im*c.im<TINY*TINY)c=cx_make(TINY,0.);
+        d=cx_make(d.re/nd,-d.im/nd);
         cx change=cx_mul(c,d);f=cx_mul(f,change);
-        stable=cx_abs(cx_make(change.re-1.,change.im))<2e-14?stable+1:0;
+        double dr=change.re-1.;
+        stable=dr*dr+change.im*change.im<4e-28?stable+1:0;
         if(stable>=3){
             if(!isfinite(f.re)||!isfinite(f.im))return 0;
             *out=f;return 1;

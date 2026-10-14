@@ -312,7 +312,7 @@ def _check_underflow_bound(log_value,log_error):
         raise FloatingPointError('underflow correction exceeds the amplitude accuracy bound')
 
 
-def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnostics, work_bytes):
+def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnostics, work_bytes, *, charged=None):
     """All-level native sums with the general RML channel solve and direct capture.
 
     Real L-B and external diagonal terms remain in the solve. Exceptional
@@ -323,7 +323,11 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     a=np.require(reduced,dtype=float,requirements=['C','A']);f=np.ones_like(p)
     if not eligible(e,er,gamma,a,f,work_bytes,True,1e-8):return None
     if np.any(~np.isfinite(logarithmic)) or np.any(abs(logarithmic)>1e20):return None
-    if (np.any((p!=0)&(p<1e-80)) or np.any(p>1e20)
+    # An open charged exit deep in its barrier has a small P, which enters
+    # only through sqrt(P) and L; an underflowed one never reaches here.
+    tiny_p=(p!=0)&(p<1e-80)
+    if charged is not None:tiny_p&=~np.asarray(charged)[None,:]
+    if (np.any(tiny_p) or np.any(p>1e20)
             or np.any(abs(external)>1e20)):return None
     target_diagnostics=diagnostics
     if diagnostics is not None:diagnostics=dict(diagnostics)
@@ -408,6 +412,125 @@ class _ChannelFunctions:
         return self.cache[key]
 
 
+def _evaluate_group_rows(result,rows,group,e,p,log,phase,log_p,limited,attenuation,phase_loss,
+                         external,beta,reduced,charged,diagnostics,work_bytes,absorption_rtol):
+    """One spin group on the energies ``rows`` of the batch: the collision
+    matrix, flux balance and partial cross sections, added into *result*."""
+    # With L-B=iP and no external term, congruence by sqrt(P) gives
+    # exactly the RM channel system. Keep the general level-space path
+    # for independent verification, real shifts and underflow bounds.
+    diagonal = (absorption_rtol == 1e-8 and not group.level_metric
+                and not np.any(log.real) and not np.any(external)
+                and not np.any(limited) and not np.any(charged)
+                and np.all((p==0)|((p>=1e-80)&(p<=1e20)))
+                and np.all(abs(e)<=1e20)
+                and np.all((reduced==0)|((abs(reduced)>=1e-40)&(abs(reduced)<=1e20)))
+                and all(v==0 or 1e-100<=v<=1e20 for v in group.radiation))
+    for entrance in group.entrances:
+        bounds = {}
+        streamed=None
+        if (absorption_rtol==1e-8 and not diagonal and not group.level_metric and not np.any(limited)
+                and (not np.any(charged) or not np.any(np.isfinite(log_p)&(log.imag==0)))):
+            streamed=_streamed_rml(e,group,reduced,log,external,p,entrance,diagnostics,work_bytes,charged=charged)
+            if streamed is None and not np.any(np.isfinite(log_p)&(log.imag==0)):
+                from ._rm_acceleration import reference_block_size
+                if len(e)>reference_block_size(len(group.levels),len(group.channels),work_bytes):
+                    streamed=_reference_rml_observables(e,group,reduced,log,external,p,entrance,diagnostics,work_bytes)
+        if diagonal:
+            from .reich_moore import solve_collision
+            scaled, direct_absorption = solve_collision(e, [lv.energy for lv in group.levels],
+                group.radiation, None, diagnostics, entrance=entrance, reduced=reduced,
+                channel_factors=np.sqrt(p), work_bytes=work_bytes,
+                return_absorption=True, absorption_rtol=absorption_rtol)
+            underflow = np.zeros(len(e), dtype=bool)
+            core = 2j*scaled
+        elif streamed is not None:
+            w,direct_absorption=streamed
+            underflow=np.zeros(len(e),dtype=bool)
+            core=2j*np.sqrt(p)*np.sqrt(p[:,entrance,None])*w
+        else:
+            w, x, y = solve_rml(e, [lv.energy for lv in group.levels], group.radiation,
+                reduced, log,
+                external, entrance=entrance, diagnostics=diagnostics,
+                log_penetrability=log_p,error_bounds=bounds,
+                level_metric=group.level_metric if group.level_metric else None,
+                level_energy=group.level_energy if group.level_metric else None,
+                level_origin=group.level_origin,work_bytes=work_bytes)
+            underflow = np.any(bounds['missing'],axis=1)
+            core = 2j*np.sqrt(p)*np.sqrt(p[:, entrance, None])*w
+        if np.any(underflow):
+            with np.errstate(divide='ignore'):
+                log_core = np.log(2.)+.5*(log_p+log_p[:,entrance,None])+np.log(abs(w))
+                log_core_error = np.log(2.)+.5*(log_p+log_p[:,entrance,None])+bounds['w']
+            # Preserve products rescued by a large amplitude or beta.
+            mask = bounds['missing'] & (abs(w)>0)
+            core[mask] = 1j*np.exp(log_core[mask])*(w[mask]/abs(w[mask]))
+        resonant = core*np.exp(-1j*(phase+phase[:, entrance, None]))
+        core_collision = core.copy(); core_collision[:,entrance] += 1.
+        collision = resonant.copy()
+        collision[:, entrance] += np.exp(-2j*phase[:, entrance])
+        for out, channel in enumerate(group.channels):
+            amplitude = resonant[:, out]
+            if out == entrance:
+                amplitude = -np.expm1(-2j*phase[:, entrance])-resonant[:, entrance]
+            sigma = beta*abs(amplitude)**2
+            if np.any(underflow):
+                with np.errstate(divide='ignore'):
+                    log_amplitude = np.log(abs(amplitude))
+                if out != entrance:
+                    log_amplitude[underflow] = (log_core[:,out]+phase[:,out].imag+phase[:,entrance].imag)[underflow]
+                    sigma[underflow] = np.exp((np.log(beta)+2*log_amplitude)[underflow])
+                _check_underflow_bound((log_amplitude+.5*np.log(beta))[underflow],
+                    (log_core_error[:,out]+phase[:,out].imag+phase[:,entrance].imag+.5*np.log(beta))[underflow])
+                with np.errstate(divide='ignore'):
+                    _check_underflow_bound((np.log(abs(core_collision[:,out]))+.5*np.log(beta))[underflow],
+                        (log_core_error[:,out]+.5*np.log(beta))[underflow])
+            result[channel.mt][rows] += sigma
+        absorption = direct_absorption if diagonal or streamed is not None else (2*p[:, entrance]*np.sum(np.asarray(group.radiation)[None, :]*abs(x)**2, axis=1)
+                      +4*p[:, entrance]*np.sum(external.imag*abs(y)**2, axis=1))
+        if np.any(underflow):
+            with np.errstate(divide='ignore'):
+                level_weights=np.log(2.)+log_p[:,entrance,None]+np.log(np.asarray(group.radiation))[None,:]
+                external_weights=np.log(4.)+log_p[:,entrance,None]+np.log(external.imag)
+                log_x=np.log(abs(x));log_y=np.log(abs(y))
+                active=np.asarray(group.radiation)>0
+                _check_underflow_bound((log_x+.5*(level_weights+np.log(beta)[:,None]))[underflow][:,active],
+                    (bounds['x']+.5*(level_weights+np.log(beta)[:,None]))[underflow][:,active])
+                active_external=(external.imag>0)&underflow[:,None]
+                _check_underflow_bound((log_y+.5*(external_weights+np.log(beta)[:,None]))[active_external],
+                    (bounds['y']+.5*(external_weights+np.log(beta)[:,None]))[active_external])
+                log_absorption=np.logaddexp(logsumexp(level_weights+2*log_x,axis=1),
+                    logsumexp(external_weights+2*log_y,axis=1))
+            absorption[underflow]=np.exp(log_absorption[underflow])
+        error_core = float(np.max(abs(1-np.sum(abs(core_collision)**2, axis=1)-absorption)))
+        absorption *= attenuation[:,entrance]
+        capture_sigma=beta*absorption
+        if np.any(underflow):capture_sigma[underflow]=np.exp((np.log(beta)+log_absorption+2*phase[:,entrance].imag)[underflow])
+        result[102][rows] += capture_sigma
+        # Direct positive decomposition of flux lost on entering and
+        # leaving the phase layer. Never assign a residual to capture.
+        for out,channel in enumerate(group.channels):
+            loss = attenuation[:,entrance]*phase_loss[:,out]*abs(core_collision[:,out])**2
+            if out == entrance:loss += phase_loss[:,entrance]
+            if channel.phase_absorption_mt is not None:
+                loss_sigma=beta*loss
+                if np.any(underflow):
+                    with np.errstate(divide='ignore'):
+                        log_loss=2*phase[:,entrance].imag+np.log(phase_loss[:,out])+2*np.log(abs(core_collision[:,out]))
+                        if out==entrance:log_loss=np.logaddexp(log_loss,np.log(phase_loss[:,entrance]))
+                    loss_sigma[underflow]=np.exp((np.log(beta)+log_loss)[underflow])
+                result[channel.phase_absorption_mt][rows] += loss_sigma
+            elif np.any(loss != 0):
+                raise ValueError('absorptive phase requires declared reaction ownership')
+            absorption += loss
+        error = float(np.max(abs(1-np.sum(abs(collision)**2, axis=1)-absorption)))
+        error = max(error,error_core)
+        if error > 1e-9:
+            raise FloatingPointError('RML collision matrix fails flux balance')
+        if diagnostics is not None:
+            diagnostics['rml_max_absolute_flux_error'] = max(diagnostics.get('rml_max_absolute_flux_error', 0.), error)
+
+
 def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1024**2, absorption_rtol=0.):
     e = np.asarray(energies)
     mts = {1, 2, 18, 102} | {mt for g in groups for mt in g.reaction_mts}
@@ -438,118 +561,18 @@ def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1
                              for ch in group.channels], axis=1)
         if np.any(external.imag < 0):
             raise ValueError('negative external absorption is outside the passive KRM3 profile')
-        # With L-B=iP and no external term, congruence by sqrt(P) gives
-        # exactly the RM channel system. Keep the general level-space path
-        # for independent verification, real shifts and underflow bounds.
-        diagonal = (absorption_rtol == 1e-8 and not group.level_metric
-                    and not np.any(log.real) and not np.any(external)
-                    and not np.any(limited) and not np.any(charged)
-                    and np.all((p==0)|((p>=1e-80)&(p<=1e20)))
-                    and np.all(abs(e)<=1e20)
-                    and np.all((reduced==0)|((abs(reduced)>=1e-40)&(abs(reduced)<=1e20)))
-                    and all(v==0 or 1e-100<=v<=1e20 for v in group.radiation))
-        for entrance in group.entrances:
-            bounds = {}
-            streamed=None
-            if absorption_rtol==1e-8 and not diagonal and not group.level_metric and not np.any(charged) and not np.any(limited):
-                streamed=_streamed_rml(e,group,reduced,log,external,p,entrance,diagnostics,work_bytes)
-                if streamed is None and not np.any(np.isfinite(log_p)&(log.imag==0)):
-                    from ._rm_acceleration import reference_block_size
-                    if len(e)>reference_block_size(len(group.levels),len(group.channels),work_bytes):
-                        streamed=_reference_rml_observables(e,group,reduced,log,external,p,entrance,diagnostics,work_bytes)
-            if diagonal:
-                from .reich_moore import solve_collision
-                scaled, direct_absorption = solve_collision(e, [lv.energy for lv in group.levels],
-                    group.radiation, None, diagnostics, entrance=entrance, reduced=reduced,
-                    channel_factors=np.sqrt(p), work_bytes=work_bytes,
-                    return_absorption=True, absorption_rtol=absorption_rtol)
-                underflow = np.zeros(len(e), dtype=bool)
-                core = 2j*scaled
-            elif streamed is not None:
-                w,direct_absorption=streamed
-                underflow=np.zeros(len(e),dtype=bool)
-                core=2j*np.sqrt(p)*np.sqrt(p[:,entrance,None])*w
-            else:
-                w, x, y = solve_rml(e, [lv.energy for lv in group.levels], group.radiation,
-                    reduced, log,
-                    external, entrance=entrance, diagnostics=diagnostics,
-                    log_penetrability=log_p,error_bounds=bounds,
-                    level_metric=group.level_metric if group.level_metric else None,
-                    level_energy=group.level_energy if group.level_metric else None,
-                    level_origin=group.level_origin,work_bytes=work_bytes)
-                underflow = np.any(bounds['missing'],axis=1)
-                core = 2j*np.sqrt(p)*np.sqrt(p[:, entrance, None])*w
-            if np.any(underflow):
-                with np.errstate(divide='ignore'):
-                    log_core = np.log(2.)+.5*(log_p+log_p[:,entrance,None])+np.log(abs(w))
-                    log_core_error = np.log(2.)+.5*(log_p+log_p[:,entrance,None])+bounds['w']
-                # Preserve products rescued by a large amplitude or beta.
-                mask = bounds['missing'] & (abs(w)>0)
-                core[mask] = 1j*np.exp(log_core[mask])*(w[mask]/abs(w[mask]))
-            resonant = core*np.exp(-1j*(phase+phase[:, entrance, None]))
-            core_collision = core.copy(); core_collision[:,entrance] += 1.
-            collision = resonant.copy()
-            collision[:, entrance] += np.exp(-2j*phase[:, entrance])
-            for out, channel in enumerate(group.channels):
-                amplitude = resonant[:, out]
-                if out == entrance:
-                    amplitude = -np.expm1(-2j*phase[:, entrance])-resonant[:, entrance]
-                sigma = beta*abs(amplitude)**2
-                if np.any(underflow):
-                    with np.errstate(divide='ignore'):
-                        log_amplitude = np.log(abs(amplitude))
-                    if out != entrance:
-                        log_amplitude[underflow] = (log_core[:,out]+phase[:,out].imag+phase[:,entrance].imag)[underflow]
-                        sigma[underflow] = np.exp((np.log(beta)+2*log_amplitude)[underflow])
-                    _check_underflow_bound((log_amplitude+.5*np.log(beta))[underflow],
-                        (log_core_error[:,out]+phase[:,out].imag+phase[:,entrance].imag+.5*np.log(beta))[underflow])
-                    with np.errstate(divide='ignore'):
-                        _check_underflow_bound((np.log(abs(core_collision[:,out]))+.5*np.log(beta))[underflow],
-                            (log_core_error[:,out]+.5*np.log(beta))[underflow])
-                result[channel.mt] += sigma
-            absorption = direct_absorption if diagonal or streamed is not None else (2*p[:, entrance]*np.sum(np.asarray(group.radiation)[None, :]*abs(x)**2, axis=1)
-                          +4*p[:, entrance]*np.sum(external.imag*abs(y)**2, axis=1))
-            if np.any(underflow):
-                with np.errstate(divide='ignore'):
-                    level_weights=np.log(2.)+log_p[:,entrance,None]+np.log(np.asarray(group.radiation))[None,:]
-                    external_weights=np.log(4.)+log_p[:,entrance,None]+np.log(external.imag)
-                    log_x=np.log(abs(x));log_y=np.log(abs(y))
-                    active=np.asarray(group.radiation)>0
-                    _check_underflow_bound((log_x+.5*(level_weights+np.log(beta)[:,None]))[underflow][:,active],
-                        (bounds['x']+.5*(level_weights+np.log(beta)[:,None]))[underflow][:,active])
-                    active_external=(external.imag>0)&underflow[:,None]
-                    _check_underflow_bound((log_y+.5*(external_weights+np.log(beta)[:,None]))[active_external],
-                        (bounds['y']+.5*(external_weights+np.log(beta)[:,None]))[active_external])
-                    log_absorption=np.logaddexp(logsumexp(level_weights+2*log_x,axis=1),
-                        logsumexp(external_weights+2*log_y,axis=1))
-                absorption[underflow]=np.exp(log_absorption[underflow])
-            error_core = float(np.max(abs(1-np.sum(abs(core_collision)**2, axis=1)-absorption)))
-            absorption *= attenuation[:,entrance]
-            capture_sigma=beta*absorption
-            if np.any(underflow):capture_sigma[underflow]=np.exp((np.log(beta)+log_absorption+2*phase[:,entrance].imag)[underflow])
-            result[102] += capture_sigma
-            # Direct positive decomposition of flux lost on entering and
-            # leaving the phase layer. Never assign a residual to capture.
-            for out,channel in enumerate(group.channels):
-                loss = attenuation[:,entrance]*phase_loss[:,out]*abs(core_collision[:,out])**2
-                if out == entrance:loss += phase_loss[:,entrance]
-                if channel.phase_absorption_mt is not None:
-                    loss_sigma=beta*loss
-                    if np.any(underflow):
-                        with np.errstate(divide='ignore'):
-                            log_loss=2*phase[:,entrance].imag+np.log(phase_loss[:,out])+2*np.log(abs(core_collision[:,out]))
-                            if out==entrance:log_loss=np.logaddexp(log_loss,np.log(phase_loss[:,entrance]))
-                        loss_sigma[underflow]=np.exp((np.log(beta)+log_loss)[underflow])
-                    result[channel.phase_absorption_mt] += loss_sigma
-                elif np.any(loss != 0):
-                    raise ValueError('absorptive phase requires declared reaction ownership')
-                absorption += loss
-            error = float(np.max(abs(1-np.sum(abs(collision)**2, axis=1)-absorption)))
-            error = max(error,error_core)
-            if error > 1e-9:
-                raise FloatingPointError('RML collision matrix fails flux balance')
-            if diagnostics is not None:
-                diagnostics['rml_max_absolute_flux_error'] = max(diagnostics.get('rml_max_absolute_flux_error', 0.), error)
+        subsets=[slice(None)]
+        if absorption_rtol==1e-8 and np.any(charged) and not group.level_metric:
+            # Rows where no open charged P has underflowed take the streamed
+            # native solve; the rows that need its underflow bounds keep the
+            # general one.
+            missing_rows=np.any(np.isfinite(log_p)&(log.imag==0),axis=1)
+            if np.any(~missing_rows) and np.any(missing_rows):
+                subsets=[np.flatnonzero(~missing_rows),np.flatnonzero(missing_rows)]
+        for rows in subsets:
+            _evaluate_group_rows(result,rows,group,e[rows],p[rows],log[rows],phase[rows],log_p[rows],
+                limited[rows],attenuation[rows],phase_loss[rows],external[rows],beta[rows],reduced,
+                charged,diagnostics,work_bytes,absorption_rtol)
     result[1] = sum(v for mt, v in result.items() if mt != 1)
     if any(np.any(~np.isfinite(v)) for v in result.values()):
         raise FloatingPointError('nonfinite RML cross sections')
