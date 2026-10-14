@@ -118,10 +118,25 @@ def _provenance(node, key, default=None):
     return default
 
 
+def isRadionuclideProduction(reaction) -> bool:
+    """A ``production`` of a radioactive nuclide (ENDF MF8-10, roadmap E6).
+
+    Told apart from the responses this format keeps in ``suite.productions``
+    (gas production MT203-207) by its channel's ``genre``, which the ENDF and
+    GNDS decoders both set to ``production``. It shares its MT with the reaction
+    that makes it -- MT102's isomer is MT102 -- and OpenMC names a group by MT
+    alone, so it has no place in this file: neither the NJOY/ACE route nor
+    ``openmc.data`` writes one.
+    """
+    return getattr(getattr(reaction, "outputChannel", None), "genre", None) == "production"
+
+
 def _allReactions(suite):
     for container in (suite.reactions, suite.fissionComponents, suite.sums,
                       suite.productions, suite.incompleteReactions):
         for reaction in container:
+            if container is suite.productions and isRadionuclideProduction(reaction):
+                continue
             yield container, reaction
 
 
@@ -206,6 +221,12 @@ def encodeNeutron(suite, temperatures=None, *, awr: Optional[float] = None,
              and RECON_LABEL in elastic.crossSection.forms)
     if zeroK:
         g.require("energy")["0K"] = R.Dataset.of(elastic.crossSection.forms[RECON_LABEL].xs)
+
+    skipped = sum(1 for p in suite.productions if isRadionuclideProduction(p))
+    if skipped:
+        report.lost(f"{skipped} radionuclide production(s) (MF8-10) have no group in "
+                    f"OpenMC's format, which names reactions by MT alone; not written",
+                    unaffectedScopes=("cross-sections",))
 
     reactions = g.require("reactions")
     written = {}

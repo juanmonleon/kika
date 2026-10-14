@@ -51,9 +51,9 @@ Start with ``summary()``, which says what the file actually contained:
 Check what was dropped
 ----------------------
 
-That last line matters. kika does not model every ENDF section — MF1 to 7,
-MF12-15 and the covariance files 31-35 are decoded into the model; MF8 on a
-neutron tape, MF23, 27, 28 and 40 are not — so a decode can be **partial**, and
+That last line matters. kika does not model every ENDF section — MF1 to 10
+(MF8-10 as the radionuclide ``productions``), MF12-15 and the covariance files
+31-35 are decoded into the model; MF23, 27, 28, 39 and 40 are not — so a decode can be **partial**, and
 ``ev.report`` is the only thing that says so (the full list, section by section,
 is in the methods page on reading and writing ENDF):
 

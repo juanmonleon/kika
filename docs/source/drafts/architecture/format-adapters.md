@@ -60,8 +60,8 @@ what was tried; a binary file is refused instead of being handed to a text decod
 For ENDF and ACE, reading has two steps: a parser that turns the file into objects
 shaped like the format (sections, records), and a decoder that turns those into the
 model. The format-shaped objects (`kika.read_endf`, `kika.read_ace`) are public and not
-deprecated. The model does not cover every part of every file (ENDF MF 8 to 10, for
-instance), evaluators legitimately work in the format's own terms, and decoding into the
+deprecated. The model does not cover every part of every file (ENDF MF 23 to 28 and
+MF 39 to 40, for instance), evaluators legitimately work in the format's own terms, and decoding into the
 model costs about 2.5 times a bare parse, which a high-throughput pipeline does not pay.
 GNDS has no such layer: its tree already has the model's shape, so the XML goes straight
 into the model.

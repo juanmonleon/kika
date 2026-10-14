@@ -99,7 +99,12 @@ def formLabel(suite, temperature: Optional[float]) -> str:
 
 
 def _nodes(suite):
-    return [n for n in list(suite.reactions) + list(suite.sums) + list(suite.productions)
+    # A radionuclide production (MF8-10) shares its reaction's MT, and this
+    # table is keyed by MT; it is not one of this module's responses.
+    from .neutron_encode import isRadionuclideProduction
+
+    productions = [n for n in suite.productions if not isRadionuclideProduction(n)]
+    return [n for n in list(suite.reactions) + list(suite.sums) + productions
             if n.ENDF_MT is not None]
 
 
@@ -252,7 +257,7 @@ def isotopeSummary(suite, temperature: Optional[float] = None) -> Dict[str, Any]
     reference = referenceTemperature(suite) if temperature is None else float(temperature)
     angular = set(angularMTs(suite))
     sums = {int(n.ENDF_MT) for n in suite.sums if n.ENDF_MT is not None}
-    responses = {int(n.ENDF_MT) for n in suite.productions if n.ENDF_MT is not None}
+    responses = {int(n.ENDF_MT) for n in _nodes(suite) if any(n is p for p in suite.productions)}
     nodes = {int(n.ENDF_MT): n for n in _nodes(suite)}
     pointwise = crossSections(suite, reference) if reference is not None else {}
 
