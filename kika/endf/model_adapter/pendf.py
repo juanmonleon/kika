@@ -36,7 +36,7 @@ from kika.nuclear_data.model import (
 )
 from kika.nuclear_data.model.enums import Interpolation
 
-__all__ = ["attachReconstruction", "readReconstructed", "pendfHeader",
+__all__ = ["attachReconstruction", "readReconstructed", "pendfHeader", "pendfResonances",
            "trimDescription", "RECONSTRUCTED_LABEL"]
 
 RECONSTRUCTED_LABEL = "recon"
@@ -125,6 +125,83 @@ def trimDescription(path, keep: int = PENDF_DESCRIPTION_LINES) -> int:
     if not update_mf1_directory(str(path)):
         raise ValueError(f"{path}: the MF1 directory could not be rebuilt")
     return keep
+
+
+def _radiusFm(radius) -> Optional[float]:
+    """A constant radius in fm from any of the model's radius slots, else ``None``."""
+    from kika.nuclear_data.model.resonances import ScatteringRadius
+
+    if radius is None:
+        return None
+    if isinstance(radius, ScatteringRadius):
+        return None if radius.isEnergyDependent else radius.constant
+    return float(radius)
+
+
+def pendfResonances(suite):
+    """The MF2 a PENDF carries, as NJOY RECONR writes it: the scattering radius alone.
+
+    RECONR never copies MF2 into its PENDF; it writes a default MF2/151
+    (``reconr.f90``, ``recout``): one isotope of abundance 1, one LRU=0 range
+    from the lowest energy of the evaluation to the top of the resolved range,
+    with the target spin and the scattering radius. The resonances are already
+    in MF3, which MF1/451 says with LRP=2, so nothing downstream reads them
+    from the PENDF (BROADR does not; PURR and UNRESR read the evaluation).
+    A suite read from GNDS has no ENDF record of its resonance ranges (QX, LRX,
+    LAD, the particle pairs), so this is the MF2 a PENDF written from it gets,
+    and it is the one NJOY would have written anyway.
+
+    The fields, as RECONR picks them:
+
+    * **EL**: the evaluation's lowest projectile energy.
+    * **EH**: the top of the resolved range; with only an unresolved range, its
+      bottom (RECONR clips ``eresr`` up to ``eresl``); with neither, the top of
+      the radius' own domain, else of the evaluation.
+    * **AP**: the radius of the *last* range that states a constant one (RECONR
+      keeps the SPI/AP of the last range it reads; an R-Matrix Limited range
+      states none), else the file-level radius, else 0, as RECONR leaves it.
+    * **SPI**: the target's spin, from PoPs (the deriver refuses a missing one).
+
+    Returns a new :class:`~kika.nuclear_data.model.Resonances` with only a
+    constant ``scatteringRadius`` over ``[EL, EH]``, which the GNDS → ENDF
+    derivation writes as that LRU=0 range.
+    """
+    from kika.nuclear_data.model.resonances import Resonances, ScatteringRadius
+    from .mf1_header import _evaluatedStyle
+
+    resonances = getattr(suite, "resonances", None)
+    domain = getattr(_evaluatedStyle(suite), "projectileEnergyDomain", None)
+    if domain is None:
+        raise ValueError("the evaluation states no projectile energy domain, so the "
+                         "PENDF's MF2 range has no bounds")
+    low, high = float(domain.min), float(domain.max)
+    top, radius = high, None
+    if resonances is not None:
+        resolved = list(resonances.resolved or [])
+        unresolved = resonances.unresolved
+        if resolved:
+            top = max(float(region.domainMax) for region in resolved)
+        elif unresolved is not None:
+            top = float(unresolved.domainMin)
+        elif resonances.scatteringRadius is not None \
+                and resonances.scatteringRadius.domainMax is not None:
+            top = float(resonances.scatteringRadius.domainMax)
+        for region in sorted(resolved, key=lambda region: float(region.domainMin)):
+            formalism = region.formalism
+            stated = _radiusFm(getattr(formalism, "scatteringRadius", None))
+            if stated is None:
+                stated = _radiusFm(region.scatteringRadius)
+            if stated is not None:
+                radius = stated
+        if unresolved is not None:
+            stated = _radiusFm(getattr(unresolved.tabulatedWidths, "scatteringRadius", None))
+            if stated is not None:
+                radius = stated
+        if radius is None:
+            radius = _radiusFm(resonances.scatteringRadius)
+    return Resonances(scatteringRadius=ScatteringRadius(
+        constant=0.0 if radius is None else float(radius), unit="fm",
+        domainMin=low, domainMax=max(low, min(top, high))))
 
 
 def _linlin(form, mt: int) -> XYs1d:

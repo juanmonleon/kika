@@ -30,10 +30,10 @@ from __future__ import annotations
 import dataclasses
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Collection, Dict, Iterator, List, Optional, Tuple
 
 __all__ = ["DERIVED", "DerivationContext", "DERIVERS", "hasEndfProvenance", "needsDerivation",
-           "provenanceNodes", "deriveEndfProvenance"]
+           "provenanceNodes", "deriveEndfProvenance", "sectionSelected"]
 
 #: ``sourceFormat`` of a provenance this package wrote, so a reader of the
 #: model can tell bookkeeping the file stated from bookkeeping kika derived.
@@ -50,6 +50,9 @@ class DerivationContext:
     awr: Optional[float] = None
     #: FUDGE's ``ENDFconversionFlags``, ``href → flags``, when the file had them.
     conversionFlags: Dict[str, str] = field(default_factory=dict)
+    #: The sections the tape will hold (``deriveEndfProvenance``'s ``files``),
+    #: or ``None`` for all.
+    files: Optional[Collection] = None
 
 
 #: ``(name, applies, derive)``: ``applies(node)`` says whether the deriver is for
@@ -161,11 +164,21 @@ def provenanceNodes(suite) -> Iterator[Tuple[str, object]]:
     yield from walk(suite, "suite")
 
 
-def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
+def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None,
+                         files: Optional[Collection] = None):
     """Give every node of *suite* that lacks ENDF provenance a derived one. In place.
 
     Returns the report. Nodes that already carry provenance keep it. Callers that
     must not change their suite — the tape writer — pass a copy.
+
+    ``files``: the sections the tape will hold, as MF numbers (a whole file)
+    and ``(MF, MT)`` pairs (one section), or ``None`` for all
+    (:func:`sectionSelected`). A node whose sections all lie outside them (a
+    product's MF4/5/6/12-15, the resonances' MF2, a nu-bar, MF1/458, a
+    covariance) is neither derived nor reported missing: a PENDF has no use
+    for an outgoing distribution, and saying it was lost would be false. The
+    suite and the reactions are derived whatever ``files`` says, so MF3's LR
+    still reads the breakup from the products.
     """
     from kika.nuclear_data.model import ConversionReport
 
@@ -179,7 +192,7 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
     report = report if report is not None else ConversionReport()
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
 
-    context = DerivationContext(suite=suite, mat=mat)
+    context = DerivationContext(suite=suite, mat=mat, files=files)
     flags = EndfConversionFlags.of(suite)
     if flags:
         for href, text in flags.conversions:
@@ -188,9 +201,19 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
         # Nodes added to a suite that did come from a tape take its numbers.
         context.mat = mat if mat is not None else suite.provenance.mat
         context.za, context.awr = suite.provenance.za, suite.provenance.awr
+    from ..multiplicity import nubarNode
+
+    nubarMts = {id(nubarNode(suite, mt)): mt for mt in (452, 455, 456)}
+    nubarMts.pop(id(None), None)
+
+    def outside(path, node):
+        kept = _nodeSections(path, node, nubarMts)
+        return files is not None and kept is not None \
+            and not any(sectionSelected(mf, mt, files) for mf, mt in kept)
+
     for name, applies, derive in _inRunOrder():
         for path, node in provenanceNodes(suite):
-            if hasEndfProvenance(node) or not applies(node):
+            if hasEndfProvenance(node) or not applies(node) or outside(path, node):
                 continue
             provenance = derive(node, path, context, report)
             if provenance is not None:
@@ -199,12 +222,10 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
     # What is still without ENDF bookkeeping is not written, and a tape that is
     # missing it has to say so: the writer only emits a section a provenance
     # asks for, so without this the gap would be silent.
-    from ..multiplicity import nubarNode
-
-    nubars = {id(nubarNode(suite, mt)) for mt in (452, 455, 456)} - {id(None)}
+    nubars = set(nubarMts)
     underived = Counter()
     for path, node in provenanceNodes(suite):
-        if hasEndfProvenance(node) or not _carriesData(node, nubars):
+        if hasEndfProvenance(node) or not _carriesData(node, nubars) or outside(path, node):
             continue
         underived[type(node).__name__] += 1
     for kind, count in sorted(underived.items()):
@@ -214,6 +235,48 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None):
             f"in the written tape"
         )
     return report
+
+
+def sectionSelected(mf: int, mt: Optional[int], selection) -> bool:
+    """Whether section ``(mf, mt)`` is in *selection*: MF numbers (a whole file)
+    and ``(MF, MT)`` pairs (one section). ``mt=None`` asks for any section of
+    the file."""
+    for entry in selection:
+        if isinstance(entry, tuple):
+            if int(entry[0]) == mf and (mt is None or int(entry[1]) == mt):
+                return True
+        elif int(entry) == mf:
+            return True
+    return False
+
+
+def _nodeSections(path: str, node, nubarMts) -> Optional[List[Tuple[int, Optional[int]]]]:
+    """The sections *node* is written to, as ``(MF, MT or None)``, or ``None``
+    for "derive it always" (the suite, a reaction: MF1/451 and MF3 are what
+    every tape holds, and MF3's LR reads the products)."""
+    from kika.nuclear_data.model import Product, Resonances
+    from kika.nuclear_data.model.output_channel import Multiplicity
+
+    if isinstance(node, Product):
+        return [(mf, None) for mf in (4, 5, 6, 12, 13, 14, 15)]
+    if isinstance(node, Resonances) or ".resonances" in path:
+        return [(2, None)]
+    if isinstance(node, Multiplicity):
+        mt = nubarMts.get(id(node))
+        return None if mt is None else [(1, mt)]
+    kind = type(node).__name__
+    if kind == "PoPs":
+        # A neutron suite's own PoPs writes no section; its decay data is a
+        # decay sub-library's MF8, which this writer never emits.
+        return [(8, None)]
+    if kind == "FissionEnergyRelease":
+        return [(1, 458)]
+    if kind == "DelayedNeutrons":
+        # Its provenance is MF5/MT455's; MF1/455 reads the rates off the model.
+        return [(5, 455)]
+    if kind == "CovarianceSection":
+        return [(mf, None) for mf in (31, 32, 33, 34, 35, 40)]
+    return None
 
 
 def _carriesData(node, nubars=frozenset()) -> bool:

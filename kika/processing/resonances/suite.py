@@ -389,6 +389,10 @@ class SuiteReconstructionResult:
         worst={}
         for key,original in self.forms.items():
             target=key if key in entries else next((projected[mt] for mt,k in self._mt_keys.items() if k==key and mt in projected),None)
+            if target is None and any(k==key and 851<=mt<=870 for mt,k in self._mt_keys.items()):
+                # A lumped covariance reaction (GNDS's lump0...) lives in MF33
+                # alone (ENDF-6 §33.2): an ENDF-6 tape has no MF3 for it to keep.
+                continue
             if target is None:raise ValueError(f'reloaded suite lost reaction {key}')
             covered.add(target)
             form=entries[target].crossSection.get(chosen)
@@ -429,7 +433,10 @@ class SuiteReconstructionResult:
             return dict(cached[1])
         total=sum(len(g)+4*max(0,len(g)-1) for g in grids);done=0
         fractions=np.array([.1732050807568877,.3819660112501051,.6180339887498949,.8267949192431123])
-        verification_batch=max(1,min(32768,self.options.max_work_bytes//(64*(len(checked)+1))))
+        # Sized by the reconstruction, not by what the tape kept: the physical
+        # witnesses are cached per batch, and a reload without the lumped
+        # reactions must cut the grid where the first verification did.
+        verification_batch=max(1,min(32768,self.options.max_work_bytes//(64*(len(self.forms)+1))))
         if workers is None:
             from .parallel import default_workers
             workers=default_workers()
@@ -466,6 +473,7 @@ class SuiteReconstructionResult:
                         worst[key]=(float(points[index]),float(reference[key][index]),float(values[index]))
                     maxima[key]=max(maxima[key],maximum)
                 for key in self._order:
+                    if key not in serialized:continue   # a lumped covariance reaction, above
                     components=sum((serialized[part] for part in self._graph[key]),np.zeros(len(points)))
                     if np.any(error_ratio(serialized[key],components,self.options)>1):
                         raise ReconstructionConvergenceError(f'serialized sum does not close within the total budget: {key}')
