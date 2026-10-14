@@ -450,20 +450,62 @@ The options of the format that change the result:
 - **Missing sectors.** As for Reich-Moore, every $(\ell, J, s)$ allowed by an $\ell$ of
   the elastic channels and absent from the file adds its hard-sphere term.
 
-The Coulomb functions are computed in double precision from the continued fractions of
-DLMF §33.8 (modified Lentz algorithm), from the Tricomi series (DLMF §13.2.9) or a
-Laplace integral at small $\rho$, and, below the turning point, by integrating the Riccati
-equations of $S$ and $\ln P$ in $\ln\rho$,
+The Coulomb functions of an open channel ($\eta > 0$) are computed in double precision
+from Steed's continued fraction for $\rho H_\ell^{+\prime}/H_\ell^+$ (DLMF §33.8,
+modified Lentz algorithm), whose real part is $S_\ell$ and imaginary part $P_\ell$, and
+from the continued fraction for $F_\ell'/F_\ell$, which gives the phase. The fraction
+carries $P_\ell$ only to an absolute accuracy, so how $P_\ell$ is obtained depends on
+where $\rho$ lies:
 
-$$
-\frac{dS}{d\ln\rho} = S - \rho^2 + 2\eta\rho + \ell(\ell+1) - S^2 + P^2,\qquad
-\frac{d\ln P}{d\ln\rho} = 1 - 2S ,
-$$ (eq-resonance-reconstruction-coulomb-transport)
+- **Outside or at the edge of the barrier** ($P_\ell \ge \lvert S_\ell\rvert/5$), $P_\ell$
+  and $S_\ell$ are taken from the fraction at $\rho$.
+- **Inside the barrier**, $S_\ell$ is still taken from the fraction, and $P_\ell$ from
+  the Wronskian $F_\ell' G_\ell - F_\ell G_\ell' = 1$. With $F_\ell$ from its power
+  series (DLMF §33.6, whose terms have one sign there), $f = F_\ell'/F_\ell$ and
+  $p = \operatorname{Re}(H_\ell^{+\prime}/H_\ell^+)$, $G_\ell$ is the dominant root of
 
-inward from $\max(\rho, \rho_\text{turn} + 8)$, with $\rho_\text{turn} = \eta +
-\sqrt{\eta^2 + \ell(\ell+1)}$. A penetrability below the smallest normal double is carried
-as $\ln P$, and the solve then bounds the error that its omission makes in every
-observable (relative $2\cdot10^{-12}$); an unbounded case raises.
+  $$
+  (p - f)\,G_\ell^2 + G_\ell/F_\ell + (p - f)\,F_\ell^2 = 0 ,
+  \qquad P_\ell = \frac{\rho}{F_\ell^2 + G_\ell^2},
+  $$ (eq-resonance-reconstruction-coulomb-wronskian)
+
+  a root without cancellation. This route is used when the series is well conditioned
+  (the sum of the magnitudes of its terms at most 8 times its value) and the
+  discriminant of the quadratic is at least $1/4$.
+- **Where it is not**, the fraction is evaluated at $\max(\rho, \rho_\text{turn} + 8)$,
+  with $\rho_\text{turn} = \eta + \sqrt{\eta^2 + \ell(\ell+1)}$, and the Riccati
+  equations of $S$ and $\ln P$ are integrated inward to $\rho$ in $\ln\rho$ (an
+  eighth-order Dormand-Prince scheme, relative tolerance $2\cdot10^{-12}$),
+
+  $$
+  \frac{dS}{d\ln\rho} = S - \rho^2 + 2\eta\rho + \ell(\ell+1) - S^2 + P^2,\qquad
+  \frac{d\ln P}{d\ln\rho} = 1 - 2S .
+  $$ (eq-resonance-reconstruction-coulomb-transport)
+
+- **Below $\rho = 0.25$**, with $\eta\rho \le 2$ the Tricomi series (DLMF §13.2.9) gives
+  the outgoing wave; with $\eta\rho > 2$ the fraction and the Wronskian are used while the
+  fraction converges within 3 000 iterations (its rounding in $S$ grows with their
+  number), and nearer the threshold Tricomi's Laplace integral for the outgoing wave,
+  rotated to the positive imaginary axis.
+
+For a closed charged channel, $S_c$ is the logarithmic derivative of the decaying
+Whittaker function. The same fraction, at $\rho = i\kappa$ and $\eta = -i\eta_c$, is real
+and gives it directly while it converges within 500 iterations; nearer the threshold, a
+Laplace integral of the Tricomi function $U$ does.
+
+Both Laplace integrals, open and closed, are evaluated in the compiled kernel by the
+trapezoidal rule in the logarithm of the integration variable, with the step halved until
+two levels agree (the integrands are analytic in a strip around the real axis, so the rule
+converges geometrically); a row whose sum cancels by more than a factor $10^3$, or that
+the kernel does not complete for any other reason, is computed by the Python reference,
+which uses adaptive quadrature.
+
+A penetrability below the smallest normal double is carried as $\ln P$, and the solve then
+bounds the error that its omission makes in every observable (relative
+$2\cdot10^{-12}$); an unbounded case raises. Channels of different spin groups that
+differ only in their MT, spin, label or external R-matrix (the same pair, $\ell$ and
+radii) share one evaluation of these functions per batch of energies, since the functions
+depend on none of those.
 
 **Limits and failure modes.** Refused: KRM=1, 2 (SLBW, MLBW written as LRF=7); a
 formalism whose approximation is neither `ReichMoore` (KRM=3) nor `FullRMatrix` (KRM=4),
@@ -628,6 +670,22 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
   $\lvert E_\lambda - E_\text{channel}\rvert$. On FUDGE's own LRF=7 test tapes this alone
   makes MT 600 differ by 0.55 % from NJOY, and 2.3·10⁻⁶ with the convention changed; it
   is a choice of convention, and neither result is shown to be wrong.
+- **Coulomb penetrabilities with their relative accuracy inside the barrier.** NJOY and
+  FUDGE compute the charged-channel functions at each energy with COULFG-type continued
+  fractions (Steed's method), which give $P_\ell$ only to an absolute accuracy: inside
+  the barrier, where $P_\ell$ is a tiny imaginary part next to $S_\ell$, its relative
+  error grows. kika takes $P_\ell$ from the Wronskian there
+  ({eq}`eq-resonance-reconstruction-coulomb-wronskian`), which keeps it to about
+  $10^{-15}$ in $\ln P$ against 40-digit references, and integrates the Riccati equations
+  only where that route is not conditioned. For the closed channel, the fraction and the
+  trapezoidal Laplace integral reach $10^{-12}$ to $10^{-16}$, where an adaptive
+  quadrature reached $10^{-10}$. What this buys in time: JEFF-4.0 O-16, whose α
+  exit (MT 800) is charged in all nine spin groups, reconstructs in 3.0-3.4 s on one
+  thread, against 5.3 s for NJOY 2016.78 RECONR and 1.6 s for FUDGE 6.14.0 at
+  `accuracy` $=10^{-3}$, with 7 783 points in MT 1 against 10 751 and 16 921
+  (measured 2026-10-13); a direct integration of the Riccati equations at every energy
+  took over 40 minutes. On this material FUDGE remains about twice as fast; the
+  remaining time is the common linearisation, not the R-matrix.
 - **Capture as a positive sum.** kika computes capture directly from the level
   amplitudes ({eq}`eq-resonance-reconstruction-rml-capture`) and uses the flux balance
   only as a check. FUDGE obtains capture from the flux deficit, which loses its relative
@@ -708,6 +766,20 @@ test.
   (`::test_model_cross_sections_against_level_space_including_closed_channels`);
   Coulomb $P$, $S$ against 60-digit references, $5\cdot10^{-10}$
   (`kika/processing/tests/test_r_matrix_advanced.py::test_coulomb_against_60_digit_reference`);
+  $\ln P$, $S$ and the phase inside the barrier, at small $
+ho$ and near the threshold,
+  against 40-digit references, relative $2\cdot10^{-14}$ in $\ln P$ and $10^{-12}$ in
+  $S$ and the phase
+  (`kika/processing/tests/test_coulomb_native.py::test_barrier_functions_against_40_digit_reference`);
+  the closed-channel shift against 40-digit references, $10^{-12}$
+  (`::test_closed_shift_against_40_digit_reference`); the barrier route does not call the
+  Riccati integration where it is conditioned
+  (`::test_the_barrier_route_needs_no_transport_where_it_is_conditioned`); the compiled
+  rows equal the Python reference, $10^{-12}$
+  (`::test_native_open_rows_are_the_reference`, `::test_native_closed_rows_are_the_reference`);
+  points of the proton and α exits of Ca-40 just above threshold, where the fraction
+  does not converge, against 40-digit references, $2\cdot10^{-15}$ in $\ln P$ and
+  $10^{-14}$ in $S$ (`::test_threshold_laplace_against_40_digit_reference`);
   a relativistic charged exit against a 60-digit level matrix
   (`::test_relativistic_charged_against_independent_60_digit_level_matrix`); Brune
   parameters against Brune's equation 33 and the formal transform, $3\cdot10^{-11}$
@@ -891,6 +963,10 @@ collects the largest solve residual and flux error of each formalism.
   exact form; otherwise, or when the extension is not loaded
   (`kika.processing.resonances.native_available`), the NumPy solver gives the same
   quantities. Nothing is compiled at run time.
+- `kika.processing.resonances._coulomb_native` (C, built with the package): the open and
+  closed charged-channel functions per row, with the algorithm of
+  `kika.processing.resonances.coulomb`, which computes any row the compiled kernel does
+  not complete, or raises.
 - `kika.processing.resonances.parallel`: the verification physics on at most
   $\min(4, \text{cores}/2)$ threads at low priority, for large materials (more than
   $10^9$ energy-level products); results are bit-identical to the serial path.
