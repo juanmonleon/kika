@@ -829,7 +829,12 @@ def _twoBodyCapture(photons, evaluation, grid, A):
     original = next((p for p in source.outputChannel.products if p.pid == "photon"), None)
     forms = getattr(getattr(original, "distribution", None), "forms", {})
     evaluated = forms.get("eval") or (next(iter(forms.values())) if forms else None)
-    if not isinstance(evaluated, m.AngularTwoBody):
+    explicitPrimary = (
+        isinstance(evaluated, m.Uncorrelated)
+        and isinstance(evaluated.energy, m.PrimaryGamma)
+        and (evaluated.productFrame == m.Frame.centerOfMass
+             or _statedInMF6(evaluation, 102)))
+    if not isinstance(evaluated,m.AngularTwoBody) and not explicitPrimary:
         return None
     product, form = photons[0]
     if not isinstance(form, m.Uncorrelated):

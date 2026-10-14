@@ -133,14 +133,19 @@ def test_unit_base_photon_moments_map_both_support_and_density():
     assert H._meanEnergyOf(form,np.array([15.]),k,moment=2)[0]==pytest.approx(2.5**2*(1./3.+1./6.)/2)
 
 
-def test_two_body_capture_includes_compound_recoil_and_fixed_photon_kick(monkeypatch):
+@pytest.mark.parametrize("explicit_primary", [False, True])
+def test_two_body_capture_includes_compound_recoil_and_fixed_photon_kick(monkeypatch, explicit_primary):
     from types import SimpleNamespace as NS
     A, binding = .9991673, 2223300.
     grid = np.array([.0253, 1e6, 2e7])
     line = m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=2,
                             energy=binding, atomicWeightRatio=A), productFrame=m.Frame.lab)
     photon = NS(pid="photon", distribution=NS(forms={"MonteCarlo": line}))
-    sourcePhoton = NS(pid="photon", distribution=NS(forms={"eval": m.AngularTwoBody(angular=m.Isotropic2d())}))
+    sourceForm = (m.Uncorrelated(angular=m.Isotropic2d(),
+                      energy=m.PrimaryGamma(value=binding, domainMin=1e-5, domainMax=2e7),
+                      productFrame=m.Frame.centerOfMass) if explicit_primary
+                  else m.AngularTwoBody(angular=m.Isotropic2d()))
+    sourcePhoton = NS(pid="photon", distribution=NS(forms={"eval": sourceForm}))
     rx = NS(ENDF_MT=102, outputChannel=NS(Q=NS(value=2224648.), products=[photon]))
     source = NS(outputChannel=NS(products=[sourcePhoton]))
     evaluation = NS(findReactionByENDF_MT=lambda mt: source)

@@ -121,6 +121,11 @@ def tabulateDistribution(form, context: TabulationContext):
         return None
     if isinstance(form, m.Uncorrelated):
         energy = form.energy
+        if (context.pid == "photon" and context.mt == 102
+                and isinstance(energy, m.PrimaryGamma)):
+            # Same massless-photon frame convention as the two-body branch
+            # above, with the explicitly stated canonical binding retained.
+            return _uncorrelated(form.angular, energy, m.Frame.lab, context)
         if isinstance(energy, m.WeightedFunctionals):
             terms = []
             for term in energy.weighted:
