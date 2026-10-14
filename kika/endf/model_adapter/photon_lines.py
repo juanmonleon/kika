@@ -100,6 +100,49 @@ def _yieldOf(record_or_product):
     return _multiplicityOf(record_or_product, multiplicityAxes()).form
 
 
+def _yieldAtNodes(y, energies: List[float]) -> List[float]:
+    """``y`` at each incident node; the first of a repeated energy takes the left limit.
+
+    A TAB2 may state one incident energy twice -- a step, 8 nodes in JEFF-4.0
+    and 9 in JENDL-5 (Fe-58 and the Hf isotopes' capture) -- and evaluating at
+    the energy itself gives both nodes the right-hand value.
+    """
+    out = []
+    for k, e in enumerate(energies):
+        if k + 1 < len(energies) and energies[k + 1] == e:
+            e = float(np.nextafter(e, -np.inf))
+        out.append(float(y.evaluate(e)))
+    return out
+
+
+def _pointsByNode(meta) -> Dict[str, List[int]]:
+    """The incident nodes each piece's multiplicity has a point at, in order.
+
+    A line has one at every node from the first that lists it to the last (a
+    zero where a node in between does not); a primary at the nodes that list it.
+    """
+    present: Dict[str, List[int]] = {}
+    for k, names in enumerate(meta["nodes"]):
+        for name in names:
+            present.setdefault(name, []).append(k)
+    out = {}
+    for piece in meta["pieces"]:
+        nodes = present.get(piece["label"], [])
+        if piece["kind"] == "discrete" and nodes:
+            nodes = list(range(nodes[0], nodes[-1] + 1))
+        out[piece["label"]] = nodes
+    return out
+
+
+def _valueAt(function, energy: float, k: int, nodes: List[int]) -> float:
+    """The piece's multiplicity at node *k*: its own point when the table still has
+    one per node (a repeated incident energy is two points), else evaluated."""
+    xs = getattr(function, "xs", None)
+    if xs is not None and len(xs) == len(nodes) and k in nodes:
+        return float(np.asarray(function.ys, dtype=float)[nodes.index(k)])
+    return float(function.evaluate(energy))
+
+
 def _lineKeys(energies: np.ndarray) -> List[Tuple[float, int]]:
     """``(E_γ, n)`` per line of one node: ``n`` counts a repeat of the energy before it."""
     keys, prior, count = [], None, 0
@@ -171,7 +214,7 @@ def decodeLineSpectrum(product, index: int, mt: int, frame, awr: Optional[float]
     inner = ENDF_INT_TO_INTERPOLATION.get(int(body.lep), "lin-lin")
     outer = int(body.tab2_interp[0][1]) if body.tab2_interp else 2
     y = _yieldOf(product)
-    yAt = [float(y.evaluate(e)) for e in energies]
+    yAt = _yieldAtNodes(y, energies)
     ratio = float(awr) / (1.0 + float(awr)) if awr else 0.0
 
     discrete: Dict[Tuple[float, int], List[Tuple[int, float]]] = {}
@@ -391,9 +434,11 @@ def restoreLineSpectrum(record: dict, forms: Dict[str, object],
             f"MF6/MT{mt} product {index}: the continuum {cont!r} has "
             f"{len(contNodes)} incident energies and the file {len(rawCont)}; a node "
             f"added or removed in the model cannot be written back")
+    yAt = _yieldAtNodes(y, energies)
+    points = _pointsByNode(meta)
     values = []
     for k, energy in enumerate(energies):
-        yk = float(y.evaluate(energy))
+        yk = yAt[k]
         table = np.asarray(raw[k], dtype=float).reshape(-1, 2)
         row = []
         for j, name in enumerate(meta["nodes"][k]):
@@ -407,13 +452,18 @@ def restoreLineSpectrum(record: dict, forms: Dict[str, object],
                     shifted = meta["ratio"] * energy if (
                         meta["shift"] and energy > _PRIMARY_SHIFT_FLOOR) else 0.0
                     eg = -(float(line.value) + shifted)
-            m = float(multiplicities[name].evaluate(energy))
+            m = _valueAt(multiplicities[name], energy, k, points[name])
             p = m / yk if yk else table[j, 1]
             row.extend([eg, p])
         if k in rawCont:
             node = contNodes[rawCont.index(k)]
-            m = float(multiplicities[cont].evaluate(energy))
+            m = _valueAt(multiplicities[cont], energy, k, rawCont)
             scale = m / yk if yk else None
+            if scale == 0.0 and _rawIntegral(table[nd[k]:], fields["lep"]) == 0.0:
+                # A continuum the file states with zero weight (a histogram
+                # whose only nonzero value is its last point: 1e-19 in JEFF-4.0
+                # Pr-143 MT91): no photons either way, and its own values back.
+                scale = None
             if scale is None:
                 row.extend(float(v) for v in table[nd[k]:].reshape(-1))
             else:
@@ -424,6 +474,17 @@ def restoreLineSpectrum(record: dict, forms: Dict[str, object],
     return MF6LawContinuum(law=1, lang=int(fields["lang"]), lep=int(fields["lep"]),
                            tab2_interp=pairs, incident_energies=energies,
                            nd=nd, na=na, values=values)
+
+
+def _rawIntegral(table, lep) -> float:
+    from kika.nuclear_data.model import ENDF_INT_TO_INTERPOLATION, XYs1d
+    from kika.nuclear_data.model.functions.integration import integrateFunction1d
+
+    if len(table) < 2:
+        return 0.0
+    return float(integrateFunction1d(XYs1d(
+        xs=table[:, 0], ys=table[:, 1],
+        interpolation=ENDF_INT_TO_INTERPOLATION.get(int(lep), "lin-lin"))))
 
 
 def _decodedPrimary(meta, piece) -> float:

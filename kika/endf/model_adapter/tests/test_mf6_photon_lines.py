@@ -286,3 +286,14 @@ def test_merged_for_the_processed_writers_is_the_section_as_stated():
         np.testing.assert_array_equal(node.ys, table[:, 1])
     y = merged["photon"].multiplicity.form
     np.testing.assert_array_equal(y.xs, section.products[0].y_energies)
+
+
+def test_a_repeated_incident_energy_takes_each_side_of_the_step():
+    """JEFF-4.0 Fe-58 and Hf capture state one incident energy twice; the first
+    node of the pair is the left limit, or the rebuild halves a line there."""
+    from kika.endf.model_adapter.photon_lines import _yieldAtNodes
+    from kika.nuclear_data.model import Regions1d
+
+    y = Regions1d.fromEndfRegions(np.array([1.0, 2.0, 2.0, 3.0]),
+                                  np.array([1.0, 1.0, 4.0, 4.0]), [(2, 2), (4, 2)])
+    assert _yieldAtNodes(y, [1.0, 2.0, 2.0, 3.0]) == pytest.approx([1.0, 1.0, 4.0, 4.0])
