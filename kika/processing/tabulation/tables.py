@@ -23,7 +23,7 @@ NEGATIVE_POLICIES = ("clip", "raise")
 
 @dataclass(frozen=True)
 class TabulationOptions:
-    """Tolerances of the tabulation (roadmap D6).
+    """Tolerances of the tabulation.
 
     ``rtol``/``atol`` bound the lin-lin interpolation error of a refined table
     against the function it tabulates, ``|f - lin| <= rtol*|f| + atol*max|f|``

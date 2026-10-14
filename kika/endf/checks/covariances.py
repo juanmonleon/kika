@@ -6,10 +6,9 @@ MF31, MF33 and MF34 are checked here; MF32, MF35 and MF40 in :mod:`.mf32`,
 :func:`check_covariances` reads what kika's parser kept -- the records with
 their LB/LS, counts and grids, and the triangle before it is mirrored -- and
 reports what is wrong with it, without assembling a model covariance. Three
-families of checks, in the order of the plan (kika-workspace
-``docs/library/cov_checks_roadmap.md``, phases C2-C4):
+families of checks:
 
-**Structure (C2)** -- what ENDF-6 §31-34 pins down without looking at a value:
+**Structure** -- what ENDF-6 §31-34 pins down without looking at a value:
 counts (NL/NMT1, NI, NC, the number of (L, L1) sub-subsections) against what was
 read, NT against NE/LS/NER, LB valid for the file, LTY, grids strictly
 increasing, (L, L1) inside the range NL/NL1/LTT allow, and **LB=5 LS=1 in a
@@ -17,7 +16,7 @@ cross block** -- a symmetric triangle where the block is not symmetric, which
 kika mirrors and so turns into |rho| > 1 (the "defect A" of JEFF-4.0 MF34).
 An MT the parser could not read at all is a ``parse_error``.
 
-**Values (C3)** -- on each block summed on its own union grid the way kika sums
+**Values** -- on each block summed on its own union grid the way kika sums
 it: |rho| > 1 (a cross block needs the variances of both self blocks, on a
 common grid), negative variances, rows with no variance (``max == min`` exactly,
 never a threshold on sigma), covariance where the variance is zero, and the size
@@ -29,7 +28,7 @@ whose average is under 1 % of the largest bin average) -- past
 anything the three major libraries state -- a warning. Without central values a
 block is reported "not evaluable", not guessed.
 
-**Positive semi-definiteness (C4)** -- the eigenvalues of every self block, in
+**Positive semi-definiteness** -- the eigenvalues of every self block, in
 three levels by |lambda_min| / lambda_max: below 1e-6 a note, up to 1e-3 a
 warning, above that a defect. Two explanations downgrade a negative eigenvalue
 to a note, and both are measured, not assumed: it is within the rounding of the
@@ -40,7 +39,7 @@ near-low-rank matrix) and lambda_min of the correlation matrix is inside what
 that rounding can do. A defect also says which LB=5 record is already
 indefinite on its own.
 
-**The joint matrix (C9)** -- every reaction of MF31/MF33, and every Legendre
+**The joint matrix** -- every reaction of MF31/MF33, and every Legendre
 order of MF34, joined by its cross blocks: self blocks PSD and |rho| <= 1
 everywhere do not make the joint PSD. Only what the cross blocks add is graded.
 C9 also brought in what FUDGE's converter checks and kika did not (a non-zero

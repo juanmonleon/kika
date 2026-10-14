@@ -1,4 +1,4 @@
-"""A written OpenMC file against the official one of the same evaluation (roadmap D4.2).
+"""A written OpenMC file against the official one of the same evaluation.
 
 The two files are not expected to be identical -- the grids differ, the
 tabulations differ, the official one came through NJOY -- so the comparison is
@@ -13,7 +13,7 @@ physical and every difference is meant to be attributed:
 - **integrals that do not depend on the grid**: the resonance integral
   (0.5 eV to 1 MeV, 1/E weight) and the Maxwellian average at the file's kT,
   for capture, elastic and fission;
-- **size**: bytes on disk, the D8 ratio.
+- **size**: bytes on disk, and the ratio of the two.
 
 :func:`compareNeutron` returns a :class:`Comparison`; :meth:`Comparison.summary`
 renders it.

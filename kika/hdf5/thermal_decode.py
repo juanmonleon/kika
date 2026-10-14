@@ -1,8 +1,7 @@
-"""OpenMC thermal-scattering HDF5 → a ``thermalNeutronScatteringLaw`` suite (roadmap H9a).
+"""OpenMC thermal-scattering HDF5 → a ``thermalNeutronScatteringLaw`` suite.
 
 A processed thermal file states, per temperature, the elastic and inelastic
-cross sections and how to sample the outgoing neutron
-(``openmc_hdf5_format_survey.md`` §3). The suite read from it:
+cross sections and how to sample the outgoing neutron. The suite read from it:
 
 - has ``interaction = "thermalNeutronScatteringLaw"`` and ``target`` the table
   name (``c_H_in_H2O``); the ``eval`` style is declared and empty, and each

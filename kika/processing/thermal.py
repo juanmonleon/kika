@@ -1,12 +1,12 @@
-"""Thermal incoherent inelastic scattering tables from S(alpha, beta) (roadmap H9c).
+"""Thermal incoherent inelastic scattering tables from S(alpha, beta).
 
 kika's own THERMR + ACER for the ``incoherent_inelastic`` group of an OpenMC
 thermal file: from the model's :class:`~kika.nuclear_data.model.IncoherentInelastic`
 law at one temperature, the inelastic cross section on THERMR's fixed incident
 grid and, at each incident energy, the outgoing-energy table with its pdf and
 cdf and the 16 equiprobable cosines at each outgoing energy -- the "continuous"
-representation (ACER ``iwt = 2``) the official libraries carry. The reading of
-the Fortran is ``docs/library/thermal_inelastic_plan.md`` in kika-workspace.
+representation (ACER ``iwt = 2``) the official libraries carry. The method is
+documented in the manual (``methods/processing/thermal-scattering-tables``).
 
 - **THERMR** (``thermr.f90`` ``calcem``/``sigl``/``sig``/``terpq``) runs in C
   (``kika/processing/_thermal_native.c``), ported line for line: the
@@ -30,8 +30,8 @@ and a consistent PDF/CDF on the closed-form free-gas S(alpha, beta) of a nucleus
 45-point beta grid. As THERMR does, the cross section is not the kernel's
 integral but the nuclide's elastic cross section at the temperature (BROADR's
 MT2, which THERMR copies to the inelastic MT), read lin-lin at the incident
-energies as ACER reads it. The reference that checks it is independent of
-this code (``kika-workspace/kika_dev/processing/beyond_njoy/thermal_freegas``).
+energies as ACER reads it. It is checked against a reference that is independent
+of this code.
 """
 from __future__ import annotations
 

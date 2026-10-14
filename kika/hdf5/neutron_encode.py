@@ -1,8 +1,7 @@
 """Model → OpenMC incident-neutron HDF5.
 
-Writes what the C++ reads (``openmc_hdf5_format_survey.md`` §2), directly with
-h5py -- not through ``openmc.data``, whose exporter refuses ENDF-derived data
-(roadmap D3). The encoder serialises; it does not process. It needs the suite
+Writes what the C++ reads, directly with h5py -- not through ``openmc.data``,
+whose exporter refuses ENDF-derived data, and which is not a dependency. The encoder serialises; it does not process. It needs the suite
 in the processed shape :mod:`kika.hdf5.neutron_decode` produces and
 :func:`kika.hdf5.writer.writeSuite` builds from an evaluation:
 
@@ -12,7 +11,7 @@ in the processed shape :mod:`kika.hdf5.neutron_decode` produces and
   ``threshold_idx`` says (``len(xs) + threshold_idx == len(energy/<T>)``);
 - every distribution and yield as a ``MonteCarlo`` form (tables with their CDF).
 
-The contract it enforces, and refuses to break (roadmap H4, gate 1):
+The contract it enforces, and refuses to break:
 
 - group names ``f"{round(kT/k_B)}K"``, the same in ``kTs``, ``energy``, every
   reaction and ``urr``;
@@ -119,7 +118,7 @@ def _provenance(node, key, default=None):
 
 
 def isRadionuclideProduction(reaction) -> bool:
-    """A ``production`` of a radioactive nuclide (ENDF MF8-10, roadmap E6).
+    """A ``production`` of a radioactive nuclide (ENDF MF8-10).
 
     Told apart from the responses this format keeps in ``suite.productions``
     (gas production MT203-207) by its channel's ``genre``, which the ENDF and
@@ -168,7 +167,7 @@ def _grid(suite, label) -> np.ndarray:
             raise HDF5FormatError(
                 f"the {label!r} cross sections are not on one common grid; OpenMC stores one "
                 f"grid per temperature and each reaction from a threshold index on it "
-                f"(kika.algebra builds the union grid, roadmap H3)")
+                f"(kika.algebra builds the union grid)")
     if np.any(np.diff(grid) <= 0):
         raise HDF5FormatError(f"the {label!r} grid is not strictly increasing; the C++ assumes it is")
     return grid
@@ -185,7 +184,7 @@ def encodeNeutron(suite, temperatures=None, *, awr: Optional[float] = None,
 
     ``temperatures`` restricts the ``heated_<T>`` styles written (names or
     kelvins); by default all of them. ``awr`` overrides the atomic weight ratio
-    (roadmap D11: the writer passes the one the official library uses).
+    (the writer passes the one the official library uses).
     """
     m = _m()
     report = report if report is not None else m.ConversionReport()

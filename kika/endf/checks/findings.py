@@ -10,8 +10,6 @@ before kika assembles it into a model covariance. None of them blocks anything.
 * ``defect`` -- the section is not what ENDF-6 says it should be, or it is not a
   covariance: a count that does not match, |rho| > 1, a negative eigenvalue
   well above rounding.
-
-Plan and decisions: kika-workspace ``docs/library/cov_checks_roadmap.md``.
 """
 from __future__ import annotations
 

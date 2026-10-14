@@ -89,8 +89,10 @@ def test_level_reaction_gets_openmcs_kinematics():
     assert out.energy.massRatio == pytest.approx((A / (A + 1)) ** 2)
 
 
-def test_kalbach_slope_matches_openmc():
-    # openmc.data.kalbach_slope(14e6, 5e6, 1, 1, 26056) in OpenMC 0.16.0
+def test_kalbach_slope_is_of_order_one_and_grows_with_the_emitted_energy():
+    """Kalbach's systematics for n + Fe-56 at 14 MeV: finite, of order one, and
+    steeper (more forward) the more energy the neutron takes out. Not a
+    comparison with OpenMC's ``kalbach_slope``, which is not a dependency."""
     value = float(kalbachSlope(14e6, 5e6, 1, 26056))
     assert value == pytest.approx(0.0, abs=10)  # finite and of order unity
     assert np.all(np.diff(kalbachSlope(14e6, np.array([1e5, 1e6, 5e6]), 1, 26056)) > 0)
