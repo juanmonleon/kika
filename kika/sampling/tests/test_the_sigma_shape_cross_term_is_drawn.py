@@ -88,6 +88,8 @@ def test_sigma_and_the_shape_are_one_block_with_the_files_cross_term(covariance)
     np.testing.assert_allclose(matrix, _expected(), rtol=1e-6)
     (note,) = notes
     assert "is drawn with them in one matrix" in note
+    # L0xL0 states 3 % where MF33 states 5/4/6 %: the run says how far apart.
+    assert "up to 50% away from MF33's" in note
 
 
 def test_the_run_draws_it_and_says_so(covariance):
@@ -199,6 +201,19 @@ def test_sigma_on_mf33s_own_grid_takes_the_union_with_the_l0_side(tmp_path):
     run = perturbFromModel(FE56, REQUEST, 2, seed=3, dryRun=True,
                            covarianceSource=path)
     assert run.samples[0]["set"].components() == (SIGMA, A1, A2)
+
+
+def test_a_null_l0xl0_is_not_compared_with_mf33():
+    """This project's ``_a0cross`` tapes write L0xL0 as a one-bin zero block."""
+    from kika.sampling.joint_blocks import _sigmaDiscrepancy
+
+    grid = l0_fixture.GRID
+    sigma = [((ZA, MT), (ZA, MT), l0_fixture.mf33Block(), grid, grid)]
+    null = [((ZA, MT, 0), (ZA, MT, 0), np.zeros((1, 1)), grid[[0, -1]], grid[[0, -1]])]
+    stated = [((ZA, MT, 0), (ZA, MT, 0), l0_fixture.block(0, 0), grid, grid)]
+    assert _sigmaDiscrepancy(null, sigma, MT) is None
+    assert _sigmaDiscrepancy(stated, sigma, MT) == pytest.approx(0.5)
+    assert _sigmaDiscrepancy(stated, [], MT) is None
 
 
 def test_named_orders_are_left_alone(covariance):
