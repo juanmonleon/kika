@@ -810,7 +810,8 @@ class NonMonotonicTable(ValueError):
 
 
 def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
-                start_line, pad=PAD_BLANK, interp_pad=PAD_BLANK, data_format=ENDF_FORMAT_FLOAT):
+                start_line, pad=PAD_BLANK, interp_pad=PAD_BLANK, data_format=ENDF_FORMAT_FLOAT,
+                header_format=ENDF_FORMAT_FLOAT):
     """
     Format a complete TAB1 record to ENDF lines.
 
@@ -818,6 +819,11 @@ def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
     are separate because the two disagree inside one section: ``tsl_4-Be.txt``
     writes ``       1621          1`` followed by blanks on the same tape whose
     data lines end in explicit zeros, and ENDF/B-VIII.1's O-16 does the reverse.
+
+    *header_format* reaches C1-C2 of the header, apart from *data_format*: a
+    header float can be a Q value written to 8 digits in fixed point
+    (ENDF/B-VIII.1 In-115, MF9/MT102: ``  6783389.7``), which the canonical
+    7-digit field rounds to a different number.
 
     Parameters
     ----------
@@ -847,7 +853,7 @@ def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
     header = format_endf_data_line(
         [c1, c2, l1, l2, nr, np_count],
         mat, mf, mt, line_num,
-        formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
+        formats=[header_format, header_format,
                  ENDF_FORMAT_INT_ZERO, ENDF_FORMAT_INT, ENDF_FORMAT_INT, ENDF_FORMAT_INT],
     )
     result_lines.append(header)

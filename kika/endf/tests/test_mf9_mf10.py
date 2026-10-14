@@ -7,9 +7,10 @@ writes non-canonically comes back canonical with the same value.
 **Where it runs.** On the two committed activation cuts
 (``ACTIVATION_FIXTURES`` in ``test_micro_tape_regen.py``), and -- ``slow``,
 needing the shared libraries -- on every MF9/MF10 section of ENDF/B-VIII.1,
-JEFF-4.0 and JENDL-5. On the Windows workstation, with no library tree, the
-gate was run on the 34 MF9/MF10 sections of the 25 tapes in the IAEA download
-cache (2026-10-14: B-VII.1/VIII.1, JEFF-3.3/4.0, JENDL-5), all byte-identical.
+JEFF-4.0 and JENDL-5. At home the three libraries sit under
+``NuclearData/endf``: point ``KIKA_LIB_TAPES`` there. The full sweep (2026-10-14)
+caught one section, In-115 MF9/MT102 of B-VIII.1, whose 8-digit fixed-point QM
+the TAB1 header rounded to 7.
 """
 from __future__ import annotations
 
@@ -105,6 +106,19 @@ def test_the_counts_are_derived_from_the_body():
     back = parse_mf10_mt(str(section).splitlines()[:-1], 16)
     assert str(back) == str(section)
     assert back.num_states == 2 and len(back.states[1].x) == 2
+
+
+def test_an_eight_digit_q_value_keeps_its_digits():
+    """ENDF/B-VIII.1 In-115, MF9/MT102, writes QM as ``  6783389.7``. The
+    canonical field is ``6.783390+6``, a different number; the state's header
+    goes through the precise formatter, as its data does."""
+    section = MF9MT(number=102, _za=49115.0, _awr=113.81, _mat=4931, states=[
+        ProductionState(qm=6783389.7, qi=6656120.0, izap=49116, lfs=1,
+                        interp=[(2, 2)], x=[1.0e-5, 2.0e7], y=[0.5, 0.5])])
+    text = str(section)
+    assert "  6783389.7" in text
+    back = parse_mf9_mt(text.splitlines()[:-1], 102)
+    assert back.states[0].qm == 6783389.7
 
 
 # ---------------------------------------------------------------------------

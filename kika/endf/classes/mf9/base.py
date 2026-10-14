@@ -51,7 +51,8 @@ class ProductionState:
         return format_tab1(self.qm, self.qi, self.izap, self.lfs, self.interp,
                            self.x, self.y, mat, mf, mt, line_num,
                            pad=pad.pairs, interp_pad=pad.interp,
-                           data_format=ENDF_FORMAT_PRECISE)
+                           data_format=ENDF_FORMAT_PRECISE,
+                           header_format=ENDF_FORMAT_PRECISE)
 
 
 @dataclass
