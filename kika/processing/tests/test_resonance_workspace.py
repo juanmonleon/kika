@@ -227,7 +227,10 @@ def test_compacted_first_reaction_keeps_independent_master_verification_grid(mon
     result=reconstruct_suite(suite,NeutronContext(56.,0.))
     first=next(iter(result.forms.values()))
     curves=first.function1ds if isinstance(first,Regions1d) else [first]
-    assert all(len(c.xs)==2 for c in curves)
+    # Compacted to the segment edges: one table through them, since the
+    # constant reaction does not jump where the others do.
+    edges={s.low for s in result._segments}|{s.high for s in result._segments}
+    assert len(curves)==1 and set(curves[0].xs.tolist())<=edges
     assert len(result._grids[0])>2
     with pytest.raises(ValueError):result._grids[0].setflags(write=True)
     seen=[];original=type(result)._evaluate_segment

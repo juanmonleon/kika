@@ -329,9 +329,14 @@ def test_material_identity_and_options_are_part_of_certification():
 
 def test_individually_accurate_exported_reactions_must_also_close_the_sum():
     suite=suite_model();result=run(suite);attach_reconstruction(suite,result)
+    def fast(form):
+        # The fast region [300, 1000] eV, whether or not the reaction jumps at
+        # 300 eV (a reaction that does not is one table through that node).
+        curve=form.function1ds[-1] if hasattr(form,'function1ds') else form
+        return curve.xs>=300.,curve
     for reaction in suite.reactions:
-        reaction.crossSection['recon'].function1ds[-1].ys*=.9994
-    suite.sums[1].crossSection['recon'].function1ds[-1].ys*=1.0006
+        at,curve=fast(reaction.crossSection['recon']);curve.ys[at]*=.9994
+    at,curve=fast(suite.sums[1].crossSection['recon']);curve.ys[at]*=1.0006
     # Each constant fast-region form is within its individual budget, but
     # the total and its components disagree by more than the requested budget.
     with pytest.raises(ReconstructionConvergenceError,match='sum does not close'):

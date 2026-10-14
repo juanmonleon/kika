@@ -1,7 +1,49 @@
 """Batched multi-reaction linearization with explicit empirical error checks."""
+from collections.abc import Mapping
 from dataclasses import dataclass
+import functools
 import math
 import numpy as np
+
+
+@functools.lru_cache(maxsize=64)
+def _key_index(keys):
+    return {key:i for i,key in enumerate(keys)}
+
+
+@functools.lru_cache(maxsize=64)
+def _shared_keys(keys):
+    """One tuple object for every segment with the same reactions."""
+    return keys
+
+
+class ReactionColumns(Mapping):
+    """A read-only ``{reaction: value}`` of one segment's checks.
+
+    A segment's report holds a value for every reaction, and a material
+    with thousands of segments made them most of what a reconstruction kept
+    (JENDL-5 Cl-35: 3 376 segments x 234 reactions, 173 MB as dicts). The
+    keys are shared between segments; floats are stored as one array and
+    read back as Python floats. It reads, compares and copies like the dict
+    it replaces; ``dict(columns)`` gives that dict.
+    """
+    __slots__=('_keys','_values')
+
+    def __init__(self,items):
+        keys,values=zip(*items) if items else ((),())
+        self._keys=_shared_keys(tuple(keys))
+        floats=all(type(v) is float for v in values)
+        self._values=np.array(values,dtype=float) if floats and values else tuple(values)
+
+    def __getitem__(self,key):
+        value=self._values[_key_index(self._keys)[key]]
+        return float(value) if isinstance(self._values,np.ndarray) else value
+
+    def __iter__(self):return iter(self._keys)
+    def __len__(self):return len(self._keys)
+    def __contains__(self,key):return key in _key_index(self._keys)
+    def __repr__(self):return repr(dict(self))
+    def __reduce__(self):return (ReactionColumns,(list(self.items()),))
 
 
 class ReconstructionConvergenceError(RuntimeError):
@@ -136,13 +178,13 @@ def linearize_steps(seeds, options, point_budget, *, constants=None, deferred=No
     values={mt:np.concatenate([chunk[1][mt] for chunk in chunks]) for mt in first}
     check=dict(iterations=max(c['iterations'] for c in checks),
         evaluations=sum(c['evaluations'] for c in checks)-(len(checks)-1),
-        refinement_maxima={mt:max(c['refinement_maxima'][mt] for c in checks) for mt in first},
-        verification_maxima={mt:max(c['verification_maxima'][mt] for c in checks) for mt in first},
+        refinement_maxima=ReactionColumns([(mt,max(c['refinement_maxima'][mt] for c in checks)) for mt in first]),
+        verification_maxima=ReactionColumns([(mt,max(c['verification_maxima'][mt] for c in checks)) for mt in first]),
         verification_worst={mt:max(((c['verification_maxima'][mt],c['verification_worst'][mt]) for c in checks
                                     if mt in c.get('verification_worst',{})),key=lambda t:t[0])[1]
                             for mt in first if any(mt in c.get('verification_worst',{}) for c in checks)},
-        integrals={mt:{weight:{name:sum(c['integrals'][mt][weight][name] for c in checks)
-            for name in checks[0]['integrals'][mt][weight]} for weight in ('dE','dE_over_E')} for mt in first},
+        integrals=ReactionColumns([(mt,{weight:{name:sum(c['integrals'][mt][weight][name] for c in checks)
+            for name in checks[0]['integrals'][mt][weight]} for weight in ('dE','dE_over_E')}) for mt in first]),
         refinement_chunks=len(chunks))
     return grid,values,check
 
@@ -186,6 +228,7 @@ def _linearize_chunk(seeds, options, point_budget, *, first=None, constants=None
         raise ReconstructionConvergenceError(message,category=category) from exc
     x=result.x
     y={mt:result.y[:,j] for j,mt in enumerate(mts)}
+    column={mt:j for j,mt in enumerate(mts)}
     probes,actual=result.probe_x,result.probe_y
     # On very narrow panels a nominal fraction may round onto an endpoint.
     # Compare the line at the *representable* queried abscissa.
@@ -199,9 +242,9 @@ def _linearize_chunk(seeds, options, point_budget, *, first=None, constants=None
     worst={}
     integrals={}
     for mt in first:
-        if mt not in mts and mt not in deferred:continue
-        if mt in mts:
-            samples=actual[:,:,mts.index(mt)]
+        if mt not in column and mt not in deferred:continue
+        if mt in column:
+            samples=actual[:,:,column[mt]]
         else:
             y[mt]=np.asarray(deferred[mt](x),dtype=float)
             samples=np.asarray(deferred[mt](probes.ravel()),dtype=float).reshape(probes.shape)
@@ -228,11 +271,17 @@ def _linearize_chunk(seeds, options, point_budget, *, first=None, constants=None
             integrals[mt][name]={'reference_estimate':float(np.sum(factor*a)),
                                 'linear_estimate':float(np.sum(factor*linear[:,gauss_indices])),
                                 'absolute_difference_estimate':float(np.sum(factor*np.abs(a-linear[:,gauss_indices])))}
-    constant_integrals={}
+    constant_integrals={};constant_tables={}
     for mt in first:
         if mt in y:continue
         value=constants[mt]
-        y[mt]=np.full(len(x),value)
+        # One read-only table per constant value: the tables are only read
+        # (compression, minima), and a material cut into thousands of
+        # segments has hundreds of constant partials in each.
+        token=float(value).hex()
+        if token not in constant_tables:
+            constant_tables[token]=np.full(len(x),value);constant_tables[token].setflags(write=False)
+        y[mt]=constant_tables[token]
         maxima[mt]=(0.,0.)
         # Many modeled partials are identically zero on a resonance span.
         # Their quadrature is the same calculation; do it once per constant,
@@ -249,9 +298,9 @@ def _linearize_chunk(seeds, options, point_budget, *, first=None, constants=None
         integrals[mt]=constant_integrals[token]
     y={mt:y[mt] for mt in first}
     return x,y,dict(iterations=result.passes,evaluations=seeded+result.evaluations,
-                   refinement_maxima={mt:v[0] for mt,v in maxima.items()},
-                   verification_maxima={mt:v[1] for mt,v in maxima.items()},
-                   verification_worst=worst,integrals=integrals)
+                   refinement_maxima=ReactionColumns([(mt,v[0]) for mt,v in maxima.items()]),
+                   verification_maxima=ReactionColumns([(mt,v[1]) for mt,v in maxima.items()]),
+                   verification_worst=worst,integrals=ReactionColumns(list(integrals.items())))
 
 
 def verification_batches(grid,batch_size,fractions=VERIFICATION_FRACTIONS):
