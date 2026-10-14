@@ -17,9 +17,13 @@ typedef char rm_requires_ieee_float64[
 
 #define TILE 128
 #define ENVELOPE_LIMIT 1e8
+/* Channels per spin group. Cl-35 (ENDF/B-VIII.1) has groups of four: a
+ * neutron and a proton channel for each of two channel spins. Stack tiles
+ * grow as 2*RM_MAX_CHANNELS^2*TILE doubles, 74 KB at six. */
+#define RM_MAX_CHANNELS 6
 
 static int dimensions(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c) {
-    if (ne < 0 || n < 0 || c < 1 || c > 3 ||
+    if (ne < 0 || n < 0 || c < 1 || c > RM_MAX_CHANNELS ||
         ne > PY_SSIZE_T_MAX / (16*c*c) || n > PY_SSIZE_T_MAX / (8*c)) {
         PyErr_SetString(PyExc_ValueError, "invalid native RM dimensions");
         return 0;
@@ -91,7 +95,7 @@ static int envelope_bounded(Py_ssize_t ne,Py_ssize_t n,Py_ssize_t c,
      * Dispatch to separate kernels so an unavailable certificate does not
      * add branches inside the existing generic inner loops.
      */
-    double max_f2[3]={0},bound=0.;
+    double max_f2[RM_MAX_CHANNELS]={0},bound=0.;
     for (Py_ssize_t i=0;i<ne;i++) for (Py_ssize_t j=0;j<c;j++) {
         double value=f[i*c+j]*f[i*c+j];
         if (!isfinite(value)) return 0;

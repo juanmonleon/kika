@@ -18,6 +18,9 @@ try:
 except (ImportError, AttributeError):
     _native=None
 
+#: Channels per spin group the compiled sums take (``RM_MAX_CHANNELS``).
+MAX_CHANNELS=6
+
 
 def eligible(energies, levels, widths, reduced, factors, work_bytes,
              return_absorption, absorption_rtol):
@@ -27,7 +30,7 @@ def eligible(energies, levels, widths, reduced, factors, work_bytes,
             or reduced is None or work_bytes < 65536):return False
     e,er,g,a,f=(np.asarray(v) for v in (energies,levels,widths,reduced,factors))
     if (e.ndim!=1 or er.ndim!=1 or g.shape!=er.shape or a.ndim!=2
-            or a.shape[0]!=len(er) or len(er)<32 or not 1<=a.shape[1]<=3
+            or a.shape[0]!=len(er) or len(er)<32 or not 1<=a.shape[1]<=MAX_CHANNELS
             or f.shape!=(len(e),a.shape[1]) or not len(e)):return False
     # Restrict acceleration to normal float64 arithmetic. Extreme data use
     # the reference kernel, including its established pole-limit handling.

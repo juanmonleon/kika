@@ -2,7 +2,7 @@
 static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
         const double *e,const double *er,const double *gamma,const double *a,
         const double *f,double *out,unsigned char *unsafe) {
-    double max_f2[3]={0};int normal_energies=1;
+    double max_f2[RM_MAX_CHANNELS]={0};int normal_energies=1;
     for (Py_ssize_t i=0;i<ne;i++)
         if (!(isfinite(e[i]) && fabs(e[i])<=1e20)) normal_energies=0;
     for (Py_ssize_t i=0;i<ne;i++) for (Py_ssize_t j=0;j<c;j++) {
@@ -11,9 +11,9 @@ static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
     }
     for (Py_ssize_t start=0;start<ne;start+=TILE) {
         Py_ssize_t count=ne-start<TILE?ne-start:TILE;
-        double rr[9*TILE]={0},ri[9*TILE]={0};
+        double rr[RM_MAX_CHANNELS*RM_MAX_CHANNELS*TILE]={0},ri[RM_MAX_CHANNELS*RM_MAX_CHANNELS*TILE]={0};
 #ifndef RM_SKIP_ENVELOPE
-        double envelope[3*TILE]={0};
+        double envelope[RM_MAX_CHANNELS*TILE]={0};
 #endif
         double qr[TILE],qi[TILE];
         for (Py_ssize_t i=0;i<count;i++) unsafe[start+i]=0;
