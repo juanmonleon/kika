@@ -54,12 +54,12 @@ from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS, METHODS,
                    pairs_from_laws, validate)
 from .evaluate import (evaluate, interpolate_between, left_limit, right_limit,
                        sample_on_union)
-from .grid import compress_flat, discontinuities, join_pieces, split_at_discontinuities, union
+from .grid import compress_flat, compress_flat_pieces, discontinuities, join_pieces, split_at_discontinuities, union
 from .integrate import (cumulative_integral, group_averages, group_integrals,
                         integral, interval_averages, interval_integrals,
                         log_window_averages, legendre_coefficients, legendre_moments, panel_integrals)
 from .fold import box_gaussian_fold_nodes, fold_tabulated, gaussian_fold_nodes
-from .refine import RefinementError, RefineResult, refine, to_linlin
+from .refine import RefinementError, RefineResult, drive, refine, refine_steps, to_linlin
 from .arithmetic import add, on_common_grid
 from .prepared import prepare_evaluator
 from .thin import thin_common_grid
@@ -70,11 +70,11 @@ __all__ = [
     "HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS", "METHODS",
     "interval_laws", "laws_on_refinement", "method_laws", "pairs_from_laws", "validate",
     "evaluate", "interpolate_between", "left_limit", "right_limit", "sample_on_union",
-    "compress_flat", "discontinuities", "join_pieces", "split_at_discontinuities", "union",
+    "compress_flat", "compress_flat_pieces", "discontinuities", "join_pieces", "split_at_discontinuities", "union",
     "cumulative_integral", "group_averages", "group_integrals", "integral",
     "interval_averages", "interval_integrals", "log_window_averages",
     "legendre_coefficients", "legendre_moments", "panel_integrals", "box_gaussian_fold_nodes", "fold_tabulated", "gaussian_fold_nodes",
-    "RefinementError", "RefineResult", "refine", "to_linlin",
+    "RefinementError", "RefineResult", "drive", "refine", "refine_steps", "to_linlin",
     "add", "on_common_grid", "prepare_evaluator",
     "difference", "interpolate_to_grid", "read_pair", "steps_difference", "window_difference",
     "thin_common_grid",

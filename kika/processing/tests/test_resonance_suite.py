@@ -40,18 +40,18 @@ def run(suite=None,**kwargs):return reconstruct_suite(suite_model() if suite is 
 def test_constant_projection_preserves_full_tables_and_checks(monkeypatch):
     import kika.processing.resonances.suite as module
     reference=run()
-    actual_linearize=module.linearize
+    actual_linearize=module.linearize_steps
     declarations=[]
     def projected(*args,**kwargs):
         declarations.append(kwargs.get('constants',{}))
         return actual_linearize(*args,**kwargs)
-    monkeypatch.setattr(module,'linearize',projected)
+    monkeypatch.setattr(module,'linearize_steps',projected)
     optimized=run()
     assert any(ReactionKey('reactions','extra') in c for c in declarations)
     def original(*args,**kwargs):
         kwargs.pop('constants',None)
         return actual_linearize(*args,**kwargs)
-    monkeypatch.setattr(module,'linearize',original)
+    monkeypatch.setattr(module,'linearize_steps',original)
     baseline=run()
     for key,form in optimized.forms.items():
         for a,b in zip(getattr(form,'function1ds',[form]),
@@ -70,11 +70,11 @@ def test_linear_background_deferral_keeps_source_knots_and_physical_sums(monkeyp
     suite=suite_model()
     suite.reactions['extra'].crossSection['eval']=XYs1d(
         [10.,37.,110.,300.,1000.],[.3,1.,.1,.9,1.8],axes=AXES,label='eval')
-    actual_linearize=module.linearize;declarations=[]
+    actual_linearize=module.linearize_steps;declarations=[]
     def track(*args,**kwargs):
         declarations.append(kwargs.get('deferred',{}))
         return actual_linearize(*args,**kwargs)
-    monkeypatch.setattr(module,'linearize',track)
+    monkeypatch.setattr(module,'linearize_steps',track)
     optimized=run(suite)
     extra=ReactionKey('reactions','extra')
     assert any(extra in d for d in declarations)
@@ -82,7 +82,7 @@ def test_linear_background_deferral_keeps_source_knots_and_physical_sums(monkeyp
     def ordinary(*args,**kwargs):
         kwargs.pop('deferred',None)
         return actual_linearize(*args,**kwargs)
-    monkeypatch.setattr(module,'linearize',ordinary)
+    monkeypatch.setattr(module,'linearize_steps',ordinary)
     baseline=run(suite)
     for key,form in optimized.forms.items():
         for a,b in zip(form.function1ds,baseline.forms[key].function1ds):

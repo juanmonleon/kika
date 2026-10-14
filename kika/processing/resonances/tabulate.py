@@ -1,6 +1,7 @@
 """Prepared-domain resonance tabulation, background assembly and V3 checks."""
 from dataclasses import dataclass
 import hashlib
+import math
 from types import MappingProxyType
 import numpy as np
 
@@ -130,13 +131,29 @@ def _segments(prepared,backgrounds):
     return tuple(out)
 
 
+#: Geometric seeds of one segment: GEOMETRIC_SEEDS across it, but never
+#: denser than GEOMETRIC_SEEDS per decade. A tape whose background changes
+#: interpolation law every few hundred eV cuts the range into thousands of
+#: segments (JENDL-5 Cl-35: 3 291 narrower than 1 %); a fixed count per
+#: segment seeded each 100 eV one with 65 points, 205 000 seeds that the
+#: refinement then verified panel by panel. The net only starts refinement:
+#: levels, thresholds and source knots are seeded on their own, and every
+#: final panel passes its probes.
+GEOMETRIC_SEEDS=65
+
+
 def _seeds(segment,context):
     lo,hi=segment.low,segment.high
-    seeds=list(np.geomspace(lo,hi,65))+[lo,hi]
+    count=GEOMETRIC_SEEDS
+    if lo>0 and hi>lo:
+        count=int(min(GEOMETRIC_SEEDS,max(2,1+math.ceil((GEOMETRIC_SEEDS-1)*math.log10(hi/lo)))))
+    seeds=list(np.geomspace(lo,hi,count))+[lo,hi]
     if segment.region.unresolved is not None:
         seeds.extend(x for x in segment.region.unresolved.grid if lo<=x<=hi)
     for curves in segment.backgrounds.values():
-        seeds.extend(x for c in curves for x in c.x if lo<x<hi)
+        for c in curves:
+            knots=np.asarray(c.x,dtype=float)
+            seeds.extend(knots[np.searchsorted(knots,lo,'right'):np.searchsorted(knots,hi,'left')])
         if not segment.left_high and any(c.x[-1]==hi and c.endpoint_jump for c in curves):
             seeds.append(np.nextafter(hi,lo))
     for g in segment.region.groups:
@@ -158,14 +175,21 @@ def _seeds(segment,context):
                 real=np.stack([c.functions(centers[active],logarithmic=True)[1].real for c in g.channels],axis=1)
                 centers[active]=er[active]-np.sum(reduced[active]*reduced[active]*real,axis=1)
                 active&=(centers>=lo)&(centers<=hi)
-        for level_index,level in enumerate(g.levels):
-            if level.energy<=0:continue
-            pr,sr,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*level.energy)*g.channel_radius.evaluate(level.energy))
+        iterations=0 if segment.region.approximation in ("ReichMoore","RMatrixNeutral") else 4
+        energies=np.array([lv.energy for lv in g.levels],dtype=float)
+        starts=energies if centers is None else centers
+        # A level seeds a segment only through a peak inside it, and a
+        # fixed-point centre starting outside never moves.
+        inside=(energies>0)&(((energies>=lo)&(energies<=hi))|((starts>=lo)&(starts<=hi)))
+        for level_index in np.flatnonzero(inside):
+            level=g.levels[level_index]
             center=level.energy
             if centers is not None:center=float(centers[level_index])
+            if iterations:
+                pr,sr,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*level.energy)*g.channel_radius.evaluate(level.energy))
             # Fixed-point seeds isolate shifted peaks; correctness still comes
             # from subsequent reference evaluations, not this estimate.
-            for _ in range(0 if segment.region.approximation in ("ReichMoore","RMatrixNeutral") else 4):
+            for _ in range(iterations):
                 if not lo<=center<=hi:break
                 _,shift,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*center)*g.channel_radius.evaluate(center))
                 center=level.energy+.5*level.neutron*(sr-shift)/pr

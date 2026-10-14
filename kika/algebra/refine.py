@@ -30,7 +30,7 @@ import numpy as np
 from .evaluate import panel_value
 from .laws import HISTOGRAM, LINLIN, LOGLIN, LOGLOG, LOG_X, validate, vanishing_panels
 
-__all__ = ["RefinementError", "RefineResult", "refine", "to_linlin",
+__all__ = ["RefinementError", "RefineResult", "refine", "refine_steps", "drive", "to_linlin",
            "LINEARIZATION_TOLERANCE", "PANEL_TEST_FRACTIONS"]
 
 #: Default relative tolerance of :func:`to_linlin`. 1e-4 sits between FUDGE's
@@ -137,6 +137,41 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         Reuse exact (abscissa, starting interval) values from the previous
         pass; requires a deterministic evaluator. No rounded cache keys.
     """
+    return drive(refine_steps(x, y, exceeds, active=active, log_x=log_x, fractions=fractions,
+                              snap=snap, insert=insert, max_passes=max_passes,
+                              max_points=max_points, min_width_ulps=min_width_ulps,
+                              unresolvable=unresolvable, keep_probes=keep_probes,
+                              precheck=precheck, reuse_probes=reuse_probes),
+                 lambda request: evaluate(*request))
+
+
+def drive(steps, evaluate):
+    """Run a generator of evaluation requests to its result.
+
+    *steps* yields requests and is sent ``evaluate(request)`` for each; what it
+    returns is the result. :func:`refine` is :func:`refine_steps` driven by its
+    own function; a caller that refines many independent tables can instead
+    advance them together and answer their requests in one batch.
+    """
+    try:
+        request = next(steps)
+        while True:
+            request = steps.send(evaluate(request))
+    except StopIteration as stop:
+        return stop.value
+
+
+def refine_steps(x, y, exceeds: Callable, *,
+                 active=None, log_x=None, fractions=PANEL_TEST_FRACTIONS,
+                 snap: Optional[Callable] = None, insert: str = "worst",
+                 max_passes: int = 40, max_points: Optional[int] = None,
+                 min_width_ulps: float = 0.0, unresolvable: str = "raise",
+                 keep_probes: bool = False, precheck: int = 0,
+                 reuse_probes: bool = False):
+    """:func:`refine` as a generator: it yields ``(q, owner)`` and is sent the
+    values of the function there; its return value is the
+    :class:`RefineResult`. The arithmetic is :func:`refine`'s.
+    """
     if insert not in ("worst", "balanced", "all"):
         raise ValueError(f"insert must be 'worst', 'balanced' or 'all', got {insert!r}")
     if unresolvable not in ("raise", "accept"):
@@ -212,12 +247,12 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
                 actual[indices[hit]]=cache_values[at[hit]]
                 missing=indices[~hit]
             if len(missing):
-                actual[missing]=np.asarray(evaluate(flat[missing],flat_owner[missing]),dtype=float)
+                actual[missing]=np.asarray((yield (flat[missing],flat_owner[missing])),dtype=float)
                 evaluations+=len(missing)
             available[indices]=True
         primary=precheck or q.shape[1]
         first=np.flatnonzero(np.tile(np.arange(q.shape[1])<primary,len(owner)))
-        fetch(first)
+        yield from fetch(first)
         actual=actual.reshape(q.shape+y.shape[1:])
         frac = (q - x1[:, None]) / (x2 - x1)[:, None]
         chord=(y1[:,None,:]+(y2-y1)[:,None,:]*frac[...,None] if y.ndim>1
@@ -235,7 +270,7 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
             remaining=np.flatnonzero(np.repeat(~np.any(ratio>1.,axis=1),q.shape[1])&~available)
             # fetch writes the flattened array even after the shaped view is made.
             actual=actual.reshape((flat.size,)+y.shape[1:])
-            fetch(remaining)
+            yield from fetch(remaining)
             actual=actual.reshape(q.shape+y.shape[1:])
             ratios(remaining)
         bad = np.any(ratio > 1.0, axis=1)
@@ -252,7 +287,7 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
             if keep_probes:
                 remaining=np.flatnonzero(np.repeat(stuck,q.shape[1])&~available)
                 actual=actual.reshape((flat.size,)+y.shape[1:])
-                fetch(remaining)
+                yield from fetch(remaining)
                 actual=actual.reshape(q.shape+y.shape[1:])
         settle = ~bad | stuck
         if keep_probes and settle.any():
@@ -279,7 +314,7 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         # Every inserted node needs its own evaluated value.
         missing=np.flatnonzero(pick.ravel()&~available)
         actual=actual.reshape((flat.size,)+y.shape[1:])
-        fetch(missing)
+        yield from fetch(missing)
         actual=actual.reshape(q.shape+y.shape[1:])
         if reuse_probes:
             retain=available&np.repeat(split,q.shape[1])

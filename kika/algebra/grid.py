@@ -16,7 +16,7 @@ import numpy as np
 from .laws import LINLIN, validate
 
 __all__ = ["union", "occurrences", "discontinuities", "split_at_discontinuities",
-           "join_pieces", "compress_flat"]
+           "join_pieces", "compress_flat", "compress_flat_pieces"]
 
 
 def compress_flat(x, y, laws=LINLIN):
@@ -52,6 +52,64 @@ def compress_flat(x, y, laws=LINLIN):
             return x.copy(), y.copy(), laws.copy()
     # Advanced indexing already owns its result; a second copy is redundant.
     return x[indices], y[indices], laws[indices[:-1]]
+
+
+def compress_flat_pieces(pieces):
+    """:func:`compress_flat` of each lin-lin ``(x, y)`` piece, in one pass.
+
+    The result is the one ``compress_flat(x, y, LINLIN)`` gives piece by
+    piece; only the per-call cost goes. A material whose backgrounds jump
+    every few hundred eV has thousands of regions per reaction, and checking
+    each one alone took longer than tabulating it.
+    """
+    pieces = [(np.asarray(x, dtype=float), np.asarray(y, dtype=float)) for x, y in pieces]
+    if not pieces:
+        return []
+    for x, y in pieces:
+        if x.ndim != 1 or y.shape != x.shape:
+            # The generic path words every error the same way.
+            compress_flat(x, y, LINLIN)
+    lengths = np.array([len(x) for x, _ in pieces])
+    x = np.concatenate([p[0] for p in pieces])
+    y = np.concatenate([p[1] for p in pieces])
+    ends = np.cumsum(lengths)
+    starts = ends - lengths
+    if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+        raise ValueError("table has non-finite values")
+    inside = np.ones(max(len(x) - 1, 0), dtype=bool)
+    inside[ends[:-1] - 1] = False
+    if np.any(np.diff(x)[inside] < 0):
+        raise ValueError("abscissae must be non-decreasing")
+    negative_zero = (y == 0) & np.signbit(y)
+    keep = np.ones(len(x), dtype=bool)
+    if len(x) > 2:
+        keep[1:-1] = ~((y[:-2] == y[1:-1]) & (y[1:-1] == y[2:])
+            & (x[:-2] < x[1:-1]) & (x[1:-1] < x[2:])
+            & ~negative_zero[:-2] & ~negative_zero[1:-1] & ~negative_zero[2:])
+    keep[starts] = True
+    keep[ends - 1] = True
+    counts = np.add.reduceat(keep.astype(np.int64), starts)
+    bounds = np.cumsum(counts)
+    kept_x = x[keep]
+    with np.errstate(over='ignore'):
+        overflow = ~np.isfinite(np.diff(kept_x))
+    overflow[bounds[:-1] - 1] = False
+    if overflow.any():
+        # A piece whose kept span overflows keeps every node, as the generic
+        # path does; only those pieces, so the rest are cut below as usual.
+        for piece in np.unique(np.searchsorted(bounds, np.flatnonzero(overflow), side='right')):
+            keep[starts[piece]:ends[piece]] = True
+        counts = np.add.reduceat(keep.astype(np.int64), starts)
+        bounds = np.cumsum(counts)
+        kept_x = x[keep]
+    kept_y = y[keep]
+    # The pieces are views of one kept array per input, and their laws views
+    # of one read-only LINLIN array: no piece aliases the input or another.
+    laws = np.full(int(counts.max()), LINLIN, dtype=np.int64)
+    laws.setflags(write=False)
+    edges = np.r_[0, bounds]
+    return [(kept_x[a:b], kept_y[a:b], laws[:max(b - a - 1, 0)])
+            for a, b in zip(edges[:-1].tolist(), edges[1:].tolist())]
 
 
 def union(grids: Iterable[np.ndarray], steps: Iterable[float] = ()) -> np.ndarray:

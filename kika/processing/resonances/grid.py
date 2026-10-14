@@ -74,7 +74,30 @@ def check_dense_workspace(size,work_bytes):
 
 
 def linearize(evaluate, seeds, options, point_budget, *, constants=None, deferred=None):
+    """:func:`linearize_steps` driven by *evaluate* (energies -> {MT: values})."""
+    from kika.algebra import drive
+    return drive(linearize_steps(seeds,options,point_budget,constants=constants,deferred=deferred),
+                 lambda request:evaluate(request[0]))
+
+
+def _requests_of(steps, columns, mts):
+    """Pass a refinement's requests up as energies, its answers back as columns."""
+    try:
+        request=next(steps)
+        while True:
+            request=steps.send(columns((yield request[0],mts)))
+    except StopIteration as stop:
+        return stop.value
+
+
+def linearize_steps(seeds, options, point_budget, *, constants=None, deferred=None):
     """Refine independent seed-panel chunks on the same shared reaction mesh.
+
+    A generator: it yields ``(energies, mts)`` and is sent ``{MT: values}``
+    there, for every MT or, when *mts* is a tuple, at least for those; it
+    returns ``(grid, values, check)``. :func:`linearize` drives it
+    with one function; the suite advances many segments together so that
+    their resonance physics is evaluated in one batch.
 
     The workspace target sizes starting chunks; final tables and an adaptive
     chunk's growth are additional storage. It is not a bound on process RSS.
@@ -92,19 +115,19 @@ def linearize(evaluate, seeds, options, point_budget, *, constants=None, deferre
     x=np.unique(np.asarray(seeds,dtype=float))
     if len(x)>point_budget:
         raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
-    first=evaluate(x)
+    first=yield x,None
     count=max(1,sum(mt not in (constants or {}) and mt not in (deferred or {}) for mt in first))
     # Conservative live-array estimate for seven probes, sorting, chords,
     # ratios, kept probes, and child panels. Adaptive growth remains explicit.
     panels=max(1,min(4096,options.max_work_bytes//(1024*(count+1))))
     if len(x)-1<=panels:
-        return _linearize_chunk(evaluate,x,options,point_budget,first=first,constants=constants,deferred=deferred)
+        return (yield from _linearize_chunk(x,options,point_budget,first=first,constants=constants,deferred=deferred))
     chunks=[];checks=[];points=0
     for start in range(0,len(x)-1,panels):
         end=min(start+panels,len(x)-1)
         future_seeds=len(x)-end-1
         budget=point_budget-points-future_seeds+(1 if start else 0)
-        grid,values,check=_linearize_chunk(evaluate,x[start:end+1],options,budget,
+        grid,values,check=yield from _linearize_chunk(x[start:end+1],options,budget,
             first={mt:v[start:end+1] for mt,v in first.items()},constants=constants,deferred=deferred)
         keep=slice(1,None) if start else slice(None)
         chunks.append((grid[keep],{mt:v[keep] for mt,v in values.items()}))
@@ -124,7 +147,7 @@ def linearize(evaluate, seeds, options, point_budget, *, constants=None, deferre
     return grid,values,check
 
 
-def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, constants=None, deferred=None):
+def _linearize_chunk(seeds, options, point_budget, *, first=None, constants=None, deferred=None):
     """Return a common grid, values and checks; retain node evaluations.
 
     The refinement itself is :func:`kika.algebra.refine`, the one adaptive
@@ -134,12 +157,12 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
     its worst tested probe and midpoint. Exact previous-pass probes are reused
     on new panels; only missing energies are evaluated.
     """
-    from kika.algebra import RefinementError, refine
+    from kika.algebra import RefinementError, refine_steps
 
     x=np.unique(np.asarray(seeds,dtype=float))
     if len(x)>point_budget:
         raise ReconstructionConvergenceError('seed grid exceeds max_points',category='budget-exhausted')
-    first=evaluate(x) if first is None else first
+    if first is None:first=yield x,None
     seeded=len(x)
     constants={} if constants is None else constants
     deferred={} if deferred is None else deferred
@@ -150,11 +173,11 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
     columns=lambda values:np.column_stack([np.asarray(values[mt],dtype=float) for mt in mts])
     fractions=np.r_[REFINEMENT_FRACTIONS,VERIFICATION_FRACTIONS]
     try:
-        result=refine(x,columns(first),lambda q,owner:columns(evaluate(q)),
+        result=yield from _requests_of(refine_steps(x,columns(first),
                       lambda actual,linear:error_ratio(actual,linear,options)/.5,
                       fractions=fractions,insert='balanced',max_passes=options.max_iterations,
                       max_points=point_budget,keep_probes=True,
-                      precheck=3,reuse_probes=True)
+                      precheck=3,reuse_probes=True),columns,tuple(mts))
     except RefinementError as exc:
         message={'points':'refinement exceeds max_points',
                  'passes':'refinement exceeds max_iterations',
@@ -191,7 +214,7 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
             # Release retained candidate probes before allocating the retry.
             result=x=y=probes=actual=actual_fractions=samples=linear=ratio=None
             factors=factor=energy=a=None
-            grid,values,check=_linearize_chunk(evaluate,seeds,options,point_budget,
+            grid,values,check=yield from _linearize_chunk(seeds,options,point_budget,
                 first=first,constants=constants)
             check['evaluations']+=extra_evaluations
             return grid,values,check
@@ -211,18 +234,19 @@ def _linearize_chunk(evaluate, seeds, options, point_budget, *, first=None, cons
         value=constants[mt]
         y[mt]=np.full(len(x),value)
         maxima[mt]=(0.,0.)
-        integrals[mt]={}
-        for name,factor in factors:
-            # Many modeled partials are identically zero on a resonance
-            # span. Their quadrature is the same calculation; do it once
-            # per constant, preserving the original reduction order.
-            token=(name,float(value).hex())
-            if token not in constant_integrals:
-                constant_integrals[token]=(float(np.sum(factor*value)),
-                                            float(np.sum(factor*0.)))
-            estimate,difference=constant_integrals[token]
-            integrals[mt][name]=dict(reference_estimate=estimate,
-                linear_estimate=estimate,absolute_difference_estimate=difference)
+        # Many modeled partials are identically zero on a resonance span.
+        # Their quadrature is the same calculation; do it once per constant,
+        # preserving the original reduction order, and report it once: a
+        # material cut into thousands of segments has hundreds of constant
+        # partials in each, and a dict apiece held 330 MB (JENDL-5 Cl-35).
+        token=float(value).hex()
+        if token not in constant_integrals:
+            constant_integrals[token]={}
+            for name,factor in factors:
+                estimate,difference=float(np.sum(factor*value)),float(np.sum(factor*0.))
+                constant_integrals[token][name]=dict(reference_estimate=estimate,
+                    linear_estimate=estimate,absolute_difference_estimate=difference)
+        integrals[mt]=constant_integrals[token]
     y={mt:y[mt] for mt in first}
     return x,y,dict(iterations=result.passes,evaluations=seeded+result.evaluations,
                    refinement_maxima={mt:v[0] for mt,v in maxima.items()},

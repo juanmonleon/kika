@@ -5,7 +5,7 @@ and never edited by reconstruction. The supported material is a neutron/lab
 suite whose resonance ranges are supported and whose additive sums close.
 """
 from copy import deepcopy
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import InitVar, dataclass, field, fields, is_dataclass
 from enum import Enum
 import hashlib
 import re
@@ -16,7 +16,7 @@ from .assemble import BackgroundCurve, prepare_backgrounds
 from .breit_wigner import evaluate_bw
 from .prepare import evaluate_region, group_radii, group_knots, group_breaks, region_mts
 from .context import NeutronContext
-from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize, error_ratio, verification_batches
+from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize_steps, error_ratio, verification_batches
 from .prepare import PreparedResonances, prepare_resonances, UnsupportedResonanceError
 from .tabulate import _Segment, _seeds
 
@@ -29,6 +29,12 @@ class ReactionKey:
     """Model identity; MT is used only to project BW partials and ENDF output."""
     container: str
     label: str
+
+    def __hash__(self):
+        # Equality still compares both fields. The label alone is the cheap
+        # part of the identity, and keys are hashed tens of millions of times
+        # tabulating a material cut into thousands of segments.
+        return hash(self.label)
 
 
 def _entries(suite):
@@ -192,6 +198,19 @@ def _curves(forms):
     return out
 
 
+def _knots_in(curve,low,high):
+    """The knots of *curve* in [low, high], without reading the rest of it."""
+    x=curve._x
+    return x[np.searchsorted(x,low,'left'):np.searchsorted(x,high,'right')]
+
+
+def _laws_over(curve,low,high):
+    """The laws of the intervals of *curve* that overlap (low, high)."""
+    x=curve._x
+    laws=np.broadcast_to(curve._laws,(len(x)-1,))
+    return laws[max(int(np.searchsorted(x,low,'right'))-1,0):int(np.searchsorted(x,high,'left'))]
+
+
 @dataclass(frozen=True)
 class _SuiteSegment:
     low: float
@@ -200,23 +219,47 @@ class _SuiteSegment:
     region: object
     left_high: bool
     _shared_linear: object=field(init=False,repr=False,compare=False)
+    shared_cache: InitVar[object]=None
 
-    def __post_init__(self):
+    def __post_init__(self,shared_cache):
+        # Segments of one material share their curves; a tape whose
+        # backgrounds step every few hundred eV has thousands of segments,
+        # and reading every whole curve again for each made this quadratic.
+        identity=tuple((key,id(curve)) for key,curve in self.curves.items())
+        if shared_cache is not None and identity in shared_cache:
+            object.__setattr__(self,'_shared_linear',shared_cache[identity][1])
+            return
         from kika.algebra.prepared import _prepare_shared_linear_evaluator
+        # Backgrounds are split at their jumps, so the set of curves changes
+        # from segment to segment; what each curve contributes (its grid and
+        # laws, and whether it is uniformly lin-lin) is worked out once.
+        per_curve,grids,readers=({},{},{}) if shared_cache is None else (
+            shared_cache.setdefault('curves',{}),shared_cache.setdefault('grids',{}),
+            shared_cache.setdefault('readers',{}))
         groups={}
         for key,curve in self.curves.items():
             if curve is None or len(curve.x)<2:continue
-            laws=tuple(np.broadcast_to(curve._laws,(len(curve.x)-1,)))
-            # Uniform lin-lin tables already use NumPy's efficient interp.
-            if all(law==2 for law in laws):continue
-            groups.setdefault((tuple(curve.x),laws),[]).append((key,curve))
+            known=per_curve.get(id(curve))
+            if known is None:
+                laws=tuple(np.broadcast_to(curve._laws,(len(curve.x)-1,)))
+                # Uniform lin-lin tables already use NumPy's efficient interp.
+                grid=None if all(law==2 for law in laws) else grids.setdefault((tuple(curve.x),laws),len(grids))
+                known=per_curve[id(curve)]=(curve,grid)
+            if known[1] is not None:groups.setdefault(known[1],[]).append((key,curve))
+        table={grid:shape for shape,grid in grids.items()} if groups else {}
         shared=[]
-        for (x,laws),members in groups.items():
+        for grid,members in groups.items():
             if len(members)<2:continue
-            ys=np.column_stack([curve.y for _,curve in members])
-            shared.append((tuple(key for key,_ in members),
-                           _prepare_shared_linear_evaluator(x,ys,laws)))
+            token=(grid,)+tuple((key,id(curve)) for key,curve in members)
+            if token not in readers:
+                x,laws=table[grid]
+                ys=np.column_stack([curve.y for _,curve in members])
+                readers[token]=(tuple(curve for _,curve in members),_prepare_shared_linear_evaluator(x,ys,laws))
+            shared.append((tuple(key for key,_ in members),readers[token][1]))
         object.__setattr__(self,'_shared_linear',tuple(shared))
+        if shared_cache is not None:
+            # The curves are held so their ids stay theirs.
+            shared_cache[identity]=(tuple(self.curves.values()),self._shared_linear)
 
 
 @dataclass(frozen=True)
@@ -235,11 +278,27 @@ class SuiteReconstructionResult:
     _physical_owners: object
     _grids: tuple=()
     _verification_cache: object=field(default_factory=dict,init=False,repr=False,compare=False)
+    _columns_cache: object=field(default_factory=dict,init=False,repr=False,compare=False)
 
-    def _evaluate_segment(self,s,points,include_resonances=True,*,physical_witness=None,constant_values=None,shared_linear=True):
+    def _wanted(self,only):
+        """*only* and every reaction their sums are made of."""
+        wanted=self._columns_cache.get(only)
+        if wanted is None:
+            wanted=set();stack=list(only)
+            while stack:
+                key=stack.pop()
+                if key in wanted:continue
+                wanted.add(key);stack.extend(self._graph.get(key,()))
+            self._columns_cache[only]=wanted
+        return wanted
+
+    def _evaluate_segment(self,s,points,include_resonances=True,*,physical_witness=None,constant_values=None,shared_linear=True,physics=None,only=None,backgrounds=None):
+        """Every reaction at *points*, or, with *only*, at least those (and
+        what their sums need); each is computed as it is for the full set."""
         e=np.asarray(points,dtype=float).copy()
         if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
         constant_values={} if constant_values is None else constant_values
+        wanted=None if only is None else self._wanted(only)
         grouped={}
         # Verification keeps the ordinary background readers and evaluates the
         # physics exactly (direct capture, no Gram contraction).
@@ -248,21 +307,36 @@ class SuiteReconstructionResult:
                 needed=[(i,key) for i,key in enumerate(keys) if key not in constant_values
                         and (not include_resonances or key not in self._graph)]
                 if len(needed)<2:continue
+                if wanted is not None and not any(key in wanted for _,key in needed):continue
                 batch=reader(e,max_cells=max(1,min(65536,self.options.max_work_bytes//64)))
                 if batch is not None:grouped.update((key,batch[:,i]) for i,key in needed)
-        values={}
+        values={};shared={}
         for key,curve in s.curves.items():
-            if key in constant_values:values[key]=np.full(len(e),constant_values[key])
+            if wanted is not None and key not in wanted:continue
+            # One read-only array per constant: constants are only read, by
+            # sums and columns, and most of them are the same zero (keyed by
+            # its bits, so that -0.0 keeps its sign).
+            if key in constant_values:
+                value=constant_values[key];token=float(value).hex()
+                if token not in shared:
+                    shared[token]=np.full(len(e),value);shared[token].setflags(write=False)
+                values[key]=shared[token]
             elif key in grouped:values[key]=grouped[key]
             elif curve is not None and (not include_resonances or key not in self._graph):
-                values[key]=curve.evaluate(e)
+                values[key]=backgrounds[key] if backgrounds is not None and key in backgrounds else curve.evaluate(e)
             else:values[key]=np.zeros(len(e))
-        total=self._mt_keys.get(1)
-        total_parts=_sum_leaves(total,self._graph) if total is not None else None
+        if 'total_parts' not in self._columns_cache:
+            total=self._mt_keys.get(1)
+            self._columns_cache['total_parts']=_sum_leaves(total,self._graph) if total is not None else None
+        total_parts=self._columns_cache['total_parts']
         if include_resonances and s.region is not None:
-            for start in range(0,len(e),self.options.block_size):
-                sl=slice(start,start+self.options.block_size)
-                if physical_witness is not None and start in physical_witness:
+            # Precomputed physics (``_answer``) is one block over every energy.
+            blocks=[0] if physics is not None else range(0,len(e),self.options.block_size)
+            for start in blocks:
+                sl=slice(None) if physics is not None else slice(start,start+self.options.block_size)
+                if physics is not None:
+                    physical=physics
+                elif physical_witness is not None and start in physical_witness:
                     saved_e,physical=physical_witness[start]
                     if not np.array_equal(saved_e,e[sl]):raise ValueError('physical witness energy mismatch')
                 else:
@@ -286,12 +360,92 @@ class SuiteReconstructionResult:
                     if key is not None and key not in self._graph:
                         if total_parts is not None and key not in total_parts and np.any(value!=0):
                             raise UnsupportedResonanceError(f'total graph omits resonance partial MT{mt}',category='incomplete-total-graph')
-                        values[key][sl]+=value
+                        if key in values:values[key][sl]+=value
                     elif np.any(value!=0):raise UnsupportedResonanceError(f'MF2 partial MT{mt} has no exclusive model reaction')
+        checked=values
         if include_resonances:
-            for key in self._order:values[key]=sum((values[part] for part in self._graph[key]),np.zeros(len(e)))
-        if any(np.any(~np.isfinite(v)) for v in values.values()):raise FloatingPointError('nonfinite suite cross section')
+            for key in self._order:
+                if wanted is None or key in wanted:
+                    values[key]=sum((values[part] for part in self._graph[key]),np.zeros(len(e)))
+            checked=self._finite_witnesses(only,values)
+        if any(np.any(~np.isfinite(values[key])) for key in checked):raise FloatingPointError('nonfinite suite cross section')
         return values
+
+    def _finite_witnesses(self,only,values):
+        """The reactions whose finiteness implies that of all *values*.
+
+        A sum is not finite when any of its parts is not (a NaN propagates;
+        an infinity stays one or, against an opposite one, becomes NaN), so
+        the sums just formed and the reactions in none of them are enough.
+        """
+        token=('finite',only)
+        keys=self._columns_cache.get(token)
+        if keys is None:
+            sums=[key for key in self._order if key in values]
+            covered=set()
+            for key in sums:covered|=self._wanted((key,))
+            keys=tuple(key for key in values if key in sums or key not in covered)
+            self._columns_cache[token]=keys
+        return keys
+
+    def _answer(self,requests):
+        """Values for many ``(segment, (energies, mts), constants)`` requests at once.
+
+        The resonance physics of every request on one region is one batch,
+        in request order and blocks of ``block_size``; the rest is
+        :meth:`_evaluate_segment`, request by request.
+        """
+        physics=[None]*len(requests);regions={};adjusted=[];curves={}
+        for n,(s,(points,only),constants) in enumerate(requests):
+            e=np.asarray(points,dtype=float).copy()
+            if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
+            adjusted.append(e)
+            if s.region is not None:regions.setdefault(id(s.region),(s.region,[]))[1].append(n)
+            for key,curve in self._plain_curves(s,constants,only):
+                curves.setdefault(id(curve),(curve,[]))[1].append((n,key))
+        # A background curve is read elementwise and one curve spans many
+        # segments: read it once over every request that needs it.
+        backgrounds=[{} for _ in requests]
+        for curve,members in curves.values():
+            values=curve.evaluate(np.concatenate([adjusted[n] for n,_ in members]));end=0
+            for n,key in members:
+                backgrounds[n][key]=values[end:end+len(adjusted[n])];end+=len(adjusted[n])
+        context=self._prepared.context;size=self.options.block_size
+        for region,members in regions.values():
+            self._check_competitive_owners(region)
+            energies=[adjusted[n] for n in members]
+            flat=np.concatenate(energies);blocks=[]
+            for start in range(0,len(flat),size):
+                e=flat[start:start+size]
+                physical=evaluate_region(e,region,context,work_bytes=self.options.max_work_bytes,
+                    absorption_rtol=min(1e-8,self.options.rtol*1e-5))
+                blocks.append(_subtract_competitive(physical,region,context,e))
+            keys=list(blocks[0])
+            if any(list(b)!=keys for b in blocks):raise ValueError('resonance blocks disagree on their partials')
+            joined={mt:np.concatenate([b[mt] for b in blocks]) for mt in keys}
+            end=0
+            for n,e in zip(members,energies):
+                physics[n]={mt:v[end:end+len(e)] for mt,v in joined.items()};end+=len(e)
+        return [self._evaluate_segment(s,e,constant_values=c,physics=p,only=only,backgrounds=b)
+                for (s,(e,only),c),p,b in zip(requests,physics,backgrounds)]
+
+    def _plain_curves(self,s,constants,only):
+        """The ``(key, curve)`` that :meth:`_evaluate_segment` reads one by one
+        for this request: not constant, not summed, not in a shared reader."""
+        token=('plain',id(s),id(constants),only)
+        plan=self._columns_cache.get(token)
+        if plan is None:
+            wanted=None if only is None else self._wanted(only)
+            readers=set()
+            for keys,_ in s._shared_linear:
+                needed=[key for key in keys if key not in constants and key not in self._graph]
+                if len(needed)>=2 and (wanted is None or any(key in wanted for key in needed)):readers.update(needed)
+            plain=tuple((key,curve) for key,curve in s.curves.items()
+                        if (wanted is None or key in wanted) and key not in constants and key not in readers
+                        and curve is not None and key not in self._graph)
+            # The segment and constants are held so their ids stay theirs.
+            plan=self._columns_cache[token]=(s,constants,plain)
+        return plan[2]
 
     def _check_competitive_owners(self,region):
         for g in region.groups:
@@ -504,7 +658,10 @@ def _exact_physical_block(region,context,e,work_bytes):
 #: kernel, grid or publication change alters any reconstructed value, so
 #: caches keyed on it are invalidated exactly then.
 #: 2: thresholds below the kinematic one are raised as RECONR does (D37).
-ENGINE_VERSION='kika-native-suite-2'
+#: 3: an RML width of a bound level is referred to its channel energy, not to
+#: |E_lambda| (Ca-40 thermal (n,alpha) x6.4); charged-channel functions and
+#: groups of up to six channels in C; geometric seeds by the decade.
+ENGINE_VERSION='kika-native-suite-3'
 
 
 def _target_awr(suite,context):
@@ -666,7 +823,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 for nbt,law in radius.interpolation:
                     if law==1:cuts.update(x for x in radius.energies[previous:nbt] if r.low<x<r.high)
                     previous=nbt
-    edges=sorted(cuts);segments=[]
+    edges=sorted(cuts);segments=[];shared_cache={}
     for a,b in zip(edges[:-1],edges[1:]):
         region=next((r for r in prepared.regions if r.low<=a and r.high>=b),None)
         local={}
@@ -676,19 +833,29 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             if not candidates and not (b<=cs[0].x[0] or a>=cs[-1].x[-1]):
                 raise UnsupportedResonanceError(f'source function has an uncovered internal gap: {key}',category='internal-gap')
             local[key]=candidates[0] if candidates else None
-        segments.append(_SuiteSegment(a,b,MappingProxyType(local),region,b<high))
+        segments.append(_SuiteSegment(a,b,MappingProxyType(local),region,b<high,shared_cache))
     result=SuiteReconstructionResult(MappingProxyType({}),MappingProxyType({}),source_style,label,options,prepared,
         tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
-    tables=[];checks=[];points=0;source_balance={key:0. for key in graph};source_worst={}
+    tables=[None]*len(segments);checks=[None]*len(segments);points=0
+    source_balance={key:0. for key in graph};source_worst={}
     span=np.log(high/low) if low>0 else None
-    for s in segments:
+    # Segments are tabulated together, a window at a time, so that the
+    # resonance physics of all their refinement passes is evaluated in a few
+    # large batches (``_answer``) rather than one small one per segment and
+    # pass: JENDL-5 Cl-35 cuts its RRR into 3 376 segments. The window holds
+    # at most ``max_work_bytes`` of starting panels, by linearize's own
+    # estimate. Segments start in order, so the source diagnostics are those
+    # of a serial run; each refines under the budget left by the finished
+    # ones, and the total is checked in order at the end.
+    pending={}
+    def tabulate(position,s,budget):
         seed_curves={i:(c,) for i,(key,c) in enumerate(s.curves.items()) if c is not None and key not in graph}
         if s.region is not None:
             seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context)
         else:
             # Original knots suffice for linear fast-region data. Inserting
             # unnecessary near-threshold points amplifies ENDF x-rounding.
-            seeds=sorted({s.low,s.high}|{x for c in seed_curves.values() for x in c[0].x if s.low<=x<=s.high})
+            seeds=sorted({s.low,s.high}|{float(x) for c in seed_curves.values() for x in _knots_in(c[0],s.low,s.high)})
             for cs in seed_curves.values():
                 c=cs[0]
                 if c.x[-1]==s.high and c.endpoint_jump:
@@ -698,7 +865,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # sums are derived even if the redundant source aggregate disagrees.
         # Redundant aggregates inform diagnostics, not the reconstructed mesh.
         # Keep their original knots in this separate source-comparison grid.
-        diagnostic_seeds=set(seeds)|{x for c in s.curves.values() if c is not None for x in c.x if s.low<=x<=s.high}
+        diagnostic_seeds=set(seeds)|{float(x) for c in s.curves.values() if c is not None for x in _knots_in(c,s.low,s.high)}
         grid=np.asarray(sorted(diagnostic_seeds))
         probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
         original=result._evaluate_segment(s,probe,False)
@@ -725,9 +892,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         deferred={}
         for key,curve in s.curves.items():
             if key in graph or key in affected or key in constants or curve is None:continue
-            source_x=np.asarray(curve.x)
-            laws=np.broadcast_to(curve.law,(len(source_x)-1,))
-            relevant=(source_x[:-1]<high)&(source_x[1:]>s.low)
+            laws,relevant=_laws_over(curve,s.low,high),slice(None)
             # Source knots are included in seeds, so these untouched columns
             # are affine inside each seed panel. Still check all seven final
             # probes; a failure falls back to the full adaptive column set.
@@ -737,27 +902,54 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                     if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
                     return curve.evaluate(e)
                 deferred[key]=read
-        x,y,check=linearize(lambda e:result._evaluate_segment(s,e,constant_values=constants),
-            seeds,options,options.max_points-points,constants=constants,deferred=deferred)
-        points+=len(x);tables.append((x,y));checks.append(dict(domain=(s.low,s.high),points=len(x),**check))
+        work=min(len(seeds),max(1,options.max_work_bytes//1024))*(len(s.curves)-len(constants)-len(deferred)+1)*1024
+        pending[position]=(constants,work)
+        x,y,check=yield from linearize_steps(seeds,options,budget,constants=constants,deferred=deferred)
+        return x,y,check
+    live={};started=0;finished=0.;done=0;working=0
+    def finish(index,value):
+        nonlocal finished,done,working
+        x,y,check=value;s=segments[index]
+        tables[index]=(x,y);checks[index]=dict(domain=(s.low,s.high),points=len(x),**check)
+        done+=len(x)
+        if index in live:working-=pending[index][1]
+        pending.pop(index,None)
         if progress is not None:
-            progress(float(min(1.,np.log(s.high/low)/span)) if span else len(tables)/len(segments))
+            finished=max(finished,float(min(1.,np.log(s.high/low)/span)) if span else
+                         sum(t is not None for t in tables)/len(segments))
+            progress(finished)
+    while started<len(segments) or live:
+        while started<len(segments) and (not live or working<options.max_work_bytes):
+            index=started;started+=1
+            generator=tabulate(index,segments[index],options.max_points-done)
+            try:request=next(generator)
+            except StopIteration as stop:finish(index,stop.value)
+            else:live[index]=[generator,request];working+=pending[index][1]
+        order_live=sorted(live)
+        answers=result._answer([(segments[i],live[i][1],pending[i][0]) for i in order_live])
+        for i,values in zip(order_live,answers):
+            try:live[i][1]=live[i][0].send(values)
+            except StopIteration as stop:
+                finish(i,stop.value);del live[i]
+    for x,_ in tables:
+        points+=len(x)
+        if points>options.max_points:
+            raise ReconstructionConvergenceError('refinement exceeds max_points',category='budget-exhausted')
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')]);output={}
-    from kika.algebra import compress_flat
+    from kika.algebra import compress_flat_pieces
+    owned=[{physical_owners.get(mt) for mt in region_mts(s.region)} if s.region is not None else set()
+           for s in segments]
     for key in entries:
-        children=[]
+        pieces=[]
         for i,(x,y) in enumerate(tables):
             s=segments[i];curve=s.curves[key]
-            affected=s.region is not None and key in {physical_owners.get(mt) for mt in region_mts(s.region)}
-            if curve is not None and key not in graph and not affected:
-                original_x=np.asarray(curve.x)
-                laws=np.broadcast_to(curve.law,(len(original_x)-1,))
-                relevant=(original_x[:-1]<s.high)&(original_x[1:]>s.low)
-                if np.all(laws[relevant]==2):
+            if curve is not None and key not in graph and key not in owned[i]:
+                original_x=curve._x
+                if np.all(_laws_over(curve,s.low,s.high)==2):
                     # An untouched lin-lin background already has an exact
                     # representation on its own knots. It need not inherit
                     # every other reaction's resonance or fast-region knot.
-                    x=np.unique(np.r_[s.low,original_x[(original_x>s.low)&(original_x<s.high)],s.high])
+                    x=np.unique(np.r_[s.low,original_x[np.searchsorted(original_x,s.low,'right'):np.searchsorted(original_x,s.high,'left')],s.high])
                     if not s.left_high and original_x[-1]==s.high and curve.endpoint_jump:
                         x=np.unique(np.r_[x,np.nextafter(s.high,s.low)])
                     query=x.copy()
@@ -765,8 +957,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                     values=curve.evaluate(query)
                 else:values=y[key]
             else:values=y[key]
-            cx,cy,_=compress_flat(x,values,2)
-            children.append(XYs1d(cx,cy,axes=axes,index=i))
+            pieces.append((x,values))
+        children=[XYs1d(cx,cy,axes=axes,index=i) for i,(cx,cy,_) in enumerate(compress_flat_pieces(pieces))]
         output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
         output[key].label=label
     normalized_hash=hashlib.sha256((source_hash+repr(context)+repr(options)).encode()).hexdigest()
