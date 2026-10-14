@@ -3,14 +3,13 @@
 The format OpenMC's continuous-energy transport reads (``cross_sections.xml``
 plus one ``.h5`` per nuclide, thermal material or element): **processed** data,
 every temperature of a nuclide in one file, organised by reaction and product.
-It plays the part ACE plays for MCNP. The plan is
-``kika-workspace/docs/library/openmc_hdf5_roadmap.md``; the format reference is
-``openmc_hdf5_format_survey.md`` beside it, built from OpenMC v0.16.0's source.
+It plays the part ACE plays for MCNP. The layouts are read from OpenMC
+v0.16.0's source. How kika reads and writes the format is documented in the
+manual's methods chapter (``methods/formats/hdf5``).
 
-OpenMC is **not** a dependency of kika, not even an optional one (roadmap D3):
-the files are read and written with h5py, against what OpenMC's C++ reads, and
-checking against a real OpenMC happens outside the library
-(``kika-workspace/kika_dev/hdf5/``).
+OpenMC is **not** a dependency of kika, not even an optional one: the files
+are read and written with h5py, against what OpenMC's C++ reads, and checking
+against a real OpenMC happens outside the library.
 
 Layers, bottom up:
 
@@ -34,13 +33,15 @@ _LAZY = {
     "CrossSectionsXml": "library",
     "read": "api",
     "write": "api",
-    "writeSuite": "neutron_encode",
-    "patch_library": "patch",
+    "writeSuite": "writer",
+    "processSuite": "processing",
 }
 
 _SUBMODULES = ("records", "library", "names", "functions", "distributions",
                "neutron_decode", "neutron_encode", "thermal_decode",
-               "thermal_encode", "patch", "api", "tables")
+               "thermal_encode", "api", "tables", "writer", "processing",
+               "thermal_processing", "ace_thermal", "contract", "compare",
+               "fission_energy", "exceptions")
 
 
 def __getattr__(name):
