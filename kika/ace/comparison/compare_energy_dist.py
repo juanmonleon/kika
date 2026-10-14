@@ -167,7 +167,7 @@ def compare_delayed_neutron_dist(ace1: Ace, ace2: Ace, tolerance: float, verbose
         dist1 = ace1.energy_distributions.get_delayed_neutron_distribution(i)
         dist2 = ace2.energy_distributions.get_delayed_neutron_distribution(i)
         
-        if not compare_energy_distribution(dist1, dist2, tolerance, f"Delayed neutron group {i}", verbose):
+        if not compare_distribution_lists(dist1, dist2, tolerance, f"Delayed neutron group {i}", verbose):
             return False
     
     return True

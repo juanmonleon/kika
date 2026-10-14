@@ -8,6 +8,7 @@ from kika.ace.classes.angular_distribution.distributions.equiprobable import Equ
 from kika.ace.classes.angular_distribution.distributions.tabulated import TabulatedAngularDistribution
 from kika.ace.classes.angular_distribution.distributions.kalbach_mann import KalbachMannAngularDistribution
 import logging
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -120,9 +121,9 @@ def read_and_block(ace: Ace, and_idx: int, debug: bool = False) -> None:
     # LOCB(2..NXS(5)+1) belong to the first NXS(5) reactions of the MTR block,
     # the ones that emit neutrons (manual Tables 16-17).
     if len(locators.incident_neutron) > len(mts):
-        logger.warning(
-            f"LAND has {len(locators.incident_neutron)} reaction locators but MTR only "
-            f"{len(mts)} MTs; the angular distributions past MTR are not read")
+        lost(ace, "AND", "",
+             f"LAND has {len(locators.incident_neutron)} reaction locators but MTR only "
+             f"{len(mts)} MTs; the angular distributions past MTR are not read")
     for i, locb_entry in enumerate(locators.incident_neutron[:len(mts)]):
         locb_value = int(locb_entry)
         mt_value = int(mts[i])
@@ -144,19 +145,19 @@ def read_and_block(ace: Ace, and_idx: int, debug: bool = False) -> None:
             )
             continue
         if locb_value < -1:
-            logger.warning(f"Invalid LAND locator {locb_value} for MT={mt_value}; angular distribution not read")
+            lost(ace, "AND", f"MT={mt_value}", f"LAND locator {locb_value} is not valid")
             continue
 
         data_idx = and_idx + locb_value - 1
         if debug:
             logger.debug(f"Angular distribution data index: and_idx + locb - 1 = {and_idx} + {locb_value} - 1 = {data_idx}")
         if data_idx >= len(ace.xss_data):
-            logger.warning(f"AND locator for MT={mt_value} points past the XSS array ({data_idx}); not read")
+            lost(ace, "AND", f"MT={mt_value}", f"locator points past the XSS array ({data_idx})")
             continue
         try:
             dist = read_angular_distribution(ace, data_idx, mt_value, and_idx, debug)
         except ValueError as e:
-            logger.warning(f"Angular distribution for MT={mt_value} could not be read: {e}")
+            lost(ace, "AND", f"MT={mt_value}", str(e))
             continue
         ace.angular_distributions.incident_neutron[mt_value] = dist
 
@@ -255,7 +256,7 @@ def read_andp_block(ace: Ace, andp_idx: int, debug: bool = False) -> None:
             
             # Check if the index is valid before trying to read
             if data_idx < 0 or data_idx >= len(ace.xss_data):
-                logger.error(f"ERROR: Invalid angular distribution index for photon production MT={mt_value}: {data_idx} out of bounds")
+                lost(ace, "ANDP", f"MT={mt_value}", f"locator points past the XSS array ({data_idx})")
                 error_count += 1
                 continue
             
@@ -275,8 +276,7 @@ def read_andp_block(ace: Ace, andp_idx: int, debug: bool = False) -> None:
                             sample = [dist.cosine_bins[0][j] for j in range(min(3, len(dist.cosine_bins[0])))]
                             logger.debug(f"  First 3 cosine values: {sample}")
             except ValueError as e:
-                error_msg = f"ERROR reading photon production distribution for MT={mt_value}: {e}"
-                logger.error(error_msg)
+                lost(ace, "ANDP", f"MT={mt_value}", str(e))
                 error_count += 1
                 continue
         
@@ -360,6 +360,7 @@ def read_angular_distribution_photon(ace: Ace, data_idx: int, andp_idx: int, mt_
             # Add 33 values from -1 to 1 (uniformly spaced)
             cosines = np.array([-1.0 + j * (2.0 / 32) for j in range(33)])
             distribution._cosine_bins.append(cosines)
+            distribution.energy_forms.append("isotropic")
             if debug:
                 logger.debug(f"Using isotropic distribution for energy point {i} ({energies[i]})")
             continue
@@ -377,6 +378,7 @@ def read_angular_distribution_photon(ace: Ace, data_idx: int, andp_idx: int, mt_
         # Read the 33 cosine values for 32 equiprobable bins
         cosines = ace.xss_data[data_loc:data_loc + 33]
         distribution._cosine_bins.append(cosines)
+        distribution.energy_forms.append("equiprobable")
         
         if debug and i == 0:  # Print details for first energy only to avoid verbose output
             logger.debug(f"Cosine bins for first energy: {cosines[:5].tolist()}... (showing first 5)")
@@ -457,8 +459,7 @@ def read_andh_blocks(ace: Ace, debug: bool = False) -> None:
                         continue
                     
                     if andh_ptr > len(ace.xss_data):
-                        if debug:
-                            logger.debug(f"ANDH pointer {andh_ptr} is out of bounds, skipping particle")
+                        lost(ace, "ANDH", "", f"ANDH pointer {andh_ptr} is out of bounds, skipping particle")
                         continue
                     
                 else:
@@ -529,7 +530,7 @@ def read_andh_blocks(ace: Ace, debug: bool = False) -> None:
             
             # Check if the index is valid before trying to read
             if data_idx < 0 or data_idx >= len(ace.xss_data):
-                logger.error(f"ERROR: Invalid angular distribution index for particle {particle_idx}, MT={mt_value}: {data_idx} out of bounds")
+                lost(ace, "ANDH", f"particle {particle_idx} MT={mt_value}", f"locator points past the XSS array ({data_idx})")
                 error_count += 1
                 continue
             
@@ -543,7 +544,7 @@ def read_andh_blocks(ace: Ace, debug: bool = False) -> None:
                     if debug:
                         logger.debug(f"Read particle production distribution for particle {particle_idx}, MT={mt_value}")
             except ValueError as e:
-                logger.error(f"ERROR reading particle {particle_idx} distribution for MT={mt_value}: {e}")
+                lost(ace, "ANDH", f"particle {particle_idx} MT={mt_value}", str(e))
                 error_count += 1
                 continue
         
@@ -698,6 +699,7 @@ def read_equiprobable_distribution(ace: Ace, base_idx: int, mt_entry: int,
             # Add 33 values from -1 to 1 (uniformly spaced)
             cosines = np.array([-1.0 + j * (2.0 / 32) for j in range(33)])
             distribution._cosine_bins.append(cosines)
+            distribution.energy_forms.append("isotropic")
             
             if debug and i < 3:  # Show first 3 energy points only
                 logger.debug(f"Energy point {i} ({energies[i]} MeV): LOCC=0 → Using isotropic distribution")
@@ -719,6 +721,7 @@ def read_equiprobable_distribution(ace: Ace, base_idx: int, mt_entry: int,
         # Read the 33 cosine values
         cosines = ace.xss_data[data_loc:data_loc + 33]
         distribution._cosine_bins.append(cosines)
+        distribution.energy_forms.append("equiprobable")
         
         if debug and i < 3:  # Show first 3 energy points only
             cosine_values = cosines[:5].tolist()  # Show first 5 cosine values
@@ -777,6 +780,7 @@ def read_tabulated_distribution(ace: Ace, base_idx: int, mt_entry: int,
         locc_value = int(locc_entry)
         
         if locc_value == 0:
+            distribution.energy_forms.append("isotropic")
             # Isotropic distribution at this energy
             # Add a simple two-point distribution: μ=[-1,1], PDF=[0.5,0.5], CDF=[0,1]
             # JJ follows ENDF (1 histogram, 2 lin-lin), which is what NJOY
@@ -805,6 +809,7 @@ def read_tabulated_distribution(ace: Ace, base_idx: int, mt_entry: int,
             if data_loc + 33 > len(ace.xss_data):
                 raise ValueError(f"Equiprobable bin data truncated at energy {energies[i]}")
             edges = np.array(ace.xss_data[data_loc:data_loc + 33])
+            distribution.energy_forms.append("equiprobable")
             widths = np.diff(edges)
             density = np.divide(1.0 / 32.0, widths, out=np.zeros_like(widths), where=widths > 0)
             distribution.interpolation.append(1)
@@ -830,6 +835,7 @@ def read_tabulated_distribution(ace: Ace, base_idx: int, mt_entry: int,
         
         # Read interpolation flag
         interp_flag = int(ace.xss_data[data_loc])
+        distribution.energy_forms.append("tabulated")
         distribution.interpolation.append(interp_flag)
         
         # Read number of points (Np)

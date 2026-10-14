@@ -28,6 +28,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from kika._constants import mf3SumComponents
+
 from kika.nuclear_data.model import (
     AceProvenance,
     ConversionReport,
@@ -197,6 +199,10 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
             suite.reactions.append(reaction)
 
     _attachURR(ace, suite, report)
+    # ACE roadmap A3: AND, DLW, TYR, NU/DNU, BDD and DNED become the products.
+    from .secondaries import attachAceSecondaries
+
+    attachAceSecondaries(ace, suite, report)
     _reportUnconverted(ace, report)
 
     # What ACE genuinely does not have. Stated per item, because "ACE carries no
@@ -215,6 +221,8 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
     from .photons import attachAcePhotons
 
     attachAcePhotons(ace, suite, report, provenance=provenance)
+    _place(ace, suite)
+    _attachHeating(ace, suite, provenance)
     # Both ways to the same object: the tuple is unchanged, and the
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report
@@ -222,59 +230,23 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
 
 
 def _reportUnconverted(ace, report: ConversionReport) -> None:
-    """Name every neutron-side block the file has and this decoder does not convert.
+    """Name every block the file has and this decoder does not convert.
 
-    Only cross sections, Q values, URR references and the photon blocks reach
-    the model. The secondary-neutron distributions, the multiplicities and the
-    delayed-neutron data are in the file and not in the suite, and a
-    conversion that dropped them without a word would read as a file that does
-    not have them. None of it changes a cross section, and the entries say so.
+    Since A3 the neutron angular and energy distributions, the multiplicities
+    and the fission and delayed-neutron data reach the model
+    (:mod:`.secondaries`). The secondary-particle blocks (PTYPE, NTRO, IXS
+    and HPD...YH: protons, alphas and the other charged products) do not, as
+    in OpenMC: they are ACE roadmap A7. None of it changes a cross section.
     """
     SCOPES = ("cross-sections",)
     angular = getattr(ace, "angular_distributions", None)
-    if angular is not None:
-        mts = sorted(int(mt) for mt in getattr(angular, "incident_neutron", {}) or {})
-        if getattr(angular, "elastic", None) is not None:
-            mts = [2] + [mt for mt in mts if mt != 2]
-        if mts:
-            report.unsupportedNode(
-                f"ACE's neutron angular distributions (AND block, MT "
-                f"{', '.join(map(str, mts))}) are not converted",
-                unaffectedScopes=SCOPES)
-        if any(getattr(angular, "particle_production", []) or []):
-            report.unsupportedNode(
-                "ACE's secondary-particle angular distributions are not converted",
-                unaffectedScopes=SCOPES)
     energy = getattr(ace, "energy_distributions", None)
-    if energy is not None:
-        mts = sorted(int(mt) for mt in getattr(energy, "incident_neutron", {}) or {})
-        if mts:
-            report.unsupportedNode(
-                f"ACE's neutron energy distributions (DLW block, MT "
-                f"{', '.join(map(str, mts))}) are not converted",
-                unaffectedScopes=SCOPES)
-        if getattr(energy, "delayed_neutron", None):
-            report.unsupportedNode(
-                "ACE's delayed-neutron energy spectra (DNED block) are not converted",
-                unaffectedScopes=SCOPES)
-        if any(getattr(energy, "particle_production", []) or []):
-            report.unsupportedNode(
-                "ACE's secondary-particle energy distributions are not converted",
-                unaffectedScopes=SCOPES)
-    nubar = getattr(ace, "nubar", None)
-    if nubar is not None:
-        kinds = [name for name in ("prompt", "total", "delayed")
-                 if getattr(nubar, name, None) is not None]
-        if kinds:
-            report.unsupportedNode(
-                f"ACE's nu-bar ({', '.join(kinds)}; NU/DNU blocks) is not converted",
-                unaffectedScopes=SCOPES)
-    delayed = getattr(ace, "delayed_neutron_data", None)
-    if delayed is not None and getattr(delayed, "precursors", None):
+    if (angular is not None and any(getattr(angular, "particle_production", []) or [])) or \
+            (energy is not None and any(getattr(energy, "particle_production", []) or [])):
         report.unsupportedNode(
-            f"ACE's delayed-neutron precursor data (BDD block, "
-            f"{len(delayed.precursors)} groups) is not converted",
-                unaffectedScopes=SCOPES)
+            "ACE's secondary-particle data (IXS: production cross sections, angular and "
+            "energy distributions of charged products) is not converted",
+            unaffectedScopes=SCOPES)
 
 
 def _mtNumbers(ace) -> List[int]:
@@ -306,6 +278,9 @@ def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
 
     energies = np.asarray(reactionData.energies, dtype=float) * MEV_TO_EV
     values = np.asarray(reactionData.xs_values, dtype=float)
+    if mt == 444:
+        # damage-energy production: ACE states MeV·b, the model eV·b (as OpenMC)
+        values = values * MEV_TO_EV
 
     crossSection = CrossSection()
     crossSection[GRIDDED_LABEL] = XYs1d(
@@ -329,32 +304,93 @@ def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
     ), report
 
 
-def _attachURR(ace, suite: ReactionSuite, report: ConversionReport) -> None:
-    """Declare the URR probability tables on the reactions they apply to.
+#: Redundant MTs that are response functions of the processed library, not reactions
+#: (gas production, KERMA, damage energy): ``suite.productions``, as the HDF5 decoder puts them.
+RESPONSE_MTS = (203, 204, 205, 206, 207, 301, 444, 901)
 
-    §16.1.1's ``URR_probabilityTables1d`` is a **reference**, not a container of
-    the tables themselves — it carries an ``href``. The tables are a processed
-    sampling aid, and re-expressing ACE's (cumulative probability, σ) bands as a
-    GNDS node is its own piece of work. Declaring the form with an href says
-    "these exist and here is where they live" rather than silently omitting a
-    block that changes self-shielded reaction rates.
+
+def _place(ace, suite: ReactionSuite) -> None:
+    """Each reaction into the container its role puts it in, as the HDF5 decoder does.
+
+    A reaction is redundant when the MF3 sum rules make it the sum of others
+    the file carries (OpenMC's ``get_reaction_components``): MT 103 beside
+    MT 600-649, MT 18 beside its chances, and the sums kika itself adds
+    (MT 3, 4, 27, 101...). Redundant sums go to ``suite.sums`` as
+    :class:`CrossSectionSum` with their summands, the response functions to
+    ``suite.productions``, and the fission chances, when MT 18 is there, to
+    ``suite.fissionComponents``. Left in ``reactions``, a sum would be counted
+    twice by anything that adds the reactions up (OpenMC's C++ rebuilds the
+    total that way).
     """
+    from kika.nuclear_data.model import Add, CrossSectionSum
+
+    direct = {int(m) for m in getattr(ace.reaction_mt_data, "incident_neutron", [])} | {2}
+    present = {r.ENDF_MT for r in suite.reactions}
+    keep = []
+    for reaction in list(suite.reactions):
+        mt = reaction.ENDF_MT
+        if mt in RESPONSE_MTS:
+            suite.productions.append(reaction)
+            continue
+        components = mf3SumComponents(mt, direct)
+        if (components and components != [mt]) or mt not in direct:
+            total = CrossSectionSum(id=reaction.id, crossSection=reaction.crossSection,
+                                    outputChannel=reaction.outputChannel, provenance=reaction.provenance)
+            for c in components:
+                if c in present:
+                    total.summands.append(Add(
+                        href=f"/reactionSuite/reactions/reaction[@label='MT{c}']/crossSection"))
+            suite.sums.append(total)
+            continue
+        if mt in (19, 20, 21, 38) and 18 in present:
+            suite.fissionComponents.append(reaction)
+            continue
+        keep.append(reaction)
+    suite.reactions = type(suite.reactions)(keep)
+
+
+def _attachHeating(ace, suite: ReactionSuite, provenance) -> None:
+    """ESZ's heating numbers as the KERMA MT301, in eV·b: number × σ_t, as OpenMC builds it.
+
+    ACER stores the heating as an average energy deposited per collision
+    (KERMA/σ_t, MeV); the model and OpenMC store the KERMA itself. Skipped
+    when the file has MT301 in MTR already.
+    """
+    esz = getattr(ace, "esz_block", None)
+    if esz is None or len(esz.heating_numbers) == 0 or suite.findReactionByENDF_MT(301) is not None:
+        return
+    energies = np.asarray(esz.energies, dtype=float) * MEV_TO_EV
+    kerma = np.asarray(esz.heating_numbers, dtype=float) * MEV_TO_EV * np.asarray(esz.total_xs, dtype=float)
+    crossSection = CrossSection()
+    crossSection[GRIDDED_LABEL] = XYs1d(xs=energies, ys=kerma, interpolation=Interpolation.linlin,
+                                        axes=crossSectionAxes(), label=GRIDDED_LABEL)
+    suite.productions.append(Reaction(id=ReactionId(label="MT301", ENDF_MT=301), crossSection=crossSection,
+                                      outputChannel=OutputChannel(), provenance=provenance))
+
+
+def _attachURR(ace, suite: ReactionSuite, report: ConversionReport) -> None:
+    """The URR probability tables, on the reactions they apply to.
+
+    One :class:`ProbabilityTables` (the HDF5 decoder's node: energies in eV, the
+    (N, 6, M) table with the heating row in eV, the INT/ILF/IOA/IFF flags),
+    held by a ``URR_probabilityTables1d`` form of elastic, fission and capture,
+    as OpenMC's ``urr`` group is.
+    """
+    from kika.nuclear_data.model import ProbabilityTables
+
     urr = getattr(ace, "unresolved_resonance", None)
     if urr is None or not getattr(urr, "has_data", False):
         return
-
-    for mt in (1, 2, 18, 102):
+    m = urr.table_length
+    table = np.empty((len(urr.energies), 6, m))
+    for i, t in enumerate(urr.tables):
+        table[i] = [t.cumulative_probabilities, t.total_xs, t.elastic_xs, t.fission_xs, t.capture_xs,
+                    np.asarray(t.heating_numbers, dtype=float) * MEV_TO_EV]
+    tables = ProbabilityTables(energies=np.asarray(urr.energies, dtype=float) * MEV_TO_EV, table=table,
+                               interpolation=int(urr.interpolation), inelastic=int(urr.inelastic_flag),
+                               absorption=int(urr.other_absorption_flag),
+                               multiplySmooth=int(urr.factors_flag) == 1)
+    for mt in (2, 18, 102):
         reaction = suite.findReactionByENDF_MT(mt)
-        if reaction is None:
-            continue
-        reaction.crossSection[URR_LABEL] = URR_probabilityTables1d(
-            href=f"/reactionSuite/reactions/reaction[@label='MT{mt}']/crossSection",
-            label=URR_LABEL,
-        )
-
-    report.unsupportedNode(
-        f"ACE's URR probability tables ({getattr(urr, 'num_energies', 0)} energies "
-        f"x {getattr(urr, 'table_length', 0)} bands) are declared as "
-        f"URR_probabilityTables1d references only; their contents are not "
-        f"converted into GNDS nodes"
-    )
+        if reaction is not None:
+            reaction.crossSection[URR_LABEL] = URR_probabilityTables1d(label=URR_LABEL, table=tables)

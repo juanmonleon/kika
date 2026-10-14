@@ -39,7 +39,9 @@ class EnergyDistribution:
             24: "Tabular Energy Multipliers",
             44: "Kalbach-Mann Correlated Energy-Angle Distribution",
             61: "Correlated Energy-Angle Distribution",
-            66: "N-body Phase Space Distribution"
+            33: "Level Scattering of a Produced Particle",
+            66: "N-body Phase Space Distribution",
+            67: "Laboratory Angle-Energy Distribution",
         }
         return law_names.get(self.law, f"Unknown Law {self.law}")
     

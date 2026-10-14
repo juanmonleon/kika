@@ -9,10 +9,20 @@ way:
   ``1 - f``. Its continuous part is then rescaled onto the interpolated outgoing
   range (unit-base, or "scaled", interpolation), and its discrete lines are kept
   where they are. INT=1 always uses the lower table. Any other INT is treated as
-  lin-lin, as MCNP does.
+  lin-lin, as MCNP does. For INT=22 that is what ENDF means (unit-base). For
+  INT=12 (corresponding points) and the log laws it is not: ENDF would
+  interpolate the outgoing grid point by point, but MCNP and OpenMC sample
+  those intervals unit-base too, and so does kika (D-A4 of the ACE roadmap);
+  the reader notes every such law in ``ace.read_report``.
 * A table holds ``ND`` discrete lines first (``INTT' = 10*ND + INTT``); the
   probability of line ``k`` is ``CDF(k) - CDF(k-1)``. The remaining points are a
-  continuous density, histogram (INTT=1) or lin-lin (INTT=2).
+  continuous density, histogram (INTT=1) or lin-lin (INTT=2). A table can be
+  lines only (NP = ND, photon spectra): its continuous part is then empty and
+  the result says so with ``discrete_only``.
+* An incident energy can be repeated: that is how ENDF and NJOY write a jump
+  in the distribution. Below it the first table of the pair applies and above
+  it the second; exactly at it, the first (Juan, D-A3 of the ACE roadmap).
+  The reader notes every repeated energy in ``ace.read_report``.
 * LAW=44 angles follow Kalbach-87 with ``r`` and ``a`` taken at the lower point
   of the outgoing-energy bin for a histogram table and interpolated in E' for a
   lin-lin one. LAW=61 uses the angular table of the lower point for a histogram
@@ -46,13 +56,19 @@ def interval_scheme(nbt: Sequence[int], interp: Sequence[int], i: int) -> int:
 
 
 def bracket(energies: Sequence[float], energy: float) -> Tuple[int, float]:
-    """Lower table index and interpolation fraction; outside the grid the end table, f=0."""
+    """Lower table index and interpolation fraction; outside the grid the end table, f=0.
+
+    At a repeated energy the first table of the pair is returned (f=0), and
+    just above it the interval starts from the second.
+    """
     grid = np.asarray(energies, dtype=float)
     if energy <= grid[0]:
         return 0, 0.0
-    if energy >= grid[-1]:
+    if energy > grid[-1]:
         return len(grid) - 1, 0.0
     i = int(np.searchsorted(grid, energy, side="right")) - 1
+    if grid[i] == energy:
+        return int(np.searchsorted(grid, energy, side="left")), 0.0
     return i, float((energy - grid[i]) / (grid[i + 1] - grid[i]))
 
 
@@ -148,8 +164,11 @@ def _scaled(part: Dict, lo: float, hi: float) -> Dict:
 def interpolate_tables(low: Dict, high: Dict, frac: float, scheme: int) -> Dict:
     """Distribution at an incident energy between two tables (see the module notes).
 
-    Returns the continuous part as ``e_out``/``pdf``/``cdf`` and the discrete
-    lines as ``discrete_energies``/``discrete_probabilities``.
+    Returns the continuous part as ``e_out``/``pdf``/``cdf`` (the CDF starts at
+    the probability of the lines) and the discrete lines as
+    ``discrete_energies``/``discrete_probabilities``. When neither table has a
+    continuous part, ``discrete_only`` is True and ``e_out``/``pdf``/``cdf``
+    are empty: the distribution is the lines.
     """
     lo, hi = split_table(low), split_table(high)
     if scheme == 1 or frac <= 0.0:
@@ -172,7 +191,10 @@ def interpolate_tables(low: Dict, high: Dict, frac: float, scheme: int) -> Dict:
         left += w * l_t
         right += w * r_t
     intt = 1 if lo["intt"] == 1 and hi["intt"] == 1 else 2
-    if intt == 1:
+    if len(nodes) == 0:
+        # both tables are lines only
+        grid, pdf, cont = nodes, nodes.copy(), nodes.copy()
+    elif intt == 1:
         # histogram: the value of the bin that starts at each node
         grid, pdf = nodes, right
         cont = np.concatenate(([0.0], np.cumsum(pdf[:-1] * np.diff(grid))))
@@ -191,6 +213,7 @@ def interpolate_tables(low: Dict, high: Dict, frac: float, scheme: int) -> Dict:
     cdf = discrete_p.sum() + cont
     return {
         "intt": intt,
+        "discrete_only": len(grid) == 0,
         "n_discrete": len(lo["discrete_energies"]) + len(hi["discrete_energies"]),
         "discrete_energies": np.concatenate((lo["discrete_energies"], hi["discrete_energies"])),
         "discrete_probabilities": discrete_p,
@@ -204,6 +227,7 @@ def interpolate_tables(low: Dict, high: Dict, frac: float, scheme: int) -> Dict:
 def _as_result(part: Dict) -> Dict:
     return {
         "intt": part["intt"],
+        "discrete_only": len(part["e_out"]) == 0,
         "n_discrete": len(part["discrete_energies"]),
         "discrete_energies": np.array(part["discrete_energies"]),
         "discrete_probabilities": np.array(part["discrete_probabilities"]),
@@ -212,6 +236,19 @@ def _as_result(part: Dict) -> Dict:
         "pdf": np.array(part["pdf"]),
         "cdf": np.array(part["cdf"]),
     }
+
+
+def table_weights(incident_energies, nbt, interp, energy: float):
+    """The incident-energy tables sampled at ``energy`` and their weights.
+
+    ``[(i, 1.0)]`` at a tabulated energy, outside the grid or in an INT=1
+    interval; ``[(i, 1 - f), (i + 1, f)]`` otherwise: the random choice of
+    table the transport codes make between two incident energies.
+    """
+    i, frac = bracket(incident_energies, energy)
+    if frac == 0.0 or i + 1 >= len(incident_energies) or interval_scheme(nbt, interp, i) == 1:
+        return [(i, 1.0)]
+    return [(i, 1.0 - frac), (i + 1, frac)]
 
 
 def distribution_at(incident_energies, tables, nbt, interp, energy: float) -> Optional[Dict]:

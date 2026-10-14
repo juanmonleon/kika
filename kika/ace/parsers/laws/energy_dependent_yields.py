@@ -31,9 +31,26 @@ def parse_energy_dependent_yield(ace: Ace, ky_idx: int) -> EnergyDependentYield:
     # Ensure ky_idx is an integer
     ky_idx = int(ky_idx)
     
-    # Check if we have data to parse
-    if ky_idx >= len(ace.xss_data):
-        return yield_obj
+    xss = ace.xss_data
+    try:
+        n_r = int(xss[ky_idx])
+        idx = ky_idx + 1
+        yield_obj.n_interp_regions = n_r
+        if idx + 2 * n_r >= len(xss):
+            raise IndexError
+        yield_obj.nbt = xss[idx:idx + n_r]
+        yield_obj.interp = xss[idx + n_r:idx + 2 * n_r]
+        idx += 2 * n_r
+        n_e = int(xss[idx])
+        idx += 1
+        if idx + 2 * n_e > len(xss):
+            raise IndexError
+    except IndexError:
+        raise ValueError(f"energy-dependent yield at KY={ky_idx} runs past the XSS array ({len(xss)})")
+    yield_obj.n_energies = n_e
+    yield_obj.energies = xss[idx:idx + n_e]
+    yield_obj.yields = xss[idx + n_e:idx + 2 * n_e]
+    return yield_obj
     
     # Read the number of interpolation regions (N_R)
     yield_obj.n_interp_regions = int(ace.xss_data[ky_idx])

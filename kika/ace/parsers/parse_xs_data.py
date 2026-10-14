@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 from kika.ace.classes.cross_section.cross_section_data import CrossSectionData, ReactionCrossSection
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ def read_xs_data_block(ace, debug=False):
         logger.debug(f"Found {len(mt_entries)} MT entries and {len(locator_entries)} locator entries")
     
     if len(mt_entries) != len(locator_entries):
-        logger.warning(f"MTR has {len(mt_entries)} reactions but LSIG {len(locator_entries)} locators; SIG not read")
+        lost(ace, "SIG", "", f"MTR has {len(mt_entries)} reactions but LSIG {len(locator_entries)} locators")
         return None
     
     # Process each reaction
@@ -98,7 +99,7 @@ def read_xs_data_block(ace, debug=False):
             logger.debug(f"  Absolute index: sig_idx + locator - 1 = {sig_idx} + {locator_value} - 1 = {abs_idx}")
         
         if abs_idx >= len(ace.xss_data):
-            logger.warning(f"SIG of MT={mt_value}: Absolute index {abs_idx} is out of bounds ({len(ace.xss_data)})")
+            lost(ace, "SIG", f"MT={mt_value}", f"locator points past the XSS array ({abs_idx})")
             continue
             
         try:
@@ -116,21 +117,21 @@ def read_xs_data_block(ace, debug=False):
             
             # Validate that indices make sense
             if energy_idx <= 0:
-                logger.warning(f"SIG of MT={mt_value}: Invalid energy index {energy_idx} (must be > 0)")
+                lost(ace, "SIG", f"MT={mt_value}", f"energy index IE={energy_idx} (must be > 0)")
                 continue
                 
             if num_energies <= 0:
-                logger.warning(f"SIG of MT={mt_value}: Invalid number of energies {num_energies} (must be > 0)")
+                lost(ace, "SIG", f"MT={mt_value}", f"NE={num_energies} (must be > 0)")
                 continue
                 
             # Verify energy index doesn't exceed the energy grid size (use Python-style index for check)
             if python_energy_idx >= len(ace.esz_block.energies):
-                logger.warning(f"SIG of MT={mt_value}: Energy index {energy_idx} (0-indexed: {python_energy_idx}) exceeds energy grid size {len(ace.esz_block.energies)}")
+                lost(ace, "SIG", f"MT={mt_value}", f"IE={energy_idx} is past the energy grid ({len(ace.esz_block.energies)})")
                 continue
                 
             # Check if num_energies would make the cross section extend beyond the energy grid
             if python_energy_idx + num_energies > len(ace.esz_block.energies):
-                logger.warning(f"SIG of MT={mt_value} runs past the energy grid; truncated to the grid")
+                lost(ace, "SIG", f"MT={mt_value}", f"IE={energy_idx}, NE={num_energies} run past the energy grid; truncated to it")
                 if debug:
                     logger.debug(f"  WARNING: Cross section would extend beyond energy grid: "
                                f"start={energy_idx} (0-indexed: {python_energy_idx}), length={num_energies}, "
@@ -170,10 +171,9 @@ def read_xs_data_block(ace, debug=False):
                 if debug:
                     logger.debug(f"  Successfully read {len(xs_entries)} XS values for MT={mt_value}")
             else:
-                logger.warning(f"SIG of MT={mt_value}: XS data would extend beyond XSS array: {xs_end} > {len(ace.xss_data)}")
+                lost(ace, "SIG", f"MT={mt_value}", f"runs past the XSS array ({xs_end} > {len(ace.xss_data)})")
         except (IndexError, ValueError) as e:
-            # Skip reaction if there's an error
-            logger.warning(f"SIG of MT={mt_value}: {str(e)}")
+            lost(ace, "SIG", f"MT={mt_value}", str(e))
             continue
     
     if debug:

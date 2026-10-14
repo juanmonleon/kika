@@ -67,7 +67,10 @@ def test_the_composite_mts_are_present(ace, decoded):
     from kika._constants import MT_COMPOSITE_ORDER
 
     suite, _ = decoded
-    decodedMTs = {r.id.ENDF_MT for r in suite.reactions}
+    # Since A3 a summed MT is a CrossSectionSum in suite.sums, not a reaction
+    decodedMTs = {r.id.ENDF_MT for c in (suite.reactions, suite.sums, suite.fissionComponents,
+                                         suite.productions) for r in c}
+    assert not {r.id.ENDF_MT for r in suite.reactions} & {1, 3, 4, 27, 101}
     available = {mt for mt in MT_COMPOSITE_ORDER
                  if ace.cross_section._get_or_compute_reaction(mt) is not None}
     assert available <= decodedMTs, f"composites lost: {sorted(available - decodedMTs)}"
@@ -138,7 +141,7 @@ def test_a_reconstructed_style_is_not_invented(decoded):
     assert not any(isinstance(s, CrossSectionReconstructed) for s in suite.styles)
 
 
-def test_the_urr_tables_are_declared_where_they_exist(ace, decoded):
+def test_the_urr_tables_are_converted_where_they_exist(ace, decoded):
     suite, report = decoded
     if not getattr(ace.unresolved_resonance, "has_data", False):
         pytest.skip("this ACE file has no URR probability tables")
@@ -148,9 +151,11 @@ def test_the_urr_tables_are_declared_where_they_exist(ace, decoded):
 
     form = suite.reactionByENDF_MT(102).crossSection[URR_LABEL]
     assert isinstance(form, URR_probabilityTables1d)
-    assert form.href
-    # Declared, not converted — and the report has to say which.
-    assert any("URR probability tables" in entry for entry in report.unsupported)
+    urr = ace.unresolved_resonance
+    assert form.table.table.shape == (urr.num_energies, 6, urr.table_length)
+    np.testing.assert_allclose(form.table.energies, np.asarray(urr.energies) * 1e6)
+    np.testing.assert_allclose(form.table.table[:, 5], np.array([t.heating_numbers for t in urr.tables]) * 1e6)
+    assert not any("URR probability tables" in entry for entry in report.unsupported)
 
 
 def test_the_gridded_style_exists_and_says_what_it_is(decoded):

@@ -59,8 +59,7 @@ def parse_level_scattering(ace: Ace, base_dist: EnergyDistribution, idat_idx: in
         if debug:
             logger.debug(f"(A / (A + 1))^2 value: {distribution.asquare}")
     else:
-        if debug:
-            logger.debug(f"Not enough data to read parameters. Need indices {idat_idx} and {idat_idx + 1}, have {len(ace.xss_data)} entries")
+        raise ValueError(f"LAW=3 needs LDAT(1:2) at {idat_idx}, past the XSS array ({len(ace.xss_data)})")
     
     if debug:
         logger.debug("Completed parsing level scattering distribution")

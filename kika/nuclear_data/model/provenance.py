@@ -146,6 +146,10 @@ class AceProvenance(Provenance):
     matid: Optional[int] = None
     formatVersion: Optional[str] = None
     temperatureMeV: Optional[float] = None
+    #: What a node read from ACE states and the model has no slot for (a
+    #: reaction's TY, the 32-bin form of an angular table...), kept so that the
+    #: ACE writer can give it back; empty for the table-level provenance.
+    attributes: Dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.awr = _asFloat(self.awr)

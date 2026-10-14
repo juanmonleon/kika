@@ -330,6 +330,13 @@ def _emissionMode(product, reaction, delayedProducts) -> str:
         return stated
     if any(product is d for d in delayedProducts):
         return "delayed"
+    # A fission neutron with no delayed families beside it carries the total
+    # nu (OpenMC's ``whichnu``: prompt only when delayed data exist).
+    channel = getattr(reaction, "outputChannel", None)
+    ffd = getattr(channel, "fissionFragmentData", None)
+    if (product.pid == "n" and reaction.ENDF_MT in FISSION_MTS
+            and (ffd is None or not ffd.delayedNeutrons.delayedNeutrons)):
+        return "total"
     return "prompt"
 
 

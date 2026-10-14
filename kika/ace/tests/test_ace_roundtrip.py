@@ -9,19 +9,13 @@ Reading a real 16 MB Fe-56 file and writing it straight back returns all
 gate, and it is what the perturbation pipeline depends on: it edits a handful
 of XSS entries and writes the rest back untouched.
 
-**The text does not.** 6 903 of 205 430 lines differ, and every one of them for
-the same reason: an XSS entry whose value is a whole number is written in
-floating-point notation (``5`` becomes ``5.00000000000E+00``). ACE has no types
-— MT numbers, block lengths and pointers live in the same REAL array as the
-cross sections — so kika cannot tell which entries were written as integers,
-and renders them all as floats. MCNP's list-directed reads accept both, which
-is why this has never been noticed.
-
-Note the symmetry with the ENDF side: there kika writes floats as integers
-where the value is zero, here it writes integers as floats. Both are the same
-missing piece — the format layer does not carry how a number was spelled. That
-is a thing the GNDS canonical model can record properly, and a reason to keep
-the byte-level pin visible until it does.
+**The text survives too.** ACE has no types -- MT numbers, block lengths
+and pointers live in the same REAL array as the cross sections -- and only the
+spelling tells them apart: NJOY writes them as I20, the rest as E20.11. Until
+the A1 phase of the ACE roadmap (2026-10-14) kika wrote every word as a real,
+and 6 903 of 205 430 lines of this file differed. The reader now keeps the
+spelling as one bit per word (``Ace.xss_int_words``) and the writer gives the
+same bytes back, header and unpadded last line included.
 
 No fixture is committed: a real ACE file is 16 MB at best, and truncating one
 means recomputing the internal pointer blocks, which would make the fixture
@@ -84,27 +78,6 @@ def test_roundtrip_preserves_the_line_count(roundtripped):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Deferred to phase 3 by decision, 2026-08-04, after the phase-1 defect "
-        "burn-down cleared the other eight pins. ACE stores MT numbers, block "
-        "lengths, pointers and cross sections in one untyped REAL array, so "
-        "kika cannot tell which entries the source spelled as integers and "
-        "writes them all as floats: '                  11' comes back as "
-        "'   1.10000000000E+01'. 6 903 of 205 430 lines differ this way on the "
-        "TENDL Fe-56 file. Deferred rather than fixed because the cost is "
-        "real and the consequence is not: the values are unaffected (the "
-        "companion test proves the XSS is bitwise identical) and MCNP's "
-        "list-directed reads accept both spellings, while a fix needs a "
-        "per-entry spelling flag on the XSS array and gives up the np.savetxt fast "
-        "path over 820 000 entries, in a pipeline that writes one ACE per "
-        "sample per temperature. Recording how a number was written is a job "
-        "for the canonical model in phase 3. The mirror-image defect on the "
-        "ENDF side — float fields rendered as integers — was fixed in phase 1, "
-        "because there it cost nothing."
-    ),
-)
 def test_ace_roundtrip_is_byte_identical(roundtripped):
     src, out = roundtripped
     assert (

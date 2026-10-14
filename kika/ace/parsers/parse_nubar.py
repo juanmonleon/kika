@@ -1,6 +1,7 @@
 import logging
 import numpy as np
 from kika.ace.classes.nubar.nubar import NuData, NuPolynomial, NuTabulated, NuContainer
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def read_nubar_data(ace, debug=False):
         
         # Check bounds
         if jxs2 >= len(ace.xss_data):
-            logger.warning(f"JXS(2)={jxs2} points past the XSS array ({len(ace.xss_data)}); NU block not read")
+            lost(ace, "NU", "", f"JXS(2)={jxs2} points past the XSS array ({len(ace.xss_data)})")
             ace.nubar.has_nubar = False
             return ace.nubar
         
@@ -156,7 +157,7 @@ def read_nubar_data(ace, debug=False):
         # Check bounds
         if dnu_idx >= len(ace.xss_data):
             # keep the prompt/total nu already read
-            logger.warning(f"JXS(24)={dnu_idx} points past the XSS array ({len(ace.xss_data)}); delayed nu not read")
+            lost(ace, "DNU", "", f"JXS(24)={dnu_idx} points past the XSS array ({len(ace.xss_data)})")
             return ace.nubar
         
         # Delayed ν is given when JXS(24) > 0
@@ -272,6 +273,8 @@ def parse_nubar_array(xss_data: np.ndarray, idx: int, debug=False) -> NuData:
             logger.debug(f"Polynomial form with {n_coeff} coefficients")
         
         # Create a NuPolynomial object and populate it
+        if idx + 2 + n_coeff > len(xss_data):
+            raise ValueError(f"nu polynomial of NC={n_coeff} at {idx} runs past the XSS array")
         result.polynomial = NuPolynomial()
         result.polynomial.coefficients = xss_data[idx + 2:idx + 2 + n_coeff]
         
@@ -306,6 +309,8 @@ def parse_nubar_array(xss_data: np.ndarray, idx: int, debug=False) -> NuData:
         # Read number of energy points
         n_energies = int(xss_data[pos])
         pos += 1
+        if pos + 2 * n_energies > len(xss_data):
+            raise ValueError(f"nu table of NE={n_energies} at {pos - 1} runs past the XSS array")
         
         if debug:
             logger.debug(f"Number of energy points: {n_energies}")

@@ -74,6 +74,7 @@ from kika.nuclear_data.model import (
 )
 
 from .decode import GRIDDED_LABEL, HEATED_LABEL
+from .secondaries import MONTE_CARLO_LABEL
 
 __all__ = ["attachAcePhotons", "photonProductionTotal", "PHOTON_LABEL"]
 
@@ -311,6 +312,25 @@ def _orphan(suite, mt: int, x, sigmaGamma, provenance):
     return orphan
 
 
+def _monteCarlo(ace, laws, angular, mtrp: int, report: ConversionReport):
+    """The ``MonteCarlo`` form of one photon: its DLWP chain with its ANDP angles."""
+    from .secondaries import angularForm, lawForm
+
+    if not laws:
+        return None
+    mu = angularForm(angular) if angular is not None else Isotropic2d()
+    awr = float(getattr(getattr(ace, "header", None), "atomic_weight_ratio", 0.0) or 0.0)
+    if len(laws) > 1:
+        report.unsupportedNode(f"MTRP {mtrp}: a chain of {len(laws)} photon laws; only "
+                               f"chains of one have a Monte Carlo form here")
+        return None
+    try:
+        return lawForm(laws[0], mu, Frame.lab, awr, report, f"DLWP MTRP {mtrp}")
+    except (AttributeError, TypeError, ValueError, KeyError) as e:
+        report.unsupportedNode(f"MTRP {mtrp}: no Monte Carlo form for its DLWP law ({e})")
+        return None
+
+
 def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
                      provenance=None) -> ConversionReport:
     """Put every MTRP entry of *ace* on the photon products of its reaction.
@@ -373,6 +393,11 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
         distribution = Distribution()
         distribution[PHOTON_LABEL] = Uncorrelated(angular=angularForm, energy=energyForm,
                                                   label=PHOTON_LABEL, productFrame=Frame.lab)
+        # The Monte Carlo form beside it (ACE roadmap A3): the DLWP laws and the
+        # ANDP tables as they are sampled, which the HDF5 and ACE writers take.
+        mc = _monteCarlo(ace, energy.get(mtrp), angular.get(mtrp), mtrp, report)
+        if mc is not None:
+            distribution[MONTE_CARLO_LABEL] = mc
 
         channel = host.outputChannel
         taken = {p.label for p in channel.products}
