@@ -105,3 +105,43 @@ def test_native_closed_rows_are_the_reference(l):
     # The quadrature reference is itself accurate to about 1e-10 (40-digit
     # comparison); the fraction to 1e-12.
     np.testing.assert_allclose(actual,reference,rtol=2e-10)
+
+
+# mpmath 1.3.0 at 40 digits, as BARRIER, for L=0..3 at one (eta, rho): points
+# of Ca-40's alpha exit (ENDF/B-VIII.1) and one deeper in the barrier.
+LADDER = [
+    (0,8.0,3.0,-21.669141874460773723,-5.9475353563141141224,3.103517806286231317e-11),
+    (1,8.0,3.0,-22.162116752997418284,-6.0970407412219158193,1.8486869525644235341e-11),
+    (2,8.0,3.0,-23.132823986447423525,-6.3869388548247785383,6.6841286097103312141e-12),
+    (3,8.0,3.0,-24.553803112942044637,-6.8014460964333058988,1.5161695443494984517e-12),
+    (0,6.0,3.6,-11.150417429600682659,-5.1461557080003267716,1.3049233043242580287e-6),
+    (1,6.0,3.6,-11.623826421134241088,-5.3176058173130416857,7.8703939193096815054e-7),
+    (2,6.0,3.6,-12.553141962411571323,-5.6467369636597551863,2.9302964223764961203e-7),
+    (3,6.0,3.6,-13.907763577710485984,-6.1108300876957689782,7.0032208117494628328e-8),
+    (0,9.448,2.3155,-31.688379890284707914,-5.9234072882156712068,1.3926007623900238406e-15),
+    (1,9.448,2.3155,-32.227150312035695432,-6.0728988258008008496,7.9209774204819391237e-16),
+    (2,9.448,2.3155,-33.288820918869686915,-6.3628338414734995015,2.6131821740461415635e-16),
+    (3,9.448,2.3155,-34.844564077645658507,-6.7775108451033885146,5.176172257388250859e-17),
+    (0,30.0,0.5,-164.98636553262543226,-5.2179451167906813219,2.0332199850374760152e-73),
+    (1,30.0,0.5,-165.67884921893559548,-5.3839861136340722304,9.8457486974619758277e-74),
+    (2,30.0,0.5,-167.04518033580564685,-5.7039738838344718863,2.366279810021635343e-74),
+    (3,30.0,0.5,-169.05172589065821136,-6.1574687594971637702,2.9445309227932905466e-75),
+]
+
+
+@pytest.mark.parametrize('ls',[(0,1,2,3),(1,3),(2,3)])
+def test_ladder_by_upward_recurrence_against_40_digit_reference(ls):
+    """One evaluation at the lowest L and the outgoing wave's recurrence."""
+    points=sorted({(eta,rho) for _,eta,rho,*_ in LADDER})
+    eta=np.array([p[0] for p in points]);rho=np.array([p[1] for p in points])
+    ladder=coulomb.charged_channel_log_ladder(ls,eta,rho)
+    assert sorted(ladder)==sorted(ls)
+    for l,e,r,log_p,shift,phase in LADDER:
+        if l not in ls:continue
+        i=points.index((e,r))
+        assert float(ladder[l][0][i])==pytest.approx(log_p,rel=2e-14,abs=1e-13)
+        assert float(ladder[l][1][i])==pytest.approx(shift,rel=1e-13)
+        assert float(ladder[l][2][i])==pytest.approx(phase,rel=1e-12)
+    # The lowest L is the ordinary evaluation, bit for bit.
+    direct=charged_channel_log_functions(min(ls),eta,rho)
+    for got,expected in zip(ladder[min(ls)],direct):np.testing.assert_array_equal(got,expected)

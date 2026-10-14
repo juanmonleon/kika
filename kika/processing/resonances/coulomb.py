@@ -281,6 +281,39 @@ def charged_channel_log_functions(l,eta,rho):
     return p,s,phase
 
 
+def charged_channel_log_ladder(ls,eta,rho):
+    """``{L: (ln(P), S, phase)}`` for every L of *ls* at the same eta, rho.
+
+    One evaluation at the lowest L and the upward recurrence of the outgoing
+    wave for the rest (``_coulomb_native.open_ladder``): channels of one pair
+    and radius at several L (Ca-40: alpha at L=0,1,2) need one continued
+    fraction instead of one each. Against 40-digit mpmath on Ca-40's rows
+    the recurrence is within 1.2e-13 in ln(P) and S. Every point the kernel
+    does not complete, and every point without it, is
+    :func:`charged_channel_log_functions` at its own L.
+    """
+    ls=sorted({int(l) for l in ls})
+    eta,rho=np.broadcast_arrays(np.asarray(eta,dtype=float),np.asarray(rho,dtype=float))
+    if (_native is None or not hasattr(_native,'open_ladder') or eta.ndim!=1 or len(ls)<2
+            or np.any(~np.isfinite(eta+rho)) or np.any(eta<0) or np.any(rho<=0)):
+        return {l:charged_channel_log_functions(l,eta,rho) for l in ls}
+    lmin=ls[0];nl=ls[-1]-lmin+1;n=len(rho)
+    batch=np.flatnonzero((eta>0)&((rho>.25)|(eta*rho>2.)))
+    log_p,shift,phase=(np.empty((nl,len(batch))) for _ in range(3));ok=np.zeros((nl,len(batch)),np.uint8)
+    if len(batch):
+        _native.open_ladder(lmin,nl,len(batch),np.ascontiguousarray(eta[batch]),np.ascontiguousarray(rho[batch]),
+                            *_TABLEAU,log_p.ravel(),shift.ravel(),phase.ravel(),ok.ravel())
+    out={}
+    for l in ls:
+        k=l-lmin;p,s,ph=np.empty(n),np.empty(n),np.empty(n)
+        done=batch[ok[k].astype(bool)]
+        p[done],s[done],ph[done]=log_p[k][ok[k].astype(bool)],shift[k][ok[k].astype(bool)],phase[k][ok[k].astype(bool)]
+        rest=np.setdiff1d(np.arange(n),done,assume_unique=True)
+        if len(rest):p[rest],s[rest],ph[rest]=charged_channel_log_functions(l,eta[rest],rho[rest])
+        out[l]=(p,s,ph)
+    return out
+
+
 def charged_channel_functions(l,eta,rho):
     """Return representable P,S,phase; reject an underflow instead of clipping."""
     log_p,shift,phase = charged_channel_log_functions(l,eta,rho)

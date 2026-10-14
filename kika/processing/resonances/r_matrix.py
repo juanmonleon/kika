@@ -65,7 +65,7 @@ class RMLChannel:
     def k_squared(self,channel_energy):
         return self.kinematics.k_squared(channel_energy) if self.kinematics is not None else self.k2_cm*channel_energy
 
-    def functions(self, energy, *, logarithmic=False):
+    def functions(self, energy, *, logarithmic=False, coulomb=None):
         e = np.asarray(energy,dtype=float)
         channel_energy = self.channel_energy(e)
         opened = channel_energy > 0
@@ -85,7 +85,7 @@ class RMLChannel:
                     # KRL changes k through the two-body invariant.
                     eta = self.charge_strength/np.sqrt(self.k_squared(channel_energy[opened]))
                     if logarithmic:
-                        lp,so,channel_phase = charged_channel_log_functions(self.l,eta,rho[opened])
+                        lp,so,channel_phase = (coulomb or charged_channel_log_functions)(self.l,eta,rho[opened])
                         po = np.exp(lp)
                     else:
                         po,so,channel_phase = charged_channel_functions(self.l,eta,rho[opened])
@@ -396,19 +396,51 @@ class _ChannelFunctions:
     in every group). The functions do not depend on the spin group, the MT
     label or the external R term, so channels equal in everything else share
     one evaluation, which is the same computation.
+
+    Charged channels equal in everything but L (one pair and radius at
+    several L) are a family: their Coulomb functions come from one ladder
+    (:func:`coulomb.charged_channel_log_ladder`), declared by :meth:`plan`.
     """
     def __init__(self,energies):
-        self.energies = energies;self.cache = {}
+        self.energies = energies;self.cache = {};self.families = {}
 
-    def __call__(self,channel):
+    @staticmethod
+    def _key(channel):
         from dataclasses import replace
         try:
             key = replace(channel,mt=0,spin=0.,reaction_label='',phase_absorption_mt=None,external=None)
             hash(key)
         except TypeError:
+            return None
+        return key
+
+    def plan(self,channels):
+        from dataclasses import replace
+        for channel in channels:
+            if not channel.charge_strength or channel.effective or channel.penetrability != 'calculate':continue
+            key = self._key(channel)
+            if key is not None:self.families.setdefault(replace(key,l=0),[set(),None,None])[0].add(channel.l)
+
+    def _ladder(self,family):
+        from .coulomb import charged_channel_log_functions,charged_channel_log_ladder
+        def coulomb(l,eta,rho):
+            if family[1] is None:
+                family[1] = charged_channel_log_ladder(family[0],eta,rho);family[2] = (eta.copy(),rho.copy())
+            elif not (np.array_equal(eta,family[2][0]) and np.array_equal(rho,family[2][1])):
+                return charged_channel_log_functions(l,eta,rho)
+            return family[1][l]
+        return coulomb
+
+    def __call__(self,channel):
+        from dataclasses import replace
+        key = self._key(channel)
+        if key is None:
             return channel.functions(self.energies,logarithmic=True)
         if key not in self.cache:
-            self.cache[key] = channel.functions(self.energies,logarithmic=True)
+            family = self.families.get(replace(key,l=0)) if channel.charge_strength else None
+            coulomb = self._ladder(family) if family is not None and len(family[0])>1 else None
+            self.cache[key] = (channel.functions(self.energies,logarithmic=True) if coulomb is None
+                               else channel.functions(self.energies,logarithmic=True,coulomb=coulomb))
         return self.cache[key]
 
 
@@ -536,6 +568,7 @@ def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1
     mts = {1, 2, 18, 102} | {mt for g in groups for mt in g.reaction_mts}
     result = {mt: np.zeros_like(e) for mt in mts}
     functions = _ChannelFunctions(e)
+    functions.plan([ch for group in groups for ch in group.channels])
     for group in groups:
         ctx = group.context or context
         incident = group.channels[group.entrances[0]]

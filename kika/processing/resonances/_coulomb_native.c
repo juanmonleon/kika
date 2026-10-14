@@ -534,6 +534,54 @@ static PyObject *open_rows(PyObject *self,PyObject *args){
     Py_RETURN_NONE;
 }
 
+/* ln(P), S and phase for L=lmin..lmin+nl-1 at the same (eta, rho): the row
+ * at lmin as open_rows computes it, then the upward recurrence of the
+ * outgoing wave (DLMF 33.4.3-4). With q=H'/H and S_l=l/rho+eta/l,
+ * R_l^2=1+eta^2/l^2: q_l=R_l^2/(S_l-q_{l-1})-S_l. Inside the barrier H is
+ * dominated by the growing G, for which upward recurrence is stable, and
+ * Im(q_l)=R_l^2 Im(q_{l-1})/|S_l-q_{l-1}|^2 is a product: ln(P) keeps its
+ * relative accuracy with no cancellation. F'/F, for the phase, comes from
+ * its own fraction at each L (upward recurrence of F is not stable). */
+static PyObject *open_ladder(PyObject *self,PyObject *args){
+    int lmin,nl;Py_ssize_t n;
+    PyObject *o[11];Py_buffer b[11];memset(b,0,sizeof b);
+    if(!PyArg_ParseTuple(args,"iinOOOOOOOOOOO",&lmin,&nl,&n,&o[0],&o[1],&o[2],&o[3],&o[4],&o[5],&o[6],
+                         &o[7],&o[8],&o[9],&o[10]))return NULL;
+    if(lmin<0||nl<1||lmin+nl-1>64||n<0){PyErr_SetString(PyExc_ValueError,"invalid native Coulomb dimensions");return NULL;}
+    Py_ssize_t counts[11]={n,n,STAGES*STAGES,STAGES,STAGES,STAGES+1,STAGES+1,nl*n,nl*n,nl*n,nl*n};
+    const char *formats[11]={"d","d","d","d","d","d","d","d","d","d","B"};
+    int writable[11]={0,0,0,0,0,0,0,1,1,1,1};
+    for(int i=0;i<11;i++)if(!get(o[i],&b[i],counts[i],formats[i],writable[i])){release_all(b,11);return NULL;}
+    const double *eta=b[0].buf,*rho=b[1].buf;
+    tableau tb={b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf};
+    double *log_p=b[7].buf,*shift=b[8].buf,*phase=b[9].buf;unsigned char *ok=b[10].buf;
+    Py_BEGIN_ALLOW_THREADS
+    for(Py_ssize_t i=0;i<n;i++){
+        double h=eta[i],r=rho[i];
+        int good=h>0&&(r>.25?open_point(lmin,h,r,&tb,&log_p[i],&shift[i],&phase[i])
+                            :h*r>2.&&small_point(lmin,h,r,&log_p[i],&shift[i],&phase[i]));
+        ok[i]=(unsigned char)good;
+        double lp=log_p[i],qr=shift[i]/r,qi=exp(lp)/r;
+        for(int k=1;k<nl;k++){
+            Py_ssize_t at=k*n+i;
+            if(good){
+                int l=lmin+k;
+                double sl=l/r+h/l,r2=1+h*h/((double)l*l),dr=sl-qr,m=dr*dr+qi*qi,reg;
+                lp+=log(r2)-log(m);qr=r2*dr/m-sl;qi=r2*qi/m;
+                good=isfinite(lp)&&isfinite(qr)&&m>0&&regular(l,h,r,&reg);
+                if(good){
+                    log_p[at]=lp;shift[at]=r*qr;phase[at]=atan2(exp(lp),r*reg-r*qr);
+                    good=isfinite(phase[at]);
+                }
+            }
+            ok[at]=(unsigned char)good;
+        }
+    }
+    Py_END_ALLOW_THREADS
+    release_all(b,11);
+    Py_RETURN_NONE;
+}
+
 static PyObject *closed_rows(PyObject *self,PyObject *args){
     int l;Py_ssize_t n;
     PyObject *o[4];Py_buffer b[4];memset(b,0,sizeof b);
@@ -552,6 +600,7 @@ static PyObject *closed_rows(PyObject *self,PyObject *args){
 
 static PyMethodDef methods[]={
     {"open_rows",open_rows,METH_VARARGS,"ln(P), S and phase of open charged channels outside the small-radius series; ok=0 rows need the reference."},
+    {"open_ladder",open_ladder,METH_VARARGS,"open_rows for consecutive L at one (eta, rho), by upward recurrence from the lowest; ok=0 rows need the reference."},
     {"closed_rows",closed_rows,METH_VARARGS,"Shift of closed charged channels; ok=0 rows need the reference."},
     {NULL,NULL,0,NULL}
 };
