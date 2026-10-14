@@ -180,3 +180,50 @@ def test_histogram_joint_cm_mean_retains_constant_density_and_angle_in_each_bin(
     decoded=decodeCorrelated(encodeCorrelated(form),m.Frame.centerOfMass)
     assert all(str(t.interpolation)=='flat' for t in decoded.energyAngular.function2ds)
     np.testing.assert_allclose(H._meanEnergyOf(decoded,grid,H._Kinematics(A=2.,Q=0.)),expected,rtol=0.,atol=1e-12)
+
+
+def test_mf12_capture_uses_gheat_compound_recoil_and_fixed_primary_kick(monkeypatch):
+    from types import SimpleNamespace as NS
+    A,binding=29.,6e6
+    E=np.array([.0253,1e6,2e7])
+    form=m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=2,energy=binding,atomicWeightRatio=A),productFrame=m.Frame.lab)
+    p=NS(pid='photon',distribution=NS(forms={'MonteCarlo':form}))
+    rx=NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=binding),products=[p]))
+    source=NS(provenance=NS(headerFields={'mf12':{'lo':1}}),outputChannel=NS(products=[]))
+    evaluation=NS(findReactionByENDF_MT=lambda mt:source)
+    monkeypatch.setattr(H,'_yield',lambda p,E:np.ones(len(E)))
+    result=H.heatingOf(NS(reactions=[rx]),E,{102:np.ones(len(E))},awr=A,Z=14,evaluation=evaluation,kinematic=True)
+    expected=E/(A+1)+binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1))
+    np.testing.assert_allclose(result.kerma,expected,rtol=1e-14)
+    np.testing.assert_allclose(result.kinematicUpper[102],expected,rtol=1e-14)
+    np.testing.assert_allclose(result.damage,H.lindhard(binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1)),14,A+1,14,A,25.),rtol=1e-14)
+
+
+def test_mf12_capture_retains_neutron_balance_outside_photon_domain(monkeypatch):
+    from types import SimpleNamespace as NS
+    A,binding=2.,6e6;E=np.array([1e6,2e7+10])
+    form=m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=2,energy=binding,atomicWeightRatio=A),productFrame=m.Frame.lab)
+    multiplicity=NS(forms={},form=NS(domainMin=1e-5,domainMax=2e7))
+    p=NS(pid='photon',multiplicity=multiplicity,distribution=NS(forms={'MonteCarlo':form}))
+    rx=NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=binding),products=[p]))
+    source=NS(provenance=NS(headerFields={'mf12':{'lo':1}}),outputChannel=NS(products=[]))
+    monkeypatch.setattr(H,'_yield',lambda p,E:(E<=2e7).astype(float))
+    result=H.heatingOf(NS(reactions=[rx]),E,{102:np.ones(len(E))},awr=A,Z=1,
+        evaluation=NS(findReactionByENDF_MT=lambda mt:source),kinematic=True)
+    assert result.kerma[1]==E[1]+binding
+    expected=E[1]/(A+1)+(binding+A*E[1]/(A+1))**2/(2*H.NEUTRON_REST_ENERGY*(A+1))
+    assert result.kinematicUpper[102][1]==pytest.approx(expected,rel=1e-14)
+
+
+def test_mf12_zero_tail_keeps_its_shared_support_endpoint_in_the_correction():
+    from types import SimpleNamespace as NS
+    A,binding=2.,6e6;E=np.array([2e7,2e7+10.])
+    function=m.XYs1d(xs=[1e-5,2e7,2e7,2e8],ys=[1.,1.,0.,0.])
+    multiplicity=NS(forms={'eval':function},form=function)
+    form=m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=2,energy=binding,atomicWeightRatio=A),productFrame=m.Frame.lab)
+    p=NS(pid='photon',multiplicity=multiplicity,distribution=NS(forms={'MonteCarlo':form}))
+    rx=NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=binding),products=[p]))
+    source=NS(provenance=NS(headerFields={'mf12':{'lo':1}}),outputChannel=NS(products=[]))
+    result=H.heatingOf(NS(reactions=[rx]),E,{102:np.ones(len(E))},awr=A,Z=1,evaluation=NS(findReactionByENDF_MT=lambda mt:source))
+    np.testing.assert_array_equal(H._yield(p,E),[0.,0.])
+    np.testing.assert_allclose(result.kerma,[E[0]/(A+1),E[1]+binding],rtol=1e-14)

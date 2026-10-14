@@ -10,8 +10,9 @@ in kika-workspace):
   Σ_γ y_γ Ē_γ`` -- everything but the neutrons and photons it emits (HEATR's
   ``nheat`` and then ``gheat``, ``local = 0``). Capture is the exception: with
   its photons known, MT301 follows the stated capture branch: independent
-  cascade-photon kicks, or for an explicit two-body primary photon the
-  compound recoil ``E/(A+1)`` plus its fixed binding-energy kick.
+  MF6 cascade-photon kicks, or for MF12 and an explicit two-body primary
+  photon the compound recoil ``E/(A+1)`` plus the stated photon kicks.
+  MF12 primary-line kicks use their fixed binding energy, as gheat does.
 - **MT901** is MT301 plus the energy of the photons emitted, ``Σ_γ y_γ Ē_γ`` --
   what OpenMC's files carry (measured on Fe-56: at thermal 901 − 301 is the
   capture photons' 7.489 MeV, where HEATR's ``local = 1`` balance would give
@@ -60,7 +61,7 @@ FISSION_MTS = (18, 19, 20, 21, 38)
 HEATR_APPROXIMATIONS = (
     "damage of the continuum neutron emission: one isotropic emission in the lab, the "
     "target's Z and A for the recoil (HEATR's tabdam)",
-    "capture cascades: the recoil of each photon on its own, Σ y⟨E_γ²⟩/(2(A+1)m_nc²), without the "
+    "MF6 capture cascades: the recoil of each photon on its own, Σ y⟨E_γ²⟩/(2(A+1)m_nc²), without the "
     "compound nucleus' recoil E/(A+1), in the KERMA and in the damage (HEATR's output)",
     "damage of particle emission: capdam's single particle at min(Q + AE/(A+1), Coulomb "
     "barrier), deuterons and alphas of a continuum taken as protons",
@@ -651,7 +652,7 @@ def _emissionDamage(form, grid, A, Z, ed):
     return _onGrid(energies, values, grid, flat)
 
 
-def _captureDamage(photons, grid, A, Z, ed, Q):
+def _captureDamage(photons, grid, A, Z, ed, Q, fixedPrimary=False):
     """Capture: ``Σ_γ y_γ ⟨df(E_γ²/2tm)⟩`` (``gheat``), or ``capdam``'s single photon."""
     tm = NEUTRON_REST_ENERGY * (A + 1.0)
     if not photons:
@@ -661,11 +662,11 @@ def _captureDamage(photons, grid, A, Z, ed, Q):
     total = np.zeros(len(grid))
     for product, form in photons:
         y = _yield(product, grid)
-        total = total + y * _photonRecoilDamage(form, grid, A, Z, ed, tm)
+        total = total + y * _photonRecoilDamage(form, grid, A, Z, ed, tm, fixedPrimary)
     return total
 
 
-def _photonRecoilDamage(form, grid, A, Z, ed, tm):
+def _photonRecoilDamage(form, grid, A, Z, ed, tm, fixedPrimary=False):
     from kika.nuclear_data import model as m
 
     if isinstance(form, m.DistributionMixture):
@@ -673,11 +674,12 @@ def _photonRecoilDamage(form, grid, A, Z, ed, tm):
         for term in form.weighted:
             weight = (np.asarray(term.weight.evaluate(grid), dtype=float)
                       if term.weight is not None else 1.0)
-            out = out + weight * _photonRecoilDamage(term.functional, grid, A, Z, ed, tm)
+            out = out + weight * _photonRecoilDamage(term.functional, grid, A, Z, ed, tm, fixedPrimary)
         return out
     energy = form.energy
     if isinstance(energy, m.DiscretePhotonEnergy):
-        eg = np.asarray(energy.outgoingEnergy(grid), dtype=float)
+        eg = (np.full(len(grid),float(energy.energy)) if fixedPrimary and energy.primaryFlag==2
+              else np.asarray(energy.outgoingEnergy(grid), dtype=float))
         return lindhard(eg * eg / (2.0 * tm), Z, A + 1.0, Z, A, ed)
     energies, tables, flat = _tables(energy)
     values = [_expect(t, lambda e: lindhard(e * e / (2.0 * tm), Z, A + 1.0, Z, A, ed))
@@ -860,8 +862,36 @@ def _statedInMF6(evaluation, mt) -> bool:
 
 
 
+def _mf12Capture(evaluation, mt):
+    """Source branch only; numerical photon values always come from the model."""
+    if evaluation is None:return False
+    source=evaluation.findReactionByENDF_MT(mt)
+    fields=getattr(getattr(source,"provenance",None),"headerFields",None) or {}
+    return bool(fields.get("mf12")) and not bool(fields.get("mf6"))
+
+
+def _mf12CaptureDomain(photons, grid):
+    """gheat closes its correction on the last MF12 subsection's domain."""
+    if not photons:return np.zeros(len(grid),dtype=bool)
+    multiplicity=getattr(photons[-1][0],"multiplicity",None)
+    forms=getattr(multiplicity,"forms",None) or {}
+    function=forms.get(MONTE_CARLO) or getattr(multiplicity,"form",None)
+    lo=getattr(function,"domainMin",None);hi=getattr(function,"domainMax",None)
+    xs=getattr(function,"xs",None);ys=getattr(function,"ys",None)
+    if xs is not None and ys is not None:
+        xs=np.asarray(xs);live=np.flatnonzero(np.asarray(ys)!=0)
+        if not len(live):return np.zeros(len(grid),dtype=bool)
+        first,last=int(live[0]),int(live[-1])
+        lo=float(xs[first]);hi=float(xs[min(last+1,len(xs)-1)])
+        if first and not _isFlat(function):lo=float(xs[first-1])
+        # A repeated terminal x states a zero tail while gheat's support
+        # still includes that x. The recoil uses the actual (right) yield.
+        return (grid>=lo)&(grid<=hi)
+    return ((grid>=lo) if lo is not None else np.ones(len(grid),dtype=bool)) & ((grid<=hi) if hi is not None else True) & (_yield(photons[-1][0],grid)>0)
+
+
 def _kinematicUpperOf(mt, grid, A, Q, Qbal, emitted, neutronYield, carried,
-                      deposit, heavy, mf6, lr, twoBodyCapture, photons):
+                      deposit, heavy, mf6, lr, twoBodyCapture, photons, captureCompound=False, captureDomain=None):
     """HEATR nheat/gheat MT443 diagnostic, in eV per collision.
 
     The historical high limit is a diagnostic approximation, not a certified
@@ -881,6 +911,10 @@ def _kinematicUpperOf(mt, grid, A, Q, Qbal, emitted, neutronYield, carried,
         if photons:
             # gheat replaces the single-photon kick of nheat with the
             # independent kicks of the stated gamma cascade.
+            if captureCompound:
+                available=Q+A*grid/(A+1)
+                fallback=grid/(A+1)+available*available/(2*NEUTRON_REST_ENERGY*(A+1))
+                return np.where(captureDomain,carried,fallback+carried-deposit)
             return grid / (A + 1) + carried
         available = Q + A * grid / (A + 1)
         return grid / (A + 1) + available * available / (2 * NEUTRON_REST_ENERGY * (A + 1))
@@ -1021,14 +1055,24 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             # ``deposit`` is with the photons in, as everywhere else.
             deposit = (heavy[0] if heavy is not None else np.zeros(len(grid))) + gammas
         twoBodyCapture = None
+        captureCompound = mt == 102 and _mf12Capture(evaluation, mt)
+        captureDomain = _mf12CaptureDomain(photons,grid) if captureCompound else None
         if mt == 102 and photons:
             second = np.zeros(len(grid))
             for product, form in photons:
-                second = second + _yield(product, grid) * _meanEnergyOf(form, grid, photon, moment=2)
-            # HEATR's output keeps only the photons' recoil: at Fe-56's capture
-            # resonances (1.15, 73, 106 keV) the official MT301 is short of
-            # E/(A+1)·σ_γ to the eV, though gheat's code reads as if it kept it.
+                energy = getattr(form,"energy",None)
+                if captureCompound and isinstance(energy,m.DiscretePhotonEnergy) and energy.primaryFlag==2:
+                    kick = np.full(len(grid),float(energy.energy)**2)
+                else:
+                    kick = _meanEnergyOf(form, grid, photon, moment=2)
+                second = second + _yield(product, grid) * kick
+            # MF6 cascades retain the measured photon-kick approximation.
+            # MF12 goes through gheat instead: its compound recoil and fixed
+            # primary-line kicks are observed separately in real HEATR.
             carried = second / (2.0 * tm)
+            if captureCompound:
+                carried = carried + np.where(captureDomain,grid/(A+1),deposit)
+                notes.append("MT102: MF12 gheat branch; compound recoil and fixed primary-line photon kicks")
             twoBodyCapture = _twoBodyCapture(photons, evaluation, grid, A)
             if twoBodyCapture is not None:
                 carried = twoBodyCapture
@@ -1053,7 +1097,10 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
                 recoil = np.divide(carried, y, out=np.zeros_like(carried), where=y > 0)
                 d = y * lindhard(recoil, Z, A + 1, Z, A, ed)
             else:
-                d = _captureDamage(photons, grid, A, Z, ed, _qAt(Qkin, grid))
+                d = _captureDamage(photons, grid, A, Z, ed, _qAt(Qkin, grid), fixedPrimary=captureCompound)
+                if captureCompound and photons:
+                    fallback=_captureDamage([],grid,A,Z,ed,_qAt(Qkin,grid))
+                    d=d+np.where(captureDomain,0.,fallback)
         elif heavy is not None:
             d = heavy[1]
         elif neutrons:
@@ -1072,7 +1119,7 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             mf6 = _statedInMF6(evaluation, mt) or bool(fields.get("mf6"))
             lr = int(getattr(getattr(reaction, "provenance", None), "lr", 0) or 0)
             upper = _kinematicUpperOf(mt, grid, A, _qAt(Qkin, grid), Qbal, emitted,
-                neutronYield, carried, deposit, heavy, mf6, lr, twoBodyCapture, photons)
+                neutronYield, carried, deposit, heavy, mf6, lr, twoBodyCapture, photons, captureCompound, captureDomain)
             if upper is not None:
                 kinematicUpper[mt] = upper
     # Fission's damage: HEATR's conbar gives a fission the recoil of one
