@@ -72,13 +72,14 @@ def _list(head, values, mf, mt):
     return lines
 
 
-def _lb5(matrix: np.ndarray, symmetric: bool, mf: int, mt: int):
-    ne = GRID.size
+def _lb5(matrix: np.ndarray, symmetric: bool, mf: int, mt: int, grid=None):
+    grid = GRID if grid is None else grid
+    ne = grid.size
     if symmetric:
-        values = list(GRID) + [matrix[i, j] for i in range(ne - 1)
+        values = list(grid) + [matrix[i, j] for i in range(ne - 1)
                                for j in range(i, ne - 1)]
     else:
-        values = list(GRID) + list(matrix.ravel())
+        values = list(grid) + list(matrix.ravel())
     return _list([0.0, 0.0, 1 if symmetric else 0, 5, len(values), ne],
                  values, mf, mt)
 
@@ -89,11 +90,14 @@ def _send(mf):
 
 
 def write(path: Path, *, orders=(0, 1, 2), za: int = None, awr: float = None,
-          mat: int = None, grid=None) -> Path:
+          mat: int = None, grid=None, mf33=None) -> Path:
     """Write the tape. *za*, *awr*, *mat* and *grid* default to Fe-56's; the
     covariance numbers are the same whatever nuclide they are written for,
     which is what lets the same block serve as a well-behaved covariance
-    beside another evaluation's tables."""
+    beside another evaluation's tables.
+
+    *mf33* is ``(grid, matrix)`` for an MF33/MT2 on its own grid, as an
+    evaluation's MF33 and MF34 usually are; by default it shares MF34's."""
     global ZA, AWR, MAT, GRID
     saved = (ZA, AWR, MAT, GRID)
     ZA = ZA if za is None else int(za)
@@ -101,12 +105,12 @@ def write(path: Path, *, orders=(0, 1, 2), za: int = None, awr: float = None,
     MAT = MAT if mat is None else int(mat)
     GRID = GRID if grid is None else np.asarray(grid, dtype=float)
     try:
-        return _write(Path(path), list(orders))
+        return _write(Path(path), list(orders), mf33)
     finally:
         ZA, AWR, MAT, GRID = saved
 
 
-def _write(path: Path, orders) -> Path:
+def _write(path: Path, orders, mf33=None) -> Path:
     lines = [f"{'synthetic Fe-56 MF33+MF34 with L=0 (kika tests)':<66}"
              f"{1:4d}{0:2d}{0:3d}     "]
     # MF3 stub: the covariance file only has to name the reaction.
@@ -116,7 +120,11 @@ def _write(path: Path, orders) -> Path:
     # MF33/MT2: one NI subsection, LB=5 symmetric.
     lines += [_line([float(ZA), AWR, 0, 0, 0, 1], 33, MT),
               _line([0.0, 0.0, 0, MT, 0, 1], 33, MT)]
-    lines += _lb5(mf33Block(), True, 33, MT)
+    if mf33 is None:
+        lines += _lb5(mf33Block(), True, 33, MT)
+    else:
+        lines += _lb5(np.asarray(mf33[1], dtype=float), True, 33, MT,
+                      grid=np.asarray(mf33[0], dtype=float))
     lines += [_send(33), _line([0.0, 0.0, 0, 0, 0, 0], 0, 0)]
     # MF34/MT2: LTT=3 because a_0 is present (ENDF-6 §34.2: NL counts the
     # coefficients and the first is a_0), upper triangle of (L, L1).

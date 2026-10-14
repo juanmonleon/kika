@@ -49,7 +49,7 @@ what they return, so a fix to how MF34 is read reaches this path too.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import (Any, Dict, Hashable, List, NamedTuple, Optional, Sequence,
                     Tuple)
 
@@ -162,12 +162,18 @@ class Selection:
     :func:`~kika.sampling.mf33_sampling.relativiseOnAssemblyGrids`. An absolute
     MF34 section is not converted, and :func:`absoluteSectionsLeftOut` names
     it so the run can record it.
+
+    ``magnitudeMts`` is set by :func:`resolveMagnitudeOrder`, never by a
+    caller: the MF34 reactions whose L0xLl sections -- the correlation between
+    the cross section and the a_l -- are drawn with MF33's sigma. Pista J3 of
+    ``mf4_tabulated_perturbation_roadmap.md``.
     """
 
     mf: int
     mt: Optional[Any] = None
     index: Optional[Any] = None
     relative: Optional[bool] = True
+    magnitudeMts: Optional[Tuple[int, ...]] = None
 
     def __post_init__(self) -> None:
         if self.mf not in SUPPORTED_MF:
@@ -183,6 +189,10 @@ class Selection:
                 f"index={self.index!r} selects nothing. Only MF34 and MF35 take "
                 f"one -- the Legendre order there, the incident-energy band here"
             )
+        if self.magnitudeMts and self.mf != 34:
+            raise ValueError(
+                f"magnitudeMts names the MF34 reactions whose sigma <-> a_l "
+                f"cross term is drawn; MF{self.mf} has none")
 
 
 #: The model's name for each covariance file, inverted: what a request written
@@ -412,9 +422,16 @@ def resolveMagnitudeOrder(suite, request):
     * **angular only** -- sigma is not being perturbed, so neither its variance
       nor its correlation with the shape is wanted.
     * **with MF33 for the same MT** -- MF33 states sigma's variance and the
-      L>=1 the shape. The cross term L0xLl is what a joint draw would add; it
-      is not drawn yet, and the note says whether the file's cross blocks
-      carry anything.
+      L>=1 the shape, and the **cross term L0xLl is drawn with them** (J3,
+      2026-10-14): the selection comes back with ``magnitudeMts`` naming the
+      reaction, and :func:`collectEntries` puts the L0xLl sections in the
+      matrix with their L=0 side re-keyed to MF33's sigma, so sigma is one
+      component and not two. L0xL0 stays out -- MF33 is sigma's variance
+      (option (a) of J2, and the only one that works on this project's own
+      ``_a0cross`` tapes, which write L0xL0 as a null block). Where the file's
+      cross blocks are null (<= :data:`NULL_MAGNITUDE_COVARIANCE`, the
+      ENDF/B-VIII.x placeholders) or MF33 states no sigma for that MT, nothing
+      is added and the run is the one it was before J3, bit for bit.
 
     Orders named explicitly are left alone, L=0 included: that is a request to
     perturb sigma from MF34, which :class:`PerturbationSet` still refuses next
@@ -433,7 +450,7 @@ def resolveMagnitudeOrder(suite, request):
     out: List[Selection] = []
     changed = False
     for selection in selections:
-        if selection.mf != 34 or selection.index is not None:
+        if selection.mf != 34 or selection.index is not None or selection.magnitudeMts:
             out.append(selection)
             continue
         found = _mf34_entries(suite, mt=selection.mt, relative=selection.relative)
@@ -449,11 +466,17 @@ def resolveMagnitudeOrder(suite, request):
                 f"section's magnitude, not a shape, so the angular distribution "
                 f"was not perturbed there")
             continue
-        out.append(Selection(mf=34, mt=selection.mt, index=shape,
-                             relative=selection.relative))
+        joint: List[int] = []
         for mt in _mtsOf(found, withOrder=MAGNITUDE_ORDER):
-            withSigma = crossSectionMTs is None or mt in crossSectionMTs
-            notes.append(_magnitudeNote(found, mt, withSigma))
+            withSigma = ((crossSectionMTs is None or mt in crossSectionMTs)
+                         and bool(_cross_section_entries(suite, mf=33, mt=mt)))
+            drawn = withSigma and _largestCross(found, mt) > NULL_MAGNITUDE_COVARIANCE
+            if drawn:
+                joint.append(mt)
+            notes.append(_magnitudeNote(found, mt, withSigma, drawn=drawn))
+        out.append(Selection(mf=34, mt=selection.mt, index=shape,
+                             relative=selection.relative,
+                             magnitudeMts=tuple(joint) or None))
     if not changed:
         return request, notes
     if isinstance(request, dict):
@@ -476,12 +499,23 @@ def _mtsOf(found, withOrder=None) -> List[int]:
                    if withOrder is None or withOrder in (row[2], col[2])})
 
 
-def _magnitudeNote(found, mt: int, withSigma: bool) -> str:
-    """The line a run records for a dropped L=0, and what the drop cost."""
+def _largestCross(found, mt: int) -> float:
+    """``max |cov|`` over the L0xLl sections of reaction *mt* (0 if none)."""
     cross = [np.asarray(matrix, dtype=float) for row, col, matrix, *_ in found
              if int(row[1]) == mt
              and (row[2] == MAGNITUDE_ORDER) != (col[2] == MAGNITUDE_ORDER)]
-    largest = max((float(np.max(np.abs(m))) for m in cross if m.size), default=0.0)
+    return max((float(np.max(np.abs(m))) for m in cross if m.size), default=0.0)
+
+
+def _magnitudeNote(found, mt: int, withSigma: bool, drawn: bool = False) -> str:
+    """The line a run records for MF34's L=0: drawn as the cross term, or dropped."""
+    largest = _largestCross(found, mt)
+    if drawn:
+        return (f"MF34/MT{mt} states L=0 (the variance of sigma and its "
+                f"correlation with the a_l). MF33 gives sigma's variance and the "
+                f"L>=1 the shape, and the sigma <-> a_l cross term (L0xLl, max "
+                f"|cov| {largest:.3g}) is drawn with them in one matrix; L0xL0 "
+                f"is not used")
     carried = (f"its L0xLl blocks are null (max |cov| {largest:.1e}), so nothing "
                f"is lost" if largest <= NULL_MAGNITUDE_COVARIANCE else
                f"its L0xLl blocks reach |cov| {largest:.3g}, and that "
@@ -527,8 +561,7 @@ def _asSelections(request) -> List[Selection]:
             if value is None or value is True:
                 out.append(Selection(mf=int(mf)))
             elif isinstance(value, Selection):
-                out.append(Selection(mf=int(mf), mt=value.mt, index=value.index,
-                                     relative=value.relative))
+                out.append(replace(value, mf=int(mf)))
             elif isinstance(value, dict):
                 out.append(Selection(mf=int(mf), **value))
             else:
@@ -596,6 +629,9 @@ def collectEntries(suite, request) -> List[Tuple[ComponentKey, ComponentKey,
                                   relative=selection.relative)
             keys = [(_legendreKey(row), _legendreKey(col))
                     for row, col, *_ in found]
+            if selection.magnitudeMts:
+                cross, crossKeys = _magnitudeCrossEntries(suite, selection)
+                found, keys = found + cross, keys + crossKeys
         if not found:
             raise ValueError(
                 f"MF{selection.mf} states no section matching mt={selection.mt!r}, "
@@ -606,6 +642,34 @@ def collectEntries(suite, request) -> List[Tuple[ComponentKey, ComponentKey,
         for (rowKey, colKey), (_r, _c, matrix, rowGrid, colGrid) in zip(keys, found):
             entries.append((rowKey, colKey, matrix, rowGrid, colGrid))
     return entries
+
+
+def _magnitudeCrossEntries(suite, selection: Selection):
+    """The L0xLl sections of *selection*'s ``magnitudeMts``, L=0 read as MF33's sigma.
+
+    ``(found, keys)`` in :func:`collectEntries`' shapes. The L=0 side of each
+    section becomes ``(ZA, 33, MT, 0)`` -- the component MF33 already put in the
+    request -- so sigma is one row family of the joint and the cross block
+    lands between it and the a_l. A section is kept only if its other side is
+    one of the shape orders the selection draws; L0xL0 never is.
+    """
+    shape = sorted(_asIntSet(selection.index)) if selection.index is not None else None
+    orders = None if shape is None else shape + [MAGNITUDE_ORDER]
+    found, keys = [], []
+    for entry in _mf34_entries(suite, mt=selection.mt, orders=orders,
+                               relative=selection.relative):
+        row, col = entry[0], entry[1]
+        rowIsSigma, colIsSigma = row[2] == MAGNITUDE_ORDER, col[2] == MAGNITUDE_ORDER
+        if rowIsSigma == colIsSigma:
+            continue
+        sigma = row if rowIsSigma else col
+        if int(sigma[1]) not in selection.magnitudeMts:
+            continue
+        sigmaKey = _crossSectionKey((sigma[0], sigma[1]), 33)
+        found.append(entry)
+        keys.append((sigmaKey, _legendreKey(col)) if rowIsSigma
+                    else (_legendreKey(row), sigmaKey))
+    return found, keys
 
 
 def componentDomains(suite, request) -> Dict[ComponentKey, Tuple[float, float]]:
