@@ -62,17 +62,20 @@ def _true(value: bool) -> Optional[str]:
 
 
 def writeResonances(root: ET.Element, resonances, report: ConversionReport,
-                    domain) -> None:
+                    domain, reactionHrefs: Optional[dict] = None) -> None:
     """``domain`` is ``(min, max)`` as strings — every ``constant1d`` in §19 has
     to declare one and the model's scalars do not carry it, so the evaluation's
-    own ``projectileEnergyDomain`` is used, exactly as in the reaction writer."""
+    own ``projectileEnergyDomain`` is used, exactly as in the reaction writer.
+
+    ``reactionHrefs`` maps an ENDF MT to the xPath of that reaction in the suite
+    being written, for the links an ENDF-decoded region has no list of."""
     element = ET.SubElement(root, "resonances")
     _scatteringRadius(element, resonances.scatteringRadius, report,
                       "resonances", domain=domain)
     for region in resonances.resolved:
-        _resolved(element, region, report, domain)
+        _resolved(element, region, report, domain, resonances.scatteringRadius)
     if resonances.unresolved is not None:
-        _unresolved(element, resonances.unresolved, report, domain)
+        _unresolved(element, resonances.unresolved, report, domain, reactionHrefs)
 
 
 def _constant(parent: ET.Element, tag: Optional[str], value: float, domain,
@@ -161,7 +164,7 @@ def _radiusAxes(parent: ET.Element, unit: Optional[str]) -> None:
 
 
 def _resolved(parent: ET.Element, region, report: ConversionReport,
-              domain) -> None:
+              domain, topRadius: Optional[ScatteringRadius] = None) -> None:
     element = ET.SubElement(parent, "resolved")
     _set(element, domainMin=_number(region.domainMin),
          domainMax=_number(region.domainMax),
@@ -170,7 +173,7 @@ def _resolved(parent: ET.Element, region, report: ConversionReport,
     if isinstance(formalism, RMatrix):
         if region.scatteringRadius is not None:
             report.unsupportedNode('region-local RMatrix radius function is not serialized by this GNDS writer')
-        _rMatrix(element, formalism, report, domain)
+        _rMatrix(element, formalism, report, domain, topRadius)
     elif isinstance(formalism, BreitWigner):
         _breitWigner(element, formalism, report, domain, region.scatteringRadius)
     elif formalism is not None:
@@ -189,7 +192,12 @@ def _nestedPoPs(parent, formalism, report: ConversionReport, where: str) -> None
 
 
 def _rMatrix(parent: ET.Element, formalism: RMatrix,
-             report: ConversionReport, domain) -> None:
+             report: ConversionReport, domain,
+             topRadius: Optional[ScatteringRadius] = None) -> None:
+    groups = _rmGroupsForGNDS(formalism, report)
+    reactions, groups = _withoutEmptyFission(formalism, groups, report)
+    groups = _withChannelSpins(reactions, groups)
+    groups = _rmRadiusOnChannels(formalism, groups, topRadius, report)
     element = ET.SubElement(parent, "RMatrix")
     if formalism.radiusPolicy is not None and (formalism.radiusPolicy.channelMode=='constant' or formalism.radiusPolicy.phaseRadius is not None):
         report.unsupportedNode('independent RM radiusPolicy requires channel-radius normalization before GNDS serialization')
@@ -203,18 +211,142 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
          relativisticKinematics=_true(formalism.relativisticKinematics),
          reducedWidthAmplitudes=_true(formalism.reducedWidthAmplitudes))
     _nestedPoPs(element, formalism, report, "RMatrix")
-    if formalism.scatteringRadius is not None:
-        _scatteringRadius(element, ScatteringRadius(
-            constant=formalism.scatteringRadius,
-            unit=formalism.radiusUnit), report, "RMatrix", domain)
 
-    reactions = ET.SubElement(element, "resonanceReactions")
-    for reaction in formalism.resonanceReactions:
-        _resonanceReaction(reactions, reaction, report, domain)
+    container = ET.SubElement(element, "resonanceReactions")
+    for reaction in reactions:
+        _resonanceReaction(container, reaction, report, domain)
 
-    groups = ET.SubElement(element, "spinGroups")
-    for group in _rmGroupsForGNDS(formalism, report):
-        _spinGroup(groups, group, report, domain, formalism.reducedWidthAmplitudes)
+    container = ET.SubElement(element, "spinGroups")
+    for group in groups:
+        _spinGroup(container, group, report, domain, formalism.reducedWidthAmplitudes)
+
+
+def _rmRole(reaction) -> Optional[str]:
+    """``neutron``/``capture``/``fission``, by MT first and by the LRF=3
+    decoder's labels second: the rule ``prepare_reich_moore`` applies, so the
+    writer and the processing code cannot disagree on what a channel is."""
+    mt = getattr(reaction, "reactionMT", None)
+    if mt == 2 or (mt is None and reaction.label == "elastic"):
+        return "neutron"
+    if mt == 102 or (mt is None and reaction.label == "capture"):
+        return "capture"
+    if mt in (18, 19) or (mt is None and reaction.label in ("fission", "fissionA", "fissionB")):
+        return "fission"
+    return None
+
+
+def _withoutEmptyFission(formalism, groups, report):
+    """D38: a range with no fission width writes no fission channel.
+
+    The LRF=3 decoder gives every Reich-Moore range the four ENDF columns, so a
+    non-fissile evaluation carried ``fissionA``/``fissionB`` resonance reactions
+    with **no reaction to link to** (there is no MT18), and FUDGE stops on the
+    first ``resonanceReaction`` without its mandatory ``link``
+    (``resonances/common.py:266``). FUDGE's own ENDF→GNDS writes the fission
+    channels only when some resonance has a fission width (``haveFission`` in
+    ``ENDF_ITYPE_0_Misc.py``), and that is the rule here. Nothing is lost: an
+    all-zero column adds nothing to any cross section, and the model keeps its
+    four columns for the ENDF writer.
+    """
+    roles = {r.label: _rmRole(r) for r in formalism.resonanceReactions}
+    empty = {label for label, role in roles.items() if role == "fission"}
+    for group in groups:
+        for position, channel in enumerate(group.channels):
+            if channel.resonanceReaction in empty and any(
+                    row[position] != 0 for row in group.widths):
+                empty.discard(channel.resonanceReaction)
+    if not empty:
+        return list(formalism.resonanceReactions), groups
+    from copy import deepcopy
+    pruned = []
+    for source in groups:
+        group = deepcopy(source)
+        keep = [i for i, channel in enumerate(group.channels)
+                if channel.resonanceReaction not in empty]
+        group.channels = [group.channels[i] for i in keep]
+        group.widths = [[row[i] for i in keep] for row in group.widths]
+        # `columnIndex` addresses the table `_rMatrixTable` lays out: dropping a
+        # channel must not leave an index pointing past the last column.
+        first = min((c.columnIndex for c in group.channels
+                     if c.columnIndex is not None), default=1)
+        for position, channel in enumerate(group.channels):
+            if channel.columnIndex is not None:
+                channel.columnIndex = position + first
+        pruned.append(group)
+    report.warn(
+        f"RMatrix: {sorted(empty)} carry no non-zero width in any resonance and "
+        f"are not written, as FUDGE does not write them"
+    )
+    return [r for r in formalism.resonanceReactions if r.label not in empty], pruned
+
+
+#: The ``channelSpin`` FUDGE gives the channels whose spin no ENDF field states
+#: (``ENDF_ITYPE_0_Misc.py``, LRF=3): 1 to the eliminated capture channel and 0
+#: to each fission channel. FUDGE's reader requires the attribute on every
+#: channel (``resolved.py:716``); the value takes no part in a Reich-Moore cross
+#: section, where only the entrance channel's spin enters the statistical factor.
+_UNSTATED_CHANNEL_SPIN = {"capture": 1, "fission": 0}
+
+
+def _withChannelSpins(reactions, groups):
+    roles = {r.label: _rmRole(r) for r in reactions}
+
+    def unstated(channel):
+        return (channel.channelSpin is None
+                and roles.get(channel.resonanceReaction) in _UNSTATED_CHANNEL_SPIN)
+
+    if not any(unstated(c) for g in groups for c in g.channels):
+        return groups
+    from copy import deepcopy
+    groups = [deepcopy(g) for g in groups]
+    for group in groups:
+        for channel in group.channels:
+            if unstated(channel):
+                channel.channelSpin = _UNSTATED_CHANNEL_SPIN[roles[channel.resonanceReaction]]
+    return groups
+
+
+def _rmRadiusOnChannels(formalism, groups, topRadius, report):
+    """D20b: the range's AP has no slot under ``RMatrix`` — ``RMatrixType``
+    (``gnds.xsd:855-868``) admits no ``scatteringRadius`` child. GNDS states a
+    radius in two other places, and the writer takes whichever loses nothing:
+
+    * **equal to ``resonances/scatteringRadius``**, as in every single-range
+      evaluation (the decoder fills the top one from the first range's AP):
+      not written. Reading back, every use falls through to the top radius
+      (``prepare_reich_moore.py``: channel, reaction, RMatrix, top).
+    * **otherwise**, on every channel that states no radius of its own — the
+      only channels the range radius ever reached. Same number, same use; what
+      GNDS cannot say is that it was one range-level value, and the report says
+      so.
+    """
+    radius = formalism.scatteringRadius
+    if radius is None:
+        return groups
+    top = topRadius
+    if (top is not None and not top.isEnergyDependent and top.constant == radius
+            and (top.unit or None) == (formalism.radiusUnit or None)):
+        return groups
+    if all(c.scatteringRadius is not None for g in groups for c in g.channels):
+        report.lost(
+            f"RMatrix: range radius {radius} differs from the top-level one and "
+            f"every channel states its own, so nothing uses it; GNDS has no slot "
+            f"for it under RMatrix and it is not written"
+        )
+        return groups
+    from copy import deepcopy
+    groups = [deepcopy(g) for g in groups]
+    for group in groups:
+        for channel in group.channels:
+            if channel.scatteringRadius is None:
+                channel.scatteringRadius = radius
+                channel.radiusUnit = formalism.radiusUnit
+    report.warn(
+        f"RMatrix: range radius {radius} differs from the top-level one; GNDS "
+        f"has no slot for it under RMatrix, so it is written on the channels "
+        f"that use it"
+    )
+    return groups
 
 
 def _rmGroupsForGNDS(formalism, report):
@@ -235,8 +367,13 @@ def _rmGroupsForGNDS(formalism, report):
             raise ValueError('serializing legacy RM rows requires modeled target spin')
         if source.atomicWeightRatio is not None:
             report.lost(f'RM {source.label}: per-group atomicWeightRatio has no native GNDS slot; supply physical particle masses for a normalized GNDS evaluation')
+        # `spinGroup/@parity` is required (gnds.xsd and FUDGE's reader alike) and
+        # LRF=3 states no target parity. FUDGE's ENDF->GNDS assumes a positive
+        # one (`targetParity = 1` in ENDF_ITYPE_0_Misc.py) and so does this; the
+        # parity takes no part in a Reich-Moore cross section.
+        parity=1 if target.parity is None else target.parity
         if target.parity is None:
-            report.lost(f'RM {source.label}: target parity is unknown; GNDS spin-group parity cannot be inferred')
+            report.warn(f'RM {source.label}: ENDF states no target parity; the spin-group parity assumes a positive one, as FUDGE does')
         spin=float(target.spin.value);neutron=next((c for c in source.channels if c.resonanceReaction=='elastic'),None)
         if neutron is None:raise ValueError('legacy RM requires its declared elastic channel')
         l=neutron.L;buckets={}
@@ -246,7 +383,7 @@ def _rmGroupsForGNDS(formalism, report):
             buckets.setdefault((j,cs),[]).append(i)
         for ordinal,((j,cs),indices) in enumerate(buckets.items()):
             group=deepcopy(source);group.label=f'{source.label}-J{j}-s{cs}-{ordinal}'
-            group.spin=j;group.parity=None if target.parity is None else target.parity*(-1)**l
+            group.spin=j;group.parity=parity*(-1)**l
             group.spins=[];group.energies=[source.energies[i] for i in indices]
             group.widths=[list(source.widths[i]) for i in indices];group.atomicWeightRatio=None
             for position,channel in enumerate(group.channels):
@@ -436,7 +573,7 @@ def _breitWigner(parent: ET.Element, formalism: BreitWigner,
 
 
 def _unresolved(parent: ET.Element, region, report: ConversionReport,
-                domain) -> None:
+                domain, reactionHrefs: Optional[dict] = None) -> None:
     element = ET.SubElement(parent, "unresolved")
     _set(element, domainMin=_number(region.domainMin),
          domainMax=_number(region.domainMax),
@@ -456,6 +593,10 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
     if widths.potentialScatteringInterpolation is not None or widths.potentialScatteringEnergies is not None:
         report.lost('URR independent potential-scattering interpolation requires the KIKA opt-in resonance extension')
     _nestedPoPs(node, widths, report, "tabulatedWidths")
+    # `resonanceReactions` before both radii: `TabulatedWidthsType`
+    # (gnds.xsd:816-834) is an `xs:sequence`, and written after them it was a
+    # schema error that hid the empty list behind it.
+    _unresolvedReactions(node, widths, report, domain, reactionHrefs)
     table = None if policy is None else policy.phaseRadius
     # FUDGE's mapping (ENDF_ITYPE_0_Misc.readResonanceSection): AP(E) is the
     # hardSphereRadius when P/S come from the mass, and the scatteringRadius
@@ -477,17 +618,6 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
         _scatteringRadius(node, table, report, "tabulatedWidths", domain,
                           tag="hardSphereRadius")
 
-    reactions = ET.SubElement(node, "resonanceReactions")
-    for reaction in widths.resonanceReactions:
-        _resonanceReaction(reactions, reaction, report, domain)
-    if not widths.resonanceReactions:
-        report.lost(
-            "the unresolved region names no resonanceReactions, which §19.4.1 "
-            "requires; the channels are identified only by the labels on their "
-            "own widths, and reconstructing the list from those would produce "
-            "entries with no link in them"
-        )
-
     Ls = ET.SubElement(node, "Ls")
     byL = {}
     for group in widths.spinGroups:
@@ -499,6 +629,41 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
         for index, group in enumerate(groups):
             _unresolvedSpinGroup(Js, group, index, widths.energyGrid, report,
                                  domain)
+
+
+#: The URR width labels the ENDF decoder writes, and the MT each one is. The
+#: competitive width has no single reaction (it is MT4 less the elastic, or
+#: MT51 and up), and FUDGE leaves it out of the list too: its ENDF->GNDS writes
+#: the competitive width with a label no resonanceReaction carries.
+_URR_LABEL_MT = {"neutron": 2, "elastic": 2, "capture": 102, "fission": 18}
+
+
+def _unresolvedReactions(node: ET.Element, widths, report: ConversionReport,
+                         domain, reactionHrefs) -> None:
+    """§19.4.1's ``resonanceReactions``, which the schema requires non-empty.
+
+    A GNDS-read region carries its own list and it is written as read. An
+    ENDF-decoded one carries none, since ENDF states URR channels by position;
+    the list is then built the way FUDGE builds it, one linked entry per width
+    whose MT the suite has a reaction for (D38: written empty, the file did not
+    validate and FUDGE could not resolve the widths' reactions).
+    """
+    reactions = ET.SubElement(node, "resonanceReactions")
+    if widths.resonanceReactions:
+        for reaction in widths.resonanceReactions:
+            _resonanceReaction(reactions, reaction, report, domain)
+        return
+    for label in _channelLabels(widths):
+        href = (reactionHrefs or {}).get(_URR_LABEL_MT.get(label))
+        if href is not None:
+            entry = _set(ET.SubElement(reactions, "resonanceReaction"), label=label)
+            _set(ET.SubElement(entry, "link"), href=href)
+    if len(reactions) == 0:
+        report.lost(
+            "the unresolved region names no resonanceReactions, which §19.4.1 "
+            "requires, and no width label maps to a reaction of this suite; the "
+            "channels are identified only by the labels on their own widths"
+        )
 
 
 def _channelLabels(widths) -> list:
@@ -536,8 +701,14 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
         if channel.neutronWidthConvention!='reduced':
             report.lost('URR physical neutron widths require the KIKA opt-in resonance extension')
         node = ET.SubElement(widths, "width")
+        # An integral count goes out as an integer: FUDGE's `floatOrint`
+        # (resonances/common.py:487) does `int(value)` on any integral float,
+        # and `int("1.0")` raises, so `1.0` was a file FUDGE could not open.
+        dof = channel.degreesOfFreedom
         _set(node, label=str(position), resonanceReaction=channel.label,
-             degreesOfFreedom=_number(channel.degreesOfFreedom))
+             degreesOfFreedom=(None if dof is None else
+                               str(int(dof)) if float(dof).is_integer()
+                               else _number(dof)))
         grid = channel.energies if channel.energies is not None else blockGrid
         _average(node, None, grid, channel.widths, channel.constantWidth,
                  f"spinGroup L={group.L} J={group.J} width {channel.label!r}",

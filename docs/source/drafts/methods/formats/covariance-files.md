@@ -31,15 +31,15 @@ parameters $(\text{material}, \text{MT})$. Three file formats carry such a set:
 - **COVERX**, the covariance library format of the SCALE system: Fortran unformatted
   sequential records (binary), or a text transcription of the same content. Energies are
   in eV and in descending order, groups are numbered from high energy to low. Blocks are
-  stored in banded form. `TODO(ref)`: SCALE manual, COVERX format description.
+  stored in banded form (SCALE 6.3.1 manual, COVERX format).
 - **BOXER**, the card-image format written by NJOY's COVR module: 80-column header cards,
   each followed by run-length compressed values and control integers. A file holds the
   group boundaries, cross-sections, standard deviations and covariance or correlation
-  matrices. `TODO(ref)`: NJOY 2016 manual, COVR chapter.
+  matrices (NJOY 2016 manual, COVR).
 - **COVFIL**, the ENDF-formatted tape written by NJOY's ERRORR module: an MF 1 / MT 451
   section holding the group boundaries, optional MF 3 group cross-sections, and MF 33 (or
-  MF 34) sections whose sub-sections hold the matrix row by row. `TODO(ref)`: NJOY 2016
-  manual, ERRORR chapter.
+  MF 34) sections whose sub-sections hold the matrix row by row (NJOY 2016 manual,
+  ERRORR).
 
 In every format a block is the covariance between the vertical (row) parameter and the
 horizontal (column) parameter, and a block is normally stated once per unordered pair:
@@ -413,5 +413,8 @@ There is no oracle check against SCALE or NJOY reading a file kika wrote.
 
 - D. A. Brown (ed.), *ENDF-6 Formats Manual*, Brookhaven National Laboratory (2023),
   doi:10.2172/2007538. Cited as ENDF-6: Ch. 33 (MF 33), Ch. 34 (MF 34).
-- `TODO(ref)`: the SCALE manual (COVERX format) and the NJOY 2016 manual (ERRORR and COVR
-  chapters, the COVFIL and BOXER formats).
+- W. Wieselquist and R. A. Lefebvre (eds.), *SCALE 6.3.1 User Manual*, ORNL/TM-SCALE-6.3.1,
+  Oak Ridge National Laboratory (2023), doi:10.2172/1959594: the COVERX format.
+- R. E. MacFarlane, D. W. Muir, R. M. Boicourt, A. C. Kahler and J. L. Conlin, *The NJOY
+  Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
+  doi:10.2172/1338791: ERRORR and COVR, the COVFIL and BOXER formats.

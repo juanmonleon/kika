@@ -1,4 +1,4 @@
-"""ACER-like tabulation: evaluated distributions → Monte Carlo tables (roadmap H3, D6).
+"""ACER-like tabulation: evaluated distributions → Monte Carlo tables.
 
 What a continuous-energy transport code samples is not what an evaluation
 states. ACER (NJOY) turns Legendre series, laws and correlated forms into

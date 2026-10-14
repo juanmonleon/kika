@@ -8,9 +8,15 @@ analysis.
 
 - **Input**: `kika.read_mcnp(path)` reads materials, cells and PERT cards; see
   {doc}`/user_guide/tutorials/input_files`.
-- **Tally output (MCTAL)**: `kika.read_mctal(path)` returns the tallies, with
-  `to_dataframe`, `to_xarray`, `get_slice` and the PERT tallies; see
+- **Tally output (MCTAL)**: `kika.read_mctal(path)` returns the tallies. Each tally holds
+  MCNP's eight bin axes as the file writes them, totals included: `to_xarray()` gives the
+  labelled bins, `total(*axes)` the total bins over the axes named, and `to_dataframe()`
+  a flat table; each takes `perturbation=N` for the PERT tallies. See
   {doc}`/user_guide/tutorials/mctal_files`.
+- **Mesh tallies (FMESH)**: `kika.read_meshtal(path)` reads a MESHTAL text file or the
+  HDF5 runtape of MCNP 6.3, rectangular or cylindrical, into the same object, with the
+  same `to_xarray`, `total` and `to_dataframe` views; see
+  {doc}`/user_guide/tutorials/mesh_tallies`.
 - **PERT cards** for sensitivities: `kika.mcnp.generate_pert_cards` and
   `perturb_material`; see {doc}`/user_guide/tutorials/pert_cards` and, for what is computed
   from them, {doc}`../methods/uq/sensitivities`.

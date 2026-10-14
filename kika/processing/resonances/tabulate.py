@@ -66,6 +66,7 @@ class ReconstructionResult:
         Finite probes cannot establish a mathematical all-energy guarantee.
         """
         from kika.nuclear_data.model import Regions1d
+        from kika.nuclear_data.model.functions.regions1d import curvesOnDomains
         from kika.algebra import prepare_evaluator
         if set(forms)!=set(self.forms):raise ValueError('reloaded reactions differ from reconstructed output')
         maxima={mt:0. for mt in forms}
@@ -74,8 +75,8 @@ class ReconstructionResult:
             grid=self._grids[index] if self._grids else (exemplar.function1ds[index].xs if isinstance(exemplar,Regions1d) else exemplar.xs)
             evaluators={}
             for mt,form in forms.items():
-                curves=form.function1ds if isinstance(form,Regions1d) else [form]
-                if len(curves)!=len(self._segments):raise ValueError('serialized region structure changed')
+                curves=curvesOnDomains(form,[(seg.low,seg.high) for seg in self._segments])
+                if curves is None:raise ValueError('serialized region structure changed')
                 curve=curves[index]
                 if curve.domainMin!=s.low or curve.domainMax!=s.high:
                     raise ReconstructionConvergenceError('serialization moved a region boundary')

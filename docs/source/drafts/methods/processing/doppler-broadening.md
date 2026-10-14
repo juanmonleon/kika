@@ -5,7 +5,7 @@
 **Computes:** pointwise and linear-table neutron cross-sections at a higher target temperature.
 **Applies to:** complete scalar neutron/laboratory-frame source tables for one nuclide.
 **Entry points:** {py:func}`kika.processing.doppler.evaluate_broadened`, {py:func}`kika.processing.doppler.broaden_curve`, {py:func}`kika.processing.doppler.broaden_suite`.
-**Status:** experimental.
+**Status:** experimental — not yet in a release (after 0.4.0).
 ```
 
 ## Background
@@ -118,8 +118,9 @@ For each Gaussian sequence, $A=2|b_\pm|d$ and $B=2d^2$; add their bounds.
 For the coupled low-$z$ recurrence, use $|D_n|+|H_n|$ and
 $A=2(|z+s_0|+z)d$. The omitted moment is at most $T_n/(n+2)$.
 The diagnostic pads the coefficient bound by $1+128\epsilon$ and permits
-stopping after at least three coefficients in production, or nine in the
-private moment diagnostic, only when that moment bound is
+stopping after at least three coefficients when the moments are contracted with
+a panel's polynomial, or nine when the moments themselves are returned, only
+when that moment bound is
 at most $4\epsilon$ times the accumulated difference norm. Other maximum
 term counts retain the requested number of coefficients.
 
@@ -175,7 +176,7 @@ quadrature, polynomial-power and summation sensitivity. With
 $N_a=\sum_{j=0}^{16}|a_j|$, each Gaussian charges
 $e^{-s^2}[(\mu_0+\eta_\mu)T_{16}+\eta_\mu N_a+
 512\epsilon\mu_0N_a]/(\sqrt\pi hE)$ to the kernel estimate. This float provision
-is empirical rather than directed interval arithmetic. When the reflected
+is empirical, not directed interval arithmetic. When the reflected
 Gaussian has $s_+-\delta>8$, it may be omitted with the bound
 $(\mu_0+\eta_\mu)e^{-(s_+-\delta)^2}(1+64\epsilon)/(\sqrt\pi hE)$.
 
@@ -228,7 +229,7 @@ S_\sigma\left(\left|1+\frac{s_0}{z}\right|+\frac d z\right)^2\right].
 $$ (eq-doppler-geometry-estimate)
 
 This float64 sensitivity provision is tested against high-precision Gaussian
-integrals; it remains a diagnostic rather than a directed-rounding certificate.
+integrals; it remains a diagnostic, not a directed-rounding certificate.
 It is charged to the existing kernel allocation, which is never enlarged.
 
 
@@ -320,6 +321,38 @@ aggregate addition retains compensated `math.fsum` scaling.
 - A suite source temperature follows a validated style or declaration. PoPs
   masses and explicit masses must agree. Metadata never establish an unknown
   heating history as convolution-compatible merely by copying a style.
+- **The kernel is the same integral as BROADR's and FUDGE's, with its error
+  accounted.** NJOY BROADR integrates each linear panel with the SIGMA1 analytic
+  moments of order 0 to 4, switching to a series where they lose precision; FUDGE
+  uses closed moments with a centred expansion for narrow panels. kika uses closed
+  moments where its error diagnostic accepts them and a local series otherwise,
+  and charges each error term to an explicit share of the budget
+  ({eq}`eq-doppler-budget`). This is a different route to the same operator
+  {eq}`eq-doppler-operator`: no gain in accuracy of the kernel over BROADR's is
+  claimed, only that its error is stated.
+- **The mesh is not thinned.** BROADR thins the heated table to `errthn` (and
+  `thnmax`), and FUDGE to half its accuracy, by removing nodes that the chord of
+  their neighbours reproduces at the nodes. The tolerance then holds at the nodes
+  and not between them: on Fe-56 of ENDF/B-VIII.1 at 293.6 K (MT 2 and 102, up to
+  850 keV), sampling the BROADR table at 100 000 random energies against kika's
+  pointwise kernel gives a maximum relative error of 1.0 % at the default
+  `errthn` $=10^{-3}$, with 8.4 % of the MT 102 points above $10^{-3}$; it stays
+  below $10^{-3}$ everywhere only with `errthn` $\le 10^{-4}$. kika's table, built
+  at `rtol` $=10^{-3}$ and checked at interior points, gives $5\cdot10^{-4}$
+  there, with no point above $10^{-3}$ (NJOY 2016.78, measured 2026-10-11).
+- **The output window is the one asked for.** The upper limit given to BROADR is
+  not always the one it heats to: on ENDF/B-VIII.1 Zr-90 a run asked for a higher
+  limit heated only up to 200 keV, and H-1 up to 6.5 MeV, leaving the rest at the
+  cold values (NJOY 2016.78, measured 2026-10-11). kika has no automatic cut-off;
+  the window is an argument, and every node inside it is heated and checked.
+- **The source below its first energy is part of the input.** The integral
+  {eq}`eq-doppler-operator` reaches below the first energy of the cold table, so
+  kika asks for the continuation (zero, constant or $1/v$) and integrates it. In
+  FUDGE, `lowerlimit='oneOverV'` shapes only the output below the first energy and
+  does not add that contribution to the integral; to reproduce FUDGE, kika is run
+  with `zero` support. Comparisons of the two codes that use $1/v$ in kika and
+  `oneOverV` in FUDGE therefore differ by that term, and not by an error of
+  either.
 
 ## Limits and failure modes
 
@@ -366,6 +399,39 @@ rejection and atomic attachment in `test_table_suite.py`.
 component diagnostics with the ordered contributions of individual panels,
 including signed data, repeated and interleaved labels, Unicode labels and
 subclass dictionary semantics. It also checks shared region-label ownership.
+The native block controller is checked against the scalar controller, including
+identical accepted values/errors/tails/components and the same rejected point
+and budget, in `kika/processing/doppler/tests/test_blocks.py`. Additional checks
+cover strided/reversed/unaligned queries, constrained scratch, failed buffer
+exports, late failures without partial results, and ordered prepared edges.
+
+### Comparison with FUDGE and NJOY
+
+These comparisons are not tests of this repository: FUDGE and NJOY are neither
+dependencies of kika nor the truth. FUDGE 6.14.0 and NJOY 2016.78 (Linux build),
+on evaluations of ENDF/B-VIII.1.
+
+- **FUDGE, on the same cold input.** Both codes heated the identical cold tables of
+  Fe-56, Zr-90, Au-197, U-235, U-238 and Pu-239 (MT 102), with the same support
+  convention (`zero` or `constant`), at 1, 293.6, 600 and 1200 K and relative
+  tolerances $10^{-3}$, $10^{-4}$ and $10^{-5}$ ($10^{-8}$ b absolute). Over
+  8 055 probes, the largest difference is 0.31 of the sum of the two codes'
+  declared tolerances (measured 2026-10-12). The two codes compute the same
+  heated cross-section.
+- **NJOY, on its own cold table.** BROADR was compared with kika's kernel applied
+  to NJOY's own RECONR table, so that only the broadening differs. At the probes,
+  BROADR's residual is at most 0.93 of its budget, and kika's pointwise kernel
+  agrees with an independent numerical quadrature on the same input to
+  $1.1\cdot10^{-10}$ of the budget (Fe-56, Zr-90, Au-197, U-235, U-238 at
+  293.6 K and above; measured 2026-10-11). Between the nodes of a thinned table the
+  error is larger, as stated under *Conventions and choices*. Pu-239 was not
+  compared with NJOY, which did not process the cold evaluation correctly.
+- **Time.** On a thermal window (Fe-56 and Au-197 at 600 K, $10^{-7}$ to 20 eV,
+  MT 2 and 102, `rtol` $=10^{-3}$, one core, median of three runs, measured
+  2026-10-12) kika takes 0.31 s and 0.30 s, FUDGE 0.15 s and 0.19 s, NJOY 0.13 s:
+  on small tables both are about twice as fast. On the whole domain of Fe-56 MT 102
+  at 600 K ($10^{-5}$ eV to 150 MeV, identical cold input) kika takes 12 s and
+  FUDGE 18 s (median of three alternated runs).
 
 ## Diagnostics
 
@@ -421,7 +487,7 @@ separately from retained source/result arrays.
 `table` refines and verifies interpolated forms; `suite` prepares semantic input,
 derives sums and attaches an independent Heated copy atomically. Temperature
 styles do not automatically heat every other object in a reaction suite.
-See {doc}`doppler-broadening` for a worked API workflow and {doc}`doppler`
+See {doc}`../../user_guide/doppler-broadening` for a worked API workflow and {doc}`../../api_reference/processing-doppler`
 for generated contracts.
 
 ## References
@@ -431,9 +497,3 @@ Livermore National Laboratory, FUDGE documentation, Theory (`rrEq`,
 `continuousEq`) and Heating a heated cross section (`continuousEq2`).
 [Upstream source](https://github.com/LLNL/fudge/blob/master/crossSectionAdjustForHeatedTarget/Doc/crossSectionAdjustForHeatedTarget.tex).
 
-
-The native block controller is checked against the scalar controller, including
-identical accepted values/errors/tails/components and the same rejected point
-and budget, in `kika/processing/doppler/tests/test_blocks.py`. Additional checks
-cover strided/reversed/unaligned queries, constrained scratch, failed buffer
-exports, late failures without partial results, and ordered prepared edges.

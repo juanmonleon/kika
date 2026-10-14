@@ -243,6 +243,10 @@ _TAPES: Dict[str, Sequence[str]] = {
     "n14_b81": ("endfb81/n-007_N_014.endf", "endfb81/neutrons/n-007_N_014.endf"),
     "s36_jendl": ("jendl5/n_016-S-036.dat", "jendl5/neutrons/n_016-S-036.dat"),
     "hf182_jendl": ("jendl5/n_072-Hf-182.dat", "jendl5/neutrons/n_072-Hf-182.dat"),
+    # MF8 LMF=3/9/10 together, two isomers made (Co58m, Co60m): the activation
+    # witness of roadmap E6.
+    "co59_jendl": ("jendl5/n_027-Co-059.dat", "jendl5/neutrons/n_027-Co-059.dat",
+                   "jendl5/n/27059.endf"),
     "cm243_jeff40": ("jeff40/n_96-Cm-243g.jeff", "jeff40/neutrons/n_96-Cm-243g.jeff"),
     "li7_jeff40": ("jeff40/n_3-Li-007g.jeff", "jeff40/neutrons/n_3-Li-007g.jeff"),
     # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
@@ -684,6 +688,10 @@ PHOTON_TAPES = ("n14_b81", "s36_jendl", "hf182_jendl", "cm243_jeff40", "li7_jeff
 for _name in PHOTON_TAPES:
     globals()[f"{_name}_tape"] = _tape_fixture(_name)
 del _name
+
+#: The activation witnesses (roadmap E6, MF8-10). ``am241_b81`` is already a
+#: fixture through ``MF32_TAPES``.
+co59_jendl_tape = _tape_fixture("co59_jendl")
 
 #: Whole neutron sublibraries, by the directory name every root uses for them.
 #: The WSL workstation nests them one deeper (``<lib>/neutrons/``).

@@ -61,6 +61,10 @@ PENDING = {
     ("ReactionSuite", "headerFields.photonsVerbatim"):
         "MF12 LO=2 cascades whose ES_i name no level of the cut (Fe-56 without "
         "MT51) and MF13 on an MT with no MF3 (N-14 MT28/32): kept as bytes",
+    ("ReactionSuite", "headerFields.mf8Activation"):
+        "MF8 of a reaction kept as the file's text (E6): its NO=0 decay LISTs and "
+        "LMF=6 states have no node. Derived, MF8 is rebuilt from the productions "
+        "with NO=1, which states the same final states",
     ("Product", "headerFields.nm"):
         "the libraries' NM disagrees with their data (JEFF-4.0 Fe-56 states 31 "
         "beside a 32nd-order row; 74 of 131 sampled tapes state 0); derived is "
@@ -74,7 +78,8 @@ PENDING = {
         "the micro-tapes cut MF2 out and keep the header's LRP; on a whole "
         "tape LRP follows MF2, which is G5",
     ("ReactionSuite", "headerFields.lfi"):
-        "Cm-243's cut keeps MT51-53 only, so nothing in it says fissionable",
+        "Cm-243's cut keeps MT51-53 only, and Am-241's activation cut MT102, so "
+        "nothing in either says fissionable",
     ("Product", "headerFields.ltt"):
         "Cf-252's cut keeps MF5/MT18 and not its MF4: the decoder gives the "
         "neutron an isotropic angular half, which derives an MF4 the cut lacks",
@@ -98,7 +103,7 @@ ONLY_ON = {
     ("Product", "headerFields.li"): {"micro_cf252_pfns"},
     ("Product", "headerFields.lct"): {"micro_cf252_pfns"},
     # U-238 cut to MT2 keeps the fissile LFI=1 with no fission reaction left.
-    ("ReactionSuite", "headerFields.lfi"): {"micro_cm243_photons",
+    ("ReactionSuite", "headerFields.lfi"): {"micro_cm243_photons", "micro_am241_activation",
                                             "micro_u238_ltt2_mf34",
                                             "micro_u238_mf34_l0"},
     ("ReactionSuite", "headerFields.awi"): {"micro_a_he4_mf6", "micro_d_h2_mf6"},
@@ -168,4 +173,9 @@ def test_the_derivers_run_suite_first_whatever_was_imported_first():
     from kika.endf.model_adapter.derive import _inRunOrder
     from kika.endf.model_adapter.derive import reactions, suite  # noqa: F401
 
-    assert [name for name, _, _ in _inRunOrder()][:2] == ["suite", "reactions"]
+    names = [name for name, _, _ in _inRunOrder()]
+    # `productions` (E6) runs between them when it is registered: a production
+    # is a Reaction, and the reactions deriver must find it already derived.
+    assert [n for n in names if n != "productions"][:2] == ["suite", "reactions"]
+    if "productions" in names:
+        assert names.index("productions") < names.index("reactions")

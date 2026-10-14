@@ -2,10 +2,10 @@
 
 ```{admonition} At a glance
 :class: note
-**Reads:** ENDF-6 tapes: the incident-particle sublibraries (MF 1 to 7, MF 12 to 15, the
+**Reads:** ENDF-6 tapes: the incident-particle sublibraries (MF 1 to 10, MF 12 to 15, the
 covariances MF 31 to 35), and the decay and fission-yield sublibraries.
 
-**Writes:** a whole ENDF-6 tape from the model (MF 1 to 7, 12 to 15, 31 to 35), or one
+**Writes:** a whole ENDF-6 tape from the model (MF 1 to 10, 12 to 15, 31 to 35), or one
 section re-encoded and spliced into an existing tape.
 
 **Into:** a {py:class}`~kika.nuclear_data.model.suite.ReactionSuite` with its
@@ -52,9 +52,10 @@ model (`kika.read`, or `read_endf` followed by `decodeReactionSuite`):
 | MF 5 | Decoded: energy distributions, every law. |
 | MF 6 | Decoded: energy-angle distributions, every law except LAW=5, which is kept verbatim. |
 | MF 7 | Decoded, on a thermal-scattering tape. |
+| MF 8 (the MTs of reactions), MF 9, MF 10 | Decoded: the production of radioactive nuclides, one `production` per final state in `suite.productions`. MF 8 is also kept verbatim in the provenance, for the records the model has no node for. |
 | MF 12 to 15 | Decoded: photon production, attached to the reactions' products. |
 | MF 31 to 35 | Decoded into the separate `CovarianceSuite` (MF 31, 33, 34, 35 as covariance sections; MF 32 as resonance-parameter covariances). |
-| MF 8 (incident-particle tapes), MF 23, 27, 28, 40 | Not decoded; reported as unsupported. |
+| MF 8 / MT 454, 457, 459 on an incident-particle tape, MF 8 states with LMF=6, MF 23, 27, 28, 39, 40 | Not decoded; reported as unsupported (MF 8 is kept verbatim, so it is written back). |
 
 A decay sublibrary (NSUB 4 or 5) and a fission-yield sublibrary (NSUB 11) are decoded
 into a `PoPs` tree instead of a reaction suite.
@@ -112,6 +113,37 @@ readers for MF 33 and 34 skip blank fields instead. How a short last line was pa
 - **Units.** Cross-sections in b against eV; multiplicities dimensionless; $\mu$ and
   $f(\mu)$ without a unit; Q-values in eV; masses in amu, from AWR times the neutron
   mass, 1.00866491595 amu.
+- **Radionuclide production (MF 8, 9, 10).** MF 9 and MF 10 state, per final state,
+  the product's ZA (IZAP), its level index (LFS), the Q-value to the ground state (QM)
+  and to the level (QI), and a TAB1: a multiplicity $y(E)$ in MF 9, a production
+  cross-section $\sigma_p(E)$ in MF 10. MF 8 lists the same states and says, through
+  LMF, which file holds their yield (ENDF-6 §8.2). Each state becomes one `production`
+  reaction, labelled `MT<n> <product>` (`MT102 Am242_e2`), with an output channel of
+  genre `production` holding the one product made:
+
+  - **MF 9**: the cross-section is a `reference` to the reaction's own `eval`
+    cross-section, and the product's multiplicity is the MF 9 table;
+  - **MF 8 with LMF=3** (no MF 9 or MF 10 for the state): the same reference, with a
+    multiplicity of 1 over the reaction's domain;
+  - **MF 10**: the cross-section is the MF 10 table, and the multiplicity is 1 over the
+    table's domain.
+
+  In every case the production cross-section is
+
+  $$
+  \sigma_p(E) = \sigma(E)\, y(E)
+  $$ (eq-endf-production)
+
+  with $\sigma$ the referenced cross-section for MF 9 and LMF=3, and $y = 1$ for MF 10
+  and LMF=3. The channel's Q is QI, over the table's domain. The level energy
+  $\mathrm{QM} - \mathrm{QI}$ goes to the product's nuclide in `PoPs` (`nuclearLevel` =
+  LFS); QM itself is kept in the provenance. An excited product is aliased as a
+  metastable state (`Am242_m1` names `Am242_e2`), numbered by level within each nuclide.
+  MF 9 and MF 10 are read on their own: their records name the product and the level, so
+  MF 8 is not needed to decode them. FUDGE reaches them only through MF 8, labels a
+  production by the form of its multiplicity (`m(E)*Am242_e2 [...]`), and gives the Q and
+  a constant multiplicity the whole projectile domain; kika's label does not change when
+  the data is edited, and its domains are the ones the file states.
 - **Covariances (MF 31-35)** are decoded by `decodeCovarianceSuite` into a separate
   `CovarianceSuite`; an MF 34 Legendre order is a slice of its section.
 
@@ -150,6 +182,11 @@ readers for MF 33 and 34 skip blank fields instead. How a short last line was pa
   no MF 4** gives a warning.
 - **An MF 1/455 with LDG=1** (energy-dependent delayed groups): reported as unsupported,
   its records kept in the provenance.
+- **An MF 8 state whose LMF points at an MF 9 or MF 10 that does not state it** is
+  reported lost; MF 8 is kept and written back as read. **An MF 9 on a reaction with no
+  MF 3**, or an MF 9 or MF 10 state whose IZAP is not a nuclide (ZAP=-1 for fission), has
+  no cross-section or product to name: the section is kept verbatim, reported as
+  unsupported, and written back unchanged.
 - **A blank field in a LIST or TAB1 body** is read as zero, which is what ENDF-6 means by
   one; NP points and the declared number of LIST values always come back.
 
@@ -176,9 +213,9 @@ exception.
 
 **A whole tape** (`kika.write(suite, path, format="endf")`, or `writeEndfTape`):
 
-1. One encoder per section writes MF 1, 2, 3 to 7, 12 to 15 and 31 to 35, from what the
-   model holds and, for the parts the decoder kept verbatim (MF 1/460, MF 6 LAW=5), from
-   the provenance. Which sections are written follows the provenance: an MF 4 only
+1. One encoder per section writes MF 1, 2, 3 to 10, 12 to 15 and 31 to 35, from what the
+   model holds and, for the parts the decoder kept verbatim (MF 1/460, MF 6 LAW=5, MF 8),
+   from the provenance. Which sections are written follows the provenance: an MF 4 only
    where the product records an LTT, an MF 6 only where the reaction came from one.
 2. Sections are sorted by (MF, MT); SEND, FEND, MEND and TEND are added; the tape
    identification record is the one the tape was read with, or a default, which the
@@ -195,6 +232,30 @@ still describe the table; otherwise they are rebuilt from the model's regions, w
 warning. Two neighbouring regions share their boundary point: it is written once when
 the values on both sides agree, and twice (a repeated energy, a step) when they differ.
 Regions that are not adjacent cannot be written as one TAB1 and raise.
+
+**A PENDF** (the reconstructed or heated tables, {doc}`../processing/processing-chain`) is
+written so that NJOY reads it. A reconstructed or heated MF 3 has one model region per
+discontinuity, and NJOY holds at most 20 interpolation regions in a TAB1 (MODER stops on
+more), so neighbouring regions of one law are merged as RECONR writes them: the jump as a
+repeated energy inside one region, the same function. The same holds for the heating
+sections (MT 301, 444). The MF 1/451 descriptive text is cut to ENDF-6's five-line
+identification block, as RECONR leaves it: with the 560 lines of an evaluation's
+documentation NJOY 2016.78 HEATR stopped, and with 300 it ran (Fe-56 of ENDF/B-VIII.1,
+measured 2026-10-13). A heated material carries, for each reaction, only the points its
+own table needs, and not every point of the temperature's common grid (which made the
+293.6 K material of Fe-56 nine times the size of BROADR's).
+
+On kika's PENDF of Fe-56 of ENDF/B-VIII.1, NJOY 2016.78 (Windows build) runs MODER to ACER
+(measured 2026-10-14). At 0 K the ACE file agrees with the RECONR chain's ($10^{-3}$) to
+$4.7\cdot10^{-4}$ in MT 102 and $3.6\cdot10^{-4}$ in MT 1 at the 99th percentile of NJOY's
+points. At 293.6 K the two ACE files differ more in MT 102 ($3.1\cdot10^{-3}$ at the 99th
+percentile, all of it between 1 keV and 850 keV), and the difference is NJOY's. Against a
+pointwise broadening of each code's own 0 K MT 102 to $10^{-6}$, at 3 000 random energies
+in that range read lin-lin from each ACE file, kika's table is within $1.0\cdot10^{-3}$ at
+the 99th percentile (largest $1.3\cdot10^{-3}$: its broadening and thinning tolerances
+together) and BROADR's within $7.8\cdot10^{-3}$ (largest $9.9\cdot10^{-3}$). RECONR and
+BROADR allow up to ten times their tolerance (`errmax`, default $10\cdot$`err`) where
+their integral criterion permits it, and kika holds its tolerance at every point.
 
 **Numbers** are written in 11 columns without `E`, correctly rounded once:
 6 decimals in the mantissa for an exponent of one digit (7 significant figures), 5 for
@@ -216,6 +277,19 @@ descriptive text from the style's ENDF-compatible documentation; a section's QM 
 come from the reaction's Q value and from what its residual decays into (LR from the
 light particles of the breakup, by ENDF-6's LR table). A suite read from ENDF is never
 derived.
+
+**Productions (MF 8, 9, 10).** A production whose cross-section is a reference and whose
+multiplicity is tabulated is written to MF 9; one whose cross-section is a table, to
+MF 10 (a constant multiplicity $c \ne 1$ is folded in as $c\,\sigma_p$, and reported); a
+reference with a multiplicity of 1 is an MF 8 state with LMF=3. IZAP and LFS come from the
+product's nuclide, QI from the channel's Q, QM from the provenance or, derived, as QI plus
+the level energy in `PoPs`. The TAB1's interpolation pairs are the file's own while they
+fit the table; otherwise the model's regions are written with neighbouring regions of the
+same law merged (a GNDS file splits a step into two regions, ENDF keeps it in one). MF 8
+is written as the provenance kept it while its states are still the productions'; when
+they change, or the suite did not come from ENDF, it is rebuilt from the productions with
+NO=1 (the decay data of each state is the decay sublibrary's, ENDF-6 §8.2), keeping the
+records of any state the model does not carry.
 
 MF 2/151 is derived when the resonances hold a scattering radius and nothing else: one
 isotope (abundance 1) with one LRU=0 range, LRP=0. EL and EH are the radius' own energy
@@ -241,8 +315,13 @@ the tape's line endings and width.
   file it came from, the section's text byte for byte.
 - **Kept numerically:** a value the source wrote with more than 7 significant figures,
   which comes back rounded to 7; covariance values, to a relative $10^{-6}$.
-- **Not kept in a whole-tape write:** what the model does not decode (MF 8 on an
-  incident-particle tape, MF 23, 27, 28, 40), each named in the report; the
+- **Kept as the file's text:** MF 8 of a reaction, including the decay lists of its
+  states (NO=0) and the LMF=6 states the model does not carry, while the productions are
+  unchanged. Through GNDS those records are not carried, and MF 8 comes back rebuilt with
+  NO=1.
+- **Not kept in a whole-tape write:** what the model does not decode (MF 8 decay and
+  yield data on an incident-particle tape, MF 23, 27, 28, 39, 40), each named in the
+  report; the
   directory, which is rebuilt; and, on the micro tapes of the tests, an MF 34 section
   that the covariance decoder collapses, which the report names.
 - **Not checked by the fixed point:** anything the model does not carry is absent from
@@ -255,7 +334,8 @@ the tape's line endings and width.
 `ConversionReport` (see {doc}`../../architecture/canonical-model`). For ENDF, the
 entries a user meets most:
 
-- **unsupported**: an MF the decoder does not handle (MF 8, 23, 27, 28, 40), Adler-Adler
+- **unsupported**: an MF the decoder does not handle (MF 23, 27, 28, 39, 40; MF 8 decay
+  data on an incident-particle tape; MF 8 LMF=6 states), Adler-Adler
   resonances, several isotopes in MF 2, several unresolved ranges. **These mean part of
   the evaluation is not in the model**: a computation that needs it will not see it.
 - **losses**: an MF 4 with no MF 3, a section with no Q-value, a default tape
@@ -303,13 +383,28 @@ All tests below passed on 2026-10-11 unless marked otherwise.
   MF 2 states what the radius and `PoPs` state, and a target with no spin gets no MF 2
   (`kika/endf/model_adapter/tests/test_a_gnds_radius_reaches_mf2.py::test_the_radius_alone_is_written_as_the_tape_states_it`,
   `::test_a_target_without_a_spin_is_not_given_one`).
+- **Radionuclide production (MF 8-10)**, on two committed cuts: JENDL-5 Co-59 (LMF=3, 9
+  and 10, two isomers) and ENDF/B-VIII.1 Am-241 (MF 9, MF 8 with decay lists). Every MF 9
+  and MF 10 section re-emits byte for byte
+  (`kika/endf/tests/test_mf9_mf10.py::test_every_fixture_section_roundtrips`); a
+  whole-tape write gives back MF 8, 9 and 10 as read and the productions as a fixed point
+  (`kika/endf/model_adapter/tests/test_productions.py::test_the_tape_comes_back_with_mf8_mf9_mf10_as_read`);
+  through GNDS, MF 9 and MF 10 come back as read and MF 8 is rebuilt with the same states
+  (`::test_through_gnds_mf9_mf10_return_and_mf8_is_derived`); the ground-state and isomer
+  production cross-sections of Am-241 capture add up to the capture cross-section to a
+  relative $10^{-12}$ (`::test_the_production_cross_section_is_sigma_times_multiplicity`);
+  stripping the provenance and deriving it gives back every field the decoder wrote
+  (`kika/endf/model_adapter/tests/test_derive_oracle.py`). On the 34 MF 9 and MF 10
+  sections of 25 tapes from ENDF/B-VII.1 and VIII.1, JEFF-3.3 and 4.0 and JENDL-5, every
+  section re-emits byte for byte; from the GNDS file FUDGE 6.14 writes for ENDF/B-VII.1
+  Am-241, kika writes the tape's MF 9 byte for byte (measured 2026-10-14).
 - **Splicing an unchanged section** leaves the rest of the tape byte-identical
   (`kika/endf/tests/test_a_splice_keeps_the_tapes_format.py::test_a_splice_of_an_unchanged_section_leaves_the_rest_byte_identical`).
 - **Refusals**: Adler-Adler is named and stops the parser and the decoder
   (`kika/endf/tests/test_mf2_adler_adler_is_refused_by_name.py::test_the_parser_names_adler_adler_and_stops`,
   `::test_the_model_decoder_names_it_too`); a repeated abscissa is written as a step
   (`kika/endf/tests/test_a_descending_table_is_never_written.py::test_a_repeated_abscissa_is_a_step_and_is_allowed`).
-- **Against FUDGE.** FUDGE's ENDF-to-GNDS translation and kika's read agree on every
+- **Against FUDGE** (6.14). FUDGE's ENDF-to-GNDS translation and kika's read agree on every
   cross-section, Legendre coefficient and resonance energy of the Fe-56 micro-tapes to a
   relative $10^{-14}$ (`kika/endf/model_adapter/tests/test_fudge_in_the_loop.py`,
   `::test_every_cross_section_reads_the_same`,
@@ -324,11 +419,12 @@ All tests below passed on 2026-10-11 unless marked otherwise.
 ## Implementation
 
 - `kika/_records.py`: the 11-column field grammar, number parsing and formatting.
-- `kika/endf/read_endf.py`, `kika/endf/parsers/`, `kika/endf/classes/`: the parse layer.
+- `kika/endf/read_endf.py`, `kika/endf/parsers/`, `kika/endf/classes/`: the parse layer
+  (`parse_mf9_10.py` and `classes/mf9` for MF 9 and MF 10).
 - `kika/endf/utils.py`: TAB1, TAB2, LIST and INTG readers and writers.
 - `kika/endf/model_adapter/decode.py`: `decodeReactionSuite`, MF 1 and MF 3; `angular.py`
   (MF 4), `energy.py` (MF 5), `energy_angle.py` (MF 6), `thermal_scattering.py` (MF 7),
-  `photons.py` (MF 12-15), `resonances.py` (MF 2), `multiplicity.py` (MF 1/452-456),
+  `photons.py` (MF 12-15), `productions.py` (MF 8-10), `resonances.py` (MF 2), `multiplicity.py` (MF 1/452-456),
   `covariances.py` (MF 31-35); `encode.py` and the same modules for the section encoders;
   `derive/` for bookkeeping a non-ENDF suite lacks; `pendf.py` to attach a PENDF as
   `recon`.
@@ -341,6 +437,7 @@ All tests below passed on 2026-10-11 unless marked otherwise.
 - D. A. Brown (ed.), *ENDF-6 Formats Manual: Data Formats and Procedures for the Evaluated
   Nuclear Data Files ENDF/B-VI, ENDF/B-VII and ENDF/B-VIII*, Brookhaven National
   Laboratory (2023), doi:10.2172/2007538. Cited as ENDF-6: §0.5.2 (interpolation), §4
-  (MF 4), §32.2.3 (INTG records).
+  (MF 4), §8.2 (MF 8 of a reaction), §9 and §10 (radionuclide production), §32.2.3 (INTG
+  records).
 - C. Mattoon, B. Beck and G. Gert, "Managing and Processing Nuclear Data Libraries with
   FUDGE", *EPJ Web of Conferences* 284, 14010 (2023), doi:10.1051/epjconf/202328414010.

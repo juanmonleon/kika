@@ -1,7 +1,6 @@
-"""What OpenMC's C++ assumes of a neutron file and never checks (roadmap H4, gate 1).
+"""What OpenMC's C++ assumes of a neutron file and never checks.
 
-``openmc_hdf5_roadmap.md`` §1.2 lists it; each point is a check here, run on
-the file as written:
+Each point is a check here, run on the file as written:
 
 - root ``version`` with major 3, one top-level group;
 - ``kTs`` names are ``f"{round(kT/k_B)}K"`` of their own values, and every

@@ -7,8 +7,6 @@ caller's choice, and on a shared 12 GB box it is the wrong one.
 
 A tape that cannot be read, or whose check fails, is recorded on its row and
 the walk goes on: in a library census the failures are findings too.
-
-Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
 """
 from __future__ import annotations
 

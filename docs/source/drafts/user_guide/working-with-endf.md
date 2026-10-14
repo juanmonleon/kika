@@ -2,7 +2,7 @@
 
 What you can do with an ENDF-6 tape in kika, and the call for each task: identify it,
 read all of it or only what you need, decode it into the model, edit it, check its
-covariances, download it, and index a whole library. How kika reads and writes the
+covariances, process it for transport, download it, and index a whole library. How kika reads and writes the
 format (what it assumes, what it refuses) is in {doc}`../methods/formats/endf`.
 
 The examples use a tape called `Fe56.endf`; any ENDF-6 tape works.
@@ -68,6 +68,22 @@ ev.covarianceSuite             # MF 31-35, decoded
 
 The model is the same whatever the format; see {doc}`../architecture/canonical-model`
 and {doc}`/user_guide/reading_files`.
+
+## Process it for transport
+
+{py:func}`kika.endf.process_endf` reconstructs the resonances, broadens to each
+temperature, computes the unresolved-range probability tables (and, on request, the
+heating), and writes a PENDF, an OpenMC HDF5 file or a GNDS file with heated styles, with
+no NJOY; {py:func}`kika.endf.reconstruct_endf` is its first stage on its own, at 0 K. The
+calls are in {doc}`processing-an-evaluation`.
+
+```python
+from kika.endf import process_endf, ProcessingPlan
+
+run = process_endf("Fe56.endf", ProcessingPlan(temperatures=(293.6, 600.0)))
+run.write_pendf("Fe56.pendf")
+print(run.report_document().to_text())
+```
 
 ## Edit a tape
 

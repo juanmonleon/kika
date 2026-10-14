@@ -26,8 +26,12 @@ heating and damage cross-sections, PURR adds probability tables for the unresolv
 GASPR adds gas-production cross-sections, and ACER writes the ACE file a Monte Carlo
 code reads. Each module reads a few cards of input; the deck is the sequence.
 
-kika does not reimplement this chain. It runs NJOY, with an input it writes the same way
-every time, and checks that NJOY read what it was given.
+This page is about running NJOY: with an input kika writes the same way every time, and
+with a check that NJOY read what it was given. kika also has its own processing chain,
+which does the work of RECONR, BROADR, PURR, HEATR, and THERMR with ACER for thermal
+scattering, without NJOY ({doc}`processing-chain`). The two routes are independent; the
+NJOY route is kept as a reference and for the outputs only NJOY writes (an ACE file from
+an evaluation).
 
 ## What it computes
 
@@ -83,7 +87,7 @@ acer
  /
 acer
  0 40 0 43 44
- 7 1 1 -1 /
+ 7 0 1 -1 /
 '{title}'/
 stop
 ```
@@ -91,7 +95,11 @@ stop
 RECONR and BROADR work to a fractional tolerance of $10^{-3}$; PURR uses nine background
 cross-sections from $10^{10}$ to 10 b; the second ACER call reads back the ACE file the
 first one wrote, checks it, and writes the final ACE file and its `xsdir` line (tapes 43
-and 44). With a PENDF supplied, the RECONR step is replaced by a MODER that reads the
+and 44). Its print flag is 0: the listing holds the consistency checks and not a second
+copy of the whole table, which is the ACE file again in another layout (1.4 million of
+the 1.44 million lines of the 122 MB listing for Fe-56 of ENDF/B-VIII.1, measured
+2026-10-13). `acer_iprint=1` asks for that copy; the ACE file and `xsdir` line are byte
+for byte the same either way. With a PENDF supplied, the RECONR step is replaced by a MODER that reads the
 PENDF from tape 26 and converts it to the binary tape BROADR expects.
 
 **2. Material, temperature and suffix.** MAT is read from the tape's first material

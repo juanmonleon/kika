@@ -58,7 +58,7 @@ __all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
 #: of *coverage* rather than of order: an MF absent here is one nothing can
 #: write, not one that sorts late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 31, 32, 33, 34, 35)
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 31, 32, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -287,7 +287,8 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
         except KeyError:
             reconstructed = False
         section, report = encodeMF3MT(reaction, mat, report, label=formLabel,
-            precision="best" if reconstructed else "legacy")
+            precision="best" if reconstructed else "legacy",
+            mergeRegions=reconstructed)
         mf3.append((3, mt, section))
 
         # MF4 is about the particle the MT names (the p, d, t, He-3 or alpha
@@ -500,6 +501,13 @@ def _photonSections(suite, mat, report):
     return encodePhotonSections(suite, mat, report)
 
 
+def _productionSections(suite, mat, report):
+    """MF8-10 from ``suite.productions``, and MF8 as kept where it still agrees (roadmap E6)."""
+    from ..model_adapter.productions import encodeProductionSections
+
+    return encodeProductionSections(suite, mat, report)
+
+
 def _mf7Sections(suite, mat, report):
     """MF7 for a thermal-scattering suite (roadmap E4); nothing for any other."""
     from ..model_adapter.thermal_scattering import encodeMF7Sections
@@ -620,7 +628,8 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
 
     sections: List[Tuple[int, int, object]] = []
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
-                  _mf6Sections, _mf7Sections, _photonSections, _covarianceSections):
+                  _mf6Sections, _mf7Sections, _productionSections, _photonSections,
+                  _covarianceSections):
         if build in (_mf1Sections, _mf3And4And5Sections, _mf6Sections):
             built, report = build(suite, mat, report, label)
         else:
@@ -902,6 +911,8 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progr
         advance("write")
         if not report.isClean:
             raise ValueError(f'reconstructed ENDF conversion is incomplete: {vars(report)}')
+        from ..model_adapter.pendf import trimDescription
+        trimDescription(provisional)
         reloaded, conversion = decodeReactionSuite(read_endf(str(provisional)))
         if not conversion.isCleanFor('cross-sections'):
             raise ValueError(f'reconstructed ENDF reload is incomplete: {vars(conversion)}')
@@ -931,7 +942,8 @@ def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
     from kika.nuclear_data.model import Regions1d
     from ..read_endf import read_endf
     from ..model_adapter import decodeMF3MT
-    from ..model_adapter.pendf import pendfHeader
+    from kika.nuclear_data.model.functions.regions1d import curvesOnDomains
+    from ..model_adapter.pendf import pendfHeader, trimDescription
     if not isinstance(result, SuiteDopplerResult):
         raise TypeError('SuiteDopplerResult required')
     result.verify_suite(suite)
@@ -946,6 +958,7 @@ def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
                               tapeId=tapeId or DEFAULT_TAPE_ID, label=result.label)
         if not report.isClean:
             raise ValueError('heated ENDF conversion loses represented data: '+report.summary())
+        trimDescription(provisional)
         header = pendfHeader(provisional)
         if header['temp'] != result.temperature:
             raise ValueError('heated ENDF temperature changed on relecture')
@@ -956,6 +969,14 @@ def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
         for mt, key in result._mt_keys.items():
             reaction, _ = decodeMF3MT(tape.mf[3].mt[mt])
             form = reaction.crossSection['eval']
+            if key in result.forms:
+                # The tape states each table as one region per law
+                # (mergeRegions); cut it back at the regions it was written from.
+                original = result.forms[key]
+                cut = curvesOnDomains(form, [(c.domainMin, c.domainMax) for c in
+                    (original.function1ds if isinstance(original, Regions1d) else [original])])
+                if cut is not None and len(cut) > 1:
+                    form = Regions1d(function1ds=cut, axes=form.axes, label=form.label)
             form.label = result.label
             published[key] = form
         if set(published) != set(result.forms):

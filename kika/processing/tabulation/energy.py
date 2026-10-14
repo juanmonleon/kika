@@ -109,7 +109,7 @@ def _tabulateLaw(law, options: TabulationOptions, incident: Optional[Sequence[fl
 
 def tabulateEnergy(form, options: TabulationOptions = TabulationOptions(), *, awr: float = None,
                    discrete=None) -> Tuple[object, int]:
-    """P(E'|E) → ``(processed form, number of tables clipped)``.
+    """``P(E'|E)`` → ``(processed form, number of tables clipped)``.
 
     ``discrete`` gives, per incident energy, how many leading points are lines
     (ENDF's ND, which the model keeps in provenance). ``awr`` is needed for a

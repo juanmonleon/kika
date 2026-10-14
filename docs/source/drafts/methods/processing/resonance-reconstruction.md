@@ -440,6 +440,10 @@ The options of the format that change the result:
   \gamma^\top\big)^{-1}\gamma_{\cdot n}$, $W_c = \sum_\lambda \gamma_{\lambda c}x_\lambda$
   (plus $R^\text{ext}$), in place of {eq}`eq-resonance-reconstruction-rml-solve`. $M$ must
   be positive definite and the $\tilde E_\lambda$ distinct.
+- **Signed channel spin.** ENDF-6 lets SCH be negative, the sign only telling apart two
+  channels with the same $\lvert s\rvert$ (JEFF-4.0 O-16 writes its α channels with
+  $s = -1/2$). The coupling of $\ell$, $s$ and $J$ is checked with $\lvert s\rvert$, and
+  the sign stays in the channel's identity.
 - **Split sectors.** ENDF may write one $(J, \pi)$ as several spin groups (one per
   channel spin); kika merges them into one sector over the union of their channels, so
   that shared channels interfere and hard-sphere scattering is counted once.
@@ -493,20 +497,28 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
    fission by its chances (MT 18 a sum of MT 19, 20, 21, 38), so that the resonance
    fission enters MT 18 once, through MT 19 (ENDF-6 §3.4.5). A partial with no exclusive
    reaction, or omitted from the total's graph while non-zero, is an error.
-3. **Segments.** The domain (the union of the evaluated tables, which must equal the
+3. **Kinematic thresholds.** For every exclusive reaction with $Q < 0$, the threshold
+   $E_\text{thr} = -Q\,(A+1)/A$ is rounded to seven significant figures and raised by
+   one unit in the seventh, $E^{(7)}_\text{thr}$ (with $A$ from the model's particle
+   data, else from the context). A table whose first energy lies below
+   $E^{(7)}_\text{thr}$ has that energy replaced by it, and each following energy the
+   move overtakes is raised one unit in its seventh figure above the one before it. The
+   values are not changed, so the evaluator's first value (normally 0) now sits at
+   $E^{(7)}_\text{thr}$; sums follow from their leaves.
+4. **Segments.** The domain (the union of the evaluated tables, which must equal the
    projectile domain the evaluated style declares, when it declares one) is cut at every region boundary, every end and
    discontinuity of a table (a repeated energy, a histogram knot), and every step of a
    radius or parameter table. At a shared boundary the region on the right owns the point;
    the segment on the left is evaluated at the next representable energy below it, so the
    output keeps a repeated energy with both one-sided values.
-4. **Seeds.** In a resonance segment: 65 energies equally spaced in $\ln E$, the ends,
+5. **Seeds.** In a resonance segment: 65 energies equally spaced in $\ln E$, the ends,
    every knot of the backgrounds, radii and parameter tables, competitive thresholds,
    and for every level with $E_\lambda > 0$ its energy, its shifted peak (for SLBW/MLBW
    four fixed-point iterations of {eq}`eq-resonance-reconstruction-widths`; for R-Matrix
    Limited eight of $E_\lambda - \sum_c\gamma_{\lambda c}^2\operatorname{Re}L_c$), and
    $E_\lambda \pm m\,\Gamma_\lambda$ for 35 values of $m$ equally spaced in $\ln m$ from
    $1/64$ to $128$. Outside resonance regions, the knots of the evaluated tables.
-5. **Refinement.** All reactions of a segment are refined on one shared grid
+6. **Refinement.** All reactions of a segment are refined on one shared grid
    (`kika.algebra.refine`). Each panel is probed at the fractions 0.25, 0.5, 0.75; a
    panel that passes is also probed at 0.1127, 0.2764, 0.7236, 0.8873. A panel fails when
    any reaction has $r > 1/2$ ({eq}`eq-resonance-reconstruction-budget`) at any probe; it
@@ -514,45 +526,120 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
    every panel passes, and raises when it exceeds `max_points` (default 200 000;
    4 000 000 in `reconstruct_endf`), `max_iterations` passes (default 40), or a failing
    panel can no longer be split in double precision.
-6. **Untouched reactions.** A reaction with no resonance contribution in a segment keeps
+7. **Untouched reactions.** A reaction with no resonance contribution in a segment keeps
    its evaluated lin-lin knots there instead of the shared grid; an exactly constant span
    is stored as its two ends. Sums are rebuilt from their leaves at every node.
-7. **Verification.** `attach_reconstruction` re-evaluates the physics exactly (direct
+8. **Verification.** `attach_reconstruction` re-evaluates the physics exactly (direct
    capture, no channel-space shortcut) at every node and at four other fractions of every
    panel (0.1732, 0.3820, 0.6180, 0.8268), checks {eq}`eq-resonance-reconstruction-budget`
    with the full budget for every reaction, and checks that each stored sum equals the
-   sum of its stored leaves to the same budget. Only then is the new style attached; the
-   evaluated forms are untouched.
-8. **Publication.** `write_pendf` checks that the source has not changed since the
+   sum of its stored leaves to the same budget. Only then is the new style attached (it
+   carries the date it was made, as GNDS requires of every style); the evaluated forms
+   are untouched.
+9. **Publication.** `write_pendf` checks that the source has not changed since the
    reconstruction (a hash of the model), verifies again, resamples each table at the
    energies the ENDF eleven-character fields can represent (the linear table evaluated at
    the rounded energies; colliding knots keep their original values), writes MF 1, 2 and
    3 with LRP=2 and LDRV=1 (ENDF-6 §1.1: MF 2 is kept but its contribution is already in
    MF 3), reloads the file, requires a clean conversion, and verifies the reloaded tables
    against the physics with the full budget. The destination is replaced only if all of
-   this passes.
+   this passes. Two rules of the writing keep the file readable by NJOY. In MF 3,
+   neighbouring interpolation regions of the same law are written as one (NBT, INT)
+   pair, with each jump as a repeated energy: the function is the same, and NJOY holds
+   at most 20 regions per table, while a reconstructed table has one per discontinuity.
+   The checks that read the file back cut it again at their own region edges, and fail
+   if an edge is not a point of the table. In MF 1, the descriptive text keeps only the
+   five-line identification block of ENDF-6 §1.1, as RECONR does; the evaluation's
+   documentation stays in the evaluation.
 
 ## Conventions and choices
 
 - **The tolerance is mixed, and split in two.** A relative tolerance alone fails at the
   zeros of interference minima; `atol` (default $10^{-8}$ b) bounds the work there. Half
   of the budget is spent on tabulation so that rounding the energies to ENDF fields
-  cannot, by itself, push a correct table out of tolerance.
-- **The check is empirical.** The probes are a finite set of energies; the report says
+  cannot, by itself, push a correct table out of tolerance. NJOY RECONR tests the
+  partials in turn against `err` (with `errmax` and a local criterion `errint` in b);
+  FUDGE tests each node against the chord to its neighbours and inserts midpoints. Both
+  spend the whole tolerance on the grid, so the ENDF rounding of the written file comes on
+  top of it.
+- **The check is empirical, and every reaction is checked at points the grid did not
+  use.** The probes are a finite set of energies; the report says
   `empirical_verification=True` and `global_error_bound=False`. The verification probes
-  differ from the refinement probes, so the grid was not built to pass them.
+  differ from the refinement probes, so the grid was not built to pass them. FUDGE never
+  re-examines a reaction it has marked converged and takes no interior probes, which is
+  where its tables leave the tolerance in the comparison under Validation; NJOY does not
+  re-check its grid either. The check is what kika's run costs most: on U-238 of
+  ENDF/B-VIII.1 the verification took 912 s against 109 s for the reconstruction (one
+  thread, measured 2026-10-10), a cost neither other code pays.
+- **Seeds per level instead of a dense pattern.** FUDGE seeds hundreds of offsets around
+  every resonance; kika seeds the level, its shifted peak and 35 offsets in units of its
+  width, and lets the refinement do the rest. A minimal-seed variant was measured to be
+  much slower and is not used.
 - **Sums are derived, never kept.** An evaluated MT 1 that disagrees with the sum of its
   partials is reported (`source_sum_discrepancies`) and replaced, so the PENDF closes and
   a sum cannot double count a partial. MT 1 present without an explicit sum graph is
-  refused instead of guessed.
+  refused instead of guessed. NJOY accumulates the partials into the sums as it goes;
+  FUDGE may add a reconstructed contribution to the background of an evaluated sum. kika
+  follows the model's sum graph, so which reactions a sum holds is stated by the data and
+  not by a list of MT numbers.
 - **Negative values are kept and reported**, never clipped (a background can be negative
   in the resonance range by construction); `minima` in the report gives the smallest
-  value per reaction.
+  value per reaction. NJOY clips negative partials and floors the elastic; FUDGE clips
+  after assembly. Clipping makes the table depart from the evaluation without saying
+  where; a transport code that needs non-negative values can clip on reading, with the
+  report saying where it matters.
+- **Values in double precision, rounding only on export.** NJOY rounds to seven figures
+  while it assembles (SLBW before adding the potential term). kika keeps float64 until the
+  file is written, then resamples the verified table at the energies the ENDF fields can
+  represent and verifies the file again; on a steep flank of U-238 near 16 689 eV,
+  rounding alone moved a correct table to 1.3 times its budget, which this catches.
+- **A range boundary is an exact step.** At a boundary between two ranges, or at a
+  discontinuity of a table, kika writes a repeated energy with both one-sided values.
+  FUDGE replaces the step by a ramp $10^{-8}$ wide in relative energy, and NJOY by a ramp
+  of about $5\cdot10^{-7}$; the PENDF of NJOY for Al-27 of ENDF/B-VIII.0 then differs
+  from the physics by 62 % in capture just below 845 keV, at the one energy inside the
+  ramp.
+- **Thresholds are raised to the kinematic one, as RECONR does.** Evaluations round
+  $-Q(A+1)/A$ to seven figures, sometimes down, and so open a reaction a few parts per
+  million below the energy at which it can occur, where its kinematics has no solution
+  (ACER reports it as a threshold error). kika applies RECONR's rule (step 3 of the
+  assembly): on Au-197 of ENDF/B-VIII.1 it raises 15 reactions, the first energies of
+  MT 17 and 51-63 then equal those of the official OpenMC HDF5 library (processed with
+  NJOY) to $10^{-13}$ relative, and
+  $\sigma_{51}(77\,800\ \text{eV})$ moves from 0.002660 b to NJOY's 0.002546 b. It is a
+  correction of consistency with the energetics, not a more physical shape near the
+  threshold: the linear ramp above it is still the evaluator's, and the move is of parts
+  per million in energy.
+- **APL with NAPS=1 enters the phase and the penetrability.** For a Reich-Moore range
+  with NAPS=1, kika uses a non-zero APL of an $\ell$-block as $a_c$ and $a_\varphi$, as
+  NJOY does, because NAPS=1 states that the two radii are the same. FUDGE's ENDF to GNDS
+  translation puts APL into the phase only, and the published GNDS files of
+  ENDF/B-VIII.1 carry that reading; on Fe-56 the two differ in the resonance part of the
+  elastic by a median of $2.6\cdot10^{-4}$ and up to about 1.7 %. Which one the evaluator
+  meant is not settled by the format; kika states its choice here.
+- **One radius policy throughout NAPS=2.** NJOY prepares the widths of a NAPS=2 range
+  with the mass-formula radius and evaluates $P_\ell(E)$ with the constant AP; kika uses
+  the radii of the table under *The radii and the radius flags* everywhere. On a NAPS=2
+  test case with a tabulated AP($E$) NJOY differs from both kika and FUDGE by about 97 %
+  of the budget, while those two agree to $10^{-10}$.
+- **Level normalisation at the absolute energy.** For a bound level of an R-Matrix
+  Limited channel, kika takes the reference penetrability at the channel energy of
+  $\lvert E_\lambda\rvert$ (ENDF-6 App. D); NJOY and FUDGE take
+  $\lvert E_\lambda - E_\text{channel}\rvert$. On FUDGE's own LRF=7 test tapes this alone
+  makes MT 600 differ by 0.55 % from NJOY, and 2.3·10⁻⁶ with the convention changed; it
+  is a choice of convention, and neither result is shown to be wrong.
+- **Capture as a positive sum.** kika computes capture directly from the level
+  amplitudes ({eq}`eq-resonance-reconstruction-rml-capture`) and uses the flux balance
+  only as a check. FUDGE obtains capture from the flux deficit, which loses its relative
+  accuracy when capture is small: on a synthetic Reich-Moore level with a tiny capture
+  width near a pole its NumPy path returns up to $10^{29}$ b, while kika's stays finite
+  and within $10^{-13}$ of the closed form.
 - **No fallback.** There is no retry with looser tolerances, another formalism or NJOY;
   a material either reconstructs within its budget or raises with a category.
 - **Physical constants are fixed and recorded** in the context, so a comparison with
   another processor can match them.
-- **0 K only.** No Doppler broadening is applied; the PENDF is at 0 K.
+- **0 K only.** No Doppler broadening is applied; the PENDF is at 0 K. Heating the
+  reconstructed tables is {doc}`doppler-broadening`.
 
 ## Limits and failure modes
 
@@ -652,16 +739,76 @@ test.
   (`kika/endf/tests/test_reconstruct_endf.py::test_pendf_is_written_reloaded_and_not_reconstructed_twice`,
   deselected by default, run with `-k`, passed 2026-10-11); threaded verification equals
   the serial one (`::test_threaded_verification_is_the_serial_one`); the ENDF field
-  rounding (`kika/endf/tests/test_reconstruction_precision.py`).
+  rounding (`kika/endf/tests/test_reconstruction_precision.py`); each check of the
+  report flags what it should (`::test_each_check_flags_what_it_should`).
+- **Kinematic thresholds.** A table that opens below the threshold is raised to
+  $E^{(7)}_\text{thr}$, is zero below it and keeps its values
+  (`kika/processing/tests/test_kinematic_thresholds.py::test_a_table_below_the_kinematic_threshold_is_raised_to_reconr_s_value`);
+  overtaken points move up one place each
+  (`::test_points_the_move_overtakes_are_pushed_up_one_place_each`); a table already at
+  the threshold is left alone (`::test_a_table_already_at_reconr_s_threshold_is_left_alone`).
+- **A PENDF NJOY can read.** Neighbouring regions of one law are written as one, state
+  the same function, and are cut back at the original edges without inventing one
+  (`kika/endf/model_adapter/tests/test_a_kika_pendf_is_readable_by_njoy.py`); the MF 1
+  identification block is kept (`::test_a_pendf_keeps_the_identification_block_of_mf1`).
+  These tests, with `kika/endf/tests/test_reconstruct_endf.py` and
+  `kika/processing/tests/test_resonance_publication.py`, passed on 2026-10-14.
 - **Parameters read by two parsers.** The 312 Fe-56 resonances read from ENDF-6 by kika
   and from GNDS written by FUDGE agree to $10^{-12}$
   (`kika/gnds/tests/test_resonance_oracle.py::test_both_encodings_hold_the_same_312_resonances`);
   this checks the input, not the cross-sections. `TODO(check)`: needs the tape and GNDS
   data (`--deep`); not re-run for this page.
 
-`TODO(check)`: no test in this repository compares the native reconstruction pointwise
-with NJOY RECONR or FUDGE on a full evaluation; that comparison, with its measured
-difference, is the missing validation of this page.
+### Comparison with NJOY and FUDGE
+
+These comparisons are not tests of this repository: NJOY and FUDGE are neither
+dependencies of kika nor the truth, and a test pinned to them would fail the day kika
+improves on them. NJOY 2016.78 (Linux build), FUDGE 6.14.0
+with its compiled extensions; the evaluations of ENDF/B-VIII.1. All three codes ran at
+the same nominal tolerance: kika `rtol` $=10^{-3}$, `atol` $=10^{-8}$ b; NJOY `err` $=$
+`errmax` $=10^{-3}$, `errint` $=10^{-8}$; FUDGE `accuracy` $=10^{-3}$ unless stated. The
+metric is the ratio $r$ of {eq}`eq-resonance-reconstruction-budget` with that tolerance
+(1 uses all of it), of each code's linear table against kika's exact evaluation of the
+physics (direct per-level sums, not its table), at probes none of the codes chose: points
+equally spaced in $\ln E$, the centre and flanks of every level, and the 16 worst nodes
+of each code and reaction, MT 2, 18 and 102 in the resolved range, with a margin of
+$10^{-6}$ relative around range boundaries (measured 2026-10-10).
+
+| Material | kika | FUDGE | NJOY |
+|---|---|---|---|
+| Au-197 | 0.50 | 0.25 | 1.2 |
+| Fe-56 | 0.50 | 13 | 1.3 |
+| Pu-239 | 0.50 | 6.0 | 2.0 |
+| U-235 | 0.50 | 7.4 | 1.6 |
+| U-238 | 0.50 | 0.61 | 1.8 |
+| Zr-90 | 0.50 | 0.55 | 1.5 |
+
+kika's maxima sit at 0.5 because it tabulates to half the budget. The reference is
+kika's physics, so the table answers only if the codes agree on the physics, which was
+checked by evaluating each code's own kernel at the worst probes:
+
+- **FUDGE, U-235.** Its kernel agrees with kika's to $5\cdot10^{-9}$ relative in elastic
+  and $8\cdot10^{-9}$ in fission and capture, so the excess is tabulation: FUDGE checks
+  each node against the chord to its neighbours and never returns to a reaction it marked
+  converged. At `accuracy` $=10^{-4}$ it passes a set of 25 891 probes of the same kind
+  (maximum 0.95, against kika's 0.50 at $10^{-3}$, measured 2026-10-09) but not an
+  adversarial set of 26 044 energies around the worst panels (fission 1.6, capture 1.7, 21 and 22 probes above 1).
+- **FUDGE, Fe-56.** At `accuracy` $=10^{-4}$ the ratio stays 13. Here the kernels
+  themselves differ, by 1.3 % in elastic at the worst probe, in the deep interference
+  minima near 73 keV and 219 keV, where kika and NJOY agree with each other to
+  $5\cdot10^{-4}$. The cause in FUDGE is not established.
+- **NJOY.** Its excesses (up to twice the budget, 99th percentile of the ratio below
+  0.9) were not attributed to a single cause, since NJOY's kernel was not evaluated
+  separately. Where a cause is known it is a convention named under *Conventions and
+  choices* (range-boundary ramps, the NAPS=2 radius).
+
+In time, FUDGE is faster than kika on every one of these materials (reconstruction only,
+excluding its ENDF to GNDS translation, one thread on the same machine, measured
+2026-10-10): from about 10 times on Zr-90 and Fe-56 to 1.2 times on U-235 and U-238. NJOY
+(wall time including its MODER pass) is faster on Pu-239 and Zr-90, comparable on Fe-56,
+and slower on U-235 and U-238. At equal achieved error on U-235 (FUDGE at
+`accuracy` $=10^{-4}$), kika takes about 60 % of FUDGE's time. These times exclude kika's
+verification, which on its own costs several times the reconstruction.
 
 ## Diagnostics
 
@@ -681,30 +828,52 @@ difference, is the missing validation of this page.
   cross-section kept as computed;
 - `preparation_notes`: what preparation assumed or corrected (a rounded GT, a declared
   AWRI, a zeroed negative competitive width);
+- `raised_thresholds`: for each reaction whose first energy was moved to its kinematic
+  threshold (step 3 of the assembly), the evaluated and the new first energy. An entry
+  says the evaluation opens the reaction a few parts per million below the energy at
+  which it can occur; it is a correction of the abscissa, not of the values;
 - `source_conversion_report`: the conversion report of the source, whose losses would
   have blocked the reconstruction;
 - `points`, `stored_points`, `domain`, `context`, `options`, `resonance_partial_owners`,
-  `engine` (`kika-native-suite-1`), `source_sha256`.
+  `engine` (`kika-native-suite-2`; it names the reconstruction physics and changes
+  whenever a change of kernel, grid or publication alters a reconstructed value, so a
+  cache keyed on it is invalidated exactly then), `source_sha256`.
 
 `report_document()` renders the same, with the tape's MF 1 and MF 2 flags, as a
-dictionary, text or an HTML page (`to_dict`, `to_text`, `to_html`, `save`): a verdict,
-the resonance ranges (LRU, LRF, NRO, NAPS, AP), the segments, one row per MT (points,
-jumps, finest $\Delta E/E$, negatives, worst verification ratio, integral difference),
-the sum graph and the evaluation's sums against their parts, the verification of the
-tabulation and, after `write_pendf`, of the reloaded PENDF, the conversion notes, and
-timings. `TODO(check)`: the column headed "AP (fm)" shows the ENDF field AP, which is in
-$10^{-12}$ cm. A caller of `PreparedResonances.evaluate` can also pass a `diagnostics`
-dictionary, which collects the largest solve residual and flux error of each formalism.
+dictionary, text or an HTML page (`to_dict`, `to_text`, `to_html`, `save`; the
+dictionary's `schema` key names its version). It opens with a verdict that follows from
+a list of checks, each `passed`, `note`, `warning`, `failed` or `not run`, and with the
+meaning of each level printed under it:
+
+| Check | What it compares | Should worry the user when |
+|---|---|---|
+| `tabulation` | the tables against the reference at four interior points per panel | `failed` (the run normally raises before) |
+| `pendf` | the reloaded PENDF against the reference, at every node and four interior points | `failed` (the file is then not kept); `not run` without `write_pendf` |
+| `source_sums` | each sum the evaluation stores against the sum of its parts | `warning`: the evaluation is inconsistent, and the reconstructed sum differs from the one it prints |
+| `negatives` | the sign of every value | `warning`: negative values kept as computed |
+| `grid` | ascending energies; a repeated energy only at a real jump | `note` for a jump of the evaluation's own MF 3 away from a range boundary; `failed` for decreasing energies |
+| `integrals` | $\int\sigma\,dE$ of each table against an accurate estimate of the reference's | `note` when the absolute tolerance dominates a small reaction |
+| `parameters` | the adjustments preparation made (a width negative by rounding, a block's own AWRI) | `note`, each adjustment listed |
+| `conversion` | what reading the file lost or approximated in MF 2 and MF 3 | `warning`: the result may not reflect the evaluation there |
+
+It then lists the findings, what was done, the resonance ranges (LRU, LRF, NRO, NAPS and
+AP, shown in fm), one row per MT (points, jumps, finest $\Delta E/E$, negatives, worst
+verification ratio, integral difference), the sum graph, the conversion notes and the
+timings, with the engine's segments and iterations folded under the run details. A
+caller of `PreparedResonances.evaluate` can also pass a `diagnostics` dictionary, which
+collects the largest solve residual and flux error of each formalism.
 
 ## Implementation
 
 - `kika.endf.reconstruction`: `reconstruct_endf` (read MF 1, 2, 3; decode; context;
   reconstruct), `EndfReconstruction` (`tables_by_mt`, `write_pendf`, `report_document`).
-- `kika.endf.reconstruction_report`: the report document.
+- `kika.endf.reconstruction_report`: the report document and its checks.
 - `kika.endf.writers.assemble`: `writeReconstructedEndfTape` (verify, resample, write
-  LRP=2, reload, verify again).
+  LRP=2, reload, verify again); `kika.endf.model_adapter.encode` merges the
+  interpolation regions of one law, and `kika.endf.model_adapter.pendf` trims the MF 1
+  text.
 - `kika.processing.resonances.suite`: `reconstruct_suite`, `attach_reconstruction`,
-  ownership, sum graph, segments, verification.
+  ownership, kinematic thresholds, sum graph, segments, verification.
 - `kika.processing.resonances.prepare`, `prepare_reich_moore`, `prepare_r_matrix`: the
   checks and the normalisation of each formalism into immutable groups, radii and
   amplitudes; `radii`: radius functions.
@@ -738,4 +907,7 @@ dictionary, which collects the largest solve residual and flux error of each for
   (2002).
 - *NIST Digital Library of Mathematical Functions*, <https://dlmf.nist.gov/>: §10.29,
   §13.2, §33.8.
-- `TODO(ref)`: a reference for Reich-Moore and for R-matrix theory (Lane and Thomas).
+- A. M. Lane and R. G. Thomas, "R-matrix theory of nuclear reactions", *Reviews of
+  Modern Physics* 30, 257-353 (1958).
+- C. W. Reich and M. S. Moore, "Multilevel formula for the fission process", *Physical
+  Review* 111, 929-933 (1958).

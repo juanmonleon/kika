@@ -29,7 +29,7 @@ from ..enums import ENDF_INT_TO_INTERPOLATION, INTERPOLATION_TO_ENDF_INT, Interp
 from .base import Function1d, OutOfRange, _interpolate_1d
 from .xys1d import XYs1d
 
-__all__ = ["Regions1d"]
+__all__ = ["Regions1d", "curvesOnDomains"]
 
 
 @dataclass
@@ -166,3 +166,35 @@ class Regions1d(Function1d):
     def __repr__(self) -> str:
         rules = ", ".join(f.interpolation.value for f in self.function1ds)
         return f"Regions1d(n_regions={len(self)}, [{rules}])"
+
+
+def curvesOnDomains(form, domains: Sequence[Tuple[float, float]]) -> Optional[List[XYs1d]]:
+    """*form*'s curves, cut at the edges of *domains* -- or ``None`` if they cannot be.
+
+    For a table written with fewer regions than it was computed on: an ENDF
+    TAB1 states a jump as the same energy twice, inside one region or at a
+    region boundary alike, and NJOY reads at most 20 regions, so a writer may
+    join a computed table's regions into one per law. A check that compares
+    region by region gets them back here. Each ``(low, high)`` is cut out of
+    the curve that spans it, from the **last** point at ``low`` to the
+    **first** at ``high``: at a jump the region below keeps the left value and
+    the one above the right; a point shared without a jump goes to both.
+    Values are never touched; ``None`` when a domain edge is not a point of the
+    table, so the caller's own check rejects it.
+    """
+    have = form.function1ds if isinstance(form, Regions1d) else [form]
+    if len(have) == len(domains):
+        return list(have)
+    cut = []
+    for low, high in domains:
+        host = next((c for c in have if c.domainMin <= low and high <= c.domainMax), None)
+        if host is None:
+            return None
+        xs, ys = np.asarray(host.xs), np.asarray(host.ys)
+        start = int(np.searchsorted(xs, low, side="right")) - 1
+        stop = int(np.searchsorted(xs, high, side="left"))
+        if start < 0 or stop >= xs.size or stop <= start or xs[start] != low or xs[stop] != high:
+            return None
+        cut.append(XYs1d(xs=xs[start:stop + 1].copy(), ys=ys[start:stop + 1].copy(),
+                         interpolation=host.interpolation, axes=host.axes, index=len(cut)))
+    return cut

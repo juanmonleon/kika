@@ -302,6 +302,72 @@ class ReactionSuite:
                     f"the {form!r} cross section of MT{mt}")
         return _pointwise(chosen)
 
+    def resolve_reference(self, reference) -> object:
+        """The cross-section form a §16.1.1 ``reference`` points at, in this suite.
+
+        Resolved by **labels**, the container's and the form's, never by the
+        element tag in the href: the tag says how a GNDS writer happened to spell
+        the form (a one-region ``regions1d`` is written as its ``XYs1d``), and
+        the model holds the form whatever it is spelt as. Searches ``reactions``,
+        ``sums``, ``fissionComponents``, ``productions`` and ``orphanProducts``.
+        """
+        import re
+
+        labels = re.findall(r"\[@label='([^']*)'\]", getattr(reference, "href", "") or "")
+        if len(labels) < 2:
+            raise ValueError(f"cannot resolve {reference!r}: the href does not name "
+                             f"a container label and a form label")
+        owner, formLabel = labels[0], labels[-1]
+        for container in (self.reactions, self.sums, self.fissionComponents,
+                          self.productions, self.orphanProducts):
+            for reaction in container:
+                if reaction.label == owner:
+                    return reaction.crossSection[formLabel]
+        raise KeyError(f"no reaction labelled {owner!r} for {reference!r}")
+
+    def production_cross_section(
+        self, production, form: str = EVAL_LABEL
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """``(E, σ_production)`` of one ``production``: its cross section times its multiplicity.
+
+        *production* is a production reaction or its label. ENDF states the same
+        quantity two ways -- MF10 as a cross section, MF9 as a multiplicity of
+        the reaction's MF3 -- and the model keeps the difference (a ``reference``
+        to the reaction's σ for MF9), so a perturbed MF3 reaches the production.
+        This is the one place that undoes it: the reference is followed, and the
+        product's multiplicity is applied.
+
+        The grid is the union of both tables' nodes inside the common domain,
+        and each factor is evaluated there by **its own** interpolation rule, so
+        the values are exact at every node; between nodes the product of two
+        interpolants is not itself one of ENDF's laws, the caveat
+        :meth:`cross_section` gives for flattened regions.
+        """
+        if isinstance(production, str):
+            production = self.productions.byLabel(production)
+        chosen = production.crossSection[form]
+        if type(chosen).__name__ == "Reference":
+            chosen = self.resolve_reference(chosen)
+        _checkUnits(chosen, CROSS_SECTION_UNITS,
+                    f"the {form!r} cross section of {production.label}")
+        x, _ = _pointwise(chosen)
+        products = [p for p in production.outputChannel.products if p.pid != "photon"]
+        if len(products) != 1 or products[0].multiplicity is None:
+            raise ValueError(f"{production.label} has {len(products)} products; a "
+                             f"production makes exactly one, with a multiplicity")
+        stated = products[0].multiplicity
+        multiplicity = stated[form] if form in stated else stated.form
+        grid = [x]
+        if isinstance(multiplicity, (XYs1d, Regions1d)):
+            grid.append(_pointwise(multiplicity)[0])
+        lo = max(float(chosen.domainMin), float(multiplicity.domainMin))
+        hi = min(float(chosen.domainMax), float(multiplicity.domainMax))
+        energies = np.unique(np.concatenate(grid))
+        energies = energies[(energies >= lo) & (energies <= hi)]
+        values = (np.asarray(chosen.evaluate(energies), dtype=float)
+                  * np.asarray(multiplicity.evaluate(energies), dtype=float))
+        return energies, values
+
     def summary(self) -> str:
         """A few lines saying what is actually in here, including what is missing."""
         lines = [

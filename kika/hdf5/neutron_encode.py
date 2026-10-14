@@ -1,8 +1,7 @@
 """Model → OpenMC incident-neutron HDF5.
 
-Writes what the C++ reads (``openmc_hdf5_format_survey.md`` §2), directly with
-h5py -- not through ``openmc.data``, whose exporter refuses ENDF-derived data
-(roadmap D3). The encoder serialises; it does not process. It needs the suite
+Writes what the C++ reads, directly with h5py -- not through ``openmc.data``,
+whose exporter refuses ENDF-derived data, and which is not a dependency. The encoder serialises; it does not process. It needs the suite
 in the processed shape :mod:`kika.hdf5.neutron_decode` produces and
 :func:`kika.hdf5.writer.writeSuite` builds from an evaluation:
 
@@ -12,7 +11,7 @@ in the processed shape :mod:`kika.hdf5.neutron_decode` produces and
   ``threshold_idx`` says (``len(xs) + threshold_idx == len(energy/<T>)``);
 - every distribution and yield as a ``MonteCarlo`` form (tables with their CDF).
 
-The contract it enforces, and refuses to break (roadmap H4, gate 1):
+The contract it enforces, and refuses to break:
 
 - group names ``f"{round(kT/k_B)}K"``, the same in ``kTs``, ``energy``, every
   reaction and ``urr``;
@@ -118,10 +117,25 @@ def _provenance(node, key, default=None):
     return default
 
 
+def isRadionuclideProduction(reaction) -> bool:
+    """A ``production`` of a radioactive nuclide (ENDF MF8-10).
+
+    Told apart from the responses this format keeps in ``suite.productions``
+    (gas production MT203-207) by its channel's ``genre``, which the ENDF and
+    GNDS decoders both set to ``production``. It shares its MT with the reaction
+    that makes it -- MT102's isomer is MT102 -- and OpenMC names a group by MT
+    alone, so it has no place in this file: neither the NJOY/ACE route nor
+    ``openmc.data`` writes one.
+    """
+    return getattr(getattr(reaction, "outputChannel", None), "genre", None) == "production"
+
+
 def _allReactions(suite):
     for container in (suite.reactions, suite.fissionComponents, suite.sums,
                       suite.productions, suite.incompleteReactions):
         for reaction in container:
+            if container is suite.productions and isRadionuclideProduction(reaction):
+                continue
             yield container, reaction
 
 
@@ -153,7 +167,7 @@ def _grid(suite, label) -> np.ndarray:
             raise HDF5FormatError(
                 f"the {label!r} cross sections are not on one common grid; OpenMC stores one "
                 f"grid per temperature and each reaction from a threshold index on it "
-                f"(kika.algebra builds the union grid, roadmap H3)")
+                f"(kika.algebra builds the union grid)")
     if np.any(np.diff(grid) <= 0):
         raise HDF5FormatError(f"the {label!r} grid is not strictly increasing; the C++ assumes it is")
     return grid
@@ -170,7 +184,7 @@ def encodeNeutron(suite, temperatures=None, *, awr: Optional[float] = None,
 
     ``temperatures`` restricts the ``heated_<T>`` styles written (names or
     kelvins); by default all of them. ``awr`` overrides the atomic weight ratio
-    (roadmap D11: the writer passes the one the official library uses).
+    (the writer passes the one the official library uses).
     """
     m = _m()
     report = report if report is not None else m.ConversionReport()
@@ -206,6 +220,12 @@ def encodeNeutron(suite, temperatures=None, *, awr: Optional[float] = None,
              and RECON_LABEL in elastic.crossSection.forms)
     if zeroK:
         g.require("energy")["0K"] = R.Dataset.of(elastic.crossSection.forms[RECON_LABEL].xs)
+
+    skipped = sum(1 for p in suite.productions if isRadionuclideProduction(p))
+    if skipped:
+        report.lost(f"{skipped} radionuclide production(s) (MF8-10) have no group in "
+                    f"OpenMC's format, which names reactions by MT alone; not written",
+                    unaffectedScopes=("cross-sections",))
 
     reactions = g.require("reactions")
     written = {}

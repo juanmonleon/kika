@@ -17,9 +17,9 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch  # noqa: E402
 # Top to bottom. Each row: (layer name, rule, packages).
 ROWS = [
     ("Doors and consumers", "import any layer below",
-     ["kika.read / kika.write", "kika.sampling", "kika.njoy"]),
+     ["kika.read / write", "kika.sampling", "kika.njoy", "kika.tsl"]),
     ("Format layer", "import the layers below",
-     ["kika.endf", "kika.gnds", "kika.ace", "kika.g4ndl"]),
+     ["kika.endf", "kika.gnds", "kika.ace", "kika.g4ndl", "kika.hdf5"]),
     ("Calculation layer", "import no format package",
      ["kika.nuclear_data.model", "kika.processing", "kika.cov"]),
     ("Leaves", "import nothing from kika",

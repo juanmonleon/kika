@@ -209,7 +209,18 @@ def main(tapeText, name):
             # A neutron evaluation kika wrote (roadmap E5c): FUDGE's PoPs of
             # it, and FUDGE's ENDF of it.
             import brownies.legacy.toENDF6.toENDF6  # noqa: F401 - attaches toENDF6
-            out = {"pops": "\n".join(reactionSuite.PoPs.toXML_strList())}
+            out = {"pops": "\n".join(reactionSuite.PoPs.toXML_strList()),
+                   "resonances": _resonanceEnergies(reactionSuite)}
+            # D38: FUDGE's resonance reconstruction, which needs more of the
+            # file than reading does (a fission channel's link to a reaction
+            # with a fissionGenre, the elastic channel's particle pair).
+            try:
+                from fudge.processing.resonances import reconstructResonances
+
+                xsecs = reconstructResonances.reconstructResonances(reactionSuite, 1e-3)
+                out["reconstructed"] = sorted(xsecs)
+            except Exception as error:
+                out["reconstructionError"] = f"{type(error).__name__}: {error}"
             try:
                 out["endf"] = reactionSuite.toENDF6("eval", {"verbosity": 0})
             except Exception as error:  # reported, so the PoPs half still runs

@@ -1,7 +1,7 @@
 """What the OpenMC HDF5 reader and writer raise.
 
 Every failure names the file and the HDF5 path it happened at. OpenMC's C++
-reader checks almost nothing (``openmc_hdf5_format_survey.md`` §2): a file that
+reader checks almost nothing: a file that
 breaks its assumptions loads and then indexes out of bounds. A reader that is to
 be trusted as a yardstick, and a writer whose files are to be trusted at all,
 have to stop instead.

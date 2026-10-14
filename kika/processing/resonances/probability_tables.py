@@ -1,4 +1,4 @@
-"""Unresolved-resonance probability tables from the model's URR parameters (roadmap H8).
+"""Unresolved-resonance probability tables from the model's URR parameters.
 
 kika's own PURR. At each energy of the unresolved grid the average parameters
 are frozen and resonance ladders are drawn from them -- spacings from Wigner's
@@ -40,8 +40,10 @@ bounds (as FRENDY's ``check_statistical_error``, which uses the CLT on each
 band's ``p · σ``). ``errorTarget`` stops drawing ladders once they are small
 enough, with ``ladders`` as the cap.
 
-``background`` adds the smooth cross section PURR takes from MF3: for LSSF=0
-the file's background, for LSSF=1 the file's value minus the dilute average.
+``background`` adds the smooth cross section PURR takes from MF3 (:func:`purrInputs`):
+for LSSF=0 the file's MF3 values; for LSSF=1, where MF3 already holds the dilute
+average, no elastic, fission or capture background, and only the competition kept in
+the total.
 """
 from __future__ import annotations
 

@@ -84,6 +84,11 @@ COVARIANCE_MF = (31, 32, 33, 34, 35)
 #: declares per MT what it keeps verbatim instead.
 PHOTON_MF = (12, 13, 14, 15)
 
+#: The radioactive-production files of a reaction. Decoded by
+#: :mod:`.productions` into ``suite.productions``, which declares per state what
+#: it keeps as text instead.
+ACTIVATION_MF = (8, 9, 10)
+
 
 def _za(section) -> int:
     """ZA, **rounded** rather than truncated.
@@ -297,7 +302,7 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
         # this used to write lost LREL and NMOD, and no other reader knew them.
         library=libraryFromNlib(fields.get("nlib")),
         version=versionFromHeader(fields.get("nver"), fields.get("lrel"), fields.get("nmod")),
-        date=evaluationInfo.get("eval_date") or None,
+        date=gndsDate(evaluationInfo.get("eval_date"), report),
     )
     # The same block, as GNDS carries it: FUDGE writes the NWD records into the
     # evaluated style's `documentation/endfCompatible`, one line per record, and
@@ -502,19 +507,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             report = _attachEnergyAngleDistributions(suite, mf6.mt[mt], mt, report)
 
     present = set(getattr(endf, "mf", {}))
-    for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF)):
-        if mf == 8:
-            # In an incident-neutron evaluation the MTs of MF8 are the
-            # radioactive products of reactions (activation data).
-            mts = sorted(getattr(endf.mf[8], "mt", {}))
-            report.unsupportedNode(
-                f"MF8 (MT{mts[:6]}{'...' if len(mts) > 6 else ''}) is read and kept "
-                f"as the file states it; the radioactive products of a reaction "
-                f"are activation data and are not in this reactionSuite",
-                # Decay products and their yields, not a cross section MF3 states.
-                unaffectedScopes=("cross-sections",),
-            )
-            continue
+    for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF) - set(ACTIVATION_MF)):
         report.unsupportedNode(
             f"MF{mf} is present in the file and this decoder does not convert "
             f"it; it is absent from this reactionSuite",
@@ -573,6 +566,11 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # just built.
     from .photons import attachPhotons
     report = attachPhotons(suite, endf, report)
+
+    # MF8-10, after every reaction exists: an MF9 state's cross section is a
+    # reference to its reaction's (roadmap E6).
+    from .productions import attachProductions
+    report = attachProductions(suite, endf, report)
 
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)
@@ -986,6 +984,47 @@ def _attachMultiplicity(product, multiplicity, pid: str, mt: int,
         f"nu-bar is the one §17.3 asks for. MF6's yield is kept in the "
         f"provenance and comes back on the tape unchanged"
     )
+
+
+_MONTHS = {name: number for number, name in enumerate(
+    ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT",
+     "NOV", "DEC"), start=1)}
+
+
+def gndsDate(edate: Optional[str], report: Optional[ConversionReport] = None
+             ) -> Optional[str]:
+    """MF1/451's EDATE as the ``xs:date`` GNDS requires on a style (D20b).
+
+    ENDF writes the evaluation date as free text, by convention ``EVAL-SEP13``,
+    and the libraries vary it (JEFF-4.0's Fe-56 ``AUG-2018``, ENDF/B-VIII.1's
+    Fe-56 ``Eval-Oct22``). ``RS_EvaluatedType`` makes ``date`` a required
+    ``DateAttribute``, so the text as read was a schema error on every file
+    kika wrote from a tape. FUDGE's ENDF->GNDS (``getENDFDate``) keeps the
+    month and year and sets the day to 01, a two-digit year below 50 being
+    20xx; this does the same, for the spellings above and an ISO date as is.
+    Text with no month and year in it gives ``None``: FUDGE then writes
+    *today*, which would be kika inventing a date, so the attribute is left
+    absent and the report says why. The text itself is not lost, it stays in
+    the provenance and goes back to MF1/451 unchanged.
+    """
+    import re
+
+    text = (edate or "").strip()
+    if not text:
+        return None
+    iso = re.fullmatch(r"(\d{4})-?(\d{2})-?(\d{2})", text)
+    if iso:
+        return "-".join(iso.groups())
+    found = re.search(r"([A-Za-z]{3})[-\s.]*(\d{4}|\d{2})\s*$", text)
+    if found and found.group(1).upper() in _MONTHS:
+        year = int(found.group(2))
+        if year < 100:
+            year += 2000 if year < 50 else 1900
+        return f"{year:04d}-{_MONTHS[found.group(1).upper()]:02d}-01"
+    if report is not None:
+        report.lost(f"MF1/451 EDATE {text!r} names no month and year, so the "
+                    f"evaluated style has no date (GNDS requires one)")
+    return None
 
 
 def _channelGenre(mf6mt, mt: int) -> str:

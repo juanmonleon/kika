@@ -12,6 +12,11 @@ an evaluation; this module does it off the processed suite
   and the elastic adds the 0 K ``recon`` OpenMC keeps for resonance
   up-scattering. Nothing is labelled ``eval``. :func:`crossSections` takes a
   temperature in kelvin, or ``0`` for that 0 K elastic.
+* **The responses are served beside σ.** Gas production (MT 203-207, in b),
+  KERMA (301 and the local 901) and the damage energy (444, all three in eV·b)
+  are not reactions but ``suite.productions``; :func:`crossSections` serves
+  them per temperature with the reactions, and :func:`isotopeSummary` marks
+  each row's ``unit``.
 * **Angular tables are sampling tables.** Every angular distribution is a
   ``MonteCarlo`` ``XYs2d`` of :class:`Xs_pdf_cdf1d` (ACE law 61's cosine
   tables), lin-lin or histogram in μ, never Legendre. :func:`angularBulk`
@@ -34,7 +39,7 @@ import numpy as np
 
 __all__ = ["temperatures", "referenceTemperature", "formLabel", "crossSections",
            "angularMTs", "angularBulk", "isotopeSummary", "ZERO_K_FORM",
-           "PROJECTION_ORDER"]
+           "PROJECTION_ORDER", "ENERGY_RESPONSE_MTS"]
 
 #: The 0 K elastic OpenMC stores beside the heated ones.
 ZERO_K_FORM = "recon"
@@ -46,6 +51,10 @@ PROJECTION_ORDER = 20
 _K_B = 8.617333262e-5
 
 _HEATED = re.compile(r"^heated_(\d+(?:\.\d+)?)K$")
+
+#: Responses whose values are an energy times a cross section (eV·b): KERMA,
+#: its local part and the damage energy. Every other row is in barns.
+ENERGY_RESPONSE_MTS = (301, 444, 901)
 
 
 def temperatures(suite) -> List[Dict[str, Any]]:
@@ -90,12 +99,19 @@ def formLabel(suite, temperature: Optional[float]) -> str:
 
 
 def _nodes(suite):
-    return [n for n in list(suite.reactions) + list(suite.sums) if n.ENDF_MT is not None]
+    # A radionuclide production (MF8-10) shares its reaction's MT, and this
+    # table is keyed by MT; it is not one of this module's responses.
+    from .neutron_encode import isRadionuclideProduction
+
+    productions = [n for n in suite.productions if not isRadionuclideProduction(n)]
+    return [n for n in list(suite.reactions) + list(suite.sums) + productions
+            if n.ENDF_MT is not None]
 
 
 def crossSections(suite, temperature: Optional[float] = None) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
     """MT → ``(E, sigma)`` (eV, b) at ``temperature`` (K; see :func:`formLabel`)
-    for every reaction and sum that has it. At 0 K only the elastic exists."""
+    for every reaction, sum and response that has it; the responses in
+    :data:`ENERGY_RESPONSE_MTS` are in eV·b. At 0 K only the elastic exists."""
     label = formLabel(suite, temperature)
     out: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
     for node in _nodes(suite):
@@ -241,6 +257,7 @@ def isotopeSummary(suite, temperature: Optional[float] = None) -> Dict[str, Any]
     reference = referenceTemperature(suite) if temperature is None else float(temperature)
     angular = set(angularMTs(suite))
     sums = {int(n.ENDF_MT) for n in suite.sums if n.ENDF_MT is not None}
+    responses = {int(n.ENDF_MT) for n in _nodes(suite) if any(n is p for p in suite.productions)}
     nodes = {int(n.ENDF_MT): n for n in _nodes(suite)}
     pointwise = crossSections(suite, reference) if reference is not None else {}
 
@@ -248,12 +265,13 @@ def isotopeSummary(suite, temperature: Optional[float] = None) -> Dict[str, Any]
     for mt, (e, s) in pointwise.items():
         node = nodes[mt]
         q = None
-        if mt not in sums:
-            q = getattr(getattr(node.outputChannel, "Q", None), "value", None)
+        if mt not in sums and mt not in responses:
+            q = getattr(getattr(getattr(node, "outputChannel", None), "Q", None), "value", None)
         positive = np.nonzero(s > 0)[0]
         row = dict(mt=mt, label=str(node.label), q_value=None if q is None else float(q),
                    threshold=float(e[positive[0]]) if positive.size else None,
-                   sum=mt in sums, angular=mt in angular, **_range(e, s))
+                   sum=mt in sums, angular=mt in angular, response=mt in responses,
+                   unit="eV*b" if mt in ENERGY_RESPONSE_MTS else "b", **_range(e, s))
         rows.append(row)
 
     zeroK = None

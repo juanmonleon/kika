@@ -7,7 +7,7 @@ fixed-length byte string stays a byte string (``b"data_neutron"``, not
 ``"data_neutron"``), a 1-based breakpoint stays 1-based, an ``int64`` stays an
 ``int64``. The decoders above this layer decide what each node means; this one
 only guarantees that read → write gives back the same datasets, the same dtypes
-and the same attributes (roadmap H1).
+and the same attributes.
 
 What is *not* kept is the container: chunking, compression and the HDF5 library
 version an object was written with are properties of the file, not of the data.
@@ -332,7 +332,7 @@ def _compareAttrs(path: str, a: Dict[str, Attribute], b: Dict[str, Attribute],
 def compareTrees(a: Node, b: Node, path: str = "", limit: Optional[int] = None) -> List[str]:
     """Every difference in data, dtype, shape and attributes, as readable lines.
 
-    Empty means identical dataset by dataset (roadmap H1's gate). Storage --
+    Empty means identical dataset by dataset. Storage --
     chunking, compression -- is not compared.
     """
     out: List[str] = []

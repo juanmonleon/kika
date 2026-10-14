@@ -215,11 +215,21 @@ def _function(parent: ET.Element, form, report: ConversionReport,
     the two positions cannot both write the same attributes.
     """
     if isinstance(form, XYs1d):
+        pieces = _stepPieces(form)
+        if len(pieces) > 1 and index is None:
+            # A step inside one table, written as the regions1d FUDGE writes for
+            # it: one region per side. Under a regions container the caller
+            # flattens the pieces instead, since a region cannot hold regions.
+            element = ET.SubElement(parent, "regions1d")
+            _writeCommon(element, form, nested, index)
+            _axesUnlessNested(element, form, report, where, nested, parentAxes)
+            _stepRegions(ET.SubElement(element, "function1ds"), form, pieces, 0)
+            return element
         element = ET.SubElement(parent, "XYs1d")
         _writeCommon(element, form, nested, index)
         _interpolation(element, form)
         _axesUnlessNested(element, form, report, where, nested, parentAxes)
-        _values(element, form.interleaved())
+        _values(element, pieces[0])
         return element
     if isinstance(form, Regions1d):
         # A region set of one is not a region set: `function1ds_inRegions`
@@ -242,16 +252,27 @@ def _function(parent: ET.Element, form, report: ConversionReport,
                 # The primary's `label` and `axes` describe the curve, not the
                 # wrapper, so they survive the collapse.
                 _set(collapsed, label=getattr(form, "label", None))
-                if collapsed.find("axes") is None:
+                if collapsed.find("axes") is None and form.axes is not None:
+                    # First child, wherever `_axes` appends it: both `XYs1d`
+                    # and `regions1d` open their sequence with `axes`.
                     _axes(collapsed, form.axes)
+                    axes = collapsed.find("axes")
+                    collapsed.remove(axes)
+                    collapsed.insert(0, axes)
             return collapsed
         element = ET.SubElement(parent, "regions1d")
         _writeCommon(element, form, nested, index)
         _axesUnlessNested(element, form, report, where, nested, parentAxes)
         container = ET.SubElement(element, "function1ds")
-        for position, child in enumerate(form.function1ds):
+        position = 0
+        for child in form.function1ds:
+            pieces = _stepPieces(child) if isinstance(child, XYs1d) else []
+            if len(pieces) > 1:
+                position = _stepRegions(container, child, pieces, position)
+                continue
             _function(container, child, report, where, nested=True,
                       parentAxes=form.axes, index=position)
+            position += 1
         return element
     if isinstance(form, Constant1d):
         element = ET.SubElement(parent, "constant1d")
@@ -305,6 +326,7 @@ def _function(parent: ET.Element, form, report: ConversionReport,
         for child in form.function1ds:
             _function(container, child, report, where, nested=True,
                       parentAxes=form.axes)
+        _dropRepeatedOuter(container, report, where)
         return element
     if isinstance(form, XYs3d):
         element = ET.SubElement(parent, "XYs3d")
@@ -326,6 +348,7 @@ def _function(parent: ET.Element, form, report: ConversionReport,
             # already handles one floor down.
             _function(container, child, report, where, nested=True,
                       parentAxes=form.axes)
+        _dropRepeatedOuter(container, report, where)
         return element
     if isinstance(form, Regions2d):
         element = ET.SubElement(parent, "regions2d")
@@ -342,6 +365,156 @@ def _function(parent: ET.Element, form, report: ConversionReport,
         f"{type(form).__name__}; the node is absent from the file"
     )
     return None
+
+
+#: Outgoing neutrons by MT, for the reactions whose MT fixes the count (ENDF-6
+#: Appendix B). Only what an MF4 or MF5 section can leave without a
+#: multiplicity; fission is absent on purpose, its count is the nu-bar.
+_NEUTRONS_BY_MT = {2: 1, 4: 1, 11: 2, 16: 2, 17: 3, 22: 1, 23: 1, 24: 2, 25: 3,
+                   28: 1, 29: 1, 30: 2, 32: 1, 33: 1, 34: 1, 35: 1, 36: 1,
+                   37: 4, 41: 2, 42: 3, 44: 1, 45: 1,
+                   **{mt: 1 for mt in range(50, 92)},
+                   **{mt: 2 for mt in range(875, 892)}}
+
+#: The one light particle each charged-particle level series emits.
+_CHARGED_SERIES = ((600, "H1"), (650, "H2"), (700, "H3"), (750, "He3"), (800, "He4"))
+
+
+def _impliedCount(mt: Optional[int], pid: str) -> Optional[int]:
+    if mt is None:
+        return None
+    if pid == "n":
+        return _NEUTRONS_BY_MT.get(mt)
+    for first, light in _CHARGED_SERIES:
+        if first <= mt < first + 50 and pid == light:
+            return 1
+    return None
+
+
+def _stated(multiplicity) -> bool:
+    return multiplicity is not None and bool(list(multiplicity.items()))
+
+
+def _crossSectionDomain(reaction):
+    """The reaction's evaluated cross-section domain, or ``None``."""
+    try:
+        form = reaction.crossSection["eval"]
+        return float(form.domainMin), float(form.domainMax)
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return None
+
+
+#: FUDGE's ``fissionGenre`` by MT (``ENDF_ITYPE_0.py``).
+_FISSION_GENRE = {18: "total", 19: "firstChance", 20: "secondChance",
+                  21: "thirdChance", 38: "fourthChance"}
+
+
+def _endfGenre(mt: Optional[int]) -> Optional[str]:
+    """FUDGE's ``genre`` for an ENDF MT that states none (``ENDF_ITYPE_0_Misc``):
+    the two-body MTs (elastic, the discrete inelastic levels 50-90 and the
+    charged-particle levels 600-848) are ``twoBody``, MT5 is the sum of the rest,
+    and everything else — capture included — is ``NBody``."""
+    if mt is None:
+        return None
+    if mt == 5:
+        return "sumOfRemainingOutputChannels"
+    if mt == 2 or 50 <= mt <= 90 or any(
+            first <= mt <= first + 48 for first in (600, 650, 700, 750, 800)):
+        return "twoBody"
+    return "NBody"
+
+
+def _stepPieces(form) -> list:
+    """An ``XYs1d``'s points as the strictly increasing runs GNDS can hold.
+
+    ENDF writes a step as the same x twice inside one interpolation range (the
+    Fe-56 micro-tape's MT2 at its resonance boundary, Au-197's MT2 at 2 keV),
+    and kika's model keeps the table as read. GNDS cannot: FUDGE's reader
+    rejects a non-increasing ``XYs1d`` (``XYs1d.py:2188``). FUDGE's ENDF→GNDS
+    (``getTAB1Regions``) drops a point repeated with the same y and splits at
+    one repeated with a different y, so each side of the step is its own region
+    and the pair survives as the last point of one and the first of the next.
+    Same rule here, so the file states the function the model holds.
+
+    A step **at either end** of the table leaves a one-point run there: the
+    value on the far side of the domain edge, as in Fe-56 MT16's photon
+    multiplicity, which starts ``(11398910, 0), (11398910, 0.0121)``. FUDGE
+    drops that point and so does this; the function on its domain is unchanged.
+
+    Returns interleaved ``[x0, y0, x1, y1, ...]`` arrays, one per run, and the
+    table unchanged when it is not a step: x going *down*, or a one-point run
+    in the middle (a value stated three times), which no reader takes either.
+    """
+    xs, ys = np.asarray(form.xs, dtype=float), np.asarray(form.ys, dtype=float)
+    if xs.size < 2 or not np.any(xs[1:] <= xs[:-1]):
+        return [form.interleaved()]
+    keep = np.ones(xs.size, dtype=bool)
+    keep[1:] = ~((xs[1:] == xs[:-1]) & (ys[1:] == ys[:-1]))
+    xs, ys = xs[keep], ys[keep]
+    if np.any(xs[1:] < xs[:-1]):
+        return [form.interleaved()]
+    bounds = np.r_[0, np.flatnonzero(xs[1:] == xs[:-1]) + 1, xs.size]
+    if bounds.size > 2 and bounds[1] - bounds[0] == 1:
+        bounds = bounds[1:]
+    if bounds.size > 2 and bounds[-1] - bounds[-2] == 1:
+        bounds = bounds[:-1]
+    if np.any(np.diff(bounds) < 2):
+        return [form.interleaved()]
+    pieces = []
+    for low, high in zip(bounds[:-1], bounds[1:]):
+        piece = np.empty(2 * (high - low), dtype=float)
+        piece[0::2], piece[1::2] = xs[low:high], ys[low:high]
+        pieces.append(piece)
+    return pieces
+
+
+def _dropRepeatedOuter(container: ET.Element, report: ConversionReport,
+                       where: str) -> None:
+    """Drop a child that repeats the previous one's ``outerDomainValue`` and
+    says exactly the same thing.
+
+    JEFF-4.0 Fe-56 MF4/MT2 states the 3.905 MeV distribution twice, identical,
+    and kika's model keeps both as read. FUDGE's reader refuses an outer value
+    that does not increase (``multiD_XYs.py:393``), and its ENDF→GNDS drops the
+    repeat; nothing is lost by doing the same, since the two are the same
+    serialised node. A repeat that *differs* is a step in the incident energy,
+    which is not this case: it is left in place and reported.
+    """
+    previous = None
+    for child in list(container):
+        outer = child.attrib.get("outerDomainValue")
+        if previous is not None and outer is not None                 and outer == previous.attrib.get("outerDomainValue"):
+            if ET.tostring(child) == ET.tostring(previous):
+                container.remove(child)
+                continue
+            report.warn(
+                f"{where}: two different distributions at outerDomainValue="
+                f"{outer}; written both, which GNDS readers reject"
+            )
+        previous = child
+
+
+def _hasDecreasingXYs1d(element: ET.Element) -> bool:
+    """Whether any ``XYs1d`` under ``element`` has an x that does not increase."""
+    for node in element.iter("XYs1d"):
+        values = node.find("values")
+        if values is None or not values.text:
+            continue
+        xs = np.array(values.text.split()[0::2], dtype=float)
+        if np.any(xs[1:] <= xs[:-1]):
+            return True
+    return False
+
+
+def _stepRegions(container: ET.Element, form, pieces, position: int) -> int:
+    """Write ``pieces`` as consecutive indexed regions; returns the next index."""
+    for piece in pieces:
+        node = ET.SubElement(container, "XYs1d")
+        node.attrib["index"] = str(position)
+        _interpolation(node, form)
+        _values(node, piece)
+        position += 1
+    return position
 
 
 #: The §18.3 parametrised spectra: model class → GNDS tag, and the parameter
@@ -546,9 +719,14 @@ class _SuiteWriter:
 
     def reaction(self, parent: ET.Element, reaction, tag: str) -> None:
         element = ET.SubElement(parent, tag)
+        # FUDGE's spelling when the model has none: an ENDF decode does not set
+        # it, and FUDGE tells a fission reaction from any other by this
+        # attribute alone (`Reaction.isFission`), which its resonance
+        # reconstruction asks of every fission channel's link.
         _set(element, label=reaction.label,
              ENDF_MT=None if reaction.ENDF_MT is None else str(reaction.ENDF_MT),
-             fissionGenre=reaction.id.fissionGenre)
+             fissionGenre=(reaction.id.fissionGenre
+                           or _FISSION_GENRE.get(reaction.ENDF_MT)))
         # ReactionType's sequence puts doubleDifferentialCrossSection *before*
         # crossSection (gnds.xsd:888-896).
         from .thermal_scattering import writeDoubleDifferentialCrossSection
@@ -558,7 +736,8 @@ class _SuiteWriter:
         self.crossSection(element, reaction.crossSection,
                           f"{reaction.label!r}")
         self.outputChannel(element, reaction.outputChannel,
-                           f"{reaction.label!r}")
+                           f"{reaction.label!r}", reaction.ENDF_MT,
+                           _crossSectionDomain(reaction))
 
     @writes("crossSectionForm", "resonancesWithBackground", "reference",
             "thermalNeutronScatteringLaw1d")
@@ -591,15 +770,76 @@ class _SuiteWriter:
             _function(ET.SubElement(background, name), region, self.report,
                       f"{where} background/{name}")
 
-    def outputChannel(self, parent: ET.Element, channel, where: str) -> None:
+    def outputChannel(self, parent: ET.Element, channel, where: str,
+                      mt: Optional[int] = None, domain=None) -> None:
+        """``mt`` and ``domain`` are the reaction's, and only a reaction's own
+        channel gets them: they fill what ENDF leaves to the MT (the genre, the
+        count of outgoing neutrons), which says nothing about a decay channel."""
         element = ET.SubElement(parent, "outputChannel")
-        _set(element, genre=channel.genre, process=channel.process)
+        genre = channel.genre
+        if genre is None:
+            # Required by gnds.xsd and by FUDGE's reader (`outputChannel.py:121`
+            # raises on None). The ENDF decoder sets it only from the laws a
+            # section states, so a reaction with no MF4/MF5/MF6 (a capture with
+            # MF12 photons, a level with MF3 alone) had none. The file gets
+            # FUDGE's ENDF->GNDS rule, by MT; the model keeps None.
+            genre = _endfGenre(mt)
+            if genre is not None:
+                self.report.warn(
+                    f"{where}: the model states no outputChannel genre; written "
+                    f"{genre!r}, FUDGE's rule for MT{mt}")
+        _set(element, genre=genre, process=channel.process)
         self.Q(element, channel.Q, where)
         products = ET.SubElement(element, "products")
         for product in channel.products:
-            self.product(products, product, where)
+            self.product(products, product, where, mt, domain)
+        if mt == 2:
+            self.elasticRecoil(products, channel, where, domain)
         if channel.fissionFragmentData is not None:
             self.fissionFragmentData(element, channel.fissionFragmentData, where)
+
+    def elasticRecoil(self, products: ET.Element, channel, where: str,
+                      domain) -> None:
+        """The target's recoil in elastic scattering, which ENDF leaves implicit.
+
+        An ENDF MT2 states the neutron's angular distribution (MF4) and nothing
+        about the target, so the decoded channel has one product. GNDS spells a
+        two-body channel with both bodies, the second a ``recoil`` of the first,
+        and FUDGE's resonance reconstruction needs them: it reads the elastic
+        channel's particle pair off this reaction's products
+        (``reconstructResonances.py``, ``pA, pB = ...['particles']``) and stops
+        on a pair of one. Written the way FUDGE's ENDF->GNDS writes it and the
+        way kika writes a level residual's recoil; the model is left as decoded.
+        """
+        target = getattr(self.suite, "target", None)
+        bodies = list(channel.products)
+        if target is None or len(bodies) != 1 or bodies[0].pid != "n":
+            return
+        neutron = bodies[0]
+        forms = [] if neutron.distribution is None else list(neutron.distribution.items())
+        twoBody = [label for label, form in forms if isinstance(form, AngularTwoBody)]
+        if not twoBody:
+            return
+        if domain is None:
+            domain = tuple(float(v) for v in self.domain)
+        label = twoBody[0] or "eval"
+        element = ET.SubElement(products, "product")
+        _set(element, pid=target, label=target)
+        multiplicity = ET.SubElement(element, "multiplicity")
+        constant = ET.SubElement(multiplicity, "constant1d")
+        _set(constant, label="eval", value="1",
+             domainMin=_number(domain[0]), domainMax=_number(domain[1]))
+        axes = ET.SubElement(constant, "axes")
+        _set(ET.SubElement(axes, "axis"), index="1", label="energy_in", unit="eV")
+        _set(ET.SubElement(axes, "axis"), index="0", label="multiplicity", unit="")
+        distribution = ET.SubElement(element, "distribution")
+        node = ET.SubElement(distribution, "angularTwoBody")
+        _set(node, label=label, productFrame="centerOfMass")
+        _set(ET.SubElement(node, "recoil"),
+             href=(f"../../../../product[@label='{neutron.label or neutron.pid}']"
+                   f"/distribution/angularTwoBody[@label='{label}']"))
+        self.report.warn(f"{where}: the target's elastic recoil is written as a "
+                         f"second product, as FUDGE writes it; the model has one")
 
     def fissionFragmentData(self, parent: ET.Element, data, where: str) -> None:
         """§18.4, ``gnds.xsd:1296-1335``: delayed neutrons and the energy release.
@@ -687,16 +927,64 @@ class _SuiteWriter:
         _set(ET.SubElement(axes, "axis"), index="1", label="energy_in", unit="eV")
         _set(ET.SubElement(axes, "axis"), index="0", label="Q", unit=q.unit or "eV")
 
-    def product(self, parent: ET.Element, product, where: str) -> None:
+    def product(self, parent: ET.Element, product, where: str,
+                mt: Optional[int] = None, domain=None) -> None:
         element = ET.SubElement(parent, "product")
         _set(element, pid=product.pid, label=product.label or product.pid)
-        self.multiplicity(element, product.multiplicity,
-                          f"{where} product {product.pid!r}")
+        here = f"{where} product {product.pid!r}"
+        if _stated(product.multiplicity):
+            self.multiplicity(element, product.multiplicity, here)
+        else:
+            self.unstatedMultiplicity(element, product, here, mt, domain)
         self.distribution(element, product.distribution,
                           f"{where} product {product.pid!r}")
         if product.outputChannel is not None:
             self.outputChannel(element, product.outputChannel,
                                f"{where} product {product.pid!r}")
+
+    def unstatedMultiplicity(self, parent: ET.Element, product, where: str,
+                             mt: Optional[int], domain) -> None:
+        """D20b: a product the model gives no multiplicity, in the two cases
+        where the file can still say something true.
+
+        * **The MT fixes the count.** ENDF writes no multiplicity for the
+          neutron an MF4 or MF5 section describes, because the reaction says
+          how many there are: one for MT2 and the levels, two for (n,2n), and
+          so on (ENDF-6 Appendix B). FUDGE writes that count as a
+          ``constant1d`` over the reaction's domain, and so does this. That is
+          the MT's statement, not one made on the evaluator's behalf.
+        * **Nothing is stated about the product at all**: its distribution is
+          ``unspecified``. That is the photon kika puts in the decay channel of
+          an excited residual (LR=0), whose lines the evaluation gives on the
+          reaction's own photon product instead. ``unspecified`` is then the
+          accurate word for its multiplicity too.
+
+        Anything else stays an empty ``<multiplicity/>`` and is reported, the
+        doctrine of :meth:`multiplicity`.
+        """
+        count = _impliedCount(mt, product.pid)
+        if count is not None and domain is None:
+            # A resonance-region cross section (`resonancesWithBackground`)
+            # states no domain of its own; MT2's is the evaluation's.
+            domain = tuple(float(v) for v in self.domain)
+        if count is not None:
+            element = ET.SubElement(parent, "multiplicity")
+            constant = ET.SubElement(element, "constant1d")
+            _set(constant, label="eval", value=str(count),
+                 domainMin=_number(domain[0]), domainMax=_number(domain[1]))
+            axes = ET.SubElement(constant, "axes")
+            _set(ET.SubElement(axes, "axis"), index="1", label="energy_in", unit="eV")
+            _set(ET.SubElement(axes, "axis"), index="0", label="multiplicity", unit="")
+            self.report.warn(
+                f"{where}: no multiplicity in the model; written {count}, the "
+                f"number MT{mt} emits")
+            return
+        forms = () if product.distribution is None else list(product.distribution.items())
+        if forms and all(isinstance(form, Unspecified) for _, form in forms):
+            element = ET.SubElement(parent, "multiplicity")
+            _set(ET.SubElement(element, "unspecified"), label="eval")
+            return
+        self.multiplicity(parent, product.multiplicity, where)
 
     @writes("multiplicityForm", "constant1d", "reference", "branching1d",
             "unspecified")
@@ -748,7 +1036,13 @@ class _SuiteWriter:
             elif isinstance(form, UnspecifiedMultiplicity):
                 _set(ET.SubElement(element, "unspecified"), label=label)
             else:
-                _function(element, form, self.report, where)
+                node = _function(element, form, self.report, where)
+                # A form under a suite needs its label, and FUDGE's reader
+                # refuses one without (`suites.py:121`). The delayed-neutron
+                # multiplicities MF1/455 decodes carry none; they are the
+                # evaluation, so they get the label the Q and rate get.
+                if node is not None and "label" not in node.attrib:
+                    node.attrib["label"] = label or "eval"
 
     @writes("distributionForm", "angularTwoBody", "unspecified", "branching3d",
             "thermalNeutronScatteringLaw")
@@ -764,53 +1058,22 @@ class _SuiteWriter:
         element = ET.SubElement(parent, "distribution")
         forms = () if distribution is None else distribution.items()
         for label, form in forms:
-            if isinstance(form, Uncorrelated):
-                self.uncorrelated(element, form, label, where)
-            elif isinstance(form, EnergyAngular):
-                self.energyAngular(element, form, label, where)
-            elif isinstance(form, AngularEnergy):
-                self.angularEnergy(element, form, label, where)
-            elif isinstance(form, KalbachMann):
-                self.kalbachMann(element, form, label, where)
-            elif isinstance(form, AngularTwoBody):
-                self.angularTwoBody(element, form, label, where)
-            elif isinstance(form, Isotropic2d):
-                # A bare Isotropic2d is what `kika/endf/model_adapter/
-                # angular.py:146` returns for every MF4 with LTT=0, so this is
-                # the majority shape of an ENDF-sourced angular distribution and
-                # not an edge case. It used to be written as <isotropic2d>
-                # directly under <distribution>, which is wrong three ways:
-                # `DistributionType` (gnds.xsd:1647-1662) has no such child,
-                # `DistributionIsotropic2dType` (:1693) has no attributes at all
-                # so `label` and `productFrame` were invalid on it, and kika's
-                # own reader (decode.py's readDistribution) drops the node into
-                # the report. An isotropic MF4 lost its distribution between
-                # kika's two halves.
-                #
-                # The fix is here and not in the reader: adding a reader would
-                # encode a node the schema does not have. What an LTT=0 MF4 *is*
-                # in GNDS is a two-body angular distribution that happens to be
-                # isotropic, and `readAngularTwoBody` already reads that back.
-                twoBody = ET.SubElement(element, "angularTwoBody")
-                _set(twoBody, label=label, productFrame=str(form.productFrame))
-                ET.SubElement(twoBody, "isotropic2d")
-            elif isinstance(form, Branching3d):
-                # Before Unspecified, because both are attribute-only nodes and
-                # a reader that saw them in the other order would be relying on
-                # the two classes being unrelated rather than on the order.
-                _set(ET.SubElement(element, "branching3d"), label=label,
-                     productFrame=str(form.productFrame))
-            elif isinstance(form, Unspecified):
-                _set(ET.SubElement(element, "unspecified"), label=label,
-                     productFrame=str(form.productFrame))
-            elif isinstance(form, ThermalNeutronScatteringLaw):
-                _set(ET.SubElement(element, "thermalNeutronScatteringLaw"),
-                     label=label, href=form.href)
-            else:
-                self.report.unsupportedNode(
-                    f"{where}: kika's writer has no serialisation for a "
-                    f"{type(form).__name__} distribution"
-                )
+            written = len(element)
+            self._distributionForm(element, form, label, where)
+            for node in list(element)[written:]:
+                if _hasDecreasingXYs1d(node):
+                    # MF6 LAW=1 with ND>0 is the case met: the first ND outgoing
+                    # points are discrete lines, in decreasing energy, and the
+                    # model holds them as points of the spectrum (the decoder
+                    # reports that loss). No GNDS reader takes a decreasing
+                    # XYs1d, FUDGE included (`XYs1d.py:2188`), so the form is
+                    # not written and the product is counted as incomplete.
+                    element.remove(node)
+                    self.report.unsupportedNode(
+                        f"{where}: the {label!r} distribution holds an XYs1d "
+                        f"whose x decreases (discrete lines carried as spectrum "
+                        f"points); not written, since no GNDS reader takes it"
+                    )
         if len(element) == 0:
             # Counted on the **element**, not on the model dict. A product
             # whose only form is one this writer cannot serialise leaves the
@@ -818,6 +1081,56 @@ class _SuiteWriter:
             # file came out invalid without the "does not validate" sentence
             # that `declareWhatIsMissing` is there to put in the report.
             self.incompleteProducts.append(where)
+
+    def _distributionForm(self, element: ET.Element, form, label: str,
+                          where: str) -> None:
+        if isinstance(form, Uncorrelated):
+            self.uncorrelated(element, form, label, where)
+        elif isinstance(form, EnergyAngular):
+            self.energyAngular(element, form, label, where)
+        elif isinstance(form, AngularEnergy):
+            self.angularEnergy(element, form, label, where)
+        elif isinstance(form, KalbachMann):
+            self.kalbachMann(element, form, label, where)
+        elif isinstance(form, AngularTwoBody):
+            self.angularTwoBody(element, form, label, where)
+        elif isinstance(form, Isotropic2d):
+            # A bare Isotropic2d is what `kika/endf/model_adapter/
+            # angular.py:146` returns for every MF4 with LTT=0, so this is
+            # the majority shape of an ENDF-sourced angular distribution and
+            # not an edge case. It used to be written as <isotropic2d>
+            # directly under <distribution>, which is wrong three ways:
+            # `DistributionType` (gnds.xsd:1647-1662) has no such child,
+            # `DistributionIsotropic2dType` (:1693) has no attributes at all
+            # so `label` and `productFrame` were invalid on it, and kika's
+            # own reader (decode.py's readDistribution) drops the node into
+            # the report. An isotropic MF4 lost its distribution between
+            # kika's two halves.
+            #
+            # The fix is here and not in the reader: adding a reader would
+            # encode a node the schema does not have. What an LTT=0 MF4 *is*
+            # in GNDS is a two-body angular distribution that happens to be
+            # isotropic, and `readAngularTwoBody` already reads that back.
+            twoBody = ET.SubElement(element, "angularTwoBody")
+            _set(twoBody, label=label, productFrame=str(form.productFrame))
+            ET.SubElement(twoBody, "isotropic2d")
+        elif isinstance(form, Branching3d):
+            # Before Unspecified, because both are attribute-only nodes and
+            # a reader that saw them in the other order would be relying on
+            # the two classes being unrelated rather than on the order.
+            _set(ET.SubElement(element, "branching3d"), label=label,
+                 productFrame=str(form.productFrame))
+        elif isinstance(form, Unspecified):
+            _set(ET.SubElement(element, "unspecified"), label=label,
+                 productFrame=str(form.productFrame))
+        elif isinstance(form, ThermalNeutronScatteringLaw):
+            _set(ET.SubElement(element, "thermalNeutronScatteringLaw"),
+                 label=label, href=form.href)
+        else:
+            self.report.unsupportedNode(
+                f"{where}: kika's writer has no serialisation for a "
+                f"{type(form).__name__} distribution"
+            )
 
     def _distributionAE(self, parent: ET.Element, form, label: str, tag: str,
                         where: str) -> None:
@@ -1130,7 +1443,12 @@ class _SuiteWriter:
     def resonances(self, root: ET.Element) -> None:
         from .encode_resonances import writeResonances
 
-        writeResonances(root, self.suite.resonances, self.report, self.domain)
+        hrefs = {}
+        for reaction in self.suite.reactions:
+            mt = getattr(reaction, "ENDF_MT", None)
+            if mt is not None and mt not in hrefs:
+                hrefs[mt] = f"/reactionSuite/reactions/reaction[@label='{reaction.label}']"
+        writeResonances(root, self.suite.resonances, self.report, self.domain, hrefs)
 
     # -- the declaration ---------------------------------------------------
 
