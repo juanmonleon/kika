@@ -161,7 +161,8 @@ def tabulateEnergyAngular(form, options: TabulationOptions, *,
                     mu, _ = muTable(_normalisedNode(nodes[j],f0[j]),options,outer=node.outerDomainValue)
                 else:mu = _isotropicTable(node.outerDomainValue)
             tables.append(mu)
-        angular.append(m.XYs2d(function1ds=tables, outerDomainValue=energy))
+        angular.append(m.XYs2d(function1ds=tables, outerDomainValue=energy,
+                                interpolation=surface.interpolation))
     energyForm = m.XYs2d(function1ds=spectra, interpolation=xys3d.interpolation,
                          interpolationQualifier=xys3d.interpolationQualifier)
     return m.EnergyAngularMC(energy=energyForm,

@@ -158,3 +158,25 @@ def test_capture_cascade_does_not_take_two_body_recoil_branch():
     photon = NS(pid="photon", distribution=NS(forms={"eval": m.Uncorrelated()}))
     evaluation = NS(findReactionByENDF_MT=lambda mt: NS(outputChannel=NS(products=[photon])))
     assert H._twoBodyCapture([(photon,m.Uncorrelated())], evaluation, np.array([1.]), 55.) is None
+
+
+def test_histogram_joint_cm_mean_retains_constant_density_and_angle_in_each_bin():
+    spectra=[];angular=[]
+    for E,scale in ((100.,1.),(200.,2.)):
+        x=np.array([0.,10.,20.])*scale
+        spectra.append(m.Xs_pdf_cdf1d(xs=x,pdf=np.array([2.,1.,0.])/(30*scale),
+            cdf=np.array([0.,2./3.,1.]),interpolation=m.Interpolation.flat,outerDomainValue=E))
+        children=[_table([-1.,1.],[.5-1.5*mu,.5+1.5*mu],e) for e,mu in zip(x,(.2,-.3,0.))]
+        angular.append(m.XYs2d(function1ds=children,interpolation=m.Interpolation.flat,outerDomainValue=E))
+    form=m.EnergyAngularMC(energy=m.XYs2d(function1ds=spectra,interpolationQualifier=m.InterpolationQualifier.unitBase),
+        energyAngular=m.XYs3d(function2ds=angular),productFrame=m.Frame.centerOfMass)
+    grid=np.array([100.,150.,200.]);scale=grid/100.
+    cm=(2*50+150)/30*scale
+    cross=(2*.2*10**1.5-.3*(20**1.5-10**1.5))*2/3/30*np.sqrt(scale)
+    expected=cm+grid/9+2*np.sqrt(grid/9)*cross
+    actual=H._meanEnergyOf(form,grid,H._Kinematics(A=2.,Q=0.))
+    np.testing.assert_allclose(actual,expected,rtol=0.,atol=1e-12)
+    from kika.hdf5.distributions import encodeCorrelated,decodeCorrelated
+    decoded=decodeCorrelated(encodeCorrelated(form),m.Frame.centerOfMass)
+    assert all(str(t.interpolation)=='flat' for t in decoded.energyAngular.function2ds)
+    np.testing.assert_allclose(H._meanEnergyOf(decoded,grid,H._Kinematics(A=2.,Q=0.)),expected,rtol=0.,atol=1e-12)

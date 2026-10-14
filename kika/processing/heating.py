@@ -414,9 +414,16 @@ def _unitBaseCMMean(form, grid, k):
             nodes,ww=_GL4;r=(left+right)/2+(right-left)/2*nodes
             original=a+(r*r-qa)*width/qw
             frac=(original-x[:-1,None])/np.maximum(np.diff(x)[:,None],1e-300)
-            density=p[:-1,None]+np.diff(p)[:,None]*frac
-            angle=mu[:-1,None]+np.diff(mu)[:,None]*frac
-            norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
+            if _isFlat(table):
+                # A correlated histogram uses its lower-bin angular law too
+                # (OpenMC secondary_correlated.cpp); no endpoint blend.
+                density=p[:-1,None]
+                angle=mu[:-1,None]
+                norm=float(np.sum(np.diff(x)*p[:-1]))
+            else:
+                density=p[:-1,None]+np.diff(p)[:,None]*frac
+                angle=mu[:-1,None]+np.diff(mu)[:,None]*frac
+                norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
             integral=float(np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle))/norm
             cross+=weight*integral
             mean+=weight*(qa+qw*(means[i]-a)/width)
