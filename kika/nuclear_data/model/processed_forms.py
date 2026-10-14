@@ -143,6 +143,9 @@ class ProbabilityTableStatistics:
     ``sigma0`` (b), from the bands' cross sections, and their errors:
     ``shielding``/``shieldingSigma``, (N, 4, K). With an ``errorTarget``,
     ``converged`` says per energy whether it was reached before the cap.
+    Band errors condition on the realized probability-bin boundaries. They
+    do not include variation of those boundaries between independent pilots.
+
     """
 
     ladders: np.ndarray
