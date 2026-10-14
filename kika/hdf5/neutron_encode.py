@@ -117,17 +117,10 @@ def _provenance(node, key, default=None):
     return default
 
 
-def isRadionuclideProduction(reaction) -> bool:
-    """A ``production`` of a radioactive nuclide (ENDF MF8-10).
-
-    Told apart from the responses this format keeps in ``suite.productions``
-    (gas production MT203-207) by its channel's ``genre``, which the ENDF and
-    GNDS decoders both set to ``production``. It shares its MT with the reaction
-    that makes it -- MT102's isomer is MT102 -- and OpenMC names a group by MT
-    alone, so it has no place in this file: neither the NJOY/ACE route nor
-    ``openmc.data`` writes one.
-    """
-    return getattr(getattr(reaction, "outputChannel", None), "genre", None) == "production"
+#: A radionuclide production (MF8-10) shares its MT with the reaction that makes
+#: it, and OpenMC names a group by MT alone, so it has no place in this file:
+#: neither the NJOY/ACE route nor ``openmc.data`` writes one.
+from kika.nuclear_data.model import isRadionuclideProduction  # noqa: E402
 
 
 def _allReactions(suite):

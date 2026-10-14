@@ -342,12 +342,21 @@ class ReactionSuite:
         the values are exact at every node; between nodes the product of two
         interpolants is not itself one of ENDF's laws, the caveat
         :meth:`cross_section` gives for flattened regions.
+
+        **A reference read at the evaluated form is refused where the resonances
+        could reach it.** There the reaction's evaluated form is the MF3
+        background, and MF2 adds the resonances only on reconstruction: Am-241
+        capture to Am-242m reads 0 at thermal. The reconstruction gives the
+        production a ``recon`` form that follows the reaction's, so ask for that.
+        A table that starts above the resonance range, or a tape whose MF3
+        already holds the resonances (LRP=2), is read as it is.
         """
         if isinstance(production, str):
             production = self.productions.byLabel(production)
         chosen = production.crossSection[form]
         if type(chosen).__name__ == "Reference":
             chosen = self.resolve_reference(chosen)
+            self._refuseBackgroundOnly(production, form, chosen)
         _checkUnits(chosen, CROSS_SECTION_UNITS,
                     f"the {form!r} cross section of {production.label}")
         x, _ = _pointwise(chosen)
@@ -367,6 +376,26 @@ class ReactionSuite:
         values = (np.asarray(chosen.evaluate(energies), dtype=float)
                   * np.asarray(multiplicity.evaluate(energies), dtype=float))
         return energies, values
+
+    def _refuseBackgroundOnly(self, production, form: str, resolved) -> None:
+        """Raise when *resolved*, the reaction form a reference reached, may lack MF2's part."""
+        header = getattr(self.provenance, "headerFields", None) or {}
+        if header.get("lrp") == 2:
+            return
+        domain = self.resonances.domain if self.resonances is not None else None
+        if domain is None or float(resolved.domainMin) >= float(domain[1]):
+            return
+        try:
+            chain = self.styles.chain(form)
+        except (KeyError, ValueError):
+            chain = []
+        if any(type(style).__name__ == "CrossSectionReconstructed" for style in chain):
+            return
+        raise ValueError(
+            f"{production.label} refers to its reaction's {form!r} cross section, which "
+            f"below {float(domain[1]):g} eV is the MF3 background without the resonance "
+            f"contribution; reconstruct the suite (kika.processing.resonances) and ask "
+            f"for form='recon'")
 
     def summary(self) -> str:
         """A few lines saying what is actually in here, including what is missing."""

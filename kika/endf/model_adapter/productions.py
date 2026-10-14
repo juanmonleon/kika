@@ -66,7 +66,8 @@ from kika.nuclear_data.model import (
     multiplicityAxes,
     pidFromZA,
 )
-from kika.nuclear_data.model.cross_section_forms import Reference
+# crossSectionFormTag lives in the model, where kika.processing reaches it too.
+from kika.nuclear_data.model.cross_section_forms import Reference, crossSectionFormTag
 from kika.nuclear_data.model.functions.simple import Constant1d
 from kika.nuclear_data.model.pops import MetaStable, zaFromPid
 
@@ -103,21 +104,6 @@ def productionLabel(mt: int, pid: str) -> str:
     """``MT102 Am242_e2``: the reaction's kika label, then the nuclide made."""
     return f"MT{int(mt)} {pid}"
 
-
-def crossSectionFormTag(form) -> str:
-    """The GNDS element a cross-section form is written as, for an ``href`` to it.
-
-    Follows :mod:`kika.gnds.encode`, which writes a one-region ``Regions1d`` as
-    the single ``XYs1d`` it holds. The href is informative only inside kika:
-    :func:`resolveReference` resolves by the container's label and the form's
-    label, never by this tag.
-    """
-    name = type(form).__name__
-    if name == "Regions1d":
-        return "regions1d" if len(form.function1ds) > 1 else "XYs1d"
-    if name == "ResonancesWithBackground":
-        return "resonancesWithBackground"
-    return name
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +272,8 @@ def attachProductions(suite, endf, report: Optional[ConversionReport] = None) ->
         return report
 
     levels: Dict[int, Dict[int, str]] = {}
+    #: pid -> [(level energy, "MF<n>/MT<m>")]: what each section says it is.
+    stated: Dict[str, List[Tuple[float, str]]] = {}
     for mt in mts:
         index = None
         if mt in mf8:
@@ -311,6 +299,7 @@ def attachProductions(suite, endf, report: Optional[ConversionReport] = None) ->
                 pid = pidFromZA(int(state.izap), int(state.lfs))
                 _addNuclide(suite, pid, int(state.izap), int(state.lfs), state.level_energy)
                 levels.setdefault(int(state.izap), {})[int(state.lfs)] = pid
+                stated.setdefault(pid, []).append((float(state.level_energy), f"MF{mf}/MT{mt}"))
                 table = _function1d(state.interp, state.x, state.y,
                                     axes=multiplicityAxes() if mf == 9 else crossSectionAxes())
                 table.label = EVAL_LABEL
@@ -337,8 +326,42 @@ def attachProductions(suite, endf, report: Optional[ConversionReport] = None) ->
             opaque = [[s.zap, s.lfs] for s in index.states if (s.zap, s.lfs) not in modelled]
             if opaque:
                 suite.provenance.headerFields.setdefault(ACTIVATION_MF8_OPAQUE_KEY, {})[mt] = opaque
+            for s in index.states:
+                if (s.zap, s.lfs) in modelled:
+                    stated.setdefault(pidFromZA(s.zap, s.lfs), []).append((float(s.elfs), f"MF8/MT{mt}"))
     _addMetaStables(suite, levels)
+    _reportLevelDisagreements(suite, stated, report)
     return report
+
+
+#: Two statements of one level energy disagree beyond this relative difference:
+#: FUDGE's tolerance between MF8 and MF9/MF10 (``readMF8``), below which the
+#: differences are the rounding of a 7-digit field (B-VIII.1 Fe-55: 3 633 000
+#: and 3 633 001 eV).
+LEVEL_ENERGY_RTOL = 2.0e-4
+
+
+def _reportLevelDisagreements(suite, stated, report) -> None:
+    """One message per product whose level energy the sections state differently.
+
+    PoPs holds one energy per nuclide -- the first statement read -- while each
+    MF9/MF10 state keeps its own ``QM`` in its provenance, so a tape written from
+    this suite comes back as read. A GNDS file has only the PoPs energy, and a
+    tape written through it rebuilds every ``QM`` from it.
+    """
+    for pid, values in sorted(stated.items()):
+        energies = [e for e, _ in values]
+        spread = max(energies) - min(energies)
+        if spread <= LEVEL_ENERGY_RTOL * max(abs(e) for e in energies):
+            continue
+        kept = getattr(getattr(suite.PoPs.particles.get(pid), "energy", None), "value", None)
+        listed = ", ".join(f"{e:g} eV ({where})" for e, where in values)
+        keeps = f"{kept:g} eV" if kept is not None else "no energy (a ground state)"
+        report.approximated(
+            f"{pid}: the sections state its level energy differently -- {listed}; PoPs "
+            f"keeps {keeps}. An ENDF tape written from this suite keeps each state's "
+            f"QM; through GNDS every QM is rebuilt from the PoPs energy",
+            unaffectedScopes=("cross-sections",))
 
 
 def _whyNotModelled(suite, section, mf, mt) -> Optional[str]:
