@@ -20,10 +20,9 @@ import numpy as np
 import pytest
 
 from kika.ace import read_ace
-from kika.ace.model_adapter import (GRIDDED_LABEL, HEATED_LABEL, URR_LABEL,
-                                    decodeAce, qValuesByMT)
+from kika.ace.model_adapter import MONTE_CARLO_LABEL, aceLabels, decodeAce, qValuesByMT
 from kika.nuclear_data import CrossSection
-from kika.nuclear_data.model import (Evaluated, GriddedCrossSection, Heated,
+from kika.nuclear_data.model import (Evaluated, GriddedCrossSection, Heated, MonteCarlo_cdf,
                                      URR_probabilityTables1d, XYs1d)
 
 pytestmark = pytest.mark.tape
@@ -39,11 +38,16 @@ def decoded(ace):
     return decodeAce(ace)
 
 
+@pytest.fixture(scope="module")
+def labels(ace):
+    return aceLabels(ace)
+
+
 # ---------------------------------------------------------------------------
 # The numbers
 # ---------------------------------------------------------------------------
 
-def test_every_reaction_reproduces_the_flat_path_array_for_array(ace, decoded):
+def test_every_reaction_reproduces_the_flat_path_array_for_array(ace, decoded, labels):
     """``assert_array_equal``, not ``allclose``. The adapter re-expresses; the
     moment it starts recomputing, this is the test that says so."""
     suite, _ = decoded
@@ -52,7 +56,7 @@ def test_every_reaction_reproduces_the_flat_path_array_for_array(ace, decoded):
     for reaction in suite.reactions:
         mt = reaction.id.ENDF_MT
         expected = CrossSection.from_ace(ace, mt)
-        form = reaction.crossSection[GRIDDED_LABEL]
+        form = reaction.crossSection[labels[0]]
 
         np.testing.assert_array_equal(form.xs, expected.energies)
         np.testing.assert_array_equal(form.ys, expected.values)
@@ -76,19 +80,19 @@ def test_the_composite_mts_are_present(ace, decoded):
     assert available <= decodedMTs, f"composites lost: {sorted(available - decodedMTs)}"
 
 
-def test_energies_are_in_ev_not_mev(decoded):
+def test_energies_are_in_ev_not_mev(decoded, labels):
     """ACE is MeV throughout and the model is eV, as ENDF is. Getting this wrong
     is a factor of a million that still plots as a plausible curve."""
     suite, _ = decoded
-    form = suite.reactionByENDF_MT(2).crossSection[GRIDDED_LABEL]
+    form = suite.reactionByENDF_MT(2).crossSection[labels[0]]
     assert form.domainMax > 1.0e6
 
 
-def test_the_form_is_an_xys1d_and_not_a_single_region_regions1d(decoded):
+def test_the_form_is_an_xys1d_and_not_a_single_region_regions1d(decoded, labels):
     """ACE has no ``(NBT, INT)`` regions: it is lin-lin on one union grid. A
     one-region ``regions1d`` would assert a structure the file does not have."""
     suite, _ = decoded
-    form = suite.reactionByENDF_MT(2).crossSection[GRIDDED_LABEL]
+    form = suite.reactionByENDF_MT(2).crossSection[labels[0]]
     assert isinstance(form, XYs1d)
     assert form.interpolation.value == "lin-lin"
 
@@ -97,39 +101,65 @@ def test_the_form_is_an_xys1d_and_not_a_single_region_regions1d(decoded):
 # The processed styles — what makes ACE not an evaluation
 # ---------------------------------------------------------------------------
 
-def test_the_derived_from_chain_resolves_to_an_evaluated_style(decoded):
+def test_the_derived_from_chain_resolves_to_an_evaluated_style(decoded, labels):
     suite, _ = decoded
-    chain = [s.label for s in suite.styles.chain(GRIDDED_LABEL)]
-    assert chain == [GRIDDED_LABEL, HEATED_LABEL, "eval"]
-    assert isinstance(suite.styles.evaluatedFor(GRIDDED_LABEL), Evaluated)
+    heated, _ = labels
+    chain = [s.label for s in suite.styles.chain(heated)]
+    assert chain == [heated, "eval"]
+    assert isinstance(suite.styles.evaluatedFor(heated), Evaluated)
 
 
-def test_the_cross_sections_are_gridded_and_never_evaluated(decoded):
+def test_the_labels_are_the_processed_suites(decoded, labels):
+    """ACE roadmap D-A11: ``heated_<T>``/``URR_<T>``/``MonteCarlo``, the labels the
+    HDF5 decoder and kika's processing give, so an ACE suite needs no relabelling
+    to be written to HDF5 or back to ACE. No ``gridded`` style any more."""
+    suite, _ = decoded
+    heated, urr = labels
+    assert heated == "heated_294K" and urr == "URR_294K"
+    assert isinstance(suite.styles[MONTE_CARLO_LABEL], MonteCarlo_cdf)
+    assert not any(isinstance(s, GriddedCrossSection) for s in suite.styles)
+
+
+def test_an_ace_suite_goes_to_hdf5_without_relabelling(ace, decoded):
+    """What D-A11 buys: the HDF5 encoder takes the decoded suite as it is.
+
+    Before it, ``a3_gate.py`` copied every ``gridded`` form to ``heated_<T>``
+    and added the styles by hand before it could encode.
+    """
+    from kika.hdf5.neutron_encode import encodeNeutron
+
+    suite, _ = decoded
+    tree = encodeNeutron(suite, awr=float(ace.header.atomic_weight_ratio))
+    (name, nuclide), = tree.groups()
+    assert list(nuclide["kTs"].children) == ["294K"]
+    assert "294K" in nuclide["reactions/reaction_002"].children
+
+
+def test_the_cross_sections_are_heated_and_never_evaluated(decoded, labels):
     """The whole point. An ACE file contains no evaluated data, so nothing in it
     may be labelled ``eval`` — otherwise a processed representation starts
     claiming to be the evaluation it came from."""
     suite, _ = decoded
     for reaction in suite.reactions:
         assert "eval" not in reaction.crossSection.forms
-        assert GRIDDED_LABEL in reaction.crossSection.forms
+        assert labels[0] in reaction.crossSection.forms
 
 
-def test_the_heated_style_carries_the_temperature_in_kelvin(ace, decoded):
+def test_the_heated_style_carries_kT_in_eV(ace, decoded):
     """ACE's header field is kT in **MeV**; 2.53e-08 is 293.6 K, not 2.53e-08 K.
 
     ``Header.temperature``'s inline comment says kelvin and its class docstring
-    says MeV. They cannot both be right, and the docstring is.
+    says MeV. They cannot both be right, and the docstring is. The style states
+    kT in eV (``eV/k``), as the HDF5 decoder's does.
     """
-    from kika._constants import BOLTZMANN_CONSTANT
+    from kika.hdf5.names import K_BOLTZMANN
 
     suite, _ = decoded
     heated = next(s for s in suite.styles if isinstance(s, Heated))
     assert heated.derivedFrom == "eval"
-    assert heated.temperature.unit == "K"
-    assert heated.temperature.value == pytest.approx(
-        ace.header.temperature / BOLTZMANN_CONSTANT
-    )
-    assert 250.0 < heated.temperature.value < 350.0
+    assert heated.temperature.unit == "eV/k"
+    assert heated.temperature.value == pytest.approx(ace.header.temperature * 1e6)
+    assert 250.0 < heated.temperature.value / K_BOLTZMANN < 350.0
 
 
 def test_a_reconstructed_style_is_not_invented(decoded):
@@ -141,15 +171,16 @@ def test_a_reconstructed_style_is_not_invented(decoded):
     assert not any(isinstance(s, CrossSectionReconstructed) for s in suite.styles)
 
 
-def test_the_urr_tables_are_converted_where_they_exist(ace, decoded):
+def test_the_urr_tables_are_converted_where_they_exist(ace, decoded, labels):
     suite, report = decoded
     if not getattr(ace.unresolved_resonance, "has_data", False):
         pytest.skip("this ACE file has no URR probability tables")
 
-    assert any(s.label == URR_LABEL for s in suite.styles)
-    assert suite.styles.chain(URR_LABEL)[1].label == GRIDDED_LABEL
+    heated, urr = labels
+    assert any(s.label == urr for s in suite.styles)
+    assert suite.styles.chain(urr)[1].label == heated
 
-    form = suite.reactionByENDF_MT(102).crossSection[URR_LABEL]
+    form = suite.reactionByENDF_MT(102).crossSection[urr]
     assert isinstance(form, URR_probabilityTables1d)
     urr = ace.unresolved_resonance
     assert form.table.table.shape == (urr.num_energies, 6, urr.table_length)
@@ -157,11 +188,6 @@ def test_the_urr_tables_are_converted_where_they_exist(ace, decoded):
     np.testing.assert_allclose(form.table.table[:, 5], np.array([t.heating_numbers for t in urr.tables]) * 1e6)
     assert not any("URR probability tables" in entry for entry in report.unsupported)
 
-
-def test_the_gridded_style_exists_and_says_what_it_is(decoded):
-    suite, _ = decoded
-    gridded = next(s for s in suite.styles if isinstance(s, GriddedCrossSection))
-    assert gridded.derivedFrom == HEATED_LABEL
 
 
 # ---------------------------------------------------------------------------

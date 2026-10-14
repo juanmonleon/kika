@@ -6,8 +6,15 @@ reconstructed from resonance parameters, Doppler-broadened to a temperature and
 put on a unionised grid. GNDS §9 exists to record exactly that, through a chain
 of styles linked by ``derivedFrom``. So this decoder does not produce an
 ``eval``-labelled cross section the way the ENDF decoder does — it produces a
-``gridded`` one, hanging off a ``heated`` style, hanging off the ``evaluated``
-style the file *refers to and does not contain*.
+``heated_<T>`` one, hanging off the ``evaluated`` style the file *refers to and
+does not contain*.
+
+**The labels are the processed suite's (ACE roadmap D-A11).** ``heated_<T>``,
+``URR_<T>`` and ``MonteCarlo``, with ``<T>`` named from kT as OpenMC names its
+temperature groups (``heated_294K``): the labels the HDF5 decoder and kika's
+own processing give, and the ones the HDF5 and ACE encoders require. A suite
+read from ACE is therefore a processed suite like any other, and goes to HDF5
+or back to ACE without relabelling.
 
 **The finding that changed what this module does.** The roadmap recorded, from
 phase 1, that "ACE lacks ``qm``/``qi``", and phase 3's plan said this decoder
@@ -36,9 +43,9 @@ from kika.nuclear_data.model import (
     CrossSection,
     Evaluated,
     Frame,
-    GriddedCrossSection,
     Heated,
     Interpolation,
+    MonteCarlo_cdf,
     Nuclide,
     OutputChannel,
     PhysicalQuantity,
@@ -54,33 +61,45 @@ from kika.nuclear_data.model import (
     pidFromZA,
 )
 
-__all__ = ["decodeAce", "aceStyles", "qValuesByMT",
-           "EVALUATED_LABEL", "HEATED_LABEL", "GRIDDED_LABEL", "URR_LABEL"]
+from .secondaries import MONTE_CARLO_LABEL
 
-#: Style labels this decoder assigns. They are kika's, not GNDS-mandated: §9
-#: fixes the node *names*, and leaves the labels to the writer.
+__all__ = ["decodeAce", "aceStyles", "aceLabels", "qValuesByMT",
+           "EVALUATED_LABEL", "MONTE_CARLO_LABEL"]
+
+#: Style labels this decoder assigns: the processed suite's (D-A11), the same
+#: as :mod:`kika.hdf5.names`. GNDS §9 fixes the node *names* and leaves the
+#: labels to the writer; the per-temperature ones come from :func:`aceLabels`.
 EVALUATED_LABEL = "eval"
-HEATED_LABEL = "heated"
-GRIDDED_LABEL = "gridded"
-URR_LABEL = "URR"
 
 #: ACE stores energies and Q values in MeV; the model works in eV, as ENDF does.
 MEV_TO_EV = 1.0e6
 
 
-def _temperatureK(ace) -> Optional[float]:
+def _kTeV(ace) -> Optional[float]:
     """ACE's header temperature is **kT in MeV**, not a temperature in kelvin.
 
     ``Header.temperature``'s inline comment says "Temperature in K" and its
     class docstring says MeV. The docstring is right — Fe-56 at ``2.53e-08``
-    is 293.6 K — and ``CrossSection.from_ace`` already divides by k_B. Recorded
-    here because the two disagree in the source and only one of them can be
-    followed.
+    is 293.6 K. Returned in eV; ``None`` when the header has none. A kT of 0
+    is a 0 K table, not a missing temperature.
     """
-    from kika._constants import BOLTZMANN_CONSTANT
+    kT = getattr(getattr(ace, "header", None), "temperature", None)
+    return float(kT) * MEV_TO_EV if kT is not None else None
 
-    kT = getattr(ace.header, "temperature", None)
-    return float(kT) / BOLTZMANN_CONSTANT if kT else None
+
+def aceLabels(ace):
+    """``(heated, urr)``: the labels of this table's temperature, ``heated_294K``/``URR_294K``.
+
+    Named from kT exactly as OpenMC names a temperature group
+    (:func:`kika.hdf5.names.temperatureName`), because the HDF5 encoder checks
+    that the name and the stated kT agree. A table with no header temperature
+    is named ``0K``.
+    """
+    from kika.hdf5.names import heatedLabel, temperatureName, urrLabel
+
+    kT = _kTeV(ace)
+    name = temperatureName(kT if kT is not None else 0.0)
+    return heatedLabel(name), urrLabel(name)
 
 
 def qValuesByMT(ace, report: Optional[ConversionReport] = None) -> Dict[int, float]:
@@ -116,7 +135,8 @@ def qValuesByMT(ace, report: Optional[ConversionReport] = None) -> Dict[int, flo
 def aceStyles(ace, report: Optional[ConversionReport] = None):
     """The ``derivedFrom`` chain an ACE file implies, and nothing more.
 
-    ``evaluated`` → ``heated`` → ``griddedCrossSection`` [→ ``URR_probabilityTables``].
+    ``evaluated`` → ``heated_<T>`` [→ ``URR_<T>``], and ``evaluated`` →
+    ``MonteCarlo``: the chain the HDF5 decoder builds for one temperature.
 
     **``crossSectionReconstructed`` is deliberately not in it.** A continuous-energy
     ACE has almost certainly been through RECONR, but the file does not say so,
@@ -138,19 +158,20 @@ def aceStyles(ace, report: Optional[ConversionReport] = None):
         "eval-labelled form"
     )
 
-    temperature = _temperatureK(ace)
-    if temperature is None:
-        report.warn("this ACE file has no header temperature; the heated style has none")
+    kT = _kTeV(ace)
+    if kT is None:
+        report.warn("this ACE file has no header temperature; its heated style is named 0K "
+                    "and states none")
+    heated, urrLabel = aceLabels(ace)
     styles.append(Heated(
-        label=HEATED_LABEL, derivedFrom=EVALUATED_LABEL,
-        temperature=(PhysicalQuantity(value=temperature, unit="K")
-                     if temperature is not None else None),
+        label=heated, derivedFrom=EVALUATED_LABEL,
+        temperature=PhysicalQuantity(value=kT, unit="eV/k") if kT is not None else None,
     ))
-    styles.append(GriddedCrossSection(label=GRIDDED_LABEL, derivedFrom=HEATED_LABEL))
 
     urr = getattr(ace, "unresolved_resonance", None)
     if urr is not None and getattr(urr, "has_data", False):
-        styles.append(URR_probabilityTables(label=URR_LABEL, derivedFrom=GRIDDED_LABEL))
+        styles.append(URR_probabilityTables(label=urrLabel, derivedFrom=heated))
+    styles.append(MonteCarlo_cdf(label=MONTE_CARLO_LABEL, derivedFrom=EVALUATED_LABEL))
 
     return styles, report
 
@@ -158,9 +179,9 @@ def aceStyles(ace, report: Optional[ConversionReport] = None):
 def decodeAce(ace, report: Optional[ConversionReport] = None):
     """A parsed :class:`~kika.ace.classes.ace.Ace` → a :class:`ReactionSuite`.
 
-    The cross sections land under the ``gridded`` style, because that is what
-    they are: values on ACE's unionised grid at the file's temperature. Nothing
-    is labelled ``eval``.
+    The cross sections land under the ``heated_<T>`` style, because that is
+    what they are: values on ACE's unionised grid at the file's temperature.
+    Nothing is labelled ``eval``.
     """
     report = report if report is not None else ConversionReport()
 
@@ -192,13 +213,14 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
     for style in styles:
         suite.styles.add(style)
 
+    heated, urrLabel = aceLabels(ace)
     qByMT = qValuesByMT(ace, report)
     for mt in _mtNumbers(ace):
-        reaction, report = decodeAceReaction(ace, mt, qByMT, provenance, report)
+        reaction, report = decodeAceReaction(ace, mt, qByMT, provenance, report, label=heated)
         if reaction is not None:
             suite.reactions.append(reaction)
 
-    _attachURR(ace, suite, report)
+    _attachURR(ace, suite, report, urrLabel)
     # ACE roadmap A3: AND, DLW, TYR, NU/DNU, BDD and DNED become the products.
     from .secondaries import attachAceSecondaries
 
@@ -222,7 +244,7 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
 
     attachAcePhotons(ace, suite, report, provenance=provenance)
     _place(ace, suite)
-    _attachHeating(ace, suite, provenance)
+    _attachHeating(ace, suite, provenance, heated)
     # Both ways to the same object: the tuple is unchanged, and the
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report
@@ -265,8 +287,11 @@ def _mtNumbers(ace) -> List[int]:
 
 
 def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
-                      provenance: AceProvenance, report: ConversionReport):
-    """One MT → a :class:`Reaction` with a ``gridded``-labelled cross section.
+                      provenance: AceProvenance, report: ConversionReport, label: Optional[str] = None):
+    """One MT → a :class:`Reaction` with a ``heated_<T>``-labelled cross section.
+
+    ``label`` is the table's heated label (:func:`aceLabels`), computed from the
+    header when not given.
 
     An ``XYs1d`` rather than the ``regions1d`` the ENDF decoder builds: ACE has
     no ``(NBT, INT)`` regions, it is lin-lin on one union grid, and a
@@ -282,10 +307,11 @@ def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
         # damage-energy production: ACE states MeV·b, the model eV·b (as OpenMC)
         values = values * MEV_TO_EV
 
+    label = label if label is not None else aceLabels(ace)[0]
     crossSection = CrossSection()
-    crossSection[GRIDDED_LABEL] = XYs1d(
+    crossSection[label] = XYs1d(
         xs=energies, ys=values, interpolation=Interpolation.linlin,
-        axes=crossSectionAxes(), label=GRIDDED_LABEL,
+        axes=crossSectionAxes(), label=label,
     )
 
     channel = OutputChannel(Q=Q(value=qByMT.get(mt), unit="eV"))
@@ -349,7 +375,7 @@ def _place(ace, suite: ReactionSuite) -> None:
     suite.reactions = type(suite.reactions)(keep)
 
 
-def _attachHeating(ace, suite: ReactionSuite, provenance) -> None:
+def _attachHeating(ace, suite: ReactionSuite, provenance, label: str) -> None:
     """ESZ's heating numbers as the KERMA MT301, in eV·b: number × σ_t, as OpenMC builds it.
 
     ACER stores the heating as an average energy deposited per collision
@@ -362,13 +388,13 @@ def _attachHeating(ace, suite: ReactionSuite, provenance) -> None:
     energies = np.asarray(esz.energies, dtype=float) * MEV_TO_EV
     kerma = np.asarray(esz.heating_numbers, dtype=float) * MEV_TO_EV * np.asarray(esz.total_xs, dtype=float)
     crossSection = CrossSection()
-    crossSection[GRIDDED_LABEL] = XYs1d(xs=energies, ys=kerma, interpolation=Interpolation.linlin,
-                                        axes=crossSectionAxes(), label=GRIDDED_LABEL)
+    crossSection[label] = XYs1d(xs=energies, ys=kerma, interpolation=Interpolation.linlin,
+                                axes=crossSectionAxes(), label=label)
     suite.productions.append(Reaction(id=ReactionId(label="MT301", ENDF_MT=301), crossSection=crossSection,
                                       outputChannel=OutputChannel(), provenance=provenance))
 
 
-def _attachURR(ace, suite: ReactionSuite, report: ConversionReport) -> None:
+def _attachURR(ace, suite: ReactionSuite, report: ConversionReport, label: str) -> None:
     """The URR probability tables, on the reactions they apply to.
 
     One :class:`ProbabilityTables` (the HDF5 decoder's node: energies in eV, the
@@ -393,4 +419,4 @@ def _attachURR(ace, suite: ReactionSuite, report: ConversionReport) -> None:
     for mt in (2, 18, 102):
         reaction = suite.findReactionByENDF_MT(mt)
         if reaction is not None:
-            reaction.crossSection[URR_LABEL] = URR_probabilityTables1d(label=URR_LABEL, table=tables)
+            reaction.crossSection[label] = URR_probabilityTables1d(label=label, table=tables)

@@ -24,16 +24,16 @@ ANDP 32 equiprobable bins / tabulated    ``XYs2d`` of flat / tabulated ``XYs1d``
 GPD                                      ``suite.photonProductionTotal`` (not GNDS)
 =======================================  ========================================
 
-**The label is ``heated``, not ``eval`` and not ``gridded``.** The decoder that
+**The label is the table's ``heated_<T>``, not ``eval``.** The decoder that
 calls this declares that nothing in an ACE-derived suite carries an
 eval-labelled form, because ACE refers to an evaluation it does not contain;
 the photon data is no exception (NJOY's ACER has linearised it, thinned it and
-expanded every level cascade into lines). It is not ``gridded`` either: only
-MFTYPE 13 sits on the union grid, the yields keep their own grid. So it hangs
-off the ``heated`` style, the table's statement at its temperature. A reader
+expanded every level cascade into lines). So it hangs off the heated style,
+the table's statement at its temperature, as the cross sections do (ACE
+roadmap D-A11; :func:`~kika.ace.model_adapter.decode.aceLabels`). A reader
 written for ENDF suites asks for ``distribution["eval"]`` and must ask for
-:data:`PHOTON_LABEL` here; ``multiplicity.form`` works for both, because a
-multiplicity with a single form answers ``.form`` whatever its label.
+that label here; ``multiplicity.form`` works for both, because a multiplicity
+with a single form answers ``.form`` whatever its label.
 
 **What ACE does not have, and the model therefore does not get.** ACE has no
 level scheme: ACER turned every MF12 LO=2 cascade into one line per transition
@@ -73,20 +73,13 @@ from kika.nuclear_data.model import (
     multiplicityAxes,
 )
 
-from .decode import GRIDDED_LABEL, HEATED_LABEL
+from .decode import aceLabels
 from .secondaries import MONTE_CARLO_LABEL
 
-__all__ = ["attachAcePhotons", "photonProductionTotal", "PHOTON_LABEL"]
+__all__ = ["attachAcePhotons", "photonProductionTotal"]
 
 #: ACE stores energies in MeV and densities per MeV; the model works in eV.
 MEV_TO_EV = 1.0e6
-
-#: The label every photon form decoded from ACE carries; see the module
-#: docstring for why it is the ``heated`` style's.
-PHOTON_LABEL = HEATED_LABEL
-
-#: The label of the reactions' cross sections, which MFTYPE 13 divides by.
-_GRIDDED_LABEL = GRIDDED_LABEL
 
 
 # ---------------------------------------------------------------------------
@@ -140,17 +133,14 @@ def _domainOf(function) -> Tuple[float, float]:
 
 
 def photonProductionTotal(ace) -> Optional[XYs1d]:
-    """GPD as an :class:`XYs1d` in eV and barns, labelled ``gridded``, or ``None``.
-
-    GPD is on the union grid and is a cross section, so unlike the per-photon
-    forms it *is* gridded-labelled.
-    """
+    """GPD as an :class:`XYs1d` in eV and barns, labelled ``heated_<T>``, or ``None``."""
     total = ace.photon_production_total() if hasattr(ace, "photon_production_total") else None
     if total is None:
         return None
     energies, sigma = total
+    label = aceLabels(ace)[0]
     return XYs1d(xs=energies * MEV_TO_EV, ys=sigma, interpolation=Interpolation.linlin,
-                 axes=crossSectionAxes(), label=_GRIDDED_LABEL)
+                 axes=crossSectionAxes(), label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -260,11 +250,11 @@ def _energy(laws, multiplicity, mtrp: int, report: ConversionReport):
 # Multiplicity
 # ---------------------------------------------------------------------------
 
-def _yieldMultiplicity(sigp) -> Multiplicity:
+def _yieldMultiplicity(sigp, label: str) -> Multiplicity:
     """MFTYPE 12/16: the yield *is* the multiplicity, on its own grid."""
     function = _tab1(np.asarray(sigp.energies, dtype=float) * MEV_TO_EV, sigp.yields,
                      sigp.interpolation_bounds, sigp.interpolation_schemes,
-                     axes=multiplicityAxes(), label=PHOTON_LABEL)
+                     axes=multiplicityAxes(), label=label)
     return Multiplicity(form=function)
 
 
@@ -295,7 +285,7 @@ def _isDiscreteLevel(mt: int) -> bool:
     return any(start <= mt <= start + 48 for start in (600, 650, 700, 750, 800))
 
 
-def _orphan(suite, mt: int, x, sigmaGamma, provenance):
+def _orphan(suite, mt: int, x, sigmaGamma, provenance, label: str):
     """The orphan product an MFTYPE 13 with no reaction to divide by hangs on."""
     for orphan in suite.orphanProducts:
         if orphan.ENDF_MT == mt:
@@ -303,11 +293,11 @@ def _orphan(suite, mt: int, x, sigmaGamma, provenance):
     orphan = Reaction(id=ReactionId(label=f"Orphan product {len(suite.orphanProducts) + 1}",
                                     ENDF_MT=int(mt)),
                       outputChannel=OutputChannel(genre="NBody"), provenance=provenance)
-    # σ_γ is on the union grid, so it is the gridded style's, like every other
+    # σ_γ is on the union grid, so it is the heated style's, like every other
     # cross section in an ACE-derived suite.
-    orphan.crossSection[_GRIDDED_LABEL] = XYs1d(
+    orphan.crossSection[label] = XYs1d(
         xs=x, ys=sigmaGamma, interpolation=Interpolation.linlin,
-        axes=crossSectionAxes(), label=_GRIDDED_LABEL)
+        axes=crossSectionAxes(), label=label)
     suite.orphanProducts.append(orphan)
     return orphan
 
@@ -336,7 +326,7 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
     """Put every MTRP entry of *ace* on the photon products of its reaction.
 
     Runs after the reactions are built, because MFTYPE 12/16 hang off reaction
-    MTMULT and MFTYPE 13 divides by its gridded σ. Returns the report; never
+    MTMULT and MFTYPE 13 divides by its heated σ. Returns the report; never
     raises on an unsupported law — that photon is reported and either kept
     with the half that could be read or, when it has no host, left out.
     """
@@ -348,6 +338,7 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
     from kika.ace.classes.photon_production_xs import (DirectCrossSection,
                                                         YieldBasedCrossSection)
 
+    label = aceLabels(ace)[0]
     angular = getattr(getattr(ace, "angular_distributions", None), "photon_production", None) or {}
     energy = getattr(getattr(ace, "energy_distributions", None), "photon_production", None) or {}
 
@@ -363,23 +354,23 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
                     f"reaction for, so there is no σ for the photon to multiply "
                     f"and it is left out")
                 continue
-            multiplicity = _yieldMultiplicity(entry)
+            multiplicity = _yieldMultiplicity(entry, label)
         elif isinstance(entry, DirectCrossSection):
             mt = mtrp // 1000
             x, sigmaGamma = _directSigma(ace, entry)
             host = suite.findReactionByENDF_MT(mt) if mt else None
-            sigmaForm = host.crossSection.get(_GRIDDED_LABEL) if host is not None else None
+            sigmaForm = host.crossSection.get(label) if host is not None else None
             if sigmaForm is not None:
                 y, n = _divide(x, sigmaGamma, sigmaForm)
                 zeros += n
                 divided.append(mtrp)
                 form = XYs1d(xs=x, ys=y, interpolation=Interpolation.linlin,
-                             axes=multiplicityAxes(), label=PHOTON_LABEL)
+                             axes=multiplicityAxes(), label=label)
             else:
-                host = _orphan(suite, mt, x, sigmaGamma, provenance)
+                host = _orphan(suite, mt, x, sigmaGamma, provenance, label)
                 orphaned.append(mtrp)
                 form = Constant1d(constant=1.0, domainMin_=float(x[0]), domainMax_=float(x[-1]),
-                                  axes=multiplicityAxes(), label=PHOTON_LABEL)
+                                  axes=multiplicityAxes(), label=label)
             multiplicity = Multiplicity(form=form)
         else:
             report.unsupportedNode(
@@ -391,8 +382,8 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
         energyForm = _energy(energy.get(mtrp), multiplicity.form, mtrp, report)
         angularForm = _angular(angular.get(mtrp), mtrp, report)
         distribution = Distribution()
-        distribution[PHOTON_LABEL] = Uncorrelated(angular=angularForm, energy=energyForm,
-                                                  label=PHOTON_LABEL, productFrame=Frame.lab)
+        distribution[label] = Uncorrelated(angular=angularForm, energy=energyForm,
+                                           label=label, productFrame=Frame.lab)
         # The Monte Carlo form beside it (ACE roadmap A3): the DLWP laws and the
         # ANDP tables as they are sampled, which the HDF5 and ACE writers take.
         mc = _monteCarlo(ace, energy.get(mtrp), angular.get(mtrp), mtrp, report)
