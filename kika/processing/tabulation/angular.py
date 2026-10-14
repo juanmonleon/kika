@@ -5,8 +5,8 @@ until lin-lin interpolation reproduces it to the tolerance -- the shape ACER
 gives: three points where the distribution is nearly isotropic, tens to a
 hundred where it is forward-peaked. A tabulated distribution keeps its own
 points (re-expressed lin-lin first if stated under another law). A
-``regions2d`` (ENDF LTT=3) is flattened, the boundary energy taken once, from
-the region above it. Negative densities follow
+``regions2d`` (ENDF LTT=3) is flattened with both sides of each boundary
+retained, since their densities may differ. Negative densities follow
 :attr:`TabulationOptions.negative`.
 """
 from __future__ import annotations
@@ -132,17 +132,14 @@ def muTable(function, options: TabulationOptions, outer=None, what="angular"):
 
 
 def _functions(form) -> List:
-    """The per-energy functions of an XYs2d or regions2d, boundary energies once."""
+    """Per-energy functions in source order, including both sides of a jump."""
     m = _m()
     if isinstance(form, m.XYs2d):
         return list(form.function1ds)
     out: List = []
     for region in form.function2ds:
         for f in _functions(region):
-            if out and f.outerDomainValue == out[-1].outerDomainValue:
-                out[-1] = f
-            else:
-                out.append(f)
+            out.append(f)
     return out
 
 

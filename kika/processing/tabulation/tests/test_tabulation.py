@@ -61,14 +61,22 @@ def test_histogram_cdf_and_discrete_lines():
     assert table.cdf[1] == pytest.approx(0.5 / total)
 
 
-def test_angular_regions_take_the_boundary_once():
+def test_angular_regions_retain_both_sides_of_a_boundary():
     low = m.XYs2d(function1ds=[m.Legendre(coefficients=np.array([1.0]), outerDomainValue=1.0),
                                m.Legendre(coefficients=np.array([1.0, 0.1]), outerDomainValue=2.0)])
     high = m.XYs2d(function1ds=[m.XYs1d(xs=[-1, 1], ys=[0.4, 0.6], outerDomainValue=2.0),
                                 m.XYs1d(xs=[-1, 1], ys=[0.3, 0.7], outerDomainValue=3.0)])
     form, _ = tabulateAngular(m.Regions2d(function2ds=[low, high]))
-    assert [t.outerDomainValue for t in form.function1ds] == [1.0, 2.0, 3.0]
-    assert form.function1ds[1].pdf[-1] == pytest.approx(0.6)
+    assert [t.outerDomainValue for t in form.function1ds] == [1.0, 2.0, 2.0, 3.0]
+    assert form.function1ds[2].pdf[-1] == pytest.approx(0.6)
+    from kika.processing.heating import _meanMu
+    from kika.hdf5.distributions import encodeAngle, decodeAngle
+    E = np.array([1.5, 2., 2.5])
+    expected = [0.05, 1./15., 0.1]
+    np.testing.assert_allclose(_meanMu(form, E), expected, rtol=0., atol=1e-6)
+    decoded = decodeAngle(encodeAngle(form))
+    np.testing.assert_array_equal([t.outerDomainValue for t in decoded.function1ds], [1., 2., 2., 3.])
+    np.testing.assert_allclose(_meanMu(decoded, E), expected, rtol=0., atol=1e-6)
 
 
 def test_evaporation_table_from_a_law():
