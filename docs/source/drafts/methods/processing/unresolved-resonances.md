@@ -11,9 +11,9 @@ $\chi^2$ width distributions of real degrees of freedom.
 B and C, LSSF=0 or 1, or the equivalent GNDS data), as part of the reconstruction of
 {doc}`resonance-reconstruction`.
 
-**Entry points:** through `kika.endf.reconstruct_endf` and
-`kika.processing.resonances.reconstruct_suite`; the width-fluctuation averages alone are
-`kika.processing.resonances.fluctuations.width_products`.
+**Entry points:** through {py:func}`kika.endf.reconstruct_endf` and
+{py:func}`kika.processing.resonances.reconstruct_suite`; the width-fluctuation averages alone are
+{py:func}`kika.processing.resonances.fluctuations.width_products`.
 
 **Status:** experimental — not yet in a release (after 0.4.0).
 ```
@@ -247,7 +247,7 @@ were computed).
 - `kika.processing.resonances.unresolved`: preparation (radii, parameter functions,
   conventions, grids), the cross-sections of {eq}`eq-unresolved-resonances-sigma`, and
   their tabulation on the declared grids.
-- `kika.processing.resonances.fluctuations`: `width_products`, the integrals of
+- {py:mod}`kika.processing.resonances.fluctuations`: `width_products`, the integrals of
   {eq}`eq-unresolved-resonances-laplace`; its integrand has a compiled form in
   `kika.processing.resonances._rm_native`, used when loaded.
 - `kika.endf.model_adapter.resonances`: the reading of cases A, B and C and of NRO, NAPS

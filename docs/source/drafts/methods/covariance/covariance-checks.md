@@ -9,9 +9,9 @@ file and its evidence, without changing anything.
 **Applies to:** MF 31, 32, 33, 34, 35 and 40 of ENDF-6 tapes, read with kika's ENDF
 parser.
 
-**Entry points:** `kika.endf.check_covariances`, `kika.endf.check_covariance_library`;
-the reports are `kika.endf.checks.CovarianceCheckReport` and
-`kika.endf.checks.CovarianceLibraryReport`.
+**Entry points:** {py:func}`kika.endf.check_covariances`, {py:func}`kika.endf.check_covariance_library`;
+the reports are {py:class}`kika.endf.checks.CovarianceCheckReport` and
+{py:class}`kika.endf.checks.CovarianceLibraryReport`.
 
 **Status:** experimental — not yet in a release (after 0.4.0).
 ```
@@ -53,7 +53,7 @@ reaction the tape does not give, for example).
 
 ## What it computes
 
-Input: a tape read with `kika.endf.read_endf` or `kika.endf.open_endf`, the covariance
+Input: a tape read with {py:func}`kika.endf.read_endf` or {py:func}`kika.endf.open_endf`, the covariance
 files to check (all six by default), and optionally the cross-sections $\sigma(E)$ by
 MT, for instance from a PENDF. Output: a `CovarianceCheckReport`, a tuple of findings.
 Each finding is
@@ -451,7 +451,7 @@ anything else) and carry Greek letters and math signs in the dictionary and the 
 - **Layer 1 only informs.** Nothing here raises on a bad section, changes it or proposes
   a remedy. The same file is used for different things (sampled, processed by NJOY,
   compared between libraries), and whether a finding matters depends on the use. Repairs
-  belong to the pre-flight of the matrices actually drawn (`kika.cov.conditioning`),
+  belong to the pre-flight of the matrices actually drawn ({py:mod}`kika.cov.conditioning`),
   which runs on the assembled covariance. By then the LB and LS records a block came from
   are gone, so the pre-flight cannot say *why* a block is indefinite; the sampler traces
   each of its findings back to the layer-1 findings of the sections involved

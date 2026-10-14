@@ -8,10 +8,10 @@ fixed, checked input deck.
 
 **Applies to:** neutron ENDF-6 tapes; NJOY 2016.
 
-**Entry points:** `kika.njoy.run_njoy.run_njoy`, `kika.njoy.run_njoy.run_njoy_with_pendf`,
-`kika.processing.njoy_reconstruct.njoy_reconstruct`,
-`kika.processing.njoy_pendf_cache.get_or_create_pendf`; decks: `kika.njoy.InputDeck`,
-`kika.njoy.reader.read_deck`.
+**Entry points:** {py:func}`kika.njoy.run_njoy.run_njoy`, {py:func}`kika.njoy.run_njoy.run_njoy_with_pendf`,
+{py:func}`kika.processing.njoy_reconstruct.njoy_reconstruct`,
+{py:func}`kika.processing.njoy_pendf_cache.get_or_create_pendf`; decks: {py:class}`kika.njoy.InputDeck`,
+{py:func}`kika.njoy.reader.read_deck`.
 
 **Status:** stable.
 ```

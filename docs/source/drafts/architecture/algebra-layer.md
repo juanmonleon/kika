@@ -4,7 +4,7 @@
 :class: note
 **Decides:** every operation on a tabulated one-dimensional function (evaluating,
 integrating, refining, summing, folding, comparing) is implemented once, in
-`kika.algebra`, which takes plain arrays and imports nothing from kika.
+{py:mod}`kika.algebra`, which takes plain arrays and imports nothing from kika.
 
 **Packages:** `kika.algebra`.
 
@@ -59,7 +59,7 @@ cross-sections as such, no flux, no reaction, no physical constant. The law code
 numbering of interpolation laws, a convention of the mathematics, and not physics.
 Anything that needs a physical model belongs in the calculation layer that builds on
 this one: the ENDF fission-spectrum laws, for instance, are in
-`kika.nuclear_data.spectrum_laws`, and resonance formalisms are in `kika.processing`.
+{py:mod}`kika.nuclear_data.spectrum_laws`, and resonance formalisms are in {py:mod}`kika.processing`.
 Because the package holds no physics, it can import nothing from kika, and so the model,
 the formats and the physics can all build on it without an import cycle.
 
@@ -142,8 +142,8 @@ forms, the refinement criterion, the fold) is documented on its own methods page
 
 `kika/algebra/`: `laws.py`, `evaluate.py`, `grid.py`, `integrate.py`, `refine.py`,
 `arithmetic.py`, `fold.py`, `compare.py`, `thin.py`, `prepared.py`. The package exports the public
-functions of all of them (`kika.algebra.evaluate`, `kika.algebra.integral`,
-`kika.algebra.to_linlin`, and the rest).
+functions of all of them ({py:func}`kika.algebra.evaluate`, {py:func}`kika.algebra.integral`,
+{py:func}`kika.algebra.to_linlin`, and the rest).
 
 ## References
 
