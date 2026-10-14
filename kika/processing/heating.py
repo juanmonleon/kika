@@ -915,7 +915,9 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     deposition keep their evaluated recoil/deposit convention.
     ``kinematic=True`` computes the additional MT443 diagnostic arrays.
     They are omitted by default, saving time and memory for normal heating.
-    Fission auxiliary-Q handling is not yet supported and raises explicitly.
+    For fission with MF1/458, that release retains authority as in HEATR;
+    auxiliary fission Q is accepted and reported but does not replace its
+    released-energy components. Missing release information raises explicitly.
     """
     grid = np.asarray(grid, dtype=float)
     A = float(awr)
@@ -924,11 +926,19 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     qa, qbar = dict(qa or {}), dict(qbar or {})
     if set(qa) & set(qbar):
         raise ValueError("a reaction cannot have both scalar qa and tabulated qbar")
-    known = {r.ENDF_MT for r in suite.reactions}
+    physical = list(suite.reactions) + list(getattr(suite, "fissionComponents", ()))
+    fissionSources = physical + [r for r in getattr(suite, "sums", ()) if r.ENDF_MT == 18]
+    known = {r.ENDF_MT for r in fissionSources}
     if (set(qa) | set(qbar)) - known:
         raise ValueError("auxiliary Q names an absent reaction")
-    if (set(qa) | set(qbar)) & set(FISSION_MTS):
-        raise NotImplementedError("fission auxiliary Q requires fission-release processing")
+    auxiliaryFissions = (set(qa) | set(qbar)) & set(FISSION_MTS)
+    if auxiliaryFissions:
+        releases = [release for r in fissionSources if r.ENDF_MT in FISSION_MTS
+                    for release in getattr(getattr(r.outputChannel, "fissionFragmentData", None),
+                                           "fissionEnergyReleases", ())]
+        if not any(release.promptProductKE is not None and release.promptGammaEnergy is not None
+                   for release in releases):
+            raise NotImplementedError("fission auxiliary Q requires fission-release processing")
     from kika.nuclear_data import model as m
     for mt, value in qa.items():
         if not np.isscalar(value) or not np.isfinite(float(value)):
@@ -946,6 +956,8 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     damage = np.zeros(len(grid))
     notes: List[str] = [f"heating by kika (energy balance on the Monte Carlo tables; "
                         f"damage with ed = {ed:g} eV)"] + [f"as HEATR: {a}" for a in HEATR_APPROXIMATIONS]
+    for mt in sorted(auxiliaryFissions):
+        notes.append(f"MT{mt}: auxiliary fission Q accepted; MF1/458 retains authority for released energy, as HEATR")
     for reaction in suite.reactions:
         mt = reaction.ENDF_MT
         if mt is None or mt in FISSION_MTS or mt not in sigma:

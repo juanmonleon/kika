@@ -54,3 +54,17 @@ def test_positive_qbar_does_not_rewrite_the_evaluated_distribution():
 def test_fission_qa_is_explicitly_unimplemented():
     with pytest.raises(NotImplementedError,match='fission-release'):
         H.heatingOf(suite(mt=18),np.array([10.,20.]),{18:np.ones(2)},awr=2.,Z=1,qa={18:1.})
+
+
+@pytest.mark.parametrize('mode',['qa','qbar'])
+def test_fission_release_keeps_authority_over_auxiliary_q(mode):
+    E=np.array([10.,20.]);source=suite(mt=18)
+    release=m.FissionEnergyRelease(promptProductKE=m.Polynomial1d(coefficients=np.array([1e8]),domainMin_=0.,domainMax_=1e8),
+                                  promptGammaEnergy=m.Polynomial1d(coefficients=np.array([1e7]),domainMin_=0.,domainMax_=1e8))
+    source.reactions[0].outputChannel.fissionFragmentData=m.FissionFragmentData(fissionEnergyReleases=[release])
+    value=1e6 if mode=='qa' else m.XYs1d(xs=[1e-5,1e8],ys=[1e6,1.1e6])
+    baseline=H.heatingOf(source,E,{18:np.ones(2)},awr=235.,Z=92)
+    changed=H.heatingOf(source,E,{18:np.ones(2)},awr=235.,Z=92,**{mode:{18:value}})
+    np.testing.assert_array_equal(changed.kerma,baseline.kerma)
+    np.testing.assert_array_equal(changed.damage,baseline.damage)
+    assert any('MF1/458 retains authority' in note for note in changed.notes)
