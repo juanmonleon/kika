@@ -43,8 +43,11 @@ How this differs from OpenMC's ``IncidentNeutron.from_ace``, on purpose:
 
 Laws 22, 24 and 67 have no model form (and no witness in any library on the
 share): they are reported, not converted. What the forms cannot hold and the
-ACE writer needs back (the TY, the 32-bin form, law 66's tabulated part...)
-goes to the ``attributes`` of an :class:`AceProvenance` on the product.
+ACE writer needs back goes to the ``attributes`` of an :class:`AceProvenance`
+on the product: the TY, the law numbers of the chain (laws 3 and 33, and 1
+and 4, share a form), law 66's tabulated part, and a delayed group's BDD
+record. The delayed ν (DNU) is the ``multiplicitySum`` MT 455, as the ENDF
+adapter gives it.
 """
 from __future__ import annotations
 
@@ -62,6 +65,7 @@ EV_PER_MEV = 1.0e6
 PER_SHAKE_TO_PER_S = 1.0e8
 MONTE_CARLO_LABEL = "MonteCarlo"
 TOTAL_NUBAR_LABEL = "total fission neutron multiplicity"
+DELAYED_NUBAR_LABEL = "delayed fission neutron multiplicity"
 FISSION_MTS = (18, 19, 20, 21, 38)
 
 
@@ -300,6 +304,37 @@ def lawForm(law, angular, frame, awr: float, report: ConversionReport, where: st
                           label=MONTE_CARLO_LABEL, productFrame=frame)
 
 
+def chainAttributes(chain) -> dict:
+    """What a law chain states and its model form does not, for the ACE writer.
+
+    The law numbers (law 3 and law 33 are both a ``LevelEnergy``, laws 1 and 4
+    both a table of ``xs_pdf_cdf1d``), the sign law 61 gives its LC, the INTT
+    of a table of lines only, and law 66's tabulated part (NJOY 2016 writes
+    the xi table after NPSX and Ap; the model's ``NBodyPhaseSpace`` has no
+    slot for it).
+    """
+    out = {"laws": [int(law.law) for law in chain]}
+    linesOnly = {int(t["intt"]) for law in chain for t in (getattr(law, "distributions", None) or [])
+                 if isinstance(t, dict) and "n_discrete" in t and int(t["n_discrete"]) == len(t["e_out"])}
+    if len(linesOnly) == 1:
+        # A table of lines only is a histogram in the model; the INTT the file
+        # gave it (NJOY writes 0, Lib81 sometimes 2) is not, so it is kept.
+        out["linesOnlyINTT"] = linesOnly.pop()
+    for law in chain:
+        if int(law.law) == 61:
+            # The sign of law 61's LC is the producer's convention (the reader
+            # takes |LC|): LANL's Lib81 writes them positive, older NJOY tables
+            # negative. Kept so the ACE writer gives the same words back.
+            signs = {int(np.sign(lc)) for d in law.distributions for lc in d["lc"] if int(lc) != 0}
+            if len(signs) == 1:
+                out["law61LC"] = signs.pop()
+        if int(law.law) == 66 and np.asarray(getattr(law, "xi_grid", [])).size:
+            out["law66"] = {"intt": int(law.intt), "xi": [float(v) for v in law.xi_grid],
+                            "pdf": [float(v) for v in law.pdf], "cdf": [float(v) for v in law.cdf]}
+            break
+    return out
+
+
 def chainDistribution(chain, angular, frame, awr, report, where, applicability=True):
     """An LNW chain → a ``Distribution`` holding one form, or a ``DistributionMixture``."""
     m = _m()
@@ -397,7 +432,7 @@ def attachAceSecondaries(ace, suite, report: Optional[ConversionReport] = None) 
 
     mts = [int(v) for v in ace.reaction_mt_data.incident_neutron]
     tys = dict(zip(mts, (int(v) for v in ace.particle_release.incident_neutron)))
-    delayed = _delayedNeutrons(ace, awr, report)
+    delayed, dnu = _delayedNeutrons(ace, awr, report)
     total = None
     for mt in (int(v) for v in ace.reaction_mt_data.secondary_neutron_mt):
         reaction = suite.findReactionByENDF_MT(mt)
@@ -410,7 +445,9 @@ def attachAceSecondaries(ace, suite, report: Optional[ConversionReport] = None) 
         angular = angularForm(dist) if dist is not None else None
         distribution = chainDistribution(ed.incident_neutron.get(mt, []), angular, frame, awr, report,
                                          f"DLW MT{mt}")
-        attributes = {"TY": ty, "angular": type(dist).__name__ if dist is not None else None}
+        chain = ed.incident_neutron.get(mt, [])
+        attributes = {"TY": ty, "angular": type(dist).__name__ if dist is not None else None,
+                      **chainAttributes(chain)}
         channel = reaction.outputChannel
         if ty == 19:
             prompt, total, mode = _fissionNeutron(ace)
@@ -440,6 +477,9 @@ def attachAceSecondaries(ace, suite, report: Optional[ConversionReport] = None) 
                 href=f"/reactionSuite/reactions/reaction[@label='{fission.label}']"
                      f"/outputChannel/products/product[@label='n']/multiplicity"))
         suite.sums.multiplicitySums.append(multiplicitySum)
+    if dnu is not None:
+        suite.sums.multiplicitySums.append(m.MultiplicitySum(
+            label=DELAYED_NUBAR_LABEL, multiplicity=_multiplicity(dnu), ENDF_MT=455))
     return report
 
 
@@ -453,13 +493,14 @@ def _fissionNeutron(ace):
     return _nuForm(nu.total), None, ("prompt" if nu.has_delayed else "total")
 
 
-def _delayedNeutrons(ace, awr, report) -> List:
-    """One DelayedNeutron per BDD group: rate in 1/s, multiplicity DNU(E)·P_g(E), DNED spectrum."""
+def _delayedNeutrons(ace, awr, report):
+    """``(groups, DNU)``: one DelayedNeutron per BDD group (rate in 1/s, multiplicity
+    DNU(E)·P_g(E), DNED spectrum) and the delayed ν itself; ``([], None)`` without."""
     m = _m()
     nu = ace.nubar
     bdd = ace.delayed_neutron_data
     if nu is None or not nu.has_delayed or bdd is None or not bdd.precursors:
-        return []
+        return [], None
     dnu = _nuForm(nu.delayed)
     out = []
     chains = ace.energy_distributions.delayed_neutron
@@ -477,9 +518,20 @@ def _delayedNeutrons(ace, awr, report) -> List:
         chain = chains[g] if g < len(chains) else []
         distribution = chainDistribution(chain, None, m.Frame.lab, awr, report, f"DNED group {g + 1}",
                                          applicability=len(chain) > 1)
-        product = _neutron(form, distribution, {"group": g + 1, "probabilities": prob.tolist()})
+        attributes = {"group": g + 1, "probabilities": prob.tolist(),
+                      "energies": [float(e) for e in p.energies],
+                      "interpolation_regions": [[int(b), int(i)] for b, i in p.interpolation_regions],
+                      **chainAttributes(chain)}
+        if len(chain) == 1:
+            law = chain[0]
+            attributes["applicability"] = {
+                "energies": [float(e) for e in law.applicability_energies],
+                "probabilities": [float(v) for v in law.applicability_probabilities],
+                "nbt": [int(v) for v in law.applicability_nbt],
+                "interp": [int(v) for v in law.applicability_interp]}
+        product = _neutron(form, distribution, attributes)
         out.append(m.DelayedNeutron(label=str(g + 1),
                                     rate=PhysicalQuantity(value=float(p.decay_constant) * PER_SHAKE_TO_PER_S,
                                                           unit="1/s"),
                                     product=product))
-    return out
+    return out, dnu

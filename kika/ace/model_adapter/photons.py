@@ -15,7 +15,9 @@ ACE                                      model
 =======================================  ========================================
 SIGP MFTYPE 12 / 16 (yield on MTMULT)    multiplicity ``XYs1d`` on reaction MTMULT
 SIGP MFTYPE 13 (σ_γ)                     multiplicity σ_γ / σ_MT, *approximated*
-SIGP MFTYPE 13 with no MT to divide by   an orphan product carrying σ_γ, y = 1
+SIGP MFTYPE 13 with no MT to divide by   an orphan product per MT carrying the sum
+                                         of its photons' σ_γ, each photon y =
+                                         σ_γ / Σ (y = 1 when it is the only one)
 DLWP law 2, LP = 0 or 1                  ``Uncorrelated(energy=DiscreteGamma)``
 DLWP law 2, LP = 2                       ``Uncorrelated(energy=PrimaryGamma)``
 DLWP law 4                               ``Uncorrelated(energy=XYs2d)`` continuum
@@ -50,6 +52,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from kika.nuclear_data.model import (
+    AceProvenance,
     ConversionReport,
     Constant1d,
     DiscreteGamma,
@@ -285,6 +288,34 @@ def _isDiscreteLevel(mt: int) -> bool:
     return any(start <= mt <= start + 48 for start in (600, 650, 700, 750, 800))
 
 
+def _orphanSigmas(ace, suite, entries, label: str):
+    """``{MT: (x, Σσ_γ, count)}`` for the MFTYPE 13 photons whose MT the table has no σ for.
+
+    Several photons can name the same missing MT (six on MT 28 in ENDF/B-VIII.1
+    N-14). Their orphan carries the sum of their σ_γ on the union of their
+    grid slices, and each photon its share of it, as the ENDF adapter states
+    MF13's partials against its total; one orphan holding the first photon's
+    σ_γ would give the others that photon's numbers.
+    """
+    from kika.ace.classes.photon_production_xs import DirectCrossSection
+
+    grid = np.asarray(ace.esz_block.energies, dtype=float) * MEV_TO_EV
+    groups = {}
+    for mtrp, entry in entries:
+        if not isinstance(entry, DirectCrossSection):
+            continue
+        mt = int(mtrp) // 1000
+        host = suite.findReactionByENDF_MT(mt) if mt else None
+        if host is not None and host.crossSection.get(label) is not None:
+            continue
+        start = max(int(entry.energy_grid_index) - 1, 0)
+        values = np.asarray(entry.cross_sections, dtype=float)
+        lo, hi, total, count = groups.get(mt, (start, start + values.size, np.zeros(grid.size), 0))
+        total[start:start + values.size] += values
+        groups[mt] = (min(lo, start), max(hi, start + values.size), total, count + 1)
+    return {mt: (grid[lo:hi], total[lo:hi], count) for mt, (lo, hi, total, count) in groups.items()}
+
+
 def _orphan(suite, mt: int, x, sigmaGamma, provenance, label: str):
     """The orphan product an MFTYPE 13 with no reaction to divide by hangs on."""
     for orphan in suite.orphanProducts:
@@ -343,8 +374,10 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
     energy = getattr(getattr(ace, "energy_distributions", None), "photon_production", None) or {}
 
     decoded, divided, zeros, orphaned, levels = 0, [], 0, [], 0
+    orphanSigmas = _orphanSigmas(ace, suite, list(sigp.cross_sections.items()), label)
     for mtrp, entry in sigp.cross_sections.items():
         mtrp = int(mtrp)
+        unrepresented = None
         if isinstance(entry, YieldBasedCrossSection):
             mt = int(entry.mtmult)
             host = suite.findReactionByENDF_MT(mt)
@@ -363,14 +396,26 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
             if sigmaForm is not None:
                 y, n = _divide(x, sigmaGamma, sigmaForm)
                 zeros += n
+                # σ_γ where σ_MT = 0 has no multiplicity to be; kept for the ACE writer.
+                hostSigma = np.interp(x, np.asarray(sigmaForm.xs, dtype=float),
+                                      np.asarray(sigmaForm.ys, dtype=float))
+                lostAt = np.flatnonzero((hostSigma == 0.0) & (sigmaGamma != 0.0))
+                if lostAt.size:
+                    unrepresented = {int(i): float(sigmaGamma[i]) for i in lostAt}
                 divided.append(mtrp)
                 form = XYs1d(xs=x, ys=y, interpolation=Interpolation.linlin,
                              axes=multiplicityAxes(), label=label)
             else:
-                host = _orphan(suite, mt, x, sigmaGamma, provenance, label)
+                xOrphan, sigmaOrphan, count = orphanSigmas[mt]
+                host = _orphan(suite, mt, xOrphan, sigmaOrphan, provenance, label)
                 orphaned.append(mtrp)
-                form = Constant1d(constant=1.0, domainMin_=float(x[0]), domainMax_=float(x[-1]),
-                                  axes=multiplicityAxes(), label=label)
+                if count == 1:
+                    form = Constant1d(constant=1.0, domainMin_=float(x[0]), domainMax_=float(x[-1]),
+                                      axes=multiplicityAxes(), label=label)
+                else:
+                    y, _ = _divide(x, sigmaGamma, host.crossSection[label])
+                    form = XYs1d(xs=x, ys=y, interpolation=Interpolation.linlin,
+                                 axes=multiplicityAxes(), label=label)
             multiplicity = Multiplicity(form=form)
         else:
             report.unsupportedNode(
@@ -394,6 +439,22 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
         taken = {p.label for p in channel.products}
         product = Product(pid="photon", label=_uniqueLabel("photon", taken),
                           multiplicity=multiplicity, distribution=distribution)
+        # What the ACE writer needs back: the entry's number and form, and the
+        # law numbers of its DLWP chain (ACE roadmap A4).
+        laws = list(energy.get(mtrp) or [])
+        from .secondaries import chainAttributes
+
+        attributes = {"MTRP": mtrp, "MFTYPE": int(entry.mftype), **chainAttributes(laws)}
+        if unrepresented:
+            attributes["sigmaGammaWhereSigmaIsZero"] = unrepresented
+        if len(laws) == 1 and hasattr(laws[0], "applicability_energies"):
+            # The Monte Carlo form of a one-law chain has no weight, so its P(E) goes here.
+            attributes["applicability"] = {
+                "energies": [float(e) for e in laws[0].applicability_energies],
+                "probabilities": [float(v) for v in laws[0].applicability_probabilities],
+                "nbt": [int(v) for v in laws[0].applicability_nbt],
+                "interp": [int(v) for v in laws[0].applicability_interp]}
+        product.provenance = AceProvenance(attributes=attributes)
         channel.products.products.append(product)
         decoded += 1
         if _isDiscreteLevel(mt):
@@ -422,8 +483,9 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
     if orphaned:
         report.approximated(
             f"{len(orphaned)} MFTYPE 13 photon(s) name an MT this table has no "
-            f"cross section for (MTRP {orphaned[:5]}...); each sits on an orphan "
-            f"product whose cross section is σ_γ, with multiplicity 1")
+            f"cross section for (MTRP {orphaned[:5]}...); they sit on an orphan "
+            f"product per MT whose cross section is the sum of their σ_γ, each with "
+            f"its share of it as multiplicity (1 when it is alone)")
     if levels:
         report.lost(
             f"{levels} photon line(s) come from discrete-level reactions: ACE "

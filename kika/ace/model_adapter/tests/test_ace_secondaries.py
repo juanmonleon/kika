@@ -105,7 +105,7 @@ def test_prompt_and_total_nu_with_both_given():
 
 def test_delayed_groups_carry_their_rate_in_per_second_and_keep_their_probabilities():
     report = m.ConversionReport()
-    groups = _delayedNeutrons(_fission_ace(groups=((0.0127, 0.6, 0.6), (0.0317, 0.3, 0.3))), AWR, report)
+    groups, _ = _delayedNeutrons(_fission_ace(groups=((0.0127, 0.6, 0.6), (0.0317, 0.3, 0.3))), AWR, report)
     assert [g.rate.value for g in groups] == pytest.approx([0.0127e8, 0.0317e8])
     assert groups[0].rate.unit == "1/s"
     # 0.6 + 0.3 != 1: kept as the file states it (OpenMC would renormalise)
@@ -114,5 +114,5 @@ def test_delayed_groups_carry_their_rate_in_per_second_and_keep_their_probabilit
 
 def test_an_energy_dependent_group_probability_multiplies_on_the_union_grid():
     ace = _fission_ace(groups=((0.0127, 0.5, 0.7),))
-    (group,) = _delayedNeutrons(ace, AWR, m.ConversionReport())
+    (group,), _ = _delayedNeutrons(ace, AWR, m.ConversionReport())
     np.testing.assert_allclose(group.product.multiplicity[MC].ys, [0.016 * 0.5, 0.016 * 0.7])

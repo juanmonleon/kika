@@ -40,7 +40,9 @@ def write_ace(ace: Ace, filepath: str = None, overwrite: bool = False) -> str:
         # encoder): integers as I20, reals as E20.11, and the last line as long
         # as its fields, as NJOY writes it.
         try:
-            with open(filepath, 'w', buffering=1024*1024) as f:
+            # newline='\n': ACE is LF on every platform, as NJOY writes it; text
+            # mode on Windows would turn every line end into CRLF.
+            with open(filepath, 'w', newline='\n', buffering=1024*1024) as f:
                 f.write(write_header(ace.header) + "\n")
                 for text in format_xss_lines(values, is_int):
                     f.write(text)
@@ -57,7 +59,7 @@ def write_ace(ace: Ace, filepath: str = None, overwrite: bool = False) -> str:
 
     try:
         # Open file with a large buffer and write header and data in chunks
-        with open(filepath, 'w', buffering=1024*1024) as f:
+        with open(filepath, 'w', newline='\n', buffering=1024*1024) as f:
             header_str = write_header(ace.header)
             f.write(header_str + "\n")
             

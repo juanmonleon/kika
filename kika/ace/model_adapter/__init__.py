@@ -11,9 +11,11 @@ costs for the cluster pipeline and the desktop app.
 """
 from .decode import (EVALUATED_LABEL, MONTE_CARLO_LABEL, aceLabels, aceStyles, decodeAce,
                      decodeAceReaction, qValuesByMT)
+from .encode import AceEncodeError, encodeAce
 from .photons import attachAcePhotons, photonProductionTotal
 
 __all__ = [
     "decodeAce", "decodeAceReaction", "aceStyles", "aceLabels", "qValuesByMT",
+    "encodeAce", "AceEncodeError",
     "attachAcePhotons", "photonProductionTotal", "EVALUATED_LABEL", "MONTE_CARLO_LABEL",
 ]

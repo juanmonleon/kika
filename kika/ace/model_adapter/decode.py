@@ -196,6 +196,19 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
         formatVersion=getattr(ace.header, "format_version", None),
         temperatureMeV=getattr(ace.header, "temperature", None),
     )
+    # The order NJOY gave MTR and YP, which is not ascending (MT 4 goes last
+    # when a photon yield needs it): the ACE writer gives it back (A4).
+    provenance.attributes["MTR"] = [int(v) for v in ace.reaction_mt_data.incident_neutron]
+    provenance.attributes["MTRP"] = [int(v) for v in ace.reaction_mt_data.photon_production]
+    # NXS(9..16): zero in Lib81, Z and A in NXS(10)/(11) from NJOY 2016 and JEFF-4.0.
+    nxs = list(getattr(ace.header, "nxs_array", None) or [])
+    if len(nxs) >= 17:
+        provenance.attributes["NXS"] = [int(v) for v in nxs[9:17]]
+        # NXS(2) is the ground state's ZA even when the ZAID names an isomer (27058 for 27458)
+        provenance.attributes["ZA"] = int(nxs[2])
+    yp = getattr(ace, "photon_yield_multipliers", None)
+    if yp is not None:
+        provenance.attributes["YP"] = [int(v) for v in yp.multiplier_mts]
 
     za = int(provenance.zaid) if provenance.zaid is not None else 0
     pops = PoPs()

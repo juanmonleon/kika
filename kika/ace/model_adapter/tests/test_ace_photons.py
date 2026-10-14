@@ -175,6 +175,38 @@ def test_mftype13_with_no_reaction_is_an_orphan_carrying_sigma_gamma(synthetic):
     assert any("orphan product" in line for line in report.approximations)
 
 
+def test_two_photons_on_one_missing_mt_each_keep_their_sigma_gamma():
+    """ENDF/B-VIII.1 N-14 states six MFTYPE 13 photons on MT 28, which it has no σ for.
+
+    One orphan per MT carries the sum of their σ_γ and each photon its share,
+    so y·Σ gives every photon its own σ_γ back. Before, the orphan held the
+    first photon's σ_γ and the others, with y = 1, silently took its numbers.
+    """
+    suite = ReactionSuite(evaluation="synthetic", projectile="n", target="N14")
+    suite.reactions.append(_reaction(51, [0.0, 0.5, 0.5, 0.4, 0.1]))
+    sigp = PhotonProductionCrossSections(has_data=True)
+    sigp.cross_sections = {
+        28001: DirectCrossSection(mt=28001, mftype=13, energy_grid_index=2, num_entries=4,
+                                  cross_sections=np.array([0.0, 0.2, 0.4, 0.4])),
+        28002: DirectCrossSection(mt=28002, mftype=13, energy_grid_index=3, num_entries=3,
+                                  cross_sections=np.array([0.1, 0.1, 0.3])),
+    }
+    energy = {k: [DiscreteEnergyDistribution(eg=1.0, lp=0)] for k in sigp.cross_sections}
+    angular = {k: IsotropicAngularDistribution(mt=k) for k in sigp.cross_sections}
+    ace = SimpleNamespace(photon_production_xs=sigp,
+                          angular_distributions=SimpleNamespace(photon_production=angular),
+                          energy_distributions=SimpleNamespace(photon_production=energy),
+                          esz_block=SimpleNamespace(energies=GRID_MEV), photon_production_data=None)
+    attachAcePhotons(ace, suite, ConversionReport())
+    (orphan,) = suite.orphanProducts
+    sigma = orphan.crossSection[LABEL]
+    np.testing.assert_allclose(sigma.xs, GRID_MEV[1:] * 1e6)
+    np.testing.assert_allclose(sigma.ys, [0.0, 0.3, 0.5, 0.7])
+    for photon, expected in zip(_photons(orphan), ([0.0, 0.2, 0.4, 0.4], [0.1, 0.1, 0.3])):
+        y = photon.multiplicity.form
+        np.testing.assert_allclose(y.ys * np.interp(y.xs, sigma.xs, sigma.ys), expected)
+
+
 def test_what_cannot_be_decoded_is_reported_and_does_not_raise(synthetic):
     suite, report = synthetic
     assert any("MTRP 16001" in line and "MT16" in line for line in report.unsupported)
