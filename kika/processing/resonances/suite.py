@@ -211,6 +211,13 @@ _GROUP=object()
 _ABSENT=object()
 
 
+class _Constants(dict):
+    """A segment's constants, with their reactions' positions in *order*
+    (``columns``) and their values (``column_values``) as arrays, for a caller that
+    lays out many segments' constants at once."""
+    __slots__=('order','columns','column_values')
+
+
 class _DeferredRead:
     """A deferred column's reader on one segment: its curve, at the left
     neighbour of the segment's high where the segment is closed on the
@@ -1226,7 +1233,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         leaves=[rows.get(part) for part in graph[key] if part not in graph]
         sum_parts[key]=(None if None in leaves else np.array(leaves,dtype=np.int64),
                         [part for part in graph[key] if part in graph])
-    blocked_in={};zero_sets={}
+    blocked_in={};zero_sets={};sum_values={}
     def blocked(region):
         """The reactions a segment of *region* never holds constant or
         defers: the sums, and the partials its physics owns."""
@@ -1269,13 +1276,23 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # in the order of the segment's curves, then the sums of constants.
         held=held_rows[position];value=value_rows[position]
         at=np.flatnonzero(held)
-        constants=dict(zip(keyed[at].tolist(),value[at].tolist()))
+        constants=_Constants(zip(keyed[at].tolist(),value[at].tolist()));added=[]
         for key in order:
             # Constant when every part is: its leaves held here, its sums
-            # constant already (the order puts parts first).
+            # constant already (the order puts parts first). A sum of leaves
+            # only is the same for the same values, added in the same order.
             leaves,sums=sum_parts[key]
             if leaves is not None and held[leaves].all() and all(part in constants for part in sums):
-                constants[key]=sum((constants[part] for part in graph[key]),0.)
+                if sums:total=sum((constants[part] for part in graph[key]),0.)
+                else:
+                    token=(key,value[leaves].tobytes());total=sum_values.get(token)
+                    if total is None:total=sum_values[token]=sum(value[leaves].tolist(),0.)
+                constants[key]=total;added.append((key,total))
+        constants.order=names
+        if all(rows.get(key) is not None for key,_ in added):
+            constants.columns=np.r_[at,np.array([rows[key] for key,_ in added],dtype=np.int64)]
+            constants.column_values=np.r_[value[at],np.array([total for _,total in added],dtype=float)]
+        else:constants.columns=constants.column_values=None
         # One object per zero set (JENDL-5 Cl-35: 212 for 3 376 segments), so
         # that what is worked out per set is worked out once.
         zeros=frozenset(keyed[at[value[at]==0]].tolist())

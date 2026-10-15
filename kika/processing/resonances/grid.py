@@ -394,7 +394,13 @@ def _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,opt
     index_of=where.__getitem__
     for k,(_,constants,deferred) in enumerate(spans):
         if constants:
-            at=list(map(index_of,constants));constant[k,at]=list(constants.values());has[k,at]=True
+            # (Positions and values laid out by the caller when its order is
+            # these keys; otherwise looked up.)
+            at=getattr(constants,'columns',None)
+            if at is not None and (constants.order is keys or constants.order==keys):
+                constant[k,at]=constants.column_values;has[k,at]=True
+            else:
+                at=list(map(index_of,constants));constant[k,at]=list(constants.values());has[k,at]=True
         if deferred:deferred_in[k,list(map(index_of,deferred))]=True
     y={}
     for j,mt in enumerate(keys):
