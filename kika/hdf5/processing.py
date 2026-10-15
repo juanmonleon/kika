@@ -323,7 +323,7 @@ CHUNK_KNOTS = 4000
 """Source knots per energy chunk of the resonant group (see ``_broadenPlan``)."""
 
 
-def _broadenPlan(suite, thnmax):
+def _broadenPlan(suite, thnmax, options=None):
     """What ``_broadened`` broadens, independent of the temperature.
 
     ``(entries, leaves, lo, hi, tasks)``; each task is ``(keys, domain)``, a
@@ -363,24 +363,39 @@ def _broadenPlan(suite, thnmax):
         dense = max(counts.values())
         resonant = [k for k in active if counts[k] >= 0.2 * dense]
         smooth = [k for k in active if counts[k] < 0.2 * dense]
-        # The resonant group is cut into energy chunks of CHUNK_KNOTS source
-        # knots, broadened independently (in parallel by _broadenAll). Each
-        # chunk sees the whole 0 K source, so its thermal neighbourhood is
-        # complete; only the output domain is the chunk's. The refinement
-        # accepts every interval on its own verification, so a chunked table
-        # meets the same tolerance, and the shared boundary is one exact
-        # evaluation of the same point in both chunks. The cuts depend on the
-        # data alone, never on the number of workers, so the result does not.
-        grid = np.unique(np.concatenate([knots[k] for k in resonant]))
-        grid = grid[(grid > lo) & (grid < hi)]
-        pieces = max(1, len(grid) // CHUNK_KNOTS)
-        cuts = [lo]
-        for i in range(1, pieces):
-            j = i * len(grid) // pieces
-            # Between two distinct knots, never on a discontinuity.
-            cuts.append(float(np.sqrt(grid[j - 1] * grid[j])))
-        cuts.append(hi)
-        tasks += [(resonant, (a, b)) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
+        # Preserve dense sources for the moment-block kernel. Small energy
+        # windows fall below its eligibility threshold and lose that speedup.
+        # Parallelize these independent leaves instead; every table retains
+        # the same kernel and interpolation verification budgets.
+        from kika.processing.doppler import core as dopplerCore, _blocks
+        native = (dopplerCore._native is not None
+                  and hasattr(dopplerCore._native, "prepare_blocks")
+                  and (options is None or (options.backend != "python"
+                       and options.max_series_terms == 80 and options.max_radius >= 6
+                       and options.max_work_bytes >= 64*1024*1024)))
+        full = [k for k in resonant if native and counts[k] >= _blocks._DENSE_SOURCE
+                and np.all(_flatten(entries[k].crossSection[RECON_LABEL])[1] >= 0)]
+        tasks.extend(([key], (lo, hi)) for key in full)
+        resonant = [k for k in resonant if k not in full]
+        if resonant:
+            # The resonant group is cut into energy chunks of CHUNK_KNOTS source
+            # knots, broadened independently (in parallel by _broadenAll). Each
+            # chunk sees the whole 0 K source, so its thermal neighbourhood is
+            # complete; only the output domain is the chunk's. The refinement
+            # accepts every interval on its own verification, so a chunked table
+            # meets the same tolerance, and the shared boundary is one exact
+            # evaluation of the same point in both chunks. The cuts depend on the
+            # data alone, never on the number of workers, so the result does not.
+            grid = np.unique(np.concatenate([knots[k] for k in resonant]))
+            grid = grid[(grid > lo) & (grid < hi)]
+            pieces = max(1, len(grid) // CHUNK_KNOTS)
+            cuts = [lo]
+            for i in range(1, pieces):
+                j = i * len(grid) // pieces
+                # Between two distinct knots, never on a discontinuity.
+                cuts.append(float(np.sqrt(grid[j - 1] * grid[j])))
+            cuts.append(hi)
+            tasks += [(resonant, (a, b)) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
         if smooth:
             tasks.append((smooth, (lo, hi)))
     return entries, leaves, lo, hi, tasks
@@ -519,7 +534,7 @@ def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
     """
     from kika.processing.doppler.suite import _mass
 
-    entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax)
+    entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax, options)
     awr = _mass(suite, None).atomic_weight_ratio
     top = {id(keys): min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in keys)
            for keys, _ in tasks}
