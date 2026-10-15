@@ -5,6 +5,7 @@ augmented system replaces naked divisions near poles. Absorption is evaluated
 directly; flux is an independent diagnostic, never an instruction to clip.
 """
 from dataclasses import dataclass
+from functools import cached_property
 import numpy as np
 from .breit_wigner import Group
 from .channel_functions import neutral_channel_functions
@@ -140,6 +141,25 @@ class RMLGroup(Group):
     @property
     def reaction_mts(self):
         return {c.mt for c in self.channels} | {c.phase_absorption_mt for c in self.channels if c.phase_absorption_mt is not None} | {102}
+
+    def __getstate__(self):
+        # Pickle makes read-only arrays writable; rebuild the cache lazily.
+        return {key:value for key,value in self.__dict__.items() if key!='kernel_arrays'}
+
+    def __setstate__(self,state):
+        self.__dict__.update({key:value for key,value in state.items() if key!='kernel_arrays'})
+
+    @cached_property
+    def kernel_arrays(self):
+        """Level energies, radiative widths and the (level, channel) reduced
+        amplitudes as read-only float64 arrays, made once per group. Every
+        evaluation converted the tuples again (Pu-239: ~1 600 levels, 151 000
+        conversions, 2.6 s)."""
+        freeze=lambda a:np.frombuffer(np.asarray(a,dtype=float).tobytes(),dtype=float).reshape(np.shape(a))
+        energies=freeze([lv.energy for lv in self.levels])
+        radiation=freeze(np.asarray(self.radiation,dtype=float).reshape(len(self.levels)))
+        reduced=freeze(np.asarray(self.reduced,dtype=float).reshape((len(self.levels),len(self.channels))))
+        return energies,radiation,reduced
 
 
 def solve_rml(energies, levels, radiation, reduced, logarithmic, external=None, *, entrance=0, diagnostics=None,
@@ -319,7 +339,7 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     poles use bounded reference batches; no level absorption array is retained.
     """
     from ._rm_acceleration import _native, eligible, reference_block_size, channel_solution, gram_capture
-    er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
+    er,gamma,_=group.kernel_arrays
     a=np.require(reduced,dtype=float,requirements=['C','A']);f=np.ones_like(p)
     if not eligible(e,er,gamma,a,f,work_bytes,True,1e-8):return None
     if np.any(~np.isfinite(logarithmic)) or np.any(abs(logarithmic)>1e20):return None
@@ -391,7 +411,7 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
 def _reference_rml_observables(e,group,reduced,logarithmic,external,p,entrance,diagnostics,work_bytes):
     """Keep neutral fallback level arrays bounded after a streaming batch."""
     from ._rm_acceleration import reference_block_size
-    er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
+    er,gamma,_=group.kernel_arrays
     w=np.empty_like(p,dtype=complex);absorption=np.empty(len(e))
     block=reference_block_size(len(er),p.shape[1],work_bytes)
     for start in range(0,len(e),block):
@@ -461,6 +481,7 @@ def _evaluate_group_rows(result,rows,group,e,p,log,phase,log_p,limited,attenuati
                          external,beta,reduced,charged,diagnostics,work_bytes,absorption_rtol):
     """One spin group on the energies ``rows`` of the batch: the collision
     matrix, flux balance and partial cross sections, added into *result*."""
+    er,gamma,_=group.kernel_arrays
     # With L-B=iP and no external term, congruence by sqrt(P) gives
     # exactly the RM channel system. Keep the general level-space path
     # for independent verification, real shifts and underflow bounds.
@@ -470,7 +491,7 @@ def _evaluate_group_rows(result,rows,group,e,p,log,phase,log_p,limited,attenuati
                 and np.all((p==0)|((p>=1e-80)&(p<=1e20)))
                 and np.all(abs(e)<=1e20)
                 and np.all((reduced==0)|((abs(reduced)>=1e-40)&(abs(reduced)<=1e20)))
-                and all(v==0 or 1e-100<=v<=1e20 for v in group.radiation))
+                and np.all((gamma==0)|((gamma>=1e-100)&(gamma<=1e20))))
     for entrance in group.entrances:
         bounds = {}
         streamed=None
@@ -483,8 +504,8 @@ def _evaluate_group_rows(result,rows,group,e,p,log,phase,log_p,limited,attenuati
                     streamed=_reference_rml_observables(e,group,reduced,log,external,p,entrance,diagnostics,work_bytes)
         if diagonal:
             from .reich_moore import solve_collision
-            scaled, direct_absorption = solve_collision(e, [lv.energy for lv in group.levels],
-                group.radiation, None, diagnostics, entrance=entrance, reduced=reduced,
+            scaled, direct_absorption = solve_collision(e, er,
+                gamma, None, diagnostics, entrance=entrance, reduced=reduced,
                 channel_factors=np.sqrt(p), work_bytes=work_bytes,
                 return_absorption=True, absorption_rtol=absorption_rtol)
             underflow = np.zeros(len(e), dtype=bool)
@@ -494,7 +515,7 @@ def _evaluate_group_rows(result,rows,group,e,p,log,phase,log_p,limited,attenuati
             underflow=np.zeros(len(e),dtype=bool)
             core=2j*np.sqrt(p)*np.sqrt(p[:,entrance,None])*w
         else:
-            w, x, y = solve_rml(e, [lv.energy for lv in group.levels], group.radiation,
+            w, x, y = solve_rml(e, er, gamma,
                 reduced, log,
                 external, entrance=entrance, diagnostics=diagnostics,
                 log_penetrability=log_p,error_bounds=bounds,
@@ -531,14 +552,14 @@ def _evaluate_group_rows(result,rows,group,e,p,log,phase,log_p,limited,attenuati
                     _check_underflow_bound((np.log(abs(core_collision[:,out]))+.5*np.log(beta))[underflow],
                         (log_core_error[:,out]+.5*np.log(beta))[underflow])
             result[channel.mt][rows] += sigma
-        absorption = direct_absorption if diagonal or streamed is not None else (2*p[:, entrance]*np.sum(np.asarray(group.radiation)[None, :]*abs(x)**2, axis=1)
+        absorption = direct_absorption if diagonal or streamed is not None else (2*p[:, entrance]*np.sum(gamma[None, :]*abs(x)**2, axis=1)
                       +4*p[:, entrance]*np.sum(external.imag*abs(y)**2, axis=1))
         if np.any(underflow):
             with np.errstate(divide='ignore'):
-                level_weights=np.log(2.)+log_p[:,entrance,None]+np.log(np.asarray(group.radiation))[None,:]
+                level_weights=np.log(2.)+log_p[:,entrance,None]+np.log(gamma)[None,:]
                 external_weights=np.log(4.)+log_p[:,entrance,None]+np.log(external.imag)
                 log_x=np.log(abs(x));log_y=np.log(abs(y))
-                active=np.asarray(group.radiation)>0
+                active=gamma>0
                 _check_underflow_bound((log_x+.5*(level_weights+np.log(beta)[:,None]))[underflow][:,active],
                     (bounds['x']+.5*(level_weights+np.log(beta)[:,None]))[underflow][:,active])
                 active_external=(external.imag>0)&underflow[:,None]
@@ -598,7 +619,7 @@ def evaluate_rml(energies, groups, context, diagnostics=None, *, work_bytes=64*1
             raise ValueError('active KPS phase is outside the passive profile')
         attenuation = np.exp(2*phase.imag)
         phase_loss = -np.expm1(2*phase.imag)
-        reduced = np.asarray(group.reduced).reshape((len(group.levels),len(group.channels)))
+        reduced = group.kernel_arrays[2]
         for index,ch in enumerate(group.channels):
             if (not ch.effective and ch.penetrability == 'calculate' and np.any(reduced[:,index] != 0)
                     and np.any((e > ch.threshold) & (p[:,index] == 0) & ~np.isfinite(log_p[:,index]))):
