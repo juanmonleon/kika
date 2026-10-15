@@ -284,6 +284,38 @@ def _hostFor(suite, mt) -> Optional[_Host]:
                  "orphan")
 
 
+def _ownHost(suite, mt, production) -> Optional[_Host]:
+    """An MF13 on an MT with no MF3: an orphan product whose σ is the section's σ_γ.
+
+    ENDF/B-VIII.1 N-14 states photons on MT28 and MT32 and Pu-241 on MT3 with no
+    MF3 for those MTs. FUDGE drops them; NJOY writes them (MFTYPE 13), and in
+    Pu-241 they are every photon of the nonelastic above 0.1 MeV. The orphan's
+    σ is the section's total σ_γ (its one photon's when NK = 1), so each
+    multiplicity is that photon's share of it -- the convention ``decodeAce``
+    uses for an MFTYPE 13 with no reaction -- and y·σ gives σ_γ back exactly.
+    """
+    from kika.nuclear_data.model import OutputChannel, Reaction, ReactionId, crossSectionAxes
+
+    table = production.total or (production.photons[0] if len(production.photons) == 1 else None)
+    if table is None:
+        return None
+    sigma = _function1d(table.interp, table.x, table.y, axes=crossSectionAxes())
+    sigma.label = EVAL_LABEL
+    orphan = Reaction(id=ReactionId(label=f"Orphan product {len(suite.orphanProducts) + 1}",
+                                    ENDF_MT=int(mt)),
+                      outputChannel=OutputChannel(genre="NBody"))
+    orphan.crossSection[EVAL_LABEL] = sigma
+    source = next(iter(suite.reactions), None)
+    provenance = getattr(source, "provenance", None)
+    orphan.provenance = EndfProvenance(
+        mat=getattr(provenance, "mat", None), awr=getattr(provenance, "awr", None),
+        za=getattr(provenance, "za", None))
+    suite.orphanProducts.append(orphan)
+    return _Host(orphan, orphan,
+                 f"/reactionSuite/orphanProducts/orphanProduct[@label='{orphan.label}']",
+                 "orphan")
+
+
 # ---------------------------------------------------------------------------
 # Decode
 # ---------------------------------------------------------------------------
@@ -306,15 +338,25 @@ def attachPhotons(suite, endf, report: Optional[ConversionReport] = None):
                 _keepVerbatim(suite, sections, mt, why, report)
             continue
         why = _whyNotModelled(sections)
-        host = None
+        host, own = None, False
         if why is None:
             host = _hostFor(suite, mt)
+            if host is None and 13 in sections:
+                host, own = _ownHost(suite, mt, sections[13]), True
             if host is None:
                 why = ("there is no cross section for these photons to hang from "
                        "(an MT with no MF3, or a sum with no values), so neither a "
                        "reaction nor an orphanProduct can carry them")
         if why is None:
             why = _attach(suite, host, sections, mt, report)
+            if why is None and own:
+                report.approximated(
+                    f"MT{mt}: MF13 on an MT with no MF3, so its photons hang on an "
+                    f"orphanProduct whose σ is the section's own σ_γ, each multiplicity "
+                    f"its share of it (NJOY writes these photons; FUDGE drops them)",
+                    unaffectedScopes=("cross-sections",))
+            elif why is not None and own:
+                suite.orphanProducts.remove(host.node)
         if why is not None:
             _keepVerbatim(suite, sections, mt, why, report)
     return report

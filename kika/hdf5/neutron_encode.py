@@ -233,6 +233,14 @@ def encodeNeutron(suite, temperatures=None, *, awr: Optional[float] = None,
         report.lost(f"{skipped} radionuclide production(s) (MF8-10) have no group in "
                     f"OpenMC's format, which names reactions by MT alone; not written",
                     unaffectedScopes=("cross-sections",))
+    orphans = sorted(int(o.ENDF_MT) for o in getattr(suite, "orphanProducts", ()))
+    if orphans:
+        # As OpenMC's from_ace does with an ACE photon on an MT it has no
+        # reaction for ("Photon production is present for MT=... but no cross
+        # section is given"): an OpenMC file hangs photons on reactions only.
+        report.lost(f"the photons of orphan product(s) on MT {orphans}, with no reaction to "
+                    f"hang on in OpenMC's format; not written",
+                    unaffectedScopes=("cross-sections",))
 
     reactions = g.require("reactions")
     written = {}

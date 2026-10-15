@@ -834,12 +834,21 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     # redundant (O-16: reaction_004 with 15 photons, reaction_103 with 4).
     for orphan in work.orphanProducts:
         mt = orphan.ENDF_MT
+        own = _ownSigma(orphan)
         target = out.findReactionByENDF_MT(mt)
         if target is None:
             # MT3, the nonelastic, is every partial but the elastic (Pu-240 and
             # Pu-241 state photons on it; the official file writes it redundant).
             levels = ([c for c in sorted(present) if c != 2] if mt == 3 else
                       [c for c in LEVEL_SUMS.get(mt, ()) if c in present])
+            if not levels and own is not None:
+                # MF13 on an MT with no MF3 and no partials (N-14 MT28, MT32):
+                # kept as an orphan with σ_γ on each grid, so the ACE carries
+                # its photons as NJOY's does (MFTYPE 13). OpenMC's format hangs
+                # photons on reactions only; its encoder declares them lost.
+                out.orphanProducts.append(_keptOrphan(orphan, own, mt, heated, grids, awr, zaTarget,
+                                                      tabOptions, report, photonFlags, particles))
+                continue
             if not levels:
                 report.lost(f"MT{mt}: {len(orphan.outputChannel.products)} photons stated on a "
                             f"sum the evaluation gives no partials of; not written")
@@ -854,6 +863,12 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         proxy = copy.copy(orphan)
         if source is not None:
             proxy.crossSection = source.crossSection
+        elif own is not None:
+            # MF13 on an MT with no MF3 (Pu-241 MT3): the multiplicities are
+            # shares of the section's own σ_γ, and the yield is per reaction
+            # of the sum the photons now hang on.
+            coldest = min(heated, key=lambda T: float(str(T).rstrip("K")))
+            proxy = _sharesOf(orphan, own, target, heatedLabel(coldest), report)
         _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report, flags=photonFlags,
                   particles=particles)
 
@@ -1104,6 +1119,88 @@ def _photonFlags(suite) -> Dict[Tuple[str, str], str]:
 #: The products an ACE table carries: neutrons, photons and the light charged
 #: particles MCNP transports (PTYPE 9, 31, 32, 33, 34).
 ACE_PARTICLES = ("n", "photon", "H1", "H2", "H3", "He3", "He4")
+
+
+def _ownSigma(orphan):
+    """An orphan's own σ -- MF13 on an MT with no MF3 -- or ``None`` when it refers to a sum."""
+    m = _m()
+    form = orphan.crossSection.forms.get(EVAL_LABEL)
+    return form if isinstance(form, (m.XYs1d, m.Regions1d)) else None
+
+
+def _linlinOf(form) -> Tuple[np.ndarray, np.ndarray]:
+    from kika.algebra.laws import interval_laws
+    from kika.algebra.refine import to_linlin
+
+    x, y, pairs = form.toEndfRegions()
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    return to_linlin(x, y, interval_laws(x.size, [tuple(p) for p in pairs]))
+
+
+def _sharesOf(orphan, own, target, label, report):
+    """``orphan`` with each photon's multiplicity σ_γk / σ_target instead of σ_γk / σ_own.
+
+    On σ_γk's grid ∪ σ_target's points inside it, lin-lin, 0 where σ_target = 0
+    (the ENDF adapter's MF13 division, J5), with σ_target at ``label``: the
+    coldest temperature, a yield being one table for every temperature.
+    """
+    from kika.algebra.evaluate import sample_on_union
+    from kika.algebra.grid import discontinuities, union
+    from kika.algebra.laws import LINLIN
+
+    m = _m()
+    sx, sy = _linlinOf(own)
+    sigma = target.crossSection.forms[label]
+    tx, ty = np.asarray(sigma.xs, dtype=float), np.asarray(sigma.ys, dtype=float)
+    proxy = copy.copy(orphan)
+    proxy.outputChannel = m.OutputChannel(Q=orphan.outputChannel.Q, genre=orphan.outputChannel.genre)
+    zeros = 0
+    for product in orphan.outputChannel.products:
+        share = copy.copy(product)
+        if product.multiplicity is not None:
+            fx, fy = _linlinOf(product.multiplicity.form)
+            gamma = fy * sample_on_union(sx, sy, LINLIN, fx)
+            inside = (tx > fx[0]) & (tx < fx[-1])
+            steps = [float(v) for v in discontinuities(fx)]
+            steps += [float(v) for v in discontinuities(tx) if fx[0] < v < fx[-1]]
+            u = union([fx, tx[inside]], steps=steps)
+            numerator = sample_on_union(fx, gamma, LINLIN, u)
+            denominator = sample_on_union(tx, ty, LINLIN, u)
+            zero = denominator == 0.0
+            zeros += int(zero.sum())
+            y = np.where(zero, 0.0, numerator / np.where(zero, 1.0, denominator))
+            share.multiplicity = m.Multiplicity(form=m.XYs1d(
+                xs=u, ys=y, axes=m.multiplicityAxes(), label=EVAL_LABEL))
+        proxy.outputChannel.products.products.append(share)
+    report.approximated(
+        f"MT{orphan.ENDF_MT}: MF13 with no MF3 of its own, so each photon's yield is σ_γ "
+        f"over the sum it hangs on ({label}), lin-lin on σ_γ's grid and the sum's"
+        + (f"; 0 at {zeros} point(s) where the sum is 0" if zeros else ""))
+    return proxy
+
+
+def _keptOrphan(orphan, own, mt, heated, grids, awr, zaTarget, options, report, flags, particles):
+    """An orphan with no reaction to hang on, kept with σ_γ on each temperature's grid."""
+    from kika.algebra.evaluate import sample_on_union
+    from kika.algebra.laws import LINLIN
+
+    m = _m()
+    sx, sy = _linlinOf(own)
+    cs = m.CrossSection()
+    for T in heated:
+        grid = grids[T]
+        on = grid[int(np.searchsorted(grid, sx[0], side="left")):]
+        cs[heatedLabel(T)] = m.XYs1d(xs=on, ys=sample_on_union(sx, sy, LINLIN, on),
+                                     axes=m.crossSectionAxes(), label=heatedLabel(T))
+    kept = m.Reaction(id=m.ReactionId(label=orphan.label, ENDF_MT=int(mt)), crossSection=cs,
+                      outputChannel=m.OutputChannel(Q=m.Q(value=0.0), genre=orphan.outputChannel.genre),
+                      provenance=m.Hdf5Provenance(attributes={"redundant": 1}))
+    _products(orphan, kept.outputChannel, mt, awr, zaTarget, options, report, flags=flags,
+              particles=particles)
+    report.warn(f"MT{mt}: photons stated (MF13) on an MT with no cross section and no partials, "
+                f"kept as an orphan product with σ_γ as its σ; an ACE table writes them as "
+                f"NJOY does (MFTYPE 13), an OpenMC file has no reaction to hang them on")
+    return kept
 
 
 def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, flags=None,
