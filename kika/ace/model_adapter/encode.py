@@ -1048,6 +1048,7 @@ class _Encoder:
             ids.append(ipt)
             mts, tys, records, angles, chains = [], [], {}, {}, {}
             production, heat = np.zeros(len(grid)), np.zeros(len(grid))
+            made = []
             for mt, node, product in entries:
                 form = product.distribution.forms[MONTE_CARLO_LABEL]
                 # a level's particle is law 33, the charged-particle level law
@@ -1075,6 +1076,7 @@ class _Encoder:
                 records[mt] = NS(mt=mt, mftype=12, mtmult=mt, interpolation_bounds=nbt,
                                  interpolation_schemes=interp, energies=_mev(x),
                                  yields=np.asarray(y, dtype=float))
+                made.append((node.crossSection.forms[self.label], multiplicity))
                 sigma = np.zeros(len(grid))
                 sigma[self.suffix(grid, xs, f"MT{mt}"):] = xs.ys
                 contribution = np.interp(grid, x, y, left=0.0, right=0.0) * sigma
@@ -1094,21 +1096,21 @@ class _Encoder:
             values, numbers = production[start:], heating[start:] / EV_PER_MEV
             stated = (self.tableAttributes.get("HPD") or {}).get(pid)
             if stated is not None:
-                # The table's own HPD, given back when the production this
-                # suite rebuilds is the one it states: its heating number is
-                # ACER's, which kika's moments match to ~1e-3 and not word for
-                # word. Rebuilt otherwise, since the data under it changed.
+                # The table's own HPD (ACER's heating number, which kika's
+                # moments match to ~1e-3 and not word for word), given back
+                # while the cross sections and yields it was made of are the
+                # ones the table was read with; rebuilt once they changed.
+                from .secondaries import hpdDigest
+
                 given = np.asarray(stated["production"], dtype=float)
-                start = int(stated["start"]) - 1
-                if len(given) == len(grid) - start and np.allclose(
-                        production[start:], given, rtol=1e-5,
-                        # NJOY writes 0 below its floor (Mn-55 H3: up to 6e-12 of the maximum)
-                        atol=1e-9 * float(given.max(initial=0.0))):
+                if (stated.get("digest") == hpdDigest(made)
+                        and len(given) == len(grid) - int(stated["start"]) + 1):
+                    start = int(stated["start"]) - 1
                     values, numbers = given, np.asarray(stated["heating"], dtype=float)
                 else:
-                    start = max(int(first[0]) - 1, 0) if first.size else 0
-                    self.report.approximated(f"HPD {pid}: the production the suite gives no longer "
-                                             f"matches the table's; rebuilt, heating number kika's")
+                    self.report.approximated(f"HPD {pid}: a cross section or yield it is made of "
+                                             f"changed since the table was read; rebuilt, heating "
+                                             f"number kika's")
             hpd[i + 1] = NS(energy_grid_index=start + 1, xs_values=values, heating_numbers=numbers)
             mtrh.append(np.asarray(mts, dtype=float))
             tyrh.append(np.asarray(tys, dtype=float))

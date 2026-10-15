@@ -547,6 +547,30 @@ def _delayedNeutrons(ace, awr, report):
 # Charged-particle production (PTYPE, NTRO, IXS: roadmap A7, read back in A11)
 # ----------------------------------------------------------------------
 
+def hpdDigest(pairs) -> str:
+    """SHA-256 of what a particle's HPD is made of: each producing reaction's
+    cross section and the particle's yield on it, ``pairs`` in MT order.
+
+    The ACE writer gives the table's own HPD back while this is unchanged --
+    the question is whether the data moved, not whether kika's sum of y*sigma
+    and ACER's agree to some tolerance (Cr-53's alphas differ by 2e-5 at one
+    point, from the same data).
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    for xs, multiplicity in pairs:
+        for form in (xs, multiplicity):
+            if hasattr(form, "toEndfRegions"):
+                x, y, regions = form.toEndfRegions()
+            else:
+                x, y, regions = [], getattr(form, "coefficients", []), []
+            digest.update(np.asarray(x, dtype=float).tobytes())
+            digest.update(np.asarray(y, dtype=float).tobytes())
+            digest.update(repr([tuple(int(v) for v in r) for r in regions]).encode())
+    return digest.hexdigest()
+
+
 def attachAceParticles(ace, suite, report: Optional[ConversionReport] = None) -> ConversionReport:
     """Give each reaction of ``suite`` the light charged particles ACE says it produces.
 
@@ -573,7 +597,10 @@ def attachAceParticles(ace, suite, report: Optional[ConversionReport] = None) ->
     andh = getattr(ace.angular_distributions, "particle_production", None) or []
     dlwh = getattr(ace.energy_distributions, "particle_production", None) or []
     stated = {}
+    heated = next((label for r in suite.reactions for label in r.crossSection.forms
+                   if label.startswith("heated")), None)
     for i, ipt in enumerate(ids):
+        made = []
         pid = byType.get(ipt)
         if pid is None:
             report.unsupportedNode(f"IXS particle {i + 1}: PTYPE {ipt} is not one of the light "
@@ -608,11 +635,14 @@ def attachAceParticles(ace, suite, report: Optional[ConversionReport] = None) ->
                 "angular": type(dist).__name__ if dist is not None else None,
                 **chainAttributes(chain)})
             reaction.outputChannel.products.products.append(product)
+            if heated is not None and heated in reaction.crossSection.forms:
+                made.append((mt, reaction.crossSection.forms[heated], yield_))
         data = hpd.get(i + 1)
         if data is not None:
             stated[pid] = {"start": int(data.energy_grid_index),
                            "production": np.asarray(data.xs_values, dtype=float).tolist(),
-                           "heating": np.asarray(data.heating_numbers, dtype=float).tolist()}
+                           "heating": np.asarray(data.heating_numbers, dtype=float).tolist(),
+                           "digest": hpdDigest([(x, y) for _, x, y in sorted(made, key=lambda t: t[0])])}
     if stated and isinstance(getattr(suite, "provenance", None), AceProvenance):
         suite.provenance.attributes["HPD"] = stated
     return report
