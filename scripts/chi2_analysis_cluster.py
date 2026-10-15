@@ -2326,6 +2326,7 @@ def aggregate_cell_map(cells: pd.DataFrame, exp_ids, libraries: List[str]) -> pd
     g = t.groupby(["library", "cell"], observed=True).agg(
         n=("n", "sum"), chi2=("chi2", "sum"), dof=("dof", "sum"), w_num=("w_num", "sum"),
         w_den2=("w_den2", "sum"), rel_resid_sum=("rel_resid_sum", "sum"),
+        cond_rel_sum=("cond_rel_sum", "sum"),
         n_z1=("n_z1", "sum"), n_z2=("n_z2", "sum"), n_exp=("experiment_id", "nunique"),
     ).reset_index()
     n_a = len(CELL_A_EDGES) - 1
@@ -2334,9 +2335,10 @@ def aggregate_cell_map(cells: pd.DataFrame, exp_ids, libraries: List[str]) -> pd
     g["chi2_per_dof"] = np.where(g["dof"] > 0, g["chi2"] / g["dof"].clip(lower=1), np.nan)
     g["w"] = np.where(g["w_den2"] > 0, g["w_num"] / np.sqrt(g["w_den2"].clip(lower=1e-300)), np.nan)
     g["mean_rel_resid"] = g["rel_resid_sum"] / g["n"]
+    g["cond_rel"] = g["cond_rel_sum"] / g["n"]
     g["frac_z1"] = g["n_z1"] / g["n"]; g["frac_z2"] = g["n_z2"] / g["n"]
     cols = ["library", "e_lo", "e_hi", "a_lo", "a_hi", "n", "n_exp", "chi2", "dof", "chi2_per_dof",
-            "w", "mean_rel_resid", "frac_z1", "frac_z2"]
+            "w", "cond_rel", "mean_rel_resid", "frac_z1", "frac_z2"]
     return g[cols].sort_values(["library", "e_lo", "a_lo"]).reset_index(drop=True)
 
 
@@ -2353,11 +2355,15 @@ def cell_map_figure(cmap_df: pd.DataFrame, libraries: List[str], subset_key: str
         t = cmap_df[cmap_df["library"] == lib]
         G = np.full((2, n_e, n_a), np.nan)
         ie = np.searchsorted(CELL_E_EDGES, t["e_lo"].to_numpy()); ia = np.searchsorted(CELL_A_EDGES, t["a_lo"].to_numpy())
-        G[0, ie, ia] = t["chi2_per_dof"].to_numpy(); G[1, ie, ia] = t["w"].to_numpy()
+        G[0, ie, ia] = t["chi2_per_dof"].to_numpy(); G[1, ie, ia] = 100.0 * t["cond_rel"].to_numpy()
         grids[lib] = G
     vmax = max(4.0, float(np.nanmax([np.nanmax(G[0]) for G in grids.values()] + [1.0])))
     norm_c = LogNorm(vmin=1.0 / vmax, vmax=vmax)              # chi^2/dof = 1 sits at the neutral centre
-    wmax = 5.0
+    # 15-oct: the second row is the SIGNED size of the disagreement, mean(e_c / y_eval) in %, with
+    # e_c the cell's residual conditioned on the rest of its experiment (normalisation profiled).
+    # The standardised w saturates at a few hundred points per cell -- any bias is > 5 sigma -- so
+    # it stays in the CSV and the figure shows how much and which way.
+    wmax = 10.0
     norm_w = TwoSlopeNorm(vcenter=0.0, vmin=-wmax, vmax=wmax)
     for j, lib in enumerate(libraries):
         G = grids[lib]
@@ -2373,13 +2379,14 @@ def cell_map_figure(cmap_df: pd.DataFrame, libraries: List[str], subset_key: str
     for i in range(2):
         axes[i, 0].set_ylabel("E [MeV]")
     fig.colorbar(im0, ax=axes[0, :], shrink=0.9).set_label("χ²/dof", fontsize=13)
-    fig.colorbar(im1, ax=axes[1, :], shrink=0.9).set_label("w [σ], data − eval", fontsize=13)
+    fig.colorbar(im1, ax=axes[1, :], shrink=0.9).set_label("(data − eval)/eval [%], conditional", fontsize=12)
     fig.suptitle(f"Conditional χ² map (V4, normalisation profiled) — {subset_label}", fontsize=12)
     name = f"cell_map_{subset_key}"
     save_and_close(fig, figures_dir, name, fig_log)
     report.append(
         f"\n**Where the disagreement is** (conditional χ²/dof per energy × angle cell, V4 covariance, "
-        f"each experiment's normalisation profiled; `w` > 0 means data above the evaluation). "
+        f"each experiment's normalisation profiled; bottom row: conditional (data − eval)/eval in %, "
+        f"> 0 means data above the evaluation). "
         f"Cells condition on the rest of their experiment, so they localise the disagreement and "
         f"do not add up to the χ². Table: `cell_map/cell_map_{subset_key}.csv`.\n\n"
         f"![{name}](figures/{name}.{FIGURE_FORMAT})\n"
@@ -2389,7 +2396,7 @@ def cell_map_figure(cmap_df: pd.DataFrame, libraries: List[str], subset_key: str
     if len(worst):
         report.append("\nThis work — the eight cells with the largest conditional χ²/dof (dof ≥ 5):\n\n")
         report.append(_df_to_md(worst[["e_lo", "e_hi", "a_lo", "a_hi", "n", "n_exp", "chi2_per_dof", "w",
-                                       "mean_rel_resid", "frac_z1"]], float_format="%.3f") + "\n")
+                                       "cond_rel", "mean_rel_resid", "frac_z1"]], float_format="%.3f") + "\n")
 
 
 # ── Per-subentry breakdown (all variants) ───────────────────────────────────
