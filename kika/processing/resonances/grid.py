@@ -399,7 +399,8 @@ def _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,opt
     y={}
     for j,mt in enumerate(keys):
         if mt in index:y[mt]=result.y[:,index[mt]]
-        elif mt not in late:y[mt]=np.repeat(constant[:,j],lengths)
+        # A column constant on every span is left to its reader, who takes
+        # it from constant and lengths when it needs the table.
     # Deferred columns that no span refines: their readers at every span's
     # nodes and probes, one curve read for all the spans that share it.
     late_samples={};late_nodes={}
@@ -463,11 +464,15 @@ def _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,opt
         a=np.ascontiguousarray(samples[:,gauss,j]);l=np.ascontiguousarray(linear[:,gauss,j])
         integrals[i]={name:{'reference_estimate':float(np.sum(f*a)),'linear_estimate':float(np.sum(f*l)),
                             'absolute_difference_estimate':float(np.sum(f*np.abs(a-l)))} for name,f in factors}
+    by_column={}
     for i,mt in enumerate(keys):
         if integrals[i] is not None:continue
-        # Constant on every span: its quadrature is the constant's.
-        value=constant[:,i][span_of_panel][:,None]
-        estimates={name:float(np.sum(f*value)) for name,f in factors}
+        # Constant on every span: its quadrature is the constant's, the same
+        # for every reaction with the same constants (most are zero).
+        token=constant[:,i].tobytes();estimates=by_column.get(token)
+        if estimates is None:
+            value=constant[:,i][span_of_panel][:,None]
+            estimates=by_column[token]={name:float(np.sum(f*value)) for name,f in factors}
         integrals[i]={name:dict(reference_estimate=estimates[name],linear_estimate=estimates[name],
                                 absolute_difference_estimate=0.) for name,f in factors}
     check=dict(iterations=int(result.probe_pass.max()) if len(result.probe_pass) else 0,

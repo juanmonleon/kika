@@ -248,7 +248,8 @@ def _compress_and_join_flat(x,y,lengths):
     owner=np.repeat(region,lengths)[keep]
     xs,ys=x[keep],y[keep]
     cut=np.flatnonzero(np.diff(owner))+1
-    return list(zip(np.split(xs,cut),np.split(ys,cut)))
+    bounds=np.r_[0,cut,len(xs)].tolist()
+    return [(xs[a:b],ys[a:b]) for a,b in zip(bounds[:-1],bounds[1:])]
 
 
 def _join_continuous(pieces):
@@ -1504,9 +1505,12 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
             output[key].label=label
             minima[key]=float(np.min(values))
-            for u in ordered:del u['y'][key]
+            for u in ordered:u['y'].pop(key,None)
             continue
-        column=np.concatenate([u['y'][key] for u in ordered])
+        # (A group's column constant on all its segments is its constants
+        # repeated over each segment's nodes; see _group_tables.)
+        column=np.concatenate([u['y'][key] if key in u['y'] else np.repeat(u['constant'][:,column_of[key]],u['lengths'])
+                               for u in ordered])
         own=[]
         if not summed:
             # An untouched lin-lin background already has an exact
@@ -1540,7 +1544,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # A reaction's tables are released once its output exists, so the
         # output and the tables are never all held at once.
         minima[key]=float(np.min(column))
-        for u in ordered:del u['y'][key]
+        for u in ordered:u['y'].pop(key,None)
     normalized_hash=hashlib.sha256((source_hash+repr(context)+repr(options)).encode()).hexdigest()
     report=dict(engine=ENGINE_VERSION,scope='all modeled cross sections across evaluated domain',
         source_sha256=source_hash,normalized_sha256=normalized_hash,minima=minima,
