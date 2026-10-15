@@ -232,10 +232,11 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
 
     _attachURR(ace, suite, report, urrLabel)
     # AND, DLW, TYR, NU/DNU, BDD and DNED become the products.
-    from .secondaries import attachAceSecondaries
+    from .secondaries import attachAceParticles, attachAceSecondaries
 
     attachAceSecondaries(ace, suite, report)
-    _reportUnconverted(ace, report)
+    # PTYPE/NTRO/IXS: the light charged particles (roadmap A11).
+    attachAceParticles(ace, suite, report)
 
     # What ACE genuinely does not have. Stated per item, because "ACE carries no
     # Q values" was the previous formulation and it is false.
@@ -259,26 +260,6 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report
     return suite, report
-
-
-def _reportUnconverted(ace, report: ConversionReport) -> None:
-    """Name every block the file has and this decoder does not convert.
-
-    The neutron angular and energy distributions, the multiplicities
-    and the fission and delayed-neutron data reach the model
-    (:mod:`.secondaries`). The secondary-particle blocks (PTYPE, NTRO, IXS
-    and HPD...YH: protons, alphas and the other charged products) do not, as
-    in OpenMC. None of it changes a cross section.
-    """
-    SCOPES = ("cross-sections",)
-    angular = getattr(ace, "angular_distributions", None)
-    energy = getattr(ace, "energy_distributions", None)
-    if (angular is not None and any(getattr(angular, "particle_production", []) or [])) or \
-            (energy is not None and any(getattr(energy, "particle_production", []) or [])):
-        report.unsupportedNode(
-            "ACE's secondary-particle data (IXS: production cross sections, angular and "
-            "energy distributions of charged products) is not converted",
-            unaffectedScopes=SCOPES)
 
 
 def _mtNumbers(ace) -> List[int]:

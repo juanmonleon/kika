@@ -1052,8 +1052,12 @@ class _Encoder:
                 form = product.distribution.forms[MONTE_CARLO_LABEL]
                 # a level's particle is law 33, the charged-particle level law
                 level = isinstance(form, m.Uncorrelated) and isinstance(form.energy, m.LevelEnergy)
-                laws, numbers = _chain(form, {"laws": [33]} if level else {}, f"DLWH {pid} MT{mt}",
-                                       self.domain)
+                # What a table read from ACE stated about the chain (applicability,
+                # INTT), as for a neutron; a level is law 33 either way.
+                attributes = dict(_attributes(product))
+                if level:
+                    attributes["laws"] = [33]
+                laws, numbers = _chain(form, attributes, f"DLWH {pid} MT{mt}", self.domain)
                 chains[mt] = laws
                 angles[mt] = (_correlatedRecord(mt) if any(n in CORRELATED_LAWS for n in numbers)
                               else _angularRecord(_angularOf(form), mt))
@@ -1087,8 +1091,25 @@ class _Encoder:
             start = max(int(first[0]) - 1, 0) if first.size else 0
             total = np.asarray(self.totalOnGrid, dtype=float)
             heating = np.divide(heat, total, out=np.zeros(len(grid)), where=total > 0)
-            hpd[i + 1] = NS(energy_grid_index=start + 1, xs_values=production[start:],
-                            heating_numbers=heating[start:] / EV_PER_MEV)
+            values, numbers = production[start:], heating[start:] / EV_PER_MEV
+            stated = (self.tableAttributes.get("HPD") or {}).get(pid)
+            if stated is not None:
+                # The table's own HPD, given back when the production this
+                # suite rebuilds is the one it states: its heating number is
+                # ACER's, which kika's moments match to ~1e-3 and not word for
+                # word. Rebuilt otherwise, since the data under it changed.
+                given = np.asarray(stated["production"], dtype=float)
+                start = int(stated["start"]) - 1
+                if len(given) == len(grid) - start and np.allclose(
+                        production[start:], given, rtol=1e-5,
+                        # NJOY writes 0 below its floor (Mn-55 H3: up to 6e-12 of the maximum)
+                        atol=1e-9 * float(given.max(initial=0.0))):
+                    values, numbers = given, np.asarray(stated["heating"], dtype=float)
+                else:
+                    start = max(int(first[0]) - 1, 0) if first.size else 0
+                    self.report.approximated(f"HPD {pid}: the production the suite gives no longer "
+                                             f"matches the table's; rebuilt, heating number kika's")
+            hpd[i + 1] = NS(energy_grid_index=start + 1, xs_values=values, heating_numbers=numbers)
             mtrh.append(np.asarray(mts, dtype=float))
             tyrh.append(np.asarray(tys, dtype=float))
             sigh[i + 1] = records

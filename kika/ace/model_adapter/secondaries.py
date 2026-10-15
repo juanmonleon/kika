@@ -541,3 +541,78 @@ def _delayedNeutrons(ace, awr, report):
                                                           unit="1/s"),
                                     product=product))
     return out, dnu
+
+
+# ----------------------------------------------------------------------
+# Charged-particle production (PTYPE, NTRO, IXS: roadmap A7, read back in A11)
+# ----------------------------------------------------------------------
+
+def attachAceParticles(ace, suite, report: Optional[ConversionReport] = None) -> ConversionReport:
+    """Give each reaction of ``suite`` the light charged particles ACE says it produces.
+
+    One product per (particle, reaction in MTRH): its yield from SIGH (MFTYPE 12
+    on its own reaction, the only form NJOY writes there), its ``MonteCarlo``
+    form from DLWH and ANDH (law 33, the level law, is a ``LevelEnergy`` as
+    law 3 is), the frame from TYRH. HPD is not a form of any product: the
+    production cross section and heating number each particle has are kept as
+    the table stated them, on the suite's bookkeeping, for the ACE writer to
+    give back when nothing they are made of has changed.
+    """
+    from .encode import PARTICLE_TYPES
+
+    m = _m()
+    report = report if report is not None else ConversionReport()
+    types = getattr(ace, "secondary_particle_types", None)
+    ids = [int(v) for v in (getattr(types, "particle_ids", None) or [])]
+    if not ids:
+        return report
+    byType = {ipt: pid for pid, (ipt, _) in PARTICLE_TYPES.items()}
+    awr = float(ace.header.atomic_weight_ratio)
+    sigh = getattr(getattr(ace, "particle_production_xs", None), "particle_cross_sections", None) or {}
+    hpd = getattr(getattr(ace, "secondary_particle_cross_sections", None), "particle_data", None) or {}
+    andh = getattr(ace.angular_distributions, "particle_production", None) or []
+    dlwh = getattr(ace.energy_distributions, "particle_production", None) or []
+    stated = {}
+    for i, ipt in enumerate(ids):
+        pid = byType.get(ipt)
+        if pid is None:
+            report.unsupportedNode(f"IXS particle {i + 1}: PTYPE {ipt} is not one of the light "
+                                   f"charged particles kika names ({sorted(byType)})",
+                                   unaffectedScopes=("cross-sections",))
+            continue
+        mts = [int(v) for v in ace.reaction_mt_data.particle_production[i]]
+        tys = [int(v) for v in ace.particle_release.particle_production[i]]
+        records = sigh.get(i + 1, {})
+        for mt, ty in zip(mts, tys):
+            reaction = suite.findReactionByENDF_MT(mt)
+            where = f"IXS {pid} MT{mt}"
+            if reaction is None or reaction.outputChannel is None:
+                report.lost(f"{where}: no reaction to hang the particle on; not converted")
+                continue
+            frame = m.Frame.centerOfMass if ty < 0 else m.Frame.lab
+            dist = andh[i].get(mt) if i < len(andh) else None
+            chain = dlwh[i].get(mt, []) if i < len(dlwh) else []
+            angular = angularForm(dist) if dist is not None else None
+            distribution = chainDistribution(chain, angular, frame, awr, report, where)
+            record = records.get(mt)
+            if distribution is None or record is None:
+                report.lost(f"{where}: {'no SIGH yield' if record is None else 'a law kika cannot read'}"
+                            f"; not converted")
+                continue
+            yield_ = _function(record.energies, record.yields, record.interpolation_bounds,
+                               record.interpolation_schemes)
+            product = Product(pid=pid, label=pid, multiplicity=_multiplicity(yield_),
+                              distribution=distribution)
+            product.provenance = AceProvenance(attributes={
+                "TY": ty, "MFTYPE": int(record.mftype), "MTMULT": int(record.mtmult),
+                "angular": type(dist).__name__ if dist is not None else None,
+                **chainAttributes(chain)})
+            reaction.outputChannel.products.products.append(product)
+        data = hpd.get(i + 1)
+        if data is not None:
+            stated[pid] = {"start": int(data.energy_grid_index),
+                           "production": np.asarray(data.xs_values, dtype=float).tolist(),
+                           "heating": np.asarray(data.heating_numbers, dtype=float).tolist()}
+    if stated and isinstance(getattr(suite, "provenance", None), AceProvenance):
+        suite.provenance.attributes["HPD"] = stated
+    return report
