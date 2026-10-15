@@ -167,14 +167,7 @@ def _run_njoy_deck(njoy_exe, workdir: Path, deck: str):
     from .locale_guard import check_run, read_listing
 
     for attempt in range(1, _MAX_LOCALE_ATTEMPTS + 1):
-        result = subprocess.run(
-            build_njoy_command(njoy_exe),
-            cwd=workdir,
-            input=deck.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        result = _watchedRun(njoy_exe, workdir, deck)
         check = check_run(deck, read_listing(workdir))
         crashed = _crashed_on_a_misread(result)
         if not check.corrupted and not crashed:
@@ -185,6 +178,41 @@ def _run_njoy_deck(njoy_exe, workdir: Path, deck: str):
                 check.detail if check.corrupted else crashed, attempt + 1,
                 _MAX_LOCALE_ATTEMPTS)
     return result
+
+
+#: How often a running NJOY's listing is read for a misread echo, in seconds.
+_WATCH_INTERVAL = 0.5
+
+
+def _watchedRun(njoy_exe, workdir: Path, deck: str) -> subprocess.CompletedProcess:
+    """One NJOY run of *deck*, stopped as soon as its listing shows a misread.
+
+    A misread tolerance can be ``err = 0``, and RECONR may never finish on it:
+    ENDF/B-VIII.1 Pu-239 ran 47 min of CPU without writing a tape, where the
+    same deck read correctly takes 3.5 min. The echo is in the listing within a
+    second of the start, so it is read while NJOY runs -- only up to its last
+    complete line, since a line half written could read ``0.0`` for ``0.001``
+    -- and the run is killed on the first misread. The listing stays behind
+    for :func:`_run_njoy_deck`'s check, which then runs the deck again.
+    """
+    from .locale_guard import check_run, read_listing
+
+    process = subprocess.Popen(build_njoy_command(njoy_exe), cwd=workdir,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT)
+    data = deck.encode("utf-8")
+    while True:
+        try:
+            out, _ = process.communicate(input=data, timeout=_WATCH_INTERVAL)
+            break
+        except subprocess.TimeoutExpired:
+            data = None
+            listing = read_listing(workdir) or ""
+            if check_run(deck, listing[:listing.rfind("\n") + 1]).corrupted:
+                process.kill()
+                out, _ = process.communicate()
+                break
+    return subprocess.CompletedProcess(process.args, process.returncode, out, None)
 
 
 #: What gfortran prints when a formatted read meets a number it cannot parse --
