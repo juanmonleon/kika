@@ -1039,22 +1039,7 @@ def _fission_heating(out, work, grid, sigma, A):
         raise UnsupportedResonanceError("a fission with no MF1/458: HEATR's fission heating needs "
                                         "its energy release", category="heating-unsupported")
     h0 = evaluate(release.promptProductKE, grid) + evaluate(release.promptGammaEnergy, grid)
-    photon = h._Kinematics(A=A, Q=0.0, awp=0.0)
-    gammas = np.zeros(len(grid))
-    fissions = [r for r in list(out.reactions) + list(out.fissionComponents) + list(out.sums)
-                if r.ENDF_MT in h.FISSION_MTS]
-    # The prompt photons of fission are stated once, on MT18 (or the first chance).
-    for reaction in sorted(fissions, key=lambda r: r.ENDF_MT != 18):
-        found = False
-        for product in reaction.outputChannel.products:
-            mode = (getattr(product.provenance, "attributes", None) or {}).get("emission_mode", "prompt")
-            form = h._distribution(product) if product.pid == "photon" and mode == "prompt" else None
-            if form is not None:
-                gammas = gammas + h._yield(product, grid) * h._meanEnergyOf(form, grid, photon)
-                found = True
-        if found:
-            break
-    return np.where(sigma_f > 0, sigma_f * (h0 - gammas), 0.0)
+    return np.where(sigma_f > 0, sigma_f * h0, 0.0) - h.fissionPhotonKerma(out, grid, sigma, awr=A)
 
 
 def _heating(run, plan, report):

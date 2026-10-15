@@ -1396,12 +1396,16 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                    heatingPartials=(), qa=None, qbar=None):
     """MT301, MT901 and MT444 by :func:`kika.processing.heating.heatingOf`, plus fission.
 
-    The fission part comes from MF1/458 as OpenMC's ``from_njoy`` adds it to
-    HEATR's ``301 − 318``: ``(EFR + EB)·σ_f`` for 301, ``(EFR + EGP + EGD + EB)·σ_f``
-    for 901.
+    The fission part comes from MF1/458. For 901 it is ``(EFR + EGP + EGD + EB)·σ_f``.
+    For 301 it is HEATR's ``(EFR + EGP)·σ_f`` less the prompt photons the tables
+    carry for fission (:func:`~kika.processing.heating.fissionPhotonKerma`), plus
+    the delayed betas OpenMC counts locally, ``EB·σ_f``. Taking only ``EFR + EB``
+    is right only when those photons carry exactly EGP: Pu-238 of ENDF/B-VIII.1
+    states none and lost all of EGP (−3.8 % of its KERMA), and fission photons
+    stated on MT3 (Pu-240/241 above 100 keV) were taken out twice.
     """
     m = _m()
-    from kika.processing.heating import heatingOf
+    from kika.processing.heating import fissionPhotonEnergy, fissionPhotonKerma, heatingOf
     from .fission_energy import evaluate
 
     qm = {}
@@ -1447,7 +1451,8 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                 eb = evaluate(release.delayedBetaEnergy, grid)
                 egp = evaluate(release.promptGammaEnergy, grid)
                 egd = evaluate(release.delayedGammaEnergy, grid)
-                nonlocal_ = nonlocal_ + (efr + eb) * sigmaF
+                nonlocal_ = (nonlocal_ + (efr + egp + eb) * sigmaF
+                             - fissionPhotonKerma(out, grid, sigma, awr=awr))
                 local = local + (efr + egp + egd + eb) * sigmaF
             responses[301][label] = m.XYs1d(xs=grid, ys=nonlocal_, label=label)
             responses[901][label] = m.XYs1d(xs=grid, ys=local, label=label)
@@ -1456,11 +1461,14 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
         if heatingPartials:
             fissionKerma, fissionPhotons, fissionKinematic = {}, {}, {}
             if release is not None:
-                nonlocalF = evaluate(release.promptProductKE, grid) + evaluate(release.delayedBetaEnergy, grid)
-                photonF = evaluate(release.promptGammaEnergy, grid) + evaluate(release.delayedGammaEnergy, grid)
+                egpF = evaluate(release.promptGammaEnergy, grid)
+                releasedF = evaluate(release.promptProductKE, grid) + egpF + evaluate(release.delayedBetaEnergy, grid)
+                photonF = egpF + evaluate(release.delayedGammaEnergy, grid)
+                carriedF = fissionPhotonEnergy(out, grid, awr=awr)
                 for mt in result.perReaction:
                     if mt in FISSION_MTS:
-                        fissionKerma[mt], fissionPhotons[mt] = nonlocalF, photonF
+                        carried = carriedF.get(18, carriedF.get(mt, 0.0))
+                        fissionKerma[mt], fissionPhotons[mt] = releasedF - carried, photonF
                         fissionKinematic[mt] = evaluate(release.promptProductKE, grid) + evaluate(release.promptGammaEnergy, grid)
             partials = result.partialsOf(sigma, heatingPartials, fissionKerma=fissionKerma,
                                          fissionPhotonEnergy=fissionPhotons, fissionKinematicEnergy=fissionKinematic)
@@ -1469,7 +1477,7 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
             if 901 in partials:
                 totalLocal = result.kermaLocal.copy()
                 if release is not None:
-                    totalLocal += (nonlocalF + photonF) * sigmaF
+                    totalLocal += (releasedF - egpF + photonF) * sigmaF
                 partials[901] = totalLocal
             for mt, values in partials.items():
                 responses[mt][label] = m.XYs1d(xs=grid, ys=values, label=label)
