@@ -376,19 +376,31 @@ class _SuiteSegment:
     curves: object
     region: object
     left_high: bool
-    _shared_linear: object=field(init=False,repr=False,compare=False)
+    _linear: object=field(default=None,init=False,repr=False,compare=False)
+    _cache: object=field(default=None,init=False,repr=False,compare=False)
+    _identity: object=field(default=None,init=False,repr=False,compare=False)
     shared_cache: InitVar[object]=None
     identity: InitVar[object]=None
 
     def __post_init__(self,shared_cache,identity):
-        # Segments of one material share their curves; a tape whose
-        # backgrounds step every few hundred eV has thousands of segments,
-        # and reading every whole curve again for each made this quadratic.
-        # (*identity*, when given, names the curves as this does.)
+        # (*identity*, when given, names the curves as the default does.)
+        object.__setattr__(self,'_cache',shared_cache);object.__setattr__(self,'_identity',identity)
+
+    @property
+    def _shared_linear(self):
+        """The segment's shared lin-lin readers, made when first asked: only
+        a segment read on its own asks (a group reads its curves itself).
+
+        Segments of one material share their curves; a tape whose
+        backgrounds step every few hundred eV has thousands of segments,
+        and reading every whole curve again for each made this quadratic.
+        """
+        if self._linear is not None:return self._linear
+        shared_cache=self._cache;identity=self._identity
         if identity is None:identity=tuple((key,id(curve)) for key,curve in self.curves.items())
         if shared_cache is not None and identity in shared_cache:
-            object.__setattr__(self,'_shared_linear',shared_cache[identity][1])
-            return
+            object.__setattr__(self,'_linear',shared_cache[identity][1])
+            return self._linear
         from kika.algebra.prepared import _prepare_shared_linear_evaluator
         # Backgrounds are split at their jumps, so the set of curves changes
         # from segment to segment; what each curve contributes (its grid and
@@ -416,10 +428,11 @@ class _SuiteSegment:
                 ys=np.column_stack([curve.y for _,curve in members])
                 readers[token]=(tuple(curve for _,curve in members),_prepare_shared_linear_evaluator(x,ys,laws))
             shared.append((tuple(key for key,_ in members),readers[token][1]))
-        object.__setattr__(self,'_shared_linear',tuple(shared))
+        object.__setattr__(self,'_linear',tuple(shared))
         if shared_cache is not None:
             # The curves are held so their ids stay theirs.
-            shared_cache[identity]=(tuple(self.curves.values()),self._shared_linear)
+            shared_cache[identity]=(tuple(self.curves.values()),self._linear)
+        return self._linear
 
 
 @dataclass(frozen=True)
