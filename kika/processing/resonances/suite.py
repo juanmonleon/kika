@@ -527,11 +527,20 @@ class SuiteReconstructionResult:
         token=('sums',id(constant_values))
         plan=self._columns_cache.get(token)
         if plan is None:
-            zeros=frozenset(key for key,value in constant_values.items() if value==0 and key not in self._graph)
+            zeros=self._zeros(constant_values)
             parts={key:tuple(part for part in self._graph[key] if part not in zeros) for key in self._order}
             # The constants are held so their id stays theirs.
             plan=self._columns_cache[token]=(zeros,parts,constant_values);self._own(token,id(constant_values))
         return plan[0],plan[1]
+
+    def _zeros(self,constant_values):
+        """The leaves that are the constant zero on a segment."""
+        token=('zeros',id(constant_values))
+        plan=self._columns_cache.get(token)
+        if plan is None:
+            zeros=frozenset(key for key,value in constant_values.items() if value==0 and key not in self._graph)
+            plan=self._columns_cache[token]=(zeros,constant_values);self._own(token,id(constant_values))
+        return plan[0]
 
     def _finite_witnesses(self,only,values,constants=_NO_CONSTANTS):
         """The reactions whose finiteness implies that of all *values*.
@@ -626,10 +635,10 @@ class SuiteReconstructionResult:
         n=len(e);order=np.argsort(local,kind='stable')
         cut=np.flatnonzero(np.diff(local[order]))+1
         position={int(local[p[0]]):p for p in np.split(order,cut)}
-        plans=[self._sum_plan(c) for c in consts]
+        zero_sets=[self._zeros(c) for c in consts]
         closure=self._wanted(only);asked=set(only)
-        wanted=[closure-(zeros-asked) for zeros,_ in plans]
-        everywhere=frozenset.intersection(*[frozenset(zeros) for zeros,_ in plans])
+        wanted=[closure-(zeros-asked) for zeros in zero_sets]
+        everywhere=frozenset.intersection(*zero_sets)
         union_=set().union(*wanted)
         keys=[key for key in segs[0].curves if key in union_]
         grouped={}
@@ -640,19 +649,25 @@ class SuiteReconstructionResult:
                 if len(needed)<2 or not any(key in wanted[g] for _,key in needed):continue
                 batch=reader(e[position[g]],max_cells=max(1,min(65536,self.options.max_work_bytes//64)))
                 if batch is not None:grouped.update(((g,key),batch[:,i]) for i,key in needed)
-        values={}
+        values={};present=[g for g in range(len(segs)) if g in position]
         for key in keys:
-            column=np.zeros(n);by_curve={}
-            for g,s in enumerate(segs):
-                at=position.get(g)
-                if at is None:continue
-                if key in consts[g]:column[at]=consts[g][key]
-                elif (g,key) in grouped:column[at]=grouped[(g,key)]
-                else:
-                    curve=s.curves[key]
-                    if curve is not None and key not in self._graph:by_curve.setdefault(id(curve),(curve,[]))[1].append(at)
-            for curve,ats in by_curve.values():
-                at=np.concatenate(ats);column[at]=curve.evaluate(e[at])
+            # Each segment's value: its constant, its shared reader's, or its
+            # curve's (read elementwise, once per curve over its segments).
+            constant=np.zeros(len(segs));by_curve={}
+            summed=key in self._graph
+            for g in present:
+                c=consts[g]
+                if key in c:constant[g]=c[key]
+                elif (g,key) in grouped:pass
+                elif not summed:
+                    curve=segs[g].curves[key]
+                    if curve is not None:by_curve.setdefault(id(curve),(curve,[]))[1].append(g)
+            column=constant[local]
+            for g in present:
+                if (g,key) in grouped:column[position[g]]=grouped[(g,key)]
+            for curve,gs in by_curve.values():
+                at=position[gs[0]] if len(gs)==1 else np.concatenate([position[g] for g in gs])
+                column[at]=curve.evaluate(e[at])
             values[key]=column
         if 'total_parts' not in self._columns_cache:
             total=self._mt_keys.get(1)
@@ -1175,12 +1190,9 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         else:
             # Original knots suffice for linear fast-region data. Inserting
             # unnecessary near-threshold points amplifies ENDF x-rounding.
-            seeds=sorted({s.low,s.high}|{float(x) for c in seed_curves.values() for x in _knots_in(c[0],s.low,s.high)})
-            for cs in seed_curves.values():
-                c=cs[0]
-                if c.x[-1]==s.high and c.endpoint_jump:
-                    seeds.append(float(np.nextafter(s.high,s.low)))
-            seeds=sorted(set(seeds))
+            seeds={s.low,s.high}|{float(x) for knots in closed_leaf[position] for x in knots}
+            if ends_jump[position]:seeds.add(float(np.nextafter(s.high,s.low)))
+            seeds=sorted(seeds)
         affected=({physical_owners.get(mt) for mt in region_mts(s.region)}
                   if s.region is not None else set())
         constants={}

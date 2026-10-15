@@ -383,9 +383,11 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
     # reaction and each segment's constants (NaN: not a constant there).
     where={mt:i for i,mt in enumerate(keys)}
     lengths=np.array([b-a for a,b in bounds]);starts=np.r_[0,np.cumsum(lengths)]
-    constant=np.full((len(xs),len(keys)),np.nan)
-    for k,(_,constants,_) in enumerate(spans):
-        for mt,value in constants.items():constant[k,where[mt]]=value
+    constant=np.full((len(xs),len(keys)),np.nan);has=np.zeros((len(xs),len(keys)),dtype=bool)
+    deferred_in=np.zeros((len(xs),len(keys)),dtype=bool)
+    for k,(_,constants,deferred) in enumerate(spans):
+        for mt,value in constants.items():constant[k,where[mt]]=value;has[k,where[mt]]=True
+        for mt in deferred:deferred_in[k,where[mt]]=True
     y={}
     for j,mt in enumerate(keys):
         if mt in index:y[mt]=result.y[:,index[mt]]
@@ -397,7 +399,7 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
         j=where[mt]
         column=np.repeat(constant[:,j],lengths)
         sampled=np.repeat(constant[:,j],np.diff(panels))[:,None]*np.ones(probes.shape[1])
-        users=[k for k in range(len(xs)) if mt in spans[k][2]]
+        users=np.flatnonzero(deferred_in[:,j]).tolist()
         readers=[spans[k][2][mt] for k in users]
         curve=getattr(readers[0],'curve',None)
         grids=[result.x[starts[k]:starts[k+1]] for k in users]
@@ -427,15 +429,15 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
     # A column constant on a span is its constant there, on the nodes and
     # the probes alike, so it never counts against that span.
     for j,mt in enumerate(checked):
-        for k,(_,constants,_) in enumerate(spans):
-            if mt in constants:
-                p0,p1=panels[k],panels[k+1]
-                samples[p0:p1,:,j]=constants[mt];nodes[p0:p1,:,j]=constants[mt]
+        on=has[:,where[mt]][span_of_panel]
+        if np.any(on):
+            value=constant[:,where[mt]][span_of_panel][on][:,None]
+            samples[on,:,j]=value;nodes[on,:,j]=value
     linear=nodes[:,0,None,:]+(nodes[:,1]-nodes[:,0])[:,None,:]*fractions[:,:,None]
     ratio=error_ratio(samples,linear,options)
     for j,mt in enumerate(late):
         r=ratio[:,:,len(union)+j]
-        deferred_here=np.array([mt in spans[k][2] for k in range(len(xs))])[span_of_panel]
+        deferred_here=deferred_in[:,where[mt]][span_of_panel]
         if np.any(~np.isfinite(r[deferred_here])) or np.any(r[deferred_here]>.5):return alone()
     refinement=np.zeros(len(keys));verification=np.zeros(len(keys));integrals=[None]*len(keys);worst={}
     where={mt:i for i,mt in enumerate(keys)}
@@ -450,7 +452,7 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
     for i,mt in enumerate(keys):
         if integrals[i] is not None:continue
         # Constant on every span: its quadrature is the constant's.
-        value=np.array([spans[k][1][mt] for k in range(len(xs))])[span_of_panel][:,None]
+        value=constant[:,i][span_of_panel][:,None]
         estimates={name:float(np.sum(f*value)) for name,f in factors}
         integrals[i]={name:dict(reference_estimate=estimates[name],linear_estimate=estimates[name],
                                 absolute_difference_estimate=0.) for name,f in factors}
