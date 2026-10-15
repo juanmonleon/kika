@@ -16,7 +16,7 @@ def spectrum(flat=False):
 
 @pytest.mark.parametrize("flat",[False,True])
 def test_tabulated_recoil_retains_incident_energy_with_held_support(monkeypatch,flat):
-    monkeypatch.setattr(H,"lindhard",lambda e,*args:e)
+    monkeypatch.setattr(H,"lindhard",lambda e,*args:e); monkeypatch.setattr(H, "_heating_native", None)  # the NumPy reference uses the stub
     E=np.array([0.,1.,1e6,1.25e6,1.5e6,np.nextafter(2e6,-np.inf),2e6,3e6,1e8])
     f=np.where(E>=2e6,1.,0.) if flat else np.clip((E-1e6)/1e6,0.,1.)
     mean=(1e6+3e6*f)*((1-f)/2+f/3)
@@ -61,7 +61,7 @@ def test_tabulated_recoil_refuses_zero_mass():
 @pytest.mark.parametrize("frame",[m.Frame.lab,m.Frame.centerOfMass])
 @pytest.mark.parametrize("flat",[False,True])
 def test_charged_damage_preserves_closed_boost_moment_with_held_spectrum(monkeypatch,frame,flat):
-    monkeypatch.setattr(H,"lindhard",lambda e,*args:e)
+    monkeypatch.setattr(H,"lindhard",lambda e,*args:e); monkeypatch.setattr(H, "_heating_native", None)  # the NumPy reference uses the stub
     E=np.array([0.,1e6,1.25e6,1.5e6,2e6,3e6,1e8]);A,ap=28.,4.
     f=np.where(E>=2e6,1.,0.) if flat else np.clip((E-1e6)/1e6,0.,1.)
     mean=(1e6+3e6*f)*((1-f)/2+f/3)

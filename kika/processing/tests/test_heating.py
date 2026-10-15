@@ -244,7 +244,7 @@ def test_analytic_emission_damage_retains_logarithmic_parameter_law(name, shape,
     E = np.array([1e-5, 786.4939, 1e4, 1e6, 2e7, 3e7]); A = 238.
     # With an identity partition the angular cross term integrates to zero,
     # and the spectrum's first moment has a closed incomplete-gamma form.
-    monkeypatch.setattr(H, "lindhard", lambda recoil, *args: recoil)
+    monkeypatch.setattr(H, "lindhard", lambda recoil, *args: recoil); monkeypatch.setattr(H, "_heating_native", None)  # the NumPy reference uses the stub
     t = theta.evaluate(E); upper = (E + 3e7) / t
     expected = (E + shape * t * gammainc(shape+1, upper) / gammainc(shape, upper)) / A
     actual = H._emissionDamage(form, E, A, 92, 0.)
@@ -263,7 +263,7 @@ def test_analytic_emission_damage_does_not_interpolate_across_zero_support(monke
     law = m.SimpleMaxwellianFission(U=m.PhysicalQuantity(1e6, "eV"),
         theta=m.XYs1d(xs=[1., 2e6], ys=[1e6, 1e6]))
     E = np.array([1e-5, 1e6, 1e6+1., 2e6])
-    monkeypatch.setattr(H, "lindhard", lambda recoil, *args: recoil)
+    monkeypatch.setattr(H, "lindhard", lambda recoil, *args: recoil); monkeypatch.setattr(H, "_heating_native", None)  # the NumPy reference uses the stub
     actual = H._emissionDamage(m.Uncorrelated(energy=law), E, 238., 92, 0.)
     np.testing.assert_array_equal(actual[:2], [0., 0.])
     upper = (E[2:]-1e6)/1e6
@@ -356,7 +356,7 @@ def test_mf6_capture_443_uses_independent_photon_kicks_without_compound_recoil()
 def test_two_body_damage_splits_displacement_threshold_and_controls_interpolation(A,ed,monkeypatch):
     # An identity partition above ed gives an exact truncated uniform-recoil
     # integral. This checks threshold clipping without copying quadrature.
-    monkeypatch.setattr(H,"lindhard",lambda recoil,*args:np.where(recoil>=ed,recoil,0.))
+    monkeypatch.setattr(H,"lindhard",lambda recoil,*args:np.where(recoil>=ed,recoil,0.)); monkeypatch.setattr(H, "_heating_native", None)  # the NumPy reference uses the stub
     form=m.AngularTwoBody(angular=m.Isotropic2d(),productFrame=m.Frame.centerOfMass)
     activation=25*(A+1)**2/(4*A)
     E=np.unique(np.r_[activation*np.array([.999999,1.,1.000001,1.4]),np.geomspace(activation,1e8,17)])
@@ -398,7 +398,7 @@ def test_fission_chances_use_common_aggregate_spectrum_once_without_double_count
 
 def test_inelastic_damage_keeps_both_sides_of_reaction_threshold(monkeypatch):
     A=55.;Q=-1e6;threshold=(A+1)/A*(-Q)
-    monkeypatch.setattr(H,"lindhard",lambda recoil,*args:recoil)
+    monkeypatch.setattr(H,"lindhard",lambda recoil,*args:recoil); monkeypatch.setattr(H, "_heating_native", None)  # the NumPy reference uses the stub
     form=m.AngularTwoBody(angular=m.Isotropic2d(),productFrame=m.Frame.centerOfMass)
     E=np.array([threshold/10,np.nextafter(threshold,-np.inf),threshold,threshold+1.,2*threshold])
     r2=np.maximum(1-threshold/E,0.);expected=np.where(E>=threshold,E*A/(A+1)**2*(1+r2),0.)
