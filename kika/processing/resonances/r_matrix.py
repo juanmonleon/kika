@@ -318,7 +318,7 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     Real L-B and external diagonal terms remain in the solve. Exceptional
     poles use bounded reference batches; no level absorption array is retained.
     """
-    from ._rm_acceleration import _native, eligible, reference_block_size, channel_solution
+    from ._rm_acceleration import _native, eligible, reference_block_size, channel_solution, gram_capture
     er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
     a=np.require(reduced,dtype=float,requirements=['C','A']);f=np.ones_like(p)
     if not eligible(e,er,gamma,a,f,work_bytes,True,1e-8):return None
@@ -343,7 +343,7 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     regular=unsafe==0
     w=np.empty_like(p,dtype=complex);y=np.empty_like(w);absorption=np.empty(len(e))
     if np.any(regular):
-        rr=r[regular];index=np.arange(c);rr[:,index,index]+=external[regular]
+        level=r[regular];rr=level.copy();index=np.arange(c);rr[:,index,index]+=external[regular]
         matrix=np.eye(c)[None,:,:]-logarithmic[regular,:,None]*rr
         rhs=np.zeros((len(rr),c,1),complex);rhs[:,entrance,0]=1.
         try:yr=channel_solution(matrix,rhs,entrance)
@@ -353,12 +353,25 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
         maximum=float(np.max(residual/(np.linalg.norm(matrix,axis=(1,2))*np.linalg.norm(yr,axis=1)+1.)))
         if maximum>1e-11:return None
         y[regular]=yr;w[regular]=np.einsum('ecd,ed->ec',rr,yr)
-        direct=np.empty(len(rr))
-        _native.absorption(len(rr),len(er),c,np.ascontiguousarray(e[regular]),er,gamma,
-            a.ravel(),np.ascontiguousarray(f[regular]).ravel(),yr.view(float).ravel(),direct)
+        # Capture from the level sum alone (the external term is added below),
+        # by the Gram contraction where its roundoff bound allows, as the RM
+        # path does; the other rows take the direct all-level sum.
+        direct,accepted,bound=gram_capture(level,yr,e[regular],er,gamma,a,f[regular],1e-8)
+        fallback=~accepted
+        if np.any(fallback):
+            rows=np.empty(int(fallback.sum()))
+            _native.absorption(len(rows),len(er),c,np.ascontiguousarray(e[regular][fallback]),er,gamma,
+                a.ravel(),np.ascontiguousarray(f[regular][fallback]).ravel(),np.ascontiguousarray(yr[fallback]).view(float).ravel(),rows)
+            direct[fallback]=rows
         absorption[regular]=p[regular,entrance]*(direct+4*np.sum(external[regular].imag*abs(yr)**2,axis=1))
         if diagnostics is not None:
             diagnostics['rml_max_solver_residual']=max(diagnostics.get('rml_max_solver_residual',0.),maximum)
+            diagnostics['rml_gram_capture_energies']=diagnostics.get('rml_gram_capture_energies',0)+int(accepted.sum())
+            diagnostics['rml_direct_capture_energies']=diagnostics.get('rml_direct_capture_energies',0)+int(fallback.sum())
+            if np.any(accepted) and np.any(gamma>0):
+                diagnostics['rml_max_capture_relative_roundoff_estimate']=max(
+                    diagnostics.get('rml_max_capture_relative_roundoff_estimate',0.),
+                    float(np.max(bound[accepted]/direct[accepted])))
     indexes=np.flatnonzero(~regular);block=reference_block_size(len(er),c,work_bytes)
     for start in range(0,len(indexes),block):
         ix=indexes[start:start+block]

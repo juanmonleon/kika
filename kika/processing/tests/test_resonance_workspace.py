@@ -58,6 +58,29 @@ def test_streamed_rml_retains_real_shifts_closed_channels_and_pole_limits(shift,
     for mt in expected:np.testing.assert_allclose(fallback[mt],expected[mt],rtol=2e-12,atol=1e-11)
 
 
+@pytest.mark.parametrize('levels',[3,40])
+def test_streamed_rml_gram_capture_and_few_level_groups_are_native(levels):
+    """The RML capture takes the Gram contraction 4 y* Im(R) y where its
+    roundoff bound allows, as the RM path does, and agrees with the general
+    level-space solve. A group of a few levels takes the native sums too:
+    W-183 and Sr-88 groups of 10-11 levels were on the NumPy reference."""
+    from kika.processing.resonances import _rm_acceleration
+    if _rm_acceleration._native is None:pytest.skip('optional extension unavailable')
+    model,ctx=rml_model(shift='calculate')
+    sg=model.resolved[0].formalism.spinGroups[0]
+    sg.energies=[100.+i*.4 for i in range(levels)]
+    sg.widths=[list(sg.widths[i%2]) for i in range(levels)]
+    region=prepare_resonances(model,ctx).regions[0]
+    e=np.unique(np.r_[np.geomspace(10.,299.,300),75.])
+    expected=evaluate_region(e,region,ctx)
+    diagnostics={}
+    actual=evaluate_region(e,region,ctx,diagnostics,absorption_rtol=1e-8)
+    for mt in expected:np.testing.assert_allclose(actual[mt],expected[mt],rtol=2e-11,atol=1e-10)
+    assert diagnostics.get('rml_native_energies',0)>0
+    assert diagnostics.get('rml_gram_capture_energies',0)>0
+    assert diagnostics['rml_max_capture_relative_roundoff_estimate']<=1e-8
+
+
 def test_extreme_neutral_penetrability_retains_general_bounded_rml(monkeypatch):
     from kika.processing.resonances.r_matrix import RMLChannel
     original=RMLChannel.functions

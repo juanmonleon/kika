@@ -30,7 +30,7 @@ def eligible(energies, levels, widths, reduced, factors, work_bytes,
             or reduced is None or work_bytes < 65536):return False
     e,er,g,a,f=(np.asarray(v) for v in (energies,levels,widths,reduced,factors))
     if (e.ndim!=1 or er.ndim!=1 or g.shape!=er.shape or a.ndim!=2
-            or a.shape[0]!=len(er) or len(er)<32 or not 1<=a.shape[1]<=MAX_CHANNELS
+            or a.shape[0]!=len(er) or not len(er) or not 1<=a.shape[1]<=MAX_CHANNELS
             or f.shape!=(len(e),a.shape[1]) or not len(e)):return False
     # Restrict acceleration to normal float64 arithmetic. Extreme data use
     # the reference kernel, including its established pole-limit handling.
@@ -65,6 +65,41 @@ def channel_solution(matrix,rhs,entrance):
     return np.ascontiguousarray(np.linalg.solve(matrix,rhs)[:,:,0])
 
 
+def gram_capture(r,y,e,er,gamma,a,f,absorption_rtol):
+    """Radiative capture 4 Re(y* Im(R) y) and the rows where it is accepted.
+
+    ``r`` is the level sum of :func:`_native.matrices` with the factors ``f``
+    applied and nothing else added, so Im(R) is the positive Gram sum of the
+    radiative level amplitudes: 4 y* Im(R) y = 2 sum_n gamma_n |X_n|^2, the
+    direct capture of ``_native.absorption``. Signed off-diagonal terms can
+    cancel, so a row is accepted only under a conservative roundoff estimate
+    ``bound``; the caller computes the others directly.
+    """
+    c=r.shape[1]
+    b=r.imag;diag=np.diagonal(b,axis1=1,axis2=2)
+    cap=(4*np.real(y[:,0].conj()*(b[:,0,0]*y[:,0])) if c==1 else
+         4*np.real(np.sum(y.conj()*np.einsum('eij,ej->ei',b,y),axis=1)))
+    majorant=(4*(abs(y[:,0])*np.sqrt(np.maximum(diag[:,0],0.)))**2 if c==1 else
+              4*np.sum(abs(y)*np.sqrt(np.maximum(diag,0.)),axis=1)**2)
+    eps=np.finfo(float).eps;tiny=np.finfo(float).tiny
+    scale=8*(len(er)+32*c+64)*eps
+    bound=scale/(1-scale)*majorant if scale<1 else np.full(len(y),np.inf)
+    radiative=gamma>0;active=np.any((a!=0)&radiative[:,None],axis=0)
+    normal=np.all((diag>=tiny)|~active[None,:],axis=1)
+    normal &= np.all((f*f>=tiny)|(f==0),axis=1)
+    normal &= np.all((a*a>=tiny)|(a==0)) and np.all((gamma>=tiny)|~radiative)
+    if np.any(radiative):
+        distance=np.maximum(abs(e-er.min()),abs(e-er.max()))
+        with np.errstate(over='ignore',divide='ignore'):
+            upper=(distance*distance+(.5*gamma.max())**2)*(1+8*eps)
+            lower=np.nextafter(.5*gamma[radiative].min()/upper,0.)
+        normal &= lower>=tiny
+    accepted=normal&np.isfinite(cap)&(cap>=tiny)&(majorant>=tiny)&(bound<=absorption_rtol*cap)&(bound<=1e-10)
+    if absorption_rtol==0.:accepted[:]=False
+    if not np.any(radiative):accepted[:]=True;cap[:]=0.
+    return cap,accepted,bound
+
+
 def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entrance=0,
           reduced=None,channel_factors=None,work_bytes=64*1024**2,
           return_absorption=False,absorption_rtol=0.):
@@ -93,27 +128,8 @@ def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entranc
         maximum=float(np.max(abs(residual)/(np.linalg.norm(matrix,axis=(1,2))[:,None,None]*np.linalg.norm(y,axis=1)[:,None,None]+1.)))
         if maximum>1e-11:return None
         w[regular]=rr[:,0,:]*y if c==1 else np.einsum('ecd,ed->ec',rr,y)
-        b=rr.imag;diag=np.diagonal(b,axis1=1,axis2=2)
-        cap=(4*np.real(y[:,0].conj()*(b[:,0,0]*y[:,0])) if c==1 else
-             4*np.real(np.sum(y.conj()*np.einsum('eij,ej->ei',b,y),axis=1)))
-        majorant=(4*(abs(y[:,0])*np.sqrt(np.maximum(diag[:,0],0.)))**2 if c==1 else
-                  4*np.sum(abs(y)*np.sqrt(np.maximum(diag,0.)),axis=1)**2)
-        eps=np.finfo(float).eps;tiny=np.finfo(float).tiny
-        scale=8*(len(er)+32*c+64)*eps
-        bound=scale/(1-scale)*majorant if scale<1 else np.full(len(y),np.inf)
-        radiative=gamma>0;active=np.any((a!=0)&radiative[:,None],axis=0)
-        normal=np.all((diag>=tiny)|~active[None,:],axis=1)
-        normal &= np.all((f[regular]*f[regular]>=tiny)|(f[regular]==0),axis=1)
-        normal &= np.all((a*a>=tiny)|(a==0)) and np.all((gamma>=tiny)|~radiative)
-        if np.any(radiative):
-            distance=np.maximum(abs(e[regular]-er.min()),abs(e[regular]-er.max()))
-            with np.errstate(over='ignore',divide='ignore'):
-                upper=(distance*distance+(.5*gamma.max())**2)*(1+8*eps)
-                lower=np.nextafter(.5*gamma[radiative].min()/upper,0.)
-            normal &= lower>=tiny
-        accepted=normal&np.isfinite(cap)&(cap>=tiny)&(majorant>=tiny)&(bound<=absorption_rtol*cap)&(bound<=1e-10)
-        if absorption_rtol==0.:accepted[:]=False
-        if not np.any(radiative):accepted[:]=True;cap[:]=0.
+        cap,accepted,bound=gram_capture(rr,y,e[regular],er,gamma,a,f[regular],absorption_rtol)
+        radiative=gamma>0
         fallback=~accepted
         if np.any(fallback):
             direct=np.zeros(int(fallback.sum()))
