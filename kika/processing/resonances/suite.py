@@ -578,7 +578,7 @@ class SuiteReconstructionResult:
             if item[0] is _GROUP:
                 # Energies of several segments: each segment's left edge rule,
                 # and its physics in segment order, as if asked one by one.
-                _,segs,consts,local,points,only=item
+                _,segs,consts,local,points,only,_=item
                 e=np.asarray(points,dtype=float).copy()
                 highs=np.array([s.high for s in segs]);lows_=np.array([s.low for s in segs])
                 left=np.array([s.left_high for s in segs])
@@ -633,10 +633,10 @@ class SuiteReconstructionResult:
     def _evaluate_group(self,item,e,physics):
         """:meth:`_evaluate_segment` for energies of several segments of one
         region at once: every value is the one its own segment gives (a
-        constant, a shared reader, its curve, the physics), and every sum
+        constant, its curve, the physics), and every sum
         adds the parts any of them needs (a part that is zero on a segment
         adds nothing there, exactly: a sum starts at +0.0)."""
-        _,segs,consts,local,points,only=item
+        _,segs,consts,local,points,only,members=item
         n=len(e);order=np.argsort(local,kind='stable')
         cut=np.flatnonzero(np.diff(local[order]))+1
         position={int(local[p[0]]):p for p in np.split(order,cut)}
@@ -645,39 +645,28 @@ class SuiteReconstructionResult:
         # Segments share their zero sets (the same object, see
         # reconstruct_suite): what each set wants is worked out once.
         distinct={id(zeros):zeros for zeros in zero_sets}
-        wanted_by={i:closure-(zeros-asked) for i,zeros in distinct.items()}
-        wanted=[wanted_by[id(zeros)] for zeros in zero_sets]
         everywhere=frozenset.intersection(*distinct.values())
-        union_=set().union(*wanted_by.values())
+        union_=set().union(*(closure-(zeros-asked) for zeros in distinct.values()))
         keys=[key for key in segs[0].curves if key in union_]
-        read_by={};read_in=[()]*len(segs)
-        for g,s in enumerate(segs):
-            if g not in position:continue
-            for names,reader in s._shared_linear:
-                needed=[(i,key) for i,key in enumerate(names) if key not in consts[g] and key not in self._graph]
-                if len(needed)<2 or not any(key in wanted[g] for _,key in needed):continue
-                batch=reader(e[position[g]],max_cells=max(1,min(65536,self.options.max_work_bytes//64)))
-                if batch is not None:
-                    for i,key in needed:read_by.setdefault(key,[]).append((g,batch[:,i]))
-                    read_in[g]=set(read_in[g])|{key for _,key in needed}
-        values={};present=[g for g in range(len(segs)) if g in position]
+        # The segments' constant leaves and curve indices, as reconstruct_suite
+        # laid them out for every segment (a group's constants are those).
+        rows,held,constants,indices,choices=self._columns_cache['segment_tables']
+        values={}
         for key in keys:
-            # Each segment's value: its constant, its shared reader's, or its
-            # curve's (read elementwise, once per curve over its segments).
-            constant=np.zeros(len(segs));by_curve={}
-            summed=key in self._graph
-            for g in present:
-                value=consts[g].get(key,_ABSENT)
-                if value is not _ABSENT:constant[g]=value
-                elif summed or key in read_in[g]:pass
-                else:
-                    curve=segs[g].curves[key]
-                    if curve is not None:by_curve.setdefault(id(curve),(curve,[]))[1].append(g)
-            column=constant[local]
-            for g,read in read_by.get(key,()):column[position[g]]=read
-            for curve,gs in by_curve.values():
-                at=position[gs[0]] if len(gs)==1 else np.concatenate([position[g] for g in gs])
-                column[at]=curve.evaluate(e[at])
+            # Each segment's value: its constant or its curve's, a curve read
+            # elementwise once over all the segments that read it. (Not the
+            # segments' shared readers: each segment has its own set of
+            # curves, so a reader serves one segment; their lin-lin arithmetic
+            # and node values are the curve's, see panel_value.) A sum's
+            # column is remade from its parts below.
+            row=rows[key];here=held[row,members]
+            column=np.where(here,constants[row,members],0.)[local]
+            if key not in self._graph:
+                index=indices[row,members];read=np.flatnonzero(~here&(index>=0))
+                for j in np.unique(index[read]).tolist():
+                    gs=read[index[read]==j].tolist()
+                    at=position[gs[0]] if len(gs)==1 else np.concatenate([position[g] for g in gs])
+                    column[at]=choices[row][j].evaluate(e[at])
             values[key]=column
         if 'total_parts' not in self._columns_cache:
             total=self._mt_keys.get(1)
@@ -1203,6 +1192,10 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         linear=curve.linear_over_many(lows,highs);end=0
         for row,run in members:
             constant_of[row,run]=values[end:end+len(run)];linear_of[row,run]=linear[end:end+len(run)];end+=len(run)
+    # Each segment's constant leaves as prepare finds them, for the group
+    # requests (whose constants are these) to read by index.
+    held_of=np.zeros((len(names),len(segments)),dtype=bool);value_of=np.zeros((len(names),len(segments)))
+    result._columns_cache['segment_tables']=(rows,held_of,value_of,indices,choices)
     blocked_in={};zero_sets={}
     def blocked(region):
         """The reactions a segment of *region* never holds constant or
@@ -1240,6 +1233,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             held=free&(value==value)
         at=np.flatnonzero(held)
         constants=dict(zip(keyed[at].tolist(),value[at].tolist()))
+        held_of[:,position]=held;value_of[at,position]=value[at]
         for key in order:
             if all(part in constants for part in graph[key]):
                 constants[key]=sum((constants[part] for part in graph[key]),0.)
@@ -1362,6 +1356,36 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             # segment do.
             first,last=segments[positions[0]],segments[positions[-1]]
             checks[positions[0]]=dict(domain=(first.low,last.high),points=sum(len(tables[i]) for i in positions),**group)
+    def source_values(e,owner):
+        """A source-diagnostic request over the energies of several
+        segments: every reaction as the source states it, sums included,
+        each segment reading its constant leaves as their constants and the
+        rest from their curves (one read per curve over all the segments
+        that read it; elementwise, the left edge rule per segment). A leaf
+        that is the constant zero on a segment is left out there: +0.0, as
+        the segments' requests joined it."""
+        members,local=np.unique(owner,return_inverse=True)
+        e=np.asarray(e,dtype=float).copy()
+        highs=np.array([segments[i].high for i in members]);lows=np.array([segments[i].low for i in members])
+        left=np.array([segments[i].left_high for i in members])
+        at=left[local]&(e==highs[local])
+        e[at]=np.nextafter(highs[local][at],lows[local][at])
+        order_=np.argsort(local,kind='stable')
+        position=np.split(order_,np.flatnonzero(np.diff(local[order_]))+1)
+        held,value,index=held_of[:,members],value_of[:,members],indices[:,members]
+        asked=summed_row[:,None]|~(held&(value==0))
+        out={}
+        for row in np.flatnonzero(asked.any(axis=1)).tolist():
+            ask=asked[row];constant=ask&held[row]
+            column=np.where(constant[local],value[row][local],0.)
+            read=np.flatnonzero(ask&~constant&(index[row]>=0))
+            for j in np.unique(index[row][read]).tolist():
+                gs=read[index[row][read]==j].tolist()
+                at=position[gs[0]] if len(gs)==1 else np.concatenate([position[g] for g in gs])
+                column[at]=choices[row][j].evaluate(e[at])
+                if not np.all(np.isfinite(column[at])):raise FloatingPointError('nonfinite suite cross section')
+            out[names[row]]=column
+        return out
     def answer(requests):
         """Values for requests ``(energies, only, segment)``, *segment* one
         index or one per energy: each split into one request per segment."""
@@ -1369,10 +1393,12 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         for e,only,owner in requests:
             if np.ndim(owner)==0:
                 shapes.append(None);flat.append((segments[int(owner)],(e,only),pending[int(owner)][0]));continue
+            if only=='diagnostic':
+                shapes.append(('ready',source_values(e,owner)));continue
             if isinstance(only,tuple):
                 members,local=np.unique(owner,return_inverse=True)
                 shapes.append('group')
-                flat.append((_GROUP,[segments[i] for i in members],[pending[i][0] for i in members],local,e,only))
+                flat.append((_GROUP,[segments[i] for i in members],[pending[i][0] for i in members],local,e,only,members))
                 continue
             ordered=np.argsort(owner,kind='stable')
             parts=np.split(ordered,np.flatnonzero(np.diff(owner[ordered]))+1);shapes.append((len(e),parts))
@@ -1380,6 +1406,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 i=int(owner[idx[0]]);flat.append((segments[i],(e[idx],only),pending[i][0]))
         values=result._answer(flat);out=[];at=0
         for (e,only,owner),shape in zip(requests,shapes):
+            if isinstance(shape,tuple) and shape[0]=='ready':
+                out.append(shape[1]);continue
             if shape is None or shape=='group':
                 out.append(values[at]);at+=1;continue
             n,parts=shape;pieces=values[at:at+len(parts)];at+=len(parts)
