@@ -106,6 +106,18 @@ def _channelProducts(channel, base):
             yield from _channelProducts(inner, key + ("decay",))
 
 
+def _multiplicityOwners(suite) -> Iterator[Tuple[Tuple[str, ...], object]]:
+    """``(key, owner)`` of every multiplicity: the products', then the
+    multiplicity sums' (total nu-bar), keyed by ENDF MT and rank."""
+    yield from _products(suite)
+    seen: Dict[int, int] = {}
+    for summed in getattr(getattr(suite, "sums", None), "multiplicitySums", None) or ():
+        mt = int(getattr(summed, "ENDF_MT", None) or 0)
+        rank = seen.get(mt, 0)
+        seen[mt] = rank + 1
+        yield ("multiplicitySums", str(mt), str(rank)), summed
+
+
 def _tables(form) -> Iterator[object]:
     """Every ``Xs_pdf_cdf1d`` under ``form``, in field and list order."""
     m = _m()
@@ -456,16 +468,17 @@ def lower(suite) -> Lowered:
                     for style in getattr(suite, "styles", None) or ())
     _foldSums(suite, out)
     _liftProbabilityTables(suite, out)
-    for key, product in _products(suite):
-        # A yield with a step, as ACE states it: one TAB1 with the energy
-        # repeated. GNDS splits it into regions1d (FUDGE drops a repeat with
-        # equal values), so the table comes back with more NBT/INT; the block
-        # keeps it as it was (Pu-240's MT4 photons).
-        for label, form in (getattr(getattr(product, "multiplicity", None), "forms", None) or {}).items():
+    # A yield with a step, as ACE states it: one TAB1 with the energy
+    # repeated. GNDS splits it into regions1d (FUDGE drops a repeat with
+    # equal values), so the table comes back with more NBT/INT; the block
+    # keeps it as it was (Pu-240's MT4 photons, U-238's total nu-bar).
+    for key, owner in _multiplicityOwners(suite):
+        for label, form in (getattr(getattr(owner, "multiplicity", None), "forms", None) or {}).items():
             if processed and isinstance(form, (m.XYs1d, m.Regions1d)):
                 x, y, pairs = form.toEndfRegions()
                 if len(pairs) > 1 or np.any(np.diff(np.asarray(x, dtype=float)) <= 0):
                     out.multiplicities.append((key, label, (x, y, pairs)))
+    for key, product in _products(suite):
         distribution = getattr(product, "distribution", None)
         if distribution is None:
             continue
@@ -647,7 +660,7 @@ def read(application: ET.Element, suite, report, readFunction) -> ET.Element:
         _readAce(blocks["aceProvenance"], suite, report)
     _applyForms(entries, suite, report, readFunction)
     if blocks["multiplicityTables"]:
-        products = {"/".join(key): product for key, product in _products(suite)}
+        products = {"/".join(key): owner for key, owner in _multiplicityOwners(suite)}
         for node in blocks["multiplicityTables"]:
             product = products.get(node.get("key"))
             forms = getattr(getattr(product, "multiplicity", None), "forms", None)
