@@ -56,3 +56,30 @@ def test_tabulated_recoil_refuses_zero_mass():
     law=m.XYs2d(function1ds=[m.Xs_pdf_cdf1d(xs=[0.,1.],pdf=[0.,0.],cdf=[0.,0.],outerDomainValue=1.)])
     with pytest.raises(ValueError,match="positive width and mass"):
         H._emissionDamage(m.Uncorrelated(energy=law),np.array([1.]),238.,92,25.)
+
+
+@pytest.mark.parametrize("frame",[m.Frame.lab,m.Frame.centerOfMass])
+@pytest.mark.parametrize("flat",[False,True])
+def test_charged_damage_preserves_closed_boost_moment_with_held_spectrum(monkeypatch,frame,flat):
+    monkeypatch.setattr(H,"lindhard",lambda e,*args:e)
+    E=np.array([0.,1e6,1.25e6,1.5e6,2e6,3e6,1e8]);A,ap=28.,4.
+    f=np.where(E>=2e6,1.,0.) if flat else np.clip((E-1e6)/1e6,0.,1.)
+    mean=(1e6+3e6*f)*((1-f)/2+f/3)
+    expected=mean+(ap*E/(A+1)**2 if frame==m.Frame.centerOfMass else 0.)
+    form=m.Uncorrelated(energy=spectrum(flat),productFrame=frame)
+    actual=H._particleDamage(form,E,H._Kinematics(A=A,Q=0.,awp=ap),2,ap,14,A,0.)
+    np.testing.assert_allclose(actual,expected,atol=.1,rtol=1.1e-4)
+
+
+def test_charged_lab_damage_splits_threshold_against_independent_scalar_integral():
+    z,a,Z,A,ed=1.,1.,14,28.,25.;top=1e5
+    law=m.XYs2d(function1ds=[m.Xs_pdf_cdf1d(xs=[0.,top],pdf=[1/top,1/top],cdf=[0.,1.],outerDomainValue=1e6)])
+    def partition(r):
+        scale=30.724*z*Z*np.sqrt(z**(2/3)+Z**(2/3))*(a+A)/A
+        factor=.0793*z**(2/3)*np.sqrt(Z)*(a+A)**1.5/((z**(2/3)+Z**(2/3))**.75*a**1.5*np.sqrt(A))
+        v=r/scale
+        return r/(1+factor*(3.4008*v**(1/6)+.40244*v**.75+v))
+    expected=quad(partition,ed,top,epsabs=1e-6)[0]/top
+    form=m.Uncorrelated(energy=law,productFrame=m.Frame.lab)
+    actual=H._particleDamage(form,np.array([1e6,3e6]),H._Kinematics(A=A,Q=0.,awp=a),z,a,Z,A,ed)
+    np.testing.assert_allclose(actual,expected,atol=.02,rtol=2e-5)

@@ -847,8 +847,8 @@ def _emissionDamage(form, grid, A, Z, ed):
     return _tabulatedEmissionDamage(spectrum, grid, A, Z, ed)
 
 
-def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed):
-    """Numerical tabdam with actual incident energy and unit-base support.
+def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
+    """Controlled tabulated recoil or particle damage with actual incident energy.
 
     The isotropic single-emission recoil approximation is retained. Gaussian
     orders double after splitting displacement-threshold crossings. Successive
@@ -860,6 +860,10 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed):
     from functools import lru_cache
     grid=np.asarray(grid,dtype=float)
     if not len(grid):return np.empty(0)
+    # A particle uses its own Z/mass and an optional isotropic CM boost;
+    # a neutron emission instead uses the target recoil divided by A.
+    if particle is None:recoilZ,recoilA,denominator,incidentFactor=Z,A,A,1.
+    else:recoilZ,recoilA,incidentFactor=particle;denominator=1.
     energies,tables,flat=_tables(spectrum)
     if any(getattr(t,'numberOfDiscrete',0) for t in tables):
         raise NotImplementedError('tabulated neutron recoil with discrete outgoing lines')
@@ -884,7 +888,8 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed):
                 if weight==0:continue
                 x,p,hist,oldwidth=prepared[i]
                 mapped=low+(x-x[0])*width/oldwidth
-                cuts=np.unique(np.r_[mapped,(np.sqrt(E)-np.sqrt(A*ed))**2,(np.sqrt(E)+np.sqrt(A*ed))**2])
+                incident=incidentFactor*E
+                cuts=np.unique(np.r_[mapped,(np.sqrt(incident)-np.sqrt(denominator*ed))**2,(np.sqrt(incident)+np.sqrt(denominator*ed))**2])
                 cuts=cuts[(cuts>=mapped[0])&(cuts<=mapped[-1])]
                 for start in range(0,len(cuts)-1,256):
                     stop=min(start+256,len(cuts)-1)
@@ -894,10 +899,10 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed):
                     if hist:
                         pos=np.clip(np.searchsorted(x,source,side='right')-1,0,len(x)-2);density=p[pos]
                     else:density=np.interp(source,x,p)
-                    root=np.sqrt(E*ep);last=np.clip(np.divide(E+ep-A*ed,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
+                    root=np.sqrt(incident*ep);last=np.clip(np.divide(incident+ep-denominator*ed,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
                     angle=(last[...,None]-1)/2+(last[...,None]+1)/2*mu
-                    recoil=np.maximum(0.,(E+ep[...,None]-2*root[...,None]*angle)/A)
-                    angular=np.sum(wm*lindhard(recoil,Z,A,Z,A,ed),axis=-1)*(last+1)/4
+                    recoil=np.maximum(0.,(incident+ep[...,None]-2*root[...,None]*angle)/denominator)
+                    angular=np.sum(wm*lindhard(recoil,recoilZ,recoilA,Z,A,ed),axis=-1)*(last+1)/4
                     value+=weight*float(np.sum(w*half[:,None]*2*v*density*oldwidth/width*angular))
             if previous is not None and abs(value-previous)<=.01+1e-5*abs(value):return value
             previous=value
@@ -1118,7 +1123,9 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes):
             continue
         found = True
         deposit = deposit + y * mean
-        damage = damage + y * _particleDamage(tabulated, grid, k, za // 1000, awp, Z, A, ed)
+        active=y!=0
+        if np.any(active):
+            damage[active]+=y[active]*_particleDamage(tabulated,grid[active],k,za//1000,awp,Z,A,ed)
     return (deposit, damage) if found else None
 
 
@@ -1141,6 +1148,8 @@ def _particleDamage(form, grid, k, zp, ap, Z, A, ed):
     frame = getattr(form, "productFrame", None)
     cm = str(getattr(frame, "value", frame)) in ("centerOfMass", "Frame.centerOfMass")
     x = k.awp / (k.A + 1.0) ** 2
+    if isinstance(spectrum,m.XYs2d):
+        return _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,particle=(zp,ap,x if cm else 0.))
     energies, tables, flat = _tables(spectrum)
     u, wu = _GL8
 
