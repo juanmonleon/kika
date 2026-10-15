@@ -214,18 +214,26 @@ def _compress_and_join(pieces):
     Python work goes: JENDL-5 Cl-35 has 3 376 pieces for each of 234
     reactions.
     """
-    from kika.algebra import compress_flat_pieces
     pieces=[(np.asarray(x,dtype=float),np.asarray(y,dtype=float)) for x,y in pieces]
     lengths=np.array([len(x) for x,_ in pieces])
-    if len(pieces)<2 or np.any(lengths<2):
-        return _join_continuous(compress_flat_pieces(pieces))
-    x=np.concatenate([p[0] for p in pieces]);y=np.concatenate([p[1] for p in pieces])
+    return _compress_and_join_flat(np.concatenate([p[0] for p in pieces]),np.concatenate([p[1] for p in pieces]),lengths)
+
+
+def _compress_and_join_flat(x,y,lengths):
+    """:func:`_compress_and_join` of the pieces of *lengths* laid end to end
+    in *x*, *y*: no piece objects are made."""
+    from kika.algebra import compress_flat_pieces
+    lengths=np.asarray(lengths)
     ends=np.cumsum(lengths);starts=ends-lengths
+    def pieces():
+        return list(zip(np.split(x,ends[:-1]),np.split(y,ends[:-1])))
+    if len(lengths)<2 or np.any(lengths<2):
+        return _join_continuous(compress_flat_pieces(pieces()))
     if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
-        return _join_continuous(compress_flat_pieces(pieces))
+        return _join_continuous(compress_flat_pieces(pieces()))
     inside=np.ones(len(x)-1,dtype=bool);inside[ends[:-1]-1]=False
     if np.any(np.diff(x)[inside]<0):
-        return _join_continuous(compress_flat_pieces(pieces))
+        return _join_continuous(compress_flat_pieces(pieces()))
     negative=(y==0)&np.signbit(y)
     keep=np.ones(len(x),dtype=bool)
     keep[1:-1]=~((y[:-2]==y[1:-1])&(y[1:-1]==y[2:])&(x[:-2]<x[1:-1])&(x[1:-1]<x[2:])
@@ -235,7 +243,7 @@ def _compress_and_join(pieces):
         kept=x[keep]
         gaps=~np.isfinite(np.diff(kept))
     if np.any(gaps):
-        return _join_continuous(compress_flat_pieces(pieces))
+        return _join_continuous(compress_flat_pieces(pieces()))
     last,first=ends[:-1]-1,starts[1:]
     joined=(x[last]==x[first])&(y[last]==y[first])&(np.signbit(y[last])==np.signbit(y[first]))
     keep[first[joined]]=False
@@ -1199,10 +1207,11 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # a group stays within the seed count linearize gives one chunk.
     GROUP_SEEDS=2048
     live={};started=0;finished=0.;done=0;working=0
+    units={}
     def finish(index,value):
         nonlocal finished,done
         x,y,*check=value;s=segments[index]
-        tables[index]=(x,y)
+        tables[index]=x;units[index]=dict(x=x,lengths=np.array([len(x)]),y=y,constant=None)
         if check:checks[index]=dict(domain=(s.low,s.high),points=len(x),**check[0])
         done+=len(x)
         if index in pending:result._forget(id(segments[index]),id(pending[index][0]))
@@ -1212,12 +1221,25 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                          sum(t is not None for t in tables)/len(segments))
             progress(finished)
     def complete(positions,results,group):
-        for i,value in zip(positions,results):finish(i,value)
+        nonlocal done
+        if group is not None and isinstance(results,dict):
+            # One table for the group; each segment keeps its grid.
+            start=0
+            for i,n in zip(positions,results['lengths'].tolist()):
+                tables[i]=results['x'][start:start+n];start+=n
+                result._forget(id(segments[i]),id(pending[i][0]));pending.pop(i,None)
+            units[positions[0]]=results;done+=int(results['lengths'].sum())
+            if progress is not None:
+                s=segments[positions[-1]]
+                progress(float(min(1.,np.log(s.high/low)/span)) if span else
+                         sum(t is not None for t in tables)/len(segments))
+        else:
+            for i,value in zip(positions,results):finish(i,value)
         if group is not None:
             # A group's segments report as one region, as the chunks of one
             # segment do.
             first,last=segments[positions[0]],segments[positions[-1]]
-            checks[positions[0]]=dict(domain=(first.low,last.high),points=sum(len(tables[i][0]) for i in positions),**group)
+            checks[positions[0]]=dict(domain=(first.low,last.high),points=sum(len(tables[i]) for i in positions),**group)
     def answer(requests):
         """Values for requests ``(energies, only, segment)``, *segment* one
         index or one per energy: each split into one request per segment."""
@@ -1282,7 +1304,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # The window's request plans hold every segment's constants; the tables
     # are all that the output needs.
     result._columns_cache.clear();pending.clear()
-    for x,_ in tables:
+    for x in tables:
         points+=len(x)
         if points>options.max_points:
             raise ReconstructionConvergenceError('refinement exceeds max_points',category='budget-exhausted')
@@ -1290,34 +1312,44 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     from kika.algebra import compress_flat_pieces
     owned=[{physical_owners.get(mt) for mt in region_mts(s.region)} if s.region is not None else set()
            for s in segments]
-    lows=np.array([x[0] for x,_ in tables]);highs=np.array([x[-1] for x,_ in tables])
-    for key in entries:
-        tabs=[y[key] for _,y in tables]
-        if key not in graph and all(not t.flags.writeable and len(t)>=2 for t in tabs):
-            values=np.array([t[0] for t in tabs])
-            if not np.any((values==0)&np.signbit(values)):
-                # The constant of every segment (read-only tables, see below):
-                # compression leaves each segment its two ends, and segments
-                # with one value join through their shared edge. Written
-                # directly, as _compress_and_join would make it.
-                cut=np.flatnonzero(values[1:]!=values[:-1])+1
-                children=[]
-                for a,b in zip(np.r_[0,cut],np.r_[cut,len(values)]):
-                    cx=np.r_[lows[a],highs[a:b]];children.append(XYs1d(cx,np.full(len(cx),values[a]),axes=axes,index=len(children)))
-                output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
-                output[key].label=label
-                minima[key]=float(np.min(values))
-                for _,y in tables:del y[key]
-                continue
-        pieces=[];summed=key in graph
-        for i,(x,y) in enumerate(tables):
-            if summed or not y[key].flags.writeable:
-                pieces.append((x,y[key]));continue
-            s=segments[i];curve=s.curves[key]
-            if curve is not None and key not in owned[i]:
+    lows=np.array([x[0] for x in tables]);highs=np.array([x[-1] for x in tables])
+    ordered=[units[i] for i in sorted(units)]
+    grid=np.concatenate([u['x'] for u in ordered]);lengths=np.concatenate([u['lengths'] for u in ordered])
+    ends=np.cumsum(lengths);starts=ends-lengths
+    names=tuple(segments[0].curves) if segments else ()
+    column_of={key:j for j,key in enumerate(names)}
+    def constants_of(key):
+        # Each segment's constant for *key* (NaN: not a constant table there).
+        out=[]
+        for u in ordered:
+            if u['constant'] is not None:out.append(u['constant'][:,column_of[key]])
+            else:
+                t=u['y'][key]
                 # (A read-only table is a constant of the segment, shared by
-                # _linearize_chunk; on its own knots the curve is that same
-                # constant, and compression leaves the segment's two ends.)
+                # _linearize_chunk.)
+                out.append(np.array([np.nan if t.flags.writeable or len(t)<1 else t[0]]))
+        return np.concatenate(out)
+    for key in entries:
+        values=constants_of(key);summed=key in graph
+        if not summed and not np.any(np.isnan(values)) and np.all(lengths>=2) and not np.any((values==0)&np.signbit(values)):
+            # The constant of every segment: compression leaves each segment
+            # its two ends, and segments with one value join through their
+            # shared edge. Written directly, as _compress_and_join would make it.
+            cut=np.flatnonzero(values[1:]!=values[:-1])+1
+            children=[]
+            for a,b in zip(np.r_[0,cut],np.r_[cut,len(values)]):
+                cx=np.r_[lows[a],highs[a:b]];children.append(XYs1d(cx,np.full(len(cx),values[a]),axes=axes,index=len(children)))
+            output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
+            output[key].label=label
+            minima[key]=float(np.min(values))
+            for u in ordered:del u['y'][key]
+            continue
+        column=np.concatenate([u['y'][key] for u in ordered])
+        own={}
+        if not summed:
+            for i in np.flatnonzero(np.isnan(values)).tolist():
+                s=segments[i];curve=s.curves[key]
+                if curve is None or key in owned[i]:continue
                 original_x=curve._x
                 if np.all(_laws_over(curve,s.low,s.high)==2):
                     # An untouched lin-lin background already has an exact
@@ -1328,17 +1360,19 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                         x=np.unique(np.r_[x,np.nextafter(s.high,s.low)])
                     query=x.copy()
                     if s.left_high:query[query==s.high]=np.nextafter(s.high,s.low)
-                    values=curve.evaluate(query)
-                else:values=y[key]
-            else:values=y[key]
-            pieces.append((x,values))
-        children=[XYs1d(cx,cy,axes=axes,index=i) for i,(cx,cy) in enumerate(_compress_and_join(pieces))]
+                    own[i]=(x,curve.evaluate(query))
+        if own:
+            pieces=[own[i] if i in own else (grid[a:b],column[a:b]) for i,(a,b) in enumerate(zip(starts.tolist(),ends.tolist()))]
+            joined=_compress_and_join(pieces)
+        else:
+            joined=_compress_and_join_flat(grid,column,lengths)
+        children=[XYs1d(cx,cy,axes=axes,index=i) for i,(cx,cy) in enumerate(joined)]
         output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
         output[key].label=label
         # A reaction's tables are released once its output exists, so the
         # output and the tables are never all held at once.
-        minima[key]=float(np.min(np.concatenate([y[key] for _,y in tables])))
-        for _,y in tables:del y[key]
+        minima[key]=float(np.min(column))
+        for u in ordered:del u['y'][key]
     normalized_hash=hashlib.sha256((source_hash+repr(context)+repr(options)).encode()).hexdigest()
     report=dict(engine=ENGINE_VERSION,scope='all modeled cross sections across evaluated domain',
         source_sha256=source_hash,normalized_sha256=normalized_hash,minima=minima,
@@ -1354,7 +1388,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         empirical_verification=True,global_error_bound=False)
     return SuiteReconstructionResult(MappingProxyType(output),MappingProxyType(report),source_style,label,options,prepared,
         tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners),
-        tuple(np.frombuffer(x.tobytes(),dtype=x.dtype) for x,_ in tables))
+        tuple(np.frombuffer(np.ascontiguousarray(x).tobytes(),dtype=x.dtype) for x in tables))
 
 
 def attach_reconstruction(suite,result,*,progress=None,workers=None):

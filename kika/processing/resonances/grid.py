@@ -358,11 +358,12 @@ def linearize_group_steps(spans, options, point_budget, keys):
 
 
 def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,options,alone):
-    """Per-span tables and one check for the whole group.
+    """The group's tables and one check for the whole group.
 
-    The tables are those of each span refined alone: its refined columns
-    from the common refinement, its constants as their shared table and its
-    deferred columns from their readers. The check is the group's, as
+    The tables are those of each span refined alone, laid end to end on the
+    common grid (each edge twice): its refined columns from the common
+    refinement, its constants and its deferred columns from their readers,
+    with each span's constants alongside (``constant``, NaN where none). The check is the group's, as
     linearize aggregates the chunks of one segment: maxima are the maxima
     over every panel, evaluations add, iterations are the deepest pass.
     """
@@ -378,44 +379,45 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
     factors=(('dE',factor),('dE_over_E',factor*(1/probes[:,gauss])))
     # Columns no span refines: deferred in some spans, constant in the rest.
     late=[mt for mt in keys if mt not in index and any(mt in d for _,_,d in spans)]
-    tables=[];late_samples={mt:np.empty(probes.shape) for mt in late};late_nodes={mt:np.empty((len(pos),2)) for mt in late}
-    for k,(f,(_,constants,deferred)) in enumerate(zip(firsts,spans)):
-        (a,b),p0,p1=bounds[k],panels[k],panels[k+1]
-        grid=result.x[a:b];by_value={};y={}
-        for mt in keys:
-            if mt in constants:
-                value=constants[mt];token=float(value).hex()
-                if token not in by_value:
-                    table=np.full(len(grid),value);table.setflags(write=False);by_value[token]=table
-                y[mt]=by_value[token]
-            elif mt in index:y[mt]=result.y[a:b,index[mt]]
-            else:y[mt]=None
-        tables.append((grid,y))
+    # The group's tables: the common grid (each edge twice), one column per
+    # reaction and each segment's constants (NaN: not a constant there).
+    where={mt:i for i,mt in enumerate(keys)}
+    lengths=np.array([b-a for a,b in bounds]);starts=np.r_[0,np.cumsum(lengths)]
+    constant=np.full((len(xs),len(keys)),np.nan)
+    for k,(_,constants,_) in enumerate(spans):
+        for mt,value in constants.items():constant[k,where[mt]]=value
+    y={}
+    for j,mt in enumerate(keys):
+        if mt in index:y[mt]=result.y[:,index[mt]]
+        elif mt not in late:y[mt]=np.repeat(constant[:,j],lengths)
     # Deferred columns that no span refines: their readers at every span's
     # nodes and probes, one curve read for all the spans that share it.
+    late_samples={};late_nodes={}
     for mt in late:
+        j=where[mt]
+        column=np.repeat(constant[:,j],lengths)
+        sampled=np.repeat(constant[:,j],np.diff(panels))[:,None]*np.ones(probes.shape[1])
         users=[k for k in range(len(xs)) if mt in spans[k][2]]
         readers=[spans[k][2][mt] for k in users]
         curve=getattr(readers[0],'curve',None)
+        grids=[result.x[starts[k]:starts[k+1]] for k in users]
         if curve is not None and all(getattr(r,'curve',None) is curve for r in readers):
             pieces=[];sizes=[]
-            for k,r in zip(users,readers):
-                p0,p1=panels[k],panels[k+1]
-                e=np.r_[tables[k][0],probes[p0:p1].ravel()]
+            for k,r,grid in zip(users,readers,grids):
+                e=np.r_[grid,probes[panels[k]:panels[k+1]].ravel()]
                 if r.left_high is not None:e[e==r.left_high[0]]=np.nextafter(*r.left_high)
                 pieces.append(e);sizes.append(len(e))
             values=np.asarray(curve.evaluate(np.concatenate(pieces)),dtype=float)
             parts=np.split(values,np.cumsum(sizes)[:-1])
         else:
-            parts=[np.asarray(r(np.r_[tables[k][0],probes[panels[k]:panels[k+1]].ravel()]),dtype=float)
-                   for k,r in zip(users,readers)]
+            parts=[np.asarray(r(np.r_[grid,probes[panels[k]:panels[k+1]].ravel()]),dtype=float)
+                   for k,r,grid in zip(users,readers,grids)]
         for k,v in zip(users,parts):
-            p0,p1=panels[k],panels[k+1];n=len(tables[k][0])
-            tables[k][1][mt]=v[:n];late_samples[mt][p0:p1]=v[n:].reshape(probes[p0:p1].shape)
-        for k in range(len(xs)):
-            p0,p1=panels[k],panels[k+1];y=tables[k][1]
-            if mt not in spans[k][2]:late_samples[mt][p0:p1]=spans[k][1][mt]
-            late_nodes[mt][p0:p1,0]=y[mt][:-1];late_nodes[mt][p0:p1,1]=y[mt][1:]
+            p0,p1=panels[k],panels[k+1];n=lengths[k]
+            column[starts[k]:starts[k+1]]=v[:n];sampled[p0:p1]=v[n:].reshape(probes[p0:p1].shape)
+        y[mt]=column;late_samples[mt]=sampled
+        late_nodes[mt]=np.stack([column[pos],column[pos+1]],axis=1)
+    table=dict(x=result.x,lengths=lengths,y=y,constant=constant)
     checked=list(union)+late
     samples=result.probe_y
     nodes=np.stack([result.y[pos],result.y[pos+1]],axis=1)
@@ -457,7 +459,7 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
                refinement_maxima=ReactionColumns.of(keys,refinement),
                verification_maxima=ReactionColumns.of(keys,verification),
                verification_worst=worst,integrals=ReactionColumns.of(keys,tuple(integrals)))
-    return tables,check
+    return table,check
 
 
 def _chunk_tables(x, y, probes, actual, first, constants, deferred, options, iterations, evaluations):
