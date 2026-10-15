@@ -336,3 +336,113 @@ def test_analytic_energy_cm_isotropic_shift_and_unsupported_second_moment():
     np.testing.assert_allclose(H._meanEnergyOf(form, E, k), expected, rtol=1e-14)
     with pytest.raises(NotImplementedError, match="second moment"):
         H._meanEnergyOf(form, E, k, 2)
+
+
+def test_mf6_capture_443_uses_independent_photon_kicks_without_compound_recoil():
+    from types import SimpleNamespace as NS
+    A = 55.; E = np.array([1., 1e5, 1e7]); binding = 2e6
+    form = m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=0, energy=binding, atomicWeightRatio=A), productFrame=m.Frame.lab)
+    product = NS(pid="photon", multiplicity=m.Multiplicity(form=m.Constant1d(constant=2.,domainMin_=0.,domainMax_=2e7)),
+                 distribution=NS(forms={"MonteCarlo":form}))
+    source = NS(provenance=NS(headerFields={"mf6":{"lct":1}}), outputChannel=NS(products=[]))
+    reaction = NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=5e6),products=[product]))
+    result = H.heatingOf(NS(reactions=[reaction]),E,{102:np.ones(len(E))},awr=A,Z=26,
+                        evaluation=NS(findReactionByENDF_MT=lambda mt:source),kinematic=True)
+    expected = np.full(len(E),2*binding**2/(2*(A+1)*H.NEUTRON_REST_ENERGY))
+    np.testing.assert_allclose(result.kinematicUpper[102],expected,rtol=1e-14)
+
+
+@pytest.mark.parametrize("A,ed", [(1.,25.), (55.,40.), (238.,25.)])
+def test_two_body_damage_splits_displacement_threshold_and_controls_interpolation(A,ed,monkeypatch):
+    # An identity partition above ed gives an exact truncated uniform-recoil
+    # integral. This checks threshold clipping without copying quadrature.
+    monkeypatch.setattr(H,"lindhard",lambda recoil,*args:np.where(recoil>=ed,recoil,0.))
+    form=m.AngularTwoBody(angular=m.Isotropic2d(),productFrame=m.Frame.centerOfMass)
+    activation=25*(A+1)**2/(4*A)
+    E=np.unique(np.r_[activation*np.array([.999999,1.,1.000001,1.4]),np.geomspace(activation,1e8,17)])
+    maximum=4*A/(A+1)**2*E
+    expected=np.where((E>=activation)&(maximum>=ed),(maximum**2-ed**2)/(2*maximum),0.)
+    actual=H._twoBodyDamage(form,E,A,0.,26,ed,elastic=True)
+    np.testing.assert_allclose(actual,expected,atol=.02,rtol=2e-5)
+
+
+@pytest.mark.parametrize("extent", ["below","above","mixed"])
+def test_unit_base_held_spectrum_keeps_exact_incident_boost(extent):
+    energy=m.XYs2d(function1ds=[_table([0.,1.],[1.,1.],10.),_table([0.,4.],[.5,0.],20.)],
+                    interpolationQualifier=m.InterpolationQualifier.unitBase)
+    angular=[]
+    for E,width,mu in ((10.,1.,.2),(20.,4.,.1)):
+        angular.append(m.XYs2d(function1ds=[_table([-1.,1.],[.5-1.5*mu,.5+1.5*mu],x) for x in (0.,width)],outerDomainValue=E))
+    form=m.EnergyAngularMC(energy=energy,energyAngular=m.XYs3d(function2ds=angular),productFrame=m.Frame.centerOfMass)
+    E={"below":np.array([1e-5,1.,9.]),"above":np.array([21.,100.,1e6]),"mixed":np.array([1e-5,1.,9.,21.,100.,1e6])}[extent]
+    low=E<10.;mean=np.where(low,.5,4./3.);cross=np.where(low,.2*2./3.,.1*2.*8./15.)
+    expected=mean+E/9.+2*np.sqrt(E/9.)*cross
+    np.testing.assert_allclose(H._meanEnergyOf(form,E,H._Kinematics(A=2.,Q=0.)),expected,rtol=1e-14,atol=1e-12)
+
+
+def test_fission_chances_use_common_aggregate_spectrum_once_without_double_counting(monkeypatch):
+    from types import SimpleNamespace as NS
+    form=object();neutron=NS(pid="n",distribution=NS(forms={"MonteCarlo":form}))
+    def reaction(mt,products):return NS(ENDF_MT=mt,outputChannel=NS(Q=NS(value=0.),products=products))
+    suite=NS(reactions=[reaction(19,[]),reaction(20,[])],sums=[reaction(18,[neutron])])
+    calls=[]
+    def emission(g,*args):
+        assert g is form;calls.append(g);return np.array([123.,234.])
+    monkeypatch.setattr(H,"_emissionDamage",emission)
+    E=np.array([1.,2.]);xs={18:np.array([4.,2.]),19:np.array([1.,2.]),20:np.array([3.,0.])}
+    result=H.heatingOf(suite,E,xs,awr=238.,Z=92)
+    np.testing.assert_array_equal(result.damage,[4*123.,2*234.])
+    assert len(calls)==1
+    assert 18 not in result.perReaction
+
+
+def test_inelastic_damage_keeps_both_sides_of_reaction_threshold(monkeypatch):
+    A=55.;Q=-1e6;threshold=(A+1)/A*(-Q)
+    monkeypatch.setattr(H,"lindhard",lambda recoil,*args:recoil)
+    form=m.AngularTwoBody(angular=m.Isotropic2d(),productFrame=m.Frame.centerOfMass)
+    E=np.array([threshold/10,np.nextafter(threshold,-np.inf),threshold,threshold+1.,2*threshold])
+    r2=np.maximum(1-threshold/E,0.);expected=np.where(E>=threshold,E*A/(A+1)**2*(1+r2),0.)
+    np.testing.assert_allclose(H._twoBodyDamage(form,E,A,Q,26,0.,elastic=False),expected,atol=.02,rtol=2e-5)
+
+
+
+def test_kalbach_mean_maps_continuum_and_keeps_sampled_parameters_on_source_support():
+    energy=m.XYs2d(function1ds=[_table([0.,1.],[1.,1.],10.),_table([0.,4.],[.5,0.],20.)],interpolationQualifier=m.InterpolationQualifier.unitBase)
+    rs=m.XYs2d(function1ds=[m.XYs1d(xs=[0.,1.],ys=[.2,.2],outerDomainValue=10.),m.XYs1d(xs=[0.,4.],ys=[.8,.8],outerDomainValue=20.)])
+    aa=m.XYs2d(function1ds=[m.XYs1d(xs=[0.,1.],ys=[1.,1.],outerDomainValue=10.),m.XYs1d(xs=[0.,4.],ys=[2.,2.],outerDomainValue=20.)])
+    form=m.KalbachMann(f=energy,r=rs,a=aa,productFrame=m.Frame.centerOfMass)
+    E=np.array([15.]);cm=2.5*(.5+1/3)/2
+    mu1=.2*(1/np.tanh(1.)-1.);mu2=.8*(1/np.tanh(2.)-.5)
+    cross=np.sqrt(2.5)*(mu1*2/3+mu2*8/15)/2
+    expected=cm+15/9+2*np.sqrt(15/9)*cross
+    np.testing.assert_allclose(H._meanEnergyOf(form,E,H._Kinematics(A=2.,Q=0.)),[expected],atol=1e-10,rtol=1e-12)
+    np.testing.assert_allclose(H._meanEnergyOf(form,E,H._Kinematics(A=2.,Q=0.,awp=0.)),[cm],atol=1e-12,rtol=1e-14)
+
+
+
+def test_generated_mf6_recoil_uses_canonical_cm_moments_and_requires_missing_residual():
+    from types import SimpleNamespace as NS
+    energy=m.XYs2d(function1ds=[_table([0.,4.],[.25,.25],E) for E in (10.,20.)],interpolationQualifier=m.InterpolationQualifier.unitBase)
+    angles=m.XYs3d(function2ds=[m.XYs2d(function1ds=[_table([-1.,1.],[.2,.8],x) for x in (0.,4.)],outerDomainValue=E) for E in (10.,20.)])
+    form=m.EnergyAngularMC(energy=energy,energyAngular=angles,productFrame=m.Frame.centerOfMass)
+    records=[{"zap":1,"law":1},{"zap":0,"law":1}]
+    source=NS(provenance=NS(headerFields={"mf6":{"products":records}}))
+    evaluation=NS(findReactionByENDF_MT=lambda mt:source)
+    E=np.array([5.,10.,15.,20.,25.]);A=55.;k=H._Kinematics(A=A,Q=0.)
+    cross=.2*2/3*2
+    expected=E*A/(A+1)**2+2/A-2*np.sqrt(E)/(A+1)*cross
+    np.testing.assert_allclose(H._generatedMF6Recoil(evaluation,16,form,E,k),expected,rtol=1e-12,atol=1e-14)
+    records.append({"zap":2004,"law":0})
+    assert H._generatedMF6Recoil(evaluation,16,form,E,k) is None
+
+
+
+def test_zero_lower_unit_base_support_has_closed_incident_dependence():
+    energy=m.XYs2d(function1ds=[_table([0.,1.],[1.,1.],10.),_table([0.,4.],[.5,0.],20.)],interpolationQualifier=m.InterpolationQualifier.unitBase)
+    angular=[]
+    for E,width,mu in ((10.,1.,.2),(20.,4.,.1)):
+        angular.append(m.XYs2d(function1ds=[_table([-1.,1.],[.5-1.5*mu,.5+1.5*mu],x) for x in (0.,width)],outerDomainValue=E))
+    form=m.EnergyAngularMC(energy=energy,energyAngular=m.XYs3d(function2ds=angular),productFrame=m.Frame.centerOfMass)
+    E=np.linspace(10.,20.,101);fraction=(E-10)/10;width=1+3*fraction
+    expected=width*((1-fraction)*.5+fraction/3)+E/9+2*np.sqrt(E/9*width)*((1-fraction)*.2*2/3+fraction*.1*8/15)
+    np.testing.assert_allclose(H._meanEnergyOf(form,E,H._Kinematics(A=2.,Q=0.)),expected,rtol=2e-15,atol=1e-14)

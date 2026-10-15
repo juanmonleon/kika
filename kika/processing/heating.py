@@ -384,21 +384,69 @@ def _unitBaseCMMean(form, grid, k):
 
     A blend of moments is not the moment of a unit-base blend. Each source
     density is mapped to the interpolated support. Substitution sqrt(E')
-    makes the square-root cross moment polynomial on every linear panel.
+    makes the tabulated square-root cross moment polynomial on every linear
+    panel. Kalbach parameters are read before unit-base mapping, as OpenMC
+    samples them; Gaussian orders are doubled until their lab cross term
+    agrees to .001 eV + 1e-8 incident energy.
     Interpolation of the resulting lab mean is refined on three interior
     probes to 0.1 eV + 1e-7 times incident energy; this is a sampled criterion.
     """
-    energies,tables,flat=_tables(form.energy)
+    from functools import lru_cache
+    from kika.nuclear_data import model as m
+    kalbach = isinstance(form,m.KalbachMann)
+    energies,tables,flat=_tables(form.f if kalbach else form.energy)
     if flat:return None
     if any(getattr(t,"numberOfDiscrete",0) for t in tables):return None
-    angular=list(form.energyAngular.function2ds)
-    mus=[np.array([_expect(u,lambda x:x) for u in a.function1ds]) for a in angular]
+    gauss = {4:_GL4}
+    if kalbach:
+        rs=list(m.toEndfTab2(form.r)[0]);slopes=list(m.toEndfTab2(form.a)[0])
+        if len(rs)!=len(tables) or len(slopes)!=len(tables):
+            raise ValueError("Kalbach parameter incident grids differ")
+        parameters=[]
+        for table,rr,aa in zip(tables,rs,slopes):
+            if not np.array_equal(table.xs,rr.xs) or not np.array_equal(table.xs,aa.xs):
+                raise ValueError("Kalbach parameter outgoing grids differ")
+            parameters.append((np.asarray(rr.ys),np.asarray(aa.ys)))
+        gauss.update({n:np.polynomial.legendre.leggauss(n) for n in (8,16,32)})
+        mus=None
+    else:
+        angular=list(form.energyAngular.function2ds)
+        mus=[np.array([_expect(u,lambda x:x) for u in a.function1ds]) for a in angular]
     means=[_expect(t,lambda e:e) for t in tables]
     ranges=[(float(t.xs[0]),float(t.xs[-1]-t.xs[0])) for t in tables]
     if any(w<=0 for _,w in ranges):return None
-    for t,mu in zip(tables,mus):
-        if len(mu)!=len(t.xs):raise ValueError("energy-angle grids differ in unit-base moment")
-    def at(E):
+    if not kalbach:
+        for t,mu in zip(tables,mus):
+            if len(mu)!=len(t.xs):raise ValueError("energy-angle grids differ in unit-base moment")
+    if not kalbach and all(a==0. for a,width in ranges):
+        # A zero lower support factors sqrt(width) out of the cross moment.
+        # Only normalized source moments remain; the incident mixture and
+        # CM boost can then be evaluated exactly, without an incident mesh.
+        unitCross=[]
+        for table,mu,(a,width) in zip(tables,mus,ranges):
+            x=np.asarray(table.xs);p=np.asarray(table.pdf)
+            roots=np.sqrt(np.maximum(x/width,0.));left=roots[:-1,None];right=roots[1:,None]
+            nodes,weights=_GL4;r=(left+right)/2+(right-left)/2*nodes
+            frac=(width*r*r-x[:-1,None])/np.maximum(np.diff(x)[:,None],1e-300)
+            if _isFlat(table):
+                density=p[:-1,None];angle=mu[:-1,None]
+                norm=float(np.sum(np.diff(x)*p[:-1]))
+            else:
+                density=p[:-1,None]+np.diff(p)[:,None]*frac
+                angle=mu[:-1,None]+np.diff(mu)[:,None]*frac
+                norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
+            unitCross.append(float(np.sum((right-left)/2*weights*2*r*r*width*density*angle))/norm)
+        query=np.asarray(grid,dtype=float);widths=np.array([w for a,w in ranges]);unitMean=np.asarray(means)/widths;unitCross=np.asarray(unitCross)
+        j=np.clip(np.searchsorted(energies,query,side="right")-1,0,len(energies)-1);upper=np.minimum(j+1,len(energies)-1)
+        span=energies[upper]-energies[j]
+        fraction=np.clip(np.divide(query-energies[j],span,out=np.zeros(len(query)),where=span>0),0.,1.)
+        width=(1-fraction)*widths[j]+fraction*widths[upper]
+        mean=width*((1-fraction)*unitMean[j]+fraction*unitMean[upper])
+        cross=np.sqrt(width)*((1-fraction)*unitCross[j]+fraction*unitCross[upper])
+        boost=k.awp/(k.A+1)**2
+        return mean+boost*query+2*np.sqrt(boost*query)*cross
+    @lru_cache(maxsize=30000)
+    def at(E, components=False):
         j=int(np.clip(np.searchsorted(energies,E,side="right")-1,0,len(energies)-1))
         upper=min(j+1,len(energies)-1)
         theta=(E-energies[j])/(energies[upper]-energies[j]) if upper!=j else 0.
@@ -408,29 +456,53 @@ def _unitBaseCMMean(form, grid, k):
         mean=cross=0.
         for weight,i in zip(weights,(j,upper)):
             if weight==0:continue
-            a,width=ranges[i];table=tables[i];x=np.asarray(table.xs);p=np.asarray(table.pdf);mu=mus[i]
+            a,width=ranges[i];table=tables[i];x=np.asarray(table.xs);p=np.asarray(table.pdf)
             mapped=qa+qw*(x-a)/width
             root=np.sqrt(np.maximum(mapped,0));left=root[:-1,None];right=root[1:,None]
-            nodes,ww=_GL4;r=(left+right)/2+(right-left)/2*nodes
-            original=a+(r*r-qa)*width/qw
-            frac=(original-x[:-1,None])/np.maximum(np.diff(x)[:,None],1e-300)
-            if _isFlat(table):
-                # A correlated histogram uses its lower-bin angular law too
-                # (OpenMC secondary_correlated.cpp); no endpoint blend.
-                density=p[:-1,None]
-                angle=mu[:-1,None]
-                norm=float(np.sum(np.diff(x)*p[:-1]))
-            else:
-                density=p[:-1,None]+np.diff(p)[:,None]*frac
-                angle=mu[:-1,None]+np.diff(mu)[:,None]*frac
-                norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
-            integral=float(np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle))/norm
+            previous=None
+            for order,(nodes,ww) in gauss.items():
+                r=(left+right)/2+(right-left)/2*nodes
+                original=a+(r*r-qa)*width/qw
+                frac=(original-x[:-1,None])/np.maximum(np.diff(x)[:,None],1e-300)
+                if _isFlat(table):
+                    density=p[:-1,None]
+                    norm=float(np.sum(np.diff(x)*p[:-1]))
+                else:
+                    density=p[:-1,None]+np.diff(p)[:,None]*frac
+                    norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
+                if kalbach:
+                    rr,aa=parameters[i]
+                    if _isFlat(table):
+                        rr=rr[:-1,None];aa=aa[:-1,None]
+                    else:
+                        rr=rr[:-1,None]+np.diff(rr)[:,None]*frac
+                        aa=aa[:-1,None]+np.diff(aa)[:,None]*frac
+                    safe=np.where(abs(aa)>.01,aa,1.)
+                    langevin=np.where(abs(aa)>.01,1/np.tanh(safe)-1/safe,
+                                      aa*(1/3+aa*aa*(-1/45+aa*aa*(2/945-aa*aa/4725))))
+                    angle=rr*langevin
+                else:
+                    mu=mus[i]
+                    angle=(mu[:-1,None] if _isFlat(table) else
+                           mu[:-1,None]+np.diff(mu)[:,None]*frac)
+                integral=float(np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle))/norm
+                if not kalbach:break
+                error=2*np.sqrt(k.awp*max(E,0))/(k.A+1)*abs(integral-previous) if previous is not None else np.inf
+                if error <= .001+1e-8*max(E,0):break
+                previous=integral
+            else:raise ValueError("Kalbach cross-moment quadrature did not converge")
             cross+=weight*integral
             mean+=weight*(qa+qw*(means[i]-a)/width)
+        if components:return mean,cross
         boost=k.awp/(k.A+1)**2
         return mean+boost*E+2*np.sqrt(boost*E)*cross
     lo=max(float(np.min(grid)),float(energies[0]));hi=min(float(np.max(grid)),float(energies[-1]))
-    if hi<lo:return np.array([at(float(E)) for E in grid])
+    def held(query, first):
+        source=float(np.nextafter(energies[0],-np.inf)) if first else float(energies[-1])
+        mean,cross=at(source,True)
+        boost=k.awp/(k.A+1)**2
+        return mean+boost*query+2*np.sqrt(boost*query)*cross
+    if hi<lo:return held(np.asarray(grid),bool(np.max(grid)<energies[0]))
     nodes=np.unique(np.r_[lo,energies[(energies>lo)&(energies<hi)],hi])
     values=np.array([at(float(E)) for E in nodes])
     for iteration in range(30):
@@ -451,8 +523,9 @@ def _unitBaseCMMean(form, grid, k):
         values = np.array([known[E] for E in nodes])
     else:raise ValueError("unit-base mean refinement did not converge")
     output=np.interp(grid,nodes,values)
-    outside=(grid<lo)|(grid>hi)
-    for index in np.flatnonzero(outside):output[index]=at(float(grid[index]))
+    below=grid<lo;above=grid>hi
+    if np.any(below):output[below]=held(grid[below],True)
+    if np.any(above):output[above]=held(grid[above],False)
     return output
 
 
@@ -514,7 +587,7 @@ def _analyticSpectrumMoment(spectrum, grid, power):
 
     shape = 1.5 if isinstance(spectrum, m.SimpleMaxwellianFission) else 2.
     grid = np.asarray(grid, dtype=float)
-    top = np.array([spectrum.upperBound(float(E)) for E in grid])
+    top = grid + spectrum.upperBound(0.)
     theta = np.asarray(spectrum.theta.evaluate(grid, outOfRange="hold"), dtype=float)
     active = top > 0
     if (np.any(~np.isfinite(top)) or
@@ -623,6 +696,11 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
                                  np.sqrt(e) * np.interp(e, nodes, mubar)))
         return _cmToLab(grid, mean, _onGrid(energies, cross, grid, flat), k)
     if isinstance(form, m.KalbachMann):
+        if not cm or k.awp==0.:
+            return _unitBaseSpectrumMean(form.f,grid,moment)
+        if moment==1:
+            exact=_unitBaseCMMean(form,grid,k)
+            if exact is not None:return exact
         energies, tables, flat = _tables(form.f)
         mean = _onGrid(energies, [_expect(t, lambda e: e ** moment) for t in tables], grid, flat)
         rs = list(m.toEndfTab2(form.r)[0])
@@ -666,33 +744,74 @@ def _distribution(product):
 # Damage per path
 # ----------------------------------------------------------------------
 
-def _twoBodyDamage(form, grid, A, Q, Z, ed, elastic):
-    """``disbar``: ``E_R(μ) = E·A/(A+1)²·(1 − 2rμ + r²)`` over the angular tables, GL-64."""
-    angular = form.angular if hasattr(form, "angular") else None
-    nodesMu, weightsMu = _GL64
-    if angular is None or type(angular).__name__ == "Isotropic2d":
-        energies, pdfs = np.array([grid[0], grid[-1]]), [np.full(64, 0.5)] * 2
-    else:
-        energies, tables, _ = _tables(angular)
-        pdfs = [_pdfAt(t, nodesMu) for t in tables]
-        pdfs = [p / max(float(np.sum(weightsMu * p)), 1e-300) for p in pdfs]
-    nodes = np.unique(np.concatenate([energies, _geometric(grid[0], grid[-1])]))
-    nodes = nodes[(nodes >= grid[0]) & (nodes <= grid[-1])]
-    j = np.clip(np.searchsorted(energies, nodes, side="right") - 1, 0, len(energies) - 1)
-    jn = np.minimum(j + 1, len(energies) - 1)
-    span = energies[jn] - energies[j]
-    w = np.where(span > 0, (nodes - energies[j]) / np.where(span > 0, span, 1.0), 0.0)
-    w = np.clip(w, 0.0, 1.0)
-    pdf = np.array([(1 - wi) * pdfs[a] + wi * pdfs[b] for wi, a, b in zip(w, j, jn)])
-    thr = (A + 1.0) / A * max(-Q, 0.0)
-    r2 = np.clip(1.0 - thr / np.maximum(nodes, 1e-300), 0.0, None)
-    r = np.sqrt(r2)
-    er = nodes[:, None] * A / (A + 1.0) ** 2 * (1.0 - 2.0 * r[:, None] * nodesMu[None, :] + r2[:, None])
-    d = np.sum(weightsMu[None, :] * pdf * lindhard(er, Z, A, Z, A, ed), axis=1)
-    d = np.where(r2 > 0, np.maximum(d, 0.0), 0.0)
-    if elastic:
-        d = np.where(nodes >= ELASTIC_DAMAGE_THRESHOLD * (A + 1.0) ** 2 / (4.0 * A), d, 0.0)
-    return np.interp(grid, nodes, d)
+def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
+ """Two-body recoil damage on normalized angular panels.
+
+ Split at the displacement threshold and recoil decades, double Gaussian
+ orders to .001 eV + 1e-8 relative agreement, then refine incident-energy
+ interpolation at three interior probes to .01 eV + 1e-5 relative error.
+ These are sampled convergence criteria, with explicit resource limits.
+ The historical fixed 25 eV elastic activation convention is retained.
+ """
+ from functools import lru_cache
+ grid=np.asarray(grid,dtype=float)
+ angular=getattr(form,'angular',None);isotropic=angular is None or type(angular).__name__=='Isotropic2d'
+ if isotropic:energies=np.array([grid[0]]);tables=None;flat=False
+ else:energies,tables,flat=_tables(angular)
+ gauss={n:np.polynomial.legendre.leggauss(n) for n in (8,16,32,64)}
+ data=[]
+ for t in tables or []:
+  x=np.asarray(t.xs);p=np.asarray(t.pdf if hasattr(t,'pdf') else t.ys);hist=_isFlat(t)
+  norm=float(np.sum(np.diff(x)*(p[:-1] if hist else (p[:-1]+p[1:])/2)))
+  if not norm>0:raise ValueError('angular damage requires a positive density mass')
+  data.append((x,p,hist,norm))
+ cutoff=25*(A+1)**2/(4*A) if elastic else 0.
+ threshold=(A+1)/A*max(-Q,0.)
+ @lru_cache(maxsize=30000)
+ def at(E):
+  if E<cutoff or E<threshold:return 0.
+  r=np.sqrt(max(0.,1-threshold/max(E,1e-300)));c=E*A/(A+1)**2;offset=c*(1+r*r);slope=2*c*r
+  if slope==0:return float(lindhard(offset,Z,A,Z,A,ed))
+  last=min(1.,(offset-ed)/slope)
+  if last<=-1:return 0.
+  j=int(np.clip(np.searchsorted(energies,E,side='right')-1,0,len(energies)-1));k=min(j+1,len(energies)-1)
+  f=float(np.clip((E-energies[j])/(energies[k]-energies[j]),0,1)) if k!=j and not flat else 0.
+  rcuts=max(ed,1e-12)*10.**np.arange(13);mcuts=(offset-rcuts)/slope;mcuts=mcuts[(mcuts>-1)&(mcuts<last)]
+  value=0.
+  for idx,weight in ((j,1-f),(k,f)):
+   if weight==0:continue
+   if isotropic:x=np.array([-1.,1.]);p=np.array([.5,.5]);hist=False;norm=1.
+   else:x,p,hist,norm=data[idx]
+   cuts=np.unique(np.r_[-1.,x[(x>-1)&(x<last)],mcuts,last]);half=np.diff(cuts)/2;mid=(cuts[:-1]+cuts[1:])/2
+   previous=None
+   for n in (8,16,32,64):
+    u,w=gauss[n];mu=mid[:,None]+half[:,None]*u
+    if hist:density=p[np.clip(np.searchsorted(x,mu,side='right')-1,0,len(p)-1)]
+    else:density=np.interp(mu,x,p)
+    integral=float(np.sum(half[:,None]*w*density*lindhard(np.maximum(offset-slope*mu,0.),Z,A,Z,A,ed)))/norm
+    if previous is not None and abs(integral-previous)<=.001+1e-8*abs(integral):break
+    previous=integral
+   else:raise ValueError('two-body damage angular quadrature did not converge')
+   value+=weight*integral
+  return value
+ lo,hi=float(grid.min()),float(grid.max())
+ if hi==lo:return np.full(len(grid),at(lo))
+ nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=2.),cutoff,threshold]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
+ for edge in (cutoff,threshold):
+  if lo<edge<=hi:nodes=np.unique(np.r_[nodes,np.nextafter(edge,-np.inf)])
+ values=np.array([at(float(E)) for E in nodes])
+ for _ in range(30):
+  additions={}
+  for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
+   for fraction in (.25,.5,.75):
+    e=float(a+(b-a)*fraction)
+    if not a<e<b:continue
+    v=at(e)
+    if abs(v-(va+(vb-va)*fraction))>.01+1e-5*abs(v):additions[e]=v
+  if not additions:return np.interp(grid,nodes,values)
+  if len(nodes)+len(additions)>20000:raise ValueError('two-body damage interpolation exceeds resource cap')
+  known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[e] for e in nodes])
+ raise ValueError('two-body damage interpolation did not converge')
 
 
 def _geometric(lo, hi, step=1.1):
@@ -1054,17 +1173,49 @@ def _mf12CaptureDomain(photons, grid):
     return ((grid>=lo) if lo is not None else np.ones(len(grid),dtype=bool)) & ((grid<=hi) if hi is not None else True) & (_yield(photons[-1][0],grid)>0)
 
 
+def _generatedMF6Recoil(evaluation, mt, form, grid, k):
+    """HEATR's one-particle diagnostic when MF6 omits the residual.
+
+    Product identity/law provenance selects this branch; both energy moments
+    come from the canonical processed law. The generated residual has mass A,
+    even for multiple neutron emission: this is HEATR's stated approximation.
+    """
+    from kika.nuclear_data import model as m
+    source = evaluation.findReactionByENDF_MT(mt) if evaluation is not None else None
+    fields = getattr(getattr(source,"provenance",None),"headerFields",None) or {}
+    records = (fields.get("mf6") or {}).get("products",[])
+    neutrons = [r for r in records if r.get("zap")==1]
+    if (len(neutrons)!=1 or neutrons[0].get("law")!=1
+            or any(r.get("zap") not in (0,1) for r in records)):
+        return None
+    if (not isinstance(form,(m.EnergyAngularMC,m.KalbachMann))
+            or form.productFrame!=m.Frame.centerOfMass):
+        return None
+    lab = _unitBaseCMMean(form,grid,k)
+    if lab is None:return None
+    energy = form.f if isinstance(form,m.KalbachMann) else form.energy
+    cm = _unitBaseSpectrumMean(energy,grid,1)
+    recoil = grid/(k.A+1)+(k.A+1)/k.A*cm-lab
+    if np.any(recoil < -(.001+1e-10*grid)):
+        raise ValueError("generated MF6 recoil energy is negative")
+    return np.maximum(recoil,0.)
+
+
 def _kinematicUpperOf(mt, grid, A, Q, Qbal, emitted, neutronYield, carried,
                       deposit, heavy, mf6, lr, twoBodyCapture, photons, captureCompound=False, captureDomain=None):
     """HEATR nheat/gheat MT443 diagnostic, in eV per collision.
 
     The historical high limit is a diagnostic approximation, not a certified
-    physical bound. Explicit MF6 recoil energy is mandatory on the MF6 path.
+    physical bound. MF6 capture uses its generated photon recoil; other MF6
+    paths require explicit recoil energy.
     """
     if mt == 2:
         return carried
     if mf6:
-        if mt == 102 and twoBodyCapture is not None:
+        if mt == 102 and photons:
+            # nheat generates the residual subsection when MF6 capture only
+            # states photons: its hmax is the sum of independent photon
+            # momentum kicks (hgam102 supplies the explicit primary case).
             return carried
         if heavy is not None:
             return heavy[0]
@@ -1284,6 +1435,10 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             lr = int(getattr(getattr(reaction, "provenance", None), "lr", 0) or 0)
             upper = _kinematicUpperOf(mt, grid, A, _qAt(Qkin, grid), Qbal, emitted,
                 neutronYield, carried, deposit, heavy, mf6, lr, twoBodyCapture, photons, captureCompound, captureDomain)
+            if upper is None and mf6 and len(neutrons)==1:
+                upper = _generatedMF6Recoil(evaluation,mt,neutrons[0][1],grid,k)
+                if upper is not None:
+                    notes.append(f"MT{mt}: MT443 uses HEATR's generated one-particle MF6 recoil approximation")
             if upper is not None:
                 kinematicUpper[mt] = upper
     # Fission's damage: HEATR's conbar gives a fission the recoil of one
@@ -1291,17 +1446,30 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     # the fragments are not followed): U-235 at thermal, ~6.9 keV per fission.
     # MT444 keeps it -- unlike the KERMA, whose fission part comes from MF1/458.
     chances = [r for r in getattr(suite, "fissionComponents", ()) if r.ENDF_MT in FISSION_MTS]
-    fissions = chances or [r for r in suite.reactions if r.ENDF_MT in FISSION_MTS]
+    if not chances:
+        chances = [r for r in suite.reactions if r.ENDF_MT in FISSION_MTS and r.ENDF_MT != 18]
+    fissions = chances or [r for r in suite.reactions if r.ENDF_MT == 18]
+    aggregate = next((r for r in getattr(suite, "sums", ()) if r.ENDF_MT == 18), None)
+    commonPrompt = (next(((p, _distribution(p)) for p in aggregate.outputChannel.products
+                         if p.pid == "n" and _distribution(p) is not None), None)
+                    if aggregate is not None else None)
+    fissionDamage = {}
     for reaction in fissions:
         mt = reaction.ENDF_MT
         if mt not in sigma:
             continue
         prompt = next(((p, _distribution(p)) for p in reaction.outputChannel.products
                        if p.pid == "n" and _distribution(p) is not None), None)
+        if prompt is None and commonPrompt is not None:
+            prompt = commonPrompt
+            notes.append(f"MT{mt}: fission damage uses the common MT18 prompt spectrum")
         if prompt is None:
             continue
         s = np.asarray(sigma[mt], dtype=float)
-        d = _emissionDamage(prompt[1], grid, A, Z, ed)
+        key = id(prompt[1])
+        if key not in fissionDamage:
+            fissionDamage[key] = _emissionDamage(prompt[1], grid, A, Z, ed)
+        d = fissionDamage[key]
         damage += np.where(s > 0, s * d, 0.0)
         perReaction[mt] = (np.zeros(len(grid)), np.zeros(len(grid)), d)
     # Photons stated on a sum (MF13 on MT4, 103-107): carried away for MT301 and
