@@ -68,7 +68,9 @@ class RefineResult:
     ``probe_x`` and ``probe_y`` hold, for every final panel in order, the
     probes it passed with -- ``(panels, fractions)`` and
     ``(panels, fractions[, columns])`` -- so a caller can report on them
-    without asking the function again.
+    without asking the function again -- and ``probe_pass`` the pass each
+    final panel settled in. A zero-width interval (a step) has no panel and
+    no probes.
     """
 
     x: np.ndarray
@@ -78,6 +80,7 @@ class RefineResult:
     unresolved: int = 0
     probe_x: Optional[np.ndarray] = None
     probe_y: Optional[np.ndarray] = None
+    probe_pass: Optional[np.ndarray] = None
 
 
 def refine(x, y, evaluate: Callable, exceeds: Callable, *,
@@ -188,8 +191,8 @@ def refine_steps(x, y, exceeds: Callable, *,
     if active is None:
         active = width > 0
     active = np.asarray(active, dtype=bool) & (width > 0)
-    if keep_probes and not active.all():
-        raise ValueError("keep_probes needs every interval refined")
+    if keep_probes and not (active | (width == 0)).all():
+        raise ValueError("keep_probes needs every interval of positive width refined")
     log_x = (np.zeros(width.size, dtype=bool) if log_x is None
              else np.asarray(log_x, dtype=bool))
     if max_points is not None and n > max_points:
@@ -202,7 +205,7 @@ def refine_steps(x, y, exceeds: Callable, *,
     owner, lg = idx, log_x[idx]
 
     added_x, added_y, added_at = [], [], []
-    done_x1, done_px, done_py = [], [], []
+    done_x1, done_px, done_py, done_pass = [], [], [], []
     n_points, evaluations, unresolved = n, 0, 0
     passes = 0
     tiny = np.finfo(float).eps
@@ -294,6 +297,7 @@ def refine_steps(x, y, exceeds: Callable, *,
             done_x1.append(x1[settle])
             done_px.append(q[settle])
             done_py.append(actual[settle])
+            done_pass.append(np.full(int(settle.sum()), passes))
         split = bad & ~stuck
         if not split.any():
             break
@@ -373,9 +377,11 @@ def refine_steps(x, y, exceeds: Callable, *,
             o = np.argsort(dx1, kind="stable")
             result.probe_x = np.concatenate(done_px)[o]
             result.probe_y = np.concatenate(done_py)[o]
+            result.probe_pass = np.concatenate(done_pass)[o]
         else:
             result.probe_x = np.zeros((0, fractions.size))
             result.probe_y = np.zeros((0, fractions.size) + y.shape[1:])
+            result.probe_pass = np.zeros(0, dtype=int)
     return result
 
 

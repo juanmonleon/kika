@@ -48,6 +48,17 @@ class BackgroundCurve:
         """A constant certified by the algebra snapshot, or None."""
         return self._evaluate.constant_on(low,high)
 
+    def constant_on_many(self,lows,highs):
+        """:meth:`constant_on` for many spans: the constant, or NaN for None."""
+        return self._evaluate.constant_on_many(lows,highs)
+
+    def linear_over_many(self,lows,highs):
+        """Whether every interval overlapping each (low, high) is lin-lin."""
+        x=self._x;laws=np.broadcast_to(self._laws,(len(x)-1,))
+        other=np.r_[0,np.cumsum(laws!=2)]
+        j0=np.maximum(np.searchsorted(x,lows,'right')-1,0);j1=np.maximum(np.searchsorted(x,highs,'left'),j0)
+        return other[j1]==other[j0]
+
 
 def prepare_backgrounds(backgrounds):
     from kika.nuclear_data.model import XYs1d,Regions1d,Background,ResonancesWithBackground

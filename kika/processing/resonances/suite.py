@@ -17,7 +17,7 @@ from .assemble import BackgroundCurve, prepare_backgrounds
 from .breit_wigner import evaluate_bw
 from .prepare import evaluate_region, group_radii, group_knots, group_breaks, region_mts
 from .context import NeutronContext
-from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize_steps, error_ratio, verification_batches
+from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize_steps, linearize_group_steps, error_ratio, verification_batches
 from .prepare import PreparedResonances, prepare_resonances, UnsupportedResonanceError
 from .tabulate import _Segment, _seeds
 
@@ -202,6 +202,47 @@ def _curves(forms):
 _NO_CONSTANTS=MappingProxyType({})
 
 
+def _compress_and_join(pieces):
+    """``_join_continuous(compress_flat_pieces(pieces))`` in one vectorised pass.
+
+    The arithmetic is theirs: each piece keeps the nodes compress_flat keeps,
+    and a piece that starts on the last node of the one before (abscissa,
+    value and sign) continues it without that node. Only the per-piece
+    Python work goes: JENDL-5 Cl-35 has 3 376 pieces for each of 234
+    reactions.
+    """
+    from kika.algebra import compress_flat_pieces
+    pieces=[(np.asarray(x,dtype=float),np.asarray(y,dtype=float)) for x,y in pieces]
+    lengths=np.array([len(x) for x,_ in pieces])
+    if len(pieces)<2 or np.any(lengths<2):
+        return _join_continuous(compress_flat_pieces(pieces))
+    x=np.concatenate([p[0] for p in pieces]);y=np.concatenate([p[1] for p in pieces])
+    ends=np.cumsum(lengths);starts=ends-lengths
+    if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+        return _join_continuous(compress_flat_pieces(pieces))
+    inside=np.ones(len(x)-1,dtype=bool);inside[ends[:-1]-1]=False
+    if np.any(np.diff(x)[inside]<0):
+        return _join_continuous(compress_flat_pieces(pieces))
+    negative=(y==0)&np.signbit(y)
+    keep=np.ones(len(x),dtype=bool)
+    keep[1:-1]=~((y[:-2]==y[1:-1])&(y[1:-1]==y[2:])&(x[:-2]<x[1:-1])&(x[1:-1]<x[2:])
+                 &~negative[:-2]&~negative[1:-1]&~negative[2:])
+    keep[starts]=True;keep[ends-1]=True
+    with np.errstate(over='ignore'):
+        kept=x[keep]
+        gaps=~np.isfinite(np.diff(kept))
+    if np.any(gaps):
+        return _join_continuous(compress_flat_pieces(pieces))
+    last,first=ends[:-1]-1,starts[1:]
+    joined=(x[last]==x[first])&(y[last]==y[first])&(np.signbit(y[last])==np.signbit(y[first]))
+    keep[first[joined]]=False
+    region=np.cumsum(np.r_[0,~joined])
+    owner=np.repeat(region,lengths)[keep]
+    xs,ys=x[keep],y[keep]
+    cut=np.flatnonzero(np.diff(owner))+1
+    return list(zip(np.split(xs,cut),np.split(ys,cut)))
+
+
 def _join_continuous(pieces):
     """Consecutive lin-lin pieces joined where they share their end node exactly.
 
@@ -326,7 +367,7 @@ class SuiteReconstructionResult:
         zeros,parts=self._sum_plan(constant_values)
         # A request for some columns leaves out the reactions that are the
         # constant zero here: they are none of its columns and add nothing.
-        wanted=None if only is None else self._wanted(only)-zeros
+        wanted=None if only is None else self._wanted(only)-(zeros-set(only))
         grouped={}
         # Verification keeps the ordinary background readers and evaluates the
         # physics exactly (direct capture, no Gram contraction).
@@ -395,8 +436,11 @@ class SuiteReconstructionResult:
             for key in self._order:
                 if wanted is None or key in wanted:
                     values[key]=sum((values[part] for part in parts[key]),np.zeros(len(e)))
-            checked=self._finite_witnesses((only,id(constant_values)),values)
-        if any(np.any(~np.isfinite(values[key])) for key in checked):raise FloatingPointError('nonfinite suite cross section')
+            checked=self._finite_witnesses((only,id(constant_values)),values,constant_values)
+        # One pass over every checked value: a reaction apiece cost more than
+        # the values on a segment of a few points.
+        if checked and not np.all(np.isfinite(np.concatenate([np.ravel(values[key]) for key in checked]))):
+            raise FloatingPointError('nonfinite suite cross section')
         return values
 
     def _own(self,token,owner):
@@ -426,12 +470,13 @@ class SuiteReconstructionResult:
             plan=self._columns_cache[token]=(zeros,parts,constant_values);self._own(token,id(constant_values))
         return plan[0],plan[1]
 
-    def _finite_witnesses(self,only,values):
+    def _finite_witnesses(self,only,values,constants=_NO_CONSTANTS):
         """The reactions whose finiteness implies that of all *values*.
 
         A sum is not finite when any of its parts is not (a NaN propagates;
         an infinity stays one or, against an opposite one, becomes NaN), so
-        the sums just formed and the reactions in none of them are enough.
+        the sums just formed and the reactions in none of them are enough;
+        and a declared constant is a finite float by construction.
         """
         token=('finite',only)
         keys=self._columns_cache.get(token)
@@ -439,7 +484,7 @@ class SuiteReconstructionResult:
             sums=[key for key in self._order if key in values]
             covered=set()
             for key in sums:covered|=self._wanted((key,))
-            keys=tuple(key for key in values if key in sums or key not in covered)
+            keys=tuple(key for key in values if key in sums or (key not in covered and key not in constants))
             self._columns_cache[token]=keys
             if isinstance(only,tuple) and len(only)==2:self._own(token,only[1])
         return keys
@@ -482,9 +527,30 @@ class SuiteReconstructionResult:
             end=0
             for n,e in zip(members,energies):
                 physics[n]={mt:v[end:end+len(e)] for mt,v in joined.items()};end+=len(e)
-        return [self._evaluate_segment(s,e,False,backgrounds=b) if only=='diagnostic' else
+        return [self._evaluate_segment(s,e,False,constant_values=self._source_constants(c),
+                    only=self._diagnostic_keys(s,c),backgrounds=b) if only=='diagnostic' else
                 self._evaluate_segment(s,e,constant_values=c,physics=p,only=only,backgrounds=b)
                 for (s,(e,only),c),p,b in zip(requests,physics,backgrounds)]
+
+    def _source_constants(self,constants):
+        """A segment's constant leaves: as the source states them, exactly
+        (constant_on certifies the value); sums keep their stated forms."""
+        token=('source',id(constants))
+        plan=self._columns_cache.get(token)
+        if plan is None:
+            plan=self._columns_cache[token]=(MappingProxyType({k:v for k,v in constants.items() if k not in self._graph}),constants)
+            self._own(token,id(constants))
+        return plan[0]
+
+    def _diagnostic_keys(self,s,constants):
+        """What a source diagnostic reads: every reaction but the leaves that
+        are the constant zero on the segment."""
+        token=('diagnostic',id(constants))
+        plan=self._columns_cache.get(token)
+        if plan is None:
+            plan=self._columns_cache[token]=(tuple(k for k in s.curves if k in self._graph or not (k in constants and constants[k]==0)),constants)
+            self._own(token,id(constants))
+        return plan[0]
 
     def _plain_curves(self,s,constants,only):
         """The ``(key, curve)`` that :meth:`_evaluate_segment` may read one by
@@ -492,9 +558,10 @@ class SuiteReconstructionResult:
         token=('plain',id(s),id(constants),only)
         plan=self._columns_cache.get(token)
         if plan is None:
-            # A diagnostic reads every source form as stated, sums included.
+            # A diagnostic reads the source forms as stated, sums included,
+            # but for the constant leaves (see _source_constants).
             source=only=='diagnostic'
-            if source:constants={}
+            if source:constants=self._source_constants(constants)
             wanted=None if only is None or source else self._wanted(only)
             # Keys a shared reader serves are read here too: the reader takes
             # precedence, and declines a query that crosses a log-law panel,
@@ -883,11 +950,18 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                     if law==1:cuts.update(x for x in radius.energies[previous:nbt] if r.low<x<r.high)
                     previous=nbt
     edges=sorted(cuts);segments=[];shared_cache={}
+    # The pieces of a curve are sorted and do not overlap, so their starts and
+    # ends are both non-decreasing: the pieces with start <= a and end >= b
+    # are the run [bisect_left(ends, b), bisect_right(starts, a)), found by
+    # bisection rather than by reading every piece for every segment.
+    import bisect
+    spans_of={key:([c.x[0] for c in cs],[c.x[-1] for c in cs]) for key,cs in curves.items()}
     for a,b in zip(edges[:-1],edges[1:]):
         region=next((r for r in prepared.regions if r.low<=a and r.high>=b),None)
         local={}
         for key,cs in curves.items():
-            candidates=[c for c in cs if c.x[0]<=a and c.x[-1]>=b]
+            starts,ends=spans_of[key]
+            candidates=cs[bisect.bisect_left(ends,b):bisect.bisect_right(starts,a)]
             if len(candidates)>1:raise ValueError('ambiguous source region ownership')
             if not candidates and not (b<=cs[0].x[0] or a>=cs[-1].x[-1]):
                 raise UnsupportedResonanceError(f'source function has an uncovered internal gap: {key}',category='internal-gap')
@@ -907,7 +981,26 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # of a serial run; each refines under the budget left by the finished
     # ones, and the total is checked in order at the end.
     pending={}
-    def tabulate(position,s,budget):
+    # Constancy and linearity of every source curve on every segment that
+    # reads it, decided per curve for all its segments at once (the same
+    # answers constant_on and _laws_over give one segment at a time).
+    span_high=[np.nextafter(s.high,s.low) if s.left_high else s.high for s in segments]
+    readers={}
+    for i,s in enumerate(segments):
+        for key,curve in s.curves.items():
+            if curve is not None and key not in graph:readers.setdefault(id(curve),(curve,[]))[1].append(i)
+    constant_at={};linear_at={}
+    for curve,where in readers.values():
+        where=np.asarray(where);lows=np.array([segments[i].low for i in where]);highs=np.array([span_high[i] for i in where])
+        values=np.full(len(where),np.nan);wide=highs>lows
+        if np.any(wide):values[wide]=curve.constant_on_many(lows[wide],highs[wide])
+        linear=curve.linear_over_many(lows,highs)
+        for i,v,l in zip(where.tolist(),values.tolist(),linear.tolist()):
+            constant_at[(id(curve),i)]=v;linear_at[(id(curve),i)]=l
+    def prepare(position):
+        """Seeds, constants, deferred columns and source-diagnostic grid of
+        one segment; none of it depends on another segment."""
+        s=segments[position]
         seed_curves={i:(c,) for i,(key,c) in enumerate(s.curves.items()) if c is not None and key not in graph}
         if s.region is not None:
             seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context)
@@ -926,7 +1019,11 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         high=np.nextafter(s.high,s.low) if s.left_high else s.high
         for key,curve in s.curves.items():
             if key in graph or key in affected:continue
-            value=(0. if curve is None else curve.constant_on(s.low,high)) if high>s.low else None
+            if high<=s.low:value=None
+            elif curve is None:value=0.
+            else:
+                value=constant_at[(id(curve),position)]
+                if value!=value:value=None
             if value is not None:constants[key]=value
         for key in order:
             if all(part in constants for part in graph[key]):
@@ -934,11 +1031,11 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         deferred={}
         for key,curve in s.curves.items():
             if key in graph or key in affected or key in constants or curve is None:continue
-            laws,relevant=_laws_over(curve,s.low,high),slice(None)
+            linear=linear_at[(id(curve),position)]
             # Source knots are included in seeds, so these untouched columns
             # are affine inside each seed panel. Still check all seven final
             # probes; a failure falls back to the full adaptive column set.
-            if np.all(laws[relevant]==2):
+            if linear:
                 def read(e,curve=curve,s=s):
                     e=np.asarray(e,dtype=float).copy()
                     if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
@@ -946,8 +1043,6 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 deferred[key]=read
         work=min(len(seeds),max(1,options.max_work_bytes//1024))*(len(s.curves)-len(constants)-len(deferred)+1)*1024
         pending[position]=(constants,work)
-        # The source diagnostics are the segment's first request, answered in
-        # segment order with the others of its round.
         # Diagnose the evaluated aggregate against exclusive leaves. Output
         # sums are derived even if the redundant source aggregate disagrees.
         # Redundant aggregates inform diagnostics, not the reconstructed mesh.
@@ -955,9 +1050,14 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         diagnostic_seeds=set(seeds)|{float(x) for c in s.curves.values() if c is not None for x in _knots_in(c,s.low,s.high)}
         grid=np.asarray(sorted(diagnostic_seeds))
         probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
-        original=yield probe,'diagnostic'
+        return seeds,constants,deferred,probe
+    def diagnose(position,probe,original):
+        s=segments[position];constants=pending[position][0]
         for key in order:
-            summed=sum((original[part] for part in graph[key]),np.zeros(len(probe)))
+            # A part that is the constant zero here adds nothing, exactly (a
+            # sum starts at +0.0), and the diagnostic request leaves it out.
+            parts=[part for part in graph[key] if part in graph or not (part in constants and constants[part]==0)]
+            summed=sum((original[part] for part in parts),np.zeros(len(probe)))
             ratio=error_ratio(original[key],summed,options)
             maximum=float(np.max(ratio))
             if maximum>source_balance[key]:
@@ -965,34 +1065,126 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 source_worst[key]=dict(energy_eV=float(probe[index]),side='left-limit' if s.left_high and probe[index]==s.high else 'point',stated_b=float(original[key][index]),components_b=float(summed[index]),error_ratio=maximum)
             source_balance[key]=max(source_balance[key],maximum)
             original[key]=summed
-        x,y,check=yield from linearize_steps(seeds,options,budget,constants=constants,deferred=deferred)
-        return x,y,check
+    def tag(steps,position):
+        """One segment's linearize_steps requests, marked with the segment."""
+        try:
+            request=next(steps)
+            while True:
+                request=steps.send((yield (*request,position)))
+        except StopIteration as stop:
+            return stop.value
+    keys=tuple(segments[0].curves) if segments else ()
+    def run(positions,items,budget):
+        """Tabulate consecutive segments: their source diagnostics in one
+        request, answered in segment order, then one refinement for all of
+        them (linearize_group_steps) or, for one segment, its own."""
+        probes=[item[3] for item in items]
+        values=yield (np.concatenate(probes),'diagnostic',np.repeat(positions,[len(v) for v in probes]))
+        end=0
+        for position,probe in zip(positions,probes):
+            diagnose(position,probe,{key:v[end:end+len(probe)] for key,v in values.items()});end+=len(probe)
+        if len(positions)==1:
+            seeds,constants,deferred,_=items[0]
+            return [(yield from tag(linearize_steps(seeds,options,budget,constants=constants,deferred=deferred,keys=keys),positions[0]))],None
+        spans=[item[:3] for item in items]
+        steps=linearize_group_steps(spans,options,budget,keys);owners=np.asarray(positions)
+        try:
+            request=next(steps)
+            while True:
+                e,only,local=request
+                request=steps.send((yield (e,only,owners[local])))
+        except StopIteration as stop:
+            results,group=stop.value
+        if group is not None:
+            # One check for the group; each segment keeps its own tables.
+            return results,group
+        for k,item in enumerate(results):
+            if item is None:
+                # A deferred column failed a probe: this segment alone, with
+                # the ordinary retry of every column.
+                seeds,constants,deferred=spans[k]
+                results[k]=yield from tag(linearize_steps(seeds,options,budget,constants=constants,deferred=deferred,keys=keys),positions[k])
+        return results,None
+    # Consecutive segments of one region, each of a few seeds, are refined
+    # together (JENDL-5 Cl-35: 3 376 segments, a median of two seeds each);
+    # a group stays within the seed count linearize gives one chunk.
+    GROUP_SEEDS=2048
     live={};started=0;finished=0.;done=0;working=0
     def finish(index,value):
-        nonlocal finished,done,working
-        x,y,check=value;s=segments[index]
-        tables[index]=(x,y);checks[index]=dict(domain=(s.low,s.high),points=len(x),**check)
+        nonlocal finished,done
+        x,y,*check=value;s=segments[index]
+        tables[index]=(x,y)
+        if check:checks[index]=dict(domain=(s.low,s.high),points=len(x),**check[0])
         done+=len(x)
-        if index in live:working-=pending[index][1]
         if index in pending:result._forget(id(segments[index]),id(pending[index][0]))
         pending.pop(index,None)
         if progress is not None:
             finished=max(finished,float(min(1.,np.log(s.high/low)/span)) if span else
                          sum(t is not None for t in tables)/len(segments))
             progress(finished)
+    def complete(positions,results,group):
+        for i,value in zip(positions,results):finish(i,value)
+        if group is not None:
+            # A group's segments report as one region, as the chunks of one
+            # segment do.
+            first,last=segments[positions[0]],segments[positions[-1]]
+            checks[positions[0]]=dict(domain=(first.low,last.high),points=sum(len(tables[i][0]) for i in positions),**group)
+    def answer(requests):
+        """Values for requests ``(energies, only, segment)``, *segment* one
+        index or one per energy: each split into one request per segment."""
+        flat=[];shapes=[]
+        for e,only,owner in requests:
+            if np.ndim(owner)==0:
+                shapes.append(None);flat.append((segments[int(owner)],(e,only),pending[int(owner)][0]));continue
+            ordered=np.argsort(owner,kind='stable')
+            parts=np.split(ordered,np.flatnonzero(np.diff(owner[ordered]))+1);shapes.append((len(e),parts))
+            for idx in parts:
+                i=int(owner[idx[0]]);flat.append((segments[i],(e[idx],only),pending[i][0]))
+        values=result._answer(flat);out=[];at=0
+        for (e,only,owner),shape in zip(requests,shapes):
+            if shape is None:
+                out.append(values[at]);at+=1;continue
+            n,parts=shape;pieces=values[at:at+len(parts)];at+=len(parts)
+            if isinstance(only,tuple):keys=only
+            else:
+                # Each segment's diagnostic leaves out its own zero leaves:
+                # the union, zero where a segment has none (it never reads it).
+                keys=tuple(dict.fromkeys(key for piece in pieces for key in piece))
+            joined={}
+            for key in keys:
+                column=np.zeros(n)
+                for idx,piece in zip(parts,pieces):
+                    if key in piece:column[idx]=piece[key]
+                joined[key]=column
+            out.append(joined)
+        return out
     while started<len(segments) or live:
         while started<len(segments) and (not live or working<options.max_work_bytes):
-            index=started;started+=1
-            generator=tabulate(index,segments[index],options.max_points-done)
+            positions=[started];items=[prepare(started)];started+=1
+            region=segments[positions[0]].region
+            total=len(items[0][0])
+            while (region is not None and started<len(segments) and segments[started].region is region
+                   and total<GROUP_SEEDS):
+                item=prepare(started)
+                if total+len(item[0])>GROUP_SEEDS:
+                    # Too many seeds for this group: it starts the next one,
+                    # already prepared.
+                    break
+                positions.append(started);items.append(item);total+=len(item[0]);started+=1
+            work=sum(pending[i][1] for i in positions)
+            generator=run(positions,items,options.max_points-done)
             try:request=next(generator)
-            except StopIteration as stop:finish(index,stop.value)
-            else:live[index]=[generator,request];working+=pending[index][1]
+            except StopIteration as stop:
+                complete(positions,*stop.value)
+            else:
+                live[positions[0]]=[generator,request,positions,work];working+=work
         order_live=sorted(live)
-        answers=result._answer([(segments[i],live[i][1],pending[i][0]) for i in order_live])
+        answers=answer([live[i][1] for i in order_live])
         for i,values in zip(order_live,answers):
             try:live[i][1]=live[i][0].send(values)
             except StopIteration as stop:
-                finish(i,stop.value);del live[i]
+                complete(live[i][2],*stop.value)
+                working-=live[i][3];del live[i]
     # The window's request plans hold every segment's constants; the tables
     # are all that the output needs.
     result._columns_cache.clear();pending.clear()
@@ -1004,11 +1196,34 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     from kika.algebra import compress_flat_pieces
     owned=[{physical_owners.get(mt) for mt in region_mts(s.region)} if s.region is not None else set()
            for s in segments]
+    lows=np.array([x[0] for x,_ in tables]);highs=np.array([x[-1] for x,_ in tables])
     for key in entries:
-        pieces=[]
+        tabs=[y[key] for _,y in tables]
+        if key not in graph and all(not t.flags.writeable and len(t)>=2 for t in tabs):
+            values=np.array([t[0] for t in tabs])
+            if not np.any((values==0)&np.signbit(values)):
+                # The constant of every segment (read-only tables, see below):
+                # compression leaves each segment its two ends, and segments
+                # with one value join through their shared edge. Written
+                # directly, as _compress_and_join would make it.
+                cut=np.flatnonzero(values[1:]!=values[:-1])+1
+                children=[]
+                for a,b in zip(np.r_[0,cut],np.r_[cut,len(values)]):
+                    cx=np.r_[lows[a],highs[a:b]];children.append(XYs1d(cx,np.full(len(cx),values[a]),axes=axes,index=len(children)))
+                output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
+                output[key].label=label
+                minima[key]=float(np.min(values))
+                for _,y in tables:del y[key]
+                continue
+        pieces=[];summed=key in graph
         for i,(x,y) in enumerate(tables):
+            if summed or not y[key].flags.writeable:
+                pieces.append((x,y[key]));continue
             s=segments[i];curve=s.curves[key]
-            if curve is not None and key not in graph and key not in owned[i]:
+            if curve is not None and key not in owned[i]:
+                # (A read-only table is a constant of the segment, shared by
+                # _linearize_chunk; on its own knots the curve is that same
+                # constant, and compression leaves the segment's two ends.)
                 original_x=curve._x
                 if np.all(_laws_over(curve,s.low,s.high)==2):
                     # An untouched lin-lin background already has an exact
@@ -1023,18 +1238,18 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 else:values=y[key]
             else:values=y[key]
             pieces.append((x,values))
-        children=[XYs1d(cx,cy,axes=axes,index=i) for i,(cx,cy) in enumerate(_join_continuous(compress_flat_pieces(pieces)))]
+        children=[XYs1d(cx,cy,axes=axes,index=i) for i,(cx,cy) in enumerate(_compress_and_join(pieces))]
         output[key]=children[0] if len(children)==1 else Regions1d(children,axes=axes,label=label)
         output[key].label=label
         # A reaction's tables are released once its output exists, so the
         # output and the tables are never all held at once.
-        minima[key]=min(float(np.min(y[key])) for _,y in tables)
+        minima[key]=float(np.min(np.concatenate([y[key] for _,y in tables])))
         for _,y in tables:del y[key]
     normalized_hash=hashlib.sha256((source_hash+repr(context)+repr(options)).encode()).hexdigest()
     report=dict(engine=ENGINE_VERSION,scope='all modeled cross sections across evaluated domain',
         source_sha256=source_hash,normalized_sha256=normalized_hash,minima=minima,
         projectile=str(suite.projectile),target=str(suite.target),projectileFrame=str(suite.projectileFrame),
-        domain=(low,high),points=points,regions=checks,source_sum_error_ratios=source_balance,
+        domain=(low,high),points=points,regions=[c for c in checks if c is not None],source_sum_error_ratios=source_balance,
         stored_points=sum(len(c.xs) for f in output.values() for c in (f.function1ds if isinstance(f,Regions1d) else [f])),
         source_sum_policy='derive-from-leaves',source_sum_discrepancies=source_worst,
         raised_thresholds=MappingProxyType({key.label:v for key,v in raised.items()}),
