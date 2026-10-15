@@ -11,9 +11,9 @@ the number of samples, and tests of the normality of the results.
 **Applies to:** any set of per-sample results with relative statistical uncertainties
 (MCNP tallies, $k_\text{eff}$), one response or a table of responses.
 
-**Entry points:** `kika.UQ.fastTMC.fastTMC`, `kika.UQ.fastTMC.create_summary_table`,
-`kika.UQ.convergence.convergence_analysis`, `kika.UQ.normality.normality_tests`,
-`kika.UQ.normality.histogram_data`, `kika.UQ.normality.qq_plot_data`.
+**Entry points:** {py:func}`kika.UQ.fastTMC.fastTMC`, {py:func}`kika.UQ.fastTMC.create_summary_table`,
+{py:func}`kika.UQ.convergence.convergence_analysis`, {py:func}`kika.UQ.normality.normality_tests`,
+{py:func}`kika.UQ.normality.histogram_data`, {py:func}`kika.UQ.normality.qq_plot_data`.
 
 **Status:** experimental — since 0.1.1 (convergence and normality since 0.2.0).
 ```
@@ -171,7 +171,7 @@ In `kika/UQ/tests/test_fast_tmc_and_normality.py`:
   (`::test_the_anderson_darling_p_value_meets_the_tabulated_critical_values`), and the
   decision follows $\alpha$ (`::test_the_anderson_darling_decision_follows_alpha`).
 
-No test exercises `kika.UQ.convergence`, the bootstrap intervals' coverage, or the
+No test exercises {py:mod}`kika.UQ.convergence`, the bootstrap intervals' coverage, or the
 Shapiro-Wilk and D'Agostino-Pearson tests.
 
 ## Diagnostics
@@ -193,10 +193,10 @@ Shapiro-Wilk and D'Agostino-Pearson tests.
 
 ## Implementation
 
-- `kika.UQ.fastTMC`: the decomposition, the reliability flag, the bootstrap and the summary
+- {py:mod}`kika.UQ.fastTMC`: the decomposition, the reliability flag, the bootstrap and the summary
   table.
 - `kika.UQ.convergence`: the running statistics and their intervals.
-- `kika.UQ.normality`: the normality tests, the histogram and the Q-Q data.
+- {py:mod}`kika.UQ.normality`: the normality tests, the histogram and the Q-Q data.
 
 ## References
 

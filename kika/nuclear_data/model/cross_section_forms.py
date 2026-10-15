@@ -33,6 +33,7 @@ __all__ = [
     "Background",
     "ResonancesWithBackground",
     "Reference",
+    "crossSectionFormTag",
     "CoulombPlusNuclearElastic",
     "ThermalNeutronScatteringLaw1d",
     "URR_probabilityTables1d",
@@ -116,6 +117,22 @@ class Reference:
 
     href: str
     label: Optional[str] = None
+
+
+def crossSectionFormTag(form) -> str:
+    """The GNDS element a cross-section form is written as, for a ``reference`` to it.
+
+    Follows :mod:`kika.gnds.encode`, which writes a one-region ``Regions1d`` as
+    the single ``XYs1d`` it holds. The href is informative only inside kika:
+    :meth:`~kika.nuclear_data.model.ReactionSuite.resolve_reference` resolves by
+    the container's label and the form's label, never by this tag.
+    """
+    name = type(form).__name__
+    if name == "Regions1d":
+        return "regions1d" if len(form.function1ds) > 1 else "XYs1d"
+    if name == "ResonancesWithBackground":
+        return "resonancesWithBackground"
+    return name
 
 
 @dataclass
