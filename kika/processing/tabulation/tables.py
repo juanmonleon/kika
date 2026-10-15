@@ -53,8 +53,14 @@ class TabulationOptions:
     #: Absolute error in normalized first and second moments of a Legendre
     #: angular law (after the explicitly selected negative-density policy).
     angularMomentAtol: float = 1.0e-5
+    #: Absolute CDF error of the transport-safe histogram projection of a
+    #: mixed discrete/continuous energy law. Its mass, first and second
+    #: moments are retained exactly per panel; maxPoints still caps each table.
+    mixedCdfAtol: float = 1.0e-6
 
     def __post_init__(self):
+        if not np.isfinite(self.mixedCdfAtol) or self.mixedCdfAtol <= 0:
+            raise ValueError("mixed CDF tolerance must be positive and finite")
         if (not np.isfinite(self.correlatedRtol) or not np.isfinite(self.correlatedAtol)
                 or self.correlatedRtol < 0 or self.correlatedAtol < 0):
             raise ValueError("correlated tolerances must be finite and nonnegative")

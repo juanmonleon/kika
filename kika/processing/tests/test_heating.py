@@ -232,3 +232,59 @@ def test_mf12_zero_tail_keeps_its_shared_support_endpoint_in_the_correction():
     result=H.heatingOf(NS(reactions=[rx]),E,{102:np.ones(len(E))},awr=A,Z=1,evaluation=NS(findReactionByENDF_MT=lambda mt:source))
     np.testing.assert_array_equal(H._yield(p,E),[0.,0.])
     np.testing.assert_allclose(result.kerma,[E[0]/(A+1),E[1]+binding],rtol=1e-14)
+
+
+@pytest.mark.parametrize("name,shape", [("SimpleMaxwellianFission", 1.5), ("Evaporation", 2.)])
+def test_analytic_emission_damage_retains_logarithmic_parameter_law(name, shape, monkeypatch):
+    from scipy.special import gammainc
+    theta = m.XYs1d(xs=[1e-5, 1.5e7, 3e7], ys=[1295500., 1492300., 1499835.],
+                    interpolation=m.Interpolation.linlog)
+    law = getattr(m, name)(U=m.PhysicalQuantity(-3e7, "eV"), theta=theta)
+    form = m.Uncorrelated(energy=law, productFrame=m.Frame.lab)
+    E = np.array([1e-5, 786.4939, 1e4, 1e6, 2e7, 3e7]); A = 238.
+    # With an identity partition the angular cross term integrates to zero,
+    # and the spectrum's first moment has a closed incomplete-gamma form.
+    monkeypatch.setattr(H, "lindhard", lambda recoil, *args: recoil)
+    t = theta.evaluate(E); upper = (E + 3e7) / t
+    expected = (E + shape * t * gammainc(shape+1, upper) / gammainc(shape, upper)) / A
+    actual = H._emissionDamage(form, E, A, 92, 0.)
+    np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=.1)
+
+
+def test_analytic_emission_damage_refuses_invalid_parameter_instead_of_zero():
+    law = m.SimpleMaxwellianFission(U=m.PhysicalQuantity(-3e7, "eV"),
+        theta=m.XYs1d(xs=[1., 2.], ys=[-1., -1.]))
+    with pytest.raises(ValueError, match="positive theta"):
+        H._emissionDamage(m.Uncorrelated(energy=law), np.array([1., 2.]), 238., 92, 25.)
+
+
+def test_analytic_emission_damage_does_not_interpolate_across_zero_support(monkeypatch):
+    from scipy.special import gammainc
+    law = m.SimpleMaxwellianFission(U=m.PhysicalQuantity(1e6, "eV"),
+        theta=m.XYs1d(xs=[1., 2e6], ys=[1e6, 1e6]))
+    E = np.array([1e-5, 1e6, 1e6+1., 2e6])
+    monkeypatch.setattr(H, "lindhard", lambda recoil, *args: recoil)
+    actual = H._emissionDamage(m.Uncorrelated(energy=law), E, 238., 92, 0.)
+    np.testing.assert_array_equal(actual[:2], [0., 0.])
+    upper = (E[2:]-1e6)/1e6
+    expected = (E[2:] + 1.5e6*gammainc(2.5, upper)/gammainc(1.5, upper))/238.
+    np.testing.assert_allclose(actual[2:], expected, rtol=2e-5, atol=.1)
+
+
+@pytest.mark.parametrize("qualifier", [None, m.InterpolationQualifier.unitBase])
+def test_photon_unit_base_maps_only_continuum_and_retains_line_mass(qualifier):
+    first = m.Xs_pdf_cdf1d(xs=[10., 1., 3.], pdf=[.2, .4, .4], cdf=[.2, .2, 1.],
+        numberOfDiscrete=1, outerDomainValue=10.)
+    last = m.Xs_pdf_cdf1d(xs=[20., 2., 6.], pdf=[.4, .15, .15], cdf=[.4, .4, 1.],
+        numberOfDiscrete=1, outerDomainValue=20.)
+    form = m.Uncorrelated(energy=m.XYs2d(function1ds=[first, last],
+        interpolationQualifier=qualifier), productFrame=m.Frame.lab)
+    E = np.array([15.]); k = H._Kinematics(A=55., Q=0., awp=0.)
+    # At the midpoint the continuum is uniform on [1.5, 4.5], mass .7;
+    # the two unchanged lines carry mean mass .1 at 10 and .2 at 20.
+    assert H._meanEnergyOf(form, E, k)[0] == pytest.approx(7.1, abs=1e-12)
+    assert H._meanEnergyOf(form, E, k, moment=2)[0] == pytest.approx(96.825, abs=1e-12)
+    from kika.hdf5.distributions import encodeContinuous, decodeContinuous
+    decoded = decodeContinuous(encodeContinuous(form.energy))
+    roundtrip = m.Uncorrelated(energy=decoded, productFrame=m.Frame.lab)
+    assert H._meanEnergyOf(roundtrip, E, k)[0] == pytest.approx(7.1, abs=1e-12)

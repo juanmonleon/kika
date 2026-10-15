@@ -204,3 +204,41 @@ def test_angular_boundary_coordinates_match_openmc_lower_bound_without_source_ed
     sampled_mean = (1-fraction)*means[ids] + fraction*means[ids+1]
     np.testing.assert_allclose(sampled_mean, _meanMu(converted, probes), atol=1e-14, rtol=0.)
     np.testing.assert_allclose(sampled_mean, [.05, .1, .2, .2, .25], atol=1e-5, rtol=0.)
+
+
+def test_mixed_histogram_retains_lines_mass_and_two_continuum_moments():
+    source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 0., 2.], ys=[.2, 0., .8], outerDomainValue=15.)])
+    converted, _ = tabulateEnergy(source, discrete=[1])
+    table = converted.function1ds[0]
+    assert str(table.interpolation) == "flat" and table.numberOfDiscrete == 1
+    assert table.pdf[0] == pytest.approx(.2, abs=1e-14)
+    from kika.processing.heating import _expect
+    assert _expect(table, lambda x: x) == pytest.approx(2.+.8*4/3, abs=1e-12)
+    assert _expect(table, lambda x: x*x) == pytest.approx(20.+.8*2., abs=1e-12)
+    q = np.linspace(0., 2., 10001)
+    assert np.max(abs(np.interp(q, table.xs[1:], table.cdf[1:]) - (.2+.2*q*q))) <= TabulationOptions().mixedCdfAtol
+    assert len(table.xs) <= TabulationOptions().maxPoints
+
+
+def test_mixed_single_histogram_panel_gets_a_transport_safe_second_panel():
+    source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 1., 3.], ys=[.2, .4, .4],
+        interpolation=m.Interpolation.flat, outerDomainValue=15.)])
+    converted, _ = tabulateEnergy(source, discrete=[1])
+    table = converted.function1ds[0]
+    np.testing.assert_array_equal(table.xs, [10., 1., 2., 3.])
+    np.testing.assert_allclose(table.cdf, [.2, .2, .6, 1.], rtol=0., atol=1e-14)
+
+
+def test_pure_lines_do_not_enter_the_continuum_interpolation_branch():
+    source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 5.], ys=[.25, .75], outerDomainValue=15.)])
+    converted, _ = tabulateEnergy(source, discrete=[2])
+    table = converted.function1ds[0]
+    assert str(table.interpolation) == "flat" and table.numberOfDiscrete == 2
+    np.testing.assert_array_equal(table.xs, [10., 5.])
+    np.testing.assert_allclose(table.cdf, [.25, 1.], rtol=0., atol=1e-14)
+
+
+@pytest.mark.parametrize("value", [0., -1., float("nan"), float("inf")])
+def test_mixed_cdf_tolerance_is_validated(value):
+    with pytest.raises(ValueError, match="mixed CDF tolerance"):
+        TabulationOptions(mixedCdfAtol=value)

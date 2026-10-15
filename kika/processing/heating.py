@@ -456,6 +456,53 @@ def _unitBaseCMMean(form, grid, k):
     return output
 
 
+def _unitBaseSpectrumMean(energy, grid, moment):
+    """OpenMC's unit-base continuum mapping, with unmapped discrete lines."""
+    energies, tables, flat = _tables(energy)
+    if flat:
+        return _onGrid(energies, [_expect(t, lambda e: e**moment) for t in tables], grid, True)
+    parts = []
+    low, width = [], []
+    nodes, weights = _GL4
+    for table in tables:
+        x, p = np.asarray(table.xs), np.asarray(table.pdf if hasattr(table, "pdf") else table.ys)
+        nd = int(getattr(table, "numberOfDiscrete", 0) or 0)
+        discrete = np.array([np.sum(p[:nd]*x[:nd]**k) for k in range(3)])
+        cx, cp = x[nd:], p[nd:]
+        if len(cx) < 2 or cx[-1] <= cx[0]:
+            return _onGrid(energies, [_expect(t, lambda e: e**moment) for t in tables], grid)
+        half = np.diff(cx)/2
+        points = (cx[:-1]+cx[1:])[:, None]/2 + half[:, None]*nodes
+        if _isFlat(table):
+            density = cp[:-1, None]
+        else:
+            density = cp[:-1, None]+np.diff(cp)[:, None]*(nodes+1)/2
+        weighted = half[:, None]*weights*density
+        continuous = np.array([np.sum(weighted*points**k) for k in range(3)])
+        mass = discrete[0]+continuous[0]
+        if mass <= 0:
+            raise ValueError("unit-base spectrum has no positive mass")
+        parts.append(np.r_[discrete, continuous]/mass)
+        low.append(float(cx[0])); width.append(float(cx[-1]-cx[0]))
+    parts, low, width = np.asarray(parts), np.array(low), np.array(width)
+    j = np.clip(np.searchsorted(energies, grid, side="right")-1, 0, len(energies)-1)
+    k = np.minimum(j+1, len(energies)-1)
+    span = energies[k]-energies[j]
+    fraction = np.clip(np.divide(grid-energies[j], span, out=np.zeros(len(grid)), where=span>0), 0., 1.)
+    qa = (1-fraction)*low[j]+fraction*low[k]
+    qw = (1-fraction)*width[j]+fraction*width[k]
+    output = np.zeros(len(grid))
+    for weight, ids in ((1-fraction, j), (fraction, k)):
+        mass = parts[ids, 3]
+        u1 = (parts[ids, 4]-low[ids]*mass)/width[ids]
+        value = parts[ids, 1]+qa*mass+qw*u1
+        if moment == 2:
+            u2 = (parts[ids, 5]-2*low[ids]*parts[ids, 4]+low[ids]**2*mass)/width[ids]**2
+            value = parts[ids, 2]+qa*qa*mass+2*qa*qw*u1+qw*qw*u2
+        output += weight*value
+    return output
+
+
 def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
     """``⟨E'^moment⟩`` in the lab of one Monte Carlo form, on ``grid``."""
     from kika.nuclear_data import model as m
@@ -504,17 +551,11 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
         mean = _onGrid(energies, [_expect(t, lambda e: e ** moment,
                                           k.trapezoid and lab and moment == 1)
                                   for t in tables], grid, flat)
-        qualifier=getattr(energy,"interpolationQualifier",None)
-        if lab and str(getattr(qualifier,"value",qualifier))=="unitBase" and moment in (1,2) and not any(getattr(t,"numberOfDiscrete",0) for t in tables):
-            lower=np.array([float(t.xs[0]) for t in tables]);width=np.array([float(t.xs[-1]-t.xs[0]) for t in tables])
-            if np.all(width>0):
-                first=np.array([_expect(t,lambda e:e) for t in tables])
-                u1=_onGrid(energies,(first-lower)/width,grid,flat)
-                a=_onGrid(energies,lower,grid,flat);span=_onGrid(energies,width,grid,flat)
-                if moment==1:return a+span*u1
-                second=np.array([_expect(t,lambda e:e*e) for t in tables])
-                u2=_onGrid(energies,(second-2*lower*first+lower*lower)/(width*width),grid,flat)
-                return a*a+2*a*span*u1+span*span*u2
+        qualifier = getattr(energy, "interpolationQualifier", None)
+        if (lab and moment in (1, 2) and
+                (str(getattr(qualifier, "value", qualifier)) == "unitBase"
+                 or all(hasattr(t, "pdf") for t in tables))):
+            return _unitBaseSpectrumMean(energy, grid, moment)
         if lab:
             return mean
         if moment != 1:
@@ -529,7 +570,9 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
         energies, tables, flat = _tables(form.energy)
         mean = _onGrid(energies, [_expect(t, lambda e: e ** moment, k.trapezoid and not cm)
                                   for t in tables], grid, flat)
-        if not cm:
+        if not cm or k.awp == 0.0:
+            if moment in (1, 2):
+                return _unitBaseSpectrumMean(form.energy, grid, moment)
             return mean
         inner = list(form.energyAngular.function2ds)
         cross = []
@@ -640,6 +683,8 @@ def _emissionDamage(form, grid, A, Z, ed):
     if spectrum is None or isinstance(spectrum, (m.LevelEnergy, m.DiscretePhotonEnergy,
                                                  m.NBodyPhaseSpace)):
         return np.zeros(len(grid))
+    if isinstance(spectrum, (m.SimpleMaxwellianFission, m.Evaporation)):
+        return _analyticEmissionDamage(spectrum, grid, A, Z, ed)
     energies, tables, flat = _tables(spectrum)
     u, wu = _GL4
     values = []
@@ -649,6 +694,81 @@ def _emissionDamage(form, grid, A, Z, ed):
             return np.sum(wu * lindhard(er, Z, A, Z, A, ed), axis=-1) / 2.0
         values.append(_expect(t, g))
     return _onGrid(energies, values, grid, flat)
+
+
+def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
+    """Integrate LF7/9 directly, retaining the parameter interpolation law.
+
+    A display grid at parameter knots loses logarithmic incident dependence.
+    Gaussian orders are doubled on sqrt(E'/theta), splitting the displacement
+    threshold in angle. Incident interpolation is checked at three interior
+    points; this is a sampled error criterion, with explicit resource caps.
+    """
+    from functools import lru_cache
+    gauss = {n: np.polynomial.legendre.leggauss(n) for n in (16, 32, 64, 128)}
+    @lru_cache(maxsize=30000)
+    def at(E):
+        theta = float(spectrum.theta.evaluate(E, outOfRange="hold"))
+        top = float(spectrum.upperBound(E))
+        if top <= 0:
+            return 0.0
+        if not theta > 0 or not np.isfinite(top):
+            raise ValueError("analytic damage requires positive theta and finite support")
+        vmax = np.sqrt(top / theta)
+        cuts = np.unique(np.r_[0., vmax, 1., 2., 4., 8.,
+            abs(np.sqrt(E) - np.sqrt(A * ed)) / np.sqrt(theta),
+            (np.sqrt(E) + np.sqrt(A * ed)) / np.sqrt(theta)])
+        cuts = cuts[(cuts >= 0) & (cuts <= vmax)]
+        previous = None
+        for order in (16, 32, 64, 128):
+            nodes, weights = gauss[order]
+            half = np.diff(cuts) / 2
+            v = ((cuts[:-1] + cuts[1:])[:, None] / 2 + half[:, None] * nodes).ravel()
+            w = (half[:, None] * weights).ravel()
+            ep = theta * v * v
+            root = np.sqrt(E * ep)
+            last = np.clip((E + ep - A * ed) / np.maximum(2 * root, 1e-300), -1., 1.)
+            mu = (last[:, None] - 1) / 2 + (last[:, None] + 1) / 2 * nodes
+            recoil = np.maximum(0., (E + ep[:, None] - 2 * root[:, None] * mu) / A)
+            angular = np.sum(weights * lindhard(recoil, Z, A, Z, A, ed), axis=1) * (last + 1) / 4
+            density = spectrum.evaluate(E, ep) * (2 * theta * v)
+            mass = float(np.sum(w * density))
+            value = float(np.sum(w * density * angular))
+            if (previous is not None and abs(mass - 1) <= 1e-9
+                    and abs(value - previous) <= .01 + 1e-7 * abs(value)):
+                return value
+            previous = value
+        raise ValueError("analytic emission damage quadrature did not converge")
+    active = np.array([spectrum.upperBound(float(E)) > 0 for E in grid])
+    output = np.zeros(len(grid))
+    if not np.any(active):
+        return output
+    validGrid = np.asarray(grid)[active]
+    lo, hi = float(np.min(validGrid)), float(np.max(validGrid))
+    if lo == hi:
+        output[active] = at(lo)
+        return output
+    parameters = spectrum.incidentEnergies()
+    nodes = np.unique(np.r_[lo, hi, parameters[(parameters > lo) & (parameters < hi)],
+                             _geometric(lo, hi, step=4.)])
+    nodes = nodes[(nodes >= lo) & (nodes <= hi)]
+    values = np.array([at(float(E)) for E in nodes])
+    for iteration in range(30):
+        additions = {}
+        for a, b, va, vb in zip(nodes[:-1], nodes[1:], values[:-1], values[1:]):
+            for f in (.25, .5, .75):
+                E = float(a + (b - a) * f)
+                value = at(E)
+                if abs(value - (va + (vb - va) * f)) > .05 + 1e-5 * abs(value):
+                    additions[E] = value
+        if not additions:
+            output[active] = np.interp(validGrid, nodes, values)
+            return output
+        if len(nodes) + len(additions) > 20000:
+            raise ValueError("analytic emission damage interpolation exceeds capacity")
+        known = dict(zip(nodes, values)); known.update(additions)
+        nodes = np.array(sorted(known)); values = np.array([known[E] for E in nodes])
+    raise ValueError("analytic emission damage interpolation did not converge")
 
 
 def _captureDamage(photons, grid, A, Z, ed, Q, fixedPrimary=False):
