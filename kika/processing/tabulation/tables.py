@@ -55,7 +55,8 @@ class TabulationOptions:
     angularMomentAtol: float = 1.0e-5
     #: Absolute CDF error of the transport-safe histogram projection of a
     #: mixed discrete/continuous energy law. Its mass, first and second
-    #: moments are retained exactly per panel; maxPoints still caps each table.
+    #: moments are retained exactly per panel. The projection's size is bounded
+    #: by this tolerance and the panel count, so maxPoints does not cap it.
     mixedCdfAtol: float = 1.0e-6
 
     def __post_init__(self):
