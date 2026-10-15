@@ -40,6 +40,7 @@ fallback for a section without them (one isotropic emission for neutrons,
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -65,6 +66,28 @@ HEATR_APPROXIMATIONS = (
     "damage of particle emission: capdam's single particle at min(Q + AE/(A+1), Coulomb "
     "barrier), deuterons and alphas of a continuum taken as protons",
 )
+
+#: Threads for the incident energies of a damage/moment quadrature: each energy
+#: is independent and its large array arithmetic releases the GIL.
+_ENERGY_THREADS = max(1, min(8, (os.cpu_count() or 2) // 2))
+
+
+def _evaluateAll(at, energies) -> np.ndarray:
+    """``[at(E) for E in energies]``, the distinct energies computed on threads.
+
+    ``at`` is a pure, memoised function of one energy, so the values do not
+    depend on the order or the thread that computes them: bit for bit those
+    of the sequential loop. An energy that fails raises as it would there.
+    """
+    energies = [float(E) for E in energies]
+    distinct = list(dict.fromkeys(energies))
+    if _ENERGY_THREADS > 1 and len(distinct) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=_ENERGY_THREADS) as pool:
+            for _ in pool.map(at, distinct):
+                pass
+    return np.array([at(E) for E in energies])
+
 
 _GL4 = np.polynomial.legendre.leggauss(4)
 _GL8 = np.polynomial.legendre.leggauss(8)
@@ -235,9 +258,26 @@ def lindhard(E, Zr, Ar, Zl, Al, ed):
     el = 30.724 * Zr * Zl * np.sqrt(Zr ** (2 / 3) + Zl ** (2 / 3)) * (Ar + Al) / Al
     denom = (Zr ** (2 / 3) + Zl ** (2 / 3)) ** 0.75 * Ar ** 1.5 * np.sqrt(Al)
     fl = 0.0793 * Zr ** (2 / 3) * np.sqrt(Zl) * (Ar + Al) ** 1.5 / denom
-    ep = np.maximum(E, 0.0) / el
-    out = E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
-    return np.where(E >= ed, out, 0.0)
+    if E.ndim == 0:
+        ep = np.maximum(E, 0.0) / el
+        out = E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
+        return np.where(E >= ed, out, 0.0)
+    # The same expression in place, in its order of operations: the damage
+    # quadratures call this on millions of recoils at a time, and the
+    # temporaries cost a fifth of it.
+    ep = np.maximum(E, 0.0)
+    ep /= el
+    out = np.power(ep, 1 / 6)
+    out *= 3.4008
+    term = np.power(ep, 0.75)
+    term *= 0.40244
+    out += term
+    out += ep
+    out *= fl
+    out += 1.0
+    np.divide(E, out, out=out)
+    out[~(E >= ed)] = 0.0
+    return out
 
 
 # ----------------------------------------------------------------------
@@ -504,9 +544,10 @@ def _unitBaseCMMean(form, grid, k):
         return mean+boost*query+2*np.sqrt(boost*query)*cross
     if hi<lo:return held(np.asarray(grid),bool(np.max(grid)<energies[0]))
     nodes=np.unique(np.r_[lo,energies[(energies>lo)&(energies<hi)],hi])
-    values=np.array([at(float(E)) for E in nodes])
+    values=_evaluateAll(at,nodes)
     for iteration in range(30):
         additions=[]
+        _evaluateAll(at,[float(a+(b-a)*fraction) for a,b in zip(nodes[:-1],nodes[1:]) if b!=a for fraction in (.25,.5,.75)])
         for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
             if b==a:continue
             for fraction in (.25,.5,.75):
@@ -799,9 +840,10 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=2.),cutoff,threshold]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
  for edge in (cutoff,threshold):
   if lo<edge<=hi:nodes=np.unique(np.r_[nodes,np.nextafter(edge,-np.inf)])
- values=np.array([at(float(E)) for E in nodes])
+ values=_evaluateAll(at,nodes)
  for _ in range(30):
   additions={}
+  _evaluateAll(at,[float(a+(b-a)*fraction) for a,b in zip(nodes[:-1],nodes[1:]) for fraction in (.25,.5,.75)])
   for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
    for fraction in (.25,.5,.75):
     e=float(a+(b-a)*fraction)
@@ -916,9 +958,10 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
     nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=4.)]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
     if flat:
         left=np.nextafter(energies[1:],-np.inf);nodes=np.unique(np.r_[nodes,left[(left>lo)&(left<hi)]])
-    values=np.array([at(float(E)) for E in nodes])
+    values=_evaluateAll(at,nodes)
     for iteration in range(30):
         additions={}
+        _evaluateAll(at,[float(a+(b-a)*f) for a,b in zip(nodes[:-1],nodes[1:]) for f in (.25,.5,.75)])
         for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
             for f in (.25,.5,.75):
                 E=float(a+(b-a)*f)
@@ -986,9 +1029,10 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
     nodes = np.unique(np.r_[lo, hi, parameters[(parameters > lo) & (parameters < hi)],
                              _geometric(lo, hi, step=4.)])
     nodes = nodes[(nodes >= lo) & (nodes <= hi)]
-    values = np.array([at(float(E)) for E in nodes])
+    values = _evaluateAll(at, nodes)
     for iteration in range(30):
         additions = {}
+        _evaluateAll(at, [float(a + (b - a) * f) for a, b in zip(nodes[:-1], nodes[1:]) for f in (.25, .5, .75)])
         for a, b, va, vb in zip(nodes[:-1], nodes[1:], values[:-1], values[1:]):
             for f in (.25, .5, .75):
                 E = float(a + (b - a) * f)
