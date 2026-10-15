@@ -17,6 +17,15 @@ import numpy as np
 
 from .tables import TabulationOptions, pdfTable, refine
 
+from importlib import import_module
+try:
+    _polynomial_native = import_module("kika.algebra._polynomial_native")
+except ModuleNotFoundError as exc:
+    if exc.name != "kika.algebra._polynomial_native":raise
+    _polynomial_native = None
+if _polynomial_native is not None and _polynomial_native.API_VERSION != 1:
+    raise ImportError("rebuild kika's native polynomial extension (API version mismatch)")
+
 __all__ = ["tabulateAngular", "legendreDensity", "muTable"]
 
 
@@ -32,7 +41,18 @@ def legendreDensity(coefficients):
 
     c = np.asarray(coefficients, dtype=float)
     scaled = c * (2.0 * np.arange(c.size) + 1.0) / 2.0
-    return lambda mu: legendre.legval(np.asarray(mu, dtype=float), scaled)
+    if _polynomial_native is None or scaled.ndim != 1 or not len(scaled):
+        return lambda mu: legendre.legval(np.asarray(mu,dtype=float),scaled)
+    scaled = np.ascontiguousarray(scaled)
+    def density(mu):
+        query=np.asarray(mu,dtype=float)
+        points=np.ascontiguousarray(query).ravel()
+        out=np.empty_like(points)
+        if _polynomial_native.legendre_values(scaled,points,out):
+            result=out.reshape(query.shape)
+            return result[()] if query.ndim==0 else result
+        return legendre.legval(query,scaled)
+    return density
 
 
 def _linlinXY(function):
@@ -65,6 +85,14 @@ def _legendreMoments(coefficients, negative):
     """Exact polynomial integrals, split at real roots for positive clipping."""
     from numpy.polynomial import Legendre
     c = np.asarray(coefficients, dtype=float)
+    if len(c) and np.all(np.isfinite(c)) and c[0] > 0:
+        # |P_l(mu)| <= 1 proves positivity when the constant term dominates.
+        # Orthogonality then gives both moments without finding any roots.
+        bound = np.sum((2*np.arange(1,len(c))+1)*np.abs(c[1:]))
+        if c[0] > bound*(1+64*np.finfo(float).eps):
+            first = c[1]/c[0] if len(c)>1 else 0.
+            second = 1/3+(2/3)*(c[2]/c[0] if len(c)>2 else 0.)
+            return np.array([first,second])
     law = Legendre(c * (2*np.arange(len(c))+1)/2)
     roots = law.roots()
     real = np.real(roots[np.abs(np.imag(roots)) < 1e-10])

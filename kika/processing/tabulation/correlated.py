@@ -139,6 +139,24 @@ def tabulateEnergyAngular(form, options: TabulationOptions, *,
                       atol=min(options.atol, options.correlatedAtol))
     xys3d = form.xys3d
     spectra, angular = [], []
+    # Repeated normalized Legendre laws are common across outgoing energies.
+    # Keep this cache local and bounded; returned mutable tables own their arrays.
+    from collections import OrderedDict
+    angularCache = OrderedDict()
+    def angleTable(node, outer):
+        import copy
+        key = (np.asarray(node.coefficients,dtype=float).tobytes()
+               if isinstance(node,m.Legendre) else None)
+        if key is not None and key in angularCache:
+            angularCache.move_to_end(key)
+            table = copy.deepcopy(angularCache[key])
+            table.outerDomainValue = outer
+            return table
+        table, _ = muTable(node, options, outer=outer)
+        if key is not None:
+            angularCache[key] = table
+            if len(angularCache)>256:angularCache.popitem(last=False)
+        return table
     for k, surface in enumerate(xys3d.function2ds):
         energy = surface.outerDomainValue
         nd = int(discrete[k]) if discrete is not None and k < len(discrete) else 0
@@ -153,12 +171,12 @@ def tabulateEnergyAngular(form, options: TabulationOptions, *,
         for inode, (node, magnitude) in enumerate(zip(nodes, f0)):
             if magnitude > 0:
                 normalised = _normalisedNode(node, magnitude)
-                mu, _ = muTable(normalised, options, outer=node.outerDomainValue)
+                mu = angleTable(normalised, node.outerDomainValue)
             else:
                 neighbours = [j for j in (inode-1,inode+1) if 0 <= j < len(nodes) and f0[j] > 0]
                 if not nd and not histogram and isinstance(node,m.Legendre) and neighbours:
                     j = neighbours[0]
-                    mu, _ = muTable(_normalisedNode(nodes[j],f0[j]),options,outer=node.outerDomainValue)
+                    mu = angleTable(_normalisedNode(nodes[j],f0[j]),node.outerDomainValue)
                 else:mu = _isotropicTable(node.outerDomainValue)
             tables.append(mu)
         angular.append(m.XYs2d(function1ds=tables, outerDomainValue=energy,

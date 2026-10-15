@@ -242,3 +242,48 @@ def test_pure_lines_do_not_enter_the_continuum_interpolation_branch():
 def test_mixed_cdf_tolerance_is_validated(value):
     with pytest.raises(ValueError, match="mixed CDF tolerance"):
         TabulationOptions(mixedCdfAtol=value)
+
+
+
+def test_angular_moments_positive_proof_and_clipping_keep_exact_integrals():
+    from kika.processing.tabulation.angular import _legendreMoments
+    np.testing.assert_allclose(_legendreMoments([1.,.02,.04,.01],"clip"),[.02,1/3+2*.04/3],rtol=1e-14,atol=1e-15)
+    np.testing.assert_allclose(_legendreMoments([1.,1.],"clip"),[5/9,11/27],rtol=1e-14,atol=1e-15)
+    with pytest.raises(ValueError,match="negative"):
+        _legendreMoments([1.,1.],"raise")
+
+
+def test_repeated_joint_angles_are_cached_with_independent_mutable_arrays(monkeypatch):
+    from kika.processing.tabulation import correlated as C
+    from kika.processing.tabulation.tables import TabulationOptions
+    from kika.nuclear_data import model as m
+    real=C.muTable;calls=[]
+    def spy(*args,**kwargs):calls.append(1);return real(*args,**kwargs)
+    monkeypatch.setattr(C,"muTable",spy)
+    surfaces=[]
+    for E in (10.,20.):
+        surfaces.append(m.XYs2d(function1ds=[m.Legendre(coefficients=np.array([1.,.1]),outerDomainValue=x) for x in (0.,1.)],outerDomainValue=E))
+    form=m.EnergyAngular(xys3d=m.XYs3d(function2ds=surfaces),productFrame=m.Frame.centerOfMass)
+    result=C.tabulateEnergyAngular(form,TabulationOptions())
+    tables=[t for surface in result.energyAngular.function2ds for t in surface.function1ds]
+    assert len(calls)==1
+    for t in tables[1:]:
+        np.testing.assert_array_equal(t.pdf,tables[0].pdf)
+        assert not np.shares_memory(t.pdf,tables[0].pdf)
+    old=tables[1].pdf.copy();tables[0].pdf[0]+=1
+    np.testing.assert_array_equal(tables[1].pdf,old)
+
+
+
+def test_legendre_density_native_and_reference_keep_shape_values_and_fallback(monkeypatch):
+    from kika.processing.tabulation import angular as A
+    coefficients=np.array([1.,.3,-.1,.01])
+    for points in (np.array(.7),np.array([-1.,0.,1.]),np.arange(6.).reshape(2,3)/5):
+        expected=np.polynomial.legendre.legval(points,coefficients*(2*np.arange(4)+1)/2)
+        actual=A.legendreDensity(coefficients)(points)
+        np.testing.assert_array_equal(np.asarray(actual).view(np.uint64),np.asarray(expected).view(np.uint64))
+        assert np.shape(actual)==np.shape(points)
+    outside=np.array([-2.,1.1])
+    before=A.legendreDensity(coefficients)(outside)
+    monkeypatch.setattr(A,"_polynomial_native",None)
+    np.testing.assert_array_equal(A.legendreDensity(coefficients)(outside),before)
