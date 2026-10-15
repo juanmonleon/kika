@@ -844,16 +844,82 @@ def _emissionDamage(form, grid, A, Z, ed):
         return np.zeros(len(grid))
     if isinstance(spectrum, (m.SimpleMaxwellianFission, m.Evaporation)):
         return _analyticEmissionDamage(spectrum, grid, A, Z, ed)
-    energies, tables, flat = _tables(spectrum)
-    u, wu = _GL4
-    values = []
-    for E, t in zip(energies, tables):
-        def g(ep, E=E):
-            er = (E - 2.0 * np.sqrt(E * ep)[..., None] * u + ep[..., None]) / A
-            return np.sum(wu * lindhard(er, Z, A, Z, A, ed), axis=-1) / 2.0
-        values.append(_expect(t, g))
-    return _onGrid(energies, values, grid, flat)
+    return _tabulatedEmissionDamage(spectrum, grid, A, Z, ed)
 
+
+def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed):
+    """Numerical tabdam with actual incident energy and unit-base support.
+
+    The isotropic single-emission recoil approximation is retained. Gaussian
+    orders double after splitting displacement-threshold crossings. Successive
+    orders must agree to .01 eV + 1e-5 relative; three interior interpolation
+    probes must agree to .05 eV + 1e-4 relative. These allocate a fraction of
+    the 1 eV + 1e-3 validation budget, with explicit resource caps. The sampled
+    convergence criterion is not a uniform mathematical error certificate.
+    """
+    from functools import lru_cache
+    grid=np.asarray(grid,dtype=float)
+    if not len(grid):return np.empty(0)
+    energies,tables,flat=_tables(spectrum)
+    if any(getattr(t,'numberOfDiscrete',0) for t in tables):
+        raise NotImplementedError('tabulated neutron recoil with discrete outgoing lines')
+    prepared=[]
+    for t in tables:
+        x=np.asarray(t.xs,dtype=float);p=np.asarray(t.pdf if hasattr(t,'pdf') else t.ys,dtype=float)
+        hist=_isFlat(t);width=x[-1]-x[0]
+        norm=float(np.sum(np.diff(x)*(p[:-1] if hist else (p[:-1]+p[1:])/2)))
+        if not width>0 or not norm>0:raise ValueError('tabulated recoil spectrum requires positive width and mass')
+        prepared.append((x,p/norm,hist,width))
+    gauss={n:np.polynomial.legendre.leggauss(n) for n in (8,16,32,64,128)}
+    @lru_cache(maxsize=30000)
+    def at(E):
+        j=int(np.clip(np.searchsorted(energies,E,side='right')-1,0,len(tables)-1));k=min(j+1,len(tables)-1)
+        f=float(np.clip((E-energies[j])/(energies[k]-energies[j]),0.,1.)) if j!=k and not flat else 0.
+        low=(1-f)*prepared[j][0][0]+f*prepared[k][0][0]
+        width=(1-f)*prepared[j][3]+f*prepared[k][3]
+        previous=None
+        for order in (8,16,32,64):
+            g,w=gauss[order];mu,wm=gauss[order*2];value=0.
+            for i,weight in ((j,1-f),(k,f)):
+                if weight==0:continue
+                x,p,hist,oldwidth=prepared[i]
+                mapped=low+(x-x[0])*width/oldwidth
+                cuts=np.unique(np.r_[mapped,(np.sqrt(E)-np.sqrt(A*ed))**2,(np.sqrt(E)+np.sqrt(A*ed))**2])
+                cuts=cuts[(cuts>=mapped[0])&(cuts<=mapped[-1])]
+                for start in range(0,len(cuts)-1,256):
+                    stop=min(start+256,len(cuts)-1)
+                    aa=np.sqrt(cuts[start:stop]);bb=np.sqrt(cuts[start+1:stop+1]);half=(bb-aa)/2
+                    v=(aa[:,None]+bb[:,None])/2+half[:,None]*g;ep=v*v
+                    source=x[0]+(ep-low)*oldwidth/width
+                    if hist:
+                        pos=np.clip(np.searchsorted(x,source,side='right')-1,0,len(x)-2);density=p[pos]
+                    else:density=np.interp(source,x,p)
+                    root=np.sqrt(E*ep);last=np.clip(np.divide(E+ep-A*ed,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
+                    angle=(last[...,None]-1)/2+(last[...,None]+1)/2*mu
+                    recoil=np.maximum(0.,(E+ep[...,None]-2*root[...,None]*angle)/A)
+                    angular=np.sum(wm*lindhard(recoil,Z,A,Z,A,ed),axis=-1)*(last+1)/4
+                    value+=weight*float(np.sum(w*half[:,None]*2*v*density*oldwidth/width*angular))
+            if previous is not None and abs(value-previous)<=.01+1e-5*abs(value):return value
+            previous=value
+        raise ValueError('tabulated recoil damage quadrature did not converge')
+    lo=float(grid.min());hi=float(grid.max())
+    if lo==hi:return np.full(len(grid),at(lo))
+    nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=4.)]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
+    if flat:
+        left=np.nextafter(energies[1:],-np.inf);nodes=np.unique(np.r_[nodes,left[(left>lo)&(left<hi)]])
+    values=np.array([at(float(E)) for E in nodes])
+    for iteration in range(30):
+        additions={}
+        for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
+            for f in (.25,.5,.75):
+                E=float(a+(b-a)*f)
+                if not a<E<b:continue
+                value=at(E)
+                if abs(value-(va+(vb-va)*f))>.05+1e-4*abs(value):additions[E]=value
+        if not additions:return np.interp(grid,nodes,values)
+        if len(nodes)+len(additions)>20000:raise ValueError('tabulated recoil damage interpolation exceeds resource cap')
+        known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[E] for E in nodes])
+    raise ValueError('tabulated recoil damage interpolation did not converge')
 
 def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
     """Integrate LF7/9 directly, retaining the parameter interpolation law.
