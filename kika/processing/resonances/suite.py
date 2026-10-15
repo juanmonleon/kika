@@ -197,6 +197,9 @@ def _curves(forms):
     return out
 
 
+#: Marks a request for energies of several segments (see ``_answer``).
+_GROUP=object()
+
 #: The constants of a request that declares none: one object, so that the
 #: plans keyed on it are made once.
 _NO_CONSTANTS=MappingProxyType({})
@@ -496,8 +499,21 @@ class SuiteReconstructionResult:
         in request order and blocks of ``block_size``; the rest is
         :meth:`_evaluate_segment`, request by request.
         """
-        physics=[None]*len(requests);regions={};adjusted=[];curves={}
-        for n,(s,(points,only),constants) in enumerate(requests):
+        physics=[None]*len(requests);regions={};adjusted=[];curves={};orders={}
+        for n,item in enumerate(requests):
+            if item[0] is _GROUP:
+                # Energies of several segments: each segment's left edge rule,
+                # and its physics in segment order, as if asked one by one.
+                _,segs,consts,local,points,only=item
+                e=np.asarray(points,dtype=float).copy()
+                highs=np.array([s.high for s in segs]);lows_=np.array([s.low for s in segs])
+                left=np.array([s.left_high for s in segs])
+                at=left[local]&(e==highs[local])
+                e[at]=np.nextafter(highs[local][at],lows_[local][at])
+                adjusted.append(e);orders[n]=np.argsort(local,kind='stable')
+                if segs[0].region is not None:regions.setdefault(id(segs[0].region),(segs[0].region,[]))[1].append(n)
+                continue
+            s,(points,only),constants=item
             e=np.asarray(points,dtype=float).copy()
             if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
             adjusted.append(e)
@@ -514,7 +530,7 @@ class SuiteReconstructionResult:
         context=self._prepared.context;size=self.options.block_size
         for region,members in regions.values():
             self._check_competitive_owners(region)
-            energies=[adjusted[n] for n in members]
+            energies=[adjusted[n][orders[n]] if n in orders else adjusted[n] for n in members]
             flat=np.concatenate(energies);blocks=[]
             for start in range(0,len(flat),size):
                 e=flat[start:start+size]
@@ -526,11 +542,77 @@ class SuiteReconstructionResult:
             joined={mt:np.concatenate([b[mt] for b in blocks]) for mt in keys}
             end=0
             for n,e in zip(members,energies):
-                physics[n]={mt:v[end:end+len(e)] for mt,v in joined.items()};end+=len(e)
-        return [self._evaluate_segment(s,e,False,constant_values=self._source_constants(c),
+                part={mt:v[end:end+len(e)] for mt,v in joined.items()};end+=len(e)
+                if n in orders:
+                    back=np.empty_like(orders[n]);back[orders[n]]=np.arange(len(back))
+                    part={mt:v[back] for mt,v in part.items()}
+                physics[n]=part
+        out=[]
+        for n,(item,p,b) in enumerate(zip(requests,physics,backgrounds)):
+            if item[0] is _GROUP:out.append(self._evaluate_group(item,adjusted[n],p));continue
+            s,(e,only),c=item
+            out.append(self._evaluate_segment(s,e,False,constant_values=self._source_constants(c),
                     only=self._diagnostic_keys(s,c),backgrounds=b) if only=='diagnostic' else
-                self._evaluate_segment(s,e,constant_values=c,physics=p,only=only,backgrounds=b)
-                for (s,(e,only),c),p,b in zip(requests,physics,backgrounds)]
+                self._evaluate_segment(s,e,constant_values=c,physics=p,only=only,backgrounds=b))
+        return out
+
+    def _evaluate_group(self,item,e,physics):
+        """:meth:`_evaluate_segment` for energies of several segments of one
+        region at once: every value is the one its own segment gives (a
+        constant, a shared reader, its curve, the physics), and every sum
+        adds the parts any of them needs (a part that is zero on a segment
+        adds nothing there, exactly: a sum starts at +0.0)."""
+        _,segs,consts,local,points,only=item
+        n=len(e);order=np.argsort(local,kind='stable')
+        cut=np.flatnonzero(np.diff(local[order]))+1
+        position={int(local[p[0]]):p for p in np.split(order,cut)}
+        plans=[self._sum_plan(c) for c in consts]
+        closure=self._wanted(only);asked=set(only)
+        wanted=[closure-(zeros-asked) for zeros,_ in plans]
+        everywhere=frozenset.intersection(*[frozenset(zeros) for zeros,_ in plans])
+        union_=set().union(*wanted)
+        keys=[key for key in segs[0].curves if key in union_]
+        grouped={}
+        for g,s in enumerate(segs):
+            if g not in position:continue
+            for names,reader in s._shared_linear:
+                needed=[(i,key) for i,key in enumerate(names) if key not in consts[g] and key not in self._graph]
+                if len(needed)<2 or not any(key in wanted[g] for _,key in needed):continue
+                batch=reader(e[position[g]],max_cells=max(1,min(65536,self.options.max_work_bytes//64)))
+                if batch is not None:grouped.update(((g,key),batch[:,i]) for i,key in needed)
+        values={}
+        for key in keys:
+            column=np.zeros(n);by_curve={}
+            for g,s in enumerate(segs):
+                at=position.get(g)
+                if at is None:continue
+                if key in consts[g]:column[at]=consts[g][key]
+                elif (g,key) in grouped:column[at]=grouped[(g,key)]
+                else:
+                    curve=s.curves[key]
+                    if curve is not None and key not in self._graph:by_curve.setdefault(id(curve),(curve,[]))[1].append(at)
+            for curve,ats in by_curve.values():
+                at=np.concatenate(ats);column[at]=curve.evaluate(e[at])
+            values[key]=column
+        if 'total_parts' not in self._columns_cache:
+            total=self._mt_keys.get(1)
+            self._columns_cache['total_parts']=_sum_leaves(total,self._graph) if total is not None else None
+        total_parts=self._columns_cache['total_parts']
+        if physics is not None:
+            for mt,value in physics.items():
+                if mt==1:continue
+                key=self._physical_owners.get(mt)
+                if key is not None and key not in self._graph:
+                    if total_parts is not None and key not in total_parts and np.any(value!=0):
+                        raise UnsupportedResonanceError(f'total graph omits resonance partial MT{mt}',category='incomplete-total-graph')
+                    if key in values:values[key]+=value
+                elif np.any(value!=0):raise UnsupportedResonanceError(f'MF2 partial MT{mt} has no exclusive model reaction')
+        for key in self._order:
+            if key in values:
+                values[key]=sum((values[part] for part in self._graph[key] if part not in everywhere),np.zeros(n))
+        if values and not np.all(np.isfinite(np.concatenate(list(values.values())))):
+            raise FloatingPointError('nonfinite suite cross section')
+        return values
 
     def _source_constants(self,constants):
         """A segment's constant leaves: as the source states them, exactly
@@ -954,18 +1036,19 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # ends are both non-decreasing: the pieces with start <= a and end >= b
     # are the run [bisect_left(ends, b), bisect_right(starts, a)), found by
     # bisection rather than by reading every piece for every segment.
-    import bisect
-    spans_of={key:([c.x[0] for c in cs],[c.x[-1] for c in cs]) for key,cs in curves.items()}
-    for a,b in zip(edges[:-1],edges[1:]):
+    lows_,highs_=np.array(edges[:-1],dtype=float),np.array(edges[1:],dtype=float)
+    owner_of={}
+    for key,cs in curves.items():
+        starts=np.array([c.x[0] for c in cs],dtype=float);ends=np.array([c.x[-1] for c in cs],dtype=float)
+        first,stop=np.searchsorted(ends,highs_,'left'),np.searchsorted(starts,lows_,'right')
+        count=stop-first
+        if np.any(count>1):raise ValueError('ambiguous source region ownership')
+        if np.any((count<1)&~((highs_<=cs[0].x[0])|(lows_>=cs[-1].x[-1]))):
+            raise UnsupportedResonanceError(f'source function has an uncovered internal gap: {key}',category='internal-gap')
+        owner_of[key]=(cs,np.where(count==1,first,-1).tolist())
+    for i,(a,b) in enumerate(zip(edges[:-1],edges[1:])):
         region=next((r for r in prepared.regions if r.low<=a and r.high>=b),None)
-        local={}
-        for key,cs in curves.items():
-            starts,ends=spans_of[key]
-            candidates=cs[bisect.bisect_left(ends,b):bisect.bisect_right(starts,a)]
-            if len(candidates)>1:raise ValueError('ambiguous source region ownership')
-            if not candidates and not (b<=cs[0].x[0] or a>=cs[-1].x[-1]):
-                raise UnsupportedResonanceError(f'source function has an uncovered internal gap: {key}',category='internal-gap')
-            local[key]=candidates[0] if candidates else None
+        local={key:(cs[at[i]] if at[i]>=0 else None) for key,(cs,at) in owner_of.items()}
         segments.append(_SuiteSegment(a,b,MappingProxyType(local),region,b<high,shared_cache))
     result=SuiteReconstructionResult(MappingProxyType({}),MappingProxyType({}),source_style,label,options,prepared,
         tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
@@ -984,11 +1067,15 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # Constancy and linearity of every source curve on every segment that
     # reads it, decided per curve for all its segments at once (the same
     # answers constant_on and _laws_over give one segment at a time).
-    span_high=[np.nextafter(s.high,s.low) if s.left_high else s.high for s in segments]
+    span_high=[np.nextafter(s.high,s.low) if s.left_high else s.high for s in segments];level_cache={}
     readers={}
-    for i,s in enumerate(segments):
-        for key,curve in s.curves.items():
-            if curve is not None and key not in graph:readers.setdefault(id(curve),(curve,[]))[1].append(i)
+    for key,(cs,at) in owner_of.items():
+        if key in graph:continue
+        at=np.asarray(at);order_=np.argsort(at,kind='stable');at_sorted=at[order_]
+        cut=np.flatnonzero(np.diff(at_sorted))+1
+        for run in np.split(order_,cut):
+            if len(run) and at[run[0]]>=0:
+                curve=cs[int(at[run[0]])];readers.setdefault(id(curve),(curve,[]))[1].extend(run.tolist())
     constant_at={};linear_at={}
     for curve,where in readers.values():
         where=np.asarray(where);lows=np.array([segments[i].low for i in where]);highs=np.array([span_high[i] for i in where])
@@ -1003,7 +1090,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         s=segments[position]
         seed_curves={i:(c,) for i,(key,c) in enumerate(s.curves.items()) if c is not None and key not in graph}
         if s.region is not None:
-            seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context)
+            seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context,level_cache)
         else:
             # Original knots suffice for linear fast-region data. Inserting
             # unnecessary near-threshold points amplifies ENDF x-rounding.
@@ -1040,6 +1127,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                     e=np.asarray(e,dtype=float).copy()
                     if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
                     return curve.evaluate(e)
+                # What the reader is, for a caller that reads many at once.
+                read.curve=curve;read.left_high=(s.high,s.low) if s.left_high else None
                 deferred[key]=read
         work=min(len(seeds),max(1,options.max_work_bytes//1024))*(len(s.curves)-len(constants)-len(deferred)+1)*1024
         pending[position]=(constants,work)
@@ -1136,13 +1225,18 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         for e,only,owner in requests:
             if np.ndim(owner)==0:
                 shapes.append(None);flat.append((segments[int(owner)],(e,only),pending[int(owner)][0]));continue
+            if isinstance(only,tuple):
+                members,local=np.unique(owner,return_inverse=True)
+                shapes.append('group')
+                flat.append((_GROUP,[segments[i] for i in members],[pending[i][0] for i in members],local,e,only))
+                continue
             ordered=np.argsort(owner,kind='stable')
             parts=np.split(ordered,np.flatnonzero(np.diff(owner[ordered]))+1);shapes.append((len(e),parts))
             for idx in parts:
                 i=int(owner[idx[0]]);flat.append((segments[i],(e[idx],only),pending[i][0]))
         values=result._answer(flat);out=[];at=0
         for (e,only,owner),shape in zip(requests,shapes):
-            if shape is None:
+            if shape is None or shape=='group':
                 out.append(values[at]);at+=1;continue
             n,parts=shape;pieces=values[at:at+len(parts)];at+=len(parts)
             if isinstance(only,tuple):keys=only

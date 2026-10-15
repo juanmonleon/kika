@@ -389,13 +389,33 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
                     table=np.full(len(grid),value);table.setflags(write=False);by_value[token]=table
                 y[mt]=by_value[token]
             elif mt in index:y[mt]=result.y[a:b,index[mt]]
-            else:y[mt]=np.asarray(deferred[mt](grid),dtype=float)
-        for mt in late:
-            if mt in deferred:
-                late_samples[mt][p0:p1]=np.asarray(deferred[mt](probes[p0:p1].ravel()),dtype=float).reshape(probes[p0:p1].shape)
-            else:late_samples[mt][p0:p1]=constants[mt]
-            late_nodes[mt][p0:p1,0]=y[mt][:-1];late_nodes[mt][p0:p1,1]=y[mt][1:]
+            else:y[mt]=None
         tables.append((grid,y))
+    # Deferred columns that no span refines: their readers at every span's
+    # nodes and probes, one curve read for all the spans that share it.
+    for mt in late:
+        users=[k for k in range(len(xs)) if mt in spans[k][2]]
+        readers=[spans[k][2][mt] for k in users]
+        curve=getattr(readers[0],'curve',None)
+        if curve is not None and all(getattr(r,'curve',None) is curve for r in readers):
+            pieces=[];sizes=[]
+            for k,r in zip(users,readers):
+                p0,p1=panels[k],panels[k+1]
+                e=np.r_[tables[k][0],probes[p0:p1].ravel()]
+                if r.left_high is not None:e[e==r.left_high[0]]=np.nextafter(*r.left_high)
+                pieces.append(e);sizes.append(len(e))
+            values=np.asarray(curve.evaluate(np.concatenate(pieces)),dtype=float)
+            parts=np.split(values,np.cumsum(sizes)[:-1])
+        else:
+            parts=[np.asarray(r(np.r_[tables[k][0],probes[panels[k]:panels[k+1]].ravel()]),dtype=float)
+                   for k,r in zip(users,readers)]
+        for k,v in zip(users,parts):
+            p0,p1=panels[k],panels[k+1];n=len(tables[k][0])
+            tables[k][1][mt]=v[:n];late_samples[mt][p0:p1]=v[n:].reshape(probes[p0:p1].shape)
+        for k in range(len(xs)):
+            p0,p1=panels[k],panels[k+1];y=tables[k][1]
+            if mt not in spans[k][2]:late_samples[mt][p0:p1]=spans[k][1][mt]
+            late_nodes[mt][p0:p1,0]=y[mt][:-1];late_nodes[mt][p0:p1,1]=y[mt][1:]
     checked=list(union)+late
     samples=result.probe_y
     nodes=np.stack([result.y[pos],result.y[pos+1]],axis=1)

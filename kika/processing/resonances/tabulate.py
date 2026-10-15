@@ -142,7 +142,15 @@ def _segments(prepared,backgrounds):
 GEOMETRIC_SEEDS=65
 
 
-def _seeds(segment,context):
+def _level_energies(group,cache):
+    """A group's level energies, once per reconstruction when *cache* is given."""
+    if cache is None:return np.array([lv.energy for lv in group.levels],dtype=float)
+    entry=cache.get(id(group))
+    if entry is None:entry=cache[id(group)]=(group,np.array([lv.energy for lv in group.levels],dtype=float))
+    return entry[1]
+
+
+def _seeds(segment,context,cache=None):
     lo,hi=segment.low,segment.high
     count=GEOMETRIC_SEEDS
     if lo>0 and hi>lo:
@@ -166,7 +174,7 @@ def _seeds(segment,context):
         if segment.region.approximation=='RMatrixNeutral' and not g.level_metric and g.levels:
             # Independent fixed-point estimates as one vector. The per-level
             # update, eight steps and range stopping rule are unchanged.
-            er=np.array([lv.energy for lv in g.levels])
+            er=_level_energies(g,cache).copy()
             centers=er.copy()
             reduced=np.asarray(g.reduced).reshape(len(er),len(g.channels))
             active=(er>0)&(centers>=lo)&(centers<=hi)
@@ -176,7 +184,7 @@ def _seeds(segment,context):
                 centers[active]=er[active]-np.sum(reduced[active]*reduced[active]*real,axis=1)
                 active&=(centers>=lo)&(centers<=hi)
         iterations=0 if segment.region.approximation in ("ReichMoore","RMatrixNeutral") else 4
-        energies=np.array([lv.energy for lv in g.levels],dtype=float)
+        energies=_level_energies(g,cache)
         starts=energies if centers is None else centers
         # A level seeds a segment only through a peak inside it, and a
         # fixed-point centre starting outside never moves.
