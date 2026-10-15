@@ -1080,6 +1080,15 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² — cinta B-spline v6 y5s _re con la estadística H⁻¹, plegado exacto y modos referidos al modelo (B16)",
         "systematic_block_col": None,
     },
+    # ── 15-oct: B16X — la cinta de B16 con el precompute de Sigma_eval por congruencia A J A^T
+    # (eval_covariance.build_eval_cov_congruence) y BLAS a 8 hilos. Puerta: chi^2 por experimento
+    # igual a B16 a ~1e-8 (no bit a bit: otro orden de suma, ~1e-16 antes del float32).
+    "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_x": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_x.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — B16 con Σ_eval por congruencia A J Aᵀ (puerta de equivalencia, B16X)",
+        "systematic_block_col": None,
+    },
     "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_corr": {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_corr.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",

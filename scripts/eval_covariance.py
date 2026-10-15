@@ -513,6 +513,216 @@ def _mf34_family_is_relative(mf34) -> Optional[bool]:
         )
     return flags.pop()
 
+# ── The congruence: Sigma_eval = A J A^T in one GEMM (15-oct) ─────────────────
+
+
+class _Columns:
+    """The parameter axis of one group's congruence.
+
+    Legendre legs: every leg of order l (one per block grid the order appears on, plus the
+    cross term's shape grid) is a containing-bin map times the same per-point sensitivity. The
+    columns of order l are the distinct SIGNATURES of the points -- the tuple of bins a point
+    occupies on each of those grids (-1 off a grid) -- so A has ONE non-zero per point and order,
+    and each block's matrix is placed in J through exact per-grid selectors. The per-order
+    meshes of a B-spline tape put 21 blocks on 21 different grids: one column per (grid, order)
+    would be ~11 000 columns, the signatures are a few hundred per order. Exact: a block's term
+    is S_r P_r mat P_c^T S_c and P_g = Q E_g with Q the signature one-hot and E_g the selector.
+
+    Magnitude leg: the MF33 overlap average times y_eval, its used columns only."""
+
+    def __init__(self, n: int):
+        self.n = n
+        self.groups: Dict[Tuple, dict] = {}     # (l, rel) -> {"sens", "grids": {gkey: pm}}
+        self.dense_legs: Dict[Tuple, Tuple[np.ndarray, np.ndarray]] = {}
+
+    def leg(self, l: int, rel: bool, gkey: bytes, pm: PointMap, sens: np.ndarray) -> Tuple:
+        g = self.groups.setdefault((l, rel), {"sens": sens, "grids": {}})
+        g["grids"].setdefault(gkey, pm)
+        return ("L", (l, rel), gkey)
+
+    def dense(self, key, W: np.ndarray, scale: np.ndarray) -> Tuple:
+        if key not in self.dense_legs:
+            used = np.flatnonzero(np.any(W != 0.0, axis=0))
+            self.dense_legs[key] = (scale[:, None] * W[:, used], used)
+        return ("D", key)
+
+    def assemble(self):
+        """(A, selector) with selector(leg) -> (column slice start, rows-of-J index, bin index)."""
+        blocks, sel, start = [], {}, 0
+        for gk, g in self.groups.items():
+            keys = list(g["grids"])
+            sig = np.stack([np.where(g["grids"][k].covered, g["grids"][k]._idx, -1) for k in keys], axis=1)
+            live = (g["sens"] != 0.0) & np.any(sig >= 0, axis=1)
+            uniq, inv = np.unique(sig[live], axis=0, return_inverse=True)
+            inv = inv.ravel()
+            A = np.zeros((self.n, uniq.shape[0]))
+            A[np.flatnonzero(live), inv] = g["sens"][live]
+            blocks.append(A)
+            for i, k in enumerate(keys):
+                b = uniq[:, i]
+                ok = np.flatnonzero(b >= 0)
+                sel[("L", gk, k)] = (start + ok, b[ok])
+            start += uniq.shape[0]
+        for key, (A_cols, used) in self.dense_legs.items():
+            blocks.append(A_cols)
+            sel[("D", key)] = (start + np.arange(used.size), used)
+            start += used.size
+        A = np.concatenate(blocks, axis=1) if blocks else np.zeros((self.n, 0))
+        return A, sel
+
+
+def build_eval_cov_congruence(
+    lib: Dict, e_mev: np.ndarray, mu: np.ndarray, c0: np.ndarray, a_l_per_pt: np.ndarray,
+    y_eval: np.ndarray, drop: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """``build_mf34_block + build_mf33_block + build_mf33_mf34_cross_block`` as ONE congruence.
+
+    15-oct. The three builders fold every MF34 block (21 for a per-order tape), the MF33 block
+    and the cross blocks as separate element-wise N x N passes -- six or more full-matrix
+    temporaries per block, single-threaded and memory-bound: ~15 of the 21 minutes of a
+    precompute, ~290 s per library for Cierjacks alone. The algebra those builders already
+    document (``Sigma_eval = M J M^T``, `_mf33_magnitude_map`) is used literally here:
+
+        A = [ sens_l * P_g  (each MF34 leg)  |  y * W  (MF33)  |  sens_L * P_shape (cross) ]
+        J = the file's blocks placed on those columns (a block and its companion transpose)
+        Sigma_eval = (A @ J) @ A.T        -- one dense, multithreaded GEMM
+
+    Same maps (`PointMap.nearest`, the overlap average), the same off-grid zeros, the same
+    relative scaling and the same ``drop``, the same guards on the cross term. Not bit for bit:
+    the sums run in another order (~1e-16 relative before the float32 cast of the sidecar).
+    """
+    e_mev = np.asarray(e_mev, dtype=float).ravel()
+    N = e_mev.size
+    if N == 0:
+        return np.zeros((0, 0), dtype=float)
+    mu = np.asarray(mu, dtype=float).ravel()
+    c0 = np.asarray(c0, dtype=float).ravel()
+    y = np.asarray(y_eval, dtype=float).ravel()
+    a_l_per_pt = np.asarray(a_l_per_pt, dtype=float)
+    if a_l_per_pt.ndim == 1:
+        a_l_per_pt = a_l_per_pt.reshape(N, -1)
+    L_max = a_l_per_pt.shape[1]
+    e_ev = e_mev * 1e6
+    base_sens = _legendre_base_sens(mu, c0, L_max) if L_max else np.zeros((0, N))
+    cols = _Columns(N)
+    pieces = []                                       # (leg_r, leg_c, mat)
+
+    def sens_of(l: int, rel: bool) -> np.ndarray:
+        s_ = base_sens[l - 1].copy()
+        if rel:
+            s_ *= a_l_per_pt[:, l - 1]
+        if drop is not None:
+            s_ = np.where(drop[:, l - 1], 0.0, s_)
+        return s_
+
+    mf34 = lib.get("mf34")
+    if mf34 is not None and L_max:
+        for idx in range(len(mf34.matrices)):
+            l_r, l_c = int(mf34.l_rows[idx]), int(mf34.l_cols[idx])
+            if l_r < 1 or l_c < 1 or l_r > L_max or l_c > L_max:
+                continue
+            grid = np.asarray(mf34.energy_grids[idx], dtype=float)
+            mat = np.asarray(mf34.matrices[idx], dtype=float)
+            if mat.shape[0] == 0:
+                continue
+            pm = PointMap.nearest(grid, e_ev)
+            if pm.n_off_grid:
+                _key = (l_r, l_c, int(N))
+                if _key not in _OFF_GRID_SEEN:
+                    _OFF_GRID_SEEN.add(_key)
+                    print(
+                        f"  [MF34 off-grid] block (L={l_r}, L1={l_c}) spans "
+                        f"[{grid[0]:.6g}, {grid[-1]:.6g}] eV; {pm.n_off_grid} of "
+                        f"{e_ev.size} points lie outside it and contribute ZERO "
+                        f"through this block (the file declares nothing there). "
+                        f"Roadmap §10.7-6.",
+                        flush=True,
+                    )
+            rel = bool(mf34.is_relative[idx])
+            gk = grid.tobytes()
+            leg_r = cols.leg(l_r, rel, gk, pm, sens_of(l_r, rel))
+            leg_c = cols.leg(l_c, rel, gk, pm, sens_of(l_c, rel))
+            pieces.append((leg_r, leg_c, mat))
+            if l_r != l_c:
+                pieces.append((leg_c, leg_r, mat.T))
+
+    g33, rc33, emf4 = lib.get("mf33_grid_ev"), lib.get("mf33_rel_cov"), lib.get("energies_mf4_mev")
+    leg_mag = None
+    if g33 is not None and rc33 is not None:
+        pm_mag = _mf33_magnitude_map(g33, emf4, e_mev)
+        leg_mag = cols.dense(("mag",), pm_mag.dense(), y)
+        pieces.append((leg_mag, leg_mag, np.asarray(rc33, dtype=float)))
+
+    cross = lib.get("mf33_mf34_cross")
+    if cross and L_max:
+        if g33 is None or emf4 is None:
+            raise ValueError(
+                "a non-empty cross term needs `mf33_grid_ev` and "
+                "`energies_mf4_mev`: its magnitude leg must reach the points "
+                "through the SAME map as `build_mf33_block`, or Sigma_eval is not "
+                "a congruence and PSD does not transfer (roadmap §10.7-2(a))."
+            )
+        a_is_relative = _mf34_family_is_relative(mf34)
+        if a_is_relative is None:
+            raise ValueError(
+                "a non-empty cross term needs `a_is_relative`, the MF34 family's "
+                "convention. Keying the shape leg on the cross block's own flag is "
+                "§L13: two units for one parameter (roadmap §10.7-2(b))."
+            )
+        if leg_mag is None:
+            pm_mag = _mf33_magnitude_map(g33, emf4, e_mev)
+            leg_mag = cols.dense(("mag",), pm_mag.dense(), y)
+        n_mag = _mf33_magnitude_map(g33, emf4, e_mev[:1]).n_bins
+        for blk in cross:
+            L = int(blk["l"])
+            if L < 1 or L > L_max:
+                continue
+            mat = np.asarray(blk["matrix"], dtype=float)
+            if mat.size == 0:
+                continue
+            if mat.shape[0] != n_mag:
+                raise ValueError(
+                    f"cross block l={L} has {mat.shape[0]} magnitude bins but the "
+                    f"shipped MF33 grid has {n_mag}. A cross term is "
+                    f"Cauchy-Schwarz-compatible only with the marginals it was "
+                    f"built from (§10.1); rebuild it on the MF33 grid rather than "
+                    f"regridding it here."
+                )
+            blk_rel = bool(blk.get("is_relative", True))
+            if blk_rel != bool(a_is_relative):
+                raise ValueError(
+                    f"cross block l={L} declares is_relative={blk_rel} but the "
+                    f"MF34 family is is_relative={a_is_relative}. One parameter "
+                    f"cannot carry two units (§L13). Rebuild the cross in the "
+                    f"marginals' coordinates -- from the same replicas -- rather "
+                    f"than rescaling it here, which would divide by an a_L_nom "
+                    f"that passes through zero."
+                )
+            shape_grid = np.asarray(blk["shape_grid_ev"], dtype=float)
+            pm_sh = PointMap.nearest(shape_grid, e_ev)
+            leg_sh = cols.leg(L, bool(a_is_relative), shape_grid.tobytes(), pm_sh,
+                              sens_of(L, bool(a_is_relative)))
+            pieces.append((leg_mag, leg_sh, mat))
+            pieces.append((leg_sh, leg_mag, mat.T))
+
+    if not pieces:
+        return np.zeros((N, N), dtype=float)
+    A, sel = cols.assemble()
+    P = A.shape[1]
+    if P == 0:
+        return np.zeros((N, N), dtype=float)
+    J = np.zeros((P, P))
+    for leg_r, leg_c, mat in pieces:
+        (jr, br), (jc, bc) = sel[leg_r], sel[leg_c]
+        J[np.ix_(jr, jc)] += mat[np.ix_(br, bc)]
+    F = A @ J
+    sigma = F @ A.T
+    del F, A
+    sigma += sigma.T
+    sigma *= 0.5
+    return sigma
+
+
 def build_eval_cov_for_groups(
     df,
     libraries: Dict[str, Dict],
@@ -589,12 +799,6 @@ def build_eval_cov_for_groups(
             )
             drop = _mask[g_pt][:, :l_max]
 
-        sigma_mf34 = build_mf34_block(
-            lib.get("mf34"), e_mev, mu, c0, a_l_per_pt, drop=drop)
-        sigma_mf33 = build_mf33_block(
-            lib.get("mf33_grid_ev"), lib.get("mf33_rel_cov"),
-            lib.get("energies_mf4_mev"), e_mev, y_eval,
-        )
         # Opt-in MF33↔MF34 cross term; None → zero block → numbers unchanged.
         # The MF33 grid and the MF4 grid go in because the cross term's
         # magnitude leg is built from them by the SAME call the self block
@@ -617,14 +821,11 @@ def build_eval_cov_for_groups(
                 f"Either supply `mf33_grid_ev`/`mf33_rel_cov`, or drop the "
                 f"cross term with them."
             )
-        sigma_cross = build_mf33_mf34_cross_block(
-            lib.get("mf33_mf34_cross"), e_mev, mu, c0, a_l_per_pt, y_eval,
-            mf33_grid_ev=lib.get("mf33_grid_ev"),
-            energies_mf4_mev=lib.get("energies_mf4_mev"),
-            a_is_relative=_mf34_family_is_relative(lib.get("mf34")),
-            drop=drop,
-        )
-        eval_cov[key] = (sigma_mf34 + sigma_mf33 + sigma_cross).astype(np.float32)
+        # 15-oct: the three element-wise builders (build_mf34_block, build_mf33_block,
+        # build_mf33_mf34_cross_block -- kept, they are the reference the congruence is tested
+        # against) are replaced by ONE congruence A J A^T: same maps, same scaling, same drop.
+        eval_cov[key] = build_eval_cov_congruence(
+            lib, e_mev, mu, c0, a_l_per_pt, y_eval, drop=drop).astype(np.float32)
     return eval_cov
 
 
