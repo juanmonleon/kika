@@ -80,9 +80,19 @@ class _Evaluator:
         decided=inside&~empty&linear
         good=decided&equal&np.isfinite(value)&~signed
         out[good]=value[good]
-        for i in np.flatnonzero(inside&~empty&~linear):
-            result=self.constant_on(float(lows[i]),float(highs[i]))
-            if result is not None:out[i]=result
+        # Spans over log-law panels: constant_on's further checks, all
+        # spans at once -- every log-x panel inside widens (finite ratio
+        # above 1), and the table reads the constant at both ends.
+        logs=np.flatnonzero(inside&~empty&~linear&equal&np.isfinite(value)&~signed)
+        if len(logs):
+            with np.errstate(over='ignore',divide='ignore',invalid='ignore'):
+                ratio=x[1:]/x[:-1]
+            bad=np.r_[0,np.cumsum(np.isin(laws,(3,5))&~(np.isfinite(ratio)&(ratio>1.)))]
+            logs=logs[bad[np.maximum(j1,j0)[logs]]==bad[j0[logs]]]
+            if len(logs):
+                at=value[logs]
+                logs=logs[(self(lows[logs])==at)&(self(highs[logs])==at)]
+                out[logs]=value[logs]
         return out
 
     def constant_on(self, low, high):

@@ -205,23 +205,16 @@ _GROUP=object()
 _NO_CONSTANTS=MappingProxyType({})
 
 
-def _compress_and_join(pieces):
-    """``_join_continuous(compress_flat_pieces(pieces))`` in one vectorised pass.
+def _compress_and_join_flat(x,y,lengths):
+    """``_join_continuous(compress_flat_pieces(pieces))`` in one vectorised
+    pass, for the pieces of *lengths* laid end to end in *x*, *y*.
 
     The arithmetic is theirs: each piece keeps the nodes compress_flat keeps,
     and a piece that starts on the last node of the one before (abscissa,
     value and sign) continues it without that node. Only the per-piece
-    Python work goes: JENDL-5 Cl-35 has 3 376 pieces for each of 234
-    reactions.
+    Python work goes, and no piece objects are made: JENDL-5 Cl-35 has 3 376
+    pieces for each of 234 reactions.
     """
-    pieces=[(np.asarray(x,dtype=float),np.asarray(y,dtype=float)) for x,y in pieces]
-    lengths=np.array([len(x) for x,_ in pieces])
-    return _compress_and_join_flat(np.concatenate([p[0] for p in pieces]),np.concatenate([p[1] for p in pieces]),lengths)
-
-
-def _compress_and_join_flat(x,y,lengths):
-    """:func:`_compress_and_join` of the pieces of *lengths* laid end to end
-    in *x*, *y*: no piece objects are made."""
     from kika.algebra import compress_flat_pieces
     lengths=np.asarray(lengths)
     ends=np.cumsum(lengths);starts=ends-lengths
@@ -276,9 +269,10 @@ def _join_continuous(pieces):
 
 
 def _own_knots(curve,segments,positions):
-    """``{position: (x, values)}``: each segment's table on the curve's own
-    knots (the segment's two ends and the knots strictly inside), for the
-    segments over which the curve is lin-lin. What the per-segment
+    """``(positions, lengths, x, values)``: each segment's table on the
+    curve's own knots (the segment's two ends and the knots strictly
+    inside), for the segments over which the curve is lin-lin, laid end to
+    end in segment order. What the per-segment
     ``np.unique(np.r_[low, inside, high])`` and one read each give, laid out
     by index arithmetic and read once.
     """
@@ -286,7 +280,8 @@ def _own_knots(curve,segments,positions):
     lows=np.array([s.low for s in segments]);highs=np.array([s.high for s in segments])
     linear=curve.linear_over_many(lows,highs)
     keep=np.flatnonzero(linear)
-    if not len(keep):return {}
+    positions=np.asarray(positions)
+    if not len(keep):return positions[:0],np.zeros(0,dtype=np.int64),np.zeros(0),np.zeros(0)
     lows,highs=lows[keep],highs[keep]
     left=np.array([segments[k].left_high for k in keep])
     a=np.searchsorted(x,lows,'right');b=np.searchsorted(x,highs,'left')
@@ -298,7 +293,9 @@ def _own_knots(curve,segments,positions):
     last_inside=np.where(inside>0,x[np.maximum(b-1,0)],-np.inf)
     if np.any(jump&(last_inside==np.nextafter(highs,lows))):
         # The added left neighbour is a knot already: np.unique would merge it.
-        return {positions[k]:_own_knots_one(curve,segments[k]) for k in keep.tolist()}
+        pieces=[_own_knots_one(curve,segments[k]) for k in keep.tolist()]
+        return (positions[keep],np.array([len(p[0]) for p in pieces],dtype=np.int64),
+                np.concatenate([p[0] for p in pieces]),np.concatenate([np.asarray(p[1],dtype=float) for p in pieces]))
     count=inside+2+jump
     ends=np.cumsum(count);starts=ends-count
     nodes=np.empty(int(ends[-1]) if len(ends) else 0)
@@ -311,10 +308,7 @@ def _own_knots(curve,segments,positions):
     at_high=np.repeat(left,count)&(query==np.repeat(highs,count))
     query[at_high]=np.nextafter(np.repeat(highs,count)[at_high],np.repeat(lows,count)[at_high])
     read=np.asarray(curve.evaluate(query),dtype=float)
-    out={}
-    for k,s0,e0 in zip(keep.tolist(),starts.tolist(),ends.tolist()):
-        out[positions[k]]=(nodes[s0:e0],read[s0:e0])
-    return out
+    return positions[keep],count.astype(np.int64),nodes,read
 
 
 def _own_knots_one(curve,s):
@@ -1421,7 +1415,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         if not summed and not np.any(np.isnan(values)) and np.all(lengths>=2) and not np.any((values==0)&np.signbit(values)):
             # The constant of every segment: compression leaves each segment
             # its two ends, and segments with one value join through their
-            # shared edge. Written directly, as _compress_and_join would make it.
+            # shared edge. Written directly, as _compress_and_join_flat would make it.
             cut=np.flatnonzero(values[1:]!=values[:-1])+1
             children=[]
             for a,b in zip(np.r_[0,cut],np.r_[cut,len(values)]):
@@ -1432,7 +1426,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             for u in ordered:del u['y'][key]
             continue
         column=np.concatenate([u['y'][key] for u in ordered])
-        own={}
+        own=[]
         if not summed:
             # An untouched lin-lin background already has an exact
             # representation on its own knots. It need not inherit every
@@ -1444,10 +1438,19 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 if curve is None or key in owned[i]:continue
                 by_curve.setdefault(id(curve),(curve,[]))[1].append(i)
             for curve,where in by_curve.values():
-                own.update(_own_knots(curve,[segments[i] for i in where],where))
+                table=_own_knots(curve,[segments[i] for i in where],where)
+                if len(table[0]):own.append(table)
         if own:
-            pieces=[own[i] if i in own else (grid[a:b],column[a:b]) for i,(a,b) in enumerate(zip(starts.tolist(),ends.tolist()))]
-            joined=_compress_and_join(pieces)
+            # Those segments' tables in place of theirs on the common grid:
+            # each segment's nodes are a run of grid, or of its own table.
+            at=np.concatenate([t[0] for t in own]);count=np.concatenate([t[1] for t in own])
+            source=np.r_[grid,np.concatenate([t[2] for t in own])]
+            read=np.r_[column,np.concatenate([t[3] for t in own])]
+            sized=lengths.copy();sized[at]=count
+            base=starts.copy();base[at]=len(grid)+np.cumsum(count)-count
+            stop=np.cumsum(sized)
+            take=np.repeat(base-(stop-sized),sized)+np.arange(int(stop[-1]))
+            joined=_compress_and_join_flat(source[take],read[take],sized)
         else:
             joined=_compress_and_join_flat(grid,column,lengths)
         children=[XYs1d(cx,cy,axes=axes,index=i) for i,(cx,cy) in enumerate(joined)]

@@ -357,6 +357,12 @@ def linearize_group_steps(spans, options, point_budget, keys):
     return _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,options,alone)
 
 
+def _ranges(starts,stops):
+    """The indices ``starts[i]:stops[i]`` of every *i*, end to end."""
+    sizes=stops-starts;total=int(sizes.sum())
+    return np.repeat(starts-(np.cumsum(sizes)-sizes),sizes)+np.arange(total)
+
+
 def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,options,alone):
     """The group's tables and one check for the whole group.
 
@@ -402,21 +408,27 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
         users=np.flatnonzero(deferred_in[:,j]).tolist()
         readers=[spans[k][2][mt] for k in users]
         curve=getattr(readers[0],'curve',None)
-        grids=[result.x[starts[k]:starts[k+1]] for k in users]
         if curve is not None and all(getattr(r,'curve',None) is curve for r in readers):
-            pieces=[];sizes=[]
-            for k,r,grid in zip(users,readers,grids):
-                e=np.r_[grid,probes[panels[k]:panels[k+1]].ravel()]
-                if r.left_high is not None:e[e==r.left_high[0]]=np.nextafter(*r.left_high)
-                pieces.append(e);sizes.append(len(e))
-            values=np.asarray(curve.evaluate(np.concatenate(pieces)),dtype=float)
-            parts=np.split(values,np.cumsum(sizes)[:-1])
+            # Every user's nodes, then every user's probes, read at once
+            # (the read is elementwise); a segment closed on the left at its
+            # high reads that high's left neighbour, as its reader does.
+            at=np.array(users)
+            node_at=_ranges(starts[at],starts[at+1]);panel_at=_ranges(panels[at],panels[at+1])
+            e=np.r_[result.x[node_at],probes[panel_at].ravel()]
+            owner=np.r_[np.repeat(at,lengths[at]),np.repeat(at,np.diff(panels)[at]*probes.shape[1])]
+            closed=[(k,r.left_high) for k,r in zip(users,readers) if r.left_high is not None]
+            if closed:
+                high=np.full(len(xs),np.nan);toward=np.full(len(xs),np.nan)
+                for k,(h,l) in closed:high[k]=h;toward[k]=l
+                hit=e==high[owner]
+                e[hit]=np.nextafter(high[owner][hit],toward[owner][hit])
+            values=np.asarray(curve.evaluate(e),dtype=float)
+            column[node_at]=values[:len(node_at)];sampled[panel_at]=values[len(node_at):].reshape(len(panel_at),-1)
         else:
-            parts=[np.asarray(r(np.r_[grid,probes[panels[k]:panels[k+1]].ravel()]),dtype=float)
-                   for k,r,grid in zip(users,readers,grids)]
-        for k,v in zip(users,parts):
-            p0,p1=panels[k],panels[k+1];n=lengths[k]
-            column[starts[k]:starts[k+1]]=v[:n];sampled[p0:p1]=v[n:].reshape(probes[p0:p1].shape)
+            for k,r in zip(users,readers):
+                p0,p1=panels[k],panels[k+1];n=lengths[k]
+                v=np.asarray(r(np.r_[result.x[starts[k]:starts[k+1]],probes[p0:p1].ravel()]),dtype=float)
+                column[starts[k]:starts[k+1]]=v[:n];sampled[p0:p1]=v[n:].reshape(probes[p0:p1].shape)
         y[mt]=column;late_samples[mt]=sampled
         late_nodes[mt]=np.stack([column[pos],column[pos+1]],axis=1)
     table=dict(x=result.x,lengths=lengths,y=y,constant=constant)

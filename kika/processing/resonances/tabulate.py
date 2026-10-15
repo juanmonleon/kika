@@ -150,6 +150,42 @@ def _level_energies(group,cache):
     return entry[1]
 
 
+#: Peak widths seeded either side of a level.
+_WIDTH_MULTIPLES=np.geomspace(1/64,128,35)
+
+
+def _cached(cache,key,make):
+    """``make()``, once per reconstruction when *cache* is given."""
+    if cache is None:return make()
+    entry=cache.get(key)
+    if entry is None:entry=cache[key]=make()
+    return entry
+
+
+def _center_iterates(group,region,cache):
+    """The fixed-point centre estimates of a group's levels, every step.
+
+    Row ``i`` is the estimate after ``i`` steps; a level steps while it stays
+    inside *region* (and from a positive energy), and holds after. A segment
+    stops a level at its first estimate outside the segment, which lies
+    inside the region's run of estimates, so each segment reads its centres
+    off these rows with the update it would have made itself.
+    """
+    def make():
+        er=_level_energies(group,cache)
+        reduced=np.asarray(group.reduced).reshape(len(er),len(group.channels))
+        rows=[er.copy()];centers=er.copy()
+        active=(er>0)&(centers>=region.low)&(centers<=region.high)
+        for _ in range(8):
+            if np.any(active):
+                real=np.stack([c.functions(centers[active],logarithmic=True)[1].real for c in group.channels],axis=1)
+                centers[active]=er[active]-np.sum(reduced[active]*reduced[active]*real,axis=1)
+                active&=(centers>=region.low)&(centers<=region.high)
+            rows.append(centers.copy())
+        return np.array(rows)
+    return _cached(cache,('centers',id(group),region.low,region.high),make)
+
+
 def _seeds(segment,context,cache=None,knots=None):
     lo,hi=segment.low,segment.high
     count=GEOMETRIC_SEEDS
@@ -174,22 +210,17 @@ def _seeds(segment,context,cache=None,knots=None):
     for g in segment.region.groups:
         ctx=g.context or context
         for radius in group_radii(g):seeds.extend(x for x in radius.energies if lo<x<hi)
-        seeds.extend(x for x in group_knots(g) if lo<=x<=hi)
+        seeds.extend(x for x in _cached(cache,('knots',id(g)),lambda:group_knots(g)) if lo<=x<=hi)
         if g.competitive_mt is not None and g.competitive_q<0:
             seeds.append(-g.competitive_q*(1+ctx.atomic_weight_ratio)/ctx.atomic_weight_ratio)
         centers=None
         if segment.region.approximation=='RMatrixNeutral' and not g.level_metric and g.levels:
-            # Independent fixed-point estimates as one vector. The per-level
-            # update, eight steps and range stopping rule are unchanged.
-            er=_level_energies(g,cache).copy()
-            centers=er.copy()
-            reduced=np.asarray(g.reduced).reshape(len(er),len(g.channels))
-            active=(er>0)&(centers>=lo)&(centers<=hi)
-            for _ in range(8):
-                if not np.any(active):break
-                real=np.stack([c.functions(centers[active],logarithmic=True)[1].real for c in g.channels],axis=1)
-                centers[active]=er[active]-np.sum(reduced[active]*reduced[active]*real,axis=1)
-                active&=(centers>=lo)&(centers<=hi)
+            # Independent fixed-point estimates, eight steps, each level
+            # stopped at its first estimate outside [lo, hi].
+            rows=_center_iterates(g,segment.region,cache)
+            outside=(rows<lo)|(rows>hi)
+            step=np.where(outside.any(axis=0),outside.argmax(axis=0),len(rows)-1)
+            centers=rows[step,np.arange(rows.shape[1])]
         iterations=0 if segment.region.approximation in ("ReichMoore","RMatrixNeutral") else 4
         energies=_level_energies(g,cache)
         starts=energies if centers is None else centers
@@ -212,8 +243,9 @@ def _seeds(segment,context,cache=None,knots=None):
             for peak in (level.energy,center):
                 if lo<=peak<=hi:
                     seeds.append(peak)
-                    for multiple in np.geomspace(1/64,128,35):seeds.extend((peak-width*multiple,peak+width*multiple))
-    return sorted({float(x) for x in seeds if np.isfinite(x) and lo<=x<=hi})
+                    seeds.extend((peak-width*_WIDTH_MULTIPLES).tolist());seeds.extend((peak+width*_WIDTH_MULTIPLES).tolist())
+    seeds=np.array(seeds,dtype=float)
+    return sorted(set(seeds[np.isfinite(seeds)&(seeds>=lo)&(seeds<=hi)].tolist()))
 
 
 def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label='recon'):
