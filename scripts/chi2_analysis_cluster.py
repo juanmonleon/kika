@@ -1103,6 +1103,21 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² — C16 con Σ_eval por congruencia A J Aᵀ, EXFOR CORREGIDA (C16X)",
         "systematic_block_col": None,
     },
+    # ── 15-oct: C17H / C17Z — la cinta de C16X con el 1σ de variant_kinney y cierjacks_additive_vs_mult
+    # ×0,5 y ×0 (W16_TERM_SCALE; MF4 idéntica). Se leen contra C16X: la comprobación de la banda dice
+    # que la de C16X sobre-declara ×3-6 en todas las celdas.
+    "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_ts05_corr": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_ts05_corr.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — C16X con variant_kinney y cierjacks_additive_vs_mult a 0,5σ, EXFOR CORREGIDA (C17H)",
+        "systematic_block_col": None,
+    },
+    "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_ts0_corr": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_ts0_corr.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — C16X sin variant_kinney ni cierjacks_additive_vs_mult, EXFOR CORREGIDA (C17Z)",
+        "systematic_block_col": None,
+    },
     # ── RUN 97: una malla por orden Legendre (roadmap §10.8) ────────────────
     #
     # Candidata frente a `predictive_91_cross`, la misma base contra la que se
