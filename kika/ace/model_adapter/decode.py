@@ -9,23 +9,20 @@ of styles linked by ``derivedFrom``. So this decoder does not produce an
 ``heated_<T>`` one, hanging off the ``evaluated`` style the file *refers to and
 does not contain*.
 
-**The labels are the processed suite's (ACE roadmap D-A11).** ``heated_<T>``,
+**The labels are the processed suite's.** ``heated_<T>``,
 ``URR_<T>`` and ``MonteCarlo``, with ``<T>`` named from kT as OpenMC names its
 temperature groups (``heated_294K``): the labels the HDF5 decoder and kika's
 own processing give, and the ones the HDF5 and ACE encoders require. A suite
 read from ACE is therefore a processed suite like any other, and goes to HDF5
 or back to ACE without relabelling.
 
-**The finding that changed what this module does.** The roadmap recorded, from
-phase 1, that "ACE lacks ``qm``/``qi``", and phase 3's plan said this decoder
-should report that ACE carries no Q values. **That is wrong.** ACE's LQR block
-carries one Q per reaction, in MeV, aligned with MTR, and it is correct: Fe-56
+**ACE carries Q values.** ACE's LQR block carries one Q per reaction, in MeV, aligned with MTR, and it is correct: Fe-56
 capture reads +7.646 MeV, (n,2n) −11.197 MeV, (n,p) −2.913 MeV. What ACE lacks
 is **QM** — the mass-difference Q — and **LR**. So the Q = 0 defect on the ACE
 side was never "the format has no Q"; it was ``CrossSection.from_ace`` not
 reading a block that is there. This decoder reads it.
 
-**Not gated in CI.** Phase 0 decided against committing a 16 MB ACE fixture, so
+**Not gated in CI.** No ACE table is committed (a real one is 16 MB), so
 every test here is ``@pytest.mark.tape`` and runs only where an ACE file is
 reachable.
 """
@@ -66,7 +63,7 @@ from .secondaries import MONTE_CARLO_LABEL
 __all__ = ["decodeAce", "aceStyles", "aceLabels", "qValuesByMT",
            "EVALUATED_LABEL", "MONTE_CARLO_LABEL"]
 
-#: Style labels this decoder assigns: the processed suite's (D-A11), the same
+#: Style labels this decoder assigns: the processed suite's, the same
 #: as :mod:`kika.hdf5.names`. GNDS §9 fixes the node *names* and leaves the
 #: labels to the writer; the per-temperature ones come from :func:`aceLabels`.
 EVALUATED_LABEL = "eval"
@@ -197,7 +194,7 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
         temperatureMeV=getattr(ace.header, "temperature", None),
     )
     # The order NJOY gave MTR and YP, which is not ascending (MT 4 goes last
-    # when a photon yield needs it): the ACE writer gives it back (A4).
+    # when a photon yield needs it): the ACE writer gives it back.
     provenance.attributes["MTR"] = [int(v) for v in ace.reaction_mt_data.incident_neutron]
     provenance.attributes["MTRP"] = [int(v) for v in ace.reaction_mt_data.photon_production]
     # NXS(9..16): zero in Lib81, Z and A in NXS(10)/(11) from NJOY 2016 and JEFF-4.0.
@@ -234,7 +231,7 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
             suite.reactions.append(reaction)
 
     _attachURR(ace, suite, report, urrLabel)
-    # ACE roadmap A3: AND, DLW, TYR, NU/DNU, BDD and DNED become the products.
+    # AND, DLW, TYR, NU/DNU, BDD and DNED become the products.
     from .secondaries import attachAceSecondaries
 
     attachAceSecondaries(ace, suite, report)
@@ -251,7 +248,7 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
         "ACE carries no covariances at all, so there is no covarianceSuite to "
         "build from one"
     )
-    # Roadmap E5f.2: the photon production blocks (MTRP/SIGP/LANDP/ANDP/DLWP)
+    # The photon production blocks (MTRP/SIGP/LANDP/ANDP/DLWP)
     # become photon products, the shape the ENDF adapter gives MF12-15.
     from .photons import attachAcePhotons
 
@@ -267,11 +264,11 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
 def _reportUnconverted(ace, report: ConversionReport) -> None:
     """Name every block the file has and this decoder does not convert.
 
-    Since A3 the neutron angular and energy distributions, the multiplicities
+    The neutron angular and energy distributions, the multiplicities
     and the fission and delayed-neutron data reach the model
     (:mod:`.secondaries`). The secondary-particle blocks (PTYPE, NTRO, IXS
     and HPD...YH: protons, alphas and the other charged products) do not, as
-    in OpenMC: they are ACE roadmap A7. None of it changes a cross section.
+    in OpenMC. None of it changes a cross section.
     """
     SCOPES = ("cross-sections",)
     angular = getattr(ace, "angular_distributions", None)

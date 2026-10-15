@@ -102,6 +102,13 @@ PROCESSING_REJECTION_CATEGORIES = {
         "An OpenMC HDF5 file needs at least one broadened temperature; process with one or more "
         "temperatures and broadening on.",
     "hdf5-failed": "The OpenMC HDF5 file could not be written.",
+    "ace-needs-temperature":
+        "An ACE table is at one broadened temperature; process with one or more temperatures and "
+        "broadening on.",
+    "ace-temperature-not-processed": "A temperature asked for in the ACE output was not broadened in this run.",
+    "ace-table-exists":
+        "The xsdir in the output directory already names this table; pass replace=True to overwrite it.",
+    "ace-failed": "The ACE table could not be written, or did not read back as it was written.",
     "pendf-temperature-not-processed":
         "A temperature asked for in the PENDF was not broadened in this run.",
     "pendf-failed": "The PENDF could not be written, or did not read back as it was written.",
@@ -718,6 +725,106 @@ class EndfProcessing:
                    + ("; omitted: " + "; ".join(omitted) if omitted else ""))
         self._written("hdf5", t0, path, summary=summary, temperatures=temps, omitted=omitted)
         return path
+
+    def write_ace(self, directory, *, temperatures=None, extension: str | None = None,
+                  xsdir: bool = True, replace: bool = False,
+                  progress: Progress | None = None) -> list:
+        """Write one ACE table per broadened temperature into ``directory``.
+
+        The same processed suite :meth:`write_hdf5` writes (the broadening and
+        the URR tables of this run, the distributions tabulated for Monte
+        Carlo, KERMA, damage and gas production), written by
+        :func:`kika.ace.model_adapter.encodeAce` with ACER's conventions:
+        ZAID ``1000 Z + A`` (an isomer ``+ 300 + 100 m``, as LANL names
+        Am-242m1 95642), the suffix of the temperature (``.02c`` at 293.6 K),
+        the legacy header, the KERMA of HEATR's ``local = 0`` as ESZ's heating
+        number. Each table is ``<ZAID><suffix>`` (``8016.02c``); it is read
+        back in strict mode and compared word for word before it replaces a
+        file. ``xsdir`` adds its line to ``directory/xsdir`` (path relative to
+        it), refusing a table name the file already has unless ``replace``.
+
+        ``temperatures`` (kelvin) picks some of the broadened ones; ``extension``
+        overrides the suffix and needs a single temperature. The
+        charged-particle blocks are not written. Returns the paths written.
+
+        Raises :class:`ProcessingOutputError`: ``ace-needs-temperature`` when
+        nothing was broadened, ``ace-temperature-not-processed``,
+        ``ace-table-exists``, else ``ace-failed``. Each call appends its own
+        ``write`` stage.
+        """
+        from kika.ace.model_adapter import encodeAce
+        from kika.ace.writers.write_ace import write_ace_checked
+        from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
+        from kika.hdf5.processing import processSuite
+        from kika.nuclear_data.model import ConversionReport
+
+        t0 = time.perf_counter()
+        directory = Path(directory)
+        if progress:
+            progress("write", None)
+        temps = list(self.temperatures)
+        written, omitted = [], []
+        try:
+            if not temps or not self._broadened:
+                raise ProcessingOutputError(
+                    "ace-needs-temperature", PROCESSING_REJECTION_CATEGORIES["ace-needs-temperature"])
+            if temperatures is not None:
+                wanted = [float(t) for t in np.atleast_1d(temperatures)]
+                missing = [t for t in wanted if not any(abs(t - T) <= 1e-9 * T for T in temps)]
+                if missing:
+                    raise ProcessingOutputError(
+                        "ace-temperature-not-processed",
+                        f"{missing} K not broadened in this run; broadened: {temps}")
+                temps = [T for T in temps if any(abs(t - T) <= 1e-9 * T for t in wanted)]
+            if extension is not None and len(temps) != 1:
+                raise ProcessingOutputError(
+                    "ace-failed", f"extension={extension!r} names one table, and {len(temps)} "
+                                  f"temperatures {temps} were asked for")
+            work = self._full_suite(progress, category="ace-failed")
+            omit = ()
+            resonances = work.resonances
+            if resonances is not None and resonances.unresolved is not None and not self._urr:
+                omit = ("urr",)
+                omitted.append("URR probability tables (the URR stage did not produce them)")
+            report = ConversionReport()
+            try:
+                processed = processSuite(
+                    work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
+                    broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
+                    context=self.reconstruction.context, thinning=self.plan.thinning,
+                    workers=self.plan.workers, omit=omit)
+            except Exception as error:
+                raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
+            directory.mkdir(parents=True, exist_ok=True)
+            for i, T in enumerate(temps):
+                try:
+                    ace, _ = encodeAce(processed, T, extension=extension, report=report)
+                    name = f"{ace.header.zaid}{ace.header.extension}"
+                    target = directory / name
+                    write_ace_checked(ace, target)
+                except ProcessingOutputError:
+                    raise
+                except Exception as error:
+                    raise ProcessingOutputError("ace-failed",
+                                                f"{T:g} K: {type(error).__name__}: {error}") from error
+                if xsdir:
+                    try:
+                        add_xsdir_entry(directory / "xsdir", xsdir_line_for(ace, name), replace=replace)
+                    except XsdirEntryExists as error:
+                        raise ProcessingOutputError("ace-table-exists", str(error)) from error
+                written.append(target)
+                if progress:
+                    progress("write", (i + 1) / len(temps))
+            omitted += list(report.unsupported)
+        except ProcessingOutputError as error:
+            self._written("ace", t0, directory, error, temperatures=temps, files=[str(p) for p in written])
+            raise
+        summary = (f"ACE {', '.join(p.name for p in written)}"
+                   + ("; with URR probability tables" if self._urr else "")
+                   + ("; omitted: " + "; ".join(omitted) if omitted else ""))
+        self._written("ace", t0, directory, summary=summary, temperatures=temps,
+                      files=[str(p) for p in written], omitted=omitted)
+        return written
 
     def report_document(self):
         """The reconstruction report with a section per processing stage

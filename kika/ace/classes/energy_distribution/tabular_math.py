@@ -12,7 +12,7 @@ way:
   lin-lin, as MCNP does. For INT=22 that is what ENDF means (unit-base). For
   INT=12 (corresponding points) and the log laws it is not: ENDF would
   interpolate the outgoing grid point by point, but MCNP and OpenMC sample
-  those intervals unit-base too, and so does kika (D-A4 of the ACE roadmap);
+  those intervals unit-base too, and so does kika;
   the reader notes every such law in ``ace.read_report``.
 * A table holds ``ND`` discrete lines first (``INTT' = 10*ND + INTT``); the
   probability of line ``k`` is ``CDF(k) - CDF(k-1)``. The remaining points are a
@@ -21,7 +21,7 @@ way:
   the result says so with ``discrete_only``.
 * An incident energy can be repeated: that is how ENDF and NJOY write a jump
   in the distribution. Below it the first table of the pair applies and above
-  it the second; exactly at it, the first (Juan, D-A3 of the ACE roadmap).
+  it the second; exactly at it, the first.
   The reader notes every repeated energy in ``ace.read_report``.
 * LAW=44 angles follow Kalbach-87 with ``r`` and ``a`` taken at the lower point
   of the outgoing-energy bin for a histogram table and interpolated in E' for a

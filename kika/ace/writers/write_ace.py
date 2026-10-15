@@ -137,3 +137,35 @@ def write_ace_ascii(ace: Ace, filepath: str = None, overwrite: bool = False) -> 
         A success message including the path to the written file
     """
     return write_ace(ace, filepath, overwrite)
+
+
+def write_ace_checked(ace: Ace, filepath) -> None:
+    """Write ``ace`` at ``filepath`` through a temporary file, read back in strict
+    mode and compared word for word before it replaces ``filepath``: NXS, JXS
+    and the integer words equal, the reals to the 12 digits E20.11 keeps.
+    """
+    from pathlib import Path
+
+    from kika.ace.parsers.parse_ace import read_ace
+
+    target = Path(filepath)
+    temporary = target.with_name(f".{target.name}.tmp")
+    write_ace(ace, str(temporary), overwrite=True)
+    try:
+        again = read_ace(str(temporary), strict=True)
+        a = np.asarray(ace.xss_data, dtype=float)
+        b = np.asarray(again.xss_data, dtype=float)
+        same = (list(again.header.nxs_array) == list(ace.header.nxs_array)
+                and list(again.header.jxs_array) == list(ace.header.jxs_array) and a.shape == b.shape)
+        if same:
+            ints = unpack_int_words(getattr(ace, "xss_int_words", None), a.size - 1)
+            ints = np.zeros(a.size - 1, dtype=bool) if ints is None else np.asarray(ints, dtype=bool)
+            x, y = a[1:], b[1:]
+            same = (np.array_equal(x[ints], y[ints])
+                    and bool(np.all(np.abs(x[~ints] - y[~ints]) <= 5.0e-12 * np.abs(x[~ints]))))
+        if not same:
+            raise ValueError(f"{target.name} does not read back as it was written")
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    os.replace(temporary, target)

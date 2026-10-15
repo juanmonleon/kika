@@ -101,6 +101,23 @@ def aceKT(temperature: float) -> float:
 # Small helpers
 # ----------------------------------------------------------------------
 
+def metastableIndex(suite) -> int:
+    """The target's isomer number, 0 for a ground state: ``Am242_m1`` is 1.
+
+    MF1/451's LISO when the suite was read from ENDF, the ``metastable``
+    attribute of an OpenMC file, else the ``metaStable`` alias PoPs gives the
+    target (GNDS). The level index is not it: Am-242m1 is level 2.
+    """
+    fields = getattr(suite.provenance, "headerFields", None) or {}
+    if fields.get("liso"):
+        return int(fields["liso"])
+    attributes = getattr(suite.provenance, "attributes", None) or {}
+    if attributes.get("metastable"):
+        return int(attributes["metastable"])
+    aliases = getattr(suite.PoPs, "aliases", None) or {}
+    return next((int(a.metaStableIndex) for a in aliases.values() if a.pid == suite.target), 0)
+
+
 def _flatten(form) -> Tuple[np.ndarray, np.ndarray]:
     m = _m()
     if isinstance(form, m.XYs1d):
@@ -614,8 +631,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     if target is None or getattr(target, "Z", None) is None:
         raise HDF5FormatError(f"the target {suite.target!r} has no Z/A in PoPs")
     Z, A = int(target.Z), int(target.A)
-    metastable = int(getattr(suite.provenance, "headerFields", {}).get("lis0", 0) or 0) \
-        if suite.provenance is not None else 0
+    metastable = metastableIndex(suite)
     if awr is None:
         awr = getattr(suite.provenance, "awr", None)
     if awr is None:
@@ -635,6 +651,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         report.warn(f"processed the {label!r} forms where they exist, the evaluation elsewhere")
     work = _reconstructed(suite, context, report)
     _linearised(work, report)
+    photonFlags = _photonFlags(work)
 
     # --- which reactions --------------------------------------------------
     leaves: List[_Leaf] = []
@@ -706,6 +723,10 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     out.PoPs = copy.deepcopy(work.PoPs)
     out.provenance = m.Hdf5Provenance(attributes={"Z": Z, "A": A, "metastable": metastable,
                                                   "atomic_weight_ratio": awr})
+    mat = getattr(suite.provenance, "mat", None)
+    if mat:
+        # the tape's MAT, which an ACE header names the table by (mat2631)
+        out.provenance.attributes["mat"] = int(mat)
     out.styles.add(m.Evaluated(label=EVAL_LABEL))
     for T, kT in styleKT.items():
         out.styles.add(m.Heated(label=heatedLabel(T), derivedFrom=EVAL_LABEL,
@@ -765,7 +786,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                 x, y = x[kept], y[kept]
             cs[RECON_LABEL] = m.XYs1d(xs=x, ys=y, axes=m.crossSectionAxes(), label=RECON_LABEL)
         channel = channelOf(reaction)
-        _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs)
+        _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs, flags=photonFlags)
         redundant = 1 if (mt == 18 and chances) else 0
         rid = m.ReactionId(label=reaction.label, ENDF_MT=mt, fissionGenre=reaction.id.fissionGenre)
         new = (m.CrossSectionSum if redundant else m.Reaction)(
@@ -774,7 +795,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         (out.sums if redundant else (out.fissionComponents if mt in chances else out.reactions)).append(new)
     if summedFission is not None:
         channel = channelOf(summedFission)
-        _products(summedFission, channel, 18, awr, zaTarget, tabOptions, report, work.PoPs)
+        _products(summedFission, channel, 18, awr, zaTarget, tabOptions, report, work.PoPs,
+                  flags=photonFlags)
         out.reactions.append(m.Reaction(
             id=m.ReactionId(label=summedFission.label, ENDF_MT=18),
             crossSection=summedForms(sorted(chances)), outputChannel=channel,
@@ -827,7 +849,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         proxy = copy.copy(orphan)
         if source is not None:
             proxy.crossSection = source.crossSection
-        _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report)
+        _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report, flags=photonFlags)
 
     # --- gas production -----------------------------------------------------
     for gasMT, cs in _gas(work, leaves, heated, grids).items():
@@ -1056,7 +1078,24 @@ def _evaluated(component):
     return form
 
 
-def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None):
+def _photonFlags(suite) -> Dict[Tuple[str, str], str]:
+    """``{(reaction label, product label): first flag}`` of FUDGE's ``ENDFconversionFlags``
+    (``MF13``, ``MF6``, ``ESk=``): which ENDF file a photon of a GNDS evaluation was in."""
+    import re
+
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    flags = EndfConversionFlags.of(suite)
+    out = {}
+    pattern = re.compile(r"\[@label='([^']*)'\]/outputChannel/products/product\[@label='([^']*)'\]$")
+    for path, value in (flags.conversions if flags is not None else []):
+        match = pattern.search(path)
+        if match:
+            out[(match.group(1), match.group(2))] = value.split(",")[0].strip()
+    return out
+
+
+def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, flags=None):
     """Neutron and photon products with Monte Carlo distributions, onto ``channel``."""
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
@@ -1065,7 +1104,7 @@ def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None):
     for product in reaction.outputChannel.products:
         if product.pid not in ("n", "photon"):
             continue
-        new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report)
+        new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, flags=flags)
         if new is not None:
             channel.products.products.append(new)
             explicitPhotons |= product.pid == "photon"
@@ -1166,12 +1205,13 @@ def _cascadePhotons(pops, reaction, awr):
                 energy=m.DiscretePhotonEnergy(primaryFlag=0, energy=float(line.energy),
                                               atomicWeightRatio=awr),
                 label=MONTE_CARLO_LABEL, productFrame=m.Frame.lab)
-            product.provenance = m.Hdf5Provenance(attributes={"emission_mode": "prompt"})
+            product.provenance = m.Hdf5Provenance(attributes={"emission_mode": "prompt", "MFTYPE": 12})
             out.append(product)
     return out
 
 
-def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, delayed=False):
+def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, delayed=False,
+                      flags=None):
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
@@ -1217,7 +1257,30 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
             return None
     new.multiplicity = m.Multiplicity(form=multiplicity)
     new.provenance = m.Hdf5Provenance(attributes={"emission_mode": "delayed" if delayed else "prompt"})
+    if product.pid == "photon":
+        new.provenance.attributes["MFTYPE"] = _photonFile(reaction, record, product, flags)
     return new
+
+
+def _photonFile(reaction, record, product=None, flags=None) -> int:
+    """The ACE MFTYPE of a photon: 16 from MF6, 13 from MF13, 12 from MF12.
+
+    What the evaluation states, which an ACE table keeps: MF13 as a production
+    cross section, MF12 and MF6 as yields on the reaction. OpenMC's file does
+    not tell them apart. From ENDF, the reaction's MF6 record or its MF12/MF13
+    header fields say it; from GNDS, FUDGE's conversion flags (``MF13``,
+    ``MF6``; a photon with neither is MF12's). A GNDS file with no flags at all
+    does not say, and its photons are yields (16).
+    """
+    if record is not None:
+        return 16
+    fields = getattr(getattr(reaction, "provenance", None), "headerFields", None) or {}
+    if "mf13" in fields or "mf12" in fields:
+        return 13 if "mf13" in fields else 12
+    if flags and product is not None:
+        flag = flags.get((reaction.label, product.label), "")
+        return 13 if flag == "MF13" else 16 if flag == "MF6" else 12
+    return 16
 
 
 # ----------------------------------------------------------------------
@@ -1292,6 +1355,13 @@ def _fission(work, out, report):
                 (fission.outputChannel.fissionFragmentData is not None
                  and len(fission.outputChannel.fissionFragmentData.delayedNeutrons)):
             out.sums.multiplicitySums.append(summed)
+            delayed = work.sums.multiplicitySums.byENDF_MT(455)
+            if delayed is not None and delayed.multiplicity is not None:
+                # MF1/455 as the evaluation states it: an ACE table's DNU (the
+                # OpenMC file states only each group's yield)
+                out.sums.multiplicitySums.append(m.MultiplicitySum(
+                    label="delayed fission neutron multiplicity", multiplicity=delayed.multiplicity,
+                    ENDF_MT=455))
         else:
             prompt.provenance.attributes["emission_mode"] = "total"
     data = fission.outputChannel.fissionFragmentData

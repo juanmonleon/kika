@@ -5,8 +5,10 @@
 **Reads:** continuous-energy neutron ACE tables (legacy and 2.0.1 headers) block by
 block, and photo-atomic tables.
 
-**Writes:** an ACE table from its parsed object, its `xsdir` line, and a neutron table
-from a processed model at one temperature.
+**Writes:** an ACE table from its parsed object and its `xsdir` line; a neutron table
+from a processed model at one temperature, so from kika's own processing of an ENDF or
+GNDS evaluation, from an OpenMC file and from each sample of a perturbation run, without
+NJOY; and a thermal scattering table (`.t`).
 
 **Into:** the parse layer's `Ace` object, and from it the canonical model: cross-sections,
 Q-values, the secondary neutrons with their angular and energy distributions and
@@ -14,8 +16,12 @@ multiplicities, fission $\bar\nu$ and the delayed-neutron groups, photon product
 the unresolved-range probability tables (see {doc}`../../architecture/format-adapters`).
 
 **Entry points:** {py:func}`kika.ace.parsers.parse_ace.read_ace`, {py:func}`kika.read`,
-{py:func}`kika.ace.model_adapter.decodeAce`, {py:func}`kika.ace.model_adapter.encodeAce`,
-`kika.ace.writers.write_ace.write_ace`, `kika.ace.xsdir.create_xsdir_files_for_ace`.
+{py:func}`kika.write` (`format="ace"`), {py:func}`kika.ace.model_adapter.decodeAce`,
+{py:func}`kika.ace.model_adapter.encodeAce`, `EndfProcessing.write_ace`
+({py:func}`kika.endf.process_endf`, {py:func}`kika.endf.process_gnds`),
+`AceOptions(engine="kika")` of {py:func}`kika.sampling.model_perturbation.perturbFromModel`,
+`kika.tsl.ace_writer.write_ace_thermal`, `kika.ace.writers.write_ace.write_ace`,
+`kika.ace.xsdir.add_xsdir_entry`.
 
 **Status:** stable (parse layer); experimental (model path).
 ```
@@ -176,7 +182,11 @@ What is derived because the model does not carry it in ACE's form:
   the two-point isotropic histogram an isotropic entry, any other a tabulated entry;
 - one interpolation region that is lin-lin is written with NR = 0, as NJOY writes it;
 - an MFTYPE 13 photon cross-section is its multiplicity times its reaction's
-  cross-section, on the union grid.
+  cross-section, on the union grid;
+- a photon's cosines are isotropic or 32 equiprobable bins, the only forms ANDP holds:
+  any other cosine table is cut into 32 bins of equal probability by inverting its own
+  CDF exactly (linear in a histogram panel, quadratic in a lin-lin one), as ACER does
+  with MF14.
 
 What ACE states and the model has no slot for is kept beside the decoded nodes and used
 when the same table is written back: the order of MTR and YP (MT 4 goes last when a photon
@@ -184,10 +194,31 @@ yield needs it), which law of two that share a model form a chain used (3 or 33,
 the sign of law 61's cosine-table locators, the interpolation code of an outgoing-energy
 table that is only lines, law 66's tabulated part, each precursor family's probability
 table, each photon's MTRP number and MFTYPE, the probability of a one-law chain, and NXS(2)
-and NXS(9-16). A suite that does not come from ACE follows NJOY's rules instead: reactions
-with secondary neutrons first and the rest by MT; of the sums, only MT 18 and 103-107 and
-those a photon yield is stated on; photons numbered $1000\,\mathrm{MT} + i$ as MFTYPE 16
-yields; a probability of 1 over the law's domain; Z and A in NXS(10) and NXS(11).
+and NXS(9-16). A suite that does not come from ACE follows NJOY's rules instead (ACER's choice of what
+survives its union grid):
+
+- reactions with secondary neutrons first and the rest by MT;
+- of the sums, MT 103-107 and MT 18, or the fission chances instead of MT 18 when MT 19
+  has distributions; MT 4 (and MT 3) only when a photon yield is stated on it or the
+  unresolved-range tables compete with it (ILF = 4), written last;
+- each reaction starts one point before its first nonzero value, so a gas production is
+  not written from MT 5's threshold;
+- photons numbered $1000\,\mathrm{MT} + i$, with the MFTYPE of the file they were stated
+  in: 12 for MF12, 13 for MF13 (written as a production cross-section), 16 for MF6. A
+  suite from ENDF says which file through its bookkeeping and one from GNDS through
+  FUDGE's conversion flags; a suite that says neither (an OpenMC file, a GNDS file with
+  no flags) writes yields, MFTYPE 16, on their reaction, which MCNP reads the same way;
+- the delayed $\bar\nu$ is MF1/455's; a suite that states only each delayed family's
+  yield (an OpenMC file) writes their sum, and says so;
+- ESZ's heating number is NJOY HEATR's KERMA with photons deposited elsewhere
+  (`local = 0`), which is what MCNP's tables carry. A processed suite's MT 301 is OpenMC's,
+  whose fission part adds the delayed betas' energy to the fragments'; the encoder takes
+  $E_B\,\sigma_f$ out again. MT 901, the KERMA with local photons, has no ACE place and
+  is reported lost;
+- a probability of 1 over the law's domain; Z and A in NXS(10) and NXS(11); an isomer's
+  ZAID is $1000\,Z + A + 300 + 100\,m$ (Am-242m1 is 95642), as LANL writes it for MCNP;
+- the header carries the date, a title naming the target and the evaluation, and the
+  tape's MAT.
 
 **The ZAID suffix.** A table kika writes from a suite that does not come from ACE takes
 the suffix of its temperature, the one kika's NJOY runs give (`.02c` at 293.6 K, `.06c`
@@ -198,8 +229,44 @@ A temperature with no suffix raises, and an explicit `extension` is taken as giv
 same rule names the tables kika's NJOY runs write when no extension is given. The header
 is the legacy one, which MCNP5, MCNP6 and Serpent read.
 
-`kika.write` does not write ACE; an ACE table from an evaluation is produced by NJOY (see
-{doc}`../processing/njoy`).
+**From an evaluation.** `process_endf(path, plan).write_ace(directory)` (and the same
+from `process_gnds`) writes one table per broadened temperature: the processed suite
+`write_hdf5` writes (this run's broadening and probability tables, the distributions
+tabulated for Monte Carlo, KERMA, damage and gas production) through `encodeAce`. Each
+table is `<ZAID><suffix>` (`8016.02c`), written to a temporary file, read back in strict
+mode and compared with what was written (integer words equal, reals to the 12 digits of
+E20.11) before it replaces a file, and its line is added to `directory/xsdir`, which
+refuses a table name it already has unless `replace=True` (MCNP would read only one of
+the two). A refusal is a {py:class}`~kika.endf.ProcessingOutputError` with a category:
+`ace-needs-temperature`, `ace-temperature-not-processed`, `ace-table-exists`,
+`ace-failed`. NJOY is not run.
+
+**Through `kika.write`.** `kika.write(suite, path, format="ace", temperatures=T)` writes
+a processed suite: one read from an ACE or OpenMC file, or
+`kika.hdf5.processing.processSuite`'s. An evaluation is refused (`ace-needs-processed-suite`):
+an ACE table is one temperature of a processing run. A thermal scattering suite is
+written as a `.t` table (below).
+
+**For each sample of a perturbation run.** `AceOptions(engine="kika")` processes each
+realisation from its 0 K forms (multiplied at 0 K, then broadened) and writes it with
+`encodeAce`, with no tape and no NJOY; the probability tables are computed once, on the
+unperturbed evaluation, and shared by every sample. An unperturbed sample is the table
+`write_ace` writes.
+
+**Thermal tables.** `kika.tsl.ace_writer.write_ace_thermal` writes one temperature of a
+processed thermal law in ACER's layout: ITIE (incident energies, the inelastic σ),
+ITXE (continuous outgoing tables: NE locators, each one word before its block, NE counts,
+then $E'$, pdf, cdf and the equiprobable cosines per outgoing energy), and the elastic
+part at ITCE: the Bragg edges and cumulative structure factors of a coherent one, σ(E)
+and its equiprobable cosines for an incoherent one, both for a mixed one (the incoherent
+half at JXS(7-9)). The σ's and factors are per molecule (divided by `nmix`). From a
+suite of kika's thermal processing (`kika.hdf5.thermal_processing.processThermal`) or
+an OpenMC thermal file, the incoherent elastic, which those state as $\sigma_b$ and $W'$,
+is written as THERMR computes it: $\sigma(E) = \tfrac{\sigma_b}{2}\,(1 - e^{-2c})/c$
+with $c = 2EW'$, on the inelastic incident grid, with the mean cosine of each of 16
+equiprobable bins of $p(\mu) \propto e^{-c(1-\mu)}$. NJOY's own table interpolates
+that σ, written to 7 digits on the free-atom PENDF grid, back to its energies; kika
+evaluates it where it is written.
 
 **Many variants of one table.** A perturbed sample differs from its source table in a
 small part of XSS. Since
@@ -267,7 +334,26 @@ derives because the suite has none, and the charged-particle blocks it does not 
   (`kika/hdf5/tests/test_ace_thermal.py::test_the_table_reads_into_the_processed_forms`,
   `::test_the_forms_encode_as_openmc_lays_them_out`), and `kika.read` returns its suite
   (`kika/tsl/tests/test_tsl_formats.py::test_an_ace_thermal_table_is_read_into_the_model`).
-- `kika/ace/xsdir.py` and `kika/ace/comparison` have no tests.
+- Processing → ACE: one table per temperature named by ZAID and suffix, its `xsdir`
+  line, the refusal of a repeated table, the refusals by category, and `kika.write` of a
+  read table giving the same file
+  (`kika/ace/model_adapter/tests/test_ace_output.py`); a photon cosine table cut into 32
+  equiprobable bins, each carrying 1/32 (`::test_a_photon_cosine_table_is_cut_into_32_equiprobable_bins`);
+  an isomer's ZAID (`::test_an_isomer_takes_lanls_zaid`); the MFTYPE of each photon
+  (`::test_a_photon_keeps_the_file_it_was_stated_in`).
+- Conversions: an OpenMC file to ACE and back with the same cross-sections, the delayed
+  $\bar\nu$ of a fissile, the heating number, MT 4 for the unresolved-range competition,
+  OpenMC thermal files to `.t`, THERMR's incoherent cosines, and FUDGE's photon flags
+  (`kika/ace/model_adapter/tests/test_ace_conversions.py`).
+- Perturbation samples without NJOY, and the unperturbed processing equal to
+  `write_ace`'s table word for word
+  (`kika/sampling/tests/test_ace_kika_engine.py`).
+- Thermal tables: each elastic mode written and read back to a fixed point, the locator
+  convention, and, with `KIKA_ACE_SAB` pointing to a directory of thermal tables, each
+  real table recomposed byte for byte (`kika/tsl/tests/test_ace_thermal_writer.py`).
+- `TODO(check)`: the comparison of kika's tables with NJOY's of the same tape and
+  temperature is a development check, not a public test.
+- `kika/ace/comparison` has no tests.
 
 ## Implementation
 
@@ -276,7 +362,12 @@ derives because the suite has none, and the charged-particle blocks it does not 
 - `kika/ace/encoders/`: one encoder per block, the energy laws, and the layout that places
   the blocks and fills NXS and JXS; `kika/ace/contract.py`: what a table must satisfy to
   be laid out.
-- `kika/ace/writers/write_ace.py`: writing; `kika/ace/xsdir.py`: `xsdir` lines.
+- `kika/ace/writers/write_ace.py`: writing, and `write_ace_checked`, which reads the file
+  back before it replaces one; `kika/ace/xsdir.py`: `xsdir` lines (`add_xsdir_entry`).
+- `kika/endf/process.py`: `EndfProcessing.write_ace`; `kika/_write.py`: the `ace` door;
+  `kika/sampling/model_perturbation.py`: `AceOptions(engine="kika")`.
+- `kika/tsl/ace_writer.py`: thermal tables (`write_ace_thermal`, `write_thermal_suite`,
+  THERMR's incoherent elastic).
 - `kika/ace/model_adapter/decode.py`: `decodeAce`, the styles and labels, Q-values, the
   probability tables and where each reaction goes; `secondaries.py`: neutron products,
   fission and delayed neutrons; `photons.py`: photon products; `encode.py`: `encodeAce`.

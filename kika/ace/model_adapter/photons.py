@@ -1,4 +1,4 @@
-"""ACE photon production → the photon products of a reaction (roadmap E5f.2).
+"""ACE photon production → the photon products of a reaction.
 
 A continuous-energy neutron ACE table states its photons in five blocks, one
 entry per *photon production reaction* (MTRP, usually ``MT*1000 + i``): SIGP
@@ -32,7 +32,7 @@ eval-labelled form, because ACE refers to an evaluation it does not contain;
 the photon data is no exception (NJOY's ACER has linearised it, thinned it and
 expanded every level cascade into lines). So it hangs off the heated style,
 the table's statement at its temperature, as the cross sections do (ACE
-roadmap D-A11; :func:`~kika.ace.model_adapter.decode.aceLabels`). A reader
+:func:`~kika.ace.model_adapter.decode.aceLabels`). A reader
 written for ENDF suites asks for ``distribution["eval"]`` and must ask for
 that label here; ``multiplicity.form`` works for both, because a multiplicity
 with a single form answers ``.form`` whatever its label.
@@ -429,7 +429,7 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
         distribution = Distribution()
         distribution[label] = Uncorrelated(angular=angularForm, energy=energyForm,
                                            label=label, productFrame=Frame.lab)
-        # The Monte Carlo form beside it (ACE roadmap A3): the DLWP laws and the
+        # The Monte Carlo form beside it: the DLWP laws and the
         # ANDP tables as they are sampled, which the HDF5 and ACE writers take.
         mc = _monteCarlo(ace, energy.get(mtrp), angular.get(mtrp), mtrp, report)
         if mc is not None:
@@ -440,7 +440,7 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
         product = Product(pid="photon", label=_uniqueLabel("photon", taken),
                           multiplicity=multiplicity, distribution=distribution)
         # What the ACE writer needs back: the entry's number and form, and the
-        # law numbers of its DLWP chain (ACE roadmap A4).
+        # law numbers of its DLWP chain, which the ACE writer gives back.
         laws = list(energy.get(mtrp) or [])
         from .secondaries import chainAttributes
 

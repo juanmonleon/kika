@@ -192,7 +192,12 @@ def encodeNeutron(suite, temperatures=None, *, awr: Optional[float] = None,
         awr = _provenance(suite, "atomic_weight_ratio")
     if awr is None:
         awr = _awrFromModel(suite, target)
-    name = name or (suite.target if _provenance(suite, "Z") is not None else gndsName(Z, A, metastable))
+    if name is None:
+        name = suite.target if _provenance(suite, "Z") is not None else gndsName(Z, A, metastable)
+        if metastable and name == gndsName(Z, A):
+            # an isomer read from ENDF is the ground state's id at an excited
+            # level (Am242, level 2); OpenMC names it Am242_m1
+            name = gndsName(Z, A, metastable)
 
     root = R.Group()
     root.setAttr("filetype", "data_neutron")

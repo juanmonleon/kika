@@ -126,4 +126,4 @@ def test_the_charged_particle_blocks_are_reported_not_written(decoded):
     suite, _ = decoded
     written, report = encodeAce(suite)
     assert not list(getattr(written.secondary_particle_types, "particle_ids", []) or [])
-    assert any("A7" in line for line in report.unsupported)
+    assert any("charged-particle production" in line for line in report.unsupported)

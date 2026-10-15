@@ -1,4 +1,4 @@
-"""ACE's secondary-neutron blocks → the model's Monte Carlo forms (ACE roadmap A3).
+"""ACE's secondary-neutron blocks → the model's Monte Carlo forms.
 
 AND, DLW, TYR, NU, DNU, BDD and DNED become products of the reactions
 :func:`~kika.ace.model_adapter.decode.decodeAce` builds, in the forms the HDF5

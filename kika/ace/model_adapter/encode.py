@@ -1,7 +1,7 @@
-"""A processed :class:`~kika.nuclear_data.model.suite.ReactionSuite` → an :class:`~kika.ace.classes.ace.Ace` (ACE roadmap A4).
+"""A processed :class:`~kika.nuclear_data.model.suite.ReactionSuite` → an :class:`~kika.ace.classes.ace.Ace`.
 
-**One serialisation path (D-A5).** This module writes no word. It fills the
-block objects the A2 encoders read (:mod:`kika.ace.encoders.blocks`), lets
+**One serialisation path.** This module writes no word. It fills the
+block objects the block encoders read (:mod:`kika.ace.encoders.blocks`), lets
 :func:`kika.ace.encoders.layout.encode_xss` lay the XSS out and fill NXS and
 JXS, and reads the result back with the parser, so what comes out is the same
 ``Ace`` a file read from disk is: the object the user, the app, the sampling
@@ -46,12 +46,17 @@ it), which law of two that share a form a chain used (3/33, 1/4), law 66's
 xi table, a delayed group's BDD record, a photon's MTRP and MFTYPE, and the
 P(E) of a one-law chain that the model keeps without a weight. When a suite
 has none of it (it was processed by kika, not read from ACE), the rules
-here are NJOY's: secondary-neutron reactions first and the rest ascending,
-MTRP = 1000·MT + i, MFTYPE 16 (D-A8), the multipliers' MTs ascending, a
-P(E) of 1 over the law's domain.
+here are NJOY's (ACER's ``unionx``): secondary-neutron reactions first and
+the rest ascending; of the sums MT 18 (or the fission chances, when MT 19
+carries distributions), 103-107, MT 4 when a photon yield or the URR
+competition (ILF = 4) needs it, last; MTRP = 1000·MT + i with the MFTYPE of
+the file the photon was stated in (MF12 → 12, MF13 → 13, MF6 → 16), the
+multipliers' MTs ascending; a reaction starts one point before its first
+nonzero value; a P(E) of 1 over the law's domain; ESZ's heating number is
+HEATR's ``local = 0`` KERMA, without the delayed betas OpenMC's MT301 adds.
 
-**Not written:** the charged-particle production blocks (PTYPE, NTRO, IXS:
-roadmap A7), which the decoder does not convert either; reported.
+**Not written:** the charged-particle production blocks (PTYPE, NTRO, IXS),
+which the decoder does not convert either; reported.
 """
 from __future__ import annotations
 
@@ -75,6 +80,10 @@ CORRELATED_LAWS = (44, 61, 66, 67)
 KEPT_SUMS = (18, 103, 104, 105, 106, 107)
 #: ESZ's heating number comes from this production, never written to MTR.
 HEATING_MT = 301
+#: ACER's equiprobable cosine bins per incident energy (AND LC > 0, ANDP)
+EQUIPROBABLE_BINS = 32
+#: OpenMC's local-photon KERMA; an ACE table has only ESZ's heating number
+LOCAL_HEATING_MT = 901
 
 
 class AceEncodeError(ValueError):
@@ -127,6 +136,14 @@ def _intt(interpolation) -> int:
 def _attributes(node) -> dict:
     provenance = getattr(node, "provenance", None)
     return provenance.attributes if isinstance(provenance, AceProvenance) else {}
+
+
+def _photonType(product) -> Optional[int]:
+    """The MFTYPE a processed suite states for a photon (MF6 16, MF13 13, MF12 12)."""
+    stated = _attributes(product).get("MFTYPE")
+    if stated is None:
+        stated = (getattr(getattr(product, "provenance", None), "attributes", None) or {}).get("MFTYPE")
+    return None if stated is None else int(stated)
 
 
 def _form(component, label: str, what: str):
@@ -187,24 +204,77 @@ def _equiprobableTable(t) -> bool:
 # Angular distributions (AND, ANDP)
 # ----------------------------------------------------------------------
 
-def _angularRecord(angular, mt: int):
-    """A 2-d cosine form (or ``Isotropic2d``/None) → the parser's angular object."""
+def _equiprobableEdges(t, bins: int = EQUIPROBABLE_BINS) -> np.ndarray:
+    """The ``bins + 1`` cosines that cut a cosine table into bins of equal probability.
+
+    The table's own CDF, inverted exactly: linear in a histogram panel,
+    quadratic in a lin-lin one. ACER's form for a photon (ANDP holds nothing
+    else), and what it makes of MF14.
+    """
+    m = _m()
+    x, p = np.asarray(t.xs, dtype=float), np.asarray(t.pdf, dtype=float)
+    dx = np.diff(x)
+    flat = t.interpolation == m.Interpolation.flat
+    mass = p[:-1] * dx if flat else 0.5 * (p[:-1] + p[1:]) * dx
+    c = np.concatenate([[0.0], np.cumsum(mass)])
+    p, c = p / c[-1], c / c[-1]
+    edges = [x[0]]
+    for q in np.arange(1, bins) / bins:
+        i = int(np.clip(np.searchsorted(c, q, side="right") - 1, 0, len(dx) - 1))
+        while mass[i] <= 0.0 and i + 1 < len(dx):
+            i += 1
+        dq = q - c[i]
+        slope = 0.0 if flat else (p[i + 1] - p[i]) / dx[i]
+        if abs(slope) * dx[i] <= 1e-12 * max(p[i], 1e-300):
+            s = dq / p[i]
+        else:
+            s = (-p[i] + np.sqrt(max(p[i] * p[i] + 2.0 * slope * dq, 0.0))) / slope
+        edges.append(x[i] + min(max(s, 0.0), dx[i]))
+    edges.append(x[-1])
+    return np.maximum.accumulate(np.asarray(edges))
+
+
+def _asEquiprobable(t):
+    """``t`` as the histogram of its equiprobable bins (the shape ``_equiprobableTable`` recognises)."""
+    m = _m()
+    from kika.nuclear_data.model import Xs_pdf_cdf1d
+
+    edges = _equiprobableEdges(t)
+    n = edges.size - 1
+    pdf = np.zeros(n + 1)
+    with np.errstate(divide="ignore"):
+        pdf[:n] = np.where(np.diff(edges) > 0, 1.0 / (n * np.diff(edges)), 0.0)
+    return Xs_pdf_cdf1d(xs=edges, pdf=pdf, cdf=np.linspace(0.0, 1.0, n + 1),
+                        interpolation=m.Interpolation.flat, outerDomainValue=t.outerDomainValue)
+
+
+def _angularRecord(angular, mt: int, photon: bool = False):
+    """A 2-d cosine form (or ``Isotropic2d``/None) → the parser's angular object.
+
+    ``photon``: ANDP states a photon's cosine as isotropic or as equiprobable
+    bins only, so any other table is cut into 32 of them.
+    """
     from kika.ace.classes.angular_distribution.distributions import (
         EquiprobableAngularDistribution, IsotropicAngularDistribution, TabulatedAngularDistribution)
 
     m = _m()
     if angular is None or isinstance(angular, m.Isotropic2d):
         return IsotropicAngularDistribution(mt=mt)
-    tables, _, _ = _tab2(angular)
+    tables = list(_tab2(angular)[0])
     energies = _mev([t.outerDomainValue for t in tables])
     forms = []
-    for t in tables:
+    for i, t in enumerate(tables):
         if _isotropicTable(t):
             forms.append("isotropic")
         elif _equiprobableTable(t):
             forms.append("equiprobable")
+        elif photon:
+            tables[i] = _asEquiprobable(t)
+            forms.append("equiprobable")
         else:
             forms.append("tabulated")
+    if photon and all(f == "isotropic" for f in forms):
+        return IsotropicAngularDistribution(mt=mt)
     if all(f == "equiprobable" for f in forms):
         return EquiprobableAngularDistribution(mt=mt, _energies=energies,
                                                _cosine_bins=[np.asarray(t.xs, dtype=float) for t in tables],
@@ -475,7 +545,7 @@ class _Encoder:
         members = []
         for container, node in nodes.values():
             mt = int(node.ENDF_MT)
-            if mt == 2 or mt == HEATING_MT and container is s.productions:
+            if mt == 2 or mt in (HEATING_MT, LOCAL_HEATING_MT) and container is s.productions:
                 continue
             if container is s.sums and mt not in KEPT_SUMS and mt not in photonHosts:
                 continue
@@ -490,9 +560,23 @@ class _Encoder:
                 self.report.warn(f"MT {extra} are not in the decoded table's MTR; written after it")
             order += extra
         else:
+            # ACER (unionx): MT18 when the fission chances carry no
+            # distributions, else the chances (MT19 with MF4-6) and not MT18
+            chances = [mt for mt in members if nodes[mt][0] is s.fissionComponents]
+            if chances:
+                if any(mt in neutronMTs for mt in chances):
+                    members = [mt for mt in members if not (mt == 18 and nodes[mt][0] is s.sums)]
+                else:
+                    members = [mt for mt in members if mt not in chances]
+
+            # ACER: the reactions with secondary neutrons, then the rest
+            # ascending, then a sum written only to carry photon yields (MT4)
+            def addedForPhotons(mt):
+                return nodes[mt][0] is s.sums and mt not in KEPT_SUMS
+
             first = sorted(mt for mt in members if mt in neutronMTs)
-            rest = sorted(mt for mt in members if mt not in neutronMTs and mt not in photonHosts)
-            hosts = sorted(mt for mt in members if mt not in neutronMTs and mt in photonHosts)
+            rest = sorted(mt for mt in members if mt not in neutronMTs and not addedForPhotons(mt))
+            hosts = sorted(mt for mt in members if mt not in neutronMTs and addedForPhotons(mt))
             order = first + rest + hosts
         # NXS(5): the reactions with secondary neutrons first (contract)
         return [mt for mt in order if mt in neutronMTs] + [mt for mt in order if mt not in neutronMTs]
@@ -516,11 +600,18 @@ class _Encoder:
         photons = self.photons(nodes)
         # A yield (MFTYPE 12/16) multiplies its MT's σ, which must be in MTR;
         # an MFTYPE 13 states σ_γ itself and needs nothing.
-        photonHosts = {mt for mt, _, p in photons if int(_attributes(p).get("MFTYPE", 16)) in (12, 16)}
+        photonHosts = {mt for mt, _, p in photons if (_photonType(p) or 16) in (12, 16)}
+        unr = self.urr()
+        if unr is not None and unr.inelastic_flag == 4:
+            # ACER keeps MT4 when the URR tables compete with it (ILF = 4)
+            photonHosts = photonHosts | {4}
         mtr = self.mtr(nodes, set(neutrons), photonHosts)
         secondary = [mt for mt in mtr if mt in neutrons]
 
         esz = self.esz(nodes, grid)
+        if LOCAL_HEATING_MT in nodes:
+            self.report.lost("MT901, the KERMA with local photons: an ACE table has one heating "
+                             "number, ESZ's (MT301, photons deposited elsewhere)")
         crossSection = NS(reaction={})
         q, ty = [], []
         angular = NS(elastic=None, incident_neutron={}, photon_production={}, particle_production=[])
@@ -532,7 +623,14 @@ class _Encoder:
             values = np.asarray(form.ys, dtype=float)
             if mt == 444:
                 values = values / EV_PER_MEV
-            crossSection.reaction[mt] = NS(energy_idx=self.suffix(grid, form, f"MT{mt}"), _xs_entries=values)
+            start = self.suffix(grid, form, f"MT{mt}")
+            if not isinstance(s.provenance, AceProvenance):
+                # ACER starts a reaction one point before its first nonzero
+                # value (a gas production is not written from MT5's threshold)
+                first = np.flatnonzero(values)
+                if first.size and first[0] > 1:
+                    start, values = start + first[0] - 1, values[first[0] - 1:]
+            crossSection.reaction[mt] = NS(energy_idx=start, _xs_entries=values)
             qv = node.outputChannel.Q.value if node.outputChannel is not None and \
                 node.outputChannel.Q is not None else None
             if qv is None:
@@ -555,7 +653,6 @@ class _Encoder:
 
         nubar, bdd, dned = self.fission(nodes)
         energy.delayed_neutron = dned
-        unr = self.urr()
         gpd, mtrp, sigp, yp = self.photonBlocks(photons, nodes, grid, angular, energy)
 
         header = self.header()
@@ -601,10 +698,40 @@ class _Encoder:
         if kerma is None:
             self.report.lost("the suite has no KERMA (MT301): ESZ's heating numbers are 0")
         else:
+            kerma = kerma - self.delayedBetaKerma(nodes, grid, full)
             nonzero = total != 0.0
             heating[nonzero] = kerma[nonzero] / (total[nonzero] * EV_PER_MEV)
         return NS(energies=_mev(grid), total_xs=total, absorption_xs=absorption, elastic_xs=elastic,
                   heating_numbers=heating, has_data=True)
+
+    def delayedBetaKerma(self, nodes, grid, full) -> np.ndarray:
+        """EB·σ_f, the delayed betas OpenMC's MT301 counts and HEATR's does not.
+
+        ESZ's heating number is ACER's, HEATR's ``local = 0`` KERMA / σ_t, whose
+        fission part is the fragments' kinetic energy (EFR). A processed suite's
+        MT301 is OpenMC's, which adds the delayed betas (EB, ~6.5 MeV for U-235,
+        3.8 % of the fission KERMA): they are taken out again. A suite read from
+        ACE carries ACER's own number, and is left as it is.
+        """
+        if isinstance(self.suite.provenance, AceProvenance):
+            return np.zeros(len(grid))
+        fission = nodes.get(18)
+        release = None
+        for mt in FISSION_MTS:
+            node = nodes.get(mt)
+            data = getattr(getattr(node[1], "outputChannel", None), "fissionFragmentData", None) if node else None
+            if data is not None and data.fissionEnergyReleases:
+                release = data.fissionEnergyReleases[0]
+                break
+        if release is None or getattr(release, "delayedBetaEnergy", None) is None:
+            return np.zeros(len(grid))
+        from kika.hdf5.fission_energy import evaluate
+
+        sigmaF = full(18, "MT18") if fission is not None else sum(
+            (full(mt, f"MT{mt}") for mt in (19, 20, 21, 38) if mt in nodes), np.zeros(len(grid)))
+        self.report.warn("ESZ's heating number is HEATR's local = 0 KERMA: MT301 without the delayed "
+                         "betas (EB) OpenMC's fission KERMA adds")
+        return np.asarray(evaluate(release.delayedBetaEnergy, grid), dtype=float) * sigmaF
 
     def partials(self, nodes):
         s = self.suite
@@ -673,17 +800,22 @@ class _Encoder:
         else:
             total = _nuRecord(nu)
         delayed = None
+        dnu = None
         if groups:
-            if delayedSum is None:
-                raise AceEncodeError("the fission neutron has delayed groups but the suite has no delayed ν "
-                                     "(multiplicitySum MT455) for DNU")
-            delayed = _nuRecord(_multiplicityForm(delayedSum.multiplicity))
+            if delayedSum is not None:
+                dnu = _multiplicityForm(delayedSum.multiplicity)
+            else:
+                # An OpenMC file states each group's yield, not MF1/455: the
+                # delayed nu is their sum
+                dnu = _summedYields([_multiplicityForm(g.product.multiplicity) for g in groups])
+                self.report.approximated("DNU is the sum of the delayed groups' yields "
+                                         "(the suite states no delayed nu, MT455)")
+            delayed = _nuRecord(dnu)
         nubar = NS(has_nubar=True, has_both_nu_types=prompt is not None, prompt=prompt, total=total,
                    has_delayed=delayed is not None, delayed=delayed)
         if not groups:
             return nubar, None, []
         precursors, chains = [], []
-        dnu = _multiplicityForm(delayedSum.multiplicity)
         for g, group in enumerate(groups):
             attributes = _attributes(group.product)
             if "energies" in attributes:
@@ -696,6 +828,10 @@ class _Encoder:
                 d = np.asarray(dnu.evaluate(x), dtype=float)
                 probabilities = np.divide(y, d, out=np.zeros_like(y), where=d != 0)
                 energies, regions = _mev(x), []
+                if probabilities.size > 2 and np.allclose(probabilities, probabilities[0], rtol=1e-12, atol=0):
+                    # a constant fraction (MF1/455 LDG = 0): two points, as ACER writes it
+                    energies = energies[[0, -1]]
+                    probabilities = probabilities[[0, -1]]
             precursors.append(NS(decay_constant=float(group.rate.value) / PER_SHAKE_TO_PER_S,
                                  interpolation_regions=regions, energies=energies, probabilities=probabilities))
             form = _monteCarlo(group.product.distribution, f"delayed group {g + 1}")
@@ -761,7 +897,7 @@ class _Encoder:
         sigp, mtrps, multipliers = {}, [], []
         for mtrp, mt, node, product, attributes in entries:
             mtrps.append(mtrp)
-            mftype = int(attributes.get("MFTYPE", 13 if id(node) in orphans else 16))
+            mftype = _photonType(product) or (13 if id(node) in orphans else 16)
             multiplicity = _multiplicityForm(product.multiplicity)
             if mftype in (12, 16):
                 x, y, nbt, interp = _regions(multiplicity)
@@ -780,12 +916,18 @@ class _Encoder:
                         sigma[int(i)] = value
                 start = _position(grid, xs)
                 if start is None:
-                    raise AceEncodeError(f"MTRP {mtrp}: an MFTYPE 13 production is not on the union grid")
+                    # A processed suite's yield σ_γ/σ is on the evaluation's
+                    # MF13 grid: σ_γ on the union grid from the reaction's
+                    # threshold, as ACER puts MF13 on it
+                    start = self.suffix(grid, host, f"MT{mt}")
+                    xs = grid[start:]
+                    y = np.interp(xs, multiplicity.xs, multiplicity.ys, left=0.0, right=0.0)
+                    sigma = y * np.asarray(host.ys, dtype=float)
                 sigp[mtrp] = NS(mt=mtrp, mftype=13, energy_grid_index=start + 1, cross_sections=sigma)
             mc = self.photonMonteCarlo(product, attributes, mtrp)
             laws, numbers = _chain(mc, attributes, f"DLWP MTRP {mtrp}", self.domain)
             energy.photon_production[mtrp] = laws
-            angular.photon_production[mtrp] = _angularRecord(_angularOf(mc), mtrp)
+            angular.photon_production[mtrp] = _angularRecord(_angularOf(mc), mtrp, photon=True)
 
         yp = self.tableAttributes.get("YP")
         if yp is None:
@@ -829,19 +971,42 @@ class _Encoder:
         s = self.suite
         p = s.provenance if isinstance(s.provenance, AceProvenance) else None
         target = s.PoPs[s.target] if s.target in s.PoPs else None
+        known = target is not None and getattr(target, "Z", None) is not None
         zaid = self.overrides.get("zaid") or getattr(p, "zaid", None)
-        if zaid is None and target is not None and getattr(target, "Z", None) is not None:
-            zaid = 1000 * int(target.Z) + int(target.A)
+        if zaid is None and known:
+            # An isomer as LANL writes it for MCNP, A + 300 + 100 m (Am-242m1
+            # 95642), which MCNP and OpenMC read as that state
+            from kika.hdf5.processing import metastableIndex
+
+            meta = metastableIndex(s)
+            zaid = 1000 * int(target.Z) + int(target.A) + (300 + 100 * meta if meta else 0)
         awr = self.overrides.get("awr") or getattr(p, "awr", None)
+        if awr is None:
+            # a suite kika processed states MF1/451's AWR, as ACER takes it
+            awr = (getattr(s.provenance, "attributes", None) or {}).get("atomic_weight_ratio")
+        if awr is None and known and getattr(target, "mass", None) is not None:
+            from kika._constants import NEUTRON_MASS_AMU
+
+            awr = float(target.mass.value) / NEUTRON_MASS_AMU
         if zaid is None or awr is None:
-            raise AceEncodeError("the suite states no ZAID or AWR (an ACE-decoded suite carries both in its "
-                                 "AceProvenance; pass zaid= and awr= otherwise)")
+            raise AceEncodeError("the suite states no ZAID or AWR (its target has no Z, A or mass in "
+                                 "PoPs); pass zaid= and awr=")
         h = Header()
         h.format_version = getattr(p, "formatVersion", None) or "legacy"
         h.zaid, h.extension = int(zaid), self.overrides.get("extension") or getattr(p, "extension", None)
         h.atomic_weight_ratio = float(awr)
         h.temperature = self.kT / EV_PER_MEV
         h.date, h.comment, h.matid = getattr(p, "date", None), getattr(p, "comment", None), getattr(p, "matid", None)
+        if p is None:
+            # A table kika processed: written today, titled by its target and
+            # evaluation, and named by the tape's MAT, as ACER heads one
+            import datetime
+
+            from kika import __version__
+
+            h.date = datetime.date.today().strftime("%m/%d/%y")
+            h.comment = " ".join(x for x in (s.target, s.evaluation, f"(kika {__version__})") if x)[:70]
+            h.matid = (getattr(s.provenance, "attributes", None) or {}).get("mat")
         h.izaw_array = [(0, 0.0)] * 16
         h.nxs_array = [0] * 17
         # NXS(2): the ground state's ZA, also for an isomer's ZAID
@@ -881,6 +1046,20 @@ def _position(grid: np.ndarray, xs: np.ndarray) -> Optional[int]:
     return None
 
 
+def _summedYields(forms):
+    """Σ of the groups' yields: polynomials coefficient by coefficient, else lin-lin on the union grid."""
+    m = _m()
+    if all(isinstance(f, m.Polynomial1d) for f in forms):
+        n = max(len(f.coefficients) for f in forms)
+        c = np.zeros(n)
+        for f in forms:
+            c[:len(f.coefficients)] += np.asarray(f.coefficients, dtype=float)
+        return m.Polynomial1d(coefficients=c, domainMin_=forms[0].domainMin, domainMax_=forms[0].domainMax)
+    x = np.unique(np.concatenate([np.asarray(f.xs, dtype=float) for f in forms if hasattr(f, "xs")]))
+    y = sum(np.asarray(f.evaluate(x), dtype=float) for f in forms)
+    return m.XYs1d(xs=x, ys=y)
+
+
 def _nuRecord(form):
     """A ν form → the parser's ν record: LNU = 1 polynomial (coefficients per MeV^i) or 2 tabulated."""
     m = _m()
@@ -904,7 +1083,7 @@ def encodeAce(suite, temperature=None, *, zaid: Optional[int] = None, awr: Optio
     ``AceProvenance`` states. A suite kika processed itself has none: its ZAID
     is 1000·Z + A and its suffix its temperature's (``.02c`` for 293.6 K, the
     one kika's NJOY runs give; :func:`kika._utils.ace_temperature_suffix`),
-    and a temperature with no suffix raises. The table is laid out by the A2 encoders and read
+    and a temperature with no suffix raises. The table is laid out by the block encoders and read
     back with the parser in ``strict`` mode, so a block that would not read
     raises here rather than in the code that opens the file.
     """
@@ -929,5 +1108,38 @@ def encodeAce(suite, temperature=None, *, zaid: Optional[int] = None, awr: Optio
     ace.xss_int_words = pack_int_words(enc.is_int)
     ace.read_report = ReadReport(strict=strict)
     ace = parse_blocks(ace)
-    report.unsupportedNode("charged-particle production (PTYPE, NTRO, IXS) is not written (ACE roadmap A7)")
+    message = "charged-particle production (PTYPE, NTRO, IXS) is not written: kika writes neutrons and photons"
+    if message not in report.unsupported:
+        report.unsupportedNode(message)
     return ace, report
+
+
+def writeAceSuite(suite, path, temperature=None, **options) -> ConversionReport:
+    """``kika.write(suite, path, format="ace")``: the table at ``path``, and the report.
+
+    The suite must be processed (``heated_<T>`` styles on a union grid with
+    Monte Carlo forms); an evaluation raises :class:`AceEncodeError` rather than
+    being processed here, since an ACE table is one temperature of a processing
+    run (:meth:`kika.endf.EndfProcessing.write_ace`). The file is read back in
+    strict mode before it replaces ``path``.
+    """
+    from pathlib import Path
+
+    from kika.ace.writers.write_ace import write_ace_checked
+    from kika.hdf5.writer import isProcessed
+
+    if getattr(suite, "interaction", None) == "thermalNeutronScatteringLaw":
+        from kika.nuclear_data.model import ConversionReport as Report
+        from kika.tsl.ace_writer import write_thermal_suite
+
+        write_thermal_suite(suite, path, temperature, **options)
+        return Report()
+    if not isProcessed(suite):
+        raise AceEncodeError("ace-needs-processed-suite: an ACE table is a processed suite at one "
+                             "temperature; process the evaluation first (kika.endf.process_endf(...)"
+                             ".write_ace(directory), or kika.hdf5.processing.processSuite)")
+    ace, report = encodeAce(suite, temperature, **options)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_ace_checked(ace, path)
+    return report

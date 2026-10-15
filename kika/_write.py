@@ -48,7 +48,7 @@ from typing import Optional
 __all__ = ["write"]
 
 #: Formats the door can write.
-WRITE_FORMATS = ("gnds", "endf", "g4ndl", "hdf5")
+WRITE_FORMATS = ("gnds", "endf", "g4ndl", "hdf5", "ace")
 
 #: Where a covariance sibling goes, relative to the evaluation. The layout the
 #: ENDF/B-VIII.1 GNDS distribution uses, so a pair kika writes sits where a
@@ -115,6 +115,14 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         evaluation is reconstructed, broadened to each temperature and
         tabulated first (:func:`kika.hdf5.writer.writeSuite`, which takes the
         remaining ``options``).
+        ACE: the one temperature of the table (kelvin, or a name such as
+        ``"294K"``), needed when the suite has several. ``path`` is the table
+        file. The suite must be processed -- read from an ACE or OpenMC file,
+        or :func:`kika.hdf5.processing.processSuite`'s; an evaluation is
+        refused (process it with :func:`kika.endf.process_endf` and
+        :meth:`~kika.endf.EndfProcessing.write_ace`). The remaining
+        ``options`` (``zaid``, ``awr``, ``extension``) reach
+        :func:`kika.ace.model_adapter.encodeAce`.
     resonance_extensions
         GNDS only. Preserve KPS, tabulated resonance backgrounds and the
         URR's cross-section INT in the versioned KIKA applicationData
@@ -138,6 +146,10 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         )
     if resonance_extensions and format != 'gnds':
         raise ValueError('resonance_extensions is a GNDS-only option')
+    if format == "ace":
+        from kika.ace.model_adapter.encode import writeAceSuite
+
+        return writeAceSuite(suite, Path(os.fspath(path)), temperature=temperatures, **options)
     if (temperatures is not None or options) and format != "hdf5":
         raise ValueError("temperatures= and the processing options are for format='hdf5'")
     if format == "hdf5":
