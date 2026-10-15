@@ -7,6 +7,7 @@ suite whose resonance ranges are supported and whose additive sums close.
 from copy import deepcopy
 from dataclasses import InitVar, dataclass, field, fields, is_dataclass
 from enum import Enum
+from collections.abc import Mapping
 import functools
 import hashlib
 import operator
@@ -209,6 +210,33 @@ _GROUP=object()
 
 #: What a mapping lookup returns for a missing key.
 _ABSENT=object()
+
+
+class _Curves(Mapping):
+    """A segment's curve per reaction, read off the material's table of
+    curve indices (*column*, -1 for none) instead of held as a dict."""
+    __slots__=('_keys','_rows','_choices','_column')
+
+    def __init__(self,keys,rows,choices,column):
+        self._keys=keys;self._rows=rows;self._choices=choices;self._column=column
+
+    def __getitem__(self,key):
+        row=self._rows[key];return self._choices[row][self._column[row]]
+
+    def __contains__(self,key):
+        return key in self._rows
+
+    def __iter__(self):
+        return iter(self._keys)
+
+    def __len__(self):
+        return len(self._keys)
+
+    def items(self):
+        return zip(self._keys,map(operator.getitem,self._choices,self._column.tolist()))
+
+    def values(self):
+        return map(operator.getitem,self._choices,self._column.tolist())
 
 
 class _Constants(dict):
@@ -1196,11 +1224,11 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # trailing None of each list reads), and the column of indices names them.
     keys_=tuple(owner_of);choices=[list(cs)+[None] for cs,_ in owner_of.values()]
     indices=np.array([at for _,at in owner_of.values()],dtype=np.int64).reshape(len(owner_of),len(edges)-1)
+    row_of={key:i for i,key in enumerate(keys_)};columns_=np.ascontiguousarray(indices.T)
     for i,(a,b) in enumerate(zip(edges[:-1],edges[1:])):
         region=next((r for r in prepared.regions if r.low<=a and r.high>=b),None)
-        column=indices[:,i]
-        local=dict(zip(keys_,map(operator.getitem,choices,column.tolist())))
-        segments.append(_SuiteSegment(a,b,MappingProxyType(local),region,b<high,shared_cache,column.tobytes()))
+        column=columns_[i]
+        segments.append(_SuiteSegment(a,b,_Curves(keys_,row_of,choices,column),region,b<high,shared_cache,column.tobytes()))
     result=SuiteReconstructionResult(MappingProxyType({}),MappingProxyType({}),source_style,label,options,prepared,
         tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
     tables=[None]*len(segments);checks=[None]*len(segments);points=0
