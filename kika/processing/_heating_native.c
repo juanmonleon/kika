@@ -195,7 +195,64 @@ static PyObject *emission_chunk(PyObject *self, PyObject *args)
     return result;
 }
 
+/* One angular quadrature of _twoBodyDamage's at(E), before dividing by the
+ * table's mass: np.sum(half[:,None]*w*density*lindhard(np.maximum(offset-slope*mu,0.)))
+ * with mu = mid + half*u on the panels between consecutive cuts. */
+static PyObject *twobody_chunk(PyObject *self, PyObject *args)
+{
+    PyObject *objects[5];
+    Py_buffer b[5] = {{0}};
+    static const char *names[5] = {"cuts", "u", "w", "x", "p"};
+    double offset, slope, el, fl, ed;
+    int hist;
+    double *terms = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOdddddp", &objects[0], &objects[1], &objects[2], &objects[3],
+                          &objects[4], &offset, &slope, &el, &fl, &ed, &hist))
+        return NULL;
+    for (int k = 0; k < 5; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
+    const double *cuts = b[0].buf, *u = b[1].buf, *w = b[2].buf, *x = b[3].buf, *p = b[4].buf;
+    Py_ssize_t nk = b[0].len / sizeof(double), n = b[1].len / sizeof(double), nx = b[3].len / sizeof(double);
+    if (nk < 2 || n < 1 || b[2].len != b[1].len || nx < 2 || b[4].len != b[3].len) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent two-body buffers");
+        goto done;
+    }
+    Py_ssize_t nc = nk - 1;
+    terms = PyMem_Malloc(sizeof(double) * (size_t)(nc * n));
+    if (!terms) { PyErr_NoMemory(); goto done; }
+    double total;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t i = 0; i < nc; ++i) {
+        double half = (cuts[i + 1] - cuts[i]) / 2;
+        double mid = (cuts[i] + cuts[i + 1]) / 2;
+        for (Py_ssize_t j = 0; j < n; ++j) {
+            double mu = mid + half * u[j];
+            double density;
+            if (hist) {
+                Py_ssize_t pos = search_right(mu, x, nx) - 1;
+                if (pos < 0) pos = 0;
+                if (pos > nx - 1) pos = nx - 1;
+                density = p[pos];
+            } else {
+                density = np_interp1(mu, x, p, nx);
+            }
+            double recoil = np_maximum(offset - slope * mu, 0.);
+            terms[i * n + j] = ((half * w[j]) * density) * lindhard1(recoil, el, fl, ed);
+        }
+    }
+    total = numpy_total(terms, nc * n);
+    Py_END_ALLOW_THREADS
+    result = PyFloat_FromDouble(total);
+ done:
+    PyMem_Free(terms);
+    for (int k = 0; k < 5; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
 static PyMethodDef methods[] = {
+    {"twobody_chunk", twobody_chunk, METH_VARARGS,
+     "One angular quadrature of the two-body recoil damage, bit for bit the NumPy reference."},
     {"emission_chunk", emission_chunk, METH_VARARGS,
      "One chunk of the tabulated emission-damage quadrature, bit for bit the NumPy reference."},
     {NULL, NULL, 0, NULL}

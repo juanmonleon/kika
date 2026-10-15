@@ -55,3 +55,27 @@ def test_native_kernel_rejects_inconsistent_buffers():
     with pytest.raises(ValueError, match="float64"):
         native.emission_chunk(np.array([1, 2]), g, w, g, w, np.array([0.0, 1.0]), np.array([1.0, 1.0]),
                               0., 1., 1., 1e6, 56., 1400., 1., 1., 25., False, False, False)
+
+
+@pytest.mark.parametrize("hist", [False, True])
+def test_native_two_body_chunk_equals_numpy_bit_for_bit(hist):
+    rng = np.random.default_rng(77 + hist)
+    for _ in range(300):
+        nx = int(rng.integers(2, 60))
+        x = np.unique(np.r_[-1.0, 1.0, rng.uniform(-1, 1, nx)])
+        p = rng.uniform(0.0, 3.0, len(x))
+        A = float(rng.choice([1.0, 11.9, 55.4, 235.0]))
+        Z = 26 if A > 2 else 1
+        ed = H.displacementEnergy(Z)
+        E = 10.0 ** rng.uniform(1, 7.5)
+        c = E * A / (A + 1) ** 2
+        r = rng.uniform(0.2, 1.0)
+        offset, slope = c * (1 + r * r), 2 * c * r
+        last = min(1.0, (offset - ed) / slope)
+        if last <= -1:
+            continue
+        mcuts = (offset - ed * 10.0 ** np.arange(13)) / slope
+        cuts = np.unique(np.r_[-1.0, x[(x > -1) & (x < last)], mcuts[(mcuts > -1) & (mcuts < last)], last])
+        u, w = np.polynomial.legendre.leggauss(int(rng.choice([8, 16, 32, 64])))
+        args = (cuts, u, w, x, p, offset, slope, (Z, A, Z, A), ed, hist)
+        assert H._twoBodyChunk(*args) == H._twoBodyChunkNumpy(*args)

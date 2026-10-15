@@ -803,6 +803,25 @@ def _distribution(product):
 # Damage per path
 # ----------------------------------------------------------------------
 
+def _twoBodyChunk(cuts,u,w,x,p,offset,slope,partition,ed,hist):
+    """One angular quadrature of :func:`_twoBodyDamage` before its mass division:
+    Gauss nodes ``u``/``w`` on each panel between ``cuts``, the recoil
+    ``offset - slope*mu`` through :func:`lindhard`. Native when built;
+    :func:`_twoBodyChunkNumpy` is the definition."""
+    if _heating_native is None:
+        return _twoBodyChunkNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist)
+    el,fl=(float(c) for c in _lindhardConstants(*partition))
+    return _heating_native.twobody_chunk(cuts,u,w,x,p,float(offset),float(slope),el,fl,float(ed),bool(hist))
+
+
+def _twoBodyChunkNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist):
+    half=np.diff(cuts)/2;mid=(cuts[:-1]+cuts[1:])/2
+    mu=mid[:,None]+half[:,None]*u
+    if hist:density=p[np.clip(np.searchsorted(x,mu,side='right')-1,0,len(p)-1)]
+    else:density=np.interp(mu,x,p)
+    return float(np.sum(half[:,None]*w*density*lindhard(np.maximum(offset-slope*mu,0.),*partition,ed)))
+
+
 def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  """Two-body recoil damage on normalized angular panels.
 
@@ -841,13 +860,11 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
    if weight==0:continue
    if isotropic:x=np.array([-1.,1.]);p=np.array([.5,.5]);hist=False;norm=1.
    else:x,p,hist,norm=data[idx]
-   cuts=np.unique(np.r_[-1.,x[(x>-1)&(x<last)],mcuts,last]);half=np.diff(cuts)/2;mid=(cuts[:-1]+cuts[1:])/2
+   cuts=np.unique(np.r_[-1.,x[(x>-1)&(x<last)],mcuts,last])
    previous=None
    for n in (8,16,32,64):
-    u,w=gauss[n];mu=mid[:,None]+half[:,None]*u
-    if hist:density=p[np.clip(np.searchsorted(x,mu,side='right')-1,0,len(p)-1)]
-    else:density=np.interp(mu,x,p)
-    integral=float(np.sum(half[:,None]*w*density*lindhard(np.maximum(offset-slope*mu,0.),Z,A,Z,A,ed)))/norm
+    u,w=gauss[n]
+    integral=_twoBodyChunk(cuts,u,w,x,p,offset,slope,(Z,A,Z,A),ed,hist)/norm
     if previous is not None and abs(integral-previous)<=.001+1e-8*abs(integral):break
     previous=integral
    else:raise ValueError('two-body damage angular quadrature did not converge')
@@ -858,9 +875,10 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=2.),cutoff,threshold]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
  for edge in (cutoff,threshold):
   if lo<edge<=hi:nodes=np.unique(np.r_[nodes,np.nextafter(edge,-np.inf)])
- values=np.array([at(float(E)) for E in nodes])
+ values=_evaluateAll(at,nodes)
  for _ in range(30):
   additions={}
+  _evaluateAll(at,[float(a+(b-a)*fraction) for a,b in zip(nodes[:-1],nodes[1:]) for fraction in (.25,.5,.75)])
   for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
    for fraction in (.25,.5,.75):
     e=float(a+(b-a)*fraction)
