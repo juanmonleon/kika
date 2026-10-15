@@ -7,6 +7,7 @@ suite whose resonance ranges are supported and whose additive sums close.
 from copy import deepcopy
 from dataclasses import InitVar, dataclass, field, fields, is_dataclass
 from enum import Enum
+import functools
 import hashlib
 import operator
 import re
@@ -109,18 +110,23 @@ def _normalize_link(href,base):
     return '/'+ '/'.join(parts)
 
 
+@functools.lru_cache(maxsize=65536)
+def _semantic(path):
+    """A link path as its ``(element, label)`` steps: a pure function of the
+    string, and every part of every sum reads every reaction's path."""
+    out=[]
+    for step in _split_path(path):
+        match=re.fullmatch(r"([^\[]+)(?:\[@label=([\"'])(.*?)\2\])?",step)
+        if match is None:raise UnsupportedResonanceError('only local attribute-label links are implemented')
+        out.append((match[1],match[3]))
+    return tuple(out)
+
+
 def _target(href,base,entries,style):
     path=_normalize_link(href,base)
-    def semantic(path):
-        out=[]
-        for step in _split_path(path):
-            match=re.fullmatch(r"([^\[]+)(?:\[@label=([\"'])(.*?)\2\])?",step)
-            if match is None:raise UnsupportedResonanceError('only local attribute-label links are implemented')
-            out.append((match[1],match[3]))
-        return out
-    steps=semantic(path)
+    steps=_semantic(path)
     for key in entries:
-        prefix=semantic(_path(key))
+        prefix=_semantic(_path(key))
         if steps==prefix:return key,style
         if len(steps)==len(prefix)+1 and steps[:-1]==prefix and steps[-1][1] is not None:
             return key,steps[-1][1]
