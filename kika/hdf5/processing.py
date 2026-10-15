@@ -1302,9 +1302,56 @@ def _photonFile(reaction, record, product=None, flags=None) -> int:
 # Gas, fission, NJOY
 # ----------------------------------------------------------------------
 
+#: The light particles each ENDF-6 MT emits by its definition, ``{MT: {gas MT:
+#: count}}``, as GASPR counts them (``gaspr.f90``). They count only for a
+#: reaction that states no light particle of its own (MF3 alone).
+GAS_BY_MT = {
+    11: {204: 1}, 22: {207: 1}, 23: {207: 3}, 24: {207: 1}, 25: {207: 1}, 28: {203: 1},
+    29: {207: 2}, 30: {207: 2}, 32: {204: 1}, 33: {205: 1}, 34: {206: 1},
+    35: {204: 1, 207: 2}, 36: {205: 1, 207: 2}, 41: {203: 1}, 42: {203: 1}, 44: {203: 2},
+    45: {203: 1, 207: 1}, 103: {203: 1}, 104: {204: 1}, 105: {205: 1}, 106: {206: 1},
+    107: {207: 1}, 108: {207: 2}, 109: {207: 3}, 111: {203: 2}, 112: {203: 1, 207: 1},
+    113: {205: 1, 207: 2}, 114: {204: 1, 207: 2}, 115: {203: 1, 204: 1},
+    116: {203: 1, 205: 1}, 117: {204: 1, 207: 1},
+}
+#: The discrete-level series of charged-particle emission: MT600-649 (p) … 800-849 (α).
+GAS_SERIES = {600: 203, 650: 204, 700: 205, 750: 206, 800: 207}
+
+
+def _impliedGas(reaction) -> Dict[int, int]:
+    mt = reaction.ENDF_MT
+    if mt is None:
+        return {}
+    if 51 <= mt <= 91:
+        # A level that breaks up (LR, ENDF-102): N-14 MT60-77 have LR=28, a
+        # proton each -- 0.205 b of N-14's 0.249 b of MT203 at 14 MeV.
+        from kika.endf.model_adapter.derive.reactions import LR_PRODUCTS
+
+        lr = int(getattr(getattr(reaction, "provenance", None), "lr", 0) or 0)
+        pids = {pid: gasMT for gasMT, pid in GAS_MTS.items()}
+        return {pids[pid]: n for pid, n in LR_PRODUCTS.get(lr, {}).items() if pid in pids}
+    if mt in GAS_BY_MT:
+        return GAS_BY_MT[mt]
+    for start, gasMT in GAS_SERIES.items():
+        if start <= mt < start + 50:
+            return {gasMT: 1}
+    return {}
+
+
 def gasMultiplicities(reaction) -> Dict[int, object]:
-    """``{gas MT: multiplicity function}`` for the light particles a reaction emits."""
+    """``{gas MT: multiplicity function}`` for the light particles a reaction emits.
+
+    From the reaction's own products (MF4/MF6); a reaction that states none
+    (MF3 alone -- every MT600-849 of ENDF/B-VIII.1 N-14) emits what its MT says,
+    as GASPR counts it: with only the stated products, N-14's MT203, 204 and 207
+    were zero everywhere and MT205 was missing.
+    """
     out = {}
+    if not any(p.pid in GAS_MTS.values() for p in reaction.outputChannel.products):
+        for gasMT, count in _impliedGas(reaction).items():
+            out[gasMT] = _m().Constant1d(constant=float(count), domainMin_=0.0,
+                                         domainMax_=float("inf"))
+        return out
     for product in reaction.outputChannel.products:
         for gasMT, pid in GAS_MTS.items():
             if product.pid == pid:
