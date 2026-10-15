@@ -230,11 +230,52 @@ static rm_complex rm_div(rm_complex a,rm_complex b) {
     return z;
 }
 
+/* One c <= 3 channel system m y = e_entrance (m: 2*c*c doubles, row-major
+ * complex) by Gaussian elimination with partial pivoting. No explicit
+ * inverse or determinant formula; the callers check the residual,
+ * passivity and flux of the candidate solution. 0 when it cannot. */
+static int small_solve(Py_ssize_t c,Py_ssize_t entrance,const double *m,rm_complex *solution) {
+    rm_complex a[9],rhs[3]={{0}};
+    rhs[entrance].r=1.;
+    for (Py_ssize_t j=0;j<c*c;j++) {
+        a[j].r=m[2*j];a[j].i=m[2*j+1];
+        if (!isfinite(a[j].r) || !isfinite(a[j].i) ||
+                fabs(a[j].r)>1e8 || fabs(a[j].i)>1e8) return 0;
+    }
+    for (Py_ssize_t k=0;k<c;k++) {
+        Py_ssize_t pivot=k;double largest=0.;
+        for (Py_ssize_t j=k;j<c;j++) {
+            double magnitude=hypot(a[j*c+k].r,a[j*c+k].i);
+            if (magnitude>largest) {largest=magnitude;pivot=j;}
+        }
+        if (!(largest>=DBL_MIN && isfinite(largest))) return 0;
+        if (pivot!=k) {
+            for (Py_ssize_t j=k;j<c;j++) {
+                rm_complex saved=a[k*c+j];a[k*c+j]=a[pivot*c+j];a[pivot*c+j]=saved;
+            }
+            rm_complex saved=rhs[k];rhs[k]=rhs[pivot];rhs[pivot]=saved;
+        }
+        for (Py_ssize_t j=k+1;j<c;j++) {
+            rm_complex factor=rm_div(a[j*c+k],a[k*c+k]);
+            for (Py_ssize_t l=k+1;l<c;l++) a[j*c+l]=rm_sub(a[j*c+l],rm_mul(factor,a[k*c+l]));
+            rhs[j]=rm_sub(rhs[j],rm_mul(factor,rhs[k]));
+        }
+    }
+    int ok=1;
+    for (Py_ssize_t j=c;j-->0;) {
+        rm_complex value=rhs[j];
+        for (Py_ssize_t k=j+1;k<c;k++) value=rm_sub(value,rm_mul(a[j*c+k],solution[k]));
+        solution[j]=rm_div(value,a[j*c+j]);
+        if (!isfinite(solution[j].r) || !isfinite(solution[j].i)) ok=0;
+    }
+    return ok;
+}
+
 static PyObject *channel_solve(PyObject *self,PyObject *args) {
     Py_ssize_t ne,c,entrance;PyObject *input,*output;Py_buffer b[7]={0};
     if (!PyArg_ParseTuple(args,"nnnOO",&ne,&c,&entrance,&input,&output)) return NULL;
     if (!dimensions(ne,0,c)) return NULL;
-    if (entrance<0 || entrance>=c) {
+    if (entrance<0 || entrance>=c || c>3) {
         PyErr_SetString(PyExc_ValueError,"invalid native entrance channel");return NULL;
     }
     if (!buffer(input,&b[0],2*ne*c*c,"d",0) || !buffer(output,&b[1],2*ne*c,"d",1)) {
@@ -243,47 +284,132 @@ static PyObject *channel_solve(PyObject *self,PyObject *args) {
     int failed=0;const double *matrix=b[0].buf;double *out=b[1].buf;
     Py_BEGIN_ALLOW_THREADS
     for (Py_ssize_t row=0;row<ne;row++) {
-        rm_complex a[9],rhs[3]={{0}},solution[3];
-        rhs[entrance].r=1.;
-        for (Py_ssize_t j=0;j<c*c;j++) {
-            a[j].r=matrix[2*(row*c*c+j)];a[j].i=matrix[2*(row*c*c+j)+1];
-            if (!isfinite(a[j].r) || !isfinite(a[j].i) ||
-                    fabs(a[j].r)>1e8 || fabs(a[j].i)>1e8) failed=1;
-        }
-        if (failed) break;
-        /* Ordinary Gaussian elimination with partial pivoting. No explicit
-         * inverse or determinant formula; Python independently checks the
-         * residual, passivity and flux of the candidate solution. */
-        for (Py_ssize_t k=0;k<c;k++) {
-            Py_ssize_t pivot=k;double largest=0.;
-            for (Py_ssize_t j=k;j<c;j++) {
-                double magnitude=hypot(a[j*c+k].r,a[j*c+k].i);
-                if (magnitude>largest) {largest=magnitude;pivot=j;}
-            }
-            if (!(largest>=DBL_MIN && isfinite(largest))) {failed=1;break;}
-            if (pivot!=k) {
-                for (Py_ssize_t j=k;j<c;j++) {
-                    rm_complex saved=a[k*c+j];a[k*c+j]=a[pivot*c+j];a[pivot*c+j]=saved;
-                }
-                rm_complex saved=rhs[k];rhs[k]=rhs[pivot];rhs[pivot]=saved;
-            }
-            for (Py_ssize_t j=k+1;j<c;j++) {
-                rm_complex factor=rm_div(a[j*c+k],a[k*c+k]);
-                for (Py_ssize_t l=k+1;l<c;l++) a[j*c+l]=rm_sub(a[j*c+l],rm_mul(factor,a[k*c+l]));
-                rhs[j]=rm_sub(rhs[j],rm_mul(factor,rhs[k]));
-            }
-        }
-        if (failed) break;
-        for (Py_ssize_t j=c;j-->0;) {
-            rm_complex value=rhs[j];
-            for (Py_ssize_t k=j+1;k<c;k++) value=rm_sub(value,rm_mul(a[j*c+k],solution[k]));
-            solution[j]=rm_div(value,a[j*c+j]);
-            if (!isfinite(solution[j].r) || !isfinite(solution[j].i)) failed=1;
-            out[2*(row*c+j)]=solution[j].r;out[2*(row*c+j)+1]=solution[j].i;
-        }
+        rm_complex solution[3];
+        int ok=small_solve(c,entrance,matrix+2*row*c*c,solution);
+        for (Py_ssize_t j=0;j<c && ok;j++) {out[2*(row*c+j)]=solution[j].r;out[2*(row*c+j)+1]=solution[j].i;}
+        if (!ok) {failed=1;break;}
     }
     Py_END_ALLOW_THREADS
     release(b);return PyBool_FromLong(!failed);
+}
+
+/* The rows of _rm_acceleration.solve after the level sums, fused: the
+ * channel system (I - iR) y = e_entrance, its residual, W = R y, and the
+ * Gram capture 4 Re(y* Im(R) y) with its roundoff majorant, bound and
+ * acceptance, for c <= 3. Every output is computed with the operations, in
+ * the order, of the NumPy statements it replaces (complex reciprocal for
+ * c = 1 as NumPy's, einsum sums in index order), so the published values do
+ * not change. Returns (status, maximum): status 1 means some system needs
+ * the NumPy path; 2 means a non-passive |y| > 1 + 1e-8. */
+static PyObject *solve_rows(PyObject *self,PyObject *args) {
+    Py_ssize_t nr,c,entrance,nlev;PyObject *o[9];Py_buffer b[9]={0};
+    double rtol,ermin,ermax,halfgmax2,hgmin;int scalar_ok,radiative_any;
+    if (!PyArg_ParseTuple(args,"nnnnOOOOOOOOOdddddii",&nr,&c,&entrance,&nlev,
+            &o[0],&o[1],&o[2],&o[3],&o[4],&o[5],&o[6],&o[7],&o[8],
+            &rtol,&ermin,&ermax,&halfgmax2,&hgmin,&scalar_ok,&radiative_any)) return NULL;
+    if (!dimensions(nr,nlev,c) || c>3 || entrance<0 || entrance>=c) {
+        PyErr_SetString(PyExc_ValueError,"invalid native solve dimensions");return NULL;
+    }
+    /* r, f, e, active | y, w, cap, accepted, bound */
+    Py_ssize_t sizes[9]={2*nr*c*c,nr*c,nr,c,2*nr*c,2*nr*c,nr,nr,nr};
+    const char *formats[9]={"d","d","d","B","d","d","d","B","d"};
+    for (int i=0;i<9;i++) if (!buffer(o[i],&b[i],sizes[i],formats[i],i>=4)) {
+        for (int k=0;k<9;k++) if (b[k].obj!=NULL) PyBuffer_Release(&b[k]);
+        return NULL;
+    }
+    const double *r=b[0].buf,*f=b[1].buf,*e=b[2].buf;const unsigned char *active=b[3].buf;
+    double *y=b[4].buf,*w=b[5].buf,*cap=b[6].buf,*bound=b[8].buf;unsigned char *accepted=b[7].buf;
+    int status=0;double maximum=0.;
+    const double eps=DBL_EPSILON,tiny=DBL_MIN;
+    double scale=8*((double)nlev+32*(double)c+64)*eps;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t row=0;row<nr && !status;row++) {
+        const double *rr=r+2*row*c*c;double m[18];rm_complex s[3];
+        /* matrix = eye(c) - 1j*rr, as NumPy forms it */
+        for (Py_ssize_t j=0;j<c;j++) for (Py_ssize_t l=0;l<c;l++) {
+            double re=rr[2*(j*c+l)],im=rr[2*(j*c+l)+1];
+            double pr=0.*re-1.*im,pi=0.*im+1.*re;
+            m[2*(j*c+l)]=(j==l?1.:0.)-pr;m[2*(j*c+l)+1]=0.-pi;
+        }
+        if (c==1) {
+            /* NumPy's 1/z (Smith's method with a reciprocal scale) */
+            double zr=m[0],zi=m[1];
+            if (fabs(zr)>=fabs(zi)) {
+                if (zr==0. && zi==0.) {status=1;break;}
+                double rat=zi/zr,scl=1.0/(zr+zi*rat);
+                s[0].r=(1.+0.*rat)*scl;s[0].i=(0.-1.*rat)*scl;
+            } else {
+                double rat=zr/zi,scl=1.0/(zi+zr*rat);
+                s[0].r=(1.*rat+0.)*scl;s[0].i=(0.*rat-1.)*scl;
+            }
+        } else if (!small_solve(c,entrance,m,s)) {status=1;break;}
+        double norm2=0.,mnorm2=0.;
+        for (Py_ssize_t j=0;j<c;j++) norm2+=s[j].r*s[j].r+s[j].i*s[j].i;
+        if (sqrt(norm2)>1+1e-8) {status=2;break;}
+        for (Py_ssize_t j=0;j<2*c*c;j++) mnorm2+=m[j]*m[j];
+        double denominator=sqrt(mnorm2)*sqrt(norm2)+1.;
+        for (Py_ssize_t j=0;j<c;j++) {
+            double ar=(j==entrance?-1.:0.),ai=0.;
+            for (Py_ssize_t l=0;l<c;l++) {
+                ar+=m[2*(j*c+l)]*s[l].r-m[2*(j*c+l)+1]*s[l].i;
+                ai+=m[2*(j*c+l)]*s[l].i+m[2*(j*c+l)+1]*s[l].r;
+            }
+            double ratio=hypot(ar,ai)/denominator;
+            if (!(ratio<=maximum)) maximum=ratio;
+        }
+        for (Py_ssize_t j=0;j<c;j++) {y[2*(row*c+j)]=s[j].r;y[2*(row*c+j)+1]=s[j].i;}
+        /* w = rr[:,0,:]*y (c=1) or einsum('ecd,ed->ec') */
+        for (Py_ssize_t j=0;j<c;j++) {
+            double accr=0.,acci=0.;
+            for (Py_ssize_t l=0;l<c;l++) {
+                double re=rr[2*(j*c+l)],im=rr[2*(j*c+l)+1];
+                double pr=re*s[l].r-im*s[l].i,pi=re*s[l].i+im*s[l].r;
+                if (c==1) {accr=pr;acci=pi;} else {accr+=pr;acci+=pi;}
+            }
+            w[2*(row*c+j)]=accr;w[2*(row*c+j)+1]=acci;
+        }
+        /* gram_capture */
+        double value,major,diag[3];
+        for (Py_ssize_t j=0;j<c;j++) diag[j]=rr[2*(j*c+j)+1];
+        if (c==1) {
+            double tr=diag[0]*s[0].r-0.*s[0].i,ti=diag[0]*s[0].i+0.*s[0].r;
+            value=4*(s[0].r*tr-(-s[0].i)*ti);
+            double t=4*(hypot(s[0].r,s[0].i)*sqrt(fmax(diag[0],0.)));
+            major=t*t;
+        } else {
+            double sum=0.,msum=0.;
+            for (Py_ssize_t i=0;i<c;i++) {
+                double tr=0.,ti=0.;
+                for (Py_ssize_t j=0;j<c;j++) {
+                    double bij=rr[2*(i*c+j)+1];
+                    tr+=bij*s[j].r-0.*s[j].i;ti+=bij*s[j].i+0.*s[j].r;
+                }
+                sum+=s[i].r*tr-(-s[i].i)*ti;
+                msum+=hypot(s[i].r,s[i].i)*sqrt(fmax(diag[i],0.));
+            }
+            value=4*sum;major=4*(msum*msum);
+        }
+        double bnd=scale<1?scale/(1-scale)*major:INFINITY;
+        int normal=scalar_ok;
+        for (Py_ssize_t j=0;j<c;j++) {
+            if (!(diag[j]>=tiny || !active[j])) normal=0;
+            double ff=f[row*c+j]*f[row*c+j];
+            if (!(ff>=tiny || f[row*c+j]==0)) normal=0;
+        }
+        if (radiative_any) {
+            double distance=fmax(fabs(e[row]-ermin),fabs(e[row]-ermax));
+            double upper=(distance*distance+halfgmax2)*(1+8*eps);
+            double lower=nextafter(hgmin/upper,0.);
+            if (!(lower>=tiny)) normal=0;
+        }
+        int ok=normal && isfinite(value) && value>=tiny && major>=tiny && bnd<=rtol*value && bnd<=1e-10;
+        if (rtol==0.) ok=0;
+        if (!radiative_any) {ok=1;value=0.;}
+        cap[row]=value;accepted[row]=(unsigned char)ok;bound[row]=bnd;
+    }
+    Py_END_ALLOW_THREADS
+    for (int k=0;k<9;k++) if (b[k].obj!=NULL) PyBuffer_Release(&b[k]);
+    return Py_BuildValue("(id)",status,maximum);
 }
 
 static double softplus(double t) {
@@ -434,6 +560,7 @@ static PyObject *special_probe(PyObject *self,PyObject *args) {
 static PyMethodDef methods[]={
     {"special",special_probe,METH_VARARGS,"Private kexp(-|x|), sin x, cos x, W4(x, y) diagnostic."},
     {"channel_solve",channel_solve,METH_VARARGS,"Solve small channel systems by pivoted elimination; false requires NumPy fallback."},
+    {"solve_rows",solve_rows,METH_VARARGS,"Channel solve, residual, W and Gram capture of RM rows (c <= 3); status 1 requires NumPy fallback."},
     {"breit_wigner",breit_wigner,METH_VARARGS,"Accumulate all constant-radius BW levels in source order."},
     {"matrices",matrices,METH_VARARGS,"Fill all-level collision sums and reference-fallback flags."},
     {"absorption",absorption,METH_VARARGS,"Fill positive radiative probabilities using compensated level sums."},

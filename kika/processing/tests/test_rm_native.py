@@ -256,3 +256,25 @@ def test_the_exact_native_witness_is_the_numpy_reference_on_a_real_region():
     assert diagnostics['rm_native_energies']>0 and diagnostics.get('rm_native_gram_energies',0)==0
     for mt in (1,2,102):
         np.testing.assert_allclose(native[mt],exact[mt],rtol=1e-11,atol=1e-14)
+
+
+@pytest.mark.parametrize('c',[1,2,3])
+@pytest.mark.parametrize('rtol',[1e-8,0.])
+def test_fused_rows_match_the_numpy_statements_they_replace(monkeypatch,c,rtol):
+    """solve_rows (channel solve, residual, W, Gram capture and its acceptance
+    in one compiled pass) against the NumPy statements of solve()."""
+    if backend._native is None or not hasattr(backend._native,'solve_rows'):
+        pytest.skip('optional extension unavailable')
+    e,er,gamma,a,f=problem(c)
+    for entrance in range(c):
+        diagnostics={}
+        fused=backend.solve(e,er,gamma,None,diagnostics,entrance=entrance,reduced=a,channel_factors=f,
+                            return_absorption=True,absorption_rtol=rtol)
+        monkeypatch.setattr(backend,'_fused_rows',lambda *args:None)
+        reference=backend.solve(e,er,gamma,None,{},entrance=entrance,reduced=a,channel_factors=f,
+                                return_absorption=True,absorption_rtol=rtol)
+        monkeypatch.undo()
+        assert fused is not None and reference is not None
+        np.testing.assert_allclose(fused[0],reference[0],rtol=1e-13,atol=1e-16)
+        np.testing.assert_allclose(fused[1],reference[1],rtol=1e-12,atol=1e-16)
+        if rtol:assert diagnostics['rm_native_gram_energies']>0

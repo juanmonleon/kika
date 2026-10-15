@@ -100,6 +100,29 @@ def gram_capture(r,y,e,er,gamma,a,f,absorption_rtol):
     return cap,accepted,bound
 
 
+def _fused_rows(rr,f,e,er,gamma,a,c,entrance,absorption_rtol,radiative):
+    """The channel solve, residual, W and :func:`gram_capture` of the regular
+    rows in one compiled pass (``_native.solve_rows``, c <= 3), with the same
+    operations in the same order. None: take the NumPy statements; False: a
+    non-passive solution, which the caller rejects as it always has."""
+    if c>3 or _native is None or not hasattr(_native,'solve_rows'):return None
+    tiny=np.finfo(float).tiny
+    active=np.ascontiguousarray(np.any((a!=0)&radiative[:,None],axis=0),dtype=np.uint8)
+    scalar_ok=bool(np.all((a*a>=tiny)|(a==0)) and np.all((gamma>=tiny)|~radiative))
+    any_radiative=bool(np.any(radiative))
+    halfgmax2=(.5*gamma.max())**2 if any_radiative else 0.
+    hgmin=.5*gamma[radiative].min() if any_radiative else 0.
+    n=len(rr);y=np.empty((n,c),complex);w=np.empty((n,c),complex)
+    cap=np.empty(n);accepted=np.empty(n,np.uint8);bound=np.empty(n)
+    status,maximum=_native.solve_rows(n,c,entrance,len(er),rr.view(float).ravel(),f.ravel(),e,active,
+        y.view(float).ravel(),w.view(float).ravel(),cap,accepted,bound,
+        float(absorption_rtol),float(er.min()),float(er.max()),float(halfgmax2),float(hgmin),
+        int(scalar_ok),int(any_radiative))
+    if status==2:return False
+    if status:return None
+    return y,w,cap,accepted.astype(bool),bound,maximum
+
+
 def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entrance=0,
           reduced=None,channel_factors=None,work_bytes=64*1024**2,
           return_absorption=False,absorption_rtol=0.):
@@ -117,19 +140,27 @@ def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entranc
     regular=poles==0
     w=np.zeros((len(e),c),complex);capture=np.zeros(len(e))
     if np.any(regular):
-        rr=r[regular];matrix=np.eye(c)[None,:,:]-1j*rr
-        rhs=np.zeros((len(rr),c,1),complex);rhs[:,entrance,0]=1.
-        try:
-            if c==1:y=np.ascontiguousarray((1/matrix[:,0,0])[:,None])
-            else:y=channel_solution(matrix,rhs,entrance)
-        except np.linalg.LinAlgError:return None
-        if np.any(np.linalg.norm(y,axis=1)>1+1e-8):return None
-        residual=matrix@y[:,:,None]-rhs
-        maximum=float(np.max(abs(residual)/(np.linalg.norm(matrix,axis=(1,2))[:,None,None]*np.linalg.norm(y,axis=1)[:,None,None]+1.)))
-        if maximum>1e-11:return None
-        w[regular]=rr[:,0,:]*y if c==1 else np.einsum('ecd,ed->ec',rr,y)
-        cap,accepted,bound=gram_capture(rr,y,e[regular],er,gamma,a,f[regular],absorption_rtol)
+        rr=np.ascontiguousarray(r[regular]);fr=np.ascontiguousarray(f[regular]);er_rows=np.ascontiguousarray(e[regular])
         radiative=gamma>0
+        fused=_fused_rows(rr,fr,er_rows,er,gamma,a,c,entrance,absorption_rtol,radiative)
+        if fused is False:return None
+        if fused is not None:
+            y,w_rows,cap,accepted,bound,maximum=fused
+            if maximum>1e-11:return None
+            w[regular]=w_rows
+        else:
+            matrix=np.eye(c)[None,:,:]-1j*rr
+            rhs=np.zeros((len(rr),c,1),complex);rhs[:,entrance,0]=1.
+            try:
+                if c==1:y=np.ascontiguousarray((1/matrix[:,0,0])[:,None])
+                else:y=channel_solution(matrix,rhs,entrance)
+            except np.linalg.LinAlgError:return None
+            if np.any(np.linalg.norm(y,axis=1)>1+1e-8):return None
+            residual=matrix@y[:,:,None]-rhs
+            maximum=float(np.max(abs(residual)/(np.linalg.norm(matrix,axis=(1,2))[:,None,None]*np.linalg.norm(y,axis=1)[:,None,None]+1.)))
+            if maximum>1e-11:return None
+            w[regular]=rr[:,0,:]*y if c==1 else np.einsum('ecd,ed->ec',rr,y)
+            cap,accepted,bound=gram_capture(rr,y,e[regular],er,gamma,a,f[regular],absorption_rtol)
         fallback=~accepted
         if np.any(fallback):
             direct=np.zeros(int(fallback.sum()))
