@@ -353,9 +353,7 @@ def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_r
         streaming=True;native_fixed=65536;native_per_energy=1
         for group in region.groups:
             if not group.levels:continue
-            if diagonal_rml:
-                er=np.asarray([lv.energy for lv in group.levels]);gamma=np.asarray(group.radiation)
-                a=np.asarray(group.reduced).reshape(len(er),len(group.channels))
+            if diagonal_rml:er,gamma,a=group.kernel_arrays
             else:er,gamma,a=group.kernel_data
             c=a.shape[1]
             if not eligible(np.zeros(1),er,gamma,a,np.ones((1,c)),work_bytes,True,absorption_rtol):
