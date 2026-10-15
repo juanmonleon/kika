@@ -275,6 +275,58 @@ def _join_continuous(pieces):
     return out
 
 
+def _own_knots(curve,segments,positions):
+    """``{position: (x, values)}``: each segment's table on the curve's own
+    knots (the segment's two ends and the knots strictly inside), for the
+    segments over which the curve is lin-lin. What the per-segment
+    ``np.unique(np.r_[low, inside, high])`` and one read each give, laid out
+    by index arithmetic and read once.
+    """
+    x=curve._x
+    lows=np.array([s.low for s in segments]);highs=np.array([s.high for s in segments])
+    linear=curve.linear_over_many(lows,highs)
+    keep=np.flatnonzero(linear)
+    if not len(keep):return {}
+    lows,highs=lows[keep],highs[keep]
+    left=np.array([segments[k].left_high for k in keep])
+    a=np.searchsorted(x,lows,'right');b=np.searchsorted(x,highs,'left')
+    inside=np.maximum(b-a,0)
+    # Knots strictly inside are increasing and distinct from the ends, so
+    # np.unique is the sorted concatenation itself; a curve ending at a
+    # segment's high with a jump there adds that high's left neighbour.
+    jump=(~left)&(x[-1]==highs)&curve.endpoint_jump
+    last_inside=np.where(inside>0,x[np.maximum(b-1,0)],-np.inf)
+    if np.any(jump&(last_inside==np.nextafter(highs,lows))):
+        # The added left neighbour is a knot already: np.unique would merge it.
+        return {positions[k]:_own_knots_one(curve,segments[k]) for k in keep.tolist()}
+    count=inside+2+jump
+    ends=np.cumsum(count);starts=ends-count
+    nodes=np.empty(int(ends[-1]) if len(ends) else 0)
+    nodes[starts]=lows
+    positions_inside=np.repeat(starts+1,inside)+(np.arange(int(inside.sum()))-np.repeat(np.cumsum(inside)-inside,inside))
+    nodes[positions_inside]=x[positions_inside+np.repeat(a-starts-1,inside)]
+    nodes[ends[jump]-2]=np.nextafter(highs[jump],lows[jump])
+    nodes[ends-1]=highs
+    query=nodes.copy()
+    at_high=np.repeat(left,count)&(query==np.repeat(highs,count))
+    query[at_high]=np.nextafter(np.repeat(highs,count)[at_high],np.repeat(lows,count)[at_high])
+    read=np.asarray(curve.evaluate(query),dtype=float)
+    out={}
+    for k,s0,e0 in zip(keep.tolist(),starts.tolist(),ends.tolist()):
+        out[positions[k]]=(nodes[s0:e0],read[s0:e0])
+    return out
+
+
+def _own_knots_one(curve,s):
+    original_x=curve._x
+    x=np.unique(np.r_[s.low,original_x[np.searchsorted(original_x,s.low,'right'):np.searchsorted(original_x,s.high,'left')],s.high])
+    if not s.left_high and original_x[-1]==s.high and curve.endpoint_jump:
+        x=np.unique(np.r_[x,np.nextafter(s.high,s.low)])
+    query=x.copy()
+    if s.left_high:query[query==s.high]=np.nextafter(s.high,s.low)
+    return x,curve.evaluate(query)
+
+
 def _knots_in(curve,low,high):
     """The knots of *curve* in [low, high], without reading the rest of it."""
     x=curve._x
@@ -1076,6 +1128,26 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # reads it, decided per curve for all its segments at once (the same
     # answers constant_on and _laws_over give one segment at a time).
     span_high=[np.nextafter(s.high,s.low) if s.left_high else s.high for s in segments];level_cache={}
+    # The knots of every source curve on every segment that reads it, found
+    # per curve for all its segments: strictly inside (seeds) and in the
+    # closed span (fast-region seeds, source diagnostics), and whether a leaf
+    # curve ends at the segment's high with a jump there.
+    inside_leaf=[[] for _ in segments];closed_leaf=[[] for _ in segments];closed_all=[[] for _ in segments]
+    ends_jump=[False]*len(segments)
+    for key,(cs,at) in owner_of.items():
+        at=np.asarray(at);leaf=key not in graph
+        for j in np.unique(at[at>=0]).tolist():
+            curve=cs[j];where=np.flatnonzero(at==j);x=curve._x
+            lo=np.array([segments[i].low for i in where]);hi=np.array([segments[i].high for i in where])
+            a0,b0=np.searchsorted(x,lo,'right'),np.searchsorted(x,hi,'left')
+            a1,b1=np.searchsorted(x,lo,'left'),np.searchsorted(x,hi,'right')
+            if leaf:
+                for k in np.flatnonzero(b0>a0).tolist():inside_leaf[where[k]].append(x[a0[k]:b0[k]])
+            for k in np.flatnonzero(b1>a1).tolist():
+                closed_all[where[k]].append(x[a1[k]:b1[k]])
+                if leaf:closed_leaf[where[k]].append(x[a1[k]:b1[k]])
+            if leaf and bool(curve.endpoint_jump):
+                for k in np.flatnonzero(x[-1]==hi).tolist():ends_jump[where[k]]=True
     readers={}
     for key,(cs,at) in owner_of.items():
         if key in graph:continue
@@ -1098,7 +1170,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         s=segments[position]
         seed_curves={i:(c,) for i,(key,c) in enumerate(s.curves.items()) if c is not None and key not in graph}
         if s.region is not None:
-            seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context,level_cache)
+            seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context,level_cache,
+                         knots=(inside_leaf[position],ends_jump[position]))
         else:
             # Original knots suffice for linear fast-region data. Inserting
             # unnecessary near-threshold points amplifies ENDF x-rounding.
@@ -1144,7 +1217,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # sums are derived even if the redundant source aggregate disagrees.
         # Redundant aggregates inform diagnostics, not the reconstructed mesh.
         # Keep their original knots in this separate source-comparison grid.
-        diagnostic_seeds=set(seeds)|{float(x) for c in s.curves.values() if c is not None for x in _knots_in(c,s.low,s.high)}
+        diagnostic_seeds=set(seeds)|{float(x) for knots in closed_all[position] for x in knots}
         grid=np.asarray(sorted(diagnostic_seeds))
         probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
         return seeds,constants,deferred,probe
@@ -1279,7 +1352,9 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             positions=[started];items=[prepare(started)];started+=1
             region=segments[positions[0]].region
             total=len(items[0][0])
-            while (region is not None and started<len(segments) and segments[started].region is region
+            # (The fast region groups too: it has no physics, and its many
+            # lin-lin backgrounds are deferred columns read once per group.)
+            while (started<len(segments) and segments[started].region is region
                    and total<GROUP_SEEDS):
                 item=prepare(started)
                 if total+len(item[0])>GROUP_SEEDS:
@@ -1347,20 +1422,17 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         column=np.concatenate([u['y'][key] for u in ordered])
         own={}
         if not summed:
+            # An untouched lin-lin background already has an exact
+            # representation on its own knots. It need not inherit every
+            # other reaction's resonance or fast-region knot. The segments
+            # that read one curve are done together.
+            by_curve={}
             for i in np.flatnonzero(np.isnan(values)).tolist():
                 s=segments[i];curve=s.curves[key]
                 if curve is None or key in owned[i]:continue
-                original_x=curve._x
-                if np.all(_laws_over(curve,s.low,s.high)==2):
-                    # An untouched lin-lin background already has an exact
-                    # representation on its own knots. It need not inherit
-                    # every other reaction's resonance or fast-region knot.
-                    x=np.unique(np.r_[s.low,original_x[np.searchsorted(original_x,s.low,'right'):np.searchsorted(original_x,s.high,'left')],s.high])
-                    if not s.left_high and original_x[-1]==s.high and curve.endpoint_jump:
-                        x=np.unique(np.r_[x,np.nextafter(s.high,s.low)])
-                    query=x.copy()
-                    if s.left_high:query[query==s.high]=np.nextafter(s.high,s.low)
-                    own[i]=(x,curve.evaluate(query))
+                by_curve.setdefault(id(curve),(curve,[]))[1].append(i)
+            for curve,where in by_curve.values():
+                own.update(_own_knots(curve,[segments[i] for i in where],where))
         if own:
             pieces=[own[i] if i in own else (grid[a:b],column[a:b]) for i,(a,b) in enumerate(zip(starts.tolist(),ends.tolist()))]
             joined=_compress_and_join(pieces)

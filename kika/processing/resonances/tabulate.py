@@ -150,7 +150,7 @@ def _level_energies(group,cache):
     return entry[1]
 
 
-def _seeds(segment,context,cache=None):
+def _seeds(segment,context,cache=None,knots=None):
     lo,hi=segment.low,segment.high
     count=GEOMETRIC_SEEDS
     if lo>0 and hi>lo:
@@ -158,12 +158,19 @@ def _seeds(segment,context,cache=None):
     seeds=list(np.geomspace(lo,hi,count))+[lo,hi]
     if segment.region.unresolved is not None:
         seeds.extend(x for x in segment.region.unresolved.grid if lo<=x<=hi)
-    for curves in segment.backgrounds.values():
-        for c in curves:
-            knots=c._x if hasattr(c,'_x') else np.asarray(c.x,dtype=float)
-            seeds.extend(knots[np.searchsorted(knots,lo,'right'):np.searchsorted(knots,hi,'left')])
-        if not segment.left_high and any(c.x[-1]==hi and c.endpoint_jump for c in curves):
-            seeds.append(np.nextafter(hi,lo))
+    if knots is not None:
+        # Precomputed by the caller: the curves' knots strictly inside, and
+        # whether one ends at hi with a jump there.
+        inside,jump=knots
+        for values in inside:seeds.extend(values)
+        if not segment.left_high and jump:seeds.append(np.nextafter(hi,lo))
+    else:
+        for curves in segment.backgrounds.values():
+            for c in curves:
+                points=c._x if hasattr(c,'_x') else np.asarray(c.x,dtype=float)
+                seeds.extend(points[np.searchsorted(points,lo,'right'):np.searchsorted(points,hi,'left')])
+            if not segment.left_high and any(c.x[-1]==hi and c.endpoint_jump for c in curves):
+                seeds.append(np.nextafter(hi,lo))
     for g in segment.region.groups:
         ctx=g.context or context
         for radius in group_radii(g):seeds.extend(x for x in radius.energies if lo<x<hi)
