@@ -146,3 +146,18 @@ def test_mt4_is_kept_last_when_the_urr_tables_compete_with_it():
     ace, _ = encodeAce(suite, _kelvin(suite)[0], extension=".80c")
     assert int(ace.unresolved_resonance.inelastic_flag) == 4
     assert [int(m) for m in ace.reaction_mt_data.incident_neutron][-1] == 4
+
+
+def test_law_61_locators_are_positive_and_a_constant_yield_is_ty():
+    """OpenMC reads a law 61 cosine table only behind a positive LC (any other is
+    isotropic), as NJOY 2016 writes them; a constant integer yield is TY, not 101."""
+    from kika.ace.model_adapter.encode import encodeAce
+
+    suite = _read(DATA / "Fe56.h5")
+    ace, _ = encodeAce(suite, _kelvin(suite)[0], extension=".80c")
+    signs = {int(np.sign(lc)) for chain in ace.energy_distributions.incident_neutron.values()
+             for law in chain if law.law == 61 for d in law.distributions for lc in d["lc"] if lc}
+    assert signs == {1}
+    ty = dict(zip((int(m) for m in ace.reaction_mt_data.incident_neutron),
+                  (int(t) for t in ace.particle_release.incident_neutron)))
+    assert abs(ty[16]) == 2

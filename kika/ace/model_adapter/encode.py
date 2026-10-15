@@ -82,6 +82,15 @@ KEPT_SUMS = (18, 103, 104, 105, 106, 107)
 HEATING_MT = 301
 #: ACER's equiprobable cosine bins per incident energy (AND LC > 0, ANDP)
 EQUIPROBABLE_BINS = 32
+#: INTT of an outgoing-energy table of lines only, for a suite not read from ACE:
+#: what NJOY 2016's ACER writes for an MF6 table of discrete lines (2), which
+#: OpenMC reads; a table read from ACE keeps its own (NJOY 0 in older tables)
+LINES_ONLY_INTT = 2
+#: The sign of law 61's cosine-table locators (LC) for a suite not read from ACE:
+#: positive, as NJOY 2016 and LANL's Lib81 write them. OpenMC reads a table only
+#: behind a positive LC and takes any other as isotropic; MCNP takes |LC|. A
+#: table read from ACE keeps its own (older NJOY tables are negative).
+LAW61_LC_SIGN = 1
 #: The light charged particles of an ACE table: model pid -> (PTYPE IPT, mass ratio to the
 #: neutron, ENDF's AWP for them)
 PARTICLE_TYPES = {"H1": (9, 0.99862347), "H2": (31, 1.99626), "H3": (32, 2.98960),
@@ -370,7 +379,7 @@ def _law(functional, lawNumber: Optional[int], attributes: dict, where: str) -> 
             return _spectrum(energy, where)
         if isinstance(energy, (m.XYs2d, m.Regions2d)):
             energies, nbt, interp, tables, raw = _eoutTables(energy, where,
-                                                             int(attributes.get("linesOnlyINTT", 0)))
+                                                             int(attributes.get("linesOnlyINTT", LINES_ONLY_INTT)))
             if lawNumber == 1:
                 return NS(law=1, nbt=nbt, interp=interp, incident_energies=energies,
                           distribution_data=[{"e_out": t["e_out"]} for t in tables],
@@ -380,7 +389,7 @@ def _law(functional, lawNumber: Optional[int], attributes: dict, where: str) -> 
         raise AceEncodeError(f"{where}: an uncorrelated energy form {type(energy).__name__} has no ACE law")
     if isinstance(functional, m.KalbachMann):
         energies, nbt, interp, tables, raw = _eoutTables(functional.f, where,
-                                                         int(attributes.get("linesOnlyINTT", 0)))
+                                                         int(attributes.get("linesOnlyINTT", LINES_ONLY_INTT)))
         rs, _, _ = _tab2(functional.r)
         as_, _, _ = _tab2(functional.a)
         for t, r, a in zip(tables, rs, as_):
@@ -388,12 +397,12 @@ def _law(functional, lawNumber: Optional[int], attributes: dict, where: str) -> 
         return NS(law=44, nbt=nbt, interp=interp, incident_energies=energies, distributions=tables,
                   domain=(raw[0].outerDomainValue, raw[-1].outerDomainValue))
     if isinstance(functional, m.EnergyAngularMC):
-        return _law61(functional, where, int(attributes.get("law61LC", -1)),
-                      int(attributes.get("linesOnlyINTT", 0)))
+        return _law61(functional, where, int(attributes.get("law61LC", LAW61_LC_SIGN)),
+                      int(attributes.get("linesOnlyINTT", LINES_ONLY_INTT)))
     raise AceEncodeError(f"{where}: {type(functional).__name__} has no ACE energy law")
 
 
-def _law61(form, where: str, sign: int = -1, linesOnlyINTT: int = 0) -> NS:
+def _law61(form, where: str, sign: int = LAW61_LC_SIGN, linesOnlyINTT: int = 0) -> NS:
     """Law 61: each E' table with its LC column, then a cosine table per E' point.
 
     One table per point, as NJOY writes it: in ENDF/B-VIII.1 Fe-56 MT5 not one
@@ -778,6 +787,10 @@ class _Encoder:
         if isinstance(multiplicity, m.Constant1d):
             return sign * int(multiplicity.constant)
         x, y, nbt, interp = _regions(multiplicity)
+        values = np.unique(np.asarray(y, dtype=float))
+        if not isinstance(self.suite.provenance, AceProvenance) and values.size == 1 and                 values[0] == int(values[0]) and values[0] > 0:
+            # a constant integer yield (Be-9's MT16: 2) is TY, as ACER writes it
+            return sign * int(values[0])
         energy.neutron_yields[mt] = NS(nbt=nbt, interp=interp, energies=_mev(x), yields=y)
         return sign * 101
 
