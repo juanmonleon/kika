@@ -446,3 +446,32 @@ def test_zero_lower_unit_base_support_has_closed_incident_dependence():
     E=np.linspace(10.,20.,101);fraction=(E-10)/10;width=1+3*fraction
     expected=width*((1-fraction)*.5+fraction/3)+E/9+2*np.sqrt(E/9*width)*((1-fraction)*.2*2/3+fraction*.1*8/15)
     np.testing.assert_allclose(H._meanEnergyOf(form,E,H._Kinematics(A=2.,Q=0.)),expected,rtol=2e-15,atol=1e-14)
+
+
+def test_fission_photons_are_taken_out_once_against_the_release():
+    # MT18 as the sum of its chances carries fission's photons; MT3 carries others.
+    # heatingOf takes MT3's out of MT301 and leaves MT18's to fissionPhotonKerma,
+    # which the release's EGP balances; delayed photons are not EGP's.
+    from types import SimpleNamespace as NS
+    E = np.array([1., 1e5, 1e7]); one = np.ones(len(E))
+
+    def line(energy, count, mode="prompt"):
+        form = m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=0, energy=energy, atomicWeightRatio=239.),
+                              productFrame=m.Frame.lab)
+        return NS(pid="photon", provenance=NS(attributes={"emission_mode": mode}),
+                  multiplicity=m.Multiplicity(form=m.Constant1d(constant=count, domainMin_=0., domainMax_=2e7)),
+                  distribution=NS(forms={"MonteCarlo": form}))
+
+    chance = NS(ENDF_MT=19, outputChannel=NS(Q=NS(value=2e8), products=[]))
+    fission = NS(ENDF_MT=18, outputChannel=NS(Q=NS(value=2e8), products=[line(1e6, 7.), line(4e5, 3., "delayed")]))
+    nonelastic = NS(ENDF_MT=3, outputChannel=NS(Q=NS(value=0.), products=[line(5e5, 2.)]))
+    suite = NS(reactions=[], fissionComponents=[chance], sums=[fission, nonelastic])
+    sigma = {19: 2 * one, 18: 2 * one, 3: 5 * one}
+    result = H.heatingOf(suite, E, sigma, awr=239., Z=94)
+    np.testing.assert_allclose(result.kerma, -5 * 2 * 5e5 * one, rtol=1e-14)
+    assert 18 not in result.photonEnergy
+    np.testing.assert_allclose(H.fissionPhotonEnergy(suite, E, awr=239.)[18], 7e6 * one, rtol=1e-14)
+    np.testing.assert_allclose(H.fissionPhotonKerma(suite, E, sigma, awr=239.), 2 * 7e6 * one, rtol=1e-14)
+    fission.outputChannel.products = []
+    assert H.fissionPhotonEnergy(suite, E, awr=239.) == {}
+    np.testing.assert_array_equal(H.fissionPhotonKerma(suite, E, sigma, awr=239.), 0 * one)

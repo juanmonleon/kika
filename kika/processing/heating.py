@@ -1348,7 +1348,8 @@ def fissionPhotonEnergy(suite, grid, *, awr: float) -> Dict[int, np.ndarray]:
         for product in reaction.outputChannel.products:
             if product.pid != "photon":
                 continue
-            mode = (getattr(product.provenance, "attributes", None) or {}).get("emission_mode", "prompt")
+            provenance = getattr(product, "provenance", None)
+            mode = (getattr(provenance, "attributes", None) or {}).get("emission_mode", "prompt")
             form = _distribution(product) if mode == "prompt" else None
             if form is not None:
                 energy = energy + _yield(product, grid) * _meanEnergyOf(form, grid, photon)
