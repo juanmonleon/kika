@@ -212,6 +212,23 @@ def _level_seeds(group,region,cache):
                 lowest=rows.min(axis=0),highest=rows.max(axis=0))
 
 
+def _region_seeds(region,context,cache):
+    """The seed tables of every group of *region* joined, when every group
+    seeds as a fixed-point group or has no levels; None otherwise."""
+    fixed=[];tables=[]
+    for g in region.groups:
+        ctx=g.context or context
+        fixed.append(_cached(cache,('fixed',id(g),id(ctx)),lambda:_fixed_seeds(g,ctx)))
+        if not g.levels:continue
+        if region.approximation!='RMatrixNeutral' or g.level_metric:return None
+        tables.append(_cached(cache,('levels',id(g),region.low,region.high),lambda:_level_seeds(g,region,cache)))
+    width=1+2*len(_WIDTH_MULTIPLES)
+    joined={name:np.concatenate([t[name] for t in tables]) if tables else np.zeros((0,width) if name in ('peaks','centres') else 0)
+            for name in ('energy','peaks','centres','lowest','highest')}
+    joined['fixed']=np.unique(np.concatenate(fixed)) if fixed else np.zeros(0)
+    return joined
+
+
 def _seeds(segment,context,cache=None,knots=None):
     lo,hi=segment.low,segment.high
     count=GEOMETRIC_SEEDS
@@ -233,6 +250,17 @@ def _seeds(segment,context,cache=None,knots=None):
                 seeds.extend(points[np.searchsorted(points,lo,'right'):np.searchsorted(points,hi,'left')])
             if not segment.left_high and any(c.x[-1]==hi and c.endpoint_jump for c in curves):
                 seeds.append(np.nextafter(hi,lo))
+    table=_cached(cache,('region',id(segment.region),id(context)),lambda:_region_seeds(segment.region,context,cache))
+    if table is not None:
+        # Every group's fixed seeds and level seeds in one table (see the
+        # loop below, which this is group by group).
+        fixed,energy=table['fixed'],table['energy']
+        parts.append(fixed[np.searchsorted(fixed,lo,'left'):np.searchsorted(fixed,hi,'right')])
+        peak=(energy>0)&(energy>=lo)&(energy<=hi)
+        parts.append(table['peaks'][peak].ravel())
+        parts.append(table['centres'][peak&(table['lowest']>=lo)&(table['highest']<=hi)].ravel())
+        seeds=np.concatenate([np.array(seeds,dtype=float)]+parts)
+        return np.unique(seeds[np.isfinite(seeds)&(seeds>=lo)&(seeds<=hi)]).tolist()
     for g in segment.region.groups:
         ctx=g.context or context
         # The group's radius energies, knots and competitive threshold.

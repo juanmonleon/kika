@@ -310,7 +310,6 @@ def linearize_group_steps(spans, options, point_budget, keys):
     values=yield x,tuple(union),node
     first={mt:values.get(mt) for mt in keys}
     starts=np.r_[0,np.cumsum([len(v) for v in xs])]
-    firsts=[{mt:None if v is None else v[a:b] for mt,v in first.items()} for a,b in zip(starts[:-1],starts[1:])]
     index={mt:j for j,mt in enumerate(union)}
     columns=lambda values:np.column_stack([np.asarray(values[mt],dtype=float) for mt in union])
     # The span of each starting interval; a boundary step has none of its own.
@@ -346,7 +345,8 @@ def linearize_group_steps(spans, options, point_budget, keys):
         # Each span's own checks, as if refined alone (a deferred column of
         # some span failed: _chunk_tables marks it for its own retry).
         out=[]
-        for k,(f,(_,constants,deferred),mts) in enumerate(zip(firsts,spans,owned)):
+        for k,((_,constants,deferred),mts) in enumerate(zip(spans,owned)):
+            f={mt:None if v is None else v[starts[k]:starts[k+1]] for mt,v in first.items()}
             (a,b),p0,p1=bounds[k],panels[k],panels[k+1]
             take=[index[mt] for mt in mts]
             passes=int(result.probe_pass[p0:p1].max()) if p1>p0 else 0
@@ -354,7 +354,7 @@ def linearize_group_steps(spans, options, point_budget, keys):
                                      result.probe_y[p0:p1][:,:,take],f,constants,deferred,options,passes,
                                      len(xs[k])+int(evaluations[k])))
         return out,None
-    return _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,options,alone)
+    return _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,options,alone)
 
 
 def _ranges(starts,stops):
@@ -363,7 +363,7 @@ def _ranges(starts,stops):
     return np.repeat(starts-(np.cumsum(sizes)-sizes),sizes)+np.arange(total)
 
 
-def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,options,alone):
+def _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,options,alone):
     """The group's tables and one check for the whole group.
 
     The tables are those of each span refined alone, laid end to end on the
@@ -373,7 +373,6 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
     linearize aggregates the chunks of one segment: maxima are the maxima
     over every panel, evaluations add, iterations are the deepest pass.
     """
-    keys=tuple(firsts[0])
     pos=np.flatnonzero(np.diff(result.x)>0)
     probes=result.probe_x
     if len(pos)!=len(probes):return alone()
@@ -384,16 +383,19 @@ def _group_tables(result,xs,bounds,panels,firsts,spans,union,index,evaluations,o
     factor=(x2-x1)[:,None]*weights
     factors=(('dE',factor),('dE_over_E',factor*(1/probes[:,gauss])))
     # Columns no span refines: deferred in some spans, constant in the rest.
-    late=[mt for mt in keys if mt not in index and any(mt in d for _,_,d in spans)]
+    deferred_any=set().union(*(d for _,_,d in spans))
+    late=[mt for mt in keys if mt not in index and mt in deferred_any]
     # The group's tables: the common grid (each edge twice), one column per
     # reaction and each segment's constants (NaN: not a constant there).
     where={mt:i for i,mt in enumerate(keys)}
     lengths=np.array([b-a for a,b in bounds]);starts=np.r_[0,np.cumsum(lengths)]
     constant=np.full((len(xs),len(keys)),np.nan);has=np.zeros((len(xs),len(keys)),dtype=bool)
     deferred_in=np.zeros((len(xs),len(keys)),dtype=bool)
+    index_of=where.__getitem__
     for k,(_,constants,deferred) in enumerate(spans):
-        for mt,value in constants.items():constant[k,where[mt]]=value;has[k,where[mt]]=True
-        for mt in deferred:deferred_in[k,where[mt]]=True
+        if constants:
+            at=list(map(index_of,constants));constant[k,at]=list(constants.values());has[k,at]=True
+        if deferred:deferred_in[k,list(map(index_of,deferred))]=True
     y={}
     for j,mt in enumerate(keys):
         if mt in index:y[mt]=result.y[:,index[mt]]

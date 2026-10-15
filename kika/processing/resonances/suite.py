@@ -1196,6 +1196,13 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # requests (whose constants are these) to read by index.
     held_of=np.zeros((len(names),len(segments)),dtype=bool);value_of=np.zeros((len(names),len(segments)))
     result._columns_cache['segment_tables']=(rows,held_of,value_of,indices,choices)
+    # Each sum's leaf parts as rows (None: a part with no curve, never a
+    # constant) and its parts that are sums.
+    sum_parts={}
+    for key in order:
+        leaves=[rows.get(part) for part in graph[key] if part not in graph]
+        sum_parts[key]=(None if None in leaves else np.array(leaves,dtype=np.int64),
+                        [part for part in graph[key] if part in graph])
     blocked_in={};zero_sets={}
     def blocked(region):
         """The reactions a segment of *region* never holds constant or
@@ -1235,7 +1242,10 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         constants=dict(zip(keyed[at].tolist(),value[at].tolist()))
         held_of[:,position]=held;value_of[at,position]=value[at]
         for key in order:
-            if all(part in constants for part in graph[key]):
+            # Constant when every part is: its leaves held here, its sums
+            # constant already (the order puts parts first).
+            leaves,sums=sum_parts[key]
+            if leaves is not None and held[leaves].all() and all(part in constants for part in sums):
                 constants[key]=sum((constants[part] for part in graph[key]),0.)
         # One object per zero set (JENDL-5 Cl-35: 212 for 3 376 segments), so
         # that what is worked out per set is worked out once.
