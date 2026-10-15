@@ -41,7 +41,9 @@ fallback for a section without them (one isotropic emission for neutrons,
 from __future__ import annotations
 
 import contextvars
+import copy
 import os
+import weakref
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -1179,6 +1181,46 @@ def _massRatio(pid, pops):
     return float(zaFromPid(pid) % 1000) * 0.99167
 
 
+#: id(form) -> (weak reference to the form, {context key: (table, error)}).
+_HEAVY_TABULATIONS: Dict[int, tuple] = {}
+
+
+def _tabulateHeavy(form, context):
+    """``tabulateDistribution(form, context)`` once per evaluated form and context.
+
+    A charged particle's tabulation depends on its evaluated law and the reaction,
+    not on the temperature or the energy grid, and the heating of every
+    temperature asks for it again: U-235's take ~46 s each time. The table is
+    read, never changed, by the moments and the damage. A failure is kept too and
+    raised again, so each temperature's notes are the same. The entry goes with
+    the form (model forms are compared by value, so the key is their identity).
+    """
+    from kika.processing.tabulation import tabulateDistribution
+
+    key = (context.awr, context.zaTarget, context.mt, context.Q, context.pid, context.zaEmitted,
+           context.options)
+    entry = _HEAVY_TABULATIONS.get(id(form))
+    if entry is None or entry[0]() is not form:
+        formId = id(form)
+
+        def forget(reference, formId=formId):
+            if _HEAVY_TABULATIONS.get(formId, (None,))[0] is reference:
+                del _HEAVY_TABULATIONS[formId]
+
+        entry = _HEAVY_TABULATIONS[formId] = (weakref.ref(form, forget), {})
+    tables = entry[1]
+    if key not in tables:
+        try:
+            tables[key] = (tabulateDistribution(form, context), None)
+        except (TypeError, ValueError, NotImplementedError) as exc:
+            # A copy carries no traceback: the frames would keep the form alive.
+            tables[key] = (None, copy.copy(exc))
+    tabulated, error = tables[key]
+    if error is not None:
+        raise copy.copy(error)
+    return tabulated
+
+
 def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes):
     """``(deposit, damage)`` of a reaction's charged particles and recoils.
 
@@ -1208,7 +1250,7 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes):
         context = TabulationContext(awr=A, zaTarget=zaTarget, mt=reaction.ENDF_MT, Q=Q,
                                     pid=product.pid, zaEmitted=za)
         try:
-            tabulated = tabulateDistribution(form, context)
+            tabulated = _tabulateHeavy(form, context)
         except (TypeError, ValueError, NotImplementedError) as exc:
             notes.append(f"MT{reaction.ENDF_MT} {product.pid}: {type(form).__name__} not "
                          f"tabulated for the heating ({exc}); left out")

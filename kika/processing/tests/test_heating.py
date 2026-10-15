@@ -475,3 +475,32 @@ def test_fission_photons_are_taken_out_once_against_the_release():
     fission.outputChannel.products = []
     assert H.fissionPhotonEnergy(suite, E, awr=239.) == {}
     np.testing.assert_array_equal(H.fissionPhotonKerma(suite, E, sigma, awr=239.), 0 * one)
+
+
+def test_heavy_tabulation_is_done_once_per_form_and_forgotten_with_it(monkeypatch):
+    import gc
+    from kika.processing import tabulation as T
+    from kika.processing.tabulation import TabulationContext
+    calls = []
+
+    def tabulate(form, context):
+        calls.append(context.mt)
+        if context.mt == 2:
+            raise ValueError("no such law")
+        return ("table", context.mt)
+
+    monkeypatch.setattr(T, "tabulateDistribution", tabulate)
+    form = m.Uncorrelated()
+    first = TabulationContext(awr=55., zaTarget=26056, mt=103, Q=0., pid="H1", zaEmitted=1001)
+    assert H._tabulateHeavy(form, first) == H._tabulateHeavy(form, first) == ("table", 103)
+    assert calls == [103]
+    failing = TabulationContext(awr=55., zaTarget=26056, mt=2, Q=0., pid="H1", zaEmitted=1001)
+    for _ in range(2):
+        with pytest.raises(ValueError, match="no such law"):
+            H._tabulateHeavy(form, failing)
+    assert calls == [103, 2]
+    key = id(form)
+    assert key in H._HEAVY_TABULATIONS
+    del form
+    gc.collect()
+    assert key not in H._HEAVY_TABULATIONS
