@@ -220,6 +220,20 @@ def test_mixed_histogram_retains_lines_mass_and_two_continuum_moments():
     assert len(table.xs) <= TabulationOptions().maxPoints
 
 
+def test_mixed_histogram_is_a_projection_maxpoints_does_not_drop():
+    # The projection's size is set by mixedCdfAtol; capping it at maxPoints
+    # dropped whole products (Pu-242's MF6 capture photons, ENDF/B-VIII.1).
+    source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 0., 2.], ys=[.2, 0., .8], outerDomainValue=15.)])
+    options = TabulationOptions(maxPoints=100)
+    converted, _ = tabulateEnergy(source, options, discrete=[1])
+    table = converted.function1ds[0]
+    assert len(table.xs) > options.maxPoints
+    q = np.linspace(0., 2., 10001)
+    assert np.max(abs(np.interp(q, table.xs[1:], table.cdf[1:]) - (.2+.2*q*q))) <= options.mixedCdfAtol
+    reference, _ = tabulateEnergy(source, discrete=[1])
+    np.testing.assert_array_equal(table.xs, reference.function1ds[0].xs)
+
+
 def test_mixed_single_histogram_panel_gets_a_transport_safe_second_panel():
     source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 1., 3.], ys=[.2, .4, .4],
         interpolation=m.Interpolation.flat, outerDomainValue=15.)])

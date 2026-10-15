@@ -12,7 +12,12 @@ def polynomial(value):
     return m.Polynomial1d(coefficients=np.array([value]),domainMin_=0.,domainMax_=1e8)
 
 
-def test_attachment_uses_exclusive_fission_cross_sections_once_at_each_temperature(monkeypatch):
+@pytest.mark.parametrize('carried',[None,9.])
+def test_attachment_uses_exclusive_fission_cross_sections_once_at_each_temperature(monkeypatch,carried):
+    # Fission's MT301 is HEATR's EFR + EGP less the prompt photons the tables
+    # carry for fission (none: all of EGP stays, as Pu-238 of ENDF/B-VIII.1),
+    # plus OpenMC's local delayed betas; MT901 and MT442 do not depend on them.
+    released=100.+7.+11.-(carried or 0.)
     grid=np.array([1.,2.]); temperatures=[293.6,600.]
     labels=['293K','600K']; grids={name:grid for name in labels}
     def rx(mt,value):
@@ -39,14 +44,16 @@ def test_attachment_uses_exclusive_fission_cross_sections_once_at_each_temperatu
                          19:(np.zeros(2),np.zeros(2),np.full(2,4.)),
                          20:(np.zeros(2),np.zeros(2),np.full(2,4.))})
     monkeypatch.setattr(H,'heatingOf',calculation)
+    monkeypatch.setattr(H,'fissionPhotonEnergy',
+                        lambda suite,E,awr: {} if carried is None else {18:np.full(len(E),carried)})
     _attachHeating(out,work,temperatures,dict.fromkeys(labels,0.),grids,['kerma','damage'],
         235.,92,235,None,m.ConversionReport(),heatingPartials=[302,318,442,445,901],qa={2:1.})
     response={r.ENDF_MT:r for r in out.productions}
     for name in labels:
         label=heatedLabel(name)
-        assert np.array_equal(response[301].crossSection[label].ys,np.full(2,4.+8.*107.))
+        assert np.array_equal(response[301].crossSection[label].ys,np.full(2,4.+8.*released))
         assert np.array_equal(response[901].crossSection[label].ys,np.full(2,4.+8.*131.))
-        assert np.array_equal(response[318].crossSection[label].ys,np.full(2,8.*107.))
+        assert np.array_equal(response[318].crossSection[label].ys,np.full(2,8.*released))
         assert np.array_equal(response[442].crossSection[label].ys,np.full(2,8.*24.))
         assert np.array_equal(response[302].crossSection[label].ys,np.full(2,4.))
         assert np.array_equal(response[445].crossSection[label].ys,np.full(2,6.))

@@ -235,9 +235,26 @@ def lindhard(E, Zr, Ar, Zl, Al, ed):
     el = 30.724 * Zr * Zl * np.sqrt(Zr ** (2 / 3) + Zl ** (2 / 3)) * (Ar + Al) / Al
     denom = (Zr ** (2 / 3) + Zl ** (2 / 3)) ** 0.75 * Ar ** 1.5 * np.sqrt(Al)
     fl = 0.0793 * Zr ** (2 / 3) * np.sqrt(Zl) * (Ar + Al) ** 1.5 / denom
-    ep = np.maximum(E, 0.0) / el
-    out = E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
-    return np.where(E >= ed, out, 0.0)
+    if E.ndim == 0:
+        ep = np.maximum(E, 0.0) / el
+        out = E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
+        return np.where(E >= ed, out, 0.0)
+    # The same expression in place, in its order of operations: the damage
+    # quadratures call this on millions of recoils at a time, and the
+    # temporaries cost a fifth of it.
+    ep = np.maximum(E, 0.0)
+    ep /= el
+    out = np.power(ep, 1 / 6)
+    out *= 3.4008
+    term = np.power(ep, 0.75)
+    term *= 0.40244
+    out += term
+    out += ep
+    out *= fl
+    out += 1.0
+    np.divide(E, out, out=out)
+    out[~(E >= ed)] = 0.0
+    return out
 
 
 # ----------------------------------------------------------------------
@@ -1324,6 +1341,59 @@ def _kinematicUpperOf(mt, grid, A, Q, Qbal, emitted, neutronYield, carried,
     return deposit
 
 
+def fissionPhotonEnergy(suite, grid, *, awr: float) -> Dict[int, np.ndarray]:
+    """Prompt-photon energy per fission (eV) that a processed suite's tables carry.
+
+    HEATR's fission KERMA is ``(EFR + EGP)·σ_f`` from MF1/458 less the photons the
+    evaluation states, wherever it states them (``heatr.f90`` nheat, gheat): the
+    release keeps authority, and only the photons actually transported leave.
+    Fission's own photons are stated once, on MT18 (as a reaction or as the sum of
+    its chances) or else on each chance; this gives ``{18: E}`` in the first case,
+    ``{mt: E}`` per chance in the second, ``{}`` when fission states none (Pu-238 of
+    ENDF/B-VIII.1: all of EGP stays local). Photons on MT3 are not fission's here:
+    :func:`heatingOf` takes them out of MT301 as any photons stated on a sum.
+    Delayed photons are left out, as EGD is not in MT301.
+    """
+    grid = np.asarray(grid, dtype=float)
+    photon = _Kinematics(A=float(awr), Q=0.0, awp=0.0)
+    fissions = [r for c in (suite.reactions, getattr(suite, "fissionComponents", ()),
+                            getattr(suite, "sums", ()))
+                for r in c if r.ENDF_MT in FISSION_MTS]
+    found: Dict[int, np.ndarray] = {}
+    for reaction in sorted(fissions, key=lambda r: r.ENDF_MT != 18):
+        energy, stated = np.zeros(len(grid)), False
+        for product in reaction.outputChannel.products:
+            if product.pid != "photon":
+                continue
+            provenance = getattr(product, "provenance", None)
+            mode = (getattr(provenance, "attributes", None) or {}).get("emission_mode", "prompt")
+            form = _distribution(product) if mode == "prompt" else None
+            if form is not None:
+                energy = energy + _yield(product, grid) * _meanEnergyOf(form, grid, photon)
+                stated = True
+        if stated:
+            found[reaction.ENDF_MT] = energy
+            if reaction.ENDF_MT == 18:
+                break
+    return found
+
+
+def fissionPhotonKerma(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float) -> np.ndarray:
+    """``Σ σ·E_γ`` (eV·b) of :func:`fissionPhotonEnergy` on ``grid``: MT18's photons
+    with the whole fission cross section, a chance's with its own."""
+    energies = fissionPhotonEnergy(suite, grid, awr=awr)
+    term = np.zeros(len(np.asarray(grid)))
+    if 18 in energies:
+        sigmaF = sigma.get(18)
+        if sigmaF is None:
+            sigmaF = np.sum([sigma[mt] for mt in FISSION_MTS if mt != 18 and mt in sigma], axis=0)
+        return np.where(sigmaF > 0, sigmaF * energies[18], 0.0)
+    for mt, energy in energies.items():
+        if mt in sigma:
+            term = term + np.where(sigma[mt] > 0, sigma[mt] * energy, 0.0)
+    return term
+
+
 def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
               qm: Optional[Dict[int, float]] = None, ed: Optional[float] = None,
               qa: Optional[Dict[int, float]] = None, qbar: Optional[Dict[int, object]] = None,
@@ -1551,11 +1621,13 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         d = fissionDamage[key]
         damage += np.where(s > 0, s * d, 0.0)
         perReaction[mt] = (np.zeros(len(grid)), np.zeros(len(grid)), d)
-    # Photons stated on a sum (MF13 on MT4, 103-107): carried away for MT301 and
-    # deposited for MT901, as HEATR's gheat does with σ_sum·y·Ē (= σ_γ·Ē).
+    # Photons stated on a sum (MF13 on MT3, MT4, 103-107): carried away for MT301
+    # and deposited for MT901, as HEATR's gheat does with σ_sum·y·Ē (= σ_γ·Ē).
+    # A summed MT18's own photons are fission's: fissionPhotonEnergy takes them,
+    # against the release's EGP, so they are not taken out here a second time.
     for reaction in getattr(suite, "sums", ()):
         mt = reaction.ENDF_MT
-        if mt is None or mt not in sigma:
+        if mt is None or mt not in sigma or mt in FISSION_MTS:
             continue
         photons = [(p, _distribution(p)) for p in reaction.outputChannel.products
                    if p.pid == "photon"]

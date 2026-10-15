@@ -92,9 +92,13 @@ def _mixedHistogram(table, options, outer):
             pb = pa
         # On each subpanel the CDF error is at most |dp|*dx/24. Mass
         # and moments through order two agree exactly at every panel end.
+        # This is a projection, not an adaptive refinement, so maxPoints does
+        # not cap it: |dp|*dx <= 2 m on a panel of mass m, which bounds the
+        # table by N + 2*sqrt(N/(12*mixedCdfAtol)) points for N panels of a
+        # normalised continuum. Capping it dropped the whole product instead:
+        # Pu-242's MF6 capture photons of ENDF/B-VIII.1 need 2 057 points at
+        # 6.5 MeV and were lost.
         count = max(1, int(np.ceil(np.sqrt(abs(pb-pa)*(b-a)/(24*options.mixedCdfAtol)))))
-        if nd + len(edges) + 2*count > options.maxPoints:
-            raise ValueError("mixed histogram conversion exceeds maxPoints")
         for k in range(count):
             left, right = a+(b-a)*k/count, a+(b-a)*(k+1)/count
             pl, pr = pa+(pb-pa)*k/count, pa+(pb-pa)*(k+1)/count
