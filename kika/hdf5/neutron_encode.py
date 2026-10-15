@@ -161,6 +161,15 @@ def _grid(suite, label) -> np.ndarray:
                 f"the {label!r} cross sections are not on one common grid; OpenMC stores one "
                 f"grid per temperature and each reaction from a threshold index on it "
                 f"(kika.algebra builds the union grid)")
+    # A step -- the same energy twice, as kika's own ACE keeps a discontinuity
+    # (ENDF/B-VIII.1 Fe-54 has 14) -- is nudged up by one part in 1e12, as
+    # processSuite's _strictly does before it writes HDF5; a grid that goes
+    # down is still refused.
+    steps = np.flatnonzero(np.diff(grid) == 0)
+    if steps.size:
+        grid = np.array(grid, dtype=float)
+        for i in steps:
+            grid[i + 1] = max(grid[i] * (1.0 + 1.0e-12), np.nextafter(grid[i], np.inf))
     if np.any(np.diff(grid) <= 0):
         raise HDF5FormatError(f"the {label!r} grid is not strictly increasing; the C++ assumes it is")
     return grid
