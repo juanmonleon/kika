@@ -61,6 +61,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -1053,6 +1054,36 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_corr.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
         "title":      "χ² — cinta B-spline v6 y5s con nivel de efectos aleatorios, contra la base EXFOR CORREGIDA",
+        "systematic_block_col": None,
+    },
+    # ── 14-oct: B15/C15 — la MISMA cinta que B14/C14, re-puntuada con kika develop bd2715b ──────────
+    # Cambian dos cosas del marco, ninguna de la cinta: el plegado TOF de y_eval es el exacto
+    # (fold_quadrature = "exact"; antes 65 nodos uniformes en ±3σ_E truncada) y u, v van referidos a
+    # y_eval (sin el rompecabezas de Peelle). JEFF y JENDL salen de la misma pasada. Se leen contra
+    # B14/C14; la cinta B-spline usa su propio plegado (fastfold, Gauss-Legendre por paneles), no el de kika.
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s _re, plegado exacto y modos referidos al modelo (B15)",
+        "systematic_block_col": None,
+    },
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact_corr": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact_corr.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s _re, plegado exacto y modos referidos al modelo, EXFOR CORREGIDA (C15)",
+        "systematic_block_col": None,
+    },
+    # ── 14-oct: B16/C16 — la cinta _re con la parte estadistica H^-1 (no el sandwich); marco de B15/C15 ──
+    "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s _re con la estadística H⁻¹, plegado exacto y modos referidos al modelo (B16)",
+        "systematic_block_col": None,
+    },
+    "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_corr": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_corr.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s _re con la estadística H⁻¹, plegado exacto, EXFOR CORREGIDA (C16)",
         "systematic_block_col": None,
     },
     # ── RUN 97: una malla por orden Legendre (roadmap §10.8) ────────────────
@@ -2263,19 +2294,108 @@ def run_subset_primary_detail(
     return summary
 
 
+# ── Conditional chi^2 map per (energy band x angle band) cell (15-oct) ──────
+#
+# Where the evaluation disagrees with the data, not just how much. For each (library,
+# experiment) the cell score is the chi^2 of the cell's residuals CONDITIONED on the rest of
+# the experiment, under the V4 covariance, with the experiment's normalisation profiled out
+# (flat prior) -- chi2_metrics.conditional_cell_scores. Cells of different experiments add
+# exactly (Sigma is block-diagonal across experiments), so a subset's map is a sum over the
+# long table. It LOCATES disagreement; the cells condition on overlapping rests, so they do
+# not add up to the chi^2. KIKA_CHI2_CELL_MAP=0 turns it off (it costs one dpotri per block).
+CELL_MAP = os.environ.get("KIKA_CHI2_CELL_MAP", "1") != "0"
+CELL_E_EDGES = np.array([float(x) for x in os.environ.get(
+    "KIKA_CHI2_CELL_E_EDGES",
+    "0.85,1.0,1.25,1.5,1.75,2.0,2.25,2.5,2.75,3.0,3.25,3.5,3.75,4.0").split(",")])
+CELL_A_EDGES = np.array([float(x) for x in os.environ.get(
+    "KIKA_CHI2_CELL_A_EDGES", "0,30,60,90,120,150,180").split(",")])
+
+
+def aggregate_cell_map(cells: pd.DataFrame, exp_ids, libraries: List[str]) -> pd.DataFrame:
+    """Sum the long (library, experiment, cell) table over ``exp_ids`` into one map per library."""
+    t = cells[cells["experiment_id"].isin(exp_ids) & cells["library"].isin(libraries)]
+    g = t.groupby(["library", "cell"], observed=True).agg(
+        n=("n", "sum"), chi2=("chi2", "sum"), dof=("dof", "sum"), w_num=("w_num", "sum"),
+        w_den2=("w_den2", "sum"), rel_resid_sum=("rel_resid_sum", "sum"),
+        n_z1=("n_z1", "sum"), n_z2=("n_z2", "sum"), n_exp=("experiment_id", "nunique"),
+    ).reset_index()
+    n_a = len(CELL_A_EDGES) - 1
+    g["e_lo"] = CELL_E_EDGES[g["cell"] // n_a]; g["e_hi"] = CELL_E_EDGES[g["cell"] // n_a + 1]
+    g["a_lo"] = CELL_A_EDGES[g["cell"] % n_a]; g["a_hi"] = CELL_A_EDGES[g["cell"] % n_a + 1]
+    g["chi2_per_dof"] = np.where(g["dof"] > 0, g["chi2"] / g["dof"].clip(lower=1), np.nan)
+    g["w"] = np.where(g["w_den2"] > 0, g["w_num"] / np.sqrt(g["w_den2"].clip(lower=1e-300)), np.nan)
+    g["mean_rel_resid"] = g["rel_resid_sum"] / g["n"]
+    g["frac_z1"] = g["n_z1"] / g["n"]; g["frac_z2"] = g["n_z2"] / g["n"]
+    cols = ["library", "e_lo", "e_hi", "a_lo", "a_hi", "n", "n_exp", "chi2", "dof", "chi2_per_dof",
+            "w", "mean_rel_resid", "frac_z1", "frac_z2"]
+    return g[cols].sort_values(["library", "e_lo", "a_lo"]).reset_index(drop=True)
+
+
+def cell_map_figure(cmap_df: pd.DataFrame, libraries: List[str], subset_key: str,
+                    subset_label: str, figures_dir: Path, report: List[str],
+                    fig_log: List[str]) -> None:
+    """Two rows of heatmaps (chi^2/dof, signed w) x one column per library, shared scales."""
+    from matplotlib.colors import LogNorm, TwoSlopeNorm
+    n_e, n_a = len(CELL_E_EDGES) - 1, len(CELL_A_EDGES) - 1
+    fig, axes = plt.subplots(2, len(libraries), figsize=(4.2 * len(libraries), 7.2),
+                             squeeze=False, sharex=True, sharey=True, constrained_layout=True)
+    grids = {}
+    for lib in libraries:
+        t = cmap_df[cmap_df["library"] == lib]
+        G = np.full((2, n_e, n_a), np.nan)
+        ie = np.searchsorted(CELL_E_EDGES, t["e_lo"].to_numpy()); ia = np.searchsorted(CELL_A_EDGES, t["a_lo"].to_numpy())
+        G[0, ie, ia] = t["chi2_per_dof"].to_numpy(); G[1, ie, ia] = t["w"].to_numpy()
+        grids[lib] = G
+    vmax = max(4.0, float(np.nanmax([np.nanmax(G[0]) for G in grids.values()] + [1.0])))
+    norm_c = LogNorm(vmin=1.0 / vmax, vmax=vmax)              # chi^2/dof = 1 sits at the neutral centre
+    wmax = 5.0
+    norm_w = TwoSlopeNorm(vcenter=0.0, vmin=-wmax, vmax=wmax)
+    for j, lib in enumerate(libraries):
+        G = grids[lib]
+        im0 = axes[0, j].pcolormesh(CELL_A_EDGES, CELL_E_EDGES, G[0], cmap="RdBu_r", norm=norm_c,
+                                    edgecolors="white", linewidth=0.5)
+        im1 = axes[1, j].pcolormesh(CELL_A_EDGES, CELL_E_EDGES, np.clip(G[1], -wmax, wmax), cmap="PuOr_r",
+                                    norm=norm_w, edgecolors="white", linewidth=0.5)
+        axes[0, j].set_title(LIB_LABELS[lib], fontsize=13)
+        axes[1, j].set_xlabel("θ_lab [deg]")
+        for i in range(2):
+            axes[i, j].grid(False)
+            axes[i, j].set_xticks(CELL_A_EDGES[::2])
+    for i in range(2):
+        axes[i, 0].set_ylabel("E [MeV]")
+    fig.colorbar(im0, ax=axes[0, :], shrink=0.9).set_label("χ²/dof", fontsize=13)
+    fig.colorbar(im1, ax=axes[1, :], shrink=0.9).set_label("w [σ], data − eval", fontsize=13)
+    fig.suptitle(f"Conditional χ² map (V4, normalisation profiled) — {subset_label}", fontsize=12)
+    name = f"cell_map_{subset_key}"
+    save_and_close(fig, figures_dir, name, fig_log)
+    report.append(
+        f"\n**Where the disagreement is** (conditional χ²/dof per energy × angle cell, V4 covariance, "
+        f"each experiment's normalisation profiled; `w` > 0 means data above the evaluation). "
+        f"Cells condition on the rest of their experiment, so they localise the disagreement and "
+        f"do not add up to the χ². Table: `cell_map/cell_map_{subset_key}.csv`.\n\n"
+        f"![{name}](figures/{name}.{FIGURE_FORMAT})\n"
+    )
+    worst = cmap_df[(cmap_df["library"] == "This_work") & (cmap_df["dof"] >= 5)].nlargest(8, "chi2_per_dof") \
+        if "This_work" in libraries else pd.DataFrame()
+    if len(worst):
+        report.append("\nThis work — the eight cells with the largest conditional χ²/dof (dof ≥ 5):\n\n")
+        report.append(_df_to_md(worst[["e_lo", "e_hi", "a_lo", "a_hi", "n", "n_exp", "chi2_per_dof", "w",
+                                       "mean_rel_resid", "frac_z1"]], float_format="%.3f") + "\n")
+
+
 # ── Per-subentry breakdown (all variants) ───────────────────────────────────
 
 
 def per_subentry_table_all_variants(
-    df_in: pd.DataFrame, eval_cov: Optional[Dict],
+    df_in: pd.DataFrame, per_exp_full: pd.DataFrame,
     libraries: List[str], report: List[str],
-    systematic_block_col: Optional[str] = None,
 ) -> pd.DataFrame:
     """χ²/N per (subentry × variant), all four variants in one table.
 
     Rows are (Kinney_1976, Smith_1980, OTHER, BOTH/ALL) × (V1, V2, V3, V4);
-    columns are libraries. Each slice goes through chi2_per_experiment_variants
-    once with the full eval_cov, so V1/V2/V3/V4 are consistent within a row.
+    columns are libraries. 15-oct: each slice is a row filter of the one-pass
+    per-experiment table (a subentry is a set of whole experiments), so V1/V2/V3/V4
+    are consistent within a row and nothing is refactorised.
     """
     subentry_labels = ("Kinney_1976", "Smith_1980", "OTHER", "BOTH/ALL")
     rows = []
@@ -2283,9 +2403,8 @@ def per_subentry_table_all_variants(
         sub_df = df_in if ks_label == "BOTH/ALL" else df_in[df_in["ks_subentry"] == ks_label]
         if len(sub_df) == 0:
             continue
-        per_exp = chi2_metrics.chi2_per_experiment_variants(
-            sub_df, eval_cov, systematic_block_col=systematic_block_col,
-        )
+        per_exp = per_exp_full[per_exp_full["experiment_id"].isin(
+            sub_df["experiment_id"].unique())].reset_index(drop=True)
         n_first = int(per_exp[per_exp["library"] == libraries[0]]["N"].sum()) if libraries else 0
         for variant in VARIANTS:
             v_lo = _v_low(variant)
@@ -2479,6 +2598,50 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
             f"Available builders: {sorted(subsets_df)}"
         )
 
+    # 15-oct: ONE pass over every (library, experiment) -- chi^2 V1-V4 and the primary variant's
+    # whitened residuals from the same factorisation -- and every subset / subentry table is a row
+    # filter of it. Before, each subset recomputed both (and the subentry table four more slices):
+    # Cierjacks' 28 631-point block was factorised 8 times per library, ~31 of 69 min. Valid because
+    # a subset is a union of WHOLE experiments (asserted below), and per group the numbers are the
+    # ones the per-subset calls returned, bit for bit (chi2_metrics.chi2_variants_and_z).
+    t_pass = time.time()
+    cell_rows: List[pd.DataFrame] = []
+    on_group = None
+    if CELL_MAP:
+        _D, _u, _v, _r = chi2_metrics._components(df)
+        _bids = chi2_metrics._resolve_block_codes(df, paths.systematic_block_col)
+        _codes = chi2_metrics.cell_codes(df["energy_mev"].to_numpy(dtype=float),
+                                         df["angle_deg"].to_numpy(dtype=float),
+                                         CELL_E_EDGES, CELL_A_EDGES)
+        _yev = df["y_eval"].to_numpy(dtype=float)
+
+        def on_group(key, ord_pos, factor, r):
+            U = chi2_metrics.profiled_mode_matrix(
+                _u[ord_pos], None if _bids is None else _bids[ord_pos])
+            t = chi2_metrics.conditional_cell_scores(factor, r, U, _codes[ord_pos], _yev[ord_pos])
+            t.insert(0, "experiment_id", key[1]); t.insert(0, "library", key[0])
+            cell_rows.append(t)
+
+    per_exp_full, z_full = chi2_metrics.chi2_variants_and_z(
+        df, eval_cov, systematic_block_col=paths.systematic_block_col,
+        z_variant=PRIMARY_VARIANT, on_group=on_group,
+    )
+    cells_long = pd.concat(cell_rows, ignore_index=True) if cell_rows else None
+    if cells_long is not None:
+        (paths.run_dir / "cell_map").mkdir(parents=True, exist_ok=True)
+        cells_long.to_csv(paths.run_dir / "cell_map" / "cell_map_long.csv", index=False)
+    print(f"  [T] one pass over {len(per_exp_full)} (library, experiment) blocks: "
+          f"{time.time() - t_pass:.0f} s", flush=True)
+    _group_sizes = df.groupby(["library", "experiment_id"], observed=True).size()
+    for _k, _sd in subsets_df.items():
+        _sz = _sd.groupby(["library", "experiment_id"], observed=True).size()
+        if not _sz.equals(_group_sizes.loc[_sz.index]):
+            raise SystemExit(f"subset {_k!r} cuts rows inside an experiment: the one-pass "
+                             f"tables do not apply to it")
+
+    def _rows_of(ids) -> pd.DataFrame:
+        return per_exp_full[per_exp_full["experiment_id"].isin(ids)].reset_index(drop=True)
+
     report: List[str] = []
     fig_log: List[str] = []
     report.append(f"# {paths.title}\n")
@@ -2537,9 +2700,7 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
             report.append("\n_(subset is empty — skipped)_\n")
             continue
 
-        per_exp_av = chi2_metrics.chi2_per_experiment_variants(
-            df_subset, eval_cov, systematic_block_col=paths.systematic_block_col,
-        )
+        per_exp_av = _rows_of(df_subset["experiment_id"].unique())
         decision_summary = aggregate_all_variants_by_library(per_exp_av, libraries)
         all_variants_summaries[subset_key] = decision_summary
         write_decision_table(decision_summary, subset_key, subset_label, report)
@@ -2556,10 +2717,7 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
             per_exp_av, libraries, subset_key, report,
         )
 
-        z_primary = chi2_metrics.whitened_residuals_per_experiment_variant(
-            df_subset, eval_cov, variant=PRIMARY_VARIANT,
-            systematic_block_col=paths.systematic_block_col,
-        )
+        z_primary = z_full.loc[df_subset.index]
         primary_summaries[subset_key] = run_subset_primary_detail(
             df_s=df_subset,
             per_exp_av=per_exp_av,
@@ -2579,6 +2737,12 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
             subset_key, subset_label,
             paths.figures_dir, report, fig_log,
         )
+
+        if cells_long is not None:
+            cmap_df = aggregate_cell_map(cells_long, df_subset["experiment_id"].unique(), libraries)
+            cmap_df.to_csv(paths.run_dir / "cell_map" / f"cell_map_{subset_key}.csv", index=False)
+            cell_map_figure(cmap_df, libraries, subset_key, subset_label,
+                            paths.figures_dir, report, fig_log)
 
     # ── Build & splice in the headline summary ───────────────────────────────
     headline: List[str] = []
@@ -2664,8 +2828,7 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
         "\n## Per-subentry breakdown (Kinney 1976 / Smith 1980 / OTHER) — all variants\n"
     )
     per_subentry_table_all_variants(
-        df, eval_cov, libraries, report,
-        systematic_block_col=paths.systematic_block_col,
+        df, per_exp_full, libraries, report,
     )
 
     # Combined comparison: every (subset × variant) cell per library.

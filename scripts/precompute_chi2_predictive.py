@@ -96,6 +96,7 @@ scripts/chi2_analysis_cluster.py under the `predictive` methodology key.
 """
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -891,6 +892,14 @@ def _min_eig_lanczos(block: np.ndarray, tol: float = 1e-6) -> Optional[float]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _t(msg: str) -> None:
+    """15-oct: a wall-clock mark per phase, so a run's log says where its time went."""
+    print(f"[T] {time.time() - _T0:7.0f} s  {msg}", flush=True)
+
+
+_T0 = time.time()
+
+
 def main() -> None:
     # load_library_lib_c0 reads MF3 + MF4 + MF34 + MF33 and returns exactly the
     # dict build_eval_cov_for_groups expects, so the MF33/MF34 handling here is
@@ -1065,6 +1074,7 @@ def main() -> None:
     energies_in_range = sorted(
         e for e in exfor_cache if E_MIN_MEV <= e <= E_MAX_MEV
     )
+    _t("tapes and EXFOR loaded")
     print(f"Iterating {len(energies_in_range)} EXFOR energies in "
           f"[{E_MIN_MEV}, {E_MAX_MEV}] MeV")
 
@@ -1110,9 +1120,11 @@ def main() -> None:
     def _a_l_lookup(lib_key: str, lib: dict, e_mev: float) -> np.ndarray:
         return interp_a_l_to_energy(lib, e_mev, L_MAX)
 
+    _t("rows folded")
     eval_cov = build_eval_cov_for_groups(
         df, libraries, _a_l_lookup, l_max=L_MAX,
     )
+    _t("Sigma_eval built")
 
     # Diagonal of Sigma_eval per row, for diagnostic plots only — chi^2 itself
     # uses the full block. _eval_pos lets a consumer slice the block correctly
@@ -1206,9 +1218,11 @@ def main() -> None:
             print(f"[PSD]   large groups were NOT checked (cross block off ⇒ the sum "
                   f"of two PSD sandwiches is PSD by construction)")
 
+    _t("PSD checks done")
     df.to_parquet(OUTPUT_PARQUET, index=False)
     sidecar = OUTPUT_PARQUET + ".eval_cov.npz"
     save_eval_cov(sidecar, eval_cov)
+    _t("parquet and sidecar written")
 
     print(f"\nSaved: {OUTPUT_PARQUET}")
     print(f"  shape: {df.shape}")

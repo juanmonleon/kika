@@ -30,6 +30,7 @@ piecewise-constant semantics).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
@@ -641,12 +642,42 @@ def _decode_key(s: str) -> Tuple:
 
 
 def save_eval_cov(path: str, eval_cov: Dict[Tuple, np.ndarray]) -> None:
-    """Write all per-group blocks to a single compressed .npz file."""
+    """Write all per-group blocks to a single .npz file, UNcompressed.
+
+    15-oct: was ``np.savez_compressed``. The float32 covariance blocks do not compress (ratio
+    0.92), and single-threaded zlib on 11 GB took 10.8 of a run's 69 minutes. Same arrays, same
+    file name and keys; `load_eval_cov` reads either kind."""
     arrays = {_encode_key(k): np.asarray(v) for k, v in eval_cov.items()}
-    np.savez_compressed(path, **arrays)
+    np.savez(path, **arrays)
 
 
-def load_eval_cov(path: str) -> Dict[Tuple, np.ndarray]:
-    """Inverse of save_eval_cov. Returns {(library, experiment_id): array}."""
-    with np.load(path) as data:
-        return {_decode_key(k): np.asarray(data[k]) for k in data.files}
+class LazyEvalCov(Mapping):
+    """``{(library, experiment_id): block}`` read from the sidecar one block at a time.
+
+    15-oct: `load_eval_cov` used to inflate every block into RAM up front (11.9 GB resident for
+    the whole analysis, which touches one block at a time). A block is read from the archive when
+    it is asked for and not kept: the caller holds it as long as it needs it."""
+
+    def __init__(self, path: str):
+        self._z = np.load(path)
+        self._keys = {_decode_key(k): k for k in self._z.files}
+
+    def __getitem__(self, key: Tuple) -> np.ndarray:
+        return np.asarray(self._z[self._keys[tuple(key)]])
+
+    def __iter__(self):
+        return iter(self._keys)
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def __contains__(self, key) -> bool:
+        return tuple(key) in self._keys
+
+    def close(self) -> None:
+        self._z.close()
+
+
+def load_eval_cov(path: str) -> "LazyEvalCov":
+    """Inverse of save_eval_cov: a read-only mapping {(library, experiment_id): array}."""
+    return LazyEvalCov(path)
