@@ -161,3 +161,39 @@ def test_law_61_locators_are_positive_and_a_constant_yield_is_ty():
     ty = dict(zip((int(m) for m in ace.reaction_mt_data.incident_neutron),
                   (int(t) for t in ace.particle_release.incident_neutron)))
     assert abs(ty[16]) == 2
+
+
+def test_a_table_read_back_from_gnds_is_put_back_on_the_union_grid():
+    """GNDS spells a step as a regions1d and drops an energy repeated with the same
+    value, so a processed suite read back from it is not on one grid; the encoder
+    flattens the regions and reads each table on the union grid."""
+    import copy
+
+    from kika.ace.encoders.layout import encode_xss
+    from kika.ace.model_adapter.encode import encodeAce
+    from kika.nuclear_data.model import Regions1d, XYs1d
+
+    suite = _read(DATA / "Fe56.h5")
+    T = _kelvin(suite)[0]
+    label = next(k for k in suite.reactionByENDF_MT(2).crossSection.forms if k.startswith("heated"))
+    capture = suite.reactionByENDF_MT(102).crossSection.forms[label]
+    i = len(capture.xs) // 2
+    ys = np.array(capture.ys, dtype=float)
+    x = np.asarray(capture.xs, dtype=float)
+    ys[i] = ys[i - 1] + (ys[i + 1] - ys[i - 1]) * (x[i] - x[i - 1]) / (x[i + 1] - x[i - 1])
+    suite.reactionByENDF_MT(102).crossSection.forms[label] = XYs1d(xs=x, ys=ys, axes=capture.axes)
+    expected, _ = encodeAce(suite, T, extension=".80c")
+
+    gnds = copy.deepcopy(suite)
+    gnds.reactionByENDF_MT(102).crossSection.forms[label] = XYs1d(
+        xs=np.delete(x, i), ys=np.delete(ys, i), axes=capture.axes)
+    elastic = gnds.reactionByENDF_MT(2).crossSection.forms[label]
+    k = len(elastic.xs) // 3
+    gnds.reactionByENDF_MT(2).crossSection.forms[label] = Regions1d(function1ds=[
+        XYs1d(xs=elastic.xs[:k + 1], ys=elastic.ys[:k + 1]), XYs1d(xs=elastic.xs[k:], ys=elastic.ys[k:])],
+        axes=elastic.axes)
+    written, _ = encodeAce(gnds, T, extension=".80c")
+
+    a, b = encode_xss(expected), encode_xss(written)
+    assert list(a.nxs) == list(b.nxs) and list(a.jxs) == list(b.jxs)
+    np.testing.assert_allclose(b.xss[1:], a.xss[1:], rtol=1e-14, atol=0)

@@ -66,6 +66,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from kika.algebra.laws import LINLIN
 from kika.nuclear_data.model import AceProvenance, ConversionReport
 
 from .secondaries import DELAYED_NUBAR_LABEL, FISSION_MTS, TOTAL_NUBAR_LABEL
@@ -507,6 +508,7 @@ class _Encoder:
         self.tableAttributes = _attributes(suite)
         self.overrides = header or {}
         self.domain = (0.0, 0.0)
+        self.unionGrid = None
 
     # --- reactions -------------------------------------------------------
 
@@ -519,24 +521,60 @@ class _Encoder:
                 out[int(node.ENDF_MT)] = (container, node)
         return out
 
+    def flat(self, form, what):
+        """The one lin-lin table ACE holds; a ``Regions1d`` is how GNDS spells a step."""
+        if isinstance(form, self.m.Regions1d):
+            x, y, pairs = form.toEndfRegions()
+            if any(code != LINLIN for _, code in pairs):
+                raise AceEncodeError(f"{what}: the {self.label!r} cross section has a region that is "
+                                     f"not lin-lin, and ACE is read lin-lin")
+            return self.m.XYs1d(xs=x, ys=y, axes=form.axes)
+        if not isinstance(form, self.m.XYs1d):
+            raise AceEncodeError(f"{what}: the {self.label!r} cross section is a {type(form).__name__}, "
+                                 f"not a table")
+        return form
+
     def xs(self, node, what):
+        """The node's cross section on its stretch of the union grid.
+
+        A table that is not a stretch of the grid -- read back from GNDS, which
+        drops an energy repeated with the same value and splits at a step -- is
+        read on the grid over its own range, with both faces at each step
+        (``sample_on_union``).
+        """
         form = node.crossSection.forms.get(self.label) if node.crossSection is not None else None
         if form is None:
             raise AceEncodeError(f"{what} has no {self.label!r} cross section")
-        if not isinstance(form, self.m.XYs1d):
-            raise AceEncodeError(f"{what}: the {self.label!r} cross section is a {type(form).__name__}, "
-                                 f"not an XYs1d on the union grid")
-        return form
+        form = self.flat(form, what)
+        grid = self.unionGrid
+        if grid is None:
+            return form
+        x = np.asarray(form.xs, dtype=float)
+        start = int(np.searchsorted(grid, x[0], side="left"))
+        if np.array_equal(grid[start:start + len(x)], x):
+            return form
+        from kika.algebra.evaluate import sample_on_union
+
+        on = grid[start:int(np.searchsorted(grid, x[-1], side="right"))]
+        return self.m.XYs1d(xs=on, ys=sample_on_union(x, form.ys, LINLIN, on), axes=form.axes)
 
     def grid(self, nodes) -> np.ndarray:
-        longest = None
+        """The longest table when every other is a suffix of it, else the union that keeps steps."""
+        tables = []
         for mt, (_, node) in nodes.items():
             form = node.crossSection.forms.get(self.label) if node.crossSection is not None else None
-            if isinstance(form, self.m.XYs1d) and (longest is None or len(form.xs) > len(longest)):
-                longest = np.asarray(form.xs, dtype=float)
-        if longest is None:
+            if isinstance(form, (self.m.XYs1d, self.m.Regions1d)):
+                tables.append(np.asarray(self.flat(form, f"MT{mt}").xs, dtype=float))
+        if not tables:
             raise AceEncodeError(f"no cross section under {self.label!r}")
-        return longest
+        longest = max(tables, key=len)
+        if all(np.array_equal(longest[len(longest) - len(x):], x) for x in tables):
+            self.unionGrid = longest
+        else:
+            from kika.algebra.grid import union
+
+            self.unionGrid = union(tables)
+        return self.unionGrid
 
     def suffix(self, grid, form, what) -> int:
         """IE - 1: where ``form`` starts on the grid, checked to be a suffix of it."""
