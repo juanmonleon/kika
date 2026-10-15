@@ -85,7 +85,8 @@ def extract(suite):
 def write(root,saved,report):
     if not saved:return
     from .encode import _function
-    application=ET.SubElement(root,'applicationData')
+    application=root.find('applicationData')
+    if application is None:application=ET.SubElement(root,'applicationData')
     institution=ET.SubElement(application,'institution',label=LABEL)
     channels=[s for s in saved if s[0] not in (URR,URRPOT,URRWIDTH)];urr=[s for s in saved if s[0]==URR]
     widths=[s for s in saved if s[0]==URRWIDTH]

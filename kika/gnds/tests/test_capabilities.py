@@ -262,7 +262,9 @@ def test_the_bridge_joined_something():
         f"{len(BRIDGED)} registry tags are schema nodes; the two tables were "
         f"written against 42, and E4b's thermal-scattering nodes added ten"
     )
-    assert len(UNBRIDGED) == 12
+    # Twelve, and two more since roadmap A11: xs_pdf_cdf1d and energyAngularMC,
+    # which FUDGE writes and its 6.10.0 schema does not declare.
+    assert len(UNBRIDGED) == 14
 
 
 def test_a_paired_entry_turned_neither_fails_the_bridge():

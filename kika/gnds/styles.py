@@ -20,7 +20,8 @@ from kika.gnds.nodes import reads, writes
 from kika.nuclear_data.model import (ConversionReport, CrossSectionReconstructed,
                                      Evaluated, Heated, PhysicalQuantity, RangeQuantity,
                                      Style, Styles, TargetInfo, TargetInfoElement,
-                                     TargetInfoNuclide)
+                                     TargetInfoNuclide, URR_probabilityTables)
+from kika.nuclear_data.model.styles import MonteCarlo_cdf
 
 __all__ = ["STYLES", "WRITABLE_STYLES", "readStyles", "writeStyles",
            "readPhysicalQuantity", "readRange"]
@@ -30,6 +31,9 @@ STYLES = {
     "evaluated": Evaluated,
     "crossSectionReconstructed": CrossSectionReconstructed,
     "heated": Heated,
+    # In RS_StylesType of FUDGE's current gnds.xsd (label, date, derivedFrom).
+    "MonteCarlo_cdf": MonteCarlo_cdf,
+    "URR_probabilityTables": URR_probabilityTables,
 }
 
 #: Writer vocabulary derived from the model. Some other styles still have no
