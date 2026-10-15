@@ -408,35 +408,38 @@ def _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,opt
         j=where[mt]
         column=np.repeat(constant[:,j],lengths)
         sampled=np.repeat(constant[:,j],np.diff(panels))[:,None]*np.ones(probes.shape[1])
-        users=np.flatnonzero(deferred_in[:,j]).tolist()
-        # The users of each curve: a reaction cut at its jumps has a curve per
-        # piece, read once for all the segments of that piece.
-        by_curve={};alone=[]
-        for k in users:
-            r=spans[k][2][mt];curve=getattr(r,'curve',None)
-            if curve is None:alone.append((k,r))
-            else:by_curve.setdefault(id(curve),(curve,[]))[1].append((k,r))
-        for curve,members in by_curve.values():
-            # Every user's nodes, then every user's probes, read at once
-            # (the read is elementwise); a segment closed on the left at its
-            # high reads that high's left neighbour, as its reader does.
-            at=np.array([k for k,_ in members])
-            node_at=_ranges(starts[at],starts[at+1]);panel_at=_ranges(panels[at],panels[at+1])
-            e=np.r_[result.x[node_at],probes[panel_at].ravel()]
-            closed=[(k,r.left_high) for k,r in members if r.left_high is not None]
-            if closed:
-                owner=np.r_[np.repeat(at,lengths[at]),np.repeat(at,np.diff(panels)[at]*probes.shape[1])]
-                high=np.full(len(xs),np.nan);toward=np.full(len(xs),np.nan)
-                for k,(h,l) in closed:high[k]=h;toward[k]=l
-                hit=e==high[owner]
-                e[hit]=np.nextafter(high[owner][hit],toward[owner][hit])
-            values=np.asarray(curve.evaluate(e),dtype=float)
-            column[node_at]=values[:len(node_at)];sampled[panel_at]=values[len(node_at):].reshape(len(panel_at),-1)
-        if alone:
-            for k,r in alone:
-                p0,p1=panels[k],panels[k+1];n=lengths[k]
-                v=np.asarray(r(np.r_[result.x[starts[k]:starts[k+1]],probes[p0:p1].ravel()]),dtype=float)
-                column[starts[k]:starts[k+1]]=v[:n];sampled[p0:p1]=v[n:].reshape(probes[p0:p1].shape)
+        users=np.flatnonzero(deferred_in[:,j])
+        readers=[spans[k][2][mt] for k in users.tolist()]
+        # Every user's nodes and probes, laid out once; a segment closed on
+        # the left at its high reads that high's left neighbour, as its
+        # reader does. The read is elementwise.
+        sizes=lengths[users];counts=np.diff(panels)[users]
+        node_at=_ranges(starts[users],starts[users+1]);panel_at=_ranges(panels[users],panels[users+1])
+        e_nodes=result.x[node_at];e_probes=probes[panel_at]
+        closed=[(u,r.left_high) for u,r in enumerate(readers) if getattr(r,'left_high',None) is not None]
+        if closed:
+            high=np.full(len(users),np.nan);toward=np.full(len(users),np.nan)
+            for u,(h,l) in closed:high[u]=h;toward[u]=l
+            for e,owner in ((e_nodes,np.repeat(np.arange(len(users)),sizes)),(e_probes,np.repeat(np.arange(len(users)),counts))):
+                hit=e==(high[owner] if e.ndim==1 else high[owner][:,None])
+                rows_hit=np.nonzero(hit)[0]
+                e[hit]=np.nextafter(high[owner][rows_hit],toward[owner][rows_hit])
+        node_end=np.r_[0,np.cumsum(sizes)];panel_end=np.r_[0,np.cumsum(counts)]
+        # A reaction cut at its jumps has a curve per piece: each run of
+        # users of one curve is read in one call.
+        u=0
+        while u<len(users):
+            curve=getattr(readers[u],'curve',None);v=u+1
+            if curve is None:
+                k=int(users[u]);p0,p1=panels[k],panels[k+1];n=lengths[k]
+                value=np.asarray(readers[u](np.r_[result.x[starts[k]:starts[k+1]],probes[p0:p1].ravel()]),dtype=float)
+                column[starts[k]:starts[k+1]]=value[:n];sampled[p0:p1]=value[n:].reshape(probes[p0:p1].shape)
+                u=v;continue
+            while v<len(users) and getattr(readers[v],'curve',None) is curve:v+=1
+            a,b=node_end[u],node_end[v];c,d=panel_end[u],panel_end[v]
+            value=np.asarray(curve.evaluate(np.r_[e_nodes[a:b],e_probes[c:d].ravel()]),dtype=float)
+            column[node_at[a:b]]=value[:b-a];sampled[panel_at[c:d]]=value[b-a:].reshape(d-c,-1)
+            u=v
         y[mt]=column;late_samples[mt]=sampled
         late_nodes[mt]=np.stack([column[pos],column[pos+1]],axis=1)
     table=dict(x=result.x,lengths=lengths,y=y,constant=constant)

@@ -210,6 +210,23 @@ _GROUP=object()
 #: What a mapping lookup returns for a missing key.
 _ABSENT=object()
 
+
+class _DeferredRead:
+    """A deferred column's reader on one segment: its curve, at the left
+    neighbour of the segment's high where the segment is closed on the
+    left there (*left_high* is that ``(high, low)``, or None). The curve
+    and the edge are what a caller reading many segments at once needs."""
+    __slots__=('curve','left_high')
+
+    def __init__(self,curve,left_high):
+        self.curve=curve;self.left_high=left_high
+
+    def __call__(self,e):
+        e=np.asarray(e,dtype=float).copy()
+        if self.left_high is not None:
+            high,low=self.left_high;e[e==high]=np.nextafter(high,low)
+        return self.curve.evaluate(e)
+
 #: The constants of a request that declares none: one object, so that the
 #: plans keyed on it are made once.
 _NO_CONSTANTS=MappingProxyType({})
@@ -1267,15 +1284,9 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # Source knots are included in seeds, so these untouched columns
         # are affine inside each seed panel. Still check all seven final
         # probes; a failure falls back to the full adaptive column set.
+        closed=(s.high,s.low) if s.left_high else None
         for row in np.flatnonzero(deferred_rows[position]).tolist():
-            key=names[row];curve=s.curves[key]
-            def read(e,curve=curve,s=s):
-                e=np.asarray(e,dtype=float).copy()
-                if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
-                return curve.evaluate(e)
-            # What the reader is, for a caller that reads many at once.
-            read.curve=curve;read.left_high=(s.high,s.low) if s.left_high else None
-            deferred[key]=read
+            key=names[row];deferred[key]=_DeferredRead(s.curves[key],closed)
         work=min(len(seeds),max(1,options.max_work_bytes//1024))*(len(s.curves)-len(constants)-len(deferred)+1)*1024
         pending[position]=(constants,work)
         # Diagnose the evaluated aggregate against exclusive leaves. Output
@@ -1484,8 +1495,6 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             raise ReconstructionConvergenceError('refinement exceeds max_points',category='budget-exhausted')
     axes=Axes([Axis(1,'energy_in','eV'),Axis(0,'crossSection','b')]);output={};minima={}
     from kika.algebra import compress_flat_pieces
-    owned=[{physical_owners.get(mt) for mt in region_mts(s.region)} if s.region is not None else set()
-           for s in segments]
     lows=np.array([x[0] for x in tables]);highs=np.array([x[-1] for x in tables])
     ordered=[units[i] for i in sorted(units)]
     grid=np.concatenate([u['x'] for u in ordered]);lengths=np.concatenate([u['lengths'] for u in ordered])
@@ -1528,13 +1537,15 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             # representation on its own knots. It need not inherit every
             # other reaction's resonance or fast-region knot. The segments
             # that read one curve are done together.
-            by_curve={}
-            for i in np.flatnonzero(np.isnan(values)).tolist():
-                s=segments[i];curve=s.curves[key]
-                if curve is None or key in owned[i]:continue
-                by_curve.setdefault(id(curve),(curve,[]))[1].append(i)
-            for curve,where in by_curve.values():
-                table=_own_knots(curve,[segments[i] for i in where],where)
+            # (Its curve on each segment where it is not a constant and its
+            # physics does not own it, grouped by curve, segments in order.)
+            row=rows[key];index=indices[row]
+            pick=np.flatnonzero(np.isnan(values)&(index>=0)&free_of[row])
+            order_=pick[np.argsort(index[pick],kind='stable')]
+            for where in np.split(order_,np.flatnonzero(np.diff(index[order_]))+1):
+                if not len(where):continue
+                where=where.tolist()
+                table=_own_knots(choices[row][index[where[0]]],[segments[i] for i in where],where)
                 if len(table[0]):own.append(table)
         if own:
             # Those segments' tables in place of theirs on the common grid:
