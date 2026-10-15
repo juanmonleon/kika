@@ -31,6 +31,8 @@ def _run(compiler=None):
         ['kika/processing/doppler/_doppler_native.c']), Extension(
         'kika.processing._thermal_native',
         ['kika/processing/_thermal_native.c']), Extension(
+        'kika.processing._heating_native',
+        ['kika/processing/_heating_native.c']), Extension(
         'kika.algebra._polynomial_native',
         ['kika/algebra/_polynomial_native.c'])]})
     command=StrictBuild(distribution)

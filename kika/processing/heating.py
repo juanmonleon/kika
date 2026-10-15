@@ -40,6 +40,8 @@ fallback for a section without them (one isotropic emission for neutrons,
 """
 from __future__ import annotations
 
+import contextvars
+import os
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -65,6 +67,40 @@ HEATR_APPROXIMATIONS = (
     "damage of particle emission: capdam's single particle at min(Q + AE/(A+1), Coulomb "
     "barrier), deuterons and alphas of a continuum taken as protons",
 )
+
+from importlib import import_module
+try:
+    _heating_native = import_module("kika.processing._heating_native")
+except ModuleNotFoundError as exc:  # the NumPy reference path stays the definition
+    if exc.name != "kika.processing._heating_native":
+        raise
+    _heating_native = None
+if _heating_native is not None and _heating_native.API_VERSION != 1:
+    raise ImportError("rebuild kika's native heating extension (API version mismatch)")
+
+#: Threads for the independent incident energies of a damage quadrature: set by
+#: heatingOf from the processing's ``workers`` for the length of one call.
+_energyThreads = contextvars.ContextVar("kika_heating_threads", default=1)
+
+
+def _evaluateAll(at, energies) -> np.ndarray:
+    """``[at(E) for E in energies]``, the distinct energies computed on threads.
+
+    ``at`` is a pure, memoised function of one energy whose heavy part runs in
+    the native kernel without the GIL, so the values are those of the
+    sequential loop whatever thread computes them. An energy that fails raises
+    as it would there.
+    """
+    energies = [float(E) for E in energies]
+    distinct = list(dict.fromkeys(energies))
+    threads = _energyThreads.get()
+    if threads > 1 and len(distinct) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(threads, len(distinct))) as pool:
+            for _ in pool.map(at, distinct):
+                pass
+    return np.array([at(E) for E in energies])
+
 
 _GL4 = np.polynomial.legendre.leggauss(4)
 _GL8 = np.polynomial.legendre.leggauss(8)
@@ -227,14 +263,20 @@ def displacementEnergy(Z: int) -> float:
     return float(table.get(int(Z), 25))
 
 
+def _lindhardConstants(Zr, Ar, Zl, Al):
+    """``(el, fl)`` of :func:`lindhard`'s partition, which the native kernel takes as given."""
+    el = 30.724 * Zr * Zl * np.sqrt(Zr ** (2 / 3) + Zl ** (2 / 3)) * (Ar + Al) / Al
+    denom = (Zr ** (2 / 3) + Zl ** (2 / 3)) ** 0.75 * Ar ** 1.5 * np.sqrt(Al)
+    fl = 0.0793 * Zr ** (2 / 3) * np.sqrt(Zl) * (Ar + Al) ** 1.5 / denom
+    return el, fl
+
+
 def lindhard(E, Zr, Ar, Zl, Al, ed):
     """Damage energy of a recoil ``(Zr, Ar)`` of energy ``E`` in a lattice ``(Zl, Al)`` (``df``)."""
     E = np.asarray(E, dtype=float)
     if Zr == 0:
         return np.zeros_like(E)
-    el = 30.724 * Zr * Zl * np.sqrt(Zr ** (2 / 3) + Zl ** (2 / 3)) * (Ar + Al) / Al
-    denom = (Zr ** (2 / 3) + Zl ** (2 / 3)) ** 0.75 * Ar ** 1.5 * np.sqrt(Al)
-    fl = 0.0793 * Zr ** (2 / 3) * np.sqrt(Zl) * (Ar + Al) ** 1.5 / denom
+    el, fl = _lindhardConstants(Zr, Ar, Zl, Al)
     if E.ndim == 0:
         ep = np.maximum(E, 0.0) / el
         out = E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
@@ -761,6 +803,25 @@ def _distribution(product):
 # Damage per path
 # ----------------------------------------------------------------------
 
+def _twoBodyChunk(cuts,u,w,x,p,offset,slope,partition,ed,hist):
+    """One angular quadrature of :func:`_twoBodyDamage` before its mass division:
+    Gauss nodes ``u``/``w`` on each panel between ``cuts``, the recoil
+    ``offset - slope*mu`` through :func:`lindhard`. Native when built;
+    :func:`_twoBodyChunkNumpy` is the definition."""
+    if _heating_native is None:
+        return _twoBodyChunkNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist)
+    el,fl=(float(c) for c in _lindhardConstants(*partition))
+    return _heating_native.twobody_chunk(cuts,u,w,x,p,float(offset),float(slope),el,fl,float(ed),bool(hist))
+
+
+def _twoBodyChunkNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist):
+    half=np.diff(cuts)/2;mid=(cuts[:-1]+cuts[1:])/2
+    mu=mid[:,None]+half[:,None]*u
+    if hist:density=p[np.clip(np.searchsorted(x,mu,side='right')-1,0,len(p)-1)]
+    else:density=np.interp(mu,x,p)
+    return float(np.sum(half[:,None]*w*density*lindhard(np.maximum(offset-slope*mu,0.),*partition,ed)))
+
+
 def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  """Two-body recoil damage on normalized angular panels.
 
@@ -799,13 +860,11 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
    if weight==0:continue
    if isotropic:x=np.array([-1.,1.]);p=np.array([.5,.5]);hist=False;norm=1.
    else:x,p,hist,norm=data[idx]
-   cuts=np.unique(np.r_[-1.,x[(x>-1)&(x<last)],mcuts,last]);half=np.diff(cuts)/2;mid=(cuts[:-1]+cuts[1:])/2
+   cuts=np.unique(np.r_[-1.,x[(x>-1)&(x<last)],mcuts,last])
    previous=None
    for n in (8,16,32,64):
-    u,w=gauss[n];mu=mid[:,None]+half[:,None]*u
-    if hist:density=p[np.clip(np.searchsorted(x,mu,side='right')-1,0,len(p)-1)]
-    else:density=np.interp(mu,x,p)
-    integral=float(np.sum(half[:,None]*w*density*lindhard(np.maximum(offset-slope*mu,0.),Z,A,Z,A,ed)))/norm
+    u,w=gauss[n]
+    integral=_twoBodyChunk(cuts,u,w,x,p,offset,slope,(Z,A,Z,A),ed,hist)/norm
     if previous is not None and abs(integral-previous)<=.001+1e-8*abs(integral):break
     previous=integral
    else:raise ValueError('two-body damage angular quadrature did not converge')
@@ -816,9 +875,10 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=2.),cutoff,threshold]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
  for edge in (cutoff,threshold):
   if lo<edge<=hi:nodes=np.unique(np.r_[nodes,np.nextafter(edge,-np.inf)])
- values=np.array([at(float(E)) for E in nodes])
+ values=_evaluateAll(at,nodes)
  for _ in range(30):
   additions={}
+  _evaluateAll(at,[float(a+(b-a)*fraction) for a,b in zip(nodes[:-1],nodes[1:]) for fraction in (.25,.5,.75)])
   for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
    for fraction in (.25,.5,.75):
     e=float(a+(b-a)*fraction)
@@ -864,6 +924,38 @@ def _emissionDamage(form, grid, A, Z, ed):
     return _tabulatedEmissionDamage(spectrum, grid, A, Z, ed)
 
 
+def _emissionChunk(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed,partition,hist,lab):
+    """One chunk of :func:`_tabulatedEmissionDamage`'s quadrature: the panels between
+    ``cuts`` (outgoing energies; Gauss nodes ``g``/``w`` in sqrt(E')) and, unless
+    ``lab``, the recoil angle (nodes ``mu``/``wm``), each recoil through
+    :func:`lindhard` with ``partition = (Zr, Ar, Zl, Al)``. The native kernel does
+    it operation for operation; :func:`_emissionChunkNumpy` is the definition."""
+    if _heating_native is None:
+        return _emissionChunkNumpy(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed,partition,hist,lab)
+    noRecoil=partition[0]==0
+    el,fl=(1.,1.) if noRecoil else (float(c) for c in _lindhardConstants(*partition))
+    return _heating_native.emission_chunk(cuts,g,w,mu,wm,x,p,float(low),float(width),float(oldwidth),
+        float(incident),float(denominator),float(denominator*ed),el,fl,float(ed),bool(hist),bool(lab),noRecoil)
+
+
+def _emissionChunkNumpy(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed,partition,hist,lab):
+    aa=np.sqrt(cuts[:-1]);bb=np.sqrt(cuts[1:]);half=(bb-aa)/2
+    v=(aa[:,None]+bb[:,None])/2+half[:,None]*g;ep=v*v
+    source=x[0]+(ep-low)*oldwidth/width
+    if hist:
+        pos=np.clip(np.searchsorted(x,source,side='right')-1,0,len(x)-2);density=p[pos]
+    else:density=np.interp(source,x,p)
+    if lab:
+        # In the laboratory frame the particle energy is angle independent.
+        angular=lindhard(ep,*partition,ed)
+    else:
+        root=np.sqrt(incident*ep);last=np.clip(np.divide(incident+ep-denominator*ed,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
+        angle=(last[...,None]-1)/2+(last[...,None]+1)/2*mu
+        recoil=np.maximum(0.,(incident+ep[...,None]-2*root[...,None]*angle)/denominator)
+        angular=np.sum(wm*lindhard(recoil,*partition,ed),axis=-1)*(last+1)/4
+    return float(np.sum(w*half[:,None]*2*v*density*oldwidth/width*angular))
+
+
 def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
     """Controlled tabulated recoil or particle damage with actual incident energy.
 
@@ -892,6 +984,7 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
         if not width>0 or not norm>0:raise ValueError('tabulated recoil spectrum requires positive width and mass')
         prepared.append((x,p/norm,hist,width))
     gauss={n:np.polynomial.legendre.leggauss(n) for n in (8,16,32,64,128)}
+    lab=particle is not None and incidentFactor==0.
     @lru_cache(maxsize=30000)
     def at(E):
         j=int(np.clip(np.searchsorted(energies,E,side='right')-1,0,len(tables)-1));k=min(j+1,len(tables)-1)
@@ -910,21 +1003,8 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
                 cuts=cuts[(cuts>=mapped[0])&(cuts<=mapped[-1])]
                 for start in range(0,len(cuts)-1,256):
                     stop=min(start+256,len(cuts)-1)
-                    aa=np.sqrt(cuts[start:stop]);bb=np.sqrt(cuts[start+1:stop+1]);half=(bb-aa)/2
-                    v=(aa[:,None]+bb[:,None])/2+half[:,None]*g;ep=v*v
-                    source=x[0]+(ep-low)*oldwidth/width
-                    if hist:
-                        pos=np.clip(np.searchsorted(x,source,side='right')-1,0,len(x)-2);density=p[pos]
-                    else:density=np.interp(source,x,p)
-                    if particle is not None and incidentFactor==0.:
-                        # In the laboratory frame the particle energy is angle independent.
-                        angular=lindhard(ep,recoilZ,recoilA,Z,A,ed)
-                    else:
-                        root=np.sqrt(incident*ep);last=np.clip(np.divide(incident+ep-denominator*ed,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
-                        angle=(last[...,None]-1)/2+(last[...,None]+1)/2*mu
-                        recoil=np.maximum(0.,(incident+ep[...,None]-2*root[...,None]*angle)/denominator)
-                        angular=np.sum(wm*lindhard(recoil,recoilZ,recoilA,Z,A,ed),axis=-1)*(last+1)/4
-                    value+=weight*float(np.sum(w*half[:,None]*2*v*density*oldwidth/width*angular))
+                    value+=weight*_emissionChunk(cuts[start:stop+1],g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed,
+                                                 (recoilZ,recoilA,Z,A),bool(hist),lab)
             if previous is not None and abs(value-previous)<=.01+1e-5*abs(value):return value
             previous=value
         raise ValueError('tabulated recoil damage quadrature did not converge')
@@ -933,9 +1013,10 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
     nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=4.)]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
     if flat:
         left=np.nextafter(energies[1:],-np.inf);nodes=np.unique(np.r_[nodes,left[(left>lo)&(left<hi)]])
-    values=np.array([at(float(E)) for E in nodes])
+    values=_evaluateAll(at,nodes)
     for iteration in range(30):
         additions={}
+        _evaluateAll(at,[float(a+(b-a)*f) for a,b in zip(nodes[:-1],nodes[1:]) for f in (.25,.5,.75)])
         for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
             for f in (.25,.5,.75):
                 E=float(a+(b-a)*f)
@@ -1394,7 +1475,23 @@ def fissionPhotonKerma(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float)
     return term
 
 
-def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
+def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, workers: Optional[int] = None,
+              **options) -> HeatingResult:
+    """Run :func:`_heatingOf` with its damage quadratures on ``workers`` threads.
+
+    ``workers`` is the processing's own count, ``min(cpus, 8)`` when not given,
+    as for the Doppler broadening; 1 keeps every energy on this thread. The
+    result does not depend on it.
+    """
+    count = min(os.cpu_count() or 1, 8) if workers is None else max(1, int(workers))
+    token = _energyThreads.set(count)
+    try:
+        return _heatingOf(suite, grid, sigma, **options)
+    finally:
+        _energyThreads.reset(token)
+
+
+def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
               qm: Optional[Dict[int, float]] = None, ed: Optional[float] = None,
               qa: Optional[Dict[int, float]] = None, qbar: Optional[Dict[int, object]] = None,
               evaluation=None, zaTarget: Optional[int] = None,

@@ -938,7 +938,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     wanted = [p for p in ("kerma", "damage") if p not in omit]
     if wanted:
         _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report,
-                       heatingPartials=heatingPartials, qa=qa, qbar=qbar)
+                       heatingPartials=heatingPartials, qa=qa, qbar=qbar, workers=workers)
     # The URR tables name the reaction whose smooth cross section stands for
     # the inelastic competition, and the C++ requires it to exist
     # (nuclide.cpp:308-320): MT4 is written for that, as the official exporter
@@ -1622,7 +1622,7 @@ def _totalOn(out, T, grid):
 
 
 def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report,
-                   heatingPartials=(), qa=None, qbar=None):
+                   heatingPartials=(), qa=None, qbar=None, workers=None):
     """MT301, MT901 and MT444 by :func:`kika.processing.heating.heatingOf`, plus fission.
 
     The fission part comes from MF1/458. For 901 it is ``(EFR + EGP + EGD + EB)·σ_f``.
@@ -1670,7 +1670,8 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                 values[len(grid) - len(form):] = form.ys
                 sigma[reaction.ENDF_MT] = values
         result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, ed=ed, evaluation=work,
-                           zaTarget=1000 * Z + A, qa=qa, qbar=qbar, kinematic=443 in heatingPartials)
+                           zaTarget=1000 * Z + A, qa=qa, qbar=qbar, kinematic=443 in heatingPartials,
+                           workers=workers)
         notes = result.notes
         if "kerma" in wanted:
             nonlocal_ = result.kerma

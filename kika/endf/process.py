@@ -1180,7 +1180,7 @@ def _heating(run, plan, report):
         for i, T in enumerate(temps):
             grid, sigma = _heating_grid(run, T)
             result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, evaluation=work,
-                               zaTarget=1000 * Z + A)
+                               zaTarget=1000 * Z + A, workers=plan.workers)
             kerma = result.kerma
             fission = _fission_heating(out, work, grid, sigma, awr)
             if fission is not None:
