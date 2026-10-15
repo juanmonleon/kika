@@ -115,6 +115,7 @@ def prepare_rml(region, resonances, context, notes):
         if sg.atomicWeightRatio not in (None, context.atomic_weight_ratio):
             raise ValueError('RML group AWRI disagrees with incident context')
         channels = []; indexes = []; capture = []; entrances = []; identities = set()
+        parity = sg.parity; physical_seen = False
         for index, ch in enumerate(sg.channels):
             if ch.resonanceReaction not in reactions:
                 raise ValueError('unknown RML resonance reaction')
@@ -191,8 +192,18 @@ def prepare_rml(region, resonances, context, notes):
                         raise UnsupportedResonanceError('neutron channels require a neutral neutron ejectile')
                 elif a.charge*b.charge<=0:
                     raise UnsupportedResonanceError('charged exit MT requires a repulsive charged pair')
-                if sg.parity is not None and sg.parity != a.parity*b.parity*(-1)**l:
-                    raise ValueError('group parity disagrees with physical channel')
+                implied = a.parity*b.parity*(-1)**l
+                if parity != implied:
+                    # J=0 has no sign to carry parity, so ENDF puts it in PJ, a
+                    # label the channels already fix. Rh-103 (ENDF/B-VIII.1 and
+                    # JEFF-4.0) writes PJ=+1 on both J=0 groups, one of them
+                    # n + 1/2- at L=0; read as written the two would merge into
+                    # one coherent sector. The channels decide; they must agree.
+                    if sg.spin != 0 or physical_seen:
+                        raise ValueError('group parity disagrees with physical channel')
+                    notes.append(f'RML J=0 group {sg.label}: PJ={parity:+d} contradicts its channels; parity {implied:+d} taken from them')
+                    parity = implied
+                physical_seen = True
                 if rr.Q is None or not math.isfinite(rr.Q):
                     raise ValueError('RML physical pair needs a finite declared Q [eV]')
                 q = rr.Q
@@ -261,6 +272,9 @@ def prepare_rml(region, resonances, context, notes):
         for er, row in zip(sg.energies, sg.widths):
             if len(row) != len(sg.channels) or not all(math.isfinite(v) for v in [er,*row]):
                 raise ValueError('nonfinite/malformed RML row')
+            # A table may hold integers (Sr-88 of ENDF/B-VIII.1: E_lambda =
+            # 13840); the native kernels take float64 only.
+            er = float(er); row = [float(v) for v in row]
             gg = (2*row[capture[0]]**2 if f.reducedWidthAmplitudes else abs(row[capture[0]])) if eliminated_capture else 0.
             amplitudes = []; physical = []
             for i,ch in zip(indexes,channels):
@@ -309,7 +323,7 @@ def prepare_rml(region, resonances, context, notes):
                                 sum(v for v,c in zip(physical,channels) if c.mt not in (2,18))))
         first = channels[entrances[0]]
         prepared.append(RMLGroup(first.l, first.radius, first.phase_radius, tuple(levels), context=context,
-            spin=sg.spin, channels=tuple(channels), reduced=tuple(reduced), radiation=tuple(radiation), entrances=tuple(entrances),parity=sg.parity))
+            spin=sg.spin, channels=tuple(channels), reduced=tuple(reduced), radiation=tuple(radiation), entrances=tuple(entrances),parity=parity))
     if not prepared:raise ValueError('RML requires groups')
     # ENDF may split the same J/parity across channel-spin records. Rebuild
     # one sector, zero-extending each row to its union of declared channels.

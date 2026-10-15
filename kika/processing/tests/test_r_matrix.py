@@ -373,6 +373,46 @@ def test_missing_rml_parity_is_rejected():
         prepare_resonances(source,ctx)
 
 
+def _j0_model(parity):
+    # n(1/2+) + target(1/2+) at L=0, s=0: J=0 and parity +1, fixed by the channels.
+    source,ctx = rml_model()
+    sg = source.resolved[0].formalism.spinGroups[0]
+    sg.spin = 0.; sg.parity = parity
+    for ch in sg.channels[:2]:ch.channelSpin = 0.
+    return source,ctx
+
+
+def test_j0_parity_comes_from_the_channels_when_pj_contradicts_them():
+    """Rh-103 (ENDF/B-VIII.1, JEFF-4.0) writes PJ=+1 on a J=0 group whose
+    n + 1/2- channel at L=0 is odd. J=0 has no sign to carry parity, so the
+    channels decide, and the substitution is noted."""
+    e = np.array([30.,100.,100.1,250.])
+    expected = prepare_resonances(*_j0_model(1)).evaluate(e)
+    prepared = prepare_resonances(*_j0_model(-1))
+    assert prepared.regions[0].groups[0].parity == 1
+    assert any('PJ=-1 contradicts its channels' in n for n in prepared.preparation_notes)
+    for mt,value in expected.items():np.testing.assert_array_equal(value,prepared.evaluate(e)[mt])
+
+
+def test_nonzero_spin_parity_contradicting_its_channels_is_still_rejected():
+    source,ctx = rml_model()
+    source.resolved[0].formalism.spinGroups[0].parity = -1
+    with pytest.raises(ValueError,match='group parity disagrees'):
+        prepare_resonances(source,ctx)
+
+
+def test_an_integer_level_table_is_read_as_float():
+    """Sr-88 of ENDF/B-VIII.1 reached the native kernel with int64 level
+    energies (E_lambda = 13840) and was refused."""
+    e = np.array([30.,100.,250.])
+    source,ctx = rml_model(); source.resolved[0].formalism.spinGroups[0].energies = [100,101]
+    reference,_ = rml_model(); reference.resolved[0].formalism.spinGroups[0].energies = [100.,101.]
+    prepared = prepare_resonances(source,ctx)
+    assert all(type(lv.energy) is float for lv in prepared.regions[0].groups[0].levels)
+    for mt,value in prepare_resonances(reference,ctx).evaluate(e).items():
+        np.testing.assert_array_equal(value,prepared.evaluate(e)[mt])
+
+
 def test_active_open_channel_underflow_is_rejected_but_closed_channel_is_retained(monkeypatch):
     from kika.processing.resonances import r_matrix
     original = r_matrix.neutral_channel_functions

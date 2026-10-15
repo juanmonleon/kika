@@ -1024,8 +1024,11 @@ def gndsDate(edate: Optional[str], report: Optional[ConversionReport] = None
             year += 2000 if year < 50 else 1900
         return f"{year:04d}-{_MONTHS[found.group(1).upper()]:02d}-01"
     if report is not None:
+        # A missing date changes no physics: W-182/184/186 and Gd-155/157
+        # were refused reconstruction on their EDATE text alone.
         report.lost(f"MF1/451 EDATE {text!r} names no month and year, so the "
-                    f"evaluated style has no date (GNDS requires one)")
+                    f"evaluated style has no date (GNDS requires one)",
+                    unaffectedScopes=("cross-sections",))
     return None
 
 

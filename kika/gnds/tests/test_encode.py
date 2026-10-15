@@ -709,6 +709,19 @@ def test_an_endf_edate_becomes_the_xs_date_fudge_writes(edate, date):
     assert gndsDate(edate) == date
 
 
+def test_an_edate_with_no_date_is_a_loss_that_leaves_cross_sections_clean():
+    """W-182/184/186 and Gd-155/157 were refused reconstruction because their
+    EDATE ('Eval090806', 'NEA,INFN M') names no month and year. The loss is
+    reported; it changes no cross section."""
+    from kika.endf.model_adapter.decode import gndsDate
+    from kika.nuclear_data.model.conversion import ConversionReport
+
+    report = ConversionReport()
+    assert gndsDate("Eval090806", report) is None
+    assert report.losses and not report.isClean
+    assert report.isCleanFor("cross-sections")
+
+
 #: D25. What is wrong with a ``covarianceSuite`` **written from an ENDF decode**,
 #: by kind. **Empty, and it was two.** Both were the same shape of hole — an
 #: attribute §25 makes required that the ENDF side has no concept of and
