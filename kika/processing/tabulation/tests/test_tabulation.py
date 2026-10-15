@@ -61,14 +61,22 @@ def test_histogram_cdf_and_discrete_lines():
     assert table.cdf[1] == pytest.approx(0.5 / total)
 
 
-def test_angular_regions_take_the_boundary_once():
+def test_angular_regions_retain_both_sides_of_a_boundary():
     low = m.XYs2d(function1ds=[m.Legendre(coefficients=np.array([1.0]), outerDomainValue=1.0),
                                m.Legendre(coefficients=np.array([1.0, 0.1]), outerDomainValue=2.0)])
     high = m.XYs2d(function1ds=[m.XYs1d(xs=[-1, 1], ys=[0.4, 0.6], outerDomainValue=2.0),
                                 m.XYs1d(xs=[-1, 1], ys=[0.3, 0.7], outerDomainValue=3.0)])
     form, _ = tabulateAngular(m.Regions2d(function2ds=[low, high]))
-    assert [t.outerDomainValue for t in form.function1ds] == [1.0, 2.0, 3.0]
-    assert form.function1ds[1].pdf[-1] == pytest.approx(0.6)
+    assert [t.outerDomainValue for t in form.function1ds] == [1.0, np.nextafter(2., -np.inf), 2.0, 3.0]
+    assert form.function1ds[2].pdf[-1] == pytest.approx(0.6)
+    from kika.processing.heating import _meanMu
+    from kika.hdf5.distributions import encodeAngle, decodeAngle
+    E = np.array([1.5, np.nextafter(2., -np.inf), 2., 2.5])
+    expected = [0.05, 0.1, 1./15., 0.1]
+    np.testing.assert_allclose(_meanMu(form, E), expected, rtol=0., atol=1e-6)
+    decoded = decodeAngle(encodeAngle(form))
+    np.testing.assert_array_equal([t.outerDomainValue for t in decoded.function1ds], [1., np.nextafter(2., -np.inf), 2., 3.])
+    np.testing.assert_allclose(_meanMu(decoded, E), expected, rtol=0., atol=1e-6)
 
 
 def test_evaporation_table_from_a_law():
@@ -120,6 +128,46 @@ def test_energy_angular_legendre_becomes_mc():
         _assertTable(t)
 
 
+@pytest.mark.parametrize('field', ['correlatedRtol', 'correlatedAtol'])
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -1.])
+def test_correlated_accuracy_cannot_be_silently_disabled_by_nonfinite_or_negative_values(field, value):
+    from kika.processing.tabulation.tables import TabulationOptions
+    with pytest.raises(ValueError, match='finite and nonnegative'):
+        TabulationOptions(**{field: value})
+
+
+
+def test_angular_moment_control_matches_clipped_polynomial_integrals():
+    from kika.processing.tabulation.angular import muTable, _tableMoments
+    # p(mu)=1.5*mu, clipped positive on [0,1], with moments 2/3 and 1/2.
+    form = m.Legendre(coefficients=[0., 1.])
+    table, clipped = muTable(form, TabulationOptions(angularMomentAtol=1e-6))
+    assert clipped
+    assert np.allclose(_tableMoments(table), [2/3, 1/2], rtol=0, atol=1e-6)
+
+
+def test_angular_moment_control_detects_hidden_negative_interval():
+    from kika.processing.tabulation.angular import muTable
+    # p(mu)=.5 + 1.2 P2(mu), positive at +/-1, negative near zero.
+    with pytest.raises(ValueError, match="negative interval"):
+        muTable(m.Legendre(coefficients=[1., 0., .48]), TabulationOptions(negative="raise"))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.])
+def test_angular_moment_tolerance_is_validated(value):
+    with pytest.raises(ValueError, match="angular moment tolerance"):
+        TabulationOptions(angularMomentAtol=value)
+
+
+
+def test_angular_moments_catch_midpoint_cancellation_within_capacity():
+    from kika.processing.tabulation.angular import muTable, _tableMoments
+    c=[1.,.0455164863,.00692508399,.000996352270,-.00285652874,.00111578676,.00174842263]
+    table,_=muTable(m.Legendre(coefficients=c), TabulationOptions(rtol=1e-4,atol=1e-6))
+    assert len(table.xs)<500
+    assert np.allclose(_tableMoments(table), [c[1],1/3+2*c[2]/3], rtol=0,atol=1e-5)
+
+
 def test_legendre_table_keeps_the_mean_cosine_where_a_midpoint_sits_on_the_chord():
     """Fe-56 elastic at 1.438 MeV (ENDF/B-VIII.1): with three seeds and a midpoint-only
     test, [-1, 0] passed as one segment (mu = -0.5 lies on the chord) and the table's
@@ -133,3 +181,109 @@ def test_legendre_table_keeps_the_mean_cosine_where_a_midpoint_sits_on_the_chord
     mu, cdf = np.asarray(table.xs), np.asarray(table.cdf)
     mean = float(np.sum(np.diff(cdf) * 0.5 * (mu[1:] + mu[:-1])))
     assert mean == pytest.approx(a[1], abs=2e-3)
+
+
+def test_angular_boundary_coordinates_match_openmc_lower_bound_without_source_edits():
+    low = m.XYs2d(function1ds=[m.Legendre(coefficients=[1.], outerDomainValue=1.),
+                              m.Legendre(coefficients=[1., .1], outerDomainValue=2.)])
+    high = m.XYs2d(function1ds=[m.Legendre(coefficients=[1., .2], outerDomainValue=2.),
+                               m.Legendre(coefficients=[1., .3], outerDomainValue=3.)])
+    source = m.Regions2d(function2ds=[low, high])
+    converted, _ = tabulateAngular(source)
+    energies = np.array([t.outerDomainValue for t in converted.function1ds])
+    assert np.all(np.diff(energies) > 0)
+    assert low.function1ds[-1].outerDomainValue == 2.
+    assert high.function1ds[0].outerDomainValue == 2.
+    from kika.processing.heating import _meanMu
+    means = _meanMu(converted, energies)
+    probes = np.array([1.5, np.nextafter(2., -np.inf), 2., np.nextafter(2., np.inf), 2.5])
+    # OpenMC 0.16 get_energy_index / lower_bound_index, including exact-node
+    # selection; this arithmetic differs from np.interp on repeated energies.
+    ids = np.maximum(np.searchsorted(energies, probes, side='left') - 1, 0)
+    fraction = (probes - energies[ids]) / (energies[ids + 1] - energies[ids])
+    sampled_mean = (1-fraction)*means[ids] + fraction*means[ids+1]
+    np.testing.assert_allclose(sampled_mean, _meanMu(converted, probes), atol=1e-14, rtol=0.)
+    np.testing.assert_allclose(sampled_mean, [.05, .1, .2, .2, .25], atol=1e-5, rtol=0.)
+
+
+def test_mixed_histogram_retains_lines_mass_and_two_continuum_moments():
+    source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 0., 2.], ys=[.2, 0., .8], outerDomainValue=15.)])
+    converted, _ = tabulateEnergy(source, discrete=[1])
+    table = converted.function1ds[0]
+    assert str(table.interpolation) == "flat" and table.numberOfDiscrete == 1
+    assert table.pdf[0] == pytest.approx(.2, abs=1e-14)
+    from kika.processing.heating import _expect
+    assert _expect(table, lambda x: x) == pytest.approx(2.+.8*4/3, abs=1e-12)
+    assert _expect(table, lambda x: x*x) == pytest.approx(20.+.8*2., abs=1e-12)
+    q = np.linspace(0., 2., 10001)
+    assert np.max(abs(np.interp(q, table.xs[1:], table.cdf[1:]) - (.2+.2*q*q))) <= TabulationOptions().mixedCdfAtol
+    assert len(table.xs) <= TabulationOptions().maxPoints
+
+
+def test_mixed_single_histogram_panel_gets_a_transport_safe_second_panel():
+    source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 1., 3.], ys=[.2, .4, .4],
+        interpolation=m.Interpolation.flat, outerDomainValue=15.)])
+    converted, _ = tabulateEnergy(source, discrete=[1])
+    table = converted.function1ds[0]
+    np.testing.assert_array_equal(table.xs, [10., 1., 2., 3.])
+    np.testing.assert_allclose(table.cdf, [.2, .2, .6, 1.], rtol=0., atol=1e-14)
+
+
+def test_pure_lines_do_not_enter_the_continuum_interpolation_branch():
+    source = m.XYs2d(function1ds=[m.XYs1d(xs=[10., 5.], ys=[.25, .75], outerDomainValue=15.)])
+    converted, _ = tabulateEnergy(source, discrete=[2])
+    table = converted.function1ds[0]
+    assert str(table.interpolation) == "flat" and table.numberOfDiscrete == 2
+    np.testing.assert_array_equal(table.xs, [10., 5.])
+    np.testing.assert_allclose(table.cdf, [.25, 1.], rtol=0., atol=1e-14)
+
+
+@pytest.mark.parametrize("value", [0., -1., float("nan"), float("inf")])
+def test_mixed_cdf_tolerance_is_validated(value):
+    with pytest.raises(ValueError, match="mixed CDF tolerance"):
+        TabulationOptions(mixedCdfAtol=value)
+
+
+
+def test_angular_moments_positive_proof_and_clipping_keep_exact_integrals():
+    from kika.processing.tabulation.angular import _legendreMoments
+    np.testing.assert_allclose(_legendreMoments([1.,.02,.04,.01],"clip"),[.02,1/3+2*.04/3],rtol=1e-14,atol=1e-15)
+    np.testing.assert_allclose(_legendreMoments([1.,1.],"clip"),[5/9,11/27],rtol=1e-14,atol=1e-15)
+    with pytest.raises(ValueError,match="negative"):
+        _legendreMoments([1.,1.],"raise")
+
+
+def test_repeated_joint_angles_are_cached_with_independent_mutable_arrays(monkeypatch):
+    from kika.processing.tabulation import correlated as C
+    from kika.processing.tabulation.tables import TabulationOptions
+    from kika.nuclear_data import model as m
+    real=C.muTable;calls=[]
+    def spy(*args,**kwargs):calls.append(1);return real(*args,**kwargs)
+    monkeypatch.setattr(C,"muTable",spy)
+    surfaces=[]
+    for E in (10.,20.):
+        surfaces.append(m.XYs2d(function1ds=[m.Legendre(coefficients=np.array([1.,.1]),outerDomainValue=x) for x in (0.,1.)],outerDomainValue=E))
+    form=m.EnergyAngular(xys3d=m.XYs3d(function2ds=surfaces),productFrame=m.Frame.centerOfMass)
+    result=C.tabulateEnergyAngular(form,TabulationOptions())
+    tables=[t for surface in result.energyAngular.function2ds for t in surface.function1ds]
+    assert len(calls)==1
+    for t in tables[1:]:
+        np.testing.assert_array_equal(t.pdf,tables[0].pdf)
+        assert not np.shares_memory(t.pdf,tables[0].pdf)
+    old=tables[1].pdf.copy();tables[0].pdf[0]+=1
+    np.testing.assert_array_equal(tables[1].pdf,old)
+
+
+
+def test_legendre_density_native_and_reference_keep_shape_values_and_fallback(monkeypatch):
+    from kika.processing.tabulation import angular as A
+    coefficients=np.array([1.,.3,-.1,.01])
+    for points in (np.array(.7),np.array([-1.,0.,1.]),np.arange(6.).reshape(2,3)/5):
+        expected=np.polynomial.legendre.legval(points,coefficients*(2*np.arange(4)+1)/2)
+        actual=A.legendreDensity(coefficients)(points)
+        np.testing.assert_array_equal(np.asarray(actual).view(np.uint64),np.asarray(expected).view(np.uint64))
+        assert np.shape(actual)==np.shape(points)
+    outside=np.array([-2.,1.1])
+    before=A.legendreDensity(coefficients)(outside)
+    monkeypatch.setattr(A,"_polynomial_native",None)
+    np.testing.assert_array_equal(A.legendreDensity(coefficients)(outside),before)

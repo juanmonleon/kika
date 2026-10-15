@@ -295,7 +295,7 @@ def test_header_marks_complete_reconstructed_style_and_rejects_mixed_export():
     assert header._lrp==2 and header._ldrv==1
     assert suite.provenance.headerFields['lrp']==1
     suite.reactions['capture'].crossSection.forms.pop('recon')
-    with pytest.raises(ValueError,match='complete|missing|every|recon'):
+    with pytest.raises(ValueError,match='cannot mix evaluated cross sections:.*capture'):
         _mf1Sections(suite,2631,ConversionReport(),'recon')
 
 

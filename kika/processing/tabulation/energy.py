@@ -66,7 +66,46 @@ def _tableAt(function, k, options, discrete, clipped):
                                  outer=function.outerDomainValue,
                                  what=f"P(E'|E={function.outerDomainValue:g} eV)")
     clipped[0] += wasClipped
+    if nd:
+        # OpenMC 0.16 interpolates discrete entries on the lin-lin branch.
+        # Two positive constant subpanels can retain a linear panel's mass,
+        # first and second moments exactly; a CDF bound sets their width.
+        table = _mixedHistogram(table, options, outer=function.outerDomainValue)
     return table
+
+
+def _mixedHistogram(table, options, outer):
+    """Transport-safe mixed measure with exact panel moments through order two."""
+    nd = int(table.numberOfDiscrete)
+    x, p = np.asarray(table.xs[nd:]), np.asarray(table.pdf[nd:])
+    flat = str(table.interpolation) == "flat"
+    if len(x) < 2:
+        table.interpolation = _m().Interpolation.flat
+        return table
+    if flat and len(x) >= 3:
+        return table
+    edges, density = [float(x[0])], []
+    for a, b, pa, pb in zip(x[:-1], x[1:], p[:-1], p[1:]):
+        if b <= a:
+            continue
+        if flat:
+            pb = pa
+        # On each subpanel the CDF error is at most |dp|*dx/24. Mass
+        # and moments through order two agree exactly at every panel end.
+        count = max(1, int(np.ceil(np.sqrt(abs(pb-pa)*(b-a)/(24*options.mixedCdfAtol)))))
+        if nd + len(edges) + 2*count > options.maxPoints:
+            raise ValueError("mixed histogram conversion exceeds maxPoints")
+        for k in range(count):
+            left, right = a+(b-a)*k/count, a+(b-a)*(k+1)/count
+            pl, pr = pa+(pb-pa)*k/count, pa+(pb-pa)*(k+1)/count
+            density.extend([pl+(pr-pl)/6, pl+5*(pr-pl)/6])
+            edges.extend([(left+right)/2, right])
+    if not density:
+        return table
+    density.append(float(p[-1]))
+    converted, _ = pdfTable(np.r_[table.xs[:nd], edges], np.r_[table.pdf[:nd], density],
+        histogram=True, options=options, discrete=nd, outer=outer, what="mixed line/continuum spectrum")
+    return converted
 
 
 def _histogramLaw(law) -> bool:

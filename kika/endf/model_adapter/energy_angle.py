@@ -8,9 +8,10 @@ the reaction. So this adapter builds *products* where
 :mod:`~kika.endf.model_adapter.angular` and :mod:`~kika.endf.model_adapter.energy`
 decorate the one neutron their files describe.
 
-**The mapping is measured, not chosen.** Every row below was checked product by
+**The mapping follows the physical source data.** The original rows were checked product by
 product against the FUDGE translation of the same library
-(``ENDF-B-VIII.1-GNDS/``), and the two counts agree:
+(``ENDF-B-VIII.1-GNDS/``). An explicitly stated LAW=2 photon energy
+is retained as ``primaryGamma`` rather than inferred from Q:
 
 =========================  ==================================================
 MF6                        §18 form
@@ -19,7 +20,8 @@ LAW=1 LANG=1, all ``NA=0``  ``uncorrelated(isotropic2d, XYs2d)``
 LAW=1 LANG=1, any ``NA>0``  ``energyAngular(XYs3d)``
 LAW=1 LANG=2                ``KalbachMann(f, r[, a])``
 LAW=1 LANG=11-15            not modelled — no witness in five libraries
-LAW=2                       ``angularTwoBody(XYs2d)``
+LAW=2                       ``angularTwoBody(XYs2d)``; explicit photon AWP
+                            becomes ``uncorrelated(..., primaryGamma)``
 LAW=3                       ``angularTwoBody(isotropic2d)``
 LAW=4                       ``angularTwoBody(recoil href)``
 LAW=5                       not modelled — 0 of 558 GNDS evaluations carry one
@@ -88,6 +90,7 @@ from kika.nuclear_data.model import (
     Multiplicity,
     NBodyPhaseSpace,
     PhysicalQuantity,
+    PrimaryGamma,
     Regions1d,
     Uncorrelated,
     Unspecified,
@@ -373,7 +376,12 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
             # **Only when that product reached the model**, so a recoil never
             # points at a node this suite does not contain -- which is what
             # keeps every commit of this adapter's slicing internally valid.
-            ejectile = label
+            if (isinstance(distribution, Uncorrelated)
+                    and isinstance(distribution.energy, PrimaryGamma)):
+                ejectile = recoilAngularHref(label).replace(
+                    "/angularTwoBody[", "/uncorrelated[")
+            else:
+                ejectile = label
         entries.append((label, pid, _multiplicityOf(product, yieldAxes),
                         distribution))
         records.append(_productRecord(product, index, pid, label, modelled,
@@ -473,7 +481,7 @@ def _distributionOf(product, index: int, mt: int, frame: Frame,
                 f"inventing a target would be worse than saying so"
             )
             return None, True, report
-        return (AngularTwoBody(recoilHref=recoilAngularHref(ejectile),
+        return (AngularTwoBody(recoilHref=ejectile if ejectile.startswith("../") else recoilAngularHref(ejectile),
                                productFrame=frame),
                 True, report)
 
@@ -484,7 +492,19 @@ def _distributionOf(product, index: int, mt: int, frame: Frame,
         return _continuumLegendre(product.law_data, index, mt, frame, report)
 
     if law == 2:
-        return _twoBody(product.law_data, index, mt, frame, report)
+        form, modelled, report = _twoBody(product.law_data, index, mt, frame, report)
+        if product.za == 0 and product.awp > 0 and modelled:
+            # ENDF102 6.2: AWP explicitly states the primary photon energy.
+            # angularTwoBody has no energy slot; preserve both physical
+            # functions as GNDS uncorrelated/primaryGamma instead of
+            # replacing the stated energy with a value inferred from Q.
+            energy = PrimaryGamma(
+                value=float(product.awp),
+                domainMin=float(product.law_data.incident_energies[0]),
+                domainMax=float(product.law_data.incident_energies[-1]),
+                axes=energyAxes())
+            form = Uncorrelated(angular=form.angular, energy=energy, productFrame=frame)
+        return form, modelled, report
 
     if law == 6:
         return _phaseSpace(product.law_data, frame), True, report
@@ -835,7 +855,9 @@ def _restoreProduct(record: dict, forms, mt: int):
 
     return MF6Product(
         zap=record["zap"],
-        awp=record["awp"],
+        awp=(float(forms.energy.value) if law == 2 and record["zap"] == 0
+             and isinstance(forms, Uncorrelated) and isinstance(forms.energy, PrimaryGamma)
+             else record["awp"]),
         lip=int(record["lip"]),
         y_interp=[(int(a), int(b)) for a, b in record["y_interp"]],
         y_energies=list(record["y_energies"]),
@@ -888,6 +910,9 @@ def _restoreLaw(record: dict, form, mt: int):
         return _continuumBody(fields, nodes, pairs, rows, index, mt)
 
     if law == 2:
+        if (record["zap"] == 0 and isinstance(form, Uncorrelated)
+                and isinstance(form.energy, PrimaryGamma)):
+            form = AngularTwoBody(angular=form.angular, productFrame=form.productFrame)
         if not isinstance(form, AngularTwoBody) or form.angular is None:
             raise ValueError(
                 f"MF6/MT{mt} product {index}: the provenance says LAW=2, which "

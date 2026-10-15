@@ -1,4 +1,4 @@
-"""Build the compiled resonance and Doppler kernels. Required: a failed build is an error.
+"""Build the compiled numerical kernels. Required: a failed build is an error.
 
 The app and generated scripts reconstruct with it; without it the NumPy
 reference path is correct but too slow for whole actinides, and a silent
@@ -30,7 +30,9 @@ def _run(compiler=None):
         'kika.processing.doppler._doppler_native',
         ['kika/processing/doppler/_doppler_native.c']), Extension(
         'kika.processing._thermal_native',
-        ['kika/processing/_thermal_native.c'])]})
+        ['kika/processing/_thermal_native.c']), Extension(
+        'kika.algebra._polynomial_native',
+        ['kika/algebra/_polynomial_native.c'])]})
     command=StrictBuild(distribution)
     command.inplace=True
     if compiler:command.compiler=compiler

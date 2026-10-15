@@ -323,7 +323,7 @@ CHUNK_KNOTS = 4000
 """Source knots per energy chunk of the resonant group (see ``_broadenPlan``)."""
 
 
-def _broadenPlan(suite, thnmax):
+def _broadenPlan(suite, thnmax, options=None):
     """What ``_broadened`` broadens, independent of the temperature.
 
     ``(entries, leaves, lo, hi, tasks)``; each task is ``(keys, domain)``, a
@@ -363,24 +363,39 @@ def _broadenPlan(suite, thnmax):
         dense = max(counts.values())
         resonant = [k for k in active if counts[k] >= 0.2 * dense]
         smooth = [k for k in active if counts[k] < 0.2 * dense]
-        # The resonant group is cut into energy chunks of CHUNK_KNOTS source
-        # knots, broadened independently (in parallel by _broadenAll). Each
-        # chunk sees the whole 0 K source, so its thermal neighbourhood is
-        # complete; only the output domain is the chunk's. The refinement
-        # accepts every interval on its own verification, so a chunked table
-        # meets the same tolerance, and the shared boundary is one exact
-        # evaluation of the same point in both chunks. The cuts depend on the
-        # data alone, never on the number of workers, so the result does not.
-        grid = np.unique(np.concatenate([knots[k] for k in resonant]))
-        grid = grid[(grid > lo) & (grid < hi)]
-        pieces = max(1, len(grid) // CHUNK_KNOTS)
-        cuts = [lo]
-        for i in range(1, pieces):
-            j = i * len(grid) // pieces
-            # Between two distinct knots, never on a discontinuity.
-            cuts.append(float(np.sqrt(grid[j - 1] * grid[j])))
-        cuts.append(hi)
-        tasks += [(resonant, (a, b)) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
+        # Preserve dense sources for the moment-block kernel. Small energy
+        # windows fall below its eligibility threshold and lose that speedup.
+        # Parallelize these independent leaves instead; every table retains
+        # the same kernel and interpolation verification budgets.
+        from kika.processing.doppler import core as dopplerCore, _blocks
+        native = (dopplerCore._native is not None
+                  and hasattr(dopplerCore._native, "prepare_blocks")
+                  and (options is None or (options.backend != "python"
+                       and options.max_series_terms == 80 and options.max_radius >= 6
+                       and options.max_work_bytes >= 64*1024*1024)))
+        full = [k for k in resonant if native and counts[k] >= _blocks._DENSE_SOURCE
+                and np.all(_flatten(entries[k].crossSection[RECON_LABEL])[1] >= 0)]
+        tasks.extend(([key], (lo, hi)) for key in full)
+        resonant = [k for k in resonant if k not in full]
+        if resonant:
+            # The resonant group is cut into energy chunks of CHUNK_KNOTS source
+            # knots, broadened independently (in parallel by _broadenAll). Each
+            # chunk sees the whole 0 K source, so its thermal neighbourhood is
+            # complete; only the output domain is the chunk's. The refinement
+            # accepts every interval on its own verification, so a chunked table
+            # meets the same tolerance, and the shared boundary is one exact
+            # evaluation of the same point in both chunks. The cuts depend on the
+            # data alone, never on the number of workers, so the result does not.
+            grid = np.unique(np.concatenate([knots[k] for k in resonant]))
+            grid = grid[(grid > lo) & (grid < hi)]
+            pieces = max(1, len(grid) // CHUNK_KNOTS)
+            cuts = [lo]
+            for i in range(1, pieces):
+                j = i * len(grid) // pieces
+                # Between two distinct knots, never on a discontinuity.
+                cuts.append(float(np.sqrt(grid[j - 1] * grid[j])))
+            cuts.append(hi)
+            tasks += [(resonant, (a, b)) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
         if smooth:
             tasks.append((smooth, (lo, hi)))
     return entries, leaves, lo, hi, tasks
@@ -519,7 +534,7 @@ def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
     """
     from kika.processing.doppler.suite import _mass
 
-    entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax)
+    entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax, options)
     awr = _mass(suite, None).atomic_weight_ratio
     top = {id(keys): min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in keys)
            for keys, _ in tasks}
@@ -564,6 +579,7 @@ def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
 def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX,
                  endf=None, omit: Sequence[str] = (), awr: Optional[float] = None,
                  context=None, doppler=None, tabulation=None, ed: Optional[float] = None,
+                 heatingPartials: Sequence[int] = (), qa=None, qbar=None,
                  thinning: Optional[float] = 1.0e-3,
                  workers: Optional[int] = None, label: Optional[str] = None,
                  urrTables: Optional[Dict[float, object]] = None,
@@ -575,6 +591,12 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     KERMA, damage and the URR probability tables are kika's; ``omit``
     leaves any of ``"urr"``, ``"kerma"``, ``"damage"`` out. ``ed`` is the
     displacement threshold of the damage (default: HEATR's table by Z).
+    ``heatingPartials`` requests additional HEATR response identifiers, stored
+    as redundant production reactions at every processed temperature. ``qa``
+    and ``qbar`` are forwarded to :func:`kika.processing.heating.heatingOf`.
+    Fission partials use the processed MF1/458 release, including Sher-Beck.
+    MT443 uses HEATR's diagnostic convention; unresolved explicit MF6
+    recoil paths raise rather than silently omitting a contribution.
     ``awr`` overrides the
     atomic weight ratio (default MF1/451's, as ACER takes it).
     ``thinning`` is the relative tolerance to which each temperature's grid is
@@ -608,6 +630,12 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     if unknown:
         raise ValueError(f"omit names {sorted(unknown)}; the pieces that can be left out are "
                          f"urr, kerma and damage")
+    heatingPartials = tuple(heatingPartials)
+    if any(isinstance(mt, (bool, np.bool_)) or not isinstance(mt, (int, np.integer))
+           for mt in heatingPartials) or len(set(heatingPartials)) != len(heatingPartials):
+        raise ValueError("heatingPartials must contain distinct integer response identifiers")
+    if heatingPartials and "kerma" in omit and "damage" in omit:
+        raise ValueError("heatingPartials cannot be requested while all heating is omitted")
     tabOptions = tabulation or TabulationOptions()
 
     target = suite.PoPs[suite.target] if suite.target in suite.PoPs else None
@@ -866,7 +894,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     # --- KERMA and damage (kika's HEATR, H8) ---------------------------------
     wanted = [p for p in ("kerma", "damage") if p not in omit]
     if wanted:
-        _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report)
+        _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report,
+                       heatingPartials=heatingPartials, qa=qa, qbar=qbar)
     # The URR tables name the reaction whose smooth cross section stands for
     # the inelastic competition, and the C++ requires it to exist
     # (nuclide.cpp:308-320): MT4 is written for that, as the official exporter
@@ -1363,7 +1392,8 @@ def _totalOn(out, T, grid):
     return total, fission
 
 
-def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report):
+def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report,
+                   heatingPartials=(), qa=None, qbar=None):
     """MT301, MT901 and MT444 by :func:`kika.processing.heating.heatingOf`, plus fission.
 
     The fission part comes from MF1/458 as OpenMC's ``from_njoy`` adds it to
@@ -1382,18 +1412,19 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                 qm[reaction.ENDF_MT] = float(value)
 
     release = None
-    fission = next((r for r in out.reactions if r.ENDF_MT in FISSION_MTS), None)
+    fission = (next((r for r in out.reactions if r.ENDF_MT in FISSION_MTS), None)
+               or next((r for r in out.sums if r.ENDF_MT == 18), None))
     if fission is not None and fission.outputChannel.fissionFragmentData is not None:
         releases = fission.outputChannel.fissionFragmentData.fissionEnergyReleases
         release = releases[0] if releases else None
-    responses = {301: m.CrossSection(), 901: m.CrossSection(), 444: m.CrossSection()}
+    responses = {mt: m.CrossSection() for mt in dict.fromkeys((301, 901, 444, *heatingPartials))}
     notes = None
     for temperature, (T, kT) in zip(temperatures, styleKT.items()):
         grid = grids[T]
         total, sigmaF = _totalOn(out, T, grid)
         label = heatedLabel(T)
         sigma = {}
-        for reaction in out.reactions:
+        for reaction in list(out.reactions) + list(out.fissionComponents):
             form = reaction.crossSection.forms.get(label)
             if form is not None and reaction.ENDF_MT is not None:
                 values = np.zeros_like(grid)
@@ -1406,7 +1437,7 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                 values[len(grid) - len(form):] = form.ys
                 sigma[reaction.ENDF_MT] = values
         result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, ed=ed, evaluation=work,
-                           zaTarget=1000 * Z + A)
+                           zaTarget=1000 * Z + A, qa=qa, qbar=qbar, kinematic=443 in heatingPartials)
         notes = result.notes
         if "kerma" in wanted:
             nonlocal_ = result.kerma
@@ -1422,13 +1453,33 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
             responses[901][label] = m.XYs1d(xs=grid, ys=local, label=label)
         if "damage" in wanted:
             responses[444][label] = m.XYs1d(xs=grid, ys=result.damage, label=label)
+        if heatingPartials:
+            fissionKerma, fissionPhotons, fissionKinematic = {}, {}, {}
+            if release is not None:
+                nonlocalF = evaluate(release.promptProductKE, grid) + evaluate(release.delayedBetaEnergy, grid)
+                photonF = evaluate(release.promptGammaEnergy, grid) + evaluate(release.delayedGammaEnergy, grid)
+                for mt in result.perReaction:
+                    if mt in FISSION_MTS:
+                        fissionKerma[mt], fissionPhotons[mt] = nonlocalF, photonF
+                        fissionKinematic[mt] = evaluate(release.promptProductKE, grid) + evaluate(release.promptGammaEnergy, grid)
+            partials = result.partialsOf(sigma, heatingPartials, fissionKerma=fissionKerma,
+                                         fissionPhotonEnergy=fissionPhotons, fissionKinematicEnergy=fissionKinematic)
+            # MT301/901 are the existing OpenMC total definitions; their
+            # release already includes the local/nonlocal fission convention.
+            if 901 in partials:
+                totalLocal = result.kermaLocal.copy()
+                if release is not None:
+                    totalLocal += (nonlocalF + photonF) * sigmaF
+                partials[901] = totalLocal
+            for mt, values in partials.items():
+                responses[mt][label] = m.XYs1d(xs=grid, ys=values, label=label)
     names = {301: "heating", 901: "heating-local", 444: "damage-energy"}
     for mt, cs in responses.items():
         if len(cs.forms):
             out.productions.append(m.Reaction(
-                id=m.ReactionId(label=names[mt], ENDF_MT=mt), crossSection=cs,
+                id=m.ReactionId(label=names.get(mt, f"heating-response-{mt}"), ENDF_MT=mt), crossSection=cs,
                 outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
                 provenance=m.Hdf5Provenance(attributes={
-                    "redundant": 1, "center_of_mass": 0 if mt == 444 else 1})))
+                    "redundant": 1, "center_of_mass": 0 if 444 <= mt <= 447 else 1})))
     for note in notes or ():
         report.warn(note)

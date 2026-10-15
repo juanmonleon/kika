@@ -180,12 +180,52 @@ def test_the_model_fixed_point_through_a_whole_tape(tape, tmp_path):
             assert [x.pid for x in a.scatteringAtoms] == [x.pid for x in b.scatteringAtoms]
 
 
-def test_lln1_is_refused_by_name():
+def _logarithmic_tape():
     endf = read_endf(str(_DATA / "micro_tsl_sch4.endf"))
-    endf.mf[7].mt[4]._lln = 1
+    section = endf.mf[7].mt[4]
+    section._lln = 1
+    section.beta_interp = [(n, 2) for n, _ in section.beta_interp]
+    for block in section.blocks:
+        block.table.interp = [(n, 3) for n, _ in block.table.interp]
+        block.table.li = [2 for _ in block.table.li]
+        block.table.values = np.log(np.maximum(block.table.values, 1e-20)).tolist()
+    return endf
+
+
+def test_lln1_preserves_nodes_and_transforms_interpolation_on_physical_s():
+    endf = _logarithmic_tape()
     suite, report = decodeReactionSuite(endf)
-    assert any(LLN_REFUSAL in u for u in report.unsupported)
+    assert not any("LLN=1" in u for u in report.unsupported)
+    form = next(f for r in suite.reactions for f in r.doubleDifferentialCrossSection.forms.values()
+                if isinstance(f, IncoherentInelastic))
+    kernel = form.principal.selfScatteringKernel.kernel
+    expected = np.asarray([b.table.values for b in endf.mf[7].mt[4].blocks]).transpose(1,0,2)
+    np.testing.assert_allclose(kernel.values, np.exp(expected), rtol=2e-15)
+    assert str(kernel.grids[2].interpolation) == 'log-log'
+    assert str(kernel.grids[1].interpolation) == 'log-lin'
+    written, _ = _mf7(suite)
+    assert written[4].lln == 0
+    np.testing.assert_allclose(np.asarray([b.table.values for b in written[4].blocks]).transpose(1,0,2),
+                               kernel.values, rtol=2e-15)
+    assert written[4].blocks[0].table.interp[0][1] == 5
+    assert written[4].beta_interp[0][1] == 4
+
+
+def test_lln1_refuses_unrepresentable_interpolation_instead_of_guessing():
+    endf = _logarithmic_tape()
+    endf.mf[7].mt[4].blocks[0].table.interp = [(len(endf.mf[7].mt[4].blocks[0].table.x), 4)]
+    for block in endf.mf[7].mt[4].blocks[1:]:
+        block.table.interp = endf.mf[7].mt[4].blocks[0].table.interp.copy()
+    suite, report = decodeReactionSuite(endf)
+    assert any("LLN=1" in u and "interpolation" in u for u in report.unsupported)
     assert [r.ENDF_MT for r in suite.reactions] == [2]
+
+
+def test_lln1_refuses_underflow_instead_of_losing_logarithmic_data():
+    endf = _logarithmic_tape()
+    endf.mf[7].mt[4].blocks[0].table.values[0][0] = -1000.
+    _, report = decodeReactionSuite(endf)
+    assert any("LLN=1" in u and "range" in u for u in report.unsupported)
 
 
 def test_alpha_grids_that_differ_between_betas_are_refused():
@@ -195,3 +235,46 @@ def test_alpha_grids_that_differ_between_betas_are_refused():
     block.table.x = [x * 1.01 for x in block.table.x]
     _suite, report = decodeReactionSuite(endf)
     assert any("differ between beta" in u for u in report.unsupported)
+
+
+def test_thermal_processing_refuses_a_declared_but_missing_elastic_law(monkeypatch):
+    from types import SimpleNamespace
+    import kika
+    from kika.hdf5.thermal_processing import processThermal
+    from kika.hdf5.exceptions import HDF5FormatError
+    _, suite, _ = _load("sch4")
+    partial = SimpleNamespace(reactions=[r for r in suite.reactions if r.ENDF_MT != 2])
+    monkeypatch.setattr(kika, "read", lambda *args, **kwargs: partial)
+    with pytest.raises(HDF5FormatError, match="incomplete thermal"):
+        processThermal(_DATA / "micro_tsl_sch4.endf", name="c_H_in_CH4_solid")
+
+
+
+def test_mixed_elastic_retains_evaluated_coherent_edges_and_zero_increments(monkeypatch):
+    from types import SimpleNamespace as NS
+    from kika.nuclear_data import model as m
+    import kika.hdf5.thermal_processing as processing
+    edges=np.array([.1,.2,5.]);factors=np.array([1.,1.,2.])
+    coherent=NS(temperatures=[300.],braggEdges=lambda:edges,cumulativeS=lambda T:factors)
+    incoherent=NS(debyeWaller=lambda T:2.,boundAtomCrossSection=NS(convertedTo=lambda u:NS(value=4.)))
+    monkeypatch.setattr(processing,"_law",lambda suite,cls:coherent if cls is m.CoherentElastic else incoherent)
+    def forbidden(*args,**kwargs):raise AssertionError("mixed elastic must retain evaluated factors")
+    monkeypatch.setattr(processing,"_acerBraggEdges",forbidden)
+    xs,distribution=processing._evaluatedElastic(NS(),300.,m.ConversionReport())
+    assert isinstance(xs,m.SumOfFunctions) and isinstance(distribution,m.MixedElasticMC)
+    assert np.array_equal(xs.functions[0].braggEdges,edges)
+    assert np.array_equal(xs.functions[0].structureFactors,factors)
+
+
+def test_lln1_distinguishes_invalid_log_ordinate_domain_from_valid_unsupported_law():
+    invalid = _logarithmic_tape()
+    section = invalid.mf[7].mt[4]
+    for block in section.blocks:
+        block.table.interp = [(len(block.table.x), 4)]
+    _, report = decodeReactionSuite(invalid)
+    assert any("source interpolation domain is invalid" in message for message in report.unsupported)
+    for block in section.blocks:
+        block.table.values = np.ones_like(block.table.values).tolist()
+    _, report = decodeReactionSuite(invalid)
+    assert any("exactly as a GNDS" in message for message in report.unsupported)
+    assert not any("domain is invalid" in message for message in report.unsupported)
