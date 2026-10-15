@@ -50,9 +50,12 @@ hold an evaluated form labelled `eval` and a reconstructed one labelled `recon`;
 `styles` node records that `recon` was derived from `eval`. The labels kika uses are
 `eval` (what the file states), `recon` (the resonance region reconstructed, from kika's
 own reconstruction or from an NJOY PENDF file) and, for a perturbed realisation,
-`realization-NNNN`. A suite decoded from ACE carries no `eval` form at all: its
-cross-sections are labelled `gridded`, under a `heated` style at the file's temperature,
-because that is what an ACE table holds.
+`realization-NNNN`. A processed suite labels its forms by what processing made them:
+`heated_<T>` for the cross-sections at one temperature (`heated_294K`), `URR_<T>` for the
+probability tables at that temperature, and `MonteCarlo` for the sampled distributions.
+kika's processing, the OpenMC HDF5 reader and the ACE reader give the same labels, so a
+processed suite goes to any processed format whichever it came from. A suite decoded from
+ACE carries no `eval` form at all, because an ACE table holds only processed data.
 
 **Processed data uses the processed styles of GNDS §9.4.** A suite read from an OpenMC
 HDF5 file, or produced by kika's own processing, carries one `heated` style per temperature

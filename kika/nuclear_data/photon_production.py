@@ -117,9 +117,17 @@ class PhotonProductionError(ValueError):
 
 #: Style labels in the order a form is preferred. ``eval`` is the evaluation;
 #: ``recon`` its pointwise reconstruction (FUDGE's, in published GNDS);
-#: ``heated`` and ``gridded`` are what an ACE-decoded suite holds, which has no
-#: ``eval`` at all. Any other label is taken after these, in file order.
-_LABEL_PREFERENCE = ("eval", "recon", "heated", "gridded")
+#: a ``heated_<T>`` label (any label starting ``heated``) is what an
+#: ACE-decoded suite holds, which has no ``eval`` at all (ACE roadmap D-A11).
+#: Any other label is taken after these, in file order.
+_LABEL_PREFERENCE = ("eval", "recon", "heated")
+
+
+def _rank(label: str) -> int:
+    for i, preferred in enumerate(_LABEL_PREFERENCE):
+        if label == preferred or (preferred == "heated" and label.startswith("heated")):
+            return i
+    return len(_LABEL_PREFERENCE)
 
 
 def _forms(component) -> List[Any]:
@@ -127,8 +135,8 @@ def _forms(component) -> List[Any]:
 
     Style-label neutral on purpose: the same physics reads an ENDF-decoded
     suite (``eval``), a GNDS one (``eval`` beside ``recon``) and an ACE one
-    (``heated``/``gridded`` only), and a hard-coded ``eval`` would find nothing
-    in the last.
+    (``heated_<T>`` and ``MonteCarlo`` only), and a hard-coded ``eval`` would
+    find nothing in the last.
     """
     if component is None:
         return []
@@ -136,7 +144,7 @@ def _forms(component) -> List[Any]:
         labels = list(component.keys())
     except (AttributeError, TypeError):
         return []
-    ordered = [l for l in _LABEL_PREFERENCE if l in labels] +         [l for l in labels if l not in _LABEL_PREFERENCE]
+    ordered = sorted(labels, key=_rank)  # stable: file order within a rank
     out = []
     for label in ordered:
         try:

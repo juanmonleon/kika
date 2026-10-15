@@ -1,5 +1,6 @@
 import logging
 from kika.ace.classes.esz import EszBlock
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ def read_esz_block(ace, debug=False):
         logger.debug(f"Number of energy points NXS(3) = {n_energy}")
     
     if esz_idx <= 0 or n_energy <= 0:
-        logger.warning(f"Warning: 0 number of energies: ESZ={esz_idx}, NE={n_energy}.")
+        lost(ace, "ESZ", "", f"no energy grid: JXS(1)={esz_idx}, NXS(3)={n_energy}")
     
     # Check if we have enough data
     if esz_idx + 5*n_energy > len(ace.xss_data) + 1:

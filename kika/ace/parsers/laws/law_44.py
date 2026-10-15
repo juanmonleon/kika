@@ -1,4 +1,6 @@
 import logging
+from kika.ace.classes.xss import table_padding, xss_ints
+from kika.ace.classes.read_report import note
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika.ace.classes.energy_distribution.distributions.kalbach_mann import KalbachMannDistribution
@@ -60,9 +62,7 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     # Read the number of interpolation regions (N_R)
     distribution.n_interp_regions = int(ace.xss_data[idat_idx])
@@ -74,24 +74,22 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
     # Read the interpolation parameters if present
     if n_r > 0 and idx + 2*n_r - 1 < len(ace.xss_data):
         # Read NBT values
-        distribution.nbt = [int(ace.xss_data[idx + i]) for i in range(n_r)]
+        distribution.nbt = xss_ints(ace.xss_data, idx, n_r)
         if debug:
             logger.debug(f"NBT values: {distribution.nbt}")
         idx += n_r
         
         # Read INT values
-        distribution.interp = [int(ace.xss_data[idx + i]) for i in range(n_r)]
+        distribution.interp = xss_ints(ace.xss_data, idx, n_r)
         if debug:
             logger.debug(f"INT values: {distribution.interp}")
         idx += n_r
-    elif n_r > 0 and debug:
-        logger.debug(f"Not enough data to read interpolation parameters. Need index up to {idx + 2*n_r - 1}, have {len(ace.xss_data)}")
+    elif n_r > 0:
+        raise ValueError(f"NR={n_r} interpolation regions at {idx} run past the XSS array ({len(ace.xss_data)})")
     
     # Read the number of incident energies (N_E)
     if idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     distribution.n_energies = int(ace.xss_data[idx])
     if debug:
@@ -101,9 +99,7 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
     
     # Check if we have enough data
     if idx + n_e - 1 >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
     
     # Read the incident energies - a view of xss_data
     distribution.incident_energies = ace.xss_data[idx:idx + n_e]
@@ -113,12 +109,10 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
     
     # Check if we have enough data for the locations
     if idx + n_e - 1 >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Not enough data to read distribution locations. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read distribution locations. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
     
     # Read the distribution locations (L values)
-    distribution.distribution_locations = [int(ace.xss_data[idx + i]) for i in range(n_e)]
+    distribution.distribution_locations = xss_ints(ace.xss_data, idx, n_e)
     if debug:
         logger.debug(f"Distribution locations: {distribution.distribution_locations}")
     
@@ -135,10 +129,7 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
             logger.debug(f"Processing distribution {i+1}/{n_e}, location={loc}")
         if loc <= 0:
             # Skip if location is invalid
-            if debug:
-                logger.debug(f"Skipping distribution {i+1}: invalid location ({loc})")
-            distribution.distributions.append(None)
-            continue
+            raise ValueError(f"distribution {i+1}: invalid location ({loc})")
         
         # Convert to absolute index
         dist_idx = jed + loc - 1  # -1 for 0-indexing
@@ -147,10 +138,7 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
         
         # Check if we're within bounds
         if dist_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Absolute index {dist_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-            distribution.distributions.append(None)
-            continue
+            raise ValueError(f"Absolute index {dist_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
         
         # Read the combined interpolation parameter (INTT')
         intt_prime = int(ace.xss_data[dist_idx])
@@ -171,10 +159,7 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
         # Check if we have enough data for the full distribution
         # We need 5 arrays of length n_points (E_out, PDF, CDF, R, A)
         if dist_idx + 2 + 5*n_points - 1 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Not enough data for full distribution. Need index up to {dist_idx + 2 + 5*n_points - 1}, have {len(ace.xss_data)}")
-            distribution.distributions.append(None)
-            continue
+            raise ValueError(f"Not enough data for full distribution. Need index up to {dist_idx + 2 + 5*n_points - 1}, have {len(ace.xss_data)}")
         
         # Read the outgoing energy grid (E_out)
         e_out = ace.xss_data[dist_idx + 2:dist_idx + 2 + n_points]
@@ -219,4 +204,14 @@ def parse_kalbach_mann_distribution(ace: Ace, base_dist: EnergyDistribution, ida
     
     if debug:
         logger.debug(f"Completed parsing Kalbach-Mann distribution with {len(distribution.distributions)} valid distributions")
+    distribution.padding, unread = table_padding(
+        ace.xss_data, base_dist.jed, distribution.distribution_locations,
+        [2 + 5 * d['n_points'] for d in distribution.distributions])
+    if distribution.distributions:
+        # JED-relative position just past the last table, for the block reader's padding check
+        distribution.data_end = (int(distribution.distribution_locations[-1]) + 2
+                                 + 5 * distribution.distributions[-1]['n_points'])
+    for table, gap in unread:
+        note(ace, None, None, f"LAW={distribution.law}: {gap} words after table {table} are not zeros and "
+                               f"no locator points at them; they are not kept")
     return distribution

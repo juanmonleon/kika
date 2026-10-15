@@ -50,9 +50,7 @@ def parse_discrete_energy_distribution(ace: Ace, base_dist: EnergyDistribution, 
     
     # Check if we have data to parse
     if idat_idx + 1 >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Not enough data to read LP and EG. Need index up to {idat_idx + 1}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read LP and EG. Need index up to {idat_idx + 1}, have {len(ace.xss_data)}")
     
     # Read LP (indicator of whether photon is primary or non-primary)
     lp_entry = ace.xss_data[idat_idx]
@@ -66,17 +64,10 @@ def parse_discrete_energy_distribution(ace: Ace, base_dist: EnergyDistribution, 
     if debug:
         logger.debug(f"EG (photon energy or binding energy): {eg}")
     
-    # Store this information in the distribution object
-    # For Law 2, we only have a single discrete energy and probability
+    # As the file states them; with LP=2 the photon energy needs E and AWR
+    # (DiscreteEnergyDistribution.get_photon_energy).
     distribution.lp = lp
     distribution.eg = eg
-    
-    # For LP=0 or LP=1, the energy is just EG
-    # For LP=2, we'll need to calculate it during sampling based on incident energy
-    # For now, just store the discrete energy as EG
-    distribution.n_discrete_energies = 1
-    distribution.discrete_energies = [eg]
-    distribution.probabilities = [1.0]  # Only one discrete energy, so probability is 100%
     
     if debug:
         logger.debug(f"Completed parsing discrete energy distribution with LP={lp}, EG={eg}")

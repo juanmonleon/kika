@@ -21,7 +21,8 @@ from typing import Callable, Optional
 from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      Branching3d,
                                      ConversionReport, DiscreteGamma,
-                                     EnergyAngular, Evaporation, Frame,
+                                     EnergyAngular, EnergyAngularMC,
+                                     Evaporation, Frame,
                                      GeneralEvaporation, Isotropic2d,
                                      KalbachMann, MadlandNix, NBodyPhaseSpace,
                                      PhysicalQuantity, PrimaryGamma,
@@ -122,6 +123,8 @@ class _DistributionReader:
                 form = self.angularEnergy(child, here)
             elif child.tag == "KalbachMann":
                 form = self.kalbachMann(child, here)
+            elif child.tag == "energyAngularMC":
+                form = self.energyAngularMC(child, here)
             elif child.tag == "unspecified":
                 form = Unspecified(
                     label=label,
@@ -392,6 +395,26 @@ class _DistributionReader:
         """§18.4: P(E′,mu|E), the outgoing energy outermost."""
         return self._distributionAE(element, path, "energyAngular",
                                     EnergyAngular)
+
+    @reads("distributionForm", "energyAngularMC")
+    def energyAngularMC(self, element: ET.Element, path: str) -> EnergyAngularMC:
+        """The Monte Carlo ``energyAngularMC``: ``<energy>`` then ``<energyAngular>``."""
+        label = element.attrib.get("label", "")
+        here = f"{path}/energyAngularMC{_quoted(label)}"
+        form = EnergyAngularMC(label=label,
+                               productFrame=Frame(element.attrib.get("productFrame", "lab")))
+        for name, read in (("energy", readFunction2d), ("energyAngular", readFunction3d)):
+            holder = element.find(name)
+            child = None if holder is None else next(
+                (c for c in holder if c.tag not in IGNORED), None)
+            if child is None:
+                self.unsupported(name, here, "an <energyAngularMC> without this half")
+                continue
+            try:
+                setattr(form, name, read(child, readAxes(child, self.resolve)))
+            except UnsupportedNode as exc:
+                self.unsupported(child.tag, f"{here}/{name}", exc.args[0])
+        return form
 
     @reads("distributionForm", "angularEnergy")
     def angularEnergy(self, element: ET.Element, path: str) -> AngularEnergy:

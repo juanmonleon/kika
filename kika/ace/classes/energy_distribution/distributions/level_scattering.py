@@ -162,3 +162,27 @@ class LevelScattering(EnergyDistribution):
         )
         
         return header + description + info_table + methods_section + "\n" + example
+
+@dataclass
+class ParticleLevelScattering(EnergyDistribution):
+    """
+    Law 33: level scattering of a produced particle.
+
+    NJOY writes it for two-body reactions in the particle-production blocks
+    (MF6 LAW=2, MF4 reactions and the recoil of neutron capture):
+
+    - LDAT(1): ``threshold``, Ec = (A+1)/A·|Q|
+    - LDAT(2): ``energy_factor``, C = A(A+1-A')/(A+1)², with A' the mass of
+      the outgoing particle
+
+    and E_out = C·(E - Ec). With A' = 1 this is law 3. The factor no longer
+    says what A is, so unlike :class:`LevelScattering` the lab-frame energy is
+    not derivable from the law alone.
+    """
+    law: int = 33
+    threshold: float = 0.0      # LDAT(1), Ec
+    energy_factor: float = 0.0  # LDAT(2), C
+
+    def get_energy(self, incident_energy: float) -> float:
+        """E_out = C·(E - Ec), zero below the threshold."""
+        return max(0.0, self.energy_factor * (incident_energy - self.threshold))

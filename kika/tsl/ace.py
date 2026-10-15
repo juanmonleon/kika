@@ -256,7 +256,10 @@ def read_ace_thermal(paths: Union[str, Path, Sequence[Union[str, Path]]]) -> Pro
         library=first.library, emax=emax, paths=[str(p) for p in paths],
         details={"zaid": first.zaid.split(".")[0], "mat": first.mat, "date": first.date,
                  "elastic_mode": first.elastic_mode, "outgoing": first.outgoing_kind,
-                 "extensions": [Path(p).suffix.lstrip(".") for p in paths]})
+                 "extensions": [Path(p).suffix.lstrip(".") for p in paths],
+                 # what the writer needs to give the table back: NXS(4), which a
+                 # continuous table fills and nothing reads, and kT to all digits
+                 "nieb": int(first.nxs[4]), "kt": first.kt})
 
 
 def _zaid_nuclide(za: int) -> str:

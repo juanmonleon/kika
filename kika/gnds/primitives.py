@@ -52,7 +52,7 @@ from kika.nuclear_data.model import (Axes, Axis, Constant1d, Grid, GridStyle,
                                      Interpolation, InterpolationQualifier,
                                      Legendre, Polynomial1d, Regions1d,
                                      Regions2d, ValueType, XYs1d, XYs2d,
-                                     XYs3d)
+                                     XYs3d, Xs_pdf_cdf1d)
 
 __all__ = [
     "UnsupportedNode", "readValues", "readAxes", "readForm",
@@ -355,6 +355,30 @@ def _readXYs1d(element: ET.Element, axes: Optional[Axes]) -> XYs1d:
         )
     return XYs1d(
         xs=flat[0::2], ys=flat[1::2],
+        interpolation=_interpolation(element),
+        axes=readAxes(element) or axes,
+        label=element.attrib.get("label"),
+        outerDomainValue=_optionalFloat(element, "outerDomainValue"),
+        index=_optionalInt(element, "index"),
+    )
+
+
+@reads("function1d", "xs_pdf_cdf1d")
+def _readXs_pdf_cdf1d(element: ET.Element, axes: Optional[Axes]) -> Xs_pdf_cdf1d:
+    """The ``MonteCarlo_cdf`` table: ``xs``, ``pdf`` and ``cdf``, each a ``values``.
+
+    FUDGE's spelling (``xData/xs_pdf_cdf.py``): ``interpolation`` only when it is
+    not lin-lin. The cumulative is read as stored, never rebuilt from the
+    density (``kika.nuclear_data.model.functions.pdf_cdf``).
+    """
+    arrays = {}
+    for name in ("xs", "pdf", "cdf"):
+        child = element.find(name)
+        if child is None:
+            raise ValueError(f"<xs_pdf_cdf1d> has no <{name}> child")
+        arrays[name] = _values(child)
+    return Xs_pdf_cdf1d(
+        xs=arrays["xs"], pdf=arrays["pdf"], cdf=arrays["cdf"],
         interpolation=_interpolation(element),
         axes=readAxes(element) or axes,
         label=element.attrib.get("label"),

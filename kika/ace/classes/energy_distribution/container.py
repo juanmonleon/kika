@@ -16,8 +16,9 @@ class EnergyDistributionContainer:
     # Particle production energy distributions (particle index → MT → list of distributions)
     particle_production: List[Dict[int, List[EnergyDistribution]]] = field(default_factory=list)
     
-    # Delayed neutron energy distributions (precursor group → distribution)
-    delayed_neutron: List[EnergyDistribution] = field(default_factory=list)
+    # Delayed neutron energy distributions: [group g] → the law chain of
+    # precursor group g + 1, in BDD order (empty if it could not be read)
+    delayed_neutron: List[List[EnergyDistribution]] = field(default_factory=list)
     
     # Energy-dependent neutron yields (MT → yield)
     neutron_yields: Dict[int, EnergyDistribution] = field(default_factory=dict)
@@ -149,19 +150,19 @@ class EnergyDistributionContainer:
         # Not found
         return None
     
-    def get_delayed_neutron_distribution(self, group: int) -> Optional[EnergyDistribution]:
+    def get_delayed_neutron_distribution(self, group: int) -> Optional[List[EnergyDistribution]]:
         """
-        Get the energy distribution for a delayed neutron precursor group.
+        Get the energy laws of a delayed neutron precursor group.
         
         Parameters
         ----------
         group : int
-            Precursor group index (0-based)
+            Precursor group index (0-based, in BDD order)
             
         Returns
         -------
-        Optional[EnergyDistribution]
-            Energy distribution for the precursor group, or None if not found
+        Optional[List[EnergyDistribution]]
+            The law chain of the group, as for a reaction, or None if not found
         """
         if group < 0 or group >= len(self.delayed_neutron):
             return None
@@ -261,11 +262,12 @@ class EnergyDistributionContainer:
                     distribution_types[dist_type] += 1
         
         # Count distribution types for delayed neutron
-        for dist in self.delayed_neutron:
-            dist_type = dist.__class__.__name__
-            if dist_type not in distribution_types:
-                distribution_types[dist_type] = 0
-            distribution_types[dist_type] += 1
+        for dist_list in self.delayed_neutron:
+            for dist in dist_list:
+                dist_type = dist.__class__.__name__
+                if dist_type not in distribution_types:
+                    distribution_types[dist_type] = 0
+                distribution_types[dist_type] += 1
         
         # Display distribution type summary
         if distribution_types:
@@ -379,8 +381,8 @@ class EnergyDistributionContainer:
             print(f"{'Group':<8} {'Distribution Type':<30} {'Access Method':<50}")
             print("-" * header_width)
             
-            for i, dist in enumerate(self.delayed_neutron):
-                dist_type = dist.__class__.__name__
+            for i, dist_list in enumerate(self.delayed_neutron):
+                dist_type = ", ".join(d.__class__.__name__ for d in dist_list) or "(not read)"
                 access = f".get_delayed_neutron_distribution({i})"
                 print(f"{i:<8} {dist_type:<30} {access:<50}")
         

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import numpy as np
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
+from kika.ace.classes.energy_distribution import tabular_math
 from kika._utils import create_repr_section
 
 
@@ -65,35 +66,32 @@ class TabularLinearFunctions(EnergyDistribution):
     
     def get_interpolated_function_data(self, incident_energy: float) -> Dict:
         """
-        Get interpolated function data for a specific incident energy.
-        
-        For Law 22, we don't interpolate between function data sets.
-        Instead, we find the bracket incident energies and use the lower one's function data.
-        
-        Parameters
-        ----------
-        incident_energy : float
-            The incident energy
-            
+        The functions that apply at an incident energy, as one function set.
+
+        Between two incident energies the transport code picks the lower table
+        with probability 1 - f and the upper one with f (INT=1: always the
+        lower one), then a function k by P_ik, and E_out = C_ik (E - T_ik) at
+        the actual E. That mixture is itself a function set: the two tables'
+        functions side by side with their P scaled by the table weights.
+
         Returns
         -------
         Dict
-            Dictionary containing the function data or None if not available
+            ``nf``, ``p``, ``t``, ``c`` as :meth:`get_function_data`, or None
+            if the law has no tables.
         """
-        # Find the bracketing incident energies
-        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
-            # Below the minimum incident energy, return the first function data
-            return self.get_function_data(0) if self.function_data else None
-        
-        if incident_energy >= self.incident_energies[-1]:
-            # Above the maximum incident energy, return the last function data
-            return self.get_function_data(len(self.incident_energies) - 1) if self.function_data else None
-        
-        # Find the energy interval containing the incident energy
-        idx = np.searchsorted(self.incident_energies, incident_energy, side='right') - 1
-        
-        # Return the function data for the lower incident energy
-        return self.get_function_data(idx)
+        if len(self.incident_energies) == 0 or not self.function_data:
+            return None
+        weights = tabular_math.table_weights(self.incident_energies, self.nbt, self.interp, incident_energy)
+        if len(weights) == 1:
+            return self.get_function_data(weights[0][0])
+        parts = [(w, self.get_function_data(i)) for i, w in weights]
+        return {
+            "nf": sum(int(d["nf"]) for _, d in parts),
+            "p": np.concatenate([w * np.asarray(d["p"], dtype=float) for w, d in parts]),
+            "t": np.concatenate([np.asarray(d["t"], dtype=float) for _, d in parts]),
+            "c": np.concatenate([np.asarray(d["c"], dtype=float) for _, d in parts]),
+        }
     
     def __repr__(self) -> str:
         """
@@ -238,8 +236,11 @@ class TabularEnergyMultipliers(EnergyDistribution):
         """
         Get interpolated multiplier table for a specific incident energy.
         
-        For tabular energy multipliers, we interpolate between the
-        multiplier tables of adjacent incident energies.
+        Between two incident energies the multipliers are interpolated point
+        by point (corresponding points) with the fraction of the interval; an
+        INT=1 interval keeps the lower table. NBT/INT of the law decide which
+        (no LAW=24 table has been found in the share's libraries to check
+        this against a transport code).
         
         Parameters
         ----------
@@ -251,35 +252,17 @@ class TabularEnergyMultipliers(EnergyDistribution):
         List[float]
             Interpolated multiplier table or None if not available
         """
-        # Find the bracketing incident energies
-        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
-            # Below the minimum incident energy, return the first table
-            return self.get_multiplier_table(0)
-        
-        if incident_energy >= self.incident_energies[-1]:
-            # Above the maximum incident energy, return the last table
-            return self.get_multiplier_table(len(self.incident_energies) - 1)
-        
-        # Find the energy interval containing the incident energy
-        idx = np.searchsorted(self.incident_energies, incident_energy, side='right') - 1
-        
-        # Get the multiplier tables for the bracketing energies
-        table_low = self.get_multiplier_table(idx)
-        table_high = self.get_multiplier_table(idx + 1)
-        
-        if (table_low is None or table_high is None or len(table_low) == 0
-                or len(table_high) == 0 or len(table_low) != len(table_high)):
-            return table_low if table_low is not None and len(table_low) > 0 else table_high
-            
-        # Calculate interpolation factor
-        energy_low = self.incident_energies[idx]
-        energy_high = self.incident_energies[idx + 1]
-        factor = (incident_energy - energy_low) / (energy_high - energy_low)
-        
-        # Linearly interpolate between tables
-        interp_table = [table_low[i] + factor * (table_high[i] - table_low[i]) for i in range(len(table_low))]
-        
-        return interp_table
+        if len(self.incident_energies) == 0 or not self.multiplier_tables:
+            return None
+        weights = tabular_math.table_weights(self.incident_energies, self.nbt, self.interp, incident_energy)
+        if len(weights) == 1:
+            return self.get_multiplier_table(weights[0][0])
+        (i, w_low), (_, frac) = weights
+        table_low = np.asarray(self.get_multiplier_table(i), dtype=float)
+        table_high = np.asarray(self.get_multiplier_table(i + 1), dtype=float)
+        if len(table_low) != len(table_high):
+            raise ValueError(f"LAW=24 tables {i} and {i + 1} have {len(table_low)} and {len(table_high)} multipliers")
+        return list(w_low * table_low + frac * table_high)
     
     def __repr__(self) -> str:
         """

@@ -351,40 +351,28 @@ class CrossSectionData:
         if not component_reactions:
             return None
 
-        # Use the full energy grid if available, otherwise use first component's grid
-        if self.energy_grid is not None:
-            energy_entries = self.energy_grid
-            num_energies = len(energy_entries)
-        else:
-            energy_entries = component_reactions[0]._energy_entries
-            num_energies = len(energy_entries)
-
-        # Initialize sum array for full energy grid
-        xs_sum = np.zeros(num_energies)
-
-        # Sum all component cross sections, respecting their energy indices
+        # The sum starts at the lowest threshold of its components (IE of ACE,
+        # threshold_idx of OpenMC), not at the first grid point: below it every
+        # component is absent, and a block of zeros there would state a
+        # threshold the reaction does not have.
+        grid = self.energy_grid if self.energy_grid is not None else component_reactions[0]._energy_entries
+        num_energies = len(grid)
+        start = max(0, min(c.energy_idx for c in component_reactions))
+        xs_sum = np.zeros(num_energies - start)
         for comp_reaction in component_reactions:
-            comp_xs = comp_reaction.xs_values
-            start_idx = comp_reaction.energy_idx
-            end_idx = start_idx + len(comp_xs)
-
-            # Clamp to valid range
-            if start_idx < 0:
-                start_idx = 0
-            if end_idx > num_energies:
-                end_idx = num_energies
-
-            actual_len = end_idx - start_idx
-            if actual_len > 0 and actual_len <= len(comp_xs):
-                xs_sum[start_idx:end_idx] += np.array(comp_xs[:actual_len])
+            comp_xs = np.asarray(comp_reaction.xs_values, dtype=float)
+            lo = max(comp_reaction.energy_idx, 0)
+            hi = min(comp_reaction.energy_idx + len(comp_xs), num_energies)
+            if hi > lo:
+                xs_sum[lo - start:hi - start] += comp_xs[lo - comp_reaction.energy_idx:hi - comp_reaction.energy_idx]
 
         # A computed composite owns its array: it is not part of the table.
         return ReactionCrossSection(
             mt=mt,
-            energy_idx=0,  # Computed composite covers full energy grid
-            num_energies=num_energies,
+            energy_idx=start,
+            num_energies=num_energies - start,
             _xs_entries=xs_sum,
-            _energy_entries=energy_entries
+            _energy_entries=grid[start:]
         )
     
     def plot(self, mt: Union[int, List[int]], ax=None, **kwargs):

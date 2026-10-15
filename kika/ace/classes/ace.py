@@ -28,6 +28,7 @@ from kika.ace.classes.secondary_particles.secondary_particle_reactions import Se
 from kika.ace.classes.secondary_particles.secondary_particles_types import SecondaryParticleTypes
 from kika.ace.classes.esz import EszBlock
 from kika.ace.classes.ace_repr import ace_repr
+from kika.ace.classes.read_report import ReadReport
 from kika._constants import MT_COMPOSITES, MT_COMPOSITE_ORDER
 
 
@@ -46,6 +47,8 @@ class Ace:
     
     # XSS data array - loaded immediately
     xss_data: Optional[np.ndarray] = None  # XSS array, float64, xss_data[0] is a placeholder
+    # One bit per XSS word: spelled as an integer (I20) in the file (kika.ace.classes.xss)
+    xss_int_words: Optional[np.ndarray] = None
     
     # Standard ACE data blocks
     esz_block: Optional[EszBlock] = None
@@ -74,6 +77,9 @@ class Ace:
     secondary_particle_data_locations: Optional[SecondaryParticleDataLocators] = None
     secondary_particle_cross_sections: Optional[SecondaryParticleCrossSections] = None
     
+    # What the read could not take, or took with a caveat (kika.ace.classes.read_report)
+    read_report: Optional[ReadReport] = None
+
     # Debug flag for parsers
     _debug: bool = False
     

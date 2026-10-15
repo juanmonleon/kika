@@ -304,37 +304,25 @@ class LaboratoryAngleEnergyDistribution(EnergyDistribution):
     
     def get_interpolated_distribution(self, incident_energy: float) -> Dict:
         """
-        Get an interpolated distribution for a specific incident energy.
-        
-        For Law 67, we find the bracketing incident energies and use the
-        distribution for the lower energy. In a full implementation,
-        we would interpolate between the distributions.
-        
-        Parameters
-        ----------
-        incident_energy : float
-            The incident energy
-            
+        The angle-energy tables sampled at an incident energy.
+
+        Between two incident energies the lower table is used with probability
+        1 - f and the upper one with f (INT=1: always the lower one), as for
+        the other tabulated laws. A LAW=67 table is a set of cosines each with
+        its own E' table, so the two are not merged: both are returned with
+        their weights.
+
         Returns
         -------
         Dict
-            Dictionary containing the distribution data or None if not available
+            ``{"weights": [...], "tables": [...]}``, one or two tables as
+            :meth:`get_distribution` gives them; None if the law has none.
         """
-        # Find the bracketing incident energies
-        if len(self.incident_energies) == 0 or incident_energy <= self.incident_energies[0]:
-            # Below the minimum incident energy, return the first distribution
-            return self.get_distribution(0)
-        
-        if incident_energy >= self.incident_energies[-1]:
-            # Above the maximum incident energy, return the last distribution
-            return self.get_distribution(len(self.incident_energies) - 1)
-        
-        # Find the energy interval containing the incident energy
-        idx = np.searchsorted(self.incident_energies, incident_energy, side='right') - 1
-        
-        # Return the distribution for the lower incident energy
-        # In a full implementation, we would interpolate between distributions
-        return self.get_distribution(idx)
+        if len(self.incident_energies) == 0 or not self.angle_energy_distributions:
+            return None
+        weights = tabular_math.table_weights(self.incident_energies, self.nbt, self.interp, incident_energy)
+        return {"weights": [w for _, w in weights],
+                "tables": [self.get_distribution(i) for i, _ in weights]}
 
     # Removed sampling methods:
     # - sample_outgoing_angle_energy

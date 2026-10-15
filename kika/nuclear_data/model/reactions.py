@@ -98,6 +98,14 @@ class _ReactionList:
     def append(self, reaction: Reaction) -> None:
         self.reactions.append(reaction)
 
+    def remove(self, reaction: Reaction) -> None:
+        """Drop ``reaction`` (the object itself, not an equal one)."""
+        for i, held in enumerate(self.reactions):
+            if held is reaction:
+                del self.reactions[i]
+                return
+        raise ValueError("that reaction is not in this container")
+
     def byLabel(self, label: str) -> Reaction:
         for reaction in self.reactions:
             if reaction.label == label:

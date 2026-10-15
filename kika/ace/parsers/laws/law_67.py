@@ -1,4 +1,5 @@
 import logging
+from kika.ace.classes.xss import xss_ints
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika.ace.classes.energy_distribution.distributions.angle_energy import LaboratoryAngleEnergyDistribution
@@ -64,9 +65,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     # Read the number of interpolation regions (N_R)
     distribution.n_interp_regions = int(ace.xss_data[idat_idx])
@@ -78,24 +77,22 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
     # Read the interpolation parameters if present
     if n_r > 0 and idx + 2*n_r - 1 < len(ace.xss_data):
         # Read NBT values
-        distribution.nbt = [int(ace.xss_data[idx + i]) for i in range(n_r)]
+        distribution.nbt = xss_ints(ace.xss_data, idx, n_r)
         if debug:
             logger.debug(f"NBT values: {distribution.nbt}")
         idx += n_r
         
         # Read INT values
-        distribution.interp = [int(ace.xss_data[idx + i]) for i in range(n_r)]
+        distribution.interp = xss_ints(ace.xss_data, idx, n_r)
         if debug:
             logger.debug(f"INT values: {distribution.interp}")
         idx += n_r
-    elif n_r > 0 and debug:
-        logger.debug(f"Not enough data to read interpolation parameters. Need index up to {idx + 2*n_r - 1}, have {len(ace.xss_data)}")
+    elif n_r > 0:
+        raise ValueError(f"NR={n_r} interpolation regions at {idx} run past the XSS array ({len(ace.xss_data)})")
     
     # Read the number of incident energies (N_E)
     if idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     distribution.n_energies = int(ace.xss_data[idx])
     if debug:
@@ -105,9 +102,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
     
     # Check if we have enough data
     if idx + n_e - 1 >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
     
     # Read the incident energies - a view of xss_data
     distribution.incident_energies = ace.xss_data[idx:idx + n_e]
@@ -117,12 +112,10 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
     
     # Check if we have enough data for the locations
     if idx + n_e - 1 >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Not enough data to read distribution locations. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read distribution locations. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
     
     # Read the distribution locations (L values)
-    distribution.distribution_locations = [int(ace.xss_data[idx + i]) for i in range(n_e)]
+    distribution.distribution_locations = xss_ints(ace.xss_data, idx, n_e)
     if debug:
         logger.debug(f"Distribution locations: {distribution.distribution_locations}")
     
@@ -142,10 +135,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
             logger.debug(f"Processing distribution {i+1}/{n_e}, location={loc}")
         if loc <= 0:
             # Skip if location is invalid
-            if debug:
-                logger.debug(f"Skipping distribution {i+1}: invalid location ({loc})")
-            distribution.angle_energy_distributions.append(None)
-            continue
+            raise ValueError(f"distribution {i+1}: invalid location ({loc})")
         
         dist_idx = jed + loc - 1
         if debug:
@@ -153,10 +143,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
         
         # Check if we're within bounds
         if dist_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Absolute index {dist_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-            distribution.angle_energy_distributions.append(None)
-            continue
+            raise ValueError(f"Absolute index {dist_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
         
         # Read INTMU (interpolation scheme for angles)
         intmu = int(ace.xss_data[dist_idx])
@@ -170,10 +157,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
         
         # Read the secondary cosines (XMU) - a view of xss_data
         if dist_idx + 2 + nmu - 1 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Not enough data to read cosines. Need index up to {dist_idx + 2 + nmu - 1}, have {len(ace.xss_data)}")
-            distribution.angle_energy_distributions.append(None)
-            continue
+            raise ValueError(f"Not enough data to read cosines. Need index up to {dist_idx + 2 + nmu - 1}, have {len(ace.xss_data)}")
             
         cosines = ace.xss_data[dist_idx + 2:dist_idx + 2 + nmu]
         if debug:
@@ -181,12 +165,9 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
         
         # Read the energy distribution locations (LMU)
         if dist_idx + 2 + nmu + nmu - 1 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Not enough data to read energy distribution locations. Need index up to {dist_idx + 2 + nmu + nmu - 1}, have {len(ace.xss_data)}")
-            distribution.angle_energy_distributions.append(None)
-            continue
+            raise ValueError(f"Not enough data to read energy distribution locations. Need index up to {dist_idx + 2 + nmu + nmu - 1}, have {len(ace.xss_data)}")
             
-        lmu_values = [int(ace.xss_data[dist_idx + 2 + nmu + j]) for j in range(nmu)]
+        lmu_values = xss_ints(ace.xss_data, dist_idx + 2 + nmu, nmu)
         if debug:
             logger.debug(f"Energy distribution locations (LMU): {lmu_values}")
         
@@ -198,20 +179,12 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
             if debug:
                 logger.debug(f"Processing energy distribution for cosine {j+1}/{nmu}, location={lmu}")
             if lmu <= 0:
-                # Skip if location is invalid
-                if debug:
-                    logger.debug(f"Skipping energy distribution for cosine {j+1}: invalid location ({lmu})")
-                energy_distributions.append(None)
-                continue
+                raise ValueError(f"LAW=67 cosine {j+1}: invalid location LMU={lmu}")
                 
             energy_dist_idx = jed + lmu - 1
 
-            # Skip if still out of bounds
             if energy_dist_idx >= len(ace.xss_data):
-                if debug:
-                    logger.debug(f"Absolute index {energy_dist_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-                energy_distributions.append(None)
-                continue
+                raise ValueError(f"LAW=67 cosine {j+1}: Absolute index {energy_dist_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
                 
             # Read INTEP (interpolation parameter for secondary energies)
             intep = int(ace.xss_data[energy_dist_idx])
@@ -225,10 +198,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
             
             # Read the secondary energy grid (E_p) - a view of xss_data
             if energy_dist_idx + 2 + npep - 1 >= len(ace.xss_data):
-                if debug:
-                    logger.debug(f"Not enough data to read secondary energy grid. Need index up to {energy_dist_idx + 2 + npep - 1}, have {len(ace.xss_data)}")
-                energy_distributions.append(None)
-                continue
+                raise ValueError(f"LAW=67 cosine {j+1}: Not enough data to read secondary energy grid. Need index up to {energy_dist_idx + 2 + npep - 1}, have {len(ace.xss_data)}")
                 
             e_p = ace.xss_data[energy_dist_idx + 2:energy_dist_idx + 2 + npep]
             if debug:
@@ -236,10 +206,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
             
             # Read the probability density function (PDF) - a view of xss_data
             if energy_dist_idx + 2 + npep + npep - 1 >= len(ace.xss_data):
-                if debug:
-                    logger.debug(f"Not enough data to read PDF. Need index up to {energy_dist_idx + 2 + npep + npep - 1}, have {len(ace.xss_data)}")
-                energy_distributions.append(None)
-                continue
+                raise ValueError(f"LAW=67 cosine {j+1}: Not enough data to read PDF. Need index up to {energy_dist_idx + 2 + npep + npep - 1}, have {len(ace.xss_data)}")
                 
             pdf = ace.xss_data[energy_dist_idx + 2 + npep:energy_dist_idx + 2 + npep + npep]
             if debug:
@@ -247,10 +214,7 @@ def parse_laboratory_angle_energy_distribution(ace: Ace, base_dist: EnergyDistri
             
             # Read the cumulative density function (CDF) - a view of xss_data
             if energy_dist_idx + 2 + 2*npep + npep - 1 >= len(ace.xss_data):
-                if debug:
-                    logger.debug(f"Not enough data to read CDF. Need index up to {energy_dist_idx + 2 + 2*npep + npep - 1}, have {len(ace.xss_data)}")
-                energy_distributions.append(None)
-                continue
+                raise ValueError(f"LAW=67 cosine {j+1}: Not enough data to read CDF. Need index up to {energy_dist_idx + 2 + 2*npep + npep - 1}, have {len(ace.xss_data)}")
                 
             cdf = ace.xss_data[energy_dist_idx + 2 + 2*npep:energy_dist_idx + 2 + 2*npep + npep]
             if debug:

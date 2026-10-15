@@ -8,6 +8,7 @@ in MCNP ACE format files.
 from .law_1 import parse_tabular_energy_distribution
 from .law_2 import parse_discrete_energy_distribution
 from .law_3 import parse_level_scattering
+from .law_33 import parse_particle_level_scattering
 from .law_4 import parse_continuous_energy_angle_distribution
 from .law_5 import parse_general_evaporation_spectrum
 from .law_7 import parse_maxwell_fission_spectrum
@@ -25,6 +26,7 @@ __all__ = [
     'parse_tabular_energy_distribution',
     'parse_discrete_energy_distribution',
     'parse_level_scattering',
+    'parse_particle_level_scattering',
     'parse_continuous_energy_angle_distribution',
     'parse_general_evaporation_spectrum',
     'parse_maxwell_fission_spectrum',

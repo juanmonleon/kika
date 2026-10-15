@@ -2,6 +2,8 @@ import logging
 from kika.ace.classes.ace import Ace
 import numpy as np
 from kika.ace.classes.header import Header
+from kika.ace.classes.xss import integer_fields, pack_int_words
+from kika.ace.classes.read_report import AceReadError, ReadReport, lost
 from kika.ace.parsers.parse_esz import read_esz_block
 from kika.ace.parsers import read_header, read_nubar_data
 from kika.ace.parsers.parse_delayed import read_delayed_neutron_data
@@ -29,7 +31,7 @@ from kika.ace.parsers.parse_photoatomic import is_photoatomic_extension, parse_p
 # Setup logger
 logger = logging.getLogger(__name__)
 
-def read_ace(filename, debug=False):
+def read_ace(filename, debug=False, strict=True):
     """
     Read and parse an ACE format file.
     
@@ -45,6 +47,11 @@ def read_ace(filename, debug=False):
         Path to the ACE file
     debug : bool, optional
         Whether to print debug information, defaults to False
+    strict : bool, optional
+        ``True`` (the default): a block or reaction that cannot be read raises
+        :class:`~kika.ace.classes.read_report.AceReadError`. ``False``: the
+        table keeps what could be read and ``ace.read_report`` lists what was
+        not. Notes (legitimate things worth knowing) are recorded either way.
         
     Returns
     -------
@@ -61,6 +68,7 @@ def read_ace(filename, debug=False):
     ace.filename = filename
     ace.header = Header()
     ace._debug = debug  # Store debug flag for later use by parsers
+    ace.read_report = ReadReport(strict=strict)
     
     # The header is read line by line and the XSS straight from the file in
     # chunks: a list of lines would hold ~1.6x the file in str objects just to
@@ -81,7 +89,7 @@ def read_ace(filename, debug=False):
         read_header(ace.header, lines, debug=debug)
 
         # Read the XSS array - essential data needed for all parsers
-        ace.xss_data = read_xss_file(file, ace.header.nxs_array[1])
+        ace.xss_data, ace.xss_int_words = read_xss_file(file, ace.header.nxs_array[1], spelling=True)
 
     # A photo-atomic table ('p') shares only the header with a neutron one:
     # its NXS and JXS mean other things, so the neutron block parsers below
@@ -90,77 +98,56 @@ def read_ace(filename, debug=False):
     if is_photoatomic_extension(ace.header.extension):
         return parse_photoatomic(ace.header, ace.xss_data, filename)
 
-    # Parse every block
-    
-    # ESZ Block
-    ace.esz_block = read_esz_block(ace, debug)
-    
-    # Nubar data
-    ace.nubar = read_nubar_data(ace, debug)
-    
-    # Delayed neutron data
-    ace.delayed_neutron_data = read_delayed_neutron_data(ace, debug)
-    
-    # MT Reaction data
-    ace.reaction_mt_data = read_mtr_blocks(ace, debug)
-    
-    # Q values
-    ace.q_values = read_lqr_block(ace, debug)
-    
-    # Particle release data
-    ace.particle_release = read_tyr_blocks(ace, debug)
-    
-    # Cross section locators
-    ace.xs_locators = read_xs_locator_blocks(ace, debug)
-    
-    # Cross section data
-    ace.xs_data = read_xs_data_block(ace, debug)
-    
-    # Angular distribution locators - Fix: Assign the return value instead of direct modification
-    ace.angular_locators = read_angular_locator_blocks(ace, debug)
-    
-    # Angular distribution data - Fix: Assign the return value instead of direct modification
-    ace.angular_distributions = read_angular_distribution_blocks(ace, debug)
-    
-    # Energy distribution locators
-    ace.energy_distribution_locators = read_energy_locator_blocks(ace, debug)
-    
-    # Energy distribution data
-    ace.energy_distributions = read_energy_distribution_blocks(ace, debug)
+    parse_blocks(ace, debug)
+    return ace
 
-    # Photon production data
-    ace.photon_production_data = read_gpd_block(ace, debug)
-    
-    # Secondary particle types (PTYPE block)
-    # This must be read first as other secondary particle blocks depend on it
-    ace.secondary_particle_types = parse_ptype_block(ace, debug)
-    
-    # Photon production cross sections
-    photon_xs, particle_xs = read_production_xs_blocks(ace, debug)
+def parse_blocks(ace, debug=False):
+    """Decode every block of ``ace`` from its header and ``xss_data``.
+
+    What :func:`read_ace` runs once the XSS is read; also what turns an XSS
+    built by :mod:`kika.ace.encoders` back into blocks. ``ace.read_report``
+    must exist (strict or not).
+    """
+    # Parse every block. A block that cannot be read raises AceReadError
+    # naming it (strict) or is left empty and recorded in ace.read_report.
+    def block(name, parser, *args):
+        try:
+            return parser(ace, *args, debug)
+        except AceReadError:
+            raise
+        except (ValueError, IndexError, TypeError, KeyError, AttributeError) as e:
+            lost(ace, name, "", f"block not read: {e}")
+            return None
+
+    ace.esz_block = block("ESZ", read_esz_block)
+    ace.nubar = block("NU", read_nubar_data)
+    ace.delayed_neutron_data = block("BDD", read_delayed_neutron_data)
+    ace.reaction_mt_data = block("MTR", read_mtr_blocks)
+    ace.q_values = block("LQR", read_lqr_block)
+    ace.particle_release = block("TYR", read_tyr_blocks)
+    ace.xs_locators = block("LSIG", read_xs_locator_blocks)
+    ace.xs_data = block("SIG", read_xs_data_block)
+    ace.angular_locators = block("LAND", read_angular_locator_blocks)
+    ace.angular_distributions = block("AND", read_angular_distribution_blocks)
+    ace.energy_distribution_locators = block("LDLW", read_energy_locator_blocks)
+    ace.energy_distributions = block("DLW", read_energy_distribution_blocks)
+    ace.photon_production_data = block("GPD", read_gpd_block)
+    # PTYPE first: the other secondary-particle blocks depend on it
+    ace.secondary_particle_types = block("PTYPE", parse_ptype_block)
+    photon_xs, particle_xs = block("SIGP", read_production_xs_blocks) or (None, None)
     ace.photon_production_xs = photon_xs
     ace.particle_production_xs = particle_xs
-    
-    # Fission cross section
-    ace.fission_xs = read_fission_xs_block(ace, debug)
-    
-    # Unresolved resonance tables
-    ace.unresolved_resonance = read_unresolved_resonance_block(ace, debug)
-    
-    # Secondary particle reaction counts (NTRO block)
-    ace.secondary_particle_reactions = parse_ntro_block(ace, debug)
-    
-    # Secondary particle data locations (IXS block)
-    ace.secondary_particle_data_locations = parse_ixs_block(ace, debug)
-    
-    # Photon and secondary particle yield multipliers
-    photon_yield_multipliers, particle_yield_multipliers = read_yield_multiplier_blocks(ace, debug)
-    ace.photon_yield_multipliers = photon_yield_multipliers
-    ace.particle_yield_multipliers = particle_yield_multipliers
-    
-    # Secondary particle cross sections (HPD block)
-    ace.secondary_particle_cross_sections = parse_hpd_block(ace, debug)
-    
+    ace.fission_xs = block("FIS", read_fission_xs_block)
+    ace.unresolved_resonance = block("UNR", read_unresolved_resonance_block)
+    ace.secondary_particle_reactions = block("NTRO", parse_ntro_block)
+    ace.secondary_particle_data_locations = block("IXS", parse_ixs_block)
+    photon_ym, particle_ym = block("YP", read_yield_multiplier_blocks) or (None, None)
+    ace.photon_yield_multipliers = photon_ym
+    ace.particle_yield_multipliers = particle_ym
+    ace.secondary_particle_cross_sections = block("HPD", parse_hpd_block)
+
     return ace
+
 
 #: Lines of XSS parsed per chunk (4 values each).
 _XSS_CHUNK_LINES = 65536
@@ -191,7 +178,7 @@ def _read_header_lines(file):
     return lines
 
 
-def read_xss_file(file, n_values):
+def read_xss_file(file, n_values, spelling=False):
     """
     Read the XSS array from a binary file positioned just after the header.
 
@@ -209,18 +196,54 @@ def read_xss_file(file, n_values):
     n_values : int
         ``NXS(1)``, the declared length of the XSS array.
 
+    spelling : bool, optional
+        Also return which words are spelled as integers, packed as
+        ``Ace.xss_int_words`` (see :mod:`kika.ace.classes.xss`).
+
     Returns
     -------
     numpy.ndarray
-        ``float64`` array of length ``n_values + 1``, ``[0]`` = 0.0.
+        ``float64`` array of length ``n_values + 1``, ``[0]`` = 0.0; with
+        ``spelling=True``, ``(xss, int_words)``.
     """
     start = file.tell()
-    xss = _read_xss_fixed_lines(file, n_values) if n_values else None
-    if xss is None:
+    found = _read_xss_fixed_lines(file, n_values) if n_values else None
+    if found is None:
         file.seek(start)
         lines = file.read().decode("ascii", "replace").splitlines(keepends=True)
         xss = read_xss(lines, n_values)
-    return xss
+        is_int = _spelling_from_lines(lines, xss.size - 1)
+    else:
+        xss, is_int = found
+    if not spelling:
+        return xss
+    return xss, (pack_int_words(is_int) if is_int is not None else None)
+
+
+def _spelling_from_lines(lines, n_values):
+    """Integer spelling of each XSS token (no decimal point); None if the tokens do not count n_values."""
+    if n_values:
+        lines = lines[:-(-n_values // 4)]
+    is_int = np.fromiter(("." not in t for t in " ".join(lines).split()), dtype=bool)
+    return is_int if is_int.size == n_values else None
+
+
+#: Largest single read: the share's 9p mount has failed one-off reads of ~5 MB
+#: with ENOMEM (Th-232, Se-80 and W-181 in the 2026-10-14 census) that succeed
+#: when repeated or smaller.
+_READ_BYTES = 1 << 20
+
+
+def _read_exact(file, n):
+    """``n`` bytes (fewer only at the end of the file), read at most ``_READ_BYTES`` at a time."""
+    parts = []
+    while n > 0:
+        part = file.read(min(n, _READ_BYTES))
+        if not part:
+            break
+        parts.append(part)
+        n -= len(part)
+    return b"".join(parts)
 
 
 def _read_xss_fixed_lines(file, n_values):
@@ -240,12 +263,13 @@ def _read_xss_fixed_lines(file, n_values):
 
     xss = np.empty(n_values + 1, dtype=np.float64)
     xss[0] = 0.0
+    is_int = np.empty(n_values, dtype=bool)
     pending = first
     done = 0  # full lines read so far
     try:
         while done < n_full:
             take = min(_XSS_CHUNK_LINES, n_full - done)
-            chunk = pending + file.read(take * width - len(pending))
+            chunk = pending + _read_exact(file, take * width - len(pending))
             pending = b""
             if len(chunk) < take * width:
                 return None
@@ -255,18 +279,21 @@ def _read_xss_fixed_lines(file, n_values):
             values = xss[1 + 4 * done:1 + 4 * (done + take)]
             for k in range(4):
                 values[k::4] = rows[f"f{k}"].astype(np.float64)
+            fields = np.frombuffer(chunk, dtype=np.uint8).reshape(take, width)[:, :80].reshape(take, 4, 20)
+            is_int[4 * done:4 * (done + take)] = integer_fields(fields).ravel()
             done += take
         if n_last:
             # n_full > 0 here: a table shorter than one line fails the width check.
-            last = file.read(n_last * 20)
+            last = _read_exact(file, n_last * 20)
             if len(last) < n_last * 20:
                 return None
             xss[1 + 4 * n_full:] = np.frombuffer(
                 last, dtype="S20", count=n_last
             ).astype(np.float64)
+            is_int[4 * n_full:] = integer_fields(np.frombuffer(last, dtype=np.uint8).reshape(n_last, 20))
     except ValueError:  # a blank or non-numeric field
         return None
-    return xss
+    return xss, is_int
 
 
 def read_xss(lines, n_values=None):

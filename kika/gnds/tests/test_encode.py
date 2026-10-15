@@ -1580,8 +1580,9 @@ def test_a_gnds_sourced_suite_writes_an_endf_tape(h2_gnds, tmp_path):
 
 def test_an_unknown_format_is_refused_by_name(h2_gnds, tmp_path):
     suite = kika.read(h2_gnds, covariances=False)
+    # "ace" was the unknown format until ACE became one kika writes (roadmap A10).
     with pytest.raises(ValueError, match="format must be one of"):
-        kika.write(suite, tmp_path / "out.ace", format="ace")
+        kika.write(suite, tmp_path / "out.xyz", format="xyz")
 
 
 # ---------------------------------------------------------------------------
