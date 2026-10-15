@@ -44,7 +44,7 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from kika._constants import MF3_SUM_RULES
+from kika._constants import mf3SumComponents
 
 from . import records as R
 from .distributions import decodeDistribution
@@ -244,17 +244,7 @@ def _place(suite, decoded):
 
 def _components(mt, present):
     """The MTs a sum adds up, as far as the file carries them."""
-    rule = MF3_SUM_RULES.get(mt)
-    if rule is None:
-        return []
-    out = []
-    for part in rule[0]:
-        if isinstance(part, str):
-            sub = int(part[1:])
-            out.extend([sub] if sub in present else _components(sub, present))
-        elif part in present:
-            out.append(part)
-    return out
+    return mf3SumComponents(mt, present)
 
 
 # ----------------------------------------------------------------------

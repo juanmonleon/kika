@@ -12,6 +12,8 @@ from kika._utils import create_repr_section
 class EquiprobableAngularDistribution(AngularDistribution):
     """Angular distribution for 32 equiprobable bin scattering."""
     _cosine_bins: List[np.ndarray] = field(default_factory=list)  # 33 cosines for each energy (views of xss_data)
+    # 'isotropic' (LC = 0, held above as uniform bins) or 'equiprobable' at each energy
+    energy_forms: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         super().__post_init__()

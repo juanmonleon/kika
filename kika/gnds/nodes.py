@@ -85,7 +85,8 @@ from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      URR_probabilityTables,
                                      URR_probabilityTables1d, Uncorrelated,
                                      Unspecified, UnspecifiedMultiplicity,
-                                     XYs1d, XYs2d, XYs3d, Ys1d)
+                                     XYs1d, XYs2d, XYs3d, Ys1d, Xs_pdf_cdf1d,
+                                     EnergyAngularMC)
 from kika.nuclear_data.model.styles import (AverageProductData,
                                             CoulombPlusNuclearElasticMuCutoff,
                                             MonteCarlo_cdf, SnElasticUpScatter)
@@ -220,6 +221,9 @@ NOT_A_DISTRIBUTION_FORM = {
 NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     # -- §5-6 functionals. `primitives.FUNCTION_1D` / `_2D` derive from these.
     _spec("XYs1d", "function1d", "§6.2.2", XYs1d, Status.PAIRED),
+    # FUDGE writes it (xData/xs_pdf_cdf.py) for the MonteCarlo_cdf style; its
+    # own gnds.xsd does not declare it (roadmap A11).
+    _spec("xs_pdf_cdf1d", "function1d", "§9.4.3", Xs_pdf_cdf1d, Status.PAIRED),
     _spec("regions1d", "function1d", "§6.3.2", Regions1d, Status.PAIRED),
     _spec("constant1d", "function1d", "§6.2.1", Constant1d, Status.PAIRED),
     _spec("Legendre", "function1d", "§6.2.4", Legendre, Status.PAIRED),
@@ -282,6 +286,8 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     _spec("angularEnergy", "distributionForm", "§18.5", AngularEnergy,
           Status.PAIRED),
     _spec("KalbachMann", "distributionForm", "§18.6", KalbachMann,
+          Status.PAIRED),
+    _spec("energyAngularMC", "distributionForm", "§18.1.1", EnergyAngularMC,
           Status.PAIRED),
     _spec("branching3d", "distributionForm", "§18.1.1", Branching3d,
           Status.PAIRED),
@@ -413,15 +419,14 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     _spec("heated", "style", "§9.4.1", Heated, Status.PAIRED),
     _spec("averageProductData", "style", "§9.4.2", AverageProductData,
           Status.WRITE_ONLY, "as `realization`. Legal in RS_StylesType (gnds.xsd:87-93)"),
-    _spec("MonteCarlo_cdf", "style", "§9.4.3", MonteCarlo_cdf,
-          Status.WRITE_ONLY, "as `realization`. Not in RS_StylesType (gnds.xsd:87-93)"),
+    _spec("MonteCarlo_cdf", "style", "§9.4.3", MonteCarlo_cdf, Status.PAIRED),
     _spec("griddedCrossSection", "style", "§9.4.4", GriddedCrossSection,
           Status.WRITE_ONLY,
           "built by kika/ace/model_adapter/decode.py:141, and "
           "**not** in RS_StylesType — so the file kika writes from an ACE "
           "decode is rejected by FUDGE's own schema"),
     _spec("URR_probabilityTables", "style", "§9.4.5", URR_probabilityTables,
-          Status.WRITE_ONLY, "as `griddedCrossSection`. Not in RS_StylesType (gnds.xsd:87-93)"),
+          Status.PAIRED),
     _spec("heatedMultiGroup", "style", "§9.4.6", HeatedMultiGroup,
           Status.WRITE_ONLY, "as `realization`. Not in RS_StylesType (gnds.xsd:87-93)"),
     _spec("SnElasticUpScatter", "style", "§9.4.7", SnElasticUpScatter,

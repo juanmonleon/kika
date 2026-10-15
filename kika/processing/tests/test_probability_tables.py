@@ -15,6 +15,18 @@ def test_competition_flags_follow_purr():
     assert competitionFlags([2, 4, 18, 102]) == (-1, -1)
 
 
+def test_a_reaction_tabulated_with_leading_zeros_starts_at_its_threshold():
+    # ENDF/B-VIII.1 Pu-240 MT20: zeros from 1e-5 eV to 4 MeV. PURR reads the
+    # PENDF, which starts it one point before its first nonzero value, so it
+    # does not compete in a URR that ends at 40 keV (NJOY: IOA = -1).
+    from kika.nuclear_data.model import XYs1d
+    from kika.processing.resonances.probability_tables import _threshold
+
+    assert _threshold(XYs1d(xs=[1e-5, 4e6, 5e6, 2e7], ys=[0.0, 0.0, 0.1, 0.2])) == 4e6
+    assert _threshold(XYs1d(xs=[4.3e4, 4.4e4], ys=[0.0, 0.017])) == 4.3e4
+    assert _threshold(XYs1d(xs=[1e-5, 2e7], ys=[0.0, 0.0])) == np.inf
+
+
 def test_band_bounds_are_increasing_and_open_at_the_top():
     rng = np.random.default_rng(3)
     bounds = bandBounds(rng.lognormal(size=10000), 20)

@@ -15,6 +15,9 @@ class TabulatedAngularDistribution(AngularDistribution):
     _cosine_grid: List[np.ndarray] = field(default_factory=list)  # Cosine grid for each energy (views of xss_data)
     _pdf: List[np.ndarray] = field(default_factory=list)  # PDF for each energy (views of xss_data)
     _cdf: List[np.ndarray] = field(default_factory=list)  # CDF for each energy (views of xss_data)
+    # What the file has at each energy (LC = 0, > 0, < 0): 'isotropic', 'equiprobable' or
+    # 'tabulated'. The first two are held above as an equivalent table; this keeps what to write back.
+    energy_forms: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         super().__post_init__()

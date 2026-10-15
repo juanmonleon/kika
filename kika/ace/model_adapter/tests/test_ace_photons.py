@@ -38,7 +38,7 @@ from kika.ace.classes.energy_distribution.distributions.tabular import \
 from kika.ace.classes.photon_production_xs import (DirectCrossSection,
                                                     PhotonProductionCrossSections,
                                                     YieldBasedCrossSection)
-from kika.ace.model_adapter import GRIDDED_LABEL, PHOTON_LABEL, attachAcePhotons
+from kika.ace.model_adapter import aceLabels, attachAcePhotons
 from kika.nuclear_data.model import (ConversionReport, CrossSection, DiscreteGamma,
                                      Interpolation, Isotropic2d, OutputChannel,
                                      PrimaryGamma, Reaction, ReactionId, ReactionSuite,
@@ -51,12 +51,15 @@ from kika.nuclear_data.model import (ConversionReport, CrossSection, DiscreteGam
 
 GRID_MEV = np.array([1e-11, 1.0, 2.0, 5.0, 20.0])
 
+#: The synthetic table has no header temperature, so its label is the 0 K one.
+LABEL = "heated_0K"
+
 
 def _reaction(mt, ys):
     xs = CrossSection()
-    xs[GRIDDED_LABEL] = XYs1d(xs=GRID_MEV * 1e6, ys=np.asarray(ys, dtype=float),
-                              interpolation=Interpolation.linlin,
-                              axes=crossSectionAxes(), label=GRIDDED_LABEL)
+    xs[LABEL] = XYs1d(xs=GRID_MEV * 1e6, ys=np.asarray(ys, dtype=float),
+                      interpolation=Interpolation.linlin,
+                      axes=crossSectionAxes(), label=LABEL)
     return Reaction(id=ReactionId(label=f"MT{mt}", ENDF_MT=mt), crossSection=xs,
                     outputChannel=OutputChannel())
 
@@ -122,7 +125,7 @@ def test_a_discrete_line_is_a_discrete_gamma_on_its_reaction(synthetic):
     suite, _ = synthetic
     first, second = _photons(suite.findReactionByENDF_MT(51))
     assert (first.label, second.label) == ("photon", "photon__a")
-    form = first.distribution[PHOTON_LABEL]
+    form = first.distribution[LABEL]
     assert isinstance(form.energy, DiscreteGamma)
     assert form.energy.value == pytest.approx(846778.0)
     # The line's domain is its multiplicity's, as the ENDF adapter writes it.
@@ -132,7 +135,7 @@ def test_a_discrete_line_is_a_discrete_gamma_on_its_reaction(synthetic):
 
 def test_equiprobable_bins_become_a_normalised_histogram(synthetic):
     suite, _ = synthetic
-    angular = _photons(suite.findReactionByENDF_MT(51))[0].distribution[PHOTON_LABEL].angular
+    angular = _photons(suite.findReactionByENDF_MT(51))[0].distribution[LABEL].angular
     assert isinstance(angular, XYs2d)
     for function in angular.function1ds:
         assert function.interpolation == Interpolation.flat
@@ -141,7 +144,7 @@ def test_equiprobable_bins_become_a_normalised_histogram(synthetic):
 
 def test_lp2_is_a_primary_gamma_and_law4_a_continuum(synthetic):
     suite, _ = synthetic
-    photons = {p.label: p.distribution[PHOTON_LABEL] for p in _photons(suite.findReactionByENDF_MT(102))}
+    photons = {p.label: p.distribution[LABEL] for p in _photons(suite.findReactionByENDF_MT(102))}
     assert isinstance(photons["photon"].energy, XYs2d)
     spectrum = photons["photon"].energy.function1ds[0]
     # MeV and 1/MeV become eV and 1/eV, and the density still integrates to 1.
@@ -165,11 +168,43 @@ def test_mftype13_with_no_reaction_is_an_orphan_carrying_sigma_gamma(synthetic):
     suite, report = synthetic
     (orphan,) = suite.orphanProducts
     assert orphan.ENDF_MT == 4
-    np.testing.assert_allclose(orphan.crossSection[GRIDDED_LABEL].ys, [0.1, 0.2, 0.3])
-    np.testing.assert_allclose(orphan.crossSection[GRIDDED_LABEL].xs, [2e6, 5e6, 20e6])
+    np.testing.assert_allclose(orphan.crossSection[LABEL].ys, [0.1, 0.2, 0.3])
+    np.testing.assert_allclose(orphan.crossSection[LABEL].xs, [2e6, 5e6, 20e6])
     (photon,) = _photons(orphan)
     assert photon.multiplicity.form.constant == 1.0
     assert any("orphan product" in line for line in report.approximations)
+
+
+def test_two_photons_on_one_missing_mt_each_keep_their_sigma_gamma():
+    """ENDF/B-VIII.1 N-14 states six MFTYPE 13 photons on MT 28, which it has no σ for.
+
+    One orphan per MT carries the sum of their σ_γ and each photon its share,
+    so y·Σ gives every photon its own σ_γ back. Before, the orphan held the
+    first photon's σ_γ and the others, with y = 1, silently took its numbers.
+    """
+    suite = ReactionSuite(evaluation="synthetic", projectile="n", target="N14")
+    suite.reactions.append(_reaction(51, [0.0, 0.5, 0.5, 0.4, 0.1]))
+    sigp = PhotonProductionCrossSections(has_data=True)
+    sigp.cross_sections = {
+        28001: DirectCrossSection(mt=28001, mftype=13, energy_grid_index=2, num_entries=4,
+                                  cross_sections=np.array([0.0, 0.2, 0.4, 0.4])),
+        28002: DirectCrossSection(mt=28002, mftype=13, energy_grid_index=3, num_entries=3,
+                                  cross_sections=np.array([0.1, 0.1, 0.3])),
+    }
+    energy = {k: [DiscreteEnergyDistribution(eg=1.0, lp=0)] for k in sigp.cross_sections}
+    angular = {k: IsotropicAngularDistribution(mt=k) for k in sigp.cross_sections}
+    ace = SimpleNamespace(photon_production_xs=sigp,
+                          angular_distributions=SimpleNamespace(photon_production=angular),
+                          energy_distributions=SimpleNamespace(photon_production=energy),
+                          esz_block=SimpleNamespace(energies=GRID_MEV), photon_production_data=None)
+    attachAcePhotons(ace, suite, ConversionReport())
+    (orphan,) = suite.orphanProducts
+    sigma = orphan.crossSection[LABEL]
+    np.testing.assert_allclose(sigma.xs, GRID_MEV[1:] * 1e6)
+    np.testing.assert_allclose(sigma.ys, [0.0, 0.3, 0.5, 0.7])
+    for photon, expected in zip(_photons(orphan), ([0.0, 0.2, 0.4, 0.4], [0.1, 0.1, 0.3])):
+        y = photon.multiplicity.form
+        np.testing.assert_allclose(y.ys * np.interp(y.xs, sigma.xs, sigma.ys), expected)
 
 
 def test_what_cannot_be_decoded_is_reported_and_does_not_raise(synthetic):
@@ -178,7 +213,7 @@ def test_what_cannot_be_decoded_is_reported_and_does_not_raise(synthetic):
     assert any("MTRP 51002" in line and "law 9" in line for line in report.unsupported)
     # The law-9 photon keeps its multiplicity and angle; only the energy half is empty.
     photon = _photons(suite.findReactionByENDF_MT(51))[1]
-    assert photon.distribution[PHOTON_LABEL].energy is None
+    assert photon.distribution[LABEL].energy is None
     assert photon.multiplicity is not None
 
 
@@ -224,7 +259,7 @@ def test_the_decoded_photons_rebuild_the_gpd_total(fe56):
     E = energies * 1e6
     rebuilt = np.zeros_like(E)
     for reaction in suite.reactions:
-        sigma = reaction.crossSection[GRIDDED_LABEL]
+        sigma = reaction.crossSection[aceLabels(ace)[0]]
         for photon in _photons(reaction):
             rebuilt += photon.multiplicity.form.evaluate(E) * np.interp(E, sigma.xs, sigma.ys)
     np.testing.assert_allclose(rebuilt, total, rtol=2e-6, atol=1e-12)
@@ -256,26 +291,27 @@ def _cascadeLines(particles, pid, weight=1.0, out=None):
     return out
 
 
-def _aceLines(reaction, energy):
+def _aceLines(reaction, energy, label):
     lines = defaultdict(float)
     for photon in _photons(reaction):
-        lines[round(photon.distribution[PHOTON_LABEL].energy.value)] += \
+        lines[round(photon.distribution[label].energy.value)] += \
             float(photon.multiplicity.form.evaluate(energy))
     return lines
 
 
 @pytest.mark.tape
 def test_the_8468_kev_line_at_2_mev_agrees_with_the_endf_cascade(fe56, endf_suite):
-    name, _, suite, _ = fe56
+    name, table, suite, _ = fe56
+    label = aceLabels(table)[0]
     E = 2e6
     ace = suite.findReactionByENDF_MT(51)
     endf = endf_suite.findReactionByENDF_MT(51)
-    aceYield = _aceLines(ace, E)[846778]
+    aceYield = _aceLines(ace, E, label)[846778]
     endfYield = _cascadeLines(endf_suite.PoPs.particles, "Fe56_e1")[846778]
     assert aceYield == pytest.approx(endfYield, rel=1e-6)
 
     if name.endswith("_81.02c"):
-        sigmaAce = np.interp(E, ace.crossSection[GRIDDED_LABEL].xs, ace.crossSection[GRIDDED_LABEL].ys)
+        sigmaAce = np.interp(E, ace.crossSection[label].xs, ace.crossSection[label].ys)
         sigmaEndf = float(endf.crossSection["eval"].evaluate(E))
         assert aceYield * sigmaAce == pytest.approx(endfYield * sigmaEndf, rel=1e-3)
 
@@ -288,16 +324,17 @@ def test_every_level_line_of_the_b81_table_matches_the_endf_cascade(fe56, endf_s
     walk differ in how internal conversion is carried down the cascade, and the
     largest gap seen is 2.7e-4 (MT84's 846.8 keV line).
     """
-    name, _, suite, _ = fe56
+    name, table, suite, _ = fe56
     if not name.endswith("_81.02c"):
         pytest.skip("the .80c table is ENDF/B-VIII.0; the tape is VIII.1")
+    label = aceLabels(table)[0]
     E, compared = 5e6, 0
     for mt in range(51, 91):
         ace = suite.findReactionByENDF_MT(mt)
         if ace is None or not _photons(ace):
             continue
         cascade = _cascadeLines(endf_suite.PoPs.particles, f"Fe56_e{mt - 50}")
-        for energy, value in _aceLines(ace, E).items():
+        for energy, value in _aceLines(ace, E, label).items():
             expected = sum(v for k, v in cascade.items() if abs(k - energy) < 300)
             assert value == pytest.approx(expected, abs=1e-3), (mt, energy)
             compared += 1

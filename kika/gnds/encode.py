@@ -69,7 +69,8 @@ from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      ThermalNeutronScatteringLaw1d,
                                      Uncorrelated, Unspecified,
                                      UnspecifiedMultiplicity, XYs1d,
-                                     XYs2d, XYs3d)
+                                     XYs2d, XYs3d, Xs_pdf_cdf1d,
+                                     EnergyAngularMC)
 
 from .nodes import writes
 from .primitives import formatFraction
@@ -193,7 +194,7 @@ def _interpolation(element: ET.Element, form) -> None:
 
 
 @writes("function1d", "XYs1d", "regions1d", "constant1d", "Legendre",
-        "polynomial1d")
+        "polynomial1d", "xs_pdf_cdf1d")
 @writes("function2d", "XYs2d", "regions2d")
 @writes("function3d", "XYs3d")
 def _function(parent: ET.Element, form, report: ConversionReport,
@@ -295,6 +296,18 @@ def _function(parent: ET.Element, form, report: ConversionReport,
         _writeCommon(element, form, nested, index)
         _axesUnlessNested(element, form, report, where, nested, parentAxes)
         _values(element, form.coefficients)
+        return element
+    if isinstance(form, Xs_pdf_cdf1d):
+        # FUDGE's spelling (xData/xs_pdf_cdf.py): `interpolation` only when it
+        # is not lin-lin, and xs, pdf, cdf each a <values>. FUDGE refuses any
+        # other attribute, so the discrete lines a table may open with
+        # (`numberOfDiscrete`) go to KIKA::processed (kika/gnds/processed.py).
+        element = ET.SubElement(parent, "xs_pdf_cdf1d")
+        _writeCommon(element, form, nested, index)
+        _interpolation(element, form)
+        _axesUnlessNested(element, form, report, where, nested, parentAxes)
+        for name in ("xs", "pdf", "cdf"):
+            _values(ET.SubElement(element, name), getattr(form, name))
         return element
     if isinstance(form, Polynomial1d):
         element = ET.SubElement(parent, "polynomial1d")
@@ -1092,6 +1105,8 @@ class _SuiteWriter:
             self.angularEnergy(element, form, label, where)
         elif isinstance(form, KalbachMann):
             self.kalbachMann(element, form, label, where)
+        elif isinstance(form, EnergyAngularMC):
+            self.energyAngularMC(element, form, label, where)
         elif isinstance(form, AngularTwoBody):
             self.angularTwoBody(element, form, label, where)
         elif isinstance(form, Isotropic2d):
@@ -1227,6 +1242,27 @@ class _SuiteWriter:
                 continue
             _function(ET.SubElement(element, name), function, self.report,
                       where)
+
+    @writes("distributionForm", "energyAngularMC")
+    def energyAngularMC(self, parent: ET.Element, form, label: str,
+                        where: str) -> None:
+        """§18's Monte Carlo ``energyAngularMC``: P(E′|E) then P(mu|E,E′).
+
+        ``EnergyAngularMCType`` is a sequence of both, ``<energy>`` (an
+        ``XYs2d`` of ``xs_pdf_cdf1d``) and ``<energyAngular>`` (an ``XYs3d``),
+        FUDGE's ``energyAngularMC.py`` spelling. Both or neither, as for
+        ``uncorrelated``.
+        """
+        if not form.isComplete:
+            self.report.unsupportedNode(
+                f"{where}: an <energyAngularMC> with one half; the schema "
+                f"requires both, so neither is written")
+            return
+        element = ET.SubElement(parent, "energyAngularMC")
+        _set(element, label=label, productFrame=str(form.productFrame))
+        _function(ET.SubElement(element, "energy"), form.energy, self.report, where)
+        _function(ET.SubElement(element, "energyAngular"), form.energyAngular,
+                  self.report, where)
 
     @writes("distributionForm", "uncorrelated")
     @writes("uncorrelatedAngularForm", "isotropic2d")
@@ -1489,10 +1525,17 @@ def writeReactionSuite(suite, format: Optional[str] = None,
     if resonance_extensions:
         from .resonance_extensions import extract
         suite,saved=extract(suite)
-    writer = _SuiteWriter(suite, report)
-    writer.incompleteProducts = []
-    writer._warnedAboutDomain = False
-    root = writer.write(chooseFormat(suite, format))
+    from . import processed
+
+    lowered = processed.lower(suite)
+    try:
+        writer = _SuiteWriter(suite, report)
+        writer.incompleteProducts = []
+        writer._warnedAboutDomain = False
+        root = writer.write(chooseFormat(suite, format))
+    finally:
+        processed.restore(lowered, suite)
+    processed.write(root, lowered, report, _function)
     if saved:
         from .resonance_extensions import write
         write(root,saved,report)

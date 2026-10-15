@@ -6,19 +6,23 @@ reconstructed from resonance parameters, Doppler-broadened to a temperature and
 put on a unionised grid. GNDS §9 exists to record exactly that, through a chain
 of styles linked by ``derivedFrom``. So this decoder does not produce an
 ``eval``-labelled cross section the way the ENDF decoder does — it produces a
-``gridded`` one, hanging off a ``heated`` style, hanging off the ``evaluated``
-style the file *refers to and does not contain*.
+``heated_<T>`` one, hanging off the ``evaluated`` style the file *refers to and
+does not contain*.
 
-**The finding that changed what this module does.** The roadmap recorded, from
-phase 1, that "ACE lacks ``qm``/``qi``", and phase 3's plan said this decoder
-should report that ACE carries no Q values. **That is wrong.** ACE's LQR block
-carries one Q per reaction, in MeV, aligned with MTR, and it is correct: Fe-56
+**The labels are the processed suite's.** ``heated_<T>``,
+``URR_<T>`` and ``MonteCarlo``, with ``<T>`` named from kT as OpenMC names its
+temperature groups (``heated_294K``): the labels the HDF5 decoder and kika's
+own processing give, and the ones the HDF5 and ACE encoders require. A suite
+read from ACE is therefore a processed suite like any other, and goes to HDF5
+or back to ACE without relabelling.
+
+**ACE carries Q values.** ACE's LQR block carries one Q per reaction, in MeV, aligned with MTR, and it is correct: Fe-56
 capture reads +7.646 MeV, (n,2n) −11.197 MeV, (n,p) −2.913 MeV. What ACE lacks
 is **QM** — the mass-difference Q — and **LR**. So the Q = 0 defect on the ACE
 side was never "the format has no Q"; it was ``CrossSection.from_ace`` not
 reading a block that is there. This decoder reads it.
 
-**Not gated in CI.** Phase 0 decided against committing a 16 MB ACE fixture, so
+**Not gated in CI.** No ACE table is committed (a real one is 16 MB), so
 every test here is ``@pytest.mark.tape`` and runs only where an ACE file is
 reachable.
 """
@@ -28,15 +32,17 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from kika._constants import mf3SumComponents
+
 from kika.nuclear_data.model import (
     AceProvenance,
     ConversionReport,
     CrossSection,
     Evaluated,
     Frame,
-    GriddedCrossSection,
     Heated,
     Interpolation,
+    MonteCarlo_cdf,
     Nuclide,
     OutputChannel,
     PhysicalQuantity,
@@ -52,33 +58,45 @@ from kika.nuclear_data.model import (
     pidFromZA,
 )
 
-__all__ = ["decodeAce", "aceStyles", "qValuesByMT",
-           "EVALUATED_LABEL", "HEATED_LABEL", "GRIDDED_LABEL", "URR_LABEL"]
+from .secondaries import MONTE_CARLO_LABEL
 
-#: Style labels this decoder assigns. They are kika's, not GNDS-mandated: §9
-#: fixes the node *names*, and leaves the labels to the writer.
+__all__ = ["decodeAce", "aceStyles", "aceLabels", "qValuesByMT",
+           "EVALUATED_LABEL", "MONTE_CARLO_LABEL"]
+
+#: Style labels this decoder assigns: the processed suite's, the same
+#: as :mod:`kika.hdf5.names`. GNDS §9 fixes the node *names* and leaves the
+#: labels to the writer; the per-temperature ones come from :func:`aceLabels`.
 EVALUATED_LABEL = "eval"
-HEATED_LABEL = "heated"
-GRIDDED_LABEL = "gridded"
-URR_LABEL = "URR"
 
 #: ACE stores energies and Q values in MeV; the model works in eV, as ENDF does.
 MEV_TO_EV = 1.0e6
 
 
-def _temperatureK(ace) -> Optional[float]:
+def _kTeV(ace) -> Optional[float]:
     """ACE's header temperature is **kT in MeV**, not a temperature in kelvin.
 
     ``Header.temperature``'s inline comment says "Temperature in K" and its
     class docstring says MeV. The docstring is right — Fe-56 at ``2.53e-08``
-    is 293.6 K — and ``CrossSection.from_ace`` already divides by k_B. Recorded
-    here because the two disagree in the source and only one of them can be
-    followed.
+    is 293.6 K. Returned in eV; ``None`` when the header has none. A kT of 0
+    is a 0 K table, not a missing temperature.
     """
-    from kika._constants import BOLTZMANN_CONSTANT
+    kT = getattr(getattr(ace, "header", None), "temperature", None)
+    return float(kT) * MEV_TO_EV if kT is not None else None
 
-    kT = getattr(ace.header, "temperature", None)
-    return float(kT) / BOLTZMANN_CONSTANT if kT else None
+
+def aceLabels(ace):
+    """``(heated, urr)``: the labels of this table's temperature, ``heated_294K``/``URR_294K``.
+
+    Named from kT exactly as OpenMC names a temperature group
+    (:func:`kika.hdf5.names.temperatureName`), because the HDF5 encoder checks
+    that the name and the stated kT agree. A table with no header temperature
+    is named ``0K``.
+    """
+    from kika.hdf5.names import heatedLabel, temperatureName, urrLabel
+
+    kT = _kTeV(ace)
+    name = temperatureName(kT if kT is not None else 0.0)
+    return heatedLabel(name), urrLabel(name)
 
 
 def qValuesByMT(ace, report: Optional[ConversionReport] = None) -> Dict[int, float]:
@@ -114,7 +132,8 @@ def qValuesByMT(ace, report: Optional[ConversionReport] = None) -> Dict[int, flo
 def aceStyles(ace, report: Optional[ConversionReport] = None):
     """The ``derivedFrom`` chain an ACE file implies, and nothing more.
 
-    ``evaluated`` → ``heated`` → ``griddedCrossSection`` [→ ``URR_probabilityTables``].
+    ``evaluated`` → ``heated_<T>`` [→ ``URR_<T>``], and ``evaluated`` →
+    ``MonteCarlo``: the chain the HDF5 decoder builds for one temperature.
 
     **``crossSectionReconstructed`` is deliberately not in it.** A continuous-energy
     ACE has almost certainly been through RECONR, but the file does not say so,
@@ -136,19 +155,20 @@ def aceStyles(ace, report: Optional[ConversionReport] = None):
         "eval-labelled form"
     )
 
-    temperature = _temperatureK(ace)
-    if temperature is None:
-        report.warn("this ACE file has no header temperature; the heated style has none")
+    kT = _kTeV(ace)
+    if kT is None:
+        report.warn("this ACE file has no header temperature; its heated style is named 0K "
+                    "and states none")
+    heated, urrLabel = aceLabels(ace)
     styles.append(Heated(
-        label=HEATED_LABEL, derivedFrom=EVALUATED_LABEL,
-        temperature=(PhysicalQuantity(value=temperature, unit="K")
-                     if temperature is not None else None),
+        label=heated, derivedFrom=EVALUATED_LABEL,
+        temperature=PhysicalQuantity(value=kT, unit="eV/k") if kT is not None else None,
     ))
-    styles.append(GriddedCrossSection(label=GRIDDED_LABEL, derivedFrom=HEATED_LABEL))
 
     urr = getattr(ace, "unresolved_resonance", None)
     if urr is not None and getattr(urr, "has_data", False):
-        styles.append(URR_probabilityTables(label=URR_LABEL, derivedFrom=GRIDDED_LABEL))
+        styles.append(URR_probabilityTables(label=urrLabel, derivedFrom=heated))
+    styles.append(MonteCarlo_cdf(label=MONTE_CARLO_LABEL, derivedFrom=EVALUATED_LABEL))
 
     return styles, report
 
@@ -156,9 +176,9 @@ def aceStyles(ace, report: Optional[ConversionReport] = None):
 def decodeAce(ace, report: Optional[ConversionReport] = None):
     """A parsed :class:`~kika.ace.classes.ace.Ace` → a :class:`ReactionSuite`.
 
-    The cross sections land under the ``gridded`` style, because that is what
-    they are: values on ACE's unionised grid at the file's temperature. Nothing
-    is labelled ``eval``.
+    The cross sections land under the ``heated_<T>`` style, because that is
+    what they are: values on ACE's unionised grid at the file's temperature.
+    Nothing is labelled ``eval``.
     """
     report = report if report is not None else ConversionReport()
 
@@ -173,6 +193,19 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
         formatVersion=getattr(ace.header, "format_version", None),
         temperatureMeV=getattr(ace.header, "temperature", None),
     )
+    # The order NJOY gave MTR and YP, which is not ascending (MT 4 goes last
+    # when a photon yield needs it): the ACE writer gives it back.
+    provenance.attributes["MTR"] = [int(v) for v in ace.reaction_mt_data.incident_neutron]
+    provenance.attributes["MTRP"] = [int(v) for v in ace.reaction_mt_data.photon_production]
+    # NXS(9..16): zero in Lib81, Z and A in NXS(10)/(11) from NJOY 2016 and JEFF-4.0.
+    nxs = list(getattr(ace.header, "nxs_array", None) or [])
+    if len(nxs) >= 17:
+        provenance.attributes["NXS"] = [int(v) for v in nxs[9:17]]
+        # NXS(2) is the ground state's ZA even when the ZAID names an isomer (27058 for 27458)
+        provenance.attributes["ZA"] = int(nxs[2])
+    yp = getattr(ace, "photon_yield_multipliers", None)
+    if yp is not None:
+        provenance.attributes["YP"] = [int(v) for v in yp.multiplier_mts]
 
     za = int(provenance.zaid) if provenance.zaid is not None else 0
     pops = PoPs()
@@ -190,14 +223,20 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
     for style in styles:
         suite.styles.add(style)
 
+    heated, urrLabel = aceLabels(ace)
     qByMT = qValuesByMT(ace, report)
     for mt in _mtNumbers(ace):
-        reaction, report = decodeAceReaction(ace, mt, qByMT, provenance, report)
+        reaction, report = decodeAceReaction(ace, mt, qByMT, provenance, report, label=heated)
         if reaction is not None:
             suite.reactions.append(reaction)
 
-    _attachURR(ace, suite, report)
-    _reportUnconverted(ace, report)
+    _attachURR(ace, suite, report, urrLabel)
+    # AND, DLW, TYR, NU/DNU, BDD and DNED become the products.
+    from .secondaries import attachAceParticles, attachAceSecondaries
+
+    attachAceSecondaries(ace, suite, report)
+    # PTYPE/NTRO/IXS: the light charged particles (roadmap A11).
+    attachAceParticles(ace, suite, report)
 
     # What ACE genuinely does not have. Stated per item, because "ACE carries no
     # Q values" was the previous formulation and it is false.
@@ -210,71 +249,17 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
         "ACE carries no covariances at all, so there is no covarianceSuite to "
         "build from one"
     )
-    # Roadmap E5f.2: the photon production blocks (MTRP/SIGP/LANDP/ANDP/DLWP)
+    # The photon production blocks (MTRP/SIGP/LANDP/ANDP/DLWP)
     # become photon products, the shape the ENDF adapter gives MF12-15.
     from .photons import attachAcePhotons
 
     attachAcePhotons(ace, suite, report, provenance=provenance)
+    _place(ace, suite)
+    _attachHeating(ace, suite, provenance, heated)
     # Both ways to the same object: the tuple is unchanged, and the
     # attribute is the one that survives `suite, _ = ...`. §11.4.
     suite.report = report
     return suite, report
-
-
-def _reportUnconverted(ace, report: ConversionReport) -> None:
-    """Name every neutron-side block the file has and this decoder does not convert.
-
-    Only cross sections, Q values, URR references and the photon blocks reach
-    the model. The secondary-neutron distributions, the multiplicities and the
-    delayed-neutron data are in the file and not in the suite, and a
-    conversion that dropped them without a word would read as a file that does
-    not have them. None of it changes a cross section, and the entries say so.
-    """
-    SCOPES = ("cross-sections",)
-    angular = getattr(ace, "angular_distributions", None)
-    if angular is not None:
-        mts = sorted(int(mt) for mt in getattr(angular, "incident_neutron", {}) or {})
-        if getattr(angular, "elastic", None) is not None:
-            mts = [2] + [mt for mt in mts if mt != 2]
-        if mts:
-            report.unsupportedNode(
-                f"ACE's neutron angular distributions (AND block, MT "
-                f"{', '.join(map(str, mts))}) are not converted",
-                unaffectedScopes=SCOPES)
-        if any(getattr(angular, "particle_production", []) or []):
-            report.unsupportedNode(
-                "ACE's secondary-particle angular distributions are not converted",
-                unaffectedScopes=SCOPES)
-    energy = getattr(ace, "energy_distributions", None)
-    if energy is not None:
-        mts = sorted(int(mt) for mt in getattr(energy, "incident_neutron", {}) or {})
-        if mts:
-            report.unsupportedNode(
-                f"ACE's neutron energy distributions (DLW block, MT "
-                f"{', '.join(map(str, mts))}) are not converted",
-                unaffectedScopes=SCOPES)
-        if getattr(energy, "delayed_neutron", None):
-            report.unsupportedNode(
-                "ACE's delayed-neutron energy spectra (DNED block) are not converted",
-                unaffectedScopes=SCOPES)
-        if any(getattr(energy, "particle_production", []) or []):
-            report.unsupportedNode(
-                "ACE's secondary-particle energy distributions are not converted",
-                unaffectedScopes=SCOPES)
-    nubar = getattr(ace, "nubar", None)
-    if nubar is not None:
-        kinds = [name for name in ("prompt", "total", "delayed")
-                 if getattr(nubar, name, None) is not None]
-        if kinds:
-            report.unsupportedNode(
-                f"ACE's nu-bar ({', '.join(kinds)}; NU/DNU blocks) is not converted",
-                unaffectedScopes=SCOPES)
-    delayed = getattr(ace, "delayed_neutron_data", None)
-    if delayed is not None and getattr(delayed, "precursors", None):
-        report.unsupportedNode(
-            f"ACE's delayed-neutron precursor data (BDD block, "
-            f"{len(delayed.precursors)} groups) is not converted",
-                unaffectedScopes=SCOPES)
 
 
 def _mtNumbers(ace) -> List[int]:
@@ -293,8 +278,11 @@ def _mtNumbers(ace) -> List[int]:
 
 
 def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
-                      provenance: AceProvenance, report: ConversionReport):
-    """One MT → a :class:`Reaction` with a ``gridded``-labelled cross section.
+                      provenance: AceProvenance, report: ConversionReport, label: Optional[str] = None):
+    """One MT → a :class:`Reaction` with a ``heated_<T>``-labelled cross section.
+
+    ``label`` is the table's heated label (:func:`aceLabels`), computed from the
+    header when not given.
 
     An ``XYs1d`` rather than the ``regions1d`` the ENDF decoder builds: ACE has
     no ``(NBT, INT)`` regions, it is lin-lin on one union grid, and a
@@ -306,11 +294,15 @@ def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
 
     energies = np.asarray(reactionData.energies, dtype=float) * MEV_TO_EV
     values = np.asarray(reactionData.xs_values, dtype=float)
+    if mt == 444:
+        # damage-energy production: ACE states MeV·b, the model eV·b (as OpenMC)
+        values = values * MEV_TO_EV
 
+    label = label if label is not None else aceLabels(ace)[0]
     crossSection = CrossSection()
-    crossSection[GRIDDED_LABEL] = XYs1d(
+    crossSection[label] = XYs1d(
         xs=energies, ys=values, interpolation=Interpolation.linlin,
-        axes=crossSectionAxes(), label=GRIDDED_LABEL,
+        axes=crossSectionAxes(), label=label,
     )
 
     channel = OutputChannel(Q=Q(value=qByMT.get(mt), unit="eV"))
@@ -329,32 +321,93 @@ def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
     ), report
 
 
-def _attachURR(ace, suite: ReactionSuite, report: ConversionReport) -> None:
-    """Declare the URR probability tables on the reactions they apply to.
+#: Redundant MTs that are response functions of the processed library, not reactions
+#: (gas production, KERMA, damage energy): ``suite.productions``, as the HDF5 decoder puts them.
+RESPONSE_MTS = (203, 204, 205, 206, 207, 301, 444, 901)
 
-    §16.1.1's ``URR_probabilityTables1d`` is a **reference**, not a container of
-    the tables themselves — it carries an ``href``. The tables are a processed
-    sampling aid, and re-expressing ACE's (cumulative probability, σ) bands as a
-    GNDS node is its own piece of work. Declaring the form with an href says
-    "these exist and here is where they live" rather than silently omitting a
-    block that changes self-shielded reaction rates.
+
+def _place(ace, suite: ReactionSuite) -> None:
+    """Each reaction into the container its role puts it in, as the HDF5 decoder does.
+
+    A reaction is redundant when the MF3 sum rules make it the sum of others
+    the file carries (OpenMC's ``get_reaction_components``): MT 103 beside
+    MT 600-649, MT 18 beside its chances, and the sums kika itself adds
+    (MT 3, 4, 27, 101...). Redundant sums go to ``suite.sums`` as
+    :class:`CrossSectionSum` with their summands, the response functions to
+    ``suite.productions``, and the fission chances, when MT 18 is there, to
+    ``suite.fissionComponents``. Left in ``reactions``, a sum would be counted
+    twice by anything that adds the reactions up (OpenMC's C++ rebuilds the
+    total that way).
     """
+    from kika.nuclear_data.model import Add, CrossSectionSum
+
+    direct = {int(m) for m in getattr(ace.reaction_mt_data, "incident_neutron", [])} | {2}
+    present = {r.ENDF_MT for r in suite.reactions}
+    keep = []
+    for reaction in list(suite.reactions):
+        mt = reaction.ENDF_MT
+        if mt in RESPONSE_MTS:
+            suite.productions.append(reaction)
+            continue
+        components = mf3SumComponents(mt, direct)
+        if (components and components != [mt]) or mt not in direct:
+            total = CrossSectionSum(id=reaction.id, crossSection=reaction.crossSection,
+                                    outputChannel=reaction.outputChannel, provenance=reaction.provenance)
+            for c in components:
+                if c in present:
+                    total.summands.append(Add(
+                        href=f"/reactionSuite/reactions/reaction[@label='MT{c}']/crossSection"))
+            suite.sums.append(total)
+            continue
+        if mt in (19, 20, 21, 38) and 18 in present:
+            suite.fissionComponents.append(reaction)
+            continue
+        keep.append(reaction)
+    suite.reactions = type(suite.reactions)(keep)
+
+
+def _attachHeating(ace, suite: ReactionSuite, provenance, label: str) -> None:
+    """ESZ's heating numbers as the KERMA MT301, in eV·b: number × σ_t, as OpenMC builds it.
+
+    ACER stores the heating as an average energy deposited per collision
+    (KERMA/σ_t, MeV); the model and OpenMC store the KERMA itself. Skipped
+    when the file has MT301 in MTR already.
+    """
+    esz = getattr(ace, "esz_block", None)
+    if esz is None or len(esz.heating_numbers) == 0 or suite.findReactionByENDF_MT(301) is not None:
+        return
+    energies = np.asarray(esz.energies, dtype=float) * MEV_TO_EV
+    kerma = np.asarray(esz.heating_numbers, dtype=float) * MEV_TO_EV * np.asarray(esz.total_xs, dtype=float)
+    crossSection = CrossSection()
+    crossSection[label] = XYs1d(xs=energies, ys=kerma, interpolation=Interpolation.linlin,
+                                axes=crossSectionAxes(), label=label)
+    suite.productions.append(Reaction(id=ReactionId(label="MT301", ENDF_MT=301), crossSection=crossSection,
+                                      outputChannel=OutputChannel(), provenance=provenance))
+
+
+def _attachURR(ace, suite: ReactionSuite, report: ConversionReport, label: str) -> None:
+    """The URR probability tables, on the reactions they apply to.
+
+    One :class:`ProbabilityTables` (the HDF5 decoder's node: energies in eV, the
+    (N, 6, M) table with the heating row in eV, the INT/ILF/IOA/IFF flags),
+    held by a ``URR_probabilityTables1d`` form of elastic, fission and capture,
+    as OpenMC's ``urr`` group is.
+    """
+    from kika.nuclear_data.model import ProbabilityTables
+
     urr = getattr(ace, "unresolved_resonance", None)
     if urr is None or not getattr(urr, "has_data", False):
         return
-
-    for mt in (1, 2, 18, 102):
+    m = urr.table_length
+    table = np.empty((len(urr.energies), 6, m))
+    for i, t in enumerate(urr.tables):
+        table[i] = [t.cumulative_probabilities, t.total_xs, t.elastic_xs, t.fission_xs, t.capture_xs,
+                    np.asarray(t.heating_numbers, dtype=float) * MEV_TO_EV]
+    tables = ProbabilityTables(energies=np.asarray(urr.energies, dtype=float) * MEV_TO_EV, table=table,
+                               interpolation=int(urr.interpolation), inelastic=int(urr.inelastic_flag),
+                               absorption=int(urr.other_absorption_flag),
+                               multiplySmooth=int(urr.factors_flag) == 1)
+    for mt in (2, 18, 102):
         reaction = suite.findReactionByENDF_MT(mt)
-        if reaction is None:
-            continue
-        reaction.crossSection[URR_LABEL] = URR_probabilityTables1d(
-            href=f"/reactionSuite/reactions/reaction[@label='MT{mt}']/crossSection",
-            label=URR_LABEL,
-        )
-
-    report.unsupportedNode(
-        f"ACE's URR probability tables ({getattr(urr, 'num_energies', 0)} energies "
-        f"x {getattr(urr, 'table_length', 0)} bands) are declared as "
-        f"URR_probabilityTables1d references only; their contents are not "
-        f"converted into GNDS nodes"
-    )
+        if reaction is not None:
+            reaction.crossSection[label] = URR_probabilityTables1d(label=label, table=tables)

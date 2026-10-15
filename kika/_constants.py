@@ -121,8 +121,11 @@ MT_COMPOSITES = {
     27: (['@18', '@101'], "Total absorption = fission + disappearance"),
 
     # Depends on 4 and 27
+    # ENDF-6 Appendix B: MT 4, 5, 11, 16-18, 22-26, 28-37, 41-42, 44-45 and the
+    # high-energy MT 152-200 that are not in MT101 (155, 182, 191-193, 197 are)
     3: (['@4', '@27', 5, 11] + list(range(16, 18)) + list(range(22, 26))
-        + list(range(28, 38)) + [41, 42, 44, 45], "Non-elastic"),
+        + list(range(28, 38)) + [41, 42, 44, 45]
+        + list(range(152, 155)) + list(range(156, 182)) + list(range(183, 191)) + [194, 195, 196, 198, 199, 200], "Non-elastic"),
 
     # Depends on 3
     1: ([2, '@3'], "Total = elastic + non-elastic"),
@@ -161,12 +164,34 @@ MF3_SUM_RULES = {
           "neutron disappearance"),
     27:  (('@18', '@101'), "absorption"),
     3:   (('@4', '@27', 5, 11, '@16', 17) + tuple(range(22, 26))
-          + tuple(range(28, 38)) + (41, 42, 44, 45), "non-elastic"),
+          + tuple(range(28, 38)) + (41, 42, 44, 45)
+          + tuple(range(152, 155)) + tuple(range(156, 182)) + tuple(range(183, 191))
+          + (194, 195, 196, 198, 199, 200), "non-elastic"),
     1:   ((2, '@3'), "total"),
 }
 
 # Dependency order: a rule only ever references MTs that come before it here.
 MF3_SUM_ORDER = (4, 16, 18, 103, 104, 105, 106, 107, 101, 27, 3, 1)
+
+
+def mf3SumComponents(mt, present):
+    """The MTs of ``present`` that MT ``mt`` sums, by MF3_SUM_RULES ('@n' recursing
+    into n when n itself is absent); [] when ``mt`` has no rule.
+
+    How a processed file decides that a reaction is redundant: OpenMC calls it
+    redundant when this is anything but ``[mt]`` (``get_reaction_components``).
+    """
+    rule = MF3_SUM_RULES.get(mt)
+    if rule is None:
+        return []
+    out = []
+    for part in rule[0]:
+        if isinstance(part, str):
+            sub = int(part[1:])
+            out.extend([sub] if sub in present else mf3SumComponents(sub, present))
+        elif part in present:
+            out.append(part)
+    return out
 
 # Nu-bar decomposition: total (MT 452) = prompt (MT 456) + delayed (MT 455).
 # Kept separate from MT_COMPOSITES (which drives cross-section summation) because

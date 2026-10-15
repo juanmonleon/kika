@@ -9,12 +9,13 @@ never the reverse. A module-level import from ``kika/ace/__init__.py`` would put
 the model on the ``read_ace`` critical path and change what ``import kika``
 costs for the cluster pipeline and the desktop app.
 """
-from .decode import (EVALUATED_LABEL, GRIDDED_LABEL, HEATED_LABEL, URR_LABEL,
-                     aceStyles, decodeAce, decodeAceReaction, qValuesByMT)
-from .photons import PHOTON_LABEL, attachAcePhotons, photonProductionTotal
+from .decode import (EVALUATED_LABEL, MONTE_CARLO_LABEL, aceLabels, aceStyles, decodeAce,
+                     decodeAceReaction, qValuesByMT)
+from .encode import AceEncodeError, encodeAce
+from .photons import attachAcePhotons, photonProductionTotal
 
 __all__ = [
-    "decodeAce", "decodeAceReaction", "aceStyles", "qValuesByMT",
-    "attachAcePhotons", "photonProductionTotal", "PHOTON_LABEL",
-    "EVALUATED_LABEL", "HEATED_LABEL", "GRIDDED_LABEL", "URR_LABEL",
+    "decodeAce", "decodeAceReaction", "aceStyles", "aceLabels", "qValuesByMT",
+    "encodeAce", "AceEncodeError",
+    "attachAcePhotons", "photonProductionTotal", "EVALUATED_LABEL", "MONTE_CARLO_LABEL",
 ]

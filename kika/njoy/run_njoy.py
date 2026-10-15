@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from textwrap import dedent
+from typing import Optional
 from .launcher import build_njoy_command
 from .locale_guard import (
     LISTING_FILENAME,
@@ -15,8 +16,8 @@ from .locale_guard import (
 )
 from .templates import NJOY_INPUT_TEMPLATE, NJOY_INPUT_TEMPLATE_WITH_PENDF
 from kika.endf import open_endf
-from kika._constants import K_TO_SUFFIX, NDLIBRARY_TO_SUFFIX
-from kika._utils import MeV_to_kelvin
+from kika._constants import NDLIBRARY_TO_SUFFIX
+from kika._utils import MeV_to_kelvin, ace_temperature_suffix
 
 def _resolve_nd_suffix(library_name: str) -> str:
     """Return the ACE suffix for a library name, falling back to '00' if unknown."""
@@ -32,7 +33,7 @@ def _resolve_nd_suffix(library_name: str) -> str:
     return "00"
 
 
-def _get_temperature_info(temperature: float) -> tuple[float, str]:
+def _get_temperature_info(temperature: float) -> tuple[float, Optional[str]]:
     """
     Helper function to get temperature in Kelvin and corresponding suffix.
 
@@ -43,8 +44,11 @@ def _get_temperature_info(temperature: float) -> tuple[float, str]:
 
     Returns
     -------
-    tuple[float, str]
-        (temperature_in_kelvin, temperature_suffix)
+    tuple[float, str | None]
+        (temperature_in_kelvin, temperature_suffix). The suffix is ``None``
+        for a temperature not in ``K_TO_SUFFIX``: a caller that needs it
+        asks :func:`kika._utils.ace_temperature_suffix`, which raises, and a
+        caller given ``extension=`` does not need it.
     """
     # Convert temperature to Kelvin if needed
     if temperature < 1.0:
@@ -52,17 +56,10 @@ def _get_temperature_info(temperature: float) -> tuple[float, str]:
     else:
         temp_K = temperature
 
-    # Find the corresponding temperature suffix
-    if K_TO_SUFFIX:
-        closest_temp = min(K_TO_SUFFIX.keys(), key=lambda k: abs(k - temp_K))
-        if abs(closest_temp - temp_K) <= 1.0:
-            temp_suffix = K_TO_SUFFIX[closest_temp]
-        else:
-            temp_suffix = ".00"
-    else:
-        temp_suffix = ".00"
-
-    return temp_K, temp_suffix
+    try:
+        return temp_K, ace_temperature_suffix(temp_K)
+    except ValueError:
+        return temp_K, None
 
 
 def _suff_from_extension(extension: str) -> str:
@@ -138,8 +135,10 @@ def _render_njoy_input(mat: int, T: float, title: str, suff: str = None,
                        template: str = NJOY_INPUT_TEMPLATE, acer_iprint: int = 0) -> str:
     if suff is None:
         # Use helper function to get temperature suffix (without 'c')
-        _, temp_suffix = _get_temperature_info(T)
-        suff = temp_suffix
+        # A temperature with no suffix raises here (pass extension=), instead
+        # of ".00", which would name the table by a temperature it is not at.
+        temp_K, _ = _get_temperature_info(T)
+        suff = ace_temperature_suffix(temp_K)
     # Fill the template with the run-specific parameters
     deck = dedent(template).format(mat=mat, T=T, title=title, suff=suff)
     if int(acer_iprint) != 0:
@@ -168,14 +167,7 @@ def _run_njoy_deck(njoy_exe, workdir: Path, deck: str):
     from .locale_guard import check_run, read_listing
 
     for attempt in range(1, _MAX_LOCALE_ATTEMPTS + 1):
-        result = subprocess.run(
-            build_njoy_command(njoy_exe),
-            cwd=workdir,
-            input=deck.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        result = _watchedRun(njoy_exe, workdir, deck)
         check = check_run(deck, read_listing(workdir))
         crashed = _crashed_on_a_misread(result)
         if not check.corrupted and not crashed:
@@ -186,6 +178,41 @@ def _run_njoy_deck(njoy_exe, workdir: Path, deck: str):
                 check.detail if check.corrupted else crashed, attempt + 1,
                 _MAX_LOCALE_ATTEMPTS)
     return result
+
+
+#: How often a running NJOY's listing is read for a misread echo, in seconds.
+_WATCH_INTERVAL = 0.5
+
+
+def _watchedRun(njoy_exe, workdir: Path, deck: str) -> subprocess.CompletedProcess:
+    """One NJOY run of *deck*, stopped as soon as its listing shows a misread.
+
+    A misread tolerance can be ``err = 0``, and RECONR may never finish on it:
+    ENDF/B-VIII.1 Pu-239 ran 47 min of CPU without writing a tape, where the
+    same deck read correctly takes 3.5 min. The echo is in the listing within a
+    second of the start, so it is read while NJOY runs -- only up to its last
+    complete line, since a line half written could read ``0.0`` for ``0.001``
+    -- and the run is killed on the first misread. The listing stays behind
+    for :func:`_run_njoy_deck`'s check, which then runs the deck again.
+    """
+    from .locale_guard import check_run, read_listing
+
+    process = subprocess.Popen(build_njoy_command(njoy_exe), cwd=workdir,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT)
+    data = deck.encode("utf-8")
+    while True:
+        try:
+            out, _ = process.communicate(input=data, timeout=_WATCH_INTERVAL)
+            break
+        except subprocess.TimeoutExpired:
+            data = None
+            listing = read_listing(workdir) or ""
+            if check_run(deck, listing[:listing.rfind("\n") + 1]).corrupted:
+                process.kill()
+                out, _ = process.communicate()
+                break
+    return subprocess.CompletedProcess(process.args, process.returncode, out, None)
 
 
 #: What gfortran prints when a formatted read meets a number it cannot parse --
@@ -320,7 +347,7 @@ def run_njoy(
         xsdir_filename = f"{zaid}.{extension}.xsdir"
         base_filename = ace_filename
     else:
-        temp_suffix = temp_suffix_legacy
+        temp_suffix = temp_suffix_legacy or ace_temperature_suffix(temp_K)
         ace_dir = Path(ace_dir) if ace_dir is not None else (
             output_dir / "ace" / library_name / f"{temp_K:.1f}K"
         )
@@ -475,7 +502,7 @@ def run_njoy_with_pendf(
         xsdir_filename = f"{zaid}.{extension}.xsdir"
         base_filename = ace_filename
     else:
-        temp_suffix = temp_suffix_legacy
+        temp_suffix = temp_suffix_legacy or ace_temperature_suffix(temp_K)
         ace_dir = Path(ace_dir) if ace_dir is not None else (
             output_dir / "ace" / library_name / f"{temp_K:.1f}K"
         )

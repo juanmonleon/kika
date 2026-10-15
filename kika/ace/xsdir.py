@@ -101,6 +101,69 @@ def build_xsdir_line(
     return _wrap_xsdir_fields(fields)
 
 
+class XsdirEntryExists(ValueError):
+    """The xsdir already names the table being added."""
+
+
+def xsdir_line_for(ace, file_ref: str) -> str:
+    """The xsdir entry of an :class:`~kika.ace.classes.ace.Ace` stored at ``file_ref``.
+
+    Text file (type 1), address 1, ``ptable`` when the table has URR
+    probability tables, as ACER writes it.
+    """
+    h = ace.header
+    has_ptable = bool(getattr(getattr(ace, "unresolved_resonance", None), "has_data", False))
+    return build_xsdir_line(f"{h.zaid}{h.extension}", h.atomic_weight_ratio, file_ref,
+                            int(h.nxs_array[1]), h.temperature, has_ptable=has_ptable)
+
+
+def _entries(text: str):
+    """``(head, entries)`` of an xsdir: the lines up to ``directory`` (all of them
+    kept as they are, an empty list if there is no such line) and, after it,
+    each entry as ``(table name, its physical lines)``, continuations included."""
+    lines = text.splitlines()
+    head = []
+    for i, line in enumerate(lines):
+        if line.strip().lower() == "directory":
+            head, lines = lines[:i + 1], lines[i + 1:]
+            break
+    out, current = [], []
+    for line in lines:
+        if not current and not line.strip():
+            continue
+        current.append(line)
+        if line.rstrip().endswith("+"):
+            continue
+        out.append((current[0].split()[0], current))
+        current = []
+    if current:
+        out.append((current[0].split()[0], current))
+    return head, out
+
+
+def add_xsdir_entry(xsdir_path, line: str, *, replace: bool = False) -> None:
+    """Add one entry to the xsdir at ``xsdir_path`` (created if missing).
+
+    A table name the file already has raises :class:`XsdirEntryExists`, since
+    MCNP would read only one of the two; ``replace`` drops that entry first.
+    Everything else in the file is kept as it is. The sampling master xsdir,
+    which replaces on purpose, is written by :func:`create_xsdir_files_for_ace`.
+    """
+    name = line.split()[0]
+    text = open(xsdir_path, encoding="utf-8").read() if os.path.exists(xsdir_path) else ""
+    head, entries = _entries(text)
+    kept = []
+    for table, lines in entries:
+        if table == name:
+            if not replace:
+                raise XsdirEntryExists(f"{xsdir_path} already has {name}: {' '.join(lines)}")
+            continue
+        kept += lines
+    with open(xsdir_path, "w", encoding="utf-8", newline="\n") as fx:
+        for physical in head + kept + [line]:
+            fx.write(physical + "\n")
+
+
 def write_xsdir_line(xsdir_path: str, line: str, mode: str = "w") -> None:
     """Write a single xsdir entry (possibly multi-line) to file."""
     with open(xsdir_path, mode) as fx:

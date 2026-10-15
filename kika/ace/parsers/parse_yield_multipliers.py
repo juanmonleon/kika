@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Tuple
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.yield_multipliers import PhotonYieldMultipliers, SecondaryParticleYieldMultipliers
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -89,8 +90,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
         return result
     
     if ly >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Invalid YP block location: LY={ly} exceeds XSS length {len(ace.xss_data)}")
+        lost(ace, "YP", "", f"Invalid YP block location: LY={ly} exceeds XSS length {len(ace.xss_data)}")
         return result
     
     # Read NYP (number of MTs to follow)
@@ -107,8 +107,7 @@ def read_photon_yield_multipliers(ace: Ace, debug=False) -> PhotonYieldMultiplie
     
     # Check if we have enough data for all MT numbers
     if ly + nyp >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Not enough data: need {nyp} entries, but only {len(ace.xss_data) - ly - 1} available")
+        lost(ace, "YP", "", f"Not enough data: need {nyp} entries, but only {len(ace.xss_data) - ly - 1} available")
         return result
     
     # Read the MT numbers (MTY values)
@@ -211,8 +210,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         return result
     
     if jxs32_idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Invalid IXS block location: JXS(32)={jxs32_idx} exceeds XSS length {len(ace.xss_data)}")
+        lost(ace, "YH", "", f"Invalid IXS block location: JXS(32)={jxs32_idx} exceeds XSS length {len(ace.xss_data)}")
         return result
     
     # Iterate through each particle type (1 to NTYPE)
@@ -230,8 +228,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
             logger.debug(f"  YH index calculation: JXS(32) + 10*(i-1) + 9 = {jxs32_idx} + 10*({i}-1) + 9 = {jed_idx}")
         
         if jed_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  ERROR: JED index {jed_idx} exceeds XSS length {len(ace.xss_data)}")
+            lost(ace, "YH", "", f"JED index {jed_idx} exceeds XSS length {len(ace.xss_data)}")
             continue
         
         # Get the value at JED, which is LY
@@ -248,8 +245,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
             continue
         
         if ly >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  Invalid YH location: LY={ly} exceeds XSS length {len(ace.xss_data)}")
+            lost(ace, "YH", "", f"Invalid YH location: LY={ly} exceeds XSS length {len(ace.xss_data)}")
             continue
         
         # Read NYH (number of MTs to follow)
@@ -266,8 +262,7 @@ def read_secondary_particle_yield_multipliers(ace: Ace, debug=False) -> Secondar
         
         # Check if we have enough data for all MT numbers
         if ly + nyh >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  Not enough data: need {nyh} entries, but only {len(ace.xss_data) - ly - 1} available")
+            lost(ace, "YH", "", f"Not enough data: need {nyh} entries, but only {len(ace.xss_data) - ly - 1} available")
             continue
         
         # Read the MT numbers (MTY values)

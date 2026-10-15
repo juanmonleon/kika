@@ -174,6 +174,19 @@ class AceOptions:
         layout and made the listing ~120 MB per sample and temperature for
         Fe-56, 97 % of it. The consistency checks are printed either way, and
         the ACE and xsdir are byte for byte the same.
+    engine
+        ``"njoy"`` (the default): each sample's tape through NJOY. ``"kika"``:
+        each realisation processed by kika from its 0 K forms -- multiplied
+        at 0 K, then broadened -- and written by
+        :func:`kika.ace.model_adapter.encodeAce`, the processing
+        :meth:`kika.endf.EndfProcessing.write_ace` uses; no tape, no NJOY. The
+        URR probability tables are computed once, on the unperturbed
+        evaluation, and shared by every sample (they are not perturbed). A
+        table without ``extensions`` is ``<ZAID>.<suffix of its
+        temperature>``; ``libraryName``, ``njoyVersion``, ``keepNjoyFiles``
+        and ``fullAceListing`` do not apply.
+    omit, thnmax, thinning
+        ``engine="kika"`` only, as :class:`HDF5Options` takes them.
     """
 
     temperatures: Tuple[float, ...] = ()
@@ -183,6 +196,10 @@ class AceOptions:
     njoyVersion: str = "NJOY 2016.78"
     keepNjoyFiles: bool = True
     fullAceListing: bool = False
+    engine: str = "njoy"
+    omit: Tuple[str, ...] = ()
+    thnmax: object = "njoy"
+    thinning: Optional[float] = 1.0e-3
 
     def __post_init__(self) -> None:
         import os
@@ -208,6 +225,16 @@ class AceOptions:
             raise ValueError(
                 f"{len(self.extensions)} extension(s) for {len(self.temperatures)} "
                 f"temperature(s): give one per temperature, or none")
+        if self.engine not in ("njoy", "kika"):
+            raise ValueError(f"AceOptions.engine is 'njoy' or 'kika', not {self.engine!r}")
+        if self.engine == "kika":
+            HDF5Options(temperatures=self.temperatures, omit=tuple(self.omit)).validate()
+            if self.extensions is None:
+                from kika._utils import ace_temperature_suffix
+
+                for temperature in self.temperatures:
+                    ace_temperature_suffix(temperature)
+            return
         if not self.njoyExe:
             raise ValueError(
                 "no NJOY executable: pass AceOptions(njoyExe=...), set the "
@@ -220,7 +247,8 @@ class AceOptions:
                 "libraryName": self.libraryName,
                 "extensions": list(self.extensions) if self.extensions else None,
                 "njoyVersion": self.njoyVersion, "keepNjoyFiles": self.keepNjoyFiles,
-                "fullAceListing": self.fullAceListing}
+                "fullAceListing": self.fullAceListing, "engine": self.engine,
+                "omit": list(self.omit), "thnmax": self.thnmax, "thinning": self.thinning}
 
 
 @dataclass
@@ -926,6 +954,66 @@ def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
                       f"{record['returncode']}); listing: {record['listing']}",
                       subject="ace", sample=sample, temperature=temperature,
                       returncode=record["returncode"], listing=record["listing"])
+        produced.append(record)
+    return produced
+
+
+def _emitAceKika(suite, pset, sampleDir: Path, ctx, log, sample: int) -> List[Dict[str, Any]]:
+    """One realisation processed by kika and written as ACE, once per temperature.
+
+    Records in :func:`_emitAce`'s shape (``returncode`` 0, or 1 with the error
+    in ``listing``); like it, never raises: one failed sample is reported, not
+    allowed to lose the others.
+    """
+    from kika.ace.model_adapter import encodeAce
+    from kika.ace.writers.write_ace import write_ace_checked
+    from kika.ace.xsdir import xsdir_line_for, write_xsdir_line
+    from kika.hdf5.processing import ACE_PARTICLES, processSuite
+    from kika.nuclear_data.model.conversion import ConversionReport
+
+    options = ctx.ace
+    aceDir = sampleDir / "ace"
+    aceDir.mkdir(parents=True, exist_ok=True)
+    shared = ctx.acePieces or {}
+    report = ConversionReport()
+    produced: List[Dict[str, Any]] = []
+    processed, failure = None, None
+    try:
+        with log.timed("note", f"processed by kika at {list(options.temperatures)} K",
+                       subject="ace", sample=sample):
+            processed = processSuite(suite, temperatures=list(options.temperatures), report=report,
+                                     label=pset.label, urrTables=shared.get("urr"),
+                                     omit=tuple(options.omit), thnmax=options.thnmax,
+                                     thinning=options.thinning, workers=1, particles=ACE_PARTICLES)
+    except Exception as error:  # noqa: BLE001 -- recorded per temperature below
+        failure = f"processing: {type(error).__name__}: {error}"
+    for at, temperature in enumerate(options.temperatures):
+        extension = options.extensions[at] if options.extensions else None
+        record: Dict[str, Any] = {"temperature": temperature, "extension": extension,
+                                  "returncode": None, "ace": None, "xsdir": None,
+                                  "listing": None}
+        with log.timed("emitted", f"ace at {temperature:g} K (kika)", subject="ace",
+                       sample=sample, temperature=temperature) as info:
+            try:
+                if failure is not None:
+                    raise RuntimeError(failure)
+                ext = None if extension is None else (
+                    extension if extension.startswith(".") else f".{extension}")
+                ace, _ = encodeAce(processed, temperature, extension=ext, report=report)
+                name = f"{ace.header.zaid}{ace.header.extension}"
+                path = aceDir / name
+                write_ace_checked(ace, path)
+                xsdir = aceDir / f"{name}.xsdir"
+                write_xsdir_line(str(xsdir), xsdir_line_for(ace, name))
+                record.update(returncode=0, ace=str(path), xsdir=str(xsdir))
+                info["path"] = str(path)
+                info["bytes"] = path.stat().st_size
+            except Exception as error:  # noqa: BLE001
+                record.update(returncode=1, listing=f"{type(error).__name__}: {error}")
+            info["returncode"] = record["returncode"]
+        if record["returncode"] != 0:
+            log.error(f"kika ACE failed at {temperature:g} K: {record['listing']}",
+                      subject="ace", sample=sample, temperature=temperature)
         produced.append(record)
     return produced
 
@@ -2124,6 +2212,8 @@ class _SampleContext:
     #: ``"hdf5"`` only: the options, and the NJOY pieces computed once.
     hdf5: Optional[HDF5Options] = None
     hdf5Pieces: Optional[Any] = None
+    #: ``"ace"`` with ``engine="kika"``: what every sample shares (the URR tables).
+    acePieces: Optional[Any] = None
 
 
 def _emitHdf5(suite, pset, sampleDir: Path, ctx, log, number: int) -> Dict[str, Path]:
@@ -2213,7 +2303,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
         # when there is a tape to patch; otherwise the whole tape from the
         # model. Either is written on demand if it was not asked for.
         tapeFormats = [fmt for fmt in ctx.formats if fmt not in ("ace", "hdf5")]
-        if "ace" in ctx.formats and not any(
+        njoyAce = "ace" in ctx.formats and ctx.ace.engine == "njoy"
+        if njoyAce and not any(
                 fmt in tapeFormats for fmt in ("endf-delta", "endf-tape")):
             tapeFormats.append("endf-delta" if ctx.sourceFormat == "endf"
                                else "endf-tape")
@@ -2234,7 +2325,12 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                         fmt)
                 info["path"] = str(files[fmt])
                 info["bytes"] = files[fmt].stat().st_size
-        if "ace" in ctx.formats:
+        if "ace" in ctx.formats and not njoyAce:
+            aceProduced = _emitAceKika(suite, pset, sampleDir, ctx, log, number)
+            good = [r["ace"] for r in aceProduced if r["ace"] and r["returncode"] == 0]
+            if good:
+                files["ace"] = [Path(p) for p in good]
+        elif "ace" in ctx.formats:
             tape = files.get("endf-delta") or files["endf-tape"]
             if ctx.pendfPath is not None:
                 njoyEndf, samplePendf = _njoyInputs(
@@ -2607,7 +2703,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             "none. Ask for endf-tape, gnds or ace"
         )
     if sourceFormat == "gnds":
-        needsTape = [f for f in formats if f in ("endf-tape", "ace")]
+        needsTape = [f for f in formats if f == "endf-tape"
+                     or (f == "ace" and ace is not None and ace.engine == "njoy")]
         resonances = getattr(suite, "resonances", None)
         withParameters = resonances is not None and (
             bool(resonances.resolved) or resonances.unresolved is not None)
@@ -2863,7 +2960,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         angularPositivity=angularPositivity,
         hdf5=hdf5 if "hdf5" in formats else None,
         hdf5Pieces=_hdf5Pieces(hdf5, suite, originalSourcePath or sourcePath, log)
-        if ("hdf5" in formats and emitTapes) else None)
+        if ("hdf5" in formats and emitTapes) else None,
+        acePieces=_hdf5Pieces(ace, suite, originalSourcePath or sourcePath, log)
+        if ("ace" in formats and emitTapes and ace.engine == "kika") else None)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:

@@ -53,9 +53,7 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     # Read the number of interpolation regions (N_R)
     n_r_entry = ace.xss_data[idat_idx]
@@ -86,17 +84,13 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
                 distribution.nbt = [int(v) for v in e_out_nbt]
                 distribution.interp = [int(v) for v in e_out_int]
             else:
-                if debug:
-                    logger.debug(f"Not enough data to read INT values. Need index up to {idx + n_r - 1}, have {len(ace.xss_data)}")
+                raise ValueError(f"Not enough data to read INT values. Need index up to {idx + n_r - 1}, have {len(ace.xss_data)}")
         else:
-            if debug:
-                logger.debug(f"Not enough data to read NBT values. Need index up to {idx + n_r - 1}, have {len(ace.xss_data)}")
+            raise ValueError(f"Not enough data to read NBT values. Need index up to {idx + n_r - 1}, have {len(ace.xss_data)}")
     
     # Read the number of incident energies (N_E)
     if idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     n_e_entry = ace.xss_data[idx]
     n_e = int(n_e_entry)
@@ -107,9 +101,7 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
     
     # Check if we have enough data
     if idx + n_e - 1 >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read incident energies. Need index up to {idx + n_e - 1}, have {len(ace.xss_data)}")
     
     # Read the list of incident energies - a view of xss_data
     incident_energies = ace.xss_data[idx:idx + n_e]
@@ -121,15 +113,15 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
     
     # Read the number of outgoing energies (NET) in each table
     if idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     net_entry = ace.xss_data[idx]
     net = int(net_entry)
     if debug:
         logger.debug(f"Number of outgoing energies (NET): {net}")
     idx += 1
+    if net < 2:
+        raise ValueError(f"LAW=1 with NET={net}: equiprobable bins need at least two boundaries")
     
     # Read the E_out tables for each incident energy
     # Each table has NET entries
@@ -139,9 +131,7 @@ def parse_tabular_energy_distribution(ace: Ace, base_dist: EnergyDistribution, i
         if debug:
             logger.debug(f"Processing E_out table {i+1}/{n_e}")
         if idx + net - 1 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Not enough data to read E_out table {i+1}. Need index up to {idx + net - 1}, have {len(ace.xss_data)}")
-            break
+            raise ValueError(f"Not enough data to read E_out table {i+1}. Need index up to {idx + net - 1}, have {len(ace.xss_data)}")
         
         # Get the outgoing energy boundaries for this incident energy
         e_out = ace.xss_data[idx:idx + net]

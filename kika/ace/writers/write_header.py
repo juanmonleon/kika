@@ -94,8 +94,8 @@ def write_header(header):
                     za, awr = header.izaw_array[idx]
                 else:
                     za, awr = 0, 0.0
-                # Format exactly as Fortran 4(I7,F11.0) - right-justified
-                line += f"{za:7d}{awr:11.0f}"
+                # Fortran 4(I7,F11.0): F11.0 always prints the point ("0.")
+                line += f"{za:7d}{awr:10.0f}."
             result.append(line)
     
     # Format NXS array (16 integers over 2 lines)

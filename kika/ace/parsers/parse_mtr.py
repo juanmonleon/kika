@@ -2,6 +2,7 @@ import numpy as np
 from typing import List, Optional
 import logging
 from kika.ace.classes.mt_reaction.mtr import ReactionMTData
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ def read_mtr_blocks(ace, debug=False):
                     logger.debug(f"Read {len(reaction_mt_data.photon_production)} MT values from MTRP block")
                     logger.debug(f"Photon production MT values: {[int(entry) for entry in reaction_mt_data.photon_production]}")
             else:
-                logger.warning(f"MTRP block of NXS(6)={num_photon_reactions} entries runs past the XSS array; not read")
+                lost(ace, "MTRP", "", f"NXS(6)={num_photon_reactions} entries run past the XSS array")
     
     # Read MTRH block (particle production MT numbers) if present
     jxs31 = ace.header.jxs_array[31]  # JXS(31)

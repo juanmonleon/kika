@@ -13,8 +13,9 @@ both halves of what this phase does:
   while nothing changed, rebuilt by multiplication once something did;
 * MF12 LO=2 (E5c) reaches PoPs as the level's decay and comes back as its
   own bytes while the cascade is unchanged (``test_photon_cascades.py``);
-  an LO=2 whose transitions name a level the evaluation does not, and the
-  photons of an MT with no cross section, are kept verbatim and declared.
+  an LO=2 whose transitions name a level the evaluation does not is kept
+  verbatim and declared; an MF13 on an MT with no MF3 hangs on an orphan
+  product whose σ is its own σ_γ.
 
 On the six committed cuts here, and — ``tape``/``slow`` — on every tape of the
 three libraries whose photons the model now carries.
@@ -178,6 +179,8 @@ def test_the_pfns_selector_still_finds_the_neutron_on_mt18():
 
 
 def test_what_the_model_does_not_carry_is_kept_and_declared():
+    from kika.nuclear_data.model.cross_section_forms import Reference
+
     suite, report = decode("fe56")
     # The cut keeps MT52-55 and not MT51, so the 846.8 keV level their
     # cascades end on is named nowhere in it: kept, and said, never guessed.
@@ -185,10 +188,17 @@ def test_what_the_model_does_not_carry_is_kept_and_declared():
     assert {"12/52", "14/52"} <= set(kept)
     assert any("MT52" in m and "no level" in m for m in report.unsupported)
     suite, report = decode("n14")
-    # N-14's MT28 and MT32 state MF13 photons and no MF3: nothing to divide by.
-    assert {"13/28", "13/32"} <= set(suite.provenance.headerFields[PHOTONS_VERBATIM_KEY])
-    assert "13/4" not in suite.provenance.headerFields[PHOTONS_VERBATIM_KEY]
-    assert any("MT28" in m and "no cross section" in m for m in report.unsupported)
+    # N-14's MT28 and MT32 state MF13 photons and no MF3: they hang on an
+    # orphan whose σ is the section's own σ_γ (NJOY writes them, FUDGE drops
+    # them), so nothing is kept aside and the multiplicities are shares of it.
+    assert PHOTONS_VERBATIM_KEY not in suite.provenance.headerFields
+    own = {o.ENDF_MT: o for o in suite.orphanProducts
+           if not isinstance(o.crossSection[EVAL_LABEL], Reference)}
+    assert sorted(own) == [28, 32]
+    assert len(photons(own[28].outputChannel)) == 6 and len(photons(own[32].outputChannel)) == 1
+    only = photons(own[32].outputChannel)[0].multiplicity.form
+    assert np.all((np.asarray(only.ys) == 1.0) | (np.asarray(only.ys) == 0.0))
+    assert any("MT28" in m and "own σ_γ" in m for m in report.approximations)
 
 
 def test_the_photons_survive_a_gnds_round_trip(tmp_path):
@@ -304,19 +314,24 @@ def test_mf13_photons_carry_fudges_esk_flag():
     assert flags is not None
     # FUDGE's spelling: "MF13", plus ",ESk=..." only when ES is not 0.
     mf13 = [f for _, f in flags.conversions if f.split(",")[0] == "MF13"]
-    assert len(mf13) == sum(len(photons(suite.reactionByENDF_MT(mt).outputChannel))
-                            for mt in (4, 103, 104, 105, 107))
+    # MT4 and MT103-107 have MF3 in this cut; MT28 and MT32 hang on orphans.
+    assert sorted(o.ENDF_MT for o in suite.orphanProducts) == [28, 32]
+    assert len(mf13) == (sum(len(photons(suite.reactionByENDF_MT(mt).outputChannel))
+                             for mt in (4, 103, 104, 105, 107))
+                         + sum(len(photons(o.outputChannel)) for o in suite.orphanProducts))
 
 
 def test_a_sums_photons_become_an_orphan_product(n14_b81_tape, tmp_path):
     """The whole N-14: MT4 and MT103-107 are sums, so their MF13 photons go to
-    five orphanProducts referencing them, as NNDC's GNDS of N-14 has them."""
+    five orphanProducts referencing them, as NNDC's GNDS of N-14 has them; MT28
+    and MT32 have no MF3, so theirs go to two carrying their own σ_γ."""
     import kika
     from kika.nuclear_data.model.cross_section_forms import Reference
 
     suite, _ = decodeReactionSuite(read_endf(str(n14_b81_tape)))
-    assert [o.ENDF_MT for o in suite.orphanProducts] == [4, 103, 104, 105, 107]
-    assert all(isinstance(o.crossSection[EVAL_LABEL], Reference) for o in suite.orphanProducts)
+    assert [o.ENDF_MT for o in suite.orphanProducts] == [4, 28, 32, 103, 104, 105, 107]
+    assert [o.ENDF_MT for o in suite.orphanProducts
+            if isinstance(o.crossSection[EVAL_LABEL], Reference)] == [4, 103, 104, 105, 107]
     out = tmp_path / "n14.endf"
     writeEndfTape(suite, out)
     source = section_lines(Path(n14_b81_tape).read_text())
@@ -329,3 +344,19 @@ def test_a_sums_photons_become_an_orphan_product(n14_b81_tape, tmp_path):
     back = kika.read(gnds)
     assert [len(o.outputChannel.products) for o in back.orphanProducts] == \
         [len(o.outputChannel.products) for o in suite.orphanProducts]
+
+
+def test_an_own_sigma_orphan_that_cannot_carry_its_photons_is_taken_back(monkeypatch):
+    """When the photons of an MF13 with no MF3 cannot be attached, the orphan made for
+    them is removed again and the section is kept verbatim, as before b74cd4d."""
+    from kika.endf.model_adapter import photons as module
+
+    attach = module._attach
+
+    def refuse(suite, host, sections, mt, report):
+        return "refused for the test" if mt in (28, 32) else attach(suite, host, sections, mt, report)
+
+    monkeypatch.setattr(module, "_attach", refuse)
+    suite, _ = decode("n14")
+    assert [o.ENDF_MT for o in suite.orphanProducts] == []
+    assert {"13/28", "13/32"} <= set(suite.provenance.headerFields[PHOTONS_VERBATIM_KEY])

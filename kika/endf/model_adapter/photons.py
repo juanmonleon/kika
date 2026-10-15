@@ -284,6 +284,38 @@ def _hostFor(suite, mt) -> Optional[_Host]:
                  "orphan")
 
 
+def _ownHost(suite, mt, production) -> Optional[_Host]:
+    """An MF13 on an MT with no MF3: an orphan product whose σ is the section's σ_γ.
+
+    ENDF/B-VIII.1 N-14 states photons on MT28 and MT32 and Pu-241 on MT3 with no
+    MF3 for those MTs. FUDGE drops them; NJOY writes them (MFTYPE 13), and in
+    Pu-241 they are every photon of the nonelastic above 0.1 MeV. The orphan's
+    σ is the section's total σ_γ (its one photon's when NK = 1), so each
+    multiplicity is that photon's share of it -- the convention ``decodeAce``
+    uses for an MFTYPE 13 with no reaction -- and y·σ gives σ_γ back exactly.
+    """
+    from kika.nuclear_data.model import OutputChannel, Reaction, ReactionId, crossSectionAxes
+
+    table = production.total or (production.photons[0] if len(production.photons) == 1 else None)
+    if table is None:
+        return None
+    sigma = _function1d(table.interp, table.x, table.y, axes=crossSectionAxes())
+    sigma.label = EVAL_LABEL
+    orphan = Reaction(id=ReactionId(label=f"Orphan product {len(suite.orphanProducts) + 1}",
+                                    ENDF_MT=int(mt)),
+                      outputChannel=OutputChannel(genre="NBody"))
+    orphan.crossSection[EVAL_LABEL] = sigma
+    source = next(iter(suite.reactions), None)
+    provenance = getattr(source, "provenance", None)
+    orphan.provenance = EndfProvenance(
+        mat=getattr(provenance, "mat", None), awr=getattr(provenance, "awr", None),
+        za=getattr(provenance, "za", None))
+    suite.orphanProducts.append(orphan)
+    return _Host(orphan, orphan,
+                 f"/reactionSuite/orphanProducts/orphanProduct[@label='{orphan.label}']",
+                 "orphan")
+
+
 # ---------------------------------------------------------------------------
 # Decode
 # ---------------------------------------------------------------------------
@@ -306,15 +338,25 @@ def attachPhotons(suite, endf, report: Optional[ConversionReport] = None):
                 _keepVerbatim(suite, sections, mt, why, report)
             continue
         why = _whyNotModelled(sections)
-        host = None
+        host, own = None, False
         if why is None:
             host = _hostFor(suite, mt)
+            if host is None and 13 in sections:
+                host, own = _ownHost(suite, mt, sections[13]), True
             if host is None:
                 why = ("there is no cross section for these photons to hang from "
                        "(an MT with no MF3, or a sum with no values), so neither a "
                        "reaction nor an orphanProduct can carry them")
         if why is None:
             why = _attach(suite, host, sections, mt, report)
+            if why is None and own:
+                report.approximated(
+                    f"MT{mt}: MF13 on an MT with no MF3, so its photons hang on an "
+                    f"orphanProduct whose σ is the section's own σ_γ, each multiplicity "
+                    f"its share of it (NJOY writes these photons; FUDGE drops them)",
+                    unaffectedScopes=("cross-sections",))
+            elif why is not None and own:
+                suite.orphanProducts.remove(host.node)
         if why is not None:
             _keepVerbatim(suite, sections, mt, why, report)
     return report
@@ -839,6 +881,13 @@ def encodePhotonSections(suite, mat: Optional[int] = None,
 #: ENDF writes both from the same evaluated level scheme, so they normally agree
 #: to the last digit; this only absorbs the 6-7 significant figures of the format.
 _LEVEL_TOLERANCE = 1e-5
+#: The second window, tried only when the first finds no level. Some
+#: evaluations round a transition's ES to fewer figures than the level's own
+#: ES_NS: ENDF/B-VIII.1 Fe-58 MT603 sends its photons to 71 770 and 125 690 eV,
+#: the levels MT601-602 state at 71 769 and 125 689 eV (1.4e-5), and the whole
+#: cascade was dropped. The level must still be the only one in the window:
+#: U-234's levels 56 eV apart at 1.024 MeV (5.5e-5) leave it ambiguous.
+_LEVEL_TOLERANCE_LOOSE = 1e-4
 
 
 def _cascadeDigest(levelEnergy: float, transitions) -> str:
@@ -881,15 +930,23 @@ def _levelEnergies(suite, sections12, series) -> Dict[int, float]:
 
 
 def _levelOf(energies: Dict[int, float], es: float) -> Optional[int]:
-    """The level index whose energy is *es*, or ``None`` -- never a nearest guess."""
+    """The level index whose energy is *es*, or ``None`` -- never a nearest guess.
+
+    The exact energy first; then the one level within ``_LEVEL_TOLERANCE``, and
+    only if there is none, the one level within ``_LEVEL_TOLERANCE_LOOSE``. Two
+    levels in a window are ambiguous and give ``None``.
+    """
     if es == 0.0:
         return 0
     for index, energy in energies.items():
         if energy == es:
             return index
-    matches = [index for index, energy in energies.items()
-               if energy and abs(energy - es) <= _LEVEL_TOLERANCE * abs(es)]
-    return matches[0] if len(matches) == 1 else None
+    for tolerance in (_LEVEL_TOLERANCE, _LEVEL_TOLERANCE_LOOSE):
+        matches = [index for index, energy in energies.items()
+                   if energy and abs(energy - es) <= tolerance * abs(es)]
+        if matches:
+            return matches[0] if len(matches) == 1 else None
+    return None
 
 
 def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
