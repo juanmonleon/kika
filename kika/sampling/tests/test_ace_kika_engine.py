@@ -56,11 +56,12 @@ def test_the_unperturbed_processing_is_write_aces_table(tmp_path):
     from kika.endf import ProcessingPlan, process_endf
     from kika.endf.model_adapter import decodeReactionSuite
     from kika.endf.read_endf import read_endf
-    from kika.hdf5.processing import processSuite
+    from kika.hdf5.processing import ACE_PARTICLES, processSuite
 
     (written,) = process_endf(TAPE, ProcessingPlan(temperatures=(293.6,), workers=1)).write_ace(tmp_path)
     suite, _ = decodeReactionSuite(read_endf(TAPE))
-    ace, _ = encodeAce(processSuite(suite, temperatures=[293.6], endf=TAPE, workers=1), 293.6)
+    ace, _ = encodeAce(processSuite(suite, temperatures=[293.6], endf=TAPE, workers=1,
+                                    particles=ACE_PARTICLES), 293.6)
     reference = read_ace(str(written), strict=True)
     assert list(ace.header.nxs_array) == list(reference.header.nxs_array)
     assert list(ace.header.jxs_array) == list(reference.header.jxs_array)

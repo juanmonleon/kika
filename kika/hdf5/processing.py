@@ -584,7 +584,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                  thinning: Optional[float] = 1.0e-3,
                  workers: Optional[int] = None, label: Optional[str] = None,
                  urrTables: Optional[Dict[float, object]] = None,
-                 broadened: Optional[Dict[float, tuple]] = None):
+                 broadened: Optional[Dict[float, tuple]] = None,
+                 particles: Sequence[str] = ("n", "photon")):
     """The processed suite of ``suite`` at ``temperatures`` (kelvin; default 293.6 K).
 
     ``endf`` is the ENDF tape the suite was read from, for the target's mass
@@ -614,6 +615,9 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     ``broadened`` passes the broadening already done on this suite's 0 K forms
     (``_broadenAll``'s ``{kelvin: (heated forms, ceiling)}``, as
     ``kika.endf.process_endf`` keeps it); each temperature's ceiling is its own.
+    ``particles`` are the products tabulated for Monte Carlo: neutrons and
+    photons, as OpenMC's file holds them; an ACE table also carries the light
+    charged particles (:data:`ACE_PARTICLES`).
     """
     m = _m()
     from kika.processing.tabulation import TabulationContext, TabulationOptions, tabulateDistribution
@@ -786,7 +790,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                 x, y = x[kept], y[kept]
             cs[RECON_LABEL] = m.XYs1d(xs=x, ys=y, axes=m.crossSectionAxes(), label=RECON_LABEL)
         channel = channelOf(reaction)
-        _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs, flags=photonFlags)
+        _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs, flags=photonFlags,
+                  particles=particles)
         redundant = 1 if (mt == 18 and chances) else 0
         rid = m.ReactionId(label=reaction.label, ENDF_MT=mt, fissionGenre=reaction.id.fissionGenre)
         new = (m.CrossSectionSum if redundant else m.Reaction)(
@@ -796,7 +801,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     if summedFission is not None:
         channel = channelOf(summedFission)
         _products(summedFission, channel, 18, awr, zaTarget, tabOptions, report, work.PoPs,
-                  flags=photonFlags)
+                  flags=photonFlags, particles=particles)
         out.reactions.append(m.Reaction(
             id=m.ReactionId(label=summedFission.label, ENDF_MT=18),
             crossSection=summedForms(sorted(chances)), outputChannel=channel,
@@ -849,7 +854,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         proxy = copy.copy(orphan)
         if source is not None:
             proxy.crossSection = source.crossSection
-        _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report, flags=photonFlags)
+        _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report, flags=photonFlags,
+                  particles=particles)
 
     # --- gas production -----------------------------------------------------
     for gasMT, cs in _gas(work, leaves, heated, grids).items():
@@ -1095,14 +1101,20 @@ def _photonFlags(suite) -> Dict[Tuple[str, str], str]:
     return out
 
 
-def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, flags=None):
-    """Neutron and photon products with Monte Carlo distributions, onto ``channel``."""
+#: The products an ACE table carries: neutrons, photons and the light charged
+#: particles MCNP transports (PTYPE 9, 31, 32, 33, 34).
+ACE_PARTICLES = ("n", "photon", "H1", "H2", "H3", "He3", "He4")
+
+
+def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, flags=None,
+              particles=("n", "photon")):
+    """The ``particles`` products with Monte Carlo distributions, onto ``channel``."""
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
     explicitPhotons = False
     for product in reaction.outputChannel.products:
-        if product.pid not in ("n", "photon"):
+        if product.pid not in particles:
             continue
         new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, flags=flags)
         if new is not None:
@@ -1224,8 +1236,11 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
                                 Q=reaction.outputChannel.Q.value, pid=product.pid,
                                 zaEmitted=_zaOf(product.pid) if product.pid != "photon" else 0,
                                 discrete=discrete, options=options, report=report)
+    from kika.processing.tabulation.distribution import LIGHT_PARTICLE_AWP, isLevelMT
+
+    light = product.pid in LIGHT_PARTICLE_AWP and isLevelMT(mt)
     if form is None or isinstance(form, m.Isotropic2d):
-        if mt == 2 or (product.pid == "n" and 51 <= mt <= 90):
+        if mt == 2 or (product.pid == "n" and 51 <= mt <= 90) or light:
             # Isotropic in the centre of mass where the evaluation gives no MF4.
             form = m.AngularTwoBody(angular=m.Isotropic2d(), productFrame=m.Frame.centerOfMass)
         else:
@@ -1248,7 +1263,7 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
     new.distribution[MONTE_CARLO_LABEL] = tabulated
     multiplicity = product.multiplicity.form if product.multiplicity is not None else None
     if multiplicity is None or not isinstance(multiplicity, m.Function1d):
-        if product.pid == "n" and not delayed:
+        if (product.pid == "n" and not delayed) or light:
             multiplicity = m.Polynomial1d(coefficients=np.array([1.0]), domainMin_=0.0,
                                           domainMax_=float("inf"))
         else:

@@ -968,7 +968,7 @@ def _emitAceKika(suite, pset, sampleDir: Path, ctx, log, sample: int) -> List[Di
     from kika.ace.model_adapter import encodeAce
     from kika.ace.writers.write_ace import write_ace_checked
     from kika.ace.xsdir import xsdir_line_for, write_xsdir_line
-    from kika.hdf5.processing import processSuite
+    from kika.hdf5.processing import ACE_PARTICLES, processSuite
     from kika.nuclear_data.model.conversion import ConversionReport
 
     options = ctx.ace
@@ -984,7 +984,7 @@ def _emitAceKika(suite, pset, sampleDir: Path, ctx, log, sample: int) -> List[Di
             processed = processSuite(suite, temperatures=list(options.temperatures), report=report,
                                      label=pset.label, urrTables=shared.get("urr"),
                                      omit=tuple(options.omit), thnmax=options.thnmax,
-                                     thinning=options.thinning, workers=1)
+                                     thinning=options.thinning, workers=1, particles=ACE_PARTICLES)
     except Exception as error:  # noqa: BLE001 -- recorded per temperature below
         failure = f"processing: {type(error).__name__}: {error}"
     for at, temperature in enumerate(options.temperatures):

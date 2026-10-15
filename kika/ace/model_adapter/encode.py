@@ -82,6 +82,10 @@ KEPT_SUMS = (18, 103, 104, 105, 106, 107)
 HEATING_MT = 301
 #: ACER's equiprobable cosine bins per incident energy (AND LC > 0, ANDP)
 EQUIPROBABLE_BINS = 32
+#: The light charged particles of an ACE table: model pid -> (PTYPE IPT, mass ratio to the
+#: neutron, ENDF's AWP for them)
+PARTICLE_TYPES = {"H1": (9, 0.99862347), "H2": (31, 1.99626), "H3": (32, 2.98960),
+                  "He3": (33, 2.98903), "He4": (34, 3.96713)}
 #: OpenMC's local-photon KERMA; an ACE table has only ESZ's heating number
 LOCAL_HEATING_MT = 901
 
@@ -609,6 +613,7 @@ class _Encoder:
         secondary = [mt for mt in mtr if mt in neutrons]
 
         esz = self.esz(nodes, grid)
+        self.totalOnGrid = esz.total_xs
         if LOCAL_HEATING_MT in nodes:
             self.report.lost("MT901, the KERMA with local photons: an ACE table has one heating "
                              "number, ESZ's (MT301, photons deposited elsewhere)")
@@ -656,17 +661,22 @@ class _Encoder:
         gpd, mtrp, sigp, yp = self.photonBlocks(photons, nodes, grid, angular, energy)
 
         header = self.header()
+        ids, mtrh, tyrh, hpd, sigh, yh = self.particleBlocks(nodes, grid, angular, energy,
+                                                           float(header.atomic_weight_ratio))
         rmt = NS(incident_neutron=np.asarray(mtr, dtype=float),
                  secondary_neutron_mt=np.asarray(secondary, dtype=float),
-                 photon_production=np.asarray(mtrp, dtype=float), particle_production=[])
+                 photon_production=np.asarray(mtrp, dtype=float), particle_production=mtrh)
         return NS(header=header, esz_block=esz, nubar=nubar, reaction_mt_data=rmt,
                   q_values=NS(q_values=np.asarray(q, dtype=float)),
-                  particle_release=NS(incident_neutron=np.asarray(ty, dtype=float), particle_production=[]),
+                  particle_release=NS(incident_neutron=np.asarray(ty, dtype=float), particle_production=tyrh),
                   cross_section=crossSection, angular_distributions=angular, energy_distributions=energy,
                   unresolved_resonance=unr, delayed_neutron_data=bdd,
                   photon_production_data=gpd, photon_production_xs=NS(cross_sections=sigp) if gpd else None,
                   photon_yield_multipliers=NS(multiplier_mts=yp) if gpd else None,
-                  secondary_particle_types=NS(particle_ids=[]), particle_production_xs=None)
+                  secondary_particle_types=NS(particle_ids=ids),
+                  secondary_particle_cross_sections=NS(particle_data=hpd) if ids else None,
+                  particle_production_xs=NS(particle_cross_sections=sigh) if ids else None,
+                  particle_yield_multipliers=NS(particle_multipliers=yh) if ids else None)
 
     def esz(self, nodes, grid) -> NS:
         nes = len(grid)
@@ -951,6 +961,91 @@ class _Encoder:
             self.report.approximated("GPD is the sum of the photon productions (the suite states no total)")
         return NS(total_xs=gpdTotal, outgoing_energies=None), mtrps, sigp, yp
 
+    # --- light charged particles (PTYPE, NTRO, IXS) --------------------------
+
+    def particleBlocks(self, nodes, grid, angular, energy, awr: float):
+        """The charged-particle production blocks, as NJOY 2016's ACER writes them.
+
+        Per particle (PTYPE 9, 31, 32, 33, 34 in that order): MTRH, the
+        reactions producing it, ascending; TYRH +-1 by frame (-1 in the centre
+        of mass); SIGH, each yield as MFTYPE 12 on its own reaction; ANDH and
+        DLWH from its Monte Carlo form; HPD, the production cross section
+        sum(y sigma) on the union grid from one point before its first nonzero
+        value, with the heating number, the produced particles' energy per collision
+        in MeV, sum(y sigma E) / sigma_t, normalised as ESZ's; YH, the
+        reactions with a yield.
+        """
+        from kika.hdf5.names import MONTE_CARLO_LABEL
+        from kika.processing.heating import _Kinematics, _meanEnergyOf
+
+        s, m = self.suite, self.m
+        ids, mtrh, tyrh, hpd, sigh, yh = [], [], [], {}, {}, {}
+        angular.particle_production, energy.particle_production = [], []
+        for pid, (ipt, awp) in PARTICLE_TYPES.items():
+            entries = []
+            for mt in sorted(nodes):
+                container, node = nodes[mt]
+                if container is s.sums or node.outputChannel is None or mt == HEATING_MT:
+                    continue
+                product = next((p for p in node.outputChannel.products if p.pid == pid), None)
+                if product is not None and product.distribution is not None and \
+                        MONTE_CARLO_LABEL in product.distribution.forms:
+                    entries.append((mt, node, product))
+            if not entries:
+                continue
+            i = len(ids)
+            ids.append(ipt)
+            mts, tys, records, angles, chains = [], [], {}, {}, {}
+            production, heat = np.zeros(len(grid)), np.zeros(len(grid))
+            for mt, node, product in entries:
+                form = product.distribution.forms[MONTE_CARLO_LABEL]
+                # a level's particle is law 33, the charged-particle level law
+                level = isinstance(form, m.Uncorrelated) and isinstance(form.energy, m.LevelEnergy)
+                laws, numbers = _chain(form, {"laws": [33]} if level else {}, f"DLWH {pid} MT{mt}",
+                                       self.domain)
+                chains[mt] = laws
+                angles[mt] = (_correlatedRecord(mt) if any(n in CORRELATED_LAWS for n in numbers)
+                              else _angularRecord(_angularOf(form), mt))
+                mts.append(mt)
+                tys.append(-1 if _frameOf(form) else 1)
+                xs = self.xs(node, f"MT{mt}")
+                x0 = np.asarray(xs.xs, dtype=float)
+                multiplicity = _multiplicityForm(product.multiplicity)
+                if isinstance(multiplicity, (m.Constant1d, m.Polynomial1d)):
+                    c = float(multiplicity.constant if isinstance(multiplicity, m.Constant1d)
+                              else multiplicity.coefficients[0])
+                    x, y, nbt, interp = np.array([x0[0], x0[-1]]), np.array([c, c]), [], []
+                else:
+                    x, y, nbt, interp = _regions(multiplicity)
+                records[mt] = NS(mt=mt, mftype=12, mtmult=mt, interpolation_bounds=nbt,
+                                 interpolation_schemes=interp, energies=_mev(x),
+                                 yields=np.asarray(y, dtype=float))
+                sigma = np.zeros(len(grid))
+                sigma[self.suffix(grid, xs, f"MT{mt}"):] = xs.ys
+                contribution = np.interp(grid, x, y, left=0.0, right=0.0) * sigma
+                production += contribution
+                Q = node.outputChannel.Q.value if node.outputChannel.Q is not None else 0.0
+                try:
+                    mean = _meanEnergyOf(form, grid, _Kinematics(A=awr, Q=float(Q), awp=awp))
+                except (TypeError, ValueError, NotImplementedError) as error:
+                    self.report.approximated(f"HPD {pid}: MT{mt}'s mean energy not computed ({error}); "
+                                             f"its heating counted as 0")
+                    mean = np.zeros(len(grid))
+                heat += contribution * mean
+            first = np.flatnonzero(production)
+            start = max(int(first[0]) - 1, 0) if first.size else 0
+            total = np.asarray(self.totalOnGrid, dtype=float)
+            heating = np.divide(heat, total, out=np.zeros(len(grid)), where=total > 0)
+            hpd[i + 1] = NS(energy_grid_index=start + 1, xs_values=production[start:],
+                            heating_numbers=heating[start:] / EV_PER_MEV)
+            mtrh.append(np.asarray(mts, dtype=float))
+            tyrh.append(np.asarray(tys, dtype=float))
+            sigh[i + 1] = records
+            yh[i + 1] = list(mts)
+            angular.particle_production.append(angles)
+            energy.particle_production.append(chains)
+        return ids, mtrh, tyrh, hpd, sigh, yh
+
     def photonMonteCarlo(self, product, attributes, mtrp):
         """The photon's Monte Carlo form, else its heated ``Uncorrelated`` (lines and continua)."""
         from kika.hdf5.names import MONTE_CARLO_LABEL
@@ -1108,9 +1203,11 @@ def encodeAce(suite, temperature=None, *, zaid: Optional[int] = None, awr: Optio
     ace.xss_int_words = pack_int_words(enc.is_int)
     ace.read_report = ReadReport(strict=strict)
     ace = parse_blocks(ace)
-    message = "charged-particle production (PTYPE, NTRO, IXS) is not written: kika writes neutrons and photons"
-    if message not in report.unsupported:
-        report.unsupportedNode(message)
+    if not list(getattr(ace.secondary_particle_types, "particle_ids", None) or []):
+        message = ("charged-particle production (PTYPE, NTRO, IXS) is not written: the suite carries no "
+                   "light charged-particle products (a suite read from ACE or OpenMC has none)")
+        if message not in report.unsupported:
+            report.unsupportedNode(message)
     return ace, report
 
 

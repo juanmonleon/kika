@@ -755,7 +755,7 @@ class EndfProcessing:
         from kika.ace.model_adapter import encodeAce
         from kika.ace.writers.write_ace import write_ace_checked
         from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
-        from kika.hdf5.processing import processSuite
+        from kika.hdf5.processing import ACE_PARTICLES, processSuite
         from kika.nuclear_data.model import ConversionReport
 
         t0 = time.perf_counter()
@@ -792,7 +792,7 @@ class EndfProcessing:
                     work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
                     broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
                     context=self.reconstruction.context, thinning=self.plan.thinning,
-                    workers=self.plan.workers, omit=omit)
+                    workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
             except Exception as error:
                 raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
             directory.mkdir(parents=True, exist_ok=True)
