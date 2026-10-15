@@ -16,10 +16,22 @@ typedef char rm_requires_ieee_float64[
     (sizeof(double)==8 && DBL_MANT_DIG==53 && DBL_MAX_EXP==1024)?1:-1];
 
 #define TILE 128
+/* Energies per block of the level sums (_rm_kernel.h). */
+#define RM_BLOCK 4
+#if defined(__GNUC__) || defined(__clang__)
+#define RM_INLINE static inline __attribute__((always_inline))
+/* GCC/clang vector extensions: on the AVX2 target the level sums run four
+ * energies per vector (RM_VECTOR in _rm_kernel.h). */
+typedef double rm_v4d __attribute__((vector_size(32)));
+typedef long long rm_v4i __attribute__((vector_size(32)));
+#else
+#define RM_INLINE static __forceinline
+#endif
 #define ENVELOPE_LIMIT 1e8
 /* Channels per spin group. Cl-35 (ENDF/B-VIII.1) has groups of four: a
  * neutron and a proton channel for each of two channel spins. Stack tiles
- * grow as 2*RM_MAX_CHANNELS^2*TILE doubles, 74 KB at six. */
+ * grow as 2*RM_MAX_CHANNELS^2*TILE doubles, 74 KB at six (absorption), and
+ * the level-sum blocks as 2*RM_MAX_CHANNELS^2*RM_BLOCK. */
 #define RM_MAX_CHANNELS 6
 
 static int dimensions(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c) {
@@ -69,6 +81,7 @@ static void release(Py_buffer *b) {
 
 #if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
 #define RM_HAS_AVX2 1
+#define RM_VECTOR 1
 #define RM_TARGET __attribute__((target("avx2")))
 #define RM_MATRICES matrix_sum_avx2
 #define RM_ABSORPTION absorption_sum_avx2
@@ -85,6 +98,7 @@ static void release(Py_buffer *b) {
 #undef RM_MATRICES
 #undef RM_SKIP_ENVELOPE
 #undef RM_SKIP_ABSORPTION
+#undef RM_VECTOR
 #endif
 static int use_avx2=0;
 
@@ -120,19 +134,21 @@ static PyObject *matrices(PyObject *self,PyObject *args) {
     if (!dimensions(ne,n,c)) return NULL;
     Py_ssize_t sizes[7]={ne,n,n,n*c,ne*c,2*ne*c*c,ne};
     for (int i=0;i<7;i++) if (!buffer(o[i],&b[i],sizes[i],i==6?"B":"d",i>=5)) {release(b);return NULL;}
+    unsigned char *flags=PyMem_Malloc(n>0?(size_t)n:1);
+    if (flags==NULL) {release(b);return PyErr_NoMemory();}
     Py_BEGIN_ALLOW_THREADS
     int certified=envelope_bounded(ne,n,c,b[2].buf,b[3].buf,b[4].buf);
 #ifdef RM_HAS_AVX2
     if (use_avx2) {
-        if (certified) matrix_sum_certified_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf);
-        else matrix_sum_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf);
+        if (certified) matrix_sum_certified_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
+        else matrix_sum_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
     }
     else
 #endif
-    if (certified) matrix_sum_certified(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf);
-    else matrix_sum(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf);
+    if (certified) matrix_sum_certified(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
+    else matrix_sum(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
     Py_END_ALLOW_THREADS
-    release(b);Py_RETURN_NONE;
+    PyMem_Free(flags);release(b);Py_RETURN_NONE;
 }
 
 static PyObject *absorption(PyObject *self,PyObject *args) {
