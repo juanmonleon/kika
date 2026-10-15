@@ -152,3 +152,18 @@ def test_multiple_temperatures_keep_source_chain_and_optional_documentation():
     for label in ('hot600', 'hot1200'):
         assert after[label] == before[label]
         assert after[label].documentation is None
+
+
+@pytest.mark.parametrize('temperature', [
+    PhysicalQuantity(2.53e-2, 'eV/k'), PhysicalQuantity(2.53e-8, 'MeV/k'),
+])
+def test_a_processed_kt_is_written_in_kelvin(temperature):
+    # A suite read from ACE or HDF5, or processed by kika, states kT; the
+    # writer refused it, so no processed suite could be written as GNDS.
+    styles = Styles()
+    styles.add(Heated(label='heated_294K', derivedFrom='eval', temperature=temperature))
+    root = ET.Element('reactionSuite')
+    writeStyles(root, styles, _number)
+    written = root.find('.//heated/temperature')
+    assert written.attrib['unit'] == 'K'
+    assert float(written.attrib['value']) == pytest.approx(293.59, rel=1e-4)

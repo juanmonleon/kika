@@ -44,9 +44,25 @@ def readPhysicalQuantity(element: Optional[ET.Element]) -> Optional[PhysicalQuan
                             unit=element.attrib.get("unit", ""))
 
 
+#: kT units a processed suite states its temperature in, as eV per unit (the
+#: ACE, HDF5 and processSuite decoders write kT in eV/k): written back in K.
+_KT_UNITS = {"eV/k": 1.0, "MeV/k": 1.0e6}
+
+
 def _heatedTemperature(style: Heated) -> PhysicalQuantity:
-    """Reject incomplete processed metadata instead of losing its meaning."""
+    """Reject incomplete processed metadata instead of losing its meaning.
+
+    A kT (``eV/k``, ``MeV/k``) is converted to K: a suite read from ACE or HDF5,
+    or processed by kika, states its temperature so, and was refused here.
+    """
+    from kika.hdf5.names import K_BOLTZMANN
+
     temperature = style.temperature
+    if (isinstance(temperature, PhysicalQuantity) and temperature.unit in _KT_UNITS
+            and isinstance(temperature.value, (int, float))
+            and not isinstance(temperature.value, bool)):
+        temperature = PhysicalQuantity(
+            value=float(temperature.value) * _KT_UNITS[temperature.unit] / K_BOLTZMANN, unit="K")
     if (not isinstance(temperature, PhysicalQuantity)
             or temperature.unit != "K"
             or isinstance(temperature.value, bool)
