@@ -12,8 +12,9 @@ The output is **byte-identical** to ``write_ace``: the template *is* a
 ``write_ace`` file of the unperturbed table, the lines are re-formatted with
 the format string ``write_ace``'s ``np.savetxt`` applies, and every case in
 which ``write_ace`` would lay the file out differently -- another header, an
-XSS of another length, or the all-integer ``%20d`` format switching on or off
--- falls back to ``write_ace`` itself.
+XSS of another length, another integer-spelling mask (``xss_int_words``) or,
+without one, the all-integer ``%20d`` format switching on or off -- falls back
+to ``write_ace`` itself.
 """
 
 from __future__ import annotations
@@ -24,11 +25,18 @@ from typing import Optional
 
 import numpy as np
 
-from kika.ace.writers.write_ace import write_ace
+from kika.ace.classes.xss import unpack_int_words
+from kika.ace.writers.write_ace import format_xss_lines, write_ace
 from kika.ace.writers.write_header import write_header
 
 _FLOAT_FMT = "%20.11E"
 _ROW_FMT = _FLOAT_FMT * 4
+
+
+def _same_int_words(a, b) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return a is b or np.array_equal(a, b)
 
 
 def _all_integer(values: np.ndarray) -> bool:
@@ -56,7 +64,13 @@ class AcePatchWriter:
             write_ace(ace, self.template_path, overwrite=True)
 
         values = self.base_xss[1:]
-        self.usable = values.size > 0 and not _all_integer(values)
+        packed = getattr(ace, "xss_int_words", None)
+        self.base_int_words = None if packed is None else np.array(packed, copy=True)
+        # With the spelling known, write_ace formats word by word and leaves the
+        # last line unpadded; without it, the all-integer %20d layout is the
+        # one case it lays out differently.
+        self.is_int = unpack_int_words(self.base_int_words, values.size)
+        self.usable = values.size > 0 and (self.is_int is not None or not _all_integer(values))
         if not self.usable:
             return
         size = os.path.getsize(self.template_path)
@@ -67,8 +81,10 @@ class AcePatchWriter:
         n = values.size
         self.full_rows = n // 4
         self.remainder = n % 4
-        rows = self.full_rows + (1 if self.remainder else 0)
-        self.data_start = size - rows * self.line
+        last = 0
+        if self.remainder:
+            last = (20 * self.remainder + len(newline)) if self.is_int is not None else self.line
+        self.data_start = size - self.full_rows * self.line - last
         # The XSS starts on the line after the header; anything else means the
         # layout is not the one assumed here.
         with open(self.template_path, "rb") as handle:
@@ -84,7 +100,8 @@ class AcePatchWriter:
         xss = np.asarray(ace.xss_data, dtype=float)
         if (not self.usable or xss.shape != self.base_xss.shape
                 or write_header(ace.header) != self.base_header
-                or _all_integer(xss[1:])):
+                or not _same_int_words(getattr(ace, "xss_int_words", None), self.base_int_words)
+                or (self.is_int is None and _all_integer(xss[1:]))):
             write_ace(ace, path, overwrite=True)
             return False
 
@@ -107,6 +124,9 @@ class AcePatchWriter:
 
     def _format_rows(self, values: np.ndarray, first: int, last: int) -> bytes:
         newline = "\r\n" if self.line == 82 else "\n"
+        if self.is_int is not None:
+            text = "".join(format_xss_lines(values, self.is_int, first, last))
+            return (text.replace("\n", newline) if newline != "\n" else text).encode("ascii")
         out = []
         for row in range(first, last + 1):
             if row < self.full_rows:

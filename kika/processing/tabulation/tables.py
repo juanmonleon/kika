@@ -23,7 +23,7 @@ NEGATIVE_POLICIES = ("clip", "raise")
 
 @dataclass(frozen=True)
 class TabulationOptions:
-    """Tolerances of the tabulation (roadmap D6).
+    """Tolerances of the tabulation.
 
     ``rtol``/``atol`` bound the lin-lin interpolation error of a refined table
     against the function it tabulates, ``|f - lin| <= rtol*|f| + atol*max|f|``
@@ -45,8 +45,28 @@ class TabulationOptions:
     angularSeeds: int = 3
     #: Initial points of an outgoing-energy table refined from a law.
     energySeeds: int = 64
+    #: Splitting a joint MF6 density into marginal/conditional tables requires
+    #: tighter accuracy than an ordinary one-dimensional density, especially
+    #: for CM energy moments. These are caps; stricter rtol/atol still apply.
+    correlatedRtol: float = 1.0e-4
+    correlatedAtol: float = 1.0e-6
+    #: Absolute error in normalized first and second moments of a Legendre
+    #: angular law (after the explicitly selected negative-density policy).
+    angularMomentAtol: float = 1.0e-5
+    #: Absolute CDF error of the transport-safe histogram projection of a
+    #: mixed discrete/continuous energy law. Its mass, first and second
+    #: moments are retained exactly per panel. The projection's size is bounded
+    #: by this tolerance and the panel count, so maxPoints does not cap it.
+    mixedCdfAtol: float = 1.0e-6
 
     def __post_init__(self):
+        if not np.isfinite(self.mixedCdfAtol) or self.mixedCdfAtol <= 0:
+            raise ValueError("mixed CDF tolerance must be positive and finite")
+        if (not np.isfinite(self.correlatedRtol) or not np.isfinite(self.correlatedAtol)
+                or self.correlatedRtol < 0 or self.correlatedAtol < 0):
+            raise ValueError("correlated tolerances must be finite and nonnegative")
+        if not np.isfinite(self.angularMomentAtol) or self.angularMomentAtol < 0:
+            raise ValueError("angular moment tolerance must be finite and nonnegative")
         if self.negative not in NEGATIVE_POLICIES:
             raise ValueError(f"negative must be one of {NEGATIVE_POLICIES}")
 

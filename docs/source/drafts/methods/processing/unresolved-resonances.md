@@ -11,9 +11,9 @@ $\chi^2$ width distributions of real degrees of freedom.
 B and C, LSSF=0 or 1, or the equivalent GNDS data), as part of the reconstruction of
 {doc}`resonance-reconstruction`.
 
-**Entry points:** through `kika.endf.reconstruct_endf` and
-`kika.processing.resonances.reconstruct_suite`; the width-fluctuation averages alone are
-`kika.processing.resonances.fluctuations.width_products`.
+**Entry points:** through {py:func}`kika.endf.reconstruct_endf` and
+{py:func}`kika.processing.resonances.reconstruct_suite`; the width-fluctuation averages alone are
+{py:func}`kika.processing.resonances.fluctuations.width_products`.
 
 **Status:** experimental — not yet in a release (after 0.4.0).
 ```
@@ -166,11 +166,13 @@ the resolved range the right-hand region owns the point and the jump is kept.
 
 ## Limits and failure modes
 
-What is **not** computed: self-shielded cross-sections, probability tables (NJOY PURR) or
-Bondarenko factors (NJOY UNRESR, MacFarlane et al. 2017); Doppler broadening; any
-temperature but 0 K; a competitive cross-section from MF 2; interference between the
-unresolved and resolved ranges. The result is the infinitely dilute average only, which is
-what a transport code needs where self-shielding in the range does not matter.
+What this page computes is the infinitely dilute average at 0 K, which is what a transport
+code needs where self-shielding in the range does not matter. Self-shielding is carried by
+probability tables and Bondarenko factors (what NJOY PURR produces, MacFarlane et al.
+2017), which kika computes from the same parameters at the temperatures asked for:
+{doc}`probability-tables`. What is computed nowhere: a competitive cross-section from
+MF 2; interference between the unresolved and resolved ranges; Bondarenko factors by NJOY
+UNRESR's quadrature (the probability tables give them by sampling, as PURR does).
 
 Refused (`UnsupportedResonanceError` or `ValueError`), before any evaluation:
 
@@ -245,7 +247,7 @@ were computed).
 - `kika.processing.resonances.unresolved`: preparation (radii, parameter functions,
   conventions, grids), the cross-sections of {eq}`eq-unresolved-resonances-sigma`, and
   their tabulation on the declared grids.
-- `kika.processing.resonances.fluctuations`: `width_products`, the integrals of
+- {py:mod}`kika.processing.resonances.fluctuations`: `width_products`, the integrals of
   {eq}`eq-unresolved-resonances-laplace`; its integrand has a compiled form in
   `kika.processing.resonances._rm_native`, used when loaded.
 - `kika.endf.model_adapter.resonances`: the reading of cases A, B and C and of NRO, NAPS
@@ -259,5 +261,6 @@ were computed).
 - R. E. MacFarlane, D. W. Muir, R. M. Boicourt, A. C. Kahler and J. L. Conlin, *The NJOY
   Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
   doi:10.2172/1338791: UNRESR, PURR.
-- `TODO(ref)`: a reference for the $\chi^2$ (Porter-Thomas) width distributions and for
-  the width-fluctuation correction.
+- C. E. Porter and R. G. Thomas, "Fluctuations of nuclear reaction widths", *Physical
+  Review* 104, 483-491 (1956): the $\chi^2$ width distributions. The width-fluctuation
+  integrals are those of NJOY's UNRESR (MacFarlane et al. 2017, above).

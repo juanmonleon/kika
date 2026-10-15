@@ -6,10 +6,10 @@ Two kinds of suite come in:
   :func:`processSuite`: ``heated_<T>`` styles on a common grid per temperature
   and ``MonteCarlo`` distributions. It is serialised as it is.
 - **an evaluation** -- decoded from ENDF or GNDS. It is processed first
-  (:func:`processSuite`, roadmap H4): reconstructed at 0 K if it has no
+  (:func:`processSuite`): reconstructed at 0 K if it has no
   ``recon`` style, broadened to each temperature, put on a common grid per
   temperature, its distributions tabulated with their CDF, and the pieces
-  kika does not compute yet taken from NJOY (D7).
+  kika does not compute yet taken from NJOY.
 
 Like the G4NDL writer, the file is written to a temporary name in the target
 directory, **read back** (records, then the neutron decoder) and compared with
@@ -80,8 +80,8 @@ def writeSuite(suite, directory, temperatures=None, *, report=None, index: bool 
             if missing:
                 raise ValueError(f"writing a thermal evaluation needs {missing}: the path of its "
                                  f"tape (endf=) and the OpenMC table name (name='c_H_in_H2O')")
-            options.pop("neutron", None)
-            suite = processThermal(options.pop("endf"), name=options.pop("name"),
+            suite = processThermal(options.pop("endf"), options.pop("neutron", None),
+                                   name=options.pop("name"),
                                    temperatures=temperatures, report=report, **options)
             temperatures = None
         return writeThermal(suite, directory, temperatures=temperatures, report=report,

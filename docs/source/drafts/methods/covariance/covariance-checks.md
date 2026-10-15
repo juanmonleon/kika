@@ -9,9 +9,9 @@ file and its evidence, without changing anything.
 **Applies to:** MF 31, 32, 33, 34, 35 and 40 of ENDF-6 tapes, read with kika's ENDF
 parser.
 
-**Entry points:** `kika.endf.check_covariances`, `kika.endf.check_covariance_library`;
-the reports are `kika.endf.checks.CovarianceCheckReport` and
-`kika.endf.checks.CovarianceLibraryReport`.
+**Entry points:** {py:func}`kika.endf.check_covariances`, {py:func}`kika.endf.check_covariance_library`;
+the reports are {py:class}`kika.endf.checks.CovarianceCheckReport` and
+{py:class}`kika.endf.checks.CovarianceLibraryReport`.
 
 **Status:** experimental — not yet in a release (after 0.4.0).
 ```
@@ -53,7 +53,7 @@ reaction the tape does not give, for example).
 
 ## What it computes
 
-Input: a tape read with `kika.endf.read_endf` or `kika.endf.open_endf`, the covariance
+Input: a tape read with {py:func}`kika.endf.read_endf` or {py:func}`kika.endf.open_endf`, the covariance
 files to check (all six by default), and optionally the cross-sections $\sigma(E)$ by
 MT, for instance from a PENDF. Output: a `CovarianceCheckReport`, a tuple of findings.
 Each finding is
@@ -233,7 +233,7 @@ sit on a lattice
 $q \in \{10^{-2}, 10^{-3}, 10^{-4}\}$, tried coarsest first, when at least 98 % of them
 are within $\min(5\cdot10^{-5}, q/20)$ of a multiple of $q$. A rounding error uniform in
 $\pm q/2$ on an $n \times n$ symmetric matrix has a spectral norm of about
-$2\,(q/\sqrt{12})\sqrt{n}$ (the edge of Wigner's semicircle, TODO(ref)), so the record
+$2\,(q/\sqrt{12})\sqrt{n}$ (the edge of Wigner's semicircle, Wigner 1955), so the record
 $D R D$ can reach $-1.5 \cdot 2\,(q/\sqrt{12})\sqrt{n}\, \max_i d_i$ with $d_i$ its
 variances and 1.5 a slack. Projected onto the union grid, a record's negative
 eigenvalue grows by at most $\max_j \sum_i T_{ij}^2$, with $T_{ij}$ the fraction of union
@@ -331,7 +331,7 @@ that hold:
   logarithmically spaced points.
 - **MF 34.** For $\ell \ge 1$, $f(\mu) \ge 0$ bounds every normalised coefficient,
   $|a_\ell| \le 1$, and a quantity confined to an interval of width 2 has a standard
-  deviation of at most 1 whatever its distribution (Popoviciu's inequality, TODO(ref)).
+  deviation of at most 1 whatever its distribution (Popoviciu's inequality, Popoviciu 1935).
   A relative $\sigma$ is made absolute with the smallest magnitude the bin can mean,
   $\min(|\langle a_\ell \rangle_i|, \min_{E \in \text{bin}} |a_\ell(E)|)$, both exact from
   MF 4's table, so that a breach is certain and not an artefact of averaging. A bin with
@@ -359,7 +359,7 @@ Each band is checked as a self block, then:
   residual $\max_i |\sum_j C_{ij}| / \max|C|$ above $10^{-2}$ is `sum_rule_violated`,
   a defect.
 - **A bound that holds.** $0 \le P_i \le 1$, so $\operatorname{var}(P_i) \le P_i(1-P_i)$
-  (the Bhatia-Davis inequality, TODO(ref)), never above $1/4$. With MF 5 a single
+  (the Bhatia-Davis inequality, Bhatia and Davis 2000), never above $1/4$. With MF 5 a single
   tabulated (LF=1) spectrum, the bound of group $i$ is $\sqrt{\max_k P_{ik}(1 - P_{ik})}$
   over the incident energies $k$ of the band, the most lenient choice; otherwise
   $\sigma(P_i) \le 1/2$. A group above it is `variance_exceeds_physical_bound` (defect).
@@ -451,7 +451,7 @@ anything else) and carry Greek letters and math signs in the dictionary and the 
 - **Layer 1 only informs.** Nothing here raises on a bad section, changes it or proposes
   a remedy. The same file is used for different things (sampled, processed by NJOY,
   compared between libraries), and whether a finding matters depends on the use. Repairs
-  belong to the pre-flight of the matrices actually drawn (`kika.cov.conditioning`),
+  belong to the pre-flight of the matrices actually drawn ({py:mod}`kika.cov.conditioning`),
   which runs on the assembled covariance. By then the LB and LS records a block came from
   are gone, so the pre-flight cannot say *why* a block is indefinite; the sampler traces
   each of its findings back to the layer-1 findings of the sections involved
@@ -481,6 +481,23 @@ anything else) and carry Greek letters and math signs in the dictionary and the 
   reported twice.
 - **MAT1 equal to the file's own MAT is the same material**, as kika reads it everywhere
   else; it is noted, not refused.
+- **Against FUDGE** (6.14.0, from its source, not from runs). FUDGE checks covariances
+  through the warning classes its `check()` methods raise (`fudge/warning.py`), with five
+  levels. Every one of them has a counterpart here: a non-monotonic grid or a dimension
+  mismatch (`grid_not_increasing`, `nt_mismatch`, `count_mismatch`), an empty matrix
+  (`inert_rows`, by rows), a negative variance or a correlation out of range
+  (`negative_variance`, `correlation_out_of_bounds`), negative eigenvalues
+  (`not_positive_semidefinite`), a cyclic dependency or an unresolved link (`nc_chained`,
+  `unresolved_reference`), a variance above 1000 % (`relative_uncertainty_above_one`,
+  `implausible_relative_uncertainty`). Four checks here come from FUDGE's ENDF-6
+  translation: MF 32 widths against MF 2 (`widths_differ_from_mf2`), an uncertainty on a
+  spin (`spin_uncertainty`), a last value of LB 0-4, 8, 9 that is not zero
+  (`trailing_value_not_zero`) and a covariance without its central values
+  (`missing_central_values`). Where kika goes further: FUDGE tests $\lvert\rho\rvert \le 1$
+  in MF 32 only; it does not test the matrix with its cross blocks (a `FIXME` in its
+  source), which `joint_not_positive_semidefinite` does; and it judges positivity against
+  an absolute eigenvalue of $-10^{-6}$, where kika normalises by the block and separates
+  round-off from defects ({eq}`eq-covariance-checks-ulp`).
 - **A library is checked one tape at a time**, so a library of hundreds of tapes runs in
   the memory of the largest one; failures are rows, because in a census they are
   findings too.
@@ -629,5 +646,9 @@ A `CovarianceLibraryReport` adds `checked`, `failed`, `tapes_with(check, level, 
   §32.2.4.
 - N. J. Higham, "Computing a nearest symmetric positive semidefinite matrix", *Linear
   Algebra and its Applications* 103, 103-118 (1988).
-- `TODO(ref)`: Popoviciu's and the Bhatia-Davis inequalities on the variance of a
-  bounded variable; the spectral norm of a random symmetric matrix (Wigner's semicircle).
+- T. Popoviciu, "Sur les équations algébriques ayant toutes leurs racines réelles",
+  *Mathematica (Cluj)* 9, 129-145 (1935): the variance of a bounded variable.
+- R. Bhatia and C. Davis, "A better bound on the variance", *The American Mathematical
+  Monthly* 107(4), 353-357 (2000).
+- E. P. Wigner, "Characteristic vectors of bordered matrices with infinite dimensions",
+  *Annals of Mathematics* 62, 548-564 (1955): the spectral norm of a random symmetric matrix.

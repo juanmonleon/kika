@@ -8,9 +8,9 @@ over a window of fixed lethargy width sliding along the energy axis.
 **Applies to:** any lin-lin pointwise table: a PENDF, a reconstruction, an ACE
 cross-section.
 
-**Entry points:** `kika.processing.group_averaging.resonance_group_average`,
-`kika.processing.group_averaging.resonance_window_average`; the integrals:
-`kika.algebra.group_averages`, `kika.algebra.log_window_averages`.
+**Entry points:** {py:func}`kika.processing.group_averaging.resonance_group_average`,
+{py:func}`kika.processing.group_averaging.resonance_window_average`; the integrals:
+{py:func}`kika.algebra.group_averages`, {py:func}`kika.algebra.log_window_averages`.
 
 **Status:** stable.
 ```
@@ -69,7 +69,7 @@ $\ln(E_g/E_{g-1}) = w$, the window average equals that group's average.
 - **Windows for display, groups for numbers.** A group average depends on where the edges
   fall (a resonance on an edge is split between two groups); a window average is a
   continuous curve with no edges to place.
-- **The integrals are those of `kika.algebra`**, shared with every other group average in
+- **The integrals are those of {py:mod}`kika.algebra`**, shared with every other group average in
   kika (see {doc}`../../architecture/algebra-layer`).
 
 ## Limits and failure modes
@@ -79,7 +79,7 @@ points; energies that decrease; group boundaries that do not strictly increase; 
 weighting; lethargy weighting with a non-positive energy; a non-positive window width.
 
 The table is taken as lin-lin. A table under another law should be linearised first
-(`kika.algebra.to_linlin`).
+({py:func}`kika.algebra.to_linlin`).
 
 ## Validation
 

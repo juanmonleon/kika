@@ -1,4 +1,4 @@
-"""An evaluation → the processed suite the OpenMC encoder writes (roadmap H4).
+"""An evaluation → the processed suite the OpenMC encoder writes.
 
 :func:`processSuite` takes a suite decoded from ENDF or GNDS (``eval`` forms)
 and builds a **new** suite in the shape :mod:`kika.hdf5.neutron_encode`
@@ -13,14 +13,14 @@ serialises, without editing the one it was given:
    cross sections above it, as BROADR leaves them. Every reaction
    is then on one grid per temperature, the union of the broadened grid
    below ``thnmax`` and the 0 K one above, each from its threshold index.
-3. **Reactions** (roadmap D5, the official exporter's set): every exclusive
+3. **Reactions**: every exclusive
    partial; the redundant sums 4, 16, 103-107 -- rebuilt from their levels when
    the evaluation does not give them, as ``from_ace`` does for depletion -- and
    18 when the fission chances are given; gas production 203-207 as
    Σ multiplicity × σ over the reactions that emit p, d, t, ³He, α (what
    GASPR computes); KERMA 301/901 and damage 444 by kika's HEATR
-   (:mod:`kika.processing.heating`, H8) and the URR probability tables by
-   kika's PURR (:mod:`kika.processing.resonances.probability_tables`, H8). No
+   (:mod:`kika.processing.heating`) and the URR probability tables by
+   kika's PURR (:mod:`kika.processing.resonances.probability_tables`). No
    NJOY: every piece of a neutron file is kika's.
 4. **Distributions and yields** tabulated with their CDF
    (:mod:`kika.processing.tabulation`); neutrons and photons only, the
@@ -100,6 +100,23 @@ def aceKT(temperature: float) -> float:
 # ----------------------------------------------------------------------
 # Small helpers
 # ----------------------------------------------------------------------
+
+def metastableIndex(suite) -> int:
+    """The target's isomer number, 0 for a ground state: ``Am242_m1`` is 1.
+
+    MF1/451's LISO when the suite was read from ENDF, the ``metastable``
+    attribute of an OpenMC file, else the ``metaStable`` alias PoPs gives the
+    target (GNDS). The level index is not it: Am-242m1 is level 2.
+    """
+    fields = getattr(suite.provenance, "headerFields", None) or {}
+    if fields.get("liso"):
+        return int(fields["liso"])
+    attributes = getattr(suite.provenance, "attributes", None) or {}
+    if attributes.get("metastable"):
+        return int(attributes["metastable"])
+    aliases = getattr(suite.PoPs, "aliases", None) or {}
+    return next((int(a.metaStableIndex) for a in aliases.values() if a.pid == suite.target), 0)
+
 
 def _flatten(form) -> Tuple[np.ndarray, np.ndarray]:
     m = _m()
@@ -323,7 +340,7 @@ CHUNK_KNOTS = 4000
 """Source knots per energy chunk of the resonant group (see ``_broadenPlan``)."""
 
 
-def _broadenPlan(suite, thnmax):
+def _broadenPlan(suite, thnmax, options=None):
     """What ``_broadened`` broadens, independent of the temperature.
 
     ``(entries, leaves, lo, hi, tasks)``; each task is ``(keys, domain)``, a
@@ -363,24 +380,39 @@ def _broadenPlan(suite, thnmax):
         dense = max(counts.values())
         resonant = [k for k in active if counts[k] >= 0.2 * dense]
         smooth = [k for k in active if counts[k] < 0.2 * dense]
-        # The resonant group is cut into energy chunks of CHUNK_KNOTS source
-        # knots, broadened independently (in parallel by _broadenAll). Each
-        # chunk sees the whole 0 K source, so its thermal neighbourhood is
-        # complete; only the output domain is the chunk's. The refinement
-        # accepts every interval on its own verification, so a chunked table
-        # meets the same tolerance, and the shared boundary is one exact
-        # evaluation of the same point in both chunks. The cuts depend on the
-        # data alone, never on the number of workers, so the result does not.
-        grid = np.unique(np.concatenate([knots[k] for k in resonant]))
-        grid = grid[(grid > lo) & (grid < hi)]
-        pieces = max(1, len(grid) // CHUNK_KNOTS)
-        cuts = [lo]
-        for i in range(1, pieces):
-            j = i * len(grid) // pieces
-            # Between two distinct knots, never on a discontinuity.
-            cuts.append(float(np.sqrt(grid[j - 1] * grid[j])))
-        cuts.append(hi)
-        tasks += [(resonant, (a, b)) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
+        # Preserve dense sources for the moment-block kernel. Small energy
+        # windows fall below its eligibility threshold and lose that speedup.
+        # Parallelize these independent leaves instead; every table retains
+        # the same kernel and interpolation verification budgets.
+        from kika.processing.doppler import core as dopplerCore, _blocks
+        native = (dopplerCore._native is not None
+                  and hasattr(dopplerCore._native, "prepare_blocks")
+                  and (options is None or (options.backend != "python"
+                       and options.max_series_terms == 80 and options.max_radius >= 6
+                       and options.max_work_bytes >= 64*1024*1024)))
+        full = [k for k in resonant if native and counts[k] >= _blocks._DENSE_SOURCE
+                and np.all(_flatten(entries[k].crossSection[RECON_LABEL])[1] >= 0)]
+        tasks.extend(([key], (lo, hi)) for key in full)
+        resonant = [k for k in resonant if k not in full]
+        if resonant:
+            # The resonant group is cut into energy chunks of CHUNK_KNOTS source
+            # knots, broadened independently (in parallel by _broadenAll). Each
+            # chunk sees the whole 0 K source, so its thermal neighbourhood is
+            # complete; only the output domain is the chunk's. The refinement
+            # accepts every interval on its own verification, so a chunked table
+            # meets the same tolerance, and the shared boundary is one exact
+            # evaluation of the same point in both chunks. The cuts depend on the
+            # data alone, never on the number of workers, so the result does not.
+            grid = np.unique(np.concatenate([knots[k] for k in resonant]))
+            grid = grid[(grid > lo) & (grid < hi)]
+            pieces = max(1, len(grid) // CHUNK_KNOTS)
+            cuts = [lo]
+            for i in range(1, pieces):
+                j = i * len(grid) // pieces
+                # Between two distinct knots, never on a discontinuity.
+                cuts.append(float(np.sqrt(grid[j - 1] * grid[j])))
+            cuts.append(hi)
+            tasks += [(resonant, (a, b)) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
         if smooth:
             tasks.append((smooth, (lo, hi)))
     return entries, leaves, lo, hi, tasks
@@ -519,7 +551,7 @@ def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
     """
     from kika.processing.doppler.suite import _mass
 
-    entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax)
+    entries, leaves, lo, hi, tasks = _broadenPlan(suite, thnmax, options)
     awr = _mass(suite, None).atomic_weight_ratio
     top = {id(keys): min(float(_flatten(entries[k].crossSection[RECON_LABEL])[0][-1]) for k in keys)
            for keys, _ in tasks}
@@ -564,21 +596,29 @@ def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
 def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX,
                  endf=None, omit: Sequence[str] = (), awr: Optional[float] = None,
                  context=None, doppler=None, tabulation=None, ed: Optional[float] = None,
+                 heatingPartials: Sequence[int] = (), qa=None, qbar=None,
                  thinning: Optional[float] = 1.0e-3,
                  workers: Optional[int] = None, label: Optional[str] = None,
                  urrTables: Optional[Dict[float, object]] = None,
-                 broadened: Optional[Dict[float, tuple]] = None):
+                 broadened: Optional[Dict[float, tuple]] = None,
+                 particles: Sequence[str] = ("n", "photon")):
     """The processed suite of ``suite`` at ``temperatures`` (kelvin; default 293.6 K).
 
     ``endf`` is the ENDF tape the suite was read from, for the target's mass
     ratio and spin as MF1/MF2 state them (the reconstruction's context).
-    KERMA, damage and the URR probability tables are kika's (H8); ``omit``
+    KERMA, damage and the URR probability tables are kika's; ``omit``
     leaves any of ``"urr"``, ``"kerma"``, ``"damage"`` out. ``ed`` is the
     displacement threshold of the damage (default: HEATR's table by Z).
+    ``heatingPartials`` requests additional HEATR response identifiers, stored
+    as redundant production reactions at every processed temperature. ``qa``
+    and ``qbar`` are forwarded to :func:`kika.processing.heating.heatingOf`.
+    Fission partials use the processed MF1/458 release, including Sher-Beck.
+    MT443 uses HEATR's diagnostic convention; unresolved explicit MF6
+    recoil paths raise rather than silently omitting a contribution.
     ``awr`` overrides the
-    atomic weight ratio (D11; default MF1/451's, as ACER takes it).
+    atomic weight ratio (default MF1/451's, as ACER takes it).
     ``thinning`` is the relative tolerance to which each temperature's grid is
-    thinned (roadmap H5): points are dropped while every reaction, read
+    thinned: points are dropped while every reaction, read
     lin-lin, reproduces every dropped point to it. 1e-3 is what the official
     libraries are processed to (BROADR's ``errthn``); ``None`` keeps the full
     union grid. The 0 K elastic is thinned to the same tolerance (RECONR's
@@ -589,14 +629,17 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     Windows, so a script that calls this needs the usual
     ``if __name__ == "__main__":`` guard; ``workers=1`` stays in-process. ``label`` processes
     the forms of that style -- a perturbation run's ``realization`` -- in
-    place of the evaluated ones wherever it has them (roadmap H7, D12: the
+    place of the evaluated ones wherever it has them (the
     sample is multiplied at 0 K and broadened, never the reverse).
     ``urrTables`` passes URR probability tables already computed
     (:func:`urrTablesOf`, ``{kelvin: ProbabilityTables}``), as a perturbation
-    run shares the unperturbed evaluation's between its samples (D12).
+    run shares the unperturbed evaluation's between its samples.
     ``broadened`` passes the broadening already done on this suite's 0 K forms
     (``_broadenAll``'s ``{kelvin: (heated forms, ceiling)}``, as
     ``kika.endf.process_endf`` keeps it); each temperature's ceiling is its own.
+    ``particles`` are the products tabulated for Monte Carlo: neutrons and
+    photons, as OpenMC's file holds them; an ACE table also carries the light
+    charged particles (:data:`ACE_PARTICLES`).
     """
     m = _m()
     from kika.processing.tabulation import TabulationContext, TabulationOptions, tabulateDistribution
@@ -608,14 +651,19 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     if unknown:
         raise ValueError(f"omit names {sorted(unknown)}; the pieces that can be left out are "
                          f"urr, kerma and damage")
+    heatingPartials = tuple(heatingPartials)
+    if any(isinstance(mt, (bool, np.bool_)) or not isinstance(mt, (int, np.integer))
+           for mt in heatingPartials) or len(set(heatingPartials)) != len(heatingPartials):
+        raise ValueError("heatingPartials must contain distinct integer response identifiers")
+    if heatingPartials and "kerma" in omit and "damage" in omit:
+        raise ValueError("heatingPartials cannot be requested while all heating is omitted")
     tabOptions = tabulation or TabulationOptions()
 
     target = suite.PoPs[suite.target] if suite.target in suite.PoPs else None
     if target is None or getattr(target, "Z", None) is None:
         raise HDF5FormatError(f"the target {suite.target!r} has no Z/A in PoPs")
     Z, A = int(target.Z), int(target.A)
-    metastable = int(getattr(suite.provenance, "headerFields", {}).get("lis0", 0) or 0) \
-        if suite.provenance is not None else 0
+    metastable = metastableIndex(suite)
     if awr is None:
         awr = getattr(suite.provenance, "awr", None)
     if awr is None:
@@ -635,6 +683,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         report.warn(f"processed the {label!r} forms where they exist, the evaluation elsewhere")
     work = _reconstructed(suite, context, report)
     _linearised(work, report)
+    photonFlags = _photonFlags(work)
 
     # --- which reactions --------------------------------------------------
     leaves: List[_Leaf] = []
@@ -706,6 +755,10 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     out.PoPs = copy.deepcopy(work.PoPs)
     out.provenance = m.Hdf5Provenance(attributes={"Z": Z, "A": A, "metastable": metastable,
                                                   "atomic_weight_ratio": awr})
+    mat = getattr(suite.provenance, "mat", None)
+    if mat:
+        # the tape's MAT, which an ACE header names the table by (mat2631)
+        out.provenance.attributes["mat"] = int(mat)
     out.styles.add(m.Evaluated(label=EVAL_LABEL))
     for T, kT in styleKT.items():
         out.styles.add(m.Heated(label=heatedLabel(T), derivedFrom=EVAL_LABEL,
@@ -765,7 +818,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
                 x, y = x[kept], y[kept]
             cs[RECON_LABEL] = m.XYs1d(xs=x, ys=y, axes=m.crossSectionAxes(), label=RECON_LABEL)
         channel = channelOf(reaction)
-        _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs)
+        _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs, flags=photonFlags,
+                  particles=particles)
         redundant = 1 if (mt == 18 and chances) else 0
         rid = m.ReactionId(label=reaction.label, ENDF_MT=mt, fissionGenre=reaction.id.fissionGenre)
         new = (m.CrossSectionSum if redundant else m.Reaction)(
@@ -774,7 +828,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         (out.sums if redundant else (out.fissionComponents if mt in chances else out.reactions)).append(new)
     if summedFission is not None:
         channel = channelOf(summedFission)
-        _products(summedFission, channel, 18, awr, zaTarget, tabOptions, report, work.PoPs)
+        _products(summedFission, channel, 18, awr, zaTarget, tabOptions, report, work.PoPs,
+                  flags=photonFlags, particles=particles)
         out.reactions.append(m.Reaction(
             id=m.ReactionId(label=summedFission.label, ENDF_MT=18),
             crossSection=summedForms(sorted(chances)), outputChannel=channel,
@@ -807,12 +862,21 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     # redundant (O-16: reaction_004 with 15 photons, reaction_103 with 4).
     for orphan in work.orphanProducts:
         mt = orphan.ENDF_MT
+        own = _ownSigma(orphan)
         target = out.findReactionByENDF_MT(mt)
         if target is None:
             # MT3, the nonelastic, is every partial but the elastic (Pu-240 and
             # Pu-241 state photons on it; the official file writes it redundant).
             levels = ([c for c in sorted(present) if c != 2] if mt == 3 else
                       [c for c in LEVEL_SUMS.get(mt, ()) if c in present])
+            if not levels and own is not None:
+                # MF13 on an MT with no MF3 and no partials (N-14 MT28, MT32):
+                # kept as an orphan with σ_γ on each grid, so the ACE carries
+                # its photons as NJOY's does (MFTYPE 13). OpenMC's format hangs
+                # photons on reactions only; its encoder declares them lost.
+                out.orphanProducts.append(_keptOrphan(orphan, own, mt, heated, grids, awr, zaTarget,
+                                                      tabOptions, report, photonFlags, particles))
+                continue
             if not levels:
                 report.lost(f"MT{mt}: {len(orphan.outputChannel.products)} photons stated on a "
                             f"sum the evaluation gives no partials of; not written")
@@ -827,7 +891,14 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         proxy = copy.copy(orphan)
         if source is not None:
             proxy.crossSection = source.crossSection
-        _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report)
+        elif own is not None:
+            # MF13 on an MT with no MF3 (Pu-241 MT3): the multiplicities are
+            # shares of the section's own σ_γ, and the yield is per reaction
+            # of the sum the photons now hang on.
+            coldest = min(heated, key=lambda T: float(str(T).rstrip("K")))
+            proxy = _sharesOf(orphan, own, target, heatedLabel(coldest), report)
+        _products(proxy, target.outputChannel, mt, awr, zaTarget, tabOptions, report, flags=photonFlags,
+                  particles=particles)
 
     # --- gas production -----------------------------------------------------
     for gasMT, cs in _gas(work, leaves, heated, grids).items():
@@ -848,7 +919,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         if missing:
             raise ValueError(f"urrTables has no tables at {missing} K")
         urrTables = {T: urrTables[float(t)] for t, T in zip(temperatures, styleKT)}
-        report.warn("URR probability tables passed in, computed on another suite (D12: a "
+        report.warn("URR probability tables passed in, computed on another suite (a "
                     "perturbation run's unperturbed evaluation); they are not perturbed")
     else:
         from kika.processing.resonances.probability_tables import purrGrid, purrInputs, competitionFlags
@@ -866,7 +937,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     # --- KERMA and damage (kika's HEATR, H8) ---------------------------------
     wanted = [p for p in ("kerma", "damage") if p not in omit]
     if wanted:
-        _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report)
+        _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report,
+                       heatingPartials=heatingPartials, qa=qa, qbar=qbar, workers=workers)
     # The URR tables name the reaction whose smooth cross section stands for
     # the inelastic competition, and the C++ requires it to exist
     # (nuclide.cpp:308-320): MT4 is written for that, as the official exporter
@@ -952,7 +1024,7 @@ def _urrContext(suite, context):
 
 
 def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None, options=None, transportXS=None):
-    """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR (roadmap H8).
+    """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR.
 
     The tables :func:`processSuite` writes. ``context`` is the target's
     NeutronContext (default: the model's mass and spin); ``options`` a
@@ -1056,16 +1128,121 @@ def _evaluated(component):
     return form
 
 
-def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None):
-    """Neutron and photon products with Monte Carlo distributions, onto ``channel``."""
+def _photonFlags(suite) -> Dict[Tuple[str, str], str]:
+    """``{(reaction label, product label): first flag}`` of FUDGE's ``ENDFconversionFlags``
+    (``MF13``, ``MF6``, ``ESk=``): which ENDF file a photon of a GNDS evaluation was in."""
+    import re
+
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    flags = EndfConversionFlags.of(suite)
+    out = {}
+    pattern = re.compile(r"\[@label='([^']*)'\]/outputChannel/products/product\[@label='([^']*)'\]$")
+    for path, value in (flags.conversions if flags is not None else []):
+        match = pattern.search(path)
+        if match:
+            out[(match.group(1), match.group(2))] = value.split(",")[0].strip()
+    return out
+
+
+#: The products an ACE table carries: neutrons, photons and the light charged
+#: particles MCNP transports (PTYPE 9, 31, 32, 33, 34).
+ACE_PARTICLES = ("n", "photon", "H1", "H2", "H3", "He3", "He4")
+
+
+def _ownSigma(orphan):
+    """An orphan's own σ -- MF13 on an MT with no MF3 -- or ``None`` when it refers to a sum."""
+    m = _m()
+    form = orphan.crossSection.forms.get(EVAL_LABEL)
+    return form if isinstance(form, (m.XYs1d, m.Regions1d)) else None
+
+
+def _linlinOf(form) -> Tuple[np.ndarray, np.ndarray]:
+    from kika.algebra.laws import interval_laws
+    from kika.algebra.refine import to_linlin
+
+    x, y, pairs = form.toEndfRegions()
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    return to_linlin(x, y, interval_laws(x.size, [tuple(p) for p in pairs]))
+
+
+def _sharesOf(orphan, own, target, label, report):
+    """``orphan`` with each photon's multiplicity σ_γk / σ_target instead of σ_γk / σ_own.
+
+    On σ_γk's grid ∪ σ_target's points inside it, lin-lin, 0 where σ_target = 0
+    (the ENDF adapter's MF13 division, J5), with σ_target at ``label``: the
+    coldest temperature, a yield being one table for every temperature.
+    """
+    from kika.algebra.evaluate import sample_on_union
+    from kika.algebra.grid import discontinuities, union
+    from kika.algebra.laws import LINLIN
+
+    m = _m()
+    sx, sy = _linlinOf(own)
+    sigma = target.crossSection.forms[label]
+    tx, ty = np.asarray(sigma.xs, dtype=float), np.asarray(sigma.ys, dtype=float)
+    proxy = copy.copy(orphan)
+    proxy.outputChannel = m.OutputChannel(Q=orphan.outputChannel.Q, genre=orphan.outputChannel.genre)
+    zeros = 0
+    for product in orphan.outputChannel.products:
+        share = copy.copy(product)
+        if product.multiplicity is not None:
+            fx, fy = _linlinOf(product.multiplicity.form)
+            gamma = fy * sample_on_union(sx, sy, LINLIN, fx)
+            inside = (tx > fx[0]) & (tx < fx[-1])
+            steps = [float(v) for v in discontinuities(fx)]
+            steps += [float(v) for v in discontinuities(tx) if fx[0] < v < fx[-1]]
+            u = union([fx, tx[inside]], steps=steps)
+            numerator = sample_on_union(fx, gamma, LINLIN, u)
+            denominator = sample_on_union(tx, ty, LINLIN, u)
+            zero = denominator == 0.0
+            zeros += int(zero.sum())
+            y = np.where(zero, 0.0, numerator / np.where(zero, 1.0, denominator))
+            share.multiplicity = m.Multiplicity(form=m.XYs1d(
+                xs=u, ys=y, axes=m.multiplicityAxes(), label=EVAL_LABEL))
+        proxy.outputChannel.products.products.append(share)
+    report.approximated(
+        f"MT{orphan.ENDF_MT}: MF13 with no MF3 of its own, so each photon's yield is σ_γ "
+        f"over the sum it hangs on ({label}), lin-lin on σ_γ's grid and the sum's"
+        + (f"; 0 at {zeros} point(s) where the sum is 0" if zeros else ""))
+    return proxy
+
+
+def _keptOrphan(orphan, own, mt, heated, grids, awr, zaTarget, options, report, flags, particles):
+    """An orphan with no reaction to hang on, kept with σ_γ on each temperature's grid."""
+    from kika.algebra.evaluate import sample_on_union
+    from kika.algebra.laws import LINLIN
+
+    m = _m()
+    sx, sy = _linlinOf(own)
+    cs = m.CrossSection()
+    for T in heated:
+        grid = grids[T]
+        on = grid[int(np.searchsorted(grid, sx[0], side="left")):]
+        cs[heatedLabel(T)] = m.XYs1d(xs=on, ys=sample_on_union(sx, sy, LINLIN, on),
+                                     axes=m.crossSectionAxes(), label=heatedLabel(T))
+    kept = m.Reaction(id=m.ReactionId(label=orphan.label, ENDF_MT=int(mt)), crossSection=cs,
+                      outputChannel=m.OutputChannel(Q=m.Q(value=0.0), genre=orphan.outputChannel.genre),
+                      provenance=m.Hdf5Provenance(attributes={"redundant": 1}))
+    _products(orphan, kept.outputChannel, mt, awr, zaTarget, options, report, flags=flags,
+              particles=particles)
+    report.warn(f"MT{mt}: photons stated (MF13) on an MT with no cross section and no partials, "
+                f"kept as an orphan product with σ_γ as its σ; an ACE table writes them as "
+                f"NJOY does (MFTYPE 13), an OpenMC file has no reaction to hang them on")
+    return kept
+
+
+def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, flags=None,
+              particles=("n", "photon")):
+    """The ``particles`` products with Monte Carlo distributions, onto ``channel``."""
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
     explicitPhotons = False
     for product in reaction.outputChannel.products:
-        if product.pid not in ("n", "photon"):
+        if product.pid not in particles:
             continue
-        new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report)
+        new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, flags=flags)
         if new is not None:
             channel.products.products.append(new)
             explicitPhotons |= product.pid == "photon"
@@ -1166,12 +1343,13 @@ def _cascadePhotons(pops, reaction, awr):
                 energy=m.DiscretePhotonEnergy(primaryFlag=0, energy=float(line.energy),
                                               atomicWeightRatio=awr),
                 label=MONTE_CARLO_LABEL, productFrame=m.Frame.lab)
-            product.provenance = m.Hdf5Provenance(attributes={"emission_mode": "prompt"})
+            product.provenance = m.Hdf5Provenance(attributes={"emission_mode": "prompt", "MFTYPE": 12})
             out.append(product)
     return out
 
 
-def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, delayed=False):
+def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, delayed=False,
+                      flags=None):
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
@@ -1184,8 +1362,11 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
                                 Q=reaction.outputChannel.Q.value, pid=product.pid,
                                 zaEmitted=_zaOf(product.pid) if product.pid != "photon" else 0,
                                 discrete=discrete, options=options, report=report)
+    from kika.processing.tabulation.distribution import LIGHT_PARTICLE_AWP, isLevelMT
+
+    light = product.pid in LIGHT_PARTICLE_AWP and isLevelMT(mt)
     if form is None or isinstance(form, m.Isotropic2d):
-        if mt == 2 or (product.pid == "n" and 51 <= mt <= 90):
+        if mt == 2 or (product.pid == "n" and 51 <= mt <= 90) or light:
             # Isotropic in the centre of mass where the evaluation gives no MF4.
             form = m.AngularTwoBody(angular=m.Isotropic2d(), productFrame=m.Frame.centerOfMass)
         else:
@@ -1208,7 +1389,7 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
     new.distribution[MONTE_CARLO_LABEL] = tabulated
     multiplicity = product.multiplicity.form if product.multiplicity is not None else None
     if multiplicity is None or not isinstance(multiplicity, m.Function1d):
-        if product.pid == "n" and not delayed:
+        if (product.pid == "n" and not delayed) or light:
             multiplicity = m.Polynomial1d(coefficients=np.array([1.0]), domainMin_=0.0,
                                           domainMax_=float("inf"))
         else:
@@ -1217,16 +1398,86 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
             return None
     new.multiplicity = m.Multiplicity(form=multiplicity)
     new.provenance = m.Hdf5Provenance(attributes={"emission_mode": "delayed" if delayed else "prompt"})
+    if product.pid == "photon":
+        new.provenance.attributes["MFTYPE"] = _photonFile(reaction, record, product, flags)
     return new
+
+
+def _photonFile(reaction, record, product=None, flags=None) -> int:
+    """The ACE MFTYPE of a photon: 16 from MF6, 13 from MF13, 12 from MF12.
+
+    What the evaluation states, which an ACE table keeps: MF13 as a production
+    cross section, MF12 and MF6 as yields on the reaction. OpenMC's file does
+    not tell them apart. From ENDF, the reaction's MF6 record or its MF12/MF13
+    header fields say it; from GNDS, FUDGE's conversion flags (``MF13``,
+    ``MF6``; a photon with neither is MF12's). A GNDS file with no flags at all
+    does not say, and its photons are yields (16).
+    """
+    if record is not None:
+        return 16
+    fields = getattr(getattr(reaction, "provenance", None), "headerFields", None) or {}
+    if "mf13" in fields or "mf12" in fields:
+        return 13 if "mf13" in fields else 12
+    if flags and product is not None:
+        flag = flags.get((reaction.label, product.label), "")
+        return 13 if flag == "MF13" else 16 if flag == "MF6" else 12
+    return 16
 
 
 # ----------------------------------------------------------------------
 # Gas, fission, NJOY
 # ----------------------------------------------------------------------
 
+#: The light particles each ENDF-6 MT emits by its definition, ``{MT: {gas MT:
+#: count}}``, as GASPR counts them (``gaspr.f90``). They count only for a
+#: reaction that states no light particle of its own (MF3 alone).
+GAS_BY_MT = {
+    11: {204: 1}, 22: {207: 1}, 23: {207: 3}, 24: {207: 1}, 25: {207: 1}, 28: {203: 1},
+    29: {207: 2}, 30: {207: 2}, 32: {204: 1}, 33: {205: 1}, 34: {206: 1},
+    35: {204: 1, 207: 2}, 36: {205: 1, 207: 2}, 41: {203: 1}, 42: {203: 1}, 44: {203: 2},
+    45: {203: 1, 207: 1}, 103: {203: 1}, 104: {204: 1}, 105: {205: 1}, 106: {206: 1},
+    107: {207: 1}, 108: {207: 2}, 109: {207: 3}, 111: {203: 2}, 112: {203: 1, 207: 1},
+    113: {205: 1, 207: 2}, 114: {204: 1, 207: 2}, 115: {203: 1, 204: 1},
+    116: {203: 1, 205: 1}, 117: {204: 1, 207: 1},
+}
+#: The discrete-level series of charged-particle emission: MT600-649 (p) … 800-849 (α).
+GAS_SERIES = {600: 203, 650: 204, 700: 205, 750: 206, 800: 207}
+
+
+def _impliedGas(reaction) -> Dict[int, int]:
+    mt = reaction.ENDF_MT
+    if mt is None:
+        return {}
+    if 51 <= mt <= 91:
+        # A level that breaks up (LR, ENDF-102): N-14 MT60-77 have LR=28, a
+        # proton each -- 0.205 b of N-14's 0.249 b of MT203 at 14 MeV.
+        from kika.endf.model_adapter.derive.reactions import LR_PRODUCTS
+
+        lr = int(getattr(getattr(reaction, "provenance", None), "lr", 0) or 0)
+        pids = {pid: gasMT for gasMT, pid in GAS_MTS.items()}
+        return {pids[pid]: n for pid, n in LR_PRODUCTS.get(lr, {}).items() if pid in pids}
+    if mt in GAS_BY_MT:
+        return GAS_BY_MT[mt]
+    for start, gasMT in GAS_SERIES.items():
+        if start <= mt < start + 50:
+            return {gasMT: 1}
+    return {}
+
+
 def gasMultiplicities(reaction) -> Dict[int, object]:
-    """``{gas MT: multiplicity function}`` for the light particles a reaction emits."""
+    """``{gas MT: multiplicity function}`` for the light particles a reaction emits.
+
+    From the reaction's own products (MF4/MF6); a reaction that states none
+    (MF3 alone -- every MT600-849 of ENDF/B-VIII.1 N-14) emits what its MT says,
+    as GASPR counts it: with only the stated products, N-14's MT203, 204 and 207
+    were zero everywhere and MT205 was missing.
+    """
     out = {}
+    if not any(p.pid in GAS_MTS.values() for p in reaction.outputChannel.products):
+        for gasMT, count in _impliedGas(reaction).items():
+            out[gasMT] = _m().Constant1d(constant=float(count), domainMin_=0.0,
+                                         domainMax_=float("inf"))
+        return out
     for product in reaction.outputChannel.products:
         for gasMT, pid in GAS_MTS.items():
             if product.pid == pid:
@@ -1292,6 +1543,13 @@ def _fission(work, out, report):
                 (fission.outputChannel.fissionFragmentData is not None
                  and len(fission.outputChannel.fissionFragmentData.delayedNeutrons)):
             out.sums.multiplicitySums.append(summed)
+            delayed = work.sums.multiplicitySums.byENDF_MT(455)
+            if delayed is not None and delayed.multiplicity is not None:
+                # MF1/455 as the evaluation states it: an ACE table's DNU (the
+                # OpenMC file states only each group's yield)
+                out.sums.multiplicitySums.append(m.MultiplicitySum(
+                    label="delayed fission neutron multiplicity", multiplicity=delayed.multiplicity,
+                    ENDF_MT=455))
         else:
             prompt.provenance.attributes["emission_mode"] = "total"
     data = fission.outputChannel.fissionFragmentData
@@ -1363,15 +1621,20 @@ def _totalOn(out, T, grid):
     return total, fission
 
 
-def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report):
+def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, ed, report,
+                   heatingPartials=(), qa=None, qbar=None, workers=None):
     """MT301, MT901 and MT444 by :func:`kika.processing.heating.heatingOf`, plus fission.
 
-    The fission part comes from MF1/458 as OpenMC's ``from_njoy`` adds it to
-    HEATR's ``301 − 318``: ``(EFR + EB)·σ_f`` for 301, ``(EFR + EGP + EGD + EB)·σ_f``
-    for 901.
+    The fission part comes from MF1/458. For 901 it is ``(EFR + EGP + EGD + EB)·σ_f``.
+    For 301 it is HEATR's ``(EFR + EGP)·σ_f`` less the prompt photons the tables
+    carry for fission (:func:`~kika.processing.heating.fissionPhotonKerma`), plus
+    the delayed betas OpenMC counts locally, ``EB·σ_f``. Taking only ``EFR + EB``
+    is right only when those photons carry exactly EGP: Pu-238 of ENDF/B-VIII.1
+    states none and lost all of EGP (−3.8 % of its KERMA), and fission photons
+    stated on MT3 (Pu-240/241 above 100 keV) were taken out twice.
     """
     m = _m()
-    from kika.processing.heating import heatingOf
+    from kika.processing.heating import fissionPhotonEnergy, fissionPhotonKerma, heatingOf
     from .fission_energy import evaluate
 
     qm = {}
@@ -1382,18 +1645,19 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                 qm[reaction.ENDF_MT] = float(value)
 
     release = None
-    fission = next((r for r in out.reactions if r.ENDF_MT in FISSION_MTS), None)
+    fission = (next((r for r in out.reactions if r.ENDF_MT in FISSION_MTS), None)
+               or next((r for r in out.sums if r.ENDF_MT == 18), None))
     if fission is not None and fission.outputChannel.fissionFragmentData is not None:
         releases = fission.outputChannel.fissionFragmentData.fissionEnergyReleases
         release = releases[0] if releases else None
-    responses = {301: m.CrossSection(), 901: m.CrossSection(), 444: m.CrossSection()}
+    responses = {mt: m.CrossSection() for mt in dict.fromkeys((301, 901, 444, *heatingPartials))}
     notes = None
     for temperature, (T, kT) in zip(temperatures, styleKT.items()):
         grid = grids[T]
         total, sigmaF = _totalOn(out, T, grid)
         label = heatedLabel(T)
         sigma = {}
-        for reaction in out.reactions:
+        for reaction in list(out.reactions) + list(out.fissionComponents):
             form = reaction.crossSection.forms.get(label)
             if form is not None and reaction.ENDF_MT is not None:
                 values = np.zeros_like(grid)
@@ -1406,7 +1670,8 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                 values[len(grid) - len(form):] = form.ys
                 sigma[reaction.ENDF_MT] = values
         result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, ed=ed, evaluation=work,
-                           zaTarget=1000 * Z + A)
+                           zaTarget=1000 * Z + A, qa=qa, qbar=qbar, kinematic=443 in heatingPartials,
+                           workers=workers)
         notes = result.notes
         if "kerma" in wanted:
             nonlocal_ = result.kerma
@@ -1416,19 +1681,43 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                 eb = evaluate(release.delayedBetaEnergy, grid)
                 egp = evaluate(release.promptGammaEnergy, grid)
                 egd = evaluate(release.delayedGammaEnergy, grid)
-                nonlocal_ = nonlocal_ + (efr + eb) * sigmaF
+                nonlocal_ = (nonlocal_ + (efr + egp + eb) * sigmaF
+                             - fissionPhotonKerma(out, grid, sigma, awr=awr))
                 local = local + (efr + egp + egd + eb) * sigmaF
             responses[301][label] = m.XYs1d(xs=grid, ys=nonlocal_, label=label)
             responses[901][label] = m.XYs1d(xs=grid, ys=local, label=label)
         if "damage" in wanted:
             responses[444][label] = m.XYs1d(xs=grid, ys=result.damage, label=label)
+        if heatingPartials:
+            fissionKerma, fissionPhotons, fissionKinematic = {}, {}, {}
+            if release is not None:
+                egpF = evaluate(release.promptGammaEnergy, grid)
+                releasedF = evaluate(release.promptProductKE, grid) + egpF + evaluate(release.delayedBetaEnergy, grid)
+                photonF = egpF + evaluate(release.delayedGammaEnergy, grid)
+                carriedF = fissionPhotonEnergy(out, grid, awr=awr)
+                for mt in result.perReaction:
+                    if mt in FISSION_MTS:
+                        carried = carriedF.get(18, carriedF.get(mt, 0.0))
+                        fissionKerma[mt], fissionPhotons[mt] = releasedF - carried, photonF
+                        fissionKinematic[mt] = evaluate(release.promptProductKE, grid) + evaluate(release.promptGammaEnergy, grid)
+            partials = result.partialsOf(sigma, heatingPartials, fissionKerma=fissionKerma,
+                                         fissionPhotonEnergy=fissionPhotons, fissionKinematicEnergy=fissionKinematic)
+            # MT301/901 are the existing OpenMC total definitions; their
+            # release already includes the local/nonlocal fission convention.
+            if 901 in partials:
+                totalLocal = result.kermaLocal.copy()
+                if release is not None:
+                    totalLocal += (releasedF - egpF + photonF) * sigmaF
+                partials[901] = totalLocal
+            for mt, values in partials.items():
+                responses[mt][label] = m.XYs1d(xs=grid, ys=values, label=label)
     names = {301: "heating", 901: "heating-local", 444: "damage-energy"}
     for mt, cs in responses.items():
         if len(cs.forms):
             out.productions.append(m.Reaction(
-                id=m.ReactionId(label=names[mt], ENDF_MT=mt), crossSection=cs,
+                id=m.ReactionId(label=names.get(mt, f"heating-response-{mt}"), ENDF_MT=mt), crossSection=cs,
                 outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
                 provenance=m.Hdf5Provenance(attributes={
-                    "redundant": 1, "center_of_mass": 0 if mt == 444 else 1})))
+                    "redundant": 1, "center_of_mass": 0 if 444 <= mt <= 447 else 1})))
     for note in notes or ():
         report.warn(note)

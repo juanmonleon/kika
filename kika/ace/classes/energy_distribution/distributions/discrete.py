@@ -1,26 +1,23 @@
 # Law 2: Discrete distributions
 
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika._utils import create_repr_section
 
 @dataclass
 class DiscreteEnergyDistribution(EnergyDistribution):
     """
-    Law 2: Discrete energy distribution.
-    
-    This represents nuclear level excitations where the outgoing energy is discrete.
-    For photons, this represents discrete photon energy lines.
+    Law 2: one discrete photon line (manual Table 33).
+
+    ``lp`` and ``eg`` are kept as the file states them. With LP = 0 or 1 the
+    photon energy is EG; with LP = 2 (a primary photon) EG is the binding
+    energy and the photon energy depends on the incident energy,
+    EG + AWR/(AWR+1)·E, so it is not a number of the law alone: ask
+    :meth:`get_photon_energy` for it.
     """
     law: int = 2
-    n_discrete_energies: int = 0  # Number of discrete energies
-    discrete_energies: List[float] = field(default_factory=list)  # Discrete energy values
-    probabilities: List[float] = field(default_factory=list)  # Probabilities for each discrete energy
-    
-    # For photons (according to Table 33)
-    lp: int = 0  # Indicator of whether photon is primary (0,1) or non-primary (2)
-    eg: float = 0.0  # Photon energy or binding energy
+    lp: int = 0  # 0 or 1: the line is EG; 2: primary photon, EG is the binding energy
+    eg: float = 0.0  # Photon energy (LP 0/1) or binding energy (LP 2), MeV
     
     def get_photon_energy(self, incident_energy: float, awr: float) -> float:
         """
@@ -82,15 +79,11 @@ class DiscreteEnergyDistribution(EnergyDistribution):
         info_table += "{:<{width1}} {:<{width2}}\n".format(
             "Law Number", self.law, 
             width1=property_col_width, width2=value_col_width)
-        info_table += "{:<{width1}} {:<{width2}}\n".format(
-            "Number of Discrete Energies", self.n_discrete_energies, 
-            width1=property_col_width, width2=value_col_width)
-        
         # Add photon-specific data if applicable
         if self.lp > 0:
             lp_desc = {
-                1: "Primary photon (energy = EG)",
-                2: "Non-primary photon (energy = EG + (AWR/(AWR+1))*E_incident)"
+                1: "Photon energy = EG",
+                2: "Primary photon (energy = EG + (AWR/(AWR+1))*E_incident)"
             }
             lp_description = lp_desc.get(self.lp, f"Unknown LP={self.lp}")
             
@@ -100,25 +93,6 @@ class DiscreteEnergyDistribution(EnergyDistribution):
             info_table += "{:<{width1}} {:<{width2}}\n".format(
                 "Photon Energy (EG)", f"{self.eg:.6g} MeV", 
                 width1=property_col_width, width2=value_col_width)
-        
-        # If we have discrete energies, show some statistics
-        if self.discrete_energies:
-            info_table += "{:<{width1}} {:<{width2}}\n".format(
-                "Energy Range", f"{min(self.discrete_energies):.6g} - {max(self.discrete_energies):.6g} MeV", 
-                width1=property_col_width, width2=value_col_width)
-            
-            # Show a few discrete energies if there aren't too many
-            if len(self.discrete_energies) <= 5:
-                energy_list = ", ".join(f"{e:.6g}" for e in self.discrete_energies)
-                info_table += "{:<{width1}} {:<{width2}}\n".format(
-                    "Discrete Energies", energy_list, 
-                    width1=property_col_width, width2=value_col_width)
-            
-            # Show probabilities if they exist
-            if self.probabilities and len(self.probabilities) == len(self.discrete_energies):
-                info_table += "{:<{width1}} {:<{width2}}\n".format(
-                    "Probability Range", f"{min(self.probabilities):.6g} - {max(self.probabilities):.6g}", 
-                    width1=property_col_width, width2=value_col_width)
         
         info_table += "-" * header_width + "\n\n"
         
@@ -140,10 +114,6 @@ class DiscreteEnergyDistribution(EnergyDistribution):
             "--------\n"
             "# For photon data with LP=2, calculate the photon energy at 1 MeV\n"
             "photon_energy = distribution.get_photon_energy(incident_energy=1.0, awr=238.0)\n"
-            "\n"
-            "# Access discrete energy levels and their probabilities directly\n"
-            "energies = distribution.discrete_energies\n"
-            "probs = distribution.probabilities\n"
         )
         
         return header + description + info_table + methods_section + "\n" + example

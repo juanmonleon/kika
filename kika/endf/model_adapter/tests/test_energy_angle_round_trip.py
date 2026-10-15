@@ -882,3 +882,23 @@ def test_a_law_zero_neutron_keeps_the_spectrum_mf5_gave_it(u235_b81_tape):
     assert len(form.energy.outerDomainValues) == 23
     assert any("LAW=0" in message and "MT18" in message
                for message in report.warnings)
+
+
+def test_law2_primary_photon_energy_is_physical_data_and_edits_round_trip():
+    from kika.endf.classes.mf6 import MF6MT
+    from kika.endf.classes.mf6.products import MF6Product
+    from kika.endf.classes.mf6.laws import MF6LawTwoBody,MF6LawNoBody
+    from kika.nuclear_data.model import PrimaryGamma
+    section=MF6MT(number=102);section._za=1001.;section._awr=.9991673;section._mat=125;section._lct=2;section._nk=2
+    body=MF6LawTwoBody(tab2_interp=[(2,2)],incident_energies=[1e-5,2e7],lang=[0,0],values=[[],[]])
+    section.products=[MF6Product(zap=0,awp=2223300.,y_interp=[(2,2)],y_energies=[1e-5,2e7],y_values=[1.,1.],law_data=body),
+        MF6Product(zap=1002,awp=1.996799,y_interp=[(2,2)],y_energies=[1e-5,2e7],y_values=[1.,1.],law_data=MF6LawNoBody(law=4))]
+    encoded,entries,provenance,report=_roundTrip(section,102)
+    assert str(encoded)==str(section)
+    photon=entries[0][3];assert isinstance(photon,Uncorrelated) and isinstance(photon.energy,PrimaryGamma)
+    assert photon.energy.value==2223300.
+    assert photon.productFrame is Frame.centerOfMass
+    assert '/uncorrelated[' in entries[1][3].recoilHref
+    photon.energy.value=2223400.
+    edited,_=encodeMF6MT({label:form for label,_,_,form in entries},provenance,102,report)
+    assert edited.products[0].awp==2223400.

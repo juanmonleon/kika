@@ -435,7 +435,11 @@ def attach_broadening(suite,result,*,date=None):
         container[result.label]=candidates[key].crossSection[result.label]
         containers[key]=container
     styles=Styles(list(suite.styles.styles)+[heated])
+    # Radionuclide productions follow their reactions; MF10 is copied, as BROADR leaves it.
+    from ..productions import production_forms,publish_production_forms
+    productions=production_forms(suite,result.source_style,result.label,result.forms)
     # No operation capable of failing remains after this publication boundary.
     for key,r in entries.items():r.crossSection=containers[key]
+    publish_production_forms(productions)
     suite.styles=styles
     return suite

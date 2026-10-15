@@ -40,8 +40,9 @@ correlation to the standard -- would be a named variant delivered through an
 external covariance override (P5). **P5 does not exist yet, so the constraint
 is pending and not built**; every record says so (``"constraint"``).
 
-**References.** Only what the roadmap has read and quotes: the IAEA standards
-evaluation of the U-235 thermal PFNS, ``<E'>`` = 2.000 +/- 0.009 MeV. Chi-Nu/CEA
+**References.** Only what has been read at the source: the IAEA neutron standards
+evaluation of the U-235 thermal PFNS, ``<E'>`` = 2.00 +/- 0.01 MeV (Carlson et
+al., Nucl. Data Sheets 148, 143 (2018), p. 27). Chi-Nu/CEA
 Pu-239 (Marini 2020, 0.2-0.5 % from 0.7 MeV) has not been read against the
 libraries yet and is not used.
 """
@@ -67,10 +68,10 @@ C10_CONSTRAINT = ("none: MF35 as stated (PD-9); a GLS update with a measured "
 C10_REFERENCES: Dict[int, Dict[str, Any]] = {
     92235: {
         "incident": 0.0253,
-        "meanEnergy": 2.000e6,
-        "sigmaMeanEnergy": 0.009e6,
+        "meanEnergy": 2.00e6,
+        "sigmaMeanEnergy": 0.01e6,
         "source": ("IAEA neutron standards evaluation of the U-235 thermal "
-                   "PFNS, as quoted in pfns_mf5_mf35_roadmap.md (Q3, C10)"),
+                   "PFNS: Carlson et al., Nucl. Data Sheets 148, 143 (2018), p. 27"),
     },
 }
 

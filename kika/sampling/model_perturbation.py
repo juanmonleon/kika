@@ -174,6 +174,19 @@ class AceOptions:
         layout and made the listing ~120 MB per sample and temperature for
         Fe-56, 97 % of it. The consistency checks are printed either way, and
         the ACE and xsdir are byte for byte the same.
+    engine
+        ``"njoy"`` (the default): each sample's tape through NJOY. ``"kika"``:
+        each realisation processed by kika from its 0 K forms -- multiplied
+        at 0 K, then broadened -- and written by
+        :func:`kika.ace.model_adapter.encodeAce`, the processing
+        :meth:`kika.endf.EndfProcessing.write_ace` uses; no tape, no NJOY. The
+        URR probability tables are computed once, on the unperturbed
+        evaluation, and shared by every sample (they are not perturbed). A
+        table without ``extensions`` is ``<ZAID>.<suffix of its
+        temperature>``; ``libraryName``, ``njoyVersion``, ``keepNjoyFiles``
+        and ``fullAceListing`` do not apply.
+    omit, thnmax, thinning
+        ``engine="kika"`` only, as :class:`HDF5Options` takes them.
     """
 
     temperatures: Tuple[float, ...] = ()
@@ -183,6 +196,10 @@ class AceOptions:
     njoyVersion: str = "NJOY 2016.78"
     keepNjoyFiles: bool = True
     fullAceListing: bool = False
+    engine: str = "njoy"
+    omit: Tuple[str, ...] = ()
+    thnmax: object = "njoy"
+    thinning: Optional[float] = 1.0e-3
 
     def __post_init__(self) -> None:
         import os
@@ -208,6 +225,16 @@ class AceOptions:
             raise ValueError(
                 f"{len(self.extensions)} extension(s) for {len(self.temperatures)} "
                 f"temperature(s): give one per temperature, or none")
+        if self.engine not in ("njoy", "kika"):
+            raise ValueError(f"AceOptions.engine is 'njoy' or 'kika', not {self.engine!r}")
+        if self.engine == "kika":
+            HDF5Options(temperatures=self.temperatures, omit=tuple(self.omit)).validate()
+            if self.extensions is None:
+                from kika._utils import ace_temperature_suffix
+
+                for temperature in self.temperatures:
+                    ace_temperature_suffix(temperature)
+            return
         if not self.njoyExe:
             raise ValueError(
                 "no NJOY executable: pass AceOptions(njoyExe=...), set the "
@@ -220,7 +247,8 @@ class AceOptions:
                 "libraryName": self.libraryName,
                 "extensions": list(self.extensions) if self.extensions else None,
                 "njoyVersion": self.njoyVersion, "keepNjoyFiles": self.keepNjoyFiles,
-                "fullAceListing": self.fullAceListing}
+                "fullAceListing": self.fullAceListing, "engine": self.engine,
+                "omit": list(self.omit), "thnmax": self.thnmax, "thinning": self.thinning}
 
 
 @dataclass
@@ -930,6 +958,66 @@ def _emitAce(endfPath: Path, sampleDir: Path, options: AceOptions, log,
     return produced
 
 
+def _emitAceKika(suite, pset, sampleDir: Path, ctx, log, sample: int) -> List[Dict[str, Any]]:
+    """One realisation processed by kika and written as ACE, once per temperature.
+
+    Records in :func:`_emitAce`'s shape (``returncode`` 0, or 1 with the error
+    in ``listing``); like it, never raises: one failed sample is reported, not
+    allowed to lose the others.
+    """
+    from kika.ace.model_adapter import encodeAce
+    from kika.ace.writers.write_ace import write_ace_checked
+    from kika.ace.xsdir import xsdir_line_for, write_xsdir_line
+    from kika.hdf5.processing import ACE_PARTICLES, processSuite
+    from kika.nuclear_data.model.conversion import ConversionReport
+
+    options = ctx.ace
+    aceDir = sampleDir / "ace"
+    aceDir.mkdir(parents=True, exist_ok=True)
+    shared = ctx.acePieces or {}
+    report = ConversionReport()
+    produced: List[Dict[str, Any]] = []
+    processed, failure = None, None
+    try:
+        with log.timed("note", f"processed by kika at {list(options.temperatures)} K",
+                       subject="ace", sample=sample):
+            processed = processSuite(suite, temperatures=list(options.temperatures), report=report,
+                                     label=pset.label, urrTables=shared.get("urr"),
+                                     omit=tuple(options.omit), thnmax=options.thnmax,
+                                     thinning=options.thinning, workers=1, particles=ACE_PARTICLES)
+    except Exception as error:  # noqa: BLE001 -- recorded per temperature below
+        failure = f"processing: {type(error).__name__}: {error}"
+    for at, temperature in enumerate(options.temperatures):
+        extension = options.extensions[at] if options.extensions else None
+        record: Dict[str, Any] = {"temperature": temperature, "extension": extension,
+                                  "returncode": None, "ace": None, "xsdir": None,
+                                  "listing": None}
+        with log.timed("emitted", f"ace at {temperature:g} K (kika)", subject="ace",
+                       sample=sample, temperature=temperature) as info:
+            try:
+                if failure is not None:
+                    raise RuntimeError(failure)
+                ext = None if extension is None else (
+                    extension if extension.startswith(".") else f".{extension}")
+                ace, _ = encodeAce(processed, temperature, extension=ext, report=report)
+                name = f"{ace.header.zaid}{ace.header.extension}"
+                path = aceDir / name
+                write_ace_checked(ace, path)
+                xsdir = aceDir / f"{name}.xsdir"
+                write_xsdir_line(str(xsdir), xsdir_line_for(ace, name))
+                record.update(returncode=0, ace=str(path), xsdir=str(xsdir))
+                info["path"] = str(path)
+                info["bytes"] = path.stat().st_size
+            except Exception as error:  # noqa: BLE001
+                record.update(returncode=1, listing=f"{type(error).__name__}: {error}")
+            info["returncode"] = record["returncode"]
+        if record["returncode"] != 0:
+            log.error(f"kika ACE failed at {temperature:g} K: {record['listing']}",
+                      subject="ace", sample=sample, temperature=temperature)
+        produced.append(record)
+    return produced
+
+
 def _matOf(suite) -> Optional[int]:
     """The ENDF MAT of the suite's target, from the library's own table.
 
@@ -1386,11 +1474,13 @@ def resolveSpaces(blocks, index, space):
     states an uncertainty that straddles zero -- so a log draw of it cannot
     represent what the file says, and a linear draw can.
 
-    A block that carries components of two quantities is drawn once, so it gets
-    one space: the mapping's entry for the *first* MF in the block that names
-    one, and the run's default otherwise. That case only arises under
-    ``grouping="stated"`` with a file that declares a cross term, which is
-    exactly the case where drawing the two halves separately would be wrong.
+    A block that carries components of two quantities is drawn once. If they
+    ask for the same space it is that one; if not it is ``"mixed"``, and each
+    row is drawn in its own quantity's space (:func:`toDrawSpace`). Such a
+    block is what a request for MF33 *and* MF34 assembles when the file states
+    the sigma <-> a_l cross term (J3): before 2026-10-14 the whole block took
+    the space of its first MF, so ``{33: "log", 34: "linear"}`` drew the a_l in
+    log.
     """
     from kika.sampling.joint_blocks import MF_OF_QUANTITY
 
@@ -1413,10 +1503,54 @@ def resolveSpaces(blocks, index, space):
 
     resolved: Dict[Hashable, str] = {}
     for key, _matrix in blocks:
-        named = [byMf[component.mf] for component in index[key]["components"]
-                 if component.mf in byMf]
-        resolved[key] = named[0] if named else "log"
+        wanted = {byMf.get(component.mf, "log")
+                  for component in index[key]["components"]}
+        resolved[key] = wanted.pop() if len(wanted) == 1 else "mixed"
     return resolved
+
+
+def logRows(meta, space) -> np.ndarray:
+    """One boolean per row of a block: drawn in log space (True) or linear.
+
+    *meta* is the block's entry of the request index, *space* the run's
+    ``space`` argument; a quantity the mapping does not name is drawn in log,
+    as :func:`resolveSpaces` has it.
+    """
+    from kika.sampling.joint_blocks import MF_OF_QUANTITY
+
+    if isinstance(space, str):
+        byMf = None
+    else:
+        byMf = {(MF_OF_QUANTITY[name] if isinstance(name, str) else int(name)): value
+                for name, value in dict(space).items()}
+    stride = int(meta["stride"])
+    rows = []
+    for component in meta["components"]:
+        wanted = space if byMf is None else byMf.get(component.mf, "log")
+        rows += [wanted == "log"] * stride
+    return np.asarray(rows, dtype=bool)
+
+
+def toDrawSpace(matrix, meta, space) -> np.ndarray:
+    """The covariance of what is drawn: ``log1p`` on the log x log part only.
+
+    A relative Σ drawn in log space is the covariance of ln f, ``log1p(Σ)``,
+    and a factor comes out as ``f = exp(y - M_ii/2)`` so that E[f] = 1. In a
+    **mixed** block the linear rows are drawn as ``f = 1 + y`` and their
+    blocks are left as stated -- **the cross block included**, untransformed.
+    That is exact in second moments: by Stein's lemma, for jointly normal
+    (y_s, y_a), Cov(exp(y_s - d/2), y_a) = E[exp(y_s - d/2)] Cov(y_s, y_a) =
+    Cov(y_s, y_a), since the mean factor is one. Pista J2 of
+    ``mf4_tabulated_perturbation_roadmap.md``.
+    """
+    matrix = np.asarray(matrix, dtype=float)
+    mask = logRows(meta, space)
+    if mask.all():
+        return np.log1p(matrix)
+    out = matrix.copy()
+    inLog = np.ix_(mask, mask)
+    out[inLog] = np.log1p(matrix[inLog])
+    return out
 
 
 def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod,
@@ -1487,6 +1621,17 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
             group, space=wanted, returns="factors",
             decomposition_method=decompositionMethod, psd_method=psdMethod,
             null_tol=nullTol, verbose=False, logger=logger)
+    # A mixed block (J3) is decomposed as a linear one -- its matrix is already
+    # the covariance of what is drawn, see toDrawSpace -- and its log rows are
+    # exponentiated once the realisation is in.
+    mixed = [(key, np.asarray(matrix, dtype=float) if inDrawSpace
+              else toDrawSpace(matrix, index[key], space))
+             for key, matrix in factorBlocks if spaces[key] == "mixed"]
+    if mixed:
+        prepared += prepare_blocks(
+            mixed, space="linear", returns="factors",
+            decomposition_method=decompositionMethod, psd_method=psdMethod,
+            null_tol=nullTol, verbose=False, logger=logger)
 
     if deltaBlocks:
         from kika.sampling.mf35_sampling import (NULL_TOL, SAMPLING_SPACE,
@@ -1501,6 +1646,13 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
 
     samples, diagnostics = realise_blocks(
         prepared, nSamples, sampling_method=samplingMethod, seed=seed)
+    for key, matrix in mixed:
+        mask = logRows(index[key], space)
+        drawn = np.array(samples[key], dtype=float)
+        drawn[:, mask] = np.exp(drawn[:, mask] - 1.0 - 0.5 * np.diag(matrix)[mask])
+        samples[key] = drawn.astype(samples[key].dtype, copy=False)
+        diagnostics[key]["space"] = "mixed"
+        diagnostics[key]["log_rows"] = int(mask.sum())
 
     if deltaBlocks:
         stated = dict(statedBlocks) if statedBlocks is not None else {}
@@ -2060,6 +2212,8 @@ class _SampleContext:
     #: ``"hdf5"`` only: the options, and the NJOY pieces computed once.
     hdf5: Optional[HDF5Options] = None
     hdf5Pieces: Optional[Any] = None
+    #: ``"ace"`` with ``engine="kika"``: what every sample shares (the URR tables).
+    acePieces: Optional[Any] = None
 
 
 def _emitHdf5(suite, pset, sampleDir: Path, ctx, log, number: int) -> Dict[str, Path]:
@@ -2149,7 +2303,8 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
         # when there is a tape to patch; otherwise the whole tape from the
         # model. Either is written on demand if it was not asked for.
         tapeFormats = [fmt for fmt in ctx.formats if fmt not in ("ace", "hdf5")]
-        if "ace" in ctx.formats and not any(
+        njoyAce = "ace" in ctx.formats and ctx.ace.engine == "njoy"
+        if njoyAce and not any(
                 fmt in tapeFormats for fmt in ("endf-delta", "endf-tape")):
             tapeFormats.append("endf-delta" if ctx.sourceFormat == "endf"
                                else "endf-tape")
@@ -2170,7 +2325,12 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
                         fmt)
                 info["path"] = str(files[fmt])
                 info["bytes"] = files[fmt].stat().st_size
-        if "ace" in ctx.formats:
+        if "ace" in ctx.formats and not njoyAce:
+            aceProduced = _emitAceKika(suite, pset, sampleDir, ctx, log, number)
+            good = [r["ace"] for r in aceProduced if r["ace"] and r["returncode"] == 0]
+            if good:
+                files["ace"] = [Path(p) for p in good]
+        elif "ace" in ctx.formats:
             tape = files.get("endf-delta") or files["endf-tape"]
             if ctx.pendfPath is not None:
                 njoyEndf, samplePendf = _njoyInputs(
@@ -2543,7 +2703,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             "none. Ask for endf-tape, gnds or ace"
         )
     if sourceFormat == "gnds":
-        needsTape = [f for f in formats if f in ("endf-tape", "ace")]
+        needsTape = [f for f in formats if f == "endf-tape"
+                     or (f == "ace" and ace is not None and ace.engine == "njoy")]
         resonances = getattr(suite, "resonances", None)
         withParameters = resonances is not None and (
             bool(resonances.resolved) or resonances.unresolved is not None)
@@ -2734,8 +2895,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     # and the space the format pipeline conditions in (multigroup_draw).
     factorBlocks, _deltaBlocks = _splitBySemantics(blocks, index)
     logKeys = {key for key, wanted in resolveSpaces(factorBlocks, index, space).items()
-               if wanted == "log"}
-    blocks = [(key, np.log1p(np.asarray(matrix, dtype=float)) if key in logKeys
+               if wanted in ("log", "mixed")}
+    blocks = [(key, toDrawSpace(matrix, index[key], space) if key in logKeys
                else matrix) for key, matrix in blocks]
     blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
         blocks, index, conditioningPlan, log, labels, layer1,
@@ -2799,7 +2960,9 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         angularPositivity=angularPositivity,
         hdf5=hdf5 if "hdf5" in formats else None,
         hdf5Pieces=_hdf5Pieces(hdf5, suite, originalSourcePath or sourcePath, log)
-        if ("hdf5" in formats and emitTapes) else None)
+        if ("hdf5" in formats and emitTapes) else None,
+        acePieces=_hdf5Pieces(ace, suite, originalSourcePath or sourcePath, log)
+        if ("ace" in formats and emitTapes and ace.engine == "kika") else None)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
@@ -2977,8 +3140,11 @@ def _jsonableRequest(value):
     from kika.sampling.joint_blocks import Selection
 
     if isinstance(value, Selection):
-        return {"mf": value.mf, "mt": _jsonableRequest(value.mt),
-                "index": _jsonableRequest(value.index), "relative": value.relative}
+        out = {"mf": value.mf, "mt": _jsonableRequest(value.mt),
+               "index": _jsonableRequest(value.index), "relative": value.relative}
+        if value.magnitudeMts:
+            out["magnitudeMts"] = list(value.magnitudeMts)
+        return out
     if isinstance(value, Mapping):
         return {str(k): _jsonableRequest(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

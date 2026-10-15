@@ -1,4 +1,5 @@
 import logging
+from kika.ace.classes.xss import xss_ints
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika.ace.classes.energy_distribution.distributions.maxwell import MaxwellFissionSpectrum
@@ -52,9 +53,7 @@ def parse_maxwell_fission_spectrum(ace: Ace, base_dist: EnergyDistribution, idat
     
     # Check if we have data to parse
     if idat_idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idat_idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     # Read the number of interpolation regions for temperature (N_R)
     n_temp_interp_regions_entry = ace.xss_data[idat_idx]
@@ -68,21 +67,21 @@ def parse_maxwell_fission_spectrum(ace: Ace, base_dist: EnergyDistribution, idat
     if n_r > 0:
         # Read NBT values for temperature interpolation
         if idx + n_r <= len(ace.xss_data):
-            distribution.temp_nbt = [int(ace.xss_data[idx + i]) for i in range(n_r)]
+            distribution.temp_nbt = xss_ints(ace.xss_data, idx, n_r)
             if debug:
                 logger.debug(f"Temperature NBT values: {distribution.temp_nbt}")
             idx += n_r
-        elif debug:
-            logger.debug(f"Not enough data to read temperature NBT values. Need index up to {idx + n_r}, have {len(ace.xss_data)}")
+        else:
+            raise ValueError(f"Not enough data to read temperature NBT values. Need index up to {idx + n_r}, have {len(ace.xss_data)}")
         
         # Read INT values for temperature interpolation
         if idx + n_r <= len(ace.xss_data):
-            distribution.temp_interp = [int(ace.xss_data[idx + i]) for i in range(n_r)]
+            distribution.temp_interp = xss_ints(ace.xss_data, idx, n_r)
             if debug:
                 logger.debug(f"Temperature INT values: {distribution.temp_interp}")
             idx += n_r
-        elif debug:
-            logger.debug(f"Not enough data to read temperature INT values. Need index up to {idx + n_r}, have {len(ace.xss_data)}")
+        else:
+            raise ValueError(f"Not enough data to read temperature INT values. Need index up to {idx + n_r}, have {len(ace.xss_data)}")
     
     # Read the number of incident energies (N_E)
     if idx < len(ace.xss_data):
@@ -93,9 +92,7 @@ def parse_maxwell_fission_spectrum(ace: Ace, base_dist: EnergyDistribution, idat
             logger.debug(f"Number of incident energies (N_E): {n_e}")
         idx += 1
     else:
-        if debug:
-            logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}")
     
     # Read the incident energy table - a view of xss_data
     if idx + n_e <= len(ace.xss_data):
@@ -104,9 +101,7 @@ def parse_maxwell_fission_spectrum(ace: Ace, base_dist: EnergyDistribution, idat
             logger.debug(f"Incident energy table range: [{distribution.incident_energies[0] if n_e > 0 else 'N/A'}, {distribution.incident_energies[-1] if n_e > 0 else 'N/A'}]")
         idx += n_e
     else:
-        if debug:
-            logger.debug(f"Not enough data to read incident energy table. Need index up to {idx + n_e}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read incident energy table. Need index up to {idx + n_e}, have {len(ace.xss_data)}")
     
     # Read the temperature table - a view of xss_data
     if idx + n_e <= len(ace.xss_data):
@@ -115,17 +110,15 @@ def parse_maxwell_fission_spectrum(ace: Ace, base_dist: EnergyDistribution, idat
             logger.debug(f"Temperature table range: [{distribution.temperatures[0] if n_e > 0 else 'N/A'}, {distribution.temperatures[-1] if n_e > 0 else 'N/A'}]")
         idx += n_e
     else:
-        if debug:
-            logger.debug(f"Not enough data to read temperature table. Need index up to {idx + n_e}, have {len(ace.xss_data)}")
-        return distribution
+        raise ValueError(f"Not enough data to read temperature table. Need index up to {idx + n_e}, have {len(ace.xss_data)}")
     
     # Read the restriction energy (U) - a plain float
     if idx < len(ace.xss_data):
         distribution.restriction_energy = float(ace.xss_data[idx])
         if debug:
             logger.debug(f"Restriction energy (U): {distribution.restriction_energy}")
-    elif debug:
-        logger.debug(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}, cannot read restriction energy")
+    else:
+        raise ValueError(f"Index {idx} out of bounds for XSS data with length {len(ace.xss_data)}, cannot read restriction energy")
     
     if debug:
         logger.debug(f"Completed parsing Maxwell fission spectrum with {n_e} incident energies")

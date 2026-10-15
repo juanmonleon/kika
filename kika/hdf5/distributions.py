@@ -1,7 +1,7 @@
 """OpenMC's angle-energy distributions ↔ the model's Monte Carlo forms.
 
 Every table OpenMC stores is tabulated with its cumulative, and decodes to
-``xs_pdf_cdf1d`` nodes (roadmap D9):
+``xs_pdf_cdf1d`` nodes:
 
 =================================  ===========================================
 ``distribution_<i>/@type``         model form (label ``MonteCarlo``)
@@ -261,7 +261,8 @@ def decodeCorrelated(group, frame, where="", label=MONTE_CARLO_LABEL):
                 interpolation=m.Interpolation.flat if flag in (MU_DISCRETE, 1) else _interp(flag),
                 numberOfDiscrete=n if flag == MU_DISCRETE else 0,
                 outerDomainValue=float(data[0, j])))
-        inner.append(m.XYs2d(function1ds=tables, outerDomainValue=float(incident[i])))
+        inner.append(m.XYs2d(function1ds=tables, outerDomainValue=float(incident[i]),
+                             interpolation=m.Interpolation.flat if codes[i] == 1 else m.Interpolation.linlin))
     energyForm = _incidentForm(energy, interpolation)
     xys3d = m.XYs3d(function2ds=inner)
     if isinstance(energyForm, m.XYs2d):

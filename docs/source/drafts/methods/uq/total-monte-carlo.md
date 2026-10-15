@@ -11,9 +11,9 @@ the number of samples, and tests of the normality of the results.
 **Applies to:** any set of per-sample results with relative statistical uncertainties
 (MCNP tallies, $k_\text{eff}$), one response or a table of responses.
 
-**Entry points:** `kika.UQ.fastTMC.fastTMC`, `kika.UQ.fastTMC.create_summary_table`,
-`kika.UQ.convergence.convergence_analysis`, `kika.UQ.normality.normality_tests`,
-`kika.UQ.normality.histogram_data`, `kika.UQ.normality.qq_plot_data`.
+**Entry points:** {py:func}`kika.UQ.fastTMC.fastTMC`, {py:func}`kika.UQ.fastTMC.create_summary_table`,
+{py:func}`kika.UQ.convergence.convergence_analysis`, {py:func}`kika.UQ.normality.normality_tests`,
+{py:func}`kika.UQ.normality.histogram_data`, {py:func}`kika.UQ.normality.qq_plot_data`.
 
 **Status:** experimental — since 0.1.1 (convergence and normality since 0.2.0).
 ```
@@ -34,8 +34,8 @@ $$ (eq-total-monte-carlo-decomposition)
 and the nuclear-data part is what is left when the mean statistical variance is subtracted
 from the observed one. Fast TMC uses this to run each sample with fewer histories
 (a larger $\sigma_{\text{stat},i}$) and still recover $\sigma_\text{ND}$, provided the
-statistical part does not dominate. `TODO(ref)`: Total Monte Carlo (Koning and Rochman)
-and Fast TMC (Rochman et al.).
+statistical part does not dominate (Total Monte Carlo: Koning and Rochman 2008; Fast TMC:
+Rochman et al. 2014).
 
 ## What it computes
 
@@ -171,7 +171,7 @@ In `kika/UQ/tests/test_fast_tmc_and_normality.py`:
   (`::test_the_anderson_darling_p_value_meets_the_tabulated_critical_values`), and the
   decision follows $\alpha$ (`::test_the_anderson_darling_decision_follows_alpha`).
 
-No test exercises `kika.UQ.convergence`, the bootstrap intervals' coverage, or the
+No test exercises {py:mod}`kika.UQ.convergence`, the bootstrap intervals' coverage, or the
 Shapiro-Wilk and D'Agostino-Pearson tests.
 
 ## Diagnostics
@@ -193,15 +193,22 @@ Shapiro-Wilk and D'Agostino-Pearson tests.
 
 ## Implementation
 
-- `kika.UQ.fastTMC`: the decomposition, the reliability flag, the bootstrap and the summary
+- {py:mod}`kika.UQ.fastTMC`: the decomposition, the reliability flag, the bootstrap and the summary
   table.
 - `kika.UQ.convergence`: the running statistics and their intervals.
-- `kika.UQ.normality`: the normality tests, the histogram and the Q-Q data.
+- {py:mod}`kika.UQ.normality`: the normality tests, the histogram and the Q-Q data.
 
 ## References
 
-- `TODO(ref)`: Total Monte Carlo (Koning and Rochman).
-- `TODO(ref)`: Fast TMC (Rochman et al.).
+- A. J. Koning and D. Rochman, "Towards sustainable nuclear energy: putting nuclear physics
+  to work", *Annals of Nuclear Energy* 35, 2024-2030 (2008), doi:10.1016/j.anucene.2008.06.004.
+- D. Rochman, W. Zwermann, S. C. van der Marck, A. J. Koning, H. Sjöstrand, P. Helgesson and
+  B. Krzykacz-Hausmann, "Efficient use of Monte Carlo: uncertainty propagation", *Nuclear
+  Science and Engineering* 177, 337-349 (2014), doi:10.13182/NSE13-32.
 - R. B. D'Agostino and M. A. Stephens (eds.), *Goodness-of-Fit Techniques*, Marcel Dekker
   (1986): Table 4.9, the Anderson-Darling p-value with estimated parameters.
-- `TODO(ref)`: the Shapiro-Wilk and D'Agostino-Pearson tests.
+- S. S. Shapiro and M. B. Wilk, "An analysis of variance test for normality (complete
+  samples)", *Biometrika* 52, 591-611 (1965).
+- R. B. D'Agostino and E. S. Pearson, "Tests for departure from normality. Empirical
+  results for the distributions of $b_2$ and $\sqrt{b_1}$", *Biometrika* 60, 613-622
+  (1973).

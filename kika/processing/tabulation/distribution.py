@@ -49,10 +49,23 @@ def isLevelMT(mt: int) -> bool:
         or 750 <= mt <= 798 or 800 <= mt <= 848 or 875 <= mt <= 890
 
 
-def levelEnergy(Q: float, awr: float):
-    """OpenMC's ``LevelInelastic`` from a Q value and the target's atomic weight ratio."""
+#: The light charged particles' mass ratios to the neutron, as ENDF states them (AWP)
+LIGHT_PARTICLE_AWP = {"H1": 0.99862347, "H2": 1.99626, "H3": 2.98960, "He3": 2.98903, "He4": 3.96713}
+
+
+def levelEnergy(Q: float, awr: float, awp: float = 1.0):
+    """The centre-of-mass energy of the particle a level reaction emits, ``C2 (E - C1)``.
+
+    A neutron: OpenMC's ``LevelInelastic``, ``C1 = (A+1)/A |Q|`` and ``C2 = (A/(A+1))²``.
+    A particle of mass ratio ``awp`` (ACE law 33, as NJOY's ACER writes it for
+    p, d, t, ³He, α): ``C1 = -(A+1)/A Q``, signed, and ``C2 = A (A+1-awp)/(A+1)²``,
+    the residual taking the rest of the mass.
+    """
     A = float(awr)
-    return _m().LevelEnergy(threshold=(A + 1.0) / A * abs(float(Q)), massRatio=(A / (A + 1.0)) ** 2)
+    if awp == 1.0:
+        return _m().LevelEnergy(threshold=(A + 1.0) / A * abs(float(Q)), massRatio=(A / (A + 1.0)) ** 2)
+    return _m().LevelEnergy(threshold=-(A + 1.0) / A * float(Q),
+                            massRatio=A * (A + 1.0 - float(awp)) / (A + 1.0) ** 2)
 
 
 @dataclass
@@ -104,7 +117,10 @@ def tabulateDistribution(form, context: TabulationContext):
             return m.AngularTwoBody(angular=tabAngular, productFrame=form.productFrame,
                                     label=MONTE_CARLO_LABEL)
         if isLevelMT(context.mt) and context.Q is not None:
-            return m.Uncorrelated(angular=tabAngular, energy=levelEnergy(context.Q, context.awr),
+            awp = LIGHT_PARTICLE_AWP.get(context.pid, 1.0)
+            if isinstance(tabAngular, m.Isotropic2d) and awp != 1.0:
+                tabAngular, _ = tabulateAngular(_isotropicXYs2d(), options)
+            return m.Uncorrelated(angular=tabAngular, energy=levelEnergy(context.Q, context.awr, awp),
                                   label=MONTE_CARLO_LABEL, productFrame=form.productFrame)
         if context.pid == "photon" and context.Q is not None and context.awr is not None:
             # A two-body photon (H-1 capture, MF6 LAW=2): one line per incident
@@ -121,6 +137,11 @@ def tabulateDistribution(form, context: TabulationContext):
         return None
     if isinstance(form, m.Uncorrelated):
         energy = form.energy
+        if (context.pid == "photon" and context.mt == 102
+                and isinstance(energy, m.PrimaryGamma)):
+            # Same massless-photon frame convention as the two-body branch
+            # above, with the explicitly stated canonical binding retained.
+            return _uncorrelated(form.angular, energy, m.Frame.lab, context)
         if isinstance(energy, m.WeightedFunctionals):
             terms = []
             for term in energy.weighted:

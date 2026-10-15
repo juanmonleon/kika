@@ -1,7 +1,9 @@
 import logging
+import numpy as np
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.energy_distribution.base import EnergyDistribution
 from kika.ace.classes.energy_distribution.distributions.phase_space import NBodyPhaseSpaceDistribution
+from kika.ace.classes.read_report import note
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -35,89 +37,43 @@ def parse_nbody_phase_space_distribution(ace: Ace, base_dist: EnergyDistribution
     NBodyPhaseSpaceDistribution
         N-body phase space distribution object
     """
-    if debug:
-        logger.debug(f"Parsing N-body phase space distribution (Law 66) starting at index {idat_idx}")
-    
-    # Create a new distribution object using the base properties
     distribution = NBodyPhaseSpaceDistribution(
         law=base_dist.law,
-        idat=base_dist.idat
+        idat=base_dist.idat,
+        applicability_energies=base_dist.applicability_energies,
+        applicability_probabilities=base_dist.applicability_probabilities,
+        applicability_nbt=base_dist.applicability_nbt,
+        applicability_interp=base_dist.applicability_interp,
     )
-    
-    # Copy applicability data from base_dist
-    distribution.applicability_energies = base_dist.applicability_energies
-    distribution.applicability_probabilities = base_dist.applicability_probabilities
-    distribution.applicability_nbt = base_dist.applicability_nbt
-    distribution.applicability_interp = base_dist.applicability_interp
-    
-    # Check if we have data to parse
-    if idat_idx + 1 >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Index {idat_idx+1} out of bounds for XSS data with length {len(ace.xss_data)}")
+    xss = ace.xss_data
+    if idat_idx + 1 >= len(xss):
+        raise ValueError(f"LAW=66 needs NPSX and Ap at {idat_idx}, past the XSS array ({len(xss)})")
+    distribution.npsx = int(round(xss[idat_idx]))
+    distribution.ap = float(xss[idat_idx + 1])
+
+    # INTT, NP and the ξ table follow in what NJOY 2016 writes (Table 48);
+    # older NJOY wrote the two words alone, and the words after them are then
+    # the next law. The table is taken only if it reads as one.
+    table = _xi_table(xss, idat_idx + 2)
+    if table is None:
+        note(ace, None, None, f"LAW=66: no tabulated ξ part at {idat_idx + 2} (written before NJOY 2016); "
+                               f"NPSX={distribution.npsx} and Ap read, the phase-space density is analytic")
         return distribution
-    
-    # Read NPSX (number of bodies in the phase space)
-    distribution.npsx = int(ace.xss_data[idat_idx])
-    if debug:
-        logger.debug(f"NPSX (number of bodies in the phase space): {distribution.npsx}")
-    
-    # Read A_P (total mass ratio for the NPSX particles)
-    if idat_idx + 2 <= len(ace.xss_data):
-        distribution.ap = float(ace.xss_data[idat_idx + 1])
-        if debug:
-            logger.debug(f"A_P (total mass ratio): {distribution.ap}")
-    else:
-        if debug:
-            logger.debug(f"Index {idat_idx+2} out of bounds for XSS data with length {len(ace.xss_data)}")
-    
-    # Read INTT (interpolation parameter)
-    if idat_idx + 3 <= len(ace.xss_data):
-        distribution.intt = int(ace.xss_data[idat_idx + 2])
-        if debug:
-            logger.debug(f"INTT (interpolation parameter): {distribution.intt}")
-    else:
-        if debug:
-            logger.debug(f"Index {idat_idx+3} out of bounds for XSS data with length {len(ace.xss_data)}")
-    
-    # Read N_P (number of points in the distribution)
-    if idat_idx + 4 <= len(ace.xss_data):
-        distribution.n_points = int(ace.xss_data[idat_idx + 3])
-        if debug:
-            logger.debug(f"N_P (number of points in the distribution): {distribution.n_points}")
-    else:
-        if debug:
-            logger.debug(f"Index {idat_idx+4} out of bounds for XSS data with length {len(ace.xss_data)}")
-    
-    # Get number of points
-    n_p = distribution.n_points
-    
-    # Read ξ grid - a view of xss_data
-    if idat_idx + 4 + n_p <= len(ace.xss_data):
-        distribution.xi_grid = ace.xss_data[idat_idx + 4:idat_idx + 4 + n_p]
-        if debug:
-            logger.debug(f"ξ grid range: [{distribution.xi_grid[0] if n_p > 0 else 'N/A'}, {distribution.xi_grid[-1] if n_p > 0 else 'N/A'}]")
-    else:
-        if debug:
-            logger.debug(f"Not enough data to read ξ grid. Need index up to {idat_idx + 4 + n_p}, have {len(ace.xss_data)}")
-    
-    # Read PDF - a view of xss_data
-    if idat_idx + 4 + n_p + n_p <= len(ace.xss_data):
-        distribution.pdf = ace.xss_data[idat_idx + 4 + n_p:idat_idx + 4 + n_p + n_p]
-        if debug:
-            logger.debug(f"PDF range: [{distribution.pdf[0] if n_p > 0 else 'N/A'}, {distribution.pdf[-1] if n_p > 0 else 'N/A'}]")
-    else:
-        if debug:
-            logger.debug(f"Not enough data to read PDF. Need index up to {idat_idx + 4 + n_p + n_p}, have {len(ace.xss_data)}")
-    
-    # Read CDF - a view of xss_data
-    if idat_idx + 4 + n_p + n_p + n_p <= len(ace.xss_data):
-        distribution.cdf = ace.xss_data[idat_idx + 4 + 2*n_p:idat_idx + 4 + 2*n_p + n_p]
-        if debug:
-            logger.debug(f"CDF range: [{distribution.cdf[0] if n_p > 0 else 'N/A'}, {distribution.cdf[-1] if n_p > 0 else 'N/A'}]")
-    else:
-        if debug:
-            logger.debug(f"Not enough data to read CDF. Need index up to {idat_idx + 4 + n_p + n_p + n_p}, have {len(ace.xss_data)}")
-    
-    if debug:
-        logger.debug(f"Completed parsing N-body phase space distribution with {n_p} points")
+    distribution.intt, distribution.n_points, distribution.xi_grid, distribution.pdf, distribution.cdf = table
     return distribution
+
+
+def _xi_table(xss, start):
+    """``(INTT, NP, ξ, pdf, cdf)`` at ``start`` if it is a ξ table on [0, 1], else None."""
+    if start + 1 >= len(xss):
+        return None
+    intt, n_p = xss[start], xss[start + 1]
+    if intt not in (1.0, 2.0) or n_p != int(n_p) or n_p < 2 or start + 2 + 3 * int(n_p) > len(xss):
+        return None
+    n_p = int(n_p)
+    a = start + 2
+    xi, pdf, cdf = xss[a:a + n_p], xss[a + n_p:a + 2 * n_p], xss[a + 2 * n_p:a + 3 * n_p]
+    if not (xi[0] == 0.0 and abs(xi[-1] - 1.0) < 1e-6 and np.all(np.diff(xi) >= 0)
+            and np.all(pdf >= 0) and abs(cdf[0]) < 1e-6 and abs(cdf[-1] - 1.0) < 1e-4):
+        return None
+    return int(intt), n_p, xi, pdf, cdf

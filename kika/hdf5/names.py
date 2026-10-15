@@ -1,9 +1,9 @@
 """The names the format fixes: temperatures, nuclides, reaction labels.
 
 Every table here is OpenMC v0.16.0's, copied rather than imported (OpenMC is
-not a dependency, roadmap D3), with its source line. The C++ re-opens groups by
+not a dependency), with its source line. The C++ re-opens groups by
 the names these functions produce, so a name that differs by one character is a
-file that fails to load (``openmc_hdf5_format_survey.md`` §2.2).
+file that fails to load.
 """
 from __future__ import annotations
 

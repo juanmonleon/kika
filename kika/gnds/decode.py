@@ -205,7 +205,10 @@ class _SuiteReader:
         if applicationData is not None:
             from .endf_conversion import readConversionFlags
             from .resonance_extensions import read
+            from . import processed
             applicationData = readConversionFlags(applicationData, suite, self.report)
+            applicationData = processed.read(applicationData, suite, self.report,
+                                             lambda node: readForm(node, readAxes(node)))
             unknown=read(applicationData,suite,self.report,self.form)
             if unknown:self.report.lost(
                 f"{path}/applicationData holds "
@@ -817,10 +820,15 @@ def readReactionSuite(
 
     suite = _SuiteReader(document, documents, report).read()
     # The positive statement that this came from GNDS, which `kika.write` needs
-    # to decide the version to declare. See `GndsProvenance`.
-    suite.provenance = GndsProvenance(
-        formatVersion=root.attrib.get("format"),
-        path=None if document.path is None else str(document.path),
-    )
+    # to decide the version to declare. See `GndsProvenance`. A processed suite
+    # whose KIKA::processed block gave back the ACE table's bookkeeping keeps
+    # that instead (kika/gnds/processed.py): the ACE writer needs it, and a
+    # GNDS write of it takes the default version.
+    from kika.nuclear_data.model import AceProvenance, Hdf5Provenance
+    if not isinstance(suite.provenance, (AceProvenance, Hdf5Provenance)):
+        suite.provenance = GndsProvenance(
+            formatVersion=root.attrib.get("format"),
+            path=None if document.path is None else str(document.path),
+        )
     suite.report = report
     return suite, report

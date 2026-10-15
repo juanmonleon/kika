@@ -45,6 +45,10 @@ class KalbachMannDistribution(EnergyDistribution):
     # Store each energy-angle distribution
     # Each entry is a dictionary containing the distribution data
     distributions: List[Dict] = field(default_factory=list)
+    # Zero words NJOY left after each table, before the next one starts (NJOY
+    # 2016.78 reserves room in the MT5 of JEFF-4.0 and does not fill it): not
+    # data, kept so that the table is written back word for word.
+    padding: List[int] = field(default_factory=list)
     
     def get_distribution(self, energy_idx: int) -> Dict:
         """

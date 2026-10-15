@@ -84,6 +84,11 @@ COVARIANCE_MF = (31, 32, 33, 34, 35)
 #: declares per MT what it keeps verbatim instead.
 PHOTON_MF = (12, 13, 14, 15)
 
+#: The radioactive-production files of a reaction. Decoded by
+#: :mod:`.productions` into ``suite.productions``, which declares per state what
+#: it keeps as text instead.
+ACTIVATION_MF = (8, 9, 10)
+
 
 def _za(section) -> int:
     """ZA, **rounded** rather than truncated.
@@ -502,19 +507,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
             report = _attachEnergyAngleDistributions(suite, mf6.mt[mt], mt, report)
 
     present = set(getattr(endf, "mf", {}))
-    for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF)):
-        if mf == 8:
-            # In an incident-neutron evaluation the MTs of MF8 are the
-            # radioactive products of reactions (activation data).
-            mts = sorted(getattr(endf.mf[8], "mt", {}))
-            report.unsupportedNode(
-                f"MF8 (MT{mts[:6]}{'...' if len(mts) > 6 else ''}) is read and kept "
-                f"as the file states it; the radioactive products of a reaction "
-                f"are activation data and are not in this reactionSuite",
-                # Decay products and their yields, not a cross section MF3 states.
-                unaffectedScopes=("cross-sections",),
-            )
-            continue
+    for mf in sorted(present - set(SUPPORTED_MF) - set(PHOTON_MF) - set(ACTIVATION_MF)):
         report.unsupportedNode(
             f"MF{mf} is present in the file and this decoder does not convert "
             f"it; it is absent from this reactionSuite",
@@ -573,6 +566,11 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # just built.
     from .photons import attachPhotons
     report = attachPhotons(suite, endf, report)
+
+    # MF8-10, after every reaction exists: an MF9 state's cross section is a
+    # reference to its reaction's (roadmap E6).
+    from .productions import attachProductions
+    report = attachProductions(suite, endf, report)
 
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)

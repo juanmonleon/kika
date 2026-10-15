@@ -27,6 +27,8 @@ refuses and loses:
   parameters (SLBW, MLBW, Reich-Moore, R-Matrix Limited).
 - {doc}`processing/unresolved-resonances`: infinitely dilute averages in the unresolved
   range.
+- {doc}`processing/doppler-broadening`: cross-sections at a higher temperature, by
+  free-gas convolution of a colder table.
 - {doc}`processing/group-averaging`: flux-weighted group and window averages.
 - {doc}`processing/differential-cross-sections`: $d\sigma/d\Omega$, frame transforms and
   time-of-flight resolution.
@@ -67,5 +69,4 @@ refuses and loses:
   Legendre fits with model averaging, Monte Carlo covariances, adaptive multigroup collapse,
   $\chi^2$ against EXFOR). It is not part of the library package yet; its page follows when
   it is.
-- **Doppler broadening** in kika's own processing, in development.
 - **The shared notation page.**

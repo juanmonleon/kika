@@ -19,6 +19,9 @@ classifiers = [
 ]
 packages = [{include = "kika"}]
 include = [
+    {path = "kika/algebra/_polynomial_native.c", format = "sdist"},
+    {path = "kika/algebra/_polynomial_native*.pyd", format = "wheel"},
+    {path = "kika/algebra/_polynomial_native*.so", format = "wheel"},
     {path = "kika/processing/doppler/_doppler_native.c", format = "sdist"},
     {path = "kika/processing/doppler/_doppler_native*.pyd", format = "wheel"},
     {path = "kika/processing/doppler/_doppler_native*.so", format = "wheel"},
@@ -33,8 +36,12 @@ include = [
     {path = "kika/processing/_thermal_native.c", format = "sdist"},
     {path = "kika/processing/_thermal_native*.pyd", format = "wheel"},
     {path = "kika/processing/_thermal_native*.so", format = "wheel"},
+    {path = "kika/processing/_heating_native.c", format = "sdist"},
+    {path = "kika/processing/_heating_native*.pyd", format = "wheel"},
+    {path = "kika/processing/_heating_native*.so", format = "wheel"},
 ]
 exclude = [
+    "kika/algebra/_polynomial_native.c",
     "kika/processing/doppler/_doppler_native.c",
     "kika/**/tests",
     "kika/**/tests/**",
@@ -44,6 +51,7 @@ exclude = [
     "kika/processing/resonances/_rm_kernel.h",
     "kika/processing/resonances/_coulomb_native.c",
     "kika/processing/_thermal_native.c",
+    "kika/processing/_heating_native.c",
     "kika/UQ/output_directory/**",
     "kika/**/*.sdf",
     "kika/ace/writers/test_writing.02c",

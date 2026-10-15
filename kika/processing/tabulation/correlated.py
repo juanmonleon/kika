@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
+from dataclasses import replace
 
 import numpy as np
 
@@ -88,15 +89,78 @@ def _isotropicTable(outer):
     return table
 
 
+def _jointNodes(surface, options, discrete):
+    """Refine a linear joint Legendre law before splitting marginal/conditional PDFs.
+
+    Interpolating normalised conditional coefficients alone loses the joint law
+    when its marginal changes. The coefficient L1 bound uses |P_l(mu)| <= 1.
+    Zero-marginal endpoints take the adjacent limiting conditional distribution.
+    """
+    m = _m()
+    nodes = list(surface.function1ds)
+    if discrete or surface.interpolation != m.Interpolation.linlin or not all(isinstance(n, m.Legendre) for n in nodes):
+        return nodes
+    import copy
+    order = max(len(n.coefficients) for n in nodes)
+    weights = (2*np.arange(order)+1)/2
+    pairs = [(float(n.outerDomainValue), np.pad(np.asarray(n.coefficients,float), (0,order-len(n.coefficients)))) for n in nodes]
+    peak=max(float(np.sum(weights*abs(c))) for _,c in pairs)
+    for iteration in range(40):
+        refined=[];changed=False;worst=0.;bad=None
+        for left,right in zip(pairs[:-1],pairs[1:]):
+            a,ca=left;b,cb=right;refined.append(left)
+            if b<=a:continue
+            mid=(ca+cb)/2
+            if mid[0]<=0:continue
+            na=ca/ca[0] if ca[0]>0 else cb/cb[0]
+            nb=cb/cb[0] if cb[0]>0 else na
+            linear=(na+nb)/2
+            error=float(np.sum(weights*abs(mid-mid[0]*linear)))
+            scale=max(float(np.sum(weights*abs(mid))),1e-300)
+            if error > options.rtol*scale+options.atol*peak:
+                if error/scale>worst:worst=error/scale;bad=(a,b,ca.tolist(),cb.tolist())
+                refined.append(((a+b)/2,mid));changed=True
+        refined.append(pairs[-1])
+        if len(refined)>options.maxPoints:raise ValueError("joint energy-angle refinement exceeds maxPoints")
+        pairs=refined
+        if not changed:break
+    else:raise ValueError(f"joint refinement did not converge: E={surface.outerDomainValue}, worst={worst}, panel={bad}")
+    result=[]
+    for x,c in pairs:
+        node=copy.copy(nodes[0]);node.outerDomainValue=x;node.coefficients=c.copy();result.append(node)
+    return result
+
+
 def tabulateEnergyAngular(form, options: TabulationOptions, *,
                           discrete: Optional[Sequence[int]] = None):
     """energyAngular (Legendre in mu per E') → energyAngularMC."""
     m = _m()
+    options = replace(options, rtol=min(options.rtol, options.correlatedRtol),
+                      atol=min(options.atol, options.correlatedAtol))
     xys3d = form.xys3d
     spectra, angular = [], []
+    # Repeated normalized Legendre laws are common across outgoing energies.
+    # Keep this cache local and bounded; returned mutable tables own their arrays.
+    from collections import OrderedDict
+    angularCache = OrderedDict()
+    def angleTable(node, outer):
+        import copy
+        key = (np.asarray(node.coefficients,dtype=float).tobytes()
+               if isinstance(node,m.Legendre) else None)
+        if key is not None and key in angularCache:
+            angularCache.move_to_end(key)
+            table = copy.deepcopy(angularCache[key])
+            table.outerDomainValue = outer
+            return table
+        table, _ = muTable(node, options, outer=outer)
+        if key is not None:
+            angularCache[key] = table
+            if len(angularCache)>256:angularCache.popitem(last=False)
+        return table
     for k, surface in enumerate(xys3d.function2ds):
         energy = surface.outerDomainValue
-        nodes = list(surface.function1ds)
+        nd = int(discrete[k]) if discrete is not None and k < len(discrete) else 0
+        nodes = _jointNodes(surface, options, nd)
         eOut = np.array([n.outerDomainValue for n in nodes], dtype=float)
         f0 = np.array([_magnitude(n) for n in nodes], dtype=float)
         histogram = surface.interpolation == m.Interpolation.flat
@@ -104,14 +168,19 @@ def tabulateEnergyAngular(form, options: TabulationOptions, *,
         table, _ = pdfTable(eOut, f0, histogram=histogram, options=options, discrete=nd, outer=energy)
         spectra.append(table)
         tables = []
-        for node, magnitude in zip(nodes, f0):
+        for inode, (node, magnitude) in enumerate(zip(nodes, f0)):
             if magnitude > 0:
                 normalised = _normalisedNode(node, magnitude)
-                mu, _ = muTable(normalised, options, outer=node.outerDomainValue)
+                mu = angleTable(normalised, node.outerDomainValue)
             else:
-                mu = _isotropicTable(node.outerDomainValue)
+                neighbours = [j for j in (inode-1,inode+1) if 0 <= j < len(nodes) and f0[j] > 0]
+                if not nd and not histogram and isinstance(node,m.Legendre) and neighbours:
+                    j = neighbours[0]
+                    mu = angleTable(_normalisedNode(nodes[j],f0[j]),node.outerDomainValue)
+                else:mu = _isotropicTable(node.outerDomainValue)
             tables.append(mu)
-        angular.append(m.XYs2d(function1ds=tables, outerDomainValue=energy))
+        angular.append(m.XYs2d(function1ds=tables, outerDomainValue=energy,
+                                interpolation=surface.interpolation))
     energyForm = m.XYs2d(function1ds=spectra, interpolation=xys3d.interpolation,
                          interpolationQualifier=xys3d.interpolationQualifier)
     return m.EnergyAngularMC(energy=energyForm,

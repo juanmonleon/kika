@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional
 from kika.ace.classes.ace import Ace
 from kika.ace.classes.secondary_particles.secondary_particle_cross_sections import SecondaryParticleCrossSections, ParticleProductionCrossSection
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -99,8 +100,7 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
         # Get the HPD index for this particle
         hpd_idx = locator_set.hpd
         if hpd_idx <= 0:
-            if debug:
-                logger.debug(f"Invalid cross section location {hpd_idx} for particle type {j}, skipping")
+            lost(ace, "HPD", "", f"Invalid cross section location {hpd_idx} for particle type {j}, skipping")
             continue
         
         if debug:
@@ -108,14 +108,12 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
         
         # Check if HPD index is valid
         if hpd_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Cross section location {hpd_idx} exceeds XSS length {len(ace.xss_data)}")
+            lost(ace, "HPD", "", f"Cross section location {hpd_idx} exceeds XSS length {len(ace.xss_data)}")
             continue
         
         # Check if we have enough data to read the basic parameters
         if hpd_idx + 2 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Not enough data at index {hpd_idx}, skipping")
+            lost(ace, "HPD", "", f"Not enough data at index {hpd_idx}, skipping")
             continue
         
         # Read the energy grid index (IE)
@@ -129,8 +127,7 @@ def parse_hpd_block(ace: Ace, debug: bool = False) -> SecondaryParticleCrossSect
         
         # Check if we have enough data for the cross sections and heating numbers
         if hpd_idx + 2 + 2*ne - 1 >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"Not enough data for cross section values, skipping")
+            lost(ace, "HPD", "", f"Not enough data for cross section values, skipping")
             continue
         
         # Create a data object for this particle

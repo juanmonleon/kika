@@ -7,6 +7,7 @@ from kika.ace.classes.photon_production_xs import (
     PhotonProductionCrossSections, ParticleProductionCrossSections,
     YieldBasedCrossSection, DirectCrossSection
 )
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -115,8 +116,7 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
         return result
     
     if sigp_idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Invalid SIGP block location: JXS(15)={sigp_idx} exceeds XSS length {len(ace.xss_data)}")
+        lost(ace, "SIGP", "", f"Invalid SIGP block location: JXS(15)={sigp_idx} exceeds XSS length {len(ace.xss_data)}")
         return result
     
     # Check if cross section locators are available
@@ -130,9 +130,8 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
     mts = ace.reaction_mt_data.photon_production
     locators = ace.xs_locators.photon_production
     
-    if len(mts) == 0 or len(locators) == 0 or len(mts) != len(locators):
-        if debug:
-            logger.debug(f"Invalid data: mts={len(mts) if mts else 0}, locators={len(locators) if locators else 0}")
+    if len(mts) != len(locators):
+        lost(ace, "SIGP", "", f"MTRP has {len(mts)} entries but LSIGP {len(locators)}")
         return result
     
     if debug:
@@ -156,8 +155,7 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
         
         # Check bounds
         if xs_start_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  ERROR: Index {xs_start_idx} exceeds XSS length {len(ace.xss_data)}")
+            lost(ace, "SIGP", f"MT={mt_value}", f"Index {xs_start_idx} exceeds XSS length {len(ace.xss_data)}")
             continue
         
         # Read the cross section data based on MFTYPE
@@ -170,7 +168,11 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
         if mftype in (12, 16):
             if debug:
                 logger.debug(f"  Processing yield-based cross section (MFTYPE={mftype})")
-            xs = read_yield_based_xs(ace.xss_data, xs_start_idx, mt_value, mftype, debug)
+            try:
+                xs = read_yield_based_xs(ace.xss_data, xs_start_idx, mt_value, mftype, debug)
+            except (ValueError, IndexError) as e:
+                lost(ace, "SIGP", f"MT={mt_value}", str(e))
+                continue
             if xs:
                 result.cross_sections[mt_value] = xs
                 result.has_data = True
@@ -179,15 +181,18 @@ def read_photon_production_xs(ace: Ace, debug=False) -> PhotonProductionCrossSec
         elif mftype == 13:
             if debug:
                 logger.debug("  Processing direct cross section (MFTYPE=13)")
-            xs = read_direct_xs(ace.xss_data, xs_start_idx, mt_value, debug)
+            try:
+                xs = read_direct_xs(ace.xss_data, xs_start_idx, mt_value, debug)
+            except (ValueError, IndexError) as e:
+                lost(ace, "SIGP", f"MT={mt_value}", str(e))
+                continue
             if xs:
                 result.cross_sections[mt_value] = xs
                 result.has_data = True
                 if debug:
                     logger.debug(f"  Successfully read direct cross section for MT={mt_value}")
         else:
-            if debug:
-                logger.debug(f"  Unsupported MFTYPE: {mftype}")
+            lost(ace, "SIGP", f"MT={mt_value}", f"MFTYPE={mftype} is not 12, 13 or 16")
     
     return result
 
@@ -280,8 +285,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
         return result
     
     if jxs31_idx >= len(ace.xss_data) or jxs32_idx >= len(ace.xss_data):
-        if debug:
-            logger.debug(f"Invalid block locations: JXS(31)={jxs31_idx}, JXS(32)={jxs32_idx} exceed XSS length {len(ace.xss_data)}")
+        lost(ace, "SIGH", "", f"Invalid block locations: JXS(31)={jxs31_idx}, JXS(32)={jxs32_idx} exceed XSS length {len(ace.xss_data)}")
         return result
     
     # Check if reaction MT data and cross section locators are available
@@ -315,8 +319,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             logger.debug(f"  NMT index: JXS(31) + i - 1 = {jxs31_idx} + {i} - 1 = {nmt_idx}")
         
         if nmt_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  ERROR: NMT index {nmt_idx} exceeds XSS length {len(ace.xss_data)}")
+            lost(ace, "SIGH", "", f"NMT index {nmt_idx} exceeds XSS length {len(ace.xss_data)}")
             continue
         
         nmt_entry = ace.xss_data[nmt_idx]
@@ -332,8 +335,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             logger.debug(f"  SIG index location: JXS(32) + 10*(i-1) + 4 = {jxs32_idx} + 10*({i}-1) + 4 = {sig_idx_loc}")
         
         if sig_idx_loc >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  ERROR: SIG index location {sig_idx_loc} exceeds XSS length {len(ace.xss_data)}")
+            lost(ace, "SIGH", "", f"SIG index location {sig_idx_loc} exceeds XSS length {len(ace.xss_data)}")
             continue
         
         sig_idx_entry = ace.xss_data[sig_idx_loc]
@@ -349,8 +351,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             continue
             
         if sig_idx >= len(ace.xss_data):
-            if debug:
-                logger.debug(f"  Invalid SIG location: {sig_idx} exceeds XSS length {len(ace.xss_data)}")
+            lost(ace, "SIGH", "", f"Invalid SIG location: {sig_idx} exceeds XSS length {len(ace.xss_data)}")
             continue
         
         # Get MT numbers and locators for this particle type
@@ -368,9 +369,10 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
         mts = ace.reaction_mt_data.particle_production[i-1]
         locators = ace.xs_locators.particle_production[i-1]
         
-        if len(mts) == 0 or len(locators) == 0 or len(mts) != len(locators):
-            if debug:
-                logger.debug(f"  Invalid data: mts={len(mts) if mts else 0}, locators={len(locators) if locators else 0}")
+        if len(mts) != len(locators):
+            lost(ace, "SIGH", f"particle {i}", f"MTRH has {len(mts)} entries but LSIGH {len(locators)}")
+            continue
+        if len(mts) == 0:
             continue
         
         if debug:
@@ -397,8 +399,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             
             # Check bounds
             if xs_start_idx >= len(ace.xss_data):
-                if debug:
-                    logger.debug(f"    ERROR: Index {xs_start_idx} exceeds XSS length {len(ace.xss_data)}")
+                lost(ace, "SIGH", f"particle {i} MT={mt_value}", f"Index {xs_start_idx} exceeds XSS length {len(ace.xss_data)}")
                 continue
             
             # Read the cross section data based on MFTYPE
@@ -411,7 +412,11 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
             if mftype in (12, 16):
                 if debug:
                     logger.debug(f"    Processing yield-based cross section (MFTYPE={mftype})")
-                xs = read_yield_based_xs(ace.xss_data, xs_start_idx, mt_value, mftype, debug)
+                try:
+                    xs = read_yield_based_xs(ace.xss_data, xs_start_idx, mt_value, mftype, debug)
+                except (ValueError, IndexError) as e:
+                    lost(ace, "SIGH", f"particle {i} MT={mt_value}", str(e))
+                    continue
                 if xs:
                     # Keyed by particle type too: the same MT (e.g. MT5)
                     # produces several particles
@@ -420,8 +425,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
                     if debug:
                         logger.debug(f"    Successfully read yield-based cross section for MT={mt_value}")
             else:
-                if debug:
-                    logger.debug(f"    Unsupported MFTYPE: {mftype}")
+                lost(ace, "SIGH", f"particle {i} MT={mt_value}", f"MFTYPE={mftype} is not 12 or 16")
     
     # Add this check at the end to ensure consistency
     if result.particle_cross_sections:
@@ -467,9 +471,7 @@ def read_yield_based_xs(xss: np.ndarray, start_idx: int, mt: int, mftype: int, d
         The parsed cross section data or None if there was an error
     """
     if start_idx + 2 >= len(xss):
-        if debug:
-            logger.debug(f"    ERROR: Index {start_idx + 2} exceeds XSS length {len(xss)}")
-        return None
+        raise ValueError(f"Index {start_idx + 2} exceeds XSS length {len(xss)}")
     
     xs = YieldBasedCrossSection(mt=mt, mftype=mftype)
     
@@ -492,9 +494,7 @@ def read_yield_based_xs(xss: np.ndarray, start_idx: int, mt: int, mftype: int, d
     # Read interpolation data if present
     if xs.num_regions > 0:
         if current_idx + 2 * xs.num_regions - 1 >= len(xss):
-            if debug:
-                logger.debug(f"    ERROR: Not enough data for interpolation regions")
-            return None
+            raise ValueError(f"Not enough data for interpolation regions")
         
         # Read NBT array (view of xss_data)
         xs.interpolation_bounds = xss[current_idx:current_idx + xs.num_regions]
@@ -512,9 +512,7 @@ def read_yield_based_xs(xss: np.ndarray, start_idx: int, mt: int, mftype: int, d
     
     # Read number of energies (NE)
     if current_idx >= len(xss):
-        if debug:
-            logger.debug(f"    ERROR: Index {current_idx} exceeds XSS length {len(xss)}")
-        return None
+        raise ValueError(f"Index {current_idx} exceeds XSS length {len(xss)}")
         
     num_energies_entry = xss[current_idx]
     xs.num_energies = int(num_energies_entry)
@@ -525,9 +523,7 @@ def read_yield_based_xs(xss: np.ndarray, start_idx: int, mt: int, mftype: int, d
     
     # Check bounds
     if current_idx + 2 * xs.num_energies - 1 >= len(xss):
-        if debug:
-            logger.debug(f"    ERROR: Not enough data for energy/yield points")
-        return None
+        raise ValueError(f"Not enough data for energy/yield points")
     
     # Read energies (E array) (view of xss_data)
     xs.energies = xss[current_idx:current_idx + xs.num_energies]
@@ -568,9 +564,7 @@ def read_direct_xs(xss: np.ndarray, start_idx: int, mt: int, debug=False) -> Opt
         The parsed cross section data or None if there was an error
     """
     if start_idx + 2 >= len(xss):
-        if debug:
-            logger.debug(f"    ERROR: Index {start_idx + 2} exceeds XSS length {len(xss)}")
-        return None
+        raise ValueError(f"Index {start_idx + 2} exceeds XSS length {len(xss)}")
     
     xs = DirectCrossSection(mt=mt, mftype=13)
     
@@ -590,9 +584,7 @@ def read_direct_xs(xss: np.ndarray, start_idx: int, mt: int, debug=False) -> Opt
     
     # Check bounds
     if start_idx + 3 + xs.num_entries - 1 >= len(xss):
-        if debug:
-            logger.debug(f"    ERROR: Not enough data for cross section values")
-        return None
+        raise ValueError(f"Not enough data for cross section values")
     
     # Read cross section values (view of xss_data)
     xs.cross_sections = xss[start_idx + 3:start_idx + 3 + xs.num_entries]

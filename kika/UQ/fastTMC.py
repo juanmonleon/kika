@@ -63,13 +63,15 @@ def fastTMC(
     -------
     dict or pd.DataFrame
         For single tally: Dict with uncertainty decomposition results including:
-            - 'mean_tally': Mean value across samples
-            - 'percent_unc_observed': Total observed uncertainty (%)
-            - 'percent_unc_statistical': Statistical uncertainty component (%)
-            - 'percent_unc_nuclear_data': Nuclear data uncertainty component (%)
-            - 'is_reliable': Boolean flag indicating if decomposition is reliable
-            - 'bootstrap': Bootstrap resampling results
-            - 'ci': Confidence intervals for key quantities
+
+        - 'mean_tally': Mean value across samples
+        - 'percent_unc_observed': Total observed uncertainty (%)
+        - 'percent_unc_statistical': Statistical uncertainty component (%)
+        - 'percent_unc_nuclear_data': Nuclear data uncertainty component (%)
+        - 'is_reliable': Boolean flag indicating if decomposition is reliable
+        - 'bootstrap': Bootstrap resampling results
+        - 'ci': Confidence intervals for key quantities
+
         For multiple tallies: DataFrame with summary results including reliability flags.
         
         Note: When is_reliable is False, use percent_unc_observed instead of 

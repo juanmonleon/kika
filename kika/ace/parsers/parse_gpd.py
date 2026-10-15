@@ -1,6 +1,7 @@
 import logging
 from typing import List
 from kika.ace.classes.gpd import PhotonProductionData
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -77,8 +78,7 @@ def read_gpd_block(ace, debug=False):
     
     # Check if we have enough data for the total photon production cross section
     if gpd_idx + n_energy > len(ace.xss_data):
-        if debug:
-            logger.debug(f"ERROR: GPD block would extend beyond XSS array: {gpd_idx + n_energy} > {len(ace.xss_data)}")
+        lost(ace, "GPD", "", f"GPD block would extend beyond XSS array: {gpd_idx + n_energy} > {len(ace.xss_data)}")
         return None
     
     # Extract total photon production cross section (view of xss_data)

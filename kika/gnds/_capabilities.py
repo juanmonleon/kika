@@ -177,6 +177,8 @@ _IN_BOTH = frozenset("""
 _FAMILIES: Dict[str, Tuple[str, ...]] = {
     "CoulombPlusNuclearElastic": ("crossSectionForm",),
     "KalbachMann": ("distributionForm",),
+    "energyAngularMC": ("distributionForm",),
+    "xs_pdf_cdf1d": ("function1d",),
     "BraggEdges": ("coherentElasticForm",),
     "GaussianApproximation": ("scatteringKernelForm",),
     "Legendre": ("function1d",),
@@ -747,12 +749,32 @@ _NOT_IN_SCHEMA_WHY = (
 )
 
 for _style in ("realization", "angularDistributionReconstructed",
-               "CoulombPlusNuclearElasticMuCutoff", "MonteCarlo_cdf",
-               "griddedCrossSection", "URR_probabilityTables",
+               "CoulombPlusNuclearElasticMuCutoff",
+               "griddedCrossSection",
                "heatedMultiGroup", "SnElasticUpScatter"):
     _one(_style, Coverage.PARTIAL, None, "notInSchemaStyles",
          _NOT_IN_SCHEMA_WHY,
          where="not in gnds.xsd")
+
+for _style in ("MonteCarlo_cdf", "URR_probabilityTables"):
+    _one(_style, Coverage.FULL, None, "processedStyles",
+         "§9.4.3/§9.4.5, read and written (roadmap A11). Not in FUDGE 6.10.0's "
+         "RS_StylesType, which this census follows; FUDGE's current gnds.xsd "
+         "(2026-09-30, gnds.xsd:111-113) declares both, with label, date and "
+         "derivedFrom",
+         where="not in gnds.xsd")
+
+_one("xs_pdf_cdf1d", Coverage.FULL, None, "processedForms",
+     "§9.4.3's MonteCarlo_cdf table, read and written in FUDGE's spelling "
+     "(xData/xs_pdf_cdf.py: xs, pdf, cdf). FUDGE writes it and neither its "
+     "6.10.0 nor its current gnds.xsd declares it. A table's leading discrete "
+     "lines go to applicationData KIKA::processed (roadmap A11)",
+     where="not in gnds.xsd")
+_one("energyAngularMC", Coverage.FULL, None, "processedForms",
+     "the Monte Carlo energy-angle form (§18.1.1), read and written as FUDGE's "
+     "energyAngularMC.py spells it; FUDGE's current gnds.xsd:1516 declares it, "
+     "6.10.0's does not (roadmap A11)",
+     where="not in gnds.xsd")
 
 _one("Ys1d", Coverage.UNSUPPORTED, None, "notInSchemaForms",
      "modelled, and gnds.xsd declares no <Ys1d> at all -- §6.2.5 is a 2.1 "

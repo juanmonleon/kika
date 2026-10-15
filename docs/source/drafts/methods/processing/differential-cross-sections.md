@@ -9,9 +9,9 @@ and folded with a time-of-flight resolution.
 
 **Applies to:** elastic scattering (two-body kinematics), Legendre or tabulated MF 4.
 
-**Entry points:** `kika.endf.dcs.differential_xs_vs_angle`,
-`kika.endf.dcs.differential_xs_vs_energy`, `kika.endf.dcs.resolve_sigma`,
-`kika.endf.dcs.TofResolution`, `kika.utils.energy_folding.tof_energy_resolution`.
+**Entry points:** {py:func}`kika.endf.dcs.differential_xs_vs_angle`,
+{py:func}`kika.endf.dcs.differential_xs_vs_energy`, {py:func}`kika.endf.dcs.resolve_sigma`,
+{py:class}`kika.endf.dcs.TofResolution`, {py:func}`kika.utils.energy_folding.tof_energy_resolution`.
 
 **Status:** stable.
 ```
@@ -65,11 +65,11 @@ and a distribution changes frame as a density, $f_L(\mu_L) = f_C(\mu_C)\, d\mu_C
   end values are held.
 - *Bin-averaged* over $[E_\text{lo}, E_\text{hi}]$ with weight $w(E) = 1/E$ (lethargy) or 1:
   $\langle\sigma\rangle = \int \sigma w\,dE / \int w\,dE$, integrated exactly under the
-  same law by the group average of {doc}`group-averaging` (`kika.algebra.group_averages`),
+  same law by the group average of {doc}`group-averaging` ({py:func}`kika.algebra.group_averages`),
   over the part of the bin the table covers.
 - *Folded* with a Gaussian resolution of width $\sigma_E(E)$:
   $\tilde\sigma(E_0) = \int \sigma(E)\, \mathcal{N}(E; E_0, \sigma_E^2)\, dE$, computed
-  exactly on the lin-lin interpolant of the table (`kika.algebra.fold_tabulated`).
+  exactly on the lin-lin interpolant of the table ({py:func}`kika.algebra.fold_tabulated`).
 
 **4. Time-of-flight resolution.** With flight path $L$ and timing spread $\delta t$, the
 time of flight is $t = L/v$ with $v = c\sqrt{2E/m_n c^2}$ (non-relativistic), and

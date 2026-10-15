@@ -11,7 +11,8 @@ from .reaction_id import ReactionId
 from .sums import MultiplicitySum, MultiplicitySums, Summands
 
 __all__ = ["Reaction", "CrossSectionSum", "Reactions", "Sums", "OrphanProducts",
-           "FissionComponents", "Productions", "IncompleteReactions"]
+           "FissionComponents", "Productions", "IncompleteReactions",
+           "isRadionuclideProduction"]
 
 
 @dataclass
@@ -96,6 +97,14 @@ class _ReactionList:
 
     def append(self, reaction: Reaction) -> None:
         self.reactions.append(reaction)
+
+    def remove(self, reaction: Reaction) -> None:
+        """Drop ``reaction`` (the object itself, not an equal one)."""
+        for i, held in enumerate(self.reactions):
+            if held is reaction:
+                del self.reactions[i]
+                return
+        raise ValueError("that reaction is not in this container")
 
     def byLabel(self, label: str) -> Reaction:
         for reaction in self.reactions:
@@ -195,6 +204,19 @@ class FissionComponents(_ReactionList):
 
 class Productions(_ReactionList):
     """§14.1.1. Production reactions."""
+
+
+def isRadionuclideProduction(reaction) -> bool:
+    """A ``production`` of a radioactive nuclide (ENDF MF8-10, roadmap E6).
+
+    Told apart from the other responses ``suite.productions`` holds (gas
+    production, MT203-207) by its channel's ``genre``, which the ENDF and GNDS
+    decoders both set to ``production``. It shares its MT with the reaction that
+    makes it -- MT102's isomer is MT102 -- so it is not a cross section of the
+    material: whatever projects reactions by MT (the resonance reconstruction,
+    Doppler broadening, OpenMC's format) leaves it out and treats it on its own.
+    """
+    return getattr(getattr(reaction, "outputChannel", None), "genre", None) == "production"
 
 
 class IncompleteReactions(_ReactionList):

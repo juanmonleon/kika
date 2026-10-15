@@ -1,4 +1,4 @@
-"""A thermal scattering evaluation → the processed suite the thermal encoder writes (H9b, H9c).
+"""A thermal scattering evaluation → the processed suite the thermal encoder writes.
 
 As OpenMC's ``ThermalScattering.from_njoy`` builds its official files
 (``thermal.py:966-1038``, ``njoy.py:595-760``), without NJOY:
@@ -70,12 +70,13 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
     ``name`` is the OpenMC table name (``c_H_in_H2O``); ``temperatures`` in
     kelvin, by default every temperature the evaluation tabulates. The
     incoherent inelastic tables are kika's (:func:`kika.processing.thermal.inelasticTables`,
-    THERMR + ACER, roadmap H9c); the elastic comes from the evaluation, as
+    THERMR + ACER); the elastic comes from the evaluation, as
     OpenMC's ``from_njoy`` takes it with ``use_endf_data``: incoherent from
     σ_b and the Debye-Waller integral, coherent from the Bragg edges and the
-    cumulative structure factors at the temperature. ``neutron`` (the
-    principal nuclide's tape) is no longer read; it is accepted so a caller of
-    the NJOY-era signature keeps working.
+    cumulative structure factors at the temperature. ``neutron`` is the
+    principal nuclide's neutron tape: its atomic weight ratio is the table's
+    header AWR, as ACER takes it (graphite 11.89365, where the scattering law's
+    B(3) is 11.898). Without it the header carries B(3).
     """
     m = _m()
     import kika
@@ -93,9 +94,17 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
                               f"{sorted(THERMAL_DATA)[:5]}...")
     entry = THERMAL_DATA[name]
     tsl = kika.read(str(thermal), covariances=False)
+    # The low-level ENDF reader can report a malformed MT2 and continue with
+    # MT4. A valid inelastic kernel must not hide the missing elastic physics.
+    if (_declaresElastic(thermal) and _law(tsl, m.CoherentElastic) is None
+            and _law(tsl, m.IncoherentElastic) is None):
+        raise HDF5FormatError("the evaluation declares MF7/MT2 but its elastic law "
+                              "was not decoded; refusing an incomplete thermal file")
     inelastic = _law(tsl, m.IncoherentInelastic)
     if inelastic is None:
-        raise HDF5FormatError("the thermal evaluation has no incoherent inelastic law")
+        issues = getattr(getattr(tsl, "report", None), "unsupported", [])
+        detail = "; decoder: " + "; ".join(issues[:3]) if issues else ""
+        raise HDF5FormatError("the thermal evaluation has no incoherent inelastic law" + detail)
     temps = [float(t) for t in (temperatures or _evaluationTemperatures(tsl))]
     awr = _principalAwr(tsl, inelastic)
     # The table's AWR is ACER's: the principal nuclide's, read from its neutron
@@ -137,7 +146,7 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
         # The ACE header's AWR, written with six decimals (ACER's f12.6).
         "atomic_weight_ratio": round(float(headerAwr), 6), "energy_max": float(energyMax),
         "nuclides": nuclidesFromPairs([(z, 0.0) for z in entry.zaids])})
-    report.warn("thermal inelastic by kika (THERMR's calcem and ACER's iwt=2, roadmap H9c); "
+    report.warn("thermal inelastic by kika (THERMR's calcem and ACER's iwt=2); "
                 "elastic from the evaluation (use_endf_data)")
     suite.report = report
     return suite
@@ -281,14 +290,39 @@ def _evaluatedElastic(tsl, T: float, report, nmix: int = 1):
         match = [t for t in coherent.temperatures if abs(t - T) < 0.05]
         if not match:
             raise HDF5FormatError(f"the coherent elastic is not tabulated at {T} K")
-        edges, factors = _acerBraggEdges(coherent.braggEdges(), coherent.cumulativeS(match[0]),
-                                         float(inelasticEmax(tsl)), nmix)
+        if incoherent is not None:
+            # OpenMC from_njoy(use_endf_data=True) replaces a mixed elastic
+            # law from the evaluated source, including its coherent part.
+            # Keep all physical edges and factors rather than truncating and
+            # rounding this part through ACE's coherent-only serialization.
+            edges = np.asarray(coherent.braggEdges(), dtype=float)
+            factors = np.asarray(coherent.cumulativeS(match[0]), dtype=float) / nmix
+        else:
+            edges, factors = _acerBraggEdges(coherent.braggEdges(), coherent.cumulativeS(match[0]),
+                                             float(inelasticEmax(tsl)), nmix)
         coh = (m.CoherentElasticXS(braggEdges=edges, structureFactors=factors),
                m.CoherentElasticMC())
     if coh and inc:
         return (m.SumOfFunctions(functions=[coh[0], inc[0]]),
                 m.MixedElasticMC(coherent=coh[1], incoherent=inc[1]))
     return coh or inc or (None, None)
+
+
+def _declaresElastic(path) -> bool:
+    """Presence of MF7/MT2 in an ENDF source, only as a completeness guard.
+
+    Numerical values still come exclusively from the model. GNDS sources
+    have no ENDF directory and are not scanned as ENDF records.
+    """
+    with open(path, errors="replace") as handle:
+        first = handle.readline()
+        if first.lstrip("\ufeff \t\r\n").startswith("<"):
+            return False
+        for line in handle:
+            if (len(line) >= 75 and line[70:72].strip() == "7"
+                    and line[72:75].strip() == "2"):
+                return True
+    return False
 
 
 def _matOf(path) -> int:

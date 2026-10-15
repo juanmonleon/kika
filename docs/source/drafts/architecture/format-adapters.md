@@ -7,8 +7,9 @@ encodes the model back; one door, {py:func}`kika.read`, routes any file to the r
 decoder, and one door, {py:func}`kika.write`, to the right encoder.
 
 **Packages:** `kika.endf` (with `kika.endf.model_adapter` and `kika.endf.writers`),
-`kika.gnds`, `kika.ace` (with `kika.ace.model_adapter`), `kika.g4ndl`, and the doors in
-`kika/_read.py`, `kika/_write.py`, `kika/_identify.py`.
+`kika.gnds`, `kika.ace` (with `kika.ace.model_adapter`), `kika.g4ndl`, `kika.hdf5`, the doors in
+`kika/_read.py`, `kika/_write.py`, `kika/_identify.py`, and `kika.tsl`, through which the
+door reads the thermal-scattering tables of the processed formats.
 
 **Enforced by:** `kika/tests/test_read_front_door.py` (the door is a route),
 `kika/endf/model_adapter/tests/test_nothing_imports_the_adapter.py` (who may import an
@@ -23,6 +24,14 @@ adapter), and each format's round-trip tests.
 | GNDS | `readReactionSuite`, `readCovarianceSuite` (`kika.gnds`), straight from the XML tree | `writeReactionSuite`, `writeCovarianceSuite` | Read, write, read is a fixed point on the numbers; write, read, write is a fixed point on the tree |
 | ACE | `read_ace` parses; `decodeAce` (`kika.ace.model_adapter`) decodes | None from the model: ACE is produced by NJOY from an ENDF tape | The parsed ACE object, read and written back, returns every XSS entry bitwise identical |
 | G4NDL | `kika.g4ndl.open(root).read(target)`: elastic, inelastic, capture and fission | `writeSuite`, and `patch_isotope` / `patch_elastic` on an existing library | Read and write over whole libraries, per channel |
+| OpenMC HDF5 | `kika.hdf5.api.read`, by the file's `filetype`: `data_neutron` and `data_thermal` (`data_photon` is refused: the model has no photo-atomic suite) | `kika.hdf5.writer.writeSuite`: a processed suite is serialised; an evaluation is processed first ({doc}`../methods/processing/processing-chain`) | HDF5, model, HDF5 gives the same tree, record for record |
+
+**Thermal-scattering tables in processed form** (an ACE `.NNt` table, a material of a
+G4NDL `ThermalScattering` folder) are not a format package of their own: the door hands
+them to `kika.tsl`, which reads them into a processed thermal suite, with the
+outgoing-neutron sampling tables kept beside the model (GNDS has no node for an
+equiprobable cosine set). OpenMC thermal files go through `kika.hdf5`, and ENDF-6 and
+GNDS thermal evaluations through their own adapters.
 
 The doors:
 
@@ -31,14 +40,16 @@ The doors:
   and returns a `ReactionSuite` (a `PoPs` tree for decay and fission-yield data, a
   photo-atomic object for photo-atomic ACE). The conversion report is on `suite.report`.
   `format=` forces a format past the recognition; `covariances=False` skips them;
-  `target=` names the isotope in a G4NDL library, which is a directory.
-- {py:func}`kika.write` `(suite, path, format="gnds", ...)` writes a suite as GNDS, ENDF
-  or G4NDL and returns the conversion report of the writing. A suite with covariances is
+  `target=` names the isotope in a G4NDL library, which is a directory, or a material of
+  its `ThermalScattering` folder.
+- {py:func}`kika.write` `(suite, path, format="gnds", ...)` writes a suite as GNDS, ENDF,
+  G4NDL or OpenMC HDF5 (`temperatures=` and the processing options apply to HDF5 only) and returns the conversion report of the writing. A suite with covariances is
   written to GNDS as two files, the evaluation and its covariances, linked as the
   specification requires.
 - {py:func}`kika.identify` `(path)` names what kind of file a path is, for every format
   kika reads (covariance libraries, SDF, MCNP and Serpent files, NJOY decks as well as the
-  four above), from the head of its content and without running a parser.
+  five above), from the head of its content and without running a parser. An HDF5 file is
+  named only when h5py is installed; without it, it is an unknown kind, not an error.
 
 ## Design decisions
 
@@ -60,8 +71,8 @@ what was tried; a binary file is refused instead of being handed to a text decod
 For ENDF and ACE, reading has two steps: a parser that turns the file into objects
 shaped like the format (sections, records), and a decoder that turns those into the
 model. The format-shaped objects (`kika.read_endf`, `kika.read_ace`) are public and not
-deprecated. The model does not cover every part of every file (ENDF MF 8 to 10, for
-instance), evaluators legitimately work in the format's own terms, and decoding into the
+deprecated. The model does not cover every part of every file (ENDF MF 23 to 28 and
+MF 39 to 40, for instance), evaluators legitimately work in the format's own terms, and decoding into the
 model costs about 2.5 times a bare parse, which a high-throughput pipeline does not pay.
 GNDS has no such layer: its tree already has the model's shape, so the XML goes straight
 into the model.
@@ -132,10 +143,12 @@ on `suite.covarianceSuite`; the GNDS writer writes it as a sibling file.
 
 ## Known exceptions
 
-- **No model-to-ACE encoder.** ACE is written from the parsed ACE object, or produced by
-  NJOY from an ENDF tape; `kika.write` does not offer ACE.
-- **ACE decodes into the `gridded` style**, not `eval`: its cross-sections are values on
-  ACE's unionised grid at the file's temperature, not the evaluation.
+- **ACE is not a `kika.write` target.** `encodeAce` writes a processed suite to an ACE
+  table at one temperature, but `kika.write` does not offer it, and an ACE table from an
+  evaluation is produced by NJOY.
+- **ACE decodes into the processed styles** (`heated_<T>`, `URR_<T>`, `MonteCarlo`), not
+  `eval`: its cross-sections are values on ACE's unionised grid at the file's temperature,
+  not the evaluation.
 - **Only GNDS has a capability census.** `kika.gnds.capabilities()` states, for every
   node of the GNDS schemas, whether kika reads and writes it. The other formats state
   their coverage on their methods page, and in the report of each conversion.
@@ -172,6 +185,9 @@ methods chapter: {doc}`../methods/formats/endf`.
 - `kika/gnds/decode.py`, `encode.py`, `covariances.py`, `_capabilities.py`: GNDS.
 - `kika/ace/model_adapter/`: ACE decoding.
 - `kika/g4ndl/`: G4NDL reading, writing and patching.
+- `kika/hdf5/`: OpenMC HDF5 reading, writing, processing and `cross_sections.xml`.
+- `kika/tsl/`: thermal-scattering libraries in every format, and the processed thermal
+  suite.
 
 ## References
 

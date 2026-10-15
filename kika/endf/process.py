@@ -102,6 +102,13 @@ PROCESSING_REJECTION_CATEGORIES = {
         "An OpenMC HDF5 file needs at least one broadened temperature; process with one or more "
         "temperatures and broadening on.",
     "hdf5-failed": "The OpenMC HDF5 file could not be written.",
+    "ace-needs-temperature":
+        "An ACE table is at one broadened temperature; process with one or more temperatures and "
+        "broadening on.",
+    "ace-temperature-not-processed": "A temperature asked for in the ACE output was not broadened in this run.",
+    "ace-table-exists":
+        "The xsdir in the output directory already names this table; pass replace=True to overwrite it.",
+    "ace-failed": "The ACE table could not be written, or did not read back as it was written.",
     "pendf-temperature-not-processed":
         "A temperature asked for in the PENDF was not broadened in this run.",
     "pendf-failed": "The PENDF could not be written, or did not read back as it was written.",
@@ -223,6 +230,23 @@ def _engine_category(error):
     if isinstance(error, DopplerConvergenceError):
         return "doppler-verification-failed", engine
     return "doppler-failed", engine
+
+
+def _describe(error) -> str:
+    """The error for a stage's summary; a dead worker pool says the likely cause.
+
+    Where processes are spawned (Windows, macOS) every worker imports the
+    caller's main script again. A script that starts the run at module level,
+    without the ``if __name__ == "__main__":`` guard, makes each worker start
+    it too, and multiprocessing stops them: the parent only sees a broken pool.
+    """
+    from concurrent.futures.process import BrokenProcessPool
+    if isinstance(error, BrokenProcessPool):
+        return (f"{error} A worker process stopped before doing any work. Where processes are "
+                f"spawned (Windows, macOS) this is what happens when the calling script starts "
+                f"the run without an `if __name__ == \"__main__\":` guard; add the guard, or "
+                f"run in one process with ProcessingPlan(workers=1)")
+    return str(error)
 
 
 def _ranges(evaluation):
@@ -702,6 +726,106 @@ class EndfProcessing:
         self._written("hdf5", t0, path, summary=summary, temperatures=temps, omitted=omitted)
         return path
 
+    def write_ace(self, directory, *, temperatures=None, extension: str | None = None,
+                  xsdir: bool = True, replace: bool = False,
+                  progress: Progress | None = None) -> list:
+        """Write one ACE table per broadened temperature into ``directory``.
+
+        The same processed suite :meth:`write_hdf5` writes (the broadening and
+        the URR tables of this run, the distributions tabulated for Monte
+        Carlo, KERMA, damage and gas production), written by
+        :func:`kika.ace.model_adapter.encodeAce` with ACER's conventions:
+        ZAID ``1000 Z + A`` (an isomer ``+ 300 + 100 m``, as LANL names
+        Am-242m1 95642), the suffix of the temperature (``.02c`` at 293.6 K),
+        the legacy header, the KERMA of HEATR's ``local = 0`` as ESZ's heating
+        number. Each table is ``<ZAID><suffix>`` (``8016.02c``); it is read
+        back in strict mode and compared word for word before it replaces a
+        file. ``xsdir`` adds its line to ``directory/xsdir`` (path relative to
+        it), refusing a table name the file already has unless ``replace``.
+
+        ``temperatures`` (kelvin) picks some of the broadened ones; ``extension``
+        overrides the suffix and needs a single temperature. The
+        charged-particle blocks are not written. Returns the paths written.
+
+        Raises :class:`ProcessingOutputError`: ``ace-needs-temperature`` when
+        nothing was broadened, ``ace-temperature-not-processed``,
+        ``ace-table-exists``, else ``ace-failed``. Each call appends its own
+        ``write`` stage.
+        """
+        from kika.ace.model_adapter import encodeAce
+        from kika.ace.writers.write_ace import write_ace_checked
+        from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
+        from kika.hdf5.processing import ACE_PARTICLES, processSuite
+        from kika.nuclear_data.model import ConversionReport
+
+        t0 = time.perf_counter()
+        directory = Path(directory)
+        if progress:
+            progress("write", None)
+        temps = list(self.temperatures)
+        written, omitted = [], []
+        try:
+            if not temps or not self._broadened:
+                raise ProcessingOutputError(
+                    "ace-needs-temperature", PROCESSING_REJECTION_CATEGORIES["ace-needs-temperature"])
+            if temperatures is not None:
+                wanted = [float(t) for t in np.atleast_1d(temperatures)]
+                missing = [t for t in wanted if not any(abs(t - T) <= 1e-9 * T for T in temps)]
+                if missing:
+                    raise ProcessingOutputError(
+                        "ace-temperature-not-processed",
+                        f"{missing} K not broadened in this run; broadened: {temps}")
+                temps = [T for T in temps if any(abs(t - T) <= 1e-9 * T for t in wanted)]
+            if extension is not None and len(temps) != 1:
+                raise ProcessingOutputError(
+                    "ace-failed", f"extension={extension!r} names one table, and {len(temps)} "
+                                  f"temperatures {temps} were asked for")
+            work = self._full_suite(progress, category="ace-failed")
+            omit = ()
+            resonances = work.resonances
+            if resonances is not None and resonances.unresolved is not None and not self._urr:
+                omit = ("urr",)
+                omitted.append("URR probability tables (the URR stage did not produce them)")
+            report = ConversionReport()
+            try:
+                processed = processSuite(
+                    work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
+                    broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
+                    context=self.reconstruction.context, thinning=self.plan.thinning,
+                    workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
+            except Exception as error:
+                raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
+            directory.mkdir(parents=True, exist_ok=True)
+            for i, T in enumerate(temps):
+                try:
+                    ace, _ = encodeAce(processed, T, extension=extension, report=report)
+                    name = f"{ace.header.zaid}{ace.header.extension}"
+                    target = directory / name
+                    write_ace_checked(ace, target)
+                except ProcessingOutputError:
+                    raise
+                except Exception as error:
+                    raise ProcessingOutputError("ace-failed",
+                                                f"{T:g} K: {type(error).__name__}: {error}") from error
+                if xsdir:
+                    try:
+                        add_xsdir_entry(directory / "xsdir", xsdir_line_for(ace, name), replace=replace)
+                    except XsdirEntryExists as error:
+                        raise ProcessingOutputError("ace-table-exists", str(error)) from error
+                written.append(target)
+                if progress:
+                    progress("write", (i + 1) / len(temps))
+            omitted += list(report.unsupported)
+        except ProcessingOutputError as error:
+            self._written("ace", t0, directory, error, temperatures=temps, files=[str(p) for p in written])
+            raise
+        summary = (f"ACE {', '.join(p.name for p in written)}"
+                   + ("; with URR probability tables" if self._urr else "")
+                   + ("; omitted: " + "; ".join(omitted) if omitted else ""))
+        self._written("ace", t0, directory, summary=summary, temperatures=temps,
+                      files=[str(p) for p in written], omitted=omitted)
+        return written
+
     def report_document(self):
         """The reconstruction report with a section per processing stage
         (``to_text()``, ``to_html()``, ``to_dict()``, ``save(path)``)."""
@@ -794,16 +918,30 @@ def _flat(form):
 
 
 def _heated_suite(rec, T, tables):
-    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T``."""
+    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T``,
+    each reaction on its own points (``ownPoints``), as BROADR writes a PENDF."""
     suite = copy.deepcopy(rec.suite)
     source = rec.result.label if rec.result.label in suite.styles.labels else "eval"
-    return _add_heated(suite, HEATED_LABEL, T, tables, source)
+    return _add_heated(suite, HEATED_LABEL, T, tables, source, ownPoints=True)
 
 
-def _add_heated(suite, label, T, tables, source):
+#: ``ownPoints``: a point a reaction holds only because another reaction needs
+#: it is dropped when the reaction, read lin-lin, reproduces it to this relative
+#: tolerance -- far below the seven figures of an ENDF number, so nothing written
+#: changes, while the table shrinks to its own grid.
+OWN_POINTS_RTOL = 1.0e-9
+
+
+def _add_heated(suite, label, T, tables, source, ownPoints=False):
     """Add a ``heated`` style ``label`` at ``T`` (derived from ``source``) and every
     reaction's broadened table under it, on the common union grid, steps
-    restored as repeated energies (regions) so a writer keeps both faces."""
+    restored as repeated energies (regions) so a writer keeps both faces.
+
+    ``ownPoints`` keeps, for each reaction, only the points its own table needs
+    (:data:`OWN_POINTS_RTOL`). On the union grid every reaction carries the
+    knots of all the others -- ~9x the lines of BROADR's material for Fe-56 --
+    and NJOY's ACER stops on such a tape."""
+    from kika.algebra import thin_common_grid
     from kika.hdf5 import processing as hp
     from kika.nuclear_data.model import Heated, PhysicalQuantity
     grid = max((x for x, _ in tables.values()), key=len)
@@ -826,7 +964,13 @@ def _add_heated(suite, label, T, tables, source):
         x, y = tables[mt]
         full = np.zeros(len(grid))
         full[len(grid) - len(x):] = y
-        form = hp._pieces(xs, full)
+        if ownPoints:
+            first = len(grid) - len(x)
+            keep = thin_common_grid(xs, full[None, :], rtol=OWN_POINTS_RTOL, atol=0.0,
+                                    keep=[first] if first > 0 else None)
+            form = hp._pieces(xs[keep], full[keep])
+        else:
+            form = hp._pieces(xs, full)
         form.label = label
         reaction.crossSection[label] = form
     return suite
@@ -1002,22 +1146,7 @@ def _fission_heating(out, work, grid, sigma, A):
         raise UnsupportedResonanceError("a fission with no MF1/458: HEATR's fission heating needs "
                                         "its energy release", category="heating-unsupported")
     h0 = evaluate(release.promptProductKE, grid) + evaluate(release.promptGammaEnergy, grid)
-    photon = h._Kinematics(A=A, Q=0.0, awp=0.0)
-    gammas = np.zeros(len(grid))
-    fissions = [r for r in list(out.reactions) + list(out.fissionComponents) + list(out.sums)
-                if r.ENDF_MT in h.FISSION_MTS]
-    # The prompt photons of fission are stated once, on MT18 (or the first chance).
-    for reaction in sorted(fissions, key=lambda r: r.ENDF_MT != 18):
-        found = False
-        for product in reaction.outputChannel.products:
-            mode = (getattr(product.provenance, "attributes", None) or {}).get("emission_mode", "prompt")
-            form = h._distribution(product) if product.pid == "photon" and mode == "prompt" else None
-            if form is not None:
-                gammas = gammas + h._yield(product, grid) * h._meanEnergyOf(form, grid, photon)
-                found = True
-        if found:
-            break
-    return np.where(sigma_f > 0, sigma_f * (h0 - gammas), 0.0)
+    return np.where(sigma_f > 0, sigma_f * h0, 0.0) - h.fissionPhotonKerma(out, grid, sigma, awr=A)
 
 
 def _heating(run, plan, report):
@@ -1051,7 +1180,7 @@ def _heating(run, plan, report):
         for i, T in enumerate(temps):
             grid, sigma = _heating_grid(run, T)
             result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, evaluation=work,
-                               zaTarget=1000 * Z + A)
+                               zaTarget=1000 * Z + A, workers=plan.workers)
             kerma = result.kerma
             fission = _fission_heating(out, work, grid, sigma, awr)
             if fission is not None:
@@ -1066,7 +1195,7 @@ def _heating(run, plan, report):
             category = "heating-unsupported" if isinstance(error, UnsupportedResonanceError) else "heating-failed"
         details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
         return StageReport("heating", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})", details), {}
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     details["notes"] = list(notes)
     details["n_points"] = {T: int(len(t[301][0])) for T, t in tables.items()}
     fissile = any(r.ENDF_MT in (18, 19) for r in _entries(work).values())
@@ -1132,7 +1261,7 @@ def _broaden(rec, plan, report):
     except Exception as error:
         category, engine = _engine_category(error)
         return StageReport("broaden", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})",
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})",
                            dict(temperatures=list(temps), thnmax_eV=thnmax, engine_category=engine,
                                 error="".join(traceback.format_exception_only(type(error), error)).strip())), \
             {}, thnmax, None, None
@@ -1170,7 +1299,7 @@ def _urr(rec, plan, unresolved, report):
         category = "urr-unsupported" if isinstance(error, UnsupportedResonanceError) else "urr-failed"
         details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
         return StageReport("urr", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})", details), {}
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     report("urr", 1.0)
     ne = len(next(iter(tables.values())).energies)
     details["n_energies"] = ne
@@ -1200,6 +1329,15 @@ def _start(plan, progress):
     children) and the progress callback."""
     import multiprocessing
     from dataclasses import replace
+    if getattr(multiprocessing.current_process(), "_inheriting", False):
+        # A spawned worker is importing the caller's main script, and the
+        # script starts a run at module level. Running it here would redo the
+        # whole processing in every worker; stop at once, so the parent's pool
+        # breaks and its stage says why (_describe).
+        raise RuntimeError(
+            "process_endf/process_gnds was called while a worker process was importing the "
+            "main script: start the run under `if __name__ == \"__main__\":`, or use "
+            "ProcessingPlan(workers=1)")
     plan = ProcessingPlan() if plan is None else plan
     if multiprocessing.current_process().daemon and plan.workers != 1:
         plan = replace(plan, workers=1)

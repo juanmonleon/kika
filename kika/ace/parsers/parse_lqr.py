@@ -1,6 +1,7 @@
 import logging
 from typing import List, Optional
 from kika.ace.classes.q_values import QValues
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def read_lqr_block(ace, debug=False):
                 if debug:
                     logger.debug(f"Successfully read {len(ace.q_values.q_values)} Q-values")
             else:
-                logger.warning(f"LQR block of NXS(4)={num_reactions} entries runs past the XSS array; not read")
+                lost(ace, "LQR", "", f"NXS(4)={num_reactions} entries run past the XSS array")
     
     # Return the q_values object
     return ace.q_values

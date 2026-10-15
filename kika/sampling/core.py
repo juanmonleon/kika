@@ -43,7 +43,7 @@ ENDF/B-VIII.1 U-235 cost ~1/125 of one 3205×3205 decomposition. What stops
 the blocks drawing correlated ``Z`` is the quiet failure this arrangement
 invites -- the samples look fine block by block and are correlated across
 blocks -- and a per-block seed only prevents it for pseudo-random draws.
-Separately seeded Sobol sequences paired by replica are correlated too (D35),
+Separately seeded Sobol sequences paired by replica are correlated too,
 so under Sobol all blocks of a call share one sequence and take disjoint
 columns of it; see :func:`realise_blocks`.
 """
@@ -293,19 +293,18 @@ def realise_blocks(
 ) -> Tuple[Dict[Hashable, np.ndarray], Dict[Hashable, Dict[str, Any]]]:
     """Draw the uncorrelated normals for every prepared block and correlate them.
 
-    **Under Sobol the blocks share one sequence** (D35 in
-    ``library-gaps.md``). Each block used to get its own
-    ``qmc.Sobol(d=rank_i, seed=seed + i*stride)``, and the blocks were paired
-    by replica index. Scrambling randomises the values but keeps the lattice
-    of each dimension, so dimension *k* of two separately seeded Sobol
-    sequences is the same function of the replica index up to a digital flip:
-    measured |corr| 0.35-0.85 between the k-th columns, and blocks the file
-    leaves independent came out with p95 |rho| 0.20-0.39 (MF33 x MF34 of
-    U-238 B-VIII.1). Every block looked right on its own; the error was in
-    the covariance *between* blocks, where a response that depends on two of
-    them picks up a term the evaluation never stated, of either sign.
+    **Under Sobol the blocks share one sequence.** Giving each block its own
+    ``qmc.Sobol(d=rank_i, seed=seed + i*stride)`` and pairing the blocks by
+    replica index would correlate them. Scrambling randomises the values but
+    keeps the lattice of each dimension, so dimension *k* of two separately
+    seeded Sobol sequences is the same function of the replica index up to a
+    digital flip: measured ``|corr|`` 0.35-0.85 between the k-th columns, and
+    p95 ``|rho|`` 0.20-0.39 between blocks the file leaves independent (MF33 x
+    MF34 of U-238 B-VIII.1). Every block would look right on its own; the error
+    is in the covariance *between* blocks, where a response that depends on two
+    of them picks up a term the evaluation never stated, of either sign.
 
-    Now one ``qmc.Sobol(d=sum of ranks, seed=seed)`` is drawn and its columns
+    So one ``qmc.Sobol(d=sum of ranks, seed=seed)`` is drawn and its columns
     are dealt to the blocks **in turn**: the leading direction of every block
     first, in block order, then every block's second, and so on, a block
     dropping out when its rank is used up. The leading Sobol dimensions are

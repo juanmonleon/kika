@@ -2,8 +2,8 @@
 
 ```{admonition} At a glance
 :class: note
-**Decides:** the calculation layer (`kika.nuclear_data`, `kika.processing`, `kika.cov`)
-imports no format package (`kika.endf`, `kika.ace`, `kika.gnds`, `kika.g4ndl`), and the
+**Decides:** the calculation layer (`kika.nuclear_data`, {py:mod}`kika.processing`, {py:mod}`kika.cov`)
+imports no format package ({py:mod}`kika.endf`, {py:mod}`kika.ace`, {py:mod}`kika.gnds`, `kika.g4ndl`, `kika.hdf5`), and the
 leaves import nothing from kika.
 
 **Packages:** the core of kika (see the figure in {doc}`index`).
@@ -19,10 +19,10 @@ checks), `kika/algebra/tests/test_algebra.py` (the algebra imports nothing from 
 
 | Layer | Packages | May import |
 |---|---|---|
-| Leaves | `kika.algebra`, `kika._records`, `kika._legendre_frames`, `kika._covariance_forms` | nothing from kika |
+| Leaves | {py:mod}`kika.algebra`, `kika._records`, `kika._legendre_frames`, `kika._covariance_forms` | nothing from kika |
 | Calculation | `kika.nuclear_data` (with the model, `kika.nuclear_data.model`), `kika.processing`, `kika.cov` | the leaves, and each other |
-| Format | `kika.endf`, `kika.gnds`, `kika.ace`, `kika.g4ndl` | the calculation layer and the leaves |
-| Doors and consumers | `kika.read`, `kika.write`, `kika.identify` (in `kika/_read.py`, `_write.py`, `_identify.py`), `kika.sampling`, `kika.njoy` | everything below |
+| Format | `kika.endf`, `kika.gnds`, `kika.ace`, `kika.g4ndl`, `kika.hdf5` | the calculation layer and the leaves |
+| Doors and consumers | {py:func}`kika.read`, {py:func}`kika.write`, {py:func}`kika.identify` (in `kika/_read.py`, `_write.py`, `_identify.py`), `kika.sampling`, `kika.njoy`, {py:mod}`kika.tsl` | everything below |
 
 Two things are checked about every import. **Where it points**: a module of the
 calculation layer may not import a format package at all, at run time or under

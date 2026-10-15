@@ -1,6 +1,6 @@
 """OpenMC incident-neutron HDF5 → :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
-**A processed file, and the model says so** (roadmap D9), as the ACE decoder
+**A processed file, and the model says so**, as the ACE decoder
 does (:mod:`kika.ace.model_adapter.decode`):
 
 - the ``eval`` style is declared and empty: the file refers to an evaluation it
@@ -44,7 +44,7 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from kika._constants import MF3_SUM_RULES
+from kika._constants import mf3SumComponents
 
 from . import records as R
 from .distributions import decodeDistribution
@@ -62,7 +62,7 @@ PARTICLE_TO_PID = {"neutron": "n", "photon": "photon", "electron": "e-", "positr
 PID_TO_PARTICLE = {pid: name for name, pid in PARTICLE_TO_PID.items()}
 
 #: Redundant MTs that are response functions, not reactions.
-RESPONSE_MTS = (203, 204, 205, 206, 207, 301, 444, 901)
+RESPONSE_MTS = (203, 204, 205, 206, 207, *range(301, 448), 901)
 
 #: ``fission_energy_release/<dataset>`` → FissionEnergyRelease term.
 FISSION_ENERGY_TERMS = {
@@ -244,17 +244,7 @@ def _place(suite, decoded):
 
 def _components(mt, present):
     """The MTs a sum adds up, as far as the file carries them."""
-    rule = MF3_SUM_RULES.get(mt)
-    if rule is None:
-        return []
-    out = []
-    for part in rule[0]:
-        if isinstance(part, str):
-            sub = int(part[1:])
-            out.extend([sub] if sub in present else _components(sub, present))
-        elif part in present:
-            out.append(part)
-    return out
+    return mf3SumComponents(mt, present)
 
 
 # ----------------------------------------------------------------------

@@ -86,7 +86,7 @@ def test_every_run_writes_c10_beside_its_samples(tmp_path):
 
 
 def test_jeff40_u235_reports_its_thermal_sigma_against_the_standard(u235_tape):
-    """2.00 % stated against the IAEA 0.45 %: x4.4, said in the notes."""
+    """2.00 % stated against the standards' 0.50 % (2.00 +/- 0.01 MeV): x4.0, in the notes."""
     run = perturbFromModel(str(u235_tape), {35: {"index": [0]}}, nSamples=2,
                            seed=11, dryRun=True)
     record = run.spectrumMoments[18][0]
@@ -95,5 +95,5 @@ def test_jeff40_u235_reports_its_thermal_sigma_against_the_standard(u235_tape):
     assert record["sigma(meanEnergy)_stated_rel"] == pytest.approx(0.01998, rel=2e-3)
     assert record["sigma(F>1MeV)_stated_rel"] == pytest.approx(0.0073, rel=1e-2)
     assert record["sigma(F>3MeV)_stated_rel"] == pytest.approx(0.0391, rel=1e-2)
-    assert record["reference"]["stated_over_reference"] == pytest.approx(4.44, rel=1e-2)
-    assert any(note.startswith("C10") and "x4.4" in note for note in run.notes)
+    assert record["reference"]["stated_over_reference"] == pytest.approx(4.00, rel=1e-2)
+    assert any(note.startswith("C10") and "x4.0" in note for note in run.notes)

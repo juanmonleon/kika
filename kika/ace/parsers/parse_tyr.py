@@ -1,11 +1,12 @@
 import numpy as np
 import logging
 from kika.ace.classes.particle_release.particle_release import ParticleRelease
+from kika.ace.classes.read_report import lost
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
-def read_tyr_blocks(ace, debug=False, strict_validation=True):
+def read_tyr_blocks(ace, debug=False):
     """
     Read TYR and TYRH blocks from the XSS array if they exist.
     
@@ -15,9 +16,6 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
         The Ace object with XSS data and header
     debug : bool, optional
         Whether to print debug information, defaults to False
-    strict_validation : bool, optional
-        If True, invalid TY values will raise an error If False, 
-        invalid values will generate a warning but processing will continue.
         
     Returns
     -------
@@ -89,12 +87,7 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
                     if debug:
                         logger.debug(f"  TY[{i+1}] = {ty_value} → {'VALID' if valid else 'INVALID'}")
                     if not valid:
-                        error_msg = f"Invalid TY value {ty_value} at index {i+1} in TYR block"
-                        if strict_validation:
-                            logger.error(error_msg)
-                            raise ValueError(error_msg)
-                        else:
-                            logger.warning(f"{error_msg} - continuing with processing")
+                        lost(ace, "TYR", f"reaction {i+1}", f"TY={ty_value} is not a valid multiplicity")
                         
                 ace.particle_release.incident_neutron = ty_entries
                 if debug:
@@ -197,12 +190,7 @@ def read_tyr_blocks(ace, debug=False, strict_validation=True):
                     if debug:
                         logger.debug(f"    TY[{j+1}] = {ty_value} → {'VALID' if valid else 'INVALID'}")
                     if not valid:
-                        error_msg = f"Invalid TY value {ty_value} for particle type {i}, reaction {j+1}"
-                        if strict_validation:
-                            logger.error(error_msg)
-                            raise ValueError(error_msg)
-                        else:
-                            logger.warning(f"{error_msg} - continuing with processing")
+                        lost(ace, "TYRH", f"particle {i} reaction {j+1}", f"TY={ty_value} is not a valid multiplicity")
                         
                 ace.particle_release.particle_production[i_python] = ty_entries
                 if debug:

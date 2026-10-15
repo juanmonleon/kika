@@ -40,9 +40,13 @@ class ReactionKey(NamedTuple):
 
 
 def _entries(suite):
+    # A radionuclide production (MF8-10) shares its reaction's MT, so it cannot
+    # be projected by MT; it is published on its own (kika.processing.productions).
+    from kika.nuclear_data.model import isRadionuclideProduction
     entries={}
     for container in CONTAINERS:
         for reaction in getattr(suite,container):
+            if container=='productions' and isRadionuclideProduction(reaction):continue
             key=ReactionKey(container,reaction.label)
             if key in entries:raise ValueError(f'duplicate reaction identity {key}')
             entries[key]=reaction
@@ -1694,6 +1698,10 @@ def attach_reconstruction(suite,result,*,progress=None,workers=None):
     from datetime import date as calendar_date
     candidate.styles.add(CrossSectionReconstructed(result.label,derivedFrom=result.source_style,date=calendar_date.today().isoformat()))
     result.verify_suite(candidate,progress=progress,workers=workers)
+    # Radionuclide productions follow their reactions (MF10 linearised, as RECONR does).
+    from ..productions import production_forms,publish_production_forms
+    productions=production_forms(suite,result.source_style,result.label,result.forms,
+                                 linearise_to=result.options.rtol)
     # Publish prebuilt containers only after every operation that can fail.
     candidates=_entries(candidate)
     containers={}
@@ -1703,6 +1711,7 @@ def attach_reconstruction(suite,result,*,progress=None,workers=None):
         container[result.label]=candidates[key].crossSection[result.label]
         containers[key]=container
     for key,reaction in entries.items():reaction.crossSection=containers[key]
+    publish_production_forms(productions)
     suite.styles=candidate.styles
     return suite
 
