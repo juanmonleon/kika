@@ -105,3 +105,19 @@ def test_the_cascade_survives_a_gnds_round_trip(tmp_path):
     back, report = readReactionSuite(Document.parse(out))
     assert cascade(back) == cascade(suite)
     assert not [m for m in report.losses if "decay" in m]
+
+
+def test_a_transition_rounded_to_fewer_figures_still_names_its_level():
+    # ENDF/B-VIII.1 Fe-58 MT603 sends its photons to 71 770 and 125 690 eV; the
+    # levels are stated at 71 769 and 125 689 eV (1.4e-5). The whole cascade
+    # of five (n,p) levels was dropped. U-234's levels 56 eV apart at 1.024 MeV
+    # still leave an inexact energy between them ambiguous.
+    from kika.endf.model_adapter.photons import _levelOf
+
+    fe58 = {0: 0.0, 1: 71769.0, 2: 125689.0, 3: 169920.0}
+    assert _levelOf(fe58, 71770.0) == 1
+    assert _levelOf(fe58, 125690.0) == 2
+    assert _levelOf(fe58, 169920.0) == 3
+    u234 = {15: 1023770.0, 17: 1023826.0}
+    assert _levelOf(u234, 1023826.0) == 17
+    assert _levelOf(u234, 1023800.0) is None

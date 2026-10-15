@@ -839,6 +839,13 @@ def encodePhotonSections(suite, mat: Optional[int] = None,
 #: ENDF writes both from the same evaluated level scheme, so they normally agree
 #: to the last digit; this only absorbs the 6-7 significant figures of the format.
 _LEVEL_TOLERANCE = 1e-5
+#: The second window, tried only when the first finds no level. Some
+#: evaluations round a transition's ES to fewer figures than the level's own
+#: ES_NS: ENDF/B-VIII.1 Fe-58 MT603 sends its photons to 71 770 and 125 690 eV,
+#: the levels MT601-602 state at 71 769 and 125 689 eV (1.4e-5), and the whole
+#: cascade was dropped. The level must still be the only one in the window:
+#: U-234's levels 56 eV apart at 1.024 MeV (5.5e-5) leave it ambiguous.
+_LEVEL_TOLERANCE_LOOSE = 1e-4
 
 
 def _cascadeDigest(levelEnergy: float, transitions) -> str:
@@ -881,15 +888,23 @@ def _levelEnergies(suite, sections12, series) -> Dict[int, float]:
 
 
 def _levelOf(energies: Dict[int, float], es: float) -> Optional[int]:
-    """The level index whose energy is *es*, or ``None`` -- never a nearest guess."""
+    """The level index whose energy is *es*, or ``None`` -- never a nearest guess.
+
+    The exact energy first; then the one level within ``_LEVEL_TOLERANCE``, and
+    only if there is none, the one level within ``_LEVEL_TOLERANCE_LOOSE``. Two
+    levels in a window are ambiguous and give ``None``.
+    """
     if es == 0.0:
         return 0
     for index, energy in energies.items():
         if energy == es:
             return index
-    matches = [index for index, energy in energies.items()
-               if energy and abs(energy - es) <= _LEVEL_TOLERANCE * abs(es)]
-    return matches[0] if len(matches) == 1 else None
+    for tolerance in (_LEVEL_TOLERANCE, _LEVEL_TOLERANCE_LOOSE):
+        matches = [index for index, energy in energies.items()
+                   if energy and abs(energy - es) <= tolerance * abs(es)]
+        if matches:
+            return matches[0] if len(matches) == 1 else None
+    return None
 
 
 def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
