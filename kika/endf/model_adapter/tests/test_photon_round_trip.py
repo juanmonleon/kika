@@ -344,3 +344,19 @@ def test_a_sums_photons_become_an_orphan_product(n14_b81_tape, tmp_path):
     back = kika.read(gnds)
     assert [len(o.outputChannel.products) for o in back.orphanProducts] == \
         [len(o.outputChannel.products) for o in suite.orphanProducts]
+
+
+def test_an_own_sigma_orphan_that_cannot_carry_its_photons_is_taken_back(monkeypatch):
+    """When the photons of an MF13 with no MF3 cannot be attached, the orphan made for
+    them is removed again and the section is kept verbatim, as before b74cd4d."""
+    from kika.endf.model_adapter import photons as module
+
+    attach = module._attach
+
+    def refuse(suite, host, sections, mt, report):
+        return "refused for the test" if mt in (28, 32) else attach(suite, host, sections, mt, report)
+
+    monkeypatch.setattr(module, "_attach", refuse)
+    suite, _ = decode("n14")
+    assert [o.ENDF_MT for o in suite.orphanProducts] == []
+    assert {"13/28", "13/32"} <= set(suite.provenance.headerFields[PHOTONS_VERBATIM_KEY])
