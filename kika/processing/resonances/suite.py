@@ -1257,9 +1257,15 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     all_knots=np.unique(np.concatenate([c._x for cs,_ in owner_of.values() for c in cs])) if owner_of else np.zeros(0)
     leaf_curves=[c._x for key,(cs,_) in owner_of.items() if key not in graph for c in cs]
     leaf_knots=np.unique(np.concatenate(leaf_curves)) if leaf_curves else np.zeros(0)
+    lows_of=np.array([s.low for s in segments]);highs_of=np.array([s.high for s in segments]);bounds_of={}
     def knots_of(knots,position,closed):
-        s=segments[position]
-        return knots[np.searchsorted(knots,s.low,'left' if closed else 'right'):np.searchsorted(knots,s.high,'right' if closed else 'left')]
+        # (Each segment's run of *knots*, found for all segments at once.)
+        bounds=bounds_of.get((id(knots),closed))
+        if bounds is None:
+            bounds=bounds_of[(id(knots),closed)]=(
+                np.searchsorted(knots,lows_of,'left' if closed else 'right').tolist(),
+                np.searchsorted(knots,highs_of,'right' if closed else 'left').tolist())
+        return knots[bounds[0][position]:bounds[1][position]]
     # Whether a leaf curve ends at the segment's high with a jump there.
     ends_jump=[False]*len(segments)
     for key,(cs,at) in owner_of.items():
@@ -1357,8 +1363,8 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 constants[key]=total;added.append((key,total))
         constants.order=names
         if all(rows.get(key) is not None for key,_ in added):
-            constants.columns=np.r_[at,np.array([rows[key] for key,_ in added],dtype=np.int64)]
-            constants.column_values=np.r_[value[at],np.array([total for _,total in added],dtype=float)]
+            constants.columns=np.concatenate([at,np.array([rows[key] for key,_ in added],dtype=at.dtype)])
+            constants.column_values=np.concatenate([value[at],np.array([total for _,total in added],dtype=float)])
         else:constants.columns=constants.column_values=None
         # One object per zero set (JENDL-5 Cl-35: 212 for 3 376 segments), so
         # that what is worked out per set is worked out once.
@@ -1378,7 +1384,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # Redundant aggregates inform diagnostics, not the reconstructed mesh.
         # Keep their original knots in this separate source-comparison grid.
         grid=np.unique(np.concatenate([np.asarray(seeds,dtype=float),knots_of(all_knots,position,True)]))
-        probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
+        probe=np.concatenate([grid,(grid[:-1]+grid[1:])*.5])
         return seeds,constants,deferred,probe
     def diagnose(positions,probes,original):
         """Each stated sum against the sum of its parts, on the probes of

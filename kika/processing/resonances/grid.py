@@ -443,7 +443,7 @@ def _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,opt
                 u=v;continue
             while v<len(users) and getattr(readers[v],'curve',None) is curve:v+=1
             a,b=node_end[u],node_end[v];c,d=panel_end[u],panel_end[v]
-            value=np.asarray(curve.evaluate(np.r_[e_nodes[a:b],e_probes[c:d].ravel()]),dtype=float)
+            value=np.asarray(curve.evaluate(np.concatenate([e_nodes[a:b],e_probes[c:d].ravel()])),dtype=float)
             column[node_at[a:b]]=value[:b-a];sampled[panel_at[c:d]]=value[b-a:].reshape(d-c,-1)
             u=v
         y[mt]=column;late_samples[mt]=sampled
