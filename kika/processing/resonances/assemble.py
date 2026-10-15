@@ -42,7 +42,14 @@ class BackgroundCurve:
 
     def evaluate(self,e):
         """The curve under its law (:func:`kika.algebra.evaluate`), zero off it."""
-        return self._evaluate(np.asarray(e,dtype=float))
+        e=np.asarray(e,dtype=float);read=self._evaluate
+        # A lin-lin table read inside its domain is np.interp, which is what
+        # the evaluator does there; without its checks, a curve cut into
+        # thousands of pieces is read thousands of times (JENDL-5 Cl-35).
+        if read._linlin and e.ndim==1 and len(e) and len(read._x)>1:
+            low,high=e.min(),e.max()
+            if low>=read._x[0] and high<=read._x[-1]:return np.interp(e,read._x,read._y)
+        return read(e)
 
     def constant_on(self,low,high):
         """A constant certified by the algebra snapshot, or None."""
