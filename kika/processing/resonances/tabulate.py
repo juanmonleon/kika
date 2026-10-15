@@ -186,19 +186,45 @@ def _center_iterates(group,region,cache):
     return _cached(cache,('centers',id(group),region.low,region.high),make)
 
 
+def _fixed_seeds(group,context):
+    """A group's seeds that no level places: its radius energies, its knots
+    and its competitive threshold, sorted and finite. (A segment reads those
+    in its closed span; its own ends are seeds anyway.)"""
+    values=[float(x) for radius in group_radii(group) for x in radius.energies]+[float(x) for x in group_knots(group)]
+    if group.competitive_mt is not None and group.competitive_q<0:
+        values.append(-group.competitive_q*(1+context.atomic_weight_ratio)/context.atomic_weight_ratio)
+    values=np.array(values,dtype=float)
+    return np.unique(values[np.isfinite(values)])
+
+
+def _level_seeds(group,region,cache):
+    """Each level's seeds in a fixed-point group: the peak and the peak
+    plus and minus its width times each multiple, at its energy
+    (``peaks``) and at its last centre estimate (``centres``), with the
+    lowest and highest of its estimates."""
+    rows=_center_iterates(group,region,cache)
+    energy=_level_energies(group,cache)
+    width=np.array([lv.neutron+lv.capture+lv.fission+lv.competitive for lv in group.levels],dtype=float)[:,None]
+    def around(peak):
+        peak=peak[:,None]
+        return np.concatenate([peak,peak-width*_WIDTH_MULTIPLES,peak+width*_WIDTH_MULTIPLES],axis=1)
+    return dict(energy=energy,peaks=around(energy),centres=around(rows[-1]),
+                lowest=rows.min(axis=0),highest=rows.max(axis=0))
+
+
 def _seeds(segment,context,cache=None,knots=None):
     lo,hi=segment.low,segment.high
     count=GEOMETRIC_SEEDS
     if lo>0 and hi>lo:
         count=int(min(GEOMETRIC_SEEDS,max(2,1+math.ceil((GEOMETRIC_SEEDS-1)*math.log10(hi/lo)))))
-    seeds=list(np.geomspace(lo,hi,count))+[lo,hi]
+    seeds=[lo,hi];parts=[np.geomspace(lo,hi,count)]
     if segment.region.unresolved is not None:
         seeds.extend(x for x in segment.region.unresolved.grid if lo<=x<=hi)
     if knots is not None:
         # Precomputed by the caller: the curves' knots strictly inside, and
         # whether one ends at hi with a jump there.
         inside,jump=knots
-        for values in inside:seeds.extend(values)
+        parts.extend(inside)
         if not segment.left_high and jump:seeds.append(np.nextafter(hi,lo))
     else:
         for curves in segment.backgrounds.values():
@@ -209,28 +235,28 @@ def _seeds(segment,context,cache=None,knots=None):
                 seeds.append(np.nextafter(hi,lo))
     for g in segment.region.groups:
         ctx=g.context or context
-        for radius in group_radii(g):seeds.extend(x for x in radius.energies if lo<x<hi)
-        seeds.extend(x for x in _cached(cache,('knots',id(g)),lambda:group_knots(g)) if lo<=x<=hi)
-        if g.competitive_mt is not None and g.competitive_q<0:
-            seeds.append(-g.competitive_q*(1+ctx.atomic_weight_ratio)/ctx.atomic_weight_ratio)
-        centers=None
+        # The group's radius energies, knots and competitive threshold.
+        fixed=_cached(cache,('fixed',id(g),id(ctx)),lambda:_fixed_seeds(g,ctx))
+        parts.append(fixed[np.searchsorted(fixed,lo,'left'):np.searchsorted(fixed,hi,'right')])
         if segment.region.approximation=='RMatrixNeutral' and not g.level_metric and g.levels:
-            # Independent fixed-point estimates, eight steps, each level
-            # stopped at its first estimate outside [lo, hi].
-            rows=_center_iterates(g,segment.region,cache)
-            outside=(rows<lo)|(rows>hi)
-            step=np.where(outside.any(axis=0),outside.argmax(axis=0),len(rows)-1)
-            centers=rows[step,np.arange(rows.shape[1])]
+            # A level seeds through its peak inside [lo, hi], and through its
+            # fixed-point centre (eight steps, stopped at the first estimate
+            # outside [lo, hi]) when that centre is inside: when every
+            # estimate is, and the centre is the last.
+            table=_cached(cache,('levels',id(g),segment.region.low,segment.region.high),
+                          lambda:_level_seeds(g,segment.region,cache))
+            energy=table['energy']
+            peak=(energy>0)&(energy>=lo)&(energy<=hi)
+            parts.append(table['peaks'][peak].ravel())
+            parts.append(table['centres'][peak&(table['lowest']>=lo)&(table['highest']<=hi)].ravel())
+            continue
         iterations=0 if segment.region.approximation in ("ReichMoore","RMatrixNeutral") else 4
         energies=_level_energies(g,cache)
-        starts=energies if centers is None else centers
-        # A level seeds a segment only through a peak inside it, and a
-        # fixed-point centre starting outside never moves.
-        inside=(energies>0)&(((energies>=lo)&(energies<=hi))|((starts>=lo)&(starts<=hi)))
+        # A level seeds a segment only through a peak inside it.
+        inside=(energies>0)&(energies>=lo)&(energies<=hi)
         for level_index in np.flatnonzero(inside):
             level=g.levels[level_index]
             center=level.energy
-            if centers is not None:center=float(centers[level_index])
             if iterations:
                 pr,sr,_=neutral_channel_functions(g.l,np.sqrt(ctx.k_squared_per_ev*level.energy)*g.channel_radius.evaluate(level.energy))
             # Fixed-point seeds isolate shifted peaks; correctness still comes
@@ -244,8 +270,8 @@ def _seeds(segment,context,cache=None,knots=None):
                 if lo<=peak<=hi:
                     seeds.append(peak)
                     seeds.extend((peak-width*_WIDTH_MULTIPLES).tolist());seeds.extend((peak+width*_WIDTH_MULTIPLES).tolist())
-    seeds=np.array(seeds,dtype=float)
-    return sorted(set(seeds[np.isfinite(seeds)&(seeds>=lo)&(seeds<=hi)].tolist()))
+    seeds=np.concatenate([np.array(seeds,dtype=float)]+parts)
+    return np.unique(seeds[np.isfinite(seeds)&(seeds>=lo)&(seeds<=hi)]).tolist()
 
 
 def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label='recon'):

@@ -1157,22 +1157,42 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                 if leaf:closed_leaf[where[k]].append(x[a1[k]:b1[k]])
             if leaf and bool(curve.endpoint_jump):
                 for k in np.flatnonzero(x[-1]==hi).tolist():ends_jump[where[k]]=True
+    # Each reaction's constant (NaN: none) and linearity on each segment, as
+    # (reaction, segment) arrays: a segment reads its column.
+    names=tuple(owner_of);rows={key:i for i,key in enumerate(names)}
+    keyed=np.empty(len(names),dtype=object)
+    for i,key in enumerate(names):keyed[i]=key
+    constant_of=np.full((len(names),len(segments)),np.nan);linear_of=np.zeros((len(names),len(segments)),dtype=bool)
+    present_of=np.zeros((len(names),len(segments)),dtype=bool);summed_row=np.array([key in graph for key in names],dtype=bool)
     readers={}
-    for key,(cs,at) in owner_of.items():
+    for row,(key,(cs,at)) in enumerate(owner_of.items()):
+        at=np.asarray(at);present_of[row]=at>=0
         if key in graph:continue
-        at=np.asarray(at);order_=np.argsort(at,kind='stable');at_sorted=at[order_]
+        order_=np.argsort(at,kind='stable');at_sorted=at[order_]
         cut=np.flatnonzero(np.diff(at_sorted))+1
         for run in np.split(order_,cut):
             if len(run) and at[run[0]]>=0:
-                curve=cs[int(at[run[0]])];readers.setdefault(id(curve),(curve,[]))[1].extend(run.tolist())
-    constant_at={};linear_at={}
-    for curve,where in readers.values():
-        where=np.asarray(where);lows=np.array([segments[i].low for i in where]);highs=np.array([span_high[i] for i in where])
+                curve=cs[int(at[run[0]])];readers.setdefault(id(curve),(curve,[]))[1].append((row,run))
+    for curve,members in readers.values():
+        where=np.concatenate([run for _,run in members]);lows=np.array([segments[i].low for i in where]);highs=np.array([span_high[i] for i in where])
         values=np.full(len(where),np.nan);wide=highs>lows
         if np.any(wide):values[wide]=curve.constant_on_many(lows[wide],highs[wide])
-        linear=curve.linear_over_many(lows,highs)
-        for i,v,l in zip(where.tolist(),values.tolist(),linear.tolist()):
-            constant_at[(id(curve),i)]=v;linear_at[(id(curve),i)]=l
+        linear=curve.linear_over_many(lows,highs);end=0
+        for row,run in members:
+            constant_of[row,run]=values[end:end+len(run)];linear_of[row,run]=linear[end:end+len(run)];end+=len(run)
+    blocked_in={}
+    def blocked(region):
+        """The reactions a segment of *region* never holds constant or
+        defers: the sums, and the partials its physics owns."""
+        out=blocked_in.get(id(region))
+        if out is None:
+            out=summed_row.copy()
+            if region is not None:
+                for mt in region_mts(region):
+                    row=rows.get(physical_owners.get(mt))
+                    if row is not None:out[row]=True
+            blocked_in[id(region)]=out=(region,out)
+        return out[1]
     def prepare(position):
         """Seeds, constants, deferred columns and source-diagnostic grid of
         one segment; none of it depends on another segment."""
@@ -1187,44 +1207,39 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
             seeds={s.low,s.high}|{float(x) for knots in closed_leaf[position] for x in knots}
             if ends_jump[position]:seeds.add(float(np.nextafter(s.high,s.low)))
             seeds=sorted(seeds)
-        affected=({physical_owners.get(mt) for mt in region_mts(s.region)}
-                  if s.region is not None else set())
-        constants={}
+        # The leaves constant here (a missing curve is the constant zero),
+        # in the order of the segment's curves, then the sums of constants.
+        free=~blocked(s.region);present=present_of[:,position]
         high=np.nextafter(s.high,s.low) if s.left_high else s.high
-        for key,curve in s.curves.items():
-            if key in graph or key in affected:continue
-            if high<=s.low:value=None
-            elif curve is None:value=0.
-            else:
-                value=constant_at[(id(curve),position)]
-                if value!=value:value=None
-            if value is not None:constants[key]=value
+        if high<=s.low:held=np.zeros(len(names),dtype=bool);value=constant_of[:,position]
+        else:
+            value=np.where(present,constant_of[:,position],0.)
+            held=free&(value==value)
+        at=np.flatnonzero(held)
+        constants=dict(zip(keyed[at].tolist(),value[at].tolist()))
         for key in order:
             if all(part in constants for part in graph[key]):
                 constants[key]=sum((constants[part] for part in graph[key]),0.)
         deferred={}
-        for key,curve in s.curves.items():
-            if key in graph or key in affected or key in constants or curve is None:continue
-            linear=linear_at[(id(curve),position)]
-            # Source knots are included in seeds, so these untouched columns
-            # are affine inside each seed panel. Still check all seven final
-            # probes; a failure falls back to the full adaptive column set.
-            if linear:
-                def read(e,curve=curve,s=s):
-                    e=np.asarray(e,dtype=float).copy()
-                    if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
-                    return curve.evaluate(e)
-                # What the reader is, for a caller that reads many at once.
-                read.curve=curve;read.left_high=(s.high,s.low) if s.left_high else None
-                deferred[key]=read
+        # Source knots are included in seeds, so these untouched columns
+        # are affine inside each seed panel. Still check all seven final
+        # probes; a failure falls back to the full adaptive column set.
+        for row in np.flatnonzero(free&present&~held&linear_of[:,position]).tolist():
+            key=names[row];curve=s.curves[key]
+            def read(e,curve=curve,s=s):
+                e=np.asarray(e,dtype=float).copy()
+                if s.left_high:e[e==s.high]=np.nextafter(s.high,s.low)
+                return curve.evaluate(e)
+            # What the reader is, for a caller that reads many at once.
+            read.curve=curve;read.left_high=(s.high,s.low) if s.left_high else None
+            deferred[key]=read
         work=min(len(seeds),max(1,options.max_work_bytes//1024))*(len(s.curves)-len(constants)-len(deferred)+1)*1024
         pending[position]=(constants,work)
         # Diagnose the evaluated aggregate against exclusive leaves. Output
         # sums are derived even if the redundant source aggregate disagrees.
         # Redundant aggregates inform diagnostics, not the reconstructed mesh.
         # Keep their original knots in this separate source-comparison grid.
-        diagnostic_seeds=set(seeds)|{float(x) for knots in closed_all[position] for x in knots}
-        grid=np.asarray(sorted(diagnostic_seeds))
+        grid=np.unique(np.concatenate([np.asarray(seeds,dtype=float)]+closed_all[position]))
         probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
         return seeds,constants,deferred,probe
     def diagnose(position,probe,original):
