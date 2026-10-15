@@ -249,7 +249,7 @@ absolute covariance in b².
 
 - **The weight is $\sigma\phi$, always, and $\sigma$ is never guessed.** The angular
   distribution is a distribution per reaction, so its group average is weighted by the
-  reaction rate, as in NJOY's ERRORR (TODO(ref)). `MF34_to_MG` refuses to run without a
+  reaction rate, as in NJOY's ERRORR (MacFarlane et al. 2017). `MF34_to_MG` refuses to run without a
   $\sigma(E)$ in `endf_object.pendf`, because a wrong weight leaves no trace in the result.
   The caller fills it, for example from NJOY (`kika.processing.njoy_reconstruct`).
 - **A relative block is collapsed as relative, with $a_\ell$ in the weight**
@@ -445,5 +445,6 @@ covariance. `summary()` lists the blocks.
 
 - D. A. Brown (ed.), *ENDF-6 Formats Manual*, Brookhaven National Laboratory (2023),
   doi:10.2172/2007538: Ch. 33 (LB flags), Ch. 34 and §34.1 (MF 34).
-- TODO(ref): the NJOY ERRORR module, for the $\sigma\phi$-weighted collapse of relative
-  covariances.
+- R. E. MacFarlane, D. W. Muir, R. M. Boicourt, A. C. Kahler and J. L. Conlin, *The NJOY
+  Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
+  doi:10.2172/1338791: ERRORR, the $\sigma\phi$-weighted collapse of relative covariances.

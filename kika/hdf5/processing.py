@@ -1,4 +1,4 @@
-"""An evaluation → the processed suite the OpenMC encoder writes (roadmap H4).
+"""An evaluation → the processed suite the OpenMC encoder writes.
 
 :func:`processSuite` takes a suite decoded from ENDF or GNDS (``eval`` forms)
 and builds a **new** suite in the shape :mod:`kika.hdf5.neutron_encode`
@@ -13,14 +13,14 @@ serialises, without editing the one it was given:
    cross sections above it, as BROADR leaves them. Every reaction
    is then on one grid per temperature, the union of the broadened grid
    below ``thnmax`` and the 0 K one above, each from its threshold index.
-3. **Reactions** (roadmap D5, the official exporter's set): every exclusive
+3. **Reactions**: every exclusive
    partial; the redundant sums 4, 16, 103-107 -- rebuilt from their levels when
    the evaluation does not give them, as ``from_ace`` does for depletion -- and
    18 when the fission chances are given; gas production 203-207 as
    Σ multiplicity × σ over the reactions that emit p, d, t, ³He, α (what
    GASPR computes); KERMA 301/901 and damage 444 by kika's HEATR
-   (:mod:`kika.processing.heating`, H8) and the URR probability tables by
-   kika's PURR (:mod:`kika.processing.resonances.probability_tables`, H8). No
+   (:mod:`kika.processing.heating`) and the URR probability tables by
+   kika's PURR (:mod:`kika.processing.resonances.probability_tables`). No
    NJOY: every piece of a neutron file is kika's.
 4. **Distributions and yields** tabulated with their CDF
    (:mod:`kika.processing.tabulation`); neutrons and photons only, the
@@ -572,13 +572,13 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
 
     ``endf`` is the ENDF tape the suite was read from, for the target's mass
     ratio and spin as MF1/MF2 state them (the reconstruction's context).
-    KERMA, damage and the URR probability tables are kika's (H8); ``omit``
+    KERMA, damage and the URR probability tables are kika's; ``omit``
     leaves any of ``"urr"``, ``"kerma"``, ``"damage"`` out. ``ed`` is the
     displacement threshold of the damage (default: HEATR's table by Z).
     ``awr`` overrides the
-    atomic weight ratio (D11; default MF1/451's, as ACER takes it).
+    atomic weight ratio (default MF1/451's, as ACER takes it).
     ``thinning`` is the relative tolerance to which each temperature's grid is
-    thinned (roadmap H5): points are dropped while every reaction, read
+    thinned: points are dropped while every reaction, read
     lin-lin, reproduces every dropped point to it. 1e-3 is what the official
     libraries are processed to (BROADR's ``errthn``); ``None`` keeps the full
     union grid. The 0 K elastic is thinned to the same tolerance (RECONR's
@@ -589,11 +589,11 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     Windows, so a script that calls this needs the usual
     ``if __name__ == "__main__":`` guard; ``workers=1`` stays in-process. ``label`` processes
     the forms of that style -- a perturbation run's ``realization`` -- in
-    place of the evaluated ones wherever it has them (roadmap H7, D12: the
+    place of the evaluated ones wherever it has them (the
     sample is multiplied at 0 K and broadened, never the reverse).
     ``urrTables`` passes URR probability tables already computed
     (:func:`urrTablesOf`, ``{kelvin: ProbabilityTables}``), as a perturbation
-    run shares the unperturbed evaluation's between its samples (D12).
+    run shares the unperturbed evaluation's between its samples.
     ``broadened`` passes the broadening already done on this suite's 0 K forms
     (``_broadenAll``'s ``{kelvin: (heated forms, ceiling)}``, as
     ``kika.endf.process_endf`` keeps it); each temperature's ceiling is its own.
@@ -848,7 +848,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         if missing:
             raise ValueError(f"urrTables has no tables at {missing} K")
         urrTables = {T: urrTables[float(t)] for t, T in zip(temperatures, styleKT)}
-        report.warn("URR probability tables passed in, computed on another suite (D12: a "
+        report.warn("URR probability tables passed in, computed on another suite (a "
                     "perturbation run's unperturbed evaluation); they are not perturbed")
     else:
         from kika.processing.resonances.probability_tables import purrGrid, purrInputs, competitionFlags
@@ -952,7 +952,7 @@ def _urrContext(suite, context):
 
 
 def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None, options=None, transportXS=None):
-    """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR (roadmap H8).
+    """``{kelvin: ProbabilityTables}`` from the URR parameters by kika's PURR.
 
     The tables :func:`processSuite` writes. ``context`` is the target's
     NeutronContext (default: the model's mass and spin); ``options`` a

@@ -32,15 +32,11 @@ GNDS as XML; the specification also admits JSON and HDF5.
 ## Coverage
 
 kika answers what it supports node by node, for all 300 elements that `gnds.xsd` and
-`covariances.xsd` declare plus the 12 names kika uses that they do not:
+`covariances.xsd` declare plus the 12 names kika uses that they do not. The census is
+`kika.gnds.capabilities()`, which can be filtered by coverage (`coverage="unsupported"`)
+and rendered as a summary or as text.
 
-```python
-import kika.gnds
-print(kika.gnds.capabilities().summary())
-print(kika.gnds.capabilities(coverage="unsupported").text())
-```
-
-On 2026-10-11 it reported 218 nodes read and written in full, 17 in part and 65 not at
+On 2026-10-14 it reported 219 nodes read and written in full, 16 in part and 65 not at
 all, 13 of those without a line in a file's report. Each row gives the reason, citing the
 specification or the source. In outline:
 
@@ -112,6 +108,30 @@ its SHA-1 written to match the file actually written. The writer:
   round-tripping representation);
 - writes the version the suite came in as, and 2.0 for a suite with no GNDS origin.
 
+For a suite that came from ENDF, the model does not say some things GNDS spells out, and
+the writer then spells them as FUDGE's ENDF to GNDS translation does, so that FUDGE reads
+the file. None of these changes the model:
+
+- **Steps.** A step inside an `XYs1d` (a repeated energy) is written as a `regions1d`
+  with one region on each side; a step on a domain edge drops the point outside the
+  domain; an outer value repeated with the same function is written once.
+- **Reich-Moore.** No fission channel when no resonance has a fission width; the channel
+  spin of capture is 1 and of fission 0; spin-group parity from a positive target parity,
+  as FUDGE assumes; the range radius AP has no slot under `RMatrix`, so it is dropped when
+  it equals the top-level radius and otherwise carried by the channels.
+- **Unresolved range.** `resonanceReactions` come before the radii and link to MT 2, 102
+  and 18; integral degrees of freedom are written as integers.
+- **Reactions.** The output channel's genre, a product's multiplicity, the fission genre
+  of MT 18 and the target recoil of MT 2 are taken from the MT when the model states
+  none.
+- **Particles.** In PoPs, gauge bosons come before baryons; delayed-neutron
+  multiplicities are labelled.
+- **Not written.** A distribution holding an `XYs1d` whose $x$ decreases (the discrete
+  lines of an ENDF MF 6 LAW=1 with ND > 0) is not written and is reported as incomplete.
+
+Reading ENDF for this, the evaluation date EDATE becomes an `xs:date`, FUDGE's rule, and a
+product without a Q of its own takes the Q of its sum.
+
 Byte identity with FUDGE's output is not a goal: number spelling, indentation and
 attribute order differ.
 
@@ -153,10 +173,19 @@ All tests below passed on 2026-10-11 unless marked.
 - **Version and links** (`kika/gnds/tests/test_version_and_xpath.py`), decay data
   (`test_pops_decay.py`), thermal scattering (`test_thermal_scattering.py`), heated styles
   (`test_heated_styles.py`).
-- **The capability table** (`kika/gnds/tests/test_capabilities.py`): two of its tests fail
-  on the default branch on 2026-10-11 (`test_the_registry_bounds_the_capability`,
-  `test_a_paired_entry_turned_neither_fails_the_bridge`: the `heated` style is listed as
-  partial where the node registry allows full, without a caveat).
+- **The capability table** against the node registry, so that no node is claimed beyond
+  what the reader and writer handle (`kika/gnds/tests/test_capabilities.py`, including
+  `::test_the_registry_bounds_the_capability` and
+  `::test_a_paired_entry_turned_neither_fails_the_bridge`).
+- **A GNDS file FUDGE reads.** A suite decoded from ENDF is written with each spelling
+  FUDGE's reader requires (`kika/gnds/tests/test_encode.py::test_an_endf_decoded_suite_is_written_the_way_fudge_reads_it`,
+  which runs without FUDGE). With FUDGE installed (the `fudge` marker, deselected by
+  default), FUDGE 6.14 reads kika's GNDS of Au-197, Fe-56, Cl-35 and U-235 of
+  ENDF/B-VIII.1, and its resonance reconstruction from kika's file matches its
+  reconstruction from its own ENDF to GNDS translation to $2\cdot10^{-10}$ relative in
+  capture and fission
+  (`kika/endf/model_adapter/tests/test_fudge_in_the_loop.py::test_fudge_reads_and_reconstructs_the_gnds_kika_writes`,
+  measured 2026-10-13); Fe-56 and U-235 validate against `gnds.xsd`.
 
 ## Implementation
 

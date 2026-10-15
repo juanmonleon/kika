@@ -176,13 +176,30 @@ def _run_njoy_deck(njoy_exe, workdir: Path, deck: str):
             check=False,
         )
         check = check_run(deck, read_listing(workdir))
-        if not check.corrupted:
+        crashed = _crashed_on_a_misread(result)
+        if not check.corrupted and not crashed:
             return result
         if attempt < _MAX_LOCALE_ATTEMPTS:
             logging.getLogger(__name__).warning(
                 "NJOY misread its deck (%s); re-running (%d/%d)",
-                check.detail, attempt + 1, _MAX_LOCALE_ATTEMPTS)
+                check.detail if check.corrupted else crashed, attempt + 1,
+                _MAX_LOCALE_ATTEMPTS)
     return result
+
+
+#: What gfortran prints when a formatted read meets a number it cannot parse --
+#: the same decimal-locale misread, caught by the runtime instead of by the
+#: listing check, in a module after the one :func:`check_run` reads (an ACER
+#: card, for instance).
+_MISREAD_CRASHES = ("Error during floating point read", "Bad real number")
+
+
+def _crashed_on_a_misread(result) -> str | None:
+    """The gfortran message when NJOY stopped on an unparsable number, else None."""
+    if result.returncode == 0:
+        return None
+    text = (result.stdout or b"").decode("utf-8", "replace")
+    return next((message for message in _MISREAD_CRASHES if message in text), None)
 
 
 def _guard_decimal_locale(workdir: Path, deck: str, njoy_files_dir: Path,

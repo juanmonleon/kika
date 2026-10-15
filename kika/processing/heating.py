@@ -1,16 +1,16 @@
-"""KERMA and damage energy from a processed suite (roadmap H8; replaces NJOY HEATR).
+"""KERMA and damage energy from a processed suite (replaces NJOY HEATR).
 
 What OpenMC's files carry as MT301 (heating, photons transported), MT901
 (heating with the photons deposited locally) and MT444 (damage energy), minus
 fission, which the writer adds from MF1/458 as ``from_njoy`` does. The method
-is HEATR's (``heatr.f90``; the reading is ``docs/library/heating_kerma_damage_plan.md``
-in kika-workspace):
+is HEATR's (``heatr.f90``):
 
 - **energy balance** (MT301): a reaction deposits ``E + Q_M − Σ_n y_n Ē_n −
   Σ_γ y_γ Ē_γ`` -- everything but the neutrons and photons it emits (HEATR's
   ``nheat`` and then ``gheat``, ``local = 0``). Capture is the exception: with
-  its photons known, MT301 keeps only the recoil,
-  ``E/(A+1) + Σ_γ y_γ ⟨E_γ²⟩/(2(A+1)m_nc²)``.
+  its photons known, MT301 keeps only the recoil of each photon,
+  ``Σ_γ y_γ ⟨E_γ²⟩/(2(A+1)m_nc²)``, and not the compound nucleus' own recoil
+  ``E/(A+1)``, as HEATR leaves it (:data:`HEATR_APPROXIMATIONS`).
 - **MT901** is MT301 plus the energy of the photons emitted, ``Σ_γ y_γ Ē_γ`` --
   what OpenMC's files carry (measured on Fe-56: at thermal 901 − 301 is the
   capture photons' 7.489 MeV, where HEATR's ``local = 1`` balance would give

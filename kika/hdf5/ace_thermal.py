@@ -1,4 +1,4 @@
-"""A thermal-scattering ACE table (``.NNt``) → the processed thermal forms (roadmap H9c).
+"""A thermal-scattering ACE table (``.NNt``) → the processed thermal forms.
 
 kika's ACE reader covers continuous-energy neutron and photo-atomic tables; the
 thermal tables THERMR + ACER write (ITIE/ITCE/ITXE/ITCA blocks) are read here,

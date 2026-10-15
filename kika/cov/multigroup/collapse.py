@@ -989,19 +989,23 @@ def MF34_to_MG(endf_object,
         ENDF object containing both MF4 and MF34 data
     energy_grid : str, list, or np.ndarray
         Multigroup energy grid specification:
+
         - str: Name of predefined grid (e.g., "VITAMINJ174")
         - list/array: Custom energy group boundaries
     weighting_function : str or Callable, optional
         Base weighting spectrum phi(E) for multigroup collapse. The effective
         weight is always sigma(E)*phi(E):
+
         - "constant": phi(E) = 1 (default)
         - "lethargy": phi(E) = 1/E
         - "maxwellian": Maxwellian spectrum
         - "fission": Fission spectrum
+
         A callable is refused (``NotImplementedError``): the collapse needs the
         antiderivative of phi as well, and there is no argument to pass it in.
     relative_normalization : str, optional
         Normalization scheme for relative covariances:
+
         - "mf34_cell": Use MF34-derived MG means (ENDF-preserving, default)
           Reproduces evaluator's percent uncertainties within MF34 bins
         - "mg_cell": Use MG-grid means from MF4 (physics-preserving)
@@ -1012,6 +1016,7 @@ def MF34_to_MG(endf_object,
         Specific MT reaction to process (if None, process all)
     output_frame : str, optional
         Reference frame for output Legendre coefficients:
+
         - "same" (default): preserve the MF4 native frame (backward compatible)
         - "lab": apply CM→lab kinematic transformation if MF4 is in CM frame
           (no-op if already in lab frame). Matches NJOY GROUPR convention.

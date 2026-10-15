@@ -1,10 +1,10 @@
 """The thermal cross sections of a TSL tape, computed by NJOY THERMR.
 
 kika computes the two elastic parts of a thermal scattering law in closed form
-(:mod:`kika.nuclear_data.model.thermal_scattering`) but not the incoherent
-inelastic cross section, which is S(α,β) integrated over angle and outgoing
-energy (roadmap E4c, deferred). Until it does, :func:`run_thermr` has NJOY do
-it, in the chain every processing of a TSL material uses::
+(:mod:`kika.nuclear_data.model.thermal_scattering`) and the incoherent
+inelastic tables with its own THERMR (:mod:`kika.processing.thermal`).
+:func:`run_thermr` runs NJOY's instead, as the reference to compare with, in
+the chain every NJOY processing of a TSL material uses::
 
     moder → reconr → broadr → thermr → moder
 

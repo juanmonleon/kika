@@ -1,6 +1,6 @@
 """OpenMC incident-neutron HDF5 → :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
-**A processed file, and the model says so** (roadmap D9), as the ACE decoder
+**A processed file, and the model says so**, as the ACE decoder
 does (:mod:`kika.ace.model_adapter.decode`):
 
 - the ``eval`` style is declared and empty: the file refers to an evaluation it

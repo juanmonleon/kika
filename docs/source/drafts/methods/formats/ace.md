@@ -25,7 +25,7 @@ the unresolved-range probability tables (see {doc}`../../architecture/format-ada
 ACE (A Compact ENDF) is the format of continuous-energy Monte Carlo codes such as MCNP and
 Serpent. A table is processed data, written by NJOY's ACER: the resonance region is
 already reconstructed, every cross-section is on one unionised energy grid, linearly
-interpolated, at one temperature (`TODO(ref)`: the ACE format specification). After a
+interpolated, at one temperature (Conlin and Romano 2019). After a
 header, a table is three arrays: NXS (sizes), JXS (pointers to blocks) and XSS, one long
 array holding every block. Each XSS word is written either as an integer (I20) or as a
 real (E20.11). Energies are in MeV, cross-sections in barns, angular densities per unit
@@ -52,6 +52,15 @@ What kika does with each block of a neutron table:
 
 A photo-atomic table (ZAID suffix ending in `p`) is parsed on its own, since its NXS and
 JXS mean other things, and returned as a `PhotoatomicAce`. It has no model path.
+
+A thermal-scattering table (`.NNt`, the ITIE, ITCE, ITXE and ITCA blocks THERMR and ACER
+write) is not a neutron table and is not read by `read_ace`. `kika.read` recognises it by
+its name field (`h-h2o.80t`, `grph.72t`) and reads it, as OpenMC reads it, into a
+processed thermal-scattering suite: the inelastic cross-section and, for the continuous
+representation, its outgoing-energy tables with equiprobable cosines; the coherent elastic
+Bragg edges (MeV·b converted to eV·b) or the incoherent elastic cross-section and cosines.
+See {doc}`hdf5` for the processed forms and
+{doc}`../../user_guide/thermal-scattering-libraries` for reading thermal libraries.
 
 ## Reading
 
@@ -192,6 +201,15 @@ is the legacy one, which MCNP5, MCNP6 and Serpent read.
 `kika.write` does not write ACE; an ACE table from an evaluation is produced by NJOY (see
 {doc}`../processing/njoy`).
 
+**Many variants of one table.** A perturbed sample differs from its source table in a
+small part of XSS. Since
+every XSS value has a fixed place (four 20-column fields per line), `AcePatchWriter` writes
+the unperturbed table once and each sample as that text with only the changed lines
+re-formatted, with the format `write_ace` uses. The output is byte-identical to
+`write_ace`, and any case in which `write_ace` would lay the file out differently (another
+header, another XSS length, the integer format switching on or off) falls back to
+`write_ace` itself.
+
 ## What the round trip keeps and loses
 
 - **Parse layer, read and write:** the file comes back byte for byte.
@@ -239,6 +257,16 @@ derives because the suite has none, and the charged-particle blocks it does not 
   bookkeeping, MTR follows NJOY's order with the same cross-sections
   (`::test_without_ace_provenance_mtr_follows_njoys_rule`). These need the table and
   `--deep`. `TODO(check)`: the same check over whole libraries is not in a public test.
+- Every unconverted block is named and the conversion stays clean for cross-sections; an
+  absent block says nothing
+  (`kika/ace/model_adapter/tests/test_ace_decode_reports_what_it_drops.py`).
+- Patched samples are byte-identical to `write_ace` and a layout change falls back to it
+  (`kika/ace/tests/test_patch_writer_matches_write_ace.py::test_patched_samples_are_byte_identical`,
+  `::test_a_layout_change_falls_back_to_write_ace`).
+- A thermal table reads into the processed forms and encodes as OpenMC lays them out
+  (`kika/hdf5/tests/test_ace_thermal.py::test_the_table_reads_into_the_processed_forms`,
+  `::test_the_forms_encode_as_openmc_lays_them_out`), and `kika.read` returns its suite
+  (`kika/tsl/tests/test_tsl_formats.py::test_an_ace_thermal_table_is_read_into_the_model`).
 - `kika/ace/xsdir.py` and `kika/ace/comparison` have no tests.
 
 ## Implementation
@@ -256,7 +284,8 @@ derives because the suite has none, and the charged-particle blocks it does not 
 
 ## References
 
-- `TODO(ref)`: the ACE format specification, full citation.
+- J. L. Conlin (ed.) and P. Romano, *A Compact ENDF (ACE) Format Specification*,
+  LA-UR-19-29016, Los Alamos National Laboratory (2019), doi:10.2172/1561065.
 - R. E. MacFarlane, D. W. Muir, R. M. Boicourt, A. C. Kahler and J. L. Conlin, *The NJOY
   Nuclear Data Processing System, Version 2016*, Los Alamos National Laboratory (2017),
   doi:10.2172/1338791: ACER.

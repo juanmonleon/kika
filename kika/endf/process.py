@@ -225,6 +225,23 @@ def _engine_category(error):
     return "doppler-failed", engine
 
 
+def _describe(error) -> str:
+    """The error for a stage's summary; a dead worker pool says the likely cause.
+
+    Where processes are spawned (Windows, macOS) every worker imports the
+    caller's main script again. A script that starts the run at module level,
+    without the ``if __name__ == "__main__":`` guard, makes each worker start
+    it too, and multiprocessing stops them: the parent only sees a broken pool.
+    """
+    from concurrent.futures.process import BrokenProcessPool
+    if isinstance(error, BrokenProcessPool):
+        return (f"{error} A worker process stopped before doing any work. Where processes are "
+                f"spawned (Windows, macOS) this is what happens when the calling script starts "
+                f"the run without an `if __name__ == \"__main__\":` guard; add the guard, or "
+                f"run in one process with ProcessingPlan(workers=1)")
+    return str(error)
+
+
 def _ranges(evaluation):
     """``(resolved, unresolved)`` summaries of the MF2 ranges evaluation_summary lists."""
     rows = evaluation.get("resonance_ranges") or []
@@ -794,16 +811,30 @@ def _flat(form):
 
 
 def _heated_suite(rec, T, tables):
-    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T``."""
+    """The reconstruction's (MF1-MF3) suite with a ``heated`` style at ``T``,
+    each reaction on its own points (``ownPoints``), as BROADR writes a PENDF."""
     suite = copy.deepcopy(rec.suite)
     source = rec.result.label if rec.result.label in suite.styles.labels else "eval"
-    return _add_heated(suite, HEATED_LABEL, T, tables, source)
+    return _add_heated(suite, HEATED_LABEL, T, tables, source, ownPoints=True)
 
 
-def _add_heated(suite, label, T, tables, source):
+#: ``ownPoints``: a point a reaction holds only because another reaction needs
+#: it is dropped when the reaction, read lin-lin, reproduces it to this relative
+#: tolerance -- far below the seven figures of an ENDF number, so nothing written
+#: changes, while the table shrinks to its own grid.
+OWN_POINTS_RTOL = 1.0e-9
+
+
+def _add_heated(suite, label, T, tables, source, ownPoints=False):
     """Add a ``heated`` style ``label`` at ``T`` (derived from ``source``) and every
     reaction's broadened table under it, on the common union grid, steps
-    restored as repeated energies (regions) so a writer keeps both faces."""
+    restored as repeated energies (regions) so a writer keeps both faces.
+
+    ``ownPoints`` keeps, for each reaction, only the points its own table needs
+    (:data:`OWN_POINTS_RTOL`). On the union grid every reaction carries the
+    knots of all the others -- ~9x the lines of BROADR's material for Fe-56 --
+    and NJOY's ACER stops on such a tape."""
+    from kika.algebra import thin_common_grid
     from kika.hdf5 import processing as hp
     from kika.nuclear_data.model import Heated, PhysicalQuantity
     grid = max((x for x, _ in tables.values()), key=len)
@@ -826,7 +857,13 @@ def _add_heated(suite, label, T, tables, source):
         x, y = tables[mt]
         full = np.zeros(len(grid))
         full[len(grid) - len(x):] = y
-        form = hp._pieces(xs, full)
+        if ownPoints:
+            first = len(grid) - len(x)
+            keep = thin_common_grid(xs, full[None, :], rtol=OWN_POINTS_RTOL, atol=0.0,
+                                    keep=[first] if first > 0 else None)
+            form = hp._pieces(xs[keep], full[keep])
+        else:
+            form = hp._pieces(xs, full)
         form.label = label
         reaction.crossSection[label] = form
     return suite
@@ -1066,7 +1103,7 @@ def _heating(run, plan, report):
             category = "heating-unsupported" if isinstance(error, UnsupportedResonanceError) else "heating-failed"
         details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
         return StageReport("heating", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})", details), {}
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     details["notes"] = list(notes)
     details["n_points"] = {T: int(len(t[301][0])) for T, t in tables.items()}
     fissile = any(r.ENDF_MT in (18, 19) for r in _entries(work).values())
@@ -1132,7 +1169,7 @@ def _broaden(rec, plan, report):
     except Exception as error:
         category, engine = _engine_category(error)
         return StageReport("broaden", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})",
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})",
                            dict(temperatures=list(temps), thnmax_eV=thnmax, engine_category=engine,
                                 error="".join(traceback.format_exception_only(type(error), error)).strip())), \
             {}, thnmax, None, None
@@ -1170,7 +1207,7 @@ def _urr(rec, plan, unresolved, report):
         category = "urr-unsupported" if isinstance(error, UnsupportedResonanceError) else "urr-failed"
         details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
         return StageReport("urr", "rejected", time.perf_counter() - t0, category,
-                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({error})", details), {}
+                           f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     report("urr", 1.0)
     ne = len(next(iter(tables.values())).energies)
     details["n_energies"] = ne
@@ -1200,6 +1237,15 @@ def _start(plan, progress):
     children) and the progress callback."""
     import multiprocessing
     from dataclasses import replace
+    if getattr(multiprocessing.current_process(), "_inheriting", False):
+        # A spawned worker is importing the caller's main script, and the
+        # script starts a run at module level. Running it here would redo the
+        # whole processing in every worker; stop at once, so the parent's pool
+        # breaks and its stage says why (_describe).
+        raise RuntimeError(
+            "process_endf/process_gnds was called while a worker process was importing the "
+            "main script: start the run under `if __name__ == \"__main__\":`, or use "
+            "ProcessingPlan(workers=1)")
     plan = ProcessingPlan() if plan is None else plan
     if multiprocessing.current_process().daemon and plan.workers != 1:
         plan = replace(plan, workers=1)

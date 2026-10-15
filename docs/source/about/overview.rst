@@ -1,14 +1,40 @@
 Overview
 ========
 
-KIKA is a comprehensive Python toolkit for nuclear data analysis and Monte Carlo simulation support. Originally designed for working with MCNP (Monte Carlo N-Particle) input and output files, it has evolved into a full-featured library covering nuclear data formats, sensitivity analysis, covariance matrices, and more.
+KIKA is a Python library for nuclear data: it reads the formats evaluated and processed
+data come in, processes an evaluation for transport, checks and samples its covariances,
+and reads the inputs and outputs of the transport codes that use the data. Arrays are
+NumPy, tables pandas or xarray, plots matplotlib.
 
-The library provides modern, lightweight alternatives to traditional tools, focusing on a clear, class-based design and seamless integration with the Python scientific ecosystem (NumPy, pandas, xarray, matplotlib).
-
-Originally created for personal use, KIKA is now available publicly to support the nuclear engineering and radiation transport community. Development continues according to the author's work requirements. Community contributions are warmly welcomed via GitHub at `https://github.com/juanmonleon/KIKA.git <https://github.com/juanmonleon/KIKA.git>`_.
+Contributions are welcome on GitHub at
+`https://github.com/juanmonleon/KIKA.git <https://github.com/juanmonleon/KIKA.git>`_.
 
 Current Features
 ----------------
+
+The Model and the Formats
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- ``kika.read`` and ``kika.write`` for ENDF-6, GNDS, ACE, G4NDL and OpenMC HDF5, through
+  one in-memory model shaped and named after GNDS
+- A conversion report with each read and write: what was lost, approximated or refused
+- Thermal-scattering libraries indexed and read in any of these formats
+
+Processing an Evaluation
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Resonance reconstruction (Breit-Wigner, Reich-Moore, R-matrix limited, unresolved
+  range) and Doppler broadening, without NJOY
+- Unresolved-resonance probability tables, heating (KERMA) and damage
+- PENDF, OpenMC HDF5 or GNDS output, each read back and checked before it is kept
+
+Covariances and Sampling
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Checks of the covariance files of a tape or a library (MF 31-35, 40)
+- Conditioning before a draw, and perturbed evaluations drawn from the covariances
+  (cross-sections, angular distributions, multiplicities, fission spectra), written as
+  ENDF, ACE, GNDS or OpenMC HDF5
 
 MCNP Input Processing
 ~~~~~~~~~~~~~~~~~~~~~
@@ -21,8 +47,9 @@ MCNP Input Processing
 MCTAL Analysis
 ~~~~~~~~~~~~~~
 
-- Comprehensive parsing of MCNP tally output (MCTAL) files
-- Extraction of F4 tally results, including uncertainties
+- Parsing of MCNP tally output (MCTAL) files, every tally axis kept
+- Mesh tallies (FMESH) from MESHTAL text files and MCNP 6.3 HDF5 runtapes
+- Tally results and their uncertainties as labelled xarray or pandas tables
 - Access to Tally Fluctuation Chart (TFC) data
 - Conversion of tally results to pandas DataFrames
 - Visualization of tally convergence

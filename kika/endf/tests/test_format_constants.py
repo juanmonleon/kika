@@ -82,44 +82,62 @@ def test_a_three_digit_exponent_is_written_rather_than_flushed_to_zero():
     assert format_endf_number(1e-308) == " 1.0000-308"
 
 
-@pytest.mark.parametrize("source,canonical", [
-    (" 0.12640975", " 1.264097-1"),
-    (" .061916773", " 6.191677-2"),
-    (" 1680612.75", " 1.680613+6"),
-    ("  583632.75", " 5.836328+5"),
+@pytest.mark.parametrize("source,written", [
+    (" 0.12640975", " 0.12640975"),
+    # Nine digits fit with the zero: the value survives, the zero comes back
+    # (as the PENDF writer and the photo-atomic tapes have it; the neutron
+    # tapes write these without it -- see _plain_decimal).
+    (" .061916773", "0.061916773"),
+    (" .025870388", "0.025870388"),
+    ("0.279110747", "0.279110747"),
+    ("-.061916773", "-.061916773"),
+    (" 1680612.75", " 1680612.75"),
+    ("  583632.75", "  583632.75"),
+    # Seven digits name this value exactly, and a tie keeps the scientific
+    # spelling: the value survives, the text is kika's.
     (" 6012.00000", " 6.012000+3"),
 ])
-def test_a_field_written_without_an_exponent_can_hold_more_digits_than_we_write(
-        source, canonical):
-    """kika's writer keeps **seven significant digits**, and some tapes write more.
+def test_a_field_written_without_an_exponent_keeps_its_digits(source, written):
+    """D22, fixed 2026-10-14: a nine-digit field comes back with nine digits.
 
-    ENDF's 11-character field can be spent two ways. kika always spends it the
-    same way — sign, ``M.MMMMMM``, exponent sign, exponent — which leaves seven
-    significant digits. An evaluator who writes ``0.12640975`` instead spends
-    nothing on an exponent and gets nine. Reading is unaffected
-    (``parse_number`` takes either); **writing the value back loses the extra
-    digits**, with relative error bounded by half of the seventh digit, ~5e-7.
-
-    Found by the MF6 round-trip sweep over ENDF/B-VIII.1 and measured there: of
-    12 388 MF6 sections, the ones that do not come back byte-identical differ
-    *only* in fields of this kind, and the largest value change over the tapes
-    checked was 4.8e-7 relative. **The JEFF-4.0 Fe-56 host tape the thesis
-    pipeline writes has 0 such fields in 1 967 724**, so nothing that pipeline
-    produces is affected — which is why this is pinned as a measured property of
-    the writer rather than fixed under an MF6 branch. Fixing it means teaching
-    ``format_endf_number`` to prefer whichever spelling preserves more digits,
-    and that changes MF3, MF4, MF5 and MF7 output too.
+    ENDF's 11-character field can be spent two ways: sign, ``M.MMMMMM``,
+    exponent sign and exponent, which leaves seven significant digits, or
+    plain decimals with no exponent, which leave up to nine. Until 2026-10-14
+    kika always wrote the first, so writing back ``0.12640975`` rounded it at
+    the seventh digit -- 97 fields of ENDF/B-VIII.1, worst 4.8e-7 relative,
+    found by the MF6 round-trip sweep. ``format_endf_number`` now writes
+    whichever spelling names the value more closely, the scientific one on a
+    tie, and a value below one drops its leading zero only when that names a
+    closer double (``-.061916773``, as the tape writes it).
     """
     value = parse_number(source)
-    assert format_endf_number(value) == canonical
-    reread = parse_number(canonical)
-    assert reread == pytest.approx(value, rel=5e-7)
+    assert format_endf_number(value) == written
+    assert parse_number(written) == value
 
 
-def test_the_seven_digit_limit_is_where_the_loss_starts():
-    """Seven digits survive exactly; the eighth is where it begins."""
-    assert parse_number(format_endf_number(0.1264097)) == 0.1264097
-    assert parse_number(format_endf_number(0.12640975)) != 0.12640975
+def test_a_seven_digit_field_comes_back_byte_for_byte():
+    """The tie rule: what a seven-digit tape wrote is what kika writes back."""
+    for field in (" 1.234567+5", "-3.141590-1", " 2.530000-2", " 1.000000-5",
+                  " 2.000000+7", " 9.999999+9", " 1.00000+10", " 1.5963-100"):
+        assert format_endf_number(parse_number(field)) == field
+
+
+def test_the_closest_field_is_never_further_than_the_scientific_one():
+    """Over values from 1e-12 to 1e11: never worse, often better, always 11 wide."""
+    import numpy as np
+    from kika._records import _format_endf_scientific
+
+    rng = np.random.default_rng(20261014)
+    values = 10 ** rng.uniform(-12, 11, 5000) * rng.choice([-1, 1], 5000)
+    better = 0
+    for value in values.tolist():
+        written = format_endf_number(value)
+        scientific = _format_endf_scientific(value)
+        assert len(written) == 11
+        new, old = abs(parse_number(written) - value), abs(parse_number(scientific) - value)
+        assert new <= old
+        better += new < old
+    assert better > 1000
 
 
 @pytest.mark.parametrize("field, decimal", [

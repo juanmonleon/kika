@@ -7,7 +7,7 @@ code depends only downwards: leaves, then the calculation layer, then the format
 then the doors and consumers.
 
 **Packages:** `kika.algebra`, `kika.nuclear_data`, `kika.processing`, `kika.cov`,
-`kika.endf`, `kika.gnds`, `kika.ace`, `kika.g4ndl`, `kika.sampling`, and the top-level
+`kika.endf`, `kika.gnds`, `kika.ace`, `kika.g4ndl`, `kika.hdf5`, `kika.tsl`, `kika.sampling`, and the top-level
 `kika.read` / `kika.write`.
 
 **Enforced by:** `kika/tests/test_layering.py`, `kika/algebra/tests/test_algebra.py`,
@@ -20,7 +20,8 @@ then the doors and consumers.
 
 kika reads several nuclear-data formats: ENDF (Evaluated Nuclear Data File), GNDS
 (Generalised Nuclear Database Structure), ACE (A Compact ENDF, the format of continuous-energy
-Monte Carlo codes) and G4NDL (the Geant4 neutron data library). Whatever the file, the
+Monte Carlo codes), G4NDL (the Geant4 neutron data library) and OpenMC's HDF5 files.
+Whatever the file, the
 data ends up in one in-memory model, the **canonical model**: a
 {py:class}`~kika.nuclear_data.model.suite.ReactionSuite` for the reactions of one
 projectile on one target, with its covariances beside it. Everything that computes
@@ -49,7 +50,7 @@ nothing from kika at all.
   into the model, and encodes the model back.
 - **Doors and consumers** sit on top. `kika.read` and `kika.write` are the single entry
   and exit for any format; `kika.sampling` and `kika.njoy` use both the model and the
-  formats.
+  formats, and `kika.tsl` reads thermal-scattering libraries in any of them.
 
 The packages for MCNP, sensitivities, uncertainty propagation, plotting and the other
 application areas build on this core. The layering tests do not cover them.
@@ -150,7 +151,8 @@ belongs in the layer and what does not: {doc}`algebra-layer`.
   lazily so that the model stays unloaded.
 - `kika/_read.py`, `kika/_write.py`, `kika/_identify.py`: the doors.
 - `kika/nuclear_data/model/`: the canonical model.
-- `kika/endf/`, `kika/gnds/`, `kika/ace/`, `kika/g4ndl/`: the format layer.
+- `kika/endf/`, `kika/gnds/`, `kika/ace/`, `kika/g4ndl/`, `kika/hdf5/`: the format layer.
+- `kika/tsl/`: thermal-scattering libraries in every format, above the format layer.
 - `kika/algebra/`: the mathematics.
 - `kika/tests/`: the tests that hold the structure of the repository as a whole.
 

@@ -63,9 +63,12 @@ def _scientific_parts(abs_val):
             return "1." + "0" * _mantissa_precision(carried), carried
 
 
-def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
+def _format_endf_scientific(value: Union[int, float, None], width: int = 11) -> str:
     """
-    Format a number according to ENDF specifications.
+    The normalised scientific spelling of an ENDF field: seven significant digits.
+
+    Not the writer any more -- :func:`format_endf_number` is, and it falls back
+    to this whenever plain decimals do not name the value more closely (D22).
 
     The output is an 11-character field made up as follows:
       - The first character is '-' if the number is negative or a blank if positive.
@@ -135,8 +138,8 @@ def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
 _EXACT_POWERS = {k: float(10 ** k) for k in range(23)}
 
 
-def round_to_endf_field(values) -> "np.ndarray":
-    """Each of *values* as :func:`format_endf_number` writes it and it reads back.
+def _round_to_scientific_field(values) -> "np.ndarray":
+    """Each of *values* as :func:`_format_endf_scientific` writes it and it reads back.
 
     The same doubles as ``parse_number(format_endf_number(v))``, bit for bit,
     without a string per value: the mantissa is rounded to its 7 (6, 5)
@@ -160,7 +163,7 @@ def round_to_endf_field(values) -> "np.ndarray":
     a = a[live]
     with np.errstate(divide="ignore"):
         exponent = np.floor(np.log10(a)).astype(np.int64)
-    # The mantissa as format_endf_number computes it, divisor and all.
+    # The mantissa as _format_endf_scientific computes it, divisor and all.
     divisor = np.empty(a.size)
     for e in np.unique(exponent):
         divisor[exponent == e] = 10 ** int(e)
@@ -182,62 +185,135 @@ def round_to_endf_field(values) -> "np.ndarray":
         else:
             value[at] = n[at] / _EXACT_POWERS[int(-e)]
     for i in np.flatnonzero(slow):
-        value[i] = float(parse_number(format_endf_number(float(a[i]))))
+        value[i] = float(parse_number(_format_endf_scientific(float(a[i]))))
     out[live] = np.copysign(value, v[live])
     return out
 
 
 
-def format_endf_number_precise(value, width=11):
-    """Choose the closest legal ENDF decimal field (ENDF-102 2023, 0.6.2).
+def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
+    """The closest legal ENDF field to *value* (ENDF-102 2023, 0.6.2).
 
-    Fixed notation can retain more digits than normalized exponent notation.
-    The legacy formatter remains the default for unchanged evaluations.
+    An 11-column field can be spent two ways. The normalised scientific
+    spelling (``" 1.234567+5"``, :func:`_format_endf_scientific`) keeps seven
+    significant digits wherever the value is; plain decimals with no exponent
+    (``" 0.12640975"``, ``" 1680612.75"``) keep up to nine for a value between
+    roughly 0.1 and 1e10. This writes whichever names a double closer to
+    *value*, and **the scientific one on a tie**.
+
+    The tie rule is what keeps an unchanged evaluation byte for byte: a field
+    read from a tape that wrote seven digits parses to a double the scientific
+    spelling reproduces exactly, so it comes back as it was read. A value
+    computed by kika, or read from a tape that spent the field on more digits,
+    now keeps them. Until 2026-10-14 every writer but the PENDF, MF12, MF14 and
+    the MF5 derivation used the scientific spelling alone, and writing back a
+    nine-digit field rounded it at the seventh digit (D22 in
+    ``kika-workspace/docs/library/library-gaps.md``: 97 fields of ENDF/B-VIII.1,
+    worst 4.8e-7 relative).
     """
-    legacy = format_endf_number(value, width)
+    if width == 11 and value is not None and value != 0:
+        # The same text, ~2x faster: the batch writer reads the scientific
+        # field back with float() instead of the ENDF grammar.
+        return format_endf_fields((value,))[0]
+    legacy = _format_endf_scientific(value, width)
     if value is None or value == 0:
         return legacy
-    digits = max(1, int(math.floor(math.log10(abs(value)))) + 1)
-    sign = int(value < 0)
-    if digits + sign <= width:
-        # Among fixed decimals the finest fitting quantum cannot round worse
-        # than a coarser one. A rounding carry may require one fewer place.
-        # Fixed text is plain Python float syntax, so float() reads it back
-        # exactly as parse_number would; only the legacy field needs the
-        # ENDF grammar. This is the PENDF writer's hottest loop.
-        places = max(0, width-digits-sign-1)
-        while places >= 0:
-            fixed = f"{value:.{places}f}"
-            if len(fixed) <= width:
-                # The fewest places that still name the same double. The finest
-                # quantum writes 20000000.1 as ``20000000.10``, eleven columns
-                # with no blank before it, where JEFF-4.0 B-10 writes
-                # `` 20000000.1``: the same value, and only the latter is the
-                # source's text.
-                named = float(fixed)
-                while places > 0:
-                    shorter = f"{value:.{places - 1}f}"
-                    if float(shorter) != named:
-                        break
-                    fixed, places = shorter, places - 1
-                # Ties keep the legacy field, as min() over [legacy, fixed] did.
-                if abs(named - value) < abs(parse_number(legacy) - value):
-                    return fixed.rjust(width)
-                return legacy
-            places -= 1
+    legacy_error = abs(parse_number(legacy) - value)
+    if legacy_error == 0.0:
+        return legacy
+    candidate = _plain_decimal(value, width)
+    # Ties keep the scientific field. Fixed text is plain Python float syntax,
+    # so float() reads it back exactly as parse_number would; only the
+    # scientific field needs the ENDF grammar.
+    if candidate is not None and abs(candidate[1] - value) < legacy_error:
+        return candidate[0].rjust(width)
     return legacy
+
+
+def _without_leading_zero(text: str) -> str:
+    """``0.0619`` -> ``.0619``: the column a value below one does not need."""
+    if text.startswith("0."):
+        return text[1:]
+    if text.startswith("-0."):
+        return "-" + text[2:]
+    return text
+
+
+def _fixed_text(value: float, width: int, dropZero: bool):
+    """``(text, double)``: the finest plain-decimal field of *value* that fits."""
+    magnitude = abs(value)
+    sign = int(value < 0)
+    digits = int(math.floor(math.log10(magnitude))) + 1
+    digits = max(0, digits) if dropZero else max(1, digits)
+    if digits + sign > width:
+        return None
+    # Among fixed decimals the finest fitting quantum cannot round worse than
+    # a coarser one. A rounding carry may require one fewer place.
+    places = max(0, width - digits - sign - 1)
+    while places >= 0:
+        fixed = f"{value:.{places}f}"
+        fixed = _without_leading_zero(fixed) if dropZero else fixed
+        if len(fixed) <= width:
+            # The fewest places that still name the same double. The finest
+            # quantum writes 20000000.1 as ``20000000.10``, eleven columns
+            # with no blank before it, where JEFF-4.0 B-10 writes
+            # `` 20000000.1``: the same value, and only the latter is the
+            # source's text.
+            named = float(fixed)
+            while places > 0:
+                shorter = f"{value:.{places - 1}f}"
+                shorter = _without_leading_zero(shorter) if dropZero else shorter
+                if float(shorter) != named:
+                    break
+                fixed, places = shorter, places - 1
+            return fixed, named
+        places -= 1
+    return None
+
+
+def _plain_decimal(value: float, width: int = 11):
+    """``(text, double)`` of the closest plain-decimal field, or None.
+
+    A value below one keeps its leading zero (`` 0.12640975``,
+    ``0.279110747``) unless dropping it names a closer double -- which is how
+    a negative value spends the field on nine digits (``-.061916773``): with
+    the zero it would hold one fewer, and a writer that always kept it would
+    still round there.
+
+    Where both name the same double, tapes disagree on the text: the neutron
+    evaluations write `` .025870388`` (5 131 fields of the local cache and the
+    committed slices), the ENDF/B-VIII.1 photo-atomic slice ``0.279110747``
+    (9). Keeping the zero is what the PENDF writer always did and what keeps
+    the photo-atomic byte-for-byte gate; the neutron fields come back with the
+    same value and the zero (90 of them in ENDF/B-VIII.1 U-235 MF3).
+    """
+    kept = _fixed_text(value, width, dropZero=False)
+    if abs(value) < 1:
+        dropped = _fixed_text(value, width, dropZero=True)
+        if dropped is not None and (kept is None
+                                    or abs(dropped[1] - value) < abs(kept[1] - value)):
+            return dropped
+    return kept
+
+
+#: The name the closest-field writer had while it was opt-in. Same function.
+format_endf_number_precise = format_endf_number
 
 
 def format_endf_fields(values, data_format=None):
     """Many floats as 11-column fields, the same text as one call per value.
 
-    ``data_format`` is ``ENDF_FORMAT_PRECISE`` or ``ENDF_FORMAT_FLOAT``. It
-    repeats :func:`format_endf_number` and :func:`format_endf_number_precise`
-    operation for operation, without their per-value overhead: the legacy
-    field is read back with ``float()`` on its own digits instead of the ENDF
-    grammar. A PENDF body is millions of these (U-238: ~3.3 M).
+    :func:`format_endf_number` calls this for an 11-column field, and
+    :func:`_plain_decimal` is the same choice spelled out for any width: the
+    scientific field is read back with ``float()`` on its own digits instead
+    of the ENDF grammar. A PENDF body is millions of these (U-238: ~3.3 M).
+    Measured 2026-10-14 against the seven-digit writer it replaced: 1.3 vs
+    1.1 us a value for a field read from a seven-digit tape, 3.2 vs 1.1 us
+    for a computed one, and 31.2 vs 30.3 s to write MF3/MF4/MF6 of the 39
+    tapes in the local cache. *data_format* is accepted for the callers that pass
+    ``ENDF_FORMAT_PRECISE`` or ``ENDF_FORMAT_FLOAT``; both name the same field
+    since D22.
     """
-    precise = data_format == ENDF_FORMAT_PRECISE
     out = []
     append = out.append
     floor, log10, isfinite = math.floor, math.log10, math.isfinite
@@ -249,38 +325,46 @@ def format_endf_fields(values, data_format=None):
         if not isfinite(value):
             raise ValueError(f"Cannot format non-finite ENDF value: {value}")
         abs_val = -value if value < 0 else value
-        exponent0 = int(floor(log10(abs_val)))
         mantissa_str, exponent = _scientific_parts(abs_val)
         sign_char = "-" if value < 0 else " "
         exp_sign = "+" if exponent >= 0 else "-"
         legacy = f"{sign_char}{mantissa_str}{exp_sign}{abs(exponent)}"
-        if not precise:
+        legacy_error = abs(float(f"{sign_char.strip()}{mantissa_str}e{exp_sign}{abs(exponent)}") - value)
+        if legacy_error == 0.0:
+            # Nothing names the value more closely, and a tie keeps this one:
+            # every field of a tape written with seven digits ends here.
             append(legacy)
             continue
-        digits = exponent0 + 1 if exponent0 >= 0 else 1
+        # _plain_decimal, inlined: this is the PENDF writer's hottest loop.
+        digits = int(floor(log10(abs_val))) + 1
         sign = 1 if value < 0 else 0
-        if digits + sign > 11:
-            append(legacy)
-            continue
-        places = 11 - digits - sign - 1
-        if places < 0:
-            places = 0
-        chosen = legacy
-        while places >= 0:
-            fixed = f"{value:.{places}f}"
-            if len(fixed) <= 11:
-                named = float(fixed)
-                while places > 0:
-                    shorter = f"{value:.{places - 1}f}"
-                    if float(shorter) != named:
-                        break
-                    fixed, places = shorter, places - 1
-                legacy_value = float(f"{sign_char.strip()}{mantissa_str}e{exp_sign}{abs(exponent)}")
-                if abs(named - value) < abs(legacy_value - value):
-                    chosen = fixed.rjust(11)
-                break
-            places -= 1
-        append(chosen)
+        best, best_error = legacy, legacy_error
+        for drop in ((False, True) if digits <= 0 else (False,)):
+            d = (digits if digits > 0 else 0) if drop else (digits if digits > 1 else 1)
+            if d + sign > 11:
+                continue
+            places = 11 - d - sign - 1
+            if places < 0:
+                places = 0
+            while places >= 0:
+                fixed = f"{value:.{places}f}"
+                if drop:
+                    fixed = _without_leading_zero(fixed)
+                if len(fixed) <= 11:
+                    named = float(fixed)
+                    while places > 0:
+                        shorter = f"{value:.{places - 1}f}"
+                        if drop:
+                            shorter = _without_leading_zero(shorter)
+                        if float(shorter) != named:
+                            break
+                        fixed, places = shorter, places - 1
+                    error = abs(named - value)
+                    if error < best_error:
+                        best, best_error = fixed.rjust(11), error
+                    break
+                places -= 1
+        append(best)
     return out
 
 
@@ -302,7 +386,7 @@ def round_to_precise_endf_field(values):
             out[start:start+32768]=round_to_precise_endf_field(v[start:start+32768])
         return out
     with np.errstate(over='ignore',under='ignore',divide='ignore',invalid='ignore'):
-        out=round_to_endf_field(v)
+        out=_round_to_scientific_field(v)
     a=np.abs(v);live=np.flatnonzero((a>0)&(a<1e11))
     if not len(live):return out
     magnitude=a[live];sign=(v[live]<0).astype(np.int64)
@@ -313,6 +397,14 @@ def round_to_precise_endf_field(values):
     scaled=magnitude*factor;integer=np.rint(scaled)
     fixed=np.copysign(integer/factor,v[live])
     eps=np.finfo(float).eps
+    # Below one, the field without its leading zero holds one more decimal
+    # and wins when it names a closer double (_plain_decimal).
+    below=magnitude<1
+    factorDropped=np.power(10.,places+1)
+    scaledDropped=magnitude*factorDropped;integerDropped=np.rint(scaledDropped)
+    fixedDropped=np.copysign(integerDropped/factorDropped,v[live])
+    useDropped=below&(abs(fixedDropped-v[live])<abs(fixed-v[live]))
+    fixed=np.where(useDropped,fixedDropped,fixed)
     # Log10 near a power of ten and rounding across a digit boundary can
     # change how many decimals fit. These uncommon inputs stay scalar.
     with np.errstate(over='ignore',under='ignore'):
@@ -321,16 +413,24 @@ def round_to_precise_endf_field(values):
           | (abs(magnitude-lower)<=8*eps*magnitude)
           | (abs(magnitude-upper)<=8*eps*magnitude)
           | (integer>=np.power(10.,digits+places))
+          | (below&(abs(scaledDropped-np.floor(scaledDropped)-.5)<=8*eps*np.maximum(1.,scaledDropped)))
+          | (below&(integerDropped>=factorDropped))
           | (digits+sign>11))
     better=abs(fixed-v[live])<abs(out[live]-v[live])
     at=live[better&~slow];out[at]=fixed[better&~slow]
-    for at in live[slow]:out[at]=parse_number(format_endf_number_precise(float(v[at])))
+    for at in live[slow]:out[at]=parse_number(format_endf_number(float(v[at])))
     return out
 
 
+#: Each of *values* as :func:`format_endf_number` writes it and it reads back.
+round_to_endf_field = round_to_precise_endf_field
+
+
 # Format constants for ENDF data types
+#: Both float formats write :func:`format_endf_number`'s closest field since D22
+#: (2026-10-14); the two names stay because ~100 call sites pass one or the other.
 ENDF_FORMAT_PRECISE = 'float_precise'
-ENDF_FORMAT_FLOAT = 'float'       # Scientific notation (e.g., " 1.234567+5")
+ENDF_FORMAT_FLOAT = 'float'
 ENDF_FORMAT_INT = 'int'           # Integer format (e.g., "         11")
 ENDF_FORMAT_BLANK = 'blank'       # Blank field
 ENDF_FORMAT_PRESERVE = 'preserve' # Use value's own type to determine format
@@ -380,8 +480,6 @@ def format_endf_data_line(values: Sequence[Union[int, float, None]],
                 # ENDF_FORMAT_INT_ZERO is an alias for this, so one branch
                 # serves both — as it always did, in two identical copies.
                 parts.append(f"{int(value):11d}")
-            elif fmt == ENDF_FORMAT_PRECISE:
-                parts.append(format_endf_number_precise(value))
             elif fmt == ENDF_FORMAT_BLANK or value is None:
                 parts.append("           ")
             else:

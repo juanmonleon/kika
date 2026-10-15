@@ -236,7 +236,7 @@ $(C_{\text{clip}} + C_{\text{clip}}^\top)/2$; the one used for drawing does not.
 
 **Higham's diagonal-preserving projection.** The nearest PSD matrix with the stated
 diagonal, in the Frobenius norm, found by alternating projections with Dykstra's
-correction (Higham 2002; `TODO(ref)`: Dykstra for the correction). The input is symmetrised and its non-finite entries are set to zero.
+correction (Higham 2002; Dykstra 1983). The input is symmetrised and its non-finite entries are set to zero.
 With $P_S$ the projection {eq}`eq-conditioning-and-psd-clip` (floor `eigval_floor`, no
 symmetrisation) and $P_U$ the projection that puts back the stated diagonal $d$,
 
@@ -653,4 +653,6 @@ of an off-diagonal correlation.
   Algebra and its Applications* 103, 103-118 (1988).
 - N. J. Higham, "Computing the nearest correlation matrix: a problem from finance", *IMA
   Journal of Numerical Analysis* 22, 329-343 (2002).
-- `TODO(ref)`: Dykstra's correction to alternating projections.
+- R. L. Dykstra, "An algorithm for restricted least squares regression", *Journal of the
+  American Statistical Association* 78(384), 837-842 (1983): the correction to
+  alternating projections.

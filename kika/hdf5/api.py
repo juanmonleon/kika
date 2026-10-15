@@ -1,10 +1,10 @@
 """The doors ``kika.read(..., format="hdf5")`` and ``kika.write(..., format="hdf5")`` open.
 
-Reading dispatches on the file's ``filetype`` (roadmap D1): ``data_neutron`` →
+Reading dispatches on the file's ``filetype``: ``data_neutron`` →
 :class:`~kika.nuclear_data.model.ReactionSuite`, ``data_thermal`` → a suite of
 interaction ``thermalNeutronScatteringLaw``. ``data_photon`` is transcribed by
-the record layer (H1) and not decoded into the model, which has no photo-atomic
-suite (roadmap H10, deferred); reading one raises and says so. ``data_wmp`` is
+the record layer and not decoded into the model, which has no photo-atomic
+suite; reading one raises and says so. ``data_wmp`` is
 the parked windowed multipole.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ def read(path, **kwargs):
         return suite
     if kind == "data_photon":
         raise HDF5UnsupportedError(
-            "a photo-atomic file has no home in the model yet (roadmap H10, deferred); "
+            "a photo-atomic file has no home in the model yet; "
             "kika.hdf5.records reads and writes it as records")
     raise HDF5UnsupportedError(f"filetype {kind!r} is not read by kika")
 

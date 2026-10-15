@@ -1386,11 +1386,13 @@ def resolveSpaces(blocks, index, space):
     states an uncertainty that straddles zero -- so a log draw of it cannot
     represent what the file says, and a linear draw can.
 
-    A block that carries components of two quantities is drawn once, so it gets
-    one space: the mapping's entry for the *first* MF in the block that names
-    one, and the run's default otherwise. That case only arises under
-    ``grouping="stated"`` with a file that declares a cross term, which is
-    exactly the case where drawing the two halves separately would be wrong.
+    A block that carries components of two quantities is drawn once. If they
+    ask for the same space it is that one; if not it is ``"mixed"``, and each
+    row is drawn in its own quantity's space (:func:`toDrawSpace`). Such a
+    block is what a request for MF33 *and* MF34 assembles when the file states
+    the sigma <-> a_l cross term (J3): before 2026-10-14 the whole block took
+    the space of its first MF, so ``{33: "log", 34: "linear"}`` drew the a_l in
+    log.
     """
     from kika.sampling.joint_blocks import MF_OF_QUANTITY
 
@@ -1413,10 +1415,54 @@ def resolveSpaces(blocks, index, space):
 
     resolved: Dict[Hashable, str] = {}
     for key, _matrix in blocks:
-        named = [byMf[component.mf] for component in index[key]["components"]
-                 if component.mf in byMf]
-        resolved[key] = named[0] if named else "log"
+        wanted = {byMf.get(component.mf, "log")
+                  for component in index[key]["components"]}
+        resolved[key] = wanted.pop() if len(wanted) == 1 else "mixed"
     return resolved
+
+
+def logRows(meta, space) -> np.ndarray:
+    """One boolean per row of a block: drawn in log space (True) or linear.
+
+    *meta* is the block's entry of the request index, *space* the run's
+    ``space`` argument; a quantity the mapping does not name is drawn in log,
+    as :func:`resolveSpaces` has it.
+    """
+    from kika.sampling.joint_blocks import MF_OF_QUANTITY
+
+    if isinstance(space, str):
+        byMf = None
+    else:
+        byMf = {(MF_OF_QUANTITY[name] if isinstance(name, str) else int(name)): value
+                for name, value in dict(space).items()}
+    stride = int(meta["stride"])
+    rows = []
+    for component in meta["components"]:
+        wanted = space if byMf is None else byMf.get(component.mf, "log")
+        rows += [wanted == "log"] * stride
+    return np.asarray(rows, dtype=bool)
+
+
+def toDrawSpace(matrix, meta, space) -> np.ndarray:
+    """The covariance of what is drawn: ``log1p`` on the log x log part only.
+
+    A relative Σ drawn in log space is the covariance of ln f, ``log1p(Σ)``,
+    and a factor comes out as ``f = exp(y - M_ii/2)`` so that E[f] = 1. In a
+    **mixed** block the linear rows are drawn as ``f = 1 + y`` and their
+    blocks are left as stated -- **the cross block included**, untransformed.
+    That is exact in second moments: by Stein's lemma, for jointly normal
+    (y_s, y_a), Cov(exp(y_s - d/2), y_a) = E[exp(y_s - d/2)] Cov(y_s, y_a) =
+    Cov(y_s, y_a), since the mean factor is one. Pista J2 of
+    ``mf4_tabulated_perturbation_roadmap.md``.
+    """
+    matrix = np.asarray(matrix, dtype=float)
+    mask = logRows(meta, space)
+    if mask.all():
+        return np.log1p(matrix)
+    out = matrix.copy()
+    inLog = np.ix_(mask, mask)
+    out[inLog] = np.log1p(matrix[inLog])
+    return out
 
 
 def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod,
@@ -1487,6 +1533,17 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
             group, space=wanted, returns="factors",
             decomposition_method=decompositionMethod, psd_method=psdMethod,
             null_tol=nullTol, verbose=False, logger=logger)
+    # A mixed block (J3) is decomposed as a linear one -- its matrix is already
+    # the covariance of what is drawn, see toDrawSpace -- and its log rows are
+    # exponentiated once the realisation is in.
+    mixed = [(key, np.asarray(matrix, dtype=float) if inDrawSpace
+              else toDrawSpace(matrix, index[key], space))
+             for key, matrix in factorBlocks if spaces[key] == "mixed"]
+    if mixed:
+        prepared += prepare_blocks(
+            mixed, space="linear", returns="factors",
+            decomposition_method=decompositionMethod, psd_method=psdMethod,
+            null_tol=nullTol, verbose=False, logger=logger)
 
     if deltaBlocks:
         from kika.sampling.mf35_sampling import (NULL_TOL, SAMPLING_SPACE,
@@ -1501,6 +1558,13 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
 
     samples, diagnostics = realise_blocks(
         prepared, nSamples, sampling_method=samplingMethod, seed=seed)
+    for key, matrix in mixed:
+        mask = logRows(index[key], space)
+        drawn = np.array(samples[key], dtype=float)
+        drawn[:, mask] = np.exp(drawn[:, mask] - 1.0 - 0.5 * np.diag(matrix)[mask])
+        samples[key] = drawn.astype(samples[key].dtype, copy=False)
+        diagnostics[key]["space"] = "mixed"
+        diagnostics[key]["log_rows"] = int(mask.sum())
 
     if deltaBlocks:
         stated = dict(statedBlocks) if statedBlocks is not None else {}
@@ -2734,8 +2798,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     # and the space the format pipeline conditions in (multigroup_draw).
     factorBlocks, _deltaBlocks = _splitBySemantics(blocks, index)
     logKeys = {key for key, wanted in resolveSpaces(factorBlocks, index, space).items()
-               if wanted == "log"}
-    blocks = [(key, np.log1p(np.asarray(matrix, dtype=float)) if key in logKeys
+               if wanted in ("log", "mixed")}
+    blocks = [(key, toDrawSpace(matrix, index[key], space) if key in logKeys
                else matrix) for key, matrix in blocks]
     blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
         blocks, index, conditioningPlan, log, labels, layer1,
@@ -2977,8 +3041,11 @@ def _jsonableRequest(value):
     from kika.sampling.joint_blocks import Selection
 
     if isinstance(value, Selection):
-        return {"mf": value.mf, "mt": _jsonableRequest(value.mt),
-                "index": _jsonableRequest(value.index), "relative": value.relative}
+        out = {"mf": value.mf, "mt": _jsonableRequest(value.mt),
+               "index": _jsonableRequest(value.index), "relative": value.relative}
+        if value.magnitudeMts:
+            out["magnitudeMts"] = list(value.magnitudeMts)
+        return out
     if isinstance(value, Mapping):
         return {str(k): _jsonableRequest(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

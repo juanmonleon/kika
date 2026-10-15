@@ -115,6 +115,27 @@ def test_a_doppler_rejection_keeps_the_0K_result(monkeypatch):
     assert result.temperatures == () and {1, 2, 102} <= set(result.cross_sections())
 
 
+def test_a_dead_worker_pool_says_what_usually_kills_it(monkeypatch):
+    """On Windows a script with no __main__ guard breaks the pool; say so."""
+    from concurrent.futures.process import BrokenProcessPool
+    from kika.hdf5 import processing as hp
+
+    def die(*args, **kwargs):
+        raise BrokenProcessPool("A process in the process pool was terminated abruptly.")
+    monkeypatch.setattr(hp, "_broadenAll", die)
+    broaden = process_endf(TAPE, ProcessingPlan(temperatures=(600.0,))).stage("broaden")
+    assert broaden.status == "rejected" and broaden.category == "doppler-failed"
+    assert '__name__ == "__main__"' in broaden.summary and "workers=1" in broaden.summary
+
+
+def test_a_worker_importing_an_unguarded_script_does_not_run_it(monkeypatch):
+    """A spawned worker re-imports the main script; a run at its top level stops."""
+    import multiprocessing
+    monkeypatch.setattr(multiprocessing.current_process(), "_inheriting", True, raising=False)
+    with pytest.raises(RuntimeError, match="__main__"):
+        process_endf(TAPE, ProcessingPlan(temperatures=(600.0,)))
+
+
 def test_zero_kelvin_only():
     result = process_endf(TAPE, ProcessingPlan(temperatures=()))
     assert result.stage("broaden").status == "skipped" and result.temperatures == ()

@@ -16,7 +16,7 @@ iterates only ``<library>`` nodes; a relative ``path`` is joined to
 (``cross_sections.cpp:47-79, 305-317``). ``<depletion_chain>`` is read by
 OpenMC's Python only, and kept here so it round trips.
 
-**The overlay** (:func:`overlay`) is what H6 and H7 need: an index in a new
+**The overlay** (:func:`overlay`) is what a benchmark with kika's files needs: an index in a new
 directory that sends a few materials to kika's files and every other one to the
 official library *where it already is*, so a benchmark can swap U-235 without
 copying 32 GB. Paths to the base library are written relative to the new index
