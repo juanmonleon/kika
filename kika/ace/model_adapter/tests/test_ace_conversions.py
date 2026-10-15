@@ -197,3 +197,20 @@ def test_a_table_read_back_from_gnds_is_put_back_on_the_union_grid():
     a, b = encode_xss(expected), encode_xss(written)
     assert list(a.nxs) == list(b.nxs) and list(a.jxs) == list(b.jxs)
     np.testing.assert_allclose(b.xss[1:], a.xss[1:], rtol=1e-14, atol=0)
+
+
+def test_a_table_kika_wrote_from_openmc_decodes_and_encodes_back_the_same(tmp_path):
+    """OpenMC's fission neutrons are isotropic in CM inside a lab-frame reaction,
+    which kika's ACE states as an explicit record (LC = 0 at each energy). Read
+    as a bare Isotropic2d it came back as LOCB = 0, five words shorter."""
+    from kika.ace.encoders.layout import encode_xss
+    from kika.ace.model_adapter.encode import encodeAce
+
+    suite = _read(DATA / "U235.h5")
+    kika.write(suite, tmp_path / "u235.ace", format="ace", temperatures=_kelvin(suite)[0],
+               extension=".80c")
+    original = read_ace(str(tmp_path / "u235.ace"))
+    again, _ = encodeAce(_read(tmp_path / "u235.ace"))
+    a, b = encode_xss(original), encode_xss(again)
+    assert list(a.nxs) == list(b.nxs) and list(a.jxs) == list(b.jxs)
+    np.testing.assert_allclose(b.xss[1:], a.xss[1:], rtol=1e-12, atol=0)

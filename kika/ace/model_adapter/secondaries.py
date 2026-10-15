@@ -150,13 +150,19 @@ def angularForm(dist):
     kind = type(dist).__name__
     if kind == "KalbachMannAngularDistribution":
         return None
-    if kind == "IsotropicAngularDistribution":
+    stated = getattr(dist, "_energies", None)
+    if kind == "IsotropicAngularDistribution" and (stated is None or len(stated) == 0):
         return Isotropic2d()
+    # An isotropic record *with* energies is an explicit table, LC = 0 at each
+    # one: what kika writes for OpenMC's fission neutrons, isotropic in CM in
+    # a lab-frame reaction. Read as Isotropic2d it came back as LOCB = 0, and
+    # the table was not the one written (roadmap A11).
     energies = np.asarray(dist._energies, dtype=float)
     tables = []
     for k, e in enumerate(energies):
         outer = float(e) * EV_PER_MEV
-        form = (dist.energy_forms[k] if getattr(dist, "energy_forms", None) else
+        form = ("isotropic" if kind == "IsotropicAngularDistribution" else
+                dist.energy_forms[k] if getattr(dist, "energy_forms", None) else
                 ("equiprobable" if kind == "EquiprobableAngularDistribution" else "tabulated"))
         if form == "isotropic":
             tables.append(_isotropicTable(outer))
