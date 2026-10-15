@@ -427,8 +427,9 @@ def chi2_variants_and_z(
     returned it). Per group the numbers are those of the two functions, bit for bit, so a subset's
     table is a row filter of this one.
 
-    ``on_group(key, ord_pos, sigma_factor, r)``, when given, is called after each V4 factorisation
-    with ``sigma_factor = (c, low)`` -- the hook for per-cell diagnostics that need the factor.
+    ``on_group(key, ord_pos, sigma_factor, r, eval_block)``, when given, is called after each V4
+    factorisation with ``sigma_factor = (c, low)`` and the group's Sigma_eval block (or None) --
+    the hook for per-cell diagnostics that need the factor or the declared covariance.
 
     Returns ``(per_exp, z)``; ``z`` is None when ``z_variant`` is None.
     """
@@ -487,7 +488,8 @@ def chi2_variants_and_z(
             if on_group is None:
                 v4, z4 = _solve_built(build, r, label=f"{label}/V4")
             else:
-                v4, z4 = _solve_built(build, r, label=f"{label}/V4", keep=on_group,
+                v4, z4 = _solve_built(build, r, label=f"{label}/V4",
+                                      keep=lambda k_, o_, f_, r_: on_group(k_, o_, f_, r_, block),
                                       keep_args=(key, ord_pos))
             del block
         else:
@@ -724,6 +726,124 @@ def profiled_mode_matrix(u: np.ndarray, block_ids: Optional[np.ndarray]) -> np.n
     cols = [np.where(block_ids == b, u, 0.0) for b in np.unique(block_ids)]
     cols = [c_ for c_ in cols if np.any(c_ != 0)]
     return np.column_stack(cols) if cols else np.zeros((u.size, 0))
+
+
+def _noise_inv_apply(D: np.ndarray, v: np.ndarray, block_ids: Optional[np.ndarray],
+                     Y: np.ndarray) -> np.ndarray:
+    """Sigma_n^-1 Y for Sigma_n = diag(D) + sum_b v_b v_b' (v masked to each block b).
+
+    The blocks have disjoint support, so the Woodbury capacitance is diagonal: O(N m)."""
+    Y = Y.reshape(Y.shape[0], -1)
+    bid = (np.zeros(D.size, dtype=np.int64) if block_ids is None
+           else np.unique(block_ids, return_inverse=True)[1].ravel())
+    vd = v / D
+    s = np.bincount(bid, weights=v * vd)                                  # v_b' D^-1 v_b
+    T = np.stack([np.bincount(bid, weights=vd * Y[:, j], minlength=s.size)
+                  for j in range(Y.shape[1])], axis=1)                   # v_b' D^-1 Y
+    return Y / D[:, None] - vd[:, None] * (T / (1.0 + s)[:, None])[bid]
+
+
+def coherent_cell_offsets(
+    D: np.ndarray, v: np.ndarray, U: np.ndarray, block_ids: Optional[np.ndarray],
+    r: np.ndarray, y_eval: np.ndarray, cell_of_row: np.ndarray,
+    eval_block: Optional[np.ndarray],
+) -> pd.DataFrame:
+    """Per cell of ONE experiment: its relative offset from the evaluation, for the covariance.
+
+    15-oct (Juan: the cell map is for finding where the covariance UNDER-declares, not for the
+    central value). For each cell c the GLS fit
+
+        r = x_c d_c + U a + eps,   x_c = y_eval on the cell's rows (0 elsewhere),
+        eps ~ N(0, Sigma_n),       Sigma_n = diag(D) + v v'   (the experiment's OWN covariance;
+                                   u u' is replaced by the free modes U -- the normalisation
+                                   is profiled, as in `conditional_cell_scores`)
+
+    gives d_c (relative; the cell against the rest of the experiment, which is all a shape
+    covariance like MF34 can be asked about) with s_c^2 = var(d_c | experiment) and weights h_c
+    (d_c = h_c' r). The evaluation's declared covariance enters only as g_c^2 = h_c' Sigma_eval h_c:
+    the variance the declared band gives that same estimator. Experiments whose d_c agree with
+    each other but sit many sqrt(s^2 + g^2) from zero mark a cell where Sigma_eval under-declares;
+    the pooling is `cell_meta_analysis`.
+
+    A cell whose x_c lies in the span of U (an experiment with one cell) has no offset: skipped.
+    """
+    cells = np.unique(cell_of_row)
+    k = U.shape[1]
+    nc = cells.size
+    X = np.zeros((r.size, nc))
+    X[np.arange(r.size), np.searchsorted(cells, cell_of_row)] = y_eval
+    Z = np.concatenate([X, U, r[:, None]], axis=1)
+    P = _noise_inv_apply(D, v, block_ids, Z)                   # Sigma_n^-1 [X, U, r]
+    A = Z[:, :-1].T @ P[:, :-1]
+    A = 0.5 * (A + A.T)
+    b = Z[:, :-1].T @ P[:, -1]
+    ui = np.arange(nc, nc + k)
+    rows, H = [], []
+    for j, cell in enumerate(cells):
+        sel = np.concatenate([[j], ui]).astype(int)
+        As = A[np.ix_(sel, sel)]
+        if k:
+            schur = As[0, 0] - As[0, 1:] @ np.linalg.lstsq(As[1:, 1:], As[1:, 0], rcond=None)[0]
+            if not schur > 1e-10 * As[0, 0]:
+                continue
+        Ai = np.linalg.pinv(As)
+        rows.append({"cell": cell, "n": int(np.sum(cell_of_row == cell)),
+                     "d": float(Ai[0] @ b[sel]), "s2": float(Ai[0, 0])})
+        H.append(P[:, sel] @ Ai[:, 0])                         # d = h' r
+    out = pd.DataFrame(rows, columns=["cell", "n", "d", "s2"])
+    g2 = np.zeros(len(out))
+    if eval_block is not None and eval_block.size and H:
+        Hm = np.stack(H, axis=1)
+        step = max(1, _ASSEMBLY_CHUNK_ELEMENTS // max(r.size, 1))
+        for a in range(0, r.size, step):                        # no float64 copy of the block
+            e = min(r.size, a + step)
+            g2 += np.einsum("ij,ij->j", Hm[a:e], np.asarray(eval_block[a:e], dtype=float) @ Hm)
+    out["g2"] = g2
+    return out
+
+
+def cell_meta_analysis(long: pd.DataFrame) -> pd.DataFrame:
+    """Random-effects pooling of `coherent_cell_offsets` over the experiments of each cell.
+
+    Per (library, cell), with d_e, s_e^2 and g_e^2 per experiment:
+
+        d_e = delta + b_e + eps_e,   b_e ~ N(0, tau^2) (between experiments),  eps_e ~ N(0, s_e^2)
+
+    DerSimonian-Laird tau^2; delta_hat = sum w d / sum w with w = 1 / (s^2 + tau^2), se^2 = 1/sum w.
+    The evaluation's error is COMMON to the experiments of a cell, so it does not average down:
+    sigma_eval = sqrt(sum w g^2 / sum w), and
+
+        z = delta_hat / sqrt(se^2 + sigma_eval^2)   ~ N(0, 1) where Sigma_eval is honest,
+        f = sqrt(max(delta_hat^2 - se^2, 0)) / sigma_eval   (offset in units of the band).
+
+    In sample (the evaluation was fitted to these data) delta_hat is pulled toward 0, so an
+    |z| > 2 here is, if anything, an under-statement.
+    """
+    rows = []
+    for (lib, cell), s in long.groupby(["library", "cell"], observed=True):
+        s = s[np.isfinite(s["d"]) & (s["s2"] > 0)]
+        m = len(s)
+        if m == 0:
+            continue
+        d, s2, g2 = s["d"].to_numpy(), s["s2"].to_numpy(), s["g2"].to_numpy()
+        w0 = 1.0 / s2
+        d_fe = np.sum(w0 * d) / np.sum(w0)
+        Q = float(np.sum(w0 * (d - d_fe) ** 2))
+        den = np.sum(w0) - np.sum(w0 ** 2) / np.sum(w0)
+        tau2 = max(0.0, (Q - (m - 1)) / den) if m > 1 and den > 0 else 0.0
+        w = 1.0 / (s2 + tau2)
+        delta = float(np.sum(w * d) / np.sum(w))
+        se2 = float(1.0 / np.sum(w))
+        sig_eval = float(np.sqrt(np.sum(w * g2) / np.sum(w)))
+        tot = np.sqrt(se2 + sig_eval ** 2)
+        rows.append({
+            "library": lib, "cell": cell, "n_exp": m, "n": int(s["n"].sum()),
+            "delta": delta, "se": np.sqrt(se2), "tau": np.sqrt(tau2), "sigma_eval": sig_eval,
+            "z": delta / tot if tot > 0 else np.nan,
+            "f": np.sqrt(max(delta ** 2 - se2, 0.0)) / sig_eval if sig_eval > 0 else np.nan,
+            "Q": Q, "frac_pos": float(np.mean(d > 0)), "top_exp_share": float(w.max() / w.sum()),
+        })
+    return pd.DataFrame(rows)
 
 
 def aggregate_chi2_by_library(

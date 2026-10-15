@@ -1095,6 +1095,14 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² — cinta B-spline v6 y5s _re con la estadística H⁻¹, plegado exacto, EXFOR CORREGIDA (C16)",
         "systematic_block_col": None,
     },
+    # ── 15-oct: C16X — el gemelo corregido de B16X (congruencia, BLAS a 8 hilos): el mapa de celdas y
+    # la comprobación de la banda sobre la base CORREGIDA, que es la que se lee para la covarianza.
+    "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_corr_x": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_exact_corr_x.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — C16 con Σ_eval por congruencia A J Aᵀ, EXFOR CORREGIDA (C16X)",
+        "systematic_block_col": None,
+    },
     # ── RUN 97: una malla por orden Legendre (roadmap §10.8) ────────────────
     #
     # Candidata frente a `predictive_91_cross`, la misma base contra la que se
@@ -2399,6 +2407,75 @@ def cell_map_figure(cmap_df: pd.DataFrame, libraries: List[str], subset_key: str
                                        "cond_rel", "mean_rel_resid", "frac_z1"]], float_format="%.3f") + "\n")
 
 
+def band_check_cells(offsets: pd.DataFrame, exp_ids, libraries: List[str]) -> pd.DataFrame:
+    """`chi2_metrics.cell_meta_analysis` over ``exp_ids``, with the cell's band edges."""
+    t = offsets[offsets["experiment_id"].isin(exp_ids) & offsets["library"].isin(libraries)]
+    g = chi2_metrics.cell_meta_analysis(t)
+    if g.empty:
+        return g
+    n_a = len(CELL_A_EDGES) - 1
+    g["e_lo"] = CELL_E_EDGES[g["cell"] // n_a]; g["e_hi"] = CELL_E_EDGES[g["cell"] // n_a + 1]
+    g["a_lo"] = CELL_A_EDGES[g["cell"] % n_a]; g["a_hi"] = CELL_A_EDGES[g["cell"] % n_a + 1]
+    cols = ["library", "e_lo", "e_hi", "a_lo", "a_hi", "n_exp", "n", "delta", "se", "tau",
+            "sigma_eval", "z", "f", "frac_pos", "top_exp_share", "Q"]
+    return g[cols].sort_values(["library", "e_lo", "a_lo"]).reset_index(drop=True)
+
+
+def band_check_figure(band_df: pd.DataFrame, libraries: List[str], subset_key: str,
+                      subset_label: str, figures_dir: Path, report: List[str],
+                      fig_log: List[str]) -> None:
+    """Top row: z = delta / sqrt(se^2 + sigma_eval^2) per cell; bottom row: delta in %."""
+    from matplotlib.colors import TwoSlopeNorm
+    if band_df.empty:
+        return
+    n_e, n_a = len(CELL_E_EDGES) - 1, len(CELL_A_EDGES) - 1
+    fig, axes = plt.subplots(2, len(libraries), figsize=(4.2 * len(libraries), 7.2),
+                             squeeze=False, sharex=True, sharey=True, constrained_layout=True)
+    zmax, dmax = 4.0, 10.0
+    norm_z = TwoSlopeNorm(vcenter=0.0, vmin=-zmax, vmax=zmax)
+    norm_d = TwoSlopeNorm(vcenter=0.0, vmin=-dmax, vmax=dmax)
+    for j, lib in enumerate(libraries):
+        t = band_df[(band_df["library"] == lib) & (band_df["n_exp"] >= 2)]
+        G = np.full((2, n_e, n_a), np.nan)
+        ie = np.searchsorted(CELL_E_EDGES, t["e_lo"].to_numpy()); ia = np.searchsorted(CELL_A_EDGES, t["a_lo"].to_numpy())
+        G[0, ie, ia] = t["z"].to_numpy(); G[1, ie, ia] = 100.0 * t["delta"].to_numpy()
+        im0 = axes[0, j].pcolormesh(CELL_A_EDGES, CELL_E_EDGES, np.clip(G[0], -zmax, zmax), cmap="RdBu_r",
+                                    norm=norm_z, edgecolors="white", linewidth=0.5)
+        im1 = axes[1, j].pcolormesh(CELL_A_EDGES, CELL_E_EDGES, np.clip(G[1], -dmax, dmax), cmap="PuOr_r",
+                                    norm=norm_d, edgecolors="white", linewidth=0.5)
+        axes[0, j].set_title(LIB_LABELS[lib], fontsize=13)
+        axes[1, j].set_xlabel("θ_lab [deg]")
+        for i in range(2):
+            axes[i, j].grid(False)
+            axes[i, j].set_xticks(CELL_A_EDGES[::2])
+    for i in range(2):
+        axes[i, 0].set_ylabel("E [MeV]")
+    fig.colorbar(im0, ax=axes[0, :], shrink=0.9).set_label("z = δ / √(se² + σ_eval²)", fontsize=12)
+    fig.colorbar(im1, ax=axes[1, :], shrink=0.9).set_label("δ = coherent (data − eval)/eval [%]", fontsize=12)
+    fig.suptitle(f"Does the declared band cover the data? (≥ 2 experiments per cell) — {subset_label}",
+                 fontsize=12)
+    name = f"cell_band_{subset_key}"
+    save_and_close(fig, figures_dir, name, fig_log)
+    report.append(
+        f"\n**Does the declared covariance cover the data?** Per cell, each experiment's offset δ_e "
+        f"(cell against the rest of the experiment, normalisation profiled, the experiment's own "
+        f"covariance only) is pooled over experiments with a random-effects model (between-experiment "
+        f"scatter τ). σ_eval is what the library's declared covariance gives the same estimator; it is "
+        f"common to the experiments, so it does not average down. |z| > 2 where several experiments "
+        f"agree marks a cell where the band under-declares; f = offset in units of σ_eval. In sample "
+        f"the evaluation was fitted to these data, so z is biased toward 0. "
+        f"Table: `cell_map/cell_band_{subset_key}.csv`.\n\n![{name}](figures/{name}.{FIGURE_FORMAT})\n"
+    )
+    worst = band_df[(band_df["library"] == "This_work") & (band_df["n_exp"] >= 3)]
+    worst = worst.reindex(worst["z"].abs().sort_values(ascending=False).index).head(10) \
+        if "This_work" in libraries else pd.DataFrame()
+    if len(worst):
+        report.append("\nThis work — the ten cells with the largest |z| (≥ 3 experiments):\n\n")
+        report.append(_df_to_md(worst[["e_lo", "e_hi", "a_lo", "a_hi", "n_exp", "n", "delta", "se", "tau",
+                                       "sigma_eval", "z", "f", "frac_pos", "top_exp_share"]],
+                                float_format="%.3f") + "\n")
+
+
 # ── Per-subentry breakdown (all variants) ───────────────────────────────────
 
 
@@ -2622,6 +2699,7 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
     # ones the per-subset calls returned, bit for bit (chi2_metrics.chi2_variants_and_z).
     t_pass = time.time()
     cell_rows: List[pd.DataFrame] = []
+    offset_rows: List[pd.DataFrame] = []
     on_group = None
     if CELL_MAP:
         _D, _u, _v, _r = chi2_metrics._components(df)
@@ -2631,9 +2709,15 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
                                          CELL_E_EDGES, CELL_A_EDGES)
         _yev = df["y_eval"].to_numpy(dtype=float)
 
-        def on_group(key, ord_pos, factor, r):
-            U = chi2_metrics.profiled_mode_matrix(
-                _u[ord_pos], None if _bids is None else _bids[ord_pos])
+        def on_group(key, ord_pos, factor, r, eval_block):
+            bids_g = None if _bids is None else _bids[ord_pos]
+            U = chi2_metrics.profiled_mode_matrix(_u[ord_pos], bids_g)
+            # 15-oct: the coherent offset per cell against the DECLARED band (for the covariance);
+            # it does not use the factor, so it runs before conditional_cell_scores overwrites it.
+            o = chi2_metrics.coherent_cell_offsets(_D[ord_pos], _v[ord_pos], U, bids_g, r,
+                                                   _yev[ord_pos], _codes[ord_pos], eval_block)
+            o.insert(0, "experiment_id", key[1]); o.insert(0, "library", key[0])
+            offset_rows.append(o)
             t = chi2_metrics.conditional_cell_scores(factor, r, U, _codes[ord_pos], _yev[ord_pos])
             t.insert(0, "experiment_id", key[1]); t.insert(0, "library", key[0])
             cell_rows.append(t)
@@ -2646,6 +2730,9 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
     if cells_long is not None:
         (paths.run_dir / "cell_map").mkdir(parents=True, exist_ok=True)
         cells_long.to_csv(paths.run_dir / "cell_map" / "cell_map_long.csv", index=False)
+    offsets_long = pd.concat(offset_rows, ignore_index=True) if offset_rows else None
+    if offsets_long is not None:
+        offsets_long.to_csv(paths.run_dir / "cell_map" / "cell_offsets_long.csv", index=False)
     print(f"  [T] one pass over {len(per_exp_full)} (library, experiment) blocks: "
           f"{time.time() - t_pass:.0f} s", flush=True)
     _group_sizes = df.groupby(["library", "experiment_id"], observed=True).size()
@@ -2759,6 +2846,11 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
             cmap_df.to_csv(paths.run_dir / "cell_map" / f"cell_map_{subset_key}.csv", index=False)
             cell_map_figure(cmap_df, libraries, subset_key, subset_label,
                             paths.figures_dir, report, fig_log)
+        if offsets_long is not None:
+            band_df = band_check_cells(offsets_long, df_subset["experiment_id"].unique(), libraries)
+            band_df.to_csv(paths.run_dir / "cell_map" / f"cell_band_{subset_key}.csv", index=False)
+            band_check_figure(band_df, libraries, subset_key, subset_label,
+                              paths.figures_dir, report, fig_log)
 
     # ── Build & splice in the headline summary ───────────────────────────────
     headline: List[str] = []
