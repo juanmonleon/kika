@@ -24,8 +24,9 @@ partial cross sections. The procedure is NJOY PURR's (``purr.f90``,
   normalised to the dilute averages, which the factors below do;
 - band boundaries come from the first ladder's sorted totals with PURR's
   spacing, finer in both tails (``purr.f90:2274-2318``), per temperature;
-- the tables are factors on the smooth cross sections (``multiply_smooth``):
-  each band's conditional mean over the mean of all samples;
+- LSSF=1 tables are factors on smooth cross sections (``multiply_smooth``):
+  each band's conditional mean over the mean of all samples. LSSF=0 tables
+  retain the absolute sampled cross sections plus MF3 background;
 - the competition flags follow PURR's rule (``purr.f90:1159-1190``).
 
 The random numbers are kika's (NumPy, seeded), so the tables agree with PURR's
@@ -226,7 +227,7 @@ def _ladder(rng, seq, elow, ehigh):
     return er, widths
 
 
-def _estimates(C, S, T, sigma0, transportXS=None):
+def _estimates(C, S, T, sigma0, transportXS=None, multiplySmooth=True):
     """A table's estimates from its ladder sums, over any leading axes.
 
     ``C`` (..., M) samples per band, ``S`` (..., 4, M) their sums of total,
@@ -247,7 +248,12 @@ def _estimates(C, S, T, sigma0, transportXS=None):
         # and ALL non-fission absorption, then reconstructs the total. The
         # published total row is not used by the transport reader.
         elastic, fission, capture, inelastic = transportXS
-        means = factor * np.asarray([0., elastic, fission, capture])[..., None]
+        if multiplySmooth:
+            means = factor * np.asarray([0., elastic, fission, capture])[..., None]
+        else:
+            # LSSF=0 tables carry absolute barns. OpenMC does not multiply
+            # those partials by smooth cross sections.
+            means = means.copy()
         means[..., 0, :] = means[..., 1:4, :].sum(-2) + inelastic
     dilute = (p[..., None, :] * means).sum(-1)
     shielding = np.empty(means.shape[:-1] + (len(sigma0),))
@@ -256,10 +262,10 @@ def _estimates(C, S, T, sigma0, transportXS=None):
         shielding[..., k] = (w[..., None, :] * means).sum(-1) / w.sum(-1)[..., None]
     shielding = np.where(dilute[..., None] != 0,
                          shielding / np.where(dilute != 0, dilute, 1.0)[..., None], 1.0)
-    return dict(probability=p, factor=factor, contribution=contribution, shielding=shielding)
+    return dict(probability=p, factor=factor, contribution=contribution, shielding=shielding, crossSection=means.copy())
 
 
-def _ladderStatistics(lc, ls, lt, sigma0, transportXS=None):
+def _ladderStatistics(lc, ls, lt, sigma0, transportXS=None, multiplySmooth=True):
     """Estimates and their delete-one-ladder jackknife errors from per-ladder sums.
 
     ``lc`` (L, M), ``ls`` (L, 4, M), ``lt`` (L, 4): one row per ladder, the
@@ -269,13 +275,13 @@ def _ladderStatistics(lc, ls, lt, sigma0, transportXS=None):
     lc, ls, lt = (np.asarray(a, dtype=float) for a in (lc, ls, lt))
     L = lc.shape[0]
     C, S, T = lc.sum(0), ls.sum(0), lt.sum(0)
-    full = _estimates(C, S, T, sigma0, transportXS)
+    full = _estimates(C, S, T, sigma0, transportXS, multiplySmooth)
     out = dict(full, ladders=L)
     if L < 2:
         for key, value in full.items():
             out[key + "Sigma"] = np.full_like(value, np.inf)
         return out
-    loo = _estimates(C - lc, S - ls, T - lt, sigma0, transportXS)
+    loo = _estimates(C - lc, S - ls, T - lt, sigma0, transportXS, multiplySmooth)
     for key, value in loo.items():
         out[key + "Sigma"] = np.sqrt((L - 1) / L * ((value - value.mean(0)) ** 2).sum(0))
     return out
@@ -305,6 +311,7 @@ def _tablesAt(job, keepLadders=False):
 
     prepared, A, E, ie, temperatures, bkg, competitionBkg, options = job[:8]
     transportXS = job[8] if len(job) > 8 else [None] * len(temperatures)
+    multiplySmooth = job[9] if len(job) > 9 else True
     native = _nativeKernel() if options.native else None
     rng = np.random.default_rng([options.seed, ie])
     nT, bins = len(temperatures), options.bins
@@ -392,12 +399,12 @@ def _tablesAt(job, keepLadders=False):
         if (options.errorTarget is not None and (ladder + 1) % options.checkEvery == 0
                 and ladder + 1 < options.ladders):
             n = ladder + 1
-            if _converged([_ladderStatistics(lc[it, :n], ls[it, :n], lt[it, :n], options.sigma0, transportXS[it])
+            if _converged([_ladderStatistics(lc[it, :n], ls[it, :n], lt[it, :n], options.sigma0, transportXS[it], multiplySmooth)
                            for it in range(nT)], options.errorTarget):
                 used = n
                 break
     lc, ls, lt = lc[:, :used], ls[:, :used], lt[:, :used]
-    stats = [_ladderStatistics(lc[it], ls[it], lt[it], options.sigma0, transportXS[it]) for it in range(nT)]
+    stats = [_ladderStatistics(lc[it], ls[it], lt[it], options.sigma0, transportXS[it], multiplySmooth) for it in range(nT)]
     converged = None if options.errorTarget is None else _converged(stats, options.errorTarget)
     for st in stats:
         st["converged"] = converged
@@ -410,7 +417,7 @@ def _tablesAt(job, keepLadders=False):
         cdf = np.array([float(f"{c:.6e}") for c in np.cumsum(counts[it] / n)])
         cdf[-1] = 1.0
         tables[it, 0] = cdf
-        tables[it, 1:5] = factors
+        tables[it, 1:5] = factors if multiplySmooth else means
         # Not used in transport (nuclide.cpp:963-987): a unit factor in the
         # scale OpenMC stores it (it multiplies the row by 1e6 on read).
         tables[it, 5] = 1.0e6
@@ -459,11 +466,12 @@ def probabilityTables(region, context, energies, temperatures, *,
             ladders=np.array([s["ladders"] for s in st]), sigma0=np.asarray(options.sigma0, dtype=float),
             probabilitySigma=stack("probabilitySigma"), factorSigma=stack("factorSigma"),
             contributionSigma=stack("contributionSigma"), shielding=stack("shielding"),
-            shieldingSigma=stack("shieldingSigma"), errorTarget=options.errorTarget,
+            shieldingSigma=stack("shieldingSigma"), crossSectionSigma=stack("crossSectionSigma"), errorTarget=options.errorTarget,
             converged=None if options.errorTarget is None else np.array([s["converged"] for s in st]),
             shieldingBasis="openmc_transport" if transportXS is not None else "ladder_cross_sections")
         out[t] = ProbabilityTables(energies=energies, table=tables[it], interpolation=2,
-                                   inelastic=inelastic, absorption=absorption, multiplySmooth=True,
+                                   inelastic=inelastic, absorption=absorption,
+                                   multiplySmooth=bool(region.tabulatedWidths.selfShieldingOnly),
                                    statistics=statistics)
     return out
 
@@ -481,6 +489,7 @@ def _ladderAccumulators(region, context, energies, temperatures, *, background=N
 def _run(task, region, context, energies, temperatures, background, options, workers, transportXS=None):
     """``task`` on every energy's job, in ``workers`` processes."""
     prepared = _prepared(region, context)
+    multiplySmooth = bool(region.tabulatedWidths.selfShieldingOnly)
     background = background or {}
     if transportXS is not None:
         transportXS = {float(t): np.asarray(transportXS[float(t)], dtype=float)
@@ -499,7 +508,7 @@ def _run(task, region, context, energies, temperatures, background, options, wor
         competitionBkg = (bkgAt(1, ie) - bkg[2] - bkg[18] - bkg[102]) if 1 in background else 0.0
         jobs.append((prepared, float(context.atomic_weight_ratio), float(E), ie, temperatures,
                      bkg, competitionBkg, options,
-                     [None if transportXS is None else transportXS[t][ie] for t in temperatures]))
+                     [None if transportXS is None else transportXS[t][ie] for t in temperatures], multiplySmooth))
     if workers > 1 and len(jobs) > 1:
         from concurrent.futures import ProcessPoolExecutor
 
