@@ -665,9 +665,21 @@ class SuiteReconstructionResult:
                     back=np.empty_like(orders[n]);back[orders[n]]=np.arange(len(back))
                     part={mt:v[back] for mt,v in part.items()}
                 physics[n]=part
+        # The group requests' columns, and each curve they read, read once
+        # over all of them (the read is elementwise).
+        grouped={};group_reads={}
+        for n,item in enumerate(requests):
+            if item[0] is not _GROUP:continue
+            values,reads,everywhere=self._group_columns(item,adjusted[n]);grouped[n]=(values,everywhere)
+            for curve,column,at in reads:group_reads.setdefault(id(curve),(curve,[]))[1].append((n,column,at))
+        for curve,uses in group_reads.values():
+            if len(uses)==1:
+                n,column,at=uses[0];column[at]=curve.evaluate(adjusted[n][at]);continue
+            read=curve.evaluate(np.concatenate([adjusted[n][at] for n,_,at in uses]));end=0
+            for n,column,at in uses:column[at]=read[end:end+len(at)];end+=len(at)
         out=[]
         for n,(item,p,b) in enumerate(zip(requests,physics,backgrounds)):
-            if item[0] is _GROUP:out.append(self._evaluate_group(item,adjusted[n],p));continue
+            if item[0] is _GROUP:out.append(self._group_sums(*grouped[n],len(adjusted[n]),p));continue
             s,(e,only),c=item
             out.append(self._evaluate_segment(s,e,False,constant_values=self._source_constants(c),
                     only=self._diagnostic_keys(s,c),backgrounds=b) if only=='diagnostic' else
@@ -680,6 +692,15 @@ class SuiteReconstructionResult:
         constant, its curve, the physics), and every sum
         adds the parts any of them needs (a part that is zero on a segment
         adds nothing there, exactly: a sum starts at +0.0)."""
+        values,reads,everywhere=self._group_columns(item,e)
+        for curve,column,at in reads:column[at]=curve.evaluate(e[at])
+        return self._group_sums(values,everywhere,len(e),physics)
+
+    def _group_columns(self,item,e):
+        """A group request's columns but for its curve reads, which come
+        back as ``(curve, column, at)`` for the caller to fill (a curve is
+        read elementwise, so the caller may read it for several requests at
+        once), with the zero leaves of every segment."""
         _,segs,consts,local,points,only,members=item
         n=len(e);order=np.argsort(local,kind='stable')
         cut=np.flatnonzero(np.diff(local[order]))+1
@@ -695,7 +716,7 @@ class SuiteReconstructionResult:
         # The segments' constant leaves and curve indices, as reconstruct_suite
         # laid them out for every segment (a group's constants are those).
         rows,held,constants,indices,choices=self._columns_cache['segment_tables']
-        values={}
+        values={};reads=[]
         for key in keys:
             # Each segment's value: its constant or its curve's, a curve read
             # elementwise once over all the segments that read it. (Not the
@@ -710,8 +731,13 @@ class SuiteReconstructionResult:
                 for j in np.unique(index[read]).tolist():
                     gs=read[index[read]==j].tolist()
                     at=position[gs[0]] if len(gs)==1 else np.concatenate([position[g] for g in gs])
-                    column[at]=choices[row][j].evaluate(e[at])
+                    reads.append((choices[row][j],column,at))
             values[key]=column
+        return values,reads,everywhere
+
+    def _group_sums(self,values,everywhere,n,physics):
+        """A group request's physics added and sums made (see
+        :meth:`_evaluate_group`)."""
         if 'total_parts' not in self._columns_cache:
             total=self._mt_keys.get(1)
             self._columns_cache['total_parts']=_sum_leaves(total,self._graph) if total is not None else None
