@@ -288,3 +288,51 @@ def test_photon_unit_base_maps_only_continuum_and_retains_line_mass(qualifier):
     decoded = decodeContinuous(encodeContinuous(form.energy))
     roundtrip = m.Uncorrelated(energy=decoded, productFrame=m.Frame.lab)
     assert H._meanEnergyOf(roundtrip, E, k)[0] == pytest.approx(7.1, abs=1e-12)
+
+
+@pytest.mark.parametrize("name,shape", [("SimpleMaxwellianFission", 1.5), ("Evaporation", 2.)])
+@pytest.mark.parametrize("power", [.5, 1, 2])
+def test_analytic_energy_moments_against_normalized_adaptive_quadrature(name, shape, power):
+    from scipy.integrate import quad
+    theta = m.XYs1d(xs=[1., 1e8], ys=[1e5, 3e6], interpolation=m.Interpolation.linlog)
+    law = getattr(m, name)(U=m.PhysicalQuantity(1., "eV"), theta=theta)
+    E = np.array([1., 1.+1e-9, 2., 1e4, 1e6, 1e8])
+    expected = [0.]
+    for e in E[1:]:
+        t = float(theta.evaluate(e)); top = law.upperBound(e); ratio = top/t
+        # Scale to [0,1] for tiny support; otherwise split the independent
+        # sqrt-energy quadrature where the exponential density is appreciable.
+        if ratio < 1:
+            norm = quad(lambda u: u**(shape-1)*np.exp(-ratio*u), 0, 1, epsabs=1e-12)[0]
+            moment = top**power*quad(lambda u: u**(shape-1+power)*np.exp(-ratio*u), 0, 1, epsabs=1e-12)[0]/norm
+        else:
+            cuts = np.unique(np.r_[0., np.sqrt(ratio), 1., 2., 4., 8.])
+            cuts = cuts[cuts <= np.sqrt(ratio)]
+            def integral(p):
+                return sum(quad(lambda v: v**(2*shape-1+2*p)*np.exp(-v*v), a, b, epsabs=1e-12)[0]
+                           for a,b in zip(cuts[:-1], cuts[1:]))
+            moment = t**power*integral(power)/integral(0)
+        expected.append(moment)
+    np.testing.assert_allclose(H._analyticSpectrumMoment(law, E, power), expected, rtol=2e-9, atol=1e-12)
+    if power in (1,2):
+        form = m.Uncorrelated(energy=law, productFrame=m.Frame.lab)
+        np.testing.assert_allclose(H._meanEnergyOf(form, E, H._Kinematics(A=238., Q=0.), power), expected, rtol=2e-9, atol=1e-12)
+
+
+@pytest.mark.parametrize("theta", [-1., float("nan"), float("inf")])
+def test_analytic_energy_moments_refuse_invalid_active_theta(theta):
+    law = m.Evaporation(U=m.PhysicalQuantity(0., "eV"),
+                       theta=m.XYs1d(xs=[1., 2.], ys=[theta, theta]))
+    with pytest.raises(ValueError, match="positive theta|non-finite"):
+        H._analyticSpectrumMoment(law, np.array([1., 2.]), 1)
+
+
+def test_analytic_energy_cm_isotropic_shift_and_unsupported_second_moment():
+    law = m.Evaporation(U=m.PhysicalQuantity(0., "eV"),
+                       theta=m.XYs1d(xs=[1., 1e8], ys=[1e6, 1e6]))
+    form = m.Uncorrelated(energy=law, angular=m.Isotropic2d(), productFrame=m.Frame.centerOfMass)
+    E = np.array([1., 1e5, 1e8]); k = H._Kinematics(A=55., Q=0.)
+    expected = H._analyticSpectrumMoment(law, E, 1) + E/(k.A+1)**2
+    np.testing.assert_allclose(H._meanEnergyOf(form, E, k), expected, rtol=1e-14)
+    with pytest.raises(NotImplementedError, match="second moment"):
+        H._meanEnergyOf(form, E, k, 2)

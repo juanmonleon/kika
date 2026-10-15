@@ -503,6 +503,37 @@ def _unitBaseSpectrumMean(energy, grid, moment):
     return output
 
 
+def _analyticSpectrumMoment(spectrum, grid, power):
+    """Truncated gamma moment with the source's incident parameter law.
+
+    The small-support form avoids ratios of underflowing incomplete gamma
+    functions; neither branch needs a rendered outgoing-energy grid.
+    """
+    from scipy.special import gammainc, gammaln, hyp1f1
+    from kika.nuclear_data import model as m
+
+    shape = 1.5 if isinstance(spectrum, m.SimpleMaxwellianFission) else 2.
+    grid = np.asarray(grid, dtype=float)
+    top = np.array([spectrum.upperBound(float(E)) for E in grid])
+    theta = np.asarray(spectrum.theta.evaluate(grid, outOfRange="hold"), dtype=float)
+    active = top > 0
+    if (np.any(~np.isfinite(top)) or
+            np.any(active & ((theta <= 0) | ~np.isfinite(theta)))):
+        raise ValueError("analytic energy moments require positive theta and finite support")
+    result = np.zeros(len(grid))
+    x = top[active] / theta[active]
+    small = x < 1.
+    value = np.empty(len(x))
+    value[small] = (top[active][small] ** power * shape / (shape + power)
+        * hyp1f1(shape + power, shape + power + 1, -x[small])
+        / hyp1f1(shape, shape + 1, -x[small]))
+    value[~small] = (theta[active][~small] ** power
+        * np.exp(gammaln(shape + power) - gammaln(shape))
+        * gammainc(shape + power, x[~small]) / gammainc(shape, x[~small]))
+    result[active] = value
+    return result
+
+
 def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
     """``⟨E'^moment⟩`` in the lab of one Monte Carlo form, on ``grid``."""
     from kika.nuclear_data import model as m
@@ -544,6 +575,15 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
             return _cmToLab(grid, ecm, 0.0, k)
         if energy is None:
             raise ValueError("an uncorrelated form without an energy distribution")
+        if isinstance(energy, (m.SimpleMaxwellianFission, m.Evaporation)):
+            mean = _analyticSpectrumMoment(energy, grid, moment)
+            if not cm or k.awp == 0.0:
+                return mean
+            if moment != 1:
+                raise NotImplementedError("second moment of a centre-of-mass spectrum")
+            mu = _meanMu(form.angular, grid)
+            root = _analyticSpectrumMoment(energy, grid, .5) if np.any(mu) else 0.
+            return _cmToLab(grid, mean, root * mu, k)
         energies, tables, flat = _tables(energy)
         lab = not cm or k.awp == 0.0
         # HEATR's trapezoids are for the mean; the photons' second moment
