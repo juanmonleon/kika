@@ -234,7 +234,8 @@ def _seeds(segment,context,cache=None,knots=None):
     count=GEOMETRIC_SEEDS
     if lo>0 and hi>lo:
         count=int(min(GEOMETRIC_SEEDS,max(2,1+math.ceil((GEOMETRIC_SEEDS-1)*math.log10(hi/lo)))))
-    seeds=[lo,hi];parts=[np.geomspace(lo,hi,count)]
+    # (Two geometric seeds are the ends themselves: geomspace sets both.)
+    seeds=[lo,hi];parts=[np.geomspace(lo,hi,count)] if count>2 else []
     if segment.region.unresolved is not None:
         seeds.extend(x for x in segment.region.unresolved.grid if lo<=x<=hi)
     if knots is not None:

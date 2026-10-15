@@ -1150,26 +1150,29 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     # reads it, decided per curve for all its segments at once (the same
     # answers constant_on and _laws_over give one segment at a time).
     span_high=[np.nextafter(s.high,s.low) if s.left_high else s.high for s in segments];level_cache={}
-    # The knots of every source curve on every segment that reads it, found
-    # per curve for all its segments: strictly inside (seeds) and in the
-    # closed span (fast-region seeds, source diagnostics), and whether a leaf
-    # curve ends at the segment's high with a jump there.
-    inside_leaf=[[] for _ in segments];closed_leaf=[[] for _ in segments];closed_all=[[] for _ in segments]
+    # The knots of the source curves a segment reads: strictly inside (seeds)
+    # and in the closed span (fast-region seeds, source diagnostics). The
+    # segment edges include every piece's ends, so no piece overlaps a
+    # segment in part: the knots of all the curves in a segment's span are
+    # those of the curves it reads, but for its own ends, which are seeds
+    # anyway; and seeds and grids are sets. One sorted array of every knot
+    # (and one of the leaves') serves every segment.
+    all_knots=np.unique(np.concatenate([c._x for cs,_ in owner_of.values() for c in cs])) if owner_of else np.zeros(0)
+    leaf_curves=[c._x for key,(cs,_) in owner_of.items() if key not in graph for c in cs]
+    leaf_knots=np.unique(np.concatenate(leaf_curves)) if leaf_curves else np.zeros(0)
+    def knots_of(knots,position,closed):
+        s=segments[position]
+        return knots[np.searchsorted(knots,s.low,'left' if closed else 'right'):np.searchsorted(knots,s.high,'right' if closed else 'left')]
+    # Whether a leaf curve ends at the segment's high with a jump there.
     ends_jump=[False]*len(segments)
     for key,(cs,at) in owner_of.items():
-        at=np.asarray(at);leaf=key not in graph
+        if key in graph:continue
+        at=np.asarray(at)
         for j in np.unique(at[at>=0]).tolist():
-            curve=cs[j];where=np.flatnonzero(at==j);x=curve._x
-            lo=np.array([segments[i].low for i in where]);hi=np.array([segments[i].high for i in where])
-            a0,b0=np.searchsorted(x,lo,'right'),np.searchsorted(x,hi,'left')
-            a1,b1=np.searchsorted(x,lo,'left'),np.searchsorted(x,hi,'right')
-            if leaf:
-                for k in np.flatnonzero(b0>a0).tolist():inside_leaf[where[k]].append(x[a0[k]:b0[k]])
-            for k in np.flatnonzero(b1>a1).tolist():
-                closed_all[where[k]].append(x[a1[k]:b1[k]])
-                if leaf:closed_leaf[where[k]].append(x[a1[k]:b1[k]])
-            if leaf and bool(curve.endpoint_jump):
-                for k in np.flatnonzero(x[-1]==hi).tolist():ends_jump[where[k]]=True
+            curve=cs[j]
+            if not bool(curve.endpoint_jump):continue
+            where=np.flatnonzero(at==j);hi=np.array([segments[i].high for i in where])
+            for k in np.flatnonzero(curve._x[-1]==hi).tolist():ends_jump[where[k]]=True
     # Each reaction's constant (NaN: none) and linearity on each segment, as
     # (reaction, segment) arrays: a segment reads its column.
     names=tuple(owner_of);rows={key:i for i,key in enumerate(names)}
@@ -1193,10 +1196,6 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         linear=curve.linear_over_many(lows,highs);end=0
         for row,run in members:
             constant_of[row,run]=values[end:end+len(run)];linear_of[row,run]=linear[end:end+len(run)];end+=len(run)
-    # Each segment's constant leaves as prepare finds them, for the group
-    # requests (whose constants are these) to read by index.
-    held_of=np.zeros((len(names),len(segments)),dtype=bool);value_of=np.zeros((len(names),len(segments)))
-    result._columns_cache['segment_tables']=(rows,held_of,value_of,indices,choices)
     # Each sum's leaf parts as rows (None: a part with no curve, never a
     # constant) and its parts that are sums.
     sum_parts={}
@@ -1217,31 +1216,37 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
                     if row is not None:out[row]=True
             blocked_in[id(region)]=out=(region,out)
         return out[1]
+    # Each segment's constant leaves (a missing curve is the constant zero;
+    # none on a span that closes to nothing) and deferred columns, for every
+    # segment at once; prepare reads its row, and the group requests (whose
+    # constants are these) read them by index.
+    free_of=np.stack([~blocked(s.region) for s in segments],axis=1) if segments else np.zeros((len(names),0),dtype=bool)
+    closed=np.array([(np.nextafter(s.high,s.low) if s.left_high else s.high)<=s.low for s in segments],dtype=bool)
+    value_any=np.where(present_of,constant_of,0.)
+    held_of=free_of&(value_any==value_any)&~closed
+    value_of=np.where(held_of,value_any,0.)
+    deferred_of=free_of&present_of&~held_of&linear_of
+    held_rows,value_rows,deferred_rows=(np.ascontiguousarray(a.T) for a in (held_of,value_of,deferred_of))
+    result._columns_cache['segment_tables']=(rows,held_of,value_of,indices,choices)
     def prepare(position):
         """Seeds, constants, deferred columns and source-diagnostic grid of
         one segment; none of it depends on another segment."""
         s=segments[position]
-        seed_curves={i:(c,) for i,(key,c) in enumerate(s.curves.items()) if c is not None and key not in graph}
         if s.region is not None:
-            seeds=_seeds(_Segment(s.low,s.high,s.region,seed_curves,s.left_high),context,level_cache,
-                         knots=(inside_leaf[position],ends_jump[position]))
+            # (The curves' knots come precomputed; _seeds reads no curve.)
+            seeds=_seeds(_Segment(s.low,s.high,s.region,_NO_CONSTANTS,s.left_high),context,level_cache,
+                         knots=([knots_of(leaf_knots,position,False)],ends_jump[position]))
         else:
             # Original knots suffice for linear fast-region data. Inserting
             # unnecessary near-threshold points amplifies ENDF x-rounding.
-            seeds={s.low,s.high}|{float(x) for knots in closed_leaf[position] for x in knots}
+            seeds={s.low,s.high}|set(knots_of(leaf_knots,position,True).tolist())
             if ends_jump[position]:seeds.add(float(np.nextafter(s.high,s.low)))
             seeds=sorted(seeds)
         # The leaves constant here (a missing curve is the constant zero),
         # in the order of the segment's curves, then the sums of constants.
-        free=~blocked(s.region);present=present_of[:,position]
-        high=np.nextafter(s.high,s.low) if s.left_high else s.high
-        if high<=s.low:held=np.zeros(len(names),dtype=bool);value=constant_of[:,position]
-        else:
-            value=np.where(present,constant_of[:,position],0.)
-            held=free&(value==value)
+        held=held_rows[position];value=value_rows[position]
         at=np.flatnonzero(held)
         constants=dict(zip(keyed[at].tolist(),value[at].tolist()))
-        held_of[:,position]=held;value_of[at,position]=value[at]
         for key in order:
             # Constant when every part is: its leaves held here, its sums
             # constant already (the order puts parts first).
@@ -1256,7 +1261,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # Source knots are included in seeds, so these untouched columns
         # are affine inside each seed panel. Still check all seven final
         # probes; a failure falls back to the full adaptive column set.
-        for row in np.flatnonzero(free&present&~held&linear_of[:,position]).tolist():
+        for row in np.flatnonzero(deferred_rows[position]).tolist():
             key=names[row];curve=s.curves[key]
             def read(e,curve=curve,s=s):
                 e=np.asarray(e,dtype=float).copy()
@@ -1271,7 +1276,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         # sums are derived even if the redundant source aggregate disagrees.
         # Redundant aggregates inform diagnostics, not the reconstructed mesh.
         # Keep their original knots in this separate source-comparison grid.
-        grid=np.unique(np.concatenate([np.asarray(seeds,dtype=float)]+closed_all[position]))
+        grid=np.unique(np.concatenate([np.asarray(seeds,dtype=float),knots_of(all_knots,position,True)]))
         probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
         return seeds,constants,deferred,probe
     def diagnose(positions,probes,original):
