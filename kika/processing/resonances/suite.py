@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import InitVar, dataclass, field, fields, is_dataclass
 from enum import Enum
 import hashlib
+import operator
 import re
 from types import MappingProxyType
 from typing import NamedTuple
@@ -200,6 +201,9 @@ def _curves(forms):
 #: Marks a request for energies of several segments (see ``_answer``).
 _GROUP=object()
 
+#: What a mapping lookup returns for a missing key.
+_ABSENT=object()
+
 #: The constants of a request that declares none: one object, so that the
 #: plans keyed on it are made once.
 _NO_CONSTANTS=MappingProxyType({})
@@ -343,12 +347,14 @@ class _SuiteSegment:
     left_high: bool
     _shared_linear: object=field(init=False,repr=False,compare=False)
     shared_cache: InitVar[object]=None
+    identity: InitVar[object]=None
 
-    def __post_init__(self,shared_cache):
+    def __post_init__(self,shared_cache,identity):
         # Segments of one material share their curves; a tape whose
         # backgrounds step every few hundred eV has thousands of segments,
         # and reading every whole curve again for each made this quadratic.
-        identity=tuple((key,id(curve)) for key,curve in self.curves.items())
+        # (*identity*, when given, names the curves as this does.)
+        if identity is None:identity=tuple((key,id(curve)) for key,curve in self.curves.items())
         if shared_cache is not None and identity in shared_cache:
             object.__setattr__(self,'_shared_linear',shared_cache[identity][1])
             return
@@ -522,17 +528,22 @@ class SuiteReconstructionResult:
         plan=self._columns_cache.get(token)
         if plan is None:
             zeros=self._zeros(constant_values)
-            parts={key:tuple(part for part in self._graph[key] if part not in zeros) for key in self._order}
+            # Segments share their zero sets (JENDL-5 Cl-35: 212 for 3 376
+            # segments), and the parts depend on nothing else.
+            parts=self._columns_cache.get(('parts',zeros))
+            if parts is None:
+                parts=self._columns_cache[('parts',zeros)]={key:tuple(part for part in self._graph[key] if part not in zeros) for key in self._order}
             # The constants are held so their id stays theirs.
             plan=self._columns_cache[token]=(zeros,parts,constant_values);self._own(token,id(constant_values))
         return plan[0],plan[1]
 
-    def _zeros(self,constant_values):
-        """The leaves that are the constant zero on a segment."""
+    def _zeros(self,constant_values,zeros=None):
+        """The leaves that are the constant zero on a segment (*zeros*, when
+        the caller has them already, is filed as that answer)."""
         token=('zeros',id(constant_values))
         plan=self._columns_cache.get(token)
         if plan is None:
-            zeros=frozenset(key for key,value in constant_values.items() if value==0 and key not in self._graph)
+            if zeros is None:zeros=frozenset(key for key,value in constant_values.items() if value==0 and key not in self._graph)
             plan=self._columns_cache[token]=(zeros,constant_values);self._own(token,id(constant_values))
         return plan[0]
 
@@ -631,18 +642,24 @@ class SuiteReconstructionResult:
         position={int(local[p[0]]):p for p in np.split(order,cut)}
         zero_sets=[self._zeros(c) for c in consts]
         closure=self._wanted(only);asked=set(only)
-        wanted=[closure-(zeros-asked) for zeros in zero_sets]
-        everywhere=frozenset.intersection(*zero_sets)
-        union_=set().union(*wanted)
+        # Segments share their zero sets (the same object, see
+        # reconstruct_suite): what each set wants is worked out once.
+        distinct={id(zeros):zeros for zeros in zero_sets}
+        wanted_by={i:closure-(zeros-asked) for i,zeros in distinct.items()}
+        wanted=[wanted_by[id(zeros)] for zeros in zero_sets]
+        everywhere=frozenset.intersection(*distinct.values())
+        union_=set().union(*wanted_by.values())
         keys=[key for key in segs[0].curves if key in union_]
-        grouped={}
+        read_by={};read_in=[()]*len(segs)
         for g,s in enumerate(segs):
             if g not in position:continue
             for names,reader in s._shared_linear:
                 needed=[(i,key) for i,key in enumerate(names) if key not in consts[g] and key not in self._graph]
                 if len(needed)<2 or not any(key in wanted[g] for _,key in needed):continue
                 batch=reader(e[position[g]],max_cells=max(1,min(65536,self.options.max_work_bytes//64)))
-                if batch is not None:grouped.update(((g,key),batch[:,i]) for i,key in needed)
+                if batch is not None:
+                    for i,key in needed:read_by.setdefault(key,[]).append((g,batch[:,i]))
+                    read_in[g]=set(read_in[g])|{key for _,key in needed}
         values={};present=[g for g in range(len(segs)) if g in position]
         for key in keys:
             # Each segment's value: its constant, its shared reader's, or its
@@ -650,15 +667,14 @@ class SuiteReconstructionResult:
             constant=np.zeros(len(segs));by_curve={}
             summed=key in self._graph
             for g in present:
-                c=consts[g]
-                if key in c:constant[g]=c[key]
-                elif (g,key) in grouped:pass
-                elif not summed:
+                value=consts[g].get(key,_ABSENT)
+                if value is not _ABSENT:constant[g]=value
+                elif summed or key in read_in[g]:pass
+                else:
                     curve=segs[g].curves[key]
                     if curve is not None:by_curve.setdefault(id(curve),(curve,[]))[1].append(g)
             column=constant[local]
-            for g in present:
-                if (g,key) in grouped:column[position[g]]=grouped[(g,key)]
+            for g,read in read_by.get(key,()):column[position[g]]=read
             for curve,gs in by_curve.values():
                 at=position[gs[0]] if len(gs)==1 else np.concatenate([position[g] for g in gs])
                 column[at]=curve.evaluate(e[at])
@@ -691,6 +707,8 @@ class SuiteReconstructionResult:
         if plan is None:
             plan=self._columns_cache[token]=(MappingProxyType({k:v for k,v in constants.items() if k not in self._graph}),constants)
             self._own(token,id(constants))
+            # Its zero leaves are the segment's.
+            self._zeros(plan[0],self._zeros(constants))
         return plan[0]
 
     def _diagnostic_keys(self,s,constants):
@@ -1115,10 +1133,15 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         if np.any((count<1)&~((highs_<=cs[0].x[0])|(lows_>=cs[-1].x[-1]))):
             raise UnsupportedResonanceError(f'source function has an uncovered internal gap: {key}',category='internal-gap')
         owner_of[key]=(cs,np.where(count==1,first,-1).tolist())
+    # Each segment's curves: one index per reaction (-1: none, which the
+    # trailing None of each list reads), and the column of indices names them.
+    keys_=tuple(owner_of);choices=[list(cs)+[None] for cs,_ in owner_of.values()]
+    indices=np.array([at for _,at in owner_of.values()],dtype=np.int64).reshape(len(owner_of),len(edges)-1)
     for i,(a,b) in enumerate(zip(edges[:-1],edges[1:])):
         region=next((r for r in prepared.regions if r.low<=a and r.high>=b),None)
-        local={key:(cs[at[i]] if at[i]>=0 else None) for key,(cs,at) in owner_of.items()}
-        segments.append(_SuiteSegment(a,b,MappingProxyType(local),region,b<high,shared_cache))
+        column=indices[:,i]
+        local=dict(zip(keys_,map(operator.getitem,choices,column.tolist())))
+        segments.append(_SuiteSegment(a,b,MappingProxyType(local),region,b<high,shared_cache,column.tobytes()))
     result=SuiteReconstructionResult(MappingProxyType({}),MappingProxyType({}),source_style,label,options,prepared,
         tuple(segments),MappingProxyType(graph),order,MappingProxyType(mt_keys),source_hash,MappingProxyType(physical_owners))
     tables=[None]*len(segments);checks=[None]*len(segments);points=0
@@ -1180,7 +1203,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         linear=curve.linear_over_many(lows,highs);end=0
         for row,run in members:
             constant_of[row,run]=values[end:end+len(run)];linear_of[row,run]=linear[end:end+len(run)];end+=len(run)
-    blocked_in={}
+    blocked_in={};zero_sets={}
     def blocked(region):
         """The reactions a segment of *region* never holds constant or
         defers: the sums, and the partials its physics owns."""
@@ -1220,6 +1243,10 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         for key in order:
             if all(part in constants for part in graph[key]):
                 constants[key]=sum((constants[part] for part in graph[key]),0.)
+        # One object per zero set (JENDL-5 Cl-35: 212 for 3 376 segments), so
+        # that what is worked out per set is worked out once.
+        zeros=frozenset(keyed[at[value[at]==0]].tolist())
+        result._zeros(constants,zero_sets.setdefault(zeros,zeros))
         deferred={}
         # Source knots are included in seeds, so these untouched columns
         # are affine inside each seed panel. Still check all seven final
@@ -1242,19 +1269,22 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         grid=np.unique(np.concatenate([np.asarray(seeds,dtype=float)]+closed_all[position]))
         probe=np.r_[grid,(grid[:-1]+grid[1:])*.5]
         return seeds,constants,deferred,probe
-    def diagnose(position,probe,original):
-        s=segments[position];constants=pending[position][0]
+    def diagnose(positions,probes,original):
+        """Each stated sum against the sum of its parts, on the probes of
+        consecutive segments laid end to end, reported segment by segment in
+        order. A part that is the constant zero on a segment is left out of
+        its request and reads +0.0 there; adding it changes nothing, exactly
+        (a sum starts at +0.0, so it is never -0.0, and x+0.0 is x)."""
+        ends=np.cumsum([len(p) for p in probes]);starts=np.r_[0,ends[:-1]]
         for key in order:
-            # A part that is the constant zero here adds nothing, exactly (a
-            # sum starts at +0.0), and the diagnostic request leaves it out.
-            parts=[part for part in graph[key] if part in graph or not (part in constants and constants[part]==0)]
-            summed=sum((original[part] for part in parts),np.zeros(len(probe)))
+            summed=sum((original[part] for part in graph[key] if part in original),np.zeros(int(ends[-1])))
             ratio=error_ratio(original[key],summed,options)
-            maximum=float(np.max(ratio))
-            if maximum>source_balance[key]:
-                index=int(np.argmax(ratio))
-                source_worst[key]=dict(energy_eV=float(probe[index]),side='left-limit' if s.left_high and probe[index]==s.high else 'point',stated_b=float(original[key][index]),components_b=float(summed[index]),error_ratio=maximum)
-            source_balance[key]=max(source_balance[key],maximum)
+            maxima=np.maximum.reduceat(ratio,starts).tolist()
+            for position,probe,a,b,maximum in zip(positions,probes,starts.tolist(),ends.tolist(),maxima):
+                if maximum>source_balance[key]:
+                    s=segments[position];index=int(np.argmax(ratio[a:b]))
+                    source_worst[key]=dict(energy_eV=float(probe[index]),side='left-limit' if s.left_high and probe[index]==s.high else 'point',stated_b=float(original[key][a+index]),components_b=float(summed[a+index]),error_ratio=maximum)
+                source_balance[key]=max(source_balance[key],maximum)
             original[key]=summed
     def tag(steps,position):
         """One segment's linearize_steps requests, marked with the segment."""
@@ -1271,9 +1301,7 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
         them (linearize_group_steps) or, for one segment, its own."""
         probes=[item[3] for item in items]
         values=yield (np.concatenate(probes),'diagnostic',np.repeat(positions,[len(v) for v in probes]))
-        end=0
-        for position,probe in zip(positions,probes):
-            diagnose(position,probe,{key:v[end:end+len(probe)] for key,v in values.items()});end+=len(probe)
+        diagnose(positions,probes,dict(values))
         if len(positions)==1:
             seeds,constants,deferred,_=items[0]
             return [(yield from tag(linearize_steps(seeds,options,budget,constants=constants,deferred=deferred,keys=keys),positions[0]))],None
