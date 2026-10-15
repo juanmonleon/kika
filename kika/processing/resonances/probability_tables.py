@@ -574,6 +574,27 @@ def _purrReads(mt: int) -> bool:
             or 100 < mt < 110 or 110 < mt < 118 or 150 < mt <= 200 or mt >= 600) and mt <= 891
 
 
+def _threshold(form) -> float:
+    """Where a reaction starts as PURR reads it: the point before its first nonzero value.
+
+    PURR reads RECONR's PENDF, which keeps one zero before the first nonzero
+    point and drops the rest. An MF3 tabulated from 1e-5 eV with zeros up to a
+    MeV threshold (ENDF/B-VIII.1 Pu-240 MT20, 21, 38) starts at that MeV
+    threshold, not at the table's first energy. A reaction that is zero
+    everywhere never starts.
+    """
+    x = getattr(form, "xs", None)
+    y = getattr(form, "ys", None)
+    if x is None and hasattr(form, "toEndfRegions"):
+        x, y, _ = form.toEndfRegions()
+    if x is None or y is None:
+        return float(form.domainMin)
+    nonzero = np.flatnonzero(np.asarray(y, dtype=float) != 0.0)
+    if not nonzero.size:
+        return np.inf
+    return float(np.asarray(x, dtype=float)[max(int(nonzero[0]) - 1, 0)])
+
+
 def purrInputs(suite, energies, form=None):
     """``(background, competing)`` for :func:`probabilityTables`, by PURR's rules.
 
@@ -625,7 +646,7 @@ def purrInputs(suite, energies, form=None):
     start = np.flatnonzero(excess > 1.0e-12)
     if start.size:
         for mt, f in sorted(sections.items()):
-            if mt > 4 and mt not in (18, 19, 102) and (1.0 + 1e-6) * float(f.domainMin) < energies[-1]:
+            if mt > 4 and mt not in (18, 19, 102) and (1.0 + 1e-6) * _threshold(f) < energies[-1]:
                 competing.append(mt)
     lssf = bool(getattr(suite.resonances.unresolved.tabulatedWidths, "selfShieldingOnly", False))
     if lssf:
