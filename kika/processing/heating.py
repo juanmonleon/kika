@@ -899,10 +899,14 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
                     if hist:
                         pos=np.clip(np.searchsorted(x,source,side='right')-1,0,len(x)-2);density=p[pos]
                     else:density=np.interp(source,x,p)
-                    root=np.sqrt(incident*ep);last=np.clip(np.divide(incident+ep-denominator*ed,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
-                    angle=(last[...,None]-1)/2+(last[...,None]+1)/2*mu
-                    recoil=np.maximum(0.,(incident+ep[...,None]-2*root[...,None]*angle)/denominator)
-                    angular=np.sum(wm*lindhard(recoil,recoilZ,recoilA,Z,A,ed),axis=-1)*(last+1)/4
+                    if particle is not None and incidentFactor==0.:
+                        # In the laboratory frame the particle energy is angle independent.
+                        angular=lindhard(ep,recoilZ,recoilA,Z,A,ed)
+                    else:
+                        root=np.sqrt(incident*ep);last=np.clip(np.divide(incident+ep-denominator*ed,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
+                        angle=(last[...,None]-1)/2+(last[...,None]+1)/2*mu
+                        recoil=np.maximum(0.,(incident+ep[...,None]-2*root[...,None]*angle)/denominator)
+                        angular=np.sum(wm*lindhard(recoil,recoilZ,recoilA,Z,A,ed),axis=-1)*(last+1)/4
                     value+=weight*float(np.sum(w*half[:,None]*2*v*density*oldwidth/width*angular))
             if previous is not None and abs(value-previous)<=.01+1e-5*abs(value):return value
             previous=value
