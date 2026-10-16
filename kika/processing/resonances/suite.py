@@ -841,7 +841,7 @@ class SuiteReconstructionResult:
                 raise UnsupportedResonanceError("competitive background requires an exclusive model reaction")
 
     def _precompute_witnesses(self,witnesses,grids,verification_batch,fractions,workers,progress):
-        """Fill the exact physical witnesses on worker threads (see ``parallel``).
+        """Fill the exact physical witnesses on worker processes, else threads (see ``parallel``).
 
         Returns False, leaving the serial path to compute them, when the work
         is too small to be worth it. The blocks are the serial path's blocks
@@ -870,12 +870,25 @@ class SuiteReconstructionResult:
         def store(item,physical):
             i,batch,start,e=item
             witnesses[1].setdefault((i,batch),{})[start]=(freeze(e),{mt:freeze(v) for mt,v in physical.items() if mt!=1})
-        try:
-            parallel.compute_blocks(items,compute,workers,store,progress)
-        except BaseException:
+        def forget():
             # Never leave a partly filled batch behind: the serial path would
             # treat its missing blocks as computed.
             for i,batch,_,_ in items:witnesses[1].pop((i,batch),None)
+        regions={i:self._segments[i].region for i in {item[0] for item in items}}
+        try:
+            try:
+                on_processes=parallel.compute_exact_blocks(items,regions,context,workers,store,progress)
+            except parallel.ProcessesUnavailable as error:
+                forget();on_processes=False
+                import warnings
+                warnings.warn('the verification worker processes stopped before working, so the '
+                              'verification runs on threads; a script that starts the run at module '
+                              f'level needs an `if __name__ == "__main__":` guard ({error})',
+                              RuntimeWarning,stacklevel=3)
+            if not on_processes:
+                parallel.compute_blocks(items,compute,workers,store,progress)
+        except BaseException:
+            forget()
             raise
         return True
 
@@ -1122,6 +1135,13 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     verification); 1 keeps everything on this thread. The numbers are
     bit-identical either way. The rest is documented on the worker below.
     """
+    import multiprocessing
+    if getattr(multiprocessing.current_process(),'_inheriting',False):
+        # A spawned worker is importing the caller's main script, and the
+        # script starts a reconstruction at module level: stop at once, so
+        # the parent's pool breaks instead of every worker redoing the run.
+        raise RuntimeError('a reconstruction was started while a worker process was importing the '
+                           'main script: start the run under `if __name__ == "__main__":`')
     from ._rm_acceleration import level_threads
     if workers is None:
         from .parallel import default_workers

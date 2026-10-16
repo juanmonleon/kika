@@ -211,19 +211,62 @@ def test_charged_particle_level_mts_have_names():
         "(n,p0)", "(n,p1)", "(n,pc)", "(n,α0)", "(n,αc)", "(n,³He0)"]
 
 
-def test_threaded_verification_is_the_serial_one(monkeypatch):
-    import kika.processing.resonances.parallel as parallel
+def _serially_attached():
     from kika.processing.resonances import attach_reconstruction
-    monkeypatch.setattr(parallel, "PARALLEL_WORK_THRESHOLD", 0)
     rec = reconstruct_endf(TAPE)
-    threads = []
-    original = parallel.compute_blocks
-    monkeypatch.setattr(parallel, "compute_blocks",
-                        lambda *a, **k: threads.append(1) or original(*a, **k))
-    attach_reconstruction(rec.suite, rec.result, workers=2)
-    assert threads, "the threaded path did not run"
-    parallel_maxima, parallel_worst = rec.result.last_verification
-    rec.result._verification_cache.clear()
-    serial = rec.result.verify_suite(rec.suite, workers=1)
-    assert serial == parallel_maxima and rec.result.last_verification[1] == parallel_worst
+    attach_reconstruction(rec.suite, rec.result, workers=1)
+    return rec, rec.result.last_verification
+
+
+def _verified_on(monkeypatch, rec, *, processes):
+    """The verification on two workers, with the exact physics on worker
+    processes or on threads, from an empty cache; asserts the path that ran."""
+    import kika.processing.resonances.parallel as parallel
+    import kika.processing.workers as w
+    with monkeypatch.context() as m:
+        m.setattr(parallel, "PARALLEL_WORK_THRESHOLD", 0)
+        m.setattr(w, "can_spawn", lambda: processes)
+        ran = []
+        for name in ("compute_blocks", "compute_exact_blocks"):
+            original = getattr(parallel, name)
+            m.setattr(parallel, name, lambda *a, _o=original, _n=name, **k: ran.append(_n) or _o(*a, **k))
+        rec.result._verification_cache.clear()
+        maxima = rec.result.verify_suite(rec.suite, workers=2)
+    # compute_exact_blocks declines (False) without processes; compute_blocks
+    # runs only then.
+    assert ("compute_blocks" in ran) is not processes and "compute_exact_blocks" in ran, ran
+    return maxima, rec.result.last_verification[1]
+
+
+def test_parallel_verification_is_the_serial_one(monkeypatch):
+    import kika.processing.resonances.parallel as parallel
+    rec, serial = _serially_attached()
+    assert _verified_on(monkeypatch, rec, processes=False) == serial
+    assert _verified_on(monkeypatch, rec, processes=True) == serial
     assert parallel.default_workers() in (1, 2, 3, 4)
+
+
+def test_broken_verification_processes_fall_back_to_threads(monkeypatch):
+    import kika.processing.resonances.parallel as parallel
+    rec, serial = _serially_attached()
+    monkeypatch.setattr(parallel, "PARALLEL_WORK_THRESHOLD", 0)
+
+    def broken(items, regions, context, workers, store, progress=None):
+        store(items[0], {})  # a partial result the fallback must discard
+        raise parallel.ProcessesUnavailable("a worker stopped")
+    monkeypatch.setattr(parallel, "compute_exact_blocks", broken)
+    rec.result._verification_cache.clear()
+    with pytest.warns(RuntimeWarning, match="__main__"):
+        maxima = rec.result.verify_suite(rec.suite, workers=2)
+    assert (maxima, rec.result.last_verification[1]) == serial
+
+
+def test_a_reconstruction_does_not_start_in_a_bootstrapping_worker(monkeypatch):
+    import multiprocessing
+
+    class Bootstrapping:
+        daemon = False
+        _inheriting = True
+    monkeypatch.setattr(multiprocessing, "current_process", lambda: Bootstrapping())
+    with pytest.raises(RuntimeError, match="__main__"):
+        reconstruct_endf(TAPE)
