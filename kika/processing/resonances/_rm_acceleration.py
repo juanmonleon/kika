@@ -38,6 +38,44 @@ def threads_for(energies,levels,channels):
     return max(1,min(threads,energies*levels*channels*(channels+1)//2//THREAD_WORK))
 
 
+#: Facts about a group's level arrays, which do not change between calls:
+#: keyed by the arrays themselves, kept only for read-only arrays (a prepared
+#: group's kernel arrays are), so an array edited in place is never served.
+_level_facts_cache={}
+
+
+def _level_facts(er,g,a):
+    """Eligibility of the level arrays and the per-group constants of
+    :func:`gram_capture` (active channels, normal-range test, width extrema),
+    made once per group instead of once per call."""
+    cacheable=all(isinstance(v,np.ndarray) and not v.flags.writeable for v in (er,g,a))
+    key=(id(er),id(g),id(a))
+    if cacheable:
+        hit=_level_facts_cache.get(key)
+        if hit is not None and hit[0] is er and hit[1] is g and hit[2] is a:return hit[3]
+    ok=(er.ndim==1 and g.shape==er.shape and a.ndim==2 and a.shape[0]==len(er) and len(er)>0
+        and 1<=a.shape[1]<=MAX_CHANNELS)
+    if ok:
+        for v in (er,g,a):
+            if v.dtype.kind not in 'fi' or not np.all(np.isfinite(v)) or np.any(abs(v)>1e20):ok=False;break
+    if ok and (np.any(g<0) or np.any((g>0)&(g<1e-100))):ok=False
+    if ok and np.any((a!=0)&(abs(a)<1e-40)):ok=False
+    facts=dict(ok=ok)
+    if ok:
+        tiny=np.finfo(float).tiny;radiative=g>0
+        facts.update(radiative=radiative,
+            active=np.ascontiguousarray(np.any((a!=0)&radiative[:,None],axis=0),dtype=np.uint8),
+            scalar_ok=bool(np.all((a*a>=tiny)|(a==0)) and np.all((g>=tiny)|~radiative)),
+            any_radiative=bool(np.any(radiative)),
+            halfgmax2=float((.5*g.max())**2) if np.any(radiative) else 0.,
+            hgmin=float(.5*g[radiative].min()) if np.any(radiative) else 0.,
+            ermin=float(er.min()),ermax=float(er.max()))
+    if cacheable:
+        if len(_level_facts_cache)>512:_level_facts_cache.clear()
+        _level_facts_cache[key]=(er,g,a,facts)
+    return facts
+
+
 def eligible(energies, levels, widths, reduced, factors, work_bytes,
              return_absorption, absorption_rtol):
     # 1e-8: production, Gram capture where its roundoff bound allows.
@@ -45,20 +83,17 @@ def eligible(energies, levels, widths, reduced, factors, work_bytes,
     if (_native is None or not return_absorption or absorption_rtol not in (0., 1e-8)
             or reduced is None or work_bytes < 65536):return False
     e,er,g,a,f=(np.asarray(v) for v in (energies,levels,widths,reduced,factors))
-    if (e.ndim!=1 or er.ndim!=1 or g.shape!=er.shape or a.ndim!=2
-            or a.shape[0]!=len(er) or not len(er) or not 1<=a.shape[1]<=MAX_CHANNELS
-            or f.shape!=(len(e),a.shape[1]) or not len(e)):return False
     # Restrict acceleration to normal float64 arithmetic. Extreme data use
     # the reference kernel, including its established pole-limit handling.
-    for v in (e,er,g,a,f):
-        if v.dtype.kind not in 'fi' or not np.all(np.isfinite(v)) or np.any(abs(v)>1e20):return False
-    if np.any(g<0) or np.any((g>0)&(g<1e-100)):return False
     # With |E|, |Er|, gamma <= 1e20 and positive gamma >= 1e-100,
     # Im(1/d) >= 1e-141. Nonzero amplitudes and factors >= 1e-40
     # keep every positive diagonal summand (including factor scaling)
     # above 1e-301, safely normal. Extreme products use direct NumPy.
-    for v in (a,f):
-        if np.any((v!=0)&(abs(v)<1e-40)):return False
+    if not _level_facts(er,g,a)['ok']:return False
+    if e.ndim!=1 or f.shape!=(len(e),a.shape[1]) or not len(e):return False
+    for v in (e,f):
+        if v.dtype.kind not in 'fi' or not np.all(np.isfinite(v)) or np.any(abs(v)>1e20):return False
+    if np.any((f!=0)&(abs(f)<1e-40)):return False
     return True
 
 
@@ -122,18 +157,13 @@ def _fused_rows(rr,f,e,er,gamma,a,c,entrance,absorption_rtol,radiative):
     operations in the same order. None: take the NumPy statements; False: a
     non-passive solution, which the caller rejects as it always has."""
     if c>3 or _native is None or not hasattr(_native,'solve_rows'):return None
-    tiny=np.finfo(float).tiny
-    active=np.ascontiguousarray(np.any((a!=0)&radiative[:,None],axis=0),dtype=np.uint8)
-    scalar_ok=bool(np.all((a*a>=tiny)|(a==0)) and np.all((gamma>=tiny)|~radiative))
-    any_radiative=bool(np.any(radiative))
-    halfgmax2=(.5*gamma.max())**2 if any_radiative else 0.
-    hgmin=.5*gamma[radiative].min() if any_radiative else 0.
+    facts=_level_facts(er,gamma,a)
     n=len(rr);y=np.empty((n,c),complex);w=np.empty((n,c),complex)
     cap=np.empty(n);accepted=np.empty(n,np.uint8);bound=np.empty(n)
-    status,maximum=_native.solve_rows(n,c,entrance,len(er),rr.view(float).ravel(),f.ravel(),e,active,
+    status,maximum=_native.solve_rows(n,c,entrance,len(er),rr.view(float).ravel(),f.ravel(),e,facts['active'],
         y.view(float).ravel(),w.view(float).ravel(),cap,accepted,bound,
-        float(absorption_rtol),float(er.min()),float(er.max()),float(halfgmax2),float(hgmin),
-        int(scalar_ok),int(any_radiative))
+        float(absorption_rtol),facts['ermin'],facts['ermax'],facts['halfgmax2'],facts['hgmin'],
+        int(facts['scalar_ok']),int(facts['any_radiative']))
     if status==2:return False
     if status:return None
     return y,w,cap,accepted.astype(bool),bound,maximum
