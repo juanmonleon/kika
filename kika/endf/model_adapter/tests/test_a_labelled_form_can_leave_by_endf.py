@@ -190,9 +190,9 @@ def test_an_mf6_product_form_under_the_label_is_the_one_written(monkeypatch):
     seen = {}
     original = adapter.encodeMF6MT
 
-    def spy(forms, provenance, mt, report):
+    def spy(forms, provenance, mt, report, *rest):
         seen[mt] = forms
-        return original(forms, provenance, mt, report)
+        return original(forms, provenance, mt, report, *rest)
 
     monkeypatch.setattr(adapter, "encodeMF6MT", spy)
     _, report, _ = encodeTapeSections(decoded, label=REALIZATION)

@@ -256,6 +256,14 @@ PERMANENT_IMPORTERS = {
     # would be a second definition. Imported inside the functions that need
     # them. Frozen build: as above.
     "kika/hdf5/processing.py",
+    # The G4NDL inelastic writer (D40, 2026-10-13): an MF6 photon whose lines
+    # the ENDF decoder split into products goes back to one product with its
+    # lines first, as G4NDL tables them, through `mergedLineSpectra` -- the
+    # same bookkeeping, and the same reason, as `kika/hdf5/processing.py`
+    # above. Imported inside the function that encodes a final state. Frozen
+    # build: `photon_lines` is a static import of `model_adapter.energy_angle`,
+    # so `kika.endf.model_adapter` in kika-api.spec's hiddenimports carries it.
+    "kika/g4ndl/inelastic_encode.py",
     # The ENDF door of a thermal-scattering evaluation (2026-10-11): an MF7
     # tape becomes a model suite exactly as `kika/_read.py` makes one, inside
     # `read_tsl`. Frozen build: `kika.tsl.read` and `kika.endf.model_adapter`
