@@ -259,8 +259,14 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
     if released is not None:
         qi = qm = released
 
+    # An orphan product (MF13 photons on a sum or on an MT with no MF3, N-14's
+    # MT28/32) has no MF3 section of its own: no LR and no MF3 regions, as one
+    # read from the tape carries none.
+    orphan = any(reaction is o for o in context.suite.orphanProducts)
     regions = []
-    if EVAL_LABEL in reaction.crossSection and hasattr(reaction.crossSection[EVAL_LABEL], "toEndfRegions"):
+    if orphan:
+        lr = None
+    elif EVAL_LABEL in reaction.crossSection and hasattr(reaction.crossSection[EVAL_LABEL], "toEndfRegions"):
         _, _, regions = reaction.crossSection[EVAL_LABEL].toEndfRegions()
 
     header = {"qi": qi} if qi != q else {}
@@ -286,7 +292,6 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
     if not isinstance(reaction, CrossSectionSum) and any(wants(mf) for mf in (12, 13, 14, 15)):
         from .photons import photonFields
 
-        orphan = any(reaction is o for o in context.suite.orphanProducts)
         path = (f"/reactionSuite/orphanProducts/orphanProduct[@label='{reaction.label}']"
                 if orphan else reactionHref(reaction))
         header.update(photonFields(reaction, context, report, path, inMF6=inMF6))

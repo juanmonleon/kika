@@ -181,6 +181,12 @@ FACADE_IMPORTERS = {
 #: 2026-08-24). It is a thesis-pipeline module, not an app path.
 PERMANENT_IMPORTERS = {
     "kika/_read.py",
+    # ``kika.write``, the other half of the front door: since A4 (2026-10-14)
+    # ``format="ace"`` encodes the model with the ACE adapter's
+    # ``writeAceSuite``, imported inside ``write`` so that ``import kika`` does
+    # not wake the model. Frozen build: ``kika.ace.model_adapter`` (in
+    # kika-api.spec's hiddenimports) imports ``.encode`` at module scope.
+    "kika/_write.py",
     "kika/sampling/mf35_sampling.py",
     "kika/sampling/endf_perturbation.py",
     "kika/sampling/mf33_sampling.py",
