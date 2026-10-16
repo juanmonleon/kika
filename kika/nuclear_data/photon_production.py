@@ -357,6 +357,9 @@ def _mf6_discrete_points(node) -> Dict[str, List[int]]:
     out: Dict[str, List[int]] = {}
     for record in (mf6 or {}).get("products", []) or []:
         law = record.get("law_fields") or {}
+        if law.get("lines"):
+            # Already split into products, one per line (D40).
+            continue
         nd = law.get("nd") or []
         if record.get("law") == 1 and record.get("pid") == "photon" and any(nd):
             out[record.get("label")] = [int(v) for v in nd]

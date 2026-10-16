@@ -249,6 +249,11 @@ _TAPES: Dict[str, Sequence[str]] = {
                    "jendl5/n/27059.endf"),
     "cm243_jeff40": ("jeff40/n_96-Cm-243g.jeff", "jeff40/neutrons/n_96-Cm-243g.jeff"),
     "li7_jeff40": ("jeff40/n_3-Li-007g.jeff", "jeff40/neutrons/n_3-Li-007g.jeff"),
+    # MF6 LAW=1 photons with discrete lines (D40): B-11's MT103 has a node whose
+    # yield is zero and still lists its lines; Pt-190's capture has a continuum,
+    # discrete lines and 26 primaries in one subsection.
+    "b11_b81": ("endfb81/n-005_B_011.endf", "endfb81/neutrons/n-005_B_011.endf"),
+    "pt190_b81": ("endfb81/n-078_Pt_190.endf", "endfb81/neutrons/n-078_Pt_190.endf"),
     # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
     # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
     # validation that picked them is kika-workspace
@@ -687,7 +692,8 @@ for _name in MF32_TAPES:
 del _name
 
 #: The photon witnesses (roadmap E5), for the same reason as ``MF32_TAPES``.
-PHOTON_TAPES = ("n14_b81", "s36_jendl", "hf182_jendl", "cm243_jeff40", "li7_jeff40")
+PHOTON_TAPES = ("n14_b81", "s36_jendl", "hf182_jendl", "cm243_jeff40", "li7_jeff40",
+                "b11_b81", "pt190_b81")
 for _name in PHOTON_TAPES:
     globals()[f"{_name}_tape"] = _tape_fixture(_name)
 del _name

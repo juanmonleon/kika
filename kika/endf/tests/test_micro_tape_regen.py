@@ -332,6 +332,9 @@ PHOTON_FIXTURES = {
     "s36": ("s36_jendl", {1: {451}, 3: {51, 52, 53}, 12: {51, 52, 53},
                           14: {51, 52, 53}}),
     "hf182": ("hf182_jendl", {1: {451}, 3: {3}, 12: {3}, 14: {3}, 15: {3}}),
+    # MF6 LAW=1 photons whose first ND points are lines (D40).
+    "b11": ("b11_b81", {1: {451}, 3: {103}, 6: {103}}),
+    "pt190": ("pt190_b81", {1: {451}, 3: {102}, 6: {102}}),
 }
 
 
@@ -901,7 +904,8 @@ def test_regenerate_cov_check_micro_tapes(ne20_jeff40_tape, w186_jeff40_tape,
 @pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
 def test_regenerate_photon_micro_tapes(n14_b81_tape, fe56_b81_tape, u235_b81_tape,
                                        s36_jendl_tape, hf182_jendl_tape,
-                                       cm243_jeff40_tape, li7_jeff40_tape, request):
+                                       cm243_jeff40_tape, li7_jeff40_tape,
+                                       b11_b81_tape, pt190_b81_tape, request):
     """Rebuild just the photon fixtures, for the same reason as the MF6 ones."""
     DATA.mkdir(parents=True, exist_ok=True)
     for key, (tape, keep) in PHOTON_FIXTURES.items():

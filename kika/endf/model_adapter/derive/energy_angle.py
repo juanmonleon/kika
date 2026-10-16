@@ -38,9 +38,11 @@ LCT is 1 when every product is in the lab, 2 when every one is in the centre
 of mass, and 3 when the light ones (A ≤ 4, a photon included, as
 ``frameForProduct`` reads it) are in the centre of mass and the heavy ones in
 the lab. JP is 0 (the P(ν) subsections of a JP>0 fission section
-have no model node). ND is 0 on every node: "the first ND outgoing points are
-discrete lines" is a statement the model has no node for, and the ENDF decoder
-reports it when it meets one.
+have no model node). ND is 0 on every node but one kind: the photons of a line
+spectrum -- ``discreteGamma`` and ``primaryGamma`` products and an isotropic
+continuum, each line's multiplicity its share of the yield (D40) -- are one
+LAW=1 subsection again, the lines first in each node in decreasing energy, the
+way FUDGE's ``gammasToENDF6_MF6`` writes them (``photon_lines.deriveLineSpectrum``).
 """
 from __future__ import annotations
 
@@ -258,6 +260,39 @@ def _law(form, frameOf):
     return None
 
 
+def _lineGroup(kept, own) -> list:
+    """The photons that make one MF6 line spectrum, or ``[]``.
+
+    Lines, primaries and an isotropic continuum of the reaction's own channel.
+    A residual's de-excitation line (Be-9 MT701, FUDGE's ``checkDecayProducts``)
+    keeps its one-point record (:func:`_law`).
+    """
+    from ..photon_lines import isLinePiece
+
+    pieces = [p for p in kept if isLinePiece(p) and p in own]
+    if not any(hasattr(getattr(_form(p), "energy", None), "value") for p in pieces):
+        return []
+    return pieces
+
+
+def _lineRecord(group, reaction, context, index, mt, report) -> Optional[dict]:
+    from ..photon_lines import deriveLineSpectrum
+    from .photons import _sum
+
+    summed = context.suite.sums.multiplicitySums.byENDF_MT(mt)
+    total = (summed.multiplicity.form if summed is not None and summed.multiplicity is not None
+             else _sum([p.multiplicity for p in group]))
+    fields = deriveLineSpectrum(group, total, context.awr, index, mt, report)
+    y = _yield(type("M", (), {"form": total})())
+    if fields is None or y is None:
+        return None
+    pairs, ex, ey = y
+    return {"index": index, "zap": 0.0, "awp": 0.0, "lip": 0, "law": 1,
+            "y_interp": pairs, "y_energies": ex, "y_values": ey,
+            "pid": "photon", "label": group[0].label, "modelled": True,
+            "law_fields": fields}
+
+
 def mf6Fields(reaction, context, report) -> Optional[dict]:
     """The ``"mf6"`` block for *reaction*, or ``None`` with the reason reported."""
     from kika.nuclear_data.model import Frame
@@ -278,8 +313,22 @@ def mf6Fields(reaction, context, report) -> Optional[dict]:
         for decayed in getattr(getattr(product, "outputChannel", None), "products", None) or ():
             if _isDiscreteLine(decayed):
                 kept.append(decayed)
-    for index, product in enumerate(kept):
+    group = _lineGroup(kept, list(channel.products))
+    index = -1
+    for product in kept:
+        if product in group[1:]:
+            continue
+        index += 1
         form = _form(product)
+        if group and product is group[0]:
+            # D40: the photons of one line spectrum are one LAW=1 subsection,
+            # the lines first in each node -- FUDGE's ``gammasToENDF6_MF6``.
+            record = _lineRecord(group, reaction, context, index, mt, report)
+            if record is None:
+                return None
+            records.append(record)
+            frames.append((True, getattr(form, "productFrame", None) or Frame.lab))
+            continue
         law = _law(form, None)
         if law is None:
             report.lost(f"MF6/MT{mt}: product {product.label!r} has a "

@@ -108,6 +108,9 @@ from kika.nuclear_data.model import (
     toEndfTab3,
 )
 
+from .photon_lines import (LINES_KEY, decodeLineSpectrum, isLineSpectrum,
+                           lineSpectrumLabels, restoreLineSpectrum)
+
 __all__ = ["decodeMF6MT", "encodeMF6MT", "recoilAngularHref", "frameForProduct"]
 
 
@@ -346,8 +349,25 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
     entries: List[Tuple[str, str, Multiplicity, Optional[object]]] = []
     records: List[dict] = []
     seen: Dict[str, int] = {}
+    taken: set = set()
     ejectile: Optional[str] = None
     for index, product in enumerate(mf6mt.products):
+        if isLineSpectrum(product):
+            # D40: a photon spectrum that opens with discrete lines becomes
+            # FUDGE's products -- a normalised continuum and one product per
+            # line -- rather than a table whose x decreases.
+            split = decodeLineSpectrum(product, index, mt, frameForProduct(lct, product.za),
+                                       getattr(mf6mt, "_awr", None), taken, report)
+            if split is not None:
+                pieces, meta = split
+                for label, multiplicity, distribution in pieces:
+                    entries.append((label, "photon", multiplicity, distribution))
+                seen.setdefault("photon", index)
+                record = _productRecord(product, index, "photon", pieces[0][0], True,
+                                        mat, mt, pad)
+                record["law_fields"][LINES_KEY] = meta
+                records.append(record)
+                continue
         if product.law < 0:
             # A LAW<0 subsection points at MF5/MF15 for a distribution and
             # carries no cross section: it cannot change MF3 or MF2.
@@ -384,6 +404,7 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
                 ejectile = label
         entries.append((label, pid, _multiplicityOf(product, yieldAxes),
                         distribution))
+        taken.add(label)
         records.append(_productRecord(product, index, pid, label, modelled,
                                       mat, mt, pad))
 
@@ -838,8 +859,12 @@ def _columnAt(body, k: int, column: int, energy: float, axes) -> XYs1d:
 # Encode
 # ---------------------------------------------------------------------------
 
-def _restoreProduct(record: dict, forms, mt: int):
-    """One provenance record → the ``MF6Product`` it was read from."""
+def _restoreProduct(record: dict, forms, mt: int, multiplicities=None, report=None):
+    """One provenance record → the ``MF6Product`` it was read from.
+
+    ``forms`` is the record's one form, or -- for a subsection D40 split into
+    several products -- every form by label, with ``multiplicities`` beside it.
+    """
     from kika.endf.classes.mf6.laws import MF6LawNoBody, MF6LawElsewhere, MF6LawRaw
     from kika.endf.classes.mf6.products import MF6Product
 
@@ -848,6 +873,8 @@ def _restoreProduct(record: dict, forms, mt: int):
         body = MF6LawElsewhere(law=law)
     elif law in (0, 3, 4):
         body = MF6LawNoBody(law=law)
+    elif (record.get("law_fields") or {}).get(LINES_KEY):
+        body = restoreLineSpectrum(record, forms or {}, multiplicities, mt, report)
     elif record["modelled"]:
         body = _restoreLaw(record, forms, mt)
     else:
@@ -1126,12 +1153,16 @@ def _restoreKalbachMann(form: KalbachMann, fields: dict, index: int, mt: int):
 
 def encodeMF6MT(forms: Optional[Dict[str, object]],
                 provenance: Optional[EndfProvenance], mt: int,
-                report: Optional[ConversionReport] = None):
+                report: Optional[ConversionReport] = None,
+                multiplicities: Optional[Dict[str, object]] = None):
     """The inverse of :func:`decodeMF6MT`, byte-identical to the source section.
 
     ``forms`` maps a product's **label** to its §18 distribution form — the mapping
     :func:`decodeMF6MT`'s ``entries`` becomes once the products are on a
-    channel. Requires the ENDF provenance: ``JP``, ``LCT``, ``NK``, every
+    channel. ``multiplicities`` maps a label to its multiplicity function and
+    is needed only by a photon subsection D40 split into one product per line,
+    whose lines carry their share of the yield there. Requires the ENDF
+    provenance: ``JP``, ``LCT``, ``NK``, every
     ``ZAP``/``AWP``/``LIP``, the yields and the laws kika does not model live
     there and nowhere else, so without it this is not a lossy encode, it is an
     impossible one.
@@ -1152,8 +1183,7 @@ def encodeMF6MT(forms: Optional[Dict[str, object]],
         )
 
     records = fields["products"]
-    expected = {record["label"] for record in records
-                if record["label"] is not None}
+    expected = {label for record in records for label in lineSpectrumLabels(record)}
     given = set(forms or {})
     if given - expected:
         raise ValueError(
@@ -1176,7 +1206,9 @@ def encodeMF6MT(forms: Optional[Dict[str, object]],
     pad = fields.get("pad") or {}
     section.pad = PadStyle(**pad) if pad else PadStyle()
     section.products = [
-        _restoreProduct(record, (forms or {}).get(record["label"]), mt)
+        _restoreProduct(record, forms or {}, mt, multiplicities, report)
+        if (record.get("law_fields") or {}).get(LINES_KEY)
+        else _restoreProduct(record, (forms or {}).get(record["label"]), mt)
         for record in records
     ]
     return section, report
