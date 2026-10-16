@@ -394,6 +394,9 @@ def normalize_suite_pairs(suite, context):
     candidates = [r for r in resolved.resolved if isinstance(r.formalism,RMatrix)
                   and (r.formalism.approximation=='FullRMatrix' or r.formalism.relativisticKinematics or r.formalism.boundaryCondition in ('Given','NegativeOrbitalMomentum','Brune')
                        or any(ch.additionalPhaseShift is not None or ch.phaseShiftMode or ch.phaseAbsorptionReaction is not None for g in r.formalism.spinGroups for ch in g.channels)
+                       # An external R-matrix (KBK, Sr-88 of B-VIII.1) is RML's: the RM
+                       # preparation refuses it, as the ENDF route never sends it there.
+                       or any(ch.externalRMatrix is not None or ch.tabulatedBackground is not None for g in r.formalism.spinGroups for ch in g.channels)
                        or any(rr.reactionMT not in (None,2,18,19,102) for rr in r.formalism.resonanceReactions)
                        or any(sum(ch.resonanceReaction==rr.label for ch in g.channels)>1
                               for rr in r.formalism.resonanceReactions if rr.reactionMT==2 for g in r.formalism.spinGroups))

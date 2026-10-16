@@ -43,7 +43,7 @@ def test_nndc_cl35_proton_channel_is_coulomb_charged():
 
     suite, _ = readReactionSuite(Document.parse(path))
     assert suite.PoPs.particles["S35"].charge == 0  # the atom's, as NNDC writes it
-    resolved = normalize_suite_pairs(suite, _context_from_model(suite))
+    resolved = normalize_suite_pairs(suite, _context_from_model(suite)[0])
     (pair,) = [rr for region in resolved.resolved
                for rr in region.formalism.resonanceReactions if rr.label == "H1 + S35"]
     assert (pair.kinematics.particleA.charge, pair.kinematics.particleB.charge) == (1, 16)

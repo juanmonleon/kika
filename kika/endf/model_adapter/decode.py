@@ -373,6 +373,89 @@ def _targetSpinFromMF2(suite, provenance) -> None:
     target.spin = PhysicalQuantity(value=spins.pop(), unit="hbar")
 
 
+def _pairParticlesFromMF2(suite) -> None:
+    """What an RML pair (LRF=7) states of its two particles, where a GNDS
+    file keeps it: the ejectile on the ``resonanceReaction``, each particle's
+    mass, spin and parity in the formalism's own PoPs (§19.3.1).
+
+    Read from ENDF, a pair carries all of it in its ``kinematics``, which is
+    ENDF-only and is not written to GNDS. Read back, the RML preparation
+    rebuilds the pair from the PoPs, the formalism's before the suite's, and
+    the ejectile, as from NNDC's files (``ejectile="H1"``, S35's ``3/2+``).
+    Without them kika could not process its own GNDS of Cl-35 ("native RML
+    particle Cl35 lacks ..."), and with the suite's masses alone its (n,p) came
+    1.6e-3 off: MA is the proton's nuclear mass, 0.99862 neutrons, and the
+    suite's H1 is the atom's.
+
+    The two particles are the linked reaction's products, matched by nuclear
+    charge, so an excited residual keeps its own level (``S35_e1``) and the
+    ground state's spin is never the level's. A particle the formalism's PoPs
+    already has (the target) only gets what it does not state; the neutron is
+    the suite's. An ambiguous match, or two pairs of a range disagreeing on a
+    particle, leave it as the file is.
+    """
+    from kika.nuclear_data.model.pops import Nuclide, PoPs
+    from kika.nuclear_data.model.resonances import RMatrix
+
+    def nuclearCharge(pid):
+        particle = suite.PoPs.particles.get(pid)
+        if isinstance(particle, Nuclide):
+            return particle.Z
+        return getattr(particle, "charge", None)
+
+    neutron = suite.PoPs.particles.get(suite.projectile)
+    if neutron is None or neutron.mass is None:
+        return
+    neutronMass = neutron.mass.convertedTo("amu").value
+    for region in suite.resonances.resolved:
+        formalism = region.formalism
+        if not isinstance(formalism, RMatrix):
+            continue
+        stated = {}
+        for channelReaction in formalism.resonanceReactions:
+            kinematics = channelReaction.kinematics
+            if kinematics is None or kinematics.effective or channelReaction.reactionMT is None:
+                continue
+            reactions = [r for r in suite.reactions if r.ENDF_MT == channelReaction.reactionMT]
+            if len(reactions) != 1:
+                continue
+            products = [p.pid for p in reactions[0].outputChannel.products if p.pid != "photon"]
+            if channelReaction.reactionMT == 2 and suite.target not in products:
+                # kika's elastic lists the neutron alone; the residual is the target.
+                products.append(suite.target)
+            pair = []
+            for particle in (kinematics.particleA, kinematics.particleB):
+                match = [pid for pid in products if nuclearCharge(pid) == particle.charge]
+                pair.append(match[0] if len(match) == 1 else None)
+            if None in pair or pair[0] == pair[1]:
+                continue
+            if channelReaction.ejectile is None:
+                channelReaction.ejectile = pair[0]
+            for pid, particle in zip(pair, (kinematics.particleA, kinematics.particleB)):
+                stated.setdefault(pid, set()).add(
+                    (float(particle.massRatio), float(particle.spin), int(particle.parity)))
+        for pid, values in stated.items():
+            known = suite.PoPs.particles.get(pid)
+            if pid == suite.projectile or len(values) != 1 or not isinstance(known, Nuclide):
+                continue
+            ((massRatio, spin, parity),) = values
+            if formalism.PoPs is None:
+                formalism.PoPs = PoPs(name="resolved resonances")
+            local = formalism.PoPs.particles.get(pid)
+            if local is None:
+                formalism.PoPs.add(Nuclide(
+                    id=pid, Z=known.Z, A=known.A, nuclearLevel=known.nuclearLevel,
+                    mass=PhysicalQuantity(value=massRatio * neutronMass, unit="amu"),
+                    spin=PhysicalQuantity(value=spin, unit="hbar"), parity=parity))
+                continue
+            if local.mass is None:
+                local.mass = PhysicalQuantity(value=massRatio * neutronMass, unit="amu")
+            if local.spin is None:
+                local.spin = PhysicalQuantity(value=spin, unit="hbar")
+            if local.parity is None:
+                local.parity = parity
+
+
 def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     """A parsed ``ENDF`` object → a :class:`ReactionSuite`, plus the report.
 
@@ -560,6 +643,11 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # product of its own.
     from .residuals import attachResiduals
     report = attachResiduals(suite, report)
+
+    # An RML pair's particles into PoPs and its ejectile, once every product
+    # and residual of the reactions it names exists.
+    if suite.resonances is not None:
+        _pairParticlesFromMF2(suite)
 
     # The photons, after the residuals: a discrete level's photons are the
     # decay of the excited residual and go into the channel `attachResiduals`
