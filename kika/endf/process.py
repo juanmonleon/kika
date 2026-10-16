@@ -113,9 +113,6 @@ PROCESSING_REJECTION_CATEGORIES = {
         "A temperature asked for in the PENDF was not broadened in this run.",
     "pendf-failed": "The PENDF could not be written, or did not read back as it was written.",
     "gnds-failed": "The GNDS file could not be written, or did not read back as it was written.",
-    "pendf-needs-endf-source":
-        "A PENDF can only be written for an evaluation read from ENDF-6 for now: kika cannot yet "
-        "write the resonance parameters (MF2) of a GNDS evaluation back to ENDF-6.",
 }
 
 #: The Doppler engine's categories (``DopplerInputError.category``) gathered
@@ -450,6 +447,14 @@ class EndfProcessing:
         it without HEATR). When the heating stage ran, every material carries
         MF3/MT301 and MT444 as HEATR adds them (:attr:`heating`).
 
+        From a GNDS evaluation the PENDF is RECONR's: MF1/451 derived from the
+        model (as the GNDS to ENDF-6 writer does), an MF2/151 that states the
+        scattering radius alone (one LRU=0 range up to the top of the resolved
+        range), since the resonances are in MF3 and GNDS does not carry their
+        ENDF bookkeeping (:func:`~kika.endf.model_adapter.pendf.pendfResonances`),
+        and MF3. The nu-bars, MF1/458 and the distributions stay on the
+        evaluation, where NJOY's later modules read them, as from RECONR.
+
         The 0 K material is ``EndfReconstruction.write_pendf``'s: verified
         against the resonance physics before and after the reload. Each
         broadened one is read back and compared with the table in memory, every
@@ -468,11 +473,6 @@ class EndfProcessing:
         if mat is None:
             mat = (self.reconstruction.evaluation or {}).get("mat")
         try:
-            if self.source_format != "endf":
-                # GNDS -> ENDF-6 cannot write MF2/151 without the ENDF bookkeeping
-                # a GNDS file does not carry (QX, LRX, LAD, the particle pairs).
-                raise ProcessingOutputError(
-                    "pendf-needs-endf-source", PROCESSING_REJECTION_CATEGORIES["pendf-needs-endf-source"])
             wanted = [0.0] + list(self.temperatures) if temperatures is None \
                 else sorted({float(t) for t in temperatures})
             for T in wanted:
@@ -530,13 +530,17 @@ class EndfProcessing:
         Returns whether it carries MF2/MT153."""
         from kika.endf.read_endf import read_endf
         from kika.endf.model_adapter import decodeMF3MT
-        from kika.endf.writers.assemble import writeEndfTape
+        from kika.endf.writers.assemble import DEFAULT_TAPE_ID, pendfFromModel, writeEndfTape
         from kika.endf.writers.update_directory import update_mf1_directory
         from kika.processing.resonances.grid import error_ratio
         from kika.endf.writers.assemble import _mf3Bearing
         rec = self.reconstruction
         suite = _heated_suite(rec, T, self._heated[T])
-        conversion = writeEndfTape(suite, path, mat=mat, label=HEATED_LABEL)
+        files = pendfFromModel(suite)
+        # A GNDS evaluation kept no tape identification record to write back;
+        # the 0 K material states kika's, and the merged tape keeps that one.
+        conversion = writeEndfTape(suite, path, mat=mat, label=HEATED_LABEL, files=files,
+                                   tapeId=DEFAULT_TAPE_ID if files else None)
         if not conversion.isClean:
             raise ProcessingOutputError("pendf-failed", f"{T:g} K: the conversion lost data: {conversion}")
         from kika.endf.model_adapter.pendf import trimDescription

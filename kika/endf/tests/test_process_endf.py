@@ -341,15 +341,12 @@ def test_process_gnds_runs_every_stage(gnds_run):
 
 def test_process_gnds_outputs(gnds_run, tmp_path):
     import kika
-    from kika.endf import ProcessingOutputError
-    with pytest.raises(ProcessingOutputError) as caught:
-        gnds_run.write_pendf(tmp_path / "h2.pendf")
-    assert caught.value.category == "pendf-needs-endf-source"
+    assert gnds_run.write_pendf(tmp_path / "h2.pendf").exists()      # M6 (test_pendf_from_gnds.py)
     back = kika.read(gnds_run.write_gnds(tmp_path / "h2.gnds.xml"), format="gnds", covariances=False)
     assert {"eval", "recon", "heated_000"} <= {s.label for s in back.styles}
     assert gnds_run.write_hdf5(tmp_path / "h2.h5").exists()
     formats = [(s.details["format"], s.status) for s in gnds_run.stages if s.stage == "write"]
-    assert formats == [("pendf", "rejected"), ("gnds", "done"), ("hdf5", "done")]
+    assert formats == [("pendf", "done"), ("gnds", "done"), ("hdf5", "done")]
 
 
 def test_process_gnds_reprocesses_kikas_own_gnds(run, tmp_path):

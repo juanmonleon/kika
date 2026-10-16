@@ -50,7 +50,7 @@ from typing import List, Optional, Sequence, Tuple
 from ..utils import (format_endf_fend_record, format_endf_mend_record,
                      format_endf_tend_record)
 
-__all__ = ["MF_WRITE_ORDER", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
+__all__ = ["MF_WRITE_ORDER", "PENDF_SECTIONS", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
            "encodeTapeSections", "assembleTape", "writeEndfTape",
            "writeEndfTapes", "writeReconstructedEndfTape", "writeHeatedEndfTape"]
 
@@ -97,7 +97,7 @@ def _mat(suite, mat: Optional[int]) -> int:
     return int(recorded)
 
 
-def _mf1Sections(suite, mat, report, label=None):
+def _mf1Sections(suite, mat, report, label=None, selection=None):
     """MF1: the 451 header first, then whichever nu-bars the suite carries.
 
     *label* selects which §9.1 form of each nu-bar is written, with the same
@@ -108,14 +108,19 @@ def _mf1Sections(suite, mat, report, label=None):
     :class:`~kika.nuclear_data.model.component.Component` bought -- before it,
     a realisation had to *replace* the evaluated form and there was no label for
     this function to be told about.
+
+    *selection* (``encodeTapeSections``'s ``files``) leaves the MTs it does not
+    name unencoded: 451 is always written.
     """
     from kika.nuclear_data.model import EVAL_LABEL
 
     from ..model_adapter import (encodeMF1MT451, encodeMF1MT452,
                                  encodeMF1MT455, encodeMF1MT456)
+    from ..model_adapter.derive import sectionSelected
     from ..model_adapter.multiplicity import nubarNode
 
     label = EVAL_LABEL if label is None else label
+    wanted = (lambda mt: True) if selection is None else (lambda mt: sectionSelected(1, mt, selection))
 
     sections = []
     header, report = encodeMF1MT451(suite, mat, report)
@@ -166,7 +171,7 @@ def _mf1Sections(suite, mat, report, label=None):
     for mt, encode in ((452, encodeMF1MT452), (455, encodeMF1MT455),
                        (456, encodeMF1MT456)):
         node = nubarNode(suite, mt)
-        if node is None:
+        if node is None or not wanted(mt):
             continue
         formLabel = label if label in node else EVAL_LABEL
         (written if formLabel == label else fellBack).append(mt)
@@ -186,9 +191,11 @@ def _mf1Sections(suite, mat, report, label=None):
     from ..model_adapter.fission_energy import (encodeMF1MT458, encodeMF1MT460,
                                                 fissionEnergyReleaseNode)
 
-    if fissionEnergyReleaseNode(suite, label) is not None:
+    if wanted(458) and fissionEnergyReleaseNode(suite, label) is not None:
         section, report = encodeMF1MT458(suite, mat, report, label=label)
         sections.append((1, 458, section))
+    if not wanted(460):
+        return sections, report
     section, report = encodeMF1MT460(suite, mat, report)
     if section is not None:
         sections.append((1, 460, section))
@@ -601,15 +608,32 @@ def _lumpedComponents(suite, mat, present, report):
     return out
 
 
+#: The files each section builder of :func:`encodeTapeSections` can emit, so
+#: a ``files=`` request runs only the builders it needs.
+_BUILDER_FILES = {
+    "_mf1Sections": {1}, "_mf2Sections": {2}, "_mf3And4And5Sections": {3, 4, 5},
+    "_mf6Sections": {6}, "_mf7Sections": {7}, "_productionSections": {8, 9, 10},
+    "_photonSections": {12, 13, 14, 15},
+    "_covarianceSections": {31, 32, 33, 34, 35},
+}
+
+
 def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
-                       label: Optional[str] = None
+                       label: Optional[str] = None, files: Optional[Sequence] = None
                        ) -> Tuple[List[Tuple[int, int, object]], object, int]:
     """A :class:`ReactionSuite` → ``[(MF, MT, section), …]`` in tape order.
 
     Returns the sections, the report, and the MAT they were stamped with. The
     report is the part to read: a model missing a file comes back as a tape
     missing that file, and only the report says so.
+
+    ``files``: write only these sections, given as MF numbers (a whole file)
+    and ``(MF, MT)`` pairs (one section); RECONR's PENDF is
+    ``((1, 451), 2, 3)`` (:data:`PENDF_SECTIONS`). What the suite holds for the
+    other sections is neither written nor reported lost: leaving it out is
+    the request.
     """
+    from ..model_adapter.derive import sectionSelected
     from kika.nuclear_data.model import ConversionReport
 
     report = report if report is not None else ConversionReport()
@@ -623,18 +647,24 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
         import copy
 
         suite = copy.deepcopy(suite)
-        report = deriveEndfProvenance(suite, report, mat=mat)
+        report = deriveEndfProvenance(suite, report, mat=mat, files=files)
     mat = _mat(suite, mat)
 
     sections: List[Tuple[int, int, object]] = []
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
                   _mf6Sections, _mf7Sections, _productionSections, _photonSections,
                   _covarianceSections):
-        if build in (_mf1Sections, _mf3And4And5Sections, _mf6Sections):
+        if files is not None and not any(sectionSelected(mf, None, files)
+                                         for mf in _BUILDER_FILES[build.__name__]):
+            continue
+        if build is _mf1Sections:
+            built, report = build(suite, mat, report, label, selection=files)
+        elif build in (_mf3And4And5Sections, _mf6Sections):
             built, report = build(suite, mat, report, label)
         else:
             built, report = build(suite, mat, report)
-        sections.extend(built)
+        sections.extend(entry for entry in built
+                        if files is None or sectionSelected(entry[0], entry[1], files))
 
     written = {mf for mf, _, _ in sections}
     for mf in sorted(written - set(MF_WRITE_ORDER)):  # pragma: no cover
@@ -683,7 +713,7 @@ def assembleTape(sections: Sequence[Tuple[int, int, object]], mat: int,
 
 def writeEndfTape(suite, path, mat: Optional[int] = None,
                   tapeId: Optional[str] = None, report=None, *,
-                  label: Optional[str] = None):
+                  label: Optional[str] = None, files: Optional[Sequence] = None):
     """Write *suite* out as an ENDF-6 tape. Returns the :class:`ConversionReport`.
 
     The directory is rebuilt **after** the file is on disk, by
@@ -699,10 +729,12 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
     under that label fall back to ``'eval'``, so a tape written from a partially
     perturbed suite carries the perturbed sections and the original ones rather
     than only the first.
+
+    ``files`` restricts the tape to those files and sections (see :func:`encodeTapeSections`).
     """
     from .update_directory import update_mf1_directory
 
-    sections, report, mat = encodeTapeSections(suite, mat, report, label=label)
+    sections, report, mat = encodeTapeSections(suite, mat, report, label=label, files=files)
     if not sections:
         raise ValueError(
             "this reactionSuite produced no ENDF sections at all, so there is "
@@ -871,6 +903,33 @@ _PUBLICATION_STEPS = (("verify", .36), ("resample", .01), ("write", .38), ("relo
 PUBLICATION_VERIFY_SHARE = _PUBLICATION_STEPS[0][1]
 
 
+#: The sections NJOY RECONR writes to a PENDF: its own MF1/451, a default
+#: MF2/151 and MF3 (``reconr.f90``, ``recout``); the nu-bars, MF1/458 and the
+#: distributions stay on the evaluation, where BROADR, HEATR and ACER read them.
+PENDF_SECTIONS = ((1, 451), 2, 3)
+
+
+def pendfFromModel(suite):
+    """Prepare a suite read from GNDS (or built by hand) for a PENDF; in place.
+
+    Returns the sections the PENDF holds, :data:`PENDF_SECTIONS`, or ``None``
+    for a suite read from ENDF, which writes back what it read (its own MF2
+    included). A GNDS suite's resonances are replaced by the MF2 NJOY RECONR
+    writes, the scattering radius alone
+    (:func:`~kika.endf.model_adapter.pendf.pendfResonances`): the resonances
+    are in MF3 already, and their ENDF bookkeeping is not in GNDS. The rest is
+    RECONR's choice too: MF1/451 and MF3, nothing the evaluation states for
+    BROADR, HEATR or ACER to read from it.
+    """
+    from ..model_adapter.derive import needsDerivation
+    from ..model_adapter.pendf import pendfResonances
+
+    if not needsDerivation(suite):
+        return None
+    suite.resonances = pendfResonances(suite)
+    return PENDF_SECTIONS
+
+
 def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progress=None, workers=None):
     """Write, reload and verify before replacing the requested destination.
 
@@ -878,7 +937,9 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progr
     KIKA's identification label by default. Conversion losses and numerical
     failures abort publication and leave an existing destination intact.
     Only the model's represented ENDF sections can be preserved; inspect the
-    source conversion report before preparing a reconstruction.
+    source conversion report before preparing a reconstruction. A suite read
+    from GNDS is written as RECONR writes a PENDF: MF1/451, MF2 with the
+    scattering radius alone, and MF3 (:func:`pendfFromModel`).
     ``progress(fraction)`` receives a plain float in (0, 1] as the steps
     (verify, resample, write, reload, verify the reload) advance.
     """
@@ -905,9 +966,10 @@ def writeReconstructedEndfTape(suite, result, path, mat=None, tapeId=None, progr
     provisional = Path(name)
     try:
         serialized = _resample_reconstructed_endf(suite, result.label)
+        files = pendfFromModel(serialized)
         advance("resample")
         report = writeEndfTape(serialized, provisional, mat=mat,
-            tapeId=DEFAULT_TAPE_ID if tapeId is None else tapeId, label=result.label)
+            tapeId=DEFAULT_TAPE_ID if tapeId is None else tapeId, label=result.label, files=files)
         advance("write")
         if not report.isClean:
             raise ValueError(f'reconstructed ENDF conversion is incomplete: {vars(report)}')
@@ -955,7 +1017,8 @@ def writeHeatedEndfTape(suite, result, path, mat=None, tapeId=None):
     try:
         serialized = _resample_reconstructed_endf(suite, result.label)
         report = writeEndfTape(serialized, provisional, mat=mat,
-                              tapeId=tapeId or DEFAULT_TAPE_ID, label=result.label)
+                              tapeId=tapeId or DEFAULT_TAPE_ID, label=result.label,
+                              files=pendfFromModel(serialized))
         if not report.isClean:
             raise ValueError('heated ENDF conversion loses represented data: '+report.summary())
         trimDescription(provisional)

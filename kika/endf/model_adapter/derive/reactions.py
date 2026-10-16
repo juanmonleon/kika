@@ -254,10 +254,16 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
     header = {"qi": qi} if qi != q else {}
     # G4c: a reaction whose distributions only MF6 states carries the MF6
     # block on its own provenance, as one read from ENDF does.
+    from . import sectionSelected
     from .energy_angle import goesToMF6, mf6Fields
 
+    # A tape that holds only some sections (a PENDF) has no MF6 or MF12-15 to
+    # derive, and their approximations would be reported for nothing.
+    def wants(mf):
+        return context.files is None or sectionSelected(mf, mt, context.files)
+
     inMF6 = False
-    if (not isinstance(reaction, CrossSectionSum) or reaction.outputChannel is not None) \
+    if wants(6) and (not isinstance(reaction, CrossSectionSum) or reaction.outputChannel is not None) \
             and getattr(reaction, "outputChannel", None) is not None \
             and goesToMF6(reaction, context):
         fields = mf6Fields(reaction, context, report)
@@ -265,7 +271,7 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
             header["mf6"] = fields
             inMF6 = True
     # E5e: its photons' MF12-15, from the model (a level's cascade from PoPs).
-    if not isinstance(reaction, CrossSectionSum):
+    if not isinstance(reaction, CrossSectionSum) and any(wants(mf) for mf in (12, 13, 14, 15)):
         from .photons import photonFields
 
         orphan = any(reaction is o for o in context.suite.orphanProducts)
