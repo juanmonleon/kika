@@ -1116,6 +1116,13 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
     # ── 16-oct (noche): F20 — la evaluacion FINAL: manifiesto de Cierjacks corregido (cola 3,06-3,0635 MeV con su
     # 7,13 %), cadena de pasadas rehecha (_e5s), covarianza exacta en la malla de 5 keV (sin colapso, suelo 1e-6),
     # DCS >= 0. EXFOR corregida + modos del dato x1 (w18c_v6_e5s). Se lee contra E19U.
+    # ── 16-oct (noche): F21 — F20 con el margen LOCAL por bin de 5 keV (W16_UNI_MARGIN=1): ningun nodo sub-declara.
+    "predictive_bspline_final_lm_corr_x": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_final_lm_corr_x.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — evaluacion final con margen local por bin, EXFOR CORREGIDA con modos del dato (F21)",
+        "systematic_block_col": None,
+    },
     "predictive_bspline_final_2026_10_16_corr_x": {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_final_2026_10_16_corr_x.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
