@@ -507,8 +507,11 @@ def _decodeReichMoore(parameters, report: ConversionReport,
         # on a scale factor, which is one refactor away from being wrong.
         perL = radiusFromEndf(block.apl_or_qx) if block.apl_or_qx else None
         channels = [
+            # columnIndex is the channel's column of the GNDS width table, where
+            # column 0 is the energy (§19.3.5): one-based, as every distributed
+            # file numbers it and as the GNDS reader and writer take it.
             Channel(label=label, resonanceReaction=reactions[i].label, L=block.l,
-                    columnIndex=i, scatteringRadius=perL,
+                    columnIndex=i + 1, scatteringRadius=perL,
                     radiusUnit=MODEL_RADIUS_UNIT)
             for i, label in enumerate(channelLabels)
         ]
@@ -644,7 +647,8 @@ def _decodeRMatrixLimited(parameters, report: ConversionReport,
                 ),
                 L=channel.l,
                 channelSpin=channel.sch,
-                columnIndex=i,
+                # One-based: column 0 of the GNDS width table is the energy.
+                columnIndex=i + 1,
                 # APT is the true channel radius and APE the effective one; the
                 # file writes both and they differ. Stored raw, never collapsed
                 # to None on a zero — a channel radius of 0.0 is what some

@@ -137,7 +137,10 @@ def _continuum(reaction, mt: int, qi, context: DerivationContext, report):
     read off the lowest level whose decaying residual carries it. LR is the
     breakup the series' levels share, when they all share one. Evaluations do
     not always agree with themselves here — JEFF-4.0 Fe-56 gives MT649 a QM
-    400 eV from MT601's — so the report says where the number came from.
+    400 eV from MT601's — so the report says where the number came from: a
+    note when every level states the same QM (to the seven digits ENDF writes
+    each term with), which is then the channel's QM exactly; an approximation
+    when they differ, since taking the lowest level is then a choice.
     """
     levels = []
     for sibling in context.suite.reactions:
@@ -148,7 +151,7 @@ def _continuum(reaction, mt: int, qi, context: DerivationContext, report):
         sqi = _q(getattr(sibling.outputChannel.Q, "value", None))
         if residual is None or sqi is None:
             if int(smt) == min(_CONTINUUM_SERIES[mt]) and sqi is not None:
-                levels.append((int(smt), sqi, 0))
+                levels.append((int(smt), sqi, 0, abs(sqi)))
             continue
         decayQ = _q(getattr(residual.outputChannel.Q, "value", None))
         if decayQ is None:
@@ -157,7 +160,7 @@ def _continuum(reaction, mt: int, qi, context: DerivationContext, report):
             lr = _lr(residual, sibling.label, report)
         except ValueError:
             lr = None
-        levels.append((int(smt), sqi + decayQ, lr))
+        levels.append((int(smt), sqi + decayQ, lr, max(abs(sqi), abs(decayQ))))
     if not levels:
         report.approximated(
             f"MT{mt}: a continuum reaction with no discrete level of its series "
@@ -165,14 +168,23 @@ def _continuum(reaction, mt: int, qi, context: DerivationContext, report):
         )
         return qi, 0
     levels.sort()
-    source, qm, _ = levels[0]
-    breakups = {lr for _, _, lr in levels if lr}
+    source, qm, _, _ = levels[0]
+    breakups = {lr for _, _, lr, _ in levels if lr}
     lr = breakups.pop() if len(breakups) == 1 else 0
-    report.approximated(
-        f"MT{mt}: QM of the continuum taken from MT{source}, the lowest level of "
-        f"its series (ENDF's QM is the channel's ground-state Q)"
-        + (f"; LR={lr}, the breakup its levels share" if lr else "")
-    )
+    shared = f"; LR={lr}, the breakup its levels share" if lr else ""
+    # Each QM is a sum of terms ENDF writes to seven significant digits.
+    agree = all(abs(q - qm) <= 1e-6 * max(scale, levels[0][3], 1.0) for _, q, _, scale in levels)
+    if agree:
+        report.warn(
+            f"MT{mt}: QM of the continuum is the ground-state Q that every level of "
+            f"its series states (MT{source}-MT{levels[-1][0]}){shared}"
+        )
+    else:
+        report.approximated(
+            f"MT{mt}: QM of the continuum taken from MT{source}, the lowest level of "
+            f"its series, whose levels do not all state the same ground-state Q"
+            + shared
+        )
     return qm, lr
 
 

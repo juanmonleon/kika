@@ -409,7 +409,8 @@ def test_a_width_is_identified_by_its_channel_not_by_a_column_number(decoded):
     group = resonances.resolved[0].formalism.spinGroups[0]
     for row in group.widths:
         assert len(row) == len(group.channels)
-    assert [c.columnIndex for c in group.channels] == list(range(len(group.channels)))
+    # One-based, the GNDS table's column: column 0 is the energy.
+    assert [c.columnIndex for c in group.channels] == list(range(1, len(group.channels) + 1))
 
 
 def _breitWignerSection(lrf: int, qx: float = 0.0, lrx: int = 0):
