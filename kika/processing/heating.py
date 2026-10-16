@@ -936,6 +936,9 @@ def _emissionChunk(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed
         return _emissionChunkNumpy(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed,partition,hist,lab)
     noRecoil=partition[0]==0
     el,fl=(1.,1.) if noRecoil else (float(c) for c in _lindhardConstants(*partition))
+    # The kernel reads C-contiguous doubles; a model table's xs can be a strided
+    # view (every ENDF-decoded MF6 recoil spectrum: Fe-56 B-VIII.1 refused).
+    cuts,g,w,mu,wm,x,p=(np.ascontiguousarray(a,dtype=float) for a in (cuts,g,w,mu,wm,x,p))
     return _heating_native.emission_chunk(cuts,g,w,mu,wm,x,p,float(low),float(width),float(oldwidth),
         float(incident),float(denominator),float(denominator*ed),el,fl,float(ed),bool(hist),bool(lab),noRecoil)
 

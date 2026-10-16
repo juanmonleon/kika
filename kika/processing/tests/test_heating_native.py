@@ -79,3 +79,17 @@ def test_native_two_body_chunk_equals_numpy_bit_for_bit(hist):
         u, w = np.polynomial.legendre.leggauss(int(rng.choice([8, 16, 32, 64])))
         args = (cuts, u, w, x, p, offset, slope, (Z, A, Z, A), ed, hist)
         assert H._twoBodyChunk(*args) == H._twoBodyChunkNumpy(*args)
+
+
+def test_a_strided_table_reaches_the_kernel():
+    """A model table's xs can be a strided view (an ENDF-decoded MF6 recoil
+    spectrum); the kernel needs C-contiguous doubles. Fe-56 B-VIII.1's heating
+    by the ENDF route stopped on it ("ndarray is not C-contiguous", 2026-10-16)."""
+    args = list(_case(np.random.default_rng(7), False, False, 26))
+    x = args[5]
+    wide = np.empty(2 * x.size)
+    wide[::2] = x
+    args[5] = wide[::2]
+    assert not args[5].flags.c_contiguous
+    assert H._emissionChunk(*args) == H._emissionChunkNumpy(*args)
+
