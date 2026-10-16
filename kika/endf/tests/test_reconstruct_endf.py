@@ -259,6 +259,7 @@ def test_broken_verification_processes_fall_back_to_threads(monkeypatch):
     import kika.processing.resonances.parallel as parallel
     rec, serial = _serially_attached()
     monkeypatch.setattr(parallel, "PARALLEL_WORK_THRESHOLD", 0)
+    monkeypatch.setattr(parallel, "PROCESS_WORK_THRESHOLD", 0)
 
     def broken(items, regions, context, workers, store, progress=None):
         store(items[0], {})  # a partial result the fallback must discard
