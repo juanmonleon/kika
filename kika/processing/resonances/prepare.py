@@ -42,7 +42,7 @@ class PreparedResonances:
     regions: tuple[PreparedRegion, ...]
     preparation_notes: tuple[str, ...] = ()
 
-    def evaluate(self, energies, *, block_size=2048, diagnostics=None):
+    def evaluate(self, energies, *, block_size=8192, diagnostics=None):
         energy = np.asarray(energies, dtype=float)
         if energy.ndim > 1 or np.any(~np.isfinite(energy)) or np.any(energy <= 0):
             raise ValueError("energies must be a scalar or 1D finite positive eV array")
@@ -321,7 +321,7 @@ def group_breaks(group):
     return breaks
 
 
-def energy_block_size(region, maximum=2048, work_bytes=64*1024**2,*,absorption_rtol=0.,native=False):
+def energy_block_size(region, maximum=8192, work_bytes=64*1024**2,*,absorption_rtol=0.,native=False):
     """Size exact RM/RML energy batches from a conservative workspace estimate.
 
     Covers level/channel temporaries per energy, not retained tables, parser

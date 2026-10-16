@@ -75,7 +75,10 @@ class ReconstructionOptions:
     atol: float = 1e-8
     max_points: int = 200000
     max_iterations: int = 40
-    block_size: int = 2048
+    # 8192: the fixed Python cost of a batch (a millisecond per spin group)
+    # amortised over four times the energies; peak memory unchanged, since
+    # max_work_bytes bounds the temporaries (W-183 5.5 -> 4.9 s).
+    block_size: int = 8192
     max_work_bytes: int = 64*1024**2
 
     def __post_init__(self):
