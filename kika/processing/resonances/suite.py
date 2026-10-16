@@ -863,7 +863,7 @@ class SuiteReconstructionResult:
                 work+=len(e)*levels
         if not items or work<parallel.PARALLEL_WORK_THRESHOLD:return False
         freeze=lambda a:np.frombuffer(np.ascontiguousarray(a,dtype=float).tobytes(),dtype=float)
-        context=self._prepared.context;work_bytes=self.options.max_work_bytes
+        context=self._prepared.context;work_bytes=min(self.options.max_work_bytes,parallel.WORKER_WORK_BYTES)
         def compute(item):
             i,_,_,e=item
             return _exact_physical_block(self._segments[i].region,context,e,work_bytes)
@@ -877,7 +877,8 @@ class SuiteReconstructionResult:
         regions={i:self._segments[i].region for i in {item[0] for item in items}}
         try:
             try:
-                on_processes=parallel.compute_exact_blocks(items,regions,context,workers,store,progress)
+                on_processes=(parallel.prefer_processes(regions,work) and
+                              parallel.compute_exact_blocks(items,regions,context,workers,store,progress))
             except parallel.ProcessesUnavailable as error:
                 forget();on_processes=False
                 import warnings

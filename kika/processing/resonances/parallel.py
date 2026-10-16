@@ -5,13 +5,15 @@ and four probes per panel; for a heavy actinide that is millions of energies
 times thousands of levels. The energies are independent, so blocks of them
 run in parallel and give bit-identical numbers.
 
-Processes where this process may start them (:func:`compute_exact_blocks`),
-threads otherwise (:func:`compute_blocks`). The compiled RM sums release the
-GIL and threads scale on them (U-238: x3.4 with four); the NumPy reference
-solver of RML does not: with large blocks the threads wait on memory, with
-small ones on the GIL, and Pu-239 stops near two threads (398 s on one,
-~218 s on six to sixteen). Processes with small, cache-sized blocks have
-neither limit (Pu-239, eight processes: 125 s, the same maxima bit for bit).
+Threads (:func:`compute_blocks`) or processes (:func:`compute_exact_blocks`),
+both on cache-sized sub-blocks (:data:`WORKER_WORK_BYTES`). The compiled
+Reich-Moore physics releases the GIL and threads share it well; the NumPy
+reference solver of the other R-matrix forms does not: with large blocks the
+threads wait on memory, with small ones on the GIL, and Pu-239 stops near two
+threads (398 s on one, ~218 s on six to sixteen). Processes have neither
+limit but cost a start-up, so they are used for that solver and for large
+work (:func:`prefer_processes`), where this process may start them (Pu-239,
+eight processes: 125 s, the same maxima bit for bit).
 
 A spawned process re-imports the caller's ``__main__``, which re-runs any
 script without an ``if __name__ == "__main__"`` guard. ``reconstruct_suite``
@@ -36,11 +38,30 @@ import sys
 #: U-238 (ENDF/B-VIII.1) is ~2.7e10; a full Fe-56 ~1e8.
 PARALLEL_WORK_THRESHOLD = 1e9
 
-#: Work bytes of each exact-physics sub-block on a worker process: small
-#: enough to stay in cache (Pu-239 on eight processes: 125 s at 4 MiB,
-#: 244 s at the reconstruction's 64 MiB). Sub-blocking changes the cost,
-#: not the numbers.
-PROCESS_WORK_BYTES = 4 * 1024 ** 2
+#: Work bytes of each exact-physics sub-block on a worker: small enough to
+#: stay in cache. Pu-239 on eight processes: 125 s at 4 MiB, 244 s at the
+#: reconstruction's 64 MiB; U-235 on four threads 21 s against 25 s.
+#: Sub-blocking changes the cost, not the numbers.
+WORKER_WORK_BYTES = 4 * 1024 ** 2
+
+#: Energy x level products above which processes repay their start-up even
+#: on the compiled Reich-Moore physics, which threads share well. Measured on
+#: eight workers: U-235 (8.1e9) 28 s on processes, 21 s on threads; U-238
+#: (2.8e10) 52 s on processes, 68 s on threads.
+PROCESS_WORK_THRESHOLD = 2e10
+
+
+def prefer_processes(regions, work):
+    """Whether the exact physics of ``regions`` should run on processes.
+
+    Only Reich-Moore has compiled exact physics, which releases the GIL; the
+    other R-matrix forms use the NumPy reference solver, which threads do not
+    share (Pu-239: no gain past two threads). Large work repays processes in
+    any case (:data:`PROCESS_WORK_THRESHOLD`).
+    """
+    if work >= PROCESS_WORK_THRESHOLD:
+        return True
+    return any(str(getattr(r, "approximation", "")).startswith("RMatrix") for r in regions.values())
 
 
 class ProcessesUnavailable(RuntimeError):
@@ -100,7 +121,7 @@ def compute_exact_blocks(items, regions, context, workers, store, progress=None)
     done = 0
     try:
         pool = ProcessPoolExecutor(max_workers=min(workers, len(items)), initializer=_start_exact_worker,
-                                   initargs=(regions, context, PROCESS_WORK_BYTES))
+                                   initargs=(regions, context, WORKER_WORK_BYTES))
     except (OSError, NotImplementedError) as error:
         raise ProcessesUnavailable(str(error)) from error
     try:

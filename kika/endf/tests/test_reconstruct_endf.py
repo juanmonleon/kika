@@ -225,6 +225,8 @@ def _verified_on(monkeypatch, rec, *, processes):
     import kika.processing.workers as w
     with monkeypatch.context() as m:
         m.setattr(parallel, "PARALLEL_WORK_THRESHOLD", 0)
+        # The micro tape is Reich-Moore and small: threads unless forced.
+        m.setattr(parallel, "PROCESS_WORK_THRESHOLD", 0 if processes else float("inf"))
         m.setattr(w, "can_spawn", lambda: processes)
         ran = []
         for name in ("compute_blocks", "compute_exact_blocks"):
@@ -232,10 +234,17 @@ def _verified_on(monkeypatch, rec, *, processes):
             m.setattr(parallel, name, lambda *a, _o=original, _n=name, **k: ran.append(_n) or _o(*a, **k))
         rec.result._verification_cache.clear()
         maxima = rec.result.verify_suite(rec.suite, workers=2)
-    # compute_exact_blocks declines (False) without processes; compute_blocks
-    # runs only then.
-    assert ("compute_blocks" in ran) is not processes and "compute_exact_blocks" in ran, ran
+    assert ran == (["compute_exact_blocks"] if processes else ["compute_blocks"]), ran
     return maxima, rec.result.last_verification[1]
+
+
+def test_processes_go_to_the_reference_solver_and_to_large_work():
+    from types import SimpleNamespace
+    import kika.processing.resonances.parallel as parallel
+    rm, rml = SimpleNamespace(approximation="ReichMoore"), SimpleNamespace(approximation="RMatrixNeutral")
+    assert not parallel.prefer_processes({0: rm}, 8.1e9)  # U-235
+    assert parallel.prefer_processes({0: rm}, 2.8e10)  # U-238
+    assert parallel.prefer_processes({0: rm, 1: rml}, 6.2e9)  # Pu-239
 
 
 def test_parallel_verification_is_the_serial_one(monkeypatch):
