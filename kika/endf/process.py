@@ -158,9 +158,12 @@ class ProcessingPlan:
     eV, or ``"njoy"`` for BROADR's default (the top of the resolved range).
     ``thinning`` is the relative tolerance each temperature's union grid is
     thinned to (BROADR's ``errthn``, 1e-3); ``None`` keeps every point.
-    ``urr_bins``/``urr_ladders`` are PURR's bands and ladders. ``workers``
-    bounds the processes of the broadening and the URR tables (default: up to
-    eight).
+    ``urr_bins``/``urr_ladders`` are PURR's bands and ladders. ``workers`` is
+    the count of every stage: the reconstruction's threads, the processes of
+    the broadening and the URR tables, the heating's threads. When not given,
+    ``KIKA_WORKERS``, else each stage's default (the reconstruction up to four
+    threads, the rest up to eight); see :mod:`kika.processing.workers`. No
+    result depends on it.
     """
     temperatures: tuple = DEFAULT_TEMPERATURES
     broaden: bool = True
@@ -1316,19 +1319,18 @@ def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | 
     the stages, the progress calls and the failure contract).
 
     Called from a daemonic process, which may not start children, the
-    broadening and the URR tables run in this process (``workers=1``); the
-    results do not depend on the number of workers."""
+    broadening and the URR tables run in this process; the threaded stages keep
+    ``plan.workers``. The results do not depend on the number of workers."""
     from .reconstruction import reconstruct_endf
     plan, report = _start(plan, progress)
-    rec = reconstruct_endf(path, options=plan.reconstruction, progress=report)
+    rec = reconstruct_endf(path, options=plan.reconstruction, progress=report, workers=plan.workers)
     return _finish(rec, plan, report, "endf")
 
 
 def _start(plan, progress):
-    """The plan (one worker in a daemonic process, which may not start
-    children) and the progress callback."""
+    """The plan and the progress callback. A daemonic process may not start
+    children: its process pools stay in-process (:func:`kika.processing.workers.can_spawn`)."""
     import multiprocessing
-    from dataclasses import replace
     if getattr(multiprocessing.current_process(), "_inheriting", False):
         # A spawned worker is importing the caller's main script, and the
         # script starts a run at module level. Running it here would redo the
@@ -1339,8 +1341,6 @@ def _start(plan, progress):
             "main script: start the run under `if __name__ == \"__main__\":`, or use "
             "ProcessingPlan(workers=1)")
     plan = ProcessingPlan() if plan is None else plan
-    if multiprocessing.current_process().daemon and plan.workers != 1:
-        plan = replace(plan, workers=1)
     report = (lambda stage, fraction: progress(stage, fraction)) if progress else (lambda *_: None)
     return plan, report
 
@@ -1442,7 +1442,7 @@ def process_gnds(path, plan: ProcessingPlan | None = None, progress: Progress | 
     options = ReconstructionOptions(max_points=DEFAULT_MAX_POINTS) if plan.reconstruction is None \
         else plan.reconstruction
     try:
-        result = reconstruct_suite(suite, context, options=options,
+        result = reconstruct_suite(suite, context, options=options, workers=plan.workers,
                                    progress=lambda f: report("reconstruct", f))
     except ValueError as error:
         if "NeutronContext" not in str(error):
@@ -1453,7 +1453,8 @@ def process_gnds(path, plan: ProcessingPlan | None = None, progress: Progress | 
             "reconstruction needs", category="context-missing") from error
     timings["reconstruct"] = time.perf_counter() - t0
     rec = EndfReconstruction(path, suite, result, context, source, timings, ENGINE_VERSION,
-                             evaluation=evaluation, native_kernel=native_available())
+                             evaluation=evaluation, native_kernel=native_available(),
+                             workers=plan.workers)
     details = dict(source_format="gnds")
     if set_aside:
         details["source_reconstruction"] = f"{', '.join(set_aside)} in the file, ignored"

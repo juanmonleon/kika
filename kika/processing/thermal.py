@@ -391,7 +391,8 @@ def _tables(inputs: _Inputs, temperature, nmix, options, report, elastic):
     # ACE stores them in MeV to 12 significant figures (1PE20.11) and OpenMC
     # multiplies by 1e6 on read: 4.9 eV reads back 4.8999999999999995.
     stored = [float(f"{e * 1e-6:.11e}") * 1e6 for e in energies]
-    workers = options.workers if options.workers is not None else min(8, os.cpu_count() or 1)
+    from kika.processing.workers import pool_default, resolve
+    workers = resolve(options.workers, pool_default())
     if workers > 1 and len(energies) > 1:
         from concurrent.futures import ThreadPoolExecutor
 

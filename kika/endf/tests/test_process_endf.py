@@ -175,22 +175,22 @@ def test_urr_tables_on_a_whole_tape(cf252_b81_tape):
 
 
 def test_a_daemonic_caller_runs_in_process(monkeypatch):
+    # A daemonic process may not start children: the pools stay in-process,
+    # while the plan keeps the count the caller asked for (threads may use it).
+    import concurrent.futures
     import multiprocessing
-    from kika.hdf5 import processing as hp
 
     class Daemon:
         daemon = True
-    seen = {}
-    real = hp._broadenAll
 
-    def spy(suite, temperatures, thnmax, options, workers, progress=None):
-        seen["workers"] = workers
-        return real(suite, temperatures, thnmax, options, workers, progress=progress)
+    class NoPool:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("a daemonic process started a process pool")
     monkeypatch.setattr(multiprocessing, "current_process", lambda: Daemon())
-    monkeypatch.setattr(hp, "_broadenAll", spy)
-    result = process_endf(TAPE, ProcessingPlan(temperatures=(600.0,)))
-    assert seen["workers"] == 1 and result.stage("broaden").status == "done"
-    assert result.plan.workers == 1
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", NoPool)
+    result = process_endf(TAPE, ProcessingPlan(temperatures=(600.0,), workers=3))
+    assert result.stage("broaden").status == "done"
+    assert result.plan.workers == 3 and result.reconstruction.workers == 3
 
 
 def test_urr_tables_without_broadening(cf252_b81_tape):

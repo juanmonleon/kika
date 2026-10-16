@@ -221,7 +221,7 @@ def _mf3HoldsTheResonances(suite) -> bool:
     return lrp is not None and int(lrp) != 1
 
 
-def _reconstructed(suite, context, report):
+def _reconstructed(suite, context, report, workers=None):
     """The suite with a ``recon`` style, reconstructed if it has none.
 
     A suite whose cross sections are already pointwise everywhere -- read from
@@ -258,8 +258,9 @@ def _reconstructed(suite, context, report):
     # The point budget kika.endf.reconstruct_endf reconstructs with (U-238
     # needs more than the engine's default).
     result = reconstruct_suite(working, context,
-                               options=ReconstructionOptions(max_points=DEFAULT_MAX_POINTS))
-    attach_reconstruction(working, result)
+                               options=ReconstructionOptions(max_points=DEFAULT_MAX_POINTS),
+                               workers=workers)
+    attach_reconstruction(working, result, workers=workers)
     working.orphanProducts = orphans
     report.warn("the 0 K cross sections were reconstructed by kika from the resonance "
                 "parameters (kika.processing.resonances)")
@@ -543,6 +544,13 @@ def _broadenTask(args):
     return _broadenReduced(reduced, lo, hi, temperature, options, domain)
 
 
+def _poolWorkers(workers, jobs):
+    """Processes for ``jobs`` independent jobs (:mod:`kika.processing.workers`):
+    one where this process may not start any."""
+    from kika.processing.workers import can_spawn, pool_default, resolve
+    return max(1, min(jobs, resolve(workers, pool_default()))) if can_spawn() else 1
+
+
 def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
     """``{T: (heated forms, ceiling)}``; every temperature and energy chunk in parallel processes.
 
@@ -567,7 +575,7 @@ def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
                 if window == (lo, top[id(keys)]):
                     window = None
             jobs.append((_reducedSuite(suite, entries, keys, lo, window), lo, hi, t, options, domain))
-    workers = min(len(jobs), os.cpu_count() or 1, 8) if workers is None else max(1, int(workers))
+    workers = _poolWorkers(workers, len(jobs))
     n = len(tasks)
     done = [0] * len(temperatures)
 
@@ -681,7 +689,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     if label is not None and label != EVAL_LABEL:
         suite = _fromLabel(suite, label)
         report.warn(f"processed the {label!r} forms where they exist, the evaluation elsewhere")
-    work = _reconstructed(suite, context, report)
+    work = _reconstructed(suite, context, report, workers)
     _linearised(work, report)
     photonFlags = _photonFlags(work)
 
@@ -1041,7 +1049,7 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
     options = options or ProbabilityTableOptions()
     tables = probabilityTables(region, _urrContext(suite, context), energies, temperatures,
                                background=background, competing=competing, options=options,
-                               workers=workers or min(len(energies), os.cpu_count() or 1, 8), transportXS=transportXS)
+                               workers=_poolWorkers(workers, len(energies)), transportXS=transportXS)
     if report is not None:
         report.warn(f"URR probability tables computed by kika (PURR's method: {options.ladders} "
                     f"ladders of {options.samples} samples, {options.bins} bands, on "

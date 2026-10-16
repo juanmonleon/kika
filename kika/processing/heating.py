@@ -1521,11 +1521,12 @@ def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, workers: Optional[in
               **options) -> HeatingResult:
     """Run :func:`_heatingOf` with its damage quadratures on ``workers`` threads.
 
-    ``workers`` is the processing's own count, ``min(cpus, 8)`` when not given,
-    as for the Doppler broadening; 1 keeps every energy on this thread. The
-    result does not depend on it.
+    ``workers`` is the processing's own count; when not given, ``KIKA_WORKERS``
+    or ``min(cpus, 8)``, as for the Doppler broadening (:mod:`kika.processing.workers`);
+    1 keeps every energy on this thread. The result does not depend on it.
     """
-    count = min(os.cpu_count() or 1, 8) if workers is None else max(1, int(workers))
+    from kika.processing.workers import pool_default, resolve
+    count = resolve(workers, pool_default())
     token = _energyThreads.set(count)
     try:
         return _heatingOf(suite, grid, sigma, **options)

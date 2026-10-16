@@ -101,6 +101,8 @@ class EndfReconstruction:
     native_kernel: bool | None = None
     #: Set by :meth:`write_pendf`: path, MAT and the reload verification.
     publication: dict | None = None
+    #: The ``workers`` the reconstruction was asked for; :meth:`write_pendf`'s default.
+    workers: int | None = None
     _attached: bool = field(default=False, repr=False)
 
     @property
@@ -147,12 +149,13 @@ class EndfReconstruction:
         (``verification-failed`` or ``publication-failed``) otherwise.
 
         ``workers``: threads for the verification physics of heavy materials.
-        Default ``min(4, cores // 2)`` at below-normal priority; 1 keeps it in
-        this thread. The result is the same either way."""
+        Default the reconstruction's own (:func:`reconstruct_endf`); 1 keeps
+        it in this thread. The result is the same either way."""
         from kika.endf.writers.assemble import PUBLICATION_VERIFY_SHARE, writeReconstructedEndfTape
         from kika.processing.resonances import (ReconstructionConvergenceError,
                                                 UnsupportedResonanceError, attach_reconstruction)
         t0 = time.perf_counter()
+        workers = self.workers if workers is None else workers
         if progress:
             progress("write", None)
         try:
@@ -173,13 +176,18 @@ class EndfReconstruction:
         return report
 
 
-def reconstruct_endf(path, *, options=None,
-                     progress: Progress | None = None) -> EndfReconstruction:
+def reconstruct_endf(path, *, options=None, progress: Progress | None = None,
+                     workers: int | None = None) -> EndfReconstruction:
     """Read an ENDF-6 neutron tape and reconstruct every cross section at 0 K.
 
     ``progress(stage, fraction)`` is called with stages ``read``, ``decode``
     and ``reconstruct``; ``fraction`` is ``None`` at the start of a stage and a
     number in (0, 1] as it advances. Raises on any rejection (see module doc).
+
+    ``workers`` threads share the level sums and the verification physics,
+    here and in :meth:`EndfReconstruction.write_pendf`; when not given,
+    ``KIKA_WORKERS`` or ``min(4, cores // 2)`` at below-normal priority
+    (:mod:`kika.processing.workers`). The tables do not depend on it.
     """
     from kika.endf.read_endf import read_endf
     from kika.endf.model_adapter import decodeReactionSuite
@@ -208,8 +216,9 @@ def reconstruct_endf(path, *, options=None,
 
     t0 = time.perf_counter()
     report("reconstruct", None)
-    result = reconstruct_suite(suite, context, options=options,
+    result = reconstruct_suite(suite, context, options=options, workers=workers,
                                progress=lambda f: report("reconstruct", f))
     timings["reconstruct"] = time.perf_counter() - t0
     return EndfReconstruction(path, suite, result, context, source, timings, ENGINE_VERSION,
-                              evaluation=evaluation, native_kernel=native_available())
+                              evaluation=evaluation, native_kernel=native_available(),
+                              workers=workers)

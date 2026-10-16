@@ -509,7 +509,8 @@ def _run(task, region, context, energies, temperatures, background, options, wor
         jobs.append((prepared, float(context.atomic_weight_ratio), float(E), ie, temperatures,
                      bkg, competitionBkg, options,
                      [None if transportXS is None else transportXS[t][ie] for t in temperatures], multiplySmooth))
-    if workers > 1 and len(jobs) > 1:
+    from kika.processing.workers import can_spawn
+    if workers > 1 and len(jobs) > 1 and can_spawn():
         from concurrent.futures import ProcessPoolExecutor
 
         with ProcessPoolExecutor(max_workers=min(workers, len(jobs))) as pool:

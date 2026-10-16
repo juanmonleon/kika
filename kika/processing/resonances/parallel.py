@@ -15,7 +15,8 @@ cancels.
 
 The machine is the user's, so the defaults are conservative:
 
-* at most ``min(4, cores // 2)`` threads (``default_workers``);
+* at most ``min(4, cores // 2)`` threads (``default_workers``), unless the
+  caller or ``KIKA_WORKERS`` asks for another count (:mod:`kika.processing.workers`);
 * each thread at below-normal priority where the system allows it;
 * only when the work is large enough to be worth it.
 """
@@ -30,8 +31,9 @@ PARALLEL_WORK_THRESHOLD = 1e9
 
 
 def default_workers() -> int:
-    """Half the cores, at most four, at least one."""
-    return max(1, min(4, (os.cpu_count() or 1) // 2))
+    """``KIKA_WORKERS`` when set, else half the cores, at most four, at least one."""
+    from kika.processing.workers import resolve, verification_default
+    return resolve(None, verification_default())
 
 
 def _lower_thread_priority():
