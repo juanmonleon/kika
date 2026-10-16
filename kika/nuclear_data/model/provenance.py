@@ -76,6 +76,14 @@ class EndfProvenance(Provenance):
     is derivable from the masses in ``PoPs``. So ``QI`` becomes the model's Q
     and ``QM`` stays here, to be written back byte-identically rather than
     recomputed.
+
+    **Except where there is no level.** A continuum (MT91, 649, ...) and
+    MT103-107 leave the residual in no particular state, so their channel's Q
+    is the ground state's, QM, and their QI is threshold bookkeeping that
+    FUDGE keeps as a ``QI=`` flag (:data:`~kika.nuclear_data.model.endf_conversion.QI_FLAGGED_MTS`,
+    every one of NNDC's 558 files). The ENDF decoder writes them the same way,
+    and keeps the tape's QI in ``headerFields["qi"]`` for the encoder (D44).
+    Read QI through :func:`~kika.nuclear_data.model.endf_conversion.reactionQI`.
     """
 
     sourceFormat: str = "endf"

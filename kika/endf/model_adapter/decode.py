@@ -373,6 +373,41 @@ def _targetSpinFromMF2(suite, provenance) -> None:
     target.spin = PhysicalQuantity(value=spins.pop(), unit="hbar")
 
 
+def _groundStateQOfContinua(suite) -> None:
+    """A continuum's (and MT103-107's) Q as GNDS states it: QM, with its QI flagged.
+
+    The residual of these reactions is in no particular level, so the channel's
+    Q is the ground state's, MF3's QM; their QI is the threshold's bookkeeping,
+    which FUDGE keeps as a ``QI=`` flag on every one of them in all 558 of
+    NNDC's ENDF/B-VIII.1 files (:data:`QI_FLAGGED_MTS`). Read as kika used to,
+    the model of a tape and the model of NNDC's GNDS of it disagreed on what
+    the same Q meant (Fe-56 MT91: QI -2.334 MeV against 0), and kika's own GNDS
+    lost the evaluator's QM where it differs from its levels' (MT649, 400 eV:
+    D44). The tape's QI stays in ``headerFields["qi"]``, where the MF3 encoder
+    reads it, so the round trip does not move.
+    """
+    from kika.nuclear_data.model.endf_conversion import (QI_FLAGGED_MTS, EndfConversionFlags,
+                                                         reactionHref)
+
+    flags = EndfConversionFlags.of(suite)
+    for reaction in suite.reactions:
+        provenance = reaction.provenance
+        q = getattr(getattr(reaction, "outputChannel", None), "Q", None)
+        if (reaction.ENDF_MT is None or int(reaction.ENDF_MT) not in QI_FLAGGED_MTS
+                or getattr(provenance, "sourceFormat", None) != "endf"
+                or getattr(provenance, "qm", None) is None or getattr(q, "value", None) is None):
+            continue
+        qi = float(q.value)
+        if flags is None:
+            flags = EndfConversionFlags()
+            suite.applicationData.entries.append(flags)
+        if qi != float(provenance.qm):
+            # Where the derivation states it too: only a QI the Q is not.
+            provenance.headerFields = dict(provenance.headerFields or {}, qi=qi)
+        flags.conversions.append((reactionHref(reaction) + "/outputChannel/Q", f"QI={qi!r}"))
+        q.value = float(provenance.qm)
+
+
 def _pairParticlesFromMF2(suite) -> None:
     """What an RML pair (LRF=7) states of its two particles, where a GNDS
     file keeps it: the ejectile on the ``resonanceReaction``, each particle's
@@ -659,6 +694,9 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # reference to its reaction's (roadmap E6).
     from .productions import attachProductions
     report = attachProductions(suite, endf, report)
+
+    # Last of the reaction passes, which all read the outputChannel Q as QI.
+    _groundStateQOfContinua(suite)
 
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)

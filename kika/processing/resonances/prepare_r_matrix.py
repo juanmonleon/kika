@@ -447,8 +447,10 @@ def normalize_suite_pairs(suite, context):
                 if rr.Q is None:
                     q = reaction.outputChannel.Q
                     if q is None or not q.isKnown:raise ValueError('native RML reaction Q is absent')
+                    from kika.nuclear_data.model.endf_conversion import reactionQI
                     from kika.nuclear_data.model.quantities import PhysicalQuantity
-                    rr.Q = PhysicalQuantity(q.value,q.unit).convertedTo('eV').value
+                    # The channel's QI, also where the model Q is a lumped MT's QM (D44).
+                    rr.Q = PhysicalQuantity(reactionQI(reaction,suite),q.unit).convertedTo('eV').value
             shift = 'zero' if f.boundaryCondition in (None,'EliminateShiftFunction') else 'calculate'
             ejectile = suite.projectile if rr.reactionMT==2 else ejectile
             rr.kinematics = ChannelKinematics(particle(ejectile),particle(residual),'calculate',shift)

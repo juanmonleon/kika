@@ -24,7 +24,7 @@ from typing import Optional
 
 from . import DERIVED, DerivationContext, register
 
-__all__ = ["LR_PRODUCTS", "reactionHref", "deriveReaction"]
+__all__ = ["LR_PRODUCTS", "reactionHref", "deriveReaction", "reactionQValues"]
 
 #: ENDF-102's LR flags, by the light particles the residual breaks up into
 #: (``endf_endl.endfLRtoC_ProductLists``). 39 and 40 are not allowed in ENDF-6.
@@ -37,15 +37,8 @@ LR_PRODUCTS = {
 _LIGHT = {"n", "H1", "H2", "H3", "He3", "He4"}
 
 
-def reactionHref(reaction) -> str:
-    """The xPath FUDGE's ``ENDFconversionFlags`` use to name *reaction*."""
-    from kika.nuclear_data.model import CrossSectionSum
-
-    if isinstance(reaction, CrossSectionSum):
-        container = "sums/crossSectionSums/crossSectionSum"
-    else:
-        container = "reactions/reaction"
-    return f"/reactionSuite/{container}[@label='{reaction.label}']"
+# The model's: kika.hdf5 and kika.processing name a reaction's flags too.
+from kika.nuclear_data.model.endf_conversion import reactionHref  # noqa: E402
 
 
 def _count(product) -> int:
@@ -215,14 +208,11 @@ def _q(value) -> Optional[float]:
     return None if value is None else float(value)
 
 
-def deriveReaction(reaction, path, context: DerivationContext, report):
-    """MF3's provenance for one reaction or cross-section sum."""
-    from kika.nuclear_data.model import CrossSectionSum, EVAL_LABEL, EndfProvenance
+def _qValues(reaction, mt: int, context: DerivationContext, report):
+    """``(Q, QI, QM, LR)`` of MF3's header, from the model alone."""
+    from kika.nuclear_data.model import CrossSectionSum
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
 
-    if reaction.ENDF_MT is None:
-        return None
-    mt = int(reaction.ENDF_MT)
     q = _q(getattr(reaction.outputChannel.Q, "value", None))
 
     flags = EndfConversionFlags.of(context.suite)
@@ -258,6 +248,55 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
     released = _nonNeutrinoEnergy(reaction)
     if released is not None:
         qi = qm = released
+    return q, qi, qm, lr
+
+
+def reactionQValues(suite, report=None) -> dict:
+    """``{MT: (QI, QM)}`` of every reaction and sum of *suite*: MF3's two Q values.
+
+    The heating's energy balance needs QM, its kinematics and a Monte Carlo
+    library's ``Q_value`` QI, and a suite read from GNDS has no MF3 header to
+    read them from. A reaction that carries ENDF provenance (read from a tape)
+    gives the tape's numbers, as HEATR reads them; any other gives what
+    :func:`deriveReaction` would write, which is the header of the tape kika
+    writes from that suite. So the heating of a GNDS evaluation is HEATR's on
+    kika's ENDF of it, and the two routes agree when the GNDS is lossless.
+    """
+    from kika.nuclear_data.model import ConversionReport
+    from kika.nuclear_data.model.endf_conversion import reactionQI
+    from . import hasEndfProvenance
+
+    report = report if report is not None else ConversionReport()
+    context = DerivationContext(suite=suite)
+    if hasEndfProvenance(suite):
+        context.za, context.awr = suite.provenance.za, suite.provenance.awr
+    table = {}
+    for container in (suite.reactions, suite.sums, getattr(suite, "fissionComponents", ())):
+        for reaction in container:
+            if reaction.ENDF_MT is None or int(reaction.ENDF_MT) in table:
+                continue
+            mt = int(reaction.ENDF_MT)
+            provenance = reaction.provenance
+            if hasEndfProvenance(reaction) and getattr(provenance, "qm", None) is not None:
+                qi = (getattr(provenance, "headerFields", None) or {}).get("qi", reactionQI(reaction, suite))
+                table[mt] = (None if qi is None else float(qi), float(provenance.qm))
+                continue
+            try:
+                _, qi, qm, _ = _qValues(reaction, mt, context, report)
+            except ValueError:
+                continue
+            table[mt] = (qi, qm)
+    return table
+
+
+def deriveReaction(reaction, path, context: DerivationContext, report):
+    """MF3's provenance for one reaction or cross-section sum."""
+    from kika.nuclear_data.model import CrossSectionSum, EVAL_LABEL, EndfProvenance
+
+    if reaction.ENDF_MT is None:
+        return None
+    mt = int(reaction.ENDF_MT)
+    q, qi, qm, lr = _qValues(reaction, mt, context, report)
 
     # An orphan product (MF13 photons on a sum or on an MT with no MF3, N-14's
     # MT28/32) has no MF3 section of its own: no LR and no MF3 regions, as one

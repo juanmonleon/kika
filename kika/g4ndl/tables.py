@@ -523,8 +523,8 @@ def _reactionRows(suite) -> List[Dict[str, Any]]:
     for mt, (e, s) in crossSections(suite).items():
         q = None
         if mt not in sums:
-            channel = suite.reactions.byENDF_MT(mt).outputChannel
-            q = getattr(getattr(channel, "Q", None), "value", None)
+            from kika.nuclear_data.model.endf_conversion import reactionQI
+            q = reactionQI(suite.reactions.byENDF_MT(mt), suite)
         positive = np.nonzero(s > 0)[0]
         row = dict(mt=mt, q_value=None if q is None else float(q),
                    threshold=float(e[positive[0]]) if positive.size else None,

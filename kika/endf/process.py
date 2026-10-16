@@ -1167,6 +1167,7 @@ def _heating(run, plan, report):
     from kika.processing.heating import heatingOf
     from kika.processing.resonances import UnsupportedResonanceError
     from kika.processing.resonances.suite import _entries
+    from kika.endf.model_adapter.derive.reactions import reactionQValues
     t0 = time.perf_counter()
     report("heating", None)
     temps = [0.0] + list(run.temperatures)
@@ -1181,8 +1182,10 @@ def _heating(run, plan, report):
         target = work.PoPs[work.target]
         Z, A = int(target.Z), int(target.A)
         awr = float(out.provenance.attributes["atomic_weight_ratio"])
-        qm = {r.ENDF_MT: float(r.provenance.qm) for r in _entries(work).values()
-              if r.ENDF_MT is not None and getattr(r.provenance, "qm", None) is not None}
+        # QM from the model when there is no MF3 header (a GNDS evaluation):
+        # with Q in its place the balance of every level was off by its
+        # excitation (Fe-56 by GNDS: KERMA x21 above MT51's threshold, D45).
+        qm = {mt: q for mt, (_, q) in reactionQValues(work).items() if q is not None}
         tables, notes = {}, []
         for i, T in enumerate(temps):
             grid, sigma = _heating_grid(run, T)
@@ -1243,6 +1246,7 @@ def _broaden(rec, plan, report):
     the suite with its 0 K forms and ``raw`` the broadened forms
     (``{T: (forms, ceiling)}``), both ``None`` on a rejection."""
     from kika.hdf5 import processing as hp
+    from kika.nuclear_data.model.endf_conversion import reactionQI
     temps = plan.temperatures
     t0 = time.perf_counter()
     for T in temps:
@@ -1254,7 +1258,7 @@ def _broaden(rec, plan, report):
             raise RuntimeError(f"the reconstruction label {label!r} is not the broadening's {hp.RECON_LABEL!r}")
         if plan.thnmax == "njoy":
             thresholds = [hp._reactionRange(r)[0] for r in list(work.reactions) + list(work.fissionComponents)
-                          if (r.outputChannel.Q.value or 0.0) < 0]
+                          if (reactionQI(r, work) or 0.0) < 0]
             thnmax = float(hp.njoyThnmax(work, min(thresholds) if thresholds else None))
         else:
             thnmax = float(plan.thnmax)

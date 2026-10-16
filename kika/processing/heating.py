@@ -1237,7 +1237,8 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes):
     source = evaluation.findReactionByENDF_MT(reaction.ENDF_MT) if evaluation is not None else None
     if source is None:
         return None
-    Q = float(source.outputChannel.Q.value or 0.0)
+    from kika.nuclear_data.model.endf_conversion import reactionQI
+    Q = float(reactionQI(source, evaluation) or 0.0)
     deposit = np.zeros(len(grid))
     damage = np.zeros(len(grid))
     found = False
@@ -1376,9 +1377,22 @@ def _mf12Capture(evaluation, mt):
 
 
 def _mf12CaptureDomain(photons, grid):
-    """gheat closes its correction on the last MF12 subsection's domain."""
-    if not photons:return np.zeros(len(grid),dtype=bool)
-    multiplicity=getattr(photons[-1][0],"multiplicity",None)
+    """Where any MF12 subsection emits: gheat's correction applies there, and
+    the neutron balance stays where none does (D47).
+
+    The last subsection alone is not the support: ENDF/B-VIII.1 Cl-35 MT102
+    states 383, the last from 100 keV, and taking it left the whole capture
+    Q deposited below (thermal KERMA x1163 against NJOY's 17035.10c).
+    """
+    domain=np.zeros(len(grid),dtype=bool)
+    for photon in photons:
+        domain|=_photonSupport(photon,grid)
+    return domain
+
+
+def _photonSupport(photon, grid):
+    """One MF12 subsection's domain, as gheat reads it."""
+    multiplicity=getattr(photon[0],"multiplicity",None)
     forms=getattr(multiplicity,"forms",None) or {}
     function=forms.get(MONTE_CARLO) or getattr(multiplicity,"form",None)
     lo=getattr(function,"domainMin",None);hi=getattr(function,"domainMax",None)
@@ -1392,7 +1406,7 @@ def _mf12CaptureDomain(photons, grid):
         # A repeated terminal x states a zero tail while gheat's support
         # still includes that x. The recoil uses the actual (right) yield.
         return (grid>=lo)&(grid<=hi)
-    return ((grid>=lo) if lo is not None else np.ones(len(grid),dtype=bool)) & ((grid<=hi) if hi is not None else True) & (_yield(photons[-1][0],grid)>0)
+    return ((grid>=lo) if lo is not None else np.ones(len(grid),dtype=bool)) & ((grid<=hi) if hi is not None else True) & (_yield(photon[0],grid)>0)
 
 
 def _generatedMF6Recoil(evaluation, mt, form, grid, k):
@@ -1452,7 +1466,7 @@ def _kinematicUpperOf(mt, grid, A, Q, Qbal, emitted, neutronYield, carried,
                 available=Q+A*grid/(A+1)
                 fallback=grid/(A+1)+available*available/(2*NEUTRON_REST_ENERGY*(A+1))
                 return np.where(captureDomain,carried,fallback+carried-deposit)
-            return grid / (A + 1) + carried
+            return carried
         available = Q + A * grid / (A + 1)
         return grid / (A + 1) + available * available / (2 * NEUTRON_REST_ENERGY * (A + 1))
     if 51 <= mt <= 90:
@@ -1680,6 +1694,14 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             if captureCompound:
                 carried = carried + np.where(captureDomain,grid/(A+1),deposit)
                 notes.append("MT102: MF12 gheat branch; compound recoil and fixed primary-line photon kicks")
+            else:
+                # The compound nucleus keeps the neutron's momentum whatever file
+                # states the photons (D49). HEATR's tabsq6 drops it for MF6, so a
+                # GNDS evaluation, which never says MF12, lost it too (Cl-35 at
+                # 22.4 keV: KERMA 16 % below NJOY's, which went through gheat).
+                carried = carried + grid / (A + 1.0)
+                notes.append("MT102: compound recoil E/(A+1) added to the MF6 photon kicks; "
+                             "HEATR's tabsq6 leaves it out")
             twoBodyCapture = _twoBodyCapture(photons, evaluation, grid, A)
             if twoBodyCapture is not None:
                 carried = twoBodyCapture

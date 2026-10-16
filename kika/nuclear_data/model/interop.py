@@ -130,7 +130,8 @@ def flatCrossSection(reaction, temperature: float = 0.0) -> Dict[str, Any]:
         "interpolation_regions": list(provenance.interpolationRegions or regions),
     }
     if reaction.outputChannel.Q.isKnown:
-        metadata["qi"] = reaction.outputChannel.Q.value
+        # A continuum's model Q is its QM; its QI is the tape's, kept for MF3 (D44).
+        metadata["qi"] = (provenance.headerFields or {}).get("qi", reaction.outputChannel.Q.value)
 
     return {
         "energies": np.asarray(energies, dtype=float),

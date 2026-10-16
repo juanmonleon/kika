@@ -1082,7 +1082,7 @@ def _target_awr(suite,context):
     return None if context is None else context.atomic_weight_ratio
 
 
-def _raise_thresholds(curves,entries,graph,awr):
+def _raise_thresholds(curves,entries,graph,awr,suite=None):
     """RECONR's threshold rule (``reconr.f90`` lunion), applied to exclusive leaves.
 
     A reaction with ``thrx = -Q (A+1)/A > 0`` whose table starts below
@@ -1103,10 +1103,14 @@ def _raise_thresholds(curves,entries,graph,awr):
         if key in graph:continue
         channel=entries[key].outputChannel
         q=None if channel is None else channel.Q
-        if q is None or q.value is None or q.value>=0:continue
+        if q is None or q.value is None:continue
+        # The kinematic threshold is the QI's: a continuum's model Q is its QM (D44).
+        from kika.nuclear_data.model.endf_conversion import reactionQI
+        qi=reactionQI(entries[key],suite)
+        if qi is None or qi>=0:continue
         if q.unit!='eV':raise UnsupportedResonanceError(f'reaction Q of {key.label} is not in eV')
         if awr is None:raise ValueError('a threshold reaction needs the target mass (PoPs or NeutronContext)')
-        threshold=figures(-q.value*(awr+1)/awr,+1)
+        threshold=figures(-qi*(awr+1)/awr,+1)
         first=cs[0];x=list(first.x)
         if x[0]>=threshold:continue
         old=x[0];x[0]=threshold;i=0
@@ -1217,7 +1221,7 @@ def _reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',op
             raise UnsupportedResonanceError('resonance backgrounds require modeled resonance regions',category='missing-resonance-regions')
     graph,order=_graph(entries,source_style)
     curves=_curves(forms)
-    raised=_raise_thresholds(curves,entries,graph,_target_awr(suite,context))
+    raised=_raise_thresholds(curves,entries,graph,_target_awr(suite,context),suite)
     mt_keys={}
     for key,r in entries.items():
         if r.ENDF_MT is not None:

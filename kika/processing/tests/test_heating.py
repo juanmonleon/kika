@@ -338,7 +338,7 @@ def test_analytic_energy_cm_isotropic_shift_and_unsupported_second_moment():
         H._meanEnergyOf(form, E, k, 2)
 
 
-def test_mf6_capture_443_uses_independent_photon_kicks_without_compound_recoil():
+def test_mf6_capture_443_uses_independent_photon_kicks_and_the_compound_recoil():
     from types import SimpleNamespace as NS
     A = 55.; E = np.array([1., 1e5, 1e7]); binding = 2e6
     form = m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=0, energy=binding, atomicWeightRatio=A), productFrame=m.Frame.lab)
@@ -348,8 +348,10 @@ def test_mf6_capture_443_uses_independent_photon_kicks_without_compound_recoil()
     reaction = NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=5e6),products=[product]))
     result = H.heatingOf(NS(reactions=[reaction]),E,{102:np.ones(len(E))},awr=A,Z=26,
                         evaluation=NS(findReactionByENDF_MT=lambda mt:source),kinematic=True)
-    expected = np.full(len(E),2*binding**2/(2*(A+1)*H.NEUTRON_REST_ENERGY))
+    # D49: the compound recoil E/(A+1) is no longer dropped for MF6.
+    expected = E/(A+1)+2*binding**2/(2*(A+1)*H.NEUTRON_REST_ENERGY)
     np.testing.assert_allclose(result.kinematicUpper[102],expected,rtol=1e-14)
+    np.testing.assert_allclose(result.kerma,expected,rtol=1e-14)
 
 
 @pytest.mark.parametrize("A,ed", [(1.,25.), (55.,40.), (238.,25.)])
@@ -504,3 +506,35 @@ def test_heavy_tabulation_is_done_once_per_form_and_forgotten_with_it(monkeypatc
     del form
     gc.collect()
     assert key not in H._HEAVY_TABULATIONS
+
+
+def test_mf12_capture_support_is_every_subsection_not_the_last():
+    """D47: Cl-35 MT102's last MF12 subsection starts at 100 keV; below it the
+    others still emit, so the capture Q is not deposited there."""
+    from types import SimpleNamespace as NS
+    A,binding=34.,8e6;E=np.array([.0253,1e3,5e5])
+    def photon(lo,hi):
+        function=m.XYs1d(xs=[lo,hi],ys=[1.,1.])
+        form=m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=0,energy=binding,atomicWeightRatio=A),productFrame=m.Frame.lab)
+        return NS(pid='photon',multiplicity=NS(forms={'eval':function},form=function),distribution=NS(forms={'MonteCarlo':form}))
+    rx=NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=binding),products=[photon(1e-5,1e5),photon(1e5,2e7)]))
+    source=NS(provenance=NS(headerFields={'mf12':{'lo':1}}),outputChannel=NS(products=[]))
+    result=H.heatingOf(NS(reactions=[rx]),E,{102:np.ones(len(E))},awr=A,Z=17,evaluation=NS(findReactionByENDF_MT=lambda mt:source))
+    np.testing.assert_array_equal(H._mf12CaptureDomain([(p,None) for p in rx.outputChannel.products],E),[True,True,True])
+    expected=E/(A+1)+binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1))
+    np.testing.assert_allclose(result.kerma,expected,rtol=1e-12)
+
+
+def test_an_mf6_capture_keeps_the_compound_recoil():
+    """D49: the compound nucleus carries E/(A+1) whatever file states the
+    photons; HEATR's tabsq6 drops it for MF6 and keeps it for MF12."""
+    from types import SimpleNamespace as NS
+    A,binding=34.,8e6;E=np.array([.0253,2.24e4,1e6])
+    form=m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=0,energy=binding,atomicWeightRatio=A),productFrame=m.Frame.lab)
+    function=m.XYs1d(xs=[1e-5,2e7],ys=[1.,1.])
+    p=NS(pid='photon',multiplicity=NS(forms={'eval':function},form=function),distribution=NS(forms={'MonteCarlo':form}))
+    rx=NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=binding),products=[p]))
+    source=NS(provenance=NS(headerFields={'mf6':True}),outputChannel=NS(products=[]))
+    result=H.heatingOf(NS(reactions=[rx]),E,{102:np.ones(len(E))},awr=A,Z=17,evaluation=NS(findReactionByENDF_MT=lambda mt:source))
+    expected=E/(A+1)+binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1))
+    np.testing.assert_allclose(result.kerma,expected,rtol=1e-12)

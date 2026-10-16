@@ -68,6 +68,7 @@ import numpy as np
 
 from kika.algebra.laws import LINLIN
 from kika.nuclear_data.model import AceProvenance, ConversionReport
+from kika.nuclear_data.model.endf_conversion import reactionQI
 
 from .secondaries import DELAYED_NUBAR_LABEL, FISSION_MTS, TOTAL_NUBAR_LABEL
 
@@ -683,8 +684,8 @@ class _Encoder:
                 if first.size and first[0] > 1:
                     start, values = start + first[0] - 1, values[first[0] - 1:]
             crossSection.reaction[mt] = NS(energy_idx=start, _xs_entries=values)
-            qv = node.outputChannel.Q.value if node.outputChannel is not None and \
-                node.outputChannel.Q is not None else None
+            # LQR is ACER's QI: the flagged QI of a continuum, not its GNDS Q.
+            qv = reactionQI(node, s) if node.outputChannel is not None else None
             if qv is None:
                 qv = 0.0
                 if container is not s.sums:
@@ -1081,7 +1082,7 @@ class _Encoder:
                 sigma[self.suffix(grid, xs, f"MT{mt}"):] = xs.ys
                 contribution = np.interp(grid, x, y, left=0.0, right=0.0) * sigma
                 production += contribution
-                Q = node.outputChannel.Q.value if node.outputChannel.Q is not None else 0.0
+                Q = reactionQI(node, self.suite) or 0.0
                 try:
                     mean = _meanEnergyOf(form, grid, _Kinematics(A=awr, Q=float(Q), awp=awp))
                 except (TypeError, ValueError, NotImplementedError) as error:

@@ -136,8 +136,10 @@ class EndfReconstruction:
             x, y = np.delete(x, joint), np.delete(y, joint)
             reaction = entries[key]
             provenance = getattr(reaction, "provenance", None)
-            q = getattr(getattr(reaction, "outputChannel", None), "Q", None)
-            qi = (getattr(provenance, "headerFields", None) or {}).get("qi", getattr(q, "value", None))
+            from kika.nuclear_data.model.endf_conversion import reactionQI
+            qi = (getattr(provenance, "headerFields", None) or {}).get("qi")
+            if qi is None:
+                qi = reactionQI(reaction, self.suite)
             lr = getattr(provenance, "lr", None)
             out[mt] = ReconstructedTable(x, y, getattr(provenance, "qm", None), qi,
                                          None if lr is None else int(lr))

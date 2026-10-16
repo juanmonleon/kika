@@ -41,6 +41,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from kika.nuclear_data.model.endf_conversion import reactionQI
+
 from .exceptions import HDF5FormatError
 from .names import (EVAL_LABEL, FISSION_MTS, K_BOLTZMANN, MONTE_CARLO_LABEL, RECON_LABEL,
                     heatedLabel, temperatureName, urrLabel)
@@ -711,7 +713,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
     if thnmax == "njoy":
         # The thresholds MF3 states (the 0 K forms may start lower, with zeros).
         thresholds = [_reactionRange(leaf.reaction)[0] for leaf in leaves
-                      if (leaf.reaction.outputChannel.Q.value or 0.0) < 0]
+                      if (reactionQI(leaf.reaction, work) or 0.0) < 0]
         thnmax = njoyThnmax(work, min(thresholds) if thresholds else None)
     if broadened is None:
         broadened = _broadenAll(work, temperatures, float(thnmax), doppler, workers)
@@ -793,7 +795,9 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         return cs
 
     def channelOf(reaction):
-        channel = m.OutputChannel(Q=m.Q(value=reaction.outputChannel.Q.value, unit="eV"),
+        # A processed library's Q is the QI (OpenMC's Q_value, ACER's LQR), also
+        # where the evaluation's GNDS Q is a continuum's QM (D44).
+        channel = m.OutputChannel(Q=m.Q(value=reactionQI(reaction, work), unit="eV"),
                                   genre=reaction.outputChannel.genre)
         return channel
 
@@ -827,7 +831,7 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
             cs[RECON_LABEL] = m.XYs1d(xs=x, ys=y, axes=m.crossSectionAxes(), label=RECON_LABEL)
         channel = channelOf(reaction)
         _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs, flags=photonFlags,
-                  particles=particles)
+                  particles=particles, qi=channel.Q.value)
         redundant = 1 if (mt == 18 and chances) else 0
         rid = m.ReactionId(label=reaction.label, ENDF_MT=mt, fissionGenre=reaction.id.fissionGenre)
         new = (m.CrossSectionSum if redundant else m.Reaction)(
@@ -1241,7 +1245,7 @@ def _keptOrphan(orphan, own, mt, heated, grids, awr, zaTarget, options, report, 
 
 
 def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, flags=None,
-              particles=("n", "photon")):
+              particles=("n", "photon"), qi=None):
     """The ``particles`` products with Monte Carlo distributions, onto ``channel``."""
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
@@ -1256,10 +1260,18 @@ def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, 
         if product.pid not in particles or product.label in hidden:
             continue
         product = merged.get(product.label, product)
-        new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, flags=flags)
+        new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, flags=flags,
+                                qi=qi)
         if new is not None:
             channel.products.products.append(new)
             explicitPhotons |= product.pid == "photon"
+    if not explicitPhotons and "photon" in particles:
+        for product in _decayPhotons(reaction):
+            new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, flags=flags,
+                                    qi=qi)
+            if new is not None:
+                channel.products.products.append(new)
+                explicitPhotons = True
     if not explicitPhotons:
         for photon in _cascadePhotons(pops, reaction, awr):
             channel.products.products.append(photon)
@@ -1308,6 +1320,26 @@ def _explicitPhotonAngle(form, reaction):
         if isinstance(f, m.Uncorrelated) and isinstance(f.angular, m.Isotropic2d):
             lo, hi = _reactionRange(reaction)
             f.angular = _isotropicPhotonAngle(lo, hi)
+
+
+def _decayPhotons(reaction):
+    """The photons a residual's own decay states, at any depth (D46).
+
+    FUDGE writes a level's de-excitation under the residual it leaves, not
+    beside it: NNDC's Cl-35 MT51 is ``n + (Cl35_e1 -> Cl35 + photon)``, the
+    photon in ``Cl35_e1``'s outputChannel. The tape states the same photon on
+    the reaction (MF12/MF14 MT51), and ACER writes it on the reaction.
+    """
+    out = []
+    pending = [p for p in reaction.outputChannel.products if p.pid not in ("n", "photon")]
+    while pending:
+        channel = getattr(pending.pop(0), "outputChannel", None)
+        for product in (channel.products if channel is not None else ()):
+            if product.pid == "photon":
+                out.append(product)
+            else:
+                pending.append(product)
+    return out
 
 
 def _cascadePhotons(pops, reaction, awr):
@@ -1363,7 +1395,7 @@ def _cascadePhotons(pops, reaction, awr):
 
 
 def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, delayed=False,
-                      flags=None):
+                      flags=None, qi=None):
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
@@ -1373,7 +1405,8 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
     if record is not None:
         discrete = (record.get("law_fields") or {}).get("nd")
     context = TabulationContext(awr=awr, zaTarget=zaTarget, mt=mt,
-                                Q=reaction.outputChannel.Q.value, pid=product.pid,
+                                Q=qi if qi is not None else reaction.outputChannel.Q.value,
+                                pid=product.pid,
                                 zaEmitted=_zaOf(product.pid) if product.pid != "photon" else 0,
                                 discrete=discrete, options=options, report=report)
     from kika.processing.tabulation.distribution import LIGHT_PARTICLE_AWP, isLevelMT
@@ -1651,12 +1684,9 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
     from kika.processing.heating import fissionPhotonEnergy, fissionPhotonKerma, heatingOf
     from .fission_energy import evaluate
 
-    qm = {}
-    for container in (work.reactions, work.sums, work.fissionComponents):
-        for reaction in container:
-            value = getattr(reaction.provenance, "qm", None)
-            if reaction.ENDF_MT is not None and value is not None:
-                qm[reaction.ENDF_MT] = float(value)
+    # QM from the model when there is no MF3 header (a GNDS evaluation, D45).
+    from kika.endf.model_adapter.derive.reactions import reactionQValues
+    qm = {mt: q for mt, (_, q) in reactionQValues(work).items() if q is not None}
 
     release = None
     fission = (next((r for r in out.reactions if r.ENDF_MT in FISSION_MTS), None)

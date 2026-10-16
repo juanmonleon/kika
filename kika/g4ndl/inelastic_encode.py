@@ -291,7 +291,7 @@ def _encodeFile(channel, reactions, suite, header, targetMass, report) -> Inelas
     qvalue = qdummy = None
     if not composite:
         reaction = reactions[0]
-        qvalue = _q(reaction)
+        qvalue = _q(reaction, suite)
         qdummy = int(first.Qdummy) if first is not None and first.Qdummy is not None else 0
     return InelasticFSRecord(None, _headerOf(header, first), channel, composite,
                              tuple(sections), qvalue, qdummy)
@@ -339,10 +339,20 @@ def _entry(entries, dt) -> dict:
     return {}
 
 
-def _q(reaction) -> float:
-    """The channel's Q in eV, 0 when the model states none."""
-    q = reaction.outputChannel.Q if reaction.outputChannel is not None else None
-    return float(q.value) if q is not None and q.value is not None else 0.0
+def _q(reaction, suite=None) -> float:
+    """The channel's QI in eV, 0 when the model states none.
+
+    G4NDL states QI. A continuum's model Q is its QM (D44): its QI is the
+    tape's, kept in the ENDF provenance, or the suite's ``QI=`` flag.
+    """
+    from kika.nuclear_data.model.endf_conversion import reactionQI
+
+    provenance = _endfProvenance(reaction)
+    kept = (getattr(provenance, "headerFields", None) or {}).get("qi") if provenance is not None else None
+    if kept is not None:
+        return float(kept)
+    value = reactionQI(reaction, suite) if reaction.outputChannel is not None else None
+    return 0.0 if value is None else float(value)
 
 
 def _endfProvenance(reaction):
@@ -400,7 +410,7 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
         endf = _endfProvenance(reaction)
         if not e3 and endf is not None and endf.lr is not None:
             e3["LR"] = endf.lr
-        q = _q(reaction)
+        q = _q(reaction, suite)
         out[DT_CROSS_SECTION] = CrossSectionBody(
             q if composite else None,
             (int(e3["LR"]) if e3.get("LR") is not None else 0) if composite else None,
@@ -979,7 +989,7 @@ def rebuildInelasticSums(suite, create: bool = False, only=None) -> List[str]:
             made = CrossSectionSum(id=ReactionId(label=f"MT{lumped}", ENDF_MT=lumped),
                                    crossSection=CrossSection(), summands=Summands([]))
             # Its Q is the channel's threshold: the largest Q of its partials.
-            made.outputChannel.Q = Q(value=max(_q(r) for r in suite.reactions
+            made.outputChannel.Q = Q(value=max(_q(r, suite) for r in suite.reactions
                                                if r.id.ENDF_MT in partials), unit="eV")
             suite.sums.append(made)
         if INELASTIC_SUM_LABEL in missing:
