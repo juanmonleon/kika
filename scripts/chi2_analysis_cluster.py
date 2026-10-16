@@ -1110,6 +1110,21 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
     # (W16_COMMON_MESH=1, W16_BAND_MARGIN=per_group; run_p44_umesh.sh): banda de la cinta / exacta x1,15 de
     # mediana contra x1,92, 0,0 % de celdas sub-declaradas contra 2,6 %. EXFOR corregida con la duda de las
     # correcciones como modos del dato (KIKA_DATA_MODES). Se lee contra D16X.
+    # ── 16-oct: E19H / E19U — las dos candidatas FINALES con la DCS central >= 0 (positividad como
+    # restriccion del ajuste penalizado, w16_write_tape.positivity_constrained): E19H = mallas por orden
+    # (la de hoy), E19U = mallas alineadas + margen por grupo. EXFOR corregida + modos del dato x1.
+    "predictive_bspline_v6_y5s_hinv_pos_corr_x": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_hinv_pos_corr_x.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — candidata final, mallas por orden, DCS >= 0, EXFOR CORREGIDA con modos del dato (E19H)",
+        "systematic_block_col": None,
+    },
+    "predictive_bspline_v6_y5s_umesh_pos_corr_x": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_umesh_pos_corr_x.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — candidata final, mallas alineadas + margen por grupo, DCS >= 0, EXFOR CORREGIDA con modos del dato (E19U)",
+        "systematic_block_col": None,
+    },
     "predictive_bspline_v6_y5s_perorder_hinv_umesh_bmg_corr_x": {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_umesh_bmg_corr_x.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
