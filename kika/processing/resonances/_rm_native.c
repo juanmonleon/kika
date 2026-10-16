@@ -61,6 +61,53 @@ static void release(Py_buffer *b) {
     for (int i=0;i<7;i++) if (b[i].obj != NULL) PyBuffer_Release(&b[i]);
 }
 
+/* Rows of the level sums on native threads. The caller holds no GIL; each
+ * range writes its own rows, so the result is that of one sweep. Threads run
+ * below normal priority (as the verification threads in parallel.py): the
+ * machine is the user's. A thread that cannot be created runs its rows here. */
+typedef void (*rm_range_fn)(void *,Py_ssize_t,Py_ssize_t);
+typedef struct {rm_range_fn fn;void *context;Py_ssize_t lo,hi;} rm_part;
+#define RM_MAX_THREADS 16
+#ifdef _WIN32
+#include <windows.h>
+static DWORD WINAPI rm_part_run(LPVOID p) {rm_part *q=(rm_part *)p;q->fn(q->context,q->lo,q->hi);return 0;}
+#else
+#include <pthread.h>
+static void *rm_part_run(void *p) {rm_part *q=(rm_part *)p;q->fn(q->context,q->lo,q->hi);return NULL;}
+#endif
+static void rm_parallel(Py_ssize_t ne,int threads,rm_range_fn fn,void *context) {
+    if (threads>RM_MAX_THREADS) threads=RM_MAX_THREADS;
+    if (threads<2 || ne<2*RM_BLOCK) {fn(context,0,ne);return;}
+    Py_ssize_t chunk=((ne+threads-1)/threads+RM_BLOCK-1)/RM_BLOCK*RM_BLOCK;
+    rm_part parts[RM_MAX_THREADS];int started[RM_MAX_THREADS]={0};int m=0;
+#ifdef _WIN32
+    HANDLE handles[RM_MAX_THREADS];
+#else
+    pthread_t handles[RM_MAX_THREADS];
+#endif
+    for (Py_ssize_t lo=chunk;lo<ne && m<RM_MAX_THREADS;lo+=chunk,m++) {
+        parts[m].fn=fn;parts[m].context=context;parts[m].lo=lo;parts[m].hi=lo+chunk<ne?lo+chunk:ne;
+#ifdef _WIN32
+        handles[m]=CreateThread(NULL,0,rm_part_run,&parts[m],CREATE_SUSPENDED,NULL);
+        if (handles[m]!=NULL) {
+            SetThreadPriority(handles[m],THREAD_PRIORITY_BELOW_NORMAL);
+            ResumeThread(handles[m]);started[m]=1;
+        }
+#else
+        started[m]=pthread_create(&handles[m],NULL,rm_part_run,&parts[m])==0;
+#endif
+    }
+    fn(context,0,chunk<ne?chunk:ne);
+    for (int i=0;i<m;i++) {
+        if (!started[i]) {fn(context,parts[i].lo,parts[i].hi);continue;}
+#ifdef _WIN32
+        WaitForSingleObject(handles[i],INFINITE);CloseHandle(handles[i]);
+#else
+        pthread_join(handles[i],NULL);
+#endif
+    }
+}
+
 #define RM_TARGET
 #define RM_MATRICES matrix_sum
 #define RM_ABSORPTION absorption_sum
@@ -130,7 +177,8 @@ static int envelope_bounded(Py_ssize_t ne,Py_ssize_t n,Py_ssize_t c,
 
 static PyObject *matrices(PyObject *self,PyObject *args) {
     Py_ssize_t ne,n,c;PyObject *o[7];Py_buffer b[7]={0};
-    if (!PyArg_ParseTuple(args,"nnnOOOOOOO",&ne,&n,&c,&o[0],&o[1],&o[2],&o[3],&o[4],&o[5],&o[6])) return NULL;
+    int threads=1;
+    if (!PyArg_ParseTuple(args,"nnnOOOOOOO|i",&ne,&n,&c,&o[0],&o[1],&o[2],&o[3],&o[4],&o[5],&o[6],&threads)) return NULL;
     if (!dimensions(ne,n,c)) return NULL;
     Py_ssize_t sizes[7]={ne,n,n,n*c,ne*c,2*ne*c*c,ne};
     for (int i=0;i<7;i++) if (!buffer(o[i],&b[i],sizes[i],i==6?"B":"d",i>=5)) {release(b);return NULL;}
@@ -140,13 +188,13 @@ static PyObject *matrices(PyObject *self,PyObject *args) {
     int certified=envelope_bounded(ne,n,c,b[2].buf,b[3].buf,b[4].buf);
 #ifdef RM_HAS_AVX2
     if (use_avx2) {
-        if (certified) matrix_sum_certified_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
-        else matrix_sum_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
+        if (certified) matrix_sum_certified_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags,threads);
+        else matrix_sum_avx2(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags,threads);
     }
     else
 #endif
-    if (certified) matrix_sum_certified(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
-    else matrix_sum(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags);
+    if (certified) matrix_sum_certified(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags,threads);
+    else matrix_sum(ne,n,c,b[0].buf,b[1].buf,b[2].buf,b[3].buf,b[4].buf,b[5].buf,b[6].buf,flags,threads);
     Py_END_ALLOW_THREADS
     PyMem_Free(flags);release(b);Py_RETURN_NONE;
 }

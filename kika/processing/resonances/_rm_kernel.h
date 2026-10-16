@@ -14,19 +14,24 @@
 #define RM_CAT2(x,y) x##y
 #define RM_CAT(x,y) RM_CAT2(x,y)
 #define RM_BODY RM_CAT(RM_MATRICES,_body)
+#define RM_RANGE RM_CAT(RM_MATRICES,_range)
+#define RM_JOB RM_CAT(RM_MATRICES,_job)
+/* acc + x*y, rounded twice (no contraction). FMA was measured slower here
+ * (1.62 against 1.22 ns per level-energy pair at three channels: the
+ * accumulation chains are latency-bound) and gave up bit-identity. */
+#define RM_MADD(x,y,acc) ((acc)+(x)*(y))
 
-RM_INLINE RM_TARGET void RM_BODY(Py_ssize_t ne, Py_ssize_t n, const Py_ssize_t c,
+/* Rows [lo, hi) of the level sums. Rows are independent, so any split of
+ * them over threads gives the numbers of one sweep. */
+RM_INLINE RM_TARGET void RM_BODY(Py_ssize_t lo, Py_ssize_t hi, Py_ssize_t n, const Py_ssize_t c,
         const double *e,const double *er,const double *gamma,const double *a,
         const double *f,double *out,unsigned char *unsafe,const unsigned char *flags) {
-    for (Py_ssize_t start=0;start<ne;start+=RM_BLOCK) {
-        Py_ssize_t count=ne-start<RM_BLOCK?ne-start:RM_BLOCK;
+    for (Py_ssize_t start=lo;start<hi;start+=RM_BLOCK) {
+        Py_ssize_t count=hi-start<RM_BLOCK?hi-start:RM_BLOCK;
         /* A short last block repeats its first energy in the spare lanes,
          * which are computed and never stored. */
         Py_ssize_t row[RM_BLOCK];double ev[RM_BLOCK];unsigned char bad[RM_BLOCK];
         for (int b=0;b<RM_BLOCK;b++) {row[b]=start+(b<count?b:0);ev[b]=e[row[b]];bad[b]=0;}
-        /* The same operations on four lanes at once: IEEE division and
-         * products round per lane exactly as the scalar ones, and nothing is
-         * contracted (-ffp-contract=off). */
         rm_v4d vr[RM_MAX_CHANNELS*(RM_MAX_CHANNELS+1)/2],vi[RM_MAX_CHANNELS*(RM_MAX_CHANNELS+1)/2];
         rm_v4d ve={ev[0],ev[1],ev[2],ev[3]},zero={0.,0.,0.,0.},one={1.,1.,1.,1.};
         for (int p=0;p<c*(c+1)/2;p++) vr[p]=vi[p]=zero;
@@ -66,11 +71,13 @@ RM_INLINE RM_TARGET void RM_BODY(Py_ssize_t ne, Py_ssize_t n, const Py_ssize_t c
             for (Py_ssize_t j=0,p=0;j<c;j++) {
 #ifndef RM_SKIP_ENVELOPE
                 double square=a[k*c+j]*a[k*c+j];
-                venv[j]+=square*size;
+                rm_v4d sv={square,square,square,square};
+                venv[j]=RM_MADD(sv,size,venv[j]);
 #endif
                 for (Py_ssize_t l=j;l<c;l++,p++) {
                     double product=a[k*c+j]*a[k*c+l];
-                    vr[p]+=product*qr;vi[p]+=product*qi;
+                    rm_v4d pv={product,product,product,product};
+                    vr[p]=RM_MADD(pv,qr,vr[p]);vi[p]=RM_MADD(pv,qi,vi[p]);
                 }
             }
         }
@@ -93,10 +100,27 @@ RM_INLINE RM_TARGET void RM_BODY(Py_ssize_t ne, Py_ssize_t n, const Py_ssize_t c
     }
 }
 
-/* flags: n bytes of scratch from the caller, written here. */
+typedef struct {
+    Py_ssize_t n,c;const double *e,*er,*gamma,*a,*f;double *out;unsigned char *unsafe;const unsigned char *flags;
+} RM_JOB;
+
+static RM_TARGET void RM_RANGE(void *context,Py_ssize_t lo,Py_ssize_t hi) {
+    const RM_JOB *j=(const RM_JOB *)context;
+    switch (j->c) {
+    case 1: RM_BODY(lo,hi,j->n,1,j->e,j->er,j->gamma,j->a,j->f,j->out,j->unsafe,j->flags);break;
+    case 2: RM_BODY(lo,hi,j->n,2,j->e,j->er,j->gamma,j->a,j->f,j->out,j->unsafe,j->flags);break;
+    case 3: RM_BODY(lo,hi,j->n,3,j->e,j->er,j->gamma,j->a,j->f,j->out,j->unsafe,j->flags);break;
+    case 4: RM_BODY(lo,hi,j->n,4,j->e,j->er,j->gamma,j->a,j->f,j->out,j->unsafe,j->flags);break;
+    case 5: RM_BODY(lo,hi,j->n,5,j->e,j->er,j->gamma,j->a,j->f,j->out,j->unsafe,j->flags);break;
+    default: RM_BODY(lo,hi,j->n,6,j->e,j->er,j->gamma,j->a,j->f,j->out,j->unsafe,j->flags);break;
+    }
+}
+
+/* flags: n bytes of scratch from the caller, written here. threads: rows
+ * split among that many threads (rm_parallel), the same numbers. */
 static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
         const double *e,const double *er,const double *gamma,const double *a,
-        const double *f,double *out,unsigned char *unsafe,unsigned char *flags) {
+        const double *f,double *out,unsigned char *unsafe,unsigned char *flags,int threads) {
     double max_f2[RM_MAX_CHANNELS]={0};int normal_energies=1;
     for (Py_ssize_t i=0;i<ne;i++)
         if (!(isfinite(e[i]) && fabs(e[i])<=1e20)) normal_energies=0;
@@ -105,7 +129,8 @@ static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
         if (value>max_f2[j]) max_f2[j]=value;
     }
     /* Per level, once per call: bit 0 the direct path, bit 1 a pole
-     * candidate whose rows are tested against the level strength. */
+     * candidate whose rows are tested against the level strength. They
+     * depend on every row (max_f2), so they are made before any split. */
     for (Py_ssize_t k=0;k<n;k++) {
         double half=.5*gamma[k],upper=0.;
         for (Py_ssize_t j=0;j<c;j++) upper+=a[k*c+j]*a[k*c+j]*max_f2[j];
@@ -115,22 +140,18 @@ static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
                    half>=5e-101 && half<=5e19;
         flags[k]=(unsigned char)(direct|(candidate<<1));
     }
-    switch (c) {
-    case 1: RM_BODY(ne,n,1,e,er,gamma,a,f,out,unsafe,flags);break;
-    case 2: RM_BODY(ne,n,2,e,er,gamma,a,f,out,unsafe,flags);break;
-    case 3: RM_BODY(ne,n,3,e,er,gamma,a,f,out,unsafe,flags);break;
-    case 4: RM_BODY(ne,n,4,e,er,gamma,a,f,out,unsafe,flags);break;
-    case 5: RM_BODY(ne,n,5,e,er,gamma,a,f,out,unsafe,flags);break;
-    default: RM_BODY(ne,n,6,e,er,gamma,a,f,out,unsafe,flags);break;
-    }
+    RM_JOB job={n,c,e,er,gamma,a,f,out,unsafe,flags};
+    rm_parallel(ne,threads,RM_RANGE,&job);
 }
 #undef RM_BODY
+#undef RM_RANGE
+#undef RM_JOB
 
 #else
 static RM_TARGET void RM_MATRICES(Py_ssize_t ne, Py_ssize_t n, Py_ssize_t c,
         const double *e,const double *er,const double *gamma,const double *a,
-        const double *f,double *out,unsigned char *unsafe,unsigned char *flags) {
-    (void)flags;
+        const double *f,double *out,unsigned char *unsafe,unsigned char *flags,int threads) {
+    (void)flags;(void)threads;
     double max_f2[RM_MAX_CHANNELS]={0};int normal_energies=1;
     for (Py_ssize_t i=0;i<ne;i++)
         if (!(isfinite(e[i]) && fabs(e[i])<=1e20)) normal_energies=0;

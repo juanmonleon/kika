@@ -1114,7 +1114,26 @@ def _resonance_mass(resonances,target_id):
     return None
 
 
-def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',options=None,progress=None):
+def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',options=None,progress=None,workers=None):
+    """Reconstruct a complete supported resonance model suite without mutating it.
+
+    ``workers`` threads share the level sums of large batches (default
+    ``parallel.default_workers()``, at most four, low priority, as
+    verification); 1 keeps everything on this thread. The numbers are
+    bit-identical either way. The rest is documented on the worker below.
+    """
+    from ._rm_acceleration import level_threads
+    if workers is None:
+        from .parallel import default_workers
+        workers=default_workers()
+    token=level_threads.set(max(1,int(workers)))
+    try:
+        return _reconstruct_suite(suite,context,source_style=source_style,label=label,options=options,progress=progress)
+    finally:
+        level_threads.reset(token)
+
+
+def _reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',options=None,progress=None):
     """Reconstruct a complete supported resonance model suite without mutating it.
 
     Local References and native summand links are resolved. All sums must have

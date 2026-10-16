@@ -338,7 +338,7 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     Real L-B and external diagonal terms remain in the solve. Exceptional
     poles use bounded reference batches; no level absorption array is retained.
     """
-    from ._rm_acceleration import _native, eligible, reference_block_size, channel_solution, gram_capture
+    from ._rm_acceleration import _native, eligible, reference_block_size, channel_solution, gram_capture, threads_for
     er,gamma,_=group.kernel_arrays
     a=np.require(reduced,dtype=float,requirements=['C','A']);f=np.ones_like(p)
     if not eligible(e,er,gamma,a,f,work_bytes,True,1e-8):return None
@@ -353,7 +353,8 @@ def _streamed_rml(e, group, reduced, logarithmic, external, p, entrance, diagnos
     if diagnostics is not None:diagnostics=dict(diagnostics)
     c=a.shape[1];e=np.require(e,dtype=float,requirements=['C','A'])
     r=np.empty((len(e),c,c),complex);unsafe=np.zeros(len(e),np.uint8)
-    _native.matrices(len(e),len(er),c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),unsafe)
+    _native.matrices(len(e),len(er),c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),unsafe,
+                     threads_for(len(e),len(er),c))
     # RML's pole threshold also depends on |L-B|. The existing native
     # flags cover the unit threshold; test only additional candidate levels.
     strength=np.sum(a*a,axis=1);scale=np.maximum(1.,np.max(abs(logarithmic),axis=1))

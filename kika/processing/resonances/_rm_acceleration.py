@@ -11,6 +11,7 @@ return None to the reference solver. The extension uses bounded stack tiles;
 Candidate small solves use pivoted C elimination when available; independent
 residual/passivity and positive-capture acceptance checks remain in Python.
 """
+import contextvars
 import numpy as np
 try:
     from . import _rm_native as _native
@@ -20,6 +21,21 @@ except (ImportError, AttributeError):
 
 #: Channels per spin group the compiled sums take (``RM_MAX_CHANNELS``).
 MAX_CHANNELS=6
+
+#: Threads for the level sums, set by ``reconstruct_suite`` from its
+#: ``workers`` for the length of one call. Rows are independent, so the
+#: numbers are those of one thread.
+level_threads=contextvars.ContextVar('kika_rm_level_threads',default=1)
+#: Level x energy x channel-pair products of work per extra thread: below
+#: about a millisecond, starting a thread costs more than it saves
+#: (measured: c=1, 300 levels, 900 energies is slower on two threads).
+THREAD_WORK=2_500_000
+
+
+def threads_for(energies,levels,channels):
+    threads=level_threads.get()
+    if threads<=1:return 1
+    return max(1,min(threads,energies*levels*channels*(channels+1)//2//THREAD_WORK))
 
 
 def eligible(energies, levels, widths, reduced, factors, work_bytes,
@@ -136,7 +152,8 @@ def solve(energies,levels,radiative_widths,amplitudes,diagnostics=None,*,entranc
                     (energies,levels,radiative_widths,reduced,channel_factors))
     if np.any(gamma<0):raise ValueError('negative radiative width')
     c=a.shape[1];r=np.empty((len(e),c,c),complex);poles=np.zeros(len(e),np.uint8)
-    _native.matrices(len(e),len(er),c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),poles)
+    _native.matrices(len(e),len(er),c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),poles,
+                     threads_for(len(e),len(er),c))
     regular=poles==0
     w=np.zeros((len(e),c),complex);capture=np.zeros(len(e))
     if np.any(regular):

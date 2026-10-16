@@ -278,3 +278,34 @@ def test_fused_rows_match_the_numpy_statements_they_replace(monkeypatch,c,rtol):
         np.testing.assert_allclose(fused[0],reference[0],rtol=1e-13,atol=1e-16)
         np.testing.assert_allclose(fused[1],reference[1],rtol=1e-12,atol=1e-16)
         if rtol:assert diagnostics['rm_native_gram_energies']>0
+
+
+@pytest.mark.parametrize('c',[1,3,6])
+def test_level_sums_on_threads_are_those_of_one_thread(c):
+    """matrices splits its rows over native threads; rows are independent and
+    the per-level decisions are made once for the whole call, so any number
+    of threads gives the numbers and pole flags of one."""
+    if backend._native is None:pytest.skip('optional extension unavailable')
+    rng=np.random.default_rng(11)
+    n=400;er=np.sort(rng.uniform(1.,90.,n));gamma=rng.uniform(.01,.1,n);gamma[::17]=0.
+    a=rng.normal(0,.1,(n,c));e=np.r_[np.sort(rng.uniform(.1,100.,1001)),er[:7]]
+    f=rng.uniform(.1,1.3,(len(e),c))
+    results=[]
+    for threads in (1,2,3,7):
+        r=np.empty((len(e),c,c),complex);unsafe=np.zeros(len(e),np.uint8)
+        backend._native.matrices(len(e),n,c,e,er,gamma,a.ravel(),f.ravel(),r.view(float).ravel(),unsafe,threads)
+        results.append((r,unsafe))
+    assert results[0][1].any()
+    for r,unsafe in results[1:]:
+        np.testing.assert_array_equal(r,results[0][0]);np.testing.assert_array_equal(unsafe,results[0][1])
+
+
+def test_level_threads_scale_with_the_work_of_the_call():
+    token=backend.level_threads.set(4)
+    try:
+        assert backend.threads_for(900,10,1)==1
+        assert backend.threads_for(900,1600,3)==3
+        assert backend.threads_for(100000,1600,3)==4
+    finally:
+        backend.level_threads.reset(token)
+    assert backend.threads_for(100000,1600,3)==1
