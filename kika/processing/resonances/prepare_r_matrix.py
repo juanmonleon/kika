@@ -412,7 +412,13 @@ def normalize_suite_pairs(suite, context):
             def declared(name):
                 value = getattr(lp,name,None)
                 return value if value is not None else getattr(gp,name,None)
-            mass,spin,parity,charge = (declared(name) for name in ('mass','spin','parity','charge'))
+            # The Coulomb charge is the nucleus's: a Nuclide's `charge` is the
+            # atom's net charge (0 in every distributed GNDS file, H1 and S35 of
+            # Cl-35 included), its nuclear charge is Z. A bare particle (n) has
+            # only `charge`.
+            charge = declared('Z')
+            if charge is None:charge = declared('charge')
+            mass,spin,parity = (declared(name) for name in ('mass','spin','parity'))
             if any(v is None for v in (mass,spin,parity,charge)):
                 raise ValueError(f'native RML particle {pid} lacks mass/spin/parity/charge')
             return ChannelParticle(mass.convertedTo('amu').value/mn,charge,spin.convertedTo('hbar').value,parity)
