@@ -469,3 +469,18 @@ def test_merge_against_real_host_structure(tmp_path, fe56_host_tape):
     assert np.all(m[i_lo:i_lo + 2, i_lo + 2:] == 0.0)
     out_diag = np.concatenate([np.diag(m)[:i_lo], np.diag(m)[i_lo + 2:]])
     assert np.all(out_diag >= 0.0) and np.any(out_diag > 0.0)
+
+
+def test_an_lb6_record_writes_and_reads_back():
+    """The writers store rect_matrix as an ndarray, and list + list + ndarray
+    broadcast instead of concatenating (U-235 B-VIII.1 MF33 rewrite)."""
+    row_grid = np.array([1.0e6, 2.0e6, 3.0e6])
+    col_grid = np.array([1.0e6, 2.0e6, 3.0e6, 4.0e6])
+    cov = np.arange(1, 7, dtype=float).reshape(2, 3) * 0.001
+    mf33 = create_mf33_from_covariance(
+        cov, row_grid, ZA, AWR, MAT, MT, mt1=MT, lb=6, col_energy_grid_ev=col_grid,
+    )
+    rec = parse_mf33_mt(str(mf33).split("\n"), MT)._subsections[0].ni_records[0]
+    assert rec.lb == 6
+    assert list(rec.row_energies) == list(row_grid) and list(rec.col_energies) == list(col_grid)
+    np.testing.assert_allclose(np.asarray(rec.rect_matrix), cov.ravel())

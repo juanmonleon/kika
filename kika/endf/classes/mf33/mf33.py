@@ -1485,7 +1485,7 @@ def emit_subsection(subsection: "Subsection", mat: int, mf: int, mt: int) -> Lis
             )
             lines.append(blank_line_number(rec_header))
             _write_values_block(
-                ni_rec.row_energies + ni_rec.col_energies + ni_rec.rect_matrix
+                _chain(ni_rec.row_energies, ni_rec.col_energies, ni_rec.rect_matrix)
             )
 
     return lines

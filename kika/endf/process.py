@@ -1068,7 +1068,7 @@ def _heating_section(mt, energies, values, za, awr, mat):
 def _insert_heating(path, tables, T):
     """Put MF3/MT301 and MT444 in the one-material tape at ``path``, in MT
     order, rebuild the MF1 directory, and check they read back."""
-    from kika._records import parse_number
+    from kika._records import parse_number, round_to_endf_field
     from kika.endf.read_endf import read_endf
     from kika.endf.writers.update_directory import update_mf1_directory
     lines = Path(path).read_text().rstrip("\n").split("\n")
@@ -1097,8 +1097,10 @@ def _insert_heating(path, tables, T):
         if section is None:
             raise ProcessingOutputError("pendf-failed", f"{T:g} K: MT{mt} missing on reload")
         back = np.asarray(section._cross_sections, float)
-        scale = float(np.max(np.abs(y))) if len(y) else 1.0
-        if len(back) != len(y) or not np.allclose(back, y, rtol=1e-6, atol=1e-9 * (scale or 1.0)):
+        # Exactly the fields as written: a fixed rtol refuses a field with a
+        # two-digit exponent, which holds six digits (U-235's 0 K KERMA is
+        # 5e12 eV*b at 1e-5 eV, rounded by up to 1.1e-6, as NJOY writes it).
+        if len(back) != len(y) or not np.array_equal(back, round_to_endf_field(y)):
             raise ProcessingOutputError("pendf-failed", f"{T:g} K: MT{mt} does not read back as written")
 
 

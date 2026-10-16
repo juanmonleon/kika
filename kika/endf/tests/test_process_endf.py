@@ -428,3 +428,16 @@ def test_the_pendf_carries_the_heating_in_every_material(heated_run, tmp_path):
     assert all({301, 444} <= mts for mts in per_material)
     assert all({301, 444} <= mts for mts in directory)
     assert heated_run.stages[-1].details["heating"] == [301, 444]
+
+
+def test_a_kerma_past_1e10_reads_back_as_its_six_digit_fields(heated_run, tmp_path, monkeypatch):
+    # U-235's 0 K MT301 is 5e12 eV*b at 1e-5 eV: a field with a two-digit
+    # exponent keeps six digits, and the readback refused it at rtol 1e-6.
+    from kika._records import round_to_endf_field
+    x, h = heated_run.heating[0.0][301]
+    big = h * (5.3e12 / np.max(np.abs(h))) * (1 + 1e-6 * np.cos(np.arange(len(h))))
+    assert np.max(np.abs(round_to_endf_field(big) / big - 1)) > 1e-6   # what rtol 1e-6 refused
+    tables = dict(heated_run._heating[0.0])
+    tables[301] = (x, big)
+    monkeypatch.setitem(heated_run._heating, 0.0, tables)
+    heated_run.write_pendf(tmp_path / "big.pendf")      # raised ProcessingOutputError
