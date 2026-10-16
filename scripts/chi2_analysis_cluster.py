@@ -1106,6 +1106,16 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
     # ── 15-oct: C17H / C17Z — la cinta de C16X con el 1σ de variant_kinney y cierjacks_additive_vs_mult
     # ×0,5 y ×0 (W16_TERM_SCALE; MF4 idéntica). Se leen contra C16X: la comprobación de la banda dice
     # que la de C16X sobre-declara ×3-6 en todas las celdas.
+    # ── 16-oct: D18U — la cinta _hinv con las mallas ALINEADAS y el margen de banda por grupo
+    # (W16_COMMON_MESH=1, W16_BAND_MARGIN=per_group; run_p44_umesh.sh): banda de la cinta / exacta x1,15 de
+    # mediana contra x1,92, 0,0 % de celdas sub-declaradas contra 2,6 %. EXFOR corregida con la duda de las
+    # correcciones como modos del dato (KIKA_DATA_MODES). Se lee contra D16X.
+    "predictive_bspline_v6_y5s_perorder_hinv_umesh_bmg_corr_x": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_umesh_bmg_corr_x.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta _hinv con mallas alineadas y margen por grupo, EXFOR CORREGIDA con modos del dato (D18U)",
+        "systematic_block_col": None,
+    },
     "predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_ts05_corr": {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_hinv_m2_c3_lvdp_lh_re_ts05_corr.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
@@ -2336,6 +2346,9 @@ def run_subset_primary_detail(
 # long table. It LOCATES disagreement; the cells condition on overlapping rests, so they do
 # not add up to the chi^2. KIKA_CHI2_CELL_MAP=0 turns it off (it costs one dpotri per block).
 CELL_MAP = os.environ.get("KIKA_CHI2_CELL_MAP", "1") != "0"
+# 16-oct: KIKA_DATA_MODES = spec CSV of fully correlated DATA systematics (the doubt about the
+# corrections of the corrected arms; scripts/exfor_data_modes.py). Unset = no modes, bit-identical.
+DATA_MODES = os.environ.get("KIKA_DATA_MODES", "").strip()
 CELL_E_EDGES = np.array([float(x) for x in os.environ.get(
     "KIKA_CHI2_CELL_E_EDGES",
     "0.85,1.0,1.25,1.5,1.75,2.0,2.25,2.5,2.75,3.0,3.25,3.5,3.75,4.0").split(",")])
@@ -2683,6 +2696,12 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
     df["sigma_eval_diag"] = df["sigma_eval_diag"].fillna(0.0)
     df["is_KS"] = df["experiment_id"].isin(KINNEY_SMITH_IDS)
     df["is_Cierjacks"] = df["experiment_id"].isin(CIERJACKS_IDS)
+    if DATA_MODES:
+        # 16-oct: the doubt about the detector corrections, as data covariance (exfor_data_modes)
+        import exfor_data_modes
+        exfor_data_modes.add_mode_columns(df, DATA_MODES)
+        print(f"  data modes from {DATA_MODES}:")
+        print(exfor_data_modes.summary(df).round(4).to_string(index=False))
 
     libs_in_data = sorted(df["library"].unique())
     libraries = [lib for lib in libs_in_data if lib in LIB_LABELS]
@@ -2723,6 +2742,7 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
                                          df["angle_deg"].to_numpy(dtype=float),
                                          CELL_E_EDGES, CELL_A_EDGES)
         _yev = df["y_eval"].to_numpy(dtype=float)
+        _M = chi2_metrics._data_modes(df)
 
         def on_group(key, ord_pos, factor, r, eval_block):
             bids_g = None if _bids is None else _bids[ord_pos]
@@ -2730,7 +2750,8 @@ def run_methodology(methodology: str, paths: RunPaths) -> Dict:
             # 15-oct: the coherent offset per cell against the DECLARED band (for the covariance);
             # it does not use the factor, so it runs before conditional_cell_scores overwrites it.
             o = chi2_metrics.coherent_cell_offsets(_D[ord_pos], _v[ord_pos], U, bids_g, r,
-                                                   _yev[ord_pos], _codes[ord_pos], eval_block)
+                                                   _yev[ord_pos], _codes[ord_pos], eval_block,
+                                                   chi2_metrics._group_modes(_M, ord_pos))
             o.insert(0, "experiment_id", key[1]); o.insert(0, "library", key[0])
             offset_rows.append(o)
             t = chi2_metrics.conditional_cell_scores(factor, r, U, _codes[ord_pos], _yev[ord_pos])

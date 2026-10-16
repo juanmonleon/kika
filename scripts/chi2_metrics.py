@@ -100,6 +100,34 @@ def _components(
     return D, u, v, r
 
 
+DATA_MODE_PREFIX = "dmode_"
+
+
+def _data_modes(df: pd.DataFrame) -> Optional[np.ndarray]:
+    """Extra fully correlated DATA systematics: one column ``dmode_<name>`` each (16-oct).
+
+    Absolute (b/sr) per row and zero off the mode's support; each column is a rank-1 term
+    m m' of the experiment's covariance, NOT masked by `systematic_block_col` (a detector
+    efficiency is correlated over every energy). Built by `scripts/exfor_data_modes.py` from the
+    doubt about the detector corrections of the corrected arms (kika-workspace
+    docs/chi2-mf4/splines/revision_metrica_2026-10-16.md). None when the frame carries no such
+    column, and then every function here is bit-identical to the version without them.
+    """
+    cols = [c for c in df.columns if str(c).startswith(DATA_MODE_PREFIX)]
+    if not cols:
+        return None
+    return df[cols].to_numpy(dtype=float)
+
+
+def _group_modes(M_all: Optional[np.ndarray], ord_pos: np.ndarray) -> Optional[np.ndarray]:
+    """The data modes with support on one group's rows (None if none)."""
+    if M_all is None:
+        return None
+    M = M_all[ord_pos]
+    keep = np.any(M != 0, axis=0)
+    return np.ascontiguousarray(M[:, keep]) if keep.any() else None
+
+
 def _select_block(
     eval_cov: Dict[Tuple, np.ndarray], key: Tuple, sub: pd.DataFrame,
 ) -> Optional[np.ndarray]:
@@ -147,8 +175,12 @@ def _per_group_sigma(
     v: np.ndarray,
     eval_cov_block: Optional[np.ndarray],
     block_ids: Optional[np.ndarray] = None,
+    M: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Assemble Sigma = diag(D) + u u^T + v v^T + Sigma_eval for one experiment.
+    """Assemble Sigma = diag(D) + u u^T + v v^T [+ M M^T] + Sigma_eval for one experiment.
+
+    ``M`` (N x k) holds the data modes of `_data_modes` (unmasked); None leaves the matrix
+    bit-identical to the one without them.
 
     When `block_ids` is given, the EXFOR rank-1 systematic modes (u, v) are
     masked to block-diagonal: they correlate only within rows sharing a block
@@ -174,6 +206,8 @@ def _per_group_sigma(
         rows += v[a:b, None] * v[None, :]
         if block_ids is not None:
             rows *= (block_ids[a:b, None] == block_ids[None, :])
+        if M is not None:
+            rows += M[a:b] @ M.T
     sigma.flat[::n + 1] += D            # == diag(D) + rank1: x + 0.0 off the diagonal is exact
     if eval_cov_block is not None and eval_cov_block.size:
         for a in range(0, n, step):
@@ -314,6 +348,25 @@ def _rank2_chi2_woodbury_blocked(
     return total
 
 
+def _lowrank_chi2_woodbury(D: np.ndarray, U: np.ndarray, r: np.ndarray) -> float:
+    """chi^2 for Sigma = diag(D) + U U' (U is N x k) by Woodbury: O(N k^2)."""
+    d = np.maximum(D, 1e-300)
+    Ud = U / d[:, None]
+    C = np.eye(U.shape[1]) + U.T @ Ud
+    b = Ud.T @ r
+    return float(np.sum(r * r / d) - b @ np.linalg.solve(C, b))
+
+
+def _modes_chi2(D: np.ndarray, u: np.ndarray, v: np.ndarray, r: np.ndarray,
+                block_ids: Optional[np.ndarray], M: Optional[np.ndarray]) -> float:
+    """V2/V3's closed form with the data modes: the rank-2 one when there are none (bit-identical),
+    else Woodbury on [u per block, v per block, M]."""
+    if M is None:
+        return _rank2_chi2_woodbury_blocked(D, u, v, r, block_ids)
+    U = np.column_stack([profiled_mode_matrix(u, block_ids), profiled_mode_matrix(v, block_ids), M])
+    return _lowrank_chi2_woodbury(D, U, r)
+
+
 def mahalanobis_chi2_per_experiment(
     df: pd.DataFrame,
     eval_cov: Optional[Dict[Tuple, np.ndarray]] = None,
@@ -335,6 +388,7 @@ def mahalanobis_chi2_per_experiment(
         each block. See `_resolve_block_codes`. None ⇒ one experiment-wide mode.
     """
     D_all, u_all, v_all, r_all = _components(df)
+    M_all = _data_modes(df)
     eval_cov = eval_cov or {}
     block_codes = _resolve_block_codes(df, systematic_block_col)
 
@@ -353,7 +407,8 @@ def mahalanobis_chi2_per_experiment(
         block = _select_block(eval_cov, key, sub)
         bids = None if block_codes is None else block_codes[ord_pos]
         label = "/".join(str(p) for p in key)
-        chi2, _z = _solve_built(lambda: _per_group_sigma(D, u, v, block, bids), r, label=label)
+        M = _group_modes(M_all, ord_pos)
+        chi2, _z = _solve_built(lambda: _per_group_sigma(D, u, v, block, bids, M), r, label=label)
         N = len(sub)
         out_rows.append({
             **{col: val for col, val in zip(group_cols, key)},
@@ -438,6 +493,7 @@ def chi2_variants_and_z(
         if z_variant not in {"V1", "V2", "V3", "V4"}:
             raise ValueError(f"variant must be V1/V2/V3/V4, got {z_variant!r}")
     D_all, u_all, v_all, r_all = _components(df)
+    M_all = _data_modes(df)
     eval_cov = eval_cov or {}
     block_codes = _resolve_block_codes(df, systematic_block_col)
     if include_eval_diag:
@@ -464,27 +520,29 @@ def chi2_variants_and_z(
         sed = sigma_eval_diag[ord_pos]
         N = r.size
         label = "/".join(str(p) for p in key)
+        M = _group_modes(M_all, ord_pos)
+        m2 = 0.0 if M is None else np.sum(M * M, axis=1)     # the data modes on V1's diagonal
 
         # V1 textbook: diag( D + u² + v² + σ_eval_diag² ). The v² term here
         # encodes a *worst-case* point-by-point inflation that ignores σ_dep's
         # within-experiment correlation; included so V1 vs V2/V3/V4 measures
         # exactly the effect of marginalising the correlated modes.
-        v1_denom = np.maximum(D + u ** 2 + v ** 2 + sed ** 2, 1e-300)
+        v1_denom = np.maximum(D + u ** 2 + v ** 2 + sed ** 2 + m2, 1e-300)
         v1 = float(np.sum(r ** 2 / v1_denom))
 
         bids = None if block_codes is None else block_codes[ord_pos]
 
         # V2 rank-2 only: D + uuᵀ + vvᵀ — Woodbury closed form (O(N)),
         # block-diagonal in `bids` when per-block systematics are requested.
-        v2 = _rank2_chi2_woodbury_blocked(D, u, v, r, bids)
+        v2 = _modes_chi2(D, u, v, r, bids, M)
 
         # V3 rank-2 + diag eval: (D + σ_eval_diag²) + uuᵀ + vvᵀ — same form.
-        v3 = _rank2_chi2_woodbury_blocked(D + sed ** 2, u, v, r, bids)
+        v3 = _modes_chi2(D + sed ** 2, u, v, r, bids, M)
 
         # V4 rank-2 + dense eval (EXFOR rank-1 masked per block, Σ_eval dense).
         if eval_cov:
             block = _select_block(eval_cov, key, sub)
-            build = lambda: _per_group_sigma(D, u, v, block, bids)  # noqa: E731
+            build = lambda: _per_group_sigma(D, u, v, block, bids, M)  # noqa: E731
             if on_group is None:
                 v4, z4 = _solve_built(build, r, label=f"{label}/V4")
             else:
@@ -495,18 +553,18 @@ def chi2_variants_and_z(
         else:
             v4 = float("nan")
             # without a sidecar V4's Sigma has no eval block, as the whitened function computes it
-            z4 = (_solve_built(lambda: _per_group_sigma(D, u, v, None, bids), r,
+            z4 = (_solve_built(lambda: _per_group_sigma(D, u, v, None, bids, M), r,
                                label=f"{label}/V4")[1] if z_variant == "V4" else None)
 
         if z_full is not None:
             if z_variant == "V4":
                 z_full[ord_pos] = z4 if z4 is not None else np.nan
             elif z_variant == "V1":
-                z_full[ord_pos] = r / np.sqrt(np.maximum(D + u ** 2 + v ** 2 + sed ** 2, 1e-300))
+                z_full[ord_pos] = r / np.sqrt(np.maximum(D + u ** 2 + v ** 2 + sed ** 2 + m2, 1e-300))
             else:
                 D_eff = D if z_variant == "V2" else D + sed ** 2
                 _c, z_full[ord_pos] = _solve_built(
-                    lambda: _per_group_sigma(D_eff, u, v, None, bids), r,
+                    lambda: _per_group_sigma(D_eff, u, v, None, bids, M), r,
                     label=f"{label}/{z_variant}")
 
         out_rows.append({
@@ -539,6 +597,7 @@ def whitened_residuals_per_experiment(
     blocks the EXFOR rank-1 systematics per block (see `_resolve_block_codes`).
     """
     D_all, u_all, v_all, r_all = _components(df)
+    M_all = _data_modes(df)
     eval_cov = eval_cov or {}
     block_codes = _resolve_block_codes(df, systematic_block_col)
 
@@ -556,7 +615,8 @@ def whitened_residuals_per_experiment(
         block = _select_block(eval_cov, key, sub)
         bids = None if block_codes is None else block_codes[ord_pos]
         label = "/".join(str(p) for p in key)
-        _chi2, z = _solve_built(lambda: _per_group_sigma(D, u, v, block, bids), r, label=label)
+        M = _group_modes(M_all, ord_pos)
+        _chi2, z = _solve_built(lambda: _per_group_sigma(D, u, v, block, bids, M), r, label=label)
         z_full[ord_pos] = z
     return pd.Series(z_full, index=df.index, name="z")
 
@@ -588,6 +648,7 @@ def whitened_residuals_per_experiment_variant(
     if variant not in {"V1", "V2", "V3", "V4"}:
         raise ValueError(f"variant must be V1/V2/V3/V4, got {variant!r}")
     D_all, u_all, v_all, r_all = _components(df)
+    M_all = _data_modes(df)
     eval_cov = eval_cov or {}
     block_codes = _resolve_block_codes(df, systematic_block_col)
     if include_eval_diag:
@@ -610,9 +671,11 @@ def whitened_residuals_per_experiment_variant(
         r = r_all[ord_pos]
         sed = sigma_eval_diag[ord_pos]
         label = "/".join(str(p) for p in key) + f"/{variant}"
+        M = _group_modes(M_all, ord_pos)
 
         if variant == "V1":
-            denom = np.sqrt(np.maximum(D + u ** 2 + v ** 2 + sed ** 2, 1e-300))
+            m2 = 0.0 if M is None else np.sum(M * M, axis=1)
+            denom = np.sqrt(np.maximum(D + u ** 2 + v ** 2 + sed ** 2 + m2, 1e-300))
             z_full[ord_pos] = r / denom
             continue
 
@@ -623,7 +686,7 @@ def whitened_residuals_per_experiment_variant(
             D_eff, block = D + sed ** 2, None
         else:  # V4
             D_eff, block = D, _select_block(eval_cov, key, sub)
-        _chi2, z = _solve_built(lambda: _per_group_sigma(D_eff, u, v, block, bids), r, label=label)
+        _chi2, z = _solve_built(lambda: _per_group_sigma(D_eff, u, v, block, bids, M), r, label=label)
         z_full[ord_pos] = z
     return pd.Series(z_full, index=df.index, name=f"z_{variant.lower()}")
 
@@ -729,10 +792,17 @@ def profiled_mode_matrix(u: np.ndarray, block_ids: Optional[np.ndarray]) -> np.n
 
 
 def _noise_inv_apply(D: np.ndarray, v: np.ndarray, block_ids: Optional[np.ndarray],
-                     Y: np.ndarray) -> np.ndarray:
-    """Sigma_n^-1 Y for Sigma_n = diag(D) + sum_b v_b v_b' (v masked to each block b).
+                     Y: np.ndarray, M: Optional[np.ndarray] = None) -> np.ndarray:
+    """Sigma_n^-1 Y for Sigma_n = diag(D) + sum_b v_b v_b' (v masked to each block b) [+ M M'].
 
-    The blocks have disjoint support, so the Woodbury capacitance is diagonal: O(N m)."""
+    The blocks have disjoint support, so the Woodbury capacitance is diagonal: O(N m). The data
+    modes M (16-oct) go on top by a second Woodbury, O(N k^2)."""
+    if M is not None:
+        B = _noise_inv_apply(D, v, block_ids, np.concatenate([Y.reshape(Y.shape[0], -1), M], axis=1))
+        k = M.shape[1]
+        BY, BM = B[:, :-k], B[:, -k:]
+        C = np.eye(k) + M.T @ BM
+        return BY - BM @ np.linalg.solve(C, M.T @ BY)
     Y = Y.reshape(Y.shape[0], -1)
     bid = (np.zeros(D.size, dtype=np.int64) if block_ids is None
            else np.unique(block_ids, return_inverse=True)[1].ravel())
@@ -746,7 +816,7 @@ def _noise_inv_apply(D: np.ndarray, v: np.ndarray, block_ids: Optional[np.ndarra
 def coherent_cell_offsets(
     D: np.ndarray, v: np.ndarray, U: np.ndarray, block_ids: Optional[np.ndarray],
     r: np.ndarray, y_eval: np.ndarray, cell_of_row: np.ndarray,
-    eval_block: Optional[np.ndarray],
+    eval_block: Optional[np.ndarray], M: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """Per cell of ONE experiment: its relative offset from the evaluation, for the covariance.
 
@@ -754,7 +824,8 @@ def coherent_cell_offsets(
     central value). For each cell c the GLS fit
 
         r = x_c d_c + U a + eps,   x_c = y_eval on the cell's rows (0 elsewhere),
-        eps ~ N(0, Sigma_n),       Sigma_n = diag(D) + v v'   (the experiment's OWN covariance;
+        eps ~ N(0, Sigma_n),       Sigma_n = diag(D) + v v' [+ M M', the data modes]
+                                   (the experiment's OWN covariance;
                                    u u' is replaced by the free modes U -- the normalisation
                                    is profiled, as in `conditional_cell_scores`)
 
@@ -773,7 +844,7 @@ def coherent_cell_offsets(
     X = np.zeros((r.size, nc))
     X[np.arange(r.size), np.searchsorted(cells, cell_of_row)] = y_eval
     Z = np.concatenate([X, U, r[:, None]], axis=1)
-    P = _noise_inv_apply(D, v, block_ids, Z)                   # Sigma_n^-1 [X, U, r]
+    P = _noise_inv_apply(D, v, block_ids, Z, M)                # Sigma_n^-1 [X, U, r]
     A = Z[:, :-1].T @ P[:, :-1]
     A = 0.5 * (A + A.T)
     b = Z[:, :-1].T @ P[:, -1]
