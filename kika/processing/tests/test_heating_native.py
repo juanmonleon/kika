@@ -118,3 +118,43 @@ def test_native_kernels_count_displacements_as_numpy_bit_for_bit(name):
             assert H._twoBodyChunk(*args) == H._twoBodyChunkNumpy(*args)
     finally:
         H._DISPLACEMENTS.reset(token)
+
+
+def test_joint_two_body_chunk_is_each_component_bit_for_bit():
+    # One evaluation of T_d per recoil for MT444, NRT and arc-dpa: each component
+    # is the separate kernel's sum to the bit, and the native kernel NumPy's.
+    models = tuple(H.displacementModels(26, 40.0).values())
+    rng = np.random.default_rng(11)
+    u, w = np.polynomial.legendre.leggauss(16)
+    for _ in range(40):
+        x = np.unique(np.r_[-1.0, 1.0, rng.uniform(-1, 1, 7)]); p = rng.uniform(0.1, 2.0, len(x))
+        E = 10.0 ** rng.uniform(3, 7); c = E * 55.4 / 56.4 ** 2; r = rng.uniform(0.3, 1.0)
+        args = (np.linspace(-1, 1, 6), u, w, x, p, c * (1 + r * r), 2 * c * r, (26, 55.4, 26, 55.4), 40.0, False)
+        joint = H._twoBodyChunkJoint(*args, models)
+        assert np.array_equal(joint, H._twoBodyChunkJointNumpy(*args, models))
+        assert joint[0] == H._twoBodyChunk(*args)
+        for k, model in enumerate(models):
+            token = H._DISPLACEMENTS.set(model)
+            try:
+                assert joint[1 + k] == H._twoBodyChunk(*args)
+            finally:
+                H._DISPLACEMENTS.reset(token)
+
+
+@pytest.mark.parametrize("lab", [False, True])
+@pytest.mark.parametrize("Zr", [0, 2, 26])
+def test_joint_emission_chunk_is_numpy_bit_for_bit(lab, Zr):
+    # The joint kernel splits the recoil angle at every component's threshold; the
+    # native kernel and the NumPy reference agree to the bit, component by component.
+    models = tuple(H.displacementModels(74, 90.0).values())   # W: three distinct thresholds
+    rng = np.random.default_rng(31 + 10 * lab + Zr)
+    for _ in range(40):
+        args = list(_case(rng, False, lab, Zr))
+        if len(args[0]) < 2:
+            continue
+        partition = args[13]
+        ed = args[12]
+        thresholds = [ed] + ([H._thresholdOf(float(m.ed), *map(float, partition)) for m in models] if Zr else [])
+        joint = (args[:12] + [thresholds, ed, partition, args[14], args[15], models])
+        assert np.array_equal(H._emissionChunkJoint(*joint), H._emissionChunkJointNumpy(*joint[:12],
+                              (thresholds + [thresholds[-1]] * 3)[:3], *joint[13:]))

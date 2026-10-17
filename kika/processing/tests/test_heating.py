@@ -612,3 +612,22 @@ def test_heating_result_carries_nrt_and_arc_dpa():
     np.testing.assert_array_equal(nrt, np.array([3., 2.]) * result.displacementsPerReaction["nrt"][2])
     assert np.all(arc < nrt) and np.all(arc > 0.2 * nrt)
     assert any("arc-dpa with E_d = 40 eV" in note for note in result.notes)
+
+
+def test_the_joint_two_body_quadrature_reproduces_the_separate_passes():
+    # MT444 within its own tolerance of the separate quadrature (.01 eV + 1e-5),
+    # the displacements within DISPLACEMENT_RTOL of their own passes.
+    angular = m.XYs2d(function1ds=[_table([-1., 0., 1.], [.3, .5, .7], 1e3), _table([-1., 1.], [.5, .5], 2e7)])
+    form = m.AngularTwoBody(angular=angular, productFrame=m.Frame.centerOfMass)
+    E = np.geomspace(1e2, 2e7, 40); A, Z, ed = 55.454, 26, 40.0
+    models = tuple(H.displacementModels(Z, ed).values())
+    separate = H._twoBodyDamage(form, E, A, 0., Z, ed, elastic=True)
+    joint = H._twoBodyDamageJoint(form, E, A, 0., Z, ed, True, models)
+    assert np.all(np.abs(joint[:, 0] - separate) <= .02 + 2e-5 * np.abs(separate))
+    for k, model in enumerate(models):
+        token = H._DISPLACEMENTS.set(model)
+        try:
+            own = H._twoBodyDamage(form, E, A, 0., Z, ed, elastic=True)
+        finally:
+            H._DISPLACEMENTS.reset(token)
+        assert np.all(np.abs(joint[:, 1 + k] - own) <= 1e-6 + 3e-4 * np.abs(own)), model.name

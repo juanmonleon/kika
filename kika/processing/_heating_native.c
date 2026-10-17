@@ -302,7 +302,204 @@ static PyObject *twobody_chunk(PyObject *self, PyObject *args)
     return result;
 }
 
+
+/* The joint damage of one recoil: MT444's damage energy (lindhard1, with its ed
+ * cut on the recoil energy) and the displacements of up to two models, from one
+ * evaluation of the Lindhard partition. out[0] is bit for bit lindhard1. */
+static inline void damage3(double E, double el, double fl, double ed, const displacement_model *m1,
+                           const displacement_model *m2, double out[3])
+{
+    double ep = np_maximum(E, 0.);
+    ep /= el;
+    double T = crt_pow(ep, 1. / 6.);
+    T *= 3.4008;
+    double term = crt_pow(ep, 0.75);
+    term *= 0.40244;
+    T += term;
+    T += ep;
+    T *= fl;
+    T += 1.0;
+    T = E / T;
+    out[0] = (E >= ed) ? T : 0.;
+    out[1] = m1->mode ? displacements1(T, m1) : 0.;
+    out[2] = m2->mode ? displacements1(T, m2) : 0.;
+}
+
+static int parse_models(displacement_model *m1, displacement_model *m2)
+{
+    for (int k = 0; k < 2; ++k) {
+        displacement_model *m = k ? m2 : m1;
+        if (m->mode < 0 || m->mode > 2 || (m->mode && !(m->Ed > 0))) {
+            PyErr_SetString(PyExc_ValueError, "native heating: invalid displacement model");
+            return -1;
+        }
+        displacement_prepare(m);
+    }
+    return 0;
+}
+
+/* emission_chunk for MT444 and two models at once: a 3-tuple of its sums.
+ * edD[c] = denominator x the recoil threshold of component c: the angular range
+ * runs from -1 to the cosine where the recoil meets the lowest of them, split at
+ * every other one, so that no Gauss panel holds a component's step; ed is
+ * MT444's cut. */
+static PyObject *emission_chunk_joint(PyObject *self, PyObject *args)
+{
+    PyObject *objects[7];
+    Py_buffer b[7] = {{0}};
+    static const char *names[7] = {"cuts", "g", "w", "mu", "wm", "x", "p"};
+    double low, width, oldwidth, incident, denominator, edD[3], el, fl, ed;
+    int hist, lab, noRecoil;
+    displacement_model m1 = {0, 0., 0., 1., 0., 0.}, m2 = {0, 0., 0., 1., 0., 0.};
+    double *terms = NULL, *row = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOOdddddddddddpppidddiddd", &objects[0], &objects[1], &objects[2],
+                          &objects[3], &objects[4], &objects[5], &objects[6], &low, &width, &oldwidth,
+                          &incident, &denominator, &edD[0], &edD[1], &edD[2], &el, &fl, &ed, &hist, &lab, &noRecoil,
+                          &m1.mode, &m1.Ed, &m1.b, &m1.c, &m2.mode, &m2.Ed, &m2.b, &m2.c))
+        return NULL;
+    for (int k = 0; k < 7; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
+    const double *cuts = b[0].buf, *g = b[1].buf, *w = b[2].buf, *mu = b[3].buf, *wm = b[4].buf;
+    const double *x = b[5].buf, *p = b[6].buf;
+    Py_ssize_t nk = b[0].len / sizeof(double), n = b[1].len / sizeof(double);
+    Py_ssize_t m = b[3].len / sizeof(double), nx = b[5].len / sizeof(double);
+    if (nk < 2 || n < 1 || b[2].len != b[1].len || b[4].len != b[3].len || nx < 2 || b[6].len != b[5].len
+        || (!lab && m < 1)) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent chunk buffers");
+        goto done;
+    }
+    if (parse_models(&m1, &m2) < 0) goto done;
+    Py_ssize_t nc = nk - 1;
+    terms = PyMem_Malloc(sizeof(double) * (size_t)(3 * nc * n));
+    row = PyMem_Malloc(sizeof(double) * (size_t)(3 * (m > 0 ? m : 1)));
+    if (!terms || !row) { PyErr_NoMemory(); goto done; }
+    double total[3];
+    /* The thresholds in decreasing order (the cosines then increase). */
+    double thr[3] = {edD[0], edD[1], edD[2]};
+    for (int s = 0; s < 2; ++s)
+        for (int q = 0; q < 2 - s; ++q)
+            if (thr[q] < thr[q + 1]) { double tmp = thr[q]; thr[q] = thr[q + 1]; thr[q + 1] = tmp; }
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t i = 0; i < nc; ++i) {
+        double aa = sqrt(cuts[i]), bb = sqrt(cuts[i + 1]);
+        double half = (bb - aa) / 2;
+        double mid = (aa + bb) / 2;
+        for (Py_ssize_t j = 0; j < n; ++j) {
+            double v = mid + half * g[j];
+            double ep = v * v;
+            double source = x[0] + ((ep - low) * oldwidth) / width;
+            double density;
+            if (hist) {
+                Py_ssize_t pos = search_right(source, x, nx) - 1;
+                if (pos < 0) pos = 0;
+                if (pos > nx - 2) pos = nx - 2;
+                density = p[pos];
+            } else {
+                density = np_interp1(source, x, p, nx);
+            }
+            double angular[3];
+            if (lab) {
+                if (noRecoil) angular[0] = angular[1] = angular[2] = 0.;
+                else damage3(ep, el, fl, ed, &m1, &m2, angular);
+            } else {
+                double root = sqrt(incident * ep);
+                angular[0] = angular[1] = angular[2] = 0.;
+                double start = -1.;
+                for (int s = 0; s < 3; ++s) {
+                    if (s && thr[s] == thr[s - 1]) continue;
+                    double stop = (root > 0) ? ((incident + ep) - thr[s]) / (2 * root) : 1.;
+                    stop = np_minimum(np_maximum(stop, -1.), 1.);
+                    if (!(stop > start)) continue;
+                    for (Py_ssize_t k = 0; k < m; ++k) {
+                        double angle = (start + stop) / 2 + ((stop - start) / 2) * mu[k];
+                        double recoil = np_maximum(0., ((incident + ep) - (2 * root) * angle) / denominator);
+                        double d[3] = {0., 0., 0.};
+                        if (!noRecoil) damage3(recoil, el, fl, ed, &m1, &m2, d);
+                        for (int c = 0; c < 3; ++c) row[c * m + k] = wm[k] * d[c];
+                    }
+                    for (int c = 0; c < 3; ++c) angular[c] += (pairwise_sum(row + c * m, m) * (stop - start)) / 4;
+                    start = stop;
+                }
+            }
+            double factor = (((((w[j] * half) * 2) * v) * density) * oldwidth) / width;
+            for (int c = 0; c < 3; ++c) terms[c * nc * n + i * n + j] = factor * angular[c];
+        }
+    }
+    for (int c = 0; c < 3; ++c) total[c] = numpy_total(terms + c * nc * n, nc * n);
+    Py_END_ALLOW_THREADS
+    result = Py_BuildValue("(ddd)", total[0], total[1], total[2]);
+ done:
+    PyMem_Free(terms);
+    PyMem_Free(row);
+    for (int k = 0; k < 7; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
+/* twobody_chunk for MT444 and two models at once: a 3-tuple of its sums. */
+static PyObject *twobody_chunk_joint(PyObject *self, PyObject *args)
+{
+    PyObject *objects[5];
+    Py_buffer b[5] = {{0}};
+    static const char *names[5] = {"cuts", "u", "w", "x", "p"};
+    double offset, slope, el, fl, ed;
+    int hist;
+    displacement_model m1 = {0, 0., 0., 1., 0., 0.}, m2 = {0, 0., 0., 1., 0., 0.};
+    double *terms = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOdddddpidddiddd", &objects[0], &objects[1], &objects[2], &objects[3],
+                          &objects[4], &offset, &slope, &el, &fl, &ed, &hist,
+                          &m1.mode, &m1.Ed, &m1.b, &m1.c, &m2.mode, &m2.Ed, &m2.b, &m2.c))
+        return NULL;
+    for (int k = 0; k < 5; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
+    const double *cuts = b[0].buf, *u = b[1].buf, *w = b[2].buf, *x = b[3].buf, *p = b[4].buf;
+    Py_ssize_t nk = b[0].len / sizeof(double), n = b[1].len / sizeof(double), nx = b[3].len / sizeof(double);
+    if (nk < 2 || n < 1 || b[2].len != b[1].len || nx < 2 || b[4].len != b[3].len) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent two-body buffers");
+        goto done;
+    }
+    if (parse_models(&m1, &m2) < 0) goto done;
+    Py_ssize_t nc = nk - 1;
+    terms = PyMem_Malloc(sizeof(double) * (size_t)(3 * nc * n));
+    if (!terms) { PyErr_NoMemory(); goto done; }
+    double total[3];
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t i = 0; i < nc; ++i) {
+        double half = (cuts[i + 1] - cuts[i]) / 2;
+        double mid = (cuts[i] + cuts[i + 1]) / 2;
+        for (Py_ssize_t j = 0; j < n; ++j) {
+            double mu = mid + half * u[j];
+            double density;
+            if (hist) {
+                Py_ssize_t pos = search_right(mu, x, nx) - 1;
+                if (pos < 0) pos = 0;
+                if (pos > nx - 1) pos = nx - 1;
+                density = p[pos];
+            } else {
+                density = np_interp1(mu, x, p, nx);
+            }
+            double recoil = np_maximum(offset - slope * mu, 0.);
+            double d[3];
+            damage3(recoil, el, fl, ed, &m1, &m2, d);
+            double factor = (half * w[j]) * density;
+            for (int c = 0; c < 3; ++c) terms[c * nc * n + i * n + j] = factor * d[c];
+        }
+    }
+    for (int c = 0; c < 3; ++c) total[c] = numpy_total(terms + c * nc * n, nc * n);
+    Py_END_ALLOW_THREADS
+    result = Py_BuildValue("(ddd)", total[0], total[1], total[2]);
+ done:
+    PyMem_Free(terms);
+    for (int k = 0; k < 5; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
 static PyMethodDef methods[] = {
+    {"twobody_chunk_joint", twobody_chunk_joint, METH_VARARGS,
+     "twobody_chunk for MT444 and two displacement models at once (3-tuple), bit for bit the NumPy reference."},
+    {"emission_chunk_joint", emission_chunk_joint, METH_VARARGS,
+     "emission_chunk for MT444 and two displacement models at once (3-tuple), bit for bit the NumPy reference."},
     {"twobody_chunk", twobody_chunk, METH_VARARGS,
      "One angular quadrature of the two-body recoil damage, bit for bit the NumPy reference."},
     {"emission_chunk", emission_chunk, METH_VARARGS,
@@ -323,6 +520,6 @@ PyMODINIT_FUNC PyInit__heating_native(void)
     crt_pow = (pow_function)(void (*)(void))found;
 #endif
     PyObject *mod = PyModule_Create(&module);
-    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 2) < 0) { Py_DECREF(mod); return NULL; }
+    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 3) < 0) { Py_DECREF(mod); return NULL; }
     return mod;
 }

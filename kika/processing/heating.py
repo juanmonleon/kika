@@ -78,7 +78,7 @@ except ModuleNotFoundError as exc:  # the NumPy reference path stays the definit
     if exc.name != "kika.processing._heating_native":
         raise
     _heating_native = None
-if _heating_native is not None and _heating_native.API_VERSION != 2:
+if _heating_native is not None and _heating_native.API_VERSION != 3:
     raise ImportError("rebuild kika's native heating extension (API version mismatch)")
 
 #: Threads for the independent incident energies of a damage quadrature: set by
@@ -159,6 +159,20 @@ def _evaluateAll(at, energies) -> np.ndarray:
             for _ in pool.map(lambda job: job[0].run(at, job[1]), zip(contexts, distinct)):
                 pass
     return np.array([at(E) for E in energies])
+
+
+def _evaluateAllRows(at, energies):
+    """:func:`_evaluateAll` for an ``at`` that returns a row (a joint quadrature)."""
+    energies = [float(E) for E in energies]
+    distinct = list(dict.fromkeys(energies))
+    threads = _energyThreads.get()
+    if threads > 1 and len(distinct) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        contexts = [contextvars.copy_context() for _ in distinct]
+        with ThreadPoolExecutor(max_workers=min(threads, len(distinct))) as pool:
+            for _ in pool.map(lambda job: job[0].run(at, job[1]), zip(contexts, distinct)):
+                pass
+    return [at(E) for E in energies]
 
 
 _GL4 = np.polynomial.legendre.leggauss(4)
@@ -878,6 +892,82 @@ def _distribution(product):
 # Damage per path
 # ----------------------------------------------------------------------
 
+#: The displacement models the MT444 pass computes alongside it (joint quadratures),
+#: and where it keeps their values for the models' own passes to take: set by
+#: _heatingOf when displacements are asked for. A quadrature that has a joint form
+#: then evaluates the damage energy once per recoil for all of them.
+_JOINT = contextvars.ContextVar("kika_joint_displacements", default=None)
+_JOINT_STORE = contextvars.ContextVar("kika_joint_store", default=None)
+
+
+def _jointModels() -> tuple:
+    """The models to compute jointly now: only on MT444's pass, when asked."""
+    if _DISPLACEMENTS.get() is not None:
+        return ()
+    return _JOINT.get() or ()
+
+
+def _jointKey(name, grid, *parts):
+    grid = np.ascontiguousarray(grid, dtype=float)
+    return (name, len(grid), hash(grid.tobytes())) + tuple(parts)
+
+
+def _jointRecall(key):
+    """A model pass's value, kept by MT444's joint quadrature (None if there is none)."""
+    model, store = _DISPLACEMENTS.get(), _JOINT_STORE.get()
+    if model is None or store is None or key not in store:
+        return None
+    return store[key].get(model.name)
+
+
+def _jointKeep(key, models, values):
+    store = _JOINT_STORE.get()
+    if store is not None:
+        store[key] = {m.name: np.array(values[:, 1 + k]) for k, m in enumerate(models)}
+
+
+def _jointPacked(models) -> tuple:
+    """(mode, ed, b, c) of up to two models for the joint native kernels."""
+    packed = []
+    for m_ in list(models)[:2]:
+        packed += [m_.mode, float(m_.ed), float(m_.b), float(m_.c)]
+    while len(packed) < 8:
+        packed += [0, 0.0, 0.0, 1.0]
+    return tuple(packed)
+
+
+def _damageEnergy(E, Zr, Ar, Zl, Al):
+    """:func:`lindhard`'s partition with no threshold, in its vector order of operations."""
+    E = np.atleast_1d(np.asarray(E, dtype=float))
+    if Zr == 0:
+        return np.zeros_like(E)
+    el, fl = _lindhardConstants(Zr, Ar, Zl, Al)
+    ep = np.maximum(E, 0.0)
+    ep /= el
+    out = np.power(ep, 1 / 6)
+    out *= 3.4008
+    term = np.power(ep, 0.75)
+    term *= 0.40244
+    out += term
+    out += ep
+    out *= fl
+    out += 1.0
+    np.divide(E, out, out=out)
+    return out
+
+
+def _jointValues(E, partition, ed, models):
+    """``(3, ...)``: MT444's damage energy (cut at ``ed``) and up to two models' N_d."""
+    shape = np.shape(E)
+    E = np.asarray(E, dtype=float).reshape(-1)
+    T = _damageEnergy(E, *partition)
+    out = np.zeros((3,) + E.shape)
+    out[0] = np.where(E >= ed, T, 0.0)
+    for k, m_ in enumerate(list(models)[:2]):
+        out[1 + k] = m_.count(T)
+    return out.reshape((3,) + shape)
+
+
 def _damageScale() -> float:
     """What one eV of damage energy is worth in the active units: 1 for MT444,
     ``0.8/(2 E_d)`` displacements under a model, so that the quadratures' absolute
@@ -968,6 +1058,70 @@ def _twoBodyChunkNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist):
     return float(np.sum(half[:,None]*w*density*lindhard(np.maximum(offset-slope*mu,0.),*partition,ed)))
 
 
+def _twoBodyChunkJoint(cuts,u,w,x,p,offset,slope,partition,ed,hist,models):
+    """:func:`_twoBodyChunk` for MT444 and the models at once: an array of 3."""
+    if _heating_native is None:
+        return _twoBodyChunkJointNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist,models)
+    el,fl=(float(c) for c in _lindhardConstants(*partition))
+    return np.array(_heating_native.twobody_chunk_joint(cuts,u,w,x,p,float(offset),float(slope),el,fl,float(ed),
+        bool(hist),*_jointPacked(models)))
+
+
+def _twoBodyChunkJointNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist,models):
+    half=np.diff(cuts)/2;mid=(cuts[:-1]+cuts[1:])/2
+    mu=mid[:,None]+half[:,None]*u
+    if hist:density=p[np.clip(np.searchsorted(x,mu,side='right')-1,0,len(p)-1)]
+    else:density=np.interp(mu,x,p)
+    values=_jointValues(np.maximum(offset-slope*mu,0.),partition,ed,models)
+    factor=half[:,None]*w*density
+    return np.array([float(np.sum(factor*values[c])) for c in range(3)])
+
+
+def _emissionChunkJoint(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,thresholds,ed,partition,hist,lab,models):
+    """:func:`_emissionChunk` for MT444 and the models at once: an array of 3. The
+    angular range runs to the lowest recoil threshold of the three (``thresholds``,
+    up to 3), split at the others so no Gauss panel holds a step; ``ed`` is MT444's cut."""
+    thresholds=(list(thresholds)+[thresholds[-1]]*3)[:3]
+    if _heating_native is None:
+        return _emissionChunkJointNumpy(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,thresholds,ed,
+                                        partition,hist,lab,models)
+    noRecoil=partition[0]==0
+    el,fl=(1.,1.) if noRecoil else (float(c) for c in _lindhardConstants(*partition))
+    cuts,g,w,mu,wm,x,p=(np.ascontiguousarray(a,dtype=float) for a in (cuts,g,w,mu,wm,x,p))
+    return np.array(_heating_native.emission_chunk_joint(cuts,g,w,mu,wm,x,p,float(low),float(width),float(oldwidth),
+        float(incident),float(denominator),*(float(denominator*r) for r in thresholds),el,fl,float(ed),bool(hist),
+        bool(lab),noRecoil,*_jointPacked(models)))
+
+
+def _emissionChunkJointNumpy(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,thresholds,ed,partition,hist,lab,models):
+    aa=np.sqrt(cuts[:-1]);bb=np.sqrt(cuts[1:]);half=(bb-aa)/2
+    v=(aa[:,None]+bb[:,None])/2+half[:,None]*g;ep=v*v
+    source=x[0]+(ep-low)*oldwidth/width
+    if hist:
+        pos=np.clip(np.searchsorted(x,source,side='right')-1,0,len(x)-2);density=p[pos]
+    else:density=np.interp(source,x,p)
+    if partition[0]==0:
+        angular=np.zeros((3,)+ep.shape)
+    elif lab:
+        angular=_jointValues(ep,partition,ed,models)
+    else:
+        root=np.sqrt(incident*ep)
+        angular=np.zeros((3,)+ep.shape)
+        start=np.full(ep.shape,-1.)
+        for s,r in enumerate(sorted(thresholds,reverse=True)):
+            if s and r==sorted(thresholds,reverse=True)[s-1]:continue
+            stop=np.clip(np.divide(incident+ep-denominator*r,2*root,out=np.ones_like(ep),where=root>0),-1.,1.)
+            stop=np.where(stop>start,stop,start)
+            angle=(start[...,None]+stop[...,None])/2+((stop[...,None]-start[...,None])/2)*mu
+            recoil=np.maximum(0.,(incident+ep[...,None]-2*root[...,None]*angle)/denominator)
+            values=_jointValues(recoil,partition,ed,models)
+            for c in range(3):
+                angular[c]+=np.sum(wm*values[c],axis=-1)*(stop-start)/4
+            start=stop
+    factor=w*half[:,None]*2*v*density*oldwidth/width
+    return np.array([float(np.sum(factor*angular[c])) for c in range(3)])
+
+
 def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  """Two-body recoil damage on normalized angular panels.
 
@@ -979,6 +1133,14 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  """
  from functools import lru_cache
  grid=np.asarray(grid,dtype=float)
+ key=_jointKey('twoBody',grid,id(form),A,Q,Z,ed,elastic)
+ kept=_jointRecall(key)
+ if kept is not None:return kept
+ models=_jointModels()
+ if models:
+  values=_twoBodyDamageJoint(form,grid,A,Q,Z,ed,elastic,models)
+  _jointKeep(key,models,values)
+  return values[:,0]
  kink=_recoilKink(Z,A,Z,A);ed=_recoilThreshold(ed,Z,A,Z,A);scale=_damageScale();rt8=_relTol(1e-8);rt5=_relTol(1e-5)
  angular=getattr(form,'angular',None);isotropic=angular is None or type(angular).__name__=='Isotropic2d'
  if isotropic:energies=np.array([grid[0]]);tables=None;flat=False
@@ -1033,6 +1195,82 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
     v=at(e)
     if abs(v-(va+(vb-va)*fraction))>.01*scale+rt5*abs(v):additions[e]=v
   if not additions:return np.interp(grid,nodes,values)
+  if len(nodes)+len(additions)>20000:raise ValueError('two-body damage interpolation exceeds resource cap')
+  known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[e] for e in nodes])
+ raise ValueError('two-body damage interpolation did not converge')
+
+
+def _twoBodyDamageJoint(form,grid,A,Q,Z,ed,elastic,models):
+ """:func:`_twoBodyDamage` for MT444 and the models at once, ``(len(grid), 3)``.
+
+ One quadrature: the cuts are the union of the three (MT444's ``ed``, each
+ model's step and kink), the angular range starts at the lowest threshold, each
+ component converges to its own tolerance (MT444's, and for N_d the scaled
+ absolute and DISPLACEMENT_RTOL relative), and the incident-energy refinement
+ adds a node where any component asks for it. MT444 is then within its
+ tolerance of the separate quadrature, not bit for bit.
+ """
+ from functools import lru_cache
+ partition=(Z,A,Z,A)
+ thresholds=[ed]+[_thresholdOf(float(m_.ed),*map(float,partition)) for m_ in models]
+ kinks=[_thresholdOf(2.*float(m_.ed)/0.8,*map(float,partition)) for m_ in models]
+ edLow=min(thresholds)
+ scales=np.array([1.]+[0.8/(2.*m_.ed) for m_ in models]+[1.]*(2-len(models)))
+ rel8=np.array([1e-8]+[max(1e-8,DISPLACEMENT_RTOL)]*2);rel5=np.array([1e-5]+[max(1e-5,DISPLACEMENT_RTOL)]*2)
+ angular=getattr(form,'angular',None);isotropic=angular is None or type(angular).__name__=='Isotropic2d'
+ if isotropic:energies=np.array([grid[0]]);tables=None;flat=False
+ else:energies,tables,flat=_tables(angular)
+ gauss={n:np.polynomial.legendre.leggauss(n) for n in (8,16,32,64)}
+ data=[]
+ for t in tables or []:
+  x=np.asarray(t.xs);p=np.asarray(t.pdf if hasattr(t,'pdf') else t.ys);hist=_isFlat(t)
+  norm=float(np.sum(np.diff(x)*(p[:-1] if hist else (p[:-1]+p[1:])/2)))
+  if not norm>0:raise ValueError('angular damage requires a positive density mass')
+  data.append((x,p,hist,norm))
+ cutoff=25*(A+1)**2/(4*A) if elastic else 0.
+ threshold=(A+1)/A*max(-Q,0.)
+ zero=np.zeros(3)
+ @lru_cache(maxsize=30000)
+ def at(E):
+  if E<cutoff or E<threshold:return zero
+  r=np.sqrt(max(0.,1-threshold/max(E,1e-300)));c=E*A/(A+1)**2;offset=c*(1+r*r);slope=2*c*r
+  if slope==0:return _jointValues(np.array([offset]),partition,ed,models)[:,0]
+  last=min(1.,(offset-edLow)/slope)
+  if last<=-1:return zero
+  j=int(np.clip(np.searchsorted(energies,E,side='right')-1,0,len(energies)-1));k=min(j+1,len(energies)-1)
+  f=float(np.clip((E-energies[j])/(energies[k]-energies[j]),0,1)) if k!=j and not flat else 0.
+  rcuts=np.r_[max(edLow,1e-12)*10.**np.arange(13),thresholds,kinks];mcuts=(offset-rcuts)/slope;mcuts=mcuts[(mcuts>-1)&(mcuts<last)]
+  value=np.zeros(3)
+  for idx,weight in ((j,1-f),(k,f)):
+   if weight==0:continue
+   if isotropic:x=np.array([-1.,1.]);p=np.array([.5,.5]);hist=False;norm=1.
+   else:x,p,hist,norm=data[idx]
+   cuts=np.unique(np.r_[-1.,x[(x>-1)&(x<last)],mcuts,last])
+   previous=None
+   for n in (8,16,32,64):
+    u,w=gauss[n]
+    integral=_twoBodyChunkJoint(cuts,u,w,x,p,offset,slope,partition,ed,hist,models)/norm
+    if previous is not None and np.all(np.abs(integral-previous)<=.001*scales+rel8*np.abs(integral)):break
+    previous=integral
+   else:raise ValueError('two-body damage angular quadrature did not converge')
+   value=value+weight*integral
+  return value
+ lo,hi=float(grid.min()),float(grid.max())
+ if hi==lo:return np.tile(at(lo),(len(grid),1))
+ nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=2.),cutoff,threshold]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
+ for edge in (cutoff,threshold):
+  if lo<edge<=hi:nodes=np.unique(np.r_[nodes,np.nextafter(edge,-np.inf)])
+ values=np.array([at(float(e)) for e in nodes]) if _energyThreads.get()<=1 else np.array(_evaluateAllRows(at,nodes))
+ for _ in range(30):
+  additions={}
+  _evaluateAllRows(at,[float(a+(b-a)*fraction) for a,b in zip(nodes[:-1],nodes[1:]) for fraction in (.25,.5,.75)])
+  for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
+   for fraction in (.25,.5,.75):
+    e=float(a+(b-a)*fraction)
+    if not a<e<b:continue
+    v=at(e)
+    if np.any(np.abs(v-(va+(vb-va)*fraction))>.01*scales+rel5*np.abs(v)):additions[e]=v
+  if not additions:return np.stack([np.interp(grid,nodes,values[:,c]) for c in range(3)],axis=1)
   if len(nodes)+len(additions)>20000:raise ValueError('two-body damage interpolation exceeds resource cap')
   known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[e] for e in nodes])
  raise ValueError('two-body damage interpolation did not converge')
@@ -1120,6 +1358,14 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
     from functools import lru_cache
     grid=np.asarray(grid,dtype=float)
     if not len(grid):return np.empty(0)
+    key=_jointKey('tabulatedEmission',grid,id(spectrum),A,Z,ed,particle)
+    kept=_jointRecall(key)
+    if kept is not None:return kept
+    models=_jointModels()
+    if models:
+        values=_tabulatedEmissionDamageJoint(spectrum,grid,A,Z,ed,particle,models)
+        _jointKeep(key,models,values)
+        return values[:,0]
     # A particle uses its own Z/mass and an optional isotropic CM boost;
     # a neutron emission instead uses the target recoil divided by A.
     if particle is None:recoilZ,recoilA,denominator,incidentFactor=Z,A,A,1.
@@ -1182,6 +1428,80 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
         known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[E] for E in nodes])
     raise ValueError('tabulated recoil damage interpolation did not converge')
 
+
+def _tabulatedEmissionDamageJoint(spectrum,grid,A,Z,ed,particle,models):
+    """:func:`_tabulatedEmissionDamage` for MT444 and the models at once, ``(len(grid), 3)``:
+    the outgoing-energy cuts of all three thresholds and kinks, the angular range from
+    the lowest threshold, each component to its own tolerance."""
+    from functools import lru_cache
+    if particle is None:recoilZ,recoilA,denominator,incidentFactor=Z,A,A,1.
+    else:recoilZ,recoilA,incidentFactor=particle;denominator=1.
+    partition=(recoilZ,recoilA,Z,A)
+    if recoilZ==0:
+        thresholds=[ed];kinks=[]
+    else:
+        thresholds=[ed]+[_thresholdOf(float(m_.ed),*map(float,partition)) for m_ in models]
+        kinks=[_thresholdOf(2.*float(m_.ed)/0.8,*map(float,partition)) for m_ in models]
+    edLow=min(thresholds)
+    scales=np.array([1.]+[0.8/(2.*m_.ed) for m_ in models]+[1.]*(2-len(models)))
+    rel5=np.array([1e-5]+[max(1e-5,DISPLACEMENT_RTOL)]*2);rel4=np.array([1e-4]+[max(1e-4,DISPLACEMENT_RTOL)]*2)
+    energies,tables,flat=_tables(spectrum)
+    if any(getattr(t,'numberOfDiscrete',0) for t in tables):
+        raise NotImplementedError('tabulated neutron recoil with discrete outgoing lines')
+    prepared=[]
+    for t in tables:
+        x=np.asarray(t.xs,dtype=float);p=np.asarray(t.pdf if hasattr(t,'pdf') else t.ys,dtype=float)
+        hist=_isFlat(t);width=x[-1]-x[0]
+        norm=float(np.sum(np.diff(x)*(p[:-1] if hist else (p[:-1]+p[1:])/2)))
+        if not width>0 or not norm>0:raise ValueError('tabulated recoil spectrum requires positive width and mass')
+        prepared.append((x,p/norm,hist,width))
+    gauss={n:np.polynomial.legendre.leggauss(n) for n in (8,16,32,64,128)}
+    lab=particle is not None and incidentFactor==0.
+    @lru_cache(maxsize=30000)
+    def at(E):
+        j=int(np.clip(np.searchsorted(energies,E,side='right')-1,0,len(tables)-1));k=min(j+1,len(tables)-1)
+        f=float(np.clip((E-energies[j])/(energies[k]-energies[j]),0.,1.)) if j!=k and not flat else 0.
+        low=(1-f)*prepared[j][0][0]+f*prepared[k][0][0]
+        width=(1-f)*prepared[j][3]+f*prepared[k][3]
+        previous=None
+        for order in (8,16,32,64):
+            g,w=gauss[order];mu,wm=gauss[order*2];value=np.zeros(3)
+            for i,weight in ((j,1-f),(k,f)):
+                if weight==0:continue
+                x,p,hist,oldwidth=prepared[i]
+                mapped=low+(x-x[0])*width/oldwidth
+                incident=incidentFactor*E
+                cuts=np.unique(np.r_[mapped,[(np.sqrt(incident)+sign*np.sqrt(denominator*r))**2
+                                             for r in [*thresholds,*kinks] for sign in (-1.,1.)]])
+                cuts=cuts[(cuts>=mapped[0])&(cuts<=mapped[-1])]
+                for start in range(0,len(cuts)-1,256):
+                    stop=min(start+256,len(cuts)-1)
+                    value=value+weight*_emissionChunkJoint(cuts[start:stop+1],g,w,mu,wm,x,p,low,width,oldwidth,incident,
+                                                           denominator,thresholds,ed,partition,bool(hist),lab,models)
+            if previous is not None and np.all(np.abs(value-previous)<=.01*scales+rel5*np.abs(value)):return value
+            previous=value
+        raise ValueError('tabulated recoil damage quadrature did not converge')
+    lo=float(grid.min());hi=float(grid.max())
+    if lo==hi:return np.tile(at(lo),(len(grid),1))
+    nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=4.)]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
+    if flat:
+        left=np.nextafter(energies[1:],-np.inf);nodes=np.unique(np.r_[nodes,left[(left>lo)&(left<hi)]])
+    values=np.array(_evaluateAllRows(at,nodes))
+    for iteration in range(30):
+        additions={}
+        _evaluateAllRows(at,[float(a+(b-a)*f) for a,b in zip(nodes[:-1],nodes[1:]) for f in (.25,.5,.75)])
+        for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
+            for f in (.25,.5,.75):
+                E=float(a+(b-a)*f)
+                if not a<E<b:continue
+                value=at(E)
+                if np.any(np.abs(value-(va+(vb-va)*f))>.05*scales+rel4*np.abs(value)):additions[E]=value
+        if not additions:return np.stack([np.interp(grid,nodes,values[:,c]) for c in range(3)],axis=1)
+        if len(nodes)+len(additions)>20000:raise ValueError('tabulated recoil damage interpolation exceeds resource cap')
+        known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[E] for E in nodes])
+    raise ValueError('tabulated recoil damage interpolation did not converge')
+
+
 def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
     """Integrate LF7/9 directly, retaining the parameter interpolation law.
 
@@ -1191,6 +1511,15 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
     points; this is a sampled error criterion, with explicit resource caps.
     """
     from functools import lru_cache
+    key = _jointKey('analyticEmission', np.asarray(grid, dtype=float), id(spectrum), A, Z, ed)
+    kept = _jointRecall(key)
+    if kept is not None:
+        return kept
+    models = _jointModels()
+    if models:
+        values = _analyticEmissionDamageJoint(spectrum, grid, A, Z, ed, models)
+        _jointKeep(key, models, values)
+        return values[:, 0]
     gauss = {n: np.polynomial.legendre.leggauss(n) for n in (16, 32, 64, 128)}
     kink = _recoilKink(Z, A, Z, A); ed = _recoilThreshold(ed, Z, A, Z, A); scale = _damageScale()
     rt7, rt5 = _relTol(1e-7), _relTol(1e-5)
@@ -1251,6 +1580,92 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
                     additions[E] = value
         if not additions:
             output[active] = np.interp(validGrid, nodes, values)
+            return output
+        if len(nodes) + len(additions) > 20000:
+            raise ValueError("analytic emission damage interpolation exceeds capacity")
+        known = dict(zip(nodes, values)); known.update(additions)
+        nodes = np.array(sorted(known)); values = np.array([known[E] for E in nodes])
+    raise ValueError("analytic emission damage interpolation did not converge")
+
+
+def _analyticEmissionDamageJoint(spectrum, grid, A, Z, ed, models):
+    """:func:`_analyticEmissionDamage` for MT444 and the models at once, ``(len(grid), 3)``."""
+    from functools import lru_cache
+    partition = (Z, A, Z, A)
+    thresholds = [ed] + [_thresholdOf(float(m_.ed), *map(float, partition)) for m_ in models]
+    kinks = [_thresholdOf(2. * float(m_.ed) / 0.8, *map(float, partition)) for m_ in models]
+    edLow = min(thresholds)
+    scales = np.array([1.] + [0.8 / (2. * m_.ed) for m_ in models] + [1.] * (2 - len(models)))
+    rel7 = np.array([1e-7] + [max(1e-7, DISPLACEMENT_RTOL)] * 2)
+    rel5 = np.array([1e-5] + [max(1e-5, DISPLACEMENT_RTOL)] * 2)
+    gauss = {n: np.polynomial.legendre.leggauss(n) for n in (16, 32, 64, 128)}
+    zero = np.zeros(3)
+
+    @lru_cache(maxsize=30000)
+    def at(E):
+        theta = float(spectrum.theta.evaluate(E, outOfRange="hold"))
+        top = float(spectrum.upperBound(E))
+        if top <= 0:
+            return zero
+        if not theta > 0 or not np.isfinite(top):
+            raise ValueError("analytic damage requires positive theta and finite support")
+        vmax = np.sqrt(top / theta)
+        cuts = np.unique(np.r_[0., vmax, 1., 2., 4., 8.,
+            [abs(np.sqrt(E) + sign * np.sqrt(A * r)) / np.sqrt(theta)
+             for r in [*thresholds, *kinks] for sign in (-1., 1.)]])
+        cuts = cuts[(cuts >= 0) & (cuts <= vmax)]
+        previous = None
+        for order in (16, 32, 64, 128):
+            nodes, weights = gauss[order]
+            half = np.diff(cuts) / 2
+            v = ((cuts[:-1] + cuts[1:])[:, None] / 2 + half[:, None] * nodes).ravel()
+            w = (half[:, None] * weights).ravel()
+            ep = theta * v * v
+            root = np.sqrt(E * ep)
+            angular = np.zeros((3, len(ep)))
+            start = np.full(len(ep), -1.)
+            for r in sorted(set(thresholds), reverse=True):
+                stop = np.clip((E + ep - A * r) / np.maximum(2 * root, 1e-300), -1., 1.)
+                stop = np.where(stop > start, stop, start)
+                mu = (start[:, None] + stop[:, None]) / 2 + (stop[:, None] - start[:, None]) / 2 * nodes
+                recoil = np.maximum(0., (E + ep[:, None] - 2 * root[:, None] * mu) / A)
+                joint = _jointValues(recoil, partition, ed, models)
+                for c in range(3):
+                    angular[c] += np.sum(weights * joint[c], axis=1) * (stop - start) / 4
+                start = stop
+            density = spectrum.evaluate(E, ep) * (2 * theta * v)
+            mass = float(np.sum(w * density))
+            value = np.array([float(np.sum(w * density * angular[c])) for c in range(3)])
+            if (previous is not None and abs(mass - 1) <= 1e-9
+                    and np.all(np.abs(value - previous) <= .01 * scales + rel7 * np.abs(value))):
+                return value
+            previous = value
+        raise ValueError("analytic emission damage quadrature did not converge")
+    active = np.array([spectrum.upperBound(float(E)) > 0 for E in grid])
+    output = np.zeros((len(grid), 3))
+    if not np.any(active):
+        return output
+    validGrid = np.asarray(grid)[active]
+    lo, hi = float(np.min(validGrid)), float(np.max(validGrid))
+    if lo == hi:
+        output[active] = at(lo)
+        return output
+    parameters = spectrum.incidentEnergies()
+    nodes = np.unique(np.r_[lo, hi, parameters[(parameters > lo) & (parameters < hi)],
+                             _geometric(lo, hi, step=4.)])
+    nodes = nodes[(nodes >= lo) & (nodes <= hi)]
+    values = np.array([at(float(E)) for E in nodes])
+    for iteration in range(30):
+        additions = {}
+        for a, b, va, vb in zip(nodes[:-1], nodes[1:], values[:-1], values[1:]):
+            for f in (.25, .5, .75):
+                E = float(a + (b - a) * f)
+                value = at(E)
+                if np.any(np.abs(value - (va + (vb - va) * f)) > .05 * scales + rel5 * np.abs(value)):
+                    additions[E] = value
+        if not additions:
+            for c in range(3):
+                output[active, c] = np.interp(validGrid, nodes, values[:, c])
             return output
         if len(nodes) + len(additions) > 20000:
             raise ValueError("analytic emission damage interpolation exceeds capacity")
@@ -1778,6 +2193,23 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
             raise TypeError(f"MT{mt} qbar must be a model Function1d")
         _qAt(value, grid)
     tm = NEUTRON_REST_ENERGY * (A + 1.0)
+    # With displacements asked for, MT444's own pass computes them jointly where a
+    # quadrature can (two-body, tabulated and analytic emission) and keeps them for
+    # the models' passes below, which then only compute the rest.
+    jointModels = tuple(displacementModels(Z, ed).values()) if displacements else ()
+    jointTokens = (_JOINT.set(jointModels), _JOINT_STORE.set({})) if jointModels else None
+    try:
+        return _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarget,
+                            report, kinematic, displacements, tm, auxiliaryFissions)
+    finally:
+        if jointTokens is not None:
+            _JOINT.reset(jointTokens[0]); _JOINT_STORE.reset(jointTokens[1])
+
+
+def _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarget, report, kinematic,
+                 displacements, tm, auxiliaryFissions):
+    """The body of :func:`_heatingOf` (its arguments checked and prepared there)."""
+    from kika.nuclear_data import model as m
     perReaction: Dict[int, tuple] = {}
     photonEnergy: Dict[int, np.ndarray] = {}
     kinematicUpper: Dict[int, np.ndarray] = {}
