@@ -93,6 +93,9 @@ class ProbabilityTableOptions:
     errorTarget: Optional[float] = None
     #: How often, in ladders, the target is checked (FRENDY: 10).
     checkEvery: int = 10
+    #: The fewest ladders drawn before the target is first checked: PURR's
+    #: count, so a table that stops early is never noisier than PURR's.
+    minimumLadders: int = 64
     #: Background cross sections (b) of the Bondarenko factors in the statistics.
     sigma0: Tuple[float, ...] = (1.0, 10.0, 100.0, 1000.0, 10000.0)
 
@@ -101,6 +104,8 @@ class ProbabilityTableOptions:
             raise ValueError(f"errorTarget must be positive; got {self.errorTarget}")
         if self.checkEvery < 2:
             raise ValueError(f"checkEvery must be at least 2 ladders; got {self.checkEvery}")
+        if self.minimumLadders < 2:
+            raise ValueError(f"minimumLadders must be at least 2; got {self.minimumLadders}")
 
 
 def _nativeKernel():
@@ -407,7 +412,8 @@ def _tablesAt(job, keepLadders=False):
             for row, values in enumerate((totals, elastic, fission, capture)):
                 ls[it, ladder, row] = np.bincount(which, values, bins)
             lt[it, ladder] = [totals.sum(), elastic.sum(), fission.sum(), capture.sum()]
-        if (options.errorTarget is not None and (ladder + 1) % options.checkEvery == 0
+        if (options.errorTarget is not None and ladder + 1 >= options.minimumLadders
+                and (ladder + 1 - options.minimumLadders) % options.checkEvery == 0
                 and ladder + 1 < options.ladders):
             n = ladder + 1
             if _converged([_ladderStatistics(lc[it, :n], ls[it, :n], lt[it, :n], options.sigma0, transportXS[it], multiplySmooth)

@@ -219,14 +219,17 @@ def test_default_draws_every_ladder_and_reports_no_target():
 def test_an_error_target_stops_early_with_the_same_table_as_that_many_ladders():
     from kika.processing.resonances.probability_tables import _tablesAt
 
-    tables, stats = _tablesAt(_job(ladders=40, errorTarget=0.5, checkEvery=4))
+    tables, stats = _tablesAt(_job(ladders=40, errorTarget=0.5, checkEvery=4, minimumLadders=4))
     assert stats[0]["ladders"] == 4 and stats[0]["converged"] is True
     # The stream is the same: stopping after n ladders is drawing n ladders.
     fixed, _ = _tablesAt(_job(ladders=4))
     assert np.array_equal(tables, fixed)
     # An unreachable target runs to the cap and says so.
-    _, capped = _tablesAt(_job(ladders=8, errorTarget=1e-9, checkEvery=4))
+    _, capped = _tablesAt(_job(ladders=8, errorTarget=1e-9, checkEvery=4, minimumLadders=4))
     assert capped[0]["ladders"] == 8 and capped[0]["converged"] is False
+    # By default the target is first checked at PURR's 64 ladders, never before.
+    _, purr = _tablesAt(_job(ladders=100, errorTarget=0.5, checkEvery=4))
+    assert purr[0]["ladders"] == 64 and purr[0]["converged"] is True
 
 
 def test_error_target_must_be_positive():
@@ -236,6 +239,8 @@ def test_error_target_must_be_positive():
         ProbabilityTableOptions(errorTarget=0.0)
     with pytest.raises(ValueError):
         ProbabilityTableOptions(checkEvery=1)
+    with pytest.raises(ValueError):
+        ProbabilityTableOptions(minimumLadders=1)
 
 
 def test_report_line_names_only_reactions_with_an_average():
