@@ -324,7 +324,8 @@ to one drawn with $n$ ladders.
 - **LSSF=1 backgrounds are zero, not MF 3 minus the dilute average.** That is PURR's
   reading. MF 3 minus the average of the parameters would add a deterministic bias
   wherever the evaluation's MF 3 is not that average.
-- **Approximate line shapes by default.** The compiled kernel evaluates the Faddeeva
+- **Approximate line shapes by default.** The compiled kernel (`_urr_kernel.h`, AVX2 where
+  the processor has it) evaluates the Faddeeva
   function with Humlíček's W4 approximation (Humlíček 1982), relative error of order
   $10^{-4}$, the precision class of PURR's own rational approximations;
   `native=False` evaluates it exactly in NumPy, the reference the kernel is tested
@@ -457,9 +458,10 @@ U-235 −0.05 % (elastic), −0.11 % (fission), −0.07 % (capture); U-238 −0.
 +0.02 % (capture). Those are the bias of PURR's table measured with the same ladders
 ($1 - f$ times the understatement above), and nothing else. The factors were turned into
 barns with the smooth cross-sections of the official file. The time for U-235 at one
-temperature is 98 s for kika in one process, unchanged by the target (all 19 energies
-stop at 64 ladders), against 99 s for PURR on the same machine (`TODO(check)`: NJOY
-version and date of this timing).
+temperature is 28.7 s for kika in one process with the AVX2 kernel (71.6 s on the
+baseline instruction set; 98 s before the kernel was split by W4 region on 2026-10-17),
+unchanged by the target (all 19 energies stop at 64 ladders), against 99 s for PURR on the
+same machine (`TODO(check)`: NJOY version and date of this timing).
 
 ## Diagnostics
 

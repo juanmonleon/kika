@@ -557,6 +557,31 @@ static void humlicek(double x,double y,double *wr,double *wi) {
     *wr=w.r;*wi=w.i;
 }
 
+#if defined(_MSC_VER) && !defined(restrict)
+#define restrict __restrict
+#endif
+/* The URR ladder kernel, baseline and AVX2 (see _urr_kernel.h). No result of
+ * it depends on traps, so the compiler may if-convert and vectorize. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize ("no-trapping-math")
+#endif
+#define URR_NAME(x) urr_##x##_base
+#define URR_TARGET
+#include "_urr_kernel.h"
+#undef URR_NAME
+#undef URR_TARGET
+#ifdef RM_HAS_AVX2
+#define URR_NAME(x) urr_##x##_avx2
+#define URR_TARGET __attribute__((target("avx2")))
+#include "_urr_kernel.h"
+#undef URR_NAME
+#undef URR_TARGET
+#endif
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
+
 static PyObject *urr_ladder(PyObject *self,PyObject *args) {
     Py_ssize_t ns,nr;double c2,s2,delta,reachw,reachd;PyObject *o[10];Py_buffer b[10]={0};
     if (!PyArg_ParseTuple(args,"nnddddd" "OOOOOOOOOO",&ns,&nr,&c2,&s2,&delta,&reachw,&reachd,
@@ -573,26 +598,12 @@ static PyObject *urr_ladder(PyObject *self,PyObject *args) {
     }
     const double *es=b[0].buf,*er=b[1].buf,*gt=b[2].buf,*gn=b[3].buf,*gg=b[4].buf,*gf=b[5].buf,*s0=b[6].buf;
     double *el=b[7].buf,*ca=b[8].buf,*fi=b[9].buf;
-    const double rpi=1.7724538509055160273;
     Py_BEGIN_ALLOW_THREADS
-    for (Py_ssize_t r=0;r<nr;r++) {
-        if (!(gt[r]>0)) continue;
-        double reach=reachw*gt[r]+fmax(reachw*gt[r],reachd*delta);
-        double lo=er[r]-reach,hi=er[r]+reach;
-        Py_ssize_t a=0,z=ns;
-        while (a<z) {Py_ssize_t m=(a+z)/2;if (es[m]<lo) a=m+1; else z=m;}
-        double ratio=gn[r]/gt[r],cel=s0[r]*(c2-(1.-ratio)),sel=s0[r]*s2;
-        double ccap=s0[r]*gg[r]/gt[r],cfis=s0[r]*gf[r]/gt[r];
-        double xi=delta>0?gt[r]/delta:0.;
-        for (Py_ssize_t i=a;i<ns && es[i]<=hi;i++) {
-            double x=2.*(es[i]-er[r])/gt[r],psi,chi;
-            if (delta>0) {
-                double wr,wi;humlicek(0.5*xi*x,0.5*xi,&wr,&wi);
-                psi=0.5*rpi*xi*wr;chi=0.5*rpi*xi*wi;
-            } else {double d=1.+x*x;psi=1./d;chi=x/d;}
-            el[i]+=cel*psi+sel*chi;ca[i]+=ccap*psi;fi[i]+=cfis*psi;
-        }
-    }
+#ifdef RM_HAS_AVX2
+    if (use_avx2) urr_ladder_avx2(ns,nr,c2,s2,delta,reachw,reachd,es,er,gt,gn,gg,gf,s0,el,ca,fi);
+    else
+#endif
+    urr_ladder_base(ns,nr,c2,s2,delta,reachw,reachd,es,er,gt,gn,gg,gf,s0,el,ca,fi);
     Py_END_ALLOW_THREADS
     for (int j=0;j<10;j++) if (b[j].obj!=NULL) PyBuffer_Release(&b[j]);
     Py_RETURN_NONE;
