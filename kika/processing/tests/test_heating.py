@@ -561,3 +561,54 @@ def test_an_mf6_capture_keeps_the_compound_recoil():
     result=H.heatingOf(NS(reactions=[rx]),E,{102:np.ones(len(E))},awr=A,Z=17,evaluation=NS(findReactionByENDF_MT=lambda mt:source))
     expected=E/(A+1)+binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1))
     np.testing.assert_allclose(result.kerma,expected,rtol=1e-12)
+
+
+def test_displacement_models_follow_nordlund():
+    # N_d = 0 below E_d, 1 up to 2E_d/0.8, 0.8 T/(2E_d) xi above; arc-dpa's xi
+    # tends to c at high damage energy (b < 0), so arc/NRT -> c.
+    nrt = H.DisplacementModel("nrt", 40.0)
+    arc = H.displacementModels(26, 40.0)["arc-dpa"]
+    assert (arc.ed, arc.b, arc.c) == (40.0, -0.568, 0.286)
+    T = np.array([10., 39.999, 40., 99.9, 100., 1e3, 1e8])
+    np.testing.assert_array_equal(nrt.count(T)[:5], [0, 0, 1, 1, 0.8 * 100 / 80])
+    np.testing.assert_allclose(nrt.count(T)[5:], 0.8 * T[5:] / 80, rtol=1e-15)
+    assert arc.count(np.array([100.]))[0] == pytest.approx(1.0)       # xi(2E_d/0.8) = 1
+    assert arc.count(np.array([1e8]))[0] / nrt.count(np.array([1e8]))[0] == pytest.approx(0.286, rel=2e-2)
+    assert set(H.displacementModels(92, 25.0)) == {"nrt"}
+    assert set(H.displacementModels(74, 90.0)) == {"nrt", "arc-dpa"}
+    assert H.displacementModels(74, 90.0)["arc-dpa"].ed == 70.0       # its own E_d, not HEATR's
+
+
+def test_displacements_reach_the_quadrature_threads():
+    # A pool thread does not inherit a context variable: with threads, the model
+    # must still be the one the caller set (else it silently counts MT444).
+    form = m.AngularTwoBody(angular=m.Isotropic2d(), productFrame=m.Frame.centerOfMass)
+    E = np.geomspace(1e3, 1e7, 24)
+    token = H._DISPLACEMENTS.set(H.DisplacementModel("nrt", 40.0))
+    try:
+        one = H._twoBodyDamage(form, E, 55.4, 0., 26, 40.0, elastic=True)
+        threads = H._energyThreads.set(4)
+        try:
+            four = H._twoBodyDamage(form, E, 55.4, 0., 26, 40.0, elastic=True)
+        finally:
+            H._energyThreads.reset(threads)
+    finally:
+        H._DISPLACEMENTS.reset(token)
+    damage = H._twoBodyDamage(form, E, 55.4, 0., 26, 40.0, elastic=True)
+    np.testing.assert_array_equal(one, four)
+    assert np.all(one[-5:] < damage[-5:] / 10)     # displacements, not eV
+
+
+def test_heating_result_carries_nrt_and_arc_dpa():
+    from types import SimpleNamespace as NS
+    form = m.AngularTwoBody(angular=m.Isotropic2d(), productFrame=m.Frame.centerOfMass)
+    n = NS(pid="n", distribution=NS(forms={"MonteCarlo": form}), multiplicity=None)
+    rx = NS(ENDF_MT=2, outputChannel=NS(Q=NS(value=0.), products=[n]))
+    E = np.array([1e4, 1e6])
+    assert H.heatingOf(NS(reactions=[rx]), E, {2: np.array([3., 2.])}, awr=55.4, Z=26).displacements == {}
+    result = H.heatingOf(NS(reactions=[rx]), E, {2: np.array([3., 2.])}, awr=55.4, Z=26, displacements=True)
+    assert set(result.displacements) == {"nrt", "arc-dpa"}
+    nrt, arc = result.displacements["nrt"], result.displacements["arc-dpa"]
+    np.testing.assert_array_equal(nrt, np.array([3., 2.]) * result.displacementsPerReaction["nrt"][2])
+    assert np.all(arc < nrt) and np.all(arc > 0.2 * nrt)
+    assert any("arc-dpa with E_d = 40 eV" in note for note in result.notes)

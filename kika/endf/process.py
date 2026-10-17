@@ -358,6 +358,7 @@ class EndfProcessing:
         self.source_format = source_format
         self._aside = {}                 # GNDS: containers set aside for the reconstruction
         self._heating = {}               # {T: {301: (E, h), 444: (E, d)}}, 0.0 for 0 K
+        self._displacements = {}         # {T: {"nrt": (E, n), "arc-dpa": (E, n)}}
 
     def _written(self, fmt, t0, path, error=None, summary="", **details):
         """Append this output's own ``write`` stage (several outputs, several stages)."""
@@ -433,6 +434,20 @@ class EndfProcessing:
         if not self._heating:
             return None
         return {T: dict(v) for T, v in self._heating.items()}
+
+    @property
+    def displacements(self) -> dict | None:
+        """``{T: {"nrt": (E, n), "arc-dpa": (E, n)}}`` when the heating stage ran.
+
+        ``Σ_r σ_r N_d,r`` in b·displacements on MT444's grid, fission included: NRT
+        with the damage's ``ed``, and arc-dpa (Nordlund et al. 2018) for Fe, Ni,
+        Cu, Pd, Pt and W only, the elements its constants exist for. No ENDF MT
+        holds them, so no file kika writes carries them
+        (:class:`kika.processing.heating.DisplacementModel`).
+        """
+        if not self._displacements:
+            return None
+        return {T: dict(v) for T, v in self._displacements.items()}
 
     def write_pendf(self, path, *, progress: Progress | None = None, temperatures=None,
                     mat=None, workers=None):
@@ -1193,13 +1208,14 @@ def _heating(run, plan, report):
         for i, T in enumerate(temps):
             grid, sigma = _heating_grid(run, T)
             result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, evaluation=work,
-                               zaTarget=1000 * Z + A, workers=plan.workers)
+                               zaTarget=1000 * Z + A, workers=plan.workers, displacements=True)
             kerma = result.kerma
             fission = _fission_heating(out, work, grid, sigma, awr)
             if fission is not None:
                 kerma = kerma + fission
             grid = _contiguous(grid)
             tables[T] = {301: (grid, _contiguous(kerma)), 444: (grid, _contiguous(result.damage))}
+            run._displacements[T] = {name: (grid, _contiguous(v)) for name, v in result.displacements.items()}
             notes = result.notes
             report("heating", 0.5 + 0.5 * (i + 1) / len(temps))
     except Exception as error:
@@ -1212,9 +1228,11 @@ def _heating(run, plan, report):
     details["notes"] = list(notes)
     details["n_points"] = {T: int(len(t[301][0])) for T, t in tables.items()}
     fissile = any(r.ENDF_MT in (18, 19) for r in _entries(work).values())
+    models = sorted({name for v in run._displacements.values() for name in v})
     summary = (f"MT301 (KERMA) and MT444 (damage) at {', '.join(f'{T:g}' for T in temps)} K, as NJOY "
                f"HEATR with local = 0" + ("; fission from MF1/458 (EFR + EGP) less its prompt photons"
-                                          if fissile else ""))
+                                          if fissile else "")
+               + (f"; displacements ({', '.join(models)}) in EndfProcessing.displacements" if models else ""))
     return StageReport("heating", "done", time.perf_counter() - t0, None, summary, details), tables
 
 

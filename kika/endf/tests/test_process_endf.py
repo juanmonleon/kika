@@ -412,6 +412,23 @@ def test_the_heating_stage_gives_mt301_and_mt444_on_each_mt1_grid(heated_run):
         assert np.all(h[x > 1.0] > 0)
 
 
+def test_the_heating_stage_gives_the_displacements_on_mt444s_grid(heated_run):
+    # Fe-56: NRT and arc-dpa (Nordlund's constants exist for iron), b*displacements;
+    # at high energy NRT is 0.8 MT444/(2 E_d) and arc-dpa a fraction of it.
+    shown = heated_run.displacements
+    assert set(shown) == {0.0, 293.6}
+    for T, tables in shown.items():
+        assert set(tables) == {"nrt", "arc-dpa"}
+        x, d = heated_run.heating[T][444]
+        xn, nrt = tables["nrt"]
+        _, arc = tables["arc-dpa"]
+        assert np.array_equal(x, xn)
+        high = x > 1e6
+        np.testing.assert_allclose(nrt[high], 0.8 * d[high] / 80.0, rtol=1e-3)
+        assert np.all(arc[high] < 0.5 * nrt[high]) and np.all(arc[high] > 0.25 * nrt[high])
+    assert "displacements" in heated_run.stage("heating").summary
+
+
 def test_the_pendf_carries_the_heating_in_every_material(heated_run, tmp_path):
     from kika._records import parse_number
     path = heated_run.write_pendf(tmp_path / "fe56.pendf")

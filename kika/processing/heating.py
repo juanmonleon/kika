@@ -49,7 +49,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
-__all__ = ["HeatingResult", "heatingOf", "displacementEnergy", "lindhard", "NEUTRON_REST_ENERGY"]
+__all__ = ["HeatingResult", "heatingOf", "displacementEnergy", "lindhard", "NEUTRON_REST_ENERGY",
+           "DisplacementModel", "displacementModels", "ARC_DPA"]
 
 #: m_n c² in eV, from NJOY's constants (``phys.f90``: amassn·amu·c²/ev).
 NEUTRON_REST_ENERGY = 1.00866491595 * 931.49410242e6
@@ -77,12 +78,65 @@ except ModuleNotFoundError as exc:  # the NumPy reference path stays the definit
     if exc.name != "kika.processing._heating_native":
         raise
     _heating_native = None
-if _heating_native is not None and _heating_native.API_VERSION != 1:
+if _heating_native is not None and _heating_native.API_VERSION != 2:
     raise ImportError("rebuild kika's native heating extension (API version mismatch)")
 
 #: Threads for the independent incident energies of a damage quadrature: set by
 #: heatingOf from the processing's ``workers`` for the length of one call.
 _energyThreads = contextvars.ContextVar("kika_heating_threads", default=1)
+
+
+@dataclass(frozen=True)
+class DisplacementModel:
+    """Displacements per primary recoil, from its damage energy ``T_d`` (Nordlund 2018).
+
+    ``N_d = 0`` below ``ed``, 1 up to ``2 ed/0.8``, and ``0.8 T_d/(2 ed) xi(T_d)``
+    above, with ``xi = 1`` for NRT (``b = 0, c = 1``) and, for arc-dpa,
+    ``xi = (1 - c)/(2 ed/0.8)^b T_d^b + c`` (K. Nordlund et al., Nat. Commun. 9,
+    1084 (2018), eqs. 4-5). ``T_d`` is the Lindhard-Robinson damage energy of the
+    recoil; ``ed`` here is the model's threshold on it, not HEATR's threshold on
+    the recoil energy that MT444 keeps.
+    """
+
+    name: str
+    ed: float
+    b: float = 0.0
+    c: float = 1.0
+
+    @property
+    def mode(self) -> int:
+        """1 for NRT, 2 for arc-dpa: the native kernel's switch (0 is MT444)."""
+        return 1 if self.b == 0.0 and self.c == 1.0 else 2
+
+    def count(self, T):
+        T = np.asarray(T, dtype=float)
+        high = 2.0 * self.ed / 0.8
+        n = (0.8 * T) / (2.0 * self.ed)
+        if self.mode == 2:
+            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                n = n * ((1.0 - self.c) / np.power(high, self.b) * np.power(T, self.b) + self.c)
+        return np.where(T < self.ed, 0.0, np.where(T < high, 1.0, n))
+
+
+#: arc-dpa constants ``Z -> (E_d, b, c)``, Nordlund et al. 2018, table 1 (MD fits for
+#: elemental metals; no other element has them, and kika gives no arc-dpa for it).
+ARC_DPA = {26: (40.0, -0.568, 0.286), 29: (33.0, -0.68, 0.16), 28: (39.0, -1.01, 0.23),
+           46: (41.0, -0.88, 0.15), 78: (42.0, -1.12, 0.11), 74: (70.0, -0.56, 0.12)}
+
+
+def displacementModels(Z: int, ed: float) -> Dict[str, DisplacementModel]:
+    """NRT with the processing's ``ed``; arc-dpa where its constants exist."""
+    models = {"nrt": DisplacementModel("nrt", float(ed))}
+    if int(Z) in ARC_DPA:
+        edArc, b, c = ARC_DPA[int(Z)]
+        models["arc-dpa"] = DisplacementModel("arc-dpa", edArc, b, c)
+    return models
+
+
+#: The displacement model the damage quadratures evaluate (None: MT444's damage
+#: energy). Set by _heatingOf for its displacement passes; _evaluateAll carries it
+#: into its threads.
+_DISPLACEMENTS = contextvars.ContextVar("kika_displacement_model", default=None)
 
 
 def _evaluateAll(at, energies) -> np.ndarray:
@@ -98,8 +152,11 @@ def _evaluateAll(at, energies) -> np.ndarray:
     threads = _energyThreads.get()
     if threads > 1 and len(distinct) > 1:
         from concurrent.futures import ThreadPoolExecutor
+        # A pool thread does not inherit this context (the displacement model):
+        # each task runs in a copy made here.
+        contexts = [contextvars.copy_context() for _ in distinct]
         with ThreadPoolExecutor(max_workers=min(threads, len(distinct))) as pool:
-            for _ in pool.map(at, distinct):
+            for _ in pool.map(lambda job: job[0].run(at, job[1]), zip(contexts, distinct)):
                 pass
     return np.array([at(E) for E in energies])
 
@@ -129,6 +186,12 @@ class HeatingResult:
 
     #: HEATR diagnostic upper energy per collision; absent for unresolved recoils.
     kinematicUpper: Dict[int, np.ndarray] = field(default_factory=dict)
+    #: ``model -> Σ_r σ_r N_d,r`` in b·displacements on ``grid``, fission included:
+    #: ``"nrt"`` always, ``"arc-dpa"`` where its constants exist (:class:`DisplacementModel`).
+    #: A dpa rate is this times the flux and the time.
+    displacements: Dict[str, np.ndarray] = field(default_factory=dict)
+    #: ``model -> mt -> N_d`` displacements per reaction.
+    displacementsPerReaction: Dict[str, Dict[int, np.ndarray]] = field(default_factory=dict)
 
     def partialsOf(self, sigma, requested, *, fissionKerma=None,
                    fissionPhotonEnergy=None, fissionKinematicEnergy=None, local=False):
@@ -274,14 +337,20 @@ def _lindhardConstants(Zr, Ar, Zl, Al):
 
 
 def lindhard(E, Zr, Ar, Zl, Al, ed):
-    """Damage energy of a recoil ``(Zr, Ar)`` of energy ``E`` in a lattice ``(Zl, Al)`` (``df``)."""
+    """Damage energy of a recoil ``(Zr, Ar)`` of energy ``E`` in a lattice ``(Zl, Al)`` (``df``).
+
+    Under a :class:`DisplacementModel` (``_DISPLACEMENTS``), its displacements instead.
+    """
     E = np.asarray(E, dtype=float)
     if Zr == 0:
         return np.zeros_like(E)
     el, fl = _lindhardConstants(Zr, Ar, Zl, Al)
+    model = _DISPLACEMENTS.get()
     if E.ndim == 0:
         ep = np.maximum(E, 0.0) / el
         out = E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
+        if model is not None:
+            return model.count(out)
         return np.where(E >= ed, out, 0.0)
     # The same expression in place, in its order of operations: the damage
     # quadratures call this on millions of recoils at a time, and the
@@ -297,6 +366,10 @@ def lindhard(E, Zr, Ar, Zl, Al, ed):
     out *= fl
     out += 1.0
     np.divide(E, out, out=out)
+    if model is not None:
+        # Displacements from the damage energy itself: the model's threshold is
+        # on T_d, so HEATR's on the recoil energy does not apply.
+        return model.count(out)
     out[~(E >= ed)] = 0.0
     return out
 
@@ -805,6 +878,76 @@ def _distribution(product):
 # Damage per path
 # ----------------------------------------------------------------------
 
+def _damageScale() -> float:
+    """What one eV of damage energy is worth in the active units: 1 for MT444,
+    ``0.8/(2 E_d)`` displacements under a model, so that the quadratures' absolute
+    tolerances (stated in eV) keep their relative weight."""
+    model = _DISPLACEMENTS.get()
+    return 1.0 if model is None else 0.8 / (2.0 * model.ed)
+
+
+#: Relative tolerance of the displacement quadratures: N_d's own constants carry
+#: 2-10 % (Nordlund et al. 2018, table 1), so 1e-4 is ample; MT444 keeps its own.
+DISPLACEMENT_RTOL = 1e-4
+
+
+def _relTol(rtol: float) -> float:
+    """A damage quadrature's relative tolerance: its own for MT444, at least
+    DISPLACEMENT_RTOL under a displacement model."""
+    return rtol if _DISPLACEMENTS.get() is None else max(rtol, DISPLACEMENT_RTOL)
+
+
+def _recoilThreshold(ed, Zr, Ar, Zl, Al) -> float:
+    """The recoil energy at which a quadrature splits: HEATR's ``ed`` for MT444; under
+    a displacement model, the recoil energy whose damage energy is the model's
+    ``E_d``, where ``N_d`` steps from 0 to 1 (a cut there is what lets the
+    quadrature converge on the step)."""
+    model = _DISPLACEMENTS.get()
+    if model is None or Zr == 0:
+        return ed
+    return _thresholdOf(float(model.ed), float(Zr), float(Ar), float(Zl), float(Al))
+
+
+from functools import lru_cache as _lru_cache
+
+
+@_lru_cache(maxsize=4096)
+def _thresholdOf(target, Zr, Ar, Zl, Al) -> float:
+    el, fl = _lindhardConstants(Zr, Ar, Zl, Al)
+
+    def T(E):
+        ep = E / el
+        return E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
+
+    lo, hi = target, 2.0 * target
+    while T(hi) < target:
+        lo, hi = hi, 2.0 * hi
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if T(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo <= 1e-12 * hi:
+            break
+    return hi
+
+
+def _recoilKink(Zr, Ar, Zl, Al) -> List[float]:
+    """Under a displacement model, the recoil energy where ``T_d = 2 E_d/0.8``: N_d's
+    kink (constant 1 below, linear above), where a quadrature must split too."""
+    model = _DISPLACEMENTS.get()
+    if model is None or Zr == 0:
+        return []
+    return [_thresholdOf(2.0 * float(model.ed) / 0.8, float(Zr), float(Ar), float(Zl), float(Al))]
+
+
+def _nativeModel():
+    """``(mode, ed, b, c)`` of the active displacement model for the native kernel."""
+    model = _DISPLACEMENTS.get()
+    return (0, 0.0, 0.0, 1.0) if model is None else (model.mode, float(model.ed), float(model.b), float(model.c))
+
+
 def _twoBodyChunk(cuts,u,w,x,p,offset,slope,partition,ed,hist):
     """One angular quadrature of :func:`_twoBodyDamage` before its mass division:
     Gauss nodes ``u``/``w`` on each panel between ``cuts``, the recoil
@@ -813,7 +956,8 @@ def _twoBodyChunk(cuts,u,w,x,p,offset,slope,partition,ed,hist):
     if _heating_native is None:
         return _twoBodyChunkNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist)
     el,fl=(float(c) for c in _lindhardConstants(*partition))
-    return _heating_native.twobody_chunk(cuts,u,w,x,p,float(offset),float(slope),el,fl,float(ed),bool(hist))
+    return _heating_native.twobody_chunk(cuts,u,w,x,p,float(offset),float(slope),el,fl,float(ed),bool(hist),
+        *_nativeModel())
 
 
 def _twoBodyChunkNumpy(cuts,u,w,x,p,offset,slope,partition,ed,hist):
@@ -835,6 +979,7 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  """
  from functools import lru_cache
  grid=np.asarray(grid,dtype=float)
+ kink=_recoilKink(Z,A,Z,A);ed=_recoilThreshold(ed,Z,A,Z,A);scale=_damageScale();rt8=_relTol(1e-8);rt5=_relTol(1e-5)
  angular=getattr(form,'angular',None);isotropic=angular is None or type(angular).__name__=='Isotropic2d'
  if isotropic:energies=np.array([grid[0]]);tables=None;flat=False
  else:energies,tables,flat=_tables(angular)
@@ -856,7 +1001,7 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
   if last<=-1:return 0.
   j=int(np.clip(np.searchsorted(energies,E,side='right')-1,0,len(energies)-1));k=min(j+1,len(energies)-1)
   f=float(np.clip((E-energies[j])/(energies[k]-energies[j]),0,1)) if k!=j and not flat else 0.
-  rcuts=max(ed,1e-12)*10.**np.arange(13);mcuts=(offset-rcuts)/slope;mcuts=mcuts[(mcuts>-1)&(mcuts<last)]
+  rcuts=np.r_[max(ed,1e-12)*10.**np.arange(13),kink];mcuts=(offset-rcuts)/slope;mcuts=mcuts[(mcuts>-1)&(mcuts<last)]
   value=0.
   for idx,weight in ((j,1-f),(k,f)):
    if weight==0:continue
@@ -867,7 +1012,7 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
    for n in (8,16,32,64):
     u,w=gauss[n]
     integral=_twoBodyChunk(cuts,u,w,x,p,offset,slope,(Z,A,Z,A),ed,hist)/norm
-    if previous is not None and abs(integral-previous)<=.001+1e-8*abs(integral):break
+    if previous is not None and abs(integral-previous)<=.001*scale+rt8*abs(integral):break
     previous=integral
    else:raise ValueError('two-body damage angular quadrature did not converge')
    value+=weight*integral
@@ -886,7 +1031,7 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
     e=float(a+(b-a)*fraction)
     if not a<e<b:continue
     v=at(e)
-    if abs(v-(va+(vb-va)*fraction))>.01+1e-5*abs(v):additions[e]=v
+    if abs(v-(va+(vb-va)*fraction))>.01*scale+rt5*abs(v):additions[e]=v
   if not additions:return np.interp(grid,nodes,values)
   if len(nodes)+len(additions)>20000:raise ValueError('two-body damage interpolation exceeds resource cap')
   known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[e] for e in nodes])
@@ -940,7 +1085,8 @@ def _emissionChunk(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed
     # view (every ENDF-decoded MF6 recoil spectrum: Fe-56 B-VIII.1 refused).
     cuts,g,w,mu,wm,x,p=(np.ascontiguousarray(a,dtype=float) for a in (cuts,g,w,mu,wm,x,p))
     return _heating_native.emission_chunk(cuts,g,w,mu,wm,x,p,float(low),float(width),float(oldwidth),
-        float(incident),float(denominator),float(denominator*ed),el,fl,float(ed),bool(hist),bool(lab),noRecoil)
+        float(incident),float(denominator),float(denominator*ed),el,fl,float(ed),bool(hist),bool(lab),noRecoil,
+        *_nativeModel())
 
 
 def _emissionChunkNumpy(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed,partition,hist,lab):
@@ -978,6 +1124,8 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
     # a neutron emission instead uses the target recoil divided by A.
     if particle is None:recoilZ,recoilA,denominator,incidentFactor=Z,A,A,1.
     else:recoilZ,recoilA,incidentFactor=particle;denominator=1.
+    kink=_recoilKink(recoilZ,recoilA,Z,A);ed=_recoilThreshold(ed,recoilZ,recoilA,Z,A);scale=_damageScale()
+    rt5,rt4=_relTol(1e-5),_relTol(1e-4)
     energies,tables,flat=_tables(spectrum)
     if any(getattr(t,'numberOfDiscrete',0) for t in tables):
         raise NotImplementedError('tabulated neutron recoil with discrete outgoing lines')
@@ -1004,13 +1152,14 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
                 x,p,hist,oldwidth=prepared[i]
                 mapped=low+(x-x[0])*width/oldwidth
                 incident=incidentFactor*E
-                cuts=np.unique(np.r_[mapped,(np.sqrt(incident)-np.sqrt(denominator*ed))**2,(np.sqrt(incident)+np.sqrt(denominator*ed))**2])
+                cuts=np.unique(np.r_[mapped,[(np.sqrt(incident)+sign*np.sqrt(denominator*r))**2
+                                             for r in [ed,*kink] for sign in (-1.,1.)]])
                 cuts=cuts[(cuts>=mapped[0])&(cuts<=mapped[-1])]
                 for start in range(0,len(cuts)-1,256):
                     stop=min(start+256,len(cuts)-1)
                     value+=weight*_emissionChunk(cuts[start:stop+1],g,w,mu,wm,x,p,low,width,oldwidth,incident,denominator,ed,
                                                  (recoilZ,recoilA,Z,A),bool(hist),lab)
-            if previous is not None and abs(value-previous)<=.01+1e-5*abs(value):return value
+            if previous is not None and abs(value-previous)<=.01*scale+rt5*abs(value):return value
             previous=value
         raise ValueError('tabulated recoil damage quadrature did not converge')
     lo=float(grid.min());hi=float(grid.max())
@@ -1027,7 +1176,7 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
                 E=float(a+(b-a)*f)
                 if not a<E<b:continue
                 value=at(E)
-                if abs(value-(va+(vb-va)*f))>.05+1e-4*abs(value):additions[E]=value
+                if abs(value-(va+(vb-va)*f))>.05*scale+rt4*abs(value):additions[E]=value
         if not additions:return np.interp(grid,nodes,values)
         if len(nodes)+len(additions)>20000:raise ValueError('tabulated recoil damage interpolation exceeds resource cap')
         known=dict(zip(nodes,values));known.update(additions);nodes=np.array(sorted(known));values=np.array([known[E] for E in nodes])
@@ -1043,6 +1192,8 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
     """
     from functools import lru_cache
     gauss = {n: np.polynomial.legendre.leggauss(n) for n in (16, 32, 64, 128)}
+    kink = _recoilKink(Z, A, Z, A); ed = _recoilThreshold(ed, Z, A, Z, A); scale = _damageScale()
+    rt7, rt5 = _relTol(1e-7), _relTol(1e-5)
     @lru_cache(maxsize=30000)
     def at(E):
         theta = float(spectrum.theta.evaluate(E, outOfRange="hold"))
@@ -1053,8 +1204,8 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
             raise ValueError("analytic damage requires positive theta and finite support")
         vmax = np.sqrt(top / theta)
         cuts = np.unique(np.r_[0., vmax, 1., 2., 4., 8.,
-            abs(np.sqrt(E) - np.sqrt(A * ed)) / np.sqrt(theta),
-            (np.sqrt(E) + np.sqrt(A * ed)) / np.sqrt(theta)])
+            [abs(np.sqrt(E) + sign * np.sqrt(A * r)) / np.sqrt(theta)
+             for r in [ed, *kink] for sign in (-1., 1.)]])
         cuts = cuts[(cuts >= 0) & (cuts <= vmax)]
         previous = None
         for order in (16, 32, 64, 128):
@@ -1072,7 +1223,7 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
             mass = float(np.sum(w * density))
             value = float(np.sum(w * density * angular))
             if (previous is not None and abs(mass - 1) <= 1e-9
-                    and abs(value - previous) <= .01 + 1e-7 * abs(value)):
+                    and abs(value - previous) <= .01 * scale + rt7 * abs(value)):
                 return value
             previous = value
         raise ValueError("analytic emission damage quadrature did not converge")
@@ -1096,7 +1247,7 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
             for f in (.25, .5, .75):
                 E = float(a + (b - a) * f)
                 value = at(E)
-                if abs(value - (va + (vb - va) * f)) > .05 + 1e-5 * abs(value):
+                if abs(value - (va + (vb - va) * f)) > .05 * scale + rt5 * abs(value):
                     additions[E] = value
         if not additions:
             output[active] = np.interp(validGrid, nodes, values)
@@ -1236,7 +1387,7 @@ def _tabulateHeavy(form, context):
     return tabulated
 
 
-def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes):
+def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damageOnly=False):
     """``(deposit, damage)`` of a reaction's charged particles and recoils.
 
     What HEATR takes from an MF6 section's ``izap > 1`` subsections: each
@@ -1276,13 +1427,15 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes):
         awp = _massRatio(product.pid, evaluation.PoPs)
         k = _Kinematics(A=A, Q=Q, awp=awp)
         y = np.asarray(multiplicity.evaluate(grid), dtype=float)
-        try:
-            mean = _meanEnergyOf(tabulated, grid, k)
-        except (ValueError, NotImplementedError) as exc:
-            notes.append(f"MT{reaction.ENDF_MT} {product.pid}: no mean energy ({exc}); left out")
-            continue
+        if not damageOnly:
+            # The displacement passes need the damage alone; the deposit is MT444's pass's.
+            try:
+                mean = _meanEnergyOf(tabulated, grid, k)
+            except (ValueError, NotImplementedError) as exc:
+                notes.append(f"MT{reaction.ENDF_MT} {product.pid}: no mean energy ({exc}); left out")
+                continue
+            deposit = deposit + y * mean
         found = True
-        deposit = deposit + y * mean
         active=y!=0
         if np.any(active):
             damage[active]+=y[active]*_particleDamage(tabulated,grid[active],k,za//1000,awp,Z,A,ed)
@@ -1567,7 +1720,7 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
               qm: Optional[Dict[int, float]] = None, ed: Optional[float] = None,
               qa: Optional[Dict[int, float]] = None, qbar: Optional[Dict[int, object]] = None,
               evaluation=None, zaTarget: Optional[int] = None,
-              report=None, kinematic: bool = False) -> HeatingResult:
+              report=None, kinematic: bool = False, displacements: bool = False) -> HeatingResult:
     """KERMA (local and not) and damage of a processed suite on ``grid``.
 
     ``suite`` is the processed suite (:func:`kika.hdf5.processing.processSuite`
@@ -1587,6 +1740,9 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     initialises that threshold before reading qbar. Tables must cover the whole
     requested grid. Capture with explicit photons and MT5 explicit
     deposition keep their evaluated recoil/deposit convention.
+    ``displacements=True`` adds the NRT and arc-dpa displacements
+    (:attr:`HeatingResult.displacements`): one more pass of the damage quadratures
+    per model, so only the outputs that carry them ask for them.
     ``kinematic=True`` computes the additional MT443 diagnostic arrays.
     They are omitted by default, saving time and memory for normal heating.
     For fission with MF1/458, that release retains authority as in HEATR;
@@ -1628,6 +1784,8 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
     kerma = np.zeros(len(grid))
     local = np.zeros(len(grid))
     damage = np.zeros(len(grid))
+    #: (mt, sigma, live, damage function, shared key) of every damage term.
+    passes: List[tuple] = []
     notes: List[str] = [f"heating by kika (energy balance on the Monte Carlo tables; "
                         f"damage with ed = {ed:g} eV)"] + [f"as HEATR: {a}" for a in HEATR_APPROXIMATIONS]
     for mt in sorted(auxiliaryFissions):
@@ -1728,30 +1886,39 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         # (Fe-56 capture at 0.0253 eV: 901 - 301 is the photons' 7.489 MeV, not
         # HEATR's local=1 balance E + Q = 7.646 MeV).
         local += np.where(live, s * (carried + exact), 0.0)
-        # damage
-        if mt == 2 or (51 <= mt <= 90 and neutrons):
-            d = _twoBodyDamage(neutrons[0][1], grid, A, Q, Z, ed, elastic=(mt == 2)) if neutrons \
-                else np.zeros(len(grid))
-        elif mt == 102:
-            if photons and twoBodyCapture is not None:
-                y = _yield(photons[0][0], grid)
-                recoil = np.divide(carried, y, out=np.zeros_like(carried), where=y > 0)
-                d = y * lindhard(recoil, Z, A + 1, Z, A, ed)
-            else:
+        # damage: MT444 now, and again under each displacement model below
+        def reactionDamage(mt=mt, Q=Q, Qkin=Qkin, neutrons=neutrons, photons=photons,
+                           twoBodyCapture=twoBodyCapture, carried=carried, heavy=heavy,
+                           captureCompound=captureCompound, captureDomain=captureDomain,
+                           reaction=reaction):
+            if mt == 2 or (51 <= mt <= 90 and neutrons):
+                return _twoBodyDamage(neutrons[0][1], grid, A, Q, Z, ed, elastic=(mt == 2)) if neutrons \
+                    else np.zeros(len(grid))
+            if mt == 102:
+                if photons and twoBodyCapture is not None:
+                    y = _yield(photons[0][0], grid)
+                    recoil = np.divide(carried, y, out=np.zeros_like(carried), where=y > 0)
+                    return y * lindhard(recoil, Z, A + 1, Z, A, ed)
                 d = _captureDamage(photons, grid, A, Z, ed, _qAt(Qkin, grid), fixedPrimary=captureCompound)
                 if captureCompound and photons:
                     fallback=_captureDamage([],grid,A,Z,ed,_qAt(Qkin,grid))
                     d=d+np.where(captureDomain,0.,fallback)
-        elif heavy is not None:
-            d = heavy[1]
-        elif neutrons:
-            d = np.zeros(len(grid))
-            for product, form in neutrons[:1]:
-                d = _emissionDamage(form, grid, A, Z, ed)
-        elif mt > 102:
-            d = _absorptionDamage(mt, grid, A, Z, ed, _qAt(Qkin, grid))
-        else:
-            d = np.zeros(len(grid))
+                return d
+            if heavy is not None:
+                if _DISPLACEMENTS.get() is None:
+                    return heavy[1]
+                again = _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget or 1000 * Z, ed, [], damageOnly=True)
+                return again[1] if again is not None else np.zeros(len(grid))
+            if neutrons:
+                d = np.zeros(len(grid))
+                for product, form in neutrons[:1]:
+                    d = _emissionDamage(form, grid, A, Z, ed)
+                return d
+            if mt > 102:
+                return _absorptionDamage(mt, grid, A, Z, ed, _qAt(Qkin, grid))
+            return np.zeros(len(grid))
+        d = reactionDamage()
+        passes.append((mt, s, live, reactionDamage, None))
         damage += np.where(live, s * d, 0.0)
         perReaction[mt] = (carried, carried + exact, d)
         photonEnergy[mt] = exact
@@ -1796,6 +1963,7 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         if key not in fissionDamage:
             fissionDamage[key] = _emissionDamage(prompt[1], grid, A, Z, ed)
         d = fissionDamage[key]
+        passes.append((mt, s, s > 0, lambda form=prompt[1]: _emissionDamage(form, grid, A, Z, ed), key))
         damage += np.where(s > 0, s * d, 0.0)
         perReaction[mt] = (np.zeros(len(grid)), np.zeros(len(grid)), d)
     # Photons stated on a sum (MF13 on MT3, MT4, 103-107): carried away for MT301
@@ -1819,8 +1987,42 @@ def _heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float, Z: int,
         kerma -= np.where(s > 0, s * gammas, 0.0)
         photonEnergy[mt] = gammas
         notes.append(f"MT{mt}: {len(photons)} photons stated on the sum, taken out of MT301")
+    # Displacements: the same damage terms, with each model's N_d(T_d) for each
+    # recoil in place of T_d (NRT always; arc-dpa where Nordlund's constants exist).
+    wanted = displacements
+    displacements: Dict[str, np.ndarray] = {}
+    displacementsPerReaction: Dict[str, Dict[int, np.ndarray]] = {}
+    models = displacementModels(Z, ed) if wanted else {}
+
+    def displacementPass(model):
+        _DISPLACEMENTS.set(model)
+        total, per, shared = np.zeros(len(grid)), {}, {}
+        for mt, s, live, function, key in passes:
+            if key is None:
+                n = function()
+            else:
+                if key not in shared:
+                    shared[key] = function()
+                n = shared[key]
+            per[mt] = n
+            total += np.where(live, s * n, 0.0)
+        return total, per
+
+    # One pass per model, in a copy of this context (the energy threads already
+    # share the work; side-by-side passes measured no faster, PXB-045).
+    for name, model in models.items():
+        total, per = contextvars.copy_context().run(displacementPass, model)
+        displacements[name], displacementsPerReaction[name] = total, per
+    if models:
+        notes.append("displacements: " + "; ".join(
+            f"{name} with E_d = {m_.ed:g} eV" + (f", b = {m_.b:g}, c = {m_.c:g} (Nordlund et al. 2018)"
+                                                 if m_.mode == 2 else "") for name, m_ in models.items()))
+    if models and "arc-dpa" not in models:
+        notes.append(f"no arc-dpa: Nordlund et al. 2018 give its constants for Fe, Ni, Cu, Pd, Pt "
+                     f"and W only, not Z = {int(Z)}")
     if report is not None:
         for note in notes:
             report.warn(note)
     return HeatingResult(grid=grid, kerma=kerma, kermaLocal=local, damage=damage, notes=notes,
-                         perReaction=perReaction, photonEnergy=photonEnergy, kinematicUpper=kinematicUpper)
+                         perReaction=perReaction, photonEnergy=photonEnergy, kinematicUpper=kinematicUpper,
+                         displacements=displacements, displacementsPerReaction=displacementsPerReaction)

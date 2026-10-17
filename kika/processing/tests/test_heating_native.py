@@ -93,3 +93,28 @@ def test_a_strided_table_reaches_the_kernel():
     assert not args[5].flags.c_contiguous
     assert H._emissionChunk(*args) == H._emissionChunkNumpy(*args)
 
+
+
+@pytest.mark.parametrize("name", ["nrt", "arc-dpa"])
+def test_native_kernels_count_displacements_as_numpy_bit_for_bit(name):
+    # Under a displacement model both kernels return N_d(T_d) of each recoil;
+    # still the NumPy reference to the bit (Fe: NRT with HEATR's 40 eV, arc-dpa with
+    # Nordlund's constants).
+    model = H.displacementModels(26, 40.0)[name]
+    token = H._DISPLACEMENTS.set(model)
+    try:
+        rng = np.random.default_rng(5 + len(name))
+        for lab in (False, True):
+            for _ in range(30):
+                args = _case(rng, False, lab, 26)
+                if len(args[0]) < 2:
+                    continue
+                assert H._emissionChunk(*args) == H._emissionChunkNumpy(*args)
+        u, w = np.polynomial.legendre.leggauss(16)
+        x = np.linspace(-1, 1, 9); p = np.ones(9) / 2
+        for E in (1e3, 1e5, 1e7):
+            c = E * 55.4 / 56.4 ** 2
+            args = (np.linspace(-1, 1, 7), u, w, x, p, 2 * c, 2 * c * 0.9, (26, 55.4, 26, 55.4), 40.0, False)
+            assert H._twoBodyChunk(*args) == H._twoBodyChunkNumpy(*args)
+    finally:
+        H._DISPLACEMENTS.reset(token)

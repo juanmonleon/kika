@@ -72,6 +72,44 @@ static inline double lindhard1(double E, double el, double fl, double ed)
     return (E >= ed) ? out : 0.;
 }
 
+/* The active displacement model (kika.processing.heating.DisplacementModel):
+ * mode 0 is MT444's damage energy, 1 NRT, 2 arc-dpa; Ed, b, c its constants. */
+typedef struct { int mode; double Ed, b, c, high, coefficient; } displacement_model;
+
+/* The constants of a model, once per call: (1 - c)/(2Ed/0.8)^b is the same value
+ * NumPy forms at every recoil, so hoisting it changes no bit. */
+static inline void displacement_prepare(displacement_model *m)
+{
+    m->high = 2. * m->Ed / 0.8;
+    m->coefficient = (m->mode == 2) ? (1. - m->c) / crt_pow(m->high, m->b) : 0.;
+}
+
+/* DisplacementModel.count on one damage energy, in NumPy's order of operations. */
+static inline double displacements1(double T, const displacement_model *m)
+{
+    double n = (0.8 * T) / (2. * m->Ed);
+    if (m->mode == 2) n = n * (m->coefficient * crt_pow(T, m->b) + m->c);
+    return (T < m->Ed) ? 0. : ((T < m->high) ? 1. : n);
+}
+
+/* lindhard1, or the displacements of its damage energy (no threshold on E then). */
+static inline double damage1(double E, double el, double fl, double ed, const displacement_model *m)
+{
+    if (m->mode == 0) return lindhard1(E, el, fl, ed);
+    double ep = np_maximum(E, 0.);
+    ep /= el;
+    double out = crt_pow(ep, 1. / 6.);
+    out *= 3.4008;
+    double term = crt_pow(ep, 0.75);
+    term *= 0.40244;
+    out += term;
+    out += ep;
+    out *= fl;
+    out += 1.0;
+    out = E / out;
+    return displacements1(out, m);
+}
+
 /* np.interp(q, x, p) for one point (finite tables, default left/right). */
 static inline double np_interp1(double q, const double *x, const double *p, Py_ssize_t n)
 {
@@ -128,11 +166,13 @@ static PyObject *emission_chunk(PyObject *self, PyObject *args)
     static const char *names[7] = {"cuts", "g", "w", "mu", "wm", "x", "p"};
     double low, width, oldwidth, incident, denominator, edDenominator, el, fl, ed;
     int hist, lab, noRecoil;
+    displacement_model model = {0, 0., 0., 1., 0., 0.};
     double *terms = NULL, *row = NULL;
     PyObject *result = NULL;
-    if (!PyArg_ParseTuple(args, "OOOOOOOdddddddddppp", &objects[0], &objects[1], &objects[2],
+    if (!PyArg_ParseTuple(args, "OOOOOOOdddddddddppp|iddd", &objects[0], &objects[1], &objects[2],
                           &objects[3], &objects[4], &objects[5], &objects[6], &low, &width, &oldwidth,
-                          &incident, &denominator, &edDenominator, &el, &fl, &ed, &hist, &lab, &noRecoil))
+                          &incident, &denominator, &edDenominator, &el, &fl, &ed, &hist, &lab, &noRecoil,
+                          &model.mode, &model.Ed, &model.b, &model.c))
         return NULL;
     for (int k = 0; k < 7; ++k)
         if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
@@ -145,6 +185,11 @@ static PyObject *emission_chunk(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_ValueError, "native heating: inconsistent chunk buffers");
         goto done;
     }
+    if (model.mode < 0 || model.mode > 2 || (model.mode && !(model.Ed > 0))) {
+        PyErr_SetString(PyExc_ValueError, "native heating: invalid displacement model");
+        goto done;
+    }
+    displacement_prepare(&model);
     Py_ssize_t nc = nk - 1;
     terms = PyMem_Malloc(sizeof(double) * (size_t)(nc * n));
     row = PyMem_Malloc(sizeof(double) * (size_t)(m > 0 ? m : 1));
@@ -170,7 +215,7 @@ static PyObject *emission_chunk(PyObject *self, PyObject *args)
             }
             double angular;
             if (lab) {
-                angular = noRecoil ? 0. : lindhard1(ep, el, fl, ed);
+                angular = noRecoil ? 0. : damage1(ep, el, fl, ed, &model);
             } else {
                 double root = sqrt(incident * ep);
                 double last = (root > 0) ? ((incident + ep) - edDenominator) / (2 * root) : 1.;
@@ -178,7 +223,7 @@ static PyObject *emission_chunk(PyObject *self, PyObject *args)
                 for (Py_ssize_t k = 0; k < m; ++k) {
                     double angle = (last - 1) / 2 + ((last + 1) / 2) * mu[k];
                     double recoil = np_maximum(0., ((incident + ep) - (2 * root) * angle) / denominator);
-                    row[k] = wm[k] * (noRecoil ? 0. : lindhard1(recoil, el, fl, ed));
+                    row[k] = wm[k] * (noRecoil ? 0. : damage1(recoil, el, fl, ed, &model));
                 }
                 angular = (pairwise_sum(row, m) * (last + 1)) / 4;
             }
@@ -205,10 +250,12 @@ static PyObject *twobody_chunk(PyObject *self, PyObject *args)
     static const char *names[5] = {"cuts", "u", "w", "x", "p"};
     double offset, slope, el, fl, ed;
     int hist;
+    displacement_model model = {0, 0., 0., 1., 0., 0.};
     double *terms = NULL;
     PyObject *result = NULL;
-    if (!PyArg_ParseTuple(args, "OOOOOdddddp", &objects[0], &objects[1], &objects[2], &objects[3],
-                          &objects[4], &offset, &slope, &el, &fl, &ed, &hist))
+    if (!PyArg_ParseTuple(args, "OOOOOdddddp|iddd", &objects[0], &objects[1], &objects[2], &objects[3],
+                          &objects[4], &offset, &slope, &el, &fl, &ed, &hist,
+                          &model.mode, &model.Ed, &model.b, &model.c))
         return NULL;
     for (int k = 0; k < 5; ++k)
         if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
@@ -218,6 +265,11 @@ static PyObject *twobody_chunk(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_ValueError, "native heating: inconsistent two-body buffers");
         goto done;
     }
+    if (model.mode < 0 || model.mode > 2 || (model.mode && !(model.Ed > 0))) {
+        PyErr_SetString(PyExc_ValueError, "native heating: invalid displacement model");
+        goto done;
+    }
+    displacement_prepare(&model);
     Py_ssize_t nc = nk - 1;
     terms = PyMem_Malloc(sizeof(double) * (size_t)(nc * n));
     if (!terms) { PyErr_NoMemory(); goto done; }
@@ -238,7 +290,7 @@ static PyObject *twobody_chunk(PyObject *self, PyObject *args)
                 density = np_interp1(mu, x, p, nx);
             }
             double recoil = np_maximum(offset - slope * mu, 0.);
-            terms[i * n + j] = ((half * w[j]) * density) * lindhard1(recoil, el, fl, ed);
+            terms[i * n + j] = ((half * w[j]) * density) * damage1(recoil, el, fl, ed, &model);
         }
     }
     total = numpy_total(terms, nc * n);
@@ -271,6 +323,6 @@ PyMODINIT_FUNC PyInit__heating_native(void)
     crt_pow = (pow_function)(void (*)(void))found;
 #endif
     PyObject *mod = PyModule_Create(&module);
-    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 1) < 0) { Py_DECREF(mod); return NULL; }
+    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 2) < 0) { Py_DECREF(mod); return NULL; }
     return mod;
 }
