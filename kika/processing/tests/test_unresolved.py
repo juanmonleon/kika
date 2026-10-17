@@ -96,6 +96,35 @@ def test_parameter_function_owns_its_grid_and_interpolation():
     assert 130. in prepared.regions[0].groups[0].averages[1].knots
 
 
+@pytest.mark.parametrize('law,expected',[(Interpolation.linlin,.1+.3*900/9900),(Interpolation.loglog,np.sqrt(.1*.4))])
+def test_tabulated_parameters_follow_their_j_state_int(law,expected):
+    # ENDF case C: the INT of a J-state is the law of its parameters between
+    # nodes too (NJOY intr2, FRENDY, FUDGE's ENDF->GNDS). At the geometric mid
+    # of 100-10000 eV a log-log capture width is the geometric mean; a stretch
+    # that touches zero (the competitive width here) is lin-lin, FUDGE's split.
+    m=model(law=law,grid=[100.,10000.]);m.unresolved.domainMax=10000.
+    channels=m.unresolved.tabulatedWidths.spinGroups[0].channels
+    channels[1].constantWidth=None;channels[1].widths=np.array([.1,.4])
+    channels[3].constantWidth=None;channels[3].widths=np.array([0.,.2])
+    group=prepare_resonances(m,CONTEXT).regions[0].groups[0]
+    assert group.averages[1].evaluate([1000.])[0]==pytest.approx(expected,rel=1e-14)
+    assert group.averages[3].evaluate([1000.])[0]==pytest.approx(.2*900/9900,rel=1e-14)
+
+
+def test_a_competitive_width_rising_from_zero_opens_at_the_threshold():
+    # Eu-156 B-VIII.1 in miniature: GX = 0 at 15 keV, 0.27 eV at 25 keV, MT51
+    # from 22.7 keV. Closed below the threshold, lin-lin from it; a width the
+    # evaluator states below the threshold, or a constant one, is kept.
+    from kika.processing.resonances.unresolved import Average,opened_at
+    f=Average(curves=(((1e4,1.5e4,2.5e4,3e4),(0.,0.,.27,.3),5),))
+    g=opened_at(f,22746.2)
+    np.testing.assert_allclose(g.evaluate([1.2e4,2e4,22746.2,2.4e4,2.5e4,2.8e4]),
+        [0,0,0,.27*(2.4e4-22746.2)/(2.5e4-22746.2),.27,f.evaluate([2.8e4])[0]],rtol=1e-14,atol=0)
+    assert opened_at(f,np.inf) is f and opened_at(Average(constant=.1),2e4).constant==.1
+    stated=Average(curves=(((1e4,2.5e4),(.1,.27),2),))
+    assert opened_at(stated,22746.2).evaluate([2e4])[0]==stated.evaluate([2e4])[0]
+
+
 def test_mf3_step_at_int_boundary_keeps_its_following_interval():
     from test_resonance_tabulation import AXES
     background=Regions1d([

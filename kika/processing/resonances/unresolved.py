@@ -39,7 +39,29 @@ class Average:
         return values
 
 
-def average(function,values,grid,constant,low,high,*,positive=False,reduced=False):
+def opened_at(f,threshold):
+    """``f``, a competitive width, opening at the competing reaction's threshold.
+
+    A width that is zero at a node and nonzero at the next one is a channel
+    opening between them; interpolating from the zero node opens it there,
+    below its threshold (ENDF/B-VIII.1 Eu-156: GX = 0 at 15 keV, 0.27 eV at
+    25 keV, MT51 from 22.7 keV; lin-lin gave 0.13 eV at 20 keV and the capture
+    of the tables 11 % low, PXB-039). That stretch is zero up to the threshold
+    and lin-lin from there; a width the evaluator states below the threshold
+    is kept.
+    """
+    if f.constant is not None or not np.isfinite(threshold):return f
+    curves=[]
+    for x,y,law in f.curves:
+        x,y=list(x),list(y);i=next((i for i in range(len(x)-1) if x[i]<threshold<x[i+1] and y[i]==0<y[i+1]),None)
+        if i is None:curves.append((tuple(x),tuple(y),law));continue
+        if i:curves.append((tuple(x[:i+1]),tuple(y[:i+1]),law))
+        curves.append(((x[i],threshold),(0.,0.),2));curves.append(((threshold,x[i+1]),(0.,y[i+1]),2))
+        if i+1<len(x)-1:curves.append((tuple(x[i+1:]),tuple(y[i+1:]),law))
+    return Average(curves=tuple(curves))
+
+
+def average(function,values,grid,constant,low,high,*,positive=False,reduced=False,law=2):
     from kika.nuclear_data.model import Constant1d,XYs1d,Regions1d
     from .prepare import UnsupportedResonanceError
     def check(v):
@@ -85,7 +107,17 @@ def average(function,values,grid,constant,low,high,*,positive=False,reduced=Fals
             if x.ndim!=1 or x.shape!=values.shape or np.any(~np.isfinite(x)) or np.any(x<=0) or np.any(np.diff(x)<=0):raise ValueError('invalid URR average grid')
             if x[0]>low or x[-1]<high:raise ValueError('URR parameter grid does not cover region')
             check(values)
-            return Average(curves=((tuple(x),tuple(values),2),))
+            # Tabulated parameters follow their J-state's INT, as NJOY (PURR
+            # ``intr2``), FRENDY and FUDGE (whose ENDF->GNDS gives each width
+            # that law) do, and as a GNDS function already does here: ENDF-102
+            # 2.4.2 computes the sigma between wide nodes "using parameter
+            # interpolation" without naming the law. A logarithmic law cannot
+            # reach a zero; that stretch is lin-lin, FUDGE's split.
+            laws=np.full(len(x)-1,law)
+            if law in (4,5):laws[(values[:-1]<=0)|(values[1:]<=0)]=2
+            cuts=np.r_[0,np.flatnonzero(np.diff(laws))+1,len(laws)]
+            return Average(curves=tuple((tuple(x[a:b+1]),tuple(values[a:b+1]),int(laws[a]))
+                                        for a,b in zip(cuts[:-1],cuts[1:])))
     check(constant)
     return Average(constant=float(constant))
 
@@ -224,7 +256,11 @@ def prepare_unresolved(region,context,notes):
         channel=prepare_radius(ctx.mass_channel_radius_fm) if policy.channelMode=='mass' else phase if policy.channelMode=='phase' else prepare_radius(policy.channelRadius) if policy.channelMode=='constant' else None
         if channel is None:raise ValueError('unknown URR channel radius policy')
         for r in (phase,channel):r.evaluate([low,high])
-        spacing=average(sg.levelSpacingFunction,sg.levelSpacing,sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid,None,low,high,positive=True)
+        law=None if sg.crossSectionInterpolation is None else INTERPOLATION_TO_ENDF_INT.get(sg.crossSectionInterpolation)
+        if sg.crossSectionInterpolation is not None and law is None or law not in (None,1,2,3,4,5):
+            raise UnsupportedResonanceError('URR cross-section interpolation supports INT1-5')
+        parameterLaw=2 if law is None else law
+        spacing=average(sg.levelSpacingFunction,sg.levelSpacing,sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid,None,low,high,positive=True,law=parameterLaw)
         by_label={}
         labels={'neutron':'neutron','elastic':'neutron','capture':'capture','fission':'fission','competitive':'competitive'}
         links={rr.label:rr.reactionMT for rr in source.resonanceReactions}
@@ -239,7 +275,7 @@ def prepare_unresolved(region,context,notes):
                 raise ValueError('URR physical neutron-width convention belongs only to the neutron channel')
             if name in by_label:raise ValueError('duplicate URR width channel')
             if not np.isfinite(c.degreesOfFreedom) or c.degreesOfFreedom<0:raise ValueError('URR degrees of freedom must be real and nonnegative')
-            f=average(c.averageFunction,c.widths,c.energies if c.energies is not None else source.energyGrid,c.constantWidth,low,high,reduced=name=='neutron' and c.neutronWidthConvention=='reduced')
+            f=average(c.averageFunction,c.widths,c.energies if c.energies is not None else source.energyGrid,c.constantWidth,low,high,reduced=name=='neutron' and c.neutronWidthConvention=='reduced',law=parameterLaw)
             by_label[name]=(f,float(c.degreesOfFreedom))
             if name=='neutron':reduced_neutron=c.neutronWidthConvention=='reduced'
         if 'neutron' not in by_label:raise ValueError('URR group needs a reduced neutron width')
@@ -249,9 +285,6 @@ def prepare_unresolved(region,context,notes):
         if reduced_neutron and pairs[0][1]==0 and any(v>0 for curve in pairs[0][0].curves for v in curve[1]):
             raise UnsupportedResonanceError('nonzero reduced GN0 requires positive neutron nu; fixed physical widths are not reduced GN0')
         groups.append(UnresolvedGroup(l,channel,phase,(),context=ctx,spin=j,spacing=spacing,averages=tuple(p[0] for p in pairs),degrees=tuple(p[1] for p in pairs),reduced_neutron=reduced_neutron))
-        law=None if sg.crossSectionInterpolation is None else INTERPOLATION_TO_ENDF_INT.get(sg.crossSectionInterpolation)
-        if sg.crossSectionInterpolation is not None and law is None or law not in (None,1,2,3,4,5):
-            raise UnsupportedResonanceError('URR cross-section interpolation supports INT1-5')
         laws.add(law)
         if law is not None:
             grid=(sg.crossSectionEnergies if sg.crossSectionEnergies is not None else

@@ -60,6 +60,21 @@ def test_the_samples_keep_a_resonance_reach_from_the_ladder_ends():
     assert emax - emin == pytest.approx(cold[3] - cold[2])
 
 
+def test_the_competition_opens_at_the_lowest_competing_threshold():
+    from types import SimpleNamespace as NS
+    from kika.nuclear_data.model import XYs1d
+    from kika.processing.resonances.probability_tables import competitionThreshold
+
+    def reaction(mt, x, y):
+        return NS(ENDF_MT=mt, crossSection=NS(forms={"eval": XYs1d(xs=x, ys=y)}))
+    suite = NS(reactions=[reaction(2, [1e-5, 2e7], [10.0, 10.0]), reaction(102, [1e-5, 2e7], [1.0, 1.0]),
+                          reaction(51, [1e-5, 22746.2, 3e4], [0.0, 0.0, 0.5]),
+                          reaction(52, [48109.2, 6e4], [0.0, 0.2])],
+               sums=[reaction(4, [22746.2, 3e4], [0.0, 0.5])], fissionComponents=[])
+    assert competitionThreshold(suite) == 22746.2
+    assert competitionThreshold(NS(reactions=suite.reactions[:2], sums=[], fissionComponents=[])) == np.inf
+
+
 def test_native_ladder_matches_the_exact_reference():
     native = _nativeKernel()
     if native is None:

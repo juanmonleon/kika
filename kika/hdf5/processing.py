@@ -1043,6 +1043,7 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
     ``ProbabilityTableOptions`` (default: PURR's 20 bands, 64 ladders).
     """
     from kika.processing.resonances.probability_tables import (ProbabilityTableOptions,
+                                                               competitionThreshold,
                                                                probabilityTables, purrGrid,
                                                                purrInputs)
 
@@ -1050,10 +1051,12 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
     region = suite.resonances.unresolved
     energies = purrGrid(region)
     background, competing = purrInputs(suite, energies, form=_evaluated)
+    threshold = competitionThreshold(suite, form=_evaluated)
     options = options or ProbabilityTableOptions()
     tables = probabilityTables(region, _urrContext(suite, context), energies, temperatures,
                                background=background, competing=competing, options=options,
-                               workers=_poolWorkers(workers, len(energies)), transportXS=transportXS)
+                               workers=_poolWorkers(workers, len(energies)), transportXS=transportXS,
+                               competitiveThreshold=threshold)
     if report is not None:
         report.warn(f"URR probability tables computed by kika (PURR's method: {options.ladders} "
                     f"ladders of {options.samples} samples, {options.bins} bands, on "

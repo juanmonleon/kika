@@ -441,13 +441,15 @@ def probabilityTables(region, context, energies, temperatures, *,
                       background: Optional[Dict[int, np.ndarray]] = None,
                       competing: Sequence[int] = (),
                       options: ProbabilityTableOptions = ProbabilityTableOptions(),
-                      workers: int = 1, transportXS=None):
+                      workers: int = 1, transportXS=None, competitiveThreshold: float = np.inf):
     """``{T: ProbabilityTables}`` at the temperatures (K) on ``energies`` (eV).
 
     ``region`` is the model's :class:`UnresolvedRegion`, ``context`` the
     :class:`NeutronContext`. ``background`` gives a smooth cross section per
     MT (1, 2, 18, 102) at each energy (:func:`purrInputs`); ``competing`` the
-    MTs whose smooth cross sections compete in the URR, for the flags.
+    MTs whose smooth cross sections compete in the URR, for the flags;
+    ``competitiveThreshold`` (:func:`competitionThreshold`) where a competitive
+    width that rises from zero opens.
     ``workers`` computes that many energies at once, one process each.
 
     Each table carries its statistical error as ``statistics``
@@ -463,7 +465,8 @@ def probabilityTables(region, context, energies, temperatures, *,
 
     temperatures = [float(t) for t in np.atleast_1d(temperatures)]
     energies = np.asarray(energies, dtype=float)
-    results = _run(_tablesAt, region, context, energies, temperatures, background, options, workers, transportXS)
+    results = _run(_tablesAt, region, context, energies, temperatures, background, options, workers, transportXS,
+                   competitiveThreshold)
     tables = np.stack([r[0] for r in results], axis=1)              # (nT, nE, 6, bins)
     inelastic, absorption = competitionFlags(competing)
     out = {}
@@ -497,9 +500,15 @@ def _ladderAccumulators(region, context, energies, temperatures, *, background=N
     return [r[2] for r in results]
 
 
-def _run(task, region, context, energies, temperatures, background, options, workers, transportXS=None):
+def _run(task, region, context, energies, temperatures, background, options, workers, transportXS=None,
+         competitiveThreshold=np.inf):
     """``task`` on every energy's job, in ``workers`` processes."""
     prepared = _prepared(region, context)
+    if np.isfinite(competitiveThreshold):
+        from .unresolved import opened_at
+        prepared = replace(prepared, groups=tuple(
+            replace(g, averages=g.averages[:3] + (opened_at(g.averages[3], competitiveThreshold),))
+            for g in prepared.groups))
     multiplySmooth = bool(region.tabulatedWidths.selfShieldingOnly)
     background = background or {}
     if transportXS is not None:
@@ -616,6 +625,37 @@ def _threshold(form) -> float:
     return float(np.asarray(x, dtype=float)[max(int(nonzero[0]) - 1, 0)])
 
 
+def _purrSections(suite, form):
+    """``{MT: cross-section function}`` of the reactions PURR reads."""
+    sections = {}
+    for container in (suite.reactions, suite.sums, suite.fissionComponents):
+        for reaction in container:
+            mt = reaction.ENDF_MT
+            if mt is None or mt in sections or not _purrReads(mt):
+                continue
+            f = form(reaction.crossSection)
+            if f is not None:
+                sections[mt] = f
+    return sections
+
+
+def competitionThreshold(suite, form=None):
+    """Where the competition opens: the lowest threshold of a competing reaction (eV).
+
+    The reactions are :func:`purrInputs`' (MT > 4 but fission and capture),
+    each starting as :func:`_threshold` reads it; ``inf`` with none.
+    """
+    if form is None:
+        def form(component):
+            forms = component.forms if component is not None else None
+            if not forms:
+                return None
+            return forms.get("eval") or next(iter(forms.values()))
+    starts = [_threshold(f) for mt, f in _purrSections(suite, form).items()
+              if mt > 4 and mt not in (18, 19, 102)]
+    return min(starts, default=np.inf)
+
+
 def purrInputs(suite, energies, form=None):
     """``(background, competing)`` for :func:`probabilityTables`, by PURR's rules.
 
@@ -635,15 +675,7 @@ def purrInputs(suite, energies, form=None):
             if not forms:
                 return None
             return forms.get("eval") or next(iter(forms.values()))
-    sections = {}
-    for container in (suite.reactions, suite.sums, suite.fissionComponents):
-        for reaction in container:
-            mt = reaction.ENDF_MT
-            if mt is None or mt in sections or not _purrReads(mt):
-                continue
-            f = form(reaction.crossSection)
-            if f is not None:
-                sections[mt] = f
+    sections = _purrSections(suite, form)
     at = energies.copy()
     at[0] *= 1.0 + 1e-6
     at[-1] *= 1.0 - 1e-6
