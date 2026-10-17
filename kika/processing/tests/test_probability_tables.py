@@ -207,10 +207,17 @@ def test_statistics_match_the_spread_of_independent_replicas():
     assert 0.5 < ratio < 1.6
 
 
-def test_default_draws_every_ladder_and_reports_no_target():
+def test_the_default_stops_at_5e3_after_purrs_64_ladders_capped_at_4096():
+    from kika.processing.resonances.probability_tables import ProbabilityTableOptions
+
+    o = ProbabilityTableOptions()
+    assert (o.errorTarget, o.minimumLadders, o.ladders) == (5.0e-3, 64, 4096)
+
+
+def test_without_a_target_every_ladder_is_drawn():
     from kika.processing.resonances.probability_tables import _tablesAt
 
-    tables, stats = _tablesAt(_job(ladders=12))
+    tables, stats = _tablesAt(_job(ladders=12, errorTarget=None))
     assert tables.shape == (1, 6, 20)
     assert stats[0]["ladders"] == 12 and stats[0]["converged"] is None
     assert stats[0]["shielding"].shape == (4, 5) and stats[0]["contributionSigma"].shape == (4, 20)

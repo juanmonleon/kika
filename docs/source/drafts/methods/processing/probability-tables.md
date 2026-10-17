@@ -94,7 +94,14 @@ parameters are constant (no declared grid) is filled the same way over its whole
 ### Frozen parameters
 
 At each table energy $E$ every sector's parameters are evaluated from their own functions
-and then held fixed for the ladders: the spacing $D$, the average widths
+and then held fixed for the ladders. A parameter tabulated on the evaluation's nodes is
+interpolated between them with the INT of its $J$-state, as NJOY, FRENDY and FUDGE do
+(ENDF-102 §2.4.2 computes the cross-sections between wide nodes "using parameter
+interpolation" without naming the law); a stretch where a logarithmic law would reach a
+zero is lin-lin. A competitive width that is zero at one node and not at the next is a
+channel opening between them: it is zero up to the lowest threshold of the competing
+reactions (below) and lin-lin from there to the next node, not from the zero node. The
+parameters are the spacing $D$, the average widths
 $\bar\Gamma_n, \bar\Gamma_\gamma, \bar\Gamma_f, \bar\Gamma_x$ (the physical neutron width
 from the reduced one as in {eq}`eq-unresolved-resonances-neutron-width`), the degrees of
 freedom, the hard-sphere phase shift $\varphi_\ell$ at the phase radius, and
@@ -128,20 +135,19 @@ resonance draws its widths independently, channel by channel:
 
 - $\bar\Gamma_y \le 0$: the width is zero;
 - $\nu_y = 0$: the width is $\bar\Gamma_y$ (it does not fluctuate);
-- $\nu_y \in \{1, 2, 3, 4\}$: $\Gamma_y = (\bar\Gamma_y/\nu_y)\,c_{\nu_y, j}$, with $j$
-  uniform on the 20 entries of PURR's table $c_{\nu, j}$ of equiprobable $\chi^2_\nu$
-  quantiles;
-- any other real $\nu_y$: $\Gamma_y = \bar\Gamma_y\,\chi^2_{\nu_y}/\nu_y$ from the
-  continuous distribution.
+- $\nu_y > 0$: $\Gamma_y = \bar\Gamma_y\,\chi^2_{\nu_y}/\nu_y$, drawn from the
+  continuous distribution, integer $\nu$ or not.
 
 The total width is $\Gamma = \Gamma_n + \Gamma_\gamma + \Gamma_f + \Gamma_x$; the
 competitive width enters $\Gamma$ only. A resonance with $\Gamma = 0$ is dropped.
 
 ### Cross-sections at the sample energies
 
-$N = 10\,000$ sample energies are drawn uniformly over the span less $300/\rho$ at each
-end, with $\rho = \sum 1/D$ the total level density, so that no sample sees the edge of a
-ladder. With the Doppler width $\Delta = \sqrt{4 k_B T E/A}$ (at the table energy $E$),
+$N = 10\,000$ sample energies are drawn uniformly over the span less a margin at each
+end, so that no sample sees the edge of a ladder. The margin is PURR's $300/\rho$, with
+$\rho = \sum 1/D$ the total level density, or the reach below of a resonance of the
+largest mean total width at the hottest temperature, if that is longer; the ladder then
+grows by as much, so the sampled span stays PURR's. With the Doppler width $\Delta = \sqrt{4 k_B T E/A}$ (at the table energy $E$),
 each resonance $r$ of a sector adds, at every sample within
 $31.83\,\Gamma_r + \max(31.83\,\Gamma_r, 20\,\Delta)$ of $E_r$,
 
@@ -180,8 +186,10 @@ the tables of different temperatures are correlated as PURR's are.
 
 ### Bands
 
-The band boundaries come from the totals of the first ladder, sorted, at each
-temperature. With $n_e = \lfloor N/(M - 8.24)\rfloor$, boundary $i = 1, \ldots, M-1$ is
+The band boundaries come from the totals of the first $L_\text{min} = 64$ ladders
+(`minimumLadders`), pooled and sorted, at each temperature; those ladders' samples are
+held until the boundaries exist. With $N$ the pooled sample count and
+$n_e = \lfloor N/(M - 8.24)\rfloor$, boundary $i = 1, \ldots, M-1$ is
 the sorted total of rank $r_i$, where $r_1 = \max(\lfloor n_e/200\rfloor, 1)$ and
 $r_{i+1} = r_i + \lfloor w_i n_e\rfloor$ with
 
@@ -257,23 +265,32 @@ factor times the smooth non-fission absorption, and a total rebuilt as their sum
 smooth inelastic competition. The basis changes only the statistics; the table is the
 same.
 
-With an error target $\tau$ (`errorTarget`), the ladders are checked every `checkEvery`
-ladders (10 by default) below the cap `ladders`: drawing stops at an energy once, at
-every temperature and for every reaction whose factors are not all exactly 1, every
-band's $s_{p\phi}$ is at most $\tau$ and every $f_x(\sigma_0)$ has a relative error at
-most $\tau$. The random stream is the same with or without the target, so a table that
-stopped after $n$ ladders is identical to one drawn with $n$ ladders.
+The ladders are drawn to an error target $\tau$ (`errorTarget`, $5\cdot10^{-3}$ by
+default): the target is first checked after $L_\text{min} = 64$ ladders and then every
+`checkEvery` (10) ladders below the cap `ladders` (4096), and drawing stops at an energy
+once, at every temperature and for every reaction whose factors are not all exactly 1,
+every band's $s_{p\phi}$ is at most $\tau$ and every $f_x(\sigma_0)$ has a relative
+error at most $\tau$. `errorTarget=None` draws exactly `ladders`. The random stream is the
+same with or without the target, so a table that stopped after $n$ ladders is identical
+to one drawn with $n$ ladders.
 
 ## Conventions and choices
 
-- **PURR's procedure, kika's random numbers.** Every choice listed in *Method* (ladder
-  span, sample count, margins, reach of a resonance, $\chi^2$ table, band spacing,
-  competition rule, energy grid) is PURR's. The random numbers are NumPy's, seeded per
+- **PURR's procedure, kika's random numbers.** The ladder span, sample count, reach of a
+  resonance, band spacing, competition rule and energy grid are PURR's; the departures
+  are listed below. The random numbers are NumPy's, seeded per
   energy by `(seed, energy index)`, so the tables agree with PURR's statistically, band
   by band, and not bit for bit; they do not depend on how the energies are split among
   processes.
-- **64 ladders and 20 bands by default.** This is what OpenMC's `make_ace` asks PURR
-  for (`20 64`). The ladders are shared by all temperatures.
+- **20 bands, at least 64 ladders, and more where the error asks for them.** PURR draws
+  the 64 ladders OpenMC's `make_ace` asks for (`20 64`) everywhere, and their error
+  differs widely: the worst error checked is $2$-$4\cdot10^{-3}$ for U-235, U-238 and
+  Pu-239 but 1-3 % for Eu-156, Pm-148 or Hf-182 (ENDF/B-VIII.1, 294 K). With the
+  $5\cdot10^{-3}$ target the first keep PURR's 64 ladders and their cost, and the others
+  draw what they need (Eu-156 19 → 80 s). Stopping on the error does not bias the factors:
+  against 2 048 fixed ladders, over eight seeds and 2 160 factors of Eu-156, the
+  standardized difference has mean $\approx 0$ and standard deviation 0.97, with 4.0 %
+  beyond 2 (expected 4.6 %). The ladders are shared by all temperatures.
 - **The tables are factors (`multiplySmooth`).** Each band's conditional mean is divided
   by the mean of all samples, so the table carries no magnitude. The magnitude comes from
   the smooth cross-section the transport code already has, and a table computed with
@@ -282,10 +299,28 @@ stopped after $n$ ladders is identical to one drawn with $n$ ladders.
   to the dilute average (its `nmode = 1`); it does not by default, and kika does not at
   all: the rescaling divides by a ladder's mean resonance elastic, which interference
   can put near zero.
-- **PURR's discrete $\chi^2$ table for 1-4 degrees of freedom.** The 20 equiprobable
-  quantiles have no extreme tail, and that shapes the outer bands; the continuous
-  distribution gives longer tails there. A real $\nu$ outside 1-4 (a non-integer AMUX,
-  for example) uses the continuous distribution, which PURR cannot state.
+- **The exact $\chi^2$, not PURR's table.** PURR draws a width from a fixed table of the
+  20 conditional means of equiprobable slices of $\chi^2_\nu$, $\nu$ = 1-4 (`ladr2`; FRENDY
+  copies it, FUDGE draws the exact distribution). The slice means keep the mean width but
+  lose 5.6 % of $\langle x^2\rangle$ for $\nu = 1$ (2.832 against 3), so the widths
+  fluctuate less than the evaluation states and the tables understate self-shielding: for
+  U-235 at 1 b, $1 - f$ by 3.7 % in fission, 2.4 % in capture and 5.6 % in the total, 1.6 to
+  8 times the table's own statistical error. kika draws the exact distribution, at no
+  measurable cost.
+- **Band boundaries on 64 ladders, not one.** Boundaries drawn from one ladder move from
+  seed to seed, and the jackknife, which holds them fixed, does not see it: for Eu-156
+  the spread of the capture factors over seeds was 1.39 times the stated error with
+  one-ladder boundaries, 0.99 with 2 000 bands and 0.98 with boundaries on 64 ladders.
+- **Margins that cover the Doppler reach.** PURR's 300 spacings are shorter than the reach
+  of a resonance at high temperature (U-235 at 25 keV: 1.7 times at 294 K, 3.1 at 1 200 K);
+  a sample near the edge then sees resonances on one side only, and the $1/x$ interference
+  term of the elastic tilts it (4.5 times the statistical error at 1 200 K). Where the
+  margin already covers the reach nothing changes; where it does not, a table depends,
+  statistically only, on the hottest temperature asked with it.
+- **Parameters follow their $J$-state's INT.** In ENDF/B-VIII.1, 175 unresolved ranges
+  with INT $\neq 2$ are evaluated between nodes; interpolating their parameters lin-lin
+  instead moves the dilute cross-section there by more than 0.1 % in 85 and more than 1 %
+  in 29, up to 18.8 % (Hf-182 capture at 150 keV).
 - **LSSF=1 backgrounds are zero, not MF 3 minus the dilute average.** That is PURR's
   reading. MF 3 minus the average of the parameters would add a deterministic bias
   wherever the evaluation's MF 3 is not that average.
@@ -293,7 +328,9 @@ stopped after $n$ ladders is identical to one drawn with $n$ ladders.
   function with Humlíček's W4 approximation (Humlíček 1982), relative error of order
   $10^{-4}$, the precision class of PURR's own rational approximations;
   `native=False` evaluates it exactly in NumPy, the reference the kernel is tested
-  against. The error is far below the statistical error of the table.
+  against. Measured on U-235 at 294 and 1 200 K and U-238 at 294 K with the same ladders,
+  the factors differ by at most $6\cdot10^{-7}$, a thousandth of their statistical error;
+  the exact function costs 10-12 times as much.
 - **The statistics follow the ladder.** A per-sample error would treat the
   $N$ correlated samples of a ladder as independent and understate the error. The
   jackknife holds the band boundaries fixed. FRENDY estimates the same statistical
@@ -313,8 +350,8 @@ it is built.
 
 Known limits of the method:
 
-- The band boundaries come from one ladder, so they are themselves random; the jackknife
-  does not include that variability.
+- The band boundaries come from 64 ladders, so they are still random; that variability,
+  which the jackknife does not include, is measured negligible (above).
 - The band spacing {eq}`eq-probability-tables-bands` has $M - 10$ central bands and is
   meant for $M \ge 11$; the options do not check $M$.
 - The ladders use the single-level Breit-Wigner formula with no interference between
@@ -335,7 +372,7 @@ has no element for them) and lists them under `omitted`.
 
 ## Validation
 
-The tests below passed on 2026-10-14, with the compiled kernel loaded; the four on a whole
+The tests below passed on 2026-10-17, with the compiled kernel loaded; the four on a whole
 evaluation need the ENDF/B-VIII.1 Cf-252 tape and the `--deep` option, and were not run
 on that date.
 
@@ -348,19 +385,31 @@ on that date.
   $-20 \le x \le 20$, $10^{-6} \le y \le 20$ (`::test_ladder_special_functions`).
 - **PURR's conventions.** The competition flags (`::test_competition_flags_follow_purr`);
   band boundaries increasing and open above (`::test_band_bounds_are_increasing_and_open_at_the_top`);
-  the $\chi^2$ quantile table averages $\nu$ within 2 %
-  (`::test_chi_square_quantiles_have_the_right_means`); NJOY's seven-figure rounding
+  the widths carry the whole Porter-Thomas spread, $\langle x^2\rangle = 1 + 2/\nu$
+  within 2 % for $\nu$ = 1, 2, 3, 4 and 1.7 (`::test_widths_carry_the_whole_porter_thomas_spread`);
+  the samples keep a resonance reach from the ladder ends
+  (`::test_the_samples_keep_a_resonance_reach_from_the_ladder_ends`); the competition opens
+  at the lowest competing threshold (`::test_the_competition_opens_at_the_lowest_competing_threshold`);
+  NJOY's seven-figure rounding
   (`::test_sigfig_is_njoys`); the grid's shaded ends and filled gaps
   (`::test_purr_grid_shades_the_ends_and_fills_wide_gaps`).
 - **Statistical error.** With equal band counts the probabilities have no error, below
   $10^{-12}$ (`::test_jackknife_of_a_mean_is_the_clt_error`); out of sample, over 12
   independent replicas of 16 ladders, the spread of the elastic $f(1\ \text{b})$ over its
   mean jackknife error is between 0.5 and 1.6
-  (`::test_statistics_match_the_spread_of_independent_replicas`); without a target every
-  ladder is drawn (`::test_default_draws_every_ladder_and_reports_no_target`); a reached
+  (`::test_statistics_match_the_spread_of_independent_replicas`); the default target is
+  $5\cdot10^{-3}$ after 64 ladders with a cap of 4 096
+  (`::test_the_default_stops_at_5e3_after_purrs_64_ladders_capped_at_4096`); without a
+  target every ladder is drawn (`::test_without_a_target_every_ladder_is_drawn`); a reached
   target gives the same table as that many ladders, and an unreachable one runs to the cap
   and says so (`::test_an_error_target_stops_early_with_the_same_table_as_that_many_ladders`);
-  invalid targets are refused (`::test_error_target_must_be_positive`).
+  by default the target is first checked at 64 ladders; invalid targets are refused
+  (`::test_error_target_must_be_positive`).
+- **Parameter interpolation** (`kika/processing/tests/test_unresolved.py`). Tabulated
+  widths follow their $J$-state's INT and a stretch touching zero is lin-lin
+  (`::test_tabulated_parameters_follow_their_j_state_int`); a competitive width rising
+  from zero opens at the threshold, and a stated or constant one is kept
+  (`::test_a_competitive_width_rising_from_zero_opens_at_the_threshold`).
 - **OpenMC basis.** The shielding uses the partial factors times the smooth
   cross-sections and ignores the total row (`::test_transport_shielding_uses_partial_factors_and_ignores_the_total_row`);
   the basis leaves the table unchanged (`::test_transport_diagnostics_do_not_change_fixed_count_tables`);
@@ -385,35 +434,40 @@ This comparison is not a test of this repository: NJOY is neither a dependency o
 nor the truth. The bands cannot be compared one by one, since their boundaries come from a
 random ladder and no two tables share them; the comparison that does not depend on the
 bands is the Bondarenko factor {eq}`eq-probability-tables-bondarenko`. kika's tables (20
-bands, 64 ladders, at 294 K) were compared with those of the OpenMC library of
+bands, the default target, at 294 K) were compared with those of the OpenMC library of
 ENDF/B-VIII.1, processed by NJOY PURR (`TODO(check)`: the NJOY version that produced it),
-at every energy of the grid (measured 2026-10-11). The grid and the competition flags are
+at every energy of the grid (measured 2026-10-17, one process). The grid and the competition flags are
 identical to the official file's: U-235 (19 energies, flags (4, 0)), U-238 (31, (4, 0)),
 Pu-239 (51, (51, −1)). The largest $\lvert f_\text{kika}/f_\text{PURR} - 1\rvert$ over the
 energies, at $\sigma_0$ = 1, 10 and 100 b:
 
 | Nuclide | MT | smallest $f$ of the official file at 1 b | 1 b | 10 b | 100 b |
 |---|---|---|---|---|---|
-| U-235 | 2 | 0.99 | 0.02 % | 0.01 % | 0.00 % |
-| U-235 | 18 | 0.90 | 0.21 % | 0.14 % | 0.03 % |
-| U-235 | 102 | 0.90 | 0.25 % | 0.17 % | 0.04 % |
-| U-238 | 2 | 0.85 | 0.48 % | 0.27 % | 0.07 % |
-| U-238 | 102 | 0.87 | 0.35 % | 0.20 % | 0.04 % |
+| U-235 | 2 | 0.99 | 0.10 % | 0.08 % | 0.03 % |
+| U-235 | 18 | 0.90 | 0.29 % | 0.23 % | 0.08 % |
+| U-235 | 102 | 0.90 | 0.20 % | 0.16 % | 0.06 % |
+| U-238 | 2 | 0.85 | 0.50 % | 0.22 % | 0.08 % |
+| U-238 | 102 | 0.87 | 0.21 % | 0.10 % | 0.02 % |
+| Pu-239 | 2 | 0.93 | 0.48 % | 0.37 % | 0.13 % |
+| Pu-239 | 18 | 0.85 | 0.40 % | 0.30 % | 0.08 % |
+| Pu-239 | 102 | 0.80 | 0.61 % | 0.42 % | 0.10 % |
 
-The self-shielding itself is 10-15 % at 1 b, and the differences are of the order of the
-statistical spread of 64 ladders (`TODO(check)`: the statistical error of both tables at
-these energies was not stated with the comparison, nor how the factors of each table
-were turned into barns for {eq}`eq-probability-tables-bondarenko`). The time for U-235 at
-one temperature, 20 bands and 64 ladders, is 99 s for kika in one process and 24 s in
-eight, against 99 s for PURR on the same machine (`TODO(check)`: NJOY version and date of
-this timing).
+The mean of $f_\text{kika}/f_\text{PURR} - 1$ at 1 b is where the exact $\chi^2$ shows:
+U-235 −0.05 % (elastic), −0.11 % (fission), −0.07 % (capture); U-238 −0.17 % (elastic),
++0.02 % (capture). Those are the bias of PURR's table measured with the same ladders
+($1 - f$ times the understatement above), and nothing else. The factors were turned into
+barns with the smooth cross-sections of the official file. The time for U-235 at one
+temperature is 98 s for kika in one process, unchanged by the target (all 19 energies
+stop at 64 ladders), against 99 s for PURR on the same machine (`TODO(check)`: NJOY
+version and date of this timing).
 
 ## Diagnostics
 
 - **Stage report** of {py:func}`kika.endf.process_endf` (`stage("urr")`): `status`
   (`done`, `skipped`, `rejected`), `category`, a one-line `summary` (bands, energies,
-  range, temperatures, ladders), and `details`: `temperatures`, `n_energies`, `bins`,
-  `ladders`, `range_eV`, and `error` when rejected.
+  range, temperatures, ladders drawn), and `details`: `temperatures`, `n_energies`, `bins`,
+  `ladders` (the cap), `ladders_drawn` (min, median, max per energy), `range_eV`, and
+  `error` when rejected.
 - **`EndfProcessing.probability_tables`**: per temperature, `energies`, the six rows
   (`cdf`, `total`, `elastic`, `fission`, `capture`, `heating`) as $(N, M)$ arrays,
   `factors`, `interpolation`, `inelastic` and `absorption`.

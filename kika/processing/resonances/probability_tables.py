@@ -15,25 +15,30 @@ partial cross sections. The procedure is NJOY PURR's (``purr.f90``,
   spacings at each end, and every spin sequence is drawn over the whole span;
   where a resonance reaches further than those 300 spacings (high
   temperatures), the margins and the ladder grow to cover it;
-- 64 ladders (OpenMC's ``make_ace`` asks PURR for ``20 64``), shared by every
-  temperature so that the tables of different temperatures are correlated as
-  PURR's are;
+- at least PURR's 64 ladders (OpenMC's ``make_ace`` asks PURR for ``20 64``),
+  shared by every temperature so that the tables of different temperatures
+  are correlated as PURR's are, and more where those leave the table's error
+  above 5e-3 (see below);
 - a resonance contributes within ``31.83 Γ + max(31.83 Γ, 20 Δ)`` of its
   energy, Δ the Doppler width;
 - ladders are not rescaled one by one (PURR's default ``nmode = 0``; the
   per-ladder rescaling of ``nmode = 1`` divides by a ladder's mean resonance
   elastic, which interference can put near zero): the table as a whole is
   normalised to the dilute averages, which the factors below do;
-- band boundaries come from the first ladder's sorted totals with PURR's
-  spacing, finer in both tails (``purr.f90:2274-2318``), per temperature;
+- band boundaries are placed with PURR's spacing, finer in both tails
+  (``purr.f90:2274-2318``), per temperature;
 - LSSF=1 tables are factors on smooth cross sections (``multiply_smooth``):
   each band's conditional mean over the mean of all samples. LSSF=0 tables
   retain the absolute sampled cross sections plus MF3 background;
 - the competition flags follow PURR's rule (``purr.f90:1159-1190``).
 
-Two choices are not kept: PURR draws a width from a table of 20 slice means
-of the chi-square, and kika from the chi-square itself (see the note below);
-and PURR's end margins do not grow with the Doppler reach, kika's do.
+Four choices are not kept (PXB-038 to PXB-040): PURR draws a width from a
+table of 20 slice means of the chi-square, kika from the chi-square itself
+(see the note below); PURR's end margins do not grow with the Doppler reach,
+kika's do; PURR places the band bounds on its first ladder's totals, kika on
+the first 64 ladders' (one ladder's bounds move from seed to seed, which the
+jackknife cannot see); and PURR always draws 64 ladders, kika draws on at an
+energy until every error it checks is at most 5e-3 (at most 4096).
 
 The random numbers are kika's (NumPy, seeded), so the tables agree with PURR's
 statistically, band by band, not bit for bit.
@@ -41,10 +46,10 @@ statistically, band by band, not bit for bit.
 Every table carries its statistical error (:class:`ProbabilityTableStatistics`):
 the ladder is the statistical unit -- the samples of one ladder share its
 resonances and are not independent -- so the errors are delete-one-ladder
-jackknife errors over the ladders, with the bands held at the first ladder's
-bounds (as FRENDY's ``check_statistical_error``, which uses the CLT on each
-band's ``p · σ``). ``errorTarget`` stops drawing ladders once they are small
-enough, with ``ladders`` as the cap.
+jackknife errors over the ladders, with the bands held at their bounds (as
+FRENDY's ``check_statistical_error``, which uses the CLT on each band's
+``p · σ``). ``errorTarget`` stops drawing ladders once they are small enough,
+with ``ladders`` as the cap.
 
 ``background`` adds the smooth cross section PURR takes from MF3 (:func:`purrInputs`):
 for LSSF=0 the file's MF3 values; for LSSF=1, where MF3 already holds the dilute
@@ -79,22 +84,25 @@ REACH_DOPPLER = 20.0
 class ProbabilityTableOptions:
     bins: int = 20
     #: Ladders per energy; with :attr:`errorTarget` the most that are drawn.
-    ladders: int = 64
+    ladders: int = 4096
     samples: int = 10000
     seed: int = 1
     #: The C kernel of ``_rm_native`` (Humlicek's W4 line shapes) when built;
     #: ``False`` evaluates the Faddeeva function exactly in NumPy, the reference.
     native: bool = True
     #: Stop drawing ladders at an energy once every statistical error checked
-    #: is at most this (``None``: always draw :attr:`ladders`, PURR's way). The
+    #: is at most this (``None``: always draw :attr:`ladders`). 5e-3 leaves
+    #: U-235, U-238 and Pu-239 at PURR's 64 ladders and takes the tables 64
+    #: leave at 1-3 % (Eu-156, Pm-148, Hf-182) to 0.5 % (PXB-040). The
     #: errors checked are each band's ``p_b · factor_b`` (its share of the
     #: dilute average) and the relative error of ``f(σ0)`` at :attr:`sigma0`,
     #: for every reaction with a nonzero average at every temperature.
-    errorTarget: Optional[float] = None
+    errorTarget: Optional[float] = 5.0e-3
     #: How often, in ladders, the target is checked (FRENDY: 10).
     checkEvery: int = 10
     #: The fewest ladders drawn before the target is first checked: PURR's
-    #: count, so a table that stops early is never noisier than PURR's.
+    #: count, so a table that stops early is never noisier than PURR's. The
+    #: band bounds are placed on these ladders' totals.
     minimumLadders: int = 64
     #: Background cross sections (b) of the Bondarenko factors in the statistics.
     sigma0: Tuple[float, ...] = (1.0, 10.0, 100.0, 1000.0, 10000.0)
@@ -347,16 +355,28 @@ def _tablesAt(job, keepLadders=False):
             seen.add(s["group"].l)
     dopplers = [np.sqrt(4.0 * t * BOLTZMANN_CONSTANT * 1.0e6 * E / A) for t in temperatures]
     elow, ehigh, emin, emax = _ladderSpan(sequences, max(dopplers))
-    bounds = [None] * nT
-    counts = np.zeros((nT, bins))
-    sums = np.zeros((nT, 4, bins))
-    everything = np.zeros((nT, 4))
-    # The same sums ladder by ladder, for the errors; the running sums above
-    # are the table's, untouched by them.
+    # The sums ladder by ladder: the table is their total, the errors their
+    # jackknife.
     lc = np.zeros((nT, options.ladders, bins))
     ls = np.zeros((nT, options.ladders, 4, bins))
     lt = np.zeros((nT, options.ladders, 4))
     used = options.ladders
+    # The band bounds come from the totals of the first ``pool`` ladders, not
+    # PURR's first one: bounds drawn from one ladder move from seed to seed,
+    # and the jackknife, which holds them fixed, does not see it (Eu-156
+    # capture: seed scatter 1.39x the jackknife sigma with one ladder's
+    # bounds, 0.99 with 2000 bands; PXB-040). Those ladders' samples wait
+    # until the bounds exist.
+    pool = min(options.minimumLadders, options.ladders)
+    bounds = None
+    waiting = []
+
+    def binned(it, ladder, totals, elastic, fission, capture):
+        which = np.minimum(np.searchsorted(bounds[it], totals, side="left"), bins - 1)
+        lc[it, ladder] = np.bincount(which, minlength=bins)
+        for row, values in enumerate((totals, elastic, fission, capture)):
+            ls[it, ladder, row] = np.bincount(which, values, bins)
+        lt[it, ladder] = [totals.sum(), elastic.sum(), fission.sum(), capture.sum()]
     for ladder in range(options.ladders):
         es = np.sort(rng.uniform(emin, emax, options.samples))
         el = np.zeros((nT, len(es)))
@@ -396,22 +416,26 @@ def _tablesAt(job, keepLadders=False):
                 el[it] += np.bincount(index, base * ((c2 - (1.0 - ratio)) * psi + s2 * chi), size)
                 ca[it] += np.bincount(index, base * gg[owner] / gt[owner] * psi, size)
                 fi[it] += np.bincount(index, base * gf[owner] / gt[owner] * psi, size)
+        samples = []
         for it in range(nT):
             elastic = np.maximum(potential + el[it] + bkg[2], 1.0e-6)
             capture = ca[it] + bkg[102]
             fission = fi[it] + bkg[18]
-            totals = elastic + capture + fission + competitionBkg
-            if bounds[it] is None:
-                bounds[it] = bandBounds(totals, bins)
-            which = np.minimum(np.searchsorted(bounds[it], totals, side="left"), bins - 1)
-            np.add.at(counts[it], which, 1)
-            for row, values in enumerate((totals, elastic, fission, capture)):
-                np.add.at(sums[it, row], which, values)
-            everything[it] += [totals.sum(), elastic.sum(), fission.sum(), capture.sum()]
-            lc[it, ladder] = np.bincount(which, minlength=bins)
-            for row, values in enumerate((totals, elastic, fission, capture)):
-                ls[it, ladder, row] = np.bincount(which, values, bins)
-            lt[it, ladder] = [totals.sum(), elastic.sum(), fission.sum(), capture.sum()]
+            samples.append((elastic + capture + fission + competitionBkg, elastic, fission, capture))
+        if bounds is None:
+            # Held in float32 but the totals, which decide the band: 6e-8 per
+            # sample against a 5e-3 target, and 40 % of the memory (64 ladders
+            # x 6 temperatures: ~75 MB a process instead of ~120).
+            waiting.append([(s[0],) + tuple(v.astype(np.float32) for v in s[1:]) for s in samples])
+            if len(waiting) == pool:
+                bounds = [bandBounds(np.concatenate([w[it][0] for w in waiting]), bins) for it in range(nT)]
+                for n, held in enumerate(waiting):
+                    for it in range(nT):
+                        binned(it, n, *held[it])
+                waiting = []
+        else:
+            for it in range(nT):
+                binned(it, ladder, *samples[it])
         if (options.errorTarget is not None and ladder + 1 >= options.minimumLadders
                 and (ladder + 1 - options.minimumLadders) % options.checkEvery == 0
                 and ladder + 1 < options.ladders):
@@ -425,6 +449,7 @@ def _tablesAt(job, keepLadders=False):
     converged = None if options.errorTarget is None else _converged(stats, options.errorTarget)
     for st in stats:
         st["converged"] = converged
+    counts, sums, everything = lc.sum(1), ls.sum(1), lt.sum(1)
     for it in range(nT):
         n = counts[it].sum()
         means = np.where(counts[it] > 0, sums[it] / np.maximum(counts[it], 1), 0.0)

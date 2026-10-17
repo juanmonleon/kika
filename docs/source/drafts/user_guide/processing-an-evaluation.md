@@ -56,8 +56,9 @@ What the plan controls:
   used.
 - `thinning`: the relative tolerance each temperature's grid is thinned to, $10^{-3}$ by
   default; `None` keeps every point.
-- `urr`, `urr_bins`, `urr_ladders`: the probability tables (on by default, 20 bands and
-  64 ladders), computed at the same temperatures.
+- `urr`, `urr_bins`, `urr_ladders`: the probability tables (on by default, 20 bands; at
+  least 64 ladders per energy and more, up to `urr_ladders` = 4096, until the table's
+  statistical error is $5\cdot10^{-3}$), computed at the same temperatures.
 - `broaden=False`: no broadening; the temperatures then serve the URR tables only.
 - `heating=True`: MT 301 (KERMA) and MT 444 (damage) at every temperature, 0 K included.
   It tabulates the secondary distributions of the whole tape, and is the slow stage.

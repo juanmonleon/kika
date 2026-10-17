@@ -1040,7 +1040,8 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
 
     The tables :func:`processSuite` writes. ``context`` is the target's
     NeutronContext (default: the model's mass and spin); ``options`` a
-    ``ProbabilityTableOptions`` (default: PURR's 20 bands, 64 ladders).
+    ``ProbabilityTableOptions`` (default: PURR's 20 bands, at least 64 ladders and
+    more where the error exceeds 5e-3).
     """
     from kika.processing.resonances.probability_tables import (ProbabilityTableOptions,
                                                                competitionThreshold,
@@ -1058,7 +1059,9 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
                                workers=_poolWorkers(workers, len(energies)), transportXS=transportXS,
                                competitiveThreshold=threshold)
     if report is not None:
-        report.warn(f"URR probability tables computed by kika (PURR's method: {options.ladders} "
+        ladders = (f"{options.ladders}" if options.errorTarget is None else
+                   f"{options.minimumLadders} to {options.ladders} (error target {options.errorTarget:g})")
+        report.warn(f"URR probability tables computed by kika (PURR's method: {ladders} "
                     f"ladders of {options.samples} samples, {options.bins} bands, on "
                     f"{len(energies)} energies); statistically, not bitwise, equal to NJOY PURR's")
         for T, table in tables.items():

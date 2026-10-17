@@ -155,7 +155,8 @@ class ProcessingPlan:
     eV, or ``"njoy"`` for BROADR's default (the top of the resolved range).
     ``thinning`` is the relative tolerance each temperature's union grid is
     thinned to (BROADR's ``errthn``, 1e-3); ``None`` keeps every point.
-    ``urr_bins``/``urr_ladders`` are PURR's bands and ladders. ``workers`` is
+    ``urr_bins`` are PURR's bands; ``urr_ladders`` the most ladders an energy
+    draws (at least PURR's 64, more until the table's error is 5e-3). ``workers`` is
     the count of every stage: the reconstruction's threads, the processes of
     the broadening and the URR tables, the heating's threads. When not given,
     ``KIKA_WORKERS``, else each stage's default (the reconstruction up to four
@@ -169,7 +170,7 @@ class ProcessingPlan:
     thinning: float | None = 1.0e-3
     urr: bool = True
     urr_bins: int = 20
-    urr_ladders: int = 64
+    urr_ladders: int = 4096
     heating: bool = False
     workers: int | None = None
 
@@ -1316,11 +1317,14 @@ def _urr(rec, plan, unresolved, report):
     report("urr", 1.0)
     ne = len(next(iter(tables.values())).energies)
     details["n_energies"] = ne
+    drawn = np.concatenate([np.atleast_1d(np.asarray(t.statistics.ladders)) for t in tables.values()])
+    details["ladders_drawn"] = dict(min=int(drawn.min()), median=float(np.median(drawn)), max=int(drawn.max()))
     lo, hi = unresolved["range_eV"]
     return StageReport("urr", "done", time.perf_counter() - t0, None,
                        f"{plan.urr_bins} bands x {ne} energies ({lo:g}-{hi:g} eV) at "
                        f"{', '.join(f'{T:g}' for T in plan.temperatures)} K; "
-                       f"{plan.urr_ladders} ladders (PURR's method, statistically equal to NJOY's)",
+                       f"{int(drawn.min())}-{int(drawn.max())} ladders per energy (median {np.median(drawn):g}; "
+                       f"PURR's method, statistically equal to NJOY's)",
                        details), dict(tables)
 
 
