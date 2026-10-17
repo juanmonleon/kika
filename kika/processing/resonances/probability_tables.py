@@ -13,6 +13,8 @@ partial cross sections. The procedure is NJOY PURR's (``purr.f90``,
 - a ladder is abstract: its span is ``0.9 nermax`` times the smallest mean
   spacing (``nermax = 1000``), the 10 000 sample energies avoid 300 mean
   spacings at each end, and every spin sequence is drawn over the whole span;
+  where a resonance reaches further than those 300 spacings (high
+  temperatures), the margins and the ladder grow to cover it;
 - 64 ladders (OpenMC's ``make_ace`` asks PURR for ``20 64``), shared by every
   temperature so that the tables of different temperatures are correlated as
   PURR's are;
@@ -28,6 +30,10 @@ partial cross sections. The procedure is NJOY PURR's (``purr.f90``,
   each band's conditional mean over the mean of all samples. LSSF=0 tables
   retain the absolute sampled cross sections plus MF3 background;
 - the competition flags follow PURR's rule (``purr.f90:1159-1190``).
+
+Two choices are not kept: PURR draws a width from a table of 20 slice means
+of the chi-square, and kika from the chi-square itself (see the note below);
+and PURR's end margins do not grow with the Doppler reach, kika's do.
 
 The random numbers are kika's (NumPy, seeded), so the tables agree with PURR's
 statistically, band by band, not bit for bit.
@@ -62,23 +68,11 @@ NAVOID = 300
 REACH_WIDTHS = 31.83
 REACH_DOPPLER = 20.0
 
-#: PURR's chi-square table (``ladr2``): 20 equiprobable quantiles for 1-4
-#: degrees of freedom. A width is ``mean/ν × CHISQ[n, ν]`` with ``n`` drawn
-#: uniformly -- a discrete distribution with no extreme tail, which is what
-#: shapes PURR's outer bands.
-CHISQ = np.array([
-    [1.31003e-3, 9.19501e-3, .0250905, .049254, .0820892, .124169, .176268, .239417,
-     .314977, .404749, .511145, .637461, .788315, .970419, 1.194, 1.47573, 1.84547,
-     2.36522, 3.20371, 5.58201],
-    [.0508548, .156167, .267335, .38505, .510131, .643564, .786543, .940541, 1.1074,
-     1.28947, 1.48981, 1.71249, 1.96314, 2.24984, 2.58473, 2.98744, 3.49278, 4.17238,
-     5.21888, 7.99146],
-    [.206832, .470719, .691933, .901674, 1.10868, 1.31765, 1.53193, 1.75444, 1.98812,
-     2.23621, 2.50257, 2.79213, 3.11143, 3.46967, 3.88053, 4.36586, 4.96417, 5.75423,
-     6.94646, 10.0048],
-    [.459462, .893735, 1.21753, 1.50872, 1.78605, 2.05854, 2.33194, 2.61069, 2.89878,
-     3.20032, 3.51995, 3.86331, 4.23776, 4.65345, 5.12533, 5.67712, 6.35044, 7.22996,
-     8.541, 11.8359]])
+#: Widths are drawn from the exact chi-square (Porter-Thomas), not from
+#: PURR's ``ladr2`` table of 20 slice means: those keep the mean width but
+#: lose 5.6 % of <x^2> for 1 degree of freedom, and the tables came out up to
+#: 8 jackknife sigma short of self-shielding (U-235, PXB-037). FUDGE draws the
+#: exact one too; NJOY and FRENDY keep the table.
 
 
 @dataclass(frozen=True)
@@ -204,7 +198,7 @@ def _sequence(group, energy):
 
 
 def _ladder(rng, seq, elow, ehigh):
-    """PURR's ``ladr2``: resonance energies from Wigner, widths from chi-square."""
+    """PURR's ``ladr2``: resonance energies from Wigner, widths from the exact chi-square."""
     dcon = seq["D"] * np.sqrt(4.0 / np.pi)
     expected = int((ehigh - elow) / seq["D"] * 1.5) + 20
     steps = dcon * np.sqrt(-np.log(rng.uniform(size=expected)))
@@ -217,14 +211,38 @@ def _ladder(rng, seq, elow, ehigh):
             widths.append(np.zeros(n))
         elif nu <= 0:
             widths.append(np.full(n, mean))
-        elif float(nu).is_integer() and 1 <= nu <= 4:
-            pick = rng.integers(0, 20, n)
-            widths.append(mean / nu * CHISQ[int(nu) - 1, pick])
         else:
             widths.append(mean * rng.chisquare(nu, n) / nu)
     while len(widths) < 4:
         widths.append(np.zeros(n))
     return er, widths
+
+
+def _ladderSpan(sequences, doppler):
+    """The ladder ``(elow, ehigh)`` and the span ``(emin, emax)`` it is sampled in.
+
+    PURR keeps the samples NAVOID mean spacings from the ladder's ends. A
+    reach longer than that sees resonances on one side only, and the 1/x
+    interference term of the elastic sums to a spurious tilt (U-235 at 25 keV:
+    the Doppler reach is 1.7x the margin at 294 K and 3.1x at 1200 K, where the
+    elastic f moved 4.5 jackknife sigma, PXB-038). The margins here cover the
+    reach of a mean resonance at ``doppler``, the hottest temperature's, and
+    the ladder grows by as much, keeping PURR's sampled span; where the margin
+    already covers it the span is PURR's. A table therefore depends on the
+    hottest temperature asked with it, statistically only, as the ladders
+    shared by all temperatures already do.
+    """
+    density = sum(1.0 / s["D"] for s in sequences)
+    dmin = min(s["D"] for s in sequences)
+    width = max(float(np.sum(s["means"])) for s in sequences)
+    reach = REACH_WIDTHS * width + max(REACH_WIDTHS * width, REACH_DOPPLER * doppler)
+    avoid = max(NAVOID / density, reach)
+    elow = 10.0
+    ehigh = elow + 0.9 * NERMAX * dmin + 2.0 * (avoid - NAVOID / density)
+    emin, emax = elow + avoid, ehigh - avoid
+    if emax <= emin:
+        raise ValueError("the ladder is too short for PURR's resonance-avoidance margins")
+    return elow, ehigh, emin, emax
 
 
 def _estimates(C, S, T, sigma0, transportXS=None, multiplySmooth=True):
@@ -322,15 +340,8 @@ def _tablesAt(job, keepLadders=False):
         if s["group"].l not in seen:
             potential += 4 * np.pi * 0.01 / s["k2"] * (2 * s["group"].l + 1) * np.sin(s["phi"]) ** 2
             seen.add(s["group"].l)
-    density = sum(1.0 / s["D"] for s in sequences)
-    dmin = min(s["D"] for s in sequences)
-    elow = 10.0
-    erange = 0.9 * NERMAX * dmin
-    ehigh = elow + erange
-    emin, emax = elow + NAVOID / density, ehigh - NAVOID / density
-    if emax <= emin:
-        raise ValueError("the ladder is too short for PURR's resonance-avoidance margins")
     dopplers = [np.sqrt(4.0 * t * BOLTZMANN_CONSTANT * 1.0e6 * E / A) for t in temperatures]
+    elow, ehigh, emin, emax = _ladderSpan(sequences, max(dopplers))
     bounds = [None] * nT
     counts = np.zeros((nT, bins))
     sums = np.zeros((nT, 4, bins))

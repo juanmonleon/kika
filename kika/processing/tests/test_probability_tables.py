@@ -3,8 +3,9 @@ exact NumPy reference, and PURR's conventions."""
 import numpy as np
 import pytest
 
-from kika.processing.resonances.probability_tables import (CHISQ, _nativeKernel, _psiChi,
-                                                           bandBounds, competitionFlags)
+from kika.processing.resonances.probability_tables import (NAVOID, NERMAX, REACH_DOPPLER,
+                                                           _ladder, _ladderSpan, _nativeKernel,
+                                                           _psiChi, bandBounds, competitionFlags)
 
 
 def test_competition_flags_follow_purr():
@@ -34,10 +35,29 @@ def test_band_bounds_are_increasing_and_open_at_the_top():
     assert np.all(np.diff(bounds[:-1]) > 0)
 
 
-def test_chi_square_quantiles_have_the_right_means():
-    # 20 equiprobable quantiles of a chi-square with nu degrees average to ~nu.
-    for nu in range(1, 5):
-        assert CHISQ[nu - 1].mean() == pytest.approx(nu, rel=0.02)
+def test_widths_carry_the_whole_porter_thomas_spread():
+    # PURR's 20 slice means keep <x> but lose 5.6 % of <x^2> for one degree of
+    # freedom (2.83 for 3); the exact chi-square has <x^2> = 1 + 2/nu, and
+    # its tail beyond PURR's largest value, 5.58, is not empty.
+    rng = np.random.default_rng(11)
+    for nu in (1, 2, 3, 4, 1.7):
+        seq = dict(D=1.0, means=np.array([2.0, 0.0, 0.0, 0.0]), degrees=np.array([nu, 0, 0, 0]))
+        x = np.concatenate([_ladder(rng, seq, 0.0, 2.0e5)[1][0] for _ in range(4)]) / 2.0
+        assert x.mean() == pytest.approx(1.0, rel=0.01)
+        assert np.mean(x * x) == pytest.approx(1.0 + 2.0 / nu, rel=0.02)
+    assert np.mean(x > 5.58) > 0
+
+
+def test_the_samples_keep_a_resonance_reach_from_the_ladder_ends():
+    # Six sequences of D = 1 eV: PURR's margin is 300/6 = 50 eV. Cold, the
+    # span is PURR's; at a 10 eV Doppler width the reach is 200 eV, and the
+    # margins grow to it while the sampled span stays PURR's.
+    seqs = [dict(D=1.0, means=np.array([0.001, 0.04, 0.3, 0.0]))] * 6
+    cold = _ladderSpan(seqs, 0.1)
+    assert cold == (10.0, 10.0 + 0.9 * NERMAX, 10.0 + NAVOID / 6, 10.0 + 0.9 * NERMAX - NAVOID / 6)
+    elow, ehigh, emin, emax = _ladderSpan(seqs, 10.0)
+    assert emin - elow >= REACH_DOPPLER * 10.0 and ehigh - emax >= REACH_DOPPLER * 10.0
+    assert emax - emin == pytest.approx(cold[3] - cold[2])
 
 
 def test_native_ladder_matches_the_exact_reference():
