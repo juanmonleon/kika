@@ -1109,13 +1109,25 @@ def _analyticEmissionDamage(spectrum, grid, A, Z, ed):
 
 
 def _captureDamage(photons, grid, A, Z, ed, Q, fixedPrimary=False):
-    """Capture: ``Σ_γ y_γ ⟨df(E_γ²/2tm)⟩`` (``gheat``), or ``capdam``'s single photon."""
+    """Capture: ``df(E/(A+1)) + Σ_γ y_γ ⟨df(E_γ²/2tm)⟩``, or ``capdam``'s single photon.
+
+    HEATR's ``gheat`` sums the damage of each photon's recoil as an independent
+    primary and leaves out the compound's own motion, E/(A+1), which kika's
+    KERMA carries since D49. Here the compound recoil is one more independent
+    primary, in the same superposition: at thermal energies E/(A+1) is far below
+    ``ed`` and the damage is HEATR's to the bit; above a few keV it is the
+    compound recoil that displaces (Fe-56 at 1 MeV: 13.2 keV against gheat's
+    0.38 keV). Folding every kick into one recoil of mean energy E/(A+1) + E_ph
+    was measured and rejected: the mean of the photon kicks can sit below
+    ``ed`` while the hard primaries do not (U-238 thermal capture damage went
+    to zero; P3 plan §5, capture_damage_recoil.py).
+    """
     tm = NEUTRON_REST_ENERGY * (A + 1.0)
     if not photons:
         er = grid / (A + 1.0)
         ea = A * er + Q
         return lindhard(er + ea * ea / (2.0 * tm), Z, A + 1.0, Z, A, ed)
-    total = np.zeros(len(grid))
+    total = lindhard(grid / (A + 1.0), Z, A + 1.0, Z, A, ed)
     for product, form in photons:
         y = _yield(product, grid)
         total = total + y * _photonRecoilDamage(form, grid, A, Z, ed, tm, fixedPrimary)

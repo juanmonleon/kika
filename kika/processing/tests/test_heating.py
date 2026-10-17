@@ -187,7 +187,7 @@ def test_histogram_joint_cm_mean_retains_constant_density_and_angle_in_each_bin(
     np.testing.assert_allclose(H._meanEnergyOf(decoded,grid,H._Kinematics(A=2.,Q=0.)),expected,rtol=0.,atol=1e-12)
 
 
-def test_mf12_capture_uses_gheat_compound_recoil_and_fixed_primary_kick(monkeypatch):
+def test_mf12_capture_uses_the_compound_recoil_and_fixed_primary_kick(monkeypatch):
     from types import SimpleNamespace as NS
     A,binding=29.,6e6
     E=np.array([.0253,1e6,2e7])
@@ -201,7 +201,30 @@ def test_mf12_capture_uses_gheat_compound_recoil_and_fixed_primary_kick(monkeypa
     expected=E/(A+1)+binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1))
     np.testing.assert_allclose(result.kerma,expected,rtol=1e-14)
     np.testing.assert_allclose(result.kinematicUpper[102],expected,rtol=1e-14)
-    np.testing.assert_allclose(result.damage,H.lindhard(binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1)),14,A+1,14,A,25.),rtol=1e-14)
+    # The damage carries the compound recoil too, as one more independent
+    # primary (P3): HEATR's at 0.0253 eV, where E/(A+1) is far below ed.
+    kick=H.lindhard(binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1)),14,A+1,14,A,25.)
+    np.testing.assert_allclose(result.damage,kick+H.lindhard(E/(A+1),14,A+1,14,A,25.),rtol=1e-14)
+    assert result.damage[0]==float(kick)
+
+
+def test_capture_damage_adds_the_compound_recoil_as_one_more_primary():
+    # Two photon lines: gheat's sum, plus df(E/(A+1)); below ed*(A+1) exactly gheat.
+    A,Z=55.,26;ed=H.displacementEnergy(Z);tm=H.NEUTRON_REST_ENERGY*(A+1)
+    lines=[m.Uncorrelated(energy=m.DiscretePhotonEnergy(primaryFlag=0,energy=e,atomicWeightRatio=A),productFrame=m.Frame.lab) for e in (7.6e6,1e6)]
+    photons=[(object(),f) for f in lines]
+    import kika.processing.heating as HH
+    grid=np.array([.0253,1e3,1e5,1e6])
+    original=HH._yield
+    try:
+        HH._yield=lambda p,E:np.ones(len(E))
+        got=H._captureDamage(photons,grid,A,Z,ed,0.)
+    finally:
+        HH._yield=original
+    gheat=sum(H.lindhard(np.full(len(grid),e*e/(2*tm)),Z,A+1,Z,A,ed) for e in (7.6e6,1e6))
+    np.testing.assert_allclose(got,gheat+H.lindhard(grid/(A+1),Z,A+1,Z,A,ed),rtol=1e-14)
+    assert np.array_equal(got[:2],gheat[:2])
+    assert got[3]>20*gheat[3]
 
 
 def test_mf12_capture_retains_neutron_balance_outside_photon_domain(monkeypatch):
