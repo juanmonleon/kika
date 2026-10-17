@@ -176,6 +176,36 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   neutron-emitting reactions (one neutron, not $\bar\nu$; the fragments are not
   followed).
 
+### Displacements (NRT and arc-dpa)
+
+{py:func}`kika.endf.process_endf` also gives the displacements per reaction,
+$\sum_r \sigma_r \langle N_d \rangle_r$ in b·displacements on MT 444's grid
+(`EndfProcessing.displacements`; `heatingOf(..., displacements=True)`). No other
+processor computes them: NJOY stops at the damage energy, FRENDY and FUDGE compute no
+damage, OpenMC scores MT 444 only. With $T_d$ the Lindhard-Robinson damage energy of a
+recoil (the partition above, without HEATR's threshold on the recoil energy),
+
+$$
+N_d(T_d) = \begin{cases} 0 & T_d < E_d \\ 1 & E_d \le T_d < 2E_d/0.8 \\
+\dfrac{0.8\,T_d}{2E_d}\,\xi(T_d) & T_d \ge 2E_d/0.8 \end{cases},\qquad
+\xi_\text{arc}(T_d) = \frac{1 - c}{(2E_d/0.8)^b}\,T_d^{\,b} + c ,
+$$ (eq-heating-displacements)
+
+with $\xi = 1$ for NRT (Norgett, Robinson and Torrens 1975) and the arc-dpa efficiency
+of Nordlund et al. (2018). $N_d$ is not linear in $T_d$, so it is applied to each recoil
+inside the same quadratures as the damage energy, never to MT 444 itself. NRT uses the
+damage's $E_d$ (HEATR's table by default); arc-dpa uses the $E_d$, $b$ and $c$ of the
+paper's table 1, the only elements it fits: Fe (40 eV, −0.568, 0.286), Cu (33, −0.68,
+0.16), Ni (39, −1.01, 0.23), Pd (41, −0.88, 0.15), Pt (42, −1.12, 0.11), W (70, −0.56,
+0.12). For any other element there is no arc-dpa, and the notes say so. The adaptive
+quadratures split at the recoil energies of $N_d$'s step and kink and take a relative
+tolerance of $10^{-4}$; the step and kink would otherwise defeat their convergence.
+
+For Fe-56 (ENDF/B-VIII.1, 293.6 K), NRT is $0.8\,\text{MT444}/(2E_d)$ to $10^{-3}$ above
+100 keV, and higher near 1 keV, where the elastic recoils of ~70 eV fall in the
+$N_d = 1$ step; arc-dpa over NRT is 0.67 at thermal energies, 0.39 at 100 keV and 0.30
+at 14 MeV, towards $c$ = 0.286.
+
 ### Fission
 
 The fission part of MT 301 and 901 is not computed by energy balance. It comes from the
@@ -366,6 +396,9 @@ thermal energy); that of MT 444 is at most 0.25 % below 25 keV, at most 1.6 % up
   doi:10.2172/2007538: §1.5 (MF 1/MT 458, fission energy release).
 - M. J. Norgett, M. T. Robinson and I. M. Torrens, A proposed method of calculating
   displacement dose rates, *Nucl. Eng. Des.* 33 (1975) 50-54.
+- K. Nordlund, S. J. Zinkle, A. E. Sand et al., Improving atomic displacement and
+  replacement calculations with physically realistic damage models, *Nat. Commun.* 9
+  (2018) 1084, doi:10.1038/s41467-018-03415-5: arc-dpa, table 1.
 - J. Lindhard, V. Nielsen, M. Scharff and P. V. Thomsen, "Integral equations governing
   radiation effects", *Matematisk-fysiske Meddelelser, Det Kongelige Danske
   Videnskabernes Selskab* 33(10) (1963): the partition of the recoil energy.
