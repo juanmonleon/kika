@@ -75,11 +75,11 @@ $$ (eq-heating-balance)
 
 with three exceptions:
 
-- **Capture (MT 102) with photons.** Only the recoil of each photon is kept,
-  $h_{102} = \sum_\gamma y_\gamma \langle E_\gamma^2\rangle / [2(A+1)m_nc^2]$, with
-  $m_nc^2 = 939.565$ MeV (NJOY's constant). HEATR's output does not contain the
-  compound-nucleus recoil $E/(A+1)$, and kika reproduces the output (see below). Capture
-  without photons follows {eq}`eq-heating-balance`, $h_{102} = E + Q_{102}$.
+- **Capture (MT 102) with photons.** The compound nucleus' recoil plus the photons' kicks,
+  $h_{102} = E/(A+1) + \sum_\gamma y_\gamma \langle E_\gamma^2\rangle / [2(A+1)m_nc^2]$, with
+  $m_nc^2 = 939.565$ MeV (NJOY's constant). HEATR keeps $E/(A+1)$ for MF 12 photons
+  (`gheat`) and leaves it out for MF 6 ones (`tabsq6`); kika adds it always (decision D49,
+  see below). Capture without photons follows {eq}`eq-heating-balance`, $h_{102} = E + Q_{102}$.
 - **MT 5.** HEATR closes no energy balance there: the deposit is the energy of the
   charged particles and recoils the evaluation states with distributions,
   $h_5 = \sum_c y_c \bar E_c$, tabulated from the evaluated suite. Without any, $h_5 = 0$.
@@ -231,10 +231,17 @@ $k^\text{loc} + k_f^\text{loc,HDF5}$.
   which is what the official OpenMC files carry. It is not HEATR's `local = 1` balance,
   which differs only in capture: there `local = 1` deposits $E + Q$, and kika deposits
   the recoil plus the energy of the photons as the evaluation states them.
-- **Capture keeps only the photons' recoil.** That is HEATR's output: the compound
-  nucleus' recoil $\tfrac{E}{A+1}\sigma_\gamma$ is absent from the MT 301 of the official
-  OpenMC library at the capture resonances of Fe-56, although HEATR's source reads as if
-  it kept it. kika reproduces the output, and lists the approximation in the report.
+- **Capture carries the compound nucleus' recoil, in the KERMA and in the damage.** The
+  official OpenMC files lack $\tfrac{E}{A+1}\sigma_\gamma$ where the photons are MF 6 (HEATR's
+  `tabsq6`): Ni-58's MT 301 is 2.3 times lower at the 59 keV capture valley. kika adds it
+  always (D49). The damage takes it as one more independent primary next to HEATR's
+  photon kicks, $\mathrm{df}(E/(A+1)) + \sum_\gamma y_\gamma\langle\mathrm{df}(E_\gamma^2/2Mc^2)\rangle$:
+  at thermal energies $E/(A+1)$ is far below $E_d$ and the damage is HEATR's to the bit;
+  at 1 MeV it is the compound that displaces (Fe-56: 13.2 keV per capture against the
+  kicks' 0.38 keV). MT 444 then moves where capture dominates the damage: Ni-58 +174 %
+  at 59 keV, Fe-56 +119 % at 73 keV, U-238 +26 % at 10.9 keV, nothing at thermal
+  energies. Folding all the kicks into one recoil of the mean energy was rejected: the
+  mean kick of U-238 (24 eV) is below $E_d$ = 25 eV while its hard primaries are not.
 - **Mean energies from the sampled tables.** HEATR reads each ENDF law and
   interpolates its means on its own mesh (a ratio of 1.1 between incident energies in
   its two-body routine); kika takes the moments of the distributions OpenMC samples and
@@ -243,7 +250,7 @@ $k^\text{loc} + k_f^\text{loc,HDF5}$.
   with what the transport code emits.
 - **HEATR's approximations are kept and reported.** One isotropic laboratory emission
   with the target's $(Z, A)$ for the damage of continuum neutron emission; each photon's
-  recoil on its own in capture, without the compound nucleus' recoil; the single
+  recoil as an independent primary in capture (with the compound's as one more); the single
   charged particle at the Coulomb barrier for absorption, a continuum's deuterons and
   alphas taken as protons; trapezoids for the mean of a laboratory MF 6 spectrum, lower
   than the exact mean on wide panels. These are equivalences with HEATR; none is claimed
