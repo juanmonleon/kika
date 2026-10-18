@@ -78,9 +78,9 @@ $$ (eq-unresolved-resonances-neutron-width)
 
 with $E$ in eV, $P_\ell$ from {eq}`eq-resonance-reconstruction-recurrence` and $a_c$ the
 channel radius ($P_\ell/\rho$ is the ENDF $V_\ell$: 1, $\rho^2/(1+\rho^2)$, ...). A width
-the model marks as physical is used as it is. `TODO(check)`: the factor $\nu_n$ follows
-the comment in `kika.processing.resonances.unresolved` ("GN0 is reduced, including the
-explicitly stated neutron nu"); it was not checked against ENDF-6 App. D for this page.
+the model marks as physical is used as it is. The factor $\nu_n$ is NJOY's: its
+`unfac` returns $V_\ell$ multiplied by AMUN (`reconr.f90:4473-4492`), so UNRESR's width is
+GN0 $\sqrt{E}\,\nu_n V_\ell$, the same product.
 
 **2. Radii.** The phase radius $a_\varphi$ is AP($E$) when the range has NRO=1, else AP;
 the channel radius $a_c$ follows NAPS: 0, the mass formula
@@ -226,8 +226,14 @@ The tests below passed on 2026-10-11, with the compiled integrand loaded.
   result is published and reloaded
   (`kika/processing/tests/test_unresolved.py::test_rrr_urr_boundaries_and_native_publication`).
 
-`TODO(check)`: no test in this repository compares these averages with NJOY UNRESR at
-infinite dilution on an evaluation.
+No test in this repository compares these averages with NJOY UNRESR at infinite
+dilution; the comparison was made once on the corpus (2026-10-08, NJOY 2016.78, Linux
+build, tolerance $10^{-6}$; 1161 unresolved ranges accepted). The largest relative
+differences in capture are 0.26 % (Ba-140), 0.67 % (Kr-83) and 4.5 % (Tb-160), all
+ENDF/B-VIII.1, and persist at $10^{-5}$. At the evaluation's own nodes Tb-160 differs by
+at most 0.0044 %: between nodes kika interpolates the cross section by the stated law
+where UNRESR evaluates the parameters, and an independent evaluation confirms kika at the
+energies of largest difference.
 
 ## Diagnostics
 

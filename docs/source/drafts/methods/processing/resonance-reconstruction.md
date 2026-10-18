@@ -13,13 +13,14 @@ whose resolved ranges are SLBW (LRF=1), MLBW (LRF=2), Reich-Moore (LRF=3) or R-M
 Limited (LRF=7); the unresolved range is on its own page,
 {doc}`unresolved-resonances`.
 
-**Entry points:** `kika.endf.reconstruct_endf`,
-`kika.endf.reconstruction.EndfReconstruction.write_pendf`,
-`kika.endf.reconstruction.EndfReconstruction.report_document`; on a model suite
-`kika.processing.resonances.reconstruct_suite`,
-`kika.processing.resonances.attach_reconstruction`; the low-level pieces
-`kika.processing.resonances.prepare_resonances` and
-`kika.processing.resonances.tabulate_resonances`.
+**Entry points:** {py:func}`kika.endf.reconstruction.reconstruct_endf`,
+{py:meth}`kika.endf.reconstruction.EndfReconstruction.write_pendf`,
+{py:meth}`kika.endf.reconstruction.EndfReconstruction.report_document`; on a model suite
+{py:func}`kika.processing.resonances.reconstruct_suite`,
+{py:func}`kika.processing.resonances.attach_reconstruction`; the low-level pieces
+{py:func}`kika.processing.resonances.prepare_resonances` and
+{py:func}`kika.processing.resonances.tabulate_resonances`. Signatures in
+{doc}`../../api_reference/processing-resonances`.
 
 **Status:** experimental — not yet in a release (after 0.4.0).
 ```
@@ -830,8 +831,11 @@ ho$ and near the threshold,
 - **Parameters read by two parsers.** The 312 Fe-56 resonances read from ENDF-6 by kika
   and from GNDS written by FUDGE agree to $10^{-12}$
   (`kika/gnds/tests/test_resonance_oracle.py::test_both_encodings_hold_the_same_312_resonances`);
-  this checks the input, not the cross-sections. `TODO(check)`: needs the tape and GNDS
-  data (`--deep`); not re-run for this page.
+  this checks the input, not the cross-sections; it needs the tape and GNDS data
+  (`--deep`) and passed on 2026-10-18. The official GNDS of Fe-56 and the tape also
+  reconstruct the same resonance part through kika, $1.1\cdot10^{-13}$ in elastic and
+  $1.1\cdot10^{-14}$ in capture over 20 001 energies (measured 2026-10-18), the APL included
+  (*Conventions and choices*).
 
 ### Comparison with NJOY and FUDGE
 
@@ -885,13 +889,26 @@ checked by evaluating each code's own kernel at the worst probes:
   the panel lies elsewhere (Pu-239 capture: 0.054 of the budget at the test point, 2.02
   at 3406.9034 eV).
 
-In time, FUDGE is faster than kika on every one of these materials (reconstruction only,
-excluding its ENDF to GNDS translation, one thread on the same machine, measured
-2026-10-10): from about 10 times on Zr-90 and Fe-56 to 1.2 times on U-235 and U-238. NJOY
-(wall time including its MODER pass) is faster on Pu-239 and Zr-90, comparable on Fe-56,
-and slower on U-235 and U-238. At equal achieved error on U-235 (FUDGE at
-`accuracy` $=10^{-4}$), kika takes about 60 % of FUDGE's time. These times exclude kika's
-verification, which on its own costs several times the reconstruction.
+In time (seconds, the reconstruction alone; kika's `reconstruct_suite` with the tape's
+context, measured 2026-10-18 on one process with one worker and, in brackets, with the
+default workers; FUDGE 6.14.0 at `accuracy` $=10^{-3}$ excluding its ENDF to GNDS
+translation, and NJOY 2016.78 RECONR with its MODER pass, both measured 2026-10-10 on the
+same machine):
+
+| Material | kika | FUDGE | NJOY |
+|---|---|---|---|
+| Au-197 | 0.62 (0.57) | 0.19 | 1.3 |
+| Fe-56 | 2.4 (2.3) | 0.66 | 5.5 |
+| Pu-239 | 17.7 (12.7) | 19.2 | 23.1 |
+| U-235 | 42.9 (32.0) | 42.2 | 102.6 |
+| U-238 | 72.4 (48.8) | 92.4 | 128.6 |
+| Zr-90 | 0.97 (0.96) | 0.20 | 0.87 |
+
+FUDGE is 3 to 5 times faster on the light materials and kika is comparable or faster on
+the actinides; NJOY is slower than kika everywhere but Zr-90. kika evaluates about eight
+times per final point where the others evaluate two or three, the seven verification
+probes of each panel that it keeps by design, and reaches half the budget where FUDGE at
+the same `accuracy` does not reach it on Fe-56, Pu-239 and U-235 (table above).
 
 ## Diagnostics
 
