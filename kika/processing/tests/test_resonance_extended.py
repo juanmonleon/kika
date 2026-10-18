@@ -78,6 +78,9 @@ def test_missing_exit_l_rejects_and_signed_bw_is_invariant():
     for mt in baseline:
         np.testing.assert_array_equal(baseline[mt], signed[mt])
     g.competitiveChannel = CompetitiveChannel(Q=-20.)
+    # A real competitive width (GT above GN+GG+GF) needs the exit L ENDF does not give.
+    r = g.resonances[0]
+    r.totalWidth = 1.5 * (r.neutronWidth + r.captureWidth + r.fissionWidth)
     with pytest.raises(UnsupportedResonanceError, match='exit L'):
         prepare_resonances(m,ctx)
 

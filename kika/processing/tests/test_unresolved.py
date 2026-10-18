@@ -141,13 +141,36 @@ def test_mf3_step_at_int_boundary_keeps_its_following_interval():
 
 @pytest.mark.parametrize('edit,match',[
     (lambda m:setattr(m.unresolved.tabulatedWidths,'radiusPolicy',None),'radius policy'),
-    (lambda m:setattr(m.unresolved.tabulatedWidths.spinGroups[0],'J',0.),'incompatible'),
     (lambda m:setattr(m.unresolved.tabulatedWidths.spinGroups[0],'levelSpacing',[-1.]),'spacings'),
     (lambda m:setattr(m.unresolved.tabulatedWidths.spinGroups[0].channels[0],'degreesOfFreedom',0.),'GN0'),
 ])
 def test_ambiguous_or_invalid_inputs_reject_before_evaluation(edit,match):
     m=model();edit(m)
     with pytest.raises(ValueError,match=match):prepare_resonances(m,CONTEXT)
+
+
+def test_an_effective_j_is_taken_with_its_statistical_factor():
+    # B-VIII.1 Pu-243 and U-241: one L=0 group with J=I, no coupling of L and s. NJOY and
+    # FUDGE take the stated J's g_J; here J=0 on I=0 halves g_J against J=1/2.
+    reference=prepare_resonances(model(),CONTEXT)
+    m=model();m.unresolved.tabulatedWidths.spinGroups[0].J=0.
+    prepared=prepare_resonances(m,CONTEXT)
+    assert any('J=0 is no coupling' in note for note in prepared.preparation_notes)
+    e=140.
+    assert prepared.evaluate(e)[102]==pytest.approx(reference.evaluate(e)[102]/2,rel=1e-13)
+
+
+def test_a_repeated_node_with_one_value_is_one_node():
+    # B-VIII.1 Th-229 states its URR grid's 10 eV twice, every column equal.
+    grid=[100.,150.,200.]
+    m=model(law=Interpolation.linlin,grid=grid)
+    g=m.unresolved.tabulatedWidths.spinGroups[0];g.levelSpacing=[100.,110.,120.]
+    reference=prepare_resonances(deepcopy(m),CONTEXT)
+    m.unresolved.tabulatedWidths.energyGrid=[100.,150.,150.,200.];g.levelSpacing=[100.,110.,110.,120.]
+    e=np.array([120.,150.,170.])
+    np.testing.assert_array_equal(prepare_resonances(m,CONTEXT).evaluate(e)[102],reference.evaluate(e)[102])
+    g.levelSpacing=[100.,110.,111.,120.]
+    with pytest.raises(ValueError,match='grid'):prepare_resonances(m,CONTEXT)
 
 
 def test_global_radius_is_never_a_urr_fallback():

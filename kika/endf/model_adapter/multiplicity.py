@@ -186,13 +186,15 @@ def _multiplicityFunction(section, report: ConversionReport,
                 f"range, and no EMAX was available from MF1/451, so the "
                 f"polynomial was given the conventional "
                 f"{DEFAULT_EMIN_EV:g}-{DEFAULT_EMAX_EV:g} eV domain. The "
-                f"coefficients are the file's; the domain is not"
+                f"coefficients are the file's; the domain is not",
+                unaffectedScopes=("cross-sections",),   # a multiplicity, not a cross section
             )
         else:
             report.approximated(
                 f"MF1/MT{mt}: LNU=1 states no energy range of its own, so the "
                 f"polynomial's domain was taken from MF1/451's EMAX "
-                f"({domain[1]:g} eV)"
+                f"({domain[1]:g} eV)",
+                unaffectedScopes=("cross-sections",),   # a multiplicity, not a cross section
             )
         function = Polynomial1d(
             coefficients=coefficients,

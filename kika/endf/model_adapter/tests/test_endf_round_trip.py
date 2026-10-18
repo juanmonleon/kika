@@ -248,5 +248,28 @@ def test_a_zero_pair_after_the_table_end_is_not_a_point():
     reaction, report = decodeMF3MT(_Section(), report)
     curve = reaction.crossSection["eval"].function1ds[-1]
     assert list(curve.xs) == [1.0e-5, 1.0e6, 3.0e7]
-    assert "NP=4" in report.approximations[0]
+    assert "NP=4 and 1 of its pairs" in report.approximations[0]
+    assert report.isCleanFor("cross-sections")
+
+
+def test_a_short_line_inside_the_record_keeps_the_points_after_it():
+    """JEFF-4.0 Cs-134 MT102: a line ends after two pairs, and the 200 MeV point follows."""
+    from kika.nuclear_data.model import ConversionReport
+
+    class _Section:
+        number = 102
+        energies = [1.0e-5, 1.0e6, 3.0e7, 0.0, 2.0e8]
+        cross_sections = [1.0, 0.5, 2.0e-4, 0.0, 0.0]
+        energy_interpolation = [(2, 2), (5, 5)]
+        atomic_weight_ratio = 133.0
+        q_mass_difference = 0.0
+        q_reaction = 0.0
+        breakup_flag = 0
+        zaid = 55134
+        _mat = 5528
+
+    reaction, report = decodeMF3MT(_Section(), ConversionReport())
+    form = reaction.crossSection["eval"]
+    xs = [x for curve in form.function1ds for x in curve.xs]
+    assert xs[-3:] == [1.0e6, 3.0e7, 2.0e8] and 0.0 not in xs[1:]
     assert report.isCleanFor("cross-sections")

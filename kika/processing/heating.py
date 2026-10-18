@@ -710,26 +710,42 @@ def _unitBaseCMMean(form, grid, k):
         boost=k.awp/(k.A+1)**2
         return mean+boost*query+2*np.sqrt(boost*query)*cross
     if hi<lo:return held(np.asarray(grid),bool(np.max(grid)<energies[0]))
-    nodes=np.unique(np.r_[lo,energies[(energies>lo)&(energies<hi)],hi])
-    values=np.array([at(float(E)) for E in nodes])
-    for iteration in range(30):
-        additions=[]
-        for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
-            if b==a:continue
-            for fraction in (.25,.5,.75):
-                E=a+(b-a)*fraction;v=at(float(E))
-                if abs(v-(va+(vb-va)*fraction))>.1+1e-7*E:additions.append((E,v))
-        if not additions:break
-        if len(nodes)+len(additions)>20000:raise ValueError("unit-base mean refinement exceeds capacity")
-        # Each new node was already integrated while checking the error.
-        # Keep those exact values and the previous nodes' values; do not
-        # repeat quadrature on the enlarged mesh.
-        known = dict(zip(nodes, values))
-        known.update(additions)
-        nodes = np.array(sorted(known))
-        values = np.array([known[E] for E in nodes])
-    else:raise ValueError("unit-base mean refinement did not converge")
-    output=np.interp(grid,nodes,values)
+    # An incident energy stated twice is a step (JEFF-4.0 B-11 MT16, two tables at
+    # 20 MeV): each side is refined on its own, the left one up to the step's left
+    # limit, and the step's own energy takes the right side's value, as at() does.
+    unique,counts=np.unique(energies,return_counts=True)
+    steps=[float(e) for e,c in zip(unique,counts) if c>1 and lo<e<hi]
+    bounds=[lo,*steps,hi]
+    meshes=[];total=0
+    for a0,b0 in zip(bounds[:-1],bounds[1:]):
+        nodes=np.unique(np.r_[a0,energies[(energies>a0)&(energies<b0)],b0])
+        right=float(np.nextafter(b0,-np.inf)) if b0 in steps else float(b0)
+        def value(E,right=right,b0=b0):
+            return at(right) if E==b0 else at(float(E))
+        values=np.array([value(float(E)) for E in nodes])
+        for iteration in range(30):
+            additions=[]
+            for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
+                if b==a:continue
+                for fraction in (.25,.5,.75):
+                    E=a+(b-a)*fraction;v=at(float(E))
+                    if abs(v-(va+(vb-va)*fraction))>.1+1e-7*E:additions.append((E,v))
+            if not additions:break
+            if total+len(nodes)+len(additions)>20000:raise ValueError("unit-base mean refinement exceeds capacity")
+            # Each new node was already integrated while checking the error.
+            # Keep those exact values and the previous nodes' values; do not
+            # repeat quadrature on the enlarged mesh.
+            known = dict(zip(nodes, values))
+            known.update(additions)
+            nodes = np.array(sorted(known))
+            values = np.array([known[E] for E in nodes])
+        else:raise ValueError("unit-base mean refinement did not converge")
+        meshes.append((nodes,values));total+=len(nodes)
+    side=np.searchsorted(np.asarray(steps,dtype=float),grid,side="right")
+    output=np.empty(len(grid))
+    for k,(nodes,values) in enumerate(meshes):
+        mask=side==k
+        output[mask]=np.interp(np.asarray(grid)[mask],nodes,values)
     below=grid<lo;above=grid>hi
     if np.any(below):output[below]=held(grid[below],True)
     if np.any(above):output[above]=held(grid[above],False)

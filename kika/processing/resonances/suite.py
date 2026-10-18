@@ -1122,6 +1122,33 @@ def _raise_thresholds(curves,entries,graph,awr,suite=None):
     return changed
 
 
+def _clip_zero_tails(curves,declared):
+    """Zeros a table carries past the evaluated domain's end, dropped.
+
+    B-VIII.1 Pb-208 MT4 ends at EMAX = 30 MeV, then states 0 b at 30.00001 and 150 MeV:
+    the evaluation says nothing there, and its domain is MF1/451's. Only a tail that is
+    zero at every point above ``declared.max``, with ``declared.max`` itself a node, is
+    dropped; anything else stays and is refused as not covering the domain.
+    Returns ``{key: (old end, new end)}``."""
+    if declared is None or declared.unit!='eV':return {}
+    top=float(declared.max);changed={}
+    for key,cs in curves.items():
+        if cs[-1].x[-1]<=top:continue
+        above=[y for c in cs for x,y in zip(c.x,c.y) if x>top]
+        if any(y!=0 for y in above) or not any(top in c.x for c in cs):continue
+        kept=[]
+        for c in cs:
+            if c.x[0]>=top:continue
+            if c.x[-1]<=top:kept.append(c);continue
+            n=c.x.index(top)+1
+            law=c.law if isinstance(c.law,int) else tuple(c.law[:n-1])
+            kept.append(BackgroundCurve(tuple(c.x[:n]),tuple(c.y[:n]),law))
+        if not kept:continue
+        changed[key]=(float(cs[-1].x[-1]),top)
+        curves[key]=tuple(kept)
+    return changed
+
+
 def _resonance_mass(resonances,target_id):
     """The target mass a formalism's own PoPs states, first region first, else ``None``.
 
@@ -1239,9 +1266,10 @@ def _reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',op
     elif 18 not in mt_keys and 19 in mt_keys and mt_keys[19] not in graph:
         physical_owners[18]=mt_keys[19]
     if 1 in mt_keys and mt_keys[1] not in graph:raise UnsupportedResonanceError('total must have an explicit additive model graph',category='total-without-graph')
+    declared=chain[-1].projectileEnergyDomain
+    clipped=_clip_zero_tails(curves,declared)
     low=min(c.x[0] for cs in curves.values() for c in cs)
     high=max(c.x[-1] for cs in curves.values() for c in cs)
-    declared=chain[-1].projectileEnergyDomain
     if declared is not None:
         if declared.unit!='eV' or declared.min!=low or declared.max!=high:
             raise UnsupportedResonanceError('modeled cross sections do not cover the evaluated projectile energy domain',category='domain-not-covered')
@@ -1721,6 +1749,7 @@ def _reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',op
         stored_points=sum(len(c.xs) for f in output.values() for c in (f.function1ds if isinstance(f,Regions1d) else [f])),
         source_sum_policy='derive-from-leaves',source_sum_discrepancies=source_worst,
         raised_thresholds=MappingProxyType({key.label:v for key,v in raised.items()}),
+        clipped_zero_tails=MappingProxyType({key.label:v for key,v in clipped.items()}),
         source_conversion_report=deepcopy(suite.report),
         resonance_partial_owners=MappingProxyType(physical_owners),
         source_style=source_style,source_style_labels=tuple(suite.styles.labels),

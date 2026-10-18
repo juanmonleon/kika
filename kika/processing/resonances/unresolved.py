@@ -104,6 +104,12 @@ def average(function,values,grid,constant,low,high,*,positive=False,reduced=Fals
         if len(values)==1:constant=float(values[0])
         else:
             x=np.asarray(grid,dtype=float)
+            if x.shape==values.shape and len(x)>1:
+                # A node repeated with the same value is one node (B-VIII.1 Th-229 states
+                # 10 eV twice, every column equal); a repeated energy with another value
+                # is still refused below.
+                repeated=np.r_[False,(np.diff(x)==0)&(np.diff(values)==0)]
+                x,values=x[~repeated],values[~repeated]
             if x.ndim!=1 or x.shape!=values.shape or np.any(~np.isfinite(x)) or np.any(x<=0) or np.any(np.diff(x)<=0):raise ValueError('invalid URR average grid')
             if x[0]>low or x[-1]<high:raise ValueError('URR parameter grid does not cover region')
             check(values)
@@ -248,7 +254,12 @@ def prepare_unresolved(region,context,notes):
         l,j=sg.L,float(sg.J)
         if not isinstance(l,(int,np.integer)) or not 0<=l<=64 or not np.isfinite(j) or j<0 or not float(2*j).is_integer():raise ValueError('invalid URR L/J')
         allowed=any(abs(l-s)<=j<=l+s and float(l+s-j).is_integer() for s in {abs(context.target_spin-.5),context.target_spin+.5})
-        if not allowed:raise UnsupportedResonanceError(f'URR J={j:g} is incompatible with I={context.target_spin:g}, L={l}',category='invalid-J')
+        if not allowed:
+            # One effective J per L (B-VIII.1 Pu-243 and U-241: L=0 with J=I). No coupling of
+            # L and s gives it, but in the URR J enters only through g_J, and NJOY (unresr,
+            # purr) and FUDGE take the stated J's g_J; so does kika, and says so.
+            notes.append(f'URR L={l} J={j:g} is no coupling of L with I={context.target_spin:g}; '
+                         f'taken as stated, g_J=(2J+1)/(2(2I+1)), as NJOY and FUDGE do')
         if (l,j) in seen:raise ValueError('duplicate URR L/J group')
         seen.add((l,j));ctx=context if sg.atomicWeightRatio is None else replace(context,atomic_weight_ratio=sg.atomicWeightRatio)
         if l in lcontexts and lcontexts[l]!=ctx:raise UnsupportedResonanceError('URR groups of one L disagree on mass')
@@ -290,7 +301,8 @@ def prepare_unresolved(region,context,notes):
             grid=(sg.crossSectionEnergies if sg.crossSectionEnergies is not None else
                   sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid)
             if grid is None:raise ValueError('URR cross-section interpolation requires a declared energy grid')
-            grids.append(tuple(map(float,grid)))
+            grid=tuple(dict.fromkeys(map(float,grid)))   # a repeated node is one node (Th-229)
+            grids.append(grid)
         elif sg.crossSectionEnergies is not None:raise ValueError('URR sigma grid requires an interpolation policy')
         policies.append((law,None if law is None else tuple(map(float,grid))))
     if not groups:raise ValueError('URR needs spin groups')
