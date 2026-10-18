@@ -96,7 +96,7 @@ except ModuleNotFoundError as exc:  # the NumPy reference path stays the definit
     if exc.name != "kika.processing._heating_native":
         raise
     _heating_native = None
-if _heating_native is not None and _heating_native.API_VERSION != 3:
+if _heating_native is not None and _heating_native.API_VERSION != 5:
     raise ImportError("rebuild kika's native heating extension (API version mismatch)")
 
 #: Threads for the independent incident energies of a damage quadrature: set by
@@ -191,6 +191,21 @@ def _evaluateAllRows(at, energies):
             for _ in pool.map(lambda job: job[0].run(at, job[1]), zip(contexts, distinct)):
                 pass
     return [at(E) for E in energies]
+
+
+def _threadMap(function, items) -> list:
+    """``[function(item) for item in items]``, the items computed on the processing's
+    threads (:data:`_energyThreads`). Each item is independent and its heavy part runs
+    in the native kernel without the GIL, so the list is the sequential one, item for
+    item, whatever thread computed it; an item that fails raises as it would there."""
+    items = list(items)
+    threads = _energyThreads.get()
+    if threads > 1 and len(items) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        contexts = [contextvars.copy_context() for _ in items]
+        with ThreadPoolExecutor(max_workers=min(threads, len(items))) as pool:
+            return list(pool.map(lambda job: job[0].run(function, job[1]), zip(contexts, items)))
+    return [function(item) for item in items]
 
 
 _GL4 = np.polynomial.legendre.leggauss(4)
@@ -368,6 +383,14 @@ def _lindhardConstants(Zr, Ar, Zl, Al):
     return el, fl
 
 
+def _lindhardPowers(ep):
+    """``(ep^(1/6), ep^(3/4))`` of :func:`lindhard`'s partition, as sqrt(cbrt(ep)) and
+    s*sqrt(s) with s = sqrt(ep): the same powers to an ulp, at about half the cost of two
+    ``pow`` (sqrt is exact; the native kernel takes the same cbrt)."""
+    s = np.sqrt(ep)
+    return np.sqrt(np.cbrt(ep)), s * np.sqrt(s)
+
+
 def lindhard(E, Zr, Ar, Zl, Al, ed):
     """Damage energy of a recoil ``(Zr, Ar)`` of energy ``E`` in a lattice ``(Zl, Al)`` (``df``).
 
@@ -380,7 +403,8 @@ def lindhard(E, Zr, Ar, Zl, Al, ed):
     model = _DISPLACEMENTS.get()
     if E.ndim == 0:
         ep = np.maximum(E, 0.0) / el
-        out = E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
+        sixth, threeQuarters = _lindhardPowers(ep)
+        out = E / (1.0 + fl * (3.4008 * sixth + 0.40244 * threeQuarters + ep))
         if model is not None:
             return model.count(out)
         return np.where(E >= ed, out, 0.0)
@@ -389,9 +413,8 @@ def lindhard(E, Zr, Ar, Zl, Al, ed):
     # temporaries cost a fifth of it.
     ep = np.maximum(E, 0.0)
     ep /= el
-    out = np.power(ep, 1 / 6)
+    out, term = _lindhardPowers(ep)
     out *= 3.4008
-    term = np.power(ep, 0.75)
     term *= 0.40244
     out += term
     out += ep
@@ -949,9 +972,8 @@ def _damageEnergy(E, Zr, Ar, Zl, Al):
     el, fl = _lindhardConstants(Zr, Ar, Zl, Al)
     ep = np.maximum(E, 0.0)
     ep /= el
-    out = np.power(ep, 1 / 6)
+    out, term = _lindhardPowers(ep)
     out *= 3.4008
-    term = np.power(ep, 0.75)
     term *= 0.40244
     out += term
     out += ep
@@ -1012,7 +1034,8 @@ def _thresholdOf(target, Zr, Ar, Zl, Al) -> float:
 
     def T(E):
         ep = E / el
-        return E / (1.0 + fl * (3.4008 * ep ** (1 / 6) + 0.40244 * ep ** 0.75 + ep))
+        sixth, threeQuarters = _lindhardPowers(ep)
+        return E / (1.0 + fl * (3.4008 * sixth + 0.40244 * threeQuarters + ep))
 
     lo, hi = target, 2.0 * target
     while T(hi) < target:
@@ -1814,6 +1837,81 @@ def _tabulateHeavy(form, context):
     return tabulated
 
 
+def _tabulateJob(job):
+    """``(tabulated, error)`` of one ``(form, context)``, in a worker process."""
+    from kika.processing.tabulation import tabulateDistribution
+
+    form, context = job
+    try:
+        return tabulateDistribution(form, context), None
+    except (TypeError, ValueError, NotImplementedError) as exc:
+        return None, exc
+
+
+def _heavyJobs(suite, evaluation, sigma, A, zaTarget):
+    """The ``(form, context)`` pairs :func:`_heavyProducts` and :func:`_independentParticles`
+    will tabulate, as they build them: each reaction's charged particles and recoils, and
+    the neutrons of one that has some."""
+    from kika.nuclear_data.model import Isotropic2d, zaFromPid
+    from kika.nuclear_data.model.endf_conversion import reactionQI
+    from kika.processing.tabulation import TabulationContext
+
+    jobs = []
+    for reaction in suite.reactions:
+        mt = reaction.ENDF_MT
+        if mt is None or mt in FISSION_MTS or mt not in sigma or mt in (2, 102) or 51 <= mt <= 90:
+            continue
+        source = evaluation.findReactionByENDF_MT(mt)
+        if source is None:
+            continue
+        Q = float(reactionQI(source, evaluation) or 0.0)
+        level = _levelParticle(mt)
+        charged, neutrons = [], []
+        for product in source.outputChannel.products:
+            forms = product.distribution.forms if product.distribution is not None else {}
+            form = forms.get("eval") or (next(iter(forms.values())) if forms else None)
+            if form is None or isinstance(form, Isotropic2d) or product.multiplicity is None:
+                continue
+            if product.pid == "n":
+                neutrons.append((form, TabulationContext(awr=A, zaTarget=zaTarget, mt=mt, Q=Q, pid="n",
+                                                         zaEmitted=1)))
+            elif product.pid != "photon":
+                charged.append((form, TabulationContext(awr=A, zaTarget=zaTarget, mt=mt, Q=Q, pid=product.pid,
+                                                        zaEmitted=zaFromPid(product.pid))))
+        jobs += charged + (neutrons if charged else [])
+    return jobs
+
+
+def _prefetchHeavy(jobs, workers):
+    """Fill :func:`_tabulateHeavy`'s cache for ``jobs`` on ``workers`` processes: each table is
+    the one the sequential call would make (the same function on the same form), and the
+    tabulation is pure Python, which threads would not run at once."""
+    missing = []
+    for form, context in jobs:
+        key = (context.awr, context.zaTarget, context.mt, context.Q, context.pid, context.zaEmitted,
+               context.options)
+        entry = _HEAVY_TABULATIONS.get(id(form))
+        if entry is None or entry[0]() is not form or key not in entry[1]:
+            missing.append((form, context, key))
+    if workers < 2 or len(missing) < 4:
+        return
+    from concurrent.futures import ProcessPoolExecutor
+
+    with ProcessPoolExecutor(max_workers=min(workers, len(missing))) as pool:
+        results = list(pool.map(_tabulateJob, [(form, context) for form, context, _ in missing]))
+    for (form, _context, key), (tabulated, error) in zip(missing, results):
+        entry = _HEAVY_TABULATIONS.get(id(form))
+        if entry is None or entry[0]() is not form:
+            formId = id(form)
+
+            def forget(reference, formId=formId):
+                if _HEAVY_TABULATIONS.get(formId, (None,))[0] is reference:
+                    del _HEAVY_TABULATIONS[formId]
+
+            entry = _HEAVY_TABULATIONS[formId] = (weakref.ref(form, forget), {})
+        entry[1].setdefault(key, (tabulated, error))
+
+
 def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damageOnly=False):
     """``(deposit, damage)`` of a reaction's charged particles and recoils.
 
@@ -2173,22 +2271,15 @@ def _recoilDamage(form, grid, k, zr, ar, Z, A, ed):
     cm = str(getattr(frame, "value", frame)) in ("centerOfMass", "Frame.centerOfMass")
     mp, M = k.awp, ar
 
-    def recoil(E, e, mus):
-        """E_R for outgoing energies ``e`` (n, 1) and cosines ``mus`` (broadcast)."""
-        if cm:
-            a = M * E / (A + 1.0) ** 2
-            return a + mp * e / M - 2.0 * np.sqrt(a * mp * e / M) * mus
-        return (E - 2.0 * np.sqrt(E * mp * e) * mus + mp * e) / M
-
     def damageAt(E, e, mus, weights):
         """``Σ_μ w df(E_R(E, e, μ))`` for outgoing energies ``e`` (n,) and a rule in μ."""
-        er = recoil(E, e[:, None], mus[None, :])
-        return lindhard(np.clip(er, 0.0, None), zr, M, Z, A, ed) @ weights
+        return _recoilRows(E, e, mus, weights, cm, M, mp, A, zr, Z, ed)
 
     if isinstance(form, m.EnergyAngularMC):
         energies, tables, flat = _tables(form.energy)
-        values = []
-        for E, t, mus in zip(energies, tables, form.energyAngular.function2ds):
+
+        def valueAt(job):
+            E, t, mus = job
             rules = [_ruleOf(u, _RECOIL_SPLIT) for u in mus.function1ds]
             nodes = np.asarray(t.xs, dtype=float)
             nd = int(getattr(t, "numberOfDiscrete", 0) or 0)
@@ -2209,23 +2300,27 @@ def _recoilDamage(form, grid, k, zr, ar, Z, A, ed):
                     left = damageAt(E, ec[inside], *rules[nd + i])
                     right = damageAt(E, ec[inside], *rules[nd + i + 1])
                     value += float(wc[inside] @ ((1.0 - f) * left + f * right))
-            values.append(value)
+            return value
+
+        values = _threadMap(valueAt, zip(energies, tables, form.energyAngular.function2ds))
         return _onGrid(energies, values, grid, flat)
     if isinstance(form, m.KalbachMann):
         energies, tables, flat = _tables(form.f)
         rs = list(m.toEndfTab2(form.r)[0])
         As = list(m.toEndfTab2(form.a)[0])
         mu, wmu = np.polynomial.legendre.leggauss(32)
-        values = []
-        for E, t, r, a in zip(energies, tables, rs, As):
+
+        def valueAt(job):
+            E, t, r, a = job
             e, w = _ruleOf(t, _RECOIL_SPLIT)
             rr = np.interp(e, r.xs, r.ys)[:, None]
             aa = np.interp(e, a.xs, a.ys)[:, None]
             safe = np.where(np.abs(aa) > 1e-6, aa, 1.0)
             norm = np.where(np.abs(aa) > 1e-6, safe / (2.0 * np.sinh(safe)), 0.5)
             p = norm * (np.cosh(aa * mu) + rr * np.sinh(aa * mu)) * wmu
-            er = recoil(E, e[:, None], mu[None, :])
-            values.append(float(w @ np.sum(p * lindhard(np.clip(er, 0.0, None), zr, M, Z, A, ed), axis=1)))
+            return float(w @ _recoilRows(E, e, mu, p, cm, M, mp, A, zr, Z, ed))
+
+        values = _threadMap(valueAt, zip(energies, tables, rs, As))
         return _onGrid(energies, values, grid, flat)
     if isinstance(form, m.Uncorrelated):
         spectrum = form.energy
@@ -2259,24 +2354,25 @@ def _recoilDamage(form, grid, k, zr, ar, Z, A, ed):
                 u, wu = _GL4
                 half = 0.5 * np.diff(cuts)
                 isotropic = (((cuts[:-1] + cuts[1:]) / 2)[:, None] + half[:, None] * u).ravel(),                     (half[:, None] * wu / 2.0 * np.ones_like(u)).ravel()
-            values = []
-            for E in energies:
+            def levelAt(E):
                 e = float(spectrum.outgoingEnergy(E))
                 if e <= 0.0:
-                    values.append(0.0)
-                    continue
+                    return 0.0
                 x, wx = (isotropic if angularTables is None
                          else _mixedRule(angularTables, angularRules, float(E)))
-                values.append(float(damageAt(E, np.array([e]), x, wx)[0]))
-            return _onGrid(energies, values, grid)
+                return float(damageAt(E, np.array([e]), x, wx)[0])
+
+            return _onGrid(energies, _threadMap(levelAt, energies), grid)
         energies, tables, flat = _tables(spectrum)
-        values = []
-        for E, t in zip(energies, tables):
+
+        def tableAt(job):
+            E, t = job
             x, wx = (_ISOTROPIC_MU if angularTables is None
                      else _mixedRule(angularTables, angularRules, float(E)))
             e, w = _ruleOf(t, _RECOIL_SPLIT)
-            values.append(float(w @ damageAt(E, e, x, wx)))
-        return _onGrid(energies, values, grid, flat)
+            return float(w @ damageAt(E, e, x, wx))
+
+        return _onGrid(energies, _threadMap(tableAt, zip(energies, tables)), grid, flat)
     raise NotImplementedError(f"one-particle recoil of a {type(form).__name__}")
 
 
@@ -2309,10 +2405,19 @@ def _incidentNodes(form):
     raise NotImplementedError(f"independent recoil of a {type(form).__name__}")
 
 
-def _emissionRule(form, i, E):
-    """``(E', μ, w)`` of incident table ``i`` of a Monte Carlo form, in its own frame."""
+def _emissionRule(form, i, E, cache=None):
+    """``(E', μ, w)`` of incident table ``i`` of a Monte Carlo form, in its own frame.
+
+    ``cache``, a dict for the length of one computation, keeps the rules that depend on the
+    table alone (correlated and Kalbach-Mann laws): every incident energy between two tables
+    asks for both. The arrays are read, never changed."""
     from kika.nuclear_data import model as m
 
+    if cache is not None and isinstance(form, (m.EnergyAngularMC, m.KalbachMann)):
+        key = (id(form), i)
+        if key not in cache:
+            cache[key] = (form, _emissionRule(form, i, E))     # the form kept alive with its key
+        return cache[key][1]
     if isinstance(form, m.EnergyAngularMC):
         _, tables, _ = _tables(form.energy)
         t, angular = tables[i], form.energyAngular.function2ds[i]
@@ -2358,7 +2463,7 @@ def _emissionRule(form, i, E):
     raise NotImplementedError(f"independent recoil of a {type(form).__name__}")
 
 
-def _labMomenta(form, E, awp, A):
+def _labMomenta(form, E, awp, A, cache=None):
     """``(p_z, p_⊥, w)`` of a particle at incident energy ``E``, in the lab.
 
     Momenta in neutron masses and eV (``p² = 2 m E'``), ``z`` along the beam; the
@@ -2379,7 +2484,7 @@ def _labMomenta(form, E, awp, A):
         for term in form.weighted:
             g = float(np.asarray(term.weight.evaluate([E]), dtype=float)[0]) if term.weight is not None else 1.0
             if g > 0:
-                pz, pp, w = _labMomenta(term.functional, E, awp, A)
+                pz, pp, w = _labMomenta(term.functional, E, awp, A, cache)
                 parts.append((pz, pp, g * w))
         pz, pp, w = (np.concatenate(c) for c in zip(*parts))
         return pz, pp, w / w.sum()
@@ -2395,7 +2500,7 @@ def _labMomenta(form, E, awp, A):
     parts = []
     for i, g in mix:
         if g > 0:
-            e, mu, w = _emissionRule(form, i, E)
+            e, mu, w = _emissionRule(form, i, E, cache)
             total = w.sum()
             if total > 0:
                 parts.append((e, mu, g * w / total))
@@ -2403,7 +2508,7 @@ def _labMomenta(form, E, awp, A):
         # Tables of zeros (Ra-225 ENDF/B-VIII.1: a spectrum stated null at its
         # threshold): the nearest table that emits, as the ends are read.
         for i in sorted(range(len(nodes)), key=lambda j: abs(nodes[j] - E)):
-            e, mu, w = _emissionRule(form, i, E)
+            e, mu, w = _emissionRule(form, i, E, cache)
             if w.sum() > 0:
                 parts.append((e, mu, w / w.sum()))
                 break
@@ -2458,8 +2563,54 @@ def _binMomenta(pz, pp, w):
     if len(w) <= _MOMENTUM_BINS:
         return pz, pp, w, np.zeros(len(w)), pp * pp
     bins = _MomentumBins(pz.min(), pz.max(), pp.min(), pp.max())
-    bins.add(pz, pp, w)
+    if _heating_native is not None:
+        zlo, zw, plo, pw = bins.edges
+        raw = _heating_native.points_bin(*(np.ascontiguousarray(v, dtype=float) for v in (pz, pp, w)),
+                                         float(zlo), float(zw), float(plo), float(pw), int(_MOMENTUM_BINS))
+        bins.sums = np.frombuffer(raw, dtype=float).reshape(5, -1).copy()
+    else:
+        bins.add(pz, pp, w)
     return bins.moments()
+
+
+def _recoilRows(E, e, mus, weights, cm, M, mp, A, zr, Z, ed):
+    """``Σ_k weights[., k] df(max(E_R(E, e_i, mu_k), 0))`` for each outgoing energy ``e_i``:
+    :func:`_recoilDamage`'s rows. ``weights`` is one rule shared by every ``e`` or one row
+    per ``e``. The native kernel does it operation for operation, a row summed pairwise as
+    np.sum does; the NumPy statements below are the definition."""
+    e = np.ascontiguousarray(e, dtype=float)
+    mus = np.ascontiguousarray(mus, dtype=float)
+    weights = np.ascontiguousarray(weights, dtype=float)
+    a = M * E / (A + 1.0) ** 2
+    if _heating_native is not None and len(e):
+        noRecoil = zr == 0
+        el, fl = (1.0, 1.0) if noRecoil else (float(c) for c in _lindhardConstants(zr, M, Z, A))
+        raw = _heating_native.recoil_rows(e, mus, weights.ravel(), float(E), float(a), float(a * mp),
+                                          float(E * mp), float(mp), float(M), el, fl, float(ed),
+                                          bool(cm), noRecoil, *_nativeModel())
+        return np.frombuffer(raw, dtype=float).copy()
+    ec, mc = e[:, None], mus[None, :]
+    if cm:
+        er = a + mp * ec / M - 2.0 * np.sqrt(a * mp * ec / M) * mc
+    else:
+        er = (E - 2.0 * np.sqrt(E * mp * ec) * mc + mp * ec) / M
+    rule = weights if weights.ndim == 2 else weights[None, :]
+    return np.sum(lindhard(np.clip(er, 0.0, None), zr, M, Z, A, ed) * rule, axis=1)
+
+
+def _momentaDamage(a, b, P, ar, zr, Z, A, ed, damage):
+    """``_addMomenta(a, b, last=damage)`` of :func:`_independentRecoilDamage`, natively
+    when the kernel is built: the same points in the same order, each block's np.sum."""
+    if _heating_native is None:
+        return _addMomenta(a, b, last=damage)
+    (az, ap, aw, avz, ap2), (bz, bp, bw, bvz, bp2) = a, b
+    vectors = [np.ascontiguousarray(v, dtype=float) for v in (az, avz, ap, ap2, aw, bz, bvz, bp, bp2, bw)]
+    cos = np.cos((np.arange(_AZIMUTH_NODES) + 0.5) * np.pi / _AZIMUTH_NODES)
+    rows = max(1, _MOMENTUM_BLOCK // (len(bz) * _AZIMUTH_NODES))
+    noRecoil = zr == 0
+    el, fl = (1.0, 1.0) if noRecoil else (float(c) for c in _lindhardConstants(zr, ar, Z, A))
+    return _heating_native.momenta_damage(*vectors, cos, float(P), float(2.0 * ar), el, fl, float(ed),
+                                          int(rows), noRecoil, *_nativeModel())
 
 
 def _addMomenta(a, b, last=None):
@@ -2475,6 +2626,13 @@ def _addMomenta(a, b, last=None):
     bins = _MomentumBins(az.min() + bz.min(), az.max() + bz.max(), 0.0, top) if last is None else None
     total = 0.0
     rows = max(1, _MOMENTUM_BLOCK // (len(bz) * _AZIMUTH_NODES))
+    if last is None and _heating_native is not None:
+        vectors = [np.ascontiguousarray(v, dtype=float) for v in (az, avz, ap, ap2, aw, bz, bvz, bp, bp2, bw)]
+        zlo, zw, plo, pw = bins.edges
+        raw = _heating_native.momenta_bin(*vectors, cos, float(zlo), float(zw), float(plo), float(pw),
+                                          int(_MOMENTUM_BINS), int(rows))
+        bins.sums = np.frombuffer(raw, dtype=float).reshape(5, -1).copy()
+        return bins.moments()
     for s in range(0, len(az), rows):
         z = (az[s:s + rows, None] + bz[None, :]).ravel()
         vz = (avz[s:s + rows, None] + bvz[None, :]).ravel()
@@ -2508,30 +2666,35 @@ def _independentRecoilDamage(particles, grid, A, Z, zr, ar, ed):
     lo, hi = float(np.min(grid)), float(np.max(grid))
     nodes = np.unique(np.concatenate([_incidentNodes(form) for form, _, _ in particles] + [[lo, hi]]))
     nodes = nodes[(nodes >= lo) & (nodes <= hi)]
-    values = np.zeros(len(nodes))
-    for j, E in enumerate(nodes):
+    rules = {}
+
+    def nodeAt(E):
         # A yield read between the grid's points around a threshold is a fraction.
         counts = [int(round(np.interp(E, grid, y))) for _, _, y in particles]
         if any(c <= 0 for c in counts):
-            continue                                         # below a threshold
+            return 0.0                                       # below a threshold
         P = np.sqrt(2.0 * E)
 
         def damage(qz, vz, qp2, w, P=P):
             er = ((P - qz) ** 2 + vz + qp2) / (2.0 * ar)
-            return float(w @ lindhard(er, zr, ar, Z, A, ed))
+            return float(np.sum(w * lindhard(er, zr, ar, Z, A, ed)))
 
         if sum(counts) == 1:
             # One particle: the recoil of each point of its law, nothing binned.
             (form, awp, _), = (p for p, c in zip(particles, counts) if c)
-            qz, qp, w = _labMomenta(form, float(E), awp, A)
-            values[j] = damage(qz, 0.0, qp * qp, w)
-            continue
-        momenta = [_binMomenta(*_labMomenta(form, float(E), awp, A))
-                   for (form, awp, _), count in zip(particles, counts) for _ in range(count)]
+            qz, qp, w = _labMomenta(form, float(E), awp, A, rules)
+            return damage(qz, 0.0, qp * qp, w)
+        # Two neutrons of one law have the same distribution: binned once, added twice.
+        momenta = []
+        for (form, awp, _), count in zip(particles, counts):
+            if count:
+                momenta += [_binMomenta(*_labMomenta(form, float(E), awp, A, rules))] * count
         total = momenta[0]
         for one in momenta[1:-1]:
             total = _addMomenta(total, one)
-        values[j] = _addMomenta(total, momenta[-1], last=damage)
+        return _momentaDamage(total, momenta[-1], P, ar, zr, Z, A, ed, damage)
+
+    values = np.array(_threadMap(nodeAt, nodes), dtype=float)
     return _onGrid(nodes, values, grid)
 
 
@@ -2865,6 +3028,8 @@ def _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarge
                         f"damage with ed = {ed:g} eV)"] + [f"as HEATR: {a}" for a in HEATR_APPROXIMATIONS]
     for mt in sorted(auxiliaryFissions):
         notes.append(f"MT{mt}: auxiliary fission Q accepted; MF1/458 retains authority for released energy, as HEATR")
+    if evaluation is not None:
+        _prefetchHeavy(_heavyJobs(suite, evaluation, sigma, A, zaTarget or 1000 * Z), _energyThreads.get())
     for reaction in suite.reactions:
         mt = reaction.ENDF_MT
         if mt is None or mt in FISSION_MTS or mt not in sigma:

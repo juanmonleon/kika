@@ -158,3 +158,83 @@ def test_joint_emission_chunk_is_numpy_bit_for_bit(lab, Zr):
         joint = (args[:12] + [thresholds, ed, partition, args[14], args[15], models])
         assert np.array_equal(H._emissionChunkJoint(*joint), H._emissionChunkJointNumpy(*joint[:12],
                               (thresholds + [thresholds[-1]] * 3)[:3], *joint[13:]))
+
+
+def _numpy(monkeypatch_target, function, *args):
+    """``function(*args)`` with the native kernel switched off: the NumPy definition."""
+    saved = H._heating_native
+    H._heating_native = None
+    try:
+        return function(*args)
+    finally:
+        H._heating_native = saved
+
+
+@pytest.mark.parametrize("model", [None, "nrt", "arc-dpa"])
+@pytest.mark.parametrize("cm", [False, True])
+def test_native_recoil_rows_equal_numpy_bit_for_bit(cm, model):
+    # _recoilDamage's rows: shared rule and one row per outgoing energy (Kalbach-Mann).
+    token = H._DISPLACEMENTS.set(None if model is None else H.displacementModels(26, 40.0)[model])
+    try:
+        rng = np.random.default_rng(7 + cm + (0 if model is None else len(model)))
+        for _ in range(40):
+            n, m_ = int(rng.integers(1, 60)), int(rng.choice([2, 8, 16, 32, 100, 200]))
+            E = 10.0 ** rng.uniform(3, 7.3)
+            e = np.sort(rng.uniform(0.0, E, n))
+            mus = np.sort(rng.uniform(-1.0, 1.0, m_))
+            for weights in (rng.uniform(0.0, 1.0, m_), rng.uniform(0.0, 1.0, (n, m_))):
+                args = (E, e, mus, weights, cm, 54.4, float(rng.choice([1.0, 0.9986, 3.97])), 55.4, 26, 26, 40.0)
+                got = H._recoilRows(*args)
+                want = _numpy(None, H._recoilRows, *args)
+                np.testing.assert_array_equal(got, want)
+    finally:
+        H._DISPLACEMENTS.reset(token)
+
+
+def _momenta(rng, n):
+    pz = rng.normal(0.0, 1e3, n)
+    pp = np.abs(rng.normal(0.0, 1e3, n))
+    w = rng.uniform(0.0, 1.0, n)
+    return H._binMomenta(pz, pp, w / w.sum())
+
+
+@pytest.mark.parametrize("model", [None, "nrt"])
+def test_native_momenta_damage_equals_numpy_bit_for_bit(model):
+    # _independentRecoilDamage's last addition: every pair of bins times the azimuths.
+    token = H._DISPLACEMENTS.set(None if model is None else H.displacementModels(26, 40.0)[model])
+    try:
+        rng = np.random.default_rng(11)
+        for na, nb in ((5, 7), (30, 600), (576, 576)):
+            a, b = _momenta(rng, na), _momenta(rng, nb)
+            P, ar, zr, Z, A, ed = 5.3e3, 53.4, 26, 26, 55.4, 40.0
+
+            def damage(qz, vz, qp2, w):
+                er = ((P - qz) ** 2 + vz + qp2) / (2.0 * ar)
+                return float(np.sum(w * H.lindhard(er, zr, ar, Z, A, ed)))
+
+            got = H._momentaDamage(a, b, P, ar, zr, Z, A, ed, damage)
+            assert got == H._addMomenta(a, b, last=damage)
+    finally:
+        H._DISPLACEMENTS.reset(token)
+
+
+def test_native_momenta_bins_equal_numpy_bit_for_bit():
+    # The intermediate additions of three or more particles: the bins' five sums.
+    rng = np.random.default_rng(13)
+    for na, nb in ((5, 7), (30, 600), (576, 576)):
+        a, b = _momenta(rng, na), _momenta(rng, nb)
+        got = H._addMomenta(a, b)
+        want = _numpy(None, H._addMomenta, a, b)
+        for x, y in zip(got, want):
+            np.testing.assert_array_equal(x, y)
+
+
+def test_native_points_bins_equal_numpy_bit_for_bit():
+    # Each particle's momenta binned before they are added (_binMomenta).
+    rng = np.random.default_rng(17)
+    for n in (30, 5000, 200000):
+        pz, pp, w = rng.normal(0.0, 1e3, n), np.abs(rng.normal(0.0, 1e3, n)), rng.uniform(0.0, 1.0, n)
+        got = H._binMomenta(pz, pp, w)
+        want = _numpy(None, H._binMomenta, pz, pp, w)
+        for x, y in zip(got, want):
+            np.testing.assert_array_equal(x, y)

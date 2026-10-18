@@ -12,6 +12,18 @@
  * arguments, so on Windows the UCRT's is looked up at import. */
 typedef double (*pow_function)(double, double);
 static pow_function crt_pow = pow;
+/* NumPy's cbrt is the C runtime's too, looked up the same way. */
+typedef double (*cbrt_function)(double);
+static cbrt_function crt_cbrt = cbrt;
+
+/* lindhard's ep^(1/6) and ep^(3/4) as heating._lindhardPowers forms them:
+ * sqrt(cbrt(ep)) and s*sqrt(s), s = sqrt(ep). */
+static inline void lindhard_powers(double ep, double *sixth, double *threeQuarters)
+{
+    double s = sqrt(ep);
+    *sixth = sqrt(crt_cbrt(ep));
+    *threeQuarters = s * sqrt(s);
+}
 
 /* The damage quadratures of kika.processing.heating, operation for operation:
  * each line keeps the NumPy expression's order of operations, np.interp's
@@ -60,9 +72,9 @@ static inline double lindhard1(double E, double el, double fl, double ed)
 {
     double ep = np_maximum(E, 0.);
     ep /= el;
-    double out = crt_pow(ep, 1. / 6.);
+    double out, term;
+    lindhard_powers(ep, &out, &term);
     out *= 3.4008;
-    double term = crt_pow(ep, 0.75);
     term *= 0.40244;
     out += term;
     out += ep;
@@ -98,9 +110,9 @@ static inline double damage1(double E, double el, double fl, double ed, const di
     if (m->mode == 0) return lindhard1(E, el, fl, ed);
     double ep = np_maximum(E, 0.);
     ep /= el;
-    double out = crt_pow(ep, 1. / 6.);
+    double out, term;
+    lindhard_powers(ep, &out, &term);
     out *= 3.4008;
-    double term = crt_pow(ep, 0.75);
     term *= 0.40244;
     out += term;
     out += ep;
@@ -311,9 +323,9 @@ static inline void damage3(double E, double el, double fl, double ed, const disp
 {
     double ep = np_maximum(E, 0.);
     ep /= el;
-    double T = crt_pow(ep, 1. / 6.);
+    double T, term;
+    lindhard_powers(ep, &T, &term);
     T *= 3.4008;
-    double term = crt_pow(ep, 0.75);
     term *= 0.40244;
     T += term;
     T += ep;
@@ -495,7 +507,276 @@ static PyObject *twobody_chunk_joint(PyObject *self, PyObject *args)
     return result;
 }
 
+/* The momenta of two independent particles, binned as _MomentumBins.moments gives them
+ * (a: z, var z, p_perp, <p_perp^2>, w; b the same), added over the relative azimuth at the
+ * nodes cos[k]: the points of _addMomenta, block by block of `rows` rows of a, in NumPy's
+ * order (pair (i, j), then the azimuth). */
+typedef struct {
+    const double *az, *avz, *ap, *ap2, *aw, *bz, *bvz, *bp, *bp2, *bw, *cos;
+    Py_ssize_t na, nb, nk;
+} momenta_pair;
+
+static int momenta_buffers(PyObject **objects, Py_buffer *b, momenta_pair *m)
+{
+    static const char *names[11] = {"az", "avz", "ap", "ap2", "aw", "bz", "bvz", "bp", "bp2", "bw", "cos"};
+    for (int k = 0; k < 11; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) return -1;
+    m->az = b[0].buf; m->avz = b[1].buf; m->ap = b[2].buf; m->ap2 = b[3].buf; m->aw = b[4].buf;
+    m->bz = b[5].buf; m->bvz = b[6].buf; m->bp = b[7].buf; m->bp2 = b[8].buf; m->bw = b[9].buf;
+    m->cos = b[10].buf;
+    m->na = b[0].len / sizeof(double); m->nb = b[5].len / sizeof(double); m->nk = b[10].len / sizeof(double);
+    for (int k = 1; k < 5; ++k)
+        if (b[k].len != b[0].len || b[k + 5].len != b[5].len) {
+            PyErr_SetString(PyExc_ValueError, "native heating: inconsistent momenta buffers");
+            return -1;
+        }
+    if (m->na < 1 || m->nb < 1 || m->nk < 1) {
+        PyErr_SetString(PyExc_ValueError, "native heating: empty momenta");
+        return -1;
+    }
+    return 0;
+}
+
+/* _addMomenta(a, b, last=damage) of _independentRecoilDamage: the sum over every point of
+ *   w * df(((P - z)**2 + var z + p_perp**2) / (2 ar))
+ * each block's np.sum (pairwise) added in order, bit for bit the NumPy reference. */
+static PyObject *momenta_damage(PyObject *self, PyObject *args)
+{
+    PyObject *objects[11];
+    Py_buffer b[11] = {{0}};
+    momenta_pair m;
+    double P, denominator, el, fl, ed;
+    Py_ssize_t rows;
+    int noRecoil;
+    displacement_model model = {0, 0., 0., 1., 0., 0.};
+    double *terms = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOOOOOOdddddnp|iddd", &objects[0], &objects[1], &objects[2],
+                          &objects[3], &objects[4], &objects[5], &objects[6], &objects[7], &objects[8],
+                          &objects[9], &objects[10], &P, &denominator, &el, &fl, &ed, &rows, &noRecoil,
+                          &model.mode, &model.Ed, &model.b, &model.c))
+        return NULL;
+    if (momenta_buffers(objects, b, &m) < 0) goto done;
+    if (rows < 1 || model.mode < 0 || model.mode > 2 || (model.mode && !(model.Ed > 0))) {
+        PyErr_SetString(PyExc_ValueError, "native heating: invalid block or displacement model");
+        goto done;
+    }
+    displacement_prepare(&model);
+    Py_ssize_t block = rows < m.na ? rows : m.na;
+    terms = PyMem_Malloc(sizeof(double) * (size_t)(block * m.nb * m.nk));
+    if (!terms) { PyErr_NoMemory(); goto done; }
+    double total = 0.;
+    double nk = (double)m.nk;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t s = 0; s < m.na; s += rows) {
+        Py_ssize_t end = (s + rows < m.na) ? s + rows : m.na, t = 0;
+        for (Py_ssize_t i = s; i < end; ++i)
+            for (Py_ssize_t j = 0; j < m.nb; ++j) {
+                double z = m.az[i] + m.bz[j];
+                double vz = m.avz[i] + m.bvz[j];
+                double w = (m.aw[i] * m.bw[j]) / nk;
+                double ab = 2.0 * (m.ap[i] * m.bp[j]);
+                double sq = m.ap2[i] + m.bp2[j];
+                double d = P - z;
+                for (Py_ssize_t k = 0; k < m.nk; ++k) {
+                    double perp2 = np_maximum(sq + ab * m.cos[k], 0.);
+                    double er = ((d * d + vz) + perp2) / denominator;
+                    terms[t++] = w * (noRecoil ? 0. : damage1(er, el, fl, ed, &model));
+                }
+            }
+        total += numpy_total(terms, t);
+    }
+    Py_END_ALLOW_THREADS
+    result = PyFloat_FromDouble(total);
+ done:
+    PyMem_Free(terms);
+    for (int k = 0; k < 11; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
+/* _addMomenta(a, b) without `last`: the points binned into _MomentumBins, the five sums
+ * (w, w z, w p_perp, w (z^2 + var z), w p_perp^2) per cell as np.bincount adds them (in the
+ * points' order), block by block. Returns the (5, n*n) sums as bytes. */
+static PyObject *momenta_bin(PyObject *self, PyObject *args)
+{
+    PyObject *objects[11];
+    Py_buffer b[11] = {{0}};
+    momenta_pair m;
+    double zlo, zw, plo, pw;
+    Py_ssize_t rows, n;
+    double *sums = NULL, *block = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOOOOOOddddnn", &objects[0], &objects[1], &objects[2],
+                          &objects[3], &objects[4], &objects[5], &objects[6], &objects[7], &objects[8],
+                          &objects[9], &objects[10], &zlo, &zw, &plo, &pw, &n, &rows))
+        return NULL;
+    if (momenta_buffers(objects, b, &m) < 0) goto done;
+    if (rows < 1 || n < 1) {
+        PyErr_SetString(PyExc_ValueError, "native heating: invalid bins");
+        goto done;
+    }
+    Py_ssize_t cells = n * n;
+    sums = PyMem_Calloc((size_t)(5 * cells), sizeof(double));
+    block = PyMem_Calloc((size_t)(5 * cells), sizeof(double));
+    if (!sums || !block) { PyErr_NoMemory(); goto done; }
+    double nk = (double)m.nk, nn = (double)n;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t s = 0; s < m.na; s += rows) {
+        Py_ssize_t end = (s + rows < m.na) ? s + rows : m.na;
+        memset(block, 0, sizeof(double) * (size_t)(5 * cells));
+        for (Py_ssize_t i = s; i < end; ++i)
+            for (Py_ssize_t j = 0; j < m.nb; ++j) {
+                double z = m.az[i] + m.bz[j];
+                double vz = m.avz[i] + m.bvz[j];
+                double w = (m.aw[i] * m.bw[j]) / nk;
+                double ab = 2.0 * (m.ap[i] * m.bp[j]);
+                double sq = m.ap2[i] + m.bp2[j];
+                for (Py_ssize_t k = 0; k < m.nk; ++k) {
+                    double pp = sqrt(np_maximum(sq + ab * m.cos[k], 0.));
+                    double fi = ((z - zlo) / zw) * nn, fk = ((pp - plo) / pw) * nn;
+                    int64_t ci = (int64_t)fi, ck = (int64_t)fk;   /* astype(int64): toward zero */
+                    ci = ci < 0 ? 0 : (ci > n - 1 ? n - 1 : ci);
+                    ck = ck < 0 ? 0 : (ck > n - 1 ? n - 1 : ck);
+                    Py_ssize_t cell = (Py_ssize_t)(ci * n + ck);
+                    block[cell] += w;
+                    block[cells + cell] += w * z;
+                    block[2 * cells + cell] += w * pp;
+                    block[3 * cells + cell] += w * (z * z + vz);
+                    block[4 * cells + cell] += w * pp * pp;
+                }
+            }
+        for (Py_ssize_t c = 0; c < 5 * cells; ++c) sums[c] += block[c];
+    }
+    Py_END_ALLOW_THREADS
+    result = PyBytes_FromStringAndSize((const char *)sums, (Py_ssize_t)(sizeof(double) * 5 * cells));
+ done:
+    PyMem_Free(sums);
+    PyMem_Free(block);
+    for (int k = 0; k < 11; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
+/* _recoilDamage's rows: for each outgoing energy e[i], the sum over the cosines mu[k] of
+ *   weight[i, k] * df(max(E_R(E, e[i], mu[k]), 0))
+ * with, in the centre of mass, E_R = a + (mp e)/M - (2 sqrt(((a mp) e)/M)) mu and, in the lab,
+ * E_R = ((E - (2 sqrt((E mp) e)) mu) + mp e)/M; `a`, `a mp` and `E mp` come formed by the
+ * caller, as NumPy forms them from scalars. A row is np.sum's pairwise sum over the cosines;
+ * `weights` holds one row shared by every e, or one row per e. */
+static PyObject *recoil_rows(PyObject *self, PyObject *args)
+{
+    PyObject *objects[3];
+    Py_buffer b[3] = {{0}};
+    static const char *names[3] = {"e", "mu", "weights"};
+    double E, a, amp, Emp, mp, M, el, fl, ed;
+    int cm, noRecoil;
+    displacement_model model = {0, 0., 0., 1., 0., 0.};
+    double *row = NULL, *out = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOdddddddddpp|iddd", &objects[0], &objects[1], &objects[2], &E, &a, &amp,
+                          &Emp, &mp, &M, &el, &fl, &ed, &cm, &noRecoil,
+                          &model.mode, &model.Ed, &model.b, &model.c))
+        return NULL;
+    for (int k = 0; k < 3; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
+    const double *e = b[0].buf, *mu = b[1].buf, *weights = b[2].buf;
+    Py_ssize_t n = b[0].len / sizeof(double), m = b[1].len / sizeof(double), nw = b[2].len / sizeof(double);
+    /* one row per e, or (when there are as many as one row) shared: the same values */
+    int perRow = (nw == n * m && n > 1);
+    if (m < 1 || !(nw == m || nw == n * m)) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent recoil buffers");
+        goto done;
+    }
+    if (model.mode < 0 || model.mode > 2 || (model.mode && !(model.Ed > 0))) {
+        PyErr_SetString(PyExc_ValueError, "native heating: invalid displacement model");
+        goto done;
+    }
+    displacement_prepare(&model);
+    row = PyMem_Malloc(sizeof(double) * (size_t)m);
+    out = PyMem_Malloc(sizeof(double) * (size_t)(n > 0 ? n : 1));
+    if (!row || !out) { PyErr_NoMemory(); goto done; }
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t i = 0; i < n; ++i) {
+        double ei = e[i], first, root;
+        if (cm) {
+            first = a + (mp * ei) / M;
+            root = 2.0 * sqrt((amp * ei) / M);
+        } else {
+            first = 0.;
+            root = 2.0 * sqrt(Emp * ei);
+        }
+        const double *w = perRow ? weights + i * m : weights;
+        for (Py_ssize_t k = 0; k < m; ++k) {
+            double er = cm ? first - root * mu[k] : ((E - root * mu[k]) + mp * ei) / M;
+            er = np_maximum(er, 0.);
+            row[k] = (noRecoil ? 0. : damage1(er, el, fl, ed, &model)) * w[k];
+        }
+        out[i] = pairwise_sum(row, m);
+    }
+    Py_END_ALLOW_THREADS
+    result = PyBytes_FromStringAndSize((const char *)out, (Py_ssize_t)(sizeof(double) * n));
+ done:
+    PyMem_Free(row);
+    PyMem_Free(out);
+    for (int k = 0; k < 3; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
+/* _MomentumBins.add of points (pz, pp, w) with no variance: the five sums per cell
+ * (w, w pz, w pp, w pz^2, w pp^2) as np.bincount adds them, in the points' order, onto
+ * zeros. Returns the (5, n*n) sums as bytes. */
+static PyObject *points_bin(PyObject *self, PyObject *args)
+{
+    PyObject *objects[3];
+    Py_buffer b[3] = {{0}};
+    static const char *names[3] = {"pz", "pp", "w"};
+    double zlo, zw, plo, pw;
+    Py_ssize_t n;
+    double *sums = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOddddn", &objects[0], &objects[1], &objects[2], &zlo, &zw, &plo, &pw, &n))
+        return NULL;
+    for (int k = 0; k < 3; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
+    Py_ssize_t np_ = b[0].len / sizeof(double);
+    if (b[1].len != b[0].len || b[2].len != b[0].len || n < 1) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent points");
+        goto done;
+    }
+    const double *pz = b[0].buf, *pp = b[1].buf, *w = b[2].buf;
+    Py_ssize_t cells = n * n;
+    sums = PyMem_Calloc((size_t)(5 * cells), sizeof(double));
+    if (!sums) { PyErr_NoMemory(); goto done; }
+    double nn = (double)n;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t t = 0; t < np_; ++t) {
+        double z = pz[t], q = pp[t], wt = w[t];
+        int64_t ci = (int64_t)(((z - zlo) / zw) * nn), ck = (int64_t)(((q - plo) / pw) * nn);
+        ci = ci < 0 ? 0 : (ci > n - 1 ? n - 1 : ci);
+        ck = ck < 0 ? 0 : (ck > n - 1 ? n - 1 : ck);
+        Py_ssize_t cell = (Py_ssize_t)(ci * n + ck);
+        sums[cell] += wt;
+        sums[cells + cell] += wt * z;
+        sums[2 * cells + cell] += wt * q;
+        sums[3 * cells + cell] += wt * (z * z + 0.0);
+        sums[4 * cells + cell] += wt * q * q;
+    }
+    Py_END_ALLOW_THREADS
+    result = PyBytes_FromStringAndSize((const char *)sums, (Py_ssize_t)(sizeof(double) * 5 * cells));
+ done:
+    PyMem_Free(sums);
+    for (int k = 0; k < 3; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
 static PyMethodDef methods[] = {
+    {"points_bin", points_bin, METH_VARARGS,
+     "_MomentumBins.add of points with no variance, bit for bit np.bincount."},
+    {"recoil_rows", recoil_rows, METH_VARARGS,
+     "The one-particle recoil damage rows of _recoilDamage, bit for bit the NumPy reference."},
+    {"momenta_damage", momenta_damage, METH_VARARGS,
+     "The damage of the residual over two binned momenta added over the azimuth, bit for bit the NumPy reference."},
+    {"momenta_bin", momenta_bin, METH_VARARGS,
+     "Two binned momenta added over the azimuth and binned again, bit for bit the NumPy reference."},
     {"twobody_chunk_joint", twobody_chunk_joint, METH_VARARGS,
      "twobody_chunk for MT444 and two displacement models at once (3-tuple), bit for bit the NumPy reference."},
     {"emission_chunk_joint", emission_chunk_joint, METH_VARARGS,
@@ -518,8 +799,14 @@ PyMODINIT_FUNC PyInit__heating_native(void)
         return NULL;
     }
     crt_pow = (pow_function)(void (*)(void))found;
+    FARPROC root = GetProcAddress(ucrt, "cbrt");
+    if (!root) {
+        PyErr_SetString(PyExc_ImportError, "native heating: the Universal CRT's cbrt is not available");
+        return NULL;
+    }
+    crt_cbrt = (cbrt_function)(void (*)(void))root;
 #endif
     PyObject *mod = PyModule_Create(&module);
-    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 3) < 0) { Py_DECREF(mod); return NULL; }
+    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 5) < 0) { Py_DECREF(mod); return NULL; }
     return mod;
 }

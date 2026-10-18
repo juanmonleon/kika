@@ -779,6 +779,7 @@ def test_the_independent_recoil_keeps_the_momentum_balance(monkeypatch):
     mp = H.PARTICLE_MASS_RATIO["p"]
     M = A + 1.0 - mp - 1.0
     monkeypatch.setattr(H, "lindhard", lambda E, *args: np.asarray(E, dtype=float))
+    monkeypatch.setattr(H, "_heating_native", None)       # the patched df is the NumPy path's
     one = np.ones(1)
     got = H._independentRecoilDamage([(proton, mp, one), (neutron, 1.0, one)], np.array([E0]),
                                      A, Z, Z - 1, M, 40.0)[0]
@@ -890,6 +891,7 @@ def test_a_neutron_section_without_its_residual_recoils_from_its_neutrons(monkey
     assert any("the neutron's energy-angle law" in n for n in notes)
     # With df(E) = E: two independent isotropic neutrons leave <E_R> = (2E + 2<p²>)/(2(A-1)).
     monkeypatch.setattr(H, "lindhard", lambda E, *args: np.asarray(E, dtype=float))
+    monkeypatch.setattr(H, "_heating_native", None)       # the patched df is the NumPy path's
     notes = []
     two = H._neutronResidualDamage(16, _neutrons(neutron, 2.0), grid, A, Z, 40.0, notes)[0]
     assert two == pytest.approx((2 * E0 + 2 * topN) / (2 * (A - 1)), rel=1e-10)
@@ -953,4 +955,27 @@ def test_a_null_table_is_read_from_the_nearest_table_that_emits():
     at = H._labMomenta(law, 1e6, 1.0, 224.0)
     nearest = H._labMomenta(law, 2e7, 1.0, 224.0)
     for a, b in zip(at, nearest):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_the_recoils_on_threads_are_the_sequential_ones_bit_for_bit():
+    # The incident energies of _recoilDamage and _independentRecoilDamage run on the
+    # processing's threads: the values are the sequential loop's, to the bit.
+    A, Z, E0 = 59.35, 28, 14e6
+    proton, neutron = _twoParticles(A, E0)
+    mp = H.PARTICLE_MASS_RATIO["p"]
+    M = A + 1.0 - mp - 1.0
+    grid = np.geomspace(2e6, 2e7, 40)
+    one = np.ones(len(grid))
+    k = H._Kinematics(A=A, Q=-5e6, awp=mp)
+
+    def run(threads):
+        token = H._energyThreads.set(threads)
+        try:
+            return (H._independentRecoilDamage([(proton, mp, one), (neutron, 1.0, one)], grid, A, Z, Z - 1, M, 40.0),
+                    H._recoilDamage(proton, grid, k, Z - 1, M, Z, A, 40.0))
+        finally:
+            H._energyThreads.reset(token)
+
+    for a, b in zip(run(1), run(4)):
         np.testing.assert_array_equal(a, b)
