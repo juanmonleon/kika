@@ -238,3 +238,25 @@ def test_native_points_bins_equal_numpy_bit_for_bit():
         want = _numpy(None, H._binMomenta, pz, pp, w)
         for x, y in zip(got, want):
             np.testing.assert_array_equal(x, y)
+
+
+@pytest.mark.parametrize("flat", [False, True])
+@pytest.mark.parametrize("kalbach", [False, True])
+def test_native_unit_base_integral_equals_numpy_bit_for_bit(flat, kalbach):
+    # _unitBaseCMMean's cross moment, one quadrature: correlated (mu) and Kalbach-Mann
+    # (r and a, the Langevin function on both sides of |a| = 0.01).
+    rng = np.random.default_rng(19 + 2 * flat + kalbach)
+    for _ in range(60):
+        n = int(rng.integers(2, 80))
+        x = np.cumsum(rng.uniform(0.1, 2.0, n)) * 10.0 ** rng.integers(3, 6)
+        x -= x[0] * rng.choice([0.0, 0.9])
+        p = rng.uniform(0.0, 2.0, n)
+        a, width = float(x[0]), float(x[-1] - x[0])
+        qa, qw = a * rng.uniform(0.5, 1.5), width * rng.uniform(0.5, 1.5)
+        nodes, ww = np.polynomial.legendre.leggauss(int(rng.choice([4, 8, 16, 32])))
+        if kalbach:
+            angular = (rng.uniform(0.0, 1.0, n), rng.choice([1e-3, 5e-3, 0.5, 3.0], n) * rng.choice([-1, 1], n))
+        else:
+            angular = rng.uniform(-1.0, 1.0, n)
+        args = (x, p, angular, nodes, ww, a, width, qa, qw, flat, kalbach)
+        assert H._unitBaseIntegral(*args) == H._unitBaseIntegralNumpy(*args)

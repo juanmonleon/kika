@@ -33,6 +33,7 @@ five significant figures), which is what the official libraries' ``kTs`` hold.
 """
 from __future__ import annotations
 
+import contextvars
 import copy
 import math
 import os
@@ -603,7 +604,22 @@ def _broadenAll(suite, temperatures, thnmax, options, workers, progress=None):
             for i, t in enumerate(temperatures)}
 
 
-def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX,
+def processSuite(*args, **kwargs):
+    # The body is _processSuite; this opens the pool its pure-Python tabulations start
+    # on (kika.processing.heating._PREFETCH) and closes it whatever happens.
+    from kika.processing.heating import _PREFETCH
+
+    token = _PREFETCH.set(None)
+    try:
+        return _processSuite(*args, **kwargs)
+    finally:
+        pool = _PREFETCH.get()
+        _PREFETCH.reset(token)
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+
+
+def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX,
                  endf=None, omit: Sequence[str] = (), awr: Optional[float] = None,
                  context=None, doppler=None, tabulation=None, ed: Optional[float] = None,
                  heatingPartials: Sequence[int] = (), qa=None, qbar=None,
@@ -708,6 +724,8 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
             leaves.append(_Leaf(reaction, container, mt))
     present = {leaf.mt for leaf in leaves}
     chances = present & {19, 20, 21, 38}
+    # The pure-Python tabulations start now, beside the broadening.
+    _startPrefetch(work, leaves, awr, 1000 * Z + A, tabOptions, particles, workers, omit)
 
     # --- per temperature cross sections ------------------------------------
     styleKT = {}
@@ -1480,6 +1498,110 @@ def _cascadePhotons(pops, reaction, awr):
     return out
 
 
+def _productContext(product, reaction, mt, awr, zaTarget, options, report, qi=None):
+    """The TabulationContext :func:`_tabulatedProduct` tabulates a product with."""
+    from kika.processing.tabulation import TabulationContext
+
+    record = _mf6Record(reaction, product)
+    discrete = None
+    if record is not None:
+        discrete = (record.get("law_fields") or {}).get("nd")
+    return TabulationContext(awr=awr, zaTarget=zaTarget, mt=mt,
+                             Q=qi if qi is not None else reaction.outputChannel.Q.value,
+                             pid=product.pid,
+                             zaEmitted=_zaOf(product.pid) if product.pid != "photon" else 0,
+                             discrete=discrete, options=options, report=report)
+
+
+#: The products' tabulations started on the processing's pool: key -> (form, future).
+_PRODUCT_TABULATIONS = contextvars.ContextVar("kika_product_tabulations", default=None)
+
+
+def _tabulationKey(form, context):
+    discrete = context.discrete
+    if isinstance(discrete, list):
+        discrete = tuple(discrete)
+    return (id(form), context.awr, context.zaTarget, context.mt, context.Q, context.pid,
+            context.zaEmitted, discrete, context.options)
+
+
+def _tabulationJob(job):
+    """``(tabulated, messages, error)`` of one product's tabulation, in a worker process:
+    the messages are what it says to the report, replayed where the table is taken."""
+    import dataclasses
+
+    from kika.processing.tabulation import tabulateDistribution
+
+    form, context = job
+    report = _m().ConversionReport()
+    context = dataclasses.replace(context, report=report)
+    try:
+        return tabulateDistribution(form, context), list(report.approximations), None
+    except (TypeError, ValueError) as exc:
+        return None, list(report.approximations), exc
+
+
+def _tabulate(form, context):
+    """``tabulateDistribution(form, context)``, or the same table started on the pool,
+    its messages said to ``context.report`` here, in the order the sequential call says
+    them. A table is taken once; a second request tabulates again, as it did."""
+    from kika.processing.tabulation import tabulateDistribution
+
+    store = _PRODUCT_TABULATIONS.get()
+    if store is not None:
+        entry = store.pop(_tabulationKey(form, context), None)
+        if entry is not None and entry[0] is form:
+            tabulated, messages, error = entry[1].result()
+            if context.report is not None:
+                for message in messages:
+                    context.report.approximated(message)
+            if error is not None:
+                raise error
+            return tabulated
+    return tabulateDistribution(form, context)
+
+
+def _startPrefetch(work, leaves, awr, zaTarget, options, particles, workers, omit):
+    """Open the processing's pool and start on it the tabulations that are pure Python:
+    each leaf's products (as :func:`_products` will ask for them) and, for the heating, the
+    charged particles. Only with more than one worker; a table not started here is made
+    where it is asked for, the same table."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    from kika.endf.model_adapter.photon_lines import mergedLineSpectra
+    from kika.processing import heating as H
+    from kika.processing.workers import pool_default, resolve
+
+    count = resolve(workers, pool_default())
+    if count < 2 or H._PREFETCH.get() is not None:
+        return
+    m = _m()
+    jobs = []
+    for leaf in leaves:
+        reaction = leaf.reaction
+        merged, hidden = mergedLineSpectra(reaction)
+        for product in reaction.outputChannel.products:
+            if product.pid not in particles or product.label in hidden or product.label in merged:
+                continue
+            form = _evaluated(product.distribution)
+            if form is None or isinstance(form, m.Isotropic2d):
+                continue
+            context = _productContext(product, reaction, leaf.mt, awr, zaTarget, options, None,
+                                      qi=reactionQI(reaction, work))
+            jobs.append((form, context))
+    heavy = [] if "kerma" in omit and "damage" in omit else \
+        H._heavyJobs(work, work, {leaf.mt for leaf in leaves}, awr, zaTarget)
+    if len(jobs) + len(heavy) < 4:
+        return
+    pool = ProcessPoolExecutor(max_workers=count)
+    H._PREFETCH.set(pool)
+    store = {}
+    for form, context in jobs:
+        store.setdefault(_tabulationKey(form, context), (form, pool.submit(_tabulationJob, (form, context))))
+    _PRODUCT_TABULATIONS.set(store)
+    H._prefetchHeavy(heavy, count)
+
+
 def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, delayed=False,
                       flags=None, qi=None):
     m = _m()
@@ -1487,14 +1609,7 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
 
     form = _evaluated(product.distribution)
     record = _mf6Record(reaction, product)
-    discrete = None
-    if record is not None:
-        discrete = (record.get("law_fields") or {}).get("nd")
-    context = TabulationContext(awr=awr, zaTarget=zaTarget, mt=mt,
-                                Q=qi if qi is not None else reaction.outputChannel.Q.value,
-                                pid=product.pid,
-                                zaEmitted=_zaOf(product.pid) if product.pid != "photon" else 0,
-                                discrete=discrete, options=options, report=report)
+    context = _productContext(product, reaction, mt, awr, zaTarget, options, report, qi=qi)
     from kika.processing.tabulation.distribution import LIGHT_PARTICLE_AWP, isLevelMT
 
     light = product.pid in LIGHT_PARTICLE_AWP and isLevelMT(mt)
@@ -1506,7 +1621,7 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
             report.lost(f"MT{mt} {product.label}: no distribution; product not written")
             return None
     try:
-        tabulated = tabulateDistribution(form, context)
+        tabulated = _tabulate(form, context)
     except (TypeError, ValueError) as exc:
         report.lost(f"MT{mt} {product.label}: {type(form).__name__} not tabulated ({exc}); "
                     f"product not written")
@@ -1855,3 +1970,8 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
                     "redundant": 1, "center_of_mass": 0 if 444 <= mt <= 447 else 1})))
     for note in notes or ():
         report.warn(note)
+
+
+# processSuite is the documented entry point; its body and signature are _processSuite's.
+processSuite.__doc__ = _processSuite.__doc__
+processSuite.__wrapped__ = _processSuite

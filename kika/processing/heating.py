@@ -96,12 +96,17 @@ except ModuleNotFoundError as exc:  # the NumPy reference path stays the definit
     if exc.name != "kika.processing._heating_native":
         raise
     _heating_native = None
-if _heating_native is not None and _heating_native.API_VERSION != 5:
+if _heating_native is not None and _heating_native.API_VERSION != 6:
     raise ImportError("rebuild kika's native heating extension (API version mismatch)")
 
 #: Threads for the independent incident energies of a damage quadrature: set by
 #: heatingOf from the processing's ``workers`` for the length of one call.
 _energyThreads = contextvars.ContextVar("kika_heating_threads", default=1)
+
+#: A process pool kika.hdf5.processing.processSuite opens for the length of one call, on
+#: which the tabulations that are pure Python start early: the charged particles' here
+#: (:func:`_prefetchHeavy`), the Monte Carlo products' there. ``None`` outside it.
+_PREFETCH = contextvars.ContextVar("kika_processing_prefetch", default=None)
 
 
 @dataclass(frozen=True)
@@ -560,6 +565,52 @@ def _meanMu(form, grid):
     return _onGrid(energies, [_expect(t, lambda m: m) for t in tables], grid, flat)
 
 
+_crtTanh = np.vectorize(__import__("math").tanh, otypes=[float])
+
+
+def _unitBaseIntegral(x, p, angular, nodes, ww, a, width, qa, qw, flat, kalbach):
+    """One quadrature of :func:`_unitBaseCMMean`'s cross moment: the native kernel when it is
+    built, :func:`_unitBaseIntegralNumpy` (the definition) otherwise."""
+    if _heating_native is None:
+        return _unitBaseIntegralNumpy(x, p, angular, nodes, ww, a, width, qa, qw, flat, kalbach)
+    vector = lambda v: np.ascontiguousarray(v, dtype=float)  # noqa: E731
+    rr, slope = angular if kalbach else (angular, angular)
+    return _heating_native.unit_base_integral(vector(x), vector(p), vector(rr), vector(slope), vector(nodes),
+                                              vector(ww), float(a), float(width), float(qa), float(qw),
+                                              bool(flat), bool(kalbach))
+
+
+def _unitBaseIntegralNumpy(x, p, angular, nodes, ww, a, width, qa, qw, flat, kalbach):
+    mapped=qa+qw*(x-a)/width
+    root=np.sqrt(np.maximum(mapped,0));left=root[:-1,None];right=root[1:,None]
+    r=(left+right)/2+(right-left)/2*nodes
+    original=a+(r*r-qa)*width/qw
+    frac=(original-x[:-1,None])/np.maximum(np.diff(x)[:,None],1e-300)
+    if flat:
+        density=p[:-1,None]
+        norm=float(np.sum(np.diff(x)*p[:-1]))
+    else:
+        density=p[:-1,None]+np.diff(p)[:,None]*frac
+        norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
+    if kalbach:
+        rr,aa=angular
+        if flat:
+            rr=rr[:-1,None];aa=aa[:-1,None]
+        else:
+            rr=rr[:-1,None]+np.diff(rr)[:,None]*frac
+            aa=aa[:-1,None]+np.diff(aa)[:,None]*frac
+        safe=np.where(abs(aa)>.01,aa,1.)
+        # tanh of the C runtime (math.tanh), as the native kernel takes it: NumPy's own
+        # vectorised tanh differs from it in the last bit.
+        langevin=np.where(abs(aa)>.01,1/_crtTanh(safe)-1/safe,
+                          aa*(1/3+aa*aa*(-1/45+aa*aa*(2/945-aa*aa/4725))))
+        angle=rr*langevin
+    else:
+        mu=angular
+        angle=(mu[:-1,None] if flat else mu[:-1,None]+np.diff(mu)[:,None]*frac)
+    return float(np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle))/norm
+
+
 def _unitBaseCMMean(form, grid, k):
     """Integrate a continuous unit-base joint law, before the lab transformation.
 
@@ -638,35 +689,10 @@ def _unitBaseCMMean(form, grid, k):
         for weight,i in zip(weights,(j,upper)):
             if weight==0:continue
             a,width=ranges[i];table=tables[i];x=np.asarray(table.xs);p=np.asarray(table.pdf)
-            mapped=qa+qw*(x-a)/width
-            root=np.sqrt(np.maximum(mapped,0));left=root[:-1,None];right=root[1:,None]
             previous=None
             for order,(nodes,ww) in gauss.items():
-                r=(left+right)/2+(right-left)/2*nodes
-                original=a+(r*r-qa)*width/qw
-                frac=(original-x[:-1,None])/np.maximum(np.diff(x)[:,None],1e-300)
-                if _isFlat(table):
-                    density=p[:-1,None]
-                    norm=float(np.sum(np.diff(x)*p[:-1]))
-                else:
-                    density=p[:-1,None]+np.diff(p)[:,None]*frac
-                    norm=float(np.sum(np.diff(x)*(p[:-1]+p[1:])/2))
-                if kalbach:
-                    rr,aa=parameters[i]
-                    if _isFlat(table):
-                        rr=rr[:-1,None];aa=aa[:-1,None]
-                    else:
-                        rr=rr[:-1,None]+np.diff(rr)[:,None]*frac
-                        aa=aa[:-1,None]+np.diff(aa)[:,None]*frac
-                    safe=np.where(abs(aa)>.01,aa,1.)
-                    langevin=np.where(abs(aa)>.01,1/np.tanh(safe)-1/safe,
-                                      aa*(1/3+aa*aa*(-1/45+aa*aa*(2/945-aa*aa/4725))))
-                    angle=rr*langevin
-                else:
-                    mu=mus[i]
-                    angle=(mu[:-1,None] if _isFlat(table) else
-                           mu[:-1,None]+np.diff(mu)[:,None]*frac)
-                integral=float(np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle))/norm
+                integral=_unitBaseIntegral(x,p,parameters[i] if kalbach else mus[i],nodes,ww,a,width,qa,qw,
+                                           _isFlat(table),kalbach)
                 if not kalbach:break
                 error=2*np.sqrt(k.awp*max(E,0))/(k.A+1)*abs(integral-previous) if previous is not None else np.inf
                 if error <= .001+1e-8*max(E,0):break
@@ -1825,6 +1851,8 @@ def _tabulateHeavy(form, context):
 
         entry = _HEAVY_TABULATIONS[formId] = (weakref.ref(form, forget), {})
     tables = entry[1]
+    if key in tables and hasattr(tables[key], "result"):
+        tables[key] = tables[key].result()                    # started on the prefetch pool
     if key not in tables:
         try:
             tables[key] = (tabulateDistribution(form, context), None)
@@ -1848,7 +1876,7 @@ def _tabulateJob(job):
         return None, exc
 
 
-def _heavyJobs(suite, evaluation, sigma, A, zaTarget):
+def _heavyJobs(suite, evaluation, mts, A, zaTarget):
     """The ``(form, context)`` pairs :func:`_heavyProducts` and :func:`_independentParticles`
     will tabulate, as they build them: each reaction's charged particles and recoils, and
     the neutrons of one that has some."""
@@ -1859,7 +1887,7 @@ def _heavyJobs(suite, evaluation, sigma, A, zaTarget):
     jobs = []
     for reaction in suite.reactions:
         mt = reaction.ENDF_MT
-        if mt is None or mt in FISSION_MTS or mt not in sigma or mt in (2, 102) or 51 <= mt <= 90:
+        if mt is None or mt in FISSION_MTS or mt not in mts or mt in (2, 102) or 51 <= mt <= 90:
             continue
         source = evaluation.findReactionByENDF_MT(mt)
         if source is None:
@@ -1893,13 +1921,18 @@ def _prefetchHeavy(jobs, workers):
         entry = _HEAVY_TABULATIONS.get(id(form))
         if entry is None or entry[0]() is not form or key not in entry[1]:
             missing.append((form, context, key))
-    if workers < 2 or len(missing) < 4:
+    pool = _PREFETCH.get()
+    if pool is not None:
+        # The processing's pool: the jobs start now and are collected when asked for.
+        results = [pool.submit(_tabulateJob, (form, context)) for form, context, _ in missing]
+    elif workers < 2 or len(missing) < 4:
         return
-    from concurrent.futures import ProcessPoolExecutor
+    else:
+        from concurrent.futures import ProcessPoolExecutor
 
-    with ProcessPoolExecutor(max_workers=min(workers, len(missing))) as pool:
-        results = list(pool.map(_tabulateJob, [(form, context) for form, context, _ in missing]))
-    for (form, _context, key), (tabulated, error) in zip(missing, results):
+        with ProcessPoolExecutor(max_workers=min(workers, len(missing))) as local:
+            results = list(local.map(_tabulateJob, [(form, context) for form, context, _ in missing]))
+    for (form, _context, key), result in zip(missing, results):
         entry = _HEAVY_TABULATIONS.get(id(form))
         if entry is None or entry[0]() is not form:
             formId = id(form)
@@ -1909,7 +1942,7 @@ def _prefetchHeavy(jobs, workers):
                     del _HEAVY_TABULATIONS[formId]
 
             entry = _HEAVY_TABULATIONS[formId] = (weakref.ref(form, forget), {})
-        entry[1].setdefault(key, (tabulated, error))
+        entry[1].setdefault(key, result)
 
 
 def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damageOnly=False):
@@ -3029,7 +3062,7 @@ def _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarge
     for mt in sorted(auxiliaryFissions):
         notes.append(f"MT{mt}: auxiliary fission Q accepted; MF1/458 retains authority for released energy, as HEATR")
     if evaluation is not None:
-        _prefetchHeavy(_heavyJobs(suite, evaluation, sigma, A, zaTarget or 1000 * Z), _energyThreads.get())
+        _prefetchHeavy(_heavyJobs(suite, evaluation, set(sigma), A, zaTarget or 1000 * Z), _energyThreads.get())
     for reaction in suite.reactions:
         mt = reaction.ENDF_MT
         if mt is None or mt in FISSION_MTS or mt not in sigma:

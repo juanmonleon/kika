@@ -15,6 +15,7 @@ static pow_function crt_pow = pow;
 /* NumPy's cbrt is the C runtime's too, looked up the same way. */
 typedef double (*cbrt_function)(double);
 static cbrt_function crt_cbrt = cbrt;
+static cbrt_function crt_tanh = tanh;   /* NumPy's tanh, the C runtime's as well */
 
 /* lindhard's ep^(1/6) and ep^(3/4) as heating._lindhardPowers forms them:
  * sqrt(cbrt(ep)) and s*sqrt(s), s = sqrt(ep). */
@@ -768,7 +769,78 @@ static PyObject *points_bin(PyObject *self, PyObject *args)
     return result;
 }
 
+/* One quadrature of _unitBaseCMMean's at(E): with the table's support [a, a+width] mapped
+ * to [qa, qa+qw] and r the Gauss nodes in sqrt(E') on each panel,
+ *   np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle)/norm
+ * with density, and angle (mu, or Kalbach r * Langevin(a)), read lin-lin (or held) at the
+ * source energy of each node. Bit for bit heating._unitBaseIntegralNumpy. */
+static PyObject *unit_base_integral(PyObject *self, PyObject *args)
+{
+    PyObject *objects[6];
+    Py_buffer b[6] = {{0}};
+    static const char *names[6] = {"x", "p", "angle", "slope", "nodes", "weights"};
+    double a, width, qa, qw;
+    int flat, kalbach;
+    double *terms = NULL, *dnorm = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOddddpp", &objects[0], &objects[1], &objects[2], &objects[3],
+                          &objects[4], &objects[5], &a, &width, &qa, &qw, &flat, &kalbach))
+        return NULL;
+    for (int k = 0; k < 6; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
+    const double *x = b[0].buf, *p = b[1].buf, *ang = b[2].buf, *sl = b[3].buf;
+    const double *nodes = b[4].buf, *ww = b[5].buf;
+    Py_ssize_t n = b[0].len / sizeof(double), m = b[4].len / sizeof(double);
+    if (n < 2 || b[1].len != b[0].len || b[2].len != b[0].len || (kalbach && b[3].len != b[0].len)
+        || b[5].len != b[4].len || m < 1) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent unit-base buffers");
+        goto done;
+    }
+    terms = PyMem_Malloc(sizeof(double) * (size_t)((n - 1) * m));
+    dnorm = PyMem_Malloc(sizeof(double) * (size_t)(n - 1));
+    if (!terms || !dnorm) { PyErr_NoMemory(); goto done; }
+    double integral;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t i = 0; i < n - 1; ++i) {
+        double dx = x[i + 1] - x[i];
+        dnorm[i] = flat ? dx * p[i] : (dx * (p[i] + p[i + 1])) / 2;
+        double lm = qa + (qw * (x[i] - a)) / width, rm = qa + (qw * (x[i + 1] - a)) / width;
+        double left = sqrt(np_maximum(lm, 0)), right = sqrt(np_maximum(rm, 0));
+        double safe_dx = np_maximum(dx, 1e-300);
+        for (Py_ssize_t k = 0; k < m; ++k) {
+            double r = (left + right) / 2 + ((right - left) / 2) * nodes[k];
+            double original = a + (((r * r) - qa) * width) / qw;
+            double frac = (original - x[i]) / safe_dx;
+            double density = flat ? p[i] : p[i] + (p[i + 1] - p[i]) * frac;
+            double angle;
+            if (kalbach) {
+                double rr = flat ? ang[i] : ang[i] + (ang[i + 1] - ang[i]) * frac;
+                double aa = flat ? sl[i] : sl[i] + (sl[i + 1] - sl[i]) * frac;
+                double langevin;
+                if (fabs(aa) > .01) langevin = 1 / crt_tanh(aa) - 1 / aa;
+                else langevin = aa * (1. / 3 + aa * aa * (-1. / 45 + aa * aa * (2. / 945 - aa * aa / 4725)));
+                angle = rr * langevin;
+            } else {
+                angle = flat ? ang[i] : ang[i] + (ang[i + 1] - ang[i]) * frac;
+            }
+            double t = (right - left) / 2;
+            t *= ww[k]; t *= 2; t *= r; t *= r; t *= width; t /= qw; t *= density; t *= angle;
+            terms[i * m + k] = t;
+        }
+    }
+    integral = numpy_total(terms, (n - 1) * m) / numpy_total(dnorm, n - 1);
+    Py_END_ALLOW_THREADS
+    result = PyFloat_FromDouble(integral);
+ done:
+    PyMem_Free(terms);
+    PyMem_Free(dnorm);
+    for (int k = 0; k < 6; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    return result;
+}
+
 static PyMethodDef methods[] = {
+    {"unit_base_integral", unit_base_integral, METH_VARARGS,
+     "One quadrature of the unit-base centre-of-mass cross moment, bit for bit the NumPy reference."},
     {"points_bin", points_bin, METH_VARARGS,
      "_MomentumBins.add of points with no variance, bit for bit np.bincount."},
     {"recoil_rows", recoil_rows, METH_VARARGS,
@@ -805,8 +877,14 @@ PyMODINIT_FUNC PyInit__heating_native(void)
         return NULL;
     }
     crt_cbrt = (cbrt_function)(void (*)(void))root;
+    FARPROC hyperbolic = GetProcAddress(ucrt, "tanh");
+    if (!hyperbolic) {
+        PyErr_SetString(PyExc_ImportError, "native heating: the Universal CRT's tanh is not available");
+        return NULL;
+    }
+    crt_tanh = (cbrt_function)(void (*)(void))hyperbolic;
 #endif
     PyObject *mod = PyModule_Create(&module);
-    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 5) < 0) { Py_DECREF(mod); return NULL; }
+    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 6) < 0) { Py_DECREF(mod); return NULL; }
     return mod;
 }
