@@ -332,14 +332,16 @@ aggregate addition retains compensated `math.fsum` scaling.
   claimed, only that its error is stated.
 - **The mesh is not thinned.** BROADR thins the heated table to `errthn` (and
   `thnmax`), and FUDGE to half its accuracy, by removing nodes that the chord of
-  their neighbours reproduces at the nodes. The tolerance then holds at the nodes
-  and not between them: on Fe-56 of ENDF/B-VIII.1 at 293.6 K (MT 2 and 102, up to
+  their neighbours reproduces. BROADR tests one point, the midpoint of each
+  interval, and by default accepts it up to `errmax` $= 10$ `errthn` unless its
+  integral criterion (`errint` $=$ `errthn`$/20000$) rejects it (`broadr.f90`
+  l. 208-209, 1408-1431). On Fe-56 of ENDF/B-VIII.1 at 293.6 K (MT 2 and 102, up to
   850 keV), sampling the BROADR table at 100 000 random energies against kika's
   pointwise kernel gives a maximum relative error of 1.0 % at the default
-  `errthn` $=10^{-3}$, with 8.4 % of the MT 102 points above $10^{-3}$; it stays
-  below $10^{-3}$ everywhere only with `errthn` $\le 10^{-4}$. kika's table, built
+  `errthn` $=10^{-3}$, with 8.3 % of the MT 102 points above $10^{-3}$, and 0.11 %
+  with `errmax` $=$ `errthn` and the integral criterion off. kika's table, built
   at `rtol` $=10^{-3}$ and checked at interior points, gives $5\cdot10^{-4}$
-  there, with no point above $10^{-3}$ (NJOY 2016.78, measured 2026-10-11).
+  there, with no point above $10^{-3}$ (NJOY 2016.78, measured 2026-10-18).
 - **The output window is the one asked for.** The upper limit given to BROADR is
   not always the one it heats to: on ENDF/B-VIII.1 Zr-90 a run asked for a higher
   limit heated only up to 200 keV, and H-1 up to 6.5 MeV, leaving the rest at the
@@ -352,7 +354,16 @@ aggregate addition retains compensated `math.fsum` scaling.
   does not add that contribution to the integral; to reproduce FUDGE, kika is run
   with `zero` support. Comparisons of the two codes that use $1/v$ in kika and
   `oneOverV` in FUDGE therefore differ by that term, and not by an error of
-  either.
+  either: 1.8 % in U-235 and 0.24 % in Fe-56 at the lowest energies, and FUDGE
+  meets its tolerance against kika run with `zero` (measured 2026-10-18). BROADR
+  continues the table as $1/v$ below its first point and as a constant above its
+  last, and cuts the integral at four Doppler widths (`broadr.f90` l. 1536,
+  1583-1590, 1619-1624). It puts a threshold reaction on the grid of the total with
+  zeros below the threshold, and writes zero at an output point unless that point
+  and the previous one lie above the laboratory threshold (l. 544-555, 1440-1446),
+  so its first node above a threshold is zero. Negative values are integrated with
+  their sign, and any broadened value below $10^{-15}$ b, negative ones included,
+  is set to zero (l. 1537, 1664-1667).
 
 ## Limits and failure modes
 
