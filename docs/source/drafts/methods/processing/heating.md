@@ -453,7 +453,7 @@ replace some nuclides, with the heating (MT 301), local heating (MT 901) and dam
 energy (MT 444) tallied per nuclide and the flux tallied per material on 402 bins. Each
 file's responses folded with its own run's flux predict the ratio of the two tallies;
 the tallied ratio is within 2 standard deviations of the predicted one for every
-nuclide and score (measured 2026-10-18, 6·10⁶ histories): the transport code reads
+nuclide and score (measured 2026-10-18, 4·10⁶ to 6·10⁶ histories per run): the transport code reads
 kika's responses as they are written, and the integral difference is the tables'.
 In a HEU sphere inside 10 cm of iron (fission spectrum), kika/official is 0.998-1.005 for
 the heating of U-234, U-235, U-238 and Fe-56, and 0.980 (U-234), 0.990 (U-235), 1.010
