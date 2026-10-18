@@ -941,3 +941,16 @@ def test_a_mixture_below_its_weights_domain_is_read_at_its_first_energy():
     first = H._labMomenta(mixture, 4.39e6, 1.0, 16.0)
     for a, b in zip(below, first):
         np.testing.assert_array_equal(a, b)
+
+
+def test_a_null_table_is_read_from_the_nearest_table_that_emits():
+    # Ra-225 ENDF/B-VIII.1 states a spectrum of zeros at its threshold; the
+    # neutron recoil read there had nothing to draw from.
+    zero = m.Xs_pdf_cdf1d(xs=[0.0, 1e6], pdf=[0.0, 0.0], cdf=[0.0, 0.0],
+                          interpolation=m.Interpolation.linlin, outerDomainValue=1e6)
+    law = m.Uncorrelated(energy=m.XYs2d(function1ds=[zero, _table([0., 2e6], [5e-7, 5e-7], 2e7)]),
+                         productFrame=m.Frame.lab)
+    at = H._labMomenta(law, 1e6, 1.0, 224.0)
+    nearest = H._labMomenta(law, 2e7, 1.0, 224.0)
+    for a, b in zip(at, nearest):
+        np.testing.assert_array_equal(a, b)

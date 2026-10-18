@@ -2412,6 +2412,16 @@ def _labMomenta(form, E, awp, A):
             total = w.sum()
             if total > 0:
                 parts.append((e, mu, g * w / total))
+    if not parts:
+        # Tables of zeros (Ra-225 ENDF/B-VIII.1: a spectrum stated null at its
+        # threshold): the nearest table that emits, as the ends are read.
+        for i in sorted(range(len(nodes)), key=lambda j: abs(nodes[j] - E)):
+            e, mu, w = _emissionRule(form, i, E)
+            if w.sum() > 0:
+                parts.append((e, mu, w / w.sum()))
+                break
+        else:
+            raise ValueError("a law whose every incident table is zero emits nothing")
     e, mu, w = (np.concatenate(c) for c in zip(*parts))
     mu = np.clip(mu, -1.0, 1.0)
     v = np.sqrt(2.0 * np.clip(e, 0.0, None) / awp)
