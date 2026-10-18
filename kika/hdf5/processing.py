@@ -688,7 +688,10 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         from kika.endf.reconstruction import context_from_endf
 
         context, _ = context_from_endf(read_endf(str(endf), mf_numbers=[1, 2]), suite)
+    realised = None
     if label is not None and label != EVAL_LABEL:
+        if urrTables is not None and _hasURR(suite):
+            realised = _realisedURR(suite, label)
         suite = _fromLabel(suite, label)
         report.warn(f"processed the {label!r} forms where they exist, the evaluation elsewhere")
     work = _reconstructed(suite, context, report, workers)
@@ -931,8 +934,17 @@ def processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMAX
         if missing:
             raise ValueError(f"urrTables has no tables at {missing} K")
         urrTables = {T: urrTables[float(t)] for t, T in zip(temperatures, styleKT)}
-        report.warn("URR probability tables passed in, computed on another suite (a "
-                    "perturbation run's unperturbed evaluation); they are not perturbed")
+        if realised is not None and not all(t.multiplySmooth for t in urrTables.values()):
+            # LSSF=0 tables are cross sections, which OpenMC does not multiply
+            # by the smooth ones: the realisation's perturbation reaches them here.
+            urrTables = {T: _perturbedTable(t, realised) for T, t in urrTables.items()}
+            report.warn("URR probability tables passed in, computed on another suite (a "
+                        "perturbation run's unperturbed evaluation); their band cross "
+                        "sections carry this realisation's elastic, fission and capture")
+        else:
+            report.warn("URR probability tables passed in, computed on another suite (a "
+                        "perturbation run's unperturbed evaluation); they are factors on "
+                        "this realisation's smooth cross sections")
     else:
         from kika.processing.resonances.probability_tables import purrGrid, purrInputs, competitionFlags
         energyURR = purrGrid(work.resonances.unresolved)
@@ -1052,6 +1064,22 @@ def urrTablesOf(suite, temperatures, *, context=None, workers=None, report=None,
     region = suite.resonances.unresolved
     energies = purrGrid(region)
     background, competing = purrInputs(suite, energies, form=_evaluated)
+    if not region.tabulatedWidths.selfShieldingOnly and _mf3HoldsTheResonances(suite):
+        # LSSF=0 adds MF3 to the ladders as a background. An MF3 that holds the
+        # 0 K reconstruction (LRP=2, a perturbation run's base tape) already
+        # carries the URR mean, which would count twice (Rh-103: x2.00).
+        from kika.processing.resonances.probability_tables import _prepared
+        from kika.processing.resonances.unresolved import evaluate_unresolved
+
+        at = energies.copy()
+        at[0] *= 1.0 + 1e-6
+        at[-1] *= 1.0 - 1e-6
+        mean = evaluate_unresolved(at, _prepared(region, _urrContext(suite, context)))
+        for mt in (1, 2, 18, 102):
+            background[mt] = background[mt] - mean[mt]
+        if report is not None:
+            report.warn("URR LSSF=0 with an MF3 that holds the resonances (LRP=2): the "
+                        "background is MF3 less the URR mean of the parameters")
     threshold = competitionThreshold(suite, form=_evaluated)
     options = options or ProbabilityTableOptions()
     tables = probabilityTables(region, _urrContext(suite, context), energies, temperatures,
@@ -1087,6 +1115,53 @@ def _urrErrorLine(T, statistics) -> str:
                   + ("reached at every energy" if not missed else f"NOT reached at {missed} energies"))
     return (f"URR {T:g} K statistical error (1 sigma, jackknife over {drawn} ladders, {statistics.shieldingBasis}, worst energy): "
             + "; ".join(parts) + target)
+
+
+def _realisedURR(suite, label):
+    """``(holds, {mt: (realised, evaluated)})`` of MT2/18/102 for :func:`_perturbedTable`.
+
+    ``holds``: the evaluated MF3 holds the resonances (a perturbation run's
+    LRP=2 base), so the realisation scales the whole cross section; otherwise
+    it moved only MF3's background.
+    """
+    from kika.processing.resonances.suite import _entries
+
+    pairs = {}
+    for reaction in _entries(suite).values():
+        mt = reaction.ENDF_MT
+        forms = reaction.crossSection.forms
+        if mt in (2, 18, 102) and mt not in pairs and label in forms and EVAL_LABEL in forms:
+            pairs[mt] = (forms[label], _evaluated(reaction.crossSection))
+    return _mf3HoldsTheResonances(suite), pairs
+
+
+def _perturbedTable(table, realised):
+    """An LSSF=0 (cross-section) table carrying a realisation's MT2/18/102.
+
+    Scaled band by band by realised/evaluated where MF3 holds the resonances
+    -- what OpenMC does to an LSSF=1 table through the smooth cross section --
+    and shifted by realised - evaluated where MF3 is the background PURR
+    added. Unit factors give the table back unchanged.
+    """
+    holds, pairs = realised
+    if not pairs:
+        return table
+    out = copy.deepcopy(table)
+    E = np.asarray(table.energies, dtype=float)
+    total = out.table[:, 1, :]
+    for mt, row in ((2, 2), (18, 3), (102, 4)):
+        if mt not in pairs:
+            continue
+        new, old = (np.asarray(f.evaluate(E), dtype=float) for f in pairs[mt])
+        values = out.table[:, row, :]
+        if holds:
+            ratio = np.where(old > 0, new / np.where(old > 0, old, 1.0), 1.0)
+            moved = values * ratio[:, None]
+        else:
+            moved = values + (new - old)[:, None]
+        total += moved - values
+        out.table[:, row, :] = moved
+    return out
 
 
 def _attachURR(out, tables):
