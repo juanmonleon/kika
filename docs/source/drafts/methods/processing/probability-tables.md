@@ -219,7 +219,11 @@ ends nudged inward by a relative $10^{-6}$):
 - **LSSF=0.** $\sigma^\text{bg}_2$, $\sigma^\text{bg}_{18}$, $\sigma^\text{bg}_{102}$ are
   the MF 3 values of MT 2, 18 and 102, and
   $\sigma^\text{bg}_c = \sigma_1 - \sigma_2 - \sigma_{18} - \sigma_{102}$ from MF 3 (MT 1,
-  or the sum of the exclusive reactions when the file has no MT 1).
+  or the sum of the exclusive reactions when the file has no MT 1). When MF 3 already
+  holds the resonances (LRP=2, as a perturbation run's base tape writes it), the URR
+  mean of the parameters is taken out of it first: added again to the ladders it would
+  count twice, and the tables of Rh-103 of ENDF/B-VIII.1 came out at twice the dilute
+  cross section that way (measured 2026-10-18).
 - **LSSF=1.** MF 3 already is the dilute average, so the partial backgrounds are zero.
   Only the competition is kept: the excess of the total over $\sigma_2 + \sigma_{18} +
   \sigma_{102}$ where it exceeds $10^{-6}$ of the total, zero below the first energy with
@@ -231,6 +235,14 @@ with its threshold below the top of the range. The competition flags follow PURR
 inelastic flag is the MT of the only competing level reaction (MT 51-91), 4 when there
 are several, and $-1$ when there is none; the absorption flag is the MT of the only other
 competing reaction, 0 when there are several, and $-1$ when there is none.
+
+In a perturbation run the tables are computed once, on the unperturbed evaluation, and
+shared by the samples. A sample perturbs MF 3 and not MF 2, so the tables' shapes do not
+change; its cross sections reach them through the smooth ones for LSSF=1 tables
+(factors), and, for LSSF=0 tables (cross sections, which a transport code does not
+multiply), by scaling each band of MT 2, 18 and 102 by the sample's cross section over
+the evaluation's at that energy (shifting it by their difference when MF 3 was a
+background).
 
 ### Statistical error
 

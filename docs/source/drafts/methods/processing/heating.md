@@ -436,6 +436,31 @@ the processing wrote 1, so transport would have emitted one neutron per (n,2n) a
 KERMA kept one neutron's energy. HEATR's own MT 301 of Nb-93 is negative at 12 MeV
 and is no reference there.
 
+MT 301 (photons transported) is MT 901 less the energy of the photons the file itself
+carries, in kika's files to the rounding of the tables. In OpenMC's official Fe-56 of
+ENDF/B-VIII.1 it is not: its MT 901 less MT 301 falls short of the photon energy its own
+photon products carry by 3.6 keV b at 8 MeV, 31 keV b at 14.1 MeV and 12.6 keV b at
+20 MeV (measured 2026-10-18), because HEATR computes the photons' energy itself (by
+trapezoids over MF 6) and ACER writes the photons from the evaluation. kika's MT 301 is
+therefore 1-2 % below the official one above 8 MeV while the photons and MT 901 agree to
+$10^{-3}$, and energy is conserved in transport with kika's file and not with the
+official one.
+
+### Integral comparison
+
+The same OpenMC model under the official library and under one in which kika's files
+replace some nuclides, with the heating (MT 301), local heating (MT 901) and damage
+energy (MT 444) tallied per nuclide and the flux tallied per material on 402 bins. Each
+file's responses folded with its own run's flux predict the ratio of the two tallies;
+the tallied ratio is within 2 standard deviations of the predicted one for every
+nuclide and score (measured 2026-10-18, 6·10⁶ histories): the transport code reads
+kika's responses as they are written, and the integral difference is the tables'.
+In a HEU sphere inside 10 cm of iron (fission spectrum), kika/official is 0.998-1.005 for
+the heating of U-234, U-235, U-238 and Fe-56, and 0.980 (U-234), 0.990 (U-235), 1.010
+(U-238) and 1.002 (Fe-56) for the damage energy. In 20 cm of Fe-56 around a 14.1 MeV point
+source, the local heating is 0.9999 ± 0.0004, the damage energy 1.0010 ± 0.0003 and the
+heating 0.984, the official file's photon deficit above.
+
 ## Diagnostics
 
 - **Stage report** of {py:func}`kika.endf.process_endf` (`stage("heating")`): `status`,
