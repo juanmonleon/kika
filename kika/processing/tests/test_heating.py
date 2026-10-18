@@ -757,3 +757,118 @@ def test_a_section_without_its_residual_gets_heatrs_one_particle_recoil(monkeypa
                                     NS(findReactionByENDF_MT=lambda mt: _section([_product("H1", proton)]),
                                        PoPs=None), grid, 2.98, 2, 2003, 25.0, [])[1], []
     assert not any("one-particle" in n for n in notes)
+
+
+def _twoParticles(A, E0, top=8e6, topN=4e6):
+    """A proton (centre of mass, flat in E' and μ) and a neutron (lab, isotropic, flat in E')."""
+    energy = m.XYs2d(function1ds=[_table([0., top], [1. / top, 1. / top], x) for x in (1e6, 2e7)])
+    angles = m.XYs3d(function2ds=[m.XYs2d(function1ds=[_table([-1., 1.], [.5, .5], x) for x in (0., top)],
+                                          outerDomainValue=E) for E in (1e6, 2e7)])
+    proton = m.EnergyAngularMC(energy=energy, energyAngular=angles, productFrame=m.Frame.centerOfMass)
+    neutron = m.Uncorrelated(energy=m.XYs2d(function1ds=[_table([0., topN], [1. / topN, 1. / topN], x)
+                                                         for x in (1e6, 2e7)]),
+                             angular=m.Isotropic2d(), productFrame=m.Frame.lab)
+    return proton, neutron
+
+
+def test_the_independent_recoil_keeps_the_momentum_balance(monkeypatch):
+    # With df(E) = E the damage is <E_R>, closed: for independent momenta
+    # <|P - p1 - p2|^2> = P^2 - 2P(<p1z> + <p2z>) + <p1^2> + <p2^2> + 2<p1z><p2z>.
+    A, Z, E0, top, topN = 59.35, 28, 14e6, 8e6, 4e6
+    proton, neutron = _twoParticles(A, E0, top, topN)
+    mp = H.PARTICLE_MASS_RATIO["p"]
+    M = A + 1.0 - mp - 1.0
+    monkeypatch.setattr(H, "lindhard", lambda E, *args: np.asarray(E, dtype=float))
+    one = np.ones(1)
+    got = H._independentRecoilDamage([(proton, mp, one), (neutron, 1.0, one)], np.array([E0]),
+                                     A, Z, Z - 1, M, 40.0)[0]
+    P = np.sqrt(2 * E0)
+    V = P / (A + 1)
+    p1z, p1sq = mp * V, mp * mp * V * V + 2 * mp * top / 2
+    p2z, p2sq = 0.0, 2 * topN / 2
+    want = (P * P - 2 * P * (p1z + p2z) + p1sq + p2sq + 2 * p1z * p2z) / (2 * M)
+    assert got == pytest.approx(want, rel=1e-10)            # the second moments are kept
+
+
+def test_the_independent_recoil_is_the_monte_carlo_of_its_model():
+    A, Z, E0, top, topN = 59.35, 28, 14e6, 8e6, 4e6
+    proton, neutron = _twoParticles(A, E0, top, topN)
+    mp = H.PARTICLE_MASS_RATIO["p"]
+    M = A + 1.0 - mp - 1.0
+    one = np.ones(1)
+    got = H._independentRecoilDamage([(proton, mp, one), (neutron, 1.0, one)], np.array([E0]),
+                                     A, Z, Z - 1, M, 40.0)[0]
+    rng = np.random.default_rng(7)
+    n = 2_000_000
+
+    def iso(size):
+        mu, phi = rng.uniform(-1, 1, size), rng.uniform(0, 2 * np.pi, size)
+        s = np.sqrt(1 - mu * mu)
+        return np.stack([s * np.cos(phi), s * np.sin(phi), mu])
+
+    p1 = np.sqrt(2 * mp * rng.uniform(0, top, n)) * iso(n)
+    p1[2] += mp * np.sqrt(2 * E0) / (A + 1)
+    p2 = np.sqrt(2 * rng.uniform(0, topN, n)) * iso(n)
+    q = -p1 - p2
+    q[2] += np.sqrt(2 * E0)
+    er = (q * q).sum(axis=0) / (2 * M)
+    d = H.lindhard(er, Z - 1, M, Z, A, 40.0)
+    assert got == pytest.approx(d.mean(), rel=5 * d.std() / d.mean() / np.sqrt(n) + 2e-4)
+
+
+def test_a_multi_particle_section_without_its_residual_recoils_from_all_of_them(monkeypatch):
+    from types import SimpleNamespace as NS
+    import kika.nuclear_data.model.endf_conversion as conversion
+
+    A, Z, E0 = 59.35, 28, 14e6
+    proton, neutron = _twoParticles(A, E0)
+    monkeypatch.setattr(H, "_tabulateHeavy", lambda form, context: form)
+    monkeypatch.setattr(conversion, "reactionQI", lambda source, evaluation: 0.0)
+    grid = np.array([E0])
+    mp = H.PARTICLE_MASS_RATIO["p"]
+
+    def run(products):
+        source = _section(products)
+        notes = []
+        out = H._heavyProducts(source, NS(findReactionByENDF_MT=lambda mt: source, PoPs=None),
+                               grid, A, Z, 28060, 40.0, notes)
+        return out[1], notes
+
+    k = H._Kinematics(A=A, Q=0., awp=mp)
+    own = H._particleDamage(proton, grid, k, 1, mp, Z, A, 40.0)
+    both = H._independentRecoilDamage([(proton, mp, np.ones(1)), (neutron, 1.0, np.ones(1))], grid,
+                                      A, Z, Z - 1, A - mp, 40.0)
+    got, notes = run([_product("n", neutron), _product("H1", proton)])
+    np.testing.assert_allclose(got, own + both, rtol=1e-12)
+    assert any("all 2 particles" in n for n in notes)
+    # A yield that is not a whole number (a lumped section): the one-particle recoil.
+    half = _product("n", neutron)
+    half.multiplicity = NS(form=NS(evaluate=lambda grid: np.full(len(grid), 0.5)))
+    got, notes = run([half, _product("H1", proton)])
+    assert any("one-particle" in n for n in notes)
+
+
+def test_two_protons_leave_one_residual(monkeypatch):
+    # (n,2p): one product of yield 2 is two independent protons and one residual,
+    # not twice the recoil from one proton (HEATR's sixbar: the recoil's yield is 1).
+    from types import SimpleNamespace as NS
+    import kika.nuclear_data.model.endf_conversion as conversion
+
+    A, Z, E0 = 57.44, 28, 14e6
+    proton, _ = _twoParticles(A, E0)
+    monkeypatch.setattr(H, "_tabulateHeavy", lambda form, context: form)
+    monkeypatch.setattr(conversion, "reactionQI", lambda source, evaluation: 0.0)
+    grid = np.array([E0])
+    mp = H.PARTICLE_MASS_RATIO["p"]
+    two = _product("H1", proton)
+    two.multiplicity = NS(form=NS(evaluate=lambda grid: np.full(len(grid), 2.0)))
+    source = _section([two])
+    notes = []
+    got = H._heavyProducts(source, NS(findReactionByENDF_MT=lambda mt: source, PoPs=None),
+                           grid, A, Z, 28058, 40.0, notes)[1]
+    k = H._Kinematics(A=A, Q=0., awp=mp)
+    own = 2 * H._particleDamage(proton, grid, k, 1, mp, Z, A, 40.0)
+    recoil = H._independentRecoilDamage([(proton, mp, np.full(1, 2.0))], grid, A, Z, Z - 2,
+                                        A + 1 - 2 * mp, 40.0)
+    np.testing.assert_allclose(got, own + recoil, rtol=1e-12)
+    assert any("all 2 particles" in n for n in notes)

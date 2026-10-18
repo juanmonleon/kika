@@ -29,6 +29,13 @@ is HEATR's (``heatr.f90``):
   with ``irec > 0``). It is exact for one emitted particle and for a level; HEATR
   takes the recoil at the mean lab cosine of each lab energy (``h6cm``), kika
   averages the damage over the angle.
+- **independent recoil** (beyond HEATR): when such a section emits more than one
+  particle (MT22, 24, 28, ..., neutrons included, whole yields), the residual takes
+  the momentum balance of all of them, each drawn from its own lab energy-angle
+  law with independent azimuths. The evaluation gives no correlation, so this is
+  a model; against the residuals ENDF/B-VIII.1 does state it is closer than
+  HEATR's one particle in every MT28 measured and equal in MT22 of medium-mass
+  targets (PXB-053). Neutron-only sections keep ``tabdam``.
 
 The mean energies integrate the processed suite's Monte Carlo densities exactly
 for polynomial moments on flat/linear panels (including MF6), from the
@@ -1830,8 +1837,10 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
     deposit = np.zeros(len(grid))
     damage = np.zeros(len(grid))
     found = False
-    light, residual, twoBody = [], False, False
+    light, residual, twoBody, neutrons = [], False, False, []
     for product in source.outputChannel.products:
+        if product.pid == "n" and product.distribution is not None and product.multiplicity is not None:
+            neutrons.append(product)
         if product.pid in ("n", "photon") or product.distribution is None:
             continue
         forms = product.distribution.forms
@@ -1882,6 +1891,25 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
         # balance, exact for a level: HEATR's sixbar backs up to the partner
         # (irec = j6 - 1). Without it a charged level kept only the particle's
         # damage (Ni-58 MT600-609, MT444 20 % below HEATR's at 5 MeV).
+        # With more than one particle emitted (MT22, 28, 24, ...), the residual takes
+        # the momentum of all of them, drawn independently: against the cascades that
+        # ENDF/B-VIII.1 does state, closer than HEATR's recoil from the one particle
+        # (O-16 MT22 1.04-1.06 against 1.13-1.15; PXB-053).
+        independent = _independentParticles(light, neutrons, grid, A, Z, zaTarget, reaction.ENDF_MT, Q,
+                                            notes) if not twoBody else None
+        if independent is not None:
+            particles, zr, ar = independent
+            if zr >= 3:
+                try:
+                    damage = damage + _independentRecoilDamage(particles, grid, A, Z, zr, ar, ed)
+                except NotImplementedError as exc:
+                    notes.append(f"MT{reaction.ENDF_MT}: no independent recoil ({exc}); "
+                                 f"one-particle recoil instead")
+                else:
+                    notes.append(f"MT{reaction.ENDF_MT}: residual not given; its recoil from the "
+                                 f"momenta of all {sum(int(round(np.max(y))) for _, _, y in particles)} "
+                                 f"particles, independent")
+                    return (deposit, damage) if found else None
         awp, tabulated, k, y, zp = max(light, key=lambda item: item[0])
         zr, ar = Z - zp, A + 1.0 - awp
         if zr >= 3:
@@ -1890,11 +1918,44 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
             except NotImplementedError as exc:
                 notes.append(f"MT{reaction.ENDF_MT}: no residual recoil ({exc}); left out")
             else:
-                damage = damage + y * recoil
+                # One residual per reaction, whatever the particle's yield: HEATR's
+                # sixbar sets the recoil's yield to 1 (irec > 0: pe = 1). With y the
+                # (n,2p) residual counted twice (Ni-58 MT111, MT444 +2.5 % at 20 MeV).
+                damage = damage + np.where(y > 0, recoil, 0.0)
                 notes.append(f"MT{reaction.ENDF_MT}: " + (
                     "two-body residual (LAW=4): its recoil from the particle's angular law" if twoBody
                     else "residual not given; HEATR's one-particle recoil"))
     return (deposit, damage) if found else None
+
+
+def _independentParticles(light, neutrons, grid, A, Z, zaTarget, mt, Q, notes):
+    """``(particles, zr, ar)`` for :func:`_independentRecoilDamage`, or ``None`` when the
+    section emits one particle (its recoil is then exact) or a yield is not a whole number."""
+    from kika.processing.tabulation import TabulationContext
+
+    particles = [(tabulated, awp, y) for awp, tabulated, _, y, _ in light]
+    for product in neutrons:
+        forms = product.distribution.forms
+        form = forms.get("eval") or (next(iter(forms.values())) if forms else None)
+        if form is None:
+            return None
+        context = TabulationContext(awr=A, zaTarget=zaTarget, mt=mt, Q=Q, pid="n", zaEmitted=1)
+        try:
+            tabulated = _tabulateHeavy(form, context)
+        except (TypeError, ValueError, NotImplementedError) as exc:
+            notes.append(f"MT{mt} n: {type(form).__name__} not tabulated for the recoil ({exc})")
+            return None
+        if tabulated is None:
+            return None
+        particles.append((tabulated, 1.0, np.asarray(product.multiplicity.form.evaluate(grid), dtype=float)))
+    counts = [y[y > 0] for _, _, y in particles]
+    if any(np.any(np.abs(c - np.round(c)) > 1e-6) for c in counts):
+        return None
+    if sum(int(round(np.max(c))) if len(c) else 0 for c in counts) < 2:
+        return None
+    mass = sum(awp * int(round(np.max(c))) for (_, awp, _), c in zip(particles, counts) if len(c))
+    charge = sum(zp * int(round(np.max(y))) for awp, _, _, y, zp in light)
+    return particles, Z - charge, A + 1.0 - mass
 
 
 def _particleDamage(form, grid, k, zp, ap, Z, A, ed):
@@ -2121,6 +2182,242 @@ def _recoilDamage(form, grid, k, zr, ar, Z, A, ed):
             values.append(float(w @ damageAt(E, e, x, wx)))
         return _onGrid(energies, values, grid, flat)
     raise NotImplementedError(f"one-particle recoil of a {type(form).__name__}")
+
+
+#: Bins per axis of a momentum distribution (p_z, p_⊥) in the independent recoil:
+#: each bin keeps its weight and centroid, so the first moments are exact and the
+#: second lose ~(1/bins)²/12 of the spread.
+_MOMENTUM_BINS = 24
+
+#: Pairs times azimuths per block of :func:`_addMomenta`, to bound its memory.
+_MOMENTUM_BLOCK = 1 << 21
+
+#: Midpoints in the relative azimuth of two independent momenta, on [0, π]: the
+#: integrand is smooth and periodic, where the midpoint rule converges fastest.
+_AZIMUTH_NODES = 16
+
+
+def _incidentNodes(form):
+    """The incident energies of a Monte Carlo form's tables."""
+    from kika.nuclear_data import model as m
+
+    if isinstance(form, m.DistributionMixture):
+        return np.unique(np.concatenate([_incidentNodes(t.functional) for t in form.weighted]))
+    if isinstance(form, m.EnergyAngularMC):
+        return _tables(form.energy)[0]
+    if isinstance(form, m.KalbachMann):
+        return _tables(form.f)[0]
+    if isinstance(form, m.Uncorrelated) and form.energy is not None and \
+            not isinstance(form.energy, (m.LevelEnergy, m.DiscretePhotonEnergy, m.NBodyPhaseSpace)):
+        return _tables(form.energy)[0]
+    raise NotImplementedError(f"independent recoil of a {type(form).__name__}")
+
+
+def _emissionRule(form, i, E):
+    """``(E', μ, w)`` of incident table ``i`` of a Monte Carlo form, in its own frame."""
+    from kika.nuclear_data import model as m
+
+    if isinstance(form, m.EnergyAngularMC):
+        _, tables, _ = _tables(form.energy)
+        t, angular = tables[i], form.energyAngular.function2ds[i]
+        rules = [_ruleOf(u, 2) for u in angular.function1ds]
+        nodes = np.asarray(t.xs, dtype=float)
+        nd = int(getattr(t, "numberOfDiscrete", 0) or 0)
+        e, w = _ruleOf(t, 2)
+        parts = [(np.full(len(rules[j][0]), e[j]), rules[j][0], w[j] * rules[j][1]) for j in range(nd)]
+        ec, wc, cont = e[nd:], w[nd:], nodes[nd:]
+        if len(cont) == 1:
+            parts += [(np.full(len(rules[nd][0]), a), rules[nd][0], b * rules[nd][1]) for a, b in zip(ec, wc)]
+        elif len(ec):
+            # P(μ|E') lin-lin between the tabulated E': the mixture of its two neighbours.
+            k = np.clip(np.searchsorted(cont, ec, side="right") - 1, 0, len(cont) - 2)
+            for a, b, j in zip(ec, wc, k):
+                lo, hi = cont[j], cont[j + 1]
+                f = min(max((a - lo) / (hi - lo), 0.0), 1.0) if hi > lo else 0.0
+                for g, (x, wx) in ((1.0 - f, rules[nd + j]), (f, rules[nd + j + 1])):
+                    if g > 0:
+                        parts.append((np.full(len(x), a), x, b * g * wx))
+        return tuple(np.concatenate(c) for c in zip(*parts))
+    if isinstance(form, m.KalbachMann):
+        _, tables, _ = _tables(form.f)
+        r, a = list(m.toEndfTab2(form.r)[0])[i], list(m.toEndfTab2(form.a)[0])[i]
+        mu, wmu = np.polynomial.legendre.leggauss(32)
+        e, w = _ruleOf(tables[i], 2)
+        rr = np.interp(e, r.xs, r.ys)[:, None]
+        aa = np.interp(e, a.xs, a.ys)[:, None]
+        safe = np.where(np.abs(aa) > 1e-6, aa, 1.0)
+        norm = np.where(np.abs(aa) > 1e-6, safe / (2.0 * np.sinh(safe)), 0.5)
+        p = norm * (np.cosh(aa * mu) + rr * np.sinh(aa * mu)) * wmu
+        return np.repeat(e, len(mu)), np.tile(mu, len(e)), (w[:, None] * p).ravel()
+    if isinstance(form, m.Uncorrelated):
+        _, tables, _ = _tables(form.energy)
+        angular = getattr(form, "angular", None)
+        if angular is None or isinstance(angular, m.Isotropic2d):
+            x, wx = _ISOTROPIC_MU
+        else:
+            _, at, _ = _tables(angular)
+            x, wx = _mixedRule(at, [_ruleOf(u, 2) for u in at], float(E))
+        e, w = _ruleOf(tables[i], 2)
+        return np.repeat(e, len(x)), np.tile(x, len(e)), (w[:, None] * wx[None, :]).ravel()
+    raise NotImplementedError(f"independent recoil of a {type(form).__name__}")
+
+
+def _labMomenta(form, E, awp, A):
+    """``(p_z, p_⊥, w)`` of a particle at incident energy ``E``, in the lab.
+
+    Momenta in neutron masses and eV (``p² = 2 m E'``), ``z`` along the beam; the
+    weights sum to 1. Between two incident tables the distribution is their
+    lin-lin mixture, as the damage is read between them everywhere else.
+    """
+    from kika.nuclear_data import model as m
+
+    if isinstance(form, m.DistributionMixture):
+        parts = []
+        for term in form.weighted:
+            g = float(np.asarray(term.weight.evaluate([E]), dtype=float)[0]) if term.weight is not None else 1.0
+            if g > 0:
+                pz, pp, w = _labMomenta(term.functional, E, awp, A)
+                parts.append((pz, pp, g * w))
+        pz, pp, w = (np.concatenate(c) for c in zip(*parts))
+        return pz, pp, w / w.sum()
+    nodes = _incidentNodes(form)
+    if E <= nodes[0] or len(nodes) == 1:
+        mix = [(0, 1.0)]
+    elif E >= nodes[-1]:
+        mix = [(len(nodes) - 1, 1.0)]
+    else:
+        i = int(np.searchsorted(nodes, E, side="right") - 1)
+        f = (E - nodes[i]) / (nodes[i + 1] - nodes[i])
+        mix = [(i, 1.0 - f), (i + 1, f)]
+    parts = []
+    for i, g in mix:
+        if g > 0:
+            e, mu, w = _emissionRule(form, i, E)
+            total = w.sum()
+            if total > 0:
+                parts.append((e, mu, g * w / total))
+    e, mu, w = (np.concatenate(c) for c in zip(*parts))
+    mu = np.clip(mu, -1.0, 1.0)
+    v = np.sqrt(2.0 * np.clip(e, 0.0, None) / awp)
+    vz, vp = v * mu, v * np.sqrt(1.0 - mu * mu)
+    frame = getattr(form, "productFrame", None)
+    if str(getattr(frame, "value", frame)) in ("centerOfMass", "Frame.centerOfMass"):
+        vz = vz + np.sqrt(2.0 * E) / (A + 1.0)
+    return awp * vz, awp * vp, w / w.sum()
+
+
+class _MomentumBins:
+    """A momentum distribution on a fixed :data:`_MOMENTUM_BINS`² mesh in ``(p_z, p_⊥)``.
+
+    Each bin keeps its weight, centroid and second moments: ``E_R`` is quadratic in
+    the momentum, so with them ``⟨E_R⟩`` is exact, and only the curvature of the
+    damage within a bin is lost.
+    """
+
+    def __init__(self, zlo, zhi, plo, phi):
+        n = _MOMENTUM_BINS
+        self.edges = (zlo, max(zhi - zlo, 1e-300), plo, max(phi - plo, 1e-300))
+        self.sums = np.zeros((5, n * n))                     # w, w p_z, w p_⊥, w p_z², w p_⊥²
+
+    def add(self, pz, pp, w, vz=0.0):
+        """Points of weight ``w``, each carrying a variance ``vz`` in ``p_z`` from before."""
+        n = _MOMENTUM_BINS
+        zlo, zw, plo, pw = self.edges
+        i = np.clip(((pz - zlo) / zw * n).astype(np.int64), 0, n - 1)
+        k = np.clip(((pp - plo) / pw * n).astype(np.int64), 0, n - 1)
+        cell = i * n + k
+        for row, values in enumerate((w, w * pz, w * pp, w * (pz * pz + vz), w * pp * pp)):
+            self.sums[row] += np.bincount(cell, weights=values, minlength=n * n)
+
+    def moments(self):
+        """``(p̄_z, p̄_⊥, w, var p_z, ⟨p_⊥²⟩)`` of the occupied bins."""
+        w, z, p, zz, pp = self.sums
+        live = w > 0
+        w = w[live]
+        z, p = z[live] / w, p[live] / w
+        return z, p, w, np.clip(zz[live] / w - z * z, 0.0, None), pp[live] / w
+
+
+def _binMomenta(pz, pp, w):
+    """Lab momenta ``(p_z, p_⊥, w)`` as :meth:`_MomentumBins.moments`."""
+    keep = w > 0
+    pz, pp, w = pz[keep], pp[keep], w[keep]
+    if len(w) <= _MOMENTUM_BINS:
+        return pz, pp, w, np.zeros(len(w)), pp * pp
+    bins = _MomentumBins(pz.min(), pz.max(), pp.min(), pp.max())
+    bins.add(pz, pp, w)
+    return bins.moments()
+
+
+def _addMomenta(a, b, last=None):
+    """The distribution of the sum of two independent, azimuthally symmetric momenta, binned.
+
+    ``p_⊥² = ⟨a_⊥²⟩ + ⟨b_⊥²⟩ + 2 a̅_⊥ b̅_⊥ cos φ`` over the relative azimuth φ: its mean
+    over φ and the bins' spreads is exact, as are those of ``p_z = a_z + b_z``. With
+    ``last(p_z, var p_z, p_⊥², w)``, the sum of ``last`` over the points, not binned:
+    the final sum's bins would put the damage at each bin's mean recoil."""
+    (az, ap, aw, avz, ap2), (bz, bp, bw, bvz, bp2) = a, b
+    cos = np.cos((np.arange(_AZIMUTH_NODES) + 0.5) * np.pi / _AZIMUTH_NODES)
+    top = np.sqrt(ap2.max()) + np.sqrt(bp2.max())
+    bins = _MomentumBins(az.min() + bz.min(), az.max() + bz.max(), 0.0, top) if last is None else None
+    total = 0.0
+    rows = max(1, _MOMENTUM_BLOCK // (len(bz) * _AZIMUTH_NODES))
+    for s in range(0, len(az), rows):
+        z = (az[s:s + rows, None] + bz[None, :]).ravel()
+        vz = (avz[s:s + rows, None] + bvz[None, :]).ravel()
+        w = (aw[s:s + rows, None] * bw[None, :]).ravel() / _AZIMUTH_NODES
+        ab = 2.0 * (ap[s:s + rows, None] * bp[None, :]).ravel()
+        sq = (ap2[s:s + rows, None] + bp2[None, :]).ravel()
+        perp2 = np.clip(sq[:, None] + ab[:, None] * cos[None, :], 0.0, None).ravel()
+        z, vz, w = (np.repeat(x, _AZIMUTH_NODES) for x in (z, vz, w))
+        if last is not None:
+            total += last(z, vz, perp2, w)
+        else:
+            bins.add(z, np.sqrt(perp2), w, vz)
+    return total if last is not None else bins.moments()
+
+
+def _independentRecoilDamage(particles, grid, A, Z, zr, ar, ed):
+    """``⟨df(E_R)⟩`` of the residual ``(zr, ar)`` of a multi-particle emission, its
+    momentum the balance of all the particles, each drawn independently.
+
+    ``particles`` holds ``(form, awp, yields)``: a Monte Carlo form, the mass ratio,
+    and the yield on ``grid`` (a whole number above the threshold). With ``p_in``
+    the neutron's momentum, ``E_R = |p_in − Σ p_i|²/2M``; each ``p_i`` follows the
+    particle's own energy-angle law in the lab, the azimuths independent. The
+    evaluation states each particle's law and not their correlation, which the
+    cascade does carry, so this is a model: measured against the residuals
+    ENDF/B-VIII.1 does state (TALYS, GNASH cascades), it is closer than one
+    particle's recoil in all six MT28 sections measured and equal in MT22 of
+    medium-mass targets, where the alpha carries the momentum (PXB-053). The damage is computed at the particles'
+    incident energies and read lin-lin between them.
+    """
+    lo, hi = float(np.min(grid)), float(np.max(grid))
+    nodes = np.unique(np.concatenate([_incidentNodes(form) for form, _, _ in particles] + [[lo, hi]]))
+    nodes = nodes[(nodes >= lo) & (nodes <= hi)]
+    values = np.zeros(len(nodes))
+    for j, E in enumerate(nodes):
+        # A yield read between the grid's points around a threshold is a fraction.
+        counts = [int(round(np.interp(E, grid, y))) for _, _, y in particles]
+        if any(c <= 0 for c in counts):
+            continue                                         # below a threshold
+        momenta = [_binMomenta(*_labMomenta(form, float(E), awp, A))
+                   for (form, awp, _), count in zip(particles, counts) for _ in range(count)]
+        P = np.sqrt(2.0 * E)
+
+        def damage(qz, vz, qp2, w, P=P):
+            er = ((P - qz) ** 2 + vz + qp2) / (2.0 * ar)
+            return float(w @ lindhard(er, zr, ar, Z, A, ed))
+
+        if len(momenta) == 1:
+            qz, _, w, vz, qp2 = momenta[0]
+            values[j] = damage(qz, vz, qp2, w)
+            continue
+        total = momenta[0]
+        for one in momenta[1:-1]:
+            total = _addMomenta(total, one)
+        values[j] = _addMomenta(total, momenta[-1], last=damage)
+    return _onGrid(nodes, values, grid)
 
 
 # ----------------------------------------------------------------------

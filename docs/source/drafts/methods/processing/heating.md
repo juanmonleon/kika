@@ -177,6 +177,24 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   laboratory cosine of each laboratory energy (`h6cm`); kika averages the damage over
   the angle. No recoil is added when the residual is itself a light particle
   ($Z - z \le 2$).
+- **The same sections when they emit more than one particle (MT 22, 24, 28, ...,
+  neutrons included, each with a whole yield):** the residual
+  $(Z - \sum z_i, A + 1 - \sum a_i)$ takes the momentum balance of all of them,
+  $E_R = |\mathbf{p}_n - \sum_i \mathbf{p}_i|^2 / 2M$, each $\mathbf{p}_i$ drawn from
+  its particle's own laboratory energy-angle distribution and the azimuths
+  independent. Each distribution is gathered on a $24 \times 24$ mesh in
+  $(p_z, p_\perp)$ keeping every bin's weight, centroid and second moments, and the
+  sums are convolved one particle at a time with sixteen midpoints in the relative
+  azimuth, so that $\langle E_R \rangle$ is exact and only the curvature of the damage
+  within a bin is lost (below $10^{-3}$ against a Monte Carlo of the same model). The
+  evaluation states each particle's distribution and not their correlation, so this
+  is a model, not HEATR's: against the residuals that ENDF/B-VIII.1 does state for
+  these reactions (sequential-emission cascades), it is closer than the heaviest
+  particle's recoil in all six MT 28 sections measured (O-16, Al-27, Si-28, Mn-54,
+  Fe-55, Mo-95) and in MT 22 of the light targets (O-16: 1.04-1.06 of the stated
+  residual's damage, HEATR's approximation 1.13-1.15), and equal within 0.5 % in MT 22
+  of the medium-mass ones, where the alpha carries the momentum. Neutron-only sections
+  (MT 16, 17) keep the single-emission recoil above.
 - **Other neutron-emitting reactions:** one isotropic emission in the laboratory,
   $E_R = (E - 2\sqrt{EE'}\mu + E')/A$, averaged over the first neutron's spectrum and
   over $\mu$ (four-point Gauss-Legendre), the target's $(Z, A)$ as recoil.
@@ -371,12 +389,14 @@ thermal energy); that of MT 444 is at most 0.25 % below 25 keV, at most 1.6 % up
 1 MeV, and 5-6 % above 1 MeV.
 
 MT 444 of ENDF/B-VIII.1 against OpenMC's official library (NJOY HEATR), measured
-2026-10-18, at 0.5-20 MeV: Ni-58 0.980-1.008, Ni-60 0.988-1.004, Cu-63 0.978-1.009,
-Cr-50 0.992-1.014, Ti-46 0.993-1.004, Fe-56 0.977-1.025 (unchanged by the
-one-particle recoil). Without the residual's recoil Ni-58 was 0.80 at 5 MeV and Ni-60
+2026-10-18, at 0.5-20 MeV, with the independent recoil: Ni-58 0.980-1.001, Ni-60
+0.988-1.004, Cu-63 0.986-1.014, Ti-46 0.991-1.004, Fe-56 0.977-1.025 (no section
+without its residual). Without the residual's recoil Ni-58 was 0.80 at 5 MeV and Ni-60
 0.69 at 20 MeV. On Ni-58, HEATR's mean-cosine recoil emulated on kika's tables moves
 MT 444 by up to +4 % at 20 MeV; the remaining difference is of the size of HEATR's
-approximations.
+approximations. The independent recoil itself moves MT 444 by at most +0.4 % against
+the heaviest particle's (Ni-58 MT 28 at 14-17 MeV); a yield of 2, as in (n,2p), is one
+residual, as in HEATR (`sixbar`, recoil yield 1).
 
 ## Diagnostics
 
