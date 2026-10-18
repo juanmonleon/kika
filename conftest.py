@@ -254,6 +254,17 @@ _TAPES: Dict[str, Sequence[str]] = {
     # discrete lines and 26 primaries in one subsection.
     "b11_b81": ("endfb81/n-005_B_011.endf", "endfb81/neutrons/n-005_B_011.endf"),
     "pt190_b81": ("endfb81/n-078_Pt_190.endf", "endfb81/neutrons/n-078_Pt_190.endf"),
+    # T3 (every evaluation through processSuite) refused these; each is one defect,
+    # test_t3_tapes.py processes them whole.
+    "t3_ni59_jeff40": ("jeff40/n_28-Ni-059g.jeff",),
+    "t3_mo100_jeff40": ("jeff40/n_42-Mo-100g.jeff",),
+    "t3_cs134_jeff40": ("jeff40/n_55-Cs-134g.jeff",),
+    "t3_b11_jeff40": ("jeff40/n_5-B-011g.jeff",),
+    "t3_w183_b81": ("endfb81/n-074_W_183.endf",),
+    "t3_pb208_b81": ("endfb81/n-082_Pb_208.endf",),
+    "t3_th229_b81": ("endfb81/n-090_Th_229.endf",),
+    "t3_u241_b81": ("endfb81/n-092_U_241.endf",),
+    "t3_ra226_b81": ("endfb81/n-088_Ra_226.endf",),
     # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
     # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
     # validation that picked them is kika-workspace

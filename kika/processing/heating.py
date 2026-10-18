@@ -743,8 +743,8 @@ def _unitBaseCMMean(form, grid, k):
         meshes.append((nodes,values));total+=len(nodes)
     side=np.searchsorted(np.asarray(steps,dtype=float),grid,side="right")
     output=np.empty(len(grid))
-    for k,(nodes,values) in enumerate(meshes):
-        mask=side==k
+    for index,(nodes,values) in enumerate(meshes):
+        mask=side==index
         output[mask]=np.interp(np.asarray(grid)[mask],nodes,values)
     below=grid<lo;above=grid>hi
     if np.any(below):output[below]=held(grid[below],True)
