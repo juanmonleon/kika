@@ -137,7 +137,10 @@ def _decayChannel(residualZA: int, lr: int, q: float, report, mt: int, domain):
     if light is None:
         report.lost(
             f"MT{mt}: LR={lr} is not a breakup ENDF-102's table describes, so the "
-            f"residual's decay is not modelled and LR stays in the provenance only"
+            f"residual's decay is not modelled and LR stays in the provenance only",
+            # LR names the residual's decay, never the reaction's cross section
+            # (B-10 MT604, LR=40, was refused by reconstruction for it).
+            unaffectedScopes=("cross-sections",),
         )
         return None
     if domain is None:

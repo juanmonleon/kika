@@ -134,6 +134,9 @@ def test_a_repeated_particle_keeps_its_pid_and_gains_an_ordinal():
     byLabel = {label: pid for label, pid, _m, _d in entries}
     assert byLabel == {"He4": "He4", "He4__1": "He4"}
     assert any("two nodes for one particle" in m for m in report.approximations)
+    # a label changes no cross section: reconstruction and Doppler must not refuse for it
+    assert any(e["kind"] == "approximations" and "two nodes for one particle" in e["message"]
+               and "cross-sections" in e["scopes"] for e in report.scopeExclusions)
 
 
 def test_the_yield_becomes_the_multiplicity(micro_mf6_tape):

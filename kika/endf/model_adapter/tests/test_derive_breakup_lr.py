@@ -74,3 +74,15 @@ def test_a_breakup_outside_the_table_is_refused():
     residual.outputChannel.products.products[0].multiplicity.form.constant = 3.0
     with pytest.raises(ValueError, match="no LR of ENDF-102's table"):
         _lr(residual, "MT51", ConversionReport())
+
+
+def test_an_lr_that_is_no_breakup_is_a_loss_that_leaves_the_cross_section_alone():
+    # B-10 MT604 of ENDF/B-VIII.1 states LR=40 (pair formation in the residual's
+    # decay, not a breakup): reconstruction refused the tape for that loss.
+    from kika.endf.model_adapter.residuals import _decayChannel
+    from kika.nuclear_data.model import ConversionReport
+
+    report = ConversionReport()
+    assert _decayChannel(4009, 40, 0.0, report, 604, None) is None
+    assert any("LR=40" in message for message in report.losses)
+    assert report.isCleanFor("cross-sections")

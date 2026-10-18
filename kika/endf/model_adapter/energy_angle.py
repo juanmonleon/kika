@@ -380,8 +380,11 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
         pid = pidFromZA(product.za, product.lip)
         label = pid if pid not in seen else f"{pid}__{index}"
         if pid in seen:
+            # A product's label: no cross section depends on it (He-3, F-19 were
+            # refused by reconstruction and Doppler for it).
             report.approximated(_repeatedProductMessage(mt, index, product,
-                                                        pid, label, seen[pid]))
+                                                        pid, label, seen[pid]),
+                                unaffectedScopes=("cross-sections",))
         else:
             seen[pid] = index
 
