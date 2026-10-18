@@ -425,7 +425,16 @@ on evaluations of ENDF/B-VIII.1.
   $1.1\cdot10^{-10}$ of the budget (Fe-56, Zr-90, Au-197, U-235, U-238 at
   293.6 K and above; measured 2026-10-11). Between the nodes of a thinned table the
   error is larger, as stated under *Conventions and choices*. Pu-239 was not
-  compared with NJOY, which did not process the cold evaluation correctly.
+  compared with NJOY: the SAMMY routines of its RECONR take a wrong channel spin for the effective fission channel of
+  this evaluation (PNT=-1, IA=IB=0), so the cold table differs before broadening.
+- **BROADR's own node values.** Over every BROADR node of Fe-56 below 850 keV (default
+  input, $10^{-3}$), 97-99 % agree with the exact kernel to the seven written figures.
+  The worst MT 2 nodes are the seven-figure rounding of their energies. The worst MT 102
+  nodes, up to $2.6\cdot10^{-3}$ at 121 020.4 eV, are a defect of BROADR, shown with a
+  traced build and a line-by-line replay. There `bsigma` is started from a panel above
+  the node, which it can only move up, and its Taylor series `hnabb` mishandles the sign
+  of the negative arguments that start produces. Either alone is harmless (measured
+  2026-10-18).
 - **Time.** On a thermal window (Fe-56 and Au-197 at 600 K, $10^{-7}$ to 20 eV,
   MT 2 and 102, `rtol` $=10^{-3}$, one core, median of three runs, measured
   2026-10-12) kika takes 0.31 s and 0.30 s, FUDGE 0.15 s and 0.19 s, NJOY 0.13 s:
