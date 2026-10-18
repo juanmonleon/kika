@@ -631,3 +631,129 @@ def test_the_joint_two_body_quadrature_reproduces_the_separate_passes():
         finally:
             H._DISPLACEMENTS.reset(token)
         assert np.all(np.abs(joint[:, 1 + k] - own) <= 1e-6 + 3e-4 * np.abs(own)), model.name
+
+
+def _dense_recoil(E, A, mp, M, zr, Z, spectrum, angular, cm):
+    """The reference: ``∫∫ p(E') p(mu|E') df(E_R) dE' dmu`` by adaptive quadrature (lin-lin p(E'))."""
+    from scipy import integrate
+
+    xs, ps = (np.asarray(v, dtype=float) for v in spectrum)
+    norm = np.trapezoid(ps, xs)
+
+    def f(mu, e):
+        if cm:
+            a, b = M * E / (A + 1.0) ** 2, mp * e / M
+            er = a + b - 2.0 * np.sqrt(a * b) * mu
+        else:
+            er = (E - 2.0 * np.sqrt(E * mp * e) * mu + mp * e) / M
+        return np.interp(e, xs, ps) / norm * float(angular(e, mu)) * float(H.lindhard(np.array(er), zr, M, Z, A, 0.0))
+
+    return integrate.dblquad(f, xs[0], xs[-1], -1.0, 1.0, epsrel=1e-11)[0]
+
+
+@pytest.mark.parametrize("frame", [m.Frame.centerOfMass, m.Frame.lab])
+def test_one_particle_recoil_integrates_the_particles_joint_energy_angle_law(frame):
+    # A proton emitted with a triangular spectrum on [0, 8 MeV] whose angular
+    # slope changes with E' (forward at the top of the spectrum): the recoil of
+    # the residual, by momentum conservation, against a brute-force integral.
+    A, Z, E0 = 59.35, 28, 14e6
+    top = 8e6
+    energy = m.XYs2d(function1ds=[_table([0., top], [2. / top, 0.], E0)])
+    slopes = (0.0, 0.6)
+    children = [_table([-1., 1.], [.5 - .5 * s, .5 + .5 * s], x) for x, s in zip((0., top), slopes)]
+    form = m.EnergyAngularMC(energy=energy, energyAngular=m.XYs3d(function2ds=[
+        m.XYs2d(function1ds=children, outerDomainValue=E0)]), productFrame=frame)
+    k = H._Kinematics(A=A, Q=0., awp=H.PARTICLE_MASS_RATIO["p"])
+    M = A + 1.0 - k.awp
+    got = H._recoilDamage(form, np.array([E0]), k, Z - 1, M, Z, A, 0.0)[0]
+    slope = lambda e, mu: (0.5 + 0.5 * (slopes[0] + (slopes[1] - slopes[0]) * e / top) * mu)
+    want = _dense_recoil(E0, A, k.awp, M, Z - 1, Z, ([0., top], [2. / top, 0.]), slope,
+                         frame == m.Frame.centerOfMass)
+    assert got == pytest.approx(want, rel=1e-6)
+
+
+def test_one_particle_recoil_is_the_same_for_each_way_of_stating_isotropy():
+    A, Z, E0, top = 26.0, 13, 10e6, 6e6
+    k = H._Kinematics(A=A, Q=0., awp=H.PARTICLE_MASS_RATIO["a"])
+    M, zr = A + 1.0 - k.awp, Z - 2
+    spectrum = lambda: m.XYs2d(function1ds=[_table([0., top], [1. / top, 1. / top], E0)])
+    flat = m.XYs3d(function2ds=[m.XYs2d(function1ds=[_table([-1., 1.], [.5, .5], x) for x in (0., top)],
+                                        outerDomainValue=E0)])
+    joint = m.EnergyAngularMC(energy=spectrum(), energyAngular=flat, productFrame=m.Frame.centerOfMass)
+    uncorrelated = m.Uncorrelated(energy=spectrum(), angular=m.Isotropic2d(), productFrame=m.Frame.centerOfMass)
+    grid = np.array([E0])
+    a = H._recoilDamage(joint, grid, k, zr, M, Z, A, 0.0)[0]
+    b = H._recoilDamage(uncorrelated, grid, k, zr, M, Z, A, 0.0)[0]
+    want = _dense_recoil(E0, A, k.awp, M, zr, Z, ([0., top], [1. / top, 1. / top]),
+                         lambda e, mu: .5, True)
+    assert a == pytest.approx(want, rel=1e-6)
+    assert b == pytest.approx(want, rel=1e-6)
+
+
+@pytest.mark.parametrize("slope", [None, 0.0, 0.6])
+def test_a_charged_levels_residual_recoils_with_the_particles_momentum(slope):
+    from scipy.integrate import quad
+
+    A, Z, E0 = 57.44, 28, 5e6
+    k = H._Kinematics(A=A, Q=4e5, awp=H.PARTICLE_MASS_RATIO["p"])
+    M, zr = A + 1.0 - k.awp, Z - 1
+    level = m.LevelEnergy(threshold=-(A + 1) / A * 4e5, massRatio=A / (A + 1) * M / (M + k.awp))
+    if slope is None:
+        angular, slope = m.Isotropic2d(), 0.0
+    else:
+        density = [(1 - slope) / 2, (1 + slope) / 2]
+        angular = m.XYs2d(function1ds=[_table([-1., 1.], density, x) for x in (1e-5, 2e7)])
+    form = m.Uncorrelated(energy=level, angular=angular, productFrame=m.Frame.centerOfMass)
+    got = H._recoilDamage(form, np.array([E0]), k, zr, M, Z, A, 40.0)[0]
+    a, b = M * E0 / (A + 1) ** 2, k.awp * float(level.outgoingEnergy(E0)) / M
+    want = quad(lambda mu: float(H.lindhard(np.array([a + b - 2 * np.sqrt(a * b) * mu]), zr, M, Z, A, 40.0)[0])
+                * (1 + slope * mu) / 2, -1, 1, epsabs=0, epsrel=1e-12, limit=200)[0]
+    assert got == pytest.approx(want, rel=1e-6)
+
+
+def _section(products):
+    from types import SimpleNamespace as NS
+    return NS(ENDF_MT=649, outputChannel=NS(products=products))
+
+
+def _product(pid, form):
+    from types import SimpleNamespace as NS
+    return NS(pid=pid, distribution=NS(forms={"eval": form}),
+              multiplicity=NS(form=NS(evaluate=lambda grid: np.ones(len(grid)))))
+
+
+def test_a_section_without_its_residual_gets_heatrs_one_particle_recoil(monkeypatch):
+    from types import SimpleNamespace as NS
+    import kika.nuclear_data.model.endf_conversion as conversion
+
+    A, Z, E0, top = 59.35, 28, 14e6, 8e6
+    energy = m.XYs2d(function1ds=[_table([0., top], [1. / top, 1. / top], E0)])
+    angles = m.XYs3d(function2ds=[m.XYs2d(function1ds=[_table([-1., 1.], [.5, .5], x) for x in (0., top)],
+                                          outerDomainValue=E0)])
+    proton = m.EnergyAngularMC(energy=energy, energyAngular=angles, productFrame=m.Frame.centerOfMass)
+    monkeypatch.setattr(H, "_tabulateHeavy", lambda form, context: form)
+    monkeypatch.setattr(conversion, "reactionQI", lambda source, evaluation: 0.0)
+    grid = np.array([E0])
+    k = H._Kinematics(A=A, Q=0., awp=H.PARTICLE_MASS_RATIO["p"])
+    own = H._particleDamage(proton, grid, k, 1, k.awp, Z, A, 40.0)
+    recoil = H._recoilDamage(proton, grid, k, Z - 1, A + 1.0 - k.awp, Z, A, 40.0)
+    assert recoil[0] > 50 * own[0]                         # the recoil is the damage
+
+    def run(products):
+        source = _section(products)
+        evaluation = NS(findReactionByENDF_MT=lambda mt: source, PoPs=None)
+        notes = []
+        out = H._heavyProducts(source, evaluation, grid, A, Z, 28060, 40.0, notes)
+        return out[1], notes
+
+    alone, notes = run([_product("H1", proton)])
+    np.testing.assert_allclose(alone, own + recoil, rtol=1e-12)
+    assert any("one-particle" in n for n in notes)
+    # With the residual listed, its own distribution gives its damage: no generated recoil.
+    withResidual, notes = run([_product("H1", proton), _product("Co60", proton)])
+    assert not any("one-particle" in n for n in notes)
+    # A residual that is itself a light particle (He-3(n,p)t) generates nothing.
+    light, notes = H._heavyProducts(_section([_product("H1", proton)]),
+                                    NS(findReactionByENDF_MT=lambda mt: _section([_product("H1", proton)]),
+                                       PoPs=None), grid, 2.98, 2, 2003, 25.0, [])[1], []
+    assert not any("one-particle" in n for n in notes)

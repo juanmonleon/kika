@@ -22,6 +22,13 @@ is HEATR's (``heatr.f90``):
   isotropic emission over the outgoing spectrum (``tabdam``), the photon
   recoils for capture (``gheat``), particle emission up to the Coulomb barrier
   for absorption (``capdam``).
+- **one-particle recoil**: the residual of an MF6 section that lists its light
+  particles (p, d, t, ³He, α) and not the residual, or states it only as a
+  two-body recoil (LAW=4), recoils with the momentum of the heaviest of them,
+  averaged over that particle's own energy-angle law (HEATR's ``hinit``/``getsix``
+  with ``irec > 0``). It is exact for one emitted particle and for a level; HEATR
+  takes the recoil at the mean lab cosine of each lab energy (``h6cm``), kika
+  averages the damage over the angle.
 
 The mean energies integrate the processed suite's Monte Carlo densities exactly
 for polynomial moments on flat/linear panels (including MF6), from the
@@ -1762,6 +1769,9 @@ def _massRatio(pid, pops):
     return float(zaFromPid(pid) % 1000) * 0.99167
 
 
+#: The light charged particles; any other non-neutron, non-photon product is a residual.
+_LIGHT_PARTICLES = ("H1", "H2", "H3", "He3", "He4")
+
 #: id(form) -> (weak reference to the form, {context key: (table, error)}).
 _HEAVY_TABULATIONS: Dict[int, tuple] = {}
 
@@ -1809,7 +1819,7 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
     particle's mean lab energy and its own Lindhard damage. ``None`` when the
     evaluation states none of them with a distribution.
     """
-    from kika.nuclear_data.model import zaFromPid
+    from kika.nuclear_data.model import AngularTwoBody, zaFromPid
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
     source = evaluation.findReactionByENDF_MT(reaction.ENDF_MT) if evaluation is not None else None
@@ -1820,6 +1830,7 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
     deposit = np.zeros(len(grid))
     damage = np.zeros(len(grid))
     found = False
+    light, residual, twoBody = [], False, False
     for product in source.outputChannel.products:
         if product.pid in ("n", "photon") or product.distribution is None:
             continue
@@ -1838,6 +1849,8 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
                          f"tabulated for the heating ({exc}); left out")
             continue
         if tabulated is None:
+            if isinstance(form, AngularTwoBody) and product.pid not in _LIGHT_PARTICLES:
+                twoBody = True                  # LAW=4: the partner's recoil, by momentum
             continue
         awp = _massRatio(product.pid, evaluation.PoPs)
         k = _Kinematics(A=A, Q=Q, awp=awp)
@@ -1851,9 +1864,36 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
                 continue
             deposit = deposit + y * mean
         found = True
+        if product.pid in _LIGHT_PARTICLES:
+            light.append((awp, tabulated, k, y, za // 1000))
+        else:
+            residual = True
         active=y!=0
         if np.any(active):
             damage[active]+=y[active]*_particleDamage(tabulated,grid[active],k,za//1000,awp,Z,A,ed)
+    if light and not residual:
+        # The section lists the light particles and not the residual: HEATR's
+        # one-particle recoil from the heaviest of them (hinit: "does not give
+        # recoil za=..., one-particle recoil approx. used"; getsix, irec > 0).
+        # Without it only the particle's own damage is left, 100-300 times
+        # smaller (ENDF/B-VIII.1 Ni-60 MT649: MT444 14-32 % below HEATR's at
+        # 10-20 MeV). A residual of Z <= 2 is itself a light particle. A
+        # residual stated as a two-body recoil (LAW=4) is the same momentum
+        # balance, exact for a level: HEATR's sixbar backs up to the partner
+        # (irec = j6 - 1). Without it a charged level kept only the particle's
+        # damage (Ni-58 MT600-609, MT444 20 % below HEATR's at 5 MeV).
+        awp, tabulated, k, y, zp = max(light, key=lambda item: item[0])
+        zr, ar = Z - zp, A + 1.0 - awp
+        if zr >= 3:
+            try:
+                recoil = _recoilDamage(tabulated, grid, k, zr, ar, Z, A, ed)
+            except NotImplementedError as exc:
+                notes.append(f"MT{reaction.ENDF_MT}: no residual recoil ({exc}); left out")
+            else:
+                damage = damage + y * recoil
+                notes.append(f"MT{reaction.ENDF_MT}: " + (
+                    "two-body residual (LAW=4): its recoil from the particle's angular law" if twoBody
+                    else "residual not given; HEATR's one-particle recoil"))
     return (deposit, damage) if found else None
 
 
@@ -1890,6 +1930,197 @@ def _particleDamage(form, grid, k, zp, ap, Z, A, ed):
 
     values = [_expect(t, lambda e, E=E: labDamage(e, E)) for E, t in zip(energies, tables)]
     return _onGrid(energies, values, grid, flat)
+
+
+#: The angular rule of an isotropic emission: Gauss-Legendre on [-1, 1], weights summing to 1.
+_ISOTROPIC_MU = (np.polynomial.legendre.leggauss(16)[0], np.polynomial.legendre.leggauss(16)[1] / 2.0)
+
+
+def _ruleOf(table, split=1):
+    """``(nodes, weights)`` with ``Σ w g(x) = ∫ g p dx``, normalised: lines first, then the
+    continuum by 4-point Gauss on each panel cut in ``split`` (``split=1`` is :func:`_expect`'s)."""
+    x = np.asarray(table.xs, dtype=float)
+    p = np.asarray(table.pdf if hasattr(table, "pdf") else table.ys, dtype=float)
+    nd = int(getattr(table, "numberOfDiscrete", 0) or 0)
+    nodes, weights = [x[:nd]], [p[:nd]]
+    cx, cp = x[nd:], p[nd:]
+    if len(cx) > 1:
+        width = cx[1:] - cx[:-1]
+        cuts = np.linspace(0.0, 1.0, split + 1)
+        a = (cx[:-1, None] + width[:, None] * cuts[None, :-1]).ravel()
+        b = (cx[:-1, None] + width[:, None] * cuts[None, 1:]).ravel()
+        lo = np.repeat(cx[:-1], split)
+        start = np.repeat(cp[:-1], split)
+        slope = np.repeat(np.where(width > 0, (cp[1:] - cp[:-1]) / np.where(width > 0, width, 1.0), 0.0), split)
+        u, wu = _GL4
+        half, mid = 0.5 * (b - a), 0.5 * (b + a)
+        pts = mid[:, None] + half[:, None] * u[None, :]
+        if _isFlat(table):
+            dens = np.broadcast_to(start[:, None], pts.shape)
+        else:
+            dens = start[:, None] + slope[:, None] * (pts - lo[:, None])
+        keep = b > a
+        nodes.append(pts[keep].ravel())
+        weights.append((half[:, None] * wu[None, :] * dens)[keep].ravel())
+    nodes, weights = np.concatenate(nodes), np.concatenate(weights)
+    total = weights.sum()
+    return nodes, (weights / total if total > 0 else weights)
+
+
+def _mixedRule(tables, rules, at):
+    """The rule of the distribution interpolated lin-lin (as a mixture) between ``tables``' nodes at ``at``."""
+    nodes = np.array([float(t.outerDomainValue) for t in tables])
+    if at <= nodes[0] or len(nodes) == 1:
+        return rules[0]
+    if at >= nodes[-1]:
+        return rules[-1]
+    i = int(np.searchsorted(nodes, at, side="right") - 1)
+    f = (at - nodes[i]) / (nodes[i + 1] - nodes[i])
+    (x0, w0), (x1, w1) = rules[i], rules[i + 1]
+    return np.concatenate([x0, x1]), np.concatenate([(1.0 - f) * w0, f * w1])
+
+
+#: Sub-panels per panel of the recoil quadrature, in E' and in μ: the recoil goes as
+#: √E' near E' = 0, and a two-point μ table is one panel; one 4-point Gauss panel
+#: integrates either to ~1e-3 only.
+_RECOIL_SPLIT = 8
+
+#: Ratio between the incident energies at which a level's two-body recoil is computed.
+_LEVEL_STEP = 1.02
+
+#: Sub-panels per angular panel of a level's two-body recoil.
+_LEVEL_SPLIT = 64
+
+
+def _recoilDamage(form, grid, k, zr, ar, Z, A, ed):
+    """``⟨df(E_R)⟩`` of the residual ``(zr, ar)`` recoiling from one emission of a particle.
+
+    HEATR's one-particle recoil for an MF6 section that lists the particle but not the
+    residual (``hinit``, ``getsix`` with ``irec > 0``): momentum conservation with the
+    particle's own energy-angle distribution. In the lab, ``E_R = (E − 2√(E m E')μ + m E')/M``;
+    in the centre of mass, ``E_R = a + b − 2√(ab)μ``, ``a = M E/(A+1)²``, ``b = m E'/M``
+    (``m = k.awp``, ``M = ar``). For a single emitted particle it is the exact recoil.
+    The damage is computed at the incident energies of the particle's tables and read
+    lin-lin between them, as HEATR's ``sixbar`` does.
+    """
+    from kika.nuclear_data import model as m
+
+    if isinstance(form, m.DistributionMixture):
+        out = np.zeros(len(grid))
+        for term in form.weighted:
+            weight = (np.asarray(term.weight.evaluate(grid), dtype=float)
+                      if term.weight is not None else 1.0)
+            out = out + weight * _recoilDamage(term.functional, grid, k, zr, ar, Z, A, ed)
+        return out
+    frame = getattr(form, "productFrame", None)
+    cm = str(getattr(frame, "value", frame)) in ("centerOfMass", "Frame.centerOfMass")
+    mp, M = k.awp, ar
+
+    def recoil(E, e, mus):
+        """E_R for outgoing energies ``e`` (n, 1) and cosines ``mus`` (broadcast)."""
+        if cm:
+            a = M * E / (A + 1.0) ** 2
+            return a + mp * e / M - 2.0 * np.sqrt(a * mp * e / M) * mus
+        return (E - 2.0 * np.sqrt(E * mp * e) * mus + mp * e) / M
+
+    def damageAt(E, e, mus, weights):
+        """``Σ_μ w df(E_R(E, e, μ))`` for outgoing energies ``e`` (n,) and a rule in μ."""
+        er = recoil(E, e[:, None], mus[None, :])
+        return lindhard(np.clip(er, 0.0, None), zr, M, Z, A, ed) @ weights
+
+    if isinstance(form, m.EnergyAngularMC):
+        energies, tables, flat = _tables(form.energy)
+        values = []
+        for E, t, mus in zip(energies, tables, form.energyAngular.function2ds):
+            rules = [_ruleOf(u, _RECOIL_SPLIT) for u in mus.function1ds]
+            nodes = np.asarray(t.xs, dtype=float)
+            nd = int(getattr(t, "numberOfDiscrete", 0) or 0)
+            e, w = _ruleOf(t, _RECOIL_SPLIT)
+            value = 0.0
+            for j in range(nd):                               # lines: their own angular table
+                value += w[j] * damageAt(E, e[j:j + 1], *rules[j])[0]
+            ec, wc, cont = e[nd:], w[nd:], nodes[nd:]
+            if len(cont) == 1 and len(ec):
+                value += float(wc @ damageAt(E, ec, *rules[nd]))
+            elif len(ec):
+                # P(mu|E') lin-lin between the tabulated E': the mixture of its two neighbours.
+                interval = np.clip(np.searchsorted(cont, ec, side="right") - 1, 0, len(cont) - 2)
+                for i in np.unique(interval):
+                    inside = interval == i
+                    lo, hi = cont[i], cont[i + 1]
+                    f = np.clip((ec[inside] - lo) / (hi - lo), 0.0, 1.0) if hi > lo else np.zeros(inside.sum())
+                    left = damageAt(E, ec[inside], *rules[nd + i])
+                    right = damageAt(E, ec[inside], *rules[nd + i + 1])
+                    value += float(wc[inside] @ ((1.0 - f) * left + f * right))
+            values.append(value)
+        return _onGrid(energies, values, grid, flat)
+    if isinstance(form, m.KalbachMann):
+        energies, tables, flat = _tables(form.f)
+        rs = list(m.toEndfTab2(form.r)[0])
+        As = list(m.toEndfTab2(form.a)[0])
+        mu, wmu = np.polynomial.legendre.leggauss(32)
+        values = []
+        for E, t, r, a in zip(energies, tables, rs, As):
+            e, w = _ruleOf(t, _RECOIL_SPLIT)
+            rr = np.interp(e, r.xs, r.ys)[:, None]
+            aa = np.interp(e, a.xs, a.ys)[:, None]
+            safe = np.where(np.abs(aa) > 1e-6, aa, 1.0)
+            norm = np.where(np.abs(aa) > 1e-6, safe / (2.0 * np.sinh(safe)), 0.5)
+            p = norm * (np.cosh(aa * mu) + rr * np.sinh(aa * mu)) * wmu
+            er = recoil(E, e[:, None], mu[None, :])
+            values.append(float(w @ np.sum(p * lindhard(np.clip(er, 0.0, None), zr, M, Z, A, ed), axis=1)))
+        return _onGrid(energies, values, grid, flat)
+    if isinstance(form, m.Uncorrelated):
+        spectrum = form.energy
+        if spectrum is None or isinstance(spectrum, (m.DiscretePhotonEnergy, m.NBodyPhaseSpace)):
+            return np.zeros(len(grid))
+        angular = getattr(form, "angular", None)
+        if angular is None or isinstance(angular, m.Isotropic2d):
+            angularTables = angularRules = None
+        else:
+            _, angularTables, _ = _tables(angular)
+            angularRules = [_ruleOf(u, _RECOIL_SPLIT) for u in angularTables]
+        if isinstance(spectrum, m.LevelEnergy):
+            # A level: two bodies, the residual's centre-of-mass momentum the particle's.
+            # One outgoing energy per incident energy, so the damage is read on a fine
+            # geometric mesh and the angular tables' energies, not on those alone.
+            lo, hi = float(np.min(grid)), float(np.max(grid))
+            threshold = float(spectrum.threshold)
+            nodes = [_geometric(max(lo, threshold, 1e-5), hi, step=_LEVEL_STEP), [lo, hi]]
+            if angularTables is not None:
+                nodes.append([float(t.outerDomainValue) for t in angularTables])
+            if lo < threshold < hi:
+                nodes.append([np.nextafter(threshold, -np.inf), threshold])
+            energies = np.unique(np.concatenate(nodes))
+            energies = energies[(energies >= lo) & (energies <= hi)]
+            if angularTables is not None:
+                # One outgoing energy: the angle alone carries the quadrature, and the
+                # damage steps at E_R = ed inside it.
+                angularRules = [_ruleOf(u, _LEVEL_SPLIT) for u in angularTables]
+            else:
+                cuts = np.linspace(-1.0, 1.0, _LEVEL_SPLIT + 1)
+                u, wu = _GL4
+                half = 0.5 * np.diff(cuts)
+                isotropic = (((cuts[:-1] + cuts[1:]) / 2)[:, None] + half[:, None] * u).ravel(),                     (half[:, None] * wu / 2.0 * np.ones_like(u)).ravel()
+            values = []
+            for E in energies:
+                e = float(spectrum.outgoingEnergy(E))
+                if e <= 0.0:
+                    values.append(0.0)
+                    continue
+                x, wx = (isotropic if angularTables is None
+                         else _mixedRule(angularTables, angularRules, float(E)))
+                values.append(float(damageAt(E, np.array([e]), x, wx)[0]))
+            return _onGrid(energies, values, grid)
+        energies, tables, flat = _tables(spectrum)
+        values = []
+        for E, t in zip(energies, tables):
+            x, wx = (_ISOTROPIC_MU if angularTables is None
+                     else _mixedRule(angularTables, angularRules, float(E)))
+            e, w = _ruleOf(t, _RECOIL_SPLIT)
+            values.append(float(w @ damageAt(E, e, x, wx)))
+        return _onGrid(energies, values, grid, flat)
+    raise NotImplementedError(f"one-particle recoil of a {type(form).__name__}")
 
 
 # ----------------------------------------------------------------------
