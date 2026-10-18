@@ -416,11 +416,13 @@ def _isFlat(table) -> bool:
     return table.interpolation == Interpolation.flat
 
 
-def _expect(table, g: Callable[[np.ndarray], np.ndarray], trapezoid: bool = False) -> float:
+def _expect(table, g: Callable[[np.ndarray], np.ndarray]) -> float:
     """``∫ g(x) p(x) dx`` over an ``Xs_pdf_cdf1d`` or ``XYs1d`` (lines first, then the continuum), normalised.
 
-    ``trapezoid`` takes the continuum by trapezoids over ``g·p`` at the
-    tabulated points, as HEATR does for MF6 spectra in the lab.
+    The continuum is integrated on its own law, not by trapezoids over ``g·p``
+    at the tabulated points as HEATR's ``getsix`` does for MF6 spectra in the
+    lab (U-235 MT91's photons at 5.382 MeV: 1.473 MeV by trapezoids, 1.515
+    exactly; ND-2, replaced in 78693cf).
     """
     x = np.asarray(table.xs, dtype=float)
     p = np.asarray(table.pdf if hasattr(table, "pdf") else table.ys, dtype=float)
@@ -432,12 +434,7 @@ def _expect(table, g: Callable[[np.ndarray], np.ndarray], trapezoid: bool = Fals
         total += float(w.sum())
         value += float(np.sum(w * g(x[:nd])))
     cx, cp = x[nd:], p[nd:]
-    if len(cx) > 1 and trapezoid and not _isFlat(table):
-        dx = np.diff(cx)
-        gp = g(cx) * cp
-        total += float(np.sum(0.5 * (cp[:-1] + cp[1:]) * dx))
-        value += float(np.sum(0.5 * (gp[:-1] + gp[1:]) * dx))
-    elif len(cx) > 1:
+    if len(cx) > 1:
         a, b = cx[:-1], cx[1:]
         nodes, weights = _GL4
         half = 0.5 * (b - a)
@@ -510,11 +507,6 @@ class _Kinematics:
     A: float               # target mass ratio
     Q: float               # the reaction's QI
     awp: float = 1.0       # emitted particle's mass ratio
-    #: HEATR's mean of a lab-frame MF6 spectrum: trapezoids over E'·f(E')
-    #: (``getsix``), not the exact integral of the lin-lin density. On wide
-    #: panels it is lower: U-235 MT91's photons at 5.382 MeV average 1.473 MeV
-    #: by trapezoids and 1.515 MeV exactly.
-    trapezoid: bool = False
 
 
 def _qAt(value, grid):
@@ -825,11 +817,7 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
             return _cmToLab(grid, mean, root * mu, k)
         energies, tables, flat = _tables(energy)
         lab = not cm or k.awp == 0.0
-        # HEATR's trapezoids are for the mean; the photons' second moment
-        # (capture recoil) it integrates by Gauss points (tabsqr, tabsq6).
-        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment,
-                                          k.trapezoid and lab and moment == 1)
-                                  for t in tables], grid, flat)
+        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment) for t in tables], grid, flat)
         qualifier = getattr(energy, "interpolationQualifier", None)
         if (lab and moment in (1, 2) and
                 (str(getattr(qualifier, "value", qualifier)) == "unitBase"
@@ -847,8 +835,7 @@ def _meanEnergyOf(form, grid, k: _Kinematics, moment=1):
             exact=_unitBaseCMMean(form,grid,k)
             if exact is not None:return exact
         energies, tables, flat = _tables(form.energy)
-        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment, k.trapezoid and not cm)
-                                  for t in tables], grid, flat)
+        mean = _onGrid(energies, [_expect(t, lambda e: e ** moment) for t in tables], grid, flat)
         if not cm or k.awp == 0.0:
             if moment in (1, 2):
                 return _unitBaseSpectrumMean(form.energy, grid, moment)
