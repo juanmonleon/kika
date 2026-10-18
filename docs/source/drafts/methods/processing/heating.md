@@ -390,7 +390,7 @@ thermal energy); that of MT 444 is at most 0.25 % below 25 keV, at most 1.6 % up
 
 MT 444 of ENDF/B-VIII.1 against OpenMC's official library (NJOY HEATR), measured
 2026-10-18, at 0.5-20 MeV, with the independent recoil: Ni-58 0.980-1.001, Ni-60
-0.988-1.004, Cu-63 0.986-1.014, Ti-46 0.991-1.004, Fe-56 0.977-1.025 (no section
+0.988-1.004, Cu-63 0.986-1.014, Cr-50 0.991-1.014, Ti-46 0.991-1.004, Fe-56 0.977-1.025 (no section
 without its residual). Without the residual's recoil Ni-58 was 0.80 at 5 MeV and Ni-60
 0.69 at 20 MeV. On Ni-58, HEATR's mean-cosine recoil emulated on kika's tables moves
 MT 444 by up to +4 % at 20 MeV; the remaining difference is of the size of HEATR's
