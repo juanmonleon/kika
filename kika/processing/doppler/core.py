@@ -32,6 +32,15 @@ class DopplerInputError(ValueError):
         super().__init__(message)
         self.category, self.energy, self.budget = category, energy, budget
 
+    def __reduce__(self):
+        # Back from a worker process whole: pickle's default passes args alone,
+        # and a refusal turned into BrokenProcessPool with its reason lost.
+        return (_rebuildDopplerError, (type(self), self.category, str(self), self.energy, self.budget))
+
+
+def _rebuildDopplerError(cls, category, message, energy, budget):
+    return cls(category, message, energy=energy, budget=budget)
+
 
 class UnsupportedDopplerError(DopplerInputError):
     pass

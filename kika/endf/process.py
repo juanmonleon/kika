@@ -62,6 +62,9 @@ class ProcessingOutputError(ValueError):
         super().__init__(message)
         self.category = category
 
+    def __reduce__(self):
+        return (type(self), (self.category, str(self)))
+
 #: Default temperature: room temperature as the official libraries state it.
 DEFAULT_TEMPERATURES = (293.6,)
 
