@@ -201,11 +201,24 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   particle's recoil in all six MT 28 sections measured (O-16, Al-27, Si-28, Mn-54,
   Fe-55, Mo-95) and in MT 22 of the light targets (O-16: 1.04-1.06 of the stated
   residual's damage, HEATR's approximation 1.13-1.15), and equal within 0.5 % in MT 22
-  of the medium-mass ones, where the alpha carries the momentum. Neutron-only sections
-  (MT 16, 17) keep the single-emission recoil above.
-- **Other neutron-emitting reactions:** one isotropic emission in the laboratory,
-  $E_R = (E - 2\sqrt{EE'}\mu + E')/A$, averaged over the first neutron's spectrum and
-  over $\mu$ (four-point Gauss-Legendre), the target's $(Z, A)$ as recoil.
+  of the medium-mass ones, where the alpha carries the momentum.
+- **Sections that state their neutrons and not the residual (MT 16, 17, 91, ...):** the
+  same momentum balance, from all $n$ neutrons with whole yields, the residual
+  $(Z, A + 1 - n)$; for one neutron (MT 91) it is the exact recoil, averaged over the
+  points of the neutron's own energy-angle law without binning. A yield that is not
+  whole takes HEATR's one-particle recoil (the first neutron, mass $A$). HEATR recoils an
+  MF 6 section's residual from one neutron with the target's mass at the mean laboratory
+  cosine (`h6cm`), and an MF 4/MF 5 one by one isotropic laboratory emission,
+  $E_R = (E - 2\sqrt{EE'}\mu + E')/A$ (`tabdam`), which kika applied to both before.
+  Measured against HEATR itself (NJOY 2016.78 rebuilt without one MT's generated
+  recoil, Ni-60 of ENDF/B-VIII.1): HEATR's MT 91 is 32.4 % of MT 444 at 14 MeV and its
+  MT 16 17.1 %; HEATR's rule emulated on kika's tables gives 32.4 % and 17.0 %, the exact
+  recoil 31.0 % and 17.2 %, the isotropic emission 34.4 % and 17.4 %. The isotropic
+  emission is therefore not HEATR's number on an MF 6 section, and the exact recoil differs
+  from it by the mean cosine alone. Against the residuals ENDF/B-VIII.1 states, the exact
+  MT 91 recoil of Fe-56 is 17 % below at 20 MeV: those residuals are computed for a
+  neutron isotropic in the centre of mass (⟨E_R⟩ 537 keV; the neutron's stated law gives
+  419 keV, the same spectrum isotropic 515 keV), not for the evaluation's own neutron.
 - **Absorption with a charged particle and no neutron (MT > 102), stated by MF 3 alone:**
   a single particle of charge $z$ and mass $a$ (proton, and for MT 104-107 and the
   continua 699, 749, 799, 849 the deuteron, triton, helium-3, alpha; HEATR takes the
@@ -215,8 +228,9 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   $E_R = \big(E_t - 2\sqrt{E_t\,a\,E_a}\,\mu + a E_a\big)/(A+1)$,
   $E_t = \tfrac{A+1-a}{A+1}E$, over $\mu$ by four-point Gauss-Legendre; zero where
   $E_a < 0$.
-- **Fission:** one emission from the prompt-neutron spectrum, as for the
-  neutron-emitting reactions (one neutron, not $\bar\nu$; the fragments are not
+- **Fission:** one isotropic laboratory emission from the prompt-neutron spectrum,
+  $E_R = (E - 2\sqrt{EE'}\mu + E')/A$ over $\mu$ by four-point Gauss-Legendre, the
+  target's $(Z, A)$ as recoil (one neutron, not $\bar\nu$; the fragments are not
   followed).
 
 ### Displacements (NRT and arc-dpa)
@@ -322,7 +336,7 @@ $k^\text{loc} + k_f^\text{loc,HDF5}$.
   interpolates the tables themselves. The deposited energy is then the one consistent
   with what the transport code emits.
 - **HEATR's approximations are kept and reported.** One isotropic laboratory emission
-  with the target's $(Z, A)$ for the damage of continuum neutron emission; each photon's
+  with the target's $(Z, A)$ for the damage of fission; each photon's
   recoil as an independent primary in capture (with the compound's as one more); the single
   charged particle at the Coulomb barrier for absorption stated by MF 3 alone; trapezoids for the mean of a laboratory MF 6 spectrum, lower
   than the exact mean on wide panels. These are equivalences with HEATR; none is claimed
@@ -396,8 +410,14 @@ median of about $10^{-5}$ and a maximum of 0.18 % over the whole range (+0.03 % 
 thermal energy); that of MT 444 is at most 0.25 % below 25 keV, at most 1.6 % up to
 1 MeV, and 5-6 % above 1 MeV.
 
-MT 444 of ENDF/B-VIII.1 against OpenMC's official library (NJOY HEATR), measured
-2026-10-18, at 0.5-20 MeV, with the independent recoil: Ni-58 0.980-1.001, Ni-60
+MT 444 of ENDF/B-VIII.1 against OpenMC's official library (NJOY HEATR) with the
+neutron-only sections' exact recoil, measured 2026-10-18 at 0.5-20 MeV: Ni-58 0.948-1.001
+(0.956 at 14 MeV), Ni-60 0.949-1.004 (0.958), Nb-93 0.992-1.046 (1.046). The nickels fall
+by HEATR's mean cosine in MT 91 and MT 16 and in the charged sections (on Ni-60, HEATR's
+own MT 91 and MT 16 are reproduced to $10^{-3}$ of MT 444 when its rule is emulated);
+Nb-93, an MF 4/MF 5 evaluation, rises because HEATR gives its (n,2n) one isotropic
+emission and kika the momenta of both neutrons. Before it, with the independent recoil
+of the charged sections only: Ni-58 0.980-1.001, Ni-60
 0.988-1.004, Cu-63 0.986-1.014, Cr-50 0.991-1.014, Ti-46 0.991-1.004, Fe-56 0.977-1.025 (no section
 without its residual). Without the residual's recoil Ni-58 was 0.80 at 5 MeV and Ni-60
 0.69 at 20 MeV. On Ni-58, HEATR's mean-cosine recoil emulated on kika's tables moves

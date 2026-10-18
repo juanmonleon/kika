@@ -19,7 +19,7 @@ is HEATR's (``heatr.f90``):
 - **damage**: the Lindhard–Robinson partition of each recoil (``df``) with
   HEATR's displacement threshold per Z, integrated the way HEATR does for each
   path: two-body kinematics over the angular distribution (``disbar``), one
-  isotropic emission over the outgoing spectrum (``tabdam``), the photon
+  isotropic emission over the prompt spectrum for fission (``tabdam``), the photon
   recoils for capture (``gheat``), particle emission up to the Coulomb barrier
   for absorption (``capdam``).
 - **one-particle recoil**: the residual of an MF6 section that lists its light
@@ -35,7 +35,13 @@ is HEATR's (``heatr.f90``):
   law with independent azimuths. The evaluation gives no correlation, so this is
   a model; against the residuals ENDF/B-VIII.1 does state it is closer than
   HEATR's one particle in every MT28 measured and equal in MT22 of medium-mass
-  targets (PXB-053). Neutron-only sections keep ``tabdam``.
+  targets (PXB-053).
+- **neutron recoil**: a section that states its neutrons and not the residual
+  (MT16, 17, 91, ...) recoils the same way, from all its neutrons (mass A+1−n),
+  exact for one. HEATR recoils an MF6 section's residual from one neutron with the
+  target's mass at the mean lab cosine (``h6cm``), and an MF4/MF5 one by ``tabdam``,
+  one isotropic lab emission; ``tabdam`` on an MF6 section is not HEATR's number
+  (Ni-60 MT91 at 14 MeV 6 % above it, PXB-057).
 
 The mean energies integrate the processed suite's Monte Carlo densities exactly
 for polynomial moments on flat/linear panels (including MF6), from the
@@ -49,7 +55,7 @@ Approximations kika keeps from HEATR are listed on :data:`HEATR_APPROXIMATIONS`
 and reported. Where HEATR uses the explicit recoil and charged-particle
 distributions of an MF6 section for the damage, kika -- whose processed suite
 keeps only neutrons and photons, as OpenMC's files do -- uses HEATR's own
-fallback for a section without them (one isotropic emission for neutrons,
+fallback for a section without them (the residual's recoil from the neutrons,
 ``capdam`` for absorption), and says so.
 """
 from __future__ import annotations
@@ -77,8 +83,8 @@ ELASTIC_DAMAGE_THRESHOLD = 25.0
 FISSION_MTS = (18, 19, 20, 21, 38)
 
 HEATR_APPROXIMATIONS = (
-    "damage of the continuum neutron emission: one isotropic emission in the lab, the "
-    "target's Z and A for the recoil (HEATR's tabdam)",
+    "damage of fission: one isotropic emission from the prompt spectrum in the lab, the "
+    "target's Z and A for the recoil, the fragments not followed (HEATR's tabdam)",
     "MF6 capture cascades: the recoil of each photon on its own, Σ y⟨E_γ²⟩/(2(A+1)m_nc²), without the "
     "compound nucleus' recoil E/(A+1), in the KERMA and in the damage (HEATR's output)",
     "damage of particle emission stated by MF3 alone: capdam's single particle at "
@@ -2021,6 +2027,48 @@ def _independentParticles(light, neutrons, grid, A, Z, zaTarget, mt, Q, notes):
     return particles, Z - charge, A + 1.0 - mass
 
 
+def _neutronResidualDamage(mt, neutrons, grid, A, Z, ed, notes=None):
+    """The residual's damage in a section that states its neutrons and not the residual.
+
+    ``neutrons`` holds ``(product, Monte Carlo form)``. With whole yields the residual
+    ``(Z, A+1−n)`` recoils from the momenta of all ``n`` neutrons, each on its own
+    energy-angle law (:func:`_independentRecoilDamage`): for one neutron (MT91) the exact
+    recoil, HEATR's one-particle recoil for an MF6 neutron (``hinit``, ``getsix`` with
+    ``irec > 0``) taken over the angle instead of at its mean cosine. With a yield that
+    is not whole, HEATR's one-particle recoil: the first neutron, the residual of mass A,
+    one per reaction. HEATR's ``tabdam`` -- one isotropic lab emission, mass A, kika's rule
+    before -- only when the form has no lab momenta.
+
+    Against HEATR itself (NJOY 2016.78 rebuilt without the generated recoil of one MT,
+    ENDF/B-VIII.1 Ni-60; PXB-057), HEATR's MT91 is 32.4 % of MT444 at 14 MeV; its rule
+    emulated on kika's tables gives 32.4 %, the exact recoil 31.0 % (the mean cosine,
+    Jensen), ``tabdam`` 34.4 %. Against the residual Fe-56 states, the exact MT91 is
+    −17 % at 20 MeV: that residual is a neutron isotropic in the centre of mass (⟨E_R⟩
+    537 keV; the neutron's own law gives 419, isotropic 515), not the evaluation's own
+    neutron (PXB-055).
+    """
+    particles = [(form, 1.0, _yield(product, grid)) for product, form in neutrons]
+    counts = [y[y > 0] for _, _, y in particles]
+    n = sum(int(round(np.max(c))) for c in counts if len(c))
+    whole = all(not np.any(np.abs(c - np.round(c)) > 1e-6) for c in counts)
+    if whole and n >= 1:
+        how, ar = (f"residual not given; its recoil from the momenta of all {n} neutrons, independent"
+                   if n > 1 else "residual not given; its recoil from the neutron's energy-angle law"), A + 1.0 - n
+    else:
+        form, _, y = particles[0]
+        particles = [(form, 1.0, np.where(y > 0, 1.0, 0.0))]
+        how, ar = "neutron yield not whole; HEATR's one-particle recoil (mass A)", A
+    try:
+        damage = _independentRecoilDamage(particles, grid, A, Z, Z, ar, ed)
+    except NotImplementedError as exc:
+        if notes is not None:
+            notes.append(f"MT{mt}: no residual recoil ({exc}); HEATR's tabdam instead")
+        return _emissionDamage(neutrons[0][1], grid, A, Z, ed)
+    if notes is not None:
+        notes.append(f"MT{mt}: {how}")
+    return damage
+
+
 def _particleDamage(form, grid, k, zp, ap, Z, A, ed):
     """``⟨df(E'_lab)⟩`` of a particle ``(zp, ap)`` in the lattice; a centre-of-mass
     spectrum taken to the lab over an isotropic centre-of-mass angle."""
@@ -2464,18 +2512,20 @@ def _independentRecoilDamage(particles, grid, A, Z, zr, ar, ed):
         counts = [int(round(np.interp(E, grid, y))) for _, _, y in particles]
         if any(c <= 0 for c in counts):
             continue                                         # below a threshold
-        momenta = [_binMomenta(*_labMomenta(form, float(E), awp, A))
-                   for (form, awp, _), count in zip(particles, counts) for _ in range(count)]
         P = np.sqrt(2.0 * E)
 
         def damage(qz, vz, qp2, w, P=P):
             er = ((P - qz) ** 2 + vz + qp2) / (2.0 * ar)
             return float(w @ lindhard(er, zr, ar, Z, A, ed))
 
-        if len(momenta) == 1:
-            qz, _, w, vz, qp2 = momenta[0]
-            values[j] = damage(qz, vz, qp2, w)
+        if sum(counts) == 1:
+            # One particle: the recoil of each point of its law, nothing binned.
+            (form, awp, _), = (p for p, c in zip(particles, counts) if c)
+            qz, qp, w = _labMomenta(form, float(E), awp, A)
+            values[j] = damage(qz, 0.0, qp * qp, w)
             continue
+        momenta = [_binMomenta(*_labMomenta(form, float(E), awp, A))
+                   for (form, awp, _), count in zip(particles, counts) for _ in range(count)]
         total = momenta[0]
         for one in momenta[1:-1]:
             total = _addMomenta(total, one)
@@ -2933,10 +2983,8 @@ def _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarge
                 again = _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget or 1000 * Z, ed, [], damageOnly=True)
                 return again[1] if again is not None else np.zeros(len(grid))
             if neutrons:
-                d = np.zeros(len(grid))
-                for product, form in neutrons[:1]:
-                    d = _emissionDamage(form, grid, A, Z, ed)
-                return d
+                return _neutronResidualDamage(mt, neutrons, grid, A, Z, ed,
+                                              notes if _DISPLACEMENTS.get() is None else None)
             if _levelParticle(mt) is not None:
                 return _levelDamage(mt, grid, A, Z, ed, Q)
             if mt > 102:

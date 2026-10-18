@@ -874,6 +874,33 @@ def test_two_protons_leave_one_residual(monkeypatch):
     assert any("all 2 particles" in n for n in notes)
 
 
+def _neutrons(form, y):
+    from types import SimpleNamespace as NS
+    return [(NS(pid="n", multiplicity=NS(forms={}, form=NS(evaluate=lambda grid: np.full(len(grid), y)))), form)]
+
+
+def test_a_neutron_section_without_its_residual_recoils_from_its_neutrons(monkeypatch):
+    A, Z, E0, topN = 55.45, 26, 14e6, 4e6
+    _, neutron = _twoParticles(A, E0, topN=topN)
+    grid = np.array([E0])
+    # One neutron isotropic in the lab: its exact recoil is HEATR's tabdam.
+    notes = []
+    one = H._neutronResidualDamage(91, _neutrons(neutron, 1.0), grid, A, Z, 40.0, notes)
+    assert one[0] == pytest.approx(H._emissionDamage(neutron, grid, A, Z, 40.0)[0], rel=1e-4)
+    assert any("the neutron's energy-angle law" in n for n in notes)
+    # With df(E) = E: two independent isotropic neutrons leave <E_R> = (2E + 2<p²>)/(2(A-1)).
+    monkeypatch.setattr(H, "lindhard", lambda E, *args: np.asarray(E, dtype=float))
+    notes = []
+    two = H._neutronResidualDamage(16, _neutrons(neutron, 2.0), grid, A, Z, 40.0, notes)[0]
+    assert two == pytest.approx((2 * E0 + 2 * topN) / (2 * (A - 1)), rel=1e-10)
+    assert any("all 2 neutrons" in n for n in notes)
+    # A yield that is not whole: HEATR's one-particle recoil, one neutron and mass A.
+    notes = []
+    lumped = H._neutronResidualDamage(5, _neutrons(neutron, 1.7), grid, A, Z, 40.0, notes)[0]
+    assert lumped == pytest.approx((2 * E0 + topN) / (2 * A), rel=1e-10)
+    assert any("one-particle" in n for n in notes)
+
+
 def test_an_mf4_charged_level_is_two_bodies_not_capdam(monkeypatch):
     # MF4 states a level's alpha by its angle alone (no yield): one alpha, two bodies,
     # as HEATR's disbar; with nothing but MF3, the same level isotropic in the CM.
