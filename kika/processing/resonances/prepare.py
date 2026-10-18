@@ -211,6 +211,8 @@ def prepare_resonances(resonances, context, *, conversion_report=None, allow_emp
                                         else replace(ctx,atomic_weight_ratio=exit_awr).mass_channel_radius_fm,
                                         "competitive radius [fm]")
             levels = []
+            # LRX=0 with GT != GN+GG+GF: (count, largest relative difference).
+            inconsistent = [0, 0.0]
             for res in group.resonances:
                 data = (res.energy, res.spin, res.totalWidth, res.neutronWidth,
                         res.captureWidth, res.fissionWidth)
@@ -244,8 +246,13 @@ def prepare_resonances(resonances, context, *, conversion_report=None, allow_emp
                         gx = 0.0
                 elif res.totalWidth and not math.isclose(res.totalWidth, partial_sum,
                                                        rel_tol=5e-6, abs_tol=1e-12):
-                    raise UnsupportedResonanceError("GT differs from GN+GG+GF; competitive or invalid widths")
-                if comp is None and res.totalWidth and res.totalWidth != partial_sum:
+                    # No competitive reaction (LRX=0): ENDF-6 makes GT = GN+GG+GF, and
+                    # RECONR (csslbw, csmlbw) and FUDGE take the line shape from the
+                    # partial widths, GT only placing grid nodes. A disagreeing GT is
+                    # the evaluation's inconsistency, reported, not a refusal.
+                    inconsistent[0] += 1
+                    inconsistent[1] = max(inconsistent[1], abs(res.totalWidth - partial_sum) / res.totalWidth)
+                elif comp is None and res.totalWidth and res.totalWidth != partial_sum:
                     notes.append(f"E={res.energy:g}, L={group.L}: GT={res.totalWidth:.17g}; "
                                  f"using GN+GG+GF={partial_sum:.17g} within rounding tolerance")
                 if partial_sum + gx == 0:
@@ -265,6 +272,10 @@ def prepare_resonances(resonances, context, *, conversion_report=None, allow_emp
                         raise UnsupportedResonanceError("competitive reference penetrability underflows")
                 levels.append(Level(res.energy, spin, res.neutronWidth,
                                     res.captureWidth, res.fissionWidth, gx))
+            if inconsistent[0]:
+                notes.append(f"L={group.L}: {inconsistent[0]} resonance(s) state GT != GN+GG+GF with no "
+                             f"competitive reaction (LRX=0), largest relative difference "
+                             f"{inconsistent[1]:.3g}; the partial widths are used, as RECONR and FUDGE do")
             groups.append(Group(group.L, channel_radius, phase_radius, tuple(levels), context=ctx,
                 competitive_mt=None if comp is None else comp.reactionMT,
                 competitive_l=None if comp is None else comp.L,

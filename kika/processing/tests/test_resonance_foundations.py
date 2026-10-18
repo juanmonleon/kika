@@ -153,7 +153,8 @@ def test_unsupported_model_rejected(mutation, pattern):
 
 
 @pytest.mark.parametrize("field, value, pattern", [
-    ("totalWidth", .5, "GT"), ("energy", 0., "zero-energy"),
+    # A GT that disagrees with GN+GG+GF is reported, not refused (test_resonance_tabulation).
+    ("energy", 0., "zero-energy"),
     ("neutronWidth", -.1, "negative"), ("spin", 1., "incompatible"),
     ("captureWidth", float("nan"), "nonfinite"),
 ])

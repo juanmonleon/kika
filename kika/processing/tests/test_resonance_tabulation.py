@@ -288,3 +288,18 @@ def test_tabulated_integral_against_independent_adaptive_quadrature():
                   points=[99.,99.9,100.,100.1,101.],epsabs=1e-6,epsrel=1e-9)[0]
     table=result.forms[102].integrate()
     assert abs(integral-table)<=result.options.rtol*abs(integral)+result.options.atol*290.
+
+
+def test_a_gt_without_competition_that_disagrees_is_reported_and_the_partials_used():
+    # Na-23, Ar-36, Ar-38 and Mo-95 of ENDF/B-VIII.1 state GT != GN+GG+GF with LRX=0;
+    # RECONR and FUDGE take the line shape from the partial widths, and kika refused.
+    reference=prepared()
+    m=model()
+    group=m.resolved[0].formalism.resonanceParameters.spinGroups[0]
+    r=group.resonances[0]
+    r.totalWidth=2*(r.neutronWidth+r.captureWidth+r.fissionWidth)
+    p=prepared(m)
+    e=np.array([20.,50.,100.,200.])
+    a,b=reference.evaluate(e),p.evaluate(e)
+    for k in a:np.testing.assert_array_equal(a[k],b[k])
+    assert any('LRX=0' in note and 'partial widths are used' in note for note in p.preparation_notes)
