@@ -444,7 +444,10 @@ photon products carry by 3.6 keV b at 8 MeV, 31 keV b at 14.1 MeV and 12.6 keV b
 trapezoids over MF 6) and ACER writes the photons from the evaluation. kika's MT 301 is
 therefore 1-2 % below the official one above 8 MeV while the photons and MT 901 agree to
 $10^{-3}$, and energy is conserved in transport with kika's file and not with the
-official one.
+official one. In N-14 the official MT 301 subtracts the MF 13 photons of MT 28 and MT 32,
+145 keV b at 14 MeV and 357 keV b at 20 MeV, which no file in OpenMC's format can carry
+(the evaluation gives those MTs no cross section in MF 3), so kika's MT 301 is 4-8 % above
+it there (measured 2026-10-18).
 
 ### Integral comparison
 
