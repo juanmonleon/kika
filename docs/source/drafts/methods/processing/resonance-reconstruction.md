@@ -734,7 +734,7 @@ seeds and probes of a panel, which is what the per-level seeds are for.
 
 ## Validation
 
-The tests below passed on 2026-10-11 (656 passed, 22 skipped, with the compiled kernel
+The tests below passed on 2026-10-18 (584 passed, 27 skipped in the 19 files cited, with the compiled kernel
 loaded) unless marked. Every comparison is with an independent calculation written in the
 test.
 
@@ -811,7 +811,7 @@ ho$ and near the threshold,
   (`kika/endf/tests/test_reconstruct_endf.py`); the PENDF written, reloaded and not
   reconstructed twice
   (`kika/endf/tests/test_reconstruct_endf.py::test_pendf_is_written_reloaded_and_not_reconstructed_twice`,
-  deselected by default, run with `-k`, passed 2026-10-11); threaded verification equals
+  deselected by default, run with `-k`, passed 2026-10-18); threaded verification equals
   the serial one (`::test_threaded_verification_is_the_serial_one`); the ENDF field
   rounding (`kika/endf/tests/test_reconstruction_precision.py`); each check of the
   report flags what it should (`::test_each_check_flags_what_it_should`).
