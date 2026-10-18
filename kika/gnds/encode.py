@@ -380,28 +380,7 @@ def _function(parent: ET.Element, form, report: ConversionReport,
     return None
 
 
-#: Outgoing neutrons by MT, for the reactions whose MT fixes the count (ENDF-6
-#: Appendix B). Only what an MF4 or MF5 section can leave without a
-#: multiplicity; fission is absent on purpose, its count is the nu-bar.
-_NEUTRONS_BY_MT = {2: 1, 4: 1, 11: 2, 16: 2, 17: 3, 22: 1, 23: 1, 24: 2, 25: 3,
-                   28: 1, 29: 1, 30: 2, 32: 1, 33: 1, 34: 1, 35: 1, 36: 1,
-                   37: 4, 41: 2, 42: 3, 44: 1, 45: 1,
-                   **{mt: 1 for mt in range(50, 92)},
-                   **{mt: 2 for mt in range(875, 892)}}
-
-#: The one light particle each charged-particle level series emits.
-_CHARGED_SERIES = ((600, "H1"), (650, "H2"), (700, "H3"), (750, "He3"), (800, "He4"))
-
-
-def _impliedCount(mt: Optional[int], pid: str) -> Optional[int]:
-    if mt is None:
-        return None
-    if pid == "n":
-        return _NEUTRONS_BY_MT.get(mt)
-    for first, light in _CHARGED_SERIES:
-        if first <= mt < first + 50 and pid == light:
-            return 1
-    return None
+from kika.nuclear_data.model import impliedMultiplicity as _impliedCount  # noqa: E402
 
 
 def _stated(multiplicity) -> bool:

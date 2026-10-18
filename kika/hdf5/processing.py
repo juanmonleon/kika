@@ -1443,7 +1443,11 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
     multiplicity = product.multiplicity.form if product.multiplicity is not None else None
     if multiplicity is None or not isinstance(multiplicity, m.Function1d):
         if (product.pid == "n" and not delayed) or light:
-            multiplicity = m.Polynomial1d(coefficients=np.array([1.0]), domainMin_=0.0,
+            # The MT fixes the count an MF4/MF5 section leaves unstated: two for
+            # (n,2n). With 1 for all, Nb-93 of ENDF/B-VIII.1 (MF4/MF5) wrote MT16's
+            # yield as 1 where OpenMC's file has 2, and MT17's as 1 for 3.
+            count = m.impliedMultiplicity(mt, product.pid) or 1
+            multiplicity = m.Polynomial1d(coefficients=np.array([float(count)]), domainMin_=0.0,
                                           domainMax_=float("inf"))
         else:
             report.lost(f"MT{mt} {product.label}: multiplicity "

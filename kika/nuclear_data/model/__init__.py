@@ -180,6 +180,7 @@ from .reactions import (
     Reactions,
     Sums,
     isRadionuclideProduction,
+    impliedMultiplicity,
 )
 from .resonances import (
     BreitWigner,
@@ -273,7 +274,7 @@ __all__ = [
     # §15-16 reactions and their cross sections
     "Reaction", "CrossSectionSum", "Reactions", "Sums", "OrphanProducts",
     "FissionComponents",
-    "Productions", "IncompleteReactions", "ReactionId", "isRadionuclideProduction",
+    "Productions", "IncompleteReactions", "ReactionId", "isRadionuclideProduction", "impliedMultiplicity",
     "CrossSection", "Component", "EVAL_LABEL", "Background",
     "ResonancesWithBackground", "Reference",
     "CoulombPlusNuclearElastic", "ThermalNeutronScatteringLaw1d",
