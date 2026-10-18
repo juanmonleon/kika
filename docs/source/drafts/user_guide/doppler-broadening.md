@@ -74,9 +74,16 @@ result = broaden_suite(
     suite, source_style="recon", source_temperature=0.0,
     temperature=600.0, support=policies, options=options, label="hot",
 )
-attach_broadening(suite, result, date="2026-10-11")
+attach_broadening(suite, result)  # the style's date: today, or date="YYYY-MM-DD"
 print(result.verify_suite(suite))
 ```
+
+For a whole evaluation, process it with {py:func}`kika.endf.process_endf` (or the
+HDF5 and ACE writers) instead: they split the energy range into chunks, broaden each
+with this function and assemble the result, in parallel processes. One call over all
+of Fe-56 ENDF/B-VIII.1 at 293.6 K takes about 156 s and needs a raised `max_points`;
+the chunked path takes 19 s in one process for the same points and error
+(measured 2026-10-18).
 
 Choose endpoint policies from the source semantics: the policies in this snippet
 are examples, not defaults suitable for every reaction. An unresolved-resonance
