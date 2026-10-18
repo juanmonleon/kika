@@ -48,3 +48,23 @@ def test_nndcs_cl35_levels_carry_their_photons_under_the_residual():
         reaction = suite.reactions.byENDF_MT(mt)
         assert not any(p.pid == "photon" for p in reaction.outputChannel.products), mt
         assert _decayPhotons(reaction), mt
+
+
+@pytest.mark.parametrize("form", ["Branching3d", "Unspecified"])
+def test_a_residual_photon_that_states_no_spectrum_is_not_reported_lost(form):
+    # Fe-56 MT51's level photon is a Branching3d (its cascade is in PoPs and
+    # _cascadePhotons writes it); O-17 MT51's is Unspecified (the tape states
+    # no photon). Neither is a loss.
+    from kika.hdf5.processing import _products
+    from kika.nuclear_data import model as m
+    from kika.processing.tabulation import TabulationOptions
+
+    photon = m.Product(pid="photon", label="photon")
+    photon.distribution = m.Distribution()
+    photon.distribution["eval"] = getattr(m, form)(label="eval", productFrame=m.Frame.lab)
+    level = NS(pid="Fe56_e1", label="Fe56_e1", outputChannel=NS(products=[photon]))
+    reaction = NS(ENDF_MT=51, outputChannel=NS(products=[level], fissionFragmentData=None))
+    channel = NS(products=NS(products=[]))
+    report = m.ConversionReport()
+    _products(reaction, channel, 51, 55.454, 26056, TabulationOptions(), report, pops=None)
+    assert report.losses == []

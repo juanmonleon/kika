@@ -1273,6 +1273,11 @@ def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, 
             explicitPhotons |= product.pid == "photon"
     if not explicitPhotons and "photon" in particles:
         for product in _decayPhotons(reaction):
+            # A Branching3d points at the level's cascade in PoPs, which
+            # _cascadePhotons writes; an Unspecified states nothing. Neither
+            # is a photon lost (Fe-56 MT51, O-17 MT51).
+            if isinstance(_evaluated(product.distribution), (m.Branching3d, m.Unspecified)):
+                continue
             new = _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, flags=flags,
                                     qi=qi)
             if new is not None:
