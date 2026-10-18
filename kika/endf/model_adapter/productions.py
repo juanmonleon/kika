@@ -383,8 +383,12 @@ def _fromMf8(suite, index: _Mf8Section, mt: int, modelled, levels, report) -> No
         if key in modelled:
             continue
         if state.lmf in (LMF_MF9, LMF_MF10):
+            # LMF=9/10: the values are MF9/MF10's, not MF8's. Whether that section does
+            # not state the product or was kept as read (W-183 B-VIII.1 MT18, IZAP=-1),
+            # no cross section of the reactions depends on this state.
             report.lost(f"MF8/MT{mt}: state ZAP={state.zap} LFS={state.lfs} points at "
-                        f"MF{state.lmf}, which does not state it; MF8 is kept as read")
+                        f"MF{state.lmf}, which does not model it; MF8 is kept as read",
+                        unaffectedScopes=("cross-sections",))
             continue
         if state.lmf != LMF_MF3 or state.zap < 1000:
             report.unsupportedNode(

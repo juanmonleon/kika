@@ -226,3 +226,27 @@ def test_decoding_one_section_reports_a_missing_interpolation_region():
 
     assert report.approximations
     assert "lin-lin" in report.approximations[0]
+
+
+def test_a_zero_pair_after_the_table_end_is_not_a_point():
+    """JEFF-4.0 Mo-100 MT102: NP=81 with 80 pairs, the blank 81st read as (0, 0)."""
+    from kika.nuclear_data.model import ConversionReport
+
+    class _Section:
+        number = 102
+        energies = [1.0e-5, 1.0e6, 3.0e7, 0.0]
+        cross_sections = [1.0, 0.5, 2.0e-4, 0.0]
+        energy_interpolation = [(4, 2)]
+        atomic_weight_ratio = 99.0
+        q_mass_difference = 0.0
+        q_reaction = 0.0
+        breakup_flag = 0
+        zaid = 42100
+        _mat = 4249
+
+    report = ConversionReport()
+    reaction, report = decodeMF3MT(_Section(), report)
+    curve = reaction.crossSection["eval"].function1ds[-1]
+    assert list(curve.xs) == [1.0e-5, 1.0e6, 3.0e7]
+    assert "NP=4" in report.approximations[0]
+    assert report.isCleanFor("cross-sections")

@@ -122,6 +122,21 @@ def decodeMF3MT(mf3mt, report: Optional[ConversionReport] = None) -> Tuple[React
     values = np.asarray(mf3mt.cross_sections, dtype=float)
     regions = [(int(nbt), int(code)) for nbt, code in mf3mt.energy_interpolation]
 
+    if (energies.size >= 3 and energies[-1] == 0 and values[-1] == 0
+            and energies[-2] > 0 and np.all(np.diff(energies[:-1]) >= 0)):
+        # NP one larger than the pairs given: the last line ends early and its blank
+        # fields read as a zero pair, an energy of 0 after the table's end (JEFF-4.0
+        # Mo-100 MT102, NP=81 and 80 pairs, the 81st "at 0 eV" after 30 MeV). It is
+        # no point of the evaluation; dropped, every stated value is kept.
+        report.approximated(
+            f"MT{mf3mt.number}: MF3 declares NP={energies.size} and its last pair is a "
+            f"(0, 0) after {energies[-2]:.6g} eV; the record states "
+            f"{energies.size - 1} points, and that pair is not read as one",
+            unaffectedScopes=("cross-sections",))
+        energies, values = energies[:-1], values[:-1]
+        regions = [(min(nbt, int(energies.size)), code) for nbt, code in regions]
+        regions = [r for i, r in enumerate(regions) if i == 0 or r[0] > regions[i - 1][0]]
+
     if not regions and energies.size:
         regions = [(int(energies.size), 2)]
         report.approximated(
