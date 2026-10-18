@@ -177,6 +177,14 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   laboratory cosine of each laboratory energy (`h6cm`); kika averages the damage over
   the angle. No recoil is added when the residual is itself a light particle
   ($Z - z \le 2$).
+- **A discrete charged level (MT 600-648, 650-698, 700-748, 750-798, 800-848) stated in
+  MF 4 or by MF 3 alone:** MF 4 gives the particle's angle and no yield, which is one;
+  the level is two bodies, the particle's centre-of-mass energy fixed by $Q$, the residual
+  recoiling as above from the stated angular distribution, isotropic in the centre of
+  mass without one. HEATR does the same kinematics (`disbar`) but takes the target's
+  $(Z, A)$ for the recoil's partition, where its MF 6 path takes the residual's; kika takes
+  the residual's in both. Without the yield these levels fell to the absorption fallback
+  below, a proton capped at the Coulomb barrier.
 - **The same sections when they emit more than one particle (MT 22, 24, 28, ...,
   neutrons included, each with a whole yield):** the residual
   $(Z - \sum z_i, A + 1 - \sum a_i)$ takes the momentum balance of all of them,
@@ -198,9 +206,10 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
 - **Other neutron-emitting reactions:** one isotropic emission in the laboratory,
   $E_R = (E - 2\sqrt{EE'}\mu + E')/A$, averaged over the first neutron's spectrum and
   over $\mu$ (four-point Gauss-Legendre), the target's $(Z, A)$ as recoil.
-- **Absorption with a charged particle and no neutron (MT > 102):** a single particle
-  of charge $z$ and mass $a$ (proton, and for MT 104-107 the deuteron, triton, helium-3,
-  alpha) at the smaller of $E_a = Q + \tfrac{A}{A+1}E$ and the Coulomb barrier
+- **Absorption with a charged particle and no neutron (MT > 102), stated by MF 3 alone:**
+  a single particle of charge $z$ and mass $a$ (proton, and for MT 104-107 and the
+  continua 699, 749, 799, 849 the deuteron, triton, helium-3, alpha; HEATR takes the
+  four continua as protons) at the smaller of $E_a = Q + \tfrac{A}{A+1}E$ and the Coulomb barrier
   $1.029\cdot10^6\,zZ/(a^{1/3} + A^{1/3})$ eV, the residual of charge $Z - z$ and mass
   $A + 1 - a$ recoiling with
   $E_R = \big(E_t - 2\sqrt{E_t\,a\,E_a}\,\mu + a E_a\big)/(A+1)$,
@@ -315,8 +324,7 @@ $k^\text{loc} + k_f^\text{loc,HDF5}$.
 - **HEATR's approximations are kept and reported.** One isotropic laboratory emission
   with the target's $(Z, A)$ for the damage of continuum neutron emission; each photon's
   recoil as an independent primary in capture (with the compound's as one more); the single
-  charged particle at the Coulomb barrier for absorption, a continuum's deuterons and
-  alphas taken as protons; trapezoids for the mean of a laboratory MF 6 spectrum, lower
+  charged particle at the Coulomb barrier for absorption stated by MF 3 alone; trapezoids for the mean of a laboratory MF 6 spectrum, lower
   than the exact mean on wide panels. These are equivalences with HEATR; none is claimed
   to be better physics.
 - **The damage keeps HEATR's fission recoil,** one emission from the prompt spectrum,
@@ -397,6 +405,16 @@ MT 444 by up to +4 % at 20 MeV; the remaining difference is of the size of HEATR
 approximations. The independent recoil itself moves MT 444 by at most +0.4 % against
 the heaviest particle's (Ni-58 MT 28 at 14-17 MeV); a yield of 2, as in (n,2p), is one
 residual, as in HEATR (`sixbar`, recoil yield 1).
+
+The charged levels stated in MF 4 (2026-10-18) take O-16 from 0.962 to 0.949 of HEATR
+at 5 MeV and N-14 from 0.926 to 0.910, with the same kinematics as HEATR's `disbar`:
+HEATR's partition of the target's $(Z, A)$ for the residual raises the alpha levels'
+recoil damage by 18 % (O-16 MT 800 at 14 MeV), which is the difference. In an
+evaluation that leaves MT 16 and 17 to MF 4/MF 5 (158 of ENDF/B-VIII.1, 6 of JEFF-4.0,
+22 of JENDL-5) the neutron yield is now the MT's two and three, as in OpenMC's files;
+the processing wrote 1, so transport would have emitted one neutron per (n,2n) and the
+KERMA kept one neutron's energy. HEATR's own MT 301 of Nb-93 is negative at 12 MeV
+and is no reference there.
 
 ## Diagnostics
 

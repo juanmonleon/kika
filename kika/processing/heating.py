@@ -81,8 +81,8 @@ HEATR_APPROXIMATIONS = (
     "target's Z and A for the recoil (HEATR's tabdam)",
     "MF6 capture cascades: the recoil of each photon on its own, Σ y⟨E_γ²⟩/(2(A+1)m_nc²), without the "
     "compound nucleus' recoil E/(A+1), in the KERMA and in the damage (HEATR's output)",
-    "damage of particle emission: capdam's single particle at min(Q + AE/(A+1), Coulomb "
-    "barrier), deuterons and alphas of a continuum taken as protons",
+    "damage of particle emission stated by MF3 alone: capdam's single particle at "
+    "min(Q + AE/(A+1), Coulomb barrier)",
 )
 
 from importlib import import_module
@@ -1736,15 +1736,19 @@ def _photonRecoilDamage(form, grid, A, Z, ed, tm, fixedPrimary=False):
 
 
 def _absorptionDamage(mt, grid, A, Z, ed, Q):
-    """``capdam`` for a reaction that emits a charged particle and no neutron."""
+    """``capdam`` for a reaction that emits a charged particle and no neutron.
+
+    The continuum of a charged-level range (649, 699, 749, 799, 849) emits its own
+    particle; HEATR takes all five as protons (``capdam``: ``zx = ax = 1`` above MT107).
+    """
     zx, ax = 1.0, 1.0
-    if mt == 104:
+    if mt in (104, 699):
         ax = 2.0
-    elif mt == 105:
+    elif mt in (105, 749):
         ax = 3.0
-    elif mt == 106:
+    elif mt in (106, 799):
         zx, ax = 2.0, 3.0
-    elif mt == 107:
+    elif mt in (107, 849):
         zx, ax = 2.0, 4.0
     ec = 1.029e6 * zx * Z / (ax ** (1 / 3) + A ** (1 / 3))
     ea = Q + A * grid / (A + 1.0)
@@ -1826,7 +1830,7 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
     particle's mean lab energy and its own Lindhard damage. ``None`` when the
     evaluation states none of them with a distribution.
     """
-    from kika.nuclear_data.model import AngularTwoBody, zaFromPid
+    from kika.nuclear_data.model import AngularTwoBody, Isotropic2d, zaFromPid
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
 
     source = evaluation.findReactionByENDF_MT(reaction.ENDF_MT) if evaluation is not None else None
@@ -1838,25 +1842,37 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
     damage = np.zeros(len(grid))
     found = False
     light, residual, twoBody, neutrons = [], False, False, []
+    level = _levelParticle(reaction.ENDF_MT)
     for product in source.outputChannel.products:
         if product.pid == "n" and product.distribution is not None and product.multiplicity is not None:
             neutrons.append(product)
-        if product.pid in ("n", "photon") or product.distribution is None:
+        ownLevel = level is not None and product.pid == level
+        if product.pid in ("n", "photon") or (product.distribution is None and not ownLevel):
             continue
-        forms = product.distribution.forms
+        forms = product.distribution.forms if product.distribution is not None else {}
         form = forms.get("eval") or (next(iter(forms.values())) if forms else None)
         multiplicity = product.multiplicity.form if product.multiplicity is not None else None
+        if ownLevel and multiplicity is None:
+            # MF4 states a level's particle by its angle alone: one of it, two bodies
+            # (HEATR's disbar). Left out, the level fell to capdam's proton below the
+            # Coulomb barrier (O-16 MT800-848, all of MT444 at 5 MeV; PXB-051).
+            multiplicity = _UNIT_YIELD
+        if form is None and ownLevel:
+            form = Isotropic2d()
         if form is None or multiplicity is None:
             continue
         za = zaFromPid(product.pid)
         context = TabulationContext(awr=A, zaTarget=zaTarget, mt=reaction.ENDF_MT, Q=Q,
                                     pid=product.pid, zaEmitted=za)
-        try:
-            tabulated = _tabulateHeavy(form, context)
-        except (TypeError, ValueError, NotImplementedError) as exc:
-            notes.append(f"MT{reaction.ENDF_MT} {product.pid}: {type(form).__name__} not "
-                         f"tabulated for the heating ({exc}); left out")
-            continue
+        if ownLevel and isinstance(form, Isotropic2d):
+            tabulated = _isotropicLevel(product.pid, A, Q)
+        else:
+            try:
+                tabulated = _tabulateHeavy(form, context)
+            except (TypeError, ValueError, NotImplementedError) as exc:
+                notes.append(f"MT{reaction.ENDF_MT} {product.pid}: {type(form).__name__} not "
+                             f"tabulated for the heating ({exc}); left out")
+                continue
         if tabulated is None:
             if isinstance(form, AngularTwoBody) and product.pid not in _LIGHT_PARTICLES:
                 twoBody = True                  # LAW=4: the partner's recoil, by momentum
@@ -1924,8 +1940,55 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
                 damage = damage + np.where(y > 0, recoil, 0.0)
                 notes.append(f"MT{reaction.ENDF_MT}: " + (
                     "two-body residual (LAW=4): its recoil from the particle's angular law" if twoBody
+                    else "two-body level: the residual's recoil from the particle's angular law "
+                         "(HEATR's disbar)" if level is not None
                     else "residual not given; HEATR's one-particle recoil"))
     return (deposit, damage) if found else None
+
+
+class _UnitYield:
+    """The yield of one: what an MF4 level states for its particle without saying it."""
+
+    @staticmethod
+    def evaluate(grid):
+        return np.ones(len(np.atleast_1d(grid)))
+
+
+_UNIT_YIELD = _UnitYield()
+
+#: The particle of each charged-level range (ENDF-6 MT600-848); the continuum of
+#: each (649, 699, ...) is not a level.
+_LEVEL_RANGES = ((600, "H1"), (650, "H2"), (700, "H3"), (750, "He3"), (800, "He4"))
+
+
+def _levelParticle(mt):
+    """The light particle a discrete charged-level MT emits, else ``None``."""
+    for first, pid in _LEVEL_RANGES:
+        if first <= mt <= first + 48:
+            return pid
+    return None
+
+
+def _isotropicLevel(pid, A, Q):
+    """A level's particle isotropic in the centre of mass, its energy from Q."""
+    from kika.nuclear_data import model as m
+    from kika.processing.tabulation import levelEnergy
+    from kika.processing.tabulation.distribution import LIGHT_PARTICLE_AWP
+
+    return m.Uncorrelated(angular=m.Isotropic2d(), energy=levelEnergy(Q, A, LIGHT_PARTICLE_AWP[pid]),
+                          productFrame=m.Frame.centerOfMass)
+
+
+def _levelDamage(mt, grid, A, Z, ed, Q):
+    """A charged level stated by MF3 alone: two bodies, isotropic in the centre of mass
+    (HEATR's disbar without MF4), the particle's damage and the residual's."""
+    pid = _levelParticle(mt)
+    form = _isotropicLevel(pid, A, Q)
+    awp = PARTICLE_MASS_RATIO[{"H1": "p", "H2": "d", "H3": "t", "He3": "h", "He4": "a"}[pid]]
+    zp = 2 if pid in ("He3", "He4") else 1
+    k = _Kinematics(A=A, Q=Q, awp=awp)
+    return (_particleDamage(form, grid, k, zp, awp, Z, A, ed)
+            + _recoilDamage(form, grid, k, Z - zp, A + 1.0 - awp, Z, A, ed))
 
 
 def _independentParticles(light, neutrons, grid, A, Z, zaTarget, mt, Q, notes):
@@ -2874,6 +2937,8 @@ def _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarge
                 for product, form in neutrons[:1]:
                     d = _emissionDamage(form, grid, A, Z, ed)
                 return d
+            if _levelParticle(mt) is not None:
+                return _levelDamage(mt, grid, A, Z, ed, Q)
             if mt > 102:
                 return _absorptionDamage(mt, grid, A, Z, ed, _qAt(Qkin, grid))
             return np.zeros(len(grid))

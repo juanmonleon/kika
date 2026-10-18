@@ -872,3 +872,30 @@ def test_two_protons_leave_one_residual(monkeypatch):
                                         A + 1 - 2 * mp, 40.0)
     np.testing.assert_allclose(got, own + recoil, rtol=1e-12)
     assert any("all 2 particles" in n for n in notes)
+
+
+def test_an_mf4_charged_level_is_two_bodies_not_capdam(monkeypatch):
+    # MF4 states a level's alpha by its angle alone (no yield): one alpha, two bodies,
+    # as HEATR's disbar; with nothing but MF3, the same level isotropic in the CM.
+    from types import SimpleNamespace as NS
+    import kika.nuclear_data.model.endf_conversion as conversion
+
+    A, Z, Q = 15.858, 8, -2.2143e6
+    grid = np.array([5e6, 14e6])
+    monkeypatch.setattr(conversion, "reactionQI", lambda source, evaluation: Q)
+    alpha = NS(pid="He4", distribution=NS(forms={"eval": m.Isotropic2d(productFrame=m.Frame.centerOfMass)}),
+               multiplicity=None)
+    source = NS(ENDF_MT=800, outputChannel=NS(products=[alpha]))
+    notes = []
+    got = H._heavyProducts(source, NS(findReactionByENDF_MT=lambda mt: source, PoPs=None),
+                           grid, A, Z, 8016, 25.0, notes)[1]
+    np.testing.assert_allclose(got, H._levelDamage(800, grid, A, Z, 25.0, Q), rtol=1e-12)
+    assert any("two-body level" in n for n in notes)
+    assert not np.allclose(got, H._absorptionDamage(800, grid, A, Z, 25.0, Q), rtol=0.05)
+
+
+def test_capdam_takes_the_continuums_own_particle():
+    A, Z, Q, grid = 55.45, 26, -1e6, np.array([14e6])
+    for continuum, lumped in ((649, 103), (699, 104), (749, 105), (799, 106), (849, 107)):
+        np.testing.assert_array_equal(H._absorptionDamage(continuum, grid, A, Z, 40.0, Q),
+                                      H._absorptionDamage(lumped, grid, A, Z, 40.0, Q))
