@@ -926,3 +926,18 @@ def test_capdam_takes_the_continuums_own_particle():
     for continuum, lumped in ((649, 103), (699, 104), (749, 105), (799, 106), (849, 107)):
         np.testing.assert_array_equal(H._absorptionDamage(continuum, grid, A, Z, 40.0, Q),
                                       H._absorptionDamage(lumped, grid, A, Z, 40.0, Q))
+
+
+def test_a_mixture_below_its_weights_domain_is_read_at_its_first_energy():
+    # O-17 MT16: two laws weighted from 4.39 MeV, read at the grid's 1e-5 eV
+    # by the neutron recoil; every weight is zero there and nothing was drawn.
+    spectrum = m.XYs2d(function1ds=[_table([0., 1e6], [1e-6, 1e-6], 4.39e6),
+                                    _table([0., 2e6], [5e-7, 5e-7], 2e7)])
+    law = m.Uncorrelated(energy=spectrum, productFrame=m.Frame.lab)
+    weight = m.XYs1d(xs=[4.39e6, 2e7], ys=[0.5, 0.5])
+    mixture = m.DistributionMixture(weighted=[m.Weighted(weight=weight, functional=law),
+                                              m.Weighted(weight=weight, functional=law)])
+    below = H._labMomenta(mixture, 1e-5, 1.0, 16.0)
+    first = H._labMomenta(mixture, 4.39e6, 1.0, 16.0)
+    for a, b in zip(below, first):
+        np.testing.assert_array_equal(a, b)

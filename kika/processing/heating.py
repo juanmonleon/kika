@@ -85,8 +85,6 @@ FISSION_MTS = (18, 19, 20, 21, 38)
 HEATR_APPROXIMATIONS = (
     "damage of fission: one isotropic emission from the prompt spectrum in the lab, the "
     "target's Z and A for the recoil, the fragments not followed (HEATR's tabdam)",
-    "MF6 capture cascades: the recoil of each photon on its own, Σ y⟨E_γ²⟩/(2(A+1)m_nc²), without the "
-    "compound nucleus' recoil E/(A+1), in the KERMA and in the damage (HEATR's output)",
     "damage of particle emission stated by MF3 alone: capdam's single particle at "
     "min(Q + AE/(A+1), Coulomb barrier)",
 )
@@ -2383,6 +2381,13 @@ def _labMomenta(form, E, awp, A):
     from kika.nuclear_data import model as m
 
     if isinstance(form, m.DistributionMixture):
+        weights = [t.weight for t in form.weighted if t.weight is not None]
+        if weights:
+            # Outside its weights' domain (O-17 MT16 below 4.39 MeV, where its
+            # cross section is zero) a mixture is read at the nearest end, as
+            # a single law is read at its first or last table.
+            E = min(max(E, min(float(w.domainMin) for w in weights)),
+                    max(float(w.domainMax) for w in weights))
         parts = []
         for term in form.weighted:
             g = float(np.asarray(term.weight.evaluate([E]), dtype=float)[0]) if term.weight is not None else 1.0
