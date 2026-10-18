@@ -664,12 +664,11 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
   the radii of the table under *The radii and the radius flags* everywhere. On a NAPS=2
   test case with a tabulated AP($E$) NJOY differs from both kika and FUDGE by about 97 %
   of the budget, while those two agree to $10^{-10}$.
-- **Level normalisation at the absolute energy.** For a bound level of an R-Matrix
-  Limited channel, kika takes the reference penetrability at the channel energy of
-  $\lvert E_\lambda\rvert$ (ENDF-6 App. D); NJOY and FUDGE take
-  $\lvert E_\lambda - E_\text{channel}\rvert$. On FUDGE's own LRF=7 test tapes this alone
-  makes MT 600 differ by 0.55 % from NJOY, and 2.3·10⁻⁶ with the convention changed; it
-  is a choice of convention, and neither result is shown to be wrong.
+- **Level normalisation at the channel energy of the level.** For a level of an
+  R-Matrix Limited channel, kika takes the reference penetrability at the channel energy
+  of $E_\lambda$, then its modulus, $\lvert E_\lambda - E_\text{channel}\rvert$, as NJOY
+  (`betset`) and FUDGE do. Taking it at $\lvert E_\lambda\rvert$ instead, as kika did
+  before, put the thermal (n,α) of Ca-40 a factor 6.4 low.
 - **Coulomb penetrabilities with their relative accuracy inside the barrier.** NJOY and
   FUDGE compute the charged-channel functions at each energy with COULFG-type continued
   fractions (Steed's method), which give $P_\ell$ only to an absolute accuracy: inside
@@ -680,12 +679,13 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
   only where that route is not conditioned. For the closed channel, the fraction and the
   trapezoidal Laplace integral reach $10^{-12}$ to $10^{-16}$, where an adaptive
   quadrature reached $10^{-10}$. What this buys in time: JEFF-4.0 O-16, whose α
-  exit (MT 800) is charged in all nine spin groups, reconstructs in 3.0-3.4 s on one
+  exit (MT 800) is charged in all nine spin groups, reconstructs in 1.4 s on one
   thread, against 5.3 s for NJOY 2016.78 RECONR and 1.6 s for FUDGE 6.14.0 at
-  `accuracy` $=10^{-3}$, with 7 783 points in MT 1 against 10 751 and 16 921
-  (measured 2026-10-13); a direct integration of the Riccati equations at every energy
-  took over 40 minutes. On this material FUDGE remains about twice as fast; the
-  remaining time is the common linearisation, not the R-matrix.
+  `accuracy` $=10^{-3}$, with 7 740 points in MT 1 against 10 751 and 16 921
+  (measured 2026-10-15); a direct integration of the Riccati equations at every energy
+  took over 40 minutes. Several L of one pair and radius (Ca-40: α at L = 0, 1, 2) come
+  from one continued fraction at the lowest L and the upward recurrence of the outgoing
+  wave (DLMF 33.4.3-4); $F'/F$, for the phase, keeps its own fraction at each L.
 - **Capture as a positive sum.** kika computes capture directly from the level
   amplitudes ({eq}`eq-resonance-reconstruction-rml-capture`) and uses the flux balance
   only as a check. FUDGE obtains capture from the flux deficit, which loses its relative
@@ -781,7 +781,9 @@ ho$ and near the threshold,
   does not converge, against 40-digit references, $2\cdot10^{-15}$ in $\ln P$ and
   $10^{-14}$ in $S$ (`::test_threshold_laplace_against_40_digit_reference`);
   a relativistic charged exit against a 60-digit level matrix
-  (`::test_relativistic_charged_against_independent_60_digit_level_matrix`); Brune
+  (`kika/processing/tests/test_r_matrix_advanced.py::test_relativistic_charged_against_independent_60_digit_level_matrix`);
+  the ladder of L by upward recurrence against a 40-digit reference, $1.2\cdot10^{-13}$
+  in $\ln P$ and $S$ (`kika/processing/tests/test_coulomb_native.py::test_ladder_by_upward_recurrence_against_40_digit_reference`); Brune
   parameters against Brune's equation 33 and the formal transform, $3\cdot10^{-11}$
   (`kika/processing/tests/test_r_matrix_completion.py::test_brune_collision_against_independent_equation_33_and_formal_transform`);
   threshold Coulomb shifts against 70- and 90-digit Whittaker references
@@ -868,11 +870,20 @@ checked by evaluating each code's own kernel at the worst probes:
 - **FUDGE, Fe-56.** At `accuracy` $=10^{-4}$ the ratio stays 13. Here the kernels
   themselves differ, by 1.3 % in elastic at the worst probe, in the deep interference
   minima near 73 keV and 219 keV, where kika and NJOY agree with each other to
-  $5\cdot10^{-4}$. The cause in FUDGE is not established.
-- **NJOY.** Its excesses (up to twice the budget, 99th percentile of the ratio below
-  0.9) were not attributed to a single cause, since NJOY's kernel was not evaluated
-  separately. Where a cause is known it is a convention named under *Conventions and
-  choices* (range-boundary ramps, the NAPS=2 radius).
+  $5\cdot10^{-4}$. The cause is the APL convention under *Conventions and choices*:
+  FUDGE's reconstruction takes the penetrability from AP and only the phase from the
+  L=1 APL. A 40-digit evaluation of the same Reich-Moore range under each reading
+  matches kika to $2\cdot10^{-10}$ and FUDGE to $3\cdot10^{-7}$, and the two readings
+  differ by the same 1.3 % at 219.474 keV; FUDGE with APL in the penetrability as well
+  matches kika to $3\cdot10^{-7}$ (measured 2026-10-18).
+- **NJOY.** Its excesses (up to twice the budget) come from its grid, not its kernel.
+  NJOY's own node values agree with kika's exact kernel plus the background to the
+  PENDF's seven digits ($\le 6\cdot10^{-4}$ of the budget, about 40 000 nodes per
+  reaction in the six materials), and the exact kernel on NJOY's grid reproduces every
+  worst-probe excess (Pu-239 capture 2.02, U-238 capture 1.77). RECONR accepts a panel
+  on one test point, its midpoint rounded to seven figures, while the largest error of
+  the panel lies elsewhere (Pu-239 capture: 0.054 of the budget at the test point, 2.02
+  at 3406.9034 eV).
 
 In time, FUDGE is faster than kika on every one of these materials (reconstruction only,
 excluding its ENDF to GNDS translation, one thread on the same machine, measured
@@ -907,7 +918,7 @@ verification, which on its own costs several times the reconstruction.
 - `source_conversion_report`: the conversion report of the source, whose losses would
   have blocked the reconstruction;
 - `points`, `stored_points`, `domain`, `context`, `options`, `resonance_partial_owners`,
-  `engine` (`kika-native-suite-2`; it names the reconstruction physics and changes
+  `engine` (`kika-native-suite-3`; it names the reconstruction physics and changes
   whenever a change of kernel, grid or publication alters a reconstructed value, so a
   cache keyed on it is invalidated exactly then), `source_sha256`.
 
@@ -957,8 +968,10 @@ collects the largest solve residual and flux error of each formalism.
 - `kika.processing.resonances._rm_native` (C, built with the package) and
   `_rm_acceleration`: the compiled level sums for Reich-Moore, diagonal R-Matrix Limited
   and Breit-Wigner, and the unresolved integrand. They are used only for normal-range
-  inputs (for instance at least 32 levels and at most 3 channels for Reich-Moore, at
+  inputs (finite level energies, widths and amplitudes in the normal float64 range for
+  Reich-Moore and R-Matrix Limited, with no minimum of levels or maximum of channels; at
   least 8 levels, $\ell \le 2$, a constant radius and no competition for Breit-Wigner),
+  their level sums on up to four native threads, bit-identical to one,
   during tabulation only when `rtol` $\ge 10^{-3}$, and during verification in their
   exact form; otherwise, or when the extension is not loaded
   (`kika.processing.resonances.native_available`), the NumPy solver gives the same
