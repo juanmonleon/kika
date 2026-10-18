@@ -105,6 +105,13 @@ def prepare_rm(region,resonances,context,notes):
             if sg.spins:
                 s=low if signed<0 else high
                 if not allowed(l,s,j) and signed>=0 and allowed(l,low,j):s=low
+                elif not allowed(l,s,j) and signed<0 and allowed(l,high,j):
+                    # The sign only splits one J into two channel groups (RECONR's
+                    # csrmat): where the low spin cannot couple, the high one is the
+                    # only channel (JEFF-4.0 Na-23, L=1, AJ=-3).
+                    s=high
+                    notes.append(f'RM L={l}: AJ={signed:g} cannot couple with channel spin {low:g}; '
+                                 f'channel spin {high:g}, the only one J={j:g} allows')
             else:
                 s=ch.channelSpin
                 if s is None:

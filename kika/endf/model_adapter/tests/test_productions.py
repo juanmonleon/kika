@@ -262,3 +262,18 @@ def test_an_mf8_section_that_is_not_activation_is_not_passed_over(tmp_path):
     doctored.write_text("".join(lines[:-1] + [injected] + lines[-1:]))
     _, report = _decode(doctored)
     assert any("MF8/MT457" in m for m in report.losses + report.unsupported)
+
+
+
+@pytest.mark.tape
+def test_an_lmf3_state_with_no_mf3_is_a_loss_that_leaves_the_cross_sections_alone():
+    """JENDL-5 Li-7 MT22: MF8 LMF=3 on an MT with no MF3. Nothing there is a cross
+    section, so reconstruction and Doppler must not refuse the tape for it."""
+    import os
+    tapes = os.environ.get("KIKA_JENDL5_TAPES")
+    path = Path(tapes) / "n_003-Li-007.dat" if tapes else None
+    if path is None or not path.is_file():
+        pytest.skip("JENDL-5 Li-7 not found (set KIKA_JENDL5_TAPES)")
+    suite = kika.read(str(path), covariances=False)
+    assert any("LMF=3" in m and "no MF3 cross section" in m for m in suite.report.losses)
+    assert suite.report.isCleanFor("cross-sections")

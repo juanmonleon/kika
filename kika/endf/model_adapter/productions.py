@@ -395,8 +395,11 @@ def _fromMf8(suite, index: _Mf8Section, mt: int, modelled, levels, report) -> No
         host = _host(suite, mt)
         reference = _reference(host) if host is not None else None
         if reference is None:
+            # No MF3 to refer to, so no cross section it could change (JENDL-5 Li-7
+            # MT22 and S-34 MT104-111 were refused by reconstruction for it).
             report.lost(f"MF8/MT{mt}: LMF=3 state ZAP={state.zap} LFS={state.lfs} with no "
-                        f"MF3 cross section to refer to; MF8 is kept as read")
+                        f"MF3 cross section to refer to; MF8 is kept as read",
+                        unaffectedScopes=("cross-sections",))
             continue
         form = host[0].crossSection[EVAL_LABEL]
         domain = (float(form.domainMin), float(form.domainMax))

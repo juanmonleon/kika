@@ -296,3 +296,15 @@ def test_typed_zero_phase_policy_keeps_mass_derived_true_radius():
     assert group.phase_radius.constant==0.
     assert group.channel_radius.constant==ctx.mass_channel_radius_fm
     assert np.isfinite(prepared.evaluate(np.array([100.]))[2]).all()
+
+
+
+def test_a_negative_aj_whose_low_channel_spin_cannot_couple_takes_the_high_one():
+    # JEFF-4.0 Na-23 (I=3/2): L=1 resonances at AJ=-3. The sign asks for s=1, which
+    # cannot reach J=3 with L=1; s=2 is the only channel, and RECONR uses the sign
+    # only to split a J into two incoherent groups.
+    ctx=NeutronContext(22.,1.5)
+    prepared=prepare_resonances(rm_model(spins=(-3.,),l=1),ctx)
+    occupied=[g for g in prepared.regions[0].groups if g.levels]
+    assert [(g.spin,g.channel_spin) for g in occupied]==[(3.,2.)]
+    assert any('AJ=-3' in note and 'channel spin 2' in note for note in prepared.preparation_notes)
