@@ -104,7 +104,9 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 #:     The realisation is multiplied at 0 K and broadened to each temperature
 #:     by kika (roadmap D12), with the sample's own KERMA and damage. The
 #:     URR probability tables are computed **once**, on the unperturbed
-#:     evaluation, and shared: they are not perturbed. Needs an
+#:     evaluation, and shared: their shapes are not perturbed; the sample's
+#:     MF33 reaches them (factors on its smooth cross sections, LSSF=1; band
+#:     cross sections scaled by it in processSuite, LSSF=0). Needs an
 #:     :class:`HDF5Options`.
 EMITTERS = ("endf-delta", "endf-tape", "gnds", "ace", "hdf5")
 
@@ -181,7 +183,8 @@ class AceOptions:
         :func:`kika.ace.model_adapter.encodeAce`, the processing
         :meth:`kika.endf.EndfProcessing.write_ace` uses; no tape, no NJOY. The
         URR probability tables are computed once, on the unperturbed
-        evaluation, and shared by every sample (they are not perturbed). A
+        evaluation, and shared by every sample: their shapes are not
+        perturbed, the sample's MF33 reaches their cross sections. A
         table without ``extensions`` is ``<ZAID>.<suffix of its
         temperature>``; ``libraryName``, ``njoyVersion``, ``keepNjoyFiles``
         and ``fullAceListing`` do not apply.
