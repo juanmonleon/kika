@@ -197,6 +197,16 @@ def prepare_resonances(resonances, context, *, conversion_report=None, allow_emp
             except ValueError as error:
                 raise UnsupportedResonanceError(str(error)) from error
             comp = group.competitiveChannel
+            if comp is not None and comp.L is None and all(
+                    math.isclose(r.totalWidth, r.neutronWidth + r.captureWidth + r.fissionWidth,
+                                 rel_tol=5e-6, abs_tol=1e-12) for r in group.resonances):
+                # LRX=1 whose GT-GN-GG-GF is rounding on every level (JEFF-4.0 Ni-59, QX=-1e-9,
+                # GX <= 3.3e-7 GT): the competitive reaction carries no width, so its exit L,
+                # which ENDF does not state, is not needed. RECONR zeroes the same widths
+                # (gxmin = 1e-5 GT). A real competitive width still needs the exit L.
+                notes.append(f"L={group.L}: LRX=1 but GT-GN-GG-GF is within rounding on all "
+                             f"{len(group.resonances)} levels; no competitive width")
+                comp = None
             if comp is not None:
                 if (comp.L is None or not isinstance(comp.L, (int, np.integer)) or not 0 <= comp.L <= 64):
                     raise UnsupportedResonanceError("competitive exit L is missing or unsupported")

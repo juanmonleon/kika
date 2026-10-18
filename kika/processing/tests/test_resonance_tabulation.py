@@ -143,6 +143,25 @@ def test_competitive_mf3_ownership_prevents_double_counting():
         tabulate_resonances(p)
 
 
+def test_lrx_without_exit_l_needs_a_width_beyond_rounding():
+    # JEFF-4.0 Ni-59: LRX=1, QX=-1e-9, GT-GN-GG-GF <= 3.3e-7 GT. ENDF gives no exit L; with no
+    # competitive width there is nothing to use it for, and the levels are the LRX=0 ones.
+    m=model()
+    group=m.resolved[0].formalism.resonanceParameters.spinGroups[0]
+    reference=prepared(deepcopy(m))
+    for r in group.resonances:
+        r.totalWidth=(r.neutronWidth+r.captureWidth+r.fissionWidth)*(1+3e-7)
+    group.competitiveChannel=CompetitiveChannel(-1e-9,inEvaluatedBackground=True)
+    p=prepared(m)
+    e=np.array([20.,100.,200.])
+    assert 51 not in p.evaluate(e)
+    np.testing.assert_allclose(p.evaluate(e)[1],reference.evaluate(e)[1],rtol=1e-14)
+    assert any('LRX=1' in note for note in p.preparation_notes)
+    group.resonances[0].totalWidth*=1.01
+    with pytest.raises(UnsupportedResonanceError,match='exit L'):
+        prepared(m)
+
+
 @pytest.mark.parametrize('graph,message',[
     ({1:(4,),4:(1,)},'cycle'),
     ({1:(2,2)},'duplicate'),
