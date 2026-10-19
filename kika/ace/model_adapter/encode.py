@@ -1019,7 +1019,9 @@ class _Encoder:
         """The charged-particle production blocks, as NJOY 2016's ACER writes them.
 
         Per particle (PTYPE 9, 31, 32, 33, 34 in that order): MTRH, the
-        reactions producing it, ascending; TYRH +-1 by frame (-1 in the centre
+        reactions producing it, ascending, one entry per product of that
+        particle (n + He-3 -> d + d lists MT650 twice, each deuteron with its
+        own records, keyed as ``kika.ace.classes.ixs_keys`` says); TYRH +-1 by frame (-1 in the centre
         of mass); SIGH, each yield as MFTYPE 12 on its own reaction; ANDH and
         DLWH from its Monte Carlo form; HPD, the production cross section
         sum(y sigma) on the union grid from one point before its first nonzero
@@ -1027,6 +1029,7 @@ class _Encoder:
         in MeV, sum(y sigma E) / sigma_t, normalised as ESZ's; YH, the
         reactions with a yield.
         """
+        from kika.ace.classes.ixs_keys import ixs_keys
         from kika.hdf5.names import MONTE_CARLO_LABEL
         from kika.processing.heating import _Kinematics, _meanEnergyOf
 
@@ -1039,10 +1042,11 @@ class _Encoder:
                 container, node = nodes[mt]
                 if container is s.sums or node.outputChannel is None or mt == HEATING_MT:
                     continue
-                product = next((p for p in node.outputChannel.products if p.pid == pid), None)
-                if product is not None and product.distribution is not None and \
-                        MONTE_CARLO_LABEL in product.distribution.forms:
-                    entries.append((mt, node, product))
+                # every product of the particle is an entry of its own
+                for product in node.outputChannel.products:
+                    if product.pid == pid and product.distribution is not None and \
+                            MONTE_CARLO_LABEL in product.distribution.forms:
+                        entries.append((mt, node, product))
             if not entries:
                 continue
             i = len(ids)
@@ -1050,7 +1054,8 @@ class _Encoder:
             mts, tys, records, angles, chains = [], [], {}, {}, {}
             production, heat = np.zeros(len(grid)), np.zeros(len(grid))
             made = []
-            for mt, node, product in entries:
+            keys = ixs_keys(mt for mt, _, _ in entries)
+            for key, (mt, node, product) in zip(keys, entries):
                 form = product.distribution.forms[MONTE_CARLO_LABEL]
                 # a level's particle is law 33, the charged-particle level law
                 level = isinstance(form, m.Uncorrelated) and isinstance(form.energy, m.LevelEnergy)
@@ -1059,10 +1064,10 @@ class _Encoder:
                 attributes = dict(_attributes(product))
                 if level:
                     attributes["laws"] = [33]
-                laws, numbers = _chain(form, attributes, f"DLWH {pid} MT{mt}", self.domain)
-                chains[mt] = laws
-                angles[mt] = (_correlatedRecord(mt) if any(n in CORRELATED_LAWS for n in numbers)
-                              else _angularRecord(_angularOf(form), mt))
+                laws, numbers = _chain(form, attributes, f"DLWH {pid} MT{key}", self.domain)
+                chains[key] = laws
+                angles[key] = (_correlatedRecord(key) if any(n in CORRELATED_LAWS for n in numbers)
+                               else _angularRecord(_angularOf(form), key))
                 mts.append(mt)
                 tys.append(-1 if _frameOf(form) else 1)
                 xs = self.xs(node, f"MT{mt}")
@@ -1074,7 +1079,7 @@ class _Encoder:
                     x, y, nbt, interp = np.array([x0[0], x0[-1]]), np.array([c, c]), [], []
                 else:
                     x, y, nbt, interp = _regions(multiplicity)
-                records[mt] = NS(mt=mt, mftype=12, mtmult=mt, interpolation_bounds=nbt,
+                records[key] = NS(mt=key, mftype=12, mtmult=mt, interpolation_bounds=nbt,
                                  interpolation_schemes=interp, energies=_mev(x),
                                  yields=np.asarray(y, dtype=float))
                 made.append((node.crossSection.forms[self.label], multiplicity))

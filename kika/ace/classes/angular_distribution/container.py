@@ -13,6 +13,7 @@ from kika.ace.classes.angular_distribution.distributions.kalbach_mann import Kal
 from kika.ace.classes.angular_distribution.distributions.equiprobable import EquiprobableAngularDistribution
 from kika.ace.classes.angular_distribution.distributions.tabulated import TabulatedAngularDistribution
 from kika.ace.classes.angular_distribution.utils import Law44DataError
+from kika.ace.classes.ixs_keys import ixs_key
 
 
 from kika._constants import (
@@ -132,7 +133,10 @@ class AngularDistributionContainer:
     elastic: Optional[AngularDistribution] = None  # Angular distribution for elastic scattering
     incident_neutron: Dict[int, AngularDistribution] = field(default_factory=dict)  # MT -> distribution for neutrons
     photon_production: Dict[int, AngularDistribution] = field(default_factory=dict)  # MT -> distribution for photons
-    particle_production: List[Dict[int, AngularDistribution]] = field(default_factory=list)  # Particle index -> (MT -> distribution)
+    # Particle index -> (MT -> distribution), one entry per MTRH entry in its
+    # order; a repeated MT keys its later entries by RepeatedMT(mt, k) (see
+    # kika.ace.classes.ixs_keys)
+    particle_production: List[Dict[int, AngularDistribution]] = field(default_factory=list)
     
     def __post_init__(self):
         """Convert standard dictionaries to ErrorMessageDict and lists to ErrorMessageList."""
@@ -223,7 +227,7 @@ class AngularDistributionContainer:
                     result[idx] = sorted(particle_data.keys_as_int())
                 else:
                     mt_keys = particle_data.keys()
-                    result[idx] = sorted(int(mt) for mt in mt_keys)
+                    result[idx] = sorted(ixs_key(mt) for mt in mt_keys)
             return result
             
         # If particle_idx is specified, return list for that particle
@@ -248,7 +252,7 @@ class AngularDistributionContainer:
         if isinstance(particle_data, ErrorMessageDict):
             return sorted(particle_data.keys_as_int())
         else:
-            return sorted(int(mt) for mt in particle_data.keys())
+            return sorted(ixs_key(mt) for mt in particle_data.keys())
     
     def get_particle_production_info(self) -> Dict[int, Dict[str, Any]]:
         """
@@ -282,7 +286,7 @@ class AngularDistributionContainer:
             if isinstance(particle_data, ErrorMessageDict):
                 mt_numbers = sorted(particle_data.keys_as_int())
             else:
-                mt_numbers = sorted(int(mt) for mt in particle_data.keys())
+                mt_numbers = sorted(ixs_key(mt) for mt in particle_data.keys())
             
             # Count distribution types
             distribution_types = {}

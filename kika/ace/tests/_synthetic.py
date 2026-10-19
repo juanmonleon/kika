@@ -10,7 +10,10 @@ table. It carries:
 * LAND/AND: tabulated elastic, LOCB=-1 for MT16, a tabulated MT51 that reuses
   the elastic's first table;
 * LDLW/DLW: LAW=44 for MT16 and LAW=3 for MT51, each with IDAT > 1, which is
-  what NJOY writes and what puts the LAW=44 tables away from IDAT.
+  what NJOY writes and what puts the LAW=44 tables away from IDAT;
+* with ``particles=True``, PTYPE/NTRO/IXS for one deuteron whose MTRH lists
+  MT51 twice, each entry with its own SIGH, ANDH and DLWH (LAW=33) records:
+  the shape NJOY writes for n + He-3 -> d + d.
 """
 from __future__ import annotations
 
@@ -24,8 +27,12 @@ def _xs_block(values):
     return [1, len(values)] + list(values)
 
 
-def build_table(secondaries: bool = True):
-    """Return ``(nxs, jxs, xss)``; ``xss`` is 1-based (``xss[0]`` unused)."""
+def build_table(secondaries: bool = True, particles: bool = False):
+    """Return ``(nxs, jxs, xss)``; ``xss`` is 1-based (``xss[0]`` unused).
+
+    ``particles`` adds the IXS blocks of one deuteron produced twice by MT51
+    (see ``_add_particles``).
+    """
     xss = [0.0]
     jxs = [0] * 33
     nxs = [0] * 17
@@ -105,6 +112,10 @@ def build_table(secondaries: bool = True):
         jxs[10] = 0
 
     jxs[22] = len(xss) - 1                               # END
+    if particles:
+        if not secondaries:
+            raise ValueError("the deuteron entries hang on MT51: particles needs secondaries")
+        _add_particles(xss, jxs, nxs)
     nxs[1] = len(xss) - 1
     nxs[2] = 26056
     nxs[3] = len(ENERGIES)
@@ -113,9 +124,83 @@ def build_table(secondaries: bool = True):
     return nxs, jxs, xss
 
 
-def write_table(path: Path, secondaries: bool = True, header: str = "legacy") -> Path:
+#: The two deuteron entries of MT51 in ``build_table(particles=True)``: their
+#: SIGH yields, ANDH (isotropic, or one tabulated table) and LAW=33 constants.
+DEUTERON_ENTRIES = (
+    {"yields": [1.0, 1.0], "isotropic": True, "law33": (0.5, 0.25)},
+    {"yields": [0.5, 2.0], "isotropic": False, "law33": (0.75, 0.125)},
+)
+
+
+def _add_particles(xss, jxs, nxs):
+    """PTYPE, NTRO, IXS and one deuteron (PTYPE 31) whose MTRH lists MT51 twice (Tables 56-61).
+
+    The shape NJOY writes for n + He-3 -> d + d (MT650): one entry per
+    deuteron, each with its own yield, angular and energy records.
+    """
+    def here():
+        return len(xss)
+
+    entries = DEUTERON_ENTRIES
+    jxs[30] = here()
+    xss += [31]                                          # PTYPE
+    jxs[31] = here()
+    xss += [len(entries)]                                # NTRO
+    jxs[32] = here()
+    ixs_at = here()
+    xss += [0] * 10                                      # IXS, filled below
+    locs = []
+    # HPD: IE, NE, production cross section, heating number
+    locs.append(here())
+    xss += [1, len(ENERGIES), 0.0, 0.3, 0.3, 0.0, 0.0, 0.0]
+    locs.append(here())
+    xss += [51] * len(entries)                           # MTRH
+    locs.append(here())
+    xss += [1] * len(entries)                            # TYRH
+    # LSIGH/SIGH: MFTYPE 12 on its own reaction, NR=0, two energies
+    sigh, lsigh = [], []
+    for entry in entries:
+        lsigh.append(len(sigh) + 1)
+        sigh += [12, 51, 0, 2, 0.9, 20.0] + list(entry["yields"])
+    locs.append(here())
+    xss += lsigh
+    locs.append(here())
+    xss += sigh
+    # LANDH/ANDH: LOCB=0 (isotropic) or one tabulated table at 20 MeV
+    andh, landh = [], []
+    for entry in entries:
+        if entry["isotropic"]:
+            landh.append(0)
+            continue
+        landh.append(len(andh) + 1)
+        table_at = len(andh) + 1 + 3
+        andh += [1, 20.0, -table_at]
+        andh += [2, 3, -1.0, 0.0, 1.0, 0.25, 0.5, 0.75, 0.0, 0.375, 1.0]
+    locs.append(here())
+    xss += landh
+    locs.append(here())
+    xss += andh
+    # LDLWH/DLWH: one LAW=33 each, IDAT just after its 9-word header
+    dlwh, ldlwh = [], []
+    for entry in entries:
+        locc = len(dlwh) + 1
+        ldlwh.append(locc)
+        dlwh += [0, 33, locc + 9, 0, 2, ENERGIES[0], ENERGIES[2], 1.0, 1.0]
+        dlwh += list(entry["law33"])
+    locs.append(here())
+    xss += ldlwh
+    locs.append(here())
+    xss += dlwh
+    locs.append(here())
+    xss += [len(entries)] + [51] * len(entries)          # YH
+    xss[ixs_at:ixs_at + 10] = locs
+    nxs[7] = 1
+
+
+def write_table(path: Path, secondaries: bool = True, header: str = "legacy",
+                particles: bool = False) -> Path:
     """Write the table as an ACE file, with a legacy or a 2.0.1 opening (Tables 1-2)."""
-    nxs, jxs, xss = build_table(secondaries)
+    nxs, jxs, xss = build_table(secondaries, particles)
     lines = []
     if header == "2.0.1":
         lines.append(f"{'2.0.1':<10}{'26056.800nc':>24}{'ENDF/B-VIII.0':>24}")

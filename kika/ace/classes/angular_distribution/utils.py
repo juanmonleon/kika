@@ -24,8 +24,13 @@ class ErrorMessageDict(dict):
             raise KeyError(error_msg)
     
     def keys_as_int(self):
-        """Get keys as integers for better display."""
-        return [int(key) for key in self.keys()]
+        """Get keys as integers for better display.
+
+        The key of a repeated IXS entry stays a ``RepeatedMT`` (an ``int``),
+        so it still finds its entry (see ``kika.ace.classes.ixs_keys``).
+        """
+        from kika.ace.classes.ixs_keys import ixs_key
+        return [ixs_key(key) for key in self.keys()]
 
 
 class ErrorMessageList(list):

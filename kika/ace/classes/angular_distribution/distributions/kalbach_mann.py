@@ -6,6 +6,7 @@ from kika.ace.classes.angular_distribution.base import AngularDistribution
 from kika.ace.classes.angular_distribution.types import AngularDistributionType
 from kika._utils import create_repr_section
 from kika.ace.classes.angular_distribution.utils import Law44DataError
+from kika.ace.classes.ixs_keys import ixs_key
 
 #: The DLW laws a reaction with LOCB=-1 may use: they carry its angle (44, 61)
 #: or make it isotropic in the centre of mass (66).
@@ -70,8 +71,9 @@ class KalbachMannAngularDistribution(AngularDistribution):
                 raise Law44DataError(
                     f"Particle index {self.particle_idx} out of bounds for MT={mt_value}"
                 )
+            # a repeated IXS entry is found by its own key, not its MT
             distributions = ace.energy_distributions.get_particle_distribution(
-                self.particle_idx, mt_value)
+                self.particle_idx, ixs_key(self.mt))
         else:
             distributions = ace.energy_distributions.get_neutron_distribution(mt_value)
 

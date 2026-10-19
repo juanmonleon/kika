@@ -13,7 +13,9 @@ class EnergyDistributionContainer:
     # Photon production energy distributions (MT → list of distributions)
     photon_production: Dict[int, List[EnergyDistribution]] = field(default_factory=dict)
     
-    # Particle production energy distributions (particle index → MT → list of distributions)
+    # Particle production energy distributions: particle index -> (MT -> law chain), one entry per MTRH entry in its
+    # order; a repeated MT keys its later entries by RepeatedMT(mt, k) (see
+    # kika.ace.classes.ixs_keys)
     particle_production: List[Dict[int, List[EnergyDistribution]]] = field(default_factory=list)
     
     # Delayed neutron energy distributions: [group g] → the law chain of

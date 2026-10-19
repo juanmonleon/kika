@@ -283,6 +283,10 @@ _TAPES: Dict[str, Sequence[str]] = {
     # JEFF-4.0 host: the three sources kika.plotting.plottable overlays in its
     # acceptance test.
     "fe56_ace_b81": ("ace/260560_81.02c", "ACE_samples/260560_81.02c"),
+    # He-3 of ENDF/B-VIII.1 as NJOY processed it: n + He-3 -> d + d (MT650)
+    # lists MT650 twice in the deuteron's MTRH, one entry per deuteron, the
+    # one table where an IXS MT repeats (kika/ace/classes/ixs_keys.py).
+    "he3_ace_b81": ("ace/endfb81/293.6K/2003.10c", "ace/2003.10c", "ACE_samples/2003.10c"),
     "fe56_pendf": ("pendf/Fe56.pendf",),
     # MF6, the energy-angle distributions. These three are not a sample: they
     # are the carriers. Swept over all 557 ENDF/B-VIII.1 neutron tapes, LAW=7
@@ -668,6 +672,7 @@ hf176_jeff40_tape = _tape_fixture("hf176_jeff40")
 k41_jeff40_tape = _tape_fixture("k41_jeff40")
 u239_jeff40_tape = _tape_fixture("u239_jeff40")
 fe56_ace_b81_tape = _tape_fixture("fe56_ace_b81")
+he3_ace_b81_tape = _tape_fixture("he3_ace_b81")
 fe56_pendf_tape = _tape_fixture("fe56_pendf")
 
 #: The MF6 law carriers. Named one at a time rather than looped, to match the

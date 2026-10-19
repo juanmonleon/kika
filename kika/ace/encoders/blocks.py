@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from kika.ace.classes.ixs_keys import ixs_keys
 from kika.ace.encoders._words import Words
 from kika.ace.encoders.laws import encode_energy_dependent_yield, encode_law_chain
 
@@ -165,8 +166,8 @@ def encode_andp(ace) -> Tuple[Words, Words]:
 def encode_andh(ace, i: int) -> Tuple[Words, Words]:
     ad = ace.angular_distributions
     land, and_ = Words(), Words()
-    for mt in ace.reaction_mt_data.particle_production[i]:
-        land.int(_encode_and_record(ad.particle_production[i][int(mt)], and_))
+    for key in ixs_keys(ace.reaction_mt_data.particle_production[i]):
+        land.int(_encode_and_record(ad.particle_production[i][key], and_))
     return land, and_
 
 
@@ -205,9 +206,9 @@ def encode_dlwp(ace) -> Tuple[Words, Words]:
 def encode_dlwh(ace, i: int) -> Tuple[Words, Words]:
     ed = ace.energy_distributions
     ldlw, dlw = Words(), Words()
-    for mt in ace.reaction_mt_data.particle_production[i]:
+    for key in ixs_keys(ace.reaction_mt_data.particle_production[i]):
         ldlw.int(dlw.next)
-        encode_law_chain(ed.particle_production[i][int(mt)], dlw)
+        encode_law_chain(ed.particle_production[i][key], dlw)
     return ldlw, dlw
 
 
@@ -306,6 +307,8 @@ def encode_yp(ace) -> Words:
 
 
 # --- particles: PTYPE, NTRO, and per particle HPD...YH (Tables 56-61) ------------
+# One SIGH, ANDH and DLWH record per MTRH entry, found by its key: an MT may
+# repeat in MTRH (kika.ace.classes.ixs_keys).
 
 def encode_hpd(ace, i: int) -> Words:
     d = ace.secondary_particle_cross_sections.particle_data[i + 1]
@@ -319,9 +322,9 @@ def encode_hpd(ace, i: int) -> Words:
 def encode_sigh(ace, i: int) -> Tuple[Words, Words]:
     lsig, sig = Words(), Words()
     xs = ace.particle_production_xs
-    for mt in ace.reaction_mt_data.particle_production[i]:
+    for key in ixs_keys(ace.reaction_mt_data.particle_production[i]):
         lsig.int(sig.next)
-        _encode_production_xs(xs.particle_cross_sections[i + 1][int(mt)], sig)
+        _encode_production_xs(xs.particle_cross_sections[i + 1][key], sig)
     return lsig, sig
 
 

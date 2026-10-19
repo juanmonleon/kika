@@ -23,6 +23,8 @@ from typing import List
 
 import numpy as np
 
+from kika.ace.classes.ixs_keys import ixs_keys
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -95,7 +97,8 @@ def structure_issues(ace) -> List[Issue]:
         if ed is None or not ed.photon_production.get(mt):
             add("DLWP", f"MT={mt}", "no energy distribution")
     for i, pm in enumerate(rmt.particle_production or []):
-        for mt in (int(m) for m in pm):
+        # one key per MTRH entry: an MT may repeat (kika.ace.classes.ixs_keys)
+        for mt in ixs_keys(pm):
             where = f"particle {i + 1} MT={mt}"
             if mt not in ace.particle_production_xs.particle_cross_sections.get(i + 1, {}):
                 add("SIGH", where, "no production cross section")

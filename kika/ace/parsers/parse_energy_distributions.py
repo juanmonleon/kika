@@ -22,6 +22,7 @@ from kika.ace.parsers.laws import (
     parse_energy_dependent_yield
 )
 from kika.ace.classes.read_report import AceReadError, lost, note
+from kika.ace.classes.ixs_keys import ixs_keys
 from kika.ace.classes.xss import xss_ints
 import logging
 
@@ -299,8 +300,8 @@ def read_dlwh_block(ace: Ace, result: EnergyDistributionContainer, debug: bool =
             lost(ace, "DLWH", f"particle {i + 1}", f"IXS word {jed_idx} is past the XSS array")
             continue
         jed = int(ace.xss_data[jed_idx])
-        for mt, locator in zip(particle_mts, locators):
-            mt = int(mt)
+        # one key per MTRH entry: an MT may repeat (see kika.ace.classes.ixs_keys)
+        for mt, locator in zip(ixs_keys(particle_mts), locators):
             distributions = _read_laws(ace, "DLWH", f"particle {i + 1} MT={mt}", jed, locator, debug)
             if distributions:
                 result.particle_production[i][mt] = distributions

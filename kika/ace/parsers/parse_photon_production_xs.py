@@ -7,6 +7,7 @@ from kika.ace.classes.photon_production_xs import (
     PhotonProductionCrossSections, ParticleProductionCrossSections,
     YieldBasedCrossSection, DirectCrossSection
 )
+from kika.ace.classes.ixs_keys import ixs_keys
 from kika.ace.classes.read_report import lost
 
 # Setup logger
@@ -382,8 +383,9 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
         result.particle_types[i] = [int(mt) for mt in mts]
         
         # Process each reaction for this particle type
-        for j, (mt, loc) in enumerate(zip(mts, locators)):
-            mt_value = int(mt)
+        # An MT may repeat in MTRH (n + He-3 -> d + d, MT650): each entry
+        # has its own key (see kika.ace.classes.ixs_keys)
+        for j, (mt_value, loc) in enumerate(zip(ixs_keys(mts), locators)):
             loc_value = int(loc)
             
             if debug:
@@ -419,7 +421,7 @@ def read_particle_production_xs(ace: Ace, debug=False) -> ParticleProductionCros
                     continue
                 if xs:
                     # Keyed by particle type too: the same MT (e.g. MT5)
-                    # produces several particles
+                    # produces several particles; mt_value is the entry's key
                     result.particle_cross_sections.setdefault(i, {})[mt_value] = xs
                     result.has_data = True
                     if debug:

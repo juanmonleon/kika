@@ -8,6 +8,7 @@ from kika.ace.classes.angular_distribution.distributions.equiprobable import Equ
 from kika.ace.classes.angular_distribution.distributions.tabulated import TabulatedAngularDistribution
 from kika.ace.classes.angular_distribution.distributions.kalbach_mann import KalbachMannAngularDistribution
 import logging
+from kika.ace.classes.ixs_keys import ixs_keys
 from kika.ace.classes.read_report import lost
 
 # Setup logger
@@ -476,10 +477,10 @@ def read_andh_blocks(ace: Ace, debug: bool = False) -> None:
         success_count = 0
         error_count = 0
         kalbach_mann_count = 0  # Count of Law=44 (Kalbach-Mann) distributions
-        for i, (mt, locator) in enumerate(zip(mt_numbers, locators)):
+        # one key per MTRH entry: an MT may repeat (see kika.ace.classes.ixs_keys)
+        for i, (mt, locator) in enumerate(zip(ixs_keys(mt_numbers), locators)):
             locator_value = int(locator)
-            mt_value = int(mt)
-            mt = mt_value
+            mt_value = mt
             
             if locator_value == 0:
                 # Isotropic distribution according to documentation

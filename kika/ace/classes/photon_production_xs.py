@@ -274,8 +274,11 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
       contains the total production cross section for each particle type.
     """
     particle_types: Dict[int, List[int]] = field(default_factory=dict)
-    # particle type (1-based, PTYPE order) -> MT -> cross section. The
-    # inherited ``cross_sections`` stays empty: an MT alone is ambiguous here.
+    # particle type (1-based, PTYPE order) -> MT -> cross section, one entry
+    # per MTRH entry in its order; a repeated MT (n + He-3 -> d + d writes
+    # MT650 twice) keys its later entries by RepeatedMT(mt, k), see
+    # kika.ace.classes.ixs_keys. The inherited ``cross_sections`` stays
+    # empty: an MT alone is ambiguous here.
     particle_cross_sections: Dict[int, Dict[int, YieldBasedCrossSection]] = field(default_factory=dict)
     
     def get_reaction_xs(self, mt: int, particle_type: int) -> Optional[YieldBasedCrossSection]:
@@ -285,7 +288,8 @@ class ParticleProductionCrossSections(ProductionCrossSectionContainer):
         Parameters
         ----------
         mt : int
-            The MT number of the reaction
+            The MT number of the reaction, or the ``RepeatedMT`` key of a
+            later entry of a repeated MT
         particle_type : int
             The particle type index (1-based)
         """
