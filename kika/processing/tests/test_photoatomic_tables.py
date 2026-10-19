@@ -8,9 +8,10 @@
   (n, l), a j-partner BMM omits joins its sibling (Pb 6p3/2), a BMM shell the
   evaluation lacks is dropped (Ir 6s1/2), and the Eu-63 2p1/2 value at
   p_z = 30 a.u. is the paper's 4.61e-3.
+* The grid reads log-log within 1e-3 of the lin-lin data, keeping every node.
 * With ENDF/B-VIII.1 and LANL's eprdata25 beside the repo (``../NuclearData``),
-  Fe and Pb are built from the model and every block agrees with eprdata25 to
-  print precision, except where eprdata25 is wrong: the heating numbers (its
+  Fe and Pb are built from the model and every block agrees with eprdata25 on
+  eprdata25's nodes to print precision, except where eprdata25 is wrong: the heating numbers (its
   quadrature; kika agrees with the independent one) and Pb's Compton shell arrays.
 """
 from __future__ import annotations
@@ -119,6 +120,28 @@ def _library(z):
     return (photo[0], relax[0], ace) if photo and relax and ace.exists() else None
 
 
+def _nodes(fine, coarse):
+    """The index in ``fine`` of every node of ``coarse`` (a repeated node to its own copy)."""
+    first = np.searchsorted(fine, coarse * (1 - 1e-11), side="left")
+    copy = np.zeros(coarse.size, dtype=int)
+    copy[1:] = coarse[1:] == coarse[:-1]
+    return first + copy
+
+
+def test_the_grid_reads_log_log_within_the_tolerance():
+    from kika.processing.photoatomic.tables import LOGLOG_RTOL, refinedGrid
+    x = np.array([1.0, 10.0, 100.0, 1.0e3])
+    y = np.array([1.0e4, 50.0, 30.0, 1.0e-2])            # lin-lin data, far from log-log between nodes
+    grid = refinedGrid([(x, y)], lambda g: [np.interp(g, x, y)])
+    assert set(x) <= set(grid.tolist())
+    true = np.interp(grid, x, y)
+    for t in np.linspace(0.05, 0.95, 19):
+        u = grid[:-1] + t * (grid[1:] - grid[:-1])
+        log = np.exp(np.log(true[:-1]) + (np.log(true[1:]) - np.log(true[:-1])) * np.log(u / grid[:-1])
+                     / np.log(grid[1:] / grid[:-1]))
+        assert np.max(np.abs(log / np.interp(u, x, y) - 1)) <= LOGLOG_RTOL * 1.01
+
+
 def _rel(a, b):
     a, b = np.asarray(a, float), np.asarray(b, float)
     s = np.maximum(np.abs(a), np.abs(b))
@@ -136,10 +159,11 @@ def test_blocks_agree_with_eprdata25(z):
         pytest.skip("no ENDF/B-VIII.1 photoat/atomic_relax or eprdata25 in ../NuclearData")
     k, _ = photoatomicTable(kika.read(found[0]), kika.read(found[1]))
     e = read_ace(str(found[2]))
-    np.testing.assert_array_equal(k.energies.size, e.energies.size)
-    assert _rel(k.energies, e.energies) < 1e-11
+    # kika's grid is eprdata25's plus the nodes the log-log reading needs: compare on eprdata25's
+    at = _nodes(k.energies, e.energies)
+    assert _rel(k.energies[at], e.energies) < 1e-11
     for name in ("incoherent", "coherent", "photoelectric", "pair_production"):
-        a, b = getattr(k, name), getattr(e, name)
+        a, b = getattr(k, name)[at], getattr(e, name)
         assert np.array_equal(a == 0, b == 0)
         assert np.max(np.abs(np.log(a[a > 0]) - np.log(b[b > 0]))) < 1e-11
     assert _rel(k.coherent_integrated_form_factor, e.coherent_integrated_form_factor) < 1e-12
@@ -150,7 +174,7 @@ def test_blocks_agree_with_eprdata25(z):
                [(r.designator_1, r.designator_2) for r in rows]
         assert _rel([r.energy for r in k.relaxation[d]], [r.energy for r in rows]) < 1e-12
     # heating: eprdata25's quadrature leaves up to ~1e-4; most points agree to 1e-6
-    d = np.abs(k.heating - e.heating) / np.abs(e.heating)
+    d = np.abs(k.heating[at] - e.heating) / np.abs(e.heating)
     assert np.mean(d[e.energies > 20.0] < 1e-6) > 0.999
     if z == 26:
         assert _rel(k.shell_electrons, e.shell_electrons) < 1e-12

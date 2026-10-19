@@ -40,7 +40,8 @@ from kika.ace.classes.photoatomic import ComptonProfile, PhotoatomicAce, Relaxat
 
 from .compton import comptonShells
 
-__all__ = ["photoatomicTable", "PhotoatomicNotes", "ELECTRON_REST_ENERGY", "unionGrid"]
+__all__ = ["photoatomicTable", "PhotoatomicNotes", "ELECTRON_REST_ENERGY", "unionGrid", "refinedGrid",
+           "LOGLOG_RTOL"]
 
 #: m_e c² in eV: CODATA 2022 electron mass, as NJOY3 evaluates it (5.485799090441e-4 amu).
 ELECTRON_REST_ENERGY = 510998.95069304795
@@ -117,6 +118,71 @@ def _onGrid(x, y, grid) -> np.ndarray:
             k = first[i]
             out[i] = y[k - 1] + (y[k] - y[k - 1]) / (x[k] - x[k - 1]) * (g - x[k - 1])
     return out
+
+
+#: How far log-log (what MCNP and OpenMC read between nodes) may stray from the
+#: lin-lin the evaluation states: the tolerance of the rest of the processing.
+LOGLOG_RTOL = 1.0e-3
+
+
+def _loglogMisses(grid, columns, rtol=LOGLOG_RTOL):
+    """Intervals where a column read log-log misses its lin-lin by more than ``rtol``.
+
+    Tested at a quarter, the half and three quarters of every interval between two
+    distinct nodes where the column is positive at both ends. Returns a bool per
+    interval.
+    """
+    a, b = grid[:-1], grid[1:]
+    wide = b > a
+    bad = np.zeros(a.size, dtype=bool)
+    for y in columns:
+        ya, yb = y[:-1], y[1:]
+        live = wide & (ya > 0.0) & (yb > 0.0)
+        if not live.any():
+            continue
+        i = np.flatnonzero(live)
+        la, lb = np.log(a[i]), np.log(b[i])
+        lya, lyb = np.log(ya[i]), np.log(yb[i])
+        for t in (0.25, 0.5, 0.75):
+            x = a[i] + t * (b[i] - a[i])
+            lin = ya[i] + t * (yb[i] - ya[i])
+            log = np.exp(lya + (lyb - lya) * (np.log(x) - la) / (lb - la))
+            bad[i] |= np.abs(log - lin) > rtol * np.abs(lin)
+    return bad
+
+
+def _openings(grid, columns, rtol=LOGLOG_RTOL):
+    """A node at a + √rtol·(b − a) in every interval where a column opens from 0 (no step).
+
+    Log-log cannot read a zero; the transport puts an infinitesimal there, so the
+    first sub-interval loses its lin-lin area, which this bounds to rtol of the interval's.
+    """
+    a, b = grid[:-1], grid[1:]
+    new = []
+    for y in columns:
+        opens = (b > a) & (y[:-1] == 0.0) & (y[1:] > 0.0)
+        new.append(a[opens] + np.sqrt(rtol) * (b[opens] - a[opens]))
+    return np.concatenate(new) if new else np.empty(0)
+
+
+def refinedGrid(tables, columnsOf, rounds: int = 60) -> np.ndarray:
+    """The union grid with nodes added until every column reads log-log within :data:`LOGLOG_RTOL`.
+
+    ``tables`` are the ``(x, y)`` the union is made of; ``columnsOf(grid)`` gives
+    the columns the transport interpolates, on a grid. Every node of the union is
+    kept; added nodes split an interval at its midpoint.
+    """
+    grid = unionGrid(tables)
+    opening = _openings(grid, columnsOf(grid))
+    if opening.size:
+        grid = np.sort(np.concatenate((grid, opening)))
+    for _ in range(rounds):
+        bad = _loglogMisses(grid, columnsOf(grid))
+        if not bad.any():
+            return grid
+        mid = 0.5 * (grid[:-1][bad] + grid[1:][bad])
+        grid = np.sort(np.concatenate((grid, mid)))
+    raise ValueError(f"the photon grid does not read log-log within {LOGLOG_RTOL} after {rounds} rounds")
 
 
 def _table(reaction):
@@ -356,6 +422,10 @@ def photoatomicTable(photoat, relaxation, *, extension: str = ".00p", awr: Optio
     ``photoat`` is a photo-atomic ``reactionSuite`` (interaction ``atomic``) and
     ``relaxation`` the element's atomic-relaxation PoPs, both from the model. The
     electron blocks are not part of this table; ``electron_words`` is empty.
+
+    The energy grid is the union of the evaluation's grids (eprdata25's) with
+    nodes added where a table read log-log, as the transport reads it, would
+    miss the lin-lin data by more than :data:`LOGLOG_RTOL` (:func:`refinedGrid`).
     """
     from kika.ace.classes.header import Header
     from kika.nuclear_data.model import ATOMIC_INTERACTION
@@ -365,9 +435,17 @@ def photoatomicTable(photoat, relaxation, *, extension: str = ".00p", awr: Optio
     notes = PhotoatomicNotes()
     reactions = {r.ENDF_MT: r for r in list(photoat.reactions) + list(photoat.sums) if r.ENDF_MT is not None}
     tables = {mt: _table(r) for mt, r in sorted(reactions.items())}
-    grid = unionGrid([tables[mt] for mt in sorted(tables)])
+    subshellMts = sorted(mt for mt in tables if mt >= _FIRST_SUBSHELL_MT)
+
+    def columns(g):
+        """What the transport interpolates log-log: the four ESZG columns and every subshell."""
+        on = {mt: _onGrid(*tables[mt], g) for mt in tables if mt in (502, 504, 515, 517) or mt in subshellMts}
+        zero = np.zeros(g.size)
+        pe = sum((on[mt] for mt in subshellMts), zero)
+        return [on[502], on[504], on.get(515, zero) + on.get(517, zero), pe] + [on[mt] for mt in subshellMts]
+
+    grid = refinedGrid([tables[mt] for mt in sorted(tables)], columns)
     on = {mt: _onGrid(*tables[mt], grid) for mt in tables}
-    subshellMts = sorted(mt for mt in on if mt >= _FIRST_SUBSHELL_MT)
     pe = np.zeros(grid.size)
     for mt in subshellMts:
         pe = pe + on[mt]
