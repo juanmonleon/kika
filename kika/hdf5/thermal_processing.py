@@ -64,7 +64,7 @@ def _evaluationTemperatures(suite) -> List[float]:
 
 
 def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
-                   useEndfData: bool = True, report=None, options=None):
+                   useEndfData: bool = True, report=None, options=None, workers=None):
     """The processed thermal suite of the evaluation at ``thermal`` (path).
 
     ``name`` is the OpenMC table name (``c_H_in_H2O``); ``temperatures`` in
@@ -76,9 +76,13 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
     cumulative structure factors at the temperature. ``neutron`` is the
     principal nuclide's neutron tape: its atomic weight ratio is the table's
     header AWR, as ACER takes it (graphite 11.89365, where the scattering law's
-    B(3) is 11.898). Without it the header carries B(3).
+    B(3) is 11.898). Without it the header carries B(3). ``workers`` is the threads for
+    the incident energies, as :func:`kika.hdf5.processing.processSuite` takes it
+    (:mod:`kika.processing.workers`); the tables do not depend on it.
     """
     m = _m()
+    import dataclasses
+
     import kika
     from kika.processing.thermal import ThermalInelasticOptions, inelasticTables
     from .ace_thermal import nuclidesFromPairs
@@ -86,6 +90,8 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
     from .thermal_names import THERMAL_DATA
 
     report = report if report is not None else m.ConversionReport()
+    if workers is not None:
+        options = dataclasses.replace(options or ThermalInelasticOptions(), workers=workers)
     if options is not None and options.iinc == 1:
         return _processFreeGas(thermal, name=name, temperatures=temperatures, report=report,
                                options=options)

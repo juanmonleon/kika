@@ -16,6 +16,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #ifndef M_PI
 #define M_PI 3.141592653589793238462643383279502884
 #endif
@@ -23,6 +26,11 @@
 #ifdef __FAST_MATH__
 #error "the thermal kernel requires strict floating-point arithmetic"
 #endif
+
+/* Python's float ** is the C runtime's pow: the Universal CRT's (ucrtbase.dll) on
+ * Windows, looked up at import because MinGW links its own; pow(x, 2) is not x*x. */
+typedef double (*pow_function)(double, double);
+static pow_function crt_pow = pow;
 
 #define SABFLG (-225.0)
 #define IMAX 20
@@ -655,7 +663,132 @@ static PyObject *py_endf11(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+/* THERMR's tpend then ACER's acesix (iwt = 2) on one incident energy, operation for
+ * operation thermal._acer's reference loop (kept in the tests): the density over the
+ * integrated cross section to 7 figures (6 below 1e-9), every field through NJOY's a11
+ * writer, then the equiprobable-area thinning. Out: E', the density before
+ * normalisation, each point's area and its clipped cosines; the caller normalises. */
+typedef struct { double *x, *y, *f, *c; Py_ssize_t n, cap; int nang; } AceOut;
+
+static int ace_push(AceOut *o, double x, double y, double f, const double *c) {
+    if (o->n == o->cap) {
+        Py_ssize_t cap = o->cap ? 2 * o->cap : 256;
+        double *nx = realloc(o->x, cap * sizeof(double)), *ny, *nf, *nc;
+        if (!nx) return 0;
+        o->x = nx;
+        if (!(ny = realloc(o->y, cap * sizeof(double)))) return 0;
+        o->y = ny;
+        if (!(nf = realloc(o->f, cap * sizeof(double)))) return 0;
+        o->f = nf;
+        if (!(nc = realloc(o->c, cap * o->nang * sizeof(double)))) return 0;
+        o->c = nc;
+        o->cap = cap;
+    }
+    o->x[o->n] = x; o->y[o->n] = y; o->f[o->n] = f;
+    double *dst = o->c + o->n * o->nang;
+    for (int j = 0; j < o->nang; j++)
+        dst[j] = c[j] < -1.0 ? -1.0 : (c[j] > 1.0 ? 1.0 : c[j]);    /* np.clip */
+    o->n++;
+    return 1;
+}
+
+static int ace_energy(const double *xin, const double *yin, Py_ssize_t nep, int nl, double xsi,
+                      int nang, AceOut *o) {
+    double *x = malloc((nep ? nep : 1) * sizeof(double));
+    double *y = malloc((nep ? nep : 1) * nl * sizeof(double));
+    double *cos = malloc((nep ? nep : 1) * nang * sizeof(double));
+    double *c = malloc((nang ? nang : 1) * sizeof(double));
+    int ok = x && y && cos && c;
+    if (!ok) goto done;
+    double rx = 1.0 / xsi;
+    for (Py_ssize_t i = 0; i < nep; i++) {
+        x[i] = endf11(xin[i]);
+        double v = yin[i * nl] * rx;
+        y[i * nl] = endf11(v >= 1e-9 ? sigfig(v, 7, 0) : sigfig(v, 6, 0));
+        for (int j = 1; j < nl; j++) y[i * nl + j] = endf11(yin[i * nl + j]);
+        for (int j = 0; j < nang; j++) cos[i * nang + j] = y[i * nl + 1 + j];
+    }
+    if (nep >= 3) {
+        memcpy(cos, cos + nang, nang * sizeof(double));
+        memcpy(cos + (nep - 1) * nang, cos + (nep - 2) * nang, nang * sizeof(double));
+    }
+    const double eps = 1e-5;
+    double xl = nep ? x[0] : 0, yl = nep ? y[0] : 0, total = 0.0, fract = 1.0;
+    Py_ssize_t i = 0, k = 1;
+    while (i < nep) {
+        double xi = x[i], yi = y[i * nl], xn;
+        i++;
+        for (;;) {
+            double add = (yi + yl) * (xi - xl) / 2;
+            if (xi == xl) break;
+            if (i == nep) {
+                xn = xi;
+                fract = total + add;
+            } else {
+                if (total + add > eps / 10) fract = total + add;
+                if (!(total + add >= fract - fract / 10000)) { total += add; break; }
+                if (total + add < fract + fract / 10000) xn = xi;
+                else if (fabs(yi - yl) > (yi + yl) / 100000) {
+                    double f = (yi - yl) / (xi - xl);
+                    double disc = fabs(crt_pow(yl / f, 2.0) + 2 * (fract - total) / f);
+                    xn = xl - yl / f + (f > 0 ? 1.0 : -1.0) * sqrt(disc);
+                } else {
+                    double a = xl + (fract - total) / yl;
+                    xn = xi < a ? xi : a;
+                }
+            }
+            double yn = yl + (yi - yl) * (xn - xl) / (xi - xl);
+            /* the first THERMR point at or above xn (aceth.f90:432-443); xn only grows */
+            while (k < nep - 1 && x[k] < xn) k++;
+            double lo = x[k - 1], hi = x[k];
+            const double *ck = cos + k * nang, *cl = cos + (k - 1) * nang;
+            if (fabs(xn - hi) < eps) memcpy(c, ck, nang * sizeof(double));
+            else if (fabs(xn - lo) < eps) memcpy(c, cl, nang * sizeof(double));
+            else for (int j = 0; j < nang; j++) c[j] = cl[j] + (ck[j] - cl[j]) * (xn - lo) / (hi - lo);
+            if (!ace_push(o, xn, yn, fract, c)) { ok = 0; goto done; }
+            xl = xn; yl = yn; fract = 1.0; total = 0.0;
+            if (xl < xi) continue;
+            break;
+        }
+        xl = xi; yl = yi;
+    }
+ done:
+    free(x); free(y); free(cos); free(c);
+    return ok;
+}
+
+static PyObject *py_ace_energy(PyObject *self, PyObject *args) {
+    PyObject *ox, *oy;
+    double xsi;
+    int nang;
+    Py_buffer bx = {0}, by = {0};
+    if (!PyArg_ParseTuple(args, "OOdi", &ox, &oy, &xsi, &nang)) return NULL;
+    if (!buffer(ox, &bx, 0, 0)) return NULL;
+    Py_ssize_t nep = bx.len / 8;
+    if (!buffer(oy, &by, 0, 0)) { PyBuffer_Release(&bx); return NULL; }
+    int nl = nep ? (int)(by.len / 8 / nep) : 0;
+    if (nang < 1 || (nep && (by.len != nep * nl * 8 || nl < nang + 1))) {
+        PyBuffer_Release(&bx); PyBuffer_Release(&by);
+        PyErr_SetString(PyExc_ValueError, "ace_energy: y must be (len(x), >= nang + 1)");
+        return NULL;
+    }
+    AceOut o = {NULL, NULL, NULL, NULL, 0, 0, nang};
+    int ok;
+    Py_BEGIN_ALLOW_THREADS
+    ok = ace_energy(bx.buf, by.buf, nep, nl, xsi, nang, &o);
+    Py_END_ALLOW_THREADS
+    PyBuffer_Release(&bx); PyBuffer_Release(&by);
+    PyObject *result = NULL;
+    if (!ok) PyErr_NoMemory();
+    else result = Py_BuildValue("y#y#y#y#", (char *)o.x, o.n * 8, (char *)o.y, o.n * 8,
+                                (char *)o.f, o.n * 8, (char *)o.c, o.n * nang * 8);
+    free(o.x); free(o.y); free(o.f); free(o.c);
+    return result;
+}
+
 static PyMethodDef methods[] = {
+    {"ace_energy", py_ace_energy, METH_VARARGS,
+     "THERMR tpend then ACER acesix iwt=2 on one incident energy, bit for bit the Python reference."},
     {"endf11", py_endf11, METH_VARARGS, "Round an array in place as NJOY writes ENDF fields (a11)."},
     {"calcem", calcem, METH_VARARGS, "THERMR calcem for one incident energy: (count, xsi)."},
     {"sig", py_sig, METH_VARARGS, "THERMR sig: the double-differential cross section."},
@@ -664,8 +797,18 @@ static PyMethodDef methods[] = {
 };
 static struct PyModuleDef module = {PyModuleDef_HEAD_INIT, "_thermal_native", NULL, 0, methods};
 PyMODINIT_FUNC PyInit__thermal_native(void) {
+#ifdef _WIN32
+    HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+    if (!ucrt) ucrt = LoadLibraryW(L"ucrtbase.dll");
+    FARPROC found = ucrt ? GetProcAddress(ucrt, "pow") : NULL;
+    if (!found) {
+        PyErr_SetString(PyExc_ImportError, "native thermal: the Universal CRT's pow is not available");
+        return NULL;
+    }
+    crt_pow = (pow_function)(void (*)(void))found;
+#endif
     PyObject *m = PyModule_Create(&module);
     if (m == NULL) return NULL;
-    if (PyModule_AddIntConstant(m, "API_VERSION", 2) < 0) { Py_DECREF(m); return NULL; }
+    if (PyModule_AddIntConstant(m, "API_VERSION", 3) < 0) { Py_DECREF(m); return NULL; }
     return m;
 }

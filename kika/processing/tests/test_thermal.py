@@ -9,7 +9,101 @@ import pytest
 
 native = pytest.importorskip("kika.processing._thermal_native")
 
-from kika.processing.thermal import _acer  # noqa: E402
+from kika.processing.thermal import _aceTables  # noqa: E402
+
+
+# -- the Python loop the native tpend + ACER kernel reproduces bit for bit ----------------
+def _reference_tpend(x, y, xsi):
+    """What THERMR's ``tpend`` leaves on the tape ACER reads: ``(E', y)``.
+
+    The density is σ(E→E')/σ(E), to 7 figures (6 below 1e-9) -- so ACER's 1e-6
+    merge threshold is on a unit area, not in barns -- and every number then
+    goes through NJOY's 11-column ENDF writer (``endf.f90`` ``a11``): 7
+    significant figures in exponent form, 9 in the fixed form it uses for
+    positive values in (0.1, 1e7). Two outgoing energies that differ beyond
+    the 7th figure read back equal, and ACER skips the second.
+    """
+    out = y.copy()
+    rx = 1.0 / xsi
+    out[:, 0] = [native.sigfig(v * rx, 7, 0) if v * rx >= 1e-9 else native.sigfig(v * rx, 6, 0)
+                 for v in y[:, 0]]
+    x = np.ascontiguousarray(x, dtype=float).copy()
+    out = np.ascontiguousarray(out, dtype=float)
+    native.endf11(x)
+    native.endf11(out.reshape(-1))
+    return x, out
+
+
+def _reference_acer(x, y, nang):
+    """ACER's ``acesix`` with ``iwt = 2`` on one incident energy: ``(E', pdf, cdf, cosines)``.
+
+    ``y`` is what THERMR's ``tpend`` leaves on the tape (:func:`_reference_tpend`).
+    """
+    nep = len(x)
+    cos = y[:, 1:1 + nang].copy()
+    if nep >= 3:
+        cos[0] = cos[1]
+        cos[-1] = cos[-2]
+    sig = y[:, 0]
+    eps = 1e-5
+    out_x, out_y, out_f, out_c = [], [], [], []
+    xl, yl = x[0], sig[0]
+    total = 0.0
+    fract = 1.0
+    i = 0
+    while i < nep:
+        xi, yi = x[i], sig[i]
+        i += 1
+        while True:
+            add = (yi + yl) * (xi - xl) / 2
+            if xi == xl:
+                break
+            if i == nep:
+                xn = xi
+                fract = total + add
+            else:
+                if total + add > eps / 10:
+                    fract = total + add
+                if not total + add >= fract - fract / 10000:
+                    total += add
+                    break
+                if total + add < fract + fract / 10000:
+                    xn = xi
+                elif abs(yi - yl) > (yi + yl) / 100000:
+                    f = (yi - yl) / (xi - xl)
+                    disc = abs((yl / f) ** 2 + 2 * (fract - total) / f)
+                    xn = xl - yl / f + np.sign(f) * np.sqrt(disc)
+                else:
+                    xn = min(xl + (fract - total) / yl, xi)
+            yn = yl + (yi - yl) * (xn - xl) / (xi - xl)
+            # The cosines at xn, found as ACER finds them: the first THERMR
+            # point at or above xn (aceth.f90:432-443), then that point's own
+            # cosines when xn is within eps of it (iwt=2: it always is).
+            k = 1
+            while k < nep - 1 and x[k] < xn:
+                k += 1
+            lo, hi = x[k - 1], x[k]
+            if abs(xn - hi) < eps:
+                c = cos[k]
+            elif abs(xn - lo) < eps:
+                c = cos[k - 1]
+            else:
+                c = cos[k - 1] + (cos[k] - cos[k - 1]) * (xn - lo) / (hi - lo)
+            out_x.append(xn)
+            out_y.append(yn)
+            out_f.append(fract)
+            out_c.append(np.clip(c, -1.0, 1.0))
+            xl, yl = xn, yn
+            fract = 1.0
+            total = 0.0
+            if xl < xi:
+                continue
+            break
+        xl, yl = xi, yi
+    area = np.cumsum(out_f)
+    total = area[-1] if len(area) else 0.0
+    return (np.asarray(out_x), np.asarray(out_y) / total, area / total, np.asarray(out_c))
+
 
 
 def test_endf11_reads_back_as_njoy_writes():
@@ -44,9 +138,25 @@ def test_acer_merges_intervals_below_one_millionth_of_the_area():
     y = np.zeros((5, 3))
     y[:, 0] = [0.0, 1e-4, 1e-4, 1.0, 0.0]                # the first intervals carry < 1e-6
     y[:, 1:] = [[0.1, 0.2]] * 5
-    ex, pdf, cdf, cos = _acer(x, y, 2)
+    ex, pdf, cdf, cos = _aceTables(x, y, 1.0, 2)
     assert ex.tolist() == [1.0, 2.0]                     # 1e-9, 2e-9 merged into 1.0
     assert cdf[-1] == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_the_native_ace_tables_are_the_python_loop_bit_for_bit(seed):
+    rng = np.random.default_rng(seed)
+    n, nang = 400, 8
+    x = np.sort(rng.uniform(0, 2, n)) * 10.0 ** rng.integers(-3, 1)
+    x[0] = 0.0
+    y = np.empty((n, nang + 1))
+    y[:, 0] = rng.lognormal(0, 3, n) * (rng.random(n) > 0.05)    # some zeros, a wide range
+    y[:, 1:] = np.sort(rng.uniform(-1.05, 1.05, (n, nang)), axis=1)
+    xsi = float(rng.uniform(0.5, 50))
+    expect = _reference_acer(*_reference_tpend(x, y, xsi), nang)
+    got = _aceTables(x, y, xsi, nang)
+    for a, b in zip(expect, got):
+        assert a.shape == b.shape and np.array_equal(a, b)
 
 
 # -- free gas (THERMR iinc=1), roadmap NR-2 ------------------------------------------------
@@ -94,6 +204,32 @@ def test_free_gas_tables_carry_the_elastic_and_normalised_spectra():
     assert np.allclose(xs.ys, np.interp(xs.xs, E, sigma), rtol=1e-9)
     for spectrum in form.energy.function1ds:
         assert spectrum.cdf[-1] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_the_tables_do_not_depend_on_the_workers():
+    def flat(result):
+        xs, form, _ = result
+        out = [xs.xs, xs.ys]
+        for spectrum, angular in zip(form.energy.function1ds, form.energyAngular.function2ds):
+            out += [spectrum.xs, spectrum.pdf, spectrum.cdf] + [t.xs for t in angular.function1ds]
+        return out
+    elastic = ([1e-6, 1.0], [20.0, 20.0])
+    one, many = (flat(th.freeGasTables(15.858, 293.6, elastic, emax=0.5,
+                                       options=th.ThermalInelasticOptions(iinc=1, workers=w)))
+                 for w in (1, 4))
+    assert len(one) == len(many)
+    assert all(np.array_equal(a, b) for a, b in zip(one, many))
+
+
+def test_process_thermal_takes_the_workers_as_process_suite_does(monkeypatch):
+    from kika.hdf5 import thermal_processing
+
+    seen = {}
+    monkeypatch.setattr(thermal_processing, "_processFreeGas",
+                        lambda path, **kwargs: seen.update(kwargs["options"].__dict__))
+    thermal_processing.processThermal("n-001_H_001.endf", name="c_H_free", temperatures=[293.6],
+                                      options=th.ThermalInelasticOptions(iinc=1), workers=3)
+    assert seen["workers"] == 3 and seen["iinc"] == 1
 
 
 def test_free_gas_options_are_checked():

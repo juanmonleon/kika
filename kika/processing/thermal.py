@@ -124,6 +124,9 @@ class _Inputs:
 def _native():
     from . import _thermal_native
 
+    if getattr(_thermal_native, "API_VERSION", 0) != 3:
+        raise ImportError("kika.processing._thermal_native is out of date: rebuild it "
+                          "(python build_native.py)")
     return _thermal_native
 
 
@@ -233,97 +236,26 @@ def _calcem(inputs: _Inputs, enow: float, options: ThermalInelasticOptions):
     return xs[:n].copy(), ys[:n * nl].reshape(n, nl).copy(), xsi
 
 
-def _tpend(x, y, xsi):
-    """What THERMR's ``tpend`` leaves on the tape ACER reads: ``(E', y)``.
+def _aceTables(x, y, xsi, nang):
+    """THERMR's ``tpend`` then ACER's ``acesix`` with ``iwt = 2`` on one incident energy:
+    ``(E', pdf, cdf, cosines)``, from :func:`_calcem`'s ``(x, y, xsi)``.
 
-    The density is σ(E→E')/σ(E), to 7 figures (6 below 1e-9) -- so ACER's 1e-6
-    merge threshold is on a unit area, not in barns -- and every number then
-    goes through NJOY's 11-column ENDF writer (``endf.f90`` ``a11``): 7
-    significant figures in exponent form, 9 in the fixed form it uses for
-    positive values in (0.1, 1e7). Two outgoing energies that differ beyond
-    the 7th figure read back equal, and ACER skips the second.
+    ``tpend`` writes the density as σ(E→E')/σ(E) to 7 figures (6 below 1e-9) -- so ACER's
+    1e-6 merge threshold is on a unit area, not in barns -- and every number through NJOY's
+    11-column ENDF writer (``endf.f90`` ``a11``): two outgoing energies that differ beyond
+    the 7th figure read back equal, and ACER skips the second. ACER then thins the points to
+    equal areas and takes each one's cosines from the first THERMR point at or above it
+    (``aceth.f90``:432-443). The native kernel does both without the GIL; the Python loop it
+    reproduces bit for bit is kept in ``tests/test_thermal.py``.
     """
-    native = _native()
-    out = y.copy()
-    rx = 1.0 / xsi
-    out[:, 0] = [native.sigfig(v * rx, 7, 0) if v * rx >= 1e-9 else native.sigfig(v * rx, 6, 0)
-                 for v in y[:, 0]]
-    x = np.ascontiguousarray(x, dtype=float).copy()
-    out = np.ascontiguousarray(out, dtype=float)
-    native.endf11(x)
-    native.endf11(out.reshape(-1))
-    return x, out
-
-
-def _acer(x, y, nang):
-    """ACER's ``acesix`` with ``iwt = 2`` on one incident energy: ``(E', pdf, cdf, cosines)``.
-
-    ``y`` is what THERMR's ``tpend`` leaves on the tape (:func:`_tpend`).
-    """
-    nep = len(x)
-    cos = y[:, 1:1 + nang].copy()
-    if nep >= 3:
-        cos[0] = cos[1]
-        cos[-1] = cos[-2]
-    sig = y[:, 0]
-    eps = 1e-5
-    out_x, out_y, out_f, out_c = [], [], [], []
-    xl, yl = x[0], sig[0]
-    total = 0.0
-    fract = 1.0
-    i = 0
-    while i < nep:
-        xi, yi = x[i], sig[i]
-        i += 1
-        while True:
-            add = (yi + yl) * (xi - xl) / 2
-            if xi == xl:
-                break
-            if i == nep:
-                xn = xi
-                fract = total + add
-            else:
-                if total + add > eps / 10:
-                    fract = total + add
-                if not total + add >= fract - fract / 10000:
-                    total += add
-                    break
-                if total + add < fract + fract / 10000:
-                    xn = xi
-                elif abs(yi - yl) > (yi + yl) / 100000:
-                    f = (yi - yl) / (xi - xl)
-                    disc = abs((yl / f) ** 2 + 2 * (fract - total) / f)
-                    xn = xl - yl / f + np.sign(f) * np.sqrt(disc)
-                else:
-                    xn = min(xl + (fract - total) / yl, xi)
-            yn = yl + (yi - yl) * (xn - xl) / (xi - xl)
-            # The cosines at xn, found as ACER finds them: the first THERMR
-            # point at or above xn (aceth.f90:432-443), then that point's own
-            # cosines when xn is within eps of it (iwt=2: it always is).
-            k = 1
-            while k < nep - 1 and x[k] < xn:
-                k += 1
-            lo, hi = x[k - 1], x[k]
-            if abs(xn - hi) < eps:
-                c = cos[k]
-            elif abs(xn - lo) < eps:
-                c = cos[k - 1]
-            else:
-                c = cos[k - 1] + (cos[k] - cos[k - 1]) * (xn - lo) / (hi - lo)
-            out_x.append(xn)
-            out_y.append(yn)
-            out_f.append(fract)
-            out_c.append(np.clip(c, -1.0, 1.0))
-            xl, yl = xn, yn
-            fract = 1.0
-            total = 0.0
-            if xl < xi:
-                continue
-            break
-        xl, yl = xi, yi
-    area = np.cumsum(out_f)
+    y = np.ascontiguousarray(y, dtype=float)
+    bx, by, bf, bc = _native().ace_energy(np.ascontiguousarray(x, dtype=float), y.reshape(-1),
+                                          float(xsi), int(nang))
+    ex, density, area = (np.frombuffer(b).copy() for b in (bx, by, bf))
+    cos = np.frombuffer(bc).reshape(-1, nang).copy()
+    area = np.cumsum(area)
     total = area[-1] if len(area) else 0.0
-    return (np.asarray(out_x), np.asarray(out_y) / total, area / total, np.asarray(out_c))
+    return ex, density / total, area / total, cos
 
 
 def _linlin(table, x: float) -> float:
@@ -336,6 +268,21 @@ def _linlin(table, x: float) -> float:
     if E[i + 1] == E[i]:
         return float(sigma[i + 1])
     return float(sigma[i] + (sigma[i + 1] - sigma[i]) * (x - E[i]) / (E[i + 1] - E[i]))
+
+
+def _discreteTables(cos, ex):
+    """:func:`_discrete` of each row of ``cos`` at its ``ex``, in one pass: the rows sorted
+    at once, and one read-only pdf and cdf shared by the tables, all of ``nang`` lines."""
+    from kika.nuclear_data import model as m
+
+    values = np.sort(np.asarray(cos, dtype=float), axis=1)
+    n = values.shape[1]
+    pdf, cdf = np.full(n, 1.0 / n), np.arange(1, n + 1) / n
+    pdf.setflags(write=False)
+    cdf.setflags(write=False)
+    return [m.Xs_pdf_cdf1d(xs=row, pdf=pdf, cdf=cdf, interpolation=m.Interpolation.flat,
+                           numberOfDiscrete=n, outerDomainValue=float(outer))
+            for row, outer in zip(values, ex)]
 
 
 def _discrete(values, outer):
@@ -411,9 +358,9 @@ def _entry(kernel, enow, inputs, nang, nmix, elastic):
         pdf=density/norm;cdf=cumulative/norm
         cos=np.clip(y[:,1:1+nang],-1.,1.)
     else:
-        ex, pdf, cdf, cos = _acer(*_tpend(x, y, xsi), nang)
-    tables = [_discrete(c, e) for c, e in zip(cos, ex)]
-    means = np.asarray([np.mean(c) for c in cos], dtype=float)
+        ex, pdf, cdf, cos = _aceTables(x, y, xsi, nang)
+    tables = _discreteTables(cos, ex)
+    means = cos.mean(axis=1)
     if len(cdf) and cdf[0] > 0.0:
         ex, pdf, cdf = np.insert(ex, 0, 0.0), np.insert(pdf, 0, 0.0), np.insert(cdf, 0, 0.0)
         dmu = 2.0 / nang
@@ -492,15 +439,17 @@ def _tables(inputs: _Inputs, temperature, nmix, options, report, elastic):
     from kika.processing.workers import pool_default, resolve
     workers = resolve(options.workers, pool_default())
 
+    def one(e):
+        return _entry(_calcem(inputs, e, options), e, inputs, nang, nmix, elastic)
+
     def compute(points):
+        # calcem and the ACE thinning release the GIL: each thread takes whole energies.
         if workers > 1 and len(points) > 1:
             from concurrent.futures import ThreadPoolExecutor
 
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                kernels = list(pool.map(lambda e: _calcem(inputs, e, options), points))
-        else:
-            kernels = [_calcem(inputs, e, options) for e in points]
-        return [_entry(k, e, inputs, nang, nmix, elastic) for k, e in zip(kernels, points)]
+                return list(pool.map(one, points))
+        return [one(e) for e in points]
 
     entries = compute(energies)
     # The S(alpha, beta) tables get the incident nodes their interpolation needs (ND-8); the
