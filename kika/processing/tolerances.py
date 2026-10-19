@@ -16,22 +16,30 @@ PXB-065).
 table and then thinned, and the three errors add up. Of the declared
 tolerance (``thinning``, BROADR's ``errthn``, 1e-3) half is the source's (the
 reconstruction tabulates at half its rtol; MF3 under another law is linearised
-to 1e-4), a quarter the broadened table's and a quarter the thinning's, so the
-table delivered stays within the tolerance it states. NJOY spends its whole
-``errthn`` on the broadening and again on the thinning, on top of RECONR's
-``err``.
+to 1e-4), a twentieth the broadened table's and the rest, nine twentieths, the
+thinning's, so the table delivered stays within the tolerance it states. The
+thinning's share decides the points written; the Doppler table's only costs
+time. Measured against a reference at 2e-5 (runbook PXB-066): U-235 79 069
+points and 7.2e-4 at most (thermal 1.4e-4), against 126 313 with a quarter
+each and 59 976 (1.4e-3, over the tolerance) with the whole of it each; a
+tighter source (reconstruction at 2e-4) bought 62 438 points at 691 s against
+74 s. NJOY spends its whole ``errthn`` on the broadening and again on the
+thinning, on top of RECONR's ``err``.
 """
 from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["THERMAL_RANGE", "THERMAL_FACTOR", "SOURCE_SHARE", "thermalFactor", "heatedShares"]
+__all__ = ["THERMAL_RANGE", "THERMAL_FACTOR", "SOURCE_SHARE", "DOPPLER_SHARE", "thermalFactor",
+           "heatedShares"]
 
 #: eV: below it every tolerance is divided by :data:`THERMAL_FACTOR` (NJOY's ``trange``).
 THERMAL_RANGE = 0.4999
 THERMAL_FACTOR = 5.0
-#: The share of a heated table's tolerance its 0 K source takes.
+#: The shares of a heated table's tolerance: its 0 K source's, the Doppler table's;
+#: the thinning takes the rest.
 SOURCE_SHARE = 0.5
+DOPPLER_SHARE = 0.05
 
 
 def thermalFactor(energies):
@@ -41,5 +49,5 @@ def thermalFactor(energies):
 
 def heatedShares(tolerance: float):
     """``(broadening, thinning)`` relative tolerances of a heated table stated to ``tolerance``."""
-    rest = (1.0 - SOURCE_SHARE) * float(tolerance)
-    return rest / 2.0, rest / 2.0
+    tolerance = float(tolerance)
+    return DOPPLER_SHARE * tolerance, (1.0 - SOURCE_SHARE - DOPPLER_SHARE) * tolerance

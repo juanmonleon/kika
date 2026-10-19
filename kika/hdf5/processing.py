@@ -668,10 +668,10 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
     stated to, five times tighter below 0.4999 eV as in NJOY. 1e-3 is what the
     official libraries are processed to (BROADR's ``errthn``). It is shared so the
     stages do not add up beyond it (:func:`heatedTolerances`): half is the 0 K
-    source's, a quarter the Doppler table's, a quarter the thinning's, which drops
+    source's, a twentieth the Doppler table's, the rest the thinning's, which drops
     points while every reaction, read lin-lin, reproduces every dropped point to
-    it. ``None`` keeps the full union grid (the broadening then takes both
-    quarters). The 0 K elastic is thinned within what the reconstruction leaves
+    it. ``None`` keeps the full union grid (the broadening then takes what the
+    source leaves). The 0 K elastic is thinned within what the reconstruction leaves
     of the same tolerance. ``workers`` broadens that
     many temperatures at once, one process each (default: one per temperature,
     at most four -- the broadening is single-threaded), and computes that many
