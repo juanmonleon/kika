@@ -11,6 +11,7 @@ retained, since their densities may differ. Negative densities follow
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import List, Tuple
 
 import numpy as np
@@ -112,6 +113,29 @@ def _legendreMoments(coefficients, negative):
     return values[1:]/values[0]
 
 
+#: The absolute floor of the angular thinning, on a density normalised to 1 (NJOY's).
+ANGULAR_THIN_FLOOR = 1.0e-7
+
+
+def _thinned(table, clipped, mu, p, target, options, outer, what):
+    """``(table, clipped)`` with the points the shape does not need dropped, to
+    three quarters of ``options.rtol`` of the density itself (an absolute term
+    on the peak would let the backward tail of a forward-peaked law go and move
+    its moments), while the moments still pass; else ``table``."""
+    from kika.algebra import thin_common_grid
+
+    q = np.maximum(np.asarray(p, dtype=float), 0.)
+    # -1, 0 and 1 stay: ACER's three points for a nearly isotropic law
+    kept = thin_common_grid(mu, q[None, :], rtol=0.75*options.rtol, atol=ANGULAR_THIN_FLOOR,
+                            keep=np.flatnonzero(np.isin(mu, (-1., 0., 1.))))
+    if len(kept) == len(mu):
+        return table, clipped
+    thin, thinClipped = pdfTable(mu[kept], p[kept], options=options, outer=outer, what=what)
+    if np.all(abs(_tableMoments(thin)-target) <= options.angularMomentAtol):
+        return thin, thinClipped
+    return table, clipped
+
+
 def _tableMoments(table):
     a, b = np.asarray(table.xs[:-1]), np.asarray(table.xs[1:])
     pa, pb = np.asarray(table.pdf[:-1]), np.asarray(table.pdf[1:])
@@ -131,11 +155,17 @@ def muTable(function, options: TabulationOptions, outer=None, what="angular"):
         degree = len(function.coefficients) - 1
         seeds = np.linspace(-1.0, 1.0, max(3, options.angularSeeds, 4 * degree + 1))
         target = _legendreMoments(function.coefficients, options.negative)
-        mu, p = refine(density, seeds, options)
+        # Refined to a quarter of the tolerance and thinned, relative to the density
+        # alone, to the other three quarters, so the two stay within it: the 4L+1
+        # seeds a high order needs against cancellations are far more points than
+        # its shape does (an L = 60 law: 241). NJOY's ptleg2 refines to 2e-4 and
+        # thins to 2e-3 relative + 1e-7 (acecm.f90 l. 250-251, 343-377).
+        fine = replace(options, rtol=options.rtol/4, atol=options.atol/4)
+        mu, p = refine(density, seeds, fine)
         for iteration in range(30):
             table, clipped = pdfTable(mu, p, options=options, outer=outer, what=what)
             if np.all(abs(_tableMoments(table)-target) <= options.angularMomentAtol):
-                return table, clipped
+                return _thinned(table, clipped, mu, p, target, options, outer, what)
             # A midpoint-only density check can miss cancellations in a
             # higher-order polynomial. Probe three interior fractions and
             # refine panels with the largest integrated shape discrepancy.

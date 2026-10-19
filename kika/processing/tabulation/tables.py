@@ -46,8 +46,10 @@ class TabulationOptions:
     #: Initial points of an outgoing-energy table refined from a law.
     energySeeds: int = 64
     #: Absolute error in normalized first and second moments of a Legendre
-    #: angular law (after the explicitly selected negative-density policy).
-    angularMomentAtol: float = 1.0e-5
+    #: angular law (after the explicitly selected negative-density policy). A
+    #: density read to rtol moves <mu> by at most rtol (1e-3); 1e-4 keeps it ten
+    #: times inside. 1e-5 kept 241 points of an L = 60 law that 10-40 hold.
+    angularMomentAtol: float = 1.0e-4
     #: Absolute CDF error of the transport-safe histogram projection of a
     #: mixed discrete/continuous energy law. Its mass, first and second
     #: moments are retained exactly per panel. The projection's size is bounded
