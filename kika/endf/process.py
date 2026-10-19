@@ -917,7 +917,8 @@ def _heated_tables(work, label, broadened, hi, thinning):
         total(key)
     mts = {k: entries[k].ENDF_MT for k in values if entries[k].ENDF_MT is not None}
     if thinning:
-        thinned_grid, thinned = hp._thin(grid, {k: (values[k], starts[k]) for k in mts}, float(thinning))
+        thinned_grid, thinned = hp._thin(grid, {k: (values[k], starts[k]) for k in mts},
+                                         hp.heatedTolerances(thinning)[1])
         grid = thinned_grid
         values = {k: v for k, (v, _) in thinned.items()}
         starts = {k: s for k, (_, s) in thinned.items()}
@@ -1286,7 +1287,7 @@ def _broaden(rec, plan, report):
             thnmax = float(hp.njoyThnmax(work, min(thresholds) if thresholds else None))
         else:
             thnmax = float(plan.thnmax)
-        broadened = hp._broadenAll(work, list(temps), thnmax, None, plan.workers,
+        broadened = hp._broadenAll(work, list(temps), thnmax, hp.dopplerOptions(plan.thinning), plan.workers,
                                    progress=lambda i, f: report(f"broaden:{temps[i]:g}", float(f)))
         heated = {}
         for T in temps:

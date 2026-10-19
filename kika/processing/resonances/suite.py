@@ -21,6 +21,7 @@ from .breit_wigner import evaluate_bw
 from .prepare import evaluate_region, group_radii, group_knots, group_breaks, region_mts
 from .context import NeutronContext
 from .grid import ReconstructionOptions, ReconstructionConvergenceError, linearize_steps, linearize_group_steps, error_ratio, verification_batches
+from kika.processing.tolerances import thermalFactor
 from .prepare import PreparedResonances, prepare_resonances, UnsupportedResonanceError
 from .tabulate import _Segment, _seeds
 
@@ -1020,7 +1021,7 @@ class SuiteReconstructionResult:
                     if values.shape!=points.shape or np.any(~np.isfinite(values)):
                         raise ReconstructionConvergenceError('invalid serialized values')
                     serialized[key]=values
-                    ratio=error_ratio(reference[key],values,self.options)
+                    ratio=error_ratio(reference[key],values,self.options)*thermalFactor(points)
                     maximum=float(np.max(ratio))
                     if maximum>maxima[key]:
                         index=int(np.argmax(ratio))

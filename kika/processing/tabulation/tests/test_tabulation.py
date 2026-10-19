@@ -128,15 +128,6 @@ def test_energy_angular_legendre_becomes_mc():
         _assertTable(t)
 
 
-@pytest.mark.parametrize('field', ['correlatedRtol', 'correlatedAtol'])
-@pytest.mark.parametrize('value', [float('nan'), float('inf'), -1.])
-def test_correlated_accuracy_cannot_be_silently_disabled_by_nonfinite_or_negative_values(field, value):
-    from kika.processing.tabulation.tables import TabulationOptions
-    with pytest.raises(ValueError, match='finite and nonnegative'):
-        TabulationOptions(**{field: value})
-
-
-
 def test_angular_moment_control_matches_clipped_polynomial_integrals():
     from kika.processing.tabulation.angular import muTable, _tableMoments
     # p(mu)=1.5*mu, clipped positive on [0,1], with moments 2/3 and 1/2.

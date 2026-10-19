@@ -8,6 +8,7 @@ import numpy as np
 from .prepare import PreparedResonances, group_radii, group_knots, group_breaks, region_mts
 from .assemble import prepare_backgrounds,prepare_sums,evaluate_assembled
 from .grid import ReconstructionOptions,ReconstructionConvergenceError,linearize,error_ratio,VERIFICATION_FRACTIONS,verification_batches
+from kika.processing.tolerances import thermalFactor
 from .channel_functions import neutral_channel_functions
 
 
@@ -95,7 +96,8 @@ class ReconstructionResult:
                 for mt,evaluator in evaluators.items():
                     value=np.asarray(evaluator(points))
                     if np.any(~np.isfinite(value)):raise ReconstructionConvergenceError('nonfinite reloaded form')
-                    ratio=error_ratio(actual.get(mt,np.zeros(len(points))),value,self.options)
+                    ratio=(error_ratio(actual.get(mt,np.zeros(len(points))),value,self.options)
+                           *thermalFactor(points))
                     maxima[mt]=max(maxima[mt],float(np.max(ratio)))
         if any(v>1 for v in maxima.values()):
             raise ReconstructionConvergenceError(f'reloaded output exceeds total mixed-error budget: {maxima}')
