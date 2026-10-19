@@ -60,6 +60,12 @@ class Header:
     
     # Arrays from header
     izaw_array: Optional[List[Tuple[int, float]]] = None  # IZAW array (16 pairs of ZA and AWR)
+    # Decimals of the IZAW AWR field as written: 0 is NJOY's F11.0 ("0."); the
+    # EPRDATA libraries write F11.7 ("0.0000000"). Kept so a table writes back as read.
+    izaw_decimals: int = 0
+    # How the MAT label after the comment is spelled: NJOY's '   mat',I4 ("mat 100")
+    # or, packed and right-aligned in 10 columns, the EPRDATA libraries' "mat100".
+    mat_packed: bool = False
     nxs_array: Optional[List[int]] = None  # NXS array (16 integers)
     jxs_array: Optional[List[int]] = None  # JXS array (32 integers)
     

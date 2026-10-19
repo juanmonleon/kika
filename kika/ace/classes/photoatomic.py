@@ -130,6 +130,16 @@ class PhotoatomicAce:
     #: Blocks the table carries that are not decoded, by their manual name.
     unparsed_blocks: List[str] = field(default_factory=list)
 
+    #: How every XSS word is spelled: EPRDATA and MCPLIB write them all as reals,
+    #: 13 significant digits (``%20.12E``), integers included.
+    xss_real_format: str = "%20.12E"
+    #: The electron blocks (JXS(19) onwards) as they were read, kept word for
+    #: word so the table writes back whole: NXS(8)-(12), the words from JXS(19)
+    #: to the end, and each JXS(19..32) relative to JXS(19) (``None`` for 0).
+    electron_nxs: List[int] = field(default_factory=list)
+    electron_words: np.ndarray = field(default_factory=lambda: np.empty(0))
+    electron_jxs: List[Optional[int]] = field(default_factory=list)
+
     @property
     def zaid(self) -> Optional[int]:
         return getattr(self.header, "zaid", None)
