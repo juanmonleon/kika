@@ -39,6 +39,7 @@ from .quantities import PhysicalQuantity
 
 __all__ = ["ATOMIC_INTERACTION", "SUBSHELL_LABELS", "subshellLabel", "subshellDesignator",
            "CoherentPhotonScattering", "IncoherentPhotonScattering",
+           "CoherentPhotonScatteringLink", "IncoherentPhotonScatteringLink",
            "Configuration", "Atomic", "ChemicalElement"]
 
 #: ``reactionSuite/@interaction`` of a photo-atomic or electro-atomic evaluation.
@@ -102,6 +103,30 @@ class IncoherentPhotonScattering:
     label: Optional[str] = None
     pid: str = "photon"
     productFrame: str = "lab"
+    gndsNodeName: ClassVar[str] = "incoherentPhotonScattering"
+
+
+@dataclass
+class CoherentPhotonScatteringLink:
+    """§18.1.1 ``coherentPhotonScattering``: the outgoing photon's link to its reaction's form.
+
+    The product-side twin of :class:`CoherentPhotonScattering`, as
+    :class:`~kika.nuclear_data.model.thermal_scattering.ThermalNeutronScatteringLaw`
+    is of the thermal forms: the scattered photon has no distribution of its
+    own, it has the reaction's double-differential form.
+    """
+
+    href: Optional[str] = None
+    label: Optional[str] = None
+    gndsNodeName: ClassVar[str] = "coherentPhotonScattering"
+
+
+@dataclass
+class IncoherentPhotonScatteringLink:
+    """§18.1.1 ``incoherentPhotonScattering``: the Compton-scattered photon's link to its form."""
+
+    href: Optional[str] = None
+    label: Optional[str] = None
     gndsNodeName: ClassVar[str] = "incoherentPhotonScattering"
 
 

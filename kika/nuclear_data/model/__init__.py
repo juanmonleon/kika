@@ -156,9 +156,10 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              FissionEnergyRelease, FissionFragmentData, Multiplicity, OutputChannel,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
-from .pops import MetaStable, Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
+from .pops import Lepton, MetaStable, Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
 from .photoatomic import (ATOMIC_INTERACTION, SUBSHELL_LABELS, Atomic, ChemicalElement,
-                          CoherentPhotonScattering, Configuration, IncoherentPhotonScattering,
+                          CoherentPhotonScattering, CoherentPhotonScatteringLink, Configuration,
+                          IncoherentPhotonScattering, IncoherentPhotonScatteringLink,
                           subshellDesignator, subshellLabel)
 from .fission_yields import (CUMULATIVE, INDEPENDENT, ElapsedTime, IncidentEnergy,
                              ProductYield, Yields)
@@ -264,7 +265,8 @@ __all__ = [
     "Heated", "HeatedMultiGroup", "GriddedCrossSection", "URR_probabilityTables",
     "MonteCarlo_cdf",
     # §12 PoPs
-    "PoPs", "Particle", "Nuclide", "Unorthodox", "pidFromZA", "zaFromPid",
+    "PoPs", "Particle", "Nuclide", "Unorthodox", "Lepton", "pidFromZA", "zaFromPid",
+    "CoherentPhotonScatteringLink", "IncoherentPhotonScatteringLink",
     "ATOMIC_INTERACTION", "SUBSHELL_LABELS", "Atomic", "ChemicalElement", "CoherentPhotonScattering",
     "Configuration", "IncoherentPhotonScattering", "subshellDesignator", "subshellLabel",
     "DecayData", "DecayModes", "DecayMode", "DecayPath", "Decay",

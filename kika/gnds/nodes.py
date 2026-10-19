@@ -87,6 +87,10 @@ from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      Unspecified, UnspecifiedMultiplicity,
                                      XYs1d, XYs2d, XYs3d, Ys1d, Xs_pdf_cdf1d,
                                      EnergyAngularMC)
+from kika.nuclear_data.model.photoatomic import (CoherentPhotonScattering,
+                                                 CoherentPhotonScatteringLink,
+                                                 IncoherentPhotonScattering,
+                                                 IncoherentPhotonScatteringLink)
 from kika.nuclear_data.model.styles import (AverageProductData,
                                             CoulombPlusNuclearElasticMuCutoff,
                                             MonteCarlo_cdf, SnElasticUpScatter)
@@ -155,11 +159,13 @@ def _spec(*args, **kwargs) -> Tuple[Tuple[str, str], NodeSpec]:
 #: rather than kept as scaffolding for a phase that might want a different
 #: sentence anyway.
 #:
-#: ``gnds.xsd:1647-1662`` gives §18.1.1's choice twelve members and kika names
-#: **eight** below. The four it does not — ``reference``,
-#: ``CoulombPlusNuclearElastic``, ``coherentPhotonScattering``,
-#: ``incoherentPhotonScattering`` — occur **zero times** across the 558 neutron
-#: evaluations the census walked, which is why they are not entries. The fifth,
+#: ``gnds.xsd:1647-1662`` gives §18.1.1's choice its members and kika names
+#: all but two below. The two it does not — ``reference`` and
+#: ``CoulombPlusNuclearElastic`` — occur **zero times** across the 558 neutron
+#: evaluations the census walked, which is why they are not entries.
+#: ``coherentPhotonScattering`` and ``incoherentPhotonScattering`` were in that
+#: list too, until the photo-atomic sublibrary (100 evaluations, every one with
+#: both) gave them a witness and the photon plan's F2b a reader and a writer. The fifth,
 #: ``thermalNeutronScatteringLaw``, is zero there too -- TSL evaluations are a
 #: sublibrary of their own -- and became an entry with roadmap E4b, which reads
 #: and writes the TSL forms it links to and why one of them is now the import-time ratchet's
@@ -295,11 +301,22 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     #    read and written since roadmap E4b with the law it points at.
     _spec("thermalNeutronScatteringLaw", "distributionForm", "§18.1.1",
           ThermalNeutronScatteringLaw, Status.PAIRED),
+    #    The scattered photon's links of a photo-atomic reaction (gnds.xsd:1509-
+    #    1510, XLinkType), read and written with the forms they point at.
+    _spec("coherentPhotonScattering", "distributionForm", "§18.1.1",
+          CoherentPhotonScatteringLink, Status.PAIRED),
+    _spec("incoherentPhotonScattering", "distributionForm", "§18.1.1",
+          IncoherentPhotonScatteringLink, Status.PAIRED),
 
     # -- §14 doubleDifferentialCrossSection forms. gnds.xsd:1087-1096, an
-    #    xs:choice. The three thermal-scattering forms (roadmap E4b); the
-    #    photon and Coulomb members have no ENDF neutron counterpart kika
-    #    decodes and are not entries, like the census-zero §18 members.
+    #    xs:choice. The three thermal-scattering forms (roadmap E4b) and the two
+    #    photo-atomic ones (MF27, photon plan F2b); the Coulomb member has no
+    #    ENDF counterpart kika decodes and is not an entry, like the
+    #    census-zero §18 members.
+    _spec("coherentPhotonScattering", "doubleDifferentialForm", "§14",
+          CoherentPhotonScattering, Status.PAIRED),
+    _spec("incoherentPhotonScattering", "doubleDifferentialForm", "§14",
+          IncoherentPhotonScattering, Status.PAIRED),
     _spec("thermalNeutronScatteringLaw_coherentElastic", "doubleDifferentialForm",
           "§14", CoherentElastic, Status.PAIRED),
     _spec("thermalNeutronScatteringLaw_incoherentElastic", "doubleDifferentialForm",

@@ -1,7 +1,7 @@
 """Serialize the same modeled PoPs fields at suite and formalism scope."""
 import xml.etree.ElementTree as ET
 from typing import Dict, List
-from kika.nuclear_data.model import Nuclide, ConversionReport, Unorthodox
+from kika.nuclear_data.model import Lepton, Nuclide, ConversionReport, Unorthodox
 from kika._constants import ATOMIC_NUMBER_TO_NAME, ATOMIC_NUMBER_TO_SYMBOL
 from .primitives import formatFraction
 
@@ -29,24 +29,31 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
                 if isinstance(p, Nuclide)]
     unorthodoxes = [p for p in pops.particles.values()
                     if isinstance(p, Unorthodox)]
+    leptons = [p for p in pops.particles.values() if isinstance(p, Lepton)]
     others = [p for p in pops.particles.values()
-              if not isinstance(p, (Nuclide, Unorthodox))]
+              if not isinstance(p, (Nuclide, Unorthodox, Lepton))]
 
-    # In the schema's order, gaugeBosons before baryons (`PoPs` is an
+    # In the schema's order, gaugeBosons, leptons, baryons (`PoPs` is an
     # `xs:sequence`), whatever order the particles were added in: a suite whose
     # neutron came first wrote baryons first, and the file did not validate.
-    for wrapper in ("gaugeBosons", "baryons"):
-        members = [p for p in others
-                   if (p.id == "photon") == (wrapper == "gaugeBosons")]
+    for wrapper in ("gaugeBosons", "leptons", "baryons"):
+        if wrapper == "leptons":
+            members = leptons
+        else:
+            members = [p for p in others
+                       if (p.id == "photon") == (wrapper == "gaugeBosons")]
         if not members:
             continue
         group = ET.SubElement(container, wrapper)
         for particle in members:
             node = ET.SubElement(group, wrapper[:-1])
             node.attrib["id"] = particle.id
+            if wrapper == "leptons":
+                node.attrib["generation"] = particle.generation
             _particleProperties(node, particle)
 
-    if nuclides:
+    atomicElements = {int(e.Z): e for e in getattr(pops, "chemicalElements", {}).values()}
+    if nuclides or atomicElements:
         elements = ET.SubElement(container, "chemicalElements")
         byZ: Dict[int, List[Nuclide]] = {}
         for nuclide in nuclides:
@@ -54,12 +61,21 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
                 report.lost(f"PoPs nuclide {nuclide.id!r}: Z/A is missing; isotope cannot be written")
                 continue
             byZ.setdefault(nuclide.Z, []).append(nuclide)
-        for Z in sorted(k for k in byZ if k is not None):
+        for Z in sorted(set(k for k in byZ if k is not None) | set(atomicElements)):
             chemical = ET.SubElement(elements, "chemicalElement")
             symbol = ATOMIC_NUMBER_TO_SYMBOL[Z]
             # `name` is the element's name: FUDGE refuses a file whose name and Z
             # disagree, and the symbol written here before was such a file.
-            _set(chemical, symbol=symbol, Z=str(Z), name=ATOMIC_NUMBER_TO_NAME[Z])
+            # The element's own name when the model holds one (FUDGE accepts
+            # both spellings of Sulphur/Sulfur and Cesium/Caesium, and the file
+            # read keeps its own), else kika's.
+            stated = getattr(atomicElements.get(Z), "name", None)
+            _set(chemical, symbol=symbol, Z=str(Z), name=stated or ATOMIC_NUMBER_TO_NAME[Z])
+            if Z in atomicElements:
+                from .photoatomic import writeAtomic
+                writeAtomic(chemical, atomicElements[Z], report)
+            if Z not in byZ:
+                continue
             isotopes = ET.SubElement(chemical, "isotopes")
             byA: Dict[int, List[Nuclide]] = {}
             for nuclide in byZ[Z]:
