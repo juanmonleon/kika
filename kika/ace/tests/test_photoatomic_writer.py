@@ -39,7 +39,8 @@ def test_encode_gives_back_the_words(tmp_path):
     assert list(e.header.nxs_array[:13]) == list(t.header.nxs_array[:13])
     assert (e.header.nxs_array[13], e.header.nxs_array[14]) == (t.incoherent_x.size, t.coherent_x.size)
     assert list(e.header.jxs_array) == list(t.header.jxs_array)
-    np.testing.assert_allclose(e.xss_data, t.xss_data, rtol=1e-14, atol=0.0)
+    # the 1 MeV point: ln(1) is the 0.0 that means zero, so it is written ln(1 + 1e-13)
+    np.testing.assert_allclose(e.xss_data, t.xss_data, rtol=1e-14, atol=1e-12)
 
 
 def test_every_word_is_a_twelve_digit_real(tmp_path):

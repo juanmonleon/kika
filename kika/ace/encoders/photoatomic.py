@@ -31,13 +31,17 @@ EPRDATA_FORMAT = 3
 
 
 def _logs(sigma) -> np.ndarray:
-    """ln σ, with a zero cross section written as 0.0 (LA-UR-13-27377, Note 1)."""
+    """ln σ, with a zero cross section written as 0.0 (LA-UR-13-27377, Note 1).
+
+    A value of exactly 1 would log to the 0.0 that means zero; it is written as
+    ln(1 + 1e-13), as eprdata25 writes the 1 MeV point of its energy grid.
+    """
     sigma = np.asarray(sigma, dtype=float)
     out = np.zeros_like(sigma)
     positive = sigma > 0.0
     if np.any(sigma < 0.0):
         raise ValueError("a photo-atomic cross section is negative")
-    out[positive] = np.log(sigma[positive])
+    out[positive] = np.log(np.where(sigma[positive] == 1.0, 1.0 + 1e-13, sigma[positive]))
     return out
 
 
@@ -64,7 +68,7 @@ def encode_photoatomic(table: PhotoatomicAce, header=None) -> PhotoatomicAce:
         jxs[index] = len(words) + 1
         words.extend(np.asarray(values, dtype=float).ravel().tolist())
 
-    block(1, np.concatenate([np.log(table.energies / EV_PER_MEV), _logs(table.incoherent), _logs(table.coherent),
+    block(1, np.concatenate([_logs(table.energies * 1e-6), _logs(table.incoherent), _logs(table.coherent),
                              _logs(table.photoelectric), _logs(table.pair_production)]))
     block(2, np.concatenate([table.incoherent_x, table.incoherent_scattering_function]))
     block(3, np.concatenate([table.coherent_x, table.coherent_integrated_form_factor, table.coherent_form_factor]))
