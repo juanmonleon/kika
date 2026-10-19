@@ -681,7 +681,8 @@ def _unitBaseCMMean(form, grid, k):
     def at(E, components=False):
         j=int(np.clip(np.searchsorted(energies,E,side="right")-1,0,len(energies)-1))
         upper=min(j+1,len(energies)-1)
-        theta=(E-energies[j])/(energies[upper]-energies[j]) if upper!=j else 0.
+        # a repeated energy (a step) has no width: its first table, as the vector form above
+        theta=(E-energies[j])/(energies[upper]-energies[j]) if energies[upper]>energies[j] else 0.
         theta=float(np.clip(theta,0,1));weights=(1-theta,theta)
         qa=sum(w*ranges[i][0] for w,i in zip(weights,(j,upper)))
         qw=sum(w*ranges[i][1] for w,i in zip(weights,(j,upper)))

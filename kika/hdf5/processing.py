@@ -664,12 +664,15 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
     recoil paths raise rather than silently omitting a contribution.
     ``awr`` overrides the
     atomic weight ratio (default MF1/451's, as ACER takes it).
-    ``thinning`` is the relative tolerance to which each temperature's grid is
-    thinned: points are dropped while every reaction, read
-    lin-lin, reproduces every dropped point to it. 1e-3 is what the official
-    libraries are processed to (BROADR's ``errthn``); ``None`` keeps the full
-    union grid. The 0 K elastic is thinned to the same tolerance (RECONR's
-    ``err`` for the official files). ``workers`` broadens that
+    ``thinning`` is the relative tolerance each temperature's cross sections are
+    stated to, five times tighter below 0.4999 eV as in NJOY. 1e-3 is what the
+    official libraries are processed to (BROADR's ``errthn``). It is shared so the
+    stages do not add up beyond it (:func:`heatedTolerances`): half is the 0 K
+    source's, a quarter the Doppler table's, a quarter the thinning's, which drops
+    points while every reaction, read lin-lin, reproduces every dropped point to
+    it. ``None`` keeps the full union grid (the broadening then takes both
+    quarters). The 0 K elastic is thinned within what the reconstruction leaves
+    of the same tolerance. ``workers`` broadens that
     many temperatures at once, one process each (default: one per temperature,
     at most four -- the broadening is single-threaded), and computes that many
     URR energies at once (default: up to eight). Processes are spawned on

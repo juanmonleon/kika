@@ -55,8 +55,10 @@ multipliers' MTs ascending; a reaction starts one point before its first
 nonzero value; a P(E) of 1 over the law's domain; ESZ's heating number is
 HEATR's ``local = 0`` KERMA, without the delayed betas OpenMC's MT301 adds.
 
-**Not written:** the charged-particle production blocks (PTYPE, NTRO, IXS),
-which the decoder does not convert either; reported.
+The light charged particles (PTYPE, NTRO, IXS: protons, deuterons, tritons,
+He-3 and alphas) are written when the suite carries them as products, one IXS
+entry per product even when two share an MT (He-3's MT650, d + d); a suite with
+none (one read from OpenMC) writes none, and the report says so.
 """
 from __future__ import annotations
 
@@ -1285,7 +1287,7 @@ def encodeAce(suite, temperature=None, *, zaid: Optional[int] = None, awr: Optio
     ace = parse_blocks(ace)
     if not list(getattr(ace.secondary_particle_types, "particle_ids", None) or []):
         message = ("charged-particle production (PTYPE, NTRO, IXS) is not written: the suite carries no "
-                   "light charged-particle products (a suite read from ACE or OpenMC has none)")
+                   "light charged-particle products (a suite read from OpenMC has none)")
         if message not in report.unsupported:
             report.unsupportedNode(message)
     return ace, report

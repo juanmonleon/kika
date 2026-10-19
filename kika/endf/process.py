@@ -156,8 +156,11 @@ class ProcessingPlan:
     keeps them for the URR tables alone (the tables do not depend on the
     broadened MF3). ``thnmax`` is the top of the broadening in
     eV, or ``"njoy"`` for BROADR's default (the top of the resolved range).
-    ``thinning`` is the relative tolerance each temperature's union grid is
-    thinned to (BROADR's ``errthn``, 1e-3); ``None`` keeps every point.
+    ``thinning`` is the relative tolerance each temperature's cross sections are
+    stated to (BROADR's ``errthn``, 1e-3; five times tighter below 0.4999 eV, as
+    in NJOY), shared between the 0 K source, the Doppler table and the thinning
+    so that they do not add up beyond it (:mod:`kika.processing.tolerances`);
+    ``None`` keeps every point of the union grid.
     ``urr_bins`` are PURR's bands; ``urr_ladders`` the most ladders an energy
     draws (at least PURR's 64, more until the table's error is 5e-3). ``workers`` is
     the count of every stage: the reconstruction's threads, the processes of
@@ -770,8 +773,9 @@ class EndfProcessing:
         it), refusing a table name the file already has unless ``replace``.
 
         ``temperatures`` (kelvin) picks some of the broadened ones; ``extension``
-        overrides the suffix and needs a single temperature. The
-        charged-particle blocks are not written. Returns the paths written.
+        overrides the suffix and needs a single temperature. The light
+        charged particles are written (PTYPE, NTRO, IXS), as ACER writes them.
+        Returns the paths written.
 
         Raises :class:`ProcessingOutputError`: ``ace-needs-temperature`` when
         nothing was broadened, ``ace-temperature-not-processed``,
