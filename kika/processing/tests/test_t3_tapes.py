@@ -9,7 +9,10 @@ Each tape carries one defect the processing now handles as NJOY and FUDGE do:
 * B-VIII.1 Pb-208: MT4 zeros past EMAX;
 * B-VIII.1 Th-229: a URR grid node stated twice;
 * B-VIII.1 U-241: one URR group with J=I at L=0;
-* B-VIII.1 Ra-226: an MF1/MT452 domain approximation.
+* B-VIII.1 Ra-226: an MF1/MT452 domain approximation;
+* B-VIII.1 Sm-153: the URR range's SPI (3/2) differs from the resolved range's (5/2);
+* JEFF-4.0 Pu-242: QX stated with LRX=0;
+* JENDL-5 Pr-141: URR parameters tabulated to 100 keV in a region to 160 keV.
 """
 from __future__ import annotations
 
@@ -20,7 +23,8 @@ from conftest import resolve_tape
 pytestmark = pytest.mark.tape
 
 TAPES = ("t3_ni59_jeff40", "t3_mo100_jeff40", "t3_cs134_jeff40", "t3_b11_jeff40", "t3_w183_b81",
-         "t3_pb208_b81", "t3_th229_b81", "t3_u241_b81", "t3_ra226_b81")
+         "t3_pb208_b81", "t3_th229_b81", "t3_u241_b81", "t3_ra226_b81",
+         "t3_sm153_b81", "t3_pu242_jeff40", "t3_pr141_jendl5")
 
 
 @pytest.mark.parametrize("name", TAPES)

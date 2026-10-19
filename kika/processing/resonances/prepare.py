@@ -137,7 +137,9 @@ def prepare_resonances(resonances, context, *, conversion_report=None, allow_emp
             if record.get("naps") == 2 and bw.radiusPolicy is None:
                 raise UnsupportedResonanceError("NAPS2 was not normalized into radiusPolicy")
             for block in record.get("l_blocks", []):
-                if block.get("lrx") or block.get("qx"):
+                # QX means nothing without LRX (ENDF-102 D.1.2; NJOY reads it only then):
+                # JEFF-4.0 Pu-242 states QX=0.99, its AP, with LRX=0 on GT=GN+GG+GF.
+                if block.get("lrx"):
                     matching = [g for g in bw.resonanceParameters.spinGroups if g.L == block.get("l")]
                     if not matching or matching[0].competitiveChannel is None:
                         raise UnsupportedResonanceError("competitive channel metadata is not modeled")

@@ -173,6 +173,24 @@ def test_a_repeated_node_with_one_value_is_one_node():
     with pytest.raises(ValueError,match='grid'):prepare_resonances(m,CONTEXT)
 
 
+@pytest.mark.parametrize('law',[Interpolation.linlin,Interpolation.loglog])
+def test_a_table_short_of_the_region_edge_is_carried_by_its_outer_interval(law):
+    # JENDL-5 Pr-141 tabulates to 100 keV a region declared to 160 keV: NJOY reads the outer
+    # interval with its law past its end; kika does the same and says so.
+    m=model(law=law,grid=[125.,150.])
+    g=m.unresolved.tabulatedWidths.spinGroups[0];g.levelSpacing=[105.,110.]
+    short=prepare_resonances(m,CONTEXT)
+    assert sum('carries them there' in n for n in short.preparation_notes)==2
+    lo,hi=short.regions[0].groups[0].spacing.evaluate(np.array([100.,200.]))
+    if law==Interpolation.linlin:
+        np.testing.assert_allclose([lo,hi],[100.,120.],rtol=1e-14)
+    else:
+        slope=np.log(110/105.)/np.log(150/125)
+        np.testing.assert_allclose([np.log(105./lo)/np.log(1.25),np.log(hi/110.)/np.log(200/150)],[slope,slope],rtol=1e-12)
+    m.unresolved.tabulatedWidths.energyGrid=[150.];g.levelSpacing=[110.]
+    assert prepare_resonances(m,CONTEXT).regions[0].groups[0].spacing.constant==110.
+
+
 def test_global_radius_is_never_a_urr_fallback():
     m=model();m.scatteringRadius=ScatteringRadius(constant=99.,unit='fm')
     prepared=prepare_resonances(m,CONTEXT)

@@ -265,6 +265,9 @@ _TAPES: Dict[str, Sequence[str]] = {
     "t3_th229_b81": ("endfb81/n-090_Th_229.endf",),
     "t3_u241_b81": ("endfb81/n-092_U_241.endf",),
     "t3_ra226_b81": ("endfb81/n-088_Ra_226.endf",),
+    "t3_sm153_b81": ("endfb81/n-062_Sm_153.endf",),
+    "t3_pu242_jeff40": ("jeff40/n_94-Pu-242g.jeff",),
+    "t3_pr141_jendl5": ("jendl5/n_059-Pr-141.dat",),
     # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
     # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
     # validation that picked them is kika-workspace

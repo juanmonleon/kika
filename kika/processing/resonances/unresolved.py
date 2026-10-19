@@ -61,7 +61,40 @@ def opened_at(f,threshold):
     return Average(curves=tuple(curves))
 
 
-def average(function,values,grid,constant,low,high,*,positive=False,reduced=False,law=2):
+def _beyond(x1,y1,x2,y2,x,law):
+    """The value at ``x`` of the interval (x1,y1)-(x2,y2) read with its ENDF law past its ends,
+    NJOY's terp1 on the outer interval."""
+    if law==1 or y1==y2:return y1
+    if law==2:return y1+(x-x1)*(y2-y1)/(x2-x1)
+    if law==3:return y1+np.log(x/x1)*(y2-y1)/np.log(x2/x1)
+    if law==4:return y1*np.exp((x-x1)*np.log(y2/y1)/(x2-x1))
+    return y1*np.exp(np.log(x/x1)*np.log(y2/y1)/np.log(x2/x1))
+
+
+def _say(notes,message):
+    if notes is not None and message not in notes:notes.append(message)
+
+
+def _reach(x,y,laws,low,high,notes,check):
+    """``(x, y, laws)`` reaching ``[low, high]``: a table short of a region edge is carried
+    there by its outer interval and law, as NJOY (purr/unresr ``gnrl``, ``terp1``) does; FUDGE
+    refuses it. JENDL-5 Pr-141 tabulates to 100 keV a region declared to 160 keV."""
+    x=list(x);y=list(y);laws=list(laws)
+    if x[0]>low:
+        value=float(_beyond(x[0],y[0],x[1],y[1],low,laws[0]))
+        _say(notes,f'URR parameters start at {x[0]:g} eV in a region from {low:g} eV; '
+                                          f"the first interval's law carries them there, as NJOY does")
+        x.insert(0,low);y.insert(0,value);laws.insert(0,laws[0])
+    if x[-1]<high:
+        value=float(_beyond(x[-2],y[-2],x[-1],y[-1],high,laws[-1]))
+        _say(notes,f'URR parameters end at {x[-1]:g} eV in a region to {high:g} eV; '
+                                          f"the last interval's law carries them there, as NJOY does")
+        x.append(high);y.append(value);laws.append(laws[-1])
+    check(y)
+    return np.asarray(x,dtype=float),np.asarray(y,dtype=float),laws
+
+
+def average(function,values,grid,constant,low,high,*,positive=False,reduced=False,law=2,notes=None):
     from kika.nuclear_data.model import Constant1d,XYs1d,Regions1d
     from .prepare import UnsupportedResonanceError
     def check(v):
@@ -94,7 +127,17 @@ def average(function,values,grid,constant,low,high,*,positive=False,reduced=Fals
                 cuts=np.r_[0,np.flatnonzero(np.diff(laws))+1,len(laws)]
                 for a,b in zip(cuts[:-1],cuts[1:]):
                     result.append((tuple(x[a:b+1]),tuple(y[a:b+1]),int(laws[a])))
-            if not result or result[0][0][0]>low or result[-1][0][-1]<high:raise ValueError('URR parameter grid does not cover region')
+            if not result:raise ValueError('URR parameter grid does not cover region')
+            if result[0][0][0]>low or result[-1][0][-1]<high:
+                if len(result[0][0])<2 or len(result[-1][0])<2:raise ValueError('URR parameter grid does not cover region')
+                first,last=result[0],result[-1]
+                if first[0][0]>low:
+                    fx,fy,_=_reach(first[0],first[1],[first[2]]*(len(first[0])-1),low,first[0][-1],notes,check)
+                    result[0]=(tuple(fx),tuple(fy),first[2])
+                    if len(result)==1:last=result[0]
+                if last[0][-1]<high:
+                    lx,ly,_=_reach(last[0],last[1],[last[2]]*(len(last[0])-1),last[0][0],high,notes,check)
+                    result[-1]=(tuple(lx),tuple(ly),last[2])
             if any(a[0][-1]!=b[0][0] for a,b in zip(result[:-1],result[1:])):raise ValueError('URR parameter regions overlap or have gaps')
             return Average(curves=tuple(result))
     if constant is None:
@@ -111,7 +154,7 @@ def average(function,values,grid,constant,low,high,*,positive=False,reduced=Fals
                 repeated=np.r_[False,(np.diff(x)==0)&(np.diff(values)==0)]
                 x,values=x[~repeated],values[~repeated]
             if x.ndim!=1 or x.shape!=values.shape or np.any(~np.isfinite(x)) or np.any(x<=0) or np.any(np.diff(x)<=0):raise ValueError('invalid URR average grid')
-            if x[0]>low or x[-1]<high:raise ValueError('URR parameter grid does not cover region')
+            if len(x)<2 and (x[0]>low or x[-1]<high):raise ValueError('URR parameter grid does not cover region')
             check(values)
             # Tabulated parameters follow their J-state's INT, as NJOY (PURR
             # ``intr2``), FRENDY and FUDGE (whose ENDF->GNDS gives each width
@@ -121,6 +164,8 @@ def average(function,values,grid,constant,low,high,*,positive=False,reduced=Fals
             # reach a zero; that stretch is lin-lin, FUDGE's split.
             laws=np.full(len(x)-1,law)
             if law in (4,5):laws[(values[:-1]<=0)|(values[1:]<=0)]=2
+            if x[0]>low or x[-1]<high:
+                x,values,laws=_reach(x,values,laws,low,high,notes,check);laws=np.asarray(laws)
             cuts=np.r_[0,np.flatnonzero(np.diff(laws))+1,len(laws)]
             return Average(curves=tuple((tuple(x[a:b+1]),tuple(values[a:b+1]),int(laws[a]))
                                         for a,b in zip(cuts[:-1],cuts[1:])))
@@ -244,8 +289,13 @@ def prepare_unresolved(region,context,notes):
         particles=list(source.PoPs.particles.values())
         if len(particles)==1 and particles[0].spin is not None:
             spin=particles[0].spin
-            if spin.unit!='hbar' or float(spin.value)!=context.target_spin:
-                raise ValueError('URR target spin disagrees with the explicit context')
+            if spin.unit!='hbar':raise ValueError('URR target spin must be in hbar')
+            if float(spin.value)!=context.target_spin:
+                # ENDF states SPI per range and NJOY (rdf2un) and FUDGE take each range's own;
+                # B-VIII.1 Sm-153 gives 5/2 in the resolved range and 3/2 here.
+                notes.append(f"URR target spin {float(spin.value):g} differs from the material's "
+                             f"{context.target_spin:g}; the range's own is used, as NJOY and FUDGE do")
+                context=replace(context,target_spin=float(spin.value))
     policy=source.radiusPolicy
     if policy is None:raise UnsupportedResonanceError('URR radius policy is absent; declare radiusPolicy explicitly before calculating',category='missing-radius-policy')
     phase=prepare_radius(policy.phaseRadius if policy.phaseRadius is not None else source.scatteringRadius)
@@ -271,7 +321,7 @@ def prepare_unresolved(region,context,notes):
         if sg.crossSectionInterpolation is not None and law is None or law not in (None,1,2,3,4,5):
             raise UnsupportedResonanceError('URR cross-section interpolation supports INT1-5')
         parameterLaw=2 if law is None else law
-        spacing=average(sg.levelSpacingFunction,sg.levelSpacing,sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid,None,low,high,positive=True,law=parameterLaw)
+        spacing=average(sg.levelSpacingFunction,sg.levelSpacing,sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid,None,low,high,positive=True,law=parameterLaw,notes=notes)
         by_label={}
         labels={'neutron':'neutron','elastic':'neutron','capture':'capture','fission':'fission','competitive':'competitive'}
         links={rr.label:rr.reactionMT for rr in source.resonanceReactions}
@@ -286,7 +336,7 @@ def prepare_unresolved(region,context,notes):
                 raise ValueError('URR physical neutron-width convention belongs only to the neutron channel')
             if name in by_label:raise ValueError('duplicate URR width channel')
             if not np.isfinite(c.degreesOfFreedom) or c.degreesOfFreedom<0:raise ValueError('URR degrees of freedom must be real and nonnegative')
-            f=average(c.averageFunction,c.widths,c.energies if c.energies is not None else source.energyGrid,c.constantWidth,low,high,reduced=name=='neutron' and c.neutronWidthConvention=='reduced',law=parameterLaw)
+            f=average(c.averageFunction,c.widths,c.energies if c.energies is not None else source.energyGrid,c.constantWidth,low,high,reduced=name=='neutron' and c.neutronWidthConvention=='reduced',law=parameterLaw,notes=notes)
             by_label[name]=(f,float(c.degreesOfFreedom))
             if name=='neutron':reduced_neutron=c.neutronWidthConvention=='reduced'
         if 'neutron' not in by_label:raise ValueError('URR group needs a reduced neutron width')
@@ -302,6 +352,8 @@ def prepare_unresolved(region,context,notes):
                   sg.levelSpacingEnergies if sg.levelSpacingEnergies is not None else source.energyGrid)
             if grid is None:raise ValueError('URR cross-section interpolation requires a declared energy grid')
             grid=tuple(dict.fromkeys(map(float,grid)))   # a repeated node is one node (Th-229)
+            # A grid short of an edge gets the edge, as NJOY's rdf2un adds EL and EH (Pr-141).
+            grid=((low,) if grid and grid[0]>low else ())+grid+((high,) if grid and grid[-1]<high else ())
             grids.append(grid)
         elif sg.crossSectionEnergies is not None:raise ValueError('URR sigma grid requires an interpolation policy')
         policies.append((law,None if law is None else tuple(map(float,grid))))
