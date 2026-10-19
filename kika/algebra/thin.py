@@ -3,7 +3,9 @@
 The inverse of refinement: given rows ``y[k, :]`` tabulated on one
 non-decreasing grid ``x`` and read lin-lin, drop grid points while every row,
 interpolated between the points kept, still reproduces **every** point it
-loses to ``|y_interp - y| <= rtol*|y| + atol``. The values at the points kept
+loses to ``|y_interp - y| <= rtol*|y| + atol``. ``rtol`` may be one value per
+point, the tolerance of a chord that starts there (NJOY tightens it below
+0.4999 eV by the left node: :mod:`kika.processing.tolerances`). The values at the points kept
 are never changed, so the thinned table is a subset of the original one.
 
 The sweep is greedy from the left: from each kept point the farthest next
@@ -34,7 +36,7 @@ def _fits(x, ys, i, j, rtol, atol):
     t = (inner - xi) / (xj - xi)
     chord = ys[:, i:i + 1] + (ys[:, j:j + 1] - ys[:, i:i + 1]) * t
     actual = ys[:, i + 1:j]
-    return bool(np.all(np.abs(chord - actual) <= rtol * np.abs(actual) + atol))
+    return bool(np.all(np.abs(chord - actual) <= rtol[i] * np.abs(actual) + atol))
 
 
 def thin_common_grid(x, ys, rtol: float = 1e-3, atol: float = 0.0,
@@ -52,6 +54,7 @@ def thin_common_grid(x, ys, rtol: float = 1e-3, atol: float = 0.0,
     atol = np.asarray(atol, dtype=float)
     if atol.ndim == 1:
         atol = atol[:, None]
+    rtol = np.broadcast_to(np.asarray(rtol, dtype=float), (n,))
     if n <= 2:
         return np.arange(n)
     mandatory = np.zeros(n, dtype=bool)

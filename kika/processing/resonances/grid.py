@@ -5,6 +5,8 @@ import functools
 import math
 import numpy as np
 
+from kika.processing.tolerances import thermalFactor
+
 
 @functools.lru_cache(maxsize=64)
 def _key_index(keys):
@@ -232,7 +234,7 @@ def _linearize_chunk(seeds, options, point_budget, *, first=None, constants=None
                       lambda actual,linear:error_ratio(actual,linear,options)/.5,
                       fractions=fractions,insert='balanced',max_passes=options.max_iterations,
                       max_points=point_budget,keep_probes=True,
-                      precheck=3,reuse_probes=True),columns,tuple(mts))
+                      precheck=3,reuse_probes=True,scale=thermalFactor),columns,tuple(mts))
     except RefinementError as exc:
         message={'points':'refinement exceeds max_points',
                  'passes':'refinement exceeds max_iterations',
@@ -320,7 +322,8 @@ def linearize_group_steps(spans, options, point_budget, keys):
     evaluations=np.zeros(len(xs),dtype=np.int64)
     steps=refine_steps(x,columns(first),lambda actual,linear:error_ratio(actual,linear,options)/.5,
         fractions=np.r_[REFINEMENT_FRACTIONS,VERIFICATION_FRACTIONS],insert='balanced',
-        max_passes=options.max_iterations,max_points=point_budget,keep_probes=True,precheck=3,reuse_probes=True)
+        max_passes=options.max_iterations,max_points=point_budget,keep_probes=True,precheck=3,reuse_probes=True,
+        scale=thermalFactor)
     try:
         try:
             q,owner=next(steps)
@@ -466,7 +469,8 @@ def _group_tables(result,xs,bounds,panels,keys,spans,union,index,evaluations,opt
             value=constant[:,where[mt]][span_of_panel][on][:,None]
             samples[on,:,j]=value;nodes[on,:,j]=value
     linear=nodes[:,0,None,:]+(nodes[:,1]-nodes[:,0])[:,None,:]*fractions[:,:,None]
-    ratio=error_ratio(samples,linear,options)
+    # NJOY's thermal rule, by each panel's left node, as the refinement applied it
+    ratio=error_ratio(samples,linear,options)*thermalFactor(result.x[pos])[:,None,None]
     for j,mt in enumerate(late):
         r=ratio[:,:,len(union)+j]
         deferred_here=deferred_in[:,where[mt]][span_of_panel]
@@ -531,7 +535,7 @@ def _chunk_tables(x, y, probes, actual, first, constants, deferred, options, ite
         samples=np.concatenate([actual,extra],axis=-1)
     tables=np.stack([y[mt] for mt in checked],axis=-1)
     linear=tables[:-1,None,:]+(tables[1:]-tables[:-1])[:,None,:]*actual_fractions[:,:,None]
-    ratio=error_ratio(samples,linear,options)
+    ratio=error_ratio(samples,linear,options)*thermalFactor(x[:-1])[:,None,None]
     if late:
         bad=np.any(~np.isfinite(ratio[:,:,len(column):])) or np.any(ratio[:,:,len(column):]>.5)
         if bad:return None

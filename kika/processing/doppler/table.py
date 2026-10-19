@@ -10,6 +10,8 @@ from collections import OrderedDict
 from types import MappingProxyType
 import numpy as np
 
+from kika.processing.tolerances import thermalFactor
+
 from .core import (PreparedDopplerCurve, DopplerOptions, DopplerInputError,
                    DopplerConvergenceError, evaluate_broadened, _immutable,
                    _quantity, KB, ENGINE_VERSION, _selected_backend)
@@ -162,9 +164,11 @@ def _seeds(curves, temperature, lo, hi, point_budget, work_bytes):
     return np.array(sorted(seeds))
 
 
-def _ratio(reference, candidate, eta, options, share):
+def _ratio(reference, candidate, eta, options, share, factor=1.):
+    """``factor`` multiplies the chord's error only (NJOY's thermal rule is on the
+    interpolation, not on the kernel's own uncertainty ``eta``)."""
     available = share*(options.atol + options.rtol*np.maximum(np.abs(reference)-eta, 0.))
-    return (np.abs(candidate-reference)+eta)/available
+    return (np.abs(candidate-reference)*factor+eta)/available
 
 
 def nodes_eta(nodes, grid, j):
@@ -233,7 +237,8 @@ def _adaptive(evaluate, seeds, options, budget, keys):
                 eta = np.maximum(np.abs(np.asarray(nodes_eta(nodes, grid, keys.index(k)))), 0.)
                 reference = np.minimum(np.abs(y[:-1]), np.abs(y[1:]))
                 available = options.table_share*(options.atol + options.rtol*np.maximum(reference-eta[:-1], 0.))
-                ratio = predicted/available
+                # NJOY's thermal rule (BROADR's errthn/5 below 0.4999 eV), by the left node
+                ratio = predicted/available*thermalFactor(grid[:-1])
                 insert.append(ratio)
             ratio = np.max(np.vstack(insert), axis=0)
             iteration_refine = float(np.max(ratio)) if len(ratio) else 0.
@@ -267,7 +272,8 @@ def _adaptive(evaluate, seeds, options, budget, keys):
                 ratios=np.zeros(q.shape)
                 for k in keys:
                     chord=np.interp(q.ravel(),grid,data[k]).reshape(q.shape)
-                    ratios=np.maximum(ratios,_ratio(actual[k].reshape(q.shape),chord,eta[k].reshape(q.shape),options,options.table_share))
+                    ratios=np.maximum(ratios,_ratio(actual[k].reshape(q.shape),chord,eta[k].reshape(q.shape),options,
+                                                    options.table_share,thermalFactor(left)[:,None]))
                 maxima=np.max(ratios,axis=1)
                 accepted=maxima<=1
                 if np.any(accepted):

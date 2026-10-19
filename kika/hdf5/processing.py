@@ -514,6 +514,27 @@ def _reducedSuite(suite, entries, keys, lo, window=None):
     return reduced
 
 
+def heatedTolerances(thinning):
+    """``(broadening, thinning)`` relative tolerances of a heated table whose stated
+    tolerance is ``thinning`` (1e-3, BROADR's errthn): what the 0 K source leaves,
+    shared so that the stages do not add up beyond it
+    (:mod:`kika.processing.tolerances`). Without thinning (``None``) the
+    broadening takes the whole of what the source leaves of 1e-3."""
+    from kika.processing.tolerances import heatedShares
+
+    if thinning is None:
+        return sum(heatedShares(1.0e-3)), None
+    return heatedShares(float(thinning))
+
+
+def dopplerOptions(thinning):
+    """The Doppler table's options for a heated table stated to ``thinning``."""
+    from kika.processing.doppler import DopplerOptions
+
+    return DopplerOptions(rtol=heatedTolerances(thinning)[0], max_points=400_000_000,
+                          max_work_bytes=4_000_000_000)
+
+
 def _broadenReduced(reduced, lo, hi, temperature, options, domain=None):
     """``{label: heated form}`` of every leaf of ``reduced`` (from ``_reducedSuite``).
 
@@ -524,7 +545,7 @@ def _broadenReduced(reduced, lo, hi, temperature, options, domain=None):
     from kika.processing.resonances.suite import _entries
 
     support = {k: SupportPolicy("one_over_v", "constant") for k in _entries(reduced)}
-    opts = options or DopplerOptions(max_points=400_000_000, max_work_bytes=4_000_000_000)
+    opts = options or dopplerOptions(None)
     extra = {}
     if reduced.resonances is not None and reduced.resonances.unresolved is not None:
         # The 0 K forms in the unresolved range are the infinitely dilute
@@ -737,7 +758,8 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
                       if (reactionQI(leaf.reaction, work) or 0.0) < 0]
         thnmax = njoyThnmax(work, min(thresholds) if thresholds else None)
     if broadened is None:
-        broadened = _broadenAll(work, temperatures, float(thnmax), doppler, workers)
+        broadened = _broadenAll(work, temperatures, float(thnmax), doppler or dopplerOptions(thinning),
+                                workers)
     else:
         missing = [t for t in temperatures if t not in broadened]
         if missing:
@@ -776,7 +798,7 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
             start = first[max(int(nonzero[0]) - 1, 0)] if nonzero.size else first[0]
             values[leaf.mt] = (y, _threshold(y, start, grid))
         if thinning:
-            grid, values = _thin(grid, values, float(thinning))
+            grid, values = _thin(grid, values, heatedTolerances(thinning)[1])
             grids[T] = grid
         heated[T] = values
         report.warn(f"{T}: broadened by kika below {hi:g} eV, 0 K above (NJOY BROADR's thnmax)")
@@ -840,13 +862,15 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
         if mt == 2:
             x, y = _strictly(*_flatten(reaction.crossSection[RECON_LABEL]))
             if thinning:
-                # The 0 K elastic (resonance scattering's source) thinned to the
+                # The 0 K elastic (resonance scattering's source) thinned within the
                 # tolerance RECONR is run at for the official files (err 0.001):
-                # the same accuracy class, at RECONR's density rather than at
-                # kika's finer reconstruction tolerance.
+                # what the reconstruction leaves of it, five times tighter below
+                # 0.4999 eV (kika.processing.tolerances), so the two do not add up.
                 from kika.algebra import thin_common_grid
+                from kika.processing.tolerances import SOURCE_SHARE, thermalFactor
 
-                kept = thin_common_grid(x, y[None, :], rtol=float(thinning),
+                kept = thin_common_grid(x, y[None, :],
+                                        rtol=(1.0 - SOURCE_SHARE) * float(thinning) / thermalFactor(x),
                                         atol=1.0e-10 * float(np.max(np.abs(y))))
                 x, y = x[kept], y[kept]
             cs[RECON_LABEL] = m.XYs1d(xs=x, ys=y, axes=m.crossSectionAxes(), label=RECON_LABEL)
@@ -1027,8 +1051,10 @@ def _sumAttributes(mt, urr=False):
 
 
 def _thin(grid, values, rtol):
-    """The grid and every leaf on it, thinned jointly (``kika.algebra.thin_common_grid``)."""
+    """The grid and every leaf on it, thinned jointly (``kika.algebra.thin_common_grid``)
+    to ``rtol``, five times tighter below 0.4999 eV (:mod:`kika.processing.tolerances`)."""
     from kika.algebra import thin_common_grid
+    from kika.processing.tolerances import thermalFactor
 
     mts = list(values)
     rows = np.vstack([values[mt][0] for mt in mts])
@@ -1036,7 +1062,7 @@ def _thin(grid, values, rtol):
     # zero over a stretch does not force every point of it to stay.
     floors = 1.0e-10 * np.max(np.abs(rows), axis=1)
     keep = sorted({values[mt][1] for mt in mts})
-    kept = thin_common_grid(grid, rows, rtol=rtol, atol=floors, keep=keep)
+    kept = thin_common_grid(grid, rows, rtol=float(rtol) / thermalFactor(grid), atol=floors, keep=keep)
     thinned = {mt: (values[mt][0][kept], int(np.searchsorted(kept, values[mt][1]))) for mt in mts}
     return grid[kept], thinned
 

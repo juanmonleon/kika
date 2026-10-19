@@ -170,10 +170,14 @@ def refine_steps(x, y, exceeds: Callable, *,
                  max_passes: int = 40, max_points: Optional[int] = None,
                  min_width_ulps: float = 0.0, unresolvable: str = "raise",
                  keep_probes: bool = False, precheck: int = 0,
-                 reuse_probes: bool = False):
+                 reuse_probes: bool = False, scale: Optional[Callable] = None):
     """:func:`refine` as a generator: it yields ``(q, owner)`` and is sent the
     values of the function there; its return value is the
     :class:`RefineResult`. The arithmetic is :func:`refine`'s.
+
+    ``scale(x1)`` multiplies each panel's ratios by a factor of its left
+    abscissa: NJOY's tolerance five times tighter below 0.4999 eV
+    (:func:`kika.processing.tolerances.thermalFactor`).
     """
     if insert not in ("worst", "balanced", "all"):
         raise ValueError(f"insert must be 'worst', 'balanced' or 'all', got {insert!r}")
@@ -261,12 +265,14 @@ def refine_steps(x, y, exceeds: Callable, *,
         chord=(y1[:,None,:]+(y2-y1)[:,None,:]*frac[...,None] if y.ndim>1
                else y1[:,None]+(y2-y1)[:,None]*frac)
         ratio=np.zeros(q.shape)
+        factor=None if scale is None else np.asarray(scale(x1),dtype=float)
         def ratios(indices):
             if not len(indices):return
             a=actual.reshape((flat.size,)+y.shape[1:])[indices]
             b=chord.reshape((flat.size,)+y.shape[1:])[indices]
             r=exceeds(a,b)
             if y.ndim>1:r=np.max(r,axis=-1)
+            if factor is not None:r=r*factor[indices//q.shape[1]]
             ratio.ravel()[indices]=np.where(usable.ravel()[indices],r,0.)
         ratios(first)
         if primary<q.shape[1]:
