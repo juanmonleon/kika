@@ -13,7 +13,7 @@ fixed, checked input deck.
 {py:func}`kika.processing.njoy_pendf_cache.get_or_create_pendf`; decks: {py:class}`kika.njoy.InputDeck`,
 {py:func}`kika.njoy.reader.read_deck`.
 
-**Status:** stable.
+**Status:** stable — since 0.1.1.
 ```
 
 ## Background
@@ -28,10 +28,11 @@ code reads. Each module reads a few cards of input; the deck is the sequence.
 
 This page is about running NJOY: with an input kika writes the same way every time, and
 with a check that NJOY read what it was given. kika also has its own processing chain,
-which does the work of RECONR, BROADR, PURR, HEATR, and THERMR with ACER for thermal
-scattering, without NJOY ({doc}`processing-chain`). The two routes are independent; the
-NJOY route is kept as a reference and for the outputs only NJOY writes (an ACE file from
-an evaluation).
+which does the work of RECONR, BROADR, PURR, HEATR, GASPR, THERMR, and ACER for neutron
+and thermal scattering tables, without NJOY ({doc}`processing-chain`,
+{py:meth}`kika.endf.EndfProcessing.write_ace`). The two routes are independent; the NJOY
+route is kept as a reference and as the comparison the processing chain is validated
+against.
 
 ## What it computes
 
@@ -112,9 +113,13 @@ with a warning for a library kika does not know).
 **3. The run, and the check that NJOY read the deck.** NJOY is run in a temporary
 directory with the tape as `tape20`. RECONR echoes the three tolerances of its fourth
 card into the listing; kika reads them back and compares them with the ones it sent
-(to $5.05 \times 10^{-4}$ in the absolute tolerance). A mismatch means NJOY misread its
-input; the same deck is run again, up to 8 times, and if every run misread, the run
-fails with `NjoyDecimalLocaleError` instead of producing an ACE file. A run whose deck
+(to $5.05 \times 10^{-4}$ in the absolute tolerance). The listing is read every 0.5 s
+while NJOY runs, up to its last complete line, and the run is stopped at the first echo
+that does not match: a misread tolerance can be zero, on which RECONR may never finish.
+A run that ends on gfortran's "Error during floating point read" or "Bad real number"
+is the same misread, caught in a later module. On either, the same deck is run again,
+up to 8 times in all, and if the last run still misread, the run fails with
+`NjoyDecimalLocaleError` instead of producing an ACE file. A run whose deck
 has no RECONR is checked through BROADR's echo instead. NJOY's listing is kept beside
 the ACE file.
 
@@ -163,6 +168,8 @@ keyed by the SHA-256 of the tape, and later calls read the cached PENDF.
   reason, a missing listing never blocks a run, a tolerance below the printed precision
   is not flagged, a PENDF deck is checked through BROADR
   (`kika/processing/tests/test_njoy_locale_guard.py`, 10 tests, passed 2026-10-11).
+- A run that crashes on a misread number is run again
+  (`kika/njoy/tests/test_a_misread_crash_is_run_again.py`, 4 tests, passed 2026-10-20).
 - RECONR reconstruction of Fe-56 and U-238, streaming, and missing executable or tape
   (`kika/processing/tests/test_njoy_reconstruct.py`). `TODO(check)`: the reconstruction
   tests need NJOY and `--deep`; not re-run for this page.
@@ -182,7 +189,7 @@ file missing, means read the listing.** `njoy_reconstruct_stream` yields `log`,
 
 - `kika/njoy/templates.py`: the deck, with and without RECONR.
 - `kika/njoy/run_njoy.py`: `run_njoy`, `run_njoy_with_pendf`, the suffix rules, the
-  re-run loop.
+  watched run and the re-run loop.
 - `kika/njoy/locale_guard.py`: reading the echoed tolerances back from the listing;
   `probe_executable` measures how often a binary misreads.
 - `kika/njoy/launcher.py`: the command line (Windows and WSL included).

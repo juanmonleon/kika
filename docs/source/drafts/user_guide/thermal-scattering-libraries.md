@@ -188,11 +188,27 @@ kika.write(kika.read(tape), "openmc_out", format="hdf5",
 ```
 
 `name` is OpenMC's table name, which fixes the atoms the table applies to and how many
-are mixed in it; `temperatures` must be ones the evaluation tabulates. The same function
-is {py:func}`kika.hdf5.thermal_processing.processThermal`, which returns the processed
-suite without writing it; with `options=ThermalInelasticOptions(iinc=1)`
+are mixed in it; `temperatures` must be ones the evaluation tabulates (there is no
+interpolation in temperature). The same function is
+{py:func}`kika.hdf5.thermal_processing.processThermal`, which returns the processed
+suite without writing it; `workers=` sets the threads over incident energies (by default
+up to eight; the tables do not depend on it). With
+`options=ThermalInelasticOptions(iinc=1)`
 ({py:class}`kika.processing.thermal.ThermalInelasticOptions`) it makes the free-gas table
 of a nuclide from its neutron tape instead.
+
+The processed suite is also written as an ACE thermal table, one temperature per file:
+
+```python
+from kika.hdf5.thermal_processing import processThermal
+
+suite = processThermal(tape, name="c_H_in_H2O", temperatures=[293.6])
+kika.write(suite, "hh2o.02t", format="ace")       # zaid= or extension= to name it otherwise
+```
+
+By default the table is named by OpenMC's short name for the material and the suffix of
+its temperature. A suite with several temperatures needs one named, as
+`temperatures=600.0`.
 
 ## Run NJOY THERMR
 

@@ -1,4 +1,4 @@
-# Differential cross-sections and energy resolution
+# Computing differential cross-sections at an energy resolution
 
 ```{admonition} At a glance
 :class: note
@@ -13,7 +13,7 @@ and folded with a time-of-flight resolution.
 {py:func}`kika.endf.dcs.differential_xs_vs_energy`, {py:func}`kika.endf.dcs.resolve_sigma`,
 {py:class}`kika.endf.dcs.TofResolution`, {py:func}`kika.utils.energy_folding.tof_energy_resolution`.
 
-**Status:** stable.
+**Status:** stable — since 0.3.0.
 ```
 
 ## Background

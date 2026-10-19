@@ -78,8 +78,8 @@ with three exceptions:
 - **Capture (MT 102) with photons.** The compound nucleus' recoil plus the photons' kicks,
   $h_{102} = E/(A+1) + \sum_\gamma y_\gamma \langle E_\gamma^2\rangle / [2(A+1)m_nc^2]$, with
   $m_nc^2 = 939.565$ MeV (NJOY's constant). HEATR keeps $E/(A+1)$ for MF 12 photons
-  (`gheat`) and leaves it out for MF 6 ones (`tabsq6`); kika adds it always (decision D49,
-  see below). Capture without photons follows {eq}`eq-heating-balance`, $h_{102} = E + Q_{102}$.
+  (`gheat`) and leaves it out for MF 6 ones (`tabsq6`); kika adds it always
+  (*Conventions and choices*). Capture without photons follows {eq}`eq-heating-balance`, $h_{102} = E + Q_{102}$.
 - **MT 5.** HEATR closes no energy balance there: the deposit is the energy of the
   charged particles and recoils the evaluation states with distributions,
   $h_5 = \sum_c y_c \bar E_c$, tabulated from the evaluated suite. Without any, $h_5 = 0$.
@@ -125,7 +125,23 @@ laboratory spectra of a reaction the evaluation states in MF 6, the mean is take
 trapezoids over $E' f(E')$ at the tabulated points, as HEATR does; the photon energy
 $G_r$ of $k^\text{loc}$ uses the exact integral in every case. The moments known at the
 tables' incident energies are interpolated to the grid lin-lin (step-wise for a histogram
-in incident energy), held at the end values outside.
+in incident energy), held at the end values outside. An incident energy stated twice is
+a step: its first table holds below it and its second at and above it. A law whose
+incident table is all zeros (a spectrum stated null at a threshold) is read from the
+nearest incident table that emits, as the ends are; a mixture of laws read outside the
+domain of its weights is read at the nearest end of that domain, where its
+cross-section is zero.
+
+A continuous centre-of-mass law in unit-base interpolation between incident energies
+(the interpolation OpenMC samples) is integrated as that blend, since the moment of a
+unit-base blend is not the blend of the moments: each incident table is mapped to the
+interpolated support, the cross moment $\langle\sqrt{E'}\mu\rangle$ is integrated by
+Gauss-Legendre with its order doubled until the laboratory term agrees to
+$10^{-3}$ eV $+\,10^{-8}E$, and the laboratory mean is tabulated on the tables' incident
+energies and refined at the fractions 0.25, 0.5 and 0.75 of each interval until linear
+interpolation reproduces it to $0.1$ eV $+\,10^{-7}E$. A step in incident energy splits
+this refinement: each side is refined on its own, the left side up to the step's left
+limit.
 
 ### Damage energy
 
@@ -153,9 +169,11 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   $\mu$, the target's $(Z, A)$ as recoil, on the tables' incident energies and a
   geometric mesh of ratio 1.1, then interpolated to the grid; negative values are set to
   zero, and the elastic damage is zero below $E = 25(A+1)^2/(4A)$ eV.
-- **Capture (MT 102):** each photon's recoil $E_\gamma^2/[2(A+1)m_nc^2]$ through
-  {eq}`eq-heating-lindhard` with recoil $(Z, A+1)$, weighted by its yield; without
-  photons, HEATR's single photon,
+- **Capture (MT 102):** the compound nucleus' recoil $E/(A+1)$ and each photon's recoil
+  $E_\gamma^2/[2(A+1)m_nc^2]$, each an independent primary through
+  {eq}`eq-heating-lindhard` with recoil $(Z, A+1)$, the photons weighted by their yields,
+  $\mathrm{df}(E/(A+1)) + \sum_\gamma y_\gamma\langle\mathrm{df}(E_\gamma^2/2(A+1)m_nc^2)\rangle$;
+  without photons, HEATR's single photon,
   $E_R = \tfrac{E}{A+1} + \big(\tfrac{A}{A+1}E + Q\big)^2/[2(A+1)m_nc^2]$.
 - **Other reactions whose charged particles and recoils the evaluation states with
   distributions** (in ENDF, MF 6): each
@@ -183,8 +201,8 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   recoiling as above from the stated angular distribution, isotropic in the centre of
   mass without one. HEATR does the same kinematics (`disbar`) but takes the target's
   $(Z, A)$ for the recoil's partition, where its MF 6 path takes the residual's; kika takes
-  the residual's in both. Without the yield these levels fell to the absorption fallback
-  below, a proton capped at the Coulomb barrier.
+  the residual's in both. Read without their yield, these levels would fall to the
+  absorption fallback below, a proton capped at the Coulomb barrier.
 - **The same sections when they emit more than one particle (MT 22, 24, 28, ...,
   neutrons included, each with a whole yield):** the residual
   $(Z - \sum z_i, A + 1 - \sum a_i)$ takes the momentum balance of all of them,
@@ -209,8 +227,7 @@ or the value given. $d_r$ follows HEATR's path for each kind of reaction:
   whole takes HEATR's one-particle recoil (the first neutron, mass $A$). HEATR recoils an
   MF 6 section's residual from one neutron with the target's mass at the mean laboratory
   cosine (`h6cm`), and an MF 4/MF 5 one by one isotropic laboratory emission,
-  $E_R = (E - 2\sqrt{EE'}\mu + E')/A$ (`tabdam`), which kika applied to both before.
-  Measured against HEATR itself (NJOY 2016.78 rebuilt without one MT's generated
+  $E_R = (E - 2\sqrt{EE'}\mu + E')/A$ (`tabdam`). Measured against HEATR itself (NJOY 2016.78 rebuilt without one MT's generated
   recoil, Ni-60 of ENDF/B-VIII.1): HEATR's MT 91 is 32.4 % of MT 444 at 14 MeV and its
   MT 16 17.1 %; HEATR's rule emulated on kika's tables gives 32.4 % and 17.0 %, the exact
   recoil 31.0 % and 17.2 %, the isotropic emission 34.4 % and 17.4 %. The isotropic
@@ -321,14 +338,16 @@ $k^\text{loc} + k_f^\text{loc,HDF5}$.
 - **Capture carries the compound nucleus' recoil, in the KERMA and in the damage.** The
   official OpenMC files lack $\tfrac{E}{A+1}\sigma_\gamma$ where the photons are MF 6 (HEATR's
   `tabsq6`): Ni-58's MT 301 is 2.3 times lower at the 59 keV capture valley. kika adds it
-  always (D49). The damage takes it as one more independent primary next to HEATR's
+  always, whatever file states the photons, because the compound nucleus keeps the
+  neutron's momentum. The damage takes it as one more independent primary next to HEATR's
   photon kicks, $\mathrm{df}(E/(A+1)) + \sum_\gamma y_\gamma\langle\mathrm{df}(E_\gamma^2/2Mc^2)\rangle$:
   at thermal energies $E/(A+1)$ is far below $E_d$ and the damage is HEATR's to the bit;
   at 1 MeV it is the compound that displaces (Fe-56: 13.2 keV per capture against the
   kicks' 0.38 keV). MT 444 then moves where capture dominates the damage: Ni-58 +174 %
   at 59 keV, Fe-56 +119 % at 73 keV, U-238 +26 % at 10.9 keV, nothing at thermal
-  energies. Folding all the kicks into one recoil of the mean energy was rejected: the
-  mean kick of U-238 (24 eV) is below $E_d$ = 25 eV while its hard primaries are not.
+  energies. Folding all the kicks into one recoil of the mean energy is not done: the
+  mean kick of U-238 (24 eV) is below $E_d$ = 25 eV while its hard primaries are not, so
+  the thermal capture damage of U-238 would vanish.
 - **Mean energies from the sampled tables.** HEATR reads each ENDF law and
   interpolates its means on its own mesh (a ratio of 1.1 between incident energies in
   its two-body routine); kika takes the moments of the distributions OpenMC samples and
@@ -361,7 +380,8 @@ left out with a note.
 
 Known limits:
 
-- The processed suite keeps only neutrons and photons, as OpenMC's files do. The charged
+- The processed suite of the HDF5 file keeps only neutrons and photons, as OpenMC's files
+  do (an ACE table also keeps the light charged particles). For the heating, the charged
   particles and recoils are tabulated again from the evaluation where it states them
   (MT 5 and the damage of MF 6 reactions); elsewhere HEATR's fallbacks apply.
 - In the HDF5 file, a fissionable target without MF 1/MT 458 gets no fission term in
@@ -389,6 +409,16 @@ The tests below passed on 2026-10-14.
   (`::test_a_level_takes_the_excitation_out_of_the_neutron`); photon lines ignore the
   frame and primaries take $\tfrac{A}{A+1}E$
   (`::test_photon_lines_ignore_the_frame_and_primaries_take_the_neutron_energy`).
+- **Reading the laws** (passed on 2026-10-20). A unit-base centre-of-mass mean comes from
+  the joint law and not from blended laboratory moments
+  (`kika/processing/tests/test_heating.py::test_unit_base_cm_mean_comes_from_the_joint_law_not_blended_lab_moments`);
+  a null incident table is read from the nearest one that emits
+  (`::test_a_null_table_is_read_from_the_nearest_table_that_emits`); a mixture below its
+  weights' domain is read at its first energy
+  (`::test_a_mixture_below_its_weights_domain_is_read_at_its_first_energy`). The
+  evaluations with incident steps in a unit-base law are processed whole by
+  `kika/processing/tests/test_t3_tapes.py::test_the_tape_t3_refused_is_processed`, which
+  needs the library tapes.
 - **The stage and the PENDF** (the committed Fe-56 micro-tape at 293.6 K). MT 301 and
   MT 444 at 0 K and at the temperature, on that temperature's MT 1 grid (relative
   $10^{-11}$), finite, and MT 301 positive above 1 eV
@@ -416,25 +446,27 @@ neutron-only sections' exact recoil, measured 2026-10-18 at 0.5-20 MeV: Ni-58 0.
 by HEATR's mean cosine in MT 91 and MT 16 and in the charged sections (on Ni-60, HEATR's
 own MT 91 and MT 16 are reproduced to $10^{-3}$ of MT 444 when its rule is emulated);
 Nb-93, an MF 4/MF 5 evaluation, rises because HEATR gives its (n,2n) one isotropic
-emission and kika the momenta of both neutrons. Before it, with the independent recoil
-of the charged sections only: Ni-58 0.980-1.001, Ni-60
-0.988-1.004, Cu-63 0.986-1.014, Cr-50 0.991-1.014, Ti-46 0.991-1.004, Fe-56 0.977-1.025 (no section
-without its residual). Without the residual's recoil Ni-58 was 0.80 at 5 MeV and Ni-60
-0.69 at 20 MeV. On Ni-58, HEATR's mean-cosine recoil emulated on kika's tables moves
-MT 444 by up to +4 % at 20 MeV; the remaining difference is of the size of HEATR's
-approximations. The independent recoil itself moves MT 444 by at most +0.4 % against
-the heaviest particle's (Ni-58 MT 28 at 14-17 MeV); a yield of 2, as in (n,2p), is one
-residual, as in HEATR (`sixbar`, recoil yield 1).
+emission and kika the momenta of both neutrons. Leaving out the neutron-only sections'
+exact recoil (the residual recoiling from the charged particles only), the same
+comparison gives Ni-58 0.980-1.001, Ni-60 0.988-1.004, Cu-63 0.986-1.014, Cr-50
+0.991-1.014, Ti-46 0.991-1.004 and Fe-56 0.977-1.025; with no recoil of the residual at
+all, Ni-58 falls to 0.80 at 5 MeV and Ni-60 to 0.69 at 20 MeV. On Ni-58, HEATR's
+mean-cosine recoil emulated on kika's tables moves MT 444 by up to +4 % at 20 MeV; the
+remaining difference is of the size of HEATR's approximations. The independent recoil
+itself moves MT 444 by at most +0.4 % against the heaviest particle's (Ni-58 MT 28 at
+14-17 MeV); a yield of 2, as in (n,2p), is one residual, as in HEATR (`sixbar`, recoil
+yield 1).
 
-The charged levels stated in MF 4 (2026-10-18) take O-16 from 0.962 to 0.949 of HEATR
-at 5 MeV and N-14 from 0.926 to 0.910, with the same kinematics as HEATR's `disbar`:
-HEATR's partition of the target's $(Z, A)$ for the residual raises the alpha levels'
-recoil damage by 18 % (O-16 MT 800 at 14 MeV), which is the difference. In an
+With the charged levels stated in MF 4 read as two bodies, with the kinematics of HEATR's
+`disbar`, O-16 is at 0.949 of HEATR at 5 MeV and N-14 at 0.910 (0.962 and 0.926 when
+those levels fall to the absorption fallback instead). HEATR's partition with the
+target's $(Z, A)$ for the residual raises the alpha levels' recoil damage by 18 % (O-16
+MT 800 at 14 MeV), which is the difference. In an
 evaluation that leaves MT 16 and 17 to MF 4/MF 5 (158 of ENDF/B-VIII.1, 6 of JEFF-4.0,
-22 of JENDL-5) the neutron yield is now the MT's two and three, as in OpenMC's files;
-the processing wrote 1, so transport would have emitted one neutron per (n,2n) and the
-KERMA kept one neutron's energy. HEATR's own MT 301 of Nb-93 is negative at 12 MeV
-and is no reference there.
+22 of JENDL-5) the neutron yield is the MT's two and three, as in OpenMC's files; a
+yield of 1 would emit one neutron per (n,2n) in transport and keep one neutron's energy
+in the KERMA. HEATR's own MT 301 of Nb-93 is negative at 12 MeV and is no reference
+there.
 
 MT 301 (photons transported) is MT 901 less the energy of the photons the file itself
 carries, in kika's files to the rounding of the tables. In OpenMC's official Fe-56 of

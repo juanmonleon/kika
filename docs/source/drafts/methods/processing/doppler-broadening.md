@@ -270,7 +270,12 @@ $$
 e_{pred}=\frac{\Delta E^2}{8}\kappa.
 $$ (eq-doppler-chord-prediction)
 
-Intervals whose predicted error exceeds their table allocation receive
+Below 0.4999 eV the table allocation is five times tighter, as in BROADR: the predicted
+error of an interval whose left node lies below that energy is multiplied by $f_T=5$
+before it is compared with the allocation, and so is the chord error at its reserved
+fractions in {eq}`eq-doppler-budget`. The factor applies to the interpolation error
+only, not to the kernel's own uncertainty $\eta$, which the tightened rule does not
+concern. Intervals whose predicted error exceeds their table allocation receive
 $\lceil1.1\sqrt{e_{pred}/b}\rceil$ equal subdivisions, capped at 64 per
 iteration, where $b$ is the available table budget. This is an insertion
 heuristic; it does not certify an interval. A separate family of four reserved
@@ -292,11 +297,13 @@ For candidate table value $c$, reference $r$ and
 reference uncertainty estimate $\eta$, acceptance uses
 
 $$
-\frac{|c-r|+\eta}{f\,[\mathrm{atol}+\mathrm{rtol}\max(|r|-\eta,0)]}\le1.
+\frac{f_T\,|c-r|+\eta}{a\,[\mathrm{atol}+\mathrm{rtol}\max(|r|-\eta,0)]}\le1,
 $$ (eq-doppler-budget)
 
-Default allocations are kernel 0.15, tails 0.10, tabulation 0.45 and serialisation
-0.20, leaving 0.10 unallocated. The table allocation includes evaluator uncertainty.
+where $a$ is the allocation of the check and $f_T$ is 5 for a table interval whose left
+node lies below 0.4999 eV and 1 otherwise (and for pointwise checks). Default
+allocations are kernel 0.15, tails 0.10, tabulation 0.45 and serialisation 0.20,
+leaving 0.10 unallocated. The table allocation includes evaluator uncertainty.
 Suites heat exclusive leaves on a common mesh and derive all declared aggregates
 from their graph. Each sum has its own acceptance scale; cancellation cannot
 enlarge its relative allowance. The source sum balance is checked beforehand on source knots, midpoints and
@@ -330,7 +337,24 @@ aggregate addition retains compensated `math.fsum` scaling.
   ({eq}`eq-doppler-budget`). This is a different route to the same operator
   {eq}`eq-doppler-operator`: no gain in accuracy of the kernel over BROADR's is
   claimed, only that its error is stated.
-- **The mesh is not thinned.** BROADR thins the heated table to `errthn` (and
+- **Five times tighter below 0.4999 eV.** BROADR divides `errthn` by five below
+  0.4999 eV, judged by the left node of each interval (`broadr.f90` l. 1408-1411), and
+  kika's table does the same; the reconstruction and the thinning of the processing
+  chain apply the same rule ({doc}`resonance-reconstruction`). A chord of a convex
+  $1/v$ cross-section lies above the curve, so the full tolerance there biases thermal
+  reaction rates upward by up to that tolerance; the factor is kept off the kernel
+  uncertainty $\eta$ because the rule is about interpolation.
+- **Inside the processing chain the table takes a twentieth of the stated tolerance.**
+  A heated table written by {doc}`processing-chain` is the 0 K reconstruction,
+  broadened, then thinned, and the three errors add. Of the tolerance the chain states
+  ($10^{-3}$ by default, BROADR's `errthn`), half is left to the 0 K source, one
+  twentieth goes to this table (`rtol` $=5\cdot10^{-5}$) and nine twentieths to the
+  thinning, so the delivered table stays within the stated tolerance. The share of this
+  table costs only time, since the thinning decides the points that are written; a
+  larger share would leave the thinning less room and write more points. NJOY spends
+  the whole `errthn` on the broadening and again on the thinning, on top of RECONR's
+  `err`.
+- **The mesh is not thinned here.** BROADR thins the heated table to `errthn` (and
   `thnmax`), and FUDGE to half its accuracy, by removing nodes that the chord of
   their neighbours reproduces. BROADR tests one point, the midpoint of each
   interval, and by default accepts it up to `errmax` $= 10$ `errthn` unless its
@@ -341,7 +365,9 @@ aggregate addition retains compensated `math.fsum` scaling.
   `errthn` $=10^{-3}$, with 8.3 % of the MT 102 points above $10^{-3}$, and 0.11 %
   with `errmax` $=$ `errthn` and the integral criterion off. kika's table, built
   at `rtol` $=10^{-3}$ and checked at interior points, gives $5\cdot10^{-4}$
-  there, with no point above $10^{-3}$ (NJOY 2016.78, measured 2026-10-18).
+  there, with no point above $10^{-3}$ (NJOY 2016.78, measured 2026-10-18). Thinning is
+  a separate step of {doc}`processing-chain`, with its own share of the tolerance (the
+  previous bullet), and every removed node is checked against the table it leaves.
 - **The output window is the one asked for.** The upper limit given to BROADR is
   not always the one it heats to: on ENDF/B-VIII.1 Zr-90 a run asked for a higher
   limit heated only up to 200 keV, and H-1 up to 6.5 MeV, leaving the rest at the

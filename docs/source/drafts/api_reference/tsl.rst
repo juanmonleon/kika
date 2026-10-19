@@ -13,3 +13,9 @@ Running THERMR
 
 .. automodule:: kika.tsl.thermr
    :members:
+
+Writing ACE thermal tables
+--------------------------
+
+.. automodule:: kika.tsl.ace_writer
+   :members: write_ace_thermal, write_thermal_suite

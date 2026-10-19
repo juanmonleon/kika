@@ -14,15 +14,24 @@ Monte Carlo. The staged entry point for an ENDF-6 tape is
 Resonance reconstruction
 ------------------------
 
-.. automodule:: kika.processing.resonances
-   :members:
-   :exclude-members: ReactionKey
+The resonance-reconstruction API has its own page,
+:doc:`processing-resonances`.
 
 Unresolved-resonance probability tables
 ---------------------------------------
 
 .. automodule:: kika.processing.resonances.probability_tables
    :members:
+
+Tolerances of the processing chain
+----------------------------------
+
+NJOY's thermal rule and the shares of a heated table's tolerance; the method is
+in :doc:`/drafts/methods/processing/processing-chain`.
+
+.. autofunction:: kika.processing.tolerances.thermalFactor
+
+.. autofunction:: kika.processing.tolerances.heatedShares
 
 Heating and damage
 ------------------

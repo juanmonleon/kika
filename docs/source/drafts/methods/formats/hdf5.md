@@ -124,12 +124,18 @@ with their cumulative; {doc}`../processing/tabulation` produces them).
   {py:func}`kika.hdf5.processing.processSuite`): serialised as it is;
 - **an evaluation** (from ENDF-6 or GNDS): processed first. kika reconstructs it at 0 K
   unless it has a `recon` style, broadens it to each temperature up to where NJOY BROADR
-  stops by default, puts every reaction of a temperature on one grid thinned to
-  $10^{-3}$, rebuilds the sums from their levels when the evaluation does not give them,
+  stops by default, puts every reaction of a temperature on one grid, thinned so that
+  the table delivered stays within $10^{-3}$ ($2\cdot10^{-4}$ below 0.4999 eV), the 0 K
+  source, the broadening and the thinning sharing that tolerance
+  ({doc}`../processing/processing-chain`), keeps the 0 K elastic in `recon` for
+  resonance up-scattering, thinned to half the tolerance (with the same thermal factor),
+  rebuilds the sums from their levels when the evaluation does not give them,
   computes gas production (MT 203-207, as GASPR does), KERMA and damage (MT 301, 901,
   444, {doc}`../processing/heating`) and the URR probability tables
   ({doc}`../processing/probability-tables`), tabulates every distribution of neutrons and
-  photons ({doc}`../processing/tabulation`), and derives `fission_energy_release` as OpenMC
+  photons ({doc}`../processing/tabulation`; the light charged particles, which OpenMC's
+  neutron files do not carry, are tabulated only for an ACE table), and derives
+  `fission_energy_release` as OpenMC
   does (below). The steps are those of {doc}`../processing/processing-chain`; no NJOY is
   run. A thermal evaluation (MF 7) is processed by
   {py:func}`kika.hdf5.thermal_processing.processThermal`
@@ -240,9 +246,10 @@ of the nine nuclides, and 1.16 times for U-238, whose official table is thinner 
 $10^{-3}$ tolerance it is processed to (it departs from kika's by up to 2.2 % in MT 102
 between 100 eV and 20 keV; measured 2026-10-11).
 
-`TODO(check)`: these comparisons are from before the latest heating and thinning changes;
-re-run `compareNeutron` on the nine before review. The benchmark names and models
-(UO₂ pin cell, iron) need their references.
+`TODO(check)`: these comparisons are from before the latest heating changes and before
+the thermal tolerance rule and the shared tolerance budget of the thinning; re-run
+`compareNeutron` on the nine before review. The benchmark names and models (UO₂ pin
+cell, iron) need their references.
 
 ## Implementation
 

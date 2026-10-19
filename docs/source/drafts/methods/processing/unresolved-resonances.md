@@ -70,7 +70,12 @@ the sector. The competitive width enters the denominator only.
 
 **1. Parameters at $E$.** $D_{\ell J}(E)$ and every $\bar\Gamma_y(E)$ are evaluated from
 their own functions (a constant, or a table with its interpolation law; a step in a table
-is kept with both one-sided values). The physical average neutron width is
+is kept with both one-sided values, and a node stated twice with the same values is one
+node). A table that stops short of an edge of the range is carried to that edge by its
+outer interval read with that interval's law past its end, as NJOY does (`terp1` on the
+outer interval), and the energy grid of the cross-sections gains the edge as a node, as
+NJOY's `rdf2un` adds EL and EH; a preparation note says so. The physical average neutron
+width is
 
 $$
 \bar\Gamma_n^{\ell J}(E) = \nu_n\,\bar\Gamma_n^{0,\ell J}(E)\,\sqrt{E}\;\frac{P_\ell(k a_c)}{k a_c},
@@ -163,6 +168,18 @@ the resolved range the right-hand region owns the point and the jump is kept.
   sectors of that $\ell$.
 - **Negative results are kept and reported**; a log interpolation law (INT=4, 5) on
   values that are not all positive (or all zero) is refused.
+- **The range's own target spin.** ENDF-6 states SPI per range; when the unresolved range
+  states one that differs from the material's, $g_J$ uses the range's, as NJOY
+  (`rdf2un`) and FUDGE do, with a note.
+- **A stated $J$ that no coupling reaches is taken as stated.** Some evaluations give
+  one effective $J$ per $\ell$ (for example $\ell = 0$ with $J = I$). In the unresolved
+  range $J$ enters only through $g_J = (2J+1)/(2(2I+1))$, and NJOY (UNRESR, PURR) and
+  FUDGE use the stated $J$'s $g_J$; kika does the same and notes it, where the resolved
+  range refuses such a $J$.
+- **Parameters short of a range edge are extended, not refused.** The outer interval
+  and its law carry the table to the edge, which is what NJOY computes for the same file;
+  FUDGE refuses it. The extension is the evaluator's last interval, not new physics, and
+  the note in the report says where it was applied.
 
 ## Limits and failure modes
 
@@ -177,12 +194,12 @@ UNRESR's quadrature (the probability tables give them by sampling, as PURR does)
 Refused (`UnsupportedResonanceError` or `ValueError`), before any evaluation:
 
 - a range without a radius policy (`missing-radius-policy`); an unknown NAPS;
-- a $J$ that $\ell$ and $I$ cannot reach (`invalid-J`), a duplicate $(\ell, J)$, sectors
-  of one $\ell$ with different masses;
+- a duplicate $(\ell, J)$, sectors of one $\ell$ with different masses;
 - a sector without a neutron width, a non-zero reduced $\bar\Gamma_n^0$ with $\nu_n = 0$,
   a channel that cannot be identified as neutron, capture, fission or competitive, a
   physical-width convention on a channel other than the neutron one, a negative $\nu$;
-- parameter tables that do not cover the range, overlap or leave gaps; non-positive
+- a parameter table of a single node that does not cover the range, tables that overlap
+  or leave gaps, a node repeated with different values; non-positive
   spacings or negative widths; an interpolation law outside INT=1-5;
 - sectors with different cross-section laws or grids and no aggregate policy;
 - more than one unresolved range in MF 2 (the conversion then reports unsupported data);
@@ -222,6 +239,14 @@ The tests below passed on 2026-10-11, with the compiled integrand loaded.
   laws are refused (`::test_mixed_sigma_conventions_are_not_resolved_by_the_last_group`);
   per-sector policies sum their terms and one potential
   (`kika/processing/tests/test_unresolved_completion.py::test_mixed_group_policies_sum_resonance_terms_and_one_potential`).
+- **Irregular input taken as NJOY takes it.** A stated $J$ that no coupling reaches is
+  used with its $g_J$
+  (`kika/processing/tests/test_unresolved.py::test_an_effective_j_is_taken_with_its_statistical_factor`);
+  a node stated twice with one value is one node
+  (`::test_a_repeated_node_with_one_value_is_one_node`); a table short of the region edge
+  is carried there by its outer interval, for each law
+  (`::test_a_table_short_of_the_region_edge_is_carried_by_its_outer_interval`). These
+  passed on 2026-10-20.
 - **Boundaries and publication.** The resolved/unresolved boundary keeps its jump, and the
   result is published and reloaded
   (`kika/processing/tests/test_unresolved.py::test_rrr_urr_boundaries_and_native_publication`).

@@ -12,16 +12,17 @@ NJOY; and a thermal scattering table (`.t`).
 
 **Into:** the parse layer's `Ace` object, and from it the canonical model: cross-sections,
 Q-values, the secondary neutrons with their angular and energy distributions and
-multiplicities, fission $\bar\nu$ and the delayed-neutron groups, photon production and
-the unresolved-range probability tables (see {doc}`../../architecture/format-adapters`).
+multiplicities, fission $\bar\nu$ and the delayed-neutron groups, photon production, the
+light charged particles and the unresolved-range probability tables (see
+{doc}`../../architecture/format-adapters`).
 
 **Entry points:** {py:func}`kika.ace.parsers.parse_ace.read_ace`, {py:func}`kika.read`,
 {py:func}`kika.write` (`format="ace"`), {py:func}`kika.ace.model_adapter.decodeAce`,
-{py:func}`kika.ace.model_adapter.encodeAce`, `EndfProcessing.write_ace`
-({py:func}`kika.endf.process_endf`, {py:func}`kika.endf.process_gnds`),
+{py:func}`kika.ace.model_adapter.encodeAce`, {py:meth}`kika.endf.EndfProcessing.write_ace`
+({py:func}`kika.endf.process_endf`, {py:func}`kika.gnds.process_gnds`),
 `AceOptions(engine="kika")` of {py:func}`kika.sampling.model_perturbation.perturbFromModel`,
-`kika.tsl.ace_writer.write_ace_thermal`, `kika.ace.writers.write_ace.write_ace`,
-`kika.ace.xsdir.add_xsdir_entry`.
+{py:func}`kika.tsl.ace_writer.write_ace_thermal`, {py:func}`kika.ace.writers.write_ace.write_ace`,
+{py:func}`kika.ace.xsdir.add_xsdir_entry`.
 
 **Status:** stable (parse layer); experimental (model path).
 ```
@@ -54,7 +55,7 @@ What kika does with each block of a neutron table:
 | NU, DNU, BDD, DNEDL, DNED | read | the fission neutron's $\bar\nu$ (prompt or total), the total $\bar\nu$ (MT 452), the delayed $\bar\nu$ (MT 455), one delayed group per precursor family with its decay constant, multiplicity and spectrum |
 | GPD, MTRP, SIGP, LANDP, ANDP, DLWP, YP | read | photon products, as the ENDF decoder makes them from MF 12-15, plus their sampled form |
 | UNR | read | probability tables on elastic, fission and capture |
-| PTYPE, NTRO, IXS and the per-particle blocks | read | not converted (reported) |
+| PTYPE, NTRO, IXS and the per-particle blocks (MTRH, TYRH, SIGH, ANDH, DLWH, HPD, YH) | read; an MT listed twice in MTRH keeps both entries, each with its own records | one product per particle and MTRH entry on its reaction (protons, deuterons, tritons, He-3, alphas): yield, frame and sampled distribution; HPD kept beside the suite; another particle type reported, not converted |
 
 A photo-atomic table (ZAID suffix ending in `p`) is parsed on its own, since its NXS and
 JXS mean other things, and returned as a `PhotoatomicAce`. It has no model path.
@@ -105,6 +106,17 @@ Secondary neutrons become the neutron product of their reaction:
   distribution; law 66 N-body phase space;
 - an uncorrelated law takes its angle from AND: an isotropic reaction is `Isotropic2d`,
   and 32 equiprobable cosine bins are a histogram.
+
+The light charged particles become products of their reactions, one per entry of the
+particle's MTRH list: the yield from SIGH (MFTYPE 12 on its own reaction, the only form
+ACER writes there), the frame from TYRH (centre of mass when negative), and the sampled
+distribution from DLWH and ANDH, read as the neutron laws are (law 33, the charged-particle
+level law, is a level as law 3 is). An MT can appear twice in MTRH (He-3's MT 650,
+$n + {}^3\text{He} \to d + d$): each entry keeps its own records, and the second product
+is labelled `H2__a`, as FUDGE names a second product of the same particle. HPD (each
+particle's production cross-section and heating number) is not a form of any product: it
+is kept as the table states it, for the encoder to give back while the cross-sections and
+yields it is made of are unchanged.
 
 For fission, the product's multiplicity is the prompt $\bar\nu$ when NU gives prompt and
 total, and the total otherwise; the total and the delayed $\bar\nu$ are the multiplicity
@@ -181,6 +193,14 @@ What is derived because the model does not carry it in ACE's form:
 - a cosine table that is a histogram with equal probabilities becomes equiprobable bins,
   the two-point isotropic histogram an isotropic entry, any other a tabulated entry;
 - one interpolation region that is lin-lin is written with NR = 0, as NJOY writes it;
+  any other interpolation is written as the form states it, so the incident-energy
+  interpolation of an energy law keeps the evaluation's unit-base code (INT = 22) where
+  ACER writes NR = 0. It is metadata for the transport code: OpenMC 0.16 ignores the
+  incident interpolation of a law and always samples between the two bracketing incident
+  tables with unit-base scaling. TODO(check): how MCNP and Serpent use a stated INT;
+- an angular distribution is written in one of the three forms AND holds (isotropic, 32
+  equiprobable bins, tabulated): ACE has no Legendre form, so a Legendre distribution
+  reaches the encoder already tabulated ({doc}`../processing/tabulation`);
 - an MFTYPE 13 photon cross-section is its multiplicity times its reaction's
   cross-section, on the union grid;
 - a photon's cosines are isotropic or 32 equiprobable bins, the only forms ANDP holds:
@@ -218,7 +238,20 @@ survives its union grid):
 - a probability of 1 over the law's domain; Z and A in NXS(10) and NXS(11); an isomer's
   ZAID is $1000\,Z + A + 300 + 100\,m$ (Am-242m1 is 95642), as LANL writes it for MCNP;
 - the header carries the date, a title naming the target and the evaluation, and the
-  tape's MAT.
+  tape's MAT;
+- the light charged particles, as NJOY 2016's ACER writes them, when the suite carries
+  them as products with a sampled form: PTYPE 9, 31, 32, 33, 34 (proton, deuteron,
+  triton, He-3, alpha) in that order; per particle, MTRH lists the producing reactions in
+  ascending MT, one entry per product (two deuterons of MT 650 are two entries), TYRH is
+  $\pm 1$ by frame ($-1$ in the centre of mass), SIGH each yield as MFTYPE 12 on its own
+  reaction, ANDH and DLWH the sampled form (a level's particle as law 33), YH the
+  reactions with a yield, and HPD the production cross-section
+  $\sum_r y_r\,\sigma_r$ on the union grid, from one point before its first nonzero value,
+  with the heating number $\sum_r y_r\,\sigma_r\,\bar E_r / \sigma_t$ in MeV, $\bar E_r$
+  the particle's mean emitted energy. A suite read from ACE gets its own HPD back while
+  the cross-sections and yields are unchanged, and a rebuilt one, with a report entry,
+  once they change. A suite with no light charged products (one read from OpenMC) writes
+  no particle blocks, and the report says so.
 
 **The ZAID suffix.** A table kika writes from a suite that does not come from ACE takes
 the suffix of its temperature, the one kika's NJOY runs give (`.02c` at 293.6 K, `.06c`
@@ -282,9 +315,9 @@ header, another XSS length, the integer format switching on or off) falls back t
 - **Parse layer, read and write:** the file comes back byte for byte.
 - **ACE → model → ACE:** every integer word of the neutron and photon blocks comes back
   equal and every real word within a few units in the last place (energies and
-  densities pass through eV and back). Not written: the charged-particle production
-  blocks (PTYPE, NTRO, IXS), and NJOY's unused room after some law tables, so the XSS is
-  shorter by that room.
+  densities pass through eV and back). The charged-particle blocks come back with them
+  (HPD as the table stated it). Not written: NJOY's unused room after some law tables,
+  so the XSS is shorter by that room.
 - **Model:** the evaluation behind the table is not in the file and is reported as lost;
   QM and LR have no ACE counterpart (reported); ACE has no covariances (reported).
 
@@ -294,10 +327,14 @@ Entries a user meets after `kika.read` of an ACE file: the absent evaluation (a 
 every table); no LQR block (a loss); a reaction with no Q (a loss, normal for sums); QM,
 LR and covariances (unsupported, on every table); energy laws without a model form (laws
 22, 24, 67); photon entries without a model form; MFTYPE 13 photons stated as
-multiplicities, and orphan photons (approximations); the charged-particle blocks
-(unsupported, stating that cross-sections are unaffected). A block absent from the table
-produces no entry. `encodeAce` adds the loss of a Q-value it writes as 0, the sums it
-derives because the suite has none, and the charged-particle blocks it does not write.
+multiplicities, and orphan photons (approximations); a charged particle of a type other
+than the five light ones, or an MTRH entry kika cannot hang on a reaction (unsupported or
+lost, stating that cross-sections are unaffected). A block absent from the table produces
+no entry. `encodeAce` adds the loss of a Q-value it writes as 0, the sums it derives
+because the suite has none, the charged-particle blocks it does not write because the
+suite carries no light charged products, an HPD rebuilt because its yields or
+cross-sections changed, and a particle's mean energy it could not compute (its heating
+counted as 0).
 
 ## Validation
 
@@ -324,6 +361,22 @@ derives because the suite has none, and the charged-particle blocks it does not 
   bookkeeping, MTR follows NJOY's order with the same cross-sections
   (`::test_without_ace_provenance_mtr_follows_njoys_rule`). These need the table and
   `--deep`. `TODO(check)`: the same check over whole libraries is not in a public test.
+  The encoder reports, and does not write, particle blocks for a suite that carries no
+  light charged products
+  (`::test_the_charged_particle_blocks_are_reported_not_written`).
+- Light charged particles, on the O-16 table of ENDF/B-VIII.1 that kika's processing
+  writes (`kika/ace/model_adapter/tests/test_ace_particles.py`): protons and alphas are
+  written (`::test_protons_and_alphas_are_written`), each particle's production is
+  $\sum y\,\sigma$ of the reactions its MTRH names
+  (`::test_each_particle_is_produced_by_the_reactions_mtrh_names`), and a level
+  reaction's particle is law 33 (`::test_a_level_reactions_particle_is_law_33`); read
+  back, the particles are products and the table comes back to $10^{-12}$ relative,
+  word for word in its counts and locators, while an edited yield rebuilds the HPD
+  (`test_ace_particles_read_back.py`); these need the O-16 tape. An MT repeated in MTRH
+  keeps both entries through the parser and the encoders, on a synthetic table
+  (`kika/ace/tests/test_repeated_ixs_mt.py`), and through the model, on the synthetic
+  table and, when the tape is present, on He-3's MT 650 of ENDF/B-VIII.1
+  (`kika/ace/model_adapter/tests/test_ace_repeated_ixs_mt.py`).
 - Every unconverted block is named and the conversion stays clean for cross-sections; an
   absent block says nothing
   (`kika/ace/model_adapter/tests/test_ace_decode_reports_what_it_drops.py`).
@@ -370,7 +423,9 @@ derives because the suite has none, and the charged-particle blocks it does not 
   THERMR's incoherent elastic).
 - `kika/ace/model_adapter/decode.py`: `decodeAce`, the styles and labels, Q-values, the
   probability tables and where each reaction goes; `secondaries.py`: neutron products,
-  fission and delayed neutrons; `photons.py`: photon products; `encode.py`: `encodeAce`.
+  fission and delayed neutrons, the light charged particles; `photons.py`: photon
+  products; `encode.py`: `encodeAce`, the charged-particle blocks included;
+  `kika/ace/classes/ixs_keys.py`: the keys of the IXS entries of a repeated MT.
 - `kika/ace/comparison/compare_ace.py`: block-by-block comparison of two tables.
 
 ## References

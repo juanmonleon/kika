@@ -32,3 +32,9 @@ kika.ace.xsdir
    :members:
    :undoc-members:
    :show-inheritance:
+
+kika.ace.writers.write_ace
+--------------------------
+
+.. automodule:: kika.ace.writers.write_ace
+   :members: write_ace, write_ace_checked

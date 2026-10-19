@@ -222,8 +222,8 @@ ends nudged inward by a relative $10^{-6}$):
   or the sum of the exclusive reactions when the file has no MT 1). When MF 3 already
   holds the resonances (LRP=2, as a perturbation run's base tape writes it), the URR
   mean of the parameters is taken out of it first: added again to the ladders it would
-  count twice, and the tables of Rh-103 of ENDF/B-VIII.1 came out at twice the dilute
-  cross section that way (measured 2026-10-18).
+  count twice, which puts the elastic and capture tables of Rh-103 of ENDF/B-VIII.1 at
+  twice the dilute cross-section (measured 2026-10-18).
 - **LSSF=1.** MF 3 already is the dilute average, so the partial backgrounds are zero.
   Only the competition is kept: the excess of the total over $\sigma_2 + \sigma_{18} +
   \sigma_{102}$ where it exceeds $10^{-6}$ of the total, zero below the first energy with
@@ -354,8 +354,8 @@ to one drawn with $n$ ladders.
 
 Refused before any ladder is drawn (`UnsupportedResonanceError` or `ValueError`): every
 refusal of the unresolved preparation ({doc}`unresolved-resonances`: no radius policy, a
-$J$ that $\ell$ and $I$ cannot reach, a sector without a neutron width, parameter tables
-that do not cover the range, and the others listed there). Also refused (`ValueError`):
+sector without a neutron width, a single-node parameter table that does not cover the
+range, and the others listed there). Also refused (`ValueError`):
 an `errorTarget` that is not positive, a `checkEvery` below 2, and smooth cross-sections
 for the OpenMC basis that are not finite, non-negative arrays of one row per energy. A
 `ProbabilityTables` whose array is not $(N, 6, M)$ over its $N$ energies is refused when
@@ -429,6 +429,16 @@ on that date.
   redundant sums are not counted in the smooth absorption
   (`::test_processed_transport_absorption_excludes_redundant_sums`); the report line
   names only reactions with an average (`::test_report_line_names_only_reactions_with_an_average`).
+- **Backgrounds of a reconstructed MF 3 and a sample's cross-sections**
+  (`kika/hdf5/tests/test_urr_lssf0_background.py`). With LRP=2 the ladders get MF 3 less
+  the URR mean (`::test_an_lrp2_mf3_gives_the_ladders_its_background_less_the_urr_mean`);
+  unit factors give the table back (`::test_unit_factors_give_the_table_back`); a complete
+  MF 3 scales the bands and a background MF 3 shifts them
+  (`::test_a_complete_mf3_scales_the_bands_and_the_total_follows`,
+  `::test_a_background_mf3_shifts_the_bands_by_what_the_realisation_moved`); the Rh-103
+  tables from its LRP=2 reconstruction equal those from the tape
+  (`::test_rh103_tables_from_its_lrp2_reconstruction_equal_the_tapes`, which needs the
+  tape). The four that need no tape passed on 2026-10-20.
 - **On a whole evaluation** (Cf-252, ENDF/B-VIII.1, 16 ladders, skipped when the tape is
   not on the machine). The stage produces 20 bands at every energy with cumulative
   probabilities non-decreasing and ending at 1
@@ -471,8 +481,7 @@ U-235 −0.05 % (elastic), −0.11 % (fission), −0.07 % (capture); U-238 −0.
 ($1 - f$ times the understatement above), and nothing else. The factors were turned into
 barns with the smooth cross-sections of the official file. The time for U-235 at one
 temperature is 28.7 s for kika in one process with the AVX2 kernel (71.6 s on the
-baseline instruction set; 98 s before the kernel was split by W4 region on 2026-10-17),
-unchanged by the target (all 19 energies stop at 64 ladders), against 99 s for PURR on the
+baseline instruction set), unchanged by the target (all 19 energies stop at 64 ladders), against 99 s for PURR on the
 same machine (`TODO(check)`: NJOY version and date of this timing).
 
 ## Diagnostics

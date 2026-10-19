@@ -4,8 +4,9 @@
 :class: note
 **Computes:** the value of a tabulated function at any abscissa, its integral (with weight
 1 or $1/x$) over any interval or set of groups, its Legendre moments, its lin-lin form to
-a stated tolerance, the sum of several tables, its convolution with a Gaussian, and the
-thinning of several tables on one grid to a stated tolerance.
+a stated tolerance, the sum of several tables, its convolution with a Gaussian, the
+thinning of several tables on one grid to a stated tolerance, and the adaptive refinement
+of a function that can be evaluated anywhere.
 
 **Applies to:** any table $(x_i, y_i)$ with one ENDF/GNDS interpolation law per interval
 (codes 1-5).
@@ -13,7 +14,8 @@ thinning of several tables on one grid to a stated tolerance.
 **Entry points:** {py:func}`kika.algebra.evaluate`, {py:func}`kika.algebra.integral`,
 {py:func}`kika.algebra.group_averages`, {py:func}`kika.algebra.legendre_moments`,
 {py:func}`kika.algebra.to_linlin`, {py:func}`kika.algebra.add`,
-{py:func}`kika.algebra.fold_tabulated`, {py:func}`kika.algebra.thin_common_grid`.
+{py:func}`kika.algebra.fold_tabulated`, {py:func}`kika.algebra.thin_common_grid`,
+{py:func}`kika.algebra.refine`, {py:func}`kika.algebra.refine_steps`.
 
 **Status:** stable.
 ```
@@ -112,11 +114,34 @@ $$
 $$ (eq-tabulated-functions-thin)
 
 with a relative tolerance $\varepsilon$ (default $10^{-3}$) and an absolute floor $a_k$
-per table. The values at the points kept are never changed, so the thinned table is a
+per table. $\varepsilon$ may also be given per point: a chord from the kept point $x_i$
+is then tested with $\varepsilon_i$, the tolerance of its left end, which is how the
+processing tightens the thermal range ({doc}`../processing/processing-chain`). The values
+at the points kept are never changed, so the thinned table is a
 subset of the original. The sweep is greedy from the left: from each kept point the
 farthest next point is found by doubling the step, then bisecting, each candidate tested
 on every table at once. The two ends, and any points named as mandatory, are always
 kept, and no interval spans one. Every dropped point is tested, not estimated.
+
+**8. Adaptive refinement** (`refine`, and `refine_steps`, the same arithmetic as a
+generator that hands out its evaluation requests). The engine the linearisation and the
+resonance reconstruction use for a function that can be evaluated anywhere, for one table
+or several on one shared grid. Each pass probes every open panel at the given fractions
+of its width (in $x$, or in $\ln x$ where asked) and computes, at each probe, a ratio
+$r = \text{exceeds}(y, \text{chord})$ supplied by the caller; a probe fails when $r > 1$,
+in any of the tables. A failing panel gains its worst probe (`insert="worst"`), its worst
+and the usable probe nearest its midpoint (`"balanced"`), or every probe (`"all"`), and
+only panels created in a pass are tested in the next. A `scale` function multiplies the
+ratios of each panel by a factor of its left abscissa,
+
+$$
+r_\text{panel} = s(x_l)\,\text{exceeds}(y, \text{chord}),
+$$ (eq-tabulated-functions-scale)
+
+so that one tolerance is tightened over a range of $x$ (the processing passes NJOY's
+factor of five below 0.4999 eV). A zero-width interval (a step) is never refined; a
+panel narrower than `min_width_ulps` units in the last place of its ends is not split,
+and a panel that fails but cannot be split raises or is accepted as unresolved, as asked.
 
 ## Conventions and choices
 
@@ -139,7 +164,7 @@ kept, and no interval spans one. Every dropped point is tested, not estimated.
 
 ## Validation
 
-`kika/algebra/tests/`, 170 tests passed on 2026-10-11, among them: each law reproduces its
+`kika/algebra/tests/`, 206 tests passed on 2026-10-20, among them: each law reproduces its
 own function (`test_algebra.py::test_each_law_reproduces_its_own_function`); every law
 integrates in closed form (`::test_every_law_integrates_in_closed_form`), the log-log case
 including a steep decrease (`::test_loglog_integral_including_steep_decrease`); a $1/x$
@@ -156,6 +181,8 @@ table is the identity and of a quadratic matches its analytic second moment
 every dropped point, keeps the mandatory points and changes no value, and keeps a kink
 (`test_thin.py::test_every_row_is_reproduced_at_every_dropped_point`,
 `::test_mandatory_points_stay_and_values_are_untouched`, `::test_a_kink_is_kept`).
+The per-point tolerance of the thinning and the `scale` of the refinement are exercised
+by the processing that uses them, not by a test of their own. TODO(check): add one.
 
 ## Diagnostics
 

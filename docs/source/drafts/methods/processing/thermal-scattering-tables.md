@@ -3,7 +3,8 @@
 ```{admonition} At a glance
 :class: note
 **Computes:** at one temperature, the incoherent inelastic cross-section $\sigma_\text{in}(E)$
-on THERMR's incident grid and, at each incident energy, the outgoing-energy table (pdf and
+on THERMR's incident grid, refined where the tables need it, and, at each incident energy,
+the outgoing-energy table (pdf and
 cdf) with 16 equiprobable cosines at each outgoing energy: the "continuous" representation
 of OpenMC's thermal files (ACER `iwt=2`). From a tabulated $S(\alpha,\beta)$, or from the
 closed-form free gas of one nuclide.
@@ -63,7 +64,8 @@ incoherent) are not computed here: they come from the evaluation in closed form,
 
 **From $S(\alpha,\beta)$.** Input: the model's incoherent inelastic law and one temperature
 the law tabulates. Output, at each incident energy $E_i$ of THERMR's grid up to the law's
-upper energy $E_\text{max}$:
+upper energy $E_\text{max}$, and at the energies added between them (see *Refining the
+incident grid*):
 
 - the cross-section $\sigma_\text{in}(E_i)/n_\text{mix}$, where
   $\sigma_\text{in}(E) = \int\!\!\int \sigma(E\to E',\mu)\,d\mu\,dE'$ is computed per
@@ -95,7 +97,8 @@ outgoing energy a set of equiprobable discrete cosines), and the highest inciden
 ## Method
 
 The S(α,β) path reproduces THERMR (`calcem`, `sigl`, `sig`, `terpq`) and ACER
-(`acesix` with `iwt=2`) step by step, with their roundings; the reason is under
+(`acesix` with `iwt=2`) step by step at each incident energy, with their roundings, and
+adds incident energies where THERMR's fixed grid is too coarse; the reasons are under
 *Conventions and choices*. The free-gas path keeps THERMR's incident grid and outgoing
 panels and replaces the angular integration and the final table by exact ones.
 
@@ -226,6 +229,31 @@ ACER does with it:
    $p = c = 0$ and isotropic cosines $-1 + (2k-1)/16$ is put in front, as OpenMC's
    `from_ace` does.
 
+### Refining the incident grid
+
+On the S(α,β) path every THERMR incident energy is kept, and nodes are added between
+them. For each interval $[E_a, E_b]$ the trial node is the geometric midpoint
+$E_m = \sqrt{E_a E_b}$, rounded to 8 significant figures, and its tables are computed as
+above. With $f = (E_m - E_a)/(E_b - E_a)$, the trial becomes a node when the lin-lin
+reading of its neighbours misses it:
+
+$$
+\left\lvert \frac{(1-f)\,\sigma_a + f\,\sigma_b}{\sigma_m} - 1 \right\rvert > 10^{-3}
+\quad\text{or}\quad
+\left\lvert \frac{(1-f)\,\langle E'\rangle_a + f\,\langle E'\rangle_b}{\langle E'\rangle_m} - 1 \right\rvert > 10^{-2}
+\quad\text{or}\quad
+\big\lvert (1-f)\,\langle \mu\rangle_a + f\,\langle\mu\rangle_b - \langle\mu\rangle_m \big\rvert > 10^{-2},
+$$ (eq-thermal-scattering-tables-incident)
+
+where $\sigma$ is the table's cross-section,
+$\langle E'\rangle = \int E'\,p(E')\,dE'$ and
+$\langle\mu\rangle = \int \bar\mu(E')\,p(E')\,dE'$, with $\bar\mu(E')$ the mean of the 16
+cosines at $E'$, both by trapezoids on the Monte Carlo table (a test is skipped where the
+midpoint's $\sigma$ or $\langle E'\rangle$ is zero). Only the intervals next to a node just
+added are tried again, and an interval of THERMR's grid is halved at most eight times. The
+free gas keeps THERMR's grid: its cross-section is the nuclide's broadened elastic read
+lin-lin, which the grid does not limit.
+
 ### The free gas
 
 The free-gas path differs from the above in four places.
@@ -270,8 +298,9 @@ $$ (eq-thermal-scattering-tables-fg-mass)
   $[-1, 1]$ and those of the end points are kept as computed. A negative density, or a
   zero total, raises.
 
-The incident energies are each computed independently, in threads (`workers`, by default
-up to 8), and the tables do not depend on their number.
+The incident energies (THERMR's, then the trial nodes of each refinement pass) are each
+computed independently, whole energies per thread (`workers`, by default up to 8), and the
+tables do not depend on their number.
 
 ## Conventions and choices
 
@@ -279,11 +308,23 @@ up to 8), and the tables do not depend on their number.
   files are THERMR + ACER output, and a Monte Carlo result changes with the tables it
   samples; reproducing the algorithm (including `sigfig`, the 11-column tape rounding and
   the $10^{-6}$ merge) puts kika's tables on the same outgoing points as the official
-  ones, so a difference in a transport result is not a processing artefact. The method's
-  own approximations are reproduced with it: the quadratic interpolation of $\ln S$
-  ignores the interpolation laws the tape states, the 20-point stacks limit the
-  resolution of long panels, and the incident grid is THERMR's fixed one (OpenMC samples
-  at the nearest incident energy, so the grid is part of the data).
+  ones at every incident energy both have, so a difference in a transport result is not a
+  processing artefact. The method's own approximations at one incident energy are
+  reproduced with it: the quadratic interpolation of $\ln S$ ignores the interpolation
+  laws the tape states, and the 20-point stacks limit the resolution of long panels.
+- **The incident grid is refined.** THERMR's fixed grid of 118 energies is too coarse
+  where the law changes fast, at the sharp phonon features of a crystal (the optical
+  phonon of H in ZrH) and near $10^{-5}$ eV, where $\sigma_\text{in}$ read lin-lin between
+  its nodes can be off by more than the tolerance. OpenMC reads the cross-section lin-lin,
+  and for the outgoing distribution it samples the table of the closer incident energy, so
+  the spacing of the grid is part of the data. kika keeps every THERMR node, so the tables
+  still compare with the official ones node by node, and adds the midpoints
+  {eq}`eq-thermal-scattering-tables-incident` asks for. It costs more incident tables,
+  and a larger file, where the law needs them. The moment tolerances are looser than the
+  cross-section's because the closer table is sampled whole: they only catch a spectrum
+  or an angular distribution that changes shape between two nodes.
+  TODO(check): the size of THERMR's interpolation error and the cost of the refinement
+  are not yet reproduced by a public test.
 - **The cross-section is the integral at each incident energy.** THERMR writes
   $\sigma_\text{in}$ Lagrange-interpolated (order 5) onto the principal nuclide's PENDF
   grid, and ACER reads it back lin-lin at the incident energies. kika keeps the direct
@@ -297,7 +338,8 @@ up to 8), and the tables do not depend on their number.
   factor is a defect of THERMR has not been settled against an independent reference.
 - **No temperature interpolation.** $S(\alpha,\beta)$ is used only at the temperatures it
   is tabulated at, as THERMR requires: interpolating a scattering law in temperature is a
-  physics choice that the evaluation does not make.
+  physics choice that the evaluation does not make, and OpenMC already interpolates
+  between the temperatures of a library.
 - **The free gas does not reproduce THERMR.** THERMR integrates the free-gas kernel over
   $\mu$ with the same piecewise-linear panels and the $\alpha \ge 10^{-6}$ floor as for a
   tabulated law, which clips the integrable singularity at $E' = E$, $\mu = 1$; its
@@ -365,6 +407,15 @@ The kernel's pieces are tested in `kika/processing/tests/test_thermal.py`:
   non-negative.
 - `test_free_gas_options_are_checked`: the refusals of `iinc`, temperature and elastic
   range.
+- `test_the_native_ace_tables_are_the_python_loop_bit_for_bit`: the native THERMR tape
+  rounding and ACER thinning equal, bit for bit, a direct Python transcription of the two
+  routines kept in the test, on six random tables of 400 outgoing points.
+- `test_the_tables_do_not_depend_on_the_workers`: one thread and four give identical
+  tables.
+- `test_the_incident_grid_keeps_thermrs_nodes_and_adds_what_sigma_needs`: on a
+  $1/\sqrt{E}$ cross-section the refined grid keeps every THERMR node, adds nodes, and
+  passes {eq}`eq-thermal-scattering-tables-incident` at every midpoint; a cross-section
+  linear in $E$ adds none.
 
 ### Comparison with the official OpenMC files
 
@@ -375,7 +426,7 @@ neither dependencies of kika nor the truth.
   THERMR + ACER, `tol` $= 10^{-3}$, 16 cosines; NJOY version TODO(check)), for H in H₂O,
   graphite, H in ZrH and Zr in ZrH₂, each at two temperatures (293.6 K or 296 K, and
   600 K), kika's tables, built with the same `tol`, have the same outgoing
-  points at every incident energy, $E'$ equal to the last bit, cdf within
+  points at every incident energy of THERMR's grid, $E'$ equal to the last bit, cdf within
   $5\times10^{-7}$, densities within $10^{-6}$ and cosines within $10^{-8}$; the elastic
   parts are identical (graphite's Bragg data within $7\times10^{-12}$). The inelastic
   cross-section differs by at most 0.03 %, and by 0.69 % at the phonon kink of H in ZrH,
@@ -387,13 +438,16 @@ neither dependencies of kika nor the truth.
   TRIGA-type ZrH system, a heavy-water cell and a reflected homogeneous UO₂-water medium).
   The largest $|z|$ of $k$ is 1.1, and of a flux group 2.9 (measured 2026-10-13). These are
   regression models, not experimental benchmarks. Evaluation: ENDF/B-VIII.1 TODO(check).
+  TODO(check): this transport comparison was run on THERMR's incident grid alone, without
+  the nodes the refinement adds; it has to be repeated with the refined tables.
 
 ## Diagnostics
 
 When a report is passed, {py:func}`kika.processing.thermal.inelasticTables` and
 {py:func}`kika.processing.thermal.freeGasTables` add one warning per temperature naming
-the method (THERMR `calcem` and ACER `iwt=2`, or the free-gas integration) and the number
-of incident energies. {py:func}`kika.hdf5.thermal_processing.processThermal` adds one
+the method (THERMR `calcem` and ACER `iwt=2` on the refined incident grid, or the
+free-gas integration) and the number of incident energies, refinement included: a count
+well above THERMR's 118 says the law has features the fixed grid would not resolve. {py:func}`kika.hdf5.thermal_processing.processThermal` adds one
 warning per file saying the inelastic part is kika's and where the elastic part came
 from. None of these signals a problem; they say what produced the tables. The returned
 `energy_max` is the highest incident energy, which is what OpenMC uses as the top of the
@@ -402,11 +456,17 @@ thermal treatment.
 ## Implementation
 
 - `kika.processing.thermal`: the inputs from the model law (`thermalInputs`,
-  `freeGasInputs`), the incident grid, the tape rounding and ACER's merge, the free-gas
-  table, the threads over incident energies, and the model forms.
+  `freeGasInputs`), the incident grid and its refinement, the free-gas table, the threads
+  over incident energies, and the model forms.
 - `kika.processing._thermal_native` (C, strict IEEE double precision): THERMR's `sig`,
   `terpq`, `sigl` and `calcem` for one incident energy, the closed-form free-gas angular
-  integration, `sigfig` and the 11-column rounding.
+  integration, `sigfig`, and THERMR's tape rounding followed by ACER's `iwt=2` merge
+  (`tpend` and `acesix`) for one incident energy. Both run without holding Python's global
+  interpreter lock, so threads over incident energies run in parallel. The equal-area
+  step takes its square with the platform C runtime's `pow`, the function Python's `**`
+  calls (on Windows the Universal C runtime's, looked up when the module is imported),
+  because `pow(x, 2)` and `x*x` differ in the last bit for a few inputs, and the kernel
+  stays bit for bit equal to the transcription its test compares it with.
 - `kika.hdf5.thermal_processing`: the whole OpenMC thermal file. For a scattering law, the
   inelastic part from {py:func}`kika.processing.thermal.inelasticTables` at each
   temperature the law tabulates (or those asked for), the table name looked up in OpenMC's

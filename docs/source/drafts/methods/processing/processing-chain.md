@@ -4,7 +4,7 @@
 :class: note
 **Computes:** from one neutron evaluation, its cross-sections at 0 K and at each requested
 temperature, its unresolved-resonance probability tables, its heating and damage
-cross-sections, and the files a transport code reads (PENDF, OpenMC HDF5, GNDS with
+cross-sections, and the files a transport code reads (PENDF, OpenMC HDF5, ACE, GNDS with
 heated styles).
 
 **Applies to:** incident-neutron evaluations read from ENDF-6 (one material, MF 1-3 for
@@ -32,10 +32,12 @@ cross-sections, PURR adds probability tables for the unresolved range (MF 2/MT 1
 GASPR the gas production, THERMR the thermal scattering, and ACER writes the ACE file.
 OpenMC builds its HDF5 library by running that chain and converting the ACE files.
 
-kika has its own implementation of the physics of RECONR, BROADR, PURR and HEATR, and
-this page is about how they are chained: in what order, on which data, what each stage
-passes to the next, and which files come out. Each stage has its own methods page; the
-route through NJOY itself is {doc}`njoy`.
+kika has its own implementation of the physics of RECONR, BROADR, PURR, HEATR and GASPR,
+and writes the ACE (A Compact ENDF) neutron table itself, as ACER does. This page is about
+how these are chained: in what order, on which data, what each stage passes to the next,
+how the tolerance is shared between them, and which files come out. Each stage has its own
+methods page; thermal scattering is processed separately
+({doc}`thermal-scattering-tables`), and the route through NJOY itself is {doc}`njoy`.
 
 ## What it computes
 
@@ -68,6 +70,23 @@ $$ (eq-processing-chain-sums)
 so a sum is exact at every grid point of every temperature. The probability tables and
 the heating are computed at the same temperatures, and the heating also at 0 K.
 
+Every broadened table is stated to the relative tolerance $\varepsilon$ of the plan
+(`thinning`, $10^{-3}$ by default, BROADR's `errthn`), tightened in the thermal range as
+NJOY tightens it:
+
+$$
+\varepsilon(E) = \frac{\varepsilon}{f(E)}, \qquad
+f(E) =
+\begin{cases}
+5, & E < 0.4999\ \text{eV},\\
+1, & \text{otherwise},
+\end{cases}
+$$ (eq-processing-chain-thermal)
+
+where $E$ is the left node of the interval being tested. The table delivered (the 0 K
+source, broadened, then thinned) stays within $\varepsilon(E)$ as a whole: the three
+stages share it instead of each spending all of it (see the thinning below).
+
 ## Method
 
 The stages run in this order; each records a {py:class}`~kika.endf.process.StageReport`
@@ -86,8 +105,9 @@ relative tolerance of $10^{-3}$. This stage raises on failure: without the 0 K
 cross-sections nothing later has a source.
 
 **3. `broaden:<T>`** (the work of BROADR), one per temperature, run in parallel processes.
-Each leaf is broadened from 0 K to $T$ below $E_\text{max}$ ({doc}`doppler-broadening`)
-and assembled by {eq}`eq-processing-chain-heated`:
+Each leaf is broadened from 0 K to $T$ below $E_\text{max}$ ({doc}`doppler-broadening`),
+its adaptive table built to $\varepsilon_\text{D}(E) = \varepsilon(E)/20$, and assembled by
+{eq}`eq-processing-chain-heated`:
 
 - **The grid.** The temperature has one grid: the union of the broadened grids at or below
   $E_\text{max}$ and of the 0 K grids above it. A step (a repeated energy) is moved up by
@@ -100,14 +120,27 @@ and assembled by {eq}`eq-processing-chain-heated`:
   kept, still reproduces its value at that point,
 
   $$
-  \lvert \tilde y_r(E_j) - y_r(E_j) \rvert \le \varepsilon \lvert y_r(E_j) \rvert + a_r,
+  \lvert \tilde y_r(E_j) - y_r(E_j) \rvert \le \varepsilon_\text{T}(E_i) \lvert y_r(E_j) \rvert + a_r,
   \qquad a_r = 10^{-10} \max_j \lvert y_r(E_j) \rvert ,
   $$ (eq-processing-chain-thin)
 
-  with $\varepsilon = 10^{-3}$ by default (`thinning=None` keeps every point). The values
-  at the points kept are not changed, the first point of every reaction is kept, and the
-  sweep is greedy from the low end ({py:func}`kika.algebra.thin_common_grid`). The
+  with $E_i$ the left end of the chord that skips $E_j$ and
+  $\varepsilon_\text{T}(E) = \tfrac{9}{20}\,\varepsilon(E)$ (`thinning=None` keeps every
+  point). The values at the points kept are not changed, the first point of every
+  reaction is kept, and the sweep is greedy from the low end
+  ({py:func}`kika.algebra.thin_common_grid`, with a relative tolerance per point). The
   floor $a_r$ keeps a reaction that is zero over a stretch from forcing every point of it.
+- **The budget.** The 0 K source carries at most half of $\varepsilon$ (the
+  reconstruction tabulates at half its relative tolerance, {doc}`resonance-reconstruction`),
+  the broadened table a twentieth and the thinning the remaining nine twentieths,
+
+  $$
+  \tfrac{1}{2}\,\varepsilon + \tfrac{1}{20}\,\varepsilon + \tfrac{9}{20}\,\varepsilon = \varepsilon ,
+  $$ (eq-processing-chain-budget)
+
+  so the heated table delivered is within the tolerance it states
+  ({py:func}`kika.processing.tolerances.heatedShares`). Without thinning the broadening
+  takes the whole half the source leaves.
 - **$E_\text{max}$.** By default (`thnmax="njoy"`) it is where NJOY BROADR stops when its
   `thnmax` is left at 0, which is what OpenMC's library generation leaves it at: the top
   of the resolved resonance range; with only an unresolved range, its lower end; with no
@@ -115,15 +148,19 @@ and assembled by {eq}`eq-processing-chain-heated`:
   ({py:func}`kika.hdf5.processing.njoyThnmax`). A number in eV replaces it.
 
 **4. `urr`** (the work of PURR). When the evaluation has an unresolved range, its
-probability tables are computed at each temperature of the plan, with 20 bands and 64
-ladders by default ({doc}`probability-tables`). They are computed from the unresolved
+probability tables are computed at each temperature of the plan, with 20 bands, and at
+each energy at least 64 ladders, more (up to 4096) until the estimated error of the table
+is $5\cdot10^{-3}$ ({doc}`probability-tables`). They are computed from the unresolved
 parameters, not from the broadened MF 3, so `broaden=False` with temperatures still gives
 them.
 
 **5. `heating`** (the work of HEATR, only when `heating=True`). MT 301 (heating, eV·b)
 and MT 444 (damage energy production, eV·b) at 0 K and at every broadened temperature,
 on that temperature's MT 1 grid, as HEATR computes them with `local = 0`
-({doc}`heating`). The method needs the secondary distributions, which are tabulated
+({doc}`heating`), and the displacement cross-sections (NRT and, for the materials it is
+parametrised for, arc-dpa) on MT 444's grid
+({py:attr}`kika.endf.EndfProcessing.displacements`). The method needs the secondary
+distributions, which are tabulated
 for this stage from the whole evaluation ({doc}`tabulation`); that makes it the slowest
 stage, and the reason it is off by default.
 
@@ -140,6 +177,10 @@ stage, and the reason it is off by default.
   damage (MT 444) and gas production (MT 203-207), as
   {py:func}`kika.hdf5.processing.processSuite` builds them ({doc}`../formats/hdf5`). The
   broadening and the URR tables of the run are reused, not recomputed.
+- **ACE** ({py:meth}`kika.endf.EndfProcessing.write_ace`): one table per broadened
+  temperature, from the same processed suite as the HDF5 (light charged particles
+  included), named `<ZAID><suffix>` with ACER's conventions (`8016.02c` at 293.6 K), each
+  with its line in an `xsdir` file ({doc}`../formats/ace`).
 - **GNDS** ({py:meth}`kika.endf.EndfProcessing.write_gnds`): the evaluation (`eval`), the
   0 K reconstruction (`recon`) and one `heated` style per temperature (`heated_000`,
   `heated_001`, … in increasing temperature), as FUDGE's processing writes a processed
@@ -161,8 +202,22 @@ over the destination; an existing file is never left half-written.
   would change the smooth cross-sections by less than the tolerance.
 - **Thinning as BROADR's `errthn`, measured instead of estimated.** The criterion
   {eq}`eq-processing-chain-thin` is tested at every dropped point of every reaction, so
-  the thinned table reproduces the unthinned one to $\varepsilon$ by construction. It is
-  a different route to the same kind of table, not a claim of a smaller one.
+  the thinned table reproduces the unthinned one to $\varepsilon_\text{T}$ by
+  construction.
+- **A tolerance that does not add up.** NJOY spends its whole `errthn` on the broadening
+  and again on the thinning, on top of RECONR's own tolerance, so a table it states to
+  $10^{-3}$ can be off by more. kika shares $\varepsilon$ by
+  {eq}`eq-processing-chain-budget`. The thinning gets the largest share because its share
+  decides how many points are written; the Doppler table's share only costs time. A
+  tighter source would buy few points for a much longer reconstruction.
+  TODO(check): the measured points and errors of these shares are not yet reproduced by a
+  public test.
+- **NJOY's thermal rule, in every adaptive step.** NJOY divides the tolerances of RECONR
+  and BROADR by five below 0.4999 eV, judged at the left node of each interval
+  ({eq}`eq-processing-chain-thermal`). kika applies the same factor in the reconstruction,
+  the Doppler table and the thinning: a $1/v$ cross-section is convex, so a lin-lin table
+  of it lies above it everywhere between its points, and without the factor every thermal
+  absorption rate would be biased high by up to the full tolerance.
 - **Each reaction starts at its threshold.** A zero on the union grid below a reaction's
   first energy would put its first point under the kinematic threshold, which ACER flags;
   BROADR keeps the threshold the same way.
@@ -190,10 +245,9 @@ over the destination; an existing file is never left half-written.
 - **The number of worker processes changes nothing in the result.** Called from a daemon
   process, which may not start children, the run uses one worker.
 
-What NJOY does in its chain and this one does not: an ACE file (ACER: the HDF5 is the
-Monte Carlo output here; an ACE file is written through {doc}`njoy`), multigroup
-cross-sections and covariances (GROUPR, ERRORR), gas production in the PENDF (GASPR: it
-is in the HDF5 only), thermal scattering in the PENDF (THERMR: thermal tables are built
+What NJOY does in its chain and this one does not: multigroup cross-sections and
+covariances (GROUPR, ERRORR), gas production in the PENDF (GASPR: it is in the HDF5 and
+the ACE table only), thermal scattering in the PENDF (THERMR: thermal tables are built
 separately, {doc}`thermal-scattering-tables`), and UNRESR's self-shielded cross-sections.
 
 ## Limits and failure modes
@@ -225,9 +279,11 @@ Outputs raise {py:class}`~kika.endf.process.ProcessingOutputError` with a catego
 broadened), `pendf-failed` (including a material that does not read back),
 `pendf-needs-endf-source` (a PENDF from a GNDS evaluation: the MF 2 of a GNDS
 evaluation cannot be written back to ENDF-6 without bookkeeping GNDS does not carry),
-`gnds-failed`.
+`gnds-failed`, `ace-needs-temperature`, `ace-temperature-not-processed`,
+`ace-table-exists` (the `xsdir` already names the table and `replace` was not given),
+`ace-failed` (including a table that does not read back word for word).
 
-Not done: an ACE file, multigroup data, and incident particles other than the neutron.
+Not done: multigroup data, and incident particles other than the neutron.
 
 ## Validation
 
@@ -261,20 +317,32 @@ marked, in `kika/endf/tests/test_process_endf.py`:
   (`::test_process_gnds_outputs`) and kika reprocesses its own GNDS
   (`::test_process_gnds_reprocesses_kikas_own_gnds`);
 - the heating stage gives MT 301 and MT 444 on each MT 1 grid
-  (`::test_the_heating_stage_gives_mt301_and_mt444_on_each_mt1_grid`) and the PENDF
-  carries them in every material (`::test_the_pendf_carries_the_heating_in_every_material`);
+  (`::test_the_heating_stage_gives_mt301_and_mt444_on_each_mt1_grid`), the displacements
+  on MT 444's grid (`::test_the_heating_stage_gives_the_displacements_on_mt444s_grid`), and
+  the PENDF carries them in every material
+  (`::test_the_pendf_carries_the_heating_in_every_material`);
 - through both doors, Au-197 of ENDF/B-VIII.1 read as ENDF-6 and as GNDS gives, at
   293.6 K, MT 1, 2 and 102 within $10^{-3}$ relative at the 99.9th percentile of the
   points (`::test_gnds_and_endf_routes_agree_once_broadened`; it needs both files on disk
   and is skipped otherwise).
 
+The ACE output, on the same micro-tape, in `kika/ace/model_adapter/tests/test_ace_output.py`:
+one table per temperature named by ZAID and suffix
+(`::test_one_table_per_temperature_named_by_zaid_and_suffix`), each named once in the
+`xsdir` (`::test_the_xsdir_names_each_table_once`), a temperature that was not broadened
+refused (`::test_a_temperature_not_broadened_is_refused`), and a table read into the
+model and written again equal to the first, line for line, the date in the header aside
+(`::test_the_door_writes_a_read_table_back_as_it_was`).
+
 The thinning is checked on its own: every row is reproduced at every dropped point, the
 points named mandatory stay and no value is changed, and a kink is kept
-(`kika/algebra/tests/test_thin.py`). The comparisons of each stage with NJOY and FUDGE are
+(`kika/algebra/tests/test_thin.py`). TODO(check): no test yet checks the thermal factor
+{eq}`eq-processing-chain-thermal` or the shares {eq}`eq-processing-chain-budget` on a
+processed table. The comparisons of each stage with NJOY and FUDGE are
 on the stage's page.
 
-All passed on 2026-10-14, except those that need a whole tape or a library on disk (Cf-252
-and Au-197 of ENDF/B-VIII.1), which were skipped.
+All passed on 2026-10-20, except those that need a whole tape or a library on disk
+(Cf-252 and Au-197 of ENDF/B-VIII.1), which were skipped.
 
 ## Diagnostics
 
@@ -293,7 +361,7 @@ one per output written: `stage`, `status` (`done`, `skipped`, `rejected`), `seco
 - `urr`: `temperatures`, `n_energies`, `bins`, `ladders`, `range_eV`;
 - `heating`: `temperatures`, `mts`, `local`, `n_points`, `notes`;
 - `write`: `format`, `path`, `temperatures`, and `omitted` (what the format could not
-  carry) or `mt153` and `heating` for a PENDF.
+  carry) or `mt153` and `heating` for a PENDF; `files` (the tables written) for ACE.
 
 **A `rejected` broadening** means the temperatures are missing from every output; its
 `engine_category` says why. **`omitted`** on a `write` stage lists data the file does not
@@ -308,11 +376,13 @@ section, as text, HTML or a dictionary.
 - `kika.processing.doppler`: the broadening; `kika.hdf5.processing`: the parallel
   broadening of every reaction, the default $E_\text{max}$, the URR tables of a suite and
   the processing for the HDF5 and the heating stage.
+- `kika.processing.tolerances`: the thermal rule and the shares of the heated budget.
 - `kika.algebra.thin`: the thinning.
 - `kika.processing.resonances.probability_tables`, `kika.processing.heating`: the URR and
   heating stages.
 - `kika.endf.writers` and `kika.endf.model_adapter.pendf`: the PENDF materials;
-  `kika.hdf5.writer`: the HDF5; `kika.gnds`: the GNDS.
+  `kika.hdf5.writer`: the HDF5; `kika.ace.model_adapter` (the encoder),
+  `kika.ace.writers` and `kika.ace.xsdir`: the ACE tables; `kika.gnds`: the GNDS.
 
 ## References
 

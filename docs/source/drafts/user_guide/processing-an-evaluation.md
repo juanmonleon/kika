@@ -2,8 +2,8 @@
 
 {py:func}`kika.endf.process_endf` takes an ENDF-6 neutron tape through kika's own
 processing chain (reconstruction, Doppler broadening, unresolved-resonance probability
-tables, optionally heating) and returns a result from which a PENDF, an OpenMC HDF5 file
-or a GNDS file with heated styles is written. {py:func}`kika.gnds.process_gnds` does the
+tables, optionally heating) and returns a result from which a PENDF, an OpenMC HDF5 file,
+ACE tables or a GNDS file with heated styles are written. {py:func}`kika.gnds.process_gnds` does the
 same from a GNDS file. No NJOY is involved. What each stage computes, and how it differs
 from NJOY, is in {doc}`../methods/processing/processing-chain`.
 
@@ -54,14 +54,17 @@ What the plan controls:
 - `thnmax`: the top of the broadening, in eV, or `"njoy"` (the default) for where NJOY
   BROADR stops by default, the top of the resolved range. Above it the 0 K values are
   used.
-- `thinning`: the relative tolerance each temperature's grid is thinned to, $10^{-3}$ by
-  default; `None` keeps every point.
+- `thinning`: the relative tolerance each temperature's cross-sections are stated to,
+  $10^{-3}$ by default (five times tighter below 0.4999 eV, as in NJOY), shared between
+  the 0 K source, the broadening and the thinning so that the result stays within it;
+  `None` keeps every point of the union grid.
 - `urr`, `urr_bins`, `urr_ladders`: the probability tables (on by default, 20 bands; at
   least 64 ladders per energy and more, up to `urr_ladders` = 4096, until the table's
   statistical error is $5\cdot10^{-3}$), computed at the same temperatures.
 - `broaden=False`: no broadening; the temperatures then serve the URR tables only.
-- `heating=True`: MT 301 (KERMA) and MT 444 (damage) at every temperature, 0 K included.
-  It tabulates the secondary distributions of the whole tape, and is the slow stage.
+- `heating=True`: MT 301 (KERMA) and MT 444 (damage) at every temperature, 0 K included,
+  and the displacement cross-sections. It tabulates the secondary distributions of the
+  whole tape, and is the slow stage.
 - `reconstruction`: the {py:class}`~kika.processing.resonances.ReconstructionOptions` of the 0 K
   stage.
 
@@ -80,6 +83,9 @@ stage starts and then a fraction in (0, 1].
   and the `cdf`, `total`, `elastic`, `fission`, `capture` and `heating` rows by band;
   `None` otherwise.
 - `run.heating`: `{T: {301: (E, h), 444: (E, d)}}` in eV·b when the heating stage ran.
+- `run.displacements`: `{T: {"nrt": (E, n), "arc-dpa": (E, n)}}`, the displacement
+  cross-sections in b·displacements on MT 444's grid when the heating stage ran (arc-dpa
+  only for Fe, Ni, Cu, Pd, Pt and W). No file format carries them.
 - `run.temperatures`, `run.thnmax`, `run.stages`, `run.to_dict()` (plain types and
   arrays; the result is also picklable).
 
@@ -88,14 +94,19 @@ stage starts and then a fraction in (0, 1].
 ```python
 run.write_pendf("fe56.pendf")      # one material per temperature, 0 K first
 run.write_hdf5("Fe56.h5")          # OpenMC; index=True also updates cross_sections.xml
+run.write_ace("ace/")              # one table per temperature: 26056.02c, 26056.09c
 run.write_gnds("fe56.gnds.xml")    # eval, recon and one heated style per temperature
 ```
 
 Each file is written to a temporary name, read back and checked, and only then moved into
 place. Each call adds a `write` stage to `run.stages`; its `details["omitted"]` lists what
 the format could not carry (the GNDS file has no URR tables and no covariances). The
-HDF5 needs at least one broadened temperature. `write_pendf(temperatures=[0, 900])`
-writes a subset. A PENDF cannot be written from a GNDS evaluation.
+HDF5 and the ACE tables need at least one broadened temperature.
+`write_pendf(temperatures=[0, 900])` writes a subset; so does
+`write_ace(directory, temperatures=[900])`. `write_ace` names each table by its ZAID and
+the suffix of its temperature, adds its line to `directory/xsdir`, refuses a table the
+`xsdir` already names unless `replace=True`, and takes `extension=".80c"` for a single
+temperature. A PENDF cannot be written from a GNDS evaluation.
 
 ## The report
 

@@ -73,8 +73,19 @@ $$ (eq-resonance-reconstruction-budget)
 
 where $\sigma$ is the cross-section the formalism and the background define (in b, $E$
 in eV) and $\sigma_\text{lin}$ the table. Tabulation targets $r \le 1/2$, leaving the
-other half of the budget for writing the table to a file. In each resonance region, for
-a reaction $x$ the formalism produces,
+other half of the budget for writing the table to a file. In the thermal range the
+budget is five times tighter: the condition is
+
+$$
+f(E)\, r(E) \le 1,
+\qquad
+f(E) = \begin{cases} 5, & E < 0.4999\ \text{eV} \\ 1, & \text{otherwise,} \end{cases}
+$$ (eq-resonance-reconstruction-thermal)
+
+with $E$ the left node of the panel during tabulation and the probe's own energy when a
+finished table is verified. In each resonance region, for a reaction $x$ the formalism
+produces,
+
 
 $$
 \sigma_x(E) = \sigma_x^\text{bg}(E) + \sigma_x^\text{res}(E),
@@ -232,10 +243,18 @@ zero for $\ell = 0$).
 
 - **$\lvert J \rvert$ is used, its sign ignored**: under LRF=1 and 2 the sign of AJ
   carries no channel-spin information, and $g_J$ depends only on $\lvert J\rvert$.
-- **GT is checked, not trusted.** A zero GT means "not given". A non-zero GT must equal
-  GN+GG+GF to a relative $5\cdot10^{-6}$ (rounding of the six-digit fields), and then
-  GN+GG+GF is used and the difference noted; a larger excess is competitive physics, and
-  without a modelled competitive channel the range is refused.
+- **GT is checked, not trusted.** A zero GT means "not given". Without a competitive
+  reaction (LRX=0) ENDF-6 makes GT equal to GN+GG+GF, so the line shape is taken from the
+  partial widths, as RECONR and FUDGE do; a GT that differs is the evaluation's own
+  inconsistency, and the preparation notes give, per $\ell$, how many levels differ and
+  by how much at most. With LRX=1, $\Gamma_x$ = GT − GN − GG − GF is the competitive
+  width.
+- **A competitive width within rounding is no width.** When an LRX=1 block has
+  GT − GN − GG − GF within a relative $5\cdot10^{-6}$ of GT on every level, there is no
+  competitive width to give a shape to, and the levels are those of LRX=0 (RECONR also
+  zeroes widths below $10^{-5}$ GT); a note says so. QX alone, without LRX=1, carries no
+  competitive width: ENDF-6 gives it a meaning only with LRX=1, and NJOY reads it only
+  then.
 - **Competition already in MF 3 is not added twice.** ENDF puts the competitive
   cross-section of LRF=1, 2 in the MF 3 of its reaction (the ENDF reader assigns it to
   MT 51); the competitive width then enters $\Gamma_\lambda$ but its
@@ -243,8 +262,10 @@ zero for $\ell = 0$).
 
 **Limits and failure modes.** Refused (`UnsupportedResonanceError`): $\ell > 64$; two
 blocks with the same $\ell$; negative widths; a level at exactly $E_\lambda = 0$; a $J$
-not reachable from $\ell$ and $I$; an LRX=1 block without an exit $\ell_x$, which ENDF
-does not state and the caller must supply in the model; a competitive reference exactly
+not reachable from $\ell$ and $I$; an LRX=1 block with a competitive width beyond rounding
+and no exit $\ell_x$, which ENDF does not state and the caller must supply in the model; an
+LRX=1 level without GT; GT − GN − GG − GF negative beyond rounding (within rounding it is
+set to zero and noted); a competitive reference exactly
 at threshold; an underflowing reference penetrability.
 
 ### Reich-Moore (LRF=3)
@@ -292,7 +313,9 @@ ENDF-6 Reich-Moore collision matrix $U = e^{-2i\varphi}\big[2(\mathbb{1}-K)^{-1}
 
 The spin sector of a level comes from the sign of its AJ: $s = I - \tfrac12$ for
 AJ $< 0$ and $s = I + \tfrac12$ otherwise (and $s = I - \tfrac12$ when AJ $\ge 0$ is
-reachable only from that channel spin). Sectors with the same $(\ell, J)$ and different
+reachable only from that channel spin; likewise $s = I + \tfrac12$ when AJ $< 0$ and only
+the high channel spin can couple $\ell$ to $J$, with a note: RECONR uses the sign only to
+split one $J$ into two incoherent groups). Sectors with the same $(\ell, J)$ and different
 $s$ are incoherent. Every $(\ell, J, s)$ sector that the declared $\ell$ values allow and
 that has no level adds its hard-sphere term $4\beta g_J \sin^2\varphi_\ell$; NLSC is not
 used to invent further $\ell$ values.
@@ -549,11 +572,16 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
    values are not changed, so the evaluator's first value (normally 0) now sits at
    $E^{(7)}_\text{thr}$; sums follow from their leaves.
 4. **Segments.** The domain (the union of the evaluated tables, which must equal the
-   projectile domain the evaluated style declares, when it declares one) is cut at every region boundary, every end and
-   discontinuity of a table (a repeated energy, a histogram knot), and every step of a
+   projectile domain the evaluated style declares, when it declares one) is cut at every
+   region boundary, every end and discontinuity of a table (a repeated energy, a histogram
+   knot), and every step of a
    radius or parameter table. At a shared boundary the region on the right owns the point;
    the segment on the left is evaluated at the next representable energy below it, so the
-   output keeps a repeated energy with both one-sided values.
+   output keeps a repeated energy with both one-sided values. Before this, a table that
+   runs past the declared upper end with only zeros there, and has that end as a node, is
+   cut back to it, because the evaluation states nothing beyond its domain
+   (`clipped_zero_tails` in the report); any other excess is refused as a domain that is
+   not covered.
 5. **Seeds.** In a resonance segment: 65 energies equally spaced in $\ln E$, the ends,
    every knot of the backgrounds, radii and parameter tables, competitive thresholds,
    and for every level with $E_\lambda > 0$ its energy, its shifted peak (for SLBW/MLBW
@@ -564,7 +592,8 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
 6. **Refinement.** All reactions of a segment are refined on one shared grid
    (`kika.algebra.refine`). Each panel is probed at the fractions 0.25, 0.5, 0.75; a
    panel that passes is also probed at 0.1127, 0.2764, 0.7236, 0.8873. A panel fails when
-   any reaction has $r > 1/2$ ({eq}`eq-resonance-reconstruction-budget`) at any probe; it
+   any reaction has $f\,r > 1/2$ ({eq}`eq-resonance-reconstruction-budget`,
+   {eq}`eq-resonance-reconstruction-thermal`) at any probe; it
    then gains its worst probe and the probe nearest its midpoint. Refinement stops when
    every panel passes, and raises when it exceeds `max_points` (default 200 000;
    4 000 000 in `reconstruct_endf`), `max_iterations` passes (default 40), or a failing
@@ -605,6 +634,16 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
   FUDGE tests each node against the chord to its neighbours and inserts midpoints. Both
   spend the whole tolerance on the grid, so the ENDF rounding of the written file comes on
   top of it.
+- **Five times tighter below 0.4999 eV, as NJOY.** RECONR and BROADR divide their
+  tolerance by five below 0.4999 eV (`trange`), judged by the left node of each interval,
+  and kika does the same ({eq}`eq-resonance-reconstruction-thermal`) in the reconstruction,
+  the Doppler table ({doc}`doppler-broadening`) and the thinning of the processing chain.
+  The reason is the reaction rates: the thermal cross-sections of a $1/v$ absorber are
+  convex in energy, so a chord at the full tolerance lies above the curve over the whole
+  thermal range, and that bias goes straight into thermal absorption rates. Without the
+  rule, the processed H-1 capture of ENDF/B-VIII.1 at 293.6 K is up to $1.3\cdot10^{-3}$
+  high, against $2.7\cdot10^{-4}$ for NJOY 2016.78 (both at $10^{-3}$, measured
+  2026-10-19).
 - **The check is empirical, and every reaction is checked at points the grid did not
   use.** The probes are a finite set of energies; the report says
   `empirical_verification=True` and `global_error_bound=False`. The verification probes
@@ -668,8 +707,8 @@ several isotopes in MF 2 (NIS > 1) is refused for the same reason.
 - **Level normalisation at the channel energy of the level.** For a level of an
   R-Matrix Limited channel, kika takes the reference penetrability at the channel energy
   of $E_\lambda$, then its modulus, $\lvert E_\lambda - E_\text{channel}\rvert$, as NJOY
-  (`betset`) and FUDGE do. Taking it at $\lvert E_\lambda\rvert$ instead, as kika did
-  before, put the thermal (n,α) of Ca-40 a factor 6.4 low.
+  (`betset`) and FUDGE do. Taking it at $\lvert E_\lambda\rvert$ instead puts the thermal
+  (n,α) of Ca-40 a factor 6.4 low.
 - **Coulomb penetrabilities with their relative accuracy inside the barrier.** NJOY and
   FUDGE compute the charged-channel functions at each energy with COULFG-type continued
   fractions (Steed's method), which give $P_\ell$ only to an absolute accuracy: inside
@@ -722,7 +761,8 @@ budget or a check failed), each with a `category` listed in
   larger than `max_work_bytes` (default 64 MiB);
 - `verification-failed`, `publication-failed`: a check above failed, or the file could
   not be written and reloaded cleanly;
-- `invalid-J`: an unresolved spin $J$ that the target spin and $\ell$ cannot reach;
+- `invalid-J`: listed, but not raised by the current engine: an unresolved $J$ that the
+  target spin and $\ell$ cannot reach is taken as stated ({doc}`unresolved-resonances`);
 - `iterations-exhausted`: the refinement passes ran out before the table converged;
 - `float64-separation`: two energies the refinement needs cannot be separated in double
   precision.
@@ -752,7 +792,11 @@ test.
   a shifted p-wave level against an independent collision matrix, $2\cdot10^{-12}$
   (`kika/processing/tests/test_resonance_extended.py::test_shifted_pwave_against_independent_complex_collision_matrix`);
   competition (`::test_competition_against_complex_swave`); absent $J$ sectors
-  (`kika/processing/tests/test_resonance_foundations.py::test_potential_only_includes_absent_spin_sectors`).
+  (`kika/processing/tests/test_resonance_foundations.py::test_potential_only_includes_absent_spin_sectors`);
+  a GT that disagrees without competition is reported and the partial widths used
+  (`kika/processing/tests/test_resonance_tabulation.py::test_a_gt_without_competition_that_disagrees_is_reported_and_the_partials_used`);
+  an LRX=1 block needs its exit $\ell_x$ only for a width beyond rounding
+  (`::test_lrx_without_exit_l_needs_a_width_beyond_rounding`).
 - **Reich-Moore.** An isolated level against the closed form, $3\cdot10^{-14}$ (capture)
   and $3\cdot10^{-12}$ (elastic), $\ell = 0..3$
   (`kika/processing/tests/test_reich_moore.py::test_isolated_level_against_rm_closed_form_without_bw_shift`);
@@ -760,15 +804,16 @@ test.
   (`::test_capture_is_positive_and_accurate_even_below_flux_subtraction`); exact undamped
   poles (`::test_exact_undamped_pole_uses_limit_and_preserves_unitarity`); an LRF=3 range
   and its LRF=7 equivalent give the same collision physics
-  (`::test_lrf3_and_equivalent_lrf7_decode_to_identical_collision_physics`).
+  (`::test_lrf3_and_equivalent_lrf7_decode_to_identical_collision_physics`); a negative AJ
+  whose low channel spin cannot couple takes the high one
+  (`::test_a_negative_aj_whose_low_channel_spin_cannot_couple_takes_the_high_one`).
 - **R-Matrix Limited.** Channel solve against a dense level-space solve, $8\cdot10^{-14}$
   (`kika/processing/tests/test_r_matrix.py::test_channel_solve_against_independent_dense_level_solve`);
   model cross-sections with closed channels against level space, $3\cdot10^{-12}$
   (`::test_model_cross_sections_against_level_space_including_closed_channels`);
   Coulomb $P$, $S$ against 60-digit references, $5\cdot10^{-10}$
   (`kika/processing/tests/test_r_matrix_advanced.py::test_coulomb_against_60_digit_reference`);
-  $\ln P$, $S$ and the phase inside the barrier, at small $
-ho$ and near the threshold,
+  $\ln P$, $S$ and the phase inside the barrier, at small $\rho$ and near the threshold,
   against 40-digit references, relative $2\cdot10^{-14}$ in $\ln P$ and $10^{-12}$ in
   $S$ and the phase
   (`kika/processing/tests/test_coulomb_native.py::test_barrier_functions_against_40_digit_reference`);
@@ -916,7 +961,8 @@ the same `accuracy` does not reach it on Fe-56, Pu-239 and U-235 (table above).
 
 - `regions`: one entry per segment, with `domain`, `points`, `iterations`, `evaluations`,
   `refinement_maxima` and `verification_maxima` per reaction (largest $r$ of
-  {eq}`eq-resonance-reconstruction-budget` at the refinement and verification probes;
+  {eq}`eq-resonance-reconstruction-budget` at the refinement and verification probes,
+  multiplied by the thermal factor of {eq}`eq-resonance-reconstruction-thermal`;
   the first should be $\le 0.5$, the second $\le 1$), `verification_worst` (energy, exact
   and tabulated values) and `integrals` (estimates of $\int\sigma\,dE$ and
   $\int\sigma\,dE/E$ by three-point Gauss-Legendre on each panel, with the integral of
@@ -932,10 +978,12 @@ the same `accuracy` does not reach it on Fe-56, Pu-239 and U-235 (table above).
   threshold (step 3 of the assembly), the evaluated and the new first energy. An entry
   says the evaluation opens the reaction a few parts per million below the energy at
   which it can occur; it is a correction of the abscissa, not of the values;
+- `clipped_zero_tails`: for each reaction whose table ran past the declared domain with
+  only zeros, the old and the new last energy (step 4 of the assembly);
 - `source_conversion_report`: the conversion report of the source, whose losses would
   have blocked the reconstruction;
 - `points`, `stored_points`, `domain`, `context`, `options`, `resonance_partial_owners`,
-  `engine` (`kika-native-suite-3`; it names the reconstruction physics and changes
+  `engine` (`kika-native-suite-4`; it names the reconstruction physics and changes
   whenever a change of kernel, grid or publication alters a reconstructed value, so a
   cache keyed on it is invalidated exactly then), `source_sha256`.
 
@@ -982,6 +1030,9 @@ collects the largest solve residual and flux error of each formalism.
   kinematics.
 - `kika.processing.resonances.assemble`, `tabulate`, `grid`: backgrounds, sums,
   refinement and the low-level `tabulate_resonances`.
+- `kika.processing.tolerances`: the thermal range and factor of
+  {eq}`eq-resonance-reconstruction-thermal`, shared with the Doppler table and the
+  thinning.
 - `kika.processing.resonances._rm_native` (C, built with the package) and
   `_rm_acceleration`: the compiled level sums for Reich-Moore, diagonal R-Matrix Limited
   and Breit-Wigner, and the unresolved integrand. They are used only for normal-range

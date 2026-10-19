@@ -12,7 +12,7 @@ cross-section.
 {py:func}`kika.processing.group_averaging.resonance_window_average`; the integrals:
 {py:func}`kika.algebra.group_averages`, {py:func}`kika.algebra.log_window_averages`.
 
-**Status:** stable.
+**Status:** stable — since 0.2.0.
 ```
 
 ## Background

@@ -83,7 +83,10 @@ HDF5 and ACE writers) instead: they split the energy range into chunks, broaden 
 with this function and assemble the result, in parallel processes. One call over all
 of Fe-56 ENDF/B-VIII.1 at 293.6 K takes about 156 s and needs a raised `max_points`;
 the chunked path takes 19 s in one process for the same points and error
-(measured 2026-10-18).
+(measured 2026-10-18). There the tolerance is the chain's, not one you pass: the table is
+broadened to a twentieth of the stated tolerance and then thinned, five times tighter
+below 0.4999 eV ({doc}`../methods/processing/doppler-broadening`, *Conventions and
+choices*).
 
 Choose endpoint policies from the source semantics: the policies in this snippet
 are examples, not defaults suitable for every reaction. An unresolved-resonance
