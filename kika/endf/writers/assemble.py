@@ -58,7 +58,7 @@ __all__ = ["MF_WRITE_ORDER", "PENDF_SECTIONS", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
 #: of *coverage* rather than of order: an MF absent here is one nothing can
 #: write, not one that sorts late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 31, 32, 33, 34, 35)
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 27, 31, 32, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -529,6 +529,13 @@ def _mf7Sections(suite, mat, report):
     return encodeMF7Sections(suite, mat, report)
 
 
+def _photoatomicSections(suite, mat, report):
+    """MF23 and MF27 for a photo-atomic suite; nothing for any other."""
+    from ..model_adapter.photoatomic import encodePhotoatomicSections
+
+    return encodePhotoatomicSections(suite, mat, report)
+
+
 def _covarianceSections(suite, mat, report):
     """MF31/33/34/35, one section per (MF, row MT) the covariance suite carries."""
     from ..model_adapter import (encodeMF31MT, encodeMF32MT, encodeMF33MT,
@@ -620,7 +627,7 @@ def _lumpedComponents(suite, mat, present, report):
 _BUILDER_FILES = {
     "_mf1Sections": {1}, "_mf2Sections": {2}, "_mf3And4And5Sections": {3, 4, 5},
     "_mf6Sections": {6}, "_mf7Sections": {7}, "_productionSections": {8, 9, 10},
-    "_photonSections": {12, 13, 14, 15},
+    "_photonSections": {12, 13, 14, 15}, "_photoatomicSections": {23, 27},
     "_covarianceSections": {31, 32, 33, 34, 35},
 }
 
@@ -658,11 +665,17 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
     mat = _mat(suite, mat)
 
     sections: List[Tuple[int, int, object]] = []
+    from kika.nuclear_data.model import ATOMIC_INTERACTION
+    atomic = getattr(suite, "interaction", None) == ATOMIC_INTERACTION
     for build in (_mf1Sections, _mf2Sections, _mf3And4And5Sections,
                   _mf6Sections, _mf7Sections, _productionSections, _photonSections,
-                  _covarianceSections):
+                  _photoatomicSections, _covarianceSections):
         if files is not None and not any(sectionSelected(mf, None, files)
                                          for mf in _BUILDER_FILES[build.__name__]):
+            continue
+        if atomic and build not in (_mf1Sections, _photoatomicSections):
+            # A photo- or electro-atomic suite is MF1 and MF23-28 only: its
+            # reactions are not MF3 reactions.
             continue
         if build is _mf1Sections:
             built, report = build(suite, mat, report, label, selection=files)
@@ -673,6 +686,10 @@ def encodeTapeSections(suite, mat: Optional[int] = None, report=None, *,
         sections.extend(entry for entry in built
                         if files is None or sectionSelected(entry[0], entry[1], files))
 
+    if atomic:
+        from ..model_adapter.photoatomic import spelledMF1
+        sections = [(mf, mt, spelledMF1(s, suite.provenance, mat, report) if (mf, mt) == (1, 451) else s)
+                    for mf, mt, s in sections]
     written = {mf for mf, _, _ in sections}
     for mf in sorted(written - set(MF_WRITE_ORDER)):  # pragma: no cover
         raise AssertionError(f"MF{mf} was built and MF_WRITE_ORDER omits it")
@@ -756,13 +773,19 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
     if tapeId is None:
         header = getattr(getattr(suite, "provenance", None), "headerFields", None) or {}
         kept = header.get(TAPE_ID_KEY)
-    path.write_text(assembleTape(sections, mat, tapeId, tapeRecord=kept),
-                    newline="\n")
+    text = assembleTape(sections, mat, tapeId, tapeRecord=kept)
+    path.write_text(text, newline="\n")
 
+    from ..model_adapter.decay_sublibrary import TAPE_KEY, applyTapeConventions
+    conventions = (getattr(getattr(suite, "provenance", None), "headerFields", None) or {}).get(TAPE_KEY)
+    if conventions:
+        # A tape whose spelling was kept (the photo-atomic sublibraries): its
+        # directory, sequence numbers and control records as read.
+        applyTapeConventions(path, text, conventions, {(mf, mt) for mf, mt, _ in sections}, report)
     # Every section written is declared, so the rebuild does not drop one that
     # the source tape's directory happened not to list.
-    if not update_mf1_directory(str(path),
-                                added_sections={(mf, mt) for mf, mt, _ in sections}):
+    elif not update_mf1_directory(str(path),
+                                  added_sections={(mf, mt) for mf, mt, _ in sections}):
         report.warn(
             f"the MF1/451 directory of {path.name} could not be rebuilt, so its "
             f"NC line counts are the ones the model was read with and are only "

@@ -629,6 +629,8 @@ def encodeSublibrary(pops: PoPs, mat: Optional[int] = None,
     from .fission_yields import FPY_KEY, encodeFissionYields
 
     report = report if report is not None else ConversionReport()
+    if any(getattr(e, "atomic", None) is not None for e in pops.chemicalElements.values()):
+        return _encodeRelaxation(pops, mat, report)
     nuclide = _decayNuclide(pops)
     provenance = pops.provenance if pops.provenance is not None else _synthesiseProvenance(pops, report)
     mat = int(mat if mat is not None else provenance.mat)
@@ -666,6 +668,21 @@ def encodeSublibrary(pops: PoPs, mat: Optional[int] = None,
 
 def _idColumns(mat: int, mf: int, mt: int, ns: int) -> str:
     return f"{mat:>4}{mf:>2}{mt:>3}{ns:>5}"
+
+
+def _encodeRelaxation(pops: PoPs, mat: Optional[int], report: ConversionReport):
+    """An atomic-relaxation PoPs (NSUB=6): MF1/451 and MF28/MT533."""
+    from .encode import encodeMF1MT451
+    from .photoatomic import encodeRelaxationSections, spelledMF1
+
+    provenance = pops.provenance
+    if provenance is None:
+        raise ValueError("an atomic relaxation PoPs read from GNDS has no ENDF header to write MF1 from")
+    mat = int(mat if mat is not None else provenance.mat)
+    mt451, report = encodeMF1MT451(SimpleNamespace(styles=pops.styles, provenance=provenance),
+                                   mat=mat, report=report)
+    mt451 = spelledMF1(mt451, provenance, mat, report)
+    return [(1, 451, mt451)] + encodeRelaxationSections(pops, mat, report), mat, report
 
 
 def encodeDecaySublibrary(pops: PoPs, mat: Optional[int] = None,
@@ -744,12 +761,20 @@ def writeSublibraryTape(pops: PoPs, path, mat: Optional[int] = None,
     text = assembleTape(sections, mat, tapeId, tapeRecord=kept)
     path.write_text(text, newline="\n")
     book = ((pops.provenance.headerFields or {}).get(TAPE_KEY) or {}) if pops.provenance else {}
+    applyTapeConventions(path, text, book, {(mf, mt) for mf, mt, _ in sections}, report)
+    return report
+
+
+def applyTapeConventions(path, text: str, book: dict, sections, report) -> None:
+    """Give a written tape the directory counts, sequence numbers and control records it was read with."""
+    from kika.endf.writers.update_directory import update_mf1_directory
+
     # The directory as read stays when no section changed length: nine decay
     # tapes of ENDF/B-VIII.1 state an NC one or two records off (Br-88 says
     # 535 for a 537-record MT457), and a copy should be a copy. Otherwise the
     # counts are rebuilt from what was written.
     if book.get("counts") is None or book["counts"] != _sectionCounts(text.split("\n")):
-        if not update_mf1_directory(str(path), added_sections={(mf, mt) for mf, mt, _ in sections}):
+        if not update_mf1_directory(str(path), added_sections=set(sections)):
             report.warn(f"the MF1/451 directory of {path.name} could not be rebuilt")
     if book.get("sequence") is False or book.get("control"):
         # The source tape's conventions, so the round trip is byte for byte:
@@ -764,7 +789,6 @@ def writeSublibraryTape(pops: PoPs, path, mat: Optional[int] = None,
         if book.get("sequence") is False:
             text = [line[:75] for line in text]
         path.write_text("\n".join(text), newline="\n")
-    return report
 
 
 def _isControl(line: str) -> bool:

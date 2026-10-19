@@ -585,6 +585,12 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         from .thermal_scattering import attachThermalScattering
 
         report = attachThermalScattering(suite, endf, report)
+    elif 23 in getattr(endf, "mf", {}):
+        # A photo-atomic (NSUB=3) or electro-atomic (NSUB=113) tape: its cross
+        # sections are MF23, and an atomic interaction has no MF3.
+        from .photoatomic import attachPhotoatomic
+
+        report = attachPhotoatomic(suite, endf, report)
     else:
         report.lost("no MF3: the evaluation carries no cross sections")
 

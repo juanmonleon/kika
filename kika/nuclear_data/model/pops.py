@@ -119,6 +119,10 @@ class PoPs:
     name: Optional[str] = None
     version: Optional[str] = None
     aliases: Dict[str, MetaStable] = field(default_factory=dict)
+    #: §12 ``chemicalElements`` that carry data of their own: the atomic
+    #: relaxation sublibrary (:class:`~kika.nuclear_data.model.photoatomic.ChemicalElement`),
+    #: by symbol. The isotopes and nuclides of an element stay in ``particles``.
+    chemicalElements: Dict[str, object] = field(default_factory=dict)
     styles: List[object] = field(default_factory=list)
     provenance: Optional[object] = None
     #: The conversion report of the read that built a standalone PoPs.

@@ -327,7 +327,25 @@ def _readEndf(path, covariances: bool):
         _noteUnparsedMFs(path, endf, report)
         pops.report = report
         return pops
+    if getattr(mt451, "_nsub", None) == 6:
+        # An atomic relaxation evaluation (MF28): the element's subshells and
+        # how a vacancy in each is filled, which GNDS writes as a standalone PoPs.
+        from kika.endf.model_adapter.photoatomic import decodeRelaxationSublibrary, keepMF1Spelling
+        pops, report = decodeRelaxationSublibrary(endf, sourcePath=path)
+        keepMF1Spelling(pops.provenance, pops.styles, path)
+        _noteUnparsedMFs(path, endf, report)
+        pops.report = report
+        return pops
     suite, report = decodeReactionSuite(endf)
+    if getattr(mt451, "_nsub", None) in (3, 113):
+        # A photo-atomic or electro-atomic tape: keep how it spells its numbers
+        # (the B-VIII.1 sublibraries are not canonical), so it writes back as read.
+        from kika.endf.model_adapter.decay_sublibrary import _keepTapeConventions
+        from kika.endf.model_adapter.photoatomic import keepMF1Spelling, keepPhotoatomicSpelling
+        keepPhotoatomicSpelling(suite, path)
+        if suite.provenance is not None:
+            _keepTapeConventions(suite.provenance, mt451, path)
+            keepMF1Spelling(suite.provenance, suite.styles, path)
 
     decoded = ()
     if covariances:

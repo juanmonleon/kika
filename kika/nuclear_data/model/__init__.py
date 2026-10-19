@@ -157,6 +157,9 @@ from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
 from .pops import MetaStable, Nuclide, Particle, PoPs, Unorthodox, pidFromZA, zaFromPid
+from .photoatomic import (ATOMIC_INTERACTION, SUBSHELL_LABELS, Atomic, ChemicalElement,
+                          CoherentPhotonScattering, Configuration, IncoherentPhotonScattering,
+                          subshellDesignator, subshellLabel)
 from .fission_yields import (CUMULATIVE, INDEPENDENT, ElapsedTime, IncidentEnergy,
                              ProductYield, Yields)
 from .decay import (AVERAGE_ENERGY_LABELS, ELECTROMAGNETIC, SPECTRUM_LABELS,
@@ -262,6 +265,8 @@ __all__ = [
     "MonteCarlo_cdf",
     # §12 PoPs
     "PoPs", "Particle", "Nuclide", "Unorthodox", "pidFromZA", "zaFromPid",
+    "ATOMIC_INTERACTION", "SUBSHELL_LABELS", "Atomic", "ChemicalElement", "CoherentPhotonScattering",
+    "Configuration", "IncoherentPhotonScattering", "subshellDesignator", "subshellLabel",
     "DecayData", "DecayModes", "DecayMode", "DecayPath", "Decay",
     "PhotonEmissionProbabilities", "Shell", "ELECTROMAGNETIC",
     "Spectrum", "Discrete", "CascadeLine", "cascadeLines", "Continuum", "TRANSITION_TYPES", "SPECTRUM_LABELS",
