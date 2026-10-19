@@ -119,3 +119,25 @@ def test_corrected_free_gas_pdf_and_cdf_describe_the_same_tail_mass():
         np.testing.assert_allclose(np.diff(c),areas,rtol=1e-9,atol=2e-15)
         assert areas.sum()==pytest.approx(1.,abs=1e-12)
         assert np.all(p>=0)
+
+
+def test_the_incident_grid_keeps_thermrs_nodes_and_adds_what_sigma_needs():
+    # sigma ~ 1/sqrt(E) read lin-lin between THERMR's nodes misses by up to ~1 % near 1e-5 eV
+    # (ND-8); the refined grid keeps every node and reads within SIGMA_TOL at its midpoints.
+    from kika.processing import thermal as T
+
+    def entry(e):
+        return dict(enow=e, sigma=1 / np.sqrt(e), moments=(2 * e, .1))
+
+    def compute(points):
+        return [entry(e) for e in points]
+
+    grid = [native.sigfig(float(e), 8, 0) for e in T.EGRID[:20]]
+    refined = [x["enow"] for x in T._refine(compute(grid), compute)]
+    assert set(grid) <= set(refined) and len(refined) > len(grid)
+    for a, b in zip(refined[:-1], refined[1:]):
+        middle = entry(native.sigfig(float(np.sqrt(a * b)), 8, 0))
+        if a < middle["enow"] < b:
+            assert not T._misses(entry(a), entry(b), middle)
+    linear = lambda points: [dict(enow=e, sigma=3 * e, moments=(2 * e, .1)) for e in points]  # noqa: E731
+    assert [x["enow"] for x in T._refine(linear(grid), linear)] == grid      # lin-lin is exact

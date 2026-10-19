@@ -20,6 +20,13 @@ documented in the manual (``methods/processing/thermal-scattering-tables``).
 - **OpenMC** (``thermal.py`` ``from_ace``): cosines sorted, and a 0 eV point with
   isotropic cosines when the cdf does not start at zero.
 
+**Incident grid (ND-8).** THERMR's fixed 116 energies (``EGRID``) are all kept, and a
+node is added at an interval's geometric midpoint wherever sigma read lin-lin there misses
+the exact value by more than 1e-3, or the neighbours' mixed moments miss <E'> by 1e-2
+(relative) or <mu> by 1e-2 (absolute) (:func:`_refine`). On the fixed grid sigma was up to
+3-4 % off between nodes, and OpenMC samples the closer table's spectrum. The S(alpha, beta)
+tables get it; the free gas keeps THERMR's grid.
+
 The cross section is THERMR's integral at each incident energy. THERMR also
 writes it, Lagrange-interpolated, on the principal nuclide's PENDF grid, and
 ACER reads it back from there; that round trip is not repeated here.
@@ -376,6 +383,102 @@ def freeGasTables(awr: float, temperature: float, elastic, *, emax: float = 10.0
     return _tables(inputs, temperature, nmix, options, report, (E, sigma))
 
 
+#: The incident grid's targets (ND-8): between two incident energies, sigma read lin-lin and
+#: the two tables' moments mixed lin-lin must agree with the exact table at the geometric
+#: midpoint -- sigma to SIGMA_TOL relative, <E'> to MOMENT_TOL relative and <mu> to MOMENT_TOL
+#: absolute -- or the midpoint becomes a node. At most REFINE_DEPTH halvings of an interval.
+SIGMA_TOL = 1e-3
+MOMENT_TOL = 1e-2
+REFINE_DEPTH = 8
+
+
+def _entry(kernel, enow, inputs, nang, nmix, elastic):
+    """One incident energy's tables, as ACER and OpenMC leave them, with their moments."""
+    from kika.nuclear_data import model as m
+
+    x, y, xsi = kernel
+    if inputs.iinc==1:
+        # ACER skips small CDF increments and joins the last nonzero PDF to
+        # a distant zero. That tail no longer integrates to its stored CDF
+        # and can corrupt the second moment despite a small KS difference.
+        # The corrected free-gas grid already controls density interpolation.
+        ex=np.asarray(x,dtype=float)
+        density=np.asarray(y[:,0],dtype=float)
+        areas=np.diff(ex)*(density[:-1]+density[1:])/2
+        cumulative=np.r_[0.,np.cumsum(areas)]
+        norm=float(cumulative[-1])
+        if not norm>0 or np.any(density<0):raise ValueError("invalid free-gas density")
+        pdf=density/norm;cdf=cumulative/norm
+        cos=np.clip(y[:,1:1+nang],-1.,1.)
+    else:
+        ex, pdf, cdf, cos = _acer(*_tpend(x, y, xsi), nang)
+    tables = [_discrete(c, e) for c, e in zip(cos, ex)]
+    means = np.asarray([np.mean(c) for c in cos], dtype=float)
+    if len(cdf) and cdf[0] > 0.0:
+        ex, pdf, cdf = np.insert(ex, 0, 0.0), np.insert(pdf, 0, 0.0), np.insert(cdf, 0, 0.0)
+        dmu = 2.0 / nang
+        tables.insert(0, _discrete(np.linspace(-1 + dmu / 2, 1 - dmu / 2, nang), 0.0))
+        means = np.insert(means, 0, 0.0)
+    if elastic is None:
+        sigma = xsi / nmix
+    else:
+        # ACER's gety1 on THERMR's MT221, the PENDF elastic: lin-lin at the
+        # incident energy as THERMR left it (enow, before the ACE rounding).
+        sigma = _linlin(elastic, enow) / nmix
+    area = float(np.sum(np.diff(ex) * (pdf[:-1] + pdf[1:]) / 2))
+    trapz = lambda f: float(np.sum(np.diff(ex) * (f[:-1] + f[1:]) / 2)) / area  # noqa: E731
+    moments = (trapz(ex * pdf), trapz(means * pdf)) if area > 0 else (0.0, 0.0)
+    return dict(enow=enow, ex=ex, pdf=pdf, cdf=cdf, tables=tables, sigma=sigma, moments=moments)
+
+
+def _misses(left, right, middle):
+    """Whether the lin-lin reading between ``left`` and ``right`` misses the exact ``middle``."""
+    f = (middle["enow"] - left["enow"]) / (right["enow"] - left["enow"])
+    mix = lambda a, b: (1 - f) * a + f * b  # noqa: E731
+    sigma = middle["sigma"]
+    if sigma > 0 and abs(mix(left["sigma"], right["sigma"]) / sigma - 1) > SIGMA_TOL:
+        return True
+    (e0, u0), (e1, u1), (em, um) = left["moments"], right["moments"], middle["moments"]
+    if em > 0 and abs(mix(e0, e1) / em - 1) > MOMENT_TOL:
+        return True
+    return abs(mix(u0, u1) - um) > MOMENT_TOL
+
+
+def _refine(entries, compute):
+    """THERMR's incident energies with a node added wherever :func:`_misses` says so.
+
+    THERMR's fixed grid (EGRID) leaves sigma read lin-lin up to 3-4 % off between its nodes
+    (H in ZrH at the 0.137 eV optical phonon, every law near 1e-5 eV), and OpenMC takes the
+    closer table's spectrum, not a mix (roadmap ND-8, runbook PXB-064). Every THERMR node is
+    kept; a midpoint that the neighbours already describe is not stored.
+    """
+    entries = list(entries)
+    todo = list(range(len(entries) - 1))
+    for _ in range(REFINE_DEPTH):
+        trials = []
+        for i in todo:
+            a, b = entries[i]["enow"], entries[i + 1]["enow"]
+            e = _native().sigfig(float(np.sqrt(a * b)), 8, 0)
+            if a < e < b:
+                trials.append((a, e))
+        if not trials:
+            break
+        found = compute([e for _, e in trials])
+        position = {entry["enow"]: k for k, entry in enumerate(entries)}
+        added = []
+        for (a, _), middle in zip(trials, found):
+            k = position[a]
+            if _misses(entries[k], entries[k + 1], middle):
+                added.append(middle)
+        if not added:
+            break
+        entries = sorted(entries + added, key=lambda entry: entry["enow"])
+        new = {entry["enow"] for entry in added}
+        todo = [k for k in range(len(entries) - 1)
+                if entries[k]["enow"] in new or entries[k + 1]["enow"] in new]
+    return entries
+
+
 def _tables(inputs: _Inputs, temperature, nmix, options, report, elastic):
     from kika.nuclear_data import model as m
 
@@ -386,55 +489,43 @@ def _tables(inputs: _Inputs, temperature, nmix, options, report, elastic):
         if enow > inputs.emax or abs(enow - inputs.emax) < 1e-5:
             break
         energies.append(enow)
-    # ACE stores the incident energies to 12 significant figures (1PE20.11):
-    # sigfig's bias (1 + 1e-13) does not survive it, and 10 eV reads back 10.
-    # ACE stores them in MeV to 12 significant figures (1PE20.11) and OpenMC
-    # multiplies by 1e6 on read: 4.9 eV reads back 4.8999999999999995.
-    stored = [float(f"{e * 1e-6:.11e}") * 1e6 for e in energies]
     from kika.processing.workers import pool_default, resolve
     workers = resolve(options.workers, pool_default())
-    if workers > 1 and len(energies) > 1:
-        from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            kernels = list(pool.map(lambda e: _calcem(inputs, e, options), energies))
-    else:
-        kernels = [_calcem(inputs, e, options) for e in energies]
-    xs, spectra, angular = [], [], []
-    for (x, y, xsi), eout, enow in zip(kernels, stored, energies):
-        if inputs.iinc==1:
-            # ACER skips small CDF increments and joins the last nonzero PDF to
-            # a distant zero. That tail no longer integrates to its stored CDF
-            # and can corrupt the second moment despite a small KS difference.
-            # The corrected free-gas grid already controls density interpolation.
-            ex=np.asarray(x,dtype=float)
-            density=np.asarray(y[:,0],dtype=float)
-            areas=np.diff(ex)*(density[:-1]+density[1:])/2
-            cumulative=np.r_[0.,np.cumsum(areas)]
-            norm=float(cumulative[-1])
-            if not norm>0 or np.any(density<0):raise ValueError("invalid free-gas density")
-            pdf=density/norm;cdf=cumulative/norm
-            cos=np.clip(y[:,1:1+nang],-1.,1.)
+    def compute(points):
+        if workers > 1 and len(points) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                kernels = list(pool.map(lambda e: _calcem(inputs, e, options), points))
         else:
-            ex, pdf, cdf, cos = _acer(*_tpend(x, y, xsi), nang)
-        tables = [_discrete(c, e) for c, e in zip(cos, ex)]
-        if len(cdf) and cdf[0] > 0.0:
-            ex, pdf, cdf = np.insert(ex, 0, 0.0), np.insert(pdf, 0, 0.0), np.insert(cdf, 0, 0.0)
-            dmu = 2.0 / nang
-            tables.insert(0, _discrete(np.linspace(-1 + dmu / 2, 1 - dmu / 2, nang), 0.0))
-        spectra.append(m.Xs_pdf_cdf1d(xs=ex, pdf=pdf, cdf=cdf, interpolation=m.Interpolation.linlin,
-                                      outerDomainValue=eout))
-        angular.append(m.XYs2d(function1ds=tables, outerDomainValue=eout))
-        if elastic is None:
-            xs.append(xsi / nmix)
-        else:
-            # ACER's gety1 on THERMR's MT221, the PENDF elastic: lin-lin at the
-            # incident energy as THERMR left it (enow, before the ACE rounding).
-            xs.append(_linlin(elastic, enow) / nmix)
+            kernels = [_calcem(inputs, e, options) for e in points]
+        return [_entry(k, e, inputs, nang, nmix, elastic) for k, e in zip(kernels, points)]
+
+    entries = compute(energies)
+    # The S(alpha, beta) tables get the incident nodes their interpolation needs (ND-8); the
+    # free gas keeps THERMR's grid, its sigma being the nuclide's elastic read lin-lin.
+    if inputs.iinc == 2:
+        entries = _refine(entries, compute)
+    xs, spectra, angular, stored = [], [], [], []
+    for entry in entries:
+        # ACE stores the incident energies to 12 significant figures (1PE20.11):
+        # sigfig's bias (1 + 1e-13) does not survive it, and 10 eV reads back 10.
+        # ACE stores them in MeV to 12 significant figures (1PE20.11) and OpenMC
+        # multiplies by 1e6 on read: 4.9 eV reads back 4.8999999999999995.
+        eout = float(f"{entry['enow'] * 1e-6:.11e}") * 1e6
+        stored.append(eout)
+        spectra.append(m.Xs_pdf_cdf1d(xs=entry["ex"], pdf=entry["pdf"], cdf=entry["cdf"],
+                                      interpolation=m.Interpolation.linlin, outerDomainValue=eout))
+        angular.append(m.XYs2d(function1ds=entry["tables"], outerDomainValue=eout))
+        xs.append(entry["sigma"])
+    energies = stored
     form = m.EnergyAngularMC(energy=m.XYs2d(function1ds=spectra),
                              energyAngular=m.XYs3d(function2ds=angular))
     if report is not None:
         kind = "free gas" if inputs.iinc == 1 else "incoherent inelastic"
-        method="singularity-free angular integration and consistent PDF/CDF" if inputs.iinc==1 else "THERMR calcem and ACER iwt=2"
+        method=("singularity-free angular integration and consistent PDF/CDF" if inputs.iinc==1 else
+                "THERMR calcem and ACER iwt=2 on THERMR's incident grid refined until sigma reads "
+                f"lin-lin to {SIGMA_TOL:g}")
         report.warn(f"{kind} at {temperature:g} K by kika ({method}, {len(energies)} incident energies)")
     return m.XYs1d(xs=np.asarray(stored), ys=np.asarray(xs)), form, float(stored[-1])
