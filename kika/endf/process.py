@@ -856,6 +856,108 @@ class EndfProcessing:
                       files=[str(p) for p in written], omitted=omitted)
         return written
 
+    def write_dosimetry_ace(self, directory, *, temperatures=None, extension: str | None = None,
+                            xsdir: bool = True, replace: bool = False,
+                            progress: Progress | None = None) -> list:
+        """Write one dosimetry ACE table (``.NNy``) per broadened temperature into ``directory``.
+
+        Reaction cross sections only, each on its own grid, for reaction-rate
+        tallies (:mod:`kika.ace.model_adapter.dosimetry` says which): every
+        cross section with an MT as this run processed it at that temperature
+        (MT 1 and the sums included), MT 301 and MT 444 when the heating stage
+        ran, the gas production MT 203-207, and the MF 9 and MF 10 production
+        cross sections numbered ``MT + 1000·(10 + LFS)`` as ACER numbers them.
+        ZAID, suffix (``.02y`` at 293.6 K), header and xsdir follow
+        :meth:`write_ace`; each table is read back in strict mode and compared
+        word for word before it replaces a file.
+
+        Raises :class:`ProcessingOutputError` with the categories of
+        :meth:`write_ace`: ``ace-needs-temperature``,
+        ``ace-temperature-not-processed``, ``ace-table-exists``, ``ace-failed``.
+        Each call appends its own ``write`` stage.
+        """
+        import datetime
+
+        from kika import __version__
+        from kika._utils import ace_temperature_suffix
+        from kika.ace.encoders.dosimetry import encode_dosimetry
+        from kika.ace.model_adapter.dosimetry import dosimetryReactions
+        from kika.ace.writers.write_ace import write_ace_checked
+        from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
+        from kika.hdf5.names import K_BOLTZMANN
+        from kika.hdf5.processing import metastableIndex
+
+        t0 = time.perf_counter()
+        directory = Path(directory)
+        if progress:
+            progress("write", None)
+        temps = list(self.temperatures)
+        written, omitted = [], []
+        try:
+            if not temps:
+                raise ProcessingOutputError(
+                    "ace-needs-temperature", PROCESSING_REJECTION_CATEGORIES["ace-needs-temperature"])
+            if temperatures is not None:
+                wanted = [float(t) for t in np.atleast_1d(temperatures)]
+                missing = [t for t in wanted if not any(abs(t - T) <= 1e-9 * T for T in temps)]
+                if missing:
+                    raise ProcessingOutputError(
+                        "ace-temperature-not-processed",
+                        f"{missing} K not broadened in this run; broadened: {temps}")
+                temps = [T for T in temps if any(abs(t - T) <= 1e-9 * T for t in wanted)]
+            if extension is not None and len(temps) != 1:
+                raise ProcessingOutputError(
+                    "ace-failed", f"extension={extension!r} names one table, and {len(temps)} "
+                                  f"temperatures {temps} were asked for")
+            work = self._full_suite(progress, category="ace-failed")
+            target_particle = work.PoPs[work.target] if work.target in work.PoPs else None
+            if target_particle is None or getattr(target_particle, "Z", None) is None:
+                raise ProcessingOutputError("ace-failed", "the suite states no Z and A for its target")
+            za = 1000 * int(target_particle.Z) + int(target_particle.A)
+            meta = metastableIndex(work)
+            zaid = za + (300 + 100 * meta if meta else 0)
+            attributes = getattr(self.reconstruction.suite.provenance, "attributes", None) or {}
+            awr = attributes.get("atomic_weight_ratio")
+            if awr is None:
+                awr = getattr(self.reconstruction.context, "atomic_weight_ratio", None)
+            directory.mkdir(parents=True, exist_ok=True)
+            heating = self.heating or {}
+            for i, T in enumerate(temps):
+                try:
+                    reactions, dropped = dosimetryReactions(work, self.cross_sections(T), heating.get(T))
+                    suffix = extension or ace_temperature_suffix(T) + "y"
+                    comment = " ".join(x for x in (work.target, work.evaluation,
+                                                   f"dosimetry (kika {__version__})") if x)
+                    ace = encode_dosimetry(
+                        reactions, zaid=zaid, extension=suffix, za=za, awr=float(awr),
+                        temperature_mev=T * K_BOLTZMANN / 1.0e6, comment=comment,
+                        date=datetime.date.today().strftime("%m/%d/%y"), matid=attributes.get("mat"))
+                    name = f"{ace.header.zaid}{ace.header.extension}"
+                    target = directory / name
+                    write_ace_checked(ace, target)
+                except ProcessingOutputError:
+                    raise
+                except Exception as error:
+                    raise ProcessingOutputError("ace-failed",
+                                                f"{T:g} K: {type(error).__name__}: {error}") from error
+                omitted += [f"{T:g} K: {d}" for d in dropped]
+                if xsdir:
+                    try:
+                        add_xsdir_entry(directory / "xsdir", xsdir_line_for(ace, name), replace=replace)
+                    except XsdirEntryExists as error:
+                        raise ProcessingOutputError("ace-table-exists", str(error)) from error
+                written.append(target)
+                if progress:
+                    progress("write", (i + 1) / len(temps))
+        except ProcessingOutputError as error:
+            self._written("ace", t0, directory, error, temperatures=temps, files=[str(p) for p in written])
+            raise
+        summary = (f"dosimetry ACE {', '.join(p.name for p in written)}"
+                   + ("; omitted: " + "; ".join(omitted) if omitted else ""))
+        self._written("ace", t0, directory, summary=summary, temperatures=temps,
+                      files=[str(p) for p in written], omitted=omitted)
+        return written
+
     def report_document(self):
         """The reconstruction report with a section per processing stage
         (``to_text()``, ``to_html()``, ``to_dict()``, ``save(path)``)."""
@@ -1352,6 +1454,79 @@ def _urr(rec, plan, unresolved, report):
                        f"{int(drawn.min())}-{int(drawn.max())} ladders per energy (median {np.median(drawn):g}; "
                        f"PURR's method, statistically equal to NJOY's)",
                        details), dict(tables)
+
+
+def dosimetry_ace(path, directory, *, extension: str | None = None, xsdir: bool = True,
+                  replace: bool = False) -> Path:
+    """Write the dosimetry ACE table (``.NNy``) of an evaluation stated pointwise.
+
+    For a tape with no resonance parameters to reconstruct (a dosimetry
+    evaluation such as IRDFF-II, or a PENDF, ``LRP = 2``): every MF 3 cross
+    section and every MF 9/10 production as the tape tabulates it, with its own
+    interpolation laws, at the tape's own temperature, which is what ACER
+    copies (:func:`kika.ace.model_adapter.dosimetry.pointwiseDosimetryReactions`).
+    A tape with resonance parameters is processed first:
+    ``process_endf(path, ProcessingPlan(temperatures=...)).write_dosimetry_ace(...)``.
+
+    The suffix is the tape temperature's (``.02y`` at 293.6 K, ``.01y`` at 0 K); a
+    temperature with none needs ``extension``. Returns the path written; the table is
+    read back and compared word for word before it replaces a file, and its
+    line is added to ``directory/xsdir`` unless ``xsdir`` is false.
+
+    Raises :class:`ProcessingOutputError`: ``ace-failed`` (resonance
+    parameters, no suffix for the temperature, unreadable tape) or
+    ``ace-table-exists``.
+    """
+    import datetime
+
+    from kika import __version__
+    from kika._utils import ace_temperature_suffix
+    from kika.ace.encoders.dosimetry import encode_dosimetry
+    from kika.ace.model_adapter.dosimetry import pointwiseDosimetryReactions
+    from kika.ace.writers.write_ace import write_ace_checked
+    from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
+    from kika.endf.model_adapter import decodeReactionSuite
+    from kika.endf.read_endf import read_endf
+    from kika.hdf5.names import K_BOLTZMANN
+    from kika.hdf5.processing import metastableIndex
+
+    path, directory = Path(path), Path(directory)
+    info = inspect_endf_processing(path)
+    if info["evaluation"].get("lrp") != 2 and (info["resolved"] or info["unresolved"]):
+        raise ProcessingOutputError(
+            "ace-failed", f"{path.name} has resonance parameters; its dosimetry table needs them "
+                          "reconstructed and broadened: process_endf(...).write_dosimetry_ace(...)")
+    evaluation = info["evaluation"]
+    T = float(evaluation.get("temperature_K") or 0.0)
+    try:
+        suffix = extension or ace_temperature_suffix(T) + "y"
+    except ValueError as error:
+        raise ProcessingOutputError("ace-failed", f"{error}; pass extension=") from None
+    try:
+        suite, _ = decodeReactionSuite(read_endf(str(path)))
+        target = suite.PoPs[suite.target] if suite.target in suite.PoPs else None
+        za = 1000 * int(target.Z) + int(target.A)
+        meta = metastableIndex(suite)
+        reactions, omitted = pointwiseDosimetryReactions(suite)
+        comment = " ".join(x for x in (suite.target, suite.evaluation, f"dosimetry (kika {__version__})") if x)
+        ace = encode_dosimetry(reactions, zaid=za + (300 + 100 * meta if meta else 0), extension=suffix, za=za,
+                               awr=float(evaluation["awr"]), temperature_mev=T * K_BOLTZMANN / 1.0e6,
+                               comment=comment, date=datetime.date.today().strftime("%m/%d/%y"),
+                               matid=evaluation.get("mat"))
+        directory.mkdir(parents=True, exist_ok=True)
+        name = f"{ace.header.zaid}{ace.header.extension}"
+        out = directory / name
+        write_ace_checked(ace, out)
+    except ProcessingOutputError:
+        raise
+    except Exception as error:
+        raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
+    if xsdir:
+        try:
+            add_xsdir_entry(directory / "xsdir", xsdir_line_for(ace, name), replace=replace)
+        except XsdirEntryExists as error:
+            raise ProcessingOutputError("ace-table-exists", str(error)) from error
+    return out
 
 
 def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
