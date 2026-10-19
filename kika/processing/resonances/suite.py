@@ -1070,7 +1070,7 @@ def _exact_physical_block(region,context,e,work_bytes):
 #: 3: an RML width of a bound level is referred to its channel energy, not to
 #: |E_lambda| (Ca-40 thermal (n,alpha) x6.4); charged-channel functions and
 #: groups of up to six channels in C; geometric seeds by the decade.
-ENGINE_VERSION='kika-native-suite-3'
+ENGINE_VERSION='kika-native-suite-4'
 
 
 def _target_awr(suite,context):

@@ -27,7 +27,7 @@ class TabulationOptions:
 
     ``rtol``/``atol`` bound the lin-lin interpolation error of a refined table
     against the function it tabulates, ``|f - lin| <= rtol*|f| + atol*max|f|``
-    at the midpoint of every interval.
+    at a quarter, the half and three quarters of every interval.
     0.1 % is the tolerance the official libraries are processed to (RECONR,
     BROADR, ACER). ``maxPoints`` caps one table; reaching it is an error, not a
     silent truncation.

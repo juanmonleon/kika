@@ -20,7 +20,7 @@ documented in the manual (``methods/processing/thermal-scattering-tables``).
 - **OpenMC** (``thermal.py`` ``from_ace``): cosines sorted, and a 0 eV point with
   isotropic cosines when the cdf does not start at zero.
 
-**Incident grid (ND-8).** THERMR's fixed 116 energies (``EGRID``) are all kept, and a
+**Incident grid.** THERMR's fixed 118 energies (``EGRID``) are all kept, and a
 node is added at an interval's geometric midpoint wherever sigma read lin-lin there misses
 the exact value by more than 1e-3, or the neighbours' mixed moments miss <E'> by 1e-2
 (relative) or <mu> by 1e-2 (absolute) (:func:`_refine`). On the fixed grid sigma was up to
@@ -396,7 +396,7 @@ def _refine(entries, compute):
 
     THERMR's fixed grid (EGRID) leaves sigma read lin-lin up to 3-4 % off between its nodes
     (H in ZrH at the 0.137 eV optical phonon, every law near 1e-5 eV), and OpenMC takes the
-    closer table's spectrum, not a mix (roadmap ND-8, runbook PXB-064). Every THERMR node is
+    closer table's spectrum, not a mix. Every THERMR node is
     kept; a midpoint that the neighbours already describe is not stored.
     """
     entries = list(entries)

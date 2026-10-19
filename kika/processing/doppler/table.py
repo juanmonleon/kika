@@ -516,7 +516,7 @@ def broaden_curve(prepared, *, temperature, options=None, output_domain=None, la
     warm(prepared,temperature,options,domain)
     construction=_ConstructionSamples(evaluate,(0,),options)
     forms,tables,report=_tabulate((prepared,),(options,),temperature,domain,options,construction,(0,),label,progress)
-    report.update(engine='doppler-table-1',core_engine=ENGINE_VERSION,backend=_selected_backend(options),source_hash=prepared.source_hash,temperature_source=prepared.source_temperature,
+    report.update(engine='doppler-table-2',core_engine=ENGINE_VERSION,backend=_selected_backend(options),source_hash=prepared.source_hash,temperature_source=prepared.source_temperature,
                   temperature_final=temperature,options=asdict(options),accuracy_scope='input_table',
                   delta_temperature=temperature-prepared.source_temperature,mass=asdict(prepared.context),
                   source_temperature_origin=prepared.source_temperature_origin,kB_eV_per_K=KB,
