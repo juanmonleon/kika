@@ -27,6 +27,7 @@ from kika.ace.parsers.parse_secondary_reaction_counts import parse_ntro_block
 from kika.ace.parsers.parse_secondary_data_locators import parse_ixs_block
 from kika.ace.parsers.parse_secondary_cross_sections import parse_hpd_block
 from kika.ace.parsers.parse_photoatomic import is_photoatomic_extension, parse_photoatomic
+from kika.ace.parsers.parse_dosimetry import is_dosimetry_extension, parse_dosimetry
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -55,10 +56,12 @@ def read_ace(filename, debug=False, strict=True):
         
     Returns
     -------
-    ace : Ace or PhotoatomicAce
+    ace : Ace, PhotoatomicAce or DosimetryAce
         An Ace object containing the parsed data, or, for a photo-atomic
         table (ZAID suffix ending in ``p``), a
-        :class:`~kika.ace.classes.photoatomic.PhotoatomicAce`.
+        :class:`~kika.ace.classes.photoatomic.PhotoatomicAce`, and for a
+        dosimetry table (suffix ending in ``y``), a
+        :class:`~kika.ace.classes.dosimetry.DosimetryAce`.
     """
 
     if debug:
@@ -97,6 +100,10 @@ def read_ace(filename, debug=False, strict=True):
     # PhotoatomicAce.
     if is_photoatomic_extension(ace.header.extension):
         return parse_photoatomic(ace.header, ace.xss_data, filename)
+    # A dosimetry table ('y') is reaction cross sections only, each with its
+    # own grid and laws.
+    if is_dosimetry_extension(ace.header.extension):
+        return parse_dosimetry(ace.header, ace.xss_data, filename, ace.xss_int_words)
 
     parse_blocks(ace, debug)
     return ace
