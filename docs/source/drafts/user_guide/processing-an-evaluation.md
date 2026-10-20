@@ -166,3 +166,19 @@ run.notes                                         # Compton shells joined or dro
 
 `write_ace` takes `extension=".25p"` for another suffix and `replace=True` to overwrite a
 table the `xsdir` already names. The method: {doc}`../methods/processing/photoatomic-tables`.
+
+## Photonuclear tables
+
+A nuclide's photonuclear table (`.u`) is written from its evaluation of the `g`
+sublibrary, which states its cross sections pointwise:
+
+```python
+from kika.endf import photonuclear_ace
+
+photonuclear_ace("g-026_Fe_056.endf", "photonuclear/")   # photonuclear/26056.01u and its xsdir line
+```
+
+`extension=".24u"` gives another suffix and `replace=True` overwrites a table the `xsdir`
+already names. What the table leaves out or approximates is the report of
+`kika.processing.photonuclear.photonuclearTable`. The method:
+{doc}`../methods/processing/photonuclear-tables`.

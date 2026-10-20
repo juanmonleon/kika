@@ -1,4 +1,4 @@
-"""The model of a photonuclear evaluation → the contents of a ``.u`` ACE table.
+r"""The model of a photonuclear evaluation → the contents of a ``.u`` ACE table.
 
 What NJOY2016's ACER (``acephn``) does, with the choices below. Every number is
 computed from the model; nothing is an option.
@@ -36,6 +36,11 @@ photon as projectile:
   and states Q = 0: there it is the channel's, from those masses and the
   residual level's energy (He-3's p + d: -5.49 MeV, where Q = 0 gives the
   deuteron the binding energy, as ACER's law 33 does);
+- a photon line (a discrete energy) is a law-4 table of one discrete line, the
+  form a ``.u`` reader takes (``phnout`` refuses law 2); and the products of one
+  kind a reaction states separately (N-14's MF 12 lines) are one entry, their
+  yields added and their laws a chain weighted by each one's share of the yield,
+  so that no reaction is listed twice for a particle;
 - the de-excitation photons a residual level states once (MF12/MF14 LO = 2,
   in PoPs) are written on every reaction that leaves that level, one line per
   transition with its yield, as the neutron tables do (ACER drops them);
@@ -47,15 +52,21 @@ photon as projectile:
 
 **Heating** (MeV per collision in the table, eV here): what is not carried by a
 transported neutron or photon stays where the collision happens. THN is
-:math:`\\sum_r \\sigma_r h_r / \\sigma_t`, with :math:`h_r` the sum over the light
-charged particles and the residual nuclei of :math:`y \\langle E'_{lab}\\rangle`,
+:math:`\sum_r \sigma_r h_r / \sigma_t`, with :math:`h_r` the sum over the light
+charged particles and the residual nuclei of :math:`y \langle E'_{lab}\rangle`,
 centre-of-mass energies taken to the laboratory with the photon's own
 kinematics (:class:`kika.processing.heating._Kinematics`). A residual whose
-evaluation gives no distribution (MF6 LAW 0) adds nothing, as in ACER; the
-report counts them. Fission adds its fragments: (EFR + EGP)(E) from MF1/458
+evaluation gives no distribution (MF6 LAW 0, the residuals of MT 5 in most of
+ENDF/B-VIII.1) recoils against what was emitted: in the centre of mass its
+momentum balances theirs, so with the emissions taken as independent
+:math:`\langle E_R\rangle = E_c(M_R) + \sum_i y_i m_i \langle E'_{i,cm}\rangle / M_R`
+(a photon counting :math:`E^2/2` for :math:`m E`), :math:`M_R` the residuals' mean
+mass. ACER adds E + Q for such a reaction instead, Q = 0 in MT 5, which keeps
+every emitted nucleon's binding energy local: 5 MeV per collision in Bi-209 at
+8 MeV, where only the recoil, keV, stays. Fission adds its fragments: (EFR + EGP)(E) from MF1/458
 when the evaluation has it, else the reaction's Q less the neutrons' energy,
 which also keeps the delayed betas and gammas local, and the report says so.
-PHN of a particle is :math:`\\sum y \\sigma \\langle E'_{lab}\\rangle / \\sigma_t`.
+PHN of a particle is :math:`\sum y \sigma \langle E'_{lab}\rangle / \sigma_t`.
 """
 from __future__ import annotations
 
@@ -373,6 +384,7 @@ class _Builder:
             from kika.hdf5.processing import _explicitPhotonAngle
 
             _explicitPhotonAngle(tabulated, reaction)
+            tabulated = _linesAsTables(tabulated, *self.ranges[mt])
         return tabulated, mftype, form
 
     def twoBodyMasses(self, reaction, product, mt, Q):
@@ -413,7 +425,7 @@ class _Builder:
 
         entries: Dict[str, list] = {pid: [] for pid, _ in PARTICLES}
         local = np.zeros(grid.size)
-        lost_residuals = []
+        lost_residuals, estimated = [], []
         for r in reactions:
             mt = int(r.ENDF_MT)
             Q = float(reactionQI(r, self.suite) or 0.0)
@@ -421,6 +433,7 @@ class _Builder:
             lo, hi = self.ranges[mt]
             explicitPhoton = False
             twoBody = None
+            before = {pid: len(v) for pid, v in entries.items()}
             for product in r.outputChannel.products:
                 if product.pid in entries:
                     made = self.tabulated(product, r, mt, Q)
@@ -436,10 +449,15 @@ class _Builder:
                                                      sigma=sigma, Q=Q, reaction=r))
                     explicitPhoton |= product.pid == "photon"
             # residuals: their energy stays local
+            unstated = []
             for product in r.outputChannel.products:
                 if product.pid in entries:
                     continue
-                local += sigma * self.residualHeating(product, r, mt, Q, grid, twoBody, lost_residuals)
+                heat = self.residualHeating(product, r, mt, Q, grid, twoBody, lost_residuals)
+                if heat is None:
+                    unstated.append(product)
+                else:
+                    local += sigma * heat
             if not explicitPhoton:
                 from kika.hdf5.processing import _cascadePhotons
 
@@ -454,12 +472,19 @@ class _Builder:
                     entries["photon"].append(dict(mt=mt, form=form, mftype=12,
                                                   yields=(np.array([lo, hi]), np.array([count, count])),
                                                   sigma=sigma, Q=Q, reaction=r))
+            if unstated:
+                emitted = [(pid, e) for pid, v in entries.items() for e in v[before[pid]:]]
+                local += sigma * self.momentumRecoil(unstated, emitted, mt, grid)
+                estimated.append(mt)
             if mt == 18:
                 local += sigma * self.fission(r, entries["n"], grid, Q)
 
         if lost_residuals:
-            report.warn(f"{len(lost_residuals)} residual nuclei have no distribution (MF6 LAW 0, MT "
-                        f"{sorted(set(lost_residuals))}): their recoil adds nothing to the heating, as in ACER")
+            report.warn(f"{len(lost_residuals)} residual nuclei with no distribution in MT "
+                        f"{sorted(set(lost_residuals))}: their recoil adds nothing to the heating")
+        if estimated:
+            report.approximated(f"MT{sorted(set(estimated))}: residuals with no distribution (MF6 LAW 0) heat by "
+                                f"their recoil from momentum balance, the emissions taken as independent")
 
         thn = np.array(local)
         for pid, ipt in PARTICLES:
@@ -488,8 +513,7 @@ class _Builder:
             partner, masses = twoBody
             return _twoBodyRecoil(partner.weighted[0].functional, grid, A=self.awr, **masses)
         if form is None or isinstance(form, (m.Unspecified, m.Branching3d)):
-            lost.append(mt)
-            return np.zeros(grid.size)
+            return None
         lo, hi = self.ranges[mt]
         mult = _multiplicity(product, mt, lo, hi, self.report)
         if mult is None:
@@ -505,6 +529,48 @@ class _Builder:
             m.zaFromPid(product.pid) % 1000)
         mean = _meanEnergyOf(tabulated, grid, _Kinematics(A=self.awr, Q=Q, awp=awp, photon=True))
         return np.interp(grid, mult[0], mult[1], left=0.0, right=0.0) * mean
+
+    def meanOf(self, pid, e, grid):
+        """A product entry's ⟨E'_lab⟩ on ``grid`` (eV), computed once."""
+        if "mean" not in e:
+            from kika.processing.heating import _Kinematics, _meanEnergyOf
+
+            awp = LIGHT_PARTICLE_AWP.get(pid, 1.0 if pid == "n" else 0.0)
+            e["mean"] = _meanEnergyOf(e["form"], grid, _Kinematics(A=self.awr, Q=e["Q"], awp=awp, photon=True))
+        return e["mean"]
+
+    def momentumRecoil(self, residuals, emitted, mt, grid):
+        """⟨E_R⟩ per reaction (eV) of residuals without a distribution, from momentum balance."""
+        m = self.m
+        from kika.processing.heating import NEUTRON_REST_ENERGY, _Kinematics
+
+        lo, hi = self.ranges[mt]
+        yR, massR = np.zeros(grid.size), np.zeros(grid.size)
+        for product in residuals:
+            mult = _multiplicity(product, mt, lo, hi, self.report)
+            if mult is None:
+                continue
+            za = m.zaFromPid(product.pid)
+            try:
+                M = nuclearRestEnergy(za)
+            except KeyError:
+                M = float(self.suite.PoPs[product.pid].mass.convertedTo("amu").value) * U_EV
+            y = np.interp(grid, mult[0], mult[1], left=0.0, right=0.0)
+            yR += y
+            massR += y * M
+        M_R = np.divide(massR, yR, out=np.full(grid.size, self.awr * NEUTRON_REST_ENERGY), where=yR > 0)
+        balance = np.zeros(grid.size)
+        for pid, e in emitted:
+            y = np.interp(grid, e["yields"][0], e["yields"][1], left=0.0, right=0.0)
+            mean = self.meanOf(pid, e, grid)
+            if pid == "photon":
+                balance += y * 0.5 * mean * mean
+                continue
+            mass = nuclearRestEnergy(1 if pid == "n" else m.zaFromPid(pid))
+            ec = _Kinematics(A=self.awr, Q=0.0, awp=mass / NEUTRON_REST_ENERGY, photon=True).boost(grid)
+            balance += y * mass * np.clip(mean - ec, 0.0, None)
+        ecR = _Kinematics(A=self.awr, Q=0.0, awp=1.0, photon=True).boost(grid) * M_R / NEUTRON_REST_ENERGY
+        return yR * ecR + np.divide(balance, M_R, out=np.zeros(grid.size), where=M_R > 0) * (yR > 0)
 
     def fission(self, reaction, neutrons, grid, Q):
         """The fragments' energy per fission (eV) on ``grid``."""
@@ -537,6 +603,7 @@ class _Builder:
 
         if pid == "n":
             entries = self.withDelayed(entries)
+        entries = self.merged(pid, entries)
         entries.sort(key=lambda e: (e["mftype"] != 12 or pid != "n", e["mt"]))
         awp = LIGHT_PARTICLE_AWP.get(pid, 1.0 if pid == "n" else 0.0)
         production, heat = np.zeros(grid.size), np.zeros(grid.size)
@@ -547,8 +614,7 @@ class _Builder:
             x, y = e["yields"]
             on = np.interp(grid, x, y, left=0.0, right=0.0)
             production += on * e["sigma"]
-            kin = _Kinematics(A=self.awr, Q=e["Q"], awp=awp, photon=True)
-            heat += on * e["sigma"] * _meanEnergyOf(form, grid, kin)
+            heat += on * e["sigma"] * self.meanOf(pid, e, grid)
             lo = self.ranges[mt][0]
             positive = x[np.asarray(y) > 0]
             thresholds.append(max(lo, float(positive[0])) if positive.size else lo)
@@ -573,6 +639,38 @@ class _Builder:
         return ParticleProduction(ipt=ipt, production_first_index=start + 1, production=production[start:],
                                   heating_first_index=start + 1, heating=heating[start:],
                                   reactions=reactions)
+
+    def merged(self, pid, entries):
+        """Entries of one reaction joined: yields added, laws a chain weighted by yield share."""
+        m = self.m
+        out, groups = [], {}
+        for e in entries:
+            groups.setdefault(e["mt"], []).append(e)
+        for mt in sorted(groups, key=lambda k: entries.index(groups[k][0])):
+            group = groups[mt]
+            if len(group) == 1:
+                out.append(group[0])
+                continue
+            from kika.ace.model_adapter.encode import _frameOf
+
+            frames = {_frameOf(e["form"]) for e in group}
+            if len(frames) > 1:
+                raise NotImplementedError(f"MT{mt} {pid}: products in both frames cannot share one entry")
+            xs = np.unique(np.concatenate([e["yields"][0] for e in group]))
+            each = [np.interp(xs, *e["yields"], left=0.0, right=0.0) for e in group]
+            total = np.sum(each, axis=0)
+            terms = []
+            for e, y in zip(group, each):
+                if isinstance(e["form"], m.DistributionMixture):
+                    raise NotImplementedError(f"MT{mt} {pid}: a law chain inside a joined entry")
+                weight = m.XYs1d(xs=xs, ys=np.divide(y, total, out=np.zeros(xs.size), where=total > 0))
+                terms.append(m.Weighted(weight=weight, functional=e["form"]))
+            joined = {k: v for k, v in group[0].items() if k != "mean"}
+            joined["form"] = m.DistributionMixture(weighted=terms, label="MonteCarlo")
+            joined["yields"] = (xs, total)
+            out.append(joined)
+            self.report.warn(f"MT{mt}: {len(group)} {pid} products joined in one entry (a chain of laws)")
+        return out
 
     def withDelayed(self, entries):
         """MT18's prompt neutrons joined with the delayed families into one entry (law chain)."""
@@ -612,7 +710,7 @@ class _Builder:
                 if isinstance(form, m.DistributionMixture):
                     raise NotImplementedError("MT18: a prompt law chain with delayed families")
                 terms.append(m.Weighted(weight=weight, functional=functional))
-            joined = dict(e)
+            joined = {k: v for k, v in e.items() if k != "mean"}
             joined["form"] = m.DistributionMixture(weighted=terms, label="MonteCarlo")
             joined["yields"] = (xs, totalNu)
             out.append(joined)
@@ -687,6 +785,25 @@ def _isotropicLab(lo, hi):
     from kika.hdf5.processing import _isotropicPhotonAngle
 
     return _isotropicPhotonAngle(lo, hi)
+
+
+def _linesAsTables(form, lo, hi):
+    """Photon lines stated as discrete energies → law-4 tables of one discrete line each."""
+    m = _m()
+    if isinstance(form, m.DistributionMixture):
+        for term in form.weighted:
+            term.functional = _linesAsTables(term.functional, lo, hi)
+        return form
+    if isinstance(form, m.Uncorrelated) and isinstance(form.energy, (m.DiscretePhotonEnergy, m.DiscreteGamma)):
+        energy = form.energy
+        if isinstance(energy, m.DiscretePhotonEnergy) and int(energy.primaryFlag) != 0:
+            raise NotImplementedError("a primary photon (its energy moves with the incident energy) in a .u table")
+        value = float(energy.energy if isinstance(energy, m.DiscretePhotonEnergy) else energy.value)
+        return m.Uncorrelated(angular=form.angular, energy=_lineTable([(value, 1.0)], lo, hi),
+                              label=form.label, productFrame=form.productFrame)
+    if isinstance(form, m.Uncorrelated) and isinstance(form.energy, m.PrimaryGamma):
+        raise NotImplementedError("a primary photon (its energy moves with the incident energy) in a .u table")
+    return form
 
 
 def _isLevelChain(form) -> bool:
