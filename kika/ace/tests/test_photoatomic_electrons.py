@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 import kika
-from kika.processing.photoatomic.electrons import ELECTRON_CUTOFF, electronBlocks
+from kika.ace.processing.photoatomic.electrons import ELECTRON_CUTOFF, electronBlocks
 
 MICRO = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data" / "micro_fe_electrons.endf"
 ND = Path(__file__).resolve().parents[5] / "NuclearData"

@@ -1,4 +1,4 @@
-"""The photon and relaxation blocks of an EPRDATA table (kika.processing.photoatomic).
+"""The photon and relaxation blocks of an EPRDATA table (kika.ace.processing.photoatomic).
 
 * The union grid repeats an edge, holds the value below then above it, and puts
   a table that opens on a non-zero value inside the union on a step.
@@ -25,8 +25,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from kika.processing.photoatomic import comptonShells, unionGrid
-from kika.processing.photoatomic.tables import ELECTRON_REST_ENERGY, _X_PER_EV, _incoherentMean, _onGrid
+from kika.ace.processing.photoatomic import comptonShells, unionGrid
+from kika.ace.processing.photoatomic.tables import ELECTRON_REST_ENERGY, _X_PER_EV, _incoherentMean, _onGrid
 
 ND = Path(__file__).resolve().parents[5] / "NuclearData"
 
@@ -88,7 +88,7 @@ def test_compton_shells_light_element_groups_by_n_and_l():
 
 
 def test_compton_shells_missing_j_partner_joins_its_sibling():
-    from kika.processing.photoatomic.compton import bmmProfiles
+    from kika.ace.processing.photoatomic.compton import bmmProfiles
 
     _, labels, _ = bmmProfiles(82)
     assert "6p1/2" in labels and "6p3/2" not in labels
@@ -100,7 +100,7 @@ def test_compton_shells_missing_j_partner_joins_its_sibling():
 
 
 def test_compton_shells_drop_a_shell_the_evaluation_lacks():
-    from kika.processing.photoatomic.compton import bmmProfiles
+    from kika.ace.processing.photoatomic.compton import bmmProfiles
 
     _, labels, _ = bmmProfiles(77)
     assert labels[-1] == "6s1/2"
@@ -110,7 +110,7 @@ def test_compton_shells_drop_a_shell_the_evaluation_lacks():
 
 
 def test_europium_profile_has_the_paper_value():
-    from kika.processing.photoatomic.compton import bmmProfiles
+    from kika.ace.processing.photoatomic.compton import bmmProfiles
 
     pz, labels, j = bmmProfiles(63)
     assert labels[2] == "2p1/2" and j[2][list(pz).index(30.0)] == pytest.approx(4.61e-3)
@@ -132,7 +132,7 @@ def _nodes(fine, coarse):
 
 
 def test_the_grid_reads_log_log_within_the_tolerance():
-    from kika.processing.photoatomic.tables import LOGLOG_RTOL, refinedGrid
+    from kika.ace.processing.photoatomic.tables import LOGLOG_RTOL, refinedGrid
     x = np.array([1.0, 10.0, 100.0, 1.0e3])
     y = np.array([1.0e4, 50.0, 30.0, 1.0e-2])            # lin-lin data, far from log-log between nodes
     grid = refinedGrid([(x, y)], lambda g: [np.interp(g, x, y)])
@@ -146,7 +146,7 @@ def test_the_grid_reads_log_log_within_the_tolerance():
 
 
 def test_cascade_xray_energy_by_hand():
-    from kika.processing.photoatomic.tables import _Subshell, _Transition, cascadeXrayEnergies
+    from kika.ace.processing.photoatomic.tables import _Subshell, _Transition, cascadeXrayEnergies
 
     shells = [
         _Subshell(1, "1s1/2", 2.0, 1000.0, [_Transition(2, 0, 900.0, 0.6), _Transition(2, 2, 800.0, 0.4)]),
@@ -169,7 +169,7 @@ def _rel(a, b):
 def test_blocks_agree_with_eprdata25(z):
     import kika
     from kika.ace import read_ace
-    from kika.processing.photoatomic import photoatomicTable
+    from kika.ace.processing.photoatomic import photoatomicTable
 
     found = _library(z)
     if found is None:
@@ -192,7 +192,7 @@ def test_blocks_agree_with_eprdata25(z):
         assert _rel([r.energy for r in k.relaxation[d]], [r.energy for r in rows]) < 1e-12
     # heating: the cascade's x-rays leave; below the first subshell that radiates, nothing does
     assert np.all((k.heating >= 0.0) & (k.heating <= k.energies * (1 + 1e-12)))
-    from kika.processing.photoatomic.tables import _relaxation, PhotoatomicNotes
+    from kika.ace.processing.photoatomic.tables import _relaxation, PhotoatomicNotes
     _, shells = _relaxation(kika.read(found[1]), PhotoatomicNotes())
     first = min(s.binding for s in shells if s.radiative())
     below = (e.energies > 20.0) & (e.energies < first)

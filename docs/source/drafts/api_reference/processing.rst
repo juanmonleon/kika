@@ -81,17 +81,17 @@ Reconstruction and PENDF through NJOY
 Photo-atomic tables
 -------------------
 
-.. automodule:: kika.processing.photoatomic
+.. automodule:: kika.ace.processing.photoatomic
    :members: photoatomicTable, PhotoatomicNotes, comptonShells, ComptonShell, bmmProfiles, unionGrid, refinedGrid
    :exclude-members: PhotoatomicProcessing, process_photoatomic, ELECTRON_REST_ENERGY
 
-.. automodule:: kika.processing.photoatomic.tables
+.. automodule:: kika.ace.processing.photoatomic.tables
    :members: LOGLOG_RTOL, ELECTRON_REST_ENERGY
    :no-index:
 
-.. automodule:: kika.processing.photoatomic.compton
+.. automodule:: kika.ace.processing.photoatomic.compton
    :no-members:
 
-.. automodule:: kika.processing.photoatomic.electrons
+.. automodule:: kika.ace.processing.photoatomic.electrons
    :members: electronBlocks
 
