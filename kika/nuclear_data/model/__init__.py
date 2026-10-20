@@ -152,7 +152,7 @@ from .thermal_scattering import (TNSL_FORMS, TNSL_INTERACTION, TNSL_PROCESSES,
                                  ScatteringAtom, SCTApproximation,
                                  SelfScatteringKernel,
                                  ThermalNeutronScatteringLaw)
-from .output_channel import (Branching1d, DelayedNeutron, DelayedNeutrons,
+from .output_channel import (AverageProductEnergy, Branching1d, DelayedNeutron, DelayedNeutrons,
                              FissionEnergyRelease, FissionFragmentData, Multiplicity, OutputChannel,
                              Product, Products, Q,
                              UnspecifiedMultiplicity)
@@ -292,7 +292,7 @@ __all__ = [
     "FreeGasApproximation", "GaussianApproximation", "ThermalNeutronScatteringLaw",
     "URR_probabilityTables1d",
     # §17-18 output channels and distributions
-    "OutputChannel", "Product", "Products", "Multiplicity", "Q",
+    "OutputChannel", "Product", "Products", "Multiplicity", "Q", "AverageProductEnergy",
     "Branching1d", "UnspecifiedMultiplicity",
     "Evaporation", "GeneralEvaporation", "SimpleMaxwellianFission", "Watt",
     "MadlandNix", "Weighted", "WeightedFunctionals", "ANALYTIC_SPECTRA",

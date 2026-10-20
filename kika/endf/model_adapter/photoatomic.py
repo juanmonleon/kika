@@ -36,7 +36,7 @@ from kika.nuclear_data.model import (EVAL_LABEL, ATOMIC_INTERACTION, Atomic, Axe
                                      DecayData, DecayMode, DecayModes, DecayPath, EndfProvenance,
                                      IncoherentPhotonScattering, PhysicalQuantity, PoPs, Product,
                                      Reaction, ReactionId, crossSectionAxes, subshellDesignator,
-                                     subshellLabel)
+                                     pidFromZA, subshellLabel)
 from kika.nuclear_data.model.thermal_scattering import DoubleDifferentialCrossSection
 
 from .photons import _function1d, _tab1Of
@@ -71,11 +71,11 @@ def photoatomicReactionLabel(mt: int, element: str) -> str:
     if mt == 515:
         return f"e- + e- + e-_anti + {element} [pair production: electron field]"
     if mt == 516:
-        return "pair production"
+        return "pair product"
     if mt == 517:
         return f"e- + e-_anti + {element} [pair production: nuclear field]"
     if mt == 522:
-        return "photo-electric"
+        return "photoelectric absorption"
     if 534 <= mt <= 572:
         return f"e- + {element}{{{subshellLabel(mt - 533)}}}"
     return f"MT{mt}"
@@ -89,8 +89,8 @@ def _axes(xLabel, xUnit, yLabel, yUnit) -> Axes:
 #: even where it is x in 1/Ang).
 _FF_AXES = {502: ("energy_in", "1/Ang", "coherent form factor", ""),
             504: ("energy_in", "1/Ang", "incoherent scattering function", ""),
-            505: ("energy_in", "eV", "real part of anomalous scattering factor", ""),
-            506: ("energy_in", "eV", "imaginary part of anomalous scattering factor", "")}
+            505: ("energy_in", "eV", "imaginary part of anomalous scattering factor", ""),
+            506: ("energy_in", "eV", "real part of anomalous scattering factor", "")}
 
 
 def _fields(section) -> dict:
@@ -112,16 +112,22 @@ def _summands(mt: int, present) -> List[int]:
 
 
 def attachPhotoatomic(suite, endf, report: ConversionReport) -> ConversionReport:
-    """MF23 (and MF27) of a photo-atomic tape → the suite's reactions, sums and forms."""
+    """MF23 (and MF27) of a photo-atomic tape → the suite's reactions, sums and forms.
+
+    An electro-atomic tape (NSUB=113: MF23 and MF26) goes to
+    :func:`_attachElectroatomic`.
+    """
     from kika.nuclear_data.model import Add, CrossSectionSum, Summands
 
+    nsub = (getattr(suite.provenance, "headerFields", None) or {}).get("nsub")
+    if nsub is not None and int(nsub) == ELECTROATOMIC_NSUB:
+        return _attachElectroatomic(suite, endf, report)
     mf23 = endf.mf[23]
     mf27 = endf.mf.get(27)
     suite.interaction = ATOMIC_INTERACTION
     element = suite.target
     present = sorted(mf23.mt)
-    # A photo-atomic tape has no neutron; MF1's decoder adds the default projectile.
-    suite.PoPs.particles.pop("n", None)
+    _atomicPoPs(suite)
     sums = {mt for mt in _SUMS if mt in present and _summands(mt, present)}
     for mt in present:
         section = mf23.mt[mt]
@@ -139,6 +145,7 @@ def attachPhotoatomic(suite, endf, report: ConversionReport) -> ConversionReport
             continue
         reaction = Reaction(id=reactionId, provenance=provenance)
         reaction.crossSection[EVAL_LABEL] = function
+        reaction.outputChannel = _outputChannel(mt, element, function, section.table.c1, reactionId.label)
         if mt in _MF27_OF and mf27 is not None:
             tables = {}
             for part in _MF27_OF[mt]:
@@ -152,8 +159,8 @@ def attachPhotoatomic(suite, endf, report: ConversionReport) -> ConversionReport
             ddcs = DoubleDifferentialCrossSection()
             if mt == 502 and 502 in tables:
                 ddcs[EVAL_LABEL] = CoherentPhotonScattering(
-                    formFactor=tables[502], realAnomalousFactor=tables.get(505),
-                    imaginaryAnomalousFactor=tables.get(506), label=EVAL_LABEL)
+                    formFactor=tables[502], realAnomalousFactor=tables.get(506),
+                    imaginaryAnomalousFactor=tables.get(505), label=EVAL_LABEL)
             elif mt == 504 and 504 in tables:
                 ddcs[EVAL_LABEL] = IncoherentPhotonScattering(scatteringFactor=tables[504], label=EVAL_LABEL)
             if len(ddcs):
@@ -164,6 +171,319 @@ def attachPhotoatomic(suite, endf, report: ConversionReport) -> ConversionReport
             if not any(mt in parts for parts in _MF27_OF.values()):
                 report.lost(f"MF27/MT{mt} is not a form factor ENDF-6 defines; not decoded")
     return report
+
+
+#: The photon, as FUDGE's PoPs of a photo-atomic suite states it.
+_PHOTON = dict(spin=1.0, parity=1, charge=0)
+#: The leptons a photo- or electro-atomic suite names: (pid, parity, charge).
+_LEPTONS = (("e-", 1, -1), ("e-_anti", -1, 1))
+#: The electron mass FUDGE's PoPs writes, amu.
+_ELECTRON_MASS_AMU = 5.48579909e-4
+#: Q of pair production in FUDGE's photo-atomic GNDS (2 m_e c^2 rounded), eV.
+_PAIR_Q = -1.022e6
+
+
+def _atomicPoPs(suite, positron: bool = True) -> None:
+    """The particles of a photo- or electro-atomic suite as FUDGE states them.
+
+    The target is the element (a ``chemicalElement`` with no isotopes, not a
+    nuclide of A = 0); the photon a gauge boson; the electron and positron
+    leptons. A photo-atomic tape has no neutron, which MF1's decoder adds.
+    """
+    from kika._constants import ATOMIC_NUMBER_TO_NAME, SYMBOL_TO_ATOMIC_NUMBER
+    from kika.nuclear_data.model import Lepton, Particle
+
+    pops = suite.PoPs
+    pops.particles.pop("n", None)
+    target = pops.particles.pop(suite.target, None)
+    z = getattr(target, "Z", None) or SYMBOL_TO_ATOMIC_NUMBER.get(suite.target)
+    if z is not None:
+        pops.chemicalElements[suite.target] = ChemicalElement(symbol=suite.target, Z=int(z),
+                                                              name=ATOMIC_NUMBER_TO_NAME.get(int(z)))
+    photon = pops.particles.get("photon") or Particle(id="photon")
+    photon.mass = PhysicalQuantity(value=0.0, unit="amu")
+    photon.spin = PhysicalQuantity(value=_PHOTON["spin"], unit="hbar")
+    photon.parity, photon.charge, photon.halflife = _PHOTON["parity"], _PHOTON["charge"], "stable"
+    pops.particles["photon"] = photon
+    for pid, parity, charge in _LEPTONS:
+        if pid == "e-_anti" and not positron:
+            continue
+        pops.particles[pid] = Lepton(id=pid, mass=PhysicalQuantity(value=_ELECTRON_MASS_AMU, unit="amu"),
+                                     spin=PhysicalQuantity(value=0.5, unit="hbar"), parity=parity,
+                                     charge=charge, halflife="stable")
+
+
+def _outputChannel(mt: int, element: str, function, epe: float, label: str):
+    """FUDGE's output channel of a photo-atomic reaction: genre, process, Q and products.
+
+    Q spans the cross section's domain: 0 for coherent and incoherent
+    scattering, ``-1.022e6`` eV for pair production, ``-EPE`` (the subshell's
+    binding energy, MF23's C1) for photo-ionisation. Every product has a
+    multiplicity of one; the scattered photon's distribution is its reaction's
+    double-differential form, every other product's is unspecified.
+    """
+    from kika.nuclear_data.model import (CoherentPhotonScatteringLink, Distribution,
+                                         IncoherentPhotonScatteringLink, Multiplicity, OutputChannel,
+                                         Product, Q, Unspecified, multiplicityAxes)
+    from kika.nuclear_data.model.functions.simple import Constant1d
+
+    xs, _, _ = function.toEndfRegions()
+    lo, hi = float(xs[0]), float(xs[-1])
+    if mt in (502, 504):
+        genre, process, q = "twoBody", ("coherent" if mt == 502 else "incoherent"), 0.0
+        pids = [("photon", "photon"), (element, element)]
+    elif mt == 515:
+        genre, process, q = "NBody", "pair production: electron field", _PAIR_Q
+        pids = [("e-", "e-"), ("e-", "e-__a"), ("e-_anti", "e-_anti"), (element, element)]
+    elif mt == 517:
+        genre, process, q = "NBody", "pair production: nuclear field", _PAIR_Q
+        pids = [("e-", "e-"), ("e-_anti", "e-_anti"), (element, element)]
+    elif 534 <= mt <= 572:
+        vacancy = f"{element}{{{subshellLabel(mt - 533)}}}"
+        genre, process, q = "NBody", None, -float(epe)
+        pids = [("e-", "e-"), (vacancy, vacancy)]
+    else:
+        return OutputChannel()
+    products = []
+    for pid, plabel in pids:
+        distribution = Distribution()
+        if pid == "photon":
+            kind = CoherentPhotonScatteringLink if mt == 502 else IncoherentPhotonScatteringLink
+            node = "coherentPhotonScattering" if mt == 502 else "incoherentPhotonScattering"
+            distribution[EVAL_LABEL] = kind(
+                href=f"/reactionSuite/reactions/reaction[@label='{label}']/doubleDifferentialCrossSection/"
+                     f"{node}[@label='{EVAL_LABEL}']", label=EVAL_LABEL)
+        else:
+            distribution[EVAL_LABEL] = Unspecified(label=EVAL_LABEL)
+        multiplicity = Multiplicity(form=Constant1d(constant=1.0, domainMin_=lo, domainMax_=hi,
+                                                    axes=multiplicityAxes(), label=EVAL_LABEL))
+        products.append(Product(pid=pid, label=plabel, multiplicity=multiplicity, distribution=distribution))
+    channel = OutputChannel(genre=genre, process=process,
+                            Q=Q(value=q, unit="eV", label=EVAL_LABEL, domainMin=lo, domainMax=hi))
+    for product in products:
+        channel.products.products.append(product)
+    return channel
+
+
+# ---------------------------------------------------------------------------
+# Electro-atomic: MF23 + MF26
+# ---------------------------------------------------------------------------
+
+#: The electro-atomic reactions FUDGE writes, by MT: (label pattern, genre, process).
+_ELECTRON_REACTIONS = {
+    525: ("e- + {el} [large angle electro-atomic scattering]", "twoBody", "large angle electro-atomic scattering"),
+    526: ("e- + {el} [large angle Coulomb scattering]", "twoBody", "large angle Coulomb scattering"),
+    527: ("e- + {el} + photon [bremsstrahlung]", "NBody", "bremsstrahlung"),
+    528: ("e- + {el} [excitation]", "NBody", "excitation"),
+}
+
+
+def electroatomicReactionLabel(mt: int, element: str) -> str:
+    """FUDGE's label of an electro-atomic reaction (``ENDF_ITYPE_3``)."""
+    if mt == 501:
+        return "total"
+    if mt == 522:
+        return "photoelectric absorption"
+    if mt in _ELECTRON_REACTIONS:
+        return _ELECTRON_REACTIONS[mt][0].format(el=element)
+    if 534 <= mt <= 572:
+        return f"e- + e- + {element}{{{subshellLabel(mt - 533)}}}"
+    return f"MT{mt}"
+
+
+def _electronSummands(mt: int, present) -> List[int]:
+    if mt == 501:
+        return [m for m in present if m in (526, 527, 528) or 534 <= m <= 572]
+    if mt == 522:
+        return [m for m in present if 534 <= m <= 572]
+    return []
+
+
+def _attachElectroatomic(suite, endf, report: ConversionReport) -> ConversionReport:
+    """MF23 + MF26 of an electro-atomic tape → reactions, sums, the large-angle elastic as an
+    incomplete reaction, and the products MF26 states, as FUDGE writes them."""
+    from kika.nuclear_data.model import Add, CrossSectionSum, Summands
+
+    mf23 = endf.mf[23]
+    mf26 = endf.mf.get(26)
+    suite.interaction = ATOMIC_INTERACTION
+    suite.projectile = "e-"
+    element = suite.target
+    present = sorted(mf23.mt)
+    _atomicPoPs(suite, positron=False)
+    sums = {mt for mt in (501, 522) if mt in present and _electronSummands(mt, present)}
+    for mt in present:
+        section = mf23.mt[mt]
+        function = _function1d(section.table.interp, section.table.x, section.table.y, axes=crossSectionAxes())
+        function.label = EVAL_LABEL
+        provenance = EndfProvenance(mat=section._mat, za=section._za, awr=section._awr,
+                                    headerFields={PHOTOATOMIC_KEY: {"mf23": _fields(section)}})
+        label = electroatomicReactionLabel(mt, element)
+        reactionId = ReactionId(label=label, ENDF_MT=mt)
+        if mt in sums:
+            links = [Add(f"/reactionSuite/reactions/reaction[@label='{electroatomicReactionLabel(p, element)}']"
+                         f"/crossSection") for p in _electronSummands(mt, present) if p not in sums]
+            reaction = CrossSectionSum(id=reactionId, provenance=provenance, summands=Summands(links))
+            reaction.crossSection[EVAL_LABEL] = function
+            suite.sums.append(reaction)
+            continue
+        reaction = Reaction(id=reactionId, provenance=provenance)
+        reaction.crossSection[EVAL_LABEL] = function
+        section26 = mf26.mt.get(mt) if mf26 is not None else None
+        reaction.outputChannel = _electronChannel(mt, element, function, section.table.c1, section26,
+                                                  provenance.headerFields[PHOTOATOMIC_KEY], report)
+        if mt == 525:
+            # The large-angle elastic is part of the total elastic MT526: FUDGE
+            # files it as an incomplete reaction, outside the sum.
+            suite.incompleteReactions.append(reaction)
+        else:
+            suite.reactions.append(reaction)
+    return report
+
+
+def _constantOne(lo, hi):
+    from kika.nuclear_data.model import Multiplicity, multiplicityAxes
+    from kika.nuclear_data.model.functions.simple import Constant1d
+
+    return Multiplicity(form=Constant1d(constant=1.0, domainMin_=lo, domainMax_=hi, axes=multiplicityAxes(),
+                                        label=EVAL_LABEL))
+
+
+def _unspecifiedProduct(pid, label, lo, hi):
+    from kika.nuclear_data.model import Distribution, Product, Unspecified
+
+    distribution = Distribution()
+    distribution[EVAL_LABEL] = Unspecified(label=EVAL_LABEL)
+    return Product(pid=pid, label=label, multiplicity=_constantOne(lo, hi), distribution=distribution)
+
+
+def _electronChannel(mt: int, element: str, function, epe: float, section26, book: dict,
+                     report: ConversionReport):
+    """The output channel of an electro-atomic reaction, its MF26 products decoded into it.
+
+    MF26's LAW=1 and LAW=2 products go through MF6's decoder (their records are
+    MF6's); LAW=8 (energy transfer) becomes the electron's ``averageProductEnergy``,
+    ``E - ET``. The fields the model does not hold are kept in ``book['mf26']``.
+    """
+    from kika.endf.classes.mf6.base import MF6MT
+    from kika.nuclear_data.model import (AverageProductEnergy, Distribution, Frame, OutputChannel, Product, Q,
+                                         XYs1d)
+
+    from .energy_angle import decodeMF6MT
+
+    xs, _, _ = function.toEndfRegions()
+    lo, hi = float(xs[0]), float(xs[-1])
+    if mt in _ELECTRON_REACTIONS:
+        _, genre, process = _ELECTRON_REACTIONS[mt]
+        q = 0.0
+    else:
+        genre, process, q = "NBody", None, -float(epe)
+    channel = OutputChannel(genre=genre, process=process,
+                            Q=Q(value=q, unit="eV", label=EVAL_LABEL, domainMin=lo, domainMax=hi))
+    decoded = {}            # pid -> (distribution form) from LAW 1/2
+    averages = {}           # pid -> XYs1d of E - ET
+    if section26 is not None:
+        law8 = {}
+        kept = MF6MT(number=mt, _za=section26._za, _awr=section26._awr, _jp=section26._jp, _lct=1,
+                     _mat=section26._mat)
+        kept.pad = section26.pad
+        for index, product in enumerate(section26.products):
+            if product.law == 8:
+                body = product.law_data
+                law8[index] = {"zap": product.zap, "awp": product.awp, "lip": product.lip,
+                               "y": [list(product.y_interp), list(product.y_energies), list(product.y_values)],
+                               "head": [body.c1, body.c2, body.l1, body.l2], "interp": list(body.interp)}
+                e = np.asarray(body.energies, dtype=float)
+                averages[pidFromZA(product.za)] = XYs1d(
+                    xs=e, ys=e - np.asarray(body.transfer, dtype=float), label=EVAL_LABEL,
+                    axes=_axes("energy_in", "eV", "averageProductEnergy", "eV"))
+            else:
+                kept.products.append(product)
+        kept._nk = len(kept.products)
+        entries, provenance6, report = decodeMF6MT(kept, report)
+        for plabel, pid, _, form in entries:
+            if form is not None and type(form).__name__ == "AngularTwoBody":
+                form.productFrame = Frame.centerOfMass
+            decoded[plabel] = form
+        book["mf26"] = {"provenance": provenance6, "law8": law8, "nk": section26._nk,
+                        "lct": section26._lct, "jp": section26._jp}
+
+    def product(pid, label, form=None):
+        if form is None and pid not in averages:
+            return _unspecifiedProduct(pid, label, lo, hi)
+        distribution = Distribution()
+        distribution[EVAL_LABEL] = form if form is not None else _unspecifiedForm()
+        p = Product(pid=pid, label=label, multiplicity=_constantOne(lo, hi), distribution=distribution)
+        if form is None and pid in averages:
+            p.averageProductEnergy = AverageProductEnergy()
+            p.averageProductEnergy[EVAL_LABEL] = averages[pid]
+        return p
+
+    if mt == 525:
+        products = [product("e-", "e-", decoded.get("e-")), _unspecifiedProduct(element, element, lo, hi)]
+    elif mt == 526:
+        products = [_unspecifiedProduct("e-", "e-", lo, hi), _unspecifiedProduct(element, element, lo, hi)]
+    elif mt == 527:
+        products = [product("photon", "photon", decoded.get("photon")), product("e-", "e-"),
+                    _unspecifiedProduct(element, element, lo, hi)]
+    elif mt == 528:
+        products = [product("e-", "e-"), _unspecifiedProduct(element, element, lo, hi)]
+    elif 534 <= mt <= 572:
+        vacancy = f"{element}{{{subshellLabel(mt - 533)}}}"
+        products = [product("e-", "e-", decoded.get("e-")), _unspecifiedProduct("e-", "e-__a", lo, hi),
+                    _unspecifiedProduct(vacancy, vacancy, lo, hi)]
+    else:
+        products = []
+    for p in products:
+        channel.products.products.append(p)
+    return channel
+
+
+def _unspecifiedForm():
+    from kika.nuclear_data.model import Unspecified
+
+    return Unspecified(label=EVAL_LABEL)
+
+
+def _encodeMF26(reaction, book: dict, mt: int, mat: int, report: ConversionReport):
+    """MF26 of an electro-atomic reaction: MF6's encoder for LAW 1/2, LAW=8 from averageProductEnergy."""
+    from kika.endf.classes.mf26 import MF26LawEnergyTransfer, MF26MT
+    from kika.endf.classes.mf6.products import MF6Product
+
+    from .energy_angle import encodeMF6MT
+
+    kept = book["mf26"]
+    provenance6 = kept["provenance"]
+    labels = [record["label"] for record in provenance6.headerFields["mf6"]["products"]]
+    byLabel = {p.label: p for p in reaction.outputChannel.products}
+    forms = {}
+    for label in labels:
+        p = byLabel.get(label)
+        if p is not None and p.distribution is not None:
+            forms[label] = p.distribution.forms.get(EVAL_LABEL)
+    section6, report = encodeMF6MT(forms, provenance6, mt, report)
+    products = list(section6.products)
+    for index in sorted(kept["law8"], key=int):
+        fields = kept["law8"][index]
+        owner = next((p for p in reaction.outputChannel.products
+                      if p.pid == pidFromZA(int(round(fields["zap"]))) and p.averageProductEnergy is not None), None)
+        if owner is None:
+            report.lost(f"MF26/MT{mt}: the energy transfer of product {index} has no averageProductEnergy")
+            continue
+        ape = owner.averageProductEnergy.forms[EVAL_LABEL]
+        e = np.asarray(ape.xs, dtype=float)
+        body = MF26LawEnergyTransfer(c1=fields["head"][0], c2=fields["head"][1], l1=fields["head"][2],
+                                     l2=fields["head"][3], interp=[tuple(x) for x in fields["interp"]],
+                                     energies=list(e), transfer=list(e - np.asarray(ape.ys, dtype=float)))
+        yi, ye, yv = fields["y"]
+        products.insert(int(index), MF6Product(zap=fields["zap"], awp=fields["awp"], lip=fields["lip"],
+                                               y_interp=[tuple(x) for x in yi], y_energies=list(ye),
+                                               y_values=list(yv), law_data=body))
+    section = MF26MT(number=mt, _za=section6._za, _awr=section6._awr, _jp=kept["jp"], _lct=kept["lct"],
+                     _nk=kept["nk"], _mat=mat)
+    section.pad = section6.pad
+    section.products = products
+    return section
 
 
 def _tab1Section(cls, mt: int, function, fields: dict, mat: int, mf: int, defaults: dict):
@@ -192,8 +512,8 @@ def encodePhotoatomicSections(suite, mat: Optional[int], report: ConversionRepor
 
     if getattr(suite, "interaction", None) != ATOMIC_INTERACTION:
         return [], report
-    target = suite.PoPs.particles.get(suite.target)
-    z = getattr(target, "Z", None)
+    element = getattr(suite.PoPs, "chemicalElements", {}).get(suite.target)
+    z = getattr(element, "Z", None) or getattr(suite.PoPs.particles.get(suite.target), "Z", None)
     if z is None:
         from kika._constants import SYMBOL_TO_ATOMIC_NUMBER
         z = SYMBOL_TO_ATOMIC_NUMBER.get(suite.target)
@@ -201,7 +521,7 @@ def encodePhotoatomicSections(suite, mat: Optional[int], report: ConversionRepor
                 "awr": float(getattr(getattr(suite.provenance, "attributes", None) or {}, "get",
                                      lambda *_: 0.0)("atomic_weight_ratio") or 0.0)}
     sections = []
-    for container in (suite.reactions, suite.sums):
+    for container in (suite.reactions, suite.sums, suite.incompleteReactions):
         for reaction in container:
             mt = reaction.ENDF_MT
             if mt is None:
@@ -214,11 +534,14 @@ def encodePhotoatomicSections(suite, mat: Optional[int], report: ConversionRepor
             rowMat = int(mat if mat is not None else getattr(reaction.provenance, "mat", 0) or 0)
             section = _tab1Section(MF23MT, mt, form, book.get("mf23"), rowMat, 23, defaults)
             sections.append((23, mt, _spelled(section, book.get("spelling", {}).get(f"23/{mt}"), rowMat, 23, report)))
+            if book.get("mf26") is not None:
+                s26 = _encodeMF26(reaction, book, mt, rowMat, report)
+                sections.append((26, mt, _spelled(s26, book.get("spelling", {}).get(f"26/{mt}"), rowMat, 26, report)))
             ddcs = reaction.doubleDifferentialCrossSection
             form27 = ddcs.forms.get(EVAL_LABEL) if ddcs is not None else None
             parts = {}
             if isinstance(form27, CoherentPhotonScattering):
-                parts = {502: form27.formFactor, 505: form27.realAnomalousFactor, 506: form27.imaginaryAnomalousFactor}
+                parts = {502: form27.formFactor, 505: form27.imaginaryAnomalousFactor, 506: form27.realAnomalousFactor}
             elif isinstance(form27, IncoherentPhotonScattering):
                 parts = {504: form27.scatteringFactor}
             for part, function in parts.items():
@@ -254,12 +577,12 @@ def keepPhotoatomicSpelling(suite, sourcePath) -> None:
 
     sections, _ = encodePhotoatomicSections(suite, None, ConversionReport())
     byMt = {}
-    for container in (suite.reactions, suite.sums):
+    for container in (suite.reactions, suite.sums, suite.incompleteReactions):
         for reaction in container:
             if reaction.ENDF_MT is not None:
                 byMt[int(reaction.ENDF_MT)] = reaction
     for mf, mt, section in sections:
-        owner = byMt.get(mt if mf == 23 else (502 if mt in (502, 505, 506) else 504))
+        owner = byMt.get(mt if mf in (23, 26) else (502 if mt in (502, 505, 506) else 504))
         if owner is None:
             continue
         raw = _rawSection(sourcePath, mf, mt)

@@ -106,7 +106,12 @@ def encode_photoatomic(table: PhotoatomicAce, header=None) -> PhotoatomicAce:
         block(18, xprob)
     if table.electron_words.size:
         start = len(words) + 1
-        words.extend(np.asarray(table.electron_words, dtype=float).tolist())
+        electron = np.array(table.electron_words, dtype=float)
+        eion = table.electron_jxs[23 - 19] if len(table.electron_jxs) > 4 else None
+        if eion is not None and ns:
+            # the EION header's block indices, counted from the first electron word
+            electron[eion + ns:eion + 3 * ns] += start - 1
+        words.extend(electron.tolist())
         for k, rel in zip(range(19, 33), table.electron_jxs):
             jxs[k] = start + rel if rel is not None else 0
         nxs[8:13] = list(table.electron_nxs)

@@ -72,8 +72,11 @@ def test_form_factors_are_the_scattering_forms(photoat):
     assert isinstance(c, CoherentPhotonScattering) and isinstance(i, IncoherentPhotonScattering)
     np.testing.assert_array_equal(c.formFactor.toEndfRegions()[1], tape.mf[27].mt[502].y)
     np.testing.assert_array_equal(i.scatteringFactor.toEndfRegions()[1], tape.mf[27].mt[504].y)
+    # ENDF-6 §27: MT505 is the imaginary anomalous factor f'' and MT506 the real one f'
     if 505 in tape.mf[27].mt:
-        np.testing.assert_array_equal(c.realAnomalousFactor.toEndfRegions()[1], tape.mf[27].mt[505].y)
+        np.testing.assert_array_equal(c.imaginaryAnomalousFactor.toEndfRegions()[1], tape.mf[27].mt[505].y)
+    if 506 in tape.mf[27].mt:
+        np.testing.assert_array_equal(c.realAnomalousFactor.toEndfRegions()[1], tape.mf[27].mt[506].y)
     assert "1/Ang" in [a.unit for a in c.formFactor.axes.axes]
 
 

@@ -58,7 +58,7 @@ __all__ = ["MF_WRITE_ORDER", "PENDF_SECTIONS", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
 #: of *coverage* rather than of order: an MF absent here is one nothing can
 #: write, not one that sorts late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 27, 31, 32, 33, 34, 35)
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 31, 32, 33, 34, 35)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -627,7 +627,7 @@ def _lumpedComponents(suite, mat, present, report):
 _BUILDER_FILES = {
     "_mf1Sections": {1}, "_mf2Sections": {2}, "_mf3And4And5Sections": {3, 4, 5},
     "_mf6Sections": {6}, "_mf7Sections": {7}, "_productionSections": {8, 9, 10},
-    "_photonSections": {12, 13, 14, 15}, "_photoatomicSections": {23, 27},
+    "_photonSections": {12, 13, 14, 15}, "_photoatomicSections": {23, 26, 27},
     "_covarianceSections": {31, 32, 33, 34, 35},
 }
 

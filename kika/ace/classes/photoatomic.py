@@ -136,6 +136,8 @@ class PhotoatomicAce:
     #: The electron blocks (JXS(19) onwards) as they were read, kept word for
     #: word so the table writes back whole: NXS(8)-(12), the words from JXS(19)
     #: to the end, and each JXS(19..32) relative to JXS(19) (``None`` for 0).
+    #: The EION header's block indices in ``electron_words`` count from the
+    #: first electron word (as if JXS(19) were 1), so the blocks can move.
     electron_nxs: List[int] = field(default_factory=list)
     electron_words: np.ndarray = field(default_factory=lambda: np.empty(0))
     electron_jxs: List[Optional[int]] = field(default_factory=list)
