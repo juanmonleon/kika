@@ -15,14 +15,19 @@ TAB1 without its CONT: NR, then NBT(1..NR) and INT(1..NR) as two arrays (NR = 0
 for a single lin-lin region), NE, the energies in MeV and the cross sections
 in barns.
 
-**Production cross sections** (MF 10) are named ``MT + 1000·(10 + LFS)``, as
-ACER and FRENDY name them: MT 4 to the first isomer (LFS 1) is 11004.
-:func:`production_mt` and :func:`split_production_mt` convert. The name carries
-no product: an MF 10 section with several products for one (MT, LFS) (MT 5 of
-Cr-52, every product with LFS 0) gets one number for all of them. NJOY writes
-them all under it and FRENDY declines to; a table read with a repeated number
-keeps every reaction, in order, and :attr:`DosimetryAce.repeated_numbers` names
-them, since a code that looks a number up finds only one.
+**Production cross sections** (MF 9/10) are named as IRDFF-II's ACE library
+names them:
+
+- ``MT + 1000·(10 + LFS)`` for a reaction with one product, as ACER and FRENDY
+  name them: MT 4 to the first isomer (LFS 1) is 11004;
+- ``(50 + LFS)·10⁶ + ZA`` for MT 5, whose products are many and are told apart
+  only by what they are: Mg(n,x)Na-24 is 50011024.
+
+:func:`production_mt`, :func:`split_production_mt` and :func:`production_za`
+convert. Older tables (NJOY's ACER) write every MT 5 product of one LFS under
+one ``MT + 1000·(10 + LFS)`` number; a table read with a repeated number keeps
+every reaction, in order, and :attr:`DosimetryAce.repeated_numbers` names them,
+since a code that looks a number up finds only one.
 
 **Units.** Every energy here is in **eV**, the cross sections in **barns**
 (eV·b for the energy-deposition numbers MT 301 and MT 444).
@@ -38,19 +43,38 @@ import numpy as np
 EV_PER_MEV = 1.0e6
 
 
-def production_mt(mt: int, lfs: int) -> int:
-    """The dosimetry-table number of the MF 10 cross section of ``mt`` to final state ``lfs``."""
+#: The one reaction whose productions are numbered by their product.
+MANY_PRODUCTS_MT = 5
+
+
+def production_mt(mt: int, lfs: int, za: Optional[int] = None) -> int:
+    """The dosimetry-table number of the production cross section of ``mt`` to final state ``lfs``.
+
+    ``za`` (1000·Z + A of the product) is needed for MT 5 only.
+    """
     if not 0 <= int(lfs) <= 98:
         raise ValueError(f"LFS = {lfs} is not a final state (0-98)")
+    if int(mt) == MANY_PRODUCTS_MT:
+        if za is None or not 0 < int(za) < 1000000:
+            raise ValueError(f"a production of MT 5 is numbered by its product; ZA = {za} is not one")
+        return (50 + int(lfs)) * 1000000 + int(za)
     return int(mt) + 1000 * (10 + int(lfs))
 
 
 def split_production_mt(number: int) -> Optional[Tuple[int, int]]:
     """``(MT, LFS)`` of a production number from :func:`production_mt`, ``None`` for a plain MT."""
     number = int(number)
+    if number >= 50000000:
+        return MANY_PRODUCTS_MT, number // 1000000 - 50
     if number < 10000:
         return None
     return number % 1000, number // 1000 - 10
+
+
+def production_za(number: int) -> Optional[int]:
+    """The product's ZA a production number names (MT 5 only), ``None`` otherwise."""
+    number = int(number)
+    return number % 1000000 if number >= 50000000 else None
 
 
 @dataclass

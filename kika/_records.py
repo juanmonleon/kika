@@ -590,7 +590,13 @@ def parse_number(text: str) -> Union[float, int, None]:
                 return value
             except (ValueError, IndexError):
                 pass
-                
+
+        # Fortran reads a numeric field with its blanks ignored (BLANK='NULL',
+        # the default), so " 1.35462+ 7" is 1.35462e7 to NJOY: IRDFF-II's
+        # master tape writes exponents that way.
+        if any(ch.isspace() for ch in text):
+            return parse_number("".join(text.split()))
+
         # If all parsing fails
         return None
 

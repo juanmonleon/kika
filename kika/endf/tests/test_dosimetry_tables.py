@@ -8,6 +8,9 @@
   stated (MF 10 with its own laws), an MF 9 production is the multiplicity
   times the cross section to the processing tolerance, and a tape with
   resonance parameters is refused.
+* With IRDFF-II beside the repo (``../NuclearData/dosimetry/irdff2``): Mg, Al-27
+  and Ti come out as the IAEA's ACE library writes them, MT 5 products numbered
+  by their product and the tape's blank-exponent numbers read.
 """
 from __future__ import annotations
 
@@ -128,3 +131,29 @@ def test_a_pointwise_tape_takes_its_temperature_suffix(tmp_path):
 def test_a_tape_with_resonance_parameters_is_refused(tmp_path):
     with pytest.raises(ProcessingOutputError, match="resonance parameters"):
         dosimetry_ace(STRUCTURAL, tmp_path, extension=".02y")
+
+
+IRDFF2 = Path(__file__).resolve().parents[5] / "NuclearData" / "dosimetry" / "irdff2"
+
+
+def _irdffMaterial(mat, out):
+    lines = (IRDFF2 / "endf" / "IRDFF-II.endf").read_text().splitlines(keepends=True)
+    body = [l for l in lines[1:] if l[66:70].strip() == str(mat)]
+    path = out / f"irdff2-{mat}.endf"
+    end = " " * 66 + "   0 0  0    0\n" + " " * 66 + "  -1 0  0    0\n"
+    path.write_text(lines[0] + "".join(body) + end)
+    return path
+
+
+@pytest.mark.parametrize("mat", [1200, 1325, 2200])
+def test_irdff2_agrees_with_the_iaea_ace_library(mat, tmp_path):
+    if not (IRDFF2 / "endf" / "IRDFF-II.endf").exists():
+        pytest.skip("no IRDFF-II in ../NuclearData/dosimetry/irdff2")
+    mine = read_ace(str(dosimetry_ace(_irdffMaterial(mat, tmp_path), tmp_path, xsdir=False)))
+    ref = read_ace(str(IRDFF2 / "ace" / "IRDFF-II" / f"dos-irdff2-{mat}.acef"))
+    assert set(ref.mt_numbers) <= set(mine.mt_numbers) and set(mine.mt_numbers) - set(ref.mt_numbers) <= {1}
+    for r in ref.reactions:
+        m = mine.reaction(r.mt)
+        assert (m.breakpoints, m.interpolation) == (r.breakpoints, r.interpolation)
+        np.testing.assert_allclose(m.energies, r.energies, rtol=1e-6)
+        np.testing.assert_allclose(m.cross_section, r.cross_section, rtol=6e-7, atol=0)

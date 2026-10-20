@@ -16,7 +16,9 @@ What goes in, in this order (the order ACER writes MF 3 then MF 10):
    emits, summed on the temperature's union grid. These are what dosimetry
    tallies ask for (dpa from MT 444, helium from MT 207); ACER has them only
    when the PENDF went through HEATR and GASPR first.
-3. **Production cross sections**, numbered ``MT + 1000·(10 + LFS)``:
+3. **Production cross sections**, numbered ``MT + 1000·(10 + LFS)``, or
+   ``(50 + LFS)·10⁶ + ZA`` for the products of MT 5
+   (:func:`kika.ace.classes.dosimetry.production_mt`, IRDFF-II's numbering):
 
    - MF 10 as the evaluation tabulates it, with its own interpolation laws
      (exact, and what ACER copies);
@@ -24,11 +26,11 @@ What goes in, in this order (the order ACER writes MF 3 then MF 10):
      σ, on the union of both grids, refined where the product read lin-lin
      misses the exact one by more than the processing tolerance.
 
-A number the table cannot tell apart (several MF 10 or MF 9 products of one
-MT and LFS, MT 5 of Cr-52 for one) is not written: whoever reads the table
-looks a number up and would find one of them. Each such product is named in
-the omitted list instead. A cross section zero everywhere is not written
-either.
+A number the table cannot tell apart (two products of one MT and LFS other
+than MT 5, which no evaluation known states) is not written: whoever reads
+the table looks a number up and would find one of them. Each such product is
+named in the omitted list instead. A cross section zero everywhere is not
+written either.
 """
 from __future__ import annotations
 
@@ -153,6 +155,7 @@ def _ownTable(number, form) -> DosimetryReaction:
 def _productions(suite, crossSections, omitted, sigmaForms=None) -> List[DosimetryReaction]:
     from kika.endf.model_adapter.productions import _levelOf
     from kika.nuclear_data.model.cross_section_forms import Reference
+    from kika.nuclear_data.model.pops import zaFromPid
 
     found: List[Tuple[int, str, DosimetryReaction]] = []
     for production in suite.productions:
@@ -163,7 +166,9 @@ def _productions(suite, crossSections, omitted, sigmaForms=None) -> List[Dosimet
             continue
         product = products[0]
         lfs, _ = _levelOf(suite, product.pid)
-        number = production_mt(mt, lfs)
+        particle = suite.PoPs.particles.get(product.pid) if suite.PoPs is not None else None
+        za = getattr(particle, "ZA", None) or zaFromPid(product.pid)
+        number = production_mt(mt, lfs, za)
         forms = production.crossSection.forms
         form = next(iter(forms.values()), None) if forms else None
         if form is None:

@@ -28,13 +28,19 @@ The layout is the one NJOY2016's ACER writes with `iopt = 3` (`acedo.f90`):
   A single lin-lin region is written as NR = 0.
 
 A production cross section of MF 9 or MF 10 (ENDF-6 §9, §10), to the final state LFS of
-the product, is numbered
+a product of charge and mass number $ZA = 1000Z + A$, is numbered as the IRDFF-II ACE
+library numbers it:
 
 $$
-N = \mathrm{MT} + 1000\,(10 + \mathrm{LFS}),
+N = \begin{cases}
+(50 + \mathrm{LFS})\cdot 10^6 + ZA & \text{MT} = 5,\\
+\mathrm{MT} + 1000\,(10 + \mathrm{LFS}) & \text{otherwise.}
+\end{cases}
 $$ (eq-dosimetry-tables-number)
 
-as ACER and FRENDY number it: MT 4 to the first isomer is 11004.
+MT 4 to the first isomer is 11004, as ACER and FRENDY number it too. MT 5 is the one
+reaction with many products, so its products are told apart by what they are: Mg(n,x)Na-24
+is 50011024.
 
 ## What it computes
 
@@ -96,8 +102,9 @@ The table is assembled from the processed suite at one temperature.
    written twice, or an edge of the multiplicity's domain), each piece evaluated from
    inside it, and the pieces meet at a repeated node.
 5. **Numbers that collide.** A number of {eq}`eq-dosimetry-tables-number` that more than
-   one product shares (several MF 10 products of one MT and LFS: MT 5 of Cr-52 has 24) is
-   not written, and each such product is named in the omitted list.
+   one product shares (two products of one MT other than 5 and one LFS, which no
+   evaluation known states) is not written, and each such product is named in the omitted
+   list.
 6. **Encoding.** The reactions are laid out in the order above. Counts, locators,
    reaction numbers and interpolation tables are integer words (I20), energies (in MeV)
    and cross sections are reals (E20.11). The header follows {doc}`../formats/ace`: ZAID
@@ -120,9 +127,13 @@ The table is assembled from the processed suite at one temperature.
 - **MF 10 keeps its own laws.** The format carries them, and copying them is exact, which
   is what ACER does. FRENDY refuses any law but lin-lin. NJOY's PENDF holds MF 10
   linearised on the reconstruction grid; both tables describe the same function.
-- **Colliding numbers are not written.** NJOY writes every product under the shared
-  number and FRENDY declines to process the evaluation. A code that looks a number up finds
-  one of them, so a table that carries both is ambiguous, and kika writes neither.
+- **MT 5 products are numbered by their product.** NJOY2016 writes every MT 5 product of
+  one LFS under one number (Cr-52 of ENDF/B-VIII.1 has 24 under 10005), and FRENDY
+  declines to process the evaluation. A code that looks a number up finds one of them. The
+  IRDFF-II ACE library numbers them by product instead, and kika follows it: Ti, Fe, Ni,
+  Cu and Zn of IRDFF-II state nothing but MT 5 products.
+- **Colliding numbers are not written.** Should two products still share a number, a
+  table that carries both is ambiguous, and kika writes neither.
 - **A pointwise evaluation is not broadened.** Asking for a temperature other than the
   tape's would mean broadening data that is a reference as it stands. No processor does
   that for dosimetry. The pointwise entry point writes the tape's own temperature.
@@ -185,6 +196,13 @@ The table is assembled from the processed suite at one temperature.
   reaction for reaction, MT 1 added (Nb-93: 39 of 39; Rh-103: 89 of 89).
 - OpenMC 0.16 reads the tables as `TableType.DOSIMETRY` with the stated number of
   reactions.
+- Against the IAEA's ACE library of IRDFF-II (December 2020 update, 70 materials,
+  pointwise ENDF-6 at 293.6 K, measured 2026-10-20): every table is written, and all 161
+  reactions of the IAEA's tables come out with the same numbers, the same grid and
+  laws, and cross sections within 5·10⁻⁷ (the IAEA prints seven digits). kika's tables
+  add MT 1 where the tape states it. The test runs Mg, Al-27 and Ti when IRDFF-II is
+  present
+  (`kika/endf/tests/test_dosimetry_tables.py::test_irdff2_agrees_with_the_iaea_ace_library`).
 
 ## Diagnostics
 
@@ -213,3 +231,5 @@ It is not empty for an NJOY table that writes several products under one number,
 - A. C. Kahler (ed.), *The NJOY Nuclear Data Processing System, Version 2016*,
   LA-UR-17-20093, Los Alamos National Laboratory (2016): ACER, `iopt = 3`.
 - ENDF-6 Formats Manual, CSEWG Document ENDF-102, BNL-203218-2018-INRE (2018): §3, §9, §10.
+- A. Trkov et al., *IRDFF-II: A New Neutron Metrology Library*, Nuclear Data Sheets 163,
+  1-108 (2020).

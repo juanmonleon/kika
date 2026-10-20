@@ -20,7 +20,8 @@ import numpy as np
 import pytest
 
 from kika.ace import read_ace
-from kika.ace.classes.dosimetry import DosimetryAce, DosimetryReaction, production_mt, split_production_mt
+from kika.ace.classes.dosimetry import (DosimetryAce, DosimetryReaction, production_mt, production_za,
+                                       split_production_mt)
 from kika.ace.encoders.dosimetry import encode_dosimetry
 from kika.ace.parsers.parse_dosimetry import is_dosimetry_extension, parse_dosimetry
 from kika.ace.writers.write_ace import write_ace, write_ace_checked
@@ -40,7 +41,13 @@ def _table():
 
 def test_production_numbers_follow_acer():
     assert production_mt(4, 1) == 11004
-    assert production_mt(5, 0) == 10005
+    assert production_mt(16, 0) == 10016
+    # MT 5 is numbered by its product, as IRDFF-II's ACE library does: Mg(n,x)Na-24, In(n,x)In-114m
+    assert production_mt(5, 0, 11024) == 50011024 and production_mt(5, 1, 49114) == 51049114
+    assert split_production_mt(51049114) == (5, 1) and production_za(51049114) == 49114
+    assert production_za(11004) is None
+    with pytest.raises(ValueError, match="numbered by its product"):
+        production_mt(5, 0)
     assert split_production_mt(11004) == (4, 1)
     assert split_production_mt(102) is None
     assert is_dosimetry_extension(".80y") and not is_dosimetry_extension(".80c")
