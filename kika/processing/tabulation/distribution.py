@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from .angular import tabulateAngular
-from .correlated import tabulateAngularEnergy, tabulateEnergyAngular, tabulateKalbachMann
+from .correlated import (tabulateAngularEnergy, tabulateEnergyAngular, tabulateKalbachMann,
+                         tabulatePhotonKalbachMann)
 from .energy import tabulateEnergy
 from .tables import TabulationOptions
 from kika._constants import NEUTRON_MASS_MEV
@@ -81,6 +82,8 @@ class TabulationContext:
     discrete: Optional[Sequence[int]] = None
     options: TabulationOptions = field(default_factory=TabulationOptions)
     report: Optional[object] = None
+    #: "n" or "photon": a photon's Kalbach-Mann is ENDF-6 Eq. 6.5-6.6
+    projectile: str = "n"
 
 
 def _say(context, message):
@@ -150,6 +153,9 @@ def tabulateDistribution(form, context: TabulationContext):
             return m.DistributionMixture(weighted=terms, label=MONTE_CARLO_LABEL)
         return _uncorrelated(form.angular, energy, form.productFrame, context)
     if isinstance(form, m.KalbachMann):
+        if context.projectile == "photon":
+            return tabulatePhotonKalbachMann(form, options, zaEmitted=context.zaEmitted,
+                                             zaTarget=context.zaTarget, discrete=context.discrete)
         return tabulateKalbachMann(form, options, zaEmitted=context.zaEmitted,
                                    zaTarget=context.zaTarget, discrete=context.discrete)
     if isinstance(form, m.EnergyAngular):

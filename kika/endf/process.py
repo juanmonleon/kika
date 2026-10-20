@@ -1529,6 +1529,72 @@ def dosimetry_ace(path, directory, *, extension: str | None = None, xsdir: bool 
     return out
 
 
+def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bool = True,
+                     replace: bool = False) -> Path:
+    """Write the photonuclear ACE table (``.NNu``) of an ENDF photonuclear evaluation (sublibrary ``g``).
+
+    The tape's reactions, their sum, the heating number and, per emitted particle
+    (n, γ, p, d, t, ³He, α), its production, yields, angles and energy laws, at
+    0 K, as :func:`kika.processing.photonuclear.photonuclearTable` makes them
+    (the method and its choices are there). The suffix is the 0 K one (``.01u``)
+    unless ``extension`` is given. Returns the path written; the table is read
+    back and compared word for word before it replaces a file, and its line is
+    added to ``directory/xsdir`` unless ``xsdir`` is false. What the table leaves
+    out or approximates is the report of
+    :func:`kika.processing.photonuclear.photonuclearTable`.
+
+    Raises :class:`ProcessingOutputError`: ``ace-failed`` (not a photonuclear tape,
+    resonance parameters, unreadable tape) or ``ace-table-exists``.
+    """
+    import datetime
+
+    from kika import __version__
+    from kika._utils import ace_temperature_suffix
+    from kika.ace.encoders.photonuclear import encode_photonuclear
+    from kika.ace.writers.write_ace import write_ace_checked
+    from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
+    from kika.endf.model_adapter import decodeReactionSuite
+    from kika.endf.read_endf import read_endf
+    from kika.hdf5.processing import metastableIndex
+    from kika.processing.photonuclear import photonuclearTable
+
+    path, directory = Path(path), Path(directory)
+    info = inspect_endf_processing(path)
+    if info["resolved"] or info["unresolved"]:
+        raise ProcessingOutputError("ace-failed", f"{path.name} has resonance parameters; a photonuclear "
+                                                  f"evaluation states its cross sections pointwise")
+    evaluation = info["evaluation"]
+    try:
+        suffix = extension or ace_temperature_suffix(0.0) + "u"
+        suite, _ = decodeReactionSuite(read_endf(str(path)))
+        if suite.projectile != "photon":
+            raise ProcessingOutputError("ace-failed", f"{path.name} is not a photonuclear evaluation "
+                                                      f"(projectile {suite.projectile!r})")
+        table = photonuclearTable(suite)
+        meta = metastableIndex(suite)
+        target = suite.PoPs[suite.target]
+        comment = " ".join(x for x in (suite.target, suite.evaluation, f"photonuclear (kika {__version__})") if x)
+        ace = encode_photonuclear(table, zaid=table.za + (300 + 100 * meta if meta else 0), extension=suffix,
+                                  awr=float(evaluation.get("awr") or table.awr), temperature_mev=0.0,
+                                  comment=comment, date=datetime.date.today().strftime("%m/%d/%y"),
+                                  matid=evaluation.get("mat"), z=int(target.Z), a=int(target.A))
+        ace.report = table.report
+        directory.mkdir(parents=True, exist_ok=True)
+        name = f"{ace.header.zaid}{ace.header.extension}"
+        out = directory / name
+        write_ace_checked(ace, out)
+    except ProcessingOutputError:
+        raise
+    except Exception as error:
+        raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
+    if xsdir:
+        try:
+            add_xsdir_entry(directory / "xsdir", xsdir_line_for(ace, name), replace=replace)
+        except XsdirEntryExists as error:
+            raise ProcessingOutputError("ace-table-exists", str(error)) from error
+    return out
+
+
 def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
     """Process an ENDF-6 neutron tape stage by stage (see the module doc for
     the stages, the progress calls and the failure contract).
@@ -1721,8 +1787,15 @@ def _gnds_evaluation(suite, path):
         out["za"] = int(target.Z) * 1000 + int(target.A)
         out["zsymam"] = str(suite.target)
         try:
-            neutron = suite.PoPs[suite.projectile]
-            out["awr"] = target.mass.convertedTo("amu").value / neutron.mass.convertedTo("amu").value
+            if suite.projectile == "n":
+                neutron = suite.PoPs[suite.projectile]
+                out["awr"] = target.mass.convertedTo("amu").value / neutron.mass.convertedTo("amu").value
+            else:
+                # ENDF's AWR is the target's mass in neutron masses whatever the
+                # projectile (a photon's mass is 0)
+                from kika._constants import NEUTRON_MASS_AMU
+
+                out["awr"] = target.mass.convertedTo("amu").value / NEUTRON_MASS_AMU
         except Exception:
             pass
     for st in suite.styles:
