@@ -78,6 +78,22 @@ def _sha256_of_file(path: Path, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def _is_complete_tape(path: Path) -> bool:
+    """A tape ends with its TEND record (MAT = -1) and holds no NUL byte at
+    its end: what a crash leaves after the rename but before the data reached
+    the disk is the right size and filled with NULs."""
+    size = path.stat().st_size
+    if size == 0:
+        return False
+    with open(path, "rb") as f:
+        f.seek(max(0, size - 4096))
+        tail = f.read()
+    if b"\0" in tail:
+        return False
+    lines = tail.rstrip().splitlines()
+    return bool(lines) and lines[-1][66:70].strip() == b"-1"
+
+
 def _pendf_cache_path(endf_path: Path, tolerance: float, cache_dir: Path) -> Path:
     """``cache_dir / {sha256}_{tolerance}.pendf`` — SHA256 over the ENDF bytes."""
     return cache_dir / f"{_sha256_of_file(endf_path)}_{tolerance}.pendf"
@@ -111,7 +127,10 @@ def get_or_create_pendf(
     cache_dir.mkdir(parents=True, exist_ok=True)
     target = _pendf_cache_path(endf_path, tolerance, cache_dir)
 
-    if target.is_file() and target.stat().st_size > 0:
+    if target.is_file() and not _is_complete_tape(target):
+        print(f"  PENDF cache entry {target.name} is truncated; reprocessing")
+        target.unlink()
+    if target.is_file():
         print(f"  PENDF cache hit: {target.name}")
         if keep_njoy_io_dir is not None:
             _copy_cached_recon_io(
@@ -135,6 +154,8 @@ def get_or_create_pendf(
             src = Path(str(payload))
             tmp = target.with_suffix(".pendf.tmp")
             shutil.copyfile(src, tmp)
+            with open(tmp, "rb+") as f:
+                os.fsync(f.fileno())
             tmp.replace(target)
             src_pendf = target
             # Persist the deck + stdout next to the cached PENDF and, if
