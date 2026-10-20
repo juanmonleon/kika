@@ -1535,13 +1535,13 @@ def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bo
 
     The tape's reactions, their sum, the heating number and, per emitted particle
     (n, γ, p, d, t, ³He, α), its production, yields, angles and energy laws, at
-    0 K, as :func:`kika.processing.photonuclear.photonuclearTable` makes them
+    0 K, as :func:`kika.ace.processing.photonuclear.photonuclearTable` makes them
     (the method and its choices are there). The suffix is the 0 K one (``.01u``)
     unless ``extension`` is given. Returns the path written; the table is read
     back and compared word for word before it replaces a file, and its line is
     added to ``directory/xsdir`` unless ``xsdir`` is false. What the table leaves
     out or approximates is the report of
-    :func:`kika.processing.photonuclear.photonuclearTable`.
+    :func:`kika.ace.processing.photonuclear.photonuclearTable`.
 
     Raises :class:`ProcessingOutputError`: ``ace-failed`` (not a photonuclear tape,
     resonance parameters, unreadable tape) or ``ace-table-exists``.
@@ -1556,7 +1556,7 @@ def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bo
     from kika.endf.model_adapter import decodeReactionSuite
     from kika.endf.read_endf import read_endf
     from kika.hdf5.processing import metastableIndex
-    from kika.processing.photonuclear import photonuclearTable
+    from kika.ace.processing.photonuclear import photonuclearTable
 
     path, directory = Path(path), Path(directory)
     info = inspect_endf_processing(path)

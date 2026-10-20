@@ -11,7 +11,7 @@ import pytest
 from scipy.integrate import quad
 
 from kika.processing.heating import NEUTRON_REST_ENERGY, _cmToLab, _Kinematics
-from kika.processing.photonuclear.tables import nuclearRestEnergy, photonTwoBodyEnergy
+from kika.ace.processing.photonuclear.tables import nuclearRestEnergy, photonTwoBodyEnergy
 from kika.processing.tabulation.kalbach import kalbachSlope, photonKalbachDensity
 
 LIBRARY = (Path(__file__).resolve().parents[5] / "NuclearData" / "photonuclear" / "endfb81"
@@ -77,7 +77,7 @@ def test_photon_boost_is_the_centre_of_mass_velocity():
 def test_deuteron_photodisintegration_heats_by_the_exact_balance():
     """H-2 (gamma, n) p: the proton's energy, the only one left local, is E + Q - <E_n> to 1e-3."""
     import kika
-    from kika.processing.photonuclear import photonuclearTable
+    from kika.ace.processing.photonuclear import photonuclearTable
 
     t = photonuclearTable(kika.read(str(_tape("g-001_H_002.endf"))))
     assert t.mt_numbers == [50] and [p.particle for p in t.particles] == ["n", "H1"]
@@ -98,7 +98,7 @@ def test_lumped_two_body_takes_the_channel_q():
     2 sqrt(E_c T*_d) of T*_d + E_c, T*_d the exact centre-of-mass energy at Q(p + d).
     """
     import kika
-    from kika.processing.photonuclear import photonuclearTable
+    from kika.ace.processing.photonuclear import photonuclearTable
 
     t = photonuclearTable(kika.read(str(_tape("g-002_He_003.endf"))))
     d = t.particle("H2")
@@ -117,7 +117,7 @@ def test_lumped_two_body_takes_the_channel_q():
 def test_fission_neutrons_include_the_delayed_ones():
     """U-235 MT 18: the neutron yield is nu_p + nu_d and the law chain has the prompt law and one per family."""
     import kika
-    from kika.processing.photonuclear import photonuclearTable
+    from kika.ace.processing.photonuclear import photonuclearTable
 
     path = _tape("g-092_U_235.endf")
     suite = kika.read(str(path))
@@ -150,7 +150,7 @@ def test_a_reaction_is_listed_once_per_particle_and_lines_are_law_4():
     import collections
 
     import kika
-    from kika.processing.photonuclear import photonuclearTable
+    from kika.ace.processing.photonuclear import photonuclearTable
 
     t = photonuclearTable(kika.read(str(_tape("g-007_N_014.endf"))))
     for p in t.particles:

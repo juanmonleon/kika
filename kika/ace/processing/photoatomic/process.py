@@ -4,8 +4,8 @@ An EPRDATA table is the photon interactions, the atomic relaxation and the
 electron interactions of one element, so the three ENDF sublibraries are all
 required: photoat (NSUB=3), atomic_relax (NSUB=6) and electrons (NSUB=113).
 :func:`process_photoatomic` reads them (paths or decoded models), builds every
-block (:func:`~kika.processing.photoatomic.photoatomicTable`,
-:func:`~kika.processing.photoatomic.electrons.electronBlocks`) and returns a
+block (:func:`~kika.ace.processing.photoatomic.photoatomicTable`,
+:func:`~kika.ace.processing.photoatomic.electrons.electronBlocks`) and returns a
 :class:`PhotoatomicProcessing` whose :meth:`~PhotoatomicProcessing.write_ace`
 writes the table. There are no numerical options: the method is fixed.
 """

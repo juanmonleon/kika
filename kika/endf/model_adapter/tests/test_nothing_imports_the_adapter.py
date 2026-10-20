@@ -274,7 +274,7 @@ PERMANENT_IMPORTERS = {
     # inside the functions that build a particle's block. Frozen build:
     # `kika.ace.model_adapter`, in kika-api.spec's hiddenimports, imports
     # `.encode` at module scope.
-    "kika/processing/photonuclear/tables.py",
+    "kika/ace/processing/photonuclear/tables.py",
     # The ENDF door of a thermal-scattering evaluation (2026-10-11): an MF7
     # tape becomes a model suite exactly as `kika/_read.py` makes one, inside
     # `read_tsl`. Frozen build: `kika.tsl.read` and `kika.endf.model_adapter`

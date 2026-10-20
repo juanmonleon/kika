@@ -4,7 +4,7 @@
 :class: note
 **Computes:** the photo-atomic ACE (A Compact ENDF) table of an element in the EPRDATA layout (photon interactions, atomic relaxation, Compton profiles and electron interactions) from its ENDF-6 (Evaluated Nuclear Data File) evaluations.
 **Applies to:** the photo-atomic (MF 23, MF 27), atomic-relaxation (MF 28) and electro-atomic (MF 23, MF 26) sublibraries of one element.
-**Entry points:** {py:func}`kika.endf.process_photoatomic`, {py:meth}`kika.endf.PhotoatomicProcessing.write_ace`, {py:func}`kika.processing.photoatomic.photoatomicTable`.
+**Entry points:** {py:func}`kika.endf.process_photoatomic`, {py:meth}`kika.endf.PhotoatomicProcessing.write_ace`, {py:func}`kika.ace.processing.photoatomic.photoatomicTable`.
 **Status:** experimental.
 ```
 
@@ -254,7 +254,7 @@ population-weighted mean.
 
 - **Union grid and steps.** A repeated edge, a table opening on a step, and lin-lin
   values between nodes
-  (`kika/processing/tests/test_photoatomic_tables.py::test_union_repeats_edges_and_opens_tables_on_steps`).
+  (`kika/ace/tests/test_photoatomic_tables.py::test_union_repeats_edges_and_opens_tables_on_steps`).
 - **Log-log refinement.** The refined grid reads log-log within $10^{-3}$ of the lin-lin
   data, keeping every node (`::test_the_grid_reads_log_log_within_the_tolerance`).
 - **Compton mean.** The incoherent mean equals an adaptive quadrature to $10^{-9}$
@@ -286,7 +286,7 @@ population-weighted mean.
   (`kika/processing/tests/test_process_photoatomic.py::test_hydrogen_agrees_with_eprdata25`),
   iron and lead (`test_photoatomic_tables.py::test_blocks_agree_with_eprdata25`), and the
   electron blocks of iron and lead
-  (`kika/processing/tests/test_photoatomic_electrons.py`), when eprdata25 is present.
+  (`kika/ace/tests/test_photoatomic_electrons.py`), when eprdata25 is present.
 - **Heating against OpenMC's analog heating.** OpenMC 0.16.0, LED electrons, a point source
   in a sphere of three mean free paths of water, iron or lead, at 5 keV (iron) and 20 keV,
   100 keV, 1 MeV and 10 MeV, $2\cdot10^5$ photons ($5\cdot10^4$ at 10 MeV); the track-length
@@ -335,14 +335,14 @@ for which electrons.
 
 ## Implementation
 
-- {py:mod}`kika.processing.photoatomic.tables`: grid, cross-sections, form factors,
+- {py:mod}`kika.ace.processing.photoatomic.tables`: grid, cross-sections, form factors,
   relaxation, fluorescence and heating numbers, Compton shells, and the header
-  ({py:func}`~kika.processing.photoatomic.photoatomicTable`).
-- {py:mod}`kika.processing.photoatomic.compton`: the BMM table and its matching to the
+  ({py:func}`~kika.ace.processing.photoatomic.photoatomicTable`).
+- {py:mod}`kika.ace.processing.photoatomic.compton`: the BMM table and its matching to the
   subshells. The data file is `data/bmm_compton_profiles.npz`, regenerated from NJOY3's
   transcription by `data/make_bmm_table.py`.
-- {py:mod}`kika.processing.photoatomic.electrons`: the electron blocks.
-- {py:mod}`kika.processing.photoatomic.process`: the entry point and writing.
+- {py:mod}`kika.ace.processing.photoatomic.electrons`: the electron blocks.
+- {py:mod}`kika.ace.processing.photoatomic.process`: the entry point and writing.
 - `kika/ace/encoders/photoatomic.py`: the layout ({doc}`../formats/ace`).
 - `kika/endf/model_adapter/photoatomic.py` and `kika/gnds/photoatomic.py`: the three
   sublibraries in the model.

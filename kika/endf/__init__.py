@@ -24,7 +24,7 @@ from .reconstruction import EndfReconstruction, ReconstructedTable, reconstruct_
 from .process import (PROCESSING_REJECTION_CATEGORIES, EndfProcessing, ProcessingOutputError, ProcessingPlan,
                       StageReport, dosimetry_ace, inspect_endf_processing, photonuclear_ace, process_endf,
                       process_gnds)
-from kika.processing.photoatomic.process import PhotoatomicProcessing, process_photoatomic
+from kika.ace.processing.photoatomic.process import PhotoatomicProcessing, process_photoatomic
 from .remote import (
     fetch_endf,
     download_endf,
