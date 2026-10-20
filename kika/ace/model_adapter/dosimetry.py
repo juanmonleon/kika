@@ -17,6 +17,7 @@ What goes in, in this order (the order ACER writes MF 3 then MF 10):
    tallies ask for (dpa from MT 444, helium from MT 207); ACER has them only
    when the PENDF went through HEATR and GASPR first.
 3. **Production cross sections**, numbered ``MT + 1000·(10 + LFS)``:
+
    - MF 10 as the evaluation tabulates it, with its own interpolation laws
      (exact, and what ACER copies);
    - MF 9, which ACER ignores: the multiplicity times the reaction's processed

@@ -75,9 +75,10 @@ def read_header(header, lines, debug=False):
             matid_str = line2[70:].strip()
 
             # Use a regular expression to match 'mat' followed by optional whitespace and then 3 or 4 digits
-            match = re.fullmatch(r'mat\s*(\d{3,4})', matid_str)
+            match = re.fullmatch(r'mat\s*(\d{1,5})', matid_str)
             if match:
                 header.matid = int(match.group(1))
+                header.mat_packed = not re.search(r'mat\s', matid_str)
             else:
                 # If the format doesn't match, set matid to None or handle the error as needed
                 header.matid = None
@@ -166,6 +167,8 @@ def read_header(header, lines, debug=False):
                     za = int(za_str) if za_str else 0
                     awr = float(awr_str) if awr_str else 0.0
                     izaw.append((za, awr))
+                    if i == 0 and j == 0 and "." in awr_str:
+                        header.izaw_decimals = len(awr_str) - awr_str.index(".") - 1
     
     header.izaw_array = izaw
     

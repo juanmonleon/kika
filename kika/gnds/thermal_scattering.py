@@ -238,6 +238,7 @@ def _writeAtom(parent: ET.Element, atom: ScatteringAtom, report, where) -> None:
     _wrappedXYs1d(element, "T_effective", atom.T_effective, report, here)
 
 
+@writes("doubleDifferentialForm", "coherentPhotonScattering", "incoherentPhotonScattering")
 @writes("coherentElasticForm", "S_table")
 @writes("doubleDifferentialForm", "thermalNeutronScatteringLaw_coherentElastic",
         "thermalNeutronScatteringLaw_incoherentElastic",
@@ -251,6 +252,10 @@ def writeDoubleDifferentialCrossSection(parent: ET.Element, ddcs, report: Conver
     container = ET.SubElement(parent, "doubleDifferentialCrossSection")
     for label, form in ddcs.items():
         here = f"{where} doubleDifferentialCrossSection[{label!r}]"
+        from .photoatomic import PHOTON_FORMS, writePhotonForm
+        if isinstance(form, PHOTON_FORMS):
+            writePhotonForm(container, label, form, report, here)
+            continue
         if not isinstance(form, (CoherentElastic, IncoherentElastic, IncoherentInelastic)):
             report.unsupportedNode(f"{here}: kika's writer has no serialisation for a "
                                    f"{type(form).__name__}")
@@ -340,6 +345,7 @@ def _readAtom(element: ET.Element, resolve, report, where) -> Optional[Scatterin
     )
 
 
+@reads("doubleDifferentialForm", "coherentPhotonScattering", "incoherentPhotonScattering")
 @reads("coherentElasticForm", "S_table")
 @reads("doubleDifferentialForm", "thermalNeutronScatteringLaw_coherentElastic",
        "thermalNeutronScatteringLaw_incoherentElastic",
@@ -382,10 +388,13 @@ def readDoubleDifferentialCrossSection(element: ET.Element, path: str, resolve,
                     calculatedAtThermal=bool(_boolean(child, "calculatedAtThermal")),
                     incoherentApproximation=True if approximation is None else approximation,
                     **common)
+            elif child.tag in ("coherentPhotonScattering", "incoherentPhotonScattering"):
+                from .photoatomic import readPhotonForm
+                form = readPhotonForm(child, resolve, label)
             else:
                 report.unsupportedNode(
-                    f"{here}/{child.tag}: a double-differential form that is not the "
-                    f"thermal scattering law; kika reads only the three TNSL forms")
+                    f"{here}/{child.tag}: a double-differential form kika does not read "
+                    f"(it reads the three TNSL forms and the two photon-scattering ones)")
                 continue
         except (ValueError, KeyError) as exc:
             report.unsupportedNode(f"{here}/{child.tag}: {exc}")

@@ -23,6 +23,7 @@ from .inventory import TapeInventory, tape_inventory
 from .reconstruction import EndfReconstruction, ReconstructedTable, reconstruct_endf
 from .process import (PROCESSING_REJECTION_CATEGORIES, EndfProcessing, ProcessingOutputError, ProcessingPlan,
                       StageReport, dosimetry_ace, inspect_endf_processing, process_endf, process_gnds)
+from kika.processing.photoatomic.process import PhotoatomicProcessing, process_photoatomic
 from .remote import (
     fetch_endf,
     download_endf,
@@ -57,6 +58,8 @@ __all__ = [
     # Staged processing: reconstruction, Doppler, URR tables (NJOY RECONR/BROADR/PURR)
     "process_endf",
     "dosimetry_ace",
+    "process_photoatomic",
+    "PhotoatomicProcessing",
     "process_gnds",
     "inspect_endf_processing",
     "ProcessingPlan",

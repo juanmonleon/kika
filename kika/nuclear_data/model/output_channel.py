@@ -111,6 +111,21 @@ class Q:
         return self.value is not None
 
 
+@dataclass(repr=False)
+class AverageProductEnergy(Component):
+    """§17.2.1 ``averageProductEnergy``: the product's mean outgoing energy, by style label.
+
+    What an electro-atomic evaluation states for the incident electron of
+    excitation and bremsstrahlung (ENDF-6 §26 LAW=8 gives the energy it loses,
+    ET(E); the mean energy it keeps is E − ET, as FUDGE writes it).
+    """
+
+    gndsNodeName: ClassVar[str] = "averageProductEnergy"
+
+    def __repr__(self) -> str:
+        return f"AverageProductEnergy({ {k: type(v).__name__ for k, v in self.forms.items()} })"
+
+
 @dataclass(init=False, repr=False)
 class Multiplicity(Component):
     """§17.3. How many of a product come out.
@@ -282,6 +297,9 @@ class Product:
     multiplicity: Optional[Multiplicity] = None
     distribution: Optional[object] = None
     outputChannel: Optional["OutputChannel"] = None  # breakup or decay
+    #: §17.2.1 ``averageProductEnergy`` (:class:`AverageProductEnergy`), when
+    #: the evaluation states the mean outgoing energy instead of a distribution.
+    averageProductEnergy: Optional["AverageProductEnergy"] = None
     #: Not a GNDS node. A distribution decoded from ENDF MF4 needs LTT, LI, LCT
     #: and NM to be written back, and those belong to the MF4 section rather
     #: than to the reaction — MF3 and MF4 carry separate headers.

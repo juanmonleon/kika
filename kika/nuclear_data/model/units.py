@@ -112,6 +112,9 @@ EXTRA_UNITS: Dict[str, str] = {
     "rad": "plane angle",
     "amu": "atomic mass unit",
     "g": "mass",
+    # The momentum-transfer abscissa x = sin(theta/2)/lambda of the photo-atomic
+    # form factors, in 1/Ang (ENDF-6 §27, and FUDGE's GNDS).
+    "Ang": "length (angstrom)",
 }
 
 _KNOWN = set(SI_UNITS) | set(DERIVED_SI_UNITS) | set(FUNDAMENTAL_CONSTANTS) | set(EXTRA_UNITS)
@@ -123,6 +126,7 @@ _KNOWN = set(SI_UNITS) | set(DERIVED_SI_UNITS) | set(FUNDAMENTAL_CONSTANTS) | se
 #: the SI base symbol even though the prefix belongs to the gramme.
 _ALIASES: Dict[str, tuple[float, str]] = {
     "g": (1e-3, "kg"),
+    "Ang": (1e-10, "m"),
 }
 
 _SYMBOL = re.compile(r"[A-Za-z][A-Za-z0-9]*")

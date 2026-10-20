@@ -105,7 +105,8 @@ class _DistributionReader:
         self.report.unsupportedNode(f"{path}/{tag}: {reason}")
 
     @reads("distributionForm", "angularTwoBody", "unspecified", "branching3d",
-           "thermalNeutronScatteringLaw")
+           "thermalNeutronScatteringLaw", "coherentPhotonScattering",
+           "incoherentPhotonScattering")
     def read(self, element: ET.Element, path: str) -> Distribution:
         here = f"{path}/distribution"
         distribution = Distribution()
@@ -136,6 +137,14 @@ class _DistributionReader:
                 from kika.nuclear_data.model import ThermalNeutronScatteringLaw
                 form = ThermalNeutronScatteringLaw(
                     href=child.attrib.get("href", ""), label=label)
+            elif child.tag in ("coherentPhotonScattering", "incoherentPhotonScattering"):
+                # The scattered photon's link to its reaction's
+                # doubleDifferentialCrossSection form (photo-atomic, F2b).
+                from kika.nuclear_data.model import (CoherentPhotonScatteringLink,
+                                                     IncoherentPhotonScatteringLink)
+                link = (CoherentPhotonScatteringLink if child.tag == "coherentPhotonScattering"
+                        else IncoherentPhotonScatteringLink)
+                form = link(href=child.attrib.get("href", ""), label=label)
             elif child.tag == "branching3d":
                 # Two attributes and no content (gnds.xsd:1816-1819). Read so
                 # the node survives a round trip; **not** resolved against the

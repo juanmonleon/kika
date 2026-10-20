@@ -286,6 +286,13 @@ class _SuiteReader:
             pops.add(self.readParticle(particle))
         for particle in element.iter("baryon"):
             pops.add(self.readParticle(particle))
+        for particle in element.iter("lepton"):
+            # The electron and positron of a photo- or electro-atomic suite.
+            from kika.nuclear_data.model import Lepton
+            base = self.readParticle(particle)
+            pops.add(Lepton(id=base.id, mass=base.mass, spin=base.spin, parity=base.parity,
+                            charge=base.charge, halflife=base.halflife, decayData=base.decayData,
+                            generation=particle.attrib.get("generation", "electronic")))
         for particle in element.iter("unorthodox"):
             # A thermal-scattering target (roadmap E4b): mass and charge only.
             from kika.nuclear_data.model import Unorthodox
@@ -297,6 +304,13 @@ class _SuiteReader:
             ))
         for chemicalElement in element.iter("chemicalElement"):
             Z = int(chemicalElement.attrib["Z"])
+            atomic = chemicalElement.find("atomic")
+            if atomic is not None or chemicalElement.find("isotopes") is None:
+                # The element itself is the data: its atomic relaxation, or the
+                # target of a photo-atomic suite (FUDGE writes it bare).
+                from .photoatomic import readChemicalElement
+                element_ = readChemicalElement(chemicalElement, self.readDecayData)
+                pops.chemicalElements[element_.symbol] = element_
             for isotope in chemicalElement.iter("isotope"):
                 A = int(isotope.attrib["A"])
                 for nuclide in isotope.iter("nuclide"):

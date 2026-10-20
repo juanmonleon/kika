@@ -44,6 +44,8 @@ def write_header(header):
             # Position 74 is index 73, so need 73 characters before mat
             line2 = f"{comment}   "  # Add 3 spaces after comment to reach position 74
             mat_str = f"mat{header.matid:4d}"
+            if getattr(header, "mat_packed", False):
+                line2, mat_str = comment, f"{'mat' + str(header.matid):>10}"
             line2 += mat_str
         else:
             line2 = comment
@@ -94,8 +96,9 @@ def write_header(header):
                     za, awr = header.izaw_array[idx]
                 else:
                     za, awr = 0, 0.0
-                # Fortran 4(I7,F11.0): F11.0 always prints the point ("0.")
-                line += f"{za:7d}{awr:10.0f}."
+                # Fortran 4(I7,F11.d): F11.0 always prints the point ("0.")
+                decimals = getattr(header, "izaw_decimals", 0) or 0
+                line += f"{za:7d}{awr:10.0f}." if decimals == 0 else f"{za:7d}{awr:11.{decimals}f}"
             result.append(line)
     
     # Format NXS array (16 integers over 2 lines)

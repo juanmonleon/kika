@@ -3,12 +3,13 @@
 ```{admonition} At a glance
 :class: note
 **Reads:** continuous-energy neutron ACE tables (legacy and 2.0.1 headers) block by
-block, and photo-atomic tables.
+block, photo-atomic tables (MCPLIB and EPRDATA) and dosimetry tables.
 
 **Writes:** an ACE table from its parsed object and its `xsdir` line; a neutron table
 from a processed model at one temperature, so from kika's own processing of an ENDF or
 GNDS evaluation, from an OpenMC file and from each sample of a perturbation run, without
-NJOY; and a thermal scattering table (`.t`).
+NJOY; a thermal scattering table (`.t`); a photo-atomic EPRDATA table (`.p`) from the
+three atomic evaluations of an element; and a dosimetry table (`.y`).
 
 **Into:** the parse layer's `Ace` object, and from it the canonical model: cross-sections,
 Q-values, the secondary neutrons with their angular and energy distributions and
@@ -22,7 +23,8 @@ light charged particles and the unresolved-range probability tables (see
 ({py:func}`kika.endf.process_endf`, {py:func}`kika.gnds.process_gnds`),
 `AceOptions(engine="kika")` of {py:func}`kika.sampling.model_perturbation.perturbFromModel`,
 {py:func}`kika.tsl.ace_writer.write_ace_thermal`, {py:func}`kika.ace.writers.write_ace.write_ace`,
-{py:func}`kika.ace.xsdir.add_xsdir_entry`.
+{py:func}`kika.ace.xsdir.add_xsdir_entry`, {py:func}`kika.endf.process_photoatomic`,
+{py:meth}`kika.endf.EndfProcessing.write_dosimetry_ace`, {py:func}`kika.endf.dosimetry_ace`.
 
 **Status:** stable (parse layer); experimental (model path).
 ```
@@ -58,7 +60,16 @@ What kika does with each block of a neutron table:
 | PTYPE, NTRO, IXS and the per-particle blocks (MTRH, TYRH, SIGH, ANDH, DLWH, HPD, YH) | read; an MT listed twice in MTRH keeps both entries, each with its own records | one product per particle and MTRH entry on its reaction (protons, deuterons, tritons, He-3, alphas): yield, frame and sampled distribution; HPD kept beside the suite; another particle type reported, not converted |
 
 A photo-atomic table (ZAID suffix ending in `p`) is parsed on its own, since its NXS and
-JXS mean other things, and returned as a `PhotoatomicAce`. It has no model path.
+JXS mean other things, and returned as a `PhotoatomicAce`: the photon blocks (ESZG, JINC,
+JCOH, JFLO, LHNM), the Compton profiles (LNEPS, LBEPS, LPIPS, LSWD, SWD) and, in the
+EPRDATA layout, the subshell and relaxation blocks (SUBSH, SPHEL, RELO, XPROB) decoded;
+the electron blocks (JXS 19-27) kept word for word, so the table writes back whole. It has
+no model path: a photo-atomic table is written from the evaluations
+({doc}`../processing/photoatomic-tables`), not read into the model.
+
+A dosimetry table (suffix ending in `y`) is returned as a `DosimetryAce`: its reactions,
+each with its own energies, cross-sections and interpolation table
+({doc}`../processing/dosimetry-tables`).
 
 A thermal-scattering table (`.NNt`, the ITIE, ITCE, ITXE and ITCA blocks THERMR and ACER
 write) is not a neutron table and is not read by `read_ace`. `kika.read` recognises it by
@@ -253,6 +264,21 @@ survives its union grid):
   once they change. A suite with no light charged products (one read from OpenMC) writes
   no particle blocks, and the report says so.
 
+**Photo-atomic tables.** `encode_photoatomic` lays a `PhotoatomicAce` out in the
+EPRDATA order of NXS(6) = 3 (ESZG, JINC, JCOH, JFLO, LHNM, LNEPS, LBEPS, LPIPS, LSWD, SWD,
+SUBSH, SPHEL, RELO, XPROB, then the electron blocks) and fills NXS and JXS, NXS(13) and
+NXS(14) included. Energies are in MeV; ESZG and SPHEL hold natural logarithms, a zero
+cross-section is written 0.0 and a value of exactly 1 as $\ln(1 + 10^{-13})$, since
+$\ln 1$ is the 0.0 that means zero. Every word is written as a real `%20.12E`, integers
+included, the IZAW pairs as `F11.7` and the MAT label packed (`mat100`), as the EPRDATA
+libraries write them. LSWD is 1-based from SWD, RELO 0-based from XPROB, and the EION
+header's block indices are absolute.
+
+**Dosimetry tables.** `encode_dosimetry` lays reactions out as NJOY2016's ACER does:
+MTR, LSIG (1-based from SIGD), and per reaction NR, NBT and INT as two arrays (NR = 0 for
+one lin-lin region), NE, energies in MeV and cross-sections; counts and locators as I20,
+the rest as E20.11.
+
 **The ZAID suffix.** A table kika writes from a suite that does not come from ACE takes
 the suffix of its temperature, the one kika's NJOY runs give (`.02c` at 293.6 K, `.06c`
 at 600 K; the temperature is matched within 1 K). A table from kika's processing then
@@ -312,7 +338,12 @@ header, another XSS length, the integer format switching on or off) falls back t
 
 ## What the round trip keeps and loses
 
-- **Parse layer, read and write:** the file comes back byte for byte.
+- **Parse layer, read and write:** the file comes back byte for byte, neutron, photo-atomic
+  and dosimetry tables alike.
+- **Photo-atomic and dosimetry tables, decoded and encoded again:** the words come back
+  as they were (to the 13 digits written), except a photo-atomic table whose LNEPS,
+  LBEPS and LPIPS span more words than NXS(5) states (25 tables of eprdata25), which is
+  written in the consistent layout.
 - **ACE → model → ACE:** every integer word of the neutron and photon blocks comes back
   equal and every real word within a few units in the last place (energies and
   densities pass through eV and back). The charged-particle blocks come back with them
@@ -344,6 +375,13 @@ counted as 0).
   object (`kika/ace/tests/test_write_ace_does_not_mutate.py`); a direct MT 18 update
   (`kika/ace/tests/test_update_cross_sections_direct_mt18.py`); photo-atomic tables
   (`kika/ace/tests/test_photoatomic_ace.py`).
+- Photo-atomic tables written: the encoder gives back the decoded words, every word a
+  12-digit real (`kika/ace/tests/test_photoatomic_writer.py::test_encode_gives_back_the_words`,
+  `::test_every_word_is_spelled_as_eprdata`); with LANL's eprdata25 present, each of its
+  100 tables comes back byte for byte read and written, and re-encoded where its layout is
+  consistent (`::test_eprdata25_writes_back`).
+- Dosimetry tables: NJOY's layout, the round trip, the refusal of interleaved NBT/INT and
+  the tables NJOY2016 ACER writes, byte for byte (`kika/ace/tests/test_dosimetry_ace.py`).
 - Reading a real Fe-56 table and writing it back returns the file byte for byte
   (`kika/ace/tests/test_ace_roundtrip.py::test_ace_roundtrip_is_byte_identical`; needs
   the table and `--deep`).
@@ -427,6 +465,10 @@ counted as 0).
   products; `encode.py`: `encodeAce`, the charged-particle blocks included;
   `kika/ace/classes/ixs_keys.py`: the keys of the IXS entries of a repeated MT.
 - `kika/ace/comparison/compare_ace.py`: block-by-block comparison of two tables.
+- Photo-atomic: `kika/ace/classes/photoatomic.py`, `kika/ace/parsers/parse_photoatomic.py`,
+  `kika/ace/encoders/photoatomic.py` (`encode_photoatomic`); dosimetry:
+  `kika/ace/classes/dosimetry.py`, `kika/ace/parsers/parse_dosimetry.py`,
+  `kika/ace/encoders/dosimetry.py` (`encode_dosimetry`), `kika/ace/model_adapter/dosimetry.py`.
 
 ## References
 

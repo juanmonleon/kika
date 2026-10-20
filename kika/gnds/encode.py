@@ -1037,7 +1037,8 @@ class _SuiteWriter:
                     node.attrib["label"] = label or "eval"
 
     @writes("distributionForm", "angularTwoBody", "unspecified", "branching3d",
-            "thermalNeutronScatteringLaw")
+            "thermalNeutronScatteringLaw", "coherentPhotonScattering",
+            "incoherentPhotonScattering")
     def distribution(self, parent: ET.Element, distribution, where: str) -> None:
         """§18. **An empty ``<distribution/>`` is deliberate and is reported.**
 
@@ -1120,6 +1121,8 @@ class _SuiteWriter:
         elif isinstance(form, ThermalNeutronScatteringLaw):
             _set(ET.SubElement(element, "thermalNeutronScatteringLaw"),
                  label=label, href=form.href)
+        elif type(form).__name__ in ("CoherentPhotonScatteringLink", "IncoherentPhotonScatteringLink"):
+            _set(ET.SubElement(element, form.gndsNodeName), label=label, href=form.href)
         else:
             self.report.unsupportedNode(
                 f"{where}: kika's writer has no serialisation for a "

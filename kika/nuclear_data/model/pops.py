@@ -18,7 +18,7 @@ from ..._constants import ATOMIC_NUMBER_TO_SYMBOL, SYMBOL_TO_ATOMIC_NUMBER
 from .quantities import PhysicalQuantity
 from .units import check_mass_unit
 
-__all__ = ["Particle", "Nuclide", "Unorthodox", "MetaStable", "PoPs", "pidFromZA",
+__all__ = ["Particle", "Nuclide", "Unorthodox", "Lepton", "MetaStable", "PoPs", "pidFromZA",
            "zaFromPid"]
 
 
@@ -93,6 +93,18 @@ class Unorthodox(Particle):
 
 
 @dataclass
+class Lepton(Particle):
+    """§12 ``lepton``: the electron and the positron of a photo- or electro-atomic suite.
+
+    A basic particle with the one attribute PoPs_LeptonType adds, its
+    ``generation`` (``"electronic"``), which the schema requires.
+    """
+
+    generation: str = "electronic"
+    gndsNodeName = "lepton"
+
+
+@dataclass
 class MetaStable:
     """§12 ``aliases/metaStable``: ``Am242_m1`` names the level ``Am242_e2``.
 
@@ -119,6 +131,10 @@ class PoPs:
     name: Optional[str] = None
     version: Optional[str] = None
     aliases: Dict[str, MetaStable] = field(default_factory=dict)
+    #: §12 ``chemicalElements`` that carry data of their own: the atomic
+    #: relaxation sublibrary (:class:`~kika.nuclear_data.model.photoatomic.ChemicalElement`),
+    #: by symbol. The isotopes and nuclides of an element stay in ``particles``.
+    chemicalElements: Dict[str, object] = field(default_factory=dict)
     styles: List[object] = field(default_factory=list)
     provenance: Optional[object] = None
     #: The conversion report of the read that built a standalone PoPs.

@@ -129,6 +129,17 @@ def parse_photoatomic(header, xss: np.ndarray, filename=None) -> PhotoatomicAce:
     if table.layout == "eprdata":
         _read_subshells(table, xss, nxs1, nxs, jxs, nes)
         table.unparsed_blocks = [name for j, name in _ELECTRON_BLOCKS.items() if jxs[j] > 0]
+        if jxs[19] > 0:
+            start = int(jxs[19])
+            table.electron_nxs = [int(v) for v in nxs[8:13]]
+            table.electron_words = np.array(_block(xss, nxs1, start, nxs1 - start + 1, "electron blocks"))
+            table.electron_jxs = [int(jxs[k]) - start if jxs[k] > 0 else None for k in range(19, 33)]
+            # The EION header names each subshell block by its XSS index: kept
+            # counted from the first electron word, so the blocks can move.
+            nssh = int(nxs[7])
+            if jxs[23] > 0 and nssh:
+                at = int(jxs[23]) - start + nssh
+                table.electron_words[at:at + 2 * nssh] -= start - 1
     return table
 
 

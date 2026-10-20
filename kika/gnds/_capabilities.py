@@ -196,6 +196,8 @@ _FAMILIES: Dict[str, Tuple[str, ...]] = {
     "averageProductData": ("style",),
     "branching1d": ("multiplicityForm",),
     "branching3d": ("distributionForm",),
+    "coherentPhotonScattering": ("distributionForm", "doubleDifferentialForm"),
+    "incoherentPhotonScattering": ("distributionForm", "doubleDifferentialForm"),
     "constant1d": ("function1d", "multiplicityForm"),
     "covarianceMatrix": ("covarianceForm",),
     "crossSectionReconstructed": ("style",),
@@ -553,12 +555,23 @@ _group("census0Forms", Coverage.UNSUPPORTED, 'distribution',
        "evaluations the census walked, so reading one would be untested "
        "code. This is the group nodes.py:149-156 names and deliberately "
        "keeps out of its own table, and it is the reason that table "
-       "cannot back this one: on these six it would say nothing rather "
-       "than no. coherentPhotonScattering is the import-time ratchet's "
+       "cannot back this one: on these it would say nothing rather "
+       "than no. CoulombPlusNuclearElastic is the import-time ratchet's "
        "guinea pig in test_nodes.py",
        """
-       forward CoulombPlusNuclearElastic coherentPhotonScattering
-       incoherentPhotonScattering
+       forward CoulombPlusNuclearElastic
+       """)
+
+_group("photoatomicScattering", Coverage.FULL, None,
+       "the photo-atomic forms (gnds.xsd:1144-1180: DDCS_CoherentPhotonScatteringType, "
+       "DDCS_IncoherentPhotonScatteringType) and the scattered photon's "
+       "links to them (gnds.xsd:1509-1510), read and written by "
+       "kika/gnds/photoatomic.py into model.photoatomic; ENDF MF27 reaches "
+       "the same model. FUDGE reads what kika writes back to the same numbers "
+       "(the photon plan's F2b, 100 ENDF/B-VIII.1 photoat evaluations)",
+       """
+       coherentPhotonScattering incoherentPhotonScattering formFactor
+       realAnomalousFactor imaginaryAnomalousFactor scatteringFactor
        """)
 
 _group("doubleDifferential", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSection',
@@ -569,15 +582,15 @@ _group("doubleDifferential", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSecti
        """
        RutherfordScattering
        nuclearAmplitudeExpansion nuclearPlusInterference nuclearTerm
-       realInterferenceTerm imaginaryInterferenceTerm formFactor
-       realAnomalousFactor imaginaryAnomalousFactor scatteringFactor
+       realInterferenceTerm imaginaryInterferenceTerm
        """)
 
 _group("doubleDifferentialContainer", Coverage.PARTIAL, None,
        "§14's container (gnds.xsd:1087-1096). Read and written since "
        "roadmap E4b for the three thermal-scattering forms "
-       "(kika/gnds/thermal_scattering.py); the photon and Coulomb forms "
-       "under it are reported by name and not read",
+       "(kika/gnds/thermal_scattering.py) and for the two photo-atomic ones "
+       "(kika/gnds/photoatomic.py); the Coulomb forms under it are reported "
+       "by name and not read",
        """
        doubleDifferentialCrossSection
        """)
@@ -668,19 +681,20 @@ _group("uncertaintyBackLink", Coverage.UNSUPPORTED, 'uncertainty',
        uncertainty
        """)
 
-_group("popsAtomic", Coverage.UNSUPPORTED, None,
-       "atomic-shell structure (gnds.xsd:599-622), outside kika's "
-       "minimal §12 particle model. The reader descends chemicalElement "
-       "-> isotope -> nuclide and never sees this branch, so nothing "
-       "reports it",
+_group("popsAtomic", Coverage.FULL, None,
+       "atomic-shell structure (gnds.xsd:425-447: PoPs_AtomicType, "
+       "PoPs_AtomicConfigurationType), the atomic relaxation sublibrary: "
+       "read into model.photoatomic.ChemicalElement and written back by "
+       "kika/gnds/photoatomic.py, the transitions through decay.py's "
+       "decayData. ENDF MF28 reaches the same model",
        """
        atomic configurations configuration bindingEnergy
        """)
 
-_group("popsOther", Coverage.UNSUPPORTED, None,
-       "the reader iterates gaugeBoson, baryon and unorthodox only "
-       "(gnds.xsd:486-489) and no distributed neutron evaluation carries "
-       "a lepton, so the branch is never entered and nothing reports it",
+_group("popsOther", Coverage.FULL, None,
+       "the electron and positron of a photo-atomic suite (gnds.xsd:"
+       "312, PoPs_LeptonType at 370-376), read into model.pops.Lepton and "
+       "written back with its generation",
        """
        leptons lepton
        """)

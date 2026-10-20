@@ -258,9 +258,10 @@ def test_the_registry_bounds_the_capability():
 def test_the_bridge_joined_something():
     """The empty-room guard for the bridge itself. Every assertion above is
     worthless if ``BRIDGED`` came out empty because a key shape changed."""
-    assert len(BRIDGED) == 52, (
+    assert len(BRIDGED) == 54, (
         f"{len(BRIDGED)} registry tags are schema nodes; the two tables were "
-        f"written against 42, and E4b's thermal-scattering nodes added ten"
+        f"written against 42, E4b's thermal-scattering nodes added ten and the "
+        f"photo-atomic forms (coherent/incoherentPhotonScattering) two"
     )
     # Twelve, and two more since roadmap A11: xs_pdf_cdf1d and energyAngularMC,
     # which FUDGE writes and its 6.10.0 schema does not declare.
@@ -339,10 +340,13 @@ def test_the_silent_drops_are_pinned_by_count():
     until roadmap E4b, and the one that was not honest went first:
     ``targetInfo`` hangs off ``<evaluated>``, which kika reads, and the style
     reader used to drop it. It is read and written now, and so is the
-    ``unorthodox`` particle a thermal-scattering target is.
+    ``unorthodox`` particle a thermal-scattering target is. The photon plan's
+    F2b took it from 17 to 11: the atomic relaxation data (``atomic``,
+    ``configurations``, ``configuration``, ``bindingEnergy``) and the leptons of
+    a photo-atomic suite are read and written.
     """
     silent = sorted(e.node for e in cap.capabilities().silent)
-    assert len(silent) == 17, silent
+    assert len(silent) == 11, silent
     assert "targetInfo" not in silent and "unorthodox" not in silent
     for node in silent:
         assert CAPABILITIES[node].why

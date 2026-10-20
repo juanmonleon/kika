@@ -35,6 +35,10 @@ def write_ace(ace: Ace, filepath: str = None, overwrite: bool = False) -> str:
         values = values[1:]
 
     is_int = unpack_int_words(getattr(ace, "xss_int_words", None), values.size)
+    real = getattr(ace, "xss_real_format", None)
+    if real is not None and is_int is None:
+        # A table type that spells every word as a real (EPRDATA: %20.12E)
+        is_int = np.zeros(values.size, dtype=bool)
     if is_int is not None:
         # The spelling of each word is known (read from the file, or set by an
         # encoder): integers as I20, reals as E20.11, and the last line as long
@@ -44,7 +48,7 @@ def write_ace(ace: Ace, filepath: str = None, overwrite: bool = False) -> str:
             # mode on Windows would turn every line end into CRLF.
             with open(filepath, 'w', newline='\n', buffering=1024*1024) as f:
                 f.write(write_header(ace.header) + "\n")
-                for text in format_xss_lines(values, is_int):
+                for text in format_xss_lines(values, is_int, real=real or _REAL):
                     f.write(text)
             return f"Success! ACE file written to: {filepath}"
         except Exception as e:
@@ -88,7 +92,8 @@ _ROW_FORMATS = ["".join(_INT if (code >> (3 - k)) & 1 else _REAL for k in range(
 _CHUNK_ROWS = 65536
 
 
-def format_xss_lines(values: np.ndarray, is_int: np.ndarray, first_row: int = 0, last_row: int = None):
+def format_xss_lines(values: np.ndarray, is_int: np.ndarray, first_row: int = 0, last_row: int = None,
+                     real: str = None):
     """XSS text with each word in its own spelling, in chunks of lines ending in newline.
 
     ``values`` is XSS(1..n) and ``is_int`` the matching bool mask. Rows
@@ -96,6 +101,8 @@ def format_xss_lines(values: np.ndarray, is_int: np.ndarray, first_row: int = 0,
     integer words are rounded first, so a count stays a count. The last line
     of the table holds only its remaining fields, unpadded.
     """
+    real = real or _REAL
+    rows = _ROW_FORMATS if real == _REAL else         ["".join(_INT if (code >> (3 - k)) & 1 else real for k in range(4)) for code in range(16)]
     n = values.size
     n_rows = -(-n // 4)
     last_row = n_rows - 1 if last_row is None else last_row
@@ -109,10 +116,10 @@ def format_xss_lines(values: np.ndarray, is_int: np.ndarray, first_row: int = 0,
             m = is_int[4 * a:4 * full_b]
             v[m] = np.rint(v[m])
             codes = (m.reshape(-1, 4) * np.array([8, 4, 2, 1])).sum(axis=1).tolist()
-            out = [_ROW_FORMATS[c] % tuple(row) for c, row in zip(codes, v.reshape(-1, 4).tolist())]
+            out = [rows[c] % tuple(row) for c, row in zip(codes, v.reshape(-1, 4).tolist())]
         if b > n_full:  # the partial last line
             tail = range(4 * n_full, n)
-            out.append("".join(_INT % round(values[k]) if is_int[k] else _REAL % values[k] for k in tail))
+            out.append("".join(_INT % round(values[k]) if is_int[k] else real % values[k] for k in tail))
         yield "\n".join(out) + "\n"
 
 

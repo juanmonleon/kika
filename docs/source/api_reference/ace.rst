@@ -38,3 +38,18 @@ kika.ace.writers.write_ace
 
 .. automodule:: kika.ace.writers.write_ace
    :members: write_ace, write_ace_checked
+
+Dosimetry tables
+----------------
+
+.. automodule:: kika.ace.classes.dosimetry
+   :members: DosimetryAce, DosimetryReaction, production_mt, split_production_mt
+
+.. automodule:: kika.ace.parsers.parse_dosimetry
+   :members: parse_dosimetry, is_dosimetry_extension
+
+.. automodule:: kika.ace.encoders.dosimetry
+   :members: encode_dosimetry
+
+.. automodule:: kika.ace.model_adapter.dosimetry
+   :members: dosimetryReactions, pointwiseDosimetryReactions
