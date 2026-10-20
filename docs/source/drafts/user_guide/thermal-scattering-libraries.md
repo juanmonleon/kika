@@ -21,7 +21,7 @@ cross-section and the outgoing-neutron tables instead.
 
 {py:func}`kika.tsl.index_tsl` lists every TSL material in a folder, grouped by compound,
 reading only headers (of an ENDF-6 tape, MF 1, MF 7/MT 2, the head of MF 7/MT 4 up to
-its first $eta$ block, and MF 7/MT 451 from the end of the file).
+its first $\beta$ block, and MF 7/MT 451 from the end of the file).
 
 ```python
 from kika.tsl import index_tsl

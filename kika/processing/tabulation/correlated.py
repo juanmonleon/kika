@@ -4,6 +4,10 @@
   its cumulative, ``r`` stays on the same outgoing grid, and the slope ``a``
   is the evaluator's when given and Kalbach's systematics otherwise
   (:mod:`.kalbach`).
+- **Kalbach-Mann with an incident photon**: the slope is Eq. 6.5 and the
+  shape Eq. 6.6 of ENDF-6 (:func:`.kalbach.photonKalbachDensity`), which no ACE
+  law 44 can hold, so it becomes an ``energyAngularMC`` (law 61): the same
+  outgoing spectrum, and at each E' the shape tabulated in mu.
 - **energyAngular** (MF6 LAW=1 LANG=1, NA > 0): at each (E, E') the series
   ``sum (2l+1)/2 f_l P_l(mu)``; ``f_0`` is the outgoing spectrum, and the
   angular table at E' is the series divided by it, tabulated in mu
@@ -23,10 +27,11 @@ import numpy as np
 
 from .angular import _linlinXY, muTable
 from .energy import mapFunction2d
-from .kalbach import kalbachSlope
-from .tables import TabulationOptions, pdfTable
+from .kalbach import kalbachSlope, photonKalbachDensity
+from .tables import TabulationOptions, pdfTable, refine
 
-__all__ = ["tabulateKalbachMann", "tabulateEnergyAngular", "tabulateAngularEnergy"]
+__all__ = ["tabulateKalbachMann", "tabulatePhotonKalbachMann", "tabulateEnergyAngular",
+           "tabulateAngularEnergy"]
 
 
 def _m():
@@ -43,7 +48,7 @@ def _flat(form):
 
 
 def tabulateKalbachMann(form, options: TabulationOptions, *, zaEmitted: int, zaTarget: int,
-                        discrete: Optional[Sequence[int]] = None):
+                        discrete: Optional[Sequence[int]] = None, zaProjectile: int = 1):
     """KalbachMann(f, r[, a]) → KalbachMann of tables, ``r`` and ``a`` on f's grid."""
     m = _m()
     rs, as_ = _flat(form.r), (_flat(form.a) if form.a is not None else None)
@@ -75,12 +80,49 @@ def tabulateKalbachMann(form, options: TabulationOptions, *, zaEmitted: int, zaT
         if as_ is not None:
             ax, ay, _ = _linlinXY(as_[k])
             return column(k, np.interp(table.xs, ax, ay))
-        return column(k, kalbachSlope(float(table.outerDomainValue), table.xs, zaEmitted, zaTarget))
+        return column(k, kalbachSlope(float(table.outerDomainValue), table.xs, zaEmitted, zaTarget,
+                                      zaProjectile))
 
     rForm = mapFunction2d(form.f, rAt)
     aForm = mapFunction2d(form.f, aAt)
     return m.KalbachMann(f=fTables, r=rForm, a=aForm, label="MonteCarlo",
                          productFrame=form.productFrame)
+
+
+def tabulatePhotonKalbachMann(form, options: TabulationOptions, *, zaEmitted: int, zaTarget: int,
+                              discrete: Optional[Sequence[int]] = None):
+    """KalbachMann(f, r[, a]) of an incident photon → energyAngularMC (ENDF-6 Eq. 6.5-6.6).
+
+    The outgoing spectrum and ``r`` are :func:`tabulateKalbachMann`'s, the slope
+    the evaluator's or Eq. 6.5; at each E' point the cosine table is Eq. 6.6
+    refined to the tabulation's tolerance.
+    """
+    m = _m()
+    km = tabulateKalbachMann(form, options, zaEmitted=zaEmitted, zaTarget=zaTarget, discrete=discrete,
+                             zaProjectile=0)
+    fTables, rTables, aTables = (list(_flat(km.f)), list(_flat(km.r)), list(_flat(km.a)))
+    seeds = np.linspace(-1.0, 1.0, max(3, options.angularSeeds))
+    angular = []
+    for table, r, a in zip(fTables, rTables, aTables):
+        tables = []
+        for eOut, rr, aa in zip(table.xs, r.ys, a.ys):
+            rr, aa = float(rr), float(aa)
+            if aa == 0.0 or rr == 0.0:
+                tables.append(_isotropicTable(float(eOut)))
+                continue
+            mu, p = refine(lambda q, rr=rr, aa=aa: photonKalbachDensity(q, rr, aa), seeds, options)
+            mu_table, _ = pdfTable(mu, p, options=options, outer=float(eOut), what="photon Kalbach angle")
+            tables.append(mu_table)
+        angular.append(m.XYs2d(function1ds=tables, outerDomainValue=table.outerDomainValue,
+                               interpolation=m.Interpolation.flat if table.interpolation == m.Interpolation.flat
+                               else m.Interpolation.linlin))
+    energyForm = km.f
+    xys = form.f
+    return m.EnergyAngularMC(energy=energyForm,
+                             energyAngular=m.XYs3d(function2ds=angular,
+                                                   interpolation=getattr(xys, "interpolation", m.Interpolation.linlin),
+                                                   interpolationQualifier=getattr(xys, "interpolationQualifier", None)),
+                             label="MonteCarlo", productFrame=form.productFrame)
 
 
 def _isotropicTable(outer):

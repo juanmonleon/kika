@@ -53,3 +53,15 @@ Dosimetry tables
 
 .. automodule:: kika.ace.model_adapter.dosimetry
    :members: dosimetryReactions, pointwiseDosimetryReactions
+
+Photonuclear tables
+-------------------
+
+.. automodule:: kika.ace.classes.photonuclear
+   :members: PhotonuclearAce, PhotonuclearReaction, ParticleProduction, ProductReaction, ProductYield
+
+.. automodule:: kika.ace.parsers.parse_photonuclear
+   :members: parse_photonuclear, is_photonuclear_extension
+
+.. automodule:: kika.ace.encoders.photonuclear
+   :members: encode_photonuclear

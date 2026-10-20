@@ -535,6 +535,19 @@ class _Kinematics:
     A: float               # target mass ratio
     Q: float               # the reaction's QI
     awp: float = 1.0       # emitted particle's mass ratio
+    photon: bool = False   # the projectile is a photon (else a neutron)
+
+    def boost(self, E):
+        """The centre of mass's kinetic energy per emitted particle, ``m_b v_cm²/2`` (eV), at ``E``.
+
+        A neutron: ``awp E/(A+1)²``. A photon, which brings momentum ``E/c`` and no
+        mass: ``½ awp m_n c² β²`` with ``β = E/(E + A m_n c²)``, exact for the
+        centre of mass's velocity.
+        """
+        if self.photon:
+            beta = np.asarray(E, dtype=float) / (np.asarray(E, dtype=float) + self.A * NEUTRON_REST_ENERGY)
+            return 0.5 * self.awp * NEUTRON_REST_ENERGY * beta * beta
+        return self.awp / (self.A + 1.0) ** 2 * E
 
 
 def _qAt(value, grid):
@@ -553,9 +566,9 @@ def _qAt(value, grid):
 
 
 def _cmToLab(grid, ecm, sqrtMu, k: _Kinematics):
-    """``⟨E'_lab⟩ = ⟨E'_cm⟩ + x E + 2√(xE)⟨√E'_cm μ⟩``, ``x = awp/(A+1)²``."""
-    x = k.awp / (k.A + 1.0) ** 2
-    return ecm + x * grid + 2.0 * np.sqrt(x * grid) * sqrtMu
+    """``⟨E'_lab⟩ = ⟨E'_cm⟩ + E_c + 2√E_c⟨√E'_cm μ⟩``, ``E_c = k.boost(E)`` (``awp E/(A+1)²`` for a neutron)."""
+    ec = k.boost(grid)
+    return ecm + ec + 2.0 * np.sqrt(ec) * sqrtMu
 
 
 def _meanMu(form, grid):
@@ -675,8 +688,8 @@ def _unitBaseCMMean(form, grid, k):
         width=(1-fraction)*widths[j]+fraction*widths[upper]
         mean=width*((1-fraction)*unitMean[j]+fraction*unitMean[upper])
         cross=np.sqrt(width)*((1-fraction)*unitCross[j]+fraction*unitCross[upper])
-        boost=k.awp/(k.A+1)**2
-        return mean+boost*query+2*np.sqrt(boost*query)*cross
+        boost=k.boost(query)
+        return mean+boost+2*np.sqrt(boost)*cross
     @lru_cache(maxsize=30000)
     def at(E, components=False):
         j=int(np.clip(np.searchsorted(energies,E,side="right")-1,0,len(energies)-1))
@@ -695,21 +708,21 @@ def _unitBaseCMMean(form, grid, k):
                 integral=_unitBaseIntegral(x,p,parameters[i] if kalbach else mus[i],nodes,ww,a,width,qa,qw,
                                            _isFlat(table),kalbach)
                 if not kalbach:break
-                error=2*np.sqrt(k.awp*max(E,0))/(k.A+1)*abs(integral-previous) if previous is not None else np.inf
+                error=(2*np.sqrt(k.boost(max(E,0))) if k.photon else 2*np.sqrt(k.awp*max(E,0))/(k.A+1))*abs(integral-previous) if previous is not None else np.inf
                 if error <= .001+1e-8*max(E,0):break
                 previous=integral
             else:raise ValueError("Kalbach cross-moment quadrature did not converge")
             cross+=weight*integral
             mean+=weight*(qa+qw*(means[i]-a)/width)
         if components:return mean,cross
-        boost=k.awp/(k.A+1)**2
-        return mean+boost*E+2*np.sqrt(boost*E)*cross
+        boost=k.boost(E)
+        return mean+boost+2*np.sqrt(boost)*cross
     lo=max(float(np.min(grid)),float(energies[0]));hi=min(float(np.max(grid)),float(energies[-1]))
     def held(query, first):
         source=float(np.nextafter(energies[0],-np.inf)) if first else float(energies[-1])
         mean,cross=at(source,True)
-        boost=k.awp/(k.A+1)**2
-        return mean+boost*query+2*np.sqrt(boost*query)*cross
+        boost=k.boost(query)
+        return mean+boost+2*np.sqrt(boost)*cross
     if hi<lo:return held(np.asarray(grid),bool(np.max(grid)<energies[0]))
     # An incident energy stated twice is a step (JEFF-4.0 B-11 MT16, two tables at
     # 20 MeV): each side is refined on its own, the left one up to the step's left

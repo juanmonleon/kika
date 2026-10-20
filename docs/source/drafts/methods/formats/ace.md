@@ -71,6 +71,13 @@ A dosimetry table (suffix ending in `y`) is returned as a `DosimetryAce`: its re
 each with its own energies, cross-sections and interpolation table
 ({doc}`../processing/dosimetry-tables`).
 
+A photonuclear table (suffix ending in `u`) is returned as a `PhotonuclearAce`: the grid,
+the total, nonelastic, elastic and heating arrays, the reactions with their Q values, and
+per emitted particle (IPT 1, 2, 9, 31-34) its production and heating blocks and, for each
+reaction, its yield record, angular record and law chain, read by the same readers as a
+neutron table's ANDH and DLWH. It has no model path either: a photonuclear table is
+written from the evaluation ({doc}`../processing/photonuclear-tables`).
+
 A thermal-scattering table (`.NNt`, the ITIE, ITCE, ITXE and ITCA blocks THERMR and ACER
 write) is not a neutron table and is not read by `read_ace`. `kika.read` recognises it by
 its name field (`h-h2o.80t`, `grph.72t`) and reads it, as OpenMC reads it, into a
