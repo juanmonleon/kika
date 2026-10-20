@@ -179,7 +179,8 @@ def prepare_rml(region, resonances, context, notes):
                 k2 = 0.; q = 0.; mode = 'unity'; radius = RadiusFunction(constant=1.); phase = RadiusFunction(constant=0.)
             else:
                 a, b = pair.particleA, pair.particleB
-                if not allowed(l,s,sg.spin):raise ValueError('invalid physical channel L/s/J coupling')
+                if not allowed(l,s,sg.spin):
+                    raise UnsupportedResonanceError('invalid physical channel L/s/J coupling',category='invalid-J')
                 if pair.effective or any(not math.isfinite(v) or v<=0 for v in (a.massRatio,b.massRatio)):
                     raise UnsupportedResonanceError('physical RML requires positive finite two-body masses')
                 if any(p.parity not in (-1,1) or not math.isfinite(p.charge) or p.charge<0

@@ -450,3 +450,12 @@ def test_external_repeated_energy_preserves_both_limits_and_tabulation_segments(
     np.testing.assert_allclose(left.ys[-1],prepared.evaluate(e[:1])[2][0],rtol=1e-13)
     np.testing.assert_allclose(right.ys[0],prepared.evaluate(e[1:2])[2][0],rtol=1e-13)
     assert max(result.verify_forms(result.forms).values()) <= 1.
+
+
+def test_a_physical_channel_j_no_coupling_reaches_is_invalid_j():
+    # An s-wave channel of channel spin 1 reaches J = 1 only.
+    source, ctx = rml_model()
+    source.resolved[0].formalism.spinGroups[0].spin = 3.
+    with pytest.raises(UnsupportedResonanceError,match='coupling') as raised:
+        prepare_resonances(source,ctx)
+    assert raised.value.category == 'invalid-J'

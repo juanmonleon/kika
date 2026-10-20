@@ -19,7 +19,7 @@ REJECTION_CATEGORIES = (
     "sum-without-graph",
     "incomplete-total-graph",
     "missing-radius-policy",
-    "invalid-J",                  # a URR spin J incompatible with the target spin and L
+    "invalid-J",                  # a resolved J no coupling of L and channel spin reaches
     # Physics the engine does not implement.
     "unsupported-physics",
     # Numerical limits and checks; never relaxed.

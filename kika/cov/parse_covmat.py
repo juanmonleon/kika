@@ -2062,9 +2062,11 @@ def write_covfil(
 
         # --- MF1 MT451: energy grid ---
         seq = 1
-        # HEAD: (ZA, AWR, ?, 0, -NGRP(?), 0)  — match NJOY convention
+        # HEAD: (ZA, AWR, 6, 0, -11, 0), as ERRORR writes it (errorr.f90 covout):
+        # L1 the ENDF format version, N1 = -11 the flag of an MF33/MF34 covariance
+        # tape, which COVR checks before it reads one.
         head = format_endf_data_line(
-            [za, awr, 6, 0, -ngrp, 0], mat, 1, 451, seq,
+            [za, awr, 6, 0, -11, 0], mat, 1, 451, seq,
             formats=[ENDF_FORMAT_FLOAT, ENDF_FORMAT_FLOAT,
                      ENDF_FORMAT_INT, ENDF_FORMAT_INT,
                      ENDF_FORMAT_INT, ENDF_FORMAT_INT],

@@ -241,7 +241,8 @@ def prepare_resonances(resonances, context, *, conversion_report=None, allow_emp
                     lower, upper = abs(group.L-channel_spin), group.L+channel_spin
                     allowed.update(lower + n for n in range(round(upper-lower)+1))
                 if spin not in allowed:
-                    raise ValueError("resonance J is incompatible with L and target spin")
+                    raise UnsupportedResonanceError("resonance J is incompatible with L and target spin",
+                                                    category="invalid-J")
                 partial_sum = res.neutronWidth + res.captureWidth + res.fissionWidth
                 # Zero is the model's unspecified GT default. Nonzero GT must agree:
                 # unresolved excess is competitive physics, never silently dropped.

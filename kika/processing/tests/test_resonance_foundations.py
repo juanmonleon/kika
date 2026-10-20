@@ -165,6 +165,15 @@ def test_invalid_resonance_rejected(field, value, pattern):
         prepare_resonances(source, NeutronContext(56., 0.))
 
 
+@pytest.mark.parametrize("l, spin", [(0, 1.5), (1, 2.5), (0, 0.)])
+def test_a_resolved_j_no_coupling_reaches_is_invalid_j(l, spin):
+    """With I = 0 the channel spin is 1/2 and J runs over |L-1/2|..L+1/2 only."""
+    source = model(l=l, levels=[Resonance(100., spin, .3, .1, .2, 0.)])
+    with pytest.raises(UnsupportedResonanceError, match="incompatible") as raised:
+        prepare_resonances(source, NeutronContext(56., 0.))
+    assert raised.value.category == "invalid-J"
+
+
 def test_hidden_competitive_metadata_rejected_even_with_equal_gt():
     source = model()
     source.provenance = SimpleNamespace(headerFields={"regions": [{"l_blocks": [{"lrx": 1, "qx": -1.}]}]})

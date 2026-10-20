@@ -262,7 +262,9 @@ def test_real_fe56_mf33_gendf_against_raw_reference_values():
 
     assert isinstance(covariance, CrossSectionCovariance)
     assert covariance.num_groups == 56
-    assert covariance.num_matrices == 150
+    # 150 blocks, plus MT 2 x MT 106 and MT 2 x MT 115, which state one entry each
+    # (about 1e-11): small, not zero, so kept.
+    assert covariance.num_matrices == 152
     assert covariance.metadata["awr"] == pytest.approx(55.45443)
     assert covariance.metadata["temperature"] == pytest.approx(600.0)
     np.testing.assert_allclose(
@@ -382,3 +384,14 @@ def test_project_to_grid_reads_an_unstated_class_as_relative():
     sigma = SimpleNamespace(energies=np.array([0.1, 100.0]), values=np.array([2.0, 2.0]))
     projected = covariance.project_to_grid(np.array([1.0, 10.0]), xs_source=sigma)
     assert projected[0, 0] == pytest.approx(0.04)  # 0.01 relative x (2 b)^2
+
+
+def test_a_written_covfil_carries_errorrs_tape_flag(tmp_path):
+    """MF1/MT451 HEAD as ERRORR writes it: L1 = 6 (the ENDF format), N1 = -11
+    (the flag of an MF33/MF34 covariance tape, which COVR checks)."""
+    path = tmp_path / "flag.gendf"
+    write_covfil(make_covariance(), path)
+    head = path.read_text().splitlines()[1]
+    assert head[70:75] == " 1451"
+    assert [int(head[22 + 11 * i:33 + 11 * i]) for i in range(4)] == [6, 0, -11, 0]
+    assert read_covfil(path).num_matrices == make_covariance().num_matrices

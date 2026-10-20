@@ -308,3 +308,10 @@ def test_a_negative_aj_whose_low_channel_spin_cannot_couple_takes_the_high_one()
     occupied=[g for g in prepared.regions[0].groups if g.levels]
     assert [(g.spin,g.channel_spin) for g in occupied]==[(3.,2.)]
     assert any('AJ=-3' in note and 'channel spin 2' in note for note in prepared.preparation_notes)
+
+
+def test_a_j_no_coupling_reaches_is_invalid_j():
+    # I = 0: the channel spin is 1/2, so an s-wave group has J = 1/2 only.
+    with pytest.raises(UnsupportedResonanceError,match='coupling') as raised:
+        prepare_resonances(rm_model(l=0,spin=1.5,channel_spin=.5),NeutronContext(56.,0.))
+    assert raised.value.category=='invalid-J'

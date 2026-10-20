@@ -118,7 +118,8 @@ def prepare_rm(region,resonances,context,notes):
                     choices={s0 for s0 in (low,high) if allowed(l,s0,j)}
                     if len(choices)!=1:raise UnsupportedResonanceError('ambiguous RM entrance channel spin')
                     s=choices.pop()
-            if s not in (low,high) or not allowed(l,s,j):raise ValueError('RM J/L/channel-spin coupling is invalid')
+            if s not in (low,high) or not allowed(l,s,j):
+                raise UnsupportedResonanceError('RM J/L/channel-spin coupling is invalid',category='invalid-J')
             if widths[gi]<0 and not f.reducedWidthAmplitudes:raise ValueError('negative radiative width')
             if not f.reducedWidthAmplitudes and widths[ni]<0 and sg.spins:raise ValueError('negative LRF3 neutron width')
             if energy==0 and widths[ni]!=0 and not f.reducedWidthAmplitudes:raise UnsupportedResonanceError('zero-energy RM neutron width reference')
