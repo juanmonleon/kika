@@ -1,4 +1,4 @@
-"""The ratio method (roadmap G4NDL §0bis, Fase 13): closure on a synthetic truth.
+"""The ratio method: closure on a synthetic truth.
 
 The truth is the Fe-56 micro-tape with a known smooth r(E) on σ and δa_l(E) added
 to f's Legendre coefficients;

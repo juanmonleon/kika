@@ -1,6 +1,6 @@
-"""The thermal scattering law through GNDS (ENDF-coverage roadmap E4b).
+"""The thermal scattering law through GNDS.
 
-ENDF MF7 → model is E4a (``kika/endf/model_adapter/thermal_scattering.py``);
+ENDF MF7 → model is ``kika/endf/model_adapter/thermal_scattering.py``;
 this is model → GNDS → model on the four committed TSL micro-tapes, which
 between them carry every form: coherent elastic (LTHR=1, 3), incoherent elastic
 (LTHR=2, 3) and incoherent inelastic with an SCT secondary atom (s-CH4).
@@ -184,7 +184,7 @@ def test_mf7_mt451_is_written_from_target_info_when_no_text_was_kept(micro_tsl_s
 
 
 # ----------------------------------------------------------------------
-# GNDS → ENDF (roadmap E4, with G1 of gnds_to_endf_plan.md)
+# GNDS → ENDF
 # ----------------------------------------------------------------------
 
 def _withoutFlags(suite):
@@ -222,7 +222,7 @@ _NOTES = {"bemetal_elastic": "MAT=26,ZA=4009", "jeff_be_elastic": "MAT=26,ZA=400
 
 def test_the_gnds_carries_fudges_mat_note(roundTrip, micro_tsl_tape):
     """FUDGE writes ``MAT=…,ZA=…`` on every TSL suite and cannot get back to ENDF
-    without both halves (roadmap T6)."""
+    without both halves."""
     suite, _, path = roundTrip
     assert _suiteNote(path) == _NOTES[Path(micro_tsl_tape).stem.removeprefix("micro_tsl_")]
 

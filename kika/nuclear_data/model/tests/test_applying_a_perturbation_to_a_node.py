@@ -20,9 +20,8 @@ by position alone, so two bin edges landing in one original interval came out
 in the wrong order and the table was no longer ascending -- an invalid TAB1,
 not merely a different one. Measured on this very tape with the Fe-56 MF33 grid
 of ``micro_fe56_mf33.endf``: 2 disordered insertions in MT1, 2 in MT102, 28 in
-MT2. Fixed there rather than reproduced here; ``library-gaps.md`` D31 carries
-the measurement still owed on a real PENDF, which is what the live pipeline
-actually feeds it.
+MT2. Fixed there rather than reproduced here; the measurement on a real
+PENDF, which is what the live pipeline actually feeds it, is still owed.
 """
 from __future__ import annotations
 

@@ -1,11 +1,10 @@
-"""Layer 1 travels with the model covariance, and the pre-flight reads it (phase C6).
+"""Layer 1 travels with the model covariance, and the pre-flight reads it.
 
 ``decodeCovarianceSuite`` runs :func:`kika.endf.check_covariances` and leaves
 each section's findings on its provenance; :mod:`kika.sampling.section_checks`
 traces a pre-flight finding on the assembled joint back to them. The case is
 the defect A of JEFF-4.0 MF34: an LB=5 LS=1 triangle in a cross-order block,
 harmless as stored and |rho| > 1 once kika mirrors it.
-Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
 """
 from __future__ import annotations
 

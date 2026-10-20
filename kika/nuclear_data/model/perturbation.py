@@ -1329,12 +1329,12 @@ def _asBandMap(bands) -> "dict":
             for index, (lo, hi) in enumerate(bands)}
 
 
-#: What a run says about a band whose two edges are the same energy (PD-1).
+#: What a run says about a band whose two edges are the same energy.
 POINT_BAND_NOTE = "covariance stated at a point, not over a band"
 
 
 def _isPoint(lo: float, hi: float) -> bool:
-    """A band stated at one incident energy: ``E1 == E2`` (PD-1)."""
+    """A band stated at one incident energy: ``E1 == E2``."""
     return lo == hi
 
 
@@ -1344,13 +1344,13 @@ def _bandOf(value: float, bands: "dict"):
     A band is ``[E1, E2)``, and the last one is closed at the top. **A band
     stated at a point** -- ``E1 == E2``, which B-VII.1 Pu-240 does for its only
     band and JEFF-4.0 U-238 for its first -- contains exactly the node at that
-    energy and nothing else (decision PD-1, 2026-10-08), and it is looked up
+    energy and nothing else (since 2026-10-08), and it is looked up
     **first**: where a point band and a range band both start at the same
     energy (JEFF-4.0 U-238: ``[1e-5, 1e-5]`` then ``[1e-5, 1e3)``), the node
     at that energy is the one thing the point band is a statement about, so it
     takes it.
 
-    Before PD-1 the half-open test matched a point band only when it happened
+    Before 2026-10-08 the half-open test matched a point band only when it happened
     to be the last band (``value == hi`` closes the last one): B-VII.1
     Pu-240's ``[0.5, 0.5]`` MeV was perturbed by accident of position, and
     JEFF-4.0 U-238's band 0 perturbed **nothing**, silently -- its node went to
@@ -1384,7 +1384,7 @@ def _outerStepPoints(bands, *, shoulder=SPECTRUM_OUTER_SHOULDER) -> List[float]:
     * **Below every lower edge**, ``E1 (1 - s)``: the node at ``E1`` is in the
       band and the one below is not. This is all the applier did before
       2026-10-08.
-    * **At every upper edge** (PF-2, decision PD-2). If the node at ``E2`` is
+    * **At every upper edge**. If the node at ``E2`` is
       in the band -- the last band, closed at the top, or a point band -- the
       step is just above it, ``E2 (1 + s)``. If it is not (half-open), the
       step is just below it, ``E2 (1 - s)``. Where the next requested band
@@ -1393,7 +1393,7 @@ def _outerStepPoints(bands, *, shoulder=SPECTRUM_OUTER_SHOULDER) -> List[float]:
       whole-band request on a tape whose bands tile its incident range -- get
       exactly the nodes they got before.
 
-    **PF-2 measured** (seed 11, sample 0, before this point was inserted):
+    **The leak above a band, measured** (seed 11, sample 0, before this point was inserted):
     ENDF/B-VIII.1 U-233 states one band ``[1e-5 eV, 5 MeV]`` on an MF5 grid to
     20 MeV with the next node at 6 MeV. The node at 5 MeV moves its group
     probabilities by up to 63 %, and the unperturbed node at 6 MeV did not stop
@@ -1434,7 +1434,7 @@ def _insertOuterShoulders(form, bands, *, shoulder=SPECTRUM_OUTER_SHOULDER,
     # both committed tapes: band 0 starts at the first incident energy. The
     # ENDF twin skips ``bands[1:]`` instead, which is right only because it is
     # always handed the whole band list.
-    # A point band with no node at its point perturbs nothing (PD-1), so it
+    # A point band with no node at its point perturbs nothing, so it
     # has no step to shoulder either.
     nodes = set(float(v) for v in form.outerDomainValues)
     stepping = {key: (lo, hi) for key, (lo, hi) in bands.items()
@@ -1469,7 +1469,7 @@ def _refineAndScale(xs, ys, boundaries, ratios, *, laws=None, maxPoints=None,
     absorbs the difference into a scalar, so the run completes, the file is
     valid, and the perturbation is not the one that was computed.
 
-    **An inserted point is valued under its panel's own law** (PD-6,
+    **An inserted point is valued under its panel's own law** (since
     2026-10-08), with :func:`kika.algebra.evaluate`, and inherits that law
     (:func:`kika.algebra.laws_on_refinement`): a point inside a log-lin or
     log-log panel cuts it into two panels of the same law, which is exact.
@@ -1479,7 +1479,7 @@ def _refineAndScale(xs, ys, boundaries, ratios, *, laws=None, maxPoints=None,
     Scaling both ends of a panel by one factor keeps it the same law, so every
     panel away from a step stays exact under all five laws.
 
-    **The outer edges of the grid step too** (PF-3, decision PD-2). Outside
+    **The outer edges of the grid step too**. Outside
     ``[g_0, g_N]`` the factor is 1, so where the table reaches past the grid
     the factor steps from ``r_0`` (or ``r_{N-1}``) to 1 there. The edges were
     not stepping candidates, so on a table with no node at ``g_N`` the panel
@@ -1769,7 +1769,7 @@ def applySpectrumFactors(energyForm, bands, boundariesByBand, ratiosFor, *,
 
 
 def _describePointBands(bands, energyForm) -> dict:
-    """``{key: record}`` for every band stated at a point (PD-1), by name.
+    """``{key: record}`` for every band stated at a point, by name.
 
     The record says what the run did with it -- the one MF5 incident node at
     exactly ``E1``, or nothing when the evaluated grid has no node there -- so

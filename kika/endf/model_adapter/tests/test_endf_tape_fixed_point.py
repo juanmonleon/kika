@@ -1,8 +1,7 @@
-"""``read → suite → write → read`` returns the same model. The §2.8 gate.
+"""``read → suite → write → read`` returns the same model.
 
 **This is the gate the whole-file writer was built against, and it is not byte
-identity** (decided 2026-08-13, owner Juan; ``docs/library/gnds_endf_conflicts.md``
-§2.8). Byte identity against the source tape would fail on choices that carry no
+identity** (decided 2026-08-13). Byte identity against the source tape would fail on choices that carry no
 information — where a field is padded, whether ``1e-5`` is written ``1.0-5``,
 how many LB=5 records one covariance block is split into — and chasing those is
 a different job from being correct. What the fixed point catches is the thing
@@ -151,7 +150,7 @@ def test_the_report_names_every_file_that_did_not_survive(roundTripped):
                      report.unsupported + report.warnings)
 
     # The tape label used to be the first thing on this list: `read_endf`
-    # dropped the first line and the writer invented one. Since roadmap T1 the
+    # dropped the first line and the writer invented one. Now the
     # line is kept and written back, so it is *not* on the list any more; the
     # verbatim check is `test_the_tape_identification_record_comes_back`.
     assert "tape identification record" not in said
@@ -166,7 +165,7 @@ def test_the_report_names_every_file_that_did_not_survive(roundTripped):
 
 
 def test_the_tape_identification_record_comes_back(roundTripped, micro_tape):
-    """The first line, byte for byte (roadmap T1): the libraries disagree on its ID columns."""
+    """The first line, byte for byte: the libraries disagree on its ID columns."""
     _before, _after, _report, out = roundTripped
     source = micro_tape.read_text().splitlines()[0]
     assert out.read_text().splitlines()[0] == source
@@ -352,7 +351,7 @@ def test_the_products_mf6_builds_survive_the_trip(micro_mf6_tape, tmp_path):
 
 
 def test_a_tape_with_mf32_comes_back_with_it(micro_mf32_tape, tmp_path):
-    """§25.3 parameter covariances survive the trip (ENDF-coverage roadmap E1).
+    """§25.3 parameter covariances survive the trip.
 
     This used to pin the opposite: MF32 decoded and had no encoder, so the
     written tape had none and the fixed point could not see it, the covariances

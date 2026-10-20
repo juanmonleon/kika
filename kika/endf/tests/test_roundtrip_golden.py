@@ -1,6 +1,6 @@
 """Tier-1 golden: the ENDF read-write spine, byte for byte.
 
-Phase 0 of the GNDS roadmap needs one test that answers "does kika give back
+kika needs one test that answers "does kika give back
 what it was given". Everything later — the canonical model, the layer
 inversion, moving the calculations onto it — may change internals only if this
 stays put.

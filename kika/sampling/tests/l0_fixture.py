@@ -1,8 +1,7 @@
 """A covariance-only Fe-56 tape whose MF34 states L=0, built on demand.
 
 Of the evaluated libraries to hand only U-235 and U-238 of ENDF/B-VIII.0 and
-VIII.1 state L=0 in MF34 (scanned 2026-10-05 with
-``kika-workspace/kika_dev/sampling/checks/scan_mf34_candidates.py``), and theirs
+VIII.1 state L=0 in MF34 (scanned 2026-10-05), and theirs
 is a placeholder: L0xL0 one bin of zero variance, L0xLl noise at 2e-19. That
 tape is committed as ``micro_u238_mf34_l0.endf`` and tests the plumbing; it
 cannot test a cross term that is really there. This project's ``_a0cross``

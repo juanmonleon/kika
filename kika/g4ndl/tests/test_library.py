@@ -1,6 +1,6 @@
 """Phase 1: names, bytes, tokens and the library index.
 
-Acceptance (roadmap §5 Fase 1): text and zlib give the same tokens; damaged
+Acceptance: text and zlib give the same tokens; damaged
 and truncated input is detected; an isotope is found only under its own name;
 ``JENDL_HE`` is never mistaken for the elastic data.
 """

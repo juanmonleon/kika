@@ -1,21 +1,21 @@
-"""PD-1 and PD-2: a PFNS factor acts where MF35 states it, and stops there.
+"""A PFNS factor acts where MF35 states it, and stops there.
 
 Three places where the model applier used to perturb more, or less, than the
-covariance covers -- each decided by Juan on 2026-10-08 and each fixed on the
-model only (the legacy applier is the fixed reference, PD-4):
+covariance covers -- each decided on 2026-10-08 and each fixed on the
+model only (the legacy applier is the fixed reference):
 
-* **PD-1, a band stated at a point** (``E1 == E2``). B-VII.1 Pu-240 states its
+* **A band stated at a point** (``E1 == E2``). B-VII.1 Pu-240 states its
   only band as ``[0.5, 0.5]`` MeV and JEFF-4.0 U-238 its first as
   ``[1e-5, 1e-5]`` eV. The half-open band test matched such a band only when it
   was the last one, so U-238's band 0 perturbed **nothing**, silently. Now the
   MF5 node at exactly ``E1`` is perturbed, nothing around it, and the run says
   "covariance stated at a point, not over a band".
-* **PF-2, the factor leaking above a band's top.** Where no band starts at a
+* **The factor leaking above a band's top.** Where no band starts at a
   band's ``E2`` the next incident node is unperturbed, so the factor ramped
   across the whole interval up to it. Measured on ENDF/B-VIII.1 U-233 (one band
   to 5 MeV, next node 6 MeV), seed 11: 63 % at 5.01 MeV, 36 % at 5.5 MeV. Fixed
   by an unperturbed node at ``E2 (1 + s)``.
-* **PF-3, the ramp across the MF35 grid's outer edge.** Where the MF5 table
+* **The ramp across the MF35 grid's outer edge.** Where the MF5 table
   reaches past ``[g_0, g_N]`` the factor steps to 1 there, and the edges were
   not stepping candidates. Measured on B-VIII.1 U-233 as the mass outside the
   grid moved net of the renormalisation: 2.1 % of it (3.3e-10 of chi) before,
@@ -23,9 +23,8 @@ model only (the legacy applier is the fixed reference, PD-4):
 
 The synthetic tests fail on the applier as it was before 2026-10-08 and pass
 on the fixed one; the tape tests pin the measured numbers on real witnesses
-(JEFF-4.0 U-238 for PD-1, ENDF/B-VIII.1 U-233 for PF-2/PF-3 -- B-VII.1 Pu-240
-is not on this box). Plan: ``kika-workspace/docs/pfns/pfns_mf5_mf35_roadmap.md``,
-Q2 and "Decisions that are Juan's".
+(JEFF-4.0 U-238 for the point band, ENDF/B-VIII.1 U-233 for the top and the
+edge -- B-VII.1 Pu-240 is not on this box).
 """
 from __future__ import annotations
 
@@ -50,7 +49,7 @@ S = SPECTRUM_OUTER_SHOULDER
 # ======================================================================
 
 #: Outgoing grid of every child: it reaches past the "MF35" grid below at
-#: both ends, and neither grid edge (1.0, 5.0) is a node -- the PF-3 shape.
+#: both ends, and neither grid edge (1.0, 5.0) is a node -- the grid-edge shape.
 XS = np.array([0.0, 0.5, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.5, 6.0])
 GRID = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
 RATIOS = np.array([1.3, 0.8, 1.2, 0.7])
@@ -86,15 +85,15 @@ def _moved(form, perturbed, energy):
 
 
 # ======================================================================
-# PD-1 -- a band stated at a point
+# A band stated at a point
 # ======================================================================
 
 def test_a_point_band_perturbs_the_node_at_its_point_and_nothing_else():
     """``[3, 3]``: the node at 3 moves, the shoulders either side do not.
 
-    Before PD-1 a point band that was not the last one matched no node at all;
+    Before 2026-10-08 a point band that was not the last one matched no node at all;
     this one is the only band, so it matched by accident of position, and the
-    factor then ramped on both sides of it (PF-1 below, PF-2 above).
+    factor then ramped on both sides of it (below and above).
     """
     form = _spectrum()
     perturbed, diagnostics = applySpectrumFactors(
@@ -149,10 +148,10 @@ def test_a_point_band_with_no_node_at_its_point_moves_nothing_and_says_so():
 
 
 def test_jeff40_u238_band_0_is_a_point_and_is_perturbed_at_it(u238_tape):
-    """The real witness of PD-1 on this box (B-VII.1 Pu-240 is not here).
+    """The real witness of the point band on this box (B-VII.1 Pu-240 is not here).
 
     JEFF-4.0 U-238 states band 0 as ``[1e-5, 1e-5]`` eV and band 1 as
-    ``[1e-5, 1e3)``. Before PD-1, band 0 perturbed no node and its draw was
+    ``[1e-5, 1e3)``. Before 2026-10-08, band 0 perturbed no node and its draw was
     thrown away without a word; now it perturbs the 1e-5 eV node, band 1 starts
     at the shoulder 1.001e-5 eV, and the run says so by name.
     """
@@ -182,7 +181,7 @@ def test_jeff40_u238_band_0_is_a_point_and_is_perturbed_at_it(u238_tape):
 
 
 # ======================================================================
-# PF-2 -- the factor stops at the top of a band
+# The factor stops at the top of a band
 # ======================================================================
 
 def test_the_factor_stops_at_the_top_of_the_last_band():
@@ -247,7 +246,7 @@ def u233_b81_perturbed(request):
 
 
 def test_the_factor_stops_at_the_top_of_a_partial_band(u233_b81_perturbed):
-    """PF-2 on its real witness: one band ``[1e-5 eV, 5 MeV]``, MF5 to 20 MeV.
+    """The leak above a band on its real witness: one band ``[1e-5 eV, 5 MeV]``, MF5 to 20 MeV.
 
     Measured before the fix (seed 11): the 5 MeV node moves its group
     probabilities by up to 63 %, and the factor was still 63 % at 5.01 MeV,
@@ -272,7 +271,7 @@ def test_the_factor_stops_at_the_top_of_a_partial_band(u233_b81_perturbed):
 
 
 def test_the_factor_stops_at_the_edge_of_the_mf35_grid(u233_b81_perturbed):
-    """PF-3 on its real witness: grid 10 eV-30 MeV, tables 0-31 MeV.
+    """The grid edge on its real witness: grid 10 eV-30 MeV, tables 0-31 MeV.
 
     The quantity is the mass outside the grid, net of the renormalisation
     scalar -- the mass the factor should not touch. Measured before (seed 11):

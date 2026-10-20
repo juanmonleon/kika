@@ -341,8 +341,8 @@ _group("sums", Coverage.FULL, None,
 _group("outputChannel", Coverage.FULL, None,
        "§17.1-17.2, including §17.2.1's recursion where a product "
        "carries its own outputChannel. The identically named `products` "
-       "and `product` under §12's decayData are read and written since "
-       "roadmap E5c (decode.py readDecayData)",
+       "and `product` under §12's decayData are read and written "
+       "(decode.py readDecayData)",
        """
        outputChannel products product multiplicity
        """)
@@ -430,7 +430,7 @@ _one("Q", Coverage.PARTIAL, 'Q', "qValue",
 
 _one("energy", Coverage.FULL, None, "levelEnergy",
      "full as §18.3's uncorrelated/energy, and as a nucleus's level "
-     "energy (gnds.xsd:494) since roadmap E5c: Nuclide.energy, read by "
+     "energy (gnds.xsd:494): Nuclide.energy, read by "
      "decode.py readNuclide and written by encode_pops.py")
 
 # -- unsupported ----------------------------------------------------------
@@ -447,8 +447,7 @@ _group("popsMetaStable", Coverage.FULL, None,
        "PoPs aliases/metaStable (gnds.xsd:513-518; ``Am242_m1`` names ``Am242_e2``), read "
        "and written by gnds/decay.py readAliases/writeAliases: the bridge "
        "between ENDF's isomer counting (LISO, RFS, FPS) and GNDS's level "
-       "counting, which the decay and fission-yield sublibraries need "
-       "(roadmap E7b/E7c)",
+       "counting, which the decay and fission-yield sublibraries need",
        """
        aliases metaStable
        """)
@@ -458,7 +457,7 @@ _group("popsDecay", Coverage.FULL, None,
        "discrete lines (intensity, energy, transition type, conversion "
        "coefficients, positron emission intensity, pair formation) and "
        "continua, and the average energies, read and written by "
-       "gnds/decay.py (roadmap E7b). A decay evaluation is a file whose "
+       "gnds/decay.py. A decay evaluation is a file whose "
        "root is PoPs; ENDF/B-VIII.1's 3 821 decay tapes go through GNDS "
        "and back to the same model",
        """
@@ -471,7 +470,7 @@ _group("popsDecayElectromagnetic", Coverage.FULL, None,
        "a particle's decayModes, each with its probability (and its "
        "uncertainty), photon emission probabilities, Q, decay path and "
        "spectra, a decay's `complete`, read and written by gnds/decay.py "
-       "(roadmap E5c for an ENDF MF12 LO=2 cascade, E7b for a decay "
+       "(for an ENDF MF12 LO=2 cascade and for a decay "
        "sublibrary). Only a decayMode-level internalConversionCoefficients, "
        "which no evaluation read so far states, is counted rather than read "
        "(gnds.xsd:539-575)",
@@ -568,7 +567,7 @@ _group("photoatomicScattering", Coverage.FULL, None,
        "links to them (gnds.xsd:1509-1510), read and written by "
        "kika/gnds/photoatomic.py into model.photoatomic; ENDF MF27 reaches "
        "the same model. FUDGE reads what kika writes back to the same numbers "
-       "(the photon plan's F2b, 100 ENDF/B-VIII.1 photoat evaluations)",
+       "(100 ENDF/B-VIII.1 photoat evaluations)",
        """
        coherentPhotonScattering incoherentPhotonScattering formFactor
        realAnomalousFactor imaginaryAnomalousFactor scatteringFactor
@@ -586,8 +585,8 @@ _group("doubleDifferential", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSecti
        """)
 
 _group("doubleDifferentialContainer", Coverage.PARTIAL, None,
-       "§14's container (gnds.xsd:1087-1096). Read and written since "
-       "roadmap E4b for the three thermal-scattering forms "
+       "§14's container (gnds.xsd:1087-1096). Read and written "
+       "for the three thermal-scattering forms "
        "(kika/gnds/thermal_scattering.py) and for the two photo-atomic ones "
        "(kika/gnds/photoatomic.py); the Coulomb forms under it are reported "
        "by name and not read",
@@ -597,9 +596,9 @@ _group("doubleDifferentialContainer", Coverage.PARTIAL, None,
 
 _group("thermalScattering", Coverage.FULL, None,
        "the thermal neutron scattering law (gnds.xsd:1182-1283), read and "
-       "written since roadmap E4b (kika/gnds/thermal_scattering.py) with "
+       "written (kika/gnds/thermal_scattering.py) with "
        "FUDGE's names, child order and units, and the reaction's two links "
-       "to it. ENDF MF7 reaches the same model (E4a). Checked both ways "
+       "to it. ENDF MF7 reaches the same model. Checked both ways "
        "against FUDGE: it reads what kika writes and kika reads what it "
        "writes (test_fudge_in_the_loop.py)",
        """
@@ -644,7 +643,7 @@ _group("fissionFragmentData", Coverage.FULL, None,
 
 _group("fissionProductYields", Coverage.FULL, None,
        "fission product yields (gnds.xsd:1339 onwards), ENDF MF8/454 and "
-       "/459, read and written by gnds/fission_yields.py (roadmap E7c) "
+       "/459, read and written by gnds/fission_yields.py "
        "under a reaction, a PoPs nuclide or as a file's root. The "
        "uncertainty read is the diagonal covariance ENDF's DY gives; a "
        "full matrix is counted, not read",
@@ -700,7 +699,7 @@ _group("popsOther", Coverage.FULL, None,
        """)
 
 _group("popsUnorthodox", Coverage.FULL, None,
-       "a thermal-scattering target (roadmap E4b): read into "
+       "a thermal-scattering target: read into "
        "model.pops.Unorthodox and written back with its mass and charge, "
        "the only children PoPs_UnorthodoxType (gnds.xsd:506-513) has "
        "besides decayData, which is its own row",
@@ -719,8 +718,8 @@ _group("physicalQuantityUncertainty", Coverage.UNSUPPORTED, None,
 _group("targetInfo", Coverage.FULL, None,
        "RS_EvaluatedType's optional child (gnds.xsd:96-108, TargetInfoType "
        "at 264-295): the target's isotopes and atom fractions, read into "
-       "Evaluated.targetInfo and written back by kika/gnds/styles.py since "
-       "roadmap E4b. ENDF MF7/MT451 fills it",
+       "Evaluated.targetInfo and written back by kika/gnds/styles.py. "
+       "ENDF MF7/MT451 fills it",
        """
        targetInfo isotopicAbundances
        """)
@@ -772,7 +771,7 @@ for _style in ("realization", "angularDistributionReconstructed",
 
 for _style in ("MonteCarlo_cdf", "URR_probabilityTables"):
     _one(_style, Coverage.FULL, None, "processedStyles",
-         "§9.4.3/§9.4.5, read and written (roadmap A11). Not in FUDGE 6.10.0's "
+         "§9.4.3/§9.4.5, read and written. Not in FUDGE 6.10.0's "
          "RS_StylesType, which this census follows; FUDGE's current gnds.xsd "
          "(2026-09-30, gnds.xsd:111-113) declares both, with label, date and "
          "derivedFrom",
@@ -782,12 +781,12 @@ _one("xs_pdf_cdf1d", Coverage.FULL, None, "processedForms",
      "§9.4.3's MonteCarlo_cdf table, read and written in FUDGE's spelling "
      "(xData/xs_pdf_cdf.py: xs, pdf, cdf). FUDGE writes it and neither its "
      "6.10.0 nor its current gnds.xsd declares it. A table's leading discrete "
-     "lines go to applicationData KIKA::processed (roadmap A11)",
+     "lines go to applicationData KIKA::processed",
      where="not in gnds.xsd")
 _one("energyAngularMC", Coverage.FULL, None, "processedForms",
      "the Monte Carlo energy-angle form (§18.1.1), read and written as FUDGE's "
      "energyAngularMC.py spells it; FUDGE's current gnds.xsd:1516 declares it, "
-     "6.10.0's does not (roadmap A11)",
+     "6.10.0's does not",
      where="not in gnds.xsd")
 
 _one("Ys1d", Coverage.UNSUPPORTED, None, "notInSchemaForms",

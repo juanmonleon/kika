@@ -27,7 +27,7 @@ the table, and here the attribute *is* the table.
 a node that inherited from it would be perturbed as if it were a table it is
 not. A parametrised spectrum has no covariance in ENDF -- MF35 is stated for
 tables -- and perturbing it would need a covariance of its *parameters*, which
-no library carries. Decision PD-3 (Juan, 2026-10-08): refuse it by name. What
+no library carries. So it is refused by name. What
 these nodes offer instead is :meth:`toPointwise`: the spectrum tabulated, as an
 ``XYs2d`` the caller asked for, never filed under the evaluated label.
 
@@ -140,7 +140,7 @@ class _Spectrum:
         At the parameters' own incident energies unless *incidentEnergies* is
         given; on :meth:`outgoingGrid` unless *outgoing* is. A **derived
         object**, not a style: the caller holds it and nothing files it under
-        the evaluated label, which is what keeps PD-3's refusal meaningful.
+        the evaluated label, which is what keeps the sampler's refusal meaningful.
         Lin-lin between the outgoing points is an approximation of the law and
         the grid decides how good -- ``outgoing`` is there for a caller that
         needs a specific one.

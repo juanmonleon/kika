@@ -1,6 +1,6 @@
 """§21.1: an MF3 section the file also gives the partials of is a ``sum``.
 
-D7 of ``docs/library/perturbation_model_roadmap.md``. The adapter used to put
+The adapter used to put
 every MF3 section in ``reactions`` and leave ``sums`` empty, so the model
 *could* express the redundant accounting and did not carry it. That is a gap
 the perturbation track walks into: MT1 and MT2 are not two independent

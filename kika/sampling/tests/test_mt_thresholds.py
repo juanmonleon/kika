@@ -8,7 +8,7 @@ section reaches **sampled numbers**. It reads ``.energies`` and
 each reaction's threshold. A wrong map perturbs a cross section where it is
 still zero.
 
-The GNDS roadmap's phase 4 **P2** changes what that function returns, and the
+A planned change to one σ-source shape (**P2** below) changes what that function returns, and the
 canonical ``CrossSection`` spells the second array ``.values``. So this file
 exists to make P2 a measurement rather than a hope: it freezes the map on a
 committed tape, and the values below are read off that tape rather than

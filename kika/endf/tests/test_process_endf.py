@@ -302,7 +302,7 @@ def test_gnds_has_a_heated_style_per_temperature(run, tmp_path):
     assert [float(styles[l].temperature.value) for l in ("heated_000", "heated_001")] == list(TEMPERATURES)
     assert styles["heated_001"].derivedFrom == "recon"
     # gnds.xsd requires a date on every style; the derived ones carry the day
-    # they were made (D38: the file FUDGE reads should also validate).
+    # they were made (the file FUDGE reads should also validate).
     assert all(styles[l].date for l in ("eval", "recon", "heated_000", "heated_001"))
     elastic = next(r for r in back.reactions if r.ENDF_MT == 2)
     x, y = result.cross_sections(900)[2]
@@ -352,7 +352,7 @@ def test_process_gnds_outputs(gnds_run, tmp_path):
 def test_process_gnds_reprocesses_kikas_own_gnds(run, tmp_path):
     """kika's own processed GNDS carries recon and heated styles; they are set
     aside, and the evaluation is reconstructed again from PoPs's target mass and
-    spin (D39: the ENDF decoder moves MF2's SPI there, as FUDGE does). Both
+    spin (the ENDF decoder moves MF2's SPI there, as FUDGE does). Both
     routes use MF2's AWRI, which the formalism's PoPs states as FUDGE does, so
     they agree point by point to rounding."""
     from kika.endf import process_gnds

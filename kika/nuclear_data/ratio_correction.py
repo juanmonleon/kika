@@ -1,6 +1,6 @@
 r"""Correct an evaluation with a measurement through smooth ratios (the *ratio method*).
 
-Roadmap G4NDL §0bis, Fase 13.  A measurement of elastic scattering sees the
+A measurement of elastic scattering sees the
 evaluation through its energy resolution (:mod:`kika.nuclear_data.forward`), so
 pasting the measured numbers into a library broadens the resonances twice --
 once by the experiment, once more by the transport code's own Doppler -- and
@@ -15,13 +15,13 @@ at 0 K keeps its structure, and the measurement fixes only what it can see:
   Legendre coefficients, with :math:`\delta a_l` fitted in each measured energy
   to the residual DCS and smoothed in energy the same way.
 
-**Why additive (D13-1, 9-oct, provisional).**  At fixed σ the folded DCS is
+**Why additive (provisional).**  At fixed σ the folded DCS is
 *linear* in f, so the residual is fitted as it is, without dividing by the
 evaluation.  A multiplicative :math:`c(\mu)` divides by the DCS exactly in the
 diffraction minima, where the data and the evaluations disagree most, and a
 high-degree c fitted on the detectors' cosines extrapolates badly towards
-:math:`\mu \to 1`, where f is largest and no detector sits (closure of 8-oct,
-roadmap Fase 13).  With :math:`\delta a_l` constant over a reading the response
+:math:`\mu \to 1`, where f is largest and no detector sits (closure of 8-oct).
+With :math:`\delta a_l` constant over a reading the response
 is exact: :math:`\langle\sigma\rangle_i\,J\,\tfrac{2l+1}{2}P_l(\mu_i)/2\pi`.
 
 **Not inside the resolved resonance region.**  There the shape comes from the

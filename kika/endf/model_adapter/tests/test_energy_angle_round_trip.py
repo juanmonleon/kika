@@ -40,7 +40,7 @@ def _roundTrip(section, mt):
     entries, provenance, report = decodeMF6MT(section)
     forms = {label: distribution
              for label, _pid, _multiplicity, distribution in entries}
-    # A photon line's multiplicity is its share of the yield (D40).
+    # A photon line's multiplicity is its share of the yield.
     multiplicities = {label: multiplicity.form
                       for label, _pid, multiplicity, _distribution in entries}
     encoded, report = encodeMF6MT(forms, provenance, mt, report, multiplicities)
@@ -589,7 +589,7 @@ def test_law_six_is_an_uncorrelated_holding_an_n_body_phase_space():
         assert isinstance(form.energy, NBodyPhaseSpace)
         assert form.energy.numberOfProducts == section.products[index].law_data.npsx
         # APSX neutron masses, by the rule the target's AWR follows, so it
-        # derives back exactly (roadmap G4c).
+        # derives back exactly.
         apsx = section.products[index].law_data.apsx
         assert form.energy.mass.unit == "amu"
         assert form.energy.mass.value / NEUTRON_MASS_AMU == pytest.approx(apsx, rel=1e-14)
@@ -663,7 +663,7 @@ def test_the_energy_angular_axes_say_which_variable_is_outermost():
     # `INT=22` — unit base, lin-lin — so the evaluation does say how to
     # interpolate between incident nodes, and the distributed GNDS file carries
     # `interpolationQualifier="unitbase"` because kika's source did too. That
-    # corrects `mf6_notes.md`, which said no measured LAW=1 TAB2 used one.
+    # corrects an earlier census, which said no measured LAW=1 TAB2 used one.
     from kika.nuclear_data.model import InterpolationQualifier
 
     assert surface.interpolationQualifier is InterpolationQualifier.unitBase
@@ -867,7 +867,7 @@ def test_every_mf6_section_of_a_real_tape_encodes_byte_identically(
 
 
 def test_a_law_zero_neutron_keeps_the_spectrum_mf5_gave_it(u235_b81_tape):
-    """PF-6: MF6's LAW=0 says "no distribution here", not "no distribution".
+    """MF6's LAW=0 says "no distribution here", not "no distribution".
 
     ENDF/B-VIII.1 U-235 states MT18 in MF5 (the prompt spectrum, LF=1) and in
     MF6 (``JP=11``, a ``LAW=0`` neutron plus 54 deferring products). The MF6

@@ -1,6 +1,6 @@
 """``psd_method="clip_rescale"`` — the congruence rescale, and its one cost.
 
-Written for the loose end ``docs/pfns/pfns_mf5_mf35_roadmap.md`` records as L1: the
+Written for a known loose end: the
 ``clip`` projection preserves eigenvectors but not the diagonal, so groups the
 file gives almost no variance come out of it with some, and
 ``generate_pfns_samples`` clamps at 5 stated σ to bound the damage. The
@@ -114,7 +114,7 @@ def test_the_sum_rule_does_not_survive_the_rescale(micro_pfns_tape):
     """The finding that keeps this off the PFNS path, pinned so it stays known.
 
     If a future change makes this pass by preserving the sum rule, that is a
-    real improvement and the docstring, the roadmap's L1 entry and the 5σ clamp
+    real improvement and the docstring and the 5σ clamp
     all need revisiting — which is exactly what a failure here should prompt.
     """
     from kika.endf.model_adapter import decodeCovarianceSuite

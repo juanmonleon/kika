@@ -1,6 +1,6 @@
 """G3: MF4 from a suite that never saw ENDF (``derive/products.py``).
 
-Three gates, as ``gnds_to_endf_plan.md`` §3.3 asks:
+Three gates:
 
 1. the rules on their own (``angularHeader``) for every LTT and the refusals;
 2. **strip and derive** on a committed cut: the MF4 written from the stripped

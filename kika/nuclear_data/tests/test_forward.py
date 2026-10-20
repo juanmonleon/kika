@@ -1,4 +1,4 @@
-"""The forward operator of an elastic measurement (roadmap G4NDL §0bis, Fase 12).
+"""The forward operator of an elastic measurement.
 
 What is pinned: the bin-through-resolution kernel reduces to the two readings
 that already exist (a box, a Gaussian); with no resolution and no bin the

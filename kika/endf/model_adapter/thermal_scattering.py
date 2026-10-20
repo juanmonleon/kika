@@ -1,4 +1,4 @@
-"""ENDF MF7 ↔ the thermal neutron scattering law (ENDF-coverage roadmap E4).
+"""ENDF MF7 ↔ the thermal neutron scattering law.
 
 The flat path (:mod:`kika.endf.classes.mf7`) has read and written File 7 byte
 for byte since 2026-08-13; this is the step to the model, which until now no TSL

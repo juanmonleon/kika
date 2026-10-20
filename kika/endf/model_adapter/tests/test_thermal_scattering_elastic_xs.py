@@ -1,4 +1,4 @@
-"""The thermal elastic cross sections, from the model (ENDF-coverage roadmap E4).
+"""The thermal elastic cross sections, from the model.
 
 The closed forms are tested against their properties on the flat classes
 (``kika/endf/tests/test_mf7_elastic_xs.py``). What is tested here is that the

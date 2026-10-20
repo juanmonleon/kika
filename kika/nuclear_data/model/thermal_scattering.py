@@ -1,6 +1,6 @@
 """GNDS-2.1: the thermal neutron scattering law (``gnds.xsd`` TNSL types).
 
-ENDF-coverage roadmap E4. A TSL evaluation is a ``reactionSuite`` whose
+A TSL evaluation is a ``reactionSuite`` whose
 ``interaction`` is ``thermalNeutronScatteringLaw``. Each of its reactions holds
 one of the three forms below in ``doubleDifferentialCrossSection``, and points
 at that form from two places: its ``crossSection`` (a

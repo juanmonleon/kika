@@ -1,4 +1,4 @@
-"""MF12 LO=2 through PoPs and back (roadmap E5c, decision J1 = A).
+"""MF12 LO=2 through PoPs and back.
 
 A level's gamma cascade is a property of the level, so it goes where GNDS puts
 it: the residual's PoPs entry gets ``nucleus/energy`` and one electromagnetic

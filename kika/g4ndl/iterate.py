@@ -1,6 +1,6 @@
 r"""The correction loop with Geant4 in it: measurement → corrected evaluation → G4NDL → …
 
-Roadmap G4NDL §0bis, Fase 14.  An experiment corrected with a transport code
+An experiment corrected with a transport code
 (multiple scattering, missed neutrons) depends on the library the code read, so
 the measurement and the library are found together, by iteration:
 
@@ -20,7 +20,7 @@ assumptions the caller declares) and what came out (r(E), δa_l(E), widths,
 χ², the files written with their SHA-256, the read-back check, the change from
 the previous iteration).
 
-**Convergence** (proposed in the roadmap): the corrected σ, read through the
+**Convergence**: the corrected σ, read through the
 experiment on the measurement's own bins, moves less than ``threshold`` of the
 statistical uncertainty in every bin between two iterations.
 

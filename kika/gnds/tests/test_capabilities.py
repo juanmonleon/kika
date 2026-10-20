@@ -260,10 +260,10 @@ def test_the_bridge_joined_something():
     worthless if ``BRIDGED`` came out empty because a key shape changed."""
     assert len(BRIDGED) == 54, (
         f"{len(BRIDGED)} registry tags are schema nodes; the two tables were "
-        f"written against 42, E4b's thermal-scattering nodes added ten and the "
+        f"written against 42, the thermal-scattering nodes added ten and the "
         f"photo-atomic forms (coherent/incoherentPhotonScattering) two"
     )
-    # Twelve, and two more since roadmap A11: xs_pdf_cdf1d and energyAngularMC,
+    # Twelve, and two more since: xs_pdf_cdf1d and energyAngularMC,
     # which FUDGE writes and its 6.10.0 schema does not declare.
     assert len(UNBRIDGED) == 14
 
@@ -313,7 +313,7 @@ def test_the_table_is_not_a_room_of_one_status():
     assert kinds == set(Coverage), f"only {kinds} occur"
     full = sum(1 for e in counted if e.coverage is Coverage.FULL)
     # Written at 134 full rows; 218 once the decay and fission-yield
-    # sublibraries landed (roadmap E7). The upper bound is the guard against
+    # sublibraries landed. The upper bound is the guard against
     # a table that is all one status, not a count.
     assert 100 < full < 270, f"{full} full rows; the table was written at 134"
     assert len({e.group for e in CAPABILITIES.values()}) > 25
@@ -337,11 +337,11 @@ def test_the_silent_drops_are_pinned_by_count():
 
     Most are honest: a child of a container already reported, a branch the
     reader never enters, a node no valid document can contain. It was 21
-    until roadmap E4b, and the one that was not honest went first:
+    until thermal scattering landed, and the one that was not honest went first:
     ``targetInfo`` hangs off ``<evaluated>``, which kika reads, and the style
     reader used to drop it. It is read and written now, and so is the
-    ``unorthodox`` particle a thermal-scattering target is. The photon plan's
-    F2b took it from 17 to 11: the atomic relaxation data (``atomic``,
+    ``unorthodox`` particle a thermal-scattering target is. The photo-atomic
+    reader took it from 17 to 11: the atomic relaxation data (``atomic``,
     ``configurations``, ``configuration``, ``bindingEnergy``) and the leptons of
     a photo-atomic suite are read and written.
     """

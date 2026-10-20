@@ -14,18 +14,16 @@ This file carries that to the end of the chain and to full evaluations:
 Two differences are pinned rather than hidden, so nobody "fixes" one by
 accident:
 
-* **PF-1** (legacy): asked for a subset of bands, ``perturb_pfns_partial`` puts
+* **Legacy**: asked for a subset of bands, ``perturb_pfns_partial`` puts
   no shoulder below the lowest one, so the factor ramps across the incident
   interval under it. The model steps there. Only the whole-band request -- the
   only one the legacy driver ever makes -- is equivalent;
-* **PF-5** (model emitter) -- **fixed**: ``endf-delta`` used to re-encode the
+* **Model emitter** -- **fixed**: ``endf-delta`` used to re-encode the
   whole MF it touched, so the *other* MF5 sections (MT455 on Cf-252) came back
   with the same values and new sequence numbers and SEND records. It now
   replaces per MT, as the legacy writer does, so those sections are gated here
   as text, on both sides. The general gate, over MF1/3/4/5, is
   ``test_the_delta_emitter_leaves_the_rest_of_the_tape_alone.py``.
-
-The plan is ``kika-workspace/docs/pfns/pfns_mf5_mf35_roadmap.md``, "Phase 2", Q1.
 """
 from __future__ import annotations
 
@@ -134,7 +132,7 @@ def test_a_mixed_request_shares_one_sobol_sequence(cf252_b81_tape):
 
     A seed ladder does not separate Sobol sequences: two of them, seeded
     apart and paired by replica, share the lattice of each dimension and come
-    out correlated (D35). So the whole run is one ``Sobol(d=Σ rank, seed)``,
+    out correlated. So the whole run is one ``Sobol(d=Σ rank, seed)``,
     and what keeps ν̄ and χ independent is that no column is used twice.
     """
     run = perturbFromModel(str(cf252_b81_tape), {31: None, 35: None},
@@ -155,7 +153,7 @@ def _assertSameTape(tape, tmp_path, nSamples=1, gridEdgesStep=False):
 
     ``gridEdgesStep=True`` is for a tape whose MF5 tables reach past the MF35
     grid (ENDF/B-VIII.1 U-235): there the model steps the factor at the grid's
-    outer edges (PF-3, fixed on the model only under PD-2) and the legacy
+    outer edges (fixed on the model only) and the legacy
     ramps it, so MF5/MT18 is compared by :func:`_assertTheyPartOnlyAtTheGridEdges`
     instead of byte for byte. Everything else is still byte-identical.
     """
@@ -187,7 +185,7 @@ def _assertSameTape(tape, tmp_path, nSamples=1, gridEdgesStep=False):
 
 
 def _assertTheyPartOnlyAtTheGridEdges(tape, legacyTape, modelTape):
-    """PF-3, pinned: the two spectra differ only where the MF35 grid ends.
+    """Pinned: the two spectra differ only where the MF35 grid ends.
 
     Per incident node, the model's outgoing grid is the legacy's plus points at
     the grid's outer edges ``g_0``/``g_N`` and their shoulders (``g_0 - s w_0``,
@@ -228,7 +226,7 @@ def _assertTheyPartOnlyAtTheGridEdges(tape, legacyTape, modelTape):
         extra += added.size
         shared = np.isin(xNew, xOld)
         np.testing.assert_allclose(yNew[shared], yOld, rtol=2e-6, atol=0.0)
-    assert extra > 0, "nothing parted; this tape is no longer a PF-3 witness"
+    assert extra > 0, "nothing parted; this tape is no longer a grid-edge witness"
 
 
 def test_the_two_writers_write_the_same_spectrum_on_the_micro_tape(tmp_path):
@@ -248,17 +246,17 @@ def test_the_two_writers_write_the_same_spectrum_on_endfb81_cf252(
 @pytest.mark.slow
 def test_the_two_writers_write_the_same_spectrum_on_endfb81_u235(
         u235_b81_tape, tmp_path):
-    """The reference evaluation, which the model could not perturb at all (PF-6).
+    """The reference evaluation, which the model could not perturb at all.
 
     Its MT18 is stated in MF5 *and* in MF6 (``JP=11``, a ``LAW=0`` neutron), and
     the decoder let MF6's ``unspecified`` replace MF5's spectrum. MF6 must come
     back byte for byte as well, which the "every other MF" clause checks.
 
-    **No longer byte-identical in MF5/MT18, on purpose** (PD-2, 2026-10-08):
+    **No longer byte-identical in MF5/MT18, on purpose** (2026-10-08):
     its tables reach past the MF35 grid at both ends, so the model now steps
-    the factor at the grid's edges where the legacy ramps it (PF-3). What
+    the factor at the grid's edges where the legacy ramps it. What
     parts, and by how much, is pinned by
-    :func:`_assertTheyPartOnlyAtTheGridEdges`; before PD-2 this tape was
+    :func:`_assertTheyPartOnlyAtTheGridEdges`; before 2026-10-08 this tape was
     byte-identical.
     """
     _assertSameTape(u235_b81_tape, tmp_path, gridEdgesStep=True)
@@ -267,17 +265,17 @@ def test_the_two_writers_write_the_same_spectrum_on_endfb81_u235(
 @pytest.mark.slow
 def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
         pu240_b71_tape, tmp_path):
-    """PF-7: B-VII.1 Pu-240 states correlations above 1 by up to 1.2e-5.
+    """B-VII.1 Pu-240 states correlations above 1 by up to 1.2e-5.
 
     The pre-flight refused the band; the legacy clipped it and drew. Rounding
     in the file is a note now, so the model clips and draws the same thing.
 
-    The tapes are not byte-equal, and that is PF-1 and PF-2 rather than PF-7:
-    the one band is [0.5, 0.5] MeV, a band stated at a point (PD-1), so it
+    The tapes are not byte-equal, and that is the band edges rather than the rounding:
+    the one band is [0.5, 0.5] MeV, a band stated at a point, so it
     neither starts at the lowest incident node nor ends at the highest. The
     legacy puts no shoulder under it and ramps the factor from 1e-5 eV up to
     0.5 MeV, and none above it, so the factor ramps down again to the next node;
-    the model steps at 0.4995 and 0.5005 MeV (PD-2, 2026-10-08) and perturbs
+    the model steps at 0.4995 and 0.5005 MeV (2026-10-08) and perturbs
     the 0.5 MeV node alone. Every original incident node carries the same
     table on both sides -- the ramps live *between* them.
 
@@ -304,7 +302,7 @@ def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
     nodes = np.asarray(source.incident_energies)
     assert np.array_equal(old.incident_energies, nodes)
     assert np.array_equal(new.incident_energies,
-                          np.sort(np.concatenate([nodes, [4.995e5, 5.005e5]]))),         "the PF-1 shoulder below the point band and the PF-2 one above it"
+                          np.sort(np.concatenate([nodes, [4.995e5, 5.005e5]]))),         "the shoulder below the point band and the one above it"
     for energy in nodes:
         a, b = old.evaluate_at_incident(energy), new.evaluate_at_incident(energy)
         assert all(np.array_equal(x, y) for x, y in zip(a, b)), energy
@@ -317,7 +315,7 @@ def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
 @pytest.mark.slow
 def test_a_band_that_states_no_variance_draws_no_perturbation(
         pu242_j40_tape, tmp_path):
-    """PF-8: JEFF-4.0 Pu-242 states its [20, 200] MeV band as a 1x1 zero.
+    """JEFF-4.0 Pu-242 states its [20, 200] MeV band as a 1x1 zero.
 
     The pre-flight refused the whole run over it; the legacy drew δ ≡ 0 there.
     """
@@ -328,7 +326,7 @@ def test_a_band_that_states_no_variance_draws_no_perturbation(
 
 
 def test_a_band_subset_is_where_the_two_appliers_part_on_purpose():
-    """PF-1: the legacy applier leaves the step below the lowest band unwritten.
+    """The legacy applier leaves the step below the lowest band unwritten.
 
     It skips ``bands[1:]`` when inserting incident shoulders, which is right only
     because the legacy driver always passes every band. Handed the top band

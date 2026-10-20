@@ -1,4 +1,4 @@
-"""The phonon spectra of a TSL evaluation, read as LEAPR's input (roadmap E4-r2).
+"""The phonon spectra of a TSL evaluation, read as LEAPR's input.
 
 The fixtures are copies of four inputs ENDF/B-VIII.1 distributes beside its TSL
 tapes (``NuclearData/tsl/endfb81``), one per shape the reader has to take:

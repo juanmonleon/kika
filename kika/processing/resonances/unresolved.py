@@ -46,7 +46,7 @@ def opened_at(f,threshold):
     opening between them; interpolating from the zero node opens it there,
     below its threshold (ENDF/B-VIII.1 Eu-156: GX = 0 at 15 keV, 0.27 eV at
     25 keV, MT51 from 22.7 keV; lin-lin gave 0.13 eV at 20 keV and the capture
-    of the tables 11 % low, PXB-039). That stretch is zero up to the threshold
+    of the tables 11 % low). That stretch is zero up to the threshold
     and lin-lin from there; a width the evaluator states below the threshold
     is kept.
     """

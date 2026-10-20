@@ -1,6 +1,6 @@
-"""MF2: an Adler-Adler range (LRF=4) is refused by name (ENDF-coverage roadmap T3).
+"""MF2: an Adler-Adler range (LRF=4) is refused by name.
 
-Decided by Juan on 2026-10-08. GNDS has no node for Adler-Adler, and the census
+Decided on 2026-10-08. GNDS has no node for Adler-Adler, and the census
 of that day found no LRF=4 range in the 1 950 evaluations of ENDF/B-VIII.1,
 JEFF-4.0 and JENDL-5, so there is no witness to build a reader against.
 

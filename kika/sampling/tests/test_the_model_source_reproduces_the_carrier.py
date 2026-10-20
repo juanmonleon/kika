@@ -1,6 +1,6 @@
 """M1's gate: the covariance *source* moves onto the model and no number moves.
 
-The draw migrated in P4 (``sampling_migration_roadmap.md``) and the source did
+The draw migrated earlier and the source did
 not: ``mf33_sampling`` and ``mf31_sampling`` still assemble a
 :class:`~kika.cov.cross_section_covariance.CrossSectionCovariance` out of format
 objects, hand it to ``carrier_blocks``, and draw. This is the other half —
@@ -366,7 +366,7 @@ def test_per_component_with_an_absolute_block_is_refused(mf33, monkeypatch):
     ``per-component`` gives each key its own bins, so there is no single grid to
     state a converted absolute block on. Converting it on one key's grid while
     the assembly expects another would be wrong everywhere and visible nowhere —
-    exactly the class of defect this whole roadmap is about — so the mode is
+    exactly the class of defect this migration is about — so the mode is
     refused while an absolute block is present, and works when none is.
     """
     from kika.sampling import mf33_sampling
@@ -445,7 +445,7 @@ def test_per_component_with_an_absolute_block_is_refused(mf33, monkeypatch):
     ``per-component`` gives each key its own bins, so there is no single grid to
     state a converted absolute block on. Converting it on one key's grid while
     the assembly expects another would be wrong everywhere and visible nowhere —
-    exactly the class of defect this whole roadmap is about — so the mode is
+    exactly the class of defect this migration is about — so the mode is
     refused while an absolute block is present, and works when none is.
     """
     from kika.sampling import mf33_sampling

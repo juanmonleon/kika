@@ -1,11 +1,11 @@
-"""Radionuclide productions (ENDF MF8-10, roadmap E6) through the resonance reconstruction.
+"""Radionuclide productions (ENDF MF8-10) through the resonance reconstruction.
 
 A production shares its MT with the reaction that makes it, and the
-reconstruction used to project every node of ``suite.productions`` by MT: from
-E6 on, every tape with MF9, MF10 or MF8 ``LMF=3`` failed with "ambiguous MT
-projection" (D41), and with it ``process_endf`` and the HDF5 processing. And a
+reconstruction used to project every node of ``suite.productions`` by MT: once
+productions were modelled, every tape with MF9, MF10 or MF8 ``LMF=3`` failed with "ambiguous MT
+projection", and with it ``process_endf`` and the HDF5 processing. And a
 production read at ``eval`` through its reference got the MF3 background: Am-241
-capture to Am-242m was 0 at thermal (D42).
+capture to Am-242m was 0 at thermal.
 
 The witness is the committed Fe-56 slice (MF2, MF3/MT1, 2, 102) with an MF9 and
 an MF10 for MT102 spliced in, so the reactions are the ones every other
@@ -74,7 +74,7 @@ def test_the_splice_decodes_into_two_productions(spliced):
 
 
 def test_the_reconstruction_sees_the_same_material_with_or_without_productions(spliced):
-    """D41. The reconstruction is deterministic in what it is given, so it is
+    """The reconstruction is deterministic in what it is given, so it is
     enough to show that it is given the same thing and the reactions come out
     bit for bit -- without paying for two Reich-Moore reconstructions.
 
@@ -110,7 +110,7 @@ def test_a_reference_follows_its_reaction_to_recon(reconstructed):
 
 
 def test_a_reference_at_eval_is_refused_where_resonances_reach(reconstructed):
-    """D42: the evaluated MT102 is MF3's background below the resonance range."""
+    """The evaluated MT102 is MF3's background below the resonance range."""
     with pytest.raises(ValueError, match="form='recon'"):
         reconstructed.production_cross_section("MT102 Fe57")
 
@@ -128,7 +128,7 @@ def test_an_mf10_table_is_linearised_as_reconr_does(reconstructed):
 
 
 def test_process_endf_reconstructs_a_tape_with_productions(spliced):
-    """The app's entry, through the stage D41 broke. Broadening runs on the same
+    """The app's entry, through the stage the MT projection broke. Broadening runs on the same
     ``_entries`` the fingerprint test above shows unchanged, and costs minutes on
     this slice, so it is not repeated here."""
     from kika.endf import ProcessingPlan, process_endf

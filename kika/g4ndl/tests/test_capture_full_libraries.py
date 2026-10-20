@@ -5,7 +5,7 @@ and every capture isotope is read into the model, written back from it and
 compared record for record (the model fixed point). Then the other direction:
 from the JEFF-4.0 ENDF tapes, the final state kika writes is the IAEA
 translation's (Mendoza & Cano-Ott), record for record but for what the
-translation does (the AWR cut to 6 digits, roadmap Fase 9); the σ needs NJOY
+translation does (the AWR cut to 6 digits); the σ needs NJOY
 and is the ``njoy``-marked test. The counts are the census of 2026-10-08.
 """
 from __future__ import annotations
@@ -103,7 +103,7 @@ def _close(ours, theirs, rtol, path="record"):
 
 def test_an_endf_tapes_mf12_capture_photons_are_the_iaea_fs(fe56_jeff40_tape,
                                                             g4ndl_jeff40_library):
-    """D10-2: a JEFF-4.0 tape whose capture photons are MF12-15 gives the
+    """A JEFF-4.0 tape whose capture photons are MF12-15 gives the
     ``Capture/FS`` the IAEA translation has, for all 22 isotopes that have one.
 
     The translation prints six significant digits (the AWR, and on Li-7, B-10,

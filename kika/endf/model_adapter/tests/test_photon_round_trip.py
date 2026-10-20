@@ -1,4 +1,4 @@
-"""MF12-15 through the model and back (roadmap E5b).
+"""MF12-15 through the model and back.
 
 **The gate.** A tape read into a :class:`ReactionSuite` and written back carries
 every photon section it came with, byte for byte under the stated exception of
@@ -117,7 +117,7 @@ def test_n14_capture_is_59_photons_and_their_total():
 
 
 def test_a_line_spans_the_domain_of_its_multiplicity():
-    """Decision J6: the section's own domain, where FUDGE uses the cross section's."""
+    """The section's own domain, where FUDGE uses the cross section's."""
     suite, _ = decode("n14")
     for product in photons(suite.reactionByENDF_MT(102).outputChannel):
         energy = form(product).energy
@@ -260,7 +260,7 @@ def test_every_modelled_photon_section_comes_back_from_the_model(neutron_librari
 
 
 # ---------------------------------------------------------------------------
-# MF13 (roadmap E5d)
+# MF13
 # ---------------------------------------------------------------------------
 
 def test_mf13_photons_are_products_with_sigma_gamma_over_sigma():
@@ -291,7 +291,7 @@ def test_mf13_comes_back_as_its_own_bytes_while_untouched():
 
 
 def test_a_changed_multiplicity_rebuilds_mf13_by_multiplication():
-    """Decision J2's other half too: a changed σ rebuilds it the same way."""
+    """The other half too: a changed σ rebuilds it the same way."""
     suite, _ = decode("n14")
     reaction = suite.reactionByENDF_MT(4)
     first = photons(reaction.outputChannel)[0]

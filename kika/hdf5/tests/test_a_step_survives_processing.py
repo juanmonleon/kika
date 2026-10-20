@@ -1,4 +1,4 @@
-"""A step in a 0 K cross section is still a step at temperature (D36).
+"""A step in a 0 K cross section is still a step at temperature.
 
 ENDF writes a discontinuity as a repeated energy. ``processSuite`` built each
 temperature's union grid with ``np.unique`` of the raw abscissae, which keeps

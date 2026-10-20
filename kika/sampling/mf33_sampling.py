@@ -417,7 +417,7 @@ def loadCrossSectionBlocks(endfObj, mtList, centralSections, *, mf: int = 33,
     ever being built.
 
     ``union="global"`` is the shipped layout and the default, so this moves no
-    number — ``docs/library/gnds_endf_conflicts.md`` §10.1 measured it
+    number — it was measured
     bit-identical on the full Fe-56 tape, 5110 x 5110. ``"per-component"`` is
     the improvement and keeps its own before/after.
 
@@ -990,8 +990,8 @@ def _augment_with_step_duplicates(
     # and 28 in MT2. Whether it fires in the live pipeline depends on the input:
     # this applier is given a *PENDF*, whose grid is far denser in the resolved
     # range, so two MF33 edges sharing an interval is rarer there than on the
-    # ENDF grid measured above -- see `docs/library/library-gaps.md` D31, which
-    # records the measurement that is still owed on a real PENDF.
+    # ENDF grid measured above. The measurement on a real PENDF is still
+    # owed.
     for pos, n, sigma_b, E_b in sorted(plan, key=lambda p: (p[0], p[3]),
                                        reverse=True):
         if n == 1:

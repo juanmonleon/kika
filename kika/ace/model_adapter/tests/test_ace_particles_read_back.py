@@ -1,4 +1,4 @@
-"""The light charged particles of an ACE table reach the model and come back (roadmap A11).
+"""The light charged particles of an ACE table reach the model and come back.
 
 PTYPE/NTRO/IXS become one product per (particle, reaction in MTRH): yield
 from SIGH, Monte Carlo form from DLWH and ANDH, frame from TYRH. HPD is kept

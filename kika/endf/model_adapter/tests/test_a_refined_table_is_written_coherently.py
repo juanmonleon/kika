@@ -22,8 +22,6 @@ complaint.
 **MF4 and MF5 were checked and do not have it**: ``encodeMF4MT`` and
 ``encodeMF5MT`` rebuild their pairs from the object through ``toEndfTab2`` /
 ``toEndfRegions``. The trap was MF3 and MF1/nu-bar, and only those two.
-
-``docs/library/library-gaps.md`` D28, ``perturbation_model_roadmap.md`` M0.
 """
 from __future__ import annotations
 

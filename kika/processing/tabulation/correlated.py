@@ -178,7 +178,7 @@ def tabulateEnergyAngular(form, options: TabulationOptions, *,
     m = _m()
     # The ordinary tolerances, as ACER's. Caps of 1e-4/1e-6 for this law (13-oct, 78693cf)
     # made Fe-56's ACE 2.7 times larger (U-235's 2.1) and moved no product's <E'> by 1e-4
-    # nor the KERMA by 2e-5 (Fe-56, O-16, Be-9, U-235; runbook PXB-065).
+    # nor the KERMA by 2e-5 (Fe-56, O-16, Be-9, U-235).
     xys3d = form.xys3d
     spectra, angular = [], []
     # Repeated normalized Legendre laws are common across outgoing energies.

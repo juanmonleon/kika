@@ -479,8 +479,7 @@ def _mf33_relative(endf: Any, mt: int) -> Optional[Tuple[np.ndarray, np.ndarray]
     """MF33 relative standard deviation of ``mt``: ``(edges eV, fraction per group)``.
 
     ``None`` when the tape has no MF33 for ``mt``. Any other failure raises: a
-    swallowed band error hid a broken MF33 path for eight months once (library
-    gap D13), and a missing band is not the same as no covariance.
+    swallowed band error hid a broken MF33 path for eight months once, and a missing band is not the same as no covariance.
     """
     mf33 = endf.files.get(33)
     if mf33 is None or mt not in mf33.mt:

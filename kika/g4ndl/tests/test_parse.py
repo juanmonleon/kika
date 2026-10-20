@@ -1,6 +1,6 @@
 """Phases 2 and 3: the cross-section and elastic final-state parsers.
 
-Acceptance (roadmap §5 Fases 2-3): every real case of repFlag 1/2/3 is read
+Acceptance: every real case of repFlag 1/2/3 is read
 to its last token with nothing changed; repeated energies survive in order;
 ``repFlag=0``, the laboratory frame and ``tempdep`` come from synthetic files;
 each malformed input stops with the file, the record and the token.

@@ -6,7 +6,7 @@ against the flat path:
     str(encodeMF1MT451(*decodeMF1MT451(s)))  ==  str(s)
 
 **Why this gate is available from the first commit.** ``NuclideInfo.to_endf``
-(``docs/library/library-gaps.md`` M2) already passes exactly this comparison on six real
+already passes exactly this comparison on six real
 evaluations, so the model-side encoder has a working reference and a gate that
 was proved reachable before it was written. What M2 did *not* close is the
 model→MF1 direction: the façade builds the section from its flat fields by
@@ -165,7 +165,7 @@ def test_an_edited_comment_block_is_what_gets_written(micro_tape):
 
 
 def test_the_suite_carries_its_projectile_in_pops(micro_tape, tmp_path):
-    """The neutron is in PoPs, as a ``baryon``, with kika's mass (roadmap T6).
+    """The neutron is in PoPs, as a ``baryon``, with kika's mass.
 
     A tape never states its projectile, but a GNDS file has to: FUDGE's
     ``toENDF6`` looks up ``PoPs['n']``. The target is still the header's

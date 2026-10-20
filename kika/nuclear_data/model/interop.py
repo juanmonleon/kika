@@ -98,7 +98,7 @@ def flatNuclideInfo(provenance) -> Dict[str, Any]:
             # block and the directory. NWD and NXC are deliberately not stored
             # -- they are the lengths of these two lists, and a stored count
             # that can disagree with what it counts is a defect waiting to be
-            # written. See `docs/library/library-gaps.md` M2.
+            # written.
             "text": list(provenance.descriptiveText),
             "directory": [tuple(entry) for entry in provenance.directory],
         },
@@ -130,7 +130,7 @@ def flatCrossSection(reaction, temperature: float = 0.0) -> Dict[str, Any]:
         "interpolation_regions": list(provenance.interpolationRegions or regions),
     }
     if reaction.outputChannel.Q.isKnown:
-        # A continuum's model Q is its QM; its QI is the tape's, kept for MF3 (D44).
+        # A continuum's model Q is its QM; its QI is the tape's, kept for MF3.
         metadata["qi"] = (provenance.headerFields or {}).get("qi", reaction.outputChannel.Q.value)
 
     return {
@@ -219,8 +219,8 @@ def flatAngularDistribution(distribution, provenance, mt: int) -> Dict[str, Any]
     common["metadata"]["energy_interpolation"] = _outerRegions(
         angular[0] if (ltt == 3 and isinstance(angular, Regions2d)) else angular
     )
-    # The two things a dense {order: array} cannot carry, and whose absence is
-    # `docs/library/library-gaps.md` D2. NM is the evaluation's declared highest order;
+    # The two things a dense {order: array} cannot carry, and whose absence was
+    # a defect. NM is the evaluation's declared highest order;
     # `legendre_orders` is each energy's own NL, so a trailing zero coefficient
     # the evaluator wrote survives instead of being trimmed on the way out.
     common["metadata"]["nm"] = header.get("nm")
@@ -360,8 +360,7 @@ def flatResonanceParameters(region, fields: Dict[str, Any], provenance
     ``None`` for a formalism the flat class cannot hold. That is not a failure
     of this projection: ``ResonanceRecord`` has four width columns and an
     R-Matrix-Limited spin group has one width *per channel* — five of them for
-    Fe-57 in JEFF-4.0 — so there is nothing to project into. The caller warns;
-    see ``docs/library/library-gaps.md`` D3.
+    Fe-57 in JEFF-4.0 — so there is nothing to project into. The caller warns.
 
     ``l_groups`` comes back as plain dicts rather than ``LGroup`` objects,
     because this module must not import the flat classes. The façade builds them.

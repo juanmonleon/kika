@@ -1,8 +1,8 @@
 """Exact integrals of a tabulated 1-d function, under the law it states.
 
 **Why the model needs this and did not have it.** MF35 is the covariance of the
-*group-integrated probabilities* of an MF5 spectrum — measured, not assumed; see
-``docs/pfns/pfns_mf5_mf35_roadmap.md`` fact 4 — so perturbing a fission spectrum
+*group-integrated probabilities* of an MF5 spectrum — measured, not assumed —
+so perturbing a fission spectrum
 from its own covariance means integrating the node over the covariance's groups,
 scaling, and integrating again to check what was written. Nothing in
 :mod:`kika.nuclear_data.model.functions` could integrate anything: a

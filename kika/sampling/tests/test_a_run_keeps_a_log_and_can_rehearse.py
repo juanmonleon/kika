@@ -1,4 +1,4 @@
-"""Piece E of ``docs/library/autofix_in_the_model.md``: the log, and the dry run.
+"""A sampling run's log, and the dry run.
 
 Two claims. The run records every stage as a typed, timed event with its
 numbers, and the two files it writes -- ``run.log.jsonl`` for a program and

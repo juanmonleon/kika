@@ -86,7 +86,7 @@ _FRAMES_MF6 = (1, 2, 3)
 
 
 def _interpolation(stream, n, what):
-    """Inelastic tables carry the C/U variants (``G4NDL_token_spec.md`` §10)."""
+    """Inelastic tables carry the C/U variants."""
     return parse_interpolation(stream, n, what, qualified=True)
 
 
@@ -254,7 +254,7 @@ def _body(stream, dt, composite, tag, photons, slot):
 def _angular(stream, tag, *, zeroMassInLab: bool = False) -> AngularBody:
     """``zeroMassInLab`` admits ``targetMass = 0`` in a laboratory-frame body,
     where ``G4ParticleHPAngular`` never uses the mass: four prompt-fission
-    MF4s write it so (``G4NDL_token_spec.md`` §12)."""
+    MF4s write it so."""
     pos = stream.position
     rep = stream.int(f"{tag}: repFlag")
     if rep not in (REP_ISOTROPIC, REP_LEGENDRE, REP_TABULATED):
@@ -432,7 +432,7 @@ def _labAngleEnergy(stream, tag) -> LabAngleEnergyBody:
 
 def _photonMean(stream, tag, *, nonnegative: bool = True):
     """``nonnegative=False`` admits a negative multiplicity, which Geant4 reads as
-    written: Pa-231's fission photons carry two of -7e-9 (spec §12)."""
+    written: Pa-231's fission photons carry two of -7e-9."""
     pos = stream.position
     rep = stream.int(f"{tag}: repFlag")
     mass = stream.float(f"{tag}: targetMass")

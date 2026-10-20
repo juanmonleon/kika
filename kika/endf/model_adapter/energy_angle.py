@@ -353,7 +353,7 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
     ejectile: Optional[str] = None
     for index, product in enumerate(mf6mt.products):
         if isLineSpectrum(product):
-            # D40: a photon spectrum that opens with discrete lines becomes
+            # A photon spectrum that opens with discrete lines becomes
             # FUDGE's products -- a normalised continuum and one product per
             # line -- rather than a table whose x decreases.
             split = decodeLineSpectrum(product, index, mt, frameForProduct(lct, product.za),
@@ -417,7 +417,7 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
 def _deferralMessage(mt: int, index: int, product) -> str:
     """Why a negative-LAW subsection produces no product, in its own terms.
 
-    Every file a negative LAW can point at is read since roadmap E5a (MF14 and
+    Every file a negative LAW can point at is read now (MF14 and
     MF15 joined MF4 and MF5), so what this says is no longer "kika cannot follow
     the pointer" but "there is no node for what the pointer stands for". For the
     130 photon subsections of ENDF/B-VIII.1's U-235, U-238 and Pu-239 MT18
@@ -425,7 +425,7 @@ def _deferralMessage(mt: int, index: int, product) -> str:
     checked against the manual**, the multiplicity distribution P(nu): the yield
     of subsection *i* being the probability of emitting *i* photons. FUDGE
     declines it by the same name (``Multiplicity dependent fission data,
-    P(nu)``), and GNDS-2.1 has no node for it (plan decision J8).
+    P(nu)``), and GNDS-2.1 has no node for it.
     """
     where = {4: "MF4", 5: "MF5", 14: "MF14", 15: "MF15"}.get(
         abs(product.law), f"MF{abs(product.law)}")
@@ -628,8 +628,8 @@ def _phaseSpace(body, frame: Frame) -> Uncorrelated:
     number derives back to the file's APSX exactly. It used to stay ``None``,
     on the argument that filling it chooses a neutron mass; but the distributed
     GNDS writes it (Li-6 MT41: 7.0278 amu) and FUDGE's ``toENDF6`` reads it,
-    so a suite without it could not be written back to MF6 by anyone (roadmap
-    G4c). The provenance keeps the file's APSX for the ENDF round trip as before.
+    so a suite without it could not be written back to MF6 by anyone.
+    The provenance keeps the file's APSX for the ENDF round trip as before.
     """
     from kika._constants import NEUTRON_MASS_AMU
 
@@ -865,7 +865,7 @@ def _columnAt(body, k: int, column: int, energy: float, axes) -> XYs1d:
 def _restoreProduct(record: dict, forms, mt: int, multiplicities=None, report=None):
     """One provenance record → the ``MF6Product`` it was read from.
 
-    ``forms`` is the record's one form, or -- for a subsection D40 split into
+    ``forms`` is the record's one form, or -- for a subsection split into
     several products -- every form by label, with ``multiplicities`` beside it.
     """
     from kika.endf.classes.mf6.laws import MF6LawNoBody, MF6LawElsewhere, MF6LawRaw
@@ -1163,7 +1163,7 @@ def encodeMF6MT(forms: Optional[Dict[str, object]],
     ``forms`` maps a product's **label** to its §18 distribution form — the mapping
     :func:`decodeMF6MT`'s ``entries`` becomes once the products are on a
     channel. ``multiplicities`` maps a label to its multiplicity function and
-    is needed only by a photon subsection D40 split into one product per line,
+    is needed only by a photon subsection split into one product per line,
     whose lines carry their share of the yield there. Requires the ENDF
     provenance: ``JP``, ``LCT``, ``NK``, every
     ``ZAP``/``AWP``/``LIP``, the yields and the laws kika does not model live

@@ -774,7 +774,7 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
         below, hi = broadened[temperature]
         reconForms = {leaf.reaction.label: leaf.reaction.crossSection[RECON_LABEL] for leaf in leaves}
         # Each form's abscissae with a step's repeated energy nudged up first, as
-        # ACER does (D36): a bare np.unique collapses the two faces of a step
+        # ACER does: a bare np.unique collapses the two faces of a step
         # into one knot, and the jump becomes a ramp to the next point -- Au-197
         # B-VIII.1's elastic at the top of the URR, 100 keV, ramped over 250 eV.
         hotGrid = np.unique(np.concatenate([_strictly(*_flatten(below[label]))[0]
@@ -842,7 +842,7 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
 
     def channelOf(reaction):
         # A processed library's Q is the QI (OpenMC's Q_value, ACER's LQR), also
-        # where the evaluation's GNDS Q is a continuum's QM (D44).
+        # where the evaluation's GNDS Q is a continuum's QM.
         channel = m.OutputChannel(Q=m.Q(value=reactionQI(reaction, work), unit="eV"),
                                   genre=reaction.outputChannel.genre)
         return channel
@@ -1310,7 +1310,7 @@ def _sharesOf(orphan, own, target, label, report):
     """``orphan`` with each photon's multiplicity σ_γk / σ_target instead of σ_γk / σ_own.
 
     On σ_γk's grid ∪ σ_target's points inside it, lin-lin, 0 where σ_target = 0
-    (the ENDF adapter's MF13 division, J5), with σ_target at ``label``: the
+    (the ENDF adapter's MF13 division), with σ_target at ``label``: the
     coldest temperature, a yield being one table for every temperature.
     """
     from kika.algebra.evaluate import sample_on_union
@@ -1380,7 +1380,7 @@ def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, 
 
     from kika.endf.model_adapter.photon_lines import mergedLineSpectra
 
-    # An MF6 photon whose lines the decoder split into products (D40) goes back
+    # An MF6 photon whose lines the decoder split into products goes back
     # to one product with the lines first in its tables, as ACER writes it.
     merged, hidden = mergedLineSpectra(reaction)
     explicitPhotons = False
@@ -1456,7 +1456,7 @@ def _explicitPhotonAngle(form, reaction):
 
 
 def _decayPhotons(reaction):
-    """The photons a residual's own decay states, at any depth (D46).
+    """The photons a residual's own decay states, at any depth.
 
     FUDGE writes a level's de-excitation under the residual it leaves, not
     beside it: NNDC's Cl-35 MT51 is ``n + (Cl35_e1 -> Cl35 + photon)``, the
@@ -1918,7 +1918,7 @@ def _attachHeating(out, work, temperatures, styleKT, grids, wanted, awr, Z, A, e
     from kika.processing.heating import fissionPhotonEnergy, fissionPhotonKerma, heatingOf
     from .fission_energy import evaluate
 
-    # QM from the model when there is no MF3 header (a GNDS evaluation, D45).
+    # QM from the model when there is no MF3 header (a GNDS evaluation).
     from kika.endf.model_adapter.derive.reactions import reactionQValues
     qm = {mt: q for mt, (_, q) in reactionQValues(work).items() if q is not None}
 

@@ -15,8 +15,7 @@ handed**. Nothing gated the *draw*, and the draw was where the two differed:
   which destroys ``C·1 ≈ 0`` -- the property the normalisation rests on;
 * and the budgets the legacy run reports were computed and dropped.
 
-kika-app runs this path, so these are fixes to a live pipeline. The plan is
-``kika-workspace/docs/pfns/pfns_mf5_mf35_roadmap.md``, "Phase 2", Q0.
+kika-app runs this path, so these are fixes to a live pipeline.
 """
 from __future__ import annotations
 

@@ -1,12 +1,11 @@
 """RECONR and MT3: a tape kika writes makes NJOY rebuild MT3 as the original does.
 
-``docs/library/njoy_reconr_redundant_sums.md`` measured that RECONR rebuilds MT3
+Measured: RECONR rebuilds MT3
 **only when MF12/MT3 exists** (``reconr.f90`` ``anlyzd``) and drops a stated
-MF3/MT3 otherwise. Before roadmap E5 a tape kika wrote carried no MF12, so the
+MF3/MT3 otherwise. Before the photon files reached the model a tape kika wrote carried no MF12, so the
 same evaluation gave a PENDF with MT3 from the original and without it from
-kika's copy. Since E5b/E5d the photons of MT3 are an ``orphanProduct`` that the
-writer emits as MF12/MT3; this is the measurement that closes the note (roadmap
-E5f.1).
+kika's copy. Now the photons of MT3 are an ``orphanProduct`` that the
+writer emits as MF12/MT3; this is the measurement that closes the gap.
 
 JENDL-5 Hf-182 is the witness: MF12/13-15 on MT3, a small tape, an RRR.
 """

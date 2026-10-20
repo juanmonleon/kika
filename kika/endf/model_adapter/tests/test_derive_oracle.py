@@ -10,8 +10,7 @@ with the phase that closes it**, and the test fails both ways --
 * a kind in the table that no longer occurs means a phase landed and forgot to
   shrink the table, which is how a gate quietly stops measuring.
 
-The phases are those of ``docs/library/gnds_to_endf_plan.md`` and
-``endf_coverage_remaining_plan.md``. Measured 2026-10-09 on ``develop`` with the
+Measured 2026-10-09 on ``develop`` with the
 projectile fix of this change (an alpha tape used to decode as neutron-incident,
 so AWI and NSUB could not be derived back). G3 (MF4's LTT/LI/LCT/NM,
 ``derive/products.py``) closed the products' ``<node>`` row the same day; on
@@ -48,8 +47,8 @@ PENDING = {
         "and the LAW=4 recoil of it, a particle the evaluation gives two masses "
         "(alpha AWP beside the He-4 target's AWR; C-12's MT5 residual) where "
         "PoPs holds one, ND>0 (Be-9 MT701's discrete photon point), and "
-        "U-235's MT18 at JP=11 with its P(nu) subsections (no model node, J8). "
-        "A photon spectrum split into lines (D40) derives back as FUDGE's "
+        "U-235's MT18 at JP=11 with its P(nu) subsections (no model node). "
+        "A photon spectrum split into lines derives back as FUDGE's "
         "gammasToENDF6_MF6 regroups it: every number ENDF writes is the file's "
         "on Pt-190 MT102; what differs is the record's bookkeeping (the node "
         "values as floats, the digest) and, with no continuum, LEP (FUDGE "
@@ -61,7 +60,7 @@ PENDING = {
         "LP of a line with ES != 0 (FUDGE's rule writes 1; Li-7 and N-14 state 0)",
     ("Reaction", "headerFields.mf13"):
         "E5e derives MF13; the model holds the multiplicity on MF13's grid "
-        "united with sigma's (decision J5), so the derived sigma_gamma is on that "
+        "united with sigma's, so the derived sigma_gamma is on that "
         "grid and not on the file's own, and LP follows FUDGE's rule as in MF12",
     ("ReactionSuite", "headerFields.photonsVerbatim"):
         "MF12 LO=2 cascades whose ES_i name no level of the cut (Fe-56 without "
@@ -74,7 +73,7 @@ PENDING = {
         "the libraries' NM disagrees with their data (JEFF-4.0 Fe-56 states 31 "
         "beside a 32nd-order row; 74 of 131 sampled tapes state 0); derived is "
         "the highest order, ENDF-102's and FUDGE's",
-    ("Resonances", "<node>"): "G5 (MF2), outside this line (D5)",
+    ("Resonances", "<node>"): "G5 (MF2), outside this line",
     # -- not derivable, by nature --------------------------------------------
     ("ReactionSuite", "headerFields.tpid"):
         "the tape's first line belongs to no material; a derived tape gets "
@@ -98,6 +97,10 @@ PENDING = {
         "covariance-only cuts (MF1 + MF31-35): no MF3, no energy domain; G6",
     ("refused", "no ENDF MAT for the target 'unknown'"):
         "synthetic covariance tapes with no MF1/451",
+    # -- photo- and electro-atomic evaluations ---------------------------------
+    ("refused", "no mass for the target 'Fe'"):
+        "an element's AWR is stated only in MF1/451: PoPs gives a chemical "
+        "element no mass and kika's mass table is per nuclide",
 }
 
 
@@ -119,6 +122,7 @@ ONLY_ON = {
                                        "micro_u235_photons", "micro_b11_photons",
                                        "micro_pt190_photons"},
     ("FissionEnergyRelease", "headerFields.replaced"): {"micro_u235_fission_energy"},
+    ("refused", "no mass for the target 'Fe'"): {"micro_fe_photoatomic", "micro_fe_electrons"},
 }
 
 

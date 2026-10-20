@@ -9,17 +9,14 @@ Two things, kept apart on purpose:
     log-lin, log-log), never trapezoids on a law that is not linear, and the
     minimum of a Legendre sum is found from the roots of its derivative, not
     on a grid — a negative lobe between grid points is the case that matters.
-    Nothing is corrected: an anomaly of the library is reported as such
-    (roadmap §5 Fase 5, "no forzar artificialmente todos los datos a cumplir
-    una prueba").
+    Nothing is corrected: an anomaly of the library is reported as such.
 
 :func:`angularPdf` and :func:`differentialCrossSection`
     ``p(mu|E)`` and ``dsigma/dOmega`` at any incident energy inside the data.
     The model leaves ``XYs2d.evaluate`` out deliberately, because the general
     question has two undecided conventions. For an angular distribution read
     from G4NDL both are settled by the domain and by the consumer, Geant4
-    11.4.3, measured against the compiled code
-    (``kika-workspace/myworkspace/G4NDL/harness``):
+    11.4.3, measured against the compiled code:
 
     * **No unit-base question.** Every record spans ``mu`` in [-1, 1], so
       interpolating at fixed ``mu`` and on the unit base are the same thing.
@@ -67,7 +64,7 @@ __all__ = [
     "tableIntegral", "NORMALISATION_TOLERANCE",
 ]
 
-#: Roadmap §5 Fase 5: "para integral/PDF interpolada, empezar con 1e-6".
+#: The normalisation tolerance of an interpolated integral or PDF.
 NORMALISATION_TOLERANCE = 1.0e-6
 
 #: Values of ``side``: see the module docstring.

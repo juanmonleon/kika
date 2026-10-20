@@ -16,7 +16,7 @@ has none", while a missing attribute says nothing at all and fails three frames
 away. The list containers even define ``__bool__`` as ``True`` so that
 ``if suite.reactions:`` cannot silently read *empty* as *absent*.
 
-MF12-15 have slots here that roadmap E5 filled (the photon products of a
+MF12-15 have slots here that were later filled (the photon products of a
 reaction, ``orphanProducts`` and ``multiplicitySum``), as MF5 and MF6 had
 filled theirs. Filling them restructured nothing, which was the claim.
 """
@@ -78,8 +78,7 @@ def _checkUnits(form: object, expected: Tuple[str, str], what: str) -> None:
     So the guarantee is in *the data*, not in the code, and this puts it in the
     code. ``ScatteringRadius.constant`` is what the other outcome looks like:
     the same field meant 5.444 fm down one path and 0.5444 of a different unit
-    down the other, for a year, because nothing asked
-    (``docs/library/gnds_endf_conflicts.md`` §4.1).
+    down the other, for a year, because nothing asked.
 
     **It raises rather than converting.** kika does not rescale on read
     anywhere — the reconstructor works in ENDF's units throughout — and a
@@ -106,8 +105,7 @@ def _checkUnits(form: object, expected: Tuple[str, str], what: str) -> None:
             f"shortcut returns bare arrays that every consumer reads as "
             f"({expected[0]}, {expected[1]}). kika does not rescale on read, so "
             f"the conversion is yours: reach for the form and its `axes` "
-            f"directly. See docs/library/gnds_endf_conflicts.md §4.1 for what happens "
-            f"when a unit is assumed instead."
+            f"directly."
         )
 
 

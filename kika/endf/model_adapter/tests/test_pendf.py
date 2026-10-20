@@ -1,4 +1,4 @@
-"""A PENDF's MF3 into the model as the ``recon`` style (G4NDL roadmap Phase 9).
+"""A PENDF's MF3 into the model as the ``recon`` style.
 
 The fast tests use the Fe-56 micro-tape as a stand-in PENDF of itself: it has
 the MF1/451 header with ``TEMP = 0`` and lin-lin MF3 tables, which is all

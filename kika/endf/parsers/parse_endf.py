@@ -101,7 +101,7 @@ def scan_tape_id(lines: List[str]) -> Optional[str]:
     libraries disagree on the rest of the line: ENDF/B-VIII.1 leaves the NTAPE
     field blank and stops at column 75, JEFF-4.0 writes NTAPE=1 and a sequence
     number, JENDL-5 writes NTAPE=0. A writer that rebuilt the record would
-    "correct" two of the three (ENDF-coverage roadmap T1).
+    "correct" two of the three.
     """
     if not lines:
         return None

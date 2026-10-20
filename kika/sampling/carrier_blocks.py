@@ -27,7 +27,7 @@ is temporary.
   identical to ``_build_union_grid``'s. So ``union='global'`` is the default and
   the MF33 source migration was never blocked on the choice: the global-vs-
   per-component question is the *improvement*, with its own before/after.
-  ``gnds_endf_conflicts.md`` §10.1. The source migration landed as
+  The source migration landed as
   :func:`kika.sampling.mf33_sampling.loadCrossSectionBlocks`; what still reaches
   this module is the **call sites**, and why is the next paragraph.
 
@@ -35,8 +35,8 @@ is temporary.
   live call sites.** ``pendf_perturbation`` and ``nubar_perturbation`` call it
   between assembling the covariance and drawing, and it reaches
   ``CrossSectionCovariance.fix_covariance`` — so a call site cannot be moved off
-  the carrier until autofix is retired or ported, which the sampling roadmap
-  makes its own change, in kika-app first (``autofix='soft'`` is every kika-app
+  the carrier until autofix is retired or ported, which is
+  its own change, in kika-app first (``autofix='soft'`` is every kika-app
   default; ``None`` is every kika one, and then this function is a no-op). Found
   when the M1 source landed, and it is why the source can be equivalent and the
   call sites still be here.

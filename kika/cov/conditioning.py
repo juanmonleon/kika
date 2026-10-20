@@ -134,7 +134,7 @@ ROUNDOFF_RATIO = float(np.finfo(np.float64).eps)
 #: stated 1.0 at 1e-6, and the ratio of two rounded variances can move it by
 #: a few of those. Above it the matrix says something an evaluator did not
 #: mean, and the draw is refused. Measured: 2.1e-7 on U-235 JEFF-4.0 MF33, and
-#: 1.19e-5 on Pu-240 ENDF/B-VII.1 MF35 (PF-7) -- 2.6x what six-figure rounding of
+#: 1.19e-5 on Pu-240 ENDF/B-VII.1 MF35 -- 2.6x what six-figure rounding of
 #: the three stored numbers allows, so the evaluator's own arithmetic rounded
 #: too, on rows with σ ~ 1e-7. That tape was refused at 1e-5. 1e-4 sits 8x above
 #: it and 10x below the coarsest defect it guards against: an INTG correlation
@@ -1020,7 +1020,7 @@ def _check_definiteness(
     largest = float(spectrum.max())
     smallest = float(spectrum.min())
     if largest <= 0.0 and float(np.max(np.abs(matrix))) <= inert_floor:
-        # PF-8: JEFF-4.0 Pu-242 states its [20, 200] MeV band as a 1x1 zero.
+        # JEFF-4.0 Pu-242 states its [20, 200] MeV band as a 1x1 zero.
         # A block that states no uncertainty is drawn as no perturbation --
         # the inert-row mask pins every row -- not refused.
         return Finding(
@@ -1163,7 +1163,7 @@ def _check_inert_rows(matrix: np.ndarray, *, floor: float) -> Optional[Finding]:
     count = int(inert.sum())
     if not count:
         return None
-    # A wholly inert block is a note too (PF-8): the evaluation states no
+    # A wholly inert block is a note too: the evaluation states no
     # uncertainty there, and the draw honours that by perturbing nothing.
     summary = f"{count}/{matrix.shape[0]} row(s) state no variance (σ² < {floor:.0e})"
     if count == matrix.shape[0]:

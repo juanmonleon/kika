@@ -1,7 +1,7 @@
 """What one elastic G4NDL file says, field by field, before any physics.
 
 These are the intermediate records the parsers in :mod:`kika.g4ndl.parse`
-produce and the model adapter (roadmap Phase 4) consumes. They are **not** a
+produce and the model adapter consumes. They are **not** a
 second public representation of the data: they keep every token the consumer
 reads — bookkeeping integers, temperatures, ``tempdep``, both frame flags of
 ``repFlag=0`` — and interpret none of them, so that nothing is lost between
@@ -10,8 +10,8 @@ the file and the decision of what it means.
 Two things they never do, because the files need them not to:
 
 * **Collapse or sort energies.** Repeated energies are real (print collisions
-  in the cross sections, repeated incident energies in the final states;
-  ``G4NDL_token_spec.md`` §7); every array is kept in file order.
+  in the cross sections, repeated incident energies in the final states);
+  every array is kept in file order.
 * **Merge interpolation into data.** A region table (``NBT``, ``INT``) stays
   beside the values it governs, exactly as the file has it.
 """

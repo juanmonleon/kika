@@ -5,7 +5,7 @@ faced five encoders and MF2/151 was the one hole that was not merely asymmetric
 but *absent*: no path in kika could write resonance parameters from a
 format-agnostic object at all, so the only way to change a resonance was to edit
 ENDF records. MF1, MF33 and MF34 already had another way out, which is why
-closing those was roadmap symmetry and closing this one is not.
+closing those was a matter of symmetry and closing this one is not.
 
 **Why the equality is against ``str(s)`` and not against the tape.** Both sides
 of this comparison are produced by ``MF2MT151.__str__``, so the SEND spelling —

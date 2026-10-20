@@ -319,7 +319,7 @@ def _encodeReaction(suite, container, reaction, temps, grids, zeroK, awr, report
     group = R.Group()
     group.setAttr("mt", int(mt))
     group.setAttr("label", _provenance(reaction, "label") or reactionLabel(mt))
-    # OpenMC's Q_value is the QI, a continuum's flagged one included (D44).
+    # OpenMC's Q_value is the QI, a continuum's flagged one included.
     from kika.nuclear_data.model.endf_conversion import reactionQI
     Q = reactionQI(reaction, suite)
     group.setAttr("Q_value", float(Q) if Q is not None else 0.0)

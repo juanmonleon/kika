@@ -2,8 +2,7 @@
 
 In MF4 a_0 is identically 1, so an MF34 section with L=0 is not about the shape:
 L0xL0 is the variance of sigma(E) of that MT (a second estimate beside MF33, on
-MF34's own grid) and L0xLl is the correlation between sigma and a_l. Pista J of
-``docs/library/mf4_tabulated_perturbation_roadmap.md``.
+MF34's own grid) and L0xLl is the correlation between sigma and a_l.
 
 The fixture is :mod:`l0_fixture`, written to ``tmp_path`` and used as the
 ``covarianceSource`` of ``micro_fe56_xs_and_angular.endf``; no committed or

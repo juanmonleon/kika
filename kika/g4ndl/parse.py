@@ -21,9 +21,6 @@ order, the sign of σ and p(μ), μ inside [-1, 1], and the ``repFlag=3``
 transition. **Physics is not checked here** — normalisation of p(μ),
 positivity of a Legendre sum, comparison against the consumer's interpolator
 are Phase 5.
-
-Where kika stops and the consumer does not, the difference is listed in
-``G4NDL_token_spec.md`` §6.
 """
 from __future__ import annotations
 
@@ -69,8 +66,8 @@ def parse_interpolation(stream: TokenStream, n: int, what: str, *,
 
     ``qualified`` admits the corresponding-point (11-15) and unit-base
     (21-25) variants ``G4InterpolationManager::MakeScheme`` knows. No elastic
-    file uses them; the incident-energy tables of inelastic spectra do
-    (``G4NDL_token_spec.md`` §10), and there the consumer applies them.
+    file uses them; the incident-energy tables of inelastic spectra do,
+    and there the consumer applies them.
 
     ``NBT`` is cumulative (the consumer's ``start[i] = range[i-1]``): it must
     increase strictly and end at ``n``, else regions overlap or leave points
@@ -158,11 +155,11 @@ def parse_cross_section(stream: TokenStream, *, toEnd: bool = True,
     ``toEnd=False`` stops after the pairs: a fission-chance file
     (``Fission/FC`` …) goes on with a final state after its σ.
     ``nonnegative=False`` admits a negative σ, which Geant4 reads as written:
-    JEFF-4.0's Ac-225 first chance has one of -1e-9 b (spec §12).
+    JEFF-4.0's Ac-225 first chance has one of -1e-9 b.
 
     The two bookkeeping integers are kept; both libraries write ``0 0``
     everywhere, so they identify nothing and MT2 comes from the directory.
-    Repeated energies are kept in order (``%e`` print collisions, spec §7);
+    Repeated energies are kept in order (``%e`` print collisions);
     an energy that *decreases* is an error, as is a negative σ.
     """
     bk = (stream.int("CrossSection: bookkeeping[0]"),

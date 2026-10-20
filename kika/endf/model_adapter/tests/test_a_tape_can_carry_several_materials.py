@@ -1,4 +1,4 @@
-"""Several materials on one tape: ``writeEndfTapes`` (ENDF-coverage roadmap T2).
+"""Several materials on one tape: ``writeEndfTapes``.
 
 ``assembleTape`` writes one material, MEND and TEND. A tape may carry many
 (§0.6.3): each material closed by its MEND, one TPID before them all and one

@@ -1,4 +1,4 @@
-"""MF9 and MF10: the read-write gate of the radioactive-production files (roadmap E6).
+"""MF9 and MF10: the read-write gate of the radioactive-production files.
 
 **The gate** is the photon files' (``test_photon_files.py``): every section must
 parse and re-emit as the bytes it came in, except that a number the source

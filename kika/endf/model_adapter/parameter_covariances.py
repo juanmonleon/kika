@@ -11,7 +11,7 @@ energy without anything noticing.
 **What this module had to measure rather than read.** ENDF-102 §32 leaves three
 things ambiguous enough that implementing from the text alone gives a decoder
 that is wrong on real tapes, and each was settled against the evaluations on
-this machine (the commands are in ``docs/library/mf32-notes.md``):
+this machine:
 
 1. **The vector is resonance-major.** Every parameter of resonance 1, then every
    parameter of resonance 2. Read parameter-major, Mn-55's block gives resonance
@@ -575,7 +575,7 @@ def decodeMF32MT(mf32mt, report: Optional[ConversionReport] = None):
 
 
 # ---------------------------------------------------------------------------
-# The way back: model → MF32 (roadmap E1)
+# The way back: model → MF32
 # ---------------------------------------------------------------------------
 #
 # **Why the encoder writes into the section it read, and not from File 2.** An

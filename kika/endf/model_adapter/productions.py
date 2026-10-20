@@ -1,4 +1,4 @@
-"""MF8/MF9/MF10 of a reaction ↔ ``reactionSuite/productions`` (roadmap E6).
+"""MF8/MF9/MF10 of a reaction ↔ ``reactionSuite/productions``.
 
 An incident-particle evaluation says which radioactive nuclides a reaction makes
 in three files: **MF8** lists the final states and, through ``LMF``, says where

@@ -1988,7 +1988,7 @@ class CrossSectionCovariance:
                 # covariance already carries the answer — sqrt(diag) is the
                 # fractional standard deviation — so on every ENDF-derived
                 # covariance, where nothing populates ``cross_sections``, a
-                # computable band was refused. That is D13, and this is
+                # computable band was refused. That was the defect, and this is
                 # ``get_relative_uncertainty``'s convention, defaulting to
                 # relative for the matrices added without the flag (GENDF).
                 mat_is_relative = (bool(self.is_relative[i])
@@ -3367,7 +3367,7 @@ class CrossSectionCovariance:
         gives every matrix its own boundaries in ``energy_grids``, because the
         subsections of an MF33 file do not agree on a grid. Only the first was
         ever consulted, which put ENDF bands on group indices — that is the
-        second half of D13.
+        second half of the same defect.
 
         The shared grid keeps precedence so the multigroup answer cannot
         change; the length check only rejects a grid that could not have been

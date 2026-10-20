@@ -37,7 +37,7 @@ capture and fission.
        ``KalbachMann``, 2 and 3 ``angularTwoBody``, 4 a recoil, 6
        ``NBodyPhaseSpace``, 7 ``angularEnergy``
 12-15  the reaction's photons, ENDF's MF12-15, through :mod:`kika.g4ndl.photons`
-       (D10-2): the photon products the ENDF adapter makes from a tape. A
+       as the photon products the ENDF adapter makes from a tape. A
        cascade (12 with repFlag=2) goes to its residual level's ``decayData``
        in PoPs, once every level of the isotope has been read
 =====  =========================================================================
@@ -49,7 +49,7 @@ same happens to a section the model *could* hold but not exactly — a
 corresponding-point or unit-base code on a one-dimensional table, several
 interpolation regions where GNDS has no ``regions3d``.
 
-**Interpolation code 1 is read as lin-lin** (roadmap Fase 10, D10-3): that is
+**Interpolation code 1 is read as lin-lin**: that is
 what Geant4 evaluates (``G4ParticleHPInterpolator.hh``, the histogram call is
 commented out), and the model holds what is transported. ENDF would read a
 histogram, so the report calls it an approximation, and the declared
@@ -422,7 +422,7 @@ def _decodeReaction(record, mt, sections, provenance, where, report, counts,
 def _photons(record, reaction, photonSections, suite, where, report, counts,
              cascades=None) -> None:
     """One reaction's dataType 12/13, 14 and 15 (ENDF MF12-15) into the model
-    through :mod:`kika.g4ndl.photons` (D10-2), or kept as text if they cannot be.
+    through :mod:`kika.g4ndl.photons`, or kept as text if they cannot be.
     A cascade waits in *cascades* until every level of the isotope is known."""
     from kika.g4ndl.inelastic_records import PhotonCascadeBody
     from kika.g4ndl.photons import attachPhotonBodies
@@ -460,7 +460,7 @@ def _photons(record, reaction, photonSections, suite, where, report, counts,
 
 
 def _cascades(suite, cascades, report, counts) -> None:
-    """The deferred cascades of an isotope, attached together (D10-2)."""
+    """The deferred cascades of an isotope, attached together."""
     from kika.g4ndl.photons import attachCascades
     from kika.nuclear_data.model.pops import zaFromPid
 

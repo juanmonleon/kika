@@ -37,7 +37,7 @@ __all__ = ["LibraryEntry", "CrossSectionsXml", "Library", "open", "overlay",
            "LIBRARY_TYPES", "registerFile"]
 
 #: What the C++ accepts (``cross_sections.cpp:47-61``); ``wmp`` is reserved for
-#: the windowed multipole, parked by Juan on 2026-10-11 (roadmap D1).
+#: the windowed multipole, parked on 2026-10-11.
 LIBRARY_TYPES = ("neutron", "thermal", "photon", "wmp")
 
 

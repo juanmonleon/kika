@@ -29,7 +29,7 @@ with its σ under ``recon`` (lin-lin, 0 K, as every G4NDL σ) and its Q. An
 ``FSMF6`` body becomes its products, by the same mapping as the inelastic MF6
 (:func:`kika.g4ndl.inelastic_decode._energyAngle`): the capture γ spectrum
 reaches the model. An ``FS`` body is ENDF's MF12/14/15 and reaches it too
-(roadmap D10-2, :mod:`kika.g4ndl.photons`): its photons become the reaction's
+(:mod:`kika.g4ndl.photons`): its photons become the reaction's
 photon products, through the same ENDF adapter an ENDF tape's MF12-15 go
 through. Only a cascade (``repFlag=2``), which names levels a final state does
 not carry, still travels as G4NDL text in the reaction's
@@ -41,7 +41,7 @@ model has no slot for comes from the provenance while it still describes the
 model. A suite read from ENDF carries its MF6 bookkeeping
 (:func:`kika.g4ndl.inelastic_encode._fromEndfMF6`), so an evaluation with an
 MF6 for MT102 (JEFF-4.0) gives an ``FSMF6``; one whose capture photons are
-MF12-15 gives an ``FS`` (D10-2). Every text is parsed back with the strict reader and compared
+MF12-15 gives an ``FS``. Every text is parsed back with the strict reader and compared
 record for record before anything is written.
 """
 from __future__ import annotations
@@ -380,7 +380,7 @@ def captureFinalState(suite, *, header=None, targetMass: Optional[float] = None,
 
 def _photonFinalState(suite, reaction, entry, targetMass, header, carriedHeader, where,
                       report) -> Optional[CapturePhotonsRecord]:
-    """The model's MT102 photons as ``Capture/FS`` (D10-2), or ``None`` if it has none.
+    """The model's MT102 photons as ``Capture/FS``, or ``None`` if it has none.
 
     From the ENDF bookkeeping a G4NDL ``FS`` read kept, or from the reaction's
     own ENDF provenance (an ENDF tape whose capture photons are MF12-15).

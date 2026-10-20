@@ -183,8 +183,8 @@ def test_the_two_appliers_produce_the_same_coefficients(bothPaths):
     every access -- one of the two has to know it, and the model is where it is a
     property of the object rather than an arithmetic step in a loop.
 
-    **The one difference, and it is the shipped applier's defect.** See
-    ``library-gaps.md`` D32: at every inserted boundary that belongs to some
+    **The one difference, and it is the shipped applier's defect**:
+    at every inserted boundary that belongs to some
     *other* order's grid, ``_apply_factors_to_mf4_legendre`` writes the
     **baseline** value for every order whose own grid has no edge there, because
     its boundary pass starts from the baseline vector and only scales the orders
@@ -231,15 +231,15 @@ def test_the_two_appliers_produce_the_same_coefficients(bothPaths):
             assert not np.any(np.isclose(ownEdges[order], energy, rtol=0.0,
                                          atol=1e-10)), (
                 f"L={order} disagrees at {energy:.6e} eV, which IS an edge of "
-                f"its own grid -- that is not D32, it is a new difference")
+                f"its own grid -- that is not the known defect, it is a new difference")
             differing.append((at, order))
 
     assert differing, (
-        "the two appliers agreed everywhere: either D32 was fixed in "
+        "the two appliers agreed everywhere: either the known defect was fixed in "
         "endf_perturbation without this test being retired, or the fixture no "
         "longer has orders on different grids")
     assert len({at for at, _order in differing}) == 44, (
-        f"D32 was measured at 44 energy points on this fixture -- 22 bin edges, "
+        f"The defect was measured at 44 energy points on this fixture -- 22 bin edges, "
         f"each written twice -- and this run found "
         f"{len({at for at, _order in differing})}")
 
@@ -387,8 +387,8 @@ def test_the_two_indices_describe_the_same_grids():
 def test_the_fe56_covariance_stops_short_of_the_tabulated_half(bothPaths):
     """JEFF-4.0 Fe-56: tables from 45 MeV, MF34 up to 20 MeV, so nothing is lost.
 
-    Measured, not assumed, because it is the number decision D1 of
-    ``docs/library/mf4_tabulated_perturbation_roadmap.md`` waits on: if this
+    Measured, not assumed, because it is the number a design decision
+    waits on: if this
     tape's covariance crossed the transition, perturbing the tabulated half
     would move a frozen result.
     """

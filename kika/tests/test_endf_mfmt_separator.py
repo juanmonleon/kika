@@ -10,8 +10,7 @@ writes ``"33/2"`` instead. Nine sites across ``kika/sampling``, ``kika/cov`` and
 ``kika/endf`` used to parse the slash and only the slash, so a ``CovarianceSuite``
 that arrived through :func:`kika.gnds.decode.readCovarianceSuite` met filters
 that matched **nothing** — and, being filters rather than parsers, did not
-raise. The caller assembled zero blocks and carried on. Full account:
-``docs/library/gnds_endf_conflicts.md`` §3.1 and §7.1.
+raise. The caller assembled zero blocks and carried on.
 
 **Why this is a repository-wide test rather than four module-local ones.** The
 four modules deliberately do *not* share a helper — ``kika/sampling`` may not

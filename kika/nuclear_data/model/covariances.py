@@ -7,8 +7,8 @@ into a ``reactionSuite``, an optional ``dimension``, and ``slices``/``slice``
 ``domainMin``/``domainMax`` pair, plus a ``domainUnit``.
 
 **An MF34 Legendre-order covariance is a slice whose ``domainValue`` is the
-Legendre order.** That is the single mapping most likely to be modelled wrongly
-in phase 3c/P7, so it is stated here and has a constructor of its own:
+Legendre order.** That is the single mapping most likely to be modelled wrongly,
+so it is stated here and has a constructor of its own:
 :meth:`DataLink.forLegendreOrder`.
 """
 from __future__ import annotations
@@ -189,7 +189,7 @@ class CovarianceMatrix:
     #: ``"upper"``) or ``"full"``; ``None`` when not read from GNDS. It is the
     #: statement ENDF's LB rests on -- a diagonal array is LB=1, a symmetric one
     #: LB=5 LS=1 -- and a dense matrix whose off-diagonal terms happen to be zero
-    #: is not the same statement (roadmap G6, FUDGE's toENDF6 reads it the same).
+    #: is not the same statement (FUDGE's toENDF6 reads it the same).
     arrayStorage: Optional[str] = None
     #: Whether the column axis is a link to the row axis (§5.1.3) rather than
     #: a grid of its own. ``None`` when not read from GNDS. ENDF says the same
@@ -321,8 +321,7 @@ class CovarianceSection:
     #: ``href`` into a ``reactionSuite``, not by a material header. Without
     #: this the encoder would have to default AWR and MAT, which is the third
     #: time in this package that what the *read* path discarded turned out to
-    #: be the whole cost of the write path (see ``docs/library/library-gaps.md`` D2
-    #: and M2).
+    #: be the whole cost of the write path.
     provenance: Optional[object] = None
 
     #: §25.2.2's own attribute, kept because the file states it rather than
@@ -389,8 +388,8 @@ class ParameterCovarianceMatrix:
     uncertainty in the same record, which is the whole reason that format
     exists. Dropping the copy would mean a caller that wants to sample has to
     go back to File 2 and re-derive the correspondence row by row, which is
-    exactly the "parsed and then dropped" mistake ``docs/library/library-gaps.md`` M4
-    records for nu-bar.
+    exactly the "parsed and then dropped" mistake already
+    made once for nu-bar.
 
     The two copies can disagree, and that is a property of the evaluation
     rather than of this class: ``href`` says where the authoritative one is,

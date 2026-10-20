@@ -168,7 +168,7 @@ def _rangeFields(energyRange, isotope, isotopeIndex: int) -> dict:
         "abn": getattr(isotope, "abn", None),
         "isotope_index": isotopeIndex,
         #: LAD says whether MF4 can be computed from these parameters. Parsed
-        #: since D5, carried since B1a — Th-232 is the tape to hand that sets it.
+        #: and carried — Th-232 is the tape to hand that sets it.
         "lad": getattr(parameters, "lad", None),
     }
 
@@ -876,7 +876,7 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
     reproduces its source tape byte for byte (``test_mf2_writes_back_what_it_read``,
     and it took two fixes — NPP and LAD — to become true). Emitting records here
     as well would be a second implementation of the same layouts, which is what
-    A2 avoided deliberately for MF33/MF34 and what ``library-gaps.md`` says MF32
+    A2 avoided deliberately for MF33/MF34 and what MF32
     should reuse rather than write again.
 
     **Physics comes from the model, bookkeeping from provenance**, and nothing

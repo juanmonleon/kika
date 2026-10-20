@@ -1,6 +1,6 @@
 """Phase 9: an ENDF evaluation → RECONR at 0 K → the model → G4NDL.
 
-Acceptance (roadmap §5 Fase 9): the processed σ agrees with an independent
+Acceptance: the processed σ agrees with an independent
 processor within a declared tolerance, the thermal treatment is stated, and the
 exported data have one coherent origin. The independent processing is the IAEA
 G4NDL translation of JEFF-4.0 (Mendoza & Cano-Ott): from the JEFF-4.0 tape,
@@ -80,8 +80,8 @@ def test_fe56_jeff40_against_the_iaea_translation(tmp_path, fe56_jeff40_tape, nj
     iaea = g4ndl.open(g4ndl_jeff40_library)
     ref_cs, ref_fs = iaea.crossSection("Fe56"), iaea.elasticFinalState("Fe56")
 
-    # Final state: identical but for two things the translation did, not kika
-    # (roadmap §0, Phase 4): AWR cut to 6 digits, and the Legendre record at the
+    # Final state: identical but for two things the translation did, not kika:
+    # AWR cut to 6 digits, and the Legendre record at the
     # 45 MeV transition cut from NL=32 to NL=30.
     assert recordDifferences(ref_fs, fs) == [
         "targetMass: 55.4544 != 55.45443", "legendre[3959].coefficients differ"]
@@ -103,7 +103,7 @@ def test_fe56_jeff40_against_the_iaea_translation(tmp_path, fe56_jeff40_tape, nj
 # ---------------------------------------------------------- Phase 10, inelastic
 
 def _sameUpToTheTranslation(ours, theirs):
-    """MF4/MF6 bodies equal but for what the IAEA translation does (roadmap Fase 10).
+    """MF4/MF6 bodies equal but for what the IAEA translation does.
 
     It cuts Legendre series at NL = 30 (MF4, and the MF6 LANG=1 rows), prints
     incident energies of MF6 to 6 digits and the AWR to 6. Anything else is a
@@ -181,7 +181,7 @@ def test_fe56_jeff40_inelastic_against_the_iaea_translation(tmp_path, fe56_jeff4
         for s in theirs.sections:
             key = (s.sfType, s.dataType)
             if s.dataType >= 12:
-                # D10-2: MF12-15 reach the model and come back as the IAEA's
+                # MF12-15 reach the model and come back as the IAEA's
                 # sections, to the six digits the translation prints.
                 photons.add(s.dataType)
                 assert key in mine, (ch, key)

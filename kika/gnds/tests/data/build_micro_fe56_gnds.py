@@ -24,8 +24,8 @@ So two files are trimmed, between them covering §19 completely:
                   file. Ta-182's whole ``resonances`` subtree is 11.7 kB; the
                   373 kB is all ``reactions`` and ``sums``, which is exactly
                   what this trim removes.
-``micro_sr88``    §19.3.4's ``externalRMatrix``. Added 2026-08-24 with the row
-                  of ``gnds_endf_conflicts.md`` §6.4 it closes: the node exists
+``micro_sr88``    §19.3.4's ``externalRMatrix``. Added 2026-08-24, when it was
+                  modelled: the node exists
                   **7 times in the whole library and all 7 are in this file**,
                   so there was no fixture that could gate reading or writing it
                   and the reader reported it instead. Its ``resonances`` is

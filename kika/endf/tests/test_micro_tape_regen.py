@@ -1,6 +1,6 @@
 """The committed micro-tapes: how they are built, and that they stay valid.
 
-Phase 0 of the GNDS roadmap needs ENDF fixtures that live in the repo, so the
+The tests need ENDF fixtures that live in the repo, so the
 read-write goldens run on a machine with no access to the shared data tree.
 Two fixtures, built two different ways for two different reasons:
 
@@ -18,8 +18,8 @@ make the fixture kika's output rather than JEFF's.
 keeping MF1/451, MF3 and MF33 for MT4 and MT16. It exists because the synthetic
 covariance fixture below is one MT wide, so nothing committed could exercise a
 **cross-reaction** assembly, and because the pair it keeps has no MT4×MT16 block
-— which is what makes the carrier's matrix half NaN and pins
-``docs/library/library-gaps.md`` D11.
+— which is what makes the carrier's matrix half NaN, a state
+the fixture pins.
 
 ``micro_fe56_cov.endf`` — synthetic, written by kika's own MF33/MF34 writers on
 a four-point grid. There is no cheap honest slice of the real MF33: Fe-56
@@ -123,7 +123,7 @@ KEEP = {1: {451}, 2: {151}, 3: {1, 2, 102}, 4: {2}, 34: {2}}
 #:
 #: The pair is also, by luck rather than design, the case that matters: the
 #: evaluation states **no** MT4×MT16 cross block, so the carrier's matrix comes
-#: back 50 % NaN and the fixture pins `docs/library/library-gaps.md` D11.
+#: back 50 % NaN and the fixture pins that.
 KEEP_MF33 = {1: {451}, 3: {4, 16}, 33: {4, 16}}
 
 #: What the PFNS micro-tape keeps, cut the same verbatim way from
@@ -221,7 +221,7 @@ FISSION_ENERGY_FIXTURES = {
     "ac227": ("ac227_b81", {1: {451, 458}, 3: {18}}),
 }
 
-#: The MF5 parametrised-spectrum fixtures (roadmap E2): file name -> (source
+#: The MF5 parametrised-spectrum fixtures: file name -> (source
 #: tape, what is kept). U-235's MF5/455 is NK=6 of LF=5 with MF1/455 beside it,
 #: the shape whose families get their spectra.
 MF5_SPECTRA_FIXTURES = {
@@ -247,8 +247,7 @@ MF32_FIXTURES = {
 
 #: The layer-1 covariance-check fixtures (:func:`kika.endf.check_covariances`):
 #: key -> (source tape, what is kept). Each carries a fault, or the absence of
-#: one, found by running the checks over ENDF/B-VIII.1, JEFF-4.0 and JENDL-5
-#: (kika-workspace ``docs/library/cov_checks_roadmap.md``, phase C7).
+#: one, found by running the checks over ENDF/B-VIII.1, JEFF-4.0 and JENDL-5.
 #:
 #: **Every cut is closed.** A covariance section names its partners, and a cut
 #: that dropped one would make the checks report a ``missing_partner`` the
@@ -298,9 +297,8 @@ def photon_fixture_path(key: str) -> Path:
     return DATA / f"micro_{key}_photons.endf"
 
 
-#: The photon micro-tapes of roadmap E5, ``key -> (tape, keep)``, cut verbatim
-#: by :func:`build_cov_check`. Picked from the census of the three libraries
-#: (kika-workspace ``docs/library/endf_photons_e5_plan.md`` §2.7):
+#: The photon micro-tapes, ``key -> (tape, keep)``, cut verbatim
+#: by :func:`build_cov_check`. Picked from a census of the three libraries:
 #:
 #: * ``n14`` (ENDF/B-VIII.1): MF12 LO=1 on MT102 with discrete and primary lines
 #:   and a continuum, MF13 on MT4/28/32/103-107, an anisotropic (LI=0, LTT=1)
@@ -332,7 +330,7 @@ PHOTON_FIXTURES = {
     "s36": ("s36_jendl", {1: {451}, 3: {51, 52, 53}, 12: {51, 52, 53},
                           14: {51, 52, 53}}),
     "hf182": ("hf182_jendl", {1: {451}, 3: {3}, 12: {3}, 14: {3}, 15: {3}}),
-    # MF6 LAW=1 photons whose first ND points are lines (D40).
+    # MF6 LAW=1 photons whose first ND points are lines.
     "b11": ("b11_b81", {1: {451}, 3: {103}, 6: {103}}),
     "pt190": ("pt190_b81", {1: {451}, 3: {102}, 6: {102}}),
 }
@@ -343,7 +341,7 @@ def activation_fixture_path(key: str) -> Path:
     return DATA / f"micro_{key}_activation.endf"
 
 
-#: The activation micro-tapes of roadmap E6, ``key -> (tape, keep)``, cut
+#: The activation micro-tapes, ``key -> (tape, keep)``, cut
 #: verbatim by :func:`build_cov_check`:
 #:
 #: * ``co59`` (JENDL-5): MF8 with LMF=3 (MT17), LMF=9 (MT102, to Co60 and
@@ -416,7 +414,7 @@ def section_inventory(text: str) -> dict[int, dict[int, int]]:
 #: sublibrary. LAW=5 is on none of them because it cannot be: charged-particle
 #: elastic scattering needs a charged projectile. Its witnesses are the five
 #: whole tapes in ``MF6_CP_FIXTURES``, cut from ENDF/B-VIII.0's charged-particle
-#: sublibraries -- ``docs/library/mf6_witness_hunt.md``.
+#: sublibraries.
 #:
 #: **MF3 is kept for every MT MF6 states, and it is not decoration.** GNDS hangs
 #: a distribution on a product of a *reaction*, and a reaction is what MF3
@@ -859,7 +857,7 @@ def test_regenerate_mf6_micro_tapes(be9_b81_tape, li6_b81_tape, c12_b81_tape,
 
     Separate from :func:`test_regenerate_micro_tapes` on purpose. The six older
     fixtures still carry the 80-column MF1/451 that ``update_mf1_directory``
-    wrote before it was fixed (``docs/library/mf7_tsl_notes.md``), so a full regen
+    wrote before it was fixed, so a full regen
     rewrites them — a change worth making, and not worth making *as a side
     effect* of adding a new MF. This test builds the new ones and touches
     nothing else.
@@ -916,7 +914,7 @@ def test_regenerate_photon_micro_tapes(n14_b81_tape, fe56_b81_tape, u235_b81_tap
 
 @pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
 def test_regenerate_activation_micro_tapes(co59_jendl_tape, am241_b81_tape, request):
-    """Rebuild just the activation fixtures (roadmap E6)."""
+    """Rebuild just the activation fixtures."""
     DATA.mkdir(parents=True, exist_ok=True)
     for key, (tape, keep) in ACTIVATION_FIXTURES.items():
         source = request.getfixturevalue(f"{tape}_tape")
@@ -970,7 +968,7 @@ def test_mf33_parses_and_states_no_cross_block():
     The fixture earns its place by being the case the carrier cannot express:
     `CrossSectionCovariance.covariance_matrix` leaves the unstated MT4xMT16
     block as NaN. If a future JEFF revision started stating it, this fixture
-    would stop exercising `docs/library/library-gaps.md` D11 and would say so here
+    would stop exercising the unstated block and would say so here
     rather than by a distant test quietly passing for a new reason.
     """
     endf = read_endf(str(MF33))

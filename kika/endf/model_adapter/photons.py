@@ -1,4 +1,4 @@
-"""MF12-15 ↔ the photon products of a reaction (roadmap E5b, E5d).
+"""MF12-15 ↔ the photon products of a reaction.
 
 ENDF states a reaction's photons in four files: MF12 (or MF13) lists them with
 a multiplicity (or a production cross section) each, MF14 gives their angular
@@ -29,19 +29,18 @@ of the excited residual and go into *its* output channel, as FUDGE puts them
 it puts there, with no multiplicity, is replaced). The photons of a **sum**
 (MT3, MT4, MT103-107 when they are ``crossSectionSum``) go to an
 ``orphanProduct`` whose cross section is a ``reference`` to the sum, as in
-NNDC's GNDS of N-14 (decision J4 for MT3). A product is matched to its MF14
+NNDC's GNDS of N-14. A product is matched to its MF14
 entry by ``(EG, ES)``, never by position.
 
-**MF13 is reached by division, and that is an approximation** (``conflicts``
-§2.6; decided 2026-10-08, roadmap §3.2, completed by J2 and J5). The
+**MF13 is reached by division, and that is an approximation**. The
 multiplicity is σ_γ/σ on the union of MF13's grid and σ's points inside it,
 both made lin-lin by :mod:`kika.algebra` first; a point where σ = 0 gets 0 and
 is declared. On the way back the section is the **original bytes** while the
 SHA-256 of every multiplicity and of σ still match what was read; once either
 changed, σ_γ = y·σ on MF13's own grid, declared once per section.
 
-**MF12 LO=2 is a level's decay, and it goes to PoPs** (roadmap E5c, decision
-J1 = A). The level is the residual of the reaction's two-body channel; its PoPs
+**MF12 LO=2 is a level's decay, and it goes to PoPs**.
+The level is the residual of the reaction's two-body channel; its PoPs
 entry gets ``nucleus/energy`` = ES_NS and one electromagnetic ``decayMode`` per
 transition (TP, and GP as ``photonEmissionProbabilities`` when LG=2), ending on
 the level whose energy is ES_i -- found exactly, or within the format's digits,
@@ -62,13 +61,13 @@ Their sections travel as text in the suite's provenance under
 header field — goes to the host's provenance under ``"mf12"``/``"mf13"``,
 ``"mf14"`` and ``"mf15"``, as primitives, beside MF3's and MF6's. For GNDS,
 FUDGE's ``ENDFconversionFlags`` ``MF13,ESk=`` is written on each MF13 photon so
-FUDGE can return the section (decision J3).
+FUDGE can return the section.
 
 **Deviations from FUDGE, declared.** The domain of a ``discreteGamma`` is that of
 its multiplicity, which is what the section states; FUDGE uses the domain of the
-reaction's cross section (J6). ``LP`` is kept rather than rebuilt from ``ES``.
+reaction's cross section. ``LP`` is kept rather than rebuilt from ``ES``.
 MF13's division grid is MF13 ∪ σ (FUDGE: MF13 only) and a zero of σ is
-declared rather than skipped (J5).
+declared rather than skipped.
 """
 from __future__ import annotations
 
@@ -181,7 +180,7 @@ def _linlin(function):
 
 
 def _divide(table, sigma) -> Tuple[np.ndarray, np.ndarray, int]:
-    """σ_γ / σ as a lin-lin table on MF13's grid ∪ σ's points inside it (J5).
+    """σ_γ / σ as a lin-lin table on MF13's grid ∪ σ's points inside it.
 
     Returns ``(x, y, zeros)`` with *zeros* the number of points where σ = 0,
     which get a multiplicity of 0 and are declared by the caller.
@@ -514,14 +513,14 @@ def _attach(suite, host: _Host, sections, mt, report) -> Optional[str]:
                     f"halves are absent and their uncorrelated nodes incomplete")
     if zeros:
         report.approximated(
-            f"MT{mt}: MF13 divided by σ (decision J5) meets σ = 0 at {zeros} "
+            f"MT{mt}: MF13 divided by σ meets σ = 0 at {zeros} "
             f"point(s); the multiplicity there is written as 0",
             unaffectedScopes=("cross-sections",))
     if mf == 13:
         report.approximated(
             f"MT{mt}: MF13 states production cross sections and GNDS a "
             f"multiplicity, so each photon's is σ_γ/σ, lin-lin on MF13's grid ∪ "
-            f"σ's (conflicts §2.6). The ENDF section comes back as its own bytes "
+            f"σ's. The ENDF section comes back as its own bytes "
             f"while neither changes",
             # Photon multiplicities: the reaction's own σ is untouched.
             unaffectedScopes=("cross-sections",))
@@ -606,7 +605,7 @@ def _attach(suite, host: _Host, sections, mt, report) -> Optional[str]:
 
 
 def _flagPhotons(suite, channelPath, labels, production, mf: int) -> None:
-    """FUDGE's flags on each photon (decision J3), as its ENDF->GNDS writes them
+    """FUDGE's flags on each photon, as its ENDF->GNDS writes them
     (``ENDF_ITYPE_0_Misc.addGammaProduct``): ``MF13`` on a photon of MF13, and
     ``ESk=`` on any photon of MF12 or MF13 whose origin level ES is not 0 -- so
     FUDGE, and kika's own GNDS->ENDF (E5e), can give both back."""
@@ -715,7 +714,7 @@ def _encodeProduction(suite, node, fields, mf, mt, mat, report):
             return section
         report.approximated(
             f"MT{mt}: a photon multiplicity or σ changed, so MF13 is rebuilt as "
-            f"σ_γ = y·σ on its own grid (conflicts §2.6, decision J2)")
+            f"σ_γ = y·σ on its own grid")
         section = MF13MT(number=mt, _l1=int(fields["l1"]))
     else:
         section = MF12MT(number=mt, _lo=1)
@@ -874,7 +873,7 @@ def encodePhotonSections(suite, mat: Optional[int] = None,
 
 
 # ---------------------------------------------------------------------------
-# MF12 LO=2: a level's cascade, in PoPs (roadmap E5c)
+# MF12 LO=2: a level's cascade, in PoPs
 # ---------------------------------------------------------------------------
 
 #: How close an ``ES_i`` must be to a level's energy to name that level, relative.

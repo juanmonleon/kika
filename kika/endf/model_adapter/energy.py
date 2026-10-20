@@ -1,7 +1,7 @@
 """MF5 ↔ the ``energy`` half of :class:`~kika.nuclear_data.model.distributions.Uncorrelated`.
 
 MF5 is a section header and NK subsections, each an independent law weighted by
-``p_k(E)``. **Every law has a model node since 2026-10-08 (roadmap E2).** LF=1
+``p_k(E)``. **Every law has a model node since 2026-10-08.** LF=1
 is a TAB2 over incident energy whose nodes are TAB1s in E′, which is GNDS
 §18.3's ``energy`` child spelled in ENDF; LF=5/7/9/11/12 are §18.3's
 parametrised spectra (:mod:`kika.nuclear_data.model.energy_spectra`) -- carried
@@ -413,7 +413,7 @@ def _refuseEdited(energyForm, provenance: EndfProvenance, mt: int) -> None:
     The parametrised laws are written back from their bytes. That is right
     only while the model still says what the bytes say; a parameter changed
     after decoding would otherwise be dropped without a word. Writing it from
-    the model instead is roadmap E2's follow-up, and until then this refuses.
+    the model instead is a follow-up, and until then this refuses.
     """
     original = _formFromProvenance(provenance, mt)
     if _signature(original) != _signature(energyForm):

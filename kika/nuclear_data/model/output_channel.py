@@ -10,7 +10,7 @@ break up or decay, and the result is another ``outputChannel`` — which is why
 ``CrossSection`` carries Q in an untyped ``metadata`` dict that ACE cannot fill.
 Here Q is a node of the output channel, where it belongs, and its absence is
 representable as ``None`` rather than as a silent zero. Deciding *whose* Q a
-reconstructed MT102 inherits is a physics question held for P6.
+reconstructed MT102 inherits is a physics question left open.
 """
 from __future__ import annotations
 
@@ -455,7 +455,7 @@ class FissionFragmentData:
     from MF1/458, one :class:`FissionEnergyRelease` per style label -- ENDF
     gives one, the evaluated. ``productYields`` holds
     :class:`~kika.nuclear_data.model.fission_yields.ProductYield` nodes, from
-    MF8/454 and /459 (roadmap E7c): in a fission sublibrary evaluation they
+    MF8/454 and /459: in a fission sublibrary evaluation they
     hang off the target nuclide in PoPs, which is where GNDS puts them.
     """
 

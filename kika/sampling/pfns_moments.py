@@ -1,12 +1,12 @@
 """C10: what an MF35 band states for the spectrum's mean energy, reported with the run.
 
-**Why this is here and not in a validation script.** Decision PD-9
-(2026-10-08): the production path keeps the library's MF35 *as stated* -- no
+**Why this is here and not in a validation script.** By design
+(2026-10-08), the production path keeps the library's MF35 *as stated* -- no
 constraint, no clipping of replicas to a band, no rejection of replicas -- and
 **reports C10 next to it**. A library's stated uncertainty on ``<E'>`` can be
 far wider than what is independently known (JEFF-4.0 U-235 thermal states
-2.00 % where the IAEA standards evaluation of the same spectrum gives 0.45 %,
-``pfns_mf5_mf35_roadmap.md`` Q3/C10), and the ensemble is a correct propagation
+2.00 % where the IAEA standards evaluation of the same spectrum gives 0.45 %),
+and the ensemble is a correct propagation
 of the file either way. Which of the two numbers a reader is looking at is not
 in any output tape, so it goes in the run's metadata and log, every run.
 
@@ -35,9 +35,9 @@ analytic check, before any positivity projection.
 
 **What this is not.** It is not a gate on the sampler (the sampler only has to
 reproduce MF35, which C4/C5 check), and it does not change a draw. The
-alternative PD-9 names -- a GLS update of ``C`` with a measured ``<E'>`` and its
+alternative -- a GLS update of ``C`` with a measured ``<E'>`` and its
 correlation to the standard -- would be a named variant delivered through an
-external covariance override (P5). **P5 does not exist yet, so the constraint
+external covariance override. **That override does not exist yet, so the constraint
 is pending and not built**; every record says so (``"constraint"``).
 
 **References.** Only what has been read at the source: the IAEA neutron standards
@@ -58,8 +58,8 @@ __all__ = ["C10_REFERENCES", "C10_THRESHOLDS", "C10_CONSTRAINT",
 #: The thresholds of the tail fractions, in eV.
 C10_THRESHOLDS = (1.0e6, 3.0e6)
 
-#: What PD-9 decided the production path does with the library's MF35.
-C10_CONSTRAINT = ("none: MF35 as stated (PD-9); a GLS update with a measured "
+#: What the production path does with the library's MF35.
+C10_CONSTRAINT = ("none: MF35 as stated; a GLS update with a measured "
                   "<E'> would be a named variant through P5, which is pending "
                   "and not built")
 
@@ -221,4 +221,4 @@ def statedMomentsNote(mt: int, moments: Mapping[Any, Mapping[str, Any]]) -> Opti
     if not parts:
         return None
     return (f"C10, MF35/MT{mt} (reported, not a gate; the ensemble carries the "
-            f"library's MF35 as stated, PD-9): " + "; ".join(parts))
+            f"library's MF35 as stated): " + "; ".join(parts))

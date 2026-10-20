@@ -1,6 +1,6 @@
 """The index and the parsers against the two whole libraries. ``tape``-marked: needs ``KIKA_G4NDL``.
 
-The counts are the ones ``kika-workspace/myworkspace/G4NDL/inventory.py``
+The counts are the ones an independent inventory script
 measured on 2026-10-05 with code that shares nothing with ``kika.g4ndl``.
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ def test_a_removed_isotope_is_not_substituted(g4ndl_g4ndl471_library):
 ])
 def test_every_elastic_file_parses_to_its_last_token(request, fixture, reps,
                                                      cs_repeat, fs_repeat):
-    """Every check the parsers make holds on every real file (spec §7 counts)."""
+    """Every check the parsers make holds on every real file."""
     lib = g4ndl.open(request.getfixturevalue(fixture))
     seen = collections.Counter()
     n_cs = n_fs = 0
@@ -209,7 +209,7 @@ def test_jeff40_fe56_negative_lobe(g4ndl_jeff40_library):
 
 @pytest.mark.parametrize("fixture", ["g4ndl_jeff40_library", "g4ndl_g4ndl471_library"])
 def test_every_pair_is_a_fixed_point_of_read_model_write_read(request, fixture):
-    """Roadmap §5 Fase 6: values, regions, repeated energies and their order.
+    """Values, regions, repeated energies and their order.
 
     Through the text, which is what Geant4 reads: records → model → records →
     text → strict parser must give the records the library has, exactly.

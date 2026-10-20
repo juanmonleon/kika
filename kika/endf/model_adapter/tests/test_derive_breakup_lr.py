@@ -67,7 +67,7 @@ def test_a_gamma_cascade_is_lr0():
 
 
 def test_a_breakup_outside_the_table_is_refused():
-    """D3: no LR is invented. FUDGE writes 0 here."""
+    """No LR is invented. FUDGE writes 0 here."""
     residual = _residual(26056, 22)
     residual.outputChannel.products.products[0].pid = "H3"
     residual.outputChannel.products.products[0].label = "H3"

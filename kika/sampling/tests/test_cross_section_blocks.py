@@ -1,7 +1,7 @@
 """MF33 sections → the one covariance they are partitions of.
 
 The cross-*reaction* half of what `test_legendre_blocks.py` does for Legendre
-orders, and P3 of `docs/library/sampling_migration_roadmap.md`. The property held is the
+orders. The property held is the
 same one, for the same reason: the samples the MF33 pipelines have already drawn
 were drawn in `CrossSectionCovariance`'s layout, so an assembly that quietly
 changes it changes results without failing.
@@ -130,7 +130,7 @@ def test_mf34_sections_are_not_swept_into_an_mf33_assembly(micro):
     """The filter is by `ENDF_MFMT`, both sides, as it is for MF34.
 
     `covariance_suite_blocks` filters nothing and emits MF33 sections among the
-    MF34 ones on the committed micro-tape (`library-gaps.md` D8). The two
+    MF34 ones on the committed micro-tape. The two
     typed enumerators are what fixed that, and each has to stay blind to the
     other's format for it to hold.
     """
@@ -184,7 +184,7 @@ def test_an_absolute_section_is_dropped_when_a_caller_asks_to_sample(micro):
 # The grid, which is what deferred the source migration
 # ----------------------------------------------------------------------
 #
-# `sampling_migration_roadmap.md` P4 left MF33's *source* on the carrier because
+# The migration left MF33's *source* on the carrier because
 # the two `UNION_MODES` give different dimensions on a real evaluation, and read
 # that as an evaluation decision that "moves every drawn column either way".
 #

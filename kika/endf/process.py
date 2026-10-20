@@ -1312,7 +1312,7 @@ def _heating(run, plan, report):
         awr = float(out.provenance.attributes["atomic_weight_ratio"])
         # QM from the model when there is no MF3 header (a GNDS evaluation):
         # with Q in its place the balance of every level was off by its
-        # excitation (Fe-56 by GNDS: KERMA x21 above MT51's threshold, D45).
+        # excitation (Fe-56 by GNDS: KERMA x21 above MT51's threshold).
         qm = {mt: q for mt, (_, q) in reactionQValues(work).items() if q is not None}
         tables, notes = {}, []
         for i, T in enumerate(temps):

@@ -98,7 +98,7 @@ def test_a_three_digit_exponent_is_written_rather_than_flushed_to_zero():
     (" 6012.00000", " 6.012000+3"),
 ])
 def test_a_field_written_without_an_exponent_keeps_its_digits(source, written):
-    """D22, fixed 2026-10-14: a nine-digit field comes back with nine digits.
+    """Fixed 2026-10-14: a nine-digit field comes back with nine digits.
 
     ENDF's 11-character field can be spent two ways: sign, ``M.MMMMMM``,
     exponent sign and exponent, which leaves seven significant digits, or

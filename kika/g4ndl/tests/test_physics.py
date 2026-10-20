@@ -2,7 +2,7 @@
 
 The whole-library sweep, with the anomalies each library ships, is in
 ``test_full_libraries.py``; the comparison against Geant4's own construction
-of p(mu|E) is in ``kika-workspace/myworkspace/G4NDL/harness``.
+of p(mu|E) is checked outside the test suite.
 """
 from __future__ import annotations
 

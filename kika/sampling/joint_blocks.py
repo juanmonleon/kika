@@ -165,8 +165,7 @@ class Selection:
 
     ``magnitudeMts`` is set by :func:`resolveMagnitudeOrder`, never by a
     caller: the MF34 reactions whose L0xLl sections -- the correlation between
-    the cross section and the a_l -- are drawn with MF33's sigma. Pista J3 of
-    ``mf4_tabulated_perturbation_roadmap.md``.
+    the cross section and the a_l -- are drawn with MF33's sigma.
     """
 
     mf: int

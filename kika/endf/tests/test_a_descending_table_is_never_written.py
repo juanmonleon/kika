@@ -1,6 +1,6 @@
 """No TAB1 leaves kika with its abscissae going backwards.
 
-**Written because of D31**, and the shape of that defect is why the gate sits
+**Written because of a defect**, and the shape of that defect is why the gate sits
 where it does. ``_augment_with_step_duplicates`` inserted step points at MF33
 bin edges in the wrong order whenever two edges fell inside one interval of the
 pointwise grid. The result was a descending energy column in every perturbed MT
@@ -103,7 +103,7 @@ def test_the_writer_does_not_flatten_it_into_a_false(tmp_path):
 
     Not this one. "I could not write the file" and "the data you handed me is
     not a function" are different answers, and flattening the second into the
-    first is how D31 ran for months: a caller sees a failure with no cause,
+    first is how that defect ran for months: a caller sees a failure with no cause,
     logs it and carries on.
     """
     from kika.endf.writers.endf_writer import ENDFWriter
@@ -120,7 +120,7 @@ def test_the_writer_does_not_flatten_it_into_a_false(tmp_path):
 
 
 def test_the_applier_that_had_the_defect_now_cannot_write_one():
-    """D31's own reproduction, shrunk: two bin edges inside one interval.
+    """The defect's own reproduction, shrunk: two bin edges inside one interval.
 
     With the fix in ``_augment_with_step_duplicates`` this produces an ascending
     table, so the gate never fires -- and that is the assertion. The gate is

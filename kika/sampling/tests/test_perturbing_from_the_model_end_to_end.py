@@ -253,7 +253,7 @@ def test_an_unknown_emitter_is_refused_before_anything_is_drawn():
 
 
 def test_the_hdf5_emitter_needs_its_options_before_anything_is_drawn():
-    """OpenMC's HDF5 is an emitter (roadmap H7); it needs the temperatures named."""
+    """OpenMC's HDF5 is an emitter; it needs the temperatures named."""
     with pytest.raises(ValueError, match="HDF5Options"):
         perturbFromModel(TAPE, REQUEST, 1, formats=("hdf5",))
 

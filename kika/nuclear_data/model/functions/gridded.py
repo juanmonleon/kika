@@ -1,6 +1,6 @@
 """GNDS-2.1 §6.2.6: ``gridded2d`` and ``gridded3d``, a full array on explicit grids.
 
-Added for the thermal scattering law (ENDF-coverage roadmap E4), whose two
+Added for the thermal scattering law, whose two
 tables are exactly this shape: the coherent-elastic ``S_table`` is S(E, T) on
 the Bragg edges x the temperatures, and the incoherent-inelastic kernel is
 S(alpha, beta, T). Neither is a stack of independent 1-d functions -- every

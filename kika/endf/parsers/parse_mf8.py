@@ -3,7 +3,7 @@
 The record walk is strict, as for MF12-15 (:mod:`.parse_photons`): every record
 of a section has to be read, and a layout ENDF-6 does not define raises, naming
 the MT, rather than being stepped over. Measured on ENDF/B-VIII.1's decay
-(3 821 nuclides) and fission-yield (31 evaluations) sublibraries, roadmap E7.
+(3 821 nuclides) and fission-yield (31 evaluations) sublibraries.
 """
 from typing import List
 

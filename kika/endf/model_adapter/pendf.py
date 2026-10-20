@@ -19,7 +19,7 @@ in MF1/451) is refused: GNDS has a separate ``heated`` style for it, and its
 first consumer here (G4NDL, which Geant4 Doppler-broadens itself) would count
 the broadening twice.
 
-This is roadmap G4NDL Phase 9's first half (ENDF → reconstruction → model);
+This is the first half of the G4NDL path (ENDF → reconstruction → model);
 the second half is ``kika.write(suite, root, format="g4ndl")``, which writes
 the ``recon`` form and knows nothing about ENDF.
 """

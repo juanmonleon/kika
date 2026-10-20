@@ -1,6 +1,6 @@
 """The GNDS vocabulary is enforced here, because a doc would not survive.
 
-The roadmap's decision is "GNDS names verbatim, attributes included". That puts
+The design decision is "GNDS names verbatim, attributes included". That puts
 ``outerDomainValue``, ``domainMin`` and ``valueType`` inside a package whose own
 style guide says attributes are ``lower_snake_case``
 (``.github/python-style.instructions.md``). The guide now carries a scoped

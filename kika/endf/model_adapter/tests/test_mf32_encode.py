@@ -1,4 +1,4 @@
-"""MF32 out of the model: ``encodeMF32MT`` (ENDF-coverage roadmap E1).
+"""MF32 out of the model: ``encodeMF32MT``.
 
 Until this encoder existed MF32 was the one file the model decoded and could
 not write: a tape written from a suite with resonance-parameter covariances came

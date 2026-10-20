@@ -1,7 +1,6 @@
 """MF5's parametrised spectra ↔ §18.3's nodes, and MT455 ↔ the precursor families.
 
-Roadmap E2 (kika-workspace ``docs/library/endf_coverage_roadmap.md``). Five
-committed witnesses, cut verbatim -- ENDF/B-VIII.1 has no MT18 of LF=11 or 12,
+Five committed witnesses, cut verbatim -- ENDF/B-VIII.1 has no MT18 of LF=11 or 12,
 so those two come from ENDF/B-VII.1 -- and the same two laws also built by hand,
 where the parameters can be planted:
 
@@ -20,7 +19,7 @@ What is asserted: the model evaluates the same spectrum the ENDF reader does
 (one implementation, :mod:`kika.nuclear_data.spectrum_laws`); the tape comes back with the
 section byte for byte; GNDS carries every parameter back; an edit to a
 parametrised spectrum is refused on the way to ENDF rather than lost; and the
-MF35 sampler refuses one by name (PD-3).
+MF35 sampler refuses one by name.
 """
 from __future__ import annotations
 
@@ -80,7 +79,7 @@ def test_a_parametrised_mf5_reaches_the_model_as_its_node(path, mt, cls):
     _endf, suite, report = (lambda e: (e, *decodeReactionSuite(e)))(read_endf(str(path)))
     energy = _energy(suite, mt)
     assert type(energy) is cls
-    assert not isinstance(energy, Function2d), "PD-3: never a table to the sampler"
+    assert not isinstance(energy, Function2d), "never a table to the sampler"
     assert not [m for m in report.unsupported if f"MF5/MT{mt}" in m]
 
 
@@ -213,7 +212,7 @@ def _withoutEdgeSteps(walked):
     O-17's MT16 weight starts ``(4390210, 0), (4390210, 0.5)``: a step on the
     first point of its domain. GNDS has no spelling for a table whose x repeats
     and FUDGE's reader refuses one, so the writer drops the point on the far
-    side of the domain edge, as FUDGE's own ENDF->GNDS does (D38). The function
+    side of the domain edge, as FUDGE's own ENDF->GNDS does. The function
     on its domain is the same; that is what this test holds the trip to.
     """
     if isinstance(walked, dict):
@@ -278,7 +277,7 @@ def test_the_written_spectra_are_schema_valid(path, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# PD-3: the sampler refuses a parametrised spectrum by name
+# The sampler refuses a parametrised spectrum by name
 # ---------------------------------------------------------------------------
 
 def test_an_mf35_perturbation_of_a_parametrised_spectrum_is_refused_by_name():
@@ -286,7 +285,7 @@ def test_an_mf35_perturbation_of_a_parametrised_spectrum_is_refused_by_name():
 
     suite = kika.read(str(RA223))
     reaction = suite.findReactionByENDF_MT(18)
-    with pytest.raises(ValueError, match=r"SimpleMaxwellianFission.*PD-3"):
+    with pytest.raises(ValueError, match=r"SimpleMaxwellianFission"):
         PerturbationSet._energyOf(reaction, 18)
 
 

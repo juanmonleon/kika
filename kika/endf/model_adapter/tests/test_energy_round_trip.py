@@ -131,7 +131,7 @@ def test_mt455_is_per_family_and_not_a_weighted_sum(mf5):
     ``decodeMF5MT`` gives no single form for it -- one partial, or their sum,
     hung on a product as *the* delayed spectrum would be a statement no schema
     can catch -- and ``decodeMF5Families`` gives the six one by one, each with
-    its ``p_k``, for §18.4's ``delayedNeutron`` products (roadmap E2).
+    its ``p_k``, for §18.4's ``delayedNeutron`` products.
     """
     from kika.endf.model_adapter.energy import decodeMF5Families
     from kika.nuclear_data.model import GeneralEvaporation

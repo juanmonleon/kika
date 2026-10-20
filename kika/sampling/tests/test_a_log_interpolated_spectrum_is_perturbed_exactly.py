@@ -1,4 +1,4 @@
-"""PD-6: an MF5 table under INT=3, 4 or 5 is perturbed from MF35 exactly.
+"""An MF5 table under INT=3, 4 or 5 is perturbed from MF35 exactly.
 
 The one real MF35 tape with a log-interpolated spectrum is JEFF-3.1.1 U-233
 (outgoing INT 2+4, six bands), and it is **not on this box**. So every test
@@ -19,7 +19,7 @@ What was missing, and what each test pins:
    ``rescale * r_g * chi`` to rounding.
 3. **Region-preserving ``replaceTable``.** A multi-region child was refused;
    it now keeps its regions, each new interval inheriting its panel's law.
-4. **PF-4, pinned on the legacy applier:** ``perturb_pfns_partial`` writes
+4. **Pinned on the legacy applier:** ``perturb_pfns_partial`` writes
    every table back as one lin-lin region, so a zero perturbation of an INT 2+4
    spectrum changes it. Measured on this fixture below.
 5. **What is still refused:** an *incident* node inserted between two
@@ -217,7 +217,7 @@ def test_a_zero_perturbation_gives_the_log_lin_spectrum_back(perturbed):
 
 
 def test_the_legacy_applier_relabels_a_log_lin_spectrum_as_lin_lin():
-    """PF-4, pinned: legacy, given delta = 0, still changes the spectrum.
+    """Pinned: legacy, given delta = 0, still changes the spectrum.
 
     ``perturb_pfns_partial`` replaces every table with ``[(n, 2)]``. On this
     fixture that relabels the log-lin region above 1 MeV as lin-lin; the
@@ -225,7 +225,7 @@ def test_the_legacy_applier_relabels_a_log_lin_spectrum_as_lin_lin():
     a different function at every point between nodes of that region.
     Measured here: relabelling moves the integral by up to 1.3e-4, and the
     written chi departs from the log-lin one between nodes by up to 4.3e-4. Not fixed, on purpose: the
-    legacy applier is the fixed reference (PD-4) and the model applier is the
+    legacy applier is the fixed reference and the model applier is the
     one that runs on such a tape.
     """
     section, band, grid, _delta = _logLinSection()

@@ -44,7 +44,7 @@ NO_BODY_LAWS = (0, 3, 4)
 #: that file today. Kept as data because the second column is the whole reason
 #: :meth:`MF6LawElsewhere.report_gaps` exists.
 #:
-#: MF14 and MF15 became readable with roadmap E5a (2026-10-09). A LAW=-14/-15
+#: MF14 and MF15 became readable on 2026-10-09. A LAW=-14/-15
 #: subsection now points at a file kika parses, so it is no longer a gap *of the
 #: file*; what the model does with it is the adapter's business and is reported
 #: there.
@@ -278,7 +278,7 @@ class MF6LawContinuum(MF6Law):
             f"smears the end point, and {says}. Neither ENDF's "
             f"corresponding-point nor its unit-base rule is implemented here. "
             f"Use spectrum(k) at an incident node, or go through NJOY. See "
-            f"this method's docstring and docs/library/mf6_notes.md."
+            f"this method's docstring."
         )
 
     def report_gaps(self, mt: int, index: int) -> List[str]:
@@ -382,8 +382,7 @@ class MF6LawChargedElastic(MF6Law):
 
     ``LTP=2``, ``LTP=14`` and ``LTP=15`` occur zero times in those 63 tapes, so
     the ``LTP=2`` branch of :meth:`amplitudes` and the log-interpolated tables
-    are reshaped by the same identity but witnessed by nothing. See
-    ``docs/library/mf6_witness_hunt.md`` in kika-workspace.
+    are reshaped by the same identity but witnessed by nothing.
     """
 
     law: int = 5

@@ -1,4 +1,4 @@
-"""Piece B of ``docs/library/autofix_in_the_model.md``: where the negativity lives.
+"""Where the negativity lives.
 
 ``autofix='medium'`` scored which pair of reaction blocks carried the negative
 eigenmodes and then removed it. The scoring survives here as a diagnostic on

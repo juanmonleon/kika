@@ -562,7 +562,7 @@ def test_a_sum_is_reachable_through_the_suite_wide_mt_lookup(h2):
 
 def test_fudges_conversion_flags_are_read_and_nothing_else_is_kept_as_raw_xml(h2):
     """LLNL's ``ENDFconversionFlags`` are a typed node now (the ENDF writer needs
-    them, ``gnds_to_endf_plan.md`` D2); an institution holding anything else is
+    them); an institution holding anything else is
     still declared lost rather than carried as XML."""
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
 

@@ -1,4 +1,4 @@
-"""MF12, MF13, MF14 and MF15: the read-write gate of the photon files (roadmap E5a).
+"""MF12, MF13, MF14 and MF15: the read-write gate of the photon files.
 
 **The gate.** Every photon section must parse and re-emit as the bytes it came
 in, with one stated exception: a field the source writes in a non-canonical
@@ -13,8 +13,7 @@ form the census found worth a fixture (``PHOTON_FIXTURES`` in
 ``test_micro_tape_regen.py``), and — ``tape``- and ``slow``-marked — on every
 MF12-15 section of ENDF/B-VIII.1, JEFF-4.0 and JENDL-5: 61 361 sections, about
 three minutes. The census that sweep re-asserts was first taken by a column
-parser that shares no code with kika (kika-workspace
-``docs/library/endf_photons_e5_plan.md`` §2); the two agree section for section.
+parser that shares no code with kika; the two agree section for section.
 
 **What has no witness, and is gated by kika's own emitter only:** MF14 LTT=2
 (tabulated p(μ)) and MF15 NC>1. Both are cheap — the first is a TAB1 where

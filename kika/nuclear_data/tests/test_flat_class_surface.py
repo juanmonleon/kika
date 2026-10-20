@@ -1,8 +1,8 @@
 """The surface ratchet: the flat canonical classes may grow, never change shape.
 
-**Why this exists.** Phase 3 of the GNDS roadmap rewrites ``kika.nuclear_data``
-around a GNDS-shaped model, and Phase 3d reimplements these five classes on top
-of it. The roadmap's acceptance for that step is "the façade passes the phase 0
+**Why this exists.** The GNDS model rewrites ``kika.nuclear_data``
+around a GNDS-shaped model, and the façade reimplements these five classes on top
+of it. The acceptance for that step is "the façade passes the phase 0
 tests without modifying them" — but the phase 0 tests do not actually pin the
 surface. ``test_annotations.py`` checks that annotations *resolve*; nothing
 anywhere checks that ``CrossSection`` still has seven fields in that order, that
@@ -170,7 +170,7 @@ EXPECTED_METHODS: dict[str, dict[str, str]] = {
     "NuclideInfo": {
         "from_endf": '(cls, mt451: "\'MF1MT451\'") -> "\'NuclideInfo\'"',
         "from_ace": '(cls, ace: "\'Ace\'") -> "\'NuclideInfo\'"',
-        # `docs/library/library-gaps.md` M2. A new method needs no entry here, but its
+        # A new method needs no entry here, but its
         # three siblings' `to_endf` are pinned, and a signature that may drift
         # while theirs may not is the odd one out rather than the free one.
         "to_endf": '(self, mat: \'Optional[int]\' = None) -> "\'MF1MT451\'"',

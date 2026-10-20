@@ -132,14 +132,14 @@ class _DistributionReader:
                     productFrame=Frame(child.attrib.get("productFrame", "lab")),
                 )
             elif child.tag == "thermalNeutronScatteringLaw":
-                # The product-side link of a TSL reaction (roadmap E4b): the
+                # The product-side link of a TSL reaction: the
                 # law itself lives in the reaction's doubleDifferentialCrossSection.
                 from kika.nuclear_data.model import ThermalNeutronScatteringLaw
                 form = ThermalNeutronScatteringLaw(
                     href=child.attrib.get("href", ""), label=label)
             elif child.tag in ("coherentPhotonScattering", "incoherentPhotonScattering"):
                 # The scattered photon's link to its reaction's
-                # doubleDifferentialCrossSection form (photo-atomic, F2b).
+                # doubleDifferentialCrossSection form (photo-atomic).
                 from kika.nuclear_data.model import (CoherentPhotonScatteringLink,
                                                      IncoherentPhotonScatteringLink)
                 link = (CoherentPhotonScatteringLink if child.tag == "coherentPhotonScattering"

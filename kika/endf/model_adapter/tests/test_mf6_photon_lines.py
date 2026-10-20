@@ -1,10 +1,10 @@
-"""MF6 LAW=1 photons with discrete lines: FUDGE's split, and the way back (D40).
+"""MF6 LAW=1 photons with discrete lines: FUDGE's split, and the way back.
 
 A LAW=1 LANG=1 photon record may open each incident node with ``ND`` discrete
 energies, each with its share of the yield, ahead of the continuum. The model
 used to carry them as points of the spectrum -- an x that decreases, which no
-GNDS reader takes -- so the GNDS writer left those distributions empty
-(``docs/library/library-gaps.md`` D40). Now they are FUDGE's products: a
+GNDS reader takes -- so the GNDS writer left those distributions empty.
+Now they are FUDGE's products: a
 normalised continuum, then one ``discreteGamma`` per line and one
 ``primaryGamma`` per primary, each with ``P·y`` as its multiplicity.
 

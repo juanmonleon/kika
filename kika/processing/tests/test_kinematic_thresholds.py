@@ -1,4 +1,4 @@
-"""D37: a table that opens below the kinematic threshold is raised as RECONR does.
+"""A table that opens below the kinematic threshold is raised as RECONR does.
 
 Evaluations round ``-Q (A+1)/A`` to seven figures and sometimes round it down
 (Au-197 ENDF/B-VIII.1 MT17, 51-63, 602-649). RECONR (``reconr.f90`` lunion)

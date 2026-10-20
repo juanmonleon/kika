@@ -5,7 +5,7 @@ The form processed Monte Carlo data takes. GNDS defines it for the
 from directly: FUDGE writes ``xs_pdf_cdf1d`` children under ``energyAngularMC``,
 ``angularEnergyMC`` and the Monte Carlo ``KalbachMann``. In kika it is what an
 OpenMC HDF5 table becomes on read, and what the ACER-like tabulation of
-:mod:`kika.processing.tabulation` produces for the HDF5 writer (roadmap D6, D9).
+:mod:`kika.processing.tabulation` produces for the HDF5 writer.
 
 **The cumulative is data, not a derived view.** OpenMC's C++ samples the stored
 ``c`` row as it is -- the PDF→CDF rebuild is dead code

@@ -138,7 +138,7 @@ def test_one_sobol_block_is_the_plain_sobol_draw():
 
 @pytest.mark.parametrize("method", ["sobol", "random", "lhs"])
 def test_blocks_are_drawn_independently_of_each_other(method):
-    """The covariance *between* two blocks is the zero the caller implied (D35).
+    """The covariance *between* two blocks is the zero the caller implied.
 
     Two separately seeded Sobol sequences paired by replica index share the
     lattice of each dimension: the k-th columns of two of them correlate at

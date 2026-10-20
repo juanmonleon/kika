@@ -1066,7 +1066,7 @@ def _exact_physical_block(region,context,e,work_bytes):
 #: Identifies the reconstruction physics, not the commit. Change it when a
 #: kernel, grid or publication change alters any reconstructed value, so
 #: caches keyed on it are invalidated exactly then.
-#: 2: thresholds below the kinematic one are raised as RECONR does (D37).
+#: 2: thresholds below the kinematic one are raised as RECONR does.
 #: 3: an RML width of a bound level is referred to its channel energy, not to
 #: |E_lambda| (Ca-40 thermal (n,alpha) x6.4); charged-channel functions and
 #: groups of up to six channels in C; geometric seeds by the decade.
@@ -1105,7 +1105,7 @@ def _raise_thresholds(curves,entries,graph,awr,suite=None):
         channel=entries[key].outputChannel
         q=None if channel is None else channel.Q
         if q is None or q.value is None:continue
-        # The kinematic threshold is the QI's: a continuum's model Q is its QM (D44).
+        # The kinematic threshold is the QI's: a continuum's model Q is its QM.
         from kika.nuclear_data.model.endf_conversion import reactionQI
         qi=reactionQI(entries[key],suite)
         if qi is None or qi>=0:continue

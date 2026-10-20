@@ -1,6 +1,6 @@
 """GNDS-2.1 §18 ``distribution`` — every law the library uses, implemented.
 
-The roadmap's rule was **empty slots exist, they are not absent**: each law was
+The design rule was **empty slots exist, they are not absent**: each law was
 declared before it was filled, so a reader meeting one could say which GNDS node
 it could not handle instead of failing somewhere unrelated, and so that adding
 the implementation later restructured nothing. Phase 7b filled them, and the
@@ -209,7 +209,7 @@ class NBodyPhaseSpace:
 
     ``mass`` is the total mass of the N products, and it comes with its unit
     stated (``amu`` in the library) — a :class:`PhysicalQuantity` rather than a
-    bare float, for the reason §4.1's scattering radius made expensive: a
+    bare float, for the reason the scattering radius made expensive: a
     number whose unit lives in a convention instead of beside it is a factor of
     ten waiting to happen.
     """

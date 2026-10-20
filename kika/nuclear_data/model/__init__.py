@@ -42,7 +42,7 @@ whichever applies. Do not take that on this docstring's word —
 three that the door is a *route* and not a fourth decoder.
 
 What the decoders do not reach is the shorter list. **MF12-15** reach the model
-since roadmap E5b/E5d (2026-10-09); MF12 LO=2 cascades travel as declared bytes until E5c. **MF5** has a node for every law since roadmap E2. Of **MF6**
+since 2026-10-09. **MF5** has a node for every law. Of **MF6**
 every law but LAW=5 does — measured 2026-08-24, the charged-particle elastic
 expansion is the one shape no GNDS evaluation in the distributed library
 carries, so there is nothing to map it onto — and a subsection whose LAW is

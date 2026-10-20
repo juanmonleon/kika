@@ -294,7 +294,7 @@ class _SuiteReader:
                             charge=base.charge, halflife=base.halflife, decayData=base.decayData,
                             generation=particle.attrib.get("generation", "electronic")))
         for particle in element.iter("unorthodox"):
-            # A thermal-scattering target (roadmap E4b): mass and charge only.
+            # A thermal-scattering target: mass and charge only.
             from kika.nuclear_data.model import Unorthodox
             pops.add(Unorthodox(
                 id=particle.attrib["id"],
@@ -332,7 +332,7 @@ class _SuiteReader:
         )
 
     def readDecayData(self, element: Optional[ET.Element]):
-        """§12 ``decayData`` in full (E5c's cascade, E7b's decay sublibrary):
+        """§12 ``decayData`` in full (an MF12 LO=2 cascade, a decay sublibrary):
         :func:`kika.gnds.decay.readDecayData`."""
         from .decay import readDecayData
         return readDecayData(element, self.tally)
@@ -436,7 +436,7 @@ class _SuiteReader:
             outputChannel=outputChannel,
         )
         if ddcs is not None:
-            # §14, roadmap E4b: the thermal scattering law. The reaction's
+            # §14: the thermal scattering law. The reaction's
             # crossSection and its neutron's distribution are links into it.
             from .thermal_scattering import readDoubleDifferentialCrossSection
             reaction.doubleDifferentialCrossSection = readDoubleDifferentialCrossSection(
@@ -555,7 +555,7 @@ class _SuiteReader:
         """§18.4: the delayed-neutron families and the energy release.
 
         The inverse of the writer's ``fissionFragmentData``, product yields
-        included (MF8/454, /459, roadmap E7c: :mod:`kika.gnds.fission_yields`).
+        included (MF8/454, /459: :mod:`kika.gnds.fission_yields`).
         """
         from kika.nuclear_data.model import (DelayedNeutron, FissionEnergyRelease,
                                              FissionFragmentData, Product)

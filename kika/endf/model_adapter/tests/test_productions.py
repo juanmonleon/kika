@@ -1,4 +1,4 @@
-"""MF8/MF9/MF10 ↔ ``reactionSuite/productions`` (roadmap E6).
+"""MF8/MF9/MF10 ↔ ``reactionSuite/productions``.
 
 What is pinned, on the two committed activation cuts (JENDL-5 Co-59: LMF=3, 9
 and 10 on one tape; ENDF/B-VIII.1 Am-241: MF9 with MF8's ``NO=0`` decay LISTs):

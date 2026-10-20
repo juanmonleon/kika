@@ -3,7 +3,7 @@
 The method had no test. It is the only way a cross-section covariance becomes
 an uncertainty band, it is what ``kika.endf.plotting`` calls for the MF3 half
 of its job, and on every ENDF-derived covariance it has never once returned a
-band — which is D13 in ``docs/library/library-gaps.md``.
+band.
 
 The file went in first as the freeze, with the pointwise tests asserting the
 refusal; the fix in the commit on top flipped them. It is organised by the two
@@ -107,7 +107,7 @@ def test_a_pair_that_is_in_neither_dictionary_is_a_valueerror():
 
 
 # ---------------------------------------------------------------------------
-# The pointwise path — D13, now answered
+# The pointwise path — now answered
 # ---------------------------------------------------------------------------
 
 def test_a_relative_matrix_carries_its_own_answer():
@@ -132,7 +132,7 @@ def test_the_band_lands_on_the_matrix_s_own_boundaries():
     A pointwise covariance leaves ``energy_grid`` None and gives each matrix
     its own boundaries. Falling back to group indices would put the band at
     0…3 eV under a cross section that lives at keV — wrong rather than absent,
-    which is why both halves of D13 had to be fixed together.
+    which is why both halves of the defect had to be fixed together.
     """
     _, band = _pointwise().to_plot_data(nuclide=26056, mt=2)
 
@@ -144,7 +144,7 @@ def test_an_absolute_matrix_with_no_cross_section_says_why_it_declines(caplog):
     """``sqrt(diag)`` of an absolute covariance is in barns, not per cent.
 
     Relativising it needs σ(E), and nothing on this object carries σ(E).
-    Declining is the right answer; declining *silently* is what made D13 take
+    Declining is the right answer; declining *silently* is what made the defect take
     eight months, so it is logged.
     """
     with caplog.at_level(logging.WARNING,
@@ -187,8 +187,8 @@ def test_the_cross_section_half_is_still_multigroup_only():
     ``_extract_xs_data`` sizes itself from ``num_groups``, which a pointwise
     covariance leaves at 0. Nothing produces this state — ``to_xs_covmat``
     never writes ``cross_sections`` — but a caller who populates it by hand
-    gets an exception from the *nominal* half before the band is reached. D13
-    was about the band; the nominal is a separate increment.
+    gets an exception from the *nominal* half before the band is reached. The
+    defect was about the band; the nominal is a separate increment.
     """
     cov = _pointwise()
     cov.cross_sections[(26056, 2)] = XS.copy()

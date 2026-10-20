@@ -158,7 +158,7 @@ def build_pfns_covariance(
     if covariance_override is not None:
         raise NotImplementedError(
             "covariance_override is reserved for the cross-pipeline external "
-            "covariance resolver (roadmap P5) and is not implemented. It is in "
+            "covariance resolver and is not implemented. It is in "
             "the signature now so that adding it is not an API break. Note "
             "that MF35 will need its own grid reconciliation: its entries are "
             "absolute covariances of integrated probabilities, so collapsing "
@@ -193,7 +193,7 @@ def build_pfns_covariance(
     # match — but §25.2.3 spells the attribute with a comma and every
     # distributed GNDS file agrees, so an equality against one spelling is a
     # filter that silently selects nothing the day the suite arrives the other
-    # way. The properties read both. See `docs/library/gnds_endf_conflicts.md` §3.1.
+    # way. The properties read both.
     sections = [s for s in suite if s.rowData is not None
                 and (s.rowData.ENDF_MF, s.rowData.ENDF_MT) == (35, mt)]
     bands = [s.rowData.incidentEnergyBand for s in sections]
@@ -819,7 +819,7 @@ def pfns_ratio_rule(deltas_by_band: Dict[int, np.ndarray], *,
     delta on a group probability into a ratio, freezing a group with no
     probability to scale, and projecting onto ``{r >= 0, sum P0 r = sum P0}``.
     Those are statements about the draw, they need this module's covariance
-    vocabulary, and the roadmap's decision 4 keeps them here.
+    vocabulary, so they are kept here.
 
     Returns a callable ``(band, p0, covered) -> (ratios, info)``, which
     ``applySpectrumFactors`` invokes once per outer node -- once per incident
