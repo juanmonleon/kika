@@ -299,8 +299,7 @@ population-weighted mean.
     removes it too agrees within $2.1\sigma$ there;
   - the 10 MeV cases sit at −0.9 % for every heating number alike.
 - **kika's tables against eprdata25 in OpenMC.** Same runs, leaving-photon spectrum:
-  $\chi^2/
-u$ between 0.25 and 1.63 (p ≥ 0.19) in all 13 cases.
+  $\chi^2/\nu$ between 0.25 and 1.63 (p ≥ 0.19) in all 13 cases.
 - **ENDF evaluations through the model.** The ENDF/B-VIII.1 photoat, atomic_relax and
   electrons tapes (100 each) are read into the model and written back byte for byte
   (`kika/endf/model_adapter/tests/test_photoatomic_model.py`,
