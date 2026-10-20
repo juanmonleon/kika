@@ -81,3 +81,9 @@ def test_short_records_keep_the_same_numeric_fields(width):
     line = record([1, "2.500000-1", "", -3, 4, 5])[:width]
     expected = tuple(parse_line(line).get(f"C{i}") for i in range(1, 7))
     assert parse_record_values(line) == expected
+
+
+@pytest.mark.parametrize("text, value", [(" 1.35462+ 7", 13546200), ("1.35462 +7", 13546200), ("-2.5- 3", -2.5e-3)])
+def test_blanks_inside_a_number_are_ignored_as_fortran_does(text, value):
+    # IRDFF-II's master tape writes exponents with a blank; NJOY reads them (BLANK='NULL')
+    assert parse_number(text) == pytest.approx(value, rel=1e-15)
