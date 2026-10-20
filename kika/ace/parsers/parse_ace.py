@@ -28,6 +28,7 @@ from kika.ace.parsers.parse_secondary_data_locators import parse_ixs_block
 from kika.ace.parsers.parse_secondary_cross_sections import parse_hpd_block
 from kika.ace.parsers.parse_photoatomic import is_photoatomic_extension, parse_photoatomic
 from kika.ace.parsers.parse_dosimetry import is_dosimetry_extension, parse_dosimetry
+from kika.ace.parsers.parse_photonuclear import is_photonuclear_extension, parse_photonuclear
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -104,6 +105,10 @@ def read_ace(filename, debug=False, strict=True):
     # own grid and laws.
     if is_dosimetry_extension(ace.header.extension):
         return parse_dosimetry(ace.header, ace.xss_data, filename, ace.xss_int_words)
+    # A photonuclear table ('u'): one grid, the reactions, and per emitted
+    # particle its production, yields, angles and energy laws.
+    if is_photonuclear_extension(ace.header.extension):
+        return parse_photonuclear(ace.header, ace.xss_data, filename, ace.xss_int_words)
 
     parse_blocks(ace, debug)
     return ace
