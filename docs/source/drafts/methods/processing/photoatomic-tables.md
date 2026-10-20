@@ -297,7 +297,12 @@ population-weighted mean.
     100 keV +0.9 %) is
     OpenMC's photon at the binding energy for a vacancy with no transitions: a number that
     removes it too agrees within $2.1\sigma$ there;
-  - the 10 MeV cases sit at −0.9 % for every heating number alike.
+  - at 10 MeV, run again with 2·10⁵ (water) and 4·10⁵ (iron, lead) photons and the
+    heating split by reaction and by incident energy: water −0.34 %, iron +0.13 %, lead
+    +0.12 %, every split within 1.8σ, the first collisions' reaction rates equal to
+    OpenMC's to 10⁻⁷ (measured 2026-10-20). The −0.9 % of the shorter runs, shared by the
+    three materials, came from their one random seed: their first collisions drew the
+    same numbers.
 - **kika's tables against eprdata25 in OpenMC.** Same runs, leaving-photon spectrum:
   $\chi^2/\nu$ between 0.25 and 1.63 (p ≥ 0.19) in all 13 cases.
 - **ENDF evaluations through the model.** The ENDF/B-VIII.1 photoat, atomic_relax and
