@@ -37,6 +37,7 @@ byte for byte, and model → GNDS → model identical.
 """
 from __future__ import annotations
 
+import functools
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
@@ -797,7 +798,16 @@ def _isControl(line: str) -> bool:
 
 def _rawSection(path, mf: int, mt: int) -> List[str]:
     """The section's records as the tape spells them, ID columns kept, SEND out."""
-    out = []
+    import os
+
+    key = os.fspath(path)
+    return list(_rawSections(key, os.stat(key).st_mtime_ns).get((mf, mt), []))
+
+
+@functools.lru_cache(maxsize=4)
+def _rawSections(path: str, stamp: int) -> dict:
+    """Every section of the tape at ``path`` (as of ``stamp``), read once: ``{(MF, MT): [records]}``."""
+    out: dict = {}
     with open(path, encoding="latin-1") as handle:
         for line in handle:
             line = line.rstrip("\r\n")
@@ -807,8 +817,8 @@ def _rawSection(path, mf: int, mt: int) -> List[str]:
                 lmf, lmt = int(line[70:72]), int(line[72:75])
             except ValueError:
                 continue
-            if lmf == mf and lmt == mt:
-                out.append(line)
+            if lmf and lmt:
+                out.setdefault((lmf, lmt), []).append(line)
     return out
 
 

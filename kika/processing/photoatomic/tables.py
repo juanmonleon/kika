@@ -97,26 +97,24 @@ def _onGrid(x, y, grid) -> np.ndarray:
     out = np.zeros(grid.size)
     if x.size == 0:
         return out
-    # which copy of a repeated energy each grid point is
-    copy = np.zeros(grid.size, dtype=int)
-    copy[1:] = (grid[1:] == grid[:-1]).astype(int)
+    copy = np.zeros(grid.size, dtype=int)              # which copy of a repeated energy
+    copy[1:] = grid[1:] == grid[:-1]
+    repeated = copy.astype(bool)
+    repeated[:-1] |= grid[:-1] == grid[1:]
     first = np.searchsorted(x, grid, side="left")
-    last = np.searchsorted(x, grid, side="right")
+    count = np.searchsorted(x, grid, side="right") - first
     inside = (grid >= x[0]) & (grid <= x[-1])
-    for i in np.flatnonzero(inside):
-        g = grid[i]
-        if last[i] > first[i]:                 # a node of the table
-            n = last[i] - first[i]
-            repeated = (i + 1 < grid.size and grid[i + 1] == g) or copy[i]
-            if g == x[0] and n == 1 and repeated:
-                out[i] = 0.0 if copy[i] == 0 else y[0]          # the table opens here
-            elif g == x[-1] and n == 1 and repeated:
-                out[i] = y[-1] if copy[i] == 0 else 0.0         # the table closes here
-            else:
-                out[i] = y[first[i] + min(copy[i], n - 1)]
-        else:
-            k = first[i]
-            out[i] = y[k - 1] + (y[k] - y[k - 1]) / (x[k] - x[k - 1]) * (g - x[k - 1])
+    node = inside & (count > 0)
+    opens = node & (grid == x[0]) & (count == 1) & repeated          # the table opens here
+    closes = node & (grid == x[-1]) & (count == 1) & repeated & ~opens   # the table closes here
+    plain = node & ~opens & ~closes
+    out[opens] = np.where(copy[opens] == 0, 0.0, y[0])
+    out[closes] = np.where(copy[closes] == 0, y[-1], 0.0)
+    out[plain] = y[first[plain] + np.minimum(copy[plain], count[plain] - 1)]
+    between = inside & (count == 0)
+    k = first[between]
+    x0, x1, y0, y1 = x[k - 1], x[k], y[k - 1], y[k]
+    out[between] = y0 + (y1 - y0) / (x1 - x0) * (grid[between] - x0)
     return out
 
 
@@ -241,6 +239,10 @@ def _relaxation(pops, notes: PhotoatomicNotes) -> Tuple[int, List[_Subshell]]:
             products = mode.decayPath.decays[0].products
             vacancy = next(p.pid for p in products if "{" in p.pid)
             labels = vacancy[vacancy.index("{") + 1:-1].split(",")
+            missing = [label for label in labels if label not in binding]
+            if missing:
+                raise ValueError(f"a transition filling {c.subshell} leaves a vacancy in {missing}, which the "
+                                 f"relaxation data states no binding energy for")
             j = subshellDesignator(labels[0])
             if len(labels) == 1:
                 rad.append(_Transition(j, 0, binding[c.subshell] - binding[labels[0]], float(mode.probability)))
