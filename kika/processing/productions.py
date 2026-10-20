@@ -1,4 +1,4 @@
-"""The forms a radionuclide production (ENDF MF8-10, roadmap E6) takes at a processed label.
+"""The forms a radionuclide production (ENDF MF8-10) takes at a processed label.
 
 A production shares its MT with the reaction that makes it -- MT102's isomer is
 MT102 -- so it is not a cross section of the material, and the resonance

@@ -18,7 +18,7 @@
  * arguments (y^2 - x'^2 > -31; |2 x' y| < 11), with the same polynomials and
  * reductions: kexp's 2^k is built exactly from k + 1.5 * 2^52, ksincos's
  * quadrant is chosen by selects. Measured 3.0-3.3x faster with AVX2, 1.3x
- * without (PXB-042). */
+ * without. */
 
 static inline double URR_NAME(kexp)(double x) URR_TARGET;
 static inline double URR_NAME(kexp)(double x) {

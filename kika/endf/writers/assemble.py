@@ -7,11 +7,9 @@ for a while — ``encodeMF1MT451``, ``encodeMF2MT151``, ``encodeMF3MT``,
 came from. What was missing was never the rendering; it was the **assembly**:
 the order sections go in, the SEND/FEND/MEND/TEND bookkeeping, the tape
 identification record and the MF1/451 directory. That is what this module is.
-``docs/library/gnds_endf_conflicts.md`` §2.8, and §10 for why the sampling pipeline
-cares.
 
 **The gate is a fixed point inside the model, not byte identity against the
-source tape** (decided 2026-08-13, owner Juan)::
+source tape** (decided 2026-08-13)::
 
     read(tape) → suite → writeEndfTape(suite, tape') → read(tape') → suite'
     assert suite' == suite
@@ -20,7 +18,7 @@ Deliberately weaker than byte identity, and deliberately so: where a field is
 padded and whether ``1e-5`` is written ``1.0-5`` carry no information, and
 chasing them is a different job from being correct. What the fixed point does
 catch is the only thing that matters here — **a quantity that does not survive
-the trip**. Its blind spot is stated in §2.8 and is real: anything the model
+the trip**. Its blind spot is real: anything the model
 does not carry is absent from both sides and the comparison passes. So the
 fixed point is necessary and not sufficient, and it leans on
 :class:`~kika.nuclear_data.model.conversion.ConversionReport` being honest about
@@ -28,17 +26,17 @@ what did not come through.
 
 **Sections come only from what the model has**, or from what the decoder kept
 verbatim beside it and said so. MF12-15 come back from the photon products
-(roadmap E5b) and, where the model does not carry them yet (LO=2, MF13, photons
+and, where the model does not carry them yet (LO=2, MF13, photons
 with no reaction), from the text the decoder kept. MF5 comes back whole — its analytic
-spectra have had nodes since roadmap E2 — and MF32 is written into the section
-the decoder kept (E1). So does **all of MF6**: what the model does
+spectra have had nodes since 2026-10-08 — and MF32 is written into the section
+the decoder kept. So does **all of MF6**: what the model does
 not carry there — LAW=5, and any subsection whose LAW is negative — is kept
 verbatim in the reaction's provenance, so the section is re-emitted whole even
 where the distribution never reached a node.
 
 **Two limits that no amount of code removes**, both format facts rather than
-gaps here: a GNDS reaction may have no MT at all (§2.4), and MF13 is reached
-from MF3 by arithmetic rather than by re-encoding (§2.6). Both are reported per
+gaps here: a GNDS reaction may have no MT at all, and MF13 is reached
+from MF3 by arithmetic rather than by re-encoding. Both are reported per
 occurrence.
 """
 from __future__ import annotations
@@ -272,12 +270,12 @@ def _mf3And4And5Sections(suite, mat, report, label=None):
     for reaction in _mf3Bearing(suite):
         mt = reaction.ENDF_MT
         if mt is None:
-            # §2.4, and it is irreducible: GNDS labels reactions and does not
+            # This is irreducible: GNDS labels reactions and does not
             # require an MT, so a suite that did not come from ENDF may hold a
             # reaction there is no section number for.
             report.lost(
                 f"reaction {reaction.label!r} has no ENDF MT, so it has no MF3 "
-                f"section to be written into (gnds_endf_conflicts.md §2.4)"
+                f"section to be written into"
             )
             continue
 
@@ -461,8 +459,7 @@ def _mf6Sections(suite, mat, report, label=None):
         if mt is None:
             report.lost(
                 f"reaction {reaction.label!r} carries an MF6 provenance and no "
-                f"ENDF MT, so there is no section number to write it under "
-                f"(gnds_endf_conflicts.md §2.4)"
+                f"ENDF MT, so there is no section number to write it under"
             )
             continue
 
@@ -490,8 +487,8 @@ def _mf6Sections(suite, mat, report, label=None):
                 form = _evaluatedForm(product, EVAL_LABEL)
             if form is not None:
                 forms[product.label or product.pid] = form
-            # A photon line's multiplicity is its share of the section's yield
-            # (D40), so the encoder needs it beside the form.
+            # A photon line's multiplicity is its share of the section's yield,
+            # so the encoder needs it beside the form.
             multiplicity = getattr(getattr(product, "multiplicity", None), "form", None)
             if multiplicity is not None:
                 multiplicities[product.label or product.pid] = multiplicity
@@ -509,21 +506,21 @@ def _mf6Sections(suite, mat, report, label=None):
 
 
 def _photonSections(suite, mat, report):
-    """MF12-15: from the model where the decoder modelled them, else as kept (roadmap E5b)."""
+    """MF12-15: from the model where the decoder modelled them, else as kept."""
     from ..model_adapter.photons import encodePhotonSections
 
     return encodePhotonSections(suite, mat, report)
 
 
 def _productionSections(suite, mat, report):
-    """MF8-10 from ``suite.productions``, and MF8 as kept where it still agrees (roadmap E6)."""
+    """MF8-10 from ``suite.productions``, and MF8 as kept where it still agrees."""
     from ..model_adapter.productions import encodeProductionSections
 
     return encodeProductionSections(suite, mat, report)
 
 
 def _mf7Sections(suite, mat, report):
-    """MF7 for a thermal-scattering suite (roadmap E4); nothing for any other."""
+    """MF7 for a thermal-scattering suite; nothing for any other."""
     from ..model_adapter.thermal_scattering import encodeMF7Sections
 
     return encodeMF7Sections(suite, mat, report)
@@ -804,7 +801,7 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
 def writeEndfTapes(suites, path, mats: Optional[Sequence[Optional[int]]] = None,
                    tapeId: Optional[str] = None, *,
                    label: Optional[str] = None) -> list:
-    """Several suites → one ENDF-6 tape, one material each (roadmap T2).
+    """Several suites → one ENDF-6 tape, one material each.
 
     Returns one :class:`ConversionReport` per suite, in the order given.
 

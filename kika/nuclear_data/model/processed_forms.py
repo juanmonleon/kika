@@ -19,7 +19,7 @@ data but consequences of kinematics:
 
 They are kept as their own classes rather than forced into the GNDS nodes they
 resemble so that a read of a processed file holds exactly what it said, and the
-writer emits exactly that back (roadmap H2, gate 1).
+writer emits exactly that back.
 """
 from __future__ import annotations
 

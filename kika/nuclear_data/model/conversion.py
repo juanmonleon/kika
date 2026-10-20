@@ -1,6 +1,6 @@
 """``ConversionReport`` — nothing converts silently.
 
-Every decoder and encoder returns one. The roadmap's hard rule for phase 7 is
+Every decoder and encoder returns one. The hard rule is
 that *"while MF coverage is partial, the writer emits only what kika owns and
 declares the gaps. A structurally valid, physically incomplete reactionSuite is
 worse than none, because it carries authority it has not earned."* This is the

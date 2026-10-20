@@ -90,7 +90,7 @@ class _ReactionList:
         return iter(self.reactions)
 
     def __bool__(self) -> bool:
-        # An empty container is still *present*, which is the roadmap's rule.
+        # An empty container is still *present*, which is the design rule.
         # Without this, `if suite.reactions:` would read an empty-but-declared
         # container as absent, which is exactly the distinction being made.
         return True
@@ -207,7 +207,7 @@ class Productions(_ReactionList):
 
 
 def isRadionuclideProduction(reaction) -> bool:
-    """A ``production`` of a radioactive nuclide (ENDF MF8-10, roadmap E6).
+    """A ``production`` of a radioactive nuclide (ENDF MF8-10).
 
     Told apart from the other responses ``suite.productions`` holds (gas
     production, MT203-207) by its channel's ``genre``, which the ENDF and GNDS

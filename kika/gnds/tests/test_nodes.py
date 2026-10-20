@@ -212,11 +212,11 @@ def test_the_known_defects_are_pinned_by_count():
     **The last one left by decision, not by repair, and that is the reason this
     docstring is longer than the assert.** ``supportsAngularReconstruction`` is
     still read, still reported and still never written; what changed is that
-    ``gnds_endf_conflicts.md`` §6.4 ruled it won't-fix — no number sits under
+    it was ruled won't-fix — no number sits under
     the attribute — so it moved to ``ONE_SIDED_ATTRIBUTES`` carrying its count
     and its reason. Zero here therefore means *nothing left that is wrong*, not
     *nothing left that is one-sided*, and the second assert is what keeps the
-    difference visible. If a later reading disagrees with §6.4, the entry comes
+    difference visible. If a later reading disagrees with that ruling, the entry comes
     back here rather than the count being quietly reinterpreted.
     """
     assert len(nodes.KNOWN_DEFECTS) == 0

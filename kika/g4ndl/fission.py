@@ -48,7 +48,7 @@ Geant4 reads (``G4ParticleHPFission::BuildPhysicsTable`` registers one
 
 Every parser reads its file to the last token and keeps every token the
 consumer reads; the ``G4NDL <source>`` header is kept where a file has one
-(``FF`` does). The census of both libraries is in ``G4NDL_token_spec.md`` §12.
+(``FF`` does).
 
 Like the rest of :mod:`kika.g4ndl`, nothing here imports the model.
 """

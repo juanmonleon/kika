@@ -1,8 +1,8 @@
 """The arithmetic of perturbing a tabulated f(mu) by Legendre-order factors.
 
-T1 of ``docs/library/mf4_tabulated_perturbation_roadmap.md``: one table, one
+One table, one
 incident energy, no model nodes. The energy dimension and the gate against the
-Legendre applier are further down the roadmap and further down this file.
+Legendre applier are further down this file.
 """
 from __future__ import annotations
 

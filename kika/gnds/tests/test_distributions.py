@@ -126,7 +126,7 @@ def test_a_primary_gamma_is_not_a_discrete_one(h2):
 
 
 def test_an_n_body_phase_space_carries_its_mass_with_its_unit(h2):
-    """§4.1's lesson, applied where the file *does* state the unit.
+    """The scattering-radius lesson, applied where the file *does* state the unit.
 
     ``<mass value= unit=>`` is a PhysicalQuantity, and it is kept as one rather
     than as a float plus a convention — which is the shape that cost a factor
@@ -264,7 +264,7 @@ def test_an_analytic_spectrum_is_reported_and_not_guessed(tag, h2_gnds,
                                                           tmp_path):
     """Six of the eleven energy choices are formulae with named parameters.
 
-    They are read since 2026-10-08 (roadmap E2; the round trips are in
+    They are read since 2026-10-08 (the round trips are in
     ``kika/endf/model_adapter/tests/test_energy_spectra.py``). What this keeps
     pinning is the other half: one planted **without** its parameters is not a
     spectrum, so it is reported with its xPath and nothing is guessed in its

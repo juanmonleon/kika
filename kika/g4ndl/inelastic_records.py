@@ -2,8 +2,7 @@
 
 The inelastic counterpart of :mod:`kika.g4ndl.records`, with the same rule:
 every token the consumer reads is kept, in file order, and none is
-interpreted. The grammar is Geant4 v11.4.3's, written down with line
-references in ``G4NDL_token_spec.md`` §10:
+interpreted. The grammar is Geant4 v11.4.3's:
 
 * ``Inelastic/CrossSection/<name>`` is the elastic cross-section grammar
   (``G4ParticleHPIsoData::Init``) and reuses

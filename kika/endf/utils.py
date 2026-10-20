@@ -239,7 +239,7 @@ def describe_interpolation_region(nbt, int_code):
 
 
 
-# Moved to kika/processing/interpolation.py by phase 2 of the GNDS roadmap:
+# Moved to kika/processing/interpolation.py during the GNDS migration:
 # interpolation law codes 1-5 are shared with GNDS (§3.4.4) and are not
 # ENDF-specific. This is a *live* re-export -- eight call sites in kika/endf
 # import interpolate_1d_endf -- not a shim awaiting deletion.
@@ -556,7 +556,7 @@ def parse_data_values(lines, start, n_values):
 #: NDIGIT=6 is the only one with no ``1X`` after JJ, which is why the five cases
 #: are a table and not an arithmetic expression. Getting that wrong shifts every
 #: field of an NDIGIT=6 record by one column, and no tape on this machine uses
-#: NDIGIT=6 to catch it — see ``docs/library/mf32-notes.md``.
+#: NDIGIT=6 to catch it.
 _INTG_LAYOUT: Dict[int, Tuple[int, int, int]] = {
     2: (18, 3, 1),
     3: (13, 4, 1),
@@ -908,7 +908,7 @@ def parse_tab2(lines, start):
 def _assertAscending(x_data, mf: int, mt: int) -> None:
     """Refuse to write a TAB1 whose abscissae go backwards.
 
-    **This gate exists because of D31** (``docs/library/library-gaps.md``), and
+    **This gate exists because of a defect**, and
     the reason it sits *here* rather than in the code that had the defect is the
     whole point. ``_augment_with_step_duplicates`` inserted step points at bin
     edges in the wrong order when two edges fell in one interval; that produced a

@@ -1,8 +1,8 @@
 """Run **under FUDGE's interpreter**, not kika's: ENDF tape → JSON of what FUDGE reads.
 
-The other half of ``test_fudge_in_the_loop.py`` (ENDF-coverage roadmap T5).
+The other half of ``test_fudge_in_the_loop.py``.
 It imports nothing from kika and kika imports nothing from it: FUDGE stays out
-of kika's environment entirely, which is the rule (``gnds_roadmap.md``: FUDGE
+of kika's environment entirely, which is the rule (FUDGE
 generates fixtures and is never a dependency at run time). The test sends this
 file's source and the tape's text on stdin, separated by ``TAPE_MARKER``, and
 reads one JSON line back, prefixed by ``JSON_MARKER`` because FUDGE prints its
@@ -18,9 +18,9 @@ What it reports is what kika's ENDF decoder also builds, in plain lists:
 * ``resonances`` — every resolved resonance energy, sorted.
 * ``photons`` — per MT, every photon product (of the reaction and of the decay
   of its residual): its multiplicity, the kind and value of its energy form,
-  its continuum table and its Legendre rows (roadmap E5b).
+  its continuum table and its Legendre rows.
 * ``pops`` — FUDGE's PoPs as XML, where the level energies and the MF12 LO=2
-  cascades live (roadmap E5c); kika parses it on its own side.
+  cascades live; kika parses it on its own side.
 
 Given a neutron GNDS file kika wrote (a name ending in ``.xml``), it reports
 that file's ``pops`` and FUDGE's ``toENDF6`` of it under ``endf``.
@@ -202,16 +202,16 @@ def main(tapeText, name):
     from brownies.legacy.converting import endfFileToGNDS
 
     if name.endswith(".xml"):
-        # The other direction (roadmap E4b): a GNDS file kika wrote, read by
+        # The other direction: a GNDS file kika wrote, read by
         # FUDGE and reported exactly as an ENDF translation would be.
         reactionSuite = _readGnds(tapeText)
         if str(reactionSuite.interaction) != "thermalNeutronScatteringLaw":
-            # A neutron evaluation kika wrote (roadmap E5c): FUDGE's PoPs of
+            # A neutron evaluation kika wrote: FUDGE's PoPs of
             # it, and FUDGE's ENDF of it.
             import brownies.legacy.toENDF6.toENDF6  # noqa: F401 - attaches toENDF6
             out = {"pops": "\n".join(reactionSuite.PoPs.toXML_strList()),
                    "resonances": _resonanceEnergies(reactionSuite)}
-            # D38: FUDGE's resonance reconstruction, which needs more of the
+            # FUDGE's resonance reconstruction, which needs more of the
             # file than reading does (a fission channel's link to a reaction
             # with a fissionGenre, the elastic channel's particle pair).
             try:
@@ -233,7 +233,7 @@ def main(tapeText, name):
         out = {"tsl": _tsl(reactionSuite)}
         if str(reactionSuite.interaction) == "thermalNeutronScatteringLaw":
             # And on to ENDF, which FUDGE can only do with the MAT=…,ZA=… note
-            # kika writes on a TSL suite (roadmap E4, GNDS → ENDF).
+            # kika writes on a TSL suite (GNDS → ENDF).
             import brownies.legacy.toENDF6.toENDF6  # noqa: F401 - attaches toENDF6
             try:
                 out["endf"] = reactionSuite.toENDF6("eval", {"verbosity": 0})

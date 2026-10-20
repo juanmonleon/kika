@@ -15,9 +15,7 @@ naming the MT and the product, and the file-level loop charges it to that one MT
 
 **The walk was verified before this parser was written.** A standalone record
 walker built from the same layout was run over the MF6 of twelve ENDF/B-VIII.1
-tapes and landed exactly on the SEND record of 633 sections out of 633. The
-measured law census, and the negative-LAW rule that census turned up, are in
-``docs/library/mf6_notes.md`` in the workspace repo.
+tapes and landed exactly on the SEND record of 633 sections out of 633.
 """
 from typing import List, Tuple
 

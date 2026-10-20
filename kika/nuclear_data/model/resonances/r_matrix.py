@@ -101,9 +101,8 @@ class ExternalRMatrix:
     **ENDF states this too**, which is why the node is not a GNDS curiosity:
     LRF=7's KBK/LBK records are the same object, with LBK=2 SAMMY's and LBK=3
     Froehner's. ``kika/endf/model_adapter/resonances.py`` still carries those
-    verbatim in provenance rather than through here — see
-    ``docs/library/gnds_endf_conflicts.md`` §6.4, which sizes that migration and
-    notes the one form this node cannot take: LBK=1 tabulates the background as
+    verbatim in provenance rather than through here. The one form this
+    node cannot take: LBK=1 tabulates the background as
     two curves, and GNDS has no ``externalRMatrix`` form for a table.
     """
 
@@ -179,8 +178,8 @@ class Channel:
     #: §19.3.4's ``externalRMatrix``, the R-matrix outside the fitted range —
     #: ENDF's LBK=2/LBK=3 background R-matrix under LRF=7. ``None`` where the
     #: channel states none, which is all but 7 channels of the 558 distributed
-    #: neutron evaluations. Modelled 2026-08-24, closing the last open row of
-    #: ``docs/library/gnds_endf_conflicts.md`` §6.4; before that it was read,
+    #: neutron evaluations. Modelled 2026-08-24;
+    #: before that it was read,
     #: reported and dropped, so a file kika round tripped came back with the
     #: evaluator's background R-matrix silently gone. It is the schema's **first**
     #: child of a channel (``gnds.xsd:915-919``, an ``xs:sequence`` ahead of both
@@ -239,8 +238,7 @@ class ResonanceReaction:
     #: That argument is about which radius the *physics* reads, not about which
     #: one the file states, so it justified not consuming the number and never
     #: justified not carrying it: a reader that drops it cannot write the file
-    #: back. Modelled now, one field beside its sibling. See
-    #: ``docs/library/gnds_endf_conflicts.md`` §6.4.
+    #: back. Modelled now, one field beside its sibling.
     hardSphereRadius: Optional[float] = None
 
 

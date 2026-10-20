@@ -81,7 +81,7 @@ FACADE_IMPORTERS = {
 #: has to go in that list — it is reached through ``kika.__getattr__``, which
 #: modulegraph cannot see either.
 #:
-#: **Phase P2 of the PFNS roadmap (2026-08-10) added the second.**
+#: **The PFNS sampling work (2026-08-10) added the second.**
 #: ``kika/sampling/mf35_sampling.py`` reads MF35 into a ``CovarianceSuite``,
 #: because the library's format-agnostic covariance object is the GNDS one and
 #: a PFNS-specific container would have been the fourth. The import is inside
@@ -146,7 +146,7 @@ FACADE_IMPORTERS = {
 #: there deliberately, since the commit the app pins predates them. If the app
 #: ever calls this writer, restoring those four is a precondition, and the
 #: comment block at ``kika-api.spec:128-153`` is where that is written down.
-#: **M1 of the perturbation roadmap (2026-08-29) added the fifth.**
+#: **The model-side perturbation work (2026-08-29) added the fifth.**
 #: ``kika/sampling/mf33_sampling.py`` decodes MF33 and MF31 into a
 #: ``CovarianceSuite`` in ``loadCrossSectionBlocks``, which is the model-side
 #: source the MF33/MF31 draw was missing -- the same reason as the MF35 and MF34
@@ -199,14 +199,14 @@ PERMANENT_IMPORTERS = {
     "kika/sampling/model_perturbation.py",
     "kika/sampling/joint_mf33_mf34.py",
     "kika/endf/writers/assemble.py",
-    # The ENDF door for a decay or fission-yield evaluation (roadmap E7), which
+    # The ENDF door for a decay or fission-yield evaluation, which
     # is a PoPs and not a reactionSuite; `kika.write` reaches it as it reaches
     # `assemble`. Frozen build: kika-api.spec needs
     # `kika.endf.model_adapter.decay_sublibrary` and `.fission_yields` in its
-    # hiddenimports (handoff note of 2026-10-09).
+    # hiddenimports.
     "kika/endf/writers/sublibrary.py",
-    # G4NDL's photon bodies are ENDF's MF12-15 field for field, and D10-2
-    # (roadmap E5f.3) puts them in the model through the ENDF photon adapter on
+    # G4NDL's photon bodies are ENDF's MF12-15 field for field, and they go
+    # into the model through the ENDF photon adapter on
     # purpose: one path for photons into the model, not two. Imported inside the
     # functions that decode or encode a final state, so parsing G4NDL does not
     # wake the model. Frozen build: `kika.g4ndl.photons` and
@@ -256,7 +256,7 @@ PERMANENT_IMPORTERS = {
     # would be a second definition. Imported inside the functions that need
     # them. Frozen build: as above.
     "kika/hdf5/processing.py",
-    # The G4NDL inelastic writer (D40, 2026-10-13): an MF6 photon whose lines
+    # The G4NDL inelastic writer (2026-10-13): an MF6 photon whose lines
     # the ENDF decoder split into products goes back to one product with its
     # lines first, as G4NDL tables them, through `mergedLineSpectra` -- the
     # same bookkeeping, and the same reason, as `kika/hdf5/processing.py`
@@ -264,6 +264,17 @@ PERMANENT_IMPORTERS = {
     # build: `photon_lines` is a static import of `model_adapter.energy_angle`,
     # so `kika.endf.model_adapter` in kika-api.spec's hiddenimports carries it.
     "kika/g4ndl/inelastic_encode.py",
+    # The G4NDL capture writer (2026-10-20): MT102's photons go back to one MF6
+    # product through `mergedLineSpectra`, as in the inelastic writer above.
+    # Same import site and frozen build.
+    "kika/g4ndl/capture.py",
+    # The photonuclear ACE tables (2026-10-20): a product's angular and
+    # correlated records are the ACE encoder's (`_angularRecord`,
+    # `_correlatedRecord`, `_frameOf`), not a second copy of them. Imported
+    # inside the functions that build a particle's block. Frozen build:
+    # `kika.ace.model_adapter`, in kika-api.spec's hiddenimports, imports
+    # `.encode` at module scope.
+    "kika/processing/photonuclear/tables.py",
     # The ENDF door of a thermal-scattering evaluation (2026-10-11): an MF7
     # tape becomes a model suite exactly as `kika/_read.py` makes one, inside
     # `read_tsl`. Frozen build: `kika.tsl.read` and `kika.endf.model_adapter`

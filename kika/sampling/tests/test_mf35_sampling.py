@@ -380,7 +380,7 @@ def test_the_table_grows_but_stays_inside_the_measured_bound(cf252):
     """NJOY ACER reads MF5 into fixed-size buffers, so growth is a real budget.
 
     Measured on Cf-252: 11 668 outgoing points become ~18 300, a factor of 1.6.
-    The roadmap's estimate from the union of every boundary and shoulder was
+    The estimate from the union of every boundary and shoulder was
     1.41; the difference is that a random draw steps at nearly every boundary.
     """
     suite, section, bands, grids = cf252

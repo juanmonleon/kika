@@ -224,7 +224,7 @@ class ENDFWriter:
         except NonMonotonicTable:
             # Deliberately not swallowed into the `bool`. "I could not write the
             # file" and "the data you handed me is not a function" are different
-            # answers, and flattening the second into the first is how D31 got
+            # answers, and flattening the second into the first is how that defect got
             # to run for months: the caller sees a failure with no cause, logs
             # it, and moves on. Let the diagnosis reach whoever built the table.
             raise

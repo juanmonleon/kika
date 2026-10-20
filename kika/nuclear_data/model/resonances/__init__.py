@@ -35,12 +35,11 @@ __all__ = [
 
 #: **The unit every radius on this model is stated in, without exception.**
 #:
-#: Decided 2026-08-20 (owner: Juan): the canonical unit is GNDS's, because GNDS
+#: Decided 2026-08-20: the canonical unit is GNDS's, because GNDS
 #: is the newer format and the one that states its units at all. Before that
 #: date the model carried whichever number its reader happened to produce —
 #: 5.444 through GNDS and 0.5444 through ENDF for the same Fe-56 radius — and
 #: :attr:`ScatteringRadius.unit` existed to *say so* rather than to fix it.
-#: ``gnds_endf_conflicts.md`` §4.1 and §7.2 are the account of that.
 #:
 #: The invariant is now: **anything on this model that is a radius is in fm.**
 #: That covers :attr:`ScatteringRadius.constant` and ``values``, and the bare

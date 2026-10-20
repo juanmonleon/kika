@@ -3,8 +3,8 @@
 Reading a file kika only half-understands is fine: the parts it does understand
 are right, and the report says what the rest was. **Writing one is not.** A file
 that comes out of here is indistinguishable from an evaluation, and anything
-missing from it is not "unread" — it is *asserted absent*. The roadmap's rule
-for this phase is written for exactly that asymmetry: *"the writer emits only
+missing from it is not "unread" — it is *asserted absent*. The design rule
+is written for exactly that asymmetry: *"the writer emits only
 what kika owns and declares the gaps in the returned ConversionReport. A
 structurally valid, physically incomplete reactionSuite is worse than none,
 because it carries authority it has not earned."*
@@ -1151,7 +1151,7 @@ class _SuiteWriter:
 
         **A known way this writes an invalid file, and it is not a defect
         here.** ``xData_XYs3d_primary`` declares no ``interpolation`` attribute
-        where every 2-d type does (``library-gaps.md`` D24). If a real node
+        where every 2-d type does. If a real node
         states a non-lin-lin law on its outermost axis, the round trip writes
         it back and the file fails validation — which is correct: dropping the
         attribute would validate by discarding what the evaluation said.

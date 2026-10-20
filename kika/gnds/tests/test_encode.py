@@ -611,9 +611,9 @@ def test_a_suite_holding_a_mixed_can_be_written_at_all(gnds_data_dir, tmp_path):
 
 
 #: The schema errors an **ENDF-decoded** suite still has, by kind. Measured
-#: 2026-08-17 at twelve and written down in `docs/library/library-gaps.md` D20;
+#: 2026-08-17 at twelve;
 #: seven once the MF4 angular `axes`, the single-region containers and the
-#: evaluated style's domain landed, and **one** since D38/D20b (2026-10-13).
+#: evaluated style's domain landed, and **one** since 2026-10-13.
 #:
 #: The six that went were decisions, taken the way FUDGE's ENDF->GNDS takes
 #: them: EDATE becomes an `xs:date` (month and year, day 01); the range radius
@@ -1593,7 +1593,7 @@ def test_a_gnds_sourced_suite_writes_an_endf_tape(h2_gnds, tmp_path):
 
 def test_an_unknown_format_is_refused_by_name(h2_gnds, tmp_path):
     suite = kika.read(h2_gnds, covariances=False)
-    # "ace" was the unknown format until ACE became one kika writes (roadmap A10).
+    # "ace" was the unknown format until ACE became one kika writes.
     with pytest.raises(ValueError, match="format must be one of"):
         kika.write(suite, tmp_path / "out.xyz", format="xyz")
 

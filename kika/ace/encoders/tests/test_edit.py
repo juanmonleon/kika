@@ -1,7 +1,7 @@
 """Adding or removing a reaction gives a table whose counts and locators all agree.
 
-Tape-free, on the synthetic table. ``kika_dev/ace/audit_2026-10-14/edit_check.py``
-in kika-workspace does the same on Fe-56 B-VIII.0 and has the result read by a
+Tape-free, on the synthetic table. An audit outside the test
+suite does the same on Fe-56 B-VIII.0 and has the result read by a
 decoder that does not use kika and by OpenMC.
 """
 from __future__ import annotations

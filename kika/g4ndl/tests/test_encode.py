@@ -1,11 +1,11 @@
 """Phase 6: the model back to G4NDL, and one isotope replaced in a library copy.
 
-Acceptance (roadmap §5 Fase 6): ``read → model → write → read`` keeps values,
+Acceptance: ``read → model → write → read`` keeps values,
 regions, repeated energies and their order — checked here on every real
 fixture as **record equality**, array for array — and replacing an isotope
 changes exactly its two files and never the base. The same gates on all
 1 152 real pairs are in ``test_full_libraries.py``; Geant4 reading the output
-is in the harness (``kika-workspace/myworkspace/G4NDL/harness``).
+is checked outside the test suite.
 """
 from __future__ import annotations
 

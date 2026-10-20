@@ -82,7 +82,7 @@ class EndfProvenance(Provenance):
     is the ground state's, QM, and their QI is threshold bookkeeping that
     FUDGE keeps as a ``QI=`` flag (:data:`~kika.nuclear_data.model.endf_conversion.QI_FLAGGED_MTS`,
     every one of NNDC's 558 files). The ENDF decoder writes them the same way,
-    and keeps the tape's QI in ``headerFields["qi"]`` for the encoder (D44).
+    and keeps the tape's QI in ``headerFields["qi"]`` for the encoder.
     Read QI through :func:`~kika.nuclear_data.model.endf_conversion.reactionQI`.
     """
 
@@ -241,7 +241,7 @@ class G4NDLProvenance(Provenance):
     tabulatedTempdeps: List[int] = field(default_factory=list)
     #: The declared ``(NBT, INT)`` of each table record (by index, from 0)
     #: whose μ interpolation had a code 1, which the model holds lin-lin as
-    #: Geant4 evaluates it; the encoder writes it back (roadmap Fase 10, D10-3).
+    #: Geant4 evaluates it; the encoder writes it back.
     tabulatedCode1: Dict[str, List[List[int]]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -289,7 +289,7 @@ class G4NDLInelasticProvenance(Provenance):
     bookkeeping: Optional[Tuple[int, int]] = None
     #: A sum only (the ``inelastic`` total, MT4, MT103-107): SHA-256 of its σ
     #: and of its parts' σ as read. What tells the writer later whether the
-    #: sum or its parts were edited (roadmap G4NDL Fase 10, D10-1).
+    #: sum or its parts were edited.
     crossSectionDigest: Optional[str] = None
     partsDigest: Optional[str] = None
 

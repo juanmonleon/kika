@@ -167,7 +167,7 @@ def _looksLikeHdf5(path) -> bool:
 
     Binary, so it is checked before the text sniffers read the file as lines.
     Only OpenMC's data files are a format kika reads; another HDF5 file is
-    reported as unknown rather than half-opened (roadmap D1: the ``filetype``
+    reported as unknown rather than half-opened (the ``filetype``
     attribute is what tells them apart).
     """
     from kika.hdf5.api import HDF5_SIGNATURE, filetype
@@ -317,8 +317,8 @@ def _readEndf(path, covariances: bool):
     mt451 = getattr(endf, "mf", {}).get(1)
     mt451 = getattr(mt451, "mt", {}).get(451) if mt451 is not None else None
     if getattr(mt451, "_nsub", None) in (4, 5, 11):
-        # A radioactive decay (NSUB=4, roadmap E7b) or fission yield (NSUB=5,
-        # 11, E7c) evaluation: one nuclide and how it decays or what its
+        # A radioactive decay (NSUB=4) or fission yield (NSUB=5,
+        # 11) evaluation: one nuclide and how it decays or what its
         # fission leaves, which GNDS writes as a standalone PoPs.
         from kika.endf.model_adapter.decay_sublibrary import (
             decodeDecaySublibrary, decodeFissionYieldSublibrary)
@@ -388,12 +388,12 @@ def _readGnds(path, covariances: bool):
 
     document = Document.parse(path)
     if document.root.tag == "fissionFragmentData":
-        # FUDGE's neutron-induced fission yields (roadmap E7c).
+        # FUDGE's neutron-induced fission yields.
         from kika.gnds.fission_yields import readFissionFragmentDataDocument
         data, _ = readFissionFragmentDataDocument(document)
         return data
     if document.root.tag == "PoPs":
-        # A decay evaluation (roadmap E7b): a standalone PoPs, no reactionSuite.
+        # A decay evaluation: a standalone PoPs, no reactionSuite.
         from kika.gnds.decay import readPoPsDocument
         pops, _ = readPoPsDocument(document)
         return pops
@@ -451,7 +451,7 @@ def _readG4ndl(path, target):
         suite, _report = processed_suite(read_g4ndl_thermal(thermal, target))
         return suite
 
-    # No covariances to follow: nominal G4NDL carries none (roadmap §5 Fase 4).
+    # No covariances to follow: nominal G4NDL carries none.
     return openLibrary(path).read(target)
 
 

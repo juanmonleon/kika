@@ -45,10 +45,10 @@ Three things it does differently, each of them deliberate:
   read, so everything else survives verbatim and ``cmp`` between two samples
   still means something. ``endf-tape`` and ``gnds`` write the whole model, which
   can be less than the tape holds -- whatever the decoder kept only as declared
-  bytes (MF12 LO=2 until E5c, MF1/460, MF8-10) and the covariance a realisation
+  bytes (MF1/460, MF8-10) and the covariance a realisation
   does not restate -- and the report says so rather than the file being quietly
-  shorter. MF7, MF12-15 (LO=1, MF13-15) and MF32 do have a model since E4, E5
-  and E1.
+  shorter. MF7, MF12-15 (LO=1, MF13-15) and MF32 do have a
+  model.
 """
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 #:     library is named -- ``NNNN/cross_sections.xml``, an overlay sending the
 #:     nuclide to the sample's file and everything else to the base library.
 #:     The realisation is multiplied at 0 K and broadened to each temperature
-#:     by kika (roadmap D12), with the sample's own KERMA and damage. The
+#:     by kika, with the sample's own KERMA and damage. The
 #:     URR probability tables are computed **once**, on the unperturbed
 #:     evaluation, and shared: their shapes are not perturbed; the sample's
 #:     MF33 reaches them (factors on its smooth cross sections, LSSF=1; band
@@ -572,7 +572,7 @@ def _spectrumNote(applied) -> Optional[str]:
 
 
 def _pointBandNote(applied) -> Optional[str]:
-    """Every MF35 band stated at a point (PD-1), named, once per run.
+    """Every MF35 band stated at a point, named, once per run.
 
     ``E1 == E2`` is a covariance at one incident energy. The run perturbs the
     MF5 node at exactly that energy and nothing around it -- no extension by
@@ -640,7 +640,7 @@ def _emitEndfDelta(suite, endfObj, sourcePath, pset, outPath, report,
     re-encoded every sibling section the realisation never touched -- MF5/MT455
     beside a perturbed MT18 came back with the same values but new sequence
     numbers, zero-filled SEND records and, on B-VIII.1 U-233, its ZA spelt
-    ``9.223300+4`` instead of ``92233.0000`` (PF-5). The pattern is the legacy
+    ``9.223300+4`` instead of ``92233.0000``. The pattern is the legacy
     writers' (``_write_perturbed_pfns_endf``): a fresh ``ENDFWriter`` per MT,
     because it snapshots the file at construction and a reused one would
     splice the second section into the pre-first text and drop the first; no
@@ -1543,8 +1543,7 @@ def toDrawSpace(matrix, meta, space) -> np.ndarray:
     blocks are left as stated -- **the cross block included**, untransformed.
     That is exact in second moments: by Stein's lemma, for jointly normal
     (y_s, y_a), Cov(exp(y_s - d/2), y_a) = E[exp(y_s - d/2)] Cov(y_s, y_a) =
-    Cov(y_s, y_a), since the mean factor is one. Pista J2 of
-    ``mf4_tabulated_perturbation_roadmap.md``.
+    Cov(y_s, y_a), since the mean factor is one.
     """
     matrix = np.asarray(matrix, dtype=float)
     mask = logRows(meta, space)
@@ -1576,7 +1575,7 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
     (:func:`~kika.sampling.core.realise_blocks`). Under Sobol that is one
     sequence whose columns are dealt to the blocks, which is what keeps blocks
     the file leaves independent independent -- separately drawn Sobol
-    sequences paired by replica are not (D35 in ``library-gaps.md``; ν̄ and χ
+    sequences paired by replica are not (ν̄ and χ
     of one run came out correlated that way). Under ``random``/``lhs`` block
     *i* of the whole run keeps the seed ``seed + i * BLOCK_SEED_STRIDE``, the
     ladder the earlier, one-call-per-group version continued by hand. A run
@@ -2240,7 +2239,7 @@ def _emitHdf5(suite, pset, sampleDir: Path, ctx, log, number: int) -> Dict[str, 
 
 
 def _hdf5Pieces(options, suite, tape, log):
-    """What every sample shares (D12), computed once on the unperturbed
+    """What every sample shares, computed once on the unperturbed
     evaluation: ``{"urr": {kelvin: tables}}``."""
     shared = {}
     unresolved = suite.resonances is not None and suite.resonances.unresolved is not None
@@ -3047,7 +3046,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
 
 def _statedSpectrumMoments(suite, index, statedBlocks, samples, log,
                            notes) -> Dict[int, Dict[Any, Dict[str, Any]]]:
-    """C10 for every MF35 reaction of the run, logged and returned (PD-9).
+    """C10 for every MF35 reaction of the run, logged and returned.
 
     The library's MF35 is drawn as stated, whatever it says; this is where the
     run says *what* it says for the mean outgoing energy, so that a JEFF-4.0
@@ -3120,7 +3119,7 @@ def _orphanPhotonNote(suite, index) -> Optional[str]:
     A realisation that moves MF3 does not move their multiplicities -- that
     would need a rule for how a partial's change reaches the sum's photons, and
     nothing asks for one until there is UQ of gamma heating. MF13 production on
-    a sum whose σ moved is re-multiplied by the new σ (decision J2), which is a
+    a sum whose σ moved is re-multiplied by the new σ, which is a
     consequence of σ, not a perturbation of the photons.
     """
     orphans = sorted({int(o.ENDF_MT) for o in getattr(suite, "orphanProducts", ())
@@ -3129,8 +3128,8 @@ def _orphanPhotonNote(suite, index) -> Optional[str]:
                               for component in meta["components"]):
         return None
     return (f"photon multiplicities of the sums MT{orphans} (orphanProducts) are "
-            f"written as evaluated: they do not follow a perturbed MF3 (decision "
-            f"J9); MF13 production on a moved sum is re-multiplied by its new σ (J2)")
+            f"written as evaluated: they do not follow a perturbed MF3; "
+            f"MF13 production on a moved sum is re-multiplied by its new σ")
 
 
 def _perturbsASpectrum(index) -> bool:

@@ -1,4 +1,4 @@
-"""Piece F of ``docs/library/autofix_in_the_model.md``: the request by quantity, and a GNDS source.
+"""A sampling request by quantity, and a GNDS source.
 
 ``{33: None}`` speaks ENDF-6. The model underneath does not: a covariance block
 lands on a *quantity* of a *reaction*, and a GNDS file names its reactions

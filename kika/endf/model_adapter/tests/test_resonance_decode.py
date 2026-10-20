@@ -159,8 +159,8 @@ def test_the_flat_lgroup_ap_changed_with_it_and_that_is_deliberate(request, tape
 
     **It is numerically equivalent** — ``None`` has always meant "use the
     range's AP", and that is the same number — so nothing downstream computes
-    anything different. It is still a visible change, and decision 3(a) of
-    ``docs/library/mf2-encoder-notes.md`` took it knowingly: the alternative was to
+    anything different. It is still a visible change, and it was
+    taken knowingly: the alternative was to
     re-collapse in ``interop`` and keep two sources of truth for one field.
     """
     path = request.getfixturevalue(tape)
@@ -269,13 +269,13 @@ def test_an_lrf7_evaluation_keeps_its_resonances(fe57_host_tape):
 
     # It still returns nothing — `ResonanceRecord` has four width columns and an
     # RML spin group has one per channel, five of them here, so there is nothing
-    # to return into. But as of the `library-gaps.md` D3 fix it is no longer
+    # to return into. But since the fix it is no longer
     # silent about it, which is the difference between an unsupported format and
     # a wrong answer.
     with pytest.warns(UserWarning, match="LRF=7"):
         assert ResonanceParameters.from_endf(mf2) == [], (
             "the flat path has started keeping LRF=7; update this test and the "
-            "D3 entry in docs/library/library-gaps.md"
+            "note above it"
         )
 
     resonances, _, report = decodeMF2MT151(mf2)

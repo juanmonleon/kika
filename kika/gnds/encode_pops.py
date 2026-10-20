@@ -90,7 +90,7 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
                     _nuclideProperties(node, nuclide)
 
     if unorthodoxes:
-        # A thermal-scattering target (roadmap E4b). PoPs_UnorthodoxType admits
+        # A thermal-scattering target. PoPs_UnorthodoxType admits
         # mass, charge and decayData only, so nothing else is written.
         group = ET.SubElement(container, "unorthodoxes")
         for particle in unorthodoxes:
@@ -195,7 +195,7 @@ def _nuclideProperties(node: ET.Element, nuclide: Nuclide) -> None:
              unit=nuclide.energy.unit or "eV")
     data = getattr(nuclide, "fissionFragmentData", None)
     if data is not None:
-        # A fission yield sublibrary's yields (roadmap E7c). Only the product
+        # A fission yield sublibrary's yields. Only the product
         # yields: delayed neutrons and the energy release belong to a reaction.
         from .fission_yields import writeProductYields
         holder = ET.SubElement(node, "fissionFragmentData")

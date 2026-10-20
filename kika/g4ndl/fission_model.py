@@ -40,7 +40,7 @@ is a different statement). ``Fission/FS``, section by section:
            ``p_k(E)·ν̄_d(E)`` — :func:`~kika.endf.model_adapter.fission_energy.
            attachDelayedSpectra`'s placement
 1, 12-15   the fission photons, ENDF's MF12-15 for MT18, through
-           :mod:`kika.g4ndl.photons` (D10-2): photon products on MT18, as an
+           :mod:`kika.g4ndl.photons`: photon products on MT18, as an
            ENDF tape's MF12-15 give them
 =========  ===================================================================
 
@@ -509,7 +509,7 @@ def _decodeFS(record: FissionFSRecord, reaction, suite, provenance, domain, wher
 
 
 def _reportCode1(entries, where: str, report) -> None:
-    """Say which tables declared INT=1 and were read lin-lin (roadmap D10-3)."""
+    """Say which tables declared INT=1 and were read lin-lin."""
     for entry in entries:
         n = len(entry.get("code1") or ())
         if n and entry.get("verbatim") is None:
@@ -909,7 +909,7 @@ def _fissionPhotons(reaction, suite, photonSections, where, report) -> None:
 
 
 def _fissionPhotonBodies(reaction, suite, entries, targetMass, where, report):
-    """MT18's photons from the model as ``{(1, dataType): body}`` (D10-2)."""
+    """MT18's photons from the model as ``{(1, dataType): body}``."""
     from kika.g4ndl.inelastic_encode import _endfProvenance
     from kika.g4ndl.photons import photonBodiesFromModel
 

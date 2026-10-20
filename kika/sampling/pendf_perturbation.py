@@ -111,8 +111,8 @@ def derive_mt_thresholds(mf3_sections: Dict[int, Any],
     It is a named function rather than nine lines inline because of what reads
     ``mf3_sections``. The map is built from ``.energies`` and
     ``.cross_sections`` — ENDF's spelling — while the canonical ``CrossSection``
-    spells the second one ``.values``. The GNDS roadmap's phase 4 P2 ("one σ-source
-    shape") changes what ``read_pendf_mf3_sections`` returns, and this is the
+    spells the second one ``.values``. Moving to one σ-source
+    shape changes what ``read_pendf_mf3_sections`` returns, and this is the
     place where that change reaches sampled numbers instead of a diagnostic.
     ``kika/sampling/tests/test_mt_thresholds.py`` freezes it first, so that
     increment can say by how much rather than hope it was nothing.

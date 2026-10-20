@@ -1,7 +1,7 @@
-"""GNDS ``doubleDifferentialCrossSection`` for the thermal scattering law (roadmap E4b).
+"""GNDS ``doubleDifferentialCrossSection`` for the thermal scattering law.
 
-The model nodes are :mod:`kika.nuclear_data.model.thermal_scattering` (E4a,
-built from ENDF MF7). This module reads and writes them, with FUDGE's node
+The model nodes are :mod:`kika.nuclear_data.model.thermal_scattering`
+(built from ENDF MF7). This module reads and writes them, with FUDGE's node
 names, attribute rules and child order (``fudge/reactionData/
 doubleDifferentialCrossSection/thermalNeutronScatteringLaw/`` and ``gnds.xsd``
 TNSL types):

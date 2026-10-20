@@ -1,7 +1,7 @@
-"""§12's level energies and electromagnetic decay, read and written (roadmap E5c).
+"""§12's level energies and electromagnetic decay, read and written.
 
 NNDC's S-36 (ENDF/B-VIII.1) has five excited levels, each with a
-``decayData/decayModes`` cascade and a ``nucleus/energy``. Until E5c both were
+``decayData/decayModes`` cascade and a ``nucleus/energy``. Until kika read them both were
 counted and dropped, so the GNDS kika wrote back had ``branching1d`` products
 pointing at a cascade that was no longer there. Valid against the schema,
 declared in the report, and without the physics.

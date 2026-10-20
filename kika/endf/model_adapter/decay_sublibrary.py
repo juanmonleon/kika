@@ -1,7 +1,7 @@
 """The ENDF sublibraries whose evaluation is a nuclide ↔ a standalone §12 PoPs.
 
-Radioactive decay (NSUB=4, MF8/MT457, roadmap E7b) and fission product yields
-(NSUB=5 spontaneous, NSUB=11 neutron-induced, MF8/MT454 and MT459, E7c; the
+Radioactive decay (NSUB=4, MF8/MT457) and fission product yields
+(NSUB=5 spontaneous, NSUB=11 neutron-induced, MF8/MT454 and MT459; the
 yields themselves are :mod:`.fission_yields`). One reader per sublibrary
 (:func:`decodeDecaySublibrary`, :func:`decodeFissionYieldSublibrary`) and one
 writer for all (:func:`encodeSublibrary`, :func:`writeSublibraryTape`).
@@ -32,7 +32,7 @@ From a GNDS-read PoPs, which has neither, the section is built the way FUDGE's
 ``PoPs_toENDF6`` builds it, except that spectra of one radiation are merged
 across decay modes (ENDF lists one spectrum per STYP) and NER counts lines only.
 
-Measured on ENDF/B-VIII.1 (3 821 nuclides, roadmap E7b): ENDF → model → ENDF
+Measured on ENDF/B-VIII.1 (3 821 nuclides): ENDF → model → ENDF
 byte for byte, and model → GNDS → model identical.
 """
 from __future__ import annotations

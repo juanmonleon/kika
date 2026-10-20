@@ -179,7 +179,7 @@ class Function2d(ABC):
         raises. **That refusal is the point.**
         ``MF5PartialTabulated.replace_table`` defaults to a single lin-lin
         region, which silently relabels every panel of a table whose later
-        regions were histogram or log-lin (PF-4); here the regions are either
+        regions were histogram or log-lin; here the regions are either
         preserved, or stated, or refused -- never invented. Measured on a
         synthetic INT 2+4 spectrum
         (``test_a_log_interpolated_spectrum_is_perturbed_exactly.py``): the

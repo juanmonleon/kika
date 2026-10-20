@@ -12,7 +12,7 @@ of XSS entries and writes the rest back untouched.
 **The text survives too.** ACE has no types -- MT numbers, block lengths
 and pointers live in the same REAL array as the cross sections -- and only the
 spelling tells them apart: NJOY writes them as I20, the rest as E20.11. Until
-the A1 phase of the ACE roadmap (2026-10-14) kika wrote every word as a real,
+2026-10-14 kika wrote every word as a real,
 and 6 903 of 205 430 lines of this file differed. The reader now keeps the
 spelling as one bit per word (``Ace.xss_int_words``) and the writer gives the
 same bytes back, header and unpadded last line included.

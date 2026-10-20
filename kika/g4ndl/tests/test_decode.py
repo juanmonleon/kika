@@ -1,6 +1,6 @@
 """Phase 4: the elastic records into the common model.
 
-Acceptance (roadmap §5 Fase 4): σ and the angular distribution are reached
+Acceptance: σ and the angular distribution are reached
 the way they are for ENDF/ACE/GNDS; the partial read is reported; the model
 does not import the format. The gate against the evaluation itself — G4NDL
 JEFF-4.0 against the JEFF-4.0 tape's MF4 — is in ``test_full_libraries.py``.
@@ -164,7 +164,7 @@ def test_histogram_interpolation_is_refused_with_the_reason():
 
 
 def test_histogram_in_mu_is_read_lin_lin_and_written_back():
-    """D10-3: Geant4 evaluates a code 1 lin-lin, so the model holds lin-lin.
+    """Geant4 evaluates a code 1 lin-lin, so the model holds lin-lin.
 
     The report calls it an approximation (ENDF reads a histogram), and the
     declared code is what the encoder writes back.

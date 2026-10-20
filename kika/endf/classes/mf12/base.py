@@ -7,8 +7,7 @@ in what the TAB1 holds and in one option:
   can instead be **LO=2**, a table of *transition probabilities* between the
   levels of the residual nucleus (the level scheme of a two-body reaction).
   LO=2 is 97 % of the MF12 sections in ENDF/B-VIII.1, JEFF-4.0 and JENDL-5
-  (census of 2026-10-09, ``docs/library/endf_photons_e5_plan.md`` §2.2 in the
-  workspace repo).
+  (census of 2026-10-09).
 * **MF13** gives a *production cross section* σ_k(E) per photon. It has no LO:
   its layout is MF12 LO=1's, and the HEAD's third field is unused.
 

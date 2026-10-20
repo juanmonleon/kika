@@ -9,8 +9,6 @@ perturbed through the GNDS door and **unperturbed through the ENDF door** —
 which is worse than either failing, because a gate on one format then says
 nothing about the other.
 
-``docs/library/library-gaps.md`` D29, ``perturbation_model_roadmap.md`` M0.
-
 **What is deliberately not tested here**: a labelled *nu-bar*. ``Multiplicity``
 is not a :class:`~kika.nuclear_data.model.component.Component` — §17.3's census
 found one form on all 230 562 nodes, so it holds a single ``form`` and has no

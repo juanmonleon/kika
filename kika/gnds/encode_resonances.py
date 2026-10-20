@@ -236,7 +236,7 @@ def _rmRole(reaction) -> Optional[str]:
 
 
 def _withoutEmptyFission(formalism, groups, report):
-    """D38: a range with no fission width writes no fission channel.
+    """A range with no fission width writes no fission channel.
 
     The LRF=3 decoder gives every Reich-Moore range the four ENDF columns, so a
     non-fissile evaluation carried ``fissionA``/``fissionB`` resonance reactions
@@ -645,7 +645,7 @@ def _unresolvedReactions(node: ET.Element, widths, report: ConversionReport,
     A GNDS-read region carries its own list and it is written as read. An
     ENDF-decoded one carries none, since ENDF states URR channels by position;
     the list is then built the way FUDGE builds it, one linked entry per width
-    whose MT the suite has a reaction for (D38: written empty, the file did not
+    whose MT the suite has a reaction for (written empty, the file did not
     validate and FUDGE could not resolve the widths' reactions).
     """
     reactions = ET.SubElement(node, "resonanceReactions")

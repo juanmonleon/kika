@@ -17,7 +17,7 @@ characterization test: it asserts today's numbers, not correct ones.
 
 **2026-10-08: the weight is now a constant sigma of 1 b, stated in the
 fixture.** Until then it was the legacy in-Python reconstructor, removed with
-its defects (reconstruction roadmap §4). The weight here is not meant to be the
+its defects. The weight here is not meant to be the
 right sigma -- production passes NJOY or ``kika.processing.resonances`` -- but a
 fixed, engine-free one, so a change to the collapse cannot hide behind a change
 to some reconstructor. The tape's own MF3 was tried first and rejected: below

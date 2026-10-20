@@ -1,9 +1,9 @@
-"""ACE's secondary-neutron blocks reach the model (ACE roadmap A3), tape-free.
+"""ACE's secondary-neutron blocks reach the model, tape-free.
 
 On the synthetic table of ``kika/ace/tests/_synthetic.py`` (elastic, MT16 with
 LAW=44 and TY=-2, MT51 with LAW=3, MT102) and on small stubs for the fission
 blocks. The real gate -- every dataset of OpenMC's ``from_ace`` file against
-kika's -- is ``kika_dev/ace/audit_2026-10-14/a3_gate.py`` in kika-workspace.
+kika's -- runs outside the test suite.
 """
 from __future__ import annotations
 

@@ -30,7 +30,7 @@ kika cannot rescale what it does not model.
 the order is canonical: the lumped reaction first, then by MT, each
 reaction's sections by ``dataType``.
 
-**The sums are derived** (roadmap Phase 10, D10-1): the lumped σ (MT4,
+**The sums are derived**: the lumped σ (MT4,
 MT103-107) and the ``Inelastic/CrossSection`` total follow their parts. A sum
 that adds up is written as it is; one whose parts were edited is rebuilt
 (:func:`kika.algebra.add`); one that was itself edited is refused; one that is
@@ -342,7 +342,7 @@ def _entry(entries, dt) -> dict:
 def _q(reaction, suite=None) -> float:
     """The channel's QI in eV, 0 when the model states none.
 
-    G4NDL states QI. A continuum's model Q is its QM (D44): its QI is the
+    G4NDL states QI. A continuum's model Q is its QM: its QI is the
     tape's, kept in the ENDF provenance, or the suite's ``QI=`` flag.
     """
     from kika.nuclear_data.model.endf_conversion import reactionQI
@@ -417,7 +417,7 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
             Pairs(np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)))
     products = list(reaction.outputChannel.products) if reaction.outputChannel else []
     if products:
-        # An MF6 photon whose lines the ENDF decoder split into products (D40)
+        # An MF6 photon whose lines the ENDF decoder split into products
         # is one MF6 product again, its lines first in each table.
         from kika.endf.model_adapter.photon_lines import mergedLineSpectra
 
@@ -431,7 +431,7 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
                                            or (_fromEndfMF6(reaction) if not entries else {}))
                                           .get("products") or [])}
     products = [p for p in products if not _isBareResidual(p, EMITTED[channel], mf6Labels)]
-    # The photons of the MF12-15 sections (D10-2) are written as dataType
+    # The photons of the MF12-15 sections are written as dataType
     # 12-15 below, not as an MF4/MF5/MF6 product.
     photonFields, photonEntry = _photonFields(reaction, entries)
     if photonFields is not None:
@@ -512,7 +512,7 @@ def _photonSections(reaction, bag, suite, targetMass, where, report) -> Dict[int
 def _isBareResidual(product, emitted, mf6Labels=()) -> bool:
     """A product that says nothing but that it exists: only ``unspecified``
     distributions, and no multiplicity -- or the multiplicity 1 and decay channel
-    of a level's residual (roadmap E5c, where a cascade hangs) that no MF6
+    of a level's residual (where a cascade hangs) that no MF6
     section states. Never the channel's emitted particle."""
     from kika.nuclear_data.model import Unspecified
 
@@ -1027,7 +1027,7 @@ def rebuildInelasticSums(suite, create: bool = False, only=None) -> List[str]:
 def _derivedSums(suite, report: ConversionReport):
     """``suite``, or a copy of it with its sums derived from their parts.
 
-    The rule (roadmap G4NDL Fase 10, D10-1): a sum the suite decomposes is
+    The rule: a sum the suite decomposes is
     derived data. Geant4 uses the total, the lumped σ and the partials each
     for a choice of its own, so a sum that no longer adds up is not an error
     it reports but physics it gets wrong.

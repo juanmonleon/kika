@@ -1,11 +1,11 @@
-"""PD-9: the run keeps MF35 as stated and reports C10 beside it.
+"""The run keeps MF35 as stated and reports C10 beside it.
 
-Juan's decision (2026-10-08): production draws the library's MF35 as it is --
+By design (2026-10-08), production draws the library's MF35 as it is --
 no constraint, no clipping to a band, no rejection of replicas -- and every
 run that perturbs a fission spectrum reports what that MF35 states for the
 mean outgoing energy and the tail fractions, against independent knowledge
-where the roadmap has read some (``kika.sampling.pfns_moments``). The GLS
-constraint through P5 is pending and not built; the record says so.
+where some is known (``kika.sampling.pfns_moments``). The GLS
+constraint through an external covariance override is pending and not built; the record says so.
 
 The numbers gated on JEFF-4.0 U-235 are the ones the C10 first pass measured
 on 2026-10-07 with ``kika_dev/sampling/checks/pfns_c10_stated_moments.py``

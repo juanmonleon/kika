@@ -9,8 +9,8 @@ admits there (Legendre-coefficient covariances, §34.2).
 
 Everything else of an MF31-35 section -- the LB of each sub-subsection, MAT1,
 MT1, NL, NI -- the encoders already take from the model: the row and column
-links, the matrix shape and its grids. MF32 from GNDS is not written (roadmap
-E1: it is rewritten from the section the ENDF decoder kept, and a GNDS suite
+links, the matrix shape and its grids. MF32 from GNDS is not written (it
+is rewritten from the section the ENDF decoder kept, and a GNDS suite
 has none), and says so.
 """
 from __future__ import annotations

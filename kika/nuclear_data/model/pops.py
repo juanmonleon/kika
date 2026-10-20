@@ -43,7 +43,7 @@ class Particle:
     #: the one §12 property whose absence a writer cannot report its way out of.
     halflife: Optional[Union[PhysicalQuantity, str]] = None
     #: §12 ``decayData``: the electromagnetic decay of an excited level (ENDF
-    #: MF12 LO=2, roadmap E5c). See :mod:`~kika.nuclear_data.model.decay`.
+    #: MF12 LO=2). See :mod:`~kika.nuclear_data.model.decay`.
     decayData: Optional[object] = None
 
     def __post_init__(self) -> None:
@@ -62,12 +62,12 @@ class Nuclide(Particle):
     #: "not stated"; a ground state reads as 0 eV from GNDS.
     energy: Optional[PhysicalQuantity] = None
     #: Where GNDS states ``decayData``: on the ``nuclide`` (a level's gamma
-    #: cascade, E5c) or on its ``nucleus`` (the decay sublibrary, E7b, as FUDGE
+    #: cascade) or on its ``nucleus`` (the decay sublibrary, as FUDGE
     #: writes it). Both are §12; the flag keeps a file's choice through a read
     #: and a write.
     decayDataOnNucleus: bool = False
     #: §18.4 ``fissionFragmentData`` on the nuclide: the fission product
-    #: yields of a fission yield sublibrary evaluation (roadmap E7c).
+    #: yields of a fission yield sublibrary evaluation.
     fissionFragmentData: Optional[object] = None
 
     @property

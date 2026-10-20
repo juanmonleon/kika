@@ -382,7 +382,7 @@ def test_a_resonance_reactions_hard_sphere_radius_is_read_not_reported(
     The old message said the *channel's* radius is the one the phase shift
     uses. That is true, and it is a statement about which radius the physics
     reads — not about which one the file states. A reader that drops the second
-    cannot write the file back, which is the test §6.4 was failing.
+    cannot write the file back, which is the test the reader was failing.
     """
     grafted = _graftReactionHardSphereRadius(micro_fe56_gnds, tmp_path)
     suite, report = readReactionSuite(Document.parse(grafted))
@@ -413,7 +413,7 @@ def test_the_reactions_hard_sphere_radius_survives_a_write(micro_fe56_gnds,
 
 
 def test_supports_angular_reconstruction_stays_a_report_entry(ta182):
-    """The one row of §6.4 that closes as won't-fix rather than as work.
+    """The one case that closes as won't-fix rather than as work.
 
     65 files set it and it still gets no node: there is no number under it. It
     qualifies parameters that are all read, and modelling it would state inside
@@ -427,7 +427,7 @@ def test_supports_angular_reconstruction_stays_a_report_entry(ta182):
 
 
 # ---------------------------------------------------------------------------
-# §19.3.4's externalRMatrix — the last open row of §6.4, closed 2026-08-24
+# §19.3.4's externalRMatrix — modelled 2026-08-24
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -493,7 +493,7 @@ def test_a_term_the_file_omits_is_none_and_not_zero(sr88):
 
 
 def test_the_external_r_matrix_survives_a_round_trip(micro_sr88_gnds, tmp_path):
-    """Read is half of it; §6.4's argument for modelling it was writing it back.
+    """Read is half of it; the argument for modelling it was writing it back.
 
     The channel's children are asserted **in order**, and that assert is not
     decoration: ``RML_ChannelType`` (``gnds.xsd:915-919``) is an ``xs:sequence``

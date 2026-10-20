@@ -5,7 +5,7 @@ and ``replace_mf_section``, ``write_mf_section_to_file``,
 ``remove_mf34_from_file`` -- read in text mode and wrote in text mode. On
 Windows that turned every line of an LF tape into CRLF, so a one-section edit
 touched every line of the file at the byte level and ``cmp`` against the source
-could no longer show what moved (B1a of the PFNS roadmap). Each one now writes
+could no longer show what moved. Each one now writes
 the line ending it read.
 
 Both endings are built here from one committed tape rather than trusted to the

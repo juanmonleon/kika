@@ -1,4 +1,4 @@
-"""The correction loop (roadmap G4NDL §0bis, Fase 14) on the JEFF-4.0 fixtures.
+"""The correction loop on the JEFF-4.0 fixtures.
 
 The "experiment" is C-12's own elastic σ read through a TOF setup and scaled by
 a smooth 5 % bump; the transport hole hands the same measurement back, so the

@@ -1,7 +1,7 @@
-"""kika's own thermal inelastic tables (roadmap H9c): the kernel's pieces.
+"""kika's own thermal inelastic tables: the kernel's pieces.
 
-The whole tables are checked against the official ENDF/B-VIII.1 files in
-``kika-workspace/kika_dev/processing/thermal`` (H in H2O: same outgoing points
+The whole tables are checked against the official ENDF/B-VIII.1 files
+(H in H2O: same outgoing points
 at every incident energy, cosines to 1e-8, densities to 1e-6).
 """
 import numpy as np
@@ -159,7 +159,7 @@ def test_the_native_ace_tables_are_the_python_loop_bit_for_bit(seed):
         assert a.shape == b.shape and np.array_equal(a, b)
 
 
-# -- free gas (THERMR iinc=1), roadmap NR-2 ------------------------------------------------
+# -- free gas (THERMR iinc=1) ------------------------------------------------
 from math import erf, exp, pi, sqrt  # noqa: E402
 
 from kika.processing import thermal as th  # noqa: E402
@@ -188,7 +188,7 @@ def test_sig_free_gas_is_the_closed_form_kernel():
 @pytest.mark.parametrize("A", [0.99917, 15.858, pytest.param(236.006, id="236.006")])
 @pytest.mark.parametrize("E", [1e-5, 0.0253, 1.55])
 def test_calcem_free_gas_integral_within_the_declared_budget(A, E):
-    # PXB-T01: calcem's integral (sigma_f = 1) within 2e-3 of the closed form.
+    # calcem's integral (sigma_f = 1) within 2e-3 of the closed form.
     options = th.ThermalInelasticOptions(iinc=1)
     inputs = th.freeGasInputs(A, 293.6, 10.0)
     _, _, xsi = th._calcem(inputs, native.sigfig(E, 8, 0), options)

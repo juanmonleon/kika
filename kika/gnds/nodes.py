@@ -165,9 +165,9 @@ def _spec(*args, **kwargs) -> Tuple[Tuple[str, str], NodeSpec]:
 #: evaluations the census walked, which is why they are not entries.
 #: ``coherentPhotonScattering`` and ``incoherentPhotonScattering`` were in that
 #: list too, until the photo-atomic sublibrary (100 evaluations, every one with
-#: both) gave them a witness and the photon plan's F2b a reader and a writer. The fifth,
+#: both) gave them a witness and a reader and a writer. The fifth,
 #: ``thermalNeutronScatteringLaw``, is zero there too -- TSL evaluations are a
-#: sublibrary of their own -- and became an entry with roadmap E4b, which reads
+#: sublibrary of their own -- and became an entry with the thermal-scattering work, which reads
 #: and writes the TSL forms it links to and why one of them is now the import-time ratchet's
 #: guinea pig (see :func:`reads` and its test). ``branching3d`` held that job
 #: until §18.1.1 was finished and it became a real entry.
@@ -228,7 +228,7 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     # -- §5-6 functionals. `primitives.FUNCTION_1D` / `_2D` derive from these.
     _spec("XYs1d", "function1d", "§6.2.2", XYs1d, Status.PAIRED),
     # FUDGE writes it (xData/xs_pdf_cdf.py) for the MonteCarlo_cdf style; its
-    # own gnds.xsd does not declare it (roadmap A11).
+    # own gnds.xsd does not declare it.
     _spec("xs_pdf_cdf1d", "function1d", "§9.4.3", Xs_pdf_cdf1d, Status.PAIRED),
     _spec("regions1d", "function1d", "§6.3.2", Regions1d, Status.PAIRED),
     _spec("constant1d", "function1d", "§6.2.1", Constant1d, Status.PAIRED),
@@ -298,7 +298,7 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     _spec("branching3d", "distributionForm", "§18.1.1", Branching3d,
           Status.PAIRED),
     #    The product-side link of a TSL reaction (gnds.xsd:1511, XLinkType),
-    #    read and written since roadmap E4b with the law it points at.
+    #    read and written with the law it points at.
     _spec("thermalNeutronScatteringLaw", "distributionForm", "§18.1.1",
           ThermalNeutronScatteringLaw, Status.PAIRED),
     #    The scattered photon's links of a photo-atomic reaction (gnds.xsd:1509-
@@ -309,8 +309,8 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
           IncoherentPhotonScatteringLink, Status.PAIRED),
 
     # -- §14 doubleDifferentialCrossSection forms. gnds.xsd:1087-1096, an
-    #    xs:choice. The three thermal-scattering forms (roadmap E4b) and the two
-    #    photo-atomic ones (MF27, photon plan F2b); the Coulomb member has no
+    #    xs:choice. The three thermal-scattering forms and the two
+    #    photo-atomic ones (MF27); the Coulomb member has no
     #    ENDF counterpart kika decodes and is not an entry, like the
     #    census-zero §18 members.
     _spec("coherentPhotonScattering", "doubleDifferentialForm", "§14",
@@ -372,7 +372,7 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
           Status.PAIRED),
     _spec("NBodyPhaseSpace", "uncorrelatedEnergyForm", "§18.3",
           NBodyPhaseSpace, Status.PAIRED),
-    # The six parametrised spectra, modelled since 2026-10-08 (roadmap E2):
+    # The six parametrised spectra, modelled since 2026-10-08:
     # kika/nuclear_data/model/energy_spectra.py, read and written by both doors.
     _spec("evaporation", "uncorrelatedEnergyForm", "§18.3", Evaporation,
           Status.PAIRED),
@@ -472,8 +472,8 @@ class Defect:
 #:
 #: **Empty since 2026-08-24, and the last entry left by decision rather than by
 #: repair.** That distinction matters enough to write down: the survivor was
-#: ``supportsAngularReconstruction``, and ``gnds_endf_conflicts.md`` §6.4 ruled
-#: it *won't fix* — there is no number under the attribute, it qualifies
+#: ``supportsAngularReconstruction``, and it was ruled
+#: *won't fix* — there is no number under the attribute, it qualifies
 #: parameters that are every one of them read, and a model node for it would
 #: state, inside a format-neutral model, what one particular reader can do with
 #: them. So it did not stop being an asymmetry; it stopped being a **defect**,
@@ -495,7 +495,7 @@ KNOWN_DEFECTS: Tuple[Defect, ...] = ()
 #: no fixture and no oracle could have noticed.
 ONE_SIDED_ATTRIBUTES = (
     ("RMatrix", "supportsAngularReconstruction",
-     "read, reported, deliberately never written (65 files; §6.4 won't fix)"),
+     "read, reported, deliberately never written (65 files; won't fix)"),
 )
 
 

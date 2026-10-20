@@ -1,7 +1,7 @@
 """MT2's cross section and angular distribution drawn in one run, on a real tape.
 
 ``micro_u238_mf34_l0.endf`` is U-238 of ENDF/B-VIII.1 cut to MF3, MF4, MF33 and
-MF34 of MT2 (``kika-workspace/kika_dev/sampling/checks/build_micro_u238_mf34_l0.py``).
+MF34 of MT2.
 It is one of two evaluations to hand whose MF34 states L=0 (U-235 is the other),
 and that L=0 is a placeholder: L0xL0 is one bin of zero variance and L0xL1,
 L0xL2 are noise at 2e-19. So the file gives sigma's variance through MF33 and

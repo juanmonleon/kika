@@ -142,8 +142,8 @@ def test_a_multi_region_child_will_not_be_flattened_silently():
 
     ``MF5PartialTabulated.replace_table`` declares one lin-lin region whatever
     it was handed, which relabels every panel of a table whose later regions
-    were histogram (PF-4). The model never does: a table that **refines** the
-    old one inherits each panel's law (PD-6, 2026-10-08); one that does not is
+    were histogram. The model never does: a table that **refines** the
+    old one inherits each panel's law (since 2026-10-08); one that does not is
     refused unless the caller states the regions.
     """
     from kika.nuclear_data.model.enums import Interpolation

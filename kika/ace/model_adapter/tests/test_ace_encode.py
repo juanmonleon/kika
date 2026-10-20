@@ -1,9 +1,9 @@
-"""ACE roadmap A4: a processed suite → ACE, and the A4a gate on a real table.
+"""A processed suite → ACE, and the round-trip gate on a real table.
 
-The gate: ACE → model (A3) → ACE (A4) is the original word for word, once the
-two things A4 does not write are taken out of the original (the
-charged-particle blocks, A7, and NJOY's unused room after some law tables).
-Both sides are laid out by the A2 encoders, whose own gate makes the
+The gate: ACE → model → ACE is the original word for word, once the
+two things the encoder does not write are taken out of the original (the
+charged-particle blocks and NJOY's unused room after some law tables).
+Both sides are laid out by the ACE encoders, whose own gate makes the
 original's re-encoding its XSS; so a difference here is the model losing or
 changing something. Integer words must be equal and real words within a few
 ulp: the model works in eV and ACE in MeV.

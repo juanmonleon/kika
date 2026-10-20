@@ -205,7 +205,7 @@ def test_a_run_that_refuses_conditioning_says_so(tmp_path):
 
 def test_without_a_plan_the_run_conditions_itself_and_writes_what_it_did(
         blocks, tmp_path):
-    """Piece A of ``docs/library/autofix_in_the_model.md``.
+    """Without a plan, the run conditions itself and writes down what it did.
 
     ``conditioningPlan=None`` is "inspect and apply the recommendation": the
     clip the draw would have made silently under ``psd_method="auto"``, with a

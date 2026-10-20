@@ -1,6 +1,6 @@
 """:class:`~kika.nuclear_data.model.suite.ReactionSuite` → G4NDL elastic files.
 
-Phase 6 of the G4NDL roadmap, the mirror of :mod:`kika.g4ndl.decode`. The
+The mirror of :mod:`kika.g4ndl.decode`. The
 model goes to the same intermediate records the parser produces
 (:mod:`kika.g4ndl.records`), and the records to text. Going through the records
 is what makes the writer checkable: every file is parsed back with the strict
@@ -28,7 +28,7 @@ read from G4NDL, and take the values every real file has when it was not:
 **Numbers.** Every float is written with ``repr``, the shortest string that
 reads back to the same double, so at most 17 significant digits and never a
 rounding. The distributed libraries print 7, which is where their repeated
-energies come from (U-238: 25 % of the points, ``G4NDL_token_spec.md`` §7).
+energies come from (U-238: 25 % of the points).
 Every integer is written as an integer: Geant4 reads ``repFlag``, ``NE``,
 ``NR``, ``NBT``, ``INT``, ``NL``/``NP`` and ``tempdep`` with ``>> G4int``, and a
 ``2.0`` there leaves ``.0`` in the stream and misaligns the rest of the file
@@ -39,9 +39,9 @@ because writing it would make Geant4 read something else than the model says:
 
 * a histogram in the model (interpolation code 1), in μ or in incident
   energy. Geant4 evaluates code 1 lin-lin, so writing it would say something
-  else; Juan decided (2026-10-06) the writer refuses it rather than rewrite the
+  else; by design the writer refuses it rather than rewrite the
   step. A code 1 *read* from a file is held lin-lin and written back as it
-  was declared (``tabulatedCode1``, roadmap Fase 10, D10-3);
+  was declared (``tabulatedCode1``);
 * any code outside 2-5, including unit-base and corresponding-point qualifiers;
 * a cross section that is not one pointwise lin-lin table. By default the
   ``recon`` form is written: G4NDL means σ at 0 K, pointwise, and an ENDF MF3
@@ -49,7 +49,7 @@ because writing it would make Geant4 read something else than the model says:
   ``crossSectionLabel='eval'`` is the caller saying it is, and a suite whose
   ``resonances`` has a resolved or unresolved region is refused even then. For
   an ENDF tape, :func:`kika.endf.model_adapter.pendf.readReconstructed` adds
-  the ``recon`` form from NJOY RECONR (roadmap Phase 9);
+  the ``recon`` form from NJOY RECONR;
 * a Legendre expansion whose ``a_0`` is not 1 (the file stores ``a_1 … a_NL``
   and the consumer takes ``a_0 = 1``), and units other than eV and barn;
 * a suite with no ``targetMass`` to write: the AWR is physics (it sets the

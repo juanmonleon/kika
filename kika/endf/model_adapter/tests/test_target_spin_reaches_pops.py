@@ -1,4 +1,4 @@
-"""MF2's SPI is the target's spin in the suite's PoPs (D39).
+"""MF2's SPI is the target's spin in the suite's PoPs.
 
 FUDGE writes it there, on the top-level target nucleus, and it is where the
 resonance reconstruction of a GNDS file looks for it. Without it a GNDS file

@@ -18,7 +18,6 @@ ls1_in_cross_block".
 
 Nothing here changes what blocks a draw. Layer-1 findings only inform, and the
 attribution is an explanation attached to a decision layer 2 already made.
-Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``, phase C6.
 """
 from __future__ import annotations
 

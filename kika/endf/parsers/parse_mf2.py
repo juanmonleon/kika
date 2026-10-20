@@ -37,8 +37,8 @@ from ...utils import get_endf_logger
 
 logger = get_endf_logger(__name__)
 
-#: Why an Adler-Adler range is refused, by name (ENDF-coverage roadmap T3,
-#: decided by Juan 2026-10-08). GNDS has no node for it, and the census of
+#: Why an Adler-Adler range is refused, by name (decided
+#: 2026-10-08). GNDS has no node for it, and the census of
 #: 2026-10-08 found **no** LRF=4 range -- nor LRF=5 or 6 -- in the 1 950
 #: evaluations of ENDF/B-VIII.1, JEFF-4.0 and JENDL-5. A reader for a format
 #: no tape exercises would be code no test can reach.

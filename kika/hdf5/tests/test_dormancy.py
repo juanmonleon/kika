@@ -1,6 +1,6 @@
 """``import kika`` and ``import kika.hdf5`` wake neither h5py nor the model.
 
-h5py is a required dependency (roadmap D2) and still imported lazily, as every
+h5py is a required dependency and still imported lazily, as every
 format is: the cluster pipeline, the app and every notebook import kika, and
 none of them should pay for HDF5 until they open a file. Run in a subprocess
 for the reason ``kika/nuclear_data/model/tests/test_dormancy.py`` gives.

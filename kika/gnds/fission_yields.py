@@ -1,4 +1,4 @@
-"""§18.4 ``productYields`` (fission product yields) ↔ the model, roadmap E7c.
+"""§18.4 ``productYields`` (fission product yields) ↔ the model.
 
 Read and written wherever ``fissionFragmentData`` appears: under a fission
 reaction's output channel, under a PoPs ``nuclide`` (FUDGE's spontaneous-fission

@@ -179,7 +179,7 @@ def test_mf3_with_no_mf33_is_the_raw_section_and_a_none(structural):
 
 
 def test_mf3_comes_back_paired_with_its_mf33_band(mf3_with_mf33, capsys):
-    """D13, from the end that noticed it.
+    """The missing band, from the end that noticed it.
 
     This test was written asserting ``band is None``: the MF33 half of the
     method had never once produced a band, on any tape, because

@@ -1,6 +1,6 @@
 """GNDS §3.5 units: the tables, the grammar, and the one prohibition.
 
-The registry exists because Juan wanted every quantity to carry its unit, from
+The registry exists so that every quantity carries its unit, from
 prior experience with unit bugs. The bug class is concrete and still in the
 tree: ``* 1e6  # MeV -> eV`` written inline, where nothing records what the
 number meant on either side. Every conversion below goes through

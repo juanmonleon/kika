@@ -11,12 +11,12 @@ by default ``C:\\Users\\Usuario\\BaradDur\\NuclearData\\openmc``.
 invented: a few temperatures, a few reactions, every N-th point of each energy
 grid (threshold points always kept, so ``threshold_idx`` stays exact), and a
 few incident energies of each distribution table, with offsets rebuilt. The
-structure -- the groups, attributes, dtypes, layouts and the contract of
-``openmc_hdf5_format_survey.md`` §2 -- is the official file's; the physics is
+structure -- the groups, attributes, dtypes and layouts -- is the official
+file's; the physics is
 deliberately damaged (a thinned grid is not a converged grid). They exist to
 test the format, so the size is kB and not MB.
 
-Cases (roadmap H0):
+Cases:
 
 - ``Fe56.h5``: levels, ``correlated`` in MT16/91, photons with a discrete line
   and the incident-energy code 22, redundant 103, 203, 301, 444, 901; two
@@ -24,7 +24,7 @@ Cases (roadmap H0):
 - ``U235.h5``: fission with six delayed groups, ``total_nu``,
   ``fission_energy_release``, ``urr`` and the redundant MT4 it names.
 - ``Cu63.h5``: ``kalbach-mann``, and a reaction with more than ten products
-  (D10, the lexicographic order of ``product_10``).
+  (the lexicographic order of ``product_10``).
 - ``H2.h5``: ``nbody`` and a primary ``discrete_photon``.
 - thermal ``c_Graphite`` (coherent elastic), ``c_H_in_ZrH`` (incoherent
   elastic), ``c_H_in_H2O`` (inelastic only), ``c_Zr_in_ZrH2`` (``mixed_elastic``

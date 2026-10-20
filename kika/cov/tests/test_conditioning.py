@@ -118,7 +118,7 @@ def test_roundoff_asymmetry_is_not_reported_and_real_asymmetry_blocks():
 
 
 def test_a_wholly_inert_block_draws_nothing_and_a_partly_inert_one_is_noted():
-    """PF-8: a block that states no uncertainty is drawn as no perturbation.
+    """A block that states no uncertainty is drawn as no perturbation.
 
     JEFF-4.0 Pu-242 states its [20, 200] MeV PFNS band as a 1x1 zero, and the
     pre-flight used to refuse the whole run over it. The legacy sampler drew

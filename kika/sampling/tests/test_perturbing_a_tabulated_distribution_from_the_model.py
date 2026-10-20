@@ -1,12 +1,10 @@
 """A tabulated MF4 perturbed end to end: request, draw, apply, write, read back.
 
-T5 and T7.3 of ``docs/library/mf4_tabulated_perturbation_roadmap.md``.
-
 The tables are real: ``micro_u238_ltt2_mf34.endf`` is U-238 of JEFF-4.0, whose
 MF4/MT2 is tabulated (LTT=2) at 39 energies with 90-91 cosines. Its own MF34 is
 **not** used here: as stated it cannot be sampled -- 172 correlations outside
 [-1, 1] (worst 4.8), not PSD, relative variances up to 1.7e4 -- and the
-pre-flight refuses it (``docs/library/jeff40_mf34_covariance_report.md``).
+pre-flight refuses it.
 Al-27, the only other evaluation to hand with LTT=2 and MF34, fails the same
 way, and no other library to hand has an LTT=2 section with MF34 at all.
 
@@ -159,7 +157,7 @@ def test_a_real_covariance_from_another_library_comes_back_out_of_the_tables(rea
 
     ENDF/B-VIII.1 states this MF34 in LAB and the tables are in CM, so the
     factors scale the tables' LAB moments, and that is where they are read
-    back (roadmap T9). Measured 2026-10-10: 1.4e-5 on the perturbed orders and
+    back. Measured 2026-10-10: 1.4e-5 on the perturbed orders and
     2e-7 on the others -- what ENDF's seven digits leave, as in the tables' own
     frame on 2026-10-05. Read in CM, the perturbed orders miss by 3.5e-4: that
     is the frame change, and the reason this reads LAB.

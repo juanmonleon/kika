@@ -6,7 +6,7 @@ MF34 is a covariance of the Legendre coefficients ``a_l(E)``. A tabulated MF4
 one incident energy; the energy dimension -- bin edges, repeated energies --
 is :func:`kika.nuclear_data.model.perturbation.applyTabulatedFactors`.
 
-**The method** (``docs/library/mf4_tabulated_perturbation_roadmap.md``, D-B).
+**The method**.
 Any table decomposes exactly as
 
     f(mu) = sum_{l in orders} (2l+1)/2 a_l P_l(mu) + r(mu)
@@ -42,9 +42,9 @@ What it guarantees by construction:
 * ``integral f' = integral f`` in the continuum, since ``int P_l = 0`` for
   ``l >= 1``. On the table, interpolated lin-lin between nodes, it is not exact:
   the lin-lin interpolant of a polynomial does not integrate to zero. ``info``
-  carries the size of that, and refining mu is decision D3.
+  carries the size of that, and refining mu is a separate decision.
 
-**A covariance in the other frame** (MF34's LCT, ENDF-6 §34.1; roadmap T9).
+**A covariance in the other frame** (MF34's LCT, ENDF-6 §34.1).
 When MF34 states LAB coefficients and the table is in CM (or the reverse), the
 factors scale the *other* frame's coefficients ``b_l``. Both steps stay closed
 form on a table, because a table is only ever evaluated:

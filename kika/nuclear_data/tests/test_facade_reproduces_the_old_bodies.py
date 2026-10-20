@@ -8,7 +8,7 @@ every tape and compares them field by field.
 
 **Where they are allowed to differ, they are listed here by name**, with the
 defect each difference fixes. A difference that is not listed fails. That is the
-distinction the roadmap kept insisting on: "the façade changes nothing" and "the
+distinction that matters: "the façade changes nothing" and "the
 façade changes exactly these three things, each of them a fix" are different
 claims, and only the second one is true.
 

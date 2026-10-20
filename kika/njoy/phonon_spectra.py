@@ -1,4 +1,4 @@
-"""The phonon spectra a thermal-scattering evaluation was made from (roadmap E4-r2).
+"""The phonon spectra a thermal-scattering evaluation was made from.
 
 A TSL evaluation's MF7 is LEAPR's *output*; the physics it was computed from is
 the phonon density of states (DOS) of each scattering atom, which ENDF/B-VIII.1

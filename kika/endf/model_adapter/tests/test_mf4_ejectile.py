@@ -4,7 +4,7 @@ ENDF-6 §4 lets the MT name the particle MF4 describes: MT600-649 the proton
 that leaves the residual in level ``MT - 600``, then the deuteron, triton, He-3
 and alpha. The adapter used to hang every MF4 on an ``n`` product, so a suite
 decoded from a tape said ``(n,p_0)`` emits a neutron with the proton's angular
-distribution (G4NDL roadmap §5 Fase 10, D10-5).
+distribution.
 
 No committed tape has an MF4 in that range, so this one is made from the W-186
 micro-tape by renumbering its MT51 (MF3, MF4 and the MF34 that points at it) to

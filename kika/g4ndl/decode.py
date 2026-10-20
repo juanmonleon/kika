@@ -1,6 +1,6 @@
 """G4NDL elastic records → :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
-Phase 4 of the G4NDL roadmap. The parsed records (:mod:`kika.g4ndl.records`)
+The parsed records (:mod:`kika.g4ndl.records`)
 go straight into the common model, the way :mod:`kika.gnds` does it: no
 G4NDL-shaped object in between, and the tokens the model has no slot for in a
 :class:`~kika.nuclear_data.model.provenance.G4NDLProvenance`.
@@ -26,9 +26,9 @@ than one energy region a ``Regions2d``, and ``repFlag=3`` a ``Regions2d`` of
 the Legendre block and the table. It is written again here rather than
 imported, so that the two formats do not depend on each other.
 
-**Two decisions made with Juan (2026-10-06).**
+**Two decisions.**
 
-* **INT=1 in μ is read as lin-lin** (revised in Fase 10, D10-3; it was
+* **INT=1 in μ is read as lin-lin** (revised; it was
   refused on 2026-10-06). Geant4 evaluates code 1 as lin-lin — the
   ``Histogram`` call is commented out (``G4ParticleHPInterpolator.hh:91-95``)
   — and the model holds what is transported. ENDF would read a histogram, so

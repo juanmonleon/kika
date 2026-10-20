@@ -1,6 +1,6 @@
 """A processed suite in GNDS: native nodes for the physics, ``KIKA::processed`` for the rest.
 
-ACE and OpenMC's HDF5 sample forms GNDS has no node for (roadmap A11):
+ACE and OpenMC's HDF5 sample forms GNDS has no node for:
 
 - ACE law 3 / OpenMC ``level`` (:class:`LevelEnergy`) is two-body kinematics,
   so it is written as an ``angularTwoBody`` with the Monte Carlo angle -- what
@@ -333,7 +333,7 @@ def _liftProbabilityTables(suite, out: "Lowered") -> None:
     ACE's and OpenMC's tables are **joint**: one band index for the total,
     elastic, fission, capture and heating at once, with INT/ILF/IOA/IFF.
     FUDGE's ``URR_probabilityTables1d`` is a P(sigma|E) per reaction, which
-    loses which band of one reaction goes with which of another (roadmap A11),
+    loses which band of one reaction goes with which of another,
     so the joint table goes to the block, once, with the reactions that use it.
     """
     m = _m()
@@ -557,7 +557,7 @@ def write(root: ET.Element, lowered: Lowered, report, function) -> None:
         application = ET.SubElement(root, "applicationData")
     institution = ET.SubElement(application, "institution", label=LABEL)
     if lowered.ace:
-        # ACE's bookkeeping (roadmap A11): the header, MTR/MTRP/NXS/YP, and per
+        # ACE's bookkeeping: the header, MTR/MTRP/NXS/YP, and per
         # product TY, MFTYPE, MTRP, the laws ACE chained -- what encodeAce
         # needs to give the table back word for word. JSON keeps every float
         # exact (repr).

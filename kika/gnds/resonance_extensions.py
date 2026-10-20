@@ -8,7 +8,7 @@ The institution carries ``resonanceChannelFunctions`` (complex KPS,
 tabulated LBK) and ``unresolvedCrossSectionInterpolation`` — ENDF's URR INT,
 which interpolates the *cross sections* between the parameter energies.
 §19.4.1 has a law only for each parameter function, and FUDGE copies INT
-there, which is a different calculation (resonance roadmap D13/N3).
+there, which is a different calculation.
 ``unresolvedPotentialScattering`` declares an independent potential policy;
 ``unresolvedNeutronWidthConvention`` explicitly identifies physical neutron
 means instead of reduced GN0. Both are opt-in canonical KIKA conventions.

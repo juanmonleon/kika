@@ -1,4 +1,4 @@
-"""MF7 into the model and back (ENDF-coverage roadmap E4a).
+"""MF7 into the model and back.
 
 A TSL tape used to decode to an empty ``nuclear`` suite that said MF7 was not
 covered. Now it is a ``thermalNeutronScatteringLaw`` suite whose reactions hold

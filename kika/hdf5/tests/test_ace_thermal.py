@@ -1,8 +1,8 @@
-"""A thermal ACE table (THERMR + ACER) read into the processed thermal forms (roadmap H9c).
+"""A thermal ACE table (THERMR + ACER) read into the processed thermal forms.
 
 The table here is built by hand in the type-1 layout, small enough to check
 every number; the real ones are checked against the official library
-(``kika-workspace/kika_dev/hdf5``: H in H2O at 294 K and 600 K came out
+(H in H2O at 294 K and 600 K came out
 identical dataset by dataset).
 """
 from __future__ import annotations

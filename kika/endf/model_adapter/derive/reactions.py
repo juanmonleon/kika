@@ -73,7 +73,7 @@ def _lr(residual, label: str, report) -> int:
     entry as the leftover always, which is what its Be-8 and B-10 kludges patch.
     Here the last entry is the leftover when it is a nucleus, or a light particle
     already listed (Be-8 → α + α under LR=22: ``He4``, ``He4__a``). A breakup
-    with no LR in the table is refused (D3); FUDGE writes 0.
+    with no LR in the table is refused; FUDGE writes 0.
     """
     channel = residual.outputChannel
     base = residual.pid.split("_")[0]

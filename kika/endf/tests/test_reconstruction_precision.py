@@ -1,4 +1,4 @@
-"""ENDF decimal precision: the closest legal field, the scientific one on a tie (D22)."""
+"""ENDF decimal precision: the closest legal field, the scientific one on a tie."""
 import numpy as np
 import pytest
 from kika._records import (format_endf_number,format_endf_number_precise,
@@ -33,7 +33,7 @@ def test_best_precision_is_never_worse_than_legacy(value):
 
 def test_fixed_notation_retains_the_digits_lost_in_normalized_exponent():
     assert format_endf_number_precise(100.44989981925573)=='100.4498998'
-    # Every writer since D22 (2026-10-14), not only the PENDF's.
+    # Every writer since 2026-10-14, not only the PENDF's.
     assert format_endf_number(100.44989981925573)=='100.4498998'
     from kika._records import _format_endf_scientific
     assert _format_endf_scientific(100.44989981925573)==' 1.004499+2'
@@ -53,7 +53,7 @@ def test_precise_choice_matches_exhaustive_legal_fixed_decimal_search():
         candidates=[format_endf_number(value)]
         for places in range(11):
             fixed=f'{value:.{places}f}'
-            # A value below one may drop its leading zero (D22).
+            # A value below one may drop its leading zero.
             for text in {fixed,fixed.replace('0.','.',1) if fixed.lstrip('-').startswith('0.') else fixed}:
                 if len(text)<=11:candidates.append(text)
         best=min(abs(parse_number(field)-value) for field in candidates)

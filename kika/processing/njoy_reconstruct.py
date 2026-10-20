@@ -44,7 +44,7 @@ def _read_endf(path: str, mf_numbers: Optional[List[int]] = None):
     module-level import here puts ``kika.endf`` on ``kika.processing``'s import
     path, and then nothing in ``kika.endf`` can import from ``kika.processing``
     at module scope -- which is precisely what blocked moving ``interpolate_1d``
-    down in phase 2 of the GNDS roadmap.
+    down during the GNDS migration.
 
     Reading a PENDF tape genuinely needs the parser, so the dependency stays and
     only its timing changes. One function rather than an import at each call

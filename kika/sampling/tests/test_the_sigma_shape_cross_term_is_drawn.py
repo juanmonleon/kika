@@ -1,10 +1,9 @@
 """J3: a request for MF33 *and* MF34 draws the sigma <-> a_l cross term the file states.
 
 MF34's L0xLl sections are the covariance between the cross section and the a_l.
-Decided 2026-10-04 (``kika-workspace/docs/library/mf4_tabulated_perturbation_roadmap.md``,
-pista J): when cross section and angular distribution are asked for together,
+Decided 2026-10-04: when cross section and angular distribution are asked for together,
 that term is drawn **by default**, in one matrix with MF33's sigma and the
-L>=1 shape. The design is J2 of the same document:
+L>=1 shape. The design:
 
 * sigma is **one** component, MF33's; the L=0 side of every L0xLl section is
   re-keyed to it, and L0xL0 is not used;

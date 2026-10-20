@@ -107,8 +107,7 @@ class AngularDistribution:
         defaults are unchanged; ``test_flat_class_surface.py`` is the proof.
 
         Two ``metadata`` keys are **new**, and they are what makes
-        :meth:`to_endf` able to write an LTT=3 section back — the
-        ``library-gaps.md`` D2 defect:
+        :meth:`to_endf` able to write an LTT=3 section back:
 
         ``nm``
             The evaluation's declared highest Legendre order. LTT=3 writes it in

@@ -530,8 +530,7 @@ class MF33MT(MT):
         average of ``xs_row`` / ``xs_col``. Without them it raises
         :class:`MF33NeedsCrossSections`: adding barns² to fractions is the
         alternative, and it is what this method did until 2026-10-06 — up to
-        ×6400 on JEFF-4.0 Eu-154 MT3 (census in kika-workspace
-        ``docs/library/cov_checks_roadmap.md``, C0).
+        ×6400 on JEFF-4.0 Eu-154 MT3.
 
         LB=8/9 are projected by :meth:`_short_range_diagonal`, not as LB=0.
 

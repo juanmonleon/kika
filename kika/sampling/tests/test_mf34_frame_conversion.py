@@ -5,8 +5,7 @@ U-235 and U-238, and both ENDF/B-VIII.1 and JEFF-4.0 do it for Th-232, Mn-55 and
 W-180…186. In all of them the covariance is of LAB coefficients and MF4 is in
 CM. A drawn factor then describes a LAB coefficient. Applying it to the CM
 coefficient perturbs a different quantity. `kika._legendre_frames` applies it in
-LAB and brings the change back to CM: option A of
-``docs/library/cov_checks_roadmap.md``, N2.
+LAB and brings the change back to CM.
 
 **The synthetic tape** is ``micro_fe56_structural.endf`` (JEFF-4.0 Fe-56,
 MF4/MT2 in CM, LTT=3, MF34 L=1..6 on three grids) with every MF34 LCT rewritten
@@ -309,8 +308,8 @@ def test_the_legacy_applier_agrees_with_the_model_off_the_bin_edges(modelRuns, l
     """`perturb_ENDF_files`' applier, with the frames from the index.
 
     Compared off the bin edges: at an edge the legacy applier keeps the
-    baseline of every order whose own grid has no edge there (D32 in
-    ``library-gaps.md``), with or without a conversion.
+    baseline of every order whose own grid has no edge there,
+    with or without a conversion.
     """
     entry = modelRuns["entry"]
     param_mapping, energy_grids = _parameter_mapping_from_index(entry)

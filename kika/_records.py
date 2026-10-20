@@ -68,7 +68,7 @@ def _format_endf_scientific(value: Union[int, float, None], width: int = 11) -> 
     The normalised scientific spelling of an ENDF field: seven significant digits.
 
     Not the writer any more -- :func:`format_endf_number` is, and it falls back
-    to this whenever plain decimals do not name the value more closely (D22).
+    to this whenever plain decimals do not name the value more closely.
 
     The output is an 11-character field made up as follows:
       - The first character is '-' if the number is negative or a blank if positive.
@@ -207,8 +207,7 @@ def format_endf_number(value: Union[int, float, None], width: int = 11) -> str:
     computed by kika, or read from a tape that spent the field on more digits,
     now keeps them. Until 2026-10-14 every writer but the PENDF, MF12, MF14 and
     the MF5 derivation used the scientific spelling alone, and writing back a
-    nine-digit field rounded it at the seventh digit (D22 in
-    ``kika-workspace/docs/library/library-gaps.md``: 97 fields of ENDF/B-VIII.1,
+    nine-digit field rounded it at the seventh digit (97 fields of ENDF/B-VIII.1,
     worst 4.8e-7 relative).
     """
     if width == 11 and value is not None and value != 0:
@@ -312,7 +311,7 @@ def format_endf_fields(values, data_format=None):
     for a computed one, and 31.2 vs 30.3 s to write MF3/MF4/MF6 of the 39
     tapes in the local cache. *data_format* is accepted for the callers that pass
     ``ENDF_FORMAT_PRECISE`` or ``ENDF_FORMAT_FLOAT``; both name the same field
-    since D22.
+    since 2026-10-14.
     """
     out = []
     append = out.append
@@ -427,8 +426,8 @@ round_to_endf_field = round_to_precise_endf_field
 
 
 # Format constants for ENDF data types
-#: Both float formats write :func:`format_endf_number`'s closest field since D22
-#: (2026-10-14); the two names stay because ~100 call sites pass one or the other.
+#: Both float formats write :func:`format_endf_number`'s closest field since
+#: 2026-10-14; the two names stay because ~100 call sites pass one or the other.
 ENDF_FORMAT_PRECISE = 'float_precise'
 ENDF_FORMAT_FLOAT = 'float'
 ENDF_FORMAT_INT = 'int'           # Integer format (e.g., "         11")

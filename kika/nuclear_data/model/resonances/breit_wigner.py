@@ -14,7 +14,7 @@ this module implements.
 
 The flat class is **not touched**. It keeps ``c3..c6`` and keeps working;
 :meth:`Resonance.toFlat` produces the positional tuple for the adapter, one way
-only. That is deliberate: the roadmap's own risk assessment is that a direct
+only. That is deliberate: the risk assessed is that a direct
 rename "can produce silently wrong reconstructed cross sections, with no test in
 existence to catch it".
 """

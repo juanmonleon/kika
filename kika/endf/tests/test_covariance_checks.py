@@ -3,8 +3,8 @@
 Each check gets a synthetic section built from the parser's own record classes,
 with the fault planted and nothing else wrong, so a test pins one rule. The
 real-tape cases (O-16 of ENDF/B-VIII.1, B-10/B-11 of JENDL-5, the MF34 defect A
-of JEFF-4.0) are the validation of phase C7, against the census in
-kika-workspace ``docs/library/cov_checks_roadmap.md``.
+of JEFF-4.0) are the validation, against a census of the
+three libraries.
 """
 from __future__ import annotations
 

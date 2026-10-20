@@ -182,7 +182,7 @@ def residualOf(suite, reaction, report, *, force: bool = False):
 
     ``None`` for a reaction that is not to a discrete level, or whose level has
     nothing to say (QM = QI and LR = 0) unless *force* -- which is what an MF12
-    LO=2 cascade is: a level whose decay the file does state (roadmap E5c).
+    LO=2 cascade is: a level whose decay the file does state.
     """
     from kika.nuclear_data.model import Nuclide, Product, pidFromZA
 

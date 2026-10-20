@@ -60,7 +60,7 @@ _PREFIX = "kika.nuclear_data."
 def _public_modules():
     """Every module in ``kika.nuclear_data``, **recursively**, tests excluded.
 
-    ``walk_packages`` rather than ``iter_modules``: phase 3 of the GNDS roadmap
+    ``walk_packages`` rather than ``iter_modules``: the GNDS model
     adds ``kika/nuclear_data/model/`` with subpackages of its own, and
     ``iter_modules`` would have reached only their ``__init__``. Walking also
     means an import error anywhere in the new model fails this suite the first

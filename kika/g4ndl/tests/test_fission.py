@@ -132,7 +132,7 @@ def test_mt18_lands_where_the_endf_adapter_puts_it():
     assert isinstance(r.provenance, G4NDLFissionProvenance)
     assert r.outputChannel.Q.value is None   # the file states 0 0, not the fission Q
     assert np.array_equal(r.crossSection["recon"].ys, G4.fissionCrossSection("Fm255").sigma)
-    n, *photons = r.outputChannel.products        # the photons after it (D10-2)
+    n, *photons = r.outputChannel.products        # the photons after it
     assert n.pid == "n" and photons and all(p.pid == "photon" for p in photons)
     d = n.distribution["eval"]
     assert isinstance(d, Uncorrelated) and isinstance(d.energy, XYs2d)
@@ -154,7 +154,7 @@ def test_mt18_lands_where_the_endf_adapter_puts_it():
     release = r.outputChannel.fissionFragmentData.fissionEnergyReleases[0]
     assert release.totalEnergy.coefficients.tolist() == \
         [G4.fissionFinalState("Fm255").section(5, 1).body.values[9]]
-    # The photons reach the model too (D10-2): nothing is kept as text.
+    # The photons reach the model too: nothing is kept as text.
     kept = [(e["infoType"], e["dataType"]) for e in r.provenance.sections if "verbatim" in e]
     assert kept == []
     assert [p for p in r.outputChannel.products if p.pid == "photon"]

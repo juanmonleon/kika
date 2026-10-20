@@ -1,9 +1,7 @@
-"""kika's own KERMA and damage (roadmap H8): the pieces against closed forms.
+"""kika's own KERMA and damage: the pieces against closed forms.
 
-The whole calculation is checked against HEATR on real evaluations in
-``kika-workspace/kika_dev/processing/heating`` (Fe-56, ENDF/B-VIII.1: elastic
-and capture to < 0.1 %, the total per collision to the medians listed in
-``docs/library/heating_kerma_damage_plan.md``).
+The whole calculation is checked against HEATR on real evaluations outside
+the test suite (Fe-56, ENDF/B-VIII.1: elastic and capture to < 0.1 %).
 """
 import numpy as np
 import pytest
@@ -371,7 +369,7 @@ def test_mf6_capture_443_uses_independent_photon_kicks_and_the_compound_recoil()
     reaction = NS(ENDF_MT=102,outputChannel=NS(Q=NS(value=5e6),products=[product]))
     result = H.heatingOf(NS(reactions=[reaction]),E,{102:np.ones(len(E))},awr=A,Z=26,
                         evaluation=NS(findReactionByENDF_MT=lambda mt:source),kinematic=True)
-    # D49: the compound recoil E/(A+1) is no longer dropped for MF6.
+    # The compound recoil E/(A+1) is no longer dropped for MF6.
     expected = E/(A+1)+2*binding**2/(2*(A+1)*H.NEUTRON_REST_ENERGY)
     np.testing.assert_allclose(result.kinematicUpper[102],expected,rtol=1e-14)
     np.testing.assert_allclose(result.kerma,expected,rtol=1e-14)
@@ -532,7 +530,7 @@ def test_heavy_tabulation_is_done_once_per_form_and_forgotten_with_it(monkeypatc
 
 
 def test_mf12_capture_support_is_every_subsection_not_the_last():
-    """D47: Cl-35 MT102's last MF12 subsection starts at 100 keV; below it the
+    """Cl-35 MT102's last MF12 subsection starts at 100 keV; below it the
     others still emit, so the capture Q is not deposited there."""
     from types import SimpleNamespace as NS
     A,binding=34.,8e6;E=np.array([.0253,1e3,5e5])
@@ -549,7 +547,7 @@ def test_mf12_capture_support_is_every_subsection_not_the_last():
 
 
 def test_an_mf6_capture_keeps_the_compound_recoil():
-    """D49: the compound nucleus carries E/(A+1) whatever file states the
+    """The compound nucleus carries E/(A+1) whatever file states the
     photons; HEATR's tabsq6 drops it for MF6 and keeps it for MF12."""
     from types import SimpleNamespace as NS
     A,binding=34.,8e6;E=np.array([.0253,2.24e4,1e6])

@@ -40,7 +40,7 @@ of mass, and 3 when the light ones (A ≤ 4, a photon included, as
 the lab. JP is 0 (the P(ν) subsections of a JP>0 fission section
 have no model node). ND is 0 on every node but one kind: the photons of a line
 spectrum -- ``discreteGamma`` and ``primaryGamma`` products and an isotropic
-continuum, each line's multiplicity its share of the yield (D40) -- are one
+continuum, each line's multiplicity its share of the yield -- are one
 LAW=1 subsection again, the lines first in each node in decreasing energy, the
 way FUDGE's ``gammasToENDF6_MF6`` writes them (``photon_lines.deriveLineSpectrum``).
 """
@@ -321,7 +321,7 @@ def mf6Fields(reaction, context, report) -> Optional[dict]:
         index += 1
         form = _form(product)
         if group and product is group[0]:
-            # D40: the photons of one line spectrum are one LAW=1 subsection,
+            # The photons of one line spectrum are one LAW=1 subsection,
             # the lines first in each node -- FUDGE's ``gammasToENDF6_MF6``.
             record = _lineRecord(group, reaction, context, index, mt, report)
             if record is None:

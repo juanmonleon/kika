@@ -6,7 +6,6 @@ verbatim, closed cut of a real tape -- ``COV_CHECK_FIXTURES`` in
 ``test_micro_tape_regen.py`` says what was kept and why -- and each was checked
 to give the same findings as the full tape on the same sections. The numbers
 asserted here are the ones the library-wide validation measured.
-Plan: kika-workspace ``docs/library/cov_checks_roadmap.md``.
 """
 from __future__ import annotations
 

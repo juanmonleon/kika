@@ -1,7 +1,7 @@
 """The ENDF writer door for an evaluation that is a standalone PoPs.
 
 A radioactive decay (NSUB=4) or fission yield (NSUB=5, 11) evaluation is a
-nuclide, not a reactionSuite (roadmap E7). ``kika.write`` reaches its tape
+nuclide, not a reactionSuite. ``kika.write`` reaches its tape
 through here, as it reaches a reactionSuite's through :mod:`.assemble`, so
 that only the front door imports the model adapter.
 """

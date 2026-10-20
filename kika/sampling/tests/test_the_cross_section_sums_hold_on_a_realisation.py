@@ -1,7 +1,6 @@
 """MF3's sum rules on a realisation: partials govern, sums follow, nothing else moves.
 
-The rule (decision 3 of ``kika-workspace/docs/library/perturbation_model_roadmap.md``,
-settled with Juan on 2026-10-07) in four parts, each pinned here:
+The rule (settled on 2026-10-07) in four parts, each pinned here:
 
 1. a partial with its own block is perturbed by it -- partials govern;
 2. every sum with a moved partial is re-derived as ``S + sum (p' - p)``, and a
@@ -523,7 +522,7 @@ def test_a_sums_own_block_is_not_drawn_where_its_partials_carry_theirs(
 def test_naming_a_decomposed_sum_names_what_decomposes_it(fe56WithTotalCovariance):
     """``{33: [1]}`` with MF33 for MT1 and MT2: the total, through MT2.
 
-    Juan, 2026-10-07: asking for the inelastic where MT51-52 are stated apart
+    By design (2026-10-07): asking for the inelastic where MT51-52 are stated apart
     is asking for MT51-52. MT2 is added to the request and said to be.
     """
     run = perturbFromModel(str(fe56WithTotalCovariance), {33: [1]}, 1, seed=3,

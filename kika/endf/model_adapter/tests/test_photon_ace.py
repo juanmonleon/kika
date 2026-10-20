@@ -1,4 +1,4 @@
-"""NJOY's ACE from a tape kika wrote is NJOY's ACE from the original (roadmap E5f.2).
+"""NJOY's ACE from a tape kika wrote is NJOY's ACE from the original.
 
 The whole chain of ``kika.njoy.templates.NJOY_INPUT_TEMPLATE`` -- RECONR,
 BROADR, HEATR, PURR, GASPR and ACER with photon production asked for (iopp=1)

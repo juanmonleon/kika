@@ -14,8 +14,8 @@ tape's 6x6 is full rank and would agree for the wrong reason.
 which the migration deletes, and it holds `null_tol=None`, which the truncation
 commit removes. Both of those are the point: the equivalence is a migration
 gate, not a property MF34 sampling is supposed to have forever. When truncation
-is turned on this test *should* fail, and it goes then — replaced by the measured
-before/after recorded in `sampling_migration_roadmap.md`. Do not "fix" it by
+is turned on this test *should* fail, and it goes then — replaced by a measured
+before/after. Do not "fix" it by
 loosening `assert_array_equal` to `allclose`; that would hide exactly the drift
 it exists to catch.
 """

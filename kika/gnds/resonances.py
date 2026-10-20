@@ -230,7 +230,7 @@ class _ResonanceReader:
         radius axis in ENDF/B-VIII.1-GNDS says ``fm``, which makes this a no-op
         on the whole library — and that is exactly why it is worth having: the
         one file that says something else would otherwise be read as fm without
-        a word, which is the shape of the error §7.2 is about.
+        a word.
 
         A unit the converter does not know is **kept as read and reported**,
         with the unit it came with, so a consumer asking for ``radiusUnit`` can
@@ -328,8 +328,7 @@ class _ResonanceReader:
             # property of the evaluation. Recorded so the writer does not have
             # to guess whether its absence was meaningful.
             #
-            # **Reported permanently, decided 2026-08-24**, and it is the one
-            # row of `gnds_endf_conflicts.md` §6.4 that closes as "won't fix"
+            # **Reported permanently, decided 2026-08-24**, as "won't fix"
             # rather than as work. 65 files set it, so it is not rare — but a
             # model node for it would state, in a format-neutral model, what
             # one reader can do with the numbers. The number it qualifies is
@@ -339,7 +338,7 @@ class _ResonanceReader:
                 f"a reconstructor can do with these parameters rather than a "
                 f"property of them; kika has no node for it, and will not — it "
                 f"is FUDGE's capability and not the evaluation's (65 files set "
-                f"it; gnds_endf_conflicts.md §6.4)",
+                f"it)",
                 unaffectedScopes=("cross-sections",),
             )
         return RMatrix(

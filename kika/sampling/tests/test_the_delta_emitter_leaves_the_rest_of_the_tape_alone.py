@@ -1,4 +1,4 @@
-"""``endf-delta`` replaces the sections it perturbed, and not one line more (PF-5).
+"""``endf-delta`` replaces the sections it perturbed, and not one line more.
 
 The emitter used to replace the whole MF it touched, so every *sibling* MT in
 that MF was re-encoded although the realisation never moved it: MF5/MT455 beside
@@ -18,8 +18,6 @@ per-MT replacement has no business normalising them.
 Lines, not raw bytes: ``ENDFWriter`` writes in text mode, so on Windows the
 whole output gets CRLF endings whatever the source had. That is the writer's,
 not the emitter's, and it touches every line equally.
-
-The plan is ``kika-workspace/docs/pfns/pfns_mf5_mf35_roadmap.md``, PF-5 / PD-7.
 """
 from __future__ import annotations
 
@@ -99,11 +97,11 @@ def test_a_spectrum_delta_leaves_the_other_mf5_sections_alone_on_the_micro_tape(
 
 def test_a_spectrum_delta_leaves_mt455_alone_on_endfb81_u233(u233_b81_tape,
                                                               tmp_path):
-    """The tape PF-5 was found on: MT455's ZA is ``92233.0000`` in the source."""
+    """The tape the defect was found on: MT455's ZA is ``92233.0000`` in the source."""
     source = _sections(u233_b81_tape)
     assert (5, 455) in source, "this evaluation is meant to carry MF5/MT455"
     assert source[(5, 455)][0].startswith(" 92233.0000"), (
-        "MT455's HEAD no longer spells its ZA the way that exposed PF-5")
+        "MT455's HEAD no longer spells its ZA the way that exposed the defect")
     _assertOnlyPerturbedMoved(u233_b81_tape, {35: None}, {(5, 18)}, tmp_path)
 
 

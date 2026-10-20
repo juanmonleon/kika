@@ -11,8 +11,7 @@ length.
 **The walk was measured before it was written.** An independent column parser
 walked every MF12-15 section of ENDF/B-VIII.1, JEFF-4.0 and JENDL-5 (1 946
 tapes, about 61 000 sections) on 2026-10-09 with no format error and no line
-left over; ``docs/library/endf_photons_e5_plan.md`` §2 in the workspace repo,
-and ``kika/endf/tests/photon_census.py`` here, which keeps it re-runnable.
+left over; ``kika/endf/tests/photon_census.py``, which keeps it re-runnable.
 """
 from typing import Callable, List, Tuple
 

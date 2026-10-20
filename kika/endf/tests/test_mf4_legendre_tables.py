@@ -2,8 +2,8 @@
 
 MF34's cell means of a_l and the covariance check's bound used to sample a_l at
 5 and 9 equally spaced energies per cell. On JEFF-4.0 Fe-56 elastic, whose a_l
-carry the resonance structure, that missed a_1 by 0.13 in 0.65-0.75 MeV
-(``kika_dev/processing/function_math/check_al_cell_averages.py``). Each MF4
+carry the resonance structure, that missed a_1 by 0.13 in 0.65-0.75 MeV.
+Each MF4
 class now states a_l(E) as one table (``legendre_table``) that reads back as
 ``extract_legendre_coefficients`` does, and the means integrate it.
 """

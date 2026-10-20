@@ -11,7 +11,7 @@ The two halves are deliberate:
 * where `LegendreCovariance.covariance_matrix` produces a matrix, we must equal
   it under `assert_array_equal` -- not `allclose`;
 * where it raises, we must not. That is not a nicety: it raises on the tape the
-  Fe-56 track actually ships (`docs/library/library-gaps.md` D9).
+  Fe-56 track actually ships.
 """
 from __future__ import annotations
 
@@ -215,7 +215,7 @@ def test_the_index_says_what_the_rows_are(micro):
 
 
 def test_a_union_bin_outside_a_section_gets_zero_not_the_nearest_bin():
-    """D9, in miniature, and the reason the carrier raises on the shipped tape.
+    """In miniature, the reason the carrier raises on the shipped tape.
 
     Two components: one stated out to 150, one only out to 20, correlated. The
     union runs to 150, so the short section is short of it. The carrier walks a
@@ -270,7 +270,7 @@ def test_a_union_bin_below_a_section_gets_zero_not_its_first_bin():
     **Both implementations are asserted**, and they must now agree: the carrier
     was fixed rather than routed around, so the duplication here is a drift
     detector. If this starts failing, one of the two lifts moved without the
-    other, and `refactor-backlog.md` names them as the pair to collapse.
+    other; they are the pair to collapse.
     """
     from kika.cov.legendre_covariance import LegendreCovariance
     from kika.sampling.model_blocks import _lift_matrix
@@ -287,7 +287,7 @@ def test_a_union_bin_below_a_section_gets_zero_not_its_first_bin():
 
 
 def test_the_carrier_no_longer_walks_off_the_top_either():
-    """D9 on the carrier: this raised IndexError before 2026-08-11."""
+    """The same case on the carrier: this raised IndexError before 2026-08-11."""
     from kika.cov.legendre_covariance import LegendreCovariance
 
     src = np.array([0.0, 10.0, 20.0])                  # stated only to 20

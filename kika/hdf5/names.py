@@ -145,7 +145,7 @@ def isInelasticScatter(mt: int) -> bool:
 
 
 # ----------------------------------------------------------------------
-# Style labels (roadmap D9)
+# Style labels
 # ----------------------------------------------------------------------
 # GNDS §9 fixes the style *node* names and leaves the labels to the writer.
 # These are kika's for a suite read from, or written to, OpenMC's HDF5.

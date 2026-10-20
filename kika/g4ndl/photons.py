@@ -1,4 +1,4 @@
-"""G4NDL photon bodies ↔ ENDF MF12-15 sections ↔ the model (roadmap D10-2, E5f.3).
+"""G4NDL photon bodies ↔ ENDF MF12-15 sections ↔ the model.
 
 Geant4's photon reader (``G4ParticleHPPhotonDist``) reads ENDF's photon files
 almost field for field: ``InitMean`` is MF12 (``repFlag`` = LO), ``InitPartials``

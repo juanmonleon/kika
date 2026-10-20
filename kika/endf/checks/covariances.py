@@ -89,7 +89,7 @@ logger = get_endf_logger(__name__)
 RHO_ROUNDING = 1e-6
 RHO_DEFECT = 1e-3
 
-#: The three PSD levels on |lambda_min| / lambda_max (roadmap, decisions).
+#: The three PSD levels on |lambda_min| / lambda_max.
 PSD_NOTE = 1e-6
 PSD_DEFECT = 1e-3
 

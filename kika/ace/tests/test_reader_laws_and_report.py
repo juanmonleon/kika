@@ -1,6 +1,6 @@
-"""The A0 reader fixes of the ACE roadmap, one test each, tape-free.
+"""The ACE reader fixes, one test each, tape-free.
 
-The 2026-10-14 audit (``docs/library/ace_roadmap.md`` §3 in kika-workspace)
+The 2026-10-14 audit
 read two whole libraries against an independent decoder. What it found wrong
 or untested is pinned here on law records laid out word by word from the
 manual (LA-UR-19-29016, Tables 30-49): LAW=33 was not decoded, a lines-only

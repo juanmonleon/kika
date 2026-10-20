@@ -35,13 +35,13 @@ is HEATR's (``heatr.f90``):
   law with independent azimuths. The evaluation gives no correlation, so this is
   a model; against the residuals ENDF/B-VIII.1 does state it is closer than
   HEATR's one particle in every MT28 measured and equal in MT22 of medium-mass
-  targets (PXB-053).
+  targets.
 - **neutron recoil**: a section that states its neutrons and not the residual
   (MT16, 17, 91, ...) recoils the same way, from all its neutrons (mass A+1−n),
   exact for one. HEATR recoils an MF6 section's residual from one neutron with the
   target's mass at the mean lab cosine (``h6cm``), and an MF4/MF5 one by ``tabdam``,
   one isotropic lab emission; ``tabdam`` on an MF6 section is not HEATR's number
-  (Ni-60 MT91 at 14 MeV 6 % above it, PXB-057).
+  (Ni-60 MT91 at 14 MeV 6 % above it).
 
 The mean energies integrate the processed suite's Monte Carlo densities exactly
 for polynomial moments on flat/linear panels (including MF6), from the
@@ -1763,14 +1763,14 @@ def _captureDamage(photons, grid, A, Z, ed, Q, fixedPrimary=False):
 
     HEATR's ``gheat`` sums the damage of each photon's recoil as an independent
     primary and leaves out the compound's own motion, E/(A+1), which kika's
-    KERMA carries since D49. Here the compound recoil is one more independent
+    KERMA carries. Here the compound recoil is one more independent
     primary, in the same superposition: at thermal energies E/(A+1) is far below
     ``ed`` and the damage is HEATR's to the bit; above a few keV it is the
     compound recoil that displaces (Fe-56 at 1 MeV: 13.2 keV against gheat's
     0.38 keV). Folding every kick into one recoil of mean energy E/(A+1) + E_ph
     was measured and rejected: the mean of the photon kicks can sit below
     ``ed`` while the hard primaries do not (U-238 thermal capture damage went
-    to zero; P3 plan §5, capture_damage_recoil.py).
+    to zero).
     """
     tm = NEUTRON_REST_ENERGY * (A + 1.0)
     if not photons:
@@ -2007,7 +2007,7 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
         if ownLevel and multiplicity is None:
             # MF4 states a level's particle by its angle alone: one of it, two bodies
             # (HEATR's disbar). Left out, the level fell to capdam's proton below the
-            # Coulomb barrier (O-16 MT800-848, all of MT444 at 5 MeV; PXB-051).
+            # Coulomb barrier (O-16 MT800-848, all of MT444 at 5 MeV).
             multiplicity = _UNIT_YIELD
         if form is None and ownLevel:
             form = Isotropic2d()
@@ -2062,7 +2062,7 @@ def _heavyProducts(reaction, evaluation, grid, A, Z, zaTarget, ed, notes, damage
         # With more than one particle emitted (MT22, 28, 24, ...), the residual takes
         # the momentum of all of them, drawn independently: against the cascades that
         # ENDF/B-VIII.1 does state, closer than HEATR's recoil from the one particle
-        # (O-16 MT22 1.04-1.06 against 1.13-1.15; PXB-053).
+        # (O-16 MT22 1.04-1.06 against 1.13-1.15).
         independent = _independentParticles(light, neutrons, grid, A, Z, zaTarget, reaction.ENDF_MT, Q,
                                             notes) if not twoBody else None
         if independent is not None:
@@ -2186,12 +2186,12 @@ def _neutronResidualDamage(mt, neutrons, grid, A, Z, ed, notes=None):
     before -- only when the form has no lab momenta.
 
     Against HEATR itself (NJOY 2016.78 rebuilt without the generated recoil of one MT,
-    ENDF/B-VIII.1 Ni-60; PXB-057), HEATR's MT91 is 32.4 % of MT444 at 14 MeV; its rule
+    ENDF/B-VIII.1 Ni-60), HEATR's MT91 is 32.4 % of MT444 at 14 MeV; its rule
     emulated on kika's tables gives 32.4 %, the exact recoil 31.0 % (the mean cosine,
     Jensen), ``tabdam`` 34.4 %. Against the residual Fe-56 states, the exact MT91 is
     −17 % at 20 MeV: that residual is a neutron isotropic in the centre of mass (⟨E_R⟩
     537 keV; the neutron's own law gives 419, isotropic 515), not the evaluation's own
-    neutron (PXB-055).
+    neutron.
     """
     particles = [(form, 1.0, _yield(product, grid)) for product, form in neutrons]
     counts = [y[y > 0] for _, _, y in particles]
@@ -2723,7 +2723,7 @@ def _independentRecoilDamage(particles, grid, A, Z, zr, ar, ed):
     cascade does carry, so this is a model: measured against the residuals
     ENDF/B-VIII.1 does state (TALYS, GNASH cascades), it is closer than one
     particle's recoil in all six MT28 sections measured and equal in MT22 of
-    medium-mass targets, where the alpha carries the momentum (PXB-053). The damage is computed at the particles'
+    medium-mass targets, where the alpha carries the momentum. The damage is computed at the particles'
     incident energies and read lin-lin between them.
     """
     lo, hi = float(np.min(grid)), float(np.max(grid))
@@ -2827,7 +2827,7 @@ def _mf12Capture(evaluation, mt):
 
 def _mf12CaptureDomain(photons, grid):
     """Where any MF12 subsection emits: gheat's correction applies there, and
-    the neutron balance stays where none does (D47).
+    the neutron balance stays where none does.
 
     The last subsection alone is not the support: ENDF/B-VIII.1 Cl-35 MT102
     states 383, the last from 100 keV, and taking it left the whole capture
@@ -3169,7 +3169,7 @@ def _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarge
                 notes.append("MT102: MF12 gheat branch; compound recoil and fixed primary-line photon kicks")
             else:
                 # The compound nucleus keeps the neutron's momentum whatever file
-                # states the photons (D49). HEATR's tabsq6 drops it for MF6, so a
+                # states the photons. HEATR's tabsq6 drops it for MF6, so a
                 # GNDS evaluation, which never says MF12, lost it too (Cl-35 at
                 # 22.4 keV: KERMA 16 % below NJOY's, which went through gheat).
                 carried = carried + grid / (A + 1.0)
@@ -3312,7 +3312,7 @@ def _heatingBody(suite, grid, sigma, A, Z, ed, qm, qa, qbar, evaluation, zaTarge
         return total, per
 
     # One pass per model, in a copy of this context (the energy threads already
-    # share the work; side-by-side passes measured no faster, PXB-045).
+    # share the work; side-by-side passes measured no faster).
     for name, model in models.items():
         total, per = contextvars.copy_context().run(displacementPass, model)
         displacements[name], displacementsPerReaction[name] = total, per

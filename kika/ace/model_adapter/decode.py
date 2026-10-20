@@ -235,7 +235,7 @@ def decodeAce(ace, report: Optional[ConversionReport] = None):
     from .secondaries import attachAceParticles, attachAceSecondaries
 
     attachAceSecondaries(ace, suite, report)
-    # PTYPE/NTRO/IXS: the light charged particles (roadmap A11).
+    # PTYPE/NTRO/IXS: the light charged particles.
     attachAceParticles(ace, suite, report)
 
     # What ACE genuinely does not have. Stated per item, because "ACE carries no

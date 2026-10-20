@@ -87,7 +87,7 @@ def test_the_dry_run_writes_no_tape_and_no_parquet(dry, micro_pfns_tape,
 
 
 def test_seeds_are_recorded_per_band_so_a_run_can_be_reproduced(dry):
-    """Under Sobol the bands share one seed and never a column of it (D35).
+    """Under Sobol the bands share one seed and never a column of it.
 
     Separately seeded Sobol sequences paired by replica are correlated, so
     what keeps the bands independent is one sequence dealt out, not a seed each.

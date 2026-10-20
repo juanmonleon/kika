@@ -1,13 +1,13 @@
-"""A continuum's (and MT103-107's) Q is its QM, its QI a ``QI=`` flag (D44/D45).
+"""A continuum's (and MT103-107's) Q is its QM, its QI a ``QI=`` flag.
 
 FUDGE writes these reactions that way in every one of NNDC's 558 files: their
 residual is in no particular level, so the channel's Q is the ground state's.
 The ENDF decoder used to keep QI as the Q, so the model of a tape and the model
 of NNDC's GNDS of it meant different things by the same Q (Fe-56 MT91: -2.334
 MeV against 0), kika's own GNDS lost an evaluator's QM that disagrees with its
-levels (Fe-56 MT649, 400 eV: D44), and the heating of any GNDS evaluation, which
+levels (Fe-56 MT649, 400 eV), and the heating of any GNDS evaluation, which
 had no MF3 header to read QM from, balanced every level with its QI (Fe-56 by
-GNDS: KERMA x21 above MT51's threshold: D45).
+GNDS: KERMA x21 above MT51's threshold).
 
 No micro-tape states a flagged MT with QI != QM, so the first tests edit
 B-11's MT103 QI by 100 keV. The tape tests (``KIKA_LIB_TAPES``) compare the

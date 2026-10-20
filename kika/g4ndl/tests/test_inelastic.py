@@ -236,7 +236,7 @@ def test_the_law_mapping_is_the_endf_adapters():
 
 
 def test_the_photons_of_a_channel_reach_the_model():
-    """D10-2: Hg-196 MT17's dataType 12, 14 and 15 are its photons' MF12-15."""
+    """Hg-196 MT17's dataType 12, 14 and 15 are its photons' MF12-15."""
     suite = G4.read("Hg196")
     r = suite.reactions[17]
     p = r.provenance
@@ -249,7 +249,7 @@ def test_the_photons_of_a_channel_reach_the_model():
 
 
 def test_code_1_is_read_lin_lin_and_written_back(tmp_path):
-    """D10-3: Hg-196 MT17's MF5 spectra state INT=1, which Geant4 evaluates lin-lin.
+    """Hg-196 MT17's MF5 spectra state INT=1, which Geant4 evaluates lin-lin.
 
     The model holds lin-lin, the report says it is an approximation of what
     ENDF would read, and the declared code goes back into the file.
@@ -270,7 +270,7 @@ def test_code_1_is_read_lin_lin_and_written_back(tmp_path):
 
 
 def test_a_histogram_in_the_model_is_not_written():
-    """The other half of D10-3: Geant4 would read a written code 1 lin-lin."""
+    """The other half: Geant4 would read a written code 1 lin-lin."""
     from kika.g4ndl.inelastic_encode import _tab1
     from kika.nuclear_data.model.enums import Interpolation
     f = XYs1d(xs=np.array([1.0, 2.0, 3.0]), ys=np.array([1.0, 2.0, 0.0]),
@@ -354,7 +354,7 @@ def test_model_edits_are_what_is_written(tmp_path):
     f01 = back.inelasticFinalState("Pu244", "F01")
     angular = [s for s in f01.sections if s.sfType == 51 and s.dataType == 4][0].body
     assert isinstance(angular, AngularBody) and angular.repFlag == 0
-    # The total followed MT16 (D10-1), the report says so, and the caller's
+    # The total followed MT16, the report says so, and the caller's
     # suite still holds the total it was read with.
     assert any("inelastic differs from the sum" in m and "rebuilt from its parts" in m
                for m in report.warnings)

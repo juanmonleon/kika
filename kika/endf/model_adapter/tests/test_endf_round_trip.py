@@ -1,6 +1,6 @@
 """The real phase 3c gate: the model reproduces the flat path, byte for byte.
 
-**Why not "ENDF → model → ENDF byte-identical".** That is what the roadmap
+**Why not "ENDF → model → ENDF byte-identical".** That is what was
 originally asked for, and it measures almost nothing. The writer is
 patch-in-place (``kika/endf/writers/endf_writer.py:162-166``): whatever it is
 not handed survives verbatim, so the assertion stays true even if the model
@@ -91,8 +91,7 @@ def test_the_flat_path_round_trips_the_tape_whose_za_did_not_parse_exactly(th232
     """This was a strict xfail until phase 3d, and the XPASS is why it changed.
 
     ``CrossSection.nuclide_id`` truncated ZA, so all 57 Th-232 MF3 sections came
-    back naming ZA 90231 — Ac-231. The façade rounds. See
-    ``docs/library/library-gaps.md`` D1.
+    back naming ZA 90231 — Ac-231. The façade rounds.
     Since the float-parse fix of 2026-08-24 the ZA parses exactly as well, so
     the round trip holds for two reasons; the test keeps it on the tape that
     exposed the truncation.

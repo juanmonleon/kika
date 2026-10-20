@@ -1,14 +1,14 @@
 """The committed G4NDL fixtures are what they claim to be.
 
-Phase 0 of the G4NDL roadmap: no reader exists yet, and these files are what it
-will be written against. Each claim ``data/build_fixtures.py`` makes about a
+Written before the reader: these files are what it
+was written against. Each claim ``data/build_fixtures.py`` makes about a
 fixture — "this one is tabulated", "this one has a repeated energy", "this
 one's ``.z`` disagrees with its text" — is asserted here, with a token walker
 written for this file alone. It deliberately shares no code with
 ``kika.g4ndl``: a fixture checked by the code under test proves nothing.
 
-The numbers pinned below come from ``kika-workspace/myworkspace/G4NDL/
-inventory.py`` run over the full libraries on 2026-10-05. Fe-56 is not a
+The numbers pinned below come from an independent inventory script
+run over the full libraries on 2026-10-05. Fe-56 is not a
 committed fixture (size); ``test_full_libraries.py`` pins it on the real tree.
 """
 from __future__ import annotations

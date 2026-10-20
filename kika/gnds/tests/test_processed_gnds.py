@@ -1,4 +1,4 @@
-"""A processed suite through GNDS and back, with nothing lost (roadmap A11).
+"""A processed suite through GNDS and back, with nothing lost.
 
 GNDS states the physics in its own nodes (``xs_pdf_cdf1d``,
 ``energyAngularMC``, ``angularTwoBody`` for a level, ``discreteGamma`` for a
@@ -58,7 +58,7 @@ def test_an_ace_table_comes_back_as_the_same_xss(tmp_path):
 def test_the_physics_is_in_gnds_nodes_and_the_rest_in_the_block(tmp_path):
     """A reader that ignores KIKA::processed still finds the Monte Carlo
     tables and the MonteCarlo_cdf style. (This fixture's photons are
-    continuous; the lines-as-discreteGamma case is in the ACE gate, A11.)"""
+    continuous; the lines-as-discreteGamma case is in the ACE gate.)"""
     suite = kika.read(str(DATA / "U235.h5"))
     _, report, path = _through_gnds(suite, tmp_path)
     text = path.read_text(encoding="utf-8")

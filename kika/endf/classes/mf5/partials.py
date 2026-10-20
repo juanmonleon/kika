@@ -229,8 +229,8 @@ class MF5PartialTabulated(MF5Partial):
 
         Exact, under every law of the table: each edge cuts its panel into two
         of the same law (:func:`kika.algebra.group_integrals`). This is what
-        MF35's LB=7 matrix is the covariance *of* — see the roadmap's measured
-        fact 4 — so it has to be the same integral the evaluator took, not a
+        MF35's LB=7 matrix is the covariance *of*, so it
+        has to be the same integral the evaluator took, not a
         quadrature of it.
         """
         x, y = self.table(k)

@@ -1,4 +1,4 @@
-"""ACE photon production → photon products (roadmap E5f.2).
+"""ACE photon production → photon products.
 
 Two kinds of test. The **synthetic** ones build the parsed ACE objects by hand
 and run in the fast lane: one entry per mapping row of

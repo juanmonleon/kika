@@ -1,10 +1,10 @@
-"""A level's photons stated under its residual reach the processed reaction (D46).
+"""A level's photons stated under its residual reach the processed reaction.
 
 FUDGE writes NNDC's Cl-35 MT51 as ``n + (Cl35_e1 -> Cl35 + photon)``: the
 photon is in the residual's own outputChannel, not beside the neutron. The
 processed suite used to read the reaction's products alone, so the HDF5 file
 had no photons for 51-91, 600-849 and the heating deposited each level's
-energy (KERMA x2.3 above 5 MeV once the balance used QM: D45).
+energy (KERMA x2.3 above 5 MeV once the balance used QM).
 """
 from __future__ import annotations
 

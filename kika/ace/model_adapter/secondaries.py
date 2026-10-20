@@ -156,7 +156,7 @@ def angularForm(dist):
     # An isotropic record *with* energies is an explicit table, LC = 0 at each
     # one: what kika writes for OpenMC's fission neutrons, isotropic in CM in
     # a lab-frame reaction. Read as Isotropic2d it came back as LOCB = 0, and
-    # the table was not the one written (roadmap A11).
+    # the table was not the one written.
     energies = np.asarray(dist._energies, dtype=float)
     tables = []
     for k, e in enumerate(energies):
@@ -544,7 +544,7 @@ def _delayedNeutrons(ace, awr, report):
 
 
 # ----------------------------------------------------------------------
-# Charged-particle production (PTYPE, NTRO, IXS: roadmap A7, read back in A11)
+# Charged-particle production (PTYPE, NTRO, IXS), written and read back
 # ----------------------------------------------------------------------
 
 def hpdDigest(pairs) -> str:

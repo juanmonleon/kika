@@ -32,7 +32,7 @@ partial cross sections. The procedure is NJOY PURR's (``purr.f90``,
   retain the absolute sampled cross sections plus MF3 background;
 - the competition flags follow PURR's rule (``purr.f90:1159-1190``).
 
-Four choices are not kept (PXB-038 to PXB-040): PURR draws a width from a
+Four choices are not kept: PURR draws a width from a
 table of 20 slice means of the chi-square, kika from the chi-square itself
 (see the note below); PURR's end margins do not grow with the Doppler reach,
 kika's do; PURR places the band bounds on its first ladder's totals, kika on
@@ -76,7 +76,7 @@ REACH_DOPPLER = 20.0
 #: Widths are drawn from the exact chi-square (Porter-Thomas), not from
 #: PURR's ``ladr2`` table of 20 slice means: those keep the mean width but
 #: lose 5.6 % of <x^2> for 1 degree of freedom, and the tables came out up to
-#: 8 jackknife sigma short of self-shielding (U-235, PXB-037). FUDGE draws the
+#: 8 jackknife sigma short of self-shielding (U-235). FUDGE draws the
 #: exact one too; NJOY and FRENDY keep the table.
 
 
@@ -93,7 +93,7 @@ class ProbabilityTableOptions:
     #: Stop drawing ladders at an energy once every statistical error checked
     #: is at most this (``None``: always draw :attr:`ladders`). 5e-3 leaves
     #: U-235, U-238 and Pu-239 at PURR's 64 ladders and takes the tables 64
-    #: leave at 1-3 % (Eu-156, Pm-148, Hf-182) to 0.5 % (PXB-040). The
+    #: leave at 1-3 % (Eu-156, Pm-148, Hf-182) to 0.5 %. The
     #: errors checked are each band's ``p_b · factor_b`` (its share of the
     #: dilute average) and the relative error of ``f(σ0)`` at :attr:`sigma0`,
     #: for every reaction with a nonzero average at every temperature.
@@ -238,7 +238,7 @@ def _ladderSpan(sequences, doppler):
     reach longer than that sees resonances on one side only, and the 1/x
     interference term of the elastic sums to a spurious tilt (U-235 at 25 keV:
     the Doppler reach is 1.7x the margin at 294 K and 3.1x at 1200 K, where the
-    elastic f moved 4.5 jackknife sigma, PXB-038). The margins here cover the
+    elastic f moved 4.5 jackknife sigma). The margins here cover the
     reach of a mean resonance at ``doppler``, the hottest temperature's, and
     the ladder grows by as much, keeping PURR's sampled span; where the margin
     already covers it the span is PURR's. A table therefore depends on the
@@ -365,7 +365,7 @@ def _tablesAt(job, keepLadders=False):
     # PURR's first one: bounds drawn from one ladder move from seed to seed,
     # and the jackknife, which holds them fixed, does not see it (Eu-156
     # capture: seed scatter 1.39x the jackknife sigma with one ladder's
-    # bounds, 0.99 with 2000 bands; PXB-040). Those ladders' samples wait
+    # bounds, 0.99 with 2000 bands). Those ladders' samples wait
     # until the bounds exist.
     pool = min(options.minimumLadders, options.ladders)
     bounds = None

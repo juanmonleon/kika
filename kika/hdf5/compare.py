@@ -91,7 +91,7 @@ def maxwellianAverage(E, sigma, kT):
 def _datasetBytes(tree, temperatures) -> int:
     """Bytes of the data a file holds for these temperatures (and everything else).
 
-    The D8 size ratio is per temperature set: the official files carry six, a
+    The size ratio is per temperature set: the official files carry six, a
     file written for a benchmark one or two.
     """
     total = 0

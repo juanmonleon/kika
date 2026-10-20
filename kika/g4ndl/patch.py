@@ -1,9 +1,9 @@
 """Replace one isotope's data in a copy of a whole G4NDL library.
 
-Phase 6 of the G4NDL roadmap, for the case it was asked for: an iterative loop
+Written for the case it was asked for: an iterative loop
 (insert measured σ or a measured p(μ), run Geant4, compare, repeat) needs a
 complete library ``G4NEUTRONHPDATA`` can point at, in which exactly one
-isotope's files differ from a reference library. Phase 10 extends it from the
+isotope's files differ from a reference library. It was later extended from the
 elastic to the inelastic channels, and the capture and fission work extend it
 to MT102 and MT18.
 
@@ -11,7 +11,7 @@ to MT102 and MT18.
 :func:`~kika.g4ndl.encode.writeSuite` one isotope into the copy", for the
 processes asked (``elastic``, ``inelastic`` or both; default: what the suite
 holds). :func:`patch_elastic` is the elastic-only case. Both come with the
-guarantees the roadmap asks for:
+guarantees:
 
 * **The base library is never modified.** Everything is written into a
   temporary sibling of ``output_library``, verified, and only then renamed

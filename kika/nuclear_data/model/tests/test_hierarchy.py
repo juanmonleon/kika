@@ -1,6 +1,6 @@
 """The §9-25 hierarchy: present-but-empty, derivedFrom chains, and round-tripping.
 
-Three gates, in the order the roadmap states them.
+Three gates.
 
 1. **Every §14.1.1 child is present as an empty container, not ``None``.** The
    distinction is the whole point of building the hierarchy before filling it: a

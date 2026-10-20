@@ -6,7 +6,7 @@ kika's arithmetic rather than the library's. Everything here is ``tape``-marked
 and runs against the shared tree.
 
 **The sharpest test in this file is about Q values**, because it contradicts
-what the roadmap recorded. Phase 1 concluded "ACE lacks ``qm``/``qi``" and made
+an earlier conclusion, "ACE lacks ``qm``/``qi``", which made
 ``CrossSection.to_endf()`` raise for an ACE-sourced section on that basis. The
 raise is right; the reason was not. ACE's LQR block carries one Q per reaction,
 in MeV, positionally aligned with MTR — and reading it back gives Fe-56 capture
@@ -110,7 +110,7 @@ def test_the_derived_from_chain_resolves_to_an_evaluated_style(decoded, labels):
 
 
 def test_the_labels_are_the_processed_suites(decoded, labels):
-    """ACE roadmap D-A11: ``heated_<T>``/``URR_<T>``/``MonteCarlo``, the labels the
+    """``heated_<T>``/``URR_<T>``/``MonteCarlo``, the labels the
     HDF5 decoder and kika's processing give, so an ACE suite needs no relabelling
     to be written to HDF5 or back to ACE. No ``gridded`` style any more."""
     suite, _ = decoded
@@ -229,7 +229,7 @@ def test_the_flat_path_reads_the_same_q_values_this_decoder_does(ace):
     """The gap this decoder recorded, now closed on the flat side too.
 
     ``CrossSection.from_ace`` used to build six ACE metadata keys and no Q at
-    all, with ``ace.q_values`` right there — ``docs/library/library-gaps.md`` D4. It
+    all, with ``ace.q_values`` right there. It
     calls ``qValuesByMT`` now, so there is one alignment convention rather than
     two, and this asserts the two paths agree rather than merely that the flat
     one is non-empty. Agreement is the property that matters: a second copy of

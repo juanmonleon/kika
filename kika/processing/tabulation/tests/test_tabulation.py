@@ -1,4 +1,4 @@
-"""The ACER-like tabulation (roadmap H3): normalised, monotone, accurate tables."""
+"""The ACER-like tabulation: normalised, monotone, accurate tables."""
 from __future__ import annotations
 
 import numpy as np

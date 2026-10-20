@@ -1,4 +1,4 @@
-"""kika's own URR probability tables (roadmap H8): the C kernel against the
+"""kika's own URR probability tables: the C kernel against the
 exact NumPy reference, and PURR's conventions."""
 import numpy as np
 import pytest

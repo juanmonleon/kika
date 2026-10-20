@@ -19,11 +19,10 @@ CI had not run since 2026-08-07 when the first cross-machine run showed that
 
 *The resonance-reconstruction goldens that used to live here are gone with the
 legacy reconstructor (``kika.processing.reconstruct``, removed 2026-10-08).
-They froze regression, not physics -- its kernels carried the defects listed in
-the reconstruction roadmap §4 -- so they were retired rather than regenerated
+They froze regression, not physics -- its kernels carried known
+defects -- so they were retired rather than regenerated
 against the new engine, whose physics gates are independent references
-(``kika.processing.resonances`` and its tests). See
-``kika-workspace/docs/library/resonance_migration_r9.md`` §2.*
+(``kika.processing.resonances`` and its tests).*
 """
 from __future__ import annotations
 

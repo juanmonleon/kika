@@ -363,7 +363,7 @@ def _summationMTs(present) -> set:
     return {mt for mt in available if resolve_sum_components(mt, available)}
 
 def _targetSpinFromMF2(suite, provenance) -> None:
-    """MF2's SPI as the target's spin in the suite's PoPs (D39).
+    """MF2's SPI as the target's spin in the suite's PoPs.
 
     FUDGE puts it there (``micro_fe56.gnds.xml``: the top-level ``fe56``
     nucleus has its spin, besides the formalism's own PoPs), and it is where
@@ -400,8 +400,8 @@ def _groundStateQOfContinua(suite) -> None:
     NNDC's ENDF/B-VIII.1 files (:data:`QI_FLAGGED_MTS`). Read as kika used to,
     the model of a tape and the model of NNDC's GNDS of it disagreed on what
     the same Q meant (Fe-56 MT91: QI -2.334 MeV against 0), and kika's own GNDS
-    lost the evaluator's QM where it differs from its levels' (MT649, 400 eV:
-    D44). The tape's QI stays in ``headerFields["qi"]``, where the MF3 encoder
+    lost the evaluator's QM where it differs from its levels' (MT649, 400 eV).
+    The tape's QI stays in ``headerFields["qi"]``, where the MF3 encoder
     reads it, so the round trip does not move.
     """
     from kika.nuclear_data.model.endf_conversion import (QI_FLAGGED_MTS, EndfConversionFlags,
@@ -715,7 +715,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     report = attachPhotons(suite, endf, report)
 
     # MF8-10, after every reaction exists: an MF9 state's cross section is a
-    # reference to its reaction's (roadmap E6).
+    # reference to its reaction's.
     from .productions import attachProductions
     report = attachProductions(suite, endf, report)
 
@@ -1049,7 +1049,7 @@ def _attachEnergyAngleDistributions(suite: ReactionSuite, mf6mt, mt: int,
 
 
 def _totalLineMultiplicity(suite, reaction, mf6mt, fields) -> None:
-    """The yield of a photon subsection D40 split into lines, as the reaction's
+    """The yield of a photon subsection split into lines, as the reaction's
     total gamma multiplicity -- FUDGE's ``multiplicitySum`` for MF6 photons.
 
     Each line carries ``P·y``, so without it ``y`` is only the sum of the
@@ -1087,8 +1087,8 @@ def _flagMF6(suite, reaction, fields) -> None:
     reaction) and what FUDGE's ENDF->GNDS writes, for the reason it exists: a
     two-body reaction or a photon continuum stated in MF6 would otherwise go
     back to MF4 or MF15 by the form rule, which is not the file kika read.
-    Writing FUDGE's flag is the precedent of ``MF13,ESk=`` (decision J3), not
-    a hint of kika's own (D4). A section with a deferring subsection (LAW<0,
+    Writing FUDGE's flag is the precedent of ``MF13,ESk=``, not
+    a hint of kika's own. A section with a deferring subsection (LAW<0,
     the P(nu) records of a JP>0 fission section) is not flagged: the model has
     no node for those, so MF6 could not be derived back from it anyway.
     """
@@ -1107,7 +1107,7 @@ def _flagMF6(suite, reaction, fields) -> None:
 
     base = reactionHref(reaction) + "/outputChannel/products/product"
     for record in records:
-        # A photon subsection D40 split into lines is several products, and
+        # A photon subsection split into lines is several products, and
         # FUDGE flags each of them.
         for label in lineSpectrumLabels(record):
             flags.conversions.append((f"{base}[@label='{label}']", "MF6"))

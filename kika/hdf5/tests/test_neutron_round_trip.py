@@ -1,7 +1,7 @@
-"""HDF5 → model → HDF5 is identical (roadmap H2 gate 1, H9a), and what the model holds.
+"""HDF5 → model → HDF5 is identical, and what the model holds.
 
-The same over every file of the three official libraries is
-``kika-workspace/kika_dev/hdf5/h2_transcription.py``.
+The same over every file of the three official libraries is checked
+outside the test suite.
 """
 from __future__ import annotations
 

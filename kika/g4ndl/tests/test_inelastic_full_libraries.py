@@ -4,7 +4,7 @@ Every ``Inelastic/`` file is read to its last token, written back as text and
 read again (the text fixed point), and every inelastic isotope is read into
 the model, written back from it and compared record for record (the model
 fixed point). The counts are the census of
-``kika-workspace/myworkspace/G4NDL/phase10/`` (2026-10-08). Several minutes
+2026-10-08. Several minutes
 per library: the model fixed point decodes ~27 000 files.
 """
 from __future__ import annotations

@@ -29,7 +29,7 @@ pytestmark = pytest.mark.tape
 #: library -> (fission isotopes, chance files {dir: (files, with a final state)},
 #: FF files, sections kept as text {(infoType, dataType): count}).
 CENSUS = {
-    # The photons (1, 12/14/15) reach the model since D10-2 (2026-10-09).
+    # The photons (1, 12/14/15) reach the model since 2026-10-09.
     "g4ndl_g4ndl471_library": (70, {"FC": (38, 5), "SC": (38, 5), "TC": (36, 3), "LC": (35, 2)},
                                11, {(3, 5): 1}),
     "g4ndl_jeff40_library": (75, {"FC": (33, 1), "SC": (33, 1), "TC": (33, 1), "LC": (33, 1)},
@@ -123,8 +123,8 @@ def test_the_model_is_the_endf_adapters(fe56_jeff40_tape, g4ndl_jeff40_library, 
         assert np.allclose(ours["sums"][mt], theirs["sums"][mt], rtol=1e-8, atol=0)
     assert [f[:4] for f in ours["families"]] == [f[:4] for f in theirs["families"]]
     # Above 1 eV only: Pu-239's p_k(E) declares INT=1 from 1e-5 eV to 5 MeV and
-    # steps at 1 eV. G4NDL reads it lin-lin, as Geant4 evaluates it (roadmap
-    # D10-3), ENDF a histogram, so at thermal the two differ by 0.25 %, by design.
+    # steps at 1 eV. G4NDL reads it lin-lin, as Geant4 evaluates it,
+    # ENDF a histogram, so at thermal the two differ by 0.25 %, by design.
     for a, b in zip(ours["families"], theirs["families"]):
         assert np.allclose(a[4][1:], b[4][1:], rtol=1e-6, atol=0)
     assert (ours["spectrum"], ours["angular"]) == (theirs["spectrum"], theirs["angular"])

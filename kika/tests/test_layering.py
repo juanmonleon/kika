@@ -10,7 +10,7 @@ arrow points one way: formats may import the calculations, the calculations may
 not import the formats.
 
 **``kika/cov`` joined the guarded set before phase 4, not during it.** The
-roadmap's phase 4 bullet is "extend the ratchet to ``kika/cov``: no
+phase 4 task was "extend the ratchet to ``kika/cov``: no
 ``kika.endf`` imports outside the encoders", and it belongs *before* the phase
 that rewrites ``CrossSectionCovariance`` and ``LegendreCovariance`` to read and
 write through ``CovarianceSuite`` — a net is worth nothing installed after the
@@ -21,7 +21,7 @@ below, a file phase 7 has since deleted outright.
 
 The phase-4 wording needs one gloss. "Outside the encoders" is not a rule this
 test can express, because ``kika/cov`` is not cleanly one layer: MF34 encoding
-in ``legendre_covariance.py`` is format code that the roadmap explicitly keeps
+in ``legendre_covariance.py`` is format code that is explicitly kept
 ("their COVERX/COVFIL/BOXER/GENDF I/O are kept as format encoders, on the same
 footing as ENDF and ACE"), while ``parse_covmat.py`` reaching for ENDF's record
 grammar is a genuine leak. A per-file frozen count says both at once: the
@@ -31,7 +31,7 @@ explained, and neither may grow.
 **Why a ratchet and not a rule.** The arrow was inverted in places, worst of
 all ~960 lines of pure numerics living inside ``kika/endf/processing/`` and
 re-exported *upward* by shims in ``kika/processing/``. Phase 2 of the GNDS
-roadmap moved four of them — ``linearization``, ``penetration``,
+migration moved four of them — ``linearization``, ``penetration``,
 ``resonance_formulas``, ``urr_formulas`` — and deleted the shims, which had no
 other importers. ``resonance_bounds`` stayed put: it reads
 ``mf2.mt[151].isotopes`` and ``rng.lru/el/eh``, so it is an ENDF adapter and
@@ -77,13 +77,13 @@ GUARDED_PACKAGES = ("kika/processing", "kika/nuclear_data", "kika/cov")
 #: after GNDS and an import from ``kika/nuclear_data`` into ``kika/gnds`` would
 #: read like tidying rather than like an inversion. ``kika.g4ndl`` joined the
 #: same way, on the day the package was created, and so did ``kika.hdf5``
-#: (OpenMC's HDF5 format, roadmap H0).
+#: (OpenMC's HDF5 format).
 FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf5")
 
 #: Runtime imports of a format package, per module. May only decrease.
 #:
 #: Phase 2 took kika/processing from 8 entries to 3. It does **not** reach
-#: zero, and the original roadmap was wrong to say it would: the three that
+#: zero, and the original plan was wrong to say it would: the three that
 #: remain each need ``kika.endf.read_endf`` to parse a PENDF tape, which is a
 #: real dependency and not a layering accident. All three are deferred to call
 #: time, so ``kika.processing`` no longer pulls ``kika.endf`` in at *import*
@@ -100,14 +100,14 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #: classes are removed in 1.0 — they are the deprecation's cost, held visibly
 #: rather than hidden. No *new* module may join the list.
 #:
-#: **D4 raises ``cross_section.py`` from 2 to 3, for the same reason and
+#: **The ACE Q fix raises ``cross_section.py`` from 2 to 3, for the same reason and
 #: knowingly.** ``from_ace`` now reads ACE's LQR block through
 #: ``kika.ace.model_adapter``'s ``qValuesByMT`` instead of aligning MTR and LQR
 #: a second time locally. The alignment is positional, undeclared in the file,
 #: and has one subtlety (MT 2 is absent because elastic Q is zero *by
 #: definition*) — precisely the kind of convention that drifts when it is
 #: written twice. It already had: the library carried "ACE stores no reaction Q
-#: values" in a docstring, a roadmap and an error message while the values sat
+#: values" in a docstring, a design note and an error message while the values sat
 #: parsed in ``ace.q_values``. One decoder, one convention, one worse number.
 #:
 #: **M2 raises ``nuclide_info.py`` from 1 to 2, and it is the façade's own
@@ -123,7 +123,7 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #: one, and the note on it is kept below because *why* it was cheap is the
 #: transferable part.
 #:
-#: ``legendre_covariance.py`` (4) is the one the roadmap protects. Three of the
+#: ``legendre_covariance.py`` (4) is the one kept on purpose. Three of the
 #: four are the MF34 *encoder* — ``to_mf34`` builds an ``MF34MT`` from
 #: ``_make_lb5_record``/``_make_lb6_record`` (lines 315-316) and
 #: ``write_mf34_to_file`` splices it (line 416). That is format code doing
@@ -464,8 +464,8 @@ def test_processing_pulls_no_format_package_in_at_import_time():
 
     **Nothing checked that it stays fixed.** The ratchet counts import
     statements, not when they run, so re-hoisting one of the three to module
-    scope leaves every existing test green and re-closes the cycle. The GNDS
-    roadmap records this as "worth a dedicated test at some point" and notes
+    scope leaves every existing test green and re-closes the cycle. This was
+    flagged as "worth a dedicated test at some point", with the rule
     that every phase 4-9 increment touching ``kika/processing`` has to keep the
     imports deferred — which makes this the net that belongs *before* phase 4,
     not after it.

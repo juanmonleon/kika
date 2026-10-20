@@ -1,8 +1,8 @@
 """The layout puts an Ace's blocks back into an XSS, and a changed object stays consistent.
 
 Tape-free, on the synthetic table of ``kika/ace/tests/_synthetic.py``. The real
-gate (every word of every table of two libraries) lives in
-``kika_dev/ace/audit_2026-10-14/recompose.py`` in kika-workspace.
+gate (every word of every table of two libraries) runs outside
+the test suite.
 """
 from __future__ import annotations
 

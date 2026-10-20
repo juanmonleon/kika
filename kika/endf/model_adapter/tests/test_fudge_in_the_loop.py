@@ -1,4 +1,4 @@
-"""kika's ENDF decode against FUDGE's, with FUDGE actually run (roadmap T5).
+"""kika's ENDF decode against FUDGE's, with FUDGE actually run.
 
 The three ``kika/gnds/tests/test_*_oracle.py`` compare kika with kika on a file
 FUDGE translated offline, so they cannot be cited as "validated against FUDGE".
@@ -6,7 +6,7 @@ This one can: it runs FUDGE's ``endfFileToGNDS`` on the same committed
 micro-tape kika decodes and compares what each reads.
 
 **FUDGE never enters kika's environment.** ``KIKA_FUDGE_PYTHON`` names an
-interpreter that has FUDGE (on Juan's machines, the course venv in WSL)::
+interpreter that has FUDGE (for instance a FUDGE venv in WSL)::
 
     KIKA_FUDGE_PYTHON="wsl.exe -d Ubuntu -e /home/<user>/FUDGE_class/.venv/bin/python"
     pytest -m fudge kika/endf/model_adapter/tests/test_fudge_in_the_loop.py
@@ -206,7 +206,7 @@ def test_the_resonance_energies_read_the_same(pair):
 
 
 # ----------------------------------------------------------------------
-# The thermal scattering law (roadmap E4)
+# The thermal scattering law
 # ----------------------------------------------------------------------
 
 #: The committed TSL micro-tapes, and the evaluation file name FUDGE knows each by.
@@ -301,7 +301,7 @@ def test_the_one_tsl_difference_is_a_repeated_point_kika_keeps(fudgePython):
 
 
 # ----------------------------------------------------------------------
-# The thermal scattering law through GNDS (roadmap E4b), both ways
+# The thermal scattering law through GNDS, both ways
 # ----------------------------------------------------------------------
 
 @pytest.fixture(scope="module", params=sorted(_TSL))
@@ -398,7 +398,7 @@ def test_kika_reads_the_tsl_gnds_fudge_writes(tslGnds):
 
 
 # ----------------------------------------------------------------------
-# The thermal scattering law from GNDS back to ENDF (roadmap E4), both ways
+# The thermal scattering law from GNDS back to ENDF, both ways
 # ----------------------------------------------------------------------
 
 def _sameTslForms(suite, tape: Path):
@@ -413,7 +413,7 @@ def _sameTslForms(suite, tape: Path):
 
 
 def test_fudge_writes_endf_from_the_tsl_gnds_kika_writes(tslGnds, tmp_path, request):
-    """FUDGE writes a TSL tape from kika's GNDS (roadmap T6).
+    """FUDGE writes a TSL tape from kika's GNDS.
 
     It needs the neutron in PoPs and both halves of the ``MAT=…,ZA=…`` note.
     Its tape must hold the forms kika decodes from the source, under the
@@ -450,7 +450,7 @@ def test_kika_writes_endf_from_the_tsl_gnds_fudge_writes(tslGnds, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The photons (roadmap E5b)
+# The photons
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -479,7 +479,7 @@ def test_the_capture_photons_read_the_same(photonPair):
     line energy, continuum table and Legendre row to the last bit, once paired
     by (kind, energy).
 
-    **One difference, named and asserted (decision J6):** a line's domain.
+    **One difference, named and asserted:** a line's domain.
     kika takes the domain of the photon's own multiplicity, which is what the
     section states; FUDGE takes the reaction's cross-section domain.
     """
@@ -523,7 +523,7 @@ def test_the_capture_photons_read_the_same(photonPair):
 def test_the_mf13_photons_divide_to_the_same_multiplicities(photonPair):
     """N-14 MT4 (a reaction in the cut): kika's σ_γ/σ against FUDGE's.
 
-    **Not to the last bit, and that is the point of decision J5.** FUDGE divides
+    **Not to the last bit, and that is the point.** FUDGE divides
     on MF13's grid alone and skips σ = 0; kika divides on MF13 ∪ σ. Read at
     FUDGE's own abscissae the two must agree to the linearisation tolerance
     both apply to σ (1e-3), and the line energies must be identical.
@@ -545,7 +545,7 @@ def test_the_mf13_photons_divide_to_the_same_multiplicities(photonPair):
 
 
 # ---------------------------------------------------------------------------
-# The cascades (roadmap E5c)
+# The cascades
 # ---------------------------------------------------------------------------
 
 def _cascadesOfPoPs(xml):
@@ -625,7 +625,7 @@ def test_fudge_writes_the_cascades_back_from_the_gnds_kika_writes(cascadePair, f
 
 
 # ----------------------------------------------------------------------
-# D38: FUDGE reads, and reconstructs from, the GNDS kika writes from a tape
+# FUDGE reads, and reconstructs from, the GNDS kika writes from a tape
 # ----------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", _TAPES)
@@ -633,7 +633,7 @@ def test_fudge_reads_and_reconstructs_the_gnds_kika_writes(name, fudgePython, tm
     """kika's GNDS of a Reich-Moore tape → FUDGE reads it, finds the tape's
     resonances, and reconstructs from it.
 
-    Each step failed until D38 (2026-10-13): the first ``resonanceReaction``
+    Each step failed until 2026-10-13: the first ``resonanceReaction``
     (``fissionA`` with no ``link``, on an evaluation with no fission), then a
     channel without ``channelSpin``, a ``spinGroup`` without ``parity``, the
     step in MT2, the repeated 3.905 MeV of MF4, a channel without ``genre``;
@@ -646,7 +646,7 @@ def test_fudge_reads_and_reconstructs_the_gnds_kika_writes(name, fudgePython, tm
     ``hardSphereRadius`` (phase only); kika, like NJOY, uses it for the
     penetrability too, and its GNDS says so. Measured on this tape:
     2.6e-4 median in the resonance elastic, 2e-10 once the convention is
-    aligned (``docs/library/library-gaps.md``, D38).
+    aligned.
     """
     import kika
 

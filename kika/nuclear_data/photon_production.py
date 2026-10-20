@@ -118,7 +118,7 @@ class PhotonProductionError(ValueError):
 #: Style labels in the order a form is preferred. ``eval`` is the evaluation;
 #: ``recon`` its pointwise reconstruction (FUDGE's, in published GNDS);
 #: a ``heated_<T>`` label (any label starting ``heated``) is what an
-#: ACE-decoded suite holds, which has no ``eval`` at all (ACE roadmap D-A11).
+#: ACE-decoded suite holds, which has no ``eval`` at all.
 #: Any other label is taken after these, in file order.
 _LABEL_PREFERENCE = ("eval", "recon", "heated")
 
@@ -358,7 +358,7 @@ def _mf6_discrete_points(node) -> Dict[str, List[int]]:
     for record in (mf6 or {}).get("products", []) or []:
         law = record.get("law_fields") or {}
         if law.get("lines"):
-            # Already split into products, one per line (D40).
+            # Already split into products, one per line.
             continue
         nd = law.get("nd") or []
         if record.get("law") == 1 and record.get("pid") == "photon" and any(nd):

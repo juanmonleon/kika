@@ -724,7 +724,7 @@ class PerturbationSet:
         ``{r >= 0, sum P0 r = sum P0}``, freezing a group with no probability to
         scale -- arrives as
         :func:`~kika.sampling.mf35_sampling.pfns_ratio_rule`. It stays in the
-        sampling layer on purpose (roadmap decision 4): it is a statement about
+        sampling layer on purpose: it is a statement about
         the draw, not about the function.
         """
         from kika.nuclear_data.model.perturbation import (applySpectrumFactors,
@@ -767,7 +767,7 @@ class PerturbationSet:
                     **summariseSpectrumNodes(nodes),
                     "input_normalisation_max_abs":
                         inputResidual.get(component.index, 0.0),
-                    # A band stated at one energy (PD-1) says so by name, so a
+                    # A band stated at one energy says so by name, so a
                     # one-node perturbation is not read as a band that covered
                     # its range.
                     **info["point_bands"].get(component.index, {}),
@@ -796,7 +796,7 @@ class PerturbationSet:
         candidates, refused = [], []
         for product in (getattr(channel, "products", None) or ()):
             # MF35 is the covariance of a particle's spectrum, never a photon's.
-            # Since roadmap E5b the photons of MF12/MF15 are products too, and
+            # The photons of MF12/MF15 are products too, and
             # the continuum one carries a table of P(E'|E) as well: without this,
             # U-235's MT18 has two candidates and every PFNS draw refuses.
             if product.pid == "photon":
@@ -812,18 +812,18 @@ class PerturbationSet:
             elif isinstance(energy, Function2d):
                 candidates.append((product, energy))
         if not candidates and refused:
-            # PD-3 (decided 2026-10-08): refused by name.
+            # Refused by name.
             # A parametrised spectrum is a formula, MF35 is a covariance of the group
             # integrals of a *table*, and perturbing the formula would need a
             # covariance of its parameters, which ENDF does not carry.
-            # Tabulating it and applying an external covariance is roadmap P5.
+            # Tabulating it and applying an external covariance is not built yet.
             raise ValueError(
                 f"MT{mt}: the energy distribution is a parametrised spectrum "
                 f"({', '.join(refused)}), and an MF35 perturbation is refused "
-                f"for it (decision PD-3): MF35 covers group integrals of a "
+                f"for it: MF35 covers group integrals of a "
                 f"tabulated chi(E'|E), and a formula has no such table. "
                 f"Tabulating it with toPointwise() and supplying a covariance "
-                f"is the external-covariance route (P5), not built yet"
+                f"is the external-covariance route, not built yet"
             )
         if not candidates:
             raise ValueError(
@@ -989,7 +989,7 @@ class PerturbationSet:
 
         A covariance in the other frame than the distribution's (MF34's LCT)
         is applied in that frame on both halves: the Legendre applier by its
-        padded solve, the tabulated one in closed form (roadmap T9). Each half
+        padded solve, the tabulated one in closed form. Each half
         reports its own conversion, under ``frame`` and ``tables["frame"]``.
 
         Positivity of f(mu) is checked on both halves. Under the default
@@ -1105,7 +1105,7 @@ class PerturbationSet:
         candidates = []
         for product in (getattr(channel, "products", None) or ()):
             # MF34 is the covariance of the distribution MF4 describes, which is
-            # never a photon's. Photons (roadmap E5b) carry an angular half too,
+            # never a photon's. Photons carry an angular half too,
             # an isotropic one at the least, and would make every MT with
             # photons a two-candidate refusal.
             if product.pid == "photon":

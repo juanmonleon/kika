@@ -4,7 +4,7 @@ ENDF-6 §33.2 gives the F_k of LB=0/8/9 the dimension of barns², and those of
 LB=1/2/5/6 are fractions. Until 2026-10-06 ``_process_ni_records_to_matrix``
 summed both into one matrix and called it relative, and projected LB=8 onto a
 finer grid as if it were LB=0. The census of JEFF-4.0 and ENDF/B-VIII.1 that
-found it (kika-workspace ``docs/library/cov_checks_roadmap.md``, C0) counts
+found it counts
 15 039 mixed blocks in 500 JEFF-4.0 tapes, and the summed LB=8 dominates in the
 tail: x6400 on Eu-154 MT3.
 

@@ -1,4 +1,4 @@
-"""MF6 LAW=1 photons whose first ``ND`` outgoing points are discrete lines (D40).
+"""MF6 LAW=1 photons whose first ``ND`` outgoing points are discrete lines.
 
 ENDF-6 §6.2.3 lets a LAW=1 LANG=1 record open each incident node with ``ND``
 discrete energies, each with the fraction of the yield it carries, ahead of the
@@ -413,7 +413,7 @@ def restoreLineSpectrum(record: dict, forms: Dict[str, object],
     if missing:
         raise ValueError(
             f"MF6/MT{mt} product {index} was split into the photon products "
-            f"{labels} (D40) and the model does not hand back "
+            f"{labels} and the model does not hand back "
             f"{missing}: each line's multiplicity is its share of the yield, so "
             f"the section cannot be written without every piece")
 
@@ -507,7 +507,7 @@ def mergedLineSpectra(reaction):
 
     ``merged`` maps the first piece's label to a product with the section's own
     yield and one ``uncorrelated`` spectrum that opens each node with its lines
-    (the shape the decoder gave before D40, which is ACER's: lines first in the
+    (the shape the decoder used to give, which is ACER's: lines first in the
     table, counted by ND in the record); ``hidden`` is the other pieces' labels.
     Both empty for a reaction with none.
     """
