@@ -343,6 +343,12 @@ def captureFinalState(suite, *, header=None, targetMass: Optional[float] = None,
     carriedHeader = provenance.finalStateHeader if provenance is not None else None
     products = [p for p in (reaction.outputChannel.products if reaction.outputChannel else ())
                 if p.multiplicity is not None or p.distribution]
+    # An MF6 photon whose lines the ENDF decoder split into products is one
+    # MF6 product again, its lines first in each table, as for the inelastic.
+    from kika.endf.model_adapter.photon_lines import mergedLineSpectra
+
+    merged, hidden = mergedLineSpectra(reaction)
+    products = [merged.get(p.label, p) for p in products if p.label not in hidden]
     photons = _photonFinalState(suite, reaction, entry, targetMass, header, carriedHeader,
                                 where, report)
     if photons is not None:

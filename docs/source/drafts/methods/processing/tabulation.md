@@ -290,9 +290,11 @@ the clipped table is lin-lin between the refined nodes of the signed function.
   as the series it comes from.
 - **Correlated laws at the ordinary tolerances.** The joint refinement of `energyAngular`
   uses the same $r_\text{tol}$ and $a_\text{tol}$ as every other table, as ACER does.
-- **Negative densities are clipped and renormalised.** This is ACER's rule
-  (TODO(check): the ACER routine that applies it), and it changes the distribution only
-  where the evaluation states an unphysical density. The alternative, refusing, is
+- **Negative densities are clipped and renormalised.** This is ACER's rule: its
+  Legendre-to-table conversion (`ptleg2` in NJOY 2016.78) raises every value below
+  $10^{-10}$ to $10^{-10}$ and normalises the cumulative to 1, where kika sets the value to
+  zero. It changes the distribution only where the evaluation states an unphysical
+  density. The alternative, refusing, is
   available as `negative="raise"`.
 - **Stated tables keep their points.** A tabulated distribution is not re-gridded: the
   evaluator's points are what the evaluation asserts, and lin-lin interpolation between
@@ -388,8 +390,12 @@ In `kika/processing/tabulation/tests/test_tabulation.py`:
   $E'$ and $\mu$ tables.
 
 The angular thinning is exercised by every Legendre test above (the isotropic series
-keeps exactly $\mu = -1$, 0 and 1), but no test yet measures a thinned table of a high
-order against its series. TODO(check): add one.
+keeps exactly $\mu = -1$, 0 and 1).
+`test_a_thinned_high_order_legendre_table_keeps_its_series` measures it on an order-40
+series, $a_\ell = 0.7^\ell$, positive on $[-1, 1]$: the thinned table has fewer points
+than the $4N + 1$ seeds, is within $1.05\,r_\text{tol} f(\mu) + \tfrac{1}{4} a_\text{tol}
+\max f$ of the series at 20 001 cosines, and keeps its mean cosine to
+`angularMomentAtol` (passed on 2026-10-20).
 
 Every table in these tests is checked to start at 0, end at 1, be monotone and have a
 non-negative density. The OpenMC writer's contract checker rejects a file whose

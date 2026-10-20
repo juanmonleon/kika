@@ -215,7 +215,9 @@ What is derived because the model does not carry it in ACE's form:
   interpolation of an energy law keeps the evaluation's unit-base code (INT = 22) where
   ACER writes NR = 0. It is metadata for the transport code: OpenMC 0.16 ignores the
   incident interpolation of a law and always samples between the two bracketing incident
-  tables with unit-base scaling. TODO(check): how MCNP and Serpent use a stated INT;
+  tables with unit-base scaling. The ACE specification states only that NR = 0 means
+  lin-lin (Conlin and Romano 2019). `TODO(check)`: how MCNP and Serpent use a stated INT
+  needs the MCNP manual or Serpent's source, neither of which is at hand;
 - an angular distribution is written in one of the three forms AND holds (isotropic, 32
   equiprobable bins, tabulated): ACE has no Legendre form, so a Legendre distribution
   reaches the encoder already tabulated ({doc}`../processing/tabulation`);
@@ -405,7 +407,7 @@ counted as 0).
   (`::test_the_written_table_is_a_file_kika_reads_back_strictly`); without the ACE
   bookkeeping, MTR follows NJOY's order with the same cross-sections
   (`::test_without_ace_provenance_mtr_follows_njoys_rule`). These need the table and
-  `--deep`. `TODO(check)`: the same check over whole libraries is not in a public test.
+  `--deep`. No public test runs the same check over a whole library.
   The encoder reports, and does not write, particle blocks for a suite that carries no
   light charged products
   (`::test_the_charged_particle_blocks_are_reported_not_written`).
@@ -449,8 +451,7 @@ counted as 0).
 - Thermal tables: each elastic mode written and read back to a fixed point, the locator
   convention, and, with `KIKA_ACE_SAB` pointing to a directory of thermal tables, each
   real table recomposed byte for byte (`kika/tsl/tests/test_ace_thermal_writer.py`).
-- `TODO(check)`: the comparison of kika's tables with NJOY's of the same tape and
-  temperature is a development check, not a public test.
+- No public test compares kika's tables with NJOY's of the same tape and temperature.
 - `kika/ace/comparison` has no tests.
 
 ## Implementation

@@ -76,7 +76,7 @@ from kika.g4ndl.tokens import HEADER_TAG, TokenStream
 from kika.nuclear_data.model import (
     AngularEnergy, AngularTwoBody, ConversionReport, CrossSectionSum, EnergyAngular, Frame,
     G4NDLInelasticProvenance, Isotropic2d, KalbachMann, Legendre,
-    NBodyPhaseSpace, Regions1d, Regions2d, Uncorrelated, Unspecified, XYs1d, XYs2d,
+    NBodyPhaseSpace, PrimaryGamma, Regions1d, Regions2d, Uncorrelated, Unspecified, XYs1d, XYs2d,
     toEndfTab2, toEndfTab3, zaFromPid,
 )
 from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
@@ -693,6 +693,10 @@ def _productBody(form, rec, tag, report, suite):
             return 3, None
         return 2, _twoBody(form.angular, rec, tag)
     if isinstance(form, Uncorrelated):
+        if isinstance(form.energy, PrimaryGamma) and isinstance(form.angular, XYs2d):
+            # A LAW=2 photon: the ENDF decoder keeps the energy AWP states as
+            # a primaryGamma beside the angle; MF6 writes it back as LAW=2.
+            return 2, _twoBody(form.angular, rec, tag)
         if not isinstance(form.angular, Isotropic2d):
             raise G4NDLUnsupportedError(f"{tag}: MF6 has no uncorrelated form with an "
                                         f"anisotropic angular half")

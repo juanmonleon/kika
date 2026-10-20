@@ -526,7 +526,9 @@ All passed on 2026-10-11 unless marked:
 - `covarianceSource`: `kika/sampling/tests/test_covariance_can_come_from_another_file.py`;
 - absolute sections: `kika/sampling/tests/test_an_absolute_section_is_made_relative.py`;
 - the ACE emitter: `kika/sampling/tests/test_ace_is_an_emitter.py` (its NJOY run on a
-  full tape, `TODO(check)`: skipped here, not re-run);
+  full tape, `::test_a_real_ace_comes_out_of_a_real_perturbed_tape`, runs only with
+  `NJOY_EXECUTABLE` and `KIKA_FULL_TAPE` set; passed 2026-10-21 on JEFF-4.0 U-235, and on
+  Fe-56 the pre-flight refuses its every-block request before NJOY runs);
 - the emitters end to end, $\bar\nu$ included:
   `kika/sampling/tests/test_perturbing_from_the_model_end_to_end.py`.
 

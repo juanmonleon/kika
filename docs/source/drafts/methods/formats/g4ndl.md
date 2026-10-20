@@ -131,8 +131,15 @@ name as `target`).
   loop. 429 passed on 2026-10-11.
 - Whole distributed libraries, every isotope read and written back
   (`kika/g4ndl/tests/test_full_libraries.py`, `test_capture_full_libraries.py`,
-  `test_fission_full_libraries.py`, `test_inelastic_full_libraries.py`). `TODO(check)`:
-  they need the libraries on disk; not re-run for this page.
+  `test_fission_full_libraries.py`, `test_inelastic_full_libraries.py`), with
+  `KIKA_G4NDL` and the JEFF-4.0 ENDF tapes on disk. `TODO(check)`: on 2026-10-20, 32 of
+  38 passed; six fail on the current code and need fixing before this item is stated as
+  passing: `test_capture_full_libraries.py::test_the_final_state_from_an_endf_tape_is_the_iaea_translation`
+  on Pb-208, Cu-63 and H-1 (the MF 6 capture photons are refused: no product mass ratio
+  to write, or an anisotropic angular half), and
+  `test_fission_full_libraries.py::test_the_model_is_the_endf_adapters` on U-235, Th-230
+  and Pu-239 (the sums of the suite read from the ENDF tape now include MT 16, 17, 22
+  and others besides MT 452 and 455, which the test expects alone).
 - The `ThermalScattering` folder: a folder of materials is indexed, its Bragg table and
   outgoing tables are read per temperature, and `kika.read` returns its suite
   (`kika/tsl/tests/test_tsl_formats.py::test_a_g4ndl_thermal_folder_is_a_library_of_materials`).

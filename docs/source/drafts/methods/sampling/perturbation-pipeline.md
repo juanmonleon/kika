@@ -374,7 +374,7 @@ The tests below passed on 2026-10-11 unless marked.
 - **Resonance region.** The resonance cross-section moves by its factor and the ACE file
   carries the perturbation in the resolved range
   (`kika/sampling/tests/test_the_resonance_region_is_perturbed_as_reconstructed.py`).
-  `TODO(check)`: needs NJOY and `--deep`; not re-run for this page.
+  Needs NJOY, `--deep` and, for the ACE file, `KIKA_RUN_NJOY_ACE=1` (passed 2026-10-21).
 
 ## Diagnostics
 

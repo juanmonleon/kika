@@ -171,11 +171,14 @@ keyed by the SHA-256 of the tape, and later calls read the cached PENDF.
 - A run that crashes on a misread number is run again
   (`kika/njoy/tests/test_a_misread_crash_is_run_again.py`, 4 tests, passed 2026-10-20).
 - RECONR reconstruction of Fe-56 and U-238, streaming, and missing executable or tape
-  (`kika/processing/tests/test_njoy_reconstruct.py`). `TODO(check)`: the reconstruction
-  tests need NJOY and `--deep`; not re-run for this page.
+  (`kika/processing/tests/test_njoy_reconstruct.py`, 8 tests, passed 2026-10-20 under
+  `--deep` with NJOY 2016.78 and the JEFF-4.0 tapes; without NJOY and the tapes the
+  reconstruction tests skip).
 - ACE produced inside a sampling run
-  (`kika/sampling/tests/test_ace_is_an_emitter.py`). `TODO(check)`: the end-to-end case
-  needs NJOY and a full tape; not re-run.
+  (`kika/sampling/tests/test_ace_is_an_emitter.py`, 10 tests). The end-to-end case,
+  `::test_a_real_ace_comes_out_of_a_real_perturbed_tape`, runs only with
+  `NJOY_EXECUTABLE` and `KIKA_FULL_TAPE` set, the latter to a tape whose MF 33 the
+  sampler accepts; it passed 2026-10-20 with NJOY 2016.78 on U-238 of JEFF-4.0.
 - The deck builder, the deck reader and `run_njoy` itself have no dedicated tests.
 
 ## Diagnostics

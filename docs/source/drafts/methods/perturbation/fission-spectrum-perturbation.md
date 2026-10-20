@@ -304,9 +304,17 @@ below the lowest band and the file-level applier does not
 (`kika/sampling/tests/test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py::test_a_band_subset_is_where_the_two_appliers_part_on_purpose`),
 and for log-interpolated tables, which the file-level applier rewrites as lin-lin
 (`kika/sampling/tests/test_a_log_interpolated_spectrum_is_perturbed_exactly.py::test_the_legacy_applier_relabels_a_log_lin_spectrum_as_lin_lin`).
-`TODO(check)`: the whole-tape gates of the two writers on real evaluations
-(`test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py`) need external tapes and
-were not re-run.
+On whole evaluations
+(`kika/sampling/tests/test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py`,
+passed 2026-10-20) the two draw alike on JEFF-4.0 U-235 and ENDF/B-VIII.1 Cf-252
+(`::test_the_draw_is_the_legacy_draw_on_jeff40_u235` and its sibling), write the same MF 5
+on JEFF-4.0 U-235, ENDF/B-VIII.1 Cf-252 and U-235 and JEFF-4.0 Pu-242
+(`::test_the_two_writers_write_the_same_spectrum_on_jeff40_u235` and its siblings,
+`::test_a_band_that_states_no_variance_draws_no_perturbation`), and NJOY makes an ACE file
+from the model's perturbed Cf-252 spectrum
+(`::test_njoy_makes_ace_from_the_models_perturbed_spectrum`). `TODO(check)`: the gate on an ENDF/B-VII.1 Pu-240 correlation rounded
+above 1 (`::test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it`) needs that
+evaluation, which was not on the machine; not re-run.
 
 **Exact cases.** A zero perturbation reproduces $\chi$ to $10^{-14}$ of its maximum at every
 node, inserted ones included
@@ -369,8 +377,11 @@ band and inside a gap between bands the group probabilities move by less than $1
 node only (`::test_contiguous_bands_get_no_new_outer_node`). A partial band request moves
 nothing below the requested band
 (`kika/sampling/tests/test_perturbing_a_fission_spectrum_on_the_model.py::test_a_partial_band_request_steps_where_the_perturbation_starts`).
-`TODO(check)`: the tape witnesses in the same file (point band of a U-238 evaluation, the
-partial band and grid edge of a U-233 evaluation) need external tapes and were not re-run.
+On whole evaluations (passed 2026-10-20): the first band of JEFF-4.0 U-238 is a point and
+is perturbed at it (`::test_jeff40_u238_band_0_is_a_point_and_is_perturbed_at_it`); on
+ENDF/B-VIII.1 U-233 the factor stops at the top of a partial band and at the edge of the
+MF 35 grid (`::test_the_factor_stops_at_the_top_of_a_partial_band`,
+`::test_the_factor_stops_at_the_edge_of_the_mf35_grid`).
 
 **End to end** (`kika/sampling/tests/test_perturbing_a_fission_spectrum_on_the_model.py`).
 The delta tape moves MF 5 and one directory record, and leaves MF 3 and MF 35 byte for byte
@@ -385,9 +396,9 @@ $\langle E' \rangle$ and $F(>1\ \text{MeV})$ of a triangle exact to $10^{-14}$
 {eq}`eq-fission-spectrum-perturbation-moment` follows the stated one within its 3σ
 sampling band over 20 000 draws (`::test_the_stated_sigma_is_the_sandwich_and_the_drawn_one_follows_it`);
 every run writes the records (`::test_every_run_writes_c10_beside_its_samples`).
-`TODO(check)`: the U-235 comparison with the standards value
-(`::test_jeff40_u235_reports_its_thermal_sigma_against_the_standard`) needs an external tape
-and was not re-run.
+On JEFF-4.0 U-235 at thermal energy the run reports $\langle E' \rangle$ = 2.0 MeV with a
+stated relative $\sigma$ of 2.0 %, 4.0 times the standards' 0.50 %, and says so in the notes
+(`::test_jeff40_u235_reports_its_thermal_sigma_against_the_standard`, passed 2026-10-20).
 
 ## Diagnostics
 

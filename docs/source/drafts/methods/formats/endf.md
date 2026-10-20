@@ -375,8 +375,8 @@ All tests below passed on 2026-10-11 unless marked otherwise.
   MF 5 of Cf-252 (`test_endf_tape_fixed_point.py::test_the_mf5_section_a_tape_gets_back_is_byte_identical`),
   and MF 6 on Be-9, C-12, Li-6, Ti-50 and U-235 (`::test_a_tape_with_mf6_comes_back_with_all_of_it`).
   The same MF 3 gate on whole evaluations (Fe-56 from JEFF-4.0 and JENDL-5, U-235,
-  Th-232) runs with `--deep` (`test_endf_round_trip.py::test_the_same_holds_on_real_tapes`);
-  `TODO(check)`: not re-run for this page, the tapes are not on this machine.
+  Th-232) runs with `--deep` (`test_endf_round_trip.py::test_the_same_holds_on_real_tapes`,
+  4 tests, passed 2026-10-20).
 - **A suite read from GNDS** is written as an ENDF tape with MAT 128 for H-2, every
   reaction and an MF 2 holding the scattering radius alone
   (`kika/gnds/tests/test_encode.py::test_a_gnds_sourced_suite_writes_an_endf_tape`); that
@@ -411,10 +411,12 @@ All tests below passed on 2026-10-11 unless marked otherwise.
   `::test_the_legendre_coefficients_read_the_same`,
   `::test_the_resonance_energies_read_the_same`), and an ENDF tape kika writes from the
   NNDC GNDS files of Be-9, Li-6, Fe-56 and U-235 matches FUDGE's in every number of
-  MF 1/452-458, 3, 4, 5, 6 and 12-15
-  (`kika/endf/model_adapter/tests/test_derive_vs_fudge.py::test_kika_writes_from_nndcs_gnds_what_fudge_writes`,
-  measured 2026-10-09 according to the test). `TODO(check)`: both need a Python with
-  FUDGE (`KIKA_FUDGE_PYTHON`) and were not re-run for this page.
+  MF 1/452-458, 3, 4, 5, 6 and 12-15, and N-14 in MF 12-15
+  (`kika/endf/model_adapter/tests/test_derive_vs_fudge.py::test_kika_writes_from_nndcs_gnds_what_fudge_writes`).
+  "Every number" is field by field: equal as text, or, where kika writes a closer field
+  than FUDGE's seven significant digits, kika's value rounded to seven digits is
+  FUDGE's. Both run only with a Python that has FUDGE (`KIKA_FUDGE_PYTHON`), and passed
+  2026-10-20 with FUDGE 6.14.
 
 ## Implementation
 

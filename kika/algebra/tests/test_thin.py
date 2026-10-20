@@ -28,3 +28,16 @@ def test_a_kink_is_kept():
     x = np.linspace(-1, 1, 201)
     kept = thin_common_grid(x, np.abs(x)[None, :], rtol=1e-6)
     assert 100 in kept
+
+
+def test_a_per_point_tolerance_is_the_tolerance_of_the_chord_that_starts_there():
+    x = np.geomspace(1e-3, 10.0, 20001)
+    y = 1 / np.sqrt(x)
+    rtol = np.where(x < 1.0, 2e-4, 1e-3)
+    kept = thin_common_grid(x, y[None, :], rtol=rtol)
+    back = np.interp(x, x[kept], y[kept])
+    left = kept[np.searchsorted(kept, np.arange(len(x)), side="right") - 1]
+    error = np.abs(back - y) / y
+    assert np.all(error <= rtol[left])
+    # the loose chords use more than the tight tolerance, so the tight one is what holds
+    assert error[x[left] >= 1.0].max() > 2e-4

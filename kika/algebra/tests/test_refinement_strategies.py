@@ -64,3 +64,18 @@ def test_unresolvable_kept_panel_has_no_missing_staged_probes():
 def test_invalid_precheck_rejected(precheck):
     with pytest.raises(ValueError,match='precheck'):
         refine([0.,1.],[0.,1.],lambda q,o:q,lambda a,b:abs(a-b),precheck=precheck)
+
+
+def test_scale_multiplies_the_ratios_of_the_panels_by_their_left_node():
+    from kika.algebra import drive, refine_steps
+    f = lambda q: 1/np.sqrt(q)
+    x = np.array([1e-3, 1., 10.])
+    steps = refine_steps(x, f(x), lambda a, b: abs(a-b)/abs(a)/1e-3,
+                         scale=lambda x1: np.where(x1 < 1., 4., 1.))
+    result = drive(steps, lambda request: f(request[0]))
+    left, width = result.x[:-1], np.diff(result.x)
+    q = left[:, None]+width[:, None]*np.linspace(.05, .95, 19)
+    chord = np.interp(q.ravel(), result.x, result.y).reshape(q.shape)
+    error = np.max(abs(chord-f(q))/f(q), axis=1)
+    assert error[left < 1.].max() <= 1.02e-3/4
+    assert 1.02e-3/4 < error[left >= 1.].max() <= 1.02e-3

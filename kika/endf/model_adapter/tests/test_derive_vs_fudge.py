@@ -10,7 +10,10 @@ polluted by what GNDS lost.
 Measured 2026-10-09, every MT of MF1/452-458, MF3, MF4, MF5, MF6 and MF12-15
 identical in its numbers (blank and zero read alike) on Be-9, Li-6, Fe-56 and
 U-235, and MF12-15 on N-14 (MF13 on its sums' orphanProducts included); MF1/451
-differs only in its directory, which lists MF2 (G5, not this line).
+differs only in its directory, which lists MF2 (G5, not this line). Measured
+again 2026-10-20 with kika's writer writing the closest legal field: where
+kika's field carries more digits than FUDGE's seven significant ones
+(``3.967130999`` against ``3.967131+0``), it rounds to FUDGE's.
 
 ``KIKA_GNDS_LIB`` points at the folder of NNDC's ``n-*.endf.gnds.xml`` files;
 by default ``NuclearData/gnds/endfb81`` beside ``KIKA_LIB_TAPES``.
@@ -50,6 +53,36 @@ def _fields(line):
     return [text[k:k + 11].strip() or "0" for k in range(0, 66, 11)]
 
 
+def _number(field):
+    """An ENDF field as a float (``1.5+3`` included), or None for text."""
+    try:
+        return float(field)
+    except ValueError:
+        pass
+    for k in range(len(field) - 1, 0, -1):
+        if field[k] in "+-" and field[k - 1] not in "eE":
+            try:
+                return float(field[:k] + "e" + field[k:])
+            except ValueError:
+                return None
+    return None
+
+
+def _same(ours, fudges):
+    """Field by field: equal as text, or kika's number rounded to FUDGE's seven
+    significant digits is FUDGE's number (kika writes the closest legal field,
+    FUDGE seven digits)."""
+    if len(ours) != len(fudges):
+        return False
+    for mine, theirs in zip(ours, fudges):
+        if mine == theirs:
+            continue
+        a, b = _number(mine), _number(theirs)
+        if a is None or b is None or float(f"{a:.6e}") != float(f"{b:.6e}"):
+            return False
+    return True
+
+
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_kika_writes_from_nndcs_gnds_what_fudge_writes(name, tmp_path):
     import sys
@@ -82,4 +115,6 @@ def test_kika_writes_from_nndcs_gnds_what_fudge_writes(name, tmp_path):
         for mt in a:
             ours = [_fields(l) for l in str(b[mt]).splitlines()]
             fudges = [_fields(l) for l in str(a[mt]).splitlines()]
-            assert ours == fudges, f"{name} MF{mf}/MT{mt}"
+            assert len(ours) == len(fudges), f"{name} MF{mf}/MT{mt}: line count"
+            bad = [k for k, (o, f) in enumerate(zip(ours, fudges)) if not _same(o, f)]
+            assert not bad, f"{name} MF{mf}/MT{mt} line {bad[0]}: {ours[bad[0]]} != {fudges[bad[0]]}"

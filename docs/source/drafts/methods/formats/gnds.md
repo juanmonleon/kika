@@ -164,8 +164,8 @@ All tests below passed on 2026-10-11 unless marked.
   (`kika/gnds/tests/test_cross_section_oracle.py::test_every_shared_cross_section_agrees_to_the_last_bit`,
   `kika/gnds/tests/test_resonance_oracle.py::test_both_encodings_hold_the_same_312_resonances`,
   `kika/gnds/tests/test_covariance_oracle.py::test_fe56_covariances_agree_with_the_endf_path`).
-  `TODO(check)`: these need the full GNDS and ENDF files (`tape`, `gnds` markers); not
-  re-run for this page.
+  These need the full GNDS and ENDF files (`tape`, `gnds` markers), and passed on
+  2026-10-20 with the NNDC ENDF/B-VIII.1 GNDS files.
 - **Writing.** Writing twice gives the same file; cross-sections, resonance parameters,
   unresolved averages and covariance matrices survive the round trip; every committed
   fixture validates against the schema; an unreadable distribution is left empty and never

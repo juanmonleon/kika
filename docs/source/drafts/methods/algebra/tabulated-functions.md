@@ -164,7 +164,7 @@ and a panel that fails but cannot be split raises or is accepted as unresolved, 
 
 ## Validation
 
-`kika/algebra/tests/`, 206 tests passed on 2026-10-20, among them: each law reproduces its
+`kika/algebra/tests/`, 208 tests passed on 2026-10-20, among them: each law reproduces its
 own function (`test_algebra.py::test_each_law_reproduces_its_own_function`); every law
 integrates in closed form (`::test_every_law_integrates_in_closed_form`), the log-log case
 including a steep decrease (`::test_loglog_integral_including_steep_decrease`); a $1/x$
@@ -181,8 +181,12 @@ table is the identity and of a quadratic matches its analytic second moment
 every dropped point, keeps the mandatory points and changes no value, and keeps a kink
 (`test_thin.py::test_every_row_is_reproduced_at_every_dropped_point`,
 `::test_mandatory_points_stay_and_values_are_untouched`, `::test_a_kink_is_kept`).
-The per-point tolerance of the thinning and the `scale` of the refinement are exercised
-by the processing that uses them, not by a test of their own. TODO(check): add one.
+A per-point tolerance is that of the chord that starts at the point
+(`test_thin.py::test_a_per_point_tolerance_is_the_tolerance_of_the_chord_that_starts_there`),
+and `scale` multiplies the ratios of each panel by the factor of its left node
+(`test_refinement_strategies.py::test_scale_multiplies_the_ratios_of_the_panels_by_their_left_node`):
+on $1/\sqrt{x}$, the chords that start where the tolerance is tighter meet it, and the
+others use more than it, so the tighter tolerance is what holds them.
 
 ## Diagnostics
 

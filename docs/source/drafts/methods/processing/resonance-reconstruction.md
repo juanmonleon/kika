@@ -353,7 +353,8 @@ must hold at every energy; otherwise the evaluation raises.
 width in an LRF=3 record; a zero-energy level with a neutron width; a boundary condition
 other than the eliminated shift; relativistic kinematics; additional phases or external
 R-matrices on a Reich-Moore range (they belong to LRF=7); two groups that state
-different radii or masses for the same $\ell$; a duplicate $(\ell, J, s)$ sector.
+different radii or masses for the same $\ell$; a duplicate $(\ell, J, s)$ sector; a $J$
+that $\ell$ and the entrance channel spin cannot couple (`invalid-J`).
 
 ### R-Matrix Limited (LRF=7)
 
@@ -761,8 +762,10 @@ budget or a check failed), each with a `category` listed in
   larger than `max_work_bytes` (default 64 MiB);
 - `verification-failed`, `publication-failed`: a check above failed, or the file could
   not be written and reloaded cleanly;
-- `invalid-J`: listed, but not raised by the current engine: an unresolved $J$ that the
-  target spin and $\ell$ cannot reach is taken as stated ({doc}`unresolved-resonances`);
+- `invalid-J`: a resolved $J$ that no coupling of $\ell$ with a channel spin reaches
+  (SLBW, MLBW and Reich-Moore levels, R-Matrix Limited physical channels). In the
+  unresolved range such a $J$ is taken as stated, as NJOY and FUDGE take it, and noted
+  ({doc}`unresolved-resonances`);
 - `iterations-exhausted`: the refinement passes ran out before the table converged;
 - `float64-separation`: two energies the refinement needs cannot be separated in double
   precision.
@@ -779,6 +782,12 @@ The tests below passed on 2026-10-18 (584 passed, 27 skipped in the 19 files cit
 loaded) unless marked. Every comparison is with an independent calculation written in the
 test.
 
+- **Unreachable $J$** (passed on 2026-10-20). A level or channel whose $J$ no coupling of
+  $\ell$ and the channel spin reaches is refused with the category `invalid-J`, in SLBW and
+  MLBW (`kika/processing/tests/test_resonance_foundations.py::test_a_resolved_j_no_coupling_reaches_is_invalid_j`),
+  Reich-Moore (`kika/processing/tests/test_reich_moore.py::test_a_j_no_coupling_reaches_is_invalid_j`)
+  and R-Matrix Limited
+  (`kika/processing/tests/test_r_matrix.py::test_a_physical_channel_j_no_coupling_reaches_is_invalid_j`).
 - **Channel functions.** $P_\ell$, $S_\ell$ and $\sin^2\varphi_\ell$ against the
   Riccati-Bessel definitions for $\ell = 0..3$, $\rho = 10^{-7}..100$, relative
   $2\cdot10^{-13}$ to $2\cdot10^{-12}$

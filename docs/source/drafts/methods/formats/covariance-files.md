@@ -208,10 +208,12 @@ MF 34, which `LegendreCovariance.from_covfil` reads.
   state it, and kika leaves `is_relative` empty. Every consumer in `kika.cov`, including
   `CrossSectionCovariance.project_to_grid`, reads an unstated class as relative, the form
   in which multigroup covariance libraries are normally distributed.
-- **COVFIL blocks are relative.** Relative covariances are what ERRORR is normally asked
-  for; a COVFIL written with absolute covariances would be read with the wrong flag.
-  `TODO(check)`: confirm against the ERRORR input options. MF 34 blocks from COVFIL are in
-  an unknown frame, because the records kika reads do not state one.
+- **COVFIL blocks are relative.** ERRORR's `irelco` option (card 2) chooses absolute (0)
+  or relative (1) covariances, and relative is its default (NJOY 2016.78, `errorr.f90`);
+  the MF 33 records it writes do not say which (an MF 34 section writes `irelco` as L2 of
+  its HEAD, which kika does not read). A COVFIL written with `irelco` = 0 would be read
+  with the wrong flag. MF 34 blocks from COVFIL are in an unknown reference frame
+  (LAB or CM), because the records kika reads do not state one.
 - **Energies are in eV** in all three formats; `energy_unit="MeV"` on reading converts the
   boundaries to MeV, and any other unit is refused.
 - **Group 1 is the lowest group** after a COVERX read with `ascending=True`. BOXER and
@@ -230,8 +232,8 @@ MF 34, which `LegendreCovariance.from_covfil` reads.
 
 - **Which pair is the row.** COVERX writes the column (horizontal) parameter first; kika
   follows that order and stores the block under its row parameter. A reader that took the
-  first pair as the row would transpose every cross-reaction block. `TODO(check)`: the
-  test of this against the SCALE 44-group library was not re-run.
+  first pair as the row would transpose every cross-reaction block; the SCALE 44-group
+  library checks this (see *Validation*).
 - **A COVFIL sub-section that does not end at row NG** has no terminator the reader can
   see, so its next CONT would be read as a row. kika's writer always writes row NG (a
   single zero when the row is empty).
@@ -315,9 +317,12 @@ only), and the MF 33 or MF 34 sections, then FEND, MEND and TEND. The writer der
 - the material (MAT and ZA) from the row isotope, which is the same for every block (see
   *Refused*); MAT1 = 0 for a column parameter of that material, its MAT otherwise; only
   that material's cross-sections go into MF 3;
-- the MF 1 HEAD as (ZA, AWR, 6, 0, −G, 0) and the CONT as (TEMP, 0, G, 0, G+1, 0).
-  `TODO(check)`: the fields L1 = 6 and N1 = −G have not been compared with an ERRORR
-  tape; kika's reader does not use them;
+- the MF 1 HEAD as (ZA, AWR, 6, 0, −11, 0) and the CONT as (TEMP, 0, G, 0, G+1, 0), as
+  ERRORR writes them (NJOY 2016.78 `covout`, and an ERRORR tape of Fe-56): L1 is the ENDF
+  format version and N1 = −11 the flag of an MF 33 or MF 34 covariance tape, which NJOY's
+  COVR checks before it reads one
+  (`kika/cov/tests/test_covariance_formats.py::test_a_written_covfil_carries_errorrs_tape_flag`);
+  kika's reader does not use them;
 - AWR and the temperature from `metadata` unless passed explicitly, else zero;
 - one MF 33 (MF 34) section per row MT, NMT1 the number of blocks with that row MT; for
   MF 34, NL and NL1 the number of distinct $L$ and $L_1$ among them;
@@ -389,10 +394,11 @@ vectors.
 - **Against real files**, value by value against the numbers printed in the files: the
   orientation of a cross-reaction block of the SCALE 44-group library
   (`::test_real_scale44_coverx_cross_block_orientation`), and NJOY ERRORR tapes of Fe-56 for
-  MF 33 (56 groups, 150 blocks) and MF 34
+  MF 33 (56 groups, 152 blocks) and MF 34
   (`::test_real_fe56_mf33_gendf_against_raw_reference_values`,
-  `::test_real_fe56_mf34_gendf_against_raw_reference_values`). `TODO(check)`: not re-run;
-  they need the external data files.
+  `::test_real_fe56_mf34_gendf_against_raw_reference_values`). They read the files named by
+  `KIKA_TEST_SCALE44_COVERX`, `KIKA_TEST_FE56_MF33_GENDF` and `KIKA_TEST_FE56_MF34_GENDF`
+  and are skipped without them; with them, they passed on 2026-10-20.
 
 There is no oracle check against SCALE or NJOY reading a file kika wrote.
 

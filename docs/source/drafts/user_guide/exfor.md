@@ -17,8 +17,8 @@ exfor.configure(db_path="x4sqlite1.db")     # or set KIKA_X4PRO_DB_PATH
 ## Angular distributions
 
 ```python
-data = exfor.read_all_exfor(target="Fe56", mt=2)                       # grouped by energy
-data = exfor.read_all_exfor(target="Fe56", mt=2, energy_range=(1.0, 5.0))   # MeV
+data = exfor.read_all_exfor(target="Fe-56", mt=2)                      # grouped by energy
+data = exfor.read_all_exfor(target="Fe-56", mt=2, energy_range=(1.0, 5.0))  # MeV
 ```
 
 Each item is an `ExforAngularDistribution`: the angles, the differential cross-section and
@@ -37,8 +37,8 @@ plotting builders), `to_dataframe`.
 
 ```python
 db = exfor.X4ProDatabase()                        # uses the configured path
-xs = db.query_cross_sections(target="Fe56", mt=102, energy_range=(1e-3, 20.0))
-hits = db.search_datasets(targets=["Fe56"], quantities=["DA"], year_min=1990,
+xs = db.query_cross_sections(target="Fe-56", mt=102, energy_range=(1e-3, 20.0))
+hits = db.search_datasets(targets=["Fe-56"], quantities=["DA"], year_min=1990,
                           energy_min_mev=1.0, energy_max_mev=5.0)
 exp = db.load_experiment_general(hits[0]["dataset_id"])     # any quantity
 ```
@@ -61,6 +61,5 @@ carry around.
 `kika.exfor.AD_utils` holds the older function-based interface. It is deprecated; the
 classes above replace it.
 
-`TODO(check)`: the calls on this page were checked against the code's signatures and its
-tests (`kika/exfor/tests/`, 74 passed on 2026-10-11, on trimmed database records), not run
-against a full X4Pro database.
+A target is named as X4Pro names it, `Fe-56`. `read_all_exfor` also accepts `Fe56`; the
+queries of `X4ProDatabase` do not, and find nothing under that spelling.

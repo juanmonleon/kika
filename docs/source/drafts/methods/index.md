@@ -15,6 +15,9 @@ refuses and loses:
 - {doc}`formats/ace`: ACE tables of Monte Carlo codes.
 - {doc}`formats/g4ndl`: Geant4's neutron data library.
 - {doc}`formats/covariance-files`: COVERX, BOXER and COVFIL multigroup covariances.
+- {doc}`formats/hdf5`: OpenMC's HDF5 nuclear data, read and written.
+
+The symbols every page shares are defined once in {doc}`notation`.
 
 ## Mathematics of tabulated data
 
@@ -32,6 +35,17 @@ refuses and loses:
 - {doc}`processing/group-averaging`: flux-weighted group and window averages.
 - {doc}`processing/differential-cross-sections`: $d\sigma/d\Omega$, frame transforms and
   time-of-flight resolution.
+- {doc}`processing/processing-chain`: the stages of processing an evaluation, their order
+  and the tolerances they share.
+- {doc}`processing/probability-tables`: unresolved-resonance probability tables.
+- {doc}`processing/heating`: heating (KERMA) and damage cross-sections.
+- {doc}`processing/tabulation`: evaluated distributions as the tables Monte Carlo codes
+  sample.
+- {doc}`processing/thermal-scattering-tables`: thermal inelastic scattering as
+  cross-sections and outgoing tables.
+- {doc}`processing/dosimetry-tables`: dosimetry ACE tables.
+- {doc}`processing/photoatomic-tables`: photo-atomic ACE tables (EPRDATA).
+- {doc}`processing/photonuclear-tables`: photonuclear ACE tables.
 - {doc}`processing/njoy`: running NJOY with a fixed, checked chain.
 
 ## Covariances
@@ -69,4 +83,3 @@ refuses and loses:
   Legendre fits with model averaging, Monte Carlo covariances, adaptive multigroup collapse,
   $\chi^2$ against EXFOR). It is not part of the library package yet; its page follows when
   it is.
-- **The shared notation page.**

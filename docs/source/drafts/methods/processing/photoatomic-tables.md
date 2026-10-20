@@ -304,7 +304,15 @@ population-weighted mean.
     three materials, came from their one random seed: their first collisions drew the
     same numbers.
 - **kika's tables against eprdata25 in OpenMC.** Same runs, leaving-photon spectrum:
-  $\chi^2/\nu$ between 0.25 and 1.63 (p ≥ 0.19) in all 13 cases.
+  $\chi^2/\nu$ between 0.25 and 1.63 (p ≥ 0.19) in all 13 cases. With thick-target
+  bremsstrahlung (TTB) electrons instead, the same 13 cases (2026-10-20): water and iron
+  give the same histories as eprdata25, bit for bit; lead gives $\chi^2/\nu$ between 0.14 and
+  0.76 (p ≥ 0.97) and analog heating within $0.3\sigma$, and its flux differs (−8.1σ at
+  1 MeV) because kika's Compton shells follow BMM's list (see *Conventions and choices*), as
+  with LED.
+  Under TTB the sum of $\phi\,\Sigma_t H$ exceeds the analog heating at 10 MeV (+1.7 %
+  water, +7.5 % iron, +19 % lead) for every heating number, OpenMC's own included: TTB
+  emits the bremsstrahlung as photons that can leave, where $H$ deposits it locally.
 - **ENDF evaluations through the model.** The ENDF/B-VIII.1 photoat, atomic_relax and
   electrons tapes (100 each) are read into the model and written back byte for byte
   (`kika/endf/model_adapter/tests/test_photoatomic_model.py`,

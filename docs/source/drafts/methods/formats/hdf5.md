@@ -247,9 +247,10 @@ $10^{-3}$ tolerance it is processed to (it departs from kika's by up to 2.2 % in
 between 100 eV and 20 keV; measured 2026-10-11).
 
 `TODO(check)`: these comparisons are from before the latest heating changes and before
-the thermal tolerance rule and the shared tolerance budget of the thinning; re-run
-`compareNeutron` on the nine before review. The benchmark names and models (UO₂ pin
-cell, iron) need their references.
+the thermal tolerance rule and the shared tolerance budget of the thinning. They need the
+nine nuclides processed again, `compareNeutron` on each, and the four OpenMC pairs at
+20 000 × 120 per side run again. The benchmark names and models (UO₂ pin cell, iron)
+need their references.
 
 ## Implementation
 

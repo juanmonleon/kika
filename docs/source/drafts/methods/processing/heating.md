@@ -391,7 +391,8 @@ Known limits:
 - On Au-197 of ENDF/B-VIII.1, MT 301 lies 3-4 % below the official OpenMC library
   between 1 eV and 100 keV, with larger ratios above 100 keV where the KERMA is a small
   difference (measured 2026-10-13; `TODO(check)`: the NJOY version that produced the
-  official file). The cause is not identified.
+  official file, which neither the file nor its archive records; it needs the library's
+  release notes). The cause is not identified.
 
 ## Validation
 
@@ -432,13 +433,19 @@ calculation on a whole evaluation; the comparison with HEATR below is external.
 ### Comparison with NJOY HEATR
 
 This comparison is not a test of this repository: NJOY is neither a dependency of kika
-nor the truth. U-235 of ENDF/B-VIII.1 at 294 K, kika's PENDF MT 301 and MT 444 against
-those of NJOY 2016.78 (Linux build) RECONR, BROADR and HEATR, the same definition on
-both sides (measured 2026-10-13; `TODO(check)`: the tolerances of RECONR, BROADR and
-kika's run, and the metric's interpolation): the relative difference of MT 301 has a
-median of about $10^{-5}$ and a maximum of 0.18 % over the whole range (+0.03 % at
-thermal energy); that of MT 444 is at most 0.25 % below 25 keV, at most 1.6 % up to
-1 MeV, and 5-6 % above 1 MeV.
+nor the truth. U-235 of ENDF/B-VIII.1 at 294 K: kika's MT 301 and MT 444
+({py:func}`kika.endf.process_endf` with `heating=True`, the reconstruction and the
+thinning at their default $10^{-3}$) against NJOY 2016.78 (Linux build) RECONR
+(`err` = $10^{-3}$), BROADR (`errthn` = $10^{-3}$) and HEATR with `local` = 0, the same
+definition on both sides. kika's values are read lin-lin at NJOY's 75 895 energies, and
+the metric is $(h_\text{kika} - h_\text{NJOY})/\lvert h_\text{NJOY}\rvert$ where NJOY's
+value is not zero (measured 2026-10-20). For MT 301 its median magnitude is
+$1.7\cdot10^{-4}$ and its largest 0.30 % (at 3.9 MeV); below 0.4999 eV it is at most
+$7.3\cdot10^{-5}$, from 0.5 eV to 25 keV at most 0.13 %, from 25 keV to 1 MeV at most
+0.031 %. For MT 444 it is at most 0.058 % below 0.4999 eV, 0.38 % up to 25 keV and 1.0 %
+up to 1 MeV, and above 1 MeV kika lies below NJOY by a median of 4.5 % and at most 6.3 %
+(at 14.5 MeV). Below 1 MeV the differences are of the size of the two codes' tolerances
+on the cross-sections themselves.
 
 MT 444 of ENDF/B-VIII.1 against OpenMC's official library (NJOY HEATR) with the
 neutron-only sections' exact recoil, measured 2026-10-18 at 0.5-20 MeV: Ni-58 0.948-1.001

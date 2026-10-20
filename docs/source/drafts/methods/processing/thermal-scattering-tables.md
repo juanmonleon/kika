@@ -322,9 +322,13 @@ tables do not depend on their number.
   {eq}`eq-thermal-scattering-tables-incident` asks for. It costs more incident tables,
   and a larger file, where the law needs them. The moment tolerances are looser than the
   cross-section's because the closer table is sampled whole: they only catch a spectrum
-  or an angular distribution that changes shape between two nodes.
-  TODO(check): the size of THERMR's interpolation error and the cost of the refinement
-  are not yet reproduced by a public test.
+  or an angular distribution that changes shape between two nodes. On a $1/v$
+  cross-section, THERMR's 118 nodes read lin-lin are off by up to 3.1 % at the geometric
+  midpoint of its first interval ($10^{-5}$ to $1.78\times10^{-5}$ eV), 45 of its 117
+  intervals miss $10^{-3}$, and the refinement brings the grid to 187 nodes
+  (`kika/processing/tests/test_thermal.py::test_thermrs_grid_misses_a_one_over_v_cross_section_by_three_percent`).
+  The size at the phonon features of a crystal depends on the law, and no test measures
+  it.
 - **The cross-section is the integral at each incident energy.** THERMR writes
   $\sigma_\text{in}$ Lagrange-interpolated (order 5) onto the principal nuclide's PENDF
   grid, and ACER reads it back lin-lin at the incident energies. kika keeps the direct
@@ -348,7 +352,9 @@ tables do not depend on their number.
   that the table's cdf no longer integrates its pdf. Against an analytic reference, the
   pointwise density of NJOY's free-gas table is off by up to +27 % (H-1, 9.85 eV), and for
   U-238 below $2.5\times10^{-4}$ eV $\sigma$ and $\langle E'\rangle$ are low by 0.45 % and
-  0.46 %, independently of `tol` (NJOY version TODO(check), measured TODO(check) date).
+  0.46 %, independently of `tol` (NJOY 2016.78, at 1200 K, measured 2026-10-12; at
+  293.6 K the H-1 density at 9.85 eV, where it exceeds 1 % of its peak, is off by up to
+  106 %).
   kika integrates the angle in closed form ({eq}`eq-thermal-scattering-tables-fg-mass`),
   refines the tails against the peak scale, and builds pdf and cdf from the same areas.
   The free-gas law, the incident grid, the $\beta$ panels and the cross-section (the
@@ -423,7 +429,8 @@ These comparisons are not tests of this repository: the official files and OpenM
 neither dependencies of kika nor the truth.
 
 - **Tables.** Against OpenMC's official ENDF/B-VIII.1 thermal files (processed with NJOY
-  THERMR + ACER, `tol` $= 10^{-3}$, 16 cosines; NJOY version TODO(check)), for H in H₂O,
+  THERMR + ACER, `tol` $= 10^{-3}$, 16 cosines; `TODO(check)`: the NJOY version, which
+  neither the files nor their archive record), for H in H₂O,
   graphite, H in ZrH and Zr in ZrH₂, each at two temperatures (293.6 K or 296 K, and
   600 K), kika's tables, built with the same `tol`, have the same outgoing
   points at every incident energy of THERMR's grid, $E'$ equal to the last bit, cdf within
@@ -437,9 +444,11 @@ neither dependencies of kika nor the truth.
   within $3\sigma$, in five test models (a UO₂ cell in light water, a graphite lattice, a
   TRIGA-type ZrH system, a heavy-water cell and a reflected homogeneous UO₂-water medium).
   The largest $|z|$ of $k$ is 1.1, and of a flux group 2.9 (measured 2026-10-13). These are
-  regression models, not experimental benchmarks. Evaluation: ENDF/B-VIII.1 TODO(check).
-  TODO(check): this transport comparison was run on THERMR's incident grid alone, without
-  the nodes the refinement adds; it has to be repeated with the refined tables.
+  regression models, not experimental benchmarks. Evaluation: ENDF/B-VIII.1, the neutron
+  data from OpenMC's official library on both sides. `TODO(check)`: this transport
+  comparison was run on THERMR's incident grid alone, without the nodes the refinement
+  adds; it has to be repeated with the refined tables (five OpenMC pairs at $10^8$
+  histories per side).
 
 ## Diagnostics
 
