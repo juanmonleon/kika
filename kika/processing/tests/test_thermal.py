@@ -277,3 +277,21 @@ def test_the_incident_grid_keeps_thermrs_nodes_and_adds_what_sigma_needs():
             assert not T._misses(entry(a), entry(b), middle)
     linear = lambda points: [dict(enow=e, sigma=3 * e, moments=(2 * e, .1)) for e in points]  # noqa: E731
     assert [x["enow"] for x in T._refine(linear(grid), linear)] == grid      # lin-lin is exact
+
+
+def test_thermrs_grid_misses_a_one_over_v_cross_section_by_three_percent():
+    # THERMR's 118 incident energies, read lin-lin at their geometric midpoints, on
+    # sigma ~ 1/sqrt(E): what the refinement of the incident grid is for, and its cost.
+    from kika.processing import thermal as T
+
+    grid = np.asarray(T.EGRID, dtype=float)
+    middle = np.sqrt(grid[:-1] * grid[1:])
+    error = np.interp(middle, grid, 1 / np.sqrt(grid)) * np.sqrt(middle) - 1
+    assert len(grid) == 118
+    assert 0.031 < error.max() < 0.032 and middle[error.argmax()] < grid[1]
+    assert (error > T.SIGMA_TOL).sum() == 45
+
+    def compute(points):
+        return [dict(enow=e, sigma=1 / np.sqrt(e), moments=(2 * e, .1)) for e in points]
+
+    assert len(T._refine(compute(list(grid)), compute)) == 187

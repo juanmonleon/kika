@@ -69,8 +69,8 @@ parts set to zero and the flag set to true, since there is no decomposition to j
 
 **2. The bootstrap.** For each of $B$ replicates (default 1000, optional seed), $N$ indices
 are drawn with replacement, the pairs $(y_i, s_i)$ at those indices are taken together, and
-{eq}`eq-total-monte-carlo-estimators` is evaluated on them. The interval at level $\gamma$
-(default 0.95) is the pair of percentiles $100\,(1-\gamma)/2$ and $100\,(1+\gamma)/2$ of the
+{eq}`eq-total-monte-carlo-estimators` is evaluated on them. The interval at level $q$
+(default 0.95) is the pair of percentiles $100\,(1-q)/2$ and $100\,(1+q)/2$ of the
 replicates, for $\bar y$, $\sigma_\text{obs}$ and $\sigma_\text{ND}$. The replicates are
 drawn in blocks to bound memory; the stream of random numbers, and so the result, is the
 same as drawing them one at a time.

@@ -458,3 +458,25 @@ def test_a_kerma_past_1e10_reads_back_as_its_six_digit_fields(heated_run, tmp_pa
     tables[301] = (x, big)
     monkeypatch.setitem(heated_run._heating, 0.0, tables)
     heated_run.write_pendf(tmp_path / "big.pendf")      # raised ProcessingOutputError
+
+
+@pytest.mark.slow
+def test_a_heated_table_is_within_the_tolerance_it_states():
+    """The 0 K source, the Doppler table and the thinning share the stated
+    tolerance (kika.processing.tolerances): the table delivered at 1e-3 is within
+    1e-3 of one processed at 1e-4 (source and thinning), five times tighter below
+    0.4999 eV, for every reaction, with the broadening stopped at 10 eV."""
+    from kika.endf.reconstruction import DEFAULT_MAX_POINTS
+    from kika.processing.resonances import ReconstructionOptions
+    from kika.processing.tolerances import thermalFactor
+
+    T, reference = 293.6, 1.0e-4
+    stated = process_endf(TAPE, ProcessingPlan(temperatures=(T,), urr=False, thnmax=10.0, workers=2))
+    tight = process_endf(TAPE, ProcessingPlan(
+        temperatures=(T,), urr=False, thnmax=10.0, workers=2, thinning=reference,
+        reconstruction=ReconstructionOptions(rtol=reference, max_points=DEFAULT_MAX_POINTS)))
+    for mt, (x, y) in tight.cross_sections(T).items():
+        inside = (x <= 10.0) & (y > 0)
+        x, y = x[inside], y[inside]
+        error = np.abs(np.interp(x, *stated.cross_sections(T)[mt]) - y) / y
+        assert np.all(error <= (stated.plan.thinning + reference) / thermalFactor(x)), mt

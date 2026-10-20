@@ -467,9 +467,11 @@ anything else) and carry Greek letters and math signs in the dictionary and the 
   $\operatorname{var}(P) \le P(1-P)$ are mathematical, so breaking them is.
 - **The warning edge for $\sigma^\text{rel}$ is absolute and outside threshold regions.**
   Large relative uncertainties near a threshold are legitimate, and an edge on
-  $\sigma^\text{rel}$ alone flags them. The value 10 is set above what the major
-  libraries state outside threshold regions. TODO(check): that survey is not
-  reproducible from a test in the repository.
+  $\sigma^\text{rel}$ alone flags them. The value 10 sits in the far tail of what the
+  major libraries state outside threshold regions: `check_covariance_library` on every
+  tape of ENDF/B-VIII.1, JEFF-4.0 and JENDL-5, MF 31 and MF 33, finds three blocks past
+  it, ENDF/B-VIII.1 O-16 MT 800 (12), JEFF-4.0 Hf-176 MT 16 (24) and MT 107 (11, the cut
+  in the table below) (measured 2026-10-20).
 - **Rounding is measured, not assumed.** A negative eigenvalue is downgraded only when
   {eq}`eq-covariance-checks-ulp` or the quantised-correlation bound can produce it.
 - **A light PSD warning is graded by consequence.** $r$ places a block between rounding
@@ -572,7 +574,7 @@ indefinite in its LB=5) and the full Fe-56 tape of JENDL-5 (no defect, every PSD
 a note) the checks are pinned by
 `kika/endf/tests/test_covariance_checks.py::test_o16_b81_mt2_is_indefinite_already_in_its_lb5`
 and `::test_jendl5_fe56_has_no_defect_and_its_negative_eigenvalues_are_rounding`.
-TODO(check): these need the full tapes and `--deep`; not re-run for this page.
+Both need the full tapes and run under `--deep`.
 
 **The library walk.** `kika/endf/tests/test_covariance_library_check.py`: every tape of a
 directory is checked and gives the counts of a check of the tape alone

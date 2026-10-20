@@ -89,7 +89,8 @@ From the evaluation of a photon on a nucleus of rest energy $M_A$:
    is the reaction's, except in MT 5, which lumps channels and states $Q = 0$: there it is
    the channel's, $M_A - m_b - M_B^{(0)} - E_{lev}$, with the residual's ground-state mass
    and its level energy from the evaluation. $T_b^*(E)$ is written as a chain of ACE
-   law-33 pieces $C(E - E_c)$, each the chord of $T_b^*$ between its ends, halved until
+   law-33 pieces $C(E - E_p)$ (a slope $C$ and an intercept $E_p$ per piece), each the
+   chord of $T_b^*$ between its ends, halved until
    $|T_b^* - \text{chord}| \le 10^{-4}\,T_b^*$ at 10 %, 25 %, 50 %, 75 % and 90 % of every
    piece; each piece applies with probability 1 on its own interval. A recoil's angle is
    its partner's with $\mu \to -\mu$.

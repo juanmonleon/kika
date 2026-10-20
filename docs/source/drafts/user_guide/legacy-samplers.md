@@ -109,10 +109,10 @@ default) and `perturb_PENDF_files` for MF 3 (seed `seed`, log by default), then 
 sample $i$ of one with sample $i$ of the other in one NJOY run per pair. **The two files
 are drawn independently**, so any covariance an evaluation states between the
 cross-section and the angular coefficients (the MF 34 L=0 blocks) is absent from the
-ensemble. And pairing two balanced Sobol sets by index correlates them, which the
-module's own docstring measures as a mixture 18-21 % narrower than independence on a
-fission-spectrum driver (`TODO(check)`: no test in this repository reproduces that
-number). `perturbFromModel` draws the two files in one block where the evaluation
+ensemble. And pairing two balanced Sobol sets by index correlates them, so the spread of
+a response that mixes the two can come out narrower than independent draws give; how
+much narrower depends on the response, and no test in this repository measures it.
+`perturbFromModel` draws the two files in one block where the evaluation
 correlates them, and in independent blocks with different seeds otherwise.
 
 ### `perturb_joint_mf33_mf34`: one draw of the joint covariance
@@ -157,15 +157,15 @@ These tests gate the equivalence of the two paths, where there is one; all passe
 |---|---|---|
 | `perturb_PENDF_files` | the draw is bit-identical to the sampler it replaced, and its repair sequence is the plan | `kika/sampling/tests/test_mf33_migration_equivalence.py::test_the_draw_is_bit_identical`, `::test_the_plan_is_generate_samples_repair_sequence` |
 | | the model applier gives the same abscissae, values and encoded bytes as the PENDF applier | `kika/nuclear_data/model/tests/test_applying_a_perturbation_to_a_node.py::test_the_model_applier_reproduces_the_format_applier`, `::test_the_encoded_section_is_byte_identical` |
-| | end to end with NJOY | `kika/sampling/tests/test_pendf_perturbation.py::test_pendf_only_smoke` (`TODO(check)`: skipped, not re-run) |
+| | end to end with NJOY | `kika/sampling/tests/test_pendf_perturbation.py::test_pendf_only_smoke` (needs NJOY; passed 2026-10-21) |
 | `perturb_ENDF_files` | the MF 34 draw is bit for bit the draw it replaced | `kika/sampling/tests/test_mf34_migration_equivalence.py::test_the_draw_itself_is_bit_for_bit` |
 | | the model applier refines the same energies and gives the same coefficients | `kika/nuclear_data/model/tests/test_applying_a_perturbation_to_an_angular_distribution.py::test_the_two_appliers_refine_the_same_energies`, `::test_the_two_appliers_produce_the_same_coefficients` |
 | `perturb_nubar_files` | the model applier gives the same $\bar\nu$ table | `kika/nuclear_data/model/tests/test_applying_a_perturbation_to_a_multiplicity.py::test_the_two_appliers_produce_the_same_table` |
-| | the family sum rule | `kika/sampling/tests/test_mf31_sampling.py::test_family_prompt_only_derives_total_and_keeps_delayed` and the other `test_family_*` tests; the end-to-end tests on full tapes `TODO(check)`: skipped, not re-run |
+| | the family sum rule | `kika/sampling/tests/test_mf31_sampling.py::test_family_prompt_only_derives_total_and_keeps_delayed` and the other `test_family_*` tests; on JEFF-4.0 U-235, Th-232 and Pu-241, `::test_end_to_end_write_satisfies_sum_rule` (passed 2026-10-20) |
 | `perturb_pfns_files` | the model draws MF 35 as the sampler does | `kika/sampling/tests/test_the_model_draws_a_fission_spectrum_as_the_legacy_does.py::test_the_model_draw_is_the_legacy_draw` |
-| | the two write the same MF 5/MT 18 bytes | `kika/sampling/tests/test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py::test_the_two_writers_write_the_same_spectrum_on_the_micro_tape`; on full evaluations, `TODO(check)`: skipped, not re-run |
+| | the two write the same MF 5/MT 18 bytes | `kika/sampling/tests/test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py::test_the_two_writers_write_the_same_spectrum_on_the_micro_tape`; on JEFF-4.0 U-235, ENDF/B-VIII.1 Cf-252 and U-235 and JEFF-4.0 Pu-242, `::test_the_two_writers_write_the_same_spectrum_on_jeff40_u235` and its siblings (passed 2026-10-20) |
 | `perturb_joint_mf33_mf34` | the shape block is what the MF 34 sampler assembles; the cross reaches the ensemble | `kika/sampling/tests/test_joint_mf33_mf34.py::test_the_shape_block_is_bit_for_bit_what_the_shipped_sampler_assembles`, `::test_the_cross_reaches_the_ensemble` |
-| `perturb_ENDF_PENDF_combined` | none against the model path; argument checks pass, the NJOY smoke test `TODO(check)`: skipped, not re-run | `kika/sampling/tests/test_combined_perturbation.py` |
+| `perturb_ENDF_PENDF_combined` | none against the model path; argument checks pass, and the NJOY smoke test `::test_combined_smoke` makes ACE files (passed 2026-10-21) | `kika/sampling/tests/test_combined_perturbation.py` |
 | `perturb_ACE_files`, `reprocess_endf_to_ace` | none against the model path; `perturb_ACE_files` is covered for its argument types only | `kika/sampling/tests/test_normalize_mt_list.py` |
 
 `perturbFromModel` has no ACE-file input and no reprocessing entry: it perturbs an

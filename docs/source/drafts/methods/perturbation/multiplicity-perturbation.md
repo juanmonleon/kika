@@ -175,8 +175,10 @@ between the last node of a bin and the edge, which on a sparse table is the whol
 - **Constant extrapolation in the derived sum.** Where one component stops short of the
   other (a delayed table to 20 MeV beside a prompt one to 30 MeV), the shorter one is held
   at its last value over the rest of the union grid. The total then stays continuous at
-  the end of the shorter table. `TODO(check)`: whether a delayed $\bar\nu$ held constant
-  above its table is what the evaluator intends; the file states nothing there.
+  the end of the shorter table. The format does not allow the case: ENDF-6 §1.3.2 and
+  §1.4.2 ask the delayed and the prompt tables to cover the energy range of the fission
+  cross-section, so a table that stops short states nothing above its end, and the last
+  stated value is the assumption that adds the least.
 
 ## Limits and failure modes
 
@@ -238,9 +240,8 @@ writable as one lin-lin region (`::test_a_perturbed_multiplicity_is_still_writab
 a six-point table across 15 bins with factors alternating $\pm 5\,\%$, the realised
 bin-averaged factor is within 0.01 of the drawn one
 (`kika/sampling/tests/test_mf31_sampling.py::test_sparse_table_realises_the_block_it_was_given`).
-The same bound on three real tapes is
-`::test_realised_factors_track_the_block_on_real_tapes`; `TODO(check)`: needs external
-tapes, not re-run.
+The same bound holds on JEFF-4.0 U-235, Th-232 and Pu-241
+(`::test_realised_factors_track_the_block_on_real_tapes`, passed 2026-10-20).
 
 **The family rule** (synthetic consistent family, in `kika/sampling/tests/test_mf31_sampling.py`).
 Sum rule to $10^{-12}$ in every coverage pattern:

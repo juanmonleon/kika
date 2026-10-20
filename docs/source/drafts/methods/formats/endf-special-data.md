@@ -117,7 +117,8 @@ model and restored on the way out:
 
 Decay sublibraries: ENDF to the model and back to ENDF, byte for byte; model to GNDS and
 back to the model, identical (`kika/endf/model_adapter/tests/test_decay_sublibrary.py`; the
-whole ENDF/B-VIII.1 decay sublibrary under `-m tape`, `TODO(check)`: not re-run here).
+whole ENDF/B-VIII.1 decay sublibrary, with `KIKA_DECAY_TAPES` set, under `-m tape`:
+`::test_every_decay_evaluation_of_the_library_comes_back`, passed 2026-10-20).
 Thermal scattering and photons come back with the sections unchanged where the model was
 not edited.
 
@@ -137,8 +138,10 @@ All passed on 2026-10-11 (94 passed, 17 skipped that need full tapes):
 points become lines and the empty placeholder photon is skipped
 (`kika/nuclear_data/tests/test_photon_production.py::test_mf6_discrete_points_become_lines_and_the_rest_stays_a_continuum`,
 `::test_jendl5_fe56_level_gammas_in_mf6_are_lines`). Comparisons against
-NJOY RECONR on a kika-written photon tape (`test_photon_reconr.py`) and against FUDGE's
-decay translation need NJOY or FUDGE: `TODO(check)`, not re-run.
+NJOY RECONR on a kika-written photon tape (`test_photon_reconr.py`, 2 tests, JENDL-5
+Hf-182, NJOY 2016.78) and against FUDGE's decay translation
+(`test_decay_sublibrary.py::test_fudge_and_kika_agree_on_a_decay_evaluation`, 4 tests,
+FUDGE 6.14) need NJOY or FUDGE, and passed 2026-10-20.
 
 ## Implementation
 

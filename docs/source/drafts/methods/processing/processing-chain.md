@@ -209,9 +209,9 @@ over the destination; an existing file is never left half-written.
   $10^{-3}$ can be off by more. kika shares $\varepsilon$ by
   {eq}`eq-processing-chain-budget`. The thinning gets the largest share because its share
   decides how many points are written; the Doppler table's share only costs time. A
-  tighter source would buy few points for a much longer reconstruction.
-  TODO(check): the measured points and errors of these shares are not yet reproduced by a
-  public test.
+  tighter source would buy few points for a much longer reconstruction. That the three
+  shares add up to no more than $\varepsilon(E)$ is checked on a processed table (see
+  *Validation*).
 - **NJOY's thermal rule, in every adaptive step.** NJOY divides the tolerances of RECONR
   and BROADR by five below 0.4999 eV, judged at the left node of each interval
   ({eq}`eq-processing-chain-thermal`). kika applies the same factor in the reconstruction,
@@ -336,10 +336,24 @@ model and written again equal to the first, line for line, the date in the heade
 
 The thinning is checked on its own: every row is reproduced at every dropped point, the
 points named mandatory stay and no value is changed, and a kink is kept
-(`kika/algebra/tests/test_thin.py`). TODO(check): no test yet checks the thermal factor
-{eq}`eq-processing-chain-thermal` or the shares {eq}`eq-processing-chain-budget` on a
-processed table. The comparisons of each stage with NJOY and FUDGE are
-on the stage's page.
+(`kika/algebra/tests/test_thin.py`).
+
+The thermal factor {eq}`eq-processing-chain-thermal` is checked in each engine that
+applies it, on a $1/v$ cross-section from $10^{-5}$ to 20 eV at a relative tolerance of
+$10^{-3}$, in `kika/processing/tests/test_thermal_tolerance.py` (passed on 2026-10-20):
+the reconstruction's refinement
+(`::test_the_reconstruction_refinement_is_five_times_tighter_below_0_4999_eV`), the
+Doppler table at 293.6 K (`::test_the_doppler_table_is_five_times_tighter_below_0_4999_eV`)
+and the thinning (`::test_the_thinning_is_five_times_tighter_below_0_4999_eV`). In each,
+every interval whose left node lies below 0.4999 eV is within a fifth of the engine's
+tolerance, and some interval above it is not, so the factor is what keeps the thermal
+ones inside it. The shares {eq}`eq-processing-chain-budget` are checked on the Fe-56
+micro-tape at 293.6 K, broadened up to 10 eV: MT 1, 2 and 102 processed at the default
+$\varepsilon = 10^{-3}$ are within $\varepsilon(E)$ (plus the reference's own tolerance)
+of the same tape processed with the reconstruction and the thinning at $10^{-4}$
+(`kika/endf/tests/test_process_endf.py::test_a_heated_table_is_within_the_tolerance_it_states`,
+marked `slow`, passed on 2026-10-20). The comparisons of each stage with NJOY and FUDGE
+are on the stage's page.
 
 All passed on 2026-10-20, except those that need a whole tape or a library on disk
 (Cf-252 and Au-197 of ENDF/B-VIII.1), which were skipped.

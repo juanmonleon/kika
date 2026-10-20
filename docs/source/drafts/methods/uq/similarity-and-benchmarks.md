@@ -203,8 +203,8 @@ The tests below passed on 2026-10-11 unless marked.
   covariance library: $c_k$ is required to match a frozen CALINS value to
   $5\cdot10^{-10}$ absolute
   (`kika/benchmarks/tests/test_real_dice_scale44.py::test_real_dice_scale44_sandwich_and_ck_match_frozen_calins_reference`).
-  `TODO(check)`: needs the user's DICE database and the COVERX file, and is
-  skipped without them; not re-run for this page.
+  It needs a DICE database in kika's schema and the SCALE 44-group COVERX file, and
+  is skipped without them (passed 2026-10-20).
 
 ## Diagnostics
 

@@ -285,7 +285,9 @@ absolute covariance in b².
   a CM covariance is kept as the relative covariance of the LAB coefficients, and the
   block is labelled LAB. A relative covariance is not invariant under the frame change
   (each LAB coefficient mixes every CM order), so this is an approximation.
-  TODO(check): its size has not been measured.
+  TODO(check): its size has not been measured; measuring it needs, on a real evaluation,
+  the CM covariance of every order the LAB coefficients mix, propagated through the
+  transfer matrix of {eq}`eq-multigroup-collapse-cm-lab` and compared with the block kept.
 - **The CM-to-LAB map is two-body.** {eq}`eq-multigroup-collapse-gamma` holds for elastic
   scattering and for a discrete inelastic level, the reactions whose MF 4 is a two-body
   angular distribution; for any other reaction a CM distribution has no single LAB
@@ -334,6 +336,9 @@ Limits of the method and of the code:
   is that of the stated part diluted by the group's whole weight.
 - With $\sigma$ in the weight the integrals of step 3 are trapezoidal on a mesh that
   includes every energy of the $\sigma(E)$ table, so their accuracy is that of the table.
+  Without $\sigma$, a Maxwellian or fission $\phi$ is integrated by the trapezoid on the
+  source energies alone, which on a coarse MF 4 mesh misses the group mean by more than
+  1 % (see *Validation*).
 - A relative element is undefined where a group mean $\bar a_{\ell,g}$ is near zero; it is
   set to zero (relative blocks) or NaN before conditioning (absolute input), and a small but non-zero group
   mean can give a large relative variance.
@@ -395,9 +400,30 @@ All tests below were run on 2026-10-11 and passed.
   own kinematics, and a reaction that is not two-body is refused
   (`::test_elastic_and_a_level_get_their_own_kinematics`,
   `::test_a_reaction_that_is_not_two_body_is_refused`).
+- **The weights against an independent integral.** The cell means of
+  {eq}`eq-multigroup-collapse-cell-mean` under the flux alone are compared with adaptive
+  quadrature of the same integrals, for a linear $a_1$ tabulated on seven energies
+  (`kika/cov/tests/test_cell_means_against_quadrature.py`, run 2026-10-20). Under $\phi = 1$ and
+  $\phi = 1/E$ they agree to $10^{-12}$ relative
+  (`::test_constant_and_lethargy_weights_are_exact_on_a_linear_coefficient`). Under the
+  Maxwellian and fission fluxes the trapezoid misses by more than 1 % on the seven
+  energies alone and agrees to $10^{-5}$ when the mesh holds 10 000 log-spaced energies,
+  as a $\sigma(E)$ table supplies (`::test_maxwellian_and_fission_weights_converge_with_the_mesh`).
 
-TODO(check): no test compares `MF34_to_MG` with NJOY ERRORR's multigroup MF 34 output,
-nor the lethargy, Maxwellian or fission weighting against an independent integral.
+- **Against NJOY ERRORR** (no test in this repository; measured 2026-10-20). NJOY 2016.78
+  ERRORR (`mfcov=34`, `legord=1`, $\phi = 1/E$, 21 groups from $10^{-5}$ eV to 20 MeV)
+  and `MF34_to_MG` (lethargy weight, LAB output) were run on JENDL-5 Fe-56 MT 2 with the
+  same $\sigma(E)$, one RECONR PENDF at 0.1 % tolerance; ERRORR's covariance tape was read
+  with `read_covfil`. Above 3 MeV the group means $\bar a_{1,g}$ agree to $10^{-3}$
+  relative and the relative standard deviations to 1.4 %; the correlations differ by at
+  most 0.004 over every group. Below 2 MeV, in and just above the resolved range, they
+  part: $\bar a_{1,g}$ differs by up to 55 % (0.035 from kika, 0.079 from ERRORR for
+  0.1-0.2 MeV), and the relative standard deviations with it. An independent quadrature of
+  {eq}`eq-multigroup-collapse-cell-mean` with the PENDF elastic $\sigma(E)$ gives kika's CM
+  means to $10^{-4}$ (0.0234 for 0.1-0.2 MeV), and ERRORR's values there lie close to the
+  mean weighted by $\phi$ alone (0.067 in CM, plus a LAB shift of about $2/(3A)$ = 0.012),
+  as if ERRORR left the resonance structure of $\sigma(E)$ out of the MF 34 group means.
+  That reading is not confirmed in the ERRORR source.
 
 ## Diagnostics
 

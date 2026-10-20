@@ -292,3 +292,23 @@ def test_legendre_density_native_and_reference_keep_shape_values_and_fallback(mo
     before=A.legendreDensity(coefficients)(outside)
     monkeypatch.setattr(A,"_polynomial_native",None)
     np.testing.assert_array_equal(A.legendreDensity(coefficients)(outside),before)
+
+
+def test_a_thinned_high_order_legendre_table_keeps_its_series():
+    """An order-40 law, b**l with b = 0.7 (positive on [-1, 1]): refined from 161
+    seeds, thinned, and still within the tolerance of the series everywhere."""
+    options = TabulationOptions()
+    coefficients = 0.7 ** np.arange(41)
+    table, clipped = muTable(m.Legendre(coefficients=coefficients), options)
+    assert not clipped
+    _assertTable(table)
+    assert len(table) < 4 * 40 + 1
+    exact = legendreDensity(coefficients)
+    q = np.linspace(-1, 1, 20001)
+    f = exact(q)
+    assert f.min() > 0
+    error = np.abs(np.interp(q, table.xs, table.pdf) - f)
+    # refined to rtol/4 (+ atol/4 of the peak), thinned to 3/4 of rtol of the density
+    assert np.all(error <= 1.05 * options.rtol * f + options.atol / 4 * f.max())
+    mean = np.trapezoid(q * np.interp(q, table.xs, table.pdf), q)
+    assert abs(mean - coefficients[1]) <= options.angularMomentAtol

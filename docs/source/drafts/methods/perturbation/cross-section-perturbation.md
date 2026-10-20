@@ -26,11 +26,11 @@ cross-section $\sigma(E)$ as a TAB1 record: energies $x_1 \le \dots \le x_n$, va
 interpolation regions, each with one of the ENDF interpolation laws (histogram, lin-lin,
 lin-log, log-lin, log-log) (ENDF-6 Ch. 3). A discontinuity is written as a repeated energy,
 the first copy carrying the limit from below and the second the limit from above
-(ENDF-6 §0.5, `TODO(check)`: section number).
+(ENDF-6 §0.5.2).
 
 Some MTs are **sums** of others, and the tape states both: MT 1 is MT 2 plus MT 3, MT 3 the
 non-elastic channels, MT 4 the levels MT 51-91, MT 103 the levels MT 600-649, and so on
-(ENDF-6 Ch. 3, `TODO(check)`: section of the summation table). A tape is consistent only
+(ENDF-6 §0.4.3.11, Table 14). A tape is consistent only
 if each stated sum equals its stated partials.
 
 MF 33 states the covariance of the relative cross-sections, $\delta\sigma_i/\sigma_i$, on
@@ -307,8 +307,15 @@ Limits of the method:
   is not counted.
 - In the unresolved range, PURR builds the probability tables from the unperturbed MF 2
   parameters, so the self-shielded cross-sections an ACE file carries there do not carry the
-  factor. `TODO(check)`: whether tables stated as factors on the smooth cross-section (LSSF=1)
-  let it through has not been verified.
+  factor. That holds where the evaluation states LSSF=0. Where it states LSSF=1, PURR
+  writes the tables as factors on the smooth cross-section and ACER flags them so (NJOY
+  2016.78 source, `purr.f90` and `acefc.f90`), and the transport code multiplies them by
+  the ACE smooth cross-section, which is the perturbed MF 3, so the factor reaches the
+  self-shielded values. Checked on a run (2026-10-20, no test in this repository): on
+  ENDF/B-VIII.1 Mo-97 (LSSF=1 from 2 to 100 keV) with MT 102 perturbed and taken through
+  kika's NJOY chain to ACE at 293.6 K, the probability tables are flagged as factors and
+  are the same as those of the unperturbed chain, and the smooth capture in the
+  unresolved range moves by the drawn factor.
 
 ## Validation
 
@@ -368,9 +375,10 @@ pair at the last edge counts as covered (`::test_the_first_copy_at_the_last_edge
   reconstructed), every re-derived sum moved by what its leaves moved to $10^{-5}$ of the
   sum, MT 4 and MT 103 moved MT 51-91 and MT 600-649, and MT 1's block was discarded
   (`::test_every_sum_holds_on_a_whole_evaluation`; slow, needs the tape and NJOY; run with
-  `-m slow`). The JENDL-5 Fe-56 remainder case
-  (`::test_jendl5_fe56_elastic_is_the_remainder_it_is_stated_as`): `TODO(check)`: not re-run,
-  the tape was not reachable.
+  `-m slow`). On JENDL-5 Fe-56, which states the elastic as MT 1 minus every other channel, MT 2
+  takes the remainder and the written MT 1 carries MT 1's own factors to $2\cdot10^{-6}$
+  above 1 MeV (`::test_jendl5_fe56_elastic_is_the_remainder_it_is_stated_as`, passed
+  2026-10-21; slow, about 1 h 40 min on a workstation).
 
 **The resonance region.** In
 `kika/sampling/tests/test_the_resonance_region_is_perturbed_as_reconstructed.py`, on
@@ -384,8 +392,8 @@ differs from the base only in MF 3 MT 1, MT 2 and MF 1/451
 PENDF and the original ENDF (`::test_njoy_gets_the_perturbed_pendf_and_the_original_endf`).
 The ACE comparison (`::test_the_ace_carries_the_perturbation_in_the_resolved_range`, which
 requires a median deviation of the ACE ratio from the factor below $10^{-5}$ and a 99th
-percentile below $10^{-3}$ over more than 1 000 energies below 850 keV): `TODO(check)`: not
-re-run.
+percentile below $10^{-3}$ over more than 1 000 energies below 850 keV) passed 2026-10-21;
+it runs NJOY to ACE twice and only with `KIKA_RUN_NJOY_ACE=1`.
 
 **Absolute sections.** An absolute MF 33 section is made relative as the file-level sampler
 makes it, bit for bit on its grid, and assembles to its relative covariance; bins below

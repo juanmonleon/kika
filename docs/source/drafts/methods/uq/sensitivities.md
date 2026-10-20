@@ -175,8 +175,9 @@ value is below $10^{-15}$ in magnitude. When one MT carries two labels (Serpent 
 average: the arithmetic mean of the values and the root mean square of the relative
 errors. A material or nuclide filter selects the entries the file has; an entry the file
 lacks is reported with a warning and selects nothing. Several files can be combined if their energy grids
-agree. The grid is taken as Serpent writes it, as MeV (`TODO(check)`: Serpent's unit for
-`SENS_E`). Serpent states no response value, so $(R_0, \sigma_{R_0})$ default to
+agree. The grid is taken as Serpent writes it, in MeV: on the SCALE 44-group structure
+Serpent's `SENS_E` runs from $10^{-11}$ to 20, with an edge at $2.53\cdot10^{-8}$, the
+thermal 0.0253 eV. Serpent states no response value, so $(R_0, \sigma_{R_0})$ default to
 $(1.0, 0.01)$ unless given.
 
 **7. SDF objects and files.**
