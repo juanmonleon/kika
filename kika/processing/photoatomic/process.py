@@ -97,8 +97,8 @@ def process_photoatomic(photoat, relaxation, electrons) -> PhotoatomicProcessing
 
     ``photoat``, ``relaxation`` and ``electrons`` are paths to the photo-atomic,
     atomic-relaxation and electro-atomic tapes (or the models :func:`kika.read`
-    returns for them), all of the same element. See
-    :doc:`/drafts/methods/processing/photoatomic-tables` for the method.
+    returns for them), all of the same element. The method is the methods page
+    "Writing photo-atomic tables" of the manual.
 
     Raises :class:`ValueError` when one is missing, is not the sublibrary it should
     be, or names another element.

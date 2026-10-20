@@ -128,3 +128,41 @@ run.stage("decode").details.get("source_reconstruction")   # e.g. "recon in the 
 The stages, the result and the outputs are those of `process_endf`. A reconstruction or
 heated style the file carries is set aside and kika reconstructs from the evaluated
 resonance parameters, so that every table has kika's tolerance and verification.
+
+## Dosimetry tables
+
+A run writes a dosimetry table (`.NNy`) beside its continuous-energy one: every
+cross-section it processed, the level sums the tape leaves out, KERMA, damage and gas
+production, and the MF 9 and MF 10 production cross-sections, numbered
+`MT + 1000 (10 + LFS)`.
+
+```python
+paths = run.write_dosimetry_ace("ace/")          # ace/26056.02y and its xsdir line
+```
+
+A tape with no resonance parameters (a dosimetry evaluation) is written as it is stated,
+at its own temperature, without processing:
+
+```python
+from kika.endf import dosimetry_ace
+
+dosimetry_ace("IRDFF-II/Nb093.endf", "ace/", extension=".00y")
+```
+
+What goes in, and why: {doc}`../methods/processing/dosimetry-tables`.
+
+## Photo-atomic tables
+
+An element's photo-atomic table (`.p`, the EPRDATA layout MCNP and OpenMC read) needs its
+three atomic evaluations:
+
+```python
+from kika.endf import process_photoatomic
+
+run = process_photoatomic("photoat-026_Fe_000.endf", "atom-026_Fe_000.endf", "e-026_Fe_000.endf")
+run.write_ace("photon/")                          # photon/26000.00p and its xsdir line
+run.notes                                         # Compton shells joined or dropped, and the like
+```
+
+`write_ace` takes `extension=".25p"` for another suffix and `replace=True` to overwrite a
+table the `xsdir` already names. The method: {doc}`../methods/processing/photoatomic-tables`.
