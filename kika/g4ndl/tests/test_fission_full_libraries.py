@@ -89,8 +89,10 @@ def _nodes(suite):
     r = suite.findReactionByENDF_MT(18)
     (n,) = [p for p in r.outputChannel.products if p.pid == "n"]
     data = r.outputChannel.fissionFragmentData
+    # Only the nu-bar sums: an ENDF tape also carries FUDGE's total gamma
+    # multiplicity of every reaction whose MF6 photon lines were split.
     sums = {m.ENDF_MT: np.asarray(m.multiplicity.form.evaluate(e)) for m in
-            suite.sums.multiplicitySums}
+            suite.sums.multiplicitySums if m.ENDF_MT in (452, 455)}
     families = [(f.label, f.rate.value, f.rate.unit,
                  type(f.product.distribution["eval"].energy).__name__,
                  np.asarray(f.product.multiplicity.form.evaluate(e)))
