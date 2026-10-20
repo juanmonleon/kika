@@ -52,12 +52,14 @@ From the three evaluations of one element, one table with these blocks:
 The heating number at photon energy $E$ is
 
 $$
-H(E) = \frac{\sigma_{\mathrm{inc}}\,(E - \bar E_{\mathrm{inc}}) + \sigma_{\mathrm{pair}}\,(E - 2m_ec^2)
-+ \sigma_{\mathrm{pe}}\,(E - \Phi)}{\sigma_{\mathrm{coh}} + \sigma_{\mathrm{inc}} + \sigma_{\mathrm{pair}} + \sigma_{\mathrm{pe}}},
+H(E) = \frac{\sigma_{\mathrm{inc}}\,(E - \bar E_{\mathrm{inc}} - X_C) + \sigma_{\mathrm{pair}}\,(E - 2m_ec^2)
++ \sum_s \sigma_s\,(E - X_s)}{\sigma_{\mathrm{coh}} + \sigma_{\mathrm{inc}} + \sigma_{\mathrm{pair}} + \sigma_{\mathrm{pe}}},
 $$ (eq-photoatomic-tables-heating)
 
-with $\bar E_{\mathrm{inc}}$ the mean energy of the Compton-scattered photon and $\Phi(E)$ the
-fluorescence energy of the model in *Method*. Here $m_ec^2 = 510\,998.950\,69$ eV.
+with $\bar E_{\mathrm{inc}}$ the mean energy of the Compton-scattered photon, $\sigma_s$ the
+photo-ionisation cross-section of subshell $s$, $X_s$ the mean x-ray energy the relaxation
+cascade radiates from a vacancy in $s$, and $X_C(E)$ its mean after an incoherent
+collision (see *Method*). Here $m_ec^2 = 510\,998.950\,69$ eV.
 
 ## Method
 
@@ -129,17 +131,23 @@ $$ (eq-photoatomic-tables-coherent)
   over every interval of the $S$ table, each also cut at a geometric ladder of ratio 1.2,
   with 16-point Gauss-Legendre: $S$ is linear on each piece and the other factors are
   smooth.
-- **Fluorescence.** $\Phi(E)$ follows the MCPLIB fluorescence model of NJOY's `acepho`:
-  - **Z = 12 to 19:** above the K edge, $\Phi$ is the K shell's radiative probability
-    times its mean radiative energy;
-  - **other Z:** above the K edge, $\Phi$ is the sum, over the K-shell radiative
-    transitions from L2, L3, the M shells (Z ≥ 37) and the outer shells, of probability
-    times energy;
-  - **Z > 30:** above the mean L edge, $\Phi$ is the L shells' weighted radiative energy,
-    using the edge jumps of the photo-electric cross-section. This replaces the K value
-    above the K edge too, as NJOY does.
+- **Cascade x-rays.** With $p_t$ and $E_t$ the probability and energy of each
+  transition that fills a vacancy in $s$,
 
-  JFLO tabulates the same quantities by shell edge, with NFLO = 0, 2, 4, 5 or 6 by Z.
+  $$
+  X_s = \sum_{t\ \mathrm{radiative}} p_t\,(E_t + X_j) + \sum_{t\ \mathrm{non\text{-}radiative}} p_t\,(X_j + X_k),
+  $$ (eq-photoatomic-tables-cascade)
+
+  where $j$ (and $k$) are the subshells the transition leaves a vacancy in.
+  - A subshell with no transitions is filled without radiation: $X_s = 0$.
+  - A radiative line of non-positive energy carries nothing.
+  - $X_C(E)$ is the mean of $X_s$ over the electrons bound below $E$, each equally likely
+    to be struck.
+- **Fluorescence block.** JFLO follows the MCPLIB fluorescence model of NJOY's `acepho`:
+  K-shell lines above the K edge and, for Z > 30, L-shell lines above the mean L edge,
+  weighted by the edge jumps of the photo-electric cross-section, with NFLO = 0, 2, 4, 5
+  or 6 by Z. It is what a code without the relaxation data samples; the heating number
+  does not use it.
 
 ### Compton shells
 
@@ -207,10 +215,18 @@ population-weighted mean.
 - **The Eu-63 profile is the paper's.** NJOY3's transcription of BMM reads the 2p1/2 value
   at $p_z = 30$ a.u. as `4.61-03`, which C++ evaluates as 1.61. The paper's value is
   $4.61\cdot10^{-3}$.
-- **The heating number keeps NJOY's fluorescence model.** It subtracts one shell's
-  fluorescence from the whole photo-electric cross-section. TODO(check): whether a
-  heating number consistent with the full relaxation cascade, which the transport samples,
-  should replace it is being measured against OpenMC's analog heating.
+- **The heating number follows the relaxation cascade, not NJOY's fluorescence model.**
+  - NJOY's model subtracts one shell's fluorescence from the whole photo-electric
+    cross-section. For Z > 30, above the K edge it subtracts the L lines only, as the
+    L value overwrites the K one. eprdata25 does the same.
+  - The transport samples the whole cascade from the subshell that was ionised, and
+    follows the x-rays it emits. A heating number that also counts their energy as
+    deposited counts it twice, wherever a collision tally uses it.
+  - In lead at 100 keV (ENDF/B-VIII.1, eprdata25, 2026-10-20), NJOY's number is 91 keV per
+    collision against 36 keV with the cascade.
+  - Vacancies the evaluation gives no transitions for are filled locally, with no
+    radiation. A code may emit a photon there instead (OpenMC does), and that is the
+    residual left in *Validation*.
 - **The coherent integral is the trapezoid in $x^2$.**
   - The transport samples within an interval as if $F^2$ were linear in $x^2$, so the
     trapezoid is the integral consistent with how the table is read.
@@ -260,15 +276,31 @@ population-weighted mean.
   - electron blocks: 2 736 460 words, 340 differing in the 13th digit, plus Ni and Ag,
     where a subshell opens on a non-zero value inside the grid: kika keeps the step,
     eprdata25 ramps from the 10 eV cut;
-  - heating numbers: 99.9 % of points within $10^{-6}$. Where they differ (up to
-    $2.4\cdot10^{-4}$), kika agrees with an adaptive reference to $10^{-10}$ and eprdata25
-    does not.
+  - heating numbers, below the first subshell that radiates (where both are
+    $E - \bar E_{\mathrm{inc}}$ weighted): 99.9 % of points within $10^{-6}$. Where they
+    differ (up to $2.4\cdot10^{-4}$), kika agrees with an adaptive reference to
+    $10^{-10}$ and eprdata25 does not. Above it they differ by the cascade (see
+    *Conventions and choices*).
 
   The tests enforce this on hydrogen
   (`kika/processing/tests/test_process_photoatomic.py::test_hydrogen_agrees_with_eprdata25`),
   iron and lead (`test_photoatomic_tables.py::test_blocks_agree_with_eprdata25`), and the
   electron blocks of iron and lead
   (`kika/processing/tests/test_photoatomic_electrons.py`), when eprdata25 is present.
+- **Heating against OpenMC's analog heating.** OpenMC 0.16.0, LED electrons, a point source
+  in a sphere of three mean free paths of water, iron or lead, at 5 keV (iron) and 20 keV,
+  100 keV, 1 MeV and 10 MeV, $2\cdot10^5$ photons ($5\cdot10^4$ at 10 MeV); the track-length
+  sum of $\phi\,\Sigma_t H$ against the analog energy deposition (2026-10-20):
+  - kika's number: within 2.8 % in every case and within $2.5\sigma$ in 8 of 13; NJOY's
+    model: +71 % (lead, 100 keV) and +5.9 % (lead, 1 MeV);
+  - what is left (iron 5 keV +1.3 %, water 20-100 keV +0.4 %, lead 20 keV +2.8 % and
+    100 keV +0.9 %) is
+    OpenMC's photon at the binding energy for a vacancy with no transitions: a number that
+    removes it too agrees within $2.1\sigma$ there;
+  - the 10 MeV cases sit at −0.9 % for every heating number alike.
+- **kika's tables against eprdata25 in OpenMC.** Same runs, leaving-photon spectrum:
+  $\chi^2/
+u$ between 0.25 and 1.63 (p ≥ 0.19) in all 13 cases.
 - **ENDF evaluations through the model.** The ENDF/B-VIII.1 photoat, atomic_relax and
   electrons tapes (100 each) are read into the model and written back byte for byte
   (`kika/endf/model_adapter/tests/test_photoatomic_model.py`,

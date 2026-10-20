@@ -23,10 +23,14 @@ difference of binding energies (radiative E_i − E_j; non-radiative
 E_i − E_j − E_k), as GNDS defines it: ENDF's ETR is not used.
 
 **Heating numbers** (LHNM), per collision:
-``H = [σ_inc (E − Ē_inc) + σ_pair (E − 2mc²) + σ_pe (E − F)] / σ_tot``, with Ē_inc
-the mean energy of the Compton-scattered photon (Klein-Nishina times the
-incoherent scattering function) and F the fluorescence energy NJOY's ``alax``
-model removes above the K or L edge (:func:`_fluorescence`).
+``H = [σ_inc (E − Ē_inc − X_C) + σ_pair (E − 2mc²) + Σ_s σ_s (E − X_s)] / σ_tot``, with
+Ē_inc the mean energy of the Compton-scattered photon (Klein-Nishina times the
+incoherent scattering function), X_s the expected x-ray energy of the whole
+relaxation cascade from a vacancy in subshell s (:func:`cascadeXrayEnergies`)
+and X_C its mean over the electrons an incoherent collision can strike. What
+the cascade radiates leaves as photons the transport follows; the rest is
+deposited. The fluorescence block (JFLO) keeps NJOY's ``alax`` model
+(:func:`_fluorescence`), which is what codes without the relaxation data sample.
 """
 from __future__ import annotations
 
@@ -41,7 +45,7 @@ from kika.ace.classes.photoatomic import ComptonProfile, PhotoatomicAce, Relaxat
 from .compton import comptonShells
 
 __all__ = ["photoatomicTable", "PhotoatomicNotes", "ELECTRON_REST_ENERGY", "unionGrid", "refinedGrid",
-           "LOGLOG_RTOL"]
+           "LOGLOG_RTOL", "cascadeXrayEnergies"]
 
 #: m_e c² in eV: CODATA 2022 electron mass, as NJOY3 evaluates it (5.485799090441e-4 amu).
 ELECTRON_REST_ENERGY = 510998.95069304795
@@ -338,7 +342,7 @@ def _edgeRatio(binding: Optional[float], grid, pe) -> float:
 
 
 def _fluorescence(z: int, shells: List[_Subshell], grid, pe):
-    """``(edges, ejection probabilities, yields, energies, F(E))`` of the alax model, in eV."""
+    """``(edges, ejection probabilities, yields, energies)`` of the alax model, in eV."""
     by = {s.designator: s for s in shells}
     K, L1, L2, L3 = (by[d].binding if d in by else 0.0 for d in (1, 2, 3, 4))
     Lbar = (L1 + L2 + L3) / 3.0
@@ -400,16 +404,52 @@ def _fluorescence(z: int, shells: List[_Subshell], grid, pe):
         probs = [rL, 1.0, 1 + p3 / t, 1 + (p3 + p2) / t, 1 + (p3 + p2 + pM) / t, 1 / rK]
         yields = [0.0, b, b + g * p3, b + g * (p3 + p2), b + g * (p3 + p2 + pM), b + g * (p3 + p2 + pM + pO)]
         lines = [0.0, EL, e3, e2, eM, eO]
-    F = np.zeros(grid.size)
-    aboveK = np.searchsorted(grid, K, side="right")
-    if 12 <= z <= 19:
-        F[aboveK:] = PK * EK
-    else:
-        F[aboveK:] = p2 * e2 + p3 * e3 + pM * eM + pO * eO
-        if z > 30:
-            F[np.searchsorted(grid, Lbar, side="right"):] = PL * EL
     return (np.asarray(edges, float), np.asarray(probs, float), np.asarray(yields, float),
-            np.asarray(lines, float), F)
+            np.asarray(lines, float))
+
+
+# ---------------------------------------------------------------------------
+# Heating: the x-rays of the relaxation cascade leave, the rest stays
+# ---------------------------------------------------------------------------
+
+def cascadeXrayEnergies(shells: List[_Subshell]) -> Dict[int, float]:
+    """The expected x-ray energy, in eV, of the whole relaxation cascade from a vacancy in each subshell.
+
+    ``X(s) = Σ_t p_t [E_t + X(j)]`` over the radiative transitions and
+    ``Σ_t p_t [X(j) + X(k)]`` over the non-radiative ones. A vacancy in a subshell
+    with no transitions is filled without radiation, so its energy stays local
+    (X = 0); a radiative line of non-positive energy carries nothing.
+    """
+    by = {s.designator: s for s in shells}
+    memo: Dict[int, float] = {}
+
+    def X(d: int) -> float:
+        if d not in memo:
+            total = 0.0
+            for t in by[d].transitions if d in by else []:
+                if t.subk == 0:
+                    total += t.probability * (max(t.energy, 0.0) + X(t.subj))
+                else:
+                    total += t.probability * (X(t.subj) + X(t.subk))
+            memo[d] = total
+        return memo[d]
+
+    return {s.designator: X(s.designator) for s in shells}
+
+
+def _comptonVacancyXrays(shells: List[_Subshell], xray: Dict[int, float], grid) -> np.ndarray:
+    """The mean cascade x-ray energy after an incoherent collision at each energy of ``grid``.
+
+    The struck electron is one of the electrons bound below the photon energy, each
+    equally likely, and its vacancy relaxes as a photo-ionisation vacancy does.
+    """
+    num = np.zeros(grid.size)
+    den = np.zeros(grid.size)
+    for s in shells:
+        bound = grid > s.binding
+        num += np.where(bound, s.electrons * xray[s.designator], 0.0)
+        den += np.where(bound, s.electrons, 0.0)
+    return np.where(den > 0.0, num / np.where(den > 0.0, den, 1.0), 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -473,13 +513,18 @@ def photoatomicTable(photoat, relaxation, *, extension: str = ".00p", awr: Optio
     t.coherent_x, t.coherent_form_factor = cx, cf
     t.coherent_integrated_form_factor = np.concatenate(([0.0], np.cumsum(steps)))
 
-    edges, probs, yields, lines, F = _fluorescence(z, shells, grid, pe)
+    edges, probs, yields, lines = _fluorescence(z, shells, grid, pe)
     t.fluorescence_edge_energies, t.fluorescence_ejection_probabilities = edges, probs
     t.fluorescence_yields, t.fluorescence_energies = yields, lines
 
     mean = _incoherentMean(grid, t.incoherent_x, t.incoherent_scattering_function)
     total = ((coh + inc) + pair) + pe
-    heat = ((grid - mean) * inc + (grid - 2.0 * ELECTRON_REST_ENERGY) * pair + (grid - F) * pe)
+    xray = cascadeXrayEnergies(shells)
+    photo = np.zeros(grid.size)
+    for mt in subshellMts:
+        photo = photo + on[mt] * (grid - xray[mt - 533])
+    heat = ((grid - mean - _comptonVacancyXrays(shells, xray, grid)) * inc
+            + (grid - 2.0 * ELECTRON_REST_ENERGY) * pair + photo)
     t.heating = np.where(total > 0.0, heat / np.where(total > 0.0, total, 1.0), 0.0)
 
     compton, notes.compton = comptonShells(z, [(s.label, s.electrons, s.binding) for s in shells])

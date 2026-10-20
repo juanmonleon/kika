@@ -9,10 +9,13 @@
   evaluation lacks is dropped (Ir 6s1/2), and the Eu-63 2p1/2 value at
   p_z = 30 a.u. is the paper's 4.61e-3.
 * The grid reads log-log within 1e-3 of the lin-lin data, keeping every node.
+* The x-ray energy of a relaxation cascade, by hand on three subshells.
 * With ENDF/B-VIII.1 and LANL's eprdata25 beside the repo (``../NuclearData``),
   Fe and Pb are built from the model and every block agrees with eprdata25 on
-  eprdata25's nodes to print precision, except where eprdata25 is wrong: the heating numbers (its
-  quadrature; kika agrees with the independent one) and Pb's Compton shell arrays.
+  eprdata25's nodes to print precision, except Pb's Compton shell arrays (out of
+  step in eprdata25) and the heating numbers, which in kika follow the whole
+  relaxation cascade: they lie between 0 and E, and below every edge with
+  radiative transitions they are eprdata25's.
 """
 from __future__ import annotations
 
@@ -142,6 +145,20 @@ def test_the_grid_reads_log_log_within_the_tolerance():
         assert np.max(np.abs(log / np.interp(u, x, y) - 1)) <= LOGLOG_RTOL * 1.01
 
 
+def test_cascade_xray_energy_by_hand():
+    from kika.processing.photoatomic.tables import _Subshell, _Transition, cascadeXrayEnergies
+
+    shells = [
+        _Subshell(1, "1s1/2", 2.0, 1000.0, [_Transition(2, 0, 900.0, 0.6), _Transition(2, 2, 800.0, 0.4)]),
+        _Subshell(2, "2s1/2", 2.0, 100.0, [_Transition(3, 0, 90.0, 0.1), _Transition(3, 3, 80.0, 0.9)]),
+        _Subshell(3, "2p1/2", 2.0, 10.0, []),                       # filled without radiation
+    ]
+    x = cascadeXrayEnergies(shells)
+    assert x[3] == 0.0
+    assert x[2] == pytest.approx(0.1 * 90.0)
+    assert x[1] == pytest.approx(0.6 * (900.0 + 9.0) + 0.4 * (9.0 + 9.0))
+
+
 def _rel(a, b):
     a, b = np.asarray(a, float), np.asarray(b, float)
     s = np.maximum(np.abs(a), np.abs(b))
@@ -173,9 +190,14 @@ def test_blocks_agree_with_eprdata25(z):
         assert [(r.designator_1, r.designator_2) for r in k.relaxation[d]] == \
                [(r.designator_1, r.designator_2) for r in rows]
         assert _rel([r.energy for r in k.relaxation[d]], [r.energy for r in rows]) < 1e-12
-    # heating: eprdata25's quadrature leaves up to ~1e-4; most points agree to 1e-6
+    # heating: the cascade's x-rays leave; below the first subshell that radiates, nothing does
+    assert np.all((k.heating >= 0.0) & (k.heating <= k.energies * (1 + 1e-12)))
+    from kika.processing.photoatomic.tables import _relaxation, PhotoatomicNotes
+    _, shells = _relaxation(kika.read(found[1]), PhotoatomicNotes())
+    first = min(s.binding for s in shells if s.radiative())
+    below = (e.energies > 20.0) & (e.energies < first)
     d = np.abs(k.heating[at] - e.heating) / np.abs(e.heating)
-    assert np.mean(d[e.energies > 20.0] < 1e-6) > 0.999
+    assert below.sum() > 100 and np.mean(d[below] < 1e-6) > 0.99
     if z == 26:
         assert _rel(k.shell_electrons, e.shell_electrons) < 1e-12
         assert _rel(k.compton_profiles[0].pdf, e.compton_profiles[0].pdf) < 1e-12
