@@ -262,7 +262,16 @@ From the evaluation of a photon on a nucleus of rest energy $M_A$:
     spectra (Be-9's charged particles, up to 3 %);
   - THN equal for Pb-208 and Ca-40 (2·10⁻⁶ and 3·10⁻⁵), where every reaction states its
     products' energies; elsewhere the differences of the heating bullet above.
-- TODO(next): the whole ENDF/B-VIII.1 library through the entry point and NJOY's reader.
+- The whole ENDF/B-VIII.1 photonuclear sublibrary (222 evaluations) through
+  {py:func}`kika.endf.photonuclear_ace`: every table is written and read back strictly, and
+  NJOY2016.78's own reader of photonuclear tables (ACER `iopt = 7`, the check its tests run)
+  reads each one and writes it back with the same NXS, JXS and XSS. This includes the six
+  evaluations (Y-89, Rh-103, Tb-159, Ho-165, Tm-169, Ta-181) whose tables NJOY stops on
+  when it writes them itself. 17 s per evaluation at the median, 69 s at most (measured
+  2026-10-20).
+- Size: on the sixteen evaluations above, kika's tables are 1.3 times NJOY's in all (0.21
+  for Be-9 to 3.7 for Pb-208): law 61 for the photon's Kalbach-Mann and the chains of
+  two-body pieces are larger than one law 44 or 33.
 
 ## Diagnostics
 
