@@ -1,0 +1,91 @@
+name: wheels
+
+# kika ships compiled C kernels (build_native.py), so a wheel built on one
+# machine is valid for one OS, one architecture and one Python only. Without a
+# wheel for their platform, `pip install kika-nd` falls back to the sdist and
+# compiles on the user's machine, and build_native.py refuses to install
+# without a C compiler. This builds every wheel PyPI should carry; the release
+# skill downloads the `dist` artifact and uploads it with twine.
+#
+# Tag pushes (v*) are the release path. Pull requests that touch the build
+# also run it, so a kernel that does not compile on Windows or macOS is caught
+# before the release, not during it.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "build_native.py"
+      - "pyproject.toml"
+      - "**/*.c"
+      - "**/*.h"
+      - ".github/workflows/wheels.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheels:
+    name: wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pypa/cibuildwheel@v4.2.1
+        env:
+          CIBW_BUILD: "cp312-* cp313-* cp314-*"
+          CIBW_SKIP: "*-musllinux_* *_i686 *-win32"
+          # macos-14 is arm64; the x86_64 wheel is cross-built and tested
+          # under Rosetta.
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          # Runs in a clean venv with only the wheel installed, outside the
+          # source tree: a kernel missing from the wheel fails here, where the
+          # editable install would have imported it from the checkout.
+          CIBW_TEST_COMMAND: >-
+            python -c "import importlib, kika;
+            [importlib.import_module(m) for m in (
+            'kika.processing.resonances._rm_native',
+            'kika.processing.resonances._coulomb_native',
+            'kika.processing.doppler._doppler_native',
+            'kika.processing._thermal_native',
+            'kika.processing._heating_native',
+            'kika.algebra._polynomial_native')];
+            from kika.processing import native_available;
+            assert native_available(); print('kika', kika.__version__, 'native ok')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  dist:
+    # One artifact with everything to upload, so the release downloads a
+    # single name and cannot pick up a partial set.
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
