@@ -390,9 +390,8 @@ Known limits:
   flagged.
 - On Au-197 of ENDF/B-VIII.1, MT 301 lies 3-4 % below the official OpenMC library
   between 1 eV and 100 keV, with larger ratios above 100 keV where the KERMA is a small
-  difference (measured 2026-10-13; `TODO(check)`: the NJOY version that produced the
-  official file, which neither the file nor its archive records; it needs the library's
-  release notes). The cause is not identified.
+  difference (measured 2026-10-13; the official file is NJOY 2016.78's, as openmc.org
+  states for the library). The cause is not identified.
 
 ## Validation
 

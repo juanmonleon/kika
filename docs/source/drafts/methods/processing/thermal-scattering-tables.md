@@ -429,8 +429,8 @@ These comparisons are not tests of this repository: the official files and OpenM
 neither dependencies of kika nor the truth.
 
 - **Tables.** Against OpenMC's official ENDF/B-VIII.1 thermal files (processed with NJOY
-  THERMR + ACER, `tol` $= 10^{-3}$, 16 cosines; `TODO(check)`: the NJOY version, which
-  neither the files nor their archive record), for H in H₂O,
+  2016.78 THERMR + ACER, as openmc.org states for the library, `tol` $= 10^{-3}$,
+  16 cosines), for H in H₂O,
   graphite, H in ZrH and Zr in ZrH₂, each at two temperatures (293.6 K or 296 K, and
   600 K), kika's tables, built with the same `tol`, have the same outgoing
   points at every incident energy of THERMR's grid, $E'$ equal to the last bit, cdf within
@@ -438,17 +438,26 @@ neither dependencies of kika nor the truth.
   parts are identical (graphite's Bragg data within $7\times10^{-12}$). The inelastic
   cross-section differs by at most 0.03 %, and by 0.69 % at the phonon kink of H in ZrH,
   for the reason given under *Conventions and choices* (measured 2026-10-11).
-- **Transport.** OpenMC 0.16.0 run with the official thermal files and with kika's, the
-  neutron data the same, $10^8$ active histories per side and independent seeds:
+- **Transport.** OpenMC 0.16.0 run with the official thermal files and with kika's tables
+  on the refined incident grid, the neutron data the same, $10^8$ active histories per
+  side and independent seeds, in five test models: a UO₂ cell in light water, a graphite
+  lattice, a TRIGA-type ZrH system, a heavy-water cell and a reflected homogeneous
+  UO₂-water medium. kika's tables replace H in H₂O, graphite, H and Zr in ZrH, and D in
+  D₂O; the water of the ZrH system and O in D₂O keep the official tables. The gate is
   $|\Delta k| \le 3\sigma$ and the flux in each of 32 groups from $10^{-5}$ eV to 20 MeV
-  within $3\sigma$, in five test models (a UO₂ cell in light water, a graphite lattice, a
-  TRIGA-type ZrH system, a heavy-water cell and a reflected homogeneous UO₂-water medium).
-  The largest $|z|$ of $k$ is 1.1, and of a flux group 2.9 (measured 2026-10-13). These are
-  regression models, not experimental benchmarks. Evaluation: ENDF/B-VIII.1, the neutron
-  data from OpenMC's official library on both sides. `TODO(check)`: this transport
-  comparison was run on THERMR's incident grid alone, without the nodes the refinement
-  adds; it has to be repeated with the refined tables (five OpenMC pairs at $10^8$
-  histories per side).
+  within $3\sigma$. $k$ passes in all five, the largest $|z|$ being 2.1 (graphite lattice,
+  $\Delta k = -19 \pm 8.8$ pcm). The flux passes in four, the largest $|z|$ being 2.7. In
+  the homogeneous medium it does not: kika's flux is higher in every group below 5 meV, by
+  0.043 % to 2.3 %, with $z = 3.6$ in the group from 59 µeV to 140 µeV (+1.3 %) and
+  $\chi^2 = 65$ over the 32 groups (measured 2026-10-21). The difference comes from the
+  official files. Below 2 meV their $\sigma_\text{in}$, read lin-lin between THERMR's
+  nodes, is up to 2.5 % above $\sigma_\text{in}$ computed at the energies the refinement
+  adds (0.76 % in that group). A larger cross-section scatters more of the coldest
+  neutrons up and out of these groups, which is the sign observed. With kika's tables on
+  THERMR's grid alone, the same model agrees with the official files within $2.3\sigma$
+  in every group (measured 2026-10-13). These are regression models, not experimental
+  benchmarks. Evaluation: ENDF/B-VIII.1, the neutron data from OpenMC's official library
+  on both sides.
 
 ## Diagnostics
 
