@@ -1055,6 +1055,23 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² — cinta B-spline v6 y5s con nivel de efectos aleatorios, contra la base EXFOR CORREGIDA",
         "systematic_block_col": None,
     },
+    # ── 14-oct: B15/C15 — la MISMA cinta que B14/C14, re-puntuada con kika develop bd2715b ──────────
+    # Cambian dos cosas del marco, ninguna de la cinta: el plegado TOF de y_eval es el exacto
+    # (fold_quadrature = "exact"; antes 65 nodos uniformes en ±3σ_E truncada) y u, v van referidos a
+    # y_eval (sin el rompecabezas de Peelle). JEFF y JENDL salen de la misma pasada. Se leen contra
+    # B14/C14; la cinta B-spline usa su propio plegado (fastfold, Gauss-Legendre por paneles), no el de kika.
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s _re, plegado exacto y modos referidos al modelo (B15)",
+        "systematic_block_col": None,
+    },
+    "predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact_corr": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_predictive_bspline_v6_y5s_perorder_m2_c3_lvdp_lh_re_exact_corr.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_predictive",
+        "title":      "χ² — cinta B-spline v6 y5s _re, plegado exacto y modos referidos al modelo, EXFOR CORREGIDA (C15)",
+        "systematic_block_col": None,
+    },
     # ── RUN 97: una malla por orden Legendre (roadmap §10.8) ────────────────
     #
     # Candidata frente a `predictive_91_cross`, la misma base contra la que se
