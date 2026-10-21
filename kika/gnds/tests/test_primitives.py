@@ -1,4 +1,4 @@
-"""Phase 5 P2: §5-6 primitives, gated on every functional node in the fixtures.
+"""§5-6 primitives, gated on every functional node in the fixtures.
 
 The shape of this module is deliberate. Two of its tests
 (:func:`test_every_functional_node_in_every_fixture_builds` and
@@ -160,7 +160,7 @@ def test_every_xys1d_survives_the_interleaving_round_trip(fixture, request):
 
     §6.1.1 stores ``x0 y0 x1 y1 …`` in one node; the model keeps two arrays.
     That de-interleaving is the encoder's inverse, so it is gated at full
-    precision here rather than at P7 — a rounding introduced in the reader
+    precision here rather than at the writer — a rounding introduced in the reader
     would look like a writer defect three increments later.
     """
     root = ET.parse(request.getfixturevalue(fixture)).getroot()
@@ -359,13 +359,13 @@ def test_a_deliberately_unread_node_says_why(node):
 def test_a_node_the_model_declares_and_does_not_implement_says_so():
     """``regions3d``, and the message must carry *its* reason, not a phase number.
 
-    This test used to parse ``<XYs3d/>`` and assert "phase 7b", which stopped
+    This test used to parse ``<XYs3d/>`` and assert a phase number, which stopped
     having a subject when ``XYs3d`` landed. Re-pointing it exposed that
-    ``_unsupported`` spelled "phase 7b" into the message for every entry of
+    ``_unsupported`` spelled that phase number into the message for every entry of
     ``NOT_IMPLEMENTED_NODES`` regardless — false for ``regions3d``, which no
     phase can fill because ``gnds.xsd`` declares no element of its type. The
     reason now comes from ``_UnimplementedNode.plannedFor``, which was defined
-    in phase 5 and had never been set by a subclass.
+    with the model and had never been set by a subclass.
     """
     with pytest.raises(UnsupportedNode) as raised:
         readForm(_parse("<regions3d/>"))

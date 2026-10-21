@@ -433,7 +433,7 @@ def fissionSummary(suite) -> Optional[Dict[str, Any]]:
     at thermal (``ET``, ``ER``, the fragments' kinetic energy); the chances
     (MT19, 20, 21, 38) with their σ range, Q and whether they carry a final
     state of their own; where the photons live (``"model"`` when they reached
-    it, D10-2; ``"verbatim"`` when any travels as G4NDL text; ``None``
+    it; ``"verbatim"`` when any travels as G4NDL text; ``None``
     without) and whether the fragment yields (``Fission/FF``) are kept."""
     reaction = suite.findReactionByENDF_MT(18)
     if reaction is None:

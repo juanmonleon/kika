@@ -1481,7 +1481,7 @@ def resolveSpaces(blocks, index, space):
     ask for the same space it is that one; if not it is ``"mixed"``, and each
     row is drawn in its own quantity's space (:func:`toDrawSpace`). Such a
     block is what a request for MF33 *and* MF34 assembles when the file states
-    the sigma <-> a_l cross term (J3): before 2026-10-14 the whole block took
+    the sigma <-> a_l cross term: before 2026-10-14 the whole block took
     the space of its first MF, so ``{33: "log", 34: "linear"}`` drew the a_l in
     log.
     """
@@ -1623,7 +1623,7 @@ def _drawEverything(blocks, index, nSamples, *, seed, space, decompositionMethod
             group, space=wanted, returns="factors",
             decomposition_method=decompositionMethod, psd_method=psdMethod,
             null_tol=nullTol, verbose=False, logger=logger)
-    # A mixed block (J3) is decomposed as a linear one -- its matrix is already
+    # A mixed block is decomposed as a linear one -- its matrix is already
     # the covariance of what is drawn, see toDrawSpace -- and its log rows are
     # exponentiated once the realisation is in.
     mixed = [(key, np.asarray(matrix, dtype=float) if inDrawSpace
@@ -3046,7 +3046,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
 
 def _statedSpectrumMoments(suite, index, statedBlocks, samples, log,
                            notes) -> Dict[int, Dict[Any, Dict[str, Any]]]:
-    """C10 for every MF35 reaction of the run, logged and returned.
+    """The stated <E'> of every MF35 reaction of the run, logged and returned.
 
     The library's MF35 is drawn as stated, whatever it says; this is where the
     run says *what* it says for the mean outgoing energy, so that a JEFF-4.0

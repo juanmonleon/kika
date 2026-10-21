@@ -10,7 +10,7 @@ actually uses, and that is what this decoder produces: a ``BreitWigner`` with
 named widths, an ``RMatrix`` with widths that belong to *channels*, a
 ``TabulatedWidths`` for the unresolved region.
 
-**The l-dependent scattering radius.** Phase 1 found MF2/151's APL was being
+**The l-dependent scattering radius.** MF2/151's APL used to be
 dropped outright — on the committed Fe-56 slice, AP is 0.5444 overall but
 0.5002 for L=1 (ENDF units, 10^-12 cm), which moves elastic by a median 2% and up to 42% locally.
 ``EnergyRange.scattering_radius_for_l`` already resolves it against the LRF (the
@@ -90,15 +90,15 @@ def decodeMF2MT151(mf2mt151, report: Optional[ConversionReport] = None, *, compe
     The provenance's ``headerFields['regions']`` is a list parallel to the
     decoded regions, holding the per-range ENDF bookkeeping GNDS has no node
     for — ``lrf``, ``nlsc``, ``abn``, and the range's own ``spi``/``ap``. It is
-    what lets the phase 3d ``ResonanceParameters`` façade rebuild its
+    what lets the ``ResonanceParameters`` façade rebuild its
     ``metadata`` without re-reading the section, and what lets
     ``encodeMF2MT151`` write the section back.
 
     **Every range appears in that list, including LRU=0 and the formalisms the
     model cannot hold.** A ``kind`` key says which is which, and a consumer that
     walks it in step with ``resonances.resolved`` must skip ``radiusOnly``:
-    those ranges contribute a scattering radius and no region. Before B1a they
-    were dropped before the append, so an isotope's second range silently became
+    those ranges contribute a scattering radius and no region. They used to
+    be dropped before the append, so an isotope's second range silently became
     its first.
     """
     report = report if report is not None else ConversionReport()
@@ -437,8 +437,8 @@ def _decodeBreitWigner(parameters, lrf: int, report: ConversionReport,
         # Under LRF=1/2 the C2/L2 fields are QX and LRX, the competitive
         # reaction's Q value and its flag — not a radius. GNDS carries the
         # competitive channel's Q on the reaction, which this decoder does not
-        # build, so the loss is declared rather than quietly absorbed. Since
-        # B1a the values are carried in provenance, so the section can still be
+        # build, so the loss is declared rather than quietly absorbed. The
+        # values are carried in provenance, so the section can still be
         # written back; the *model* is what has no home for them.
         if block.lrx or block.apl_or_qx:
             report.warn(
@@ -538,7 +538,7 @@ def _decodeReichMoore(parameters, report: ConversionReport,
 
 
 #: The twelve columns of an LRF=7 particle-pair record, in file order. Ten of
-#: them had no home before B1a: only ``mt`` and ``q`` reached the model, as a
+#: them used to have no home: only ``mt`` and ``q`` reached the model, as a
 #: ``ResonanceReaction`` label and Q value.
 #:
 #: They stay in provenance rather than becoming ``PoPs`` particles, and the

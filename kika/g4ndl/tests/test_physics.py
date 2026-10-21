@@ -1,4 +1,4 @@
-"""Phase 5: physics checks and p(mu|E) of an elastic suite read from G4NDL.
+"""Physics checks and p(mu|E) of an elastic suite read from G4NDL.
 
 The whole-library sweep, with the anomalies each library ships, is in
 ``test_full_libraries.py``; the comparison against Geant4's own construction

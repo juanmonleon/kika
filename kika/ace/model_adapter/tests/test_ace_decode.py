@@ -286,7 +286,7 @@ def test_the_report_declares_the_absence_of_covariances(decoded):
 
 
 def test_the_photons_the_ace_carries_are_decoded_not_dropped(ace, decoded):
-    """Roadmap E5f.2: every MTRP entry is a photon product (test_ace_photons.py
+    """Every MTRP entry is a photon product (test_ace_photons.py
     has the detail)."""
     suite, _ = decoded
     if not ace.photon_production_xs:

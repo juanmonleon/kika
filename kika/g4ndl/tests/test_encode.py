@@ -1,4 +1,4 @@
-"""Phase 6: the model back to G4NDL, and one isotope replaced in a library copy.
+"""The model back to G4NDL, and one isotope replaced in a library copy.
 
 Acceptance: ``read → model → write → read`` keeps values,
 regions, repeated energies and their order — checked here on every real

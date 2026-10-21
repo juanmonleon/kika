@@ -7,7 +7,7 @@ and an ``angularTwoBody`` whose ``angular`` is an ``XYs2d`` of ``Legendre`` or
 of ``XYs1d``, or a ``regions2d`` when the file uses more than one region.
 
 **The gate is against the file, not against the flat class.** Everywhere else in
-phase 3c the acceptance is "the model reproduces what the flat path produces",
+the adapter the acceptance is "the model reproduces what the flat path produces",
 because the flat path is the code being replaced and agreeing with it is the
 whole claim. MF4 is the exception, and deliberately:
 ``AngularDistribution.to_endf()`` **cannot** reproduce an LTT=3 section — it
@@ -267,12 +267,12 @@ def encodeMF4MT(distribution, provenance: EndfProvenance, mt: int,
 
     Requires an ENDF provenance: LTT, LI, LCT and NM have no GNDS counterpart.
     A suite read from ENDF writes back the file's own header, never a derived
-    one; a suite read from GNDS gets one from ``derive/products.py`` (G3),
+    one; a suite read from GNDS gets one from ``derive/products.py``,
     whose rules the oracle checks against every stated header of the corpus
     (``test_derive_oracle.py``) rather than against the tapes it was written on.
     """
     report = report if report is not None else ConversionReport()
-    # "derived": the header G3 derived from the model for a suite read from
+    # "derived": the header derived from the model for a suite read from
     # GNDS (`derive/products.py`), stated by the same rules FUDGE writes it by.
     if provenance is None or provenance.sourceFormat not in ("endf", "derived"):
         raise ValueError(

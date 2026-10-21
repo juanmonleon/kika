@@ -9,7 +9,7 @@ No type annotation names both; no import links them. ``kika.processing.
 njoy_reconstruct`` *returns* ``Dict[int, CrossSection]``, and kika-app's
 ``endf_service`` and ``plot.py`` consume those objects and serialise them — so
 a rename on ``CrossSection`` breaks the desktop app with no grep hit anywhere.
-Phase 3 rewrites this layer. These are the seams it must not move.
+The GNDS migration rewrites this layer. These are the seams it must not move.
 
 **What is measured here, not assumed.** Every equality below was run against
 the committed micro-tapes before it was written down. One of the four sites
@@ -69,7 +69,7 @@ def test_project_to_grid_agrees_for_both_types(mf33_section, pair):
 
 
 def test_the_interp_shim_is_dead_for_cross_section(mf33_section, pair):
-    """A surprise worth writing down before phase 3 moves it.
+    """A surprise worth writing down before the migration moves it.
 
     ``_bin_average_xs`` branches on ``hasattr(xs_source, 'get_cross_section')``
     and its docstring frames the two arms as "ENDF ``MF3MT``" versus "canonical
@@ -80,7 +80,7 @@ def test_the_interp_shim_is_dead_for_cross_section(mf33_section, pair):
     This matters: the shim always interpolates linearly, while
     ``get_cross_section`` honours the section's own scheme. Give
     ``CrossSection`` a ``__getattr__``, or drop ``get_cross_section`` in the
-    phase 3d façade, and this silently switches arms — changing log-log
+    façade, and this silently switches arms — changing log-log
     sections' group averages with nothing else to show for it.
     """
     mf3mt, xs = pair
@@ -101,7 +101,7 @@ def test_the_interp_shim_is_dead_for_cross_section(mf33_section, pair):
 def test_how_wrong_the_shim_would_be_if_it_were_reached(mf33_section, pair):
     """The size of the hazard above, measured rather than asserted to exist.
 
-    Phase 4's P2 ("one σ-source shape") was planned around the worry that
+    The "one σ-source shape" refactor was planned around the worry that
     unifying the two shapes could flip sections from ``get_cross_section`` to
     the shim and move covariance numbers with every test green. Measured
     2026-08-12, the worry has two halves and they resolve differently.

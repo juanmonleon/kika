@@ -1,4 +1,4 @@
-"""Phase 5: the physics of an elastic suite read from G4NDL, checked and evaluated.
+"""The physics of an elastic suite read from G4NDL, checked and evaluated.
 
 Two things, kept apart on purpose:
 

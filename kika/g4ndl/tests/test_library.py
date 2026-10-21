@@ -1,4 +1,4 @@
-"""Phase 1: names, bytes, tokens and the library index.
+"""Names, bytes, tokens and the library index.
 
 Acceptance: text and zlib give the same tokens; damaged
 and truncated input is detected; an isotope is found only under its own name;

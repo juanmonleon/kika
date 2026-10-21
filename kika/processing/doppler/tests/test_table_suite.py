@@ -1,4 +1,4 @@
-"""D3 budgets, semantic boundaries, source declarations and atomic publication."""
+"""Budgets, semantic boundaries, source declarations and atomic publication."""
 from copy import deepcopy
 import numpy as np
 import pytest

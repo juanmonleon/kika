@@ -1,6 +1,6 @@
 """Fe-56's 312 resonances, out of GNDS and out of ENDF-6, compared.
 
-Phase 5's acceptance test for the §19 reader, and the third of the three
+The acceptance test for the §19 reader, and the third of the three
 oracles. It is the most demanding of them, because the two encodings do not even
 *group* the resonances the same way:
 
@@ -151,8 +151,8 @@ def test_the_two_paths_agree_on_the_scattering_radius(fromGnds, fromEndf):
     Its previous version asserted the opposite — ``fromGnds.constant ==
     10 * fromEndf.constant``, with the ENDF side stating no unit — and closed
     with "if a later phase makes the two agree on one canonical unit, this test
-    fails and is the place to record the change". That phase is 2026-08-20 and
-    this is the record.
+    fails and is the place to record the change". That change landed on 2026-08-20
+    and this is the record.
 
     ENDF still states AP in units of 10^-12 cm and GNDS still states fm; what
     changed is that the **model** now states fm (``MODEL_RADIUS_UNIT``) and the

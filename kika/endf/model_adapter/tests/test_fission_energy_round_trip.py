@@ -166,7 +166,7 @@ def test_a_tape_without_458_writes_no_458(micro_nubar_tape):
 
 
 # ----------------------------------------------------------------------
-# E3b: the same node through GNDS (gnds.xsd:1296-1335)
+# The same node through GNDS (gnds.xsd:1296-1335)
 # ----------------------------------------------------------------------
 
 def _through_gnds(path, tmp_path):
@@ -209,7 +209,7 @@ def test_the_written_fission_fragment_data_is_schema_valid(micro_fission_energy_
     distribution are MF5/455's per-family spectra, which the model does not
     carry yet -- and neither do several things outside §18.4 on a cut tape
     (an MT18 with no MF5 has an empty distribution). Those are counted
-    elsewhere; this asserts on the nodes E3b writes.
+    elsewhere; this asserts on the nodes the GNDS encoder writes.
     """
     from kika.gnds.tests.test_encode import _schemaErrors
 

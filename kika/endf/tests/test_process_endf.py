@@ -341,7 +341,7 @@ def test_process_gnds_runs_every_stage(gnds_run):
 
 def test_process_gnds_outputs(gnds_run, tmp_path):
     import kika
-    assert gnds_run.write_pendf(tmp_path / "h2.pendf").exists()      # M6 (test_pendf_from_gnds.py)
+    assert gnds_run.write_pendf(tmp_path / "h2.pendf").exists()      # see test_pendf_from_gnds.py
     back = kika.read(gnds_run.write_gnds(tmp_path / "h2.gnds.xml"), format="gnds", covariances=False)
     assert {"eval", "recon", "heated_000"} <= {s.label for s in back.styles}
     assert gnds_run.write_hdf5(tmp_path / "h2.h5").exists()

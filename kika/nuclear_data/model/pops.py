@@ -1,8 +1,8 @@
-"""A minimal GNDS §12 ``PoPs`` — just enough particle data for phase 3.
+"""A minimal GNDS §12 ``PoPs`` — just enough particle data for the model.
 
 The full properties-of-particles database is its own document (NEA, 2016b) and
 its own project. ``reactionSuite`` *requires* a ``PoPs`` child, so this has to
-exist; what phase 3 actually needs from it is the projectile, the target, the
+exist; what the model actually needs from it is the projectile, the target, the
 reaction products, and their masses and spins.
 
 Masses go through :func:`~kika.nuclear_data.model.units.check_mass_unit`, which

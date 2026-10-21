@@ -12,8 +12,8 @@ Three gates.
    check the failure is a hang rather than an error.
 
 3. **Every node round-trips through ``to_dict``/``from_dict``.** The cheapest
-   possible proxy for the phase 5 reader and the phase 7c writer, run three
-   months before either exists. It catches the modelling mistakes that only show
+   possible proxy for the GNDS reader and writer, written three
+   months before either existed. It catches the modelling mistakes that only show
    up when something has to walk the tree generically — a field that cannot be
    reconstructed, a container that loses its element type, a cycle.
 """
@@ -195,7 +195,7 @@ def test_endf_mt_is_carried_but_derived():
 
 
 # ---------------------------------------------------------------------------
-# The MF34 mapping, stated once so P7 cannot get it wrong quietly
+# The MF34 mapping, stated once so the writer cannot get it wrong quietly
 # ---------------------------------------------------------------------------
 
 def test_a_legendre_order_covariance_is_a_slice_domain_value():
@@ -383,7 +383,7 @@ def test_a_clean_decode_does_not_clutter_the_repr():
 
 
 # ---------------------------------------------------------------------------
-# 4. The nodes the real GNDS files forced (phase 5, P4)
+# 4. The nodes the real GNDS files forced
 # ---------------------------------------------------------------------------
 
 def test_a_background_is_three_named_regions_and_knows_which_it_has():

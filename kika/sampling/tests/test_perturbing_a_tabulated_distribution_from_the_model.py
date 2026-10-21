@@ -102,7 +102,7 @@ def _binOf(energy):
 
 
 def test_the_drawn_factors_come_back_out_of_the_written_tables(run, base):
-    """T7.3: sample - base, projected, is (c_l - 1) a_l for l = 1, 2 and ~0 above.
+    """Sample - base, projected, is (c_l - 1) a_l for l = 1, 2 and ~0 above.
 
     At every base energy strictly inside a bin, over all N samples, read back
     from the written tape. What separates the two is the writer's seven
@@ -153,7 +153,7 @@ def test_repair_leaves_no_negative_node(covariance):
 
 
 def test_a_real_covariance_from_another_library_comes_back_out_of_the_tables(realRun, base):
-    """T7.3 with ENDF/B-VIII.1's MF34 on JEFF-4.0's tables, N=8, read back.
+    """The same with ENDF/B-VIII.1's MF34 on JEFF-4.0's tables, N=8, read back.
 
     ENDF/B-VIII.1 states this MF34 in LAB and the tables are in CM, so the
     factors scale the tables' LAB moments, and that is where they are read

@@ -1,4 +1,4 @@
-"""§18 distributions, read and written back — phase 7b's ``uncorrelated``
+"""§18 distributions, read and written back — ``uncorrelated``
 and ``energyAngular``.
 
 Beside ``test_resonances.py`` and for the same reason: the chapter has its own
@@ -556,7 +556,7 @@ def test_a_branching3d_reads_and_writes_back_its_two_attributes(s36_gnds,
 
     ``DistributionBranching3dType`` (``gnds.xsd:1816-1819``) has no content at
     all, so there is no data shape to get wrong — what there is to get wrong is
-    dropping it, which is what happened until phase 7b: 14 032 of them across
+    dropping it, which is what happened until it was read: 14 032 of them across
     the distribution came out as an empty ``<distribution/>`` that does not
     validate.
 

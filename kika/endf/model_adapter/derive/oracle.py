@@ -1,4 +1,4 @@
-"""G0: the gate — strip a real tape's provenance, derive it back, compare.
+"""The gate — strip a real tape's provenance, derive it back, compare.
 
 A suite decoded from ENDF carries the bookkeeping the file stated. Hide it,
 run :func:`~kika.endf.model_adapter.derive.deriveEndfProvenance`, and every

@@ -1,4 +1,4 @@
-"""M1's gate: the covariance *source* moves onto the model and no number moves.
+"""The gate: the covariance *source* moves onto the model and no number moves.
 
 The draw migrated earlier and the source did
 not: ``mf33_sampling`` and ``mf31_sampling`` still assemble a
@@ -6,7 +6,7 @@ not: ``mf33_sampling`` and ``mf31_sampling`` still assemble a
 objects, hand it to ``carrier_blocks``, and draw. This is the other half —
 :func:`~kika.sampling.mf33_sampling.loadCrossSectionBlocks` reads the
 ``CovarianceSuite`` and assembles the same joint matrix — and the property held
-is the one P4 held: **bit identity, on the drawn factors**, not ``allclose`` and
+is the one the draw migration held: **bit identity, on the drawn factors**, not ``allclose`` and
 not on the matrix alone.
 
 *The matrix alone is not enough, and that is not pedantry.* Two matrices that
@@ -120,7 +120,7 @@ def test_the_block_key_and_the_index_are_the_carrier_s(mf33):
 
 
 # ---------------------------------------------------------------------------
-# The draw — the gate P4 was held to
+# The draw — the gate the draw migration was held to
 # ---------------------------------------------------------------------------
 
 def _draw(key, matrix, meta, grid, *, space, thresholds):
@@ -310,13 +310,13 @@ def test_a_suite_handed_in_is_not_modified(mf33):
 
 
 # ---------------------------------------------------------------------------
-# Written output — the gate P1 had to learn
+# Written output — the gate the first migration had to learn
 # ---------------------------------------------------------------------------
 
 def test_the_written_pendf_is_byte_identical(tmp_path):
     """The migration is measured on a file, not on an array.
 
-    P1 first ticked its acceptance on an inference from the draw and had to be
+    The first migration ticked its acceptance on an inference from the draw and had to be
     corrected the same day: comparing matrices in memory and assuming the tapes
     follow is how a wrong migration gets through. So this runs the applier both
     pipelines run and diffs the bytes.
@@ -389,13 +389,13 @@ def test_per_component_with_an_absolute_block_is_refused(mf33, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Written output — the gate P1 had to learn
+# Written output — the gate the first migration had to learn
 # ---------------------------------------------------------------------------
 
 def test_the_written_pendf_is_byte_identical(tmp_path):
     """The migration is measured on a file, not on an array.
 
-    P1 first ticked its acceptance on an inference from the draw and had to be
+    The first migration ticked its acceptance on an inference from the draw and had to be
     corrected the same day: comparing matrices in memory and assuming the tapes
     follow is how a wrong migration gets through. So this runs the applier both
     pipelines run and diffs the bytes.

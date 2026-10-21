@@ -6,11 +6,11 @@ scope, then ``read_endf`` and ``read_ace`` — which the cluster pipeline, the
 desktop app and every notebook call — start building the model on every parse,
 and ``import kika`` gets slower for everyone to no purpose.
 
-There is a second, sharper reason, and phase 3d ran into it. A lazy import from
+There is a second, sharper reason, and it has bitten before. A lazy import from
 an app-reachable code path is invisible to PyInstaller's modulegraph, so a
 package missing from kika-app's ``hiddenimports`` raises ``ModuleNotFoundError``
 in the frozen binary and nowhere else — dev, tests and CI all green. That is the
-exact failure nine other modules were found in during P2. When the flat classes
+exact failure nine other modules were found in. When the flat classes
 became façades, ``kika.endf.model_adapter`` and ``kika.nuclear_data.model`` were
 still absent from that list, and the desktop app would have broken the first
 time it read a cross section. They are in the spec now; keep them there.
@@ -39,7 +39,7 @@ ADAPTERS = ("kika.endf.model_adapter", "kika.ace.model_adapter")
 
 #: The only modules allowed to import an adapter, and why.
 #:
-#: **Phase 3d added these, and it is a real cost rather than a formality.** The
+#: **The façades added these, and it is a real cost rather than a formality.** The
 #: flat classes are façades over the model now, so their ``from_endf`` reaches
 #: the adapter — inside the method, never at module scope, so ``read_endf`` is
 #: still untouched and the dormancy test below still holds.
@@ -66,7 +66,7 @@ FACADE_IMPORTERS = {
 #: when the flat classes go, whoever deletes the last façade entry finds the list
 #: still non-empty and has to work out why.
 #:
-#: **Phase 3e (2026-08-10) added the front door.** ``kika/_read.py`` is
+#: **The front door was added on 2026-08-10.** ``kika/_read.py`` is
 #: ``kika.read`` — the one door onto the model — so importing the adapters is its
 #: entire job. It does so *inside* ``_readEndf``/``_readAce`` rather than at
 #: module scope, which is what keeps ``import kika`` from waking the model.
@@ -76,7 +76,7 @@ FACADE_IMPORTERS = {
 #: here means checking kika-app's ``kika-api.spec``. Checked on 2026-08-10 —
 #: ``kika.nuclear_data.model``, ``kika.endf.model_adapter`` and
 #: ``kika.ace.model_adapter`` are already in ``hiddenimports`` (spec lines
-#: 143-146) from phase 3d, and **kika-app calls no ``kika.read``** (zero grep
+#: 143-146) since the façades, and **kika-app calls no ``kika.read``** (zero grep
 #: hits), so no spec change was owed. If the app ever does call it, ``kika._read``
 #: has to go in that list — it is reached through ``kika.__getattr__``, which
 #: modulegraph cannot see either.
@@ -95,7 +95,7 @@ FACADE_IMPORTERS = {
 #: import. If the app ever calls ``perturb_pfns_files``, ``kika-api.spec``'s
 #: ``hiddenimports`` is where that has to be recorded.
 #:
-#: **P1 of the sampling migration (2026-08-11) added the third.**
+#: **The sampling migration (2026-08-11) added the third.**
 #: ``kika/sampling/endf_perturbation.py`` reads MF34 into a ``CovarianceSuite``
 #: in ``load_mf34_suite``, for the same reason the PFNS entry above does: the
 #: library's format-agnostic covariance object is the GNDS one, and the
@@ -108,11 +108,11 @@ FACADE_IMPORTERS = {
 #: at module scope and calls it, so the adapter really is reached in the frozen
 #: binary. It needs no spec change *only* because ``kika.endf.model_adapter``
 #: and ``kika.nuclear_data.model`` are already in ``kika-api.spec``'s
-#: ``hiddenimports`` from phase 3d (spec lines 143-146). Verified 2026-08-11 —
+#: ``hiddenimports`` since the façades (spec lines 143-146). Verified 2026-08-11 —
 #: if those entries are ever removed, this endpoint breaks in the frozen build
 #: and nowhere else.
 #:
-#: **Phase 4 P1a (2026-08-12) added the fourth; it left with the legacy
+#: **The reconstruction move (2026-08-12) added the fourth; it left with the legacy
 #: reconstructor on 2026-10-08.**
 #: ``kika/endf/processing/reconstruct.py`` was the ENDF adapter for resonance
 #: reconstruction: MF2/151 in, ``MF3MT`` out. The physics moved onto the model,
@@ -120,13 +120,13 @@ FACADE_IMPORTERS = {
 #: module an ENDF↔model boundary, and that is exactly what the adapter is for.
 #: The alternative was to keep converting through the flat
 #: ``ResonanceParameters``, whose ``c3..c6`` cannot hold an LRF=7 spin group,
-#: and that is the defect the phase exists to fix.
+#: and that is the defect the move exists to fix.
 #:
 #: The imports are inside ``reconstruct()``, so ``import kika.endf.processing``
 #: — which kika-app does, for ``detect_resonance_bounds`` — still does not wake
 #: the model. **The frozen build was checked and needs nothing:**
 #: ``kika.endf.model_adapter`` and ``kika.nuclear_data.model`` have been in
-#: ``kika-api.spec``'s ``hiddenimports`` since phase 3d (spec lines 143-146),
+#: ``kika-api.spec``'s ``hiddenimports`` since the façades (spec lines 143-146),
 #: and no path in kika-app reaches this function — the app reconstructs with
 #: NJOY, through ``kika.processing.njoy_reconstruct``.
 #: **§2.8 (2026-08-20) added the fifth.** ``kika/endf/writers/assemble.py`` is
@@ -157,10 +157,10 @@ FACADE_IMPORTERS = {
 #:
 #: **The frozen build was checked and needs nothing.** kika-api reaches
 #: ``mf33_sampling`` transitively (``routers/sampling.py`` -> ``pendf_perturbation``),
-#: but it calls **none** of the functions added by M1 -- zero grep hits for
+#: but it calls **none** of the functions added there -- zero grep hits for
 #: ``loadCrossSectionBlocks`` / ``load_mf33_blocks`` / ``build_mf31_blocks`` in
 #: kika-app on 2026-08-29 -- and the two modules the import pulls in have been in
-#: ``kika-api.spec``'s ``hiddenimports`` since phase 3d (spec lines 162-165)
+#: ``kika-api.spec``'s ``hiddenimports`` since the façades (spec lines 162-165)
 #: regardless. That stays true when the call sites do move: the same two entries
 #: cover it.
 #:
@@ -181,7 +181,7 @@ FACADE_IMPORTERS = {
 #: 2026-08-24). It is a thesis-pipeline module, not an app path.
 PERMANENT_IMPORTERS = {
     "kika/_read.py",
-    # ``kika.write``, the other half of the front door: since A4 (2026-10-14)
+    # ``kika.write``, the other half of the front door: since 2026-10-14
     # ``format="ace"`` encodes the model with the ACE adapter's
     # ``writeAceSuite``, imported inside ``write`` so that ``import kika`` does
     # not wake the model. Frozen build: ``kika.ace.model_adapter`` (in

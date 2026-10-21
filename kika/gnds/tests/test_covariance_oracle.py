@@ -1,6 +1,6 @@
 """One evaluation, two encodings: GNDS Fe-56 against ENDF Fe-56.
 
-Phase 5's acceptance test for the covariance reader, and the only one that can
+The acceptance test for the covariance reader, and the only one that can
 say the matrices are *right* rather than merely well-formed. Everything else in
 ``kika/gnds/tests`` checks that a file was read the way it was written; this
 checks that what was read is the same physics kika already gets from the same
@@ -150,7 +150,7 @@ def test_the_encodings_group_a_mixed_covariance_differently(
     formed.
 
     Combining a ``mixed`` onto one grid is a real operation kika will need, and
-    it is not phase 5's: it belongs wherever the two paths are made to produce
+    it is not the reader's: it belongs wherever the two paths are made to produce
     one answer, with its own test that the sum reproduces the ENDF matrix.
     """
     gnds, _ = gndsCovariances

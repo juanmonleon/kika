@@ -152,7 +152,7 @@ def test_the_perturbed_spectrum_actually_moved(run, micro_pfns_tape):
     largest relative move per sample: median 0.76, 18-20 % above 1.0, maximum
     3.1 (Sobol) and 3.6 (random) -- the same distribution under both, so it is
     the covariance and not the draw. 1.0 held only because the Sobol draw
-    before D35 happened to put none of its first three samples there.
+    before the blocks shared one sequence happened to put none of its first three samples there.
     """
     _, out = run
     original = read_endf(str(micro_pfns_tape), mf_numbers=[5]).files[5]

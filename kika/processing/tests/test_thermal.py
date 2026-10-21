@@ -258,8 +258,8 @@ def test_corrected_free_gas_pdf_and_cdf_describe_the_same_tail_mass():
 
 
 def test_the_incident_grid_keeps_thermrs_nodes_and_adds_what_sigma_needs():
-    # sigma ~ 1/sqrt(E) read lin-lin between THERMR's nodes misses by up to ~1 % near 1e-5 eV
-    # (ND-8); the refined grid keeps every node and reads within SIGMA_TOL at its midpoints.
+    # sigma ~ 1/sqrt(E) read lin-lin between THERMR's nodes misses by up to ~1 % near 1e-5 eV;
+    # the refined grid keeps every node and reads within SIGMA_TOL at its midpoints.
     from kika.processing import thermal as T
 
     def entry(e):

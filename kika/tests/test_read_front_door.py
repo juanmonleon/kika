@@ -7,7 +7,7 @@ and is owned by none of them.
 
 Three things are worth more than the rest and are called out where they appear:
 
-1. **Dormancy survives the door.** The whole safety argument for phases 3a-3d is
+1. **Dormancy survives the door.** The whole safety argument for introducing the model is
    "the model is built beside the old code and nothing imports it". Adding a
    public entry point is exactly the change that would end that quietly.
 2. **The door transforms nothing.** It must be a *route* to the adapters, not a
@@ -315,7 +315,7 @@ def test_an_mf_with_no_parser_is_reported_rather_than_passed_over(tmp_path, micr
     decode is unchanged and the only difference is the section under test.
 
     **This test used to inject an MF6, and MF6 gained a parser; then an MF8,
-    which had had one since E7a, and MF9/MF10 gained theirs in E6.** Each time
+    which already had one, and MF9/MF10 gained theirs.** Each time
     it kept passing for a reason other than the one it names. The stand-in has
     to be an MF that genuinely has no parser, and MF39 (covariances of
     radionuclide multiplicities) is one; if it ever gains one, this test must

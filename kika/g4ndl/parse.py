@@ -1,4 +1,4 @@
-"""Phases 2 and 3: the elastic cross-section and final-state grammars.
+"""The elastic cross-section and final-state grammars.
 
 Each parser consumes one :class:`~kika.g4ndl.tokens.TokenStream` to its last
 token and returns a record from :mod:`kika.g4ndl.records`. The grammar is the
@@ -20,7 +20,7 @@ one the 1 153 real elastic files of JEFF-4.0 and G4NDL 4.7.1 pass
 order, the sign of σ and p(μ), μ inside [-1, 1], and the ``repFlag=3``
 transition. **Physics is not checked here** — normalisation of p(μ),
 positivity of a Legendre sum, comparison against the consumer's interpolator
-are Phase 5.
+are in :mod:`kika.g4ndl.physics`.
 """
 from __future__ import annotations
 

@@ -58,7 +58,7 @@ def test_a_removed_isotope_is_not_substituted(g4ndl_g4ndl471_library):
         lib.locate("Ar36", "Elastic/FS")
 
 
-# ---------------------------------------------------------- Phases 2 and 3
+# ----------------------------------------------------------------- Parsers
 
 @pytest.mark.parametrize("fixture,reps,cs_repeat,fs_repeat", [
     ("g4ndl_jeff40_library", {1: 61, 2: 6, 3: 526}, 580, 11),
@@ -97,7 +97,7 @@ def test_fe56_records(request, fixture, n_pairs, n_leg, n_tab, e_trans):
     assert 55 < fs.targetMass < 56
 
 
-# ----------------------------------------------------------------- Phase 4
+# ------------------------------------------------------------------- Model
 
 @pytest.mark.parametrize("fixture", ["g4ndl_jeff40_library", "g4ndl_g4ndl471_library"])
 def test_every_isotope_decodes_into_the_model(request, fixture):
@@ -161,7 +161,7 @@ def test_jeff40_angular_is_the_tape_mf4(request, g4ndl_jeff40_library, target, t
             assert a[2].tolist() == b[2].tolist()
 
 
-# ----------------------------------------------------------------- Phase 5
+# ----------------------------------------------------------------- Physics
 
 @pytest.mark.parametrize("fixture,negative,unnormalised", [
     # (records, isotopes). Library anomalies, measured 2026-10-06, reported and
@@ -205,7 +205,7 @@ def test_jeff40_fe56_negative_lobe(g4ndl_jeff40_library):
     assert min(f.value for f in neg) == pytest.approx(-0.0261, abs=1e-4)
 
 
-# ----------------------------------------------------------------- Phase 6
+# ------------------------------------------------------------------ Writer
 
 @pytest.mark.parametrize("fixture", ["g4ndl_jeff40_library", "g4ndl_g4ndl471_library"])
 def test_every_pair_is_a_fixed_point_of_read_model_write_read(request, fixture):

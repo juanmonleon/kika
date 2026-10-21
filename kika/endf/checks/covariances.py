@@ -1115,7 +1115,7 @@ def _short_range_near_threshold(ctx, mt: int, good, loc, out) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Completeness (C5): the blocks and references a section implies
+# Completeness: the blocks and references a section implies
 # ---------------------------------------------------------------------------
 
 
@@ -1296,7 +1296,7 @@ def _nc_references(sections, sec, sub, loc, out) -> None:
     for k, nc in enumerate(sub.nc_records):
         nloc = CovarianceLocation(mat=loc.mat, mf=loc.mf, mt=mt, mat1=loc.mat1, mt1=loc.mt1, nc=k)
         if nc.lty not in VALID_LTY:
-            continue  # lty_invalid (C2)
+            continue  # lty_invalid
         if nc.lty in (0, 1) and not is_self:
             out.append(CovarianceFinding(
                 "nc_misplaced", DEFECT,

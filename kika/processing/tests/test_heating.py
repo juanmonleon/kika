@@ -200,7 +200,7 @@ def test_mf12_capture_uses_the_compound_recoil_and_fixed_primary_kick(monkeypatc
     np.testing.assert_allclose(result.kerma,expected,rtol=1e-14)
     np.testing.assert_allclose(result.kinematicUpper[102],expected,rtol=1e-14)
     # The damage carries the compound recoil too, as one more independent
-    # primary (P3): HEATR's at 0.0253 eV, where E/(A+1) is far below ed.
+    # primary: HEATR's at 0.0253 eV, where E/(A+1) is far below ed.
     kick=H.lindhard(binding**2/(2*H.NEUTRON_REST_ENERGY*(A+1)),14,A+1,14,A,25.)
     np.testing.assert_allclose(result.damage,kick+H.lindhard(E/(A+1),14,A+1,14,A,25.),rtol=1e-14)
     assert result.damage[0]==float(kick)

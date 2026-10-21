@@ -1,4 +1,4 @@
-"""R3 checks on independent probes, assembly ownership and lossy serialization."""
+"""Checks on independent probes, assembly ownership and lossy serialization."""
 from copy import deepcopy
 import xml.etree.ElementTree as ET
 import numpy as np

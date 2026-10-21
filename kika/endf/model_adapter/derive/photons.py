@@ -1,4 +1,4 @@
-"""E5e: MF12-15 bookkeeping from the model, for a suite read from GNDS.
+"""MF12-15 bookkeeping from the model, for a suite read from GNDS.
 
 ``photons.encodePhotonSections`` writes MF12-15 from blocks on a reaction's
 provenance (``"mf12"``/``"mf13"``, ``"mf14"``, ``"mf15"``). A suite read from
@@ -17,7 +17,7 @@ and ``toENDF6/reactionSuite.py`` ``addDecayGamma``):
   and 2 for a line; sorted by decreasing (EG, ES), the total multiplicity first
   when there are several; MF14 is LI=1 when all are isotropic, else LTT=1 with
   the isotropic ones first;
-- a photon FUDGE's flag sends to **MF6** is G4c's.
+- a photon FUDGE's flag sends to **MF6** is ``derive/energy_angle.py``'s.
 
 Improvements over FUDGE, declared: the decision is per photon rather than from
 the first of the list, and NK of MF14 counts only the photons written.
@@ -134,7 +134,7 @@ def _lineFields(reaction, context, report, reactionPath, inMF6=False) -> Optiona
     for channel, host, channelPath in _hosts(reaction, reactionPath):
         if inMF6 and host is not None:
             # A residual's decay lines of a reaction written in MF6 are in its
-            # MF6 section (G4c), as FUDGE writes them.
+            # MF6 section, as FUDGE writes them.
             continue
         photons = []
         for product in channel.products:

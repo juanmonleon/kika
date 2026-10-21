@@ -195,8 +195,8 @@ def test_bookkeeping_is_written_back_from_provenance(request, tape, what, edit):
 
 
 #: Ways of arriving with something unwritable. Each must raise rather than emit
-#: a structurally valid section with invented parameters — the hard rule phase 7
-#: states and which applies to every encoder, not only the GNDS one.
+#: a structurally valid section with invented parameters — the hard rule
+#: that applies to every encoder, not only the GNDS one.
 _REFUSALS = [
     ("fe57_host_tape", "the particle-pair columns are gone",
      lambda r, p: p.headerFields["regions"][0].__setitem__("particle_pairs", None)),

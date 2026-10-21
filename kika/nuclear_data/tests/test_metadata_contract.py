@@ -7,7 +7,7 @@ and nothing declares what the keys are. ``CrossSection.to_endf`` fails without
 ``awr`` and ``mat``. An untyped dict with load-bearing keys is API whether it is documented
 or not.
 
-Phase 3c replaces this dict with a typed ``Provenance``. The conversion is
+A typed ``Provenance`` replaces this dict. The conversion is
 lossy the moment a key is forgotten, and nothing today would notice — the
 round-trip tests would still pass, because a missing ``qm`` only surfaces when
 someone writes ENDF back out. So the key sets get written down first, here,
@@ -20,7 +20,7 @@ same fields would be ``float``. That is why float-valued ENDF fields are
 checked as ``NUMBER`` (int or float) and not as ``float``. A typed
 ``Provenance`` that declares ``emax: float`` will be wrong on the first tape it
 meets; ``test_endf_float_fields_are_not_reliably_float`` records that trap
-rather than leaving phase 3c to rediscover it.
+rather than leaving the typed ``Provenance`` to rediscover it.
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ ENDF_METADATA: dict[str, dict[str, str]] = {
         "lct": INT,
         "energy_interpolation": LIST,
         "tab_interpolation": LIST,
-        # Added by phase 3d, deliberately, and the only two keys this contract
+        # Added by the façade, deliberately, and the only two keys this contract
         # has ever gained. They are what lets `to_endf` write an LTT=3 section
         # back byte for byte. `nm` is the
         # evaluation's declared highest Legendre order, which had nowhere to
@@ -198,8 +198,8 @@ def test_to_endf_consumes_exactly_the_keys_this_file_pins(endf_objects):
     """The concrete reason the ``CrossSection`` key set is load-bearing.
 
     ``to_endf`` reads ``qm``/``qi``/``lr`` out of ``metadata`` and raises when
-    they are absent — that is the phase 1 fix for silently writing Q = 0. Drop
-    one of those keys in phase 3c and this is what breaks.
+    they are absent — that is the fix for silently writing Q = 0. Drop
+    one of those keys in the typed ``Provenance`` and this is what breaks.
     """
     xs = endf_objects["CrossSection"]
     assert {"qm", "qi", "lr"} <= set(xs.metadata)
@@ -213,7 +213,7 @@ def test_to_endf_consumes_exactly_the_keys_this_file_pins(endf_objects):
 
 
 def test_endf_float_fields_are_not_reliably_float(endf_objects):
-    """Records the int/float trap for phase 3c's typed ``Provenance``.
+    """Records the int/float trap for the typed ``Provenance``.
 
     ENDF writes these in its fixed-format float notation, but the parser hands
     back ``int`` when the value is integral. On this tape ``emax`` is
@@ -252,7 +252,7 @@ def test_ace_evaluation_info_keys_are_unchanged(ace_objects):
 
 
 def test_ace_carries_qi_but_not_qm_or_lr(ace_objects):
-    """The structural half of the phase 1 Q = 0 fix, with D4's correction.
+    """The structural half of the Q = 0 fix, with a later correction.
 
     ``to_endf`` on an ACE-sourced section must still refuse rather than
     silently write Q = 0 — but the reason is narrower than this test used to

@@ -47,7 +47,7 @@ class NuclideInfo:
     def from_endf(cls, mt451: "MF1MT451") -> "NuclideInfo":
         """Create from an ENDF ``MT451`` object.
 
-        **Phase 3d: this reads the file through the GNDS model.** The section is
+        **This reads the file through the GNDS model.** The section is
         decoded into ``PoPs`` + an ``evaluated`` style + ``EndfProvenance``, and
         ``model.interop`` projects that back into the five fields this class has
         always had. The fields, their order and their defaults are unchanged —

@@ -801,7 +801,7 @@ def test_an_mf6_tape_writes_a_gnds_file_with_no_empty_distribution(
 
     A product whose law kika cannot read is written with an **empty
     `<distribution/>`** rather than an ``<unspecified/>``, so the file announces
-    its own incompleteness and fails schema validation. Phase 7b took that count
+    its own incompleteness and fails schema validation. That count was brought
     to zero for suites decoded from GNDS; this is the same count for a suite
     decoded from a tape whose distributions are all in File 6.
     """

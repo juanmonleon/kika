@@ -463,7 +463,7 @@ def _covarianceSections(source, mf: int, mt: int):
 
 
 def _faithfulMF34(sections, mt: int, report, mat):
-    """MF34 written section by section (G6), FUDGE's layout
+    """MF34 written section by section, FUDGE's layout
     (``toENDF6/covariances/covarianceSuite.py``): LTT=3 when an order-0 row is
     given and 1 otherwise, one subsection (NMT1=1, MAT1=0, MT1=MT) with NL/NL1
     the distinct row/column orders, and per (L, L1) a CONT with LCT from the
@@ -560,7 +560,7 @@ def encodeMF34MT(source, mt: int, mat: Optional[int] = None,
 
 
 def _faithful(sections) -> bool:
-    """Whether to write each component as its own record (G6), not collapsed."""
+    """Whether to write each component as its own record, not collapsed."""
     return any(not isinstance(s.form, CovarianceMatrix)
                or getattr(s.provenance, "sourceFormat", None) == "derived"
                for s in sections)
@@ -649,7 +649,7 @@ def _otherMaterial(link) -> int:
 
 
 def _faithfulSection(sections, mf: int, mt: int, za, awr, mat, report):
-    """MF31/MF33 written component by component (G6): NI per matrix, NC per sum."""
+    """MF31/MF33 written component by component: NI per matrix, NC per sum."""
     from kika.endf.classes.mf33.mf33 import MF33MT, Subsection
 
     section = MF33MT(number=mt, _za=float(za), _awr=float(awr), _mat=int(mat or 0), _mf=mf)

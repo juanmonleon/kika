@@ -301,7 +301,7 @@ def test_law_bodies_get_the_class_their_law_says():
 # ---------------------------------------------------------------------------
 
 def test_deferred_photon_distributions_point_at_a_file_kika_reads():
-    """``LAW=-15`` sends the distribution to MF15, which kika reads since E5a.
+    """``LAW=-15`` sends the distribution to MF15, which kika reads.
 
     Until 2026-10-09 this was the one MF6 gap every actinide MT18 reported: the
     section was complete as *read* and incomplete as *data*, because MF15 had no

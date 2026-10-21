@@ -126,8 +126,8 @@ def test_no_covariance_file_is_declared_unconvertible_any_more(covEndf):
     """Every covariance file kika parses now reaches the model.
 
     **This test used to assert the opposite for MF32**, and the notice it
-    checked for — "the model has nowhere to put it: §25.3 parameter covariances
-    are phase 7b" — was accurate right up until §25.3 existed. It is kept,
+    checked for — "the model has nowhere to put it", about §25.3 parameter
+    covariances — was accurate right up until §25.3 existed. It is kept,
     inverted, because the interesting failure now is a *regression*: a change
     that dropped MF32 back out of the suite would otherwise show up only as a
     missing list somewhere downstream.

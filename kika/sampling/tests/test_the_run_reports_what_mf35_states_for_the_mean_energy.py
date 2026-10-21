@@ -1,4 +1,4 @@
-"""The run keeps MF35 as stated and reports C10 beside it.
+"""The run keeps MF35 as stated and reports what it states beside it.
 
 By design (2026-10-08), production draws the library's MF35 as it is --
 no constraint, no clipping to a band, no rejection of replicas -- and every
@@ -7,9 +7,8 @@ mean outgoing energy and the tail fractions, against independent knowledge
 where some is known (``kika.sampling.pfns_moments``). The GLS
 constraint through an external covariance override is pending and not built; the record says so.
 
-The numbers gated on JEFF-4.0 U-235 are the ones the C10 first pass measured
-on 2026-10-07 with ``kika_dev/sampling/checks/pfns_c10_stated_moments.py``
-(band 0: <E'> 2.0007 MeV, sigma 1.998 %, F(>1 MeV) 0.73 %, F(>3 MeV) 3.91 %),
+The numbers gated on JEFF-4.0 U-235 are the ones a first standalone pass
+measured on 2026-10-07 (band 0: <E'> 2.0007 MeV, sigma 1.998 %, F(>1 MeV) 0.73 %, F(>3 MeV) 3.91 %),
 now computed by the run on the model node.
 """
 from __future__ import annotations
@@ -65,7 +64,7 @@ def test_the_stated_sigma_is_the_sandwich_and_the_drawn_one_follows_it():
     assert stated > 0
     assert drawn == pytest.approx(stated, rel=3 / np.sqrt(2 * 20000))
     assert record["constraint"] == C10_CONSTRAINT
-    assert "P5" in C10_CONSTRAINT and "not built" in C10_CONSTRAINT
+    assert "not built" in C10_CONSTRAINT
 
 
 def test_every_run_writes_c10_beside_its_samples(tmp_path):

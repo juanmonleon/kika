@@ -3,7 +3,7 @@
 The design rule was **empty slots exist, they are not absent**: each law was
 declared before it was filled, so a reader meeting one could say which GNDS node
 it could not handle instead of failing somewhere unrelated, and so that adding
-the implementation later restructured nothing. Phase 7b filled them, and the
+the implementation later restructured nothing. They have all been filled since, and the
 rule is what made that a series of small commits rather than one large one.
 
 **All seven §18.1.1 members the library contains are here** —
@@ -422,7 +422,7 @@ class Recoil(_UnimplementedDistribution):
 #: :class:`KalbachMann` became dataclasses.
 #:
 #: **It is down to a dict that no longer contains an unimplemented §18 law**,
-#: which is what phase 7b set out to do. The entry that remains is a misplaced
+#: which is what implementing the §18 laws set out to do. The entry that remains is a misplaced
 #: name and not a gap; the test above is what keeps the distinction.
 NOT_IMPLEMENTED_DISTRIBUTIONS = {
     cls.gndsNodeName: cls

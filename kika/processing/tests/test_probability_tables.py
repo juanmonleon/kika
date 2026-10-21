@@ -143,7 +143,7 @@ def test_ladder_special_functions():
 
 
 # ----------------------------------------------------------------------
-# Statistical error (NR-10): the ladder is the unit, jackknife over ladders
+# Statistical error: the ladder is the unit, jackknife over ladders
 # ----------------------------------------------------------------------
 
 def _fakePrepared():

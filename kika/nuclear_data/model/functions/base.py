@@ -9,7 +9,7 @@ higher-dimensional one) and ``index`` (position, when it sits inside a
 
 **Why evaluation delegates.** Every concrete subclass resolves ``evaluate`` to
 ``kika.processing.interpolation.interpolate_1d`` rather than reimplementing the
-interpolation laws. That is not laziness: phase 3's acceptance is that the model
+interpolation laws. That is not laziness: the acceptance test is that the model
 reproduces the flat path *bit for bit*, and the only way to guarantee that of
 floating-point code is to run the same code. A second implementation would
 agree to about 1e-16 and disagree somewhere, and finding where is not work worth
@@ -39,7 +39,7 @@ def _interpolate_1d():
     ``reconstruct``, which imports ``kika.nuclear_data.cross_section`` — so a
     module-level import here would close a cycle the moment anything makes
     ``kika/nuclear_data/__init__.py`` import this package, which is exactly what
-    phase 3d does. Phase 2 was blocked for the same reason in the other
+    the façades do. The same cycle has already bitten in the other
     direction; once is enough.
     """
     from kika.processing.interpolation import interpolate_1d

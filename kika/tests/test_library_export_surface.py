@@ -202,7 +202,7 @@ def test_kika_utils_nuclear_data_still_does_not_exist():
 
     ``kika-api/app/main.py:85`` and ``routers/covariance.py:58`` log
     ``"kika.utils.nuclear_data EXISTS - this is the problem!"`` if this module
-    ever comes back — it once shadowed the real ``kika.nuclear_data``. Phase 3
+    ever comes back — it once shadowed the real ``kika.nuclear_data``. The GNDS migration
     adds a subpackage under ``kika/nuclear_data/`` and is exactly the kind of
     work that could resurrect it by accident, so the app's runtime guard gets
     a compile-time twin here.

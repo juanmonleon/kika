@@ -1,6 +1,6 @@
-"""Every node survives a generic walk. The cheapest proxy for phases 5 and 7c.
+"""Every node survives a generic walk. The cheapest proxy for the GNDS reader and writer.
 
-The GNDS reader (phase 5) and writer (phase 7c) are months away, and both work
+The GNDS reader and writer were months away when this was written, and both work
 the same way: walk the tree generically, turn each node into its fields, and
 rebuild it from them. Bugs in a *model* that only appear under a generic walk —
 a field that cannot be reconstructed from what the node exposes, a container
@@ -13,7 +13,7 @@ now, on guesses about what the reader needs; running it as a test costs nothing
 and still catches the modelling mistakes.
 
 What this does **not** test is XML, xPath ``href`` resolution, or the GNDS
-element ordering. Those are phase 5's, and they need the specification's
+element ordering. Those are the reader's, and they need the specification's
 serialisation rules rather than a dataclass walk.
 """
 from __future__ import annotations
@@ -147,8 +147,8 @@ def test_every_node_round_trips_through_a_generic_walk(name):
 
     assert type(rebuilt) is type(original)
     assert to_dict(rebuilt) == to_dict(original), (
-        f"{name} does not survive a generic to_dict/from_dict walk. Phase 5's "
-        f"reader and phase 7c's writer both walk the tree this way."
+        f"{name} does not survive a generic to_dict/from_dict walk. The GNDS "
+        f"reader and writer both walk the tree this way."
     )
 
 

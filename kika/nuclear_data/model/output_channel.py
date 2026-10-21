@@ -255,7 +255,7 @@ class Multiplicity(Component):
     def isEvaluable(self) -> bool:
         """This multiplicity is a number kika can compute at an energy.
 
-        Until phase 7b a multiplicity held a number or a curve, so "no constant
+        A multiplicity used to hold a number or a curve, so "no constant
         and no function" could be read as "kika did not decode this". §17.3 has
         three members that carry no numbers **by design** — a ``reference`` to
         another product's multiplicity (3 539 in the library), an isomeric
@@ -338,7 +338,7 @@ class DelayedNeutron:
     **``product.multiplicity`` is routinely empty, and that is not a defect.**
     ENDF MF1/455 gives the *aggregate* delayed nu-bar and the NNF decay
     constants; the per-family split lives in the MF5/455 subsection weights.
-    Until MF5 is decoded (phase 7b) the families exist with their rates and no
+    Until MF5 is decoded the families exist with their rates and no
     multiplicity, and the aggregate is held by the ``multiplicitySum`` that
     §21 provides for exactly this. An invented equal split would look like data.
     """

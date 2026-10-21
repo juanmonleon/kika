@@ -1,4 +1,4 @@
-"""Full R3 material domains, sum links, styles and atomic publication."""
+"""Full material domains, sum links, styles and atomic publication."""
 from copy import deepcopy
 import numpy as np
 import pytest

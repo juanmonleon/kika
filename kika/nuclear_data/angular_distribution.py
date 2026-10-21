@@ -101,7 +101,7 @@ class AngularDistribution:
     def from_endf(cls, mf4mt: "MF4MT") -> "AngularDistribution":
         """Create from an ENDF ``MF4MT`` (any subclass).
 
-        **Phase 3d: this reads the file through the GNDS model.** The section is
+        **This reads the file through the GNDS model.** The section is
         decoded into an ``angularTwoBody`` (or ``isotropic2d``) and projected
         back into the same eleven fields. The fields, their order and their
         defaults are unchanged; ``test_flat_class_surface.py`` is the proof.
@@ -142,7 +142,7 @@ class AngularDistribution:
         """The fallback for an LTT the decoder refuses, kept from the old body.
 
         It produces an object with the energies and nothing else, which is what
-        this class did for any unrecognised subclass before phase 3d. Reached
+        this class did for any unrecognised subclass before the model. Reached
         only for an LTT outside 0-3; the decoder reports it.
         """
         za = int(round(float(mf4mt.zaid))) if mf4mt.zaid is not None else 0
@@ -166,7 +166,7 @@ class AngularDistribution:
 
     @classmethod
     def _from_endf_pre_3d(cls, mf4mt: "MF4MT") -> "AngularDistribution":
-        """The pre-phase-3d body, kept so the two can be compared directly.
+        """The body from before the model, kept so the two can be compared directly.
 
         Not dead code: ``test_facade_reproduces_the_old_bodies.py`` asserts that
         this and :meth:`from_endf` agree field for field on every MF4 section of
@@ -815,7 +815,7 @@ class AngularDistribution:
     def _legendre_rows(self, count: int) -> List[List[float]]:
         """``[a_1 .. a_NL]`` per energy, with NL as the evaluation declared it.
 
-        **This is the D2 fix.** ``coefficients`` is a dense rectangle padded to
+        **This is the trailing-zero fix.** ``coefficients`` is a dense rectangle padded to
         the section's highest order, so the old body rebuilt each row and then
         trimmed trailing zeros — which cannot distinguish padding this class
         added from a zero the evaluator wrote. ``metadata['legendre_orders']``
@@ -854,7 +854,7 @@ class AngularDistribution:
         the flat fields are the source of truth for the flat API, so an object
         whose ``coefficients`` a caller has edited must write out the edit. A
         stashed model would silently ignore it, which would be a worse defect
-        than the one phase 3d is fixing here.
+        than the one the model fixes here.
 
         What it does take from ``from_endf`` is the two ``metadata`` keys the
         fields cannot hold — ``nm`` and ``legendre_orders``. With them, an LTT=3

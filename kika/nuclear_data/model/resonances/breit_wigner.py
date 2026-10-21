@@ -72,7 +72,7 @@ class SpinGroup:
     """Resonances sharing an orbital angular momentum ``L``.
 
     ENDF calls this an l-block. ``scatteringRadius`` is the l-dependent radius
-    that phase 1 found MF2/151 was dropping entirely — on the committed Fe-56
+    that MF2/151 used to drop entirely — on the committed Fe-56
     slice, keeping it moved elastic by a median 2% and up to 42% locally.
     """
 

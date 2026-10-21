@@ -1,4 +1,4 @@
-"""Phase 10, step 2: the inelastic final-state and level-scheme grammars.
+"""The inelastic final-state and level-scheme grammars.
 
 The counterpart of :mod:`kika.g4ndl.parse` for ``Inelastic/``, with the same
 contract: each parser consumes a :class:`~kika.g4ndl.tokens.TokenStream` to its

@@ -8,7 +8,7 @@ exception, but a sentence in a markdown file is not what stops a future agent or
 a future ``ruff --fix`` from "correcting" the spelling.
 
 What stops it is this file. The consequence of a rename is not cosmetic: the
-phase 5 GNDS reader resolves nodes by introspection on these exact names, so a
+GNDS reader resolves nodes by introspection on these exact names, so a
 tidied attribute silently breaks reading every file that uses it.
 
 There is no linter to configure — no ruff, flake8 or black config anywhere in
@@ -156,7 +156,7 @@ def _lookup(name: str) -> type:
 
 @pytest.mark.parametrize("clsName", sorted(GNDS_NODES))
 def test_every_declared_attribute_exists(clsName):
-    """A rename shows up here rather than in a phase 5 reader that stops working."""
+    """A rename shows up here rather than in a GNDS reader that stops working."""
     cls = _lookup(clsName)
     missing = [a for a in GNDS_NODES[clsName] if not hasattr(cls, a) and a not in _fieldNames(cls)]
     assert not missing, (

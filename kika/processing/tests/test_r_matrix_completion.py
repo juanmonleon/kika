@@ -1,4 +1,4 @@
-"""Independent gates for the remaining R5 capabilities."""
+"""Independent gates for the remaining R-matrix capabilities."""
 from copy import deepcopy
 import numpy as np
 import pytest

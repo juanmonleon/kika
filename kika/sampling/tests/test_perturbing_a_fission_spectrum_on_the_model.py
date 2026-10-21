@@ -1,4 +1,4 @@
-"""M6: the fission spectrum perturbed on the model, and the gate that says so.
+"""The fission spectrum perturbed on the model, and the gate that says so.
 
 Three of kika's four covariance files could already be perturbed through the
 model — ``applyFactors`` for MF33 and MF31, ``applyLegendreFactors`` for MF34 —
@@ -181,7 +181,7 @@ def test_a_multi_region_child_will_not_be_flattened_silently():
 def test_the_model_applier_reproduces_the_format_applier(name):
     """Point for point on real drawn deltas, tables and diagnostics alike.
 
-    This is the acceptance of M6. ``perturb_pfns_partial`` is what the shipped
+    This is the acceptance of the model applier. ``perturb_pfns_partial`` is what the shipped
     PFNS driver runs and it is untouched; the model applier is written beside
     it, and the two are handed the same sample of the same covariance. Equality
     here is what makes them one operation with two spellings — and it covers the

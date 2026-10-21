@@ -144,9 +144,9 @@ class TabulatedWidths:
     #: ``g_J = (2J+1) / (2(2I+1))`` factor the resolved region does, so a
     #: reconstructor needs I here as much as there. The resolved formalisms
     #: (:class:`~.breit_wigner.BreitWigner`, :class:`~.r_matrix.RMatrix`) have
-    #: carried this field since 3b; the unresolved one did not, which made the
+    #: carried this field from the start; the unresolved one did not, which made the
     #: two halves of the same calculation ask for the same number in different
-    #: ways. Added in phase 4.
+    #: ways. Added later.
     PoPs: Optional[object] = None
     #: The region's own radius policy, the same
     #: :class:`~.radius_policy.RadiusPolicy` the resolved formalisms carry.

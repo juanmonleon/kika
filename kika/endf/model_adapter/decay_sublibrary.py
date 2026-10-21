@@ -688,7 +688,7 @@ def _encodeRelaxation(pops: PoPs, mat: Optional[int], report: ConversionReport):
 
 def encodeDecaySublibrary(pops: PoPs, mat: Optional[int] = None,
                           report: Optional[ConversionReport] = None):
-    """The name E7b gave :func:`encodeSublibrary`."""
+    """An earlier name for :func:`encodeSublibrary`."""
     return encodeSublibrary(pops, mat, report)
 
 
@@ -738,7 +738,7 @@ def _synthesiseProvenance(pops: PoPs, report: ConversionReport):
 
 def writeDecayTape(pops: PoPs, path, mat: Optional[int] = None, tapeId: Optional[str] = None,
                    report: Optional[ConversionReport] = None) -> ConversionReport:
-    """The name E7b gave :func:`writeSublibraryTape`."""
+    """An earlier name for :func:`writeSublibraryTape`."""
     return writeSublibraryTape(pops, path, mat, tapeId, report)
 
 

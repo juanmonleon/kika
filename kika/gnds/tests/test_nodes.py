@@ -203,7 +203,7 @@ def test_the_writer_emits_the_tag_the_key_claims(family):
 # ---------------------------------------------------------------------------
 
 def test_the_known_defects_are_pinned_by_count():
-    """Four on the day the table landed, **zero** since 2026-08-24. D19 went
+    """Four on the day the table landed, **zero** since 2026-08-24. One went
     with the isotropic2d fix, and the two R-matrix flags and the nested PoPs
     went with the commit after that. Each repair lowered the number and this
     test is what noticed — the same shape as
@@ -273,13 +273,13 @@ def test_every_unimplemented_distribution_is_placed_at_a_choice_point():
     ``recoil`` belongs to ``angularTwoBody`` (``gnds.xsd:1670``), where it is
     already read and written; so does ``NBodyPhaseSpace``, which
     :data:`nodes.NOT_A_DISTRIBUTION_FORM` also places at its real home, an §18.3
-    *energy* form (``gnds.xsd:1703``). Both read like laws phase 7b owed, and
+    *energy* form (``gnds.xsd:1703``). Both read like laws still to be read, and
     treating them as such would have meant adding a ``distributionForm`` entry
     the schema does not admit — the same class of mistake as the ``isotropic2d``
     the writer used to emit under ``distribution``.
 
     That the dict is down to a misplaced name and holds **no unimplemented §18
-    law at all** is what phase 7b finishing looks like from this side.
+    law at all** is what finishing the §18 laws looks like from this side.
 
     So each name is either an entry here or explicitly placed elsewhere, and
     this is what stops a third state — named in the model, absent from both.
@@ -329,12 +329,12 @@ def test_the_misplaced_names_stay_misplaced_after_they_are_implemented():
 
 
 def test_registering_an_undeclared_node_fails_at_import_time():
-    """The other direction, and the one that made phase 7b safe: a reader for
+    """The other direction, and the one that made adding the §18 laws safe: a reader for
     a §18 law that nobody declared cannot be added quietly.
 
-    The guinea pig was ``branching3d`` until phase 7b implemented it, and
+    The guinea pig was ``branching3d`` until it was implemented, and
     ``coherentPhotonScattering`` until the photo-atomic sublibrary gave it a
-    reader (the photon plan's F2b), which is the good reason for a victim to
+    reader, which is the good reason for a victim to
     expire. ``CoulombPlusNuclearElastic`` takes over: a real §18.1.1 member
     (``gnds.xsd:1657``) that the census counted **zero times** in the 558
     distributed neutron evaluations. A node with no occurrences is not going to

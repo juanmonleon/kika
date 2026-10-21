@@ -12,9 +12,9 @@ pydantic response models:
 
 The physics of all three is already covered elsewhere. What is *not* covered is
 their **shape** — arity, container type, the NaN convention, which errors are
-``ValueError``. That is what phase 3/4 will move, and what the app depends on.
+``ValueError``. That is what a rewrite would move, and what the app depends on.
 
-**Deviation from the phase 3 plan, deliberate.** The plan called for a fourth
+**Deviation from the plan, deliberate.** The plan called for a fourth
 committed fixture, a real ``reconr`` slice, so that ``read_pendf_mf3_sections``
 could be pinned without NJOY. It is not needed:
 ``read_pendf_mf3_sections`` is ``read_endf(path, mf_numbers=[3])`` plus a dict
@@ -162,7 +162,7 @@ def test_groups_outside_the_pointwise_range_are_nan_not_zero(pointwise):
     ],
 )
 def test_every_rejection_is_a_valueerror(pointwise, kwargs, match):
-    """All eight guards, so a phase 4 rewrite cannot quietly downgrade one.
+    """All eight guards, so a rewrite cannot quietly downgrade one.
 
     The plan for this file said "the three ``ValueError`` paths"; there are
     eight. Counting them is the point — an exception type that changes to

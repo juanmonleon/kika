@@ -1,6 +1,6 @@
 """Fe-56's cross sections, out of GNDS and out of ENDF-6, compared.
 
-Phase 5's acceptance test for the ``reactionSuite`` reader, and the counterpart
+The acceptance test for the ``reactionSuite`` reader, and the counterpart
 of :mod:`kika.gnds.tests.test_covariance_oracle`: the same evaluation in two
 encodings, read by two paths that share no parser and no unpacking, and they
 agree or they do not.
@@ -77,7 +77,7 @@ def _gndsPointwise(form):
     resonance-region entries *are* the background — an evaluation with LRU=1
     adds MF3 to the reconstructed resonances. So concatenating the regions in
     domain order is what makes the two encodings comparable, and it is exactly
-    what phase 5's model was reshaped to allow: with the old single-function
+    what the model was reshaped to allow: with the old single-function
     background one of the two pieces would simply not be here.
     """
     if isinstance(form, ResonancesWithBackground):
@@ -212,7 +212,7 @@ def test_the_full_evaluation_reads_with_a_report_that_names_every_gap(fromGnds):
     # skipped" is answerable without reading the reader.
     assert all(entry.startswith("/reactionSuite") for entry in report.unsupported)
     laws = {entry.rsplit("/", 1)[-1].split(":")[0] for entry in report.unsupported}
-    # **Empty, and that is phase 7b finished.** The set is the record of how it
+    # **Empty, and that is every §18 law read.** The set is the record of how it
     # emptied: `uncorrelated` first, then `energyAngular` with the XYs3d
     # increment, then `angularEnergy` and `KalbachMann`, and last the two
     # branching nodes — read for format fidelity and deliberately not resolved

@@ -2,7 +2,7 @@
 
 ENDF-6 §8.2: an incident-neutron evaluation's MF8 says which radioactive
 nuclides a reaction produces and points at MF9/MF10 for how many. kika does not
-model activation yet (E6, deferred until someone needs it), so the section is
+model activation yet (deferred until someone needs it), so the section is
 kept as the lines it was read from and written back unchanged.
 """
 from __future__ import annotations

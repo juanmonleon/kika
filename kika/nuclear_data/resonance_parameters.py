@@ -110,7 +110,7 @@ class ResonanceParameters:
     def from_endf(cls, mf2: "MF2MT151") -> List[Union["ResonanceParameters", "UnresolvedResonanceParameters"]]:
         """Create ``ResonanceParameters`` from an ENDF ``MF2MT151``.
 
-        **Phase 3d: this reads the file through the GNDS model.** The section is
+        **This reads the file through the GNDS model.** The section is
         decoded once, into ``BreitWigner``/``RMatrix``/``TabulatedWidths`` nodes
         by formalism, and ``model.interop`` projects each region back into the
         fields this class has always had. Same fields, same order, same

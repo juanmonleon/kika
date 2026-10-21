@@ -1,4 +1,4 @@
-"""Phase 5 P3: §25 ``covarianceSuite``.
+"""§25 ``covarianceSuite``.
 
 Two kinds of test, and both are needed. The hand-built ``array`` cases pin the
 three storage modes against matrices small enough to write out by hand — that is
@@ -245,7 +245,7 @@ def test_the_parameter_covariance_matrices_are_square(gnds_covariance_fixture):
 def test_la139_carries_the_mf34_legendre_slice(gnds_data_dir):
     """``slices/slice[@domainValue]`` — MF34, and the reason this fixture exists.
 
-    ``DataLink.forLegendreOrder`` was written in phase 3b against the
+    ``DataLink.forLegendreOrder`` was written against the
     specification; this is the first time it meets a published file. A
     covariance about Legendre order *l* is the angular distribution **sliced**
     at that order, not a separate quantity.

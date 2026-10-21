@@ -224,7 +224,7 @@ def load_mf33_covariance(
 
 
 # ---------------------------------------------------------------------------
-# The model-side source (M1)
+# The model-side source
 # ---------------------------------------------------------------------------
 
 def relativiseAbsoluteSections(suite, binCentral, unionGrid, *, mf: int = 33,

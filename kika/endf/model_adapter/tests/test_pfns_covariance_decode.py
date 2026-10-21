@@ -173,7 +173,7 @@ def test_report_declares_the_mf5_section_it_did_not_model(micro_pfns_tape):
 
 
 def test_the_redirect_no_longer_claims_mf5_is_a_covariance(micro_pfns_tape):
-    """The bug this phase exists to fix, pinned.
+    """The bug fixed here, pinned.
 
     ``decode.py`` used to redirect every supported MF outside {1,2,3,4} to
     ``decodeCovarianceSuite``. MF5 is the first supported MF that is neither

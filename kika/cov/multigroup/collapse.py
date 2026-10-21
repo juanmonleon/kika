@@ -206,7 +206,7 @@ def legendre_source_from_model(angular, max_order: int,
         ``P(mu)`` onto Legendre orders is a Gauss quadrature with ENDF's angular
         interpolation laws in it: a second implementation of
         ``MF4MTTabulated.extract_legendre_coefficients``, validated against the
-        first, which is the trade P1b was withdrawn rather than make. If the
+        first, which is a trade deliberately not made. If the
         model path ever needs it, the quadrature moves down out of
         ``kika.endf.utils`` and both callers share one copy.
     """

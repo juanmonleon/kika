@@ -1,4 +1,4 @@
-"""R8 batching preserves physics, meshes, failure budgets and publication probes."""
+"""Batching preserves physics, meshes, failure budgets and publication probes."""
 from dataclasses import replace
 import numpy as np
 import pytest

@@ -55,7 +55,7 @@ def test_the_moments_shift_by_exactly_the_deltas_and_nothing_else_moves():
     """Project ``f'`` and ``f``: the named orders differ by delta, others by ~0.
 
     Exact up to the lin-lin interpolation of the correction between nodes,
-    which is what D3 measures; at 401 nodes it is below 1e-5.
+    which is what the mu-grid density sets; at 401 nodes it is below 1e-5.
     """
     mu = np.cos(np.linspace(np.pi, 0.0, 401))
     p = _pdf([1.0, 0.4, 0.2, 0.1], mu)
@@ -123,7 +123,7 @@ def test_a_histogram_table_is_projected_exactly():
 
 
 # ----------------------------------------------------------------------
-# T2: the gate against the Legendre applier
+# The gate against the Legendre applier
 # ----------------------------------------------------------------------
 #
 # Fabricate an LTT=2 distribution whose Legendre truth is known -- the Legendre
@@ -208,7 +208,7 @@ def test_the_two_appliers_agree_to_the_projection_floor(fe56):
 
 def test_a_coarse_mu_grid_raises_the_projection_floor(fe56):
     """At 21 nodes the gate still holds against its own floor, but the floor is
-    0.13 in a_l and the integral moves 1.7e-3 -- the size that D3 (refining mu)
+    0.13 in a_l and the integral moves 1.7e-3 -- the size that refining mu
     has to answer, measured rather than argued."""
     worst, bound, floor, info = _gate(fe56, 21)
     assert worst <= bound
@@ -217,7 +217,7 @@ def test_a_coarse_mu_grid_raises_the_projection_floor(fe56):
 
 
 # ----------------------------------------------------------------------
-# T3: the incident-energy dimension
+# The incident-energy dimension
 # ----------------------------------------------------------------------
 
 def _threeTables():
@@ -294,7 +294,7 @@ def test_a_repair_callback_sees_every_negative_node_and_its_answer_is_kept():
 
 
 # ----------------------------------------------------------------------
-# T9: a covariance in the other frame (MF34's LCT) on a table
+# A covariance in the other frame (MF34's LCT) on a table
 # ----------------------------------------------------------------------
 
 from kika._legendre_frames import (FrameConversion, correctionBasis,  # noqa: E402
@@ -358,14 +358,14 @@ def test_a_single_panel_table_is_projected_to_rounding_in_another_frame():
 
 @pytest.mark.parametrize("awr", [FE56_AWR, 11.9])
 def test_the_two_appliers_agree_across_frames_to_the_projection_floor(fe56, awr):
-    """The T2 gate with a LAB covariance on the CM distribution.
+    """The Legendre-applier gate with a LAB covariance on the CM distribution.
 
     The Fe-56 coefficients are tabulated on 401 nodes; both appliers get the
     same factors and the same conversion. They may differ by the tabulation's
     floor on the LAB moments, carried back by a Jacobian of at most
     (1+γ)/(1-γ)², and by nothing the frame change adds. Measured 2026-10-10:
     3.0e-5 against a bound of 4.4e-4 at A = 55.5 (4.0e-5 / 5.4e-4 at A = 11.9),
-    the same as T2 without a frame change; the LAB factors applied in CM miss
+    the same as the gate without a frame change; the LAB factors applied in CM miss
     by 1.7e-2 (9.0e-2).
     """
     legendre, factors, edges = fe56

@@ -11,12 +11,12 @@ slice of it:
 **Byte-identical.** MF3/MT1, MF3/MT2 and MF3/MT102 come back exactly as
 written, all 15 127 lines. That is the gate, and it is asserted exactly.
 
-**What this file found, and what is left.** Phase 0 recorded five defects:
+**What this file found, and what is left.** It recorded five defects:
 zero floats written as integers (in every SEND record and MF1/451's STA field),
 the MF2/151 L=1 scattering radius APL dropped, MF4/MT2 re-emitting one AWR where
 the source carries two, and ``update_mf1_directory`` writing its own line number
 where ENDF-6 requires 99999 in the MF1/451 SEND record. All but the AWR one were
-fixed in the phase-1 burn-down and are now asserted as ordinary tests. The AWR
+fixed in a defect burn-down and are now asserted as ordinary tests. The AWR
 case stays pinned by a test written the way it *should* pass, marked
 ``xfail(strict=True)``: when it is fixed the test starts passing, the strict
 marker turns that into a failure, and whoever fixed it is forced to come here
@@ -272,15 +272,15 @@ def test_mf2_keeps_the_l_dependent_scattering_radius(micro_tape):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Deferred to phase 3 by decision, 2026-08-04, after the phase-1 defect "
+        "Deferred by decision, 2026-08-04, after the defect "
         "burn-down cleared the other eight pins. JEFF-4.0 Fe-56 carries two "
         "slightly different AWR values on consecutive MF4/MT2 records "
         "(5.545443+1 then 5.545440+1). kika parses one and re-emits it on both, "
         "so the rewritten tape is self-consistent but is not the source byte "
         "for byte. Preserving the source's own inconsistency means carrying AWR "
         "per record, which is a model change, not a formatting fix — it belongs "
-        "with the GNDS hierarchy in phase 3, where AWR lives on the model "
-        "rather than on each ENDF record. Left pinned so that phase 3 has to "
+        "with the GNDS hierarchy, where AWR lives on the model "
+        "rather than on each ENDF record. Left pinned so that the model has to "
         "decide rather than drift."
     ),
 )

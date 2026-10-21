@@ -183,7 +183,7 @@ def read_mf34_split(
         the blocks are going to be folded; omit only for inspection.
     grid_rtol : float
         Tolerance for the grid comparisons, and the number is measured rather
-        than chosen for comfort (Phase 0.7, run 86's shipped ``_mg.endf``).
+        than chosen for comfort (on a shipped ``_mg.endf``).
 
         Bit-exact is *not* achievable across MF sections: only 1126 of 1739 of
         our fine edges come back bit-identical, because the parser evaluates

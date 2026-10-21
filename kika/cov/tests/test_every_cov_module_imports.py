@@ -8,7 +8,7 @@ into ``kika/plotting/``. The shims were pointed at ``kika.cov.legacy.*`` — a
 package that was never committed, then or since. The multigroup sibling of that
 same commit *was* created (``kika/cov/multigroup/legacy_mg_plotting.py``, 1550
 lines), which is why the breakage looked like a deliberate pattern and not an
-omission. That sibling is gone too: phase 7 deleted it and its shim in
+omission. That sibling is gone too: it and its shim were deleted in
 September 2026, once the four plotting methods on
 :class:`MultigroupLegendreCovariance` were confirmed to reach
 ``kika.plotting.multigroup_covariance`` directly and nothing else imported it.

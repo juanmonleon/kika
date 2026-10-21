@@ -1,4 +1,4 @@
-"""Phase 5 P1: the format gate, and href resolution against real files.
+"""The format gate, and href resolution against real files.
 
 The interesting test in this module is
 :func:`test_every_href_in_the_paired_fixture_resolves`. Resolution is the part

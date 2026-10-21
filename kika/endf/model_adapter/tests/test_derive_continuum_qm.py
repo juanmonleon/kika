@@ -5,7 +5,7 @@ level of the series states the same one, and the continuum takes it. When the
 levels agree that is the channel's QM exactly, a note; when they do not (JEFF-4.0
 Fe-56: MT649 400 eV from MT601), taking the lowest is a choice, an approximation
 -- which the PENDF publication refuses, so the distinction decides whether a
-PENDF can be written from a GNDS file (M6).
+PENDF can be written from a GNDS file.
 """
 from types import SimpleNamespace as NS
 

@@ -1,9 +1,9 @@
-"""G6: the covariance sections' ENDF header -- MAT, ZA, AWR and MF34's LTT.
+"""The covariance sections' ENDF header -- MAT, ZA, AWR and MF34's LTT.
 
 §25.2.2 identifies a covariance by the ``href`` of what it is about, not by a
 material header, so a covariance read from GNDS has no ZA/AWR/MAT and the
 MF31/33/34/35 encoders refused it ("the section header would be invented").
-They are not invented here: they are the suite's own, derived in G1, as every
+They are not invented here: they are the suite's own, derived by ``derive/suite.py``, as every
 other section of the tape has them. MF34's LTT is 1, the only value ENDF-6
 admits there (Legendre-coefficient covariances, §34.2).
 

@@ -93,13 +93,13 @@ DECLARED_ELSEWHERE = {
         "the model implements it, but no neutron evaluation in "
         "ENDF/B-VIII.1-GNDS contains one, so reading it would be untested code"
     ),
-    # `discreteGamma` and `primaryGamma` were here until phase 7b modelled
-    # them. They are not functionals and never were — they reach the model
+    # `discreteGamma` and `primaryGamma` were here until the model
+    # implemented them. They are not functionals and never were — they reach the model
     # through `kika.gnds.distributions`, at the `uncorrelated/energy` choice
     # point where the schema puts them (gnds.xsd:1697), and a functional reader
     # should not be the thing that has an opinion about them.
     #
-    # `branching1d` left for the same reason when phase 7b modelled it: it is a
+    # `branching1d` left for the same reason when the model implemented it: it is a
     # §17.3 multiplicity form (gnds.xsd:1633) whose whole content is one
     # attribute, read by `kika.gnds.decode.readMultiplicity`. Three entries have
     # now been removed from this dict by being implemented and none by being
@@ -623,8 +623,8 @@ def _unsupported(tag: str, kind: str) -> UnsupportedNode:
     from kika.nuclear_data.model.functions.higher import NOT_IMPLEMENTED_NODES
 
     if tag in NOT_IMPLEMENTED_NODES:
-        # `plannedFor` and not a phase named here: it used to say "phase 7b"
-        # for every entry, which was true while XYs3d was the entry and is
+        # `plannedFor` and not a fixed sentence here: it used to say "not yet
+        # implemented" for every entry, which was true while XYs3d was the entry and is
         # false for regions3d, whose reason is that no phase can fill it.
         return UnsupportedNode(
             tag,

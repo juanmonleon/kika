@@ -134,7 +134,7 @@ def test_the_encoded_section_is_byte_identical(mf3, mt):
 def test_the_pairs_come_from_the_regions_and_not_from_arithmetic(mf3):
     """NBT is a consequence of the region lengths, so it cannot drift from NP.
 
-    The defect D28 fixed was exactly this pair disagreeing. The format applier
+    A past defect was exactly this pair disagreeing. The format applier
     keeps them in step by recomputing NBT by hand; here there is nothing to
     recompute, and this asserts the property that makes that true.
     """

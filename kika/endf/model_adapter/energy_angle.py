@@ -486,7 +486,7 @@ def _distributionOf(product, index: int, mt: int, frame: Frame,
         # Isotropic in the centre of mass, stated by the LAW number alone. The
         # same node MF4's LTT=0 produces, and it goes inside an angularTwoBody
         # rather than bare: §18.1.1 admits `isotropic2d` only under
-        # `angularTwoBody`, which is the defect `gnds` commit 2 of phase 7b-0
+        # `angularTwoBody`, the same defect already
         # fixed on the MF4 side.
         return (AngularTwoBody(angular=Isotropic2d(productFrame=frame),
                                productFrame=frame),

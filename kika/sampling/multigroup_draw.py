@@ -393,7 +393,7 @@ def apply_legacy_autofix(
     dropping it here would be a behaviour change for a live consumer riding on
     a migration. Retiring it is its own change, in that repository first.
 
-    ⚠ **Under D11 this measures nothing on an incomplete covariance.** The
+    ⚠ **With NaN cross blocks this measures nothing on an incomplete covariance.** The
     carrier states an unstated cross block as NaN; every eigenvalue solver
     fails on such a matrix and the fallback returns ``0.0``, which clears any
     negative ``accept_tol``. On the full Fe-56 tape that is 85.7 % of the

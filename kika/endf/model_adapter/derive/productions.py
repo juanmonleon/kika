@@ -1,4 +1,4 @@
-"""E6: the ENDF bookkeeping of a ``production``, derived from the model.
+"""The ENDF bookkeeping of a ``production``, derived from the model.
 
 Gives a production read from GNDS -- or built by hand -- exactly the provenance
 :func:`~kika.endf.model_adapter.productions.attachProductions` gives one read

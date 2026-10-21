@@ -81,7 +81,7 @@ def _legendre(reaction):
 
 
 def _photonsOf(channel):
-    """Every photon product of *channel* and of the decay channels inside it (E5b)."""
+    """Every photon product of *channel* and of the decay channels inside it."""
     out = []
     for product in channel.products:
         if product.pid == "photon":
@@ -148,7 +148,7 @@ def _grid(gridded, index):
 
 
 def _tsl(reactionSuite):
-    """Each TSL reaction's form, in plain lists (kika's E4 decode builds the same)."""
+    """Each TSL reaction's form, in plain lists (kika's decode builds the same)."""
     out = []
     for reaction in reactionSuite.reactions:
         form = reaction.doubleDifferentialCrossSection.evaluated
@@ -261,7 +261,7 @@ def main(tapeText, name):
         os.rmdir(folder)
     reactionSuite = translated["reactionSuite"]
     if str(reactionSuite.interaction) == "thermalNeutronScatteringLaw":
-        # FUDGE's own GNDS of the tape goes back too, for kika to read (E4b).
+        # FUDGE's own GNDS of the tape goes back too, for kika to read.
         gnds = "\n".join(reactionSuite.toXML_strList())
         sys.stdout.write("\n" + JSON_MARKER + json.dumps({"tsl": _tsl(reactionSuite),
                                                           "gnds": gnds}) + "\n")

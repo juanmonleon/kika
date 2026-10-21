@@ -7,9 +7,9 @@ layer for exactly the case it exists for.
 
 **The gate is equality against the file**, from the first commit, because there
 is no older implementation to be measured against and no defect to inherit.
-That is the criterion phase 3 arrived at the hard way: comparing a new path
+That is the criterion the model arrived at the hard way: comparing a new path
 against the code it replaces is blind whenever both are wrong the same way,
-which is how the ZA truncation survived (D1).
+which is how the ZA truncation survived.
 
 **What made it possible was not the encoder.** ``MF1MT451.__str__`` already
 reproduced the section; what was missing was that ``NuclideInfo`` threw away
@@ -94,7 +94,7 @@ def test_an_edited_field_reaches_the_file(section):
     """The flat fields are the source of truth, not a stashed model.
 
     If ``to_endf`` re-encoded a model kept from ``from_endf``, this edit would
-    be silently dropped — the failure mode D2 records for ``AngularDistribution``
+    be silently dropped — the failure mode recorded for ``AngularDistribution``
     and the reason that method builds from the fields too.
     """
     info = NuclideInfo.from_endf(section)

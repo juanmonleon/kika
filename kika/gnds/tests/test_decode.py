@@ -65,7 +65,7 @@ def test_the_report_is_hung_on_the_suite_as_well_as_returned(h2):
     """`suite.report` is how a caller who dropped the tuple still finds out."""
     suite, report = h2
     assert suite.report is report
-    # Unclean from `losses`, never from `unsupported`: since phase 7b closed,
+    # Unclean from `losses`, never from `unsupported`: since every §18 law is read,
     # H-2's unsupported list is **empty** and what is left are the four known
     # drops — applicationData, the uncertainty back-links, PoPs aliases and
     # the documentation block. `isClean` covers both, which is why it is
@@ -305,7 +305,7 @@ def test_a_branching_multiplicity_reads_as_a_branching_and_not_as_nothing(
         s36_gnds):
     """§17.3's ``branching1d``: five of them, and none of them empty.
 
-    Until phase 7b this and its two siblings were reported and **dropped**, so
+    Until the model implemented them, this and its two siblings were reported and **dropped**, so
     the model could not tell "the evaluator said the multiplicity is a branching
     ratio" from "kika failed to read this" — both were an empty
     :class:`Multiplicity`. 14 032 branchings across the distribution took that
@@ -455,7 +455,7 @@ def test_an_unspecified_distribution_is_read_as_a_statement(h2):
 
 
 def test_the_three_uncorrelated_laws_are_read_whole(h2):
-    """Phase 7b's first landing, on the fixture that used to report all three.
+    """The first §18 law read, on the fixture that used to report all three.
 
     H-2's three ``uncorrelated`` distributions were the subject of
     ``test_an_unimplemented_law_is_named_with_its_xpath`` until the law was
@@ -492,7 +492,7 @@ def test_the_three_uncorrelated_laws_are_read_whole(h2):
 
 
 def test_an_unread_energy_form_is_named_with_its_xpath(h2_gnds, tmp_path):
-    """The naming doctrine, on a subject that survives phase 7b.
+    """The naming doctrine, on a subject that survives every §18 law being read.
 
     Six of ``uncorrelated/energy``'s eleven choices are analytic spectra
     (``gnds.xsd:1697-1709``). kika reads them since 2026-10-08, so this plants

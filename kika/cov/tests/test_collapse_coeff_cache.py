@@ -40,7 +40,7 @@ def _means(mf4, grid, orders, cache):
     """The two halves the collapse now calls in sequence.
 
     Sampling the section and averaging the result used to be one function with
-    the cache inside it. They are separate since phase 4's P4-C2 —
+    the cache inside it. They are separate now —
     ``resolve_legendre_source`` produces a ``LegendreSource`` and
     ``compute_base_cell_means`` integrates one — so the defect this file pins
     now lives in the resolver. It is the same defect and the same key: the

@@ -421,16 +421,16 @@ def resolveMagnitudeOrder(suite, request):
     * **angular only** -- sigma is not being perturbed, so neither its variance
       nor its correlation with the shape is wanted.
     * **with MF33 for the same MT** -- MF33 states sigma's variance and the
-      L>=1 the shape, and the **cross term L0xLl is drawn with them** (J3,
-      2026-10-14): the selection comes back with ``magnitudeMts`` naming the
+      L>=1 the shape, and the **cross term L0xLl is drawn with them**
+      (2026-10-14): the selection comes back with ``magnitudeMts`` naming the
       reaction, and :func:`collectEntries` puts the L0xLl sections in the
       matrix with their L=0 side re-keyed to MF33's sigma, so sigma is one
       component and not two. L0xL0 stays out -- MF33 is sigma's variance
-      (option (a) of J2, and the only one that works on this project's own
+      (the only option that works on this project's own
       ``_a0cross`` tapes, which write L0xL0 as a null block). Where the file's
       cross blocks are null (<= :data:`NULL_MAGNITUDE_COVARIANCE`, the
       ENDF/B-VIII.x placeholders) or MF33 states no sigma for that MT, nothing
-      is added and the run is the one it was before J3, bit for bit.
+      is added and the run is the one it was before the cross term, bit for bit.
 
     Orders named explicitly are left alone, L=0 included: that is a request to
     perturb sigma from MF34, which :class:`PerturbationSet` still refuses next

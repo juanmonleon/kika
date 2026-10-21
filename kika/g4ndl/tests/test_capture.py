@@ -137,7 +137,7 @@ def test_mt102_and_what_reaches_the_model():
 
 
 def test_capture_photons_reach_the_model():
-    """D10-2: an ``FS`` body is ENDF's MF12/14/15 and reaches the model through
+    """An ``FS`` body is ENDF's MF12/14/15 and reaches the model through
     the ENDF photon adapter: one photon product per InitMean line."""
     suite = G4.read("N14")
     r = suite.findReactionByENDF_MT(102)

@@ -2,8 +2,8 @@
 
 **Why this exists.** The GNDS model rewrites ``kika.nuclear_data``
 around a GNDS-shaped model, and the façade reimplements these five classes on top
-of it. The acceptance for that step is "the façade passes the phase 0
-tests without modifying them" — but the phase 0 tests do not actually pin the
+of it. The acceptance for that step is "the façade passes the existing
+tests without modifying them" — but the existing tests do not actually pin the
 surface. ``test_annotations.py`` checks that annotations *resolve*; nothing
 anywhere checks that ``CrossSection`` still has seven fields in that order, that
 ``to_endf`` still takes keyword-only ``qm``/``qi``/``lr``, or that ``__repr__``
@@ -327,7 +327,7 @@ def test_the_flat_classes_are_still_dataclasses(cls_name):
     """Guards a silent failure mode in ``test_annotations.py``.
 
     ``test_dataclass_fields_resolve`` loops rather than parametrizes, and skips
-    anything ``dataclasses.is_dataclass`` says no to. So a phase 3d façade built
+    anything ``dataclasses.is_dataclass`` says no to. So a façade built
     as properties over a ``_model`` attribute would not turn that test red — it
     would quietly drop out of it, and the coverage would vanish with nothing to
     show for it. This is the assertion that notices.

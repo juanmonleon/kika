@@ -8,15 +8,15 @@ against the flat path:
 **Why this gate is available from the first commit.** ``NuclideInfo.to_endf``
 already passes exactly this comparison on six real
 evaluations, so the model-side encoder has a working reference and a gate that
-was proved reachable before it was written. What M2 did *not* close is the
+was proved reachable before it was written. What that did *not* close is the
 model→MF1 direction: the façade builds the section from its flat fields by
-design, so P6's "MF1 decode + encode" row was an over-claim for a day. This
+design, so claiming "MF1 decode + encode" was an over-claim. This
 closes it.
 
 **What makes it work at all** is that the decoder puts the whole 451 header into
 ``EndfProvenance`` verbatim — including the NWD comment block, which is 291 to
 701 lines across the tapes to hand and is parsed into *nothing* else. That was
-M2's real finding: the write path was never the hard part, what the read path
+the real finding: the write path was never the hard part, what the read path
 discarded was.
 """
 from __future__ import annotations

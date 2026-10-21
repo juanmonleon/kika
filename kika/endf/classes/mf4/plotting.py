@@ -142,12 +142,12 @@ def _generate_unique_labels(endf_list, labels):
 
 #: The MF34 uncertainty band, kept under its old private name.
 #:
-#: The implementation moved to :mod:`kika.plotting.covariance` in phase 4's P4.
+#: The implementation moved to :mod:`kika.plotting.covariance`.
 #: It draws a ``LegendreCovariance`` and touches no ENDF type, so it was
 #: calculation-layer code living in the format package — and
 #: ``kika/cov/multigroup/legacy_mg_plotting.py`` reached it here *through its
 #: leading underscore*, which is the import the layering ratchet was counting.
-#: That module was itself deleted in phase 7 (September 2026). The alias stays
+#: That module was itself deleted (September 2026). The alias stays
 #: so this module's own two call sites read unchanged.
 _plot_uncertainty_bands = plot_legendre_uncertainty_bands
 

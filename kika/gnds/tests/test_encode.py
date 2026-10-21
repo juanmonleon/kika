@@ -17,8 +17,8 @@ Three gates, and the third is the one that matters.
    ``<unspecified/>`` there would make the file valid by asserting, on the
    evaluator's behalf, that no distribution was given. So
    :func:`test_the_only_schema_errors_are_the_distributions_phase_7b_will_fill`
-   asserts the *count* and *kind* of the remaining errors. When phase 7b lands,
-   that test fails and is the place the change gets recorded.
+   asserts the *count* and *kind* of the remaining errors. When the last law
+   lands, that test fails and is the place the change gets recorded.
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ SCHEMA = _FUDGE_DIR / "fudge" / "gnds.xsd"
 COVARIANCE_SCHEMA = _FUDGE_DIR / "fudge" / "covariances" / "covariances.xsd"
 
 #: The committed evaluations, by conftest fixture name. Between them they carry
-#: every node the writer emits. It was three until phase 7b needed witnesses:
+#: every node the writer emits. It was three until the §18 laws needed witnesses:
 #: ``h3`` for ``uncorrelated/angular``'s ``XYs2d``, ``micro_be9`` for
 #: ``angularEnergy``, ``s36`` for ``KalbachMann``.
 FIXTURES = ("h2_gnds", "micro_fe56_gnds", "micro_ta182_gnds", "h3_gnds",
@@ -65,10 +65,10 @@ FIXTURES = ("h2_gnds", "micro_fe56_gnds", "micro_ta182_gnds", "h3_gnds",
 #: notices; the invariant test below runs on all of them and the *fact* test
 #: skips exactly these.
 #:
-#: **Empty since ``branching3d`` landed, and that is phase 7b closing.** It held
+#: **Empty since ``branching3d`` landed, the last §18 law to be read.** It held
 #: ``s36`` and its five of them, which was the last §18 node kika could not
 #: read. Both tests now run on every committed fixture. The dict is kept rather
-#: than deleted for the reason it was introduced: the next phase that ships a
+#: than deleted for the reason it was introduced: the next change that ships a
 #: fixture ahead of its reader should declare it here instead of quietly leaving
 #: the file out of the parametrisation.
 INCOMPLETE_FIXTURES: dict = {}
@@ -473,7 +473,7 @@ def test_a_threshold_keeps_its_domain_through_a_round_trip(evaluation,
 
 def test_every_committed_gnds_fixture_now_validates_completely(
         completeEvaluation, tmp_path):
-    """Phase 7b's acceptance gate, and the number it moves.
+    """The acceptance gate of the §18 readers, and the number it moves.
 
     Before ``uncorrelated`` landed the first three fixtures wrote 3, 1 and 21
     empty ``<distribution/>`` elements — 25 schema errors that were deliberate,
@@ -499,7 +499,7 @@ def test_an_unreadable_distribution_is_left_empty_and_never_called_unspecified(
     given. Writing it where kika merely cannot read the law yet would put that
     statement in their mouth, and nothing downstream could tell the difference.
 
-    **The subject moved when phase 7b landed ``uncorrelated``.** H-2's three
+    **The subject moved when ``uncorrelated`` landed.** H-2's three
     empty ``<distribution/>`` elements were its three ``uncorrelated`` laws;
     they are read now, so the doctrine needs a law that is still unread. One is
     planted here — an ``<evaporation>`` with no ``U`` and no ``theta``, which
@@ -584,7 +584,7 @@ def test_a_suite_holding_a_mixed_can_be_written_at_all(gnds_data_dir, tmp_path):
     reader and demanded by the writer, three ways of getting one attribute
     wrong. Nothing saw it because ``h2_gnds`` is the only covariance file in the
     round trip and it holds no ``mixed``; F-19 holds four and La-139 thirteen,
-    and both have been committed since phase 5.
+    and both have been committed since the reader was written.
 
     A ``covarianceSuite`` is a root in its own right (§25.1.1), so this goes
     through ``writeCovarianceSuite`` directly rather than through ``kika.write``
@@ -637,7 +637,7 @@ def _endfSchemaErrors(suite, tmp_path, name="out.xml"):
 
 
 def test_the_endf_decoded_suites_schema_errors_are_pinned(micro_tape, tmp_path):
-    """The gate that was missing, and it is why D19 lived for a phase.
+    """The gate that was missing, and it is why a bare ``isotropic2d`` lived so long.
 
     ``test_the_only_schema_errors_are_the_distributions_phase_7b_will_fill``
     walks the three **GNDS** fixtures, and the GNDS reader never produces a bare
@@ -662,7 +662,7 @@ def test_the_endf_decoded_suites_schema_errors_are_pinned(micro_tape, tmp_path):
 
 
 def test_an_endf_decoded_suite_is_written_the_way_fudge_reads_it(micro_tape, tmp_path):
-    """D38, checked without FUDGE or ``xmllint``, so it runs everywhere.
+    """Checked without FUDGE or ``xmllint``, so it runs everywhere.
 
     Each assertion is one place FUDGE's reader stopped on a file kika wrote
     from this tape (``test_fudge_in_the_loop`` runs FUDGE itself, where it is
@@ -722,7 +722,7 @@ def test_an_edate_with_no_date_is_a_loss_that_leaves_cross_sections_clean():
     assert report.isCleanFor("cross-sections")
 
 
-#: D25. What is wrong with a ``covarianceSuite`` **written from an ENDF decode**,
+#: What is wrong with a ``covarianceSuite`` **written from an ENDF decode**,
 #: by kind. **Empty, and it was two.** Both were the same shape of hole — an
 #: attribute §25 makes required that the ENDF side has no concept of and
 #: therefore never set — and both are closed:
@@ -770,9 +770,9 @@ def _endfCovarianceSchemaErrors(tape, tmp_path):
 @pytest.mark.parametrize("fixture,expected", ENDF_COVARIANCE_TAPES)
 def test_the_endf_decoded_covariance_sibling_is_pinned(fixture, expected,
                                                        request, tmp_path):
-    """D25. The gate that was missing one level below the gate that was missing.
+    """The gate that was missing one level below the gate that was missing.
 
-    ``test_the_endf_decoded_suites_schema_errors_are_pinned`` closed D20 — "no
+    ``test_the_endf_decoded_suites_schema_errors_are_pinned`` closed the gap "no
     test validates a suite decoded from ENDF" — and it closed it for the
     ``reactionSuite`` only: it reads with ``covariances=False`` and validates
     against ``gnds.xsd``. A ``covarianceSuite`` is a **root in its own right**
@@ -781,9 +781,9 @@ def test_the_endf_decoded_covariance_sibling_is_pinned(fixture, expected,
     same hole, one level further out, surviving the fix for itself.
 
     This test landed **declaring the damage rather than repairing it**, which is
-    the opposite order from D20 and is why it went first: a number that is
+    the opposite order from that gap and is why it went first: a number that is
     pinned can be lowered by anyone, and a number nobody measures is what let
-    D19 live for a phase. It was pinned at 5 and 3 for exactly one commit; both
+    the bare ``isotropic2d`` live so long. It was pinned at 5 and 3 for exactly one commit; both
     kinds are described in :data:`ENDF_COVARIANCE_SCHEMA_GAPS`, which is now
     empty.
 
@@ -806,7 +806,7 @@ def test_the_endf_decoded_covariance_sibling_is_pinned(fixture, expected,
 
 def test_the_covariance_sibling_says_the_same_target_as_the_evaluation(
         micro_cov_tape, tmp_path):
-    """D25, half one. The pair must not disagree about what it is about.
+    """Half one. The pair must not disagree about what it is about.
 
     ENDF has no target *string* anywhere: the nuclide name is derived from
     MF1/451's ZA through PoPs, and ``decodeReactionSuite`` has already done that
@@ -863,13 +863,13 @@ def test_a_covariance_suite_decoded_without_a_target_says_so(micro_cov_tape):
 
 def test_every_endf_built_covariance_form_gets_the_label_the_schema_requires(
         micro_cov_tape, tmp_path):
-    """D25, half two — and the fix is for four forms, not for the one measured.
+    """Half two — and the fix is for four forms, not for the one measured.
 
     ``covariances.xsd`` marks ``label`` required on ``covarianceMatrix``
     (:118), ``shortRangeSelfScalingVariance`` (:126), ``mixed`` (:135) and
     ``sum`` (:143). Only the first occurs in an ENDF decode today, so only the
     first was in the error count — patching just that one would leave three
-    forms one MF away from reintroducing D25 with nothing to notice.
+    forms one MF away from reintroducing the missing label with nothing to notice.
 
     The approximation is **reported**, which is the part that matters more than
     the attribute: a reader of the written file cannot tell a style label kika
@@ -896,7 +896,7 @@ def test_every_endf_built_covariance_form_gets_the_label_the_schema_requires(
 
 
 def test_a_bare_isotropic2d_goes_where_the_schema_admits_it(micro_tape, tmp_path):
-    """D19. ``<isotropic2d>`` is not a child of ``<distribution>``.
+    """``<isotropic2d>`` is not a child of ``<distribution>``.
 
     ``kika/endf/model_adapter/angular.py:146`` returns a **bare**
     ``Isotropic2d`` for every MF4 with LTT=0, and the writer used to emit it
@@ -943,7 +943,7 @@ def test_a_bare_isotropic2d_goes_where_the_schema_admits_it(micro_tape, tmp_path
     # It used to remove one as well, because the LTT=3 section it replaces was
     # written with no `axes` at all -- and an absent required first child is
     # what xmllint reports as "this element is not expected. Expected is
-    # ( axes )", which is where the D20 note's "written after the function1ds"
+    # ( axes )", which is where the old diagnosis "written after the function1ds"
     # came from. The writer always emitted axes before the container; the model
     # simply had none to give. Now that it does, replacing that section removes
     # nothing, and the delta is zero.
@@ -1246,7 +1246,7 @@ def test_every_committed_covariance_fixture_can_be_written(
     Only ``h2_gnds``'s sibling was ever written, and it is the *simplest*
     covariance file in the library: one ``covarianceMatrix`` per section, no
     ``mixed``, no ``shortRangeSelfScalingVariance``, no parameter covariances.
-    The four fixtures here were committed in phase 5 precisely because between
+    The four fixtures here were committed with the reader precisely because between
     them they carry every §25 construct kika reads — and nothing wrote them.
 
     Both defects this catches were of the same kind: an attribute asked of a

@@ -575,9 +575,8 @@ _group("photoatomicScattering", Coverage.FULL, None,
 
 _group("doubleDifferential", Coverage.UNSUPPORTED, 'doubleDifferentialCrossSection',
        "gnds.xsd:1249 onwards. The model declares the slot and nothing "
-       "fills it; these are not §18 laws and were never in phase 7b's "
-       "scope, so no phase is scheduled and the reader says so rather "
-       "than naming one",
+       "fills it; these are not §18 laws and no reader for them is "
+       "planned, and the reader says so rather than promising one",
        """
        RutherfordScattering
        nuclearAmplitudeExpansion nuclearPlusInterference nuclearTerm

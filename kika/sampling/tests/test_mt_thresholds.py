@@ -8,9 +8,9 @@ section reaches **sampled numbers**. It reads ``.energies`` and
 each reaction's threshold. A wrong map perturbs a cross section where it is
 still zero.
 
-A planned change to one σ-source shape (**P2** below) changes what that function returns, and the
+A planned change to one σ-source shape changes what that function returns, and the
 canonical ``CrossSection`` spells the second array ``.values``. So this file
-exists to make P2 a measurement rather than a hope: it freezes the map on a
+exists to make that change a measurement rather than a hope: it freezes the map on a
 committed tape, and the values below are read off that tape rather than
 reasoned about.
 
@@ -54,7 +54,7 @@ def mf3_sections():
 
 
 def test_the_threshold_map_is_what_it_was(mf3_sections):
-    """The frozen values. This is the assertion P2 has to keep green."""
+    """The frozen values. This is the assertion that change has to keep green."""
     thresholds = derive_mt_thresholds(mf3_sections, [4, 16])
     assert set(thresholds) == set(EXPECTED)
     for mt, expected in EXPECTED.items():
@@ -94,7 +94,7 @@ def test_an_all_zero_section_yields_no_threshold():
 
 
 def test_the_map_reads_the_endf_spelling_and_would_notice_the_other_one():
-    """Why P2 has to run this file.
+    """Why that change has to run this file.
 
     ``.cross_sections`` is ``MF3MT``'s name for the array. The canonical
     ``CrossSection`` calls it ``.values`` and carries no ``.cross_sections`` at

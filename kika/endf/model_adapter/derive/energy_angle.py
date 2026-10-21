@@ -1,4 +1,4 @@
-"""G4c: MF6's bookkeeping from the model -- the ``"mf6"`` block ``encodeMF6MT`` rebuilds from.
+"""MF6's bookkeeping from the model -- the ``"mf6"`` block ``encodeMF6MT`` rebuilds from.
 
 **Which reactions.** FUDGE's ``ENDFconversionFlags`` ``MF6`` on any product of
 the reaction decide it when the file has them. Otherwise the forms do, by the
@@ -10,7 +10,7 @@ two-body sends the whole reaction to MF6.
 
 **Which products, in which order.** The reaction's own, as the model lists
 them, less what MF6 does not state: photons that MF12-15 carry (a discrete or
-primary line, a branching to a level's cascade -- E5e) and a two-body residual
+primary line, a branching to a level's cascade) and a two-body residual
 whose distribution is only the recoil and whose decay says nothing more, which
 FUDGE marks ``implicitProduct``.
 

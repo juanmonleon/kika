@@ -4,7 +4,7 @@
 the model, so it has to live on one side or the other, and the arrow points from
 format to calculation: ``kika.endf`` may import ``kika.nuclear_data``, never the
 reverse. Putting the adapter in the model would recreate exactly the inverted
-dependency phase 2 spent an increment straightening.
+dependency that was once straightened out.
 
 **Only an allow-listed module outside this package may import it**, and only
 from inside a function (``ALLOWED_IMPORTERS`` in
@@ -253,9 +253,9 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
     # The first version of this guessed `_laboratory`, `_authors`, `_eval_date`
     # and four more from the property names; the real fields are `_alab`,
     # `_auth`, `_edate`, `_ref`, `_ddate`, `_rdate`, `_zsymam`. `getattr(..., None)`
-    # meant every one silently returned "", so every reactionSuite decoded since
-    # P6 has had an empty evaluationInfo and an empty `evaluation`. Nothing
-    # caught it until P9 compared the façade against the body it replaced.
+    # meant every one silently returned "", so every reactionSuite decoded
+    # had an empty evaluationInfo and an empty `evaluation`. Nothing
+    # caught it until the façade was compared against the body it replaced.
     evaluationInfo = {
         name: getattr(mt451, name, None) or ""
         for name in ("laboratory", "authors", "eval_date", "reference",
@@ -304,7 +304,7 @@ def decodeMF1MT451(mt451, report: Optional[ConversionReport] = None):
         # The target's level energy is ELIS, 0 for a ground state. FUDGE's
         # toENDF6 reads it (`target.energy[0]`) and stops without it, so a
         # GNDS file kika writes from a tape could not be written back to ENDF
-        # by FUDGE (found by the E5c oracle, test_fudge_in_the_loop).
+        # by FUDGE (found by the FUDGE oracle, test_fudge_in_the_loop).
         # LIS too: a metastable target (ENDF/B-VIII.1 Re-186m1, LIS=4) is
         # that level, and MF1/451's LIS/ELIS/LISO are derived back from it.
         elis = getattr(mt451, "_elis", None)
@@ -1114,7 +1114,7 @@ def _flagMF6(suite, reaction, fields) -> None:
 
 
 def _addProductsToPoPs(suite, records) -> None:
-    """Every particle MF6 names, in PoPs with the mass AWP states (G4c).
+    """Every particle MF6 names, in PoPs with the mass AWP states.
 
     MF6 gives each product's mass as AWP in neutron masses, and the model has
     one place for a mass: PoPs. Without this an ENDF-decoded suite lost every
@@ -1180,7 +1180,7 @@ _MONTHS = {name: number for number, name in enumerate(
 
 def gndsDate(edate: Optional[str], report: Optional[ConversionReport] = None
              ) -> Optional[str]:
-    """MF1/451's EDATE as the ``xs:date`` GNDS requires on a style (D20b).
+    """MF1/451's EDATE as the ``xs:date`` GNDS requires on a style.
 
     ENDF writes the evaluation date as free text, by convention ``EVAL-SEP13``,
     and the libraries vary it (JEFF-4.0's Fe-56 ``AUG-2018``, ENDF/B-VIII.1's

@@ -256,7 +256,7 @@ def attachProductions(suite, endf, report: Optional[ConversionReport] = None) ->
                         f"it is absent from this reactionSuite and from a tape written from it")
     for mt, section in sorted(files.get(8, {}).items()):
         if not isinstance(section, MF8Raw):
-            # MT454/457/459 are a decay or yield sublibrary's (E7), not a
+            # MT454/457/459 are a decay or yield sublibrary's, not a
             # reaction's products; in an incident-particle tape they have no home.
             report.unsupportedNode(
                 f"MF8/MT{mt} is decay or fission-yield data in an incident-particle "

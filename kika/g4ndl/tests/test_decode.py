@@ -1,4 +1,4 @@
-"""Phase 4: the elastic records into the common model.
+"""The elastic records into the common model.
 
 Acceptance: σ and the angular distribution are reached
 the way they are for ENDF/ACE/GNDS; the partial read is reported; the model

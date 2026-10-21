@@ -100,7 +100,7 @@ def parse_mf8_yields(lines: List[str], mt: int) -> MF8FissionYields:
 
 
 def parse_mf8(lines: List[str]) -> MF:
-    """Every MT of an MF8 block: 457, 454 and 459 parsed, the rest kept (E6)."""
+    """Every MT of an MF8 block: 457, 454 and 459 parsed, the rest kept."""
     mf = MF(number=8)
     mf.num_lines = len(lines)
     groups, counts = group_lines_by_mt_with_positions(lines)

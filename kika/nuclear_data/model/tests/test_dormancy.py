@@ -1,6 +1,6 @@
 """The model must stay unreachable from a plain ``import kika``.
 
-**Why this is the load-bearing test of phase 3.** Nothing outside the library
+**Why this is the load-bearing test of the model.** Nothing outside the library
 imports ``kika.nuclear_data`` by name — 0 scripts, 0 kika-app modules, 2
 notebooks. But ``kika/__init__.py:13`` does ``from . import nuclear_data`` at
 module scope, so *every* consumer imports the package transitively on
@@ -9,14 +9,14 @@ health**: a syntax error, a circular import, a slow table build or a
 module-level ``warnings.warn`` in the new model would break the cluster
 pipeline, the desktop app and every notebook simultaneously.
 
-The whole safety argument for phases 3a-3c is "the new model is built beside the
+The whole safety argument for building the model is "the new model is built beside the
 old one and nothing imports it". That is an argument about a fact, and this is
 the test of the fact. It has to run in a **subprocess**: by the time this test
 module is collected, the model is already in ``sys.modules`` — pytest imported
 it to get here.
 
 If this ever fails, do not relax it. Find what started importing the model and
-stop it: the façades wired in by phase 3d reach the model from inside their
+stop it: the façades reach the model from inside their
 methods, never at module scope.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ def test_import_kika_does_not_import_the_model():
         leaked = sorted(m for m in sys.modules if m.startswith("kika.nuclear_data.model"))
         assert not leaked, (
             "`import kika` pulled in the GNDS model: " + ", ".join(leaked) +
-            ". The model is meant to be dormant until phase 3d; something now "
+            ". The model is meant to stay dormant on a plain import; something now "
             "imports it, and every consumer of the library pays for it."
         )
         print("dormant")

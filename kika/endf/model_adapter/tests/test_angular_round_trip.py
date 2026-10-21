@@ -1,10 +1,10 @@
 """MF4 → ``angularTwoBody`` → MF4, byte for byte, against the **file**.
 
-Everywhere else in phase 3c the gate is "the model reproduces what the flat
+Everywhere else in the adapter the gate is "the model reproduces what the flat
 class produces", because the flat class is the code being replaced. MF4 is the
 one place that gate would be *weaker* than the truth:
 ``AngularDistribution.to_endf()`` cannot reproduce an LTT=3 section, so matching
-it would have meant reproducing its losses. **Phase 3d then fixed them**, by
+it would have meant reproducing its losses. **Those losses are fixed now**, by
 routing ``from_endf`` through this decoder and keeping NM and the per-energy NL
 in ``metadata`` -- so the two xfails that used to live here are gone and the
 flat path is asserted byte-exact alongside the model.
@@ -129,11 +129,11 @@ def test_a_trailing_zero_coefficient_is_not_trimmed(mf4):
 
 
 # ---------------------------------------------------------------------------
-# The flat path used to be lossy here; phase 3d fixed it
+# The flat path used to be lossy here; it is fixed
 # ---------------------------------------------------------------------------
 
 def test_the_flat_path_now_round_trips_mf4_too(mf4):
-    """This was a strict xfail until phase 3d, and the XPASS is why it changed.
+    """This was a strict xfail until the flat class became a façade, and the XPASS is why it changed.
 
     ``AngularDistribution.to_endf()`` could not reproduce an LTT=3 section: it
     had no home for NM, and it trimmed trailing zero coefficients so NL dropped

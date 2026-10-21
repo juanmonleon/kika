@@ -4,14 +4,14 @@
 every photon section it came with, byte for byte under the stated exception of
 ``kika/endf/tests/test_photon_files.py`` (a field the source writes
 non-canonically comes back canonical, its value bit for bit). That holds for
-both halves of what this phase does:
+both halves of what the photon decoder does:
 
 * MF12 LO=1, MF14 and MF15 reach the model as ``photon`` products and are
   re-encoded **from** it — multiplicities, line energies, angular and energy
   tables — with only ENDF's own bookkeeping taken from the provenance;
-* MF13 (E5d) is divided by σ on the way in and comes back as its own bytes
+* MF13 is divided by σ on the way in and comes back as its own bytes
   while nothing changed, rebuilt by multiplication once something did;
-* MF12 LO=2 (E5c) reaches PoPs as the level's decay and comes back as its
+* MF12 LO=2 reaches PoPs as the level's decay and comes back as its
   own bytes while the cascade is unchanged (``test_photon_cascades.py``);
   an LO=2 whose transitions name a level the evaluation does not is kept
   verbatim and declared; an MF13 on an MT with no MF3 hangs on an orphan
@@ -159,7 +159,7 @@ def test_mt18_has_one_photon_with_mf6_and_mf12_both_stating_it():
 
 
 def test_the_pfns_selector_still_finds_the_neutron_on_mt18():
-    """Roadmap risk R1: with a photon carrying P(E'|E) beside it, MF35 used to
+    """With a photon carrying P(E'|E) beside it, MF35 used to
     meet two candidates and refuse every PFNS draw."""
     from kika.nuclear_data.model import Distribution, Frame
     from kika.sampling.perturbation_set import PerturbationSet
