@@ -1,4 +1,4 @@
-"""GNDS photo-atomic forms and PoPs atomic data ↔ the model (photon plan, F2b).
+"""GNDS photo-atomic forms and PoPs atomic data ↔ the model.
 
 **§14 double-differential forms.** ``coherentPhotonScattering`` (``formFactor``,
 optional ``realAnomalousFactor`` and ``imaginaryAnomalousFactor``) and

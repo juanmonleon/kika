@@ -1,4 +1,4 @@
-"""G6: MF31-35 from a covariance suite read from GNDS.
+"""MF31-35 from a covariance suite read from GNDS.
 
 NNDC's ENDF/B-VIII.1 GNDS covariance files were written by FUDGE from the ENDF
 tapes, so the tape is the reference: the sections kika writes from the GNDS are

@@ -3,7 +3,7 @@
 An MF file can turn *itself* into plot data. What it cannot know is that MF34
 is MF4's covariance and MF33 is MF3's: that pairing is a property of the tape
 as a whole, so it lived on the ``ENDF`` container, and it grew until 292 of
-that class's 413 lines were plotting orchestration. Phase 4's P3 moves it here
+that class's 413 lines were plotting orchestration. This module now holds it
 and leaves the dataclass a syntactic container: a dictionary of MF files, a
 MAT, and the derived names.
 

@@ -1,13 +1,13 @@
-"""Q1 of the PFNS migration: the model and the shipped pipeline are one operation.
+"""The model and the shipped pipeline are one operation.
 
-Q0 (``test_the_model_draws_a_fission_spectrum_as_the_legacy_does.py``) made the
+``test_the_model_draws_a_fission_spectrum_as_the_legacy_does.py`` made the
 model *draw* MF35 the way ``generate_pfns_samples`` does, on the micro-tape.
 This file carries that to the end of the chain and to full evaluations:
 
-* **Q1.1, the draw** -- bit-identical on whole tapes, and the one place the two
+* **The draw** -- bit-identical on whole tapes, and the one place the two
   are *meant* to differ: a request that also perturbs a relative quantity moves
   the spectrum up the seed ladder;
-* **Q1.2, the tape** -- for one seed, the MF5/MT18 records ``perturb_pfns_files``
+* **The tape** -- for one seed, the MF5/MT18 records ``perturb_pfns_files``
   writes and the ones ``perturbFromModel(formats=("endf-delta",))`` writes are
   the same bytes, and nothing outside MF5 moves on either side.
 
@@ -76,7 +76,7 @@ def _records(path):
 
 
 # ======================================================================
-# Q1.1 -- the draw, on whole evaluations
+# The draw, on whole evaluations
 # ======================================================================
 
 def _assertSameDraw(tape):
@@ -145,7 +145,7 @@ def test_a_mixed_request_shares_one_sobol_sequence(cf252_b81_tape):
 
 
 # ======================================================================
-# Q1.2 -- the tape
+# The tape
 # ======================================================================
 
 def _assertSameTape(tape, tmp_path, nSamples=1, gridEdgesStep=False):
@@ -357,7 +357,7 @@ def test_a_band_subset_is_where_the_two_appliers_part_on_purpose():
 
 
 # ======================================================================
-# Q1.3 -- NJOY takes the model's tape
+# NJOY takes the model's tape
 # ======================================================================
 
 @pytest.mark.slow

@@ -169,7 +169,7 @@ def test_the_inert_rows_are_pinned_and_the_cast_is_float32(carrier, blocks):
 
 
 def test_the_nan_fill_and_the_zero_fill_draw_the_same_factors(blocks):
-    """D11's fill is inert for every repair, and this holds it that way.
+    """The NaN fill is inert for every repair, and this holds it that way.
 
     The flaggers read only the diagonal and both congruences are
     ``diag(s) @ M @ diag(s)``, so an unstated cross block scales without

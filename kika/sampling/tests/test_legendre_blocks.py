@@ -107,7 +107,7 @@ def test_an_mf33_section_in_the_same_suite_is_not_swept_in(micro):
 
 
 def test_the_cross_order_block_is_placed_and_is_not_negligible(micro):
-    """D8: the cross corner is 19 % of the largest entry, not a rounding term."""
+    """The cross corner is 19 % of the largest entry, not a rounding term."""
     _endf, suite = micro
     (key, joint), = legendre_covariance_blocks(suite)
     stride = legendre_covariance_index(suite)[key]["stride"]
@@ -259,7 +259,7 @@ def test_the_cross_block_is_transposed_in_rather_than_stated_twice():
 
 
 def test_a_union_bin_below_a_section_gets_zero_not_its_first_bin():
-    """D10, the live half, and the one that did not raise.
+    """The live half of a grid-cursor defect, and the one that did not raise.
 
     A cursor starting at 0 and only moving forward gave a union bin *below* a
     section's first boundary that section's **first bin**, replicating a

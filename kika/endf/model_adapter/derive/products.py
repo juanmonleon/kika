@@ -1,4 +1,4 @@
-"""G3 (and G4b): a product's MF4 bookkeeping — LTT, LI, LCT, NM — from the model.
+"""A product's MF4 bookkeeping — LTT, LI, LCT, NM — from the model.
 
 A product decoded from ENDF carries the MF4 header in its provenance
 (``angular._headerProvenance``); one read from GNDS carries nothing, and the
@@ -8,11 +8,11 @@ rule that puts it there, stated in the model's terms:
 - **Which product.** The one MF4 is about: ``angular.mf4Ejectile(MT)`` (the
   neutron, or the light charged particle of MT600-849), on the reaction's own
   output channel -- never a decay product -- and only when the reaction is not
-  one FUDGE's ``ENDFconversionFlags`` send to MF6 (that is G4c).
+  one FUDGE's ``ENDFconversionFlags`` send to MF6 (``derive/energy_angle.py``).
 - **LTT** from the form: ``isotropic2d`` is 0 (with LI=1); an ``XYs2d`` of
   ``Legendre`` is 1, of ``XYs1d`` is 2; a ``regions2d`` whose first region is
   Legendre and second tabulated is 3. An ``uncorrelated`` contributes its
-  angular half (its energy half is MF5, G4b).
+  angular half (its energy half is MF5).
 - **LCT** from the ``productFrame``: lab 1, centre of mass 2.
 - **NM**, written by LTT=3 only, is the highest Legendre order of its Legendre
   region -- ENDF-102's definition, and what FUDGE writes
@@ -103,7 +103,7 @@ def angularHeader(form, mt: int) -> dict:
 
 
 def _sentToMF6(context: DerivationContext, mt: int) -> bool:
-    """Whether FUDGE's flags put this reaction's distributions in MF6 (G4c)."""
+    """Whether FUDGE's flags put this reaction's distributions in MF6."""
     from .reactions import reactionHref
 
     reaction = context.suite.findReactionByENDF_MT(mt)
@@ -153,7 +153,7 @@ def deriveProduct(product, path, context: DerivationContext, report):
                 if "is not an MF4 form" not in str(refused):
                     report.lost(f"{refused}; MF4 is not written for it")
     if product.pid == "n" and isinstance(form, Uncorrelated) and form.energy is not None:
-        # G4b: MF5 is always about the neutron (ENDF-6 §5).
+        # MF5 is always about the neutron (ENDF-6 §5).
         from .energy import mf5Fields
 
         fields = mf5Fields(form.energy, context, report, mt)
@@ -166,7 +166,7 @@ def deriveProduct(product, path, context: DerivationContext, report):
 
 
 def deriveDelayedNeutrons(families, path, context: DerivationContext, report):
-    """MF5/MT455's provenance on §18.4's families (G4b)."""
+    """MF5/MT455's provenance on §18.4's families."""
     from kika.nuclear_data.model import EndfProvenance
 
     from .energy import familyFields

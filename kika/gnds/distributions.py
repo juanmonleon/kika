@@ -77,7 +77,7 @@ def _declaredAndUnread(family: str) -> dict:
 UNREAD_ANGULAR_FORMS = _declaredAndUnread("uncorrelatedAngularForm")
 UNREAD_ENERGY_FORMS = _declaredAndUnread("uncorrelatedEnergyForm")
 #: §18.1.1's own choice, same derivation. It used to be one hard-coded sentence
-#: saying "phase 7b" about every law, which is false for ``angularEnergy``:
+#: saying "not implemented yet" about every law, which is false for ``angularEnergy``:
 #: nothing is queued for it, its two occurrences in the library are why it is a
 #: decision instead. The registry already carries each reason; this reads them.
 UNREAD_DISTRIBUTION_FORMS = _declaredAndUnread("distributionForm")

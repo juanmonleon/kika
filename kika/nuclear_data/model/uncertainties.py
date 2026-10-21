@@ -4,8 +4,8 @@
 uncertainty (itself a function) or a covariance, or a ``listOfCovariances``
 pointing at entries in a separate ``covarianceSuite`` (§25).
 
-Only the shape is built here. The real covariance work is phase 3b's
-``CovarianceSuite`` and phase 3c's MF33/MF34 adapters; what P4 needs is a slot
+Only the shape is built here. The real covariance work is the
+``CovarianceSuite`` and the MF33/MF34 adapters; what is needed here is a slot
 for ``XYs1d.uncertainty`` to point at, so the functional containers are
 structurally complete rather than quietly missing a child the spec allows.
 """
@@ -22,7 +22,7 @@ class Covariance:
     """A pointer to a covariance living in a ``covarianceSuite`` (§25).
 
     ``href`` is an xPath into another document, which is how §25 links a
-    reaction's data to its covariance. Resolving it is phase 5's job.
+    reaction's data to its covariance. Resolving it is the GNDS reader's job.
     """
 
     href: str
@@ -42,7 +42,7 @@ class Uncertainty:
 
     Exactly one of the three forms is expected to be set. Nothing enforces that
     yet because nothing constructs one yet; the constraint belongs with the
-    decoder that first fills it, in phase 3c.
+    decoder that first fills it.
     """
 
     standard: Optional[object] = None

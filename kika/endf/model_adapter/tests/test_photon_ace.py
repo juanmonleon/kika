@@ -3,7 +3,7 @@
 The whole chain of ``kika.njoy.templates.NJOY_INPUT_TEMPLATE`` -- RECONR,
 BROADR, HEATR, PURR, GASPR and ACER with photon production asked for (iopp=1)
 -- run on the evaluation and on ``writeEndfTape(decodeReactionSuite(...))``.
-Before E5 the second tape had no MF12-15 and the ACE no photon-production
+Before photon sections were decoded, the second tape had no MF12-15 and the ACE no photon-production
 blocks. The gate is the strongest one there is: the two ACE files are the same
 text, line for line, so GPD, MTRP, SIGP, LANDP/ANDP, LDLWP/DLWP and YP are too.
 

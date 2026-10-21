@@ -158,8 +158,8 @@ class Channel:
     columnIndex: Optional[int] = None
     #: §19.3.4 lets a channel carry its own radius. This is where ENDF's APL
     #: lands: under Reich-Moore the radius is per l-block, which is per spin
-    #: group here, so every channel of that group gets it. Phase 1 found this
-    #: value was being dropped entirely.
+    #: group here, so every channel of that group gets it. This value used to
+    #: be dropped entirely.
     #:
     #: Under LRF=7 this is ENDF's **APT**, the *true* channel radius — the one
     #: that enters the penetrability and shift factors.
@@ -261,7 +261,7 @@ class RMatrixSpinGroup:
     #: group's ``spin``, and this is empty. **ENDF's LRF=3 is not that shape**:
     #: it groups by *l*, not by J, and writes AJ on every resonance record. The
     #: first version of the decoder kept only energies and widths, which dropped
-    #: AJ silently — caught when the phase 3d façade tried to project back to
+    #: AJ silently — caught when the façade tried to project back to
     #: ``ResonanceRecord.spin`` and had nothing to read.
     spins: List[float] = field(default_factory=list)
     atomicWeightRatio: Optional[float] = None
@@ -304,7 +304,7 @@ class RMatrix:
     #: whichever range happened to be first. For the single-range tapes to hand
     #: those are the same number; for a file whose ranges declare different radii
     #: they are not, and a reconstruction reading the file-level one would use
-    #: another range's radius without saying so. Added in phase 4, additively:
+    #: another range's radius without saying so. Added later, additively:
     #: the encoder writes AP from provenance, so no round trip moves.
     #:
     #: Per-*channel* radii (ENDF's APL under LRF=3, APT/APE under LRF=7) are a

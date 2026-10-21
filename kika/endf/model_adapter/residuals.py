@@ -126,7 +126,7 @@ def _decayChannel(residualZA: int, lr: int, q: float, report, mt: int, domain):
 
     # The nucleus that is left carries multiplicity 1, as in FUDGE and NNDC's
     # files: FUDGE's toENDF6 reads a multiplicity off every product it walks
-    # and stops on one without (found by the E5c oracle).
+    # and stops on one without (found by the FUDGE oracle).
     one = _constantMultiplicity(1, domain) if domain is not None else None
     if lr == 0:
         add(pidFromZA(residualZA), one)

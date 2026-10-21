@@ -1,4 +1,4 @@
-"""Decision J9 of the E5 plan: a run that moves MF3 says the sums' photons stay put."""
+"""A run that moves MF3 says the sums' photons stay put."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -20,7 +20,7 @@ def test_a_run_that_moves_mf3_names_the_sums_whose_photons_it_leaves(n14_b81_tap
     mts = sorted(int(o.ENDF_MT) for o in suite.orphanProducts)
     assert mts, "N-14's sums carry photons"
     note = _orphanPhotonNote(suite, _index(3))
-    assert note is not None and "J9" in note and str(mts) in note
+    assert note is not None and str(mts) in note
 
 
 def test_a_run_that_does_not_touch_mf3_says_nothing(n14_b81_tape):

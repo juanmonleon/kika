@@ -1,7 +1,7 @@
 """The model assembles the same MF34 blocks the ENDF path does.
 
-``LegendreCovariance.from_covariance_suite`` is the covariance half of phase 4's
-collapse work: with it and ``legendre_source_from_model``, the multigroup
+``LegendreCovariance.from_covariance_suite`` is the covariance half of the model-driven
+collapse: with it and ``legendre_source_from_model``, the multigroup
 collapse can be driven from a ``reactionSuite`` on both sides.
 
 **The gate is agreement with ``MF34MT.to_ang_covmat``, block for block, at

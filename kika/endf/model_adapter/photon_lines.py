@@ -567,7 +567,7 @@ def _evaluated(product):
 
 
 # ---------------------------------------------------------------------------
-# From a model with no ENDF provenance (G4c): FUDGE's toENDF6 regrouping
+# From a model with no ENDF provenance: FUDGE's toENDF6 regrouping
 # ---------------------------------------------------------------------------
 
 def isLinePiece(product) -> bool:

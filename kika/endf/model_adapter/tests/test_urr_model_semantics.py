@@ -1,7 +1,7 @@
-"""URR semantics the model has to carry before R6 computes anything.
+"""URR semantics the model has to carry before anything computes from it.
 
-Each test pins a defect the corpus round trip found (workspace
-``resonance_oracle/tools/urr_roundtrip.py`` over B-VIII.1, JEFF-4.0, JENDL-5):
+Each test pins a defect the corpus round trip found (over
+B-VIII.1, JEFF-4.0, JENDL-5):
 a value that read back unchanged into ENDF but meant something else in the
 model, or was dropped on the way to GNDS.
 """
@@ -124,7 +124,7 @@ def test_trailing_blanks_after_the_last_value_are_not_read():
 
 
 # ---------------------------------------------------------------------------
-# P2: the URR's own radius policy (NAPS, NRO=1)
+# The URR's own radius policy (NAPS, NRO=1)
 # ---------------------------------------------------------------------------
 
 from dataclasses import replace
@@ -254,7 +254,7 @@ def test_a_phase_mode_table_is_the_gnds_scattering_radius():
 
 
 # ---------------------------------------------------------------------------
-# P1: ENDF's URR INT through GNDS, in the KIKA applicationData institution
+# ENDF's URR INT through GNDS, in the KIKA applicationData institution
 # ---------------------------------------------------------------------------
 
 from pathlib import Path

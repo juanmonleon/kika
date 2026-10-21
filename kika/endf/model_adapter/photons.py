@@ -608,7 +608,7 @@ def _flagPhotons(suite, channelPath, labels, production, mf: int) -> None:
     """FUDGE's flags on each photon, as its ENDF->GNDS writes them
     (``ENDF_ITYPE_0_Misc.addGammaProduct``): ``MF13`` on a photon of MF13, and
     ``ESk=`` on any photon of MF12 or MF13 whose origin level ES is not 0 -- so
-    FUDGE, and kika's own GNDS->ENDF (E5e), can give both back."""
+    FUDGE, and kika's own GNDS->ENDF, can give both back."""
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
 
     wanted = []
@@ -1099,7 +1099,7 @@ def _cascadeRows(suite, fields, mt):
         rows.append((es, float(mode.probability), gp) if fields["lg"] == 2
                     else (es, float(mode.probability)))
     if fields.get("sortDescending"):
-        # A cascade derived for a GNDS-read suite (E5e): FUDGE's order,
+        # A cascade derived for a GNDS-read suite: FUDGE's order,
         # decreasing final-level energy.
         rows.sort(key=lambda row: row[0], reverse=True)
     energy = getattr(level, "energy", None)

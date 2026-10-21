@@ -1,7 +1,6 @@
 """G4NDL ``Capture/``: radiative capture (MT102), read, modelled and written.
 
-The third process after the elastic (Phases 1-9) and the inelastic (Phase
-10). One isotope's capture is a cross section and at most one final state,
+The third process after the elastic and the inelastic. One isotope's capture is a cross section and at most one final state,
 and every piece of grammar is one kika already reads:
 
 ``Capture/CrossSection/<name>``

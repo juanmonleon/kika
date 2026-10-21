@@ -1,4 +1,4 @@
-"""M6: a PENDF from a GNDS evaluation (``process_gnds(...).write_pendf``).
+"""A PENDF from a GNDS evaluation (``process_gnds(...).write_pendf``).
 
 A GNDS file does not carry the ENDF bookkeeping of its resonance ranges (QX,
 LRX, LAD, the particle pairs), so MF2/151 cannot be written back as the

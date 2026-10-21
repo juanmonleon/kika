@@ -189,8 +189,8 @@ def assemble_joint(entries, atol: float = 1e-12,
 
     *entries* is a sequence of ``(rowKey, colKey, matrix, rowGrid, colGrid)``.
     Keys are whatever identifies a component of the joint quantity — for MF34
-    an ``(isotope, MT, L)`` triplet, and for the cross-*reaction* case that P3
-    still owes, an ``(isotope, MT)`` pair. Returns ``(keys, joint, stride)``
+    an ``(isotope, MT, L)`` triplet, and for the cross-*reaction* case still
+    to come, an ``(isotope, MT)`` pair. Returns ``(keys, joint, stride)``
     with *keys* in the order their rows appear.
 
     **Why this exists at all.** A file states a covariance in pieces: a square

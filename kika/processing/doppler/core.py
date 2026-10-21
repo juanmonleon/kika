@@ -246,7 +246,7 @@ def prepare_curve(form, *, context, source_temperature, support,
 
     Array input is explicitly canonical eV/b. Model forms require axes, converted
     independently of codecs. PoPs/style/URR and graph checks belong to the suite
-    preparer, not this pointwise D2 entry.
+    preparer, not this pointwise entry.
     """
     if isinstance(form, tuple):
         regions = form

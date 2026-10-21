@@ -1,4 +1,4 @@
-"""Phases 2 and 3: the cross-section and elastic final-state parsers.
+"""The cross-section and elastic final-state parsers.
 
 Acceptance: every real case of repFlag 1/2/3 is read
 to its last token with nothing changed; repeated energies survive in order;

@@ -1,9 +1,9 @@
-"""C10: what an MF35 band states for the spectrum's mean energy, reported with the run.
+"""What an MF35 band states for the spectrum's mean energy, reported with the run.
 
 **Why this is here and not in a validation script.** By design
 (2026-10-08), the production path keeps the library's MF35 *as stated* -- no
 constraint, no clipping of replicas to a band, no rejection of replicas -- and
-**reports C10 next to it**. A library's stated uncertainty on ``<E'>`` can be
+**reports what it states next to it**. A library's stated uncertainty on ``<E'>`` can be
 far wider than what is independently known (JEFF-4.0 U-235 thermal states
 2.00 % where the IAEA standards evaluation of the same spectrum gives 0.45 %),
 and the ensemble is a correct propagation
@@ -60,7 +60,7 @@ C10_THRESHOLDS = (1.0e6, 3.0e6)
 
 #: What the production path does with the library's MF35.
 C10_CONSTRAINT = ("none: MF35 as stated; a GLS update with a measured "
-                  "<E'> would be a named variant through P5, which is pending "
+                  "<E'> would be a named variant, which is pending "
                   "and not built")
 
 #: ``ZA -> reference``. ``incident`` is the incident energy (eV) the reference
@@ -138,7 +138,7 @@ def statedSpectrumMoments(energyForm, bands: Mapping[Any, Sequence[float]],
                           matrices: Mapping[Any, np.ndarray], *,
                           za: Optional[int] = None,
                           drawn: Optional[Mapping[Any, np.ndarray]] = None) -> dict:
-    """C10 per band: ``{band: record}``, from the evaluated node and the stated C.
+    """Per band: ``{band: record}``, from the evaluated node and the stated C.
 
     *bands*, *grids*, *matrices* and *drawn* are keyed by the band the file
     states. *matrices* are the **stated** absolute covariances of the group

@@ -1,7 +1,7 @@
 """GNDS-2.1 §6 higher-dimensional forms: ``XYs2d``, ``regions2d``, ``XYs3d``.
 
-Phase 5 declared these as ``NotImplementedError`` stubs under the model's rule
-that *empty slots exist, they are not absent*. Phase 7b fills the two the ENDF
+These were declared as ``NotImplementedError`` stubs under the model's rule
+that *empty slots exist, they are not absent*, then filled: first the two the ENDF
 MF4 decoder needs and then ``XYs3d``, which is what ``energyAngular`` and
 ``angularEnergy`` hold. ``regions3d`` stays declared and empty **permanently**,
 and not for want of a phase: the schema gives it no reachable element. See
@@ -807,7 +807,7 @@ class Regions3d(_UnimplementedNode):
     )
 
 
-#: Every node still declared without an implementation, for the phase 5 reader
+#: Every node still declared without an implementation, for the GNDS reader
 #: to consult when it needs to say "I know this node exists and I cannot read
 #: it yet".
 NOT_IMPLEMENTED_NODES = {cls.gndsNodeName: cls for cls in (Regions3d,)}

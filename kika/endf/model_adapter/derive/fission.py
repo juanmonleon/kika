@@ -1,4 +1,4 @@
-"""G4a: MF1/452, 455, 456 and 458 bookkeeping from the model.
+"""MF1/452, 455, 456 and 458 bookkeeping from the model.
 
 The nu-bars sit where :func:`~kika.endf.model_adapter.multiplicity.attachNubar`
 puts them and where NNDC's GNDS has them: the fission neutron's multiplicity

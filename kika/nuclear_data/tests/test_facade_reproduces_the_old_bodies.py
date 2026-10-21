@@ -1,4 +1,4 @@
-"""Phase 3d's real claim: *only the body changed*.
+"""The façades' real claim: *only the body changed*.
 
 ``test_flat_class_surface.py`` proves the **shape** survived — same fields, same
 order, same signatures. It cannot prove the **values** did, and that is the half
@@ -26,7 +26,7 @@ from kika.nuclear_data import AngularDistribution, NuclideInfo
 REAL_TAPES = ["fe56_host_tape", "fe57_host_tape", "fe56_jendl_tape",
               "u235_tape", "th232_tape", "pu241_tape"]
 
-#: metadata keys phase 3d *adds*. Both are inputs to the D2 fix; see
+#: metadata keys the façade *adds*. Both are inputs to the trailing-zero fix; see
 #: ``AngularDistribution.from_endf``.
 NEW_ANGULAR_METADATA = {"nm", "legendre_orders"}
 
@@ -98,7 +98,7 @@ def test_the_new_metadata_keys_are_present_and_are_the_files_own(micro_tape):
 
 
 def test_the_old_body_could_not_write_an_ltt3_section_and_the_new_one_can(micro_tape):
-    """The D2 fix, stated as a before/after rather than as prose."""
+    """The trailing-zero fix, stated as a before/after rather than as prose."""
     section = read_endf(str(micro_tape)).mf[4].mt[2]
     assert section._ltt == 3
 
@@ -107,7 +107,7 @@ def test_the_old_body_could_not_write_an_ltt3_section_and_the_new_one_can(micro_
 
     assert new == str(section), "the façade still cannot reproduce an LTT=3 section"
     assert old != str(section), (
-        "the old body reproduces it too, so D2 is not what this test says it is"
+        "the old body reproduces it too, so the defect is not what this test says it is"
     )
 
 
@@ -151,7 +151,7 @@ def test_nuclide_info_matches_the_old_body_except_for_the_za_fix(micro_tape):
 
 @pytest.mark.parametrize("tape", ["th232_tape", "pu241_tape"])
 def test_nuclide_info_reads_za_the_same_way_on_a_tape_that_used_to_trip_mf3(request, tape):
-    """D1 is no longer observable on these tapes, and that is worth pinning.
+    """The ZA truncation is no longer observable on these tapes, and that is worth pinning.
 
     Th-232's ZA used to read back as ``90231.99999999999`` from an **MF3**
     section and exactly ``90232.0`` from MF1/451. The ENDF float parse rounded
@@ -177,7 +177,7 @@ def test_the_evaluation_info_is_not_silently_empty(micro_tape):
     properties -- ``_laboratory`` for ``laboratory``, and six more -- and the
     real ones are ``_alab``, ``_auth``, ``_edate``, ``_ref``, ``_ddate``,
     ``_rdate``, ``_zsymam``. Every ``getattr(..., None) or ""`` returned "", so
-    every reactionSuite decoded since P6 carried an empty ``evaluationInfo``
+    every reactionSuite decoded until then carried an empty ``evaluationInfo``
     and an empty ``evaluation``. Nothing else asserted a *value* there.
     """
     mt451 = read_endf(str(micro_tape)).mf[1].mt[451]

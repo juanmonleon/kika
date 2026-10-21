@@ -292,7 +292,7 @@ def njoy_reconstruct_stream(
     # *import* time. A module-level import here makes kika.processing's
     # __init__ depend on kika.endf, and then nothing in kika.endf can import
     # from kika.processing at module scope -- which is what blocked moving
-    # interpolate_1d down in phase 2. Reading a PENDF tape genuinely needs
+    # interpolate_1d down. Reading a PENDF tape genuinely needs
     # the parser, so the dependency stays; only its timing changes.
     mat = _mat_from_tape_header(endf_path)
     if mat is None:
@@ -559,7 +559,7 @@ def _run_reconr_once_stream(
             # *import* time. A module-level import here makes kika.processing's
             # __init__ depend on kika.endf, and then nothing in kika.endf can import
             # from kika.processing at module scope -- which is what blocked moving
-            # interpolate_1d down in phase 2. Reading a PENDF tape genuinely needs
+            # interpolate_1d down. Reading a PENDF tape genuinely needs
             # the parser, so the dependency stays; only its timing changes.
             # MF3 is the only file the result is built from; a PENDF's MF2
             # is a stub after reconr and MF1 is a directory.

@@ -1,6 +1,6 @@
 """The plain-data bridge between the model and the flat classes it replaces.
 
-Phase 3d makes ``NuclideInfo``, ``AngularDistribution``, ``ResonanceParameters``
+The model makes ``NuclideInfo``, ``AngularDistribution``, ``ResonanceParameters``
 and ``CrossSection`` façades over the GNDS model. Every one of them needs the
 same thing: model nodes in, the dict of constructor arguments the flat
 dataclass expects out. That projection lives here.
@@ -62,7 +62,7 @@ def dominantInterpolation(regions: List[Tuple[int, int]]) -> str:
     ``NBT`` is **cumulative**, so region *i* spans ``NBT[i] - NBT[i-1]`` points.
     Reading it as a per-region count is what made the original
     ``_dominant_interpolation`` always pick the last region rather than the
-    widest — the phase 1 defect. The arithmetic is repeated here rather than
+    widest — the original defect. The arithmetic is repeated here rather than
     imported because importing it would point this module upward.
     """
     if not regions:

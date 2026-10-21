@@ -1,4 +1,4 @@
-"""Photo-atomic and atomic-relaxation GNDS ↔ the model (the photon plan's F2b).
+"""Photo-atomic and atomic-relaxation GNDS ↔ the model.
 
 Always run, from the committed iron micro-tapes:
 

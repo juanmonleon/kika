@@ -39,7 +39,7 @@ both halves and both sides read from it, "the key sets are equal" would be true
 by construction and would assert nothing. So the table below is *static* — hand
 written, never derived from the code — and the two sides **register against it**
 with :func:`reads` and :func:`writes`, which raise at **import time** for a tag
-the table does not declare. Adding a §18 law reader in phase 7b without
+the table does not declare. Adding a §18 law reader without
 declaring it fails ``import kika.gnds``, not a test somebody might not run. The
 other direction is :func:`check`, which lists the entries whose declared status
 disagrees with what actually registered.
@@ -147,17 +147,17 @@ def _spec(*args, **kwargs) -> Tuple[Tuple[str, str], NodeSpec]:
     return spec.key, spec
 
 
-#: **Phase 7b's landing strip is empty, which is what finishing it means.**
+#: **The landing strip for the §18 laws is empty, which is what finishing them means.**
 #: The strip was the §18 laws and the multiplicity forms kika declared but did
 #: not implement, sitting here as ``READ_ONLY``/``NEITHER`` entries with a
 #: reason until their writers landed and :func:`check` noticed the declaration
 #: and the code agreeing again. Every one of them has.
 #:
-#: There was a ``_PHASE_7B`` reason here, carried by four §18 entries before
+#: There was a shared "not yet implemented" reason here, carried by four §18 entries before
 #: ``uncorrelated`` and by three ``multiplicityForm`` entries after it. Every
 #: one of them is ``PAIRED`` now, so the constant had no users and is gone
-#: rather than kept as scaffolding for a phase that might want a different
-#: sentence anyway.
+#: rather than kept as scaffolding for a future reader that might want a
+#: different sentence anyway.
 #:
 #: ``gnds.xsd:1647-1662`` gives §18.1.1's choice its members and kika names
 #: all but two below. The two it does not — ``reference`` and
@@ -220,8 +220,8 @@ NOT_A_DISTRIBUTION_FORM = {
               "as a bare <recoil href=…/> onto AngularTwoBody.recoilHref",
     "NBodyPhaseSpace": "§18.3's energy choice — gnds.xsd:1697, inside "
                        "uncorrelated/energy, where it is PAIRED under "
-                       "the uncorrelatedEnergyForm family since phase "
-                       "7b and lands with uncorrelated",
+                       "the uncorrelatedEnergyForm family and lands "
+                       "with uncorrelated",
 }
 
 NODES: Dict[Tuple[str, str], NodeSpec] = dict([
@@ -502,7 +502,7 @@ ONE_SIDED_ATTRIBUTES = (
 class UndeclaredNode(LookupError):
     """A side registered for a node :data:`NODES` does not declare.
 
-    Raised at **import time**, which is the whole point: a phase 7b reader for
+    Raised at **import time**, which is the whole point: a new reader for
     an §18 law that nobody added to the table fails ``import kika.gnds`` rather
     than passing every test until someone reads the file.
     """

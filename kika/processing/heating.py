@@ -450,7 +450,7 @@ def _expect(table, g: Callable[[np.ndarray], np.ndarray]) -> float:
     The continuum is integrated on its own law, not by trapezoids over ``g·p``
     at the tabulated points as HEATR's ``getsix`` does for MF6 spectra in the
     lab (U-235 MT91's photons at 5.382 MeV: 1.473 MeV by trapezoids, 1.515
-    exactly; ND-2, replaced in 78693cf).
+    exactly; the trapezoids were replaced in 78693cf).
     """
     x = np.asarray(table.xs, dtype=float)
     p = np.asarray(table.pdf if hasattr(table, "pdf") else table.ys, dtype=float)

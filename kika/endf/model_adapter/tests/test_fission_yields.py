@@ -1,4 +1,4 @@
-"""Roadmap E7c: fission product yields (MF8/MT454, MT459) ↔ §18.4 ``productYields``.
+"""Fission product yields (MF8/MT454, MT459) ↔ §18.4 ``productYields``.
 
 Fixtures (``kika/endf/tests/data``), whole ENDF/B-VIII.1 files: the Cm-242
 neutron-induced yields (NSUB=11, one energy, 1 193 products), the Fm-254

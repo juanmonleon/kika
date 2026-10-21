@@ -7,7 +7,7 @@ five formalisms' record layouts from scratch. So the gate is: every number the
 flat ``ResonanceParameters.from_endf`` extracts is reproduced, **plus** the two
 things it either loses or cannot name —
 
-* the l-dependent scattering radius, which phase 1 found MF2/151 was dropping
+* the l-dependent scattering radius, which MF2/151 used to drop
   and which moves elastic by up to 42% locally on the committed Fe-56 slice;
 * the meaning of ``c3..c6``, which depends on LRF and which the model replaces
   with named widths (Breit-Wigner) or channel-indexed widths (R-matrix).
@@ -45,7 +45,7 @@ def decoded(mf2):
 
 
 # ---------------------------------------------------------------------------
-# The l-dependent radius — the phase 1 finding, kept
+# The l-dependent radius, kept
 # ---------------------------------------------------------------------------
 
 def test_the_fixture_actually_has_an_l_dependent_radius(mf2):
@@ -91,7 +91,7 @@ def test_none_means_the_file_wrote_zero_not_a_radius_that_equals_ap(decoded, mf2
     is in the file.
 
     This test used to assert the second, and it was wrong in a way its own
-    docstring already argued against. The consequence was measured in B1a and is
+    docstring already argued against. The consequence was measured then and is
     the reason the assertion was inverted rather than adjusted: **U-235, Th-232
     and Pu-241 all write APL explicitly equal to AP**, so the old collapse
     stored ``None`` for them and an encoder would have written ``0.0`` where the

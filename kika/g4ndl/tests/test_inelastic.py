@@ -1,4 +1,4 @@
-"""Phase 10: the inelastic grammar, its model mapping, the writer and the patch.
+"""The inelastic grammar, its model mapping, the writer and the patch.
 
 Against the committed real fixtures under ``data/inelastic/`` (one small file
 per section type and law, ``build_fixtures.INELASTIC``; the whole of Pu-244

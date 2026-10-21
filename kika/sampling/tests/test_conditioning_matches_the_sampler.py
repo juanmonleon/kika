@@ -1,4 +1,4 @@
-"""P2's acceptance: conditioning ahead of the draw is the draw's own repair.
+"""The acceptance: conditioning ahead of the draw is the draw's own repair.
 
 The design says a run should decide its repairs in front of a human, apply
 exactly those, and then draw with ``psd_method="none"`` because there is nothing
@@ -118,13 +118,13 @@ def test_a_conditioned_draw_reports_no_repair_of_its_own(blocks):
 
 
 def test_a_derived_plan_closes_the_same_loop_as_a_psd_one():
-    """P2's acceptance, on the plan P4 actually ships.
+    """The acceptance, on the plan the MF33 draw actually ships.
 
     The parametrised test above holds the loop for a plan whose only step is a
     PSD projection, which is what ``recommended_plan`` produces. The MF33 draw
     ships a plan derived from ``generate_samples``' repair set instead —
     rescales and a cap, no PSD step at all — so the property has to be held
-    again for that shape, or P2's guarantee simply does not cover the first
+    again for that shape, or the guarantee simply does not cover the first
     caller to use it.
 
     Deliberately the *whole* helper rather than ``apply_plan`` alone: the

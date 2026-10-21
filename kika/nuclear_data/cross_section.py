@@ -106,15 +106,15 @@ class CrossSection:
     def from_endf(cls, mf3mt: "MF3MT") -> "CrossSection":
         """Create a ``CrossSection`` from an ENDF ``MF3MT`` object.
 
-        **This is the one flat class phase 3d did NOT route through the model,
+        **This is the one flat class NOT routed through the model,
         and the reason is a measurement rather than a preference.**
         ``NuclideInfo``, ``AngularDistribution`` and ``ResonanceParameters`` all
         build their model and project back. Doing the same here costs 2.5x:
         ``decodeMF3MT`` alone is 5.4 ms against this body's 3.3 ms for the
         committed slice's three sections, and the legacy reconstructor (removed
         2026-10-08) constructed one ``CrossSection`` per MT per call, which the cluster ran
-        per sample per temperature. The plan's phase 3d gate names a 20% ceiling
-        and its documented fallback is exactly this: keep the fast constructor,
+        per sample per temperature. The gate for the change was a 20% ceiling
+        and its fallback is exactly this: keep the fast constructor,
         and expose the model lazily through :attr:`model`.
 
         One thing did change, and it is a fix: ZA
@@ -145,7 +145,7 @@ class CrossSection:
             energies=energies,
             values=values,
             reaction=mf3mt.number,
-            # Rounded, not truncated -- see the docstring and library-gaps D1.
+            # Rounded, not truncated -- see the docstring.
             nuclide_id=int(round(float(mf3mt.zaid))) if mf3mt.zaid is not None else 0,
             interpolation=interp_name,
             metadata={
@@ -161,7 +161,7 @@ class CrossSection:
     def to_model(self, mf3mt: "MF3MT"):
         """The GNDS ``Reaction`` for the section this object came from.
 
-        Built on demand, never in ``from_endf``. This is the phase 3d escape
+        Built on demand, never in ``from_endf``. This is the escape
         hatch: the constructor is on the cluster's hot path and a model round
         trip there costs 2.5x, so anything that actually wants the model pays
         for it at the point of asking rather than everyone paying always.

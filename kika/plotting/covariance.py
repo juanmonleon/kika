@@ -947,7 +947,7 @@ def plot_legendre_uncertainty_bands(ax, coeff_energies, coeff_values, mf34_covma
                                     uncertainty_sigma, color, alpha=0.2):
     """Shade a_l(E) +/- k*sigma using MF34's own energy bin boundaries.
 
-    Moved here from ``kika.endf.classes.mf4.plotting`` in phase 4's P4. It was
+    Moved here from ``kika.endf.classes.mf4.plotting``. It was
     reached from ``kika/cov`` through its leading underscore, across a package
     boundary, which is what the layering ratchet was counting; and it never
     needed ENDF at all. ``mf34_covmat`` is a

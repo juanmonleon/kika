@@ -131,7 +131,7 @@ class Regions1d(Function1d):
         """One call to the shared interpolator over the concatenated grid.
 
         Deliberately *not* "find the region, then evaluate it": that would be a
-        second implementation of region look-up, and the phase 3 gate is that
+        second implementation of region look-up, and the acceptance test is that
         this reproduces the flat path exactly.
         """
         separated = any(a.domainMax != b.domainMin or a.ys[-1] != b.ys[0]

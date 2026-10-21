@@ -1,11 +1,11 @@
 """Every field the MF2/151 parser holds survives ``decodeMF2MT151``.
 
-**Why this test is the deliverable of B1a and not a by-product of it.** The
+**Why this test is the deliverable of the MF2 decoder work and not a by-product of it.** The
 plan for an MF2 encoder assumed the work was emitting five formalisms' record
 layouts. It was not: ``MF2MT151.__str__`` already writes the section byte for
 byte (``test_mf2_writes_back_what_it_read.py``), so the encoder is a
 model→flat-tree rebuild — and the obstacle is that **the model did not retain
-enough to drive it**. Measured before B1a, the decoder was dropping the
+enough to drive it**. Measured before that work, the decoder was dropping the
 l-dependent radius on half the corpus, ten of the twelve columns of every LRF=7
 particle pair, BND, APE, APT, IFG, KRL, LAD, QX/LRX, URR case C's INT and its
 per-J energy grid, case B's MUF, and every LRU=0 range in its entirety.
@@ -17,7 +17,7 @@ by field, against the parsed section — and this test is what makes the encoder
 gate a formality rather than an investigation.
 
 **It compares against the file's own parse, never against the flat
-``ResonanceParameters``.** That is the P7b lesson: a gate that compares the
+``ResonanceParameters``.** That is the lesson MF3 and MF4 taught: a gate that compares the
 model against the code it replaces cannot see a defect the model *inherits*,
 because both sides agree and the agreement reads as proof. ``from_endf`` drops
 LRF=7 outright, so half of what is checked here has no flat counterpart at all.
@@ -456,7 +456,7 @@ def test_the_decoder_keeps_every_field_the_parser_holds(request, tape):
 def test_the_inventory_would_notice_a_dropped_field(fe56_host_tape):
     """The comparison bites. Without this the test above can pass by being blind.
 
-    Plants the exact defect B1a fixed — a per-l radius collapsed away — and
+    Plants the exact defect fixed here — a per-l radius collapsed away — and
     requires it to be reported.
     """
     section = read_endf(str(fe56_host_tape), mf_numbers=[2]).mf[2].mt[151]
@@ -473,7 +473,7 @@ def test_the_inventory_would_notice_a_dropped_field(fe56_host_tape):
     )
 
 
-#: One planted defect per field group B1a closed, ``(name, mutation)``. The
+#: One planted defect per field group closed, ``(name, mutation)``. The
 #: first run of this module passed all thirteen tape assertions immediately,
 #: which is not evidence of anything on its own — a comparison that reaches
 #: nothing also passes. Each entry below was checked to be reported, and three
@@ -507,7 +507,7 @@ _PLANTED = [
 
 @pytest.mark.parametrize("what,plant", _PLANTED, ids=[name for name, _ in _PLANTED])
 def test_a_planted_lrf7_defect_is_reported(fe57_host_tape, what, plant):
-    """Fe-57 JEFF-4.0, the only LRF=7 evaluation to hand and where B1a's losses were."""
+    """Fe-57 JEFF-4.0, the only LRF=7 evaluation to hand and where the decoder's losses were."""
     section = read_endf(str(fe57_host_tape), mf_numbers=[2]).mf[2].mt[151]
     resonances, provenance, _ = decodeMF2MT151(section)
 

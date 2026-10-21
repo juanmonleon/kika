@@ -1,4 +1,4 @@
-"""J3: a request for MF33 *and* MF34 draws the sigma <-> a_l cross term the file states.
+"""A request for MF33 *and* MF34 draws the sigma <-> a_l cross term the file states.
 
 MF34's L0xLl sections are the covariance between the cross section and the a_l.
 Decided 2026-10-04: when cross section and angular distribution are asked for together,
@@ -83,7 +83,7 @@ def test_sigma_and_the_shape_are_one_block_with_the_files_cross_term(covariance)
     ((key, matrix),) = blocks
     assert index[key]["components"] == [SIGMA, A1, A2]
     assert index[key]["quantities"] == ["angularDistribution", "crossSection"]
-    # sigma x sigma is MF33's (5/4/6 %), not L0xL0's (3 %): option (a) of J2.
+    # sigma x sigma is MF33's (5/4/6 %), not L0xL0's (3 %).
     np.testing.assert_allclose(matrix, _expected(), rtol=1e-6)
     (note,) = notes
     assert "is drawn with them in one matrix" in note

@@ -1,21 +1,21 @@
-"""G0 as a test: strip every micro-tape's provenance, derive it back, compare.
+"""The oracle as a test: strip every micro-tape's provenance, derive it back, compare.
 
 The oracle (``derive/oracle.py``) existed only as a command-line table, so the
-figures quoted when G0-G2 landed were reproduced by nothing. This file pins the
+figures it quoted were reproduced by nothing. This file pins the
 table instead: **every kind of mismatch that remains is listed in ``PENDING``
-with the phase that closes it**, and the test fails both ways --
+with the reason it remains**, and the test fails both ways --
 
-* a mismatch of a kind not in the table is a regression of G1/G2 (or a new
+* a mismatch of a kind not in the table is a regression of the suite or MF3 derivers (or a new
   deriver that is wrong), and
-* a kind in the table that no longer occurs means a phase landed and forgot to
+* a kind in the table that no longer occurs means a deriver landed and forgot to
   shrink the table, which is how a gate quietly stops measuring.
 
 Measured 2026-10-09 on ``develop`` with the
 projectile fix of this change (an alpha tape used to decode as neutron-incident,
-so AWI and NSUB could not be derived back). G3 (MF4's LTT/LI/LCT/NM,
+so AWI and NSUB could not be derived back). The MF4 deriver (LTT/LI/LCT/NM,
 ``derive/products.py``) closed the products' ``<node>`` row the same day; on
 131 whole tapes sampled from the three libraries it derives LTT, LI and LCT
-exactly. G4a (the nu-bars, MF1/458) and G4b (MF5: tables, the five §18.3 laws,
+exactly. The nu-bar (MF1/458) and MF5 derivers (tables, the five §18.3 laws,
 weighted sums and MT455's families) closed their rows next: every MF5 block of
 the cuts, kept bytes included, is derived as the file states it.
 """
@@ -42,7 +42,7 @@ PENDING = {
         "MF1/458 LFC=1: the thermal value and σ the LIST repeats beside a "
         "tabulated term are not in the model (FUDGE writes σ=0)",
     ("Reaction", "headerFields.mf6"):
-        "G4c derives every MF6 of the neutron cuts; what is left is what the "
+        "Every MF6 of the neutron cuts is derived; what is left is what the "
         "model does not hold: LAW=5 (charged-particle elastic, refused by name) "
         "and the LAW=4 recoil of it, a particle the evaluation gives two masses "
         "(alpha AWP beside the He-4 target's AWR; C-12's MT5 residual) where "
@@ -54,33 +54,33 @@ PENDING = {
         "values as floats, the digest) and, with no continuum, LEP (FUDGE "
         "writes 2, B-11 MT103 states 1)",
     ("Reaction", "headerFields.mf12"):
-        "E5e derives MF12 from the model; what differs is what the model does "
+        "MF12 is derived from the model; what differs is what the model does "
         "not hold: an LO=2 section's own bytes and SHA-256 (the derived one is "
         "rebuilt from PoPs, in FUDGE's decreasing order and with its LP=0), and "
         "LP of a line with ES != 0 (FUDGE's rule writes 1; Li-7 and N-14 state 0)",
     ("Reaction", "headerFields.mf13"):
-        "E5e derives MF13; the model holds the multiplicity on MF13's grid "
+        "MF13 is derived; the model holds the multiplicity on MF13's grid "
         "united with sigma's, so the derived sigma_gamma is on that "
         "grid and not on the file's own, and LP follows FUDGE's rule as in MF12",
     ("ReactionSuite", "headerFields.photonsVerbatim"):
         "MF12 LO=2 cascades whose ES_i name no level of the cut (Fe-56 without "
         "MT51) and MF13 on an MT with no MF3 (N-14 MT28/32): kept as bytes",
     ("ReactionSuite", "headerFields.mf8Activation"):
-        "MF8 of a reaction kept as the file's text (E6): its NO=0 decay LISTs and "
+        "MF8 of a reaction kept as the file's text: its NO=0 decay LISTs and "
         "LMF=6 states have no node. Derived, MF8 is rebuilt from the productions "
         "with NO=1, which states the same final states",
     ("Product", "headerFields.nm"):
         "the libraries' NM disagrees with their data (JEFF-4.0 Fe-56 states 31 "
         "beside a 32nd-order row; 74 of 131 sampled tapes state 0); derived is "
         "the highest order, ENDF-102's and FUDGE's",
-    ("Resonances", "<node>"): "G5 (MF2), outside this line",
+    ("Resonances", "<node>"): "MF2 is not derived here",
     # -- not derivable, by nature --------------------------------------------
     ("ReactionSuite", "headerFields.tpid"):
         "the tape's first line belongs to no material; a derived tape gets "
-        "the default one (T1)",
+        "the default one",
     ("ReactionSuite", "headerFields.lrp"):
         "the micro-tapes cut MF2 out and keep the header's LRP; on a whole "
-        "tape LRP follows MF2, which is G5",
+        "tape LRP follows MF2, which is not derived here",
     ("ReactionSuite", "headerFields.lfi"):
         "Cm-243's cut keeps MT51-53 only, and Am-241's activation cut MT102, so "
         "nothing in either says fissionable",
@@ -94,7 +94,7 @@ PENDING = {
         "PoPs entry carries one mass (AWR's, not AWI's)",
     # -- tapes that are not whole evaluations --------------------------------
     ("refused", "MF1/451 needs EMAX"):
-        "covariance-only cuts (MF1 + MF31-35): no MF3, no energy domain; G6",
+        "covariance-only cuts (MF1 + MF31-35): no MF3, no energy domain",
     ("refused", "no ENDF MAT for the target 'unknown'"):
         "synthetic covariance tapes with no MF1/451",
     # -- photo- and electro-atomic evaluations ---------------------------------
@@ -164,7 +164,7 @@ def test_a_cuts_artefact_occurs_on_that_cut_only(table):
 
 
 def test_g1_and_g2_fields_derive_exactly(table):
-    """MAT, ZA, AWR, QM, LR and interpolation regions are G1-G2's, and done."""
+    """MAT, ZA, AWR, QM, LR and interpolation regions derive exactly, and are done."""
     wrong = {key: where[:3] for key, where in table.items() if key[1] in COMPARED}
     assert not wrong, wrong
 
@@ -184,7 +184,7 @@ def test_the_derivers_run_suite_first_whatever_was_imported_first():
     from kika.endf.model_adapter.derive import reactions, suite  # noqa: F401
 
     names = [name for name, _, _ in _inRunOrder()]
-    # `productions` (E6) runs between them when it is registered: a production
+    # `productions` runs between them when it is registered: a production
     # is a Reaction, and the reactions deriver must find it already derived.
     assert [n for n in names if n != "productions"][:2] == ["suite", "reactions"]
     if "productions" in names:

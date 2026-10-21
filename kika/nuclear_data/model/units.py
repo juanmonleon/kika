@@ -190,7 +190,7 @@ def parse_unit(text: str) -> Unit:
     convenience: it is how GNDS spells a decay rate, it is how
     :data:`DERIVED_SI_UNITS` in this very module spells the admixture of ``Hz``,
     and a parser that rejects the string its own tables contain would have
-    failed on the first GNDS file phase 5 reads. ``1`` carries no dimension and
+    failed on the first GNDS file it reads. ``1`` carries no dimension and
     no factor — it exists only so the string may begin with ``/``.
     """
     original = text

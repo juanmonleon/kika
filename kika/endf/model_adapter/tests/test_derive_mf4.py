@@ -1,4 +1,4 @@
-"""G3: MF4 from a suite that never saw ENDF (``derive/products.py``).
+"""MF4 from a suite that never saw ENDF (``derive/products.py``).
 
 Three gates:
 

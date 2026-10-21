@@ -1,6 +1,6 @@
 """ENDF MF8/MT454 and MT459 (fission product yields) ↔ §18.4 ``productYields``.
 
-Roadmap E7c. The yields live on the target nuclide of a standalone PoPs (a
+The yields live on the target nuclide of a standalone PoPs (a
 fission yield sublibrary, NSUB=5 or 11) or on the decaying nuclide of a decay
 tape that also states them (36 of ENDF/B-VIII.1's, Cf-252 among them). The
 GNDS shape is FUDGE's (``ENDF_ITYPE_1``/``ENDF_ITYPE_5``): MT454 is

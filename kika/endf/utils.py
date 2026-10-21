@@ -15,7 +15,7 @@ from numpy.typing import ArrayLike
 
 #: The fixed-width record grammar, re-exported from :mod:`kika._records`.
 #:
-#: It moved out of this module in phase 4's P4 because it is not ENDF's:
+#: It moved out of this module because it is not ENDF's:
 #: COVERX/COVFIL/BOXER share the same 11-column convention, and
 #: ``kika/cov/parse_covmat.py`` importing it from here was the one import-time
 #: format dependency in ``kika/cov``. These names stay importable from

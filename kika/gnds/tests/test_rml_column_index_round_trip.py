@@ -4,7 +4,7 @@ The ENDF decoder numbered each channel's ``columnIndex`` from 0, while the GNDS
 width table (§19.3.5) has the energy in column 0 and every distributed file
 numbers the widths from 1. Written to GNDS, the first channel (Cl-35's capture)
 pointed at the energy column; read back, its widths were zero and
-``process_gnds`` refused the suite. Found on 2026-10-16 checking M6 on Cl-35
+``process_gnds`` refused the suite. Found on 2026-10-16 checking the PENDF built from GNDS on Cl-35
 and Sr-88 of ENDF/B-VIII.1.
 """
 from pathlib import Path

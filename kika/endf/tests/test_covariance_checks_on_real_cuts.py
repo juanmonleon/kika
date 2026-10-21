@@ -1,4 +1,4 @@
-"""Layer 1 on real evaluations: one committed micro-tape per fault (phase C7).
+"""Layer 1 on real evaluations: one committed micro-tape per fault.
 
 The synthetic tests in ``test_covariance_checks.py`` pin each rule; these pin
 that the rules find what the evaluators actually wrote. Each fixture is a
@@ -59,7 +59,7 @@ def test_w186_mf34_rho_49_a_negative_variance_and_an_indefinite_block():
     assert _faults(report) == {("defect", "negative_variance"): 1,
                                ("defect", "correlation_out_of_bounds"): 1,
                                ("defect", "not_positive_semidefinite"): 1}
-    # LAB covariances (LCT=1) for an MF4 given in CM (C9). A note since the
+    # LAB covariances (LCT=1) for an MF4 given in CM. A note since the
     # samplers convert between frames for MT51 (8-oct-2026).
     frame = report.by_check("frame_differs_from_mf4")[0]
     assert frame.level == "note" and frame.evidence["mf4_lct"] == {"51": 2}
@@ -137,7 +137,7 @@ def _only(report, check):
 
 
 # ---------------------------------------------------------------------------
-# MF32 and MF35 (phase C8). The MF32 cuts of ENDF/B-VIII.1 were committed for
+# MF32 and MF35. The MF32 cuts of ENDF/B-VIII.1 were committed for
 # the MF32 parser (``test_mf32_roundtrip.py``) and carry MF2 with them.
 # ---------------------------------------------------------------------------
 

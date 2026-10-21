@@ -142,7 +142,7 @@ class AceProvenance(Provenance):
     ACE is a *processed* representation, not a peer evaluation: it has been
     reconstructed, Doppler-broadened and put on a grid, and it records no
     reaction Q values at all. The absence is declared here rather than defaulted
-    to zero, which is the structural version of the phase 1 fix.
+    to zero, which is the structural version of the fix for a silent Q = 0.
     """
 
     sourceFormat: str = "ace"
@@ -202,7 +202,7 @@ class G4NDLProvenance(Provenance):
     """Where a G4NDL-read suite came from, and the tokens the model has no slot for.
 
     G4NDL is a *processed* library (Geant4 ParticleHP): one directory per
-    process, one file per isotope. What is here is what Phase 6's writer needs
+    process, one file per isotope. What is here is what the G4NDL writer needs
     to write an isotope back token for token, and what a reader needs to know
     which files were read:
 

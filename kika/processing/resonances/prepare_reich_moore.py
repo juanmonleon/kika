@@ -11,11 +11,11 @@ from .reich_moore import RMLevel,RMGroup
 def prepare_rm(region,resonances,context,notes):
     from .prepare import UnsupportedResonanceError
     f=region.formalism
-    if f.approximation!='ReichMoore':raise UnsupportedResonanceError('R4 supports ReichMoore only; full RML remains deferred')
+    if f.approximation!='ReichMoore':raise UnsupportedResonanceError('this preparer supports ReichMoore only; full RML is prepared elsewhere')
     if f.angularLCount is not None and (not isinstance(f.angularLCount,int) or f.angularLCount<0):raise ValueError('RM angular L count must be nonnegative integer')
     if f.relativisticKinematics:raise UnsupportedResonanceError('relativistic RM is not implemented')
     if f.boundaryCondition not in (None,'EliminateShiftFunction'):
-        raise UnsupportedResonanceError('R4 certifies the eliminated-shift RM convention only')
+        raise UnsupportedResonanceError('RM is prepared in the eliminated-shift convention only')
     if f.radiusUnit not in (None,'fm'):raise UnsupportedResonanceError('RM radii require fm')
     if f.PoPs is not None:
         particles=list(f.PoPs.particles.values())
@@ -39,7 +39,7 @@ def prepare_rm(region,resonances,context,notes):
             if roles[label]=='neutron':
                 projectile=r.kinematics.particleA;target=r.kinematics.particleB
                 if r.kinematics.effective or projectile.massRatio!=1. or projectile.charge!=0. or projectile.spin!=.5:
-                    raise UnsupportedResonanceError('R4 entrance must be a physical neutron/target pair')
+                    raise UnsupportedResonanceError('the RM entrance must be a physical neutron/target pair')
                 if target.spin!=context.target_spin:raise ValueError('declared RM pair target spin disagrees with context')
     prepared=[];covered={};radii_by_l={}
     def allowed(l,s,j):return abs(l-s)<=j<=l+s and float(j-abs(l-s)).is_integer()
@@ -57,7 +57,7 @@ def prepare_rm(region,resonances,context,notes):
             if channel.boundaryConditionValue not in (None,0.):raise UnsupportedResonanceError('nonzero RM boundary value is not supported')
             if channel.radiusUnit not in (None,'fm'):raise UnsupportedResonanceError('RM channel radii require fm')
         if kinds.count('neutron')!=1 or kinds.count('capture')!=1:
-            raise UnsupportedResonanceError('R4 normalization requires one entrance and one eliminated capture per group')
+            raise UnsupportedResonanceError('RM normalization requires one entrance and one eliminated capture per group')
         ni=kinds.index('neutron');gi=kinds.index('capture');fi=[i for i,k in enumerate(kinds) if k=='fission']
         ch=sg.channels[ni];l=ch.L
         if not isinstance(l,(int,np.integer)) or not 0<=l<=64:raise UnsupportedResonanceError('RM requires integer L=0..64')

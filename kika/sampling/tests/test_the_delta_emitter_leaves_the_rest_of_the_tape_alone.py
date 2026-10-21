@@ -5,7 +5,7 @@ that MF was re-encoded although the realisation never moved it: MF5/MT455 beside
 a perturbed MT18 came back with new sequence numbers, zero-filled SEND records
 and, on ENDF/B-VIII.1 U-233, its ZA spelt ``9.223300+4`` instead of
 ``92233.0000``. The values were the same on every tape measured, which is why
-the Q1 gates (``test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py``)
+the PFNS gates (``test_the_model_writes_a_fission_spectrum_as_the_legacy_does.py``)
 compare numbers; this file compares the text.
 
 The property: take the delta tape and the tape it came from, drop the sections

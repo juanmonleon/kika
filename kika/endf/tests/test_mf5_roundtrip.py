@@ -216,7 +216,7 @@ def test_evaluate_at_incident_is_exact_on_the_nodes(synthetic_partial):
 def test_lf1_node_insertion_is_an_exact_refinement(synthetic_partial):
     """Inserting an incident node must not move chi anywhere.
 
-    10 000 random (E, E′). This is the identity the band-edge shoulder of P3.5
+    10 000 random (E, E′). This is the identity the band-edge shoulder
     depends on: the new node exists only so a piecewise-constant factor has
     somewhere to land, and it must be invisible until a factor is applied.
 

@@ -1,6 +1,6 @@
 """G4NDL inelastic records → reactions of a :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
-Phase 10, step 3. The counterpart of :mod:`kika.g4ndl.decode` for
+The counterpart of :mod:`kika.g4ndl.decode` for
 ``Inelastic/``, and the mapping is the ENDF adapter's
 (``kika/endf/model_adapter/{angular,energy,energy_angle}.py``) restated over
 the G4NDL records, because G4NDL's inelastic sections *are* ENDF files 3-6

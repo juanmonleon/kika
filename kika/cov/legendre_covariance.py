@@ -196,7 +196,7 @@ class LegendreCovariance:
                               energy_unit: str = 'eV') -> "LegendreCovariance":
         """Every MF34 section of a GNDS ``covarianceSuite``, as one carrier.
 
-        The covariance half of what phase 4 set out to do: the multigroup
+        The covariance half of driving the collapse from the model: the multigroup
         collapse can be driven from a ``reactionSuite`` on both sides now — a_l
         through :func:`~kika.cov.multigroup.collapse.legendre_source_from_model`,
         and the covariance through here.
@@ -205,8 +205,8 @@ class LegendreCovariance:
         GENDF, COVFIL, BOXER and COVERX, exactly as
         :meth:`~kika.cov.cross_section_covariance.CrossSectionCovariance.from_covariance_section`
         already does. **Duck-typed rather than imported**, and for the same
-        reason: ``kika.cov`` does not depend on the model, and phase 4's P4 had
-        just finished removing the last import-time reason it might.
+        reason: ``kika.cov`` does not depend on the model, and it no longer has
+        any import-time reason to.
 
         A *suite* rather than a section, unlike the cross-section twin, because
         the two are keyed differently. There, several MF35 bands share one MT and

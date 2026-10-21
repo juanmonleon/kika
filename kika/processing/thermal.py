@@ -330,7 +330,7 @@ def freeGasTables(awr: float, temperature: float, elastic, *, emax: float = 10.0
     return _tables(inputs, temperature, nmix, options, report, (E, sigma))
 
 
-#: The incident grid's targets (ND-8): between two incident energies, sigma read lin-lin and
+#: The incident grid's targets: between two incident energies, sigma read lin-lin and
 #: the two tables' moments mixed lin-lin must agree with the exact table at the geometric
 #: midpoint -- sigma to SIGMA_TOL relative, <E'> to MOMENT_TOL relative and <mu> to MOMENT_TOL
 #: absolute -- or the midpoint becomes a node. At most REFINE_DEPTH halvings of an interval.
@@ -452,7 +452,7 @@ def _tables(inputs: _Inputs, temperature, nmix, options, report, elastic):
         return [one(e) for e in points]
 
     entries = compute(energies)
-    # The S(alpha, beta) tables get the incident nodes their interpolation needs (ND-8); the
+    # The S(alpha, beta) tables get the incident nodes their interpolation needs; the
     # free gas keeps THERMR's grid, its sigma being the nuclide's elastic read lin-lin.
     if inputs.iinc == 2:
         entries = _refine(entries, compute)

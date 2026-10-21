@@ -1,7 +1,7 @@
 """§12 ``decayData`` in full, PoPs ``aliases``, and a PoPs that stands alone.
 
-Roadmap E5c read and wrote the electromagnetic part of ``decayData`` (a level's
-gamma cascade); E7b adds what a radioactive decay sublibrary states and FUDGE
+The electromagnetic part of ``decayData`` (a level's gamma cascade) was read
+and written first; this module adds what a radioactive decay sublibrary states and FUDGE
 writes (``PoPs/decays``): a mode's ``Q`` and the uncertainty of its
 probability, its ``spectra`` -- ``discrete`` lines and ``continuum`` tables --
 and the decay's ``averageEnergies``. A decay evaluation is a whole GNDS file

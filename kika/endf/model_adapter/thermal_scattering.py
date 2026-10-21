@@ -44,13 +44,13 @@ temperature's LI, and the padding dialect -- travels in each reaction's
 provenance under :data:`MF7_KEY`. The encoder rebuilds the flat sections from
 the model and takes from the provenance only what the model does not hold. A
 scalar the model still holds unchanged is written with the digits it was read
-with. MF7/MT451, the composition, is stated in the model since E4b (the
+with. MF7/MT451, the composition, is stated in the model (the
 evaluated style's ``targetInfo``, PoPs nuclides, and the principal atom's
 ``boundAtomCrossSectionByNuclide``, as FUDGE maps it) and still goes back out
 verbatim from the suite's provenance (:data:`MF7MT451_KEY`) when it is there;
 without it the section is rebuilt from the model by FUDGE's rule.
 
-**The target** (E4b) is the ``unorthodox`` particle ``tnsl-<ZSYMAM>`` with
+**The target** is the ``unorthodox`` particle ``tnsl-<ZSYMAM>`` with
 MF1's AWR as its mass, in place of the pseudo-ZA nuclide MF1/451 names, and
 each reaction has Q = 0 and a neutron multiplicity of 1 over the evaluation's
 domain (1e-5 eV to EMAX): the nodes GNDS requires and FUDGE writes.

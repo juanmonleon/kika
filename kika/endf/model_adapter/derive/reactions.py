@@ -1,4 +1,4 @@
-"""G2: MF3's bookkeeping — QM, QI, LR and the interpolation regions — from the model.
+"""MF3's bookkeeping — QM, QI, LR and the interpolation regions — from the model.
 
 FUDGE's rules (``toENDF6/reactions/base.py:105-158``,
 ``toENDF6/reactionData/crossSection.py:30-61``), stated in the model's terms:
@@ -309,7 +309,7 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
         _, _, regions = reaction.crossSection[EVAL_LABEL].toEndfRegions()
 
     header = {"qi": qi} if qi != q else {}
-    # G4c: a reaction whose distributions only MF6 states carries the MF6
+    # A reaction whose distributions only MF6 states carries the MF6
     # block on its own provenance, as one read from ENDF does.
     from . import sectionSelected
     from .energy_angle import goesToMF6, mf6Fields
@@ -327,7 +327,7 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
         if fields is not None:
             header["mf6"] = fields
             inMF6 = True
-    # E5e: its photons' MF12-15, from the model (a level's cascade from PoPs).
+    # Its photons' MF12-15, from the model (a level's cascade from PoPs).
     if not isinstance(reaction, CrossSectionSum) and any(wants(mf) for mf in (12, 13, 14, 15)):
         from .photons import photonFields
 

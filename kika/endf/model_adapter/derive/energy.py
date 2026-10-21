@@ -1,4 +1,4 @@
-"""G4b: MF5's bookkeeping from the model -- the ``"mf5"`` block the encoder rebuilds from.
+"""MF5's bookkeeping from the model -- the ``"mf5"`` block the encoder rebuilds from.
 
 :func:`~kika.endf.model_adapter.energy.encodeMF5MT` writes a section from a
 record per subsection: ``U``, ``LF``, the weight ``p(E)`` and, for every

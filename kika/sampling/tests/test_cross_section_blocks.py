@@ -71,7 +71,7 @@ def test_the_mf33_assembly_reproduces_the_carrier(micro, carrier):
 
 
 def test_the_carrier_states_half_of_it_as_nan(carrier):
-    """D11, pinned where the assembly can see it.
+    """The NaN cross blocks, pinned where the assembly can see it.
 
     Not incidental colour: it is the reason the gate above zero-fills its
     reference, and if it ever stopped being true that gate would be comparing
@@ -200,7 +200,7 @@ def test_the_two_union_modes_agree_when_every_component_shares_a_grid(micro):
     `micro_fe56_mf33.endf` states MT4 and MT16 on the same 124-bin grid, so the
     pooled union and the per-key unions are the same grid and both modes give
     the same 248x248. The fixture is not wrong — it simply cannot distinguish
-    the two, which is exactly why P4's measurement had to be taken on a tape.
+    the two, which is exactly why the measurement had to be taken on a tape.
     """
     _endf, suite = micro
 
@@ -236,7 +236,7 @@ def test_the_global_mode_reproduces_the_carrier_on_a_real_evaluation(
 
     Fe-56 JEFF-4.0 states MF33 for MT 1/2/4/5/16/102/103 on *four different*
     native grids — 630, 630, 124, 124, 124, 631, 124 bins — which is the case
-    `micro_fe56_mf33.endf` does not have and P4 was deferred on. Measured
+    `micro_fe56_mf33.endf` does not have and the measurement was deferred on. Measured
     2026-08-13:
 
     | mode | dimension | padded rows |

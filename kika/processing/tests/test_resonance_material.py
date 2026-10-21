@@ -1,4 +1,4 @@
-"""R7 complete materials: redundant diagnostics, empty MF2 and publication."""
+"""Complete materials: redundant diagnostics, empty MF2 and publication."""
 from copy import deepcopy
 from pathlib import Path
 import numpy as np

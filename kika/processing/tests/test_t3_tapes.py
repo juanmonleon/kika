@@ -1,4 +1,4 @@
-"""The evaluations the full-library sweep (T3) refused, processed whole.
+"""The evaluations the full-library sweep refused, processed whole.
 
 Each tape carries one defect the processing now handles as NJOY and FUDGE do:
 

@@ -1,7 +1,7 @@
 """What the ``ENDF`` container adds on top of its MF files, frozen.
 
 ``ENDF.to_plot_data`` is 292 of the class's 413 lines and it had no test at
-all. Phase 4's P3 moves those lines off the dataclass, so they are pinned here
+all. A refactor moves those lines off the dataclass, so they are pinned here
 first — every branch, on the two committed micro-tapes, before anything moves.
 The point is not that plotting works; it is that **the association does not
 change**, because the association is the only thing the container contributes.

@@ -1,4 +1,4 @@
-"""The real phase 3c gate: the model reproduces the flat path, byte for byte.
+"""The real gate: the model reproduces the flat path, byte for byte.
 
 **Why not "ENDF → model → ENDF byte-identical".** That is what was
 originally asked for, and it measures almost nothing. The writer is
@@ -11,7 +11,7 @@ The gate here is narrower and much stronger — per MF/MT section,
 
     str(encodeMF3MT(decoded_reaction))  ==  str(s)
 
-**It compared against the flat path until P7b, and that was too weak.** The
+**It used to compare against the flat path, and that was too weak.** The
 original formulation was ``== str(CrossSection.from_endf(s).to_endf())``: what
 the model produced against what the code it replaces produces. That catches a
 model that drops a field, but it cannot catch a model that inherits a *defect*
@@ -88,7 +88,7 @@ def test_the_same_holds_on_real_tapes(request, tape):
 
 
 def test_the_flat_path_round_trips_the_tape_whose_za_did_not_parse_exactly(th232_tape):
-    """This was a strict xfail until phase 3d, and the XPASS is why it changed.
+    """This was a strict xfail until the flat class became a façade, and the XPASS is why it changed.
 
     ``CrossSection.nuclide_id`` truncated ZA, so all 57 Th-232 MF3 sections came
     back naming ZA 90231 — Ac-231. The façade rounds.
@@ -178,7 +178,7 @@ def test_the_reconstructed_regions_agree_with_the_file_s_own_pairs(decoded):
 # ---------------------------------------------------------------------------
 
 def test_the_report_names_every_mf_the_decoder_did_not_read(decoded):
-    """The phase 7 hard rule, applied from the first decoder.
+    """The hard rule, applied from the first decoder.
 
     *"A structurally valid, physically incomplete reactionSuite is worse than
     none, because it carries authority it has not earned."* So the gaps are
@@ -188,7 +188,7 @@ def test_the_report_names_every_mf_the_decoder_did_not_read(decoded):
 
     assert report.unsupported, "the micro-tape has MF34, which is not a reactionSuite node"
     text = " ".join(report.unsupported)
-    # MF1, MF2, MF3 and MF4 are read as of P7b. What remains is the covariance
+    # MF1, MF2, MF3 and MF4 are read. What remains is the covariance
     # files, which §25.1.1 puts in a root node of their own.
     for mf in sorted(set(endf.mf) - {1, 2, 3, 4}):
         assert f"MF{mf}" in text, f"MF{mf} is in the file and the report does not mention it"

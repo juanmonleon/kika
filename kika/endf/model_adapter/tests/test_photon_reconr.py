@@ -52,7 +52,7 @@ def test_reconr_rebuilds_the_same_mt3_from_kikas_tape(hf182, njoy_exe, tmp_path)
 
 def test_without_mf12_mt3_reconr_writes_no_mt3(hf182, njoy_exe, tmp_path):
     """The control: the same tape with MF12-15/MT3 cut out gives no MT3 at all,
-    which is what every kika tape gave before E5 (risk R7 of the E5 plan)."""
+    which is what every kika tape gave before photon sections were decoded."""
     from kika.processing.njoy_reconstruct import njoy_reconstruct
 
     text = hf182.read_text(encoding="latin-1")

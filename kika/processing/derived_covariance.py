@@ -148,7 +148,7 @@ def resolve_derived_covariance(
         # *import* time. A module-level import here makes kika.processing's
         # __init__ depend on kika.endf, and then nothing in kika.endf can import
         # from kika.processing at module scope -- which is what blocked moving
-        # interpolate_1d down in phase 2. Reading a PENDF tape genuinely needs
+        # interpolate_1d down. Reading a PENDF tape genuinely needs
         # the parser, so the dependency stays; only its timing changes.
         from kika.endf.read_endf import read_endf
         endf = read_endf(str(endf_path))

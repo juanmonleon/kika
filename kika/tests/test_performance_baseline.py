@@ -1,6 +1,6 @@
-"""The phase 3d performance gate, recorded in P8 and enforced in P9.
+"""The performance gate on the flat-class façades, recorded once and then enforced.
 
-**Why this exists.** Phase 3d rewrites the flat classes' method bodies to route
+**Why this exists.** The façades rewrite the flat classes' method bodies to route
 through the GNDS model: ``CrossSection.from_endf`` will build a ``ReactionSuite``
 and project it back. The legacy reconstructor (removed 2026-10-08) built one
 ``CrossSection`` per MT per call, and the cluster pipeline calls that per sample
@@ -18,7 +18,7 @@ because 1300 other tests were competing for the same cores. That is not a
 regression, it is contention — and a timing gate that goes red on machine load
 is worse than no gate, because it teaches you to ignore it. So every test here is
 ``perf``-marked **and** skipped unless ``RUN_PERF_GATE=1``. It is run
-deliberately, on a quiet machine, as part of accepting P9.
+deliberately, on a quiet machine, before accepting a change to the façades.
 
 **What is honest about wall-clock, and what is not.**
 
@@ -38,7 +38,7 @@ deliberately, on a quiet machine, as part of accepting P9.
 
   This is not hypothetical. ``read_pendf_mf3_sections`` at three repeats spread
   **1.28x** — it is dominated by file I/O and page-cache state, not by anything
-  phase 3d touches — which is what failed the first version of this gate. Ten
+  the façades touch — which is what failed the first version of this gate. Ten
   repeats brings it to about 1.06x and back inside the budget. The recorded
   spreads are in the baseline file; check them before trusting a green run.
 * The baseline records the **machine it was measured on** — platform, processor,
@@ -46,7 +46,7 @@ deliberately, on a quiet machine, as part of accepting P9.
   so a mismatch **skips** rather than passing or failing. Saying "no regression"
   on a different CPU would be worse than saying nothing.
 * The legacy ``reconstruct`` measurement left with its reconstructor
-  (2026-10-08); the new engine's cost belongs to resonance milestone R8.
+  (2026-10-08); the new engine's cost is not gated here.
 
 Run the gate with ``RUN_PERF_GATE=1 pytest kika/tests/test_performance_baseline.py``.
 Regenerate the baseline with ``REGEN_PERF_BASELINE=1 pytest kika/tests/test_performance_baseline.py``,
@@ -81,7 +81,7 @@ def _requireOptIn() -> None:
     """Wall-clock assertions are opt-in. See the module docstring for why."""
     if os.environ.get("RUN_PERF_GATE") != "1":
         pytest.skip(
-            "set RUN_PERF_GATE=1 to run the phase 3d timing gate, on a quiet "
+            "set RUN_PERF_GATE=1 to run the façade timing gate, on a quiet "
             "machine. Inside a loaded test suite these numbers measure "
             "contention, not the code."
         )
@@ -159,7 +159,7 @@ MEASUREMENTS = {
 def test_record_the_baseline(micro_tape):
     """Writes the committed baseline. Skips unless ``REGEN_PERF_BASELINE=1``."""
     if os.environ.get("REGEN_PERF_BASELINE") != "1":
-        pytest.skip("set REGEN_PERF_BASELINE=1 to re-record the phase 3d baseline")
+        pytest.skip("set REGEN_PERF_BASELINE=1 to re-record the façade baseline")
 
     payload = {
         "machine": _machine(),
@@ -224,7 +224,7 @@ def _checkOne(name: str, micro_tape) -> None:
     ratio = measured / recorded
     assert ratio <= 1.0 + tolerance, (
         f"{name} regressed {ratio:.2f}x: {recorded:.4f} s -> {measured:.4f} s.\n"
-        f"The phase 3d fallback is a lazy `model` property on the flat class — "
+        f"The fallback is a lazy `model` property on the flat class — "
         f"keep the fast constructor and build the model on first access."
     )
 

@@ -991,7 +991,7 @@ class _SuiteWriter:
         :class:`Constant1d` carries its own domain and ``_function`` writes it.
 
         The other three are attributes and nothing else, so they are written
-        here rather than delegated. Until phase 7b they were not written at all
+        here rather than delegated. They used to be not written at all
         and the node came out empty — invalid, in 17 749 places across the
         distribution, for a reason that was never a decision.
 
@@ -1668,8 +1668,7 @@ def _formLabel(form, report, where: str) -> str:
     ``covariances.py:113`` builds every gridded matrix without one, because in
     ENDF a covariance belongs to a file and a section, not to a *style*. So a
     covariance sibling written from a tape was invalid once per matrix, which is
-    D25 and is what ``test_the_endf_decoded_covariance_sibling_is_pinned``
-    measures.
+    what ``test_the_endf_decoded_covariance_sibling_is_pinned`` measures.
 
     The value is not invented out of nothing: in GNDS a form's label names the
     style it belongs to, and the only suites reaching this branch are the ones
@@ -1773,7 +1772,8 @@ def _array(parent: ET.Element, matrix) -> ET.Element:
     ``covarianceMatrix`` wraps one in a ``gridded2d``. Writing the parameter
     matrix by calling :func:`_covarianceMatrix` and ignoring the grids would
     emit that ``gridded2d`` and its ``axes`` as well, and the schema admits
-    neither there — the same shape of defect as D19, a node written into a file
+    neither there — the same shape of defect as an ``<isotropic2d>`` written straight under
+    ``<distribution>``, a node written into a file
     that no reader of the standard takes back. A parameter covariance has no
     grid to put in an ``axes`` either: row 47 is *a neutron width*, and what
     says so is the ``parameterLink`` list, not an energy boundary.

@@ -14,7 +14,7 @@ written as a hardcoded ``0``. The counts either side of it — ``12*NPP`` and
 internally consistent, and NPP is recoverable from ``2*NPP``. That is precisely
 why nothing noticed: the parser derives NPP from the word count and never reads
 the field the writer was not writing. A defect that only a comparison against
-the *file* can see — the same blind spot P7b found for MF3 and MF4, where
+the *file* can see — the same blind spot found earlier for MF3 and MF4, where
 comparing the model against the code it replaces made both sides agree on a
 shared error.
 """

@@ -11,7 +11,7 @@ Three things are pinned here, on the same fixture as the end-to-end gate:
 1. a plan whose steps are all ``none`` draws **exactly** what no plan draws --
    the seed ladder, the block order and the matrices are untouched;
 2. a ``clip`` step ahead of the draw under ``psdMethod="none"`` is
-   **bit-identical** to no plan under ``psdMethod="clip"``. That is P2's
+   **bit-identical** to no plan under ``psdMethod="clip"``. That is the conditioning's
    acceptance (``test_conditioning_matches_the_sampler.py``) restated at the
    pipeline level, and it holds here for a reason worth stating: the draw
    decomposes the assembled block as given, so the plan and the projection act
@@ -237,7 +237,7 @@ def test_without_a_plan_the_run_conditions_itself_and_writes_what_it_did(
     # And the pre-flight was told which rows belong together. Measured: the
     # "1 variance at 1.39e3x the median" the whole-block inspection reports on
     # this joint is a₁'s bins judged against a₃'s -- within its own order it is
-    # no outlier, and the finding does not fire. Piece C of the note.
+    # no outlier, and the finding does not fire.
     assert auto.report.findings("definiteness")
     assert not auto.report.findings("variance_outliers")
     assert inspect_blocks(blocks).findings("variance_outliers"),         "the whole-block inspection no longer shows the artefact this pins"

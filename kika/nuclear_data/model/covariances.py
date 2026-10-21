@@ -260,7 +260,7 @@ class Sum:
 
     **Reshaped 2026-08-12** from two parallel lists ``references`` and
     ``coefficients``, which could fall out of step and had nowhere to keep each
-    term's ``ENDF_MFMT``. Nothing constructed it — it was phase 3b scaffolding
+    term's ``ENDF_MFMT``. Nothing constructed it — it was scaffolding
     — so the change cost no caller. The two lists survive as read-only
     properties.
     """

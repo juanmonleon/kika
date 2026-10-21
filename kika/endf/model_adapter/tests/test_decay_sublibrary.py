@@ -1,4 +1,4 @@
-"""Roadmap E7b: the radioactive decay sublibrary, ENDF ↔ a standalone §12 PoPs ↔ GNDS.
+"""The radioactive decay sublibrary, ENDF ↔ a standalone §12 PoPs ↔ GNDS.
 
 The fixtures are whole ENDF/B-VIII.1 decay files (``kika/endf/tests/data``):
 Co-60 (one beta- mode; gamma, beta, e- and x-ray lines), Fe-56 (stable),

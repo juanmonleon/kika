@@ -9,11 +9,11 @@ ends on. The reaction that leaves the residual in that level only points at it
 (``branching1d``/``branching3d``). This is how FUDGE converts an evaluation and
 how the 558 distributed GNDS files read (``n-016_S_036.endf.gnds.xml``).
 
-Roadmap E5c modelled the electromagnetic subset, with the names of §12 and of
+The electromagnetic subset came first, with the names of §12 and of
 ``gnds.xsd:539-575``: ``decayData > decayModes > decayMode(label, mode) >
 probability, photonEmissionProbabilities?, decayPath > decay(index) > products``.
 
-Roadmap E7b adds the rest of §12's decay data, which is what a radioactive
+Then the rest of §12's decay data, which is what a radioactive
 decay sublibrary (ENDF MF8/MT457) states: a mode's ``Q`` and the uncertainty of
 its probability, its ``spectra`` (``spectrum(label, pid)`` of ``discrete``
 lines -- intensity, energy, transition type, internal conversion coefficients,
@@ -166,7 +166,7 @@ class DecayMode:
     probability: float
     decayPath: DecayPath = field(default_factory=DecayPath)
     photonEmissionProbabilities: Optional[PhotonEmissionProbabilities] = None
-    #: The decay sublibrary's part (E7b): the mode's Q, the probability's
+    #: The decay sublibrary's part: the mode's Q, the probability's
     #: standard uncertainty, and the spectra of what it emits.
     Q: Optional[PhysicalQuantity] = None
     probabilityUncertainty: Optional[float] = None

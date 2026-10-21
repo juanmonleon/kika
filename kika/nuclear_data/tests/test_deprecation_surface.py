@@ -1,6 +1,6 @@
 """The PEP 562 deprecation surface: what it fixes, and what it does not.
 
-Phase 3d's last commit replaced ``kika/nuclear_data/__init__.py``'s four eager
+The façades replaced ``kika/nuclear_data/__init__.py``'s four eager
 imports with a module-level ``__getattr__``. Two things follow, and only one of
 them is the advertised win, so both are asserted here rather than described.
 
@@ -17,7 +17,7 @@ path* at module scope, so those load on ``import kika`` regardless of this file.
 ``angular_distribution`` — 1000 lines, the largest of the four — and
 ``nuclide_info`` genuinely stay out.
 
-**Phase 4 P1a moved reconstruction onto the model**, and with it
+**Reconstruction moved onto the model**, and with it
 ``resonance_parameters`` stopped loading: nothing on the ``import kika`` path
 reaches the flat resonance classes any more. ``cross_section`` still loads, now
 through ``njoy_reconstruct`` alone. The tests below pin both halves, so the
@@ -156,7 +156,7 @@ def test_import_kika_no_longer_loads_the_two_biggest_flat_modules():
 def test_only_cross_section_still_loads_and_here_is_who_pulls_it():
     """Pinned so the partial win is not mistaken for the whole one.
 
-    **Phase 4 took one of the two.** ``kika.processing.reconstruct`` used to
+    **Moving reconstruction onto the model took one of the two.** ``kika.processing.reconstruct`` used to
     import ``cross_section`` and ``resonance_parameters`` by module path at
     module scope; it now computes on the model and imports neither, so
     ``resonance_parameters`` — the flat resonance classes, and the ones the
@@ -164,8 +164,8 @@ def test_only_cross_section_still_loads_and_here_is_who_pulls_it():
 
     ``cross_section`` still does, and the puller is named rather than left to be
     grepped for: ``kika/processing/njoy_reconstruct.py:32``, which returns
-    ``Dict[int, CrossSection]``. Changing what it returns is phase 4's P2 — the
-    one-sigma-source increment — not P1, and it reaches the sampling drivers, so
+    ``Dict[int, CrossSection]``. Changing what it returns is a separate
+    change — one sigma source — and it reaches the sampling drivers, so
     it is sequenced behind the parallel migration's gate. This assertion is what
     will go red when that lands, and it should be tightened again then.
     """
@@ -177,13 +177,13 @@ def test_only_cross_section_still_loads_and_here_is_who_pulls_it():
 
     assert "kika.nuclear_data.resonance_parameters" not in loaded, (
         "the flat resonance classes are being pulled in again on import kika; "
-        "phase 4 P1a took them out by moving reconstruction onto the model"
+        "moving reconstruction onto the model took them out"
     )
     assert "kika.nuclear_data.cross_section" in loaded
 
 
 def test_the_model_is_still_dormant_after_the_facade():
-    """The invariant every increment since P4 has had to keep.
+    """The invariant every increment since the façades has had to keep.
 
     The façades import the adapter *inside* their methods, so ``import kika``
     still does not build the model. If this fails, the cluster pipeline and the

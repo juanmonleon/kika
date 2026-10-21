@@ -172,7 +172,7 @@ class _ResonanceReader:
         The energy-dependent form keeps its interpolation, because the radius
         sets the hard-sphere phase shift and reading it with the wrong rule
         between nodes is a wrong phase shift rather than a missing one — the
-        reason the model grew the field in phase 4.
+        reason the model has the field.
         """
         if element is None:
             return None

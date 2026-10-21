@@ -9,17 +9,17 @@ are the calculation layer. ``kika.endf`` and ``kika.ace`` are format layers. The
 arrow points one way: formats may import the calculations, the calculations may
 not import the formats.
 
-**``kika/cov`` joined the guarded set before phase 4, not during it.** The
-phase 4 task was "extend the ratchet to ``kika/cov``: no
-``kika.endf`` imports outside the encoders", and it belongs *before* the phase
+**``kika/cov`` joined the guarded set before the covariance rewrite, not during it.** The
+task was "extend the ratchet to ``kika/cov``: no
+``kika.endf`` imports outside the encoders", and it belongs *before* the work
 that rewrites ``CrossSectionCovariance`` and ``LegendreCovariance`` to read and
 write through ``CovarianceSuite`` — a net is worth nothing installed after the
 fall. Nothing in ``kika/cov`` was changed to add it; the seven imports it had
-then were written down as they were, which is what a ratchet is for. **Phase 4's
-P4 has since taken it to six** — see the note on ``legacy_mg_plotting.py``
-below, a file phase 7 has since deleted outright.
+then were written down as they were, which is what a ratchet is for. **It has
+since gone down to six** — see the note on ``legacy_mg_plotting.py``
+below, a file since deleted outright.
 
-The phase-4 wording needs one gloss. "Outside the encoders" is not a rule this
+That wording needs one gloss. "Outside the encoders" is not a rule this
 test can express, because ``kika/cov`` is not cleanly one layer: MF34 encoding
 in ``legendre_covariance.py`` is format code that is explicitly kept
 ("their COVERX/COVFIL/BOXER/GENDF I/O are kept as format encoders, on the same
@@ -30,7 +30,7 @@ explained, and neither may grow.
 
 **Why a ratchet and not a rule.** The arrow was inverted in places, worst of
 all ~960 lines of pure numerics living inside ``kika/endf/processing/`` and
-re-exported *upward* by shims in ``kika/processing/``. Phase 2 of the GNDS
+re-exported *upward* by shims in ``kika/processing/``. The GNDS
 migration moved four of them — ``linearization``, ``penetration``,
 ``resonance_formulas``, ``urr_formulas`` — and deleted the shims, which had no
 other importers. ``resonance_bounds`` stayed put: it reads
@@ -82,7 +82,7 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 
 #: Runtime imports of a format package, per module. May only decrease.
 #:
-#: Phase 2 took kika/processing from 8 entries to 3. It does **not** reach
+#: The GNDS migration took kika/processing from 8 entries to 3. It does **not** reach
 #: zero, and the original plan was wrong to say it would: the three that
 #: remain each need ``kika.endf.read_endf`` to parse a PENDF tape, which is a
 #: real dependency and not a layering accident. All three are deferred to call
@@ -91,7 +91,7 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #: import from ``kika.processing`` at module scope, and ``interpolate_1d``
 #: could not move down at all.
 #:
-#: **Phase 3d makes this figure go up, on purpose.** The flat classes become
+#: **The façades make this figure go up, on purpose.** The flat classes become
 #: façades whose ``from_endf``/``to_endf`` route through
 #: ``kika.endf.model_adapter``, so each gains an import of it. That is a worse
 #: layering number and a better library: the alternative is two decoders for the
@@ -110,7 +110,7 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #: values" in a docstring, a design note and an error message while the values sat
 #: parsed in ``ace.q_values``. One decoder, one convention, one worse number.
 #:
-#: **M2 raises ``nuclide_info.py`` from 1 to 2, and it is the façade's own
+#: **The MF1 façade raises ``nuclide_info.py`` from 1 to 2, and it is the façade's own
 #: definition rather than a new coupling.** ``NuclideInfo.to_endf`` has to
 #: *construct* an ``MF1MT451``, so it imports the class it builds; the existing
 #: entry is ``from_endf``'s ``decodeMF1MT451``. A canonical→format method that
@@ -119,7 +119,7 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #:
 #: **The ``kika/cov`` entries are seeded, not earned**, and they are not all the
 #: same kind of thing — which is the point of listing them separately rather
-#: than quoting one total for the package. There were three; phase 4's P4 cut
+#: than quoting one total for the package. There were three; a refactor cut
 #: one, and the note on it is kept below because *why* it was cheap is the
 #: transferable part.
 #:
@@ -130,7 +130,7 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #: format work, kept deliberately. The fourth (line 199) is ``read_endf`` in the
 #: reading direction. All four are deferred to call time.
 #:
-#: ``parse_covmat.py`` (1) — **gone, phase 4 P4, and it was the genuine leak**:
+#: ``parse_covmat.py`` (1) — **gone, and it was the genuine leak**:
 #: the only import in ``kika/cov`` that ran at *import* time rather than at call
 #: time. It took ENDF's record grammar — ``parse_number``, ``parse_line``,
 #: ``parse_endf_id``, ``format_endf_number``, ``format_endf_data_line``,
@@ -139,13 +139,13 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #: record convention, so the dependency was real rather than lazy, and deferring
 #: it would have hidden the problem instead of fixing it. The grammar moved down
 #: to :mod:`kika._records` — the same species as ``interpolate_1d_endf``, which
-#: phase 2 moved to ``kika.processing`` precisely because the interpolation laws
+#: was moved to ``kika.processing`` precisely because the interpolation laws
 #: are not ENDF's property either. ``kika.endf.utils`` re-exports it, so the
 #: forty-odd importers inside ``kika/endf`` and the public-surface pin on
 #: ``parse_endf_id`` are untouched. The prediction written here — "this entry
 #: goes to zero and no other line here changes" — held exactly.
 #:
-#: ``multigroup/legacy_mg_plotting.py`` (1) — **cut in phase 4's P4**, and it was
+#: ``multigroup/legacy_mg_plotting.py`` (1) — **cut**, and it was
 #: the weakest of the three: a ``try``/``except`` around a **private** helper,
 #: ``kika.endf.classes.mf4.plotting._plot_uncertainty_bands``. What made it cheap
 #: was not the ``except`` but the helper itself — it never needed ENDF at all.
@@ -158,7 +158,7 @@ FORBIDDEN_ROOTS = ("kika.endf", "kika.ace", "kika.gnds", "kika.g4ndl", "kika.hdf
 #: Reaching through a leading underscore into another package is the part worth
 #: recording, and it is now nobody's import.
 #:
-#: The file itself is gone as of phase 7 (September 2026). It was reachable only
+#: The file itself is gone as of September 2026. It was reachable only
 #: through ``plotting_mg.py``, the deprecation shim that ``kika/cov/multigroup/
 #: __init__.py`` star-imported, so importing the package paid for 1553 lines and
 #: a DeprecationWarning that no caller ever wanted. The note stays because the
@@ -383,7 +383,7 @@ def test_the_ratchet_catches_a_violation(tmp_path, monkeypatch):
 #: dependency is real in every case and only its *timing* is negotiable.
 #:
 #: ``kika/processing``'s three genuinely need ``read_endf`` to parse a PENDF
-#: tape. **``kika/cov`` joined in phase 4's P4**, and it could not have before:
+#: tape. **``kika/cov`` joined later**, and it could not have before:
 #: ``parse_covmat.py`` imported the record grammar at module scope, so this
 #: check would have failed on the day it was written. Deferring that import
 #: would have passed the check and left the leak; moving the grammar to
@@ -393,7 +393,7 @@ _MUST_DEFER = ("kika/processing", "kika/cov")
 
 #: The canonical model. Not a *format* package, so the ratchet above says
 #: nothing about it — and it must not, because ``kika/processing`` computing on
-#: the model is the whole point of phase 4. What is forbidden is only the
+#: the model is the whole point of the migration. What is forbidden is only the
 #: *timing*, for the same reason the ENDF imports are: see
 #: ``test_processing_does_not_wake_the_model_at_import_time``.
 _MODEL_ROOT = "kika.nuclear_data.model"
@@ -460,14 +460,14 @@ def test_processing_pulls_no_format_package_in_at_import_time():
     ``kika.processing`` at module scope at all**, because the cycle closed and
     ``import kika`` died with "partially initialized module". ``interpolate_1d``
     could not be moved down, and neither could anything else, ever, until it was
-    fixed. Phase 2 fixed it by deferring three imports to call time.
+    fixed. Deferring three imports to call time fixed it.
 
     **Nothing checked that it stays fixed.** The ratchet counts import
     statements, not when they run, so re-hoisting one of the three to module
     scope leaves every existing test green and re-closes the cycle. This was
     flagged as "worth a dedicated test at some point", with the rule
-    that every phase 4-9 increment touching ``kika/processing`` has to keep the
-    imports deferred — which makes this the net that belongs *before* phase 4,
+    that every later increment touching ``kika/processing`` has to keep the
+    imports deferred — which makes this the net that belongs *before* that work,
     not after it.
 
     A subprocess check was the obvious shape and does not work: ``import
@@ -487,7 +487,7 @@ def test_processing_pulls_no_format_package_in_at_import_time():
 
     assert not offenders, (
         "these modules import a format package at module scope, "
-        "which re-closes the import cycle phase 2 opened:\n"
+        "which re-closes the import cycle that deferring them broke:\n"
         + "\n".join(
             f"  {name}:{line} imports {dotted}"
             for name, hits in offenders.items()
@@ -557,9 +557,9 @@ def test_that_check_catches_a_hoisted_import(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_processing_does_not_wake_the_model_at_import_time():
-    """Phase 4's companion to the check above, and it guards a bigger number.
+    """The companion to the check above, and it guards a bigger number.
 
-    Phase 4 moves the calculations onto ``kika.nuclear_data.model``, so
+    The GNDS migration moves the calculations onto ``kika.nuclear_data.model``, so
     ``kika/processing`` importing it is correct and expected — *at call time*.
     At module scope it is a regression nothing else would notice, because
     ``kika/__init__.py`` does ``from . import processing`` and would then build
@@ -573,7 +573,7 @@ def test_processing_does_not_wake_the_model_at_import_time():
     a *count* of these imports is the wrong instrument. Deferred imports of it
     are supposed to grow.
 
-    **``kika/cov`` is covered too, since P4.** The number there is if anything
+    **``kika/cov`` is covered too.** The number there is if anything
     larger: ``import kika`` loads ``kika.cov`` — measured, not assumed — so a
     module-scope model import in the multigroup collapse would wake the model
     for the cluster pipeline and kika-app alike, exactly as it would from
@@ -601,7 +601,7 @@ def test_processing_does_not_wake_the_model_at_import_time():
 
 
 def test_that_model_check_catches_a_hoisted_import(tmp_path, monkeypatch):
-    """It bites, and it does not fire on the deferred imports P1a actually wrote."""
+    """It bites, and it does not fire on deferred imports."""
     package = tmp_path / "kika" / "processing"
     package.mkdir(parents=True)
 

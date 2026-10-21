@@ -1,6 +1,6 @@
 """``XYs2d`` and ``regions2d``: the outer axis is a list, and that is the point.
 
-These were ``NotImplementedError`` stubs until phase 7b. What forced them open
+These were ``NotImplementedError`` stubs at first. What forced them open
 was a modelling mistake caught on the committed Fe-56 slice: ``AngularTwoBody``
 held ``Dict[float, Function1d]``, and MF4 repeats an incident energy — once as
 a discontinuity inside one grid, once at the boundary between the Legendre and

@@ -1,4 +1,4 @@
-"""G3/G4: kika's ENDF from NNDC's GNDS is FUDGE's ENDF from the same GNDS.
+"""kika's ENDF from NNDC's GNDS is FUDGE's ENDF from the same GNDS.
 
 The strongest gate the GNDS->ENDF derivation has: the distributed ENDF/B-VIII.1
 GNDS files were written by FUDGE from the ENDF tapes, and FUDGE's ``toENDF6``
@@ -10,7 +10,7 @@ polluted by what GNDS lost.
 Measured 2026-10-09, every MT of MF1/452-458, MF3, MF4, MF5, MF6 and MF12-15
 identical in its numbers (blank and zero read alike) on Be-9, Li-6, Fe-56 and
 U-235, and MF12-15 on N-14 (MF13 on its sums' orphanProducts included); MF1/451
-differs only in its directory, which lists MF2 (G5, not this line). Measured
+differs only in its directory, which lists MF2 (not derived here). Measured
 again 2026-10-20 with kika's writer writing the closest legal field: where
 kika's field carries more digits than FUDGE's seven significant ones
 (``3.967130999`` against ``3.967131+0``), it rounds to FUDGE's.

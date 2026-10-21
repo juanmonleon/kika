@@ -76,7 +76,7 @@ _MF1_EVALUATION_INFO = (
 
 
 def backgroundTable(form, name: str, report=None):
-    """§16.1.1's background, as the one MF3 table ENDF states (G2, NNDC GNDS).
+    """§16.1.1's background, as the one MF3 table ENDF states (NNDC GNDS).
 
     MF3 *is* the background: ENDF adds the resonances to it at processing time
     and GNDS says so with ``resonancesWithBackground``. FUDGE writes the three

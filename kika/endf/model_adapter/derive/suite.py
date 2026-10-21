@@ -1,4 +1,4 @@
-"""G1: the suite's own ENDF bookkeeping — MAT, ZA, AWR and the MF1/451 header.
+"""The suite's own ENDF bookkeeping — MAT, ZA, AWR and the MF1/451 header.
 
 Everything else takes these three from here, because ENDF stamps them on every
 section and a tape that disagreed with itself about AWR would be worse than one

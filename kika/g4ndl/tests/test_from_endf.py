@@ -1,4 +1,4 @@
-"""Phase 9: an ENDF evaluation → RECONR at 0 K → the model → G4NDL.
+"""An ENDF evaluation → RECONR at 0 K → the model → G4NDL.
 
 Acceptance: the processed σ agrees with an independent
 processor within a declared tolerance, the thermal treatment is stated, and the
@@ -100,7 +100,7 @@ def test_fe56_jeff40_against_the_iaea_translation(tmp_path, fe56_jeff40_tape, nj
     assert np.abs(ours / theirs - 1).max() < 2e-3
 
 
-# ---------------------------------------------------------- Phase 10, inelastic
+# -------------------------------------------------------------------- Inelastic
 
 def _sameUpToTheTranslation(ours, theirs):
     """MF4/MF6 bodies equal but for what the IAEA translation does.

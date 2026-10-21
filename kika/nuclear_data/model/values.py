@@ -7,8 +7,8 @@ the zeros that were not written. Covariance rows are mostly zero, so this is not
 an optimisation the format added for fun — it is what makes a ``covarianceSuite``
 a reasonable size.
 
-Round-tripping that compression exactly is a phase 6/7 concern, but the shape
-has to be right now, because the decoders written in phase 3c fill it.
+Round-tripping that compression exactly is the writers' concern, but the shape
+has to be right now, because the ENDF decoders fill it.
 """
 from __future__ import annotations
 

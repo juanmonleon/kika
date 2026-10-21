@@ -67,13 +67,13 @@ def test_the_fixture_reads_back_as_written(covarianceSuite):
 
 
 # ----------------------------------------------------------------------
-# J1: an MF34 selection without orders leaves L=0 out, and says so
+# An MF34 selection without orders leaves L=0 out, and says so
 # ----------------------------------------------------------------------
 
 def test_an_angular_request_leaves_the_cross_section_alone(covariance):
     """``{34: None}`` perturbs the shape and nothing else; L=0 is a note.
 
-    Before J1 the L=0 factors landed on sigma and MF3 was rewritten by a
+    Before, the L=0 factors landed on sigma and MF3 was rewritten by a
     request that named only the angular distribution.
     """
     run = _run(covariance, {34: None})
@@ -98,7 +98,7 @@ def test_naming_order_zero_still_perturbs_sigma_from_mf34(covariance):
 def test_cross_section_and_angular_together_are_drawn(covariance):
     """``{33, 34}`` no longer refuses: MF33 gives sigma, L>=1 the shape.
 
-    And since J3 (2026-10-14) the sigma <-> a_l term L0xLl is drawn with them;
+    And since 2026-10-14 the sigma <-> a_l term L0xLl is drawn with them;
     the gates are in ``test_the_sigma_shape_cross_term_is_drawn.py``.
     """
     run = _run(covariance, {33: None, 34: None})

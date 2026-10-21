@@ -8,7 +8,7 @@ COVERX, COVFIL and BOXER use the same one, which is why
 time rather than at call time, and the one the layering ratchet called "the
 genuine leak".
 
-Moved here in phase 4's P4, on the precedent phase 2 set with
+Moved here on the precedent set by moving
 ``interpolate_1d_endf`` -> ``kika.processing.interpolation``: the interpolation
 laws are not ENDF's property either, and the fix for a real shared dependency
 is to put the shared thing where both callers can reach it without one

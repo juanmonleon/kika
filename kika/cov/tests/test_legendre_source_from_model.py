@@ -13,7 +13,7 @@ today and after either of them changes.
 The model side arrives through ``kika.read()`` — the one door — rather than by
 calling ``decodeMF4MT``. That is not politeness: it means this test exercises
 the path a user actually has, and it keeps ``kika/cov`` free of the adapter
-import, which is what P4 had just finished removing.
+import, which had just been removed.
 """
 from __future__ import annotations
 

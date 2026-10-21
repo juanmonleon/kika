@@ -74,7 +74,7 @@ you want, or go through :func:`kika.read` / :func:`kika.write`:
 :mod:`~kika.gnds.primitives`          §5-6 ``values``/``axes``/the functionals
 :mod:`~kika.gnds.styles`              §9, shared by both roots
 :mod:`~kika.gnds.decode`              §14 ``reactionSuite`` → the model
-:mod:`~kika.gnds.distributions`       §18, split out when phase 7b started
+:mod:`~kika.gnds.distributions`       §18, split out when the §18 laws started
                                       filling it — the reader spanned five
                                       specification chapters and this is the
                                       one that grows

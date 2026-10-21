@@ -1,6 +1,6 @@
 """:class:`~kika.nuclear_data.model.suite.ReactionSuite` → G4NDL inelastic files.
 
-Phase 10, step 5: the mirror of :mod:`kika.g4ndl.inelastic_decode`, built the
+The mirror of :mod:`kika.g4ndl.inelastic_decode`, built the
 way :mod:`kika.g4ndl.encode` is. The model goes to the records the parser
 produces (:mod:`kika.g4ndl.inelastic_records`), the records to text
 (:mod:`kika.g4ndl.inelastic_format`), and every text is parsed back with the

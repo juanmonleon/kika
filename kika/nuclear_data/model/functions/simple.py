@@ -2,7 +2,7 @@
 ``Ys1d``, ``Legendre`` and ``gridded1d``.
 
 Small enough to share a module. Each is a real implementation rather than a
-stub — they are cheap, and phase 3c's ENDF decoders need ``Legendre`` (MF4) and
+stub — they are cheap, and the ENDF decoders need ``Legendre`` (MF4) and
 ``gridded1d`` (multigroup) as soon as they are written.
 """
 from __future__ import annotations

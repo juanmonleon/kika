@@ -38,14 +38,14 @@ is temporary.
   the carrier until autofix is retired or ported, which is
   its own change, in kika-app first (``autofix='soft'`` is every kika-app
   default; ``None`` is every kika one, and then this function is a no-op). Found
-  when the M1 source landed, and it is why the source can be equivalent and the
+  when the model-side source landed, and it is why the source can be equivalent and the
   call sites still be here.
 
 **The NaN fill is left as the carrier states it.** An unstated cross block
 comes back ``np.nan`` and stays that way until :func:`~kika.sampling.core.draw_samples`
 zeroes it immediately before decomposing — which is exactly where
-``generate_samples`` zeroes it today. Filling here instead would be defect D11's
-fix, and that fix changes what ``autofix`` decides, so it is a separate change
+``generate_samples`` zeroes it today. Filling here instead would be the fix for the
+NaN cross blocks, and that fix changes what ``autofix`` decides, so it is a separate change
 with its own before/after rather than a side effect of an adapter.
 """
 from __future__ import annotations

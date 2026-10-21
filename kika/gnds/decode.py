@@ -28,7 +28,7 @@ data. What the census settled:
                            ``uncorrelated``, ``energyAngular``,
                            ``angularEnergy``, ``KalbachMann`` and
                            ``branching3d`` joined ``angularTwoBody`` and
-                           ``unspecified`` over phase 7b. The report's
+                           ``unspecified``. The report's
                            ``unsupported`` list is empty on every distributed
                            evaluation, and ``test_cross_section_oracle`` pins
                            that on the 18.8 MB Fe-56 file.
@@ -54,7 +54,7 @@ that does. The resolver, the report and the path builder are the reader's state,
 so they live on it.
 
 **PoPs is read minimally and says so.** §12 is its own database and its own
-project; ``ReactionSuite`` requires the node, and what phase 3 needs from it is
+project; ``ReactionSuite`` requires the node, and what the model needs from it is
 ids, masses, spins, charges and halflives. Aliases, decay data and nuclear level
 energies are dropped, and the report carries one aggregated entry saying how
 many of each — one entry rather than 34 375, because a report nobody can read
@@ -819,9 +819,8 @@ def readReactionSuite(
     -------
     (ReactionSuite, ConversionReport)
         The report is **not** optional reading. This decode is partial by
-        design: the §18 energy and energy-angle laws are phase 7b, and a file
-        whose products carry ``uncorrelated`` distributions comes back with
-        those products present, their multiplicities read, and no distribution.
+        design: a file whose products carry a distribution form the reader
+        does not read comes back with those products present, their multiplicities read, and no distribution.
         The report names each one with its xPath.
     """
     report = report if report is not None else ConversionReport()

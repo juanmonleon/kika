@@ -7,7 +7,7 @@ so the reader under test opens them the way it opens a real one:
 ``JEFF-4.0/`` and ``G4NDL-4.7.1/``
     Real files, copied **byte for byte** (still zlib-compressed) from the IAEA
     JEFF-4.0 G4NDL translation (Mendoza & Cano-Ott) and from Geant4's own
-    G4NDL 4.7.1. Chosen by ``kika-workspace/myworkspace/G4NDL/inventory.py`` as
+    G4NDL 4.7.1. Chosen by an inventory of both libraries as
     the smallest file showing each construct; ``REAL`` below says which.
     Kept small on purpose (~130 kB): Fe-56 and anything else full-size is
     read from the whole library by the ``tape``-marked tests instead
@@ -16,7 +16,7 @@ so the reader under test opens them the way it opens a real one:
 ``inelastic/JEFF-4.0/`` and ``inelastic/G4NDL-4.7.1/``
     Real ``Inelastic/`` files, byte for byte, kept apart from the elastic
     mini libraries so that those keep testing an elastic-only library. Chosen
-    by ``kika-workspace/myworkspace/G4NDL/phase10/`` as the smallest file
+    by an inventory of both libraries as the smallest file
     showing each section type and law (``INELASTIC`` says which), plus one
     whole isotope (Pu-244 of G4NDL 4.7.1: its ``Inelastic/CrossSection`` and
     every channel, 2.3 kB) for the total and the sums, and two level schemes

@@ -1,6 +1,6 @@
-"""The phase 4 gate: the model's functions equal the flat path **bit for bit**.
+"""The gate: the model's functions equal the flat path **bit for bit**.
 
-``np.testing.assert_array_equal``, not ``allclose``. Phase 3's whole claim is
+``np.testing.assert_array_equal``, not ``allclose``. The model's whole claim is
 that the new model computes the same numbers as the code it will replace, and
 "the same to 1e-12" is a different and weaker claim — one that lets a
 reimplementation drift somewhere nobody looks.

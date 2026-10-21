@@ -1,4 +1,4 @@
-"""Q0 of the PFNS migration: the model draws MF35 the way the shipped pipeline does.
+"""The model draws MF35 the way the shipped pipeline does.
 
 ``perturbFromModel`` could already apply a fission-spectrum perturbation, and
 ``test_perturbing_a_fission_spectrum_on_the_model.py`` gates that applier
@@ -57,7 +57,7 @@ def _modelDeltas(run):
 
 
 # ======================================================================
-# Q0.1 + Q0.2 -- what may be drawn at all
+# What may be drawn at all
 # ======================================================================
 
 @pytest.mark.parametrize("name", TAPES)
@@ -116,7 +116,7 @@ def test_an_explicit_null_tolerance_still_wins():
 
 
 # ======================================================================
-# Q0.3 -- the conditioning a band may receive
+# The conditioning a band may receive
 # ======================================================================
 
 def test_the_automatic_plan_clips_a_spectrum_band():
@@ -147,7 +147,7 @@ def test_a_plan_that_would_break_the_sum_rule_is_refused(remedy):
 
 
 # ======================================================================
-# Q0.4 -- the run says what the legacy run says
+# The run says what the legacy run says
 # ======================================================================
 
 #: Per band, from the draw. The names are the legacy run summary's.
@@ -204,7 +204,7 @@ def test_a_run_without_a_spectrum_does_not_claim_one(tmp_path):
 
 
 # ======================================================================
-# Q0.5 -- the point cap reaches the applier
+# The point cap reaches the applier
 # ======================================================================
 
 def test_the_outgoing_point_cap_reaches_the_applier():

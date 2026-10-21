@@ -25,7 +25,7 @@ flood sbatch logs, and not at import, which would break every consumer at once
 for a message none of them asked for.
 
 The honest note, stated once: the model this points at cannot yet reconstruct
-cross sections, group-average, or collapse covariances — that is phase 4. So
+cross sections, group-average, or collapse covariances — that comes later. So
 the warning says these classes are *going away*, not that there is a drop-in
 replacement for everything they do today.
 """

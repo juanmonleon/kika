@@ -1,7 +1,7 @@
 """The committed GNDS fixtures are what they claim to be.
 
-This is phase 5's P0: no reader exists yet, and these tests are what the reader
-will be written against. Every claim a fixture's docstring makes — "this one
+Written before the reader: these tests are what the reader
+was written against. Every claim a fixture's docstring makes — "this one
 carries ``slices``", "this pair's checksum is real", "the trim leaves no
 dangling href" — is asserted here, because a fixture whose description has
 drifted from its content is worse than no fixture: it makes a reader look
@@ -137,7 +137,7 @@ def test_the_fe56_trim_left_no_dangling_href(micro_fe56_gnds):
 
     ``build_micro_fe56_gnds.py`` drops ``externalFiles`` and everything that
     referenced it. A surviving ``$covariances#`` href would be a *silent* defect:
-    every later phase would read the unresolvable link as a reader bug and go
+    every later test would read the unresolvable link as a reader bug and go
     looking in the wrong place.
     """
     root = ET.parse(micro_fe56_gnds).getroot()
@@ -153,7 +153,7 @@ def test_the_fe56_trim_kept_its_resonances_whole(micro_fe56_gnds):
     """The resonance block is the only reason this fixture exists.
 
     The row counts are pinned deliberately. They are the trim's contract with
-    every later phase — P5 asserts the decoded spin groups against these — and
+    every later test — the decoded spin groups are asserted against these — and
     if a re-cut from a re-issued evaluation changes them, that must surface here
     and not as an unexplained failure in the resonance decoder.
     """
@@ -175,7 +175,7 @@ def test_the_fe56_trim_kept_its_resonances_whole(micro_fe56_gnds):
     # the href, because a GNDS label may itself end in ``]`` — this evaluation's
     # capture channel is literally ``Fe57 + photon [inclusive]`` — and a
     # ``strip("']")`` eats the label's own bracket. That is the first thing the
-    # phase 1 xPath resolver has to get right, so it is pinned here first.
+    # xPath resolver has to get right, so it is pinned here first.
     linked = {
         match.group(1)
         for node in rmatrix.iter("link")
@@ -250,7 +250,7 @@ def test_the_gnds_marker_is_applied(request, gnds_data_dir):
     """``-m gnds`` selects this test, because it asked for a GNDS fixture.
 
     ``conftest.py`` has claimed since it was written that ``gnds`` is applied
-    automatically from fixtures; nothing applied it until this phase, so
+    automatically from fixtures; nothing applied it until this test, so
     ``-m gnds`` quietly selected nothing. This is the test that keeps the
     docstring honest.
     """

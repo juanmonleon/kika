@@ -92,7 +92,7 @@ def test_the_request_draws_sigma_from_mf33_and_the_shape_from_l1_l2(run):
     (note,) = [n for n in run.notes if "states L=0" in n]
     assert "null" in note and "nothing is lost" in note
     # MF4/MT2 is LTT=3 with tables from 17 MeV and the MF34 runs to 30 MeV, so
-    # the tabulated half is perturbed too -- decision D1, here with the
+    # the tabulated half is perturbed too -- by design, here with the
     # evaluation's own, well-formed covariance.
     for component, info in sample["applied"].items():
         if component.mf == 34:
@@ -138,7 +138,7 @@ def test_sigma_and_shape_are_drawn_independently(run):
 
 
 def test_sigma_and_shape_are_independent_under_sobol_too():
-    """D35: was a strict xfail until the blocks shared one Sobol sequence.
+    """Was a strict xfail until the blocks shared one Sobol sequence.
 
     Each block drew its own Sobol and the blocks were paired by replica, so two
     blocks the file leaves independent came out correlated -- 95th percentile

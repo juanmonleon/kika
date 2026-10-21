@@ -14,7 +14,7 @@ plain ``import kika``.
 node name with its first letter capitalised (``XYs1d``, ``Regions1d``,
 ``PhysicalQuantity``), and attributes keep the spec's spelling exactly
 (``outerDomainValue``, ``domainMin``, ``valueType``, ``interpolationQualifier``).
-Do **not** "fix" these to snake_case — the phase 5 reader resolves GNDS nodes by
+Do **not** "fix" these to snake_case — the GNDS reader resolves GNDS nodes by
 introspection on these names, and a rename silently breaks it.
 ``tests/test_gnds_naming.py`` enforces this, because a documented convention
 does not survive contact with a linter or an agent. Local variables and private
@@ -51,7 +51,7 @@ and is declared rather than given a product.
 
 A docstring that reasons about the state of *another* part of this tree expires
 in silence: the paragraph above replaced one that had gone on claiming, long
-after phase 3c closed, that nothing decoded ENDF into these containers. Either
+after the ENDF decoders landed, that nothing decoded ENDF into these containers. Either
 date such a sentence or point it at the test that fails when it stops holding.
 """
 from __future__ import annotations
