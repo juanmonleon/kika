@@ -16,9 +16,18 @@ Each tape carries one defect the processing now handles as NJOY and FUDGE do:
 """
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 import pytest
 
-from conftest import resolve_tape
+# the repository's conftest, by path: a bare `from conftest import` takes whichever
+# conftest a full collection put first on sys.path (kika/plotting/tests has one)
+_spec = importlib.util.spec_from_file_location(
+    "_kika_root_conftest", Path(__file__).resolve().parents[3] / "conftest.py")
+_root = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_root)
+resolve_tape = _root.resolve_tape
 
 pytestmark = pytest.mark.tape
 

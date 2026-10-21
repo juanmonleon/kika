@@ -372,7 +372,6 @@ def test_process_gnds_reprocesses_kikas_own_gnds(run, tmp_path):
 
 def test_gnds_and_endf_routes_agree_once_broadened(tmp_path):
     """The same evaluation through both doors: Au-197 B-VIII.1, ENDF and GNDS."""
-    from conftest import resolve_library  # noqa: F401  (library roots, as the other library tests)
     import os
     root = Path(os.environ.get("KIKA_LIB_TAPES", "/share_snc/lib/endf"))
     endf = root / "endfb81/n-079_Au_197.endf"
