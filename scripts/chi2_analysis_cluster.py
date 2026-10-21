@@ -1412,6 +1412,18 @@ PATHS: Dict[str, Dict[str, Optional[str]]] = {
         "title":      "χ² — cinta de la tesis (run 077) sin PPP (c₀ y modos referidos al modelo)",
         "systematic_block_col": "energy_mev",
     },
+    # 2026-10-21 — TH77Q: TH77P con el nivel de This_work tratado igual que el de
+    # JEFF/JENDL. Forma de cada bin fija (nominal_fits de 077) y nivel reajustado
+    # con los modos referidos al modelo sobre los MISMOS puntos que uso el ajuste
+    # de 077 (1738/1738 bins reproducidos). Entra por KIKA_NOMINAL_FITS =
+    # /share_snc/snc/JuanMonleon/chi2/nominal_fits_077_ppp.parquet (cada c_l del bin × k_bin).
+    # Scripts: kika-workspace publications/thesis-analysis/CHAPTER-3/chi2_analysis/ppp_this_work/.
+    "exfor_c0_TH77Q": {
+        "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_exfor_c0_TH77Q.parquet",
+        "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_exfor_c0",
+        "title":      "χ² — cinta de la tesis (run 077) sin PPP, nivel de This_work reajustado como JEFF/JENDL",
+        "systematic_block_col": "energy_mev",
+    },
     "library_c0": {
         "parquet":    "/share_snc/snc/JuanMonleon/chi2/chi2_data_library_c0_82.parquet",
         "report_dir": "/share_snc/snc/JuanMonleon/CHI_Figures/chi2_library_c0",
