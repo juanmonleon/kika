@@ -228,29 +228,64 @@ incoherent, inelastic-only and mixed elastic):
 
 Against the official OpenMC ENDF/B-VIII.1 library (processed by NJOY), for H-1, O-16,
 Fe-56, U-234, U-235, U-238, Pu-239, Pu-240 and Pu-241 written by kika from the ENDF/B-VIII.1
-evaluations, with {py:func}`kika.hdf5.compare.compareNeutron` (measured 2026-10-11): the
-same reactions in all nine except MT 3 of Pu-241; no structural difference in eight (U-234
-has fewer cascade lines in five high levels); the resonance integral (0.5 eV to 1 MeV, 1/E)
-and the Maxwellian average at the file's $kT$ of MT 2, 18 and 102 within 0.056 %. For
-JEFF-4.0 (H-1, O-16, Fe-56, U-235, U-238, Pu-239), the same integrals within 0.1 %.
+evaluations at 293.6 K with the default tolerance, with
+{py:func}`kika.hdf5.compare.compareNeutron` (measured 2026-10-21): the same reactions in
+all nine; no structural difference in eight (U-234 has fewer cascade lines in five high
+levels, MT 69, 75, 76, 80 and 86, 19 to 45 photon products against 39 to 54); the
+resonance integral (0.5 eV to 1 MeV, 1/E) and the Maxwellian average at the file's $kT$ of
+MT 2, 18 and 102 within 0.041 % (O-16 MT 102), and within 0.021 % for the other eight.
 
-In OpenMC 0.16.0, with the official library and kika's files for those nine nuclides (and
-kika's H in H₂O in the UO₂ cell) against the official library alone, 20 000 particles × 120
-batches (measured 2026-10-11), $\Delta k$ with the URR tables off / on: UO₂ pin cell
-$-42 \pm 88$ / $+18 \pm 92$ pcm, Godiva $-29 \pm 64$ / $+35 \pm 70$ pcm, Jezebel
-$+99 \pm 64$ / $-0 \pm 60$ pcm, an iron benchmark $+28 \pm 72$ / $-27 \pm 73$ pcm: all
-within $2\sigma$.
+For JEFF-4.0 (H-1, O-16, Fe-56, U-235, U-238, Pu-239) against the official OpenMC JEFF-4.0
+library, the same reactions, no structural difference, and the same integrals within
+0.021 %, except the capture of O-16 (0.17 mb at 0.0253 eV): resonance integral −0.11 %,
+Maxwellian average −0.070 % (measured 2026-10-21). The Maxwellian difference is the
+official table's. Below 1 eV both files hold the capture as $1/v$ at their nodes (to
+$2.5\cdot10^{-4}$), and against the exact $1/v$ law the Maxwellian average of kika's table
+is low by 0.0065 % and the official one high by 0.064 %: read lin-lin, a chord of a convex
+curve lies above it, and the official grid has 234 points below 1.27 eV ($50\,kT$) against
+kika's 405.
 
-The size per temperature of kika's files is 0.52 to 1.08 times the official one for eight
-of the nine nuclides, and 1.16 times for U-238, whose official table is thinner than the
-$10^{-3}$ tolerance it is processed to (it departs from kika's by up to 2.2 % in MT 102
-between 100 eV and 20 keV; measured 2026-10-11).
+In OpenMC 0.16.0, the official ENDF/B-VIII.1 library with kika's files for those nine
+nuclides (and, in the UO₂ pin cell, kika's H in H₂O, processed by kika from the ENDF/B-VIII.1
+thermal evaluation) against the official library alone, 20 000 particles × 120 batches
+(20 inactive), every material at 293.6 K (measured 2026-10-21), $\Delta k$ with the URR
+probability tables off / on, $\pm$ the combined standard deviation of the two runs:
 
-`TODO(check)`: these comparisons are from before the latest heating changes and before
-the thermal tolerance rule and the shared tolerance budget of the thinning. They need the
-nine nuclides processed again, `compareNeutron` on each, and the four OpenMC pairs at
-20 000 × 120 per side run again. The benchmark names and models (UO₂ pin cell, iron)
-need their references.
+| Model | URR tables off (pcm) | URR tables on (pcm) |
+|---|---|---|
+| UO₂ pin cell | $+125 \pm 91$ | $-102 \pm 89$ |
+| Godiva | $+2 \pm 68$ | $+20 \pm 69$ |
+| Jezebel | $-72 \pm 65$ | $-39 \pm 59$ |
+| Iron | $+17 \pm 70$ | $-27 \pm 78$ |
+
+All eight are within $1.4\sigma$. What is compared is the same model under two libraries,
+so the difference is the data; two of the models are not published benchmarks, and none of
+the $k$ values is compared with an experiment:
+
+- **Godiva**: the simplified model of ICSBEP HEU-MET-FAST-001 (ICSBEP Handbook), a bare
+  sphere of uranium of radius 8.7407 cm at 18.74 g/cm³, 1.02 / 93.71 / 5.27 wt% U-234 /
+  U-235 / U-238.
+- **Jezebel**: the sphere of ICSBEP PU-MET-FAST-001 (radius 6.3849 cm) of plutonium at
+  15.61 g/cm³, 95.2 / 4.5 / 0.3 at.% Pu-239 / Pu-240 / Pu-241, with the benchmark's
+  gallium (1.02 wt%) left out: a variant of the benchmark, whose $k$ is not the benchmark's.
+- **UO₂ pin cell**: not a published benchmark. An infinite square lattice (pitch 1.26 cm,
+  reflective) of a bare UO₂ pin of radius 0.4096 cm at 10.4 g/cm³, 4 at.% U-235 in the
+  uranium, no gap and no cladding, in water at 1.0 g/cm³ with the H in H₂O thermal table.
+- **Iron**: not a published benchmark. Godiva's sphere inside a 10 cm shell of Fe-56 alone
+  at 7.874 g/cm³ (outer radius 18.7407 cm), so that Fe-56's inelastic levels and its photon
+  production enter.
+
+The size of kika's files, as {py:func}`~kika.hdf5.compare.compareNeutron` measures it (the
+data at the temperatures both files hold and the data that does not depend on the
+temperature), is 0.91 (Pu-241) to 1.65 (U-238) times the official one for eight of the nine
+ENDF/B-VIII.1 nuclides, and 3.0 times for H-1 (measured 2026-10-21). Three choices make
+kika's files larger, each for a precision NJOY's tables do not have: the cross sections of
+a temperature are thinned to the share of the $10^{-3}$ tolerance the 0 K source and the
+broadening leave, where NJOY thins to the whole $10^{-3}$ after reconstructing and broadening
+to it; tabulated angular distributions hold the density to $10^{-3}$, where NJOY's ACER
+thins its Legendre tables to $2\cdot10^{-3}$ (O-16's elastic tables hold 1.7 times the
+official cosines); and H-1's capture photon carries the angular distribution the
+evaluation gives at 153 energies, which the official file writes isotropic.
 
 ## Implementation
 
@@ -278,6 +313,9 @@ need their references.
   Formats", <https://docs.openmc.org/en/v0.16.0/io_formats/nuclear_data.html>.
 - D. A. Brown (ed.), *ENDF-6 Formats Manual*, Brookhaven National Laboratory (2023),
   doi:10.2172/2007538: MF 1/MT 458.
+- NEA Nuclear Science Committee, *International Handbook of Evaluated Criticality Safety
+  Benchmark Experiments*, NEA/NSC/DOC(95)03, OECD Nuclear Energy Agency, Paris:
+  HEU-MET-FAST-001 (Godiva) and PU-MET-FAST-001 (Jezebel).
 - R. Sher and C. Beck, EPRI NP-1771, Electric Power Research Institute (1981): the energy
   dependence of the fission energy release, as the ENDF-6 manual (CSEWG document
   ENDF-102) recommends it for MF 1/MT 458.

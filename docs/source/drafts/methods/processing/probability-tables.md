@@ -458,8 +458,8 @@ nor the truth. The bands cannot be compared one by one, since their boundaries c
 random ladder and no two tables share them; the comparison that does not depend on the
 bands is the Bondarenko factor {eq}`eq-probability-tables-bondarenko`. kika's tables (20
 bands, the default target, at 294 K) were compared with those of the OpenMC library of
-ENDF/B-VIII.1, processed by NJOY PURR (`TODO(check)`: the NJOY version, which neither
-the files nor their archive record; it needs the library's release notes),
+ENDF/B-VIII.1, processed by NJOY 2016.78 PURR (the version openmc.org states for the
+library),
 at every energy of the grid (measured 2026-10-17, one process). The grid and the competition flags are
 identical to the official file's: U-235 (19 energies, flags (4, 0)), U-238 (31, (4, 0)),
 Pu-239 (51, (51, −1)). The largest $\lvert f_\text{kika}/f_\text{PURR} - 1\rvert$ over the

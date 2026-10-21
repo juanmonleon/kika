@@ -216,8 +216,15 @@ What is derived because the model does not carry it in ACE's form:
   ACER writes NR = 0. It is metadata for the transport code: OpenMC 0.16 ignores the
   incident interpolation of a law and always samples between the two bracketing incident
   tables with unit-base scaling. The ACE specification states only that NR = 0 means
-  lin-lin (Conlin and Romano 2019). `TODO(check)`: how MCNP and Serpent use a stated INT
-  needs the MCNP manual or Serpent's source, neither of which is at hand;
+  lin-lin (Conlin and Romano 2019). MCNP and Serpent do the same for the tabulated laws
+  4, 44 and 61: the MCNP 6.3.2 manual (LA-UR-26-23119, §2.4.3.5.4.4) samples one of the two
+  bracketing tables with the linear fraction of the incident grid and scales the outgoing
+  energy between them, and states no use of the region's INT; Serpent 2.2.1
+  (`processedistributions.c`, `sampleendflaw.c`) reads the INT of the first region only
+  and treats INT = 1 as a histogram, every other value, NR = 0 included, as that same
+  scaled sampling. So INT = 22 and NR = 0 are sampled alike by all three codes; for laws
+  7, 9 and 11 Serpent interpolates the law's parameters with the stated INT (checked
+  2026-10-21);
 - an angular distribution is written in one of the three forms AND holds (isotropic, 32
   equiprobable bins, tabulated): ACE has no Legendre form, so a Legendre distribution
   reaches the encoder already tabulated ({doc}`../processing/tabulation`);
