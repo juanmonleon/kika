@@ -301,3 +301,37 @@ def test_mcnp61_col_equals_mcnp63_colsci(tmp_path):
     assert old.version == "6.mpi" and old.build_date == "10/02/18"
     for number in (34, 44, 54):
         np.testing.assert_array_equal(old[number].result, new[number].result)
+
+
+
+def test_text_mcnp62_energy_bins_without_energy_column(tmp_path):
+    # MCNP 6.2 out=col: three energy bins and their Total as row blocks, no Energy column.
+    header = """
+        mcnp   version 6.mpi ld=10/02/18  probid =  10/13/26 09:26:42
+         mcnp 6.2 col
+         Number of histories used for normalizing tallies =             10.00
+
+         Mesh Tally Number         4
+         neutron  mesh tally.
+
+         Tally bin boundaries:
+            X direction:      0.00      1.00
+            Y direction:      0.00      1.00      2.00
+            Z direction:      0.00      1.00
+            Energy bin boundaries: 0.00E+00 1.00E-01 1.00E+00 2.00E+01
+
+                X         Y         Z     Result     Rel Error
+        """
+    def rows(values):
+        return "".join(f"      0.500     {y:.3f}     0.500 {v:.5E} 1.00000E-01\n"
+                       for pair in values for y, v in zip((0.5, 1.5), pair))
+
+    bins = [(1.0, 10.0), (2.0, 20.0), (4.0, 40.0)]
+    tally = read_meshtal(_write(tmp_path, header + rows(bins + [(7.0, 70.0)])))[4]
+    assert tally.has_energy_total
+    np.testing.assert_array_equal(tally.result[:, 0, 0, :, 0], [[1, 10], [2, 20], [4, 40], [7, 70]])
+
+    with pytest.raises(ValueError, match="not the sum of the energy bins"):
+        read_meshtal(_write(tmp_path, header + rows(bins + [(7.0, 71.0)])))
+    with pytest.raises(ValueError, match="rows do not fit"):
+        read_meshtal(_write(tmp_path, header + rows(bins[:2])))

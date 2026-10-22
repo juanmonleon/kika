@@ -8,7 +8,10 @@ MESHTAL text (MCNP 5, 6.1, 6.2, 6.3)
     ``cfsci`` variants, which print every real in scientific notation. Rows
     run with the energy bin outermost, then time, then ``i j k`` with ``k``
     fastest; an energy or time ``Total`` row block follows the bins when there
-    is more than one. Every row's coordinates are checked against the header
+    is more than one. MCNP 6.2 leaves the ``Energy`` column out even with
+    several energy bins; the blocks are still there, the row count says whether
+    the ``Total`` is, and that block is checked to be the sum of the bins. Every
+    row's coordinates are checked against the header
     bounds, so a layout the reader does not expect fails loudly instead of
     being misplaced.
 
@@ -187,25 +190,26 @@ def _text_tally(lines: List[str], start: int, stop: int, name: str) -> MeshTally
         raise ValueError(f"{where}: rows with {len(bad[0])} fields, the column header needs {n_cols}")
     data = np.array(rows, dtype=float).reshape(-1, n_cols)
 
-    col = 0
     n_e, n_t = tally.n_energy, tally.n_time
+    grid = tally.shape
     if has_energy:
-        tally.has_energy_total = bool(np.isnan(data[:, col]).any())
-        col += 1
-    elif n_e > 1:
-        raise ValueError(f"{where}: {n_e} energy bins but no Energy column")
+        tally.has_energy_total = bool(np.isnan(data[:, 0]).any())
     if has_time:
-        tally.has_time_total = bool(np.isnan(data[:, col]).any())
-    elif n_t > 1:
-        raise ValueError(f"{where}: {n_t} time bins but no Time column")
+        tally.has_time_total = bool(np.isnan(data[:, int(has_energy)]).any())
+    if not (has_energy and has_time):
+        _infer_totals(tally, data.shape[0], has_energy, has_time, where)
 
     ne_rows = n_e + int(tally.has_energy_total)
     nt_rows = n_t + int(tally.has_time_total)
-    grid = tally.shape
     expected = ne_rows * nt_rows * int(np.prod(grid))
     if data.shape[0] != expected:
         raise ValueError(f"{where}: {data.shape[0]} rows, the bounds need {expected}")
     cube = data.reshape(ne_rows, nt_rows, *grid, n_cols)
+    result = cube[..., n_bin_cols + 3]
+    if tally.has_energy_total and not has_energy:
+        _check_total_block(result, 0, n_e, where, "energy")
+    if tally.has_time_total and not has_time:
+        _check_total_block(result, 1, n_t, where, "time")
 
     col = 0
     if has_energy:
@@ -227,6 +231,34 @@ def _text_tally(lines: List[str], start: int, stop: int, name: str) -> MeshTally
     if has_volume:
         tally.attrs["volume"] = cube[0, 0, ..., col + 2].copy()
     return tally
+
+
+def _infer_totals(tally: MeshTally, n_rows: int, has_energy: bool, has_time: bool, where: str):
+    """Energy/time ``Total`` blocks of a layout without that column (MCNP 6.2 ``out=col``).
+
+    MCNP 6.2 drops the ``Energy`` column even with several energy bins, but still
+    prints the bins and their ``Total`` as consecutive row blocks; the row count
+    tells whether the total is there.
+    """
+    n_cells = int(np.prod(tally.shape))
+    e_options = [tally.has_energy_total] if has_energy else ([False, True] if tally.n_energy > 1 else [False])
+    t_options = [tally.has_time_total] if has_time else ([False, True] if tally.n_time > 1 else [False])
+    fits = [(e, t) for e in e_options for t in t_options
+            if (tally.n_energy + e) * (tally.n_time + t) * n_cells == n_rows]
+    if len(fits) != 1:
+        raise ValueError(f"{where}: {n_rows} rows do not fit {tally.n_energy} energy and "
+                         f"{tally.n_time} time bins on a {tally.shape} mesh")
+    tally.has_energy_total, tally.has_time_total = fits[0]
+
+
+def _check_total_block(result, axis, n, where, label):
+    """Without a bin column, the last block must be the sum of the bins, or the order is not
+    the one the reader assumes."""
+    moved = np.moveaxis(result, axis, 0)
+    total, summed = moved[n], moved[:n].sum(axis=0)
+    if not np.allclose(total, summed, rtol=1e-4, atol=1e-5 * np.abs(total).max(initial=0.0)):
+        raise ValueError(f"{where}: no {label.capitalize()} column and the last {label} block "
+                         f"is not the sum of the {label} bins; unexpected row order")
 
 
 def _check_bin_column(values, bounds, has_total, axis, where, label):
