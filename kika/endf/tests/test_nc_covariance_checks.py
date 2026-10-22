@@ -126,11 +126,12 @@ def test_incomplete_inputs_never_pass_as_complete(problem):
     assert not any(f.location.mt==1 for f in r.by_check('nc_matrix_evaluated'))
 
 
-def test_resource_guard_precedes_allocation(monkeypatch):
-    import kika.endf.checks.nc as module
-    monkeypatch.setattr(module,'NC_MAX_BINS',1)
-    r=check_covariances(tape(section(1,rules=[nc()]),section(2,[ni(np.eye(2))])),mf=(33,))
-    assert 'resource limit' in r.by_check('nc_matrix_not_evaluated')[0].summary
+def test_union_grid_above_the_previous_cutoff_is_accepted():
+    grid=list(range(1,1203))
+    record=NISubSubsectionRecord(lb=0,np=len(grid),ne=len(grid),nt=2*len(grid),
+                                e_table_k=grid,f_table_k=[1.]*1201+[0.])
+    calc=engine(section(1,rules=[nc(1.,1202.)]),section(2,[record]))
+    np.testing.assert_array_equal(calc.grid(calc.dependencies(1)),grid)
 
 
 def test_lump_central_values_sum_members_without_distributing_its_covariance():
@@ -220,10 +221,19 @@ def test_polynomial_nubar_is_averaged_analytically():
     np.testing.assert_allclose(calc.block(452,452,grid),np.diag(.04*mean**2))
 
 
-def test_joint_resource_limit_is_reported_separately_from_self_coverage(monkeypatch):
-    import kika.endf.checks.nc as module
-    monkeypatch.setattr(module,'NC_MAX_BINS',2)
-    r=check_covariances(tape(section(1,rules=[nc()]),section(2,[ni(np.eye(2))])),mf=(33,))
-    assert r.by_check('nc_matrix_evaluated')
+def test_shared_joint_is_checked_once_and_referenced_by_each_derived_mt(monkeypatch):
+    from kika.endf.checks import covariances as module
+    original=module._joint_psd
+    calls=[]
+    def record(*args,**kwargs):
+        calls.append(args[0])
+        return original(*args,**kwargs)
+    monkeypatch.setattr(module,'_joint_psd',record)
+    r=check_covariances(tape(section(1,rules=[nc()]),section(2,[ni(np.eye(2))]),
+                            section(3,rules=[nc()])),mf=(33,))
+    assert calls==[[1,2,3]]
+    coverage=r.by_check('nc_matrix_evaluated')
+    assert len(coverage)==2
+    assert all(f.evidence['joint_evaluated'] and f.evidence['joint_check_mt']==1 for f in coverage)
     assert not r.by_check('nc_matrix_not_evaluated')
-    assert any(f.location.mt==1 for f in r.by_check('psd_not_evaluated'))
+    assert not r.by_check('psd_not_evaluated')

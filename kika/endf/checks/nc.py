@@ -11,14 +11,8 @@ import numpy as np
 from ..classes.mf33.mf33 import MF33MT, bin_average_xs
 from .findings import NOTE, CovarianceFinding, CovarianceLocation
 
-# Bound work before allocating dense union-grid matrices. Existing NI checks
-# retain their own limits. A skipped calculation is always reported.
-NC_MAX_BINS = 1200
-NC_WORK_BYTES = 256 * 1024**2
-
-
 class NotEvaluable(ValueError):
-    """An input or resource bound prevents a complete NC calculation."""
+    """Missing or invalid input prevents a complete NC calculation."""
 
 
 def valid_lty0(rule):
@@ -90,9 +84,6 @@ class NCAssembler:
         grid = np.array(sorted(edges), dtype=float)
         if grid.size < 2 or not np.all(np.isfinite(grid)) or np.any(np.diff(grid) <= 0):
             raise NotEvaluable("invalid or empty union grid")
-        n = grid.size - 1
-        if n > NC_MAX_BINS or 12 * 8 * n * n > NC_WORK_BYTES:
-            raise NotEvaluable(f"union grid has {n} bins, above the NC diagnostic resource limit")
         return grid
 
     def connected(self, mt):
@@ -240,6 +231,7 @@ def check_nc(ctx, mf, sections, usable, out):
     from .covariances import _check_self_block, _check_cross_block, _joint_psd, _mf33_magnitude
 
     engine = NCAssembler(ctx,mf,sections,usable)
+    checked_joint = {}
     for mt in sorted(sections):
         if not any(n.lty==0 for s in sections[mt].subsections for n in s.nc_records):
             continue
@@ -250,11 +242,10 @@ def check_nc(ctx, mf, sections, usable, out):
             matrix = engine.block(mt,mt,grid)
             _check_self_block(matrix,grid,loc,out,[],None)
             _mf33_magnitude(ctx,mt,matrix,grid,False,loc,out)
-            # Keep only the blocks needed for the joint check when they fit.
             n = len(grid)-1
-            joint_fits = (n*len(nodes) <= NC_MAX_BINS
-                          and 8*n*n*(8*len(nodes)**2+12) <= NC_WORK_BYTES)
-            selfs = {mt:matrix} if joint_fits else {}
+            joint_key = (tuple(nodes),grid.tobytes())
+            new_joint = joint_key not in checked_joint
+            selfs = {mt:matrix} if new_joint else {}
             cross = {}
             for other in nodes:
                 if other == mt:
@@ -263,10 +254,10 @@ def check_nc(ctx, mf, sections, usable, out):
                 pair = engine.block(mt,other,grid)
                 crossloc = CovarianceLocation(mat=loc.mat,mf=mf,mt=mt,mat1=0,mt1=other)
                 _check_cross_block(pair,np.diag(matrix),np.diag(own),grid,crossloc,out,None)
-                if joint_fits:
+                if new_joint:
                     selfs[other] = own
                     cross[min(mt,other),max(mt,other)] = pair if mt<other else pair.T
-            if joint_fits:
+            if new_joint:
                 # Fill every constituent cross block: omitting them would invent
                 # a joint matrix inconsistent with the propagated derived row.
                 for i,a in enumerate(nodes):
@@ -276,15 +267,13 @@ def check_nc(ctx, mf, sections, usable, out):
                 if any(np.any(v) for v in [*selfs.values(),*cross.values()]):
                     _joint_psd(nodes,{m:grid for m in nodes},selfs,cross,
                                lambda ms:", ".join(f"MT{m}" for m in ms),lambda ms:loc,out)
-            else:
-                out.append(CovarianceFinding("psd_not_evaluated",NOTE,
-                    "NC self and implied cross blocks checked; the joint matrix exceeds the NC diagnostic size or memory budget",
-                    loc,{"nodes":nodes,"n":n*len(nodes),"memory_budget_bytes":NC_WORK_BYTES}))
+                checked_joint[joint_key] = mt
             out.append(CovarianceFinding("nc_matrix_evaluated",NOTE,
                 "LTY=0 covariance assembled in absolute units, including NI and cross-reaction terms; "
-                "variance, symmetry, correlation and self PSD checks executed without clipping",
+                "variance, symmetry, correlation, self PSD and joint PSD checks executed without clipping",
                 loc,{"n_bins":n,"energy_range":[float(grid[0]),float(grid[-1])],
-                     "constituents":nodes,"joint_within_memory_budget":joint_fits}))
+                     "constituents":nodes,"joint_evaluated":True,
+                     "joint_check_mt":checked_joint[joint_key],"joint_n_rows":n*len(nodes)}))
         except (ValueError,IndexError,np.linalg.LinAlgError) as exc:
             out.append(CovarianceFinding("nc_matrix_not_evaluated",NOTE,
                 f"NC numerical coverage is incomplete: {exc}. Explicit NI checks remain separate.",

@@ -177,9 +177,9 @@ def check_covariances(
     NC LTY=0 self covariances and implied cross blocks are assembled without
     clipping, then checked by the same numerical criteria as explicit NI.
     ``nc_matrix_evaluated`` records this coverage, not a passing verdict.
-    Dense NC work is bounded by :mod:`.nc`; an oversized joint eigenproblem
-    is reported separately as ``psd_not_evaluated``. These bounds apply to
-    the new NC pass, not the entire parser or the pre-existing NI checks.
+    The NC and joint MF31/MF33/MF34 eigenproblems have no fixed size or
+    memory cutoff. Connected NC joint matrices shared by several derived MTs
+    are checked once, and every MT's coverage links to that calculation.
 
     Returns
     -------
@@ -1578,8 +1578,6 @@ def _ls1_finding(loc: CovarianceLocation, k: int, rec, tri: Optional[float], out
 # The joint matrix: what the cross blocks do to positive semi-definiteness
 # ---------------------------------------------------------------------------
 
-#: Largest joint matrix whose eigenvalues are computed (as MF32's EIG_MAX).
-JOINT_EIG_MAX = 6000
 #: Cross blocks whose two-node joint is measured for the evidence.
 _JOINT_PAIRS_MAX = 60
 
@@ -1656,14 +1654,7 @@ def _joint_psd(nodes, grids, selfs, cross, describe, loc, out) -> None:
     """
     edges = list(cross)
     for members in _components(nodes, edges):
-        size = sum(len(grids[m]) - 1 for m in members)
         where = describe(members)
-        if size > JOINT_EIG_MAX:
-            out.append(CovarianceFinding(
-                "psd_not_evaluated", NOTE,
-                f"the joint matrix of {where} has {size} rows: above {JOINT_EIG_MAX}, its "
-                "eigenvalues are not computed", loc(members), {"n": size}))
-            continue
         self_min = {m: float(np.linalg.eigvalsh(0.5 * (selfs[m] + selfs[m].T))[0])
                     if selfs[m].size else 0.0 for m in members}
         joint, _ = _joint_matrix(members, grids, selfs, cross)

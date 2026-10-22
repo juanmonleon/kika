@@ -198,9 +198,9 @@ def _build() -> Dict[str, CheckDescription]:
             "and how much the repair would change sigma; the evidence names the record "
             "already indefinite on its own. MF32 is judged on its correlation matrix."),
         "psd_not_evaluated": D(
-            "PSD not evaluated (too large)", (31, 32, 33, 34),
+            "PSD not evaluated (too large)", (32,),
             {NOTE: "always"},
-            "An MF32 block, or the joint matrix of a file, with more rows than the eigenvalue "
+            "An MF32 block with more rows than its eigenvalue "
             "limit; its positive semi-definiteness was not computed."),
         "joint_not_positive_semidefinite": D(
             "Joint matrix not positive semi-definite", (31, 33, 34),
@@ -355,7 +355,8 @@ def _build() -> Dict[str, CheckDescription]:
         "nc_only_first_resolved": D(
             "Only the first derivation resolved", (31, 33),
             {NOTE: "always"},
-            "Several different LTY=0 rules for one MT; kika resolves only the first."),
+            "Several different LTY=0 rules for one MT; the legacy resolve_nc_lty0 "
+            "resolver uses only the first. The numerical checks use all declared ranges."),
         "nc_invalid_values": D(
             "Invalid NC derivation values", (31, 33),
             {DEFECT: "invalid range, nonfinite values or inconsistent coefficient/target lists"},
@@ -363,9 +364,9 @@ def _build() -> Dict[str, CheckDescription]:
             "finite coefficients and integral positive MT numbers. It cannot be propagated safely."),
         "nc_matrix_not_evaluated": D(
             "Derived covariance matrix not evaluated", (31, 33),
-            {NOTE: "inputs or resource limits prevent a complete NC numerical check"},
+            {NOTE: "missing or invalid inputs prevent a complete NC numerical check"},
             "NC LTY=0 propagation could not be completed. The evidence names the missing "
-            "input, invalid dependency, unsupported standard or resource limit. "
+            "input, invalid dependency or unsupported standard. "
             "Explicit NI components are checked separately; this is not a passing NC check."),
         "nc_matrix_evaluated": D(
             "Derived covariance matrix evaluated", (31, 33),
