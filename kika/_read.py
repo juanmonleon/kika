@@ -354,6 +354,7 @@ def _readEndf(path, covariances: bool):
             suite.covarianceSuite, report = decodeCovarianceSuite(
                 endf, report, evaluation=suite.evaluation,
                 target=suite.target,
+                reactionSuite=suite,
             )
             decoded = present
 

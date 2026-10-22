@@ -72,7 +72,8 @@ def reactionHref(mt: int) -> str:
     one — GNDS only requires that the xPath resolve inside the companion
     ``reactionSuite``.
     """
-    return f"/reactionSuite/reactions/reaction[@label='MT{mt}']/crossSection"
+    container = "sums/crossSectionSums/crossSectionSum" if 851 <= mt <= 870 else "reactions/reaction"
+    return f"/reactionSuite/{container}[@label='MT{mt}']/crossSection"
 
 
 def angularDistributionHref(mt: int) -> str:
@@ -156,8 +157,16 @@ def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
     absolute and relative components (LB=0/8/9 with LB=1-6); such a block
     raises :class:`~kika.endf.classes.mf33.MF33NeedsCrossSections` without it.
     :func:`decodeCovarianceSuite` supplies it from NJOY on its own.
+
+    NC LTY=0 is retained as a ``Sum`` of references, including each stated
+    energy range, rather than flattened with a resolver that ignores ranges.
+    MTL-only membership belongs to the companion reactionSuite's cross-section
+    sums; use ``decodeCovarianceSuite(..., reactionSuite=...)`` to retain it.
     """
     report = report if report is not None else ConversionReport()
+    if any(sub.nc_records for sub in mf33mt.subsections):
+        from .mf33_structure import decodeSums
+        return decodeSums(mf33mt, report, xsSections)
     covmat = mf33mt.to_xs_covmat(mf3_sections=xsSections)
 
     # `CrossSectionCovariance` has no `mt_metadata`, so unlike MF34 the section
@@ -882,8 +891,12 @@ def encodeMF35MT(source, mt: int, mat: Optional[int] = None,
 def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
                           evaluation: Optional[str] = None,
                           target: Optional[str] = None,
-                          checks: bool = True):
+                          checks: bool = True, reactionSuite=None):
     """Every covariance file in a parsed ENDF → one :class:`CovarianceSuite`.
+
+    ``reactionSuite`` is the optional companion model. MF33's MTL membership
+    is represented there as native crossSectionSums; without it membership
+    cannot be linked and is reported as a loss. The public reader supplies it.
 
     MF31, MF33, MF34 and MF35 become ``covarianceSections``; **MF32 becomes
     ``parameterCovariances``**, and the two lists are separate because §25.3 is
@@ -963,6 +976,10 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
 
     mf33 = endf.mf.get(33) if hasattr(endf, "mf") else None
     if mf33 is not None:
+        retained = set()
+        if reactionSuite is not None:
+            from .mf33_structure import attachLumps
+            retained = attachLumps(endf, reactionSuite, report)
         # A block that sums absolute (LB=0/8/9, barns²) and relative components
         # is relative only after dividing the absolute part by σ_i·σ_j, and in
         # the resolved range σ(E) exists only reconstructed. So σ comes from
@@ -985,6 +1002,8 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
                 f"(NJOY RECONR) before being summed with the relative ones"
             )
         for mt in sorted(getattr(mf33, "mt", {})):
+            if mt in retained:
+                continue  # represented by the companion lump's summands, not a member matrix
             sections, report = decodeMF33MT(mf33.mt[mt], report, xsSections=xsSections)
             suite.covarianceSections.extend(sections)
 
@@ -1028,6 +1047,11 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
             "covariances"
         )
 
+    from .mf33_structure import bindSumLinks
+    bindSumLinks(suite, report)
+    if reactionSuite is not None:
+        from .mf33_structure import bindReactionLinks
+        bindReactionLinks(suite, reactionSuite)
     suite.covarianceChecks = (_attachLayer1(endf, suite, report, xsSections if mf33 is not None
                                             else None) if checks else None)
 

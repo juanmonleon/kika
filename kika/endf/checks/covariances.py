@@ -1293,6 +1293,13 @@ def _nc_references(sections, sec, sub, loc, out) -> None:
     mt = loc.mt
     is_self = loc.mat1 == 0 and loc.mt1 == mt
     lty0 = [(k, nc) for k, nc in enumerate(sub.nc_records) if nc.lty == 0]
+    if lty0:
+        out.append(CovarianceFinding(
+            "nc_matrix_not_evaluated", NOTE,
+            "NC LTY=0 references and energy ranges are checked structurally, but layer 1 "
+            "does not assemble their derived matrix: its variances, correlations and PSD "
+            "have not been evaluated. Explicit NI components, when present, are checked separately.",
+            loc, {"n_derivations": len(lty0)}))
     for k, nc in enumerate(sub.nc_records):
         nloc = CovarianceLocation(mat=loc.mat, mf=loc.mf, mt=mt, mat1=loc.mat1, mt1=loc.mt1, nc=k)
         if nc.lty not in VALID_LTY:

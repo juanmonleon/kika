@@ -240,8 +240,13 @@ def test_real_tapes_convert_element_for_element(request, tape):
     for mt in sorted(endf.mf[33].mt):
         expected = endf.mf[33].mt[mt].to_xs_covmat()
         decoded, _ = decodeMF33MT(endf.mf[33].mt[mt])
-        for entry, matrix in zip(decoded, expected.matrices):
-            np.testing.assert_array_equal(entry.form.matrix, np.asarray(matrix, dtype=float))
+        from kika.nuclear_data.model import CovarianceMatrix, Mixed
+        explicit = [form for entry in decoded
+                    for form in (entry.form.components if isinstance(entry.form, Mixed) else [entry.form])
+                    if isinstance(form, CovarianceMatrix)]
+        assert len(explicit) == len(expected.matrices)
+        for form, matrix in zip(explicit, expected.matrices):
+            np.testing.assert_array_equal(form.matrix, np.asarray(matrix, dtype=float))
 
 
 # ---------------------------------------------------------------------------
@@ -270,14 +275,29 @@ def _sectionsFor(suite, mf, mt):
 
 
 def _assertFixedPoint(original, rebuilt, what):
+    from kika.nuclear_data.model import CovarianceMatrix, Mixed, Sum
+    def assert_form(a,b):
+        assert type(a) is type(b)
+        if isinstance(a,Mixed):
+            assert len(a.components)==len(b.components)
+            for aa,bb in zip(a.components,b.components):assert_form(aa,bb)
+        elif isinstance(a,Sum):
+            # A single-section decode has no sibling forms to bind hrefs to;
+            # ENDF states target MF/MT, coefficients and ranges independently.
+            assert (a.domainMin,a.domainMax,a.domainUnit)==(b.domainMin,b.domainMax,b.domainUnit)
+            assert [(s.ENDF_MFMT,s.coefficient) for s in a.summands]==[(s.ENDF_MFMT,s.coefficient) for s in b.summands]
+        else:
+            assert isinstance(a,CovarianceMatrix)
+            np.testing.assert_array_equal(a.matrix,b.matrix)
+            np.testing.assert_array_equal(a.rowGrid,b.rowGrid)
+            np.testing.assert_array_equal(a.columnGrid,b.columnGrid)
+            assert a.isRelative==b.isRelative
     assert len(rebuilt) == len(original), (
         f"{what}: {len(original)} sections in, {len(rebuilt)} back out"
     )
     for before, after in zip(original, rebuilt):
         assert after.label == before.label, f"{what}: label moved"
-        np.testing.assert_array_equal(after.form.matrix, before.form.matrix)
-        np.testing.assert_array_equal(after.form.rowGrid, before.form.rowGrid)
-        np.testing.assert_array_equal(after.form.columnGrid, before.form.columnGrid)
+        assert_form(before.form,after.form)
 
 
 def test_mf33_survives_a_round_trip_through_the_model(covEndf, suite):

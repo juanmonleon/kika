@@ -356,6 +356,12 @@ def _build() -> Dict[str, CheckDescription]:
             "Only the first derivation resolved", (31, 33),
             {NOTE: "always"},
             "Several different LTY=0 rules for one MT; kika resolves only the first."),
+        "nc_matrix_not_evaluated": D(
+            "Derived covariance matrix not evaluated", (31, 33),
+            {NOTE: "an NC LTY=0 derivation is present"},
+            "References and ranges are checked, but layer 1 does not assemble NC-derived "
+            "matrices and therefore does not evaluate their variances, correlations or PSD. "
+            "Explicit NI components are checked separately."),
         "ratio_to_standard": D(
             "Covariance relative to a standard", (31, 33),
             {NOTE: "always"},
