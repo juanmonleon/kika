@@ -5,7 +5,10 @@ MF31, MF33 and MF34 are checked here; MF32, MF35 and MF40 in :mod:`.mf32`,
 
 :func:`check_covariances` reads what kika's parser kept -- the records with
 their LB/LS, counts and grids, and the triangle before it is mirrored -- and
-reports what is wrong with it, without assembling a model covariance. Three
+reports what is wrong with it, without constructing a canonical model. LTY=0
+declarations are propagated numerically in absolute units, with energy ranges
+and cross-reaction terms, by :mod:`.nc`. Missing inputs and resource limits
+are explicit coverage findings. Three
 families of checks:
 
 **Structure** -- what ENDF-6 §31-34 pins down without looking at a value:
@@ -81,6 +84,7 @@ from .findings import (
 from .mf32 import check_mf32
 from .mf35 import check_mf35
 from .mf40 import check_mf40
+from .nc import check_nc, valid_lty0
 
 logger = get_endf_logger(__name__)
 
@@ -163,7 +167,19 @@ def check_covariances(
         Defaults to ``endf.pendf``. Used to sum mixed absolute/relative MF33
         blocks and as the MF33 central values; without it MF3 is used only
         above the upper limit of the resonance ranges, where it is the cross
-        section and not a background.
+        section and not a background. NC LTY=0 numerical propagation also needs
+        these central values wherever a contributing NI covariance is relative.
+        MF31 uses MF1 nu-bar instead. Missing inputs produce an explicit
+        ``nc_matrix_not_evaluated`` finding, never an unweighted approximation.
+
+    Notes
+    -----
+    NC LTY=0 self covariances and implied cross blocks are assembled without
+    clipping, then checked by the same numerical criteria as explicit NI.
+    ``nc_matrix_evaluated`` records this coverage, not a passing verdict.
+    Dense NC work is bounded by :mod:`.nc`; an oversized joint eigenproblem
+    is reported separately as ``psd_not_evaluated``. These bounds apply to
+    the new NC pass, not the entire parser or the pre-existing NI checks.
 
     Returns
     -------
@@ -827,6 +843,11 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
                         "lty_invalid", DEFECT, f"LTY={nc.lty} is not defined", nloc, {"lty": nc.lty}))
                 elif nc.lty == 0 and int(nc.nci or 0) != len(nc.ci):
                     _count(nc.nci, len(nc.ci), "NCI", nloc, out)
+                if nc.lty == 0 and not valid_lty0(nc):
+                    out.append(CovarianceFinding(
+                        "nc_invalid_values", DEFECT,
+                        "NC LTY=0 needs a finite increasing range, matching coefficient/target "
+                        "counts and finite integral positive MT targets", nloc))
                 if nc.e1 is not None and nc.e2 is not None and not nc.e1 < nc.e2:
                     out.append(CovarianceFinding(
                         "grid_not_increasing", DEFECT,
@@ -908,6 +929,7 @@ def _check_mf33(ctx: _Context, mf_number: int, mf_obj, out: List[CovarianceFindi
         _check_cross_block(res[0], np.diag(rr[0]), np.diag(cc[0]), grid, loc, out, extra)
 
     _joint33(ctx, mf_number, sections, usable, out)
+    check_nc(ctx, mf_number, sections, usable, out)
 
 
 def _diag33(sec, self_good, mt, xs, grid):
@@ -1280,6 +1302,8 @@ def _derives(sections, start: int, target: int) -> bool:
         if sec is None:
             continue
         for nc in _lty0_records(sec, mt):
+            if not valid_lty0(nc):
+                continue
             for x in nc.xmti:
                 m = int(round(x))
                 if m == target:
@@ -1292,18 +1316,13 @@ def _nc_references(sections, sec, sub, loc, out) -> None:
     """NC sub-subsections: where they may stand, and whether what they name exists."""
     mt = loc.mt
     is_self = loc.mat1 == 0 and loc.mt1 == mt
-    lty0 = [(k, nc) for k, nc in enumerate(sub.nc_records) if nc.lty == 0]
-    if lty0:
-        out.append(CovarianceFinding(
-            "nc_matrix_not_evaluated", NOTE,
-            "NC LTY=0 references and energy ranges are checked structurally, but layer 1 "
-            "does not assemble their derived matrix: its variances, correlations and PSD "
-            "have not been evaluated. Explicit NI components, when present, are checked separately.",
-            loc, {"n_derivations": len(lty0)}))
+    lty0 = [(k, nc) for k, nc in enumerate(sub.nc_records) if nc.lty == 0 and valid_lty0(nc)]
     for k, nc in enumerate(sub.nc_records):
         nloc = CovarianceLocation(mat=loc.mat, mf=loc.mf, mt=mt, mat1=loc.mat1, mt1=loc.mt1, nc=k)
         if nc.lty not in VALID_LTY:
             continue  # lty_invalid
+        if nc.lty == 0 and not valid_lty0(nc):
+            continue  # nc_invalid_values, without attempting int(nan) or truncating pairs
         if nc.lty in (0, 1) and not is_self:
             out.append(CovarianceFinding(
                 "nc_misplaced", DEFECT,
@@ -1333,7 +1352,7 @@ def _nc_references(sections, sec, sub, loc, out) -> None:
                         "than the file states", nloc, {"xmti": mti}))
                     continue
                 chained = [n for n in _lty0_records(target, mti)
-                           if _overlap(nc.e1, nc.e2, n.e1, n.e2)]
+                           if valid_lty0(n) and _overlap(nc.e1, nc.e2, n.e1, n.e2)]
                 if chained:
                     out.append(CovarianceFinding(
                         "nc_chained", DEFECT,
@@ -1384,8 +1403,9 @@ def _nc_references(sections, sec, sub, loc, out) -> None:
     if len(rules) > 1:
         out.append(CovarianceFinding(
             "nc_only_first_resolved", NOTE,
-            f"{len(lty0)} NC LTY=0 sub-subsections with different sums of reactions; kika "
-            "resolves only the first and applies it over the whole range", loc,
+            f"{len(lty0)} NC LTY=0 sub-subsections with different sums of reactions; the legacy "
+            "resolve_nc_lty0 resolver uses only the first over the whole range. The numerical "
+            "NC checks use all declared ranges", loc,
             {"rules": [[[float(c), m] for c, m in r] for r in sorted(rules)]}))
 
 

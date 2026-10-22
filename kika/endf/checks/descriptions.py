@@ -356,12 +356,24 @@ def _build() -> Dict[str, CheckDescription]:
             "Only the first derivation resolved", (31, 33),
             {NOTE: "always"},
             "Several different LTY=0 rules for one MT; kika resolves only the first."),
+        "nc_invalid_values": D(
+            "Invalid NC derivation values", (31, 33),
+            {DEFECT: "invalid range, nonfinite values or inconsistent coefficient/target lists"},
+            "NC LTY=0 must have a finite increasing energy range and matching lists of "
+            "finite coefficients and integral positive MT numbers. It cannot be propagated safely."),
         "nc_matrix_not_evaluated": D(
             "Derived covariance matrix not evaluated", (31, 33),
-            {NOTE: "an NC LTY=0 derivation is present"},
-            "References and ranges are checked, but layer 1 does not assemble NC-derived "
-            "matrices and therefore does not evaluate their variances, correlations or PSD. "
-            "Explicit NI components are checked separately."),
+            {NOTE: "inputs or resource limits prevent a complete NC numerical check"},
+            "NC LTY=0 propagation could not be completed. The evidence names the missing "
+            "input, invalid dependency, unsupported standard or resource limit. "
+            "Explicit NI components are checked separately; this is not a passing NC check."),
+        "nc_matrix_evaluated": D(
+            "Derived covariance matrix evaluated", (31, 33),
+            {NOTE: "the LTY=0 self and implied cross blocks were numerically checked"},
+            "NC LTY=0 and NI components were assembled in absolute units with their "
+            "energy ranges, coefficients and cross-reaction covariances. Ordinary variance, "
+            "symmetry, correlation and PSD checks ran without clipping or repair. "
+            "This records coverage, not absence of defects: read the other findings."),
         "ratio_to_standard": D(
             "Covariance relative to a standard", (31, 33),
             {NOTE: "always"},
