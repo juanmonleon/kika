@@ -124,7 +124,8 @@ def _check_grid(energies, out: Out, mf: int, mt: int, what: str, **where) -> boo
 
 def _q_limit(tape: Tape, mt: int) -> Optional[float]:
     qm, qi = tape.q(mt)
-    if qm is None or mt in FISSION_MT or mt in (5, 1, 3, 4, 27, 101):
+    # Lumped (5), summed and production (201-207) sections have no Q of their own.
+    if qm is None or mt in FISSION_MT or mt in (5, 1, 3, 4, 27, 101) or 201 <= mt <= 207:
         return None
     return max(qm, qi)
 
