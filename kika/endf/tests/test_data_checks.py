@@ -200,3 +200,10 @@ def test_cli_writes_one_html_page_and_fails_on_defects(tmp_path, capsys):
     assert "1 defect" in capsys.readouterr().out
     assert main(["check", str(DATA / "micro_h1_b81_clean.endf"), "--what", "data", "--mf", "3", "4",
                  "--no-report"]) == 0
+
+
+def test_workers_change_nothing_but_the_time():
+    serial = check_library(DATA, what="data", patterns=("micro_*.endf",), progress=False, workers=1)
+    pooled = check_library(DATA, what="data", patterns=("micro_*.endf",), progress=False, workers=2)
+    assert [t.name for t in serial.tapes] == [t.name for t in pooled.tapes]
+    assert [t.report.counts() for t in serial.tapes] == [t.report.counts() for t in pooled.tapes]

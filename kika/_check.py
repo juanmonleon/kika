@@ -33,7 +33,7 @@ __all__ = ["check"]
 
 def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Sequence[int]] = None,
           deep: bool = False, library: Optional[str] = None, recursive: bool = False, progress=True,
-          on_tape=None, should_stop=None, on_result=None):
+          on_tape=None, should_stop=None, on_result=None, workers: Optional[int] = None):
     """Check one evaluation, a folder of them, or a list of files.
 
     Parameters
@@ -54,6 +54,12 @@ def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Seque
         Look in subfolders too.
     progress, on_tape, should_stop, on_result
         For a folder: as :func:`kika.endf.checks.check_covariance_library` takes them.
+    workers
+        For a folder: processes checking tapes at once. Default as the
+        processing's: ``KIKA_WORKERS``, else the cores up to eight (and no more
+        than one per GB of free memory when ``psutil`` is installed). No result
+        depends on it. On Windows and macOS run it under
+        ``if __name__ == "__main__":``.
 
     Returns
     -------
@@ -68,7 +74,7 @@ def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Seque
         if path.is_dir():
             return check_library(path, what=what, mf=mf, deep=deep, recursive=recursive, library=library,
                                  progress=progress, on_tape=on_tape, should_stop=should_stop,
-                                 on_result=on_result)
+                                 on_result=on_result, workers=workers)
         if not path.exists():
             raise FileNotFoundError(f"no such file: {path}")
         if _is_gnds(path):
@@ -77,7 +83,7 @@ def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Seque
     if hasattr(source, "files"):  # an ENDF object already read
         return check_evaluation(source, what=what, mf=mf, deep=deep)
     return check_library(list(source), what=what, mf=mf, deep=deep, library=library, progress=progress,
-                         on_tape=on_tape, should_stop=should_stop, on_result=on_result)
+                         on_tape=on_tape, should_stop=should_stop, on_result=on_result, workers=workers)
 
 
 def _is_gnds(path: Path) -> bool:

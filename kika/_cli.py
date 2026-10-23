@@ -66,6 +66,8 @@ def main(argv=None) -> int:
     c.add_argument("--level", choices=("note", "warn", "defect"), default="warn",
                    help="lowest level listed in the report (counts always cover every level)")
     c.add_argument("--library", help="a name for a folder's report")
+    c.add_argument("--workers", type=int, help="processes checking a folder's tapes at once "
+                                               "(default: the machine's, as for processing)")
     c.add_argument("--recursive", action="store_true", help="look in subfolders too")
     c.add_argument("--fail-on", choices=("note", "warn", "defect", "never"), default="defect",
                    help="exit with 1 when a finding at this level or worse is found (default: defect)")
@@ -142,7 +144,8 @@ def _check(args) -> int:
         path = Path(source)
         t0 = time.perf_counter()
         try:
-            report = kika.check(path, what=args.what, mf=args.mf, deep=args.deep, library=args.library,
+            report = kika.check(path, what=args.what, mf=args.mf, deep=args.deep, workers=args.workers,
+                                library=args.library,
                                 recursive=args.recursive, progress=True)
         except (FileNotFoundError, ValueError) as error:
             print(f"  FAIL  {path.name}: {error}")

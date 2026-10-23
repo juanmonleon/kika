@@ -4,10 +4,14 @@
 :func:`check_library` runs the data checks, the covariance checks or both
 (:func:`~kika.endf.checks.evaluation.check_evaluation`). Both walk the same way.
 
-One tape at a time, in series: each is read (only the MF the checks need),
-checked and released before the next, so a library of hundreds of tapes runs in
-the memory of the largest one. Running several libraries side by side is the
-caller's choice, and on a shared 12 GB box it is the wrong one.
+Each tape is read (only the MF the checks need), checked and released before
+the next. Tapes are independent, so they run on ``workers`` processes at once,
+chosen as the processing chooses them (:mod:`kika.processing.workers`):
+``workers=N``, else ``KIKA_WORKERS``, else the machine's cores up to eight --
+and, when ``psutil`` is there to say so, no more than one per GB of free
+memory, the room the heaviest JENDL-5 tape needs. ``workers=1`` walks in series
+in this process. No result depends on the count: the report lists the tapes in
+library order either way.
 
 A tape that cannot be read, or whose check fails, is recorded on its row and
 the walk goes on: in a library census the failures are findings too.
@@ -54,6 +58,10 @@ TAPE_PATTERNS = ("*.endf", "*.jeff", "*.txt", "*.dat")
 _SUPPORT_MF = {31: (1,), 32: (2,), 33: (2, 3), 34: (4, 33), 35: (5,), 40: ()}
 
 Progress = Union[bool, None, Callable[[str], None]]
+#: Memory one worker may take on the heaviest tape (bytes); with ``psutil``
+#: installed the default count is capped by the free memory over this.
+WORKER_MEMORY = 1.0e9
+
 #: ``on_tape(done, total, name, ok)``, called when each tape is done.
 OnTape = Callable[[int, int, str, bool], None]
 #: ``on_result(done, total, tape)``: the same moment, with the whole :class:`TapeCheck`.
@@ -406,8 +414,9 @@ def check_covariance_library(
     on_tape: Optional[OnTape] = None,
     should_stop: Optional[Callable[[], bool]] = None,
     on_result: Optional[OnResult] = None,
+    workers: Optional[int] = None,
 ) -> CovarianceLibraryReport:
-    """Run :func:`check_covariances` on every tape of a library, one at a time.
+    """Run :func:`check_covariances` on every tape of a library.
 
     Parameters
     ----------
@@ -446,7 +455,12 @@ def check_covariance_library(
     should_stop : callable, optional
         Asked before each tape; when it returns true the walk stops there and
         the report of the tapes done so far comes back with ``stopped=True``.
-        Nothing stops inside a tape, so the wait is at most one tape.
+        Nothing stops inside a tape, so the wait is at most one tape (one per
+        worker).
+    workers : int, optional
+        Processes checking tapes at once; see the module notes for the
+        default. Run it under ``if __name__ == "__main__":`` in a script on
+        Windows or macOS, where worker processes import the script again.
 
     Returns
     -------
@@ -455,10 +469,6 @@ def check_covariance_library(
     No PENDF is attached, so a block mixing absolute and relative components is
     checked on its relative part, and says so (``mixed_needs_cross_sections``).
     """
-    from kika.endf import open_endf
-
-    from .covariances import check_covariances
-
     default = _checked_mf(mf, "")
     per_tape: Dict[Path, Tuple[int, ...]] = {}
     if isinstance(source, Mapping):
@@ -467,53 +477,94 @@ def check_covariance_library(
             if asked is not None:
                 per_tape[Path(p)] = _checked_mf(asked, f" for {Path(p).name}")
 
-    def one(path: Path, make) -> TapeCheck:
-        wanted = per_tape.get(path, default)
-        make = functools.partial(make, mf=wanted)
-        t0 = time.perf_counter()
-        try:
-            endf = open_endf(str(path))
-            present = set(endf.files)
-            covariances = present.intersection(wanted)
-            if covariances:
-                read_mf = sorted(covariances.union(
-                    *(_SUPPORT_MF[m] for m in covariances)))
-                # _Context accesses every support MF it can see. Give
-                # it only those needed by the requested covariances,
-                # and finish parsing here so failures and timing stay
-                # in the read phase. Membership never parses an MF.
-                endf.files = {m: endf.files[m] for m in read_mf if m in present}
-        except Exception as exc:  # noqa: BLE001 - recorded, the walk goes on
-            return make(error=f"read: {type(exc).__name__}: {exc}",
-                        read_seconds=time.perf_counter() - t0)
-        t1 = time.perf_counter()
-        if not endf.files:
-            # open_endf returns an empty tape for a file that is not
-            # ENDF at all; in a census that is a failure, not a tape
-            # without covariances.
-            return make(error="read: no ENDF section found in the file", read_seconds=t1 - t0)
-        if not any(m in endf.files for m in wanted):
-            return make(has_covariances=False, read_seconds=t1 - t0)
-        try:
-            tape_report = check_covariances(endf, mf=wanted)
-        except Exception as exc:  # noqa: BLE001
-            return make(error=f"check: {type(exc).__name__}: {exc}", read_seconds=t1 - t0,
-                        check_seconds=time.perf_counter() - t1)
-        return make(report=tape_report, read_seconds=t1 - t0,
-                    check_seconds=time.perf_counter() - t1)
-
-    tapes, root, stopped, planned = _walk(source, patterns, recursive, one, "covariance",
-                                          progress, on_tape, should_stop, on_result)
+    task = functools.partial(_covariance_task, per_tape=per_tape, default=default)
+    tapes, root, stopped, planned = _walk(source, patterns, recursive, task, "covariance",
+                                          progress, on_tape, should_stop, on_result, workers)
     return CovarianceLibraryReport(tapes, directory=root, library=library,
                                    stopped=stopped, planned=planned)
 
 
-def _walk(source, patterns, recursive, one, kind, progress, on_tape, should_stop, on_result):
-    """Walk the tapes of *source* in series; ``one(path, make)`` checks one.
+def _quiet() -> None:
+    """Silence the parser in this process: over a library its notes drown the progress line,
+    and what matters is in the reports (a failure is on its row)."""
+    import logging
+    import warnings
 
-    ``make(**fields)`` builds the tape's :class:`TapeCheck` with its path,
-    label, nuclide and *kind* already set. Returns ``(tapes, root, stopped,
-    planned)``. The parser's warnings and log lines are silenced for the walk.
+    logging.getLogger("kika").setLevel(logging.ERROR)
+    warnings.simplefilter("ignore")
+
+
+def _covariance_task(path: Path, *, per_tape, default) -> Dict[str, Any]:
+    """The covariance checks of one tape, as the fields of its :class:`TapeCheck`."""
+    from kika.endf import open_endf
+
+    from .covariances import check_covariances
+
+    wanted = per_tape.get(path, default)
+    fields_: Dict[str, Any] = {"mf": wanted}
+    t0 = time.perf_counter()
+    try:
+        endf = open_endf(str(path))
+        present = set(endf.files)
+        covariances = present.intersection(wanted)
+        if covariances:
+            read_mf = sorted(covariances.union(*(_SUPPORT_MF[m] for m in covariances)))
+            # _Context accesses every support MF it can see. Give it only those
+            # needed by the requested covariances, and finish parsing here so
+            # failures and timing stay in the read phase. Membership never
+            # parses an MF.
+            endf.files = {m: endf.files[m] for m in read_mf if m in present}
+    except Exception as exc:  # noqa: BLE001 - recorded, the walk goes on
+        return dict(fields_, error=f"read: {type(exc).__name__}: {exc}",
+                    read_seconds=time.perf_counter() - t0)
+    t1 = time.perf_counter()
+    if not endf.files:
+        # open_endf returns an empty tape for a file that is not ENDF at all;
+        # in a census that is a failure, not a tape without covariances.
+        return dict(fields_, error="read: no ENDF section found in the file", read_seconds=t1 - t0)
+    if not any(m in endf.files for m in wanted):
+        return dict(fields_, has_covariances=False, read_seconds=t1 - t0)
+    try:
+        tape_report = check_covariances(endf, mf=wanted)
+    except Exception as exc:  # noqa: BLE001
+        return dict(fields_, error=f"check: {type(exc).__name__}: {exc}", read_seconds=t1 - t0,
+                    check_seconds=time.perf_counter() - t1)
+    return dict(fields_, report=tape_report, read_seconds=t1 - t0,
+                check_seconds=time.perf_counter() - t1)
+
+
+def _evaluation_task(path: Path, *, what, mf, deep) -> Dict[str, Any]:
+    """The data and/or covariance checks of one tape, as the fields of its :class:`TapeCheck`."""
+    from .evaluation import check_evaluation_file
+
+    result = check_evaluation_file(path, what=what, mf=mf, deep=deep)
+    return dict(report=result.report, error=result.error, has_covariances=result.has_anything,
+                read_seconds=result.read_seconds, check_seconds=result.check_seconds, mf=result.mf)
+
+
+def walk_workers(workers: Optional[int], tapes: int) -> int:
+    """How many processes walk *tapes* tapes: the processing's rule, capped by free memory."""
+    from kika.processing.workers import can_spawn, pool_default, resolve
+
+    default = pool_default()
+    try:
+        import psutil
+
+        default = min(default, max(1, int(psutil.virtual_memory().available // WORKER_MEMORY)))
+    except Exception:  # noqa: BLE001 - psutil is optional; without it the cores decide
+        pass
+    count = min(resolve(workers, default), max(tapes, 1))
+    return count if count > 1 and can_spawn() else 1
+
+
+def _walk(source, patterns, recursive, task, kind, progress, on_tape, should_stop, on_result,
+          workers: Optional[int] = None):
+    """Walk the tapes of *source*; ``task(path)`` checks one and returns its fields.
+
+    The :class:`TapeCheck` of each tape is built here, with its path, label,
+    nuclide and *kind*, from what *task* returns, so a task can run in another
+    process (it and what it returns are pickled). Returns ``(tapes, root,
+    stopped, planned)`` with the tapes in library order whatever the workers.
     """
     import logging
     import warnings
@@ -525,51 +576,59 @@ def _walk(source, patterns, recursive, one, kind, progress, on_tape, should_stop
     n_defect = n_failed = 0
     stopped = False
     started = time.perf_counter()
+    count = walk_workers(workers, len(paths))
 
-    def _done(done: int) -> None:
+    def _add(i: int, path: Path, label, fields_: Dict[str, Any]) -> None:
+        nonlocal n_defect, n_failed
+        za, liso = _nuclide(path)
+        tape = TapeCheck(path, label=label, za=za, liso=liso, kind=kind, **fields_)
+        out.append(tape)
+        if not tape.ok:
+            n_failed += 1
+        elif tape.report is not None:
+            n_defect += bool(tape.count(DEFECT))
+            report(i, f"[{i}/{len(paths)}] {tape.name}: {tape.count(DEFECT)} defects, "
+                   f"{tape.count(WARN)} warnings  (so far {n_defect} tapes with defects, "
+                   f"{n_failed} failed)", False)
         if on_tape is not None:
-            on_tape(done, len(paths), out[-1].name, out[-1].ok)
+            on_tape(len(out), len(paths), tape.name, tape.ok)
         if on_result is not None:
-            on_result(done, len(paths), out[-1])
+            on_result(len(out), len(paths), tape)
 
-    # The parser warns about every MF it skips and logs every quirk it repairs;
-    # over hundreds of tapes that drowns the progress line. What matters is in
-    # the reports, and a failure is on its row.
     kika_log = logging.getLogger("kika")
     level = kika_log.level
-    kika_log.setLevel(logging.ERROR)
     try:
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            for i, (path, label) in enumerate(zip(paths, labels), 1):
-                if out:
-                    _done(i - 1)
-                if should_stop is not None and should_stop():
-                    stopped = True
-                    break
-                za, liso = _nuclide(path)
-                make = functools.partial(TapeCheck, path, label=label, za=za, liso=liso, kind=kind)
-                report(i, f"[{i}/{len(paths)}] {label or path.name} ...", False)
-                tape = one(path, make)
-                out.append(tape)
-                if not tape.ok:
-                    n_failed += 1
-                    continue
-                if tape.report is None:
-                    continue
-                n_defect += bool(tape.count(DEFECT))
-                report(i, f"[{i}/{len(paths)}] {tape.name}: {tape.count(DEFECT)} defects, "
-                       f"{tape.count(WARN)} warnings  (so far {n_defect} tapes with defects, "
-                       f"{n_failed} failed)", False)
-        if out and not stopped:
-            _done(len(out))
+            _quiet()
+            if count == 1:
+                for i, (path, label) in enumerate(zip(paths, labels), 1):
+                    if should_stop is not None and should_stop():
+                        stopped = True
+                        break
+                    report(i, f"[{i}/{len(paths)}] {label or path.name} ...", False)
+                    _add(i, path, label, task(path))
+            else:
+                from concurrent.futures import ProcessPoolExecutor
+
+                pool = ProcessPoolExecutor(count, initializer=_quiet)
+                try:
+                    futures = [pool.submit(task, p) for p in paths]
+                    for i, (path, label, future) in enumerate(zip(paths, labels, futures), 1):
+                        if should_stop is not None and should_stop():
+                            stopped = True
+                            break
+                        report(i, f"[{i}/{len(paths)}] {label or path.name} ...", False)
+                        _add(i, path, label, future.result())
+                finally:
+                    pool.shutdown(wait=True, cancel_futures=True)
     finally:
         kika_log.setLevel(level)
     head = (f"stopped after {len(out)} of {len(paths)} tapes" if stopped
             else f"{len(paths)} tapes")
     from .suites import suite
 
-    report(len(out), f"{head} in {time.perf_counter() - started:.0f} s: "
+    report(len(out), f"{head} in {time.perf_counter() - started:.0f} s"
+           + (f" on {count} workers" if count > 1 else "") + ": "
            f"{sum(1 for t in out if t.ok and t.has_covariances)} {suite(kind).checked_phrase}, "
            f"{n_defect} with defects, {n_failed} failed", True)
     return tuple(out), root, stopped, len(paths)
@@ -588,8 +647,9 @@ def check_library(
     on_tape: Optional[OnTape] = None,
     should_stop: Optional[Callable[[], bool]] = None,
     on_result: Optional[OnResult] = None,
+    workers: Optional[int] = None,
 ) -> LibraryReport:
-    """Check every tape of a library, one at a time: data, covariances or both.
+    """Check every tape of a library: data, covariances or both.
 
     *what* and *mf* are those of :func:`~kika.endf.checks.evaluation.check_evaluation`:
     ``("data",)`` for the data checks only, ``("covariances",)`` for the
@@ -598,7 +658,7 @@ def check_library(
     parameters are those of :func:`check_covariance_library`. The report's
     ``kind`` is ``"data"``, ``"covariance"`` or ``"evaluation"`` after *what*.
     """
-    from .evaluation import check_evaluation_file, kind_of, normalise_what
+    from .evaluation import kind_of, normalise_what
 
     what = normalise_what(what)
     kind = kind_of(what)
@@ -609,14 +669,9 @@ def check_library(
         given_root, found = _tapes(source, patterns, recursive)
         source = [p for p in found if _looks_like_endf(p)]
 
-    def one(path: Path, make) -> TapeCheck:
-        result = check_evaluation_file(path, what=what, mf=mf, deep=deep)
-        return make(report=result.report, error=result.error, has_covariances=result.has_anything,
-                    read_seconds=result.read_seconds, check_seconds=result.check_seconds,
-                    mf=result.mf)
-
-    tapes, root, stopped, planned = _walk(source, patterns, recursive, one, kind,
-                                          progress, on_tape, should_stop, on_result)
+    task = functools.partial(_evaluation_task, what=what, mf=mf, deep=deep)
+    tapes, root, stopped, planned = _walk(source, patterns, recursive, task, kind,
+                                          progress, on_tape, should_stop, on_result, workers)
     return LibraryReport(tapes, directory=given_root or root, library=library, stopped=stopped,
                          planned=planned, kind=kind)
 
