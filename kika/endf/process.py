@@ -790,7 +790,8 @@ class EndfProcessing:
         summary = (f"OpenMC HDF5 at {', '.join(f'{T:g}' for T in temps)} K"
                    + ("; with URR probability tables" if self._urr else "")
                    + ("; omitted: " + "; ".join(omitted) if omitted else ""))
-        self._written("hdf5", t0, path, summary=summary, temperatures=temps, omitted=omitted)
+        self._written("hdf5", t0, path, summary=summary, temperatures=temps, omitted=omitted,
+                      gas=list(getattr(processed, "gasReplaced", None) or []))
         return path
 
     def write_ace(self, directory, *, temperatures=None, extension: str | None = None,
@@ -879,7 +880,8 @@ class EndfProcessing:
                    + ("; with URR probability tables" if self._urr else "")
                    + ("; omitted: " + "; ".join(omitted) if omitted else ""))
         self._written("ace", t0, directory, summary=summary, temperatures=temps,
-                      files=[str(p) for p in written], omitted=omitted)
+                      files=[str(p) for p in written], omitted=omitted,
+                      gas=list(getattr(processed, "gasReplaced", None) or []))
         return written
 
     def write_dosimetry_ace(self, directory, *, temperatures=None, extension: str | None = None,

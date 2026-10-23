@@ -117,6 +117,18 @@ CHECKS = (
            NOTE: "Notes only: things true of the evaluation and worth knowing, none a fault.",
            WARN: "The evaluation has defects or warnings (listed). The output carries them as the "
                  "evaluation states them."}),
+    Check("gas", "Gas production as the evaluation states it",
+          "MT203-207 count the protons, deuterons, tritons, He-3 and alphas a collision makes. They "
+          "are written as the sum over the evaluation's reactions, as NJOY's GASPR writes them. When "
+          "the evaluation states its own, the two are compared.",
+          {PASS: "The evaluation's own MT203-207 and the sum that replaces them agree within the "
+                 "processing tolerance.",
+           NOTE: "They differ by more than the processing tolerance and by less than 1 % of the "
+                 "evaluation's peak: the two are the same within the evaluation's rounding.",
+           WARN: "They differ by more than 1 % of the evaluation's peak: the evaluation's total holds "
+                 "particles its reactions do not emit, or misses some they do. The files carry the sum, "
+                 "as NJOY's do; a gas-production tally there differs from the evaluation's own total "
+                 "where shown."}),
     Check("output", "File written and read back",
           "Every file is written to a temporary place, read back and compared with what was meant to "
           "be written, and only then moved over the destination.",
@@ -178,11 +190,41 @@ def build(run) -> dict:
     return _jsonable(data)
 
 
+#: The gas check: a difference below this share of the stated peak is the
+#: processing's own tolerance, above the second one it is worth a warning.
+GAS_TOLERANCE, GAS_MATERIAL = 1e-3, 1e-2
+_GAS_NAMES = {203: "protons", 204: "deuterons", 205: "tritons", 206: "He-3", 207: "alphas"}
+
+
+def _gas_check(writes):
+    """The gas check, from the comparison the HDF5 or ACE write stage carries; ``None``
+    when no table was tabulated or the evaluation states no MT203-207."""
+    rows = next((list((w.get("details") or {}).get("gas") or []) for w in writes
+                 if w.get("status") == "done" and "gas" in (w.get("details") or {})), None)
+    if rows is None:
+        return None
+    if not rows:
+        return None
+    worst = max(r["fraction"] for r in rows)
+    status = PASS if worst <= GAS_TOLERANCE else NOTE if worst <= GAS_MATERIAL else WARN
+    items = [f"MT{r['mt']} ({_GAS_NAMES.get(r['mt'], 'gas')}): the evaluation's total and the sum differ by "
+             f"up to {r['difference_b']:.2g} b at {r['at_eV']:.3g} eV, {100 * r['fraction']:.3g} % of the "
+             f"evaluation's peak ({r['peak_b']:.3g} b)" for r in rows]
+    mts = ", ".join(f"MT{r['mt']}" for r in rows)
+    result = (f"The evaluation states {mts}; replaced by the sum over its reactions"
+              + (", which agrees with it." if status == PASS else
+                 f", which differs from it by up to {100 * worst:.3g} % of its peak."))
+    return _check("gas", status, result, items if status != PASS else (), stage="write")
+
+
 def _finish(stages, writes):
     """Add the "Files written" stage and gather the checks and the verdict."""
     outputs = [_output(s) for s in writes]
     write_checks = [_check("output", o["status_check"], f"{o['name']}: {o['result']}", o["items"], stage="write")
                     for o in outputs]
+    gas = _gas_check(writes)
+    if gas is not None:
+        write_checks.append(gas)
     stages.append(dict(id="write", title=STAGE_TITLES["write"],
                        status="done" if outputs else "not requested",
                        state=("done" if all(o["written"] for o in outputs) else "rejected") if outputs

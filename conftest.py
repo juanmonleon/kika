@@ -268,6 +268,10 @@ _TAPES: Dict[str, Sequence[str]] = {
     "t3_sm153_b81": ("endfb81/n-062_Sm_153.endf",),
     "t3_pu242_jeff40": ("jeff40/n_94-Pu-242g.jeff",),
     "t3_pr141_jendl5": ("jendl5/n_059-Pr-141.dat",),
+    # Evaluations that state their own gas production (MF3 MT203-207):
+    # test_gas_from_the_mt.py checks the sum that replaces it.
+    "gas_li7_b81": ("endfb81/n-003_Li_007.endf", "endfb81/neutrons/n-003_Li_007.endf"),
+    "gas_f19_jendl5": ("jendl5/n_009-F-019.dat",),
     # The sources of the layer-1 micro-tapes (``COV_CHECK_FIXTURES`` in
     # ``kika/endf/tests/test_micro_tape_regen.py``), one fault each; the
     # validation that picked them is kika-workspace

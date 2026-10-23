@@ -59,6 +59,8 @@ def _gas(suite, crossSections) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
     else:
         grid = np.unique(np.concatenate([np.asarray(e, dtype=float) for e, _ in crossSections.values()]))
     totals: Dict[int, np.ndarray] = {}
+    target = suite.PoPs[suite.target] if suite.PoPs is not None and suite.target in suite.PoPs else None
+    zaTarget = None if getattr(target, "Z", None) is None else 1000 * int(target.Z) + int(target.A)
     for container in ("reactions", "fissionComponents"):
         for reaction in getattr(suite, container):
             mt = reaction.ENDF_MT
@@ -66,7 +68,7 @@ def _gas(suite, crossSections) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
                 continue
             e, sigma = (np.asarray(v, dtype=float) for v in crossSections[mt])
             on = np.interp(grid, e, sigma, left=0.0, right=0.0)
-            for gasMT, form in gasMultiplicities(reaction).items():
+            for gasMT, form in gasMultiplicities(reaction, zaTarget).items():
                 forms = form if isinstance(form, tuple) else (form,)
                 k = sum(np.full(grid.shape, f.constant) if isinstance(f, Constant1d)
                         else np.asarray(evaluate(f, grid)) for f in forms)

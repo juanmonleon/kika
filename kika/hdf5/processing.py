@@ -757,10 +757,19 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
 
     # --- which reactions --------------------------------------------------
     leaves: List[_Leaf] = []
+    # An evaluation's own gas production (MF3 MT203-207) is a total over its
+    # reactions, not one of them: summed with them it counted twice (F-19,
+    # Al-27 and Mo-94 came out at exactly twice their MT203-207), and as a
+    # reaction it collided with the sum in the HDF5 file. The sum replaces it,
+    # as GASPR replaces it (_replacedGas).
+    statedGas = {}
     for container in ("reactions", "fissionComponents"):
         for reaction in getattr(work, container):
             mt = reaction.ENDF_MT
             if mt is None or mt in NEVER:
+                continue
+            if mt in GAS_MTS:
+                statedGas[mt] = reaction
                 continue
             leaves.append(_Leaf(reaction, container, mt))
     present = {leaf.mt for leaf in leaves}
@@ -978,7 +987,11 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
                   particles=particles)
 
     # --- gas production -----------------------------------------------------
-    for gasMT, cs in _gas(work, leaves, heated, grids).items():
+    gas = _gas(work, leaves, heated, grids, zaTarget)
+    # Kept beside the report, as numbers: the processing report of
+    # kika.endf.process_endf turns them into its gas check.
+    out.gasReplaced = _replacedGas(statedGas, gas, report)
+    for gasMT, cs in sorted(gas.items()):
         out.productions.append(m.Reaction(id=m.ReactionId(label=f"MT{gasMT}", ENDF_MT=gasMT),
                                           crossSection=cs,
                                           outputChannel=m.OutputChannel(Q=m.Q(value=0.0)),
@@ -1726,53 +1739,101 @@ def _photonFile(reaction, record, product=None, flags=None) -> int:
 # Gas, fission, NJOY
 # ----------------------------------------------------------------------
 
-#: The light particles each ENDF-6 MT emits by its definition, ``{MT: {gas MT:
-#: count}}``, as GASPR counts them (``gaspr.f90``). They count only for a
-#: reaction that states no light particle of its own (MF3 alone).
-GAS_BY_MT = {
-    11: {204: 1}, 22: {207: 1}, 23: {207: 3}, 24: {207: 1}, 25: {207: 1}, 28: {203: 1},
-    29: {207: 2}, 30: {207: 2}, 32: {204: 1}, 33: {205: 1}, 34: {206: 1},
-    35: {204: 1, 207: 2}, 36: {205: 1, 207: 2}, 41: {203: 1}, 42: {203: 1}, 44: {203: 2},
-    45: {203: 1, 207: 1}, 103: {203: 1}, 104: {204: 1}, 105: {205: 1}, 106: {206: 1},
-    107: {207: 1}, 108: {207: 2}, 109: {207: 3}, 111: {203: 2}, 112: {203: 1, 207: 1},
-    113: {205: 1, 207: 2}, 114: {204: 1, 207: 2}, 115: {203: 1, 204: 1},
-    116: {203: 1, 205: 1}, 117: {204: 1, 207: 1},
+#: The light particles by ZA, and the gas MT that counts each.
+_LIGHT_ZA = {"n": 1, "p": 1001, "d": 1002, "t": 1003, "h": 2003, "a": 2004}
+_PID_ZA = {"n": 1, "H1": 1001, "H2": 1002, "H3": 1003, "He3": 2003, "He4": 2004}
+GAS_BY_ZA = {1001: 203, 1002: 204, 1003: 205, 2003: 206, 2004: 207}
+
+#: The particles each ENDF-6 MT emits by its definition (ENDF-102 Appendix B;
+#: n, p, d, t, h = He-3, a = alpha), the list GASPR counts (``gaspr.f90``).
+#: MT102 emits none: its residual is the whole compound nucleus. MT51-91 are
+#: one neutron and what the level breaks up into (LR); MT600-849 one particle
+#: of their series. MT2, 4, 5, the fission MTs and the sums have no entry.
+EMITTED_BY_MT = {
+    11: "nnd", 16: "nn", 17: "nnn", 22: "na", 23: "naaa", 24: "nna", 25: "nnna",
+    28: "np", 29: "naa", 30: "nnaa", 32: "nd", 33: "nt", 34: "nh", 35: "ndaa", 36: "ntaa",
+    37: "nnnn", 41: "nnp", 42: "nnnp", 44: "npp", 45: "npa",
+    102: "", 103: "p", 104: "d", 105: "t", 106: "h", 107: "a", 108: "aa", 109: "aaa",
+    111: "pp", 112: "pa", 113: "taa", 114: "daa", 115: "pd", 116: "pt", 117: "da",
+    152: "nnnnn", 153: "nnnnnn", 154: "nnt", 155: "ta", 156: "nnnnp", 157: "nnnd", 158: "nda",
+    159: "nnpa", 160: "nnnnnnn", 161: "nnnnnnnn", 162: "nnnnnp", 163: "nnnnnnp",
+    164: "nnnnnnnp", 165: "nnnna", 166: "nnnnna", 167: "nnnnnna", 168: "nnnnnnna",
+    169: "nnnnd", 170: "nnnnnd", 171: "nnnnnnd", 172: "nnnt", 173: "nnnnt", 174: "nnnnnt",
+    175: "nnnnnnt", 176: "nnh", 177: "nnnh", 178: "nnnnh", 179: "nnnpp", 180: "nnnaa",
+    181: "nnnpa", 182: "dt", 183: "npd", 184: "npt", 185: "ndt", 186: "nph", 187: "ndh",
+    188: "nth", 189: "nta", 190: "nnpp", 191: "ph", 192: "dh", 193: "ha", 194: "nnnnpp",
+    195: "nnnnaa", 196: "nnnnpa", 197: "ppp", 198: "nppp", 199: "nnnppa", 200: "nnnnnpp",
 }
 #: The discrete-level series of charged-particle emission: MT600-649 (p) … 800-849 (α).
-GAS_SERIES = {600: 203, 650: 204, 700: 205, 750: 206, 800: 207}
+GAS_SERIES = {600: "p", 650: "d", 700: "t", 750: "h", 800: "a"}
 
 
-def _impliedGas(reaction) -> Dict[int, int]:
+def _emitted(reaction) -> Optional[Dict[int, int]]:
+    """``{ZA: count}`` of what the reaction's MT emits, or ``None`` when it has no fixed list."""
     mt = reaction.ENDF_MT
     if mt is None:
-        return {}
+        return None
     if 51 <= mt <= 91:
         # A level that breaks up (LR, ENDF-102): N-14 MT60-77 have LR=28, a
         # proton each -- 0.205 b of N-14's 0.249 b of MT203 at 14 MeV.
         from kika.endf.model_adapter.derive.reactions import LR_PRODUCTS
 
         lr = int(getattr(getattr(reaction, "provenance", None), "lr", 0) or 0)
-        pids = {pid: gasMT for gasMT, pid in GAS_MTS.items()}
-        return {pids[pid]: n for pid, n in LR_PRODUCTS.get(lr, {}).items() if pid in pids}
-    if mt in GAS_BY_MT:
-        return GAS_BY_MT[mt]
-    for start, gasMT in GAS_SERIES.items():
+        out = {1: 1}
+        for pid, n in LR_PRODUCTS.get(lr, {}).items():
+            out[_PID_ZA[pid]] = out.get(_PID_ZA[pid], 0) + n
+        return out
+    for start, letter in GAS_SERIES.items():
         if start <= mt < start + 50:
-            return {gasMT: 1}
-    return {}
+            return {_LIGHT_ZA[letter]: 1}
+    letters = EMITTED_BY_MT.get(mt)
+    if letters is None:
+        return None
+    out = {}
+    for letter in letters:
+        out[_LIGHT_ZA[letter]] = out.get(_LIGHT_ZA[letter], 0) + 1
+    return out
 
 
-def gasMultiplicities(reaction) -> Dict[int, object]:
+def _impliedGas(reaction, targetZA: Optional[int] = None) -> Dict[int, int]:
+    """``{gas MT: count}`` by the MT: what it emits, and its residual when that is light.
+
+    The residual is the target and the neutron less what the MT emits. When it
+    is itself a proton, deuteron, triton, He-3 or alpha it counts too, and Be-8
+    counts as the two alphas it breaks up into, as GASPR counts them: Li-7's
+    levels with LR=33 break up into a triton and the alpha they leave, Li-7's
+    (n,2n alpha) leaves a deuteron, H-1's capture a deuteron.
+    """
+    emitted = _emitted(reaction)
+    if emitted is None:
+        return {}
+    out: Dict[int, int] = {}
+    for za, n in emitted.items():
+        if za in GAS_BY_ZA:
+            out[GAS_BY_ZA[za]] = out.get(GAS_BY_ZA[za], 0) + n
+    if targetZA is not None:
+        z = targetZA // 1000 - sum(n * (za // 1000) for za, n in emitted.items())
+        a = targetZA % 1000 + 1 - sum(n * (za % 1000) for za, n in emitted.items())
+        residual = 1000 * z + a
+        if residual in GAS_BY_ZA:
+            out[GAS_BY_ZA[residual]] = out.get(GAS_BY_ZA[residual], 0) + 1
+        elif residual == 4008:
+            out[207] = out.get(207, 0) + 2
+    return out
+
+
+def gasMultiplicities(reaction, targetZA: Optional[int] = None) -> Dict[int, object]:
     """``{gas MT: multiplicity function}`` for the light particles a reaction emits.
 
     From the reaction's own products (MF4/MF6); a reaction that states none
     (MF3 alone -- every MT600-849 of ENDF/B-VIII.1 N-14) emits what its MT says,
     as GASPR counts it: with only the stated products, N-14's MT203, 204 and 207
-    were zero everywhere and MT205 was missing.
+    were zero everywhere and MT205 was missing. With ``targetZA`` the residual
+    of such a reaction counts too when it is light (:func:`_impliedGas`).
     """
     out = {}
     if not any(p.pid in GAS_MTS.values() for p in reaction.outputChannel.products):
-        for gasMT, count in _impliedGas(reaction).items():
+        for gasMT, count in _impliedGas(reaction, targetZA).items():
             out[gasMT] = _m().Constant1d(constant=float(count), domainMin_=0.0,
                                          domainMax_=float("inf"))
         return out
@@ -1793,14 +1854,14 @@ def gasMultiplicities(reaction) -> Dict[int, object]:
     return out
 
 
-def _gas(work, leaves, heated, grids):
+def _gas(work, leaves, heated, grids, zaTarget=None):
     m = _m()
     from kika.hdf5.fission_energy import evaluate
 
     totals: Dict[int, Dict[str, np.ndarray]] = {}
     starts: Dict[int, Dict[str, int]] = {}
     for leaf in leaves:
-        for gasMT, form in gasMultiplicities(leaf.reaction).items():
+        for gasMT, form in gasMultiplicities(leaf.reaction, zaTarget).items():
             forms = form if isinstance(form, tuple) else (form,)
             for T, values in heated.items():
                 y, start = values[leaf.mt]
@@ -1820,6 +1881,42 @@ def _gas(work, leaves, heated, grids):
                                          axes=m.crossSectionAxes(), label=heatedLabel(T))
         out[gasMT] = cs
     return out
+
+
+def _replacedGas(stated, summed, report):
+    """How far the evaluation's own MT203-207 is from the sum over its reactions that replaces it.
+
+    Neither is always the better: Li-7's stated MT207 holds the two alphas of
+    each capture (Li-8 decays to Be-8, two alphas), 4.6 b at 1e-5 eV, that no
+    reaction emits; JENDL-5 F-19's stated MT203-207 stop at 20 MeV, where its
+    MT5 emits up to 0.44 b of protons to 200 MeV. The sum is what GASPR writes,
+    and it is consistent with the reactions the file transports.
+
+    Returns one row per replaced MT: ``mt``, ``difference_b`` (the largest
+    absolute difference), ``at_eV`` (where), ``peak_b`` (of the stated total)
+    and ``fraction`` (the difference over the peak).
+    """
+    rows = []
+    for mt, reaction in sorted(stated.items()):
+        x, y = (np.asarray(v, dtype=float) for v in _flatten(reaction.crossSection[RECON_LABEL]))
+        peak = float(y.max()) if y.size else 0.0
+        if mt in summed:
+            xs, ys = (np.asarray(v, dtype=float) for v in _flatten(summed[mt][next(iter(summed[mt]))]))
+            on = np.interp(x, xs, ys, left=0.0, right=0.0)
+            steps = np.concatenate([x[1:][np.diff(x) == 0], xs[1:][np.diff(xs) == 0]])
+        else:
+            on, steps = np.zeros_like(y), np.zeros(0)
+        # Not at a step (an energy given twice): there the two sides of the
+        # jump, Li-7's MT104 threshold at 9.98 MeV, are not the same point.
+        diff = np.where(np.isin(x, steps), 0.0, np.abs(on - y))
+        worst = float(np.max(diff)) if y.size else 0.0
+        at = float(x[int(np.argmax(diff))]) if y.size else 0.0
+        fraction = worst / peak if peak > 0 else 0.0
+        report.warn(f"MT{mt}: the gas production the evaluation states is replaced by the sum over "
+                    f"its reactions, as GASPR replaces it; they differ by at most {worst:.2g} b at "
+                    f"{at:.3g} eV ({fraction:.1e} of the stated peak)")
+        rows.append(dict(mt=mt, difference_b=worst, at_eV=at, peak_b=peak, fraction=fraction))
+    return rows
 
 
 def _fission(work, out, report):
