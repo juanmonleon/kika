@@ -86,6 +86,18 @@ def _range_row(isotope, rng) -> dict:
                ap_energy_points=len(rng.ap_e.energies) if getattr(rng, "ap_e", None) else 0,
                lfw=_int(getattr(isotope, "lfw", None)), za=_int(getattr(isotope, "za", None)),
                abundance=_num(getattr(isotope, "abn", None)))
+    # The radius a reader should see is the one used: an energy-dependent AP(E)
+    # (NRO = 1) makes the range's AP a placeholder, and a Reich-Moore block's
+    # APL replaces AP for its l.
+    ap_e = getattr(rng, "ap_e", None)
+    values = list(getattr(ap_e, "ap_values", None) or []) if ap_e is not None else []
+    if values:
+        row["ap_e_fm"] = [10 * float(min(values)), 10 * float(max(values))]
+    if rng.lru == 1 and rng.lrf == 3:
+        apl = sorted({10 * float(b.apl_or_qx) for b in getattr(p, "l_values", None) or []
+                      if getattr(b, "apl_or_qx", None) and float(b.apl_or_qx) > 0})
+        if apl:
+            row["apl_fm"] = apl
     kind = type(p).__name__
     if rng.lru == 0:
         row.update(formalism="scattering radius only")
@@ -215,6 +227,7 @@ def build(rec) -> dict:
             e_min_eV=float(x[0]), e_max_eV=float(x[-1]),
             threshold_eV=float(x[nonzero[0]]) if len(nonzero) else None,
             jumps=int(len(repeated)), jumps_at_eV=[float(x[i]) for i in repeated[:20]],
+            jumps_b=[float(abs(y[i + 1] - y[i])) for i in repeated[:20]],
             decreasing=int(np.count_nonzero(dx < 0)),
             min_relative_spacing=float(relative.min()) if len(positive) else None,
             min_relative_spacing_at_eV=float(x[positive[np.argmin(relative)]]) if len(positive) else None,
@@ -360,9 +373,14 @@ CHECKS = (
           "reactions it is made of, the stored total is compared with the sum of those reactions. kika "
           "always rebuilds totals from their parts, so this checks the evaluation, not the reconstruction.",
           {PASS: "Each stored total agrees with the sum of its parts within the tolerance.",
-           WARN: "A stored total disagrees with the sum of its parts by more than the tolerance. The "
-                 "evaluation is not self-consistent there, and the reconstructed total (the sum) will "
-                 "differ from the total printed in the evaluation at those energies.",
+           NOTE: "A stored total disagrees with the sum of its parts, but by less than 1 % of the "
+                 "stated total or less than 1 mb (typically a single point at a threshold). The output "
+                 "uses the sum of the parts and is consistent; its total differs slightly from the one "
+                 "printed in the evaluation there.",
+           WARN: "A stored total disagrees with the sum of its parts by more than 1 % of it and more "
+                 "than 1 mb. The evaluation is not self-consistent there: either the stored total or a "
+                 "part is wrong, or the total counts a reaction the file does not state on its own. The "
+                 "output uses the sum of the parts.",
            SKIP: "The evaluation stores no total alongside its parts."}),
     Check("negatives", "No negative cross sections",
           "Every value of every table is checked for sign.",
@@ -376,8 +394,8 @@ CHECKS = (
           "section genuinely jumps, typically at the boundary between two resonance ranges; both values "
           "are then kept.",
           {PASS: "Energies ascend; any repeated energy is a real jump at a resonance-range boundary.",
-           NOTE: "A jump lies away from the resonance-range boundaries. It comes from the evaluation's "
-                 "own tables (MF3) and is kept as stated.",
+           NOTE: "A jump larger than the absolute tolerance lies away from the resonance-range "
+                 "boundaries. It comes from the evaluation's own tables (MF3) and is kept as stated.",
            FAIL: "Energies decrease somewhere: the table is malformed."}),
     Check("integrals", "Integrals over energy are preserved",
           "The integral of each table over energy is compared with an accurate estimate of the "
@@ -482,9 +500,10 @@ def evaluate_checks(d) -> list:
                                      f"({worst['name']}).")
         else:
             one = len(bad) == 1
-            add("source_sums", WARN, f"{', '.join(x['name'] for x in bad)} differ{'s' if one else ''} from the "
-                                     f"sum of {'its' if one else 'their'} parts, by up to "
-                                     f"{max(x['max_ratio'] for x in bad):.0f}× the tolerance.",
+            add("source_sums", WARN if any(_material(x) for x in bad) else NOTE,
+                f"{', '.join(x['name'] for x in bad)} differ{'s' if one else ''} from the "
+                f"sum of {'its' if one else 'their'} parts, by up to "
+                f"{max(x['max_ratio'] for x in bad):.0f}× the tolerance.",
                 [f"{x['name']} at {_energy(x['at_eV'])}: the evaluation states {_b(x['stated_b'])}, its parts "
                  f"add up to {_b(x['components_b'])} ({x['max_ratio']:.1f}× the tolerance). The output uses "
                  "the sum of the parts." for x in bad])
@@ -499,18 +518,25 @@ def evaluate_checks(d) -> list:
 
     bounds = [b for r in ranges for b in (r["el_eV"], r["eh_eV"])]
     broken = [r for r in d["reactions"] if r.get("decreasing")]
-    stray = [(r, e) for r in d["reactions"] for e in r.get("jumps_at_eV", ())
-             if not any(_close(e, b) for b in bounds)]
+    # A jump is worth a note when it is larger than the absolute tolerance: a step
+    # of 1e-12 b where a channel opens (Au-197 (n,p) at 6 MeV) changes nothing.
+    def sized(r):
+        at, sizes = list(r.get("jumps_at_eV", ())), list(r.get("jumps_b") or ())
+        return zip(at, sizes[:len(at)] + [None] * (len(at) - len(sizes)))
+    stray = [(r, e, size) for r in d["reactions"] for e, size in sized(r)
+             if not any(_close(e, b) for b in bounds) and (size is None or size > tol["atol"])]
     jumps = sum(r["jumps"] for r in d["reactions"])
     if broken:
         add("grid", FAIL, f"Energies decrease in {len(broken)} table(s).",
             [f"{_mtname(r)}: {r['decreasing']} decreasing step(s)." for r in broken])
     elif stray:
         add("grid", NOTE, f"{len(stray)} jump(s) away from the resonance-range boundaries.",
-            [f"{_mtname(r)}: jump at {_energy(e)}, from the evaluation's table." for r, e in stray])
+            [f"{_mtname(r)}: jump at {_energy(e)}" + (f" of {_b(size)}" if size is not None else "")
+             + ", from the evaluation's table." for r, e, size in stray])
     else:
         add("grid", PASS, "Energies ascend in every table" + (
-            f"; {jumps} jump(s), all at a resonance-range boundary." if jumps else "; no jumps."))
+            f"; {jumps} jump(s), each at a resonance-range boundary or smaller than the tolerance."
+            if jumps else "; no jumps."))
 
     diffs = [r for r in d["reactions"] if r.get("integral_relative_difference") is not None]
     if diffs:
@@ -541,6 +567,19 @@ def evaluate_checks(d) -> list:
     else:
         add("conversion", PASS, "Resonance parameters and cross sections read without loss." + tail)
     return out
+
+
+#: A stored total's disagreement with its parts that is worth a warning: more
+#: than this fraction of the stated total and more than this many barns.
+MATERIAL_SUM_FRACTION, MATERIAL_SUM_BARNS = 1.0e-2, 1.0e-3
+
+
+def _material(discrepancy) -> bool:
+    """Whether a total's disagreement with its parts can change a result
+    (the parts may miss a reaction), rather than being a point of rounding."""
+    stated, parts = abs(discrepancy["stated_b"] or 0.0), abs(discrepancy["components_b"] or 0.0)
+    gap = abs((discrepancy["stated_b"] or 0.0) - (discrepancy["components_b"] or 0.0))
+    return gap > MATERIAL_SUM_FRACTION * max(stated, parts) and gap > MATERIAL_SUM_BARNS
 
 
 def _overall(checks):
@@ -676,9 +715,16 @@ def _content(r):
     if r.get("energy_points"):
         parts.append(f"{r['energy_points']} energies")
     text = ", ".join(parts) or "-"
-    if r.get("ap_fm") is not None:
-        text += f"; scattering radius {r['ap_fm']:.4g} fm" + (
-            " (energy dependent)" if r.get("ap_energy_points") else "")
+    ap, apl, ap_e = r.get("ap_fm"), r.get("apl_fm"), r.get("ap_e_fm")
+    if ap_e:
+        lo, hi = ap_e
+        text += (f"; scattering radius {lo:.4g} fm (energy dependent)" if lo == hi else
+                 f"; scattering radius {lo:.4g}–{hi:.4g} fm (energy dependent)")
+    elif apl and not ap:
+        text += "; scattering radius " + ", ".join(f"{v:.4g}" for v in apl) + " fm (stated per l)"
+    elif ap is not None:
+        text += f"; scattering radius {ap:.4g} fm" + (
+            "; per l: " + ", ".join(f"{v:.4g}" for v in apl) + " fm" if apl else "")
     return text
 
 

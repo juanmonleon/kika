@@ -34,7 +34,9 @@ when the plan asks for it (``heating=True``).
 
 Outputs, each appending its own ``write`` stage: :meth:`EndfProcessing.write_pendf`
 (one material per temperature, MF2/MT153 where there are URR tables, MT301 and
-MT444 when the heating stage ran), :meth:`EndfProcessing.write_hdf5` (OpenMC) and
+MT444 when the heating stage ran), :meth:`EndfProcessing.write_hdf5` (OpenMC),
+:meth:`EndfProcessing.write_ace` (one continuous-energy table per temperature),
+:meth:`EndfProcessing.write_dosimetry_ace` (``.NNy`` tables) and
 :meth:`EndfProcessing.write_gnds` (eval, recon and one ``heated`` style per
 temperature). A failed output raises
 :class:`ProcessingOutputError` and leaves any existing file in place.
@@ -96,7 +98,6 @@ PROCESSING_REJECTION_CATEGORIES = {
     "urr-unsupported": "The unresolved resonance parameters use data the probability-table method does not support.",
     "urr-failed": "The probability tables stopped with an internal error.",
     # heating (skipped / rejected)
-    "heating-not-implemented": "Heating (KERMA) is not yet available in this processing chain.",
     "heating-unsupported":
         "The evaluation lacks data HEATR's method needs for the heating (a fission without MF1/458).",
     "heating-failed": "The heating (KERMA and damage) stopped with an internal error.",
@@ -208,8 +209,14 @@ class StageReport:
       ``n_points`` (``{T: union-grid points}``), ``engine_category`` and
       ``error`` when rejected.
     - ``urr``: ``temperatures``, ``n_energies``, ``bins``, ``ladders``,
-      ``range_eV``, ``error`` when rejected.
-    - ``write``: ``path``, ``temperatures`` written (``[0.0]`` for now).
+      ``range_eV``, ``ladders_drawn`` (``min``, ``median``, ``max``), ``error``
+      when rejected.
+    - ``heating``: ``temperatures`` (0 K included), ``mts``, ``local``,
+      ``n_points``, ``notes``, ``error`` when rejected.
+    - ``write`` (one stage per file written): ``format`` (``pendf``, ``hdf5``,
+      ``ace``, ``gnds``), ``path``, ``temperatures`` written, ``files`` (ACE: the
+      tables), ``omitted`` (what the format could not carry), ``error`` when
+      rejected.
     """
     stage: str
     status: str
@@ -342,7 +349,9 @@ def _contiguous(x):
 
 
 class EndfProcessing:
-    """The result of :func:`process_endf`. Picklable; every array is float64."""
+    """The result of :func:`process_endf`. Every array is float64; :meth:`to_dict`
+    gives it as plain types and arrays, which pickle (the result itself holds the
+    reconstruction, which does not)."""
 
     def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables, *, broadened=None,
                  source_format="endf"):
@@ -365,6 +374,14 @@ class EndfProcessing:
         self._aside = {}                 # GNDS: containers set aside for the reconstruction
         self._heating = {}               # {T: {301: (E, h), 444: (E, d)}}, 0.0 for 0 K
         self._displacements = {}         # {T: {"nrt": (E, n), "arc-dpa": (E, n)}}
+        self._processed = None           # (suite, report): every temperature tabulated for Monte Carlo
+
+    def __getstate__(self):
+        # The processed suite is a cache of write_ace/write_hdf5, rebuilt on demand:
+        # it does not travel with the result.
+        state = dict(self.__dict__)
+        state["_processed"] = None
+        return state
 
     def _written(self, fmt, t0, path, error=None, summary="", **details):
         """Append this output's own ``write`` stage (several outputs, several stages)."""
@@ -637,6 +654,33 @@ class EndfProcessing:
             raise ProcessingOutputError(category, str(error)) from error
         return work
 
+    def _processed_suite(self, progress=None, category="ace-failed"):
+        """``(suite, report, omit)``: every broadened temperature tabulated for Monte Carlo,
+        light charged particles included, built once and shared by :meth:`write_ace`
+        and :meth:`write_hdf5` (the slow part of both: distributions, KERMA, damage,
+        gas production). The HDF5 file takes a copy without the charged particles,
+        which is the suite :func:`kika.hdf5.processing.processSuite` makes for it
+        without them (identical files, Au-197 and Ni-58 of ENDF/B-VIII.1)."""
+        from kika.hdf5.processing import ACE_PARTICLES, processSuite
+        from kika.nuclear_data.model import ConversionReport
+        if self._processed is not None:
+            return self._processed
+        temps = list(self.temperatures)
+        work = self._full_suite(progress, category=category)
+        resonances = work.resonances
+        omit = ("urr",) if resonances is not None and resonances.unresolved is not None and not self._urr else ()
+        report = ConversionReport()
+        try:
+            suite = processSuite(
+                work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
+                broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
+                context=self.reconstruction.context, thinning=self.plan.thinning,
+                workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
+        except Exception as error:
+            raise ProcessingOutputError(category, f"{type(error).__name__}: {error}") from error
+        self._processed = (suite, report, omit)
+        return self._processed
+
     def write_gnds(self, path, *, progress: Progress | None = None) -> Path:
         """Write the processed evaluation as GNDS, as FUDGE's ``processProtare`` does.
 
@@ -730,18 +774,12 @@ class EndfProcessing:
             if not temps or not self._broadened:
                 raise ProcessingOutputError(
                     "hdf5-needs-temperature", PROCESSING_REJECTION_CATEGORIES["hdf5-needs-temperature"])
-            work = self._full_suite(progress)
-            omit = ()
-            resonances = work.resonances
-            if resonances is not None and resonances.unresolved is not None and not self._urr:
-                omit = ("urr",)
+            processed, _, omit = self._processed_suite(progress, category="hdf5-failed")
+            if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             try:
-                writeSuite(
-                    work, path.parent, temperatures=temps, fileName=path.name, index=index,
-                    urrTables=dict(self._urr) or None, broadened={T: self._broadened[T] for T in temps},
-                    thnmax=self.thnmax, context=self.reconstruction.context, thinning=self.plan.thinning,
-                    workers=self.plan.workers, omit=omit)
+                writeSuite(_neutrons_and_photons(processed), path.parent, temperatures=temps,
+                           fileName=path.name, index=index)
             except Exception as error:
                 raise ProcessingOutputError("hdf5-failed", f"{type(error).__name__}: {error}") from error
         except ProcessingOutputError as error:
@@ -785,7 +823,6 @@ class EndfProcessing:
         from kika.ace.model_adapter import encodeAce
         from kika.ace.writers.write_ace import write_ace_checked
         from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
-        from kika.hdf5.processing import ACE_PARTICLES, processSuite
         from kika.nuclear_data.model import ConversionReport
 
         t0 = time.perf_counter()
@@ -810,21 +847,10 @@ class EndfProcessing:
                 raise ProcessingOutputError(
                     "ace-failed", f"extension={extension!r} names one table, and {len(temps)} "
                                   f"temperatures {temps} were asked for")
-            work = self._full_suite(progress, category="ace-failed")
-            omit = ()
-            resonances = work.resonances
-            if resonances is not None and resonances.unresolved is not None and not self._urr:
-                omit = ("urr",)
+            processed, processing_report, omit = self._processed_suite(progress, category="ace-failed")
+            if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             report = ConversionReport()
-            try:
-                processed = processSuite(
-                    work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
-                    broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
-                    context=self.reconstruction.context, thinning=self.plan.thinning,
-                    workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
-            except Exception as error:
-                raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
             directory.mkdir(parents=True, exist_ok=True)
             for i, T in enumerate(temps):
                 try:
@@ -845,7 +871,7 @@ class EndfProcessing:
                 written.append(target)
                 if progress:
                     progress("write", (i + 1) / len(temps))
-            omitted += list(report.unsupported)
+            omitted += list(processing_report.unsupported) + list(report.unsupported)
         except ProcessingOutputError as error:
             self._written("ace", t0, directory, error, temperatures=temps, files=[str(p) for p in written])
             raise
@@ -959,9 +985,12 @@ class EndfProcessing:
         return written
 
     def report_document(self):
-        """The reconstruction report with a section per processing stage
-        (``to_text()``, ``to_html()``, ``to_dict()``, ``save(path)``)."""
-        return ProcessingReport(self.reconstruction.report_document(), self.stages, self.thnmax)
+        """The processing report: did the run go well, and what exactly was done
+        (:mod:`kika.endf.processing_report`). ``to_text()``, ``to_html()``,
+        ``to_dict()``, ``to_json()``, ``save(path)``. Ask for it after the files
+        are written: each ``write_*`` call is one of the stages it reports."""
+        from .processing_report import ProcessingReport, build
+        return ProcessingReport(build(self))
 
     def to_dict(self) -> dict:
         """Everything as plain types and float64 arrays (not lists): ``path``,
@@ -982,6 +1011,22 @@ class EndfProcessing:
     def __repr__(self):
         states = ", ".join(f"{s.stage}={s.status}" for s in self.stages)
         return f"<EndfProcessing {self.reconstruction.path.name}: {states}>"
+
+
+def _neutrons_and_photons(processed):
+    """A copy of a processed suite with only its neutron and photon products, the
+    ones an OpenMC HDF5 file carries: the light charged particles ACE tabulates
+    are added to a reaction's products and change nothing else."""
+    suite = copy.deepcopy(processed)
+    for name in ("reactions", "orphanProducts", "fissionComponents", "productions", "sums",
+                 "incompleteReactions"):
+        for reaction in getattr(suite, name, None) or []:
+            channel = getattr(reaction, "outputChannel", None)
+            if channel is None:
+                continue
+            products = channel.products.products
+            products[:] = [p for p in products if p.pid in ("n", "photon")]
+    return suite
 
 
 def _heated_tables(work, label, broadened, hi, thinning):
@@ -1284,6 +1329,59 @@ def _fission_heating(out, work, grid, sigma, A):
     return np.where(sigma_f > 0, sigma_f * h0, 0.0) - h.fissionPhotonKerma(out, grid, sigma, awr=A)
 
 
+#: The partial reactions of a sum an evaluation may state photons on.
+_SUM_PARTS = {3: tuple(range(4, 200)) + tuple(range(600, 850)), 4: tuple(range(50, 92)),
+              18: (19, 20, 21, 38), 103: tuple(range(600, 650)), 104: tuple(range(650, 700)),
+              105: tuple(range(700, 750)), 106: tuple(range(750, 800)), 107: tuple(range(800, 850))}
+#: Negative heating deeper than this fraction of the incident energy, per
+#: collision, is material; shallower is the evaluation's rounding.
+MATERIAL_NEGATIVE_HEATING = 1.0e-3
+
+
+def _negative_heating(grid, kerma, sigma, result, gap=1.5, causes=2):
+    """Where the KERMA is negative and which reactions make it so: one entry per
+    region (negative energies closer than a factor ``gap`` belong together), with
+    the energy of its lowest value per collision and the ``causes`` reactions
+    whose own balance is most negative there (a reaction's KERMA per reaction
+    times its cross section, or the photons an evaluation states on a sum, which
+    no partial carries). Energies in eV, per collision in eV."""
+    from kika._constants import MT_TO_REACTION
+    total = sigma.get(1)
+    neg = np.flatnonzero(np.asarray(kerma) < 0)
+    if total is None or not len(neg):
+        return []
+    name = lambda mt: f"MT{mt} {MT_TO_REACTION[mt]}" if mt in MT_TO_REACTION else f"MT{mt}"
+    groups, start = [], 0
+    for k in range(1, len(neg) + 1):
+        if k == len(neg) or grid[neg[k]] > gap * grid[neg[k - 1]]:
+            groups.append(neg[start:k])
+            start = k
+    out = []
+    with np.errstate(divide="ignore", invalid="ignore"):
+        per_collision = np.where(total > 0, np.asarray(kerma) / total, 0.0)
+    for idx in groups:
+        i = int(idx[np.argmin(per_collision[idx])])
+        share = {mt: float(values[0][i] * sigma[mt][i] / total[i])
+                 for mt, values in result.perReaction.items() if mt in sigma and total[i] > 0}
+        parts = []
+        # Photons an evaluation states on a sum (MT4, MT103...) are emitted by its
+        # parts: the sum's balance is its parts' KERMA less those photons, and the
+        # parts are counted there, not on their own.
+        for mt, photons in result.photonEnergy.items():
+            if mt in result.perReaction or mt not in sigma or not total[i] > 0:
+                continue
+            members = [m for m in share if m in _SUM_PARTS.get(mt, ())]
+            net = sum(share.pop(m) for m in members) - float(photons[i] * sigma[mt][i] / total[i])
+            parts.append((net, name(mt)))
+        parts += [(v, name(mt)) for mt, v in share.items()]
+        worst = sorted(p for p in parts if p[0] < 0)[:causes]
+        out.append(dict(from_eV=float(grid[idx[0]]), to_eV=float(grid[idx[-1]]), at_eV=float(grid[i]),
+                        per_collision_eV=float(per_collision[i]), points=int(len(idx)),
+                        material=bool(per_collision[i] < -MATERIAL_NEGATIVE_HEATING * grid[i]),
+                        causes=[dict(what=w, per_collision_eV=v) for v, w in worst]))
+    return out
+
+
 def _heating(run, plan, report):
     """``(StageReport, {T: {301: (E, h), 444: (E, d)}})``; never raises.
 
@@ -1314,7 +1412,7 @@ def _heating(run, plan, report):
         # with Q in its place the balance of every level was off by its
         # excitation (Fe-56 by GNDS: KERMA x21 above MT51's threshold).
         qm = {mt: q for mt, (_, q) in reactionQValues(work).items() if q is not None}
-        tables, notes = {}, []
+        tables, notes, negative = {}, [], {}
         for i, T in enumerate(temps):
             grid, sigma = _heating_grid(run, T)
             result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, evaluation=work,
@@ -1325,6 +1423,9 @@ def _heating(run, plan, report):
                 kerma = kerma + fission
             grid = _contiguous(grid)
             tables[T] = {301: (grid, _contiguous(kerma)), 444: (grid, _contiguous(result.damage))}
+            regions = _negative_heating(grid, kerma, sigma, result)
+            if regions:
+                negative[f"{T:g}"] = regions
             run._displacements[T] = {name: (grid, _contiguous(v)) for name, v in result.displacements.items()}
             notes = result.notes
             report("heating", 0.5 + 0.5 * (i + 1) / len(temps))
@@ -1337,12 +1438,15 @@ def _heating(run, plan, report):
                            f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     details["notes"] = list(notes)
     details["n_points"] = {T: int(len(t[301][0])) for T, t in tables.items()}
+    if negative:
+        details["negative"] = negative
     fissile = any(r.ENDF_MT in (18, 19) for r in _entries(work).values())
     models = sorted({name for v in run._displacements.values() for name in v})
     summary = (f"MT301 (KERMA) and MT444 (damage) at {', '.join(f'{T:g}' for T in temps)} K, as NJOY "
                f"HEATR with local = 0" + ("; fission from MF1/458 (EFR + EGP) less its prompt photons"
                                           if fissile else "")
-               + (f"; displacements ({', '.join(models)}) in EndfProcessing.displacements" if models else ""))
+               + (f"; displacements per atom ({', '.join(models)}) computed, which no ENDF or ACE "
+                  f"section carries" if models else ""))
     return StageReport("heating", "done", time.perf_counter() - t0, None, summary, details), tables
 
 
@@ -1411,8 +1515,16 @@ def _broaden(rec, plan, report):
     summary = (f"broadened to {', '.join(f'{T:g}' for T in temps)} K below {thnmax:g} eV "
                f"(0 K values above, as NJOY BROADR); "
                + ", ".join(f"{n:,} points at {T:g} K" for T, n in points.items()))
+    # The broadening's own check, by MT: worst error on its reserved probes as a
+    # share of its tolerance (1 is the tolerance; the engine refuses above it).
+    from kika.processing.resonances.suite import _entries
+    mt_of = {k.label: r.ENDF_MT for k, r in _entries(work).items()}
+    verification = {f"{T:g}": {str(mt_of.get(label) or label): float(ratio)
+                                for label, ratio in getattr(broadened[T][0], "verification", {}).items()}
+                    for T in temps}
     return StageReport("broaden", "done", time.perf_counter() - t0, None, summary,
-                       dict(temperatures=list(temps), thnmax_eV=thnmax, n_points=points)), \
+                       dict(temperatures=list(temps), thnmax_eV=thnmax, n_points=points,
+                            verification=verification)), \
         heated, thnmax, work, broadened
 
 
@@ -1448,11 +1560,13 @@ def _urr(rec, plan, unresolved, report):
     drawn = np.concatenate([np.atleast_1d(np.asarray(t.statistics.ladders)) for t in tables.values()])
     details["ladders_drawn"] = dict(min=int(drawn.min()), median=float(np.median(drawn)), max=int(drawn.max()))
     lo, hi = unresolved["range_eV"]
+    stopping = (f", drawn until the tables' statistical error reaches {options.errorTarget:.1%}"
+                if options.errorTarget else "")
     return StageReport("urr", "done", time.perf_counter() - t0, None,
                        f"{plan.urr_bins} bands x {ne} energies ({lo:g}-{hi:g} eV) at "
                        f"{', '.join(f'{T:g}' for T in plan.temperatures)} K; "
-                       f"{int(drawn.min())}-{int(drawn.max())} ladders per energy (median {np.median(drawn):g}; "
-                       f"PURR's method, statistically equal to NJOY's)",
+                       f"{int(drawn.min())}-{int(drawn.max())} ladders per energy "
+                       f"(median {np.median(drawn):g}){stopping}",
                        details), dict(tables)
 
 
@@ -1529,36 +1643,26 @@ def dosimetry_ace(path, directory, *, extension: str | None = None, xsdir: bool 
     return out
 
 
-def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bool = True,
-                     replace: bool = False) -> Path:
-    """Write the photonuclear ACE table (``.NNu``) of an ENDF photonuclear evaluation (sublibrary ``g``).
+def photonuclear_table(path, *, extension: str | None = None):
+    """The photonuclear ACE table (``.NNu``) of an ENDF photonuclear evaluation,
+    built and not written: an :class:`~kika.ace.classes.ace.Ace` whose ``report``
+    says what the table leaves out or approximates. :func:`photonuclear_ace`
+    writes it; :func:`kika.process` keeps it between processing and writing.
 
-    The tape's reactions, their sum, the heating number and, per emitted particle
-    (n, γ, p, d, t, ³He, α), its production, yields, angles and energy laws, at
-    0 K, as :func:`kika.ace.processing.photonuclear.photonuclearTable` makes them
-    (the method and its choices are there). The suffix is the 0 K one (``.01u``)
-    unless ``extension`` is given. Returns the path written; the table is read
-    back and compared word for word before it replaces a file, and its line is
-    added to ``directory/xsdir`` unless ``xsdir`` is false. What the table leaves
-    out or approximates is the report of
-    :func:`kika.ace.processing.photonuclear.photonuclearTable`.
-
-    Raises :class:`ProcessingOutputError`: ``ace-failed`` (not a photonuclear tape,
-    resonance parameters, unreadable tape) or ``ace-table-exists``.
+    Raises :class:`ProcessingOutputError` (``ace-failed``): not a photonuclear
+    tape, resonance parameters, unreadable tape.
     """
     import datetime
 
     from kika import __version__
     from kika._utils import ace_temperature_suffix
     from kika.ace.encoders.photonuclear import encode_photonuclear
-    from kika.ace.writers.write_ace import write_ace_checked
-    from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
     from kika.endf.model_adapter import decodeReactionSuite
     from kika.endf.read_endf import read_endf
     from kika.hdf5.processing import metastableIndex
     from kika.ace.processing.photonuclear import photonuclearTable
 
-    path, directory = Path(path), Path(directory)
+    path = Path(path)
     info = inspect_endf_processing(path)
     if info["resolved"] or info["unresolved"]:
         raise ProcessingOutputError("ace-failed", f"{path.name} has resonance parameters; a photonuclear "
@@ -1579,12 +1683,29 @@ def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bo
                                   comment=comment, date=datetime.date.today().strftime("%m/%d/%y"),
                                   matid=evaluation.get("mat"), z=int(target.Z), a=int(target.A))
         ace.report = table.report
+    except ProcessingOutputError:
+        raise
+    except Exception as error:
+        raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
+    return ace
+
+
+def write_checked_ace(ace, directory, *, xsdir: bool = True, replace: bool = False) -> Path:
+    """Write a built ACE table as ``<ZAID><suffix>`` into ``directory``: read back
+    and compared word for word before it replaces a file, its line added to
+    ``directory/xsdir`` unless ``xsdir`` is false.
+
+    Raises :class:`ProcessingOutputError`: ``ace-failed``, ``ace-table-exists``.
+    """
+    from kika.ace.writers.write_ace import write_ace_checked
+    from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
+
+    directory = Path(directory)
+    try:
         directory.mkdir(parents=True, exist_ok=True)
         name = f"{ace.header.zaid}{ace.header.extension}"
         out = directory / name
         write_ace_checked(ace, out)
-    except ProcessingOutputError:
-        raise
     except Exception as error:
         raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
     if xsdir:
@@ -1593,6 +1714,27 @@ def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bo
         except XsdirEntryExists as error:
             raise ProcessingOutputError("ace-table-exists", str(error)) from error
     return out
+
+
+def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bool = True,
+                     replace: bool = False) -> Path:
+    """Write the photonuclear ACE table (``.NNu``) of an ENDF photonuclear evaluation (sublibrary ``g``).
+
+    The tape's reactions, their sum, the heating number and, per emitted particle
+    (n, γ, p, d, t, ³He, α), its production, yields, angles and energy laws, at
+    0 K, as :func:`kika.ace.processing.photonuclear.photonuclearTable` makes them
+    (the method and its choices are there). The suffix is the 0 K one (``.01u``)
+    unless ``extension`` is given. Returns the path written; the table is read
+    back and compared word for word before it replaces a file, and its line is
+    added to ``directory/xsdir`` unless ``xsdir`` is false. What the table leaves
+    out or approximates is the report of
+    :func:`kika.ace.processing.photonuclear.photonuclearTable`.
+
+    Raises :class:`ProcessingOutputError`: ``ace-failed`` (not a photonuclear tape,
+    resonance parameters, unreadable tape) or ``ace-table-exists``.
+    """
+    return write_checked_ace(photonuclear_table(path, extension=extension), directory, xsdir=xsdir,
+                             replace=replace)
 
 
 def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
@@ -1838,59 +1980,3 @@ def _endf_compatible_text(style):
         if isinstance(text, str) and "MATERIAL" in text:
             return text
     return None
-
-
-class ProcessingReport:
-    """The reconstruction report plus a "Processing stages" section.
-
-    Wraps :class:`~kika.endf.reconstruction_report.ReconstructionReport`
-    through its public methods only."""
-
-    def __init__(self, reconstruction_report, stages, thnmax):
-        self.reconstruction = reconstruction_report
-        self._stages = [asdict(s) for s in stages]
-        self._thnmax = thnmax
-
-    def _rows(self):
-        for s in self._stages:
-            seconds = "-" if s["seconds"] is None else f"{s['seconds']:.1f} s"
-            yield s["stage"], s["status"], seconds, s["category"] or "", s["summary"]
-
-    def to_dict(self) -> dict:
-        out = self.reconstruction.to_dict()
-        out["processing_stages"] = self._stages
-        out["thnmax_eV"] = self._thnmax
-        return out
-
-    def to_json(self, **kwargs) -> str:
-        import json
-        return json.dumps(self.to_dict(), **({"indent": 1, "default": str} | kwargs))
-
-    def to_text(self, **kwargs) -> str:
-        lines = ["", "PROCESSING STAGES", "-" * 17]
-        for stage, status, seconds, category, summary in self._rows():
-            lines.append(f"  {stage:<12} {status:<9} {seconds:>9}  {category}")
-            lines.append(f"      {summary}")
-        return self.reconstruction.to_text(**kwargs).rstrip() + "\n" + "\n".join(lines) + "\n"
-
-    def _section(self):
-        import html
-        e = html.escape
-        rows = "".join("<tr>" + "".join(f"<td>{e(str(c))}</td>" for c in row) + "</tr>" for row in self._rows())
-        return ('<div class="kika-report"><h2 id="kr-stages">Processing stages</h2><div class="wrap"><table>'
-                "<thead><tr><th>Stage</th><th>Status</th><th>Time</th><th>Category</th><th>Summary</th></tr>"
-                f"</thead><tbody>{rows}</tbody></table></div></div>")
-
-    def to_html(self, **kwargs) -> str:
-        page = self.reconstruction.to_html(**kwargs)
-        cut = page.rfind("</body>")
-        return page + self._section() if cut < 0 else page[:cut] + self._section() + page[cut:]
-
-    def save(self, path):
-        """Write by extension: ``.html``/``.htm``, ``.json``, anything else as text."""
-        path = Path(path)
-        suffix = path.suffix.lower()
-        body = (self.to_html() if suffix in (".html", ".htm") else
-                self.to_json() if suffix == ".json" else self.to_text())
-        path.write_text(body, encoding="utf-8")
-        return path

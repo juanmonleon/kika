@@ -93,12 +93,51 @@ def test_to_dict_is_plain_and_picklable(run):
     pickle.loads(pickle.dumps(result.stages))
 
 
-def test_report_has_a_stages_section(run):
+def test_report_answers_first_whether_it_went_well(run):
     result, _ = run
     report = result.report_document()
-    assert "PROCESSING STAGES" in report.to_text()
-    assert "Processing stages" in report.to_html()
-    assert [s["stage"] for s in report.to_dict()["processing_stages"]][:3] == ["read", "decode", "reconstruct"]
+    d = report.to_dict()
+    assert d["schema"] == "kika-processing-report/1"
+    # The micro tape is a cut: its stored MT1 still holds the reactions that were removed.
+    assert d["summary"]["status"] == "warning" and not d["summary"]["incomplete"]
+    assert d["summary"]["headline"] == "Processed, with warnings to review"
+    assert [s["id"] for s in d["stages"]] == ["read", "reconstruct", "broaden", "urr", "heating", "write"]
+    stage = {s["id"]: s for s in d["stages"]}
+    assert stage["urr"]["status"] == "skipped" and stage["heating"]["status"] == "not requested"
+    assert [c["id"] for c in stage["broaden"]["checks"]] == ["doppler"]
+    assert stage["broaden"]["checks"][0]["status"] == "passed"
+    assert "pendf" not in {c["id"] for c in d["checks"]}      # files are checked under "Files written"
+    assert all(c["stage"] for c in d["checks"])
+    # What the app reads for its verdict, and the run's own record.
+    assert d["summary"]["status"] in {c["status"] for c in d["checks"]}
+    assert [s["stage"] for s in d["processing_stages"]][:3] == ["read", "decode", "reconstruct"]
+    ratios = result.stage("broaden").details["verification"]
+    assert set(ratios) == {"293.6", "900"} and all(0 < r <= 1 for v in ratios.values() for r in v.values())
+
+    text = report.to_text()
+    assert text.isascii()
+    order = ["CHECKS", "FINDINGS", "FILES WRITTEN", "CHOICES MADE FOR YOU", "WHAT WAS DONE", "DETAILS",
+             "RUN DETAILS", "ABOUT THE CHECKS"]
+    assert [text.index(h) for h in order] == sorted(text.index(h) for h in order)
+    assert "No file was written in this run." in text
+    for jargon in ("EndfProcessing", "write_pendf", "rtol", "atol", "budget", "thnmax"):
+        assert jargon not in text, jargon
+    html = report.to_html()
+    assert html.startswith("<!doctype html>") and "<script" not in html.lower()
+    assert "<title>Processing of Fe-56</title>" in html and 'id="kp-check-doppler"' in html
+
+
+def test_report_a_file_not_written_makes_the_run_incomplete(run):
+    import copy
+    result = copy.copy(run[0])
+    result.stages = list(run[0].stages) + [staged.StageReport(
+        "write", "rejected", 0.5, "ace-failed", "The ACE table could not be written.",
+        dict(format="ace", path="out", temperatures=[293.6], files=[]))]
+    d = result.report_document().to_dict()
+    assert d["summary"]["incomplete"] and d["summary"]["headline"] == "Processing incomplete"
+    (out,) = d["outputs"]
+    assert not out["written"] and out["status_check"] == "failed"
+    assert {s["id"]: s["state"] for s in d["stages"]}["write"] == "rejected"
 
 
 def test_a_doppler_rejection_keeps_the_0K_result(monkeypatch):
