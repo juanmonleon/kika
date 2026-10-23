@@ -60,6 +60,9 @@ PSUM_WARN = 1e-3
 #: is about 1 %: below that a spectrum cannot be faulted.
 KINEMATIC_WARN = 1e-2
 KINEMATIC_DEFECT = 5e-2
+#: A kinematic violation that carries less than this fraction of the spectrum's
+#: probability beyond the limit changes nothing measurable: a note.
+KINEMATIC_MASS = 1e-4
 #: A kinematic violation in a reaction whose cross section is below this
 #: fraction of the total at that energy changes nothing measurable: a note.
 KINEMATIC_SHARE = 1e-4
@@ -135,9 +138,11 @@ def _share(tape: Tape, mt: int, e: float) -> Optional[float]:
 
 def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max,
                q: float, lab: bool, awr: float, awi: float, tape: Optional[Tape] = None,
-               **where) -> None:
+               spectrum=None, **where) -> None:
     """*e_out_max* is ``(top, start)``: where the spectrum's probability ends, and
-    where its last interval with probability begins (a discrete line: both)."""
+    where its last interval with probability begins (a discrete line: both).
+    *spectrum*, ``(line energies, line probabilities, E', f, histogram)``, lets
+    the finding say how much probability lies beyond the limit."""
     e_out_max, start = e_out_max
     avail = e + q if lab else e * awr / (awr + awi) + q
     if avail <= 0:
@@ -147,12 +152,15 @@ def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max,
         return
     level = DEFECT if excess > max(KINEMATIC_DEFECT * avail, 1e4) else WARN
     share = _share(tape, mt, e) if tape is not None else None
-    tail = ""
+    mass = _mass_beyond(spectrum, avail) if spectrum is not None else None
+    tail = f"; {mass:.2g} of its probability lies beyond" if mass is not None else ""
     if start <= avail + max(KINEMATIC_WARN * avail, 1e3):
         # Only the last interval, which starts within the limit, crosses it: the
         # resolution of the outgoing grid (coarse bins near a threshold).
         level = NOTE
         tail = f"; only its last interval, from {fmt_e(start)}, crosses the limit"
+    elif mass is not None and mass < KINEMATIC_MASS:
+        level = NOTE
     elif share is not None and share < KINEMATIC_SHARE:
         level = NOTE
         tail = ("; the reaction has no cross section there" if share == 0 else
@@ -160,7 +168,28 @@ def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max,
     nodes.add("kinematic_limit", level,
               f"{what}: outgoing energies reach {fmt_e(e_out_max)} {_at(e)}, beyond the "
               f"{fmt_e(avail)} the reaction makes available ({'lab' if lab else 'CM'}, Q = {fmt_e(q)}){tail}",
-              mf=mf, mt=mt, at=e, e_out=e_out_max, available=avail, q=q, share=share, **where)
+              mf=mf, mt=mt, at=e, e_out=e_out_max, available=avail, q=q, share=share,
+              probability_beyond=mass, **where)
+
+
+def _mass_beyond(spectrum, avail: float) -> Optional[float]:
+    """The fraction of a spectrum's probability above *avail*."""
+    lx, lf, cx, cf, histogram = (np.asarray(v, dtype=float) if i < 4 else v for i, v in enumerate(spectrum))
+    total = float(lf.sum())
+    beyond = float(lf[lx > avail].sum())
+    if cx.size > 1:
+        dx = np.diff(cx)
+        if histogram:
+            total += float(np.sum(cf[:-1] * dx))
+            overlap = np.clip(cx[1:] - np.maximum(cx[:-1], avail), 0.0, None)
+            beyond += float(np.sum(cf[:-1] * overlap))
+        else:
+            total += float(np.sum((cf[:-1] + cf[1:]) / 2 * dx))
+            for i in np.flatnonzero(cx[1:] > avail):
+                a = max(cx[i], avail)
+                fa = cf[i] + (cf[i + 1] - cf[i]) * (a - cx[i]) / dx[i] if dx[i] > 0 else cf[i]
+                beyond += float((fa + cf[i + 1]) / 2 * (cx[i + 1] - a))
+    return beyond / total if total > 0 else None
 
 
 def _support_top(x: np.ndarray, f: np.ndarray):
@@ -356,8 +385,9 @@ def _mf5_tabulated(tape, out, part, mt, k, q, awr) -> None:
         if t.x.size > 1:
             _norm(scratch, 5, mt, what, float(e), _integral(t), k=k)
         if q is not None:
+            hist = bool(t.pairs) and all(code == 1 for _, code in t.pairs)
             _kinematic(scratch, 5, mt, what, float(e), _support_top(t.x, t.y), q, True, awr, tape.awi,
-                       tape=tape, k=k)
+                       tape=tape, spectrum=((), (), t.x, t.y, hist), k=k)
     nodes.flush()
 
 
@@ -405,7 +435,10 @@ def _mf6(tape: Tape, out: Out) -> None:
             yt = Table.of(prod.y_energies, prod.y_values, prod.y_interp)
             ok = check_table(yt, out, mf=6, mt=mt, what=f"{what} multiplicity", k=k, zap=zap)
             if ok and yt.y.size and yt.y.min() < 0:
-                out.add("multiplicity_negative", DEFECT, f"{what}: negative multiplicity {yt.y.min():.6g}",
+                # A value a millionth of the largest below zero is the rounding of a zero.
+                tiny = -yt.y.min() <= 1e-6 * max(float(np.abs(yt.y).max()), 1e-300)
+                out.add("multiplicity_negative", NOTE if tiny else DEFECT,
+                        f"{what}: negative multiplicity {yt.y.min():.6g}",
                         mf=6, mt=mt, k=k, zap=zap, value=float(yt.y.min()))
             yields.append((zap, yt if ok else None))
             # LCT = 3: light particles in the CM, heavy recoils in the lab; photons are lab always.
@@ -466,11 +499,13 @@ def _law(tape, out, mt, k, zap, body, q, lab, awr, awi) -> None:
             if q is not None and x.size:
                 # A negative discrete photon energy is a primary photon: |E'| + E A/(A+1).
                 gx = np.abs(disc_x) + (np.where(disc_x < 0, e * awr / (awr + 1), 0.0) if zap == 0 else 0.0)
-                tops = [(float(gx.max()), float(gx.max()))] if gx.size else []
-                if cx.size:
+                live = gx[disc_f > 0]          # lines with no probability are not emitted
+                tops = [(float(live.max()), float(live.max()))] if live.size else []
+                if cx.size and np.any(cf > 0):
                     tops.append(_support_top(cx, cf))
                 if tops:
-                    _kinematic(scratch, 6, mt, what, e, max(tops), q, lab, awr, awi, tape=tape, k=k, zap=zap)
+                    _kinematic(scratch, 6, mt, what, e, max(tops), q, lab, awr, awi, tape=tape,
+                               spectrum=(gx, disc_f, cx, cf, body.lep == 1), k=k, zap=zap)
         nodes.flush()
     elif law == 2:
         e_in = body.incident_energies
@@ -536,7 +571,8 @@ def _products(tape: Tape, out: Out, mt: int, yields) -> None:
         return
     good = [(zap, yt) for zap, yt in yields if yt is not None]
     expected = emitted(mt)
-    if expected is not None and tape.neutron_projectile:
+    # A residual that breaks up (LR > 0) adds its own particles to the MT's.
+    if expected is not None and tape.neutron_projectile and not tape.lr(mt):
         n_exp = expected.get(1, 0) + (1 if mt == 2 else 0)
         n_tabs = [yt for zap, yt in good if zap == 1 and yt.y.size]
         if n_tabs and all(np.all(yt.y == yt.y[0]) for yt in n_tabs):
@@ -596,9 +632,15 @@ def _completeness(tape: Tape, out: Out) -> None:
     present = set(mf3)
     from kika._constants import mf3SumComponents
 
+    # Fission's spectra are written under MT18 and stand for its chances
+    # (MT19-21, 38), which carry cross sections only: that is the convention
+    # processors read. MT18 itself must then have them.
+    fission_dists = 18 in mf4 | mf5 | mf6
     for mt in sorted(present):
-        if mt in (1, 3, 27, 101) or (mt in (4, 16, 18, 103, 104, 105, 106, 107)
+        if mt in (1, 3, 27, 101) or (mt in (4, 16, 103, 104, 105, 106, 107)
                                      and [p for p in mf3SumComponents(mt, present) if p != mt]):
+            continue
+        if mt in (19, 20, 21, 38) and fission_dists:
             continue
         prods = emitted(mt)
         neutrons = mt in FISSION_MT or mt == 2 or (prods is not None and 1 in prods)
@@ -701,8 +743,9 @@ def descriptions(D, _g, _pct):
             "Outgoing energy beyond what the reaction makes available", (5, 6),
             {DEFECT: f"by more than {_pct(KINEMATIC_DEFECT)} of the limit",
              WARN: f"by more than {_pct(KINEMATIC_WARN)} of it",
-             NOTE: f"either, in a reaction below {_g(KINEMATIC_SHARE)} of the total cross section there, "
-                   "or only in a last interval that starts within the limit"},
+             NOTE: f"either, with less than {_g(KINEMATIC_MASS)} of the probability beyond the limit, in "
+                   f"a reaction below {_g(KINEMATIC_SHARE)} of the total cross section there, or only in a "
+                   "last interval that starts within the limit"},
             "No product carries more kinetic energy than E + Q in the laboratory, or E A/(A+a) + Q in "
             "the centre of mass, with Q the larger of QM and QI (FIZCON's EPMAX, ACER's consis). For "
             "MF5 LF = 7 and 9 the restriction energy U must keep E' = E - U within it. Where the "
@@ -719,12 +762,14 @@ def descriptions(D, _g, _pct):
             "Kalbach-Mann's r is the pre-compound fraction of the emission (FUDGE: severe; ACER). Found in "
             "the ENDF/B-VIII.1 photonuclear sublibrary (r = 2 in Pb-206 and Pb-207), as NNDC reported."),
         "multiplicity_negative": D(
-            "Negative multiplicity", (6,), {DEFECT: "always"},
+            "Negative multiplicity", (6,),
+            {DEFECT: "always", NOTE: "within a millionth of the largest value: the rounding of a zero"},
             "A product's yield is not negative."),
         "multiplicity_reaction": D(
             "Neutron multiplicity contradicts the MT", (6,), {DEFECT: "always"},
             "MT16 emits two neutrons, MT17 three, MT22 one ...: a constant neutron multiplicity "
-            "other than the MT's is a mislabelled reaction or a wrong yield."),
+            "other than the MT's is a mislabelled reaction or a wrong yield. Reactions whose residual "
+            "breaks up (LR > 0) are left out: the breakup adds particles."),
         "za_balance": D(
             "Charge or mass number not conserved", (6,),
             {DEFECT: "the products carry more than target and projectile, or less with the residual listed"},

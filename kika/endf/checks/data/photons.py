@@ -88,7 +88,8 @@ def _lo1(tape: Tape, out: Out, mf: int, mt: int, sec, mf15: set) -> None:
             continue
         tables.append(("photon", k, t))
         if t.y.size and t.y.min() < 0:
-            out.add("photon_negative", DEFECT,
+            tiny = -t.y.min() <= 1e-6 * max(float(np.abs(t.y).max()), 1e-300)
+            out.add("photon_negative", NOTE if tiny else DEFECT,
                     f"{what} photon {k}: negative {'multiplicity' if mf == 12 else 'cross section'} "
                     f"{t.y.min():.6g}", mf=mf, mt=mt, k=k, value=float(t.y.min()))
         eg, es, lp, lf = float(ph.c1), float(ph.c2), int(ph.l1), int(ph.l2)
@@ -106,7 +107,7 @@ def _lo1(tape: Tape, out: Out, mf: int, mt: int, sec, mf15: set) -> None:
         if exc is not None and eg > exc + _slack(exc):
             out.add("photon_energy", DEFECT,
                     f"{what} photon {k}: EG = {fmt_e(eg)} from a level at {fmt_e(exc)}: more energy than the "
-                    "level has", mf=mf, mt=mt, k=k, eg=eg, level=exc)
+                    "level has", mf=mf, mt=mt, k=k, eg=eg, level_energy=exc)
         elif es > 0 and eg > es + _slack(es):
             out.add("photon_energy", DEFECT,
                     f"{what} photon {k}: EG = {fmt_e(eg)} from ES = {fmt_e(es)}: more energy than the level "
@@ -121,8 +122,16 @@ def _lo1(tape: Tape, out: Out, mf: int, mt: int, sec, mf15: set) -> None:
     parts = [t for kind, _, t in tables if kind == "photon"]
     tot = next((t for kind, _, t in tables if kind == "total"), None)
     if tot is not None and parts and len(parts) == len(sec.photons) and tot.x.size:
+        from kika.algebra import left_limit, right_limit
+
         g = tot.x
-        s = sum(p(g) for p in parts)
+        try:
+            lo = sum(left_limit(p.x, p.y, _laws(p), g) for p in parts)
+            hi = sum(right_limit(p.x, p.y, _laws(p), g) for p in parts)
+        except ValueError:
+            return
+        # at a node where photons step on or off, the side closer to the total
+        s = np.where(np.abs(lo - tot.y) <= np.abs(hi - tot.y), lo, hi)
         with np.errstate(divide="ignore", invalid="ignore"):
             rel = np.where(tot.y != 0, np.abs(s - tot.y) / np.abs(tot.y), 0.0)
         i = int(np.argmax(rel))
@@ -133,6 +142,11 @@ def _lo1(tape: Tape, out: Out, mf: int, mt: int, sec, mf15: set) -> None:
                     mf=mf, mt=mt, at=float(g[i]), total=float(tot.y[i]), summed=float(s[i]))
 
 
+def _laws(t: Table) -> np.ndarray:
+    laws = t.laws()
+    return np.where(np.isin(laws, (1, 2, 3, 4, 5)), laws, 2)
+
+
 def _lo2(tape: Tape, out: Out, mf: int, mt: int, sec) -> None:
     what = f"MT{mt}"
     es_ns = float(getattr(sec, "es_ns", 0.0) or 0.0)
@@ -140,7 +154,7 @@ def _lo2(tape: Tape, out: Out, mf: int, mt: int, sec) -> None:
     if exc is not None and abs(es_ns - exc) > _slack(exc):
         out.add("level_scheme", WARN,
                 f"{what}: transitions from ES = {fmt_e(es_ns)}, but MF3 puts the level at {fmt_e(exc)}",
-                mf=mf, mt=mt, es=es_ns, level=exc)
+                mf=mf, mt=mt, es=es_ns, level_energy=exc)
     trans = sec.transitions
     if not trans:
         out.add("photon_record", DEFECT, f"{what}: LO = 2 with no transitions", mf=mf, mt=mt)
@@ -158,10 +172,14 @@ def _lo2(tape: Tape, out: Out, mf: int, mt: int, sec) -> None:
             out.add("level_scheme", WARN,
                     f"{what}: a transition to {fmt_e(es_i)}, which is no level of MF3 (nearest {fmt_e(near)})",
                     mf=mf, mt=mt, to=es_i, nearest=near)
-    if np.any((tp <= 0) | (tp > 1 + 1e-6)):
+    if np.any((tp < 0) | (tp > 1 + 1e-6)):
         out.add("transition_probability", DEFECT,
-                f"{what}: a transition probability outside (0, 1] ({tp.min():.6g} to {tp.max():.6g})",
+                f"{what}: a transition probability outside [0, 1] ({tp.min():.6g} to {tp.max():.6g})",
                 mf=mf, mt=mt, tp_min=float(tp.min()), tp_max=float(tp.max()))
+    elif np.any(tp == 0):
+        out.add("transition_probability", NOTE,
+                f"{what}: {int((tp == 0).sum())} transition{'s' if (tp == 0).sum() != 1 else ''} listed with "
+                "probability 0", mf=mf, mt=mt, zeros=int((tp == 0).sum()))
     d = abs(float(tp.sum()) - 1.0)
     if d > TP_NOTE:
         out.add("transition_probability", WARN if d > TP_WARN else NOTE,
@@ -173,7 +191,8 @@ def _mf14(tape: Tape, out: Out, counts: Dict[int, int]) -> None:
     for mt, sec in sorted(tape.sections(14).items()):
         what = f"MT{mt}"
         nk = int(getattr(sec, "_nk", 0) or 0)
-        if mt in counts and counts[mt] and nk != counts[mt]:
+        all_isotropic = int(getattr(sec, "_li", 0) or 0) == 1
+        if counts.get(mt) and nk != counts[mt] and not all_isotropic:
             out.add("photon_count", DEFECT,
                     f"{what}: MF14 gives {nk} photon{'s' if nk != 1 else ''}, MF12/MF13 {counts[mt]}",
                     mf=14, mt=mt, nk=nk, expected=counts[mt])
@@ -296,7 +315,7 @@ def check_photons(tape: Tape, out: Out) -> None:
                     continuum_mts.add(mt)
             elif lo == 2:
                 _lo2(tape, out, mf, mt, sec)
-                counts[mt] = len(sec.transitions)
+                counts[mt] = None     # MF14 counts the whole cascade: not comparable
             else:
                 out.add("photon_record", DEFECT, f"MT{mt}: LO = {lo}, neither 1 nor 2", mf=mf, mt=mt, lo=lo)
             if mf == 12 and mf3 and mt not in mf3 and mt != 460:
@@ -318,7 +337,8 @@ def descriptions(D, _g, _pct):
     P = (12, 13)
     return {
         "photon_negative": D(
-            "Negative photon multiplicity or cross section", P, {DEFECT: "always"},
+            "Negative photon multiplicity or cross section", P,
+            {DEFECT: "always", NOTE: "within a millionth of the largest value: the rounding of a zero"},
             "A photon yield (MF12) or photon production cross section (MF13) is not negative."),
         "photon_record": D(
             "Malformed photon record", P, {DEFECT: "always"},
@@ -337,8 +357,8 @@ def descriptions(D, _g, _pct):
             "(FIZCON's TESTEG, FUDGE's translator)."),
         "transition_probability": D(
             "Transition probabilities", P,
-            {DEFECT: "one outside (0, 1]", WARN: f"their sum off 1 by more than {_g(TP_WARN)}",
-             NOTE: f"by more than {_g(TP_NOTE)}"},
+            {DEFECT: "one outside [0, 1]", WARN: f"their sum off 1 by more than {_g(TP_WARN)}",
+             NOTE: f"by more than {_g(TP_NOTE)}, or a transition listed with probability 0"},
             "The probabilities of the transitions out of one level add up to 1 (FIZCON: 1e-4)."),
         "photon_sum": D(
             "Total photon yield is not the sum of its photons", P,
@@ -352,7 +372,9 @@ def descriptions(D, _g, _pct):
             "An MF15 spectrum belongs to a continuum photon of MF12/MF13 (FUDGE's translator warns both ways)."),
         "photon_count": D(
             "MF14 and MF12/MF13 give different numbers of photons", (14,), {DEFECT: "always"},
-            "MF14 has one angular distribution per photon of MF12/MF13, in the same order."),
+            "MF14 has one angular distribution per photon of MF12/MF13 (LO = 1), in the same order. Not "
+            "compared when MF14 says every photon is isotropic (LI = 1), nor for transition probabilities "
+            "(LO = 2), where MF14 counts the whole cascade."),
         "photon_angles_missing": D(
             "Photons without MF14", (12, 13, 14), {WARN: "always"},
             "Every photon-producing section has its angular distributions in MF14; without them codes "

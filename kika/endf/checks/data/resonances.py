@@ -103,7 +103,8 @@ def check_resonances(tape: Tape, out: Out) -> None:
                             f"range {r_index}: AP = {ap:.5g} x 1e-12 cm, the systematics give {sys_ap:.3g}: "
                             f"outside a factor {AP_FACTOR:g}", mf=2, mt=151, range_index=r_index, ap=ap,
                             systematics=sys_ap)
-            elif ap <= 0 and rng.lru in (0, 1, 2) and rng.lrf != 7 and int(getattr(rng, "nro", 0) or 0) == 0:
+            elif (ap <= 0 and rng.lru in (1, 2) and rng.lrf != 7 and int(getattr(rng, "nro", 0) or 0) == 0
+                  and (tape.za or 0) > 1 and _uses_ap(p, rng)):
                 out.add("scattering_radius", DEFECT,
                         f"range {r_index}: AP = {ap:g}, a scattering radius that is not positive",
                         mf=2, mt=151, range_index=r_index, ap=ap)
@@ -111,6 +112,13 @@ def check_resonances(tape: Tape, out: Out) -> None:
         out.add("resonance_spin", WARN,
                 f"the resonance ranges state different target spins ({', '.join(f'{s:g}' for s in sorted(spins))})",
                 mf=2, mt=151, spins=sorted(spins))
+
+
+def _uses_ap(p, rng) -> bool:
+    """Whether the range needs AP: Reich-Moore takes each l's own APL when given."""
+    if rng.lru == 1 and rng.lrf == 3:
+        return any(float(getattr(lv, "apl_or_qx", 0.0) or 0.0) <= 0 for lv in getattr(p, "l_values", []) or [])
+    return True
 
 
 def _awri(p) -> Optional[float]:
@@ -126,7 +134,7 @@ def _ranges(out: Out, ranges, iso_index: int) -> None:
     seen_urr = False
     for i, r in enumerate(ranges):
         el, eh = float(r.el), float(r.eh)
-        if not el < eh:
+        if not el < eh and r.lru != 0:
             out.add("resonance_ranges", DEFECT, f"range {i}: EL = {fmt_e(el)} is not below EH = {fmt_e(eh)}",
                     mf=2, mt=151, range_index=i, el=el, eh=eh)
         if r.lru == 2:
@@ -312,7 +320,8 @@ def descriptions(D, _g, _pct):
             "competitive width (LRX = 1) making up the difference (FIZCON's TESTW)."),
         "scattering_radius": D(
             "Scattering radius", (2,),
-            {DEFECT: "not positive", NOTE: f"outside a factor {_g(AP_FACTOR)} of 0.123 A^(1/3) + 0.08"},
+            {DEFECT: "not positive where it is used (a Reich-Moore range with every APL given does not use AP)",
+             NOTE: f"outside a factor {_g(AP_FACTOR)} of 0.123 A^(1/3) + 0.08"},
             "AP against the systematics 1.23 A^(1/3) + 0.8 fm. FUDGE's version of this check is dead code; "
             "a radius far from it is possible (light nuclei, fitted radii) and so only a note."),
         "urr_parameters": D(

@@ -94,7 +94,15 @@ class Table:
         from kika.algebra import evaluate
 
         laws = np.where(np.isin(self.laws(), (1, 2, 3, 4, 5)), self.laws(), 2)
-        return evaluate(self.x, self.y, laws, q)
+        x, y = self.x, self.y
+        if x.size > 1 and np.any(np.diff(x) < 0):
+            # Blank pairs read as (0, 0) after the last real point (reported by
+            # check_table): the table is what precedes them.
+            before = np.maximum.accumulate(np.concatenate([[-np.inf], x[:-1]]))
+            keep = ~((x == 0) & (y == 0) & (before > 0))
+            x, y = x[keep], y[keep]
+            laws = np.full(max(x.size - 1, 0), 2) if laws.size != max(x.size - 1, 0) else laws
+        return evaluate(x, y, laws, q)
 
 
 class Out:
