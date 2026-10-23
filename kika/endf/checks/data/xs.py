@@ -59,6 +59,10 @@ SUM_NOTE = 1e-3
 SUM_FLOOR = 1e-6
 SUM_MATERIAL_REL = 1e-2
 SUM_MATERIAL_B = 1e-3
+#: A material gap at no more than this many nodes, and no larger than
+#: SUM_FEW_REL, is a local slip (a node at a partial's threshold): a note.
+SUM_FEW_POINTS = 3
+SUM_FEW_REL = 5e-2
 FISSION_MT = frozenset({18, 19, 20, 21, 38})
 
 
@@ -309,7 +313,9 @@ def _sums(tape: Tape, tables: Dict[int, Table], present, rr_top: Optional[float]
         if material.any():
             j = int(np.flatnonzero(material)[np.argmax(gap[material])])
             share = f"{gap[j] / abs(s[j]):.2g} of it" if s[j] != 0 else "the total is stated as 0"
-            out.add("xs_sum", WARN,
+            local = (int(material.sum()) <= SUM_FEW_POINTS and s[j] != 0
+                     and gap[j] <= SUM_FEW_REL * abs(s[j]))
+            out.add("xs_sum", NOTE if local else WARN,
                     f"MT{mt} differs from the sum of its {len(parts)} partials by up to {fmt_b(gap[j])} "
                     f"({share}) at {fmt_e(g[j])}: {fmt_b(s[j])} stated, "
                     f"{fmt_b(total[j])} summed; {int(material.sum())} points beyond 1 % and 1 mb",

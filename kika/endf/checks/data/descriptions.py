@@ -238,7 +238,8 @@ def _build() -> Dict[str, CheckDescription]:
         "xs_sum": D(
             "A total differs from the sum of its parts", (3,),
             {WARN: f"by more than {_pct(xs.SUM_MATERIAL_REL)} and {_g(xs.SUM_MATERIAL_B * 1e3)} mb at some energy",
-             NOTE: f"by more than {_g(xs.SUM_NOTE)} relative"},
+             NOTE: f"by more than {_g(xs.SUM_NOTE)} relative, or the warning's gap at no more than "
+                   f"{xs.SUM_FEW_POINTS} nodes and within {_pct(xs.SUM_FEW_REL)}"},
             "MT1, MT3, MT4, MT16, MT18, MT27, MT101 and MT103-107 are sums of other reactions. "
             "Codes rebuild them from the parts (kika and NJOY) or use them as written (a "
             "transport code reading the total), so a gap means two answers. On a tape whose MF2 "
