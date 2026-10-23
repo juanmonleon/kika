@@ -164,8 +164,7 @@ temperature.
 
 ```python
 doc = run.report_document()
-print(doc.to_text())          # the verdict first, then the checks stage by stage
-doc.save("fe56-report.html")  # .html, .txt or .json
+doc.save("fe56-report.html")  # the verdict first, then the checks stage by stage
 ```
 
 The verdict is the worst outcome of every stage and every file written. A **failed**
