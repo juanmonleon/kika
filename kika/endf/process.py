@@ -1294,6 +1294,59 @@ def _fission_heating(out, work, grid, sigma, A):
     return np.where(sigma_f > 0, sigma_f * h0, 0.0) - h.fissionPhotonKerma(out, grid, sigma, awr=A)
 
 
+#: The partial reactions of a sum an evaluation may state photons on.
+_SUM_PARTS = {3: tuple(range(4, 200)) + tuple(range(600, 850)), 4: tuple(range(50, 92)),
+              18: (19, 20, 21, 38), 103: tuple(range(600, 650)), 104: tuple(range(650, 700)),
+              105: tuple(range(700, 750)), 106: tuple(range(750, 800)), 107: tuple(range(800, 850))}
+#: Negative heating deeper than this fraction of the incident energy, per
+#: collision, is material; shallower is the evaluation's rounding.
+MATERIAL_NEGATIVE_HEATING = 1.0e-3
+
+
+def _negative_heating(grid, kerma, sigma, result, gap=1.5, causes=2):
+    """Where the KERMA is negative and which reactions make it so: one entry per
+    region (negative energies closer than a factor ``gap`` belong together), with
+    the energy of its lowest value per collision and the ``causes`` reactions
+    whose own balance is most negative there (a reaction's KERMA per reaction
+    times its cross section, or the photons an evaluation states on a sum, which
+    no partial carries). Energies in eV, per collision in eV."""
+    from kika._constants import MT_TO_REACTION
+    total = sigma.get(1)
+    neg = np.flatnonzero(np.asarray(kerma) < 0)
+    if total is None or not len(neg):
+        return []
+    name = lambda mt: f"MT{mt} {MT_TO_REACTION[mt]}" if mt in MT_TO_REACTION else f"MT{mt}"
+    groups, start = [], 0
+    for k in range(1, len(neg) + 1):
+        if k == len(neg) or grid[neg[k]] > gap * grid[neg[k - 1]]:
+            groups.append(neg[start:k])
+            start = k
+    out = []
+    with np.errstate(divide="ignore", invalid="ignore"):
+        per_collision = np.where(total > 0, np.asarray(kerma) / total, 0.0)
+    for idx in groups:
+        i = int(idx[np.argmin(per_collision[idx])])
+        share = {mt: float(values[0][i] * sigma[mt][i] / total[i])
+                 for mt, values in result.perReaction.items() if mt in sigma and total[i] > 0}
+        parts = []
+        # Photons an evaluation states on a sum (MT4, MT103...) are emitted by its
+        # parts: the sum's balance is its parts' KERMA less those photons, and the
+        # parts are counted there, not on their own.
+        for mt, photons in result.photonEnergy.items():
+            if mt in result.perReaction or mt not in sigma or not total[i] > 0:
+                continue
+            members = [m for m in share if m in _SUM_PARTS.get(mt, ())]
+            net = sum(share.pop(m) for m in members) - float(photons[i] * sigma[mt][i] / total[i])
+            parts.append((net, name(mt)))
+        parts += [(v, name(mt)) for mt, v in share.items()]
+        worst = sorted(p for p in parts if p[0] < 0)[:causes]
+        out.append(dict(from_eV=float(grid[idx[0]]), to_eV=float(grid[idx[-1]]), at_eV=float(grid[i]),
+                        per_collision_eV=float(per_collision[i]), points=int(len(idx)),
+                        material=bool(per_collision[i] < -MATERIAL_NEGATIVE_HEATING * grid[i]),
+                        causes=[dict(what=w, per_collision_eV=v) for v, w in worst]))
+    return out
+
+
 def _heating(run, plan, report):
     """``(StageReport, {T: {301: (E, h), 444: (E, d)}})``; never raises.
 
@@ -1324,7 +1377,7 @@ def _heating(run, plan, report):
         # with Q in its place the balance of every level was off by its
         # excitation (Fe-56 by GNDS: KERMA x21 above MT51's threshold).
         qm = {mt: q for mt, (_, q) in reactionQValues(work).items() if q is not None}
-        tables, notes = {}, []
+        tables, notes, negative = {}, [], {}
         for i, T in enumerate(temps):
             grid, sigma = _heating_grid(run, T)
             result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, evaluation=work,
@@ -1335,6 +1388,9 @@ def _heating(run, plan, report):
                 kerma = kerma + fission
             grid = _contiguous(grid)
             tables[T] = {301: (grid, _contiguous(kerma)), 444: (grid, _contiguous(result.damage))}
+            regions = _negative_heating(grid, kerma, sigma, result)
+            if regions:
+                negative[f"{T:g}"] = regions
             run._displacements[T] = {name: (grid, _contiguous(v)) for name, v in result.displacements.items()}
             notes = result.notes
             report("heating", 0.5 + 0.5 * (i + 1) / len(temps))
@@ -1347,6 +1403,8 @@ def _heating(run, plan, report):
                            f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     details["notes"] = list(notes)
     details["n_points"] = {T: int(len(t[301][0])) for T, t in tables.items()}
+    if negative:
+        details["negative"] = negative
     fissile = any(r.ENDF_MT in (18, 19) for r in _entries(work).values())
     models = sorted({name for v in run._displacements.values() for name in v})
     summary = (f"MT301 (KERMA) and MT444 (damage) at {', '.join(f'{T:g}' for T in temps)} K, as NJOY "

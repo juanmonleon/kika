@@ -227,6 +227,7 @@ def build(rec) -> dict:
             e_min_eV=float(x[0]), e_max_eV=float(x[-1]),
             threshold_eV=float(x[nonzero[0]]) if len(nonzero) else None,
             jumps=int(len(repeated)), jumps_at_eV=[float(x[i]) for i in repeated[:20]],
+            jumps_b=[float(abs(y[i + 1] - y[i])) for i in repeated[:20]],
             decreasing=int(np.count_nonzero(dx < 0)),
             min_relative_spacing=float(relative.min()) if len(positive) else None,
             min_relative_spacing_at_eV=float(x[positive[np.argmin(relative)]]) if len(positive) else None,
@@ -393,8 +394,8 @@ CHECKS = (
           "section genuinely jumps, typically at the boundary between two resonance ranges; both values "
           "are then kept.",
           {PASS: "Energies ascend; any repeated energy is a real jump at a resonance-range boundary.",
-           NOTE: "A jump lies away from the resonance-range boundaries. It comes from the evaluation's "
-                 "own tables (MF3) and is kept as stated.",
+           NOTE: "A jump larger than the absolute tolerance lies away from the resonance-range "
+                 "boundaries. It comes from the evaluation's own tables (MF3) and is kept as stated.",
            FAIL: "Energies decrease somewhere: the table is malformed."}),
     Check("integrals", "Integrals over energy are preserved",
           "The integral of each table over energy is compared with an accurate estimate of the "
@@ -517,18 +518,25 @@ def evaluate_checks(d) -> list:
 
     bounds = [b for r in ranges for b in (r["el_eV"], r["eh_eV"])]
     broken = [r for r in d["reactions"] if r.get("decreasing")]
-    stray = [(r, e) for r in d["reactions"] for e in r.get("jumps_at_eV", ())
-             if not any(_close(e, b) for b in bounds)]
+    # A jump is worth a note when it is larger than the absolute tolerance: a step
+    # of 1e-12 b where a channel opens (Au-197 (n,p) at 6 MeV) changes nothing.
+    def sized(r):
+        at, sizes = list(r.get("jumps_at_eV", ())), list(r.get("jumps_b") or ())
+        return zip(at, sizes[:len(at)] + [None] * (len(at) - len(sizes)))
+    stray = [(r, e, size) for r in d["reactions"] for e, size in sized(r)
+             if not any(_close(e, b) for b in bounds) and (size is None or size > tol["atol"])]
     jumps = sum(r["jumps"] for r in d["reactions"])
     if broken:
         add("grid", FAIL, f"Energies decrease in {len(broken)} table(s).",
             [f"{_mtname(r)}: {r['decreasing']} decreasing step(s)." for r in broken])
     elif stray:
         add("grid", NOTE, f"{len(stray)} jump(s) away from the resonance-range boundaries.",
-            [f"{_mtname(r)}: jump at {_energy(e)}, from the evaluation's table." for r, e in stray])
+            [f"{_mtname(r)}: jump at {_energy(e)}" + (f" of {_b(size)}" if size is not None else "")
+             + ", from the evaluation's table." for r, e, size in stray])
     else:
         add("grid", PASS, "Energies ascend in every table" + (
-            f"; {jumps} jump(s), all at a resonance-range boundary." if jumps else "; no jumps."))
+            f"; {jumps} jump(s), each at a resonance-range boundary or smaller than the tolerance."
+            if jumps else "; no jumps."))
 
     diffs = [r for r in d["reactions"] if r.get("integral_relative_difference") is not None]
     if diffs:

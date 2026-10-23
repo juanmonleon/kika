@@ -202,7 +202,10 @@ def test_each_check_flags_what_it_should(reconstruction):
     flagged = _with(d, reactions__0__negatives=neg, summary__negative_values=2)["negatives"]
     assert flagged["status"] == "warning" and "MT1" in flagged["items"][0]
     assert _with(d, reactions__0__decreasing=1)["grid"]["status"] == "failed"
-    assert _with(d, reactions__0__jumps_at_eV=[123.0])["grid"]["status"] == "note"
+    assert _with(d, reactions__0__jumps_at_eV=[123.0], reactions__0__jumps_b=[0.5])["grid"]["status"] == "note"
+    # A channel that opens with a step of 1e-12 b (Au-197 B-VIII.1 (n,p) at 6 MeV) is
+    # below the absolute tolerance: no note.
+    assert _with(d, reactions__0__jumps_at_eV=[6e6], reactions__0__jumps_b=[1e-12])["grid"]["status"] == "passed"
     adjusted = _with(d, notes__preparation=["E=1.5, L=0: rounded negative GX=-1e-09 to zero"])["parameters"]
     assert adjusted["status"] == "note" and "1.5 eV" in adjusted["items"][0]
     elsewhere = _with(d, notes__unsupported=["MF1/458 is LFC=1: something"])["conversion"]
