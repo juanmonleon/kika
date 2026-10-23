@@ -130,7 +130,8 @@ with their cumulative; {doc}`../processing/tabulation` produces them).
   ({doc}`../processing/processing-chain`), keeps the 0 K elastic in `recon` for
   resonance up-scattering, thinned to half the tolerance (with the same thermal factor),
   rebuilds the sums from their levels when the evaluation does not give them,
-  computes gas production (MT 203-207, as GASPR does), KERMA and damage (MT 301, 901,
+  computes gas production (MT 203-207, as GASPR does, {doc}`../processing/gas-production`),
+  KERMA and damage (MT 301, 901,
   444, {doc}`../processing/heating`) and the URR probability tables
   ({doc}`../processing/probability-tables`), tabulates every distribution of neutrons and
   photons ({doc}`../processing/tabulation`; the light charged particles, which OpenMC's

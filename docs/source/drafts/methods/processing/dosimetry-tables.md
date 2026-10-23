@@ -62,7 +62,7 @@ this order:
    of these: ENDF/B-VIII.1 states only its levels.
 3. MT 301 and MT 444 (KERMA and damage energy, in eV·b) when the heating stage ran, and
    the gas production MT 203-207, computed as for the continuous-energy table (see
-   {doc}`heating` and {doc}`processing-chain`).
+   {doc}`heating` and {doc}`gas-production`), for the MTs the tape does not state.
 4. The production cross sections, numbered by {eq}`eq-dosimetry-tables-number`:
    - MF 10 as the evaluation tabulates it, with its own interpolation laws;
    - MF 9 as the multiplicity times the reaction's processed cross section,

@@ -174,7 +174,7 @@ stage, and the reason it is off by default.
   ran, MF 3/MT 301 and MT 444.
 - **OpenMC HDF5** ({py:meth}`kika.endf.EndfProcessing.write_hdf5`): every broadened
   temperature, with the URR tables, the tabulated distributions, KERMA (MT 301, 901),
-  damage (MT 444) and gas production (MT 203-207), as
+  damage (MT 444) and gas production (MT 203-207, {doc}`gas-production`), as
   {py:func}`kika.hdf5.processing.processSuite` builds them ({doc}`../formats/hdf5`). The
   broadening and the URR tables of the run are reused, not recomputed.
 - **ACE** ({py:meth}`kika.endf.EndfProcessing.write_ace`): one table per broadened
@@ -247,7 +247,7 @@ over the destination; an existing file is never left half-written.
 
 What NJOY does in its chain and this one does not: multigroup cross-sections and
 covariances (GROUPR, ERRORR), gas production in the PENDF (GASPR: it is in the HDF5 and
-the ACE table only), thermal scattering in the PENDF (THERMR: thermal tables are built
+the ACE table only, {doc}`gas-production`), thermal scattering in the PENDF (THERMR: thermal tables are built
 separately, {doc}`thermal-scattering-tables`), and UNRESR's self-shielded cross-sections.
 
 ## Limits and failure modes

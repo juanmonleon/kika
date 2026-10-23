@@ -39,6 +39,8 @@ The symbols every page shares are defined once in {doc}`notation`.
   and the tolerances they share.
 - {doc}`processing/probability-tables`: unresolved-resonance probability tables.
 - {doc}`processing/heating`: heating (KERMA) and damage cross-sections.
+- {doc}`processing/gas-production`: gas production (MT 203-207), the protons, deuterons,
+  tritons, He-3 and alphas a collision makes.
 - {doc}`processing/tabulation`: evaluated distributions as the tables Monte Carlo codes
   sample.
 - {doc}`processing/thermal-scattering-tables`: thermal inelastic scattering as
