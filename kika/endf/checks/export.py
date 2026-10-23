@@ -1,7 +1,8 @@
 """The layer-1 reports as plain data, Markdown and HTML.
 
-One renderer for both reports (one tape, a library), so the page a notebook
-writes and the one the desktop app exports are the same. Everything here is
+One renderer for both reports (one tape, a library) and for every family of
+checks (:mod:`.suites`: covariances, data, the whole evaluation), so the page a
+notebook writes and the one the desktop app exports are the same. Everything here is
 self-contained: no figures, no external stylesheet or script.
 
 The method section is built from the thresholds the checks use, not restated
@@ -18,8 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .descriptions import CHECKS
 from .findings import _RANK, DEFECT, LEVELS, NOTE, WARN, CovarianceFinding
+from .suites import described, suite
 from .symbols import to_html_symbols, to_symbols
 
 SCHEMA = 1
@@ -119,14 +120,14 @@ def _check_names(rows: Iterable[Dict[str, Any]]) -> List[str]:
 
 
 def checks_dict(names: Iterable[str]) -> Dict[str, Dict[str, Any]]:
-    """``{check: {title, mf, levels, description}}`` for *names* (see ``descriptions.CHECKS``)."""
-    return {n: CHECKS[n].to_dict() for n in names if n in CHECKS}
+    """``{check: {title, mf, levels, description}}`` for *names* (see :func:`.suites.described`)."""
+    return {n: described(n).to_dict() for n in names if described(n) is not None}
 
 
 def report_dict(report, level: str = NOTE) -> Dict[str, Any]:
     _RANK[level]  # KeyError on a bad level, before any work
     return {
-        "kind": "kika.covariance_check",
+        "kind": suite(report.kind).json_kind,
         "schema": SCHEMA,
         "kika_version": kika_version(),
         "tape": _tape_identity(report),
@@ -192,7 +193,7 @@ def library_dict(library, level: str = NOTE) -> Dict[str, Any]:
                          for f in _findings_at(tape.report.findings, level)]
     summary = library_summary_rows(library)
     return {
-        "kind": "kika.covariance_library_check",
+        "kind": suite(library.kind).json_library_kind,
         "schema": SCHEMA,
         "kika_version": kika_version(),
         "library": library.library,
@@ -312,12 +313,6 @@ def method_sections() -> List[Tuple[str, str, List[Rule]]]:
 #: How each level is written for a reader. The data keeps ``warn``.
 LEVEL_LABEL = {DEFECT: "Defect", WARN: "Warning", NOTE: "Note"}
 _LEVEL_PLURAL = {DEFECT: "Defects", WARN: "Warnings", NOTE: "Notes"}
-#: One line under each count; the method says it at length.
-_LEVEL_MEANS = {
-    DEFECT: "Not what ENDF-6 says, or not a covariance",
-    WARN: "Probably a fault, or one in some uses",
-    NOTE: "True and worth knowing, not a fault",
-}
 #: A mark beside the colour, so the level reads without it (print, colour blindness).
 _LEVEL_MARK = {DEFECT: "\u2715", WARN: "!", NOTE: "i"}
 _WORST_FIRST = (DEFECT, WARN, NOTE)
@@ -387,7 +382,8 @@ def _hidden_line(counts: Dict[str, int], level: str) -> Optional[str]:
 
 def _title(check: str) -> str:
     """The check's title from the legend, ASCII; the id where it has none."""
-    return CHECKS[check].title if check in CHECKS else check
+    d = described(check)
+    return d.title if d is not None else check
 
 
 def _worst(counts: Mapping[str, int]) -> Optional[str]:
@@ -455,10 +451,15 @@ def _tape_order(library) -> List[Tuple[int, Any]]:
     return sorted(enumerate(library.tapes), key=key)
 
 
+def _none_word(tape) -> str:
+    """How a tape with nothing its family checks is called ("No covariances")."""
+    return suite(tape.kind).none_word
+
+
 def _tape_status(tape) -> str:
     if not tape.ok:
         return f"failed: {tape.error}"
-    return "checked" if tape.has_covariances else "no covariances"
+    return "checked" if tape.has_covariances else _none_word(tape).lower()
 
 
 def _tape_state(tape, level: str = NOTE) -> str:
@@ -504,7 +505,7 @@ def _library_title(library) -> str:
 
 
 def _library_status(library, counts: Mapping[str, Any]) -> str:
-    status = (f"{counts['tapes']} tapes, {counts['checked']} with covariances checked, "
+    status = (f"{counts['tapes']} tapes, {counts['checked']} {suite(library.kind).checked_phrase}, "
               f"{counts['with_defects']} with defects, {counts['failed']} failed")
     if library.stopped:
         status += f"; stopped after {counts['tapes']} of {counts['planned']}"
@@ -560,7 +561,7 @@ def _main_text(tape, level: str = NOTE) -> str:
     if not tape.ok:
         return f"Failed: {tape.error}"
     if not tape.has_covariances:
-        return "No covariances"
+        return _none_word(tape)
     main = _main_findings(tape, level)
     if not main:
         return _clean_word(level)
@@ -595,9 +596,9 @@ def _md_findings(findings: Sequence[CovarianceFinding], depth: str) -> List[str]
     return out
 
 
-def _md_method() -> List[str]:
+def _md_method(kind: str = "covariance") -> List[str]:
     out = ["## Method and thresholds", ""]
-    for heading, intro, rules in method_sections():
+    for heading, intro, rules in suite(kind).method():
         out += [f"### {heading}", "", to_symbols(intro), ""]
         out += [f"- **{LEVEL_LABEL[lv]}**: {to_symbols(text)}" if lv else f"- {to_symbols(text)}"
                 for lv, text in rules]
@@ -610,7 +611,7 @@ _LEGEND_INTRO = ("One entry per check in this report: the files it applies to, w
 
 
 def _md_legend(names: Sequence[str]) -> List[str]:
-    entries = [(n, CHECKS[n]) for n in names if n in CHECKS]
+    entries = [(n, described(n)) for n in names if described(n) is not None]
     if not entries:
         return []
     out = ["## What each finding means", "", _LEGEND_INTRO, ""]
@@ -628,7 +629,7 @@ def report_markdown(report, level: str = WARN) -> str:
     tape = _tape_identity(report)
     counts = _level_counts(report.findings)
     title = tape["name"] or "ENDF tape"
-    out = [f"# Covariance check of {title}", ""]
+    out = [f"# {suite(report.kind).title} of {title}", ""]
     out += _md_verdict(counts, level=level)
     out += _md_table(("", ""), [
         ("Tape", tape["name"]), ("Path", tape["path"]), ("MAT", tape["mat"]),
@@ -645,7 +646,7 @@ def report_markdown(report, level: str = WARN) -> str:
         out += [hidden, ""]
     elif not listed:
         out += ["None.", ""]
-    out += _md_method()
+    out += _md_method(report.kind)
     out += _md_legend(_check_names(_display_rows(rows)))
     return "\n".join(out).rstrip() + "\n"
 
@@ -653,7 +654,7 @@ def report_markdown(report, level: str = WARN) -> str:
 def library_markdown(library, level: str = WARN) -> str:
     _RANK[level]
     counts = _library_counts(library)
-    out = [f"# Covariance check of {_library_title(library)}", ""]
+    out = [f"# {suite(library.kind).title} of {_library_title(library)}", ""]
     out += _md_verdict(counts["findings"], library, level)
     base = _base(library)
     out += _md_table(("", ""), [
@@ -680,7 +681,7 @@ def library_markdown(library, level: str = WARN) -> str:
         out += [hidden, ""]
     elif not any_listed:
         out += ["None.", ""]
-    out += _md_method()
+    out += _md_method(library.kind)
     out += _md_legend(_check_names(_display_rows(rows)))
     return "\n".join(out).rstrip() + "\n"
 
@@ -902,7 +903,7 @@ def _html_verdict(counts: Mapping[str, int], library=None, shown: str = NOTE) ->
 
 
 def _html_cards(counts: Mapping[str, int], tapes: Optional[Mapping[str, int]] = None,
-                level: str = NOTE) -> List[str]:
+                level: str = NOTE, kind: str = "covariance") -> List[str]:
     out = ['<div class="cards">']
     for lv in _shown(level):
         n = counts.get(lv, 0)
@@ -913,7 +914,7 @@ def _html_cards(counts: Mapping[str, int], tapes: Optional[Mapping[str, int]] = 
         out.append(f'<div class="card {lv}{" zero" if not n else ""}"><div class="n">{n}</div>'
                    f'<div class="lbl"><span class="mark">{_LEVEL_MARK[lv]}</span>'
                    f"{_LEVEL_PLURAL[lv]}</div>"
-                   f'<div class="means">{_e(_LEVEL_MEANS[lv])}{_e(where)}</div></div>')
+                   f'<div class="means">{_e(suite(kind).means[lv])}{_e(where)}</div></div>')
     out.append("</div>")
     return out
 
@@ -964,11 +965,11 @@ def _rule_mark(level: Optional[str]) -> str:
     return str(_badge(level)) if level else '<span class="bullet"></span>'
 
 
-def _html_method() -> List[str]:
+def _html_method(kind: str = "covariance") -> List[str]:
     out = ['<h2 id="method">Method and thresholds</h2>',
            '<p class="lead">How each level is drawn. What each check means is in '
            '<a href="#legend">What each finding means</a>.</p>']
-    for heading, intro, rules in method_sections():
+    for heading, intro, rules in suite(kind).method():
         out.append(f'<div class="mblock"><h3>{_e(heading)}</h3><p>{to_html_symbols(intro)}</p>'
                    '<ul class="rules">')
         out += [f"<li>{_rule_mark(lv)}<span>{to_html_symbols(text)}</span></li>"
@@ -978,7 +979,7 @@ def _html_method() -> List[str]:
 
 
 def _html_legend(names: Sequence[str]) -> List[str]:
-    entries = [(n, CHECKS[n]) for n in names if n in CHECKS]
+    entries = [(n, described(n)) for n in names if described(n) is not None]
     if not entries:
         return []
     out = ['<h2 id="legend">What each finding means</h2>',
@@ -1008,11 +1009,11 @@ def report_html(report, level: str = WARN) -> str:
     tape = _tape_identity(report)
     counts = _level_counts(report.findings)
     name = tape["name"] or "ENDF tape"
-    body = _html_header("kika · covariance check", name, tape["path"], [
+    body = _html_header(suite(report.kind).eyebrow, name, tape["path"], [
         ("MAT", tape["mat"]), ("MF checked", ", ".join(map(str, tape["mf"]))),
         ("kika", kika_version()), ("Generated", _now())])
     body += _html_verdict(counts, shown=level)
-    body += _html_cards(counts, level=level)
+    body += _html_cards(counts, level=level, kind=report.kind)
     body += _html_toc((("summary", "Summary by check"), ("findings", "Findings"),
                        ("method", "Method"), ("legend", "What each finding means")))
     rows = _rows_at(summary_rows(report.findings), level)
@@ -1025,9 +1026,9 @@ def report_html(report, level: str = WARN) -> str:
         body.append(f'<p class="muted">{_e(hidden)}</p>')
     elif not listed:
         body.append("<p>None.</p>")
-    body += _html_method()
+    body += _html_method(report.kind)
     body += _html_legend(_check_names(_display_rows(rows)))
-    return _html_page(f"Covariance check of {name}", body)
+    return _html_page(f"{suite(report.kind).title} of {name}", body)
 
 
 _STATE_WORD = {DEFECT: "defects", WARN: "warnings", NOTE: "notes only", "clean": "nothing found",
@@ -1059,7 +1060,8 @@ def _html_index(library, anchors: Mapping[int, str], level: str = NOTE) -> List[
             state = _tape_state(t, level)
             tip = (f"{t.name}: " + (", ".join(f"{t.count(lv)} {_LEVEL_PLURAL[lv].lower()}"
                                               for lv in _shown(level))
-                                    if t.report is not None else _STATE_WORD[state]))
+                                    if t.report is not None else
+                                    (_none_word(t).lower() if state == "nocov" else _STATE_WORD[state])))
             # Two files of one nuclide (two evaluations side by side): the
             # name tells them apart, cut short; the tooltip has it whole.
             extra = f'<span class="twin">{_e(t.name)}</span>' if twin else ""
@@ -1068,7 +1070,7 @@ def _html_index(library, anchors: Mapping[int, str], level: str = NOTE) -> List[
         out.append("</span></div>")
     out.append("</div>")
     keys = ([(lv, "Notes only" if lv == NOTE else _LEVEL_PLURAL[lv]) for lv in _shown(level)]
-            + [("clean", _clean_word(level)), ("nocov", "No covariances"),
+            + [("clean", _clean_word(level)), ("nocov", suite(library.kind).none_word),
                ("failed", "Could not be checked")])
     out.append('<div class="keys">' + "".join(
         f'<span><span class="chip {k}">&nbsp;</span>{_e(w)}</span>' for k, w in keys) + "</div>")
@@ -1079,7 +1081,7 @@ def _html_main(tape, level: str = NOTE) -> _Html:
     if not tape.ok:
         return _Html(f'<span class="status-failed">Failed: {_e(tape.error)}</span>')
     if not tape.has_covariances:
-        return _Html('<span class="status-none">No covariances</span>')
+        return _Html(f'<span class="status-none">{_e(_none_word(tape))}</span>')
     main = _main_findings(tape, level)
     if not main:
         return _Html(f'<span class="status-clean">{_e(_clean_word(level))}</span>')
@@ -1123,13 +1125,13 @@ def library_html(library, level: str = WARN) -> str:
               for i, t in enumerate(library.tapes) if t.report is not None}
     anchors = {i: (f"tape-{i}" if listed.get(i) else f"file-{i}")
                for i in range(len(library.tapes))}
-    body = _html_header("kika · covariance check of a library", title,
+    body = _html_header(suite(library.kind).eyebrow + " of a library", title,
                         str(base) if base else None, [
                             ("Tapes", _library_status(library, counts)),
                             ("kika", kika_version()), ("Generated", _now())])
     body += _html_verdict(counts["findings"], library, level)
     tapes_with = {lv: sum(1 for t in library.tapes if t.count(lv)) for lv in _shown(level)}
-    body += _html_cards(counts["findings"], tapes_with, level)
+    body += _html_cards(counts["findings"], tapes_with, level, library.kind)
     body += _html_toc((("files", "Files"), ("summary", "Summary by check"),
                        ("by-file", "Summary by file"), ("findings", "Findings"),
                        ("method", "Method"), ("legend", "What each finding means")))
@@ -1158,9 +1160,9 @@ def library_html(library, level: str = WARN) -> str:
         body.append(f'<p class="muted">{_e(hidden)}</p>')
     elif not any_listed:
         body.append("<p>None.</p>")
-    body += _html_method()
+    body += _html_method(library.kind)
     body += _html_legend(_check_names(_display_rows(rows)))
-    return _html_page(f"Covariance check of {title}", body)
+    return _html_page(f"{suite(library.kind).title} of {title}", body)
 
 
 def write_text(text: str, path) -> str:

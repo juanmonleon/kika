@@ -1,0 +1,783 @@
+ ENDF/B-VIII.1                                                         0  0
+ 2.705800+4 5.743810+1          1          0          0          02722 1451    1
+ 0.000000+0 0.000000+0          0          0          0          62722 1451    2
+ 1.000000+0 2.000000+7          1          0         10          82722 1451    3
+ 0.000000+0 0.000000+0          0          0        357        3942722 1451    4
+ 27-Co- 58 BNL        EVAL-MAY11  Mughabghab, BNL, Kim, KAERI+    2722 1451    5
+ NDS 148, 1 (2018)    DIST-AUG24 REV1-SEP23            20240830   2722 1451    6
+---- ENDF/B-VIII.1    MATERIAL 2722         REVISION 1            2722 1451    7
+----- INCIDENT-NEUTRON DATA                                       2722 1451    8
+------ ENDF-6                                                     2722 1451    9
+******************************************************************2722 1451   10
+                                                                  2722 1451   11
+  Updates of energy-angular distributions related to the emitted  2722 1451   12
+  charged particles ( AUG. 2023)                                  2722 1451   13
+                                                                  2722 1451   14
+  H.I. Kim (KAERI),                                               2722 1451   15
+  H.Y. Lee, T. Kawano, S.A. Kuvin, and M.W. Herman (LANL)         2722 1451   16
+                                                                  2722 1451   17
+  Energy-angular distributions of discrete and continuum levels   2722 1451   18
+  and photon transitions related to emitted charged particles     2722 1451   19
+  (proton, deuteron, triton, helium-3 and alpha)                  2722 1451   20
+  have been updated [1] using CoH3 [2] and formatted into         2722 1451   21
+  the ENDF-6 format using DeCE [3]. The Q-values have been        2722 1451   22
+  calculated using the mass data in Audi's 2012 mass table [4]    2722 1451   23
+  and FRDM2012 massess [5].                                       2722 1451   24
+                                                                  2722 1451   25
+  Summary of updated MF/MT                                        2722 1451   26
+  MF=4  MT= 600-639, 800-839 were deleted.                        2722 1451   27
+  MF=12/14  MT= 601-639, 801-839 were deleted.                    2722 1451   28
+  MF=6  MT= 104, 105 were deleted.                                2722 1451   29
+  MF=3  MT= 650-659, 699, 700-709, 749 were added.                2722 1451   30
+  MF=6  MT= 600-639, 650-659, 699, 700-709, 749,                  2722 1451   31
+            800-839 were added.                                   2722 1451   32
+                                                                  2722 1451   33
+***********                                                       2722 1451   34
+References                                                        2722 1451   35
+                                                                  2722 1451   36
+[1] H.I.Kim et al., Nucl. Instr. Method A 963, 163699 (2020)      2722 1451   37
+[2] T.Kawano, Springer Proceedings in Physics 254, pp.27  (2021)  2722 1451   38
+[3] T.Kawano, J. Nucl. Sci. Technol. 56, (11) 1029 (2019)         2722 1451   39
+[4] G.Audi et al., Nucl. Data Sheets 120, 1 (2014)                2722 1451   40
+[5] P.Moller et al., At. Data and Nucl. Data Tables 109, 1 (2012) 2722 1451   41
+******************************************************************2722 1451   42
+                                                                  2722 1451   43
+******************************************************************2722 1451   44
+MT=600, 601 and 602 rescaled below 1.8 MeV to sum to the numerical2722 1451   45
+MT=103 cross section that has the resonance introduced 10.35 eV.  2722 1451   46
+The MT=103 has added interpolation points 50 eV to 30 keV.        2722 1451   47
+Now the MT=103 is properly the sum of all the MT=600-649.         2722 1451   48
+Ian Thompson and Bret Beck (LLNL). Sept 22, 2022.                 2722 1451   49
+                                                                  2722 1451   50
+*************************** ENDF/B-VII.1**************************2722 1451   51
+**                                                              **2722 1451   52
+**         Original BNL evaluation                              **2722 1451   53
+**                                                              **2722 1451   54
+******************************************************************2722 1451   55
+                                                                  2722 1451   56
+------ENDF-6 FORMAT                                               2722 1451   57
+******************************************************************2722 1451   58
+**                                                              **2722 1451   59
+** This is  a completly new evaluation for Co58 in the thermal  **2722 1451   60
+   resonance, unresolved and fast regions.                        2722 1451   61
+                                                                  2722 1451   62
+ THERMAL REGION                                                   2722 1451   63
+                                                                  2722 1451   64
+ Evaluation May 14, 2011 by S.F Mughabghab and B. Pritychenko,BNL 2722 1451   65
+                                                                  2722 1451   66
+ The only available neutronic information for Co-58 is            2722 1451   67
+ the thermal neutron capture cross section and the capture        2722 1451   68
+ resonance integral [Mu06]. Since the (n,p) threshold is 3.090 MeV2722 1451   69
+ below the neutron separation energy of the compound nucleus      2722 1451   70
+ Co-59,a knowledge of the thermal (n,p) cross section is required.2722 1451   71
+                                                                  2722 1451   72
+  To obtain this information, two methods were applied.           2722 1451   73
+                                                                  2722 1451   74
+  1. The reciprocity theorem and detailed balance were applied    2722 1451   75
+     to the reaction Fe58(p,n)Co58.                               2722 1451   76
+     The (n,p) values thus obtained in the low keV region         2722 1451   77
+     were extrapolated to the thermal energy by the 1/v law.      2722 1451   78
+                                                                  2722 1451   79
+  2. The ratio of the (n,p) cross section of Co-58 to that of     2722 1451   80
+     Ni-59  in the kev region is determined by the EMPIRE code    2722 1451   81
+     and then normalized to the thermal (n,p) cross section of    2722 1451   82
+     Ni59.                                                        2722 1451   83
+                                                                  2722 1451   84
+    In spite of the crude assumtions, both methods, surprisingly, 2722 1451   85
+    yielded the same thermal (n,p) cross section, 101 b for       2722 1451   86
+    Co-58. This value is in disagreement with previous            2722 1451   87
+    evaluations giving cross sections over 1700 b.                2722 1451   88
+                                                                  2722 1451   89
+ RESONANCE PARAMETERS                                           &&2722 1451   90
+                                                                &&2722 1451   91
+ Evaluation, May 14 2011 by S.F. Mughabghab (BNL)               &&2722 1451   92
+                                                                  2722 1451   93
+  RESOLVED RESONANCES in MLBW                                     2722 1451   94
+                                                                  2722 1451   95
+   As a starting point, the thermal capture cross section, as     2722 1451   96
+   well as the capture resonance integral were adopted from       2722 1451   97
+   Mughabghab[Mu06].                                              2722 1451   98
+                                                                  2722 1451   99
+   These  two quantities were assumed to be attributed to a low   2722 1451  100
+   energy resonance determined at an energy of 10.35 eV.          2722 1451  101
+                                                                  2722 1451  102
+   If the  thermal (n,p) cross section is also attributed to      2722 1451  103
+   this resonance, then the proton width of this resonance is     2722 1451  104
+   calculated as  27.28 meV. The  (n,p) cross section             2722 1451  105
+   at the peak of this resonance is computed as 2030 b.           2722 1451  106
+   A s-wave average captue width of 0.83 eV is calculated on the  2722 1451  107
+   basis of the generalized Fermi-liquid model of Mughabghab      2722 1451  108
+   and Dunford [Mu00].                                            2722 1451  109
+                                                                  2722 1451  110
+   An average s-wave resonance spacing of 325 eV was determined   2722 1451  111
+   for Co58 with the Gilbert-Cameron relation and associated      2722 1451  112
+   paremeters [Mu98].                                             2722 1451  113
+                                                                  2722 1451  114
+                                                                  2722 1451  115
+   Effective scattering radius of 6.73 fm was adopted from        2722 1451  116
+    [Mu06] and [Mu10c].                                           2722 1451  117
+                                                                  2722 1451  118
+   Average radiative widths of 0.83 eV was assumed for s-wave     2722 1451  119
+   resonances,                                                    2722 1451  120
+                                                                  2722 1451  121
+                                                                  2722 1451  122
+                                                                  2722 1451  123
+  Calculated thermal cross sections & resonance integrals:      &&2722 1451  124
+      ---------------------------------------------             &&2722 1451  125
+      Reaction       Cross section    Res. integral             &&2722 1451  126
+                        (barn)           (barn)                 &&2722 1451  127
+                                                                &&2722 1451  128
+      Total           2027.4               -                    &&2722 1451  129
+      (n,p)            101.0               -                    &&2722 1451  130
+      Elastic           71.4               -                    &&2722 1451  131
+      Capture         1855.0              6519                  &&2722 1451  132
+      ---------------------------------------------             &&2722 1451  133
+                                                                &&2722 1451  134
+     With these parameters, the Wescott factor for the capture  &&2722 1451  135
+     reaction is calculated as g_w = 1.00609.                   &&2722 1451  136
+                                                                  2722 1451  137
+  UNRESOLVED RESONANCE REGION in 'all energy-dependent parameters'2722 1451  138
+                              format (LRF=2)                      2722 1451  139
+   Average level spacing was calculated on basis of the Gilbert-  2722 1451  140
+     Cameron relation and the value of D for Co59.                2722 1451  141
+                                                                  2722 1451  142
+   Strength functions for s-, p- and d-wave neutrons were adopted 2722 1451  143
+     from  the systematics [Mu06].                                2722 1451  144
+                                                                  2722 1451  145
+   Average radiative widths for s- and p-wave neutrons  of 0.83 eV2722 1451  146
+      and 0.415 eV, respectively were derived from systematics    2722 1451  147
+      obtained from fits to  the average capture cross section in 2722 1451  148
+      the unresolved energy region [Mu10a] and [Mu10b].           2722 1451  149
+      For d-wave neutrons the average capture width,0.590 eV,     2722 1451  150
+      is obtained as the geometric mean of the s- and             2722 1451  151
+      p-wave components.                                          2722 1451  152
+                                                                  2722 1451  153
+   Energy-dependence of level spacing was calculated according to 2722 1451  154
+     the Gilbert-Cameron level density formula with associated    2722 1451  155
+     parameters from Mughabghab [Mu06],[Mu98].                    2722 1451  156
+                                                                  2722 1451  157
+   Energy-dependence of capture widths is calculated on the       2722 1451  158
+    basis of the generalized Fermi liquid model [Mu98] with       2722 1451  159
+    associated parameters from [Mu06].                            2722 1451  160
+                                                                  2722 1451  161
+  Average parameters:                                             2722 1451  162
+                S (10**4)     <D> (eV)*   <Gg> (eV)               2722 1451  163
+    s-wave      4.0            325          0.830                 2722 1451  164
+    p-wave      0.31           175          0.415                 2722 1451  165
+    d-wave      4.0            134          0.590                 2722 1451  166
+   * Level spacing  and capture widths at the neutron separation  2722 1451  167
+     energy of target+n.                                          2722 1451  168
+                                                                  2722 1451  169
+ REFRENCES:                                                       2722 1451  170
+                                                                  2722 1451  171
+ [Mu98] S.F. Mughabghab and C.L. Dunford, Phys.Rev.Lett. 81,      2722 1451  172
+         4083 (1998)                                              2722 1451  173
+ [Mu00] S.F.Mughabghab and C.L. Dunford, Phys. Lett. B 487, 155   2722 1451  174
+         (2000).                                                  2722 1451  175
+ [Mu06] S.F.Mughabghab: Atlas of Neutron Resonances,              2722 1451  176
+         April 2006, Elsevier,(5-th edition of BNL-325).          2722 1451  177
+ [Mu10a]S.F. Mughabghab, International Conference on Nuclear Data 2722 1451  178
+         for Science and Technology, April 26-30,2010 Jeju Island 2722 1451  179
+         Korea, J. Korean Phys. Soc. 59, 821 (2011).              2722 1451  180
+ [Mu10b]S.F. Mughabghab, Brookhaven National Laboratory report    2722 1451  181
+         BNL-93861-2010, April 2010.                              2722 1451  182
+ [Mu10c]S.F. Mughabghab, "Uncertainty treatment in the Unresolved 2722 1451  183
+         Resonance region", CSEWG Meeting, Santa Fe, Nov 2010.    2722 1451  184
+                                                                  2722 1451  185
+ ***************************************************              2722 1451  186
+ FAST ENERGY REGION                                               2722 1451  187
+ Authors: H. Kim                                                  2722 1451  188
+                                                                  2722 1451  189
+ CROSS-SECTION EVALUATION PROCEDURE                               2722 1451  190
+                                                                  2722 1451  191
+ Adopted procedure is based on careful theoretical                2722 1451  192
+ analysis utilizing available experimental data and               2722 1451  193
+ nuclear reaction model calculations.                             2722 1451  194
+                                                                  2722 1451  195
+ Available experimental data were interpreted  using              2722 1451  196
+ nuclear reaction model code EMPIRE-3 by M. Herman                2722 1451  197
+ et al [EMP]. This code integrates into a single                  2722 1451  198
+ system a number of important modules and features:               2722 1451  199
+                                                                  2722 1451  200
+ - Spherical and deformed Optical Model including                 2722 1451  201
+   coupled-channels (ECIS06 by J. Raynal)                         2722 1451  202
+ - Hauser-Feshbach statistical model including                    2722 1451  203
+   HRTW width fluctuation correction                              2722 1451  204
+ - Quantum-mechanical MSD TUL model (codes ORION &                2722 1451  205
+   TRISTAN by H. Lenske), and MSC NVWY model                      2722 1451  206
+ - Exciton model with angular momentum coupling                   2722 1451  207
+   (code DEGAS by E. Betak and P. Oblozinsky) that                2722 1451  208
+   represents a good approximation to the DSD model               2722 1451  209
+ - Exciton model with Iwamoto-Harada cluster                      2722 1451  210
+   emission and Kalbach systematic angular distr.                 2722 1451  211
+   (code PCROSS by R.Capote et al)                                2722 1451  212
+ - Complete gamma-ray cascade after emission of                   2722 1451  213
+   each particle, including realistic treatment of                2722 1451  214
+   discrete transitions                                           2722 1451  215
+ - Access to OM segment of the RIPL library [RIPL]                2722 1451  216
+ - Built-in input parameter files, such as masses,                2722 1451  217
+   level density, discrete levels, fission barriers               2722 1451  218
+   and gamma strength functions based on the RIPL                 2722 1451  219
+   library [RIPL]                                                 2722 1451  220
+ - Automatic retrieval of experimental data from the              2722 1451  221
+   EXFOR/CSISRS library                                           2722 1451  222
+ - ENDF-6 formatting (code EMPEND by A. Trkov)                    2722 1451  223
+   coupled to graphical presentation capabilities                 2722 1451  224
+   (code ZVView by V. Zerkin) through the chain of                2722 1451  225
+   PrePro codes by R. Cullen                                      2722 1451  226
+ - Checking codes (CHECKR, FIZCON, PSYCHE)                        2722 1451  227
+ - Support for NJOY                                               2722 1451  228
+                                                                  2722 1451  229
+ PARAMETERIZATIONS                                                2722 1451  230
+                                                                  2722 1451  231
+ Following models and parameters were used in the                 2722 1451  232
+ current evaluation:                                              2722 1451  233
+                                                                  2722 1451  234
+ Discrete levels were taken from the RIPL-3 level                 2722 1451  235
+ file, based on the 2007 version of ENSDF.                        2722 1451  236
+ EMPIRE-specific level densities                                  2722 1451  237
+ Width fluctuations calculated within HRTW  up to 3.00 MeV        2722 1451  238
+ ENDF formatting enabled                                          2722 1451  239
+ Exclusive spectra available up to emission loop #  3             2722 1451  240
+ E1 strength function set to MLO1                                 2722 1451  241
+ GDR parameters from RIPL-2/Exp.data+Plujko systematics           2722 1451  242
+ Discrete levels turned off in PCROSS as PCROSS is off            2722 1451  243
+                                                                  2722 1451  244
+ Neutron   o. m. parameters: RIPL catalog number         2405     2722 1451  245
+ Proton    o. m. parameters: RIPL catalog number         5405     2722 1451  246
+ Alpha     o. m. parameters: RIPL catalog number         9600     2722 1451  247
+ Deuteron  o. m. parameters: RIPL catalog number         6200     2722 1451  248
+ Triton    o. m. parameters: RIPL catalog number         7100     2722 1451  249
+ He-3      o. m. parameters: RIPL catalog number         8100     2722 1451  250
+                                                                  2722 1451  251
+                         E j e c t i l e    m a s s e s   [amu]   2722 1451  252
+                                                                  2722 1451  253
+                     1n        1p        4He       2d        3t   2722 1451  254
+                                                                  2722 1451  255
+                 1.008665   1.007276   4.001506   2.013553   3.0152722 1451  256
+                                                                  2722 1451  257
+                         B i n d i n g    e n e r g i e s [MeV]   2722 1451  258
+                                                                  2722 1451  259
+    Nucleus          1n        1p        4He       2d        3t   2722 1451  260
+                                                                  2722 1451  261
+  27-Co- 59        10.454     7.364     6.943    15.184    16.573 2722 1451  262
+  27-Co- 58         8.572     6.954     6.715    12.376    17.316 2722 1451  263
+  27-Co- 57        11.376     6.028     7.081    15.001    18.042 2722 1451  264
+  27-Co- 56        10.082     5.849     7.759    12.923    20.044 2722 1451  265
+  26-Fe- 58        10.044    11.953     7.646    18.379    19.393 2722 1451  266
+  26-Fe- 57         7.646    10.559     7.320    15.606    19.575 2722 1451  267
+  26-Fe- 56        11.197    10.184     7.613    18.186    20.867 2722 1451  268
+  26-Fe- 55  <      9.298     9.213     8.455    15.927    21.724 2722 1451  269
+  25-Mn- 55        10.226     8.067     7.934    15.561    17.243 2722 1451  270
+  25-Mn- 54         8.938     7.559     8.758    13.274    19.056 2722 1451  271
+  25-Mn- 53        12.054     6.560     9.153    16.375    19.380 2722 1451  272
+  25-Mn- 52  <     10.535     6.545     8.651    13.583    20.326 2722 1451  273
+  24-Cr- 54         9.718    12.372     7.927    18.627    19.681 2722 1451  274
+  24-Cr- 53         7.939    11.133     9.148    16.220    21.013 2722 1451  275
+  24-Cr- 52  <     12.039    10.505     9.351    19.331    22.407 2722 1451  276
+  24-Cr- 51  <      9.262     9.516     8.938    16.625    21.920 2722 1451  277
+                                                                  2722 1451  278
+  < indicates inclusive spectra only                              2722 1451  279
+                                                                  2722 1451  280
+ RESULTS                                                          2722 1451  281
+                                                                  2722 1451  282
+ MF=3 Neutron cross sections                                      2722 1451  283
+      EMPIRE calculations were adopted for:                       2722 1451  284
+    MT=1 Total                                                    2722 1451  285
+    MT=2 Elastic scattering                                       2722 1451  286
+    MT=4, 51-91 Inelastic scattering                              2722 1451  287
+    MT=102 Capture                                                2722 1451  288
+    MT=16   (n,2n)                                                2722 1451  289
+    MT=17   (n,3n)                                                2722 1451  290
+    MT=18   (n,f)                                                 2722 1451  291
+    MT=22   (n,na)                                                2722 1451  292
+    MT=24   (n,2na)                                               2722 1451  293
+    MT=28   (n,np+pn)                                             2722 1451  294
+    MT=37   (n,4n)                                                2722 1451  295
+    MT=45   (n,npa)                                               2722 1451  296
+    MT=103, 600-649 (n,p)                                         2722 1451  297
+    MT=104, (n,d)                                                 2722 1451  298
+    MT=105, (n,t)                                                 2722 1451  299
+    MT=106, (n,He-3)                                              2722 1451  300
+    MT=107, 800-849 (n,a)                                         2722 1451  301
+    MT=112  (n,pa)                                                2722 1451  302
+                                                                  2722 1451  303
+ MF=4 Angular distributions of secondary neutrons                 2722 1451  304
+      EMPIRE calculations were adopted                            2722 1451  305
+                                                                  2722 1451  306
+ MF=6 Energy-angle distributions of reaction                      2722 1451  307
+      products; EMPIRE calculations were adopted                  2722 1451  308
+                                                                  2722 1451  309
+      Primary capture gammas are entered as                       2722 1451  310
+      discrete lines                                              2722 1451  311
+                                                                  2722 1451  312
+ MF=12 Transition probability arrays for photon                   2722 1451  313
+       production; taken from the RIPL library                    2722 1451  314
+                                                                  2722 1451  315
+ MF=14 Photon angular distributions                               2722 1451  316
+       isotropic distributions were assumed                       2722 1451  317
+                                                                  2722 1451  318
+ REFERENCES                                                       2722 1451  319
+                                                                  2722 1451  320
+ [EMP]                                                            2722 1451  321
+   M.Herman, R.Capote, B.Carlson, P.Oblozinsky,                   2722 1451  322
+   M.Sin, A.Trkov, H.Wienke and V.Zerkin                          2722 1451  323
+                                                                  2722 1451  324
+  "EMPIRE: Nuclear Reaction Model Code System                     2722 1451  325
+            for data evaluation"                                  2722 1451  326
+   Nuclear Data Sheets 108 (2007) 2655-2715                       2722 1451  327
+                                                                  2722 1451  328
+ [RIPL]                                                           2722 1451  329
+   R.Capote, M.Herman, P.Oblozinsky, P.G.Young,                   2722 1451  330
+   S.Goriely, T.Belgya, A.V.Ignatyuk, A.J.Koning,                 2722 1451  331
+   S.Hilaire, V.A.Plujko, M.Avrigeanu,                            2722 1451  332
+   Zhigang Ge, Yinlu Han, S.Kailas, J.Kopecky,                    2722 1451  333
+   V.M.Maslov, G.Reffo, M.Sin,                                    2722 1451  334
+   E.Sh.Soukhovitskii and P. Talou                                2722 1451  335
+                                                                  2722 1451  336
+  "RIPL - Reference Input Parameter Library for                   2722 1451  337
+          Calculation of Nuclear Reactions and                    2722 1451  338
+          Nuclear Data Evaluations",                              2722 1451  339
+                                                                  2722 1451  340
+   Nuclear Data Sheets 110 (2009) 3107-3214                       2722 1451  341
+                                                                  2722 1451  342
+   Data available online at                                       2722 1451  343
+    http://www-nds.iaea.org/RIPL-3/                               2722 1451  344
+                                                                  2722 1451  345
+ ************************************************                 2722 1451  346
+ ***************** Program FIXUP (Version 2007-1) ****************2722 1451  347
+ Corrected ZA/AWR in All Sections-----------------------------Yes 2722 1451  348
+ Corrected Thresholds-----------------------------------------Yes 2722 1451  349
+ Extended Cross Sections to 20 MeV----------------------------Yes 2722 1451  350
+ Allow Cross Section Deletion---------------------------------No  2722 1451  351
+ Allow Cross Section Reconstruction---------------------------Yes 2722 1451  352
+ Make All Cross Sections Non-Negative-------------------------No  2722 1451  353
+ Delete Energies Not in Ascending Order-----------------------Yes 2722 1451  354
+ Deleted Duplicate Points-------------------------------------Yes 2722 1451  355
+ Check for Ascending MAT/MF/MT Order--------------------------Yes 2722 1451  356
+ Check for Legal MF/MT Numbers--------------------------------Yes 2722 1451  357
+ Allow Creation of Missing Sections---------------------------Yes 2722 1451  358
+ Allow Insertion of Energy Points-----------------------------No  2722 1451  359
+ Create Uniform Energy Grid-----------------------------------No  2722 1451  360
+ Delete Section if Cross Section =0 at All Energies-----------Yes 2722 1451  361
+                                1        451        755          02722 1451  362
+                                2        151        185          02722 1451  363
+                                3          1        104          02722 1451  364
+                                3          2         41          02722 1451  365
+                                3          4         28          02722 1451  366
+                                3          5         14          02722 1451  367
+                                3         16          8          02722 1451  368
+                                3         22          8          02722 1451  369
+                                3         24          5          02722 1451  370
+                                3         28          8          02722 1451  371
+                                3         32          6          02722 1451  372
+                                3         41          5          02722 1451  373
+                                3         51         15          02722 1451  374
+                                3         52         15          02722 1451  375
+                                3         53         15          02722 1451  376
+                                3         54         14          02722 1451  377
+                                3         55         14          02722 1451  378
+                                3         56         14          02722 1451  379
+                                3         57         13          02722 1451  380
+                                3         58         12          02722 1451  381
+                                3         59         12          02722 1451  382
+                                3         60         12          02722 1451  383
+                                3         61         12          02722 1451  384
+                                3         62         12          02722 1451  385
+                                3         63         12          02722 1451  386
+                                3         64         12          02722 1451  387
+                                3         65         12          02722 1451  388
+                                3         66         12          02722 1451  389
+                                3         67         12          02722 1451  390
+                                3         68         12          02722 1451  391
+                                3         69         12          02722 1451  392
+                                3         70         12          02722 1451  393
+                                3         71         12          02722 1451  394
+                                3         72         12          02722 1451  395
+                                3         73         12          02722 1451  396
+                                3         74         12          02722 1451  397
+                                3         75         12          02722 1451  398
+                                3         76         12          02722 1451  399
+                                3         77         11          02722 1451  400
+                                3         78         12          02722 1451  401
+                                3         79         12          02722 1451  402
+                                3         80         12          02722 1451  403
+                                3         81         12          02722 1451  404
+                                3         82         12          02722 1451  405
+                                3         83         12          02722 1451  406
+                                3         84         11          02722 1451  407
+                                3         85         11          02722 1451  408
+                                3         86         11          02722 1451  409
+                                3         87         11          02722 1451  410
+                                3         88         11          02722 1451  411
+                                3         89         11          02722 1451  412
+                                3         91         11          02722 1451  413
+                                3        102         16          02722 1451  414
+                                3        103         78          02722 1451  415
+                                3        104          9          02722 1451  416
+                                3        105          8          02722 1451  417
+                                3        107         18          02722 1451  418
+                                3        112          8          02722 1451  419
+                                3        600        117          02722 1451  420
+                                3        601        117          02722 1451  421
+                                3        602        121          02722 1451  422
+                                3        603         14          02722 1451  423
+                                3        604         14          02722 1451  424
+                                3        605         14          02722 1451  425
+                                3        606         13          02722 1451  426
+                                3        607         13          02722 1451  427
+                                3        608         13          02722 1451  428
+                                3        609         13          02722 1451  429
+                                3        610         13          02722 1451  430
+                                3        611         13          02722 1451  431
+                                3        612         12          02722 1451  432
+                                3        613         12          02722 1451  433
+                                3        614         12          02722 1451  434
+                                3        615         12          02722 1451  435
+                                3        616         12          02722 1451  436
+                                3        617         12          02722 1451  437
+                                3        618         12          02722 1451  438
+                                3        619         12          02722 1451  439
+                                3        620         12          02722 1451  440
+                                3        621         12          02722 1451  441
+                                3        622         12          02722 1451  442
+                                3        623         12          02722 1451  443
+                                3        624         12          02722 1451  444
+                                3        625         11          02722 1451  445
+                                3        626         11          02722 1451  446
+                                3        627         11          02722 1451  447
+                                3        628         11          02722 1451  448
+                                3        629         11          02722 1451  449
+                                3        630         11          02722 1451  450
+                                3        631         11          02722 1451  451
+                                3        632         11          02722 1451  452
+                                3        633         11          02722 1451  453
+                                3        634         11          02722 1451  454
+                                3        635         11          02722 1451  455
+                                3        636         11          02722 1451  456
+                                3        637         11          02722 1451  457
+                                3        638         11          02722 1451  458
+                                3        639         11          02722 1451  459
+                                3        649         12          02722 1451  460
+                                3        650          9          02722 1451  461
+                                3        651          9          02722 1451  462
+                                3        652          9          02722 1451  463
+                                3        653          9          02722 1451  464
+                                3        654          9          02722 1451  465
+                                3        655          9          02722 1451  466
+                                3        656          9          02722 1451  467
+                                3        657          9          02722 1451  468
+                                3        658          9          02722 1451  469
+                                3        659          9          02722 1451  470
+                                3        699          9          02722 1451  471
+                                3        700          9          02722 1451  472
+                                3        701          8          02722 1451  473
+                                3        702          8          02722 1451  474
+                                3        703          8          02722 1451  475
+                                3        704          8          02722 1451  476
+                                3        705          8          02722 1451  477
+                                3        706          8          02722 1451  478
+                                3        707          8          02722 1451  479
+                                3        708          8          02722 1451  480
+                                3        709          8          02722 1451  481
+                                3        749          8          02722 1451  482
+                                3        800         18          02722 1451  483
+                                3        801         18          02722 1451  484
+                                3        802         18          02722 1451  485
+                                3        803         14          02722 1451  486
+                                3        804         14          02722 1451  487
+                                3        805         14          02722 1451  488
+                                3        806         14          02722 1451  489
+                                3        807         13          02722 1451  490
+                                3        808         13          02722 1451  491
+                                3        809         13          02722 1451  492
+                                3        810         13          02722 1451  493
+                                3        811         13          02722 1451  494
+                                3        812         13          02722 1451  495
+                                3        813         13          02722 1451  496
+                                3        814         12          02722 1451  497
+                                3        815         12          02722 1451  498
+                                3        816         12          02722 1451  499
+                                3        817         12          02722 1451  500
+                                3        818         12          02722 1451  501
+                                3        819         12          02722 1451  502
+                                3        820         12          02722 1451  503
+                                3        821         12          02722 1451  504
+                                3        822         12          02722 1451  505
+                                3        823         12          02722 1451  506
+                                3        824         12          02722 1451  507
+                                3        825         12          02722 1451  508
+                                3        826         12          02722 1451  509
+                                3        827         12          02722 1451  510
+                                3        828         12          02722 1451  511
+                                3        829         12          02722 1451  512
+                                3        830         12          02722 1451  513
+                                3        831         12          02722 1451  514
+                                3        832         12          02722 1451  515
+                                3        833         12          02722 1451  516
+                                3        834         12          02722 1451  517
+                                3        835         12          02722 1451  518
+                                3        836         12          02722 1451  519
+                                3        837         12          02722 1451  520
+                                3        838         12          02722 1451  521
+                                3        839         11          02722 1451  522
+                                3        849         10          02722 1451  523
+                                4          2        246          02722 1451  524
+                                4         51         72          02722 1451  525
+                                4         52         72          02722 1451  526
+                                4         53         72          02722 1451  527
+                                4         54         68          02722 1451  528
+                                4         55         68          02722 1451  529
+                                4         56         66          02722 1451  530
+                                4         57         60          02722 1451  531
+                                4         58         58          02722 1451  532
+                                4         59         58          02722 1451  533
+                                4         60         58          02722 1451  534
+                                4         61         58          02722 1451  535
+                                4         62         58          02722 1451  536
+                                4         63         58          02722 1451  537
+                                4         64         58          02722 1451  538
+                                4         65         56          02722 1451  539
+                                4         66         56          02722 1451  540
+                                4         67         56          02722 1451  541
+                                4         68         56          02722 1451  542
+                                4         69         56          02722 1451  543
+                                4         70         56          02722 1451  544
+                                4         71         56          02722 1451  545
+                                4         72         56          02722 1451  546
+                                4         73         54          02722 1451  547
+                                4         74         54          02722 1451  548
+                                4         75         54          02722 1451  549
+                                4         76         54          02722 1451  550
+                                4         77         54          02722 1451  551
+                                4         78         54          02722 1451  552
+                                4         79         54          02722 1451  553
+                                4         80         54          02722 1451  554
+                                4         81         54          02722 1451  555
+                                4         82         54          02722 1451  556
+                                4         83         54          02722 1451  557
+                                4         84         52          02722 1451  558
+                                4         85         52          02722 1451  559
+                                4         86         52          02722 1451  560
+                                4         87         52          02722 1451  561
+                                4         88         52          02722 1451  562
+                                4         89         52          02722 1451  563
+                                6          5        363          02722 1451  564
+                                6         16        212          02722 1451  565
+                                6         22        321          02722 1451  566
+                                6         24         44          02722 1451  567
+                                6         28        430          02722 1451  568
+                                6         32        176          02722 1451  569
+                                6         41        135          02722 1451  570
+                                6         91        638          02722 1451  571
+                                6        102        908          02722 1451  572
+                                6        112        385          02722 1451  573
+                                6        600        101          02722 1451  574
+                                6        601        114          02722 1451  575
+                                6        602        113          02722 1451  576
+                                6        603        114          02722 1451  577
+                                6        604        115          02722 1451  578
+                                6        605        110          02722 1451  579
+                                6        606        120          02722 1451  580
+                                6        607        114          02722 1451  581
+                                6        608        119          02722 1451  582
+                                6        609        118          02722 1451  583
+                                6        610        118          02722 1451  584
+                                6        611        113          02722 1451  585
+                                6        612        117          02722 1451  586
+                                6        613        117          02722 1451  587
+                                6        614        104          02722 1451  588
+                                6        615        110          02722 1451  589
+                                6        616        112          02722 1451  590
+                                6        617        106          02722 1451  591
+                                6        618        106          02722 1451  592
+                                6        619        109          02722 1451  593
+                                6        620        106          02722 1451  594
+                                6        621        106          02722 1451  595
+                                6        622        106          02722 1451  596
+                                6        623        103          02722 1451  597
+                                6        624        103          02722 1451  598
+                                6        625        103          02722 1451  599
+                                6        626        112          02722 1451  600
+                                6        627        109          02722 1451  601
+                                6        628        107          02722 1451  602
+                                6        629        105          02722 1451  603
+                                6        630        110          02722 1451  604
+                                6        631        105          02722 1451  605
+                                6        632        102          02722 1451  606
+                                6        633        110          02722 1451  607
+                                6        634        123          02722 1451  608
+                                6        635        115          02722 1451  609
+                                6        636        117          02722 1451  610
+                                6        637        121          02722 1451  611
+                                6        638        116          02722 1451  612
+                                6        639        130          02722 1451  613
+                                6        649        940          02722 1451  614
+                                6        650         73          02722 1451  615
+                                6        651         82          02722 1451  616
+                                6        652         84          02722 1451  617
+                                6        653         83          02722 1451  618
+                                6        654         89          02722 1451  619
+                                6        655         84          02722 1451  620
+                                6        656         87          02722 1451  621
+                                6        657         86          02722 1451  622
+                                6        658         85          02722 1451  623
+                                6        659         87          02722 1451  624
+                                6        699       1690          02722 1451  625
+                                6        700         69          02722 1451  626
+                                6        701         76          02722 1451  627
+                                6        702         71          02722 1451  628
+                                6        703         68          02722 1451  629
+                                6        704         66          02722 1451  630
+                                6        705         67          02722 1451  631
+                                6        706         69          02722 1451  632
+                                6        707         69          02722 1451  633
+                                6        708         66          02722 1451  634
+                                6        709         68          02722 1451  635
+                                6        749       1041          02722 1451  636
+                                6        800        105          02722 1451  637
+                                6        801        114          02722 1451  638
+                                6        802        114          02722 1451  639
+                                6        803        116          02722 1451  640
+                                6        804        116          02722 1451  641
+                                6        805        116          02722 1451  642
+                                6        806        116          02722 1451  643
+                                6        807        115          02722 1451  644
+                                6        808        115          02722 1451  645
+                                6        809        112          02722 1451  646
+                                6        810        112          02722 1451  647
+                                6        811        109          02722 1451  648
+                                6        812        111          02722 1451  649
+                                6        813        113          02722 1451  650
+                                6        814        113          02722 1451  651
+                                6        815        112          02722 1451  652
+                                6        816        114          02722 1451  653
+                                6        817        115          02722 1451  654
+                                6        818        113          02722 1451  655
+                                6        819        111          02722 1451  656
+                                6        820        115          02722 1451  657
+                                6        821        111          02722 1451  658
+                                6        822        109          02722 1451  659
+                                6        823        111          02722 1451  660
+                                6        824        127          02722 1451  661
+                                6        825        123          02722 1451  662
+                                6        826        120          02722 1451  663
+                                6        827        120          02722 1451  664
+                                6        828        118          02722 1451  665
+                                6        829        118          02722 1451  666
+                                6        830        118          02722 1451  667
+                                6        831        118          02722 1451  668
+                                6        832        118          02722 1451  669
+                                6        833        134          02722 1451  670
+                                6        834        126          02722 1451  671
+                                6        835        124          02722 1451  672
+                                6        836        140          02722 1451  673
+                                6        837        136          02722 1451  674
+                                6        838        136          02722 1451  675
+                                6        839        136          02722 1451  676
+                                6        849        614          02722 1451  677
+                               12         51          3          02722 1451  678
+                               12         52          3          02722 1451  679
+                               12         53          3          02722 1451  680
+                               12         54          3          02722 1451  681
+                               12         55          3          02722 1451  682
+                               12         56          4          02722 1451  683
+                               12         57          4          02722 1451  684
+                               12         58          3          02722 1451  685
+                               12         59          3          02722 1451  686
+                               12         60          3          02722 1451  687
+                               12         61          3          02722 1451  688
+                               12         62          3          02722 1451  689
+                               12         63          3          02722 1451  690
+                               12         64          3          02722 1451  691
+                               12         65          3          02722 1451  692
+                               12         66          3          02722 1451  693
+                               12         67          3          02722 1451  694
+                               12         68          3          02722 1451  695
+                               12         69          3          02722 1451  696
+                               12         70          3          02722 1451  697
+                               12         71          3          02722 1451  698
+                               12         72          3          02722 1451  699
+                               12         73          4          02722 1451  700
+                               12         74          3          02722 1451  701
+                               12         75          3          02722 1451  702
+                               12         76          3          02722 1451  703
+                               12         77          3          02722 1451  704
+                               12         78          3          02722 1451  705
+                               12         79          3          02722 1451  706
+                               12         80          3          02722 1451  707
+                               12         81          3          02722 1451  708
+                               12         82          3          02722 1451  709
+                               12         83          3          02722 1451  710
+                               12         84          3          02722 1451  711
+                               12         85          3          02722 1451  712
+                               12         86          3          02722 1451  713
+                               12         87          3          02722 1451  714
+                               12         88          3          02722 1451  715
+                               12         89          3          02722 1451  716
+                               14         51          1          02722 1451  717
+                               14         52          1          02722 1451  718
+                               14         53          1          02722 1451  719
+                               14         54          1          02722 1451  720
+                               14         55          1          02722 1451  721
+                               14         56          1          02722 1451  722
+                               14         57          1          02722 1451  723
+                               14         58          1          02722 1451  724
+                               14         59          1          02722 1451  725
+                               14         60          1          02722 1451  726
+                               14         61          1          02722 1451  727
+                               14         62          1          02722 1451  728
+                               14         63          1          02722 1451  729
+                               14         64          1          02722 1451  730
+                               14         65          1          02722 1451  731
+                               14         66          1          02722 1451  732
+                               14         67          1          02722 1451  733
+                               14         68          1          02722 1451  734
+                               14         69          1          02722 1451  735
+                               14         70          1          02722 1451  736
+                               14         71          1          02722 1451  737
+                               14         72          1          02722 1451  738
+                               14         73          1          02722 1451  739
+                               14         74          1          02722 1451  740
+                               14         75          1          02722 1451  741
+                               14         76          1          02722 1451  742
+                               14         77          1          02722 1451  743
+                               14         78          1          02722 1451  744
+                               14         79          1          02722 1451  745
+                               14         80          1          02722 1451  746
+                               14         81          1          02722 1451  747
+                               14         82          1          02722 1451  748
+                               14         83          1          02722 1451  749
+                               14         84          1          02722 1451  750
+                               14         85          1          02722 1451  751
+                               14         86          1          02722 1451  752
+                               14         87          1          02722 1451  753
+                               14         88          1          02722 1451  754
+                               14         89          1          02722 1451  755
+ 0.000000+0 0.000000+0          0          0          0          02722 1  099999
+ 0.000000+0 0.000000+0          0          0          0          02722 0  0    0
+ 2.705800+4 5.743810+1          0          0          0          02722 3 16    1
+-8.572000+6-8.572000+6          0          0          1         142722 3 16    2
+         14          2                                            2722 3 16    3
+ 8.721240+6 0.000000+0 9.000000+6 2.338520-2 1.000000+7 1.761880-12722 3 16    4
+ 1.100000+7 4.045540-1 1.200000+7 5.485150-1 1.230000+7 5.811050-12722 3 16    5
+ 1.300000+7 6.449300-1 1.400000+7 6.899900-1 1.500000+7 7.234950-12722 3 16    6
+ 1.600000+7 7.254050-1 1.700000+7 7.009450-1 1.800000+7 6.614600-12722 3 16    7
+ 1.900000+7 6.193350-1 2.000000+7 5.680050-1                      2722 3 16    8
+ 0.000000+0 0.000000+0          0          0          0          02722 3  099999
+ 2.705800+4 5.743810+1          0          0          0          02722 3 32    1
+-6.119000+6-6.119000+6          0          0          1          82722 3 32    2
+          8          2                                            2722 3 32    3
+ 6.225530+6 0.000000+0 1.400000+7 0.000000+0 1.500000+7 9.990780-62722 3 32    4
+ 1.600000+7 3.032010-4 1.700000+7 1.666750-3 1.800000+7 4.751320-32722 3 32    5
+ 1.900000+7 1.031910-2 2.000000+7 1.635500-2                      2722 3 32    6
+ 0.000000+0 0.000000+0          0          0          0          02722 3  099999
+ 2.705800+4 5.743810+1          0          0          0          02722 3 41    1
+-6.119000+6-6.119000+6          0          0          1          62722 3 41    2
+          6          2                                            2722 3 41    3
+ 6.225530+6 0.000000+0 1.600000+7 0.000000+0 1.700000+7 6.466520-52722 3 41    4
+ 1.800000+7 1.366090-3 1.900000+7 7.324060-3 2.000000+7 2.313510-22722 3 41    5
+ 0.000000+0 0.000000+0          0          0          0          02722 3  099999
+ 0.000000+0 0.000000+0          0          0          0          02722 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0

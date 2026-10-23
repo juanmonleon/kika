@@ -1,4 +1,8 @@
-"""Layer 1 over a whole library: :func:`check_covariances` on every tape of a directory.
+"""Layer 1 over a whole library: the checks on every tape of a directory.
+
+:func:`check_covariance_library` runs :func:`check_covariances`;
+:func:`check_library` runs the data checks, the covariance checks or both
+(:func:`~kika.endf.checks.evaluation.check_evaluation`). Both walk the same way.
 
 One tape at a time, in series: each is read (only the MF the checks need),
 checked and released before the next, so a library of hundreds of tapes runs in
@@ -26,12 +30,14 @@ from .findings import (
     DEFECT,
     NOTE,
     WARN,
+    CheckReport,
     CovarianceCheckReport,
     CovarianceFinding,
-    CovarianceLocation,
+    location_fields,
 )
 
-__all__ = ["check_covariance_library", "CovarianceLibraryReport", "TapeCheck", "TAPE_PATTERNS"]
+__all__ = ["check_covariance_library", "check_library", "LibraryReport", "CovarianceLibraryReport",
+           "TapeCheck", "TAPE_PATTERNS"]
 
 #: File names a library directory holds its tapes under: ENDF/B (``.endf``),
 #: JEFF (``.jeff``, ``.txt``), JENDL (``.dat``). README and CHANGELOG files do
@@ -59,8 +65,11 @@ class TapeCheck:
     """What happened to one tape: its report, or why there is none."""
 
     path: Path
-    report: Optional[CovarianceCheckReport] = None
+    report: Optional[CheckReport] = None
     error: Optional[str] = None
+    #: False when the tape holds nothing the checks asked for look at (for the
+    #: covariance checks: no covariance file). The name is the covariance
+    #: family's, kept because the desktop app reads it.
     has_covariances: bool = True
     read_seconds: float = 0.0
     check_seconds: float = 0.0
@@ -73,6 +82,8 @@ class TapeCheck:
     #: tape fails or has no covariances: what the report sorts and indexes by.
     za: Optional[int] = None
     liso: int = 0
+    #: The family of checks (:mod:`.suites`): what the pages call the tape's status.
+    kind: str = "covariance"
 
     @property
     def name(self) -> str:
@@ -103,12 +114,13 @@ class TapeCheck:
 
 
 @dataclass(frozen=True)
-class CovarianceLibraryReport:
-    """Every tape of a library and what :func:`check_covariances` found in each.
+class LibraryReport:
+    """Every tape of a library and what the checks found in each.
 
     Iterating gives ``(tape, finding)`` pairs. :meth:`summary` is the census
     table -- findings and tapes per (MF, level, check) -- and :meth:`write`
-    puts the three tables on disk as TSV.
+    puts the three tables on disk as TSV. ``kind`` is the family of checks run
+    (:mod:`.suites`).
     """
 
     tapes: Tuple[TapeCheck, ...] = ()
@@ -118,6 +130,7 @@ class CovarianceLibraryReport:
     #: done, out of ``planned``.
     stopped: bool = False
     planned: int = 0
+    kind: str = "evaluation"
 
     def __iter__(self) -> Iterator[Tuple[TapeCheck, CovarianceFinding]]:
         for tape in self.tapes:
@@ -153,12 +166,12 @@ class CovarianceLibraryReport:
                if mf is None or f.location.mf == mf}
         return tuple(t for t in self.tapes if id(t) in hit)
 
-    def report(self, name: str) -> CovarianceCheckReport:
+    def report(self, name: str) -> CheckReport:
         """The report of one tape, by file name."""
         for tape in self.tapes:
             if tape.name == name:
                 if tape.report is None:
-                    raise ValueError(f"{name} has no report: {tape.error or 'no covariances'}")
+                    raise ValueError(f"{name} has no report: {tape.error or 'nothing to check'}")
                 return tape.report
         raise KeyError(name)
 
@@ -200,7 +213,7 @@ class CovarianceLibraryReport:
         """One row per finding at *level* or worse, with its file and location."""
         import pandas as pd
 
-        loc_names = [f.name for f in fields(CovarianceLocation)]
+        loc_names = list(location_fields(self.kind))
         floor = _RANK[level]
         rows = []
         for tape, f in self:
@@ -257,7 +270,7 @@ class CovarianceLibraryReport:
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         tag = f"_{self.library}" if self.library else ""
-        paths = {name: out / f"covariance_{name}{tag}.tsv"
+        paths = {name: out / f"{self.kind}_{name}{tag}.tsv"
                  for name in ("summary", "files", "findings")}
         self.summary().to_csv(paths["summary"], sep="\t", index=False)
         self.files_dataframe().to_csv(paths["files"], sep="\t", index=False)
@@ -267,12 +280,14 @@ class CovarianceLibraryReport:
         return paths
 
     def __str__(self) -> str:
+        from .suites import suite
+
         where = self.library or (str(self.directory) if self.directory else "library")
         checked = self.checked
         with_defect = sum(1 for t in checked if t.count(DEFECT))
-        lines = [f"Covariance check of {where}: {len(self.tapes)} tapes"
+        lines = [f"{suite(self.kind).title} of {where}: {len(self.tapes)} tapes"
                  + (f" (stopped, of {self.planned})" if self.stopped else "") + ", "
-                 f"{len(checked)} with covariances checked, {with_defect} with defects, "
+                 f"{len(checked)} {suite(self.kind).checked_phrase}, {with_defect} with defects, "
                  f"{len(self.failed)} failed"]
         summary = self.summary()
         for row in summary[summary["level"] != NOTE].itertuples():
@@ -440,9 +455,6 @@ def check_covariance_library(
     No PENDF is attached, so a block mixing absolute and relative components is
     checked on its relative part, and says so (``mixed_needs_cross_sections``).
     """
-    import logging
-    import warnings
-
     from kika.endf import open_endf
 
     from .covariances import check_covariances
@@ -454,6 +466,58 @@ def check_covariance_library(
         for p, asked in source.items():
             if asked is not None:
                 per_tape[Path(p)] = _checked_mf(asked, f" for {Path(p).name}")
+
+    def one(path: Path, make) -> TapeCheck:
+        wanted = per_tape.get(path, default)
+        make = functools.partial(make, mf=wanted)
+        t0 = time.perf_counter()
+        try:
+            endf = open_endf(str(path))
+            present = set(endf.files)
+            covariances = present.intersection(wanted)
+            if covariances:
+                read_mf = sorted(covariances.union(
+                    *(_SUPPORT_MF[m] for m in covariances)))
+                # _Context accesses every support MF it can see. Give
+                # it only those needed by the requested covariances,
+                # and finish parsing here so failures and timing stay
+                # in the read phase. Membership never parses an MF.
+                endf.files = {m: endf.files[m] for m in read_mf if m in present}
+        except Exception as exc:  # noqa: BLE001 - recorded, the walk goes on
+            return make(error=f"read: {type(exc).__name__}: {exc}",
+                        read_seconds=time.perf_counter() - t0)
+        t1 = time.perf_counter()
+        if not endf.files:
+            # open_endf returns an empty tape for a file that is not
+            # ENDF at all; in a census that is a failure, not a tape
+            # without covariances.
+            return make(error="read: no ENDF section found in the file", read_seconds=t1 - t0)
+        if not any(m in endf.files for m in wanted):
+            return make(has_covariances=False, read_seconds=t1 - t0)
+        try:
+            tape_report = check_covariances(endf, mf=wanted)
+        except Exception as exc:  # noqa: BLE001
+            return make(error=f"check: {type(exc).__name__}: {exc}", read_seconds=t1 - t0,
+                        check_seconds=time.perf_counter() - t1)
+        return make(report=tape_report, read_seconds=t1 - t0,
+                    check_seconds=time.perf_counter() - t1)
+
+    tapes, root, stopped, planned = _walk(source, patterns, recursive, one, "covariance",
+                                          progress, on_tape, should_stop, on_result)
+    return CovarianceLibraryReport(tapes, directory=root, library=library,
+                                   stopped=stopped, planned=planned)
+
+
+def _walk(source, patterns, recursive, one, kind, progress, on_tape, should_stop, on_result):
+    """Walk the tapes of *source* in series; ``one(path, make)`` checks one.
+
+    ``make(**fields)`` builds the tape's :class:`TapeCheck` with its path,
+    label, nuclide and *kind* already set. Returns ``(tapes, root, stopped,
+    planned)``. The parser's warnings and log lines are silenced for the walk.
+    """
+    import logging
+    import warnings
+
     root, paths = _tapes(source, patterns, recursive)
     labels = _labels(paths, root)
     report = _reporter(progress, len(paths))
@@ -483,57 +547,16 @@ def check_covariance_library(
                 if should_stop is not None and should_stop():
                     stopped = True
                     break
-                wanted = per_tape.get(path, default)
                 za, liso = _nuclide(path)
-                make = functools.partial(TapeCheck, path, mf=wanted, label=label, za=za, liso=liso)
+                make = functools.partial(TapeCheck, path, label=label, za=za, liso=liso, kind=kind)
                 report(i, f"[{i}/{len(paths)}] {label or path.name} ...", False)
-                t0 = time.perf_counter()
-                try:
-                    endf = open_endf(str(path))
-                    present = set(endf.files)
-                    covariances = present.intersection(wanted)
-                    if covariances:
-                        read_mf = sorted(covariances.union(
-                            *(_SUPPORT_MF[m] for m in covariances)))
-                        # _Context accesses every support MF it can see. Give
-                        # it only those needed by the requested covariances,
-                        # and finish parsing here so failures and timing stay
-                        # in the read phase. Membership never parses an MF.
-                        endf.files = {m: endf.files[m] for m in read_mf if m in present}
-                except Exception as exc:  # noqa: BLE001 - recorded, the walk goes on
-                    out.append(make(
-                        error=f"read: {type(exc).__name__}: {exc}",
-                        read_seconds=time.perf_counter() - t0))
-                    n_failed += 1
-                    continue
-                t1 = time.perf_counter()
-                if not endf.files:
-                    # open_endf returns an empty tape for a file that is not
-                    # ENDF at all; in a census that is a failure, not a tape
-                    # without covariances.
-                    out.append(make(
-                        error="read: no ENDF section found in the file",
-                        read_seconds=t1 - t0))
-                    n_failed += 1
-                    continue
-                if not any(m in endf.files for m in wanted):
-                    out.append(make(has_covariances=False, read_seconds=t1 - t0))
-                    del endf
-                    continue
-                try:
-                    tape_report = check_covariances(endf, mf=wanted)
-                except Exception as exc:  # noqa: BLE001
-                    out.append(make(
-                        error=f"check: {type(exc).__name__}: {exc}",
-                        read_seconds=t1 - t0,
-                        check_seconds=time.perf_counter() - t1))
-                    n_failed += 1
-                    del endf
-                    continue
-                del endf
-                tape = make(report=tape_report, read_seconds=t1 - t0,
-                            check_seconds=time.perf_counter() - t1)
+                tape = one(path, make)
                 out.append(tape)
+                if not tape.ok:
+                    n_failed += 1
+                    continue
+                if tape.report is None:
+                    continue
                 n_defect += bool(tape.count(DEFECT))
                 report(i, f"[{i}/{len(paths)}] {tape.name}: {tape.count(DEFECT)} defects, "
                        f"{tape.count(WARN)} warnings  (so far {n_defect} tapes with defects, "
@@ -544,8 +567,55 @@ def check_covariance_library(
         kika_log.setLevel(level)
     head = (f"stopped after {len(out)} of {len(paths)} tapes" if stopped
             else f"{len(paths)} tapes")
+    from .suites import suite
+
     report(len(out), f"{head} in {time.perf_counter() - started:.0f} s: "
-           f"{sum(1 for t in out if t.ok and t.has_covariances)} with covariances, "
+           f"{sum(1 for t in out if t.ok and t.has_covariances)} {suite(kind).checked_phrase}, "
            f"{n_defect} with defects, {n_failed} failed", True)
-    return CovarianceLibraryReport(tuple(out), directory=root, library=library,
-                                   stopped=stopped, planned=len(paths))
+    return tuple(out), root, stopped, len(paths)
+
+
+def check_library(
+    source: Union[str, Path, Iterable[Union[str, Path]]],
+    *,
+    what: Sequence[str] = ("data", "covariances"),
+    mf: Optional[Sequence[int]] = None,
+    patterns: Sequence[str] = TAPE_PATTERNS,
+    recursive: bool = False,
+    library: Optional[str] = None,
+    progress: Progress = True,
+    on_tape: Optional[OnTape] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_result: Optional[OnResult] = None,
+) -> LibraryReport:
+    """Check every tape of a library, one at a time: data, covariances or both.
+
+    *what* and *mf* are those of :func:`~kika.endf.checks.evaluation.check_evaluation`:
+    ``("data",)`` for the data checks only, ``("covariances",)`` for the
+    covariance checks only, both by default; *mf* narrows either to some files
+    (``mf=[3]`` checks MF3 and only what MF3 is checked against). The other
+    parameters are those of :func:`check_covariance_library`. The report's
+    ``kind`` is ``"data"``, ``"covariance"`` or ``"evaluation"`` after *what*.
+    """
+    from .evaluation import check_evaluation_file, kind_of, normalise_what
+
+    what = normalise_what(what)
+    kind = kind_of(what)
+
+    def one(path: Path, make) -> TapeCheck:
+        result = check_evaluation_file(path, what=what, mf=mf)
+        return make(report=result.report, error=result.error, has_covariances=result.has_anything,
+                    read_seconds=result.read_seconds, check_seconds=result.check_seconds,
+                    mf=result.mf)
+
+    tapes, root, stopped, planned = _walk(source, patterns, recursive, one, kind,
+                                          progress, on_tape, should_stop, on_result)
+    return LibraryReport(tapes, directory=root, library=library, stopped=stopped,
+                         planned=planned, kind=kind)
+
+
+@dataclass(frozen=True)
+class CovarianceLibraryReport(LibraryReport):
+    """Every tape of a library and what :func:`check_covariances` found in each."""
+
+    kind: str = "covariance"

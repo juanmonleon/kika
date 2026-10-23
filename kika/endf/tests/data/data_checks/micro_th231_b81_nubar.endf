@@ -1,0 +1,460 @@
+ ENDF/B-VIII.1                                                         0  0
+ 9.023100+4 2.290520+2          0          1          0          19037 1451    1
+ 0.000000+0 1.000000+0          0          0          0          69037 1451    2
+ 1.000000+0 2.000000+7          1          0         10          89037 1451    3
+ 0.000000+0 0.000000+0          0          0        328        1049037 1451    4
+ 90-Th-231 JAEA+      EVAL-FEB10 O.Iwamoto, T.Nakagawa, et al.    9037 1451    5
+ NDS 148, 1 (2018)    DIST-AUG24 REV1-SEP22            20240830   9037 1451    6
+---- ENDF/B-VIII.1    MATERIAL 9037         REVISION 1            9037 1451    7
+----- INCIDENT-NEUTRON DATA                                       9037 1451    8
+------ ENDF-6                                                     9037 1451    9
+                                                                  9037 1451   10
+ *****************************************************************9037 1451   11
+                         JENDL-4.0 adopted                        9037 1451   12
+ *****************************************************************9037 1451   13
+AUG11 Added MT458 fission energy release data based on R. Vogt    9037 1451   14
+Energy-Dependent Fission Q Values Generalized for All Actinides   9037 1451   15
+Oct 8, 2008 report LLNL-TR-407620                                 9037 1451   16
+                                                                  9037 1451   17
+                                                                  9037 1451   18
+History                                                           9037 1451   19
+07-10 Theoretical calculation was performed with CCONE code.      9037 1451   20
+07-11 Data were compiled as JENDL/AC-2008/1/.                     9037 1451   21
+10-02 Data of prompt gamma rays due to fission were given.        9037 1451   22
+10-03 Covariance data were given.                                 9037 1451   23
+                                                                  9037 1451   24
+                                                                  9037 1451   25
+MF=1 General information                                          9037 1451   26
+  MT=452 Number of Neutrons per fission                           9037 1451   27
+    Sum of MT's=455 and 456.                                      9037 1451   28
+                                                                  9037 1451   29
+  MT=455 Delayed neutron data                                     9037 1451   30
+    Estimated from systematics by Tuttle/2/, Benedetti et al./3/  9037 1451   31
+    and Waldo et al./4/                                           9037 1451   32
+                                                                  9037 1451   33
+  MT=456 Number of prompt neutrons per fission                    9037 1451   34
+    Estimated from Howerton's systematics/5/.                     9037 1451   35
+                                                                  9037 1451   36
+                                                                  9037 1451   37
+MF= 2 Resonance parameters                                        9037 1451   38
+  MT=151                                                          9037 1451   39
+  No resonance parameters are given.                              9037 1451   40
+                                                                  9037 1451   41
+                                                                  9037 1451   42
+     Thermal cross sections and resonance integrals (at 300K)     9037 1451   43
+    -------------------------------------------------------       9037 1451   44
+                    0.0253 eV    reson. integ.(*)                 9037 1451   45
+                     (barns)       (barns)                        9037 1451   46
+    -------------------------------------------------------       9037 1451   47
+    total             1683.2                                      9037 1451   48
+    elastic             12.03                                     9037 1451   49
+    fission             40.01        282                          9037 1451   50
+    capture           1630.8         725                          9037 1451   51
+    -------------------------------------------------------       9037 1451   52
+      (*) In the energy range from 0.5 eV to 10 MeV.              9037 1451   53
+                                                                  9037 1451   54
+                                                                  9037 1451   55
+MF= 3 Neutron cross sections                                      9037 1451   56
+  Below 0.33 eV:                                                  9037 1451   57
+    * Elastic scattering cross section is 12.0 b calculated from  9037 1451   58
+      scattering radius of 9.779 fm/6/.                           9037 1451   59
+    * Fission cross section is in the 1/v shape.                  9037 1451   60
+      Cross section of 40 b at 0.0253 eV was assumed from         9037 1451   61
+      systematics.                                                9037 1451   62
+    * Capture cross section is in the 1/v shape.                  9037 1451   63
+      CCONE calculation was extrapolated to 1.0e-5 eV.            9037 1451   64
+      Cross section at 0.0253 eV is 1630 b.                       9037 1451   65
+                                                                  9037 1451   66
+  Above 0.33 eV:                                                  9037 1451   67
+    Cross sections calculated with CCONE code/6/ were adopted.    9037 1451   68
+                                                                  9037 1451   69
+  MT= 1 Total cross section                                       9037 1451   70
+    The cross section was calculated with CC OMP of Soukhovitskii 9037 1451   71
+    et al./7/.                                                    9037 1451   72
+                                                                  9037 1451   73
+                                                                  9037 1451   74
+MF= 4 Angular distributions of secondary neutrons                 9037 1451   75
+  MT=2  Elastic scattering                                        9037 1451   76
+    Calculated with CCONE code/6/.                                9037 1451   77
+                                                                  9037 1451   78
+  MT=18 Fission                                                   9037 1451   79
+    Isotropic distributions in the laboratory system were assumed.9037 1451   80
+                                                                  9037 1451   81
+                                                                  9037 1451   82
+MF= 5 Energy distributions of secondary neutrons                  9037 1451   83
+  MT=18 Prompt neutrons                                           9037 1451   84
+    Calculated with CCONE code/6/.                                9037 1451   85
+                                                                  9037 1451   86
+                                                                  9037 1451   87
+MF= 6 Energy-angle distributions                                  9037 1451   88
+    Calculated with CCONE code/6/.                                9037 1451   89
+    Distributions from fission (MT=18) are not included.          9037 1451   90
+                                                                  9037 1451   91
+                                                                  9037 1451   92
+MF=12 Photon production multiplicities                            9037 1451   93
+  MT=18 Fission                                                   9037 1451   94
+    Calculated from the total energy released by the prompt       9037 1451   95
+    gamma-rays due to fission which was estimated from its        9037 1451   96
+    systematics, and the average energy of gamma-rays.            9037 1451   97
+                                                                  9037 1451   98
+                                                                  9037 1451   99
+MF=14 Photon angular distributions                                9037 1451  100
+  MT=18 Fission                                                   9037 1451  101
+    Isotoropic distributions were assumed.                        9037 1451  102
+                                                                  9037 1451  103
+                                                                  9037 1451  104
+MF=15 Continuous photon energy spectra                            9037 1451  105
+  MT=18 Fission                                                   9037 1451  106
+    Experimental data measured by Verbinski et al./8/ for         9037 1451  107
+    U-235 thermal fission were adopted.                           9037 1451  108
+                                                                  9037 1451  109
+                                                                  9037 1451  110
+MF=31 Covariances of average number of neutrons per fission       9037 1451  111
+  MT=452 Number of neutrons per fission                           9037 1451  112
+    Sum of covariances for MT=455 and MT=456.                     9037 1451  113
+                                                                  9037 1451  114
+  MT=455                                                          9037 1451  115
+    Error of 15% was assumed.                                     9037 1451  116
+                                                                  9037 1451  117
+  MT=456                                                          9037 1451  118
+    Covariance was obtained by fitting a linear function to the   9037 1451  119
+    at 0.0 and 5.0 MeV with an uncertainty of 5%.                 9037 1451  120
+                                                                  9037 1451  121
+                                                                  9037 1451  122
+MF=33 Covariances of neutron cross sections                       9037 1451  123
+  Covariances were given to all the cross sections by using       9037 1451  124
+  KALMAN code/9/ and the covariances of model parameters          9037 1451  125
+  used in the cross-section calculations.                         9037 1451  126
+                                                                  9037 1451  127
+  For the following cross sections, standard deviations in the    9037 1451  128
+  energy region below 0.3 eV were assumed as follows:             9037 1451  129
+                                                                  9037 1451  130
+     Total               87 %                                     9037 1451  131
+     Elastic scattering  90 %                                     9037 1451  132
+     Fission             90 %                                     9037 1451  133
+     Capture             90 %                                     9037 1451  134
+                                                                  9037 1451  135
+                                                                  9037 1451  136
+MF=34 Covariances for Angular Distributions                       9037 1451  137
+  MT=2 Elastic scattering                                         9037 1451  138
+    Covariances were given only to P1 components.                 9037 1451  139
+                                                                  9037 1451  140
+                                                                  9037 1451  141
+MF=35 Covariances for Energy Distributions                        9037 1451  142
+  MT=18 Fission spectra                                           9037 1451  143
+    Estimated with CCONE and KALMAN codes.                        9037 1451  144
+                                                                  9037 1451  145
+                                                                  9037 1451  146
+***************************************************************** 9037 1451  147
+  Calculation with CCONE code                                     9037 1451  148
+***************************************************************** 9037 1451  149
+                                                                  9037 1451  150
+  Models and parameters used in the CCONE/6/ calculation          9037 1451  151
+  1) Coupled channel optical model                                9037 1451  152
+     Levels in the rotational band were included. Optical model   9037 1451  153
+     potential and coupled levels are shown in Table 1.           9037 1451  154
+                                                                  9037 1451  155
+  2) Two-component exciton model/10/                              9037 1451  156
+    * Global parametrization of Koning-Duijvestijn/11/            9037 1451  157
+      was used.                                                   9037 1451  158
+    * Gamma emission channel/12/ was added to simulate direct     9037 1451  159
+      and semi-direct capture reaction.                           9037 1451  160
+                                                                  9037 1451  161
+  3) Hauser-Feshbach statistical model                            9037 1451  162
+    * Moldauer width fluctuation correction/13/ was included.     9037 1451  163
+    * Neutron, gamma and fission decay channel were included.     9037 1451  164
+    * Transmission coefficients of neutrons were taken from       9037 1451  165
+      coupled channel calculation in Table 1.                     9037 1451  166
+    * The level scheme of the target is shown in Table 2.         9037 1451  167
+    * Level density formula of constant temperature and Fermi-gas 9037 1451  168
+      model were used with shell energy correction and collective 9037 1451  169
+      enhancement factor. Parameters are shown in Table 3.        9037 1451  170
+    * Fission channel:                                            9037 1451  171
+      Double humped fission barriers were assumed.                9037 1451  172
+      Fission barrier penetrabilities were calculated with        9037 1451  173
+      Hill-Wheler formula/14/. Fission barrier parameters were    9037 1451  174
+      shown in Table 4. Transition state model was used and       9037 1451  175
+      continuum levels are assumed above the saddles. The level   9037 1451  176
+      density parameters for inner and outer saddles are shown in 9037 1451  177
+      Tables 5 and 6, respectively.                               9037 1451  178
+    * Gamma-ray strength function of Kopecky et al/15/,/16/       9037 1451  179
+      was used. The prameters are shown in Table 7.               9037 1451  180
+                                                                  9037 1451  181
+                                                                  9037 1451  182
+------------------------------------------------------------------9037 1451  183
+                              Tables                              9037 1451  184
+------------------------------------------------------------------9037 1451  185
+                                                                  9037 1451  186
+Table 1. Coupled channel calculation                              9037 1451  187
+  --------------------------------------------------              9037 1451  188
+  * rigid rotor model was applied                                 9037 1451  189
+  * coupled levels = 0,1,2,3 (see Table 2)                        9037 1451  190
+  * optical potential parameters /7/                              9037 1451  191
+    Volume:                                                       9037 1451  192
+      V_0       = 49.97    MeV                                    9037 1451  193
+      lambda_HF = 0.01004  1/MeV                                  9037 1451  194
+      C_viso    = 15.9     MeV                                    9037 1451  195
+      A_v       = 12.04    MeV                                    9037 1451  196
+      B_v       = 81.36    MeV                                    9037 1451  197
+      E_a       = 385      MeV                                    9037 1451  198
+      r_v       = 1.2568   fm                                     9037 1451  199
+      a_v       = 0.633    fm                                     9037 1451  200
+    Surface:                                                      9037 1451  201
+      W_0       = 17.2     MeV                                    9037 1451  202
+      B_s       = 11.19    MeV                                    9037 1451  203
+      C_s       = 0.01361  1/MeV                                  9037 1451  204
+      C_wiso    = 23.5     MeV                                    9037 1451  205
+      r_s       = 1.1803   fm                                     9037 1451  206
+      a_s       = 0.601    fm                                     9037 1451  207
+    Spin-orbit:                                                   9037 1451  208
+      V_so      = 5.75     MeV                                    9037 1451  209
+      lambda_so = 0.005    1/MeV                                  9037 1451  210
+      W_so      = -3.1     MeV                                    9037 1451  211
+      B_so      = 160      MeV                                    9037 1451  212
+      r_so      = 1.1214   fm                                     9037 1451  213
+      a_so      = 0.59     fm                                     9037 1451  214
+    Coulomb:                                                      9037 1451  215
+      C_coul    = 1.3                                             9037 1451  216
+      r_c       = 1.2452   fm                                     9037 1451  217
+      a_c       = 0.545    fm                                     9037 1451  218
+    Deformation:                                                  9037 1451  219
+      beta_2    = 0.213                                           9037 1451  220
+      beta_4    = 0.066                                           9037 1451  221
+      beta_6    = 0.0015                                          9037 1451  222
+                                                                  9037 1451  223
+  * Calculated strength function                                  9037 1451  224
+    S0= 0.87e-4 S1= 2.05e-4 R'=  9.78 fm (En=1 keV)               9037 1451  225
+  --------------------------------------------------              9037 1451  226
+                                                                  9037 1451  227
+Table 2. Level Scheme of Th-231                                   9037 1451  228
+  -------------------                                             9037 1451  229
+  No.  Ex(MeV)   J PI                                             9037 1451  230
+  -------------------                                             9037 1451  231
+   0  0.00000  5/2 +  *                                           9037 1451  232
+   1  0.04195  7/2 +  *                                           9037 1451  233
+   2  0.09613  9/2 +  *                                           9037 1451  234
+   3  0.16194 11/2 +  *                                           9037 1451  235
+   4  0.18571  5/2 -                                              9037 1451  236
+   5  0.20531  7/2 -                                              9037 1451  237
+   6  0.22140  3/2 +                                              9037 1451  238
+   7  0.23689  9/2 -                                              9037 1451  239
+   8  0.24088  5/2 +                                              9037 1451  240
+   9  0.24758  1/2 +                                              9037 1451  241
+  10  0.27218  3/2 +                                              9037 1451  242
+  11  0.27542  7/2 +                                              9037 1451  243
+  12  0.27780 11/2 -                                              9037 1451  244
+  13  0.30174  5/2 +                                              9037 1451  245
+  14  0.31708  5/2 +                                              9037 1451  246
+  15  0.32491  9/2 +                                              9037 1451  247
+  16  0.33400 13/2 -                                              9037 1451  248
+  17  0.35151  7/2 +                                              9037 1451  249
+  18  0.37758  7/2 +                                              9037 1451  250
+  19  0.38569 11/2 +                                              9037 1451  251
+  20  0.38783  7/2 -                                              9037 1451  252
+  -------------------                                             9037 1451  253
+  *) Coupled levels in CC calculation                             9037 1451  254
+                                                                  9037 1451  255
+Table 3. Level density parameters                                 9037 1451  256
+  --------------------------------------------------------        9037 1451  257
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         9037 1451  258
+            1/MeV     MeV     MeV     MeV     MeV     MeV         9037 1451  259
+  --------------------------------------------------------        9037 1451  260
+   Th-232 18.7786  1.5757  3.3953  0.3835 -0.2200  3.9949         9037 1451  261
+   Th-231 18.7090  0.7895  3.3191  0.3770 -0.9082  3.0943         9037 1451  262
+   Th-230 18.6395  1.5825  3.2401  0.4059 -0.4442  4.2813         9037 1451  263
+   Th-229 17.7702  0.7930  3.2566  0.4327 -1.4313  3.7239         9037 1451  264
+   Th-228 17.7035  1.5894  3.0590  0.3964 -0.1539  3.9563         9037 1451  265
+  --------------------------------------------------------        9037 1451  266
+                                                                  9037 1451  267
+Table 4. Fission barrier parameters                               9037 1451  268
+  ----------------------------------------                        9037 1451  269
+  Nuclide     V_A    hw_A     V_B    hw_B                         9037 1451  270
+              MeV     MeV     MeV     MeV                         9037 1451  271
+  ----------------------------------------                        9037 1451  272
+   Th-232   5.800   1.040   5.950   0.500                         9037 1451  273
+   Th-231   6.000   0.800   6.000   0.600                         9037 1451  274
+   Th-230   5.500   1.040   5.950   0.600                         9037 1451  275
+   Th-229   5.500   0.800   6.000   0.520                         9037 1451  276
+   Th-228   3.900   1.040   6.400   0.600                         9037 1451  277
+  ----------------------------------------                        9037 1451  278
+                                                                  9037 1451  279
+Table 5. Level density above inner saddle                         9037 1451  280
+  --------------------------------------------------------        9037 1451  281
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         9037 1451  282
+            1/MeV     MeV     MeV     MeV     MeV     MeV         9037 1451  283
+  --------------------------------------------------------        9037 1451  284
+   Th-232 20.1263  1.8383  2.6000  0.3319 -0.5731  3.8383         9037 1451  285
+   Th-231 19.6937  0.9211  2.6000  0.3507 -1.7165  3.1211         9037 1451  286
+   Th-230 19.9772  1.8463  2.6000  0.3332 -0.5651  3.8463         9037 1451  287
+   Th-229 19.9026  0.9251  2.6000  0.3339 -1.4862  2.9251         9037 1451  288
+   Th-228 19.8280  1.8543  2.6000  0.3346 -0.5570  3.8543         9037 1451  289
+  --------------------------------------------------------        9037 1451  290
+                                                                  9037 1451  291
+Table 6. Level density above outer saddle                         9037 1451  292
+  --------------------------------------------------------        9037 1451  293
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         9037 1451  294
+            1/MeV     MeV     MeV     MeV     MeV     MeV         9037 1451  295
+  --------------------------------------------------------        9037 1451  296
+   Th-232 20.5756  1.8383 -0.1400  0.3595  0.2690  3.6883         9037 1451  297
+   Th-231 19.6937  0.9211 -0.1800  0.3963 -0.9457  3.1211         9037 1451  298
+   Th-230 19.9772  1.8463 -0.2200  0.3786  0.1497  3.8463         9037 1451  299
+   Th-229 19.9026  0.9251 -0.2600  0.3799 -0.7708  2.9251         9037 1451  300
+   Th-228 19.8280  1.8543 -0.3000  0.3812  0.1590  3.8543         9037 1451  301
+  --------------------------------------------------------        9037 1451  302
+                                                                  9037 1451  303
+Table 7. Gamma-ray strength function for Th-232                   9037 1451  304
+  --------------------------------------------------------        9037 1451  305
+  K0 = 1.502   E0 = 4.500 (MeV)                                   9037 1451  306
+  * E1: ER = 11.03 (MeV) EG = 2.71 (MeV) SIG = 302.00 (mb)        9037 1451  307
+        ER = 13.87 (MeV) EG = 4.77 (MeV) SIG = 449.00 (mb)        9037 1451  308
+  * M1: ER =  6.67 (MeV) EG = 4.00 (MeV) SIG =   2.79 (mb)        9037 1451  309
+  * E2: ER = 10.25 (MeV) EG = 3.33 (MeV) SIG =   6.25 (mb)        9037 1451  310
+  --------------------------------------------------------        9037 1451  311
+                                                                  9037 1451  312
+                                                                  9037 1451  313
+References                                                        9037 1451  314
+ 1) O.Iwamoto et al.: J. Nucl. Sci. Technol., 46, 510 (2009).     9037 1451  315
+ 2) R.J.Tuttle: INDC(NDS)-107/G+Special, p.29 (1979).             9037 1451  316
+ 3) G.Benedetti et al.: Nucl. Sci. Eng., 80, 379 (1982).          9037 1451  317
+ 4) R.Waldo et al.: Phys. Rev., C23, 1113 (1981).                 9037 1451  318
+ 5) R.J.Howerton: Nucl. Sci. Eng., 62, 438 (1977).                9037 1451  319
+ 6) O.Iwamoto: J. Nucl. Sci. Technol., 44, 687 (2007).            9037 1451  320
+ 7) E.Sh.Soukhovitskii et al.: Phys. Rev. C72, 024604 (2005).     9037 1451  321
+ 8) V.V.Verbinski et al.: Phys. Rev., C7, 1173 (1973).            9037 1451  322
+ 9) T.Kawano, K.Shibata, JAERI-Data/Code 97-037 (1997) in         9037 1451  323
+    Japanese.                                                     9037 1451  324
+10) C.Kalbach: Phys. Rev. C33, 818 (1986).                        9037 1451  325
+11) A.J.Koning, M.C.Duijvestijn: Nucl. Phys. A744, 15 (2004).     9037 1451  326
+12) J.M.Akkermans, H.Gruppelaar: Phys. Lett. 157B, 95 (1985).     9037 1451  327
+13) P.A.Moldauer: Nucl. Phys. A344, 185 (1980).                   9037 1451  328
+14) D.L.Hill, J.A.Wheeler: Phys. Rev. 89, 1102 (1953).            9037 1451  329
+15) J.Kopecky, M.Uhl: Phys. Rev. C41, 1941 (1990).                9037 1451  330
+16) J.Kopecky, M.Uhl, R.E.Chrien: Phys. Rev. C47, 312 (1990).     9037 1451  331
+                                                                  9037 1451  332
+                                1        451        436          09037 1451  333
+                                1        452          5          09037 1451  334
+                                1        455          7          09037 1451  335
+                                1        456          4          09037 1451  336
+                                1        458         11          09037 1451  337
+                                2        151          4          09037 1451  338
+                                3          1         43          09037 1451  339
+                                3          2         43          09037 1451  340
+                                3          4         32          09037 1451  341
+                                3         16         14          09037 1451  342
+                                3         17          9          09037 1451  343
+                                3         18         40          09037 1451  344
+                                3         19         40          09037 1451  345
+                                3         20         16          09037 1451  346
+                                3         21         12          09037 1451  347
+                                3         37          5          09037 1451  348
+                                3         38          7          09037 1451  349
+                                3         51         31          09037 1451  350
+                                3         52         30          09037 1451  351
+                                3         53         29          09037 1451  352
+                                3         54         28          09037 1451  353
+                                3         55         28          09037 1451  354
+                                3         56         27          09037 1451  355
+                                3         57         27          09037 1451  356
+                                3         58         27          09037 1451  357
+                                3         59         26          09037 1451  358
+                                3         60         26          09037 1451  359
+                                3         61         25          09037 1451  360
+                                3         62         25          09037 1451  361
+                                3         63         24          09037 1451  362
+                                3         64         24          09037 1451  363
+                                3         65         24          09037 1451  364
+                                3         66         23          09037 1451  365
+                                3         67         23          09037 1451  366
+                                3         68         23          09037 1451  367
+                                3         69         22          09037 1451  368
+                                3         70         22          09037 1451  369
+                                3         91         30          09037 1451  370
+                                3        102         40          09037 1451  371
+                                4          2        475          09037 1451  372
+                                4         18          2          09037 1451  373
+                                5         18       4413          09037 1451  374
+                                6         16       2403          09037 1451  375
+                                6         17       1035          09037 1451  376
+                                6         37        182          09037 1451  377
+                                6         51        298          09037 1451  378
+                                6         52        290          09037 1451  379
+                                6         53        279          09037 1451  380
+                                6         54        178          09037 1451  381
+                                6         55        174          09037 1451  382
+                                6         56        175          09037 1451  383
+                                6         57        178          09037 1451  384
+                                6         58        171          09037 1451  385
+                                6         59        168          09037 1451  386
+                                6         60        165          09037 1451  387
+                                6         61        164          09037 1451  388
+                                6         62        170          09037 1451  389
+                                6         63        159          09037 1451  390
+                                6         64        157          09037 1451  391
+                                6         65        148          09037 1451  392
+                                6         66        149          09037 1451  393
+                                6         67        150          09037 1451  394
+                                6         68        151          09037 1451  395
+                                6         69        146          09037 1451  396
+                                6         70        149          09037 1451  397
+                                6         91       5703          09037 1451  398
+                                6        102       8584          09037 1451  399
+                               12         18          4          09037 1451  400
+                               14         18          1          09037 1451  401
+                               15         18         20          09037 1451  402
+                               31        452          5          09037 1451  403
+                               31        455          4          09037 1451  404
+                               31        456         32          09037 1451  405
+                               33          1        123          09037 1451  406
+                               33          2        123          09037 1451  407
+                               33          4         11          09037 1451  408
+                               33         16         16          09037 1451  409
+                               33         17          7          09037 1451  410
+                               33         18        123          09037 1451  411
+                               33         37          4          09037 1451  412
+                               33         51         76          09037 1451  413
+                               33         52         66          09037 1451  414
+                               33         53         62          09037 1451  415
+                               33         54         62          09037 1451  416
+                               33         55         58          09037 1451  417
+                               33         56         58          09037 1451  418
+                               33         57         58          09037 1451  419
+                               33         58         58          09037 1451  420
+                               33         59         58          09037 1451  421
+                               33         60         58          09037 1451  422
+                               33         61         58          09037 1451  423
+                               33         62         58          09037 1451  424
+                               33         63         53          09037 1451  425
+                               33         64         53          09037 1451  426
+                               33         65         53          09037 1451  427
+                               33         66         53          09037 1451  428
+                               33         67         53          09037 1451  429
+                               33         68         53          09037 1451  430
+                               33         69         53          09037 1451  431
+                               33         70         53          09037 1451  432
+                               33         91         62          09037 1451  433
+                               33        102        123          09037 1451  434
+                               34          2        122          09037 1451  435
+                               35         18       5089          09037 1451  436
+ 0.000000+0 0.000000+0          0          0          0          09037 1  099999
+ 9.023100+4 2.290520+2          0          2          0          09037 1452    1
+ 0.000000+0 0.000000+0          0          0          1          49037 1452    2
+          4          2                                            9037 1452    3
+ 1.000000-5 2.027730+0 6.000000+6 2.663730+0 7.000000+6 2.758830+09037 1452    4
+ 2.000000+7 4.136830+0                                            9037 1452    5
+ 0.000000+0 0.000000+0          0          0          0          09037 1  099999
+ 9.023100+4 2.290520+2          0          2          0          09037 1455    1
+ 0.000000+0 0.000000+0          0          0          1          09037 1455    2
+ 1.000000+0                                                       9037 1455    3
+ 0.000000+0 0.000000+0          0          0          1          49037 1455    4
+          4          2                                            9037 1455    5
+ 1.000000-5 3.453000-2 6.000000+6 3.453000-2 7.000000+6 2.363000-29037 1455    6
+ 2.000000+7 2.363000-2                                            9037 1455    7
+ 0.000000+0 0.000000+0          0          0          0          09037 1  099999
+ 9.023100+4 2.290520+2          0          2          0          09037 1456    1
+ 0.000000+0 0.000000+0          0          0          1          29037 1456    2
+          2          2                                            9037 1456    3
+ 1.000000-5 2.027730+0 2.000000+7 4.136830+0                      9037 1456    4
+ 0.000000+0 0.000000+0          0          0          0          09037 1  099999
+ 0.000000+0 0.000000+0          0          0          0          09037 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0

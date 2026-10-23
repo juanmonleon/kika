@@ -1,0 +1,728 @@
+JEFF-4.0 Incident Neutron File                                       1 0  0    0
+ 5.513400+4 1.327564+2          1          0         17          15528 1451    1
+ 0.000000+0 0.000000+0          0          0          0          65528 1451    2
+ 1.000000+0 2.000000+8          1          0         10       20235528 1451    3
+ 0.000000+0 0.000000+0          0          0        422        2625528 1451    4
+ 55-Cs-134            EVAL-FEB25 A.J. Koning and D. Rochman       5528 1451    5
+                      DIST-      REV1-                            5528 1451    6
+----TENDL-2024        Material 5528                               5528 1451    7
+-----Incident neutron  data                                       5528 1451    8
+------ENDF-6 Format                                               5528 1451    9
+                                                                  5528 1451   10
+***************************   JEFF-4        **********************5528 1451   11
+                                                                  5528 1451   12
+Original data from: JEFF4T5 with correction (G. Noguere, CEA)     5528 1451   13
+                                                                  5528 1451   14
+Correction MF=2 MT=151 for PIE                                    5528 1451   15
+                                                                  5528 1451   16
+Correction MF=3 MT=102 Better agreement with PROFIL results       5528 1451   17
+                                                                  5528 1451   18
+Ref.: A.J. Koning, D. Rochman, J.-Ch. Sublet, N. Dzysiuk,         5528 1451   19
+      M. Fleming, and S. van der Marck, TENDL: Complete nuclear   5528 1451   20
+      data library for innovative nuclear science and             5528 1451   21
+      technology, Nuclear Data Sheets 155, 1 (2019).              5528 1451   22
+                                                                  5528 1451   23
+      J. Tommasi et al., NSE 160, 232 (2008)                      5528 1451   24
+                                                                  5528 1451   25
+      E. Privas et al., NSE 182, 377 (2016)                       5528 1451   26
+                                                                  5528 1451   27
+      S. Chen et al., EPJ Web of Conf. 239, 01032 (2020)          5528 1451   28
+                                                                  5528 1451   29
+************** G E N E R A L   I N F O R M A T I O N *************5528 1451   30
+                                                                  5528 1451   31
+This evaluated data file is based on a software system built      5528 1451   32
+around the nuclear model code TALYS [kon23], version 2.0. It is   5528 1451   33
+part of a large collection of isotopic evaluations, all created by5528 1451   34
+running the system with either adjusted or default input          5528 1451   35
+parameters. This means that the data in the entire collection have5528 1451   36
+been tested in detail for many isotopes against individual        5528 1451   37
+experimental data, while for other isotopes it is only as good as 5528 1451   38
+the global quality of TALYS at the moment. The mutual quality of  5528 1451   39
+all individual data files is however consistent: The same set of  5528 1451   40
+nuclear models is used and, equally important, the same ENDF-6    5528 1451   41
+formatting procedures for each isotope. The data file has been    5528 1451   42
+created automatically using the ENDF-6 format generator TEFAL.    5528 1451   43
+                                                                  5528 1451   44
+The resulting data file provides a complete representation of     5528 1451   45
+nuclear data needed for transport, activation, damage, heating,   5528 1451   46
+radioactivity, and shielding applications over the incident       5528 1451   47
+neutron energy range from 1.e-11 to 200. MeV.                     5528 1451   48
+                                                                  5528 1451   49
+All transport and activation data for neutrons, charged particles,5528 1451   50
+photons and residual nuclides are filed. This includes cross      5528 1451   51
+sections, angular distributions, double-differential spectra,     5528 1451   52
+isomeric production, discrete and continuum photon production     5528 1451   53
+cross sections, residual production cross sections and recoils.   5528 1451   54
+This general purpose evaluation can thus be used as both          5528 1451   55
+transport and activation library.                                 5528 1451   56
+                                                                  5528 1451   57
+A complete set of covariance data is included, which is stored    5528 1451   58
+in MF31-40.                                                       5528 1451   59
+                                                                  5528 1451   60
+**** N U C L I D E    S P E C I F I C   I N F O R M A T I O N ****5528 1451   61
+                                                                  5528 1451   62
+                      Resonance Range                             5528 1451   63
+                                                                  5528 1451   64
+  --------------------------------------------------------------- 5528 1451   65
+  --------------------------------------------------------------- 5528 1451   66
+                                                                  5528 1451   67
+  General methodology: The global approach considered in this     5528 1451   68
+          work is presented in the following papers:              5528 1451   69
+          (1) Modern nuclear data evaluation with the TALYS       5528 1451   70
+              code system, A.J. Koning and D. Rochman,            5528 1451   71
+              A.J. Koning and D. Rochman,                         5528 1451   72
+              Nuclear Data Sheets 113 (2012) 2841.                5528 1451   73
+          (2) TENDL: Complete Nuclear Data Library for            5528 1451   74
+              Innovative Nuclear Science and Technology,          5528 1451   75
+              A.J. Koning, D. Rochman, J.Ch Sublet, N. Dzysiuk,   5528 1451   76
+              M. Fleming and S. van der Marck,                    5528 1451   77
+              Nuclear Data Sheets 155 (2019) 1.                   5528 1451   78
+                                                                  5528 1451   79
+  MF2:  Resolved resonance range  (RRR)                           5528 1451   80
+       The RRR was generated with TARES-1.61, compiled on         5528 1451   81
+       Jan 30 2025, 17:29:54 at Villigen   , Switzerland. The RRR 5528 1451   82
+       expands from 0 to 3.089159E+2 eV. A total of               5528 1451   83
+       3 l-values are used and 30 resonances. The resonance       5528 1451   84
+       formalism is multi-level Breit Wigner (MLBW).              5528 1451   85
+       The TARES database for the measured resonances is          5528 1451   86
+        ->  default up to 261.000000 eV.                          5528 1451   87
+       Above this energy, the ladder approach is used.            5528 1451   88
+       The ladder approach from the CALENDF code is used to       5528 1451   89
+       generate statistical resonances in the unresolved          5528 1451   90
+       resonance range. Therefore, the URR is translated into     5528 1451   91
+       resolved resonance range. Explanations about the method    5528 1451   92
+       can be found in the CALENDF manual: CEA-Report CEA-R-6277  5528 1451   93
+       "CALENDF-2010: User manual" by J.C. Sublet, P. Ribon and   5528 1451   94
+       M. Coste-Delcaux.                                          5528 1451   95
+       The method of creating statistical resonances in the       5528 1451   96
+       URR region is described in: "From average parameters to    5528 1451   97
+       statistical resolved resonances", D. Rochman et al.,       5528 1451   98
+       Annals of Nucl. Ene. 51 (2013) 60.                         5528 1451   99
+       The s-wave average level spacing is 11.224600 eV and       5528 1451  100
+       the s-wave neutron strength is 0.000156 1e-4.              5528 1451  101
+                                                                  5528 1451  102
+  MF33 in the resonance range:                                    5528 1451  103
+  The MF33 in the resonance range is obtained by using a number   5528 1451  104
+  of MF2 random files. There is therefore a consistency           5528 1451  105
+  between the MF2 random and the MF33.                            5528 1451  106
+  MF32:                                                           5528 1451  107
+  The MF32 contains the resonance parameters, uncertainties and   5528 1451  108
+  some correlation. These values are used to generate random      5528 1451  109
+  MF2, taking advantage of the code ENDSAM from L. Plevnik and    5528 1451  110
+  G. Zerovnik from JSI, Slovenia (thanks to A. Trkov, IAEA).      5528 1451  111
+                                                                  5528 1451  112
+                                                                  5528 1451  113
+               Average parameters from INTER-8.05                 5528 1451  114
+                                                                  5528 1451  115
+     ****************************************************         5528 1451  116
+     *   Thermal (n,g) xs =  1.405390E+02 b. (MF2 only) *         5528 1451  117
+     *   RI      (n,g)    =  1.646620E+02 b. (MF2 only) *         5528 1451  118
+     *   MACS 30 keV      =  2.539300E+01 b. (MF2 only) *         5528 1451  119
+     *                                                  *         5528 1451  120
+     *   Thermal (n,el) xs = 8.735640E+00 b. (MF2 only) *         5528 1451  121
+     *   RI      (n,el)    = 7.660190E+01 b. (MF2 only) *         5528 1451  122
+     ****************************************************         5528 1451  123
+                                                                  5528 1451  124
+                                                                  5528 1451  125
+                                                                  5528 1451  126
+  --------------------------------------------------------------- 5528 1451  127
+  --------------------------------------------------------------- 5528 1451  128
+                                                                  5528 1451  129
+***************************** T A L Y S **************************5528 1451  130
+                                                                  5528 1451  131
+TALYS is a computer code system for the prediction and analysis   5528 1451  132
+of nuclear reactions. TALYS simulates reactions that involve      5528 1451  133
+neutrons, gamma-rays, protons, deuterons, tritons, helions and    5528 1451  134
+alpha-particles, in the 1 keV - 200 MeV energy range. This is     5528 1451  135
+achieved by implementing a suite of nuclear reaction models into  5528 1451  136
+a single code system. This nuclear data file is based on a        5528 1451  137
+theoretical analysis that utilizes the optical model, compound    5528 1451  138
+nucleus statistical theory, fission, direct reactions and         5528 1451  139
+pre-equilibrium processes, in combination with databases and      5528 1451  140
+models for nuclear structure. The following output of TALYS is    5528 1451  141
+stored in this data file:                                         5528 1451  142
+                                                                  5528 1451  143
+- Total, elastic and non-elastic cross sections                   5528 1451  144
+- Inelastic cross sections to discrete states                     5528 1451  145
+- Exclusive channel cross sections, e.g. (n,g), (n,2n), (n,np),.. 5528 1451  146
+- Inelastic scattering angular distributions to discrete states   5528 1451  147
+- Exclusive channel energy spectra                                5528 1451  148
+- Exclusive channel double-differential spectra                   5528 1451  149
+- Exclusive gamma production for discrete states and continuum    5528 1451  150
+- Elastic scattering angular distributions                        5528 1451  151
+- Recoil data                                                     5528 1451  152
+- Total particle cross sections, e.g. (n,xn), (n,xp),..           5528 1451  153
+- Total particle energy spectra                                   5528 1451  154
+- Total particle double-differential spectra                      5528 1451  155
+- Isomeric and ground state cross sections                        5528 1451  156
+- Residual production cross sections                              5528 1451  157
+                                                                  5528 1451  158
+For a description of the used nuclear models and their            5528 1451  159
+parameterization we refer to [kon19]. If for this specific        5528 1451  160
+nuclide we deviate from the global parameterization, it is made   5528 1451  161
+explicit above under Nuclide Specific Information.                5528 1451  162
+                                                                  5528 1451  163
+***************** F I L E   I N F O R M A T I O N ****************5528 1451  164
+                                                                  5528 1451  165
+##### MF1: GENERAL INFORMATION                                    5528 1451  166
+                                                                  5528 1451  167
+- MT451    : Descriptive data and directory                       5528 1451  168
+                                                                  5528 1451  169
+This text and the full directory of used MF/MT sections.          5528 1451  170
+                                                                  5528 1451  171
+##### MF2: RESONANCE PARAMETERS                                   5528 1451  172
+                                                                  5528 1451  173
+- MT151    : Resonance parameters                                 5528 1451  174
+                                                                  5528 1451  175
+Details about the origin of the resonance parameters for this     5528 1451  176
+nuclide are given above in this description. In general, both a   5528 1451  177
+Resolved and an Unresolved Resonance Range are given.             5528 1451  178
+                                                                  5528 1451  179
+##### MF3: REACTION CROSS SECTIONS                                5528 1451  180
+                                                                  5528 1451  181
+All the data present in the following MT-sections have been       5528 1451  182
+calculated with TALYS, possibly normalized to experimental data.  5528 1451  183
+If the maximal cross section in an excitation function over the   5528 1451  184
+whole energy range does not exceed 1.e-9 b, the MT-number is not  5528 1451  185
+included. Cross sections lower than 1.e-20 b are assumed to have  5528 1451  186
+no physical meaning and are set to zero. All MT numbers extend up 5528 1451  187
+to the highest incident energy.                                   5528 1451  188
+The following reaction channels/MT numbers are generally included:5528 1451  189
+                                                                  5528 1451  190
+- MT1      : Total cross section                                  5528 1451  191
+                                                                  5528 1451  192
+Calculated with the optical model over the whole energy range,    5528 1451  193
+or partly reproduced using experimental data.                     5528 1451  194
+                                                                  5528 1451  195
+- MT2      : Elastic scattering cross section                     5528 1451  196
+                                                                  5528 1451  197
+Obtained by subtracting the non-elastic cross section from the    5528 1451  198
+total cross section.                                              5528 1451  199
+                                                                  5528 1451  200
+- MT3      : Non-elastic cross section                            5528 1451  201
+                                                                  5528 1451  202
+Calculated with the optical model over the whole energy range.    5528 1451  203
+                                                                  5528 1451  204
+- MT4      : Total inelastic cross section                        5528 1451  205
+                                                                  5528 1451  206
+Sum of MT=51-91.                                                  5528 1451  207
+                                                                  5528 1451  208
+- MT5      : (n,anything) cross section                           5528 1451  209
+                                                                  5528 1451  210
+MT5 contains the reactions which can not be stored in any other   5528 1451  211
+MT-number. The information of MF3/MT5 can be combined with        5528 1451  212
+MF6/MT5 to obtain residual production cross sections particle     5528 1451  213
+production cross sections and (double-)differential cross         5528 1451  214
+sections.                                                         5528 1451  215
+                                                                  5528 1451  216
+- MT16     : (n,2n) cross section                                 5528 1451  217
+- MT17     : (n,3n) cross section                                 5528 1451  218
+- MT22     : (n,na) cross section                                 5528 1451  219
+- MT28     : (n,np) cross section                                 5528 1451  220
+- MT51-90  : (n,n') cross section for 1st-40th excited state      5528 1451  221
+- MT91     : (n,n') continuum cross section                       5528 1451  222
+- MT102    : (n,gamma) cross section                              5528 1451  223
+- MT103    : (n,p) cross section                                  5528 1451  224
+- MT104    : (n,d) cross section                                  5528 1451  225
+- MT105    : (n,t) cross section                                  5528 1451  226
+- MT106    : (n,h) cross section                                  5528 1451  227
+- MT107    : (n,a) cross section                                  5528 1451  228
+- MT600-610: (n,p) cross section for 0th-10th excited state       5528 1451  229
+- MT649    : (n,p) continuum cross section                        5528 1451  230
+- MT650-655: (n,d) cross section for 0th-5th excited state        5528 1451  231
+- MT699    : (n,d) continuum cross section                        5528 1451  232
+- MT700-705: (n,t) cross section for 0th-5th excited state        5528 1451  233
+- MT749    : (n,t) continuum cross section                        5528 1451  234
+- MT750-755: (n,h) cross section for 0th-5th excited state        5528 1451  235
+- MT799    : (n,h) continuum cross section                        5528 1451  236
+- MT800-810: (n,a) cross section for 0th-10th excited state       5528 1451  237
+- MT849    : (n,a) continuum cross section                        5528 1451  238
+                                                                  5528 1451  239
+##### MF4: ANGULAR DISTRIBUTIONS OF SECONDARY PARTICLES           5528 1451  240
+                                                                  5528 1451  241
+We use MF4 for the neutron scattering angular distribution for    5528 1451  242
+discrete levels.                                                  5528 1451  243
+                                                                  5528 1451  244
+- MT2      : Elastic angular distribution                         5528 1451  245
+                                                                  5528 1451  246
+The flag LTT=3 is used to indicate a switch at some high energy,  5528 1451  247
+generally 50 MeV, from a Legendre representation to a tabulated   5528 1451  248
+representation. For incident energies below this energy, the      5528 1451  249
+Legendre coefficients are given on a sufficiently precise energy  5528 1451  250
+grid. They are a sum of calculated Legendre coefficients for      5528 1451  251
+compound nucleus and shape-elastic scattering. For higher         5528 1451  252
+incident energies, relative angular distributions are tabulated   5528 1451  253
+on an angular grid.                                               5528 1451  254
+                                                                  5528 1451  255
+- MT51-70  : (n,n') angular distribution for 1st-20th state       5528 1451  256
+- MT600-610: (n,p) angular distribution for 0th-10th state        5528 1451  257
+- MT650-655: (n,d) angular distribution for 0th-5th state         5528 1451  258
+- MT700-705: (n,t) angular distribution for 0th-5th state         5528 1451  259
+- MT750-755: (n,h) angular distribution for 0th-5th state         5528 1451  260
+- MT800-810: (n,a) angular distribution for 0th-10th state        5528 1451  261
+                                                                  5528 1451  262
+##### MF6: PRODUCT ENERGY-ANGLE DISTRIBUTIONS                     5528 1451  263
+                                                                  5528 1451  264
+In MF6 we store all secondary energy, angle, and energy-angle     5528 1451  265
+distributions, as well as all residual and discrete + continuum   5528 1451  266
+photon production cross sections for channels other than capture  5528 1451  267
+(MT102) and reactions to discrete levels (MT51,etc.).             5528 1451  268
+All data are generated with TALYS.                                5528 1451  269
+                                                                  5528 1451  270
+- MT5      : (n,anything) yields and energy-angle distributions   5528 1451  271
+                                                                  5528 1451  272
+MT5 contains, in this order,                                      5528 1451  273
+For neutrons up to alpha particles and photons:                   5528 1451  274
+- the production yields per particle for the whole energy range   5528 1451  275
+- the secondary energy-angle distributions per particles which are5528 1451  276
+  not represented by explicit MT numbers. On a secondary energy   5528 1451  277
+  grid the relative emission spectra are given together with the  5528 1451  278
+  parameters for the Kalbach systematics for angular              5528 1451  279
+  distributions. Inelastic scattering cross sections for discrete 5528 1451  280
+  states have been broadened and added to the continuum spectra.  5528 1451  281
+For each residual product:                                        5528 1451  282
+- the production yields for the whole energy range.               5528 1451  283
+- the recoil                                                      5528 1451  284
+These distributions can be multiplied with MF3/MT5 to get         5528 1451  285
+the production cross sections and (double-)differential cross     5528 1451  286
+sections.                                                         5528 1451  287
+                                                                  5528 1451  288
+- MT16     : (n,2n) energy-angle distr. and photon production     5528 1451  289
+                                                                  5528 1451  290
+First, for each type of outgoing particle, the (trivial) integer  5528 1451  291
+particle yields are given. Next, on a sufficiently dense incident 5528 1451  292
+energy grid the secondary energy-angle distributions are          5528 1451  293
+specified by means of the relative emission spectra and the       5528 1451  294
+parameters for the Kalbach systematics for angular distributions. 5528 1451  295
+Next, the photon yield is tabulated as a function of incident     5528 1451  296
+energy. For each incident energy, the photon production is given  5528 1451  297
+for all discrete gamma lines present in the final nucleus. A      5528 1451  298
+continuum photon distribution is added to this. We assume         5528 1451  299
+isotropy for all produced gamma rays.                             5528 1451  300
+                                                                  5528 1451  301
+For the following MT-numbers, the same procedure as for MT16 is   5528 1451  302
+followed:                                                         5528 1451  303
+                                                                  5528 1451  304
+- MT17 : (n,3n) energy-angle distr. and photon production         5528 1451  305
+- MT22 : (n,na) energy-angle distr. and photon production         5528 1451  306
+- MT28 : (n,np) energy-angle distr. and photon production         5528 1451  307
+- MT91 : (n,n') continuum energy-angle distr. and phot. prod.     5528 1451  308
+- MT649: (n,p) continuum energy-angle distr. and photon prod.     5528 1451  309
+- MT699: (n,d) continuum energy-angle distr. and photon prod.     5528 1451  310
+- MT749: (n,t) continuum energy-angle distr. and photon prod.     5528 1451  311
+- MT809: (n,h) continuum energy-angle distr. and photon prod.     5528 1451  312
+- MT849: (n,a) continuum energy-angle distr. and photon prod.     5528 1451  313
+                                                                  5528 1451  314
+##### MF8: RADIOACTIVE DECAY DATA                                 5528 1451  315
+                                                                  5528 1451  316
+For reactions to isomers, MF8 designates where the information    5528 1451  317
+for isomeric versus ground state production, or residual          5528 1451  318
+production can be found, i.e. for each MT number it points to     5528 1451  319
+either MF6, MF9 or MF10.                                          5528 1451  320
+                                                                  5528 1451  321
+##### MF9: MULTIPLICITIES FOR PRODUCTION OF RADIOACTIVE NUCLIDES  5528 1451  322
+                                                                  5528 1451  323
+MF9 is used for isomer production by non-threshold reactions.     5528 1451  324
+Final states with a lifetime that exceeds 1 second are treated    5528 1451  325
+as isomer.                                                        5528 1451  326
+                                                                  5528 1451  327
+##### MF10: CROSS SECTIONS FOR PRODUCTION OF RADIOACTIVE NUCLIDES 5528 1451  328
+                                                                  5528 1451  329
+MF10 is used for isomer production by threshold reactions.        5528 1451  330
+Final states with a lifetime that exceeds 1 second are treated    5528 1451  331
+as isomer.                                                        5528 1451  332
+                                                                  5528 1451  333
+##### MF12: PHOTON PRODUCTION YIELD DATA                          5528 1451  334
+                                                                  5528 1451  335
+MF12 is used for the photon production for two types of reactions:5528 1451  336
+- Reactions to discrete levels (MT51, etc.) For this transition   5528 1451  337
+  probabilities are used (LO=2)                                   5528 1451  338
+- Photons from neutron capture (MT102). Here multiplicities are   5528 1451  339
+  given                                                           5528 1451  340
+                                                                  5528 1451  341
+##### MF14: PHOTON ANGULAR DISTRIBUTIONS                          5528 1451  342
+                                                                  5528 1451  343
+All photon production is considered as isotropic                  5528 1451  344
+                                                                  5528 1451  345
+##### MF15: PHOTON ENERGY SPECTRA                                 5528 1451  346
+                                                                  5528 1451  347
+For capture (MT102), the photon energy spectrum is given.         5528 1451  348
+                                                                  5528 1451  349
+##### MF32: COVARIANCES OF RESONANCE PARAMETERS                   5528 1451  350
+                                                                  5528 1451  351
+In MF32, we store the covariances of resonance parameters,        5528 1451  352
+and more details are given above in this description. In most     5528 1451  353
+versions of TENDL, this information is now stored in MF33.        5528 1451  354
+                                                                  5528 1451  355
+##### MF33: COVARIANCES OF NEUTRON CROSS SECTIONS                 5528 1451  356
+                                                                  5528 1451  357
+In MF33, we store the covariances of most, but not all, reaction  5528 1451  358
+channels that are given in MF3. All covariances are generated     5528 1451  359
+with the TASMAN code [kon19], which generates TALYS runs using    5528 1451  360
+a Monte Carlo parameter method.                                   5528 1451  361
+For each MT-number, the information consists of:                  5528 1451  362
+1. Covariances for MTa, Ea and MTa, Ea (variances)                5528 1451  363
+2. Covariances for MTa, Ea and MTa, Eb (correlations for the      5528 1451  364
+   same reaction channel between different energies)              5528 1451  365
+3. Covariances for MTa, Ea and MTb, Ea (correlations between      5528 1451  366
+   different reaction channels for the same energy)               5528 1451  367
+4. Covariances for MTa, Ea and MTb, Eb (correlations between      5528 1451  368
+   different reaction channels for different energies)            5528 1451  369
+Classes 1 and 2 are covered by NI-type subsubsections with        5528 1451  370
+flag LB=5, followed by a LB=8 section which contains              5528 1451  371
+the cross section variances multiplied by 1.e-3. Next, classes 3  5528 1451  372
+and 4 are covered by flag LB=6 to account for the different       5528 1451  373
+energy grids that two correlating MT-sections may have. Since     5528 1451  374
+the total correlation matrix is fully symmetric, we only need to  5528 1451  375
+include the correlation elements between different MT-numbers     5528 1451  376
+once, and we do that in the subsection with the lowest of the     5528 1451  377
+two MT-numbers. We include covariance information for all the     5528 1451  378
+total cross sections, the lumped partial cross sections and the   5528 1451  379
+individual inelastic cross sections per level (MT51,...). We do   5528 1451  380
+not include covariances for MT600 and higher MT-numbers. For the  5528 1451  381
+most important channels, we include cross-channel correlations.   5528 1451  382
+                                                                  5528 1451  383
+##### MF34: COVARIANCES OF ANGULAR DISTRIBUTIONS                  5528 1451  384
+                                                                  5528 1451  385
+In MF34, we store the covariances of the elastic scattering       5528 1451  386
+angular distributions that are given in MF4/MT2. All covariances  5528 1451  387
+are generated with the TASMAN code [kon19], which generates       5528 1451  388
+TALYS runs using a Monte Carlo parameter method. The tables are   5528 1451  389
+restricted to MT2 and contain covariances for the first 6         5528 1451  390
+Legendre coefficients. Both intra- and inter-correlations of the  5528 1451  391
+various Legendre coefficients are given. As in MF33, the LB5      5528 1451  392
+representation is used.                                           5528 1451  393
+                                                                  5528 1451  394
+##### MF40: COVARIANCES OF ISOMER PRODUCTION                      5528 1451  395
+                                                                  5528 1451  396
+For covariances of ground state and isomeric cross sections, the  5528 1451  397
+same procedures as for MF33 are used.                             5528 1451  398
+                                                                  5528 1451  399
+***** F I L E   C H E C K I N G   A N D   P R O C E S S I N G ****5528 1451  400
+                                                                  5528 1451  401
+This file has been checked and processed by                       5528 1451  402
+- the BNL checking codes CHECKR-8.24, FIZCON-8.19 and PSYCHE-8.11 5528 1451  403
+  [her08],                                                        5528 1451  404
+- the preprocessing codes PREPRO-2021 [cul23] into a PENDF file,  5528 1451  405
+- the processing code NJOY-2016.68 [mac10] into a PENDF file and a5528 1451  406
+  MCNP (ACE) library,                                             5528 1451  407
+- MCNP for a standard calculation with the ACE library.           5528 1451  408
+                                                                  5528 1451  409
+*********************** R E F E R E N C E S **********************5528 1451  410
+                                                                  5528 1451  411
+[cul23] D.E. Cullen, PREPRO 2023 - ENDF/B Pre-processing codes,   5528 1451  412
+        Technical report IAEA-NDS-0241, IAEA (2023)               5528 1451  413
+[her08] M. Herman, ENDF Utility Codes Release 8.0, (2008)         5528 1451  414
+[kon23] A.J. Koning, S. Hilaire and S. Goriely,                   5528 1451  415
+        TALYS: modeling of nuclear reactions,                     5528 1451  416
+        European Journal of Physics A59 (6), 131 (2023).          5528 1451  417
+[kon19] A.J. Koning, D. Rochman, J.-Ch. Sublet, N. Dzysiuk,       5528 1451  418
+        M. Fleming, and S. van der Marck, TENDL: Complete nuclear 5528 1451  419
+        data library for innovative nuclear science and           5528 1451  420
+        technology, Nuclear Data Sheets 155, 1 (2019)             5528 1451  421
+[mac10] R.E. Macfarlane and A.C. Kahler, Methods for processing   5528 1451  422
+        ENDF/B-VII with NJOY, Nuclear Data Sheets 111, 2739 (2010)5528 1451  423
+                                                                  5528 1451  424
+************************* C O N T E N T S ************************5528 1451  425
+                                                                  5528 1451  426
+                                1        451        688          15528 1451  427
+                                2        151        258          15528 1451  428
+                                3          1        181          15528 1451  429
+                                3          2        149          15528 1451  430
+                                3          3        181          15528 1451  431
+                                3          4         40          15528 1451  432
+                                3          5         14          15528 1451  433
+                                3         11          7          15528 1451  434
+                                3         16         16          15528 1451  435
+                                3         17          9          15528 1451  436
+                                3         22         17          15528 1451  437
+                                3         24         11          15528 1451  438
+                                3         25          7          15528 1451  439
+                                3         28         15          15528 1451  440
+                                3         32         11          15528 1451  441
+                                3         33          9          15528 1451  442
+                                3         34          8          15528 1451  443
+                                3         37          7          15528 1451  444
+                                3         41         10          15528 1451  445
+                                3         42          7          15528 1451  446
+                                3         44          8          15528 1451  447
+                                3         45          9          15528 1451  448
+                                3         51         40          15528 1451  449
+                                3         52         38          15528 1451  450
+                                3         53         38          15528 1451  451
+                                3         54         37          15528 1451  452
+                                3         55         37          15528 1451  453
+                                3         56         37          15528 1451  454
+                                3         57         36          15528 1451  455
+                                3         58         36          15528 1451  456
+                                3         59         36          15528 1451  457
+                                3         60         35          15528 1451  458
+                                3         61         35          15528 1451  459
+                                3         62         34          15528 1451  460
+                                3         63         34          15528 1451  461
+                                3         64         34          15528 1451  462
+                                3         65         33          15528 1451  463
+                                3         66         33          15528 1451  464
+                                3         67         32          15528 1451  465
+                                3         68         32          15528 1451  466
+                                3         69         31          15528 1451  467
+                                3         70         31          15528 1451  468
+                                3         71         31          15528 1451  469
+                                3         72         30          15528 1451  470
+                                3         73         30          15528 1451  471
+                                3         74         29          15528 1451  472
+                                3         75         29          15528 1451  473
+                                3         76         29          15528 1451  474
+                                3         77         28          15528 1451  475
+                                3         78         28          15528 1451  476
+                                3         79         28          15528 1451  477
+                                3         80         27          15528 1451  478
+                                3         91         27          15528 1451  479
+                                3        102         33          15528 1451  480
+                                3        103         64          15528 1451  481
+                                3        104         18          15528 1451  482
+                                3        105         17          15528 1451  483
+                                3        106         11          15528 1451  484
+                                3        107         64          15528 1451  485
+                                3        108         14          15528 1451  486
+                                3        111         12          15528 1451  487
+                                3        112         14          15528 1451  488
+                                3        115          8          15528 1451  489
+                                3        116          8          15528 1451  490
+                                3        117          9          15528 1451  491
+                                4          2        682          15528 1451  492
+                                4         51        149          15528 1451  493
+                                4         52        146          15528 1451  494
+                                4         53        141          15528 1451  495
+                                4         54        144          15528 1451  496
+                                4         55        170          15528 1451  497
+                                4         56        143          15528 1451  498
+                                4         57        143          15528 1451  499
+                                4         58        139          15528 1451  500
+                                4         59        170          15528 1451  501
+                                4         60        166          15528 1451  502
+                                4         61        141          15528 1451  503
+                                4         62        132          15528 1451  504
+                                4         63        164          15528 1451  505
+                                4         64        141          15528 1451  506
+                                4         65        166          15528 1451  507
+                                4         66        159          15528 1451  508
+                                4         67        166          15528 1451  509
+                                4         68        132          15528 1451  510
+                                4         69        157          15528 1451  511
+                                4         70        160          15528 1451  512
+                                4         71        137          15528 1451  513
+                                4         72        137          15528 1451  514
+                                4         73        134          15528 1451  515
+                                4         74        137          15528 1451  516
+                                4         75        137          15528 1451  517
+                                4         76        137          15528 1451  518
+                                4         77        133          15528 1451  519
+                                4         78        163          15528 1451  520
+                                4         79        163          15528 1451  521
+                                4         80        158          15528 1451  522
+                                6          5      14424          15528 1451  523
+                                6         11        476          15528 1451  524
+                                6         16       1160          15528 1451  525
+                                6         17        621          15528 1451  526
+                                6         22       1647          15528 1451  527
+                                6         24       1037          15528 1451  528
+                                6         25        454          15528 1451  529
+                                6         28       1543          15528 1451  530
+                                6         32       1141          15528 1451  531
+                                6         33        803          15528 1451  532
+                                6         34        677          15528 1451  533
+                                6         37        372          15528 1451  534
+                                6         41       1038          15528 1451  535
+                                6         42        401          15528 1451  536
+                                6         44        778          15528 1451  537
+                                6         45        967          15528 1451  538
+                                6         91       2680          15528 1451  539
+                                6        102       2286          15528 1451  540
+                                6        103       2463          15528 1451  541
+                                6        104       1347          15528 1451  542
+                                6        105       1304          15528 1451  543
+                                6        106        816          15528 1451  544
+                                6        107       3105          15528 1451  545
+                                6        108        783          15528 1451  546
+                                6        111        966          15528 1451  547
+                                6        112       1135          15528 1451  548
+                                6        115        789          15528 1451  549
+                                6        116        775          15528 1451  550
+                                6        117        769          15528 1451  551
+                                8          4          3          15528 1451  552
+                                8          5        155          15528 1451  553
+                                8         11          3          15528 1451  554
+                                8         22          3          15528 1451  555
+                                8         28          3          15528 1451  556
+                                8         33          3          15528 1451  557
+                                8         42          3          15528 1451  558
+                                8         44          3          15528 1451  559
+                                8         45          3          15528 1451  560
+                                8        102          3          15528 1451  561
+                                8        103          3          15528 1451  562
+                                8        104          3          15528 1451  563
+                                8        106          3          15528 1451  564
+                                8        111          3          15528 1451  565
+                                8        115          3          15528 1451  566
+                                8        117          3          15528 1451  567
+                                9        102         68          15528 1451  568
+                               10          4         58          15528 1451  569
+                               10         11         13          15528 1451  570
+                               10         22         33          15528 1451  571
+                               10         28         29          15528 1451  572
+                               10         33         17          15528 1451  573
+                               10         42         13          15528 1451  574
+                               10         44         15          15528 1451  575
+                               10         45         17          15528 1451  576
+                               10        103         61          15528 1451  577
+                               10        104         35          15528 1451  578
+                               10        106         21          15528 1451  579
+                               10        111         22          15528 1451  580
+                               10        115         15          15528 1451  581
+                               10        117         17          15528 1451  582
+                               12         51          3          15528 1451  583
+                               12         52          3          15528 1451  584
+                               12         53          3          15528 1451  585
+                               12         54          3          15528 1451  586
+                               12         55          3          15528 1451  587
+                               12         56          3          15528 1451  588
+                               12         57          3          15528 1451  589
+                               12         58          3          15528 1451  590
+                               12         59          4          15528 1451  591
+                               12         60          3          15528 1451  592
+                               12         61          4          15528 1451  593
+                               12         62          3          15528 1451  594
+                               12         63          3          15528 1451  595
+                               12         64          5          15528 1451  596
+                               12         65          3          15528 1451  597
+                               12         66          3          15528 1451  598
+                               12         67          4          15528 1451  599
+                               12         68          3          15528 1451  600
+                               12         69          3          15528 1451  601
+                               12         70          4          15528 1451  602
+                               12         71          6          15528 1451  603
+                               12         72          4          15528 1451  604
+                               12         73          3          15528 1451  605
+                               12         74          4          15528 1451  606
+                               12         75          4          15528 1451  607
+                               12         76          3          15528 1451  608
+                               12         77          5          15528 1451  609
+                               12         78          5          15528 1451  610
+                               12         79          5          15528 1451  611
+                               12         80          3          15528 1451  612
+                               14         51          1          15528 1451  613
+                               14         52          1          15528 1451  614
+                               14         53          1          15528 1451  615
+                               14         54          1          15528 1451  616
+                               14         55          1          15528 1451  617
+                               14         56          1          15528 1451  618
+                               14         57          1          15528 1451  619
+                               14         58          1          15528 1451  620
+                               14         59          1          15528 1451  621
+                               14         60          1          15528 1451  622
+                               14         61          1          15528 1451  623
+                               14         62          1          15528 1451  624
+                               14         63          1          15528 1451  625
+                               14         64          1          15528 1451  626
+                               14         65          1          15528 1451  627
+                               14         66          1          15528 1451  628
+                               14         67          1          15528 1451  629
+                               14         68          1          15528 1451  630
+                               14         69          1          15528 1451  631
+                               14         70          1          15528 1451  632
+                               14         71          1          15528 1451  633
+                               14         72          1          15528 1451  634
+                               14         73          1          15528 1451  635
+                               14         74          1          15528 1451  636
+                               14         75          1          15528 1451  637
+                               14         76          1          15528 1451  638
+                               14         77          1          15528 1451  639
+                               14         78          1          15528 1451  640
+                               14         79          1          15528 1451  641
+                               14         80          1          15528 1451  642
+                               32        151        135          15528 1451  643
+                               33          1        853          15528 1451  644
+                               33          2        729          15528 1451  645
+                               33          3        605          15528 1451  646
+                               33          4         33          15528 1451  647
+                               33         11          8          15528 1451  648
+                               33         16        144          15528 1451  649
+                               33         17          9          15528 1451  650
+                               33         22         18          15528 1451  651
+                               33         24         12          15528 1451  652
+                               33         25          9          15528 1451  653
+                               33         28         13          15528 1451  654
+                               33         32         12          15528 1451  655
+                               33         33         10          15528 1451  656
+                               33         34         10          15528 1451  657
+                               33         41         10          15528 1451  658
+                               33         42          6          15528 1451  659
+                               33         45         12          15528 1451  660
+                               33         51        238          15528 1451  661
+                               33         52         27          15528 1451  662
+                               33         53         27          15528 1451  663
+                               33         54         27          15528 1451  664
+                               33         91        163          15528 1451  665
+                               33        102         46          15528 1451  666
+                               33        103         46          15528 1451  667
+                               33        104         15          15528 1451  668
+                               33        105         15          15528 1451  669
+                               33        106         12          15528 1451  670
+                               33        107         46          15528 1451  671
+                               33        112         21          15528 1451  672
+                               33        115         10          15528 1451  673
+                               33        116         10          15528 1451  674
+                               33        117         13          15528 1451  675
+                               34          2        422          15528 1451  676
+                               40          4         53          15528 1451  677
+                               40         11         11          15528 1451  678
+                               40         22         27          15528 1451  679
+                               40         28         19          15528 1451  680
+                               40         33         15          15528 1451  681
+                               40         42          9          15528 1451  682
+                               40         45         17          15528 1451  683
+                               40        103         77          15528 1451  684
+                               40        104         23          15528 1451  685
+                               40        106         17          15528 1451  686
+                               40        115         15          15528 1451  687
+                               40        117         19          15528 1451  688
+ 0.000000+0 0.000000+0          0          0          0          05528 1  099999
+ 0.000000+0 0.000000+0          0          0          0          05528 0  0    0
+ 5.513400+4 1.327564+2          0          0          0          05528 3102    1
+ 8.762107+6 8.762107+6          0          0          1         885528 3102    2
+         88          5                                            5528 3102    3
+ 1.000000-5 0.000000+0 3.089200+2 0.000000+0 3.089200+2 6.010780+05528 3102    4
+ 6.000000+2 6.010780+0 1.000000+3 6.010780+0 2.000000+3 4.782703+05528 3102    5
+ 3.000000+3 3.554627+0 6.000000+3 1.880690+0 1.000000+4 1.364440+05528 3102    6
+ 2.000000+4 8.705930-1 3.000000+4 6.749700-1 6.000000+4 4.239300-15528 3102    7
+ 1.000000+5 2.706750-1 2.000000+5 1.660500-1 3.000000+5 1.008000-15528 3102    8
+ 4.000000+5 7.433250-2 5.000000+5 5.856000-2 6.000000+5 4.847250-25528 3102    9
+ 7.000000+5 4.114500-2 8.000000+5 3.559500-2 9.000000+5 3.135750-25528 3102   10
+ 1.000000+6 2.801250-2 1.200000+6 2.295000-2 1.400000+6 1.933500-25528 3102   11
+ 1.600000+6 1.659000-2 1.800000+6 1.448250-2 2.000000+6 1.288500-25528 3102   12
+ 2.200000+6 1.163250-2 2.400000+6 1.064250-2 2.600000+6 9.795000-35528 3102   13
+ 2.800000+6 9.045000-3 3.000000+6 8.385000-3 3.200000+6 7.725000-35528 3102   14
+ 3.400000+6 7.120500-3 3.600000+6 6.513000-3 3.800000+6 5.937000-35528 3102   15
+ 4.000000+6 5.425500-3 4.200000+6 4.894500-3 4.400000+6 4.473750-35528 3102   16
+ 4.600000+6 4.014000-3 4.800000+6 3.619500-3 5.000000+6 3.325500-35528 3102   17
+ 5.200000+6 2.990250-3 5.400000+6 2.799000-3 5.600000+6 2.527500-35528 3102   18
+ 5.800000+6 2.304000-3 6.000000+6 2.220750-3 6.200000+6 2.024250-35528 3102   19
+ 6.400000+6 2.010000-3 6.600000+6 1.838250-3 6.800000+6 1.705500-35528 3102   20
+ 7.000000+6 1.758000-3 7.200000+6 1.625250-3 7.400000+6 1.742250-35528 3102   21
+ 7.600000+6 1.614000-3 7.800000+6 1.513500-3 8.000000+6 1.628250-35528 3102   22
+ 8.500000+6 1.597500-3 9.000000+6 1.563000-3 9.500000+6 1.537500-35528 3102   23
+ 1.000000+7 1.512000-3 1.050000+7 1.484250-3 1.100000+7 1.455000-35528 3102   24
+ 1.150000+7 1.425000-3 1.200000+7 1.395000-3 1.250000+7 1.361250-35528 3102   25
+ 1.300000+7 1.329000-3 1.350000+7 1.225500-3 1.400000+7 1.189500-35528 3102   26
+ 1.450000+7 1.092000-3 1.500000+7 1.039500-3 1.600000+7 8.670000-45528 3102   27
+ 1.700000+7 7.095750-4 1.800000+7 5.844000-4 1.900000+7 4.898250-45528 3102   28
+ 2.000000+7 4.213500-4 2.100000+7 3.687000-4 2.200000+7 3.282750-45528 3102   29
+ 2.300000+7 2.973000-4 2.400000+7 2.732250-4 2.500000+7 2.541000-45528 3102   30
+ 2.600000+7 2.376750-4 2.700000+7 2.241000-4 2.800000+7 2.126250-45528 3102   31
+ 2.900000+7 2.013000-4 3.000000+7 1.918500-4                      5528 3102   32
+ 2.000000+8 0.000000+0                                            5528 3102   33
+ 0.000000+0 0.000000+0          0          0          0          05528 3  099999
+ 0.000000+0 0.000000+0          0          0          0          05528 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0

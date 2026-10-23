@@ -26,6 +26,7 @@ _LAZY = {
     'identify': '_identify',
     'write': '_write',
     'process': '_process',
+    'check': '_check',
 }
 
 #: Subpackages resolved on first attribute access, so that ``import kika``
@@ -71,7 +72,7 @@ def __dir__():
 
 
 __all__ = [
-    'read', 'write', 'process', 'sniff_format', 'identify',
+    'read', 'write', 'process', 'check', 'sniff_format', 'identify',
     'read_mctal', 'read_meshtal',
     'read_mcnp', 'generate_pert_cards', 'generate_PERTcards', 'perturb_material', 'perturb_materials',
     'compute_sensitivity', 'compute_total_sensitivity', 'plot_sens_comparison',

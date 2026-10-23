@@ -1,0 +1,1348 @@
+ ENDF/B-VIII.1                                                         0  0
+ 7.014000+3 1.388278+1          0          0          0          0 725 1451    1
+ 0.000000+0 0.000000+0          0          0          0          6 725 1451    2
+ 1.000000+0 1.500000+8          1          0         10          8 725 1451    3
+ 0.000000+0 0.000000+0          0          0        557        111 725 1451    4
+  7-N - 14 LANL       EVAL-JUN97 M.B.Chadwick,P.G.Young            725 1451    5
+ CH97,CH99            DIST-AUG24 REV1-NOV19            20240830    725 1451    6
+---- ENDF/B-VIII.1    MATERIAL  725         REVISION 1             725 1451    7
+----- INCIDENT-NEUTRON DATA                                        725 1451    8
+------ ENDF-6                                                      725 1451    9
+                                                                   725 1451   10
+ ****************************************************************  725 1451   11
+                                                                   725 1451   12
+ ENDF/B-VII  CONVERTED FROM ENDF/B-VI BY NNDC OCT 2004             725 1451   13
+                                                                   725 1451   14
+ ****************************************************************  725 1451   15
+                                                                   725 1451   16
+ ENDF/B-VI MOD 5 Revision, May 2000, S.C.Frankle, R.C.Reedy,       725 1451   17
+                           P.G.Young (LANL)                        725 1451   18
+                                                                   725 1451   19
+ The secondary gamma-ray spectrum for radiative capture (MF 12,    725 1451   20
+ MT 102) has been updated for new experimental data at incident    725 1451   21
+ neutron energies up to 400 keV. The Q-value for radiative capture 725 1451   22
+ was also updated in File 3.  Details of these changes are         725 1451   23
+ described in Frankle et al. [Fr01].                               725 1451   24
+                                                                   725 1451   25
+ The Legendre coefficients in MF=14, MT=102 were corrected by      725 1451   26
+ dividing each coefficient by 2L+1.                                725 1451   27
+                                                                   725 1451   28
+****************************************************************** 725 1451   29
+                                                                   725 1451   30
+ ENDF/B-VI MOD 4 Evaluation, August 1997, M.B. Chadwick and        725 1451   31
+           P.G. Young (LANL)                                       725 1451   32
+                                                                   725 1451   33
+ Los Alamos LA150 Library, produced with FKK/GNASH/GSCAN code      725 1451   34
+   in cooperation with ECN Petten.                                 725 1451   35
+                                                                   725 1451   36
+   This evaluation provides a complete representation of the       725 1451   37
+ nuclear data needed for transport, damage, heating,               725 1451   38
+ radioactivity, and shielding applications over the incident       725 1451   39
+ neutron energy range from 1.0E-11 to 150 MeV.  The discussion     725 1451   40
+ here is divided into the region below and above 20 MeV.           725 1451   41
+                                                                   725 1451   42
+ INCIDENT NEUTRON ENERGIES < 20 MeV                                725 1451   43
+   Below 20 MeV the evaluation is based completely on the ENDF/B-  725 1451   44
+ VI.3 (Release 3) evaluation by P. G. Young, G. M. Hale, and M.    725 1451   45
+ B. Chadwick [Yo94].                                               725 1451   46
+                                                                   725 1451   47
+ INCIDENT NEUTRON ENERGIES > 20 MeV                                725 1451   48
+   The ENDF/B-VI Release 3 evaluation of n + 14N data extends to   725 1451   49
+ 40 MeV and includes cross sections and energy-angle data for all  725 1451   50
+ significant reactions.  The present evaluation utilizes a more    725 1451   51
+ compact composite reaction spectrum representation of the data    725 1451   52
+ above 20 MeV in order to reduce the length of the file, and we    725 1451   53
+ have only included the ENDF/B-VI data below 20 MeV. To avoid      725 1451   54
+ redundancy, the sections MT=78-90 are removed, since their        725 1451   55
+ thresholds lie between 20 and 40 MeV. No essential data for       725 1451   56
+ applications is lost with our representation above 20 MeV.        725 1451   57
+   The evaluation above 20 MeV utilizes MF=6, MT=5 to represent    725 1451   58
+ all reaction data.  Production cross sections and emission        725 1451   59
+ spectra are given for neutrons, protons, deuterons, tritons,      725 1451   60
+ alpha particles, gamma rays, and all residual nuclides produced   725 1451   61
+ (A>5) in the reaction chains. To summarize, the ENDF sections     725 1451   62
+ with non-zero data above En = 20 MeV are:                         725 1451   63
+                                                                   725 1451   64
+  MF=3 MT=  1  Total Cross Section                                 725 1451   65
+       MT=  2  Elastic Scattering Cross Section                    725 1451   66
+       MT=  3  Nonelastic Cross Section                            725 1451   67
+       MT=  5  Sum of Binary (n,n') and (n,x) Reactions            725 1451   68
+                                                                   725 1451   69
+  MF=4 MT=  2  Elastic Angular Distributions                       725 1451   70
+                                                                   725 1451   71
+  MF=6 MT=  5  Production Cross Sections and Energy-Angle          725 1451   72
+               Distributions for Emission Neutrons, Protons,       725 1451   73
+               Deuterons, Tritons, and Alphas; and Angle-          725 1451   74
+               Integrated Spectra for Gamma Rays and Residual      725 1451   75
+               Nuclei That Are Stable Against Particle Emission    725 1451   76
+                                                                   725 1451   77
+   The evaluation is based on nuclear model calculations that have 725 1451   78
+ been benchmarked to experimental data, especially for n + 14N     725 1451   79
+ and p + 14N reactions [Ch97]. We use the GNASH code system        725 1451   80
+ [Yo92], which utilizes Hauser-Feshbach statistical,               725 1451   81
+ preequilibrium and direct-reaction theories. Spherical optical    725 1451   82
+ model calculations are used to obtain particle transmission       725 1451   83
+ coefficients for the Hauser-Feshbach calculations, as well as     725 1451   84
+ for the elastic neutron angular distributions.                    725 1451   85
+   Cross sections and spectra for producing individual residual    725 1451   86
+ nuclei are included for reactions. The energy-angle-correlations  725 1451   87
+ for all outgoing particles are based on Kalbach systematics       725 1451   88
+ [Ka88].                                                           725 1451   89
+   A model was developed to calculate the energy distributions of  725 1451   90
+ all recoil nuclei in the GNASH calculations [Ch96]. The recoil    725 1451   91
+ energy distributions are represented in the laboratory system in  725 1451   92
+ MT=5, MF=6, and are given as isotropic in the lab system. All     725 1451   93
+ other data in MT=5,MF=6 are given in the center-of-mass system.   725 1451   94
+ This method of representation utilizes the LCT=3 option approved  725 1451   95
+ at the November, 1996, CSEWG meeting.                             725 1451   96
+   Preequilibrium corrections were performed in the course of the  725 1451   97
+ GNASH calculations using the exciton model of Kalbach [Ka77],     725 1451   98
+ [Ka85], validated by comparison with calculations using Feshbach, 725 1451   99
+ Kerman, Koonin (FKK) theory [Ch93].  Discrete level data from     725 1451  100
+ nuclear data sheets were matched to continuum level densities     725 1451  101
+ using the formulation of Ignatyuk [Ig75] and pairing and shell    725 1451  102
+ parameters from the Cook [Co67] analysis. Neutron and charged-    725 1451  103
+ particle transmission coefficients were obtained from the         725 1451  104
+ optical potentials, as discussed below.  Gamma-ray transmission   725 1451  105
+ coefficients were calculated using the Kopecky-Uhl model [Ko90].  725 1451  106
+                                                                   725 1451  107
+ DETAILS OF THE n + 14N ANALYSIS                                   725 1451  108
+   GNASH calculations [Yo92,Ch94] were performed for neutron and   725 1451  109
+ proton reactions on nitrogen up to 150 MeV, and the calculated    725 1451  110
+ results were benchmarked against experimental data. For neutrons  725 1451  111
+ below 100 MeV, the present evaluation made extensive use of our   725 1451  112
+ previous work [Ch96a].  Very minor differences with this earlier  725 1451  113
+ work exist due to recent developments in the GNASH code. Much use 725 1451  114
+ was made of measured data in the evaluation, since an accurate    725 1451  115
+ modeling of reactions on a light nucleus is difficult. In this    725 1451  116
+ way we were able to obtain a fairly good description of the       725 1451  117
+ emission spectra of secondary particles and gamma rays.           725 1451  118
+ Additionally, the (angle-integrated) emission spectra of heavy    725 1451  119
+ recoils were calculated using our model described in Ref. [Ch96]. 725 1451  120
+ Some additional information on this evaluation can be found in    725 1451  121
+ Ref. [Ch97].                                                      725 1451  122
+   Between 20 and 150 MeV, the optical models used (the neutron    725 1451  123
+ potential of Islam below 60 MeV [Is88]; Madland's potential       725 1451  124
+ [Ma88] at higher energies, with Lane transformations for the      725 1451  125
+ proton potential) provided a reasonably good description of       725 1451  126
+ measured reaction cross section data. But since a very accurate   725 1451  127
+ description of the reaction cross section is important for        725 1451  128
+ determining secondary particle spectra, we slightly modify the    725 1451  129
+ calculated results to better describe the experimental data, and  725 1451  130
+ renormalize the calculated transmission coefficients accordingly. 725 1451  131
+ The SCAT2 code [Be92] was used to calculate the transmission      725 1451  132
+ coefficients. No measurements for the neutron reaction cross      725 1451  133
+ section on nitrogen exist above about 50 MeV. However,            725 1451  134
+ systematics have been determined from a number of target elements 725 1451  135
+ at 95 MeV by DeJuren [De50], and for 100 MeV protons by Kirby and 725 1451  136
+ Link [Ki66] (at this energy the proton and neutron reaction cross 725 1451  137
+ sections would be expected to be very similar). We have,          725 1451  138
+ therefore, used these systematics to guide our evaluated reaction 725 1451  139
+ cross sections. Additionally, below 50 MeV we have also been      725 1451  140
+ guided by the proton-induced reaction cross sections of Carlson   725 1451  141
+ et al. [Ca75]. Experimental total elastic scattering values of    725 1451  142
+ Islam et al. [Is88], Olsson et al. [Ol90], and Petler et al.      725 1451  143
+ [Pe85] were obtained by subtracting their angle-integrated        725 1451  144
+ elastic data from the evaluated total cross sections (see below). 725 1451  145
+ The evaluated total cross section was obtained by slightly        725 1451  146
+ modifying the optical model results to agree with data,           725 1451  147
+ principally the new high-accuracy results of Finlay et al.        725 1451  148
+ [Fi93]. We use the ENDF/B-VI total cross section below 40 MeV     725 1451  149
+ recently evaluated by Young [Yo94].                               725 1451  150
+   Preequilibrium spectra for incident energies below 100 MeV were 725 1451  151
+ taken from our previous work [Ch96], where they were evaluated    725 1451  152
+ from a combination of FKK calculations [Ch93], and measured       725 1451  153
+ emission spectra data, while ensuring that unitarity is conserved 725 1451  154
+ (i.e., making sure the sum of primary emitted preequilibrium      725 1451  155
+ spectra does not exceed the reaction cross section). This         725 1451  156
+ approach has the advantage of facilitating a good representation  725 1451  157
+ of emission spectra experimental data. However, the lack of such  725 1451  158
+ data above 100 MeV prohibits its extension to higher energies,    725 1451  159
+ and therefore above 100 MeV, exciton model calculations were      725 1451  160
+ utilized from the GNASH code [Ka77, Ka85]. This results in some   725 1451  161
+ (small) discontinuities around 100 MeV in the production cross    725 1451  162
+ sections, though the impact of this is negligible for most        725 1451  163
+ applications.                                                     725 1451  164
+   Nuclear level densities were determined using the Ignatyuk      725 1451  165
+ model [Ig75], as implemented by Arthur et al. [Yo92].  Pairing    725 1451  166
+ energies were obtained from the Cook systematics with the Los     725 1451  167
+ Alamos extensions to light nuclei from [Ar83].  This continuum    725 1451  168
+ level density formulation is matched continuously onto discrete   725 1451  169
+ low-lying levels at the lower excitation energies. Discrete level 725 1451  170
+ information (energy, spin, parity, gamma-ray branching ratios) is 725 1451  171
+ tabulated for each nuclide in an input file, which is based on    725 1451  172
+ the Ajzenberg-Selove compilations.  For each nucleus we performed 725 1451  173
+ a level-density analysis and determined the excitation energy at  725 1451  174
+ which we judged the level data complete. Gamma-ray transmission   725 1451  175
+ coefficients were obtained from the Kopecky-Uhl model [Ko90].     725 1451  176
+   An important test of the accuracy of the data libraries is that 725 1451  177
+ the evaluated emission spectra of light particles (A < 5) should  725 1451  178
+ be consistent with the measurements by Subramanian et al.  of UC- 725 1451  179
+ Davis [Su86].  We have compared our calculated (lab frame) angle- 725 1451  180
+ integrated emission spectra of protons, deuterons, and alphas,    725 1451  181
+ with these measurements, with good agreement. The structure seen  725 1451  182
+ at high emission energies is due to the inclusion of discrete     725 1451  183
+ nuclear levels in our calculations. Also, kerma factors obtained  725 1451  184
+ from the evaluated cross sections are in fairly good agreement    725 1451  185
+ with experimental data [Ch96].                                    725 1451  186
+                                                                   725 1451  187
+ ****************************************************************  725 1451  188
+                                                                   725 1451  189
+ ENDF/B-VI MOD 3 Revision, August 1994, P.G. Young  (LANL)         725 1451  190
+                                                                   725 1451  191
+   This modification corrects the elastic and inelastic cross      725 1451  192
+ sections (MT=63-90) at incident neutron energies above 13.5.MeV   725 1451  193
+ given in MOD 2 of ENDF/B-VI.  This correction was made to         725 1451  194
+ improve agreement with elastic scattering measurements up to      725 1451  195
+ 25 MeV.  The elastic neutron angular distributions above 20 MeV   725 1451  196
+ were also improved over the earlier data distributed in MOD 2,    725 1451  197
+ based upon fits to experimental data.                             725 1451  198
+                                                                   725 1451  199
+****************************************************************   725 1451  200
+                                                                   725 1451  201
+ ENDF/B-VI MOD 2 Evaluation, September 1992, P.G. Young (LANL)     725 1451  202
+                                                                   725 1451  203
+ Extension to 40 MeV                                               725 1451  204
+     The modified version of the ENDF/B-VI evaluation created for  725 1451  205
+ DNA (described below) is extended in energy to 40 MeV. This ext-  725 1451  206
+ tension was accomplished using experimental data and the 9/92     725 1451  207
+ Version of the GNASH code, which was updated for higher energy    725 1451  208
+ calculations. More details will be given in a later progress      725 1451  209
+ report.                                                           725 1451  210
+     The ENDF/B-VI evaluation was modified for DNA use to include  725 1451  211
+ results from Hale's R-matrix analysis that include Harvey's new   725 1451  212
+ total cross section measurement. These results are interim until  725 1451  213
+ we can incorporate the new ORNL scattering data. The ORNL         725 1451  214
+ preliminary scattering results confirm the parity of the first    725 1451  215
+ resonance as being positive, as used in the R-matrix analysis.    725 1451  216
+                                                                   725 1451  217
+****************************************************************   725 1451  218
+                                                                   725 1451  219
+ ENDF/B-VI MOD 1 Evaluation, May 1990, P.G. Young, G.M. Hale,      725 1451  220
+           M.B. Chadwick (LANL)                                    725 1451  221
+                                                                   725 1451  222
+ N14 free atom evaluation                                          725 1451  223
+                                                                   725 1451  224
+GENERAL COMMENTS:                                                  725 1451  225
+   The ENDF/B-VI data file for N14 is an essentially complete new  725 1451  226
+evaluation. Below 2.5 MeV, it consists of an R-matrix analysis of  725 1451  227
+the available experimental total, elastic, (n,p0), and (n,alpha0)  725 1451  228
+cross sections and angular distributions using the EDA coupled-    725 1451  229
+channel r-matrix code. At higher energies, the evaluation          725 1451  230
+is an update of the 1972 evaluation of Young and Foster [Yo72]     725 1451  231
+to include new experimental data since that time. More details     725 1451  232
+of the evaluation are included below.                              725 1451  233
+                                                                   725 1451  234
+MF=2  ------------------------------------------------------------ 725 1451  235
+                                                                   725 1451  236
+ MT=451 No Resonance Parameters. Scattering Radius =8.86366-13 cm  725 1451  237
+                                                                   725 1451  238
+MF=3  ------------------------------------------------------------ 725 1451  239
+                                                                   725 1451  240
+              THERMAL (2200 M/S) CROSS SECTIONS                    725 1451  241
+    TOTAL      11.8135 B              (N,GAMMA)  0.075 B           725 1451  242
+    ELASTIC     9.9114 B              (N,P)      1.8271 B          725 1451  243
+    NONELASTIC  1.9021 B                                           725 1451  244
+                                                                   725 1451  245
+ MT=1  Total Cross Section                                         725 1451  246
+   Zero to 2.2 MeV, SIGT is obtained from sum of elastic, (n,p0),  725 1451  247
+     (n,a0) cross sections from r-matrix analysis, plus the (n,g)  725 1451  248
+     cross section described below. The coupled-channel r-matrix   725 1451  249
+     analysis was performed with the EDA code, fitting simultane-  725 1451  250
+     ously almost all available total, (n,n), (n,p0), and (n,a0)   725 1451  251
+     exp. data.  The most important total cross section used were  725 1451  252
+     [Me49,Bi59,Bi69] at lower energies, and [Ca70,He70,Fo71]      725 1451  253
+     at higher energies. Significant shape difference found in     725 1451  254
+     the 0.1 - 20 keV region as compared to ENDF/B-V.              725 1451  255
+   2.2 MeV to 20 MeV, from [Ca70,He70,Fo71] using Ca70 alone       725 1451  256
+     at sharp resonances. Smoothed by appropriate fits, log-log    725 1451  257
+     interpolations is good to 1.3 pct to 0.4 MeV, linear inter-   725 1451  258
+     polation is good to 0.5 pct from 0.4 to 20 MeV, absolute      725 1451  259
+     error less than 1 pct above 2.2 MeV. Minor changes made in    725 1451  260
+     ENDF/V.2 evaluation in certain regions of high structure.     725 1451  261
+ MT=2 Elastic Scattering Cross Section                             725 1451  262
+   Zero to 2.2 MeV, based upon r-matrix analysis described         725 1451  263
+     above. Experimental elastic angular distributions in analysis 725 1451  264
+     were [Fo55,Jo66].                                             725 1451  265
+   2.2 to 20 MeV, based upon data of [Ch61,Ba67,St61,Ba63,Fo55,    725 1451  266
+     Jo66,Ph61,Be66,Lu67] and, especially, [Ch86,Te85,Ba85,Pe85,   725 1451  267
+     Pe74, Ne72]. Nonelastic cross sections were adjusted somewhat 725 1451  268
+     to achieve agreement with elastic data.                       725 1451  269
+ MT=4 Sum of MT=51-82 Cross Sections.                              725 1451  270
+ MT=16 (N,2N) Based on [Fe60,Br61,Bo65,Pr60]. 30% error estimated  725 1451  271
+ MT=51-62 Discrete Inelastic, Including N,Np Decay (LR=28)         725 1451  272
+   Threshold to 20 MeV. From (n,ngamma) data of [Di70,Or69,Cl69,   725 1451  273
+     Bu71,Ny71,Co68,Ha59,Be70,Di73] and, especially, [Ne89,        725 1451  274
+     Ro74,Ne72,Au86], together with the (n,n') data of [Ch86,      725 1451  275
+     Pe74,Ba63,Ba85,Ta87].  The level decay scheme of [Aj86]       725 1451  276
+     was used to interpret the (n,ngamma) data.                    725 1451  277
+ MT=63-90 Inelastic Assuming Energy Bands Centered Around          725 1451  278
+   the Excitation Energies Chosen. Note that N,Np (LR=28) and      725 1451  279
+   n,nalpha (LR=22) decay are included and labeled. The cross      725 1451  280
+   sections are adjusted by differencing between total and         725 1451  281
+   nonelastic. Cross sections to the bands based on Hauser-        725 1451  282
+   Feshbach and nuclear temperature calculations.                  725 1451  283
+ MT=102 Radiative Capture                                          725 1451  284
+   Zero to 0.25 MeV, 1/v from 75 mb(+-10pct) at thermal [Ju63].    725 1451  285
+   0.25 to 1 MeV, transition region.                               725 1451  286
+   1 to 20 MeV, deduced from N14(p,gamma)O15 data of [Ku70],       725 1451  287
+     assuming charge independence. Energy scale adjusted to match  725 1451  288
+     foot-hills of (p,gamma) giant resonance to resonance clusters 725 1451  289
+     served in N15 compound nucleus.                               725 1451  290
+ MT=103  Sum of MT=600-606 Cross Sections.                         725 1451  291
+ MT=104  Sum OF MT=650-653 Cross Sections.                         725 1451  292
+ MT=105  SUM OF MT=700-701 Cross Sections.                         725 1451  293
+ MT=107  Sum OF MT=800-810 Cross Sections.                         725 1451  294
+ MT=108  (N,2ALPHA) Cross Section.                                 725 1451  295
+   Based on [Li52,Mo67] and Hauser-Feshbach calculation.           725 1451  296
+ MT=600  (N,P) Cross Section to C14 Ground State.                  725 1451  297
+   Zero to 2.2 MeV, taken from coupled-channel r-matrix analysis.  725 1451  298
+     R-Matrix analysis based on [Jo50,Ga59], and esp. [Mo79].      725 1451  299
+   2.2 to 13 MeV, based mainly on [Mo79] and inverse reaction data 725 1451  300
+     of [Wo67].                                                    725 1451  301
+   13 to 20 MeV, smooth extrapolation.                             725 1451  302
+ MT=601-606  (n,p) Cross Sections to C14 Excited States.           725 1451  303
+   Thres. to 20 MeV, from (n,pgamma) data of [Or69,Di70,Cl69,Bu71, 725 1451  304
+     Ny71,Ro74].                                                   725 1451  305
+ MT=650 (N,D) Cross Section to C13 Ground State.                   725 1451  306
+   Thres.to 15 MeV, from inverse cross section data of [Ch61,Be63] 725 1451  307
+     Near Thres.and direct data of [Mi68,Fe67,Ca57,Za63] at 14 MeV 725 1451  308
+     Plus the (n,dgamma) data of [Ro74,Ne89].                      725 1451  309
+   15 to 20 MeV, smooth extrapolations.                            725 1451  310
+ MT=651-653  (n,d) Cross Section to Excited C13 Levels.            725 1451  311
+   Thres. to 20 MeV, direct data of [Fe67,Za63,Ca57], and          725 1451  312
+     (n,dgamma) data of [Or69, Di70, Ro74, Ne89].                  725 1451  313
+ MT=700-701 (N,T) Cross Sections to C12 Ground and 4.439 MeV Ex-   725 1451  314
+     cited State.                                                  725 1451  315
+   Thres. to 15 MeV, direct data of [Ga59,Sc66,Re67,Fe67].         725 1451  316
+   15 to 20 MeV, smooth extrapolations.                            725 1451  317
+ MT=800-810  (n,alpha) Cross Section to Discrete B11 States.       725 1451  318
+   Thres. to 2.2 MeV, taken from coupled-channel r-matrix analysis 725 1451  319
+     direct (n,alpha) data included [Jo50,Ga59,Sc66] but the       725 1451  320
+     analysis mainly relied on Mo79.                               725 1451  321
+   6 to 20 MeV, Used above direct data, together with (n,agamma)   725 1451  322
+     data of [Ha59,Di70,Or69,Ny71,Bu71,Be70,Cl68] and, especially, 725 1451  323
+     the data of [Ne89,Ro74]. Near En=14 MeV, the direct (n,a)     725 1451  324
+     data of [Li52,Ba68,Le68,Ma68] were also used.                 725 1451  325
+                                                                   725 1451  326
+MF=4  ------------------------------------------------------------ 725 1451  327
+                                                                   725 1451  328
+ MT=2  Elastic Angular Distributions.                              725 1451  329
+     Zero to 2.2 mev, based upon r-matrix analysis described       725 1451  330
+     above. Experimental elastic angular distributions in analysis 725 1451  331
+     were [Fo55, Jo66].                                            725 1451  332
+     2.2 TO 20 MeV, based upon data oF [Ch61,Ba67,St61,Ba63,Fo55,  725 1451  333
+     Jo66,Ph61,Be66,Lu67] and, especially, [Ch86,Te85,Ba85,Pe85,   725 1451  334
+     Pe74,Ne72].                                                   725 1451  335
+ MT=16  Angular Distribution for (n,2n) Reaction                   725 1451  336
+     In the absence of data, isotropy in the cm system is assumed, 725 1451  337
+     and the corresponding 3-body phase-space is transformed to    725 1451  338
+     the lab system.  For any reasonable cm distribution           725 1451  339
+     the strong forward peaking of the transformation will         725 1451  340
+     dominate.  Normalized for trapezoidal integration.            725 1451  341
+     identical to ENDF/B-V.                                        725 1451  342
+ MT=51 to 62  Angular Distributions for Inelastic Scattering       725 1451  343
+     based mainly on (n,n') data of [Ch86], but the data of [Pe74, 725 1451  344
+     Ta87,Ba63,Bo61,Ba85] were used as well.                       725 1451  345
+     above 7 MeV also used proton data of [Do64,Ha70,Od60]         725 1451  346
+     assuming charge symmetry, and neutron data of [Ba63].         725 1451  347
+     threshold shapes modeled after Hauser-Feshbach calcs.         725 1451  348
+ MT=63-90  Angular Distributions for Inelastic Scattering.         725 1451  349
+     Assumed isotropic in cm at all energies.                      725 1451  350
+                                                                   725 1451  351
+MF=5  ------------------------------------------------------------ 725 1451  352
+                                                                   725 1451  353
+ MT=16  Spectrum of (N,2N) Secondary Neutrons                      725 1451  354
+     in the absence of data, only the 3-body phase-space distribu- 725 1451  355
+     tion is given.  Normalized for trapezoidal integration.       725 1451  356
+     identical to ENDF/B-V.                                        725 1451  357
+                                                                   725 1451  358
+MF=12  ----------------------------------------------------------- 725 1451  359
+                                                                   725 1451  360
+ MT=102  (N,GAMMA) Multiplicities  (same as ENDF/B-V)              725 1451  361
+     Zero to 0.25 MeV, thermal spectrum based primarily upon mea-  725 1451  362
+     surements of [Th67,Jo69,Gr68,Mo62].                           725 1451  363
+     .25 to 1 MeV, transition region where thermal spectrum is     725 1451  364
+     phased into single ground-state transition.                   725 1451  365
+     1 to 20 MeV, deduced from N14(P,G)O15 data of [Ku70], who     725 1451  366
+     observed no significant transitions except to ground state.   725 1451  367
+ *** Note that gamma rays from N14(n,gamma,n') reactions are       725 1451  368
+     included under MT=102 rather than MT=4.  This produces        725 1451  369
+     error messages when the checking code PSYCHE is run because   725 1451  370
+     there is an apparent violation of energy conservation.        725 1451  371
+     However, total energy is still conserved when MT=102 and      725 1451  372
+     and MT=4 are considered together.                             725 1451  373
+                                                                   725 1451  374
+MF=13  ----------------------------------------------------------- 725 1451  375
+                                                                   725 1451  376
+     All (N,XG) cross sections agree with the excitation cross     725 1451  377
+     sections in MF=3 via the relevant decay scheme [Aj80,Aj86].   725 1451  378
+ *** Note that gamma-ray production cross sections are not         725 1451  379
+     included for MT=16.  The reason is that all excited           725 1451  380
+     states in N13 are unstable to particle emission and           725 1451  381
+     the gamma-ray cross sections are negligibly small.            725 1451  382
+                                                                   725 1451  383
+ MT=4  (N,NG) Cross Section                                        725 1451  384
+     From data of [Ha59,Di70,Or69,Cl69,Bu71,Ny71,Co68,Be70,Di73],  725 1451  385
+     and especially, [Ne89,Ro74,Ne72,Au86] together with the       725 1451  386
+     (N,N') data of [Ch86,Pe74,Ba63,Ba85,Ta87] and the level       725 1451  387
+     decay scheme of [Aj86].                                       725 1451  388
+ MT=28   (N,NPG) Cross Section                                     725 1451  389
+     From data OF [Di70,Or69,Bu71,Ny71,Cl69,Ne89,Ro74,Ne72,Di73],  725 1451  390
+     after subtraction of MF=13,MT=103 data.                       725 1451  391
+ MT=32   (N,NAG) Cross Section                                     725 1451  392
+     From data of [Di70,Or69,Bu71,Ny71,Cl69,Ne89,Ro74,Ne72,Di73],  725 1451  393
+     after subtraction of MF=13,MT=107 data.                       725 1451  394
+ MT=103  (N,PG) Cross Section                                      725 1451  395
+     From data of [Di70,Or69,Bu71,Ny71,Cl69,Ne89,Ro74,Ne72,Di73].  725 1451  396
+ MT=104  (N,DG) Cross Section                                      725 1451  397
+     From data of [Di70,Or69,Bu71,Ny71,Cl69,Ne89,Ro74,Ne72,Di73],  725 1451  398
+     and estimates of MF=3,MT=651-653.                             725 1451  399
+ MT=105  (N,TG) Cross Section                                      725 1451  400
+     (N,TG) estimated from (n,t) as discussed under MF=3,MT=741,   725 1451  401
+     and from (N,XG) data (see list below for MT=107).             725 1451  402
+ MT=107  (N,AG) Cross Section                                      725 1451  403
+     From (N,A) data of [Ga59,Sc66,Mo79] and (N,AG) data of        725 1451  404
+     [Ha59,Ny71,Or69,Bu71,Di70,Di73,Cl68,Co68] and esp. [Ne89,     725 1451  405
+     Ro74,Ne72].  Level decay scheme of [Aj80] was used.           725 1451  406
+                                                                   725 1451  407
+MF=14  ----------------------------------------------------------- 725 1451  408
+                                                                   725 1451  409
+     Data on 9 strongest lines from inelastic scatt. and particle  725 1451  410
+     reactions taken from [Mo64] -- same as ENDF/B-V.              725 1451  411
+ MT=4  Inel. Scatt. to N14, 1.63 and 4.91 MeV Anistropic           725 1451  412
+ MT=102  (N,GAMMA) Angular Distributions.                          725 1451  413
+     Zero to 0.4 MeV, all photons are isotropic.                   725 1451  414
+     .4 to 20 MeV, anisotropic distribution for the single ground  725 1451  415
+     State transition is based upon N14(P,Go)O15 data by [Ku70].   725 1451  416
+ MT=103  (N,P) to C14,  all isotropic.                             725 1451  417
+ MT=104  (N,NP)+(N,D) to C13, 3.85 MeV anisotropic                 725 1451  418
+ MT=105  (N,ND)+(N,T) to C12, all isotropic                        725 1451  419
+ MT=107  (N,ALPHA) to B11, all isotropic                           725 1451  420
+                                                                   725 1451  421
+MF=33  ----------------------------------------------------------- 725 1451  422
+                                                                   725 1451  423
+   To be provided at a later date.                                 725 1451  424
+                                                                   725 1451  425
+ ***************************************************************** 725 1451  426
+                                                                   725 1451  427
+REFERENCES                                                         725 1451  428
+                                                                   725 1451  429
+[Aj80]  F. Ajzenberg-Selove and C. Busch, Nucl.Phys.A 336, 1       725 1451  430
+   (1980)                                                          725 1451  431
+[Aj86]  F. Ajzenberg-Selove, Nucl.Phys.A 449, 1 (1986)             725 1451  432
+[Ar83]  E.D. Arthur, Los Alamos National Laboratory progress       725 1451  433
+   report LA-9841-PR (1983).                                       725 1451  434
+[Ba63]  R.W. Bauer et al., Nucl.Phys. 47, 241 (1963)               725 1451  435
+[Ba67]  R.W. Bauer et al., Nucl.Phys.A 93, 673 (1967)              725 1451  436
+[Ba68]  R. Bachinger and M. Uhl, Nucl.Phys.A 116, 673 (1968)       725 1451  437
+[Ba85]  M. Baba et al., Nuclear Data for Basic and Applied Science 725 1451  438
+   Proc. Conf., Santa Fe, NM, May 1985, Vol.1 (Gordon and Breach,  725 1451  439
+   1986) p.223                                                     725 1451  440
+[Be63]  R.E. Benenson and B. Yaramis, Phys.Rev. 129, 720 (1963)    725 1451  441
+[Be69]  F.D. Becchetti, Jr., and G.W. Greenlees, Phys.Rev. 182,    725 1451  442
+   1190 (1969)                                                     725 1451  443
+[Be92]  O. Bersillon, Proc. ICTP Workshop on Computation and       725 1451  444
+   Analysis of Nuclear Data Relevant to Nuclear Energy and Safety, 725 1451  445
+   Feb./Mar. 1992, Trieste, Italy, to be published in World        725 1451  446
+   Scientific Press; also Progress Report, Bruyeres-le-Chatel      725 1451  447
+   1977, CEA-N-2037 (1978) p.111                                   725 1451  448
+[Bi59]  E.G. Bilpuch et al., private comm. to BNL (1959)           725 1451  449
+[Bi62]  E.G. Bilpuch et al., private comm. to R.J. Howerton (1962) 725 1451  450
+[Bo65]  M. Bormann et al., Nucl.Phys. 63, 438 (1965)               725 1451  451
+[Br61]  O.D. Brill et al., Sov.Phys.-Dokl. 6, 24 (1961)            725 1451  452
+[Bu71]  P.S. Buchanan, private comm. (1969)                        725 1451  453
+[Ca57]  R.R. Carlson, Phys.Rev. 107, 1094 (1957)                   725 1451  454
+[Ca70]  A.D. Carlson, R.J. Cerbone, Nucl.Sci.Eng. 42, 28 (1970)    725 1451  455
+[Ca75]  R.F. Carlson, A.J. Cox, T.N. Nasr, et al., Nucl.Phys.      725 1451  456
+   A445, 57 (1985); R.F. Carlson, A.J. Cox, J.R. Nimmo, et al.,    725 1451  457
+   Phys.Rev.C 12, 1167 (1975).                                     725 1451  458
+[Ch61]  L.F. Chase et al., report AFSWC-TR-61-15, (1961)           725 1451  459
+[Ch86]  J. Chardine et al., report CEA-N-2506 (1986)               725 1451  460
+[Ch93]  M.B. Chadwick and P.G. Young, Phys.Rev. C 47, 2255 (1993)  725 1451  461
+[Ch96]  M.B. Chadwick, P.G. Young, R.E. MacFarlane, and A.J.       725 1451  462
+   Koning, Proc. of 2nd Int. Conf. on Accelerator Driven           725 1451  463
+   Transmutation Technology and Applications, Kalmar, Sweden, June 725 1451  464
+   1996.                                                           725 1451  465
+[Ch96a] M.B. Chadwick and P.G. Young, Nucl.Sci.Eng. 123, 1 (1996)  725 1451  466
+[Ch97]  M.B. Chadwick and P.G. Young, in APT progress report:      725 1451  467
+   1 July - 1 August 1997, internal Los Alamos National Laboratory 725 1451  468
+   memo T-2-97/M-45, 6 Aug.1997 from R.E. MacFarlane to L. Waters  725 1451  469
+[Ch99]  M.B. Chadwick, P.G. Young, G.M. Hale, et al., Los Alamos   725 1451  470
+   National Laboratory report, LA-UR-99-1222 (1999)                725 1451  471
+[Cl69]  G. Clayeux and G. Grenier, report CEA-R-3807 (1969)        725 1451  472
+[Co67]  J. L. Cook, H. Ferguson, and A. R. De L Musgrove, Aust.J.  725 1451  473
+   Phys. 20, 477 (1967)                                            725 1451  474
+[Co68]  H. Conde et al., Neutron Cross Sections and Techology,     725 1451  475
+   Proc. Conf., Washington, DC (National Bureau of Standards,      725 1451  476
+   1968) p.763; also report AE-354 (1969)                          725 1451  477
+[De50]  J. Dejuren and N. Knable, Phys. Rev. 77, 606 (1950)        725 1451  478
+[Di70]  J.K. Dickens et al., Nucl.Sci.Eng. 40, 346 (1970)          725 1451  479
+[Di73]  J.K. Dickens et al., report ORNL-4864 (1973)               725 1451  480
+[Do64]  P.F. Donovan et al., Phys.Rev. 133, B113 (1964)            725 1451  481
+[Fe60]  J.M. Ferguson and W.E. Thompson, Phys.Rev. 118, 228 (1960) 725 1451  482
+[Fe67]  P. Fessenden and D.R. Maxson, Phys.Rev. 158, 948 (1967)    725 1451  483
+[Fi93]  R. W. Finlay, W. P. Abfalterer, G. Fink, et al., Phys.Rev. 725 1451  484
+   C 47, 237 (1993)                                                725 1451  485
+[Fo55]  J.L. Fowler and C.H. Johnson, Phys.Rev. 98, 728 (1955)     725 1451  486
+[Fo71]  D.G. Foster, Jr. and D.W. Glasgow, Phys.Rev.C 3,576 (1971) 725 1451  487
+[Fr01]  S.C. Frankle, R.C. Reedy, and P.G. Young, Los ALamos       725 1451  488
+   National Laboratory Report, LA-13812 (2001).                    725 1451  489
+[Ga59]  F. Gabbard et al., Nucl.Phys. 14, 277 (1959)               725 1451  490
+[Gr68]  R.C. Greenwood, Phys.Lett. 27B, 274 (1968)                 725 1451  491
+[Ha59]  H.E. Hall and T.W. Bonner, Nucl.Phys. 14, 295 (1959/60)    725 1451  492
+[Ha70]  L. Hansen, private communication (1970)                    725 1451  493
+[He70]  H.T. Heaton et al., Bull.Am.Phys.Soc. 15, 568 (1970) and   725 1451  494
+   private communication from R.B. Schwartz (1970)                 725 1451  495
+[Ig75]  A. V. Ignatyuk, G. N. Smirenkin, and A. S. Tishin, Sov.J.  725 1451  496
+   Nucl.Phys. 21, 255 (1975); translation of Yad.Fiz. 21, 485      725 1451  497
+   (1975)                                                          725 1451  498
+[Is88]  M.S. Islam, R.W. Finlay, et al., Phys.Med.Biol. 33, 315    725 1451  499
+   (1988)                                                          725 1451  500
+[Jo50]  C.H. Johnson and H.H. Barschall, Phys.Rev. 80, 818 (1950)  725 1451  501
+[Jo66]  C.H.Johnson, et al., Neutron Cross Sections and Technol.,  725 1451  502
+   Proc. Conf., March, 1968, Washington, DC (National Bureau of    725 1451  503
+   Standards, 1968) p.851                                          725 1451  504
+[Jo69]  L. Jonsson, R. Hardell, Symposium on Neutron Capture       725 1451  505
+   Gamma Rays, Studsvik (1969) p.199                               725 1451  506
+[Ju63]  E.T. Jurney, H.T. Motz, report ANL-9797 (1963) p.241       725 1451  507
+[Ka77]  C. Kalbach, Z.Phys.A  283, 401 (1977)                      725 1451  508
+[Ka85]  C. Kalbach, Los Alamos National Laboratory report          725 1451  509
+   LA-10248-MS (1985)                                              725 1451  510
+[Ka88]  C. Kalbach, Phys.Rev.C 37,  2350 (1988); see also          725 1451  511
+   C. Kalbach and F. M. Mann, Phys.Rev.C 23, 112 (1981)            725 1451  512
+[Ki66]  P. Kirkby and W.T. Link, Can.J.Phys. 44, 1847 (1966)       725 1451  513
+[Ko90]  J. Kopecky and M. Uhl, Phys.Rev.C 41, 1941 (1990)          725 1451  514
+[Ku70]  H.M. Kuan et al., Nucl.Phys.A 151, 129 (1970)              725 1451  515
+[Le68]  B. Leroux et al., Nucl.Phys.A 116, 196 (1968)              725 1451  516
+[Li52]  A.B. Lillie, Phys.Rev. 87, 716 (1952)                      725 1451  517
+[Ma68]  D.R. Maxson et al., Nucl.Phys.A 110, 609 (1968)            725 1451  518
+[Ma88]  D.G. Madland, Proc. OECD/NEANDC Specialist's Mtg. on       725 1451  519
+   Preequilibrium Nuclear Reactions, Semmering, Austria, 1988,     725 1451  520
+   report NEANDC-245 'U' (1988) p.103                              725 1451  521
+[Me49]  E. Melkonian, Phys.Rev. 76, 1750 (1949)                    725 1451  522
+[Mi68]  D. Miljanic et al., Nucl.Phys.A 106, 401 (1968)            725 1451  523
+[Mo62]  H.T. Motz et al., Pile Neutron Research in Physics         725 1451  524
+   (IAEA, Vienna, 1962), p.225                                     725 1451  525
+[Mo64]  I.L. Morgan et al., Texas Nuclear Corp. NUcl.Phys.Div.     725 1451  526
+   annual report (Aug. 1964)                                       725 1451  527
+[Mo67]  J. Mosner et al., Nucl.Phys.A 103, 238 (1967)              725 1451  528
+[Mo79]  G.L. Morgan et al., Nucl.Sci.Eng. 70, 163 (1979)           725 1451  529
+[Ne72]  D.O. Nellis and P.S. Buchanan, report DNA-2716 (1972)      725 1451  530
+[Ne89]  R. Nelson, S. Wender, et al., Private comm. (1989)         725 1451  531
+[Ny71]  K. Nyberg-Ponnert, Phys.Script. 4, 165 (1971)              725 1451  532
+[Od60]  Y. Oda et al., J.Phys.Soc.Japan 15, 760 (1960)             725 1451  533
+[Ol90]  N. Olsson, E. Ramstrom, and B. Trostell, Phys.Med.Biol.    725 1451  534
+   35, 255 (1990)                                                  725 1451  535
+[Or69]  V.J. Orphan et al., report GA-8006 (1969)                  725 1451  536
+[Pe74]  F.G. Perey et al., report ORNL-4805 (1974)                 725 1451  537
+[Pe85]  J.S. Petler, M.S. Islam, R.W. Finlay, and F.S. Dietrich,   725 1451  538
+   Phys.Rev.C 32, 673 (1985)                                       725 1451  539
+[Ph61]  D.D. Phillips, LANL, private comm.to R.J. Howerton (1961)  725 1451  540
+[Pr60]  J.T. Prud'homme et al., report AFSWC-TR-60-30 (1960)       725 1451  541
+[Re67]  D. Rendic, Nucl.Phys.A 91, 604 (1967)                      725 1451  542
+[Ro73]  J.C. Robertson, J.Nucl.En. 27, 531 (1973)                  725 1451  543
+[Ro74]  V.C. Rogers et al., report DNA-3495F (1974)                725 1451  544
+[Sc66]  W. Scobel et al., Z.Physik 197, 124 (1966)                 725 1451  545
+[Su86]  T.S. Subramanian, J.L. Romero, F.P. Brady, et al., Phys.   725 1451  546
+   Rev. C 34, 1580 (1986); J.L. Romero, private communication      725 1451  547
+   to MBC (1994).                                                  725 1451  548
+[Su88]  A. Suhaimi, report JUEL-2196 (1988)                        725 1451  549
+[Ta87]  A. Takahashi et al., report INDC(JAP)-103/L (1986)         725 1451  550
+[Te85]  J.A. Templon et al., Nucl.Sci.Eng. 91, 451 (1985)          725 1451  551
+[Th67]  G.E. Thomas et al., Nucl.Instr.Meth. 56, 325 (1967)        725 1451  552
+[Wo67]  C. Wong et al., Phys.Rev. 160, 769 (1967)                  725 1451  553
+[Yo72]  P.G. Young and D.G. Foster, Jr., report LA-4725 (1972)     725 1451  554
+[Yo92]  P.G. Young, E.D. Arthur, and M.B. Chadwick, report         725 1451  555
+   LA-12343-MS (1992)                                              725 1451  556
+[Yo94]  P.G. Young, G.M. Hale, M.B. Chadwick, ENDF/B-VI Release 3  725 1451  557
+   of N-14 evaluation (1994)                                       725 1451  558
+[Za63]  M.R. Zatzick and D.R. Maxson, Phys.Rev. 129, 1728 (1963)   725 1451  559
+                                                                   725 1451  560
+ ************************ C O N T E N T S ***********************  725 1451  561
+                                1        451        672          0 725 1451  562
+                                2        151          4          0 725 1451  563
+                                3          1        523          0 725 1451  564
+                                3          2        428          0 725 1451  565
+                                3          4         76          0 725 1451  566
+                                3          5         41          0 725 1451  567
+                                3         16         12          0 725 1451  568
+                                3         51         76          0 725 1451  569
+                                3         52         71          0 725 1451  570
+                                3         53         67          0 725 1451  571
+                                3         54         66          0 725 1451  572
+                                3         55         62          0 725 1451  573
+                                3         56         61          0 725 1451  574
+                                3         57         57          0 725 1451  575
+                                3         58         55          0 725 1451  576
+                                3         59         52          0 725 1451  577
+                                3         60         47          0 725 1451  578
+                                3         61         46          0 725 1451  579
+                                3         62         43          0 725 1451  580
+                                3         63         41          0 725 1451  581
+                                3         64         39          0 725 1451  582
+                                3         65         36          0 725 1451  583
+                                3         66         33          0 725 1451  584
+                                3         67         32          0 725 1451  585
+                                3         68         30          0 725 1451  586
+                                3         69         29          0 725 1451  587
+                                3         70         27          0 725 1451  588
+                                3         71         24          0 725 1451  589
+                                3         72         22          0 725 1451  590
+                                3         73         20          0 725 1451  591
+                                3         74         17          0 725 1451  592
+                                3         75         13          0 725 1451  593
+                                3         76         10          0 725 1451  594
+                                3         77          7          0 725 1451  595
+                                3        102         29          0 725 1451  596
+                                3        103        227          0 725 1451  597
+                                3        104         28          0 725 1451  598
+                                3        105         42          0 725 1451  599
+                                3        107        284          0 725 1451  600
+                                3        108         12          0 725 1451  601
+                                3        600        227          0 725 1451  602
+                                3        601         31          0 725 1451  603
+                                3        602         27          0 725 1451  604
+                                3        603         26          0 725 1451  605
+                                3        604         24          0 725 1451  606
+                                3        605         23          0 725 1451  607
+                                3        606         21          0 725 1451  608
+                                3        650         28          0 725 1451  609
+                                3        651         21          0 725 1451  610
+                                3        652         18          0 725 1451  611
+                                3        653         17          0 725 1451  612
+                                3        700         42          0 725 1451  613
+                                3        701         18          0 725 1451  614
+                                3        800        284          0 725 1451  615
+                                3        801        159          0 725 1451  616
+                                3        802         76          0 725 1451  617
+                                3        803         63          0 725 1451  618
+                                3        804         38          0 725 1451  619
+                                3        805         37          0 725 1451  620
+                                3        806         31          0 725 1451  621
+                                3        807         25          0 725 1451  622
+                                3        808         21          0 725 1451  623
+                                3        809         19          0 725 1451  624
+                                3        810         18          0 725 1451  625
+                                4          2       1992          0 725 1451  626
+                                4         51         86          0 725 1451  627
+                                4         52         68          0 725 1451  628
+                                4         53         74          0 725 1451  629
+                                4         54         74          0 725 1451  630
+                                4         55         70          0 725 1451  631
+                                4         56         70          0 725 1451  632
+                                4         57         36          0 725 1451  633
+                                4         58         28          0 725 1451  634
+                                4         59         16          0 725 1451  635
+                                4         60         16          0 725 1451  636
+                                4         61         18          0 725 1451  637
+                                4         62         12          0 725 1451  638
+                                4         63          2          0 725 1451  639
+                                4         64          2          0 725 1451  640
+                                4         65          2          0 725 1451  641
+                                4         66          2          0 725 1451  642
+                                4         67          2          0 725 1451  643
+                                4         68          2          0 725 1451  644
+                                4         69          2          0 725 1451  645
+                                4         70          2          0 725 1451  646
+                                4         71          2          0 725 1451  647
+                                4         72          2          0 725 1451  648
+                                4         73          2          0 725 1451  649
+                                4         74          2          0 725 1451  650
+                                4         75          2          0 725 1451  651
+                                4         76          2          0 725 1451  652
+                                4         77          2          0 725 1451  653
+                                6          5       4575          0 725 1451  654
+                                6         16        131          0 725 1451  655
+                               12        102        217          0 725 1451  656
+                               13          4       2127          0 725 1451  657
+                               13         28         70          0 725 1451  658
+                               13         32          6          0 725 1451  659
+                               13        103        293          0 725 1451  660
+                               13        104        128          0 725 1451  661
+                               13        105         19          0 725 1451  662
+                               13        107       1010          0 725 1451  663
+                               14          4         66          0 725 1451  664
+                               14         28         18          0 725 1451  665
+                               14         32          1          0 725 1451  666
+                               14        102        139          0 725 1451  667
+                               14        103          1          0 725 1451  668
+                               14        104         18          0 725 1451  669
+                               14        105          1          0 725 1451  670
+                               14        107          1          0 725 1451  671
+                               15        102        210          0 725 1451  672
+ 0.000000+0 0.000000+0          0          0          0          0 725 1  099999
+ 0.000000+0 0.000000+0          0          0          0          0 725 0  0    0
+ 7.014001+3 1.388278+1          0          0          0          0 725 3  1    1
+ 0.000000+0 0.000000+0          0          0          1       1560 725 3  1    2
+       1560          2                                             725 3  1    3
+ 1.000000-5 1.055800+2 1.090510-5 1.015300+2 1.176400-5 9.811700+1 725 3  1    4
+ 1.257080-5 9.524000+1 1.332210-5 9.279901+1 1.474650-5 8.869400+1 725 3  1    5
+ 1.591380-5 8.575000+1 1.684950-5 8.361400+1 1.835730-5 8.052200+1 725 3  1    6
+ 2.000000-5 7.756000+1 2.181020-5 7.469200+1 2.352800-5 7.228200+1 725 3  1    7
+ 2.514170-5 7.024800+1 2.664420-5 6.852201+1 2.949290-5 6.561901+1 725 3  1    8
+ 3.182750-5 6.353700+1 3.369900-5 6.202700+1 3.671460-5 5.984100+1 725 3  1    9
+ 4.000000-5 5.774600+1 4.362030-5 5.571800+1 4.705590-5 5.401400+1 725 3  1   10
+ 5.028330-5 5.257600+1 5.328830-5 5.135500+1 5.898560-5 4.930300+1 725 3  1   11
+ 6.365490-5 4.783100+1 6.739790-5 4.676300+1 7.342911-5 4.521700+1 725 3  1   12
+ 8.000000-5 4.373600+1 8.458971-5 4.280600+1 8.724060-5 4.232100+1 725 3  1   13
+ 9.197271-5 4.145800+1 9.411171-5 4.111200+1 1.000000-4 4.016500+1 725 3  1   14
+ 1.005660-4 4.008400+1 1.065760-4 3.923200+1 1.090510-4 3.888300+1 725 3  1   15
+ 1.176400-4 3.780500+1 1.179710-4 3.776700+1 1.257080-4 3.689500+1 725 3  1   16
+ 1.273100-4 3.673000+1 1.332210-4 3.612300+1 1.347960-4 3.597900+1 725 3  1   17
+ 1.468580-4 3.488000+1 1.474650-4 3.482500+1 1.591380-4 3.389400+1 725 3  1   18
+ 1.600000-4 3.383100+1 1.684950-4 3.321900+1 1.744810-4 3.282900+1 725 3  1   19
+ 1.835730-4 3.224100+1 1.882230-4 3.197500+1 2.000000-4 3.130400+1 725 3  1   20
+ 2.011330-4 3.124700+1 2.131530-4 3.064400+1 2.181020-4 3.039700+1 725 3  1   21
+ 2.352800-4 2.963500+1 2.359420-4 2.960800+1 2.514170-4 2.899200+1 725 3  1   22
+ 2.546190-4 2.887500+1 2.664420-4 2.844600+1 2.695910-4 2.834400+1 725 3  1   23
+ 2.937160-4 2.756700+1 2.949290-4 2.752800+1 3.182750-4 2.687000+1 725 3  1   24
+ 3.200000-4 2.682500+1 3.369900-4 2.639200+1 3.489620-4 2.611700+1 725 3  1   25
+ 3.671460-4 2.570100+1 3.764470-4 2.551300+1 4.000000-4 2.503800+1 725 3  1   26
+ 4.022660-4 2.499800+1 4.263060-4 2.457200+1 4.362030-4 2.439700+1 725 3  1   27
+ 4.705590-4 2.385800+1 4.718850-4 2.383900+1 5.000000-4 2.344300+1 725 3  1   28
+ 5.028330-4 2.340300+1 5.092401-4 2.332100+1 5.328830-4 2.301700+1 725 3  1   29
+ 5.391840-4 2.294500+1 5.874331-4 2.239600+1 5.898560-4 2.236800+1 725 3  1   30
+ 6.365490-4 2.190300+1 6.400000-4 2.187100+1 6.739790-4 2.156500+1 725 3  1   31
+ 6.979250-4 2.137100+1 7.342910-4 2.107600+1 7.528940-4 2.094300+1 725 3  1   32
+ 8.000000-4 2.060800+1 8.045321-4 2.057900+1 8.458971-4 2.031400+1 725 3  1   33
+ 8.526120-4 2.027500+1 9.197271-4 1.988800+1 9.437699-4 1.976500+1 725 3  1   34
+ 1.000000-3 1.947900+1 1.018480-3 1.939600+1 1.078370-3 1.912700+1 725 3  1   35
+ 1.090510-3 1.907300+1 1.174870-3 1.873800+1 1.176400-3 1.873200+1 725 3  1   36
+ 1.257080-3 1.844500+1 1.280000-3 1.837000+1 1.332210-3 1.820100+1 725 3  1   37
+ 1.395850-3 1.801700+1 1.474640-3 1.779000+1 1.505790-3 1.771100+1 725 3  1   38
+ 1.591370-3 1.749500+1 1.609060-3 1.745500+1 1.684950-3 1.728200+1 725 3  1   39
+ 1.705230-3 1.724000+1 1.835730-3 1.697300+1 1.887540-3 1.687900+1 725 3  1   40
+ 2.000000-3 1.667700+1 2.036960-3 1.661800+1 2.156730-3 1.642800+1 725 3  1   41
+ 2.181010-3 1.639000+1 2.349730-3 1.615300+1 2.352790-3 1.614900+1 725 3  1   42
+ 2.514160-3 1.594500+1 2.560000-3 1.589200+1 2.664410-3 1.577300+1 725 3  1   43
+ 2.791700-3 1.564300+1 2.949280-3 1.548200+1 3.011580-3 1.542700+1 725 3  1   44
+ 3.182750-3 1.527400+1 3.218130-3 1.524600+1 3.369900-3 1.512300+1 725 3  1   45
+ 3.410450-3 1.509400+1 3.671460-3 1.490500+1 3.775080-3 1.483800+1 725 3  1   46
+ 4.000000-3 1.469500+1 4.073920-3 1.465400+1 4.313469-3 1.451900+1 725 3  1   47
+ 4.362030-3 1.449200+1 4.699460-3 1.432500+1 4.705590-3 1.432200+1 725 3  1   48
+ 5.000000-3 1.419100+1 5.028330-3 1.417800+1 5.120000-3 1.414100+1 725 3  1   49
+ 5.328830-3 1.405600+1 5.583400-3 1.396400+1 5.898571-3 1.385100+1 725 3  1   50
+ 6.023150-3 1.381100+1 6.365499-3 1.370300+1 6.436260-3 1.368300+1 725 3  1   51
+ 6.739800-3 1.359700+1 6.820900-3 1.357600+1 7.342910-3 1.344200+1 725 3  1   52
+ 7.550159-3 1.339500+1 8.000001-3 1.329400+1 8.147830-3 1.326500+1 725 3  1   53
+ 8.626939-3 1.317000+1 8.724060-3 1.315100+1 9.398930-3 1.303200+1 725 3  1   54
+ 9.411180-3 1.303000+1 1.000000-2 1.293700+1 1.005670-2 1.292800+1 725 3  1   55
+ 1.024000-2 1.290200+1 1.065770-2 1.284200+1 1.116680-2 1.277700+1 725 3  1   56
+ 1.179710-2 1.269700+1 1.204630-2 1.266900+1 1.273100-2 1.259300+1 725 3  1   57
+ 1.287250-2 1.257800+1 1.347960-2 1.251700+1 1.364180-2 1.250300+1 725 3  1   58
+ 1.468580-2 1.240800+1 1.500000-2 1.238300+1 1.510030-2 1.237500+1 725 3  1   59
+ 1.600000-2 1.230300+1 1.629570-2 1.228200+1 1.694320-2 1.223600+1 725 3  1   60
+ 1.725390-2 1.221600+1 1.872950-2 1.212200+1 1.879790-2 1.211800+1 725 3  1   61
+ 2.000000-2 1.205100+1 2.019180-2 1.204100+1 2.048000-2 1.202600+1 725 3  1   62
+ 2.136300-2 1.198100+1 2.159120-2 1.197100+1 2.324830-2 1.189600+1 725 3  1   63
+ 2.337220-2 1.189100+1 2.530000-2 1.181400+1 2.758980-2 1.173300+1 725 3  1   64
+ 2.976280-2 1.166500+1 3.180420-2 1.160800+1 3.370480-2 1.155900+1 725 3  1   65
+ 3.730840-2 1.147800+1 4.026180-2 1.141900+1 4.262920-2 1.137700+1 725 3  1   66
+ 4.644390-2 1.131500+1 5.000000-2 1.126500+1 5.060000-2 1.125600+1 725 3  1   67
+ 5.509750-2 1.120000+1 5.517970-2 1.119900+1 5.935950-2 1.115300+1 725 3  1   68
+ 5.952570-2 1.115100+1 6.335840-2 1.111300+1 6.360830-2 1.111100+1 725 3  1   69
+ 6.707769-2 1.108000+1 6.740970-2 1.107700+1 7.411970-2 1.102300+1 725 3  1   70
+ 7.461679-2 1.101900+1 7.500000-2 1.101600+1 7.988230-2 1.098200+1 725 3  1   71
+ 8.052350-2 1.097800+1 8.449630-2 1.095200+1 8.525840-2 1.094800+1 725 3  1   72
+ 9.192190-2 1.090900+1 9.288779-2 1.090400+1 1.000000-1 1.086800+1 725 3  1   73
+ 1.012000-1 1.086300+1 1.090510-1 1.082800+1 1.103590-1 1.082200+1 725 3  1   74
+ 1.176400-1 1.079300+1 1.190510-1 1.078800+1 1.257080-1 1.076500+1 725 3  1   75
+ 1.272170-1 1.076000+1 1.332210-1 1.074000+1 1.348190-1 1.073600+1 725 3  1   76
+ 1.474640-1 1.069900+1 1.492340-1 1.069500+1 1.591370-1 1.067000+1 725 3  1   77
+ 1.610470-1 1.066500+1 1.684950-1 1.064800+1 1.705170-1 1.064400+1 725 3  1   78
+ 1.835730-1 1.061700+1 1.857760-1 1.061300+1 2.000000-1 1.058800+1 725 3  1   79
+ 2.024000-1 1.058400+1 2.181020-1 1.055900+1 2.207190-1 1.055500+1 725 3  1   80
+ 2.352790-1 1.053500+1 2.381030-1 1.053100+1 2.514160-1 1.051500+1 725 3  1   81
+ 2.544330-1 1.051100+1 2.664410-1 1.049700+1 2.696390-1 1.049400+1 725 3  1   82
+ 2.949280-1 1.046800+1 2.984670-1 1.046500+1 3.000000-1 1.046400+1 725 3  1   83
+ 3.182750-1 1.044800+1 3.220940-1 1.044400+1 3.369900-1 1.043200+1 725 3  1   84
+ 3.410340-1 1.042900+1 3.671460-1 1.041100+1 3.715510-1 1.040800+1 725 3  1   85
+ 4.000000-1 1.039000+1 4.048000-1 1.038700+1 4.362030-1 1.036900+1 725 3  1   86
+ 4.414380-1 1.036700+1 4.705590-1 1.035200+1 4.762050-1 1.035000+1 725 3  1   87
+ 5.028330-1 1.033800+1 5.088670-1 1.033500+1 5.328830-1 1.032600+1 725 3  1   88
+ 5.392770-1 1.032300+1 5.898561-1 1.030500+1 5.969350-1 1.030300+1 725 3  1   89
+ 6.365500-1 1.029000+1 6.441880-1 1.028800+1 6.739790-1 1.028000+1 725 3  1   90
+ 6.820670-1 1.027800+1 7.342910-1 1.026400+1 7.431030-1 1.026200+1 725 3  1   91
+ 8.000000-1 1.024900+1 8.096000-1 1.024700+1 8.458970-1 1.024000+1 725 3  1   92
+ 8.534990-1 1.023900+1 9.197270-1 1.022700+1 9.238500-1 1.022600+1 725 3  1   93
+ 1.000000+0 1.021400+1 1.090510+0 1.020100+1 1.176400+0 1.019000+1 725 3  1   94
+ 1.257080+0 1.018100+1 1.332210+0 1.017300+1 1.474640+0 1.016000+1 725 3  1   95
+ 1.591370+0 1.015100+1 1.684950+0 1.014400+1 1.835730+0 1.013400+1 725 3  1   96
+ 2.000000+0 1.012500+1 2.181020+0 1.011500+1 2.352790+0 1.010800+1 725 3  1   97
+ 2.514160+0 1.010100+1 2.664410+0 1.009600+1 2.949280+0 1.008700+1 725 3  1   98
+ 3.000000+0 1.008500+1 3.182750+0 1.008000+1 3.369900+0 1.007500+1 725 3  1   99
+ 3.671460+0 1.006800+1 4.000000+0 1.006100+1 4.362030+0 1.005500+1 725 3  1  100
+ 4.705590+0 1.004900+1 5.028330+0 1.004500+1 5.328830+0 1.004100+1 725 3  1  101
+ 5.898560+0 1.003400+1 6.365500+0 1.003000+1 6.739790+0 1.002600+1 725 3  1  102
+ 7.342910+0 1.002100+1 8.000000+0 1.001600+1 8.458970+0 1.001300+1 725 3  1  103
+ 8.724060+0 1.001200+1 9.197270+0 1.000900+1 9.411180+0 1.000800+1 725 3  1  104
+ 1.000000+1 1.000500+1 3.000000+1 9.957168+0 1.000000+2 9.917517+0 725 3  1  105
+ 3.000000+2 9.842104+0 1.000000+3 9.687261+0 2.000000+3 9.465825+0 725 3  1  106
+ 4.000000+3 9.066408+0 6.000000+3 8.713514+0 8.000000+3 8.399086+0 725 3  1  107
+ 1.000000+4 8.117129+0 2.000000+4 7.053989+0 4.000000+4 5.849997+0 725 3  1  108
+ 6.000002+4 5.176650+0 8.000002+4 4.737005+0 1.000000+5 4.420508+0 725 3  1  109
+ 1.200000+5 4.176740+0 1.400000+5 3.979593+0 1.600000+5 3.814162+0 725 3  1  110
+ 1.679000+5 3.755494+0 1.696994+5 3.742550+0 1.800000+5 3.671347+0 725 3  1  111
+ 1.900000+5 3.606496+0 2.000000+5 3.545248+0 2.500000+5 3.279769+0 725 3  1  112
+ 3.000000+5 3.059815+0 3.500001+5 2.867433+0 4.000001+5 2.698878+0 725 3  1  113
+ 4.100002+5 2.676557+0 4.200002+5 2.693304+0 4.220002+5 2.715785+0 725 3  1  114
+ 4.240002+5 2.759071+0 4.250001+5 2.795116+0 4.260002+5 2.847963+0 725 3  1  115
+ 4.270002+5 2.928611+0 4.280002+5 3.058060+0 4.290002+5 3.281212+0 725 3  1  116
+ 4.300002+5 3.704866+0 4.302001+5 3.833277+0 4.304002+5 3.983588+0 725 3  1  117
+ 4.306002+5 4.160699+0 4.308002+5 4.370710+0 4.310002+5 4.621221+0 725 3  1  118
+ 4.312002+5 4.921533+0 4.314002+5 5.283244+0 4.316001+5 5.719956+0 725 3  1  119
+ 4.318002+5 6.247167+0 4.320002+5 6.879579+0 4.322002+5 7.627291+0 725 3  1  120
+ 4.324002+5 8.486403+0 4.326002+5 9.424515+0 4.328001+5 1.036323+1 725 3  1  121
+ 4.330001+5 1.116824+1 4.332002+5 1.167625+1 4.334002+5 1.175826+1 725 3  1  122
+ 4.336002+5 1.139328+1 4.338002+5 1.068129+1 4.340002+5 9.781502+0 725 3  1  123
+ 4.342002+5 8.841315+0 4.344001+5 7.957228+0 4.346002+5 7.174941+0 725 3  1  124
+ 4.348001+5 6.506554+0 4.350002+5 5.945867+0 4.360002+5 4.274235+0 725 3  1  125
+ 4.370002+5 3.559607+0 4.380002+5 3.206181+0 4.390002+5 3.008360+0 725 3  1  126
+ 4.400002+5 2.886642+0 4.420002+5 2.749820+0 4.440002+5 2.677217+0 725 3  1  127
+ 4.460002+5 2.632539+0 4.480001+5 2.601988+0 4.500001+5 2.579372+0 725 3  1  128
+ 4.550002+5 2.540603+0 4.600002+5 2.513035+0 4.650002+5 2.492425+0 725 3  1  129
+ 4.700002+5 2.474414+0 4.720002+5 2.472002+0 4.740002+5 2.469891+0 725 3  1  130
+ 4.760002+5 2.468280+0 4.780002+5 2.467368+0 4.800002+5 2.467557+0 725 3  1  131
+ 4.820002+5 2.480026+0 4.840002+5 2.507369+0 4.860002+5 2.564065+0 725 3  1  132
+ 4.880002+5 2.676465+0 4.890002+5 2.757545+0 4.900002+5 2.838655+0 725 3  1  133
+ 4.906002+5 2.867491+0 4.910002+5 2.883931+0 4.912002+5 2.881357+0 725 3  1  134
+ 4.918002+5 2.869283+0 4.920002+5 2.863519+0 4.930002+5 2.791045+0 725 3  1  135
+ 4.940002+5 2.702915+0 4.960002+5 2.562655+0 4.980001+5 2.479838+0 725 3  1  136
+ 5.000001+5 2.430518+0 5.020002+5 2.407005+0 5.040002+5 2.385892+0 725 3  1  137
+ 5.060002+5 2.366080+0 5.080001+5 2.347167+0 5.100002+5 2.328654+0 725 3  1  138
+ 5.150002+5 2.301601+0 5.200002+5 2.275047+0 5.300002+5 2.227229+0 725 3  1  139
+ 5.400002+5 2.178457+0 5.500002+5 2.126248+0 5.600002+5 2.068271+0 725 3  1  140
+ 5.700002+5 2.002008+0 5.800002+5 1.923577+0 5.900002+5 1.827889+0 725 3  1  141
+ 6.000002+5 1.710144+0 6.050002+5 1.646861+0 6.100002+5 1.575977+0 725 3  1  142
+ 6.120002+5 1.554927+0 6.140002+5 1.534676+0 6.160002+5 1.516826+0 725 3  1  143
+ 6.180002+5 1.503176+0 6.200002+5 1.496525+0 6.220002+5 1.507187+0 725 3  1  144
+ 6.240002+5 1.531649+0 6.250002+5 1.550001+0 6.260002+5 1.573196+0 725 3  1  145
+ 6.280002+5 1.634830+0 6.300002+5 1.717464+0 6.350002+5 1.977767+0 725 3  1  146
+ 6.400002+5 2.236418+0 6.420002+5 2.316949+0 6.440002+5 2.384880+0 725 3  1  147
+ 6.450002+5 2.413733+0 6.460002+5 2.437492+0 6.480002+5 2.475283+0 725 3  1  148
+ 6.500002+5 2.501074+0 6.520002+5 2.517661+0 6.540002+5 2.525548+0 725 3  1  149
+ 6.550003+5 2.526772+0 6.560002+5 2.527601+0 6.580002+5 2.525120+0 725 3  1  150
+ 6.600002+5 2.518240+0 6.700002+5 2.468530+0 6.800003+5 2.392120+0 725 3  1  151
+ 6.900002+5 2.329114+0 7.000002+5 2.266907+0 7.100002+5 2.213854+0 725 3  1  152
+ 7.200002+5 2.163002+0 7.400002+5 2.072985+0 7.600002+5 1.991209+0 725 3  1  153
+ 7.800003+5 1.913839+0 8.000003+5 1.838390+0 8.200003+5 1.762876+0 725 3  1  154
+ 8.400002+5 1.685579+0 8.600002+5 1.604374+0 8.800002+5 1.516816+0 725 3  1  155
+ 9.000003+5 1.419436+0 9.100002+5 1.365518+0 9.200003+5 1.307298+0 725 3  1  156
+ 9.300002+5 1.243944+0 9.400002+5 1.175171+0 9.500003+5 1.102486+0 725 3  1  157
+ 9.600003+5 1.033253+0 9.650003+5 1.006821+0 9.700004+5 9.945877-1 725 3  1  158
+ 9.750003+5 1.009924+0 9.800003+5 1.075747+0 9.850003+5 1.226997+0 725 3  1  159
+ 9.900003+5 1.501657+0 9.950004+5 1.903346+0 1.000000+6 2.345212+0 725 3  1  160
+ 1.005000+6 2.676600+0 1.010000+6 2.816349+0 1.012000+6 2.824382+0 725 3  1  161
+ 1.014000+6 2.812192+0 1.016000+6 2.785019+0 1.018000+6 2.747179+0 725 3  1  162
+ 1.020000+6 2.702367+0 1.040000+6 2.235675+0 1.045000+6 2.147698+0 725 3  1  163
+ 1.050000+6 2.071963+0 1.055000+6 2.007009+0 1.060000+6 1.951996+0 725 3  1  164
+ 1.065000+6 1.906305+0 1.070000+6 1.869831+0 1.075000+6 1.843384+0 725 3  1  165
+ 1.080000+6 1.828999+0 1.085000+6 1.830846+0 1.090000+6 1.857267+0 725 3  1  166
+ 1.095000+6 1.925255+0 1.100000+6 2.071265+0 1.105000+6 2.377932+0 725 3  1  167
+ 1.110000+6 3.007715+0 1.112000+6 3.375162+0 1.114000+6 3.757961+0 725 3  1  168
+ 1.116000+6 4.039859+0 1.117000+6 4.097610+0 1.118000+6 4.084291+0 725 3  1  169
+ 1.119000+6 4.001470+0 1.120000+6 3.860715+0 1.125000+6 2.893975+0 725 3  1  170
+ 1.130000+6 2.236933+0 1.135000+6 1.895717+0 1.140000+6 1.709476+0 725 3  1  171
+ 1.145000+6 1.598070+0 1.150000+6 1.525837+0 1.155000+6 1.476160+0 725 3  1  172
+ 1.160000+6 1.440977+0 1.165000+6 1.416107+0 1.170000+6 1.400313+0 725 3  1  173
+ 1.172000+6 1.396983+0 1.174000+6 1.395983+0 1.176000+6 1.398915+0 725 3  1  174
+ 1.178000+6 1.409188+0 1.180000+6 1.439618+0 1.181000+6 1.476418+0 725 3  1  175
+ 1.182000+6 1.557164+0 1.183000+6 1.785335+0 1.183200+6 1.877944+0 725 3  1  176
+ 1.183400+6 2.002275+0 1.183600+6 2.171636+0 1.183800+6 2.404237+0 725 3  1  177
+ 1.184000+6 2.719189+0 1.184200+6 3.120985+0 1.184400+6 3.554880+0 725 3  1  178
+ 1.184600+6 3.858262+0 1.184800+6 3.841622+0 1.185000+6 3.512894+0 725 3  1  179
+ 1.185200+6 3.068219+0 1.185400+6 2.665595+0 1.185600+6 2.354244+0 725 3  1  180
+ 1.185800+6 2.126552+0 1.186000+6 1.962104+0 1.186200+6 1.842287+0 725 3  1  181
+ 1.186400+6 1.753789+0 1.186600+6 1.687106+0 1.186800+6 1.636034+0 725 3  1  182
+ 1.187000+6 1.596370+0 1.187200+6 1.565010+0 1.187400+6 1.539855+0 725 3  1  183
+ 1.187600+6 1.519505+0 1.187800+6 1.502857+0 1.188000+6 1.489112+0 725 3  1  184
+ 1.189000+6 1.447419+0 1.190000+6 1.429173+0 1.192000+6 1.420121+0 725 3  1  185
+ 1.194000+6 1.428112+0 1.196000+6 1.447650+0 1.198000+6 1.480202+0 725 3  1  186
+ 1.200000+6 1.530231+0 1.205000+6 1.787807+0 1.210000+6 2.109365+0 725 3  1  187
+ 1.215000+6 1.840624+0 1.220000+6 1.587897+0 1.225000+6 1.482358+0 725 3  1  188
+ 1.230000+6 1.438037+0 1.235000+6 1.419570+0 1.240000+6 1.413854+0 725 3  1  189
+ 1.245000+6 1.415441+0 1.250000+6 1.421720+0 1.255000+6 1.431439+0 725 3  1  190
+ 1.260000+6 1.443873+0 1.265000+6 1.458513+0 1.270000+6 1.475163+0 725 3  1  191
+ 1.275000+6 1.493732+0 1.280000+6 1.514141+0 1.285000+6 1.536517+0 725 3  1  192
+ 1.290000+6 1.561204+0 1.295000+6 1.588661+0 1.300000+6 1.619376+0 725 3  1  193
+ 1.305000+6 1.654682+0 1.310000+6 1.696485+0 1.315000+6 1.747922+0 725 3  1  194
+ 1.320000+6 1.814781+0 1.325000+6 1.907551+0 1.330000+6 2.047210+0 725 3  1  195
+ 1.335000+6 2.276858+0 1.340000+6 2.679305+0 1.345000+6 3.319876+0 725 3  1  196
+ 1.350000+6 3.771554+0 1.355000+6 3.374427+0 1.360000+6 2.805136+0 725 3  1  197
+ 1.362000+6 2.646444+0 1.364000+6 2.526353+0 1.366000+6 2.437932+0 725 3  1  198
+ 1.368000+6 2.374322+0 1.370000+6 2.330186+0 1.372000+6 2.301568+0 725 3  1  199
+ 1.374000+6 2.285337+0 1.376000+6 2.279443+0 1.378000+6 2.282484+0 725 3  1  200
+ 1.380000+6 2.293106+0 1.385000+6 2.348335+0 1.390000+6 2.436804+0 725 3  1  201
+ 1.395000+6 2.544771+0 1.400000+6 2.646437+0 1.402000+6 2.677098+0 725 3  1  202
+ 1.404000+6 2.698495+0 1.406000+6 2.708758+0 1.408000+6 2.707210+0 725 3  1  203
+ 1.410000+6 2.693974+0 1.415000+6 2.618917+0 1.420000+6 2.511021+0 725 3  1  204
+ 1.425000+6 2.400469+0 1.430000+6 2.303611+0 1.435000+6 2.224786+0 725 3  1  205
+ 1.440000+6 2.162710+0 1.445000+6 2.114530+0 1.450000+6 2.076904+0 725 3  1  206
+ 1.455000+6 2.047504+0 1.460000+6 2.024232+0 1.465000+6 2.005594+0 725 3  1  207
+ 1.470000+6 1.990546+0 1.475000+6 1.978258+0 1.480000+6 1.968082+0 725 3  1  208
+ 1.485000+6 1.959533+0 1.490000+6 1.952269+0 1.495000+6 1.946180+0 725 3  1  209
+ 1.500000+6 1.940880+0 1.505000+6 1.936405+0 1.510000+6 1.932599+0 725 3  1  210
+ 1.515000+6 1.929423+0 1.520000+6 1.926840+0 1.525000+6 1.925025+0 725 3  1  211
+ 1.530000+6 1.923855+0 1.535000+6 1.923611+0 1.540000+6 1.924479+0 725 3  1  212
+ 1.545000+6 1.926847+0 1.550000+6 1.931406+0 1.555000+6 1.939050+0 725 3  1  213
+ 1.560000+6 1.951373+0 1.565000+6 1.971177+0 1.570000+6 2.003963+0 725 3  1  214
+ 1.575000+6 2.060041+0 1.580000+6 2.162522+0 1.582000+6 2.226647+0 725 3  1  215
+ 1.584000+6 2.311788+0 1.586000+6 2.426039+0 1.588000+6 2.579687+0 725 3  1  216
+ 1.590000+6 2.784095+0 1.592000+6 3.044435+0 1.594000+6 3.341874+0 725 3  1  217
+ 1.595000+6 3.483097+0 1.596000+6 3.607218+0 1.598000+6 3.729167+0 725 3  1  218
+ 1.600000+6 3.642915+0 1.602000+6 3.403217+0 1.604000+6 3.118118+0 725 3  1  219
+ 1.605000+6 2.985795+0 1.606000+6 2.860146+0 1.608000+6 2.652501+0 725 3  1  220
+ 1.610000+6 2.492656+0 1.615000+6 2.240600+0 1.620000+6 2.106860+0 725 3  1  221
+ 1.625000+6 2.029201+0 1.630000+6 1.980332+0 1.635000+6 1.947363+0 725 3  1  222
+ 1.640000+6 1.923804+0 1.645000+6 1.906362+0 1.650000+6 1.893047+0 725 3  1  223
+ 1.655000+6 1.882567+0 1.660000+6 1.874230+0 1.665000+6 1.867549+0 725 3  1  224
+ 1.670000+6 1.862235+0 1.675000+6 1.858204+0 1.680000+6 1.855372+0 725 3  1  225
+ 1.685000+6 1.853564+0 1.690000+6 1.852906+0 1.695000+6 1.853534+0 725 3  1  226
+ 1.700000+6 1.855490+0 1.705000+6 1.859133+0 1.710000+6 1.864636+0 725 3  1  227
+ 1.715000+6 1.872496+0 1.720000+6 1.883343+0 1.725000+6 1.897754+0 725 3  1  228
+ 1.730000+6 1.916969+0 1.735000+6 1.942222+0 1.740000+6 1.975685+0 725 3  1  229
+ 1.745000+6 2.019913+0 1.750000+6 2.078725+0 1.755000+6 2.156976+0 725 3  1  230
+ 1.760000+6 2.260359+0 1.765000+6 2.394244+0 1.770000+6 2.559020+0 725 3  1  231
+ 1.775000+6 2.740234+0 1.780000+6 2.897148+0 1.782000+6 2.939585+0 725 3  1  232
+ 1.784000+6 2.964647+0 1.786000+6 2.970036+0 1.788000+6 2.955330+0 725 3  1  233
+ 1.790000+6 2.921667+0 1.795000+6 2.776313+0 1.800000+6 2.592409+0 725 3  1  234
+ 1.805000+6 2.416398+0 1.810000+6 2.267992+0 1.815000+6 2.149705+0 725 3  1  235
+ 1.820000+6 2.057327+0 1.825000+6 1.985181+0 1.830000+6 1.928254+0 725 3  1  236
+ 1.835000+6 1.882878+0 1.840000+6 1.846124+0 1.845000+6 1.815800+0 725 3  1  237
+ 1.850000+6 1.790541+0 1.855000+6 1.769175+0 1.860000+6 1.750797+0 725 3  1  238
+ 1.865000+6 1.734853+0 1.870000+6 1.720821+0 1.875000+6 1.708310+0 725 3  1  239
+ 1.880000+6 1.697148+0 1.885000+6 1.686974+0 1.890000+6 1.677646+0 725 3  1  240
+ 1.895000+6 1.669125+0 1.900000+6 1.661282+0 1.910000+6 1.646936+0 725 3  1  241
+ 1.920000+6 1.634255+0 1.930000+6 1.622837+0 1.940000+6 1.612407+0 725 3  1  242
+ 1.950000+6 1.602612+0 1.960000+6 1.593614+0 1.970000+6 1.585082+0 725 3  1  243
+ 1.980000+6 1.576996+0 1.990000+6 1.569343+0 2.000000+6 1.562012+0 725 3  1  244
+ 2.010000+6 1.554998+0 2.020000+6 1.548302+0 2.030000+6 1.541926+0 725 3  1  245
+ 2.040000+6 1.535878+0 2.050000+6 1.530170+0 2.060000+6 1.524823+0 725 3  1  246
+ 2.070000+6 1.519767+0 2.080000+6 1.515138+0 2.090000+6 1.511094+0 725 3  1  247
+ 2.100000+6 1.507712+0 2.110000+6 1.505209+0 2.120000+6 1.503745+0 725 3  1  248
+ 2.130000+6 1.503863+0 2.140000+6 1.506128+0 2.150000+6 1.511597+0 725 3  1  249
+ 2.160000+6 1.521843+0 2.170000+6 1.539402+0 2.180000+6 1.568158+0 725 3  1  250
+ 2.190000+6 1.613314+0 2.200000+6 1.678898+0 2.202000+6 1.694264+0 725 3  1  251
+ 2.204000+6 1.710091+0 2.206000+6 1.726263+0 2.208000+6 1.742435+0 725 3  1  252
+ 2.210000+6 1.758325+0 2.212000+6 1.773655+0 2.214000+6 1.787921+0 725 3  1  253
+ 2.216000+6 1.800831+0 2.218000+6 1.811973+0 2.220000+6 1.821106+0 725 3  1  254
+ 2.222000+6 1.827799+0 2.224001+6 1.831979+0 2.226002+6 1.833547+0 725 3  1  255
+ 2.228001+6 1.832437+0 2.230001+6 1.828953+0 2.232001+6 1.823327+0 725 3  1  256
+ 2.234001+6 1.815618+0 2.236001+6 1.806221+0 2.238001+6 1.795613+0 725 3  1  257
+ 2.240001+6 1.783868+0 2.242001+6 1.771546+0 2.244001+6 1.758691+0 725 3  1  258
+ 2.246001+6 1.745622+0 2.248001+6 1.732637+0 2.250001+6 1.719713+0 725 3  1  259
+ 2.260001+6 1.660603+0 2.270001+6 1.613461+0 2.280001+6 1.577466+0 725 3  1  260
+ 2.290001+6 1.549971+0 2.300001+6 1.528694+0 2.310001+6 1.511954+0 725 3  1  261
+ 2.320001+6 1.498388+0 2.330001+6 1.487335+0 2.340001+6 1.478181+0 725 3  1  262
+ 2.350001+6 1.470404+0 2.360001+6 1.463749+0 2.370001+6 1.458003+0 725 3  1  263
+ 2.380001+6 1.453083+0 2.390001+6 1.448826+0 2.400001+6 1.445084+0 725 3  1  264
+ 2.420001+6 1.433235+0 2.440001+6 1.421479+0 2.447435+6 1.420160+0 725 3  1  265
+ 2.460001+6 1.420837+0 2.475001+6 1.430985+0 2.476002+6 1.606329+0 725 3  1  266
+ 2.477001+6 1.431672+0 2.479394+6 1.428219+0 2.480001+6 1.427702+0 725 3  1  267
+ 2.485001+6 1.424628+0 2.490001+6 1.422469+0 2.495001+6 1.425276+0 725 3  1  268
+ 2.500001+6 1.438423+0 2.505001+6 1.462000+0 2.506001+6 1.480000+0 725 3  1  269
+ 2.506501+6 1.493000+0 2.507001+6 1.511000+0 2.507501+6 1.534000+0 725 3  1  270
+ 2.508001+6 1.566000+0 2.508501+6 1.607000+0 2.509001+6 1.660000+0 725 3  1  271
+ 2.509501+6 1.721000+0 2.510001+6 1.775000+0 2.510501+6 1.800000+0 725 3  1  272
+ 2.511001+6 1.780000+0 2.511501+6 1.727000+0 2.512001+6 1.665000+0 725 3  1  273
+ 2.512501+6 1.611000+0 2.513001+6 1.567000+0 2.513501+6 1.534000+0 725 3  1  274
+ 2.514001+6 1.510000+0 2.514501+6 1.491000+0 2.515001+6 1.477000+0 725 3  1  275
+ 2.520001+6 1.426000+0 2.525001+6 1.414000+0 2.530001+6 1.408000+0 725 3  1  276
+ 2.540001+6 1.401000+0 2.560001+6 1.404000+0 2.580001+6 1.402000+0 725 3  1  277
+ 2.600001+6 1.393000+0 2.620001+6 1.399000+0 2.630001+6 1.416000+0 725 3  1  278
+ 2.640001+6 1.439000+0 2.650001+6 1.426000+0 2.660001+6 1.386000+0 725 3  1  279
+ 2.670001+6 1.356000+0 2.680001+6 1.356000+0 2.690001+6 1.374000+0 725 3  1  280
+ 2.695001+6 1.406000+0 2.700001+6 1.474000+0 2.702001+6 1.515000+0 725 3  1  281
+ 2.704001+6 1.560000+0 2.706001+6 1.599000+0 2.708001+6 1.614000+0 725 3  1  282
+ 2.710001+6 1.597000+0 2.712001+6 1.555000+0 2.714001+6 1.503000+0 725 3  1  283
+ 2.716001+6 1.455000+0 2.718001+6 1.415000+0 2.720001+6 1.382000+0 725 3  1  284
+ 2.725001+6 1.328000+0 2.730001+6 1.295000+0 2.735001+6 1.274000+0 725 3  1  285
+ 2.740001+6 1.257000+0 2.745001+6 1.244000+0 2.750001+6 1.232000+0 725 3  1  286
+ 2.755001+6 1.228000+0 2.760001+6 1.237000+0 2.770001+6 1.273000+0 725 3  1  287
+ 2.780001+6 1.314000+0 2.790001+6 1.353861+0 2.800001+6 1.388000+0 725 3  1  288
+ 2.820001+6 1.422000+0 2.840001+6 1.440000+0 2.860001+6 1.445000+0 725 3  1  289
+ 2.880001+6 1.457000+0 2.885001+6 1.495000+0 2.890001+6 1.578000+0 725 3  1  290
+ 2.892001+6 1.577000+0 2.894001+6 1.541000+0 2.896001+6 1.501000+0 725 3  1  291
+ 2.898001+6 1.472000+0 2.900001+6 1.453000+0 2.902001+6 1.439000+0 725 3  1  292
+ 2.904001+6 1.430000+0 2.906001+6 1.423000+0 2.908001+6 1.397000+0 725 3  1  293
+ 2.910001+6 1.408000+0 2.912001+6 1.424000+0 2.914001+6 1.459000+0 725 3  1  294
+ 2.916001+6 1.475001+0 2.918001+6 1.491000+0 2.920001+6 1.499000+0 725 3  1  295
+ 2.925001+6 1.511000+0 2.930001+6 1.527000+0 2.935001+6 1.551000+0 725 3  1  296
+ 2.940001+6 1.591000+0 2.942001+6 1.616000+0 2.944001+6 1.649000+0 725 3  1  297
+ 2.945001+6 1.670000+0 2.946001+6 1.695000+0 2.948001+6 1.760000+0 725 3  1  298
+ 2.950001+6 1.855000+0 2.952001+6 1.989000+0 2.954001+6 2.164000+0 725 3  1  299
+ 2.955001+6 2.255000+0 2.956001+6 2.332000+0 2.957001+6 2.380000+0 725 3  1  300
+ 2.958001+6 2.386000+0 2.959001+6 2.350000+0 2.960001+6 2.280000+0 725 3  1  301
+ 2.961001+6 2.192000+0 2.962001+6 2.102000+0 2.964001+6 1.944000+0 725 3  1  302
+ 2.966001+6 1.829000+0 2.968001+6 1.751000+0 2.970001+6 1.697000+0 725 3  1  303
+ 2.975001+6 1.624000+0 2.980001+6 1.591001+0 2.985001+6 1.575000+0 725 3  1  304
+ 2.990001+6 1.568000+0 3.000001+6 1.575000+0 3.020001+6 1.584000+0 725 3  1  305
+ 3.040001+6 1.598000+0 3.050001+6 1.610000+0 3.060001+6 1.632000+0 725 3  1  306
+ 3.070001+6 1.671000+0 3.075001+6 1.700000+0 3.080001+6 1.733000+0 725 3  1  307
+ 3.085001+6 1.755000+0 3.090001+6 1.752000+0 3.095001+6 1.727000+0 725 3  1  308
+ 3.100001+6 1.697000+0 3.105001+6 1.672000+0 3.110001+6 1.654000+0 725 3  1  309
+ 3.120001+6 1.633000+0 3.130001+6 1.623000+0 3.140001+6 1.618000+0 725 3  1  310
+ 3.150001+6 1.617000+0 3.160001+6 1.648000+0 3.170001+6 1.698001+0 725 3  1  311
+ 3.180001+6 1.764000+0 3.190001+6 1.839000+0 3.195001+6 1.872000+0 725 3  1  312
+ 3.200001+6 1.894000+0 3.210001+6 1.892000+0 3.220001+6 1.835000+0 725 3  1  313
+ 3.230001+6 1.761000+0 3.240001+6 1.696000+0 3.250001+6 1.648000+0 725 3  1  314
+ 3.260001+6 1.614000+0 3.280001+6 1.572001+0 3.300001+6 1.550000+0 725 3  1  315
+ 3.320001+6 1.537000+0 3.340001+6 1.529000+0 3.360001+6 1.532000+0 725 3  1  316
+ 3.380002+6 1.537000+0 3.400001+6 1.534000+0 3.420001+6 1.518000+0 725 3  1  317
+ 3.440001+6 1.514000+0 3.460001+6 1.521000+0 3.480001+6 1.570000+0 725 3  1  318
+ 3.485001+6 1.604000+0 3.490001+6 1.658000+0 3.495001+6 1.749000+0 725 3  1  319
+ 3.500001+6 1.898000+0 3.502002+6 1.976000+0 3.504001+6 2.059000+0 725 3  1  320
+ 3.506001+6 2.138000+0 3.508001+6 2.197001+0 3.510001+6 2.221000+0 725 3  1  321
+ 3.512002+6 2.201000+0 3.514001+6 2.143000+0 3.516001+6 2.064000+0 725 3  1  322
+ 3.518002+6 1.978000+0 3.520001+6 1.896000+0 3.521002+6 1.859000+0 725 3  1  323
+ 3.522001+6 1.825001+0 3.523001+6 1.793000+0 3.524001+6 1.782000+0 725 3  1  324
+ 3.526001+6 1.782000+0 3.528002+6 1.781000+0 3.530001+6 1.781000+0 725 3  1  325
+ 3.540001+6 1.786000+0 3.550001+6 1.813000+0 3.552002+6 1.826000+0 725 3  1  326
+ 3.554001+6 1.843000+0 3.556001+6 1.866000+0 3.558001+6 1.898000+0 725 3  1  327
+ 3.560001+6 1.943000+0 3.562001+6 2.003000+0 3.564001+6 2.079000+0 725 3  1  328
+ 3.566002+6 2.159000+0 3.568002+6 2.213000+0 3.570001+6 2.210000+0 725 3  1  329
+ 3.572001+6 2.149000+0 3.574001+6 2.065000+0 3.576001+6 1.986000+0 725 3  1  330
+ 3.578001+6 1.923000+0 3.579001+6 1.897000+0 3.580002+6 1.875000+0 725 3  1  331
+ 3.585001+6 1.802000+0 3.590001+6 1.763001+0 3.595001+6 1.740000+0 725 3  1  332
+ 3.600001+6 1.725000+0 3.610001+6 1.703000+0 3.620001+6 1.688000+0 725 3  1  333
+ 3.630002+6 1.673940+0 3.640001+6 1.665000+0 3.650001+6 1.663186+0 725 3  1  334
+ 3.660002+6 1.663000+0 3.670001+6 1.662805+0 3.680001+6 1.663000+0 725 3  1  335
+ 3.690001+6 1.664609+0 3.700001+6 1.668000+0 3.710001+6 1.672492+0 725 3  1  336
+ 3.720001+6 1.677647+0 3.730001+6 1.683436+0 3.740001+6 1.689830+0 725 3  1  337
+ 3.750001+6 1.696800+0 3.800001+6 1.738000+0 3.820001+6 1.758605+0 725 3  1  338
+ 3.825001+6 1.764100+0 3.840001+6 1.781048+0 3.850001+6 1.792800+0 725 3  1  339
+ 3.860001+6 1.805004+0 3.875001+6 1.824100+0 3.880002+6 1.830706+0 725 3  1  340
+ 3.900001+6 1.858000+0 3.920001+6 1.887000+0 3.940001+6 1.908000+0 725 3  1  341
+ 3.950001+6 1.912313+0 3.960001+6 1.917000+0 3.980001+6 1.934000+0 725 3  1  342
+ 4.000001+6 1.952001+0 4.020001+6 2.001000+0 4.040001+6 2.073000+0 725 3  1  343
+ 4.050001+6 2.107000+0 4.060001+6 2.118000+0 4.070001+6 2.105000+0 725 3  1  344
+ 4.080001+6 2.086000+0 4.090002+6 2.072000+0 4.100002+6 2.065000+0 725 3  1  345
+ 4.110002+6 2.080000+0 4.120002+6 2.124258+0 4.130002+6 2.164149+0 725 3  1  346
+ 4.140002+6 2.201311+0 4.150002+6 2.237185+0 4.160002+6 2.273573+0 725 3  1  347
+ 4.170002+6 2.310528+0 4.180002+6 2.339346+0 4.190002+6 2.338579+0 725 3  1  348
+ 4.200002+6 2.311925+0 4.220002+6 2.240782+0 4.232490+6 2.195783+0 725 3  1  349
+ 4.240002+6 2.164797+0 4.250001+6 2.121258+0 4.260002+6 2.078669+0 725 3  1  350
+ 4.280002+6 1.997000+0 4.300002+6 1.919000+0 4.304316+6 1.905489+0 725 3  1  351
+ 4.350002+6 1.792000+0 4.400002+6 1.690000+0 4.420002+6 1.655000+0 725 3  1  352
+ 4.440002+6 1.627000+0 4.450002+6 1.618288+0 4.460002+6 1.615000+0 725 3  1  353
+ 4.480001+6 1.629000+0 4.500001+6 1.673000+0 4.510002+6 1.683000+0 725 3  1  354
+ 4.520002+6 1.661000+0 4.525002+6 1.637000+0 4.530002+6 1.607000+0 725 3  1  355
+ 4.535002+6 1.573000+0 4.540002+6 1.557000+0 4.545002+6 1.578000+0 725 3  1  356
+ 4.550002+6 1.601000+0 4.560002+6 1.651000+0 4.570002+6 1.704000+0 725 3  1  357
+ 4.580001+6 1.751000+0 4.590002+6 1.781000+0 4.600002+6 1.783000+0 725 3  1  358
+ 4.610002+6 1.754000+0 4.620002+6 1.699000+0 4.630002+6 1.631000+0 725 3  1  359
+ 4.640002+6 1.559000+0 4.650002+6 1.491717+0 4.660002+6 1.429000+0 725 3  1  360
+ 4.680002+6 1.330000+0 4.700002+6 1.257000+0 4.720002+6 1.197000+0 725 3  1  361
+ 4.735002+6 1.167115+0 4.740002+6 1.157000+0 4.750001+6 1.134574+0 725 3  1  362
+ 4.760002+6 1.113000+0 4.780002+6 1.077000+0 4.800002+6 1.048000+0 725 3  1  363
+ 4.820002+6 1.028000+0 4.840002+6 1.019000+0 4.850002+6 1.017528+0 725 3  1  364
+ 4.860002+6 1.017000+0 4.880002+6 1.019000+0 4.900002+6 1.029000+0 725 3  1  365
+ 4.920002+6 1.044000+0 4.934763+6 1.056744+0 4.940002+6 1.062000+0 725 3  1  366
+ 4.950002+6 1.073933+0 4.960002+6 1.088000+0 4.980001+6 1.119000+0 725 3  1  367
+ 5.000001+6 1.153000+0 5.020002+6 1.194571+0 5.040002+6 1.238000+0 725 3  1  368
+ 5.050002+6 1.259901+0 5.060002+6 1.282097+0 5.080001+6 1.327408+0 725 3  1  369
+ 5.100002+6 1.374000+0 5.120002+6 1.419239+0 5.140002+6 1.460000+0 725 3  1  370
+ 5.150002+6 1.473000+0 5.160002+6 1.481353+0 5.180002+6 1.495921+0 725 3  1  371
+ 5.200002+6 1.507000+0 5.220002+6 1.515322+0 5.240002+6 1.520432+0 725 3  1  372
+ 5.250002+6 1.521000+0 5.260002+6 1.520458+0 5.269145+6 1.519399+0 725 3  1  373
+ 5.280002+6 1.517353+0 5.300002+6 1.511000+0 5.320002+6 1.502447+0 725 3  1  374
+ 5.340002+6 1.494000+0 5.350002+6 1.490022+0 5.360002+6 1.486082+0 725 3  1  375
+ 5.380002+6 1.478352+0 5.400002+6 1.470882+0 5.420002+6 1.463742+0 725 3  1  376
+ 5.440002+6 1.457000+0 5.450002+6 1.454832+0 5.460002+6 1.454000+0 725 3  1  377
+ 5.473678+6 1.454166+0 5.480002+6 1.455000+0 5.500002+6 1.461000+0 725 3  1  378
+ 5.510002+6 1.466000+0 5.520002+6 1.474000+0 5.530002+6 1.486000+0 725 3  1  379
+ 5.540002+6 1.502000+0 5.550002+6 1.523000+0 5.551633+6 1.526432+0 725 3  1  380
+ 5.560002+6 1.544000+0 5.570002+6 1.554000+0 5.580002+6 1.547000+0 725 3  1  381
+ 5.590002+6 1.525000+0 5.600002+6 1.498000+0 5.620002+6 1.456000+0 725 3  1  382
+ 5.640002+6 1.430000+0 5.650002+6 1.420978+0 5.660002+6 1.413000+0 725 3  1  383
+ 5.680002+6 1.399000+0 5.700002+6 1.386000+0 5.709689+6 1.378550+0 725 3  1  384
+ 5.720002+6 1.369427+0 5.740002+6 1.350700+0 5.750002+6 1.342000+0 725 3  1  385
+ 5.760002+6 1.334020+0 5.780002+6 1.319651+0 5.800002+6 1.308000+0 725 3  1  386
+ 5.820002+6 1.303521+0 5.840002+6 1.306886+0 5.850002+6 1.310000+0 725 3  1  387
+ 5.860002+6 1.313507+0 5.861790+6 1.314197+0 5.880002+6 1.323089+0 725 3  1  388
+ 5.900002+6 1.339000+0 5.910002+6 1.350211+0 5.920002+6 1.363000+0 725 3  1  389
+ 5.930002+6 1.377370+0 5.940002+6 1.392000+0 5.950002+6 1.403363+0 725 3  1  390
+ 5.960002+6 1.410000+0 5.970002+6 1.409738+0 5.980002+6 1.401000+0 725 3  1  391
+ 5.990002+6 1.386131+0 6.000002+6 1.371000+0 6.010002+6 1.356567+0 725 3  1  392
+ 6.020002+6 1.350000+0 6.030002+6 1.353214+0 6.040002+6 1.359482+0 725 3  1  393
+ 6.050002+6 1.367897+0 6.060002+6 1.377454+0 6.070002+6 1.388081+0 725 3  1  394
+ 6.080002+6 1.401230+0 6.090002+6 1.418162+0 6.100002+6 1.437389+0 725 3  1  395
+ 6.101406+6 1.440132+0 6.120002+6 1.472971+0 6.140002+6 1.501359+0 725 3  1  396
+ 6.150002+6 1.514359+0 6.160002+6 1.526967+0 6.180002+6 1.547718+0 725 3  1  397
+ 6.200002+6 1.562279+0 6.220002+6 1.571628+0 6.240002+6 1.544471+0 725 3  1  398
+ 6.250002+6 1.510904+0 6.254502+6 1.495949+0 6.260002+6 1.478335+0 725 3  1  399
+ 6.280002+6 1.416780+0 6.300002+6 1.358910+0 6.320002+6 1.318030+0 725 3  1  400
+ 6.340002+6 1.296228+0 6.350002+6 1.287269+0 6.360002+6 1.278353+0 725 3  1  401
+ 6.380002+6 1.267053+0 6.393089+6 1.268952+0 6.400002+6 1.272385+0 725 3  1  402
+ 6.450002+6 1.320250+0 6.500002+6 1.366298+0 6.520002+6 1.382011+0 725 3  1  403
+ 6.540002+6 1.391486+0 6.541887+6 1.391567+0 6.550003+6 1.389202+0 725 3  1  404
+ 6.560002+6 1.381485+0 6.580002+6 1.358128+0 6.600002+6 1.333686+0 725 3  1  405
+ 6.650002+6 1.275209+0 6.650350+6 1.274813+0 6.700002+6 1.225482+0 725 3  1  406
+ 6.728850+6 1.203080+0 6.750002+6 1.190982+0 6.800003+6 1.171697+0 725 3  1  407
+ 6.846130+6 1.165606+0 6.850002+6 1.165891+0 6.900002+6 1.177237+0 725 3  1  408
+ 6.910501+6 1.180947+0 6.950002+6 1.197719+0 7.000002+6 1.229222+0 725 3  1  409
+ 7.020003+6 1.244784+0 7.040002+6 1.261804+0 7.050003+6 1.270950+0 725 3  1  410
+ 7.060003+6 1.280569+0 7.080003+6 1.301382+0 7.100002+6 1.324403+0 725 3  1  411
+ 7.120003+6 1.348525+0 7.140003+6 1.373448+0 7.150002+6 1.386201+0 725 3  1  412
+ 7.160003+6 1.399143+0 7.180003+6 1.425582+0 7.199257+6 1.451927+0 725 3  1  413
+ 7.200002+6 1.452964+0 7.220003+6 1.481244+0 7.240003+6 1.510181+0 725 3  1  414
+ 7.250002+6 1.524816+0 7.260003+6 1.539518+0 7.280003+6 1.569801+0 725 3  1  415
+ 7.290002+6 1.585337+0 7.300003+6 1.598286+0 7.310003+6 1.606017+0 725 3  1  416
+ 7.320003+6 1.600317+0 7.340003+6 1.556274+0 7.350002+6 1.549419+0 725 3  1  417
+ 7.360003+6 1.561982+0 7.380002+6 1.607380+0 7.390003+6 1.631392+0 725 3  1  418
+ 7.398305+6 1.650240+0 7.400002+6 1.653784+0 7.410003+6 1.669836+0 725 3  1  419
+ 7.420003+6 1.672793+0 7.440002+6 1.656365+0 7.450002+6 1.645508+0 725 3  1  420
+ 7.450675+6 1.644621+0 7.460003+6 1.628485+0 7.480003+6 1.567863+0 725 3  1  421
+ 7.500002+6 1.516460+0 7.535442+6 1.453221+0 7.550003+6 1.439283+0 725 3  1  422
+ 7.600002+6 1.412207+0 7.650002+6 1.401974+0 7.700002+6 1.413150+0 725 3  1  423
+ 7.720003+6 1.419233+0 7.740003+6 1.431800+0 7.750002+6 1.443275+0 725 3  1  424
+ 7.760003+6 1.455330+0 7.780003+6 1.480615+0 7.800003+6 1.506502+0 725 3  1  425
+ 7.820003+6 1.532731+0 7.840003+6 1.560754+0 7.850002+6 1.578541+0 725 3  1  426
+ 7.860003+6 1.598234+0 7.880002+6 1.642549+0 7.900002+6 1.646111+0 725 3  1  427
+ 7.920003+6 1.588662+0 7.940002+6 1.536953+0 7.950002+6 1.512116+0 725 3  1  428
+ 7.960003+6 1.486134+0 7.980000+6 1.433165+0 7.990003+6 1.411443+0 725 3  1  429
+ 8.000003+6 1.393449+0 8.050002+6 1.338893+0 8.100002+6 1.309144+0 725 3  1  430
+ 8.150002+6 1.285896+0 8.200004+6 1.268511+0 8.250003+6 1.251298+0 725 3  1  431
+ 8.300003+6 1.225142+0 8.350003+6 1.207669+0 8.400003+6 1.219157+0 725 3  1  432
+ 8.450004+6 1.241100+0 8.500003+6 1.252861+0 8.540771+6 1.247147+0 725 3  1  433
+ 8.550003+6 1.246989+0 8.600003+6 1.257597+0 8.642722+6 1.277230+0 725 3  1  434
+ 8.650003+6 1.279043+0 8.700004+6 1.287000+0 8.722199+6 1.286625+0 725 3  1  435
+ 8.750003+6 1.284900+0 8.800003+6 1.280000+0 8.850003+6 1.271012+0 725 3  1  436
+ 8.900003+6 1.262000+0 8.950004+6 1.258846+0 9.000003+6 1.260000+0 725 3  1  437
+ 9.021625+6 1.262106+0 9.050003+6 1.266697+0 9.062970+6 1.268896+0 725 3  1  438
+ 9.100003+6 1.273000+0 9.101445+6 1.273048+0 9.150003+6 1.271843+0 725 3  1  439
+ 9.200004+6 1.267447+0 9.250003+6 1.263618+0 9.300003+6 1.264000+0 725 3  1  440
+ 9.346616+6 1.267699+0 9.380004+6 1.270441+0 9.381003+6 1.270521+0 725 3  1  441
+ 9.400003+6 1.272000+0 9.457474+6 1.270823+0 9.500003+6 1.274935+0 725 3  1  442
+ 9.600003+6 1.292049+0 9.650003+6 1.300770+0 9.659591+6 1.302443+0 725 3  1  443
+ 9.700004+6 1.309504+0 9.732439+6 1.315184+0 9.800003+6 1.327183+0 725 3  1  444
+ 9.841085+6 1.334601+0 9.900003+6 1.345409+0 9.916003+6 1.348566+0 725 3  1  445
+ 9.917004+6 1.348768+0 1.000000+7 1.367226+0 1.001631+7 1.371542+0 725 3  1  446
+ 1.010000+7 1.397205+0 1.020000+7 1.423123+0 1.025000+7 1.434029+0 725 3  1  447
+ 1.030000+7 1.444881+0 1.035000+7 1.439793+0 1.040000+7 1.427193+0 725 3  1  448
+ 1.045000+7 1.417759+0 1.045200+7 1.417103+0 1.045300+7 1.416775+0 725 3  1  449
+ 1.050000+7 1.404000+0 1.055000+7 1.414000+0 1.060000+7 1.438000+0 725 3  1  450
+ 1.065000+7 1.455000+0 1.070000+7 1.460000+0 1.075000+7 1.451000+0 725 3  1  451
+ 1.080000+7 1.430000+0 1.090000+7 1.384998+0 1.098800+7 1.350830+0 725 3  1  452
+ 1.098900+7 1.350570+0 1.100000+7 1.347849+0 1.110000+7 1.333971+0 725 3  1  453
+ 1.120000+7 1.339638+0 1.130000+7 1.356828+0 1.131365+7 1.359378+0 725 3  1  454
+ 1.140000+7 1.375563+0 1.150000+7 1.394890+0 1.152400+7 1.399698+0 725 3  1  455
+ 1.152500+7 1.399900+0 1.160000+7 1.415515+0 1.170000+7 1.437436+0 725 3  1  456
+ 1.180000+7 1.461504+0 1.190000+7 1.481001+0 1.200000+7 1.500455+0 725 3  1  457
+ 1.206000+7 1.512082+0 1.206100+7 1.512275+0 1.210000+7 1.519778+0 725 3  1  458
+ 1.220000+7 1.538556+0 1.240000+7 1.561777+0 1.250000+7 1.569025+0 725 3  1  459
+ 1.259600+7 1.573910+0 1.259700+7 1.573944+0 1.260000+7 1.574045+0 725 3  1  460
+ 1.270000+7 1.576496+0 1.280000+7 1.577352+0 1.290000+7 1.576649+0 725 3  1  461
+ 1.300000+7 1.574676+0 1.313200+7 1.569612+0 1.313300+7 1.569571+0 725 3  1  462
+ 1.320000+7 1.567207+0 1.330000+7 1.564255+0 1.340000+7 1.562252+0 725 3  1  463
+ 1.350000+7 1.561955+0 1.360000+7 1.562633+0 1.366800+7 1.563731+0 725 3  1  464
+ 1.366900+7 1.563730+0 1.370000+7 1.564230+0 1.380000+7 1.565826+0 725 3  1  465
+ 1.390000+7 1.567423+0 1.400000+7 1.569019+0 1.420000+7 1.572250+0 725 3  1  466
+ 1.420400+7 1.572314+0 1.420500+7 1.572314+0 1.430000+7 1.573812+0 725 3  1  467
+ 1.440000+7 1.575408+0 1.450000+7 1.577007+0 1.460000+7 1.578895+0 725 3  1  468
+ 1.474000+7 1.581601+0 1.474100+7 1.581601+0 1.480000+7 1.582500+0 725 3  1  469
+ 1.500000+7 1.585000+0 1.527600+7 1.586400+0 1.527700+7 1.586400+0 725 3  1  470
+ 1.530000+7 1.586400+0 1.540000+7 1.586800+0 1.550000+7 1.587000+0 725 3  1  471
+ 1.560000+7 1.589000+0 1.581200+7 1.589900+0 1.581300+7 1.589900+0 725 3  1  472
+ 1.590000+7 1.589000+0 1.600000+7 1.587000+0 1.608000+7 1.584637+0 725 3  1  473
+ 1.620000+7 1.580000+0 1.634800+7 1.571200+0 1.634900+7 1.571100+0 725 3  1  474
+ 1.640000+7 1.570000+0 1.650000+7 1.572000+0 1.660000+7 1.575000+0 725 3  1  475
+ 1.688400+7 1.580000+0 1.688500+7 1.579900+0 1.690000+7 1.579200+0 725 3  1  476
+ 1.700000+7 1.575000+0 1.715200+7 1.569902+0 1.720000+7 1.568400+0 725 3  1  477
+ 1.742100+7 1.563300+0 1.742200+7 1.563200+0 1.750000+7 1.562000+0 725 3  1  478
+ 1.770000+7 1.561800+0 1.795700+7 1.561200+0 1.795800+7 1.561200+0 725 3  1  479
+ 1.800000+7 1.561000+0 1.820000+7 1.560400+0 1.822400+7 1.560289+0 725 3  1  480
+ 1.849300+7 1.558100+0 1.849400+7 1.558100+0 1.850000+7 1.558000+0 725 3  1  481
+ 1.860000+7 1.555800+0 1.880000+7 1.552400+0 1.900000+7 1.550000+0 725 3  1  482
+ 1.902900+7 1.549900+0 1.903000+7 1.549900+0 1.910000+7 1.549600+0 725 3  1  483
+ 1.929700+7 1.549206+0 1.930000+7 1.549200+0 1.950000+7 1.548999+0 725 3  1  484
+ 1.956500+7 1.549800+0 1.956600+7 1.549800+0 1.960000+7 1.550100+0 725 3  1  485
+ 1.980000+7 1.551000+0 2.000000+7 1.550000+0 2.000001+7 1.550000+0 725 3  1  486
+ 2.100000+7 1.512413+0 2.166115+7 1.492604+0 2.200000+7 1.484030+0 725 3  1  487
+ 2.300000+7 1.465000+0 2.400000+7 1.455415+0 2.450611+7 1.452865+0 725 3  1  488
+ 2.500000+7 1.450868+0 2.600000+7 1.445821+0 2.700000+7 1.436000+0 725 3  1  489
+ 2.800000+7 1.422579+0 2.900000+7 1.408713+0 3.000000+7 1.394000+0 725 3  1  490
+ 3.100000+7 1.378828+0 3.108270+7 1.377582+0 3.200000+7 1.363868+0 725 3  1  491
+ 3.282283+7 1.351776+0 3.300000+7 1.349202+0 3.400000+7 1.334896+0 725 3  1  492
+ 3.500000+7 1.321000+0 3.522760+7 1.317906+0 3.600000+7 1.307591+0 725 3  1  493
+ 3.700000+7 1.294240+0 3.800000+7 1.280335+0 3.900000+7 1.265384+0 725 3  1  494
+ 3.961489+7 1.255500+0 4.000000+7 1.249000+0 4.100000+7 1.231272+0 725 3  1  495
+ 4.200000+7 1.212754+0 4.300000+7 1.193783+0 4.400000+7 1.174646+0 725 3  1  496
+ 4.500000+7 1.155578+0 4.600000+7 1.136775+0 4.700000+7 1.118398+0 725 3  1  497
+ 4.800000+7 1.100578+0 4.900000+7 1.083417+0 5.000000+7 1.067000+0 725 3  1  498
+ 5.100000+7 1.051354+0 5.200000+7 1.036342+0 5.300000+7 1.021803+0 725 3  1  499
+ 5.400000+7 1.007601+0 5.500000+7 9.936172-1 5.600000+7 9.797527-1 725 3  1  500
+ 5.700000+7 9.659235-1 5.800000+7 9.520588-1 5.900000+7 9.381001-1 725 3  1  501
+ 6.000000+7 9.240000-1 6.100000+7 9.096272-1 6.200000+7 8.950211-1 725 3  1  502
+ 6.300000+7 8.803755-1 6.400000+7 8.658570-1 6.500000+7 8.516079-1 725 3  1  503
+ 6.600000+7 8.377486-1 6.700000+7 8.243805-1 6.800000+7 8.115883-1 725 3  1  504
+ 6.900000+7 7.994422-1 7.000000+7 7.880000-1 7.100000+7 7.771850-1 725 3  1  505
+ 7.200000+7 7.668316-1 7.300000+7 7.568631-1 7.400000+7 7.472115-1 725 3  1  506
+ 7.500000+7 7.378162-1 7.600000+7 7.286233-1 7.700000+7 7.195852-1 725 3  1  507
+ 7.800000+7 7.106594-1 7.900000+7 7.018085-1 8.000000+7 6.930000-1 725 3  1  508
+ 8.100000+7 6.841740-1 8.200000+7 6.753401-1 8.300000+7 6.665657-1 725 3  1  509
+ 8.400001+7 6.579104-1 8.500000+7 6.494267-1 8.600000+7 6.411606-1 725 3  1  510
+ 8.700000+7 6.331523-1 8.800000+7 6.254366-1 8.900001+7 6.180438-1 725 3  1  511
+ 9.000000+7 6.110000-1 9.100000+7 6.042382-1 9.200000+7 5.976636-1 725 3  1  512
+ 9.300000+7 5.912588-1 9.400001+7 5.850080-1 9.500000+7 5.788967-1 725 3  1  513
+ 9.600000+7 5.729113-1 9.700000+7 5.670398-1 9.800000+7 5.612709-1 725 3  1  514
+ 9.900001+7 5.555941-1 1.000000+8 5.500000-1 1.020000+8 5.390777-1 725 3  1  515
+ 1.040000+8 5.285268-1 1.060000+8 5.183372-1 1.080000+8 5.084985-1 725 3  1  516
+ 1.100000+8 4.990000-1 1.120000+8 4.895748-1 1.140000+8 4.801442-1 725 3  1  517
+ 1.160000+8 4.709459-1 1.180000+8 4.621770-1 1.200000+8 4.540000-1 725 3  1  518
+ 1.220000+8 4.464928-1 1.240000+8 4.395962-1 1.260000+8 4.332499-1 725 3  1  519
+ 1.280000+8 4.274004-1 1.300000+8 4.220000-1 1.320000+8 4.170303-1 725 3  1  520
+ 1.340000+8 4.123897-1 1.360000+8 4.079248-1 1.380000+8 4.035009-1 725 3  1  521
+ 1.400000+8 3.990000-1 1.420000+8 3.944732-1 1.440000+8 3.900282-1 725 3  1  522
+ 1.460000+8 3.856455-1 1.480000+8 3.813079-1 1.500000+8 3.770000-1 725 3  1  523
+ 0.000000+0 0.000000+0          0          0          0          0 725 3  099999
+ 7.014000+3 1.388278+1          0          0          0          0 725 3 16    1
+-1.055347+7-1.055347+7          0          0          1         26 725 3 16    2
+         26          2                                             725 3 16    3
+ 1.131365+7 0.000000+0 1.140000+7 2.980028-5 1.150000+7 4.958505-5 725 3 16    4
+ 1.160000+7 1.188073-4 1.180000+7 2.960351-4 1.200000+7 6.392827-4 725 3 16    5
+ 1.240000+7 1.563174-3 1.250000+7 1.840795-3 1.300000+7 3.271449-3 725 3 16    6
+ 1.320000+7 3.855962-3 1.350000+7 4.754491-3 1.400000+7 6.263179-3 725 3 16    7
+ 1.450000+7 7.429780-3 1.500000+7 8.204540-3 1.550000+7 8.763380-3 725 3 16    8
+ 1.600000+7 9.111822-3 1.650000+7 9.343044-3 1.700000+7 9.547975-3 725 3 16    9
+ 1.750000+7 9.728760-3 1.800000+7 9.887544-3 1.850000+7 1.002647-2 725 3 16   10
+ 1.900000+7 1.014769-2 1.950000+7 1.026885-2 2.000000+7 1.021483-2 725 3 16   11
+ 2.000001+7 0.000000+0 1.500000+8 0.000000+0                       725 3 16   12
+ 0.000000+0 0.000000+0          0          0          0          0 725 3  099999
+ 0.000000+0 0.000000+0          0          0          0          0 725 0  0    0
+ 7.014000+3 1.388280+1          0          2          1          0 725 6 16    1
+ 1.000000+0 1.000000+0          0          1          1          2 725 6 16    2
+          2          2                                             725 6 16    3
+ 1.131365+7 2.000000+0 1.500000+8 2.000000+0                       725 6 16    4
+ 0.000000+0 0.000000+0          2          1          1         11 725 6 16    5
+         11          2                                             725 6 16    6
+ 0.000000+0 1.131365+7          0          1          6          2 725 6 16    7
+ 0.000000+0 3.080655-5 5.763790-2 3.246063+4 0.000000+0 0.000000+0 725 6 16    8
+ 0.000000+0 1.150000+7          0          1          6          2 725 6 16    9
+ 0.000000+0 3.080655-5 5.763790-2 3.246063+4 0.000000+0 0.000000+0 725 6 16   10
+ 0.000000+0 1.200000+7          0          1         51         17 725 6 16   11
+ 0.000000+0 3.592518-7 5.483031-2 3.246063+4 6.610500-7 5.208879-2 725 6 16   12
+ 6.492126+4 8.833650-7 4.934728-2 1.082021+5 1.083527-6 4.569193-2 725 6 16   13
+ 1.514829+5 1.251802-6 4.203657-2 1.947638+5 1.399893-6 3.838122-2 725 6 16   14
+ 2.380446+5 1.533706-6 3.472586-2 2.813255+5 1.656722-6 3.107051-2 725 6 16   15
+ 3.246064+5 1.771200-6 2.741516-2 3.678872+5 1.878707-6 2.375980-2 725 6 16   16
+ 4.111680+5 1.906248-6 2.010445-2 4.760893+5 1.584473-6 1.462142-2 725 6 16   17
+ 5.626509+5 1.188355-6 7.310708-3 6.492126+5 7.922365-7 8.88178-16 725 6 16   18
+ 7.357743+5 3.961183-7 0.000000+0 8.223360+5 1.650493-8 0.000000+0 725 6 16   19
+ 1.082021+6 0.000000+0 0.000000+0                                  725 6 16   20
+ 0.000000+0 1.300000+7          0          1         57         19 725 6 16   21
+ 0.000000+0 1.838481-7 3.667705-2 3.246063+4 3.382941-7 4.085217-2 725 6 16   22
+ 6.492126+4 4.520645-7 4.502728-2 1.082021+5 5.544978-7 5.059411-2 725 6 16   23
+ 1.514829+5 6.406129-7 5.616093-2 1.947638+5 7.163991-7 6.172776-2 725 6 16   24
+ 2.380446+5 7.848782-7 6.729458-2 2.813255+5 8.478320-7 7.286140-2 725 6 16   25
+ 3.246064+5 9.064166-7 7.842822-2 3.678872+5 9.614336-7 8.399505-2 725 6 16   26
+ 4.111680+5 1.005661-6 8.956187-2 4.760893+5 9.916600-7 9.791211-2 725 6 16   27
+ 5.626509+5 9.697470-7 1.090458-1 6.492126+5 9.478340-7 1.201794-1 725 6 16   28
+ 7.357743+5 9.259209-7 1.387936-1 8.223360+5 7.632700-7 1.574078-1 725 6 16   29
+ 1.082021+6 2.810635-7 2.132503-1 1.514829+6 2.801048-8 9.795464-8 725 6 16   30
+ 1.947637+6 0.000000+0 0.000000+0                                  725 6 16   31
+ 0.000000+0 1.400000+7          0          1         63         21 725 6 16   32
+ 0.000000+0 7.394402-8 5.280475-2 3.246063+4 1.360625-7 5.556558-2 725 6 16   33
+ 6.492126+4 1.818211-7 5.832641-2 1.082021+5 2.230200-7 6.200752-2 725 6 16   34
+ 1.514829+5 2.576556-7 6.568863-2 1.947638+5 2.881370-7 6.936974-2 725 6 16   35
+ 2.380446+5 3.156794-7 7.305086-2 2.813255+5 3.409995-7 7.673196-2 725 6 16   36
+ 3.246064+5 3.645623-7 8.041307-2 3.678872+5 3.866902-7 8.409418-2 725 6 16   37
+ 4.111680+5 4.167031-7 8.777529-2 4.760893+5 4.721943-7 9.329696-2 725 6 16   38
+ 5.626509+5 5.367278-7 1.006592-1 6.492126+5 6.012614-7 1.080214-1 725 6 16   39
+ 7.357743+5 6.657949-7 1.201154-1 8.223360+5 7.215114-7 1.322094-1 725 6 16   40
+ 1.082021+6 6.650917-7 1.684913-1 1.514829+6 3.786533-7 2.225552-1 725 6 16   41
+ 1.947637+6 6.218702-8 1.620921-1 2.380446+6 2.345210-9 3.310085-7 725 6 16   42
+ 2.813254+6 0.000000+0 0.000000+0                                  725 6 16   43
+ 0.000000+0 1.450000+7          0          1         66         22 725 6 16   44
+ 0.000000+0 4.953065-8 5.112261-2 3.246063+4 9.114007-8 5.308780-2 725 6 16   45
+ 6.492126+4 1.217910-7 5.505298-2 1.082021+5 1.493877-7 5.767324-2 725 6 16   46
+ 1.514829+5 1.725880-7 6.029348-2 1.947638+5 1.930056-7 6.291374-2 725 6 16   47
+ 2.380446+5 2.114546-7 6.553398-2 2.813255+5 2.284150-7 6.815423-2 725 6 16   48
+ 3.246064+5 2.441984-7 7.077449-2 3.678872+5 2.590205-7 7.339473-2 725 6 16   49
+ 4.111680+5 2.816660-7 7.601498-2 4.760893+5 3.315449-7 7.994536-2 725 6 16   50
+ 5.626509+5 3.900223-7 8.518586-2 6.492126+5 4.484997-7 9.042636-2 725 6 16   51
+ 7.357743+5 5.069771-7 9.996721-2 8.223360+5 5.832763-7 1.095081-1 725 6 16   52
+ 1.082021+6 6.319109-7 1.381306-1 1.514829+6 4.986108-7 1.891445-1 725 6 16   53
+ 1.947637+6 2.480956-7 2.340580-1 2.380446+6 3.497289-8 2.340581-1 725 6 16   54
+ 2.813254+6 7.41403-10 6.631998-7 3.246062+6 0.000000+0 0.000000+0 725 6 16   55
+ 0.000000+0 1.500000+7          0          1         69         23 725 6 16   56
+ 0.000000+0 3.571799-8 3.463423-2 3.246063+4 6.572375-8 3.690464-2 725 6 16   57
+ 6.492126+4 8.782703-8 3.917505-2 1.082021+5 1.077278-7 4.220227-2 725 6 16   58
+ 1.514829+5 1.244582-7 4.522948-2 1.947638+5 1.391819-7 4.825670-2 725 6 16   59
+ 2.380446+5 1.524861-7 5.128391-2 2.813255+5 1.647167-7 5.431113-2 725 6 16   60
+ 3.246064+5 1.760985-7 5.733834-2 3.678872+5 1.867872-7 6.036555-2 725 6 16   61
+ 4.111680+5 2.040347-7 6.339277-2 4.760893+5 2.445893-7 6.793359-2 725 6 16   62
+ 5.626509+5 2.922618-7 7.398802-2 6.492126+5 3.399343-7 8.004245-2 725 6 16   63
+ 7.357743+5 3.876068-7 8.833708-2 8.223360+5 4.610451-7 9.663171-2 725 6 16   64
+ 1.082021+6 5.481416-7 1.215156-1 1.514829+6 5.214829-7 1.672177-1 725 6 16   65
+ 1.947637+6 3.653549-7 2.168989-1 2.380446+6 1.701324-7 2.572502-1 725 6 16   66
+ 2.813254+6 2.328232-8 2.572503-1 3.246062+6 4.51337-10 9.324974-7 725 6 16   67
+ 3.678870+6 0.000000+0 0.000000+0                                  725 6 16   68
+ 0.000000+0 1.600000+7          0          1         75         25 725 6 16   69
+ 0.000000+0 2.246756-8 2.615536-2 3.246063+4 4.134198-8 2.775431-2 725 6 16   70
+ 6.492126+4 5.524553-8 2.935326-2 1.082021+5 6.776362-8 3.148519-2 725 6 16   71
+ 1.514829+5 7.828750-8 3.361712-2 1.947638+5 8.754913-8 3.574905-2 725 6 16   72
+ 2.380446+5 9.591777-8 3.788098-2 2.813255+5 1.036112-7 4.001291-2 725 6 16   73
+ 3.246064+5 1.107706-7 4.214484-2 3.678872+5 1.174941-7 4.427677-2 725 6 16   74
+ 4.111680+5 1.287368-7 4.640870-2 4.760893+5 1.562144-7 4.960660-2 725 6 16   75
+ 5.626509+5 1.885630-7 5.387046-2 6.492126+5 2.209115-7 5.813432-2 725 6 16   76
+ 7.357743+5 2.532600-7 6.437686-2 8.223360+5 3.074004-7 7.061940-2 725 6 16   77
+ 1.082021+6 3.874698-7 8.934703-2 1.514829+6 4.261842-7 1.239298-1 725 6 16   78
+ 1.947637+6 4.022457-7 1.608429-1 2.380446+6 3.283334-7 2.027648-1 725 6 16   79
+ 2.813254+6 2.146793-7 2.498119-1 3.246062+6 9.475770-8 2.902763-1 725 6 16   80
+ 3.678870+6 1.260846-8 2.902764-1 4.111678+6 2.24028-10 1.511651-6 725 6 16   81
+ 4.544486+6 0.000000+0 0.000000+0                                  725 6 16   82
+ 0.000000+0 1.800000+7          0          1         84         28 725 6 16   83
+ 0.000000+0 2.668144-8 8.629995-3 3.246063+4 4.909582-8 9.651605-3 725 6 16   84
+ 6.492126+4 6.560703-8 1.067322-2 1.082021+5 8.047294-8 1.203536-2 725 6 16   85
+ 1.514829+5 9.297061-8 1.339751-2 1.947638+5 1.039693-7 1.475966-2 725 6 16   86
+ 2.380446+5 1.139075-7 1.612180-2 2.813255+5 1.230438-7 1.748395-2 725 6 16   87
+ 3.246064+5 1.315461-7 1.884610-2 3.678872+5 1.395306-7 2.020824-2 725 6 16   88
+ 4.111680+5 1.489651-7 2.157039-2 4.760893+5 1.620130-7 2.361361-2 725 6 16   89
+ 5.626509+5 1.769286-7 2.633791-2 6.492126+5 1.918441-7 2.906220-2 725 6 16   90
+ 7.357743+5 2.067597-7 3.386196-2 8.223360+5 2.299466-7 3.866172-2 725 6 16   91
+ 1.082021+6 2.588424-7 5.306101-2 1.514829+6 2.606328-7 7.914388-2 725 6 16   92
+ 1.947637+6 2.435690-7 1.065518-1 2.380446+6 2.268238-7 1.372947-1 725 6 16   93
+ 2.813254+6 2.170206-7 1.720396-1 3.246062+6 2.101371-7 2.145215-1 725 6 16   94
+ 3.678870+6 1.952271-7 2.663674-1 4.111678+6 1.589355-7 3.322405-1 725 6 16   95
+ 4.544486+6 9.906694-8 3.936372-1 4.977294+6 3.745729-8 4.545481-1 725 6 16   96
+ 5.410102+6 4.170571-9 3.446281-6 5.842910+6 0.000000+0 0.000000+0 725 6 16   97
+ 0.000000+0 2.000000+7          0          1         96         32 725 6 16   98
+ 0.000000+0 1.689254-8 7.326430-3 3.246063+4 3.108353-8 8.126731-3 725 6 16   99
+ 6.492126+4 4.153711-8 8.927032-3 1.082021+5 5.094901-8 9.994100-3 725 6 16  100
+ 1.514829+5 5.886153-8 1.106117-2 1.947638+5 6.582502-8 1.212824-2 725 6 16  101
+ 2.380446+5 7.211709-8 1.319530-2 2.813255+5 7.790148-8 1.426237-2 725 6 16  102
+ 3.246064+5 8.328442-8 1.532944-2 3.678872+5 8.833955-8 1.639651-2 725 6 16  103
+ 4.111680+5 9.530095-8 1.746358-2 4.760893+5 1.085027-7 1.906418-2 725 6 16  104
+ 5.626509+5 1.238751-7 2.119831-2 6.492126+5 1.392474-7 2.333245-2 725 6 16  105
+ 7.357743+5 1.546198-7 2.635000-2 8.223360+5 1.784158-7 2.936755-2 725 6 16  106
+ 1.082021+6 2.084093-7 3.842019-2 1.514829+6 2.137878-7 5.527349-2 725 6 16  107
+ 1.947637+6 1.988135-7 7.367558-2 2.380446+6 1.800255-7 9.542048-2 725 6 16  108
+ 2.813254+6 1.642018-7 1.200915-1 3.246062+6 1.530437-7 1.472323-1 725 6 16  109
+ 3.678870+6 1.471948-7 1.780167-1 4.111678+6 1.459091-7 2.242241-1 725 6 16  110
+ 4.544486+6 1.473427-7 2.719630-1 4.977294+6 1.472226-7 3.201268-1 725 6 16  111
+ 5.410102+6 1.368941-7 3.686738-1 5.842910+6 1.063076-7 4.178589-1 725 6 16  112
+ 6.275718+6 5.874398-8 4.670697-1 6.708527+6 1.691360-8 5.222386-1 725 6 16  113
+ 7.141335+6 1.609655-9 5.612656-6 7.574143+6 0.000000+0 0.000000+0 725 6 16  114
+ 0.000000+0 1.500000+8          0          1         96         32 725 6 16  115
+ 0.000000+0 1.689254-8 7.326430-3 3.246063+4 3.108353-8 8.126731-3 725 6 16  116
+ 6.492126+4 4.153711-8 8.927032-3 1.082021+5 5.094901-8 9.994100-3 725 6 16  117
+ 1.514829+5 5.886153-8 1.106117-2 1.947638+5 6.582502-8 1.212824-2 725 6 16  118
+ 2.380446+5 7.211709-8 1.319530-2 2.813255+5 7.790148-8 1.426237-2 725 6 16  119
+ 3.246064+5 8.328442-8 1.532944-2 3.678872+5 8.833955-8 1.639651-2 725 6 16  120
+ 4.111680+5 9.530095-8 1.746358-2 4.760893+5 1.085027-7 1.906418-2 725 6 16  121
+ 5.626509+5 1.238751-7 2.119831-2 6.492126+5 1.392474-7 2.333245-2 725 6 16  122
+ 7.357743+5 1.546198-7 2.635000-2 8.223360+5 1.784158-7 2.936755-2 725 6 16  123
+ 1.082021+6 2.084093-7 3.842019-2 1.514829+6 2.137878-7 5.527349-2 725 6 16  124
+ 1.947637+6 1.988135-7 7.367558-2 2.380446+6 1.800255-7 9.542048-2 725 6 16  125
+ 2.813254+6 1.642018-7 1.200915-1 3.246062+6 1.530437-7 1.472323-1 725 6 16  126
+ 3.678870+6 1.471948-7 1.780167-1 4.111678+6 1.459091-7 2.242241-1 725 6 16  127
+ 4.544486+6 1.473427-7 2.719630-1 4.977294+6 1.472226-7 3.201268-1 725 6 16  128
+ 5.410102+6 1.368941-7 3.686738-1 5.842910+6 1.063076-7 4.178589-1 725 6 16  129
+ 6.275718+6 5.874398-8 4.670697-1 6.708527+6 1.691360-8 5.222386-1 725 6 16  130
+ 7.141335+6 1.609655-9 5.612656-6 7.574143+6 0.000000+0 0.000000+0 725 6 16  131
+ 0.000000+0 0.000000+0          0          0          0          0 725 6  099999
+ 0.000000+0 0.000000+0          0          0          0          0 725 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0

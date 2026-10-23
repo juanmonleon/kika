@@ -1,15 +1,18 @@
-"""What a check of an ENDF covariance section found, and where.
+"""What a check of an ENDF evaluation found, and where.
 
 These are *layer 1* findings: about a section as it is written in the file,
-before kika assembles it into a model covariance. None of them blocks anything.
-``level`` says how bad the finding is, not what to do about it:
+before kika assembles it into a model. They come from two families of checks
+that share this vocabulary -- the covariance checks (:func:`check_covariances`)
+and the data checks (:func:`kika.endf.checks.data.check_data`) -- and none of
+them blocks anything. ``level`` says how bad the finding is, not what to do
+about it:
 
 * ``note``   -- true and worth knowing, but not a fault: rounding, rows with no
   variance, a grid that stops short of MF3.
 * ``warn``   -- probably a fault, or one that only matters in some uses.
-* ``defect`` -- the section is not what ENDF-6 says it should be, or it is not a
-  covariance: a count that does not match, |rho| > 1, a negative eigenvalue
-  well above rounding.
+* ``defect`` -- the section is not what ENDF-6 or physics allows, and using it
+  gives a wrong result: a count that does not match, |rho| > 1, a negative
+  probability, a level photon with more energy than its level.
 """
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ _RANK = {level: i for i, level in enumerate(LEVELS)}
 
 
 @dataclass(frozen=True)
-class CovarianceLocation:
+class Location:
     """Where in the file a finding is: as many of the ENDF indices as apply.
 
     ``ni`` and ``nc`` are 0-based positions of the sub-subsection within its
@@ -32,6 +35,10 @@ class CovarianceLocation:
     are the final states of an MF40 block, ``band`` the 0-based incident-energy
     band of MF35, and ``range_index``/``block`` the 0-based energy range of MF32
     and the LCOMP=1 short-range block within it.
+
+    The data checks add three: ``k``, the 0-based subsection within a section
+    (the partial distribution of MF5, the product of MF6, the photon of MF12),
+    ``zap`` the product's ZA, and ``t`` the 0-based temperature of MF7.
     """
 
     mat: Optional[int] = None
@@ -50,6 +57,9 @@ class CovarianceLocation:
     band: Optional[int] = None
     range_index: Optional[int] = None
     block: Optional[int] = None
+    k: Optional[int] = None
+    zap: Optional[int] = None
+    t: Optional[int] = None
 
     def __str__(self) -> str:
         parts = []
@@ -77,22 +87,50 @@ class CovarianceLocation:
             parts.append(f"NI[{self.ni}]")
         if self.lb is not None:
             parts.append(f"LB={self.lb}" + (f" LS={self.ls}" if self.ls is not None else ""))
+        if self.k is not None:
+            parts.append(f"k[{self.k}]")
+        if self.zap is not None:
+            parts.append(f"ZAP={self.zap}")
+        if self.t is not None:
+            parts.append(f"T[{self.t}]")
         return " ".join(parts) if parts else "(file)"
 
     def to_dict(self) -> Dict[str, Optional[int]]:
-        """Every index, ``None`` where it does not apply, as plain Python ints."""
-        return {f.name: (None if getattr(self, f.name) is None else int(getattr(self, f.name)))
-                for f in fields(self)}
+        """Every index, ``None`` where it does not apply, as plain Python ints.
+
+        The indices only the data checks use (:data:`DATA_ONLY_FIELDS`) are
+        left out when they are ``None``, so a covariance finding reads as it
+        always has.
+        """
+        out = {}
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if value is None and f.name in DATA_ONLY_FIELDS:
+                continue
+            out[f.name] = None if value is None else int(value)
+        return out
+
+
+#: The location fields only the data checks set.
+DATA_ONLY_FIELDS = ("k", "zap", "t")
+#: The covariance checks' location fields, the columns of their tables.
+COVARIANCE_FIELDS = tuple(f.name for f in fields(Location) if f.name not in DATA_ONLY_FIELDS)
+CovarianceLocation = Location
+
+
+def location_fields(kind: str) -> Tuple[str, ...]:
+    """The location columns a report of *kind* tabulates."""
+    return COVARIANCE_FIELDS if kind == "covariance" else tuple(f.name for f in fields(Location))
 
 
 @dataclass(frozen=True)
-class CovarianceFinding:
-    """One thing that is true about a covariance section, with its evidence."""
+class Finding:
+    """One thing that is true about a section, with its evidence."""
 
     check: str
     level: str
     summary: str
-    location: CovarianceLocation = field(default_factory=CovarianceLocation)
+    location: Location = field(default_factory=Location)
     evidence: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -116,19 +154,27 @@ class CovarianceFinding:
                 "summary": to_symbols(self.summary), "evidence": jsonable(self.evidence)}
 
 
-@dataclass(frozen=True)
-class CovarianceCheckReport:
-    """Every finding of :func:`check_covariances` on one file.
+CovarianceFinding = Finding
 
-    Like the pre-flight's report, it defines no truthiness: "is the file ok"
-    depends on which levels the caller cares about, so ask :attr:`defects`.
+
+@dataclass(frozen=True)
+class CheckReport:
+    """Every finding of the checks run on one file.
+
+    ``kind`` names the family that produced it: ``"covariance"``
+    (:func:`check_covariances`), ``"data"`` (:func:`~kika.endf.checks.data.check_data`)
+    or ``"evaluation"`` (both, :func:`kika.check`). It picks the title, the
+    method and the legend of the pages. Like the pre-flight's report, it
+    defines no truthiness: "is the file ok" depends on which levels the caller
+    cares about, so ask :attr:`defects`.
     """
 
-    findings: Tuple[CovarianceFinding, ...] = ()
+    findings: Tuple[Finding, ...] = ()
     source: Optional[str] = None
     mat: Optional[int] = None
-    #: The covariance files that were asked for (and checked where present).
+    #: The files that were asked for (and checked where present).
     mf: Tuple[int, ...] = ()
+    kind: str = "evaluation"
 
     def __iter__(self) -> Iterator[CovarianceFinding]:
         return iter(self.findings)
@@ -167,7 +213,7 @@ class CovarianceCheckReport:
         """One row per finding: level, check, the location fields, summary, evidence."""
         import pandas as pd
 
-        loc_names = [f.name for f in fields(CovarianceLocation)]
+        loc_names = list(location_fields(self.kind))
         rows = []
         for f in self.findings:
             row = {"level": f.level, "check": f.check}
@@ -216,8 +262,17 @@ class CovarianceCheckReport:
 
         return write_text(report_html(self, level), path)
 
+    def __add__(self, other: "CheckReport") -> "CheckReport":
+        """The findings of both, as one ``"evaluation"`` report of the same file."""
+        mf = tuple(sorted(set(self.mf) | set(other.mf)))
+        return CheckReport(self.findings + other.findings, source=self.source or other.source,
+                           mat=self.mat if self.mat is not None else other.mat, mf=mf,
+                           kind=self.kind if self.kind == other.kind else "evaluation")
+
     def __str__(self) -> str:
-        head = "Covariance check"
+        from .suites import suite
+
+        head = suite(self.kind).title
         if self.source:
             head += f" of {self.source}"
         if self.mat is not None:
@@ -233,3 +288,10 @@ class CovarianceCheckReport:
         for f in sorted(self.findings, key=lambda f: -_RANK[f.level]):
             lines.append(f"  {f}")
         return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class CovarianceCheckReport(CheckReport):
+    """Every finding of :func:`check_covariances` on one file."""
+
+    kind: str = "covariance"

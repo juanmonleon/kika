@@ -1,0 +1,394 @@
+ ENDF/B-VIII.1                                                         0  0
+ 9.624000+4 2.379930+2          0          1          0          19625 1451    1
+ 0.000000+0 1.000000+0          0          0          0          69625 1451    2
+ 1.000000+0 2.000000+7          1          0         10          89625 1451    3
+ 0.000000+0 0.000000+0          0          0        324         539625 1451    4
+ 96-Cm-240 JAEA+      EVAL-FEB10 O.Iwamoto, T.Nakagawa, et al.    9625 1451    5
+ NDS 148, 1 (2018)    DIST-AUG24 REV1-DEC23            20240830   9625 1451    6
+---- ENDF/B-VIII.1    MATERIAL 9625         REVISION 1            9625 1451    7
+----- INCIDENT-NEUTRON DATA                                       9625 1451    8
+------ ENDF-6                                                     9625 1451    9
+                                                                  9625 1451   10
+ *****************************************************************9625 1451   11
+                         JENDL-4.0 adopted                        9625 1451   12
+ *****************************************************************9625 1451   13
+ *****************************************************************9625 1451   14
+ MF1, MT456                                                       9625 1451   15
+   Evaluation by R.Q. Wright                                      9625 1451   16
+   Prompt-nubar based on Maslov, INDC(BLR)-002 (1995)             9625 1451   17
+ MF1, MT452                                                       9625 1451   18
+   sum of 455 and 456 recalculated                                9625 1451   19
+                                                  Dec. 2023       9625 1451   20
+ *****************************************************************9625 1451   21
+AUG11 Added MT458 fission energy release data based on R. Vogt    9625 1451   22
+Energy-Dependent Fission Q Values Generalized for All Actinides   9625 1451   23
+Oct 8, 2008 report LLNL-TR-407620                                 9625 1451   24
+                                                                  9625 1451   25
+                                                                  9625 1451   26
+History                                                           9625 1451   27
+07-08 Theoretical calculation was performed with CCONE code.      9625 1451   28
+07-10 Theoretical calculation was performed with CCONE code.      9625 1451   29
+      Data were compiled as JENDL/AC-2008/1/.                     9625 1451   30
+10-02 Data of prompt gamma rays due to fission were given.        9625 1451   31
+10-03 Covariance data were given.                                 9625 1451   32
+                                                                  9625 1451   33
+                                                                  9625 1451   34
+MF=1 General information                                          9625 1451   35
+  MT=452 Number of Neutrons per fission                           9625 1451   36
+    Sum of MT's=455 and 456.                                      9625 1451   37
+                                                                  9625 1451   38
+  MT=455 Delayed neutron data                                     9625 1451   39
+    (Same as JENDL-3.3)                                           9625 1451   40
+    Estimated from Tuttle's systematics /2/.                      9625 1451   41
+                                                                  9625 1451   42
+  MT=456 Number of prompt neutrons per fission                    9625 1451   43
+    (Same as JENDL-3.3)                                           9625 1451   44
+    Estimated from Howerton's sytematics /3/.                     9625 1451   45
+                                                                  9625 1451   46
+                                                                  9625 1451   47
+MF= 2 Resonance parameters                                        9625 1451   48
+  MT=151                                                          9625 1451   49
+  No resonance parameters are given.                              9625 1451   50
+                                                                  9625 1451   51
+                                                                  9625 1451   52
+     Thermal cross sections and resonance integrals (at 300K)     9625 1451   53
+    -------------------------------------------------------       9625 1451   54
+                    0.0253 eV    reson. integ.(*)                 9625 1451   55
+                     (barns)       (barns)                        9625 1451   56
+    -------------------------------------------------------       9625 1451   57
+    total             91.08                                       9625 1451   58
+    elastic           10.92                                       9625 1451   59
+    fission           30.01          188                          9625 1451   60
+    capture           50.01          293                          9625 1451   61
+    -------------------------------------------------------       9625 1451   62
+      (*) In the energy range from 0.5 eV to 10 MeV.              9625 1451   63
+                                                                  9625 1451   64
+                                                                  9625 1451   65
+MF= 3 Neutron cross sections                                      9625 1451   66
+  Below 3.2 eV:                                                   9625 1451   67
+    * Elastic scattering cross section is 10.9 b calculated from  9625 1451   68
+      scattering radius of 9.29fm/4/.                             9625 1451   69
+    * Capture cross section is in the 1/v shape, and 50 b at      9625 1451   70
+      0.0253 eV which was estimated from systematics.             9625 1451   71
+    * Fission cross section is in the 1/v shape, and 30 b at      9625 1451   72
+      0.0253 eV which was estimated by assuming that the cross-   9625 1451   73
+      section ratio of capture and fission was the same as that   9625 1451   74
+      at 1 eV calculated with CCONE code /4/.                     9625 1451   75
+                                                                  9625 1451   76
+  Above 3.2 eV:                                                   9625 1451   77
+    Cross sections were calculated with CCONE code/4/.            9625 1451   78
+                                                                  9625 1451   79
+  MT= 1 Total cross section                                       9625 1451   80
+    The cross section was calculated with CC OMP of Soukhovitskii 9625 1451   81
+    et al./5/.                                                    9625 1451   82
+                                                                  9625 1451   83
+  MT=18 Fission cross section                                     9625 1451   84
+    The simulated (n,f) cross sections of Britt and Wilhelmy/6/   9625 1451   85
+    were used to determine the parameters in the CCONE            9625 1451   86
+    calculation.                                                  9625 1451   87
+                                                                  9625 1451   88
+                                                                  9625 1451   89
+MF= 4 Angular distributions of secondary neutrons                 9625 1451   90
+  MT=2 Elastic scattering                                         9625 1451   91
+    Calculated with CCONE code.                                   9625 1451   92
+                                                                  9625 1451   93
+  MT=18 Fission                                                   9625 1451   94
+    Isotropic distributions in the laboratory system were assumed.9625 1451   95
+                                                                  9625 1451   96
+                                                                  9625 1451   97
+MF= 5 Energy distributions of secondary neutrons                  9625 1451   98
+  MT=18 Prompt neutrons                                           9625 1451   99
+    Calculated with CCONE code/4/.                                9625 1451  100
+                                                                  9625 1451  101
+                                                                  9625 1451  102
+MF= 6 Energy-angle distributions                                  9625 1451  103
+    Calculated with CCONE code.                                   9625 1451  104
+    Distributions from fission (MT=18) are not included.          9625 1451  105
+                                                                  9625 1451  106
+                                                                  9625 1451  107
+MF=12 Photon production multiplicities                            9625 1451  108
+  MT=18 Fission                                                   9625 1451  109
+    Calculated from the total energy released by the prompt       9625 1451  110
+    gamma-rays due to fission which was estimated from its        9625 1451  111
+    systematics, and the average energy of gamma-rays.            9625 1451  112
+                                                                  9625 1451  113
+                                                                  9625 1451  114
+MF=14 Photon angular distributions                                9625 1451  115
+  MT=18 Fission                                                   9625 1451  116
+    Isotoropic distributions were assumed.                        9625 1451  117
+                                                                  9625 1451  118
+                                                                  9625 1451  119
+MF=15 Continuous photon energy spectra                            9625 1451  120
+  MT=18 Fission                                                   9625 1451  121
+    Experimental data measured by Verbinski et al./7/ for         9625 1451  122
+    Pu-239 thermal fission were adopted.                          9625 1451  123
+                                                                  9625 1451  124
+                                                                  9625 1451  125
+MF=31 Covariances of average number of neutrons per fission       9625 1451  126
+  MT=452 Number of neutrons per fission                           9625 1451  127
+    Sum of covariances for MT=455 and MT=456.                     9625 1451  128
+                                                                  9625 1451  129
+  MT=455                                                          9625 1451  130
+    Error of 15% was assumed.                                     9625 1451  131
+                                                                  9625 1451  132
+  MT=456                                                          9625 1451  133
+    Covariance was obtained by fitting a linear function to the   9625 1451  134
+    at 0.0 and 5.0 MeV with an uncertainty of 5%.                 9625 1451  135
+                                                                  9625 1451  136
+                                                                  9625 1451  137
+MF=33 Covariances of neutron cross sections                       9625 1451  138
+  Covariances were given to all the cross sections by using       9625 1451  139
+  KALMAN code/8/ and the covariances of model parameters          9625 1451  140
+  used in the cross-section calculations.                         9625 1451  141
+                                                                  9625 1451  142
+  Covariances of the fission cross section were determined from   9625 1451  143
+  experimental data.                                              9625 1451  144
+                                                                  9625 1451  145
+  For the following cross sections, standard deviations in the    9625 1451  146
+  energy region below 3.2 eV were assumed as follows:             9625 1451  147
+                                                                  9625 1451  148
+     Total               33 %                                     9625 1451  149
+     Elastic scattering  50 %                                     9625 1451  150
+     Fission             50 %                                     9625 1451  151
+     Capture             50 %                                     9625 1451  152
+                                                                  9625 1451  153
+                                                                  9625 1451  154
+MF=34 Covariances for Angular Distributions                       9625 1451  155
+  MT=2 Elastic scattering                                         9625 1451  156
+    Covariances were given only to P1 components.                 9625 1451  157
+                                                                  9625 1451  158
+                                                                  9625 1451  159
+MF=35 Covariances for Energy Distributions                        9625 1451  160
+  MT=18 Fission spectra                                           9625 1451  161
+    Estimated with CCONE and KALMAN codes.                        9625 1451  162
+                                                                  9625 1451  163
+                                                                  9625 1451  164
+***************************************************************** 9625 1451  165
+  Calculation with CCONE code                                     9625 1451  166
+***************************************************************** 9625 1451  167
+                                                                  9625 1451  168
+  Models and parameters used in the CCONE/4/ calculation          9625 1451  169
+  1) Coupled channel optical model                                9625 1451  170
+     Levels in the rotational band were included. Optical model   9625 1451  171
+     potential and coupled levels are shown in Table 1.           9625 1451  172
+                                                                  9625 1451  173
+  2) Two-component exciton model/9/                               9625 1451  174
+    * Global parametrization of Koning-Duijvestijn/10/            9625 1451  175
+      was used.                                                   9625 1451  176
+    * Gamma emission channel/11/ was added to simulate direct     9625 1451  177
+      and semi-direct capture reaction.                           9625 1451  178
+                                                                  9625 1451  179
+  3) Hauser-Feshbach statistical model                            9625 1451  180
+    * Moldauer width fluctuation correction/12/ was included.     9625 1451  181
+    * Neutron, gamma and fission decay channel were included.     9625 1451  182
+    * Transmission coefficients of neutrons were taken from       9625 1451  183
+      coupled channel calculation in Table 1.                     9625 1451  184
+    * The level scheme of the target is shown in Table 2.         9625 1451  185
+    * Level density formula of constant temperature and Fermi-gas 9625 1451  186
+      model were used with shell energy correction and collective 9625 1451  187
+      enhancement factor. Parameters are shown in Table 3.        9625 1451  188
+    * Fission channel:                                            9625 1451  189
+      Double humped fission barriers were assumed.                9625 1451  190
+      Fission barrier penetrabilities were calculated with        9625 1451  191
+      Hill-Wheler formula/13/. Fission barrier parameters were    9625 1451  192
+      shown in Table 4. Transition state model was used and       9625 1451  193
+      continuum levels are assumed above the saddles. The level   9625 1451  194
+      density parameters for inner and outer saddles are shown in 9625 1451  195
+      Tables 5 and 6, respectively.                               9625 1451  196
+    * Gamma-ray strength function of Kopecky et al/14/,/15/       9625 1451  197
+      was used. The prameters are shown in Table 7.               9625 1451  198
+                                                                  9625 1451  199
+                                                                  9625 1451  200
+------------------------------------------------------------------9625 1451  201
+                              Tables                              9625 1451  202
+------------------------------------------------------------------9625 1451  203
+                                                                  9625 1451  204
+Table 1. Coupled channel calculation                              9625 1451  205
+  --------------------------------------------------              9625 1451  206
+  * rigid rotor model was applied                                 9625 1451  207
+  * coupled levels = 0,1,2,3,4 (see Table 2)                      9625 1451  208
+  * optical potential parameters /5/                              9625 1451  209
+    Volume:                                                       9625 1451  210
+      V_0       = 49.97    MeV                                    9625 1451  211
+      lambda_HF = 0.01004  1/MeV                                  9625 1451  212
+      C_viso    = 15.9     MeV                                    9625 1451  213
+      A_v       = 12.04    MeV                                    9625 1451  214
+      B_v       = 81.36    MeV                                    9625 1451  215
+      E_a       = 385      MeV                                    9625 1451  216
+      r_v       = 1.2568   fm                                     9625 1451  217
+      a_v       = 0.633    fm                                     9625 1451  218
+    Surface:                                                      9625 1451  219
+      W_0       = 17.2     MeV                                    9625 1451  220
+      B_s       = 11.19    MeV                                    9625 1451  221
+      C_s       = 0.01361  1/MeV                                  9625 1451  222
+      C_wiso    = 23.5     MeV                                    9625 1451  223
+      r_s       = 1.1803   fm                                     9625 1451  224
+      a_s       = 0.601    fm                                     9625 1451  225
+    Spin-orbit:                                                   9625 1451  226
+      V_so      = 5.75     MeV                                    9625 1451  227
+      lambda_so = 0.005    1/MeV                                  9625 1451  228
+      W_so      = -3.1     MeV                                    9625 1451  229
+      B_so      = 160      MeV                                    9625 1451  230
+      r_so      = 1.1214   fm                                     9625 1451  231
+      a_so      = 0.59     fm                                     9625 1451  232
+    Coulomb:                                                      9625 1451  233
+      C_coul    = 1.3                                             9625 1451  234
+      r_c       = 1.2452   fm                                     9625 1451  235
+      a_c       = 0.545    fm                                     9625 1451  236
+    Deformation:                                                  9625 1451  237
+      beta_2    = 0.213                                           9625 1451  238
+      beta_4    = 0.066                                           9625 1451  239
+      beta_6    = 0.0015                                          9625 1451  240
+                                                                  9625 1451  241
+  * Calculated strength function                                  9625 1451  242
+    S0= 1.12e-4 S1= 2.90e-4 R'=  9.29 fm (En=1 keV)               9625 1451  243
+  --------------------------------------------------              9625 1451  244
+                                                                  9625 1451  245
+Table 2. Level Scheme of Cm-240                                   9625 1451  246
+  -------------------                                             9625 1451  247
+  No.  Ex(MeV)   J PI                                             9625 1451  248
+  -------------------                                             9625 1451  249
+   0  0.00000   0  +  *                                           9625 1451  250
+   1  0.03800   2  +  *                                           9625 1451  251
+   2  0.12700   4  +  *                                           9625 1451  252
+   3  0.26600   6  +  *                                           9625 1451  253
+   4  0.45600   8  +  *                                           9625 1451  254
+  -------------------                                             9625 1451  255
+  *) Coupled levels in CC calculation                             9625 1451  256
+                                                                  9625 1451  257
+Table 3. Level density parameters                                 9625 1451  258
+  --------------------------------------------------------        9625 1451  259
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         9625 1451  260
+            1/MeV     MeV     MeV     MeV     MeV     MeV         9625 1451  261
+  --------------------------------------------------------        9625 1451  262
+   Cm-241 18.5675  0.7730  1.0938  0.3935 -0.8080  2.9546         9625 1451  263
+   Cm-240 18.5012  1.5492  1.2421  0.3627  0.2677  3.3492         9625 1451  264
+   Cm-239 18.4349  0.7762  1.2849  0.2896  0.0935  1.7762         9625 1451  265
+   Cm-238 18.3685  1.5557  1.3566  0.2895  0.8738  2.5557         9625 1451  266
+  --------------------------------------------------------        9625 1451  267
+                                                                  9625 1451  268
+Table 4. Fission barrier parameters                               9625 1451  269
+  ----------------------------------------                        9625 1451  270
+  Nuclide     V_A    hw_A     V_B    hw_B                         9625 1451  271
+              MeV     MeV     MeV     MeV                         9625 1451  272
+  ----------------------------------------                        9625 1451  273
+   Cm-241   5.800   0.800   6.200   0.600                         9625 1451  274
+   Cm-240   6.000   1.040   5.000   0.600                         9625 1451  275
+   Cm-239   6.300   0.800   5.000   0.520                         9625 1451  276
+   Cm-238   6.000   1.040   5.000   0.600                         9625 1451  277
+  ----------------------------------------                        9625 1451  278
+                                                                  9625 1451  279
+Table 5. Level density above inner saddle                         9625 1451  280
+  --------------------------------------------------------        9625 1451  281
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         9625 1451  282
+            1/MeV     MeV     MeV     MeV     MeV     MeV         9625 1451  283
+  --------------------------------------------------------        9625 1451  284
+   Cm-241 20.4242  0.9018  2.6000  0.3647 -2.0579  3.4018         9625 1451  285
+   Cm-240 20.3513  1.8074  2.6000  0.3300 -0.6156  3.8074         9625 1451  286
+   Cm-239 20.2784  0.9056  2.6000  0.3307 -1.5174  2.9056         9625 1451  287
+   Cm-238 20.2054  1.8150  2.6000  0.3313 -0.6081  3.8150         9625 1451  288
+  --------------------------------------------------------        9625 1451  289
+                                                                  9625 1451  290
+Table 6. Level density above outer saddle                         9625 1451  291
+  --------------------------------------------------------        9625 1451  292
+  Nuclide      a*    Pair  Eshell       T      E0  Ematch         9625 1451  293
+            1/MeV     MeV     MeV     MeV     MeV     MeV         9625 1451  294
+  --------------------------------------------------------        9625 1451  295
+   Cm-241 20.4242  0.9018  0.5800  0.3862 -1.0599  3.2018         9625 1451  296
+   Cm-240 20.3513  1.8074  0.5400  0.3656  0.0996  3.8074         9625 1451  297
+   Cm-239 20.2784  0.9056  0.5000  0.3668 -0.8017  2.9056         9625 1451  298
+   Cm-238 20.2054  1.8150  0.4600  0.3680  0.1083  3.8150         9625 1451  299
+  --------------------------------------------------------        9625 1451  300
+                                                                  9625 1451  301
+Table 7. Gamma-ray strength function for Cm-241                   9625 1451  302
+  --------------------------------------------------------        9625 1451  303
+  * E1: ER = 11.55 (MeV) EG = 2.78 (MeV) SIG = 317.10 (mb)        9625 1451  304
+        ER = 14.33 (MeV) EG = 4.20 (MeV) SIG = 420.11 (mb)        9625 1451  305
+  * M1: ER =  6.59 (MeV) EG = 4.00 (MeV) SIG =   1.39 (mb)        9625 1451  306
+  * E2: ER = 10.12 (MeV) EG = 3.22 (MeV) SIG =   7.07 (mb)        9625 1451  307
+  --------------------------------------------------------        9625 1451  308
+                                                                  9625 1451  309
+                                                                  9625 1451  310
+References                                                        9625 1451  311
+ 1) O.Iwamoto et al.: J. Nucl. Sci. Technol., 46, 510 (2009).     9625 1451  312
+ 2) R.J.Tuttle: INDC(NDS)-107/G+Special, p.29 (1979).             9625 1451  313
+ 3) R.J.Howerton: Nucl. Sci. Eng., 62, 438 (1977).                9625 1451  314
+ 4) O.Iwamoto: J. Nucl. Sci. Technol., 44, 687 (2007).            9625 1451  315
+ 5) E.Sh.Soukhovitskii et al.: Phys. Rev. C72, 024604 (2005).     9625 1451  316
+ 6) H.C.Britt, J.B.Wilhelmy: Nucl. Sci. Eng., 72, 222 (1979).     9625 1451  317
+ 7) V.V.Verbinski et al.: Phys. Rev., C7, 1173 (1973).            9625 1451  318
+ 8) T.Kawano, K.Shibata, JAERI-Data/Code 97-037 (1997) in         9625 1451  319
+    Japanese.                                                     9625 1451  320
+ 9) C.Kalbach: Phys. Rev. C33, 818 (1986).                        9625 1451  321
+10) A.J.Koning, M.C.Duijvestijn: Nucl. Phys. A744, 15 (2004).     9625 1451  322
+11) J.M.Akkermans, H.Gruppelaar: Phys. Lett. 157B, 95 (1985).     9625 1451  323
+12) P.A.Moldauer: Nucl. Phys. A344, 185 (1980).                   9625 1451  324
+13) D.L.Hill, J.A.Wheeler: Phys. Rev. 89, 1102 (1953).            9625 1451  325
+14) J.Kopecky, M.Uhl: Phys. Rev. C41, 1941 (1990).                9625 1451  326
+15) J.Kopecky, M.Uhl, R.E.Chrien: Phys. Rev. C47, 312 (1990).     9625 1451  327
+                                                                  9625 1451  328
+                                1        451        381          09625 1451  329
+                                1        452          7          09625 1451  330
+                                1        455          7          09625 1451  331
+                                1        456          6          09625 1451  332
+                                1        458         11          09625 1451  333
+                                2        151          4          09625 1451  334
+                                3          1         38          09625 1451  335
+                                3          2         36          09625 1451  336
+                                3          4         27          09625 1451  337
+                                3         16         12          09625 1451  338
+                                3         17          8          09625 1451  339
+                                3         18         34          09625 1451  340
+                                3         19         34          09625 1451  341
+                                3         20         16          09625 1451  342
+                                3         21         10          09625 1451  343
+                                3         38          6          09625 1451  344
+                                3         51         26          09625 1451  345
+                                3         52         25          09625 1451  346
+                                3         53         23          09625 1451  347
+                                3         54         22          09625 1451  348
+                                3         91         25          09625 1451  349
+                                3        102         34          09625 1451  350
+                                4          2        401          09625 1451  351
+                                4         18          2          09625 1451  352
+                                5         18       4045          09625 1451  353
+                                6         16        841          09625 1451  354
+                                6         17        221          09625 1451  355
+                                6         51        268          09625 1451  356
+                                6         52        259          09625 1451  357
+                                6         53        239          09625 1451  358
+                                6         54        229          09625 1451  359
+                                6         91       3072          09625 1451  360
+                                6        102       3128          09625 1451  361
+                               12         18          4          09625 1451  362
+                               14         18          1          09625 1451  363
+                               15         18         20          09625 1451  364
+                               31        452          5          09625 1451  365
+                               31        455          4          09625 1451  366
+                               31        456         32          09625 1451  367
+                               33          1        123          09625 1451  368
+                               33          2        123          09625 1451  369
+                               33          4          6          09625 1451  370
+                               33         16         13          09625 1451  371
+                               33         17          6          09625 1451  372
+                               33         18        123          09625 1451  373
+                               33         51         81          09625 1451  374
+                               33         52         62          09625 1451  375
+                               33         53         58          09625 1451  376
+                               33         54         49          09625 1451  377
+                               33         91         62          09625 1451  378
+                               33        102        123          09625 1451  379
+                               34          2        122          09625 1451  380
+                               35         18       5859          09625 1451  381
+ 0.000000+0 0.000000+0          0          0          0          09625 1  099999
+ 9.624000+4 2.379930+2          0          2          0          09625 1455    1
+ 0.000000+0 0.000000+0          0          0          1          09625 1455    2
+ 0.000000+0                                                       9625 1455    3
+ 0.000000+0 0.000000+0          0          0          1          49625 1455    4
+          4          2                                            9625 1455    5
+ 1.000000-5 1.020000-3 6.000000+6 1.020000-3 8.000000+6 7.190000-49625 1455    6
+ 2.000000+7 7.190000-4                                            9625 1455    7
+ 0.000000+0 0.000000+0          0          0          0          09625 1  099999
+ 0.000000+0 0.000000+0          0          0          0          09625 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0

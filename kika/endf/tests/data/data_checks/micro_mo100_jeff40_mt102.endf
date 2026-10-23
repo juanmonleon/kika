@@ -1,0 +1,714 @@
+JEFF-4.0 Incident Neutron File                                       1 0  0    0
+ 4.210000+4 9.904921+1          1          0         17          14249 1451    1
+ 0.000000+0 0.000000+0          0          0          0          64249 1451    2
+ 1.000000+0 2.000000+8          1          0         10       20234249 1451    3
+ 0.000000+0 0.000000+0          0          0        422        2514249 1451    4
+ 42-Mo-100            EVAL-FEB25 A.J. Koning and D. Rochman       4249 1451    5
+                      DIST-      REV1-                            4249 1451    6
+----TENDL-2024        Material 4249                               4249 1451    7
+-----Incident neutron  data                                       4249 1451    8
+------ENDF-6 Format                                               4249 1451    9
+                                                                  4249 1451   10
+***************************    JEFF-4       **********************4249 1451   11
+                                                                  4249 1451   12
+Original data from: JEFF-4T5 with corrections (G. Noguere CEA)    4249 1451   13
+                                                                  4249 1451   14
+Correction res. param MF=2 MT=151 for MAESTRO program at MINERVE  4249 1451   15
+                                                                  4249 1451   16
+Correction MF=3 MT=102 Better agreement with EXFOR Data           4249 1451   17
+                                                                  4249 1451   18
+Ref.: A.J. Koning, D. Rochman, J.-Ch. Sublet, N. Dzysiuk,         4249 1451   19
+      M. Fleming, and S. van der Marck, TENDL: Complete nuclear   4249 1451   20
+      data library for innovative nuclear science and             4249 1451   21
+      technology, Nuclear Data Sheets 155, 1 (2019).              4249 1451   22
+                                                                  4249 1451   23
+      P. Leconte et al., EPJ Web of Conf. 111, 07001 (2016)       4249 1451   24
+                                                                  4249 1451   25
+************** G E N E R A L   I N F O R M A T I O N *************4249 1451   26
+                                                                  4249 1451   27
+This evaluated data file is based on a software system built      4249 1451   28
+around the nuclear model code TALYS [kon23], version 2.0. It is   4249 1451   29
+part of a large collection of isotopic evaluations, all created by4249 1451   30
+running the system with either adjusted or default input          4249 1451   31
+parameters. This means that the data in the entire collection have4249 1451   32
+been tested in detail for many isotopes against individual        4249 1451   33
+experimental data, while for other isotopes it is only as good as 4249 1451   34
+the global quality of TALYS at the moment. The mutual quality of  4249 1451   35
+all individual data files is however consistent: The same set of  4249 1451   36
+nuclear models is used and, equally important, the same ENDF-6    4249 1451   37
+formatting procedures for each isotope. The data file has been    4249 1451   38
+created automatically using the ENDF-6 format generator TEFAL.    4249 1451   39
+                                                                  4249 1451   40
+The resulting data file provides a complete representation of     4249 1451   41
+nuclear data needed for transport, activation, damage, heating,   4249 1451   42
+radioactivity, and shielding applications over the incident       4249 1451   43
+neutron energy range from 1.e-11 to 200. MeV.                     4249 1451   44
+                                                                  4249 1451   45
+All transport and activation data for neutrons, charged particles,4249 1451   46
+photons and residual nuclides are filed. This includes cross      4249 1451   47
+sections, angular distributions, double-differential spectra,     4249 1451   48
+isomeric production, discrete and continuum photon production     4249 1451   49
+cross sections, residual production cross sections and recoils.   4249 1451   50
+This general purpose evaluation can thus be used as both          4249 1451   51
+transport and activation library.                                 4249 1451   52
+                                                                  4249 1451   53
+A complete set of covariance data is included, which is stored    4249 1451   54
+in MF31-40.                                                       4249 1451   55
+                                                                  4249 1451   56
+**** N U C L I D E    S P E C I F I C   I N F O R M A T I O N ****4249 1451   57
+                                                                  4249 1451   58
+                      Resonance Range                             4249 1451   59
+                                                                  4249 1451   60
+  --------------------------------------------------------------- 4249 1451   61
+  --------------------------------------------------------------- 4249 1451   62
+                                                                  4249 1451   63
+  General methodology: The global approach considered in this     4249 1451   64
+          work is presented in the following papers:              4249 1451   65
+          (1) Modern nuclear data evaluation with the TALYS       4249 1451   66
+              code system, A.J. Koning and D. Rochman,            4249 1451   67
+              A.J. Koning and D. Rochman,                         4249 1451   68
+              Nuclear Data Sheets 113 (2012) 2841.                4249 1451   69
+          (2) TENDL: Complete Nuclear Data Library for            4249 1451   70
+              Innovative Nuclear Science and Technology,          4249 1451   71
+              A.J. Koning, D. Rochman, J.Ch Sublet, N. Dzysiuk,   4249 1451   72
+              M. Fleming and S. van der Marck,                    4249 1451   73
+              Nuclear Data Sheets 155 (2019) 1.                   4249 1451   74
+                                                                  4249 1451   75
+  MF2:  Resolved resonance range  (RRR)                           4249 1451   76
+       The RRR was generated with TARES-1.61, compiled on         4249 1451   77
+       Jan 30 2025, 17:29:54 at Villigen   , Switzerland. The RRR 4249 1451   78
+       expands from 0 to 2.608100E+4 eV. A total of               4249 1451   79
+       2 l-values are used and 123 resonances. The resonance      4249 1451   80
+       formalism is multi-level Breit Wigner (MLBW).              4249 1451   81
+       The TARES database for the measured resonances is          4249 1451   82
+        ->  default up to 26081.000000 eV.                        4249 1451   83
+       The unresolved resonance range is obtained from the TALYS  4249 1451   84
+       code.                                                      4249 1451   85
+                                                                  4249 1451   86
+  MF33 in the resonance range:                                    4249 1451   87
+  The MF33 in the resonance range is obtained by using a number   4249 1451   88
+  of MF2 random files. There is therefore a consistency           4249 1451   89
+  between the MF2 random and the MF33.                            4249 1451   90
+  MF32:                                                           4249 1451   91
+  The MF32 contains the resonance parameters, uncertainties and   4249 1451   92
+  some correlation. These values are used to generate random      4249 1451   93
+  MF2, taking advantage of the code ENDSAM from L. Plevnik and    4249 1451   94
+  G. Zerovnik from JSI, Slovenia (thanks to A. Trkov, IAEA).      4249 1451   95
+                                                                  4249 1451   96
+                                                                  4249 1451   97
+               Average parameters from INTER-8.05                 4249 1451   98
+                                                                  4249 1451   99
+     ****************************************************         4249 1451  100
+     *   Thermal (n,g) xs =  1.985030E-01 b. (MF2 only) *         4249 1451  101
+     *   RI      (n,g)    =  3.156420E+00 b. (MF2 only) *         4249 1451  102
+     *   MACS 30 keV      =  3.250400E-02 b. (MF2 only) *         4249 1451  103
+     *                                                  *         4249 1451  104
+     *   Thermal (n,el) xs = 5.721620E+00 b. (MF2 only) *         4249 1451  105
+     *   RI      (n,el)    = 8.758370E+01 b. (MF2 only) *         4249 1451  106
+     ****************************************************         4249 1451  107
+                                                                  4249 1451  108
+                                                                  4249 1451  109
+                                                                  4249 1451  110
+  --------------------------------------------------------------- 4249 1451  111
+  --------------------------------------------------------------- 4249 1451  112
+                                                                  4249 1451  113
+               Adjusted TALYS input parameters                    4249 1451  114
+                                                                  4249 1451  115
+#                                                                 4249 1451  116
+# General                                                         4249 1451  117
+#                                                                 4249 1451  118
+ldmodel 7                                                         4249 1451  119
+fit y                                                             4249 1451  120
+# Adjusted parameters from fitting                                4249 1451  121
+rvadjust     p    0.94295                                         4249 1451  122
+gadjust       42 101    1.01644                                   4249 1451  123
+gadjust       42 100    1.08216                                   4249 1451  124
+gadjust       41 100    1.01754                                   4249 1451  125
+wtable        42 101    1.00229 e1                                4249 1451  126
+rvadjust     a    0.94222                                         4249 1451  127
+cstrip       a    1.75943                                         4249 1451  128
+                                                                  4249 1451  129
+***************************** T A L Y S **************************4249 1451  130
+                                                                  4249 1451  131
+TALYS is a computer code system for the prediction and analysis   4249 1451  132
+of nuclear reactions. TALYS simulates reactions that involve      4249 1451  133
+neutrons, gamma-rays, protons, deuterons, tritons, helions and    4249 1451  134
+alpha-particles, in the 1 keV - 200 MeV energy range. This is     4249 1451  135
+achieved by implementing a suite of nuclear reaction models into  4249 1451  136
+a single code system. This nuclear data file is based on a        4249 1451  137
+theoretical analysis that utilizes the optical model, compound    4249 1451  138
+nucleus statistical theory, fission, direct reactions and         4249 1451  139
+pre-equilibrium processes, in combination with databases and      4249 1451  140
+models for nuclear structure. The following output of TALYS is    4249 1451  141
+stored in this data file:                                         4249 1451  142
+                                                                  4249 1451  143
+- Total, elastic and non-elastic cross sections                   4249 1451  144
+- Inelastic cross sections to discrete states                     4249 1451  145
+- Exclusive channel cross sections, e.g. (n,g), (n,2n), (n,np),.. 4249 1451  146
+- Inelastic scattering angular distributions to discrete states   4249 1451  147
+- Exclusive channel energy spectra                                4249 1451  148
+- Exclusive channel double-differential spectra                   4249 1451  149
+- Exclusive gamma production for discrete states and continuum    4249 1451  150
+- Elastic scattering angular distributions                        4249 1451  151
+- Recoil data                                                     4249 1451  152
+- Total particle cross sections, e.g. (n,xn), (n,xp),..           4249 1451  153
+- Total particle energy spectra                                   4249 1451  154
+- Total particle double-differential spectra                      4249 1451  155
+- Isomeric and ground state cross sections                        4249 1451  156
+- Residual production cross sections                              4249 1451  157
+                                                                  4249 1451  158
+For a description of the used nuclear models and their            4249 1451  159
+parameterization we refer to [kon19]. If for this specific        4249 1451  160
+nuclide we deviate from the global parameterization, it is made   4249 1451  161
+explicit above under Nuclide Specific Information.                4249 1451  162
+                                                                  4249 1451  163
+***************** F I L E   I N F O R M A T I O N ****************4249 1451  164
+                                                                  4249 1451  165
+##### MF1: GENERAL INFORMATION                                    4249 1451  166
+                                                                  4249 1451  167
+- MT451    : Descriptive data and directory                       4249 1451  168
+                                                                  4249 1451  169
+This text and the full directory of used MF/MT sections.          4249 1451  170
+                                                                  4249 1451  171
+##### MF2: RESONANCE PARAMETERS                                   4249 1451  172
+                                                                  4249 1451  173
+- MT151    : Resonance parameters                                 4249 1451  174
+                                                                  4249 1451  175
+Details about the origin of the resonance parameters for this     4249 1451  176
+nuclide are given above in this description. In general, both a   4249 1451  177
+Resolved and an Unresolved Resonance Range are given.             4249 1451  178
+                                                                  4249 1451  179
+##### MF3: REACTION CROSS SECTIONS                                4249 1451  180
+                                                                  4249 1451  181
+All the data present in the following MT-sections have been       4249 1451  182
+calculated with TALYS, possibly normalized to experimental data.  4249 1451  183
+If the maximal cross section in an excitation function over the   4249 1451  184
+whole energy range does not exceed 1.e-9 b, the MT-number is not  4249 1451  185
+included. Cross sections lower than 1.e-20 b are assumed to have  4249 1451  186
+no physical meaning and are set to zero. All MT numbers extend up 4249 1451  187
+to the highest incident energy.                                   4249 1451  188
+The following reaction channels/MT numbers are generally included:4249 1451  189
+                                                                  4249 1451  190
+- MT1      : Total cross section                                  4249 1451  191
+                                                                  4249 1451  192
+Calculated with the optical model over the whole energy range,    4249 1451  193
+or partly reproduced using experimental data.                     4249 1451  194
+                                                                  4249 1451  195
+- MT2      : Elastic scattering cross section                     4249 1451  196
+                                                                  4249 1451  197
+Obtained by subtracting the non-elastic cross section from the    4249 1451  198
+total cross section.                                              4249 1451  199
+                                                                  4249 1451  200
+- MT3      : Non-elastic cross section                            4249 1451  201
+                                                                  4249 1451  202
+Calculated with the optical model over the whole energy range.    4249 1451  203
+                                                                  4249 1451  204
+- MT4      : Total inelastic cross section                        4249 1451  205
+                                                                  4249 1451  206
+Sum of MT=51-91.                                                  4249 1451  207
+                                                                  4249 1451  208
+- MT5      : (n,anything) cross section                           4249 1451  209
+                                                                  4249 1451  210
+MT5 contains the reactions which can not be stored in any other   4249 1451  211
+MT-number. The information of MF3/MT5 can be combined with        4249 1451  212
+MF6/MT5 to obtain residual production cross sections particle     4249 1451  213
+production cross sections and (double-)differential cross         4249 1451  214
+sections.                                                         4249 1451  215
+                                                                  4249 1451  216
+- MT16     : (n,2n) cross section                                 4249 1451  217
+- MT17     : (n,3n) cross section                                 4249 1451  218
+- MT22     : (n,na) cross section                                 4249 1451  219
+- MT28     : (n,np) cross section                                 4249 1451  220
+- MT51-90  : (n,n') cross section for 1st-40th excited state      4249 1451  221
+- MT91     : (n,n') continuum cross section                       4249 1451  222
+- MT102    : (n,gamma) cross section                              4249 1451  223
+- MT103    : (n,p) cross section                                  4249 1451  224
+- MT104    : (n,d) cross section                                  4249 1451  225
+- MT105    : (n,t) cross section                                  4249 1451  226
+- MT106    : (n,h) cross section                                  4249 1451  227
+- MT107    : (n,a) cross section                                  4249 1451  228
+- MT600-610: (n,p) cross section for 0th-10th excited state       4249 1451  229
+- MT649    : (n,p) continuum cross section                        4249 1451  230
+- MT650-655: (n,d) cross section for 0th-5th excited state        4249 1451  231
+- MT699    : (n,d) continuum cross section                        4249 1451  232
+- MT700-705: (n,t) cross section for 0th-5th excited state        4249 1451  233
+- MT749    : (n,t) continuum cross section                        4249 1451  234
+- MT750-755: (n,h) cross section for 0th-5th excited state        4249 1451  235
+- MT799    : (n,h) continuum cross section                        4249 1451  236
+- MT800-810: (n,a) cross section for 0th-10th excited state       4249 1451  237
+- MT849    : (n,a) continuum cross section                        4249 1451  238
+                                                                  4249 1451  239
+##### MF4: ANGULAR DISTRIBUTIONS OF SECONDARY PARTICLES           4249 1451  240
+                                                                  4249 1451  241
+We use MF4 for the neutron scattering angular distribution for    4249 1451  242
+discrete levels.                                                  4249 1451  243
+                                                                  4249 1451  244
+- MT2      : Elastic angular distribution                         4249 1451  245
+                                                                  4249 1451  246
+The flag LTT=3 is used to indicate a switch at some high energy,  4249 1451  247
+generally 50 MeV, from a Legendre representation to a tabulated   4249 1451  248
+representation. For incident energies below this energy, the      4249 1451  249
+Legendre coefficients are given on a sufficiently precise energy  4249 1451  250
+grid. They are a sum of calculated Legendre coefficients for      4249 1451  251
+compound nucleus and shape-elastic scattering. For higher         4249 1451  252
+incident energies, relative angular distributions are tabulated   4249 1451  253
+on an angular grid.                                               4249 1451  254
+                                                                  4249 1451  255
+- MT51-70  : (n,n') angular distribution for 1st-20th state       4249 1451  256
+- MT600-610: (n,p) angular distribution for 0th-10th state        4249 1451  257
+- MT650-655: (n,d) angular distribution for 0th-5th state         4249 1451  258
+- MT700-705: (n,t) angular distribution for 0th-5th state         4249 1451  259
+- MT750-755: (n,h) angular distribution for 0th-5th state         4249 1451  260
+- MT800-810: (n,a) angular distribution for 0th-10th state        4249 1451  261
+                                                                  4249 1451  262
+##### MF6: PRODUCT ENERGY-ANGLE DISTRIBUTIONS                     4249 1451  263
+                                                                  4249 1451  264
+In MF6 we store all secondary energy, angle, and energy-angle     4249 1451  265
+distributions, as well as all residual and discrete + continuum   4249 1451  266
+photon production cross sections for channels other than capture  4249 1451  267
+(MT102) and reactions to discrete levels (MT51,etc.).             4249 1451  268
+All data are generated with TALYS.                                4249 1451  269
+                                                                  4249 1451  270
+- MT5      : (n,anything) yields and energy-angle distributions   4249 1451  271
+                                                                  4249 1451  272
+MT5 contains, in this order,                                      4249 1451  273
+For neutrons up to alpha particles and photons:                   4249 1451  274
+- the production yields per particle for the whole energy range   4249 1451  275
+- the secondary energy-angle distributions per particles which are4249 1451  276
+  not represented by explicit MT numbers. On a secondary energy   4249 1451  277
+  grid the relative emission spectra are given together with the  4249 1451  278
+  parameters for the Kalbach systematics for angular              4249 1451  279
+  distributions. Inelastic scattering cross sections for discrete 4249 1451  280
+  states have been broadened and added to the continuum spectra.  4249 1451  281
+For each residual product:                                        4249 1451  282
+- the production yields for the whole energy range.               4249 1451  283
+- the recoil                                                      4249 1451  284
+These distributions can be multiplied with MF3/MT5 to get         4249 1451  285
+the production cross sections and (double-)differential cross     4249 1451  286
+sections.                                                         4249 1451  287
+                                                                  4249 1451  288
+- MT16     : (n,2n) energy-angle distr. and photon production     4249 1451  289
+                                                                  4249 1451  290
+First, for each type of outgoing particle, the (trivial) integer  4249 1451  291
+particle yields are given. Next, on a sufficiently dense incident 4249 1451  292
+energy grid the secondary energy-angle distributions are          4249 1451  293
+specified by means of the relative emission spectra and the       4249 1451  294
+parameters for the Kalbach systematics for angular distributions. 4249 1451  295
+Next, the photon yield is tabulated as a function of incident     4249 1451  296
+energy. For each incident energy, the photon production is given  4249 1451  297
+for all discrete gamma lines present in the final nucleus. A      4249 1451  298
+continuum photon distribution is added to this. We assume         4249 1451  299
+isotropy for all produced gamma rays.                             4249 1451  300
+                                                                  4249 1451  301
+For the following MT-numbers, the same procedure as for MT16 is   4249 1451  302
+followed:                                                         4249 1451  303
+                                                                  4249 1451  304
+- MT17 : (n,3n) energy-angle distr. and photon production         4249 1451  305
+- MT22 : (n,na) energy-angle distr. and photon production         4249 1451  306
+- MT28 : (n,np) energy-angle distr. and photon production         4249 1451  307
+- MT91 : (n,n') continuum energy-angle distr. and phot. prod.     4249 1451  308
+- MT649: (n,p) continuum energy-angle distr. and photon prod.     4249 1451  309
+- MT699: (n,d) continuum energy-angle distr. and photon prod.     4249 1451  310
+- MT749: (n,t) continuum energy-angle distr. and photon prod.     4249 1451  311
+- MT809: (n,h) continuum energy-angle distr. and photon prod.     4249 1451  312
+- MT849: (n,a) continuum energy-angle distr. and photon prod.     4249 1451  313
+                                                                  4249 1451  314
+##### MF8: RADIOACTIVE DECAY DATA                                 4249 1451  315
+                                                                  4249 1451  316
+For reactions to isomers, MF8 designates where the information    4249 1451  317
+for isomeric versus ground state production, or residual          4249 1451  318
+production can be found, i.e. for each MT number it points to     4249 1451  319
+either MF6, MF9 or MF10.                                          4249 1451  320
+                                                                  4249 1451  321
+##### MF9: MULTIPLICITIES FOR PRODUCTION OF RADIOACTIVE NUCLIDES  4249 1451  322
+                                                                  4249 1451  323
+MF9 is used for isomer production by non-threshold reactions.     4249 1451  324
+Final states with a lifetime that exceeds 1 second are treated    4249 1451  325
+as isomer.                                                        4249 1451  326
+                                                                  4249 1451  327
+##### MF10: CROSS SECTIONS FOR PRODUCTION OF RADIOACTIVE NUCLIDES 4249 1451  328
+                                                                  4249 1451  329
+MF10 is used for isomer production by threshold reactions.        4249 1451  330
+Final states with a lifetime that exceeds 1 second are treated    4249 1451  331
+as isomer.                                                        4249 1451  332
+                                                                  4249 1451  333
+##### MF12: PHOTON PRODUCTION YIELD DATA                          4249 1451  334
+                                                                  4249 1451  335
+MF12 is used for the photon production for two types of reactions:4249 1451  336
+- Reactions to discrete levels (MT51, etc.) For this transition   4249 1451  337
+  probabilities are used (LO=2)                                   4249 1451  338
+- Photons from neutron capture (MT102). Here multiplicities are   4249 1451  339
+  given                                                           4249 1451  340
+                                                                  4249 1451  341
+##### MF14: PHOTON ANGULAR DISTRIBUTIONS                          4249 1451  342
+                                                                  4249 1451  343
+All photon production is considered as isotropic                  4249 1451  344
+                                                                  4249 1451  345
+##### MF15: PHOTON ENERGY SPECTRA                                 4249 1451  346
+                                                                  4249 1451  347
+For capture (MT102), the photon energy spectrum is given.         4249 1451  348
+                                                                  4249 1451  349
+##### MF32: COVARIANCES OF RESONANCE PARAMETERS                   4249 1451  350
+                                                                  4249 1451  351
+In MF32, we store the covariances of resonance parameters,        4249 1451  352
+and more details are given above in this description. In most     4249 1451  353
+versions of TENDL, this information is now stored in MF33.        4249 1451  354
+                                                                  4249 1451  355
+##### MF33: COVARIANCES OF NEUTRON CROSS SECTIONS                 4249 1451  356
+                                                                  4249 1451  357
+In MF33, we store the covariances of most, but not all, reaction  4249 1451  358
+channels that are given in MF3. All covariances are generated     4249 1451  359
+with the TASMAN code [kon19], which generates TALYS runs using    4249 1451  360
+a Monte Carlo parameter method.                                   4249 1451  361
+For each MT-number, the information consists of:                  4249 1451  362
+1. Covariances for MTa, Ea and MTa, Ea (variances)                4249 1451  363
+2. Covariances for MTa, Ea and MTa, Eb (correlations for the      4249 1451  364
+   same reaction channel between different energies)              4249 1451  365
+3. Covariances for MTa, Ea and MTb, Ea (correlations between      4249 1451  366
+   different reaction channels for the same energy)               4249 1451  367
+4. Covariances for MTa, Ea and MTb, Eb (correlations between      4249 1451  368
+   different reaction channels for different energies)            4249 1451  369
+Classes 1 and 2 are covered by NI-type subsubsections with        4249 1451  370
+flag LB=5, followed by a LB=8 section which contains              4249 1451  371
+the cross section variances multiplied by 1.e-3. Next, classes 3  4249 1451  372
+and 4 are covered by flag LB=6 to account for the different       4249 1451  373
+energy grids that two correlating MT-sections may have. Since     4249 1451  374
+the total correlation matrix is fully symmetric, we only need to  4249 1451  375
+include the correlation elements between different MT-numbers     4249 1451  376
+once, and we do that in the subsection with the lowest of the     4249 1451  377
+two MT-numbers. We include covariance information for all the     4249 1451  378
+total cross sections, the lumped partial cross sections and the   4249 1451  379
+individual inelastic cross sections per level (MT51,...). We do   4249 1451  380
+not include covariances for MT600 and higher MT-numbers. For the  4249 1451  381
+most important channels, we include cross-channel correlations.   4249 1451  382
+                                                                  4249 1451  383
+##### MF34: COVARIANCES OF ANGULAR DISTRIBUTIONS                  4249 1451  384
+                                                                  4249 1451  385
+In MF34, we store the covariances of the elastic scattering       4249 1451  386
+angular distributions that are given in MF4/MT2. All covariances  4249 1451  387
+are generated with the TASMAN code [kon19], which generates       4249 1451  388
+TALYS runs using a Monte Carlo parameter method. The tables are   4249 1451  389
+restricted to MT2 and contain covariances for the first 6         4249 1451  390
+Legendre coefficients. Both intra- and inter-correlations of the  4249 1451  391
+various Legendre coefficients are given. As in MF33, the LB5      4249 1451  392
+representation is used.                                           4249 1451  393
+                                                                  4249 1451  394
+##### MF40: COVARIANCES OF ISOMER PRODUCTION                      4249 1451  395
+                                                                  4249 1451  396
+For covariances of ground state and isomeric cross sections, the  4249 1451  397
+same procedures as for MF33 are used.                             4249 1451  398
+                                                                  4249 1451  399
+***** F I L E   C H E C K I N G   A N D   P R O C E S S I N G ****4249 1451  400
+                                                                  4249 1451  401
+This file has been checked and processed by                       4249 1451  402
+- the BNL checking codes CHECKR-8.24, FIZCON-8.19 and PSYCHE-8.11 4249 1451  403
+  [her08],                                                        4249 1451  404
+- the preprocessing codes PREPRO-2021 [cul23] into a PENDF file,  4249 1451  405
+- the processing code NJOY-2016.68 [mac10] into a PENDF file and a4249 1451  406
+  MCNP (ACE) library,                                             4249 1451  407
+- MCNP for a standard calculation with the ACE library.           4249 1451  408
+                                                                  4249 1451  409
+*********************** R E F E R E N C E S **********************4249 1451  410
+                                                                  4249 1451  411
+[cul23] D.E. Cullen, PREPRO 2023 - ENDF/B Pre-processing codes,   4249 1451  412
+        Technical report IAEA-NDS-0241, IAEA (2023)               4249 1451  413
+[her08] M. Herman, ENDF Utility Codes Release 8.0, (2008)         4249 1451  414
+[kon23] A.J. Koning, S. Hilaire and S. Goriely,                   4249 1451  415
+        TALYS: modeling of nuclear reactions,                     4249 1451  416
+        European Journal of Physics A59 (6), 131 (2023).          4249 1451  417
+[kon19] A.J. Koning, D. Rochman, J.-Ch. Sublet, N. Dzysiuk,       4249 1451  418
+        M. Fleming, and S. van der Marck, TENDL: Complete nuclear 4249 1451  419
+        data library for innovative nuclear science and           4249 1451  420
+        technology, Nuclear Data Sheets 155, 1 (2019)             4249 1451  421
+[mac10] R.E. Macfarlane and A.C. Kahler, Methods for processing   4249 1451  422
+        ENDF/B-VII with NJOY, Nuclear Data Sheets 111, 2739 (2010)4249 1451  423
+                                                                  4249 1451  424
+************************* C O N T E N T S ************************4249 1451  425
+                                                                  4249 1451  426
+                                1        451        677          14249 1451  427
+                                2        151        210          14249 1451  428
+                                3          1        149          14249 1451  429
+                                3          2        148          14249 1451  430
+                                3          3        149          14249 1451  431
+                                3          4         37          14249 1451  432
+                                3          5         14          14249 1451  433
+                                3         11          7          14249 1451  434
+                                3         16         14          14249 1451  435
+                                3         17         10          14249 1451  436
+                                3         22         18          14249 1451  437
+                                3         24         10          14249 1451  438
+                                3         25          8          14249 1451  439
+                                3         28         12          14249 1451  440
+                                3         29          8          14249 1451  441
+                                3         32          9          14249 1451  442
+                                3         33          9          14249 1451  443
+                                3         34          7          14249 1451  444
+                                3         37          7          14249 1451  445
+                                3         41          8          14249 1451  446
+                                3         42          6          14249 1451  447
+                                3         44          7          14249 1451  448
+                                3         45          8          14249 1451  449
+                                3         51         37          14249 1451  450
+                                3         52         36          14249 1451  451
+                                3         53         35          14249 1451  452
+                                3         54         34          14249 1451  453
+                                3         55         33          14249 1451  454
+                                3         56         33          14249 1451  455
+                                3         57         32          14249 1451  456
+                                3         58         32          14249 1451  457
+                                3         59         32          14249 1451  458
+                                3         60         31          14249 1451  459
+                                3         61         31          14249 1451  460
+                                3         62         30          14249 1451  461
+                                3         63         30          14249 1451  462
+                                3         64         29          14249 1451  463
+                                3         65         29          14249 1451  464
+                                3         66         29          14249 1451  465
+                                3         67         28          14249 1451  466
+                                3         68         28          14249 1451  467
+                                3         69         27          14249 1451  468
+                                3         70         27          14249 1451  469
+                                3         71         27          14249 1451  470
+                                3         72         26          14249 1451  471
+                                3         73         26          14249 1451  472
+                                3         74         26          14249 1451  473
+                                3         75         25          14249 1451  474
+                                3         76         25          14249 1451  475
+                                3         77         25          14249 1451  476
+                                3         78         24          14249 1451  477
+                                3         79         24          14249 1451  478
+                                3         80         23          14249 1451  479
+                                3         91         23          14249 1451  480
+                                3        102         30          14249 1451  481
+                                3        103         17          14249 1451  482
+                                3        104         13          14249 1451  483
+                                3        105         12          14249 1451  484
+                                3        106          9          14249 1451  485
+                                3        107         30          14249 1451  486
+                                3        108         11          14249 1451  487
+                                3        111          8          14249 1451  488
+                                3        112          9          14249 1451  489
+                                3        115          8          14249 1451  490
+                                3        116          7          14249 1451  491
+                                3        117          8          14249 1451  492
+                                4          2        675          14249 1451  493
+                                4         51        161          14249 1451  494
+                                4         52        154          14249 1451  495
+                                4         53        148          14249 1451  496
+                                4         54        145          14249 1451  497
+                                4         55        144          14249 1451  498
+                                4         56        131          14249 1451  499
+                                4         57        124          14249 1451  500
+                                4         58        142          14249 1451  501
+                                4         59        141          14249 1451  502
+                                4         60        135          14249 1451  503
+                                4         61        142          14249 1451  504
+                                4         62        140          14249 1451  505
+                                4         63        126          14249 1451  506
+                                4         64        140          14249 1451  507
+                                4         65        141          14249 1451  508
+                                4         66        126          14249 1451  509
+                                4         67        137          14249 1451  510
+                                4         68        140          14249 1451  511
+                                4         69        136          14249 1451  512
+                                4         70        116          14249 1451  513
+                                4         71        135          14249 1451  514
+                                4         72        135          14249 1451  515
+                                4         73        132          14249 1451  516
+                                4         74        135          14249 1451  517
+                                4         75        120          14249 1451  518
+                                4         76        133          14249 1451  519
+                                4         77        135          14249 1451  520
+                                4         78        138          14249 1451  521
+                                4         79        134          14249 1451  522
+                                4         80        137          14249 1451  523
+                                6          5      14423          14249 1451  524
+                                6         11        465          14249 1451  525
+                                6         16       1139          14249 1451  526
+                                6         17        790          14249 1451  527
+                                6         22       1709          14249 1451  528
+                                6         24        954          14249 1451  529
+                                6         25        538          14249 1451  530
+                                6         28       1219          14249 1451  531
+                                6         29        661          14249 1451  532
+                                6         32        861          14249 1451  533
+                                6         33        850          14249 1451  534
+                                6         34        535          14249 1451  535
+                                6         37        343          14249 1451  536
+                                6         41        759          14249 1451  537
+                                6         42        326          14249 1451  538
+                                6         44        539          14249 1451  539
+                                6         45        727          14249 1451  540
+                                6         91       2078          14249 1451  541
+                                6        102       2288          14249 1451  542
+                                6        103       1219          14249 1451  543
+                                6        104        999          14249 1451  544
+                                6        105        952          14249 1451  545
+                                6        106        672          14249 1451  546
+                                6        107       2098          14249 1451  547
+                                6        108        632          14249 1451  548
+                                6        111        566          14249 1451  549
+                                6        112        863          14249 1451  550
+                                6        115        612          14249 1451  551
+                                6        116        579          14249 1451  552
+                                6        117        660          14249 1451  553
+                                8          5        149          14249 1451  554
+                                8         11          3          14249 1451  555
+                                8         28          3          14249 1451  556
+                                8         32          3          14249 1451  557
+                                8         33          3          14249 1451  558
+                                8         41          3          14249 1451  559
+                                8         42          3          14249 1451  560
+                                8        103          3          14249 1451  561
+                                8        104          3          14249 1451  562
+                                8        105          3          14249 1451  563
+                                8        112          3          14249 1451  564
+                               10         11         13          14249 1451  565
+                               10         28         23          14249 1451  566
+                               10         32         17          14249 1451  567
+                               10         33         17          14249 1451  568
+                               10         41         15          14249 1451  569
+                               10         42         11          14249 1451  570
+                               10        103         33          14249 1451  571
+                               10        104         25          14249 1451  572
+                               10        105         23          14249 1451  573
+                               10        112         17          14249 1451  574
+                               12         51          3          14249 1451  575
+                               12         52          3          14249 1451  576
+                               12         53          3          14249 1451  577
+                               12         54          3          14249 1451  578
+                               12         55          4          14249 1451  579
+                               12         56          3          14249 1451  580
+                               12         57          3          14249 1451  581
+                               12         58          3          14249 1451  582
+                               12         59          3          14249 1451  583
+                               12         60          3          14249 1451  584
+                               12         61          3          14249 1451  585
+                               12         62          4          14249 1451  586
+                               12         63          3          14249 1451  587
+                               12         64          4          14249 1451  588
+                               12         65          4          14249 1451  589
+                               12         66          3          14249 1451  590
+                               12         67          4          14249 1451  591
+                               12         68          4          14249 1451  592
+                               12         69          3          14249 1451  593
+                               12         70          3          14249 1451  594
+                               12         71          3          14249 1451  595
+                               12         72          3          14249 1451  596
+                               12         73          4          14249 1451  597
+                               12         74          3          14249 1451  598
+                               12         75          3          14249 1451  599
+                               12         76          3          14249 1451  600
+                               12         77          3          14249 1451  601
+                               12         78          3          14249 1451  602
+                               12         79          3          14249 1451  603
+                               12         80          4          14249 1451  604
+                               14         51          1          14249 1451  605
+                               14         52          1          14249 1451  606
+                               14         53          1          14249 1451  607
+                               14         54          1          14249 1451  608
+                               14         55          1          14249 1451  609
+                               14         56          1          14249 1451  610
+                               14         57          1          14249 1451  611
+                               14         58          1          14249 1451  612
+                               14         59          1          14249 1451  613
+                               14         60          1          14249 1451  614
+                               14         61          1          14249 1451  615
+                               14         62          1          14249 1451  616
+                               14         63          1          14249 1451  617
+                               14         64          1          14249 1451  618
+                               14         65          1          14249 1451  619
+                               14         66          1          14249 1451  620
+                               14         67          1          14249 1451  621
+                               14         68          1          14249 1451  622
+                               14         69          1          14249 1451  623
+                               14         70          1          14249 1451  624
+                               14         71          1          14249 1451  625
+                               14         72          1          14249 1451  626
+                               14         73          1          14249 1451  627
+                               14         74          1          14249 1451  628
+                               14         75          1          14249 1451  629
+                               14         76          1          14249 1451  630
+                               14         77          1          14249 1451  631
+                               14         78          1          14249 1451  632
+                               14         79          1          14249 1451  633
+                               14         80          1          14249 1451  634
+                               33          1       1053          14249 1451  635
+                               33          2        956          14249 1451  636
+                               33          3        509          14249 1451  637
+                               33          4        212          14249 1451  638
+                               33         11          6          14249 1451  639
+                               33         16        109          14249 1451  640
+                               33         17         10          14249 1451  641
+                               33         22         18          14249 1451  642
+                               33         24         10          14249 1451  643
+                               33         25          9          14249 1451  644
+                               33         28         10          14249 1451  645
+                               33         32          9          14249 1451  646
+                               33         33          9          14249 1451  647
+                               33         34          8          14249 1451  648
+                               33         41          8          14249 1451  649
+                               33         42          6          14249 1451  650
+                               33         45          9          14249 1451  651
+                               33         51        163          14249 1451  652
+                               33         52         25          14249 1451  653
+                               33         53         21          14249 1451  654
+                               33         54         21          14249 1451  655
+                               33         91        114          14249 1451  656
+                               33        102        500          14249 1451  657
+                               33        103         13          14249 1451  658
+                               33        104         12          14249 1451  659
+                               33        105         12          14249 1451  660
+                               33        106         10          14249 1451  661
+                               33        107         46          14249 1451  662
+                               33        112         12          14249 1451  663
+                               33        115          9          14249 1451  664
+                               33        116          9          14249 1451  665
+                               33        117         10          14249 1451  666
+                               34          2        422          14249 1451  667
+                               40         11          9          14249 1451  668
+                               40         28         15          14249 1451  669
+                               40         32         13          14249 1451  670
+                               40         33         13          14249 1451  671
+                               40         41         11          14249 1451  672
+                               40         42          9          14249 1451  673
+                               40        103         19          14249 1451  674
+                               40        104         17          14249 1451  675
+                               40        105         17          14249 1451  676
+                               40        112         17          14249 1451  677
+ 0.000000+0 0.000000+0          0          0          0          04249 1  099999
+ 0.000000+0 0.000000+0          0          0          0          04249 0  0    0
+ 4.210000+4 9.904921+1          0          0          0          04249 3102    1
+ 5.398239+6 5.398239+6          0          0          1         814249 3102    2
+         81          5                                            4249 3102    3
+ 1.000000-5 0.000000+0 2.608100+4 0.000000+0 2.608100+4 1.385200-14249 3102    4
+ 3.000000+4 1.177840-1 6.000000+4 6.288400-2 1.000000+5 4.247200-24249 3102    5
+ 2.000000+5 3.104200-2 3.000000+5 3.124000-2 4.000000+5 3.356200-24249 3102    6
+ 5.000000+5 3.653200-2 5.000000+5 3.974000-2 6.000000+5 2.011000-24249 3102    7
+ 7.000000+5 1.656000-2 8.000000+5 1.516000-2 9.000000+5 1.533000-24249 3102    8
+ 1.000000+6 1.611000-2 1.200000+6 1.332000-2 1.400000+6 1.332000-24249 3102    9
+ 1.600000+6 1.351000-2 1.800000+6 1.333000-2 2.000000+6 1.200000-24249 3102   10
+ 2.200000+6 9.782001-3 2.400000+6 8.267000-3 2.600000+6 7.436000-34249 3102   11
+ 2.800000+6 6.600000-3 3.000000+6 5.827000-3 3.200000+6 5.137000-34249 3102   12
+ 3.400000+6 4.548000-3 3.600000+6 3.981000-3 3.800000+6 3.533000-34249 3102   13
+ 4.000000+6 3.131000-3 4.200000+6 2.757000-3 4.400000+6 2.461000-34249 3102   14
+ 4.600000+6 2.169000-3 4.800000+6 1.947000-3 5.000000+6 1.724000-34249 3102   15
+ 5.200000+6 1.521000-3 5.400000+6 1.378000-3 5.600000+6 1.229000-34249 3102   16
+ 5.800000+6 1.135000-3 6.000000+6 1.010000-3 6.200000+6 9.040000-44249 3102   17
+ 6.400000+6 8.526000-4 6.600000+6 7.661000-4 6.800000+6 7.532000-44249 3102   18
+ 7.000000+6 6.703000-4 7.200000+6 6.060000-4 7.400000+6 6.196000-44249 3102   19
+ 7.600000+6 5.608000-4 7.800000+6 6.120000-4 8.000000+6 5.507000-44249 3102   20
+ 8.500000+6 5.529000-4 9.000000+6 5.864000-4 9.500000+6 6.471000-44249 3102   21
+ 1.000000+7 7.295000-4 1.050000+7 8.260000-4 1.100000+7 9.267000-44249 3102   22
+ 1.150000+7 1.022000-3 1.200000+7 1.104000-3 1.250000+7 1.166000-34249 3102   23
+ 1.300000+7 1.210000-3 1.350000+7 1.234000-3 1.400000+7 1.239000-34249 3102   24
+ 1.450000+7 1.231000-3 1.500000+7 1.204000-3 1.600000+7 1.050000-34249 3102   25
+ 1.700000+7 9.202001-4 1.800000+7 7.782000-4 1.900000+7 6.438000-44249 3102   26
+ 2.000000+7 5.323000-4 2.100000+7 4.457000-4 2.200000+7 3.824000-44249 3102   27
+ 2.300000+7 3.339000-4 2.400000+7 2.987000-4 2.500000+7 2.698000-44249 3102   28
+ 2.600000+7 2.471000-4 2.700000+7 2.285000-4 2.800000+7 2.122000-44249 3102   29
+ 2.900000+7 1.982000-4 3.000000+7 1.851000-4                      4249 3102   30
+ 0.000000+0 0.000000+0          0          0          0          04249 3  099999
+ 0.000000+0 0.000000+0          0          0          0          04249 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0    0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0    0
