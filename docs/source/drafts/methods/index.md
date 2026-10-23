@@ -48,6 +48,12 @@ The symbols every page shares are defined once in {doc}`notation`.
 - {doc}`processing/photonuclear-tables`: photonuclear ACE tables.
 - {doc}`processing/njoy`: running NJOY with a fixed, checked chain.
 
+## Checking evaluated data
+
+- {doc}`checks/data-checks`: what is checked in every file but the covariances (MF 1-28),
+  against the format, mathematics and physics.
+- {doc}`covariance/covariance-checks`: what is checked in the covariance files.
+
 ## Covariances
 
 - {doc}`covariance/covariance-checks`: what is checked in a covariance section as written.

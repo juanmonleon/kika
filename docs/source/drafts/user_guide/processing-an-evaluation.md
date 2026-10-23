@@ -174,6 +174,12 @@ negative heating, a probability table that stopped short of its statistical targ
 **note** is something of the evaluation that kika resolved in a fixed, documented way,
 with no effect on the output. The numbers behind the checks are folded under *Details*.
 
+The first stage, *Reading the evaluation*, carries the static data checks of the
+evaluation itself ({doc}`checking-evaluations`): their defects and warnings are listed
+there as one **warning**, because the processing still runs and verifies its outputs, and
+what it lists is what a result may inherit from the evaluation. An evaluation with notes
+only gives a **note**.
+
 ## From GNDS
 
 ```python

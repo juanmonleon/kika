@@ -9,7 +9,8 @@ file and its evidence, without changing anything.
 **Applies to:** MF 31, 32, 33, 34, 35 and 40 of ENDF-6 tapes, read with kika's ENDF
 parser.
 
-**Entry points:** {py:func}`kika.endf.check_covariances`, {py:func}`kika.endf.check_covariance_library`;
+**Entry points:** {py:func}`kika.endf.check_covariances`, {py:func}`kika.endf.check_covariance_library`,
+and {py:func}`kika.check` with the data checks of {doc}`../checks/data-checks`;
 the reports are {py:class}`kika.endf.checks.CovarianceCheckReport` and
 {py:class}`kika.endf.checks.CovarianceLibraryReport`.
 
