@@ -349,7 +349,9 @@ def _contiguous(x):
 
 
 class EndfProcessing:
-    """The result of :func:`process_endf`. Picklable; every array is float64."""
+    """The result of :func:`process_endf`. Every array is float64; :meth:`to_dict`
+    gives it as plain types and arrays, which pickle (the result itself holds the
+    reconstruction, which does not)."""
 
     def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables, *, broadened=None,
                  source_format="endf"):
@@ -372,6 +374,14 @@ class EndfProcessing:
         self._aside = {}                 # GNDS: containers set aside for the reconstruction
         self._heating = {}               # {T: {301: (E, h), 444: (E, d)}}, 0.0 for 0 K
         self._displacements = {}         # {T: {"nrt": (E, n), "arc-dpa": (E, n)}}
+        self._processed = None           # (suite, report): every temperature tabulated for Monte Carlo
+
+    def __getstate__(self):
+        # The processed suite is a cache of write_ace/write_hdf5, rebuilt on demand:
+        # it does not travel with the result.
+        state = dict(self.__dict__)
+        state["_processed"] = None
+        return state
 
     def _written(self, fmt, t0, path, error=None, summary="", **details):
         """Append this output's own ``write`` stage (several outputs, several stages)."""
@@ -644,6 +654,33 @@ class EndfProcessing:
             raise ProcessingOutputError(category, str(error)) from error
         return work
 
+    def _processed_suite(self, progress=None, category="ace-failed"):
+        """``(suite, report, omit)``: every broadened temperature tabulated for Monte Carlo,
+        light charged particles included, built once and shared by :meth:`write_ace`
+        and :meth:`write_hdf5` (the slow part of both: distributions, KERMA, damage,
+        gas production). The HDF5 file takes a copy without the charged particles,
+        which is the suite :func:`kika.hdf5.processing.processSuite` makes for it
+        without them (identical files, Au-197 and Ni-58 of ENDF/B-VIII.1)."""
+        from kika.hdf5.processing import ACE_PARTICLES, processSuite
+        from kika.nuclear_data.model import ConversionReport
+        if self._processed is not None:
+            return self._processed
+        temps = list(self.temperatures)
+        work = self._full_suite(progress, category=category)
+        resonances = work.resonances
+        omit = ("urr",) if resonances is not None and resonances.unresolved is not None and not self._urr else ()
+        report = ConversionReport()
+        try:
+            suite = processSuite(
+                work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
+                broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
+                context=self.reconstruction.context, thinning=self.plan.thinning,
+                workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
+        except Exception as error:
+            raise ProcessingOutputError(category, f"{type(error).__name__}: {error}") from error
+        self._processed = (suite, report, omit)
+        return self._processed
+
     def write_gnds(self, path, *, progress: Progress | None = None) -> Path:
         """Write the processed evaluation as GNDS, as FUDGE's ``processProtare`` does.
 
@@ -737,18 +774,12 @@ class EndfProcessing:
             if not temps or not self._broadened:
                 raise ProcessingOutputError(
                     "hdf5-needs-temperature", PROCESSING_REJECTION_CATEGORIES["hdf5-needs-temperature"])
-            work = self._full_suite(progress)
-            omit = ()
-            resonances = work.resonances
-            if resonances is not None and resonances.unresolved is not None and not self._urr:
-                omit = ("urr",)
+            processed, _, omit = self._processed_suite(progress, category="hdf5-failed")
+            if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             try:
-                writeSuite(
-                    work, path.parent, temperatures=temps, fileName=path.name, index=index,
-                    urrTables=dict(self._urr) or None, broadened={T: self._broadened[T] for T in temps},
-                    thnmax=self.thnmax, context=self.reconstruction.context, thinning=self.plan.thinning,
-                    workers=self.plan.workers, omit=omit)
+                writeSuite(_neutrons_and_photons(processed), path.parent, temperatures=temps,
+                           fileName=path.name, index=index)
             except Exception as error:
                 raise ProcessingOutputError("hdf5-failed", f"{type(error).__name__}: {error}") from error
         except ProcessingOutputError as error:
@@ -792,7 +823,6 @@ class EndfProcessing:
         from kika.ace.model_adapter import encodeAce
         from kika.ace.writers.write_ace import write_ace_checked
         from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
-        from kika.hdf5.processing import ACE_PARTICLES, processSuite
         from kika.nuclear_data.model import ConversionReport
 
         t0 = time.perf_counter()
@@ -817,21 +847,10 @@ class EndfProcessing:
                 raise ProcessingOutputError(
                     "ace-failed", f"extension={extension!r} names one table, and {len(temps)} "
                                   f"temperatures {temps} were asked for")
-            work = self._full_suite(progress, category="ace-failed")
-            omit = ()
-            resonances = work.resonances
-            if resonances is not None and resonances.unresolved is not None and not self._urr:
-                omit = ("urr",)
+            processed, processing_report, omit = self._processed_suite(progress, category="ace-failed")
+            if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             report = ConversionReport()
-            try:
-                processed = processSuite(
-                    work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
-                    broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
-                    context=self.reconstruction.context, thinning=self.plan.thinning,
-                    workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
-            except Exception as error:
-                raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
             directory.mkdir(parents=True, exist_ok=True)
             for i, T in enumerate(temps):
                 try:
@@ -852,7 +871,7 @@ class EndfProcessing:
                 written.append(target)
                 if progress:
                     progress("write", (i + 1) / len(temps))
-            omitted += list(report.unsupported)
+            omitted += list(processing_report.unsupported) + list(report.unsupported)
         except ProcessingOutputError as error:
             self._written("ace", t0, directory, error, temperatures=temps, files=[str(p) for p in written])
             raise
@@ -992,6 +1011,22 @@ class EndfProcessing:
     def __repr__(self):
         states = ", ".join(f"{s.stage}={s.status}" for s in self.stages)
         return f"<EndfProcessing {self.reconstruction.path.name}: {states}>"
+
+
+def _neutrons_and_photons(processed):
+    """A copy of a processed suite with only its neutron and photon products, the
+    ones an OpenMC HDF5 file carries: the light charged particles ACE tabulates
+    are added to a reaction's products and change nothing else."""
+    suite = copy.deepcopy(processed)
+    for name in ("reactions", "orphanProducts", "fissionComponents", "productions", "sums",
+                 "incompleteReactions"):
+        for reaction in getattr(suite, name, None) or []:
+            channel = getattr(reaction, "outputChannel", None)
+            if channel is None:
+                continue
+            products = channel.products.products
+            products[:] = [p for p in products if p.pid in ("n", "photon")]
+    return suite
 
 
 def _heated_tables(work, label, broadened, hi, thinning):

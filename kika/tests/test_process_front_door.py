@@ -56,6 +56,10 @@ def test_a_neutron_tape_goes_through_process_endf(neutron):
     assert (out / "cross_sections.xml").is_file()             # an HDF5 library is indexed
     with pytest.raises(ValueError, match="written as"):
         run.write(out, "xyz")
+    # The Monte Carlo tabulation is made once and shared by the ACE and HDF5
+    # writers; it is a cache, left out of the result's state.
+    assert run.run._processed is not None
+    assert run.run.__getstate__()["_processed"] is None
 
 
 def test_the_neutron_report_lists_what_was_written(neutron):
