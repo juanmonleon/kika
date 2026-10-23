@@ -83,6 +83,7 @@ def check_data(source, *, mf: Optional[Sequence[int]] = None, deep: bool = False
         endf, path = source, getattr(source, "source_path", None)
     tape = Tape(endf, path)
     wanted = tuple(sorted(set(DATA_MF if mf is None else mf) & set(DATA_MF)))
+    tape.wanted = wanted
     out = Out(tape.mat)
     for name, files, run in _families():
         if not set(files) & set(wanted):

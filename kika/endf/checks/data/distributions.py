@@ -55,16 +55,19 @@ NEG_AREA_DEFECT = 1e-2
 PSUM_NOTE = 1e-5
 PSUM_WARN = 1e-3
 #: Outgoing energy beyond the kinematic limit, relative to the limit (with
-#: floors of 1 keV and 10 keV).
-KINEMATIC_WARN = 1e-3
-KINEMATIC_DEFECT = 1e-2
+#: floors of 1 keV and 10 keV). At 100-200 MeV the gap between relativistic and
+#: non-relativistic kinematics, and between lab and CM for an incident photon,
+#: is about 1 %: below that a spectrum cannot be faulted.
+KINEMATIC_WARN = 1e-2
+KINEMATIC_DEFECT = 5e-2
 #: A kinematic violation in a reaction whose cross section is below this
 #: fraction of the total at that energy changes nothing measurable: a note.
 KINEMATIC_SHARE = 1e-4
 #: |a_l| or a cosine beyond 1 by more than this is not rounding.
 UNIT_SLACK = 1e-6
-#: Kalbach's r outside [0, 1] by more than this.
+#: Kalbach's r outside [0, 1] by more than this; a defect beyond the second.
 KALBACH_SLACK = 1e-6
+KALBACH_DEFECT = 1e-2
 #: ZA balance of an MF6 section: tolerance on sum y Z and sum y A.
 ZA_SLACK = 1e-3
 
@@ -130,9 +133,12 @@ def _share(tape: Tape, mt: int, e: float) -> Optional[float]:
     return s / st if st > 0 else None
 
 
-def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max: float,
+def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max,
                q: float, lab: bool, awr: float, awi: float, tape: Optional[Tape] = None,
                **where) -> None:
+    """*e_out_max* is ``(top, start)``: where the spectrum's probability ends, and
+    where its last interval with probability begins (a discrete line: both)."""
+    e_out_max, start = e_out_max
     avail = e + q if lab else e * awr / (awr + awi) + q
     if avail <= 0:
         return
@@ -142,7 +148,12 @@ def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max: flo
     level = DEFECT if excess > max(KINEMATIC_DEFECT * avail, 1e4) else WARN
     share = _share(tape, mt, e) if tape is not None else None
     tail = ""
-    if share is not None and share < KINEMATIC_SHARE:
+    if start <= avail + max(KINEMATIC_WARN * avail, 1e3):
+        # Only the last interval, which starts within the limit, crosses it: the
+        # resolution of the outgoing grid (coarse bins near a threshold).
+        level = NOTE
+        tail = f"; only its last interval, from {fmt_e(start)}, crosses the limit"
+    elif share is not None and share < KINEMATIC_SHARE:
         level = NOTE
         tail = ("; the reaction has no cross section there" if share == 0 else
                 f"; the reaction is {share:.1g} of the total cross section there")
@@ -152,13 +163,14 @@ def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max: flo
               mf=mf, mt=mt, at=e, e_out=e_out_max, available=avail, q=q, share=share, **where)
 
 
-def _support_top(x: np.ndarray, f: np.ndarray) -> float:
-    """The highest outgoing energy with probability: the point after the last positive value."""
+def _support_top(x: np.ndarray, f: np.ndarray):
+    """``(top, start)``: where the probability ends -- the point after the last
+    positive value -- and that last positive point."""
     pos = np.flatnonzero(f > 0)
     if not pos.size:
-        return 0.0
+        return 0.0, 0.0
     i = int(pos[-1])
-    return float(x[min(i + 1, x.size - 1)])
+    return float(x[min(i + 1, x.size - 1)]), float(x[i])
 
 
 def _integral(t: Table) -> float:
@@ -442,7 +454,8 @@ def _law(tape, out, mt, k, zap, body, q, lab, awr, awi) -> None:
                 bad = (r < -KALBACH_SLACK) | (r > 1 + KALBACH_SLACK)
                 if bad.any():
                     i = int(np.flatnonzero(bad)[0])
-                    scratch.add("kalbach_fraction", DEFECT,
+                    off = max(-r.min(), r.max() - 1.0)
+                    scratch.add("kalbach_fraction", DEFECT if off > KALBACH_DEFECT else WARN,
                                 f"{what}: Kalbach's pre-compound fraction r = {r[i]:.6g} {_at(e)}, outside [0, 1]",
                                 mf=6, mt=mt, k=k, zap=zap, at=e, r=float(r[i]))
             if body.lang == 1 and block.shape[1] > 2:
@@ -453,7 +466,7 @@ def _law(tape, out, mt, k, zap, body, q, lab, awr, awi) -> None:
             if q is not None and x.size:
                 # A negative discrete photon energy is a primary photon: |E'| + E A/(A+1).
                 gx = np.abs(disc_x) + (np.where(disc_x < 0, e * awr / (awr + 1), 0.0) if zap == 0 else 0.0)
-                tops = [float(gx.max())] if gx.size else []
+                tops = [(float(gx.max()), float(gx.max()))] if gx.size else []
                 if cx.size:
                     tops.append(_support_top(cx, cf))
                 if tops:
@@ -498,7 +511,7 @@ def _law(tape, out, mt, k, zap, body, q, lab, awr, awi) -> None:
                             "not increasing", mf=6, mt=mt, k=k, zap=zap, at=e)
                 continue
             dens = []
-            top = 0.0
+            top = (0.0, 0.0)
             for a in blk.angles:
                 t = Table.of(a.e_out, a.f, a.interp)
                 if not check_table(t, scratch, mf=6, mt=mt, what=what, x_name="E'", k=k, zap=zap):
@@ -511,7 +524,7 @@ def _law(tape, out, mt, k, zap, body, q, lab, awr, awi) -> None:
                 top = max(top, _support_top(t.x, t.y))
             if dens and mus.size > 1:
                 _norm(scratch, 6, mt, what, e, float(np.trapz(dens, mus)), k=k, zap=zap)
-            if q is not None and top:
+            if q is not None and top[0]:
                 _kinematic(scratch, 6, mt, what, e, top, q, True, awr, awi, tape=tape, k=k, zap=zap)
         nodes.flush()
 
@@ -687,8 +700,9 @@ def descriptions(D, _g, _pct):
         "kinematic_limit": D(
             "Outgoing energy beyond what the reaction makes available", (5, 6),
             {DEFECT: f"by more than {_pct(KINEMATIC_DEFECT)} of the limit",
-             WARN: f"by more than {_g(KINEMATIC_WARN)} of it",
-             NOTE: f"either, in a reaction below {_g(KINEMATIC_SHARE)} of the total cross section there"},
+             WARN: f"by more than {_pct(KINEMATIC_WARN)} of it",
+             NOTE: f"either, in a reaction below {_g(KINEMATIC_SHARE)} of the total cross section there, "
+                   "or only in a last interval that starts within the limit"},
             "No product carries more kinetic energy than E + Q in the laboratory, or E A/(A+a) + Q in "
             "the centre of mass, with Q the larger of QM and QI (FIZCON's EPMAX, ACER's consis). For "
             "MF5 LF = 7 and 9 the restriction energy U must keep E' = E - U within it. Where the "
@@ -700,8 +714,10 @@ def descriptions(D, _g, _pct):
             "An MF6 law body whose values cannot be read as the law says (LAW=1 groups of NA + 2, "
             "LAW=2 (mu, f) pairs, a LANG the law does not define)."),
         "kalbach_fraction": D(
-            "Kalbach pre-compound fraction outside [0, 1]", (6,), {DEFECT: "always"},
-            "Kalbach-Mann's r is the pre-compound fraction of the emission (FUDGE: severe; ACER)."),
+            "Kalbach pre-compound fraction outside [0, 1]", (6,),
+            {DEFECT: f"by more than {_g(KALBACH_DEFECT)}", WARN: "by less"},
+            "Kalbach-Mann's r is the pre-compound fraction of the emission (FUDGE: severe; ACER). Found in "
+            "the ENDF/B-VIII.1 photonuclear sublibrary (r = 2 in Pb-206 and Pb-207), as NNDC reported."),
         "multiplicity_negative": D(
             "Negative multiplicity", (6,), {DEFECT: "always"},
             "A product's yield is not negative."),

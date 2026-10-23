@@ -122,6 +122,9 @@ class Tape:
         self.mat = getattr(endf, "mat", None)
         self._raw = None
         self.parse_failures: Dict[int, str] = {}
+        #: The files the run was asked for; a check that looks across files
+        #: (the HEAD of every section) stays inside them.
+        self.wanted: Tuple[int, ...] = tuple(sorted(endf.files))
 
     # ---- files and sections ------------------------------------------------
 

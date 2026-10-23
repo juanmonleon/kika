@@ -84,7 +84,7 @@ def _heads(tape: Tape, out: Out) -> None:
     bad_za: List[Tuple[int, int, int]] = []
     awr_off: List[Tuple[int, int, float]] = []
     for mf in tape.present:
-        if mf == 1:
+        if mf == 1 or mf not in tape.wanted:
             continue
         for mt, sec in tape.sections(mf).items():
             sza = getattr(sec, "_za", None)
@@ -142,7 +142,9 @@ def _flags(tape: Tape, out: Out) -> None:
     lis = int(tape._h("_lis", 0) or 0)
     elis = tape.elis
     if (lis == 0) != (elis == 0):
-        out.add("header_flags", WARN,
+        # The decay sublibrary often leaves an isomer's ELIS at 0: true, and
+        # worth knowing, but no processing reads it there.
+        out.add("header_flags", NOTE if tape.nsub == 4 else WARN,
                 f"LIS = {lis} and ELIS = {fmt_e(elis)}: a ground state has no excitation energy "
                 "and an excited state has one", mf=1, mt=451, flag="LIS/ELIS", lis=lis, elis=elis)
     awi = tape._h("_awi")

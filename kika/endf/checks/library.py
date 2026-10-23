@@ -602,6 +602,12 @@ def check_library(
 
     what = normalise_what(what)
     kind = kind_of(what)
+    given_root = None
+    if not isinstance(source, Mapping):
+        # A library folder also holds what is not a tape (LEAPR inputs beside
+        # the TSL files, READMEs named .txt): left out, not counted as failures.
+        given_root, found = _tapes(source, patterns, recursive)
+        source = [p for p in found if _looks_like_endf(p)]
 
     def one(path: Path, make) -> TapeCheck:
         result = check_evaluation_file(path, what=what, mf=mf, deep=deep)
@@ -611,8 +617,25 @@ def check_library(
 
     tapes, root, stopped, planned = _walk(source, patterns, recursive, one, kind,
                                           progress, on_tape, should_stop, on_result)
-    return LibraryReport(tapes, directory=root, library=library, stopped=stopped,
+    return LibraryReport(tapes, directory=given_root or root, library=library, stopped=stopped,
                          planned=planned, kind=kind)
+
+
+def _looks_like_endf(path: Path) -> bool:
+    """Whether *path* has ENDF-6 records: a line of 75-80 columns in its head with MAT, MF and MT."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(4096).splitlines()
+    except OSError:
+        return True             # unreadable: let the walk say so
+    for line in head[:6]:
+        if 75 <= len(line) <= 80:     # an ENDF record is 75 to 80 columns
+            try:
+                int(line[66:70]), int(line[70:72]), int(line[72:75])
+                return True
+            except ValueError:
+                continue
+    return False
 
 
 @dataclass(frozen=True)

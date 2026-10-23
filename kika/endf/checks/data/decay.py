@@ -37,6 +37,12 @@ BR_WARN = 1e-2
 #: warning above max(Q_WARN_EV, Q_WARN_REL Q).
 Q_NOTE_EV, Q_NOTE_REL = 1e3, 1e-3
 Q_WARN_EV, Q_WARN_REL = 1e5, 1e-2
+#: A decay Q off AME2020 is a warning only for a nuclide that lives this long
+#: (s): the exotic ones, short-lived, have masses AME extrapolates, and their Q
+#: weighs nothing in decay heat or inventories. A Q off by this factor is a
+#: unit error, a defect whatever the half-life.
+Q_WARN_HALFLIFE = 1.0
+Q_UNIT_FACTOR = 100.0
 #: Sum of average decay energies above sum br Q.
 ENERGY_SLACK_REL, ENERGY_SLACK_EV = 1e-2, 1e3
 #: A discrete line above the largest Q.
@@ -95,12 +101,13 @@ def _decay(tape: Tape, out: Out) -> None:
         out.add("decay_branching", NOTE, f"{int((br == 0).sum())} decay mode{'s' if (br == 0).sum() != 1 else ''} "
                 "with a branching ratio of 0", mf=8, mt=457)
     elis = tape.elis
+    isomer_unknown = (tape.liso > 0 or int(tape._h("_lis", 0) or 0) > 0) and elis == 0
     qmax = 0.0
     for m in modes:
         q = float(m.q)
         qmax = max(qmax, q)
         digit = int(m.rtyp)
-        if m.rfs != 0 or za is None or za % 1000 == 0:
+        if m.rfs != 0 or za is None or za % 1000 == 0 or isomer_unknown:
             continue
         if digit == 3:
             expected = elis if elis > 0 else None
@@ -112,7 +119,9 @@ def _decay(tape: Tape, out: Out) -> None:
             continue
         diff = abs(q - expected)
         if diff > max(Q_NOTE_EV, Q_NOTE_REL * abs(expected)):
-            level = WARN if diff > max(Q_WARN_EV, Q_WARN_REL * abs(expected)) else NOTE
+            level = WARN if diff > max(Q_WARN_EV, Q_WARN_REL * abs(expected)) and t >= Q_WARN_HALFLIFE else NOTE
+            if q > 0 and expected > 0 and max(q / expected, expected / q) >= Q_UNIT_FACTOR:
+                level = DEFECT
             out.add("decay_q", level,
                     f"{_MODE_NAME.get(digit, digit)} decay: Q = {fmt_e(q)}, AME2020 gives {fmt_e(expected)} "
                     f"(off by {fmt_e(diff)})", mf=8, mt=457, mode=float(m.rtyp), q=q, ame=expected)
@@ -244,12 +253,17 @@ def descriptions(D, _g, _pct):
             "uncertainties)."),
         "decay_q": D(
             "Decay Q against AME2020", (8,),
-            {WARN: f"off by more than {_g(Q_WARN_EV / 1e3)} keV and {_pct(Q_WARN_REL)}",
+            {DEFECT: f"off by a factor of {_g(Q_UNIT_FACTOR)} or more (a unit error)",
+             WARN: f"off by more than {_g(Q_WARN_EV / 1e3)} keV and {_pct(Q_WARN_REL)}, for a half-life of "
+                   f"{_g(Q_WARN_HALFLIFE)} s or more",
              NOTE: f"off by more than {_g(Q_NOTE_EV / 1e3)} keV and {_pct(Q_NOTE_REL)}"},
             "A decay mode's Q is the mass difference of parent (plus its excitation) and daughter, which "
             "AME2020 gives for beta-, EC/beta+, alpha, neutron and proton emission; an isomeric transition "
-            "releases the parent's excitation. Modes to an excited daughter and chains are left out. No other "
-            "checker compares decay Q with a mass table."),
+            "releases the parent's excitation. Modes to an excited daughter, chains and isomers whose MF1 "
+            "gives no excitation are left out. Short-lived exotic nuclides have masses AME extrapolates and "
+            "Q values from older tables; their differences are notes. Found in ENDF/B-VIII.1: Cu-81, Rh-123, "
+            "Pd-125, Pd-126 and I-145 state Q in keV where MeV is meant. No other checker compares decay Q "
+            "with a mass table."),
         "decay_energy": D(
             "Average decay energies exceed Q", (8,), {WARN: "always"},
             f"The average energies of the light, electromagnetic and heavy radiations add up to at most the "

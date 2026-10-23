@@ -73,8 +73,8 @@ def test_pr141_unresolved_parameters_short_of_their_range():
 
 def test_n14_two_neutrons_beyond_what_n2n_makes_available():
     r = _check("micro_n14_b81_mt16", mf=[6])
-    (f,) = r.by_check("kinematic_limit")
-    assert f.level == DEFECT and f.location.mt == 16 and f.location.zap == 1
+    (f,) = [f for f in r.by_check("kinematic_limit") if f.level == DEFECT]
+    assert f.location.mt == 16 and f.location.zap == 1
     assert f.evidence["e_out"] > f.evidence["available"] * 1.5
 
 

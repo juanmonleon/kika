@@ -73,7 +73,7 @@ def _build() -> Dict[str, CheckDescription]:
             {DEFECT: "LRP says MF2 is given and it is not",
              WARN: "LRP = -1 with an MF2; LFI = 0 with fission; LIS and ELIS disagree; AWI not 1 "
                    "on a neutron sublibrary",
-             NOTE: "LFI = 1 without fission"},
+             NOTE: "LFI = 1 without fission; LIS and ELIS disagree in the decay sublibrary"},
             "MF1/451's flags say what a processor should look for: LRP whether there are resonance "
             "parameters, LFI whether there is fission, LIS/ELIS the target's state, AWI the "
             "projectile."),
