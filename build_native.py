@@ -37,7 +37,9 @@ def _run(compiler=None):
         'kika.processing._heating_native',
         ['kika/processing/_heating_native.c']), Extension(
         'kika.algebra._polynomial_native',
-        ['kika/algebra/_polynomial_native.c'])]})
+        ['kika/algebra/_polynomial_native.c']), Extension(
+        'kika._records_native',
+        ['kika/_records_native.c'])]})
     command=StrictBuild(distribution)
     command.inplace=True
     if compiler:command.compiler=compiler

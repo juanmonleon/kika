@@ -682,3 +682,27 @@ def parse_endf_id(line: str) -> Tuple[Optional[int], Optional[int], Optional[int
     except ValueError as e:
         # This might happen if the fields contain non-numeric data
         return None, None, None
+
+
+# The four hot functions above, in C (kika/_records_native.c). Each C function
+# decides the common case with CPython's own decimal conversions -- the same
+# doubles and the same text -- and calls the Python definition above for
+# anything else, so those stay the definition: kika/tests/test_records_native.py
+# holds the two to the same results. Reading a tape is ~half field conversion
+# and writing one ~60 % field formatting, which is what this takes away.
+_python_definitions = (parse_number, parse_record_values, format_endf_fields, format_endf_number)
+from importlib import import_module as _import_module
+try:
+    _records_native = _import_module("kika._records_native")
+except ModuleNotFoundError as exc:
+    if exc.name != "kika._records_native":
+        raise
+    _records_native = None
+if _records_native is not None:
+    if _records_native.API_VERSION != 1:
+        raise ImportError("rebuild kika's native records extension (API version mismatch)")
+    _records_native.install(*_python_definitions)
+    parse_number = _records_native.parse_number
+    parse_record_values = _records_native.parse_record_values
+    format_endf_fields = _records_native.format_endf_fields
+    format_endf_number = format_endf_number_precise = _records_native.format_endf_number

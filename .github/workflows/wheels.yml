@@ -55,7 +55,8 @@ jobs:
             'kika.processing.doppler._doppler_native',
             'kika.processing._thermal_native',
             'kika.processing._heating_native',
-            'kika.algebra._polynomial_native')];
+            'kika.algebra._polynomial_native',
+            'kika._records_native')];
             from kika.processing import native_available;
             assert native_available(); print('kika', kika.__version__, 'native ok')"
 
