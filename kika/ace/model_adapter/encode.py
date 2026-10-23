@@ -1315,8 +1315,8 @@ def writeAceSuite(suite, path, temperature=None, **options) -> ConversionReport:
         return Report()
     if not isProcessed(suite):
         raise AceEncodeError("ace-needs-processed-suite: an ACE table is a processed suite at one "
-                             "temperature; process the evaluation first (kika.endf.process_endf(...)"
-                             ".write_ace(directory), or kika.hdf5.processing.processSuite)")
+                             "temperature; process the evaluation first: "
+                             "kika.process(path).write(directory, 'ace')")
     ace, report = encodeAce(suite, temperature, **options)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

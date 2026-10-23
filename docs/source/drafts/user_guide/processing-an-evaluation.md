@@ -1,5 +1,57 @@
 # Processing an evaluation
 
+## The short way
+
+{py:func}`kika.process` processes any evaluation kika knows how to turn into transport
+files, with nothing to choose. It reads the tape's header to tell what it is, takes that
+kind's route and its tested settings, and verifies every stage:
+
+```python
+import kika
+
+def main():
+    run = kika.process("n-026_Fe_056.endf")       # 293.6 K unless temperatures=[...]
+    run.write("out/", ["ace", "hdf5"])            # out/26056.02c + xsdir, out/Fe56.h5 + cross_sections.xml
+    run.report_document().save("out/Fe56.html")   # did it go well, and what was done
+
+if __name__ == "__main__":
+    main()
+```
+
+| Evaluation | How kika tells | `write` formats |
+|---|---|---|
+| incident neutron (ENDF or GNDS) | MF 1/451 NSUB = 10, or a GNDS file | `ace`, `hdf5`, `pendf`, `gnds`, `dosimetry` |
+| thermal scattering | NSUB = 12 | `ace` (`.t`, one per temperature), `hdf5` |
+| photo-atomic | NSUB = 3; its relaxation and electron tapes are found beside it | `ace` (`.p`) |
+| photonuclear | NSUB = 0 | `ace` (`.u`) |
+| dosimetry (IRDFF-II and the like) | asked for: `kind="dosimetry"` | `ace` (`.y`) |
+
+The options are few, and each is physical: `temperatures`, `heating` (neutron), `name`
+and `neutron` (thermal: the OpenMC table name when the tape does not make it plain, and
+the principal nuclide's neutron tape), `relaxation` and `electrons` (photo-atomic, when
+they are elsewhere), `workers`. An option that does not apply to the evaluation is
+refused, not ignored. A tape kika cannot route, or whose thermal table name it cannot
+tell, is refused with what it found; kika does not guess.
+
+The report opens with the answer to *did it go well?* and then says what was done: the
+checks of every stage, the findings behind any note or warning, the files written and how
+each was verified, and the choices kika made for you. Ask for it after writing, since each
+file written is one of the stages it reports.
+
+## From the command line
+
+```
+kika process n-026_Fe_056.endf --to ace hdf5 -o out/
+kika process endfb81/neutrons/ --to ace -o lib/ --temperatures 293.6 600
+kika process tsl-HinH2O.endf -o thermal/
+```
+
+Each evaluation (or every evaluation in a folder; anything else there is skipped) gets one
+line saying how it went, and its report beside the files, `<name>.report.html`. The exit
+status is 1 when any evaluation was incomplete. `python -m kika process ...` is the same.
+
+## The staged API
+
 {py:func}`kika.endf.process_endf` takes an ENDF-6 neutron tape through kika's own
 processing chain (reconstruction, Doppler broadening, unresolved-resonance probability
 tables, optionally heating) and returns a result from which a PENDF, an OpenMC HDF5 file,
@@ -106,15 +158,22 @@ HDF5 and the ACE tables need at least one broadened temperature.
 `write_ace(directory, temperatures=[900])`. `write_ace` names each table by its ZAID and
 the suffix of its temperature, adds its line to `directory/xsdir`, refuses a table the
 `xsdir` already names unless `replace=True`, and takes `extension=".80c"` for a single
-temperature. A PENDF cannot be written from a GNDS evaluation.
+temperature.
 
 ## The report
 
 ```python
 doc = run.report_document()
-print(doc.to_text())          # the reconstruction report and a "Processing stages" section
-doc.save("fe56-report.html")
+print(doc.to_text())          # the verdict first, then the checks stage by stage
+doc.save("fe56-report.html")  # .html, .txt or .json
 ```
+
+The verdict is the worst outcome of every stage and every file written. A **failed**
+check is a result not to use, or a file not written. A **warning** is something that can
+change a result and needs your judgement (a material disagreement in the evaluation,
+negative heating, a probability table that stopped short of its statistical target). A
+**note** is something of the evaluation that kika resolved in a fixed, documented way,
+with no effect on the output. The numbers behind the checks are folded under *Details*.
 
 ## From GNDS
 

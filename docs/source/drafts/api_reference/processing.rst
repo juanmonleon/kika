@@ -4,8 +4,21 @@ kika.processing
 kika's own processing of an evaluation: resonance reconstruction, Doppler
 broadening (its own page), unresolved-resonance probability tables, heating,
 thermal scattering tables, and the tabulation of secondary distributions for
-Monte Carlo. The staged entry point for an ENDF-6 tape is
-:func:`kika.endf.process_endf`.
+Monte Carlo. The one-call entry point for any evaluation is :func:`kika.process`; the
+staged entry point for an ENDF-6 tape is :func:`kika.endf.process_endf`.
+
+The one call
+------------
+
+.. autofunction:: kika.process
+
+.. autoclass:: kika._process.Processing
+   :members: write, report_document
+
+.. autoclass:: kika._process.ProcessingRouteError
+
+.. autoclass:: kika.endf.processing_report.ProcessingReport
+   :members: to_text, to_html, to_dict, to_json, save
 
 .. automodule:: kika.processing
    :members:
