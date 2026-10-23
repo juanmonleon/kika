@@ -34,7 +34,9 @@ when the plan asks for it (``heating=True``).
 
 Outputs, each appending its own ``write`` stage: :meth:`EndfProcessing.write_pendf`
 (one material per temperature, MF2/MT153 where there are URR tables, MT301 and
-MT444 when the heating stage ran), :meth:`EndfProcessing.write_hdf5` (OpenMC) and
+MT444 when the heating stage ran), :meth:`EndfProcessing.write_hdf5` (OpenMC),
+:meth:`EndfProcessing.write_ace` (one continuous-energy table per temperature),
+:meth:`EndfProcessing.write_dosimetry_ace` (``.NNy`` tables) and
 :meth:`EndfProcessing.write_gnds` (eval, recon and one ``heated`` style per
 temperature). A failed output raises
 :class:`ProcessingOutputError` and leaves any existing file in place.
@@ -96,7 +98,6 @@ PROCESSING_REJECTION_CATEGORIES = {
     "urr-unsupported": "The unresolved resonance parameters use data the probability-table method does not support.",
     "urr-failed": "The probability tables stopped with an internal error.",
     # heating (skipped / rejected)
-    "heating-not-implemented": "Heating (KERMA) is not yet available in this processing chain.",
     "heating-unsupported":
         "The evaluation lacks data HEATR's method needs for the heating (a fission without MF1/458).",
     "heating-failed": "The heating (KERMA and damage) stopped with an internal error.",
@@ -208,8 +209,14 @@ class StageReport:
       ``n_points`` (``{T: union-grid points}``), ``engine_category`` and
       ``error`` when rejected.
     - ``urr``: ``temperatures``, ``n_energies``, ``bins``, ``ladders``,
-      ``range_eV``, ``error`` when rejected.
-    - ``write``: ``path``, ``temperatures`` written (``[0.0]`` for now).
+      ``range_eV``, ``ladders_drawn`` (``min``, ``median``, ``max``), ``error``
+      when rejected.
+    - ``heating``: ``temperatures`` (0 K included), ``mts``, ``local``,
+      ``n_points``, ``notes``, ``error`` when rejected.
+    - ``write`` (one stage per file written): ``format`` (``pendf``, ``hdf5``,
+      ``ace``, ``gnds``), ``path``, ``temperatures`` written, ``files`` (ACE: the
+      tables), ``omitted`` (what the format could not carry), ``error`` when
+      rejected.
     """
     stage: str
     status: str
@@ -1342,7 +1349,8 @@ def _heating(run, plan, report):
     summary = (f"MT301 (KERMA) and MT444 (damage) at {', '.join(f'{T:g}' for T in temps)} K, as NJOY "
                f"HEATR with local = 0" + ("; fission from MF1/458 (EFR + EGP) less its prompt photons"
                                           if fissile else "")
-               + (f"; displacements ({', '.join(models)}) in EndfProcessing.displacements" if models else ""))
+               + (f"; displacements per atom ({', '.join(models)}) computed, which no ENDF or ACE "
+                  f"section carries" if models else ""))
     return StageReport("heating", "done", time.perf_counter() - t0, None, summary, details), tables
 
 
@@ -1448,11 +1456,13 @@ def _urr(rec, plan, unresolved, report):
     drawn = np.concatenate([np.atleast_1d(np.asarray(t.statistics.ladders)) for t in tables.values()])
     details["ladders_drawn"] = dict(min=int(drawn.min()), median=float(np.median(drawn)), max=int(drawn.max()))
     lo, hi = unresolved["range_eV"]
+    stopping = (f", drawn until the tables' statistical error reaches {options.errorTarget:.1%}"
+                if options.errorTarget else "")
     return StageReport("urr", "done", time.perf_counter() - t0, None,
                        f"{plan.urr_bins} bands x {ne} energies ({lo:g}-{hi:g} eV) at "
                        f"{', '.join(f'{T:g}' for T in plan.temperatures)} K; "
-                       f"{int(drawn.min())}-{int(drawn.max())} ladders per energy (median {np.median(drawn):g}; "
-                       f"PURR's method, statistically equal to NJOY's)",
+                       f"{int(drawn.min())}-{int(drawn.max())} ladders per energy "
+                       f"(median {np.median(drawn):g}){stopping}",
                        details), dict(tables)
 
 

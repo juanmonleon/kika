@@ -193,6 +193,11 @@ def test_each_check_flags_what_it_should(reconstruction):
     d = rec.report_document().to_dict()
     disc = dict(d["sums"]["source_discrepancies"][0], max_ratio=3.0, at_eV=1e3, stated_b=2.0, components_b=1.9)
     assert _with(d, sums__source_discrepancies=[disc])["source_sums"]["status"] == "warning"
+    # A threshold point the stored total keeps and its parts do not (Au-197 B-VIII.1
+    # MT4 at 77.8 keV: 2.5e-4 b against 0) is noted, not a warning: the output is
+    # the sum, and nothing of consequence is missing from it.
+    point = dict(disc, max_ratio=962.0, at_eV=77.8e3, stated_b=2.527e-4, components_b=0.0)
+    assert _with(d, sums__source_discrepancies=[point])["source_sums"]["status"] == "note"
     neg = dict(count=2, min_b=-1e-3, at_eV=5.0)
     flagged = _with(d, reactions__0__negatives=neg, summary__negative_values=2)["negatives"]
     assert flagged["status"] == "warning" and "MT1" in flagged["items"][0]
