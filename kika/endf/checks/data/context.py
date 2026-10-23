@@ -307,32 +307,34 @@ class Raw:
 
     @classmethod
     def read(cls, path: Path) -> "Raw":
+        """One pass over the columns 67-75 of every line, grouped into runs.
+
+        The runs are formed on the raw bytes (``itertools.groupby``) and only
+        each run's key is parsed: a JENDL-5 tape has a quarter of a million
+        lines and a few hundred runs.
+        """
+        from itertools import groupby
+
         data = path.read_bytes()
         lines: Dict[Tuple[int, int], int] = {}
+        runs: Dict[Tuple[int, int], int] = {}
         order: List[Tuple[int, int]] = []
         mats: Dict[int, int] = {}
-        closed = set()
-        split = []
-        prev = None
-        for line in data.splitlines():
-            if len(line) < 75:
+        for raw_key, group in groupby(line[66:75] for line in data.splitlines()):
+            if len(raw_key) < 9:
                 continue
             try:
-                mat = int(line[66:70])
-                mf = int(line[70:72])
-                mt = int(line[72:75])
+                mat, mf, mt = int(raw_key[0:4]), int(raw_key[4:6]), int(raw_key[6:9])
             except ValueError:
                 continue
+            n = sum(1 for _ in group)
             if mat > 0 and mf > 0:      # not the tape id, FEND, MEND or TEND
-                mats[mat] = mats.get(mat, 0) + 1
-            key = (mf, mt)
+                mats[mat] = mats.get(mat, 0) + n
             if mf > 0 and mt > 0:
-                if key in closed and key != prev and key not in split:
-                    split.append(key)
+                key = (mf, mt)
                 if key not in lines:
                     order.append(key)
-                lines[key] = lines.get(key, 0) + 1
-            if prev is not None and prev != key:
-                closed.add(prev)
-            prev = key
+                lines[key] = lines.get(key, 0) + n
+                runs[key] = runs.get(key, 0) + 1
+        split = [k for k in order if runs[k] > 1]
         return cls(lines, order, mats, split)

@@ -14,8 +14,10 @@ files it reads; ``mf=`` runs only the families that look at those files::
     report = check_data("n-026_Fe_056.endf", mf=[3])   # MF3 only
     print(report); report.to_html("fe56_data.html")
 
-Every check is *static*: it reads the tape and nothing else, no reconstruction
-and no processing, so a tape costs what reading it costs.
+The checks are *static* by default: they read the tape and nothing else, no
+reconstruction and no processing, so a tape costs what reading it costs.
+``deep=True`` adds the checks that need the cross sections reconstructed
+(:mod:`.deep`), at the cost of a reconstruction.
 """
 from __future__ import annotations
 
@@ -58,7 +60,7 @@ def _families():
 DATA_MF = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 28)
 
 
-def check_data(source, *, mf: Optional[Sequence[int]] = None) -> CheckReport:
+def check_data(source, *, mf: Optional[Sequence[int]] = None, deep: bool = False) -> CheckReport:
     """Check the data of one evaluation; returns a :class:`CheckReport` of kind ``"data"``.
 
     Parameters
@@ -68,6 +70,9 @@ def check_data(source, *, mf: Optional[Sequence[int]] = None) -> CheckReport:
         parsed) or an :class:`~kika.endf.classes.endf.ENDF` already read.
     mf : sequence of int, optional
         Check only these files (and nothing about the others); all by default.
+    deep : bool
+        Also reconstruct the cross sections and check what codes will use
+        (:mod:`.deep`): positivity, sums and 1/v. Needs MF3 asked for.
     """
     from kika.endf import open_endf
 
@@ -83,6 +88,10 @@ def check_data(source, *, mf: Optional[Sequence[int]] = None) -> CheckReport:
         if not set(files) & set(wanted):
             continue
         run(tape, out)
+    if deep and 3 in wanted:
+        from .deep import check_deep
+
+        check_deep(tape, out)
     _parse_errors(tape, out, wanted)
     present = [m for m in tape.present if m in wanted]
     return CheckReport(tuple(out.findings), source=path, mat=tape.mat, mf=tuple(present), kind="data")

@@ -74,7 +74,8 @@ def _plan(present, what, mf):
     return data_mf, cov_mf, sorted(m for m in read if m in present)
 
 
-def check_evaluation(source, *, what=WHAT, mf: Optional[Sequence[int]] = None) -> CheckReport:
+def check_evaluation(source, *, what=WHAT, mf: Optional[Sequence[int]] = None,
+                     deep: bool = False) -> CheckReport:
     """Run the data checks, the covariance checks or both on one evaluation.
 
     Parameters
@@ -86,6 +87,8 @@ def check_evaluation(source, *, what=WHAT, mf: Optional[Sequence[int]] = None) -
     mf : sequence of int, optional
         Only these files: ``mf=[3, 33]`` checks MF3's data and MF33's
         covariances, and reads what those are compared against.
+    deep : bool
+        Also the data checks that need the cross sections reconstructed.
 
     Returns
     -------
@@ -108,7 +111,7 @@ def check_evaluation(source, *, what=WHAT, mf: Optional[Sequence[int]] = None) -
     findings = ()
     mat = getattr(endf, "mat", None)
     if data_mf:
-        rep = check_data(endf, mf=data_mf)
+        rep = check_data(endf, mf=data_mf, deep=deep)
         findings += rep.findings
         mat = rep.mat if rep.mat is not None else mat
     if cov_mf:
@@ -131,7 +134,8 @@ class TapeResult:
     mf: Tuple[int, ...]
 
 
-def check_evaluation_file(path, *, what=WHAT, mf: Optional[Sequence[int]] = None) -> TapeResult:
+def check_evaluation_file(path, *, what=WHAT, mf: Optional[Sequence[int]] = None,
+                          deep: bool = False) -> TapeResult:
     """:func:`check_evaluation` on a file, for a library walk: never raises.
 
     Reading (the index and every file the checks need, parsed up front so the
@@ -171,7 +175,7 @@ def check_evaluation_file(path, *, what=WHAT, mf: Optional[Sequence[int]] = None
         findings = ()
         mat = getattr(endf, "mat", None)
         if data_mf:
-            rep = check_data(endf, mf=data_mf)
+            rep = check_data(endf, mf=data_mf, deep=deep)
             findings += rep.findings
         if cov_mf:
             rep = check_covariances(endf, mf=cov_mf)

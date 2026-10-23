@@ -22,6 +22,7 @@ def method_sections() -> List[Tuple[str, str, List[Rule]]]:
     from . import thermal as th
     from . import decay as dec
     from . import photoatomic as pa
+    from . import deep as dp
     from . import xs
 
     sections = [
@@ -67,6 +68,6 @@ def method_sections() -> List[Tuple[str, str, List[Rule]]]:
     sections += res.method(_g, _pct)
     sections += dist.method(_g, _pct)
     sections += ph.method(_g, _pct)
-    for module in (th, dec, pa):
+    for module in (th, dec, pa, dp):
         sections += module.method(_g, _pct)
     return sections

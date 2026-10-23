@@ -32,7 +32,7 @@ __all__ = ["check"]
 
 
 def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Sequence[int]] = None,
-          library: Optional[str] = None, recursive: bool = False, progress=True,
+          deep: bool = False, library: Optional[str] = None, recursive: bool = False, progress=True,
           on_tape=None, should_stop=None, on_result=None):
     """Check one evaluation, a folder of them, or a list of files.
 
@@ -45,6 +45,9 @@ def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Seque
         ``"all"`` (default), ``"data"`` or ``"covariances"``.
     mf : sequence of int, optional
         Only these files, and what they are checked against.
+    deep : bool
+        Also reconstruct the cross sections and check what codes will use
+        (positivity, sums, 1/v): a reconstruction per tape.
     library : str, optional
         A name for a folder's report (``"endfb81"``).
     recursive : bool
@@ -63,17 +66,17 @@ def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Seque
     if isinstance(source, (str, os.PathLike)):
         path = Path(os.fspath(source))
         if path.is_dir():
-            return check_library(path, what=what, mf=mf, recursive=recursive, library=library,
+            return check_library(path, what=what, mf=mf, deep=deep, recursive=recursive, library=library,
                                  progress=progress, on_tape=on_tape, should_stop=should_stop,
                                  on_result=on_result)
         if not path.exists():
             raise FileNotFoundError(f"no such file: {path}")
         if _is_gnds(path):
-            return _check_gnds(path, what, mf)
-        return check_evaluation(path, what=what, mf=mf)
+            return _check_gnds(path, what, mf, deep)
+        return check_evaluation(path, what=what, mf=mf, deep=deep)
     if hasattr(source, "files"):  # an ENDF object already read
-        return check_evaluation(source, what=what, mf=mf)
-    return check_library(list(source), what=what, mf=mf, library=library, progress=progress,
+        return check_evaluation(source, what=what, mf=mf, deep=deep)
+    return check_library(list(source), what=what, mf=mf, deep=deep, library=library, progress=progress,
                          on_tape=on_tape, should_stop=should_stop, on_result=on_result)
 
 
@@ -86,7 +89,7 @@ def _is_gnds(path: Path) -> bool:
         return False
 
 
-def _check_gnds(path: Path, what, mf):
+def _check_gnds(path: Path, what, mf, deep):
     """A GNDS evaluation: read into the model, written as ENDF-6, checked as such."""
     import kika
     from kika.endf.checks.evaluation import check_evaluation
@@ -97,7 +100,7 @@ def _check_gnds(path: Path, what, mf):
     with tempfile.TemporaryDirectory(prefix="kika-check-") as tmp:
         tape = Path(tmp) / (path.stem + ".endf")
         writeEndfTape(suite, tape)
-        report = check_evaluation(tape, what=what, mf=mf)
+        report = check_evaluation(tape, what=what, mf=mf, deep=deep)
     note = Finding("gnds_translated", NOTE,
                    "a GNDS evaluation: checked as the ENDF-6 tape kika writes from it, so a finding "
                    "may come from the translation as well as from the evaluation",

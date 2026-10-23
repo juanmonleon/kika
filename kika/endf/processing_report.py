@@ -104,6 +104,15 @@ CHECKS = (
           "with no energy, data the table approximates. Each is listed.",
           {PASS: "Nothing to report.",
            NOTE: "Listed; none stops the table from being used."}),
+    Check("evaluation", "The evaluation passes kika's data checks",
+          "Before it is processed, the evaluation's data (every file but the covariances) are checked "
+          "against the format, mathematics and physics: the static checks of kika.check, which read the "
+          "tape and nothing else. kika processes the evaluation either way; a finding says what in it a "
+          "result may inherit. kika.check gives the full report.",
+          {PASS: "No defect, warning or note.",
+           NOTE: "Notes only: things true of the evaluation and worth knowing, none a fault.",
+           WARN: "The evaluation has defects or warnings (listed). The output carries them as the "
+                 "evaluation states them."}),
     Check("output", "File written and read back",
           "Every file is written to a temporary place, read back and compared with what was meant to "
           "be written, and only then moved over the destination.",
@@ -142,6 +151,7 @@ def build(run) -> dict:
                                                     for r in by_stage.get("read", []) + by_stage.get("decode", [])))
         stages.append(_stage(sid, title, record, run, rd, recon_checks))
 
+    _add_evaluation_check(stages, rd["evaluation"].get("path"))
     stages, outputs, checks, summary = _finish(stages, by_stage.get("write", []))
     summary["detail"] = _detail(rd, run, outputs, summary["counts"])
     ev = rd["evaluation"]
@@ -213,6 +223,7 @@ def build_generic(proc) -> dict:
         stages.append(dict(id=s["stage"], title=_GENERIC_TITLES.get(s["stage"], s["stage"].capitalize()),
                            status=s["status"], state="rejected" if s["status"] == "rejected" else s["status"],
                            seconds=s["seconds"], summary=s["summary"] or "", checks=checks))
+    _add_evaluation_check(stages, str(proc.source))
     stages, outputs, checks, summary = _finish(stages, [s for s in raw if s["stage"] == "write"])
     what = f"{parts.get('title', proc.kind)} evaluation {parts.get('what', proc.source.name)}"
     done = [o for o in outputs if o["written"]]
@@ -236,6 +247,61 @@ def build_generic(proc) -> dict:
         choices=list(parts.get("choices") or []), steps=steps, urr=[], doppler=[], heating=[],
         reconstruction=None, processing_stages=_jsonable(raw))
     return _jsonable(data)
+
+
+#: Data checks already run, by (path, size, mtime): a report is often built twice.
+_EVALUATION_CHECKS = {}
+#: Findings listed under the check; the rest are counted.
+_EVALUATION_ITEMS = 12
+
+
+def _evaluation_check(path):
+    """``(status, result, items)`` of the static data checks on *path*, or ``None``."""
+    if not path or not os.path.isfile(path):
+        return None
+    st = os.stat(path)
+    key = (os.path.abspath(path), st.st_size, st.st_mtime_ns)
+    if key not in _EVALUATION_CHECKS:
+        from .checks.data import check_data
+        from .checks.findings import DEFECT, NOTE as C_NOTE, WARN as C_WARN
+        from .checks.suites import described
+
+        try:
+            report = check_data(path)
+        except Exception as error:  # noqa: BLE001 - a checker failure must not cost the processing report
+            _EVALUATION_CHECKS[key] = (NOTE, f"The data checks could not run ({type(error).__name__}: {error}).", [])
+            return _EVALUATION_CHECKS[key]
+        n = {lv: sum(1 for f in report if f.level == lv) for lv in (DEFECT, C_WARN, C_NOTE)}
+        status = WARN if n[DEFECT] or n[C_WARN] else NOTE if n[C_NOTE] else PASS
+        parts = [f"{n[DEFECT]} defect{'s' if n[DEFECT] != 1 else ''}" if n[DEFECT] else "",
+                 f"{n[C_WARN]} warning{'s' if n[C_WARN] != 1 else ''}" if n[C_WARN] else "",
+                 f"{n[C_NOTE]} note{'s' if n[C_NOTE] != 1 else ''}" if n[C_NOTE] else ""]
+        tally = ", ".join(p for p in parts if p)
+        result = (f"The data checks found {tally} in the evaluation." if tally
+                  else "The data checks found nothing in the evaluation.")
+        worst = [f for f in report if f.level in (DEFECT, C_WARN)]
+        worst.sort(key=lambda f: (f.level != DEFECT, f.location.mf or 0, f.location.mt or 0))
+        items = []
+        for f in worst[:_EVALUATION_ITEMS]:
+            d = described(f.check)
+            items.append(f"{'Defect' if f.level == DEFECT else 'Warning'}, {d.title if d else f.check} "
+                         f"({f.location}): {f.summary}")
+        if len(worst) > _EVALUATION_ITEMS:
+            items.append(f"... and {len(worst) - _EVALUATION_ITEMS} more; kika.check gives them all.")
+        _EVALUATION_CHECKS[key] = (status, result, items)
+    return _EVALUATION_CHECKS[key]
+
+
+def _add_evaluation_check(stages, path):
+    """The data checks' verdict, under the stage that read the evaluation."""
+    found = _evaluation_check(path)
+    if found is None:
+        return
+    status, result, items = found
+    stage = next((st for st in stages if st["id"] == "read"), stages[0] if stages else None)
+    if stage is None:
+        return
+    stage["checks"].append(_check("evaluation", status, result, items, stage=stage["id"]))
 
 
 def _sha256(path):

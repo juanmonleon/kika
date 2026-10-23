@@ -580,6 +580,7 @@ def check_library(
     *,
     what: Sequence[str] = ("data", "covariances"),
     mf: Optional[Sequence[int]] = None,
+    deep: bool = False,
     patterns: Sequence[str] = TAPE_PATTERNS,
     recursive: bool = False,
     library: Optional[str] = None,
@@ -603,7 +604,7 @@ def check_library(
     kind = kind_of(what)
 
     def one(path: Path, make) -> TapeCheck:
-        result = check_evaluation_file(path, what=what, mf=mf)
+        result = check_evaluation_file(path, what=what, mf=mf, deep=deep)
         return make(report=result.report, error=result.error, has_covariances=result.has_anything,
                     read_seconds=result.read_seconds, check_seconds=result.check_seconds,
                     mf=result.mf)

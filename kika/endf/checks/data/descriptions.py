@@ -34,6 +34,7 @@ def _build() -> Dict[str, CheckDescription]:
     from . import thermal as th
     from . import decay as dec
     from . import photoatomic as pa
+    from . import deep as dp
 
     D = CheckDescription
     ANY = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 28)
@@ -248,7 +249,7 @@ def _build() -> Dict[str, CheckDescription]:
     out.update(dist.descriptions(D, _g, _pct))
     out.update(ph.descriptions(D, _g, _pct))
     out.update(res.descriptions(D, _g, _pct))
-    for module in (th, dec, pa):
+    for module in (th, dec, pa, dp):
         out.update(module.descriptions(D, _g, _pct))
     return out
 

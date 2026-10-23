@@ -60,6 +60,8 @@ def main(argv=None) -> int:
     c.add_argument("--what", choices=("all", "data", "covariances"), default="all",
                    help="which checks to run (default: all)")
     c.add_argument("--mf", nargs="+", type=int, metavar="MF", help="only these files")
+    c.add_argument("--deep", action="store_true",
+                   help="also reconstruct the cross sections and check what codes will use (slower)")
     c.add_argument("-o", "--output", default=".", help="output folder (default: the current one)")
     c.add_argument("--level", choices=("note", "warn", "defect"), default="warn",
                    help="lowest level listed in the report (counts always cover every level)")
@@ -140,7 +142,7 @@ def _check(args) -> int:
         path = Path(source)
         t0 = time.perf_counter()
         try:
-            report = kika.check(path, what=args.what, mf=args.mf, library=args.library,
+            report = kika.check(path, what=args.what, mf=args.mf, deep=args.deep, library=args.library,
                                 recursive=args.recursive, progress=True)
         except (FileNotFoundError, ValueError) as error:
             print(f"  FAIL  {path.name}: {error}")
