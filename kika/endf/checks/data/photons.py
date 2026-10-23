@@ -69,6 +69,10 @@ def _levels(tape: Tape, mt: int) -> List[float]:
         if fam[0] <= m <= fam[1]:
             qm, qi = tape.q(m)
             out.append(qm - qi)
+    if fam[0] == 50 and tape.elis > 0:
+        # (z,n') of an isomeric target: the residual is the target, and its own
+        # isomeric state is a level a cascade can stop at (QM includes ELIS).
+        out.append(tape.elis)
     return sorted(out)
 
 

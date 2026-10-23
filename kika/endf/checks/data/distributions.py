@@ -60,9 +60,11 @@ PSUM_WARN = 1e-3
 #: is about 1 %: below that a spectrum cannot be faulted.
 KINEMATIC_WARN = 1e-2
 KINEMATIC_DEFECT = 5e-2
-#: A kinematic violation that carries less than this fraction of the spectrum's
-#: probability beyond the limit changes nothing measurable: a note.
-KINEMATIC_MASS = 1e-4
+#: When the probability beyond the limit is known it sets the level: a note
+#: below the first fraction, a warning below the second, a defect above. The
+#: energy a violation creates is that fraction times the excess.
+KINEMATIC_MASS = 1e-3
+KINEMATIC_MASS_DEFECT = 1e-2
 #: A kinematic violation in a reaction whose cross section is below this
 #: fraction of the total at that energy changes nothing measurable: a note.
 KINEMATIC_SHARE = 1e-4
@@ -163,8 +165,10 @@ def _kinematic(nodes: Out, mf: int, mt: int, what: str, e: float, e_out_max,
         level = NOTE
     elif share is not None and share < KINEMATIC_SHARE:
         level = NOTE
-        tail = ("; the reaction has no cross section there" if share == 0 else
-                f"; the reaction is {share:.1g} of the total cross section there")
+        tail += ("; the reaction has no cross section there" if share == 0 else
+                 f"; the reaction is {share:.1g} of the total cross section there")
+    elif mass is not None:
+        level = DEFECT if mass >= KINEMATIC_MASS_DEFECT else WARN
     nodes.add("kinematic_limit", level,
               f"{what}: outgoing energies reach {fmt_e(e_out_max)} {_at(e)}, beyond the "
               f"{fmt_e(avail)} the reaction makes available ({'lab' if lab else 'CM'}, Q = {fmt_e(q)}){tail}",
@@ -741,8 +745,10 @@ def descriptions(D, _g, _pct):
             "(FUDGE: severe)."),
         "kinematic_limit": D(
             "Outgoing energy beyond what the reaction makes available", (5, 6),
-            {DEFECT: f"by more than {_pct(KINEMATIC_DEFECT)} of the limit",
-             WARN: f"by more than {_pct(KINEMATIC_WARN)} of it",
+            {DEFECT: f"with {_pct(KINEMATIC_MASS_DEFECT)} or more of the probability beyond the limit "
+                     f"(when that is not known, by more than {_pct(KINEMATIC_DEFECT)} of the limit)",
+             WARN: f"with {_pct(KINEMATIC_MASS)} to {_pct(KINEMATIC_MASS_DEFECT)} beyond it (or by more than "
+                   f"{_pct(KINEMATIC_WARN)} of the limit)",
              NOTE: f"either, with less than {_g(KINEMATIC_MASS)} of the probability beyond the limit, in "
                    f"a reaction below {_g(KINEMATIC_SHARE)} of the total cross section there, or only in a "
                    "last interval that starts within the limit"},
