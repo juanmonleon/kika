@@ -122,11 +122,16 @@ class _Inputs:
 
 
 def _native():
-    from . import _thermal_native
-
+    from kika._native import FIX
+    try:
+        from . import _thermal_native
+    except ModuleNotFoundError as exc:
+        if exc.name != __package__ + "._thermal_native":
+            raise
+        raise ImportError("kika's compiled thermal-scattering extension is missing, and "
+                          "thermal processing has no Python version. " + FIX) from exc
     if getattr(_thermal_native, "API_VERSION", 0) != 3:
-        raise ImportError("kika.processing._thermal_native is out of date: rebuild it "
-                          "(python build_native.py)")
+        raise ImportError("kika's compiled thermal-scattering extension is out of date. " + FIX)
     return _thermal_native
 
 

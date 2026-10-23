@@ -19,8 +19,7 @@ import numpy as np
 from .tables import TabulationOptions, pdfTable, refine
 
 from kika._native import load as _load_native
-_polynomial_native = _load_native("kika.algebra._polynomial_native", 1,
-                                  "angular tabulation (Legendre sums)")
+_polynomial_native = _load_native("kika.algebra._polynomial_native", 1)
 
 __all__ = ["tabulateAngular", "legendreDensity", "muTable"]
 

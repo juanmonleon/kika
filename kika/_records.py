@@ -693,8 +693,7 @@ def parse_endf_id(line: str) -> Tuple[Optional[int], Optional[int], Optional[int
 # and writing one ~60 % field formatting, which is what this takes away.
 _python_definitions = (parse_number, parse_record_values, format_endf_fields, format_endf_number)
 from kika._native import load as _load_native
-_records_native = _load_native("kika._records_native", 1,
-                               "reading and writing ENDF fields")
+_records_native = _load_native("kika._records_native", 1)
 if _records_native is not None:
     _records_native.install(*_python_definitions)
     parse_number = _records_native.parse_number

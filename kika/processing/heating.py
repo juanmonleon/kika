@@ -91,7 +91,7 @@ HEATR_APPROXIMATIONS = (
 
 from kika._native import load as _load_native
 # The NumPy reference path stays the definition.
-_heating_native = _load_native("kika.processing._heating_native", 6, "heating and damage")
+_heating_native = _load_native("kika.processing._heating_native", 6)
 
 #: Threads for the independent incident energies of a damage quadrature: set by
 #: heatingOf from the processing's ``workers`` for the length of one call.

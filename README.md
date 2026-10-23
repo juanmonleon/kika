@@ -86,8 +86,9 @@ ENDF fields, Reich–Moore and Coulomb functions for resonance reconstruction,
 Doppler broadening, heating and damage, Legendre sums and thermal scattering.
 Platform wheels include them. Each one but the thermal kernel has a Python
 (NumPy) definition that gives the same results, slower. If an extension is
-missing or out of date, kika uses that Python code and says so once with a
-`kika.NativeExtensionWarning` that names the fix. `kika.native_status()` lists
+missing or out of date, kika uses that Python code and says so with one
+generic `kika.NativeExtensionWarning` per session, whichever extension it is,
+with the fix. `kika.native_status()` lists
 every extension as loaded, missing or out of date. The resonance extension uses
 float64 and retains every resonance level. Independent physical verification
 always uses the direct NumPy calculation, and so do stricter roundoff requests,
