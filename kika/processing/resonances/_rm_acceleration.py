@@ -13,11 +13,8 @@ residual/passivity and positive-capture acceptance checks remain in Python.
 """
 import contextvars
 import numpy as np
-try:
-    from . import _rm_native as _native
-    if _native.API_VERSION != 1:_native=None
-except (ImportError, AttributeError):
-    _native=None
+from kika._native import load as _load_native
+_native = _load_native(__package__ + "._rm_native", 1, "resonance reconstruction (R-matrix)")
 
 #: Channels per spin group the compiled sums take (``RM_MAX_CHANNELS``).
 MAX_CHANNELS=6

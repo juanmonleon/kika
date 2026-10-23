@@ -18,14 +18,9 @@ import numpy as np
 
 from .tables import TabulationOptions, pdfTable, refine
 
-from importlib import import_module
-try:
-    _polynomial_native = import_module("kika.algebra._polynomial_native")
-except ModuleNotFoundError as exc:
-    if exc.name != "kika.algebra._polynomial_native":raise
-    _polynomial_native = None
-if _polynomial_native is not None and _polynomial_native.API_VERSION != 1:
-    raise ImportError("rebuild kika's native polynomial extension (API version mismatch)")
+from kika._native import load as _load_native
+_polynomial_native = _load_native("kika.algebra._polynomial_native", 1,
+                                  "angular tabulation (Legendre sums)")
 
 __all__ = ["tabulateAngular", "legendreDensity", "muTable"]
 

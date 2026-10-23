@@ -24,7 +24,8 @@ What deliberately stayed behind in ``kika.endf.utils``: the SEND/FEND/MEND/TEND
 emitters and ``_TERMINATION_FORMATS``. A terminator record is an ENDF-6
 structural statement, not a fixed-width convention -- COVERX has no SEND.
 
-This module is a leaf. It imports nothing from kika.
+This module is a leaf. It imports nothing from kika but :mod:`kika._native`,
+itself a leaf, to load its compiled half.
 """
 import math
 import re
@@ -691,16 +692,10 @@ def parse_endf_id(line: str) -> Tuple[Optional[int], Optional[int], Optional[int
 # holds the two to the same results. Reading a tape is ~half field conversion
 # and writing one ~60 % field formatting, which is what this takes away.
 _python_definitions = (parse_number, parse_record_values, format_endf_fields, format_endf_number)
-from importlib import import_module as _import_module
-try:
-    _records_native = _import_module("kika._records_native")
-except ModuleNotFoundError as exc:
-    if exc.name != "kika._records_native":
-        raise
-    _records_native = None
+from kika._native import load as _load_native
+_records_native = _load_native("kika._records_native", 1,
+                               "reading and writing ENDF fields")
 if _records_native is not None:
-    if _records_native.API_VERSION != 1:
-        raise ImportError("rebuild kika's native records extension (API version mismatch)")
     _records_native.install(*_python_definitions)
     parse_number = _records_native.parse_number
     parse_record_values = _records_native.parse_record_values

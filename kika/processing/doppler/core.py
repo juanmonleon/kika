@@ -18,13 +18,8 @@ from kika._constants import BOLTZMANN_CONSTANT
 KB = BOLTZMANN_CONSTANT * 1e6
 ENGINE_VERSION = "doppler-analytic-8"
 EPS = np.finfo(float).eps
-try:
-    from importlib import import_module
-    _native = import_module(__package__ + '._doppler_native')
-except ModuleNotFoundError as exc:
-    if exc.name != __package__ + '._doppler_native':
-        raise
-    _native = None
+from kika._native import load as _load_native
+_native = _load_native(__package__ + '._doppler_native', None, "Doppler broadening")
 
 
 class DopplerInputError(ValueError):

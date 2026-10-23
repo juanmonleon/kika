@@ -27,6 +27,8 @@ _LAZY = {
     'write': '_write',
     'process': '_process',
     'check': '_check',
+    'native_status': '_native',
+    'NativeExtensionWarning': '_native',
 }
 
 #: Subpackages resolved on first attribute access, so that ``import kika``
@@ -73,6 +75,7 @@ def __dir__():
 
 __all__ = [
     'read', 'write', 'process', 'check', 'sniff_format', 'identify',
+    'native_status', 'NativeExtensionWarning',
     'read_mctal', 'read_meshtal',
     'read_mcnp', 'generate_pert_cards', 'generate_PERTcards', 'perturb_material', 'perturb_materials',
     'compute_sensitivity', 'compute_total_sensitivity', 'plot_sens_comparison',

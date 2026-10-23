@@ -89,15 +89,9 @@ HEATR_APPROXIMATIONS = (
     "min(Q + AE/(A+1), Coulomb barrier)",
 )
 
-from importlib import import_module
-try:
-    _heating_native = import_module("kika.processing._heating_native")
-except ModuleNotFoundError as exc:  # the NumPy reference path stays the definition
-    if exc.name != "kika.processing._heating_native":
-        raise
-    _heating_native = None
-if _heating_native is not None and _heating_native.API_VERSION != 6:
-    raise ImportError("rebuild kika's native heating extension (API version mismatch)")
+from kika._native import load as _load_native
+# The NumPy reference path stays the definition.
+_heating_native = _load_native("kika.processing._heating_native", 6, "heating and damage")
 
 #: Threads for the independent incident energies of a damage quadrature: set by
 #: heatingOf from the processing's ``workers`` for the length of one call.

@@ -6,11 +6,8 @@ to the independent development oracle. Only repulsive charged exits are supporte
 import numpy as np
 from scipy.integrate import solve_ivp, quad
 from scipy.integrate._ivp import dop853_coefficients
-try:
-    from . import _coulomb_native as _native
-    if _native.API_VERSION != 1:_native=None
-except (ImportError, AttributeError):
-    _native=None
+from kika._native import load as _load_native
+_native = _load_native(__package__ + "._coulomb_native", 1, "Coulomb wave functions")
 from scipy.special import kve, digamma, loggamma, gammaln
 
 
