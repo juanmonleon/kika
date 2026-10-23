@@ -966,9 +966,12 @@ class EndfProcessing:
         return written
 
     def report_document(self):
-        """The reconstruction report with a section per processing stage
-        (``to_text()``, ``to_html()``, ``to_dict()``, ``save(path)``)."""
-        return ProcessingReport(self.reconstruction.report_document(), self.stages, self.thnmax)
+        """The processing report: did the run go well, and what exactly was done
+        (:mod:`kika.endf.processing_report`). ``to_text()``, ``to_html()``,
+        ``to_dict()``, ``to_json()``, ``save(path)``. Ask for it after the files
+        are written: each ``write_*`` call is one of the stages it reports."""
+        from .processing_report import ProcessingReport, build
+        return ProcessingReport(build(self))
 
     def to_dict(self) -> dict:
         """Everything as plain types and float64 arrays (not lists): ``path``,
@@ -1419,8 +1422,16 @@ def _broaden(rec, plan, report):
     summary = (f"broadened to {', '.join(f'{T:g}' for T in temps)} K below {thnmax:g} eV "
                f"(0 K values above, as NJOY BROADR); "
                + ", ".join(f"{n:,} points at {T:g} K" for T, n in points.items()))
+    # The broadening's own check, by MT: worst error on its reserved probes as a
+    # share of its tolerance (1 is the tolerance; the engine refuses above it).
+    from kika.processing.resonances.suite import _entries
+    mt_of = {k.label: r.ENDF_MT for k, r in _entries(work).items()}
+    verification = {f"{T:g}": {str(mt_of.get(label) or label): float(ratio)
+                                for label, ratio in getattr(broadened[T][0], "verification", {}).items()}
+                    for T in temps}
     return StageReport("broaden", "done", time.perf_counter() - t0, None, summary,
-                       dict(temperatures=list(temps), thnmax_eV=thnmax, n_points=points)), \
+                       dict(temperatures=list(temps), thnmax_eV=thnmax, n_points=points,
+                            verification=verification)), \
         heated, thnmax, work, broadened
 
 
@@ -1539,36 +1550,26 @@ def dosimetry_ace(path, directory, *, extension: str | None = None, xsdir: bool 
     return out
 
 
-def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bool = True,
-                     replace: bool = False) -> Path:
-    """Write the photonuclear ACE table (``.NNu``) of an ENDF photonuclear evaluation (sublibrary ``g``).
+def photonuclear_table(path, *, extension: str | None = None):
+    """The photonuclear ACE table (``.NNu``) of an ENDF photonuclear evaluation,
+    built and not written: an :class:`~kika.ace.classes.ace.Ace` whose ``report``
+    says what the table leaves out or approximates. :func:`photonuclear_ace`
+    writes it; :func:`kika.process` keeps it between processing and writing.
 
-    The tape's reactions, their sum, the heating number and, per emitted particle
-    (n, γ, p, d, t, ³He, α), its production, yields, angles and energy laws, at
-    0 K, as :func:`kika.ace.processing.photonuclear.photonuclearTable` makes them
-    (the method and its choices are there). The suffix is the 0 K one (``.01u``)
-    unless ``extension`` is given. Returns the path written; the table is read
-    back and compared word for word before it replaces a file, and its line is
-    added to ``directory/xsdir`` unless ``xsdir`` is false. What the table leaves
-    out or approximates is the report of
-    :func:`kika.ace.processing.photonuclear.photonuclearTable`.
-
-    Raises :class:`ProcessingOutputError`: ``ace-failed`` (not a photonuclear tape,
-    resonance parameters, unreadable tape) or ``ace-table-exists``.
+    Raises :class:`ProcessingOutputError` (``ace-failed``): not a photonuclear
+    tape, resonance parameters, unreadable tape.
     """
     import datetime
 
     from kika import __version__
     from kika._utils import ace_temperature_suffix
     from kika.ace.encoders.photonuclear import encode_photonuclear
-    from kika.ace.writers.write_ace import write_ace_checked
-    from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
     from kika.endf.model_adapter import decodeReactionSuite
     from kika.endf.read_endf import read_endf
     from kika.hdf5.processing import metastableIndex
     from kika.ace.processing.photonuclear import photonuclearTable
 
-    path, directory = Path(path), Path(directory)
+    path = Path(path)
     info = inspect_endf_processing(path)
     if info["resolved"] or info["unresolved"]:
         raise ProcessingOutputError("ace-failed", f"{path.name} has resonance parameters; a photonuclear "
@@ -1589,12 +1590,29 @@ def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bo
                                   comment=comment, date=datetime.date.today().strftime("%m/%d/%y"),
                                   matid=evaluation.get("mat"), z=int(target.Z), a=int(target.A))
         ace.report = table.report
+    except ProcessingOutputError:
+        raise
+    except Exception as error:
+        raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
+    return ace
+
+
+def write_checked_ace(ace, directory, *, xsdir: bool = True, replace: bool = False) -> Path:
+    """Write a built ACE table as ``<ZAID><suffix>`` into ``directory``: read back
+    and compared word for word before it replaces a file, its line added to
+    ``directory/xsdir`` unless ``xsdir`` is false.
+
+    Raises :class:`ProcessingOutputError`: ``ace-failed``, ``ace-table-exists``.
+    """
+    from kika.ace.writers.write_ace import write_ace_checked
+    from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
+
+    directory = Path(directory)
+    try:
         directory.mkdir(parents=True, exist_ok=True)
         name = f"{ace.header.zaid}{ace.header.extension}"
         out = directory / name
         write_ace_checked(ace, out)
-    except ProcessingOutputError:
-        raise
     except Exception as error:
         raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
     if xsdir:
@@ -1603,6 +1621,27 @@ def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bo
         except XsdirEntryExists as error:
             raise ProcessingOutputError("ace-table-exists", str(error)) from error
     return out
+
+
+def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bool = True,
+                     replace: bool = False) -> Path:
+    """Write the photonuclear ACE table (``.NNu``) of an ENDF photonuclear evaluation (sublibrary ``g``).
+
+    The tape's reactions, their sum, the heating number and, per emitted particle
+    (n, γ, p, d, t, ³He, α), its production, yields, angles and energy laws, at
+    0 K, as :func:`kika.ace.processing.photonuclear.photonuclearTable` makes them
+    (the method and its choices are there). The suffix is the 0 K one (``.01u``)
+    unless ``extension`` is given. Returns the path written; the table is read
+    back and compared word for word before it replaces a file, and its line is
+    added to ``directory/xsdir`` unless ``xsdir`` is false. What the table leaves
+    out or approximates is the report of
+    :func:`kika.ace.processing.photonuclear.photonuclearTable`.
+
+    Raises :class:`ProcessingOutputError`: ``ace-failed`` (not a photonuclear tape,
+    resonance parameters, unreadable tape) or ``ace-table-exists``.
+    """
+    return write_checked_ace(photonuclear_table(path, extension=extension), directory, xsdir=xsdir,
+                             replace=replace)
 
 
 def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
@@ -1848,59 +1887,3 @@ def _endf_compatible_text(style):
         if isinstance(text, str) and "MATERIAL" in text:
             return text
     return None
-
-
-class ProcessingReport:
-    """The reconstruction report plus a "Processing stages" section.
-
-    Wraps :class:`~kika.endf.reconstruction_report.ReconstructionReport`
-    through its public methods only."""
-
-    def __init__(self, reconstruction_report, stages, thnmax):
-        self.reconstruction = reconstruction_report
-        self._stages = [asdict(s) for s in stages]
-        self._thnmax = thnmax
-
-    def _rows(self):
-        for s in self._stages:
-            seconds = "-" if s["seconds"] is None else f"{s['seconds']:.1f} s"
-            yield s["stage"], s["status"], seconds, s["category"] or "", s["summary"]
-
-    def to_dict(self) -> dict:
-        out = self.reconstruction.to_dict()
-        out["processing_stages"] = self._stages
-        out["thnmax_eV"] = self._thnmax
-        return out
-
-    def to_json(self, **kwargs) -> str:
-        import json
-        return json.dumps(self.to_dict(), **({"indent": 1, "default": str} | kwargs))
-
-    def to_text(self, **kwargs) -> str:
-        lines = ["", "PROCESSING STAGES", "-" * 17]
-        for stage, status, seconds, category, summary in self._rows():
-            lines.append(f"  {stage:<12} {status:<9} {seconds:>9}  {category}")
-            lines.append(f"      {summary}")
-        return self.reconstruction.to_text(**kwargs).rstrip() + "\n" + "\n".join(lines) + "\n"
-
-    def _section(self):
-        import html
-        e = html.escape
-        rows = "".join("<tr>" + "".join(f"<td>{e(str(c))}</td>" for c in row) + "</tr>" for row in self._rows())
-        return ('<div class="kika-report"><h2 id="kr-stages">Processing stages</h2><div class="wrap"><table>'
-                "<thead><tr><th>Stage</th><th>Status</th><th>Time</th><th>Category</th><th>Summary</th></tr>"
-                f"</thead><tbody>{rows}</tbody></table></div></div>")
-
-    def to_html(self, **kwargs) -> str:
-        page = self.reconstruction.to_html(**kwargs)
-        cut = page.rfind("</body>")
-        return page + self._section() if cut < 0 else page[:cut] + self._section() + page[cut:]
-
-    def save(self, path):
-        """Write by extension: ``.html``/``.htm``, ``.json``, anything else as text."""
-        path = Path(path)
-        suffix = path.suffix.lower()
-        body = (self.to_html() if suffix in (".html", ".htm") else
-                self.to_json() if suffix == ".json" else self.to_text())
-        path.write_text(body, encoding="utf-8")
-        return path

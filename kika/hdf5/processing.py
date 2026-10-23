@@ -434,15 +434,29 @@ def _joined(parts):
     return _pieces(np.concatenate(xs), np.concatenate(ys))
 
 
+class HeatedForms(dict):
+    """``{reaction label: heated form}``, and the broadening's own check of them:
+    ``verification``, ``{reaction label: worst error / tolerance}`` on the probes
+    the Doppler table reserved (:func:`kika.processing.doppler.broaden_suite`'s
+    ``verification_ratios``; 1 is the tolerance). A dict, so every reader of the
+    forms is unchanged; it pickles with its attribute across the worker pool."""
+
+    def __init__(self, forms=(), verification=None):
+        super().__init__(forms)
+        self.verification = dict(verification or {})
+
+
 def _assembled(leaves, hi, tasks, results):
     """``({label: heated form}, hi)`` from the results of ``_broadenPlan``'s tasks."""
-    byLabel = {}
+    byLabel, verification = {}, {}
     for (_, domain), result in zip(tasks, results):
         for label, form in result.items():
             byLabel.setdefault(label, []).append((domain[0], form))
-    out = {label: parts[0][1] if len(parts) == 1
-           else _joined([form for _, form in sorted(parts, key=lambda p: p[0])])
-           for label, parts in byLabel.items()}
+        for label, ratio in getattr(result, "verification", {}).items():
+            verification[label] = max(verification.get(label, 0.0), float(ratio))
+    out = HeatedForms({label: parts[0][1] if len(parts) == 1
+                       else _joined([form for _, form in sorted(parts, key=lambda p: p[0])])
+                       for label, parts in byLabel.items()}, verification)
     zero = None
     for key in leaves:
         if key.label not in out:
@@ -559,7 +573,10 @@ def _broadenReduced(reduced, lo, hi, temperature, options, domain=None):
                            temperature=float(temperature), support=support,
                            source_temperature=0.0, options=opts, output_domain=domain or (lo, hi),
                            negative_policy="preserve_signed", **extra)
-    return {key.label: form for key, form in result.forms.items()}
+    # The report names reactions "container/label"; the forms go by label.
+    ratios = {name.split("/", 1)[-1]: float(v)
+              for name, v in (result.report.get("verification_ratios") or {}).items() if v is not None}
+    return HeatedForms({key.label: form for key, form in result.forms.items()}, ratios)
 
 
 def _broadenTask(args):
