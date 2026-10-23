@@ -36,12 +36,12 @@ BR_WARN = 1e-2
 #: Decay Q against AME2020: a note above max(Q_NOTE_EV, Q_NOTE_REL Q), a
 #: warning above max(Q_WARN_EV, Q_WARN_REL Q).
 Q_NOTE_EV, Q_NOTE_REL = 1e3, 1e-3
-Q_WARN_EV, Q_WARN_REL = 1e5, 1e-2
+Q_WARN_EV, Q_WARN_REL = 1e5, 5e-2
 #: A decay Q off AME2020 is a warning only for a nuclide that lives this long
 #: (s): the exotic ones, short-lived, have masses AME extrapolates, and their Q
 #: weighs nothing in decay heat or inventories. A Q off by this factor is a
 #: unit error, a defect whatever the half-life.
-Q_WARN_HALFLIFE = 1.0
+Q_WARN_HALFLIFE = 60.0
 Q_UNIT_FACTOR = 100.0
 #: Sum of average decay energies above sum br Q.
 ENERGY_SLACK_REL, ENERGY_SLACK_EV = 1e-2, 1e3
@@ -101,7 +101,9 @@ def _decay(tape: Tape, out: Out) -> None:
         out.add("decay_branching", NOTE, f"{int((br == 0).sum())} decay mode{'s' if (br == 0).sum() != 1 else ''} "
                 "with a branching ratio of 0", mf=8, mt=457)
     elis = tape.elis
-    isomer_unknown = (tape.liso > 0 or int(tape._h("_lis", 0) or 0) > 0) and elis == 0
+    isomer = (tape.liso > 0 or int(tape._h("_lis", 0) or 0) > 0
+              or int(getattr(sec, "_lis", 0) or 0) > 0 or int(getattr(sec, "_liso", 0) or 0) > 0)
+    isomer_unknown = isomer and elis == 0
     qmax = 0.0
     for m in modes:
         q = float(m.q)
