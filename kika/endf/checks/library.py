@@ -543,8 +543,22 @@ def _evaluation_task(path: Path, *, what, mf, deep) -> Dict[str, Any]:
 
 
 def walk_workers(workers: Optional[int], tapes: int) -> int:
-    """How many processes walk *tapes* tapes: the processing's rule, capped by free memory."""
+    """How many processes walk *tapes* tapes: the processing's rule, capped by free memory.
+
+    Raises when called from a worker process that is still importing the
+    caller's script: on Windows and macOS each worker imports the main script
+    again, and a library walk at the top level of a script without
+    ``if __name__ == "__main__":`` would then run once more in every worker.
+    """
+    import multiprocessing
+
     from kika.processing.workers import can_spawn, pool_default, resolve
+
+    if getattr(multiprocessing.current_process(), "_inheriting", False):
+        raise RuntimeError(
+            "a library check was started while a worker process was importing the main script. "
+            "Put the code that calls kika.check (or check_library) under "
+            "'if __name__ == \"__main__\":', or pass workers=1.")
 
     default = pool_default()
     try:
