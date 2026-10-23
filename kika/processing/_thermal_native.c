@@ -32,6 +32,22 @@
 typedef double (*pow_function)(double, double);
 static pow_function crt_pow = pow;
 
+/* sigfig's powers of ten, P10[k + P10_SHIFT] = pow(10.0, k), filled at import
+ * with the very pow sigfig used to call: the same bits by construction, without
+ * a libm call per rounding. The exponent goes through a volatile so that the
+ * compiler cannot fold the call at compile time with a different rounding. */
+#define P10_SHIFT 400
+static double P10[2 * P10_SHIFT + 1];
+static void fill_p10(void) {
+    for (int k = -P10_SHIFT; k <= P10_SHIFT; k++) {
+        volatile double exponent = (double)k;
+        P10[k + P10_SHIFT] = pow(10.0, exponent);
+    }
+}
+static double p10(int k) {
+    return (k >= -P10_SHIFT && k <= P10_SHIFT) ? P10[k + P10_SHIFT] : pow(10.0, k);
+}
+
 #define SABFLG (-225.0)
 #define IMAX 20
 #define NLMAX 65
@@ -53,13 +69,13 @@ static double sigfig(double x, int ndig, int idig) {
         int ipwr = (int)aa;
         if (aa < 0) ipwr = ipwr - 1;
         ipwr = ndig - 1 - ipwr;
-        double v = x * pow(10.0, ipwr) + pow(10.0, ndig - 11);
+        double v = x * p10(ipwr) + p10(ndig - 11);
         long long ii = (long long)(v >= 0 ? floor(v + 0.5) : -floor(-v + 0.5));
         long long lim = 1;
         for (int k = 0; k < ndig; k++) lim *= 10;
         if (ii >= lim) { ii = ii / 10; ipwr = ipwr - 1; }
         ii = ii + idig;
-        xx = (double)ii * pow(10.0, -ipwr);
+        xx = (double)ii * p10(-ipwr);
     }
     return xx * 1.0000000000001;
 }
@@ -108,7 +124,7 @@ static double sig(const Ctx *c, double e, double ep, double u) {
     double b = fabs(bb);
     double cc = sqrt(4 * M_PI);
     double s, s1, s2, s3, bbb, arg, out;
-    Py_ssize_t na = c->na, nb = c->nb, ia = 0, ib = 0, i;
+    Py_ssize_t na = c->na, nb = c->nb, ia = 0, ib = 0;
     if (c->iinc == 1) {
         /* label 200: free gas, sb = ((az+1)/az)**2 per unit free cross section */
         if(ep==0) return 0;
@@ -131,8 +147,17 @@ static double sig(const Ctx *c, double e, double ep, double u) {
     }
     bbb = b;
     if (c->lasym == 1 && bb < 0) bbb = -b;
-    for (i = 0; i < nb - 1; i++) { ib = i; if (bbb < c->beta[i + 1]) break; }
-    for (i = 0; i < na - 1; i++) { ia = i; if (a < c->alpha[i + 1]) break; }
+    /* THERMR scans for the first i in [0, n-2] with x < grid[i+1], else n-2 (0 when
+     * n < 2). The grids ascend, so the test is monotone and a bisection finds the
+     * same i in log(n) steps instead of ~n/2. */
+    {
+        Py_ssize_t lo = 0, hi = nb - 2, mid;
+        while (lo < hi) { mid = (lo + hi) / 2; if (bbb < c->beta[mid + 1]) hi = mid; else lo = mid + 1; }
+        ib = lo;
+        lo = 0; hi = na - 2;
+        while (lo < hi) { mid = (lo + hi) / 2; if (a < c->alpha[mid + 1]) hi = mid; else lo = mid + 1; }
+        ia = lo;
+    }
     if (c->cliq == 0.0 || a >= c->alpha[0]) goto l150;
     if (c->lasym == 1) goto l150;
     if (b > test1) goto l150;
@@ -254,6 +279,97 @@ static void freegas_sigl(const Ctx *c,double e,double ep,int nl,double *s) {
     }
 }
 
+/* The points sigl's first pass accepts, in the order it accepts them. The second
+ * pass of THERMR's sigl rebuilds the same stack from {-1, mu0, +1} and applies the
+ * same tests in the same order, so it accepts the same points: replaying them gives
+ * the same bins without evaluating sig again (half of all sig calls). A buffer that
+ * could not grow falls back to THERMR's second pass. */
+typedef struct { double *x, *y; Py_ssize_t n, cap; int failed; } Accepted;
+
+static void accepted_push(Accepted *a, double x, double y) {
+    if (a->failed) return;
+    if (a->n == a->cap) {
+        Py_ssize_t cap = a->cap ? 2 * a->cap : 256;
+        double *nx = (double *)realloc(a->x, (size_t)cap * sizeof(double));
+        if (!nx) { a->failed = 1; return; }
+        a->x = nx;
+        double *ny = (double *)realloc(a->y, (size_t)cap * sizeof(double));
+        if (!ny) { a->failed = 1; return; }
+        a->y = ny;
+        a->cap = cap;
+    }
+    a->x[a->n] = x;
+    a->y[a->n] = y;
+    a->n++;
+}
+
+static void accepted_free(Accepted *a) { free(a->x); free(a->y); }
+
+/* thermr.f90 sigl labels 160-250 over the recorded points: the bins of equal
+ * probability and their mean cosines, as the second pass computes them. */
+static void sigl_bins(int nl, double total, const Accepted *pts, double *s) {
+    const double ytol = 0.001, half = 0.5, third = 0.333333333, sigmin = 1e-32, shade = 0.99999999;
+    int nbin = nl - 1, j = 0, il;
+    double rnbin = 1.0 / nbin, fract = total * rnbin, rfract = 1 / fract, sum = 0, gral = 0;
+    double xl = -1, yl = pts->y[0], add, xil, xn = 0, f, rf, disc, yn, xbar, test, xi, yi;
+    Py_ssize_t k, last = pts->n - 1;
+    for (il = 1; il < nl; il++) s[il] = 0;
+    for (k = 0; k <= last; k++) {
+        xi = pts->x[k];
+        yi = pts->y[k];
+    r160:
+        add = half * (yi + yl) * (xi - xl);
+        if (xi == xl) goto r250;
+        xil = 1 / (xi - xl);
+        if (k == last && j == nbin - 1) goto r165;
+        if (sum + add >= fract * shade && j < nbin - 1) goto r170;
+        sum = sum + add;
+        gral = gral + half * (yl * xi - yi * xl) * (xi + xl)
+               + third * (yi - yl) * (xi * xi + xi * xl + xl * xl);
+        goto r250;
+    r165:
+        xn = xi;
+        j = j + 1;
+        goto r190;
+    r170:
+        j = j + 1;
+        if (yl < sigmin) goto r175;
+        test = (fract - sum) * (yi - yl) / ((xi - xl) * yl * yl);
+        if (fabs(test) > ytol) goto r175;
+        xn = xl + (fract - sum) / yl;
+        if (xn > xi) goto r180;
+        if (xn >= xl && xn <= xi) goto r190;
+        goto r180;
+    r175:
+        f = (yi - yl) * xil;
+        rf = 1 / f;
+        disc = (yl * rf) * (yl * rf) + 2 * (fract - sum) * rf;
+        if (disc < 0) disc = fabs(disc);
+        if (f > 0) xn = xl - (yl * rf) + sqrt(disc);
+        if (f < 0) xn = xl - (yl * rf) - sqrt(disc);
+        if (xn > xl && xn <= xi) goto r190;
+        if (xn > xl && xn < (xi + ytol * (xi - xl))) goto r180;
+    r180:
+        xn = xi;
+    r190:
+        yn = yl + (yi - yl) * (xn - xl) * xil;
+        gral = gral + (xn - xl) * (yl * half * (xn + xl)
+               + (yi - yl) * xil * (-xl * half * (xn + xl)
+               + third * (xn * xn + xn * xl + xl * xl)));
+        xbar = gral * rfract;
+        s[j] = xbar;
+        xl = xn;
+        yl = yn;
+        sum = 0;
+        gral = 0;
+        if (j == nbin) return;
+        if (xl < xi) goto r160;
+    r250:
+        xl = xi;
+        yl = yi;
+    }
+}
+
 static void sigl(const Ctx *c, double e, double ep, int nl, double tolin, double *s) {
     if(c->iinc==1){freegas_sigl(c,e,ep,nl,s);return;}
 
@@ -268,6 +384,7 @@ static void sigl(const Ctx *c, double e, double ep, int nl, double tolin, double
     if (c->lat == 1 && c->iinc == 2) b = b * c->tev / c->tevz;
     double s1bb = sqrt(1 + b * b);
     if (ep != 0) seep = 1 / sqrt(e * ep);
+    Accepted accepted = {0};
 
     /* adaptive calculation of cross section */
     i = 3;
@@ -304,6 +421,7 @@ l110:
     y[i - 1] = yt;
     goto l110;
 l120:
+    accepted_push(&accepted, x[i], y[i]);
     sum = sum + half * (y[i] + yl) * (x[i] - xl);
     xl = x[i];
     yl = y[i];
@@ -312,10 +430,17 @@ l120:
     if (i == 1) goto l120;
     s[0] = sum;
     if (sum > sigmin) goto l130;
+    accepted_free(&accepted);
     for (il = 0; il < nl; il++) s[il] = 0;
     return;
 
 l130:
+    if (!accepted.failed && accepted.n > 0) {
+        sigl_bins(nl, sum, &accepted, s);
+        accepted_free(&accepted);
+        return;
+    }
+    accepted_free(&accepted);
     nbin = nl - 1;
     rnbin = 1.0 / nbin;
     fract = sum * rnbin;
@@ -807,6 +932,7 @@ PyMODINIT_FUNC PyInit__thermal_native(void) {
     }
     crt_pow = (pow_function)(void (*)(void))found;
 #endif
+    fill_p10();
     PyObject *m = PyModule_Create(&module);
     if (m == NULL) return NULL;
     if (PyModule_AddIntConstant(m, "API_VERSION", 3) < 0) { Py_DECREF(m); return NULL; }

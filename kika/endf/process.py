@@ -349,7 +349,9 @@ def _contiguous(x):
 
 
 class EndfProcessing:
-    """The result of :func:`process_endf`. Picklable; every array is float64."""
+    """The result of :func:`process_endf`. Every array is float64; :meth:`to_dict`
+    gives it as plain types and arrays, which pickle (the result itself holds the
+    reconstruction, which does not)."""
 
     def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables, *, broadened=None,
                  source_format="endf"):
@@ -372,6 +374,14 @@ class EndfProcessing:
         self._aside = {}                 # GNDS: containers set aside for the reconstruction
         self._heating = {}               # {T: {301: (E, h), 444: (E, d)}}, 0.0 for 0 K
         self._displacements = {}         # {T: {"nrt": (E, n), "arc-dpa": (E, n)}}
+        self._processed = None           # (suite, report): every temperature tabulated for Monte Carlo
+
+    def __getstate__(self):
+        # The processed suite is a cache of write_ace/write_hdf5, rebuilt on demand:
+        # it does not travel with the result.
+        state = dict(self.__dict__)
+        state["_processed"] = None
+        return state
 
     def _written(self, fmt, t0, path, error=None, summary="", **details):
         """Append this output's own ``write`` stage (several outputs, several stages)."""
@@ -644,6 +654,33 @@ class EndfProcessing:
             raise ProcessingOutputError(category, str(error)) from error
         return work
 
+    def _processed_suite(self, progress=None, category="ace-failed"):
+        """``(suite, report, omit)``: every broadened temperature tabulated for Monte Carlo,
+        light charged particles included, built once and shared by :meth:`write_ace`
+        and :meth:`write_hdf5` (the slow part of both: distributions, KERMA, damage,
+        gas production). The HDF5 file takes a copy without the charged particles,
+        which is the suite :func:`kika.hdf5.processing.processSuite` makes for it
+        without them (identical files, Au-197 and Ni-58 of ENDF/B-VIII.1)."""
+        from kika.hdf5.processing import ACE_PARTICLES, processSuite
+        from kika.nuclear_data.model import ConversionReport
+        if self._processed is not None:
+            return self._processed
+        temps = list(self.temperatures)
+        work = self._full_suite(progress, category=category)
+        resonances = work.resonances
+        omit = ("urr",) if resonances is not None and resonances.unresolved is not None and not self._urr else ()
+        report = ConversionReport()
+        try:
+            suite = processSuite(
+                work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
+                broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
+                context=self.reconstruction.context, thinning=self.plan.thinning,
+                workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
+        except Exception as error:
+            raise ProcessingOutputError(category, f"{type(error).__name__}: {error}") from error
+        self._processed = (suite, report, omit)
+        return self._processed
+
     def write_gnds(self, path, *, progress: Progress | None = None) -> Path:
         """Write the processed evaluation as GNDS, as FUDGE's ``processProtare`` does.
 
@@ -737,18 +774,12 @@ class EndfProcessing:
             if not temps or not self._broadened:
                 raise ProcessingOutputError(
                     "hdf5-needs-temperature", PROCESSING_REJECTION_CATEGORIES["hdf5-needs-temperature"])
-            work = self._full_suite(progress)
-            omit = ()
-            resonances = work.resonances
-            if resonances is not None and resonances.unresolved is not None and not self._urr:
-                omit = ("urr",)
+            processed, _, omit = self._processed_suite(progress, category="hdf5-failed")
+            if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             try:
-                writeSuite(
-                    work, path.parent, temperatures=temps, fileName=path.name, index=index,
-                    urrTables=dict(self._urr) or None, broadened={T: self._broadened[T] for T in temps},
-                    thnmax=self.thnmax, context=self.reconstruction.context, thinning=self.plan.thinning,
-                    workers=self.plan.workers, omit=omit)
+                writeSuite(_neutrons_and_photons(processed), path.parent, temperatures=temps,
+                           fileName=path.name, index=index)
             except Exception as error:
                 raise ProcessingOutputError("hdf5-failed", f"{type(error).__name__}: {error}") from error
         except ProcessingOutputError as error:
@@ -792,7 +823,6 @@ class EndfProcessing:
         from kika.ace.model_adapter import encodeAce
         from kika.ace.writers.write_ace import write_ace_checked
         from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, xsdir_line_for
-        from kika.hdf5.processing import ACE_PARTICLES, processSuite
         from kika.nuclear_data.model import ConversionReport
 
         t0 = time.perf_counter()
@@ -817,21 +847,10 @@ class EndfProcessing:
                 raise ProcessingOutputError(
                     "ace-failed", f"extension={extension!r} names one table, and {len(temps)} "
                                   f"temperatures {temps} were asked for")
-            work = self._full_suite(progress, category="ace-failed")
-            omit = ()
-            resonances = work.resonances
-            if resonances is not None and resonances.unresolved is not None and not self._urr:
-                omit = ("urr",)
+            processed, processing_report, omit = self._processed_suite(progress, category="ace-failed")
+            if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             report = ConversionReport()
-            try:
-                processed = processSuite(
-                    work, temperatures=temps, report=report, urrTables=dict(self._urr) or None,
-                    broadened={T: self._broadened[T] for T in temps}, thnmax=self.thnmax,
-                    context=self.reconstruction.context, thinning=self.plan.thinning,
-                    workers=self.plan.workers, omit=omit, particles=ACE_PARTICLES)
-            except Exception as error:
-                raise ProcessingOutputError("ace-failed", f"{type(error).__name__}: {error}") from error
             directory.mkdir(parents=True, exist_ok=True)
             for i, T in enumerate(temps):
                 try:
@@ -852,7 +871,7 @@ class EndfProcessing:
                 written.append(target)
                 if progress:
                     progress("write", (i + 1) / len(temps))
-            omitted += list(report.unsupported)
+            omitted += list(processing_report.unsupported) + list(report.unsupported)
         except ProcessingOutputError as error:
             self._written("ace", t0, directory, error, temperatures=temps, files=[str(p) for p in written])
             raise
@@ -992,6 +1011,22 @@ class EndfProcessing:
     def __repr__(self):
         states = ", ".join(f"{s.stage}={s.status}" for s in self.stages)
         return f"<EndfProcessing {self.reconstruction.path.name}: {states}>"
+
+
+def _neutrons_and_photons(processed):
+    """A copy of a processed suite with only its neutron and photon products, the
+    ones an OpenMC HDF5 file carries: the light charged particles ACE tabulates
+    are added to a reaction's products and change nothing else."""
+    suite = copy.deepcopy(processed)
+    for name in ("reactions", "orphanProducts", "fissionComponents", "productions", "sums",
+                 "incompleteReactions"):
+        for reaction in getattr(suite, name, None) or []:
+            channel = getattr(reaction, "outputChannel", None)
+            if channel is None:
+                continue
+            products = channel.products.products
+            products[:] = [p for p in products if p.pid in ("n", "photon")]
+    return suite
 
 
 def _heated_tables(work, label, broadened, hi, thinning):
@@ -1294,6 +1329,59 @@ def _fission_heating(out, work, grid, sigma, A):
     return np.where(sigma_f > 0, sigma_f * h0, 0.0) - h.fissionPhotonKerma(out, grid, sigma, awr=A)
 
 
+#: The partial reactions of a sum an evaluation may state photons on.
+_SUM_PARTS = {3: tuple(range(4, 200)) + tuple(range(600, 850)), 4: tuple(range(50, 92)),
+              18: (19, 20, 21, 38), 103: tuple(range(600, 650)), 104: tuple(range(650, 700)),
+              105: tuple(range(700, 750)), 106: tuple(range(750, 800)), 107: tuple(range(800, 850))}
+#: Negative heating deeper than this fraction of the incident energy, per
+#: collision, is material; shallower is the evaluation's rounding.
+MATERIAL_NEGATIVE_HEATING = 1.0e-3
+
+
+def _negative_heating(grid, kerma, sigma, result, gap=1.5, causes=2):
+    """Where the KERMA is negative and which reactions make it so: one entry per
+    region (negative energies closer than a factor ``gap`` belong together), with
+    the energy of its lowest value per collision and the ``causes`` reactions
+    whose own balance is most negative there (a reaction's KERMA per reaction
+    times its cross section, or the photons an evaluation states on a sum, which
+    no partial carries). Energies in eV, per collision in eV."""
+    from kika._constants import MT_TO_REACTION
+    total = sigma.get(1)
+    neg = np.flatnonzero(np.asarray(kerma) < 0)
+    if total is None or not len(neg):
+        return []
+    name = lambda mt: f"MT{mt} {MT_TO_REACTION[mt]}" if mt in MT_TO_REACTION else f"MT{mt}"
+    groups, start = [], 0
+    for k in range(1, len(neg) + 1):
+        if k == len(neg) or grid[neg[k]] > gap * grid[neg[k - 1]]:
+            groups.append(neg[start:k])
+            start = k
+    out = []
+    with np.errstate(divide="ignore", invalid="ignore"):
+        per_collision = np.where(total > 0, np.asarray(kerma) / total, 0.0)
+    for idx in groups:
+        i = int(idx[np.argmin(per_collision[idx])])
+        share = {mt: float(values[0][i] * sigma[mt][i] / total[i])
+                 for mt, values in result.perReaction.items() if mt in sigma and total[i] > 0}
+        parts = []
+        # Photons an evaluation states on a sum (MT4, MT103...) are emitted by its
+        # parts: the sum's balance is its parts' KERMA less those photons, and the
+        # parts are counted there, not on their own.
+        for mt, photons in result.photonEnergy.items():
+            if mt in result.perReaction or mt not in sigma or not total[i] > 0:
+                continue
+            members = [m for m in share if m in _SUM_PARTS.get(mt, ())]
+            net = sum(share.pop(m) for m in members) - float(photons[i] * sigma[mt][i] / total[i])
+            parts.append((net, name(mt)))
+        parts += [(v, name(mt)) for mt, v in share.items()]
+        worst = sorted(p for p in parts if p[0] < 0)[:causes]
+        out.append(dict(from_eV=float(grid[idx[0]]), to_eV=float(grid[idx[-1]]), at_eV=float(grid[i]),
+                        per_collision_eV=float(per_collision[i]), points=int(len(idx)),
+                        material=bool(per_collision[i] < -MATERIAL_NEGATIVE_HEATING * grid[i]),
+                        causes=[dict(what=w, per_collision_eV=v) for v, w in worst]))
+    return out
+
+
 def _heating(run, plan, report):
     """``(StageReport, {T: {301: (E, h), 444: (E, d)}})``; never raises.
 
@@ -1324,7 +1412,7 @@ def _heating(run, plan, report):
         # with Q in its place the balance of every level was off by its
         # excitation (Fe-56 by GNDS: KERMA x21 above MT51's threshold).
         qm = {mt: q for mt, (_, q) in reactionQValues(work).items() if q is not None}
-        tables, notes = {}, []
+        tables, notes, negative = {}, [], {}
         for i, T in enumerate(temps):
             grid, sigma = _heating_grid(run, T)
             result = heatingOf(out, grid, sigma, awr=awr, Z=Z, qm=qm, evaluation=work,
@@ -1335,6 +1423,9 @@ def _heating(run, plan, report):
                 kerma = kerma + fission
             grid = _contiguous(grid)
             tables[T] = {301: (grid, _contiguous(kerma)), 444: (grid, _contiguous(result.damage))}
+            regions = _negative_heating(grid, kerma, sigma, result)
+            if regions:
+                negative[f"{T:g}"] = regions
             run._displacements[T] = {name: (grid, _contiguous(v)) for name, v in result.displacements.items()}
             notes = result.notes
             report("heating", 0.5 + 0.5 * (i + 1) / len(temps))
@@ -1347,6 +1438,8 @@ def _heating(run, plan, report):
                            f"{PROCESSING_REJECTION_CATEGORIES[category]} ({_describe(error)})", details), {}
     details["notes"] = list(notes)
     details["n_points"] = {T: int(len(t[301][0])) for T, t in tables.items()}
+    if negative:
+        details["negative"] = negative
     fissile = any(r.ENDF_MT in (18, 19) for r in _entries(work).values())
     models = sorted({name for v in run._displacements.values() for name in v})
     summary = (f"MT301 (KERMA) and MT444 (damage) at {', '.join(f'{T:g}' for T in temps)} K, as NJOY "

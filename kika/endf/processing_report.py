@@ -97,8 +97,12 @@ CHECKS = (
           "KERMA (MT301) is the energy left locally per reaction. A negative value means the "
           "evaluation gives the outgoing particles more energy than the reaction makes available.",
           {PASS: "No negative heating at any temperature.",
-           WARN: "Negative heating at some energies, from the evaluation's own energy balance. It is "
-                 "kept as computed, as NJOY keeps it; energy-deposition tallies there inherit it."}),
+           NOTE: "Negative heating only at a few energies and by less than 0.1 % of the incident "
+                 "energy: the evaluation's rounding of its own energy balance. Kept as computed.",
+           WARN: "Negative heating deeper than 0.1 % of the incident energy, from the evaluation's own "
+                 "energy balance: the reaction named gives its outgoing particles and photons more energy "
+                 "than it makes available. It is kept as computed, as NJOY keeps it; energy-deposition "
+                 "tallies there inherit it."}),
     Check("notes", "What the processing reports",
           "Building a table can decide things a user should know: shells joined or dropped, transitions "
           "with no energy, data the table approximates. Each is listed.",
@@ -374,14 +378,30 @@ def _stage_checks(sid, run, record):
         if not bad:
             return [_check("heating_sign", PASS, f"KERMA and damage at {_temps([r['temperature_K'] for r in rows])}: "
                                                  "no negative value.", stage=sid)]
-        return [_check("heating_sign", WARN,
-                       f"Negative heating at {sum(r['negative_points'] for r in bad):,} energies.",
-                       [f"{r['temperature_K']:g} K: {r['negative_points']:,} energies between "
-                        f"{_energy(r['negative_from_eV'])} and {_energy(r['negative_to_eV'])}; the lowest at "
-                        f"{_energy(r['minimum_at_eV'])}, "
-                        + (f"{_energy(r['minimum_per_collision_eV'])} per collision."
-                           if r.get("minimum_per_collision_eV") is not None else
-                           f"{_g(r['minimum'])} eV·b.") for r in bad], stage=sid)]
+        regions = record.get("details", {}).get("negative") or {}
+        # One temperature tells the story (the evaluation's balance does not
+        # depend on it): the first broadened one, else 0 K.
+        key = next((k for k in regions if float(k) > 0), next(iter(regions), None))
+        worst = min(r["minimum_per_collision_eV"] for r in bad if r.get("minimum_per_collision_eV") is not None)             if any(r.get("minimum_per_collision_eV") is not None for r in bad) else None
+        found = regions.get(key, [])
+        material = [g for g in found if g.get("material", True)]
+        result = (f"Negative heating in {len(found) or 'some'} energy region{'s' if len(found) != 1 else ''}"
+                  + (f", down to {_energy(worst)} per collision" if worst is not None else "")
+                  + (f"; {len(found) - len(material)} of them below 0.1 % of the incident energy"
+                     if found and len(material) < len(found) else "") + ".")
+        items = []
+        for g in sorted(found, key=lambda g: g["per_collision_eV"])[:6]:
+            where = (f"at {_energy(g['from_eV'])}" if g["from_eV"] == g["to_eV"]
+                     else f"{_energy(g['from_eV'])} to {_energy(g['to_eV'])}")
+            cause = "; ".join(f"{c['what']} ({_energy(c['per_collision_eV'])} per collision)" for c in g["causes"])
+            items.append(f"{where} ({float(key):g} K): down to {_energy(g['per_collision_eV'])} per collision"
+                         + ("" if g["from_eV"] == g["to_eV"] else f" at {_energy(g['at_eV'])}")
+                         + (f". Its reaction balance is negative: {cause}." if cause else ".")
+                         + ("" if g.get("material", True) else " Below 0.1 % of the incident energy."))
+        if not items:
+            items = [f"{r['temperature_K']:g} K: {r['negative_points']:,} energies between "
+                     f"{_energy(r['negative_from_eV'])} and {_energy(r['negative_to_eV'])}." for r in bad]
+        return [_check("heating_sign", WARN if (material or not found) else NOTE, result, items, stage=sid)]
     return []
 
 
